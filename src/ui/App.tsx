@@ -272,10 +272,6 @@ export function App(props: AppProps): JSX.Element {
 			<Box justifyContent="space-between">
 				<Text color="gray" dimColor>
 					<Text color={PERSONA_COLOR}>{currentPersona.label}</Text>
-					<Text color="gray"> · </Text>
-					<Text>{session.model}</Text>
-					<Text color="gray"> · </Text>
-					<Text>session: {session.id.slice(0, 8)}</Text>
 					{permissionMode === "bypass" ? (
 						<>
 							<Text color="gray"> · </Text>

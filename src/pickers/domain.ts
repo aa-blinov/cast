@@ -151,7 +151,11 @@ export async function selectSession(pickers: Pickers): Promise<SessionState | nu
  * Onboarding call sites, which do need to exit if nothing gets picked,
  * check for null themselves and exit there instead.
  */
-export async function selectModel(config: AppConfig, pickers: Pickers): Promise<ModelSelection | null> {
+export async function selectModel(
+	config: AppConfig,
+	pickers: Pickers,
+	current?: string,
+): Promise<ModelSelection | null> {
 	pickers.log(`Endpoint: ${config.baseURL}\nFetching models...`);
 	const result = await fetchModels(config);
 
@@ -167,7 +171,7 @@ export async function selectModel(config: AppConfig, pickers: Pickers): Promise<
 		for (const m of result.models) {
 			options.push({
 				value: { model: m.id, reasoningMeta: m.reasoning, contextWindow: m.contextWindow },
-				label: `${m.id}${m.reasoning ? " [reasoning]" : ""}`,
+				label: `${m.id}${m.reasoning ? " [reasoning]" : ""}${m.id === current ? " (current)" : ""}`,
 			});
 		}
 	} else {
@@ -175,7 +179,13 @@ export async function selectModel(config: AppConfig, pickers: Pickers): Promise<
 	}
 
 	if (options.length > 0) {
-		const picked = await pickers.pickOption(options, { title: "Select model" });
+		// Start the cursor on the current model so /model doubles as "show
+		// current" — the picker opens highlighting what's already selected.
+		const currentIdx = current ? options.findIndex((o) => o.value.model === current) : -1;
+		const picked = await pickers.pickOption(options, {
+			title: "Select model",
+			defaultIndex: currentIdx >= 0 ? currentIdx : 0,
+		});
 		if (!picked) return null;
 		const ok = await runOnboardingCheck(config, picked.model, { log: pickers.log });
 		if (ok)
