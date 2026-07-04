@@ -184,7 +184,7 @@ export async function validateModel(config: AppConfig, model: string): Promise<V
  * only useful thing to say when this path doesn't just fall through to the
  * banner.
  * @param log Where progress lines go — defaults to `console.log` (fine for
- * --basic and pre-mount onboarding). Callers running inside the live TUI
+ * pre-mount onboarding). Callers running inside the live TUI
  * pass `pickers.log` instead, since a raw stdout write here would corrupt
  * Ink's managed frame.
  */

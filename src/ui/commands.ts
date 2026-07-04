@@ -159,7 +159,7 @@ export function canSubmitDuringRun(text: string): boolean {
 }
 
 /**
- * Route a line of user input. Every slash command from --basic is handled
+ * Route a line of user input. Every slash command is handled
  * here (parity or it's a bug); non-slash input goes to the agent as a prompt.
  */
 export async function handleInput(text: string, images: PendingImage[] | undefined, deps: CommandDeps): Promise<void> {

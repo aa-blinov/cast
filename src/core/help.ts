@@ -22,12 +22,11 @@ Usage:
                               --force
 
 TUI mode (Ink-based, multiline paste, image attachments, animations) is the
-default when stdin/stdout are a TTY. --basic selects the classic readline
-interface instead; non-TTY contexts (pipes, CI) auto-fall-back to it.
+default. Non-TTY contexts (pipes, CI) are not supported — use an interactive
+terminal.
 
 Options:
   --version, -v              Show installed version
-  --basic                    Use the readline-based UI instead of the TUI
   --model, -m <model>        Model name (validated on startup)
   --reasoning, -r <level>    Reasoning level (off/low/medium/high/max)
                              Skips interactive selection. For local models

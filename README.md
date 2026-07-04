@@ -16,7 +16,7 @@ A terminal coding agent that works with **any** OpenAI-compatible API. Point it 
 
 **Real tools, real work.** It reads files, writes code, runs shell commands, searches your codebase — and does it all in parallel. Not a chat wrapper with a "code interpreter" bolted on.
 
-**Ink TUI.** A proper terminal interface with multiline paste, image attachments, smooth animations — not a bare `readline` prompt (though that's available too via `--basic`).
+**Ink TUI.** A proper terminal interface with multiline paste, image attachments, smooth animations.
 
 **Extensible.** Rules (per-project instructions in `.cast/rules.md`), skills (self-contained instruction packages), MCP servers (any Model Context Protocol tool server), and personas (swappable system prompts) — add capabilities without touching the codebase.
 
@@ -87,6 +87,8 @@ Swap the agent's role without changing its tools:
 | `writer` | Creative fiction, prose, literary craft |
 | `pm` | Product strategy, specs, prioritization |
 | `marketer` | Positioning, copy, go-to-market |
+| `qa` | Functional testing — features, edge cases, regressions |
+| `qa-nfr` | Non-functional — performance, security, reliability |
 
 Add your own in `prompts/personas/`.
 
@@ -146,7 +148,6 @@ cast [options] [prompt]
   --bypass-permissions       Skip dangerous-command confirmation
   --skill <path>             Load extra skill (repeatable)
   --mcp <path>               Load extra MCP config (repeatable)
-  --basic                    Readline UI instead of Ink TUI
   -v, --version              Show version
   -h, --help                 Show help
 ```
@@ -170,7 +171,7 @@ Works with anything that speaks the OpenAI API: OpenRouter, OpenAI, Ollama (`htt
 src/
   core/           Agent logic (config, loop, tools, session, skills, MCP, ...)
   ui/             Ink TUI components (App, ChatLog, Composer, pickers, ...)
-  pickers/        Shared picker interface (Ink modal vs. readline)
+  pickers/        Shared picker interface (Ink modal)
   index.ts        CLI entry point
 
 prompts/          System prompts, persona files, compaction templates

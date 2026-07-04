@@ -21,7 +21,7 @@ function StartupLoader({ text }: { text: string }): JSX.Element {
 }
 
 /**
- * TUI entry point. Thin wrapper over runStartup (shared with --basic) plus
+ * TUI entry point. Thin wrapper over runStartup plus
  * mounting the Ink App. Onboarding picker calls happen before render() so
  * they don't fight the long-lived App for stdin — see pickers/ink.tsx.
  *
