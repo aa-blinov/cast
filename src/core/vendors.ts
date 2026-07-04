@@ -118,7 +118,7 @@ export class ThinkBlockParser {
 				result.thinking = this.thinkBuffer;
 				this.thinkBuffer = "";
 				this.inThinkBlock = false;
-				const remaining = text.slice(endIdx + 7);
+				const remaining = text.slice(endIdx + 8);
 				if (remaining) result.content = remaining;
 			} else {
 				this.thinkBuffer += text;
@@ -133,7 +133,7 @@ export class ThinkBlockParser {
 				const endIdx = afterStart.indexOf("</think>");
 				if (endIdx !== -1) {
 					result.thinking = afterStart.slice(0, endIdx);
-					const remaining = afterStart.slice(endIdx + 7);
+					const remaining = afterStart.slice(endIdx + 8);
 					if (remaining) result.content = (result.content ?? "") + remaining;
 				} else {
 					this.thinkBuffer = afterStart;

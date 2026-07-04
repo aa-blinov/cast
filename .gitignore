@@ -3,3 +3,5 @@ dist/
 .env
 *.tsbuildinfo
 .DS_Store
+qa/
+qa-nfr/
