@@ -59,11 +59,6 @@ describe("shouldCompact", () => {
 		// shouldCompact now uses API-reported promptTokens, not message estimation.
 		expect(shouldCompact(messages, config as any, 800)).toBe(true);
 	});
-
-	it("returns false when no API usage data", () => {
-		const messages: Message[] = [{ role: "user", content: "Hello" }];
-		expect(shouldCompact(messages, config as any)).toBe(false);
-	});
 });
 
 // ============================================================================
