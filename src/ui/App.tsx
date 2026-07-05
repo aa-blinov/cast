@@ -28,7 +28,11 @@ export function App(props: AppProps): JSX.Element {
 	const { config, runner } = result;
 
 	const [notice, setNotice] = useState<string | null>(null);
-	const showNotice = useCallback((text: string) => setNotice(text), []);
+	const noticeDurationRef = useRef(6000);
+	const showNotice = useCallback((text: string, duration?: number) => {
+		setNotice(text);
+		noticeDurationRef.current = duration ?? 6000;
+	}, []);
 
 	// Terminal resize + reflow (VS Code, iTerm) re-wraps the on-screen lines,
 	// which desyncs Ink's relative cursor-erase math: it keeps erasing the live
@@ -132,7 +136,9 @@ export function App(props: AppProps): JSX.Element {
 		// Don't dismiss out from under an open modal — e.g. the trust prompt's
 		// explanation shouldn't vanish while the user is still deciding.
 		if (!notice || modalRequest) return;
-		const id = setTimeout(() => setNotice(null), 6000);
+		const duration = noticeDurationRef.current;
+		if (duration <= 0) return;
+		const id = setTimeout(() => setNotice(null), duration);
 		return () => clearTimeout(id);
 	}, [notice, modalRequest]);
 

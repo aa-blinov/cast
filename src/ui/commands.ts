@@ -35,6 +35,7 @@ import {
 	selectSession,
 } from "../pickers/domain.ts";
 import type { Pickers } from "../pickers/types.ts";
+import { TUI_KEYBINDINGS } from "./input/keybindings.ts";
 import type { PendingImage, UseAgentSession } from "./useAgentSession.ts";
 
 /**
@@ -71,6 +72,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/rules delete", description: "Delete a rule (local or global)" },
 	{ name: "/quit", description: "Save and exit" },
 	{ name: "/help", description: "Show this command list" },
+	{ name: "/keys", description: "List all keybindings" },
 ];
 
 export interface CommandDeps {
@@ -79,7 +81,7 @@ export interface CommandDeps {
 	config: AppConfig;
 	running: boolean;
 	onQuit: () => void;
-	showNotice: (text: string) => void;
+	showNotice: (text: string, duration?: number) => void;
 	cwd: string;
 	setCwd: (cwd: string) => void;
 	currentPersona: Persona;
@@ -677,8 +679,77 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 
 	if (input === "/help") {
 		showNotice(
-			"[/clear /compact /new /abort /queue /queue-reset /steer /model /reasoning /persona /personas /skills /mcp /reload /skill: /provider /permissions /sessions /usage /context /rules /rules list /rules add /rules delete /quit]",
+			"[/clear /compact /new /abort /queue /queue-reset /steer /model /reasoning /persona /personas /skills /mcp /reload /skill: /provider /permissions /sessions /usage /context /rules /rules list /rules add /rules delete /keys /quit]",
 		);
+		return;
+	}
+
+	if (input === "/keys") {
+		const ACTION_LABELS: Record<string, string> = {
+			"editor.cursorUp": "Cursor up",
+			"editor.cursorDown": "Cursor down",
+			"editor.cursorLeft": "Cursor left",
+			"editor.cursorRight": "Cursor right",
+			"editor.cursorWordLeft": "Word left",
+			"editor.cursorWordRight": "Word right",
+			"editor.cursorLineStart": "Line start",
+			"editor.cursorLineEnd": "Line end",
+			"editor.deleteCharBackward": "Delete char",
+			"editor.deleteCharForward": "Delete forward",
+			"editor.deleteWordBackward": "Delete word",
+			"editor.deleteWordForward": "Delete word forward",
+			"editor.deleteToLineStart": "Delete to line start",
+			"editor.deleteToLineEnd": "Delete to line end",
+			"input.newLine": "New line",
+			"input.submit": "Submit",
+			"input.abort": "Abort / Exit",
+			"input.escape": "Clear input",
+			"input.attachImage": "Attach image",
+			"input.tab": "Autocomplete",
+		};
+		const KEY_LABELS: Record<string, string> = {
+			up: "↑",
+			down: "↓",
+			left: "←",
+			right: "→",
+			enter: "Enter",
+			backspace: "Backspace",
+			delete: "Del",
+			escape: "Esc",
+			tab: "Tab",
+			home: "Home",
+			end: "End",
+			"ctrl+c": "Ctrl+C",
+			"ctrl+d": "Ctrl+D",
+			"ctrl+w": "Ctrl+W",
+			"ctrl+u": "Ctrl+U",
+			"ctrl+k": "Ctrl+K",
+			"ctrl+b": "Ctrl+B",
+			"ctrl+f": "Ctrl+F",
+			"ctrl+a": "Ctrl+A",
+			"ctrl+e": "Ctrl+E",
+			"ctrl+j": "Ctrl+J",
+			"ctrl+g": "Ctrl+G",
+			"alt+b": "Alt+B",
+			"alt+f": "Alt+F",
+			"alt+d": "Alt+D",
+			"alt+left": "Alt+←",
+			"alt+right": "Alt+→",
+			"alt+backspace": "Alt+Backspace",
+			"alt+delete": "Alt+Del",
+			"alt+enter": "Alt+Enter",
+			"ctrl+left": "Ctrl+←",
+			"ctrl+right": "Ctrl+→",
+			"shift+enter": "Shift+Enter",
+		};
+		const lines = Object.entries(TUI_KEYBINDINGS).map(([id, def]) => {
+			const label = ACTION_LABELS[id] ?? id;
+			const rawKeys = Array.isArray(def.defaultKeys) ? def.defaultKeys : [def.defaultKeys];
+			const keys = rawKeys.map((k) => KEY_LABELS[k] ?? k).join(" / ");
+			return `  ${label.padEnd(22)} ${keys}`;
+		});
+		const header = "Keybindings";
+		showNotice(`${header}\n${lines.join("\n")}`, 0);
 		return;
 	}
 

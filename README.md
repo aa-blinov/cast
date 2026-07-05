@@ -133,6 +133,7 @@ Every conversation auto-saves. Resume with `--continue`, pick from a list with `
 | `/usage` | Show token/cost usage |
 | `/context` | Show context size vs. model window |
 | `/quit`, `/exit` | Save and exit |
+| `/keys` | List all keybindings |
 | `/help` | Show this command list |
 
 ## CLI Options
