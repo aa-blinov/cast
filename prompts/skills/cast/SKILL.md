@@ -75,10 +75,11 @@ EOF
 
 Skills are reusable instruction files the model can read on demand.
 
-**Locations** (highest priority first):
+**Locations** (highest priority first — on name collision, first-loaded wins):
 1. `.cast/skills/` — project (trust-gated)
 2. `~/.cast/skills/` — global
 3. Shipped with cast — builtin
+4. `--skill <path>` — extra CLI paths (loaded last)
 
 **File format** — a directory with `SKILL.md`:
 ```
@@ -126,9 +127,12 @@ EOF
 
 MCP (Model Context Protocol) servers provide external tools.
 
-**Locations:**
-1. `.cast/mcp.json` — project (trust-gated)
-2. `~/.cast/mcp.json` — global
+**Locations** (on name collision, last-loaded wins — reverse of skills/personas):
+1. `~/.cast/mcp.json` — global
+2. `.cast/mcp.json` — project (trust-gated)
+3. `--mcp <path>` — extra CLI paths (loaded last, highest priority)
+
+Global servers load first, project and CLI override them on name collision.
 
 **File format** — same as Claude Desktop/Cursor:
 ```json
@@ -156,9 +160,9 @@ MCP (Model Context Protocol) servers provide external tools.
 
 Rules are short instructions appended to the system prompt.
 
-**Locations:**
-1. `.cast/rules.md` — project (trust-gated)
-2. `~/.cast/rules.md` — global
+**Locations** (both are concatenated, not priority-based):
+1. `~/.cast/rules.md` — global (always loaded)
+2. `.cast/rules.md` — project (trust-gated, appended after global)
 
 **Managed via commands:**
 - `/rules` — list all rules

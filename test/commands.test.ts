@@ -345,10 +345,16 @@ describe("handleInput", () => {
 	it("/rules shows hint when no rules exist", async () => {
 		const fakeHome = mkdtempSync(join(tmpdir(), "cast-cmd-rules-empty-"));
 		const cwd = join(fakeHome, "project");
-		const { deps, calls } = createFakeDeps({ cwd });
-		await handleInput("/rules", undefined, deps);
-		expect(noticeText(calls)).toContain("No rules yet");
-		rmSync(fakeHome, { recursive: true, force: true });
+		const origHome = process.env.HOME;
+		process.env.HOME = fakeHome;
+		try {
+			const { deps, calls } = createFakeDeps({ cwd });
+			await handleInput("/rules", undefined, deps);
+			expect(noticeText(calls)).toContain("No rules yet");
+		} finally {
+			process.env.HOME = origHome;
+			rmSync(fakeHome, { recursive: true, force: true });
+		}
 	});
 
 	it("/rules delete removes picked rule and renumbers", async () => {
