@@ -1,13 +1,13 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { resolveProjectTrust } from "../pickers/domain.ts";
 import type { Pickers } from "../pickers/types.ts";
 import { hasContextFileInDir } from "./context-files.ts";
 import { connectMcpServers, loadMcpConfig, type McpServerConfig, type McpSetupResult } from "./mcp.ts";
-import type { Persona } from "./personas.ts";
+import { globalPersonasDir, type LoadPersonasOptions, loadPersonas, type Persona } from "./personas.ts";
 import { hasProjectRules } from "./rules.ts";
 import type { PermissionMode, Settings } from "./settings.ts";
-import { formatSkillsForPrompt, loadSkills, type Skill } from "./skills.ts";
+import { builtinSkillsDir, formatSkillsForPrompt, loadSkills, type Skill } from "./skills.ts";
 
 export interface ProjectResolverDeps {
 	noSkills: boolean;
@@ -31,6 +31,22 @@ function projectMcpPath(targetCwd: string): string | undefined {
 	return path !== globalMcpPath ? path : undefined;
 }
 
+function projectPersonasDir(targetCwd: string): string | undefined {
+	const dir = join(targetCwd, ".cast", "personas");
+	return dir !== globalPersonasDir ? dir : undefined;
+}
+
+/** True if `<cwd>/.cast/personas/` exists and contains at least one .md file. */
+function hasProjectPersonas(targetCwd: string): boolean {
+	const dir = projectPersonasDir(targetCwd);
+	if (!dir || !existsSync(dir)) return false;
+	try {
+		return readdirSync(dir).some((f) => f.endsWith(".md"));
+	} catch {
+		return false;
+	}
+}
+
 /**
  * Single trust gate for skills, MCP servers, context files, and rules — all
  * project-local resources that could come from a cloned repository. Cached
@@ -52,6 +68,7 @@ export async function resolveProjectTrustForCwd(deps: ProjectResolverDeps, cwd: 
 	}
 	if (hasContextFileInDir(cwd)) lines.push("  - AGENTS.md / CLAUDE.md (project instructions for the system prompt)");
 	if (hasProjectRules(cwd)) lines.push("  - .cast/rules.md (user instructions appended to the system prompt)");
+	if (hasProjectPersonas(cwd)) lines.push("  - .cast/personas/ (custom personas — system prompts for the agent)");
 	if (lines.length === 0) return true;
 	return resolveProjectTrust(deps.pickers, deps.settings, cwd, lines);
 }
@@ -64,6 +81,7 @@ export async function resolveSkillsForCwd(
 	const skillsDir = projectSkillsDir(cwd);
 	const skillsResult = loadSkills({
 		globalDir: deps.noSkills ? undefined : globalSkillsDir,
+		builtinDir: deps.noSkills ? undefined : builtinSkillsDir,
 		projectDir: trusted && skillsDir && existsSync(skillsDir) ? skillsDir : undefined,
 		extraPaths: deps.cliSkillPaths,
 	});
@@ -99,6 +117,25 @@ export async function resolveMcpForCwd(
 }
 
 /** Assemble the full system prompt from persona + project suffixes + cwd/date. */
+export function personaOptionsForCwd(cwd: string, trusted: boolean): LoadPersonasOptions {
+	return {
+		globalDir: globalPersonasDir,
+		projectDir: trusted ? projectPersonasDir(cwd) : undefined,
+	};
+}
+
+/**
+ * Load and merge personas from builtin + global + project. Returns the full
+ * list and the options used, so callers can pass them to findPersona later.
+ */
+export function resolvePersonasForCwd(
+	cwd: string,
+	trusted: boolean,
+): { personas: Persona[]; options: LoadPersonasOptions } {
+	const options = personaOptionsForCwd(cwd, trusted);
+	return { personas: loadPersonas(options), options };
+}
+
 export function buildSystemPrompt(
 	persona: Persona,
 	contextFilesSuffix: string,

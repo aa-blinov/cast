@@ -1,7 +1,7 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
-import { DEFAULT_PERSONA, findPersona, listPersonas } from "../src/core/personas.ts";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { DEFAULT_PERSONA, findPersona, listPersonas, loadPersonas } from "../src/core/personas.ts";
 
 const PERSONAS_DIR = join(import.meta.dirname, "..", "prompts", "personas");
 const ERROR_HANDLING_FILE = join(import.meta.dirname, "..", "prompts", "error-handling.md");
@@ -65,5 +65,86 @@ describe("findPersona", () => {
 
 	it("finds a known persona by exact name", () => {
 		expect(findPersona("writer")?.name).toBe("writer");
+	});
+});
+
+// ============================================================================
+// loadPersonas: multi-source (builtin + global + project)
+// ============================================================================
+
+const TEST_DIR = join(import.meta.dirname, "__test_tmp_personas__");
+const GLOBAL_DIR = join(TEST_DIR, "global");
+const PROJECT_DIR = join(TEST_DIR, "project");
+
+function writePersona(dir: string, name: string, body: string, label?: string): void {
+	mkdirSync(dir, { recursive: true });
+	const fm = [`name: ${name}`, label ? `label: ${label}` : `label: ${name}`].join("\n");
+	writeFileSync(join(dir, `${name}.md`), `---\n${fm}\n---\n\n${body}\n`, "utf-8");
+}
+
+beforeEach(() => {
+	mkdirSync(GLOBAL_DIR, { recursive: true });
+	mkdirSync(PROJECT_DIR, { recursive: true });
+});
+
+afterEach(() => {
+	rmSync(TEST_DIR, { recursive: true, force: true });
+});
+
+describe("loadPersonas multi-source", () => {
+	it("loads builtin personas when no global/project dirs given", () => {
+		const personas = loadPersonas();
+		expect(personas.length).toBeGreaterThan(0);
+		for (const p of personas) expect(p.source).toBe("builtin");
+	});
+
+	it("loads global user personas", () => {
+		writePersona(GLOBAL_DIR, "custom", "You are a custom assistant.", "Custom");
+		const personas = loadPersonas({ globalDir: GLOBAL_DIR });
+		const custom = personas.find((p) => p.name === "custom");
+		expect(custom).toBeDefined();
+		expect(custom!.source).toBe("global");
+		expect(custom!.label).toBe("Custom");
+	});
+
+	it("loads project personas", () => {
+		writePersona(PROJECT_DIR, "proj-only", "Project specific.", "Project");
+		const personas = loadPersonas({ projectDir: PROJECT_DIR });
+		const proj = personas.find((p) => p.name === "proj-only");
+		expect(proj).toBeDefined();
+		expect(proj!.source).toBe("project");
+	});
+
+	it("project persona wins over global on name collision", () => {
+		writePersona(GLOBAL_DIR, "dup", "Global version.", "Global Dup");
+		writePersona(PROJECT_DIR, "dup", "Project version.", "Project Dup");
+		const personas = loadPersonas({ globalDir: GLOBAL_DIR, projectDir: PROJECT_DIR });
+		const dups = personas.filter((p) => p.name === "dup");
+		expect(dups).toHaveLength(1);
+		expect(dups[0].source).toBe("project");
+		expect(dups[0].label).toBe("Project Dup");
+	});
+
+	it("global persona wins over builtin on name collision", () => {
+		writePersona(GLOBAL_DIR, "coding", "Overridden coding.", "My Coding");
+		const personas = loadPersonas({ globalDir: GLOBAL_DIR });
+		const codings = personas.filter((p) => p.name === "coding");
+		expect(codings).toHaveLength(1);
+		expect(codings[0].source).toBe("global");
+		expect(codings[0].label).toBe("My Coding");
+	});
+
+	it("findPersona respects multi-source options", () => {
+		writePersona(GLOBAL_DIR, "special", "Special assistant.", "Special");
+		const found = findPersona("special", { globalDir: GLOBAL_DIR });
+		expect(found).toBeDefined();
+		expect(found!.source).toBe("global");
+	});
+
+	it("each persona gets error-handling appended", () => {
+		writePersona(GLOBAL_DIR, "test-pers", "Test body.");
+		const personas = loadPersonas({ globalDir: GLOBAL_DIR });
+		const testPers = personas.find((p) => p.name === "test-pers")!;
+		expect(testPers.systemPrompt).toContain("## Error Handling");
 	});
 });

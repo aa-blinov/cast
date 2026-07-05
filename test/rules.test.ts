@@ -3,11 +3,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+	addGlobalRule,
 	addProjectRule,
+	deleteGlobalRule,
 	deleteProjectRule,
 	formatRulesForPrompt,
 	hasProjectRules,
 	loadRules,
+	parseGlobalRules,
 	parseProjectRules,
 	readProjectRules,
 	saveProjectRules,
@@ -154,6 +157,58 @@ describe("rules", () => {
 			saveProjectRules(projectDir, "1. Only one");
 			expect(deleteProjectRule(projectDir, 1)).toBe(true);
 			expect(readProjectRules(projectDir)).toBe("");
+		});
+	});
+
+	describe("global rules CRUD", () => {
+		it("parseGlobalRules returns empty array when no global rules file exists", () => {
+			expect(parseGlobalRules()).toEqual([]);
+		});
+
+		it("addGlobalRule creates the file and adds numbered rules", () => {
+			addGlobalRule("Be concise");
+			expect(parseGlobalRules()).toEqual(["Be concise"]);
+			addGlobalRule("No emojis");
+			expect(parseGlobalRules()).toEqual(["Be concise", "No emojis"]);
+		});
+
+		it("deleteGlobalRule removes and renumbers", () => {
+			addGlobalRule("First");
+			addGlobalRule("Second");
+			addGlobalRule("Third");
+			expect(deleteGlobalRule(2)).toBe(true);
+			expect(parseGlobalRules()).toEqual(["First", "Third"]);
+		});
+
+		it("deleteGlobalRule returns false for out-of-range", () => {
+			addGlobalRule("Only");
+			expect(deleteGlobalRule(0)).toBe(false);
+			expect(deleteGlobalRule(2)).toBe(false);
+		});
+
+		it("global rules load regardless of project trust", () => {
+			addGlobalRule("Global only");
+			expect(loadRules(projectDir, false)).toBe("1. Global only");
+			expect(loadRules(projectDir, true)).toBe("1. Global only");
+		});
+
+		it("global and project rules merge correctly in loadRules", () => {
+			addGlobalRule("Global 1");
+			addGlobalRule("Global 2");
+			addProjectRule(projectDir, "Local 1");
+			addProjectRule(projectDir, "Local 2");
+			const merged = loadRules(projectDir, true);
+			expect(merged).toBe("1. Global 1\n2. Global 2\n\n1. Local 1\n2. Local 2");
+		});
+
+		it("merged rules wrap correctly in formatRulesForPrompt", () => {
+			addGlobalRule("Global rule");
+			addProjectRule(projectDir, "Local rule");
+			const formatted = formatRulesForPrompt(loadRules(projectDir, true));
+			expect(formatted).toContain("<rules>");
+			expect(formatted).toContain("Global rule");
+			expect(formatted).toContain("Local rule");
+			expect(formatted).toContain("</rules>");
 		});
 	});
 });

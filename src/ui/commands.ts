@@ -3,10 +3,11 @@ import { type AppConfig, runOnboardingCheck } from "../core/config.ts";
 import { formatContextFilesForPrompt, loadProjectContextFiles } from "../core/context-files.ts";
 import { compactSessionMessages } from "../core/loop.ts";
 import { closeMcpConnections, type McpSetupResult } from "../core/mcp.ts";
-import { findPersona, listPersonas, type Persona } from "../core/personas.ts";
+import { findPersona, type LoadPersonasOptions, listPersonas, type Persona } from "../core/personas.ts";
 import {
 	buildSystemPrompt,
 	type ProjectResolverDeps,
+	personaOptionsForCwd,
 	resolveMcpForCwd,
 	resolveProjectTrustForCwd,
 	resolveSkillsForCwd,
@@ -83,6 +84,8 @@ export interface CommandDeps {
 	setCwd: (cwd: string) => void;
 	currentPersona: Persona;
 	setCurrentPersona: (p: Persona) => void;
+	personaOptions: LoadPersonasOptions;
+	setPersonaOptions: (o: LoadPersonasOptions) => void;
 	skills: Skill[];
 	setSkills: (s: Skill[]) => void;
 	skillsPromptSuffix: string;
@@ -351,16 +354,16 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 	}
 
 	if (input === "/personas") {
-		const lines = listPersonas().map(
-			(p) => `${p.name}${p.name === deps.currentPersona.name ? " (current)" : ""} — ${p.label}`,
+		const lines = listPersonas(deps.personaOptions).map(
+			(p) => `${p.name} (${p.source})${p.name === deps.currentPersona.name ? " [current]" : ""} — ${p.label}`,
 		);
-		showNotice(`[Personas: ${lines.join(" | ")}]`);
+		showNotice(`[Personas:\n${lines.join("\n")}]`);
 		return;
 	}
 
 	if (input === "/persona") {
 		showNotice(`[Current persona: ${deps.currentPersona.label} (${deps.currentPersona.name})]`);
-		const selected = await selectPersona(deps.pickers);
+		const selected = await selectPersona(deps.pickers, deps.personaOptions);
 		if (!selected) {
 			showNotice("[Cancelled — persona unchanged]");
 			return;
@@ -374,7 +377,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 
 	if (input.startsWith("/persona ")) {
 		const name = input.slice("/persona ".length).trim();
-		const found = findPersona(name);
+		const found = findPersona(name, deps.personaOptions);
 		if (!found) {
 			showNotice(`[Unknown persona "${name}". Use /personas to list available ones.]`);
 			return;
@@ -419,10 +422,23 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		deps.setContextFilesSuffix(contextFilesSuffix);
 		const rulesSuffix = formatRulesForPrompt(loadRules(deps.cwd, trusted));
 		deps.setRulesSuffix(rulesSuffix);
-		rebuildSystemPrompt(deps, deps.cwd, { contextFilesSuffix, rulesSuffix, skillsPromptSuffix });
+		const newPersonaOpts = personaOptionsForCwd(deps.cwd, trusted);
+		deps.setPersonaOptions(newPersonaOpts);
+		const reloadedPersona = findPersona(deps.currentPersona.name, newPersonaOpts);
+		if (reloadedPersona) {
+			deps.setCurrentPersona(reloadedPersona);
+		}
+		rebuildSystemPrompt(deps, deps.cwd, {
+			persona: reloadedPersona,
+			contextFilesSuffix,
+			rulesSuffix,
+			skillsPromptSuffix,
+		});
 		await closeMcpConnections(deps.mcpResult.connections);
 		deps.setMcpResult(await resolveMcpForCwd(deps.projectDeps, deps.cwd, trusted));
-		showNotice(`[Reloaded: ${newSkills.length} skill(s), ${deps.mcpResult.connections.length} mcp server(s)]`);
+		showNotice(
+			`[Reloaded: ${newSkills.length} skill(s), ${deps.mcpResult.connections.length} mcp server(s), personas]`,
+		);
 		return;
 	}
 
@@ -534,6 +550,8 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			deps.setContextFilesSuffix(contextFilesSuffix);
 			rulesSuffix = formatRulesForPrompt(loadRules(chosen.cwd, trusted));
 			deps.setRulesSuffix(rulesSuffix);
+			const newPersonaOpts = personaOptionsForCwd(chosen.cwd, trusted);
+			deps.setPersonaOptions(newPersonaOpts);
 			await closeMcpConnections(deps.mcpResult.connections);
 			deps.setMcpResult(await resolveMcpForCwd(deps.projectDeps, chosen.cwd, trusted));
 		}

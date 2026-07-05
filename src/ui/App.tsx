@@ -84,6 +84,7 @@ export function App(props: AppProps): JSX.Element {
 	const [projectTrusted, setProjectTrusted] = useState(result.projectTrusted);
 	const [cwd, setCwd] = useState(result.cwd);
 	const [reasoningMeta, setReasoningMeta] = useState(result.reasoningMeta);
+	const [personaOptions, setPersonaOptions] = useState(result.personaOptions);
 
 	const confirmBash = useMemo(() => makeConfirmBash(pickers, permissionMode), [pickers, permissionMode]);
 
@@ -168,6 +169,8 @@ export function App(props: AppProps): JSX.Element {
 		pickers,
 		reasoningMeta,
 		setReasoningMeta,
+		personaOptions,
+		setPersonaOptions,
 	});
 	depsRef.current = {
 		agent,
@@ -200,6 +203,8 @@ export function App(props: AppProps): JSX.Element {
 		pickers,
 		reasoningMeta,
 		setReasoningMeta,
+		personaOptions,
+		setPersonaOptions,
 	};
 
 	const handleSubmit = useCallback(async (text: string) => {

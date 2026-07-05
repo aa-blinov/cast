@@ -1,5 +1,5 @@
 import { type AppConfig, fetchModels, runOnboardingCheck } from "../core/config.ts";
-import { DEFAULT_PERSONA, listPersonas, type Persona } from "../core/personas.ts";
+import { DEFAULT_PERSONA, type LoadPersonasOptions, listPersonas, type Persona } from "../core/personas.ts";
 import { setModelsCache } from "../core/readline.ts";
 import { deleteSession, listSessions, type SessionState } from "../core/session.ts";
 import { getProjectTrust, type PermissionMode, type Settings, setProjectTrust } from "../core/settings.ts";
@@ -87,14 +87,18 @@ export async function resolveProjectTrust(
  * the current persona in place. Onboarding call sites, which do need to exit
  * if nothing gets picked, check for null themselves and exit there instead.
  */
-export async function selectPersona(pickers: Pickers): Promise<Persona | null> {
-	const personas = listPersonas();
+export async function selectPersona(pickers: Pickers, options?: LoadPersonasOptions): Promise<Persona | null> {
+	const personas = listPersonas(options);
 	const defaultIdx = Math.max(
 		0,
 		personas.findIndex((p) => p.name === DEFAULT_PERSONA),
 	);
 	const picked = await pickers.pickOption(
-		personas.map((p) => ({ value: p, label: p.label, description: p.description })),
+		personas.map((p) => ({
+			value: p,
+			label: `${p.label} (${p.source})`,
+			description: p.description,
+		})),
 		{ title: "Personas", defaultIndex: defaultIdx },
 	);
 	return picked;

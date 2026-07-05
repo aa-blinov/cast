@@ -28,7 +28,9 @@ const _promptsDir = existsSync(join(_selfDir, "..", "prompts"))
 	: join(_selfDir, "..", "..", "prompts");
 const SKILLS_INSTRUCTIONS = readFileSync(join(_promptsDir, "skills-instructions.md"), "utf-8").trim();
 
-export type SkillSource = "global" | "project" | "path";
+export const builtinSkillsDir = join(_promptsDir, "skills");
+
+export type SkillSource = "builtin" | "global" | "project" | "path";
 
 export interface Skill {
 	name: string;
@@ -163,6 +165,8 @@ function loadSkillsFromDirInternal(
 }
 
 export interface LoadSkillsOptions {
+	/** `prompts/skills/` — ships with cast, always loaded. */
+	builtinDir?: string;
 	/** `~/.cast/skills` — omit only for `--no-skills`; needs no trust prompt (the user put it there themselves). */
 	globalDir?: string;
 	/** `<cwd>/.cast/skills` — omit entirely if `--no-skills` or the project isn't trusted yet. */
@@ -173,8 +177,9 @@ export interface LoadSkillsOptions {
 
 /**
  * Load skills from every configured location. On a name collision the
- * first-loaded skill wins (global, then project, then --skill paths, in
- * that order) — matches pi's behavior.
+ * first-loaded skill wins (project > global > builtin > --skill paths) —
+ * matches pi's behavior. Builtin skills have the lowest priority so that
+ * user-provided skills can override them.
  */
 export function loadSkills(options: LoadSkillsOptions): { skills: Skill[]; diagnostics: SkillDiagnostic[] } {
 	const skillMap = new Map<string, Skill>();
@@ -194,8 +199,10 @@ export function loadSkills(options: LoadSkillsOptions): { skills: Skill[]; diagn
 		}
 	}
 
-	if (options.globalDir) addAll(loadSkillsFromDirInternal(options.globalDir, "global", true));
+	// Highest priority first: project > global > builtin > extra paths.
 	if (options.projectDir) addAll(loadSkillsFromDirInternal(options.projectDir, "project", true));
+	if (options.globalDir) addAll(loadSkillsFromDirInternal(options.globalDir, "global", true));
+	if (options.builtinDir) addAll(loadSkillsFromDirInternal(options.builtinDir, "builtin", true));
 
 	for (const rawPath of options.extraPaths) {
 		if (!existsSync(rawPath)) {

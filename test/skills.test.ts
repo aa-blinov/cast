@@ -78,12 +78,12 @@ describe("loadSkills discovery", () => {
 		expect(diagnostics.some((d) => d.message.includes("lowercase"))).toBe(true);
 	});
 
-	it("keeps the global skill on a name collision with a project skill, with a diagnostic", () => {
+	it("keeps the project skill on a name collision with a global skill, with a diagnostic", () => {
 		writeSkill(GLOBAL_DIR, "shared/SKILL.md", { name: "shared", description: "Global version." });
 		writeSkill(PROJECT_DIR, "shared/SKILL.md", { name: "shared", description: "Project version." });
 		const { skills, diagnostics } = loadSkills({ globalDir: GLOBAL_DIR, projectDir: PROJECT_DIR, extraPaths: [] });
 		expect(skills).toHaveLength(1);
-		expect(skills[0]?.description).toBe("Global version.");
+		expect(skills[0]?.description).toBe("Project version.");
 		expect(diagnostics.some((d) => d.message.includes("collision"))).toBe(true);
 	});
 

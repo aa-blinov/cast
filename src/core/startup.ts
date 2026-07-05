@@ -11,11 +11,12 @@ import type { Pickers } from "../pickers/types.ts";
 import { type AppConfig, fetchModels, loadConfig, runOnboardingCheck } from "./config.ts";
 import { formatContextFilesForPrompt, loadProjectContextFiles } from "./context-files.ts";
 import type { McpSetupResult } from "./mcp.ts";
-import { findPersona, listPersonas, type Persona } from "./personas.ts";
+import { findPersona, type LoadPersonasOptions, listPersonas, type Persona } from "./personas.ts";
 import {
 	buildSystemPrompt,
 	makeConfirmBash,
 	type ProjectResolverDeps,
+	personaOptionsForCwd,
 	resolveMcpForCwd,
 	resolveProjectTrustForCwd,
 	resolveSkillsForCwd,
@@ -56,6 +57,7 @@ export interface StartupResult {
 	mcpResult: McpSetupResult;
 	skills: Skill[];
 	persona: Persona;
+	personaOptions: LoadPersonasOptions;
 	reasoningMeta?: ModelReasoningMeta;
 	confirmBash: (command: string, reason: string) => Promise<boolean>;
 	projectDeps: ProjectResolverDeps;
@@ -120,14 +122,15 @@ export async function runStartup(
 	const { skills, skillsPromptSuffix } = await resolveSkillsForCwd(projectDeps, cwd, projectTrusted);
 	const contextFilesSuffix = formatContextFilesForPrompt(loadProjectContextFiles(cwd, projectTrusted));
 	const rulesSuffix = formatRulesForPrompt(loadRules(cwd, projectTrusted));
+	const personaOpts = personaOptionsForCwd(cwd, projectTrusted);
 
 	// Persona: CLI > saved settings > interactive selection.
 	let persona: Persona;
 	if (args.cliPersona) {
-		const found = findPersona(args.cliPersona);
+		const found = findPersona(args.cliPersona, personaOpts);
 		if (!found) {
 			console.error(
-				`Unknown persona "${args.cliPersona}". Available: ${listPersonas()
+				`Unknown persona "${args.cliPersona}". Available: ${listPersonas(personaOpts)
 					.map((p) => p.name)
 					.join(", ")}`,
 			);
@@ -135,17 +138,17 @@ export async function runStartup(
 		}
 		persona = found;
 	} else if (settings.persona) {
-		const found = findPersona(settings.persona);
+		const found = findPersona(settings.persona, personaOpts);
 		if (found) {
 			persona = found;
 		} else {
 			console.log(`Saved persona "${settings.persona}" no longer exists.`);
-			const selected = await selectPersona(pickers);
+			const selected = await selectPersona(pickers, personaOpts);
 			if (!selected) process.exit(0);
 			persona = selected;
 		}
 	} else {
-		const selected = await selectPersona(pickers);
+		const selected = await selectPersona(pickers, personaOpts);
 		if (!selected) process.exit(0);
 		persona = selected;
 	}
@@ -258,6 +261,7 @@ export async function runStartup(
 		mcpResult,
 		skills,
 		persona,
+		personaOptions: personaOpts,
 		reasoningMeta,
 		confirmBash,
 		projectDeps,

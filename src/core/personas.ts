@@ -5,13 +5,15 @@
  * primitives already, not code-specific in themselves — the persona is
  * entirely a matter of which instructions frame how they're used.
  *
- * Shipped personas live in prompts/personas/*.md as frontmatter + body,
- * same shape as a skill: name, label, description. Unlike skills, these
- * ship with cast itself (not user-provided), so there's no trust gate —
- * and there's no "always inject the description" step either, since only
- * one persona is active at a time and its full body becomes the system
- * prompt directly. prompts/error-handling.md is appended to every persona
- * (see readSharedErrorHandling below).
+ * Personas are loaded from three sources (highest priority first):
+ *   1. Project:  <cwd>/.cast/personas/*.md  (trust-gated, like skills)
+ *   2. Global:   ~/.cast/personas/*.md       (always loaded)
+ *   3. Builtin:  prompts/personas/*.md       (ships with cast)
+ *
+ * Same frontmatter format as skills (name, label, description). Only one
+ * persona is active at a time; its full body becomes the system prompt.
+ * prompts/error-handling.md is appended to every persona (see
+ * readSharedErrorHandling below).
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -19,14 +21,19 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseFrontmatter } from "./frontmatter.ts";
 
+export type PersonaSource = "builtin" | "global" | "project";
+
 export interface Persona {
 	name: string;
 	label: string;
 	description: string;
 	systemPrompt: string;
+	source: PersonaSource;
 }
 
 export const DEFAULT_PERSONA = "coding";
+
+export const globalPersonasDir = join(process.env.HOME ?? ".", ".cast", "personas");
 
 const _selfDir = dirname(fileURLToPath(import.meta.url));
 const PROMPTS_DIR = existsSync(join(_selfDir, "..", "prompts"))
@@ -75,13 +82,14 @@ const FALLBACK_PERSONA: Persona = {
 	label: "Coding agent",
 	description: "Default persona.",
 	systemPrompt: [readFallbackPersonaPrompt(), readSharedErrorHandling()].filter(Boolean).join("\n\n"),
+	source: "builtin",
 };
 
-function personasDir(): string {
+function builtinPersonasDir(): string {
 	return join(PROMPTS_DIR, "personas");
 }
 
-function loadPersonaFromFile(filePath: string): Persona | null {
+function loadPersonaFromFile(filePath: string, source: PersonaSource): Persona | null {
 	let raw: string;
 	try {
 		raw = readFileSync(filePath, "utf-8");
@@ -98,28 +106,76 @@ function loadPersonaFromFile(filePath: string): Persona | null {
 		label: typeof frontmatter.label === "string" && frontmatter.label ? frontmatter.label : name,
 		description: typeof frontmatter.description === "string" ? frontmatter.description : "",
 		systemPrompt: [body.trimEnd(), readSharedErrorHandling()].filter(Boolean).join("\n\n"),
+		source,
 	};
 }
 
-/** All personas shipped in prompts/personas/. Falls back to a single generic persona if that's missing. */
-export function listPersonas(): Persona[] {
+/**
+ * Load all .md personas from a directory, returning them sorted by name.
+ * Silently returns an empty array if the directory doesn't exist.
+ */
+function loadPersonasFromDir(dir: string, source: PersonaSource): Persona[] {
 	let files: string[];
 	try {
-		files = readdirSync(personasDir()).filter((f) => f.endsWith(".md"));
+		files = readdirSync(dir).filter((f) => f.endsWith(".md"));
 	} catch {
-		return [FALLBACK_PERSONA];
+		return [];
+	}
+	return files
+		.map((f) => loadPersonaFromFile(join(dir, f), source))
+		.filter((p): p is Persona => p !== null)
+		.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export interface LoadPersonasOptions {
+	/** `prompts/personas/` — the shipped built-in personas. */
+	builtinDir?: string;
+	/** `~/.cast/personas/` — always loaded. */
+	globalDir?: string;
+	/** `<cwd>/.cast/personas/` — omit if project isn't trusted or dir missing. */
+	projectDir?: string;
+}
+
+/**
+ * Load and merge personas from all configured sources. On a name collision
+ * the first-loaded persona wins (project, then global, then builtin) —
+ * matches the skills collision policy.
+ */
+export function loadPersonas(options: LoadPersonasOptions = {}): Persona[] {
+	const builtinDir = options.builtinDir ?? builtinPersonasDir();
+	const personaMap = new Map<string, Persona>();
+
+	// Highest priority first: project > global > builtin.
+	const sources: { dir: string | undefined; source: PersonaSource }[] = [
+		{ dir: options.projectDir, source: "project" },
+		{ dir: options.globalDir, source: "global" },
+		{ dir: builtinDir, source: "builtin" },
+	];
+
+	for (const { dir, source } of sources) {
+		if (!dir) continue;
+		for (const persona of loadPersonasFromDir(dir, source)) {
+			if (!personaMap.has(persona.name)) personaMap.set(persona.name, persona);
+		}
 	}
 
-	const personas = files
-		.map((f) => loadPersonaFromFile(join(personasDir(), f)))
-		.filter((p): p is Persona => p !== null)
-		.sort((a, b) =>
-			a.name === DEFAULT_PERSONA ? -1 : b.name === DEFAULT_PERSONA ? 1 : a.name.localeCompare(b.name),
-		);
-
+	const personas = Array.from(personaMap.values());
+	// Sort with DEFAULT_PERSONA first, then alphabetically.
+	personas.sort((a, b) =>
+		a.name === DEFAULT_PERSONA ? -1 : b.name === DEFAULT_PERSONA ? 1 : a.name.localeCompare(b.name),
+	);
 	return personas.length > 0 ? personas : [FALLBACK_PERSONA];
 }
 
-export function findPersona(name: string): Persona | undefined {
-	return listPersonas().find((p) => p.name === name);
+/**
+ * Convenience wrapper: load all personas and find one by name.
+ * Callers that already have the list should use .find() instead.
+ */
+export function findPersona(name: string, options?: LoadPersonasOptions): Persona | undefined {
+	return loadPersonas(options).find((p) => p.name === name);
+}
+
+/** Backward-compatible convenience: load all personas from all sources. */
+export function listPersonas(options?: LoadPersonasOptions): Persona[] {
+	return loadPersonas(options);
 }

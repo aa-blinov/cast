@@ -90,6 +90,7 @@ function createFakeDeps(overrides?: Partial<CommandDeps> & { running?: boolean }
 			label: "Default",
 			description: "test persona",
 			systemPrompt: "you are a test",
+			source: "builtin",
 		} as Persona,
 		setCurrentPersona: track("setCurrentPersona"),
 		skills: [],
@@ -124,6 +125,8 @@ function createFakeDeps(overrides?: Partial<CommandDeps> & { running?: boolean }
 		pickers: fakePickers,
 		reasoningMeta: undefined,
 		setReasoningMeta: track("setReasoningMeta"),
+		personaOptions: {},
+		setPersonaOptions: track("setPersonaOptions"),
 		...overrides,
 	};
 
@@ -213,7 +216,7 @@ describe("handleInput", () => {
 		});
 		await handleInput("/personas", undefined, deps);
 		expect(noticeText(calls)).toContain("Personas:");
-		expect(noticeText(calls)).toContain("(current)");
+		expect(noticeText(calls)).toContain("[current]");
 	});
 
 	it("/persona cancelled (Escape) leaves the persona unchanged and doesn't exit the process", async () => {

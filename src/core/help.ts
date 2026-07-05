@@ -77,9 +77,9 @@ Interactive commands:
   /permissions           Show/change bash confirmation mode (default/bypass)
   /skills                List loaded skills
   /mcp                   List connected MCP servers and their tools
-  /reload                Re-scan skills and reconnect MCP servers for the
-                         current directory (no restart needed after adding
-                         a skill or mcp.json entry)
+  /reload                Re-scan skills, personas, and reconnect MCP servers
+                         for the current directory (no restart needed after
+                         adding a skill, persona, or mcp.json entry)
   /skill:name [args]     Force-load and run a skill
   /usage                 Show cumulative token/cost usage for this session
   /context               Show current context size vs. the model's window
