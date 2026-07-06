@@ -1,5 +1,6 @@
 import { Box, Text } from "ink";
 import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { formatContextFilesForPrompt, resolveNestedContextFiles } from "../core/context-files.ts";
 import { buildSystemPrompt, makeConfirmBash } from "../core/project.ts";
 import {
 	formatRulesForTurn,
@@ -121,10 +122,18 @@ export function App(props: AppProps): JSX.Element {
 			//    formatRulesForTurn.
 			const rulesBlock = formatRulesForTurn(directoryRules, sticky, mentioned);
 
-			// 4. Build the full system prompt.
+			// 4. Nested AGENTS.md/CLAUDE.md for files touched this session — a
+			//    subdirectory instruction file attaches once a file from its
+			//    subtree enters context (opencode's per-file resolve model).
+			//    Trust-gated like the cwd context file.
+			const nestedContext = projectTrusted
+				? formatContextFilesForPrompt(resolveNestedContextFiles(cwd, ctxFiles))
+				: "";
+
+			// 5. Build the full system prompt.
 			return buildSystemPrompt(
 				currentPersona,
-				contextFilesSuffix,
+				contextFilesSuffix + nestedContext,
 				rulesBlock,
 				rulesLazySuffix,
 				skillsPromptSuffix,
@@ -140,6 +149,7 @@ export function App(props: AppProps): JSX.Element {
 			rulesLazySuffix,
 			skillsPromptSuffix,
 			cwd,
+			projectTrusted,
 			session.model,
 			config.reasoningLevel,
 		],

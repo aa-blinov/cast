@@ -6,6 +6,7 @@ import {
 	formatContextFilesForPrompt,
 	hasContextFileInDir,
 	loadProjectContextFiles,
+	resolveNestedContextFiles,
 } from "../src/core/context-files.ts";
 
 describe("context-files", () => {
@@ -115,6 +116,53 @@ describe("context-files", () => {
 			expect(result).toContain("</project_context>");
 			expect(result).toContain('path="a &amp; b &quot;quoted&quot;"');
 			expect(result).toContain("Do X.");
+		});
+	});
+
+	describe("resolveNestedContextFiles", () => {
+		let repo: string;
+		beforeEach(() => {
+			repo = mkdtempSync(join(tmpdir(), "cast-nested-agents-"));
+			mkdirSync(join(repo, "apps", "web", "components"), { recursive: true });
+			mkdirSync(join(repo, "services", "api"), { recursive: true });
+			writeFileSync(join(repo, "AGENTS.md"), "ROOT"); // cwd file — NOT nested
+			writeFileSync(join(repo, "apps", "web", "AGENTS.md"), "WEB");
+			writeFileSync(join(repo, "apps", "web", "components", "AGENTS.md"), "COMPONENTS");
+			writeFileSync(join(repo, "services", "api", "AGENTS.md"), "API");
+		});
+		afterEach(() => rmSync(repo, { recursive: true, force: true }));
+
+		it("returns nothing when no context files touched", () => {
+			expect(resolveNestedContextFiles(repo, [])).toEqual([]);
+		});
+
+		it("attaches every nested AGENTS.md between the touched file and cwd (nearest chain)", () => {
+			const files = resolveNestedContextFiles(repo, ["apps/web/components/Button.tsx"]);
+			// web + components attach; root is the cwd base (excluded); api untouched.
+			expect(files.map((f) => f.content)).toEqual(["WEB", "COMPONENTS"]); // shallow→deep
+		});
+
+		it("does NOT include the cwd-level AGENTS.md (that's the static base)", () => {
+			const files = resolveNestedContextFiles(repo, ["apps/web/AGENTS.md"]);
+			expect(files.map((f) => f.content)).not.toContain("ROOT");
+		});
+
+		it("scopes to the touched subtree — an api file does not pull web instructions", () => {
+			const files = resolveNestedContextFiles(repo, ["services/api/main.go"]);
+			expect(files.map((f) => f.content)).toEqual(["API"]);
+		});
+
+		it("dedupes when multiple files share a subtree", () => {
+			const files = resolveNestedContextFiles(repo, [
+				"apps/web/components/A.tsx",
+				"apps/web/components/B.tsx",
+				"apps/web/index.ts",
+			]);
+			expect(files.map((f) => f.content).sort()).toEqual(["COMPONENTS", "WEB"]);
+		});
+
+		it("ignores files outside cwd", () => {
+			expect(resolveNestedContextFiles(repo, ["/etc/passwd", "../../elsewhere/x.ts"])).toEqual([]);
 		});
 	});
 });

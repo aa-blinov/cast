@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
+import { formatContextFilesForPrompt, resolveNestedContextFiles } from "../src/core/context-files.ts";
 import type { Message } from "../src/core/llm.ts";
 import { formatRulesForTurn, loadDirectoryRules, matchAutoRules, unionStickyRules } from "../src/core/rules.ts";
 
@@ -413,6 +414,268 @@ describe("runAgentLoop — context files drive rule auto-attach", () => {
 			expect(sentPrompts).toHaveLength(2);
 			expect(sentPrompts[0]).not.toContain("WEB_RULE_BODY"); // before the read
 			expect(sentPrompts[1]).toContain("WEB_RULE_BODY"); // right after the read, same turn
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+});
+
+// ============================================================================
+// runAgentLoop — nested AGENTS.md injection end-to-end
+// ============================================================================
+
+describe("runAgentLoop — nested AGENTS.md injection", () => {
+	it("a read in a subdirectory with its own AGENTS.md injects it into the next system prompt", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "cast-loop-nested-agents-"));
+		try {
+			// Set up a monorepo-like structure:
+			//   <cwd>/AGENTS.md            — "ROOT_INSTRUCTIONS" (static base)
+			//   <cwd>/apps/web/AGENTS.md   — "WEB_INSTRUCTIONS" (nested, should appear after read)
+			//   <cwd>/apps/web/App.tsx     — the file the agent reads
+			mkdirSync(join(cwd, "apps", "web"), { recursive: true });
+			writeFileSync(join(cwd, "AGENTS.md"), "ROOT_INSTRUCTIONS", "utf-8");
+			writeFileSync(join(cwd, "apps", "web", "AGENTS.md"), "WEB_INSTRUCTIONS", "utf-8");
+			writeFileSync(join(cwd, "apps", "web", "App.tsx"), "export const App = () => null;", "utf-8");
+
+			const baseSuffix = formatContextFilesForPrompt([
+				{ path: join(cwd, "AGENTS.md"), content: "ROOT_INSTRUCTIONS" },
+			]);
+			const prompts: string[] = [];
+			const rebuildSystemPrompt = ({ contextFiles: ctxFiles }: { userText: string; contextFiles: string[] }) => {
+				const nested = formatContextFilesForPrompt(resolveNestedContextFiles(cwd, ctxFiles));
+				const p = `SYS${baseSuffix}${nested}`;
+				prompts.push(p);
+				return p;
+			};
+
+			const followUpQueue = new (await import("../src/core/loop.ts")).MessageQueue();
+			vi.mocked(streamAndCollect)
+				.mockImplementationOnce(async () => ({
+					content: "",
+					thinking: "",
+					finishReason: "stop",
+					toolCalls: [
+						{
+							id: "t1",
+							name: "read",
+							arguments: JSON.stringify({ path: "apps/web/App.tsx" }),
+						},
+					],
+				}))
+				.mockImplementationOnce(async () => {
+					followUpQueue.enqueue({ role: "user", content: "continue" });
+					return { content: "read done", thinking: "", finishReason: "stop" };
+				})
+				.mockImplementationOnce(async () => ({
+					content: "second turn",
+					thinking: "",
+					finishReason: "stop",
+				}));
+
+			await runAgentLoop([{ role: "user", content: "read the component" }], {
+				config: testConfig,
+				model: "test-model",
+				cwd,
+				systemPrompt: "SYS",
+				followUpQueue,
+				rebuildSystemPrompt,
+				onEvent: () => {},
+			});
+
+			expect(prompts[0]).toContain("ROOT_INSTRUCTIONS");
+			expect(prompts[0]).not.toContain("WEB_INSTRUCTIONS");
+			const last = prompts.at(-1)!;
+			expect(last).toContain("ROOT_INSTRUCTIONS");
+			expect(last).toContain("WEB_INSTRUCTIONS");
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	it("nested AGENTS.md appears in the SAME turn — the request right after the read carries it", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "cast-loop-nested-agents2-"));
+		try {
+			mkdirSync(join(cwd, "apps", "web"), { recursive: true });
+			writeFileSync(join(cwd, "AGENTS.md"), "ROOT_INSTRUCTIONS", "utf-8");
+			writeFileSync(join(cwd, "apps", "web", "AGENTS.md"), "WEB_INSTRUCTIONS", "utf-8");
+			writeFileSync(join(cwd, "apps", "web", "App.tsx"), "export const App = () => null;", "utf-8");
+
+			const baseSuffix = formatContextFilesForPrompt([
+				{ path: join(cwd, "AGENTS.md"), content: "ROOT_INSTRUCTIONS" },
+			]);
+			const rebuildSystemPrompt = ({ contextFiles: ctxFiles }: { userText: string; contextFiles: string[] }) => {
+				const nested = formatContextFilesForPrompt(resolveNestedContextFiles(cwd, ctxFiles));
+				return `SYS${baseSuffix}${nested}`;
+			};
+
+			const sentPrompts: string[] = [];
+			vi.mocked(streamAndCollect)
+				.mockImplementationOnce(async (_c, _m, msgs) => {
+					sentPrompts.push(JSON.stringify((msgs as Message[])[0]?.content ?? ""));
+					return {
+						content: "",
+						thinking: "",
+						finishReason: "stop",
+						toolCalls: [
+							{
+								id: "r1",
+								name: "read",
+								arguments: JSON.stringify({ path: "apps/web/App.tsx" }),
+							},
+						],
+					};
+				})
+				.mockImplementationOnce(async (_c, _m, msgs) => {
+					sentPrompts.push(JSON.stringify((msgs as Message[])[0]?.content ?? ""));
+					return { content: "done", thinking: "", finishReason: "stop" };
+				});
+
+			await runAgentLoop([{ role: "user", content: "read the component" }], {
+				config: testConfig,
+				model: "test-model",
+				cwd,
+				systemPrompt: "SYS",
+				rebuildSystemPrompt,
+				contextFiles: [],
+				onEvent: () => {},
+			});
+
+			expect(sentPrompts).toHaveLength(2);
+			expect(sentPrompts[0]).not.toContain("WEB_INSTRUCTIONS");
+			expect(sentPrompts[1]).toContain("WEB_INSTRUCTIONS");
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	it("deeply nested AGENTS.md (3 levels) attaches the full chain shallow-to-deep", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "cast-loop-nested-agents3-"));
+		try {
+			mkdirSync(join(cwd, "apps", "web", "components"), { recursive: true });
+			writeFileSync(join(cwd, "AGENTS.md"), "ROOT", "utf-8");
+			writeFileSync(join(cwd, "apps", "web", "AGENTS.md"), "WEB", "utf-8");
+			writeFileSync(join(cwd, "apps", "web", "components", "AGENTS.md"), "COMPONENTS", "utf-8");
+			writeFileSync(
+				join(cwd, "apps", "web", "components", "Button.tsx"),
+				"export const Button = () => null;",
+				"utf-8",
+			);
+
+			const baseSuffix = formatContextFilesForPrompt([{ path: join(cwd, "AGENTS.md"), content: "ROOT" }]);
+			const prompts: string[] = [];
+			const rebuildSystemPrompt = ({ contextFiles: ctxFiles }: { userText: string; contextFiles: string[] }) => {
+				const nested = formatContextFilesForPrompt(resolveNestedContextFiles(cwd, ctxFiles));
+				const p = `SYS${baseSuffix}${nested}`;
+				prompts.push(p);
+				return p;
+			};
+
+			const followUpQueue = new (await import("../src/core/loop.ts")).MessageQueue();
+			vi.mocked(streamAndCollect)
+				.mockImplementationOnce(async () => ({
+					content: "",
+					thinking: "",
+					finishReason: "stop",
+					toolCalls: [
+						{
+							id: "t1",
+							name: "read",
+							arguments: JSON.stringify({ path: "apps/web/components/Button.tsx" }),
+						},
+					],
+				}))
+				.mockImplementationOnce(async () => {
+					followUpQueue.enqueue({ role: "user", content: "continue" });
+					return { content: "read done", thinking: "", finishReason: "stop" };
+				})
+				.mockImplementationOnce(async () => ({
+					content: "second turn",
+					thinking: "",
+					finishReason: "stop",
+				}));
+
+			await runAgentLoop([{ role: "user", content: "read the button" }], {
+				config: testConfig,
+				model: "test-model",
+				cwd,
+				systemPrompt: "SYS",
+				followUpQueue,
+				rebuildSystemPrompt,
+				onEvent: () => {},
+			});
+
+			expect(prompts[0]).toContain("ROOT");
+			expect(prompts[0]).not.toContain("WEB");
+			expect(prompts[0]).not.toContain("COMPONENTS");
+
+			const last = prompts.at(-1)!;
+			expect(last).toContain("ROOT");
+			const webIdx = last.indexOf("WEB");
+			const compIdx = last.indexOf("COMPONENTS");
+			expect(webIdx).toBeGreaterThan(-1);
+			expect(compIdx).toBeGreaterThan(webIdx);
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	it("scoped: reading a file in services/ does NOT pull apps/web/ AGENTS.md", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "cast-loop-nested-agents4-"));
+		try {
+			mkdirSync(join(cwd, "apps", "web"), { recursive: true });
+			mkdirSync(join(cwd, "services", "api"), { recursive: true });
+			writeFileSync(join(cwd, "AGENTS.md"), "ROOT", "utf-8");
+			writeFileSync(join(cwd, "apps", "web", "AGENTS.md"), "WEB", "utf-8");
+			writeFileSync(join(cwd, "services", "api", "AGENTS.md"), "API", "utf-8");
+			writeFileSync(join(cwd, "services", "api", "main.go"), "package main", "utf-8");
+
+			const baseSuffix = formatContextFilesForPrompt([{ path: join(cwd, "AGENTS.md"), content: "ROOT" }]);
+			const prompts: string[] = [];
+			const rebuildSystemPrompt = ({ contextFiles: ctxFiles }: { userText: string; contextFiles: string[] }) => {
+				const nested = formatContextFilesForPrompt(resolveNestedContextFiles(cwd, ctxFiles));
+				const p = `SYS${baseSuffix}${nested}`;
+				prompts.push(p);
+				return p;
+			};
+
+			const followUpQueue = new (await import("../src/core/loop.ts")).MessageQueue();
+			vi.mocked(streamAndCollect)
+				.mockImplementationOnce(async () => ({
+					content: "",
+					thinking: "",
+					finishReason: "stop",
+					toolCalls: [
+						{
+							id: "t1",
+							name: "read",
+							arguments: JSON.stringify({ path: "services/api/main.go" }),
+						},
+					],
+				}))
+				.mockImplementationOnce(async () => {
+					followUpQueue.enqueue({ role: "user", content: "continue" });
+					return { content: "read done", thinking: "", finishReason: "stop" };
+				})
+				.mockImplementationOnce(async () => ({
+					content: "second turn",
+					thinking: "",
+					finishReason: "stop",
+				}));
+
+			await runAgentLoop([{ role: "user", content: "read the go file" }], {
+				config: testConfig,
+				model: "test-model",
+				cwd,
+				systemPrompt: "SYS",
+				followUpQueue,
+				rebuildSystemPrompt,
+				onEvent: () => {},
+			});
+
+			const last = prompts.at(-1)!;
+			expect(last).toContain("ROOT");
+			expect(last).toContain("API");
+			expect(last).not.toContain("WEB");
 		} finally {
 			rmSync(cwd, { recursive: true, force: true });
 		}
