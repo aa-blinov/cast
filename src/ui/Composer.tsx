@@ -349,10 +349,10 @@ export function Composer({
 			if (!text) return;
 			const lineCount = text.split("\n").length;
 			const totalChars = text.length;
-			// Compress if > 10 lines or > 1000 chars: insert a single PUA chip
-			// character into the buffer (atomic, one row) and remember the real
-			// text for doSubmit to swap back. Small pastes insert verbatim.
-			if (lineCount > 10 || totalChars > 1000) {
+			// Multi-line or long single-line pastes collapse to a single PUA
+			// chip character in the buffer (atomic, one row) and remember the
+			// real text for doSubmit to swap back. Short pastes insert verbatim.
+			if (lineCount > 1 || totalChars > 100) {
 				const index = chipCounterRef.current;
 				chipCounterRef.current += 1;
 				const char = chipCharFor(index);

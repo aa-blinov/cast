@@ -45,7 +45,7 @@ export function isChipChar(ch: string | undefined): ch is string {
 }
 
 export function pasteLabel(lineCount: number, totalChars: number): string {
-	return lineCount > 10 ? `[Pasted ${lineCount} lines]` : `[Pasted ${totalChars} chars]`;
+	return lineCount > 1 ? `[Pasted ${lineCount} lines]` : `[Pasted ${totalChars} chars]`;
 }
 
 /**

@@ -31,7 +31,8 @@ describe("paste.ts", () => {
 
 	it("pasteLabel formats lines and chars branches", () => {
 		expect(pasteLabel(12, 200)).toBe("[Pasted 12 lines]");
-		expect(pasteLabel(5, 1234)).toBe("[Pasted 1234 chars]");
+		expect(pasteLabel(5, 1234)).toBe("[Pasted 5 lines]");
+		expect(pasteLabel(1, 500)).toBe("[Pasted 500 chars]");
 	});
 
 	it("expandPastes swaps each chip back to its text", () => {
