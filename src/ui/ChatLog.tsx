@@ -223,7 +223,7 @@ function MessageView({ message }: { message: ChatMessage }): JSX.Element {
 	if (message.role === "warning") {
 		return (
 			<Box>
-				<Text color="red">[{message.content}]</Text>
+				<Text color="yellow">{message.content}</Text>
 			</Box>
 		);
 	}

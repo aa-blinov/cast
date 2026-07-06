@@ -8,7 +8,7 @@ import {
 	tryCliModel,
 } from "../pickers/domain.ts";
 import type { Pickers } from "../pickers/types.ts";
-import { type AppConfig, fetchModels, loadConfig, runOnboardingCheck } from "./config.ts";
+import { type AppConfig, fetchModels, loadConfig, lookupContextWindow, runOnboardingCheck } from "./config.ts";
 import { formatContextFilesForPrompt, loadProjectContextFiles } from "./context-files.ts";
 import type { McpSetupResult } from "./mcp.ts";
 import { findPersona, type LoadPersonasOptions, listPersonas, type Persona } from "./personas.ts";
@@ -208,6 +208,11 @@ export async function runStartup(
 	}
 
 	if (contextWindow && contextWindow > 0) config.contextWindow = contextWindow;
+	// Fallback: known model context windows when /v1/models doesn't expose them.
+	if (!contextWindow || contextWindow <= 0) {
+		const known = lookupContextWindow(model);
+		if (known) config.contextWindow = known;
+	}
 
 	// Reasoning: CLI > saved (same model) > interactive.
 	if (args.cliReasoning) {

@@ -15,7 +15,7 @@ import {
 } from "../core/project.ts";
 import { getModelsCache } from "../core/readline.ts";
 import { formatRuleInvocation, type Rule } from "../core/rules.ts";
-import { addUsage, createSession, estimateTokens, type SessionState, saveSession } from "../core/session.ts";
+import { addUsage, createSession, type SessionState, saveSession } from "../core/session.ts";
 import { type PermissionMode, updateSettings } from "../core/settings.ts";
 import { formatSkillInvocation, type Skill } from "../core/skills.ts";
 import { getReasoningOptions, type ModelReasoningMeta } from "../core/vendors.ts";
@@ -59,8 +59,6 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/provider", description: "Change provider URL and API key" },
 	{ name: "/permissions", description: "Change bash confirmation mode" },
 	{ name: "/sessions", description: "List / switch / delete sessions" },
-	{ name: "/usage", description: "Show cumulative token usage" },
-	{ name: "/context", description: "Show current context size" },
 	{ name: "/rules", description: "List loaded rules" },
 	{ name: "/quit", description: "Save and exit" },
 	{ name: "/help", description: "Show this command list" },
@@ -340,7 +338,6 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			);
 			return;
 		}
-		showNotice(`[Current reasoning: ${config.reasoningLevel}]`);
 		await selectReasoningLevel(config, session.model, deps.pickers, meta);
 		updateSettings({ reasoningLevel: config.reasoningLevel });
 		showNotice(`[Reasoning: ${config.reasoningLevel}]`);
@@ -348,7 +345,6 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 	}
 
 	if (input === "/persona") {
-		showNotice(`[Current persona: ${deps.currentPersona.label} (${deps.currentPersona.name})]`);
 		const selected = await selectPersona(deps.pickers, deps.personaOptions);
 		if (!selected) {
 			showNotice("[Cancelled — persona unchanged]");
@@ -376,23 +372,31 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 	}
 
 	if (input === "/skills") {
+		deps.agent.addDisplayMessage({ role: "user", content: input });
 		if (deps.skills.length === 0) {
-			showNotice("[No skills loaded. See --skill <path> and .cast/skills/]");
+			deps.agent.addDisplayMessage({
+				role: "warning",
+				content: "No skills loaded. See --skill <path> and .cast/skills/",
+			});
 		} else {
 			const lines = deps.skills.map(
 				(s) => `/skill:${s.name}${s.disableModelInvocation ? " (manual-only)" : ""} [${s.source}]`,
 			);
-			showNotice(`[Skills: ${lines.join(" | ")}]`);
+			deps.agent.addDisplayMessage({ role: "warning", content: `Skills\n${lines.join("\n")}` });
 		}
 		return;
 	}
 
 	if (input === "/mcp") {
+		deps.agent.addDisplayMessage({ role: "user", content: input });
 		if (deps.mcpResult.connections.length === 0) {
-			showNotice("[No MCP servers connected. See --mcp <path>, .cast/mcp.json]");
+			deps.agent.addDisplayMessage({
+				role: "warning",
+				content: "No MCP servers connected. See --mcp <path>, .cast/mcp.json",
+			});
 		} else {
 			const lines = deps.mcpResult.connections.map((c) => `${c.serverName} (${c.toolCount} tools)`);
-			showNotice(`[MCP: ${lines.join(" | ")}]`);
+			deps.agent.addDisplayMessage({ role: "warning", content: `MCP Servers\n${lines.join("\n")}` });
 		}
 		return;
 	}
@@ -494,7 +498,6 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 	}
 
 	if (input === "/permissions") {
-		showNotice(`[Current permission mode: ${deps.permissionMode}]`);
 		const newMode = await selectPermissionMode(deps.pickers, deps.permissionMode);
 		await applyPermissionMode(deps, newMode);
 		return;
@@ -560,27 +563,13 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		return;
 	}
 
-	if (input === "/usage") {
-		const u = session.usage;
-		const cost = u.cost ? ` · $${u.cost.toFixed(4)}` : "";
-		showNotice(`[Prompt: ${u.promptTokens} · Completion: ${u.completionTokens} · Total: ${u.totalTokens}${cost}]`);
-		return;
-	}
-
-	if (input === "/context") {
-		const used = estimateTokens(session.messages);
-		const budget = config.contextWindow - config.maxResponseTokens;
-		const pct = budget > 0 ? ((used / budget) * 100).toFixed(1) : "?";
-		const triggerPct = Math.round(config.compactionThreshold * 100);
-		showNotice(
-			`[Context: ~${used.toLocaleString()} / ${budget.toLocaleString()} tokens (${pct}%, compacts at ${triggerPct}%)]`,
-		);
-		return;
-	}
-
 	if (input === "/rules" || input === "/rules list") {
+		deps.agent.addDisplayMessage({ role: "user", content: input });
 		if (deps.directoryRules.length === 0) {
-			showNotice("No rules loaded. Create .cast/rules/*.md files to add rules.");
+			deps.agent.addDisplayMessage({
+				role: "warning",
+				content: "No rules loaded. Create .cast/rules/*.md files to add rules.",
+			});
 		} else {
 			const stickyIds = new Set(deps.activeAutoRules.map((r) => r.id));
 			const lines = deps.directoryRules.map((r) => {
@@ -598,15 +587,39 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 				const scope = r.scope ? ` scope=${r.scope}` : "";
 				return `  ${r.id}${tag}${globs}${scope} (${r.source}) — ${r.description || "no description"}`;
 			});
-			showNotice(`[Rules:\n${lines.join("\n")}]`);
+			deps.agent.addDisplayMessage({ role: "warning", content: `Rules\n${lines.join("\n")}` });
 		}
 		return;
 	}
 
 	if (input === "/help") {
-		showNotice(
-			"[/clear /compact /new /abort /queue(/q) /queue-reset /steer(/s) /model /reasoning /persona /skills /mcp /reload /skill: /rule: /provider /permissions /sessions /usage /context /rules /keys /quit]",
-		);
+		deps.agent.addDisplayMessage({ role: "user", content: input });
+		deps.agent.addDisplayMessage({
+			role: "warning",
+			content:
+				"Commands\n" +
+				"  /clear              Clear context\n" +
+				"  /compact            Compact context now\n" +
+				"  /new                Start new session\n" +
+				"  /abort              Abort running agent (alias: /stop)\n" +
+				"  /queue (/q)         Queue message for next turn\n" +
+				"  /queue-reset        Clear queue\n" +
+				"  /steer (/s)         Inject message into running turn\n" +
+				"  /model [name]       Show/change model\n" +
+				"  /reasoning [level]  Show/change reasoning level\n" +
+				"  /persona [name]     Show/change persona\n" +
+				"  /skills             List loaded skills\n" +
+				"  /mcp                List MCP servers\n" +
+				"  /reload             Re-scan skills, MCP, rules\n" +
+				"  /skill:<name>       Invoke a skill\n" +
+				"  /rule:<name>        Invoke a rule\n" +
+				"  /provider           Change provider URL\n" +
+				"  /permissions        Change bash confirmation mode\n" +
+				"  /sessions           List/switch sessions\n" +
+				"  /rules              List loaded rules\n" +
+				"  /keys               List keybindings\n" +
+				"  /quit               Save and exit (alias: /exit)",
+		});
 		return;
 	}
 
@@ -629,6 +642,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 	}
 
 	if (input === "/keys") {
+		deps.agent.addDisplayMessage({ role: "user", content: input });
 		const ACTION_LABELS: Record<string, string> = {
 			"editor.cursorUp": "Cursor up",
 			"editor.cursorDown": "Cursor down",
@@ -693,7 +707,10 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			return `  ${label.padEnd(22)} ${keys}`;
 		});
 		const header = "Keybindings";
-		showNotice(`${header}\n${lines.join("\n")}`, 0);
+		deps.agent.addDisplayMessage({
+			role: "warning",
+			content: `${header}\n${lines.join("\n")}`,
+		});
 		return;
 	}
 

@@ -1,5 +1,6 @@
 import { Box, Text } from "ink";
 import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { AppConfig } from "../core/config.ts";
 import { formatContextFilesForPrompt, resolveNestedContextFiles } from "../core/context-files.ts";
 import { buildSystemPrompt, makeConfirmBash } from "../core/project.ts";
 import {
@@ -10,6 +11,7 @@ import {
 	unionStickyRules,
 } from "../core/rules.ts";
 import type { SessionUsage } from "../core/session.ts";
+import { estimateTokens } from "../core/session.ts";
 import type { StartupResult } from "../core/startup.ts";
 import { fetchLatestVersion, isNewerVersion, isReleaseInstall } from "../core/upgrade.ts";
 import { ModalPicker, TextInputModal } from "../pickers/ink.tsx";
@@ -359,12 +361,8 @@ export function App(props: AppProps): JSX.Element {
 			<Box justifyContent="space-between">
 				<Text color="gray" dimColor>
 					<Text color={PERSONA_COLOR}>{currentPersona.label}</Text>
-					{permissionMode === "bypass" ? (
-						<>
-							<Text color="gray"> · </Text>
-							<Text color="red">bypass</Text>
-						</>
-					) : null}
+					<Text color="gray"> · </Text>
+					<Text color="gray">{session.model}</Text>
 					{/* Zero-width marker toggled by the resize effect. After that effect
 					    clears the screen, Ink's log-update would otherwise skip redrawing
 					    an *unchanged* frame — leaving a blank screen on an empty session
@@ -374,7 +372,7 @@ export function App(props: AppProps): JSX.Element {
 				</Text>
 				{agent.usage && agent.usage.totalTokens > 0 && (
 					<Text color="gray" dimColor>
-						{formatUsageTotals(agent.usage, agent.lastTurnUsage)}
+						{formatUsageTotals(agent.usage, agent.lastTurnUsage, session.messages, config)}
 					</Text>
 				)}
 			</Box>
@@ -396,20 +394,26 @@ function abbreviateTokens(n: number): string {
 	return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
 }
 
-function formatUsageTotals(usage: SessionUsage, lastTurnUsage: UseAgentSession["lastTurnUsage"]): string {
-	// Cache hit rate rather than raw uncached + cached: promptTokens already is
-	// the two summed, and cost is shown separately below, so the parenthetical's
-	// only job is "how much of the input came from cache". A percentage says
-	// that at a glance without making the reader subtract two five-digit numbers.
+function formatUsageTotals(
+	usage: SessionUsage,
+	lastTurnUsage: UseAgentSession["lastTurnUsage"],
+	messages: import("../core/llm.ts").Message[],
+	config: AppConfig,
+): string {
 	const cacheStr =
 		(usage.cacheReadTokens || usage.cacheWriteTokens) && usage.promptTokens > 0
 			? ` (${Math.round((usage.cacheReadTokens / usage.promptTokens) * 100)}% cached)`
 			: "";
-	const costStr = usage.cost ? ` · $${usage.cost.toFixed(4)}` : "";
-	// Last request's throughput, not a cumulative/session average — a session
-	// average would blend in all the idle time between turns (user typing,
-	// tool execution, etc.), which isn't what "how fast is the model
-	// responding right now" is asking.
 	const tpsStr = lastTurnUsage?.tokensPerSecond ? ` · ${lastTurnUsage.tokensPerSecond.toFixed(1)} tok/s` : "";
-	return `${abbreviateTokens(usage.promptTokens)} in${cacheStr} / ${abbreviateTokens(usage.completionTokens)} out${costStr}${tpsStr}`;
+	const costStr = usage.cost ? ` · $${usage.cost.toFixed(4)}` : "";
+	const ctxStr = formatContextPct(messages, config);
+	return `${abbreviateTokens(usage.promptTokens)} in${cacheStr} / ${abbreviateTokens(usage.completionTokens)} out · ${ctxStr}${costStr}${tpsStr}`;
+}
+
+function formatContextPct(messages: import("../core/llm.ts").Message[], config: AppConfig): string {
+	const used = estimateTokens(messages);
+	const budget = config.contextWindow - config.maxResponseTokens;
+	if (budget <= 0) return "ctx ?";
+	const pct = Math.round((used / budget) * 100);
+	return `ctx ${abbreviateTokens(used)}/${abbreviateTokens(config.contextWindow)} (${pct}%)`;
 }

@@ -108,6 +108,29 @@ export async function selectPersona(pickers: Pickers, options?: LoadPersonasOpti
 // Session resume
 // ============================================================================
 
+function getFirstUserMessage(session: SessionState): string {
+	const msg = session.messages.find((m) => m.role === "user");
+	if (!msg) return "";
+	const content =
+		typeof msg.content === "string"
+			? msg.content
+			: Array.isArray(msg.content)
+				? ((msg.content.find((p: { type?: string }) => p.type === "text") as { text?: string })?.text ?? "")
+				: "";
+	return content.replace(/\n/g, " ").trim();
+}
+
+function shortenCwd(cwd: string): string {
+	const parts = cwd.split("/").filter(Boolean);
+	if (parts.length <= 1) return cwd;
+	const last = parts[parts.length - 1]!;
+	return last.length > 12 ? `.../${last.slice(0, 12)}...` : `.../${last}`;
+}
+
+function pad(str: string, width: number): string {
+	return str.length >= width ? `${str.slice(0, width - 1)}\u200b ` : str.padEnd(width);
+}
+
 export async function selectSession(pickers: Pickers): Promise<SessionState | null> {
 	while (true) {
 		const sessions = listSessions()
@@ -122,19 +145,32 @@ export async function selectSession(pickers: Pickers): Promise<SessionState | nu
 		const options: PickOption<{
 			session: SessionState | null;
 			action: "resume" | "fresh" | "delete";
-		}>[] = sessions.map((s, i) => ({
-			value: { session: s, action: "resume" as const },
-			label: `${i + 1}. ${s.id} (${s.messages.length} msgs) — ${s.updatedAt.slice(0, 16)}`,
-		}));
+		}>[] = sessions.map((s) => {
+			const firstMsg = getFirstUserMessage(s);
+			const cwd = shortenCwd(s.cwd || "");
+			const date = s.updatedAt.slice(0, 10);
+			const time = s.updatedAt.slice(11, 16);
+			const msgCol = firstMsg.length > 40 ? `${firstMsg.slice(0, 40)}...` : firstMsg || "(empty)";
+			return {
+				value: { session: s, action: "resume" as const },
+				label: `${pad(cwd, 18)}${pad(msgCol, 43)}${date} ${time}  ${s.messages.length} msgs`,
+				description: firstMsg ? firstMsg : undefined,
+			};
+		});
 		options.push({ value: { session: null, action: "fresh" as const }, label: "Start fresh" });
 		options.push({ value: { session: null, action: "delete" as const }, label: "Delete a session" });
 
-		const picked = await pickers.pickOption(options, { title: "Saved sessions (most recent first)" });
+		const picked = await pickers.pickOption(options, { title: "Sessions (most recent first)" });
 		if (!picked) return null;
 		if (picked.action === "fresh") return null;
 		if (picked.action === "resume" && picked.session) return picked.session;
 
-		const delOptions = sessions.map((s, i) => ({ value: s, label: `${i + 1}. ${s.id}` }));
+		const delOptions = sessions.map((s) => {
+			const firstMsg = getFirstUserMessage(s);
+			const cwd = shortenCwd(s.cwd || "");
+			const msgCol = firstMsg.length > 40 ? `${firstMsg.slice(0, 40)}...` : firstMsg || "(empty)";
+			return { value: s, label: `${pad(cwd, 18)}${pad(msgCol, 43)}${s.id}` };
+		});
 		const toDelete = await pickers.pickOption(delOptions, { title: "Delete which session?" });
 		if (toDelete) {
 			deleteSession(toDelete.id);

@@ -33,6 +33,7 @@ function createFakeDeps(overrides?: Partial<CommandDeps> & { running?: boolean }
 		abort: track("agent.abort"),
 		clearContext: track("agent.clearContext"),
 		refresh: track("agent.refresh"),
+		addDisplayMessage: track("agent.addDisplayMessage"),
 		messages: [],
 		streaming: null,
 		status: "idle" as const,
@@ -138,6 +139,11 @@ function noticeText(calls: Calls): string {
 	return String(calls.showNotice?.[0]?.[0] ?? "");
 }
 
+function displayMessageText(calls: Calls, index = 1): string {
+	const arg = calls["agent.addDisplayMessage"]?.[index]?.[0] as { role?: string; content?: string } | undefined;
+	return String(arg?.content ?? "");
+}
+
 describe("handleInput", () => {
 	it("routes non-slash input to agent.submit", async () => {
 		const { deps, calls } = createFakeDeps();
@@ -201,26 +207,12 @@ describe("handleInput", () => {
 		expect(noticeText(calls)).toContain("cleared");
 	});
 
-	it("/usage shows token usage", async () => {
-		const { deps, calls } = createFakeDeps();
-		await handleInput("/usage", undefined, deps);
-		expect(noticeText(calls)).toContain("100");
-		expect(noticeText(calls)).toContain("150");
-	});
-
-	it("/context shows token estimate vs budget", async () => {
-		const { deps, calls } = createFakeDeps();
-		await handleInput("/context", undefined, deps);
-		expect(noticeText(calls)).toContain("tokens");
-		expect(noticeText(calls)).toContain("compacts");
-	});
-
 	it("/help lists command names", async () => {
 		const { deps, calls } = createFakeDeps();
 		await handleInput("/help", undefined, deps);
-		expect(noticeText(calls)).toContain("/clear");
-		expect(noticeText(calls)).toContain("/model");
-		expect(noticeText(calls)).toContain("/quit");
+		expect(displayMessageText(calls)).toContain("/clear");
+		expect(displayMessageText(calls)).toContain("/model");
+		expect(displayMessageText(calls)).toContain("/quit");
 	});
 
 	it("/persona cancelled (Escape) leaves the persona unchanged and doesn't exit the process", async () => {
@@ -265,13 +257,13 @@ describe("handleInput", () => {
 	it("/skills reports none loaded when empty", async () => {
 		const { deps, calls } = createFakeDeps();
 		await handleInput("/skills", undefined, deps);
-		expect(noticeText(calls)).toContain("No skills");
+		expect(displayMessageText(calls)).toContain("No skills");
 	});
 
 	it("/mcp reports none connected when empty", async () => {
 		const { deps, calls } = createFakeDeps();
 		await handleInput("/mcp", undefined, deps);
-		expect(noticeText(calls)).toContain("No MCP");
+		expect(displayMessageText(calls)).toContain("No MCP");
 	});
 
 	it("unknown /command submits to agent as text (e.g. file paths)", async () => {

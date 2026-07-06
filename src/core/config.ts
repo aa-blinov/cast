@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import OpenAI from "openai";
 import type { ModelReasoningMeta, ReasoningParams } from "./vendors.ts";
 import { extractReasoningMeta } from "./vendors.ts";
@@ -45,6 +48,24 @@ export function loadConfig(connection: { baseURL: string; apiKey: string }): App
 // Model info (from OpenRouter /v1/models)
 // ============================================================================
 
+/**
+ * Fallback context window sizes for known models when the provider's
+ * /v1/models doesn't expose `context_length`. Loaded from
+ * model-context-windows.json next to this file. Matched by substring
+ * (case-insensitive) against the model id — first match wins.
+ */
+const KNOWN_MODEL_CONTEXT_WINDOWS: Record<string, number> = JSON.parse(
+	readFileSync(join(fileURLToPath(import.meta.url), "..", "model-context-windows.json"), "utf-8"),
+);
+
+export function lookupContextWindow(modelId: string): number | undefined {
+	const lower = modelId.toLowerCase();
+	for (const [pattern, ctx] of Object.entries(KNOWN_MODEL_CONTEXT_WINDOWS)) {
+		if (lower.includes(pattern.toLowerCase())) return ctx;
+	}
+	return undefined;
+}
+
 export interface ModelInfo {
 	id: string;
 	ownedBy?: string;
@@ -78,7 +99,9 @@ export async function fetchModels(config: AppConfig): Promise<FetchModelsResult>
 				id: model.id,
 				ownedBy: model.owned_by,
 				reasoning: extractReasoningMeta(raw) ?? undefined,
-				contextWindow: typeof raw.context_length === "number" ? raw.context_length : undefined,
+				contextWindow:
+					(typeof raw.context_length === "number" ? raw.context_length : undefined) ??
+					lookupContextWindow(model.id),
 			});
 		}
 

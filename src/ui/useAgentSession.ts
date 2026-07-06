@@ -86,6 +86,8 @@ export interface UseAgentSession {
 	clearContext: () => void;
 	refresh: () => void;
 	resetQueue: () => void;
+	/** Append a display-only message (not persisted to session). */
+	addDisplayMessage: (message: ChatMessage) => void;
 }
 
 interface UseAgentSessionParams {
@@ -303,6 +305,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			}
 		}
 		setMessages(msgs);
+		setUsage({ ...session.usage });
+		setLastTurnUsage(null);
 	}, [session, warnings]);
 
 	const submit = useCallback(
@@ -580,6 +584,10 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		setPendingSteers([]);
 	}, [runner]);
 
+	const addDisplayMessage = useCallback((message: ChatMessage) => {
+		setMessages((msgs) => [...msgs, message]);
+	}, []);
+
 	useEffect(() => {
 		refresh();
 	}, [refresh]);
@@ -612,5 +620,6 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		clearContext,
 		refresh,
 		resetQueue,
+		addDisplayMessage,
 	};
 }
