@@ -18,6 +18,60 @@ interface ChatLogProps {
 	repaintKey?: number;
 }
 
+/**
+ * Tail of `text` that fits within `maxRows` terminal rows, accounting for line
+ * wrapping at `columns`. Keeps the most recent lines — what the user is watching
+ * stream in — and reports how many older lines were dropped.
+ *
+ * This bounds the height of the live (non-<Static>) streaming region. Ink
+ * repaints the *entire* static history — scrolling the viewport to the top of
+ * the conversation — on any frame whose interactive output is taller than the
+ * terminal (shouldClearTerminalForFrame in ink 7.x: `wasOverflowing ||
+ * isOverflowing`). A long model reasoning block would otherwise blow past the
+ * screen on every streamed token, so scrolling up mid-generation constantly
+ * snapped back to the start. The full text still lands in scrollback once the
+ * turn is promoted to history, so nothing is lost.
+ */
+export function clampTailToRows(
+	text: string,
+	maxRows: number,
+	columns: number,
+): { text: string; hiddenLines: number; usedRows: number } {
+	if (!text) return { text: "", hiddenLines: 0, usedRows: 0 };
+	const cols = Math.max(1, columns);
+	const budget = Math.max(1, maxRows);
+	const lines = text.split("\n");
+	const rowCost = (line: string) => Math.max(1, Math.ceil(line.length / cols));
+
+	let usedRows = 0;
+	let start = lines.length;
+	for (let i = lines.length - 1; i >= 0; i--) {
+		const cost = rowCost(lines[i]!);
+		// Always keep at least the last line, even if it alone exceeds the budget.
+		if (start !== lines.length && usedRows + cost > budget) break;
+		usedRows += cost;
+		start = i;
+	}
+	return { text: lines.slice(start).join("\n"), hiddenLines: start, usedRows };
+}
+
+/**
+ * Rows reserved for the rest of the interactive frame (composer, status line,
+ * notices, borders) when budgeting the live streaming region. Kept generous so
+ * the live column stays comfortably under the terminal height even while the
+ * composer is a few lines tall.
+ */
+const RENDER_ROW_RESERVE = 12;
+
+/** Dim marker shown above a clamped streaming block: older lines are in history. */
+function TruncationNote({ hidden }: { hidden: number }): JSX.Element {
+	return (
+		<Text color="gray" dimColor>
+			⋯ {hidden} earlier {hidden === 1 ? "line" : "lines"} above (full text kept in history)
+		</Text>
+	);
+}
+
 const TOOL_COLOR = gradientHex(0);
 // Sampled from the same cyan→violet brand gradient (t=0.3 lands on a clean
 // sky blue) rather than raw ANSI "blue", which reads dark/muddy on a black
@@ -207,22 +261,45 @@ export function ChatLog({ messages, streaming, error, retry, repaintKey }: ChatL
 		if (!hasOutput) {
 			streamingParts.push(<Spinner key="wait" />);
 		}
-		if (streaming.thinking) {
-			streamingParts.push(
-				<Text key="t" color="gray" dimColor>
-					<Text bold>[reasoning] </Text>
-					{streaming.thinking}
-				</Text>,
-			);
-		}
+
+		// Bound the live region to the terminal so Ink doesn't repaint the whole
+		// history (jumping the viewport to the top) on every streamed token — see
+		// clampTailToRows. Content is the answer, so it gets budget priority;
+		// reasoning fills whatever rows remain. The rest of the live column
+		// (composer, status, tool calls) is left headroom by the reserve.
+		const rows = process.stdout.rows ?? 24;
+		const cols = process.stdout.columns ?? 80;
+		let budget = Math.max(4, rows - RENDER_ROW_RESERVE - streaming.toolCalls.length);
+
+		// Chronological order: reasoning first, then the answer. Compute the
+		// content clamp first (priority for budget), but render reasoning above it.
+		let contentPart: JSX.Element | null = null;
 		if (streaming.content) {
-			streamingParts.push(
-				<Text key="c" color={AGENT_COLOR}>
-					<Text bold>[agent] </Text>
-					{streaming.content}
-				</Text>,
+			const c = clampTailToRows(streaming.content, budget, cols);
+			budget -= c.usedRows;
+			contentPart = (
+				<Box key="c" flexDirection="column">
+					{c.hiddenLines > 0 && <TruncationNote hidden={c.hiddenLines} />}
+					<Text color={AGENT_COLOR}>
+						<Text bold>[agent] </Text>
+						{c.text}
+					</Text>
+				</Box>
 			);
 		}
+		if (streaming.thinking) {
+			const t = clampTailToRows(streaming.thinking, Math.max(1, budget), cols);
+			streamingParts.push(
+				<Box key="t" flexDirection="column">
+					{t.hiddenLines > 0 && <TruncationNote hidden={t.hiddenLines} />}
+					<Text color="gray" dimColor>
+						<Text bold>[reasoning] </Text>
+						{t.text}
+					</Text>
+				</Box>,
+			);
+		}
+		if (contentPart) streamingParts.push(contentPart);
 		for (const tc of streaming.toolCalls) {
 			streamingParts.push(<ToolCallView key={tc.id} call={tc} />);
 		}
