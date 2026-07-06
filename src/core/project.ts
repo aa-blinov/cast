@@ -5,7 +5,14 @@ import type { Pickers } from "../pickers/types.ts";
 import { hasContextFileInDir } from "./context-files.ts";
 import { connectMcpServers, loadMcpConfig, type McpServerConfig, type McpSetupResult } from "./mcp.ts";
 import { globalPersonasDir, type LoadPersonasOptions, loadPersonas, type Persona } from "./personas.ts";
-import { hasProjectRules } from "./rules.ts";
+import {
+	formatAlwaysApplyRules,
+	formatLazyRulesForPrompt,
+	globalRulesDir,
+	hasProjectRulesDir,
+	loadDirectoryRules,
+	type Rule,
+} from "./rules.ts";
 import type { PermissionMode, Settings } from "./settings.ts";
 import { builtinSkillsDir, formatSkillsForPrompt, loadSkills, type Skill } from "./skills.ts";
 
@@ -67,7 +74,7 @@ export async function resolveProjectTrustForCwd(deps: ProjectResolverDeps, cwd: 
 		}
 	}
 	if (hasContextFileInDir(cwd)) lines.push("  - AGENTS.md / CLAUDE.md (project instructions for the system prompt)");
-	if (hasProjectRules(cwd)) lines.push("  - .cast/rules.md (user instructions appended to the system prompt)");
+	if (hasProjectRulesDir(cwd)) lines.push("  - .cast/rules/ (project rules — always-apply, lazy, or manual)");
 	if (hasProjectPersonas(cwd)) lines.push("  - .cast/personas/ (custom personas — system prompts for the agent)");
 	if (lines.length === 0) return true;
 	return resolveProjectTrust(deps.pickers, deps.settings, cwd, lines);
@@ -136,10 +143,35 @@ export function resolvePersonasForCwd(
 	return { personas: loadPersonas(options), options };
 }
 
+export interface ResolvedRules {
+	/** Always-apply directory rules, formatted for prompt injection. */
+	alwaysApplySuffix: string;
+	/** Lazy (description-only) directory rules, formatted for prompt. */
+	lazySuffix: string;
+	/** All discovered directory rules (for /rule:name lookup). */
+	directoryRules: Rule[];
+}
+
+export function resolveRulesForCwd(cwd: string, trusted: boolean): ResolvedRules {
+	// When trusted, discover the root `.cast/rules` plus any nested ones in
+	// subdirectories (each scoped to its subtree). Global rules always load.
+	const directoryRules = loadDirectoryRules({
+		globalDir: globalRulesDir(),
+		projectCwd: trusted ? cwd : undefined,
+	});
+
+	return {
+		alwaysApplySuffix: formatAlwaysApplyRules(directoryRules),
+		lazySuffix: formatLazyRulesForPrompt(directoryRules),
+		directoryRules,
+	};
+}
+
 export function buildSystemPrompt(
 	persona: Persona,
 	contextFilesSuffix: string,
 	rulesSuffix: string,
+	rulesLazySuffix: string,
 	skillsPromptSuffix: string,
 	cwd: string,
 	state?: {
@@ -169,7 +201,7 @@ export function buildSystemPrompt(
 				.join("\n")}\n`
 		: `\nCurrent date: ${date}\nCurrent working directory: ${cwd}\n`;
 
-	return [persona.systemPrompt, contextFilesSuffix, rulesSuffix, skillsPromptSuffix, stateBlock]
+	return [persona.systemPrompt, contextFilesSuffix, rulesSuffix, rulesLazySuffix, skillsPromptSuffix, stateBlock]
 		.filter(Boolean)
 		.join("");
 }

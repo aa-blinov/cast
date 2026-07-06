@@ -3,7 +3,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AppConfig } from "./config.ts";
 import type { Message, Tool, Usage } from "./llm.ts";
-import { applyCacheControl, createClient, isContextOverflow, streamAndCollect } from "./llm.ts";
+import {
+	applyCacheControl,
+	createClient,
+	EMPTY_ASSISTANT_PLACEHOLDER,
+	isContextOverflow,
+	streamAndCollect,
+} from "./llm.ts";
 import type { McpToolHandle } from "./mcp.ts";
 import { compactMessages, estimateTokens, shouldCompact } from "./session.ts";
 import { type ConfirmBash, createToolExecutor, getToolDefinitions, type ToolResult } from "./tools.ts";
@@ -201,6 +207,23 @@ export interface LoopConfig {
 	/** promptTokens from the most recent API response — used by shouldCompact
 	 * as the authoritative context size instead of character-based estimation. */
 	lastPromptTokens?: number;
+	/**
+	 * Optional per-turn system prompt rebuild. Called before every model
+	 * request (each inner tool-call iteration, not just once per turn) with
+	 * the current user text and accumulated context files. Rebuilding per
+	 * request is what lets a rule auto-attach *within the same turn*: the
+	 * model reads a file, contextFiles grows, and the very next request
+	 * already carries the matching rule. Returns the system prompt to use.
+	 */
+	rebuildSystemPrompt?: (context: { userText: string; contextFiles: string[] }) => string;
+	/**
+	 * Session-scoped list of context files (paths from read/write/edit tool
+	 * calls), accumulated in place across successive runAgentLoop calls. Pass
+	 * the same array every submit so a file referenced in one message keeps a
+	 * glob rule attached for the rest of the session; omitted ⇒ a fresh
+	 * per-call array (rules only auto-attach within a single submit).
+	 */
+	contextFiles?: string[];
 }
 
 // ============================================================================
@@ -236,6 +259,39 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 	const followUpQueue = loopConfig.followUpQueue ?? new MessageQueue();
 
 	const currentModel = initialModel;
+	// Session-scoped when the caller passes one (so a file referenced in an
+	// earlier message keeps its glob rule attached); otherwise per-call.
+	const contextFiles = loopConfig.contextFiles ?? [];
+
+	// Recompute the system prompt from the latest contextFiles/@-mentions and
+	// write it into messages[0]. Called before every request so rules that
+	// match a file read mid-turn attach on the next request, not only next turn.
+	const syncSystemPrompt = (): void => {
+		let prompt = systemPrompt;
+		if (loopConfig.rebuildSystemPrompt) {
+			let userText = "";
+			for (let i = messages.length - 1; i >= 0; i--) {
+				const m = messages[i]!;
+				if (m.role === "user") {
+					if (typeof m.content === "string") {
+						userText = m.content;
+					} else if (Array.isArray(m.content)) {
+						const textPart = m.content.find((p: { type?: string }) => p.type === "text") as
+							| { type: "text"; text: string }
+							| undefined;
+						if (textPart) userText = textPart.text;
+					}
+					break;
+				}
+			}
+			prompt = loopConfig.rebuildSystemPrompt({ userText, contextFiles });
+		}
+		if (messages.length === 0 || messages[0]?.role !== "system") {
+			messages.unshift({ role: "system", content: prompt });
+		} else {
+			messages[0] = { role: "system", content: prompt };
+		}
+	};
 
 	try {
 		// Outer loop: continues when follow-up messages arrive after agent would stop
@@ -246,12 +302,8 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 				break;
 			}
 
-			// Ensure system prompt
-			if (messages.length === 0 || messages[0]?.role !== "system") {
-				messages.unshift({ role: "system", content: systemPrompt });
-			} else {
-				messages[0] = { role: "system", content: systemPrompt };
-			}
+			// Sync before compaction so it summarizes against the right system prompt.
+			syncSystemPrompt();
 
 			// Compaction
 			if (shouldCompact(messages, config, loopConfig.lastPromptTokens)) {
@@ -291,6 +343,11 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 					onEvent({ type: "steering_injected", messages: [...pendingMessages] });
 					pendingMessages = [];
 				}
+
+				// Re-sync the system prompt against contextFiles that tool calls
+				// from the previous inner iteration may have added — this is what
+				// makes a glob rule attach immediately after its file is read.
+				syncSystemPrompt();
 
 				// Stream assistant response
 				// Apply prompt caching markers in-place before each request.
@@ -392,20 +449,28 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 
 				// Check for streaming errors (pi pattern: stopReason check)
 				if (completion.finishReason === "error" || completion.finishReason === "aborted") {
-					const assistantMsg: Message = { role: "assistant", content: completion.content || null };
+					const assistantMsg: Message = {
+						role: "assistant",
+						content: completion.content || EMPTY_ASSISTANT_PLACEHOLDER,
+					};
 					messages.push(assistantMsg);
 					onEvent({ type: "turn_end", toolResults: [] });
 					onEvent({ type: "end", reason: completion.finishReason });
 					return;
 				}
 
-				// Build assistant message
+				// Build assistant message. An assistant turn must carry either
+				// content or tool_calls — a turn that produced only reasoning
+				// (all output in reasoning_content) would otherwise persist as
+				// `content: null` with no tool_calls, a shape providers reject
+				// (400) on every following turn once it's in the session.
+				const hasToolCalls = Boolean(completion.toolCalls && completion.toolCalls.length > 0);
 				const assistantMsg: Message = {
 					role: "assistant",
-					content: completion.content || null,
-					...(completion.toolCalls && completion.toolCalls.length > 0
+					content: completion.content || (hasToolCalls ? null : EMPTY_ASSISTANT_PLACEHOLDER),
+					...(hasToolCalls
 						? {
-								tool_calls: completion.toolCalls.map((tc) => ({
+								tool_calls: completion.toolCalls!.map((tc) => ({
 									id: tc.id,
 									type: "function" as const,
 									function: { name: tc.name, arguments: tc.arguments },
@@ -432,10 +497,22 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 					toolResults.push(...executedToolBatch);
 					hasMoreToolCalls = true;
 
-					// Track new tool result messages
+					// Track new tool result messages and extract context files
 					for (const r of executedToolBatch) {
 						const toolMsg: Message = { role: "tool", tool_call_id: r.id, content: r.result.content };
 						messages.push(toolMsg);
+
+						// Extract file paths from tool calls for glob matching
+						const tc = toolCalls.find((t) => t.id === r.id);
+						if (tc) {
+							let args: Record<string, unknown>;
+							try {
+								args = JSON.parse(tc.arguments);
+							} catch {
+								args = {};
+							}
+							extractContextFile(tc.name, args, r.result.content, contextFiles, cwd);
+						}
 
 						// A `role: "tool"` message can't carry image content per the
 						// OpenAI-compatible chat API, so a `read` on an image file
@@ -545,4 +622,31 @@ async function executeToolCalls(
 	}
 
 	return results;
+}
+
+// ============================================================================
+// Context file tracking — extracts paths from tool calls for glob matching
+// ============================================================================
+
+function extractContextFile(
+	_toolName: string,
+	args: Record<string, unknown>,
+	_result: string,
+	contextFiles: string[],
+	cwd: string,
+): void {
+	const rawPath = typeof args.path === "string" ? args.path : undefined;
+	if (!rawPath) return;
+
+	// Normalize to relative path from cwd for consistent glob matching
+	let relPath: string;
+	if (rawPath.startsWith("/")) {
+		relPath = rawPath.startsWith(cwd) ? rawPath.slice(cwd.length + 1) : rawPath;
+	} else {
+		relPath = rawPath;
+	}
+
+	if (!contextFiles.includes(relPath)) {
+		contextFiles.push(relPath);
+	}
 }

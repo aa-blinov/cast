@@ -97,6 +97,8 @@ interface UseAgentSessionParams {
 	permissionMode: PermissionMode;
 	mcpResult: McpSetupResult;
 	confirmBash: (command: string, reason: string) => Promise<boolean>;
+	/** Per-turn system prompt rebuild for sticky rules + @-mention. */
+	rebuildSystemPrompt?: (context: { userText: string; contextFiles: string[] }) => string;
 }
 
 /**
@@ -183,7 +185,8 @@ function buildDisplayMessages(sessionMessages: SessionState["messages"]): ChatMe
 }
 
 export function useAgentSession(params: UseAgentSessionParams): UseAgentSession {
-	const { session, config, cwd, systemPrompt, runner, permissionMode, mcpResult, confirmBash } = params;
+	const { session, config, cwd, systemPrompt, runner, permissionMode, mcpResult, confirmBash, rebuildSystemPrompt } =
+		params;
 	const [messages, setMessages] = useState<ChatMessage[]>(() => buildDisplayMessages(session.messages));
 	const [streaming, setStreaming] = useState<StreamingState | null>(null);
 	const [status, setStatus] = useState<AgentStatus>("idle");
@@ -214,6 +217,17 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	// never depending on when React gets around to processing the queue.
 	const streamingRef = useRef<StreamingState | null>(null);
 	const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	// Context files (paths from read/write/edit tool calls) accumulated across
+	// this session's submits, so a glob rule that latched onto a file read in an
+	// earlier message stays attached. Reset when the session itself changes
+	// (/new, session switch) via the render-time "reset state on prop change"
+	// pattern — an effect would lag one render and trip exhaustive-deps.
+	const contextFilesRef = useRef<string[]>([]);
+	const contextFilesSessionRef = useRef(session.id);
+	if (contextFilesSessionRef.current !== session.id) {
+		contextFilesSessionRef.current = session.id;
+		contextFilesRef.current = [];
+	}
 
 	// Flush pending streaming state to React immediately.
 	const flushStreaming = useCallback(() => {
@@ -365,6 +379,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					mcpTools: mcpResult.toolDefinitions,
 					mcpToolIndex: mcpResult.toolIndex,
 					lastPromptTokens: session.lastPromptTokens,
+					rebuildSystemPrompt,
+					contextFiles: contextFilesRef.current,
 					onWarning: (message: string) => setWarnings((w) => [...w, message]),
 					onEvent: (event: AgentEvent) => {
 						switch (event.type) {
@@ -516,6 +532,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			refresh,
 			promoteStreamingToHistory,
 			updateStreaming,
+			rebuildSystemPrompt,
 		],
 	);
 

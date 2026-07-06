@@ -19,10 +19,11 @@ import {
 	personaOptionsForCwd,
 	resolveMcpForCwd,
 	resolveProjectTrustForCwd,
+	resolveRulesForCwd,
 	resolveSkillsForCwd,
 } from "./project.ts";
 import { setModelsCache } from "./readline.ts";
-import { formatRulesForPrompt, loadRules } from "./rules.ts";
+import type { Rule } from "./rules.ts";
 import { type AgentRunner, createAgentRunner } from "./runner.ts";
 import { createSession, getMostRecentSession, loadSession, type SessionState } from "./session.ts";
 import { type PermissionMode, type Settings, updateSettings } from "./settings.ts";
@@ -64,6 +65,9 @@ export interface StartupResult {
 	projectTrusted: boolean;
 	contextFilesSuffix: string;
 	rulesSuffix: string;
+	rulesLazySuffix: string;
+	directoryRules: Rule[];
+	activeAutoRules: Rule[];
 	skillsPromptSuffix: string;
 	resumed: boolean;
 }
@@ -121,7 +125,9 @@ export async function runStartup(
 	const projectTrusted = await resolveProjectTrustForCwd(projectDeps, cwd);
 	const { skills, skillsPromptSuffix } = await resolveSkillsForCwd(projectDeps, cwd, projectTrusted);
 	const contextFilesSuffix = formatContextFilesForPrompt(loadProjectContextFiles(cwd, projectTrusted));
-	const rulesSuffix = formatRulesForPrompt(loadRules(cwd, projectTrusted));
+	const resolvedRules = resolveRulesForCwd(cwd, projectTrusted);
+	const rulesSuffix = resolvedRules.alwaysApplySuffix;
+	const rulesLazySuffix = resolvedRules.lazySuffix;
 	const personaOpts = personaOptionsForCwd(cwd, projectTrusted);
 
 	// Persona: CLI > saved settings > interactive selection.
@@ -246,11 +252,19 @@ export async function runStartup(
 
 	const session = resumedSession ? { ...resumedSession, model } : createSession(model, cwd);
 	const runner = createAgentRunner();
-	const systemPrompt = buildSystemPrompt(persona, contextFilesSuffix, rulesSuffix, skillsPromptSuffix, cwd, {
-		model,
-		reasoningLevel: config.reasoningLevel,
-		reasoningMeta,
-	});
+	const systemPrompt = buildSystemPrompt(
+		persona,
+		contextFilesSuffix,
+		rulesSuffix,
+		rulesLazySuffix,
+		skillsPromptSuffix,
+		cwd,
+		{
+			model,
+			reasoningLevel: config.reasoningLevel,
+			reasoningMeta,
+		},
+	);
 	onProgress?.("Connecting MCP servers...");
 	const mcpResult = await resolveMcpForCwd(projectDeps, cwd, projectTrusted);
 	const confirmBash = makeConfirmBash(pickers, permissionMode);
@@ -272,6 +286,9 @@ export async function runStartup(
 		projectTrusted,
 		contextFilesSuffix,
 		rulesSuffix,
+		rulesLazySuffix,
+		directoryRules: resolvedRules.directoryRules,
+		activeAutoRules: [],
 		skillsPromptSuffix,
 		resumed: !!resumedSession,
 	};

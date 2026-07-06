@@ -1,6 +1,13 @@
 import { Box, Text } from "ink";
 import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { makeConfirmBash } from "../core/project.ts";
+import { buildSystemPrompt, makeConfirmBash } from "../core/project.ts";
+import {
+	formatRulesForTurn,
+	matchAutoRules,
+	type Rule,
+	selectMentionedRules,
+	unionStickyRules,
+} from "../core/rules.ts";
 import type { SessionUsage } from "../core/session.ts";
 import type { StartupResult } from "../core/startup.ts";
 import { fetchLatestVersion, isNewerVersion, isReleaseInstall } from "../core/upgrade.ts";
@@ -84,6 +91,9 @@ export function App(props: AppProps): JSX.Element {
 	const [skillsPromptSuffix, setSkillsPromptSuffix] = useState(result.skillsPromptSuffix);
 	const [contextFilesSuffix, setContextFilesSuffix] = useState(result.contextFilesSuffix);
 	const [rulesSuffix, setRulesSuffix] = useState(result.rulesSuffix);
+	const [rulesLazySuffix, setRulesLazySuffix] = useState(result.rulesLazySuffix);
+	const [directoryRules, setDirectoryRules] = useState(result.directoryRules);
+	const [activeAutoRules, setActiveAutoRules] = useState<Rule[]>([]);
 	const [permissionMode, setPermissionMode] = useState(result.permissionMode);
 	const [projectTrusted, setProjectTrusted] = useState(result.projectTrusted);
 	const [cwd, setCwd] = useState(result.cwd);
@@ -91,6 +101,49 @@ export function App(props: AppProps): JSX.Element {
 	const [personaOptions, setPersonaOptions] = useState(result.personaOptions);
 
 	const confirmBash = useMemo(() => makeConfirmBash(pickers, permissionMode), [pickers, permissionMode]);
+
+	// Per-turn system prompt rebuild for sticky rules + @-mention.
+	// Called by the loop at the start of each outer iteration.
+	const rebuildSystemPrompt = useCallback(
+		({ userText, contextFiles: ctxFiles }: { userText: string; contextFiles: string[] }) => {
+			// 1. Latch auto-attach rules whose globs match files now in context.
+			const newAuto = matchAutoRules(directoryRules, ctxFiles);
+			const sticky = unionStickyRules(activeAutoRules, newAuto);
+			if (sticky.length !== activeAutoRules.length) {
+				setActiveAutoRules(sticky);
+			}
+
+			// 2. Select @-mentioned rules from the current user message.
+			const mentioned = selectMentionedRules(directoryRules, userText);
+
+			// 3. One block: always-apply + sticky auto + mentioned (deduped).
+			//    Must include always-apply rules unconditionally — see
+			//    formatRulesForTurn.
+			const rulesBlock = formatRulesForTurn(directoryRules, sticky, mentioned);
+
+			// 4. Build the full system prompt.
+			return buildSystemPrompt(
+				currentPersona,
+				contextFilesSuffix,
+				rulesBlock,
+				rulesLazySuffix,
+				skillsPromptSuffix,
+				cwd,
+				{ model: session.model, reasoningLevel: config.reasoningLevel },
+			);
+		},
+		[
+			directoryRules,
+			activeAutoRules,
+			currentPersona,
+			contextFilesSuffix,
+			rulesLazySuffix,
+			skillsPromptSuffix,
+			cwd,
+			session.model,
+			config.reasoningLevel,
+		],
+	);
 
 	const agent = useAgentSession({
 		session,
@@ -101,6 +154,7 @@ export function App(props: AppProps): JSX.Element {
 		permissionMode,
 		mcpResult,
 		confirmBash,
+		rebuildSystemPrompt,
 	});
 	const running = agent.status === "running";
 	const canSubmit = useCallback(
@@ -163,6 +217,12 @@ export function App(props: AppProps): JSX.Element {
 		setContextFilesSuffix,
 		rulesSuffix,
 		setRulesSuffix,
+		rulesLazySuffix,
+		setRulesLazySuffix,
+		directoryRules,
+		setDirectoryRules,
+		activeAutoRules,
+		setActiveAutoRules,
 		systemPrompt,
 		setSystemPrompt,
 		mcpResult,
@@ -197,6 +257,12 @@ export function App(props: AppProps): JSX.Element {
 		setContextFilesSuffix,
 		rulesSuffix,
 		setRulesSuffix,
+		rulesLazySuffix,
+		setRulesLazySuffix,
+		directoryRules,
+		setDirectoryRules,
+		activeAutoRules,
+		setActiveAutoRules,
 		systemPrompt,
 		setSystemPrompt,
 		mcpResult,

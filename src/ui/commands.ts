@@ -10,19 +10,11 @@ import {
 	personaOptionsForCwd,
 	resolveMcpForCwd,
 	resolveProjectTrustForCwd,
+	resolveRulesForCwd,
 	resolveSkillsForCwd,
 } from "../core/project.ts";
 import { getModelsCache } from "../core/readline.ts";
-import {
-	addGlobalRule,
-	addProjectRule,
-	deleteGlobalRule,
-	deleteProjectRule,
-	formatRulesForPrompt,
-	loadRules,
-	parseGlobalRules,
-	parseProjectRules,
-} from "../core/rules.ts";
+import { formatRuleInvocation, type Rule } from "../core/rules.ts";
 import { addUsage, createSession, estimateTokens, type SessionState, saveSession } from "../core/session.ts";
 import { type PermissionMode, updateSettings } from "../core/settings.ts";
 import { formatSkillInvocation, type Skill } from "../core/skills.ts";
@@ -61,15 +53,14 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/personas", description: "List available personas" },
 	{ name: "/skills", description: "List loaded skills" },
 	{ name: "/mcp", description: "List connected MCP servers" },
-	{ name: "/reload", description: "Reload skills + MCP for cwd" },
+	{ name: "/reload", description: "Reload skills, rules, MCP, and personas for cwd" },
+	{ name: "/rule:", description: "Invoke a rule by name", takesArgs: true },
 	{ name: "/provider", description: "Change provider URL and API key" },
 	{ name: "/permissions", description: "Change bash confirmation mode" },
 	{ name: "/sessions", description: "List / switch / delete sessions" },
 	{ name: "/usage", description: "Show cumulative token usage" },
 	{ name: "/context", description: "Show current context size" },
-	{ name: "/rules", description: "List rules (local + global)" },
-	{ name: "/rules add", description: "Add a rule (local or global)", takesArgs: true },
-	{ name: "/rules delete", description: "Delete a rule (local or global)" },
+	{ name: "/rules", description: "List loaded rules" },
 	{ name: "/quit", description: "Save and exit" },
 	{ name: "/help", description: "Show this command list" },
 	{ name: "/keys", description: "List all keybindings" },
@@ -96,6 +87,12 @@ export interface CommandDeps {
 	setContextFilesSuffix: (s: string) => void;
 	rulesSuffix: string;
 	setRulesSuffix: (s: string) => void;
+	rulesLazySuffix: string;
+	setRulesLazySuffix: (s: string) => void;
+	directoryRules: Rule[];
+	setDirectoryRules: (r: Rule[]) => void;
+	activeAutoRules: Rule[];
+	setActiveAutoRules: (r: Rule[]) => void;
 	systemPrompt: string;
 	setSystemPrompt: (s: string) => void;
 	mcpResult: McpSetupResult;
@@ -127,6 +124,7 @@ function rebuildSystemPrompt(
 		persona?: Persona;
 		contextFilesSuffix?: string;
 		rulesSuffix?: string;
+		rulesLazySuffix?: string;
 		skillsPromptSuffix?: string;
 	} = {},
 ): void {
@@ -135,6 +133,7 @@ function rebuildSystemPrompt(
 			overrides.persona ?? deps.currentPersona,
 			overrides.contextFilesSuffix ?? deps.contextFilesSuffix,
 			overrides.rulesSuffix ?? deps.rulesSuffix,
+			overrides.rulesLazySuffix ?? deps.rulesLazySuffix,
 			overrides.skillsPromptSuffix ?? deps.skillsPromptSuffix,
 			cwd,
 			{
@@ -414,8 +413,12 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		deps.setSkillsPromptSuffix(skillsPromptSuffix);
 		const contextFilesSuffix = formatContextFilesForPrompt(loadProjectContextFiles(deps.cwd, trusted));
 		deps.setContextFilesSuffix(contextFilesSuffix);
-		const rulesSuffix = formatRulesForPrompt(loadRules(deps.cwd, trusted));
+		const resolvedRules = resolveRulesForCwd(deps.cwd, trusted);
+		const rulesSuffix = resolvedRules.alwaysApplySuffix;
 		deps.setRulesSuffix(rulesSuffix);
+		deps.setRulesLazySuffix(resolvedRules.lazySuffix);
+		deps.setDirectoryRules(resolvedRules.directoryRules);
+		deps.setActiveAutoRules([]); // Reset sticky rules on reload
 		const newPersonaOpts = personaOptionsForCwd(deps.cwd, trusted);
 		deps.setPersonaOptions(newPersonaOpts);
 		const reloadedPersona = findPersona(deps.currentPersona.name, newPersonaOpts);
@@ -426,12 +429,13 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			persona: reloadedPersona,
 			contextFilesSuffix,
 			rulesSuffix,
+			rulesLazySuffix: resolvedRules.lazySuffix,
 			skillsPromptSuffix,
 		});
 		await closeMcpConnections(deps.mcpResult.connections);
 		deps.setMcpResult(await resolveMcpForCwd(deps.projectDeps, deps.cwd, trusted));
 		showNotice(
-			`[Reloaded: ${newSkills.length} skill(s), ${deps.mcpResult.connections.length} mcp server(s), personas]`,
+			`[Reloaded: ${newSkills.length} skill(s), ${resolvedRules.directoryRules.length} rule(s), ${deps.mcpResult.connections.length} mcp server(s), personas]`,
 		);
 		return;
 	}
@@ -529,6 +533,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		session.cwd = chosen.cwd;
 		let contextFilesSuffix: string | undefined;
 		let rulesSuffix: string | undefined;
+		let rulesLazySuffix: string | undefined;
 		let skillsPromptSuffix: string | undefined;
 		if (chosen.cwd && chosen.cwd !== deps.cwd) {
 			deps.setCwd(chosen.cwd);
@@ -540,14 +545,23 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			deps.setSkillsPromptSuffix(skillsPromptSuffix);
 			contextFilesSuffix = formatContextFilesForPrompt(loadProjectContextFiles(chosen.cwd, trusted));
 			deps.setContextFilesSuffix(contextFilesSuffix);
-			rulesSuffix = formatRulesForPrompt(loadRules(chosen.cwd, trusted));
+			const resolvedRules = resolveRulesForCwd(chosen.cwd, trusted);
+			rulesSuffix = resolvedRules.alwaysApplySuffix;
+			rulesLazySuffix = resolvedRules.lazySuffix;
 			deps.setRulesSuffix(rulesSuffix);
+			deps.setRulesLazySuffix(rulesLazySuffix);
+			deps.setDirectoryRules(resolvedRules.directoryRules);
 			const newPersonaOpts = personaOptionsForCwd(chosen.cwd, trusted);
 			deps.setPersonaOptions(newPersonaOpts);
 			await closeMcpConnections(deps.mcpResult.connections);
 			deps.setMcpResult(await resolveMcpForCwd(deps.projectDeps, chosen.cwd, trusted));
 		}
-		rebuildSystemPrompt(deps, chosen.cwd || deps.cwd, { contextFilesSuffix, rulesSuffix, skillsPromptSuffix });
+		rebuildSystemPrompt(deps, chosen.cwd || deps.cwd, {
+			contextFilesSuffix,
+			rulesSuffix,
+			rulesLazySuffix,
+			skillsPromptSuffix,
+		});
 		agent.refresh();
 		showNotice(`[Switched to session: ${session.id} (${session.messages.length} messages)]`);
 		return;
@@ -572,105 +586,52 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 	}
 
 	if (input === "/rules" || input === "/rules list") {
-		const localRules = parseProjectRules(deps.cwd);
-		const globalRules = parseGlobalRules();
-		const parts: string[] = [];
-		if (localRules.length > 0) {
-			parts.push("Local rules:");
-			for (const r of localRules) parts.push(`  ${localRules.indexOf(r) + 1}. ${r}`);
-		}
-		if (globalRules.length > 0) {
-			parts.push("Global rules:");
-			for (const r of globalRules) parts.push(`  ${globalRules.indexOf(r) + 1}. ${r}`);
-		}
-		if (parts.length === 0) {
-			showNotice("No rules yet. Use /rules add <text> to add one.");
+		if (deps.directoryRules.length === 0) {
+			showNotice("No rules loaded. Create .cast/rules/*.md files to add rules.");
 		} else {
-			showNotice(parts.join("\n"));
-		}
-		return;
-	}
-
-	if (input.startsWith("/rules add ")) {
-		const text = input.slice("/rules add ".length).trim();
-		if (!text) {
-			showNotice("[Usage: /rules add <text>]");
-			return;
-		}
-		const scope = await deps.pickers.pickOption(
-			[
-				{ value: "local" as const, label: "Local (this project)" },
-				{ value: "global" as const, label: "Global (all projects)" },
-			],
-			{ title: "Add rule to which scope?" },
-		);
-		if (scope === null) return;
-		if (scope === "local") {
-			addProjectRule(deps.cwd, text);
-		} else {
-			addGlobalRule(text);
-		}
-		const rulesSuffix = formatRulesForPrompt(loadRules(deps.cwd, deps.projectTrusted));
-		deps.setRulesSuffix(rulesSuffix);
-		rebuildSystemPrompt(deps, deps.cwd, { rulesSuffix });
-		if (scope === "local" && !deps.projectTrusted) {
-			showNotice("[Rule added — not active yet, this project isn't trusted]");
-		} else {
-			showNotice(`[Rule added to ${scope} rules]`);
-		}
-		return;
-	}
-
-	if (input === "/rules add") {
-		showNotice("[Usage: /rules add <text>]");
-		return;
-	}
-
-	if (input === "/rules delete") {
-		const scope = await deps.pickers.pickOption(
-			[
-				{ value: "local" as const, label: "Local (this project)" },
-				{ value: "global" as const, label: "Global (all projects)" },
-			],
-			{ title: "Delete from which scope?" },
-		);
-		if (scope === null) return;
-		let rules = scope === "local" ? parseProjectRules(deps.cwd) : parseGlobalRules();
-		if (rules.length === 0) {
-			showNotice(`No ${scope} rules to delete.`);
-			return;
-		}
-		let deleted = 0;
-		while (true) {
-			rules = scope === "local" ? parseProjectRules(deps.cwd) : parseGlobalRules();
-			if (rules.length === 0) break;
-			const options = rules.map((r, i) => ({
-				value: i + 1,
-				label: `${i + 1}. ${r}`,
-			}));
-			const picked = await deps.pickers.pickOption(options, {
-				title: `Delete which ${scope} rule? (${deleted} deleted so far, Esc to finish)`,
+			const stickyIds = new Set(deps.activeAutoRules.map((r) => r.id));
+			const lines = deps.directoryRules.map((r) => {
+				let tag: string;
+				if (r.applyMode === "always") {
+					tag = " [always]";
+				} else if (r.applyMode === "auto") {
+					tag = stickyIds.has(r.id) ? " [auto:sticky]" : " [auto:globs]";
+				} else if (r.applyMode === "lazy") {
+					tag = " [lazy]";
+				} else {
+					tag = " [manual]";
+				}
+				const globs = r.globs.length > 0 ? ` globs=${JSON.stringify(r.globs)}` : "";
+				const scope = r.scope ? ` scope=${r.scope}` : "";
+				return `  ${r.id}${tag}${globs}${scope} (${r.source}) — ${r.description || "no description"}`;
 			});
-			if (picked === null) break;
-			if (scope === "local") deleteProjectRule(deps.cwd, picked);
-			else deleteGlobalRule(picked);
-			deleted++;
-		}
-		if (deleted > 0) {
-			const rulesSuffix = formatRulesForPrompt(loadRules(deps.cwd, deps.projectTrusted));
-			deps.setRulesSuffix(rulesSuffix);
-			rebuildSystemPrompt(deps, deps.cwd, { rulesSuffix });
-			showNotice(`Deleted ${deleted} ${scope} rule(s).`);
-		} else {
-			showNotice("No rules deleted.");
+			showNotice(`[Rules:\n${lines.join("\n")}]`);
 		}
 		return;
 	}
 
 	if (input === "/help") {
 		showNotice(
-			"[/clear /compact /new /abort /queue /queue-reset /steer /model /reasoning /persona /personas /skills /mcp /reload /skill: /provider /permissions /sessions /usage /context /rules /rules list /rules add /rules delete /keys /quit]",
+			"[/clear /compact /new /abort /queue /queue-reset /steer /model /reasoning /persona /personas /skills /mcp /reload /skill: /rule: /provider /permissions /sessions /usage /context /rules /keys /quit]",
 		);
+		return;
+	}
+
+	if (input.startsWith("/rule:")) {
+		const ruleName = input.slice("/rule:".length).trim();
+		if (!ruleName) {
+			showNotice("[Usage: /rule:<name>]");
+			return;
+		}
+		// Prefer an exact id match (scope-qualified, e.g. apps/web/style), then
+		// fall back to the bare name (first match) for the common flat case.
+		const rule =
+			deps.directoryRules.find((r) => r.id === ruleName) ?? deps.directoryRules.find((r) => r.name === ruleName);
+		if (!rule) {
+			showNotice(`[No rule named "${ruleName}". Use /rules to list available.]`);
+			return;
+		}
+		await agent.submit(formatRuleInvocation(rule));
 		return;
 	}
 

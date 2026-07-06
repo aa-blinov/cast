@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { describe, expect, it, vi } from "vitest";
-import { isRetryableStreamError, streamAndCollect } from "../src/core/llm.ts";
+import { EMPTY_ASSISTANT_PLACEHOLDER, isRetryableStreamError, streamAndCollect, streamChat } from "../src/core/llm.ts";
 
 function fakeClient(chunks: unknown[], onChunk?: () => void): OpenAI {
 	return {
@@ -158,5 +158,55 @@ describe("streamAndCollect — usage accounting", () => {
 		]);
 		const result = await streamAndCollect(client, "test-model", [], [], 100);
 		expect(result.thinking).toBe("openrouter-style");
+	});
+});
+
+describe("streamChat — message sanitization", () => {
+	function capturingClient(): { client: OpenAI; sent: () => unknown[] } {
+		let captured: unknown[] = [];
+		const client = {
+			chat: {
+				completions: {
+					create: async (params: { messages: unknown[] }) => {
+						captured = params.messages;
+						return {
+							async *[Symbol.asyncIterator]() {
+								yield { choices: [{ delta: {}, finish_reason: "stop" }] };
+							},
+						};
+					},
+				},
+			},
+		} as unknown as OpenAI;
+		return { client, sent: () => captured };
+	}
+
+	it("replaces a null-content assistant message (no tool_calls) with a placeholder", async () => {
+		const { client, sent } = capturingClient();
+		const messages = [
+			{ role: "user", content: "hi" },
+			// A turn that streamed only reasoning persists like this and, sent
+			// back as-is, makes GLM/z.ai answer 400 Param Incorrect.
+			{ role: "assistant", content: null },
+			{ role: "user", content: "продолжи" },
+		];
+		for await (const _ of streamChat(client, "m", messages as never, [], 100)) {
+			// drain
+		}
+		const outAssistant = sent()[1] as { content: string };
+		expect(outAssistant.content).toBe(EMPTY_ASSISTANT_PLACEHOLDER);
+	});
+
+	it("leaves an assistant message with tool_calls untouched despite null content", async () => {
+		const { client, sent } = capturingClient();
+		const toolMsg = {
+			role: "assistant",
+			content: null,
+			tool_calls: [{ id: "1", type: "function", function: { name: "read", arguments: "{}" } }],
+		};
+		for await (const _ of streamChat(client, "m", [toolMsg] as never, [], 100)) {
+			// drain
+		}
+		expect((sent()[0] as { content: unknown }).content).toBeNull();
 	});
 });

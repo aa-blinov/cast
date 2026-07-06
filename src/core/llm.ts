@@ -139,6 +139,30 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Placeholder for an assistant turn that produced neither text nor tool calls. */
+export const EMPTY_ASSISTANT_PLACEHOLDER = "(no response)";
+
+/**
+ * Guard against a malformed assistant message reaching the provider. A turn
+ * that streamed only reasoning (all output in `reasoning_content`, none in
+ * `content`) or that ended on error/abort before any output leaves an
+ * assistant message with `content: null` and no `tool_calls`. Many
+ * OpenAI-compatible providers reject that shape outright (e.g. GLM/z.ai
+ * returns `400 Param Incorrect`), and because it's persisted in the session
+ * it re-poisons every following turn until removed. Substituting a non-empty
+ * placeholder keeps the message list valid without dropping history. Applied
+ * here so it also covers messages loaded from an already-poisoned session.
+ */
+function sanitizeMessages(messages: Message[]): Message[] {
+	return messages.map((m) => {
+		if (m.role !== "assistant") return m;
+		const hasToolCalls = "tool_calls" in m && Array.isArray(m.tool_calls) && m.tool_calls.length > 0;
+		const hasContent = typeof m.content === "string" ? m.content.length > 0 : Boolean(m.content);
+		if (hasToolCalls || hasContent) return m;
+		return { ...m, content: EMPTY_ASSISTANT_PLACEHOLDER };
+	});
+}
+
 /**
  * Stream chat completions with vendor-agnostic thinking support.
  */
@@ -153,7 +177,7 @@ export async function* streamChat(
 ): AsyncGenerator<StreamChunk> {
 	const params: OpenAI.ChatCompletionCreateParamsStreaming = {
 		model,
-		messages,
+		messages: sanitizeMessages(messages),
 		tools: tools.length > 0 ? tools : undefined,
 		max_tokens: maxTokens,
 		stream: true,

@@ -1,6 +1,10 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
 import type { Message } from "../src/core/llm.ts";
+import { formatRulesForTurn, loadDirectoryRules, matchAutoRules, unionStickyRules } from "../src/core/rules.ts";
 
 vi.mock("../src/core/llm.ts", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../src/core/llm.ts")>();
@@ -286,5 +290,131 @@ describe("runAgentLoop — steering and follow-up injection", () => {
 		]);
 		expect(vi.mocked(streamAndCollect)).toHaveBeenCalledTimes(2);
 		expect(events.find((e) => e.type === "end")).toEqual({ type: "end", reason: "stop" });
+	});
+});
+
+// ============================================================================
+// runAgentLoop — rules auto-attach through the real loop (end-to-end stitch)
+// ============================================================================
+
+describe("runAgentLoop — context files drive rule auto-attach", () => {
+	it("a real read tool call latches a glob rule into the next turn's system prompt", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "cast-loop-rules-"));
+		try {
+			// A real file the agent will `read`, and two rules: one always-apply
+			// (must appear every turn) and one auto-attach on **/*.tsx (must appear
+			// only after the .tsx file enters context via the tool call).
+			mkdirSync(join(cwd, "src"), { recursive: true });
+			writeFileSync(join(cwd, "src", "App.tsx"), "export const App = () => null;");
+			const rulesDir = join(cwd, ".cast", "rules");
+			mkdirSync(rulesDir, { recursive: true });
+			writeFileSync(join(rulesDir, "root.md"), "---\nalwaysApply: true\n---\nALWAYS_RULE_BODY");
+			writeFileSync(join(rulesDir, "web.md"), '---\nglobs: ["**/*.tsx"]\n---\nWEB_RULE_BODY');
+			const catalog = loadDirectoryRules({ projectCwd: cwd });
+
+			// Mirror App.tsx's rebuild: latch sticky auto rules, record each prompt.
+			let sticky: ReturnType<typeof matchAutoRules> = [];
+			const prompts: string[] = [];
+			const rebuildSystemPrompt = ({ contextFiles }: { userText: string; contextFiles: string[] }) => {
+				sticky = unionStickyRules(sticky, matchAutoRules(catalog, contextFiles));
+				const p = `SYS${formatRulesForTurn(catalog, sticky, [])}`;
+				prompts.push(p);
+				return p;
+			};
+
+			const followUpQueue = new MessageQueue();
+			vi.mocked(streamAndCollect)
+				// Turn 1, call 1: the model asks to read the .tsx file.
+				.mockImplementationOnce(async () => ({
+					content: "",
+					thinking: "",
+					finishReason: "stop",
+					toolCalls: [{ id: "t1", name: "read", arguments: JSON.stringify({ path: "src/App.tsx" }) }],
+				}))
+				// Turn 1, call 2: tool result is back; model stops. Queue a follow-up
+				// so the outer loop runs again (rebuild only fires per outer turn).
+				.mockImplementationOnce(async () => {
+					followUpQueue.enqueue({ role: "user", content: "continue" });
+					return { content: "read done", thinking: "", finishReason: "stop" };
+				})
+				// Turn 2: nothing more to do.
+				.mockImplementationOnce(async () => ({ content: "second turn", thinking: "", finishReason: "stop" }));
+
+			await runAgentLoop([{ role: "user", content: "look at the component" }], {
+				config: testConfig,
+				model: "test-model",
+				cwd,
+				systemPrompt: "SYS",
+				followUpQueue,
+				rebuildSystemPrompt,
+				onEvent: () => {},
+			});
+
+			// Turn 1's prompt: always rule present, web rule NOT yet (no file in
+			// context when the turn began).
+			expect(prompts[0]).toContain("ALWAYS_RULE_BODY");
+			expect(prompts[0]).not.toContain("WEB_RULE_BODY");
+			// Turn 2's prompt: the read populated contextFiles, so the .tsx glob
+			// rule has now latched — alongside the always rule.
+			const last = prompts.at(-1)!;
+			expect(last).toContain("ALWAYS_RULE_BODY");
+			expect(last).toContain("WEB_RULE_BODY");
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	it("attaches a glob rule within the SAME submit — the request after the read already carries it", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "cast-loop-rules2-"));
+		try {
+			mkdirSync(join(cwd, "src"), { recursive: true });
+			writeFileSync(join(cwd, "src", "App.tsx"), "export const App = () => null;");
+			const rulesDir = join(cwd, ".cast", "rules");
+			mkdirSync(rulesDir, { recursive: true });
+			writeFileSync(join(rulesDir, "web.md"), '---\nglobs: ["**/*.tsx"]\n---\nWEB_RULE_BODY');
+			const catalog = loadDirectoryRules({ projectCwd: cwd });
+
+			let sticky: ReturnType<typeof matchAutoRules> = [];
+			const rebuildSystemPrompt = ({ contextFiles }: { userText: string; contextFiles: string[] }) => {
+				sticky = unionStickyRules(sticky, matchAutoRules(catalog, contextFiles));
+				return `SYS${formatRulesForTurn(catalog, sticky, [])}`;
+			};
+
+			// Capture the system prompt (messages[0]) actually sent on each request.
+			const sentPrompts: string[] = [];
+			vi.mocked(streamAndCollect)
+				// Request 1: no file seen yet → prompt must NOT carry the rule.
+				.mockImplementationOnce(async (_c, _m, msgs) => {
+					sentPrompts.push(JSON.stringify((msgs as Message[])[0]?.content ?? ""));
+					return {
+						content: "",
+						thinking: "",
+						finishReason: "stop",
+						toolCalls: [{ id: "r1", name: "read", arguments: JSON.stringify({ path: "src/App.tsx" }) }],
+					};
+				})
+				// Request 2: same submit, continuation after the read → the rule
+				// must already be present without any follow-up message.
+				.mockImplementationOnce(async (_c, _m, msgs) => {
+					sentPrompts.push(JSON.stringify((msgs as Message[])[0]?.content ?? ""));
+					return { content: "done", thinking: "", finishReason: "stop" };
+				});
+
+			await runAgentLoop([{ role: "user", content: "read the component" }], {
+				config: testConfig,
+				model: "test-model",
+				cwd,
+				systemPrompt: "SYS",
+				rebuildSystemPrompt,
+				contextFiles: [],
+				onEvent: () => {},
+			});
+
+			expect(sentPrompts).toHaveLength(2);
+			expect(sentPrompts[0]).not.toContain("WEB_RULE_BODY"); // before the read
+			expect(sentPrompts[1]).toContain("WEB_RULE_BODY"); // right after the read, same turn
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
 	});
 });

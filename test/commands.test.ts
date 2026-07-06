@@ -1,6 +1,3 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
 import type { McpSetupResult } from "../src/core/mcp.ts";
@@ -101,6 +98,10 @@ function createFakeDeps(overrides?: Partial<CommandDeps> & { running?: boolean }
 		setContextFilesSuffix: track("setContextFilesSuffix"),
 		rulesSuffix: "",
 		setRulesSuffix: track("setRulesSuffix"),
+		rulesLazySuffix: "",
+		setRulesLazySuffix: track("setRulesLazySuffix"),
+		directoryRules: [],
+		setDirectoryRules: track("setDirectoryRules"),
 		systemPrompt: "",
 		setSystemPrompt: track("setSystemPrompt"),
 		mcpResult: {
@@ -268,192 +269,6 @@ describe("handleInput", () => {
 		const { deps, calls } = createFakeDeps();
 		await handleInput("/mcp", undefined, deps);
 		expect(noticeText(calls)).toContain("No MCP");
-	});
-
-	it("/rules add without text shows usage", async () => {
-		const { deps, calls } = createFakeDeps();
-		await handleInput("/rules add", undefined, deps);
-		expect(noticeText(calls)).toContain("Usage");
-	});
-
-	it("/rules add <text> writes to .cast/rules.md", async () => {
-		const fakeHome = mkdtempSync(join(tmpdir(), "cast-cmd-rules-"));
-		const cwd = join(fakeHome, "project");
-		mkdirSync(join(cwd, ".cast"), { recursive: true });
-		let callCount = 0;
-		const pickers: Pickers = {
-			pickOption: async () => (callCount++ === 0 ? "local" : null),
-			promptText: async () => null,
-			log: () => {},
-		};
-		const { deps, calls } = createFakeDeps({ cwd, pickers });
-		await handleInput("/rules add be excellent to each other", undefined, deps);
-		const content = readFileSync(join(cwd, ".cast", "rules.md"), "utf-8");
-		expect(content).toContain("be excellent to each other");
-		expect(noticeText(calls)).not.toContain("not active");
-		rmSync(fakeHome, { recursive: true, force: true });
-	});
-
-	it("/rules add <text> warns the rule isn't active when the project isn't trusted", async () => {
-		const fakeHome = mkdtempSync(join(tmpdir(), "cast-cmd-rules-untrusted-add-"));
-		const cwd = join(fakeHome, "project");
-		mkdirSync(join(cwd, ".cast"), { recursive: true });
-		let callCount = 0;
-		const pickers: Pickers = {
-			pickOption: async () => (callCount++ === 0 ? "local" : null),
-			promptText: async () => null,
-			log: () => {},
-		};
-		const { deps, calls } = createFakeDeps({ cwd, projectTrusted: false, pickers });
-		await handleInput("/rules add be excellent to each other", undefined, deps);
-		const content = readFileSync(join(cwd, ".cast", "rules.md"), "utf-8");
-		expect(content).toContain("be excellent to each other");
-		expect(noticeText(calls)).toContain("not active");
-		rmSync(fakeHome, { recursive: true, force: true });
-	});
-
-	it("/rules shows numbered list of rules", async () => {
-		const fakeHome = mkdtempSync(join(tmpdir(), "cast-cmd-rules-list-"));
-		const cwd = join(fakeHome, "project");
-		mkdirSync(join(cwd, ".cast"), { recursive: true });
-		writeFileSync(join(cwd, ".cast", "rules.md"), "1. First rule\n2. Second rule");
-		try {
-			const { deps, calls } = createFakeDeps({ cwd });
-			await handleInput("/rules", undefined, deps);
-			const notice = noticeText(calls);
-			expect(notice).toContain("1. First rule");
-			expect(notice).toContain("2. Second rule");
-		} finally {
-			rmSync(fakeHome, { recursive: true, force: true });
-		}
-	});
-
-	it("/rules list works the same as /rules", async () => {
-		const fakeHome = mkdtempSync(join(tmpdir(), "cast-cmd-rules-list-alias-"));
-		const cwd = join(fakeHome, "project");
-		mkdirSync(join(cwd, ".cast"), { recursive: true });
-		writeFileSync(join(cwd, ".cast", "rules.md"), "1. A rule");
-		try {
-			const { deps, calls } = createFakeDeps({ cwd });
-			await handleInput("/rules list", undefined, deps);
-			expect(noticeText(calls)).toContain("1. A rule");
-		} finally {
-			rmSync(fakeHome, { recursive: true, force: true });
-		}
-	});
-
-	it("/rules shows hint when no rules exist", async () => {
-		const fakeHome = mkdtempSync(join(tmpdir(), "cast-cmd-rules-empty-"));
-		const cwd = join(fakeHome, "project");
-		const origHome = process.env.HOME;
-		process.env.HOME = fakeHome;
-		try {
-			const { deps, calls } = createFakeDeps({ cwd });
-			await handleInput("/rules", undefined, deps);
-			expect(noticeText(calls)).toContain("No rules yet");
-		} finally {
-			process.env.HOME = origHome;
-			rmSync(fakeHome, { recursive: true, force: true });
-		}
-	});
-
-	it("/rules delete removes picked rule and renumbers", async () => {
-		const fakeHome = mkdtempSync(join(tmpdir(), "cast-cmd-rules-delete-"));
-		const cwd = join(fakeHome, "project");
-		mkdirSync(join(cwd, ".cast"), { recursive: true });
-		writeFileSync(join(cwd, ".cast", "rules.md"), "1. First\n2. Second\n3. Third");
-		try {
-			// pick scope "local", then rule 2, then Esc
-			let callCount = 0;
-			const pickers: Pickers = {
-				pickOption: async () => {
-					const c = callCount++;
-					if (c === 0) return "local";
-					if (c === 1) return 2;
-					return null;
-				},
-				promptText: async () => null,
-				log: () => {},
-			};
-			const { deps, calls } = createFakeDeps({ cwd, pickers });
-			await handleInput("/rules delete", undefined, deps);
-			const content = readFileSync(join(cwd, ".cast", "rules.md"), "utf-8");
-			expect(content).toBe("1. First\n2. Third");
-			const lastNotice = String(calls.showNotice?.at(-1)?.[0] ?? "");
-			expect(lastNotice).toContain("1 local rule(s)");
-		} finally {
-			rmSync(fakeHome, { recursive: true, force: true });
-		}
-	});
-
-	it("/rules delete allows multiple deletions in one session", async () => {
-		const fakeHome = mkdtempSync(join(tmpdir(), "cast-cmd-rules-delete-multi-"));
-		const cwd = join(fakeHome, "project");
-		mkdirSync(join(cwd, ".cast"), { recursive: true });
-		writeFileSync(join(cwd, ".cast", "rules.md"), "1. A\n2. B\n3. C");
-		try {
-			// pick scope "local", then rule 1, then rule 1 again (B shifted up), then Esc
-			let callCount = 0;
-			const pickers: Pickers = {
-				pickOption: async () => {
-					if (callCount++ === 0) return "local";
-					return callCount <= 3 ? 1 : null;
-				},
-				promptText: async () => null,
-				log: () => {},
-			};
-			const { deps, calls } = createFakeDeps({ cwd, pickers });
-			await handleInput("/rules delete", undefined, deps);
-			const content = readFileSync(join(cwd, ".cast", "rules.md"), "utf-8");
-			expect(content).toBe("1. C");
-			const lastNotice = String(calls.showNotice?.at(-1)?.[0] ?? "");
-			expect(lastNotice).toContain("2 local rule(s)");
-		} finally {
-			rmSync(fakeHome, { recursive: true, force: true });
-		}
-	});
-
-	it("/rules delete with Esc on first pick shows no deletions", async () => {
-		const fakeHome = mkdtempSync(join(tmpdir(), "cast-cmd-rules-delete-cancel-"));
-		const cwd = join(fakeHome, "project");
-		mkdirSync(join(cwd, ".cast"), { recursive: true });
-		writeFileSync(join(cwd, ".cast", "rules.md"), "1. Keep me");
-		try {
-			// pick scope "local", then Esc on rule picker
-			let callCount = 0;
-			const pickers: Pickers = {
-				pickOption: async () => (callCount++ === 0 ? "local" : null),
-				promptText: async () => null,
-				log: () => {},
-			};
-			const { deps, calls } = createFakeDeps({ cwd, pickers });
-			await handleInput("/rules delete", undefined, deps);
-			const content = readFileSync(join(cwd, ".cast", "rules.md"), "utf-8");
-			expect(content).toBe("1. Keep me");
-			expect(noticeText(calls)).toContain("No rules deleted");
-		} finally {
-			rmSync(fakeHome, { recursive: true, force: true });
-		}
-	});
-
-	it("/rules delete with no rules shows message", async () => {
-		const fakeHome = mkdtempSync(join(tmpdir(), "cast-cmd-rules-delete-empty-"));
-		const cwd = join(fakeHome, "project");
-		mkdirSync(join(cwd, ".cast"), { recursive: true });
-		writeFileSync(join(cwd, ".cast", "rules.md"), "");
-		try {
-			let callCount = 0;
-			const pickers: Pickers = {
-				pickOption: async () => (callCount++ === 0 ? "local" : null),
-				promptText: async () => null,
-				log: () => {},
-			};
-			const { deps, calls } = createFakeDeps({ cwd, pickers });
-			await handleInput("/rules delete", undefined, deps);
-			expect(noticeText(calls)).toContain("No local rules to delete");
-		} finally {
-			rmSync(fakeHome, { recursive: true, force: true });
-		}
 	});
 
 	it("unknown /command submits to agent as text (e.g. file paths)", async () => {
