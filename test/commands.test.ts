@@ -175,6 +175,18 @@ describe("handleInput", () => {
 		expect(calls["agent.followUp"]).toEqual([["next step"]]);
 	});
 
+	it("/s <msg> is an alias for /steer", async () => {
+		const { deps, calls } = createFakeDeps({ running: true });
+		await handleInput("/s fix the bug", undefined, deps);
+		expect(calls["agent.steer"]).toEqual([["fix the bug"]]);
+	});
+
+	it("/q <msg> is an alias for /queue", async () => {
+		const { deps, calls } = createFakeDeps({ running: true });
+		await handleInput("/q next step", undefined, deps);
+		expect(calls["agent.followUp"]).toEqual([["next step"]]);
+	});
+
 	it("blocks most commands while running", async () => {
 		const { deps, calls } = createFakeDeps({ running: true });
 		await handleInput("/clear", undefined, deps);
@@ -209,15 +221,6 @@ describe("handleInput", () => {
 		expect(noticeText(calls)).toContain("/clear");
 		expect(noticeText(calls)).toContain("/model");
 		expect(noticeText(calls)).toContain("/quit");
-	});
-
-	it("/personas lists personas and marks current", async () => {
-		const { deps, calls } = createFakeDeps({
-			currentPersona: { name: "coding", label: "Coding", description: "Coding agent", systemPrompt: "" } as any,
-		});
-		await handleInput("/personas", undefined, deps);
-		expect(noticeText(calls)).toContain("Personas:");
-		expect(noticeText(calls)).toContain("[current]");
 	});
 
 	it("/persona cancelled (Escape) leaves the persona unchanged and doesn't exit the process", async () => {

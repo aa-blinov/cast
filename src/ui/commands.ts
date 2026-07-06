@@ -3,7 +3,7 @@ import { type AppConfig, runOnboardingCheck } from "../core/config.ts";
 import { formatContextFilesForPrompt, loadProjectContextFiles } from "../core/context-files.ts";
 import { compactSessionMessages } from "../core/loop.ts";
 import { closeMcpConnections, type McpSetupResult } from "../core/mcp.ts";
-import { findPersona, type LoadPersonasOptions, listPersonas, type Persona } from "../core/personas.ts";
+import { findPersona, type LoadPersonasOptions, type Persona } from "../core/personas.ts";
 import {
 	buildSystemPrompt,
 	type ProjectResolverDeps,
@@ -44,13 +44,14 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/compact", description: "Compact context now" },
 	{ name: "/new", description: "Start a new session" },
 	{ name: "/abort", description: "Abort the current run" },
+	{ name: "/s", description: "Alias for /steer", takesArgs: true },
 	{ name: "/steer", description: "Inject a message while running", takesArgs: true },
+	{ name: "/q", description: "Alias for /queue", takesArgs: true },
 	{ name: "/queue", description: "Queue a message for after the run", takesArgs: true },
 	{ name: "/queue-reset", description: "Clear the message queue" },
 	{ name: "/model", description: "Show or change model" },
 	{ name: "/reasoning", description: "Change reasoning level" },
 	{ name: "/persona", description: "Show or change persona" },
-	{ name: "/personas", description: "List available personas" },
 	{ name: "/skills", description: "List loaded skills" },
 	{ name: "/mcp", description: "List connected MCP servers" },
 	{ name: "/reload", description: "Reload skills, rules, MCP, and personas for cwd" },
@@ -166,7 +167,7 @@ async function applyPermissionMode(deps: CommandDeps, newMode: PermissionMode): 
 }
 
 /** Commands allowed while the agent is running — plain text is rejected. */
-const RUNNING_COMMANDS = new Set(["/queue", "/queue-reset", "/steer", "/abort", "/stop"]);
+const RUNNING_COMMANDS = new Set(["/queue", "/q", "/queue-reset", "/steer", "/s", "/abort", "/stop"]);
 
 export function canSubmitDuringRun(text: string): boolean {
 	const input = text.trim();
@@ -198,8 +199,9 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		agent.abort();
 		return;
 	}
-	if (input === "/steer" || input.startsWith("/steer ")) {
-		const msg = input.slice("/steer".length).trim();
+	if (input === "/steer" || input.startsWith("/steer ") || input === "/s" || input.startsWith("/s ")) {
+		const cmd = input.startsWith("/steer") ? "/steer" : "/s";
+		const msg = input.slice(cmd.length).trim();
 		if (!msg) {
 			showNotice("[Usage: /steer <message> — injects it into the running turn]");
 			return;
@@ -218,8 +220,9 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		agent.steer(msg);
 		return;
 	}
-	if (input === "/queue" || input.startsWith("/queue ")) {
-		const msg = input.slice("/queue".length).trim();
+	if (input === "/queue" || input.startsWith("/queue ") || input === "/q" || input.startsWith("/q ")) {
+		const cmd = input.startsWith("/queue") ? "/queue" : "/q";
+		const msg = input.slice(cmd.length).trim();
 		if (!msg) {
 			showNotice("[Usage: /queue <message> — runs after the current turn]");
 			return;
@@ -346,14 +349,6 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		return;
 	}
 
-	if (input === "/personas") {
-		const lines = listPersonas(deps.personaOptions).map(
-			(p) => `${p.name} (${p.source})${p.name === deps.currentPersona.name ? " [current]" : ""} — ${p.label}`,
-		);
-		showNotice(`[Personas:\n${lines.join("\n")}]`);
-		return;
-	}
-
 	if (input === "/persona") {
 		showNotice(`[Current persona: ${deps.currentPersona.label} (${deps.currentPersona.name})]`);
 		const selected = await selectPersona(deps.pickers, deps.personaOptions);
@@ -372,7 +367,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		const name = input.slice("/persona ".length).trim();
 		const found = findPersona(name, deps.personaOptions);
 		if (!found) {
-			showNotice(`[Unknown persona "${name}". Use /personas to list available ones.]`);
+			showNotice(`[Unknown persona "${name}". Use /persona to list available ones.]`);
 			return;
 		}
 		deps.setCurrentPersona(found);
@@ -612,7 +607,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 
 	if (input === "/help") {
 		showNotice(
-			"[/clear /compact /new /abort /queue /queue-reset /steer /model /reasoning /persona /personas /skills /mcp /reload /skill: /rule: /provider /permissions /sessions /usage /context /rules /keys /quit]",
+			"[/clear /compact /new /abort /queue(/q) /queue-reset /steer(/s) /model /reasoning /persona /skills /mcp /reload /skill: /rule: /provider /permissions /sessions /usage /context /rules /keys /quit]",
 		);
 		return;
 	}
