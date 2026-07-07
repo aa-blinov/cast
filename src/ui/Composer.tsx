@@ -1,5 +1,6 @@
 import { Box, Text, useStdin } from "ink";
 import { type JSX, useEffect, useMemo, useRef, useState } from "react";
+import { registerStdinOwner, type StdinOwner, setStdinSource, unregisterStdinOwner } from "../core/stdin-manager.ts";
 import { SLASH_COMMANDS } from "./commands.ts";
 import { gradientHex } from "./gradient.ts";
 import { type InputEvent, InputParser } from "./input/input-parser.ts";
@@ -78,7 +79,7 @@ export function Composer({
 	running,
 	locked,
 }: ComposerProps): JSX.Element {
-	const { stdin, setRawMode } = useStdin();
+	const { stdin, setRawMode, isRawModeSupported } = useStdin();
 
 	const bufRef = useRef(new TextBuffer());
 	const parserRef = useRef<InputParser | null>(null);
@@ -341,6 +342,7 @@ export function Composer({
 			esc.write(BRACKETED_PASTE_ON);
 			esc.write(KITTY_PUSH);
 		};
+		onCont(); // Enable on initial mount
 		process.on("SIGCONT", onCont);
 
 		const handlePasteContent = (raw: string) => {
@@ -376,6 +378,8 @@ export function Composer({
 		stdinBuf.on("paste", (text: string) => handlePasteContent(text));
 
 		const stdinSource = stdin ?? process.stdin;
+		setStdinSource(stdinSource);
+
 		const stdinDataHandler = (chunk: Buffer) => {
 			if (lockedRef.current) return;
 			stdinBuf.process(chunk);
@@ -383,7 +387,27 @@ export function Composer({
 		};
 		stdinSource.on("data", stdinDataHandler);
 
+		// Register with the stdin manager so execBash can pause us
+		// when a child process needs interactive stdin.
+		const owner: StdinOwner = {
+			id: "composer",
+			onPause: () => {
+				if (isRawModeSupported) setRawMode(false);
+				esc.write(KITTY_POP);
+				esc.write(BRACKETED_PASTE_OFF);
+				stdinSource.off("data", stdinDataHandler);
+			},
+			onResume: () => {
+				stdinSource.on("data", stdinDataHandler);
+				if (isRawModeSupported) setRawMode(true);
+				esc.write(BRACKETED_PASTE_ON);
+				esc.write(KITTY_PUSH);
+			},
+		};
+		registerStdinOwner(owner);
+
 		return () => {
+			unregisterStdinOwner(owner);
 			stdinBuf.destroy();
 			setRawMode(false);
 			esc.write(KITTY_POP);
@@ -392,7 +416,7 @@ export function Composer({
 			stdinSource.off("data", stdinDataHandler);
 			parser.destroy();
 		};
-	}, [setRawMode, stdin]);
+	}, [setRawMode, stdin, isRawModeSupported]);
 
 	const { lines, cursorLine, cursorCol } = buf.getLayout();
 	const visibleLines = lines.length > 5 ? lines.slice(-5) : lines;

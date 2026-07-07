@@ -5,6 +5,7 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 
 import type { AppConfig } from "./config.ts";
 import type { Tool } from "./llm.ts";
 import { checkDangerousBash } from "./permissions.ts";
+import { getStdinSource, suspendAndRun } from "./stdin-manager.ts";
 
 // ============================================================================
 // Tool definitions (OpenAI function calling format)
@@ -243,67 +244,102 @@ async function execBash(
 		return { content: "Aborted before the command started.", isError: true };
 	}
 
-	return new Promise((resolve) => {
-		const child = spawn("bash", ["-c", command], {
-			cwd,
-			env: process.env,
-			stdio: ["ignore", "pipe", "pipe"],
-		});
+	const stdinSource = getStdinSource();
 
-		let stdout = "";
-		let stderr = "";
-		let timedOut = false;
-		let aborted = false;
-		const maxBytes = config.maxToolOutputBytes;
+	return suspendAndRun(
+		() =>
+			new Promise((resolve) => {
+				// Show the command on stderr after Ink has suspended so the
+				// user knows what is about to run and what input is expected.
+				process.stderr.write(`\x1b[1m\x1b[36m$ ${command}\x1b[0m\n`);
 
-		child.stdout.on("data", (data: Buffer) => {
-			if (stdout.length < maxBytes) stdout += data.toString("utf-8");
-		});
-		child.stderr.on("data", (data: Buffer) => {
-			if (stderr.length < maxBytes) stderr += data.toString("utf-8");
-		});
+				const child = spawn("bash", ["-c", command], {
+					cwd,
+					env: process.env,
+					stdio: ["pipe", "pipe", "pipe"],
+				});
 
-		const timer = setTimeout(() => {
-			timedOut = true;
-			child.kill("SIGKILL");
-		}, timeout * 1000);
+				// Forward stdin to the child process so interactive commands
+				// (password prompts, confirmations) can receive user input.
+				if (stdinSource && child.stdin) {
+					stdinSource.pipe(child.stdin, { end: false });
+				}
 
-		const onAbort = () => {
-			aborted = true;
-			child.kill("SIGKILL");
-		};
-		signal?.addEventListener("abort", onAbort, { once: true });
+				let stdout = "";
+				let stderr = "";
+				let timedOut = false;
+				let aborted = false;
+				const maxBytes = config.maxToolOutputBytes;
 
-		const cleanup = () => {
-			clearTimeout(timer);
-			signal?.removeEventListener("abort", onAbort);
-		};
+				child.stdout.on("data", (data: Buffer) => {
+					if (stdout.length < maxBytes) stdout += data.toString("utf-8");
+				});
+				child.stderr.on("data", (data: Buffer) => {
+					if (stderr.length < maxBytes) stderr += data.toString("utf-8");
+				});
 
-		child.on("close", (code) => {
-			cleanup();
-			let output = stdout;
-			if (stderr) output += (output ? "\n" : "") + stderr;
-			if (aborted) {
-				output += "\n\nCommand aborted";
-			} else if (timedOut) {
-				output += `\n\nCommand timed out after ${timeout} seconds`;
-			} else if (code !== 0 && code !== null) {
-				output += `\n\nProcess exited with code ${code}`;
-			}
-			// Truncate to max lines
-			const lines = output.split("\n");
-			if (lines.length > config.maxToolOutputLines) {
-				const kept = lines.slice(-config.maxToolOutputLines);
-				output = `[Showing last ${config.maxToolOutputLines} of ${lines.length} lines]\n${kept.join("\n")}`;
-			}
-			resolve({ content: output || "(no output)", isError: aborted || timedOut || (code !== 0 && code !== null) });
-		});
+				const timer = setTimeout(() => {
+					timedOut = true;
+					child.kill("SIGKILL");
+				}, timeout * 1000);
 
-		child.on("error", (err) => {
-			cleanup();
-			resolve({ content: err.message, isError: true });
-		});
-	});
+				const onAbort = () => {
+					aborted = true;
+					child.kill("SIGKILL");
+				};
+				signal?.addEventListener("abort", onAbort, { once: true });
+
+				const cleanup = () => {
+					clearTimeout(timer);
+					signal?.removeEventListener("abort", onAbort);
+				};
+
+				child.on("close", (code) => {
+					if (stdinSource && child.stdin) {
+						stdinSource.unpipe(child.stdin);
+					}
+
+					// Ensure a blank line between command output and Ink's frame.
+					process.stderr.write("\n");
+
+					cleanup();
+					let output = stdout;
+					if (stderr) output += (output ? "\n" : "") + stderr;
+					if (aborted) {
+						output += "\n\nCommand aborted";
+					} else if (timedOut) {
+						const hint =
+							stderr.toLowerCase().includes("password") ||
+							stderr.toLowerCase().includes("username for") ||
+							stdout === ""
+								? " (command may be waiting for interactive input — use non-interactive flags or ask the user to run it manually)"
+								: "";
+						output += `\n\nCommand timed out after ${timeout} seconds${hint}`;
+					} else if (code !== 0 && code !== null) {
+						output += `\n\nProcess exited with code ${code}`;
+					}
+					// Truncate to max lines
+					const lines = output.split("\n");
+					if (lines.length > config.maxToolOutputLines) {
+						const kept = lines.slice(-config.maxToolOutputLines);
+						output = `[Showing last ${config.maxToolOutputLines} of ${lines.length} lines]\n${kept.join("\n")}`;
+					}
+					resolve({
+						content: output || "(no output)",
+						isError: aborted || timedOut || (code !== 0 && code !== null),
+					});
+				});
+
+				child.on("error", (err) => {
+					if (stdinSource && child.stdin) {
+						stdinSource.unpipe(child.stdin);
+					}
+					process.stderr.write("\n");
+					cleanup();
+					resolve({ content: err.message, isError: true });
+				});
+			}),
+	);
 }
 
 // ============================================================================
