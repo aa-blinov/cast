@@ -1,6 +1,12 @@
 import OpenAI from "openai";
 import { describe, expect, it, vi } from "vitest";
-import { EMPTY_ASSISTANT_PLACEHOLDER, isRetryableStreamError, streamAndCollect, streamChat } from "../src/core/llm.ts";
+import {
+	describeTurnError,
+	EMPTY_ASSISTANT_PLACEHOLDER,
+	isRetryableStreamError,
+	streamAndCollect,
+	streamChat,
+} from "../src/core/llm.ts";
 
 function fakeClient(chunks: unknown[], onChunk?: () => void): OpenAI {
 	return {
@@ -230,5 +236,43 @@ describe("streamChat — message sanitization", () => {
 		const outToolCalls = (sent()[0] as { tool_calls: Array<{ function: { arguments: string } }> }).tool_calls;
 		const parsed = JSON.parse(outToolCalls[0].function.arguments);
 		expect(parsed.error).toContain("truncated");
+	});
+});
+
+describe("describeTurnError", () => {
+	// A body-less gateway 401 (the mimo case): status set, message terse.
+	it("maps a 401 (by status) to a revoked-key message pointing at /provider", () => {
+		const err = Object.assign(new Error("401 status code (no body)"), { status: 401 });
+		const out = describeTurnError(err);
+		expect(out).toContain("401");
+		expect(out).toContain("/provider");
+		expect(out.toLowerCase()).toContain("revoked");
+	});
+
+	it("maps a 401 by wording when no status is attached (wrapped error)", () => {
+		const out = describeTurnError(new Error("Unauthorized: invalid api key"));
+		expect(out).toContain("/provider");
+	});
+
+	it("maps a 403 to an access-denied message", () => {
+		const err = Object.assign(new Error("403 Forbidden"), { status: 403 });
+		const out = describeTurnError(err);
+		expect(out).toContain("403");
+		expect(out.toLowerCase()).toContain("permission");
+	});
+
+	it("maps quota exhaustion (429 insufficient_quota) to a billing message, not a key error", () => {
+		const err = Object.assign(new Error("429 You exceeded your current quota"), {
+			status: 429,
+			code: "insufficient_quota",
+		});
+		const out = describeTurnError(err);
+		expect(out.toLowerCase()).toContain("quota");
+		expect(out).not.toContain("401");
+	});
+
+	it("passes an unrecognized error through unchanged", () => {
+		const out = describeTurnError(new Error("some other failure"));
+		expect(out).toBe("some other failure");
 	});
 });

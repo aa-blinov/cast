@@ -135,6 +135,41 @@ export function isRetryableStreamError(error: unknown): boolean {
 	return /terminated|socket hang up|other side closed|fetch failed/i.test(message);
 }
 
+/**
+ * Turn a raw turn-failure error into something a user can act on. The SDK
+ * surfaces auth/quota failures as terse strings — often just "401 status code
+ * (no body)" for gateways that send no body — which don't tell the user their
+ * key was rejected or what to do next. Map the actionable cases (revoked/invalid
+ * key, no permission, exhausted quota) explicitly and point at the command that
+ * fixes each; anything unrecognized falls through to the original message so no
+ * information is lost. Classify by status/code first (reliable when present),
+ * then by wording (the fallback for wrapped or body-less gateway errors).
+ */
+export function describeTurnError(error: unknown): string {
+	const status = (error as { status?: number } | undefined)?.status;
+	const code = (error as { code?: string } | undefined)?.code;
+	const message = error instanceof Error ? error.message : String(error);
+
+	// Quota/billing exhaustion — the key is valid, the account is out of credit.
+	// Checked before the status codes because it rides in on a 429 that would
+	// otherwise read as a transient rate limit.
+	if (code === "insufficient_quota" || NON_RETRYABLE_QUOTA_PATTERN.test(message)) {
+		return "Provider quota/billing exhausted — the API key is valid but out of credit. Check your provider account.";
+	}
+
+	// 401 — key rejected: revoked, expired, or wrong.
+	if (status === 401 || /\b401\b|unauthorized|invalid api key|incorrect api key/i.test(message)) {
+		return "API key rejected (401) — it may be revoked, expired, or incorrect. Run /provider to update it.";
+	}
+
+	// 403 — authenticated but not permitted for this model/endpoint.
+	if (status === 403 || /\b403\b|forbidden/i.test(message)) {
+		return "Access denied (403) — the API key lacks permission for this model or endpoint. Try /provider or pick another model with /model.";
+	}
+
+	return message;
+}
+
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
