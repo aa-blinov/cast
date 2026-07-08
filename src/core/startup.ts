@@ -115,11 +115,16 @@ function probeReason(probe: Exclude<ProviderProbe, "ok" | "unknown">, baseURL: s
  * A reachable-but-unclassifiable provider ("unknown", e.g. one without
  * /v1/models) is left alone so we don't nag on a false positive. Mutates
  * config + persists new creds (mirroring /provider). Exits if the user cancels.
+ *
+ * Returns true if credentials were actually changed — a new token may belong to
+ * a different account/provider whose model set differs, so the caller re-picks
+ * the model rather than reusing the saved one.
  */
-async function ensureConnectionAlive(config: AppConfig, pickers: Pickers): Promise<void> {
+async function ensureConnectionAlive(config: AppConfig, pickers: Pickers): Promise<boolean> {
+	let changed = false;
 	while (true) {
 		const probe = await probeProvider(config);
-		if (probe === "ok" || probe === "unknown") return;
+		if (probe === "ok" || probe === "unknown") return changed;
 		const creds = await reconfigureConnection(
 			pickers,
 			{ baseURL: config.baseURL, apiKey: config.apiKey },
@@ -129,6 +134,7 @@ async function ensureConnectionAlive(config: AppConfig, pickers: Pickers): Promi
 		config.baseURL = creds.baseURL;
 		config.apiKey = creds.apiKey;
 		updateSettings({ providerUrl: creds.baseURL, apiKey: creds.apiKey });
+		changed = true;
 	}
 }
 
@@ -235,11 +241,13 @@ export async function runStartup(
 		let ok = await runOnboardingCheck(config, settings.model, { silent: true });
 		if (!ok) {
 			// The saved model failed — but that might be the *connection* (revoked
-			// key, dead endpoint), not the model. Re-prompt credentials if so, then
-			// re-check the saved model: fixing the key often makes it valid again,
-			// sparing the user from re-picking a model they never changed.
-			await ensureConnectionAlive(config, pickers);
-			ok = await runOnboardingCheck(config, settings.model, { silent: true });
+			// key, dead endpoint), not the model. Re-prompt credentials if so. If
+			// the token actually changed, always re-pick the model (a new token can
+			// mean a different account/provider with a different model set); only
+			// when the connection was already fine do we re-check and keep the saved
+			// model the user never changed.
+			const credsChanged = await ensureConnectionAlive(config, pickers);
+			if (!credsChanged) ok = await runOnboardingCheck(config, settings.model, { silent: true });
 		}
 		if (ok) {
 			model = settings.model;
