@@ -6,6 +6,7 @@ import type { Message, Tool, Usage } from "./llm.ts";
 import {
 	applyCacheControl,
 	createClient,
+	describeTurnError,
 	EMPTY_ASSISTANT_PLACEHOLDER,
 	isContextOverflow,
 	streamAndCollect,
@@ -562,8 +563,7 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 			onEvent({ type: "end", reason: "aborted" });
 			return;
 		}
-		const message = error instanceof Error ? error.message : String(error);
-		onEvent({ type: "error", message });
+		onEvent({ type: "error", message: describeTurnError(error) });
 		onEvent({ type: "end", reason: "error" });
 	}
 }

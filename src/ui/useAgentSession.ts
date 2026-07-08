@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AppConfig } from "../core/config.ts";
-import { isRetryableStreamError } from "../core/llm.ts";
+import { describeTurnError, isRetryableStreamError } from "../core/llm.ts";
 import { type AgentEvent, runAgentLoop } from "../core/loop.ts";
 import type { McpSetupResult } from "../core/mcp.ts";
 import type { AgentRunner } from "../core/runner.ts";
@@ -530,8 +530,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				});
 				session.messages = result;
 			} catch (err) {
-				const msg = err instanceof Error ? err.message : String(err);
-				setError(msg);
+				setError(describeTurnError(err));
 				setStatus("error");
 			} finally {
 				// Flush any trailing streamed content that never got a turn_end (e.g.
