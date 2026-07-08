@@ -64,6 +64,26 @@ function appendText(blocks: StreamBlock[], kind: "thinking" | "content", text: s
 	return [...blocks, { kind, text }];
 }
 
+/**
+ * How many leading blocks have settled — can't change again, so they're safe to
+ * hand to Ink's <Static> (which freezes an item on first render). Streaming only
+ * ever grows the trailing block, so any non-trailing text/reasoning block is
+ * done; a tool block is done once it's no longer running. Draining these out of
+ * the live region as they settle is what keeps that region from growing past the
+ * terminal height — where Ink's log-update erase math breaks and frames stack.
+ */
+export function settledPrefixLength(blocks: StreamBlock[]): number {
+	let n = 0;
+	for (let i = 0; i < blocks.length; i++) {
+		const b = blocks[i]!;
+		const isLast = i === blocks.length - 1;
+		const settled = b.kind === "tool" ? b.call.status !== "running" : !isLast;
+		if (!settled) break;
+		n++;
+	}
+	return n;
+}
+
 export interface RetryInfo {
 	attempt: number;
 	maxAttempts: number;
@@ -274,9 +294,28 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	// turn_end, etc.) call flushStreaming() directly for immediate UI feedback.
 	const updateStreaming = useCallback(
 		(updater: (prev: StreamingState | null) => StreamingState | null, immediate?: boolean) => {
-			const next = updater(streamingRef.current);
+			let next = updater(streamingRef.current);
+			// Drain settled blocks (finished reasoning/text/completed tool calls)
+			// out of the live region into <Static> history the moment they can't
+			// change again, leaving only the actively-streaming tail live. Without
+			// this the whole turn accumulates in Ink's live region; once it grows
+			// past the terminal height, log-update's erase can't reach the rows
+			// that scrolled off and frames stack instead of overwriting (duplicated
+			// [reasoning] lines, spinner-per-line). A settle is a structural
+			// boundary, so flush the frame immediately when one happens rather than
+			// leaving the drained blocks visible in the live region for up to 16ms.
+			let settledNow = false;
+			if (next && next.blocks.length > 0) {
+				const settled = settledPrefixLength(next.blocks);
+				if (settled > 0) {
+					const promoted = next.blocks.slice(0, settled);
+					next = { blocks: next.blocks.slice(settled) };
+					setMessages((msgs) => [...msgs, { role: "assistant", content: "", blocks: promoted }]);
+					settledNow = true;
+				}
+			}
 			streamingRef.current = next;
-			if (immediate) {
+			if (immediate || settledNow) {
 				flushStreaming();
 			} else if (flushTimerRef.current === null) {
 				flushTimerRef.current = setTimeout(() => {
@@ -289,15 +328,17 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	);
 
 	/**
-	 * Appends the just-finished turn's streamed content (if any) as permanent
-	 * history and resets streaming for the next turn. Promoting from the
-	 * streaming state — not rebuilding from raw session/wire messages — is
+	 * Flushes whatever's left in the live region (the trailing block that never
+	 * settled while streaming) into permanent history and resets streaming for
+	 * the next turn. Most blocks already left the live region as they settled
+	 * (see updateStreaming's drain); this just commits the tail. Promoting from
+	 * the streaming state — not rebuilding from raw session/wire messages — is
 	 * what keeps each tool call's real final status: a role:"tool" message in
 	 * the OpenAI wire format carries no isError flag, so a rebuild could only
-	 * ever guess "ok". This also respects Ink's <Static>, which permanently
-	 * commits whatever an index held the first time it renders and never
-	 * revisits it — pushing a tool call before it's done would freeze it at
-	 * "running" forever, so this only runs at true turn boundaries.
+	 * ever guess "ok". Respects Ink's <Static>, which permanently commits
+	 * whatever an index held the first time it renders and never revisits it —
+	 * safe here because a tool block only ever leaves streaming once it's no
+	 * longer "running" (both here and in the incremental drain).
 	 */
 	const promoteStreamingToHistory = useCallback(() => {
 		const s = streamingRef.current;
