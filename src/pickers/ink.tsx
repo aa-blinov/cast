@@ -32,8 +32,14 @@ export function ModalPicker<T>(props: {
 		}
 	});
 	const title = props.opts?.title;
+	const error = props.opts?.error;
 	return (
 		<Box flexDirection="column" padding={1}>
+			{error && (
+				<Box marginBottom={1}>
+					<Text color="red">{error}</Text>
+				</Box>
+			)}
 			{title && (
 				<Text bold color={TITLE_COLOR}>
 					{title}
@@ -61,6 +67,7 @@ export function TextInputModal(props: {
 	label: string;
 	defaultValue?: string;
 	placeholder?: string;
+	error?: string;
 	onSubmit: (value: string) => void;
 	onCancel: () => void;
 }): JSX.Element {
@@ -88,6 +95,11 @@ export function TextInputModal(props: {
 	});
 	return (
 		<Box flexDirection="column" padding={1}>
+			{props.error && (
+				<Box marginBottom={1}>
+					<Text color="red">{props.error}</Text>
+				</Box>
+			)}
 			<Text bold color={TITLE_COLOR}>
 				{props.label}
 			</Text>
@@ -141,13 +153,14 @@ export const inkPickers: Pickers = {
 		});
 	},
 
-	promptText(label: string, defaultValue?: string, placeholder?: string): Promise<string | null> {
+	promptText(label: string, defaultValue?: string, placeholder?: string, error?: string): Promise<string | null> {
 		return new Promise((resolve) => {
 			const instance = render(
 				<TextInputModal
 					label={label}
 					defaultValue={defaultValue}
 					placeholder={placeholder}
+					error={error}
 					onSubmit={(v) => {
 						resolve(v);
 						instance.unmount();

@@ -13,7 +13,12 @@ export type ModalRequest =
 			label: string;
 			defaultValue?: string;
 			placeholder?: string;
+			error?: string;
 			resolve: (value: string | null) => void;
+	  }
+	| {
+			kind: "status";
+			label: string;
 	  };
 
 interface ModalBridge {
@@ -56,19 +61,27 @@ function createModalBridge(onLog: (text: string) => void): ModalBridge {
 				});
 			});
 		},
-		promptText(label: string, defaultValue?: string, placeholder?: string): Promise<string | null> {
+		promptText(label: string, defaultValue?: string, placeholder?: string, error?: string): Promise<string | null> {
 			return new Promise((resolvePromise) => {
 				setRequest({
 					kind: "text",
 					label,
 					defaultValue,
 					placeholder,
+					error,
 					resolve: (value) => {
 						setRequest(null);
 						resolvePromise(value);
 					},
 				});
 			});
+		},
+		status(label: string): () => void {
+			// Callers always dismiss the spinner before opening the next modal
+			// (in a finally, or right after the awaited step), so a plain clear is
+			// safe — nothing has replaced it by the time dismiss runs.
+			setRequest({ kind: "status", label });
+			return () => setRequest(null);
 		},
 		log(text: string): void {
 			onLog(text);

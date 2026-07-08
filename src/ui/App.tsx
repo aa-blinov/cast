@@ -20,6 +20,7 @@ import { Composer } from "./Composer.tsx";
 import { canSubmitDuringRun, handleInput } from "./commands.ts";
 import { gradientHex } from "./gradient.ts";
 import { useModalBridge } from "./pickerBridge.ts";
+import { Spinner } from "./Spinner.tsx";
 import { type UseAgentSession, useAgentSession } from "./useAgentSession.ts";
 import { useTerminalResync } from "./useTerminalResync.ts";
 
@@ -293,9 +294,16 @@ export function App(props: AppProps): JSX.Element {
 					label={modalRequest.label}
 					defaultValue={modalRequest.defaultValue}
 					placeholder={modalRequest.placeholder}
+					error={modalRequest.error}
 					onSubmit={modalRequest.resolve}
 					onCancel={() => modalRequest.resolve(null)}
 				/>
+			)}
+			{modalRequest?.kind === "status" && (
+				<Box>
+					<Spinner />
+					<Text> {modalRequest.label}</Text>
+				</Box>
 			)}
 			{/* Stays up for as long as the message is actually queued — not a
 			    timed toast, since a tool-heavy turn can take much longer than a
