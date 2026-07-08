@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import {
+	reconfigureConnection,
 	resolveConnection,
 	selectModel,
 	selectPersona,
@@ -8,7 +9,15 @@ import {
 	tryCliModel,
 } from "../pickers/domain.ts";
 import type { Pickers } from "../pickers/types.ts";
-import { type AppConfig, fetchModels, loadConfig, lookupContextWindow, runOnboardingCheck } from "./config.ts";
+import {
+	type AppConfig,
+	fetchModels,
+	loadConfig,
+	lookupContextWindow,
+	type ProviderProbe,
+	probeProvider,
+	runOnboardingCheck,
+} from "./config.ts";
 import { formatContextFilesForPrompt, loadProjectContextFiles } from "./context-files.ts";
 import type { McpSetupResult } from "./mcp.ts";
 import { findPersona, type LoadPersonasOptions, listPersonas, type Persona } from "./personas.ts";
@@ -88,6 +97,39 @@ function warmModelMetadataInBackground(config: AppConfig, forModel: string): Pro
 			if (found?.contextWindow && found.contextWindow > 0) config.contextWindow = found.contextWindow;
 		})
 		.catch(() => {});
+}
+
+function probeReason(probe: Exclude<ProviderProbe, "ok" | "unknown">, baseURL: string): string {
+	if (probe === "auth")
+		return "API key rejected — it may be revoked, expired, or wrong. Enter new provider credentials.";
+	if (probe === "permission") return "API key lacks permission for this endpoint. Enter new provider credentials.";
+	return `Cannot reach ${baseURL}. Enter the provider URL and API key again.`;
+}
+
+/**
+ * Called on a startup failure path (saved/CLI model didn't validate) before
+ * falling through to model selection. Probes the provider: if the connection
+ * itself is dead (revoked key, dead endpoint), re-prompts credentials in place
+ * and loops until it's live — otherwise a revoked-key user lands in a model
+ * picker that can never succeed, since no id validates against a rejected key.
+ * A reachable-but-unclassifiable provider ("unknown", e.g. one without
+ * /v1/models) is left alone so we don't nag on a false positive. Mutates
+ * config + persists new creds (mirroring /provider). Exits if the user cancels.
+ */
+async function ensureConnectionAlive(config: AppConfig, pickers: Pickers): Promise<void> {
+	while (true) {
+		const probe = await probeProvider(config);
+		if (probe === "ok" || probe === "unknown") return;
+		const creds = await reconfigureConnection(
+			pickers,
+			{ baseURL: config.baseURL, apiKey: config.apiKey },
+			probeReason(probe, config.baseURL),
+		);
+		if (!creds) process.exit(0);
+		config.baseURL = creds.baseURL;
+		config.apiKey = creds.apiKey;
+		updateSettings({ providerUrl: creds.baseURL, apiKey: creds.apiKey });
+	}
 }
 
 /**
@@ -178,6 +220,10 @@ export async function runStartup(
 			const p = warmModelMetadataInBackground(config, model);
 			if (p) await p;
 		} else {
+			// --model failed to validate — same fork as the saved-model path: make
+			// sure the connection is actually alive before routing to a model
+			// picker that can't help if the key/endpoint is the real problem.
+			await ensureConnectionAlive(config, pickers);
 			const sel = await selectModel(config, pickers);
 			if (!sel) process.exit(0);
 			model = sel.model;
@@ -186,13 +232,21 @@ export async function runStartup(
 		}
 	} else if (settings.model) {
 		onProgress?.("Connecting to model...");
-		const ok = await runOnboardingCheck(config, settings.model, { silent: true });
+		let ok = await runOnboardingCheck(config, settings.model, { silent: true });
+		if (!ok) {
+			// The saved model failed — but that might be the *connection* (revoked
+			// key, dead endpoint), not the model. Re-prompt credentials if so, then
+			// re-check the saved model: fixing the key often makes it valid again,
+			// sparing the user from re-picking a model they never changed.
+			await ensureConnectionAlive(config, pickers);
+			ok = await runOnboardingCheck(config, settings.model, { silent: true });
+		}
 		if (ok) {
 			model = settings.model;
 			const p = warmModelMetadataInBackground(config, model);
 			if (p) await p;
 		} else {
-			console.log("failed, selecting new model");
+			console.log("Saved model unavailable — selecting a new one.");
 			const sel = await selectModel(config, pickers);
 			if (!sel) process.exit(0);
 			model = sel.model;

@@ -260,3 +260,40 @@ export async function runOnboardingCheck(
 	log(`Model "${model}": failed — ${result.error}`);
 	return false;
 }
+
+/** Outcome of a provider liveness probe — see probeProvider. */
+export type ProviderProbe = "ok" | "auth" | "permission" | "unreachable" | "unknown";
+
+/**
+ * Classify why a provider request failed, from status/wording. Pure so it can
+ * be unit-tested without a live endpoint. "unknown" is the safe default (e.g. a
+ * provider that just doesn't implement /v1/models) — callers treat it as "not
+ * clearly a connection failure" and don't force a credential re-prompt on it.
+ */
+export function classifyProviderError(error: unknown): Exclude<ProviderProbe, "ok"> {
+	const status = (error as { status?: number } | undefined)?.status;
+	const message = error instanceof Error ? error.message : String(error);
+	if (status === 401 || /\b401\b|unauthorized|invalid api key/i.test(message)) return "auth";
+	if (status === 403 || /\b403\b|forbidden/i.test(message)) return "permission";
+	if (/ECONNREFUSED|ENOTFOUND|ETIMEDOUT|fetch failed/i.test(message)) return "unreachable";
+	return "unknown";
+}
+
+/**
+ * Lightweight endpoint + key liveness check, classified. Used on the startup
+ * failure path to tell "the saved model is gone" (→ pick another) apart from
+ * "the key/endpoint is dead" (→ re-enter provider credentials). Routing a
+ * revoked-key user to a model picker is a dead end: no model id can validate
+ * against a rejected key.
+ */
+export async function probeProvider(config: AppConfig): Promise<ProviderProbe> {
+	// See llm.ts createClient: native fetch avoids the SDK shim's mid-response bug.
+	const client = new OpenAI({ baseURL: config.baseURL, apiKey: config.apiKey, fetch: globalThis.fetch });
+	try {
+		const list = await client.models.list();
+		await list[Symbol.asyncIterator]().next();
+		return "ok";
+	} catch (error) {
+		return classifyProviderError(error);
+	}
+}
