@@ -10,6 +10,8 @@ export interface PickOption<T> {
 export interface PickOptions {
 	title?: string;
 	defaultIndex?: number;
+	/** A prior-attempt error shown in red above the title (e.g. failed validation). */
+	error?: string;
 }
 
 /**
@@ -22,7 +24,14 @@ export interface PickOptions {
  */
 export interface Pickers {
 	pickOption<T>(options: PickOption<T>[], opts?: PickOptions): Promise<T | null>;
-	promptText(label: string, defaultValue?: string, placeholder?: string): Promise<string | null>;
+	promptText(label: string, defaultValue?: string, placeholder?: string, error?: string): Promise<string | null>;
+	/**
+	 * Show a spinner with a label while an async step runs (model validation,
+	 * fetching the model list); returns a function that dismisses it. Optional —
+	 * implementations without a live Ink tree (startup's one-shot pickers, test
+	 * fakes) omit it and callers fall back to no spinner.
+	 */
+	status?(label: string): () => void;
 	/**
 	 * One-off status text (connection checks, trust prompts, etc.) — readline
 	 * just `console.log`s it; the TUI routes it through the same notice line

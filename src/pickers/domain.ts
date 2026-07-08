@@ -37,6 +37,37 @@ export async function resolveConnection(
 	return { baseURL, apiKey };
 }
 
+/**
+ * Re-prompt for provider URL + key when an established connection has gone bad
+ * (revoked key, moved endpoint). Unlike resolveConnection, this always asks —
+ * it's reached only after a liveness probe already failed, so the saved values
+ * are known-broken. The URL is pre-filled (usually only the key changed) and
+ * kept if left blank; a fresh key is required (the old one is known-bad, so
+ * "keep current" makes no sense). Returns null if the user cancels (Escape).
+ */
+export async function reconfigureConnection(
+	pickers: Pickers,
+	current: { baseURL: string; apiKey: string },
+	reason: string,
+): Promise<{ baseURL: string; apiKey: string } | null> {
+	pickers.log(reason);
+
+	const url = await pickers.promptText("Provider base URL", current.baseURL, current.baseURL);
+	if (url === null) return null;
+	const baseURL = url.trim() || current.baseURL;
+
+	const key = await pickers.promptText(
+		"Provider API key",
+		undefined,
+		`new key (current ends ...${current.apiKey.slice(-4)})`,
+	);
+	if (key === null) return null;
+	const apiKey = key.trim();
+	if (!apiKey) return null;
+
+	return { baseURL, apiKey };
+}
+
 // ============================================================================
 // Project trust
 // ============================================================================
@@ -184,66 +215,142 @@ export async function selectSession(pickers: Pickers): Promise<SessionState | nu
 // ============================================================================
 
 /**
+ * Validate a model behind a spinner, capturing the specific failure line for
+ * display. runOnboardingCheck's per-step progress ("endpoint: ok", "model:
+ * ok", ...) is pure noise here — it flashes and vanishes as the picker
+ * re-renders — so we run it `silent` (suppresses the success chatter) and
+ * route its output into a capture-only sink rather than the notice line. Only
+ * the *failure* reason is kept, to be shown in red on the next picker; success
+ * shows nothing but the spinner that was already up.
+ */
+async function validateModelForSelection(
+	config: AppConfig,
+	pickers: Pickers,
+	model: string,
+): Promise<{ ok: boolean; reason?: string }> {
+	const done = pickers.status?.(`Checking ${model}...`);
+	let lastLine = "";
+	try {
+		const ok = await runOnboardingCheck(config, model, {
+			silent: true,
+			log: (t) => {
+				lastLine = t;
+			},
+		});
+		return { ok, reason: ok ? undefined : lastLine || `Model "${model}" is unavailable` };
+	} finally {
+		done?.();
+	}
+}
+
+/**
  * Returns null if the user cancels (Escape / empty submit) rather than
  * exiting the process — this is also called mid-session (the TUI's
  * /model and /provider commands), where exiting on cancel would kill the
  * whole running app instead of just leaving the current model in place.
  * Onboarding call sites, which do need to exit if nothing gets picked,
  * check for null themselves and exit there instead.
+ *
+ * `lastError` carries the reason a previous attempt failed so it can be shown
+ * in the picker title — the retry recursion would otherwise bounce the user
+ * straight back to the list with no visible sign of what went wrong.
  */
 export async function selectModel(
 	config: AppConfig,
 	pickers: Pickers,
 	current?: string,
+	lastError?: string,
 ): Promise<ModelSelection | null> {
-	pickers.log(`Endpoint: ${config.baseURL}\nFetching models...`);
+	const fetching = pickers.status?.("Loading models...");
 	const result = await fetchModels(config);
+	fetching?.();
 
-	const options: PickOption<{
-		model: string;
-		reasoningMeta?: ModelReasoningMeta;
-		contextWindow?: number;
-	}>[] = [];
+	// A real model pick carries its metadata; the sentinel row routes to
+	// free-text entry instead.
+	type ModelChoice = { model: string; reasoningMeta?: ModelReasoningMeta; contextWindow?: number } | { custom: true };
+	const options: PickOption<ModelChoice>[] = [];
 
 	if (result.ok && result.models && result.models.length > 0) {
 		setModelsCache(result.models);
-		pickers.log(`Found ${result.models.length} models.`);
 		for (const m of result.models) {
 			options.push({
 				value: { model: m.id, reasoningMeta: m.reasoning, contextWindow: m.contextWindow },
 				label: `${m.id}${m.reasoning ? " [reasoning]" : ""}${m.id === current ? " (current)" : ""}`,
 			});
 		}
-	} else {
-		pickers.log(result.error ? `Models not available: ${result.error}` : "Models not available.");
 	}
 
-	if (options.length > 0) {
-		// Start the cursor on the current model so /model doubles as "show
-		// current" — the picker opens highlighting what's already selected.
-		const currentIdx = current ? options.findIndex((o) => o.value.model === current) : -1;
-		const picked = await pickers.pickOption(options, {
-			title: "Select model",
-			defaultIndex: currentIdx >= 0 ? currentIdx : 0,
-		});
-		if (!picked) return null;
-		const ok = await runOnboardingCheck(config, picked.model, { log: pickers.log });
-		if (ok)
-			return {
-				model: picked.model,
-				reasoningMeta: picked.reasoningMeta,
-				contextWindow: picked.contextWindow,
-			};
-		pickers.log("Onboarding check failed — try again.");
-		return selectModel(config, pickers);
+	// The provider's /v1/models list is never authoritative — aliases,
+	// freshly-released ids, and private deployments can all be absent — so a
+	// user must always be able to type an id by hand. When the list came back
+	// empty there's nothing to choose from, so skip the one-row menu and go
+	// straight to input.
+	if (options.length === 0) {
+		return promptCustomModel(
+			config,
+			pickers,
+			current,
+			lastError ?? (result.error ? `Couldn't load model list: ${result.error}` : undefined),
+		);
 	}
 
-	const name = await pickers.promptText("Model name", undefined, "gpt-4o, claude-sonnet-4-20250514, ...");
-	if (!name) return null;
-	const ok = await runOnboardingCheck(config, name.trim(), { log: pickers.log });
-	if (ok) return { model: name.trim() };
-	pickers.log("Onboarding check failed — try again.");
-	return selectModel(config, pickers);
+	options.push({ value: { custom: true }, label: "Enter a custom model id..." });
+
+	// Start the cursor on the current model so /model doubles as "show
+	// current" — the picker opens highlighting what's already selected.
+	const currentIdx = current ? options.findIndex((o) => "model" in o.value && o.value.model === current) : -1;
+	const picked = await pickers.pickOption(options, {
+		title: "Select model",
+		// Prior failure shown in red above the title; stays on screen the whole
+		// time the picker is open, unlike a transient notice line.
+		error: lastError,
+		defaultIndex: currentIdx >= 0 ? currentIdx : 0,
+	});
+	if (!picked) return null;
+
+	if ("custom" in picked) {
+		return promptCustomModel(config, pickers, current);
+	}
+
+	const { ok, reason } = await validateModelForSelection(config, pickers, picked.model);
+	if (ok) {
+		return { model: picked.model, reasoningMeta: picked.reasoningMeta, contextWindow: picked.contextWindow };
+	}
+	return selectModel(config, pickers, current, reason);
+}
+
+/**
+ * Prompt for a raw model id and validate it with a real provider round-trip
+ * (runOnboardingCheck) before returning. The selection is only handed back —
+ * and therefore only applied by the caller — once the provider confirms it
+ * actually serves that id; an unvalidated id is never applied. On failure this
+ * re-opens the full picker (carrying the reason so it stays visible) so the
+ * user can retry, pick from the list, or cancel. Escape / empty submit returns
+ * null (cancel), leaving a mid-session /model with the current model untouched.
+ */
+async function promptCustomModel(
+	config: AppConfig,
+	pickers: Pickers,
+	current?: string,
+	lastError?: string,
+): Promise<ModelSelection | null> {
+	// Prior failure shown in red above the prompt (a header that stays on
+	// screen), so the user sees why the last id was rejected while typing the
+	// next one.
+	const name = await pickers.promptText(
+		"Custom model id",
+		undefined,
+		"gpt-4o, claude-sonnet-4-20250514, ...",
+		lastError,
+	);
+	if (name === null) return null;
+	const model = name.trim();
+	if (!model) return null;
+
+	const { ok, reason } = await validateModelForSelection(config, pickers, model);
+	if (ok) return { model };
+
+	return selectModel(config, pickers, current, reason);
 }
 
 export async function tryCliModel(config: AppConfig, model: string): Promise<ModelSelection | null> {
