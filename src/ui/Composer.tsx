@@ -170,11 +170,10 @@ export function Composer({
 		chipCounterRef.current = 0;
 	};
 
-	const handleCtrlC = () => {
-		if (runningRef.current) {
-			onAbortRef.current();
-			return;
-		}
+	// Ctrl+C is exit-with-confirmation in every state, including mid-generation:
+	// first press arms the hint, a second within 2s quits. Stopping a running
+	// turn is Esc's job now, not Ctrl+C's.
+	const handleExitRequest = () => {
 		const now = Date.now();
 		if (now - lastCtrlCRef.current < 2000) {
 			onExitRef.current();
@@ -228,6 +227,15 @@ export function Composer({
 	handleEventRef.current = (event: InputEvent) => {
 		const b = bufRef.current;
 
+		// Esc stops a running turn — the headline behavior, checked before
+		// anything else so it wins regardless of what's in the composer (an open
+		// command palette, a half-typed /steer). The buffer is left intact so
+		// that in-progress text isn't lost when the turn is aborted.
+		if (event.type === "binding" && event.binding === "input.escape" && runningRef.current) {
+			onAbortRef.current();
+			return;
+		}
+
 		if (paletteOpen) {
 			if (event.type === "binding") {
 				if (event.binding === "editor.cursorUp") {
@@ -253,6 +261,7 @@ export function Composer({
 			}
 		} else {
 			if (event.type === "binding" && event.binding === "input.escape") {
+				// Idle Esc clears the composer.
 				b.clear();
 				setPendingPastes([]);
 				chipCounterRef.current = 0;
@@ -269,7 +278,7 @@ export function Composer({
 					b.insertNewline();
 					break;
 				case "input.abort":
-					handleCtrlC();
+					handleExitRequest();
 					break;
 				case "input.attachImage":
 					handleAttachImage();
@@ -497,7 +506,7 @@ export function Composer({
 						</Text>
 						<Text color="gray">
 							{running
-								? "/queue to queue, /steer to inject..."
+								? "Esc to stop · /queue to queue, /steer to inject..."
 								: "type / for commands, Shift+Enter for newline, Ctrl+G to attach image"}
 						</Text>
 					</Text>
