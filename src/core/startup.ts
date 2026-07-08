@@ -282,8 +282,12 @@ export async function runStartup(
 	updateSettings({
 		model,
 		reasoningLevel: config.reasoningLevel,
-		providerUrl: baseURL,
-		apiKey,
+		// Persist the *current* connection, not the resolveConnection consts —
+		// ensureConnectionAlive may have replaced a revoked key mid-startup, and
+		// writing the stale consts here would clobber it, forcing a re-prompt on
+		// every launch.
+		providerUrl: config.baseURL,
+		apiKey: config.apiKey,
 		cwd,
 	});
 
