@@ -120,7 +120,7 @@ function probeReason(probe: Exclude<ProviderProbe, "ok" | "unknown">, baseURL: s
  * a different account/provider whose model set differs, so the caller re-picks
  * the model rather than reusing the saved one.
  */
-async function ensureConnectionAlive(config: AppConfig, pickers: Pickers): Promise<boolean> {
+export async function ensureConnectionAlive(config: AppConfig, pickers: Pickers): Promise<boolean> {
 	let changed = false;
 	while (true) {
 		const probe = await probeProvider(config);
