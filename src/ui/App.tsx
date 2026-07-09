@@ -361,9 +361,13 @@ export function App(props: AppProps): JSX.Element {
 					    changes the frame string so the redraw always happens. */}
 					{repaintKey % 2 === 1 ? "\u200b" : null}
 				</Text>
-				{agent.usage && agent.usage.totalTokens > 0 && (
+				{((agent.usage && agent.usage.totalTokens > 0) || agent.elapsedMs > 0) && (
 					<Text color={theme().muted} dimColor>
-						{formatUsageTotals(agent.usage, agent.lastTurnUsage, session.messages, config)}
+						{agent.usage && agent.usage.totalTokens > 0
+							? formatUsageTotals(agent.usage, agent.lastTurnUsage, session.messages, config, agent.elapsedMs)
+							: agent.elapsedMs > 0
+								? fmtElapsed(agent.elapsedMs)
+								: ""}
 					</Text>
 				)}
 			</Box>
@@ -385,20 +389,23 @@ export function abbreviateTokens(n: number): string {
 	return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
 }
 
+const fmtElapsed = (ms: number): string => `${(ms / 1000).toFixed(1)}s`;
+
 function formatUsageTotals(
 	usage: SessionUsage,
 	lastTurnUsage: UseAgentSession["lastTurnUsage"],
 	messages: import("../core/llm.ts").Message[],
 	config: AppConfig,
+	elapsedMs: number,
 ): string {
 	const cacheStr =
 		(usage.cacheReadTokens || usage.cacheWriteTokens) && usage.promptTokens > 0
 			? ` (${Math.round((usage.cacheReadTokens / usage.promptTokens) * 100)}% cached)`
 			: "";
 	const tpsStr = lastTurnUsage?.tokensPerSecond ? ` │ ${lastTurnUsage.tokensPerSecond.toFixed(1)} tok/s` : "";
-	const costStr = usage.cost ? ` │ $${usage.cost.toFixed(4)}` : "";
+	const turnStr = elapsedMs > 0 ? ` │ ${fmtElapsed(elapsedMs)}` : "";
 	const ctxStr = formatContextPct(messages, config);
-	return `${abbreviateTokens(usage.promptTokens)} in${cacheStr} / ${abbreviateTokens(usage.completionTokens)} out │ ${ctxStr}${costStr}${tpsStr}`;
+	return `${abbreviateTokens(usage.promptTokens)} in${cacheStr} / ${abbreviateTokens(usage.completionTokens)} out │ ${ctxStr}${tpsStr}${turnStr}`;
 }
 
 export function formatContextPct(messages: import("../core/llm.ts").Message[], config: AppConfig): string {

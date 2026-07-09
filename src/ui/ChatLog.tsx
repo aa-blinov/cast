@@ -122,7 +122,7 @@ function ToolCallView({ call }: { call: ToolCallEntry }): JSX.Element {
 				<Text color={theme().tool}>[{call.name}]</Text> <Text color={statusColor}>[{call.status}]</Text>{" "}
 				<ToolSummary name={call.name} args={call.args} />
 			</Text>
-			{call.result && (
+			{call.result && call.name !== "read" && (
 				<Text color={call.status === "error" ? theme().error : theme().muted} wrap="truncate">
 					{call.result.slice(0, 500)}
 					{call.result.length > 500 ? " ..." : ""}

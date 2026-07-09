@@ -73,11 +73,12 @@ export function useTerminalResync(onResync: () => void): void {
 			// on screen. Recompute both directions so the guard can never latch.
 			const m = CUU_RE.exec(s);
 			if (m) {
-				const cuuScrolled = (Number(m[1]) || 1) > (out.rows || 24);
-				if (cuuScrolled) scrollUp = true;
-				// Only clear the flag via CUU when DECXCPR is not active —
-				// DECXCPR is authoritative when the interval is running.
-				else if (!decxprActive) scrollUp = false;
+				// During streaming the live area routinely exceeds terminal height —
+				// Ink handles that by letting the terminal scroll naturally. Only
+				// DECXCPR (layer b) can reliably detect *user*-initiated scroll,
+				// so never latch scrollUp from the CUU heuristic alone.
+				const cuuFits = (Number(m[1]) || 1) <= (out.rows || 24);
+				if (cuuFits && !decxprActive) scrollUp = false;
 			}
 
 			if (scrollUp && CURSOR_OR_ERASE_RE.test(s)) {
@@ -98,6 +99,7 @@ export function useTerminalResync(onResync: () => void): void {
 
 		function startQuery() {
 			if (!process.stdin.isTTY) return;
+			if (queryTimeout) clearTimeout(queryTimeout);
 			// Pause stdin so Ink can't consume the DECXCPR response.
 			process.stdin.pause();
 			decxprActive = true;
@@ -108,6 +110,7 @@ export function useTerminalResync(onResync: () => void): void {
 			function cleanup(scrolled: boolean) {
 				if (!active) return;
 				active = false;
+				decxprActive = false;
 				process.stdin.off("data", onStdin);
 				process.stdin.resume();
 				scrollUp = scrolled;
