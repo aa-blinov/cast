@@ -131,6 +131,9 @@ export interface UseAgentSession {
 	resetQueue: () => void;
 	/** Append a display-only message (not persisted to session). */
 	addDisplayMessage: (message: ChatMessage) => void;
+	/** Live stopwatch: ms since the current turn started. Freezes on the
+	 * final value when the turn ends, resets to 0 on next submit. */
+	elapsedMs: number;
 }
 
 interface UseAgentSessionParams {
@@ -244,6 +247,10 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	const [retry, setRetry] = useState<RetryInfo | null>(null);
 	const [usage, setUsage] = useState<UseAgentSession["usage"]>(() => ({ ...session.usage }));
 	const [lastTurnUsage, setLastTurnUsage] = useState<UseAgentSession["lastTurnUsage"]>(null);
+	// Live stopwatch: ticks while the agent is running, freezes on the final
+	// value when the turn ends, resets on the next submit.
+	const [elapsedMs, setElapsedMs] = useState(0);
+	const turnStartRef = useRef(0);
 	// Warnings shown in the chat history (e.g. "vision not supported").
 	// Persist until the next submit, always appear before the agent's response.
 	const [warnings, setWarnings] = useState<string[]>([]);
@@ -278,6 +285,16 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		contextFilesSessionRef.current = session.id;
 		contextFilesRef.current = [];
 	}
+
+	// Live stopwatch: start an interval when the agent starts running,
+	// freeze on the final value when it stops, reset on next submit.
+	useEffect(() => {
+		if (status === "running") {
+			turnStartRef.current = Date.now();
+			const id = setInterval(() => setElapsedMs(Date.now() - turnStartRef.current), 200);
+			return () => clearInterval(id);
+		}
+	}, [status]);
 
 	// Flush pending streaming state to React immediately.
 	const flushStreaming = useCallback(() => {
@@ -379,6 +396,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			setError(null);
 			setRetry(null);
 			setLastTurnUsage(null);
+			setElapsedMs(0);
 			setWarnings([]);
 
 			const userContent =
@@ -692,5 +710,6 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		refresh,
 		resetQueue,
 		addDisplayMessage,
+		elapsedMs,
 	};
 }

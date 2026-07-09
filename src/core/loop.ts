@@ -248,6 +248,12 @@ export async function runAgentLoop(initialMessages: Message[], loopConfig: LoopC
 
 async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<void> {
 	const { config, model: initialModel, cwd, systemPrompt, onEvent, onWarning, signal, mcpToolIndex } = loopConfig;
+
+	// The same signal is reused across every LLM request, compaction call,
+	// and tool execution in the loop. Each call may attach an abort listener
+	// (OpenAI SDK, child-process kill handlers, etc.). Raise the cap once so
+	// Node doesn't warn on long-running agentic sessions.
+	if (signal) setMaxListeners(100, signal);
 	const tools = [...getToolDefinitions(), ...(loopConfig.mcpTools ?? [])];
 	const builtinExecuteTool = createToolExecutor(cwd, config, loopConfig.confirmBash);
 	const executeTool = mcpToolIndex
@@ -659,9 +665,8 @@ async function executeToolCalls(
 		onEvent({ type: "tool_start", id: tc.id, name: tc.name, args: tc.args ? JSON.stringify(tc.args) : "{}" });
 	}
 
-	// Each parallel tool call adds an abort listener to the shared signal.
-	// Raise the cap so Node doesn't warn on batches > 10.
-	if (signal && prepared.length > 0) setMaxListeners(prepared.length + 5, signal);
+	// setMaxListeners(100, signal) is already called once in runLoop — no need
+	// to raise it per-batch (and doing so with a small batch would *lower* it).
 
 	const results = await Promise.all(
 		prepared.map(async (tc): Promise<ToolCallResult> => {
