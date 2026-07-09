@@ -369,7 +369,7 @@ export function App(props: AppProps): JSX.Element {
  * Under the composer the exact digits don't matter — the magnitude does — and
  * the short form keeps the line from wrapping.
  */
-function abbreviateTokens(n: number): string {
+export function abbreviateTokens(n: number): string {
 	if (n < 1000) return String(n);
 	// 999,950+ would round to "1000.0k" — hand those to the M branch so it reads
 	// "1M" instead.
@@ -393,7 +393,7 @@ function formatUsageTotals(
 	return `${abbreviateTokens(usage.promptTokens)} in${cacheStr} / ${abbreviateTokens(usage.completionTokens)} out · ${ctxStr}${costStr}${tpsStr}`;
 }
 
-function formatContextPct(messages: import("../core/llm.ts").Message[], config: AppConfig): string {
+export function formatContextPct(messages: import("../core/llm.ts").Message[], config: AppConfig): string {
 	const used = estimateTokens(messages);
 	const budget = config.contextWindow - config.maxResponseTokens;
 	if (budget <= 0) return "ctx ?";
