@@ -1,19 +1,20 @@
 import type { Theme } from "./types.ts";
 
-/** The default cast theme — cyan→violet gradient, unchanged from the original palette. */
+/** The default cast theme — a cohesive cyan→violet palette. */
 export const cast: Theme = {
 	id: "cast",
 	label: "Cast (default)",
+	description: "Cyan→violet gradient — the original cast palette",
 	colors: {
 		gradient: { from: "#38e0ff", to: "#a855f7" },
-		user: "#4dc9f6",
-		agent: "#4ade80",
-		tool: "#38e0ff",
-		persona: "#7c3aed",
+		user: "#5eead4",
+		agent: "#a78bfa",
+		tool: "#38bdf8",
+		persona: "#c084fc",
 		accent: "#38e0ff",
-		success: "#4ade80",
-		warning: "#facc15",
-		error: "#f87171",
-		muted: "#6b7280",
+		success: "#34d399",
+		warning: "#fbbf24",
+		error: "#fb7185",
+		muted: "#64748b",
 	},
 };

@@ -3,6 +3,7 @@ import type { Theme } from "./types.ts";
 export const github: Theme = {
 	id: "github",
 	label: "GitHub",
+	description: "Clean blue-green — GitHub's UI palette",
 	colors: {
 		gradient: { from: "#0969da", to: "#8250df" },
 		user: "#0969da",

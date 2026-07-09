@@ -3,6 +3,7 @@ import type { Theme } from "./types.ts";
 export const dracula: Theme = {
 	id: "dracula",
 	label: "Dracula",
+	description: "Purple-green on dark background — Zeno Rocha, 2013",
 	colors: {
 		gradient: { from: "#bd93f9", to: "#ff79c6" },
 		user: "#8be9fd",

@@ -527,6 +527,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			ALL_THEMES.map((t) => ({
 				value: t.id,
 				label: `${t.label}${t.id === currentId ? " (current)" : ""}`,
+				description: t.description,
 			})),
 			{ title: "Color themes", defaultIndex: ALL_THEMES.findIndex((t) => t.id === currentId) },
 		);
