@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import OpenAI from "openai";
 import { type AppConfig, runOnboardingCheck } from "../core/config.ts";
 import { formatContextFilesForPrompt, loadProjectContextFiles } from "../core/context-files.ts";
@@ -62,6 +63,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/theme", description: "Change color theme" },
 	{ name: "/sessions", description: "List / switch / delete sessions" },
 	{ name: "/rules", description: "List loaded rules" },
+	{ name: "/repo", description: "Show cwd and git branch" },
 	{ name: "/quit", description: "Save and exit" },
 	{ name: "/help", description: "Show this command list" },
 	{ name: "/keys", description: "List all keybindings" },
@@ -625,6 +627,61 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		return;
 	}
 
+	if (input === "/repo") {
+		let isGit = false;
+		let branch = "—";
+		let dirty = "—";
+		let remote = "—";
+		let head = "—";
+		try {
+			execFileSync("git", ["rev-parse", "--is-inside-work-tree"], {
+				cwd: deps.cwd,
+				encoding: "utf8",
+				timeout: 3000,
+				stdio: ["pipe", "pipe", "pipe"],
+			});
+			isGit = true;
+			branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+				cwd: deps.cwd,
+				encoding: "utf8",
+				timeout: 3000,
+				stdio: ["pipe", "pipe", "pipe"],
+			}).trim();
+			const status = execFileSync("git", ["status", "--porcelain"], {
+				cwd: deps.cwd,
+				encoding: "utf8",
+				timeout: 3000,
+				stdio: ["pipe", "pipe", "pipe"],
+			});
+			dirty = status.trim() ? "true" : "false";
+			try {
+				remote = execFileSync("git", ["remote", "get-url", "origin"], {
+					cwd: deps.cwd,
+					encoding: "utf8",
+					timeout: 3000,
+					stdio: ["pipe", "pipe", "pipe"],
+				}).trim();
+			} catch {
+				// no remote
+			}
+			const log = execFileSync("git", ["log", "-1", "--pretty=%h %s"], {
+				cwd: deps.cwd,
+				encoding: "utf8",
+				timeout: 3000,
+				stdio: ["pipe", "pipe", "pipe"],
+			}).trim();
+			if (log) head = log;
+		} catch {
+			// not a git repo
+		}
+		deps.agent.addDisplayMessage({ role: "user", content: input });
+		deps.agent.addDisplayMessage({
+			role: "warning",
+			content: `cwd: ${deps.cwd}\ngit: ${isGit}\ngit branch: ${branch}\ndirty: ${dirty}\nremote: ${remote}\nhead: ${head}`,
+		});
+		return;
+	}
+
 	if (input === "/help") {
 		deps.agent.addDisplayMessage({ role: "user", content: input });
 		deps.agent.addDisplayMessage({
@@ -651,6 +708,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 				"  /theme              Change color theme\n" +
 				"  /sessions           List/switch sessions\n" +
 				"  /rules              List loaded rules\n" +
+				"  /repo               Show cwd and git branch\n" +
 				"  /keys               List keybindings\n" +
 				"  /quit               Save and exit (alias: /exit)",
 		});
