@@ -16,6 +16,7 @@ cast - Coding agent harness with swappable personas
 
 Usage:
   cast [options] [prompt]
+  cast run [options] <message>  Non-interactive mode (one prompt, stream to stdout, exit)
   cast upgrade [version] [--force]
                               Re-run the installer to update (release installs
                               only) — no-op if already on that version, unless
@@ -34,6 +35,7 @@ Options:
   --continue, -c             Resume the most recently updated session
   --resume                   Pick which saved session to resume (numbered list)
   --resume=<id>              Resume a specific session by id (see /sessions)
+  --session, -s <id>         Resume a specific session by id (alias for --resume=<id>)
   --persona, -p <name>       Persona to use (see /personas for the list)
                              Skips interactive selection.
   --bypass-permissions       Skip confirmation for dangerous bash commands
