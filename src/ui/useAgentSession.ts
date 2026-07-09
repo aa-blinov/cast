@@ -554,6 +554,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 							case "end":
 								if (event.reason === "aborted") {
 									setError("Aborted");
+								} else if (event.reason === "disconnected") {
+									setError("Disconnected — stream ended early, response may be incomplete");
 								} else if (event.reason !== "stop" && event.reason !== "error") {
 									// "error" reason's own detailed message was already set by
 									// the "error" event that fires right before this one —

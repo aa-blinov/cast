@@ -444,6 +444,28 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 					}
 				}
 
+				// A mid-stream abort doesn't always reject: undici can end the async
+				// iterator cleanly, so streamAndCollect returns a partial result and no
+				// exception reaches the outer catch. Without this the partial turn
+				// commits as a normal stop and never shows "Aborted" — the symptom of
+				// pressing Esc while reasoning streams. `interrupted` (not raw
+				// signal.aborted) so a turn that *finished* right before a late Esc is
+				// committed normally instead of being mislabeled aborted.
+				if (completion.interrupted) {
+					onEvent({ type: "end", reason: "aborted" });
+					return;
+				}
+
+				// Silent truncation: the stream ended mid-response with no finish_reason
+				// and no usage, and the user didn't abort — the provider dropped it.
+				// Stop and flag it so a cut-off answer isn't mistaken for a clean exit.
+				// The partial output still shows (promoted from the streaming state);
+				// like an abort, it isn't merged into wire history.
+				if (completion.disconnected) {
+					onEvent({ type: "end", reason: "disconnected" });
+					return;
+				}
+
 				if (completion.usage) {
 					onEvent({ type: "usage", usage: completion.usage, generationMs: completion.generationMs });
 				}

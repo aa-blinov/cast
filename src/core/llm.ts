@@ -390,6 +390,20 @@ export interface CompletionResult {
 	 * tsFirstByte)) — this measures decoding throughput, not request latency.
 	 */
 	generationMs?: number;
+	/**
+	 * True when the stream ended on an abort *before* a natural finish_reason
+	 * arrived — i.e. genuinely cut short. False for a turn that completed and
+	 * only then caught a late abort signal, so the loop commits it normally
+	 * instead of labeling a finished answer "Aborted".
+	 */
+	interrupted?: boolean;
+	/**
+	 * True when the stream ended mid-response with neither a finish_reason nor a
+	 * usage summary and no user abort — a silent provider drop/truncation that
+	 * would otherwise look like a clean completion. Lets the UI flag it
+	 * ("[disconnected]") so a cut-off answer isn't mistaken for a normal exit.
+	 */
+	disconnected?: boolean;
 }
 
 export async function streamAndCollect(
@@ -410,6 +424,11 @@ export async function streamAndCollect(
 	let finishReason = "stop";
 	let usage: Usage | undefined;
 	let firstChunkAt: number | undefined;
+	// Whether the provider actually sent a terminal finish_reason. A mid-stream
+	// abort can end the async iterator cleanly with none — distinguishing "cut
+	// short" from "finished, then the user hit Esc a beat late" so the latter
+	// isn't mislabeled aborted.
+	let sawFinish = false;
 
 	for await (const chunk of streamChat(client, model, messages, tools, maxTokens, signal, reasoningBody)) {
 		if (chunk.retrying) {
@@ -428,7 +447,10 @@ export async function streamAndCollect(
 			onThinking?.(chunk.thinking);
 		}
 		if (chunk.toolCalls) toolCalls = chunk.toolCalls;
-		if (chunk.finishReason) finishReason = chunk.finishReason;
+		if (chunk.finishReason) {
+			finishReason = chunk.finishReason;
+			sawFinish = true;
+		}
 	}
 	// Capture wall-clock end after the stream is fully consumed (matching
 	// opencode's tsLastByte-on-done pattern) rather than on the last chunk.
@@ -436,7 +458,17 @@ export async function streamAndCollect(
 
 	const generationMs =
 		firstChunkAt !== undefined && lastChunkAt !== undefined ? lastChunkAt - firstChunkAt : undefined;
-	return { content, thinking, toolCalls, finishReason, usage, generationMs };
+	// Interrupted only when the signal is set AND the stream never reached a
+	// natural end — a turn that finished right before the abort landed is a
+	// completed turn, not an aborted one.
+	const interrupted = Boolean(signal?.aborted && !sawFinish);
+	// Disconnected: content started streaming but the stream ended with neither a
+	// finish_reason nor a usage summary, and the user didn't abort — the provider
+	// dropped/truncated it. Requiring "no usage" as well as "no finish_reason"
+	// avoids false-flagging providers that omit finish_reason but still send a
+	// terminal usage chunk (include_usage) on a genuinely complete turn.
+	const disconnected = Boolean(!sawFinish && !signal?.aborted && firstChunkAt !== undefined && usage === undefined);
+	return { content, thinking, toolCalls, finishReason, usage, generationMs, interrupted, disconnected };
 }
 
 // ============================================================================

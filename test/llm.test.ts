@@ -167,6 +167,51 @@ describe("streamAndCollect — usage accounting", () => {
 	});
 });
 
+describe("streamAndCollect — interrupted / disconnected flags", () => {
+	// These run the REAL streamAndCollect over fake chunk streams (not a mock),
+	// so they actually exercise the sawFinish / usage detection the loop relies on.
+
+	it("flags disconnected when the stream ends with no finish_reason and no usage", async () => {
+		// Provider dropped mid-response: some content, then the stream just ends.
+		const client = fakeClient([{ choices: [{ delta: { content: "half an ans" } }] }]);
+		const result = await streamAndCollect(client, "m", [], [], 100);
+		expect(result.disconnected).toBe(true);
+		expect(result.interrupted).toBeFalsy();
+	});
+
+	it("does NOT flag disconnected when a finish_reason arrived", async () => {
+		const client = fakeClient([
+			{ choices: [{ delta: { content: "hi" } }] },
+			{ choices: [{ delta: {}, finish_reason: "stop" }] },
+		]);
+		const result = await streamAndCollect(client, "m", [], [], 100);
+		expect(result.disconnected).toBeFalsy();
+	});
+
+	it("does NOT flag disconnected when usage arrived without a finish_reason", async () => {
+		// A provider that omits finish_reason but sends a terminal usage chunk on a
+		// genuinely complete turn (the false-positive guard) — must not be flagged.
+		const client = fakeClient([
+			{ choices: [{ delta: { content: "hi" } }] },
+			{ choices: [], usage: { prompt_tokens: 1, completion_tokens: 1 } },
+		]);
+		const result = await streamAndCollect(client, "m", [], [], 100);
+		expect(result.disconnected).toBe(false);
+	});
+
+	it("flags interrupted (not disconnected) when the signal is aborted mid-stream with no finish", async () => {
+		const controller = new AbortController();
+		const client = fakeClient(
+			[{ choices: [{ delta: { content: "part" } }] }],
+			// Abort right after the chunk streams, before any finish_reason.
+			() => controller.abort(),
+		);
+		const result = await streamAndCollect(client, "m", [], [], 100, controller.signal);
+		expect(result.interrupted).toBe(true);
+		expect(result.disconnected).toBe(false);
+	});
+});
+
 describe("streamChat — message sanitization", () => {
 	function capturingClient(): { client: OpenAI; sent: () => unknown[] } {
 		let captured: unknown[] = [];

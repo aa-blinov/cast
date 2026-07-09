@@ -152,6 +152,87 @@ describe("runAgentLoop — abort vs. error", () => {
 		expect(events.some((e) => e.type === "error")).toBe(false);
 	});
 
+	it("reports 'aborted' when a mid-stream abort ends the stream cleanly (no exception)", async () => {
+		const controller = new AbortController();
+		const events: AgentEvent[] = [];
+
+		// Undici can end the async iterator cleanly on a mid-stream abort instead
+		// of throwing: streamAndCollect returns a partial result and reports
+		// interrupted=true (aborted before a natural finish_reason). This is the
+		// "Esc during reasoning shows no Aborted" case — without the post-stream
+		// check the turn would commit as a normal stop.
+		vi.mocked(streamAndCollect).mockImplementationOnce(async () => {
+			controller.abort();
+			return { content: "partial answer", thinking: "was mid-reasoning", finishReason: "stop", interrupted: true };
+		});
+
+		await runAgentLoop([{ role: "user", content: "hi" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			signal: controller.signal,
+			onEvent: (event) => events.push(event),
+		});
+
+		const endEvent = events.find((e) => e.type === "end");
+		expect(endEvent).toEqual({ type: "end", reason: "aborted" });
+		expect(events.some((e) => e.type === "error")).toBe(false);
+		// The partial turn must not have been committed as a finished assistant
+		// message (no turn_end) — it ends as an abort, not a normal stop.
+		expect(events.some((e) => e.type === "turn_end")).toBe(false);
+	});
+
+	it("does NOT report 'aborted' when the turn finished just before a late abort", async () => {
+		const controller = new AbortController();
+		const events: AgentEvent[] = [];
+
+		// The stream reached a natural finish_reason (interrupted=false), and only
+		// then did a late Esc set the signal. A completed answer must not be
+		// mislabeled "Aborted" — it commits as a normal stop.
+		vi.mocked(streamAndCollect).mockImplementationOnce(async () => {
+			controller.abort();
+			return { content: "Привет.", thinking: "", finishReason: "stop", interrupted: false };
+		});
+
+		await runAgentLoop([{ role: "user", content: "hi" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			signal: controller.signal,
+			onEvent: (event) => events.push(event),
+		});
+
+		const endEvent = events.find((e) => e.type === "end");
+		expect(endEvent).toEqual({ type: "end", reason: "stop" });
+		expect(events.some((e) => e.type === "turn_end")).toBe(true);
+	});
+
+	it("reports 'disconnected' when the stream is silently truncated (no finish, no usage, no abort)", async () => {
+		const events: AgentEvent[] = [];
+
+		// Provider dropped mid-response: the stream ended cleanly but never sent a
+		// finish_reason or usage summary, and there was no user abort. Must not
+		// look like a normal stop.
+		vi.mocked(streamAndCollect).mockImplementationOnce(async () => {
+			return { content: "half an ans", thinking: "", finishReason: "stop", disconnected: true };
+		});
+
+		await runAgentLoop([{ role: "user", content: "hi" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			onEvent: (event) => events.push(event),
+		});
+
+		const endEvent = events.find((e) => e.type === "end");
+		expect(endEvent).toEqual({ type: "end", reason: "disconnected" });
+		expect(events.some((e) => e.type === "turn_end")).toBe(false);
+		expect(events.some((e) => e.type === "error")).toBe(false);
+	});
+
 	it("still reports reason 'error' for a genuine failure unrelated to abort", async () => {
 		const events: AgentEvent[] = [];
 
