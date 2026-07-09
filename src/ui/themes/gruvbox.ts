@@ -3,6 +3,7 @@ import type { Theme } from "./types.ts";
 export const gruvbox: Theme = {
 	id: "gruvbox",
 	label: "Gruvbox",
+	description: "Retro groove warm tones — Pavel Pertsev",
 	colors: {
 		gradient: { from: "#fabd2f", to: "#d3869b" },
 		user: "#83a598",

@@ -4,6 +4,7 @@ import type { Theme } from "./types.ts";
 export const catppuccin: Theme = {
 	id: "catppuccin",
 	label: "Catppuccin",
+	description: "Pastel dark — soothing pastel colors for the cozy night owl",
 	colors: {
 		gradient: { from: "#89b4fa", to: "#cba6f7" },
 		user: "#89dceb",

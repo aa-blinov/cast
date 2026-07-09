@@ -3,6 +3,7 @@ import type { Theme } from "./types.ts";
 export const monokai: Theme = {
 	id: "monokai",
 	label: "Monokai",
+	description: "High contrast warm palette — Wimer Hazenberg, 2006",
 	colors: {
 		gradient: { from: "#f92672", to: "#ae81ff" },
 		user: "#66d9ef",

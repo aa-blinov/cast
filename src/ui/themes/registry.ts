@@ -4,15 +4,42 @@
  * component that needs a color calls `theme()` which reads from it.
  */
 
+import { ayu } from "./ayu.ts";
 import { cast } from "./cast.ts";
 import { catppuccin } from "./catppuccin.ts";
 import { dracula } from "./dracula.ts";
 import { github } from "./github.ts";
 import { gruvbox } from "./gruvbox.ts";
+import { kanagawa } from "./kanagawa.ts";
+import { molokai } from "./molokai.ts";
 import { monokai } from "./monokai.ts";
+import { nightOwl } from "./night-owl.ts";
+import { nord } from "./nord.ts";
+import { oneDark } from "./one-dark.ts";
+import { rosePine } from "./rose-pine.ts";
+import { solarized } from "./solarized.ts";
+import { tokyoNight } from "./tokyo-night.ts";
+import { tomorrowNight } from "./tomorrow-night.ts";
 import type { Theme, ThemeColors } from "./types.ts";
 
-export const ALL_THEMES: Theme[] = [cast, dracula, gruvbox, monokai, catppuccin, github];
+export const ALL_THEMES: Theme[] = [
+	ayu,
+	cast,
+	catppuccin,
+	dracula,
+	github,
+	gruvbox,
+	kanagawa,
+	molokai,
+	monokai,
+	nightOwl,
+	nord,
+	oneDark,
+	rosePine,
+	solarized,
+	tokyoNight,
+	tomorrowNight,
+];
 
 let active: Theme = cast;
 
