@@ -215,6 +215,12 @@ export function createToolExecutor(cwd: string, config: AppConfig, confirmBash?:
 // Bash
 // ============================================================================
 
+// Grace before a still-running command is *considered* for a live reveal (it
+// also has to look like it's waiting for input — see the prompt heuristic in
+// execBash). Long enough that ordinary fast commands exit first and never
+// flash on screen; short enough to surface a real prompt promptly.
+const BASH_LIVE_GRACE_MS = 300;
+
 async function execBash(
 	args: Record<string, unknown>,
 	cwd: string,
@@ -249,10 +255,6 @@ async function execBash(
 	return suspendAndRun(
 		() =>
 			new Promise((resolve) => {
-				// Show the command on stderr after Ink has suspended so the
-				// user knows what is about to run and what input is expected.
-				process.stderr.write(`\x1b[1m\x1b[36m$ ${command}\x1b[0m\n`);
-
 				const child = spawn("bash", ["-c", command], {
 					cwd,
 					env: process.env,
@@ -271,11 +273,50 @@ async function execBash(
 				let aborted = false;
 				const maxBytes = config.maxToolOutputBytes;
 
+				// Reveal a command live only when it looks like it's *waiting for
+				// input*, not merely slow: still running past a short grace AND its
+				// latest output isn't newline-terminated (a prompt leaves the cursor
+				// on the line — "Enter value: "). Streaming logs from a long test or
+				// build end every line with "\n", so they stay silent and aren't
+				// duplicated; a fast command exits before the grace and is never
+				// shown; an interactive prompt is surfaced (header + buffered prompt,
+				// then the rest live). Output is always captured for the model
+				// regardless — the live echo is the only extra.
+				let live = false;
+				let graced = false;
+				let tail = ""; // trailing bytes of combined output, to spot a waiting prompt
+				const preLive: Buffer[] = [];
+				const goLive = () => {
+					if (live) return;
+					live = true;
+					process.stderr.write(`\x1b[1m\x1b[36m$ ${command}\x1b[0m\n`);
+					for (const chunk of preLive) process.stderr.write(chunk);
+					preLive.length = 0;
+				};
+				const maybeGoLive = () => {
+					if (!live && graced && tail.length > 0 && !tail.endsWith("\n")) goLive();
+				};
+				const graceTimer = setTimeout(() => {
+					graced = true;
+					maybeGoLive();
+				}, BASH_LIVE_GRACE_MS);
+				const onChunk = (data: Buffer) => {
+					if (live) {
+						process.stderr.write(data);
+						return;
+					}
+					preLive.push(data);
+					tail = (tail + data.toString("utf-8")).slice(-256);
+					maybeGoLive();
+				};
+
 				child.stdout.on("data", (data: Buffer) => {
 					if (stdout.length < maxBytes) stdout += data.toString("utf-8");
+					onChunk(data);
 				});
 				child.stderr.on("data", (data: Buffer) => {
 					if (stderr.length < maxBytes) stderr += data.toString("utf-8");
+					onChunk(data);
 				});
 
 				const timer = setTimeout(() => {
@@ -291,6 +332,7 @@ async function execBash(
 
 				const cleanup = () => {
 					clearTimeout(timer);
+					clearTimeout(graceTimer);
 					signal?.removeEventListener("abort", onAbort);
 				};
 
@@ -299,8 +341,9 @@ async function execBash(
 						stdinSource.unpipe(child.stdin);
 					}
 
-					// Ensure a blank line between command output and Ink's frame.
-					process.stderr.write("\n");
+					// Blank line between live output and Ink's frame — only if we
+					// actually showed something live.
+					if (live) process.stderr.write("\n");
 
 					cleanup();
 					let output = stdout;
@@ -334,7 +377,7 @@ async function execBash(
 					if (stdinSource && child.stdin) {
 						stdinSource.unpipe(child.stdin);
 					}
-					process.stderr.write("\n");
+					if (live) process.stderr.write("\n");
 					cleanup();
 					resolve({ content: err.message, isError: true });
 				});
