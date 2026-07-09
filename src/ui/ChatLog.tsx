@@ -1,7 +1,7 @@
 import { Box, Static, Text } from "ink";
 import { type JSX, useMemo } from "react";
-import { gradientHex } from "./gradient.ts";
 import { Spinner } from "./Spinner.tsx";
+import { theme } from "./themes/index.ts";
 import type { ChatMessage, RetryInfo, StreamBlock, StreamingState, ToolCallEntry } from "./useAgentSession.ts";
 
 interface ChatLogProps {
@@ -17,17 +17,6 @@ interface ChatLogProps {
 	 */
 	repaintKey?: number;
 }
-
-const TOOL_COLOR = gradientHex(0);
-// Sampled from the same cyan→violet brand gradient (t=0.3 lands on a clean
-// sky blue) rather than raw ANSI "blue", which reads dark/muddy on a black
-// background and doesn't relate to the rest of the palette.
-const USER_COLOR = gradientHex(0.3);
-// No point along the cyan→violet gradient can be green (neither endpoint has
-// enough green channel to interpolate through it), so this is a standalone
-// hex picked to match the gradient's brightness/saturation level instead —
-// vivid and readable on black, not the muddier default ANSI "green".
-const AGENT_COLOR = "#4ade80";
 
 /**
  * Line-level churn between two blocks of text. Uses an LCS so the counts
@@ -83,10 +72,10 @@ function ToolSummary({ name, args }: { name: string; args: string }): JSX.Elemen
 			}
 			return (
 				<Text wrap="truncate">
-					<Text color="gray">{parsed.path} · </Text>
-					<Text color="green">+{added}</Text>
-					<Text color="gray"> </Text>
-					<Text color="red">-{removed}</Text>
+					<Text color={theme().muted}>{parsed.path} · </Text>
+					<Text color={theme().success}>+{added}</Text>
+					<Text color={theme().muted}> </Text>
+					<Text color={theme().error}>-{removed}</Text>
 				</Text>
 			);
 		}
@@ -94,7 +83,7 @@ function ToolSummary({ name, args }: { name: string; args: string }): JSX.Elemen
 		if (parsed && name === "write" && typeof parsed.path === "string") {
 			const lines = typeof parsed.content === "string" ? parsed.content.split("\n").length : 0;
 			return (
-				<Text color="gray" wrap="truncate">
+				<Text color={theme().muted} wrap="truncate">
 					{parsed.path} · {lines} {lines === 1 ? "line" : "lines"}
 				</Text>
 			);
@@ -106,7 +95,7 @@ function ToolSummary({ name, args }: { name: string; args: string }): JSX.Elemen
 					.join(", ")
 			: args.slice(0, 200);
 		return (
-			<Text color="gray" wrap="truncate">
+			<Text color={theme().muted} wrap="truncate">
 				{generic}
 			</Text>
 		);
@@ -114,15 +103,16 @@ function ToolSummary({ name, args }: { name: string; args: string }): JSX.Elemen
 }
 
 function ToolCallView({ call }: { call: ToolCallEntry }): JSX.Element {
-	const statusColor = call.status === "running" ? "yellow" : call.status === "error" ? "red" : "green";
+	const statusColor =
+		call.status === "running" ? theme().warning : call.status === "error" ? theme().error : theme().success;
 	return (
 		<Box flexDirection="column">
 			<Text>
-				<Text color={TOOL_COLOR}>[{call.name}]</Text> <Text color={statusColor}>[{call.status}]</Text>{" "}
+				<Text color={theme().tool}>[{call.name}]</Text> <Text color={statusColor}>[{call.status}]</Text>{" "}
 				<ToolSummary name={call.name} args={call.args} />
 			</Text>
 			{call.result && (
-				<Text color={call.status === "error" ? "red" : "gray"} wrap="truncate">
+				<Text color={call.status === "error" ? theme().error : theme().muted} wrap="truncate">
 					{call.result.slice(0, 500)}
 					{call.result.length > 500 ? " ..." : ""}
 				</Text>
@@ -139,7 +129,7 @@ function ToolCallView({ call }: { call: ToolCallEntry }): JSX.Element {
 function BlockView({ block }: { block: StreamBlock }): JSX.Element {
 	if (block.kind === "thinking") {
 		return (
-			<Text color="gray" dimColor>
+			<Text color={theme().muted} dimColor>
 				<Text bold>[reasoning] </Text>
 				{block.text}
 			</Text>
@@ -147,7 +137,7 @@ function BlockView({ block }: { block: StreamBlock }): JSX.Element {
 	}
 	if (block.kind === "content") {
 		return (
-			<Text color={AGENT_COLOR}>
+			<Text color={theme().agent}>
 				<Text bold>[agent] </Text>
 				{block.text}
 			</Text>
@@ -169,7 +159,7 @@ function MessageView({ message }: { message: ChatMessage }): JSX.Element {
 	if (message.role === "user") {
 		return (
 			<Box flexDirection="column">
-				<Text color={USER_COLOR}>
+				<Text color={theme().user}>
 					<Text bold>[user] </Text>
 					{message.content}
 				</Text>
@@ -188,7 +178,7 @@ function MessageView({ message }: { message: ChatMessage }): JSX.Element {
 	if (message.role === "warning") {
 		return (
 			<Box>
-				<Text color="yellow">{message.content}</Text>
+				<Text color={theme().warning}>{message.content}</Text>
 			</Box>
 		);
 	}
@@ -206,7 +196,7 @@ export function ChatLog({ messages, streaming, error, retry, repaintKey }: ChatL
 	// first (e.g. vision fallback), then the agent responded.
 	if (error) {
 		liveParts.push(
-			<Text key="error" color="red">
+			<Text key="error" color={theme().error}>
 				[{error}]
 			</Text>,
 		);
@@ -214,7 +204,7 @@ export function ChatLog({ messages, streaming, error, retry, repaintKey }: ChatL
 
 	if (retry) {
 		liveParts.push(
-			<Text key="retry" color="yellow">
+			<Text key="retry" color={theme().warning}>
 				[Retrying ({retry.attempt}/{retry.maxAttempts}): {retry.reason}]
 			</Text>,
 		);

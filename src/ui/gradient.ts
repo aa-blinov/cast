@@ -1,25 +1,31 @@
 /**
- * Shared cyan → violet palette — the "cast" banner's colors, reused for
- * the startup loader spinner and the composer's idle border so the brand
- * accent is consistent instead of every element picking its own color.
+ * Brand gradient + theme-aware color helpers. The active theme's gradient
+ * endpoints drive the banner, spinner, and composer border; semantic colors
+ * (user, agent, tool, etc.) are read directly from the theme registry.
  */
-const GRADIENT_FROM: [number, number, number] = [56, 224, 255]; // cyan
-const GRADIENT_TO: [number, number, number] = [168, 85, 247]; // violet
+import { theme } from "./themes/index.ts";
 
-function lerpColor(t: number): [number, number, number] {
-	const clamped = Math.max(0, Math.min(1, t));
-	return [0, 1, 2].map((i) => Math.round(GRADIENT_FROM[i]! + (GRADIENT_TO[i]! - GRADIENT_FROM[i]!) * clamped)) as [
-		number,
-		number,
-		number,
-	];
+function parseHex(hex: string): [number, number, number] {
+	const h = hex.replace("#", "");
+	return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
 }
 
 function toHex(rgb: [number, number, number]): string {
 	return `#${rgb.map((c) => c.toString(16).padStart(2, "0")).join("")}`;
 }
 
-/** Hex color at position `t` (0 = cyan, 1 = violet) along the palette. */
+function lerpColor(t: number): [number, number, number] {
+	const clamped = Math.max(0, Math.min(1, t));
+	const [r1, g1, b1] = parseHex(theme().gradient.from);
+	const [r2, g2, b2] = parseHex(theme().gradient.to);
+	return [
+		Math.round(r1 + (r2 - r1) * clamped),
+		Math.round(g1 + (g2 - g1) * clamped),
+		Math.round(b1 + (b2 - b1) * clamped),
+	];
+}
+
+/** Hex color at position `t` (0 = gradient start, 1 = gradient end). */
 export function gradientHex(t: number): string {
 	return toHex(lerpColor(t));
 }
