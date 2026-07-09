@@ -12,7 +12,7 @@ export const rosePine: Theme = {
 		tool: "#c4a7e7",
 		persona: "#ebbcba",
 		accent: "#c4a7e7",
-		success: "#31748f",
+		success: "#78c0a0",
 		warning: "#f6c177",
 		error: "#eb6f92",
 		muted: "#6e6a86",

@@ -13,7 +13,7 @@ export interface ThemeColors {
 	tool: string;
 	/** Header bar: persona name. */
 	persona: string;
-	/** Composer prompt character (">"), active border. */
+	/** Composer prompt character (">"), active UI highlights. */
 	accent: string;
 	/** Positive status, successful tool completion, image attached. */
 	success: string;

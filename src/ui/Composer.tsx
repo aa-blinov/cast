@@ -466,7 +466,7 @@ export function Composer({
 			<Box
 				flexDirection="column"
 				borderStyle="round"
-				borderColor={locked ? theme().muted : running ? theme().warning : theme().accent}
+				borderColor={locked ? theme().muted : running ? theme().warning : theme().success}
 				paddingX={1}
 			>
 				{visibleLines.map((line, i) => {

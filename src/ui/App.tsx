@@ -352,7 +352,7 @@ export function App(props: AppProps): JSX.Element {
 			<Box justifyContent="space-between">
 				<Text color={theme().muted} dimColor>
 					<Text color={theme().persona}>{currentPersona.label}</Text>
-					<Text color={theme().muted}> · </Text>
+					<Text color={theme().muted}> │ </Text>
 					<Text color={theme().muted}>{session.model}</Text>
 					{/* Zero-width marker toggled by the resize effect. After that effect
 					    clears the screen, Ink's log-update would otherwise skip redrawing
@@ -395,10 +395,10 @@ function formatUsageTotals(
 		(usage.cacheReadTokens || usage.cacheWriteTokens) && usage.promptTokens > 0
 			? ` (${Math.round((usage.cacheReadTokens / usage.promptTokens) * 100)}% cached)`
 			: "";
-	const tpsStr = lastTurnUsage?.tokensPerSecond ? ` · ${lastTurnUsage.tokensPerSecond.toFixed(1)} tok/s` : "";
-	const costStr = usage.cost ? ` · $${usage.cost.toFixed(4)}` : "";
+	const tpsStr = lastTurnUsage?.tokensPerSecond ? ` │ ${lastTurnUsage.tokensPerSecond.toFixed(1)} tok/s` : "";
+	const costStr = usage.cost ? ` │ $${usage.cost.toFixed(4)}` : "";
 	const ctxStr = formatContextPct(messages, config);
-	return `${abbreviateTokens(usage.promptTokens)} in${cacheStr} / ${abbreviateTokens(usage.completionTokens)} out · ${ctxStr}${costStr}${tpsStr}`;
+	return `${abbreviateTokens(usage.promptTokens)} in${cacheStr} / ${abbreviateTokens(usage.completionTokens)} out │ ${ctxStr}${costStr}${tpsStr}`;
 }
 
 export function formatContextPct(messages: import("../core/llm.ts").Message[], config: AppConfig): string {
