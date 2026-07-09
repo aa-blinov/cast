@@ -1,7 +1,8 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { constants, type Dirent } from "node:fs";
 import { access, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
+import * as pty from "node-pty";
 import type { AppConfig } from "./config.ts";
 import type { Tool } from "./llm.ts";
 import { checkDangerousBash } from "./permissions.ts";
@@ -221,12 +222,21 @@ export function createToolExecutor(cwd: string, config: AppConfig, confirmBash?:
 // flash on screen; short enough to surface a real prompt promptly.
 const BASH_LIVE_GRACE_MS = 300;
 
-// If a command has been running for this long with *zero* output from both
-// stdout and stderr, assume it's waiting for interactive input that goes
-// through /dev/tty (bypassing our pipes): bash's `read -p`, `sudo` password,
-// `git push` credential prompt, etc. Without this, the go-live heuristic
-// never fires because the prompt never appears on our stderr pipe.
+// If a command has been running for this long with *zero* PTY output, assume
+// it's waiting for interactive input that bypasses the PTY (e.g. a program
+// that opens /dev/tty directly). Fallback — PTY normally captures prompts.
 const BASH_LIVE_SILENT_MS = 2000;
+
+/** Strip ANSI escape sequences from PTY output for the model. */
+function stripAnsi(s: string): string {
+	const ESC = String.fromCharCode(0x1b);
+	const BEL = String.fromCharCode(0x07);
+	// biome-ignore lint/suspicious/noUselessEscapeInString: [ must be escaped in regex
+	const csi = new RegExp(`${ESC}\[[0-9;]*[a-zA-Z]`, "g");
+	// biome-ignore lint/suspicious/noUselessEscapeInString: ] must be escaped in regex
+	const osc = new RegExp(`${ESC}\][^${BEL}]*${BEL}`, "g");
+	return s.replace(csi, "").replace(osc, "");
+}
 
 async function execBash(
 	args: Record<string, unknown>,
@@ -260,14 +270,15 @@ async function execBash(
 	const stdinSource = getStdinSource();
 
 	return new Promise<ToolResult>((resolve) => {
-		const child = spawn("bash", ["-c", command], {
+		const child = pty.spawn("bash", ["-c", command], {
+			name: "xterm-256color",
+			cols: process.stdout.columns || 80,
+			rows: process.stdout.rows || 24,
 			cwd,
-			env: process.env,
-			stdio: ["pipe", "pipe", "pipe"],
+			env: process.env as Record<string, string>,
 		});
 
-		let stdout = "";
-		let stderr = "";
+		let rawOutput = "";
 		let timedOut = false;
 		let aborted = false;
 		const maxBytes = config.maxToolOutputBytes;
@@ -302,8 +313,11 @@ async function execBash(
 			});
 			void suspendAndRun(async () => {
 				// Ink is suspended and the composer has released stdin — only now
-				// forward it to the child, so keystrokes don't briefly go to both.
-				if (stdinSource && child.stdin) stdinSource.pipe(child.stdin, { end: false });
+				// forward it to the PTY, so keystrokes don't briefly go to both.
+				if (stdinSource) {
+					stdinListener = (chunk: Buffer) => child.write(chunk.toString());
+					stdinSource.on("data", stdinListener);
+				}
 				process.stderr.write(`\x1b[1m\x1b[36m$ ${command}\x1b[0m\n`);
 				for (const chunk of preLive) process.stderr.write(chunk);
 				preLive.length = 0;
@@ -325,25 +339,21 @@ async function execBash(
 		const silentTimer = setTimeout(() => {
 			if (!outputSeen) goLive();
 		}, BASH_LIVE_SILENT_MS);
-		const onChunk = (data: Buffer) => {
+		let stdinListener: ((chunk: Buffer) => void) | null = null;
+
+		const onChunk = (data: string) => {
 			outputSeen = true;
+			if (rawOutput.length < maxBytes) rawOutput += data;
 			if (live) {
 				process.stderr.write(data);
 				return;
 			}
-			preLive.push(data);
-			tail = (tail + data.toString("utf-8")).slice(-256);
+			preLive.push(Buffer.from(data, "utf-8"));
+			tail = (tail + data).slice(-256);
 			maybeGoLive();
 		};
 
-		child.stdout.on("data", (data: Buffer) => {
-			if (stdout.length < maxBytes) stdout += data.toString("utf-8");
-			onChunk(data);
-		});
-		child.stderr.on("data", (data: Buffer) => {
-			if (stderr.length < maxBytes) stderr += data.toString("utf-8");
-			onChunk(data);
-		});
+		child.onData((data: string) => onChunk(data));
 
 		const timer = setTimeout(() => {
 			timedOut = true;
@@ -371,36 +381,28 @@ async function execBash(
 			else resolve(result);
 		};
 
-		child.on("close", (code) => {
-			if (live && stdinSource && child.stdin) stdinSource.unpipe(child.stdin);
+		child.onExit(({ exitCode }) => {
+			if (stdinListener && stdinSource) stdinSource.removeListener("data", stdinListener);
 			cleanup();
-			let output = stdout;
-			if (stderr) output += (output ? "\n" : "") + stderr;
+			let output = stripAnsi(rawOutput).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 			if (aborted) {
 				output += "\n\nCommand aborted";
 			} else if (timedOut) {
+				const lower = output.toLowerCase();
 				const hint =
-					stderr.toLowerCase().includes("password") ||
-					stderr.toLowerCase().includes("username for") ||
-					stdout === ""
+					lower.includes("password") || lower.includes("username for") || output.trim() === ""
 						? " (command may be waiting for interactive input — use non-interactive flags or ask the user to run it manually)"
 						: "";
 				output += `\n\nCommand timed out after ${timeout} seconds${hint}`;
-			} else if (code !== 0 && code !== null) {
-				output += `\n\nProcess exited with code ${code}`;
+			} else if (exitCode !== 0) {
+				output += `\n\nProcess exited with code ${exitCode}`;
 			}
 			const lines = output.split("\n");
 			if (lines.length > config.maxToolOutputLines) {
 				const kept = lines.slice(-config.maxToolOutputLines);
 				output = `[Showing last ${config.maxToolOutputLines} of ${lines.length} lines]\n${kept.join("\n")}`;
 			}
-			finish({ content: output || "(no output)", isError: aborted || timedOut || (code !== 0 && code !== null) });
-		});
-
-		child.on("error", (err) => {
-			if (live && stdinSource && child.stdin) stdinSource.unpipe(child.stdin);
-			cleanup();
-			finish({ content: err.message, isError: true });
+			finish({ content: output || "(no output)", isError: aborted || timedOut || exitCode !== 0 });
 		});
 	});
 }
