@@ -43,6 +43,59 @@ describe("bash", () => {
 		expect(result.isError).toBe(true);
 	});
 
+	// Live-echo gating: only a command that looks like it's waiting for input
+	// (still running past the grace + non-newline-terminated output) is shown
+	// live; fast and long-but-line-buffered commands stay silent (captured only),
+	// so their output isn't duplicated on screen.
+	function captureStderr() {
+		const writes: string[] = [];
+		const spy = vi.spyOn(process.stderr, "write").mockImplementation(((chunk: string | Uint8Array) => {
+			writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf-8"));
+			return true;
+		}) as typeof process.stderr.write);
+		return { writes, restore: () => spy.mockRestore() };
+	}
+
+	it("does not echo a fast command live — captured only, no duplication", async () => {
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const { writes, restore } = captureStderr();
+		try {
+			const result = await exec("bash", { command: "echo fast-marker-1" });
+			expect(result.content.trim()).toBe("fast-marker-1");
+			expect(writes.join("")).not.toContain("fast-marker-1");
+		} finally {
+			restore();
+		}
+	});
+
+	it("does not echo a slow but newline-terminated (non-interactive) command live", async () => {
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const { writes, restore } = captureStderr();
+		try {
+			// Line-buffered output while still running past the grace — like a long
+			// test streaming logs. Must NOT be revealed live.
+			const result = await exec("bash", { command: "echo slow-line-marker; sleep 0.5" });
+			expect(result.content).toContain("slow-line-marker");
+			expect(writes.join("")).not.toContain("slow-line-marker");
+		} finally {
+			restore();
+		}
+	});
+
+	it("reveals a command live once it prints a waiting prompt (no trailing newline)", async () => {
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const { writes, restore } = captureStderr();
+		try {
+			// Prompt with no trailing newline + still running → looks interactive.
+			await exec("bash", { command: "printf 'Enter value: '; sleep 0.5" });
+			const joined = writes.join("");
+			expect(joined).toContain("Enter value: "); // prompt echoed live
+			expect(joined).toContain("$ "); // command header shown
+		} finally {
+			restore();
+		}
+	});
+
 	it("respects timeout", async () => {
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
 		const result = await exec("bash", { command: "sleep 10", timeout: 1 });
