@@ -1,11 +1,7 @@
 import { Box, render, Text, useInput } from "ink";
 import { type JSX, useState } from "react";
-import { gradientHex } from "../ui/gradient.ts";
+import { theme } from "../ui/themes/index.ts";
 import type { Pickers, PickOption, PickOptions } from "./types.ts";
-
-/** Same cyan→violet palette as the banner/loader/border/chat labels. */
-const TITLE_COLOR = gradientHex(0);
-const SELECTED_COLOR = gradientHex(1);
 
 export function ModalPicker<T>(props: {
 	options: PickOption<T>[];
@@ -37,27 +33,30 @@ export function ModalPicker<T>(props: {
 		<Box flexDirection="column" padding={1}>
 			{error && (
 				<Box marginBottom={1}>
-					<Text color="red">{error}</Text>
+					<Text color={theme().error}>{error}</Text>
 				</Box>
 			)}
 			{title && (
-				<Text bold color={TITLE_COLOR}>
+				<Text bold color={theme().accent}>
 					{title}
 				</Text>
 			)}
-			{props.options.map((o, i) => (
-				<Box key={o.label} flexDirection="column">
-					<Text>
-						<Text color={i === idx ? SELECTED_COLOR : "gray"}>{i === idx ? ">" : " "}</Text>{" "}
-						<Text color={i === idx ? SELECTED_COLOR : "white"} bold={i === idx}>
-							{o.label}
+			{props.options.map((o, i) => {
+				const selected = i === idx;
+				return (
+					<Box key={o.label} flexDirection="column">
+						<Text>
+							<Text color={selected ? theme().accent : theme().muted}>{selected ? ">" : " "}</Text>{" "}
+							<Text color={selected ? theme().accent : "white"} bold={selected}>
+								{o.label}
+							</Text>
 						</Text>
-					</Text>
-					{i === idx && o.description && <Text color="gray"> {o.description}</Text>}
-				</Box>
-			))}
+						{selected && o.description && <Text color={theme().muted}> {o.description}</Text>}
+					</Box>
+				);
+			})}
 			<Box marginTop={1}>
-				<Text color="gray">up/down select · Enter confirm · Esc cancel</Text>
+				<Text color={theme().muted}>up/down select · Enter confirm · Esc cancel</Text>
 			</Box>
 		</Box>
 	);
@@ -97,14 +96,14 @@ export function TextInputModal(props: {
 		<Box flexDirection="column" padding={1}>
 			{props.error && (
 				<Box marginBottom={1}>
-					<Text color="red">{props.error}</Text>
+					<Text color={theme().error}>{props.error}</Text>
 				</Box>
 			)}
-			<Text bold color={TITLE_COLOR}>
+			<Text bold color={theme().accent}>
 				{props.label}
 			</Text>
 			<Box>
-				<Text color="gray">{"> "}</Text>
+				<Text color={theme().muted}>{"> "}</Text>
 				<Text>{text}</Text>
 				<Text color="white" inverse>
 					{" "}
@@ -112,11 +111,11 @@ export function TextInputModal(props: {
 			</Box>
 			{props.placeholder && !text && (
 				<Box marginTop={1}>
-					<Text color="gray">{props.placeholder}</Text>
+					<Text color={theme().muted}>{props.placeholder}</Text>
 				</Box>
 			)}
 			<Box marginTop={1}>
-				<Text color="gray">Enter confirm · Esc cancel</Text>
+				<Text color={theme().muted}>Enter confirm · Esc cancel</Text>
 			</Box>
 		</Box>
 	);

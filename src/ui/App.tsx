@@ -18,14 +18,11 @@ import { ModalPicker, TextInputModal } from "../pickers/ink.tsx";
 import { ChatLog } from "./ChatLog.tsx";
 import { Composer } from "./Composer.tsx";
 import { canSubmitDuringRun, handleInput } from "./commands.ts";
-import { gradientHex } from "./gradient.ts";
 import { useModalBridge } from "./pickerBridge.ts";
 import { Spinner } from "./Spinner.tsx";
+import { theme } from "./themes/index.ts";
 import { type UseAgentSession, useAgentSession } from "./useAgentSession.ts";
 import { useTerminalResync } from "./useTerminalResync.ts";
-
-/** Midpoint of the banner/loader/border palette — distinct from user (cyan end) and agent (violet end). */
-const PERSONA_COLOR = gradientHex(0.5);
 
 interface AppProps {
 	result: StartupResult;
@@ -33,10 +30,11 @@ interface AppProps {
 	initialPrompt?: string;
 	onPasteImage?: () => Promise<string | null>;
 	onQuit: () => void;
+	onRepaintBanner?: () => Promise<void>;
 }
 
 export function App(props: AppProps): JSX.Element {
-	const { result, version, initialPrompt, onQuit, onPasteImage } = props;
+	const { result, version, initialPrompt, onQuit, onPasteImage, onRepaintBanner } = props;
 	const { config, runner } = result;
 
 	const [notice, setNotice] = useState<string | null>(null);
@@ -78,6 +76,14 @@ export function App(props: AppProps): JSX.Element {
 	const [cwd, setCwd] = useState(result.cwd);
 	const [reasoningMeta, setReasoningMeta] = useState(result.reasoningMeta);
 	const [personaOptions, setPersonaOptions] = useState(result.personaOptions);
+	// Theme change counter — forces a re-render when /theme switches the active
+	// theme, since theme() reads from a module-level singleton that Ink can't
+	// detect on its own.
+	const [_themeVer, setThemeVer] = useState(0);
+	const onThemeChange = useCallback(() => {
+		setThemeVer((v) => v + 1);
+		void onRepaintBanner?.();
+	}, [onRepaintBanner]);
 
 	const confirmBash = useMemo(() => makeConfirmBash(pickers, permissionMode), [pickers, permissionMode]);
 
@@ -225,6 +231,7 @@ export function App(props: AppProps): JSX.Element {
 		setReasoningMeta,
 		personaOptions,
 		setPersonaOptions,
+		onThemeChange,
 	});
 	depsRef.current = {
 		agent,
@@ -265,6 +272,7 @@ export function App(props: AppProps): JSX.Element {
 		setReasoningMeta,
 		personaOptions,
 		setPersonaOptions,
+		onThemeChange,
 	};
 
 	const handleSubmit = useCallback(async (text: string) => {
@@ -278,9 +286,9 @@ export function App(props: AppProps): JSX.Element {
 				streaming={agent.streaming}
 				error={agent.error}
 				retry={agent.retry}
-				repaintKey={repaintKey}
+				repaintKey={repaintKey + _themeVer}
 			/>
-			{notice && <Text color="yellow">{notice}</Text>}
+			{notice && <Text color={theme().warning}>{notice}</Text>}
 			{modalRequest?.kind === "option" && (
 				<ModalPicker
 					options={modalRequest.options}
@@ -313,14 +321,14 @@ export function App(props: AppProps): JSX.Element {
 			    them doesn't silently hide all but the last one. */}
 			{agent.pendingSteers.map((text, i) => (
 				// biome-ignore lint/suspicious/noArrayIndexKey: FIFO queue, no stable identity
-				<Text key={`steer-${i}`} color="yellow">
+				<Text key={`steer-${i}`} color={theme().warning}>
 					[Steer queued{agent.pendingSteers.length > 1 ? ` (${i + 1}/${agent.pendingSteers.length})` : ""}:{" "}
 					{text.slice(0, 60)}]
 				</Text>
 			))}
 			{agent.pendingQueue.map((text, i) => (
 				// biome-ignore lint/suspicious/noArrayIndexKey: FIFO queue, no stable identity
-				<Text key={`queue-${i}`} color="yellow">
+				<Text key={`queue-${i}`} color={theme().warning}>
 					[Queued{agent.pendingQueue.length > 1 ? ` (${i + 1}/${agent.pendingQueue.length})` : ""}:{" "}
 					{text.slice(0, 60)}]
 				</Text>
@@ -342,10 +350,10 @@ export function App(props: AppProps): JSX.Element {
 			    Usage is the session's running total (not per-message — that
 			    got noisy fast), right-aligned on the same row. */}
 			<Box justifyContent="space-between">
-				<Text color="gray" dimColor>
-					<Text color={PERSONA_COLOR}>{currentPersona.label}</Text>
-					<Text color="gray"> · </Text>
-					<Text color="gray">{session.model}</Text>
+				<Text color={theme().muted} dimColor>
+					<Text color={theme().persona}>{currentPersona.label}</Text>
+					<Text color={theme().muted}> · </Text>
+					<Text color={theme().muted}>{session.model}</Text>
 					{/* Zero-width marker toggled by the resize effect. After that effect
 					    clears the screen, Ink's log-update would otherwise skip redrawing
 					    an *unchanged* frame — leaving a blank screen on an empty session
@@ -354,7 +362,7 @@ export function App(props: AppProps): JSX.Element {
 					{repaintKey % 2 === 1 ? "\u200b" : null}
 				</Text>
 				{agent.usage && agent.usage.totalTokens > 0 && (
-					<Text color="gray" dimColor>
+					<Text color={theme().muted} dimColor>
 						{formatUsageTotals(agent.usage, agent.lastTurnUsage, session.messages, config)}
 					</Text>
 				)}

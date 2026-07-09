@@ -43,6 +43,8 @@ export interface Settings {
 	projectTrust?: Record<string, boolean>;
 	/** Updated automatically on each run */
 	updatedAt?: string;
+	/** Active color theme id (see src/ui/themes/registry.ts). */
+	theme?: string;
 }
 
 // ============================================================================

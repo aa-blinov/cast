@@ -4,13 +4,14 @@ import { CAST_BANNER } from "../core/help.ts";
 import { closeMcpConnections } from "../core/mcp.ts";
 import { saveSession } from "../core/session.ts";
 import { type ParsedArgs, runStartup } from "../core/startup.ts";
-import { setSuspendHook } from "../core/stdin-manager.ts";
+import { setSuspendHook, suspendAndRun } from "../core/stdin-manager.ts";
 import { inkPickers } from "../pickers/ink.tsx";
 import type { Pickers } from "../pickers/types.ts";
 import { App } from "./App.tsx";
 import { gradientBanner } from "./gradient.ts";
 import { saveClipboardImageToTempFile } from "./readClipboardImage.ts";
 import { Spinner } from "./Spinner.tsx";
+import { loadTheme } from "./themes/index.ts";
 
 function StartupLoader({ text }: { text: string }): JSX.Element {
 	return (
@@ -70,6 +71,10 @@ export async function runTui(args: ParsedArgs): Promise<void> {
 	const result = await runStartup(args, pickersWithLoaderHandoff, showLoader);
 	hideLoader();
 
+	// Load the saved theme before rendering the banner — gradientBanner reads
+	// from the active theme's gradient endpoints.
+	loadTheme(args.settings.theme);
+
 	console.log(gradientBanner(CAST_BANNER, args.version));
 
 	const onQuit = () => {
@@ -82,6 +87,17 @@ export async function runTui(args: ParsedArgs): Promise<void> {
 		return filePath;
 	};
 
+	// Repaint the banner with the current theme's gradient. Uses suspendAndRun
+	// to temporarily pause Ink so raw stdout writes don't fight its managed frame.
+	const bannerLines = CAST_BANNER.split("\n").length + 2; // +2 for version + blank
+	const onRepaintBanner = async () => {
+		await suspendAndRun(async () => {
+			// Move cursor up past the banner lines and clear them
+			process.stdout.write(`\x1b[${bannerLines}A\x1b[J`);
+			process.stdout.write(`${gradientBanner(CAST_BANNER, args.version)}\n`);
+		});
+	};
+
 	const { waitUntilExit } = render(
 		<App
 			result={result}
@@ -89,6 +105,7 @@ export async function runTui(args: ParsedArgs): Promise<void> {
 			initialPrompt={args.initialPrompt}
 			onPasteImage={onPasteImage}
 			onQuit={onQuit}
+			onRepaintBanner={onRepaintBanner}
 		/>,
 	);
 

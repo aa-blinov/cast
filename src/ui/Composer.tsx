@@ -2,14 +2,14 @@ import { Box, Text, useStdin } from "ink";
 import { type JSX, useEffect, useMemo, useRef, useState } from "react";
 import { registerStdinOwner, type StdinOwner, setStdinSource, unregisterStdinOwner } from "../core/stdin-manager.ts";
 import { SLASH_COMMANDS } from "./commands.ts";
-import { gradientHex } from "./gradient.ts";
 import { type InputEvent, InputParser } from "./input/input-parser.ts";
 import { StdinBuffer } from "./input/stdin-buffer.ts";
 import { TextBuffer } from "./input/textarea.ts";
 import { chipCharFor, expandPastes, isChipChar, type PendingPaste, pasteLabel } from "./paste.ts";
+import { theme } from "./themes/index.ts";
 
-const PROMPT_COLOR = gradientHex(0);
-const BORDER_COLOR_ACTIVE = gradientHex(1);
+// Theme colors read at render time — these are reactive because the Composer
+// re-renders when the theme changes (via a state bump in App).
 
 interface ComposerProps {
 	onSubmit: (text: string) => void;
@@ -433,7 +433,7 @@ export function Composer({
 
 	return (
 		<Box flexDirection="column">
-			{imageNotice && <Text color="green">{imageNotice}</Text>}
+			{imageNotice && <Text color={theme().success}>{imageNotice}</Text>}
 			{paletteOpen && filteredCmds.length > 0 && (
 				<Box flexDirection="column" borderStyle="single" borderColor="gray" paddingX={1}>
 					{/* Always PALETTE_ROWS slots, padded with blank lines, and each row
@@ -446,13 +446,13 @@ export function Composer({
 						if (!c) return <Text key={`empty-${i}`}> </Text>;
 						const selected = paletteScroll + i === safeIdx;
 						return (
-							<Text key={c.name} color={selected ? "green" : "gray"} wrap="truncate">
+							<Text key={c.name} color={selected ? theme().success : theme().muted} wrap="truncate">
 								{selected ? "> " : "  "}
-								<Text bold={selected}>{c.name}</Text> <Text color="gray">{c.description}</Text>
+								<Text bold={selected}>{c.name}</Text> <Text color={theme().muted}>{c.description}</Text>
 							</Text>
 						);
 					})}
-					<Text color="gray">
+					<Text color={theme().muted}>
 						↑↓ · Tab/Enter · Esc
 						{filteredCmds.length > PALETTE_ROWS ? ` · ${safeIdx + 1}/${filteredCmds.length}` : ""}
 					</Text>
@@ -460,13 +460,13 @@ export function Composer({
 			)}
 			{exitHint && (
 				<Box>
-					<Text color="yellow">[Press Ctrl+C again to exit]</Text>
+					<Text color={theme().warning}>[Press Ctrl+C again to exit]</Text>
 				</Box>
 			)}
 			<Box
 				flexDirection="column"
 				borderStyle="round"
-				borderColor={locked ? "gray" : running ? "yellow" : BORDER_COLOR_ACTIVE}
+				borderColor={locked ? theme().muted : running ? theme().warning : theme().accent}
 				paddingX={1}
 			>
 				{visibleLines.map((line, i) => {
@@ -481,7 +481,7 @@ export function Composer({
 					const atColChip = isCursorLine ? (chipLabels.get(atCol) ?? null) : null;
 					return (
 						<Text key={realLine}>
-							<Text color={PROMPT_COLOR} bold>
+							<Text color={theme().accent} bold>
 								{realLine === 0 ? "> " : "  "}
 							</Text>
 							{renderWithChips(beforeCol, chipLabels, `${realLine}-before`)}
@@ -501,10 +501,10 @@ export function Composer({
 				})}
 				{lines.length === 0 && (
 					<Text>
-						<Text color={PROMPT_COLOR} bold>
+						<Text color={theme().accent} bold>
 							{"> "}
 						</Text>
-						<Text color="gray">
+						<Text color={theme().muted}>
 							{running
 								? "Esc to stop · /queue to queue, /steer to inject..."
 								: "type / for commands, Shift+Enter for newline, Ctrl+G to attach image"}

@@ -28,6 +28,7 @@ import {
 } from "../pickers/domain.ts";
 import type { Pickers } from "../pickers/types.ts";
 import { TUI_KEYBINDINGS } from "./input/keybindings.ts";
+import { ALL_THEMES, getActiveTheme, setActiveTheme } from "./themes/index.ts";
 import type { PendingImage, UseAgentSession } from "./useAgentSession.ts";
 
 /**
@@ -58,6 +59,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/rule:", description: "Invoke a rule by name", takesArgs: true },
 	{ name: "/provider", description: "Change provider URL and API key" },
 	{ name: "/permissions", description: "Change bash confirmation mode" },
+	{ name: "/theme", description: "Change color theme" },
 	{ name: "/sessions", description: "List / switch / delete sessions" },
 	{ name: "/rules", description: "List loaded rules" },
 	{ name: "/quit", description: "Save and exit" },
@@ -104,6 +106,7 @@ export interface CommandDeps {
 	pickers: Pickers;
 	reasoningMeta: ModelReasoningMeta | undefined;
 	setReasoningMeta: (m: ModelReasoningMeta | undefined) => void;
+	onThemeChange?: () => void;
 }
 
 /**
@@ -505,6 +508,39 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		return;
 	}
 
+	if (input === "/theme" || input.startsWith("/theme ")) {
+		const arg = input.slice("/theme".length).trim();
+		if (arg) {
+			const found = ALL_THEMES.find((t) => t.id === arg);
+			if (!found) {
+				showNotice(`[Unknown theme "${arg}". Use /theme to list available.]`);
+				return;
+			}
+			setActiveTheme(found.id);
+			updateSettings({ theme: found.id });
+			deps.onThemeChange?.();
+			showNotice(`[Theme: ${found.label}]`);
+			return;
+		}
+		const currentId = getActiveTheme().id;
+		const picked = await deps.pickers.pickOption(
+			ALL_THEMES.map((t) => ({
+				value: t.id,
+				label: `${t.label}${t.id === currentId ? " (current)" : ""}`,
+			})),
+			{ title: "Color themes", defaultIndex: ALL_THEMES.findIndex((t) => t.id === currentId) },
+		);
+		if (!picked) {
+			showNotice("[Cancelled — theme unchanged]");
+			return;
+		}
+		setActiveTheme(picked);
+		updateSettings({ theme: picked });
+		deps.onThemeChange?.();
+		showNotice(`[Theme: ${ALL_THEMES.find((t) => t.id === picked)?.label ?? picked}]`);
+		return;
+	}
+
 	if (input === "/sessions") {
 		const chosen = await selectSession(deps.pickers);
 		if (!chosen) {
@@ -611,6 +647,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 				"  /rule:<name>        Invoke a rule\n" +
 				"  /provider           Change provider URL\n" +
 				"  /permissions        Change bash confirmation mode\n" +
+				"  /theme              Change color theme\n" +
 				"  /sessions           List/switch sessions\n" +
 				"  /rules              List loaded rules\n" +
 				"  /keys               List keybindings\n" +
