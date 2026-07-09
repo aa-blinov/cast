@@ -656,8 +656,8 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			"editor.deleteToLineEnd": "Delete to line end",
 			"input.newLine": "New line",
 			"input.submit": "Submit",
-			"input.abort": "Abort / Exit",
-			"input.escape": "Clear input",
+			"input.abort": "Exit (2× to confirm)",
+			"input.escape": "Stop turn / clear input",
 			"input.attachImage": "Attach image",
 			"input.tab": "Autocomplete",
 		};
@@ -703,9 +703,14 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			return `  ${label.padEnd(22)} ${keys}`;
 		});
 		const header = "Keybindings";
+		// Esc and Ctrl+C are context-dependent (a single label can't capture it):
+		// spell out what each does while a turn is running vs idle.
+		const notes =
+			"\n\n  Esc      stops the current turn while generating; clears the input otherwise" +
+			"\n  Ctrl+C   press twice within 2s to exit (does not stop a turn — use Esc for that)";
 		deps.agent.addDisplayMessage({
 			role: "warning",
-			content: `${header}\n${lines.join("\n")}`,
+			content: `${header}\n${lines.join("\n")}${notes}`,
 		});
 		return;
 	}
