@@ -226,6 +226,102 @@ const BASH_LIVE_GRACE_MS = 300;
 // that opens /dev/tty directly). Fallback — PTY normally captures prompts.
 const BASH_LIVE_SILENT_MS = 2000;
 
+// Known non-interactive command prefixes — these never need live terminal
+// output (their streaming logs end every line with "\n", but slow builds
+// can still trigger the tail heuristic).  Matched against the trimmed
+// command string so leading whitespace / env vars don't fool the check.
+const NON_LIVE_PATTERNS: RegExp[] = [
+	// JS/TS ecosystem
+	/^npm\s+(run|test|ci|install|build|start|exec|publish|pack|version)/,
+	/^npx\s/,
+	/^node\s/,
+	/^yarn\b/,
+	/^pnpm\b/,
+	/^bun\s+(run|test|install|build|x)\b/,
+	/^turbo\s+(run|build|test|lint)/,
+	/^nx\s+(run|build|test|lint|affected)/,
+	/^vitest\b/,
+	/^jest\b/,
+	/^mocha\b/,
+	/^eslint\b/,
+	/^prettier\b/,
+	/^tsc\b/,
+	/^esbuild\b/,
+	/^vite\s+build/,
+	/^webpack\b/,
+	/^rollup\b/,
+	// Build tools
+	/^make\b/,
+	/^cmake\b/,
+	/^ninja\b/,
+	/^meson\b/,
+	/^bazel\b/,
+	/^gradle[w]?\b/,
+	/^mvn\b/,
+	/^ant\b/,
+	// Rust
+	/^cargo\s+(build|test|check|run|clippy|fmt|doc|bench|publish|install)/,
+	/^rustup\b/,
+	// Go
+	/^go\s+(build|test|run|install|vet|fmt|mod|generate|tool|get|clean)/,
+	// C/C++
+	/^gcc\b/,
+	/^g\+\+\b/,
+	/^clang\b/,
+	/^clang\+\+\b/,
+	// Python
+	/^python[3]?\s+(-m\s+)?(pytest|unittest|tox|setup\.py|build|compile)/,
+	/^pip[3]?\s+(install|wheel|download|compile)/,
+	/^poetry\b/,
+	/^pipenv\b/,
+	/^conda\b/,
+	/^mypy\b/,
+	/^ruff\b/,
+	/^black\b/,
+	/^flake8\b/,
+	/^pylint\b/,
+	/^isort\b/,
+	/^uv\s+(pip|run|build|sync|tool)/,
+	// Ruby
+	/^bundle\b/,
+	/^rake\b/,
+	/^gem\s+(install|build)/,
+	// PHP
+	/^composer\b/,
+	// Docker / containers
+	/^docker\s+(build|compose|pull|push|tag|save|load)/,
+	/^podman\b/,
+	// Git (non-interactive subcommands)
+	/^git\s+(clone|pull|push|fetch|stash|branch|checkout|merge|rebase|log|diff|status|add|commit|remote|tag|reset|cherry-pick|revert|bisect|clean|gc|fsck|worktree)/,
+	// Package managers (system)
+	/^brew\b/,
+	/^apt(-get)?\b/,
+	/^yum\b/,
+	/^dnf\b/,
+	/^pacman\b/,
+	/^apk\b/,
+	/^zypper\b/,
+	// Network
+	/^curl\b/,
+	/^wget\b/,
+	/^http\b/,
+	// Misc CI / tooling
+	/^terraform\b/,
+	/^ansible\b/,
+	/^kubectl\b/,
+	/^helm\b/,
+	/^rsync\b/,
+	/^scp\b/,
+	/^tar\b/,
+	/^zip\b/,
+	/^unzip\b/,
+];
+
+function isNonLiveCommand(cmd: string): boolean {
+	const trimmed = cmd.replace(/^\s*(?:\w+=\S+\s+)*/, ""); // strip leading ENV=val
+	return NON_LIVE_PATTERNS.some((re) => re.test(trimmed));
+}
+
 /** Strip ANSI escape sequences from PTY output for the model. */
 function stripAnsi(s: string): string {
 	const ESC = String.fromCharCode(0x1b);
@@ -263,7 +359,7 @@ async function execBash(
 	// completion regardless, since this function never saw the AbortSignal
 	// at all. Wiring it in here means /abort actually kills it.
 	if (signal?.aborted) {
-		return { content: "Aborted before the command started.", isError: true };
+		return { content: "[ABORTED] Command was interrupted by user (before execution started).", isError: true };
 	}
 
 	const stdinSource = getStdinSource();
@@ -308,6 +404,7 @@ async function execBash(
 				cwd,
 				env: process.env,
 				stdio: ["pipe", "pipe", "pipe"],
+				detached: true, // separate process group so kill(-pid) wipes all children
 			});
 			const dataListeners: ((data: string) => void)[] = [];
 			proc.stdout.on("data", (d: Buffer) => {
@@ -317,7 +414,7 @@ async function execBash(
 				for (const fn of dataListeners) fn(d.toString("utf-8"));
 			});
 			child = {
-				kill: (s) => proc.kill(s as NodeJS.Signals),
+				kill: (s) => process.kill(-proc.pid!, s as NodeJS.Signals),
 				write: (d) => proc.stdin?.write(d),
 				onData: (h) => dataListeners.push(h),
 				onExit: (h) => proc.on("close", (code) => h({ exitCode: code ?? 1 })),
@@ -356,7 +453,7 @@ async function execBash(
 		let releaseSuspend: () => void = () => {};
 
 		const goLive = () => {
-			if (live) return;
+			if (live || isNonLiveCommand(command)) return;
 			live = true;
 			const suspended = new Promise<void>((r) => {
 				releaseSuspend = r;
@@ -413,6 +510,15 @@ async function execBash(
 		const onAbort = () => {
 			aborted = true;
 			child.kill("SIGKILL");
+			// Safety net: if onExit never fires (D-state / hung I/O),
+			// force-resolve after 5 s instead of hanging forever.
+			setTimeout(() => {
+				if (!finalResult)
+					finish({
+						content: "[ABORTED] Command was interrupted by user (forced — process did not exit).",
+						isError: true,
+					});
+			}, 5000);
 		};
 		signal?.addEventListener("abort", onAbort, { once: true });
 
@@ -435,16 +541,19 @@ async function execBash(
 			if (stdinListener && stdinSource) stdinSource.removeListener("data", stdinListener);
 			cleanup();
 			let output = stripAnsi(rawOutput).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-			if (aborted) {
-				output += "\n\nCommand aborted";
-			} else if (timedOut) {
-				const lower = output.toLowerCase();
-				const hint =
-					lower.includes("password") || lower.includes("username for") || output.trim() === ""
-						? " (command may be waiting for interactive input — use non-interactive flags or ask the user to run it manually)"
-						: "";
-				output += `\n\nCommand timed out after ${timeout} seconds${hint}`;
-			} else if (exitCode !== 0) {
+			const prefix = aborted
+				? "[ABORTED] Command was interrupted by user.\n\n"
+				: timedOut
+					? (() => {
+							const lower = output.toLowerCase();
+							const hint =
+								lower.includes("password") || lower.includes("username for") || output.trim() === ""
+									? " (command may be waiting for interactive input — use non-interactive flags or ask the user to run it manually)"
+									: "";
+							return `[TIMED OUT] after ${timeout} seconds${hint}.\n\n`;
+						})()
+					: "";
+			if (exitCode !== 0 && !aborted && !timedOut) {
 				output += `\n\nProcess exited with code ${exitCode}`;
 			}
 			const lines = output.split("\n");
@@ -452,7 +561,7 @@ async function execBash(
 				const kept = lines.slice(-config.maxToolOutputLines);
 				output = `[Showing last ${config.maxToolOutputLines} of ${lines.length} lines]\n${kept.join("\n")}`;
 			}
-			finish({ content: output || "(no output)", isError: aborted || timedOut || exitCode !== 0 });
+			finish({ content: prefix + (output || "(no output)"), isError: aborted || timedOut || exitCode !== 0 });
 		});
 	});
 }

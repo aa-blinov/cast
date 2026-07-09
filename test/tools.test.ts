@@ -125,7 +125,7 @@ describe("bash", () => {
 			const result = await exec("bash", { command: "read -p 'Name: ' name && echo Hello_$name", timeout: 3 });
 			// read blocks forever (no stdin in test) — expect timeout
 			expect(result.isError).toBe(true);
-			expect(result.content).toContain("timed out");
+			expect(result.content).toContain("[TIMED OUT]");
 		} finally {
 			restore();
 		}
@@ -155,7 +155,7 @@ describe("bash", () => {
 		const elapsed = Date.now() - start;
 
 		expect(result.isError).toBe(true);
-		expect(result.content).toContain("aborted");
+		expect(result.content).toContain("[ABORTED]");
 		// Killed promptly, nowhere near the 30s sleep or 60s timeout it would
 		// otherwise have run for.
 		expect(elapsed).toBeLessThan(5000);

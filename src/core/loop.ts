@@ -1,3 +1,4 @@
+import { setMaxListeners } from "node:events";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -294,6 +295,24 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 		}
 	};
 
+	// Build an assistant message from partial content and persist it into
+	// `messages` so aborted/disconnected turns survive in session history.
+	const persistPartialAssistant = (content: string, thinking: string) => {
+		if (!content && !thinking) return;
+		const assistantMsg: Message = {
+			role: "assistant",
+			content: content || EMPTY_ASSISTANT_PLACEHOLDER,
+		};
+		messages.push(assistantMsg);
+		onEvent({ type: "assistant_message", content, thinking });
+	};
+
+	// Accumulate partial content so aborted/disconnected turns can be
+	// persisted into session history (the catch block can't read
+	// streamAndCollect's locals after it throws).
+	let partialContent = "";
+	let partialThinking = "";
+
 	try {
 		// Outer loop: continues when follow-up messages arrive after agent would stop
 		let overflowCompacted = false;
@@ -361,6 +380,9 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 				// contains "[Image: ...]" so the agent still knows an image was
 				// there — it just can't see it.
 				let completion: Awaited<ReturnType<typeof streamAndCollect>>;
+				// Accumulate partial content so aborted/disconnected turns can be
+				// persisted into session history (the catch block can't read
+				// streamAndCollect's locals after it throws).
 				try {
 					completion = await streamAndCollect(
 						client,
@@ -369,8 +391,14 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 						tools,
 						config.maxResponseTokens,
 						signal,
-						(token) => onEvent({ type: "token", text: token }),
-						(token) => onEvent({ type: "thinking", text: token }),
+						(token) => {
+							partialContent += token;
+							onEvent({ type: "token", text: token });
+						},
+						(token) => {
+							partialThinking += token;
+							onEvent({ type: "thinking", text: token });
+						},
 						config.reasoningParams.body,
 						(attempt, maxAttempts, reason) => onEvent({ type: "retry", attempt, maxAttempts, reason }),
 					);
@@ -405,8 +433,14 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 							tools,
 							config.maxResponseTokens,
 							signal,
-							(token) => onEvent({ type: "token", text: token }),
-							(token) => onEvent({ type: "thinking", text: token }),
+							(token) => {
+								partialContent += token;
+								onEvent({ type: "token", text: token });
+							},
+							(token) => {
+								partialThinking += token;
+								onEvent({ type: "thinking", text: token });
+							},
 							config.reasoningParams.body,
 							(attempt, maxAttempts, reason) => onEvent({ type: "retry", attempt, maxAttempts, reason }),
 						);
@@ -452,6 +486,7 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 				// signal.aborted) so a turn that *finished* right before a late Esc is
 				// committed normally instead of being mislabeled aborted.
 				if (completion.interrupted) {
+					persistPartialAssistant(completion.content, completion.thinking);
 					onEvent({ type: "end", reason: "aborted" });
 					return;
 				}
@@ -459,9 +494,8 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 				// Silent truncation: the stream ended mid-response with no finish_reason
 				// and no usage, and the user didn't abort — the provider dropped it.
 				// Stop and flag it so a cut-off answer isn't mistaken for a clean exit.
-				// The partial output still shows (promoted from the streaming state);
-				// like an abort, it isn't merged into wire history.
 				if (completion.disconnected) {
+					persistPartialAssistant(completion.content, completion.thinking);
 					onEvent({ type: "end", reason: "disconnected" });
 					return;
 				}
@@ -582,6 +616,7 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 		// Without this check every abort surfaced as reason "error" (with the
 		// generic message this catch produces) instead of "aborted".
 		if (signal?.aborted) {
+			persistPartialAssistant(partialContent, partialThinking);
 			onEvent({ type: "end", reason: "aborted" });
 			return;
 		}
@@ -624,10 +659,18 @@ async function executeToolCalls(
 		onEvent({ type: "tool_start", id: tc.id, name: tc.name, args: tc.args ? JSON.stringify(tc.args) : "{}" });
 	}
 
+	// Each parallel tool call adds an abort listener to the shared signal.
+	// Raise the cap so Node doesn't warn on batches > 10.
+	if (signal && prepared.length > 0) setMaxListeners(prepared.length + 5, signal);
+
 	const results = await Promise.all(
 		prepared.map(async (tc): Promise<ToolCallResult> => {
 			if (signal?.aborted) {
-				return { id: tc.id, name: tc.name, result: { content: "Aborted", isError: true } };
+				return {
+					id: tc.id,
+					name: tc.name,
+					result: { content: "[ABORTED] Tool execution was cancelled.", isError: true },
+				};
 			}
 
 			// Truncated/malformed arguments — return an error so the model can retry.
