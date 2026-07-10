@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import OpenAI from "openai";
 import { type AppConfig, runOnboardingCheck } from "../core/config.ts";
 import { formatContextFilesForPrompt, loadProjectContextFiles } from "../core/context-files.ts";
@@ -42,6 +42,7 @@ import type { PendingImage, UseAgentSession } from "./useAgentSession.ts";
  * keystroke (see Composer's selectCommand).
  */
 export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArgs?: boolean }> = [
+	{ name: "/copy", description: "Copy last assistant response" },
 	{ name: "/clear", description: "Clear context (and save)" },
 	{ name: "/compact", description: "Compact context now" },
 	{ name: "/new", description: "Start a new session" },
@@ -243,6 +244,31 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 
 	if (running) {
 		showNotice("[Agent running — use /queue, /steer, or /abort]");
+		return;
+	}
+
+	if (input === "/copy") {
+		for (let i = session.messages.length - 1; i >= 0; i--) {
+			const msg = session.messages[i]!;
+			if (msg.role === "assistant" && typeof msg.content === "string" && msg.content.length > 0) {
+				const text = msg.content;
+				try {
+					const platform = process.platform;
+					if (platform === "darwin") execSync("pbcopy", { input: text });
+					else if (platform === "linux") execSync("xclip -selection clipboard", { input: text });
+					else if (platform === "win32") execSync("clip", { input: Buffer.from(text, "utf-16le") });
+					else {
+						showNotice("[Clipboard not supported on this platform]");
+						return;
+					}
+					showNotice(`[Copied ${text.length} chars to clipboard]`);
+				} catch (err) {
+					showNotice(`[Copy failed: ${err instanceof Error ? err.message : String(err)}]`);
+				}
+				return;
+			}
+		}
+		showNotice("[No assistant response to copy]");
 		return;
 	}
 
@@ -719,6 +745,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			role: "warning",
 			content:
 				"Commands\n" +
+				"  /copy               Copy last assistant response\n" +
 				"  /clear              Clear context\n" +
 				"  /compact            Compact context now\n" +
 				"  /new                Start new session\n" +
