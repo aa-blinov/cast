@@ -134,6 +134,7 @@ Every conversation auto-saves. Resume with `--continue`, pick from a list with `
 | `/abort`, `/stop` | Stop current agent run |
 | `/compact` | Force context compaction |
 | `/new` | Start a new session (autosaves current) |
+| `/copy` | Copy last assistant response to clipboard |
 | `/clear` | Clear conversation context |
 | `/usage` | Show token/cost usage |
 | `/context` | Show context size vs. model window |
