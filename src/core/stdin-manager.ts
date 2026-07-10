@@ -30,6 +30,9 @@ let stdinSource: Readable | null = null;
 /** True while a child process owns the terminal (suspendAndRun is active). */
 let terminalSuspended = false;
 
+/** Number of concurrent suspendAndRun calls that paused the owner. */
+let pauseDepth = 0;
+
 /** True while the agent is actively streaming tokens (between submit and finally). */
 let streamingActive = false;
 
@@ -80,9 +83,13 @@ export function setSuspendHook(hook: SuspendHook): void {
 export async function suspendAndRun<T>(callback: () => Promise<T>): Promise<T> {
 	if (!suspendHook) return callback();
 	let result: T;
+	// Snapshot before we touch the flag — if another concurrent suspendAndRun
+	// already holds the terminal, we must not clear it when ours fails.
+	const wasSuspended = terminalSuspended;
 	// Pause the Composer's stdin handler before Ink suspends, so that
 	// keystrokes during the child process don't leak into the Composer.
-	currentOwner?.onPause();
+	// Only the outermost concurrent caller actually pauses.
+	if (pauseDepth++ === 0) currentOwner?.onPause();
 	terminalSuspended = true;
 	try {
 		await suspendHook(async () => {
@@ -90,13 +97,14 @@ export async function suspendAndRun<T>(callback: () => Promise<T>): Promise<T> {
 		});
 	} catch {
 		// suspendTerminal throws if already suspended (parallel bash calls).
-		// Fall back to running without terminal suspension — reset the flag
-		// so isTerminalSuspended() reflects the actual state (not suspended).
-		terminalSuspended = false;
+		// Fall back to running without terminal suspension — but only clear
+		// the flag if we were the one who set it (not a concurrent caller).
+		if (!wasSuspended) terminalSuspended = false;
 		result = await callback();
 	} finally {
-		terminalSuspended = false;
-		currentOwner?.onResume();
+		if (!wasSuspended) terminalSuspended = false;
+		// Only the outermost concurrent caller resumes.
+		if (--pauseDepth === 0) currentOwner?.onResume();
 	}
 	return result!;
 }
