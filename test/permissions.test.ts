@@ -39,6 +39,38 @@ describe("checkDangerousBash", () => {
 		expect(checkDangerousBash("rm old-file.txt")).toBeUndefined();
 		expect(checkDangerousBash("git status")).toBeUndefined();
 		expect(checkDangerousBash("curl https://example.com/data.json")).toBeUndefined();
+		expect(checkDangerousBash("git push --force-with-lease")).toBeUndefined();
+		expect(checkDangerousBash("git checkout .gitignore")).toBeUndefined();
+		expect(checkDangerousBash("git restore .env")).toBeUndefined();
+		expect(checkDangerousBash("rsync -av src/ dst/")).toBeUndefined();
+		expect(checkDangerousBash("find . -name '*.log' -print")).toBeUndefined();
+		expect(checkDangerousBash("find . | xargs echo")).toBeUndefined();
+	});
+
+	it("flags git checkout/restore discarding uncommitted changes", () => {
+		expect(checkDangerousBash("git checkout .")).toBeDefined();
+		expect(checkDangerousBash("git restore .")).toBeDefined();
+		expect(checkDangerousBash("git checkout . && echo done")).toBeDefined();
+	});
+
+	it("flags rsync --delete, find -delete, and xargs rm", () => {
+		expect(checkDangerousBash("rsync -av --delete src/ dst/")).toBeDefined();
+		expect(checkDangerousBash("rsync --delete-after src/ dst/")).toBeDefined();
+		expect(checkDangerousBash("find . -name '*.log' -delete")).toBeDefined();
+		expect(checkDangerousBash("find . -type f -delete")).toBeDefined();
+		expect(checkDangerousBash("find . -type f | xargs rm")).toBeDefined();
+	});
+
+	it("flags pkill, crontab -r, and iptables -F", () => {
+		expect(checkDangerousBash("pkill node")).toBeDefined();
+		expect(checkDangerousBash("crontab -r")).toBeDefined();
+		expect(checkDangerousBash("iptables -F")).toBeDefined();
+	});
+
+	it("flags base64 decode piped into shell", () => {
+		expect(checkDangerousBash("echo dGVzdA== | base64 -d | bash")).toBeDefined();
+		expect(checkDangerousBash("base64 -d payload.txt | sh")).toBeDefined();
+		expect(checkDangerousBash("base64 -d payload.txt | sudo bash")).toBeDefined();
 	});
 
 	it("does not flag a command-name word appearing mid-argument (hyphen word-boundary trap)", () => {
