@@ -32,11 +32,13 @@ import { isStreamingActive, isTerminalSuspended } from "../core/stdin-manager.ts
  *    Either signal triggers the guard: cursor/erase writes are swallowed
  *    until the user scrolls back to the bottom.
  *
- * Resize events are suppressed while streaming is active (detected by
- * isStreamingActive, set by useAgentSession) or while a child process
- * owns the terminal (suspendAndRun). A resize mid-stream just reflows
- * the live region — no replay needed. The actual resync fires once
- * after streaming ends if a resize happened.
+ * The resync itself (clear + \x1b[3J scrollback wipe + replay) is deferred
+ * while streaming is active (isStreamingActive, set by useAgentSession),
+ * while a child process owns the terminal (suspendAndRun), or while the
+ * user is scrolled up — clearing at any of those moments would erase what
+ * they're looking at. It fires once conditions clear. No-op resize events
+ * (SIGWINCH without an actual size change, e.g. tmux pane focus) are
+ * ignored entirely.
  */
 export function useTerminalResync(onResync: () => void): void {
 	useEffect(() => {
@@ -45,41 +47,53 @@ export function useTerminalResync(onResync: () => void): void {
 
 		const origWrite = out.write.bind(out);
 
+		// --- scroll guard state (shared by both detection layers) ---
+		let scrollUp = false;
+
 		// --- resize: debounce a settle, then hard reset ---
 		let resizeTimer: ReturnType<typeof setTimeout> | null = null;
-		let resizeDuringStream = false;
-		const onResize = () => {
-			// Defer the resync in two cases:
-			// 1. Streaming — Ink manages the live region, a resize just reflows it.
-			// 2. Child process owns the terminal (suspendAndRun) — isRawMode is
-			//    false but clearing now would erase the child's output.
-			if (isStreamingActive() || isTerminalSuspended()) {
-				resizeDuringStream = true;
+		let resyncPending = false;
+		// Last known size, to drop no-op SIGWINCH events (tmux pane focus,
+		// VS Code panel toggles) that fire "resize" without changing anything —
+		// each one used to cost a full clear (+ scrollback wipe via \x1b[3J),
+		// resetting the user's scroll position for no reason.
+		let lastCols = out.columns;
+		let lastRows = out.rows;
+
+		const doResync = () => {
+			// The clear below includes \x1b[3J (wipe scrollback) — running it
+			// while the user is scrolled up reading history yanks them to the
+			// bottom and destroys what they were reading. Defer until they
+			// return to the bottom (scrollUp is refreshed by the DECXCPR poll).
+			if (isStreamingActive() || isTerminalSuspended() || scrollUp) {
+				resyncPending = true;
 				return;
 			}
+			resyncPending = false;
+			origWrite("\x1b[2J\x1b[3J\x1b[H");
+			onResync();
+		};
+
+		const onResize = () => {
+			// Ignore spurious resize events where the size didn't actually change.
+			if (out.columns === lastCols && out.rows === lastRows) return;
+			lastCols = out.columns;
+			lastRows = out.rows;
 			if (resizeTimer) clearTimeout(resizeTimer);
-			resizeTimer = setTimeout(() => {
-				origWrite("\x1b[2J\x1b[3J\x1b[H");
-				onResync();
-			}, 80);
+			resizeTimer = setTimeout(doResync, 80);
 		};
 		out.on("resize", onResize);
 
-		// Flush a deferred resize once streaming ends.
-		const checkDeferredResize = () => {
-			if (resizeDuringStream && !isStreamingActive() && !isTerminalSuspended()) {
-				resizeDuringStream = false;
+		// Flush a deferred resync once streaming ends / terminal is released /
+		// the user scrolls back to the bottom.
+		const checkDeferredResync = () => {
+			if (resyncPending && !isStreamingActive() && !isTerminalSuspended() && !scrollUp) {
 				if (resizeTimer) clearTimeout(resizeTimer);
-				resizeTimer = setTimeout(() => {
-					origWrite("\x1b[2J\x1b[3J\x1b[H");
-					onResync();
-				}, 80);
+				resizeTimer = setTimeout(doResync, 80);
+				resyncPending = false;
 			}
 		};
-		const rawModeCheck = setInterval(checkDeferredResize, 200);
-
-		// --- scroll guard state (shared by both detection layers) ---
-		let scrollUp = false;
+		const rawModeCheck = setInterval(checkDeferredResync, 200);
 
 		// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI CSI parsing
 		const CUU_RE = /\x1b\[(\d*)A/;
