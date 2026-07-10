@@ -4,7 +4,7 @@
  * Loaded on startup, saved after model/reasoning changes.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 // ============================================================================
@@ -77,7 +77,12 @@ function saveSettings(settings: Settings): void {
 
 	const path = getSettingsPath();
 	const merged = { ...settings, updatedAt: new Date().toISOString() };
-	writeFileSync(path, JSON.stringify(merged, null, 2), "utf-8");
+	// Write to a temp file then rename over the target — rename is atomic within
+	// a filesystem, so a crash mid-write can't truncate settings.json (loadSettings
+	// falls back to {} on a parse error, silently losing the user's config).
+	const tmpPath = `${path}.${process.pid}.tmp`;
+	writeFileSync(tmpPath, JSON.stringify(merged, null, 2), "utf-8");
+	renameSync(tmpPath, path);
 }
 
 export function updateSettings(partial: Partial<Settings>): void {
