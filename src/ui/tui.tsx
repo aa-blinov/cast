@@ -4,7 +4,7 @@ import { CAST_BANNER } from "../core/help.ts";
 import { closeMcpConnections } from "../core/mcp.ts";
 import { saveSession } from "../core/session.ts";
 import { type ParsedArgs, runStartup } from "../core/startup.ts";
-import { setSuspendHook, suspendAndRun } from "../core/stdin-manager.ts";
+import { suspendAndRun } from "../core/stdin-manager.ts";
 import { inkPickers } from "../pickers/ink.tsx";
 import type { Pickers } from "../pickers/types.ts";
 import { App } from "./App.tsx";
@@ -109,26 +109,11 @@ export async function runTui(args: ParsedArgs): Promise<void> {
 		/>,
 	);
 
-	// Wire up Ink's suspendTerminal so execBash can hand the terminal to
-	// child processes that need interactive stdin (password prompts, etc.).
-	// We need to access Ink's internal instances WeakMap, which is not
-	// exported by the package. Use dynamic import with a file:// URL to
-	// bypass the exports field while still sharing the module cache.
-	try {
-		const { createRequire } = await import("node:module");
-		const { pathToFileURL } = await import("node:url");
-		const inkEntry = createRequire(import.meta.url).resolve("ink");
-		const instancesPath = inkEntry.replace(/index\.js$/, "instances.js");
-		const mod = await import(pathToFileURL(instancesPath).href);
-		const instances: WeakMap<NodeJS.WritableStream, { suspendTerminal: (cb: () => Promise<void>) => Promise<void> }> =
-			mod.default;
-		const inkInstance = instances.get(process.stdout);
-		if (inkInstance) {
-			setSuspendHook((cb) => inkInstance.suspendTerminal(cb));
-		}
-	} catch {
-		// Not running in TUI mode or ink internals changed — no-op.
-	}
+	// Ink's suspendTerminal (needed by execBash to hand the terminal to child
+	// processes) is wired inside <App> via the public useApp() hook — see
+	// App.tsx. It used to be wired here by digging into ink's internal
+	// instances.js at runtime, which always failed in the release bundle
+	// (ink is inlined by esbuild; there's no node_modules/ink to resolve).
 
 	await waitUntilExit();
 	saveSession(result.session);

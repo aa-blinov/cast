@@ -1,4 +1,4 @@
-import { Box, Text } from "ink";
+import { Box, Text, useApp } from "ink";
 import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AppConfig } from "../core/config.ts";
 import { formatContextFilesForPrompt, resolveNestedContextFiles } from "../core/context-files.ts";
@@ -13,6 +13,7 @@ import {
 import type { SessionUsage } from "../core/session.ts";
 import { estimateTokens } from "../core/session.ts";
 import type { StartupResult } from "../core/startup.ts";
+import { setSuspendHook } from "../core/stdin-manager.ts";
 import { fetchLatestVersion, isNewerVersion, isReleaseInstall } from "../core/upgrade.ts";
 import { ModalPicker, TextInputModal } from "../pickers/ink.tsx";
 import { ChatLog } from "./ChatLog.tsx";
@@ -36,6 +37,20 @@ interface AppProps {
 export function App(props: AppProps): JSX.Element {
 	const { result, version, initialPrompt, onQuit, onPasteImage, onRepaintBanner } = props;
 	const { config, runner } = result;
+
+	// Wire Ink's suspendTerminal so execBash can hand the terminal to child
+	// processes (live output, password prompts). Done here via the public
+	// useApp() hook — the previous wiring in tui.tsx resolved ink's internal
+	// instances.js at runtime, which worked in dev but always failed in the
+	// release bundle (ink is inlined by esbuild, there's no node_modules/ink
+	// to resolve against), silently leaving live bash output to interleave
+	// with Ink's frames and stack duplicated composer/status lines.
+	const { suspendTerminal } = useApp();
+	useEffect(() => {
+		setSuspendHook(async (cb) => {
+			await suspendTerminal(cb);
+		});
+	}, [suspendTerminal]);
 
 	const [notice, setNotice] = useState<string | null>(null);
 	const noticeDurationRef = useRef(6000);
