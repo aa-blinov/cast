@@ -762,3 +762,233 @@ describe("runAgentLoop — nested AGENTS.md injection", () => {
 		}
 	});
 });
+
+// ============================================================================
+// runAgentLoop — doom loop detection
+// ============================================================================
+
+describe("runAgentLoop — doom loop detection", () => {
+	it("blocks a tool call after DOOM_LOOP_THRESHOLD identical consecutive calls and emits doom_loop event", async () => {
+		const events: AgentEvent[] = [];
+		const loopArgs = JSON.stringify({ command: "echo hi" });
+
+		vi.mocked(streamAndCollect)
+			// Calls 1, 2, 3: model keeps calling bash with the same args.
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [{ id: "t1", name: "bash", arguments: loopArgs }],
+			}))
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [{ id: "t2", name: "bash", arguments: loopArgs }],
+			}))
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [{ id: "t3", name: "bash", arguments: loopArgs }],
+			}))
+			// Call 4: the 4th identical call is blocked by doom loop detection.
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [{ id: "t4", name: "bash", arguments: loopArgs }],
+			}))
+			// After the doom loop error, model gives up.
+			.mockImplementationOnce(async () => ({
+				content: "I'll try something different.",
+				thinking: "",
+				finishReason: "stop",
+			}));
+
+		await runAgentLoop([{ role: "user", content: "run it" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			onEvent: (event) => events.push(structuredClone(event)),
+		});
+
+		// doom_loop event must have fired exactly once (on the 4th call).
+		const doomEvents = events.filter((e) => e.type === "doom_loop");
+		expect(doomEvents).toHaveLength(1);
+		expect(doomEvents[0]).toEqual({ type: "doom_loop", tool: "bash", attempts: 3 });
+
+		// The blocked tool_end must carry an error result mentioning "Doom loop".
+		const toolEnds = events.filter((e) => e.type === "tool_end");
+		const blockedEnd = toolEnds.find((e) => e.type === "tool_end" && e.id === "t4");
+		expect(blockedEnd).toBeDefined();
+		if (blockedEnd && blockedEnd.type === "tool_end") {
+			expect(blockedEnd.result.isError).toBe(true);
+			expect(blockedEnd.result.content).toContain("Doom loop detected");
+		}
+
+		expect(events.find((e) => e.type === "end")).toEqual({ type: "end", reason: "stop" });
+	});
+
+	it("does NOT block when calls alternate between different tools", async () => {
+		const events: AgentEvent[] = [];
+
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [{ id: "t1", name: "bash", arguments: JSON.stringify({ command: "ls" }) }],
+			}))
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [{ id: "t2", name: "read", arguments: JSON.stringify({ path: "foo.ts" }) }],
+			}))
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [{ id: "t3", name: "bash", arguments: JSON.stringify({ command: "ls" }) }],
+			}))
+			.mockImplementationOnce(async () => ({
+				content: "done",
+				thinking: "",
+				finishReason: "stop",
+			}));
+
+		await runAgentLoop([{ role: "user", content: "do stuff" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			onEvent: (event) => events.push(structuredClone(event)),
+		});
+
+		expect(events.filter((e) => e.type === "doom_loop")).toHaveLength(0);
+	});
+
+	it("detects a doom loop inside a single parallel batch (batch not blind to itself)", async () => {
+		const events: AgentEvent[] = [];
+		const loopArgs = JSON.stringify({ command: "echo hi" });
+
+		vi.mocked(streamAndCollect)
+			// One completion, FOUR identical calls in one batch — executed via
+			// Promise.all. The sequential pre-scan must let the first three
+			// through and block the fourth.
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [
+					{ id: "t1", name: "bash", arguments: loopArgs },
+					{ id: "t2", name: "bash", arguments: loopArgs },
+					{ id: "t3", name: "bash", arguments: loopArgs },
+					{ id: "t4", name: "bash", arguments: loopArgs },
+				],
+			}))
+			.mockImplementationOnce(async () => ({
+				content: "ok",
+				thinking: "",
+				finishReason: "stop",
+			}));
+
+		await runAgentLoop([{ role: "user", content: "run it" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			onEvent: (event) => events.push(structuredClone(event)),
+		});
+
+		expect(events.filter((e) => e.type === "doom_loop")).toHaveLength(1);
+		const toolEnds = events.filter((e) => e.type === "tool_end");
+		const okEnds = toolEnds.filter((e) => e.type === "tool_end" && ["t1", "t2", "t3"].includes(e.id));
+		expect(okEnds).toHaveLength(3);
+		expect(okEnds.every((e) => e.type === "tool_end" && !e.result.isError)).toBe(true);
+		const blocked = toolEnds.find((e) => e.type === "tool_end" && e.id === "t4");
+		expect(blocked && blocked.type === "tool_end" && blocked.result.isError).toBe(true);
+		expect(blocked && blocked.type === "tool_end" ? blocked.result.content : "").toContain("Doom loop detected");
+	});
+
+	it("resets the window on a follow-up user message — an explicit re-run is not a loop", async () => {
+		const events: AgentEvent[] = [];
+		const loopArgs = JSON.stringify({ command: "echo hi" });
+		const identicalCall = (id: string) => ({
+			content: "",
+			thinking: "",
+			finishReason: "stop" as const,
+			toolCalls: [{ id, name: "bash", arguments: loopArgs }],
+		});
+
+		vi.mocked(streamAndCollect)
+			// Three identical calls fill the window...
+			.mockImplementationOnce(async () => identicalCall("t1"))
+			.mockImplementationOnce(async () => identicalCall("t2"))
+			.mockImplementationOnce(async () => identicalCall("t3"))
+			// ...turn ends...
+			.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }))
+			// ...follow-up injected (window reset) — the same call must run again.
+			.mockImplementationOnce(async () => identicalCall("t5"))
+			.mockImplementationOnce(async () => ({ content: "done again", thinking: "", finishReason: "stop" }));
+
+		const followUpQueue = new MessageQueue();
+		followUpQueue.enqueue({ role: "user", content: "run it once more" });
+
+		await runAgentLoop([{ role: "user", content: "run it" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			followUpQueue,
+			onEvent: (event) => events.push(structuredClone(event)),
+		});
+
+		expect(events.filter((e) => e.type === "followup_injected")).toHaveLength(1);
+		expect(events.filter((e) => e.type === "doom_loop")).toHaveLength(0);
+		const t5 = events.find((e) => e.type === "tool_end" && e.id === "t5");
+		expect(t5 && t5.type === "tool_end" && !t5.result.isError).toBe(true);
+	});
+
+	it("resets the window on a steering message injected mid-run", async () => {
+		const events: AgentEvent[] = [];
+		const loopArgs = JSON.stringify({ command: "echo hi" });
+		const identicalCall = (id: string) => ({
+			content: "",
+			thinking: "",
+			finishReason: "stop" as const,
+			toolCalls: [{ id, name: "bash", arguments: loopArgs }],
+		});
+
+		const steeringQueue = new MessageQueue();
+
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => identicalCall("t1"))
+			.mockImplementationOnce(async () => identicalCall("t2"))
+			.mockImplementationOnce(async () => {
+				// Window will be [A, A, A] after t3 executes. Queue a steering
+				// message; it's injected at the top of the next inner iteration
+				// and must clear the window before t4 is checked.
+				steeringQueue.enqueue({ role: "user", content: "keep going, run it again" });
+				return identicalCall("t3");
+			})
+			.mockImplementationOnce(async () => identicalCall("t4"))
+			.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
+
+		await runAgentLoop([{ role: "user", content: "run it" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			steeringQueue,
+			onEvent: (event) => events.push(structuredClone(event)),
+		});
+
+		expect(events.filter((e) => e.type === "steering_injected")).toHaveLength(1);
+		expect(events.filter((e) => e.type === "doom_loop")).toHaveLength(0);
+		const t4 = events.find((e) => e.type === "tool_end" && e.id === "t4");
+		expect(t4 && t4.type === "tool_end" && !t4.result.isError).toBe(true);
+	});
+});

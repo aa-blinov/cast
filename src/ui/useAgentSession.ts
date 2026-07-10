@@ -286,6 +286,12 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	// Set when a retry event arrives; cleared on the first streaming event
 	// (token/thinking) so the retry banner disappears once new content flows.
 	const clearRetryOnNextChunk = useRef(false);
+	// Doom-loop warnings queued until turn_end: the blocked tool's block is
+	// still in the live streaming region when the doom_loop event fires, so
+	// appending the warning to history immediately would print it ABOVE the
+	// very tool call it refers to. turn_end promotes the streaming blocks
+	// first, then these flush in the right order.
+	const pendingDoomWarningsRef = useRef<string[]>([]);
 	// The authoritative "current streaming" value — read and written directly,
 	// never through setStreaming's own updater callback. React only guarantees
 	// a setState updater function runs by the time of the *next render*, not
@@ -472,6 +478,9 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			process.on("uncaughtException", onUncaught);
 
 			setStatus("running");
+			// A turn aborted before its turn_end would otherwise leak queued
+			// doom-loop warnings into the next turn's flush.
+			pendingDoomWarningsRef.current = [];
 			updateStreaming(() => ({ blocks: [] }), true);
 			setStreamingActive(true);
 
@@ -577,14 +586,28 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 								}
 								break;
 							}
-							case "turn_end":
+							case "turn_end": {
 								promoteStreamingToHistory();
 								setError(null);
+								const doomWarnings = pendingDoomWarningsRef.current;
+								if (doomWarnings.length > 0) {
+									pendingDoomWarningsRef.current = [];
+									setMessages((msgs) => [
+										...msgs,
+										...doomWarnings.map((content) => ({ role: "warning" as const, content })),
+									]);
+								}
 								break;
+							}
 							case "compaction":
 								refresh();
 								break;
 							case "compaction_failed":
+								break;
+							case "doom_loop":
+								pendingDoomWarningsRef.current.push(
+									`[doom loop] ${event.tool} blocked after ${event.attempts} identical calls`,
+								);
 								break;
 							case "retry":
 								setRetry({ attempt: event.attempt, maxAttempts: event.maxAttempts, reason: event.reason });

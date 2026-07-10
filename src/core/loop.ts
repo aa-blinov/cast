@@ -16,6 +16,12 @@ import { compactMessages, estimateTokens, shouldCompact } from "./session.ts";
 import type { SubagentPrompt } from "./subagents.ts";
 import { type ConfirmBash, createToolExecutor, getToolDefinitions, type ToolResult } from "./tools.ts";
 
+// How many identical consecutive tool calls (same name + same args) before
+// we treat it as a doom loop and block execution. Matches opencode's
+// DOOM_LOOP_THRESHOLD — the model gets an error result and must try something
+// different.
+const DOOM_LOOP_THRESHOLD = 3;
+
 // Prompts for the LLM call that summarizes old messages during compaction —
 // content, not code, so they live in prompts/ alongside the persona files
 // instead of as inline strings here. Two variants (matching pi): a fresh
@@ -170,6 +176,7 @@ export type AgentEvent =
 	| { type: "followup_injected"; messages: Message[] }
 	| { type: "compaction"; messagesCompacted: number; tokensBefore: number }
 	| { type: "compaction_failed"; reason: string }
+	| { type: "doom_loop"; tool: string; attempts: number }
 	| { type: "retry"; attempt: number; maxAttempts: number; reason: string }
 	// generationMs is only set for the main completion's usage — compaction's
 	// own summarization call reports usage too (for cumulative cost tracking)
@@ -261,6 +268,12 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 		...getToolDefinitions(subagentNames, initialModel, loopConfig.subagentModel),
 		...(loopConfig.mcpTools ?? []),
 	];
+
+	// Doom-loop detector: tracks the last DOOM_LOOP_THRESHOLD tool calls
+	// (name + serialized args). When the same call appears that many times in
+	// a row we refuse to execute it and tell the model to try something else.
+	const recentToolCalls: Array<{ name: string; argsKey: string }> = [];
+
 	const builtinExecuteTool = createToolExecutor(
 		cwd,
 		config,
@@ -393,6 +406,10 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 					}
 					onEvent({ type: "steering_injected", messages: [...pendingMessages] });
 					pendingMessages = [];
+					// A fresh user instruction resets the doom-loop window — "run it
+					// again" after three identical calls is an explicit go-ahead, not
+					// the model stuck in a loop.
+					recentToolCalls.length = 0;
 				}
 
 				// Re-sync the system prompt against contextFiles that tool calls
@@ -581,7 +598,14 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 				hasMoreToolCalls = false;
 
 				if (toolCalls && toolCalls.length > 0) {
-					const executedToolBatch = await executeToolCalls(toolCalls, executeTool, onEvent, signal);
+					const executedToolBatch = await executeToolCalls(
+						toolCalls,
+						executeTool,
+						onEvent,
+						signal,
+						recentToolCalls,
+						DOOM_LOOP_THRESHOLD,
+					);
 					toolResults.push(...executedToolBatch);
 					hasMoreToolCalls = true;
 
@@ -638,6 +662,8 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 				}
 				onEvent({ type: "followup_injected", messages: [...followUpMsgs] });
 				overflowCompacted = false;
+				// Same as steering: a new user message resets the doom-loop window.
+				recentToolCalls.length = 0;
 				continue;
 			}
 
@@ -677,6 +703,8 @@ async function executeToolCalls(
 	executeTool: (name: string, args: Record<string, unknown>, signal?: AbortSignal) => Promise<ToolResult>,
 	onEvent: (event: AgentEvent) => void,
 	signal: AbortSignal | undefined,
+	recentToolCalls: Array<{ name: string; argsKey: string }>,
+	doomLoopThreshold: number,
 ): Promise<ToolCallResult[]> {
 	const prepared: Array<{ id: string; name: string; args: Record<string, unknown> | null }> = [];
 	for (const tc of toolCalls) {
@@ -694,6 +722,32 @@ async function executeToolCalls(
 
 	for (const tc of prepared) {
 		onEvent({ type: "tool_start", id: tc.id, name: tc.name, args: tc.args ? JSON.stringify(tc.args) : "{}" });
+	}
+
+	// Doom-loop detection, decided sequentially in call order BEFORE the
+	// parallel execution below. Inside Promise.all every sibling's check runs
+	// before any sibling's push lands (the synchronous prefix of each async fn
+	// executes first), so checking/pushing per-call in there made a whole batch
+	// of identical calls invisible to itself — and pushing after `await
+	// executeTool` recorded completion order, not call order, scrambling the
+	// "consecutive" window around parallel batches. A blocked call is NOT
+	// pushed: repeat attempts stay blocked until a different call breaks the
+	// run of identical entries.
+	const doomBlocked = new Set<string>();
+	for (const tc of prepared) {
+		if (tc.args === null) continue;
+		const argsKey = JSON.stringify(tc.args);
+		const recent = recentToolCalls.slice(-doomLoopThreshold);
+		if (recent.length === doomLoopThreshold && recent.every((r) => r.name === tc.name && r.argsKey === argsKey)) {
+			doomBlocked.add(tc.id);
+			onEvent({ type: "doom_loop", tool: tc.name, attempts: doomLoopThreshold });
+		} else {
+			recentToolCalls.push({ name: tc.name, argsKey });
+		}
+	}
+	// Keep the sliding window bounded.
+	if (recentToolCalls.length > doomLoopThreshold * 2) {
+		recentToolCalls.splice(0, recentToolCalls.length - doomLoopThreshold);
 	}
 
 	// setMaxListeners(100, signal) is already called once in runLoop — no need
@@ -716,6 +770,17 @@ async function executeToolCalls(
 					name: tc.name,
 					result: {
 						content: "Tool call arguments were truncated or malformed (invalid JSON). Retry the tool call.",
+						isError: true,
+					},
+				};
+			}
+
+			if (doomBlocked.has(tc.id)) {
+				return {
+					id: tc.id,
+					name: tc.name,
+					result: {
+						content: `Doom loop detected: tool "${tc.name}" was called ${doomLoopThreshold} times consecutively with the same arguments. You MUST try a completely different approach. Do NOT call this tool with the same arguments again.`,
 						isError: true,
 					},
 				};
