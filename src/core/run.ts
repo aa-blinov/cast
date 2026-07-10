@@ -114,6 +114,12 @@ function handleEvent(event: AgentEvent, session: SessionState, format: "default"
 			}
 			break;
 
+		case "doom_loop":
+			if (!emit("doom_loop", { tool: event.tool, attempts: event.attempts })) {
+				process.stderr.write(`  doom loop: ${event.tool} blocked after ${event.attempts} identical calls${EOL}`);
+			}
+			break;
+
 		case "usage":
 			addUsage(session, event.usage, { subagent: event.subagent });
 			emit("usage", { usage: event.usage, subagent: event.subagent });
