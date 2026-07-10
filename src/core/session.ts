@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { AppConfig } from "./config.ts";
 import type { Message, Usage } from "./llm.ts";
@@ -417,7 +417,19 @@ export function saveSession(session: SessionState): void {
 	// them where they are (flat, at the root) rather than inventing one.
 	const dir = session.cwd ? getProjectSessionDir(session.cwd) : getSessionsRootDir();
 	const filePath = join(dir, `${session.id}.json`);
-	writeFileSync(filePath, JSON.stringify(session), "utf-8");
+	writeFileAtomic(filePath, JSON.stringify(session));
+}
+
+/**
+ * Write to a temp file in the same directory, then rename over the target.
+ * rename is atomic within a filesystem, so a reader (or a crash) never sees a
+ * half-written session file — the exact truncation that readSessionFile has to
+ * defend against otherwise.
+ */
+function writeFileAtomic(filePath: string, data: string): void {
+	const tmpPath = `${filePath}.${process.pid}.tmp`;
+	writeFileSync(tmpPath, data, "utf-8");
+	renameSync(tmpPath, filePath);
 }
 
 /** Sessions saved before `usage` existed don't have it on disk — default it in.
