@@ -3,6 +3,7 @@ import { noPickers } from "../pickers/no-pickers.ts";
 import type { AgentEvent } from "./loop.ts";
 import { runAgentLoop } from "./loop.ts";
 import { closeMcpConnections } from "./mcp.ts";
+import { PLAN_TOOL_NAMES } from "./plan.ts";
 import { addUsage, appendMessage, type SessionState, saveSession } from "./session.ts";
 import { loadSettings } from "./settings.ts";
 import type { ParsedArgs } from "./startup.ts";
@@ -46,6 +47,9 @@ export async function runNonInteractive(args: ParsedArgs, options: RunOptions): 
 		disabledTools.add("web_search");
 		disabledTools.add("web_fetch");
 	}
+	// Headless runs have no plan mode, so the plan tools must be neither
+	// advertised nor executable.
+	for (const name of PLAN_TOOL_NAMES) disabledTools.add(name);
 
 	const ac = new AbortController();
 	runner.startRun(ac);

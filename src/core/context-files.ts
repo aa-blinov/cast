@@ -16,6 +16,7 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 
 export interface ContextFile {
@@ -55,7 +56,7 @@ export function loadProjectContextFiles(cwd: string, projectTrusted: boolean): C
 	const result: ContextFile[] = [];
 	const seen = new Set<string>();
 
-	const globalDir = join(process.env.HOME ?? ".", ".cast");
+	const globalDir = join(homedir(), ".cast");
 	const globalFile = loadContextFileFromDir(globalDir);
 	if (globalFile) {
 		result.push(globalFile);

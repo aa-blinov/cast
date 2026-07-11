@@ -9,6 +9,7 @@ import type { AppConfig } from "../config.ts";
 import type { Message, Tool, Usage } from "../llm.ts";
 import type { LoopConfig } from "../loop.ts";
 import type { McpToolHandle } from "../mcp.ts";
+import { PLAN_TOOL_NAMES } from "../plan.ts";
 import type { SubagentPrompt } from "../subagents.ts";
 import type { ConfirmBash, ToolResult } from "./shared.ts";
 
@@ -202,7 +203,10 @@ export async function execTask(
 			confirmBash: serializeConfirm(deps.confirmBash),
 			mcpTools: deps.mcpTools,
 			mcpToolIndex: deps.mcpToolIndex,
-			disabledTools: deps.disabledTools,
+			// Subagents inherit the parent's restrictions (bash/write/edit stay
+			// blocked in plan mode) but never get the plan tools themselves —
+			// they explore and report back; the parent owns the plan file.
+			disabledTools: new Set([...(deps.disabledTools ?? []), ...PLAN_TOOL_NAMES]),
 			// ponytail: no personas/currentPersona/subagentModel — child can't delegate further
 		});
 	} finally {
