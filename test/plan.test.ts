@@ -2,14 +2,18 @@ import { existsSync, mkdirSync, rmSync, utimesSync, writeFileSync } from "node:f
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+	checkReadOnlyCommand,
 	createPlanState,
 	execPlanCheck,
+	execPlanDiscard,
 	execPlanDone,
 	execPlanEdit,
+	execPlanEnter,
 	execPlanRead,
 	execPlanWrite,
 	listPlanNames,
 	type PlanState,
+	planChecklistState,
 	readActivePlan,
 	readPlanFile,
 	resolveActivePlanPath,
@@ -52,6 +56,49 @@ describe("plan", () => {
 		it("neutralizes path traversal", () => {
 			expect(slugifyPlanName("../../etc/passwd")).toBe("etc-passwd");
 			expect(slugifyPlanName("..")).toBe("");
+		});
+	});
+
+	describe("checkReadOnlyCommand", () => {
+		it("allows inspection pipelines", () => {
+			expect(checkReadOnlyCommand("ls -la").ok).toBe(true);
+			expect(checkReadOnlyCommand("cat src/app.ts | grep -n handler | head -5").ok).toBe(true);
+			expect(checkReadOnlyCommand("git log --oneline -10 && git status").ok).toBe(true);
+			expect(checkReadOnlyCommand("git diff HEAD~1 -- src/").ok).toBe(true);
+			expect(checkReadOnlyCommand("LC_ALL=C sort file.txt | uniq -c").ok).toBe(true);
+		});
+
+		it("rejects anything that can write", () => {
+			expect(checkReadOnlyCommand("rm -rf /tmp/x").ok).toBe(false);
+			expect(checkReadOnlyCommand("echo hi > out.txt").ok).toBe(false);
+			expect(checkReadOnlyCommand("cat $(find_evil)").ok).toBe(false);
+			expect(checkReadOnlyCommand("ls `rm -rf .`").ok).toBe(false);
+			expect(checkReadOnlyCommand("npm test").ok).toBe(false);
+			expect(checkReadOnlyCommand("sed -i 's/a/b/' file").ok).toBe(false);
+			expect(checkReadOnlyCommand("git checkout main").ok).toBe(false);
+			expect(checkReadOnlyCommand("git branch new-branch").ok).toBe(false);
+			expect(checkReadOnlyCommand("ls && touch x").ok).toBe(false);
+			expect(checkReadOnlyCommand("find . -name '*.md' | xargs rm").ok).toBe(false);
+			expect(checkReadOnlyCommand("").ok).toBe(false);
+		});
+	});
+
+	describe("planChecklistState", () => {
+		it("counts unchecked and checked items", () => {
+			const { unchecked, checked } = planChecklistState("## Steps\n- [ ] a\n- [x] b\n- [X] c\n* [ ] d\ntext");
+			expect(unchecked).toBe(2);
+			expect(checked).toBe(2);
+		});
+
+		it("returns zeros for a plan without a checklist", () => {
+			expect(planChecklistState("# Plan\nJust prose.")).toEqual({ unchecked: 0, checked: 0 });
+		});
+
+		it("ignores checkbox-like lines inside code fences", () => {
+			const content = "## Steps\n- [x] real step\n```markdown\n- [ ] example in docs\n```\n- [x] another";
+			// Without fence-awareness the fenced example would keep the plan
+			// "unfinished" forever (done-variant never triggers).
+			expect(planChecklistState(content)).toEqual({ unchecked: 0, checked: 2 });
 		});
 	});
 
@@ -420,6 +467,27 @@ describe("plan", () => {
 			expect(execPlanCheck({ item: "all done" }, state).isError).toBe(true);
 		});
 
+		it("never matches checkbox-like lines inside code fences", () => {
+			const state = testState("check-fence");
+			execPlanWrite(
+				{
+					name: "main",
+					content: "# Plan\n\n## Steps\n- [ ] update template\n```markdown\n- [ ] update sample\n```",
+				},
+				state,
+			);
+
+			// Substring common to both — only the real step is a candidate, so no
+			// ambiguity error and the fenced example stays untouched.
+			const parsed = JSON.parse(execPlanCheck({ item: "update" }, state).content);
+			expect(parsed.success).toBe(true);
+			expect(parsed.item).toBe("update template");
+
+			const file = readActivePlan(state);
+			expect(file.content).toContain("- [x] update template");
+			expect(file.content).toContain("- [ ] update sample");
+		});
+
 		it("checks an item off in a named plan without touching the active one", () => {
 			const state = testState("check-7");
 			execPlanWrite({ name: "backend", content: "# Backend\n\n## Steps\n- [ ] api" }, state);
@@ -442,6 +510,54 @@ describe("plan", () => {
 			const result = execPlanCheck({ item: "x", plan: "ghost" }, state);
 			expect(result.isError).toBe(true);
 			expect(JSON.parse(result.content).plans).toEqual(["main"]);
+		});
+	});
+
+	describe("execPlanDiscard", () => {
+		it("deletes a named plan; active falls back to the newest remaining", () => {
+			const state = testState("discard-1");
+			execPlanWrite({ name: "keep", content: "# Keep" }, state);
+			execPlanWrite({ name: "drop", content: "# Drop" }, state);
+			expect(state.activePlanPath).toBe(join(state.plansDir, "drop.md"));
+
+			const parsed = JSON.parse(execPlanDiscard({ name: "drop" }, state).content);
+			expect(parsed.success).toBe(true);
+			expect(parsed.discarded).toBe("drop");
+			expect(parsed.plans).toEqual(["keep"]);
+			expect(parsed.active).toBe("keep");
+			expect(existsSync(join(state.plansDir, "drop.md"))).toBe(false);
+			expect(readActivePlan(state).content).toBe("# Keep");
+		});
+
+		it("errors with the plan list for an unknown name", () => {
+			const state = testState("discard-2");
+			execPlanWrite({ name: "main", content: "# Plan" }, state);
+
+			const result = execPlanDiscard({ name: "ghost" }, state);
+			expect(result.isError).toBe(true);
+			expect(JSON.parse(result.content).plans).toEqual(["main"]);
+		});
+
+		it("requires a name and neutralizes traversal", () => {
+			const state = testState("discard-3");
+			expect(execPlanDiscard({}, state).isError).toBe(true);
+			// "../x" slugs to "x" — outside files are unreachable by construction.
+			expect(execPlanDiscard({ name: "../../etc/passwd" }, state).isError).toBe(true);
+		});
+	});
+
+	describe("execPlanEnter", () => {
+		it("returns the plan-suggested signal with the reason", () => {
+			const state = testState("enter-1");
+			const parsed = JSON.parse(execPlanEnter({ reason: "touches auth across 6 files" }, state).content);
+			expect(parsed.planSuggested).toBe(true);
+			expect(parsed.reason).toBe("touches auth across 6 files");
+		});
+
+		it("requires a reason", () => {
+			const state = testState("enter-2");
+			expect(execPlanEnter({}, state).isError).toBe(true);
+			expect(execPlanEnter({ reason: "  " }, state).isError).toBe(true);
 		});
 	});
 

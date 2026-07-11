@@ -50,7 +50,9 @@ export interface Settings {
 	theme?: string;
 	/** When false, web_search and web_fetch tools are not advertised to the model. */
 	webTools?: boolean;
-	/** Agent mode, restored on startup. Unset means "build" — the default mode. */
+	/** @deprecated Agent mode moved to SessionState.mode — the mode is per-task
+	 * session state, and storing it globally leaked plan mode across projects.
+	 * Kept only so old settings.json files still parse. */
 	mode?: "plan" | "build";
 }
 
