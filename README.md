@@ -18,7 +18,7 @@ A terminal coding agent that works with **any** OpenAI-compatible API. Point it 
 
 **Ink TUI.** A proper terminal interface with multiline paste, image attachments, smooth animations.
 
-**Extensible.** Rules (per-project instructions in `.cast/rules.md`), skills (self-contained instruction packages), MCP servers (any Model Context Protocol tool server), and personas (swappable system prompts) — add capabilities without touching the codebase.
+**Extensible.** Rules (per-project instructions in `.cast/rules/*.md`), skills (self-contained instruction packages), MCP servers (any Model Context Protocol tool server), and personas (swappable system prompts) — add capabilities without touching the codebase.
 
 ## Install
 
@@ -59,11 +59,11 @@ cast -c
 
 ### Built-in tools
 
-`bash` `read` `write` `edit` `find` `grep` `ls` `task` `web_search` `web_fetch` — the agent has full filesystem, shell, and web access. Multiple tools run in parallel. The `task` tool delegates work to isolated sub-agents (with their own persona and context) and returns only the final result. Image files (jpg/png/gif/webp/bmp) are sent directly to vision-capable models. Web tools can be toggled on/off via `/web` (persists to settings).
+`bash` `read` `write` `edit` `find` `grep` `ls` `task` `web_search` `web_fetch` — the agent has full filesystem, shell, and web access. Multiple tools run in parallel. The `task` tool delegates work to isolated sub-agents (with their own persona and context) and returns only the final result. Image files (jpg/png/gif/webp/bmp) are sent directly to vision-capable models. Web tools are off by default — toggle with `/web` (persists to settings).
 
 ### Rules
 
-Project-specific instructions the agent always follows. п
+Project-specific instructions in `.cast/rules/*.md` — Cursor-compatible format with four modes: always (injected every turn), auto (attached when matching files enter context), lazy (model reads on demand), and manual (via `@mention` or `/rule:name`). Nested `.cast/rules/` directories in subdirectories scope rules to that subtree.
 
 ### Project Context Files
 
@@ -85,11 +85,17 @@ Swap the agent's role without changing its tools:
 |---------|-------------|
 | `coding` (default) | Reads files, runs commands, edits code |
 | `coder-with-subagents` | Delegates work to sub-agents via the `task` tool for parallel exploration |
-| `writer` | Creative fiction, prose, literary craft |
-| `pm` | Product strategy, specs, prioritization |
-| `marketer` | Positioning, copy, go-to-market |
+| `senior` | Lazy senior dev — root-cause fixes, deletion over addition |
+| `tech-writer` | Documentation — READMEs, guides, API references, changelogs |
 | `qa` | Functional testing — features, edge cases, regressions |
 | `qa-nfr` | Non-functional — performance, security, reliability |
+| `pm` | Product strategy, specs, prioritization |
+| `marketer` | Positioning, copy, go-to-market |
+| `fiction-writer` | Creative fiction, prose, literary craft |
+| `sysadmin` | Operations — diagnoses systems, manages services |
+| `devops` | CI/CD, IaC, containers, Kubernetes, deployments |
+| `dba` | Database — schema design, migrations, query optimization |
+| `appsec` | Application security — threat modeling, secure code review |
 
 Add your own in `~/.cast/personas/` (global) or `.cast/personas/` (project).
 
@@ -114,7 +120,6 @@ Every conversation auto-saves. Resume with `--continue`, pick from a list with `
 | `/subagent-model [name]` | Show/change sub-agent model |
 | `/reasoning` | Change reasoning level |
 | `/persona [name]` | Show/change persona |
-| `/personas` | List available personas |
 | `/provider` | Change provider endpoint and API key |
 | `/permissions [default\|bypass]` | Show/change bash confirmation mode |
 | `/web` | Toggle web tools (web_search, web_fetch) |
@@ -124,8 +129,6 @@ Every conversation auto-saves. Resume with `--continue`, pick from a list with `
 | `/mcp` | List connected MCP servers and tools |
 | `/reload` | Re-scan skills, rules, MCP, and personas for cwd |
 | `/rules` | List loaded rules |
-| `/rules add <text>` | Add a rule (picks local or global) |
-| `/rules delete` | Delete a rule (interactive picker) |
 | `/rule:name` | Invoke a rule by name |
 | `/steer <msg>` | Inject message while agent is working |
 | `/s <msg>` | Alias for `/steer` |
@@ -137,8 +140,6 @@ Every conversation auto-saves. Resume with `--continue`, pick from a list with `
 | `/new` | Start a new session (autosaves current) |
 | `/copy` | Copy last assistant response to clipboard |
 | `/clear` | Clear conversation context |
-| `/usage` | Show token/cost usage |
-| `/context` | Show context size vs. model window |
 | `/theme` | Change color theme |
 | `/repo` | Show cwd and git branch |
 | `/quit`, `/exit` | Save and exit |
@@ -195,12 +196,13 @@ Works with anything that speaks the OpenAI API: OpenRouter, OpenAI, Ollama (`htt
 src/
   core/           Agent logic (no UI dependency)
     loop.ts         Agent loop — streaming, tool dispatch, compaction
-    tools.ts        10 built-in tool definitions + executors
+    tools.ts        Tool definitions (OpenAI function calling format)
+    tools/          Tool executors: bash, files, search, web, task
     llm.ts          LLM interaction, streaming, retry, prompt caching
     session.ts      Session persistence, token estimation, compaction
     mcp.ts          MCP server connection (stdio + streamable HTTP)
     personas.ts     Persona loading (project > global > builtin)
-    rules.ts        Cursor-compatible rule system (always/auto/lazy/manual)
+    rules.ts        Cursor-compatible rule system (always/auto/lazy/manual, nested rules, @mentions)
     skills.ts       Agent Skills spec implementation
     config.ts       AppConfig, model validation, onboarding
     project.ts      System prompt assembly, trust gating
