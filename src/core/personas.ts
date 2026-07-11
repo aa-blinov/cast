@@ -17,6 +17,7 @@
  */
 
 import { readdirSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { parseFrontmatter } from "./frontmatter.ts";
 import { promptsDir } from "./prompts.ts";
@@ -37,7 +38,7 @@ export interface Persona {
 
 export const DEFAULT_PERSONA = "coding";
 
-export const globalPersonasDir = join(process.env.HOME ?? ".", ".cast", "personas");
+export const globalPersonasDir = join(homedir(), ".cast", "personas");
 
 const PROMPTS_DIR = promptsDir;
 

@@ -18,6 +18,7 @@
  */
 
 import { type Dirent, existsSync, readdirSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { parseFrontmatter } from "./frontmatter.ts";
 import { promptsDir, readRequiredPrompt } from "./prompts.ts";
@@ -81,7 +82,7 @@ export interface Rule {
 // ============================================================================
 
 export function globalRulesDir(): string {
-	return join(process.env.HOME ?? ".", ".cast", "rules");
+	return join(homedir(), ".cast", "rules");
 }
 
 export function projectRulesDir(targetCwd: string): string | undefined {

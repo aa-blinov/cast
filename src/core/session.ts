@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import type { AppConfig } from "./config.ts";
 import type { Message, Usage } from "./llm.ts";
@@ -374,7 +375,7 @@ const SESSIONS_DIR = ".cast/sessions";
 
 /** `~/.cast/sessions` — the root everything else lives under. */
 function getSessionsRootDir(): string {
-	const dir = join(process.env.HOME ?? ".", SESSIONS_DIR);
+	const dir = join(homedir(), SESSIONS_DIR);
 	if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 	return dir;
 }

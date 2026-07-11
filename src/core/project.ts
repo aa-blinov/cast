@@ -1,4 +1,5 @@
 import { existsSync, readdirSync } from "node:fs";
+import { arch, homedir, platform } from "node:os";
 import { join } from "node:path";
 import { resolveProjectTrust } from "../pickers/domain.ts";
 import type { Pickers } from "../pickers/types.ts";
@@ -25,8 +26,8 @@ export interface ProjectResolverDeps {
 	pickers: Pickers;
 }
 
-const globalSkillsDir = join(process.env.HOME ?? ".", ".cast", "skills");
-const globalMcpPath = join(process.env.HOME ?? ".", ".cast", "mcp.json");
+const globalSkillsDir = join(homedir(), ".cast", "skills");
+const globalMcpPath = join(homedir(), ".cast", "mcp.json");
 
 function projectSkillsDir(targetCwd: string): string | undefined {
 	const dir = join(targetCwd, ".cast", "skills");
@@ -167,6 +168,15 @@ export function resolveRulesForCwd(cwd: string, trusted: boolean): ResolvedRules
 	};
 }
 
+// One line telling the model what OS it's driving, so it picks the right
+// commands and path conventions. The bash tool always spawns `bash -c` (on
+// Windows that means Git Bash), so the syntax hint stays POSIX everywhere —
+// what changes per platform is the OS toolchain and path conventions around it.
+const PLATFORM_NAMES: Record<string, string> = { darwin: "macOS", linux: "Linux", win32: "Windows" };
+const PLATFORM_LINE = `${platform()}${PLATFORM_NAMES[platform()] ? ` (${PLATFORM_NAMES[platform()]})` : ""}, ${arch()}${
+	platform() === "win32" ? " — the bash tool runs commands via Git Bash, use POSIX syntax" : ""
+}`;
+
 export function buildSystemPrompt(
 	persona: Persona,
 	contextFilesSuffix: string,
@@ -178,6 +188,9 @@ export function buildSystemPrompt(
 		model: string;
 		reasoningLevel: string;
 		reasoningMeta?: { supportedEfforts: string[] } | null;
+		/** Agent mode. TUI-only — headless runs have no modes, so they omit it
+		 * and the Mode line (with its /plan and /build hints) never renders there. */
+		mode?: "plan" | "build";
 	},
 ): string {
 	const now = new Date();
@@ -188,8 +201,14 @@ export function buildSystemPrompt(
 				`\n\n## Current System State`,
 				`- Current date: ${date}`,
 				`- Current working directory: ${cwd}`,
+				`- Platform: ${PLATFORM_LINE}`,
 				`- Model: ${state.model}`,
 				`- Reasoning: ${state.reasoningLevel}`,
+				state.mode === "plan"
+					? "- Mode: plan — read-only exploration and planning; the user approves the plan and exits with the /build command"
+					: state.mode === "build"
+						? "- Mode: build — full toolset; for a complex task worth planning first, the user can enter plan mode with the /plan command"
+						: null,
 				state.reasoningMeta?.supportedEfforts?.length
 					? `- Supported reasoning efforts: ${state.reasoningMeta.supportedEfforts.join(", ")}`
 					: null,
@@ -199,7 +218,7 @@ export function buildSystemPrompt(
 			]
 				.filter(Boolean)
 				.join("\n")}\n`
-		: `\nCurrent date: ${date}\nCurrent working directory: ${cwd}\n`;
+		: `\nCurrent date: ${date}\nCurrent working directory: ${cwd}\nPlatform: ${PLATFORM_LINE}\n`;
 
 	return [persona.systemPrompt, contextFilesSuffix, rulesSuffix, rulesLazySuffix, skillsPromptSuffix, stateBlock]
 		.filter(Boolean)

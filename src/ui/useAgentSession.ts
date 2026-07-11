@@ -156,6 +156,8 @@ interface UseAgentSessionParams {
 	subagentModel?: string;
 	/** Tool names to exclude from the definitions sent to the model. */
 	disabledTools?: Set<string>;
+	/** Plan mode state — passed to the agent loop for system prompt injection and tool gating. */
+	planState?: import("../core/plan.ts").PlanState;
 }
 
 /**
@@ -262,6 +264,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		subagentPrompts,
 		subagentModel,
 		disabledTools,
+		planState,
 	} = params;
 	const [messages, setMessages] = useState<ChatMessage[]>(() => buildDisplayMessages(session.messages));
 	const [streaming, setStreaming] = useState<StreamingState | null>(null);
@@ -290,6 +293,9 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	// very tool call it refers to. turn_end promotes the streaming blocks
 	// first, then these flush in the right order.
 	const pendingDoomWarningsRef = useRef<string[]>([]);
+	// Tool names by call id for the current run: tool_end events don't carry
+	// the name, and the plan_done notice below needs to know which tool ended.
+	const toolNamesByIdRef = useRef(new Map<string, string>());
 	// The authoritative "current streaming" value — read and written directly,
 	// never through setStreaming's own updater callback. React only guarantees
 	// a setState updater function runs by the time of the *next render*, not
@@ -469,6 +475,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			// A turn aborted before its turn_end would otherwise leak queued
 			// doom-loop warnings into the next turn's flush.
 			pendingDoomWarningsRef.current = [];
+			toolNamesByIdRef.current.clear();
 			updateStreaming(() => ({ blocks: [] }), true);
 			setStreamingActive(true);
 
@@ -492,6 +499,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					subagentPrompts,
 					subagentModel,
 					disabledTools,
+					planState,
 					// Append straight into the display history: warnings fire mid-run
 					// (e.g. vision fallback, before the response streams), so an
 					// append lands chronologically right — after the user message and
@@ -517,6 +525,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 								updateStreaming((s) => (s ? { blocks: appendText(s.blocks, "content", event.text) } : s));
 								break;
 							case "tool_start":
+								toolNamesByIdRef.current.set(event.id, event.name);
 								updateStreaming(
 									(s) =>
 										s
@@ -556,6 +565,18 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 										),
 									};
 								}, true);
+								// plan_done succeeding is the plan-mode exit signal: leave a
+								// persistent pointer in the transcript (a timed notice would
+								// vanish while the user is still reading the plan).
+								if (!event.result.isError && toolNamesByIdRef.current.get(event.id) === "plan_done") {
+									setMessages((msgs) => [
+										...msgs,
+										{
+											role: "warning",
+											content: "[Plan ready — review it, then /build to approve and implement]",
+										},
+									]);
+								}
 								break;
 							case "steering_injected":
 							case "followup_injected": {
@@ -693,6 +714,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			subagentPrompts,
 			subagentModel,
 			disabledTools,
+			planState,
 		],
 	);
 

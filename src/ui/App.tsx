@@ -2,6 +2,7 @@ import { Box, Text, useApp } from "ink";
 import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AppConfig } from "../core/config.ts";
 import { formatContextFilesForPrompt, resolveNestedContextFiles } from "../core/context-files.ts";
+import { createPlanState } from "../core/plan.ts";
 import { buildSystemPrompt, makeConfirmBash } from "../core/project.ts";
 import {
 	formatRulesForTurn,
@@ -12,7 +13,7 @@ import {
 } from "../core/rules.ts";
 import type { SessionUsage } from "../core/session.ts";
 import { estimateTokens } from "../core/session.ts";
-import { loadSettings } from "../core/settings.ts";
+import { loadSettings, updateSettings } from "../core/settings.ts";
 import type { StartupResult } from "../core/startup.ts";
 import { setSuspendHook } from "../core/stdin-manager.ts";
 import { fetchLatestVersion, isNewerVersion, isReleaseInstall } from "../core/upgrade.ts";
@@ -96,14 +97,45 @@ export function App(props: AppProps): JSX.Element {
 	const [subagentPrompts] = useState(result.subagentPrompts);
 	const [subagentModel, setSubagentModel] = useState(result.subagentModel);
 	const [webToolsEnabled, setWebToolsEnabled] = useState(() => loadSettings().webTools === true);
+	// Mode is restored from settings on startup; unset means "build" — the
+	// default mode. Every toggle persists, so quitting mid-planning resumes
+	// planning. setPlanMode is the only setter handed out (commands, /new,
+	// /sessions), so persistence can't be bypassed.
+	const [planMode, setPlanModeState] = useState(() => loadSettings().mode === "plan");
+	const setPlanMode = useCallback((v: boolean) => {
+		setPlanModeState(v);
+		updateSettings({ mode: v ? "plan" : "build" });
+	}, []);
 	const disabledTools = useMemo(() => {
 		const s = new Set<string>();
+		// Web tools respect the user's toggle in BOTH modes
 		if (!webToolsEnabled) {
 			s.add("web_search");
 			s.add("web_fetch");
 		}
+		if (planMode) {
+			// Hard block write-capable tools in plan mode
+			s.add("bash");
+			s.add("write");
+			s.add("edit");
+			// Checking off steps is a build-mode act — nothing is implemented yet
+			s.add("plan_check");
+		} else {
+			// Plan authoring tools only available in plan mode; the approved plan
+			// can't be rewritten during implementation, only checked off.
+			// plan_read stays available in build mode as a read-only reference
+			// (it only switches the active plan while plan mode is on).
+			s.add("plan_write");
+			s.add("plan_edit");
+			s.add("plan_done");
+		}
 		return s;
-	}, [webToolsEnabled]);
+	}, [webToolsEnabled, planMode]);
+	// One object per session, mutated in place: an in-flight run captured this
+	// reference at submit time, so /plan and /build toggles must land on the
+	// same object for the loop's per-request system prompt sync to see them.
+	const planState = useMemo(() => createPlanState(session.id), [session.id]);
+	planState.enabled = planMode;
 	// Theme change counter — forces a re-render when /theme switches the active
 	// theme, since theme() reads from a module-level singleton that Ink can't
 	// detect on its own.
@@ -156,7 +188,7 @@ export function App(props: AppProps): JSX.Element {
 				rulesLazySuffix,
 				skillsPromptSuffix,
 				cwd,
-				{ model: session.model, reasoningLevel: config.reasoningLevel },
+				{ model: session.model, reasoningLevel: config.reasoningLevel, mode: planMode ? "plan" : "build" },
 			);
 		},
 		[
@@ -170,6 +202,7 @@ export function App(props: AppProps): JSX.Element {
 			projectTrusted,
 			session.model,
 			config.reasoningLevel,
+			planMode,
 		],
 	);
 
@@ -188,6 +221,7 @@ export function App(props: AppProps): JSX.Element {
 		subagentPrompts,
 		subagentModel,
 		disabledTools,
+		planState,
 	});
 	const running = agent.status === "running";
 	const canSubmit = useCallback(
@@ -274,6 +308,8 @@ export function App(props: AppProps): JSX.Element {
 		setSubagentModel,
 		webToolsEnabled,
 		setWebToolsEnabled,
+		planMode,
+		setPlanMode,
 		onThemeChange,
 	});
 	depsRef.current = {
@@ -319,6 +355,8 @@ export function App(props: AppProps): JSX.Element {
 		setSubagentModel,
 		webToolsEnabled,
 		setWebToolsEnabled,
+		planMode,
+		setPlanMode,
 		onThemeChange,
 	};
 
@@ -399,6 +437,13 @@ export function App(props: AppProps): JSX.Element {
 			<Box justifyContent="space-between">
 				<Text color={theme().muted} dimColor>
 					<Text color={theme().persona}>{currentPersona.label}</Text>
+					{/* Mode is always visible: plan mode shouts (warning color, it
+					    changes what the agent may do), build stays quiet. */}
+					{planMode ? (
+						<Text color={theme().warning}> [PLAN]</Text>
+					) : (
+						<Text color={theme().muted}> [BUILD]</Text>
+					)}
 					<Text color={theme().muted}> │ </Text>
 					<Text color={theme().muted}>{session.model}</Text>
 					{/* Zero-width marker toggled by the resize effect. After that effect

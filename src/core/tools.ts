@@ -1,5 +1,7 @@
 import type { AppConfig } from "./config.ts";
 import type { Tool } from "./llm.ts";
+import type { PlanState } from "./plan.ts";
+import { execPlanCheck, execPlanDone, execPlanEdit, execPlanRead, execPlanWrite } from "./plan.ts";
 import { execBash } from "./tools/bash.ts";
 import { execEdit, execRead, execWrite } from "./tools/files.ts";
 import { execFind, execGrep, execLs } from "./tools/search.ts";
@@ -246,6 +248,113 @@ export function getToolDefinitions(personaNames?: string[], mainModel?: string, 
 					},
 				]
 			: []),
+		// Plan mode tools — always defined, filtered via disabledTools when not in
+		// plan mode, so the model only ever sees them while /plan is active (no
+		// "only available in plan mode" boilerplate needed in the descriptions).
+		{
+			type: "function",
+			function: {
+				name: "plan_write",
+				description:
+					"Write or replace a named plan file; the plan just written becomes the active one for plan_edit/plan_read/plan_done. " +
+					"Use markdown with sections: Context, Steps (as a '- [ ]' checklist), Verification.",
+				parameters: {
+					type: "object",
+					properties: {
+						name: {
+							type: "string",
+							description: "Short descriptive kebab-case name for the plan, e.g. 'auth-refactor'",
+						},
+						content: {
+							type: "string",
+							description: "Full plan markdown content",
+						},
+					},
+					required: ["name", "content"],
+				},
+			},
+		},
+		{
+			type: "function",
+			function: {
+				name: "plan_edit",
+				description:
+					"Edit a section of the active plan by matching its heading (case-insensitive; exact match wins over substring). " +
+					"Replaces the section body while preserving the heading.",
+				parameters: {
+					type: "object",
+					properties: {
+						heading: {
+							type: "string",
+							description: "Section heading to match (case-insensitive; exact match wins over substring)",
+						},
+						content: {
+							type: "string",
+							description: "New content for that section (heading is preserved)",
+						},
+					},
+					required: ["heading", "content"],
+				},
+			},
+		},
+		{
+			type: "function",
+			function: {
+				name: "plan_read",
+				description:
+					"Read a plan's content and headings, plus the names of all plans in this session. " +
+					"In plan mode the plan read becomes the active one for plan_edit/plan_done — use `name` to switch between plans. " +
+					"In build mode it is reference-only.",
+				parameters: {
+					type: "object",
+					properties: {
+						name: {
+							type: "string",
+							description: "Plan name to read (omit for the currently active plan)",
+						},
+					},
+				},
+			},
+		},
+		{
+			type: "function",
+			function: {
+				name: "plan_done",
+				description: "Signal that the active plan is complete and ready for user review.",
+				parameters: {
+					type: "object",
+					properties: {
+						summary: {
+							type: "string",
+							description: "One-line summary of what the plan covers",
+						},
+					},
+				},
+			},
+		},
+		{
+			type: "function",
+			function: {
+				name: "plan_check",
+				description:
+					"Mark a checklist item in the approved plan as done ('- [ ]' → '- [x]'). " +
+					"Call it right after completing each plan step.",
+				parameters: {
+					type: "object",
+					properties: {
+						item: {
+							type: "string",
+							description: "Text of the checklist item (case-insensitive; exact match wins over substring)",
+						},
+						plan: {
+							type: "string",
+							description: "Plan name to check the item off in (omit for the active plan)",
+						},
+					},
+					required: ["item"],
+				},
+			},
+		},
 	];
 }
 
@@ -258,6 +367,7 @@ export function createToolExecutor(
 	config: AppConfig,
 	confirmBash?: ConfirmBash,
 	taskDeps?: TaskExecutorDeps,
+	planState?: PlanState,
 ): ToolExecutor {
 	return async (name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> => {
 		try {
@@ -284,6 +394,21 @@ export function createToolExecutor(
 					if (!taskDeps)
 						return { content: "Task tool not available — no dependencies configured.", isError: true };
 					return await execTask(args, cwd, config, taskDeps, signal);
+				case "plan_write":
+					if (!planState) return { content: "Plan tool not available.", isError: true };
+					return execPlanWrite(args, planState);
+				case "plan_edit":
+					if (!planState) return { content: "Plan tool not available.", isError: true };
+					return execPlanEdit(args, planState);
+				case "plan_read":
+					if (!planState) return { content: "Plan tool not available.", isError: true };
+					return execPlanRead(args, planState);
+				case "plan_done":
+					if (!planState) return { content: "Plan tool not available.", isError: true };
+					return execPlanDone(args, planState);
+				case "plan_check":
+					if (!planState) return { content: "Plan tool not available.", isError: true };
+					return execPlanCheck(args, planState);
 				default:
 					return { content: `Unknown tool: ${name}`, isError: true };
 			}

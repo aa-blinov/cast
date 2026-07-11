@@ -764,6 +764,136 @@ describe("runAgentLoop — nested AGENTS.md injection", () => {
 });
 
 // ============================================================================
+// runAgentLoop — plan mode
+// ============================================================================
+
+describe("runAgentLoop — plan mode", () => {
+	// applyCacheControl rewrites message content in place into a structured
+	// [{ type: "text", text }] array before the request goes out — flatten it
+	// back to text to assert on the prompt.
+	const contentToText = (content: unknown): string => {
+		if (typeof content === "string") return content;
+		if (!Array.isArray(content)) return "";
+		return content
+			.map((p: { type?: string; text?: string }) => (p?.type === "text" && typeof p.text === "string" ? p.text : ""))
+			.join("");
+	};
+
+	it("prepends the plan block even when rebuildSystemPrompt replaces the prompt", async () => {
+		// rebuildSystemPrompt is always set in the TUI and rebuilds the prompt
+		// wholesale — the plan block must be applied after it, not overwritten.
+		const systemPrompts: string[] = [];
+		vi.mocked(streamAndCollect).mockImplementationOnce(
+			async (_client: unknown, _model: string, messages: unknown) => {
+				systemPrompts.push(contentToText((messages as Message[])[0]!.content));
+				return { content: "ok", thinking: "", finishReason: "stop" };
+			},
+		);
+
+		await runAgentLoop([{ role: "user", content: "plan the feature" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "BASE_PROMPT",
+			rebuildSystemPrompt: () => "REBUILT_PROMPT",
+			planState: { enabled: true, plansDir: "/tmp/never-existing-plans-dir" },
+			onEvent: () => {},
+		});
+
+		const prompt = systemPrompts[0]!;
+		expect(prompt.startsWith("═")).toBe(true);
+		expect(prompt).toContain("PLAN MODE ACTIVE");
+		// The rebuilt prompt survives below the block — and only once.
+		expect(prompt).toContain("REBUILT_PROMPT");
+		expect(prompt.indexOf("PLAN MODE ACTIVE")).toBe(prompt.lastIndexOf("PLAN MODE ACTIVE"));
+		expect(prompt).not.toContain("BASE_PROMPT");
+	});
+
+	it("injects neither block when plan mode is off and no plan was written", async () => {
+		const systemPrompts: string[] = [];
+		vi.mocked(streamAndCollect).mockImplementationOnce(
+			async (_client: unknown, _model: string, messages: unknown) => {
+				systemPrompts.push(contentToText((messages as Message[])[0]!.content));
+				return { content: "ok", thinking: "", finishReason: "stop" };
+			},
+		);
+
+		await runAgentLoop([{ role: "user", content: "hi" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "BASE_PROMPT",
+			planState: { enabled: false, plansDir: "/tmp/never-existing-plans-dir" },
+			onEvent: () => {},
+		});
+
+		expect(systemPrompts[0]).toBe("BASE_PROMPT");
+	});
+
+	it("appends the approved plan in build mode when a plan file exists", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "cast-plan-build-"));
+		writeFileSync(join(dir, "feature.md"), "# Plan\n\n## Steps\n1. PLAN_STEP_MARKER", "utf-8");
+		try {
+			const systemPrompts: string[] = [];
+			vi.mocked(streamAndCollect).mockImplementationOnce(
+				async (_client: unknown, _model: string, messages: unknown) => {
+					systemPrompts.push(contentToText((messages as Message[])[0]!.content));
+					return { content: "ok", thinking: "", finishReason: "stop" };
+				},
+			);
+
+			await runAgentLoop([{ role: "user", content: "go" }], {
+				config: testConfig,
+				model: "test-model",
+				cwd: "/tmp",
+				systemPrompt: "BASE_PROMPT",
+				rebuildSystemPrompt: () => "REBUILT_PROMPT",
+				planState: { enabled: false, plansDir: dir },
+				onEvent: () => {},
+			});
+
+			const prompt = systemPrompts[0]!;
+			// Guidance, not restriction: the base prompt (persona) stays on top.
+			expect(prompt.startsWith("REBUILT_PROMPT")).toBe(true);
+			expect(prompt).toContain("PLAN_STEP_MARKER");
+			expect(prompt).not.toContain("PLAN MODE ACTIVE");
+			expect(prompt).not.toContain("{{PLAN}}");
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("refuses to execute a disabled tool the model fabricates a call to", async () => {
+		const events: AgentEvent[] = [];
+		vi.mocked(streamAndCollect)
+			// The model calls bash even though it was filtered from the definitions.
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [{ id: "t1", name: "bash", arguments: JSON.stringify({ command: "rm -rf /" }) }],
+			}))
+			.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
+
+		await runAgentLoop([{ role: "user", content: "plan it" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "SYS",
+			disabledTools: new Set(["bash"]),
+			onEvent: (e) => events.push(e),
+		});
+
+		const toolEnd = events.find((e) => e.type === "tool_end");
+		expect(toolEnd).toBeDefined();
+		if (toolEnd?.type === "tool_end") {
+			expect(toolEnd.result.isError).toBe(true);
+			expect(toolEnd.result.content).toContain("not available");
+		}
+	});
+});
+
+// ============================================================================
 // runAgentLoop — doom loop detection
 // ============================================================================
 

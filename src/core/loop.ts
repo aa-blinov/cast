@@ -1,4 +1,5 @@
 import { setMaxListeners } from "node:events";
+import { join } from "node:path";
 import type { AppConfig } from "./config.ts";
 import type { Message, Tool, Usage } from "./llm.ts";
 import {
@@ -11,6 +12,7 @@ import {
 } from "./llm.ts";
 import type { McpToolHandle } from "./mcp.ts";
 import type { Persona } from "./personas.ts";
+import { readActivePlan } from "./plan.ts";
 import { promptsDir, readRequiredPrompt } from "./prompts.ts";
 import { compactMessages, estimateTokens, shouldCompact } from "./session.ts";
 import type { SubagentPrompt } from "./subagents.ts";
@@ -31,6 +33,15 @@ const DOOM_LOOP_THRESHOLD = 3;
 const COMPACTION_SYSTEM_PROMPT = readRequiredPrompt(promptsDir, "compaction-system.md");
 const COMPACTION_PROMPT = readRequiredPrompt(promptsDir, "compaction.md");
 const COMPACTION_UPDATE_PROMPT = readRequiredPrompt(promptsDir, "compaction-update.md");
+// Mode prompts live under prompts/modes/ — one file per agent mode, so new
+// modes slot in beside these. Plan mode: restriction block prepended to the
+// system prompt while /plan is active. Build mode: mirror of the plan block,
+// injected once plan mode is exited and a plan file exists for the session, so
+// the approved plan keeps steering the implementation — and survives
+// compaction, which would otherwise drop it from the conversation. {{PLAN}} is
+// replaced with the plan file content.
+const PLAN_MODE_PROMPT = readRequiredPrompt(promptsDir, join("modes", "plan-mode.md"));
+const BUILD_MODE_PROMPT = readRequiredPrompt(promptsDir, join("modes", "build-mode.md"));
 
 // ============================================================================
 // Compaction
@@ -215,6 +226,8 @@ export interface LoopConfig {
 	subagentModel?: string;
 	/** Tool names to exclude from the definitions sent to the model. */
 	disabledTools?: Set<string>;
+	/** Plan mode state — when enabled, injects plan system prompt block. */
+	planState?: import("./plan.ts").PlanState;
 	/** promptTokens from the most recent API response — used by shouldCompact
 	 * as the authoritative context size instead of character-based estimation. */
 	lastPromptTokens?: number;
@@ -298,13 +311,18 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 					runAgentLoop,
 				}
 			: undefined,
+		loopConfig.planState,
 	);
-	const executeTool = mcpToolIndex
-		? (name: string, args: Record<string, unknown>, toolSignal?: AbortSignal): Promise<ToolResult> => {
-				const mcpTool = mcpToolIndex.get(name);
-				return mcpTool ? mcpTool.call(args, toolSignal) : builtinExecuteTool(name, args, toolSignal);
-			}
-		: builtinExecuteTool;
+	const executeTool = (name: string, args: Record<string, unknown>, toolSignal?: AbortSignal): Promise<ToolResult> => {
+		// Same principle as the task gate above: a tool filtered out of the
+		// advertised definitions must not run even when the model fabricates a
+		// call to it by name (bash in plan mode, plan_* in build mode, …).
+		if (disabledTools?.has(name)) {
+			return Promise.resolve({ content: `Tool "${name}" is not available in the current mode.`, isError: true });
+		}
+		const mcpTool = mcpToolIndex?.get(name);
+		return mcpTool ? mcpTool.call(args, toolSignal) : builtinExecuteTool(name, args, toolSignal);
+	};
 	const client = createClient(config);
 	const steeringQueue = loopConfig.steeringQueue ?? new MessageQueue();
 	const followUpQueue = loopConfig.followUpQueue ?? new MessageQueue();
@@ -336,6 +354,24 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 				}
 			}
 			prompt = loopConfig.rebuildSystemPrompt({ userText, contextFiles });
+		}
+		// Plan mode: prepended AFTER any rebuild — the per-turn rebuild path
+		// (always active in the TUI) replaces `prompt` wholesale and would
+		// silently drop a block added earlier. The restriction must be the
+		// first thing the model sees, persona and rules included.
+		if (loopConfig.planState?.enabled) {
+			prompt = `${PLAN_MODE_PROMPT}\n\n${prompt}`;
+		} else if (loopConfig.planState) {
+			// Build mode with a plan from this session: append the approved plan
+			// (the active one — most recently written) so it keeps steering
+			// implementation. Re-read from disk on every request — that's what
+			// makes it survive compaction and resume. Appended (not prepended)
+			// because it's guidance, not a restriction: the persona keeps its
+			// place at the top.
+			const plan = readActivePlan(loopConfig.planState);
+			if (plan.exists) {
+				prompt = `${prompt}\n\n${BUILD_MODE_PROMPT.replace("{{PLAN}}", () => plan.content)}`;
+			}
 		}
 		if (messages.length === 0 || messages[0]?.role !== "system") {
 			messages.unshift({ role: "system", content: prompt });
