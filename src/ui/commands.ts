@@ -2,7 +2,7 @@ import { execFileSync, execSync } from "node:child_process";
 import OpenAI from "openai";
 import { type AppConfig, runOnboardingCheck } from "../core/config.ts";
 import { formatContextFilesForPrompt, loadProjectContextFiles } from "../core/context-files.ts";
-import { compactSessionMessages } from "../core/loop.ts";
+import { compactSessionMessages, PLAN_COMPACTION_PROMPT } from "../core/loop.ts";
 import { closeMcpConnections, type McpSetupResult } from "../core/mcp.ts";
 import { findPersona, type LoadPersonasOptions, type Persona } from "../core/personas.ts";
 import { createPlanState, readActivePlan } from "../core/plan.ts";
@@ -284,6 +284,13 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 	}
 
 	if (input === "/plan") {
+		// A run captures its tool set and system prompt at start; flipping the
+		// mode under it would leave the prompt claiming one thing while the
+		// executor gate enforces another. Modes only change between runs.
+		if (deps.running) {
+			showNotice("[Agent running — finish the run or /abort before switching modes]");
+			return;
+		}
 		if (deps.planMode) {
 			showNotice("[Already in plan mode]");
 			return;
@@ -294,6 +301,10 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 	}
 
 	if (input === "/build") {
+		if (deps.running) {
+			showNotice("[Agent running — finish the run or /abort before switching modes]");
+			return;
+		}
 		if (!deps.planMode) {
 			showNotice("[Not in plan mode]");
 			return;
@@ -327,6 +338,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 				undefined,
 				(attempt, maxAttempts, reason) => showNotice(`[Retry ${attempt}/${maxAttempts}: ${reason}]`),
 				(usage) => addUsage(session, usage),
+				deps.planMode ? PLAN_COMPACTION_PROMPT : undefined,
 			);
 			if (result.compacted) {
 				session.messages = result.messages;
@@ -680,9 +692,9 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		session.updatedAt = chosen.updatedAt;
 		session.usage = chosen.usage;
 		session.cwd = chosen.cwd;
-		// Plan mode is a per-task state of the session being left — never carry
-		// it into the resumed one.
-		deps.setPlanMode(false);
+		// Mode travels with the session: restore what the resumed session was
+		// left in instead of carrying over the current one.
+		deps.setPlanMode(chosen.mode === "plan");
 		let contextFilesSuffix: string | undefined;
 		let rulesSuffix: string | undefined;
 		let rulesLazySuffix: string | undefined;

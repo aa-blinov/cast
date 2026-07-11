@@ -3,7 +3,7 @@ import { noPickers } from "../pickers/no-pickers.ts";
 import type { AgentEvent } from "./loop.ts";
 import { runAgentLoop } from "./loop.ts";
 import { closeMcpConnections } from "./mcp.ts";
-import { PLAN_TOOL_NAMES } from "./plan.ts";
+import { createPlanState, PLAN_TOOL_NAMES } from "./plan.ts";
 import { addUsage, appendMessage, type SessionState, saveSession } from "./session.ts";
 import { loadSettings } from "./settings.ts";
 import type { ParsedArgs } from "./startup.ts";
@@ -50,6 +50,10 @@ export async function runNonInteractive(args: ParsedArgs, options: RunOptions): 
 	// Headless runs have no plan mode, so the plan tools must be neither
 	// advertised nor executable.
 	for (const name of PLAN_TOOL_NAMES) disabledTools.add(name);
+	// But an approved plan still steers: resuming a session that has one
+	// (`cast run -c "..."`) injects the same build-mode mirror block as the TUI
+	// — without this, headless continuation silently ignored the plan.
+	const planState = createPlanState(session.id);
 
 	const ac = new AbortController();
 	runner.startRun(ac);
@@ -73,6 +77,7 @@ export async function runNonInteractive(args: ParsedArgs, options: RunOptions): 
 			subagentPrompts,
 			subagentModel,
 			disabledTools,
+			planState,
 			onEvent: (event: AgentEvent) => handleEvent(event, session, options.format),
 		});
 

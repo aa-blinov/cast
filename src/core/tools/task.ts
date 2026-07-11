@@ -111,6 +111,9 @@ export interface TaskExecutorDeps {
 	subagentModel?: string;
 	/** Tool names to exclude from the definitions sent to the model. */
 	disabledTools?: Set<string>;
+	/** Parent's plan state — lets build-mode subagents inherit the approved
+	 * plan (mirror block) and plan-mode subagents inherit the bash block. */
+	planState?: import("../plan.ts").PlanState;
 	/** Injected to avoid circular dependency with loop.ts. */
 	runAgentLoop: (messages: Message[], config: LoopConfig) => Promise<Message[]>;
 }
@@ -203,10 +206,21 @@ export async function execTask(
 			confirmBash: serializeConfirm(deps.confirmBash),
 			mcpTools: deps.mcpTools,
 			mcpToolIndex: deps.mcpToolIndex,
-			// Subagents inherit the parent's restrictions (bash/write/edit stay
-			// blocked in plan mode) but never get the plan tools themselves —
-			// they explore and report back; the parent owns the plan file.
-			disabledTools: new Set([...(deps.disabledTools ?? []), ...PLAN_TOOL_NAMES]),
+			// Subagents inherit the parent's restrictions (write/edit stay blocked
+			// in plan mode) but never get the plan tools themselves — they explore
+			// and report back; the parent owns the plan file. In plan mode bash is
+			// blocked entirely for subagents (the read-only allowlist gate is a
+			// main-agent affordance; explorers have read/grep/find).
+			disabledTools: new Set([
+				...(deps.disabledTools ?? []),
+				...PLAN_TOOL_NAMES,
+				...(deps.planState?.enabled ? ["bash"] : []),
+			]),
+			// Handoff, not authority: the child sees the plan (mirror block in
+			// build mode, or the current draft during planning) but always runs
+			// with enabled=false — the plan-mode restriction block references
+			// authoring tools the child doesn't have.
+			planState: deps.planState ? { ...deps.planState, enabled: false } : undefined,
 			// ponytail: no personas/currentPersona/subagentModel — child can't delegate further
 		});
 	} finally {
