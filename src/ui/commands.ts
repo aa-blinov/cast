@@ -5,6 +5,7 @@ import { formatContextFilesForPrompt, loadProjectContextFiles } from "../core/co
 import { compactSessionMessages } from "../core/loop.ts";
 import { closeMcpConnections, type McpSetupResult } from "../core/mcp.ts";
 import { findPersona, type LoadPersonasOptions, type Persona } from "../core/personas.ts";
+import { createPlanState, readActivePlan } from "../core/plan.ts";
 import {
 	buildSystemPrompt,
 	type ProjectResolverDeps,
@@ -45,6 +46,7 @@ import type { PendingImage, UseAgentSession } from "./useAgentSession.ts";
 // name (enforced by a test) so the list is scannable as it grows.
 export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArgs?: boolean }> = [
 	{ name: "/abort", description: "Abort the current run" },
+	{ name: "/build", description: "Exit plan mode, restore full toolset" },
 	{ name: "/clear", description: "Clear context (and save)" },
 	{ name: "/compact", description: "Compact context now" },
 	{ name: "/copy", description: "Copy last assistant response" },
@@ -55,6 +57,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/new", description: "Start a new session" },
 	{ name: "/permissions", description: "Change bash confirmation mode" },
 	{ name: "/persona", description: "Show or change persona" },
+	{ name: "/plan", description: "Enter plan mode (explore + plan only)" },
 	{ name: "/provider", description: "Change provider URL and API key" },
 	{ name: "/q", description: "Alias for /queue", takesArgs: true },
 	{ name: "/queue", description: "Queue a message for after the run", takesArgs: true },
@@ -117,6 +120,8 @@ export interface CommandDeps {
 	setSubagentModel: (m: string | undefined) => void;
 	webToolsEnabled: boolean;
 	setWebToolsEnabled: (v: boolean) => void;
+	planMode: boolean;
+	setPlanMode: (v: boolean) => void;
 	onThemeChange?: () => void;
 }
 
@@ -153,6 +158,7 @@ function rebuildSystemPrompt(
 				model: deps.session.model,
 				reasoningLevel: deps.config.reasoningLevel,
 				reasoningMeta: deps.reasoningMeta,
+				mode: deps.planMode ? "plan" : "build",
 			},
 		),
 	);
@@ -277,6 +283,34 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		return;
 	}
 
+	if (input === "/plan") {
+		if (deps.planMode) {
+			showNotice("[Already in plan mode]");
+			return;
+		}
+		deps.setPlanMode(true);
+		showNotice("[Plan mode: ON — exploring and planning only]");
+		return;
+	}
+
+	if (input === "/build") {
+		if (!deps.planMode) {
+			showNotice("[Not in plan mode]");
+			return;
+		}
+		deps.setPlanMode(false);
+		// With a plan on disk, /build is the approval gesture: the loop injects
+		// the plan into the build-mode system prompt, so the user's next message
+		// (however phrased) starts implementation guided by it.
+		const hasPlan = readActivePlan(createPlanState(session.id)).exists;
+		showNotice(
+			hasPlan
+				? "[Plan mode: OFF — plan approved; your next message starts implementation]"
+				: "[Plan mode: OFF — full toolset restored]",
+		);
+		return;
+	}
+
 	if (input === "/clear") {
 		agent.clearContext();
 		showNotice("[Context cleared]");
@@ -319,6 +353,9 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		session.usage = fresh.usage;
 		saveSession(session);
 		agent.clearContext();
+		// A fresh session starts in build mode — plan mode is a per-task state,
+		// not a sticky preference.
+		deps.setPlanMode(false);
 		showNotice(`[New session: ${session.id}]`);
 		return;
 	}
@@ -643,6 +680,9 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		session.updatedAt = chosen.updatedAt;
 		session.usage = chosen.usage;
 		session.cwd = chosen.cwd;
+		// Plan mode is a per-task state of the session being left — never carry
+		// it into the resumed one.
+		deps.setPlanMode(false);
 		let contextFilesSuffix: string | undefined;
 		let rulesSuffix: string | undefined;
 		let rulesLazySuffix: string | undefined;
@@ -769,10 +809,12 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			role: "warning",
 			content:
 				"Commands\n" +
+				"  /build              Exit plan mode, restore full toolset\n" +
 				"  /copy               Copy last assistant response\n" +
 				"  /clear              Clear context\n" +
 				"  /compact            Compact context now\n" +
 				"  /new                Start new session\n" +
+				"  /plan               Enter plan mode (explore + plan only)\n" +
 				"  /abort              Abort running agent (alias: /stop)\n" +
 				"  /queue (/q)         Queue message for next turn\n" +
 				"  /queue-reset        Clear queue\n" +

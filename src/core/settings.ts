@@ -5,6 +5,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 // ============================================================================
@@ -49,6 +50,8 @@ export interface Settings {
 	theme?: string;
 	/** When false, web_search and web_fetch tools are not advertised to the model. */
 	webTools?: boolean;
+	/** Agent mode, restored on startup. Unset means "build" — the default mode. */
+	mode?: "plan" | "build";
 }
 
 // ============================================================================
@@ -59,7 +62,7 @@ const SETTINGS_DIR = ".cast";
 const SETTINGS_FILE = "settings.json";
 
 function getSettingsPath(): string {
-	return join(process.env.HOME ?? ".", SETTINGS_DIR, SETTINGS_FILE);
+	return join(homedir(), SETTINGS_DIR, SETTINGS_FILE);
 }
 
 export function loadSettings(): Settings {
@@ -74,7 +77,7 @@ export function loadSettings(): Settings {
 }
 
 function saveSettings(settings: Settings): void {
-	const dir = join(process.env.HOME ?? ".", SETTINGS_DIR);
+	const dir = join(homedir(), SETTINGS_DIR);
 	if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
 	const path = getSettingsPath();
