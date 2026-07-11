@@ -44,6 +44,11 @@ export interface SessionState {
 	 * one and just stay in the flat legacy directory (see getSessionFileDir).
 	 */
 	cwd?: string;
+	/** Agent mode this session was left in — restored on resume so quitting
+	 * mid-planning comes back to plan mode. Unset means "build", the default.
+	 * Per-session on purpose: the mode is task state, and storing it globally
+	 * leaked plan mode from one project into every other one. */
+	mode?: "plan" | "build";
 }
 
 /** Fold one turn's usage into the session's running totals. When `opts.subagent`

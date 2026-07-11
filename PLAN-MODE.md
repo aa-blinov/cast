@@ -29,7 +29,10 @@ Plan mode is a restricted agent state where the model can explore the codebase a
 
 ### Entry
 
-User types `/plan`. The command only enters the mode — the task description is sent as a regular message afterwards. Running `/plan` while already in plan mode shows `[Already in plan mode]` and changes nothing.
+Two ways in:
+
+1. User types `/plan`. The command only enters the mode — the task description is sent as a regular message afterwards. Running `/plan` while already in plan mode shows `[Already in plan mode]` and changes nothing.
+2. The model suggests it: in build mode the `plan_enter` tool signals "this task is worth planning first" with a reason. When the turn ends, the user gets a Yes/No dialog; on Yes the mode switches and a synthetic user message auto-starts the planning turn. On No, `[Staying in build mode]` and a synthetic "plan mode declined — proceed directly" message resumes the task — the model ended its turn waiting for the decision, so declining must not leave the session hanging in silence.
 
 Behavior:
 - Sets `planMode = true`
@@ -39,19 +42,24 @@ Behavior:
 
 ### Exit — the approval flow
 
-The full lifecycle: `plan_done` signals the plan is ready → the user reviews it → `/build` approves it → the user's next message starts implementation.
+The full lifecycle: `plan_done` signals the plan is ready → when the turn ends, the user gets an approval dialog:
 
-`/build` sets `planMode = false` and restores the full toolset. It is the approval gesture: from that point on, as long as the session has a plan file, a build-mode block with the approved plan is injected into the system prompt (see below), so the user does not need to spell out "implement the plan" — any next message ("go", "реализуй, но шаг 3 замени на X") starts implementation guided by it. Notice: `[Plan mode: OFF — plan approved; your next message starts implementation]` (or `full toolset restored` when no plan was written). Running `/build` outside plan mode shows `[Not in plan mode]`.
+1. **Approve — switch to build and implement now**: mode flips to build and a synthetic user message auto-starts the implementation. The auto-submit is deferred until the render that applied the mode flip, so the run picks up the fresh tool set (not the pre-flip closures).
+2. **Approve — clear context, then implement**: same, but the planning conversation is dropped first. Safe because of the mirror block — the plan is re-read from disk into the system prompt, so the exploration chatter goes without losing the decisions. The right choice after a long planning session.
+3. **Approve — switch to build, I'll start myself**: mode flips, the user types the starting message (the natural place for "go, but change step 3").
+4. **Keep planning — I'll give feedback**: nothing changes; the user describes what to refine.
 
-`/build` deliberately does not auto-submit an "implement the plan" message: the moment right after approval is where the user naturally attaches corrections, and taking it away would force them to steer mid-run.
+Dialogs open only when the run settles, never mid-run — the mode always flips between runs, so tool sets stay consistent. Signals that arrive after the user already toggled the mode manually are dropped.
 
-`plan_done` itself does not exit the mode — the user decides when to switch.
+`/build` remains as the manual approval gesture with the same semantics: from the moment the mode flips, as long as the session has a plan, the build-mode mirror block keeps injecting it, so any next message starts implementation guided by the plan. Running `/build` outside plan mode shows `[Not in plan mode]`.
 
 Plan mode is per-task session state: `/new` and switching sessions via `/sessions` always reset it to build mode.
 
 ### Persistence
 
-The mode is stored in `settings.json` (`mode: "plan" | "build"`) and restored on startup — quitting mid-planning resumes in plan mode. Unset means "build": **build is the default mode**. Every transition persists (`/plan`, `/build`, and the resets in `/new` and `/sessions` all go through the same setter).
+The mode is stored **per session** (`SessionState.mode`) and restored when that session is resumed — quitting mid-planning comes back to plan mode in that session, without leaking it into other projects (the original global `settings.mode` did exactly that and was retired). Unset means "build": **build is the default mode**. Every transition persists via the single `setPlanMode` setter; `/new` starts fresh sessions in build, `/sessions` restores whatever mode the chosen session was left in.
+
+Mode switching is rejected while a run is active (`[Agent running — finish the run or /abort before switching modes]`): a run captures its tool set and system prompt at start, and flipping the mode under it would leave the prompt claiming one thing while the executor gate enforces another.
 
 ### UI indicators
 
@@ -76,7 +84,7 @@ Uses the existing `disabledTools: Set<string>` mechanism — tools are filtered 
 
 The same set also gates execution: the loop's `executeTool` wrapper refuses any call whose name is in `disabledTools`, so a fabricated call to a non-advertised tool (bash in plan mode, `plan_*` in build mode) returns an error instead of running — the same principle as the existing `task` executor gate.
 
-Headless runs (`cast run`) have no plan mode: `run.ts` adds all `PLAN_TOOL_NAMES` to `disabledTools`, so the plan tools are neither advertised nor executable there.
+Headless runs (`cast run`) have no plan mode: `run.ts` adds all `PLAN_TOOL_NAMES` to `disabledTools`, so the plan tools are neither advertised nor executable there. But an approved plan still steers: run.ts passes a build-mode `planState`, so resuming a session that has one (`cast run -c "..."`) injects the same mirror block as the TUI.
 
 ### Plan mode tool matrix
 
@@ -89,7 +97,7 @@ Headless runs (`cast run`) have no plan mode: `run.ts` adds all `PLAN_TOOL_NAMES
 | `web_search` | **toggle** | toggle | Respects `/web` toggle. If user disabled web tools, they stay disabled in plan mode. |
 | `web_fetch` | **toggle** | toggle | Same as web_search. |
 | `task` | yes | yes | Available but inherits restricted `disabledTools`. Subagent cannot call bash/write/edit either. |
-| `bash` | **no** | yes | Blocked — cannot execute commands |
+| `bash` | **read-only** | yes | Executor-enforced allowlist in plan mode: pipelines of inspection binaries (ls, cat, grep, find, wc, diff, jq, git log/show/diff/status/blame, …) pass; redirects, command substitution, unlisted binaries (incl. test runners and package managers — `npm test` runs an arbitrary script) are rejected with the reason. |
 | `write` | **no** | yes | Blocked — cannot write files |
 | `edit` | **no** | yes | Blocked — cannot edit files |
 | `plan_write` | **yes** | no | New. Write or replace a named plan; it becomes the active one. |
@@ -97,6 +105,8 @@ Headless runs (`cast run`) have no plan mode: `run.ts` adds all `PLAN_TOOL_NAMES
 | `plan_read` | **yes** | **yes** | New. Read a plan + list the session's plans. Switches the active plan only in plan mode; reference-only in build. |
 | `plan_done` | **yes** | no | New. Signal plan completion, prompt user to switch to build. |
 | `plan_check` | no | **yes** | New. Mark a plan checklist item done. Build-mode-only: the approved plan can't be rewritten during implementation, only checked off. |
+| `plan_enter` | no | **yes** | New. Model suggests planning first; user confirms via dialog at turn end. |
+| `plan_discard` | **yes** | no | New. Delete an abandoned draft; if it was active, the newest remaining plan takes over. |
 
 ### disabledTools construction (App.tsx)
 
@@ -133,7 +143,9 @@ Subagents inherit the parent's restrictions plus the plan tools (task.ts):
 disabledTools: new Set([...(deps.disabledTools ?? []), ...PLAN_TOOL_NAMES]),
 ```
 
-A subagent spawned in plan mode gets the same restricted set — it can read files and produce findings, but cannot write or execute anything. Plan tools are never available to subagents: they explore and report back; the parent owns the plan file.
+A subagent spawned in plan mode gets the same restricted set — it can read files and produce findings, but cannot write anything; bash is blocked entirely for plan-mode subagents (the read-only allowlist is a main-agent affordance). Plan tools are never available to subagents: they explore and report back; the parent owns the plan file.
+
+Plan handoff: the parent's `planState` is passed to the child with `enabled: false`, so a build-mode subagent delegated an implementation step sees the same approved-plan mirror block as the parent (and a plan-mode subagent sees the current draft) instead of working blind.
 
 ---
 
@@ -247,9 +259,55 @@ Behavior:
 - Mode switching stays a user decision — `/build` is never triggered automatically
 - If no plan file exists → error
 
+### `plan_discard`
+
+Delete a plan from the session — the exit for abandoned drafts, which would otherwise linger in the mirror's "other plans" line forever (and could even become active again via the mtime fallback after a resume). Plan-mode-only, like the other authoring tools.
+
+```ts
+{
+  name: "plan_discard",
+  description: "Delete a plan from this session (e.g. an abandoned draft the user asked to drop). If it was the active plan, the newest remaining one becomes active.",
+  parameters: {
+    type: "object",
+    properties: {
+      name: { type: "string", description: "Name of the plan to discard" }
+    },
+    required: ["name"]
+  }
+}
+```
+
+Behavior:
+- Name is slugified (traversal-safe); unknown name → error listing the session's plans
+- Deleting the active plan clears the marker; the newest remaining plan resolves as active
+- Returns `{ success: true, discarded, plans, active }`
+
+### `plan_enter`
+
+Suggest switching to plan mode — the model's counterpart of the user's `/plan`. Build-mode-only.
+
+```ts
+{
+  name: "plan_enter",
+  description: "Suggest switching to plan mode when the user's request is complex enough to benefit from planning before implementation (multiple files, architectural decisions, unclear scope). The user is asked to confirm — call this, then END YOUR TURN and wait. Do not call it for simple, direct tasks.",
+  parameters: {
+    type: "object",
+    properties: {
+      reason: { type: "string", description: "One sentence on why this task benefits from planning first" }
+    },
+    required: ["reason"]
+  }
+}
+```
+
+Behavior:
+- Pure signal: returns `{ planSuggested: true, reason, note }` telling the model to end its turn; it cannot block on the user mid-run
+- When the run settles, the UI shows a Yes/No dialog; Yes → plan mode + auto-started planning turn, No → `[Staying in build mode]`
+- The build-mode `Mode:` line in the system prompt points the model at this tool for complex tasks
+
 ### `plan_check`
 
-Mark a checklist item in the approved plan as done. The only plan tool available in build mode — progress tracking is an implementation act, and it deliberately can't rewrite the plan, only flip `- [ ]` → `- [x]`.
+Mark a checklist item in the approved plan as done. Available in build mode — progress tracking is an implementation act, and it deliberately can't rewrite the plan, only flip `- [ ]` → `- [x]`.
 
 ```ts
 {
@@ -268,6 +326,7 @@ Mark a checklist item in the approved plan as done. The only plan tool available
 
 Behavior:
 - Finds an unchecked `- [ ]` line by item text (same matching contract as plan_edit: case-insensitive, exact wins over substring, ambiguity → error listing candidates)
+- Fence-aware, like the section parser and the checklist counter: a checkbox-like line inside a code example is content, never a candidate — matching it would corrupt the example (and a fenced `- [ ]` would keep the plan "unfinished" forever in the done-variant check)
 - Targets the active plan by default; `plan` selects another session plan explicitly (unknown name → error listing plans). Targeting never changes which plan is active
 - Flips it to `- [x]` and writes the file; already-checked items are never candidates
 - Returns `{ success: true, plan, item, remaining }`, plus `allDone: true` when the last item is checked
@@ -278,27 +337,14 @@ Behavior:
 
 ## System prompt injection
 
-When plan mode is active, a block is prepended to the system prompt. The block is content, not code — it lives in `prompts/modes/plan-mode.md` (loaded via `readRequiredPrompt`, same as the compaction prompts):
+When plan mode is active, a block is prepended to the system prompt. The block is content, not code — it lives in `prompts/modes/plan-mode.md` (loaded via `readRequiredPrompt`, same as the compaction prompts). Beyond the tool restrictions, it carries the planning methodology:
 
-```
-══════════════════════════════════════════════
-PLAN MODE ACTIVE — no code execution allowed
-══════════════════════════════════════════════
-You are in plan mode. You MUST NOT edit, write, or execute any code.
-Your job is to explore the codebase, understand the task, and produce a clear plan.
+- **Execution spec, not design doc**: the bar is an executor who never saw the conversation performing the file top to bottom with zero decisions of substance left; completeness beats brevity when they collide
+- **Workflow**: RE-ENTRY (plan_read first — an existing plan for the same task is updated, not duplicated; a different task gets a fresh name; plan_discard drops abandoned drafts on request) → UNDERSTAND (restate the ask, read the material, parallel focused `task` subagents when scope spans areas) → GROUND (unknowns eliminated by reading, not asking; unverified claims marked inline; user asked only about preferences/tradeoffs, batched, 2-4 options with a recommended default) → WRITE (plan_write early, plan_edit as findings land — never batched to the end) → DONE (self-check, plan_done, end turn)
+- **Plan structure**: Context (literal ask + end state, every outcome maps to a step) / Steps (ordered `- [ ]` checklist; concrete verb + exact target + new state; names material to reuse; grouped by outcome; edge handling stated) / Verification (commands + expected output for executable work, review criteria otherwise; at least one check exercises the NEW behavior) / Assumptions (only overridable decisions, each with a pre-decided fallback)
+- **Anti-padding directives**: no decision-free sections (Non-Goals, Alternatives, Risks), no references to the planning conversation
 
-Workflow:
-1. EXPLORE — use read, find, grep, ls to understand the relevant code
-2. CLARIFY — ask the user questions if the task is ambiguous
-3. PLAN — write your plan using plan_write (or plan_edit for updates)
-4. DONE — call plan_done when the plan is ready for review
-
-Rules:
-- Do NOT write or edit any source files (write and edit tools are unavailable)
-- Do NOT run any shell commands (bash is unavailable)
-- Use task to delegate read-only exploration to subagents in parallel
-- When the plan is complete, call plan_done — do not wait for the user to ask
-```
+The block is deliberately domain-neutral — "material", "files", "changes" rather than "code". Personas repurpose the harness for prose, marketing copy, or schema work (fiction-writer, marketer, dba…), and the same methodology holds: for a manuscript, Steps name chapters and scenes, and Verification is read-through criteria instead of commands.
 
 ### Placement in system prompt assembly
 
@@ -310,7 +356,15 @@ The plan tool descriptions carry no "only available in plan mode" boilerplate: t
 
 ### Build-mode mirror block
 
-Once plan mode is exited and the session has at least one plan, the mirror block from `prompts/modes/build-mode.md` is APPENDED to the system prompt (guidance, not restriction — the persona keeps its place at the top), with `{{PLAN}}` replaced by the active plan's content:
+Once plan mode is exited and the session has at least one plan, the mirror block from `prompts/modes/build-mode.md` is APPENDED to the system prompt (guidance, not restriction — the persona keeps its place at the top), with `{{PLAN}}` replaced by the active plan's content.
+
+The plan is snapshotted **once per run**, not per request: re-reading on every request meant each `plan_check` rewrote the system prompt mid-run and invalidated the provider's prompt cache for the entire conversation. Mode toggles are rejected while a run is active, so the snapshot loses nothing; the next submit picks up fresh checkbox state from disk.
+
+Once every checklist item is checked, the full mirror is replaced by the one-line reference from `prompts/modes/build-mode-done.md` — a fully executed plan stops steering (and stops costing tokens); the file stays on disk for reference.
+
+When the session holds more than one plan, both mirror variants append a line naming the others (`Other plans in this session: backend, frontend — use plan_read with a name to view one`) — the mirror carries only the approved plan, and without this line the model has no way to know the rest exist.
+
+Compaction is plan-aware: while plan mode is active, `prompts/modes/plan-compaction.md` is appended to the summarization prompt (automatic and `/compact` both), instructing it to preserve exploration findings not yet written into the plan file and not to restate the plan's own content.
 
 - The plan is re-read from disk on every request, which is what makes it survive compaction and session resume — `plan_read` is disabled in build mode, so without this the plan would silently vanish from context after the first compaction.
 - It instructs the model to follow the plan step by step, flag divergences instead of silently drifting, and run the plan's Verification section when done.

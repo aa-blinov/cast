@@ -158,6 +158,10 @@ interface UseAgentSessionParams {
 	disabledTools?: Set<string>;
 	/** Plan mode state — passed to the agent loop for system prompt injection and tool gating. */
 	planState?: import("../core/plan.ts").PlanState;
+	/** Fires when a mode-transition tool succeeds mid-run: plan_done ("done")
+	 * or plan_enter ("enter"). The App shows the corresponding confirmation
+	 * dialog once the run settles — never mid-run, so tool sets stay consistent. */
+	onPlanSignal?: (kind: "done" | "enter") => void;
 }
 
 /**
@@ -265,6 +269,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		subagentModel,
 		disabledTools,
 		planState,
+		onPlanSignal,
 	} = params;
 	const [messages, setMessages] = useState<ChatMessage[]>(() => buildDisplayMessages(session.messages));
 	const [streaming, setStreaming] = useState<StreamingState | null>(null);
@@ -565,17 +570,24 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 										),
 									};
 								}, true);
-								// plan_done succeeding is the plan-mode exit signal: leave a
-								// persistent pointer in the transcript (a timed notice would
-								// vanish while the user is still reading the plan).
-								if (!event.result.isError && toolNamesByIdRef.current.get(event.id) === "plan_done") {
-									setMessages((msgs) => [
-										...msgs,
-										{
-											role: "warning",
-											content: "[Plan ready — review it, then /build to approve and implement]",
-										},
-									]);
+								// plan_done / plan_enter succeeding are mode-transition signals:
+								// leave a persistent pointer in the transcript (a timed notice
+								// would vanish while the user is still reading), and tell the
+								// App so it can show the confirmation dialog once the run ends.
+								if (!event.result.isError) {
+									const endedTool = toolNamesByIdRef.current.get(event.id);
+									if (endedTool === "plan_done") {
+										setMessages((msgs) => [
+											...msgs,
+											{
+												role: "warning",
+												content: "[Plan ready — approval dialog opens when the turn ends]",
+											},
+										]);
+										onPlanSignal?.("done");
+									} else if (endedTool === "plan_enter") {
+										onPlanSignal?.("enter");
+									}
 								}
 								break;
 							case "steering_injected":
@@ -715,6 +727,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			subagentModel,
 			disabledTools,
 			planState,
+			onPlanSignal,
 		],
 	);
 

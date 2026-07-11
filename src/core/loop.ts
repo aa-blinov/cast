@@ -1,5 +1,5 @@
 import { setMaxListeners } from "node:events";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { AppConfig } from "./config.ts";
 import type { Message, Tool, Usage } from "./llm.ts";
 import {
@@ -12,7 +12,7 @@ import {
 } from "./llm.ts";
 import type { McpToolHandle } from "./mcp.ts";
 import type { Persona } from "./personas.ts";
-import { readActivePlan } from "./plan.ts";
+import { checkReadOnlyCommand, listPlanNames, planChecklistState, readActivePlan } from "./plan.ts";
 import { promptsDir, readRequiredPrompt } from "./prompts.ts";
 import { compactMessages, estimateTokens, shouldCompact } from "./session.ts";
 import type { SubagentPrompt } from "./subagents.ts";
@@ -42,6 +42,14 @@ const COMPACTION_UPDATE_PROMPT = readRequiredPrompt(promptsDir, "compaction-upda
 // replaced with the plan file content.
 const PLAN_MODE_PROMPT = readRequiredPrompt(promptsDir, join("modes", "plan-mode.md"));
 const BUILD_MODE_PROMPT = readRequiredPrompt(promptsDir, join("modes", "build-mode.md"));
+// Shown instead of the full mirror once every checklist item is checked — a
+// fully executed plan should stop steering (and stop costing tokens); the file
+// stays on disk for reference. {{NAME}}/{{PATH}} are replaced.
+const BUILD_MODE_DONE_PROMPT = readRequiredPrompt(promptsDir, join("modes", "build-mode-done.md"));
+// Appended to the compaction prompt while plan mode is active: exploration
+// findings not yet written into the plan file must survive the summary.
+// Exported for the manual /compact command, which runs outside the loop.
+export const PLAN_COMPACTION_PROMPT = readRequiredPrompt(promptsDir, join("modes", "plan-compaction.md"));
 
 // ============================================================================
 // Compaction
@@ -69,15 +77,19 @@ export async function compactSessionMessages(
 	signal?: AbortSignal,
 	onRetry?: (attempt: number, maxAttempts: number, reason: string) => void,
 	onUsage?: (usage: Usage) => void,
+	/** Extra mode-specific summarization guidance (e.g. plan mode: keep
+	 * exploration findings not yet written into the plan file). */
+	extraInstructions?: string,
 ): Promise<CompactSessionResult> {
 	const client = createClient(config);
 	try {
 		const result = await compactMessages(
 			messages,
 			async (text, previousSummary) => {
-				const promptText = previousSummary
+				const basePrompt = previousSummary
 					? `<conversation>\n${text}\n</conversation>\n\n<previous-summary>\n${previousSummary}\n</previous-summary>\n\n${COMPACTION_UPDATE_PROMPT}`
 					: `<conversation>\n${text}\n</conversation>\n\n${COMPACTION_PROMPT}`;
+				const promptText = extraInstructions ? `${basePrompt}\n\n${extraInstructions}` : basePrompt;
 				const resp = await streamAndCollect(
 					client,
 					model,
@@ -308,6 +320,7 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 					mainModel: initialModel,
 					subagentModel: loopConfig.subagentModel,
 					disabledTools: loopConfig.disabledTools,
+					planState: loopConfig.planState,
 					runAgentLoop,
 				}
 			: undefined,
@@ -316,9 +329,22 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 	const executeTool = (name: string, args: Record<string, unknown>, toolSignal?: AbortSignal): Promise<ToolResult> => {
 		// Same principle as the task gate above: a tool filtered out of the
 		// advertised definitions must not run even when the model fabricates a
-		// call to it by name (bash in plan mode, plan_* in build mode, …).
+		// call to it by name (plan_* in build mode, …).
 		if (disabledTools?.has(name)) {
 			return Promise.resolve({ content: `Tool "${name}" is not available in the current mode.`, isError: true });
+		}
+		// Plan mode allows bash for inspection only — enforced here, not by the
+		// model's goodwill: pipelines of allowlisted read-only binaries pass,
+		// anything that can write (redirects, substitution, unlisted binaries)
+		// is refused with the reason.
+		if (name === "bash" && loopConfig.planState?.enabled) {
+			const verdict = checkReadOnlyCommand(typeof args.command === "string" ? args.command : "");
+			if (!verdict.ok) {
+				return Promise.resolve({
+					content: `Plan mode allows read-only commands only — rejected: ${verdict.reason}. Inspect with ls/cat/grep/find/git log|show|diff|status|blame.`,
+					isError: true,
+				});
+			}
 		}
 		const mcpTool = mcpToolIndex?.get(name);
 		return mcpTool ? mcpTool.call(args, toolSignal) : builtinExecuteTool(name, args, toolSignal);
@@ -331,6 +357,24 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 	// Session-scoped when the caller passes one (so a file referenced in an
 	// earlier message keeps its glob rule attached); otherwise per-call.
 	const contextFiles = loopConfig.contextFiles ?? [];
+
+	// Build-mode plan snapshot, read ONCE per run: re-reading on every request
+	// meant each plan_check rewrote the system prompt mid-run and invalidated
+	// the provider's prompt cache for the whole conversation. Mode toggles are
+	// rejected while a run is active, so a per-run snapshot loses nothing; the
+	// next submit picks up fresh checkbox state from disk.
+	const buildPlanSnapshot =
+		loopConfig.planState && !loopConfig.planState.enabled ? readActivePlan(loopConfig.planState) : undefined;
+	// A session can hold several plans; the mirror carries only the approved
+	// one, so name the rest — otherwise the model has no way to know they exist.
+	const otherPlanNames =
+		buildPlanSnapshot?.path && loopConfig.planState
+			? listPlanNames(loopConfig.planState.plansDir).filter((n) => n !== basename(buildPlanSnapshot.path!, ".md"))
+			: [];
+	const otherPlansLine =
+		otherPlanNames.length > 0
+			? `\n\nOther plans in this session: ${otherPlanNames.join(", ")} — use plan_read with a name to view one. Only the approved plan above steers the work.`
+			: "";
 
 	// Recompute the system prompt from the latest contextFiles/@-mentions and
 	// write it into messages[0]. Called before every request so rules that
@@ -361,16 +405,20 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 		// first thing the model sees, persona and rules included.
 		if (loopConfig.planState?.enabled) {
 			prompt = `${PLAN_MODE_PROMPT}\n\n${prompt}`;
-		} else if (loopConfig.planState) {
+		} else if (buildPlanSnapshot?.exists && buildPlanSnapshot.path) {
 			// Build mode with a plan from this session: append the approved plan
 			// (the active one — most recently written) so it keeps steering
-			// implementation. Re-read from disk on every request — that's what
-			// makes it survive compaction and resume. Appended (not prepended)
-			// because it's guidance, not a restriction: the persona keeps its
-			// place at the top.
-			const plan = readActivePlan(loopConfig.planState);
-			if (plan.exists) {
-				prompt = `${prompt}\n\n${BUILD_MODE_PROMPT.replace("{{PLAN}}", () => plan.content)}`;
+			// implementation. Snapshotted per run (see above); re-read on the
+			// next run — that's what makes it survive compaction and resume.
+			// Appended (not prepended) because it's guidance, not a restriction:
+			// the persona keeps its place at the top.
+			const { unchecked, checked } = planChecklistState(buildPlanSnapshot.content);
+			if (unchecked === 0 && checked > 0) {
+				// Fully executed plan: stop steering (and stop paying for the full
+				// content every request) — leave a one-line reference instead.
+				prompt = `${prompt}\n\n${BUILD_MODE_DONE_PROMPT.replace("{{NAME}}", () => basename(buildPlanSnapshot.path!, ".md")).replace("{{PATH}}", () => buildPlanSnapshot.path!)}${otherPlansLine}`;
+			} else {
+				prompt = `${prompt}\n\n${BUILD_MODE_PROMPT.replace("{{PLAN}}", () => buildPlanSnapshot.content)}${otherPlansLine}`;
 			}
 		}
 		if (messages.length === 0 || messages[0]?.role !== "system") {
@@ -419,6 +467,7 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 					signal,
 					(attempt, maxAttempts, reason) => onEvent({ type: "retry", attempt, maxAttempts, reason }),
 					(usage) => onEvent({ type: "usage", usage }),
+					loopConfig.planState?.enabled ? PLAN_COMPACTION_PROMPT : undefined,
 				);
 				if (result.compacted) {
 					messages.length = 0;
@@ -545,6 +594,7 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 							signal,
 							(attempt, maxAttempts, reason) => onEvent({ type: "retry", attempt, maxAttempts, reason }),
 							(usage) => onEvent({ type: "usage", usage }),
+							loopConfig.planState?.enabled ? PLAN_COMPACTION_PROMPT : undefined,
 						);
 						if (result.compacted) {
 							messages.length = 0;

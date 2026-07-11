@@ -8,7 +8,16 @@
  * is slugified before hitting the filesystem.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	renameSync,
+	statSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import type { ToolResult } from "./tools.ts";
@@ -19,8 +28,16 @@ import type { ToolResult } from "./tools.ts";
 
 /** All plan tool names — used to disable them wherever plan mode can't apply
  * (headless runs, subagents). Within the TUI they split by mode: the authoring
- * tools are plan-mode-only, plan_check is build-mode-only (see App.tsx). */
-export const PLAN_TOOL_NAMES = ["plan_write", "plan_edit", "plan_read", "plan_done", "plan_check"] as const;
+ * tools are plan-mode-only, plan_check/plan_enter are build-mode-only (see App.tsx). */
+export const PLAN_TOOL_NAMES = [
+	"plan_write",
+	"plan_edit",
+	"plan_read",
+	"plan_done",
+	"plan_check",
+	"plan_enter",
+	"plan_discard",
+] as const;
 
 export interface PlanState {
 	enabled: boolean;
@@ -46,6 +63,110 @@ export function slugifyPlanName(name: string): string {
 		.replace(/[^a-z0-9]+/g, "-")
 		.replace(/^-+|-+$/g, "")
 		.slice(0, 64);
+}
+
+// ============================================================================
+// Read-only bash gate (plan mode)
+// ============================================================================
+
+/** Binaries that only inspect state. Deliberately excludes test runners and
+ * package managers (`npm test` runs an arbitrary package.json script), editors
+ * (`sed -i`), and anything that can spawn other commands (`xargs`, `awk`). */
+const READONLY_BINARIES = new Set([
+	"ls",
+	"cat",
+	"head",
+	"tail",
+	"wc",
+	"grep",
+	"rg",
+	"fd",
+	"find",
+	"file",
+	"stat",
+	"du",
+	"df",
+	"tree",
+	"diff",
+	"sort",
+	"uniq",
+	"cut",
+	"nl",
+	"realpath",
+	"dirname",
+	"basename",
+	"which",
+	"pwd",
+	"echo",
+	"printf",
+	"date",
+	"env",
+	"column",
+	"strings",
+	"jq",
+	"yq",
+]);
+
+/** Git subcommands that cannot mutate the repository. `branch`/`tag`/`remote`
+ * are excluded on purpose — without arguments they list, with arguments they
+ * create; `status`/`log` cover the listing use cases. */
+const READONLY_GIT_SUBCOMMANDS = new Set([
+	"log",
+	"show",
+	"diff",
+	"status",
+	"blame",
+	"rev-parse",
+	"ls-files",
+	"ls-tree",
+	"ls-remote",
+	"shortlog",
+	"describe",
+	"grep",
+	"reflog",
+	"cat-file",
+	"count-objects",
+]);
+
+/**
+ * Conservative read-only check for a bash command in plan mode. Allows plain
+ * pipelines of inspection binaries; rejects anything that can write: output
+ * redirection, command substitution, or a pipeline stage whose binary is not
+ * on the allowlist. False negatives (a safe command rejected) are acceptable;
+ * false positives (a mutating command allowed) are not.
+ */
+export function checkReadOnlyCommand(command: string): { ok: boolean; reason?: string } {
+	if (/[>]/.test(command)) {
+		return { ok: false, reason: "output redirection (>) can write files" };
+	}
+	if (/\$\(|`/.test(command)) {
+		return { ok: false, reason: "command substitution can run arbitrary commands" };
+	}
+	// Split into pipeline/sequence stages; every stage must be read-only.
+	const stages = command
+		.split(/\|\||&&|;|\||\n|&/)
+		.map((s) => s.trim())
+		.filter(Boolean);
+	if (stages.length === 0) return { ok: false, reason: "empty command" };
+	for (const stage of stages) {
+		const tokens = stage.split(/\s+/);
+		// Skip leading VAR=value assignments — they only affect the stage env.
+		let i = 0;
+		while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i]!)) i++;
+		const binary = tokens[i]?.replace(/^.*\//, "");
+		if (!binary) return { ok: false, reason: "empty pipeline stage" };
+		if (binary === "git") {
+			const sub = tokens.slice(i + 1).find((t) => !t.startsWith("-"));
+			if (!sub || !READONLY_GIT_SUBCOMMANDS.has(sub)) {
+				return { ok: false, reason: `git ${sub ?? "(none)"} is not a read-only subcommand` };
+			}
+			continue;
+		}
+		if (!READONLY_BINARIES.has(binary)) {
+			return { ok: false, reason: `"${binary}" is not on the read-only allowlist` };
+		}
+	}
+	return { ok: true };
 }
 
 // ============================================================================
@@ -134,6 +255,39 @@ function extractHeadings(content: string): string[] {
 	return parseSections(content).map((s) => s.heading);
 }
 
+/** True for lines inside ```/~~~ code fences (fence markers included) — a
+ * `- [ ]` or `# heading` inside a fenced example is content, not structure.
+ * Shared by the section parser and both checklist scanners so they can't
+ * drift apart on what counts as a fence. */
+function fencedLineMask(lines: string[]): boolean[] {
+	const mask: boolean[] = new Array(lines.length);
+	let inFence = false;
+	for (let i = 0; i < lines.length; i++) {
+		if (/^\s*(```|~~~)/.test(lines[i]!)) {
+			inFence = !inFence;
+			mask[i] = true;
+			continue;
+		}
+		mask[i] = inFence;
+	}
+	return mask;
+}
+
+/** Checklist progress of a plan: counts of unchecked and checked items.
+ * Fence-aware — checkbox-like lines inside code blocks don't count. */
+export function planChecklistState(content: string): { unchecked: number; checked: number } {
+	const lines = content.split("\n");
+	const fenced = fencedLineMask(lines);
+	let unchecked = 0;
+	let checked = 0;
+	for (let i = 0; i < lines.length; i++) {
+		if (fenced[i]) continue;
+		if (/^\s*[-*]\s+\[ \]/.test(lines[i]!)) unchecked++;
+		else if (/^\s*[-*]\s+\[x\]/i.test(lines[i]!)) checked++;
+	}
+	return { unchecked, checked };
+}
+
 // ============================================================================
 // Plan section extraction (for plan_edit)
 // ============================================================================
@@ -152,13 +306,9 @@ function parseSections(content: string): Section[] {
 
 	// Lines inside fenced code blocks are not headings — a `# comment` in a
 	// bash snippet must not become a section boundary for plan_edit.
-	let inFence = false;
+	const fenced = fencedLineMask(lines);
 	for (let i = 0; i < lines.length; i++) {
-		if (/^\s*(```|~~~)/.test(lines[i]!)) {
-			inFence = !inFence;
-			continue;
-		}
-		if (inFence) continue;
+		if (fenced[i]) continue;
 		const match = lines[i]!.match(/^(#{1,6})\s+(.+)$/);
 		if (match) {
 			const level = match[1]!.length;
@@ -374,8 +524,12 @@ export function execPlanCheck(args: Record<string, unknown>, planState: PlanStat
 
 	const lines = content.split("\n");
 	const checkboxRe = /^(\s*[-*]\s+)\[ \]\s*(.*)$/;
+	// Fence-aware: a checkbox-like line inside a code example is content, not
+	// a step — matching it would corrupt the example.
+	const fenced = fencedLineMask(lines);
 	const unchecked = lines
 		.map((line, index) => {
+			if (fenced[index]) return undefined;
 			const match = line.match(checkboxRe);
 			return match ? { index, prefix: match[1]!, text: match[2]!.trim() } : undefined;
 		})
@@ -424,6 +578,64 @@ export function execPlanCheck(args: Record<string, unknown>, planState: PlanStat
 			item: checked.text,
 			remaining,
 			...(remaining === 0 ? { allDone: true } : {}),
+		}),
+	};
+}
+
+export function execPlanDiscard(args: Record<string, unknown>, planState: PlanState): ToolResult {
+	const name = slugifyPlanName(typeof args.name === "string" ? args.name : "");
+	if (!name) {
+		return { content: "Error: name is required — the plan to discard.", isError: true };
+	}
+	const path = join(planState.plansDir, `${name}.md`);
+	if (!existsSync(path)) {
+		return {
+			content: JSON.stringify({
+				success: false,
+				error: `No plan named "${name}" in this session.`,
+				plans: listPlanNames(planState.plansDir),
+			}),
+			isError: true,
+		};
+	}
+	try {
+		unlinkSync(path);
+	} catch (err) {
+		return {
+			content: `Error deleting plan file: ${err instanceof Error ? err.message : String(err)}`,
+			isError: true,
+		};
+	}
+	// If the discarded plan was active, fall back to the newest remaining one.
+	if (planState.activePlanPath === path) planState.activePlanPath = undefined;
+	const remaining = listPlanNames(planState.plansDir);
+	const activePath = resolveActivePlanPath(planState);
+	return {
+		content: JSON.stringify({
+			success: true,
+			discarded: name,
+			plans: remaining,
+			active: activePath ? basename(activePath, ".md") : null,
+		}),
+	};
+}
+
+export function execPlanEnter(args: Record<string, unknown>, _planState: PlanState): ToolResult {
+	const reason = typeof args.reason === "string" ? args.reason.trim() : "";
+	if (!reason) {
+		return {
+			content: "Error: reason is required — one sentence on why this task benefits from planning first.",
+			isError: true,
+		};
+	}
+	// Pure signal: the UI shows a confirmation dialog when the turn ends and
+	// switches the mode itself if the user agrees. The tool can't block on the
+	// user mid-run, so the contract is "call it, then end your turn".
+	return {
+		content: JSON.stringify({
+			planSuggested: true,
+			reason,
+			note: "The user will be asked to confirm. End your turn now and wait for their decision.",
 		}),
 	};
 }

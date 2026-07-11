@@ -1,7 +1,15 @@
 import type { AppConfig } from "./config.ts";
 import type { Tool } from "./llm.ts";
 import type { PlanState } from "./plan.ts";
-import { execPlanCheck, execPlanDone, execPlanEdit, execPlanRead, execPlanWrite } from "./plan.ts";
+import {
+	execPlanCheck,
+	execPlanDiscard,
+	execPlanDone,
+	execPlanEdit,
+	execPlanEnter,
+	execPlanRead,
+	execPlanWrite,
+} from "./plan.ts";
 import { execBash } from "./tools/bash.ts";
 import { execEdit, execRead, execWrite } from "./tools/files.ts";
 import { execFind, execGrep, execLs } from "./tools/search.ts";
@@ -257,7 +265,7 @@ export function getToolDefinitions(personaNames?: string[], mainModel?: string, 
 				name: "plan_write",
 				description:
 					"Write or replace a named plan file; the plan just written becomes the active one for plan_edit/plan_read/plan_done. " +
-					"Use markdown with sections: Context, Steps (as a '- [ ]' checklist), Verification.",
+					"Use markdown with sections: Context, Steps (as a '- [ ]' checklist), Verification, and Assumptions when needed.",
 				parameters: {
 					type: "object",
 					properties: {
@@ -329,6 +337,45 @@ export function getToolDefinitions(personaNames?: string[], mainModel?: string, 
 							description: "One-line summary of what the plan covers",
 						},
 					},
+				},
+			},
+		},
+		{
+			type: "function",
+			function: {
+				name: "plan_discard",
+				description:
+					"Delete a plan from this session (e.g. an abandoned draft the user asked to drop). " +
+					"If it was the active plan, the newest remaining one becomes active.",
+				parameters: {
+					type: "object",
+					properties: {
+						name: {
+							type: "string",
+							description: "Name of the plan to discard",
+						},
+					},
+					required: ["name"],
+				},
+			},
+		},
+		{
+			type: "function",
+			function: {
+				name: "plan_enter",
+				description:
+					"Suggest switching to plan mode when the user's request is complex enough to benefit from planning " +
+					"before implementation (multiple files, architectural decisions, unclear scope). The user is asked to " +
+					"confirm — call this, then END YOUR TURN and wait. Do not call it for simple, direct tasks.",
+				parameters: {
+					type: "object",
+					properties: {
+						reason: {
+							type: "string",
+							description: "One sentence on why this task benefits from planning first",
+						},
+					},
+					required: ["reason"],
 				},
 			},
 		},
@@ -409,6 +456,12 @@ export function createToolExecutor(
 				case "plan_check":
 					if (!planState) return { content: "Plan tool not available.", isError: true };
 					return execPlanCheck(args, planState);
+				case "plan_enter":
+					if (!planState) return { content: "Plan tool not available.", isError: true };
+					return execPlanEnter(args, planState);
+				case "plan_discard":
+					if (!planState) return { content: "Plan tool not available.", isError: true };
+					return execPlanDiscard(args, planState);
 				default:
 					return { content: `Unknown tool: ${name}`, isError: true };
 			}

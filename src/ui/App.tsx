@@ -12,8 +12,8 @@ import {
 	unionStickyRules,
 } from "../core/rules.ts";
 import type { SessionUsage } from "../core/session.ts";
-import { estimateTokens } from "../core/session.ts";
-import { loadSettings, updateSettings } from "../core/settings.ts";
+import { estimateTokens, saveSession } from "../core/session.ts";
+import { loadSettings } from "../core/settings.ts";
 import type { StartupResult } from "../core/startup.ts";
 import { setSuspendHook } from "../core/stdin-manager.ts";
 import { fetchLatestVersion, isNewerVersion, isReleaseInstall } from "../core/upgrade.ts";
@@ -97,15 +97,21 @@ export function App(props: AppProps): JSX.Element {
 	const [subagentPrompts] = useState(result.subagentPrompts);
 	const [subagentModel, setSubagentModel] = useState(result.subagentModel);
 	const [webToolsEnabled, setWebToolsEnabled] = useState(() => loadSettings().webTools === true);
-	// Mode is restored from settings on startup; unset means "build" — the
-	// default mode. Every toggle persists, so quitting mid-planning resumes
-	// planning. setPlanMode is the only setter handed out (commands, /new,
-	// /sessions), so persistence can't be bypassed.
-	const [planMode, setPlanModeState] = useState(() => loadSettings().mode === "plan");
-	const setPlanMode = useCallback((v: boolean) => {
-		setPlanModeState(v);
-		updateSettings({ mode: v ? "plan" : "build" });
-	}, []);
+	// Mode is per-session state: restored from the (possibly resumed) session
+	// on startup, persisted into the session file on every toggle — so quitting
+	// mid-planning resumes planning in THAT session, without leaking plan mode
+	// into other projects the way the old global settings.mode did. Unset means
+	// "build", the default. setPlanMode is the only setter handed out
+	// (commands, /new, /sessions), so persistence can't be bypassed.
+	const [planMode, setPlanModeState] = useState(() => session.mode === "plan");
+	const setPlanMode = useCallback(
+		(v: boolean) => {
+			setPlanModeState(v);
+			session.mode = v ? "plan" : "build";
+			saveSession(session);
+		},
+		[session],
+	);
 	const disabledTools = useMemo(() => {
 		const s = new Set<string>();
 		// Web tools respect the user's toggle in BOTH modes
@@ -114,20 +120,23 @@ export function App(props: AppProps): JSX.Element {
 			s.add("web_fetch");
 		}
 		if (planMode) {
-			// Hard block write-capable tools in plan mode
-			s.add("bash");
+			// Hard block write-capable tools in plan mode. bash stays advertised:
+			// the loop's executor gate restricts it to a read-only allowlist
+			// (git log/diff/blame, grep, ls, …) so exploration keeps its teeth.
 			s.add("write");
 			s.add("edit");
-			// Checking off steps is a build-mode act — nothing is implemented yet
+			// Checking off steps and proposing to plan are build-mode acts
 			s.add("plan_check");
+			s.add("plan_enter");
 		} else {
 			// Plan authoring tools only available in plan mode; the approved plan
-			// can't be rewritten during implementation, only checked off.
-			// plan_read stays available in build mode as a read-only reference
-			// (it only switches the active plan while plan mode is on).
+			// can't be rewritten (or discarded) during implementation, only
+			// checked off. plan_read stays available in build mode as a read-only
+			// reference (it only switches the active plan while plan mode is on).
 			s.add("plan_write");
 			s.add("plan_edit");
 			s.add("plan_done");
+			s.add("plan_discard");
 		}
 		return s;
 	}, [webToolsEnabled, planMode]);
@@ -136,6 +145,19 @@ export function App(props: AppProps): JSX.Element {
 	// same object for the loop's per-request system prompt sync to see them.
 	const planState = useMemo(() => createPlanState(session.id), [session.id]);
 	planState.enabled = planMode;
+	// Mode-transition signal from the run (plan_done / plan_enter succeeded).
+	// A ref, not state: it must not trigger renders mid-run — the dialog opens
+	// only when the run settles (see the effect below), so the mode always
+	// flips between runs and tool sets stay consistent.
+	const planSignalRef = useRef<"done" | "enter" | null>(null);
+	const onPlanSignal = useCallback((kind: "done" | "enter") => {
+		planSignalRef.current = kind;
+	}, []);
+	// Message to auto-submit once the mode flip has re-rendered. Submitting in
+	// the same tick as setPlanMode would capture the OLD disabledTools/planState
+	// closures (the /plan-desc race all over again) — the effect below fires
+	// after the render that applied the new mode, so the run gets fresh config.
+	const [pendingAutoSubmit, setPendingAutoSubmit] = useState<{ text: string; wantPlanMode: boolean } | null>(null);
 	// Theme change counter — forces a re-render when /theme switches the active
 	// theme, since theme() reads from a module-level singleton that Ink can't
 	// detect on its own.
@@ -222,6 +244,7 @@ export function App(props: AppProps): JSX.Element {
 		subagentModel,
 		disabledTools,
 		planState,
+		onPlanSignal,
 	});
 	const running = agent.status === "running";
 	const canSubmit = useCallback(
@@ -235,6 +258,81 @@ export function App(props: AppProps): JSX.Element {
 	);
 	const submitRef = useRef(agent.submit);
 	submitRef.current = agent.submit;
+
+	// Deferred auto-submit for mode-transition dialogs: fires only after the
+	// render that applied the requested mode, so the run picks up the fresh
+	// disabledTools/planState instead of the pre-flip closures.
+	useEffect(() => {
+		if (!pendingAutoSubmit || planMode !== pendingAutoSubmit.wantPlanMode) return;
+		const { text } = pendingAutoSubmit;
+		setPendingAutoSubmit(null);
+		void submitRef.current(text);
+	}, [pendingAutoSubmit, planMode]);
+
+	// Mode-transition dialogs, opened when the run settles. plan_done → the
+	// approval dialog (the /build gesture, with optional auto-start); plan_enter
+	// → "switch to planning?". Signals that arrive after the user already
+	// toggled the mode manually are dropped.
+	useEffect(() => {
+		if (agent.status === "running" || modalRequest || !planSignalRef.current) return;
+		const kind = planSignalRef.current;
+		planSignalRef.current = null;
+		if (kind === "done" && planMode) {
+			void (async () => {
+				const choice = await pickers.pickOption(
+					[
+						{ value: "implement", label: "Approve — switch to build and implement now" },
+						{
+							value: "fresh",
+							label: "Approve — clear context, then implement",
+							description: "Drops the planning conversation; the plan survives in the system prompt",
+						},
+						{ value: "build", label: "Approve — switch to build, I'll start myself" },
+						{ value: "refine", label: "Keep planning — I'll give feedback" },
+					],
+					{ title: "Plan ready. What next?" },
+				);
+				if (choice === "implement" || choice === "fresh") {
+					// Fresh start is safe BECAUSE of the mirror block: the plan is
+					// re-read from disk into the system prompt, so the exploration
+					// chatter can be dropped without losing the decisions.
+					if (choice === "fresh") agent.clearContext();
+					setPlanMode(false);
+					setPendingAutoSubmit({ text: "The plan is approved. Implement it step by step.", wantPlanMode: false });
+				} else if (choice === "build") {
+					setPlanMode(false);
+					showNotice("[Plan approved — your next message starts implementation]");
+				} else {
+					showNotice("[Staying in plan mode — describe what to change]");
+				}
+			})();
+		} else if (kind === "enter" && !planMode) {
+			void (async () => {
+				const choice = await pickers.pickOption(
+					[
+						{ value: true, label: "Yes — enter plan mode" },
+						{ value: false, label: "No — continue in build mode" },
+					],
+					{ title: "Agent suggests planning this task first. Enter plan mode?" },
+				);
+				if (choice === true) {
+					setPlanMode(true);
+					setPendingAutoSubmit({
+						text: "Plan mode is on. Explore the material and write the plan.",
+						wantPlanMode: true,
+					});
+				} else {
+					// The model ended its turn waiting for this decision — resume it,
+					// otherwise declining leaves the session hanging in silence.
+					showNotice("[Staying in build mode]");
+					setPendingAutoSubmit({
+						text: "Plan mode declined — proceed with the task directly in build mode.",
+						wantPlanMode: false,
+					});
+				}
+			})();
+		}
+	}, [agent.status, agent.clearContext, modalRequest, planMode, pickers, setPlanMode, showNotice]);
 
 	useEffect(() => {
 		if (initialPrompt) {
@@ -439,11 +537,7 @@ export function App(props: AppProps): JSX.Element {
 					<Text color={theme().persona}>{currentPersona.label}</Text>
 					{/* Mode is always visible: plan mode shouts (warning color, it
 					    changes what the agent may do), build stays quiet. */}
-					{planMode ? (
-						<Text color={theme().warning}> [PLAN]</Text>
-					) : (
-						<Text color={theme().muted}> [BUILD]</Text>
-					)}
+					{planMode ? <Text color={theme().warning}> [PLAN]</Text> : <Text color={theme().muted}> [BUILD]</Text>}
 					<Text color={theme().muted}> │ </Text>
 					<Text color={theme().muted}>{session.model}</Text>
 					{/* Zero-width marker toggled by the resize effect. After that effect

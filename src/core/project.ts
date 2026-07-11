@@ -205,9 +205,9 @@ export function buildSystemPrompt(
 				`- Model: ${state.model}`,
 				`- Reasoning: ${state.reasoningLevel}`,
 				state.mode === "plan"
-					? "- Mode: plan — read-only exploration and planning; the user approves the plan and exits with the /build command"
+					? "- Mode: plan — read-only exploration and planning; plan_done opens the approval dialog, or the user exits with the /build command"
 					: state.mode === "build"
-						? "- Mode: build — full toolset; for a complex task worth planning first, the user can enter plan mode with the /plan command"
+						? "- Mode: build — full toolset; for a complex task worth planning first, suggest it with the plan_enter tool (the user can also enter plan mode with the /plan command)"
 						: null,
 				state.reasoningMeta?.supportedEfforts?.length
 					? `- Supported reasoning efforts: ${state.reasoningMeta.supportedEfforts.join(", ")}`

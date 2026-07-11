@@ -1,0 +1,1 @@
+The approved plan "{{NAME}}" for this task has been fully executed — every checklist item is checked. It no longer steers the work; treat new requests on their own terms. The plan file remains at {{PATH}} for reference — read it if the user asks about what was done or why.

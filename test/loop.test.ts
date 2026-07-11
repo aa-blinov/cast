@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -860,6 +860,155 @@ describe("runAgentLoop — plan mode", () => {
 			expect(prompt).not.toContain("{{PLAN}}");
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("snapshots the plan per run — mid-run file changes don't churn the system prompt", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "cast-plan-snapshot-"));
+		const planPath = join(dir, "feature.md");
+		writeFileSync(planPath, "# Plan\n\n## Steps\n- [ ] SNAPSHOT_V1", "utf-8");
+		try {
+			const systemPrompts: string[] = [];
+			const capture = async (_client: unknown, _model: string, messages: unknown) => {
+				systemPrompts.push(contentToText((messages as Message[])[0]!.content));
+				return { content: "", thinking: "", finishReason: "stop" };
+			};
+			vi.mocked(streamAndCollect)
+				// Request 1: model asks for a read; between requests the plan file
+				// changes on disk (as plan_check would do).
+				.mockImplementationOnce(async (_c: unknown, _m: string, messages: unknown) => {
+					systemPrompts.push(contentToText((messages as Message[])[0]!.content));
+					writeFileSync(planPath, "# Plan\n\n## Steps\n- [x] SNAPSHOT_V2", "utf-8");
+					return {
+						content: "",
+						thinking: "",
+						finishReason: "stop",
+						toolCalls: [{ id: "t1", name: "ls", arguments: JSON.stringify({ path: "." }) }],
+					};
+				})
+				.mockImplementationOnce(capture);
+
+			await runAgentLoop([{ role: "user", content: "go" }], {
+				config: testConfig,
+				model: "test-model",
+				cwd: "/tmp",
+				systemPrompt: "BASE",
+				planState: { enabled: false, plansDir: dir },
+				onEvent: () => {},
+			});
+
+			expect(systemPrompts).toHaveLength(2);
+			expect(systemPrompts[0]).toContain("SNAPSHOT_V1");
+			// Same prompt on the second request — the mid-run edit is invisible
+			// until the next run, keeping the provider prompt cache intact.
+			expect(systemPrompts[1]).toBe(systemPrompts[0]);
+			expect(systemPrompts[1]).not.toContain("SNAPSHOT_V2");
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("replaces the mirror with a short reference once every checklist item is checked", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "cast-plan-done-"));
+		writeFileSync(join(dir, "feature.md"), "# Plan\n\n## Steps\n- [x] step one\n- [x] step two", "utf-8");
+		try {
+			const systemPrompts: string[] = [];
+			vi.mocked(streamAndCollect).mockImplementationOnce(
+				async (_client: unknown, _model: string, messages: unknown) => {
+					systemPrompts.push(contentToText((messages as Message[])[0]!.content));
+					return { content: "ok", thinking: "", finishReason: "stop" };
+				},
+			);
+
+			await runAgentLoop([{ role: "user", content: "hi" }], {
+				config: testConfig,
+				model: "test-model",
+				cwd: "/tmp",
+				systemPrompt: "BASE",
+				planState: { enabled: false, plansDir: dir },
+				onEvent: () => {},
+			});
+
+			const prompt = systemPrompts[0]!;
+			expect(prompt).toContain("fully executed");
+			expect(prompt).toContain("feature");
+			expect(prompt).not.toContain("step one");
+			expect(prompt).not.toContain("<plan>");
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("names the session's other plans in the mirror block", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "cast-plan-others-"));
+		writeFileSync(join(dir, "alt.md"), "# Alt\n\n## Steps\n- [ ] other work", "utf-8");
+		writeFileSync(join(dir, "feature.md"), "# Plan\n\n## Steps\n- [ ] ACTIVE_MARKER", "utf-8");
+		// alt is older → feature resolves as the active plan.
+		const past = new Date(Date.now() - 60_000);
+		utimesSync(join(dir, "alt.md"), past, past);
+		try {
+			const systemPrompts: string[] = [];
+			vi.mocked(streamAndCollect).mockImplementationOnce(
+				async (_client: unknown, _model: string, messages: unknown) => {
+					systemPrompts.push(contentToText((messages as Message[])[0]!.content));
+					return { content: "ok", thinking: "", finishReason: "stop" };
+				},
+			);
+
+			await runAgentLoop([{ role: "user", content: "go" }], {
+				config: testConfig,
+				model: "test-model",
+				cwd: "/tmp",
+				systemPrompt: "BASE",
+				planState: { enabled: false, plansDir: dir },
+				onEvent: () => {},
+			});
+
+			const prompt = systemPrompts[0]!;
+			expect(prompt).toContain("ACTIVE_MARKER");
+			expect(prompt).toContain("Other plans in this session: alt");
+			// The other plan is named, not injected.
+			expect(prompt).not.toContain("other work");
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("restricts bash to read-only commands in plan mode at the executor", async () => {
+		const events: AgentEvent[] = [];
+		vi.mocked(streamAndCollect)
+			// One mutating call, one read-only call in the same batch.
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [
+					{ id: "t1", name: "bash", arguments: JSON.stringify({ command: "touch /tmp/evil" }) },
+					{ id: "t2", name: "bash", arguments: JSON.stringify({ command: "echo PLAN_OK" }) },
+				],
+			}))
+			.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
+
+		await runAgentLoop([{ role: "user", content: "explore" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "SYS",
+			planState: { enabled: true, plansDir: "/tmp/never-existing-plans-dir" },
+			onEvent: (e) => events.push(e),
+		});
+
+		const ends = events.filter((e) => e.type === "tool_end");
+		expect(ends).toHaveLength(2);
+		const mutating = ends.find((e) => e.type === "tool_end" && e.id === "t1");
+		const readonly = ends.find((e) => e.type === "tool_end" && e.id === "t2");
+		if (mutating?.type === "tool_end") {
+			expect(mutating.result.isError).toBe(true);
+			expect(mutating.result.content).toContain("read-only");
+		}
+		if (readonly?.type === "tool_end") {
+			expect(readonly.result.isError).toBeFalsy();
+			expect(readonly.result.content).toContain("PLAN_OK");
 		}
 	});
 
