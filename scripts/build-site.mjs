@@ -382,6 +382,71 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 	text-align: center; padding: 24px; border-top: 1px solid var(--border);
 	font-size: .8rem; color: var(--text-muted);
 }
+
+/* ── Roles showcase ────────────────────────────────────────────────── */
+.roles-showcase {
+	background: var(--bg-secondary); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+	padding: 48px 24px; max-width: 900px; margin: 0 auto;
+}
+.roles-showcase h2 {
+	text-align: center; font-size: 1.5rem; font-weight: 700; margin: 0 0 12px;
+}
+.roles-showcase > p {
+	text-align: center; color: var(--text-secondary); max-width: 600px; margin: 0 auto 28px;
+}
+.roles-terminal {
+	background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
+	max-width: 560px; margin: 0 auto; overflow: hidden;
+}
+.roles-terminal-bar {
+	display: flex; align-items: center; gap: 6px;
+	padding: 10px 16px; border-bottom: 1px solid var(--border);
+	background: var(--bg-tertiary);
+}
+.roles-terminal-bar span {
+	width: 10px; height: 10px; border-radius: 50%;
+}
+.roles-terminal-bar span:nth-child(1) { background: #fb7185; }
+.roles-terminal-bar span:nth-child(2) { background: #fbbf24; }
+.roles-terminal-bar span:nth-child(3) { background: #34d399; }
+.roles-terminal-body {
+	font-family: var(--font-mono); font-size: .85rem; padding: 16px;
+	line-height: 1.8;
+}
+.roles-terminal-body .prompt { color: var(--accent); }
+.roles-terminal-body .cmd { color: var(--green); }
+.roles-terminal-body .out { color: var(--text-secondary); }
+
+/* ── Comparison ────────────────────────────────────────────────────── */
+.comparison {
+	max-width: 700px; margin: 0 auto; padding: 40px 24px 60px;
+}
+.comparison h2 {
+	text-align: center; font-size: 1.5rem; font-weight: 700; margin: 0 0 12px;
+}
+.comparison > p {
+	text-align: center; color: var(--text-secondary); max-width: 540px; margin: 0 auto 24px;
+}
+.comparison table {
+	width: 100%; border-collapse: collapse;
+	font-size: .875rem; background: var(--bg-secondary);
+	border: 1px solid var(--border); border-radius: 8px;
+	overflow: hidden;
+}
+.comparison th, .comparison td {
+	padding: 10px 16px; border-bottom: 1px solid var(--border); text-align: left;
+}
+.comparison th {
+	background: var(--bg-tertiary); font-weight: 600; color: var(--text);
+}
+.comparison td { color: var(--text-secondary); }
+.comparison tr:last-child td { border-bottom: none; }
+
+@media (max-width: 768px) {
+	.roles-showcase { padding: 32px 16px; }
+	.roles-terminal-body { font-size: .75rem; padding: 12px; }
+	.comparison { padding: 32px 16px 48px; }
+}
 `;
 
 // ── Landing page HTML ───────────────────────────────────────────────────────
@@ -390,8 +455,8 @@ const LANDING_HTML = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>cast — Terminal Coding Agent</title>
-<meta name="description" content="A terminal coding agent that works with any OpenAI-compatible API. No vendor lock-in.">
+<title>cast — One agent, many roles</title>
+<meta name="description" content="A role-based terminal agent harness. 13 built-in personas, same tools, different judgment. Runs on any OpenAI-compatible model — including the one on your own hardware.">
 <style>${CSS}</style>
 </head>
 <body>
@@ -410,8 +475,8 @@ const LANDING_HTML = `<!DOCTYPE html>
  / ___/ __ \`/ ___/ __/
 / /__/ /_/ (__  ) /_
 \\___/\\__,_/____/\\__/</pre>
-		<h1>Terminal <span class="accent">Coding Agent</span></h1>
-		<p>Works with any OpenAI-compatible API. Point it at OpenRouter, OpenAI, Ollama, vLLM, or your own inference server.</p>
+		<h1>One agent, <span class="accent">many roles</span></h1>
+		<p>cast brings a full cast to your terminal: senior dev, QA, DBA, security reviewer, PM, tech writer. Swap the role, not the tool. Runs on any OpenAI-compatible model, including the one on your own hardware.</p>
 		<div class="hero-buttons">
 			<a href="getting-started.html" class="btn-primary">Get Started</a>
 			<a href="https://github.com/aa-blinov/cast" class="btn-secondary">GitHub</a>
@@ -425,26 +490,39 @@ const LANDING_HTML = `<!DOCTYPE html>
 		</div>
 	</section>
 
+	<section class="roles-showcase">
+		<h2>One session, one repo, four roles</h2>
+		<p>Same codebase, different lens. Swap personas mid-session — the tools don't change, the judgment does.</p>
+		<div class="roles-terminal">
+			<div class="roles-terminal-bar"><span></span><span></span><span></span></div>
+			<div class="roles-terminal-body">
+				<div><span class="prompt">&gt;</span> <span class="cmd">/persona pm</span></div>
+				<div class="out">Write a spec for the new auth flow</div>
+				<div><span class="prompt">&gt;</span> <span class="cmd">/persona coding</span></div>
+				<div class="out">Implement the spec — file by file, tested</div>
+				<div><span class="prompt">&gt;</span> <span class="cmd">/persona qa</span></div>
+				<div class="out">Review the implementation for edge cases</div>
+				<div><span class="prompt">&gt;</span> <span class="cmd">/persona tech-writer</span></div>
+				<div class="out">Document the new auth flow in the README</div>
+			</div>
+		</div>
+	</section>
+
 	<section class="features">
 		<div class="feature">
-			<span class="icon"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19 5 3-3"/><path d="m2 22 3-3"/><path d="M6.3 20.3a2.4 2.4 0 0 0 3.4 0L12 18l-6-6-2.3 2.3a2.4 2.4 0 0 0 0 3.4Z"/><path d="M7.5 13.5 10 11"/><path d="M10.5 16.5 13 14"/><path d="m12 6 6 6 2.3-2.3a2.4 2.4 0 0 0 0-3.4l-2.6-2.6a2.4 2.4 0 0 0-3.4 0Z"/></svg></span>
-			<h3>No Vendor Lock-in</h3>
-			<p>Swap providers and models without touching your workflow. One config file, one API key, works everywhere.</p>
+			<span class="icon"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+			<h3>A cast, not a coder</h3>
+			<p>13 built-in personas: senior dev, QA, DBA, security reviewer, PM, tech writer, sysadmin, devops, marketer, and more. Same tools, different judgment. Add your own with a single markdown file.</p>
+		</div>
+		<div class="feature">
+			<span class="icon"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg></span>
+			<h3>Runs where your code runs</h3>
+			<p>vLLM, Ollama, your own inference server, or any OpenAI-compatible API. No account, no telemetry, no cloud dependency. Your tokens stay on your hardware.</p>
 		</div>
 		<div class="feature">
 			<span class="icon"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span>
 			<h3>Real Tools, Real Work</h3>
-			<p>Reads files, writes code, runs shell commands, searches codebases — all in parallel. Delegates sub-tasks to isolated sub-agents.</p>
-		</div>
-		<div class="feature">
-			<span class="icon"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg></span>
-			<h3>Ink TUI</h3>
-			<p>A proper terminal interface with multiline paste, image attachments, smooth animations, and 16 color themes.</p>
-		</div>
-		<div class="feature">
-			<span class="icon"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 12h12"/><path d="m12 6 6 6-6 6"/></svg></span>
-			<h3>Extensible</h3>
-			<p>Rules, skills, MCP servers, and personas — add capabilities without touching the codebase.</p>
+			<p>Reads files, writes code, runs shell commands, searches codebases — all in parallel. Delegates sub-tasks to isolated sub-agents. Rules, skills, and MCP servers extend capabilities.</p>
 		</div>
 		<div class="feature">
 			<span class="icon"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/><path d="M17.599 6.5a3 3 0 0 0 .399-1.375"/><path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"/><path d="M3.477 10.896a4 4 0 0 1 .585-.396"/><path d="M19.938 10.5a4 4 0 0 1 .585.396"/><path d="M6 18a4 4 0 0 1-1.967-.516"/><path d="M19.967 17.484A4 4 0 0 1 18 18"/></svg></span>
@@ -456,19 +534,23 @@ const LANDING_HTML = `<!DOCTYPE html>
 			<h3>Plan Mode</h3>
 			<p>Explore the codebase and write execution plans before implementing. Think before you build.</p>
 		</div>
+		<div class="feature">
+			<span class="icon"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 12h12"/><path d="m12 6 6 6-6 6"/></svg></span>
+			<h3>Ink TUI</h3>
+			<p>A proper terminal interface with multiline paste, image attachments, smooth animations, and 16 color themes.</p>
+		</div>
 	</section>
 
-	<section class="providers">
-		<h2>Works With Any Provider</h2>
-		<div class="provider-grid">
-			<span class="provider-tag">OpenRouter</span>
-			<span class="provider-tag">OpenAI</span>
-			<span class="provider-tag">Ollama</span>
-			<span class="provider-tag">vLLM</span>
-			<span class="provider-tag">LiteLLM</span>
-			<span class="provider-tag">Azure OpenAI</span>
-			<span class="provider-tag">Any OpenAI-compatible API</span>
-		</div>
+	<section class="comparison">
+		<h2>Why not opencode?</h2>
+		<p>Both are terminal agents with tools. Different philosophy.</p>
+		<table>
+			<tr><th></th><th>opencode</th><th>cast</th></tr>
+			<tr><td>Approach</td><td>Universal agent</td><td>Role-based harness</td></tr>
+			<tr><td>Personas</td><td>Single agent, single lens</td><td>13 built-in + custom</td></tr>
+			<tr><td>Self-hosted focus</td><td>Works with any provider</td><td>Designed for local inference</td></tr>
+			<tr><td>Telemetry</td><td>Varies</td><td>None. Ever.</td></tr>
+		</table>
 	</section>
 
 	<section class="landing-docs">
@@ -482,7 +564,7 @@ const LANDING_HTML = `<!DOCTYPE html>
 	</section>
 
 	<footer class="footer">
-		cast is open source under the MIT License.
+		cast is open source under the MIT License. Works with OpenRouter, OpenAI, Ollama, vLLM, LiteLLM, Azure OpenAI, and any OpenAI-compatible API.
 	</footer>
 </div>
 </body>
@@ -501,7 +583,7 @@ function docPage(title, bodyHtml, activeFile) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title} — cast</title>
-<meta name="description" content="${title} documentation for cast, a terminal coding agent.">
+<meta name="description" content="${title} documentation for cast, a role-based terminal agent harness.">
 <style>${CSS}</style>
 </head>
 <body>

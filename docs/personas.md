@@ -1,6 +1,6 @@
 # Personas
 
-Personas are swappable system prompts that give the agent a different role without changing its tools. The tools (bash, read, write, edit, find, grep, ls) are generic file/shell primitives — the persona shapes how they're used.
+A coding agent optimized for implementation isn't the best reviewer. A QA mindset doesn't write good specs. Personas let you swap the judgment — the lens through which the agent approaches your code — without swapping the tools. Same bash, same read, same write. Different priorities, different questions, different output.
 
 ## Built-in Personas
 
