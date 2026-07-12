@@ -17,7 +17,8 @@
 		"format": "biome format --write src/ test/",
 		"test": "vitest run",
 		"test:watch": "vitest",
-		"e2e:plan": "bash scripts/e2e-plan-mode.sh"
+		"e2e:plan": "bash scripts/e2e-plan-mode.sh",
+		"build-site": "node scripts/build-site.mjs"
 	},
 	"dependencies": {
 		"@modelcontextprotocol/sdk": "^1.29.0",
@@ -30,6 +31,7 @@
 	"devDependencies": {
 		"@biomejs/biome": "2.3.5",
 		"esbuild": "^0.28.1",
+		"marked": "^18.0.6",
 		"typescript": "^5.6.0",
 		"vitest": "^3.2.0"
 	}

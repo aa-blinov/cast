@@ -36,7 +36,9 @@ src/
     prompts.ts        Prompt file loading
     readline.ts       Readline utilities, models cache
     settings.ts       User settings persistence
+    stdin-manager.ts  Stdin ownership between Ink and child processes
     subagents.ts      Sub-agent prompt loading
+    help.ts           Banner, help text, changelog
     ...
   ui/                 Ink TUI components
     App.tsx           Top-level layout
