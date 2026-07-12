@@ -331,6 +331,14 @@ export function App(props: AppProps): JSX.Element {
 				);
 				if (choice === true) {
 					setPlanMode(true);
+					// Same MCP caveat as the /plan command: connected MCP servers
+					// keep full capability in plan mode — the user should know.
+					const mcpCount = mcpResult.toolDefinitions.length;
+					if (mcpCount > 0) {
+						showNotice(
+							`[${mcpCount} MCP tool${mcpCount === 1 ? "" : "s"} stay fully enabled — plan mode does not gate them]`,
+						);
+					}
 					setPendingAutoSubmit({
 						text: "Plan mode is on. Explore the material and write the plan.",
 						wantPlanMode: true,
@@ -346,7 +354,17 @@ export function App(props: AppProps): JSX.Element {
 				}
 			})();
 		}
-	}, [agent.status, agent.clearContext, modalRequest, planMode, pickers, setPlanMode, showNotice, planState]);
+	}, [
+		agent.status,
+		agent.clearContext,
+		modalRequest,
+		planMode,
+		pickers,
+		setPlanMode,
+		showNotice,
+		planState,
+		mcpResult,
+	]);
 
 	useEffect(() => {
 		if (initialPrompt) {

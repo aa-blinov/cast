@@ -361,6 +361,18 @@ describe("plan mode commands", () => {
 		await handleInput("/plan", undefined, deps);
 		expect(calls.setPlanMode?.[0]).toEqual([true]);
 		expect(noticeText(calls)).toContain("Plan mode: ON");
+		// No MCP connected → no caveat noise.
+		expect(noticeText(calls)).not.toContain("MCP");
+	});
+
+	it("/plan warns that connected MCP tools are not gated", async () => {
+		const { deps, calls } = createFakeDeps();
+		deps.mcpResult.toolDefinitions = [
+			{ type: "function", function: { name: "mcp_db_write", parameters: { type: "object", properties: {} } } },
+			{ type: "function", function: { name: "mcp_db_read", parameters: { type: "object", properties: {} } } },
+		] as never;
+		await handleInput("/plan", undefined, deps);
+		expect(noticeText(calls)).toContain("2 MCP tools stay fully enabled");
 	});
 
 	it("/plan is a no-op when already in plan mode", async () => {

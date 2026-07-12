@@ -302,7 +302,16 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			return;
 		}
 		deps.setPlanMode(true);
-		showNotice("[Plan mode: ON — exploring and planning only]");
+		// MCP tools are a documented exception: plan mode hard-gates only the
+		// built-in tools, so connected MCP servers keep their full capability.
+		// The model is told to treat them as read-only, but that's prompt-level
+		// — the user should know the guarantee is weaker there.
+		const mcpCount = deps.mcpResult.toolDefinitions.length;
+		showNotice(
+			mcpCount > 0
+				? `[Plan mode: ON — exploring and planning only · ${mcpCount} MCP tool${mcpCount === 1 ? "" : "s"} stay fully enabled (not gated by plan mode)]`
+				: "[Plan mode: ON — exploring and planning only]",
+		);
 		return;
 	}
 

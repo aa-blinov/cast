@@ -50,6 +50,11 @@ const BUILD_MODE_DONE_PROMPT = readRequiredPrompt(promptsDir, join("modes", "bui
 // findings not yet written into the plan file must survive the summary.
 // Exported for the manual /compact command, which runs outside the loop.
 export const PLAN_COMPACTION_PROMPT = readRequiredPrompt(promptsDir, join("modes", "plan-compaction.md"));
+// One-liner for subagents running under readOnlyBash (plan-mode parent): they
+// don't get the full plan-mode block (it references authoring tools they lack),
+// but they must know why a mutating bash command bounces.
+const READONLY_BASH_NOTE =
+	"bash is INSPECTION-ONLY in this session: pipelines of read-only binaries (ls, cat, grep, find, wc, diff, git log/show/diff/status/blame, …) pass; anything that writes or runs other programs is rejected.";
 
 // ============================================================================
 // Compaction
@@ -240,6 +245,12 @@ export interface LoopConfig {
 	disabledTools?: Set<string>;
 	/** Plan mode state — when enabled, injects plan system prompt block. */
 	planState?: import("./plan.ts").PlanState;
+	/** Restrict bash to the read-only allowlist without the rest of plan mode.
+	 * Used for subagents spawned from a plan-mode parent: they inherit the
+	 * inspection-only bash but not the authoring tools or the plan prompt
+	 * (their planState arrives with enabled=false). Implied by
+	 * planState.enabled for the main agent. */
+	readOnlyBash?: boolean;
 	/** promptTokens from the most recent API response — used by shouldCompact
 	 * as the authoritative context size instead of character-based estimation. */
 	lastPromptTokens?: number;
@@ -336,8 +347,9 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 		// Plan mode allows bash for inspection only — enforced here, not by the
 		// model's goodwill: pipelines of allowlisted read-only binaries pass,
 		// anything that can write (redirects, substitution, unlisted binaries)
-		// is refused with the reason.
-		if (name === "bash" && loopConfig.planState?.enabled) {
+		// is refused with the reason. Subagents of a plan-mode parent inherit
+		// the same gate via readOnlyBash.
+		if (name === "bash" && (loopConfig.planState?.enabled || loopConfig.readOnlyBash)) {
 			const verdict = checkReadOnlyCommand(typeof args.command === "string" ? args.command : "");
 			if (!verdict.ok) {
 				return Promise.resolve({
@@ -407,7 +419,13 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 		// first thing the model sees, persona and rules included.
 		if (loopConfig.planState?.enabled) {
 			prompt = `${PLAN_MODE_PROMPT}\n\n${prompt}`;
-		} else if (buildPlanSnapshot?.exists && buildPlanSnapshot.path) {
+		} else if (loopConfig.readOnlyBash) {
+			// Subagent of a plan-mode parent: no plan-mode block (its authoring
+			// tools aren't in this toolset), but the bash restriction must be
+			// stated or rejections read like malfunctions.
+			prompt = `${prompt}\n\n${READONLY_BASH_NOTE}`;
+		}
+		if (!loopConfig.planState?.enabled && buildPlanSnapshot?.exists && buildPlanSnapshot.path) {
 			// Build mode with a plan from this session: append the approved plan
 			// (the active one — most recently written) so it keeps steering
 			// implementation. Snapshotted per run (see above); re-read on the

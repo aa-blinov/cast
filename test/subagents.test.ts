@@ -47,16 +47,19 @@ describe("execTask — plan state handoff", () => {
 		expect(child.disabledTools!.has("plan_check")).toBe(true);
 		expect(child.disabledTools!.has("web_search")).toBe(true);
 		expect(child.disabledTools!.has("bash")).toBe(false);
+		expect(child.readOnlyBash).toBe(false);
 	});
 
-	it("plan mode: child runs with enabled=false (no authoring block) and bash fully blocked", async () => {
+	it("plan mode: child runs with enabled=false (no authoring block) and inherits read-only bash", async () => {
 		const child = await captureChildConfig({
 			planState: { enabled: true, plansDir: "/tmp/plans-y" },
 			disabledTools: new Set(["write", "edit"]),
 		});
 		expect(child.planState!.enabled).toBe(false);
 		expect(child.planState!.plansDir).toBe("/tmp/plans-y");
-		expect(child.disabledTools!.has("bash")).toBe(true);
+		// bash stays advertised — the executor's read-only gate applies instead
+		expect(child.disabledTools!.has("bash")).toBe(false);
+		expect(child.readOnlyBash).toBe(true);
 		expect(child.disabledTools!.has("write")).toBe(true);
 	});
 
@@ -64,6 +67,7 @@ describe("execTask — plan state handoff", () => {
 		const child = await captureChildConfig({});
 		expect(child.planState).toBeUndefined();
 		expect(child.disabledTools!.has("bash")).toBe(false);
+		expect(child.readOnlyBash).toBe(false);
 	});
 });
 

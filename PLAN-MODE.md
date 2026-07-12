@@ -73,13 +73,14 @@ Mode switching is rejected while a run is active (`[Agent running — finish the
 
 - The mode is always visible in the status line right after the persona label: `[PLAN]` in warning color (it changes what the agent may do), `[BUILD]` muted
 - Plan mode ON/OFF shown as a notice (temporary banner, not a persistent message)
-- On a successful `plan_done`, a persistent `[Plan ready — review it, then /build to approve and implement]` message is appended to the transcript (not a timed notice — it must survive while the user reads the plan)
+- On a successful `plan_done`, a persistent `[Plan ready: /full/path/to/plan.md — approval dialog opens when the turn ends]` message is appended to the transcript (not a timed notice — it must survive while the user reads the plan; the full path is cmd-clickable and also shown as the approval dialog's title)
 
 ### /help update
 
 ```
-  /plan                Enter plan mode (explore + plan only)
-  /build               Exit plan mode, restore full toolset
+  /plan               Enter plan mode (explore + plan only)
+  /plan-model [m|off] Show or change the plan-mode model
+  /build              Exit plan mode, restore full toolset
 ```
 
 ---
@@ -91,6 +92,12 @@ Mode switching is rejected while a run is active (`[Agent running — finish the
 Uses the existing `disabledTools: Set<string>` mechanism — tools are filtered from definitions sent to the API, so the model physically cannot call them. This is a hard restriction, not prompt-level guidance.
 
 The same set also gates execution: the loop's `executeTool` wrapper refuses any call whose name is in `disabledTools`, so a fabricated call to a non-advertised tool (bash in plan mode, `plan_*` in build mode) returns an error instead of running — the same principle as the existing `task` executor gate.
+
+### MCP tools — deliberate exception
+
+MCP tools are NOT hard-gated by plan mode. Deliberate: many MCP servers are read-only research tools (docs lookup, code search) and exactly what planning needs; cast cannot know which of an arbitrary server's tools mutate state, so a hard gate would either kill legitimate research or require per-server configuration nobody maintains.
+
+The guarantee for MCP is therefore prompt-level only: the plan-mode block instructs the model that the no-changes rule extends to MCP ("inspection and retrieval only"), and the user is warned on every plan-mode entry when MCP tools are connected (`… · N MCP tools stay fully enabled (not gated by plan mode)`). A user who connects a mutating MCP server (database writes, deploys) should know plan mode does not restrain it the way it restrains bash/write/edit.
 
 Headless runs (`cast run`) have no plan mode: `run.ts` adds all `PLAN_TOOL_NAMES` to `disabledTools`, so the plan tools are neither advertised nor executable there. But an approved plan still steers: run.ts passes a build-mode `planState`, so resuming a session that has one (`cast run -c "..."`) injects the same mirror block as the TUI.
 
@@ -151,7 +158,7 @@ Subagents inherit the parent's restrictions plus the plan tools (task.ts):
 disabledTools: new Set([...(deps.disabledTools ?? []), ...PLAN_TOOL_NAMES]),
 ```
 
-A subagent spawned in plan mode gets the same restricted set — it can read files and produce findings, but cannot write anything; bash is blocked entirely for plan-mode subagents (the read-only allowlist is a main-agent affordance). Plan tools are never available to subagents: they explore and report back; the parent owns the plan file.
+A subagent spawned in plan mode gets the same restricted set — it can read files and produce findings, but cannot write anything; bash is inherited with the same executor-enforced read-only allowlist as the parent (`readOnlyBash` in LoopConfig — explorers can run `git log`/`grep` pipelines but still can't write), and a one-line note in the child's system prompt explains the restriction so rejections don't read like malfunctions. Plan tools are never available to subagents: they explore and report back; the parent owns the plan file.
 
 Plan handoff: the parent's `planState` is passed to the child with `enabled: false`, so a build-mode subagent delegated an implementation step sees the same approved-plan mirror block as the parent (and a plan-mode subagent sees the current draft) instead of working blind.
 
