@@ -1,6 +1,6 @@
 # cast
 
-A terminal coding agent that works with **any** OpenAI-compatible API. Point it at OpenRouter, OpenAI, Ollama, vLLM, LiteLLM, or your own inference server — it doesn't care where the tokens come from.
+A role-based terminal agent harness. 13 built-in personas — senior dev, QA, DBA, security reviewer, PM, tech writer — same tools, different judgment. Runs on any OpenAI-compatible model, including the one on your own hardware.
 
 ```
                    __
@@ -12,13 +12,13 @@ A terminal coding agent that works with **any** OpenAI-compatible API. Point it 
 
 ## Why cast?
 
-**No vendor lock-in.** Swap providers and models without touching your workflow. One config file, one API key, works everywhere.
+**A cast, not a coder.** 13 built-in personas swap the agent's role without changing its tools. Senior dev for root-cause fixes, QA for edge cases, DBA for schema design, PM for specs. Add your own with a single markdown file.
 
-**Real tools, real work.** It reads files, writes code, runs shell commands, searches your codebase — and does it all in parallel. Delegates sub-tasks to isolated sub-agents. Not a chat wrapper with a "code interpreter" bolted on.
+**Real tools, real work.** It reads files, writes code, runs shell commands, searches your codebase — and does it all in parallel. Delegates sub-tasks to isolated sub-agents. Rules, skills, and MCP servers extend capabilities without touching the codebase.
+
+**Runs where your code runs.** vLLM, Ollama, your own inference server, or any OpenAI-compatible API. No account, no telemetry, no cloud dependency.
 
 **Ink TUI.** A proper terminal interface with multiline paste, image attachments, smooth animations.
-
-**Extensible.** Rules (per-project instructions in `.cast/rules/*.md`), skills (self-contained instruction packages), MCP servers (any Model Context Protocol tool server), and personas (swappable system prompts) — add capabilities without touching the codebase.
 
 ## Install
 
