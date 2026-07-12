@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tools — cast</title>
+<meta name="description" content="Tools documentation for cast, a terminal coding agent.">
+<style>
+:root {
+	/* cast palette — cyan→violet gradient */
+	--bg: #0a0e14;
+	--bg-secondary: #0f1520;
+	--bg-tertiary: #151c28;
+	--border: #1e2a3a;
+	--text: #e2e8f0;
+	--text-secondary: #64748b;
+	--text-muted: #475569;
+	--accent: #38e0ff;
+	--accent-hover: #5eead4;
+	--accent-subtle: rgba(56,224,255,.1);
+	--green: #34d399;
+	--green-subtle: rgba(52,211,153,.1);
+	--orange: #fbbf24;
+	--red: #fb7185;
+	--code-bg: #0f1520;
+	--sidebar-w: 280px;
+	--header-h: 64px;
+	--font: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+	--font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 16px; scroll-behavior: smooth; }
+body {
+	font-family: var(--font);
+	background: var(--bg);
+	color: var(--text);
+	line-height: 1.6;
+	-webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--accent-hover); text-decoration: underline; }
+
+/* ── Header ─────────────────────────────────────────────────────────── */
+.header {
+	position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+	height: var(--header-h);
+	background: var(--bg-secondary);
+	border-bottom: 1px solid var(--border);
+	display: flex; align-items: center; padding: 0 24px;
+}
+.header-logo {
+	font-size: 1.25rem; font-weight: 700; color: var(--text);
+	display: flex; align-items: center; gap: 10px;
+}
+.header-links { margin-left: auto; display: flex; gap: 20px; align-items: center; }
+.header-links a { color: var(--text-secondary); font-size: .875rem; font-weight: 500; }
+.header-links a:hover { color: var(--text); text-decoration: none; }
+
+/* ── Sidebar ────────────────────────────────────────────────────────── */
+.sidebar {
+	position: fixed; top: var(--header-h); left: 0; bottom: 0;
+	width: var(--sidebar-w); background: var(--bg-secondary);
+	border-right: 1px solid var(--border);
+	overflow-y: auto; padding: 16px 0;
+}
+.sidebar-section { padding: 0 12px; margin-bottom: 8px; }
+.sidebar-section-title {
+	font-size: .75rem; font-weight: 600; text-transform: uppercase;
+	letter-spacing: .05em; color: var(--text-muted);
+	padding: 8px 12px 4px;
+}
+.sidebar a {
+	display: block; padding: 6px 12px; border-radius: 6px;
+	font-size: .875rem; color: var(--text-secondary); line-height: 1.4;
+}
+.sidebar a:hover { background: var(--bg-tertiary); color: var(--text); text-decoration: none; }
+.sidebar a.active {
+	background: var(--accent-subtle); color: var(--accent); font-weight: 500;
+}
+
+/* ── Mobile menu ────────────────────────────────────────────────────── */
+.menu-toggle {
+	display: none; background: none; border: none; color: var(--text);
+	font-size: 1.5rem; cursor: pointer; padding: 4px 8px;
+}
+@media (max-width: 768px) {
+	.sidebar {
+		transform: translateX(-100%); transition: transform .2s ease;
+		z-index: 99; width: 280px;
+	}
+	.sidebar.open { transform: translateX(0); }
+	.sidebar-backdrop {
+		position: fixed; inset: 0; z-index: 98;
+		background: rgba(0,0,0,.5); backdrop-filter: blur(2px);
+		display: none;
+	}
+	.sidebar-backdrop.visible { display: block; }
+	.menu-toggle { display: block; margin-right: 8px; }
+	.main { margin-left: 0 !important; padding: 20px 16px 60px !important; }
+	.header { padding: 0 12px; }
+	.header-links { gap: 14px; }
+
+	/* Hero */
+	.hero { padding: 56px 16px 40px; }
+	.hero-ascii { font-size: .65rem; }
+	.hero h1 { font-size: 2rem; }
+	.hero p { font-size: 1rem; margin-bottom: 24px; }
+	.hero-buttons a { padding: 10px 22px; font-size: .9rem; }
+	.install-block { margin-top: 24px; padding: 12px 14px; }
+	.install-block code { font-size: .75rem; word-break: break-all; }
+
+	/* Features */
+	.features { grid-template-columns: 1fr; padding: 24px 16px 40px; gap: 12px; }
+	.feature { padding: 16px; }
+
+	/* Providers */
+	.providers { padding: 24px 16px; }
+	.providers h2 { font-size: 1.25rem; }
+
+	/* Docs grid */
+	.landing-docs { padding: 24px 16px 60px; }
+	.landing-docs h2 { font-size: 1.25rem; }
+	.docs-grid { grid-template-columns: 1fr; }
+
+	/* Content */
+	.content h1 { font-size: 1.5rem; }
+	.content h2 { font-size: 1.25rem; margin: 28px 0 10px; }
+	.content h3 { font-size: 1.1rem; }
+	.content table { font-size: .8rem; }
+	.content th, .content td { padding: 6px 8px; }
+	.content pre:not(.mermaid-code) { padding: 12px; font-size: .8rem; }
+
+	/* Mermaid */
+	.mermaid-diagram { padding: 12px; max-height: 45vh; }
+	.mermaid-code { max-height: 45vh; }
+	.mermaid-toolbar { padding: 6px 8px; }
+	.mermaid-toolbar button { padding: 3px 8px; font-size: .75rem; }
+}
+
+/* ── Main content ───────────────────────────────────────────────────── */
+.main {
+	margin-left: var(--sidebar-w);
+	margin-top: var(--header-h);
+	padding: 32px 48px 80px;
+	max-width: 900px;
+}
+.main-landing {
+	margin-left: 0; max-width: none; padding: 0;
+}
+
+/* ── Typography ─────────────────────────────────────────────────────── */
+.content h1 { font-size: 2rem; font-weight: 700; margin: 0 0 16px; line-height: 1.3; }
+.content h2 {
+	font-size: 1.5rem; font-weight: 600; margin: 40px 0 12px;
+	padding-bottom: 8px; border-bottom: 1px solid var(--border);
+}
+.content h3 { font-size: 1.2rem; font-weight: 600; margin: 28px 0 8px; }
+.content h4 { font-size: 1rem; font-weight: 600; margin: 20px 0 6px; }
+.content p { margin: 0 0 16px; }
+.content ul, .content ol { margin: 0 0 16px; padding-left: 24px; }
+.content li { margin: 4px 0; }
+.content strong { font-weight: 600; }
+.content hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+.content blockquote {
+	border-left: 3px solid var(--accent); padding: 8px 16px;
+	margin: 0 0 16px; background: var(--accent-subtle); border-radius: 0 6px 6px 0;
+}
+.content blockquote p:last-child { margin-bottom: 0; }
+
+/* ── Code ───────────────────────────────────────────────────────────── */
+.content code {
+	font-family: var(--font-mono); font-size: .875em;
+	background: var(--code-bg); padding: 2px 6px; border-radius: 4px;
+	border: 1px solid var(--border);
+}
+.content pre:not(.mermaid-code) {
+	background: var(--code-bg); border: 1px solid var(--border);
+	border-radius: 8px; padding: 16px; margin: 0 0 16px;
+	overflow-x: auto; line-height: 1.5;
+}
+.content pre:not(.mermaid-code) code {
+	background: none; border: none; padding: 0; font-size: .875rem;
+}
+
+/* ── Mermaid ────────────────────────────────────────────────────────── */
+.mermaid-viewer {
+	background: var(--code-bg); border: 1px solid var(--border);
+	border-radius: 8px; margin: 0 0 16px; overflow: hidden;
+}
+.mermaid-toolbar {
+	display: flex; align-items: center; gap: 6px;
+	padding: 8px 12px; border-bottom: 1px solid var(--border);
+	background: var(--bg-tertiary);
+}
+.mermaid-toolbar button {
+	background: var(--bg-secondary); border: 1px solid var(--border);
+	color: var(--text-secondary); border-radius: 4px;
+	padding: 4px 10px; font-size: .8rem; cursor: pointer;
+	font-family: var(--font); line-height: 1;
+}
+.mermaid-toolbar button:hover { color: var(--text); border-color: var(--accent); }
+.mermaid-toolbar button.active { color: var(--accent); border-color: var(--accent); }
+.mermaid-toolbar .zoom-label {
+	font-size: .75rem; color: var(--text-muted); margin-left: auto;
+}
+.mermaid-diagram {
+	padding: 24px; overflow: hidden; max-height: 60vh;
+	position: relative; cursor: grab; user-select: none;
+	touch-action: none; -webkit-user-select: none;
+}
+.mermaid-diagram.dragging { cursor: grabbing; }
+.mermaid-diagram svg { transition: none; transform-origin: 0 0; }
+.mermaid-code {
+	display: none; padding: 16px; margin: 0;
+	background: none; border: none;
+	font-family: var(--font-mono); font-size: .8rem;
+	color: var(--text-secondary); line-height: 1.5;
+	overflow-x: auto; max-height: 60vh;
+}
+.mermaid-code.visible { display: block; }
+
+/* ── Tables ─────────────────────────────────────────────────────────── */
+.table-wrap { overflow-x: auto; margin: 0 0 16px; border: 1px solid var(--border); border-radius: 8px; }
+.content table {
+	width: 100%; border-collapse: collapse; margin: 0;
+	font-size: .875rem;
+}
+.content th, .content td {
+	padding: 8px 12px; border: 1px solid var(--border); text-align: left;
+}
+.content th { background: var(--bg-tertiary); font-weight: 600; }
+.content tr:hover td { background: var(--bg-tertiary); }
+
+/* ── Landing page ───────────────────────────────────────────────────── */
+.hero {
+	text-align: center; padding: 100px 24px 60px;
+	background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg) 100%);
+}
+.hero-ascii {
+	font-family: var(--font-mono); font-size: .875rem;
+	white-space: pre; margin-bottom: 24px; line-height: 1.2;
+	background: linear-gradient(90deg, #38e0ff, #38bdf8, #a78bfa, #a855f7);
+	-webkit-background-clip: text; -webkit-text-fill-color: transparent;
+	background-clip: text;
+}
+.hero h1 { font-size: 3rem; font-weight: 800; margin: 0 0 16px; }
+.hero h1 .accent { color: #38e0ff; }
+.hero p { font-size: 1.25rem; color: var(--text-secondary); max-width: 600px; margin: 0 auto 32px; }
+.hero-buttons { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+.hero-buttons a {
+	padding: 12px 28px; border-radius: 8px; font-weight: 600; font-size: 1rem;
+}
+.btn-primary { background: linear-gradient(135deg, #38e0ff, #a855f7); color: #fff; }
+.btn-primary:hover { background: linear-gradient(135deg, #5eead4, #c084fc); color: #fff; text-decoration: none; }
+.btn-secondary {
+	background: var(--bg-tertiary); color: var(--text); border: 1px solid var(--border);
+}
+.btn-secondary:hover { background: var(--bg-secondary); text-decoration: none; }
+
+.install-block {
+	max-width: 560px; margin: 32px auto 0; text-align: left;
+	background: var(--code-bg); border: 1px solid var(--border);
+	border-radius: 8px; padding: 16px 20px;
+}
+.install-block .label {
+	font-size: .75rem; font-weight: 600; color: var(--text-muted);
+	text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px;
+}
+.install-block code { font-size: .875rem; color: #34d399; }
+.install-block .note { font-size: .8rem; color: var(--text-muted); margin-top: 8px; }
+
+.features {
+	display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+	gap: 20px; padding: 40px 48px 60px; max-width: 1200px; margin: 0 auto;
+}
+.feature {
+	background: var(--bg-secondary); border: 1px solid var(--border);
+	border-radius: 8px; padding: 24px;
+}
+.feature h3 { font-size: 1.1rem; margin: 0 0 8px; }
+.feature p { color: var(--text-secondary); font-size: .9rem; margin: 0; }
+.feature .icon { margin-bottom: 12px; display: block; color: var(--accent); }
+
+.providers {
+	text-align: center; padding: 40px 24px;
+	max-width: 800px; margin: 0 auto;
+}
+.providers h2 { font-size: 1.5rem; margin: 0 0 24px; border: none; padding: 0; }
+.provider-grid {
+	display: flex; flex-wrap: wrap; gap: 12px; justify-content: center;
+}
+.provider-tag {
+	background: var(--bg-secondary); border: 1px solid var(--border);
+	padding: 8px 16px; border-radius: 6px; font-size: .875rem;
+	color: var(--text-secondary); font-weight: 500;
+}
+
+.landing-docs {
+	max-width: 1200px; margin: 0 auto; padding: 40px 48px 80px;
+}
+.landing-docs h2 {
+	font-size: 1.5rem; text-align: center; margin: 0 0 32px;
+	border: none; padding: 0;
+}
+.docs-grid {
+	display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+	gap: 12px;
+}
+.doc-card {
+	background: var(--bg-secondary); border: 1px solid var(--border);
+	border-radius: 8px; padding: 16px 20px; transition: border-color .15s;
+}
+.doc-card:hover { border-color: var(--accent); text-decoration: none; }
+.doc-card h3 { font-size: 1rem; margin: 0 0 4px; color: var(--text); }
+.doc-card p { font-size: .85rem; color: var(--text-secondary); margin: 0; }
+
+.footer {
+	text-align: center; padding: 24px; border-top: 1px solid var(--border);
+	font-size: .8rem; color: var(--text-muted);
+}
+</style>
+</head>
+<body>
+<header class="header">
+	<button class="menu-toggle" aria-label="Menu">&#9776;</button>
+	<a href="index.html" class="header-logo">cast</a>
+	<div class="header-links">
+		<a href="index.html">Home</a>
+		<a href="https://github.com/aa-blinov/cast">GitHub</a>
+	</div>
+</header>
+
+<div class="sidebar-backdrop"></div>
+<nav class="sidebar">
+	<div class="sidebar-section">
+		<div class="sidebar-section-title">Documentation</div>
+			<a href="getting-started.html">Getting Started</a>
+			<a href="cli-reference.html">CLI Reference</a>
+			<a href="interactive-commands.html">Interactive Commands</a>
+			<a href="tools.html" class="active">Tools</a>
+			<a href="personas.html">Personas</a>
+			<a href="skills.html">Skills</a>
+			<a href="rules.html">Rules</a>
+			<a href="mcp-servers.html">MCP Servers</a>
+			<a href="context-files.html">Context Files</a>
+			<a href="sessions.html">Sessions</a>
+			<a href="plan-mode.html">Plan Mode</a>
+			<a href="reasoning.html">Reasoning</a>
+			<a href="configuration.html">Configuration</a>
+			<a href="themes.html">Themes</a>
+			<a href="non-interactive-mode.html">Non-Interactive Mode</a>
+			<a href="architecture.html">Architecture</a>
+	</div>
+</nav>
+
+<main class="main">
+	<article class="content">
+		<h1>Tools</h1>
+<p>The agent has access to 10 built-in tools plus optional MCP server tools. Multiple tools run in parallel within a single turn via <code>Promise.all</code>.</p>
+<h2>File System Tools</h2>
+<h3><code>read</code></h3>
+<p>Read file contents. Supports text files and images (jpg, jpeg, png, gif, webp, bmp). Images are sent directly to vision-capable models.</p>
+<div class="table-wrap"><table><thead><tr><th>Parameter</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>path</code></td><td>Yes</td><td>File path (relative or absolute)</td></tr><tr><td><code>offset</code></td><td>No</td><td>Line number to start from (1-indexed)</td></tr><tr><td><code>limit</code></td><td>No</td><td>Maximum lines to read</td></tr></tbody></table></div><p>Output is truncated to 2000 lines or 64KB. Images larger than 5MB are rejected.</p>
+<h3><code>write</code></h3>
+<p>Write content to a file. Creates the file if it doesn&#39;t exist, overwrites if it does. Automatically creates parent directories.</p>
+<div class="table-wrap"><table><thead><tr><th>Parameter</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>path</code></td><td>Yes</td><td>File path</td></tr><tr><td><code>content</code></td><td>Yes</td><td>Content to write</td></tr></tbody></table></div><h3><code>edit</code></h3>
+<p>Edit a file using exact text replacement. Each <code>oldText</code> must match a unique, non-overlapping region of the file.</p>
+<div class="table-wrap"><table><thead><tr><th>Parameter</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>path</code></td><td>Yes</td><td>File path</td></tr><tr><td><code>edits</code></td><td>Yes</td><td>Array of <code>{oldText, newText}</code> replacements</td></tr></tbody></table></div><p>If two changes touch the same block or nearby lines, they must be merged into one edit.</p>
+<h2>Search Tools</h2>
+<h3><code>find</code></h3>
+<p>Search for files by glob pattern.</p>
+<div class="table-wrap"><table><thead><tr><th>Parameter</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>pattern</code></td><td>Yes</td><td>Glob pattern (e.g. <code>*.ts</code>, <code>**/*.json</code>, <code>src/**/*.spec.ts</code>)</td></tr><tr><td><code>path</code></td><td>No</td><td>Directory to search (default: cwd)</td></tr><tr><td><code>limit</code></td><td>No</td><td>Maximum results (default: 1000)</td></tr></tbody></table></div><h3><code>grep</code></h3>
+<p>Search file contents by regex pattern.</p>
+<div class="table-wrap"><table><thead><tr><th>Parameter</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>pattern</code></td><td>Yes</td><td>Regex or literal string</td></tr><tr><td><code>path</code></td><td>No</td><td>Directory or file to search (default: cwd)</td></tr><tr><td><code>glob</code></td><td>No</td><td>Filter by glob (e.g. <code>*.ts</code>)</td></tr><tr><td><code>ignoreCase</code></td><td>No</td><td>Case-insensitive search</td></tr><tr><td><code>literal</code></td><td>No</td><td>Treat pattern as literal string</td></tr><tr><td><code>context</code></td><td>No</td><td>Lines before/after each match</td></tr><tr><td><code>limit</code></td><td>No</td><td>Maximum matches (default: 100)</td></tr></tbody></table></div><h3><code>ls</code></h3>
+<p>List directory contents with file type, size, and name.</p>
+<div class="table-wrap"><table><thead><tr><th>Parameter</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>path</code></td><td>No</td><td>Directory to list (default: cwd)</td></tr><tr><td><code>limit</code></td><td>No</td><td>Maximum entries (default: 500)</td></tr></tbody></table></div><h2>Shell Tool</h2>
+<h3><code>bash</code></h3>
+<p>Execute a bash command in the current working directory.</p>
+<div class="table-wrap"><table><thead><tr><th>Parameter</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>command</code></td><td>Yes</td><td>Bash command to execute</td></tr><tr><td><code>timeout</code></td><td>No</td><td>Timeout in seconds (default: 180)</td></tr></tbody></table></div><p>Output is truncated to the last 2000 lines or 64KB (whichever is hit first).</p>
+<p>For long-running commands (docker build, npm install, large test suites), increase the timeout:</p>
+<pre><code>bash(command=&quot;npm run build&quot;, timeout=600)
+</code></pre>
+<h2>Web Tools</h2>
+<p>Web tools are disabled by default. Enable them with <code>/web</code> (persists to settings.json). When disabled, the tools are not advertised to the model — it doesn&#39;t know they exist.</p>
+<h3><code>web_search</code></h3>
+<p>Search the web via DuckDuckGo. No API key required.</p>
+<div class="table-wrap"><table><thead><tr><th>Parameter</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>query</code></td><td>Yes</td><td>Search query</td></tr><tr><td><code>maxResults</code></td><td>No</td><td>Maximum results (default: 10)</td></tr><tr><td><code>region</code></td><td>No</td><td>Region code (default: <code>wt-wt</code>)</td></tr><tr><td><code>time</code></td><td>No</td><td>Time filter: <code>d</code> (day), <code>w</code> (week), <code>m</code> (month), <code>y</code> (year)</td></tr></tbody></table></div><h3><code>web_fetch</code></h3>
+<p>Fetch a web page and return clean markdown via Jina Reader. Handles JS rendering, PDFs, and content extraction.</p>
+<div class="table-wrap"><table><thead><tr><th>Parameter</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>url</code></td><td>Yes</td><td>URL to fetch</td></tr><tr><td><code>maxChars</code></td><td>No</td><td>Maximum characters (default: 12,000)</td></tr></tbody></table></div><h2>Task Tool</h2>
+<h3><code>task</code></h3>
+<p>Delegate a task to a sub-agent with an isolated context. The sub-agent runs independently — its intermediate tool calls don&#39;t appear in the main context. Only the final result is returned.</p>
+<div class="table-wrap"><table><thead><tr><th>Parameter</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>assignment</code></td><td>Yes</td><td>Complete, self-contained task description</td></tr><tr><td><code>subagent</code></td><td>No</td><td>Sub-agent name (e.g. <code>worker</code>)</td></tr></tbody></table></div><p>The <code>task</code> tool is only available when the current persona has <code>subagents: true</code> (e.g. the <code>coder-with-subagents</code> persona).</p>
+<p>Use for:</p>
+<ul>
+<li>Parallel exploration (multiple sub-agents searching different parts of the codebase)</li>
+<li>Isolating complex research that would pollute the main context</li>
+<li>Delegating well-defined subtasks</li>
+</ul>
+<h2>Plan Tools</h2>
+<p>Availability is mode-gated: authoring tools exist only in plan mode, progress and suggestion tools only in build mode, <code>plan_read</code> in both. See <a href="plan-mode.html">Plan Mode</a> for details.</p>
+<div class="table-wrap"><table><thead><tr><th>Tool</th><th>Mode</th><th>Description</th></tr></thead><tbody><tr><td><code>plan_write</code></td><td>Plan</td><td>Write or replace a named plan file</td></tr><tr><td><code>plan_edit</code></td><td>Plan</td><td>Edit a section of the active plan by heading</td></tr><tr><td><code>plan_read</code></td><td>Both</td><td>Read a plan&#39;s content and headings (switches the active plan only in plan mode)</td></tr><tr><td><code>plan_done</code></td><td>Plan</td><td>Signal that the plan is ready for review</td></tr><tr><td><code>plan_discard</code></td><td>Plan</td><td>Delete a plan from the session</td></tr><tr><td><code>plan_enter</code></td><td>Build</td><td>Suggest switching to plan mode</td></tr><tr><td><code>plan_check</code></td><td>Build</td><td>Mark a checklist item as done</td></tr></tbody></table></div><h2>Subagent System</h2>
+<p>The <code>task</code> tool delegates work to isolated sub-agents. Each sub-agent has:</p>
+<ul>
+<li><strong>Own system prompt</strong> — loaded from <code>prompts/subagents/</code> (currently a <code>worker</code> prompt)</li>
+<li><strong>Isolated context</strong> — the parent agent sees only the final result, not intermediate tool calls</li>
+<li><strong>Same built-in tools</strong> — bash, read, write, edit, find, grep, ls (but no <code>task</code> — sub-agents can&#39;t delegate further)</li>
+<li><strong>Optional model override</strong> — <code>/subagent-model</code> sets a different model for sub-agents</li>
+</ul>
+<p>Sub-agent tokens are tracked separately in usage reporting (<code>/usage</code> status bar shows <code>sub</code> count).</p>
+<p>The <code>task</code> tool is only available when the current persona has <code>subagents: true</code> (e.g. <code>coder-with-subagents</code>). Other personas can&#39;t see or invoke it.</p>
+<h2>Doom Loop Detection</h2>
+<p>If the agent calls the same tool with identical arguments 3 times consecutively, the tool is blocked and the model receives an error:</p>
+<pre><code>Doom loop detected: tool &quot;bash&quot; was called 3 times consecutively with the same
+arguments. You MUST try a completely different approach.
+</code></pre>
+<p>The counter resets when:</p>
+<ul>
+<li>A different tool call breaks the streak</li>
+<li>A steering or follow-up message is injected</li>
+</ul>
+<p>This prevents the agent from getting stuck retrying the same failing operation.</p>
+<h2>Vision Support</h2>
+<p>Images can be attached to messages and are sent directly to vision-capable models.</p>
+<p><strong>Attach</strong>: <code>Ctrl+G</code> opens a file picker. Supported formats: jpg, jpeg, png, gif, webp, bmp. Images larger than 5MB are rejected.</p>
+<p><strong>Read tool</strong>: When the <code>read</code> tool opens an image file, the image is sent as a separate user message alongside the tool result text.</p>
+<p><strong>Fallback</strong>: If the model doesn&#39;t support images (404 or vision error), cast strips image messages and retries with a warning: &quot;Model doesn&#39;t support images — sending file path only&quot;.</p>
+<h2>MCP Server Tools</h2>
+<p>Tools from connected MCP servers appear alongside the built-in ones. They&#39;re named <code>mcp_&lt;server&gt;_&lt;tool&gt;</code> (e.g. <code>mcp_context7_resolve-library-id</code>).</p>
+<p>See <a href="mcp-servers.html">MCP Servers</a> for configuration.</p>
+<h2>Dangerous Command Gating</h2>
+<p>Bash commands matching known-dangerous patterns require confirmation before execution (unless <code>--bypass-permissions</code> is set or <code>/permissions bypass</code> is active).</p>
+<p>Gated patterns include:</p>
+<ul>
+<li><code>rm -rf</code> / <code>rm -r</code> with force flags</li>
+<li><code>sudo</code></li>
+<li><code>git push --force</code> / <code>git push -f</code></li>
+<li><code>git reset --hard</code></li>
+<li><code>git clean -fd</code></li>
+<li>Piping remote scripts into a shell (<code>curl | bash</code>)</li>
+<li><code>chmod 777</code></li>
+<li><code>mkfs</code>, <code>dd</code>, writing to block devices</li>
+<li>Fork bombs</li>
+<li><code>shutdown</code>, <code>reboot</code>, <code>poweroff</code></li>
+<li><code>npm publish</code></li>
+<li><code>killall</code>, <code>pkill</code>, <code>kill -9 -1</code></li>
+<li><code>git checkout .</code> / <code>git restore .</code></li>
+<li><code>rsync --delete</code></li>
+<li><code>find -delete</code></li>
+<li><code>xargs rm</code></li>
+<li><code>crontab -r</code></li>
+<li><code>iptables -F</code></li>
+<li>Decoding base64 into a shell</li>
+</ul>
+<p>File tools (<code>read</code>, <code>write</code>, <code>edit</code>) are never gated — they&#39;re trivially reversible via git.</p>
+
+	</article>
+</main>
+
+<script>
+// Mobile sidebar toggle with backdrop
+(function() {
+	const sidebar = document.querySelector('.sidebar');
+	const backdrop = document.querySelector('.sidebar-backdrop');
+	const toggle = document.querySelector('.menu-toggle');
+	if (!toggle) return;
+	function close() { sidebar.classList.remove('open'); backdrop.classList.remove('visible'); }
+	function open() { sidebar.classList.add('open'); backdrop.classList.add('visible'); }
+	toggle.addEventListener('click', () => {
+		if (sidebar.classList.contains('open')) close(); else open();
+	});
+	backdrop.addEventListener('click', close);
+	document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+})();
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+// ── Mermaid viewer with zoom + diagram/code toggle ──
+document.addEventListener('DOMContentLoaded', () => {
+	const blocks = document.querySelectorAll('pre.mermaid');
+	if (!blocks.length) return;
+
+	mermaid.initialize({ startOnLoad: false, theme: 'dark' });
+
+	blocks.forEach((pre, i) => {
+		const raw = atob(pre.dataset.raw || '') || pre.textContent;
+
+		// Build viewer shell
+		const viewer = document.createElement('div');
+		viewer.className = 'mermaid-viewer';
+
+		const toolbar = document.createElement('div');
+		toolbar.className = 'mermaid-toolbar';
+		toolbar.innerHTML =
+			'<button class="active" data-view="diagram">Diagram</button>' +
+			'<button data-view="code">Code</button>' +
+			'<span class="zoom-label">Zoom:</span>' +
+			'<button data-zoom="out">−</button>' +
+			'<button data-zoom="reset">100%</button>' +
+			'<button data-zoom="in">+</button>';
+
+		const diagram = document.createElement('div');
+		diagram.className = 'mermaid-diagram';
+
+		const code = document.createElement('pre');
+		code.className = 'mermaid-code';
+		code.textContent = raw;
+
+		viewer.append(toolbar, diagram, code);
+		pre.replaceWith(viewer);
+
+		// Render mermaid
+		const id = 'mermaid-' + i;
+		mermaid.render(id, raw).then(({ svg }) => {
+			diagram.innerHTML = svg;
+		}).catch(err => {
+			diagram.innerHTML = '<pre style="color:#fb7185">' + err.message + '</pre>';
+		});
+
+		// Zoom + pan state
+		let zoom = 1, panX = 0, panY = 0, dragging = false, startX, startY;
+		const zoomLabel = toolbar.querySelector('[data-zoom="reset"]');
+		const applyTransform = () => {
+			const svg = diagram.querySelector('svg');
+			if (svg) svg.style.transform = 'translate(' + panX + 'px,' + panY + 'px) scale(' + zoom + ')';
+			zoomLabel.textContent = Math.round(zoom * 100) + '%';
+		};
+
+		// Drag to pan (mouse + touch)
+		const getPos = e => e.touches ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : { x: e.clientX, y: e.clientY };
+		const onStart = e => {
+			const p = getPos(e); dragging = true;
+			startX = p.x - panX; startY = p.y - panY;
+			diagram.classList.add('dragging');
+		};
+		const onMove = e => {
+			if (!dragging) return;
+			const p = getPos(e);
+			panX = p.x - startX; panY = p.y - startY;
+			applyTransform();
+		};
+		const onEnd = () => { dragging = false; diagram.classList.remove('dragging'); };
+	
+diagram.addEventListener('mousedown', e => { onStart(e); e.preventDefault(); });
+		document.addEventListener('mousemove', onMove);
+		document.addEventListener('mouseup', onEnd);
+		diagram.addEventListener('touchstart', e => { if (e.touches.length === 1) onStart(e); }, { passive: true });
+		document.addEventListener('touchmove', e => { if (e.touches.length === 1 && dragging) onMove(e); }, { passive: true });
+		document.addEventListener('touchend', onEnd);
+
+		// Pinch to zoom (touch)
+		let lastPinchDist = 0;
+		diagram.addEventListener('touchstart', e => {
+			if (e.touches.length === 2) {
+				const dx = e.touches[0].clientX - e.touches[1].clientX;
+				const dy = e.touches[0].clientY - e.touches[1].clientY;
+				lastPinchDist = Math.hypot(dx, dy);
+			}
+		}, { passive: true });
+		diagram.addEventListener('touchmove', e => {
+			if (e.touches.length === 2) {
+				e.preventDefault();
+				const dx = e.touches[0].clientX - e.touches[1].clientX;
+				const dy = e.touches[0].clientY - e.touches[1].clientY;
+				const dist = Math.hypot(dx, dy);
+				if (lastPinchDist > 0) {
+					zoom = Math.min(3, Math.max(0.25, zoom * (dist / lastPinchDist)));
+					applyTransform();
+				}
+				lastPinchDist = dist;
+			}
+		});
+		diagram.addEventListener('touchend', e => { if (e.touches.length < 2) lastPinchDist = 0; });
+
+		// Zoom + view toggle buttons
+		toolbar.addEventListener('click', e => {
+			const btn = e.target.closest('button');
+			if (!btn) return;
+
+			if (btn.dataset.view) {
+				toolbar.querySelectorAll('[data-view]').forEach(b => b.classList.remove('active'));
+				btn.classList.add('active');
+				diagram.style.display = btn.dataset.view === 'diagram' ? '' : 'none';
+				code.classList.toggle('visible', btn.dataset.view === 'code');
+				return;
+			}
+
+			if (btn.dataset.zoom === 'in') zoom = Math.min(3, zoom + 0.25);
+			else if (btn.dataset.zoom === 'out') zoom = Math.max(0.25, zoom - 0.25);
+			else if (btn.dataset.zoom === 'reset') { zoom = 1; panX = 0; panY = 0; }
+			applyTransform();
+		});
+	});
+});
+</script>
+</body>
+</html>

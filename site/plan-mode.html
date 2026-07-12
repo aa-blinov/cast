@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan Mode — cast</title>
+<meta name="description" content="Plan Mode documentation for cast, a terminal coding agent.">
+<style>
+:root {
+	/* cast palette — cyan→violet gradient */
+	--bg: #0a0e14;
+	--bg-secondary: #0f1520;
+	--bg-tertiary: #151c28;
+	--border: #1e2a3a;
+	--text: #e2e8f0;
+	--text-secondary: #64748b;
+	--text-muted: #475569;
+	--accent: #38e0ff;
+	--accent-hover: #5eead4;
+	--accent-subtle: rgba(56,224,255,.1);
+	--green: #34d399;
+	--green-subtle: rgba(52,211,153,.1);
+	--orange: #fbbf24;
+	--red: #fb7185;
+	--code-bg: #0f1520;
+	--sidebar-w: 280px;
+	--header-h: 64px;
+	--font: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+	--font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 16px; scroll-behavior: smooth; }
+body {
+	font-family: var(--font);
+	background: var(--bg);
+	color: var(--text);
+	line-height: 1.6;
+	-webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--accent-hover); text-decoration: underline; }
+
+/* ── Header ─────────────────────────────────────────────────────────── */
+.header {
+	position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+	height: var(--header-h);
+	background: var(--bg-secondary);
+	border-bottom: 1px solid var(--border);
+	display: flex; align-items: center; padding: 0 24px;
+}
+.header-logo {
+	font-size: 1.25rem; font-weight: 700; color: var(--text);
+	display: flex; align-items: center; gap: 10px;
+}
+.header-links { margin-left: auto; display: flex; gap: 20px; align-items: center; }
+.header-links a { color: var(--text-secondary); font-size: .875rem; font-weight: 500; }
+.header-links a:hover { color: var(--text); text-decoration: none; }
+
+/* ── Sidebar ────────────────────────────────────────────────────────── */
+.sidebar {
+	position: fixed; top: var(--header-h); left: 0; bottom: 0;
+	width: var(--sidebar-w); background: var(--bg-secondary);
+	border-right: 1px solid var(--border);
+	overflow-y: auto; padding: 16px 0;
+}
+.sidebar-section { padding: 0 12px; margin-bottom: 8px; }
+.sidebar-section-title {
+	font-size: .75rem; font-weight: 600; text-transform: uppercase;
+	letter-spacing: .05em; color: var(--text-muted);
+	padding: 8px 12px 4px;
+}
+.sidebar a {
+	display: block; padding: 6px 12px; border-radius: 6px;
+	font-size: .875rem; color: var(--text-secondary); line-height: 1.4;
+}
+.sidebar a:hover { background: var(--bg-tertiary); color: var(--text); text-decoration: none; }
+.sidebar a.active {
+	background: var(--accent-subtle); color: var(--accent); font-weight: 500;
+}
+
+/* ── Mobile menu ────────────────────────────────────────────────────── */
+.menu-toggle {
+	display: none; background: none; border: none; color: var(--text);
+	font-size: 1.5rem; cursor: pointer; padding: 4px 8px;
+}
+@media (max-width: 768px) {
+	.sidebar {
+		transform: translateX(-100%); transition: transform .2s ease;
+		z-index: 99; width: 280px;
+	}
+	.sidebar.open { transform: translateX(0); }
+	.sidebar-backdrop {
+		position: fixed; inset: 0; z-index: 98;
+		background: rgba(0,0,0,.5); backdrop-filter: blur(2px);
+		display: none;
+	}
+	.sidebar-backdrop.visible { display: block; }
+	.menu-toggle { display: block; margin-right: 8px; }
+	.main { margin-left: 0 !important; padding: 20px 16px 60px !important; }
+	.header { padding: 0 12px; }
+	.header-links { gap: 14px; }
+
+	/* Hero */
+	.hero { padding: 56px 16px 40px; }
+	.hero-ascii { font-size: .65rem; }
+	.hero h1 { font-size: 2rem; }
+	.hero p { font-size: 1rem; margin-bottom: 24px; }
+	.hero-buttons a { padding: 10px 22px; font-size: .9rem; }
+	.install-block { margin-top: 24px; padding: 12px 14px; }
+	.install-block code { font-size: .75rem; word-break: break-all; }
+
+	/* Features */
+	.features { grid-template-columns: 1fr; padding: 24px 16px 40px; gap: 12px; }
+	.feature { padding: 16px; }
+
+	/* Providers */
+	.providers { padding: 24px 16px; }
+	.providers h2 { font-size: 1.25rem; }
+
+	/* Docs grid */
+	.landing-docs { padding: 24px 16px 60px; }
+	.landing-docs h2 { font-size: 1.25rem; }
+	.docs-grid { grid-template-columns: 1fr; }
+
+	/* Content */
+	.content h1 { font-size: 1.5rem; }
+	.content h2 { font-size: 1.25rem; margin: 28px 0 10px; }
+	.content h3 { font-size: 1.1rem; }
+	.content table { font-size: .8rem; }
+	.content th, .content td { padding: 6px 8px; }
+	.content pre:not(.mermaid-code) { padding: 12px; font-size: .8rem; }
+
+	/* Mermaid */
+	.mermaid-diagram { padding: 12px; max-height: 45vh; }
+	.mermaid-code { max-height: 45vh; }
+	.mermaid-toolbar { padding: 6px 8px; }
+	.mermaid-toolbar button { padding: 3px 8px; font-size: .75rem; }
+}
+
+/* ── Main content ───────────────────────────────────────────────────── */
+.main {
+	margin-left: var(--sidebar-w);
+	margin-top: var(--header-h);
+	padding: 32px 48px 80px;
+	max-width: 900px;
+}
+.main-landing {
+	margin-left: 0; max-width: none; padding: 0;
+}
+
+/* ── Typography ─────────────────────────────────────────────────────── */
+.content h1 { font-size: 2rem; font-weight: 700; margin: 0 0 16px; line-height: 1.3; }
+.content h2 {
+	font-size: 1.5rem; font-weight: 600; margin: 40px 0 12px;
+	padding-bottom: 8px; border-bottom: 1px solid var(--border);
+}
+.content h3 { font-size: 1.2rem; font-weight: 600; margin: 28px 0 8px; }
+.content h4 { font-size: 1rem; font-weight: 600; margin: 20px 0 6px; }
+.content p { margin: 0 0 16px; }
+.content ul, .content ol { margin: 0 0 16px; padding-left: 24px; }
+.content li { margin: 4px 0; }
+.content strong { font-weight: 600; }
+.content hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+.content blockquote {
+	border-left: 3px solid var(--accent); padding: 8px 16px;
+	margin: 0 0 16px; background: var(--accent-subtle); border-radius: 0 6px 6px 0;
+}
+.content blockquote p:last-child { margin-bottom: 0; }
+
+/* ── Code ───────────────────────────────────────────────────────────── */
+.content code {
+	font-family: var(--font-mono); font-size: .875em;
+	background: var(--code-bg); padding: 2px 6px; border-radius: 4px;
+	border: 1px solid var(--border);
+}
+.content pre:not(.mermaid-code) {
+	background: var(--code-bg); border: 1px solid var(--border);
+	border-radius: 8px; padding: 16px; margin: 0 0 16px;
+	overflow-x: auto; line-height: 1.5;
+}
+.content pre:not(.mermaid-code) code {
+	background: none; border: none; padding: 0; font-size: .875rem;
+}
+
+/* ── Mermaid ────────────────────────────────────────────────────────── */
+.mermaid-viewer {
+	background: var(--code-bg); border: 1px solid var(--border);
+	border-radius: 8px; margin: 0 0 16px; overflow: hidden;
+}
+.mermaid-toolbar {
+	display: flex; align-items: center; gap: 6px;
+	padding: 8px 12px; border-bottom: 1px solid var(--border);
+	background: var(--bg-tertiary);
+}
+.mermaid-toolbar button {
+	background: var(--bg-secondary); border: 1px solid var(--border);
+	color: var(--text-secondary); border-radius: 4px;
+	padding: 4px 10px; font-size: .8rem; cursor: pointer;
+	font-family: var(--font); line-height: 1;
+}
+.mermaid-toolbar button:hover { color: var(--text); border-color: var(--accent); }
+.mermaid-toolbar button.active { color: var(--accent); border-color: var(--accent); }
+.mermaid-toolbar .zoom-label {
+	font-size: .75rem; color: var(--text-muted); margin-left: auto;
+}
+.mermaid-diagram {
+	padding: 24px; overflow: hidden; max-height: 60vh;
+	position: relative; cursor: grab; user-select: none;
+	touch-action: none; -webkit-user-select: none;
+}
+.mermaid-diagram.dragging { cursor: grabbing; }
+.mermaid-diagram svg { transition: none; transform-origin: 0 0; }
+.mermaid-code {
+	display: none; padding: 16px; margin: 0;
+	background: none; border: none;
+	font-family: var(--font-mono); font-size: .8rem;
+	color: var(--text-secondary); line-height: 1.5;
+	overflow-x: auto; max-height: 60vh;
+}
+.mermaid-code.visible { display: block; }
+
+/* ── Tables ─────────────────────────────────────────────────────────── */
+.table-wrap { overflow-x: auto; margin: 0 0 16px; border: 1px solid var(--border); border-radius: 8px; }
+.content table {
+	width: 100%; border-collapse: collapse; margin: 0;
+	font-size: .875rem;
+}
+.content th, .content td {
+	padding: 8px 12px; border: 1px solid var(--border); text-align: left;
+}
+.content th { background: var(--bg-tertiary); font-weight: 600; }
+.content tr:hover td { background: var(--bg-tertiary); }
+
+/* ── Landing page ───────────────────────────────────────────────────── */
+.hero {
+	text-align: center; padding: 100px 24px 60px;
+	background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg) 100%);
+}
+.hero-ascii {
+	font-family: var(--font-mono); font-size: .875rem;
+	white-space: pre; margin-bottom: 24px; line-height: 1.2;
+	background: linear-gradient(90deg, #38e0ff, #38bdf8, #a78bfa, #a855f7);
+	-webkit-background-clip: text; -webkit-text-fill-color: transparent;
+	background-clip: text;
+}
+.hero h1 { font-size: 3rem; font-weight: 800; margin: 0 0 16px; }
+.hero h1 .accent { color: #38e0ff; }
+.hero p { font-size: 1.25rem; color: var(--text-secondary); max-width: 600px; margin: 0 auto 32px; }
+.hero-buttons { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+.hero-buttons a {
+	padding: 12px 28px; border-radius: 8px; font-weight: 600; font-size: 1rem;
+}
+.btn-primary { background: linear-gradient(135deg, #38e0ff, #a855f7); color: #fff; }
+.btn-primary:hover { background: linear-gradient(135deg, #5eead4, #c084fc); color: #fff; text-decoration: none; }
+.btn-secondary {
+	background: var(--bg-tertiary); color: var(--text); border: 1px solid var(--border);
+}
+.btn-secondary:hover { background: var(--bg-secondary); text-decoration: none; }
+
+.install-block {
+	max-width: 560px; margin: 32px auto 0; text-align: left;
+	background: var(--code-bg); border: 1px solid var(--border);
+	border-radius: 8px; padding: 16px 20px;
+}
+.install-block .label {
+	font-size: .75rem; font-weight: 600; color: var(--text-muted);
+	text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px;
+}
+.install-block code { font-size: .875rem; color: #34d399; }
+.install-block .note { font-size: .8rem; color: var(--text-muted); margin-top: 8px; }
+
+.features {
+	display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+	gap: 20px; padding: 40px 48px 60px; max-width: 1200px; margin: 0 auto;
+}
+.feature {
+	background: var(--bg-secondary); border: 1px solid var(--border);
+	border-radius: 8px; padding: 24px;
+}
+.feature h3 { font-size: 1.1rem; margin: 0 0 8px; }
+.feature p { color: var(--text-secondary); font-size: .9rem; margin: 0; }
+.feature .icon { margin-bottom: 12px; display: block; color: var(--accent); }
+
+.providers {
+	text-align: center; padding: 40px 24px;
+	max-width: 800px; margin: 0 auto;
+}
+.providers h2 { font-size: 1.5rem; margin: 0 0 24px; border: none; padding: 0; }
+.provider-grid {
+	display: flex; flex-wrap: wrap; gap: 12px; justify-content: center;
+}
+.provider-tag {
+	background: var(--bg-secondary); border: 1px solid var(--border);
+	padding: 8px 16px; border-radius: 6px; font-size: .875rem;
+	color: var(--text-secondary); font-weight: 500;
+}
+
+.landing-docs {
+	max-width: 1200px; margin: 0 auto; padding: 40px 48px 80px;
+}
+.landing-docs h2 {
+	font-size: 1.5rem; text-align: center; margin: 0 0 32px;
+	border: none; padding: 0;
+}
+.docs-grid {
+	display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+	gap: 12px;
+}
+.doc-card {
+	background: var(--bg-secondary); border: 1px solid var(--border);
+	border-radius: 8px; padding: 16px 20px; transition: border-color .15s;
+}
+.doc-card:hover { border-color: var(--accent); text-decoration: none; }
+.doc-card h3 { font-size: 1rem; margin: 0 0 4px; color: var(--text); }
+.doc-card p { font-size: .85rem; color: var(--text-secondary); margin: 0; }
+
+.footer {
+	text-align: center; padding: 24px; border-top: 1px solid var(--border);
+	font-size: .8rem; color: var(--text-muted);
+}
+</style>
+</head>
+<body>
+<header class="header">
+	<button class="menu-toggle" aria-label="Menu">&#9776;</button>
+	<a href="index.html" class="header-logo">cast</a>
+	<div class="header-links">
+		<a href="index.html">Home</a>
+		<a href="https://github.com/aa-blinov/cast">GitHub</a>
+	</div>
+</header>
+
+<div class="sidebar-backdrop"></div>
+<nav class="sidebar">
+	<div class="sidebar-section">
+		<div class="sidebar-section-title">Documentation</div>
+			<a href="getting-started.html">Getting Started</a>
+			<a href="cli-reference.html">CLI Reference</a>
+			<a href="interactive-commands.html">Interactive Commands</a>
+			<a href="tools.html">Tools</a>
+			<a href="personas.html">Personas</a>
+			<a href="skills.html">Skills</a>
+			<a href="rules.html">Rules</a>
+			<a href="mcp-servers.html">MCP Servers</a>
+			<a href="context-files.html">Context Files</a>
+			<a href="sessions.html">Sessions</a>
+			<a href="plan-mode.html" class="active">Plan Mode</a>
+			<a href="reasoning.html">Reasoning</a>
+			<a href="configuration.html">Configuration</a>
+			<a href="themes.html">Themes</a>
+			<a href="non-interactive-mode.html">Non-Interactive Mode</a>
+			<a href="architecture.html">Architecture</a>
+	</div>
+</nav>
+
+<main class="main">
+	<article class="content">
+		<h1>Plan Mode</h1>
+<p>Plan mode restricts the agent to exploration and planning — it can read files and produce a structured plan, but cannot execute code, write files, or run arbitrary shell commands.</p>
+<h2>Workflow</h2>
+<pre class="mermaid" data-raw="LS0tCmNvbmZpZzoKICBsYXlvdXQ6IGVsawogIGVsazoKICAgIG5vZGVQbGFjZW1lbnRTdHJhdGVneTogTkVUV09SS19TSU1QTEVYCi0tLQpmbG93Y2hhcnQgTFIKICBBWyIvcGxhbiBvciBwbGFuX2VudGVyIl0gLS0+IEJbRXhwbG9yZSBjb2RlYmFzZV0KICBCIC0tPiBDW1dyaXRlIHBsYW5dCiAgQyAtLT4gRFsicGxhbl9kb25lIl0KICBEIC0tPiBFe0FwcHJvdmFsIGRpYWxvZ30KICBFIC0tPnxJbXBsZW1lbnQgbm93fCBGW0ltcGxlbWVudCBwbGFuXQogIEUgLS0+fENsZWFyIGNvbnRleHQgKyBpbXBsZW1lbnR8IEYKICBFIC0tPnwiSSdsbCBzdGFydCBteXNlbGYifCBHWyIvYnVpbGQg4oaSIHlvdXIgbWVzc2FnZSJdCiAgRSAtLT58UmVmaW5lfCBCCiAgRyAtLT4gRgogIEYgLS0+IEhbInBsYW5fY2hlY2sgc3RlcHMiXQ==">---
+config:
+  layout: elk
+  elk:
+    nodePlacementStrategy: NETWORK_SIMPLEX
+---
+flowchart LR
+  A["/plan or plan_enter"] --> B[Explore codebase]
+  B --> C[Write plan]
+  C --> D["plan_done"]
+  D --> E{Approval dialog}
+  E -->|Implement now| F[Implement plan]
+  E -->|Clear context + implement| F
+  E -->|"I'll start myself"| G["/build → your message"]
+  E -->|Refine| B
+  G --> F
+  F --> H["plan_check steps"]</pre><ol>
+<li><strong>Enter plan mode</strong> — type <code>/plan</code> or the agent suggests it via <code>plan_enter</code></li>
+<li><strong>Explore</strong> — the agent reads files, runs read-only shell commands, and analyzes the codebase</li>
+<li><strong>Write plan</strong> — the agent produces a structured markdown plan with a checklist</li>
+<li><strong>Review</strong> — the agent signals completion with <code>plan_done</code>; the full plan file path is shown (cmd-click to open it in your editor)</li>
+<li><strong>Approve</strong> — when the turn ends, an approval dialog opens: implement now, clear context and implement (the plan survives in the system prompt, the exploration chatter doesn&#39;t), approve and start yourself, or refine — the refine option asks what should change and sends the feedback straight back to planning. <code>/build</code> remains as the manual gesture</li>
+<li><strong>Implement</strong> — the agent works through the plan, checking off steps with <code>plan_check</code></li>
+</ol>
+<p>Declining the agent&#39;s own <code>plan_enter</code> suggestion is safe: the session auto-continues in build mode.</p>
+<h2>What&#39;s Allowed in Plan Mode</h2>
+<h3>Read-Only Bash</h3>
+<p>Only inspection commands are allowed. The allowlist includes:</p>
+<p><code>ls</code>, <code>cat</code>, <code>head</code>, <code>tail</code>, <code>wc</code>, <code>grep</code>, <code>rg</code>, <code>fd</code>, <code>find</code>, <code>file</code>, <code>stat</code>, <code>du</code>, <code>df</code>, <code>tree</code>, <code>diff</code>, <code>sort</code>, <code>uniq</code>, <code>cut</code>, <code>nl</code>, <code>realpath</code>, <code>dirname</code>, <code>basename</code>, <code>which</code>, <code>pwd</code>, <code>echo</code>, <code>printf</code>, <code>date</code>, <code>column</code>, <code>strings</code>, <code>jq</code>, <code>yq</code></p>
+<p>Git read-only subcommands: <code>log</code>, <code>show</code>, <code>diff</code>, <code>status</code>, <code>blame</code>, <code>rev-parse</code>, <code>ls-files</code>, <code>ls-tree</code>, <code>ls-remote</code>, <code>shortlog</code>, <code>describe</code>, <code>grep</code>, <code>reflog</code>, <code>cat-file</code>, <code>count-objects</code></p>
+<h3>Blocked</h3>
+<ul>
+<li>Output redirection (<code>&gt;</code>)</li>
+<li>Command and process substitution (<code>$()</code>, backticks, <code>&lt;()</code>)</li>
+<li>Any binary not on the allowlist (<code>env</code> included — it launches arbitrary binaries; same for test runners and package managers)</li>
+<li>Argument-level writers on allowlisted binaries: <code>find -delete</code>/<code>-exec</code>, <code>fd -x</code>, <code>sort -o</code>, <code>tree -o</code>, <code>--output</code>, <code>uniq in out</code></li>
+<li><code>write</code>, <code>edit</code> tools</li>
+</ul>
+<p><code>web_search</code>/<code>web_fetch</code> follow the <code>/web</code> toggle in both modes — plan mode doesn&#39;t change them.</p>
+<h3>MCP Tools: A Deliberate Exception</h3>
+<p>MCP tools stay <strong>fully enabled</strong> in plan mode — they are not hard-gated the way bash/write/edit are. Many MCP servers are read-only research tools (docs lookup, code search) and exactly what planning needs, and cast can&#39;t know which of an arbitrary server&#39;s tools mutate state. The model is instructed to use MCP for inspection and retrieval only, and you get a warning on plan-mode entry when MCP tools are connected — but if your MCP server can write to a database or trigger a deploy, plan mode does not physically prevent that. Keep that in mind when planning with mutating MCP servers connected.</p>
+<h2>Plan Tools</h2>
+<div class="table-wrap"><table><thead><tr><th>Tool</th><th>Mode</th><th>Description</th></tr></thead><tbody><tr><td><code>plan_write</code></td><td>Plan</td><td>Write or replace a named plan file</td></tr><tr><td><code>plan_edit</code></td><td>Plan</td><td>Edit a section by heading</td></tr><tr><td><code>plan_read</code></td><td>Both</td><td>Read plan content and headings</td></tr><tr><td><code>plan_done</code></td><td>Plan</td><td>Signal plan is ready for review</td></tr><tr><td><code>plan_discard</code></td><td>Plan</td><td>Delete a plan</td></tr><tr><td><code>plan_enter</code></td><td>Build</td><td>Suggest switching to plan mode</td></tr><tr><td><code>plan_check</code></td><td>Build</td><td>Mark a checklist item as done</td></tr></tbody></table></div><h2>Plan Files</h2>
+<p>Plans are stored as markdown files:</p>
+<pre><code>~/.cast/plans/&lt;session-id&gt;/
+  auth-refactor.md
+  database-migration.md
+</code></pre>
+<p>One directory per session. Multiple named plans can exist in a session.</p>
+<h3>Plan Format</h3>
+<p>Plans use markdown with sections. The recommended structure:</p>
+<pre><code class="language-markdown">## Context
+
+Why this work is needed.
+
+## Steps
+
+- [ ] Step 1: Do the first thing
+- [ ] Step 2: Do the second thing
+- [ ] Step 3: Verify
+
+## Verification
+
+How to confirm the changes work.
+
+## Assumptions
+
+Any assumptions made during planning.
+</code></pre>
+<p>The checklist (<code>- [ ]</code>) format is important — <code>plan_check</code> marks items as <code>- [x]</code> and tracks progress.</p>
+<h2>Commands</h2>
+<div class="table-wrap"><table><thead><tr><th>Command</th><th>Description</th></tr></thead><tbody><tr><td><code>/plan</code></td><td>Enter plan mode</td></tr><tr><td><code>/build</code></td><td>Exit plan mode, restore full toolset</td></tr><tr><td><code>/plan-model [name|off]</code></td><td>Model used while plan mode is active</td></tr></tbody></table></div><p>Mode switching is rejected while a run is active — modes flip only between runs.</p>
+<p><code>/build</code> with an existing plan is the approval gesture — the plan is injected into the build-mode system prompt so the agent&#39;s next message starts implementation guided by it.</p>
+<h2>What the Model Sees</h2>
+<h3>Plan Mode</h3>
+<p>When plan mode is active, a restriction block is prepended to the system prompt:</p>
+<pre><code>══════════════════════════════════════════════
+PLAN MODE ACTIVE — no changes allowed
+══════════════════════════════════════════════
+You are in plan mode: read, search, and think — change nothing.
+
+Restrictions:
+- write and edit are unavailable
+- bash is INSPECTION-ONLY (allowlisted read-only binaries)
+- You cannot switch modes yourself
+</code></pre>
+<p>The model is instructed to: understand the task → explore the codebase → write a plan → call <code>plan_done</code>.</p>
+<h3>Build Mode</h3>
+<p>When you type <code>/build</code> with an approved plan, the plan is injected into the system prompt:</p>
+<pre><code>An approved plan exists for this task. It was written in plan mode and reviewed by the user:
+
+&lt;plan&gt;
+[plan content]
+&lt;/plan&gt;
+
+Follow the plan step by step. Right after completing each step, mark it done with plan_check.
+</code></pre>
+<p>The plan stays in the system prompt across turns and survives compaction — it&#39;s re-read from disk on each run.</p>
+<h3>Plan Fully Executed</h3>
+<p>Once every checklist item is checked, the plan is replaced with a brief reference:</p>
+<pre><code>The approved plan &quot;name&quot; for this task has been fully executed — every checklist
+item is checked. It no longer steers the work; treat new requests on their own terms.
+</code></pre>
+<h2>Per-Phase Model</h2>
+<p><code>/plan-model</code> sets a model used only while plan mode is active (stored as <code>planModel</code> in settings, like <code>subagentModel</code>). The typical split: an expensive high-quality model for planning, a cheap one for building, a fast one for sub-agents. The status bar, the system prompt <code>Model:</code> line, and the actual requests all report the model in use; <code>/plan-model off</code> returns plan mode to the main model.</p>
+<h2>Plan Mode Persistence</h2>
+<p>The plan mode state is per-session. If you quit mid-planning and resume the session, the mode is restored. A fresh session always starts in build mode.</p>
+
+	</article>
+</main>
+
+<script>
+// Mobile sidebar toggle with backdrop
+(function() {
+	const sidebar = document.querySelector('.sidebar');
+	const backdrop = document.querySelector('.sidebar-backdrop');
+	const toggle = document.querySelector('.menu-toggle');
+	if (!toggle) return;
+	function close() { sidebar.classList.remove('open'); backdrop.classList.remove('visible'); }
+	function open() { sidebar.classList.add('open'); backdrop.classList.add('visible'); }
+	toggle.addEventListener('click', () => {
+		if (sidebar.classList.contains('open')) close(); else open();
+	});
+	backdrop.addEventListener('click', close);
+	document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+})();
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+// ── Mermaid viewer with zoom + diagram/code toggle ──
+document.addEventListener('DOMContentLoaded', () => {
+	const blocks = document.querySelectorAll('pre.mermaid');
+	if (!blocks.length) return;
+
+	mermaid.initialize({ startOnLoad: false, theme: 'dark' });
+
+	blocks.forEach((pre, i) => {
+		const raw = atob(pre.dataset.raw || '') || pre.textContent;
+
+		// Build viewer shell
+		const viewer = document.createElement('div');
+		viewer.className = 'mermaid-viewer';
+
+		const toolbar = document.createElement('div');
+		toolbar.className = 'mermaid-toolbar';
+		toolbar.innerHTML =
+			'<button class="active" data-view="diagram">Diagram</button>' +
+			'<button data-view="code">Code</button>' +
+			'<span class="zoom-label">Zoom:</span>' +
+			'<button data-zoom="out">−</button>' +
+			'<button data-zoom="reset">100%</button>' +
+			'<button data-zoom="in">+</button>';
+
+		const diagram = document.createElement('div');
+		diagram.className = 'mermaid-diagram';
+
+		const code = document.createElement('pre');
+		code.className = 'mermaid-code';
+		code.textContent = raw;
+
+		viewer.append(toolbar, diagram, code);
+		pre.replaceWith(viewer);
+
+		// Render mermaid
+		const id = 'mermaid-' + i;
+		mermaid.render(id, raw).then(({ svg }) => {
+			diagram.innerHTML = svg;
+		}).catch(err => {
+			diagram.innerHTML = '<pre style="color:#fb7185">' + err.message + '</pre>';
+		});
+
+		// Zoom + pan state
+		let zoom = 1, panX = 0, panY = 0, dragging = false, startX, startY;
+		const zoomLabel = toolbar.querySelector('[data-zoom="reset"]');
+		const applyTransform = () => {
+			const svg = diagram.querySelector('svg');
+			if (svg) svg.style.transform = 'translate(' + panX + 'px,' + panY + 'px) scale(' + zoom + ')';
+			zoomLabel.textContent = Math.round(zoom * 100) + '%';
+		};
+
+		// Drag to pan (mouse + touch)
+		const getPos = e => e.touches ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : { x: e.clientX, y: e.clientY };
+		const onStart = e => {
+			const p = getPos(e); dragging = true;
+			startX = p.x - panX; startY = p.y - panY;
+			diagram.classList.add('dragging');
+		};
+		const onMove = e => {
+			if (!dragging) return;
+			const p = getPos(e);
+			panX = p.x - startX; panY = p.y - startY;
+			applyTransform();
+		};
+		const onEnd = () => { dragging = false; diagram.classList.remove('dragging'); };
+	
+diagram.addEventListener('mousedown', e => { onStart(e); e.preventDefault(); });
+		document.addEventListener('mousemove', onMove);
+		document.addEventListener('mouseup', onEnd);
+		diagram.addEventListener('touchstart', e => { if (e.touches.length === 1) onStart(e); }, { passive: true });
+		document.addEventListener('touchmove', e => { if (e.touches.length === 1 && dragging) onMove(e); }, { passive: true });
+		document.addEventListener('touchend', onEnd);
+
+		// Pinch to zoom (touch)
+		let lastPinchDist = 0;
+		diagram.addEventListener('touchstart', e => {
+			if (e.touches.length === 2) {
+				const dx = e.touches[0].clientX - e.touches[1].clientX;
+				const dy = e.touches[0].clientY - e.touches[1].clientY;
+				lastPinchDist = Math.hypot(dx, dy);
+			}
+		}, { passive: true });
+		diagram.addEventListener('touchmove', e => {
+			if (e.touches.length === 2) {
+				e.preventDefault();
+				const dx = e.touches[0].clientX - e.touches[1].clientX;
+				const dy = e.touches[0].clientY - e.touches[1].clientY;
+				const dist = Math.hypot(dx, dy);
+				if (lastPinchDist > 0) {
+					zoom = Math.min(3, Math.max(0.25, zoom * (dist / lastPinchDist)));
+					applyTransform();
+				}
+				lastPinchDist = dist;
+			}
+		});
+		diagram.addEventListener('touchend', e => { if (e.touches.length < 2) lastPinchDist = 0; });
+
+		// Zoom + view toggle buttons
+		toolbar.addEventListener('click', e => {
+			const btn = e.target.closest('button');
+			if (!btn) return;
+
+			if (btn.dataset.view) {
+				toolbar.querySelectorAll('[data-view]').forEach(b => b.classList.remove('active'));
+				btn.classList.add('active');
+				diagram.style.display = btn.dataset.view === 'diagram' ? '' : 'none';
+				code.classList.toggle('visible', btn.dataset.view === 'code');
+				return;
+			}
+
+			if (btn.dataset.zoom === 'in') zoom = Math.min(3, zoom + 0.25);
+			else if (btn.dataset.zoom === 'out') zoom = Math.max(0.25, zoom - 0.25);
+			else if (btn.dataset.zoom === 'reset') { zoom = 1; panX = 0; panY = 0; }
+			applyTransform();
+		});
+	});
+});
+</script>
+</body>
+</html>
