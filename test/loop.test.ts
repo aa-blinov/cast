@@ -1012,6 +1012,51 @@ describe("runAgentLoop — plan mode", () => {
 		}
 	});
 
+	it("readOnlyBash restricts a subagent's bash without the plan-mode block", async () => {
+		const events: AgentEvent[] = [];
+		const systemPrompts: string[] = [];
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async (_c: unknown, _m: string, messages: unknown) => {
+				systemPrompts.push(contentToText((messages as Message[])[0]!.content));
+				return {
+					content: "",
+					thinking: "",
+					finishReason: "stop",
+					toolCalls: [
+						{ id: "t1", name: "bash", arguments: JSON.stringify({ command: "touch /tmp/evil" }) },
+						{ id: "t2", name: "bash", arguments: JSON.stringify({ command: "echo CHILD_OK" }) },
+					],
+				};
+			})
+			.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
+
+		await runAgentLoop([{ role: "user", content: "explore" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "CHILD_SYS",
+			planState: { enabled: false, plansDir: "/tmp/never-existing-plans-dir" },
+			readOnlyBash: true,
+			onEvent: (e) => events.push(e),
+		});
+
+		// The child is told about the restriction, without the authoring block.
+		expect(systemPrompts[0]).toContain("INSPECTION-ONLY");
+		expect(systemPrompts[0]).not.toContain("PLAN MODE ACTIVE");
+
+		const ends = events.filter((e) => e.type === "tool_end");
+		const mutating = ends.find((e) => e.type === "tool_end" && e.id === "t1");
+		const readonly = ends.find((e) => e.type === "tool_end" && e.id === "t2");
+		if (mutating?.type === "tool_end") {
+			expect(mutating.result.isError).toBe(true);
+			expect(mutating.result.content).toContain("read-only");
+		}
+		if (readonly?.type === "tool_end") {
+			expect(readonly.result.isError).toBeFalsy();
+			expect(readonly.result.content).toContain("CHILD_OK");
+		}
+	});
+
 	it("refuses to execute a disabled tool the model fabricates a call to", async () => {
 		const events: AgentEvent[] = [];
 		vi.mocked(streamAndCollect)

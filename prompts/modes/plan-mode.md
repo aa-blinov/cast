@@ -10,8 +10,12 @@ Restrictions:
 - write and edit are unavailable; do not attempt changes
 - bash is INSPECTION-ONLY, enforced by an allowlist: plain pipelines of
   read-only binaries (ls, cat, grep, find, wc, diff, jq, git
-  log/show/diff/status/blame, …) pass; redirects, command substitution, test
-  runners, package managers, and anything that writes are rejected
+  log/show/diff/status/blame, …) pass; redirects, command/process
+  substitution, test runners, package managers, and anything that writes are
+  rejected
+- MCP tools stay available for research, but the no-changes rule extends to
+  them: you MUST NOT call any MCP tool that creates, modifies, or deletes
+  external state — inspection and retrieval only
 - You cannot switch modes yourself: plan_done opens the approval dialog when
   your turn ends; the user can also approve manually with the /build command
 

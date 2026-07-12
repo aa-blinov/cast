@@ -208,19 +208,16 @@ export async function execTask(
 			mcpToolIndex: deps.mcpToolIndex,
 			// Subagents inherit the parent's restrictions (write/edit stay blocked
 			// in plan mode) but never get the plan tools themselves — they explore
-			// and report back; the parent owns the plan file. In plan mode bash is
-			// blocked entirely for subagents (the read-only allowlist gate is a
-			// main-agent affordance; explorers have read/grep/find).
-			disabledTools: new Set([
-				...(deps.disabledTools ?? []),
-				...PLAN_TOOL_NAMES,
-				...(deps.planState?.enabled ? ["bash"] : []),
-			]),
+			// and report back; the parent owns the plan file.
+			disabledTools: new Set([...(deps.disabledTools ?? []), ...PLAN_TOOL_NAMES]),
 			// Handoff, not authority: the child sees the plan (mirror block in
 			// build mode, or the current draft during planning) but always runs
 			// with enabled=false — the plan-mode restriction block references
-			// authoring tools the child doesn't have.
+			// authoring tools the child doesn't have. The parent's inspection-only
+			// bash gate is inherited explicitly instead: explorers can run git
+			// log/grep pipelines but still can't write.
 			planState: deps.planState ? { ...deps.planState, enabled: false } : undefined,
+			readOnlyBash: deps.planState?.enabled === true,
 			// ponytail: no personas/currentPersona/subagentModel — child can't delegate further
 		});
 	} finally {

@@ -53,6 +53,10 @@ Git read-only subcommands: `log`, `show`, `diff`, `status`, `blame`, `rev-parse`
 
 `web_search`/`web_fetch` follow the `/web` toggle in both modes — plan mode doesn't change them.
 
+### MCP Tools: A Deliberate Exception
+
+MCP tools stay **fully enabled** in plan mode — they are not hard-gated the way bash/write/edit are. Many MCP servers are read-only research tools (docs lookup, code search) and exactly what planning needs, and cast can't know which of an arbitrary server's tools mutate state. The model is instructed to use MCP for inspection and retrieval only, and you get a warning on plan-mode entry when MCP tools are connected — but if your MCP server can write to a database or trigger a deploy, plan mode does not physically prevent that. Keep that in mind when planning with mutating MCP servers connected.
+
 ## Plan Tools
 
 | Tool | Mode | Description |
