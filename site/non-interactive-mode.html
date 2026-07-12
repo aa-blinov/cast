@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Non-Interactive Mode — cast</title>
+<meta name="description" content="Non-Interactive Mode documentation for cast, a terminal coding agent.">
+<style>
+:root {
+	/* cast palette — cyan→violet gradient */
+	--bg: #0a0e14;
+	--bg-secondary: #0f1520;
+	--bg-tertiary: #151c28;
+	--border: #1e2a3a;
+	--text: #e2e8f0;
+	--text-secondary: #64748b;
+	--text-muted: #475569;
+	--accent: #38e0ff;
+	--accent-hover: #5eead4;
+	--accent-subtle: rgba(56,224,255,.1);
+	--green: #34d399;
+	--green-subtle: rgba(52,211,153,.1);
+	--orange: #fbbf24;
+	--red: #fb7185;
+	--code-bg: #0f1520;
+	--sidebar-w: 280px;
+	--header-h: 64px;
+	--font: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+	--font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 16px; scroll-behavior: smooth; }
+body {
+	font-family: var(--font);
+	background: var(--bg);
+	color: var(--text);
+	line-height: 1.6;
+	-webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--accent-hover); text-decoration: underline; }
+
+/* ── Header ─────────────────────────────────────────────────────────── */
+.header {
+	position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+	height: var(--header-h);
+	background: var(--bg-secondary);
+	border-bottom: 1px solid var(--border);
+	display: flex; align-items: center; padding: 0 24px;
+}
+.header-logo {
+	font-size: 1.25rem; font-weight: 700; color: var(--text);
+	display: flex; align-items: center; gap: 10px;
+}
+.header-links { margin-left: auto; display: flex; gap: 20px; align-items: center; }
+.header-links a { color: var(--text-secondary); font-size: .875rem; font-weight: 500; }
+.header-links a:hover { color: var(--text); text-decoration: none; }
+
+/* ── Sidebar ────────────────────────────────────────────────────────── */
+.sidebar {
+	position: fixed; top: var(--header-h); left: 0; bottom: 0;
+	width: var(--sidebar-w); background: var(--bg-secondary);
+	border-right: 1px solid var(--border);
+	overflow-y: auto; padding: 16px 0;
+}
+.sidebar-section { padding: 0 12px; margin-bottom: 8px; }
+.sidebar-section-title {
+	font-size: .75rem; font-weight: 600; text-transform: uppercase;
+	letter-spacing: .05em; color: var(--text-muted);
+	padding: 8px 12px 4px;
+}
+.sidebar a {
+	display: block; padding: 6px 12px; border-radius: 6px;
+	font-size: .875rem; color: var(--text-secondary); line-height: 1.4;
+}
+.sidebar a:hover { background: var(--bg-tertiary); color: var(--text); text-decoration: none; }
+.sidebar a.active {
+	background: var(--accent-subtle); color: var(--accent); font-weight: 500;
+}
+
+/* ── Mobile menu ────────────────────────────────────────────────────── */
+.menu-toggle {
+	display: none; background: none; border: none; color: var(--text);
+	font-size: 1.5rem; cursor: pointer; padding: 4px 8px;
+}
+@media (max-width: 768px) {
+	.sidebar {
+		transform: translateX(-100%); transition: transform .2s ease;
+		z-index: 99; width: 280px;
+	}
+	.sidebar.open { transform: translateX(0); }
+	.sidebar-backdrop {
+		position: fixed; inset: 0; z-index: 98;
+		background: rgba(0,0,0,.5); backdrop-filter: blur(2px);
+		display: none;
+	}
+	.sidebar-backdrop.visible { display: block; }
+	.menu-toggle { display: block; margin-right: 8px; }
+	.main { margin-left: 0 !important; padding: 20px 16px 60px !important; }
+	.header { padding: 0 12px; }
+	.header-links { gap: 14px; }
+
+	/* Hero */
+	.hero { padding: 56px 16px 40px; }
+	.hero-ascii { font-size: .65rem; }
+	.hero h1 { font-size: 2rem; }
+	.hero p { font-size: 1rem; margin-bottom: 24px; }
+	.hero-buttons a { padding: 10px 22px; font-size: .9rem; }
+	.install-block { margin-top: 24px; padding: 12px 14px; }
+	.install-block code { font-size: .75rem; word-break: break-all; }
+
+	/* Features */
+	.features { grid-template-columns: 1fr; padding: 24px 16px 40px; gap: 12px; }
+	.feature { padding: 16px; }
+
+	/* Providers */
+	.providers { padding: 24px 16px; }
+	.providers h2 { font-size: 1.25rem; }
+
+	/* Docs grid */
+	.landing-docs { padding: 24px 16px 60px; }
+	.landing-docs h2 { font-size: 1.25rem; }
+	.docs-grid { grid-template-columns: 1fr; }
+
+	/* Content */
+	.content h1 { font-size: 1.5rem; }
+	.content h2 { font-size: 1.25rem; margin: 28px 0 10px; }
+	.content h3 { font-size: 1.1rem; }
+	.content table { font-size: .8rem; }
+	.content th, .content td { padding: 6px 8px; }
+	.content pre:not(.mermaid-code) { padding: 12px; font-size: .8rem; }
+
+	/* Mermaid */
+	.mermaid-diagram { padding: 12px; max-height: 45vh; }
+	.mermaid-code { max-height: 45vh; }
+	.mermaid-toolbar { padding: 6px 8px; }
+	.mermaid-toolbar button { padding: 3px 8px; font-size: .75rem; }
+}
+
+/* ── Main content ───────────────────────────────────────────────────── */
+.main {
+	margin-left: var(--sidebar-w);
+	margin-top: var(--header-h);
+	padding: 32px 48px 80px;
+	max-width: 900px;
+}
+.main-landing {
+	margin-left: 0; max-width: none; padding: 0;
+}
+
+/* ── Typography ─────────────────────────────────────────────────────── */
+.content h1 { font-size: 2rem; font-weight: 700; margin: 0 0 16px; line-height: 1.3; }
+.content h2 {
+	font-size: 1.5rem; font-weight: 600; margin: 40px 0 12px;
+	padding-bottom: 8px; border-bottom: 1px solid var(--border);
+}
+.content h3 { font-size: 1.2rem; font-weight: 600; margin: 28px 0 8px; }
+.content h4 { font-size: 1rem; font-weight: 600; margin: 20px 0 6px; }
+.content p { margin: 0 0 16px; }
+.content ul, .content ol { margin: 0 0 16px; padding-left: 24px; }
+.content li { margin: 4px 0; }
+.content strong { font-weight: 600; }
+.content hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+.content blockquote {
+	border-left: 3px solid var(--accent); padding: 8px 16px;
+	margin: 0 0 16px; background: var(--accent-subtle); border-radius: 0 6px 6px 0;
+}
+.content blockquote p:last-child { margin-bottom: 0; }
+
+/* ── Code ───────────────────────────────────────────────────────────── */
+.content code {
+	font-family: var(--font-mono); font-size: .875em;
+	background: var(--code-bg); padding: 2px 6px; border-radius: 4px;
+	border: 1px solid var(--border);
+}
+.content pre:not(.mermaid-code) {
+	background: var(--code-bg); border: 1px solid var(--border);
+	border-radius: 8px; padding: 16px; margin: 0 0 16px;
+	overflow-x: auto; line-height: 1.5;
+}
+.content pre:not(.mermaid-code) code {
+	background: none; border: none; padding: 0; font-size: .875rem;
+}
+
+/* ── Mermaid ────────────────────────────────────────────────────────── */
+.mermaid-viewer {
+	background: var(--code-bg); border: 1px solid var(--border);
+	border-radius: 8px; margin: 0 0 16px; overflow: hidden;
+}
+.mermaid-toolbar {
+	display: flex; align-items: center; gap: 6px;
+	padding: 8px 12px; border-bottom: 1px solid var(--border);
+	background: var(--bg-tertiary);
+}
+.mermaid-toolbar button {
+	background: var(--bg-secondary); border: 1px solid var(--border);
+	color: var(--text-secondary); border-radius: 4px;
+	padding: 4px 10px; font-size: .8rem; cursor: pointer;
+	font-family: var(--font); line-height: 1;
+}
+.mermaid-toolbar button:hover { color: var(--text); border-color: var(--accent); }
+.mermaid-toolbar button.active { color: var(--accent); border-color: var(--accent); }
+.mermaid-toolbar .zoom-label {
+	font-size: .75rem; color: var(--text-muted); margin-left: auto;
+}
+.mermaid-diagram {
+	padding: 24px; overflow: hidden; max-height: 60vh;
+	position: relative; cursor: grab; user-select: none;
+	touch-action: none; -webkit-user-select: none;
+}
+.mermaid-diagram.dragging { cursor: grabbing; }
+.mermaid-diagram svg { transition: none; transform-origin: 0 0; }
+.mermaid-code {
+	display: none; padding: 16px; margin: 0;
+	background: none; border: none;
+	font-family: var(--font-mono); font-size: .8rem;
+	color: var(--text-secondary); line-height: 1.5;
+	overflow-x: auto; max-height: 60vh;
+}
+.mermaid-code.visible { display: block; }
+
+/* ── Tables ─────────────────────────────────────────────────────────── */
+.table-wrap { overflow-x: auto; margin: 0 0 16px; border: 1px solid var(--border); border-radius: 8px; }
+.content table {
+	width: 100%; border-collapse: collapse; margin: 0;
+	font-size: .875rem;
+}
+.content th, .content td {
+	padding: 8px 12px; border: 1px solid var(--border); text-align: left;
+}
+.content th { background: var(--bg-tertiary); font-weight: 600; }
+.content tr:hover td { background: var(--bg-tertiary); }
+
+/* ── Landing page ───────────────────────────────────────────────────── */
+.hero {
+	text-align: center; padding: 100px 24px 60px;
+	background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg) 100%);
+}
+.hero-ascii {
+	font-family: var(--font-mono); font-size: .875rem;
+	white-space: pre; margin-bottom: 24px; line-height: 1.2;
+	background: linear-gradient(90deg, #38e0ff, #38bdf8, #a78bfa, #a855f7);
+	-webkit-background-clip: text; -webkit-text-fill-color: transparent;
+	background-clip: text;
+}
+.hero h1 { font-size: 3rem; font-weight: 800; margin: 0 0 16px; }
+.hero h1 .accent { color: #38e0ff; }
+.hero p { font-size: 1.25rem; color: var(--text-secondary); max-width: 600px; margin: 0 auto 32px; }
+.hero-buttons { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+.hero-buttons a {
+	padding: 12px 28px; border-radius: 8px; font-weight: 600; font-size: 1rem;
+}
+.btn-primary { background: linear-gradient(135deg, #38e0ff, #a855f7); color: #fff; }
+.btn-primary:hover { background: linear-gradient(135deg, #5eead4, #c084fc); color: #fff; text-decoration: none; }
+.btn-secondary {
+	background: var(--bg-tertiary); color: var(--text); border: 1px solid var(--border);
+}
+.btn-secondary:hover { background: var(--bg-secondary); text-decoration: none; }
+
+.install-block {
+	max-width: 560px; margin: 32px auto 0; text-align: left;
+	background: var(--code-bg); border: 1px solid var(--border);
+	border-radius: 8px; padding: 16px 20px;
+}
+.install-block .label {
+	font-size: .75rem; font-weight: 600; color: var(--text-muted);
+	text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px;
+}
+.install-block code { font-size: .875rem; color: #34d399; }
+.install-block .note { font-size: .8rem; color: var(--text-muted); margin-top: 8px; }
+
+.features {
+	display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+	gap: 20px; padding: 40px 48px 60px; max-width: 1200px; margin: 0 auto;
+}
+.feature {
+	background: var(--bg-secondary); border: 1px solid var(--border);
+	border-radius: 8px; padding: 24px;
+}
+.feature h3 { font-size: 1.1rem; margin: 0 0 8px; }
+.feature p { color: var(--text-secondary); font-size: .9rem; margin: 0; }
+.feature .icon { margin-bottom: 12px; display: block; color: var(--accent); }
+
+.providers {
+	text-align: center; padding: 40px 24px;
+	max-width: 800px; margin: 0 auto;
+}
+.providers h2 { font-size: 1.5rem; margin: 0 0 24px; border: none; padding: 0; }
+.provider-grid {
+	display: flex; flex-wrap: wrap; gap: 12px; justify-content: center;
+}
+.provider-tag {
+	background: var(--bg-secondary); border: 1px solid var(--border);
+	padding: 8px 16px; border-radius: 6px; font-size: .875rem;
+	color: var(--text-secondary); font-weight: 500;
+}
+
+.landing-docs {
+	max-width: 1200px; margin: 0 auto; padding: 40px 48px 80px;
+}
+.landing-docs h2 {
+	font-size: 1.5rem; text-align: center; margin: 0 0 32px;
+	border: none; padding: 0;
+}
+.docs-grid {
+	display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+	gap: 12px;
+}
+.doc-card {
+	background: var(--bg-secondary); border: 1px solid var(--border);
+	border-radius: 8px; padding: 16px 20px; transition: border-color .15s;
+}
+.doc-card:hover { border-color: var(--accent); text-decoration: none; }
+.doc-card h3 { font-size: 1rem; margin: 0 0 4px; color: var(--text); }
+.doc-card p { font-size: .85rem; color: var(--text-secondary); margin: 0; }
+
+.footer {
+	text-align: center; padding: 24px; border-top: 1px solid var(--border);
+	font-size: .8rem; color: var(--text-muted);
+}
+</style>
+</head>
+<body>
+<header class="header">
+	<button class="menu-toggle" aria-label="Menu">&#9776;</button>
+	<a href="index.html" class="header-logo">cast</a>
+	<div class="header-links">
+		<a href="index.html">Home</a>
+		<a href="https://github.com/aa-blinov/cast">GitHub</a>
+	</div>
+</header>
+
+<div class="sidebar-backdrop"></div>
+<nav class="sidebar">
+	<div class="sidebar-section">
+		<div class="sidebar-section-title">Documentation</div>
+			<a href="getting-started.html">Getting Started</a>
+			<a href="cli-reference.html">CLI Reference</a>
+			<a href="interactive-commands.html">Interactive Commands</a>
+			<a href="tools.html">Tools</a>
+			<a href="personas.html">Personas</a>
+			<a href="skills.html">Skills</a>
+			<a href="rules.html">Rules</a>
+			<a href="mcp-servers.html">MCP Servers</a>
+			<a href="context-files.html">Context Files</a>
+			<a href="sessions.html">Sessions</a>
+			<a href="plan-mode.html">Plan Mode</a>
+			<a href="reasoning.html">Reasoning</a>
+			<a href="configuration.html">Configuration</a>
+			<a href="themes.html">Themes</a>
+			<a href="non-interactive-mode.html" class="active">Non-Interactive Mode</a>
+			<a href="architecture.html">Architecture</a>
+	</div>
+</nav>
+
+<main class="main">
+	<article class="content">
+		<h1>Non-Interactive Mode</h1>
+<p><code>cast run</code> sends a single prompt, streams the response to stdout, and exits. Designed for CI/CD, scripting, and piping.</p>
+<h2>Usage</h2>
+<pre><code class="language-bash">cast run &quot;what changed in the last commit&quot;
+cast run --format json &quot;list all TODO comments&quot;
+cast run -c &quot;continue the refactoring&quot;
+cast run -m gpt-4o -r medium &quot;explain the session module&quot;
+</code></pre>
+<h2>Output Formats</h2>
+<h3>Default</h3>
+<p>Human-readable output streamed to stdout:</p>
+<ul>
+<li>Assistant text → stdout</li>
+<li>Tool names → stderr (<code>  bash...</code>)</li>
+<li>Tool errors → stderr (<code>  bash failed: ...</code>)</li>
+<li>Doom loop warnings → stderr</li>
+</ul>
+<h3>JSON</h3>
+<pre><code class="language-bash">cast run --format json &quot;analyze this codebase&quot;
+</code></pre>
+<p>Structured JSON events, one per line (JSONL). Each event has:</p>
+<pre><code class="language-json">{
+  &quot;type&quot;: &quot;token&quot;,
+  &quot;timestamp&quot;: 1720000000000,
+  &quot;sessionID&quot;: &quot;nd4k8f2x&quot;,
+  &quot;text&quot;: &quot;Hello&quot;
+}
+</code></pre>
+<h3>Event Types</h3>
+<div class="table-wrap"><table><thead><tr><th>Type</th><th>Fields</th><th>Description</th></tr></thead><tbody><tr><td><code>token</code></td><td><code>text</code></td><td>Streaming text chunk</td></tr><tr><td><code>thinking</code></td><td><code>text</code></td><td>Reasoning/thinking content</td></tr><tr><td><code>assistant_message</code></td><td><code>content</code>, <code>toolCalls</code></td><td>Complete assistant message</td></tr><tr><td><code>tool_start</code></td><td><code>id</code>, <code>name</code>, <code>args</code></td><td>Tool execution started</td></tr><tr><td><code>tool_end</code></td><td><code>id</code>, <code>name</code>, <code>result</code></td><td>Tool execution completed</td></tr><tr><td><code>doom_loop</code></td><td><code>tool</code>, <code>attempts</code></td><td>Tool blocked after identical calls</td></tr><tr><td><code>usage</code></td><td><code>usage</code>, <code>subagent</code></td><td>Token/cost usage update</td></tr><tr><td><code>end</code></td><td><code>reason</code></td><td>Run completed (<code>stop</code>, <code>error</code>, etc.)</td></tr><tr><td><code>error</code></td><td><code>message</code></td><td>Error occurred</td></tr></tbody></table></div><h2>Flags</h2>
+<p><code>cast run</code> accepts a subset of the main CLI flags:</p>
+<div class="table-wrap"><table><thead><tr><th>Flag</th><th>Short</th><th>Description</th></tr></thead><tbody><tr><td><code>--continue</code></td><td><code>-c</code></td><td>Continue the most recent session</td></tr><tr><td><code>--session &lt;id&gt;</code></td><td><code>-s</code></td><td>Continue a specific session</td></tr><tr><td><code>--model &lt;model&gt;</code></td><td><code>-m</code></td><td>Model to use</td></tr><tr><td><code>--reasoning &lt;level&gt;</code></td><td><code>-r</code></td><td>Reasoning level</td></tr><tr><td><code>--persona &lt;name&gt;</code></td><td><code>-p</code></td><td>Persona to use</td></tr><tr><td><code>--format &lt;default|json&gt;</code></td><td></td><td>Output format</td></tr><tr><td><code>--bypass-permissions</code></td><td></td><td>Skip bash confirmation</td></tr><tr><td><code>--skill &lt;path&gt;</code></td><td></td><td>Load extra skill</td></tr><tr><td><code>--no-skills</code></td><td></td><td>Skip skill discovery</td></tr><tr><td><code>--mcp &lt;path&gt;</code></td><td></td><td>Load extra MCP config</td></tr><tr><td><code>--no-mcp</code></td><td></td><td>Skip MCP discovery</td></tr></tbody></table></div><p>The message is everything after the flags (no quoting required for single words, but shell quoting helps for multi-word messages).</p>
+<h2>Plan Mode</h2>
+<p>Plan tools are not available in non-interactive mode. However, if you resume a session that has an approved plan (<code>cast run -c &quot;...&quot;</code>), the plan is injected into the build-mode system prompt to steer implementation.</p>
+<h2>Exit Code</h2>
+<ul>
+<li><code>0</code> — success</li>
+<li><code>1</code> — error (the <code>error</code> event contains the message)</li>
+</ul>
+<h2>Examples</h2>
+<pre><code class="language-bash"># Pipe JSON output to jq
+cast run --format json &quot;list files in src/&quot; | jq &#39;select(.type == &quot;token&quot;) | .text&#39; -r
+
+# Use in a CI pipeline
+cast run --bypass-permissions &quot;run the test suite and report failures&quot;
+
+# Resume and continue
+cast run -c &quot;now implement the changes we discussed&quot;
+</code></pre>
+
+	</article>
+</main>
+
+<script>
+// Mobile sidebar toggle with backdrop
+(function() {
+	const sidebar = document.querySelector('.sidebar');
+	const backdrop = document.querySelector('.sidebar-backdrop');
+	const toggle = document.querySelector('.menu-toggle');
+	if (!toggle) return;
+	function close() { sidebar.classList.remove('open'); backdrop.classList.remove('visible'); }
+	function open() { sidebar.classList.add('open'); backdrop.classList.add('visible'); }
+	toggle.addEventListener('click', () => {
+		if (sidebar.classList.contains('open')) close(); else open();
+	});
+	backdrop.addEventListener('click', close);
+	document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+})();
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+// ── Mermaid viewer with zoom + diagram/code toggle ──
+document.addEventListener('DOMContentLoaded', () => {
+	const blocks = document.querySelectorAll('pre.mermaid');
+	if (!blocks.length) return;
+
+	mermaid.initialize({ startOnLoad: false, theme: 'dark' });
+
+	blocks.forEach((pre, i) => {
+		const raw = atob(pre.dataset.raw || '') || pre.textContent;
+
+		// Build viewer shell
+		const viewer = document.createElement('div');
+		viewer.className = 'mermaid-viewer';
+
+		const toolbar = document.createElement('div');
+		toolbar.className = 'mermaid-toolbar';
+		toolbar.innerHTML =
+			'<button class="active" data-view="diagram">Diagram</button>' +
+			'<button data-view="code">Code</button>' +
+			'<span class="zoom-label">Zoom:</span>' +
+			'<button data-zoom="out">−</button>' +
+			'<button data-zoom="reset">100%</button>' +
+			'<button data-zoom="in">+</button>';
+
+		const diagram = document.createElement('div');
+		diagram.className = 'mermaid-diagram';
+
+		const code = document.createElement('pre');
+		code.className = 'mermaid-code';
+		code.textContent = raw;
+
+		viewer.append(toolbar, diagram, code);
+		pre.replaceWith(viewer);
+
+		// Render mermaid
+		const id = 'mermaid-' + i;
+		mermaid.render(id, raw).then(({ svg }) => {
+			diagram.innerHTML = svg;
+		}).catch(err => {
+			diagram.innerHTML = '<pre style="color:#fb7185">' + err.message + '</pre>';
+		});
+
+		// Zoom + pan state
+		let zoom = 1, panX = 0, panY = 0, dragging = false, startX, startY;
+		const zoomLabel = toolbar.querySelector('[data-zoom="reset"]');
+		const applyTransform = () => {
+			const svg = diagram.querySelector('svg');
+			if (svg) svg.style.transform = 'translate(' + panX + 'px,' + panY + 'px) scale(' + zoom + ')';
+			zoomLabel.textContent = Math.round(zoom * 100) + '%';
+		};
+
+		// Drag to pan (mouse + touch)
+		const getPos = e => e.touches ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : { x: e.clientX, y: e.clientY };
+		const onStart = e => {
+			const p = getPos(e); dragging = true;
+			startX = p.x - panX; startY = p.y - panY;
+			diagram.classList.add('dragging');
+		};
+		const onMove = e => {
+			if (!dragging) return;
+			const p = getPos(e);
+			panX = p.x - startX; panY = p.y - startY;
+			applyTransform();
+		};
+		const onEnd = () => { dragging = false; diagram.classList.remove('dragging'); };
+	
+diagram.addEventListener('mousedown', e => { onStart(e); e.preventDefault(); });
+		document.addEventListener('mousemove', onMove);
+		document.addEventListener('mouseup', onEnd);
+		diagram.addEventListener('touchstart', e => { if (e.touches.length === 1) onStart(e); }, { passive: true });
+		document.addEventListener('touchmove', e => { if (e.touches.length === 1 && dragging) onMove(e); }, { passive: true });
+		document.addEventListener('touchend', onEnd);
+
+		// Pinch to zoom (touch)
+		let lastPinchDist = 0;
+		diagram.addEventListener('touchstart', e => {
+			if (e.touches.length === 2) {
+				const dx = e.touches[0].clientX - e.touches[1].clientX;
+				const dy = e.touches[0].clientY - e.touches[1].clientY;
+				lastPinchDist = Math.hypot(dx, dy);
+			}
+		}, { passive: true });
+		diagram.addEventListener('touchmove', e => {
+			if (e.touches.length === 2) {
+				e.preventDefault();
+				const dx = e.touches[0].clientX - e.touches[1].clientX;
+				const dy = e.touches[0].clientY - e.touches[1].clientY;
+				const dist = Math.hypot(dx, dy);
+				if (lastPinchDist > 0) {
+					zoom = Math.min(3, Math.max(0.25, zoom * (dist / lastPinchDist)));
+					applyTransform();
+				}
+				lastPinchDist = dist;
+			}
+		});
+		diagram.addEventListener('touchend', e => { if (e.touches.length < 2) lastPinchDist = 0; });
+
+		// Zoom + view toggle buttons
+		toolbar.addEventListener('click', e => {
+			const btn = e.target.closest('button');
+			if (!btn) return;
+
+			if (btn.dataset.view) {
+				toolbar.querySelectorAll('[data-view]').forEach(b => b.classList.remove('active'));
+				btn.classList.add('active');
+				diagram.style.display = btn.dataset.view === 'diagram' ? '' : 'none';
+				code.classList.toggle('visible', btn.dataset.view === 'code');
+				return;
+			}
+
+			if (btn.dataset.zoom === 'in') zoom = Math.min(3, zoom + 0.25);
+			else if (btn.dataset.zoom === 'out') zoom = Math.max(0.25, zoom - 0.25);
+			else if (btn.dataset.zoom === 'reset') { zoom = 1; panX = 0; panY = 0; }
+			applyTransform();
+		});
+	});
+});
+</script>
+</body>
+</html>
