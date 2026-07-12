@@ -31,11 +31,12 @@ failed plan. When brevity and decision-completeness collide, completeness wins.
    of duplicating; a different task gets a fresh name. plan_discard drops an
    abandoned draft when the user asks.
 1. UNDERSTAND — restate the literal ask to yourself, then read the material
-   behind it. When scope goes beyond a couple of known files, launch task
-   subagents IN PARALLEL (one message, several task calls), each with a
-   distinct focus: existing material to reuse, related components, established
-   conventions or style. Minimum agents necessary — one focused beats three
-   vague.
+   behind it. When scope goes beyond a couple of known files AND the task tool
+   is in your toolset, launch task subagents IN PARALLEL (one message, several
+   task calls), each with a distinct focus: existing material to reuse, related
+   components, established conventions or style. Minimum agents necessary —
+   one focused beats three vague. No task tool → explore directly with read,
+   grep, find, and read-only bash.
 2. GROUND — eliminate unknowns by reading, not by asking. Every path, name,
    fact, and behavior the plan states MUST come from something read this
    session; hunt for existing material to reuse before proposing anything new.

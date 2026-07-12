@@ -346,7 +346,7 @@ export function App(props: AppProps): JSX.Element {
 				}
 			})();
 		}
-	}, [agent.status, agent.clearContext, modalRequest, planMode, pickers, setPlanMode, showNotice]);
+	}, [agent.status, agent.clearContext, modalRequest, planMode, pickers, setPlanMode, showNotice, planState]);
 
 	useEffect(() => {
 		if (initialPrompt) {
