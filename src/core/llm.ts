@@ -294,7 +294,10 @@ export async function* streamChat(
 						cost: typeof usageAny.cost === "number" ? usageAny.cost : undefined,
 						cacheReadTokens: cacheReadTokens ?? undefined,
 						cacheWriteTokens: cacheWriteTokens ?? undefined,
-						uncachedTokens: chunk.usage.prompt_tokens - (cacheReadTokens ?? 0) - (cacheWriteTokens ?? 0),
+						uncachedTokens: Math.max(
+							0,
+							chunk.usage.prompt_tokens - (cacheReadTokens ?? 0) - (cacheWriteTokens ?? 0),
+						),
 					};
 				}
 
