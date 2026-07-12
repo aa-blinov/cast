@@ -55,14 +55,16 @@ export interface SessionState {
  * is set, the tokens are also accumulated into `subagentTokens` (still part of the
  * grand total) and the context-size tracker is left untouched — a subagent's
  * prompt size says nothing about the main session's context. */
+const safe = (v: number | undefined) => Math.max(0, v ?? 0);
+
 export function addUsage(session: SessionState, usage: Usage, opts?: { subagent?: boolean }): void {
-	session.usage.promptTokens += usage.promptTokens;
-	session.usage.completionTokens += usage.completionTokens;
-	session.usage.totalTokens += usage.totalTokens;
-	if (usage.cost) session.usage.cost += usage.cost;
-	if (usage.cacheReadTokens) session.usage.cacheReadTokens += usage.cacheReadTokens;
-	if (usage.cacheWriteTokens) session.usage.cacheWriteTokens += usage.cacheWriteTokens;
-	if (usage.uncachedTokens) session.usage.uncachedTokens += usage.uncachedTokens;
+	session.usage.promptTokens += safe(usage.promptTokens);
+	session.usage.completionTokens += safe(usage.completionTokens);
+	session.usage.totalTokens += safe(usage.totalTokens);
+	if (usage.cost !== undefined) session.usage.cost += safe(usage.cost);
+	if (usage.cacheReadTokens !== undefined) session.usage.cacheReadTokens += safe(usage.cacheReadTokens);
+	if (usage.cacheWriteTokens !== undefined) session.usage.cacheWriteTokens += safe(usage.cacheWriteTokens);
+	if (usage.uncachedTokens !== undefined) session.usage.uncachedTokens += safe(usage.uncachedTokens);
 	if (opts?.subagent) {
 		session.usage.subagentTokens += usage.totalTokens;
 		return;
