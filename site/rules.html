@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Rules — cast</title>
-<meta name="description" content="Rules documentation for cast, a terminal coding agent.">
+<meta name="description" content="Rules documentation for cast, a role-based terminal agent harness.">
 <style>
 :root {
 	/* cast palette — cyan→violet gradient */
@@ -317,6 +317,71 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 .footer {
 	text-align: center; padding: 24px; border-top: 1px solid var(--border);
 	font-size: .8rem; color: var(--text-muted);
+}
+
+/* ── Roles showcase ────────────────────────────────────────────────── */
+.roles-showcase {
+	background: var(--bg-secondary); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+	padding: 48px 24px; max-width: 900px; margin: 0 auto;
+}
+.roles-showcase h2 {
+	text-align: center; font-size: 1.5rem; font-weight: 700; margin: 0 0 12px;
+}
+.roles-showcase > p {
+	text-align: center; color: var(--text-secondary); max-width: 600px; margin: 0 auto 28px;
+}
+.roles-terminal {
+	background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
+	max-width: 560px; margin: 0 auto; overflow: hidden;
+}
+.roles-terminal-bar {
+	display: flex; align-items: center; gap: 6px;
+	padding: 10px 16px; border-bottom: 1px solid var(--border);
+	background: var(--bg-tertiary);
+}
+.roles-terminal-bar span {
+	width: 10px; height: 10px; border-radius: 50%;
+}
+.roles-terminal-bar span:nth-child(1) { background: #fb7185; }
+.roles-terminal-bar span:nth-child(2) { background: #fbbf24; }
+.roles-terminal-bar span:nth-child(3) { background: #34d399; }
+.roles-terminal-body {
+	font-family: var(--font-mono); font-size: .85rem; padding: 16px;
+	line-height: 1.8;
+}
+.roles-terminal-body .prompt { color: var(--accent); }
+.roles-terminal-body .cmd { color: var(--green); }
+.roles-terminal-body .out { color: var(--text-secondary); }
+
+/* ── Comparison ────────────────────────────────────────────────────── */
+.comparison {
+	max-width: 700px; margin: 0 auto; padding: 40px 24px 60px;
+}
+.comparison h2 {
+	text-align: center; font-size: 1.5rem; font-weight: 700; margin: 0 0 12px;
+}
+.comparison > p {
+	text-align: center; color: var(--text-secondary); max-width: 540px; margin: 0 auto 24px;
+}
+.comparison table {
+	width: 100%; border-collapse: collapse;
+	font-size: .875rem; background: var(--bg-secondary);
+	border: 1px solid var(--border); border-radius: 8px;
+	overflow: hidden;
+}
+.comparison th, .comparison td {
+	padding: 10px 16px; border-bottom: 1px solid var(--border); text-align: left;
+}
+.comparison th {
+	background: var(--bg-tertiary); font-weight: 600; color: var(--text);
+}
+.comparison td { color: var(--text-secondary); }
+.comparison tr:last-child td { border-bottom: none; }
+
+@media (max-width: 768px) {
+	.roles-showcase { padding: 32px 16px; }
+	.roles-terminal-body { font-size: .75rem; padding: 12px; }
+	.comparison { padding: 32px 16px 48px; }
 }
 </style>
 </head>
