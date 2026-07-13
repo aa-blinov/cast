@@ -443,6 +443,12 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 	<article class="content">
 		<h1>Changelog</h1>
 <p>All notable user-facing changes to cast, newest first.</p>
+<h2>0.5.6</h2>
+<h3>Fixed</h3>
+<ul>
+<li>Terminal tools (<code>plan_done</code>, <code>plan_enter</code>) now force-end the turn — prevents the model from keeping runs alive by rewording summaries to dodge the doom-loop detector</li>
+<li><code>plan_done</code> no longer echoes full plan content into model context, which invited endless &quot;refinement&quot; loops</li>
+</ul>
 <h2>0.5.5</h2>
 <h3>Added</h3>
 <ul>
