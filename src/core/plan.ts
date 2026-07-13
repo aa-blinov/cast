@@ -40,6 +40,17 @@ export const PLAN_TOOL_NAMES = [
 ] as const;
 
 /**
+ * Terminal (signal) tools: a successful call ends the turn. Their contract is
+ * "call it, then wait for the user" — the UI opens a mode-transition dialog
+ * once the run settles (App.tsx waits for status !== "running"). Enforced by
+ * the loop rather than the model's goodwill: the model returning a slightly
+ * reworded summary on every call used to keep the run alive forever, and the
+ * doom-loop detector (keyed on exact args) couldn't catch the varying args.
+ * Declared here so a new signal tool can't be added without deciding this.
+ */
+export const TERMINAL_TOOL_NAMES: readonly string[] = ["plan_done", "plan_enter"];
+
+/**
  * Mode policy as data: which tools the TUI hides for a given mode. Plan mode
  * blocks writers (bash stays advertised — the executor gate restricts it to
  * the read-only allowlist) plus the build-only plan tools; build mode blocks
@@ -710,7 +721,7 @@ export function execPlanEnter(args: Record<string, unknown>, _planState: PlanSta
 
 export function execPlanDone(args: Record<string, unknown>, planState: PlanState): ToolResult {
 	const summary = typeof args.summary === "string" ? args.summary.trim() : "";
-	const { exists, content, error, path } = readActivePlan(planState);
+	const { exists, error, path } = readActivePlan(planState);
 
 	if (error) {
 		return { content: `Error reading plan file: ${error}`, isError: true };
@@ -722,16 +733,19 @@ export function execPlanDone(args: Record<string, unknown>, planState: PlanState
 		};
 	}
 
-	// Return the plan content + signal that it's ready for review. The UI
-	// shows a "[Plan ready — /build to implement]" message on this tool's
-	// success; switching modes stays a user decision (/build), never automatic.
+	// Signal that the plan is ready for review. The plan file is already on
+	// disk and the UI reads it itself (readActivePlan) to open the approval
+	// dialog — so we deliberately do NOT echo `content` back into the model's
+	// context: returning the full plan invited the model to keep "refining" it
+	// instead of stopping. The turn ends here regardless (see loop.ts's
+	// terminal-tool handling); the note states the contract for the model too.
 	return {
 		content: JSON.stringify({
 			planReady: true,
 			name: basename(path, ".md"),
 			summary: summary || "Plan complete",
-			content,
 			path,
+			note: "Plan is ready for review. Your turn ends now; the user will decide whether to approve or keep planning.",
 		}),
 	};
 }
