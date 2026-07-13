@@ -1085,6 +1085,63 @@ describe("runAgentLoop — plan mode", () => {
 			expect(toolEnd.result.content).toContain("not available");
 		}
 	});
+
+	it("ends the run after a successful plan_done — the model can't keep the turn alive", async () => {
+		// Regression: plan_done is a terminal signal tool. The model used to loop
+		// forever calling it with a slightly reworded summary each time (which
+		// also slipped past the doom-loop detector, keyed on exact args), so the
+		// run never settled and the approval dialog never opened. The loop now
+		// ends the turn itself once plan_done succeeds. streamAndCollect is
+		// mocked to ALWAYS emit another plan_done, so a passing test proves the
+		// loop stopped on its own rather than because the model happened to stop.
+		const dir = mkdtempSync(join(tmpdir(), "cast-plan-done-stop-"));
+		writeFileSync(join(dir, "feature.md"), "# Plan\n\n## Steps\n1. Do it", "utf-8");
+		try {
+			let calls = 0;
+			vi.mocked(streamAndCollect).mockImplementation(async () => {
+				calls++;
+				return {
+					content: "",
+					thinking: "",
+					finishReason: "stop",
+					toolCalls: [
+						{
+							id: `t${calls}`,
+							name: "plan_done",
+							arguments: JSON.stringify({ summary: `summary variant ${calls}` }),
+						},
+					],
+				};
+			});
+
+			const events: AgentEvent[] = [];
+			await runAgentLoop([{ role: "user", content: "finish the plan" }], {
+				config: testConfig,
+				model: "test-model",
+				cwd: "/tmp",
+				systemPrompt: "BASE",
+				planState: { enabled: true, plansDir: dir },
+				onEvent: (e) => events.push(e),
+			});
+
+			// Exactly one model request: the loop stopped right after the first
+			// successful plan_done instead of asking the model for a next step.
+			expect(calls).toBe(1);
+			const endEvents = events.filter((e) => e.type === "end");
+			expect(endEvents).toHaveLength(1);
+			expect(endEvents[0]).toEqual({ type: "end", reason: "stop" });
+			// The tool result is in the transcript (no dangling tool_call), and it
+			// carries the ready signal rather than an error.
+			const toolEnd = events.find((e) => e.type === "tool_end" && e.name === "plan_done");
+			expect(toolEnd?.type === "tool_end" && toolEnd.result.isError).toBeFalsy();
+		} finally {
+			// This test installs a persistent mockImplementation (not Once); the
+			// suite's beforeEach only mockClear()s, so reset it here to keep it
+			// from bleeding into later tests.
+			vi.mocked(streamAndCollect).mockReset();
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
 });
 
 // ============================================================================

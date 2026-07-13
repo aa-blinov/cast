@@ -12,7 +12,13 @@ import {
 } from "./llm.ts";
 import type { McpToolHandle } from "./mcp.ts";
 import type { Persona } from "./personas.ts";
-import { checkReadOnlyCommand, listPlanNames, planChecklistState, readActivePlan } from "./plan.ts";
+import {
+	checkReadOnlyCommand,
+	listPlanNames,
+	planChecklistState,
+	readActivePlan,
+	TERMINAL_TOOL_NAMES,
+} from "./plan.ts";
 import { promptsDir, readRequiredPrompt } from "./prompts.ts";
 import { compactMessages, estimateTokens, shouldCompact } from "./session.ts";
 import type { SubagentPrompt } from "./subagents.ts";
@@ -23,6 +29,13 @@ import { type ConfirmBash, createToolExecutor, getToolDefinitions, type ToolResu
 // DOOM_LOOP_THRESHOLD — the model gets an error result and must try something
 // different.
 const DOOM_LOOP_THRESHOLD = 3;
+
+// Terminal (signal) tools: once one succeeds, the turn ends — the UI opens a
+// mode-transition dialog when the run settles. Enforced by the loop, not by
+// asking the model to stop: a model that kept calling plan_done with a slightly
+// reworded summary used to keep the run alive indefinitely (and slipped past
+// the doom-loop detector, which keys on exact args). See plan.ts.
+const TERMINAL_TOOLS = new Set<string>(TERMINAL_TOOL_NAMES);
 
 // Prompts for the LLM call that summarizes old messages during compaction —
 // content, not code, so they live in prompts/ alongside the persona files
@@ -760,6 +773,19 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 				}
 
 				onEvent({ type: "turn_end", toolResults });
+
+				// A successful terminal (signal) tool ends the run. The whole batch
+				// has already executed and its tool results are in `messages` above —
+				// nothing is left dangling — and turn_end fired, which the UI needs to
+				// open the mode-transition dialog (it waits for the run to settle).
+				// Return rather than break the outer loop: a terminal signal hands
+				// control to the user, so the follow-up queue is intentionally not
+				// drained. isError is excluded so a failed plan_done (no plan on disk,
+				// etc.) lets the model recover instead of stranding the turn.
+				if (toolResults.some((r) => TERMINAL_TOOLS.has(r.name) && !r.result.isError)) {
+					onEvent({ type: "end", reason: "stop" });
+					return;
+				}
 
 				// re-poll steering at end of inner iteration
 				pendingMessages = steeringQueue.drain();

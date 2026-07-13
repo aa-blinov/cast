@@ -669,7 +669,7 @@ describe("plan", () => {
 			expect(result.isError).toBe(true);
 		});
 
-		it("returns plan ready signal with the active plan's name and content", () => {
+		it("returns the plan ready signal without echoing the plan content back", () => {
 			const state = testState("done-2");
 
 			execPlanWrite({ name: "auth", content: "# Plan\n\n## Steps\n1. Do it" }, state);
@@ -679,7 +679,12 @@ describe("plan", () => {
 			expect(parsed.planReady).toBe(true);
 			expect(parsed.name).toBe("auth");
 			expect(parsed.summary).toBe("Auth refactor");
-			expect(parsed.content).toContain("Do it");
+			// The plan is already on disk and the UI reads it itself — echoing the
+			// full content back invited the model to keep "refining" instead of
+			// stopping, so it is deliberately omitted. A note states the contract.
+			expect(parsed.content).toBeUndefined();
+			expect(parsed.path).toBeTruthy();
+			expect(parsed.note).toMatch(/turn ends/i);
 		});
 	});
 });
