@@ -443,6 +443,18 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 	<article class="content">
 		<h1>Changelog</h1>
 <p>All notable user-facing changes to cast, newest first.</p>
+<h2>0.5.5</h2>
+<h3>Added</h3>
+<ul>
+<li>Changelog page with version history from 0.1.0 to 0.5.4</li>
+<li>Sequential prev/next navigation on all documentation pages (reading loop: Getting Started → ... → Changelog → Getting Started)</li>
+<li><code>/usage</code> command documented in README and interactive commands reference</li>
+<li>Plan mode refine option uses the regular composer (multi-line and image paste supported)</li>
+</ul>
+<h3>Fixed</h3>
+<ul>
+<li>Improved provider error classification — OpenAI SDK <code>APIConnectionError</code> cause chain is now fully traversed for accurate error reporting</li>
+</ul>
 <h2>0.5.4</h2>
 <p>Fix: ensure non-negative token counts in usage tracking and streaming.</p>
 <h2>0.5.3</h2>
