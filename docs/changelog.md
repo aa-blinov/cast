@@ -2,6 +2,19 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.5.5
+
+### Added
+
+- Changelog page with version history from 0.1.0 to 0.5.4
+- Sequential prev/next navigation on all documentation pages (reading loop: Getting Started → ... → Changelog → Getting Started)
+- `/usage` command documented in README and interactive commands reference
+- Plan mode refine option uses the regular composer (multi-line and image paste supported)
+
+### Fixed
+
+- Improved provider error classification — OpenAI SDK `APIConnectionError` cause chain is now fully traversed for accurate error reporting
+
 ## 0.5.4
 
 Fix: ensure non-negative token counts in usage tracking and streaming.
