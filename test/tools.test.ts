@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
 import { PLAN_TOOL_NAMES, type PlanState } from "../src/core/plan.ts";
 import { createToolExecutor, getToolDefinitions } from "../src/core/tools.ts";
+import { isPermissionError, withAccessNote } from "../src/core/tools/search.ts";
 
 const TEST_DIR = join(import.meta.dirname, "__test_tmp__");
 
@@ -416,6 +417,41 @@ describe("grep", () => {
 			glob: `*'; touch '${canary}`,
 		});
 		expect(existsSync(canary)).toBe(false);
+	});
+
+	it("returns 'No matches found' for a pattern that matches nothing (rg exit 1)", async () => {
+		writeFileSync(join(TEST_DIR, "grep.txt"), "hello world\n");
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const result = await exec("grep", { pattern: "zzz_definitely_absent_zzz", path: TEST_DIR });
+		expect(result.content).toBe("No matches found");
+		expect(result.isError).toBeUndefined();
+	});
+});
+
+describe("grep permission diagnostics", () => {
+	it("isPermissionError recognizes EPERM/EACCES but not ENOENT", () => {
+		expect(isPermissionError({ code: "EPERM" })).toBe(true);
+		expect(isPermissionError({ code: "EACCES" })).toBe(true);
+		expect(isPermissionError({ code: "ENOENT" })).toBe(false);
+		expect(isPermissionError(new Error("nope"))).toBe(false);
+		expect(isPermissionError(undefined)).toBe(false);
+	});
+
+	it("withAccessNote appends a note when the fallback skipped paths for permissions", () => {
+		const out = withAccessNote("src/a.ts:1:hit", "", 2);
+		expect(out).toContain("src/a.ts:1:hit");
+		expect(out).toContain("2 path(s) skipped");
+		expect(out).toContain("Full Disk Access");
+	});
+
+	it("withAccessNote appends a note when rg's stderr reported permission denied", () => {
+		const out = withAccessNote("No matches found", "rg: /Users/x/Documents: Operation not permitted (os error 1)", 0);
+		expect(out).toContain("No matches found");
+		expect(out).toContain("skipped — permission denied");
+	});
+
+	it("withAccessNote is a no-op when nothing was blocked", () => {
+		expect(withAccessNote("clean output", "", 0)).toBe("clean output");
 	});
 });
 
