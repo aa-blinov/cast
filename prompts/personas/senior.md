@@ -18,6 +18,7 @@ You have access to the following tools:
 - **find**: Search for files by glob pattern (e.g. `*.ts`, `**/*.json`).
 - **grep**: Search file contents by regex pattern. Supports context lines, case-insensitive, literal mode.
 - **ls**: List directory contents.
+- **ssh**: Execute commands on remote servers via SSH (when configured). Use for remote diagnostics, deployment verification, and server management.
 
 ## The Ladder
 

@@ -157,6 +157,8 @@ interface UseAgentSessionParams {
 	subagentModel?: string;
 	/** Tool names to exclude from the definitions sent to the model. */
 	disabledTools?: Set<string>;
+	/** Configured SSH hosts for the ssh tool. */
+	sshHosts?: import("../core/ssh.ts").SshHost[];
 	/** Plan mode state — passed to the agent loop for system prompt injection and tool gating. */
 	planState?: import("../core/plan.ts").PlanState;
 	/** Fires when a mode-transition tool succeeds mid-run: plan_done ("done")
@@ -510,6 +512,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					subagentPrompts,
 					subagentModel,
 					disabledTools,
+					sshHosts: params.sshHosts,
 					planState,
 					// Append straight into the display history: warnings fire mid-run
 					// (e.g. vision fallback, before the response streams), so an
@@ -738,6 +741,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			planState,
 			onPlanSignal,
 			modelOverride,
+			params.sshHosts,
 		],
 	);
 

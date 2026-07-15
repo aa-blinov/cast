@@ -16,6 +16,7 @@ import {
 } from "./rules.ts";
 import type { PermissionMode, Settings } from "./settings.ts";
 import { builtinSkillsDir, formatSkillsForPrompt, loadSkills, type Skill } from "./skills.ts";
+import { loadSshConfig, projectSshPath } from "./ssh.ts";
 
 export interface ProjectResolverDeps {
 	noSkills: boolean;
@@ -77,6 +78,14 @@ export async function resolveProjectTrustForCwd(deps: ProjectResolverDeps, cwd: 
 	if (hasContextFileInDir(cwd)) lines.push("  - AGENTS.md / CLAUDE.md (project instructions for the system prompt)");
 	if (hasProjectRulesDir(cwd)) lines.push("  - .cast/rules/ (project rules — always-apply, lazy, or manual)");
 	if (hasProjectPersonas(cwd)) lines.push("  - .cast/personas/ (custom personas — system prompts for the agent)");
+	const sshPath = projectSshPath(cwd);
+	if (existsSync(sshPath)) {
+		const hosts = Object.keys(loadSshConfig(sshPath));
+		if (hosts.length > 0) {
+			lines.push("  - .cast/ssh.json (SSH hosts — remote command execution)");
+			for (const name of hosts) lines.push(`      ${name}`);
+		}
+	}
 	if (lines.length === 0) return true;
 	return resolveProjectTrust(deps.pickers, deps.settings, cwd, lines);
 }

@@ -59,7 +59,7 @@ cast -c
 
 ### Built-in tools
 
-`bash` `read` `write` `edit` `find` `grep` `ls` `task` `web_search` `web_fetch` — the agent has full filesystem, shell, and web access. Multiple tools run in parallel. The `task` tool delegates work to isolated sub-agents (with their own persona and context) and returns only the final result. Image files (jpg/png/gif/webp/bmp) are sent directly to vision-capable models. Web tools are off by default — toggle with `/web` (persists to settings).
+`bash` `read` `write` `edit` `find` `grep` `ls` `task` `ssh` `web_search` `web_fetch` — the agent has full filesystem, shell, SSH remote, and web access. Multiple tools run in parallel. The `task` tool delegates work to isolated sub-agents (with their own persona and context) and returns only the final result. Image files (jpg/png/gif/webp/bmp) are sent directly to vision-capable models. Web tools are off by default — toggle with `/web` (persists to settings).
 
 ### Rules
 
