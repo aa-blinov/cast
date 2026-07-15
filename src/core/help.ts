@@ -63,6 +63,13 @@ auth only, no OAuth). Their tools are added alongside the built-in ones,
 no special syntax needed to call them. Web tools (web_search, web_fetch)
 can be toggled on/off with /web — persists to settings.json.
 
+SSH hosts: remote command execution, configured in ~/.cast/ssh.json
+(global) and .cast/ssh.json (project — asked to trust once, remembered
+after that). Supports key-based (keyPath) and password-based (password
++ sshpass) auth. Connections reused via SSH ControlMaster. Per-host
+"dangerousCommands": "bypass" skips the safety check for hosts where
+sudo is expected.
+
 Personas: swappable system prompts for different roles (coding, sysadmin, ...)
 — see prompts/personas/. Same tools either way; only the instructions change.
 

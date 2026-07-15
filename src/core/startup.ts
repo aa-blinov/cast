@@ -37,6 +37,8 @@ import { type AgentRunner, createAgentRunner } from "./runner.ts";
 import { createSession, getMostRecentSession, loadSession, type SessionState } from "./session.ts";
 import { type PermissionMode, type Settings, updateSettings } from "./settings.ts";
 import type { Skill } from "./skills.ts";
+import type { SshHost } from "./ssh.ts";
+import { resolveSshHosts } from "./ssh.ts";
 import { loadSubagentPrompts, type SubagentPrompt } from "./subagents.ts";
 import { buildReasoningParams, type ModelReasoningMeta } from "./vendors.ts";
 
@@ -87,6 +89,8 @@ export interface StartupResult {
 	directoryRules: Rule[];
 	activeAutoRules: Rule[];
 	skillsPromptSuffix: string;
+	/** Configured SSH hosts for the ssh tool. */
+	sshHosts: SshHost[];
 	resumed: boolean;
 }
 
@@ -350,6 +354,7 @@ export async function runStartup(
 	onProgress?.("Connecting MCP servers...");
 	const mcpResult = await resolveMcpForCwd(projectDeps, cwd, projectTrusted, settings.disabledMcpServers ?? []);
 	const confirmBash = makeConfirmBash(pickers, permissionMode);
+	const sshHosts = resolveSshHosts(cwd, projectTrusted);
 
 	return {
 		config,
@@ -376,6 +381,7 @@ export async function runStartup(
 		directoryRules: resolvedRules.directoryRules,
 		activeAutoRules: [],
 		skillsPromptSuffix,
+		sshHosts,
 		resumed: !!resumedSession,
 	};
 }

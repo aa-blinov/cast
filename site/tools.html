@@ -466,6 +466,33 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 <p>For long-running commands (docker build, npm install, large test suites), increase the timeout:</p>
 <pre><code>bash(command=&quot;npm run build&quot;, timeout=600)
 </code></pre>
+<h2>SSH Tool</h2>
+<h3><code>ssh</code></h3>
+<p>Execute one command on a remote host via SSH. Only available when SSH hosts are configured.</p>
+<div class="table-wrap"><table><thead><tr><th>Parameter</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>host</code></td><td>Yes</td><td>Host name key from configured SSH hosts</td></tr><tr><td><code>command</code></td><td>Yes</td><td>Remote command to execute</td></tr><tr><td><code>timeout</code></td><td>No</td><td>Timeout in seconds (default: 180)</td></tr></tbody></table></div><p>Output is combined stdout+stderr, truncated to the last 2000 lines or 64KB.</p>
+<h3>Configuration</h3>
+<p>SSH hosts are configured in <code>~/.cast/ssh.json</code> (global) or <code>.cast/ssh.json</code> (project):</p>
+<pre><code class="language-json">{
+  &quot;hosts&quot;: {
+    &quot;myserver&quot;: { &quot;host&quot;: &quot;192.168.1.10&quot;, &quot;username&quot;: &quot;deploy&quot;, &quot;port&quot;: 22, &quot;keyPath&quot;: &quot;~/.ssh/id_ed25519&quot; },
+    &quot;staging&quot;: { &quot;host&quot;: &quot;staging.example.com&quot;, &quot;username&quot;: &quot;admin&quot;, &quot;password&quot;: &quot;secret123&quot; },
+    &quot;prod&quot;: { &quot;host&quot;: &quot;prod.example.com&quot;, &quot;username&quot;: &quot;root&quot;, &quot;dangerousCommands&quot;: &quot;bypass&quot; }
+  }
+}
+</code></pre>
+<h3>Authentication</h3>
+<ul>
+<li><strong>Key-based</strong> (<code>keyPath</code>): Uses <code>ssh -i &lt;keyPath&gt;</code>. Key file must have <code>600</code> or stricter permissions.</li>
+<li><strong>Password-based</strong> (<code>password</code>): Requires <code>sshpass</code> on PATH. Password is passed via <code>SSHPASS</code> env var (not CLI arg).</li>
+<li>When both <code>keyPath</code> and <code>password</code> are set, key takes priority.</li>
+<li><code>~/.ssh/config</code> keys are also picked up automatically by ssh-agent.</li>
+</ul>
+<h3>Connection Reuse</h3>
+<p>SSH connections are reused via ControlMaster (<code>ControlPersist=3600</code>). The first call to a host creates a master connection; subsequent calls reuse it through a Unix socket. This is transparent — no session state needed.</p>
+<h3>Dangerous Commands</h3>
+<p>By default, the same safety check as bash applies (blocks <code>sudo</code>, <code>rm -rf</code>, etc.). Set <code>&quot;dangerousCommands&quot;: &quot;bypass&quot;</code> per-host to skip the check for hosts where sudo is expected.</p>
+<h3>Trust Gating</h3>
+<p>Project <code>.cast/ssh.json</code> requires trust (same as MCP servers and skills). The first time you use a project with SSH hosts configured, you&#39;ll be asked to trust the project.</p>
 <h2>Web Tools</h2>
 <p>Web tools are disabled by default. Enable them with <code>/web</code> (persists to settings.json). When disabled, the tools are not advertised to the model — it doesn&#39;t know they exist.</p>
 <h3><code>web_search</code></h3>

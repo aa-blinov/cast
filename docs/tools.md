@@ -90,6 +90,53 @@ For long-running commands (docker build, npm install, large test suites), increa
 bash(command="npm run build", timeout=600)
 ```
 
+## SSH Tool
+
+### `ssh`
+
+Execute one command on a remote host via SSH. Only available when SSH hosts are configured.
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `host` | Yes | Host name key from configured SSH hosts |
+| `command` | Yes | Remote command to execute |
+| `timeout` | No | Timeout in seconds (default: 180) |
+
+Output is combined stdout+stderr, truncated to the last 2000 lines or 64KB.
+
+### Configuration
+
+SSH hosts are configured in `~/.cast/ssh.json` (global) or `.cast/ssh.json` (project):
+
+```json
+{
+  "hosts": {
+    "myserver": { "host": "192.168.1.10", "username": "deploy", "port": 22, "keyPath": "~/.ssh/id_ed25519" },
+    "staging": { "host": "staging.example.com", "username": "admin", "password": "secret123" },
+    "prod": { "host": "prod.example.com", "username": "root", "dangerousCommands": "bypass" }
+  }
+}
+```
+
+### Authentication
+
+- **Key-based** (`keyPath`): Uses `ssh -i <keyPath>`. Key file must have `600` or stricter permissions.
+- **Password-based** (`password`): Requires `sshpass` on PATH. Password is passed via `SSHPASS` env var (not CLI arg).
+- When both `keyPath` and `password` are set, key takes priority.
+- `~/.ssh/config` keys are also picked up automatically by ssh-agent.
+
+### Connection Reuse
+
+SSH connections are reused via ControlMaster (`ControlPersist=3600`). The first call to a host creates a master connection; subsequent calls reuse it through a Unix socket. This is transparent — no session state needed.
+
+### Dangerous Commands
+
+By default, the same safety check as bash applies (blocks `sudo`, `rm -rf`, etc.). Set `"dangerousCommands": "bypass"` per-host to skip the check for hosts where sudo is expected.
+
+### Trust Gating
+
+Project `.cast/ssh.json` requires trust (same as MCP servers and skills). The first time you use a project with SSH hosts configured, you'll be asked to trust the project.
+
 ## Web Tools
 
 Web tools are disabled by default. Enable them with `/web` (persists to settings.json). When disabled, the tools are not advertised to the model — it doesn't know they exist.
