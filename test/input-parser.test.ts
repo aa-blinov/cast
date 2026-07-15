@@ -39,6 +39,13 @@ describe("InputParser — sequence classification", () => {
 		expect(events).toEqual([{ type: "char", text: "и" }]);
 	});
 
+	it("drops focus in/out reports (CSI I / CSI O) — never surfaced as input", () => {
+		const { events, feed } = makeParser();
+		feed("\x1b[I");
+		feed("\x1b[O");
+		expect(events).toEqual([]);
+	});
+
 	it("ignores an unrecognized control byte (< 32, no binding)", () => {
 		const { events, feed } = makeParser();
 		feed("\x00");
