@@ -100,7 +100,7 @@ export function App(props: AppProps): JSX.Element {
 	const [directoryRules, setDirectoryRules] = useState(result.directoryRules);
 	const [activeAutoRules, setActiveAutoRules] = useState<Rule[]>([]);
 	const [permissionMode, setPermissionMode] = useState(result.permissionMode);
-	const [sshHosts] = useState(result.sshHosts);
+	const [sshHosts, setSshHosts] = useState(result.sshHosts);
 	const [projectTrusted, setProjectTrusted] = useState(result.projectTrusted);
 	const [cwd, setCwd] = useState(result.cwd);
 	const [reasoningMeta, setReasoningMeta] = useState(result.reasoningMeta);
@@ -453,6 +453,8 @@ export function App(props: AppProps): JSX.Element {
 		setPlanMode,
 		planModel,
 		setPlanModel,
+		sshHosts,
+		setSshHosts,
 		onThemeChange,
 	});
 	depsRef.current = {
@@ -502,6 +504,8 @@ export function App(props: AppProps): JSX.Element {
 		setPlanMode,
 		planModel,
 		setPlanModel,
+		sshHosts,
+		setSshHosts,
 		onThemeChange,
 	};
 

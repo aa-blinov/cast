@@ -86,6 +86,7 @@ Interactive commands:
   /sessions              List saved sessions, switch to one, or "d<N>" to delete
   /permissions           Show/change bash confirmation mode (default/bypass)
   /web                   Toggle web tools (web_search, web_fetch)
+  /ssh                   Manage SSH hosts (list, add, remove)
   /skills                List loaded skills
   /mcp                   Toggle MCP servers on/off and their tools
   /reload                Re-scan skills, personas, and reconnect MCP servers
