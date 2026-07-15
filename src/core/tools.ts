@@ -42,7 +42,10 @@ export function getToolDefinitions(personaNames?: string[], mainModel?: string, 
 					"Execute a bash command in the current working directory. Returns stdout and stderr. " +
 					"Output is truncated to last 2000 lines or 64KB (whichever is hit first). " +
 					"Default timeout 180s. For long-running commands (docker build, npm install, large test suites), " +
-					"pass a higher timeout value.",
+					"pass a higher timeout value. " +
+					"Do NOT re-run an identical command to 'double-check' a result you already have — the previous " +
+					"output still holds unless something changed. Running the same command repeatedly is treated as a " +
+					"doom loop and blocked.",
 				parameters: {
 					type: "object",
 					properties: {
@@ -65,7 +68,10 @@ export function getToolDefinitions(personaNames?: string[], mainModel?: string, 
 					"Read the contents of a file. Supports text files and images (jpg, jpeg, png, gif, webp, bmp — " +
 					"shown to you as an image in the next message; only works if the model supports vision). " +
 					"Output is truncated to 2000 lines or 64KB. Use offset/limit for large files. " +
-					"Images larger than 5MB are rejected.",
+					"Images larger than 5MB are rejected. " +
+					"You already have the contents of every file you read earlier in this session — do NOT read the " +
+					"same path again unless it has changed since (e.g. you just edited it); re-use the earlier result " +
+					"instead. Reading the same unchanged file repeatedly is treated as a doom loop and blocked.",
 				parameters: {
 					type: "object",
 					properties: {
