@@ -228,10 +228,13 @@ export async function execFind(args: Record<string, unknown>, cwd: string, _conf
 		const fdArgs = ["--glob", "--type", "f", "--max-results", String(limit)];
 		if (hasGitignore) fdArgs.push("--ignore-file", gitignorePath);
 		fdArgs.push(pattern, searchPath);
+		// Capture stderr rather than inheriting it — an invalid glob makes fd
+		// print "[fd error]: …" which would otherwise land in the TUI frame.
 		const output = execFileSync("fd", fdArgs, {
 			encoding: "utf-8",
 			timeout: 10_000,
 			cwd: searchPath,
+			stdio: ["ignore", "pipe", "pipe"],
 		});
 		absolutePaths = output.trim().split("\n").filter(Boolean);
 	} catch {
@@ -247,6 +250,26 @@ export async function execFind(args: Record<string, unknown>, cwd: string, _conf
 
 	const relativePaths = absolutePaths.map((p) => (p.startsWith(cwd) ? p.slice(cwd.length + 1) : p));
 	return { content: relativePaths.join("\n") };
+}
+
+/** True for filesystem errors that mean "not allowed to read this", as opposed
+ * to "doesn't exist". On macOS these are what a denied Full Disk Access / folder
+ * (TCC) permission produces when a tool walks into ~/Documents, ~/Desktop, etc. */
+export function isPermissionError(err: unknown): boolean {
+	const code = (err as { code?: string })?.code;
+	return code === "EPERM" || code === "EACCES";
+}
+
+/** Append a one-line note when the search couldn't read everything because of
+ * permissions — either the JS fallback hit EPERM/EACCES on some paths, or rg's
+ * stderr reported it. Without this the tool silently under-matches: the model
+ * (and the user) never learn that files were skipped, not simply absent. */
+export function withAccessNote(output: string, rgStderr: string, permissionSkips: number): string {
+	const rgDenied = /operation not permitted|permission denied/i.test(rgStderr);
+	if (permissionSkips === 0 && !rgDenied) return output;
+	const skipped = permissionSkips > 0 ? `${permissionSkips} path(s)` : "some paths";
+	const note = `[note: ${skipped} skipped — permission denied. On macOS, grant your terminal app Full Disk Access in System Settings → Privacy & Security, then restart it.]`;
+	return output ? `${output}\n${note}` : note;
 }
 
 export async function execGrep(args: Record<string, unknown>, cwd: string, config: AppConfig): Promise<ToolResult> {
@@ -273,15 +296,38 @@ export async function execGrep(args: Record<string, unknown>, cwd: string, confi
 		// a tool call argument, and a shell-interpolated `'${pattern}'` is
 		// exploitable by anything containing a single quote (confirmed with a
 		// payload that ran an injected command).
+		// stdio: capture stderr instead of letting it inherit the parent's —
+		// otherwise rg's per-file warnings ("path: Permission denied") print
+		// straight into the Ink TUI, corrupting the frame, and never reach the
+		// error object below where we want to inspect them.
 		output = execFileSync("rg", [...flags, "--", pattern, searchPath], {
 			encoding: "utf-8",
 			timeout: 10_000,
 			maxBuffer: config.maxToolOutputBytes,
+			stdio: ["ignore", "pipe", "pipe"],
 		});
-	} catch {
-		// rg isn't installed or returned an error — walk the tree and
-		// match content ourselves, skipping node_modules/.git/etc and
-		// .gitignore matches.
+	} catch (err) {
+		// rg's exit codes: 0 = matches found, 1 = ran cleanly but nothing
+		// matched, 2 = a real error (bad regex, unreadable root, …). Node's
+		// execFileSync throws on any non-zero exit, so we have to disambiguate.
+		const e = err as { status?: number | null; code?: string; stderr?: string | Buffer };
+		const rgStderr = typeof e.stderr === "string" ? e.stderr : e.stderr ? e.stderr.toString() : "";
+
+		// Exit 1 = "no matches". rg already did the work and found nothing —
+		// return immediately. The old code fell through to the whole-tree JS
+		// walk here on *every* empty search: pointless work, and on a large
+		// tree under ~/Documents it re-walks macOS-protected folders, firing a
+		// TCC permission prompt for a query that was simply going to be empty.
+		if (e.status === 1) {
+			return { content: withAccessNote("No matches found", rgStderr, 0) };
+		}
+
+		// Anything else — rg not installed (ENOENT), wrong-arch binary, timeout,
+		// buffer overflow, or a genuine rg error (status 2) — falls back to the
+		// JS walk. Track paths skipped for permission reasons so a macOS TCC /
+		// Full Disk Access problem surfaces instead of silently under-matching.
+		let permissionSkips = 0;
+
 		let patternRe: RegExp;
 		try {
 			patternRe = new RegExp(literal ? escapeRegExp(pattern) : pattern, ignoreCase ? "i" : "");
@@ -298,7 +344,8 @@ export async function execGrep(args: Record<string, unknown>, cwd: string, confi
 			let stats: Awaited<ReturnType<typeof stat>>;
 			try {
 				stats = await stat(absPath);
-			} catch {
+			} catch (statErr) {
+				if (isPermissionError(statErr)) permissionSkips++;
 				continue;
 			}
 			if (stats.size > MAX_GREP_FILE_BYTES) continue;
@@ -306,7 +353,8 @@ export async function execGrep(args: Record<string, unknown>, cwd: string, confi
 			let fileText: string;
 			try {
 				fileText = await readFile(absPath, "utf-8");
-			} catch {
+			} catch (readErr) {
+				if (isPermissionError(readErr)) permissionSkips++;
 				continue;
 			}
 
@@ -327,7 +375,7 @@ export async function execGrep(args: Record<string, unknown>, cwd: string, confi
 			}
 		}
 
-		output = blocks.join("\n");
+		output = withAccessNote(blocks.join("\n"), rgStderr, permissionSkips);
 	}
 
 	const lines = output.trim().split("\n");

@@ -10,6 +10,15 @@ import { isStreamingActive, isTerminalSuspended } from "../core/stdin-manager.ts
  *    leave stale copies of the live region stacked on screen. Debounced so a
  *    drag-resize burst triggers one reset once it settles.
  *
+ * 1b. Focus regain (alt-tab). While the window is unfocused the terminal
+ *    (Termius, and others) may throttle or coalesce rendering and reset the
+ *    scroll region, so Ink's cursor-relative incremental frames stack up —
+ *    the composer's top border reappears several times over. The terminal
+ *    itself emits no resize, so nothing triggered a redraw; the only known
+ *    workaround was to resize manually. We now enable focus reporting
+ *    (\x1b[?1004h) and treat a focus-in report (\x1b[I) as the same desync
+ *    signal as a resize, running the shared remedy once the run settles.
+ *
  * 2. Terminal scroll. Ink's log-update writes a full frame per redraw
  *    starting with CUU (`\x1b[<n>A`), assuming the cursor sits exactly where
  *    the previous frame left it. When the viewport is scrolled up that
@@ -103,6 +112,29 @@ export function useTerminalResync(onResync: () => void): void {
 			resizeTimer = setTimeout(doResync, 80);
 		};
 		out.on("resize", onResize);
+
+		// --- focus regain: enable focus reporting, resync on focus-in ---
+		// \x1b[?1004h asks the terminal to report focus changes as \x1b[I
+		// (in) / \x1b[O (out). Terminals that don't support it ignore the
+		// request. The composer's input parser drops both reports explicitly.
+		let focusReportingOn = false;
+		if (process.stdin.isTTY) {
+			origWrite("\x1b[?1004h");
+			focusReportingOn = true;
+		}
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: focus-in report
+		const FOCUS_IN_RE = /\x1b\[I/;
+		let focusTimer: ReturnType<typeof setTimeout> | null = null;
+		const onFocusData = (chunk: Buffer) => {
+			// Debounced: an alt-tab can emit focus-out then focus-in in quick
+			// succession, and some terminals repeat the report. One resync per
+			// settle is enough; doResync's own guards defer it if the run is
+			// streaming, suspended, or the user is scrolled up.
+			if (!FOCUS_IN_RE.test(chunk.toString("latin1"))) return;
+			if (focusTimer) clearTimeout(focusTimer);
+			focusTimer = setTimeout(doResync, 80);
+		};
+		if (process.stdin.isTTY) process.stdin.on("data", onFocusData);
 
 		// Flush a deferred resync once streaming ends / terminal is released /
 		// the user scrolls back to the bottom — but only after a fresh poll has
@@ -225,12 +257,20 @@ export function useTerminalResync(onResync: () => void): void {
 
 		const restore = () => {
 			out.write = origWrite;
+			// Stop the terminal reporting focus once we're no longer listening,
+			// so a later plain shell doesn't receive \x1b[I / \x1b[O noise.
+			if (focusReportingOn) {
+				origWrite("\x1b[?1004l");
+				focusReportingOn = false;
+			}
 		};
 		process.on("exit", restore);
 
 		return () => {
 			out.off("resize", onResize);
 			if (resizeTimer) clearTimeout(resizeTimer);
+			if (focusTimer) clearTimeout(focusTimer);
+			process.stdin.off("data", onFocusData);
 			clearInterval(pollInterval);
 			clearInterval(rawModeCheck);
 			cancelActiveQuery?.();
