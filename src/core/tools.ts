@@ -10,10 +10,12 @@ import {
 	execPlanRead,
 	execPlanWrite,
 } from "./plan.ts";
+import type { SshHost } from "./ssh.ts";
 import { execBash } from "./tools/bash.ts";
 import { execEdit, execRead, execWrite } from "./tools/files.ts";
 import { execFind, execGrep, execLs } from "./tools/search.ts";
 import type { ConfirmBash, ToolExecutor, ToolResult } from "./tools/shared.ts";
+import { execSsh } from "./tools/ssh.ts";
 import { execTask, type TaskExecutorDeps } from "./tools/task.ts";
 import { execWebFetch, execWebSearch } from "./tools/web.ts";
 
@@ -26,7 +28,12 @@ export type { TaskExecutorDeps } from "./tools/task.ts";
 // Tool definitions (OpenAI function calling format)
 // ============================================================================
 
-export function getToolDefinitions(personaNames?: string[], mainModel?: string, subagentModel?: string): Tool[] {
+export function getToolDefinitions(
+	personaNames?: string[],
+	mainModel?: string,
+	subagentModel?: string,
+	sshHostNames?: string[],
+): Tool[] {
 	const personaList =
 		personaNames && personaNames.length > 0
 			? `Available subagents: ${personaNames.join(", ")}. Defaults to "${personaNames.includes("worker") ? "worker" : personaNames[0]}" if omitted.`
@@ -262,6 +269,39 @@ export function getToolDefinitions(personaNames?: string[], mainModel?: string, 
 					},
 				]
 			: []),
+		// SSH tool — only when hosts are configured
+		...(sshHostNames?.length
+			? [
+					{
+						type: "function" as const,
+						function: {
+							name: "ssh",
+							description:
+								"Execute one command on a remote host via SSH. Hosts are configured in\n" +
+								"~/.cast/ssh.json (global) or .cast/ssh.json (project). Returns combined\nstdout+stderr. Use for remote server management, deployment, debugging.\n\nAvailable hosts:\n" +
+								sshHostNames.map((n) => `- ${n}`).join("\n"),
+							parameters: {
+								type: "object",
+								properties: {
+									host: {
+										type: "string",
+										description: "Host name key from configured SSH hosts",
+									},
+									command: {
+										type: "string",
+										description: "Remote command to execute",
+									},
+									timeout: {
+										type: "number",
+										description: "Timeout in seconds. Default 180.",
+									},
+								},
+								required: ["host", "command"],
+							},
+						},
+					},
+				]
+			: []),
 		// Plan mode tools — always defined, filtered via disabledTools when not in
 		// plan mode, so the model only ever sees them while /plan is active (no
 		// "only available in plan mode" boilerplate needed in the descriptions).
@@ -425,6 +465,7 @@ export function createToolExecutor(
 	confirmBash?: ConfirmBash,
 	taskDeps?: TaskExecutorDeps,
 	planState?: PlanState,
+	sshHosts?: SshHost[],
 ): ToolExecutor {
 	return async (name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> => {
 		try {
@@ -447,6 +488,8 @@ export function createToolExecutor(
 					return await execWebSearch(args, signal);
 				case "web_fetch":
 					return await execWebFetch(args, signal);
+				case "ssh":
+					return await execSsh(args, sshHosts ?? [], config, confirmBash, signal);
 				case "task":
 					if (!taskDeps)
 						return { content: "Task tool not available — no dependencies configured.", isError: true };

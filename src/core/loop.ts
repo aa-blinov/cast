@@ -21,6 +21,7 @@ import {
 } from "./plan.ts";
 import { promptsDir, readRequiredPrompt } from "./prompts.ts";
 import { compactMessages, estimateTokens, shouldCompact } from "./session.ts";
+import type { SshHost } from "./ssh.ts";
 import type { SubagentPrompt } from "./subagents.ts";
 import { type ConfirmBash, createToolExecutor, getToolDefinitions, type ToolResult } from "./tools.ts";
 
@@ -344,6 +345,8 @@ export interface LoopConfig {
 	 * per-call array (rules only auto-attach within a single submit).
 	 */
 	contextFiles?: string[];
+	/** Configured SSH hosts — when non-empty, the `ssh` tool is registered. */
+	sshHosts?: SshHost[];
 }
 
 // ============================================================================
@@ -375,8 +378,9 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 	const currentPersonaObj = loopConfig.personas?.find((p) => p.name === loopConfig.currentPersona);
 	const subagentsEnabled = currentPersonaObj?.subagents === true;
 	const subagentNames = subagentsEnabled ? loopConfig.subagentPrompts?.map((p) => p.name) : undefined;
+	const sshHostNames = loopConfig.sshHosts?.map((h) => h.name);
 	const allTools = [
-		...getToolDefinitions(subagentNames, initialModel, loopConfig.subagentModel),
+		...getToolDefinitions(subagentNames, initialModel, loopConfig.subagentModel, sshHostNames),
 		...(loopConfig.mcpTools ?? []),
 	];
 	const disabledTools = loopConfig.disabledTools;
@@ -412,6 +416,7 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 				}
 			: undefined,
 		loopConfig.planState,
+		loopConfig.sshHosts,
 	);
 	const executeTool = (name: string, args: Record<string, unknown>, toolSignal?: AbortSignal): Promise<ToolResult> => {
 		// Same principle as the task gate above: a tool filtered out of the
