@@ -37,6 +37,66 @@ const DOOM_LOOP_THRESHOLD = 3;
 // the doom-loop detector, which keys on exact args). See plan.ts.
 const TERMINAL_TOOLS = new Set<string>(TERMINAL_TOOL_NAMES);
 
+// Common wrong tool names models reach for (trained on other harnesses) mapped
+// to cast's real tools — so a hallucinated call gets pointed at the right tool
+// instead of a bare "Unknown tool", which some models retry identically until
+// the doom-loop guard trips.
+const TOOL_ALIASES: Record<string, string> = {
+	glob: "find",
+	search: "grep",
+	search_files: "grep",
+	ripgrep: "grep",
+	view: "read",
+	cat: "read",
+	open: "read",
+	list_dir: "ls",
+	list_files: "ls",
+	str_replace: "edit",
+	str_replace_editor: "edit",
+	apply_patch: "edit",
+	create_file: "write",
+	run: "bash",
+	shell: "bash",
+	run_command: "bash",
+	execute: "bash",
+};
+
+/** Levenshtein distance, capped small — just enough to catch a typo'd tool name. */
+function editDistance(a: string, b: string): number {
+	const m = a.length;
+	const n = b.length;
+	let prev = Array.from({ length: n + 1 }, (_, i) => i);
+	let curr = new Array<number>(n + 1);
+	for (let i = 1; i <= m; i++) {
+		curr[0] = i;
+		for (let j = 1; j <= n; j++) {
+			const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+			curr[j] = Math.min(prev[j]! + 1, curr[j - 1]! + 1, prev[j - 1]! + cost);
+		}
+		[prev, curr] = [curr, prev];
+	}
+	return prev[n]!;
+}
+
+/** Error result for a tool name that isn't advertised: name the closest real
+ * tool (alias table first, then nearest by edit distance) and list what's
+ * available, so the model corrects instead of retrying the fabricated name. */
+function unknownToolResult(name: string, available: string[]): ToolResult {
+	const aliased = TOOL_ALIASES[name.toLowerCase()];
+	const suggestion =
+		aliased && available.includes(aliased)
+			? aliased
+			: available
+					.map((t) => ({ t, d: editDistance(name.toLowerCase(), t.toLowerCase()) }))
+					.filter((x) => x.d <= Math.max(2, Math.floor(name.length / 3)))
+					.sort((a, b) => a.d - b.d)[0]?.t;
+	const hint = suggestion ? ` Did you mean "${suggestion}"?` : "";
+	return {
+		content: `Unknown tool "${name}".${hint} Available tools: ${available.join(", ")}. Call one of these — do not retry "${name}".`,
+		isError: true,
+	};
+}
+
 // Prompts for the LLM call that summarizes old messages during compaction —
 // content, not code, so they live in prompts/ alongside the persona files
 // instead of as inline strings here. Two variants (matching pi): a fresh
@@ -321,6 +381,9 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 	];
 	const disabledTools = loopConfig.disabledTools;
 	const tools = disabledTools?.size ? allTools.filter((t) => !disabledTools.has(t.function.name)) : allTools;
+	// Names the model is actually allowed to call this turn — used to catch
+	// fabricated tool names in executeTool below.
+	const advertisedNames = new Set(tools.map((t) => t.function.name));
 
 	// Doom-loop detector: tracks the last DOOM_LOOP_THRESHOLD tool calls
 	// (name + serialized args). When the same call appears that many times in
@@ -372,7 +435,14 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 			}
 		}
 		const mcpTool = mcpToolIndex?.get(name);
-		return mcpTool ? mcpTool.call(args, toolSignal) : builtinExecuteTool(name, args, toolSignal);
+		if (mcpTool) return mcpTool.call(args, toolSignal);
+		// Name isn't an MCP tool and isn't in the advertised (enabled) set — the
+		// model fabricated it. Point it at the right tool instead of a bare
+		// "Unknown tool" the model tends to retry until the doom-loop guard trips.
+		if (!advertisedNames.has(name)) {
+			return Promise.resolve(unknownToolResult(name, [...advertisedNames]));
+		}
+		return builtinExecuteTool(name, args, toolSignal);
 	};
 	const client = createClient(config);
 	const steeringQueue = loopConfig.steeringQueue ?? new MessageQueue();
