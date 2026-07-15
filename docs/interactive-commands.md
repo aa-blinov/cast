@@ -110,6 +110,7 @@ Token usage and context size are shown automatically in the TUI status bar (prom
 | `/repo` | Show cwd, git branch, dirty state, remote, and HEAD |
 | `/keys` | List all keybindings |
 | `/help` | Show the command list |
+| `/ssh` | Manage SSH hosts — list, add, remove (persists to `~/.cast/ssh.json`) |
 
 ## Keybindings
 

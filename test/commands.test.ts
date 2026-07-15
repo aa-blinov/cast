@@ -157,6 +157,8 @@ function createFakeDeps(overrides?: Partial<CommandDeps> & { running?: boolean }
 		setReasoningMeta: track("setReasoningMeta"),
 		personaOptions: {},
 		setPersonaOptions: track("setPersonaOptions"),
+		sshHosts: overrides?.sshHosts ?? [],
+		setSshHosts: track("setSshHosts"),
 		...overrides,
 	};
 
@@ -499,5 +501,103 @@ describe("plan mode commands", () => {
 		await handleInput("/plan-model off", undefined, deps);
 		expect(calls.setPlanModel?.[0]).toEqual([undefined]);
 		expect(noticeText(calls)).toContain("plan mode uses the main model");
+	});
+});
+
+describe("/ssh", () => {
+	it("/ssh with no hosts shows notice", async () => {
+		const { deps, calls } = createFakeDeps();
+		await handleInput("/ssh", undefined, deps);
+		const msg = String(calls["agent.addDisplayMessage"]?.[1]?.[0]?.content ?? "");
+		expect(msg).toContain("No SSH hosts");
+	});
+
+	it("/ssh lists configured hosts", async () => {
+		const { deps, calls } = createFakeDeps({
+			sshHosts: [{ name: "myserver", host: "1.2.3.4", username: "root", port: 22, keyPath: "~/.ssh/id_rsa" }],
+		});
+		await handleInput("/ssh", undefined, deps);
+		const msg = String(calls["agent.addDisplayMessage"]?.[1]?.[0]?.content ?? "");
+		expect(msg).toContain("myserver");
+		expect(msg).toContain("root@1.2.3.4");
+		expect(msg).toContain("key");
+	});
+
+	it("/ssh add cancelled at first prompt → no save", async () => {
+		const { deps, calls } = createFakeDeps();
+		await handleInput("/ssh add", undefined, deps);
+		expect(noticeText(calls)).toContain("Cancelled");
+		expect(calls.setSshHosts).toBeUndefined();
+	});
+
+	it("/ssh add full flow → hosts updated", async () => {
+		// Create a fake key file in the temp $HOME so validation passes
+		const { mkdirSync, writeFileSync, chmodSync } = await import("node:fs");
+		const sshDir = join(process.env.HOME!, ".ssh");
+		mkdirSync(sshDir, { recursive: true });
+		const keyPath = join(sshDir, "id_ed25519");
+		writeFileSync(keyPath, "fake-key");
+		chmodSync(keyPath, 0o600);
+
+		let promptStep = 0;
+		const promptResponses = ["myserver", "1.2.3.4", "root", "22"];
+		let pickStep = 0;
+		const pickResponses = ["key", keyPath, "default"];
+
+		const pickers: import("../src/pickers/types.ts").Pickers = {
+			promptText: async (_label, _def, _placeholder, _error) => {
+				if (promptStep >= promptResponses.length) return keyPath;
+				return promptResponses[promptStep++] ?? null;
+			},
+			pickOption: async () => pickResponses[pickStep++] ?? null,
+			pickMulti: async () => null,
+			log: () => {},
+		};
+
+		const { deps, calls } = createFakeDeps({ pickers } as never);
+		await handleInput("/ssh add", undefined, deps);
+		expect(calls.setSshHosts).toHaveLength(1);
+		expect(noticeText(calls)).toContain("added");
+	});
+
+	it("/ssh remove with name removes host", async () => {
+		const hosts = [{ name: "myserver", host: "1.2.3.4", username: "root" }];
+		let pickStep = 0;
+		const pickers: import("../src/pickers/types.ts").Pickers = {
+			promptText: async () => null,
+			pickOption: async () => {
+				pickStep++;
+				return pickStep === 1 ? true : null;
+			},
+			pickMulti: async () => null,
+			log: () => {},
+		};
+		const { deps, calls } = createFakeDeps({ sshHosts: hosts, pickers } as never);
+		await handleInput("/ssh remove myserver", undefined, deps);
+		expect(calls.setSshHosts).toHaveLength(1);
+		const updated = (calls.setSshHosts as never[][])[0]?.[0] as Array<{ name: string }>;
+		expect(updated).toHaveLength(0);
+		expect(noticeText(calls)).toContain("removed");
+	});
+
+	it("/ssh remove cancelled → no change", async () => {
+		const hosts = [{ name: "myserver", host: "1.2.3.4" }];
+		const pickers: import("../src/pickers/types.ts").Pickers = {
+			promptText: async () => null,
+			pickOption: async () => false,
+			pickMulti: async () => null,
+			log: () => {},
+		};
+		const { deps, calls } = createFakeDeps({ sshHosts: hosts, pickers } as never);
+		await handleInput("/ssh remove myserver", undefined, deps);
+		expect(calls.setSshHosts).toBeUndefined();
+		expect(noticeText(calls)).toContain("Cancelled");
+	});
+
+	it("/ssh remove unknown name → error", async () => {
+		const hosts = [{ name: "myserver", host: "1.2.3.4" }];
+		const { deps, calls } = createFakeDeps({ sshHosts: hosts });
+		await handleInput("/ssh remove nonexistent", undefined, deps);
+		expect(noticeText(calls)).toContain("Unknown host");
 	});
 });

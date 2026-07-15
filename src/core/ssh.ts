@@ -1,6 +1,16 @@
 import { execSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	renameSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 export interface SshHostConfig {
@@ -64,7 +74,9 @@ export function resolveSshHosts(cwd: string, trusted: boolean): SshHost[] {
 // ControlMaster — SSH connection reuse via Unix sockets
 // ============================================================================
 
-const CONTROL_DIR = join(tmpdir(), "cast-ssh-ctl");
+// Use /tmp directly — tmpdir() on macOS can produce paths that exceed the
+// 104-byte Unix socket path limit when SSH expands %C.
+const CONTROL_DIR = join("/tmp", "cast-ssh-ctl");
 const CONTROL_PATH = join(CONTROL_DIR, "%C.sock");
 
 let controlDirReady = false;
@@ -115,6 +127,35 @@ export function hasSshpass(): boolean {
 		sshpassAvailable = false;
 	}
 	return sshpassAvailable;
+}
+
+/** Write hosts to `~/.cast/ssh.json` (or custom path). Atomic write (tmp + rename). */
+export function saveSshConfig(hosts: SshHost[], path: string = globalSshPath): void {
+	const dir = path.slice(0, path.lastIndexOf("/"));
+	mkdirSync(dir, { recursive: true });
+	const record: Record<string, SshHostConfig> = {};
+	for (const h of hosts) {
+		const { name, ...cfg } = h;
+		record[name] = cfg;
+	}
+	const tmp = `${path}.tmp.${process.pid}`;
+	writeFileSync(tmp, `${JSON.stringify({ hosts: record }, null, 2)}\n`, { mode: 0o600 });
+	renameSync(tmp, path);
+}
+
+const COMMON_SSH_KEY_NAMES = ["id_ed25519", "id_rsa", "id_ecdsa", "id_dsa", "id_ecdsa_sk", "id_ed25519_sk"];
+
+/** Scan ~/.ssh/ for common key files. Returns full paths, sorted ed25519 first. */
+export function scanSshKeys(): string[] {
+	const sshDir = join(homedir(), ".ssh");
+	if (!existsSync(sshDir)) return [];
+	try {
+		const files = readdirSync(sshDir);
+		const found = COMMON_SSH_KEY_NAMES.filter((name) => files.includes(name)).map((name) => join(sshDir, name));
+		return found;
+	} catch {
+		return [];
+	}
 }
 
 /** Remove the control dir on process exit. Registered once. */
