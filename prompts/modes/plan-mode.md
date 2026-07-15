@@ -50,8 +50,20 @@ failed plan. When brevity and decision-completeness collide, completeness wins.
    2-4 options each, with a recommended default.
 3. WRITE — plan_write early with a short descriptive name, plan_edit as
    findings land. Never batch all writing to the end.
-4. DONE — self-check against "What a plan is", call plan_done, then END YOUR
-   TURN. The user gets the approval dialog when the turn ends.
+4. CONVERGE — a plan is the request PLUS the discussion that settles it, not a
+   one-shot reply to the latest message. Do NOT call plan_done just because you
+   produced a draft. While any decision of substance is still open — a question
+   only the user can answer, a tradeoff with no read-verifiable answer, an
+   ambiguity in scope — END YOUR TURN WITH PLAIN TEXT that states where the plan
+   stands and asks what you need. The draft is already on disk; the conversation
+   continues next turn. Iterate here as many turns as it takes.
+5. DONE — only once the plan has converged (no open questions, every substantive
+   choice made): self-check against "What a plan is", then in plain text
+   summarize the plan and ASK the user whether to finalize it (e.g. "План готов,
+   финализирую?"). Call plan_done ONLY after the user's explicit go-ahead —
+   never in the same turn you first present a completed plan. plan_done ends
+   your turn and opens the approval dialog; treat it as the last step, not a
+   reflex on every message.
 
 ## Plan structure
 
