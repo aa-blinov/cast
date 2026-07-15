@@ -1,4 +1,5 @@
 import { execFileSync, execSync } from "node:child_process";
+import { homedir } from "node:os";
 import OpenAI from "openai";
 import { type AppConfig, runOnboardingCheck } from "../core/config.ts";
 import { formatContextFilesForPrompt, loadProjectContextFiles } from "../core/context-files.ts";
@@ -20,6 +21,7 @@ import { formatRuleInvocation, type Rule } from "../core/rules.ts";
 import { addUsage, createSession, type SessionState, saveSession } from "../core/session.ts";
 import { loadSettings, type PermissionMode, updateSettings } from "../core/settings.ts";
 import { formatSkillInvocation, type Skill } from "../core/skills.ts";
+import { type SshHost, saveSshConfig, scanSshKeys, validateKeyPermissions } from "../core/ssh.ts";
 import { getReasoningOptions, type ModelReasoningMeta } from "../core/vendors.ts";
 import {
 	selectMcpServers,
@@ -75,6 +77,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/s", description: "Alias for /steer", takesArgs: true },
 	{ name: "/sessions", description: "List / switch / delete sessions" },
 	{ name: "/skills", description: "List loaded skills" },
+	{ name: "/ssh", description: "Manage SSH hosts (list, add, remove)" },
 	{ name: "/steer", description: "Inject a message while running", takesArgs: true },
 	{ name: "/subagent-model", description: "Show or change subagent model" },
 	{ name: "/theme", description: "Change color theme" },
@@ -119,6 +122,8 @@ export interface CommandDeps {
 	setProjectTrusted: (t: boolean) => void;
 	projectDeps: ProjectResolverDeps;
 	pickers: Pickers;
+	sshHosts: SshHost[];
+	setSshHosts: (hosts: SshHost[]) => void;
 	reasoningMeta: ModelReasoningMeta | undefined;
 	setReasoningMeta: (m: ModelReasoningMeta | undefined) => void;
 	subagentModel?: string;
@@ -721,6 +726,194 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		return;
 	}
 
+	if (input === "/ssh" || input.startsWith("/ssh ")) {
+		const sub = input.slice("/ssh".length).trim();
+		if (sub === "add") {
+			// --- Interactive wizard ---
+			const name = await deps.pickers.promptText("SSH host name (e.g. my-server)");
+			if (!name) {
+				showNotice("[Cancelled]");
+				return;
+			}
+			if (deps.sshHosts.some((h) => h.name === name)) {
+				showNotice(`[Host "${name}" already exists. Use a different name.]`);
+				return;
+			}
+			const host = await deps.pickers.promptText("Host address (IP or hostname)");
+			if (!host) {
+				showNotice("[Cancelled]");
+				return;
+			}
+			const username = await deps.pickers.promptText("Username", undefined, "root");
+			if (!username) {
+				showNotice("[Cancelled]");
+				return;
+			}
+			const portStr = await deps.pickers.promptText("Port", undefined, "22");
+			if (!portStr) {
+				showNotice("[Cancelled]");
+				return;
+			}
+			const port = Number.parseInt(portStr, 10) || 22;
+
+			// Auth method
+			const authMethod = await deps.pickers.pickOption(
+				[
+					{ value: "key" as const, label: "Key-based (keyPath)" },
+					{ value: "password" as const, label: "Password (requires sshpass)" },
+				],
+				{ title: "Authentication method" },
+			);
+			if (!authMethod) {
+				showNotice("[Cancelled]");
+				return;
+			}
+
+			let keyPath: string | undefined;
+			let password: string | undefined;
+
+			if (authMethod === "key") {
+				const availableKeys = scanSshKeys();
+				if (availableKeys.length > 0) {
+					const keyOptions = [
+						...availableKeys.map((k) => ({ value: k, label: k })),
+						{ value: "__other__", label: "Other (enter path)" },
+					];
+					const picked = await deps.pickers.pickOption(keyOptions, {
+						title: "SSH key",
+						defaultIndex: 0,
+					});
+					if (!picked) {
+						showNotice("[Cancelled]");
+						return;
+					}
+					if (picked === "__other__") {
+						const custom = await deps.pickers.promptText("Key path", undefined, "~/.ssh/id_ed25519");
+						if (!custom) {
+							showNotice("[Cancelled]");
+							return;
+						}
+						keyPath = custom;
+					} else {
+						keyPath = picked;
+					}
+				} else {
+					const custom = await deps.pickers.promptText("Key path", undefined, "~/.ssh/id_ed25519");
+					if (!custom) {
+						showNotice("[Cancelled]");
+						return;
+					}
+					keyPath = custom;
+				}
+				// Validate key with retry loop
+				while (true) {
+					const err = keyPath
+						? validateKeyPermissions(keyPath.startsWith("~/") ? keyPath.replace("~", homedir()) : keyPath)
+						: undefined;
+					if (!err) break;
+					const retry = await deps.pickers.promptText(err, keyPath, "~/.ssh/id_ed25519");
+					if (!retry) {
+						showNotice("[Cancelled]");
+						return;
+					}
+					keyPath = retry;
+				}
+			} else {
+				const pw = await deps.pickers.promptText("Password");
+				if (!pw) {
+					showNotice("[Cancelled]");
+					return;
+				}
+				password = pw;
+			}
+
+			// Dangerous commands
+			const dangerMode = await deps.pickers.pickOption(
+				[
+					{ value: "default" as const, label: "Default (block dangerous commands like sudo)" },
+					{ value: "bypass" as const, label: "Bypass (allow all commands — for hosts where sudo is expected)" },
+				],
+				{ title: "Dangerous command policy" },
+			);
+			if (!dangerMode) {
+				showNotice("[Cancelled]");
+				return;
+			}
+
+			const newHost: SshHost = { name, host, username, port, dangerousCommands: dangerMode };
+			if (keyPath) newHost.keyPath = keyPath;
+			if (password) newHost.password = password;
+
+			const updated = [...deps.sshHosts, newHost];
+			saveSshConfig(updated);
+			deps.setSshHosts(updated);
+			showNotice(`[SSH host "${name}" added]`);
+			return;
+		}
+
+		if (sub === "remove" || sub.startsWith("remove ")) {
+			const targetName = sub.slice("remove".length).trim();
+			if (deps.sshHosts.length === 0) {
+				showNotice("[No SSH hosts to remove]");
+				return;
+			}
+			let removeName = targetName;
+			if (!removeName) {
+				const picked = await deps.pickers.pickOption(
+					deps.sshHosts.map((h) => ({
+						value: h.name,
+						label: `${h.name} (${h.username ? `${h.username}@` : ""}${h.host})`,
+					})),
+					{ title: "Remove which SSH host?" },
+				);
+				if (!picked) {
+					showNotice("[Cancelled]");
+					return;
+				}
+				removeName = picked;
+			}
+			const found = deps.sshHosts.find((h) => h.name === removeName);
+			if (!found) {
+				showNotice(`[Unknown host "${removeName}". Use /ssh to list hosts.]`);
+				return;
+			}
+			const confirm = await deps.pickers.pickOption(
+				[
+					{ value: true, label: `Yes, remove "${removeName}"` },
+					{ value: false, label: "Cancel" },
+				],
+				{ title: `Remove SSH host "${removeName}"?` },
+			);
+			if (confirm !== true) {
+				showNotice("[Cancelled]");
+				return;
+			}
+			const updated = deps.sshHosts.filter((h) => h.name !== removeName);
+			saveSshConfig(updated);
+			deps.setSshHosts(updated);
+			showNotice(`[SSH host "${removeName}" removed]`);
+			return;
+		}
+
+		// /ssh (no subcommand) — list hosts
+		deps.agent.addDisplayMessage({ role: "user", content: input });
+		if (deps.sshHosts.length === 0) {
+			deps.agent.addDisplayMessage({
+				role: "warning",
+				content: "No SSH hosts configured. Use /ssh add to add one, or edit ~/.cast/ssh.json",
+			});
+			return;
+		}
+		const lines = deps.sshHosts.map((h) => {
+			const user = h.username ? `${h.username}@` : "";
+			const auth = h.password ? "password" : "key";
+			const danger = h.dangerousCommands === "bypass" ? " (no safety check)" : "";
+			return `  ${h.name.padEnd(16)} ${user}${h.host}:${h.port || 22}  ${auth}${danger}`;
+		});
+		deps.agent.addDisplayMessage({ role: "warning", content: `SSH Hosts\n${lines.join("\n")}` });
+		return;
+	}
+
 	if (input === "/theme" || input.startsWith("/theme ")) {
 		const arg = input.slice("/theme".length).trim();
 		if (arg) {
@@ -947,6 +1140,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 				"  /provider           Change provider URL\n" +
 				"  /permissions        Change bash confirmation mode\n" +
 				"  /web                Toggle web tools (web_search, web_fetch)\n" +
+				"  /ssh                Manage SSH hosts (list, add, remove)\n" +
 				"  /theme              Change color theme\n" +
 				"  /usage              Show session token/cost usage\n" +
 				"  /sessions           List/switch sessions\n" +
