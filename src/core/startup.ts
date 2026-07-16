@@ -35,7 +35,7 @@ import { setModelsCache } from "./readline.ts";
 import type { Rule } from "./rules.ts";
 import { type AgentRunner, createAgentRunner } from "./runner.ts";
 import { createSession, getMostRecentSession, loadSession, type SessionState } from "./session.ts";
-import { type PermissionMode, type Settings, updateSettings } from "./settings.ts";
+import { loadSettings, type PermissionMode, type Settings, updateSettings } from "./settings.ts";
 import type { Skill } from "./skills.ts";
 import type { SshHost } from "./ssh.ts";
 import { resolveSshHosts } from "./ssh.ts";
@@ -146,7 +146,17 @@ export async function ensureConnectionAlive(config: AppConfig, pickers: Pickers)
 		if (!creds) process.exit(0);
 		config.baseURL = creds.baseURL;
 		config.apiKey = creds.apiKey;
-		updateSettings({ providerUrl: creds.baseURL, apiKey: creds.apiKey });
+		// Seed the providers array so /provider can list and switch from the
+		// get-go; legacy users with only providerUrl/apiKey set are covered by
+		// migrateProviders on read.
+		const existing = loadSettings().providers ?? [];
+		const providerName = "default";
+		const providers = existing.some((p) => p.name === providerName)
+			? existing.map((p) =>
+					p.name === providerName ? { name: providerName, url: creds.baseURL, apiKey: creds.apiKey } : p,
+				)
+			: [...existing, { name: providerName, url: creds.baseURL, apiKey: creds.apiKey }];
+		updateSettings({ providerUrl: creds.baseURL, apiKey: creds.apiKey, providers });
 		changed = true;
 	}
 }

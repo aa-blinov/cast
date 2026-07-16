@@ -1,7 +1,6 @@
 import { execFileSync, execSync } from "node:child_process";
 import { homedir } from "node:os";
-import OpenAI from "openai";
-import { type AppConfig, runOnboardingCheck } from "../core/config.ts";
+import { type AppConfig, probeProvider, runOnboardingCheck } from "../core/config.ts";
 import { formatContextFilesForPrompt, loadProjectContextFiles } from "../core/context-files.ts";
 import { compactSessionMessages, PLAN_COMPACTION_PROMPT } from "../core/loop.ts";
 import { closeMcpConnections, formatMcpForPrompt, type McpSetupResult } from "../core/mcp.ts";
@@ -19,7 +18,13 @@ import {
 import { getModelsCache } from "../core/readline.ts";
 import { formatRuleInvocation, type Rule } from "../core/rules.ts";
 import { addUsage, createSession, estimateTokens, type SessionState, saveSession } from "../core/session.ts";
-import { loadSettings, type PermissionMode, type StatusBarConfig, updateSettings } from "../core/settings.ts";
+import {
+	loadSettings,
+	type PermissionMode,
+	type Provider,
+	type StatusBarConfig,
+	updateSettings,
+} from "../core/settings.ts";
 import { formatSkillInvocation, type Skill } from "../core/skills.ts";
 import { type SshHost, saveSshConfig, scanSshKeys, validateKeyPermissions } from "../core/ssh.ts";
 import { getReasoningOptions, type ModelReasoningMeta } from "../core/vendors.ts";
@@ -65,7 +70,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/persona", description: "Show or change persona" },
 	{ name: "/plan", description: "Enter plan mode (explore + plan only)" },
 	{ name: "/plan-model", description: "Show or change the plan-mode model" },
-	{ name: "/provider", description: "Change provider URL and API key" },
+	{ name: "/provider", description: "Switch / add / delete providers" },
 	{ name: "/q", description: "Alias for /queue", takesArgs: true },
 	{ name: "/qr", description: "Alias for /queue-reset" },
 	{ name: "/queue", description: "Queue a message for after the run", takesArgs: true },
@@ -654,40 +659,20 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		return;
 	}
 
-	if (input === "/provider") {
-		const newUrl = await deps.pickers.promptText(
-			`New base URL (current: ${config.baseURL})`,
-			undefined,
-			config.baseURL,
-		);
-		const newKey = await deps.pickers.promptText(
-			"New API key (current ends with)",
-			undefined,
-			config.apiKey.slice(-4),
-		);
-		const finalUrl = (newUrl ?? "").trim() || config.baseURL;
-		const finalKey = (newKey ?? "").trim() || config.apiKey;
-		if (finalUrl === config.baseURL && finalKey === config.apiKey) {
-			showNotice("[No changes.]");
+	// --- /provider helper: activate a provider + pick model ---
+	async function activateProvider(p: Provider): Promise<void> {
+		const probe = await probeProvider({ ...config, baseURL: p.url, apiKey: p.apiKey });
+		if (probe !== "ok" && probe !== "unknown") {
+			showNotice(`[Cannot reach provider "${p.name}": ${probe}]`);
 			return;
 		}
-		showNotice("[Verifying credentials...]");
-		try {
-			const testClient = new OpenAI({ baseURL: finalUrl, apiKey: finalKey, fetch: globalThis.fetch });
-			const list = await testClient.models.list();
-			await list[Symbol.asyncIterator]().next();
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			showNotice(`[Verification failed: ${message.slice(0, 200)}]`);
-			return;
-		}
-		config.baseURL = finalUrl;
-		config.apiKey = finalKey;
-		updateSettings({ providerUrl: finalUrl, apiKey: finalKey });
-		showNotice(`[Provider changed to: ${finalUrl}. Select a model.]`);
+		config.baseURL = p.url;
+		config.apiKey = p.apiKey;
+		updateSettings({ providerUrl: p.url, apiKey: p.apiKey });
+		showNotice(`[Provider: ${p.name}. Select a model.]`);
 		const selection = await selectModel(config, deps.pickers);
 		if (!selection) {
-			showNotice("[Cancelled — provider updated, but model unchanged (it may not work against the new provider)]");
+			showNotice("[Cancelled — provider updated, but model unchanged]");
 			return;
 		}
 		session.model = selection.model;
@@ -696,7 +681,163 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		await selectReasoningLevel(config, session.model, deps.pickers, selection.reasoningMeta);
 		updateSettings({ model: session.model, reasoningLevel: config.reasoningLevel });
 		agent.refresh();
-		showNotice(`[Model: ${session.model} (reasoning: ${config.reasoningLevel})]`);
+		showNotice(`[Provider: ${p.name}. Model: ${session.model}]`);
+	}
+
+	// --- /provider helper: add wizard (mirrors /ssh add shape) ---
+	async function addProviderWizard(existing: Provider[]): Promise<void> {
+		const name = await deps.pickers.promptText("Provider name (e.g. openrouter, local)");
+		if (!name) {
+			showNotice("[Cancelled]");
+			return;
+		}
+		if (existing.some((p) => p.name === name)) {
+			showNotice(`[Provider "${name}" already exists. Use a different name.]`);
+			return;
+		}
+		const url = await deps.pickers.promptText("Provider base URL", undefined, "https://api.openai.com/v1");
+		if (!url) {
+			showNotice("[Cancelled]");
+			return;
+		}
+		const key = await deps.pickers.promptText("Provider API key", undefined, "sk-...");
+		if (!key) {
+			showNotice("[Cancelled]");
+			return;
+		}
+
+		const probe = await probeProvider({ ...config, baseURL: url, apiKey: key });
+		if (probe !== "ok" && probe !== "unknown") {
+			showNotice(`[Verification failed: ${probe}. Provider not saved.]`);
+			return;
+		}
+
+		const newProvider: Provider = { name, url, apiKey: key };
+		// Single atomic write: providers array + active URL/key in one go.
+		updateSettings({
+			providers: [...existing, newProvider],
+			providerUrl: url,
+			apiKey: key,
+		});
+		config.baseURL = url;
+		config.apiKey = key;
+		showNotice(`[Provider "${name}" added and selected. Select a model.]`);
+		const selection = await selectModel(config, deps.pickers);
+		if (selection) {
+			session.model = selection.model;
+			deps.setReasoningMeta(selection.reasoningMeta);
+			if (selection.contextWindow && selection.contextWindow > 0) config.contextWindow = selection.contextWindow;
+			await selectReasoningLevel(config, session.model, deps.pickers, selection.reasoningMeta);
+			updateSettings({ model: session.model, reasoningLevel: config.reasoningLevel });
+			agent.refresh();
+		}
+		showNotice(`[Provider "${name}" added. Model: ${session.model}]`);
+	}
+
+	// --- /provider helper: delete picker ---
+	async function deleteProviderWizard(providers: Provider[]): Promise<void> {
+		if (providers.length === 0) {
+			showNotice("[No providers to delete]");
+			return;
+		}
+		const picked = await deps.pickers.pickOption(
+			providers.map((p) => ({ value: p.name, label: `${p.name}  ${p.url}` })),
+			{ title: "Delete which provider?" },
+		);
+		if (!picked) {
+			showNotice("[Cancelled]");
+			return;
+		}
+		const confirm = await deps.pickers.pickOption(
+			[
+				{ value: true, label: `Yes, remove "${picked}"` },
+				{ value: false, label: "Cancel" },
+			],
+			{ title: `Remove provider "${picked}"?` },
+		);
+		if (confirm !== true) {
+			showNotice("[Cancelled]");
+			return;
+		}
+
+		const updated = providers.filter((p) => p.name !== picked);
+		const wasActive = providers.find((p) => p.name === picked);
+		const isActive = wasActive && wasActive.url === config.baseURL && wasActive.apiKey === config.apiKey;
+
+		if (isActive && updated.length > 0) {
+			// Atomic: drop removed, switch active to the first remaining.
+			const fallback = updated[0]!;
+			updateSettings({
+				providers: updated,
+				providerUrl: fallback.url,
+				apiKey: fallback.apiKey,
+			});
+			config.baseURL = fallback.url;
+			config.apiKey = fallback.apiKey;
+			showNotice(`[Provider "${picked}" removed. Switched to "${fallback.name}".]`);
+		} else if (isActive && updated.length === 0) {
+			// Clear the legacy providerUrl/apiKey so migrateProviders doesn't
+			// resurrect the deleted provider as a "default" entry next startup.
+			// Empty strings (not undefined — spread drops undefined keys, which
+			// breaks the migration guard on next loadSettings).
+			updateSettings({ providers: updated, providerUrl: "", apiKey: "" });
+			config.baseURL = "";
+			config.apiKey = "";
+			showNotice(`[Provider "${picked}" removed. No providers left — use /provider add to add one.]`);
+		} else {
+			updateSettings({ providers: updated });
+			showNotice(`[Provider "${picked}" removed]`);
+		}
+	}
+
+	if (input === "/provider" || input.startsWith("/provider ")) {
+		const sub = input.slice("/provider".length).trim();
+		const settings = loadSettings();
+		const providers = settings.providers ?? [];
+
+		if (sub === "add") {
+			await addProviderWizard(providers);
+			return;
+		}
+		if (sub === "delete") {
+			await deleteProviderWizard(providers);
+			return;
+		}
+		if (sub) {
+			const found = providers.find((p) => p.name === sub);
+			if (!found) {
+				showNotice(`[Unknown provider "${sub}". Use /provider to list.]`);
+				return;
+			}
+			await activateProvider(found);
+			return;
+		}
+
+		// /provider (no subcommand) — picker, or auto-add when empty.
+		if (providers.length === 0) {
+			showNotice("[No providers configured. Adding a new one.]");
+			await addProviderWizard(providers);
+			return;
+		}
+		type ProviderChoice = { provider: Provider } | { action: "add" } | { action: "delete" };
+		const options: Array<{ value: ProviderChoice; label: string }> = providers.map((p) => ({
+			value: { provider: p },
+			label: `${p.name}  ${p.url}${p.url === config.baseURL ? "  (current)" : ""}`,
+		}));
+		options.push({ value: { action: "add" }, label: "Add a new provider..." });
+		options.push({ value: { action: "delete" }, label: "Delete a provider..." });
+
+		const picked = await deps.pickers.pickOption(options, { title: "Providers" });
+		if (!picked) {
+			showNotice("[Cancelled]");
+			return;
+		}
+		if ("action" in picked) {
+			if (picked.action === "add") await addProviderWizard(providers);
+			else await deleteProviderWizard(providers);
+			return;
+		}
+		await activateProvider(picked.provider);
 		return;
 	}
 
@@ -1225,7 +1366,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 				"  /reload             Re-scan skills, MCP, rules\n" +
 				"  /skill:<name>       Invoke a skill\n" +
 				"  /rule:<name>        Invoke a rule\n" +
-				"  /provider           Change provider URL\n" +
+				"  /provider [name]    Switch / add / delete providers\n" +
 				"  /permissions        Change bash confirmation mode\n" +
 				"  /web                Toggle web tools (web_search, web_fetch)\n" +
 				"  /ssh                Manage SSH hosts (list, add, remove)\n" +

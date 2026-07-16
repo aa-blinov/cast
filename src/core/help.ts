@@ -80,7 +80,7 @@ Interactive commands:
   /new                   Start a new session (autosaves current if non-empty)
   /model [name]          Show/change model (validated)
   /reasoning             Change reasoning level
-  /provider              Change provider endpoint and API key (validated)
+  /provider [name]       Switch / add / delete providers (validated)
   /persona [name]        Show/change persona
   /personas              List available personas
   /sessions              List saved sessions, switch to one, or "d<N>" to delete

@@ -443,6 +443,21 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 	<article class="content">
 		<h1>Changelog</h1>
 <p>All notable user-facing changes to cast, newest first.</p>
+<h2>0.6.5</h2>
+<h3>Added</h3>
+<ul>
+<li><strong>Multi-provider support</strong> — <code>/provider</code> now opens a picker to switch between saved providers; <code>/provider add</code> adds a new provider (name → URL → key wizard); <code>/provider delete</code> removes one. Providers persist in <code>settings.json</code> and the active one is remembered across sessions.</li>
+</ul>
+<h2>0.6.4</h2>
+<h3>Fixed</h3>
+<ul>
+<li><strong>Hermes tool-call recovery</strong> — XML <code>&lt;function=…&gt;</code> blocks in assistant prose (e.g. the model describing the feature itself) are no longer mis-parsed as live tool calls, preventing <code>400 Param Incorrect</code> loops on the next request. Recovery and dedup-strip now gate on actual tool names from the current session.</li>
+</ul>
+<h2>0.6.3</h2>
+<h3>Fixed</h3>
+<ul>
+<li><strong>Streaming dedup</strong> — Hermes models that emit both XML <code>&lt;tool_call&gt;</code> blocks and native function-calling in the same response no longer produce duplicate tool invocations</li>
+</ul>
 <h2>0.6.2</h2>
 <h3>Added</h3>
 <ul>
