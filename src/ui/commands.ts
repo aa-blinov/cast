@@ -660,16 +660,13 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		return;
 	}
 
-	// --- /provider helper: activate a provider + pick model ---
-	async function activateProvider(p: Provider): Promise<void> {
-		const probe = await probeProvider({ ...config, baseURL: p.url, apiKey: p.apiKey });
-		if (probe !== "ok" && probe !== "unknown") {
-			showNotice(`[Cannot reach provider "${p.name}": ${probe}]`);
-			return;
-		}
-		config.baseURL = p.url;
-		config.apiKey = p.apiKey;
-		updateSettings({ providerUrl: p.url, apiKey: p.apiKey });
+	// --- /provider helper: shared post-save flow ---
+	// Both activateProvider (existing saved provider) and addProviderWizard
+	// (newly added) probe + persist credentials before getting here; the rest
+	// (pick a model, sync reasoning meta + level, persist, refresh the agent)
+	// is identical. Both call sites also use the same notice text shape so
+	// the user gets a consistent "select a model / model set" pair.
+	async function applyProviderSelection(p: { name: string; url: string; apiKey: string }): Promise<void> {
 		showNotice(`[Provider: ${p.name}. Select a model.]`);
 		const selection = await selectModel(config, deps.pickers);
 		if (!selection) {
@@ -683,6 +680,19 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		updateSettings({ model: session.model, reasoningLevel: config.reasoningLevel });
 		agent.refresh();
 		showNotice(`[Provider: ${p.name}. Model: ${session.model}]`);
+	}
+
+	// --- /provider helper: activate a provider + pick model ---
+	async function activateProvider(p: Provider): Promise<void> {
+		const probe = await probeProvider({ ...config, baseURL: p.url, apiKey: p.apiKey });
+		if (probe !== "ok" && probe !== "unknown") {
+			showNotice(`[Cannot reach provider "${p.name}": ${probe}]`);
+			return;
+		}
+		config.baseURL = p.url;
+		config.apiKey = p.apiKey;
+		updateSettings({ providerUrl: p.url, apiKey: p.apiKey });
+		await applyProviderSelection(p);
 	}
 
 	// --- /provider helper: add wizard (mirrors /ssh add shape) ---

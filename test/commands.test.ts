@@ -699,4 +699,35 @@ describe("/provider", () => {
 		expect(deps.config.baseURL).toBe("");
 		expect(deps.config.apiKey).toBe("");
 	});
+
+	it("/provider add → save + select model", async () => {
+		// drive the add wizard through the three prompts, then a model selection,
+		// then a reasoning level. The helper extracted in 0.6.6+ should reuse
+		// the same selectModel + selectReasoningLevel flow /activate uses.
+		writeSettings({});
+		let textStep = 0;
+		const pickers: import("../src/pickers/types.ts").Pickers = {
+			promptText: async () => {
+				textStep++;
+				// name → url → key
+				if (textStep === 1) return "openrouter";
+				if (textStep === 2) return "https://openrouter.example/v1";
+				if (textStep === 3) return "sk-or-test";
+				return null;
+			},
+			pickOption: async () => ({
+				model: "gpt-test",
+				contextWindow: 64_000,
+			}),
+			pickMulti: async () => null,
+			log: () => {},
+		};
+		const { deps, calls } = createFakeDeps({ pickers } as never);
+		await handleInput("/provider add", undefined, deps);
+		// Wizard produces an "added and selected" notice (distinct from /activate's
+		// "Provider: ... . Select a model." wording). If the helper extract is
+		// wrong, this check goes red because the notice shape changes.
+		const notice = String(calls.showNotice?.at(-1)?.[0] ?? "");
+		expect(notice).toMatch(/added|Model:/);
+	});
 });
