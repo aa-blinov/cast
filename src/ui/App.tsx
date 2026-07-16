@@ -12,9 +12,8 @@ import {
 	selectMentionedRules,
 	unionStickyRules,
 } from "../core/rules.ts";
-import type { SessionUsage } from "../core/session.ts";
 import { estimateTokens, saveSession } from "../core/session.ts";
-import { loadSettings } from "../core/settings.ts";
+import { loadSettings, type StatusBarConfig } from "../core/settings.ts";
 import type { StartupResult } from "../core/startup.ts";
 import { setSuspendHook } from "../core/stdin-manager.ts";
 import { fetchLatestVersion, isNewerVersion, isReleaseInstall } from "../core/upgrade.ts";
@@ -24,8 +23,15 @@ import { Composer } from "./Composer.tsx";
 import { canSubmitDuringRun, handleInput } from "./commands.ts";
 import { useModalBridge } from "./pickerBridge.ts";
 import { Spinner } from "./Spinner.tsx";
+import {
+	defaultStatusBarConfig,
+	getStatusBarSegments,
+	type SegmentContext,
+	type StatusBarSegment,
+} from "./statusbar.tsx";
+import { StatusBarPicker } from "./statusbar-picker.tsx";
 import { theme } from "./themes/index.ts";
-import { type UseAgentSession, useAgentSession } from "./useAgentSession.ts";
+import { useAgentSession } from "./useAgentSession.ts";
 import { useTerminalResync } from "./useTerminalResync.ts";
 
 interface AppProps {
@@ -114,6 +120,11 @@ export function App(props: AppProps): JSX.Element {
 	const [subagentModel, setSubagentModel] = useState(result.subagentModel);
 	const [planModel, setPlanModel] = useState(result.planModel);
 	const [webToolsEnabled, setWebToolsEnabled] = useState(() => loadSettings().webTools === true);
+	// Status bar segment configuration — persisted in settings, defaults to all
+	// segments visible in registry order (see statusbar.ts).
+	const [statusBar, setStatusBar] = useState<StatusBarConfig>(
+		() => loadSettings().statusBar ?? defaultStatusBarConfig(),
+	);
 	// Mode is per-session state: restored from the (possibly resumed) session
 	// on startup, persisted into the session file on every toggle — so quitting
 	// mid-planning resumes planning in THAT session, without leaking plan mode
@@ -460,6 +471,8 @@ export function App(props: AppProps): JSX.Element {
 		sshHosts,
 		setSshHosts,
 		onThemeChange,
+		statusBar,
+		setStatusBar,
 	});
 	depsRef.current = {
 		agent,
@@ -511,6 +524,8 @@ export function App(props: AppProps): JSX.Element {
 		sshHosts,
 		setSshHosts,
 		onThemeChange,
+		statusBar,
+		setStatusBar,
 	};
 
 	const handleSubmit = useCallback(async (text: string) => {
@@ -574,6 +589,14 @@ export function App(props: AppProps): JSX.Element {
 					<Text> {modalRequest.label}</Text>
 				</Box>
 			)}
+			{modalRequest?.kind === "statusbar" && (
+				<StatusBarPicker
+					segments={modalRequest.segments}
+					initialConfig={modalRequest.initialConfig}
+					onConfirm={modalRequest.resolve}
+					onCancel={() => modalRequest.resolve(null)}
+				/>
+			)}
 			{/* Stays up for as long as the message is actually queued — not a
 			    timed toast, since a tool-heavy turn can take much longer than a
 			    fixed timeout to reach the point where the queue gets drained.
@@ -603,36 +626,61 @@ export function App(props: AppProps): JSX.Element {
 				running={running}
 				locked={modalRequest !== null}
 			/>
-			{/* Status bar lives under the input frame, not above the screen —
-			    matches Claude Code's own layout instead of a top-of-terminal
-			    banner that scrolls out of view as the conversation grows.
-			    Usage is the session's running total (not per-message — that
-			    got noisy fast), right-aligned on the same row. */}
-			<Box justifyContent="space-between">
-				<Text color={theme().muted} dimColor>
-					<Text color={theme().persona}>{currentPersona.label}</Text>
-					{/* Mode is always visible: plan mode shouts (warning color, it
-					    changes what the agent may do), build stays quiet. */}
-					{planMode ? <Text color={theme().warning}> [PLAN]</Text> : <Text color={theme().muted}> [BUILD]</Text>}
-					<Text color={theme().muted}> │ </Text>
-					<Text color={theme().muted}>{activeModel}</Text>
-					{/* Zero-width marker toggled by the resize effect. After that effect
-					    clears the screen, Ink's log-update would otherwise skip redrawing
-					    an *unchanged* frame — leaving a blank screen on an empty session
-					    (no <Static> reprint to force a write). Flipping this width-0 char
-					    changes the frame string so the redraw always happens. */}
-					{repaintKey % 2 === 1 ? "\u200b" : null}
-				</Text>
-				{((agent.usage && agent.usage.totalTokens > 0) || agent.elapsedMs > 0) && (
-					<Text color={theme().muted} dimColor>
-						{agent.usage && agent.usage.totalTokens > 0
-							? formatUsageTotals(agent.usage, agent.lastTurnUsage, session.messages, config, agent.elapsedMs)
-							: agent.elapsedMs > 0
-								? fmtElapsed(agent.elapsedMs)
-								: ""}
-					</Text>
-				)}
-			</Box>
+			{/* Status bar — rendered from the segment registry. Each segment
+			    renders itself based on SegmentContext; visibility and side are
+			    controlled by the statusBar config (see /statusbar command). */}
+			{(() => {
+				const segments = getStatusBarSegments();
+				const visibleSet = new Set(statusBar.visible);
+				const ctx: SegmentContext = {
+					persona: currentPersona.label,
+					planMode,
+					activeModel,
+					usage: agent.usage ?? undefined,
+					lastTurnUsage: agent.lastTurnUsage ?? undefined,
+					elapsedMs: agent.elapsedMs,
+					messageCount: session.messages.length,
+					contextWindow: config.contextWindow,
+					maxResponseTokens: config.maxResponseTokens,
+					messages: session.messages,
+				};
+
+				// Build ordered list from statusBar.order, then append any new segments
+				const ordered: StatusBarSegment[] = statusBar.order
+					.map((id) => segments.find((s) => s.id === id))
+					.filter(Boolean) as StatusBarSegment[];
+				for (const seg of segments) {
+					if (!ordered.some((s) => s.id === seg.id)) ordered.push(seg);
+				}
+
+				const leftElems: JSX.Element[] = [];
+				const rightElems: JSX.Element[] = [];
+				for (const seg of ordered) {
+					if (!visibleSet.has(seg.id)) continue;
+					const side = statusBar.sides[seg.id] ?? seg.side;
+					const node = seg.render(ctx);
+					if (!node) continue;
+					if (side === "left") leftElems.push(node);
+					else rightElems.push(node);
+				}
+
+				const sep = <Text color={theme().muted}> │ </Text>;
+				const renderGroup = (elems: JSX.Element[]) => elems.flatMap((el, i) => (i > 0 ? [sep, el] : [el]));
+
+				return (
+					<Box justifyContent="space-between">
+						<Text color={theme().muted} dimColor>
+							{...renderGroup(leftElems)}
+							{repaintKey % 2 === 1 ? "\u200b" : null}
+						</Text>
+						{rightElems.length > 0 && (
+							<Text color={theme().muted} dimColor>
+								{...renderGroup(rightElems)}
+							</Text>
+						)}
+					</Box>
+				);
+			})()}
 		</Box>
 	);
 }
@@ -649,26 +697,6 @@ export function abbreviateTokens(n: number): string {
 	// "1M" instead.
 	if (n < 999_950) return `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k`;
 	return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
-}
-
-const fmtElapsed = (ms: number): string => `${(ms / 1000).toFixed(1)}s`;
-
-function formatUsageTotals(
-	usage: SessionUsage,
-	lastTurnUsage: UseAgentSession["lastTurnUsage"],
-	messages: import("../core/llm.ts").Message[],
-	config: AppConfig,
-	elapsedMs: number,
-): string {
-	const cacheStr =
-		(usage.cacheReadTokens || usage.cacheWriteTokens) && usage.promptTokens > 0
-			? ` (${Math.round((usage.cacheReadTokens / usage.promptTokens) * 100)}% cached)`
-			: "";
-	const tpsStr = lastTurnUsage?.tokensPerSecond ? ` │ ${lastTurnUsage.tokensPerSecond.toFixed(1)} tok/s` : "";
-	const turnStr = elapsedMs > 0 ? ` │ ${fmtElapsed(elapsedMs)}` : "";
-	const subStr = usage.subagentTokens > 0 ? ` │ ${abbreviateTokens(usage.subagentTokens)} sub` : "";
-	const ctxStr = formatContextPct(messages, config);
-	return `${abbreviateTokens(usage.promptTokens)} in${cacheStr} / ${abbreviateTokens(usage.completionTokens)} out │ ${ctxStr}${tpsStr}${turnStr}${subStr}`;
 }
 
 export function formatContextPct(messages: import("../core/llm.ts").Message[], config: AppConfig): string {

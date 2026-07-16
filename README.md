@@ -147,7 +147,10 @@ Every conversation auto-saves. Resume with `--continue`, pick from a list with `
 | `/compact` | Force context compaction |
 | `/new` | Start a new session (autosaves current) |
 | `/copy` | Copy last assistant response to clipboard |
+| `/current` | Show all status bar data |
 | `/clear` | Clear conversation context |
+| `/ssh` | Manage SSH hosts (list, add, remove) |
+| `/statusbar` | Toggle and reorder status bar segments |
 | `/theme` | Change color theme |
 | `/usage` | Show session token/cost usage |
 | `/repo` | Show cwd and git branch |

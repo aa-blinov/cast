@@ -1,5 +1,6 @@
-import type { PermissionMode } from "../core/settings.ts";
+import type { PermissionMode, StatusBarConfig } from "../core/settings.ts";
 import type { ModelReasoningMeta } from "../core/vendors.ts";
+import type { StatusBarSegment } from "../ui/statusbar.tsx";
 
 export interface PickOption<T> {
 	value: T;
@@ -31,6 +32,11 @@ export interface Pickers {
 	 * against option values); unset means "all unchecked".
 	 */
 	pickMulti<T>(options: PickOption<T>[], opts?: PickOptions & { initialSelected?: T[] }): Promise<T[] | null>;
+	/** Status bar configurator. Optional — readline CLI doesn't implement it. */
+	pickStatusBar?(
+		segments: readonly StatusBarSegment[],
+		initialConfig: StatusBarConfig,
+	): Promise<StatusBarConfig | null>;
 	/**
 	 * Show a spinner with a label while an async step runs (model validation,
 	 * fetching the model list); returns a function that dismisses it. Optional —
