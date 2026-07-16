@@ -64,10 +64,10 @@ function readSharedErrorHandling(): string {
 
 /**
  * Mirror of `readSharedErrorHandling` for the hashline `edit` tool. Same
- * rationale: every persona's "**edit**: each `oldText` must match a unique
- * region" line was drifting, and the anchor-based contract is the same
- * regardless of role. The two shared sections are concatenated in
- * `systemPrompt` so each persona gets the same edit/tool guidance.
+ * rationale: every persona's "**edit**: precise text replacement" line
+ * was drifting, and the anchor-based contract is the same regardless of
+ * role. The two shared sections are concatenated in `systemPrompt` so
+ * each persona gets the same edit/tool guidance.
  */
 function readSharedToolGuidance(): string {
 	try {

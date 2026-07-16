@@ -62,6 +62,10 @@ cast speaks one API: the OpenAI chat completions format. Any provider that imple
 
 Tool calls within one assistant message run concurrently via `Promise.all`. If the model requests `bash`, `read`, and `grep` in a single response, all three execute simultaneously.
 
+### Hashline LRU Cache
+
+`read`, `edit`, and `grep` share a process-local LRU (20 entries, ~4 MB worst case) keyed by absolute path. On hit, the file's mtime is re-stated and a mismatch drops the entry; on miss the file is read once and per-line sha1s are computed in a single pass. `write` and `edit` invalidate the entry on success, so a follow-up read never sees a stale snapshot. This is invisible to the model — it just means a `read → edit` round trip (and a re-`grep` over the same files) skips both the file I/O and the per-line hashing.
+
 ### Context Compaction
 
 When the conversation exceeds ~75% of the context window, older messages are summarized by the LLM. The split is ~60/40 (old/recent), snapped to turn boundaries so tool calls and results stay together. File paths are extracted deterministically from tool calls and appended to the summary.

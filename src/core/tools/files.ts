@@ -1,14 +1,15 @@
 /**
- * File tools — `read` (with hashline anchors), `write`, and `edit` (anchor-
- * based ops with a backwards-compat shim for the old `{oldText, newText}`
- * shape). All paths resolve against the agent's cwd via resolvePath.
+ * File tools — `read` (with hashline anchors), `write`, and `edit`
+ * (anchor-based `ops[]` with `replace`/`insert_after`/`write`). All paths
+ * resolve against the agent's cwd via resolvePath.
  */
 
 import { constants } from "node:fs";
 import { access, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, extname } from "node:path";
 import type { AppConfig } from "../config.ts";
-import { computeLineHashes, formatAnchorSnippet, formatLineGutter, parseAnchor } from "./hashline.ts";
+import { formatAnchorSnippet, formatLineGutter, parseAnchor } from "./hashline.ts";
+import { getCachedFile, invalidateCachedFile } from "./hashline-cache.ts";
 import { formatSize, resolvePath, type ToolResult } from "./shared.ts";
 
 const IMAGE_MIME_TYPES: Record<string, string> = {
@@ -46,8 +47,12 @@ export async function execRead(args: Record<string, unknown>, cwd: string, confi
 		};
 	}
 
-	const content = await readFile(absolutePath, "utf-8");
-	const allLines = content.split("\n");
+	// Served from the LRU when the file was already read this session —
+	// the second read in an `read → edit` round trip skips the disk and
+	// the per-line sha1. Mtime on the entry is re-checked on hit so a
+	// concurrent editor invalidates the cache for us.
+	const cached = await getCachedFile(absolutePath);
+	const allLines = cached.lines;
 
 	const startLine = offset ? Math.max(0, offset - 1) : 0;
 	if (startLine >= allLines.length) {
@@ -97,6 +102,8 @@ export async function execWrite(args: Record<string, unknown>, cwd: string): Pro
 
 	await mkdir(dirname(absolutePath), { recursive: true });
 	await writeFile(absolutePath, content, "utf-8");
+	// Drop any cached read so the next read/edit sees the new content.
+	invalidateCachedFile(absolutePath);
 
 	return { content: `Successfully wrote ${content.length} bytes to ${filePath}` };
 }
@@ -113,16 +120,18 @@ export async function execEdit(args: Record<string, unknown>, cwd: string): Prom
 
 	// Read once; hashlines are computed against the snapshot the model last
 	// saw, so applying ops bottom-up can't shift any anchor that hasn't been
-	// validated yet. A `write` op short-circuits everything else.
+	// validated yet. A `write` op short-circuits everything else. Served
+	// from the LRU when this file was already read in the same session.
 	await access(absolutePath, constants.R_OK | constants.W_OK);
-	const rawContent = await readFile(absolutePath, "utf-8");
-	const lines = rawContent.split("\n");
-	const hashes = computeLineHashes(rawContent);
+	const cached = await getCachedFile(absolutePath);
+	const lines = cached.lines;
+	const hashes = cached.hashes;
 
 	const writeOp = ops.find((o) => o.kind === "write");
 	if (writeOp) {
 		const content = (writeOp as { kind: "write"; content: string }).content;
 		await writeFile(absolutePath, content, "utf-8");
+		invalidateCachedFile(absolutePath);
 		return { content: `Updated file ${filePath}.` };
 	}
 
@@ -152,6 +161,7 @@ export async function execEdit(args: Record<string, unknown>, cwd: string): Prom
 	}
 
 	await writeFile(absolutePath, mutated.join("\n"), "utf-8");
+	invalidateCachedFile(absolutePath);
 	return { content: `Updated ${ops.length} block(s) in ${filePath}.` };
 }
 
