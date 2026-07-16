@@ -1,4 +1,4 @@
-import { rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,6 +10,11 @@ import type { PermissionMode } from "../src/core/settings.ts";
 import type { Pickers } from "../src/pickers/types.ts";
 import type { CommandDeps } from "../src/ui/commands.ts";
 import type { UseAgentSession } from "../src/ui/useAgentSession.ts";
+
+vi.mock("../src/core/config.ts", async (importOriginal) => {
+	const mod = await importOriginal<typeof import("../src/core/config.ts")>();
+	return { ...mod, probeProvider: vi.fn().mockResolvedValue("ok") };
+});
 
 const { handleInput } = await import("../src/ui/commands.ts");
 
@@ -599,5 +604,99 @@ describe("/ssh", () => {
 		const { deps, calls } = createFakeDeps({ sshHosts: hosts });
 		await handleInput("/ssh remove nonexistent", undefined, deps);
 		expect(noticeText(calls)).toContain("Unknown host");
+	});
+});
+
+describe("/provider", () => {
+	function writeSettings(data: Record<string, unknown>) {
+		const dir = join(process.env.HOME!, ".cast");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "settings.json"), JSON.stringify(data));
+	}
+
+	it("/provider delete with no providers → notice", async () => {
+		writeSettings({});
+		const { deps, calls } = createFakeDeps();
+		await handleInput("/provider delete", undefined, deps);
+		expect(noticeText(calls)).toContain("No providers to delete");
+	});
+
+	it("/provider <unknown-name> → error", async () => {
+		writeSettings({ providers: [{ name: "openrouter", url: "https://x", apiKey: "k" }] });
+		const { deps, calls } = createFakeDeps();
+		await handleInput("/provider nonexistent", undefined, deps);
+		expect(noticeText(calls)).toContain("Unknown provider");
+	});
+
+	it("/provider with no providers → triggers add wizard", async () => {
+		writeSettings({});
+		// pickers return null → cancelled at first prompt
+		const { deps, calls } = createFakeDeps();
+		await handleInput("/provider", undefined, deps);
+		const notice = noticeText(calls);
+		expect(notice.includes("No providers") || notice.includes("Cancelled")).toBe(true);
+	});
+
+	it("/provider delete removes provider and switches active to fallback", async () => {
+		writeSettings({
+			providers: [
+				{ name: "a", url: "https://a.example", apiKey: "key-a" },
+				{ name: "b", url: "https://b.example", apiKey: "key-b" },
+			],
+			providerUrl: "https://a.example",
+			apiKey: "key-a",
+		});
+		let pickStep = 0;
+		const pickers: import("../src/pickers/types.ts").Pickers = {
+			promptText: async () => null,
+			pickOption: async () => {
+				pickStep++;
+				return pickStep === 1 ? "a" : true; // first pick: select "a", second: confirm
+			},
+			pickMulti: async () => null,
+			log: () => {},
+		};
+		const { deps, calls } = createFakeDeps({ pickers } as never);
+		// Mirror the persisted active provider in the in-memory config so the
+		// handler's wasActive check matches.
+		deps.config.baseURL = "https://a.example";
+		deps.config.apiKey = "key-a";
+		await handleInput("/provider delete", undefined, deps);
+		expect(noticeText(calls)).toContain("Switched to");
+		expect(noticeText(calls)).toContain("b");
+		expect(deps.config.baseURL).toBe("https://b.example");
+		expect(deps.config.apiKey).toBe("key-b");
+	});
+
+	// Regression for the legacy code path: delete-the-only-active-provider
+	// used to write { providerUrl: undefined, apiKey: undefined }, which the
+	// spread-based updateSettings converts into "erase those keys". Then the
+	// next startup's migrateProviders would resurrect the deleted provider
+	// as a `default` entry (providerUrl/apiKey still in the legacy fields),
+	// silently putting a dead credential back into the picker.
+	it("/provider delete of last active provider clears legacy fields", async () => {
+		writeSettings({
+			providers: [{ name: "only", url: "https://only.example", apiKey: "k-only" }],
+			providerUrl: "https://only.example",
+			apiKey: "k-only",
+		});
+		let pickStep = 0;
+		const pickers: import("../src/pickers/types.ts").Pickers = {
+			promptText: async () => null,
+			pickOption: async () => {
+				pickStep++;
+				return pickStep === 1 ? "only" : true;
+			},
+			pickMulti: async () => null,
+			log: () => {},
+		};
+		const { deps, calls } = createFakeDeps({ pickers } as never);
+		deps.config.baseURL = "https://only.example";
+		deps.config.apiKey = "k-only";
+		await handleInput("/provider delete", undefined, deps);
+		expect(noticeText(calls)).toContain("No providers left");
+		// The handler clears the legacy fields so migration can't resurrect.
+		expect(deps.config.baseURL).toBe("");
+		expect(deps.config.apiKey).toBe("");
 	});
 });
