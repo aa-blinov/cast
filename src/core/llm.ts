@@ -429,12 +429,23 @@ function coerceHermesValue(raw: string): unknown {
  * way and the provider's OpenAI-compat layer then returns truncated/invalid
  * JSON in tool_calls.arguments; cast would reject that and the model would retry
  * the same broken shape indefinitely. Returns [] when there is no such block.
+ *
+ * `validNames`, when given, restricts recovery to calls whose NAME is a real
+ * available tool. This is what keeps ordinary prose that merely *mentions*
+ * `<function=…>` (e.g. an assistant explaining this very feature, or a changelog
+ * entry) from being misread as a live tool call — a false positive that
+ * produces a bogus tool call the provider then rejects with `400 Param
+ * Incorrect` on the next request.
  */
-export function parseHermesToolCalls(content: string): Array<{ id: string; name: string; arguments: string }> {
+export function parseHermesToolCalls(
+	content: string,
+	validNames?: Set<string>,
+): Array<{ id: string; name: string; arguments: string }> {
 	const calls: Array<{ id: string; name: string; arguments: string }> = [];
 	let i = 0;
 	for (const m of content.matchAll(/<function=([^>\s]+)\s*>([\s\S]*?)<\/function>/g)) {
 		const name = m[1]!;
+		if (validNames && !validNames.has(name)) continue;
 		const params: Record<string, unknown> = {};
 		for (const pm of m[2]!.matchAll(/<parameter=([^>\s]+)\s*>([\s\S]*?)<\/parameter>/g)) {
 			params[pm[1]!] = coerceHermesValue(pm[2]!);
@@ -529,25 +540,37 @@ export async function streamAndCollect(
 
 	// Hermes-XML tool-call recovery. When the structured tool_calls are missing
 	// or carry malformed JSON (truncated `arguments`), but the content holds an
-	// XML call, parse it into a proper tool call and drop the markup from the
-	// visible content. Without this, providers that mis-serialize such calls
-	// (xiaomi mimo) trap the model in a retry loop on "arguments were malformed".
+	// XML call NAMING A REAL TOOL, parse it into a proper tool call and drop the
+	// markup from the visible content. Without this, providers that mis-serialize
+	// such calls (xiaomi mimo) trap the model in a retry loop on "arguments were
+	// malformed". Gating on the real tool names is what stops prose that merely
+	// mentions `<function=…>` (e.g. the assistant describing this feature) from
+	// being turned into a bogus tool call the provider then 400s on.
+	const validToolNames = new Set(
+		tools.map((t) => (t.type === "function" ? t.function.name : undefined)).filter((n): n is string => Boolean(n)),
+	);
 	const malformed = !toolCalls?.length || toolCalls.some((tc) => !isValidJsonObject(tc.arguments));
+	let recoveredHermes = false;
 	if (malformed && content.includes("<function=")) {
-		const recovered = parseHermesToolCalls(content);
+		const recovered = parseHermesToolCalls(content, validToolNames);
 		if (recovered.length > 0) {
 			toolCalls = recovered;
 			finishReason = "tool_calls";
 			content = stripHermesToolCalls(content);
+			recoveredHermes = true;
 		}
 	}
 
 	// When valid structured tool_calls are present but content also contains the
 	// duplicate Hermes XML markup (some providers like xiaomi mimo emit both), strip
-	// the XML so it doesn't leak into the transcript. Only strip if we see the
-	// explicit <tool_call> marker to avoid accidentally removing user-provided XML.
-	if (toolCalls?.length && !malformed && content.includes("<tool_call>")) {
-		content = stripHermesToolCalls(content);
+	// the XML so it doesn't leak into the transcript. Only strip real tool-call
+	// blocks — a `<function=NAME>` naming an actual tool — so prose that mentions
+	// the tag survives untouched. Skip when we already stripped during recovery.
+	if (!recoveredHermes && toolCalls?.length && content.includes("<function=")) {
+		const embedded = parseHermesToolCalls(content, validToolNames);
+		if (embedded.length > 0) {
+			content = stripHermesToolCalls(content);
+		}
 	}
 
 	return { content, thinking, toolCalls, finishReason, usage, generationMs, interrupted, disconnected };

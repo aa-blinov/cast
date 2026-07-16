@@ -10,6 +10,11 @@ import {
 	stripHermesToolCalls,
 } from "../src/core/llm.ts";
 
+/** Minimal ChatCompletionTool for the recovery tests — only `.function.name` is read. */
+function tool(name: string) {
+	return { type: "function" as const, function: { name, parameters: {} } };
+}
+
 function fakeClient(chunks: unknown[], onChunk?: () => void): OpenAI {
 	return {
 		chat: {
@@ -95,7 +100,8 @@ describe("streamAndCollect — Hermes tool-call recovery", () => {
 			},
 			{ choices: [{ delta: {}, finish_reason: "tool_calls" }] },
 		]);
-		const res = await streamAndCollect(client, "m", [], [], 100);
+		const tools = [tool("search_tasks")];
+		const res = await streamAndCollect(client, "m", [], tools, 100);
 		expect(res.toolCalls).toHaveLength(1);
 		expect(res.toolCalls![0]!.name).toBe("search_tasks");
 		// Arguments are now valid JSON (were truncated before recovery).
@@ -103,6 +109,31 @@ describe("streamAndCollect — Hermes tool-call recovery", () => {
 		expect(JSON.parse(res.toolCalls![0]!.arguments)).toEqual({ status: "in_progress" });
 		// The XML markup is stripped from what the user sees.
 		expect(res.content).not.toContain("<function=");
+	});
+
+	it("does NOT recover a tool call from prose that merely mentions <function=>", async () => {
+		// The assistant describing this very feature (or a changelog entry) writes
+		// `<function=…>` as plain text. It names no real tool, so it must stay text
+		// and never become a bogus tool call the provider then 400s on.
+		const client = fakeClient([
+			{
+				choices: [
+					{
+						delta: {
+							content:
+								"Fixed: models emitting both <function=foo><parameter=x>1</parameter></function> and structured calls.",
+						},
+					},
+				],
+			},
+			{ choices: [{ delta: {}, finish_reason: "stop" }] },
+		]);
+		const tools = [tool("search_tasks"), tool("read")];
+		const res = await streamAndCollect(client, "m", [], tools, 100);
+		expect(res.toolCalls).toBeUndefined();
+		expect(res.finishReason).toBe("stop");
+		// The prose is left intact — nothing stripped.
+		expect(res.content).toContain("<function=foo>");
 	});
 
 	it("leaves well-formed tool_calls untouched (no false recovery)", async () => {
@@ -118,7 +149,7 @@ describe("streamAndCollect — Hermes tool-call recovery", () => {
 			},
 			{ choices: [{ delta: {}, finish_reason: "tool_calls" }] },
 		]);
-		const res = await streamAndCollect(client, "m", [], [], 100);
+		const res = await streamAndCollect(client, "m", [], [tool("read")], 100);
 		expect(res.toolCalls).toHaveLength(1);
 		expect(res.toolCalls![0]!.id).toBe("t1");
 		expect(JSON.parse(res.toolCalls![0]!.arguments)).toEqual({ path: "a.ts" });
