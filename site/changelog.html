@@ -443,6 +443,24 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 	<article class="content">
 		<h1>Changelog</h1>
 <p>All notable user-facing changes to cast, newest first.</p>
+<h2>0.6.2</h2>
+<h3>Added</h3>
+<ul>
+<li><code>/statusbar</code> command — toggle, reorder, and reassign status bar segments between left/right sides via an interactive picker. Config persists across sessions. Useful on narrow/mobile terminals where the full bar overflows. Default: persona, mode, model (left) and elapsed (right); toggle others via <code>/statusbar</code>.</li>
+<li><code>/current</code> command — show all status bar data in a list, including disabled segments</li>
+</ul>
+<h2>0.6.1</h2>
+<h3>Fixed</h3>
+<ul>
+<li><strong>Terminal resync</strong> — resize and focus-regain now use a light clear that preserves scroll position; theme changes and streaming desyncs still do a full scrollback wipe</li>
+<li><strong>lineChurn</strong> — O(m·n) fallback for large edits uses Set-based comparison instead of raw block count; identical large texts no longer report false positive changes</li>
+<li><strong>Input parser</strong> — DECXCPR cursor-position responses (<code>\x1b[row;colR</code>) explicitly dropped to prevent accidental keybinding matches</li>
+</ul>
+<h3>Internal</h3>
+<ul>
+<li><code>displayWidth</code> extracted to <code>src/ui/display-width.ts</code> with per-session cache</li>
+<li>Test directories isolated to prevent parallel test collisions</li>
+</ul>
 <h2>0.6.0</h2>
 <h3>Added</h3>
 <ul>

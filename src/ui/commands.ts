@@ -18,8 +18,8 @@ import {
 } from "../core/project.ts";
 import { getModelsCache } from "../core/readline.ts";
 import { formatRuleInvocation, type Rule } from "../core/rules.ts";
-import { addUsage, createSession, type SessionState, saveSession } from "../core/session.ts";
-import { loadSettings, type PermissionMode, updateSettings } from "../core/settings.ts";
+import { addUsage, createSession, estimateTokens, type SessionState, saveSession } from "../core/session.ts";
+import { loadSettings, type PermissionMode, type StatusBarConfig, updateSettings } from "../core/settings.ts";
 import { formatSkillInvocation, type Skill } from "../core/skills.ts";
 import { type SshHost, saveSshConfig, scanSshKeys, validateKeyPermissions } from "../core/ssh.ts";
 import { getReasoningOptions, type ModelReasoningMeta } from "../core/vendors.ts";
@@ -33,6 +33,7 @@ import {
 } from "../pickers/domain.ts";
 import type { Pickers } from "../pickers/types.ts";
 import { TUI_KEYBINDINGS } from "./input/keybindings.ts";
+import { getStatusBarSegments, SEGMENT_MAX_WIDTH, type StatusBarSegment } from "./statusbar.tsx";
 import { ALL_THEMES, getActiveTheme, setActiveTheme } from "./themes/index.ts";
 import type { PendingImage, UseAgentSession } from "./useAgentSession.ts";
 
@@ -53,6 +54,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/clear", description: "Clear context (and save)" },
 	{ name: "/compact", description: "Compact context now" },
 	{ name: "/copy", description: "Copy last assistant response" },
+	{ name: "/current", description: "Show all status bar data" },
 	{ name: "/exit", description: "Save and exit (alias for /quit)" },
 	{ name: "/help", description: "Show this command list" },
 	{ name: "/keys", description: "List all keybindings" },
@@ -78,6 +80,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/sessions", description: "List / switch / delete sessions" },
 	{ name: "/skills", description: "List loaded skills" },
 	{ name: "/ssh", description: "Manage SSH hosts (list, add, remove)" },
+	{ name: "/statusbar", description: "Toggle and reorder status bar segments" },
 	{ name: "/steer", description: "Inject a message while running", takesArgs: true },
 	{ name: "/subagent-model", description: "Show or change subagent model" },
 	{ name: "/theme", description: "Change color theme" },
@@ -136,6 +139,8 @@ export interface CommandDeps {
 	planModel?: string;
 	setPlanModel: (m: string | undefined) => void;
 	onThemeChange?: () => void;
+	statusBar: StatusBarConfig;
+	setStatusBar: (s: StatusBarConfig) => void;
 }
 
 /**
@@ -726,6 +731,31 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		return;
 	}
 
+	if (input === "/statusbar") {
+		const allSegments = getStatusBarSegments();
+		if (!deps.pickers.pickStatusBar) {
+			showNotice("[Status bar picker not available in this mode]");
+			return;
+		}
+		const picked = await deps.pickers.pickStatusBar(allSegments, deps.statusBar);
+		if (picked === null) {
+			showNotice("[Cancelled — status bar unchanged]");
+			return;
+		}
+		// Overflow warning
+		const visibleSegs = allSegments.filter((s) => picked.visible.includes(s.id));
+		const totalWidth =
+			visibleSegs.reduce((sum, s) => sum + (SEGMENT_MAX_WIDTH[s.id] ?? 15), 0) + (visibleSegs.length - 1) * 3;
+		const cols = process.stdout.columns ?? 80;
+		if (totalWidth > cols) {
+			showNotice(`[Warning: status bar (~${totalWidth} cols) may overflow ${cols}-col terminal]`, 10000);
+		}
+		updateSettings({ statusBar: picked });
+		deps.setStatusBar(picked);
+		showNotice(`[Status bar: ${picked.visible.length} segment${picked.visible.length === 1 ? "" : "s"}]`);
+		return;
+	}
+
 	if (input === "/ssh" || input.startsWith("/ssh ")) {
 		const sub = input.slice("/ssh".length).trim();
 		if (sub === "add") {
@@ -965,6 +995,63 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		return;
 	}
 
+	if (input === "/current") {
+		const u = session.usage;
+		const fmtK = (n: number) => (n < 1000 ? String(n) : `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k`);
+		const allSegs = getStatusBarSegments();
+		const cfg = deps.statusBar;
+		// Build ordered list from statusBar.order, then append any new segments
+		const ordered: StatusBarSegment[] = cfg.order
+			.map((id) => allSegs.find((s) => s.id === id))
+			.filter(Boolean) as StatusBarSegment[];
+		for (const seg of allSegs) {
+			if (!ordered.some((s) => s.id === seg.id)) ordered.push(seg);
+		}
+		const lines: string[] = [];
+		for (const seg of ordered) {
+			let value: string;
+			switch (seg.id) {
+				case "persona":
+					value = deps.currentPersona.label;
+					break;
+				case "mode":
+					value = deps.planMode ? "PLAN" : "BUILD";
+					break;
+				case "model":
+					value = deps.session.model;
+					break;
+				case "context": {
+					const used = estimateTokens(session.messages);
+					const budget = config.contextWindow - config.maxResponseTokens;
+					value =
+						budget > 0
+							? `ctx ${fmtK(used)}/${fmtK(config.contextWindow)} (${Math.round((used / budget) * 100)}%)`
+							: "ctx ?";
+					break;
+				}
+				case "usage":
+					value = u && u.totalTokens > 0 ? `${fmtK(u.promptTokens)} in / ${fmtK(u.completionTokens)} out` : "—";
+					break;
+				case "speed":
+					value = agent.lastTurnUsage?.tokensPerSecond
+						? `${agent.lastTurnUsage.tokensPerSecond.toFixed(1)} tok/s`
+						: "—";
+					break;
+				case "elapsed":
+					value = agent.elapsedMs > 0 ? `${(agent.elapsedMs / 1000).toFixed(1)}s` : "—";
+					break;
+				case "subagent":
+					value = u && u.subagentTokens > 0 ? `${fmtK(u.subagentTokens)} sub` : "—";
+					break;
+				default:
+					value = "—";
+			}
+			lines.push(`  ${seg.label.padEnd(16)} ${value}`);
+		}
+		deps.agent.addDisplayMessage({ role: "warning", content: `Current\n${lines.join("\n")}` });
+		return;
+	}
+
 	if (input === "/sessions") {
 		const chosen = await selectSession(deps.pickers);
 		if (!chosen) {
@@ -1119,6 +1206,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 				"Commands\n" +
 				"  /build              Exit plan mode, restore full toolset\n" +
 				"  /copy               Copy last assistant response\n" +
+				"  /current            Show all status bar data\n" +
 				"  /clear              Clear context\n" +
 				"  /compact            Compact context now\n" +
 				"  /new                Start new session\n" +
@@ -1141,6 +1229,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 				"  /permissions        Change bash confirmation mode\n" +
 				"  /web                Toggle web tools (web_search, web_fetch)\n" +
 				"  /ssh                Manage SSH hosts (list, add, remove)\n" +
+				"  /statusbar          Toggle and reorder status bar segments\n" +
 				"  /theme              Change color theme\n" +
 				"  /usage              Show session token/cost usage\n" +
 				"  /sessions           List/switch sessions\n" +

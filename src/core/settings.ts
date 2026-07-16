@@ -14,6 +14,12 @@ import { join } from "node:path";
 
 export type PermissionMode = "default" | "bypass";
 
+export interface StatusBarConfig {
+	visible: string[];
+	order: string[];
+	sides: Record<string, "left" | "right">;
+}
+
 export interface Settings {
 	/** Last used model */
 	model?: string;
@@ -56,6 +62,8 @@ export interface Settings {
 	/** MCP server names the user has disabled via /mcp toggle. Persisted so
 	 * they stay disabled across sessions and /reload. */
 	disabledMcpServers?: string[];
+	/** Status bar segment configuration: which are visible, order, and sides. */
+	statusBar?: StatusBarConfig;
 	/** @deprecated Agent mode moved to SessionState.mode — the mode is per-task
 	 * session state, and storing it globally leaked plan mode across projects.
 	 * Kept only so old settings.json files still parse. */
