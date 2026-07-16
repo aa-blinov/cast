@@ -8,7 +8,14 @@ import { constants } from "node:fs";
 import { access, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, extname } from "node:path";
 import type { AppConfig } from "../config.ts";
-import { formatAnchorSnippet, formatLineGutter, parseAnchor } from "./hashline.ts";
+import {
+	findShifted,
+	formatAnchorSnippet,
+	parseAnchor,
+	renderAnchor,
+	renderAnchoredLine,
+	validateAnchor,
+} from "./hashline.ts";
 import { getCachedFile, invalidateCachedFile } from "./hashline-cache.ts";
 import { formatSize, resolvePath, type ToolResult } from "./shared.ts";
 
@@ -49,7 +56,7 @@ export async function execRead(args: Record<string, unknown>, cwd: string, confi
 
 	// Served from the LRU when the file was already read this session —
 	// the second read in an `read → edit` round trip skips the disk and
-	// the per-line sha1. Mtime on the entry is re-checked on hit so a
+	// the per-line hashing. Mtime on the entry is re-checked on hit so a
 	// concurrent editor invalidates the cache for us.
 	const cached = await getCachedFile(absolutePath);
 	const allLines = cached.lines;
@@ -67,20 +74,14 @@ export async function execRead(args: Record<string, unknown>, cwd: string, confi
 		selectedLines = selectedLines.slice(0, config.maxToolOutputLines);
 	}
 
-	// Hashline gutter: each line is prefixed with `<LINE>:<HASH>→content` so
-	// `edit` can reference lines without the model having to copy their text.
-	// The arrow separator is never legal leading whitespace in source, so a
-	// tab-indented file's real tabs stay unambiguous against the gutter —
-	// same reason Claude Code's Read uses →. See `hashline.ts` for the
-	// collision properties of the hash.
+	// Hashline gutter: each line is prefixed with `LINE:LOCAL:CHUNK→content`
+	// so `edit` can reference lines without the model having to copy their
+	// text. The arrow separator is never legal leading whitespace in source,
+	// so a tab-indented file's real tabs stay unambiguous against the gutter
+	// — same reason Claude Code's Read uses →. See `hashline.ts` for the
+	// anchor scheme.
 	const numbered = selectedLines
-		.map((line, i) =>
-			formatLineGutter({
-				lineNumber: startLine + i + 1,
-				content: line,
-				prevContent: i === 0 ? (allLines[startLine - 1] ?? "") : (selectedLines[i - 1] ?? ""),
-			}),
-		)
+		.map((line, i) => renderAnchoredLine(startLine + i + 1, cached.hashes[startLine + i] ?? ["", ""], line))
 		.join("\n");
 
 	// Build continuation hint
@@ -139,7 +140,7 @@ export async function execEdit(args: Record<string, unknown>, cwd: string): Prom
 	// file. Validation here is what catches "stale anchor", "anchor not
 	// found", "ambiguous anchor" and "range overlap" before anything is
 	// written — the model gets the fresh-anchor snippet it needs to retry.
-	const bucketResult = bucketOps(ops, lines, hashes);
+	const bucketResult = bucketOps(ops, lines, hashes, filePath);
 	if (!bucketResult.ok) return bucketResult.result;
 
 	// Apply bottom-up so each splice stays inside the original line
@@ -150,7 +151,13 @@ export async function execEdit(args: Record<string, unknown>, cwd: string): Prom
 	const sorted = bucketResult.ops.slice().sort((a, b) => {
 		const la = a.kind === "insert" ? a.line : a.lineStart;
 		const lb = b.kind === "insert" ? b.line : b.lineStart;
-		return lb - la;
+		if (la !== lb) return lb - la;
+		// Tie: an insert_after anchored on the first line of a replace range
+		// must be applied before the replace, otherwise a multi-line
+		// replacement shifts the insertion point into its own middle.
+		if (a.kind === "insert" && b.kind === "replace") return -1;
+		if (a.kind === "replace" && b.kind === "insert") return 1;
+		return 0;
 	});
 	for (const op of sorted) {
 		if (op.kind === "replace") {
@@ -248,7 +255,12 @@ interface BucketSuccess {
 	ops: BucketedOp[];
 }
 
-function bucketOps(ops: AnchorOp[], lines: string[], hashes: Array<[string, string]>): BucketSuccess | BucketFailure {
+function bucketOps(
+	ops: AnchorOp[],
+	lines: string[],
+	hashes: Array<[string, string]>,
+	filePath: string,
+): BucketSuccess | BucketFailure {
 	const result: BucketedOp[] = [];
 	for (let i = 0; i < ops.length; i++) {
 		const op = ops[i]!;
@@ -257,18 +269,19 @@ function bucketOps(ops: AnchorOp[], lines: string[], hashes: Array<[string, stri
 			const anchor = parseAnchor(op.anchorStr);
 			if (!anchor)
 				return failBucket(
-					`Anchor "${op.anchorStr}" is malformed. Expected "<line>:<hash>" or "<line>:<hash>:<secondary>".`,
+					`Anchor "${op.anchorStr}" is malformed. Expected "<line>:<local>:<chunk>" as printed by read/grep (e.g. "22:abc:rst").`,
 				);
 			const endStr = (op as { endAnchorStr?: string }).endAnchorStr;
 			const endAnchor = endStr ? parseAnchor(endStr) : undefined;
-			if (endStr && !endAnchor) return failBucket(`end_anchor "${endStr}" is malformed. Expected "<line>:<hash>".`);
+			if (endStr && !endAnchor)
+				return failBucket(`end_anchor "${endStr}" is malformed. Expected "<line>:<local>:<chunk>".`);
 			const startLine = anchor.line;
 			const endLine = endAnchor ? endAnchor.line : startLine;
 			if (startLine < 1 || startLine > lines.length) {
 				return anchorNotFound(op.anchorStr, lines, hashes);
 			}
 			if (endLine < startLine || endLine > lines.length) {
-				return anchorNotFound(endAnchor?.line ? `${endLine}:${endAnchor.primaryHash}` : "EOF", lines, hashes);
+				return anchorNotFound(endAnchor ? renderParsedAnchor(endAnchor) : "EOF", lines, hashes);
 			}
 			// Validate each touched line against the stored hash; the model
 			// might have edited a single line or a range — every anchor
@@ -278,9 +291,6 @@ function bucketOps(ops: AnchorOp[], lines: string[], hashes: Array<[string, stri
 			if (endAnchor) {
 				const endCheck = checkAnchor(endAnchor, lines, hashes, endLine);
 				if (!endCheck.ok) return endCheck.failure;
-				if (startLine === endLine && anchor.secondaryHash && endAnchor.secondaryHash === undefined) {
-					// model omitted the secondary on the second anchor — harmless.
-				}
 			}
 			result.push({
 				kind: "replace",
@@ -290,10 +300,21 @@ function bucketOps(ops: AnchorOp[], lines: string[], hashes: Array<[string, stri
 				anchorStr: op.anchorStr,
 			});
 		} else {
+			// "0" / "0:" is the documented way to insert before the first
+			// line — there is no line 0 to anchor on, so no hash is required.
+			if (op.anchorStr === "0" || op.anchorStr === "0:") {
+				result.push({
+					kind: "insert",
+					line: -1,
+					textLinesToInsert: splitContent(op.content),
+					anchorStr: op.anchorStr,
+				});
+				continue;
+			}
 			const anchor = parseAnchor(op.anchorStr);
 			if (!anchor)
 				return failBucket(
-					`Anchor "${op.anchorStr}" is malformed. Expected "<line>:<hash>" or "<line>:<hash>:<secondary>".`,
+					`Anchor "${op.anchorStr}" is malformed. Expected "<line>:<local>:<chunk>" as printed by read/grep (e.g. "22:abc:rst"), or "0:" to insert at the top of the file.`,
 				);
 			const check = checkAnchor(anchor, lines, hashes, anchor.line);
 			if (!check.ok) return check.failure;
@@ -314,8 +335,24 @@ function bucketOps(ops: AnchorOp[], lines: string[], hashes: Array<[string, stri
 	for (let i = 1; i < replaces.length; i++) {
 		if (replaces[i]!.lineStart <= replaces[i - 1]!.lineEnd) {
 			return failBucket(
-				`Edit ops overlap in ${""} (anchor "${replaces[i - 1]!.anchorStr}" through "${replaces[i]!.anchorStr}"). Merge them into a single replace op instead.`,
+				`Edit ops overlap in ${filePath} (anchor "${replaces[i - 1]!.anchorStr}" through "${replaces[i]!.anchorStr}"). Merge them into a single replace op instead.`,
 			);
+		}
+	}
+
+	// An insert_after whose anchor line sits strictly inside a replace
+	// range would splice into lines the replace is about to delete — the
+	// inserted text silently vanishes. Anchors on the first line of the
+	// range (insert lands before it) or the last (insert lands after it)
+	// are unambiguous and stay allowed.
+	const inserts = result.filter((o): o is BucketedInsert => o.kind === "insert");
+	for (const ins of inserts) {
+		for (const rep of replaces) {
+			if (ins.line >= rep.lineStart && ins.line < rep.lineEnd) {
+				return failBucket(
+					`Edit ops overlap in ${filePath}: insert_after anchor "${ins.anchorStr}" points inside the replace range "${rep.anchorStr}". Fold the inserted text into the replace content instead.`,
+				);
+			}
 		}
 	}
 	return { ok: true, ops: result };
@@ -336,55 +373,26 @@ function checkAnchor(
 	targetLine: number,
 ): AnchorCheckOk | AnchorCheckFail {
 	if (!anchor) return { ok: false, failure: failBucket("Malformed anchor.") };
+	const anchorStr = renderParsedAnchor(anchor);
 	if (targetLine < 1 || targetLine > lines.length) {
-		return { ok: false, failure: anchorNotFound(`${anchor.line}:${anchor.primaryHash}`, lines, hashes) };
+		return { ok: false, failure: anchorNotFound(anchorStr, lines, hashes) };
 	}
-	const [expectedPrimary, expectedSecondary] = hashes[targetLine - 1] ?? ["", ""];
+	const verdict = validateAnchor({ ...anchor, line: targetLine }, hashes);
+	if (verdict === "valid") return { ok: true };
+	if (verdict === "out_of_range") {
+		return { ok: false, failure: anchorNotFound(anchorStr, lines, hashes) };
+	}
+	return { ok: false, failure: staleAnchor(anchor, lines, hashes, targetLine) };
+}
 
-	// First, exact match: both primary and (optional) secondary match at
-	// `targetLine`. The model's anchor is intentionally stable when the
-	// line hasn't moved — no need to inspect the rest of the file.
-	if (expectedPrimary === anchor.primaryHash) {
-		if (!anchor.secondaryHash || expectedSecondary === anchor.secondaryHash) {
-			return { ok: true };
-		}
-		// The line's primary hash matches, but the secondary doesn't — the
-		// file has drifted (e.g. the previous line was edited). Fall through
-		// to stale handling.
-	}
-
-	// Look across the rest of the file to figure out whether the model's
-	// anchor is stale (no matching line) or merely ambiguous (the model
-	// skipped the secondary and more than one line shares the primary).
-	const primaryMatches: number[] = [];
-	for (let i = 0; i < lines.length; i++) {
-		const [p] = hashes[i] ?? ["", ""];
-		if (p === anchor.primaryHash) primaryMatches.push(i + 1);
-	}
-	if (primaryMatches.length > 1 && !anchor.secondaryHash) {
-		return {
-			ok: false,
-			failure: failBucket(
-				`Anchor "${anchor.line}:${anchor.primaryHash}" is ambiguous — the same primary hash matches lines ${primaryMatches.join(", ")}. Re-read the file and pass the full "<line>:<primary>:<secondary>" form for each line you want to edit.`,
-			),
-		};
-	}
-	// No line in the file matches the anchor at all — stale.
-	return {
-		ok: false,
-		failure: staleAnchor(
-			`${anchor.line}:${anchor.primaryHash}${anchor.secondaryHash ? `:${anchor.secondaryHash}` : ""}`,
-			expectedPrimary,
-			expectedSecondary,
-			lines,
-			hashes,
-			targetLine,
-		),
-	};
+function renderParsedAnchor(anchor: NonNullable<ReturnType<typeof parseAnchor>>): string {
+	return `${anchor.line}:${anchor.localHash}${anchor.chunkHash ? `:${anchor.chunkHash}` : ""}`;
 }
 
 function splitContent(content: string): string[] {
-	if (content === "") return [""];
+	// Empty content means "insert nothing": a replace with "" deletes the
+	// range outright instead of leaving a blank line behind.
+	if (content === "") return [];
 	// Preserve the trailing-newline semantics of the old `newText` shape:
 	// a content with a trailing newline produced an empty final line.
 	return content.split("\n");
@@ -394,43 +402,52 @@ function failBucket(message: string): BucketFailure {
 	return { ok: false, result: { content: message, isError: true } };
 }
 
-function anchorNotFound(badAnchor: string, lines: string[], _hashes: Array<[string, string]>): BucketFailure {
-	const centre = lines.length;
-	const snippet = formatAnchorSnippet(lines, Math.max(1, centre - 5), 5);
-	const freshList = freshAnchorList(lines, 10);
+function anchorNotFound(badAnchor: string, lines: string[], hashes: Array<[string, string]>): BucketFailure {
+	const snippet = formatAnchorSnippet(lines, hashes, lines.length - 1, 9);
 	const msg =
 		`Anchor "${badAnchor}" is past the end of the file (${lines.length} lines). ` +
-		`Use one of these anchors instead:\n${freshList}\n\n` +
-		`Last lines of the file:\n${snippet}`;
+		`Last lines of the file, with fresh anchors:\n${snippet}`;
 	return failBucket(msg);
 }
 
 function staleAnchor(
-	badAnchor: string,
-	expectedPrimary: string,
-	expectedSecondary: string,
+	anchor: NonNullable<ReturnType<typeof parseAnchor>>,
 	lines: string[],
-	_hashes: Array<[string, string]>,
+	hashes: Array<[string, string]>,
 	targetLine: number,
 ): BucketFailure {
-	const snippet = formatAnchorSnippet(lines, targetLine, 2);
-	const freshList = freshAnchorList(lines, 10);
-	const expected =
-		expectedSecondary && expectedSecondary !== expectedPrimary.slice(0, expectedSecondary.length)
-			? `${expectedPrimary}:${expectedSecondary}`
-			: expectedPrimary;
-	const msg =
-		`Anchor "${badAnchor}" is stale — the line no longer matches the hash from your last read. ` +
-		`Expected anchor at that line is "${expected}". ` +
-		`Re-read or use one of these fresh anchors:\n${freshList}\n\n` +
-		`Snippet around the requested line:\n${snippet}`;
-	return failBucket(msg);
-}
-
-function freshAnchorList(lines: string[], count: number): string {
-	const out: string[] = [];
-	for (let i = 0; i < Math.min(lines.length, count); i++) {
-		out.push(formatLineGutter({ lineNumber: i + 1, content: lines[i] ?? "", prevContent: lines[i - 1] }));
+	const badAnchor = renderParsedAnchor(anchor);
+	const snippet = formatAnchorSnippet(lines, hashes, targetLine - 1, 5);
+	// Commonest drift: the line itself is intact but a neighbour in the
+	// same chunk changed, so only the chunk component went stale. The
+	// fresh anchor lives at the same line number.
+	const [currentLocal] = hashes[targetLine - 1] ?? ["", ""];
+	if (currentLocal === anchor.localHash) {
+		const fresh = renderAnchor(targetLine, hashes[targetLine - 1] ?? ["", ""]);
+		return failBucket(
+			`Anchor "${badAnchor}" is stale at line ${targetLine} — the line itself is unchanged but nearby lines were edited. ` +
+				`Retry with anchor "${fresh}".\n\nSnippet around the requested line:\n${snippet}`,
+		);
 	}
-	return out.join("\n");
+	// The local hash survives line moves, so a stale anchor often just
+	// means the content shifted. A unique nearby match gets handed back
+	// as a ready-to-retry anchor — no re-read needed.
+	const shift = findShifted({ ...anchor, line: targetLine }, hashes);
+	if (shift?.kind === "found") {
+		const fresh = renderAnchor(shift.newLine, hashes[shift.newLine - 1] ?? ["", ""]);
+		return failBucket(
+			`Anchor "${badAnchor}" is stale at line ${targetLine} — the content appears to have shifted to line ${shift.newLine}. ` +
+				`Retry with anchor "${fresh}".\n\nSnippet around the requested line:\n${snippet}`,
+		);
+	}
+	if (shift?.kind === "ambiguous") {
+		return failBucket(
+			`Anchor "${badAnchor}" is stale at line ${targetLine}, and multiple nearby lines match it (lines ${shift.candidates.join(", ")}). ` +
+				`Use the fresh anchors from the snippet below to retry:\n${snippet}`,
+		);
+	}
+	return failBucket(
+		`Anchor "${badAnchor}" is stale — the line no longer matches the hashes from your last read. ` +
+			`Use the fresh anchors from the snippet below to retry:\n${snippet}`,
+	);
 }

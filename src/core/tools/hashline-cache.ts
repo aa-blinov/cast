@@ -4,7 +4,7 @@
  * next `get` we re-stat the file and discard the cached entry if it
  * changed. This is a hot path for `read`/`edit`/`grep` — a model that
  * re-reads a file between two `edit` calls now skips both the file I/O
- * and the per-line sha1, and a model that runs the same `grep` twice
+ * and the per-line hashing, and a model that runs the same `grep` twice
  * in a row skips the per-line hashing for every file it already saw.
  *
  * Capacity is bounded — 20 entries by default, ~4 MB worst case — and

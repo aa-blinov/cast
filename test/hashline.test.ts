@@ -1,28 +1,31 @@
 import { describe, expect, it } from "vitest";
-import { computeLineHashes, formatLineGutter, hash, parseAnchor, secondarySuffix } from "../src/core/tools/hashline.ts";
+import {
+	CHUNK_SIZE,
+	computeHashesForLines,
+	computeLineHashes,
+	encodeHash,
+	findShifted,
+	lineHash,
+	parseAnchor,
+	renderAnchoredLine,
+	validateAnchor,
+} from "../src/core/tools/hashline.ts";
 
 describe("hashline", () => {
-	it("hash() is deterministic for the same input", () => {
-		const a = hash(7, "const x = 1;", "let prev = 0;");
-		const b = hash(7, "const x = 1;", "let prev = 0;");
-		expect(a).toEqual(b);
-		expect(a[0]).toMatch(/^[0-9a-f]{6}$/);
-		expect(a[1]).toMatch(/^[0-9a-f]{3}$/);
+	it("lineHash is deterministic and whitespace-normalized", () => {
+		expect(lineHash("const x = 1;")).toBe(lineHash("  const x = 1;  "));
+		expect(lineHash("const  x =\t1;")).toBe(lineHash("const x = 1;"));
+		// But content changes matter.
+		expect(lineHash("return x")).not.toBe(lineHash("returnx"));
 	});
 
-	it("different line numbers of the same content hash differently", () => {
-		// A naive hash of just the line content would collide here; the
-		// line-number mixer is what makes anchored edits unambiguous.
-		const a = hash(1, "return 42;");
-		const b = hash(2, "return 42;");
-		expect(a[0]).not.toBe(b[0]);
+	it("encodeHash produces lowercase letters of the requested length", () => {
+		expect(encodeHash(lineHash("hello"))).toMatch(/^[a-z]{3}$/);
 	});
 
-	it("secondary hash disambiguates identical neighbouring lines", () => {
-		// Two adjacent blank-ish lines — same content, different prev.
-		const a = hash(1, "same", "");
-		const b = hash(2, "same", "same");
-		expect(a[1]).not.toBe(b[1]);
+	it("identical lines share the same local hash regardless of position", () => {
+		const hashes = computeHashesForLines(["same", "other", "same"]);
+		expect(hashes[0]![0]).toBe(hashes[2]![0]);
 	});
 
 	it("computeLineHashes returns one entry per line, in source order", () => {
@@ -30,60 +33,84 @@ describe("hashline", () => {
 		// ends with one. That's the same shape `read`/`edit` operate on.
 		const hashes = computeLineHashes("alpha\nbeta\ngamma\n");
 		expect(hashes).toHaveLength(4);
-		// First line has no previous, so its secondary is computed with "".
-		expect(hashes[0]![0]).toMatch(/^[0-9a-f]{6}$/);
+		expect(hashes[0]![0]).toMatch(/^[a-z]{3}$/);
+		expect(hashes[0]![1]).toMatch(/^[a-z]{3}$/);
 		expect(hashes[2]![0]).not.toBe(hashes[0]![0]);
 	});
 
-	it("formatLineGutter shows the secondary only when it disambiguates", () => {
-		const withNoSecondary = formatLineGutter({ lineNumber: 1, content: "unique-payload", prevContent: "" });
-		// The exact primary/secondary values are implementation-detail; we
-		// only assert the format and the elision rule.
-		const match = /^(\d+):([0-9a-f]{6})(?::([0-9a-f]{3}))?→(.+)$/.exec(withNoSecondary);
-		expect(match).not.toBeNull();
-		expect(match?.[4]).toBe("unique-payload");
-		expect(match?.[1]).toBe("1");
-		// Whether the secondary is printed depends on the hash bytes; the
-		// important contract is "if printed, it's the last 3 hex before →".
-		if (match?.[3]) {
-			expect(match[3]).toMatch(/^[0-9a-f]{3}$/);
-		}
-		// Round-trip: parsing the anchor we just built must reproduce the
-		// line number and at least the primary hash.
-		const parsed = parseAnchor(`${match?.[1]}:${match?.[2]}${match?.[3] ? `:${match[3]}` : ""}`);
-		expect(parsed?.line).toBe(1);
-		expect(parsed?.primaryHash).toBe(match?.[2]);
+	it("editing one line changes the chunk fingerprint of its whole chunk", () => {
+		const before = computeHashesForLines(["a", "b", "c", "d"]);
+		const after = computeHashesForLines(["a", "B", "c", "d"]);
+		// Local hashes of untouched lines are stable...
+		expect(after[0]![0]).toBe(before[0]![0]);
+		expect(after[2]![0]).toBe(before[2]![0]);
+		// ...but the shared chunk fingerprint drifts.
+		expect(after[0]![1]).not.toBe(before[0]![1]);
 	});
 
-	it("formatLineGutter carries the line content verbatim", () => {
-		const gutter = formatLineGutter({ lineNumber: 12, content: "\t\tconst x = 1;", prevContent: "}" });
-		expect(gutter).toMatch(/^12:[0-9a-f]{6}(?::[0-9a-f]{3})?→\t\tconst x = 1;$/);
+	it("lines in different chunks are unaffected by a distant edit", () => {
+		const lines = Array.from({ length: CHUNK_SIZE * 2 }, (_, i) => `line ${i}`);
+		const before = computeHashesForLines(lines);
+		const mutated = lines.slice();
+		mutated[0] = "CHANGED";
+		const after = computeHashesForLines(mutated);
+		const idx = CHUNK_SIZE; // first line of the second chunk
+		expect(after[idx]).toEqual(before[idx]);
 	});
 
-	it("secondarySuffix matches formatLineGutter's emitted secondary", () => {
-		// For the exact same inputs, the secondary the model can paste back
-		// (from secondarySuffix) must equal the one formatLineGutter
-		// already wrote. This is the contract `grep` relies on.
-		const lineNo = 17;
-		const content = "const y = 2;";
-		const prev = "const x = 1;";
-		const gutter = formatLineGutter({ lineNumber: lineNo, content, prevContent: prev });
-		const expected = secondarySuffix(lineNo, content, prev);
-		const match = /^17:[0-9a-f]{6}(?::([0-9a-f]{3}))?→/.exec(gutter);
-		const emitted = match?.[1] ?? "";
-		expect(emitted).toBe(expected);
+	it("renderAnchoredLine carries the line content verbatim", () => {
+		const gutter = renderAnchoredLine(12, ["abc", "rst"], "\t\tconst x = 1;");
+		expect(gutter).toBe("12:abc:rst→\t\tconst x = 1;");
 	});
 
-	it("parseAnchor accepts both 1- and 2-token forms", () => {
-		expect(parseAnchor("42:abc123")).toEqual({ line: 42, primaryHash: "abc123" });
-		expect(parseAnchor("42:abc123:1f2")).toEqual({ line: 42, primaryHash: "abc123", secondaryHash: "1f2" });
+	it("parseAnchor accepts full and truncated forms", () => {
+		expect(parseAnchor("42:abc:rst")).toEqual({ line: 42, localHash: "abc", chunkHash: "rst" });
+		expect(parseAnchor("42:abc")).toEqual({ line: 42, localHash: "abc" });
 	});
 
 	it("parseAnchor rejects garbage", () => {
-		expect(parseAnchor("abc123")).toBeNull();
-		expect(parseAnchor("42:xyz")).toBeNull();
+		expect(parseAnchor("abc")).toBeNull();
 		expect(parseAnchor(":abc")).toBeNull();
-		expect(parseAnchor("42:abc:1f2:extra")).toBeNull();
+		expect(parseAnchor("42:")).toBeNull();
+		expect(parseAnchor("42:ABC")).toBeNull();
+		expect(parseAnchor("42:abc:rst:extra")).toBeNull();
+		expect(parseAnchor("42:abc123")).toBeNull(); // digits are not part of the hash alphabet
 		expect(parseAnchor("")).toBeNull();
+	});
+
+	it("validateAnchor accepts a fresh full anchor and rejects drift", () => {
+		const lines = ["alpha", "beta", "gamma"];
+		const hashes = computeHashesForLines(lines);
+		const fresh = { line: 2, localHash: hashes[1]![0], chunkHash: hashes[1]![1] };
+		expect(validateAnchor(fresh, hashes)).toBe("valid");
+		// Truncated anchor (no chunk) must not silently weaken validation.
+		expect(validateAnchor({ line: 2, localHash: hashes[1]![0] }, hashes)).toBe("stale");
+		expect(validateAnchor({ ...fresh, line: 99 }, hashes)).toBe("out_of_range");
+		// Neighbouring edit within the chunk goes stale even though the
+		// line itself is untouched.
+		const drifted = computeHashesForLines(["alpha", "beta", "GAMMA"]);
+		expect(validateAnchor(fresh, drifted)).toBe("stale");
+	});
+
+	it("findShifted recovers a uniquely moved line", () => {
+		const lines = ["one", "two", "three"];
+		const hashes = computeHashesForLines(lines);
+		const anchor = { line: 2, localHash: hashes[1]![0] }; // "two", chunk omitted
+		// "two" moved down by one after an insertion above.
+		const shifted = computeHashesForLines(["inserted", "one", "two", "three"]);
+		const result = findShifted(anchor, shifted);
+		expect(result).toEqual({ kind: "found", newLine: 3 });
+	});
+
+	it("findShifted reports ambiguity when several nearby lines match", () => {
+		const hashes = computeHashesForLines(["dup", "x", "dup", "dup"]);
+		const result = findShifted({ line: 2, localHash: hashes[0]![0] }, hashes);
+		expect(result?.kind).toBe("ambiguous");
+	});
+
+	it("findShifted returns null when the content is gone", () => {
+		const hashes = computeHashesForLines(["one", "two", "three"]);
+		const result = findShifted({ line: 2, localHash: "zzz" }, hashes);
+		expect(result).toBeNull();
 	});
 });
