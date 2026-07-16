@@ -2,7 +2,6 @@
 
 All notable user-facing changes to cast, newest first.
 
-## 0.6.7
 ## 0.6.8
 
 ### Changed
@@ -13,7 +12,7 @@ All notable user-facing changes to cast, newest first.
 
 - `parseAnchor` now ignores any content past the `→` separator, so pasting a `read` gutter line (with its arrow and trailing content) into `edit` produces the correct anchor instead of a malformed one.
 
-
+## 0.6.7
 
 ### Changed
 
