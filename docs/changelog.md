@@ -2,6 +2,19 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.6.1
+
+### Fixed
+
+- **Terminal resync** — resize and focus-regain now use a light clear that preserves scroll position; theme changes and streaming desyncs still do a full scrollback wipe
+- **lineChurn** — O(m·n) fallback for large edits uses Set-based comparison instead of raw block count; identical large texts no longer report false positive changes
+- **Input parser** — DECXCPR cursor-position responses (`\x1b[row;colR`) explicitly dropped to prevent accidental keybinding matches
+
+### Internal
+
+- `displayWidth` extracted to `src/ui/display-width.ts` with per-session cache
+- Test directories isolated to prevent parallel test collisions
+
 ## 0.6.0
 
 ### Added
