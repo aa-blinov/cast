@@ -18,5 +18,5 @@ usually unnecessary.
   applied atomically; if any anchor is stale, the whole batch is rejected.
 - Two `replace` ops whose ranges overlap are rejected — merge them into one
   op with a wider range.
-- On a `stale-anchor` error, prefer the fresh anchors the tool returned
-  over guessing a new `oldText`; the tool already computed them for you.
+- On a `stale-anchor` error, use the fresh anchors the tool returned
+  in the error message — don't re-`read` and don't guess a new anchor.
