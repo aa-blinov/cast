@@ -1,148 +1,235 @@
 /**
  * Hashline anchors — every line in a file is prefixed with a short
  * content-derived hash so `edit` can reference lines without the model
- * having to copy their text. Same scheme `xai-org/grok-build` uses; see
- * `docs/tools.md` for the user-facing rationale.
+ * having to copy their text. Port of the `chunk` anchor scheme from
+ * `xai-org/grok-build`; see `docs/tools.md` for the user-facing rationale.
  *
- * The hash is mixed with the 1-based line number so two identical lines
- * on different lines still get different anchors (otherwise the model
- * could never pick one). A short secondary hash keyed on the previous
- * line is appended only when it actually disambiguates — that's why
- * most gutters you see will be `LINE:HASH→content`, with the secondary
- * `:HH` slice showing up only when two neighbouring lines collide.
+ * Anchor format: `LINE:LOCAL:CHUNK`.
  *
- * Hash size: primary 24 bits (6 hex), secondary 12 bits (3 hex). The
- * number-mixer keeps accidental collisions < 10⁻³ even in adversarial
- * 2k-line inputs; bigger gutters just cost more tokens.
+ * - `LOCAL` hashes the line's own content, whitespace-normalized (trim +
+ *   collapse internal runs), so formatter-only edits don't invalidate
+ *   anchors. Crucially it does NOT include the line number — a line that
+ *   merely moved keeps its local hash, which is what makes shifted-anchor
+ *   recovery possible.
+ * - `CHUNK` fingerprints the fixed 8-line chunk containing the line, so
+ *   edits near a line (same chunk) mark its anchor stale even when the
+ *   line itself is untouched.
+ *
+ * When an anchor goes stale, `findShifted` scans ±15 lines for a line
+ * that still validates under the anchor's hashes; a unique match is
+ * surfaced to the model as a ready-to-retry fresh anchor.
+ *
+ * Hashes are FNV-1a 32-bit, encoded as 3 lowercase letters (a–z) each —
+ * ~17.5k values per component. The line number in the anchor plus the
+ * two independent components keep accidental acceptance of a wrong line
+ * far below any practical concern.
  */
 
-import { createHash } from "node:crypto";
+const FNV_OFFSET = 0x811c9dc5;
+const FNV_PRIME = 0x01000193;
 
-const PRIMARY_HEX_LEN = 6;
-const SECONDARY_HEX_LEN = 3;
+export const HASH_LEN = 3;
+export const CHUNK_SIZE = 8;
+export const SHIFT_SEARCH_RADIUS = 15;
 
-/** Two-line window over `lines`, materialised once so callers don't redo it. */
-function previousLines(lines: string[]): string[] {
-	const out: string[] = new Array(lines.length);
-	out[0] = "";
-	for (let i = 1; i < lines.length; i++) {
-		out[i] = lines[i - 1] ?? "";
+function fnv1aMix(h: number, byte: number): number {
+	// >>> 0 keeps the running hash an unsigned 32-bit int; Math.imul is
+	// the wrapping 32-bit multiply.
+	return Math.imul(h ^ byte, FNV_PRIME) >>> 0;
+}
+
+function fnv1a32(data: string): number {
+	let h = FNV_OFFSET;
+	for (let i = 0; i < data.length; i++) {
+		// charCodeAt can exceed 255 for non-ASCII; fold to bytes the same
+		// way UTF-8 would spread them is overkill — mixing the full code
+		// unit keeps distinct characters distinct, which is all we need.
+		h = fnv1aMix(h, data.charCodeAt(i));
+	}
+	return h;
+}
+
+/**
+ * Whitespace-normalized FNV-1a fingerprint of a single line: leading and
+ * trailing whitespace trimmed, internal whitespace runs collapsed to a
+ * single space before hashing. Keeps anchors stable across formatter-only
+ * edits while still distinguishing `return x` from `returnx`.
+ */
+export function lineHash(line: string): number {
+	let h = FNV_OFFSET;
+	let prevWs = false;
+	const trimmed = line.trim();
+	for (let i = 0; i < trimmed.length; i++) {
+		const code = trimmed.charCodeAt(i);
+		if (code === 0x20 || code === 0x09 || code === 0x0b || code === 0x0c) {
+			if (!prevWs) {
+				h = fnv1aMix(h, 0x20);
+				prevWs = true;
+			}
+		} else {
+			h = fnv1aMix(h, code);
+			prevWs = false;
+		}
+	}
+	return h;
+}
+
+/** Encode a 32-bit hash as `len` lowercase letters, one per byte region. */
+export function encodeHash(hashValue: number, len: number = HASH_LEN): string {
+	let out = "";
+	for (let i = 0; i < len; i++) {
+		out += String.fromCharCode(97 + (((hashValue >>> (i * 8)) >>> 0) % 26));
 	}
 	return out;
 }
 
-function sha1Hex(input: string, len: number): string {
-	return createHash("sha1").update(input).digest("hex").slice(0, len);
+/**
+ * Fingerprint of the fixed-size chunk containing `lineIdx` (0-based):
+ * every line hash in the chunk mixed together. Any edit inside the chunk
+ * changes the fingerprint of all its lines.
+ */
+export function chunkFingerprint(lines: string[], lineIdx: number): string {
+	const chunkStart = Math.floor(lineIdx / CHUNK_SIZE) * CHUNK_SIZE;
+	const chunkEnd = Math.min(chunkStart + CHUNK_SIZE, lines.length);
+	let combined = fnv1a32("chunk");
+	for (let i = chunkStart; i < chunkEnd; i++) {
+		combined = Math.imul(combined ^ lineHash(lines[i] ?? ""), FNV_PRIME) >>> 0;
+	}
+	return encodeHash(combined);
 }
 
 /**
- * Compute the anchor hashes for every line in `content` (split on `\n`,
- * without splitting). Returns a parallel array: `[primary, secondary]`
- * for each line, in source order. The secondary is the same length as
- * the primary, but callers typically only print `len(SECONDARY_HEX_LEN)`
- * of it — `formatLineGutter` does the right thing.
+ * Compute `[local, chunk]` anchor components for every line of `lines`,
+ * in source order. Chunk fingerprints are computed once per chunk.
  */
-export function computeLineHashes(content: string): Array<[string, string]> {
-	const lines = content.split("\n");
-	const prevs = previousLines(lines);
+export function computeHashesForLines(lines: string[]): Array<[string, string]> {
+	const numChunks = Math.ceil(lines.length / CHUNK_SIZE);
+	const chunkFps: string[] = new Array(numChunks);
+	for (let c = 0; c < numChunks; c++) {
+		const start = c * CHUNK_SIZE;
+		const end = Math.min(start + CHUNK_SIZE, lines.length);
+		let combined = fnv1a32("chunk");
+		for (let i = start; i < end; i++) {
+			combined = Math.imul(combined ^ lineHash(lines[i] ?? ""), FNV_PRIME) >>> 0;
+		}
+		chunkFps[c] = encodeHash(combined);
+	}
 	const out: Array<[string, string]> = new Array(lines.length);
 	for (let i = 0; i < lines.length; i++) {
-		const lineNo = i + 1;
-		const line = lines[i] ?? "";
-		const prev = prevs[i] ?? "";
-		const primary = sha1Hex(`${lineNo}\0${line}`, PRIMARY_HEX_LEN);
-		const secondary = sha1Hex(`${lineNo}\0${prev}\0${line}`, SECONDARY_HEX_LEN);
-		out[i] = [primary, secondary];
+		out[i] = [encodeHash(lineHash(lines[i] ?? "")), chunkFps[Math.floor(i / CHUNK_SIZE)] ?? ""];
 	}
 	return out;
 }
 
-/**
- * Hash a single line directly. Mostly useful in tests; `execRead` and
- * `execGrep` go through `computeLineHashes` so the result lines up with
- * `formatLineGutter`.
- */
-export function hash(lineNumber1Based: number, content: string, prevContent?: string): [string, string] {
-	const prev = prevContent ?? "";
-	return [
-		sha1Hex(`${lineNumber1Based}\0${content}`, PRIMARY_HEX_LEN),
-		sha1Hex(`${lineNumber1Based}\0${prev}\0${content}`, SECONDARY_HEX_LEN),
-	];
+/** Convenience wrapper over `computeHashesForLines` for raw file content. */
+export function computeLineHashes(content: string): Array<[string, string]> {
+	return computeHashesForLines(content.split("\n"));
 }
 
-export interface GutterInput {
-	lineNumber: number;
-	content: string;
-	prevContent?: string;
+/** Render `LINE:LOCAL:CHUNK` for a 1-based line. */
+export function renderAnchor(lineNumber: number, hashes: [string, string]): string {
+	return `${lineNumber}:${hashes[0]}:${hashes[1]}`;
 }
 
 /**
- * Produce the gutter text the model sees: `<LINE>:<HASH>[:HH]→<content>`.
- * The secondary `:HH` slice is omitted when it equals the primary's first
- * `SECONDARY_HEX_LEN` chars — that keeps most lines short while still
- * letting two neighbouring identical lines be told apart.
+ * Produce the gutter text the model sees: `LINE:LOCAL:CHUNK→content`.
+ * The arrow separator is never legal leading whitespace in source, so a
+ * tab-indented file's real tabs stay unambiguous against the gutter.
  */
-export function formatLineGutter({ lineNumber, content, prevContent }: GutterInput): string {
-	const [primary, secondary] = hash(lineNumber, content, prevContent);
-	if (secondary === primary.slice(0, SECONDARY_HEX_LEN)) {
-		return `${lineNumber}:${primary}→${content}`;
-	}
-	return `${lineNumber}:${primary}:${secondary}→${content}`;
+export function renderAnchoredLine(lineNumber: number, hashes: [string, string], content: string): string {
+	return `${renderAnchor(lineNumber, hashes)}→${content}`;
 }
 
 export interface ParsedAnchor {
 	line: number;
-	primaryHash: string;
-	/** Only present when the model passed a full `LINE:HASH:HH` form. */
-	secondaryHash?: string;
+	localHash: string;
+	/** Absent when the model passed a truncated `LINE:LOCAL` form. */
+	chunkHash?: string;
 }
 
-const ANCHOR_RE = /^(\d+):([0-9a-f]+)(?::([0-9a-f]+))?$/;
+const ANCHOR_RE = /^(\d+):([a-z]+)(?::([a-z]+))?$/;
 
 /**
- * Build the secondary-hash suffix that `formatLineGutter` would print
- * for the same line. Used by `grep`, which only knows the line content
- * (and the previous line) — the primary hash it can call `hash()` for,
- * but the secondary suffix needs to be byte-identical to what `read`
- * would have printed for the model to copy-paste it back. Returns "" if
- * the suffix would be elided.
- */
-export function secondarySuffix(lineNumber: number, content: string, prevContent?: string): string {
-	const prev = prevContent ?? "";
-	const primary = sha1Hex(`${lineNumber}\0${content}`, PRIMARY_HEX_LEN);
-	const secondary = sha1Hex(`${lineNumber}\0${prev}\0${content}`, SECONDARY_HEX_LEN);
-	return secondary === primary.slice(0, SECONDARY_HEX_LEN) ? "" : secondary;
-}
-
-/**
- * Parse `<line>:<hash>` or `<line>:<hash>:<secondary>` into its parts.
- * Returns `null` for garbage — the caller decides whether to surface
- * that as an `AnchorNotFound` or a more specific error. The hash chars
- * are kept lowercase; the model will usually echo what `read` returned.
+ * Parse `LINE:LOCAL` or `LINE:LOCAL:CHUNK` into its parts. Returns `null`
+ * for garbage — the caller decides how to surface that.
  */
 export function parseAnchor(anchor: string): ParsedAnchor | null {
 	const match = ANCHOR_RE.exec(anchor);
 	if (!match) return null;
-	const [, lineStr, primary, secondary] = match;
+	const [, lineStr, local, chunk] = match;
 	return {
 		line: Number.parseInt(lineStr ?? "", 10),
-		primaryHash: primary ?? "",
-		secondaryHash: secondary,
+		localHash: local ?? "",
+		...(chunk ? { chunkHash: chunk } : {}),
 	};
+}
+
+export type AnchorValidation = "valid" | "stale" | "out_of_range";
+
+/**
+ * Validate a parsed anchor against the current file. A truncated anchor
+ * (no chunk component) is treated as stale rather than silently weakening
+ * validation to content-only semantics.
+ */
+export function validateAnchor(anchor: ParsedAnchor, hashes: Array<[string, string]>): AnchorValidation {
+	const idx = anchor.line - 1;
+	if (idx < 0 || idx >= hashes.length) return "out_of_range";
+	const [local, chunk] = hashes[idx] ?? ["", ""];
+	if (anchor.localHash !== local) return "stale";
+	if (!anchor.chunkHash || anchor.chunkHash !== chunk) return "stale";
+	return "valid";
+}
+
+export type ShiftResult = { kind: "found"; newLine: number } | { kind: "ambiguous"; candidates: number[] } | null;
+
+/**
+ * Search ±`radius` lines around a stale anchor for a line whose local
+ * (content) hash still matches. Exactly one hit means the content simply
+ * moved — the caller can hand the model a ready-made fresh anchor.
+ *
+ * Deliberate deviation from upstream grok-build: the anchor's chunk
+ * component is NOT checked against candidates. The very edit that shifted
+ * the line (an insertion above) also changed every chunk fingerprint, so
+ * requiring the old chunk to match would make recovery almost never fire.
+ * A unique content match within the window is strong enough evidence, and
+ * the model's retry is revalidated against the full fresh anchor anyway.
+ */
+export function findShifted(
+	anchor: ParsedAnchor,
+	hashes: Array<[string, string]>,
+	radius: number = SHIFT_SEARCH_RADIUS,
+): ShiftResult {
+	const origIdx = anchor.line - 1;
+	const start = Math.max(0, origIdx - radius);
+	const end = Math.min(origIdx + radius + 1, hashes.length);
+	const candidates: number[] = [];
+	for (let idx = start; idx < end; idx++) {
+		if (idx === origIdx) continue;
+		if ((hashes[idx] ?? ["", ""])[0] !== anchor.localHash) continue;
+		candidates.push(idx + 1);
+	}
+	if (candidates.length === 1) return { kind: "found", newLine: candidates[0]! };
+	if (candidates.length > 1) return { kind: "ambiguous", candidates };
+	return null;
 }
 
 /**
  * Format a fresh-anchor snippet for error replies — used by `edit` when
- * a stale or missing anchor needs the model to retry. Returns lines
- * numbered with their actual current hashes, so the model can copy them
- * straight back into a follow-up call without re-`read`ing the file.
+ * a stale or missing anchor needs the model to retry. Returns lines with
+ * their actual current anchors, so the model can copy them straight back
+ * into a follow-up call without re-`read`ing the file.
  */
-export function formatAnchorSnippet(lines: string[], centre: number, radius: number): string {
+export function formatAnchorSnippet(
+	lines: string[],
+	hashes: Array<[string, string]>,
+	centre: number,
+	radius: number,
+): string {
 	const lo = Math.max(0, centre - radius);
 	const hi = Math.min(lines.length, centre + radius + 1);
 	const out: string[] = [];
 	for (let i = lo; i < hi; i++) {
-		out.push(formatLineGutter({ lineNumber: i + 1, content: lines[i] ?? "", prevContent: lines[i - 1] }));
+		out.push(renderAnchoredLine(i + 1, hashes[i] ?? ["", ""], lines[i] ?? ""));
 	}
 	return out.join("\n");
 }

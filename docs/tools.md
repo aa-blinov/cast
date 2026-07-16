@@ -14,7 +14,7 @@ Read file contents. Supports text files and images (jpg, jpeg, png, gif, webp, b
 | `offset` | No | Line number to start from (1-indexed) |
 | `limit` | No | Maximum lines to read |
 
-Output is truncated to 2000 lines or 64KB. Images larger than 5MB are rejected. Each line is prefixed with a hashline anchor of the form `<LINE>:<HASH>→content` (a 6-hex primary hash, with an optional 3-hex secondary slice when it disambiguates) so it can be passed directly to `edit`.
+Output is truncated to 2000 lines or 64KB. Images larger than 5MB are rejected. Each line is prefixed with a hashline anchor of the form `<LINE>:<LOCAL>:<CHUNK>→content` (e.g. `22:abc:rst`) so it can be passed directly to `edit`.
 
 ### `write`
 
@@ -40,12 +40,12 @@ Each op has an `op` discriminator and an inline `content`:
 
 - `replace` — change one line or a range. Use `anchor` and an optional `end_anchor` (the range from `anchor` to `end_anchor` is INCLUSIVE on both ends). To delete lines, pass `content: ""`. To insert a line in the middle of the file, use `insert_after` instead.
   ```json
-  { "op": "replace", "anchor": "42:9f3a2c", "content": "    let x = 42;" }
-  { "op": "replace", "anchor": "10:abc123", "end_anchor": "12:def456", "content": "block of three lines\nspanning multiple\nlines" }
+  { "op": "replace", "anchor": "42:abc:rst", "content": "    let x = 42;" }
+  { "op": "replace", "anchor": "10:def:rst", "end_anchor": "12:ghi:rst", "content": "block of three lines\nspanning multiple\nlines" }
   ```
 - `insert_after` — add new lines after the anchor. The new lines go between the anchored line and what was originally the next line; existing content is preserved.
   ```json
-  { "op": "insert_after", "anchor": "42:9f3a2c", "content": "new line one\nnew line two" }
+  { "op": "insert_after", "anchor": "42:abc:rst", "content": "new line one\nnew line two" }
   ```
 - `write` — replace the entire file. No anchors required.
   ```json
@@ -54,11 +54,11 @@ Each op has an `op` discriminator and an inline `content`:
 
 Multiple ops in one call are validated against the pre-edit file and applied atomically. If any anchor is stale, the whole batch is rejected. Two `replace` ops whose ranges overlap are also rejected — merge them into one op with a wider range.
 
-On a stale-anchor or anchor-not-found error, the tool returns the fresh anchors and a snippet around the target line in the same reply, so a re-`read` is usually unnecessary.
+On a stale-anchor or anchor-not-found error, the tool returns the fresh anchors and a snippet around the target line in the same reply, so a re-`read` is usually unnecessary. When the anchored content merely moved (e.g. lines were inserted above it), the error names the new line and includes the exact anchor to retry with.
 
 #### Hashline anchors
 
-Every line `read` and `grep` returns carries a 6-hex hash keyed on `(line-number, content)`. The number is mixed in so two identical lines on different line numbers get different anchors. When two adjacent lines share the same primary hash, a short secondary slice (`<line>:<primary>:<secondary>`) is appended to tell them apart. To `edit` a line, copy the `<line>:<hash>[:<secondary>]` prefix into the `anchor` field of the op — do not re-type the line text.
+Every line `read` and `grep` returns carries a two-part hash (the `chunk` anchor scheme from `xai-org/grok-build`): `LOCAL` fingerprints the line's own content, whitespace-normalized, so formatter-only edits don't invalidate anchors and a line that merely moved keeps its local hash; `CHUNK` fingerprints the 8-line chunk around the line, so nearby edits mark the anchor stale even when the line itself is untouched. To `edit` a line, copy the full `<line>:<local>:<chunk>` prefix into the `anchor` field of the op — do not re-type the line text.
 
 ## Search Tools
 
@@ -86,7 +86,7 @@ Search file contents by regex pattern.
 | `context` | No | Lines before/after each match |
 | `limit` | No | Maximum matches (default: 100) |
 
-Each output line is prefixed with the same hashline anchor as `read` (`<relPath>:<line>:<hash>:<content>`), so a match can be edited without a separate `read`.
+Each output line is prefixed with the same hashline anchor as `read` (`<relPath>:<line>:<local>:<chunk>:<content>`), so a match can be edited without a separate `read`.
 
 ### `ls`
 
