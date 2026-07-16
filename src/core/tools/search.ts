@@ -11,6 +11,7 @@ import { access, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { basename, join, relative } from "node:path";
 import type { AppConfig } from "../config.ts";
 import { hash, secondarySuffix } from "./hashline.ts";
+import { getCachedFile } from "./hashline-cache.ts";
 import { formatSize, resolvePath, type ToolResult } from "./shared.ts";
 
 // ============================================================================
@@ -397,11 +398,16 @@ export async function execGrep(args: Record<string, unknown>, cwd: string, confi
  * Rewrite each `relPath:line:content` line in `output` to
  * `relPath:line:HASH[:HH]:content` so the model can copy the anchor into
  * an `edit` call without a separate `read`. Reads each unique file once
- * and caches the splits — without the cache a busy grep on a project
- * tree would do N reads for N matches and pay the I/O on every line.
+/**
+ * Walk the rg-shaped output and prefix each `<relPath>:<line>:<content>`
+ * line with a fresh hashline anchor so the model can pass it straight
+ * to `edit`. Hits the shared LRU first: a file that was already read or
+ * grep'd this session returns its precomputed anchors without another
+ * read or per-line sha1. On miss, the read goes into the LRU so the
+ * next read/edit/grep on the same file is a hit.
  */
 async function annotateWithHashes(output: string, cwd: string, searchPath: string): Promise<string> {
-	const fileCache = new Map<string, string[]>();
+	const fileCache = new Map<string, { lines: string[]; hashes: Array<[string, string]> }>();
 	const annotated: string[] = [];
 	for (const rawLine of output.split("\n")) {
 		const parsed = parseGrepLine(rawLine);
@@ -410,11 +416,11 @@ async function annotateWithHashes(output: string, cwd: string, searchPath: strin
 			continue;
 		}
 		const absPath = resolveGrepPath(parsed.relPath, cwd, searchPath);
-		let fileLines = fileCache.get(absPath);
-		if (!fileLines) {
+		let cached = fileCache.get(absPath);
+		if (!cached) {
 			try {
-				const text = await readFile(absPath, "utf-8");
-				fileLines = text.split("\n");
+				const c = await getCachedFile(absPath);
+				cached = { lines: c.lines, hashes: c.hashes };
 			} catch {
 				// File became unreadable between rg and us, or rg gave us
 				// a path we can't resolve. Drop the line through unchanged
@@ -422,11 +428,14 @@ async function annotateWithHashes(output: string, cwd: string, searchPath: strin
 				annotated.push(rawLine);
 				continue;
 			}
-			fileCache.set(absPath, fileLines);
+			fileCache.set(absPath, cached);
 		}
-		const content = fileLines[parsed.line - 1] ?? parsed.content;
-		const prev = fileLines[parsed.line - 2] ?? "";
-		const [primary] = hash(parsed.line, content, prev);
+		const content = cached.lines[parsed.line - 1] ?? parsed.content;
+		const prev = cached.lines[parsed.line - 2] ?? "";
+		// Read the precomputed primary from the cache to stay consistent
+		// with what `read` would have printed for the same line.
+		const cached_primary = cached.hashes[parsed.line - 1]?.[0];
+		const primary = cached_primary ?? hash(parsed.line, content, prev)[0];
 		const suffix = secondarySuffix(parsed.line, content, prev);
 		annotated.push(
 			suffix
