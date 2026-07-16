@@ -13,8 +13,9 @@ User settings are persisted to `~/.cast/settings.json`. This file is loaded on s
 | `planModel` | string | Model used while plan mode is active (falls back to `model`) |
 | `reasoningLevel` | string | Last used reasoning level |
 | `persona` | string | Last used persona name |
-| `providerUrl` | string | Provider endpoint URL |
-| `apiKey` | string | Provider API key |
+| `providerUrl` | string | Active provider endpoint URL |
+| `apiKey` | string | Active provider API key |
+| `providers` | Provider[] | Saved providers (name, url, apiKey) — use `/provider` to manage |
 | `cwd` | string | Last working directory |
 | `permissionMode` | `"default"` \| `"bypass"` | Bash confirmation mode |
 | `projectTrust` | Record<string, boolean> | Per-project trust decisions |
@@ -81,7 +82,16 @@ See [Tools](tools.md#dangerous-command-gating) for the list of dangerous pattern
 
 On first run, cast asks for your provider URL and API key. Both are saved to `~/.cast/settings.json`.
 
-Change later with `/provider` — cast verifies the new credentials before saving.
+You can save multiple providers and switch between them:
+
+| Command | Action |
+|---------|--------|
+| `/provider` | Open picker — switch between saved providers |
+| `/provider add` | Add a new provider (name → URL → key wizard) |
+| `/provider delete` | Remove a saved provider |
+| `/provider <name>` | Switch to a named provider directly |
+
+Providers are stored in the `providers` array in settings.json. The active provider's URL and key are also saved in the top-level `providerUrl` / `apiKey` fields for startup.
 
 Supported providers: anything that speaks the OpenAI API. Common URLs:
 

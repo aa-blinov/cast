@@ -57,7 +57,9 @@ describe("ensureConnectionAlive", () => {
 		expect(changed).toBe(true);
 		expect(cfg.baseURL).toBe("https://new.example/v1");
 		expect(cfg.apiKey).toBe("sk-new");
-		expect(upd).toHaveBeenCalledWith({ providerUrl: "https://new.example/v1", apiKey: "sk-new" });
+		expect(upd).toHaveBeenCalledWith(
+			expect.objectContaining({ providerUrl: "https://new.example/v1", apiKey: "sk-new" }),
+		);
 	});
 
 	it("keeps looping while the connection stays bad, applying each new key", async () => {

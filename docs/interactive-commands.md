@@ -23,7 +23,10 @@ All commands are typed at the TUI prompt, prefixed with `/`. Unknown slash comma
 | `/subagent-model` | Open model picker for sub-agents |
 | `/subagent-model <name>` | Switch sub-agent model |
 | `/reasoning` | Change reasoning level (opens picker if model supports it) |
-| `/provider` | Change provider endpoint URL and API key |
+| `/provider` | Open provider picker (switch, add, or delete providers) |
+| `/provider add` | Add a new provider (name → URL → key wizard) |
+| `/provider delete` | Delete a provider |
+| `/provider <name>` | Switch to a named provider |
 
 ## Persona
 

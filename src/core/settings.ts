@@ -20,6 +20,12 @@ export interface StatusBarConfig {
 	sides: Record<string, "left" | "right">;
 }
 
+export interface Provider {
+	name: string;
+	url: string;
+	apiKey: string;
+}
+
 export interface Settings {
 	/** Last used model */
 	model?: string;
@@ -36,6 +42,8 @@ export interface Settings {
 	providerUrl?: string;
 	/** Last used provider API key */
 	apiKey?: string;
+	/** Saved providers for quick switching via /provider. */
+	providers?: Provider[];
 	/** Last working directory */
 	cwd?: string;
 	/**
@@ -86,10 +94,24 @@ export function loadSettings(): Settings {
 	if (!existsSync(path)) return {};
 
 	try {
-		return JSON.parse(readFileSync(path, "utf-8")) as Settings;
+		const s = JSON.parse(readFileSync(path, "utf-8")) as Settings;
+		return migrateProviders(s);
 	} catch {
 		return {};
 	}
+}
+
+/**
+ * One-time migration: if `providers` is missing/empty but `providerUrl` +
+ * `apiKey` exist (legacy single-provider settings), populate `providers`
+ * so `/provider` can list and switch from the start.
+ */
+function migrateProviders(s: Settings): Settings {
+	if (s.providers?.length) return s;
+	if (s.providerUrl && s.apiKey) {
+		return { ...s, providers: [{ name: "default", url: s.providerUrl, apiKey: s.apiKey }] };
+	}
+	return s;
 }
 
 function saveSettings(settings: Settings): void {
