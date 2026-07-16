@@ -58,9 +58,57 @@ Other:
 
 - Only commit files changed in the current session. Stage explicit paths (`git add <path>...`), never `git add -A`.
 - Commit message: `type: imperative summary` (`feat|fix|chore|docs|test`), body explains *why*.
-- Version bumps are their own commit: `npm version patch|minor --no-git-tag-version`, then commit `package.json`+`package-lock.json` alone as `chore: bump version to X.Y.Z`.
-  - patch: small additions/fixes; minor: new user-facing feature.
-- Releasing: `git tag -a vX.Y.Z -m vX.Y.Z`, then `git push origin master && git push origin vX.Y.Z`. Tag push triggers the release workflow.
+
+## Release Process
+
+When the user says "make a release", follow these steps in order:
+
+### 1. Determine the version bump
+
+| Bump | When | npm command | Example |
+|------|------|-------------|---------|
+| **patch** | Bug fixes, small tweaks, internal improvements | `npm version patch --no-git-tag-version` | 0.6.0 → 0.6.1 |
+| **minor** | New user-facing features, non-breaking additions | `npm version minor --no-git-tag-version` | 0.6.0 → 0.7.0 |
+| **major** | Breaking changes, major rewrites, dropping features | `npm version major --no-git-tag-version` | 0.6.0 → 1.0.0 |
+
+Pre-1.0 (current): minor bumps feel like patches to users. Use minor for features worth advertising, patch for everything else.
+
+### 2. Update CHANGELOG.md
+
+- Add a new `## vX.Y.Z` section at the top.
+- Group changes under `### Features`, `### Fixes`, `### Internal` as applicable.
+- Summarize user-visible impact, not commit messages.
+
+### 3. Pre-release checks
+
+```
+npm run check && npm test && npm run build
+```
+
+All three must pass. If any fails, fix first.
+
+### 4. Commit the release
+
+```
+git add package.json package-lock.json CHANGELOG.md
+git commit -m "chore: bump version to X.Y.Z"
+```
+
+If AGENTS.md or other docs were updated in the same session, include them in the same commit.
+
+### 5. Tag and push
+
+```
+git tag -a vX.Y.Z -m vX.Y.Z
+git push origin master && git push origin vX.Y.Z
+```
+
+Tag push triggers the release workflow on CI.
+
+### 6. Verify
+
+- Confirm the tag appears on GitHub: `git ls-remote --tags origin vX.Y.Z`
+- Confirm CI release workflow succeeded.
 
 ## Dependency Security
 
