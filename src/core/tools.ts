@@ -116,8 +116,9 @@ export function getToolDefinitions(
 					"Edit a file using hashline anchors from a recent `read` or `grep`. " +
 					"Each op targets a line (or a line range) by anchor instead of pasting text. " +
 					"Ops: 'replace' (one line or `anchor`+`end_anchor` range; the range is INCLUSIVE on both ends), " +
-					"'insert_after' (add new lines after an anchor), 'write' (replace the whole file). " +
+					"'insert_after' / 'insert_before' (add new lines after/before an anchored line), 'write' (replace the whole file). " +
 					"Multiple ops in one call are validated against the pre-edit file and applied atomically. " +
+					"A successful edit returns the edited regions with fresh anchors — verify them before the next op. " +
 					"Stale-anchor errors include fresh anchors (and, when content merely moved, the exact shifted anchor to retry with) so a re-read is usually unnecessary.",
 				parameters: {
 					type: "object",
@@ -130,18 +131,18 @@ export function getToolDefinitions(
 								properties: {
 									op: {
 										type: "string",
-										enum: ["replace", "insert_after", "write"],
+										enum: ["replace", "insert_after", "insert_before", "write"],
 										description: "Kind of edit operation.",
 									},
 									anchor: {
 										type: "string",
 										description:
-											"For replace/insert_after: a hashline anchor of the form `<line>:<local>:<chunk>` exactly as printed by read/grep (e.g. `22:abc:rst`). For insert_after only, `0:` inserts at the top of the file.",
+											"For replace/insert_after/insert_before: a hashline anchor of the form `<line>:<local>:<chunk>` exactly as printed by read/grep (e.g. `22:abc:rst`). For insert_after only, `0:` inserts at the top of the file.",
 									},
 									end_anchor: {
 										type: "string",
 										description:
-											"Optional second anchor for `replace`; the range from `anchor` to `end_anchor` (inclusive) is replaced by `content`.",
+											"Optional second anchor for `replace`; the range from `anchor` to `end_anchor` (inclusive) is replaced by `content`. Without it exactly one line is replaced, regardless of how many lines `content` has.",
 									},
 									content: {
 										type: "string",

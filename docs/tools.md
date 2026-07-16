@@ -32,7 +32,7 @@ Edit a file using hashline anchors from a recent `read` or `grep`. Each `op` tar
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `path` | Yes | File path |
-| `ops` | Yes | Array of `replace` / `insert_after` / `write` operations (see below) |
+| `ops` | Yes | Array of `replace` / `insert_after` / `insert_before` / `write` operations (see below) |
 
 #### `ops[]` — anchor-based operations
 
@@ -47,12 +47,18 @@ Each op has an `op` discriminator and an inline `content`:
   ```json
   { "op": "insert_after", "anchor": "42:abc:rst", "content": "new line one\nnew line two" }
   ```
+- `insert_before` — add new lines above the anchored line. Same semantics as `insert_after` on the previous line, but the anchor names the line the text goes above — handy at section boundaries (headings, function starts).
+  ```json
+  { "op": "insert_before", "anchor": "42:abc:rst", "content": "// explanatory comment" }
+  ```
 - `write` — replace the entire file. No anchors required.
   ```json
   { "op": "write", "content": "full file content here" }
   ```
 
 Multiple ops in one call are validated against the pre-edit file and applied atomically. If any anchor is stale, the whole batch is rejected. Two `replace` ops whose ranges overlap are also rejected — merge them into one op with a wider range.
+
+A successful edit replies with the edited regions rendered with fresh anchors (±2 lines of context, overlapping windows merged, capped at 60 lines), so the result of the edit is immediately visible and follow-up ops can reuse the returned anchors without a re-`read`.
 
 On a stale-anchor or anchor-not-found error, the tool returns the fresh anchors and a snippet around the target line in the same reply, so a re-`read` is usually unnecessary. When the anchored content merely moved (e.g. lines were inserted above it), the error names the new line and includes the exact anchor to retry with.
 

@@ -398,6 +398,80 @@ describe("edit", () => {
 		expect(readFileSync(join(TEST_DIR, "shifted.txt"), "utf-8")).toBe("inserted\none\nTWO\nthree\n");
 	});
 
+	it("echoes the edited region with fresh anchors on success", async () => {
+		writeFileSync(join(TEST_DIR, "echo.txt"), "l1\nl2\nl3\nl4\nl5\nl6\n");
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const before = await exec("read", { path: "echo.txt" });
+		const result = await exec("edit", {
+			path: "echo.txt",
+			ops: [{ op: "replace", anchor: anchorForLine(before.content, 3), content: "L3a\nL3b" }],
+		});
+		expect(result.isError).toBeFalsy();
+		// The success reply must show the new content in place, with valid
+		// anchors around it, so the model can verify and chain edits.
+		expect(result.content).toMatch(/\b3:[a-z]{3}:[a-z]{3}→L3a\b/);
+		expect(result.content).toMatch(/\b4:[a-z]{3}:[a-z]{3}→L3b\b/);
+		expect(result.content).toMatch(/\b2:[a-z]{3}:[a-z]{3}→l2\b/); // context above
+		expect(result.content).toMatch(/\b6:[a-z]{3}:[a-z]{3}→l5\b/); // context below, shifted by +1
+		// A follow-up edit must be able to use an anchor from the snippet.
+		const suggested = /(\d+:[a-z]{3}:[a-z]{3})→L3b/.exec(result.content);
+		const chained = await exec("edit", {
+			path: "echo.txt",
+			ops: [{ op: "replace", anchor: suggested![1]!, content: "L3B" }],
+		});
+		expect(chained.isError).toBeFalsy();
+		expect(readFileSync(join(TEST_DIR, "echo.txt"), "utf-8")).toBe("l1\nl2\nL3a\nL3B\nl4\nl5\nl6\n");
+	});
+
+	it("insert_before puts lines above the anchored line", async () => {
+		// The exact changelog case: a new section goes ABOVE an existing
+		// heading, anchored on the heading itself.
+		writeFileSync(join(TEST_DIR, "before.txt"), "# Changelog\n\n## 0.6.7\n\n- old entry\n");
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const before = await exec("read", { path: "before.txt" });
+		const result = await exec("edit", {
+			path: "before.txt",
+			ops: [{ op: "insert_before", anchor: anchorForLine(before.content, 3), content: "## 0.6.8\n\n- new entry\n" }],
+		});
+		expect(result.isError).toBeFalsy();
+		expect(readFileSync(join(TEST_DIR, "before.txt"), "utf-8")).toBe(
+			"# Changelog\n\n## 0.6.8\n\n- new entry\n\n## 0.6.7\n\n- old entry\n",
+		);
+	});
+
+	it("insert_before the first line prepends to the file", async () => {
+		writeFileSync(join(TEST_DIR, "before-top.txt"), "first\nsecond\n");
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const before = await exec("read", { path: "before-top.txt" });
+		const result = await exec("edit", {
+			path: "before-top.txt",
+			ops: [{ op: "insert_before", anchor: anchorForLine(before.content, 1), content: "header" }],
+		});
+		expect(result.isError).toBeFalsy();
+		expect(readFileSync(join(TEST_DIR, "before-top.txt"), "utf-8")).toBe("header\nfirst\nsecond\n");
+	});
+
+	it("rejects an insert_before anchored strictly inside a replace range", async () => {
+		writeFileSync(join(TEST_DIR, "before-overlap.txt"), "l1\nl2\nl3\nl4\nl5\n");
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const before = await exec("read", { path: "before-overlap.txt" });
+		const result = await exec("edit", {
+			path: "before-overlap.txt",
+			ops: [
+				{ op: "insert_before", anchor: anchorForLine(before.content, 3), content: "X" },
+				{
+					op: "replace",
+					anchor: anchorForLine(before.content, 2),
+					end_anchor: anchorForLine(before.content, 4),
+					content: "R",
+				},
+			],
+		});
+		expect(result.isError).toBe(true);
+		expect(result.content.toLowerCase()).toContain("overlap");
+		expect(readFileSync(join(TEST_DIR, "before-overlap.txt"), "utf-8")).toBe("l1\nl2\nl3\nl4\nl5\n");
+	});
+
 	it('inserts at the top of the file with the "0:" anchor', async () => {
 		writeFileSync(join(TEST_DIR, "top.txt"), "first\nsecond\n");
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
