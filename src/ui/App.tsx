@@ -636,6 +636,8 @@ export function App(props: AppProps): JSX.Element {
 					persona: currentPersona.label,
 					planMode,
 					activeModel,
+					configuredModel: session.model,
+					planModel,
 					usage: agent.usage ?? undefined,
 					lastTurnUsage: agent.lastTurnUsage ?? undefined,
 					elapsedMs: agent.elapsedMs,

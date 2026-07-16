@@ -13,6 +13,8 @@ function emptyCtx(overrides: Partial<SegmentContext> = {}): SegmentContext {
 		persona: "Coding",
 		planMode: false,
 		activeModel: "m",
+		configuredModel: "m",
+		planModel: undefined,
 		usage: undefined,
 		lastTurnUsage: undefined,
 		elapsedMs: 0,
@@ -99,5 +101,40 @@ describe("segment renderers", () => {
 	it("elapsed renders a positive elapsedMs as a non-null element", () => {
 		const seg = getStatusBarSegments().find((s) => s.id === "elapsed")!;
 		expect(seg.render(emptyCtx({ elapsedMs: 1500 }))).not.toBeNull();
+	});
+});
+
+describe("segment formatValue (/current)", () => {
+	it("model shows configured + active on separate lines when plan mode swaps the model", () => {
+		const seg = getStatusBarSegments().find((s) => s.id === "model")!;
+		const value = seg.formatValue(
+			emptyCtx({
+				planMode: true,
+				planModel: "opus",
+				configuredModel: "haiku",
+				activeModel: "opus",
+			}),
+		);
+		expect(value).toBe("haiku (plan: opus)");
+	});
+
+	it("model collapses to activeModel when no plan override is in effect", () => {
+		const seg = getStatusBarSegments().find((s) => s.id === "model")!;
+		const value = seg.formatValue(
+			emptyCtx({
+				planMode: true,
+				planModel: undefined,
+				configuredModel: "haiku",
+				activeModel: "haiku",
+			}),
+		);
+		expect(value).toBe("haiku");
+	});
+
+	it("usage and subagent return null when there's nothing to show", () => {
+		const usage = getStatusBarSegments().find((s) => s.id === "usage")!;
+		const subagent = getStatusBarSegments().find((s) => s.id === "subagent")!;
+		expect(usage.formatValue(emptyCtx())).toBeNull();
+		expect(subagent.formatValue(emptyCtx())).toBeNull();
 	});
 });

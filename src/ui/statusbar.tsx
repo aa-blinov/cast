@@ -13,7 +13,15 @@ import { theme } from "./themes/index.ts";
 export interface SegmentContext {
 	persona: string;
 	planMode: boolean;
+	/** Model actually in use right now: the plan override when plan mode is on
+	 * with one, otherwise the configured model. */
 	activeModel: string;
+	/** The configured model — stays the same across plan/build toggles, so
+	 * /current can show when the live model diverges from it. */
+	configuredModel: string;
+	/** Plan-mode override (when set, used while plan mode is on). Undefined
+	 * when no override is configured. */
+	planModel: string | undefined;
 	usage: SessionUsage | undefined;
 	lastTurnUsage: { tokensPerSecond?: number } | undefined;
 	elapsedMs: number;
@@ -33,6 +41,13 @@ export interface StatusBarSegment {
 	defaultOn: boolean;
 	side: "left" | "right";
 	render: (ctx: SegmentContext) => JSX.Element | null;
+	/**
+	 * Plain-text rendering of this segment's data for the /current command.
+	 * Returning null means "no data" and the command prints an em-dash, the
+	 * same default it used when the segment wasn't recognized. The visible
+	 * status bar uses `render`; this is only read by /current.
+	 */
+	formatValue: (ctx: SegmentContext) => string | null;
 }
 
 const segments: StatusBarSegment[] = [];
@@ -77,6 +92,7 @@ registerStatusBarSegment({
 	defaultOn: true,
 	side: "left",
 	render: (ctx) => <Text color={theme().persona}>{ctx.persona}</Text>,
+	formatValue: (ctx) => ctx.persona,
 });
 
 registerStatusBarSegment({
@@ -86,6 +102,7 @@ registerStatusBarSegment({
 	side: "left",
 	render: (ctx) =>
 		ctx.planMode ? <Text color={theme().warning}>PLAN</Text> : <Text color={theme().muted}>BUILD</Text>,
+	formatValue: (ctx) => (ctx.planMode ? "PLAN" : "BUILD"),
 });
 
 registerStatusBarSegment({
@@ -94,6 +111,15 @@ registerStatusBarSegment({
 	defaultOn: true,
 	side: "left",
 	render: (ctx) => <Text color={theme().muted}>{ctx.activeModel}</Text>,
+	// When plan mode swaps in a separate plan model, /current shows the
+	// configured model and tags the live one in parens — otherwise the
+	// status bar reads one model and the user wonders where the other came from.
+	formatValue: (ctx) => {
+		if (ctx.planMode && ctx.planModel && ctx.planModel !== ctx.configuredModel) {
+			return `${ctx.configuredModel} (plan: ${ctx.activeModel})`;
+		}
+		return ctx.activeModel;
+	},
 });
 
 registerStatusBarSegment({
@@ -112,6 +138,14 @@ registerStatusBarSegment({
 				ctx {abbreviateTokens(used)}/{abbreviateTokens(ctx.contextWindow)} ({pct}%)
 			</Text>
 		);
+	},
+	formatValue: (ctx) => {
+		if (ctx.messages.length === 0) return null;
+		const used = estimateTokens(ctx.messages);
+		const budget = ctx.contextWindow - ctx.maxResponseTokens;
+		if (budget <= 0) return "ctx ?";
+		const pct = Math.round((used / budget) * 100);
+		return `ctx ${abbreviateTokens(used)}/${abbreviateTokens(ctx.contextWindow)} (${pct}%)`;
 	},
 });
 
@@ -132,6 +166,11 @@ registerStatusBarSegment({
 			</Text>
 		);
 	},
+	formatValue: (ctx) => {
+		const u = ctx.usage;
+		if (!u || u.totalTokens <= 0) return null;
+		return `${abbreviateTokens(u.promptTokens)} in / ${abbreviateTokens(u.completionTokens)} out`;
+	},
 });
 
 registerStatusBarSegment({
@@ -142,6 +181,10 @@ registerStatusBarSegment({
 	render: (ctx) => {
 		if (!ctx.lastTurnUsage?.tokensPerSecond) return null;
 		return <Text color={theme().muted}>{ctx.lastTurnUsage.tokensPerSecond.toFixed(1)} tok/s</Text>;
+	},
+	formatValue: (ctx) => {
+		const tps = ctx.lastTurnUsage?.tokensPerSecond;
+		return tps ? `${tps.toFixed(1)} tok/s` : null;
 	},
 });
 
@@ -154,6 +197,7 @@ registerStatusBarSegment({
 		if (ctx.elapsedMs <= 0) return null;
 		return <Text color={theme().muted}>{(ctx.elapsedMs / 1000).toFixed(1)}s</Text>;
 	},
+	formatValue: (ctx) => (ctx.elapsedMs > 0 ? `${(ctx.elapsedMs / 1000).toFixed(1)}s` : null),
 });
 
 registerStatusBarSegment({
@@ -164,5 +208,9 @@ registerStatusBarSegment({
 	render: (ctx) => {
 		if (!ctx.usage || ctx.usage.subagentTokens <= 0) return null;
 		return <Text color={theme().muted}>{abbreviateTokens(ctx.usage.subagentTokens)} sub</Text>;
+	},
+	formatValue: (ctx) => {
+		const u = ctx.usage;
+		return u && u.subagentTokens > 0 ? `${abbreviateTokens(u.subagentTokens)} sub` : null;
 	},
 });
