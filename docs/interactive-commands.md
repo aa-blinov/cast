@@ -11,6 +11,7 @@ All commands are typed at the TUI prompt, prefixed with `/`. Unknown slash comma
 | `/clear` | Clear conversation context (and save the cleared state) |
 | `/compact` | Force context compaction now (auto-triggers near the limit) |
 | `/copy` | Copy last assistant response to clipboard |
+| `/current` | Show all status bar data (even disabled segments) |
 | `/quit`, `/exit` | Save and exit |
 
 ## Model and Provider
@@ -88,6 +89,8 @@ Both steering and follow-up messages reset the doom loop counter — repeating a
 
 Token usage and context size are shown automatically in the TUI status bar (prompt tokens in, completion tokens out, context percentage, tokens/second, and sub-agent tokens).
 
+Use `/statusbar` to toggle individual segments on/off and reorder them — useful on narrow terminals where the full bar overflows. Segments can be moved between the left and right sides of the bar with ←/→, and reordered within each side with j/k. Default: persona, mode, model (left) and elapsed (right); enable others via `/statusbar`.
+
 | Command | Description |
 |---------|-------------|
 | `/usage` | Show cumulative session token/cost usage (prompt, completion, cache hits, sub-agent tokens) |
@@ -100,6 +103,7 @@ Token usage and context size are shown automatically in the TUI status bar (prom
 | `/permissions default` | Switch to gated mode (confirm dangerous commands) |
 | `/permissions bypass` | Switch to bypass mode (no confirmation) |
 | `/web` | Toggle web tools (web_search, web_fetch) on/off |
+| `/statusbar` | Toggle and reorder status bar segments (multi-select picker) |
 | `/theme` | Open theme picker |
 | `/theme <id>` | Switch to a specific theme |
 

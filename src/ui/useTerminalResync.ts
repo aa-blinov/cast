@@ -206,14 +206,25 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 		}
 		const focusTracker = createFocusReturnTracker();
 		let focusTimer: ReturnType<typeof setTimeout> | null = null;
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: focus report sequences
+		const FOCUS_RE = /\x1b\[IO/g;
 		const onFocusData = (chunk: Buffer) => {
-			// Resync only on a real focus RETURN (focus-out then focus-in), never on
-			// the spurious focus-in emitted when ?1004h is first enabled — that one
-			// would wipe the startup banner. Debounced because a terminal may repeat
-			// the report; doResync's own guards defer it during streaming/suspend/scroll.
-			if (!focusTracker.onData(chunk.toString("latin1"))) return;
-			if (focusTimer) clearTimeout(focusTimer);
-			focusTimer = setTimeout(doLightResync, 80);
+			const s = chunk.toString("latin1");
+			// Process focus sequences for the tracker first.
+			if (focusTracker.onData(s)) {
+				if (focusTimer) clearTimeout(focusTimer);
+				focusTimer = setTimeout(doLightResync, 80);
+			}
+			// Strip focus sequences in-place so they don't reach Ink's useInput.
+			// Without this, \x1b can be parsed as an Escape keypress by readline,
+			// which breaks modal pickers (StatusBarPicker, etc.) after alt-tab.
+			if (FOCUS_RE.test(s)) {
+				FOCUS_RE.lastIndex = 0;
+				const cleaned = s.replace(FOCUS_RE, "");
+				const cleanedBuf = Buffer.from(cleaned, "latin1");
+				cleanedBuf.copy(chunk);
+				for (let i = cleanedBuf.length; i < chunk.length; i++) chunk[i] = 0;
+			}
 		};
 		if (process.stdin.isTTY) process.stdin.on("data", onFocusData);
 

@@ -20,6 +20,8 @@ User settings are persisted to `~/.cast/settings.json`. This file is loaded on s
 | `projectTrust` | Record<string, boolean> | Per-project trust decisions |
 | `theme` | string | Active color theme id |
 | `webTools` | boolean | Whether web tools are enabled (default: `false` — use `/web` to enable) |
+| `disabledMcpServers` | string[] | MCP server names disabled via `/mcp` toggle |
+| `statusBar` | object | Status bar segment config (`visible`, `order`, `sides`) — use `/statusbar` to configure |
 | `updatedAt` | string | Auto-updated timestamp |
 
 Settings are written atomically (temp file + rename) to prevent corruption from crashes mid-write.
