@@ -9,6 +9,7 @@ import { access, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, extname } from "node:path";
 import type { AppConfig } from "../config.ts";
 import {
+	computeHashesForLines,
 	findShifted,
 	formatAnchorSnippet,
 	parseAnchor,
@@ -169,13 +170,86 @@ export async function execEdit(args: Record<string, unknown>, cwd: string): Prom
 
 	await writeFile(absolutePath, mutated.join("\n"), "utf-8");
 	invalidateCachedFile(absolutePath);
-	return { content: `Updated ${ops.length} block(s) in ${filePath}.` };
+	// Echo the edited regions back with fresh anchors. Without this the
+	// model is flying blind after every edit — it builds the next op on
+	// what it *believes* the file now looks like, and a misplaced insert
+	// or a forgotten end_anchor goes unnoticed until a full re-read. The
+	// snippet makes the damage (or success) visible immediately and hands
+	// over ready-to-use anchors for the follow-up edit. Same feedback
+	// grok-build's hashline_edit gives on success.
+	const snippet = postEditSnippet(bucketResult.ops, mutated);
+	return { content: `Updated ${ops.length} block(s) in ${filePath}. Result (with fresh anchors):\n\n${snippet}` };
+}
+
+const SNIPPET_CONTEXT_LINES = 2;
+const MAX_SNIPPET_LINES = 60;
+
+/**
+ * Render the post-edit regions with fresh anchors. Each op's final
+ * position in the mutated file is its original position shifted by the
+ * line-count deltas of the ops above it; overlapping context windows are
+ * merged so adjacent edits read as one block.
+ */
+function postEditSnippet(ops: BucketedOp[], mutated: string[]): string {
+	const freshHashes = computeHashesForLines(mutated);
+	// Ascending file order, accumulating the shift each op causes for
+	// everything below it.
+	const asc = ops.slice().sort((a, b) => {
+		const la = a.kind === "insert" ? a.line : a.lineStart;
+		const lb = b.kind === "insert" ? b.line : b.lineStart;
+		return la - lb;
+	});
+	let delta = 0;
+	const regions: Array<[number, number]> = [];
+	for (const op of asc) {
+		let start: number;
+		let inserted: number;
+		let removed: number;
+		if (op.kind === "replace") {
+			start = op.lineStart + delta;
+			inserted = op.textLinesToInsert.length;
+			removed = op.lineEnd - op.lineStart + 1;
+		} else {
+			start = op.line + 1 + delta;
+			inserted = op.textLinesToInsert.length;
+			removed = 0;
+		}
+		// A pure deletion has no inserted lines to show — the region
+		// degrades to the context around the seam.
+		const end = inserted > 0 ? start + inserted - 1 : start;
+		regions.push([
+			Math.max(0, start - SNIPPET_CONTEXT_LINES),
+			Math.min(mutated.length - 1, end + SNIPPET_CONTEXT_LINES),
+		]);
+		delta += inserted - removed;
+	}
+	// Merge windows that touch or overlap.
+	const merged: Array<[number, number]> = [];
+	for (const r of regions) {
+		const last = merged[merged.length - 1];
+		if (last && r[0] <= last[1] + 1) {
+			last[1] = Math.max(last[1], r[1]);
+		} else {
+			merged.push([r[0], r[1]]);
+		}
+	}
+	const out: string[] = [];
+	let budget = MAX_SNIPPET_LINES;
+	for (let i = 0; i < merged.length && budget > 0; i++) {
+		if (i > 0) out.push("⋯");
+		const [lo, hi] = merged[i]!;
+		for (let line = lo; line <= hi && budget > 0; line++, budget--) {
+			out.push(renderAnchoredLine(line + 1, freshHashes[line] ?? ["", ""], mutated[line] ?? ""));
+		}
+	}
+	if (budget <= 0) out.push("⋯ (snippet truncated)");
+	return out.join("\n");
 }
 
 type AnchorOp =
 	| { kind: "write"; content: string }
 	| { kind: "replace"; anchorStr: string; endAnchorStr?: string; content: string }
-	| { kind: "insert"; anchorStr: string; content: string };
+	| { kind: "insert"; anchorStr: string; content: string; before: boolean };
 
 function resolveOps(
 	args: Record<string, unknown>,
@@ -217,15 +291,15 @@ function resolveOps(
 				content: r.content,
 				...(r.end_anchor ? { endAnchorStr: r.end_anchor } : {}),
 			});
-		} else if (r.op === "insert_after") {
+		} else if (r.op === "insert_after" || r.op === "insert_before") {
 			if (typeof r.anchor !== "string" || typeof r.content !== "string") {
-				return { ok: false, error: `Invalid insert_after op in ${filePath}: anchor and content are required.` };
+				return { ok: false, error: `Invalid ${r.op} op in ${filePath}: anchor and content are required.` };
 			}
-			parsed.push({ kind: "insert", anchorStr: r.anchor, content: r.content });
+			parsed.push({ kind: "insert", anchorStr: r.anchor, content: r.content, before: r.op === "insert_before" });
 		} else {
 			return {
 				ok: false,
-				error: `Unknown edit op "${String(r.op)}" in ${filePath} — expected replace, insert_after, or write.`,
+				error: `Unknown edit op "${String(r.op)}" in ${filePath} — expected replace, insert_after, insert_before, or write.`,
 			};
 		}
 	}
@@ -318,9 +392,13 @@ function bucketOps(
 				);
 			const check = checkAnchor(anchor, lines, hashes, anchor.line);
 			if (!check.ok) return check.failure;
+			// Both insert flavours normalise to the same bucketed shape: the
+			// 0-based line whose *end* is the splice point. insert_before N
+			// is just insert_after N-1, with the anchor still validated
+			// against line N itself.
 			result.push({
 				kind: "insert",
-				line: anchor.line - 1,
+				line: anchor.line - (op.before ? 2 : 1),
 				textLinesToInsert: splitContent(op.content),
 				anchorStr: op.anchorStr,
 			});
@@ -340,17 +418,17 @@ function bucketOps(
 		}
 	}
 
-	// An insert_after whose anchor line sits strictly inside a replace
-	// range would splice into lines the replace is about to delete — the
-	// inserted text silently vanishes. Anchors on the first line of the
-	// range (insert lands before it) or the last (insert lands after it)
-	// are unambiguous and stay allowed.
+	// An insert whose splice point sits strictly inside a replace range
+	// would splice into lines the replace is about to delete — the
+	// inserted text silently vanishes. Splice points at the range's own
+	// boundaries (before its first line / after its last) are unambiguous
+	// and stay allowed.
 	const inserts = result.filter((o): o is BucketedInsert => o.kind === "insert");
 	for (const ins of inserts) {
 		for (const rep of replaces) {
 			if (ins.line >= rep.lineStart && ins.line < rep.lineEnd) {
 				return failBucket(
-					`Edit ops overlap in ${filePath}: insert_after anchor "${ins.anchorStr}" points inside the replace range "${rep.anchorStr}". Fold the inserted text into the replace content instead.`,
+					`Edit ops overlap in ${filePath}: insert anchor "${ins.anchorStr}" points inside the replace range "${rep.anchorStr}". Fold the inserted text into the replace content instead.`,
 				);
 			}
 		}
