@@ -10,7 +10,6 @@ import { constants, type Dirent } from "node:fs";
 import { access, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { basename, join, relative } from "node:path";
 import type { AppConfig } from "../config.ts";
-import { hash, secondarySuffix } from "./hashline.ts";
 import { getCachedFile } from "./hashline-cache.ts";
 import { formatSize, resolvePath, type ToolResult } from "./shared.ts";
 
@@ -403,7 +402,7 @@ export async function execGrep(args: Record<string, unknown>, cwd: string, confi
  * line with a fresh hashline anchor so the model can pass it straight
  * to `edit`. Hits the shared LRU first: a file that was already read or
  * grep'd this session returns its precomputed anchors without another
- * read or per-line sha1. On miss, the read goes into the LRU so the
+ * read or per-line hashing. On miss, the read goes into the LRU so the
  * next read/edit/grep on the same file is a hit.
  */
 async function annotateWithHashes(output: string, cwd: string, searchPath: string): Promise<string> {
@@ -431,17 +430,14 @@ async function annotateWithHashes(output: string, cwd: string, searchPath: strin
 			fileCache.set(absPath, cached);
 		}
 		const content = cached.lines[parsed.line - 1] ?? parsed.content;
-		const prev = cached.lines[parsed.line - 2] ?? "";
-		// Read the precomputed primary from the cache to stay consistent
-		// with what `read` would have printed for the same line.
-		const cached_primary = cached.hashes[parsed.line - 1]?.[0];
-		const primary = cached_primary ?? hash(parsed.line, content, prev)[0];
-		const suffix = secondarySuffix(parsed.line, content, prev);
-		annotated.push(
-			suffix
-				? `${parsed.relPath}:${parsed.line}:${primary}:${suffix}:${content}`
-				: `${parsed.relPath}:${parsed.line}:${primary}:${content}`,
-		);
+		// Read the precomputed hashes from the cache so the anchor is
+		// byte-identical to what `read` would print for the same line.
+		const lineHashes = cached.hashes[parsed.line - 1];
+		if (!lineHashes) {
+			annotated.push(rawLine);
+			continue;
+		}
+		annotated.push(`${parsed.relPath}:${parsed.line}:${lineHashes[0]}:${lineHashes[1]}:${content}`);
 	}
 	return annotated.join("\n");
 }
