@@ -37,9 +37,9 @@ import {
 	selectSession,
 } from "../pickers/domain.ts";
 import type { Pickers } from "../pickers/types.ts";
-import { abbreviateTokens, formatContextPct } from "./App.tsx";
+import { abbreviateTokens } from "./App.tsx";
 import { TUI_KEYBINDINGS } from "./input/keybindings.ts";
-import { getStatusBarSegments, SEGMENT_MAX_WIDTH, type StatusBarSegment } from "./statusbar.tsx";
+import { getStatusBarSegments, SEGMENT_MAX_WIDTH, type SegmentContext, type StatusBarSegment } from "./statusbar.tsx";
 import { ALL_THEMES, getActiveTheme, setActiveTheme } from "./themes/index.ts";
 import type { PendingImage, UseAgentSession } from "./useAgentSession.ts";
 
@@ -1139,9 +1139,23 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 	}
 
 	if (input === "/current") {
-		const u = session.usage;
 		const allSegs = getStatusBarSegments();
 		const cfg = deps.statusBar;
+		const activeModel = deps.planMode && deps.planModel ? deps.planModel : session.model;
+		const ctxForCurrent: SegmentContext = {
+			persona: deps.currentPersona.label,
+			planMode: deps.planMode,
+			activeModel,
+			configuredModel: session.model,
+			planModel: deps.planModel,
+			usage: session.usage,
+			lastTurnUsage: agent.lastTurnUsage ? { tokensPerSecond: agent.lastTurnUsage.tokensPerSecond } : undefined,
+			elapsedMs: agent.elapsedMs,
+			messageCount: session.messages.length,
+			contextWindow: config.contextWindow,
+			maxResponseTokens: config.maxResponseTokens,
+			messages: session.messages,
+		};
 		// Build ordered list from statusBar.order, then append any new segments
 		const ordered: StatusBarSegment[] = cfg.order
 			.map((id) => allSegs.find((s) => s.id === id))
@@ -1151,40 +1165,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		}
 		const lines: string[] = [];
 		for (const seg of ordered) {
-			let value: string;
-			switch (seg.id) {
-				case "persona":
-					value = deps.currentPersona.label;
-					break;
-				case "mode":
-					value = deps.planMode ? "PLAN" : "BUILD";
-					break;
-				case "model":
-					value = deps.session.model;
-					break;
-				case "context":
-					value = formatContextPct(session.messages, config);
-					break;
-				case "usage":
-					value =
-						u && u.totalTokens > 0
-							? `${abbreviateTokens(u.promptTokens)} in / ${abbreviateTokens(u.completionTokens)} out`
-							: "—";
-					break;
-				case "speed":
-					value = agent.lastTurnUsage?.tokensPerSecond
-						? `${agent.lastTurnUsage.tokensPerSecond.toFixed(1)} tok/s`
-						: "—";
-					break;
-				case "elapsed":
-					value = agent.elapsedMs > 0 ? `${(agent.elapsedMs / 1000).toFixed(1)}s` : "—";
-					break;
-				case "subagent":
-					value = u && u.subagentTokens > 0 ? `${abbreviateTokens(u.subagentTokens)} sub` : "—";
-					break;
-				default:
-					value = "—";
-			}
+			const value = seg.formatValue(ctxForCurrent) ?? "—";
 			lines.push(`  ${seg.label.padEnd(16)} ${value}`);
 		}
 		deps.agent.addDisplayMessage({ role: "warning", content: `Current\n${lines.join("\n")}` });
