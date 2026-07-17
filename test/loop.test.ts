@@ -1087,17 +1087,16 @@ describe("runAgentLoop — plan mode", () => {
 	});
 
 	it("answers a fabricated tool name with a suggestion, not a bare Unknown tool", async () => {
-		// mimo-2.5-pro (and other models trained on Claude Code) reach for tool
-		// names cast doesn't have, e.g. `glob`. A bare "Unknown tool" gave no
-		// guidance and the model retried it until the doom-loop guard tripped.
-		// The wrapper now names the closest real tool and lists the available set.
+		// Models trained on other harnesses invent names cast doesn't have.
+		// A bare "Unknown tool" gave no guidance and the model retried it until
+		// the doom-loop guard tripped. The wrapper names the closest real tool.
 		const events: AgentEvent[] = [];
 		vi.mocked(streamAndCollect)
 			.mockImplementationOnce(async () => ({
 				content: "",
 				thinking: "",
 				finishReason: "stop",
-				toolCalls: [{ id: "t1", name: "glob", arguments: JSON.stringify({ pattern: "**/*.md" }) }],
+				toolCalls: [{ id: "t1", name: "globby", arguments: JSON.stringify({ pattern: "**/*.md" }) }],
 			}))
 			.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
 
@@ -1113,8 +1112,8 @@ describe("runAgentLoop — plan mode", () => {
 		expect(toolEnd).toBeDefined();
 		if (toolEnd?.type === "tool_end") {
 			expect(toolEnd.result.isError).toBe(true);
-			expect(toolEnd.result.content).toContain('Unknown tool "glob"');
-			expect(toolEnd.result.content).toContain('Did you mean "find"');
+			expect(toolEnd.result.content).toContain('Unknown tool "globby"');
+			expect(toolEnd.result.content).toContain('Did you mean "glob"');
 			expect(toolEnd.result.content).toContain("Available tools:");
 		}
 	});

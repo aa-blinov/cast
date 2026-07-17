@@ -76,6 +76,11 @@ describe("parseToolsAllowlist", () => {
 		expect(parseToolsAllowlist(frontmatter)).toEqual(["read", "grep", "ls"]);
 	});
 
+	it("rewrites legacy find to glob in tools allowlists", () => {
+		const { frontmatter } = parseFrontmatter("---\ntools: [read, find, ls]\n---\n");
+		expect(parseToolsAllowlist(frontmatter)).toEqual(["read", "glob", "ls"]);
+	});
+
 	it("keeps an explicit empty array (no tools)", () => {
 		const { frontmatter } = parseFrontmatter("---\ntools: []\n---\n");
 		expect(parseToolsAllowlist(frontmatter)).toEqual([]);

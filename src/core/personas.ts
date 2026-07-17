@@ -11,15 +11,15 @@
  *
  * Frontmatter: name, label, description, subagents, tools, agentsMd.
  * Only one persona is active at a time; its body becomes the system prompt.
- * prompts/error-handling.md is appended to every persona (see
- * readSharedErrorHandling below).
+ * Shared error-handling + file-tool guidance is appended via
+ * `withSharedToolPrompt` (same append used for subagents).
  */
 
 import { readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { parseAgentsMd, parseFrontmatter, parseToolsAllowlist } from "./frontmatter.ts";
-import { promptsDir } from "./prompts.ts";
+import { promptsDir, withSharedToolPrompt } from "./prompts.ts";
 
 export type PersonaSource = "builtin" | "global" | "project";
 
@@ -53,40 +53,8 @@ export const globalPersonasDir = join(homedir(), ".cast", "personas");
 
 const PROMPTS_DIR = promptsDir;
 
-/**
- * Appended to every persona's system prompt, read fresh from
- * prompts/error-handling.md — prompts are content, not code, so this lives
- * alongside the persona files rather than as a string constant here. Tool-
- * failure mechanics (retry on error, check paths, timeouts, permissions)
- * don't depend on the persona's craft/voice — they're the same 7 tools
- * underneath regardless of role, so it's shared instead of copy-pasted into
- * every persona file. Copy-pasting it already caused the two shipped
- * personas' wording to drift from each other once; sharing it means every
- * future persona gets it automatically and identically. Missing the file
- * just omits the section rather than failing the whole persona load.
- */
-function readSharedErrorHandling(): string {
-	try {
-		return readFileSync(join(PROMPTS_DIR, "error-handling.md"), "utf-8").trim();
-	} catch {
-		return "";
-	}
-}
-
-/**
- * Mirror of `readSharedErrorHandling` for the hashline `edit` tool. Same
- * rationale: every persona's "**edit**: precise text replacement" line
- * was drifting, and the anchor-based contract is the same regardless of
- * role. The two shared sections are concatenated in `systemPrompt` so
- * each persona gets the same edit/tool guidance.
- */
-function readSharedToolGuidance(): string {
-	try {
-		return readFileSync(join(PROMPTS_DIR, "tools-edit.md"), "utf-8").trim();
-	} catch {
-		return "";
-	}
-}
+// Shared error-handling + file-tool / hashline guidance is appended via
+// `withSharedToolPrompt` so personas and subagents stay on the same contract.
 
 /**
  * Read fresh from prompts/fallback-persona.md, a sibling of prompts/personas/
@@ -109,9 +77,7 @@ const FALLBACK_PERSONA: Persona = {
 	name: DEFAULT_PERSONA,
 	label: "Coding agent",
 	description: "Default persona.",
-	systemPrompt: [readFallbackPersonaPrompt(), readSharedErrorHandling(), readSharedToolGuidance()]
-		.filter(Boolean)
-		.join("\n\n"),
+	systemPrompt: withSharedToolPrompt(readFallbackPersonaPrompt()),
 	source: "builtin",
 	filePath: "",
 	subagents: false,
@@ -138,7 +104,7 @@ function loadPersonaFromFile(filePath: string, source: PersonaSource): Persona |
 		name,
 		label: typeof frontmatter.label === "string" && frontmatter.label ? frontmatter.label : name,
 		description: typeof frontmatter.description === "string" ? frontmatter.description : "",
-		systemPrompt: [body.trimEnd(), readSharedErrorHandling(), readSharedToolGuidance()].filter(Boolean).join("\n\n"),
+		systemPrompt: withSharedToolPrompt(body),
 		source,
 		filePath,
 		subagents: frontmatter.subagents === true,

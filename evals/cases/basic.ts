@@ -22,7 +22,7 @@ export const basicCases: EvalCase[] = [
 		prompt: "What is 2 + 2?",
 		expect: {
 			containsAny: ["4", "four"],
-			toolsNotCalled: ["bash", "read", "write", "edit", "find", "grep", "ls"],
+			toolsNotCalled: ["bash", "read", "write", "edit", "glob", "grep", "ls"],
 			noErrors: true,
 		},
 	},
@@ -166,16 +166,16 @@ export const basicCases: EvalCase[] = [
 	},
 
 	{
-		id: "find-files",
+		id: "glob-files",
 		description: "Agent finds files by pattern",
 		prompt: "Find all .test.ts files in the test/ directory.",
 		expect: {
-			toolsCalled: ["find"],
+			toolsCalled: ["glob"],
 			containsAny: ["config.test.ts", "session.test.ts", "loop.test.ts", "tools.test.ts"],
 			noErrors: true,
 			verify: ({ toolCalls }) => {
 				const searchedTestTs = toolCalls.some(
-					(tc) => tc.name === "find" && typeof tc.args.pattern === "string" && /test\.ts/i.test(tc.args.pattern),
+					(tc) => tc.name === "glob" && typeof tc.args.pattern === "string" && /test\.ts/i.test(tc.args.pattern),
 				);
 				if (!searchedTestTs) return "agent didn't search with a *.test.ts pattern";
 				return undefined;
@@ -224,11 +224,11 @@ export const basicCases: EvalCase[] = [
 	},
 
 	{
-		id: "find-then-grep",
-		description: "Agent combines find and grep to locate real matches",
+		id: "glob-then-grep",
+		description: "Agent combines glob and grep to locate real matches",
 		prompt: "Find all .ts files in src/ and search for 'export function' in them. List which files matched.",
 		expect: {
-			toolsCalled: ["find", "grep"],
+			toolsCalled: ["glob", "grep"],
 			maxTurns: 4,
 			noErrors: true,
 			verify: ({ response, cwd }) => {

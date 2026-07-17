@@ -6,18 +6,44 @@
 
 import { constants } from "node:fs";
 import { access, mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { dirname, extname } from "node:path";
+import { basename, dirname, extname } from "node:path";
 import type { AppConfig } from "../config.ts";
 import {
 	computeHashesForLines,
 	findShifted,
 	formatAnchorSnippet,
-	parseAnchor,
+	recoverAnchorBySuffix,
 	renderAnchoredLine,
+	resolveAnchor,
+	stripAnchorGutter,
 	validateAnchor,
 } from "./hashline.ts";
 import { getCachedFile, invalidateCachedFile } from "./hashline-cache.ts";
+import { findFilesByBasename } from "./search.ts";
 import { formatSize, resolvePath, type ToolResult } from "./shared.ts";
+
+function isEnoent(err: unknown): boolean {
+	return (err as { code?: string })?.code === "ENOENT";
+}
+
+/**
+ * When the requested path is missing, run `glob` by basename under the hood
+ * and attach real hits so the model can retry `read`/`edit` without starting
+ * its own search loop. No guessed prefixes — only what the search returns.
+ */
+async function fileNotFoundResult(filePath: string, cwd: string, config: AppConfig): Promise<ToolResult> {
+	const hits = await findFilesByBasename(basename(filePath), cwd, config);
+	if (hits.length === 0) {
+		return { content: `File not found: ${filePath}`, isError: true };
+	}
+	const list = hits.map((h) => `- ${h}`).join("\n");
+	return {
+		content:
+			`File not found: ${filePath}\n` +
+			`Found by name (use one of these paths with read/edit — do not call glob):\n${list}`,
+		isError: true,
+	};
+}
 
 const IMAGE_MIME_TYPES: Record<string, string> = {
 	".png": "image/png",
@@ -36,7 +62,12 @@ export async function execRead(args: Record<string, unknown>, cwd: string, confi
 	const limit = typeof args.limit === "number" ? args.limit : undefined;
 	const absolutePath = resolvePath(filePath, cwd);
 
-	await access(absolutePath, constants.R_OK);
+	try {
+		await access(absolutePath, constants.R_OK);
+	} catch (err) {
+		if (isEnoent(err)) return fileNotFoundResult(filePath, cwd, config);
+		throw err;
+	}
 
 	const mimeType = IMAGE_MIME_TYPES[extname(absolutePath).toLowerCase()];
 	if (mimeType) {
@@ -109,7 +140,7 @@ export async function execWrite(args: Record<string, unknown>, cwd: string): Pro
 	return { content: `Successfully wrote ${content.length} bytes to ${filePath}` };
 }
 
-export async function execEdit(args: Record<string, unknown>, cwd: string): Promise<ToolResult> {
+export async function execEdit(args: Record<string, unknown>, cwd: string, config: AppConfig): Promise<ToolResult> {
 	const filePath = String(args.path ?? "");
 	if (!filePath) return { content: "path is required", isError: true };
 
@@ -123,7 +154,12 @@ export async function execEdit(args: Record<string, unknown>, cwd: string): Prom
 	// saw, so applying ops bottom-up can't shift any anchor that hasn't been
 	// validated yet. A `write` op short-circuits everything else. Served
 	// from the LRU when this file was already read in the same session.
-	await access(absolutePath, constants.R_OK | constants.W_OK);
+	try {
+		await access(absolutePath, constants.R_OK | constants.W_OK);
+	} catch (err) {
+		if (isEnoent(err)) return fileNotFoundResult(filePath, cwd, config);
+		throw err;
+	}
 	const cached = await getCachedFile(absolutePath);
 	const lines = cached.lines;
 	const hashes = cached.hashes;
@@ -345,24 +381,26 @@ function bucketOps(
 		const op = ops[i]!;
 		if (op.kind === "write") continue;
 		if (op.kind === "replace") {
-			const anchor = parseAnchor(op.anchorStr);
-			if (!anchor)
-				return failBucket(
-					`Anchor "${op.anchorStr}" is malformed. Expected "<line>:<local>:<chunk>" as printed by read/grep (e.g. "22:abc:rst").`,
-				);
+			const startResolved = resolveOpAnchor(op.anchorStr, hashes, lines, false);
+			if (!startResolved.ok) return startResolved;
+			if (startResolved.note) notes.push(startResolved.note);
 			const endStr = (op as { endAnchorStr?: string }).endAnchorStr;
-			const endAnchor = endStr ? parseAnchor(endStr) : undefined;
-			if (endStr && !endAnchor)
-				return failBucket(`end_anchor "${endStr}" is malformed. Expected "<line>:<local>:<chunk>".`);
+			let endAnchor = startResolved.anchor;
+			if (endStr) {
+				const end = resolveOpAnchor(endStr, hashes, lines, false);
+				if (!end.ok) return end;
+				if (end.note) notes.push(end.note);
+				endAnchor = end.anchor;
+			}
 			// Validate (and possibly auto-recover) each anchor against the
 			// current file; the resolved lines — not the anchors' own line
 			// numbers — define the range.
-			const startCheck = checkAnchor(anchor, lines, hashes, anchor.line);
+			const startCheck = checkAnchor(startResolved.anchor, lines, hashes, startResolved.anchor.line);
 			if (!startCheck.ok) return startCheck.failure;
 			if (startCheck.note) notes.push(startCheck.note);
 			const startLine = startCheck.line;
 			let endLine = startLine;
-			if (endAnchor) {
+			if (endStr) {
 				const endCheck = checkAnchor(endAnchor, lines, hashes, endAnchor.line);
 				if (!endCheck.ok) return endCheck.failure;
 				if (endCheck.note) notes.push(endCheck.note);
@@ -392,12 +430,28 @@ function bucketOps(
 				});
 				continue;
 			}
-			const anchor = parseAnchor(op.anchorStr);
-			if (!anchor)
-				return failBucket(
-					`Anchor "${op.anchorStr}" is malformed. Expected "<line>:<local>:<chunk>" as printed by read/grep (e.g. "22:abc:rst"), or "0:" to insert at the top of the file.`,
-				);
-			const check = checkAnchor(anchor, lines, hashes, anchor.line);
+			// "EOF" appends after the last real line (before a synthetic
+			// trailing empty line from a final newline, matching grok-build).
+			if (op.anchorStr === "EOF" || op.anchorStr === "eof") {
+				if (op.before) {
+					return failBucket(
+						`Anchor "EOF" is only valid with insert_after (append at end of file), not insert_before.`,
+					);
+				}
+				const len = lines.length;
+				const insertAt = len > 1 && (lines[len - 1] ?? "") === "" ? len - 1 : len;
+				result.push({
+					kind: "insert",
+					line: insertAt - 1,
+					textLinesToInsert: splitContent(op.content),
+					anchorStr: op.anchorStr,
+				});
+				continue;
+			}
+			const resolved = resolveOpAnchor(op.anchorStr, hashes, lines, true);
+			if (!resolved.ok) return resolved;
+			if (resolved.note) notes.push(resolved.note);
+			const check = checkAnchor(resolved.anchor, lines, hashes, resolved.anchor.line);
 			if (!check.ok) return check.failure;
 			if (check.note) notes.push(check.note);
 			// Both insert flavours normalise to the same bucketed shape: the
@@ -456,6 +510,61 @@ interface AnchorCheckFail {
 	failure: BucketFailure;
 }
 
+type OpAnchorOk = {
+	ok: true;
+	anchor: NonNullable<ReturnType<typeof resolveAnchor>>["anchor"];
+	note?: string;
+};
+
+/**
+ * Parse a model anchor (full form, pasted gutter, or unique hash-only
+ * suffix). Surfaces a pointed error with a fresh-anchor snippet when the
+ * string is unusable so the model can retry without inventing a new
+ * format.
+ */
+function resolveOpAnchor(
+	anchorStr: string,
+	hashes: Array<[string, string]>,
+	lines: string[],
+	allowTopInsertHint: boolean,
+): OpAnchorOk | BucketFailure {
+	const resolved = resolveAnchor(anchorStr, hashes);
+	if (resolved) {
+		const note = resolved.recoveredFromSuffix
+			? `anchor "${anchorStr}": missing line number; matched uniquely as ${renderParsedAnchor(resolved.anchor)} and the edit was applied there.`
+			: undefined;
+		return { ok: true, anchor: resolved.anchor, ...(note ? { note } : {}) };
+	}
+	const head = stripAnchorGutter(anchorStr);
+	// Hash-only form that matched zero or several lines — tell the model
+	// explicitly instead of a generic "malformed".
+	if (/^[a-z]+:[a-z]+$/.test(head) && !recoverAnchorBySuffix(anchorStr, hashes)) {
+		const [local, chunk] = head.split(":");
+		const hits: number[] = [];
+		for (let i = 0; i < hashes.length; i++) {
+			const [l, c] = hashes[i] ?? ["", ""];
+			if (l === local && c === chunk) hits.push(i + 1);
+		}
+		const snippet = formatAnchorSnippet(lines, hashes, hits[0] ? hits[0] - 1 : 0, 4);
+		if (hits.length === 0) {
+			return failBucket(
+				`Anchor "${anchorStr}" is missing the line number and matches no line in the file. ` +
+					`Copy a full "<line>:<local>:<chunk>" from the snippet below:\n${snippet}`,
+			);
+		}
+		return failBucket(
+			`Anchor "${anchorStr}" is missing the line number and matches multiple lines (${hits.join(", ")}). ` +
+				`Copy a full "<line>:<local>:<chunk>" from the snippet below:\n${snippet}`,
+		);
+	}
+	const hint = allowTopInsertHint
+		? ' Expected "<line>:<local>:<chunk>" as printed by read/grep (e.g. "22:abc:rst"), "0:" for top of file, or "EOF" to append.'
+		: ' Expected "<line>:<local>:<chunk>" as printed by read/grep (e.g. "22:abc:rst").';
+	const snippet = lines.length > 0 ? formatAnchorSnippet(lines, hashes, 0, 4) : "";
+	const snippetBlock = snippet ? `\nFresh anchors from the start of the file:\n${snippet}` : "";
+	return failBucket(`Anchor "${anchorStr}" is malformed.${hint}${snippetBlock}`);
+}
+
 /**
  * Resolve an anchor against the current file, recovering automatically
  * where the answer is unambiguous instead of bouncing an error back:
@@ -470,12 +579,11 @@ interface AnchorCheckFail {
  * tool must never guess between candidates.
  */
 function checkAnchor(
-	anchor: ReturnType<typeof parseAnchor>,
+	anchor: NonNullable<ReturnType<typeof resolveAnchor>>["anchor"],
 	lines: string[],
 	hashes: Array<[string, string]>,
 	targetLine: number,
 ): AnchorCheckOk | AnchorCheckFail {
-	if (!anchor) return { ok: false, failure: failBucket("Malformed anchor.") };
 	const anchorStr = renderParsedAnchor(anchor);
 
 	const inRange = targetLine >= 1 && targetLine <= lines.length;
@@ -510,7 +618,7 @@ function checkAnchor(
 	return { ok: false, failure: staleAnchor(anchor, lines, hashes, targetLine, shift) };
 }
 
-function renderParsedAnchor(anchor: NonNullable<ReturnType<typeof parseAnchor>>): string {
+function renderParsedAnchor(anchor: NonNullable<ReturnType<typeof resolveAnchor>>["anchor"]): string {
 	return `${anchor.line}:${anchor.localHash}${anchor.chunkHash ? `:${anchor.chunkHash}` : ""}`;
 }
 
@@ -536,7 +644,7 @@ function anchorNotFound(badAnchor: string, lines: string[], hashes: Array<[strin
 }
 
 function staleAnchor(
-	anchor: NonNullable<ReturnType<typeof parseAnchor>>,
+	anchor: NonNullable<ReturnType<typeof resolveAnchor>>["anchor"],
 	lines: string[],
 	hashes: Array<[string, string]>,
 	targetLine: number,
