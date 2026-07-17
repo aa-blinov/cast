@@ -81,6 +81,9 @@ describe("loadSubagentPrompts", () => {
 		expect(worker).toBeDefined();
 		expect(worker!.label).toBe("Worker");
 		expect(worker!.systemPrompt.length).toBeGreaterThan(0);
+		// Same shared file-tool contract as personas — not role-specific.
+		expect(worker!.systemPrompt).toContain("## File tools / hashline anchors");
+		expect(worker!.systemPrompt).toContain("## Error Handling");
 	});
 
 	it("each prompt has name, label, description, systemPrompt", () => {

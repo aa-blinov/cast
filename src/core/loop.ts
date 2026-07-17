@@ -44,7 +44,9 @@ const TERMINAL_TOOLS = new Set<string>(TERMINAL_TOOL_NAMES);
 // instead of a bare "Unknown tool", which some models retry identically until
 // the doom-loop guard trips.
 const TOOL_ALIASES: Record<string, string> = {
-	glob: "find",
+	// Pre-rename cast name — still accepted via normalizeToolName; kept here
+	// so a bare unknown-path message can point at `glob` if remapping is skipped.
+	find: "glob",
 	search: "grep",
 	search_files: "grep",
 	ripgrep: "grep",
@@ -62,6 +64,15 @@ const TOOL_ALIASES: Record<string, string> = {
 	run_command: "bash",
 	execute: "bash",
 };
+
+/** Legacy tool names rewritten to the current advertised name before dispatch. */
+const TOOL_RENAMES: Record<string, string> = {
+	find: "glob",
+};
+
+function normalizeToolName(name: string): string {
+	return TOOL_RENAMES[name] ?? name;
+}
 
 /** Levenshtein distance, capped small — just enough to catch a typo'd tool name. */
 function editDistance(a: string, b: string): number {
@@ -448,6 +459,9 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 		loopConfig.sshHosts,
 	);
 	const executeTool = (name: string, args: Record<string, unknown>, toolSignal?: AbortSignal): Promise<ToolResult> => {
+		// Legacy aliases (e.g. find → glob) before the allowlist / unknown check
+		// so old model habits and allowlists keep working against one tool.
+		name = normalizeToolName(name);
 		// Advertised set is the single source of truth for both definitions and
 		// real calls: disabledTools denylist and the builtin tools allowlist.
 		// (MCP tools are not subject to the persona/subagent allowlist.)

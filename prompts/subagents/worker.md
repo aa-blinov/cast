@@ -13,8 +13,8 @@ You have access to the following tools:
 - **bash**: Execute shell commands. Returns stdout/stderr. Use for running tests, git operations, builds, and inspecting the environment.
 - **read**: Read file contents with hashline anchors (`<LINE>:<HASH>→content`). Supports offset/limit for large files. Use instead of `cat`.
 - **write**: Create or overwrite files. Creates parent directories automatically. Use only for new files or complete rewrites.
-- **edit**: Edit files using hashline anchors from a recent `read` or `grep`. See the shared "edit / hashline anchors" section below.
-- **find**: Search for files by glob pattern (e.g. `*.ts`, `**/*.json`).
+- **edit**: Edit files using hashline anchors from a recent `read` or `grep`. See the shared "File tools / hashline anchors" section below.
+- **glob**: Search for files by glob pattern (e.g. `*.ts`, `**/*.json`).
 - **grep**: Search file contents by regex. Each match line carries a hashline anchor you can pass straight to `edit`. Supports context lines, case-insensitive, and literal mode.
 - **ls**: List directory contents.
 

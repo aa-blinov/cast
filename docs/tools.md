@@ -43,9 +43,10 @@ Each op has an `op` discriminator and an inline `content`:
   { "op": "replace", "anchor": "42:abc:rst", "content": "    let x = 42;" }
   { "op": "replace", "anchor": "10:def:rst", "end_anchor": "12:ghi:rst", "content": "block of three lines\nspanning multiple\nlines" }
   ```
-- `insert_after` — add new lines after the anchor. The new lines go between the anchored line and what was originally the next line; existing content is preserved.
+- `insert_after` — add new lines after the anchor. The new lines go between the anchored line and what was originally the next line; existing content is preserved. Special anchors: `"0:"` inserts at the top of the file; `"EOF"` appends at the end.
   ```json
   { "op": "insert_after", "anchor": "42:abc:rst", "content": "new line one\nnew line two" }
+  { "op": "insert_after", "anchor": "EOF", "content": "## Usage\n\n…" }
   ```
 - `insert_before` — add new lines above the anchored line. Same semantics as `insert_after` on the previous line, but the anchor names the line the text goes above — handy at section boundaries (headings, function starts).
   ```json
@@ -64,11 +65,11 @@ Anchors are self-healing where the answer is unambiguous: if the anchored conten
 
 #### Hashline anchors
 
-Every line `read` and `grep` returns carries a two-part hash (the `chunk` anchor scheme from `xai-org/grok-build`): `LOCAL` fingerprints the line's own content, whitespace-normalized, so formatter-only edits don't invalidate anchors and a line that merely moved keeps its local hash; `CHUNK` fingerprints the 8-line chunk around the line, so nearby edits mark the anchor stale even when the line itself is untouched. To `edit` a line, copy the full `<line>:<local>:<chunk>` prefix into the `anchor` field of the op — do not re-type the line text.
+Every line `read` and `grep` returns carries a two-part hash (the `chunk` anchor scheme from `xai-org/grok-build`): `LOCAL` fingerprints the line's own content, whitespace-normalized, so formatter-only edits don't invalidate anchors and a line that merely moved keeps its local hash; `CHUNK` fingerprints the 8-line chunk around the line, so nearby edits mark the anchor stale even when the line itself is untouched. To `edit` a line, copy the full `<line>:<local>:<chunk>` prefix into the `anchor` field of the op — do not re-type the line text. Pasting the whole gutter (`22:abc:rst→…`) or ASCII `->` is fine. If the model omits the line number and sends only `local:chunk`, `edit` recovers it when that pair is unique in the file.
 
 ## Search Tools
 
-### `find`
+### `glob`
 
 Search for files by glob pattern.
 
@@ -246,7 +247,7 @@ Subagent frontmatter example (`prompts/subagents/explorer.md`):
 name: explorer
 label: Explorer
 description: Read-only codebase exploration
-tools: [read, grep, find, ls]
+tools: [read, grep, glob, ls]
 agentsMd: true
 ---
 
