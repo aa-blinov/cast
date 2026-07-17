@@ -495,6 +495,8 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 <p>cast speaks one API: the OpenAI chat completions format. Any provider that implements this API works — OpenRouter, OpenAI, Ollama, vLLM, LiteLLM, Azure OpenAI. No provider-specific code paths.</p>
 <h3>Parallel Tool Execution</h3>
 <p>Tool calls within one assistant message run concurrently via <code>Promise.all</code>. If the model requests <code>bash</code>, <code>read</code>, and <code>grep</code> in a single response, all three execute simultaneously.</p>
+<h3>Hashline LRU Cache</h3>
+<p><code>read</code>, <code>edit</code>, and <code>grep</code> share a process-local LRU (20 entries, ~4 MB worst case) keyed by absolute path. On hit, the file&#39;s mtime is re-stated and a mismatch drops the entry; on miss the file is read once and per-line sha1s are computed in a single pass. <code>write</code> and <code>edit</code> invalidate the entry on success, so a follow-up read never sees a stale snapshot. This is invisible to the model — it just means a <code>read → edit</code> round trip (and a re-<code>grep</code> over the same files) skips both the file I/O and the per-line hashing.</p>
 <h3>Context Compaction</h3>
 <p>When the conversation exceeds ~75% of the context window, older messages are summarized by the LLM. The split is ~60/40 (old/recent), snapped to turn boundaries so tool calls and results stay together. File paths are extracted deterministically from tool calls and appended to the summary.</p>
 <h3>MCP Integration</h3>

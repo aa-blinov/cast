@@ -1527,3 +1527,246 @@ describe("runAgentLoop — disabledTools filtering", () => {
 		expect(names).toContain("web_fetch");
 	});
 });
+
+// ============================================================================
+// runAgentLoop — allowedTools (persona/subagent frontmatter tools:)
+// ============================================================================
+
+describe("runAgentLoop — allowedTools filtering", () => {
+	it("advertises only allowlisted tools", async () => {
+		let capturedTools: ToolDef[] = [];
+		vi.mocked(streamAndCollect).mockImplementationOnce(async (_c, _m, _msgs, tools) => {
+			capturedTools = tools as ToolDef[];
+			return { content: "ok", thinking: "", finishReason: "stop" };
+		});
+
+		await runAgentLoop([{ role: "user", content: "hi" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			allowedTools: ["read", "grep"],
+			onEvent: () => {},
+		});
+
+		const names = capturedTools.map((t) => t.function.name);
+		expect(names.sort()).toEqual(["grep", "read"]);
+	});
+
+	it("expands plan_* and web_* globs in the allowlist", async () => {
+		let capturedTools: ToolDef[] = [];
+		vi.mocked(streamAndCollect).mockImplementationOnce(async (_c, _m, _msgs, tools) => {
+			capturedTools = tools as ToolDef[];
+			return { content: "ok", thinking: "", finishReason: "stop" };
+		});
+
+		await runAgentLoop([{ role: "user", content: "hi" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			// No disabledTools — globs should surface the full plan_/web_ families.
+			allowedTools: ["read", "plan_*", "web_*"],
+			onEvent: () => {},
+		});
+
+		const names = new Set(capturedTools.map((t) => t.function.name));
+		expect(names.has("read")).toBe(true);
+		expect(names.has("web_search")).toBe(true);
+		expect(names.has("web_fetch")).toBe(true);
+		expect(names.has("plan_write")).toBe(true);
+		expect(names.has("plan_done")).toBe(true);
+		expect(names.has("bash")).toBe(false);
+		expect(names.has("write")).toBe(false);
+	});
+
+	it("refuses a real call to a tool outside the allowlist", async () => {
+		const events: AgentEvent[] = [];
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [{ id: "t1", name: "bash", arguments: JSON.stringify({ command: "echo hi" }) }],
+			}))
+			.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
+
+		await runAgentLoop([{ role: "user", content: "run it" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "SYS",
+			allowedTools: ["read", "grep"],
+			onEvent: (e) => events.push(e),
+		});
+
+		const toolEnd = events.find((e) => e.type === "tool_end");
+		expect(toolEnd).toBeDefined();
+		if (toolEnd?.type === "tool_end") {
+			expect(toolEnd.result.isError).toBe(true);
+			expect(toolEnd.result.content).toContain("not available");
+			expect(toolEnd.result.content).not.toContain("Unknown tool");
+		}
+	});
+
+	it("applies persona.tools when LoopConfig.allowedTools is omitted", async () => {
+		let capturedTools: ToolDef[] = [];
+		vi.mocked(streamAndCollect).mockImplementationOnce(async (_c, _m, _msgs, tools) => {
+			capturedTools = tools as ToolDef[];
+			return { content: "ok", thinking: "", finishReason: "stop" };
+		});
+
+		await runAgentLoop([{ role: "user", content: "hi" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			personas: [
+				{
+					name: "reviewer",
+					label: "Reviewer",
+					description: "",
+					systemPrompt: "review",
+					source: "builtin",
+					filePath: "",
+					subagents: false,
+					tools: ["read", "ls"],
+					agentsMd: true,
+				},
+			],
+			currentPersona: "reviewer",
+			onEvent: () => {},
+		});
+
+		expect(capturedTools.map((t) => t.function.name).sort()).toEqual(["ls", "read"]);
+	});
+
+	it("keeps MCP tools available under a builtin-only allowlist", async () => {
+		// Persona/subagent `tools:` constrains builtins (read/write/…), not the
+		// user's connected MCP servers — those names are session-specific.
+		const events: AgentEvent[] = [];
+		const mcpCall = vi.fn(async () => ({ content: "MCP_OK", isError: false }));
+		const mcpDef = {
+			type: "function" as const,
+			function: {
+				name: "mcp_demo_ping",
+				description: "ping",
+				parameters: { type: "object", properties: {} },
+			},
+		};
+		let capturedTools: ToolDef[] = [];
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async (_c, _m, _msgs, tools) => {
+				capturedTools = tools as ToolDef[];
+				return {
+					content: "",
+					thinking: "",
+					finishReason: "stop",
+					toolCalls: [{ id: "t1", name: "mcp_demo_ping", arguments: "{}" }],
+				};
+			})
+			.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
+
+		await runAgentLoop([{ role: "user", content: "ping" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "SYS",
+			allowedTools: ["read"],
+			mcpTools: [mcpDef],
+			mcpToolIndex: new Map([["mcp_demo_ping", { definition: mcpDef, call: mcpCall }]]),
+			onEvent: (e) => events.push(e),
+		});
+
+		const names = capturedTools.map((t) => t.function.name);
+		expect(names).toContain("read");
+		expect(names).toContain("mcp_demo_ping");
+		expect(names).not.toContain("bash");
+		expect(mcpCall).toHaveBeenCalledOnce();
+		const toolEnd = events.find((e) => e.type === "tool_end");
+		expect(toolEnd?.type === "tool_end" && !toolEnd.result.isError).toBe(true);
+		if (toolEnd?.type === "tool_end") {
+			expect(toolEnd.result.content).toBe("MCP_OK");
+		}
+	});
+
+	it("intersects allowlist with disabledTools", async () => {
+		let capturedTools: ToolDef[] = [];
+		vi.mocked(streamAndCollect).mockImplementationOnce(async (_c, _m, _msgs, tools) => {
+			capturedTools = tools as ToolDef[];
+			return { content: "ok", thinking: "", finishReason: "stop" };
+		});
+
+		await runAgentLoop([{ role: "user", content: "hi" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			allowedTools: ["read", "bash", "web_search"],
+			disabledTools: new Set(["web_search", "bash"]),
+			onEvent: () => {},
+		});
+
+		expect(capturedTools.map((t) => t.function.name)).toEqual(["read"]);
+	});
+
+	it("subagent frontmatter tools: blocks real calls via execTask → runAgentLoop", async () => {
+		const { execTask } = await import("../src/core/tools/task.ts");
+		const events: AgentEvent[] = [];
+		let advertised: string[] = [];
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async (_c, _m, _msgs, tools) => {
+				advertised = (tools as ToolDef[]).map((t) => t.function.name);
+				return {
+					content: "",
+					thinking: "",
+					finishReason: "stop",
+					toolCalls: [
+						{
+							id: "t1",
+							name: "write",
+							arguments: JSON.stringify({ path: "x.ts", content: "nope" }),
+						},
+					],
+				};
+			})
+			.mockImplementationOnce(async () => ({
+				content: "explored without writing",
+				thinking: "",
+				finishReason: "stop",
+			}));
+
+		const result = await execTask({ assignment: "explore only", subagent: "explorer" }, "/tmp", testConfig, {
+			model: "test-model",
+			subagentPrompts: [
+				{
+					name: "explorer",
+					label: "Explorer",
+					description: "read-only",
+					systemPrompt: "Explore.",
+					tools: ["read", "grep", "ls"],
+					agentsMd: false,
+				},
+			],
+			runAgentLoop: async (messages, config) => {
+				const withEvents: typeof config = {
+					...config,
+					onEvent: (e) => {
+						events.push(e);
+						config.onEvent(e);
+					},
+				};
+				return runAgentLoop(messages, withEvents);
+			},
+		});
+
+		expect(result.isError).toBeFalsy();
+		expect(advertised.sort()).toEqual(["grep", "ls", "read"]);
+		const toolEnd = events.find((e) => e.type === "tool_end");
+		expect(toolEnd).toBeDefined();
+		if (toolEnd?.type === "tool_end") {
+			expect(toolEnd.result.isError).toBe(true);
+			expect(toolEnd.result.content).toContain("not available");
+		}
+	});
+});

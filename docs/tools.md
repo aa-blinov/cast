@@ -231,12 +231,27 @@ The `task` tool delegates work to isolated sub-agents. Each sub-agent has:
 
 - **Own system prompt** — loaded from `prompts/subagents/` (currently a `worker` prompt)
 - **Isolated context** — the parent agent sees only the final result, not intermediate tool calls
-- **Same built-in tools** — bash, read, write, edit, find, grep, ls (but no `task` — sub-agents can't delegate further)
+- **Built-in tools** — by default the full builtin set except `task` (sub-agents can't delegate further). Frontmatter `tools:` on the subagent file can allowlist builtins (exact names or `*`-globs); MCP tools are not filtered by that list
+- **AGENTS.md** — injected into the child system prompt by default (`agentsMd: true`); set `agentsMd: false` in the subagent frontmatter to skip
 - **Optional model override** — `/subagent-model` sets a different model for sub-agents
 
 Sub-agent tokens are tracked separately in usage reporting (`/usage` status bar shows `sub` count).
 
 The `task` tool is only available when the current persona has `subagents: true` (e.g. `coder-with-subagents`). Other personas can't see or invoke it.
+
+Subagent frontmatter example (`prompts/subagents/explorer.md`):
+
+```markdown
+---
+name: explorer
+label: Explorer
+description: Read-only codebase exploration
+tools: [read, grep, find, ls]
+agentsMd: true
+---
+
+You explore the codebase and report findings. You cannot edit files.
+```
 
 ## Doom Loop Detection
 

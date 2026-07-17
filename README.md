@@ -79,7 +79,7 @@ Connect any [Model Context Protocol](https://modelcontextprotocol.io) server —
 
 ### Personas
 
-Swap the agent's role without changing its tools:
+Swap the agent's role — and optionally which built-in tools that role may use:
 
 | Persona | What it does |
 |---------|-------------|

@@ -244,7 +244,7 @@ export function buildSystemPrompt(
 
 	return [
 		persona.systemPrompt,
-		contextFilesSuffix,
+		persona.agentsMd ? contextFilesSuffix : "",
 		rulesSuffix,
 		rulesLazySuffix,
 		skillsPromptSuffix,

@@ -442,7 +442,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 <main class="main">
 	<article class="content">
 		<h1>Personas</h1>
-<p>A coding agent optimized for implementation isn&#39;t the best reviewer. A QA mindset doesn&#39;t write good specs. Personas let you swap the judgment — the lens through which the agent approaches your code — without swapping the tools. Same bash, same read, same write. Different priorities, different questions, different output.</p>
+<p>A coding agent optimized for implementation isn&#39;t the best reviewer. A QA mindset doesn&#39;t write good specs. Personas let you swap the judgment — the lens through which the agent approaches your code — and optionally constrain which built-in tools that role may use. Different priorities, different questions, different output.</p>
 <h2>Built-in Personas</h2>
 <div class="table-wrap"><table><thead><tr><th>Persona</th><th>Label</th><th>Description</th></tr></thead><tbody><tr><td><code>coding</code></td><td>Coding agent</td><td>Default persona — reads files, runs commands, edits code with precision</td></tr><tr><td><code>coder-with-subagents</code></td><td>Coder with subagents</td><td>Delegates parallel and isolated work to sub-agents via the task tool</td></tr><tr><td><code>senior</code></td><td>Senior Developer</td><td>Lazy senior dev — the ladder, root-cause fixes, deletion over addition</td></tr><tr><td><code>tech-writer</code></td><td>Technical Writer</td><td>Documentation — READMEs, guides, API references, changelogs, diagrams</td></tr><tr><td><code>qa</code></td><td>QA Engineer</td><td>Functional testing — verifies features, builds test plans, catches regressions</td></tr><tr><td><code>qa-nfr</code></td><td>QA Non-Functional</td><td>Non-functional testing — performance, security, reliability, scalability</td></tr><tr><td><code>pm</code></td><td>Project Manager</td><td>Task and spec writing — breaks work into clear, actionable tickets</td></tr><tr><td><code>marketer</code></td><td>Marketer</td><td>Positioning, messaging, and go-to-market</td></tr><tr><td><code>fiction-writer</code></td><td>Fiction Writer</td><td>Creative fiction and literary prose</td></tr><tr><td><code>sysadmin</code></td><td>System Administrator</td><td>Operations and infrastructure — diagnoses systems, manages services</td></tr><tr><td><code>devops</code></td><td>DevOps Engineer</td><td>CI/CD, IaC, containers, Kubernetes, deployments, observability</td></tr><tr><td><code>dba</code></td><td>Database Engineer</td><td>Schema design, migrations, query optimization, indexing</td></tr><tr><td><code>appsec</code></td><td>Security Engineer</td><td>Application security — threat modeling, secure code review, vulnerability analysis</td></tr></tbody></table></div><p>The <code>coding</code> persona is the default. The <code>coder-with-subagents</code> persona is the only one that enables the <code>task</code> tool for delegating work to sub-agents.</p>
 <h2>Switching Personas</h2>
@@ -460,6 +460,8 @@ name: my-persona
 label: My Custom Persona
 description: What this persona does
 subagents: false
+tools: [read, grep, ls, plan_*, web_*]
+agentsMd: true
 ---
 
 You are a specialized assistant focused on [role].
@@ -473,7 +475,17 @@ When analyzing code, always consider:
 - [consideration 2]
 </code></pre>
 <h3>Frontmatter Fields</h3>
-<div class="table-wrap"><table><thead><tr><th>Field</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>name</code></td><td>Yes</td><td>Identifier (lowercase, used in <code>-p</code> flag and <code>/persona</code> command)</td></tr><tr><td><code>label</code></td><td>No</td><td>Display name (defaults to <code>name</code>)</td></tr><tr><td><code>description</code></td><td>No</td><td>Shown in persona listings</td></tr><tr><td><code>subagents</code></td><td>No</td><td><code>true</code> to enable the <code>task</code> tool (default: <code>false</code>)</td></tr></tbody></table></div><p>The body (after frontmatter) becomes the system prompt. A shared error-handling section is appended automatically from <code>prompts/error-handling.md</code> — you don&#39;t need to include tool-failure mechanics in your persona.</p>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>name</code></td><td>Yes</td><td>Identifier (lowercase, used in <code>-p</code> flag and <code>/persona</code> command)</td></tr><tr><td><code>label</code></td><td>No</td><td>Display name (defaults to <code>name</code>)</td></tr><tr><td><code>description</code></td><td>No</td><td>Shown in persona listings</td></tr><tr><td><code>subagents</code></td><td>No</td><td><code>true</code> to enable the <code>task</code> tool (default: <code>false</code>)</td></tr><tr><td><code>tools</code></td><td>No</td><td>Allowlist of <strong>built-in</strong> tools. Omit = all builtins. Exact names or <code>*</code>-globs (<code>plan_*</code>, <code>web_*</code>). MCP tools are never filtered by this list</td></tr><tr><td><code>agentsMd</code></td><td>No</td><td>Inject <code>AGENTS.md</code> / <code>CLAUDE.md</code> into the system prompt (default: <code>true</code>)</td></tr></tbody></table></div><p>The body (after frontmatter) becomes the system prompt. A shared error-handling section is appended automatically from <code>prompts/error-handling.md</code> — you don&#39;t need to include tool-failure mechanics in your persona.</p>
+<h3>Tool allowlist (<code>tools</code>)</h3>
+<p>When set, only matching <strong>built-in</strong> tools are advertised to the model and executable (a fabricated call to a filtered tool returns &quot;not available&quot;). Connected MCP servers are unaffected — their tools stay available whenever the session has them connected.</p>
+<pre><code class="language-yaml">tools: [read, grep, ls]           # readonly builtins
+tools: [read, grep, plan_*, web_*] # globs expand to plan_write, web_search, …
+tools: []                          # no builtins (MCP still available)
+# omit the field entirely         # all builtins
+</code></pre>
+<p>Session policy still applies on top of the allowlist: plan/build mode, the web-tools toggle, and headless <code>cast run</code> can disable tools via their own denylist even if the persona listed them. The <code>task</code> tool additionally requires <code>subagents: true</code>.</p>
+<h3>AGENTS.md (<code>agentsMd</code>)</h3>
+<p>By default (<code>agentsMd: true</code>, or the field omitted), project context files (<code>AGENTS.md</code> / <code>CLAUDE.md</code>) are injected into the system prompt. Set <code>agentsMd: false</code> to skip them for that persona.</p>
 <h3>Priority</h3>
 <p>On a name collision, the first-loaded persona wins:</p>
 <ol>

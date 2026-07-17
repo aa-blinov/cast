@@ -25,6 +25,9 @@ Personas are system prompts that give the agent a different role. Active persona
 name: my-persona
 label: My Persona
 description: Short description shown in the picker.
+subagents: false
+tools: [read, grep, ls, plan_*, web_*]
+agentsMd: true
 ---
 
 You are a specialized assistant that...
@@ -37,6 +40,9 @@ You are a specialized assistant that...
 - `name` must be non-empty (used to select persona via `--persona <name>`)
 - `label` is shown in `/persona` picker and `/personas` list; defaults to `name` if omitted
 - `description` is shown in the picker
+- `subagents: true` enables the `task` tool (default `false`)
+- `tools` — optional allowlist of **built-in** tools (exact names or `*`-globs like `plan_*` / `web_*`). Omit = all builtins. MCP tools are never filtered by this list
+- `agentsMd` — inject `AGENTS.md` / `CLAUDE.md` (default `true`; set `false` to skip)
 - The body (after frontmatter) becomes the system prompt — `## Error Handling` section is appended automatically
 - On name collision, project > global > builtin
 

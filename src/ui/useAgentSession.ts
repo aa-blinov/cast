@@ -158,6 +158,8 @@ interface UseAgentSessionParams {
 	subagentModel?: string;
 	/** Tool names to exclude from the definitions sent to the model. */
 	disabledTools?: Set<string>;
+	/** Whether the project cwd is trusted — for subagent AGENTS.md injection. */
+	projectTrusted?: boolean;
 	/** Configured SSH hosts for the ssh tool. */
 	sshHosts?: import("../core/ssh.ts").SshHost[];
 	/** Plan mode state — passed to the agent loop for system prompt injection and tool gating. */
@@ -276,6 +278,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		subagentPrompts,
 		subagentModel,
 		disabledTools,
+		projectTrusted,
 		planState,
 		onPlanSignal,
 		modelOverride,
@@ -513,6 +516,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					subagentPrompts,
 					subagentModel,
 					disabledTools,
+					projectTrusted,
 					sshHosts: params.sshHosts,
 					planState,
 					// Append straight into the display history: warnings fire mid-run
@@ -757,6 +761,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			subagentPrompts,
 			subagentModel,
 			disabledTools,
+			projectTrusted,
 			planState,
 			onPlanSignal,
 			modelOverride,

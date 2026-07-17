@@ -1,8 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
 import type { Message } from "../src/core/llm.ts";
 import type { LoopConfig } from "../src/core/loop.ts";
-import { findSubagentPrompt, loadSubagentPrompts } from "../src/core/subagents.ts";
+import { findSubagentPrompt, loadSubagentPrompts, type SubagentPrompt } from "../src/core/subagents.ts";
 import { execTask } from "../src/core/tools/task.ts";
 
 const testConfig = {
@@ -94,6 +96,109 @@ describe("loadSubagentPrompts", () => {
 		for (const p of loadSubagentPrompts()) {
 			expect(p.systemPrompt).not.toContain("---");
 		}
+	});
+
+	it("builtins default to all tools and agentsMd true", () => {
+		for (const p of loadSubagentPrompts()) {
+			expect(p.tools).toBeUndefined();
+			expect(p.agentsMd).toBe(true);
+		}
+	});
+});
+
+describe("execTask — tools allowlist and agentsMd", () => {
+	const tmpDir = join(import.meta.dirname, "__test_tmp_subagent_agents__");
+
+	afterEach(() => {
+		rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	it("passes subagent.tools as child allowedTools", async () => {
+		const explorer: SubagentPrompt = {
+			name: "explorer",
+			label: "Explorer",
+			description: "read-only",
+			systemPrompt: "Explore only.",
+			tools: ["read", "grep", "ls"],
+			agentsMd: true,
+		};
+		let captured: LoopConfig | undefined;
+		await execTask({ assignment: "map the tree", subagent: "explorer" }, "/tmp", testConfig, {
+			model: "test-model",
+			subagentPrompts: [explorer],
+			runAgentLoop: async (messages, config) => {
+				captured = config;
+				config.onEvent({ type: "end", reason: "stop" });
+				return [...messages, { role: "assistant", content: "done" }];
+			},
+		});
+		expect(captured!.allowedTools).toEqual(["read", "grep", "ls"]);
+	});
+
+	it("leaves allowedTools undefined when subagent omits tools", async () => {
+		const child = await captureChildConfig({
+			subagentPrompts: [
+				{
+					name: "worker",
+					label: "Worker",
+					description: "",
+					systemPrompt: "work",
+					agentsMd: true,
+				},
+			],
+		});
+		expect(child.allowedTools).toBeUndefined();
+	});
+
+	it("injects AGENTS.md into the child system prompt when agentsMd is true", async () => {
+		mkdirSync(tmpDir, { recursive: true });
+		writeFileSync(join(tmpDir, "AGENTS.md"), "TRUSTED PROJECT RULES\n", "utf-8");
+		const worker: SubagentPrompt = {
+			name: "worker",
+			label: "Worker",
+			description: "",
+			systemPrompt: "ROLE_PROMPT",
+			agentsMd: true,
+		};
+		let childPrompt = "";
+		await execTask({ assignment: "do work" }, tmpDir, testConfig, {
+			model: "test-model",
+			subagentPrompts: [worker],
+			projectTrusted: true,
+			runAgentLoop: async (messages, config) => {
+				childPrompt = config.systemPrompt;
+				config.onEvent({ type: "end", reason: "stop" });
+				return [...messages, { role: "assistant", content: "done" }];
+			},
+		});
+		expect(childPrompt).toContain("ROLE_PROMPT");
+		expect(childPrompt).toContain("TRUSTED PROJECT RULES");
+		expect(childPrompt).toContain("<project_context>");
+	});
+
+	it("skips AGENTS.md when agentsMd is false", async () => {
+		mkdirSync(tmpDir, { recursive: true });
+		writeFileSync(join(tmpDir, "AGENTS.md"), "SHOULD NOT APPEAR\n", "utf-8");
+		const worker: SubagentPrompt = {
+			name: "worker",
+			label: "Worker",
+			description: "",
+			systemPrompt: "ROLE_ONLY",
+			agentsMd: false,
+		};
+		let childPrompt = "";
+		await execTask({ assignment: "do work" }, tmpDir, testConfig, {
+			model: "test-model",
+			subagentPrompts: [worker],
+			projectTrusted: true,
+			runAgentLoop: async (messages, config) => {
+				childPrompt = config.systemPrompt;
+				config.onEvent({ type: "end", reason: "stop" });
+				return [...messages, { role: "assistant", content: "done" }];
+			},
+		});
+		expect(childPrompt).toBe("ROLE_ONLY");
+		expect(childPrompt).not.toContain("SHOULD NOT APPEAR");
 	});
 });
 
