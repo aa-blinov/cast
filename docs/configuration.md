@@ -22,6 +22,8 @@ User settings are persisted to `~/.cast/settings.json`. This file is loaded on s
 | `theme` | string | Active color theme id |
 | `webTools` | boolean | Whether web tools are enabled (default: `false` — use `/web` to enable) |
 | `disabledMcpServers` | string[] | MCP server names disabled via `/mcp` toggle |
+| `disabledSkills` | string[] | Skill names disabled via `/skills` toggle |
+| `enabledPlugins` | Record<string, boolean> | Marketplace plugins keyed by `name@marketplace` |
 | `statusBar` | object | Status bar segment config (`visible`, `order`, `sides`) — use `/statusbar` to configure |
 | `updatedAt` | string | Auto-updated timestamp |
 
@@ -48,21 +50,26 @@ Environment variables are an alternative to the settings file for provider confi
   sessions/             # Saved sessions (per-project subdirs)
   plans/                # Plan files (per-session subdirs)
   skills/               # Global skills
+  plugins/              # Marketplace catalogs + installed plugins (see plugins.md)
   rules/                # Global rules
   personas/             # Global personas
+
+~/.config/agents/skills/   # skills.sh universal global (also ~/.agents/skills/)
 
 <project>/.cast/
   skills/               # Project-local skills
   rules/                # Project-local rules
   personas/             # Project-local personas
   mcp.json              # Project-local MCP config
+
+<project>/.agents/skills/  # skills.sh universal project (npx skills add -a universal)
 ```
 
 ## Project Trust
 
-A single trust decision gates all project-local resources: skills, MCP servers, context files, and personas in `.cast/`. cast asks once per project; the decision is saved in `settings.json` under `projectTrust`.
+A single trust decision gates all project-local resources: skills (`.cast/skills/` and `.agents/skills/`), MCP servers, context files, and personas in `.cast/`. cast asks once per project; the decision is saved in `settings.json` under `projectTrust`.
 
-Global resources (`~/.cast/`) always load without a trust check — you put them there yourself.
+Global resources (`~/.cast/`, `~/.config/agents/skills/`) always load without a trust check — you put them there yourself.
 
 ## Permission Modes
 

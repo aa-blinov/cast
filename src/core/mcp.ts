@@ -17,7 +17,8 @@
  * something concrete needs it.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -49,6 +50,14 @@ export function loadMcpConfig(path: string): Record<string, McpServerConfig> {
 	} catch {
 		return {};
 	}
+}
+
+/** Atomically write `{ "mcpServers": … }` (tmp + rename), matching `saveSshConfig`. */
+export function saveMcpConfig(path: string, servers: Record<string, McpServerConfig>): void {
+	mkdirSync(dirname(path), { recursive: true });
+	const tmp = `${path}.tmp.${process.pid}`;
+	writeFileSync(tmp, `${JSON.stringify({ mcpServers: servers }, null, 2)}\n`, "utf-8");
+	renameSync(tmp, path);
 }
 
 /** OpenAI function-calling tool names are restricted to [a-zA-Z0-9_-]; server/tool names aren't guaranteed to be. */

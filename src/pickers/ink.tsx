@@ -197,6 +197,7 @@ export function MultiSelectPicker<T>(props: {
 			return;
 		}
 		if (input === " ") {
+			if (props.options[idx]?.locked) return;
 			setSelected((prev) => {
 				const next = new Set(prev);
 				if (next.has(idx)) next.delete(idx);
@@ -233,14 +234,15 @@ export function MultiSelectPicker<T>(props: {
 				const i = scroll + vi;
 				const focused = i === idx;
 				const checked = selected.has(i);
+				const rowColor = o.muted || o.locked ? theme().warning : focused ? theme().accent : "white";
 				return (
 					<Box key={i} flexDirection="column">
 						<Text wrap="truncate">
 							<Text color={focused ? theme().accent : theme().muted}>{focused ? ">" : " "}</Text>{" "}
-							<Text color={focused ? theme().accent : "white"} bold={focused}>
-								{checked ? "[x]" : "[ ]"}
+							<Text color={rowColor} bold={focused && !o.muted && !o.locked}>
+								{o.locked ? "[-]" : checked ? "[x]" : "[ ]"}
 							</Text>{" "}
-							<Text color={focused ? theme().accent : "white"} bold={focused}>
+							<Text color={rowColor} bold={focused && !o.muted && !o.locked}>
 								{o.label}
 							</Text>
 						</Text>

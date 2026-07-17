@@ -11,7 +11,7 @@
  * that module for why it's not full YAML).
  */
 
-import { type Dirent, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { type Dirent, existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { parseFrontmatter } from "./frontmatter.ts";
 import { promptsDir, readRequiredPrompt } from "./prompts.ts";
@@ -26,7 +26,7 @@ const SKILLS_INSTRUCTIONS = readRequiredPrompt(promptsDir, "skills-instructions.
 
 export const builtinSkillsDir = join(promptsDir, "skills");
 
-export type SkillSource = "builtin" | "global" | "project" | "path";
+export type SkillSource = "builtin" | "global" | "project" | "agents" | "plugin" | "path";
 
 export interface Skill {
 	name: string;
@@ -36,6 +36,17 @@ export interface Skill {
 	baseDir: string;
 	source: SkillSource;
 	disableModelInvocation: boolean;
+	/** Marketplace plugin id (`name@marketplace`) when `source === "plugin"`. */
+	pluginId?: string;
+	/** False when the contributing plugin pack is disabled via `/plugin`. */
+	pluginEnabled?: boolean;
+}
+
+/** One plugin pack's skill root for `loadSkills`. */
+export interface PluginSkillContribution {
+	dir: string;
+	pluginId: string;
+	enabled: boolean;
 }
 
 export interface SkillDiagnostic {
@@ -46,6 +57,29 @@ export interface SkillDiagnostic {
 /** Read a skill's body (frontmatter stripped) fresh from disk, for /skill:name invocation. */
 function readSkillBody(skill: Skill): string {
 	return parseFrontmatter(readFileSync(skill.filePath, "utf-8")).body;
+}
+
+/** User-managed skills that `/skills uninstall` may delete (not builtin/plugin/--skill). */
+export function isUninstallableSkill(skill: Skill): boolean {
+	return skill.source === "global" || skill.source === "project" || skill.source === "agents";
+}
+
+/**
+ * Delete a global/project skill from disk. Directory skills (`SKILL.md`) remove
+ * the whole skill folder; loose root `.md` files remove only that file.
+ */
+export function uninstallUserSkill(skill: Skill): void {
+	if (!isUninstallableSkill(skill)) {
+		throw new Error(`Cannot uninstall ${skill.source} skill "${skill.name}"`);
+	}
+	if (!existsSync(skill.filePath)) {
+		throw new Error(`Skill file missing: ${skill.filePath}`);
+	}
+	if (basename(skill.filePath) === "SKILL.md") {
+		rmSync(skill.baseDir, { recursive: true, force: true });
+		return;
+	}
+	rmSync(skill.filePath, { force: true });
 }
 
 // ============================================================================
@@ -167,15 +201,32 @@ export interface LoadSkillsOptions {
 	globalDir?: string;
 	/** `<cwd>/.cast/skills` — omit entirely if `--no-skills` or the project isn't trusted yet. */
 	projectDir?: string;
+	/**
+	 * `<cwd>/.agents/skills` — skills.sh universal project path (e.g. `npx skills add`).
+	 * Trust-gated like `projectDir`.
+	 */
+	agentsProjectDir?: string;
+	/**
+	 * Universal global paths (`~/.config/agents/skills`, `~/.agents/skills`).
+	 * First listed wins on collision within this tier.
+	 */
+	agentsGlobalDirs?: string[];
+	/**
+	 * Marketplace plugin skill roots (enabled and disabled). Disabled packs
+	 * still load for the `/skills` picker with `pluginEnabled: false`.
+	 */
+	pluginContributions?: PluginSkillContribution[];
+	/** @deprecated Prefer `pluginContributions` — string dirs load as enabled plugin skills. */
+	pluginDirs?: string[];
 	/** Explicit `--skill <path>` files or directories — load even with `--no-skills`. */
 	extraPaths: string[];
 }
 
 /**
  * Load skills from every configured location. On a name collision the
- * first-loaded skill wins (project > global > builtin > --skill paths) —
- * matches pi's behavior. Builtin skills have the lowest priority so that
- * user-provided skills can override them.
+ * first-loaded skill wins:
+ * `.cast` project > `.agents` project > `.cast` global > `.agents` global >
+ * plugin > builtin > `--skill` paths.
  */
 export function loadSkills(options: LoadSkillsOptions): { skills: Skill[]; diagnostics: SkillDiagnostic[] } {
 	const skillMap = new Map<string, Skill>();
@@ -195,9 +246,25 @@ export function loadSkills(options: LoadSkillsOptions): { skills: Skill[]; diagn
 		}
 	}
 
-	// Highest priority first: project > global > builtin > extra paths.
+	// Highest priority first (see JSDoc).
 	if (options.projectDir) addAll(loadSkillsFromDirInternal(options.projectDir, "project", true));
+	if (options.agentsProjectDir) addAll(loadSkillsFromDirInternal(options.agentsProjectDir, "agents", true));
 	if (options.globalDir) addAll(loadSkillsFromDirInternal(options.globalDir, "global", true));
+	for (const dir of options.agentsGlobalDirs ?? []) {
+		addAll(loadSkillsFromDirInternal(dir, "agents", true));
+	}
+	const pluginContributions: PluginSkillContribution[] = [
+		...(options.pluginContributions ?? []),
+		...(options.pluginDirs ?? []).map((dir) => ({ dir, pluginId: "", enabled: true })),
+	];
+	for (const contrib of pluginContributions) {
+		const loaded = loadSkillsFromDirInternal(contrib.dir, "plugin", true);
+		for (const skill of loaded.skills) {
+			if (contrib.pluginId) skill.pluginId = contrib.pluginId;
+			skill.pluginEnabled = contrib.enabled;
+		}
+		addAll(loaded);
+	}
 	if (options.builtinDir) addAll(loadSkillsFromDirInternal(options.builtinDir, "builtin", true));
 
 	for (const rawPath of options.extraPaths) {
@@ -217,7 +284,8 @@ export function loadSkills(options: LoadSkillsOptions): { skills: Skill[]; diagn
 		}
 	}
 
-	return { skills: Array.from(skillMap.values()), diagnostics };
+	const skills = Array.from(skillMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+	return { skills, diagnostics };
 }
 
 // ============================================================================

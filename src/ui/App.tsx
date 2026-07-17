@@ -269,6 +269,8 @@ export function App(props: AppProps): JSX.Element {
 		subagentModel,
 		disabledTools,
 		projectTrusted,
+		noSkills: projectDeps.noSkills,
+		cliSkillPaths: projectDeps.cliSkillPaths,
 		sshHosts,
 		planState,
 		onPlanSignal,

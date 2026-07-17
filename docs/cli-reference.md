@@ -89,7 +89,7 @@ See [Tools](tools.md#dangerous-command-gating) for the list of patterns that tri
 | Flag | Description |
 |------|-------------|
 | `--skill <path>` | Load an extra skill file or directory (repeatable) |
-| `--no-skills` | Skip global/project skill discovery |
+| `--no-skills` | Skip project/agents/global/plugin/builtin skill discovery |
 | `--mcp <path>` | Load an extra MCP server config file (repeatable) |
 | `--no-mcp` | Skip global/project MCP server discovery |
 
@@ -122,7 +122,7 @@ The `run` subcommand accepts a subset of the main flags:
 | `--format <default\|json>` | | Output format |
 | `--bypass-permissions` | | Skip bash confirmation prompts |
 | `--skill <path>` | | Load extra skill (repeatable) |
-| `--no-skills` | | Skip skill discovery |
+| `--no-skills` | | Skip project/agents/global/plugin/builtin skill discovery |
 | `--mcp <path>` | | Load extra MCP config (repeatable) |
 | `--no-mcp` | | Skip MCP discovery |
 

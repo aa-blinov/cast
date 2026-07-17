@@ -6,7 +6,7 @@ A terminal coding agent that works with **any** OpenAI-compatible API. Point it 
 
 **Real tools, real work.** Reads files, writes code, runs shell commands, searches your codebase — all in parallel. Delegates sub-tasks to isolated sub-agents.
 
-**Extensible.** Rules, skills, MCP servers, and personas — add capabilities without touching the codebase.
+**Extensible.** Rules, skills, marketplace plugins, MCP servers, and personas — add capabilities without touching the codebase.
 
 ## Table of Contents
 
@@ -18,6 +18,7 @@ A terminal coding agent that works with **any** OpenAI-compatible API. Point it 
 | [Tools](tools.md) | Built-in tools the agent uses |
 | [Personas](personas.md) | Built-in personas and creating custom ones |
 | [Skills](skills.md) | Agent Skills spec, loading, creating |
+| [Plugins](plugins.md) | Marketplace install (`name@marketplace`) |
 | [Rules](rules.md) | Cursor-compatible rule system |
 | [MCP Servers](mcp-servers.md) | MCP configuration (local and remote) |
 | [Context Files](context-files.md) | AGENTS.md / CLAUDE.md hierarchy |

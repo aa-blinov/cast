@@ -380,6 +380,10 @@ export interface LoopConfig {
 	 * opt into AGENTS.md injection (`agentsMd: true`, the default).
 	 */
 	projectTrusted?: boolean;
+	/** Parent `--no-skills` — forwarded so task subagents skip the same discovery. */
+	noSkills?: boolean;
+	/** Parent `--skill` paths — forwarded into task subagent skill catalogs. */
+	cliSkillPaths?: string[];
 	/** Plan mode state — when enabled, injects plan system prompt block. */
 	planState?: import("./plan.ts").PlanState;
 	/** Restrict bash to the read-only allowlist without the rest of plan mode.
@@ -512,6 +516,8 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 					disabledTools: loopConfig.disabledTools,
 					planState: loopConfig.planState,
 					projectTrusted: loopConfig.projectTrusted,
+					noSkills: loopConfig.noSkills,
+					cliSkillPaths: loopConfig.cliSkillPaths,
 					mcpPromptSuffix: loopConfig.mcpPromptSuffix,
 					sshHosts: loopConfig.sshHosts,
 					runAgentLoop,

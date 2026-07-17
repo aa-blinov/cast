@@ -161,6 +161,10 @@ interface UseAgentSessionParams {
 	disabledTools?: Set<string>;
 	/** Whether the project cwd is trusted — for subagent AGENTS.md injection. */
 	projectTrusted?: boolean;
+	/** Parent `--no-skills` — forwarded to task subagents. */
+	noSkills?: boolean;
+	/** Parent `--skill` paths — forwarded to task subagents. */
+	cliSkillPaths?: string[];
 	/** Configured SSH hosts for the ssh tool. */
 	sshHosts?: import("../core/ssh.ts").SshHost[];
 	/** Plan mode state — passed to the agent loop for system prompt injection and tool gating. */
@@ -288,6 +292,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		subagentModel,
 		disabledTools,
 		projectTrusted,
+		noSkills,
+		cliSkillPaths,
 		planState,
 		onPlanSignal,
 		modelOverride,
@@ -538,6 +544,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					subagentModel,
 					disabledTools,
 					projectTrusted,
+					noSkills,
+					cliSkillPaths,
 					sshHosts: params.sshHosts,
 					mcpPromptSuffix: formatMcpForPrompt(mcpResult),
 					planState,
@@ -795,6 +803,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			subagentModel,
 			disabledTools,
 			projectTrusted,
+			noSkills,
+			cliSkillPaths,
 			planState,
 			onPlanSignal,
 			modelOverride,

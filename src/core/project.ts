@@ -4,8 +4,9 @@ import { join } from "node:path";
 import { resolveProjectTrust } from "../pickers/domain.ts";
 import type { Pickers } from "../pickers/types.ts";
 import { hasContextFileInDir } from "./context-files.ts";
-import { connectMcpServers, loadMcpConfig, type McpServerConfig, type McpSetupResult } from "./mcp.ts";
+import { connectMcpServers, loadMcpConfig, type McpServerConfig, type McpSetupResult, saveMcpConfig } from "./mcp.ts";
 import { globalPersonasDir, type LoadPersonasOptions, loadPersonas, type Persona } from "./personas.ts";
+import { pluginSkillContributions } from "./plugins.ts";
 import {
 	formatAlwaysApplyRules,
 	formatLazyRulesForPrompt,
@@ -14,7 +15,7 @@ import {
 	loadDirectoryRules,
 	type Rule,
 } from "./rules.ts";
-import type { PermissionMode, Settings } from "./settings.ts";
+import { loadSettings, type PermissionMode, type Settings } from "./settings.ts";
 import { builtinSkillsDir, formatSkillsForPrompt, loadSkills, type Skill } from "./skills.ts";
 import { loadSshConfig, projectSshPath } from "./ssh.ts";
 
@@ -27,17 +28,43 @@ export interface ProjectResolverDeps {
 	pickers: Pickers;
 }
 
-const globalSkillsDir = join(homedir(), ".cast", "skills");
-const globalMcpPath = join(homedir(), ".cast", "mcp.json");
+/** Lazy so `$HOME` changes (tests, unusual installs) are respected. */
+function globalSkillsDir(): string {
+	return join(homedir(), ".cast", "skills");
+}
+
+/** skills.sh universal global paths (canonical first, then `~/.agents/skills`). */
+function agentsGlobalSkillsDirs(): string[] {
+	const dirs = [join(homedir(), ".config", "agents", "skills"), join(homedir(), ".agents", "skills")];
+	const seen = new Set<string>();
+	const out: string[] = [];
+	for (const dir of dirs) {
+		if (seen.has(dir)) continue;
+		seen.add(dir);
+		out.push(dir);
+	}
+	return out;
+}
+
+function globalMcpPath(): string {
+	return join(homedir(), ".cast", "mcp.json");
+}
 
 function projectSkillsDir(targetCwd: string): string | undefined {
 	const dir = join(targetCwd, ".cast", "skills");
-	return dir !== globalSkillsDir ? dir : undefined;
+	return dir !== globalSkillsDir() ? dir : undefined;
+}
+
+/** skills.sh / Agent Skills universal project path (`npx skills add` default). */
+function projectAgentsSkillsDir(targetCwd: string): string | undefined {
+	const dir = join(targetCwd, ".agents", "skills");
+	const globals = new Set(agentsGlobalSkillsDirs());
+	return globals.has(dir) ? undefined : dir;
 }
 
 function projectMcpPath(targetCwd: string): string | undefined {
 	const path = join(targetCwd, ".cast", "mcp.json");
-	return path !== globalMcpPath ? path : undefined;
+	return path !== globalMcpPath() ? path : undefined;
 }
 
 function projectPersonasDir(targetCwd: string): string | undefined {
@@ -67,6 +94,9 @@ export async function resolveProjectTrustForCwd(deps: ProjectResolverDeps, cwd: 
 	const skillsDir = projectSkillsDir(cwd);
 	if (!deps.noSkills && skillsDir && existsSync(skillsDir))
 		lines.push("  - .cast/skills/ (agent skills — can instruct the model to run commands)");
+	const agentsSkillsDir = projectAgentsSkillsDir(cwd);
+	if (!deps.noSkills && agentsSkillsDir && existsSync(agentsSkillsDir))
+		lines.push("  - .agents/skills/ (skills.sh / universal agent skills)");
 	const mcpPath = projectMcpPath(cwd);
 	if (!deps.noMcp && mcpPath && existsSync(mcpPath)) {
 		const names = Object.keys(loadMcpConfig(mcpPath));
@@ -90,25 +120,92 @@ export async function resolveProjectTrustForCwd(deps: ProjectResolverDeps, cwd: 
 	return resolveProjectTrust(deps.pickers, deps.settings, cwd, lines);
 }
 
+/** Options that mirror parent-session skill discovery (`--no-skills` / `--skill`). */
+export interface PromptContextSkillOptions {
+	noSkills?: boolean;
+	cliSkillPaths?: string[];
+}
+
+/** Shared load options for parent session and task subagents. */
+function skillLoadOptionsForCwd(cwd: string, trusted: boolean, opts: { noSkills: boolean; cliSkillPaths: string[] }) {
+	const skillsDir = projectSkillsDir(cwd);
+	const agentsDir = projectAgentsSkillsDir(cwd);
+	return {
+		globalDir: opts.noSkills ? undefined : globalSkillsDir(),
+		builtinDir: opts.noSkills ? undefined : builtinSkillsDir,
+		projectDir: !opts.noSkills && trusted && skillsDir && existsSync(skillsDir) ? skillsDir : undefined,
+		agentsProjectDir: !opts.noSkills && trusted && agentsDir && existsSync(agentsDir) ? agentsDir : undefined,
+		agentsGlobalDirs: opts.noSkills ? undefined : agentsGlobalSkillsDirs().filter((d) => existsSync(d)),
+		// Fresh settings so /plugin install takes effect without restarting.
+		pluginContributions: opts.noSkills ? undefined : pluginSkillContributions(loadSettings()),
+		extraPaths: opts.cliSkillPaths,
+	};
+}
+
+/** All skills on disk for this cwd (ignores disabledSkills — use for /skills picker). */
+export function discoverSkillsForCwd(deps: ProjectResolverDeps, cwd: string, trusted: boolean): Skill[] {
+	const skillsResult = loadSkills(
+		skillLoadOptionsForCwd(cwd, trusted, { noSkills: deps.noSkills, cliSkillPaths: deps.cliSkillPaths }),
+	);
+	for (const diagnostic of skillsResult.diagnostics) {
+		console.log(`[skill warning] ${diagnostic.path}: ${diagnostic.message}`);
+	}
+	return skillsResult.skills;
+}
+
 export async function resolveSkillsForCwd(
 	deps: ProjectResolverDeps,
 	cwd: string,
 	trusted: boolean,
 ): Promise<{ skills: Skill[]; skillsPromptSuffix: string }> {
-	const skillsDir = projectSkillsDir(cwd);
-	const skillsResult = loadSkills({
-		globalDir: deps.noSkills ? undefined : globalSkillsDir,
-		builtinDir: deps.noSkills ? undefined : builtinSkillsDir,
-		projectDir: trusted && skillsDir && existsSync(skillsDir) ? skillsDir : undefined,
-		extraPaths: deps.cliSkillPaths,
-	});
-	for (const diagnostic of skillsResult.diagnostics) {
-		console.log(`[skill warning] ${diagnostic.path}: ${diagnostic.message}`);
-	}
+	const discovered = discoverSkillsForCwd(deps, cwd, trusted);
+	const disabled = new Set(loadSettings().disabledSkills ?? []);
+	// Pack-off plugin skills stay visible in `/skills` but not in the agent catalog.
+	const skills = discovered.filter((s) => !disabled.has(s.name) && s.pluginEnabled !== false);
 	return {
-		skills: skillsResult.skills,
-		skillsPromptSuffix: formatSkillsForPrompt(skillsResult.skills),
+		skills,
+		skillsPromptSuffix: formatSkillsForPrompt(skills),
 	};
+}
+
+/** MCP servers defined in global/project mcp.json (not `--mcp` paths). */
+export interface UninstallableMcpServer {
+	name: string;
+	origin: "global" | "project";
+	configPath: string;
+}
+
+/**
+ * Servers that `/mcp uninstall` can remove. Project entry wins over global for
+ * the same name (matches merge order in `resolveMcpForCwd`).
+ */
+export function listUninstallableMcpServers(cwd: string, trusted: boolean): UninstallableMcpServer[] {
+	const globalPath = globalMcpPath();
+	const globalServers = loadMcpConfig(globalPath);
+	const mcpPath = projectMcpPath(cwd);
+	const projectServers =
+		trusted && mcpPath && existsSync(mcpPath) ? loadMcpConfig(mcpPath) : ({} as Record<string, McpServerConfig>);
+	const names = new Set([...Object.keys(globalServers), ...Object.keys(projectServers)]);
+	return [...names]
+		.sort((a, b) => a.localeCompare(b))
+		.map((name) => {
+			if (name in projectServers && mcpPath) {
+				return { name, origin: "project" as const, configPath: mcpPath };
+			}
+			return { name, origin: "global" as const, configPath: globalPath };
+		});
+}
+
+/** Remove a server from its owning mcp.json (project if present, else global). */
+export function removeMcpServerFromDisk(name: string, cwd: string, trusted: boolean): UninstallableMcpServer | null {
+	const targets = listUninstallableMcpServers(cwd, trusted);
+	const entry = targets.find((t) => t.name === name);
+	if (!entry) return null;
+	const servers = loadMcpConfig(entry.configPath);
+	if (!(name in servers)) return null;
+	delete servers[name];
+	saveMcpConfig(entry.configPath, servers);
+	return entry;
 }
 
 export async function resolveMcpForCwd(
@@ -125,7 +222,7 @@ export async function resolveMcpForCwd(
 		allServerNames: [] as string[],
 	};
 	if (deps.noMcp) return emptyResult;
-	const globalServers = loadMcpConfig(globalMcpPath);
+	const globalServers = loadMcpConfig(globalMcpPath());
 	let projectServers: Record<string, McpServerConfig> = {};
 	const mcpPath = projectMcpPath(cwd);
 	if (trusted && mcpPath && existsSync(mcpPath)) {
@@ -140,7 +237,7 @@ export async function resolveMcpForCwd(
 	const disabledSet = new Set(disabledServers);
 	const filtered = Object.fromEntries(Object.entries(merged).filter(([name]) => !disabledSet.has(name)));
 	const result = await connectMcpServers(filtered);
-	result.allServerNames = allNames;
+	result.allServerNames = allNames.sort((a, b) => a.localeCompare(b));
 	for (const diagnostic of result.diagnostics) console.log(`[mcp warning] ${diagnostic}`);
 	return result;
 }
@@ -204,25 +301,28 @@ function localDateString(now = new Date()): string {
 
 /**
  * Rules + skills prompt suffixes for a cwd — same discovery the parent session
- * uses (global + builtin + trusted project). Used so task subagents see the
- * same project grounding without re-threading startup deps.
+ * uses (including `--no-skills` / `--skill` when passed). Used so task
+ * subagents see the same project grounding.
  */
 export function resolvePromptContextForCwd(
 	cwd: string,
 	trusted: boolean,
+	skillOptions: PromptContextSkillOptions = {},
 ): { rulesSuffix: string; rulesLazySuffix: string; skillsPromptSuffix: string } {
 	const rules = resolveRulesForCwd(cwd, trusted);
-	const skillsDir = projectSkillsDir(cwd);
-	const skillsResult = loadSkills({
-		globalDir: globalSkillsDir,
-		builtinDir: builtinSkillsDir,
-		projectDir: trusted && skillsDir && existsSync(skillsDir) ? skillsDir : undefined,
-		extraPaths: [],
-	});
+	const settings = loadSettings();
+	const skillsResult = loadSkills(
+		skillLoadOptionsForCwd(cwd, trusted, {
+			noSkills: skillOptions.noSkills === true,
+			cliSkillPaths: skillOptions.cliSkillPaths ?? [],
+		}),
+	);
+	const disabled = new Set(settings.disabledSkills ?? []);
+	const skills = skillsResult.skills.filter((s) => !disabled.has(s.name));
 	return {
 		rulesSuffix: rules.alwaysApplySuffix,
 		rulesLazySuffix: rules.lazySuffix,
-		skillsPromptSuffix: formatSkillsForPrompt(skillsResult.skills),
+		skillsPromptSuffix: formatSkillsForPrompt(skills),
 	};
 }
 
