@@ -16,6 +16,7 @@ import { dirname, join } from "node:path";
 import { loadConfig } from "../src/core/config.ts";
 import { type AgentEvent, runAgentLoop } from "../src/core/loop.ts";
 import { findPersona } from "../src/core/personas.ts";
+import { personaOptionsForCwd } from "../src/core/project.ts";
 
 // ============================================================================
 // Case definition
@@ -188,10 +189,11 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 		// (including the shared tools-edit guidance) the shipping agent gets —
 		// a bare stub here silently unplugged prompts/tools-edit.md from every
 		// eval run. The persona is selectable so results can be compared
-		// across personas; an unknown name fails loudly rather than silently
-		// benchmarking the wrong prompt.
+		// across personas, and resolves through the same builtin/global dirs
+		// the shipping agent uses; an unknown name fails loudly rather than
+		// silently benchmarking the wrong prompt.
 		const personaName = options.persona ?? "senior";
-		const personaPrompt = findPersona(personaName)?.systemPrompt;
+		const personaPrompt = findPersona(personaName, personaOptionsForCwd(options.cwd, false))?.systemPrompt;
 		if (!personaPrompt) {
 			throw new Error(`Persona "${personaName}" not found — check prompts/personas/ and ~/.cast/personas/.`);
 		}
@@ -236,6 +238,13 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 	// Check expectations
 	const failedChecks: string[] = [];
 	const expect = evalCase.expect;
+
+	// A run that died before making any tool call (bad persona, connection
+	// refused, …) would otherwise surface as misleading verify failures on
+	// the untouched fixture — name the real cause first.
+	if (errors.length > 0 && turns === 0) {
+		failedChecks.push(`Run failed before any tool call: ${errors.join("; ")}`);
+	}
 
 	// containsAll
 	if (expect.containsAll) {
