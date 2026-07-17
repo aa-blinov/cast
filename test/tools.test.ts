@@ -1035,6 +1035,7 @@ describe("task", () => {
 					label: "Worker",
 					description: "test",
 					systemPrompt: "worker prompt",
+					agentsMd: false,
 				},
 			],
 			runAgentLoop: async (_msgs, config) => {
@@ -1055,8 +1056,8 @@ describe("task", () => {
 			model: "test",
 			// "analyst" sorts before "worker"; the default must still be worker.
 			subagentPrompts: [
-				{ name: "analyst", label: "Analyst", description: "x", systemPrompt: "analyst prompt" },
-				{ name: "worker", label: "Worker", description: "x", systemPrompt: "worker prompt" },
+				{ name: "analyst", label: "Analyst", description: "x", systemPrompt: "analyst prompt", agentsMd: false },
+				{ name: "worker", label: "Worker", description: "x", systemPrompt: "worker prompt", agentsMd: false },
 			],
 			runAgentLoop: async (_msgs, config) => {
 				capturedConfig = config as Record<string, unknown>;
@@ -1072,7 +1073,9 @@ describe("task", () => {
 		let capturedMessages: unknown;
 		const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, {
 			model: "test",
-			subagentPrompts: [{ name: "worker", label: "Worker", description: "test", systemPrompt: "worker prompt" }],
+			subagentPrompts: [
+				{ name: "worker", label: "Worker", description: "test", systemPrompt: "worker prompt", agentsMd: false },
+			],
 			runAgentLoop: async (msgs, config) => {
 				capturedMessages = msgs;
 				capturedConfig = config as Record<string, unknown>;

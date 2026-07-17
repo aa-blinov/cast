@@ -1,6 +1,7 @@
 import { setMaxListeners } from "node:events";
 import { basename, join } from "node:path";
 import type { AppConfig } from "./config.ts";
+import { matchesToolsAllowlist } from "./frontmatter.ts";
 import type { Message, Tool, Usage } from "./llm.ts";
 import {
 	applyCacheControl,
@@ -317,6 +318,21 @@ export interface LoopConfig {
 	subagentModel?: string;
 	/** Tool names to exclude from the definitions sent to the model. */
 	disabledTools?: Set<string>;
+	/**
+	 * Optional allowlist for *built-in* tools only. Entries are exact names
+	 * or `*`-globs (`plan_*`, `web_*`). When set, only matching builtin names
+	 * are advertised and executable (after `disabledTools`). Connected MCP
+	 * tools are never filtered by this list — they come from the user's
+	 * session config, not the persona/subagent role. Used by subagents from
+	 * frontmatter `tools:`; for the main agent, derived from the active
+	 * persona when omitted.
+	 */
+	allowedTools?: string[];
+	/**
+	 * Whether the project cwd is trusted — used when spawning subagents that
+	 * opt into AGENTS.md injection (`agentsMd: true`, the default).
+	 */
+	projectTrusted?: boolean;
 	/** Plan mode state — when enabled, injects plan system prompt block. */
 	planState?: import("./plan.ts").PlanState;
 	/** Restrict bash to the read-only allowlist without the rest of plan mode.
@@ -379,12 +395,24 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 	const subagentsEnabled = currentPersonaObj?.subagents === true;
 	const subagentNames = subagentsEnabled ? loopConfig.subagentPrompts?.map((p) => p.name) : undefined;
 	const sshHostNames = loopConfig.sshHosts?.map((h) => h.name);
-	const allTools = [
-		...getToolDefinitions(subagentNames, initialModel, loopConfig.subagentModel, sshHostNames),
-		...(loopConfig.mcpTools ?? []),
-	];
+	const builtinTools = getToolDefinitions(subagentNames, initialModel, loopConfig.subagentModel, sshHostNames);
+	const mcpTools = loopConfig.mcpTools ?? [];
+	const allTools = [...builtinTools, ...mcpTools];
 	const disabledTools = loopConfig.disabledTools;
-	const tools = disabledTools?.size ? allTools.filter((t) => !disabledTools.has(t.function.name)) : allTools;
+	// Persona/subagent frontmatter `tools:` allowlists builtins only.
+	// LoopConfig wins when set (subagent spawn); otherwise the active persona.
+	// MCP tools stay available whenever connected — their names are
+	// user/session-specific and must not require listing in the persona file.
+	const allowedTools = loopConfig.allowedTools ?? currentPersonaObj?.tools;
+	let builtins = disabledTools?.size ? builtinTools.filter((t) => !disabledTools.has(t.function.name)) : builtinTools;
+	const mcps = disabledTools?.size ? mcpTools.filter((t) => !disabledTools.has(t.function.name)) : mcpTools;
+	if (allowedTools !== undefined) {
+		builtins = builtins.filter((t) => matchesToolsAllowlist(t.function.name, allowedTools));
+	}
+	const tools = [...builtins, ...mcps];
+	// Names registered before allowlist/denylist filters — so a call to a
+	// real-but-filtered builtin gets "not available", not an unknown-tool hint.
+	const knownToolNames = new Set(allTools.map((t) => t.function.name));
 	// Names the model is actually allowed to call this turn — used to catch
 	// fabricated tool names in executeTool below.
 	const advertisedNames = new Set(tools.map((t) => t.function.name));
@@ -412,6 +440,7 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 					subagentModel: loopConfig.subagentModel,
 					disabledTools: loopConfig.disabledTools,
 					planState: loopConfig.planState,
+					projectTrusted: loopConfig.projectTrusted,
 					runAgentLoop,
 				}
 			: undefined,
@@ -419,11 +448,19 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 		loopConfig.sshHosts,
 	);
 	const executeTool = (name: string, args: Record<string, unknown>, toolSignal?: AbortSignal): Promise<ToolResult> => {
-		// Same principle as the task gate above: a tool filtered out of the
-		// advertised definitions must not run even when the model fabricates a
-		// call to it by name (plan_* in build mode, …).
-		if (disabledTools?.has(name)) {
-			return Promise.resolve({ content: `Tool "${name}" is not available in the current mode.`, isError: true });
+		// Advertised set is the single source of truth for both definitions and
+		// real calls: disabledTools denylist and the builtin tools allowlist.
+		// (MCP tools are not subject to the persona/subagent allowlist.)
+		if (!advertisedNames.has(name)) {
+			if (knownToolNames.has(name) || disabledTools?.has(name)) {
+				return Promise.resolve({
+					content: `Tool "${name}" is not available in the current mode.`,
+					isError: true,
+				});
+			}
+			// Completely unknown name — suggest the closest advertised tool
+			// instead of a bare "Unknown tool" the model tends to retry.
+			return Promise.resolve(unknownToolResult(name, [...advertisedNames]));
 		}
 		// Plan mode allows bash for inspection only — enforced here, not by the
 		// model's goodwill: pipelines of allowlisted read-only binaries pass,
@@ -441,12 +478,6 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 		}
 		const mcpTool = mcpToolIndex?.get(name);
 		if (mcpTool) return mcpTool.call(args, toolSignal);
-		// Name isn't an MCP tool and isn't in the advertised (enabled) set — the
-		// model fabricated it. Point it at the right tool instead of a bare
-		// "Unknown tool" the model tends to retry until the doom-loop guard trips.
-		if (!advertisedNames.has(name)) {
-			return Promise.resolve(unknownToolResult(name, [...advertisedNames]));
-		}
 		return builtinExecuteTool(name, args, toolSignal);
 	};
 	const client = createClient(config);

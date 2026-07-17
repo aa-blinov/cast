@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { parseFrontmatter } from "../src/core/frontmatter.ts";
+import {
+	matchesToolsAllowlist,
+	parseAgentsMd,
+	parseFrontmatter,
+	parseToolsAllowlist,
+} from "../src/core/frontmatter.ts";
 
 describe("parseFrontmatter", () => {
 	it("returns empty frontmatter and the whole content as body when there's no block", () => {
@@ -58,5 +63,69 @@ describe("parseFrontmatter", () => {
 	it("accepts hyphens, underscores and digits in keys", () => {
 		const { frontmatter } = parseFrontmatter("---\nmax-tokens: 5\nsome_key: v\nkey2: w\n---\n");
 		expect(frontmatter).toEqual({ "max-tokens": "5", some_key: "v", key2: "w" });
+	});
+});
+
+describe("parseToolsAllowlist", () => {
+	it("returns undefined when tools is omitted", () => {
+		expect(parseToolsAllowlist({})).toBeUndefined();
+	});
+
+	it("parses an inline tools array", () => {
+		const { frontmatter } = parseFrontmatter("---\ntools: [read, grep, ls]\n---\n");
+		expect(parseToolsAllowlist(frontmatter)).toEqual(["read", "grep", "ls"]);
+	});
+
+	it("keeps an explicit empty array (no tools)", () => {
+		const { frontmatter } = parseFrontmatter("---\ntools: []\n---\n");
+		expect(parseToolsAllowlist(frontmatter)).toEqual([]);
+	});
+
+	it("treats a non-array tools value as omitted", () => {
+		const { frontmatter } = parseFrontmatter("---\ntools: true\n---\n");
+		expect(parseToolsAllowlist(frontmatter)).toBeUndefined();
+	});
+});
+
+describe("parseAgentsMd", () => {
+	it("defaults to true when omitted", () => {
+		expect(parseAgentsMd({})).toBe(true);
+	});
+
+	it("returns false only for explicit false", () => {
+		const { frontmatter } = parseFrontmatter("---\nagentsMd: false\n---\n");
+		expect(parseAgentsMd(frontmatter)).toBe(false);
+	});
+
+	it("returns true for explicit true", () => {
+		const { frontmatter } = parseFrontmatter("---\nagentsMd: true\n---\n");
+		expect(parseAgentsMd(frontmatter)).toBe(true);
+	});
+});
+
+describe("matchesToolsAllowlist", () => {
+	it("matches exact names", () => {
+		expect(matchesToolsAllowlist("read", ["read", "grep"])).toBe(true);
+		expect(matchesToolsAllowlist("bash", ["read", "grep"])).toBe(false);
+	});
+
+	it("matches plan_* and web_* globs", () => {
+		const patterns = ["read", "plan_*", "web_*"];
+		expect(matchesToolsAllowlist("plan_write", patterns)).toBe(true);
+		expect(matchesToolsAllowlist("plan_done", patterns)).toBe(true);
+		expect(matchesToolsAllowlist("web_search", patterns)).toBe(true);
+		expect(matchesToolsAllowlist("web_fetch", patterns)).toBe(true);
+		expect(matchesToolsAllowlist("bash", patterns)).toBe(false);
+		expect(matchesToolsAllowlist("write", patterns)).toBe(false);
+	});
+
+	it("treats bare * as match-all", () => {
+		expect(matchesToolsAllowlist("bash", ["*"])).toBe(true);
+		expect(matchesToolsAllowlist("plan_check", ["*"])).toBe(true);
+	});
+
+	it("does not match names outside the glob prefix", () => {
+		expect(matchesToolsAllowlist("planning", ["plan_*"])).toBe(false);
+		expect(matchesToolsAllowlist("my_plan_write", ["plan_*"])).toBe(false);
 	});
 });

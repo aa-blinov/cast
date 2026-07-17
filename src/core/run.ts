@@ -77,6 +77,7 @@ export async function runNonInteractive(args: ParsedArgs, options: RunOptions): 
 			subagentPrompts,
 			subagentModel,
 			disabledTools,
+			projectTrusted: result.projectTrusted,
 			planState,
 			onEvent: (event: AgentEvent) => handleEvent(event, session, options.format),
 		});
