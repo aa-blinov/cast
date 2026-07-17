@@ -1,7 +1,8 @@
 /**
  * Subagent prompts — dedicated system prompts for worker agents spawned by
  * the `task` tool. Loaded from `prompts/subagents/*.md` (builtin) with the
- * same frontmatter format as personas (name, label, description).
+ * same frontmatter format as personas (name, label, description, tools,
+ * agentsMd).
  *
  * Unlike personas, subagent prompts are not user-facing and have no
  * trust-gated project/global sources — they ship with cast and are
@@ -10,7 +11,7 @@
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseFrontmatter } from "./frontmatter.ts";
+import { parseAgentsMd, parseFrontmatter, parseToolsAllowlist } from "./frontmatter.ts";
 import { promptsDir } from "./prompts.ts";
 
 export interface SubagentPrompt {
@@ -18,6 +19,18 @@ export interface SubagentPrompt {
 	label: string;
 	description: string;
 	systemPrompt: string;
+	/**
+	 * Optional allowlist for built-in tools from frontmatter
+	 * (`tools: [read, grep, plan_*, web_*]`). Exact names or `*`-globs.
+	 * `undefined` = all builtins; when set, only matching builtin names are
+	 * advertised and executable. Connected MCP tools are never filtered here.
+	 */
+	tools?: string[];
+	/**
+	 * Whether to inject AGENTS.md / CLAUDE.md into the subagent system prompt.
+	 * Defaults to true; set `agentsMd: false` in frontmatter to disable.
+	 */
+	agentsMd: boolean;
 }
 
 const SUBAGENTS_DIR = join(promptsDir, "subagents");
@@ -39,6 +52,8 @@ function loadSubagentFromFile(filePath: string): SubagentPrompt | null {
 		label: typeof frontmatter.label === "string" && frontmatter.label ? frontmatter.label : name,
 		description: typeof frontmatter.description === "string" ? frontmatter.description : "",
 		systemPrompt: body.trimEnd(),
+		tools: parseToolsAllowlist(frontmatter),
+		agentsMd: parseAgentsMd(frontmatter),
 	};
 }
 

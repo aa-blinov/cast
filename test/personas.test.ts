@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_PERSONA, findPersona, listPersonas, loadPersonas } from "../src/core/personas.ts";
+import { buildSystemPrompt } from "../src/core/project.ts";
 import { getToolDefinitions } from "../src/core/tools.ts";
 
 const PERSONAS_DIR = join(import.meta.dirname, "..", "prompts", "personas");
@@ -164,6 +165,52 @@ describe("loadPersonas multi-source", () => {
 		const personas = loadPersonas({ globalDir: GLOBAL_DIR });
 		const testPers = personas.find((p) => p.name === "test-pers")!;
 		expect(testPers.systemPrompt).toContain("## Error Handling");
+	});
+});
+
+describe("tools and agentsMd fields", () => {
+	it("defaults tools to undefined (all tools) and agentsMd to true", () => {
+		writePersona(GLOBAL_DIR, "defaults", "Default fields.");
+		const p = loadPersonas({ globalDir: GLOBAL_DIR }).find((x) => x.name === "defaults")!;
+		expect(p.tools).toBeUndefined();
+		expect(p.agentsMd).toBe(true);
+	});
+
+	it("parses tools allowlist from frontmatter", () => {
+		writeFileSync(
+			join(GLOBAL_DIR, "readonly.md"),
+			`---\nname: readonly\nlabel: Readonly\ntools: [read, grep, ls]\n---\n\nBody.\n`,
+			"utf-8",
+		);
+		const p = loadPersonas({ globalDir: GLOBAL_DIR }).find((x) => x.name === "readonly")!;
+		expect(p.tools).toEqual(["read", "grep", "ls"]);
+	});
+
+	it("parses agentsMd: false from frontmatter", () => {
+		writeFileSync(
+			join(GLOBAL_DIR, "no-agents.md"),
+			`---\nname: no-agents\nlabel: No Agents\nagentsMd: false\n---\n\nBody.\n`,
+			"utf-8",
+		);
+		const p = loadPersonas({ globalDir: GLOBAL_DIR }).find((x) => x.name === "no-agents")!;
+		expect(p.agentsMd).toBe(false);
+	});
+
+	it("builtins omit tools and keep agentsMd true", () => {
+		for (const p of loadPersonas()) {
+			expect(p.tools).toBeUndefined();
+			expect(p.agentsMd).toBe(true);
+		}
+	});
+
+	it("buildSystemPrompt omits AGENTS.md when agentsMd is false", () => {
+		writePersona(GLOBAL_DIR, "prompt-check", "Body.");
+		const base = loadPersonas({ globalDir: GLOBAL_DIR }).find((x) => x.name === "prompt-check")!;
+		const withAgents = { ...base, agentsMd: true };
+		const withoutAgents = { ...base, agentsMd: false };
+		const suffix = "\n\n<project_context>\nPROJECT RULES\n</project_context>";
+		expect(buildSystemPrompt(withAgents, suffix, "", "", "", "", "/tmp")).toContain("PROJECT RULES");
+		expect(buildSystemPrompt(withoutAgents, suffix, "", "", "", "", "/tmp")).not.toContain("PROJECT RULES");
 	});
 });
 

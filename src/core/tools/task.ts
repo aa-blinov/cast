@@ -6,6 +6,7 @@
  */
 
 import type { AppConfig } from "../config.ts";
+import { formatContextFilesForPrompt, loadProjectContextFiles } from "../context-files.ts";
 import type { Message, Tool, Usage } from "../llm.ts";
 import type { LoopConfig } from "../loop.ts";
 import type { McpToolHandle } from "../mcp.ts";
@@ -114,6 +115,11 @@ export interface TaskExecutorDeps {
 	/** Parent's plan state — lets build-mode subagents inherit the approved
 	 * plan (mirror block) and plan-mode subagents inherit the bash block. */
 	planState?: import("../plan.ts").PlanState;
+	/**
+	 * Whether the project cwd is trusted — gates the cwd AGENTS.md file when
+	 * the subagent has `agentsMd: true` (the default).
+	 */
+	projectTrusted?: boolean;
 	/** Injected to avoid circular dependency with loop.ts. */
 	runAgentLoop: (messages: Message[], config: LoopConfig) => Promise<Message[]>;
 }
@@ -142,8 +148,15 @@ export async function execTask(
 
 	// The assignment lives only in the user message — the system prompt carries
 	// the subagent's role. Duplicating it in both wastes tokens and gives the
-	// model two competing copies of the task.
-	const childSystemPrompt = subagent?.systemPrompt ?? "You are a worker agent. Complete the assigned task.";
+	// model two competing copies of the task. AGENTS.md is appended when the
+	// subagent opts in (`agentsMd` defaults to true) so workers see the same
+	// project instructions as the parent unless frontmatter turns it off.
+	const rolePrompt = subagent?.systemPrompt ?? "You are a worker agent. Complete the assigned task.";
+	const agentsSuffix =
+		subagent?.agentsMd !== false
+			? formatContextFilesForPrompt(loadProjectContextFiles(cwd, deps.projectTrusted === true))
+			: "";
+	const childSystemPrompt = [rolePrompt, agentsSuffix].filter(Boolean).join("");
 
 	const childMessages: Message[] = [{ role: "user", content: assignment }];
 
@@ -210,6 +223,11 @@ export async function execTask(
 			// in plan mode) but never get the plan tools themselves — they explore
 			// and report back; the parent owns the plan file.
 			disabledTools: new Set([...(deps.disabledTools ?? []), ...PLAN_TOOL_NAMES]),
+			// Frontmatter `tools:` on the subagent — undefined means all (minus
+			// disabledTools above); when set, only listed names are advertised
+			// and executable.
+			allowedTools: subagent?.tools,
+			projectTrusted: deps.projectTrusted,
 			// Handoff, not authority: the child sees the plan (mirror block in
 			// build mode, or the current draft during planning) but always runs
 			// with enabled=false — the plan-mode restriction block references

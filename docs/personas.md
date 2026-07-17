@@ -1,6 +1,6 @@
 # Personas
 
-A coding agent optimized for implementation isn't the best reviewer. A QA mindset doesn't write good specs. Personas let you swap the judgment — the lens through which the agent approaches your code — without swapping the tools. Same bash, same read, same write. Different priorities, different questions, different output.
+A coding agent optimized for implementation isn't the best reviewer. A QA mindset doesn't write good specs. Personas let you swap the judgment — the lens through which the agent approaches your code — and optionally constrain which built-in tools that role may use. Different priorities, different questions, different output.
 
 ## Built-in Personas
 
@@ -47,6 +47,8 @@ name: my-persona
 label: My Custom Persona
 description: What this persona does
 subagents: false
+tools: [read, grep, ls, plan_*, web_*]
+agentsMd: true
 ---
 
 You are a specialized assistant focused on [role].
@@ -68,8 +70,27 @@ When analyzing code, always consider:
 | `label` | No | Display name (defaults to `name`) |
 | `description` | No | Shown in persona listings |
 | `subagents` | No | `true` to enable the `task` tool (default: `false`) |
+| `tools` | No | Allowlist of **built-in** tools. Omit = all builtins. Exact names or `*`-globs (`plan_*`, `web_*`). MCP tools are never filtered by this list |
+| `agentsMd` | No | Inject `AGENTS.md` / `CLAUDE.md` into the system prompt (default: `true`) |
 
 The body (after frontmatter) becomes the system prompt. A shared error-handling section is appended automatically from `prompts/error-handling.md` — you don't need to include tool-failure mechanics in your persona.
+
+### Tool allowlist (`tools`)
+
+When set, only matching **built-in** tools are advertised to the model and executable (a fabricated call to a filtered tool returns "not available"). Connected MCP servers are unaffected — their tools stay available whenever the session has them connected.
+
+```yaml
+tools: [read, grep, ls]           # readonly builtins
+tools: [read, grep, plan_*, web_*] # globs expand to plan_write, web_search, …
+tools: []                          # no builtins (MCP still available)
+# omit the field entirely         # all builtins
+```
+
+Session policy still applies on top of the allowlist: plan/build mode, the web-tools toggle, and headless `cast run` can disable tools via their own denylist even if the persona listed them. The `task` tool additionally requires `subagents: true`.
+
+### AGENTS.md (`agentsMd`)
+
+By default (`agentsMd: true`, or the field omitted), project context files (`AGENTS.md` / `CLAUDE.md`) are injected into the system prompt. Set `agentsMd: false` to skip them for that persona.
 
 ### Priority
 

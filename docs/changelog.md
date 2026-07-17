@@ -1,13 +1,19 @@
 # Changelog
 
 All notable user-facing changes to cast, newest first.
+
+## 0.6.11
+
+### Added
+
+- Persona and subagent frontmatter support `tools` (builtin allowlist; exact names or `*`-globs like `plan_*` / `web_*`) and `agentsMd` (default `true`). Omit `tools` for all builtins; MCP tools are never filtered by the allowlist. Session gates (plan/build mode, web toggle) still apply on top.
+
 ## 0.6.10
 
 ### Fixed
 
 - `edit` returns edited regions with fresh anchors on success, so a follow-up edit on the same file no longer needs a re-read after lines shift under prior anchors.
 - `read` output was switched from the two-part `<LINE>:<HASH>→` anchor format to the three-part `<LINE>:<LOCAL>:<CHUNK>→` format (introduced during the 0.6.9 cycle). The three-part form gives finer-grained movement detection when lines shift around, and the stale-anchor error path now returns a fresh anchor instead of failing blind.
-
 
 ## 0.6.9
 
@@ -37,15 +43,11 @@ All notable user-facing changes to cast, newest first.
 - Per-line hash computation for `read`/`edit`/`grep` is now backed by an in-memory LRU (default 20 entries, ~4 MB worst case). Entries are re-validated against file `mtime` on every access, so cache hits silently invalidate after external edits.
 - `Lru` exposes a `size` getter so the test-only `hashlineCacheSize` no longer reaches into a private field.
 
-
-
 ### Internal
 
 - `read`/`edit` now emit and accept hashline anchors (`<LINE>:<HASH>→…`) so line references in the conversation survive re-reads; edits are validated atomically against the file as it stands at edit time
 - In-memory LRU (default 20 entries, ~4 MB worst case) caches per-line hashes for `read`/`edit`/`grep`; entries are re-validated against file `mtime`, so cache hits silently invalidate on external edits
 - Added a public `size` getter on the LRU so `hashlineCacheSize` no longer reaches into a private field
-
-
 
 ### Changed
 

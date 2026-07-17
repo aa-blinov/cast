@@ -443,6 +443,61 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 	<article class="content">
 		<h1>Changelog</h1>
 <p>All notable user-facing changes to cast, newest first.</p>
+<h2>0.6.11</h2>
+<h3>Added</h3>
+<ul>
+<li>Persona and subagent frontmatter support <code>tools</code> (builtin allowlist; exact names or <code>*</code>-globs like <code>plan_*</code> / <code>web_*</code>) and <code>agentsMd</code> (default <code>true</code>). Omit <code>tools</code> for all builtins; MCP tools are never filtered by the allowlist. Session gates (plan/build mode, web toggle) still apply on top.</li>
+</ul>
+<h2>0.6.10</h2>
+<h3>Fixed</h3>
+<ul>
+<li><code>edit</code> returns edited regions with fresh anchors on success, so a follow-up edit on the same file no longer needs a re-read after lines shift under prior anchors.</li>
+<li><code>read</code> output was switched from the two-part <code>&lt;LINE&gt;:&lt;HASH&gt;→</code> anchor format to the three-part <code>&lt;LINE&gt;:&lt;LOCAL&gt;:&lt;CHUNK&gt;→</code> format (introduced during the 0.6.9 cycle). The three-part form gives finer-grained movement detection when lines shift around, and the stale-anchor error path now returns a fresh anchor instead of failing blind.</li>
+</ul>
+<h2>0.6.9</h2>
+<h3>Added</h3>
+<ul>
+<li><code>edit</code> now accepts <code>insert_before</code> to add new lines above a target anchor (in addition to the existing <code>insert_after</code>). Useful when the natural reference is a heading you want content to sit <em>above</em> rather than below.</li>
+<li>Successful <code>edit</code> operations now return the edited regions with fresh anchors, so a follow-up edit doesn&#39;t need a re-<code>read</code> even when prior anchors shifted.</li>
+</ul>
+<h2>0.6.8</h2>
+<h3>Changed</h3>
+<ul>
+<li><strong>Hashline anchor format switched from <code>&lt;LINE&gt;:&lt;HASH&gt;</code> to <code>&lt;LINE&gt;:&lt;LOCAL&gt;:&lt;CHUNK&gt;</code></strong> for <code>read</code>/<code>edit</code>/<code>grep</code> output. The three-part form gives finer-grained movement detection when lines shift around, and the stale-anchor error path now returns a fresh anchor instead of failing blind. Anchors emitted under 0.6.7 are no longer valid; re-read the file to get anchors in the new format.</li>
+</ul>
+<h3>Fixed</h3>
+<ul>
+<li><code>parseAnchor</code> now ignores any content past the <code>→</code> separator, so pasting a <code>read</code> gutter line (with its arrow and trailing content) into <code>edit</code> produces the correct anchor instead of a malformed one.</li>
+</ul>
+<h2>0.6.7</h2>
+<h3>Changed</h3>
+<ul>
+<li><strong><code>read</code> output now carries hashline anchors</strong> in the form <code>&lt;LINE&gt;:&lt;HASH&gt;→content</code> so a line reference made in one assistant turn still points at the same line after a re-read; <code>edit</code> accepts <code>replace</code> / <code>insert_after</code> / <code>write</code> operations keyed by those anchors and validates the whole batch atomically against the current file (stale anchors return fresh anchors instead of failing blind).</li>
+</ul>
+<h3>Internal</h3>
+<ul>
+<li>Per-line hash computation for <code>read</code>/<code>edit</code>/<code>grep</code> is now backed by an in-memory LRU (default 20 entries, ~4 MB worst case). Entries are re-validated against file <code>mtime</code> on every access, so cache hits silently invalidate after external edits.</li>
+<li><code>Lru</code> exposes a <code>size</code> getter so the test-only <code>hashlineCacheSize</code> no longer reaches into a private field.</li>
+</ul>
+<h3>Internal</h3>
+<ul>
+<li><code>read</code>/<code>edit</code> now emit and accept hashline anchors (<code>&lt;LINE&gt;:&lt;HASH&gt;→…</code>) so line references in the conversation survive re-reads; edits are validated atomically against the file as it stands at edit time</li>
+<li>In-memory LRU (default 20 entries, ~4 MB worst case) caches per-line hashes for <code>read</code>/<code>edit</code>/<code>grep</code>; entries are re-validated against file <code>mtime</code>, so cache hits silently invalidate on external edits</li>
+<li>Added a public <code>size</code> getter on the LRU so <code>hashlineCacheSize</code> no longer reaches into a private field</li>
+</ul>
+<h3>Changed</h3>
+<ul>
+<li><strong><code>/current</code> model line shows the configured model and the live plan model together</strong> when plan mode swaps in a separate one, so the discrepancy from the status bar becomes visible instead of silently different.</li>
+</ul>
+<h3>Internal</h3>
+<ul>
+<li><code>/current</code> rendering moved into <code>formatValue</code> on each registered status bar segment — adding a new segment now needs one place instead of two.</li>
+<li><code>applyProviderSelection</code> extracted from <code>/provider activate</code> — the post-save flow (<code>selectModel</code> → <code>selectReasoningLevel</code> → <code>refresh</code>) lives in one helper. <code>/provider add</code> keeps its own notice wording and stays inline.</li>
+<li><code>/current</code> and <code>/usage</code> reuse <code>abbreviateTokens</code> and <code>formatContextPct</code> from <code>App.tsx</code> — local <code>fmtK</code> (no M-branch) and a duplicated context-percent formatter are gone.</li>
+<li>Hermes XML strip is a single function (<code>stripHermesToolCalls</code>) shared by <code>core/llm.ts</code> and the streaming path — the previously duplicated private copy was deleted.</li>
+<li><code>ensureConnectionAlive</code> now writes the full providers array (not just legacy <code>providerUrl</code>/<code>apiKey</code>); the regression test was tightened to assert exactly what gets persisted, including that existing providers survive a reconnect prompt.</li>
+<li>New <code>test/statusbar.test.ts</code> covers <code>defaultStatusBarConfig</code>, the <code>SEGMENT_MAX_WIDTH</code> overflow map, and the empty-data paths of the registered renderers; new <code>formatValue</code> tests cover the plan-mode model divergence.</li>
+</ul>
 <h2>0.6.5</h2>
 <h3>Added</h3>
 <ul>

@@ -1,17 +1,16 @@
 /**
- * Personas — swappable system prompts that give the agent a different role
- * (coding agent, fiction writer, ...) without touching the tool set. The
- * tools (bash/read/write/edit/find/grep/ls) are generic file/shell
- * primitives already, not code-specific in themselves — the persona is
- * entirely a matter of which instructions frame how they're used.
+ * Personas — swappable agent definitions: system prompt plus optional
+ * capability knobs from frontmatter (`tools`, `agentsMd`, `subagents`).
+ * When `tools` is omitted all builtins are available; when set, only listed
+ * builtin names are advertised and executable (MCP tools are unaffected).
  *
  * Personas are loaded from three sources (highest priority first):
  *   1. Project:  <cwd>/.cast/personas/*.md  (trust-gated, like skills)
  *   2. Global:   ~/.cast/personas/*.md       (always loaded)
  *   3. Builtin:  prompts/personas/*.md       (ships with cast)
  *
- * Same frontmatter format as skills (name, label, description). Only one
- * persona is active at a time; its full body becomes the system prompt.
+ * Frontmatter: name, label, description, subagents, tools, agentsMd.
+ * Only one persona is active at a time; its body becomes the system prompt.
  * prompts/error-handling.md is appended to every persona (see
  * readSharedErrorHandling below).
  */
@@ -19,7 +18,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { parseFrontmatter } from "./frontmatter.ts";
+import { parseAgentsMd, parseFrontmatter, parseToolsAllowlist } from "./frontmatter.ts";
 import { promptsDir } from "./prompts.ts";
 
 export type PersonaSource = "builtin" | "global" | "project";
@@ -34,6 +33,18 @@ export interface Persona {
 	filePath: string;
 	/** Whether this persona can use the `task` tool to delegate to sub-agents. Defaults to false. */
 	subagents: boolean;
+	/**
+	 * Optional allowlist for built-in tools from frontmatter
+	 * (`tools: [read, grep, plan_*, web_*]`). Exact names or `*`-globs.
+	 * `undefined` = all builtins; when set, only matching builtin names are
+	 * advertised and executable. Connected MCP tools are never filtered here.
+	 */
+	tools?: string[];
+	/**
+	 * Whether to inject AGENTS.md / CLAUDE.md into the system prompt.
+	 * Defaults to true; set `agentsMd: false` in frontmatter to disable.
+	 */
+	agentsMd: boolean;
 }
 
 export const DEFAULT_PERSONA = "coding";
@@ -104,6 +115,7 @@ const FALLBACK_PERSONA: Persona = {
 	source: "builtin",
 	filePath: "",
 	subagents: false,
+	agentsMd: true,
 };
 
 function builtinPersonasDir(): string {
@@ -130,6 +142,8 @@ function loadPersonaFromFile(filePath: string, source: PersonaSource): Persona |
 		source,
 		filePath,
 		subagents: frontmatter.subagents === true,
+		tools: parseToolsAllowlist(frontmatter),
+		agentsMd: parseAgentsMd(frontmatter),
 	};
 }
 

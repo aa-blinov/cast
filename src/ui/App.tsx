@@ -268,6 +268,7 @@ export function App(props: AppProps): JSX.Element {
 		subagentPrompts,
 		subagentModel,
 		disabledTools,
+		projectTrusted,
 		sshHosts,
 		planState,
 		onPlanSignal,
