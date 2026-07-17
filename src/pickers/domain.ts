@@ -418,15 +418,104 @@ export async function selectMcpServers(
 	toolCounts: Record<string, number>,
 ): Promise<string[] | null> {
 	const disabledSet = new Set(disabledNames);
-	const options: PickOption<string>[] = allServerNames.map((name) => {
+	const names = [...allServerNames].sort((a, b) => a.localeCompare(b));
+	const options: PickOption<string>[] = names.map((name) => {
 		const count = toolCounts[name];
 		const status = disabledSet.has(name) ? "disabled" : count !== undefined ? `${count} tools` : "disconnected";
 		return { value: name, label: `${name} (${status})` };
 	});
-	const initialSelected = allServerNames.filter((n) => !disabledSet.has(n));
+	const initialSelected = names.filter((n) => !disabledSet.has(n));
 	const picked = await pickers.pickMulti(options, {
 		title: "MCP Servers (space to toggle, enter to confirm)",
 		initialSelected,
 	});
 	return picked;
+}
+
+export interface SkillPickItem {
+	name: string;
+	source: string;
+	disableModelInvocation: boolean;
+	pluginId?: string;
+	/** False when the skill's marketplace pack is disabled via `/plugin`. */
+	pluginEnabled?: boolean;
+}
+
+/** Label bits for `/skills` picker and list (includes plugin provenance). */
+export function formatSkillPickLabel(
+	skill: SkillPickItem,
+	disabled: boolean,
+): {
+	label: string;
+	description?: string;
+	muted: boolean;
+	locked: boolean;
+} {
+	const packOff = skill.source === "plugin" && skill.pluginEnabled === false;
+	const bits: string[] = [];
+	if (skill.source === "plugin" && skill.pluginId) {
+		bits.push(`plugin · ${skill.pluginId}`);
+	} else {
+		bits.push(skill.source);
+	}
+	if (skill.disableModelInvocation) bits.push("manual-only");
+	if (packOff) bits.push("pack off");
+	else if (disabled) bits.push("disabled");
+	return {
+		label: `${skill.name} (${bits.join(", ")})`,
+		description: packOff ? "Enable this pack with /plugin first" : undefined,
+		muted: packOff,
+		locked: packOff,
+	};
+}
+
+/**
+ * Toggle discovered skills on/off. Returns names the user wants ENABLED, or null
+ * on cancel. Same interaction as /mcp. Skills from a disabled plugin pack are
+ * shown locked (Space ignored) until the pack is re-enabled via `/plugin`.
+ */
+export async function selectSkills(
+	pickers: Pickers,
+	skills: SkillPickItem[],
+	disabledNames: string[],
+): Promise<string[] | null> {
+	const disabledSet = new Set(disabledNames);
+	const sorted = [...skills].sort((a, b) => a.name.localeCompare(b.name));
+	const options: PickOption<string>[] = sorted.map((s) => {
+		const meta = formatSkillPickLabel(s, disabledSet.has(s.name));
+		return {
+			value: s.name,
+			label: meta.label,
+			description: meta.description,
+			muted: meta.muted,
+			locked: meta.locked,
+		};
+	});
+	const initialSelected = sorted
+		.filter((s) => !(s.source === "plugin" && s.pluginEnabled === false) && !disabledSet.has(s.name))
+		.map((s) => s.name);
+	return pickers.pickMulti(options, {
+		title: "Skills (space to toggle, enter to confirm)",
+		initialSelected,
+	});
+}
+
+/**
+ * Toggle installed marketplace plugins on/off. Returns plugin ids
+ * (`name@marketplace`) the user wants ENABLED, or null on cancel.
+ */
+export async function selectPlugins(
+	pickers: Pickers,
+	plugins: Array<{ id: string; enabled: boolean; description?: string }>,
+): Promise<string[] | null> {
+	const sorted = [...plugins].sort((a, b) => a.id.localeCompare(b.id));
+	const options: PickOption<string>[] = sorted.map((p) => ({
+		value: p.id,
+		label: `${p.id}${p.enabled ? "" : " (disabled)"}${p.description ? ` — ${p.description}` : ""}`,
+	}));
+	const initialSelected = sorted.filter((p) => p.enabled).map((p) => p.id);
+	return pickers.pickMulti(options, {
+		title: "Plugins (space to toggle, enter to confirm)",
+		initialSelected,
+	});
 }

@@ -1,5 +1,5 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -9,6 +9,7 @@ import {
 	mcpHttpFetch,
 	mcpToolName,
 	sanitizeToolNamePart,
+	saveMcpConfig,
 } from "../src/core/mcp.ts";
 
 const TEST_DIR = join(import.meta.dirname, "__mcp_test_tmp__");
@@ -83,6 +84,21 @@ describe("loadMcpConfig", () => {
 			}),
 		);
 		expect(loadMcpConfig(path)).toEqual({ echo: { command: "node", args: ["server.js"] } });
+	});
+});
+
+describe("saveMcpConfig", () => {
+	it("writes mcpServers and round-trips through loadMcpConfig", () => {
+		mkdirSync(TEST_DIR, { recursive: true });
+		const path = join(TEST_DIR, "mcp.json");
+		saveMcpConfig(path, { echo: { command: "node", args: ["server.js"] } });
+		expect(existsSync(path)).toBe(true);
+		expect(JSON.parse(readFileSync(path, "utf-8"))).toEqual({
+			mcpServers: { echo: { command: "node", args: ["server.js"] } },
+		});
+		expect(loadMcpConfig(path)).toEqual({ echo: { command: "node", args: ["server.js"] } });
+		saveMcpConfig(path, {});
+		expect(loadMcpConfig(path)).toEqual({});
 	});
 });
 

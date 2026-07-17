@@ -1,12 +1,15 @@
 ---
 name: cast
 label: cast
-description: Configure cast itself — add personas, skills, MCP servers, or rules. Use when the user wants to customize cast's behavior or add new capabilities.
+description: Configure cast itself — personas, skills, marketplace plugins, MCP servers, or rules. Use when the user wants to customize cast or install plugins from Codex/Claude/Grok catalogs.
 ---
 
 # cast configuration
 
-cast stores all user configuration under `~/.cast/` (global) and `<cwd>/.cast/` (project-local). After any change, run `/reload` to apply without restarting.
+cast stores user config under `~/.cast/` (global) and `<cwd>/.cast/` (project-local).
+
+- Slash toggles/install/uninstall for `/skills`, `/mcp`, `/plugin`: hot-reload in the same session — no `/reload`, no restart.
+- File drops/edits (skills, personas, rules, mcp.json, `npx skills add`): `/reload` in the same session (does not reset chat).
 
 ## Personas
 
@@ -88,9 +91,16 @@ Skills are reusable instruction files the model can read on demand.
 **Locations** (highest priority first — on name collision, first-loaded wins):
 
 1. `.cast/skills/` — project (trust-gated)
-2. `~/.cast/skills/` — global
-3. Shipped with cast — builtin
-4. `--skill <path>` — extra CLI paths (loaded last)
+2. `.agents/skills/` — skills.sh universal project path (trust-gated)
+3. `~/.cast/skills/` — global
+4. `~/.config/agents/skills/` / `~/.agents/skills/` — skills.sh universal global
+5. Enabled marketplace plugins (`/plugin install`) — `source: plugin`
+6. Shipped with cast — builtin
+7. `--skill <path>` — extra CLI paths (still load with `--no-skills`)
+
+`--no-skills` skips project, agents, global, plugin, and builtin discovery.
+
+`npx skills add owner/repo --skill name -a universal` → `.agents/skills/`; invoke with `/skill:name`.
 
 **File format** — a directory with `SKILL.md`:
 
@@ -117,7 +127,10 @@ Instructions the model reads when this skill is invoked...
 - `name` must be lowercase, alphanumeric + hyphens
 - `description` is required (shown to the model)
 - `disable-model-invocation: true` — skill is hidden from model, only usable via `/skill:name`
-- On name collision, project > global > builtin
+- `/skills` — multi-select toggle; also `list`, `enable`/`disable <name>`, `uninstall`, `help`
+- `/skills uninstall` — delete cast/agents skill from disk (picker or name + confirm); not builtin/plugin/`--skill`
+- Plugin skills are labeled `plugin · name@marketplace`; if the pack is off, they stay visible but locked until `/plugin` re-enables the pack
+- On name collision: `.cast` project > `.agents` project > `.cast` global > `.agents` global > plugin > builtin
 
 **Example — create a skill:**
 
@@ -136,6 +149,36 @@ description: Branch naming, commit messages, and PR conventions for this repo.
 - Always squash-merge PRs
 EOF
 ```
+
+## Marketplace plugins
+
+Plugins are installable packs (usually skills) from catalogs — same `name@marketplace` shape as Claude Code / Grok Build. MVP loads **skills** from plugins only (not MCP/hooks inside the pack).
+
+**Defaults** (seeded once on first `/plugin` / marketplace / install):
+
+| Label | Source repo | Typical marketplace name |
+|-------|-------------|--------------------------|
+| Codex | `openai/plugins` | `openai-curated` |
+| Claude | `anthropics/claude-plugins-official` | `claude-plugins-official` |
+| Grok | `xai-org/plugin-marketplace` | `xai-official` |
+
+**Commands** — type `/plugin` in the composer; the palette lists every subcommand:
+
+```
+/plugin                              # toggle installed plugins
+/plugin list
+/plugin marketplace list             # catalogs
+/plugin marketplace list xai-official
+/plugin install superpowers@xai-official
+/plugin uninstall                    # picker + confirm
+/plugin enable|disable NAME@SHOP
+/skills list                         # catalog after install
+/skills                              # toggle
+```
+
+Install hot-reloads the skill catalog. Prefer plugins that ship a `skills/` directory (packs with only `commands/` / `agents/` contribute nothing in cast yet). Disabling a pack via `/plugin` locks its skills in `/skills` (warning color) until the pack is on again.
+
+Layout: `~/.cast/plugins/` (marketplaces, installs, `known_marketplaces.json`). State: `enabledPlugins` in `settings.json`.
 
 ## MCP Servers
 
@@ -172,37 +215,43 @@ Global servers load first, project and CLI override them on name collision.
 
 **Tool names** are namespaced as `mcp_<server>_<tool>` to avoid collisions.
 
-Servers listed in mcp.json can be toggled on/off per-session via `/mcp` — disabled servers are hidden from the model and persisted in settings. Only enabled servers appear in `<available_mcp>`.
+Same command shape as skills: `/mcp` toggle, `list`, `enable`/`disable <name>`, `uninstall` (confirm), `help`. Disabled servers persist in `disabledMcpServers`. Only enabled servers appear in `<available_mcp>`.
+
+`/mcp uninstall` removes a server from global or project `mcp.json`. CLI `--mcp` paths are not removable here.
 
 ## Rules
 
-Rules are short instructions appended to the system prompt.
+Cursor-compatible rule files (not a single `rules.md`):
 
-**Locations** (both are concatenated, not priority-based):
+1. `~/.cast/rules/*.md` — global
+2. `.cast/rules/*.md` — project (trust-gated)
 
-1. `~/.cast/rules.md` — global (always loaded)
-2. `.cast/rules.md` — project (trust-gated, appended after global)
+Frontmatter: `always-apply`, `globs`, `description` (lazy), or manual via `/rule:name`. See docs/rules.md.
 
-**Managed via commands:**
-
-- `/rules` — list all rules
-- `/rules add <text>` — add a rule (auto-numbered)
-- `/rules delete <number>` — remove a rule by number
+**Commands:** `/rules` (list), `/rule:<name>` (force-load).
 
 **Example:**
 
+```bash
+mkdir -p .cast/rules
+cat > .cast/rules/typescript.md << 'EOF'
+---
+always-apply: false
+globs: ["*.ts", "*.tsx"]
+---
+
+Use strict TypeScript; prefer unknown over any.
+EOF
 ```
-/rules add Always respond in Spanish
-/rules add Prefer functional style over classes
-/rules delete 2
-```
+
+Then `/reload`.
 
 ## Applying Changes
 
-After creating or modifying any of the above, run:
+Never quit cast for these — the chat continues either way.
 
-```
-/reload
-```
-
-This re-scans skills, personas, and reconnects MCP servers for the current directory without restarting.
+| Change | How to apply |
+|--------|----------------|
+| `/skills` / `/mcp` / `/plugin` toggle, enable/disable, uninstall | automatic (hot-reload) |
+| `/plugin install` / marketplace remove | automatic (skills reload) |
+| New/edited files under `.cast/` / `~/.cast/` / `.agents/` (skills, personas, rules, mcp.json) | `/reload` (same session) |

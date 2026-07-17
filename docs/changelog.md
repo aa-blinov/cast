@@ -11,6 +11,16 @@ All notable user-facing changes to cast, newest first.
 - After a mid-stream `/abort` (Esc) with no tool-result abort signal, cast appends a `<system-reminder>` (`[Request interrupted by user]`) so the next turn’s model sees that the prior turn was cut off.
 - Overnight sessions get a one-shot `<system-reminder>` when the local calendar date advances past the last announced day (persisted per session).
 - Built-in `explore` and `review` subagents for `task` (read-oriented tool allowlists). `coder-with-subagents` steers mapping to `explore` and validation to `review`; `worker` remains the default catch-all for everything else.
+- Marketplace plugins (Grok/Claude-shaped): `/plugin marketplace add`, `/plugin install name@marketplace` — installs contribute skills from `~/.cast/plugins/`.
+- `/skills` and bare `/plugin` open multi-select toggles (same UX as `/mcp`); disabled skill names persist in `disabledSkills`.
+- Default marketplaces auto-seeded once: Codex (`openai/plugins`), Claude (`anthropics/claude-plugins-official`), Grok (`xai-org/plugin-marketplace`).
+- `/plugin` slash palette lists install / marketplace / toggle subcommands; builtin `cast` skill documents plugins + toggles.
+- Bare `/plugin uninstall` opens a picker + confirm (typed `name@marketplace` still works).
+- `/skills uninstall` and `/mcp uninstall` — interactive picker + confirm (or typed name); removes global/project skills and mcp.json entries, clears matching disable flags, hot-reloads.
+- Uniform `/skills` / `/mcp` / `/plugin` surface: `list`, `enable`/`disable`, `help`; toggle cancel shows `[Cancelled]`; no-op toggle skips reload; typed uninstall confirms; `/plugin marketplace remove` cleans settings + reloads skills.
+- Skill discovery loads skills.sh universal paths: `.agents/skills/` (project, trust-gated) and `~/.config/agents/skills/` / `~/.agents/skills/` (global), so `npx skills add … -a universal` works without copying into `.cast/skills/`.
+- `/skills`, `/mcp`, and `/plugin` pickers/lists sort entries alphabetically by name (skills were previously discovery-order, so plugin skills clustered at the bottom).
+- `/skills` labels plugin skills with their pack id (`plugin · name@marketplace`). Skills from a disabled pack stay visible but locked (warning color) until `/plugin` re-enables the pack.
 
 ### Fixed
 
@@ -19,12 +29,15 @@ All notable user-facing changes to cast, newest first.
 - Committed `task` tool rows show the full subagent report (wrapped), not a 500-char truncated line.
 - Session rebuild/resume restores tool `[error]` via persisted `castIsError` on tool results (was always `[ok]`).
 - Trackpad scroll during an active agent turn no longer fights Ink redraws: while the live region fits the screen, cursor-position polling stays on (and short CUU frames cannot clear the scroll-up guard); tall streaming frames skip that poll so a false scroll latch cannot swallow redraws and scramble scrollback.
+- Sync `task` subagents honor parent `--no-skills` / `--skill` (they previously always loaded global/builtin/plugin skills and ignored CLI skill paths).
 
 ### Changed
 
+- Docs spell out hot-reload vs `/reload`: `/skills` / `/mcp` / `/plugin` toggle and install/uninstall apply in-session; `/reload` is only for on-disk file drops/edits (same chat, no restart).
 - `task` UI shows the delegated assignment text (not raw JSON `key=value` args). Non-default subagent names are prefixed (`explore · …`).
 - Subagent final-answer extraction ignores empty placeholder turns (`(no response)`); the worker prompt requires a standalone closing report.
 - Sync `task` subagents now receive the same environment grounding as the parent: Current System State (cwd/date/platform/model), always-apply + lazy rules, skills catalog, MCP server list, and SSH hosts.
+- `--no-skills` help/docs clarify that plugin skill discovery is skipped too (behavior unchanged).
 - `coder-with-subagents` (and the `task` tool description) steers harder on user cues like “parallel” / “independently”: split into same-turn multi-`task` calls instead of solo exploration.
 - Shared prompt append adds Agent discipline (action safety, parallel tool calls, preamble-with-tools, prompt secrecy) for all personas and subagents.
 

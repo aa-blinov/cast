@@ -1,7 +1,14 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { formatSkillInvocation, formatSkillsForPrompt, loadSkills } from "../src/core/skills.ts";
+import {
+	formatSkillInvocation,
+	formatSkillsForPrompt,
+	isUninstallableSkill,
+	loadSkills,
+	uninstallUserSkill,
+} from "../src/core/skills.ts";
+import { formatSkillPickLabel } from "../src/pickers/domain.ts";
 
 const TEST_DIR = join(import.meta.dirname, "__test_tmp_skills__");
 const GLOBAL_DIR = join(TEST_DIR, "global");
@@ -87,6 +94,99 @@ describe("loadSkills discovery", () => {
 		expect(diagnostics.some((d) => d.message.includes("collision"))).toBe(true);
 	});
 
+	it("keeps global over plugin, and plugin over builtin, on name collision", () => {
+		const pluginDir = join(TEST_DIR, "plugin");
+		const builtinDir = join(TEST_DIR, "builtin");
+		mkdirSync(pluginDir, { recursive: true });
+		mkdirSync(builtinDir, { recursive: true });
+		writeSkill(GLOBAL_DIR, "shared/SKILL.md", { name: "shared", description: "Global version." });
+		writeSkill(pluginDir, "shared/SKILL.md", { name: "shared", description: "Plugin version." });
+		writeSkill(builtinDir, "shared/SKILL.md", { name: "shared", description: "Builtin version." });
+
+		const globalWins = loadSkills({
+			globalDir: GLOBAL_DIR,
+			pluginDirs: [pluginDir],
+			builtinDir,
+			extraPaths: [],
+		});
+		expect(globalWins.skills).toHaveLength(1);
+		expect(globalWins.skills[0]?.description).toBe("Global version.");
+		expect(globalWins.skills[0]?.source).toBe("global");
+
+		const pluginWins = loadSkills({
+			pluginDirs: [pluginDir],
+			builtinDir,
+			extraPaths: [],
+		});
+		expect(pluginWins.skills).toHaveLength(1);
+		expect(pluginWins.skills[0]?.description).toBe("Plugin version.");
+		expect(pluginWins.skills[0]?.source).toBe("plugin");
+	});
+
+	it("stamps pluginId and pluginEnabled from pluginContributions", () => {
+		const pluginDir = join(TEST_DIR, "plugin-pack");
+		mkdirSync(pluginDir, { recursive: true });
+		writeSkill(pluginDir, "alpha/SKILL.md", { name: "alpha", description: "A." });
+		writeSkill(pluginDir, "beta/SKILL.md", { name: "beta", description: "B." });
+		const { skills } = loadSkills({
+			pluginContributions: [{ dir: pluginDir, pluginId: "pack@mp", enabled: false }],
+			extraPaths: [],
+		});
+		expect(skills).toHaveLength(2);
+		for (const s of skills) {
+			expect(s.pluginId).toBe("pack@mp");
+			expect(s.pluginEnabled).toBe(false);
+			expect(s.source).toBe("plugin");
+		}
+	});
+
+	it("returns skills sorted alphabetically by name", () => {
+		writeSkill(GLOBAL_DIR, "zeta/SKILL.md", { name: "zeta", description: "Z." });
+		writeSkill(GLOBAL_DIR, "alpha/SKILL.md", { name: "alpha", description: "A." });
+		writeSkill(GLOBAL_DIR, "mid/SKILL.md", { name: "mid", description: "M." });
+		const { skills } = loadSkills({ globalDir: GLOBAL_DIR, extraPaths: [] });
+		expect(skills.map((s) => s.name)).toEqual(["alpha", "mid", "zeta"]);
+	});
+
+	it("loads .agents/skills below .cast project and above .cast global", () => {
+		const agentsProject = join(TEST_DIR, "agents-project");
+		const agentsGlobal = join(TEST_DIR, "agents-global");
+		mkdirSync(agentsProject, { recursive: true });
+		mkdirSync(agentsGlobal, { recursive: true });
+		writeSkill(PROJECT_DIR, "shared/SKILL.md", { name: "shared", description: "Cast project." });
+		writeSkill(agentsProject, "shared/SKILL.md", { name: "shared", description: "Agents project." });
+		writeSkill(GLOBAL_DIR, "shared/SKILL.md", { name: "shared", description: "Cast global." });
+		writeSkill(agentsGlobal, "shared/SKILL.md", { name: "shared", description: "Agents global." });
+		writeSkill(agentsGlobal, "only-agents/SKILL.md", { name: "only-agents", description: "From agents global." });
+
+		const castProjectWins = loadSkills({
+			projectDir: PROJECT_DIR,
+			agentsProjectDir: agentsProject,
+			globalDir: GLOBAL_DIR,
+			agentsGlobalDirs: [agentsGlobal],
+			extraPaths: [],
+		});
+		expect(castProjectWins.skills.find((s) => s.name === "shared")?.description).toBe("Cast project.");
+		expect(castProjectWins.skills.find((s) => s.name === "shared")?.source).toBe("project");
+
+		const agentsProjectWins = loadSkills({
+			agentsProjectDir: agentsProject,
+			globalDir: GLOBAL_DIR,
+			agentsGlobalDirs: [agentsGlobal],
+			extraPaths: [],
+		});
+		expect(agentsProjectWins.skills.find((s) => s.name === "shared")?.description).toBe("Agents project.");
+		expect(agentsProjectWins.skills.find((s) => s.name === "shared")?.source).toBe("agents");
+
+		const castGlobalWins = loadSkills({
+			globalDir: GLOBAL_DIR,
+			agentsGlobalDirs: [agentsGlobal],
+			extraPaths: [],
+		});
+		expect(castGlobalWins.skills.find((s) => s.name === "shared")?.description).toBe("Cast global.");
+		expect(castGlobalWins.skills.find((s) => s.name === "only-agents")?.source).toBe("agents");
+	});
+
 	it("loads an explicit --skill path even when it's outside global/project dirs", () => {
 		const explicitDir = join(TEST_DIR, "explicit");
 		writeSkill(explicitDir, "extra/SKILL.md", { name: "extra", description: "Loaded via --skill." });
@@ -140,5 +240,70 @@ describe("formatSkillInvocation", () => {
 		expect(invocation).toContain('<skill name="my-skill"');
 		expect(invocation).toContain("Step 1. Step 2.");
 		expect(invocation).toContain("User: extra instructions");
+	});
+});
+
+describe("formatSkillPickLabel", () => {
+	it("shows plugin provenance and locks pack-off skills", () => {
+		const locked = formatSkillPickLabel(
+			{
+				name: "pony",
+				source: "plugin",
+				pluginId: "ponytail@ponytail",
+				pluginEnabled: false,
+				disableModelInvocation: false,
+			},
+			false,
+		);
+		expect(locked.label).toBe("pony (plugin · ponytail@ponytail, pack off)");
+		expect(locked.locked).toBe(true);
+		expect(locked.muted).toBe(true);
+		expect(locked.description).toMatch(/\/plugin/);
+
+		const on = formatSkillPickLabel(
+			{
+				name: "pony",
+				source: "plugin",
+				pluginId: "ponytail@ponytail",
+				pluginEnabled: true,
+				disableModelInvocation: false,
+			},
+			true,
+		);
+		expect(on.label).toBe("pony (plugin · ponytail@ponytail, disabled)");
+		expect(on.locked).toBe(false);
+	});
+});
+
+describe("uninstallUserSkill", () => {
+	it("removes a directory skill and refuses builtin", () => {
+		writeSkill(GLOBAL_DIR, "gone/SKILL.md", { name: "gone", description: "Delete me." });
+		const { skills } = loadSkills({ globalDir: GLOBAL_DIR, extraPaths: [] });
+		const skill = skills[0]!;
+		expect(isUninstallableSkill(skill)).toBe(true);
+		uninstallUserSkill(skill);
+		expect(existsSync(join(GLOBAL_DIR, "gone"))).toBe(false);
+
+		const builtin = {
+			...skill,
+			name: "cast",
+			source: "builtin" as const,
+			filePath: join(GLOBAL_DIR, "cast", "SKILL.md"),
+			baseDir: join(GLOBAL_DIR, "cast"),
+		};
+		expect(isUninstallableSkill(builtin)).toBe(false);
+		expect(() => uninstallUserSkill(builtin)).toThrow(/builtin/);
+
+		const agents = { ...skill, source: "agents" as const };
+		expect(isUninstallableSkill(agents)).toBe(true);
+	});
+
+	it("removes a loose root .md without wiping the skills dir", () => {
+		writeSkill(GLOBAL_DIR, "loose.md", { name: "loose", description: "Loose file." });
+		const { skills } = loadSkills({ globalDir: GLOBAL_DIR, extraPaths: [] });
+		const skill = skills[0]!;
+		uninstallUserSkill(skill);
+		expect(existsSync(join(GLOBAL_DIR, "loose.md"))).toBe(false);
+		expect(existsSync(GLOBAL_DIR)).toBe(true);
 	});
 });

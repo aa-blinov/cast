@@ -70,6 +70,15 @@ export interface Settings {
 	/** MCP server names the user has disabled via /mcp toggle. Persisted so
 	 * they stay disabled across sessions and /reload. */
 	disabledMcpServers?: string[];
+	/** Skill names disabled via /skills toggle. Still discovered for the picker;
+	 * omitted from the agent catalog and /skill: invocation until re-enabled. */
+	disabledSkills?: string[];
+	/**
+	 * Installed marketplace plugins keyed by `name@marketplace`.
+	 * `true`/absent-after-install = enabled; `false` = installed but disabled.
+	 * Package lives under ~/.cast/plugins/; see plugins.ts.
+	 */
+	enabledPlugins?: Record<string, boolean>;
 	/** Status bar segment configuration: which are visible, order, and sides. */
 	statusBar?: StatusBarConfig;
 	/** @deprecated Agent mode moved to SessionState.mode — the mode is per-task

@@ -114,12 +114,13 @@ describe("selectMcpServers", () => {
 		};
 		// db-admin was previously disabled
 		await selectMcpServers(pickers, merged, ["db-admin"], counts);
+		// Options are sorted alphabetically by name.
 		expect(capturedOptions).toEqual([
 			{ value: "context7", label: "context7 (5 tools)" },
-			{ value: "github", label: "github (disconnected)" },
 			{ value: "db-admin", label: "db-admin (disabled)" },
+			{ value: "github", label: "github (disconnected)" },
 		]);
-		// db-admin disabled → only context7 and github initially selected
+		// db-admin disabled → only context7 and github initially selected (alpha order)
 		expect(capturedInitial).toEqual(["context7", "github"]);
 	});
 

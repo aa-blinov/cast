@@ -6,6 +6,10 @@ export interface PickOption<T> {
 	value: T;
 	label: string;
 	description?: string;
+	/** Dimmed label (e.g. skill whose plugin pack is disabled). */
+	muted?: boolean;
+	/** Space cannot toggle this row (still navigable). */
+	locked?: boolean;
 }
 
 export interface PickOptions {

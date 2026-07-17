@@ -22,6 +22,7 @@ src/
     personas.ts       Persona loading (project > global > builtin)
     rules.ts          Cursor-compatible rule system (always/auto/lazy/manual)
     skills.ts         Agent Skills spec implementation
+    plugins.ts        Marketplace catalogs + plugin install (skills)
     config.ts         AppConfig, model validation, onboarding
     context-files.ts  AGENTS.md / CLAUDE.md discovery
     project.ts        System prompt assembly, trust gating

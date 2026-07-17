@@ -71,7 +71,7 @@ Drop an `AGENTS.md` or `CLAUDE.md` in your repo root — cast picks it up automa
 
 ### Skills
 
-Self-contained instruction packages loaded on demand from `~/.cast/skills/` (global) or `.cast/skills/` (project). Follows the [Agent Skills spec](https://agentskills.io). The agent sees what's available and loads the right one automatically.
+Self-contained instruction packages loaded on demand from `~/.cast/skills/` / `.cast/skills/`, plus skills.sh universal paths (`.agents/skills/`, `~/.config/agents/skills/`). Follows the [Agent Skills spec](https://agentskills.io). The agent sees what's available and loads the right one automatically.
 
 ### MCP Servers
 
@@ -176,7 +176,7 @@ Options:
   -s, --session <id>         Resume specific session (alias for --resume=<id>)
   --bypass-permissions       Skip dangerous-command confirmation
   --skill <path>             Load extra skill (repeatable)
-  --no-skills                Skip global/project skill discovery
+  --no-skills                Skip project/agents/global/plugin/builtin skill discovery
   --mcp <path>               Load extra MCP config (repeatable)
   --no-mcp                   Skip global/project MCP server discovery
   -v, --version              Show version
