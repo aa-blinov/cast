@@ -288,7 +288,8 @@ export function getToolDefinitions(
 									},
 									subagent: {
 										type: "string",
-										description: "Subagent name (optional). Example: 'worker'",
+										description:
+											"Subagent name (optional). Prefer 'explore' for read-only mapping, 'review' for independent validation; 'worker' (default) for everything else — edits, mixed work, or unclear fit.",
 									},
 								},
 								required: ["assignment"],
