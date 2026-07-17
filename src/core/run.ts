@@ -90,6 +90,8 @@ export async function runNonInteractive(args: ParsedArgs, options: RunOptions): 
 			subagentModel,
 			disabledTools,
 			projectTrusted: result.projectTrusted,
+			noSkills: result.projectDeps.noSkills,
+			cliSkillPaths: result.projectDeps.cliSkillPaths,
 			sshHosts: result.sshHosts,
 			mcpPromptSuffix: formatMcpForPrompt(mcpResult),
 			planState,

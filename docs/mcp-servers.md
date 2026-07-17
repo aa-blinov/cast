@@ -96,7 +96,19 @@ Extra paths (`--mcp`) work even with `--no-mcp`.
 | Command | Description |
 |---------|-------------|
 | `/mcp` | Toggle MCP servers on/off (multi-select picker) |
+| `/mcp list` | Read-only list (origin + tools/status) |
+| `/mcp enable` / `disable <name>` | Toggle one server without the picker |
+| `/mcp uninstall` | Remove a server from global/project `mcp.json` (picker + confirm, or typed name) |
+| `/mcp help` | Cheat sheet |
 | `/reload` | Reconnect MCP servers (re-reads config files) |
+
+`/mcp uninstall` edits the owning config file (project wins over global for the same name). CLI `--mcp` paths are not removable here.
+
+### Hot-reload
+
+`/mcp` toggle / `enable` / `disable` / `uninstall` reconnect servers **in the current session** — no `/reload`, no restart.
+
+Use `/reload` after editing `~/.cast/mcp.json` or `.cast/mcp.json` by hand (or adding a new server entry outside `/mcp`). See [Interactive commands](interactive-commands.md#hot-reload-vs-reload).
 
 ### Toggling Servers
 

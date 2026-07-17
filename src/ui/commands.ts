@@ -8,9 +8,25 @@ import { closeMcpConnections, formatMcpForPrompt, type McpSetupResult } from "..
 import { findPersona, type LoadPersonasOptions, type Persona } from "../core/personas.ts";
 import { createPlanState, readActivePlan } from "../core/plan.ts";
 import {
+	addMarketplace,
+	ensureDefaultMarketplaces,
+	getMarketplaceCatalog,
+	installPlugin,
+	listInstalledPlugins,
+	listKnownMarketplaces,
+	parsePluginRef,
+	removeMarketplace,
+	setPluginEnabled,
+	uninstallPlugin,
+	updateMarketplace,
+} from "../core/plugins.ts";
+import {
 	buildSystemPrompt,
+	discoverSkillsForCwd,
+	listUninstallableMcpServers,
 	type ProjectResolverDeps,
 	personaOptionsForCwd,
+	removeMcpServerFromDisk,
 	resolveMcpForCwd,
 	resolveProjectTrustForCwd,
 	resolveRulesForCwd,
@@ -26,16 +42,19 @@ import {
 	type StatusBarConfig,
 	updateSettings,
 } from "../core/settings.ts";
-import { formatSkillInvocation, type Skill } from "../core/skills.ts";
+import { formatSkillInvocation, isUninstallableSkill, type Skill, uninstallUserSkill } from "../core/skills.ts";
 import { type SshHost, saveSshConfig, scanSshKeys, validateKeyPermissions } from "../core/ssh.ts";
 import { getReasoningOptions, type ModelReasoningMeta } from "../core/vendors.ts";
 import {
+	formatSkillPickLabel,
 	selectMcpServers,
 	selectModel,
 	selectPermissionMode,
 	selectPersona,
+	selectPlugins,
 	selectReasoningLevel,
 	selectSession,
+	selectSkills,
 } from "../pickers/domain.ts";
 import type { Pickers } from "../pickers/types.ts";
 import { abbreviateTokens } from "./App.tsx";
@@ -66,12 +85,46 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/help", description: "Show this command list" },
 	{ name: "/keys", description: "List all keybindings" },
 	{ name: "/mcp", description: "Toggle MCP servers on/off" },
+	{ name: "/mcp disable", description: "Disable one server — name", takesArgs: true },
+	{ name: "/mcp enable", description: "Enable one server — name", takesArgs: true },
+	{ name: "/mcp help", description: "Show MCP command cheat sheet" },
+	{ name: "/mcp list", description: "List configured MCP servers" },
+	{
+		name: "/mcp uninstall",
+		description: "Uninstall — picker, or server name",
+		takesArgs: true,
+	},
 	{ name: "/model", description: "Show or change model" },
 	{ name: "/new", description: "Start a new session" },
 	{ name: "/permissions", description: "Change bash confirmation mode" },
 	{ name: "/persona", description: "Show or change persona" },
 	{ name: "/plan", description: "Enter plan mode (explore + plan only)" },
 	{ name: "/plan-model", description: "Show or change the plan-mode model" },
+	// /plugin* — separate palette rows so typing "/plugin" shows the full menu
+	// (Composer matches name.startsWith; space closes the palette after pick).
+	{ name: "/plugin", description: "Toggle installed plugins on/off" },
+	{ name: "/plugin disable", description: "Disable one plugin — name@marketplace", takesArgs: true },
+	{ name: "/plugin enable", description: "Enable one plugin — name@marketplace", takesArgs: true },
+	{ name: "/plugin help", description: "Show plugin command cheat sheet" },
+	{
+		name: "/plugin install",
+		description: "Install — name@marketplace (e.g. superpowers@xai-official)",
+		takesArgs: true,
+	},
+	{ name: "/plugin list", description: "List installed plugins" },
+	{ name: "/plugin marketplace add", description: "Add catalog — owner/repo, URL, or path", takesArgs: true },
+	{
+		name: "/plugin marketplace list",
+		description: "List catalogs, or plugins in one — optional name",
+		takesArgs: true,
+	},
+	{ name: "/plugin marketplace remove", description: "Remove a catalog — name", takesArgs: true },
+	{ name: "/plugin marketplace update", description: "Refresh a catalog — name", takesArgs: true },
+	{
+		name: "/plugin uninstall",
+		description: "Uninstall — picker, or name@marketplace",
+		takesArgs: true,
+	},
 	{ name: "/provider", description: "Switch / add / delete providers" },
 	{ name: "/q", description: "Alias for /queue", takesArgs: true },
 	{ name: "/qr", description: "Alias for /queue-reset" },
@@ -85,7 +138,16 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/rules", description: "List loaded rules" },
 	{ name: "/s", description: "Alias for /steer", takesArgs: true },
 	{ name: "/sessions", description: "List / switch / delete sessions" },
-	{ name: "/skills", description: "List loaded skills" },
+	{ name: "/skills", description: "Toggle skills on/off" },
+	{ name: "/skills disable", description: "Disable one skill — name", takesArgs: true },
+	{ name: "/skills enable", description: "Enable one skill — name", takesArgs: true },
+	{ name: "/skills help", description: "Show skills command cheat sheet" },
+	{ name: "/skills list", description: "List loaded skills" },
+	{
+		name: "/skills uninstall",
+		description: "Uninstall — picker, or skill name (cast/agents dirs)",
+		takesArgs: true,
+	},
 	{ name: "/ssh", description: "Manage SSH hosts (list, add, remove)" },
 	{ name: "/statusbar", description: "Toggle and reorder status bar segments" },
 	{ name: "/steer", description: "Inject a message while running", takesArgs: true },
@@ -210,6 +272,652 @@ async function applyPermissionMode(deps: CommandDeps, newMode: PermissionMode): 
 	deps.setPermissionMode(newMode);
 	updateSettings({ permissionMode: newMode });
 	deps.showNotice(`Permission mode: ${newMode}`);
+}
+
+async function reloadSkillsAfterPluginChange(deps: CommandDeps): Promise<void> {
+	const { skills, skillsPromptSuffix } = await resolveSkillsForCwd(deps.projectDeps, deps.cwd, deps.projectTrusted);
+	deps.setSkills(skills);
+	deps.setSkillsPromptSuffix(skillsPromptSuffix);
+	rebuildSystemPrompt(deps, deps.cwd, { skillsPromptSuffix });
+}
+
+const SKILLS_HELP = `Skills — pick a row from the /skills palette, or type:
+
+  /skills                      Toggle on/off (multi-select, like /mcp)
+  /skills list                 What's loaded (source + enabled)
+  /skills enable|disable NAME
+  /skills uninstall            Pick global/project skill to remove
+  /skills uninstall NAME
+
+Add skills via ~/.cast/skills/, .cast/skills/, .agents/skills/ (npx skills add),
+/plugin install, or --skill.
+Builtin and plugin skills: disable or /plugin uninstall — not /skills uninstall.`;
+
+const MCP_HELP = `MCP — pick a row from the /mcp palette, or type:
+
+  /mcp                         Toggle servers on/off (multi-select)
+  /mcp list                    Configured servers + status
+  /mcp enable|disable NAME
+  /mcp uninstall               Pick server to remove from mcp.json
+  /mcp uninstall NAME
+
+Add servers via ~/.cast/mcp.json, .cast/mcp.json, or --mcp.
+CLI --mcp paths are not removable with /mcp uninstall.`;
+
+const PLUGIN_HELP = `Plugins — pick a row from the /plugin palette, or type:
+
+  /plugin                      Toggle installed on/off (like /skills /mcp)
+  /plugin list                 What's installed
+  /plugin install NAME@SHOP    e.g. superpowers@xai-official
+  /plugin uninstall            Pick installed to remove
+  /plugin uninstall NAME@SHOP
+  /plugin enable|disable NAME@SHOP
+
+  /plugin marketplace list           Catalogs (openai-curated, claude-…, xai-official)
+  /plugin marketplace list SHOP      Plugins inside one catalog
+  /plugin marketplace add owner/repo
+  /plugin marketplace update|remove SHOP
+
+Defaults seed once: openai/plugins · anthropics/claude-plugins-official · xai-org/plugin-marketplace
+
+Flow:  /plugin marketplace list xai-official
+       /plugin install superpowers@xai-official
+       /skills`;
+
+/** One-shot Codex/Claude/Grok marketplace seed; surfaces a short notice if anything new landed. */
+function seedDefaultMarketplaces(deps: CommandDeps): void {
+	const result = ensureDefaultMarketplaces();
+	if (!result.seeded) return;
+	const parts: string[] = [];
+	if (result.added.length > 0) parts.push(`added ${result.added.join(", ")}`);
+	if (result.errors.length > 0) parts.push(`failed: ${result.errors.join("; ")}`);
+	if (parts.length === 0) return;
+	deps.agent.addDisplayMessage({
+		role: "warning",
+		content: `[Default marketplaces: ${parts.join(" — ")}]`,
+	});
+}
+
+async function confirmUninstall(deps: CommandDeps, title: string, yesLabel: string): Promise<boolean> {
+	const confirm = await deps.pickers.pickOption(
+		[
+			{ value: true, label: yesLabel },
+			{ value: false, label: "Cancel" },
+		],
+		{ title },
+	);
+	if (confirm !== true) {
+		deps.showNotice("[Cancelled]");
+		return false;
+	}
+	return true;
+}
+
+async function togglePluginsPicker(deps: CommandDeps): Promise<void> {
+	seedDefaultMarketplaces(deps);
+	const installed = listInstalledPlugins(loadSettings());
+	if (installed.length === 0) {
+		deps.agent.addDisplayMessage({
+			role: "warning",
+			content: "No plugins installed. Use /plugin marketplace add, then /plugin install name@marketplace",
+		});
+		return;
+	}
+	const enabledIds = await selectPlugins(deps.pickers, installed);
+	if (enabledIds === null) {
+		deps.showNotice("[Cancelled]");
+		return;
+	}
+	const enabledSet = new Set<string>(enabledIds);
+	const enabledPlugins: Record<string, boolean> = {};
+	for (const p of installed) {
+		enabledPlugins[p.id] = enabledSet.has(p.id);
+	}
+	const prev = new Set<string>(installed.filter((p) => p.enabled).map((p) => p.id));
+	const toEnable = enabledIds.filter((id) => !prev.has(id));
+	const toDisable = installed.filter((p) => p.enabled && !enabledSet.has(p.id)).map((p) => p.id);
+	if (toEnable.length === 0 && toDisable.length === 0) return;
+	updateSettings({ enabledPlugins });
+	await reloadSkillsAfterPluginChange(deps);
+	deps.agent.addDisplayMessage({
+		role: "warning",
+		content: `[Plugins: enabled ${toEnable.length}, disabled ${toDisable.length}]`,
+	});
+}
+
+/** Apply uninstall + settings + skill reload (shared by typed ref and picker). */
+async function applyPluginUninstall(deps: CommandDeps, ref: string): Promise<void> {
+	const result = uninstallPlugin(ref, loadSettings());
+	updateSettings({
+		enabledPlugins: Object.keys(result.enabledPlugins).length > 0 ? result.enabledPlugins : undefined,
+	});
+	await reloadSkillsAfterPluginChange(deps);
+	deps.agent.addDisplayMessage({ role: "warning", content: `[Uninstalled ${result.id}]` });
+}
+
+/** Bare `/plugin uninstall` — pick an installed plugin, confirm, remove (like /provider delete). */
+async function uninstallPluginInteractive(deps: CommandDeps): Promise<void> {
+	const installed = listInstalledPlugins(loadSettings());
+	if (installed.length === 0) {
+		deps.agent.addDisplayMessage({
+			role: "warning",
+			content: "No plugins installed. Use /plugin marketplace add, then /plugin install name@marketplace",
+		});
+		return;
+	}
+	const picked = await deps.pickers.pickOption(
+		installed.map((p) => ({
+			value: p.id,
+			label: `${p.id}${p.enabled ? "" : " (disabled)"}${p.description ? ` — ${p.description}` : ""}`,
+		})),
+		{ title: "Uninstall which plugin?" },
+	);
+	if (!picked) {
+		deps.showNotice("[Cancelled]");
+		return;
+	}
+	if (!(await confirmUninstall(deps, `Uninstall plugin "${picked}"?`, `Yes, uninstall "${picked}"`))) return;
+	await applyPluginUninstall(deps, picked);
+}
+
+async function applySkillUninstall(deps: CommandDeps, skill: Skill): Promise<void> {
+	uninstallUserSkill(skill);
+	const disabled = (loadSettings().disabledSkills ?? []).filter((n) => n !== skill.name);
+	updateSettings({ disabledSkills: disabled.length > 0 ? disabled : undefined });
+	await reloadSkillsAfterPluginChange(deps);
+	deps.agent.addDisplayMessage({
+		role: "warning",
+		content: `[Uninstalled skill ${skill.name} (${skill.source})]`,
+	});
+}
+
+async function uninstallSkillInteractive(deps: CommandDeps): Promise<void> {
+	const removable = discoverSkillsForCwd(deps.projectDeps, deps.cwd, deps.projectTrusted).filter(isUninstallableSkill);
+	if (removable.length === 0) {
+		deps.agent.addDisplayMessage({
+			role: "warning",
+			content:
+				"No uninstallable skills (.cast / .agents only). Builtin/plugin: disable or /plugin uninstall; --skill paths are CLI-owned.",
+		});
+		return;
+	}
+	const disabled = new Set(loadSettings().disabledSkills ?? []);
+	const picked = await deps.pickers.pickOption(
+		removable.map((s) => ({
+			value: s.name,
+			label: `${s.name} (${s.source}${disabled.has(s.name) ? ", disabled" : ""}) — ${s.description}`,
+		})),
+		{ title: "Uninstall which skill?" },
+	);
+	if (!picked) {
+		deps.showNotice("[Cancelled]");
+		return;
+	}
+	const skill = removable.find((s) => s.name === picked);
+	if (!skill) return;
+	if (
+		!(await confirmUninstall(
+			deps,
+			`Uninstall skill "${skill.name}" (${skill.source})?`,
+			`Yes, uninstall "${skill.name}"`,
+		))
+	) {
+		return;
+	}
+	await applySkillUninstall(deps, skill);
+}
+
+async function setSkillEnabled(deps: CommandDeps, name: string, enable: boolean): Promise<void> {
+	const discovered = discoverSkillsForCwd(deps.projectDeps, deps.cwd, deps.projectTrusted);
+	const skill = discovered.find((s) => s.name === name);
+	if (!skill) {
+		deps.showNotice(`[No skill named "${name}". Use /skills list.]`);
+		return;
+	}
+	if (enable && skill.source === "plugin" && skill.pluginEnabled === false) {
+		deps.showNotice(`[Enable plugin ${skill.pluginId ?? "pack"} with /plugin first]`);
+		return;
+	}
+	const disabled = new Set(loadSettings().disabledSkills ?? []);
+	if (enable) disabled.delete(name);
+	else disabled.add(name);
+	const next = [...disabled];
+	updateSettings({ disabledSkills: next.length > 0 ? next : undefined });
+	await reloadSkillsAfterPluginChange(deps);
+	deps.agent.addDisplayMessage({
+		role: "warning",
+		content: `[Skill ${name} ${enable ? "enabled" : "disabled"}]`,
+	});
+}
+
+function formatSkillsList(deps: CommandDeps): string {
+	const discovered = discoverSkillsForCwd(deps.projectDeps, deps.cwd, deps.projectTrusted);
+	if (discovered.length === 0) {
+		return "No skills found. See --skill <path>, /plugin install, .cast/skills/, .agents/skills/";
+	}
+	const disabled = new Set(loadSettings().disabledSkills ?? []);
+	const lines = discovered.map((s) => {
+		const packOff = s.source === "plugin" && s.pluginEnabled === false;
+		const meta = formatSkillPickLabel(s, disabled.has(s.name));
+		const state = packOff ? "lock" : disabled.has(s.name) ? "off" : "on ";
+		return `${state} ${meta.label} — ${s.description}`;
+	});
+	return `Skills\n${lines.join("\n")}`;
+}
+
+async function handleSkillsCommand(input: string, deps: CommandDeps): Promise<void> {
+	const { showNotice } = deps;
+	deps.agent.addDisplayMessage({ role: "user", content: input });
+	const args = input === "/skills" ? "" : input.slice("/skills ".length).trim();
+	if (args === "help") {
+		deps.agent.addDisplayMessage({ role: "warning", content: SKILLS_HELP });
+		return;
+	}
+	if (!args) {
+		const discovered = discoverSkillsForCwd(deps.projectDeps, deps.cwd, deps.projectTrusted);
+		if (discovered.length === 0) {
+			deps.agent.addDisplayMessage({
+				role: "warning",
+				content: "No skills found. See --skill <path>, /plugin install, .cast/skills/, .agents/skills/",
+			});
+			return;
+		}
+		const settings = loadSettings();
+		const disabledNames = settings.disabledSkills ?? [];
+		const enabledNames = await selectSkills(deps.pickers, discovered, disabledNames);
+		if (enabledNames === null) {
+			showNotice("[Cancelled]");
+			return;
+		}
+		const enabledSet = new Set(enabledNames);
+		// Pack-off plugin skills stay out of disabledSkills — gating is via `/plugin`.
+		const toggleable = discovered.filter((s) => !(s.source === "plugin" && s.pluginEnabled === false));
+		const newDisabled = toggleable.map((s) => s.name).filter((n) => !enabledSet.has(n));
+		const oldDisabledSet = new Set(disabledNames);
+		const newDisabledSet = new Set(newDisabled);
+		const toEnable = toggleable.map((s) => s.name).filter((n) => oldDisabledSet.has(n) && !newDisabledSet.has(n));
+		const toDisable = toggleable.map((s) => s.name).filter((n) => !oldDisabledSet.has(n) && newDisabledSet.has(n));
+		if (toEnable.length === 0 && toDisable.length === 0) return;
+		updateSettings({ disabledSkills: newDisabled.length > 0 ? newDisabled : undefined });
+		await reloadSkillsAfterPluginChange(deps);
+		deps.agent.addDisplayMessage({
+			role: "warning",
+			content: `[Skills: enabled ${toEnable.length}, disabled ${toDisable.length}]`,
+		});
+		return;
+	}
+
+	const [verb, ...rest] = args.split(/\s+/);
+	const name = rest.join(" ").trim();
+	if (verb === "list") {
+		deps.agent.addDisplayMessage({ role: "warning", content: formatSkillsList(deps) });
+		return;
+	}
+	if (verb === "enable" || verb === "disable") {
+		if (!name) {
+			showNotice(`[Usage: /skills ${verb} <name>]`);
+			return;
+		}
+		await setSkillEnabled(deps, name, verb === "enable");
+		return;
+	}
+	if (verb === "uninstall") {
+		if (!name) {
+			await uninstallSkillInteractive(deps);
+			return;
+		}
+		const discovered = discoverSkillsForCwd(deps.projectDeps, deps.cwd, deps.projectTrusted);
+		const skill = discovered.find((s) => s.name === name);
+		if (!skill) {
+			showNotice(`[No skill named "${name}". Use /skills list.]`);
+			return;
+		}
+		if (!isUninstallableSkill(skill)) {
+			showNotice(
+				`[Cannot uninstall ${skill.source} skill "${name}". Use /plugin uninstall for plugin skills; builtin/--skill are not removable here.]`,
+			);
+			return;
+		}
+		if (
+			!(await confirmUninstall(
+				deps,
+				`Uninstall skill "${skill.name}" (${skill.source})?`,
+				`Yes, uninstall "${skill.name}"`,
+			))
+		) {
+			return;
+		}
+		await applySkillUninstall(deps, skill);
+		return;
+	}
+	showNotice(`[Unknown /skills ${verb}. See /skills help]`);
+}
+
+async function reloadMcpAfterChange(deps: CommandDeps, disabledServers: string[]): Promise<void> {
+	await closeMcpConnections(deps.mcpResult.connections);
+	const newResult = await resolveMcpForCwd(deps.projectDeps, deps.cwd, deps.projectTrusted, disabledServers);
+	deps.setMcpResult(newResult);
+	rebuildSystemPrompt(deps, deps.cwd);
+}
+
+async function applyMcpUninstall(deps: CommandDeps, name: string): Promise<void> {
+	const removed = removeMcpServerFromDisk(name, deps.cwd, deps.projectTrusted);
+	if (!removed) {
+		deps.showNotice(`[No uninstallable MCP server named "${name}". Use /mcp list.]`);
+		return;
+	}
+	const disabled = (loadSettings().disabledMcpServers ?? []).filter((n) => n !== name);
+	updateSettings({ disabledMcpServers: disabled.length > 0 ? disabled : undefined });
+	await reloadMcpAfterChange(deps, disabled);
+	deps.agent.addDisplayMessage({
+		role: "warning",
+		content: `[Uninstalled MCP ${name} (${removed.origin})]`,
+	});
+}
+
+async function uninstallMcpInteractive(deps: CommandDeps): Promise<void> {
+	const removable = listUninstallableMcpServers(deps.cwd, deps.projectTrusted);
+	if (removable.length === 0) {
+		deps.agent.addDisplayMessage({
+			role: "warning",
+			content:
+				"No uninstallable MCP servers in ~/.cast/mcp.json or .cast/mcp.json. CLI --mcp paths are not removable here.",
+		});
+		return;
+	}
+	const disabled = new Set(loadSettings().disabledMcpServers ?? []);
+	const toolCounts: Record<string, number> = {};
+	for (const c of deps.mcpResult.connections) toolCounts[c.serverName] = c.toolCount;
+	const picked = await deps.pickers.pickOption(
+		removable.map((s) => {
+			const count = toolCounts[s.name];
+			const status = disabled.has(s.name) ? "disabled" : count !== undefined ? `${count} tools` : "disconnected";
+			return { value: s.name, label: `${s.name} (${s.origin}, ${status})` };
+		}),
+		{ title: "Uninstall which MCP server?" },
+	);
+	if (!picked) {
+		deps.showNotice("[Cancelled]");
+		return;
+	}
+	if (!(await confirmUninstall(deps, `Uninstall MCP server "${picked}"?`, `Yes, uninstall "${picked}"`))) return;
+	await applyMcpUninstall(deps, picked);
+}
+
+async function setMcpServerEnabled(deps: CommandDeps, name: string, enable: boolean): Promise<void> {
+	const allNames = deps.mcpResult.allServerNames;
+	if (!allNames.includes(name)) {
+		deps.showNotice(`[No MCP server named "${name}". Use /mcp list.]`);
+		return;
+	}
+	const disabled = new Set(loadSettings().disabledMcpServers ?? []);
+	if (enable) disabled.delete(name);
+	else disabled.add(name);
+	const next = [...disabled];
+	updateSettings({ disabledMcpServers: next.length > 0 ? next : undefined });
+	await reloadMcpAfterChange(deps, next);
+	deps.agent.addDisplayMessage({
+		role: "warning",
+		content: `[MCP ${name} ${enable ? "enabled" : "disabled"}]`,
+	});
+}
+
+function formatMcpList(deps: CommandDeps): string {
+	const allNames = deps.mcpResult.allServerNames;
+	if (allNames.length === 0) {
+		return "No MCP servers configured. See --mcp <path>, .cast/mcp.json";
+	}
+	const disabled = new Set(loadSettings().disabledMcpServers ?? []);
+	const toolCounts: Record<string, number> = {};
+	for (const c of deps.mcpResult.connections) toolCounts[c.serverName] = c.toolCount;
+	const ownership = new Map(listUninstallableMcpServers(deps.cwd, deps.projectTrusted).map((s) => [s.name, s.origin]));
+	const lines = allNames.map((name) => {
+		const count = toolCounts[name];
+		const origin = ownership.get(name) ?? "cli";
+		const status = disabled.has(name) ? "disabled" : count !== undefined ? `${count} tools` : "disconnected";
+		return `${disabled.has(name) ? "off" : "on "} ${name} (${origin}, ${status})`;
+	});
+	return `MCP\n${lines.join("\n")}`;
+}
+
+async function handleMcpCommand(input: string, deps: CommandDeps): Promise<void> {
+	const { showNotice } = deps;
+	deps.agent.addDisplayMessage({ role: "user", content: input });
+	const args = input === "/mcp" ? "" : input.slice("/mcp ".length).trim();
+	if (args === "help") {
+		deps.agent.addDisplayMessage({ role: "warning", content: MCP_HELP });
+		return;
+	}
+	if (!args) {
+		const allNames = deps.mcpResult.allServerNames;
+		if (allNames.length === 0) {
+			deps.agent.addDisplayMessage({
+				role: "warning",
+				content: "No MCP servers configured. See --mcp <path>, .cast/mcp.json",
+			});
+			return;
+		}
+		const settings = loadSettings();
+		const disabledNames = settings.disabledMcpServers ?? [];
+		const toolCounts: Record<string, number> = {};
+		for (const c of deps.mcpResult.connections) toolCounts[c.serverName] = c.toolCount;
+		const enabledNames = await selectMcpServers(deps.pickers, allNames, disabledNames, toolCounts);
+		if (enabledNames === null) {
+			showNotice("[Cancelled]");
+			return;
+		}
+		const newDisabled = allNames.filter((n) => !enabledNames.includes(n));
+		const oldDisabledSet = new Set(disabledNames);
+		const newDisabledSet = new Set(newDisabled);
+		const toEnable = allNames.filter((n) => oldDisabledSet.has(n) && !newDisabledSet.has(n));
+		const toDisable = allNames.filter((n) => !oldDisabledSet.has(n) && newDisabledSet.has(n));
+		if (toEnable.length === 0 && toDisable.length === 0) return;
+		updateSettings({ disabledMcpServers: newDisabled.length > 0 ? newDisabled : undefined });
+		await reloadMcpAfterChange(deps, newDisabled);
+		deps.agent.addDisplayMessage({
+			role: "warning",
+			content: `[MCP: enabled ${toEnable.length}, disabled ${toDisable.length}]`,
+		});
+		return;
+	}
+
+	const [verb, ...rest] = args.split(/\s+/);
+	const name = rest.join(" ").trim();
+	if (verb === "list") {
+		deps.agent.addDisplayMessage({ role: "warning", content: formatMcpList(deps) });
+		return;
+	}
+	if (verb === "enable" || verb === "disable") {
+		if (!name) {
+			showNotice(`[Usage: /mcp ${verb} <name>]`);
+			return;
+		}
+		await setMcpServerEnabled(deps, name, verb === "enable");
+		return;
+	}
+	if (verb === "uninstall") {
+		if (!name) {
+			await uninstallMcpInteractive(deps);
+			return;
+		}
+		const removable = listUninstallableMcpServers(deps.cwd, deps.projectTrusted);
+		if (!removable.some((s) => s.name === name)) {
+			showNotice(`[No uninstallable MCP server named "${name}". Use /mcp list.]`);
+			return;
+		}
+		if (!(await confirmUninstall(deps, `Uninstall MCP server "${name}"?`, `Yes, uninstall "${name}"`))) return;
+		await applyMcpUninstall(deps, name);
+		return;
+	}
+	showNotice(`[Unknown /mcp ${verb}. See /mcp help]`);
+}
+
+async function handlePluginCommand(input: string, deps: CommandDeps): Promise<void> {
+	const { showNotice } = deps;
+	deps.agent.addDisplayMessage({ role: "user", content: input });
+	const args = input === "/plugin" ? "" : input.slice("/plugin ".length).trim();
+	if (args === "help") {
+		deps.agent.addDisplayMessage({ role: "warning", content: PLUGIN_HELP });
+		return;
+	}
+	if (!args) {
+		await togglePluginsPicker(deps);
+		return;
+	}
+
+	const [verb, ...rest] = args.split(/\s+/);
+	const restJoined = rest.join(" ").trim();
+
+	// Any marketplace/install command should see the defaults.
+	if (verb === "marketplace" || verb === "install" || verb === "list") {
+		seedDefaultMarketplaces(deps);
+	}
+
+	try {
+		if (verb === "list") {
+			const installed = listInstalledPlugins(loadSettings());
+			if (installed.length === 0) {
+				deps.agent.addDisplayMessage({
+					role: "warning",
+					content: "No plugins installed. Use /plugin marketplace add, then /plugin install name@marketplace",
+				});
+				return;
+			}
+			const lines = installed.map(
+				(p) => `${p.enabled ? "on " : "off"} ${p.id}${p.description ? ` — ${p.description}` : ""}`,
+			);
+			deps.agent.addDisplayMessage({ role: "warning", content: `Plugins\n${lines.join("\n")}` });
+			return;
+		}
+
+		if (verb === "install") {
+			if (!restJoined || !parsePluginRef(restJoined)) {
+				showNotice("[Usage: /plugin install name@marketplace]");
+				return;
+			}
+			showNotice(`[Installing ${restJoined}…]`);
+			const result = installPlugin(restJoined, loadSettings());
+			updateSettings({ enabledPlugins: result.enabledPlugins });
+			await reloadSkillsAfterPluginChange(deps);
+			deps.agent.addDisplayMessage({
+				role: "warning",
+				content: `[Installed ${result.id}] skills from ${result.root}`,
+			});
+			return;
+		}
+
+		if (verb === "uninstall") {
+			if (!restJoined) {
+				await uninstallPluginInteractive(deps);
+				return;
+			}
+			if (!parsePluginRef(restJoined)) {
+				showNotice("[Usage: /plugin uninstall  or  /plugin uninstall name@marketplace]");
+				return;
+			}
+			if (!(await confirmUninstall(deps, `Uninstall plugin "${restJoined}"?`, `Yes, uninstall "${restJoined}"`))) {
+				return;
+			}
+			await applyPluginUninstall(deps, restJoined);
+			return;
+		}
+
+		if (verb === "enable" || verb === "disable") {
+			if (!restJoined || !parsePluginRef(restJoined)) {
+				showNotice(`[Usage: /plugin ${verb} name@marketplace]`);
+				return;
+			}
+			const result = setPluginEnabled(restJoined, verb === "enable", loadSettings());
+			updateSettings({ enabledPlugins: result.enabledPlugins });
+			await reloadSkillsAfterPluginChange(deps);
+			deps.agent.addDisplayMessage({
+				role: "warning",
+				content: `[Plugin ${result.id} ${verb}d]`,
+			});
+			return;
+		}
+
+		if (verb === "marketplace") {
+			const sub = rest[0];
+			const subArgs = rest.slice(1).join(" ").trim();
+			if (!sub || sub === "help") {
+				deps.agent.addDisplayMessage({ role: "warning", content: PLUGIN_HELP });
+				return;
+			}
+			if (sub === "list") {
+				if (subArgs) {
+					const catalog = getMarketplaceCatalog(subArgs);
+					const lines = catalog.plugins.map((p) => `${p.name}${p.description ? ` — ${p.description}` : ""}`);
+					deps.agent.addDisplayMessage({
+						role: "warning",
+						content: `Marketplace ${catalog.name} (${catalog.plugins.length})\n${lines.join("\n") || "(empty)"}`,
+					});
+					return;
+				}
+				const known = listKnownMarketplaces();
+				if (known.length === 0) {
+					deps.agent.addDisplayMessage({
+						role: "warning",
+						content: "No marketplaces. Add one: /plugin marketplace add owner/repo",
+					});
+					return;
+				}
+				const lines = known.map((m) => `${m.name} ← ${m.source}`);
+				deps.agent.addDisplayMessage({ role: "warning", content: `Marketplaces\n${lines.join("\n")}` });
+				return;
+			}
+			if (sub === "add") {
+				if (!subArgs) {
+					showNotice("[Usage: /plugin marketplace add owner/repo|url|path]");
+					return;
+				}
+				showNotice(`[Adding marketplace ${subArgs}…]`);
+				const mp = addMarketplace(subArgs);
+				deps.agent.addDisplayMessage({
+					role: "warning",
+					content: `[Marketplace added: ${mp.name}] → /plugin install <name>@${mp.name}`,
+				});
+				return;
+			}
+			if (sub === "update") {
+				if (!subArgs) {
+					showNotice("[Usage: /plugin marketplace update <name>]");
+					return;
+				}
+				showNotice(`[Updating marketplace ${subArgs}…]`);
+				const mp = updateMarketplace(subArgs);
+				deps.agent.addDisplayMessage({ role: "warning", content: `[Marketplace updated: ${mp.name}]` });
+				return;
+			}
+			if (sub === "remove") {
+				if (!subArgs) {
+					showNotice("[Usage: /plugin marketplace remove <name>]");
+					return;
+				}
+				const removedIds = removeMarketplace(subArgs);
+				const enabled = { ...(loadSettings().enabledPlugins ?? {}) };
+				for (const id of Object.keys(enabled)) {
+					if (parsePluginRef(id)?.marketplace === subArgs || removedIds.includes(id)) {
+						delete enabled[id];
+					}
+				}
+				updateSettings({ enabledPlugins: Object.keys(enabled).length > 0 ? enabled : undefined });
+				await reloadSkillsAfterPluginChange(deps);
+				deps.agent.addDisplayMessage({
+					role: "warning",
+					content: `[Marketplace removed: ${subArgs}${removedIds.length > 0 ? ` (${removedIds.length} plugins)` : ""}]`,
+				});
+				return;
+			}
+			showNotice(`[Unknown /plugin marketplace ${sub}. See /plugin help]`);
+			return;
+		}
+
+		showNotice(`[Unknown /plugin ${verb}. See /plugin help]`);
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		deps.agent.addDisplayMessage({ role: "warning", content: `[plugin] ${message}` });
+	}
 }
 
 /** Commands allowed while the agent is running — plain text is rejected. */
@@ -561,54 +1269,18 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		return;
 	}
 
-	if (input === "/skills") {
-		deps.agent.addDisplayMessage({ role: "user", content: input });
-		if (deps.skills.length === 0) {
-			deps.agent.addDisplayMessage({
-				role: "warning",
-				content: "No skills loaded. See --skill <path> and .cast/skills/",
-			});
-		} else {
-			const lines = deps.skills.map(
-				(s) => `/skill:${s.name}${s.disableModelInvocation ? " (manual-only)" : ""} [${s.source}]`,
-			);
-			deps.agent.addDisplayMessage({ role: "warning", content: `Skills\n${lines.join("\n")}` });
-		}
+	if (input === "/skills" || input.startsWith("/skills ")) {
+		await handleSkillsCommand(input, deps);
 		return;
 	}
 
-	if (input === "/mcp") {
-		deps.agent.addDisplayMessage({ role: "user", content: input });
-		const allNames = deps.mcpResult.allServerNames;
-		if (allNames.length === 0) {
-			deps.agent.addDisplayMessage({
-				role: "warning",
-				content: "No MCP servers configured. See --mcp <path>, .cast/mcp.json",
-			});
-			return;
-		}
-		const settings = loadSettings();
-		const disabledNames = settings.disabledMcpServers ?? [];
-		const toolCounts: Record<string, number> = {};
-		for (const c of deps.mcpResult.connections) toolCounts[c.serverName] = c.toolCount;
-		const enabledNames = await selectMcpServers(deps.pickers, allNames, disabledNames, toolCounts);
-		if (enabledNames === null) return; // cancelled
-		const newDisabled = allNames.filter((n) => !enabledNames.includes(n));
-		const oldDisabledSet = new Set(disabledNames);
-		const newDisabledSet = new Set(newDisabled);
-		const toEnable = allNames.filter((n) => oldDisabledSet.has(n) && !newDisabledSet.has(n));
-		const toDisable = allNames.filter((n) => !oldDisabledSet.has(n) && newDisabledSet.has(n));
-		if (toEnable.length === 0 && toDisable.length === 0) return; // no change
-		// Hot-swap: close all, re-resolve with updated disabled list
-		await closeMcpConnections(deps.mcpResult.connections);
-		const newResult = await resolveMcpForCwd(deps.projectDeps, deps.cwd, deps.projectTrusted, newDisabled);
-		deps.setMcpResult(newResult);
-		rebuildSystemPrompt(deps, deps.cwd);
-		updateSettings({ disabledMcpServers: newDisabled.length > 0 ? newDisabled : undefined });
-		deps.agent.addDisplayMessage({
-			role: "warning",
-			content: `[MCP: enabled ${toEnable.length}, disabled ${toDisable.length}]`,
-		});
+	if (input === "/plugin" || input.startsWith("/plugin ")) {
+		await handlePluginCommand(input, deps);
+		return;
+	}
+
+	if (input === "/mcp" || input.startsWith("/mcp ")) {
+		await handleMcpCommand(input, deps);
 		return;
 	}
 
@@ -657,7 +1329,12 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		const skillArgs = spaceIdx === -1 ? undefined : rest.slice(spaceIdx + 1).trim();
 		const skill = deps.skills.find((s) => s.name === skillName);
 		if (!skill) {
-			showNotice(`[No skill named "${skillName}". Use /skills to list available.]`);
+			const discovered = discoverSkillsForCwd(deps.projectDeps, deps.cwd, deps.projectTrusted);
+			if (discovered.some((s) => s.name === skillName)) {
+				showNotice(`[Skill "${skillName}" is disabled. Re-enable it with /skills.]`);
+			} else {
+				showNotice(`[No skill named "${skillName}". Use /skills to toggle available skills.]`);
+			}
 			return;
 		}
 		await agent.submit(formatSkillInvocation(skill, skillArgs));
@@ -1354,8 +2031,9 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 				"  /subagent-model [name]  Show/change subagent model\n" +
 				"  /reasoning [level]  Show/change reasoning level\n" +
 				"  /persona [name]     Show/change persona\n" +
-				"  /skills             List loaded skills\n" +
-				"  /mcp                Toggle MCP servers on/off\n" +
+				"  /skills …           Toggle / list / enable|disable / uninstall (/skills help)\n" +
+				"  /plugin …           Plugins palette (install / marketplace / toggle)\n" +
+				"  /mcp …              Toggle / list / enable|disable / uninstall (/mcp help)\n" +
 				"  /reload             Re-scan skills, MCP, rules\n" +
 				"  /skill:<name>       Invoke a skill\n" +
 				"  /rule:<name>        Invoke a rule\n" +

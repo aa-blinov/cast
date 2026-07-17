@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -291,8 +291,160 @@ describe("handleInput", () => {
 
 	it("/skills reports none loaded when empty", async () => {
 		const { deps, calls } = createFakeDeps();
+		// Skip auto-discovery so the catalog is empty (builtins would otherwise load).
+		deps.projectDeps = { ...deps.projectDeps, noSkills: true, cliSkillPaths: [] };
 		await handleInput("/skills", undefined, deps);
 		expect(displayMessageText(calls)).toContain("No skills");
+	});
+
+	it("/plugin uninstall with no args picks, confirms, and removes", async () => {
+		const { addMarketplace, installPlugin, listInstalledPlugins } = await import("../src/core/plugins.ts");
+		const mpDir = join(process.env.HOME!, "mp");
+		mkdirSync(join(mpDir, ".cast-plugin"), { recursive: true });
+		mkdirSync(join(mpDir, "plugins", "hello", "skills", "greet"), { recursive: true });
+		writeFileSync(
+			join(mpDir, ".cast-plugin", "marketplace.json"),
+			JSON.stringify({
+				name: "ponytail",
+				plugins: [{ name: "hello", description: "Hello", source: "./plugins/hello" }],
+			}),
+		);
+		writeFileSync(
+			join(mpDir, "plugins", "hello", "skills", "greet", "SKILL.md"),
+			"---\nname: greet\ndescription: Hi.\n---\n\nHello.\n",
+		);
+		addMarketplace(mpDir);
+		const installed = installPlugin("hello@ponytail", {});
+		expect(listInstalledPlugins({ enabledPlugins: installed.enabledPlugins })).toHaveLength(1);
+
+		const { updateSettings } = await import("../src/core/settings.ts");
+		updateSettings({ enabledPlugins: installed.enabledPlugins });
+
+		let pickStep = 0;
+		const { deps, calls } = createFakeDeps();
+		deps.pickers = {
+			pickOption: async () => {
+				// 1) pick plugin id, 2) confirm true
+				const responses = ["hello@ponytail", true] as const;
+				return responses[pickStep++] ?? null;
+			},
+			promptText: async () => null,
+			pickMulti: async () => null,
+			log: () => {},
+		};
+		deps.projectDeps = { ...deps.projectDeps, pickers: deps.pickers };
+
+		await handleInput("/plugin uninstall", undefined, deps);
+		expect(displayMessageText(calls)).toContain("[Uninstalled hello@ponytail]");
+		expect(listInstalledPlugins({ enabledPlugins: {} })).toHaveLength(0);
+	});
+
+	it("/plugin uninstall with no plugins → notice", async () => {
+		const { deps, calls } = createFakeDeps();
+		await handleInput("/plugin uninstall", undefined, deps);
+		expect(displayMessageText(calls)).toContain("No plugins installed");
+	});
+
+	it("/skills uninstall with no removable skills → notice", async () => {
+		const { deps, calls } = createFakeDeps({
+			projectDeps: {
+				noSkills: true,
+				noMcp: false,
+				cliSkillPaths: [],
+				cliMcpPaths: [],
+				settings: {},
+				pickers: {
+					pickOption: async () => null,
+					promptText: async () => null,
+					pickMulti: async () => null,
+					log: () => {},
+				},
+			},
+		});
+		await handleInput("/skills uninstall", undefined, deps);
+		expect(displayMessageText(calls)).toContain("No uninstallable skills");
+	});
+
+	it("/skills uninstall picks and removes a global skill", async () => {
+		const skillsDir = join(process.env.HOME!, ".cast", "skills", "bye");
+		mkdirSync(skillsDir, { recursive: true });
+		writeFileSync(join(skillsDir, "SKILL.md"), "---\nname: bye\ndescription: Remove me.\n---\n\nGone.\n");
+		let pickStep = 0;
+		const { deps, calls } = createFakeDeps();
+		deps.pickers = {
+			pickOption: async () => {
+				const responses = ["bye", true] as const;
+				return responses[pickStep++] ?? null;
+			},
+			promptText: async () => null,
+			pickMulti: async () => null,
+			log: () => {},
+		};
+		deps.projectDeps = { ...deps.projectDeps, pickers: deps.pickers };
+		await handleInput("/skills uninstall", undefined, deps);
+		expect(displayMessageText(calls)).toContain("[Uninstalled skill bye");
+		expect(existsSync(skillsDir)).toBe(false);
+	});
+
+	it("/mcp uninstall with no servers → notice", async () => {
+		const { deps, calls } = createFakeDeps();
+		await handleInput("/mcp uninstall", undefined, deps);
+		expect(displayMessageText(calls)).toContain("No uninstallable MCP");
+	});
+
+	it("/mcp uninstall picks and removes a global server", async () => {
+		const { saveMcpConfig, loadMcpConfig } = await import("../src/core/mcp.ts");
+		const mcpPath = join(process.env.HOME!, ".cast", "mcp.json");
+		mkdirSync(join(process.env.HOME!, ".cast"), { recursive: true });
+		saveMcpConfig(mcpPath, { doomed: { command: "echo", args: ["hi"] } });
+		expect(loadMcpConfig(mcpPath)).toHaveProperty("doomed");
+
+		let pickStep = 0;
+		const { deps, calls } = createFakeDeps();
+		deps.pickers = {
+			pickOption: async () => {
+				const responses = ["doomed", true] as const;
+				return responses[pickStep++] ?? null;
+			},
+			promptText: async () => null,
+			pickMulti: async () => null,
+			log: () => {},
+		};
+		deps.projectDeps = { ...deps.projectDeps, pickers: deps.pickers };
+		await handleInput("/mcp uninstall", undefined, deps);
+		expect(displayMessageText(calls)).toContain("[Uninstalled MCP doomed");
+		expect(loadMcpConfig(mcpPath)).toEqual({});
+	});
+
+	it("/skills list shows loaded skills", async () => {
+		const { deps, calls } = createFakeDeps();
+		await handleInput("/skills list", undefined, deps);
+		expect(displayMessageText(calls)).toMatch(/Skills|No skills found/);
+	});
+
+	it("/skills help shows cheat sheet", async () => {
+		const { deps, calls } = createFakeDeps();
+		await handleInput("/skills help", undefined, deps);
+		expect(displayMessageText(calls)).toContain("/skills list");
+	});
+
+	it("/skills disable then enable toggles disabledSkills", async () => {
+		const { loadSettings } = await import("../src/core/settings.ts");
+		const { deps, calls } = createFakeDeps();
+		await handleInput("/skills disable cast", undefined, deps);
+		expect(displayMessageText(calls)).toContain("[Skill cast disabled]");
+		expect(loadSettings().disabledSkills).toContain("cast");
+		await handleInput("/skills enable cast", undefined, deps);
+		expect(loadSettings().disabledSkills ?? []).not.toContain("cast");
+	});
+
+	it("/mcp list and help", async () => {
+		const { deps, calls } = createFakeDeps();
+		await handleInput("/mcp help", undefined, deps);
+		expect(displayMessageText(calls)).toContain("/mcp list");
+		await handleInput("/mcp list", undefined, deps);
+		const last = calls["agent.addDisplayMessage"]?.at(-1)?.[0] as { content?: string } | undefined;
+		expect(String(last?.content ?? "")).toContain("No MCP servers");
 	});
 
 	it("/mcp reports none connected when empty", async () => {

@@ -8,18 +8,29 @@ The agent sees a list of available skills (name + description) in its system pro
 
 ## Built-in Skills
 
-Skills ship with cast in `prompts/skills/`. Use `/skills` to see what's loaded.
+Skills ship with cast in `prompts/skills/`. Use `/skills list` to see what's loaded; bare `/skills` toggles them on/off.
 
 ## Loading Priority
 
 Skills are discovered from multiple locations. On a name collision, the first-loaded skill wins:
 
-1. **Project** — `.cast/skills/` (trust-gated)
-2. **Global** — `~/.cast/skills/` (always loaded)
-3. **Builtin** — `prompts/skills/` (ships with cast)
-4. **Extra paths** — `--skill <path>` flags (loaded even with `--no-skills`)
+1. **Project (cast)** — `.cast/skills/` (trust-gated)
+2. **Project (agents)** — `.agents/skills/` (trust-gated; skills.sh / `npx skills add` universal path)
+3. **Global (cast)** — `~/.cast/skills/` (always loaded)
+4. **Global (agents)** — `~/.config/agents/skills/` then `~/.agents/skills/` (skills.sh universal global)
+5. **Plugin** — skills from enabled `/plugin install name@marketplace` packages
+6. **Builtin** — `prompts/skills/` (ships with cast)
+7. **Extra paths** — `--skill <path>` flags (loaded even with `--no-skills`)
 
-Use `--no-skills` to skip discovery of project, global, and builtin skills. Extra paths still load.
+Use `--no-skills` to skip auto-discovery (including `.agents/skills`). Extra paths (`--skill`) still load.
+
+### skills.sh / `npx skills add`
+
+```bash
+npx -y skills add mattpocock/skills --skill grill-me -a universal
+```
+
+Installs into `.agents/skills/` (project) or `~/.config/agents/skills/` (global). Cast loads those automatically after `/reload` (or on next start). Invoke with `/skill:grill-me` (not `/grill-me`).
 
 ## Creating a Skill
 
@@ -83,6 +94,30 @@ Names that violate these rules generate a warning but still load.
 
 When a skill file references relative paths (templates, examples, configs), resolve them against the skill's directory. The system prompt tells the agent: *"When a skill file references a relative path, resolve it against the skill directory."*
 
+## Enabling / disabling
+
+| Command | Description |
+|---------|-------------|
+| `/skills` | Toggle on/off (multi-select picker, like `/mcp`) |
+| `/skills list` | Read-only catalog (source + on/off) |
+| `/skills enable` / `disable <name>` | Toggle one skill without the picker |
+| `/skills uninstall` | Remove a global/project skill (picker + confirm, or typed name) |
+| `/skills help` | Cheat sheet |
+
+Disabled names are stored in `~/.cast/settings.json` as `disabledSkills`. `/skill:<name>` only works for enabled skills.
+
+Plugin skills show their pack id in the picker/list (`plugin · name@marketplace`). If the pack is disabled via `/plugin`, the skill stays visible but locked (warning color, Space ignored) until you re-enable the pack — it is not added to `disabledSkills`.
+
+`/skills uninstall` deletes a **global**, **project**, or **agents** (`.agents/skills`) skill from disk. Builtin, plugin, and `--skill` paths are not removable here — use `/plugin uninstall` for marketplace packs.
+
+Whole marketplace packs can be toggled with bare `/plugin` (see [Plugins](plugins.md)).
+
+### Hot-reload
+
+`/skills` toggle / `enable` / `disable` / `uninstall` and `/plugin install` / enable / uninstall update the skill catalog **in the current session** — no `/reload`, no restart.
+
+Use `/reload` only after dropping or editing skill files on disk yourself (e.g. `npx skills add`, copy into `.cast/skills/`). See [Interactive commands](interactive-commands.md#hot-reload-vs-reload).
+
 ## Invoking Skills
 
 ### Automatic
@@ -105,7 +140,7 @@ The `/skill:<name>` command reads the skill's full content and submits it to the
 | Flag | Description |
 |------|-------------|
 | `--skill <path>` | Load an extra skill file or directory (repeatable) |
-| `--no-skills` | Skip global/project/builtin skill discovery |
+| `--no-skills` | Skip project/agents/global/plugin/builtin skill discovery |
 
 ```bash
 cast --skill ./my-project-skill.md

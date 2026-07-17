@@ -134,6 +134,6 @@ If the workflow is still running, wait and re-check. Do not declare the release 
 - Compaction: LLM-based summarization past a token threshold (falls back to pruning).
 - Parallel tool execution: tool calls within one assistant message run concurrently via `Promise.all`.
 - Reasoning: `vendors.ts` reads metadata from `/v1/models`, sends `reasoning.effort` param, parses `<think>` blocks.
-- Skills and MCP servers: global path loads unconditionally, project path (`.cast/skills/`, `.cast/mcp.json`) is trust-gated.
+- Skills and MCP servers: global paths load unconditionally (`~/.cast/skills/`, agents universal globals); project paths (`.cast/skills/`, `.agents/skills/`, `.cast/mcp.json`) are trust-gated.
 - MCP: stdio and streamable-HTTP only; tool names namespaced `mcp_<server>_<tool>`.
 - Pure CLI with `node:readline` — no TUI framework, no server, no orchestrator.

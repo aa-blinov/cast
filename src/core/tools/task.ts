@@ -139,6 +139,10 @@ export interface TaskExecutorDeps {
 	 * the subagent has `agentsMd: true` (the default).
 	 */
 	projectTrusted?: boolean;
+	/** Parent `--no-skills` — skip auto skill discovery for the child too. */
+	noSkills?: boolean;
+	/** Parent `--skill` paths — still loaded when `noSkills` is set. */
+	cliSkillPaths?: string[];
 	/** Parent's MCP catalog block (`formatMcpForPrompt`) — tools are already
 	 * inherited via mcpTools; this lists enabled servers in the prompt. */
 	mcpPromptSuffix?: string;
@@ -164,12 +168,17 @@ export function buildTaskSystemPrompt(
 		subagentName: string;
 		subagentLabel: string;
 		mcpPromptSuffix?: string;
+		noSkills?: boolean;
+		cliSkillPaths?: string[];
 	},
 ): string {
 	const agentsSuffix = opts.agentsMd
 		? formatContextFilesForPrompt(loadProjectContextFiles(cwd, opts.projectTrusted))
 		: "";
-	const { rulesSuffix, rulesLazySuffix, skillsPromptSuffix } = resolvePromptContextForCwd(cwd, opts.projectTrusted);
+	const { rulesSuffix, rulesLazySuffix, skillsPromptSuffix } = resolvePromptContextForCwd(cwd, opts.projectTrusted, {
+		noSkills: opts.noSkills,
+		cliSkillPaths: opts.cliSkillPaths,
+	});
 	const stateBlock = formatSystemEnvironmentBlock(cwd, {
 		model: opts.model,
 		reasoningLevel: config.reasoningLevel,
@@ -221,6 +230,8 @@ export async function execTask(
 		subagentName: subagent?.name ?? "worker",
 		subagentLabel: subagent?.label ?? "Worker",
 		mcpPromptSuffix: deps.mcpPromptSuffix,
+		noSkills: deps.noSkills,
+		cliSkillPaths: deps.cliSkillPaths,
 	});
 
 	const childMessages: Message[] = [{ role: "user", content: assignment }];

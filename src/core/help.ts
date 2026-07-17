@@ -42,7 +42,7 @@ Options:
                              this run only — see /permissions to persist it
   --skill <path>             Load an extra skill file or directory
                              (repeatable, works even with --no-skills)
-  --no-skills                Skip global/project skill discovery
+  --no-skills                Skip project/agents/global/plugin/builtin skill discovery
   --mcp <path>               Load an extra MCP server config file
                              (repeatable, works even with --no-mcp)
   --no-mcp                   Skip global/project MCP server discovery
@@ -52,8 +52,9 @@ Provider connection: saved settings > interactive prompt on first run.
 Once entered, saved to ~/.cast/settings.json.
 
 Skills (https://agentskills.io): self-contained instruction packages the
-agent loads on demand, from ~/.cast/skills/ (global) and .cast/skills/
-(project — asked to trust the project once, remembered after that).
+agent loads on demand from ~/.cast/skills/ (global), .cast/skills/ and
+.agents/skills/ (project — asked to trust once, remembered after that),
+plus ~/.config/agents/skills/ (skills.sh universal global).
 
 MCP servers: Model Context Protocol servers, configured in ~/.cast/mcp.json
 (global) and .cast/mcp.json (project — asked to trust once, remembered
@@ -87,8 +88,9 @@ Interactive commands:
   /permissions           Show/change bash confirmation mode (default/bypass)
   /web                   Toggle web tools (web_search, web_fetch)
   /ssh                   Manage SSH hosts (list, add, remove)
-  /skills                List loaded skills
-  /mcp                   Toggle MCP servers on/off and their tools
+  /skills …              Toggle / list / enable|disable / uninstall (see /skills help)
+  /plugin …              Type /plugin — palette lists install, marketplace, toggle
+  /mcp …                 Toggle / list / enable|disable / uninstall (see /mcp help)
   /reload                Re-scan skills, personas, and reconnect MCP servers
                          for the current directory (no restart needed after
                          adding a skill, persona, or mcp.json entry)

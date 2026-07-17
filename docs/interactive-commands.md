@@ -41,12 +41,26 @@ See [Personas](personas.md) for the full list.
 
 | Command | Description |
 |---------|-------------|
-| `/skills` | List loaded skills |
+| `/skills` | Toggle skills on/off (multi-select). Also: `list`, `enable`/`disable`, `uninstall`, `help` |
 | `/skill:<name> [args]` | Force-load and run a skill by name |
-| `/mcp` | Toggle MCP servers on/off (multi-select picker) |
+| `/plugin` | Toggle installed plugins. Palette also has install / list / enable / uninstall / marketplace / help |
+| `/mcp` | Toggle MCP servers on/off. Also: `list`, `enable`/`disable`, `uninstall`, `help` |
 | `/reload` | Re-scan skills, rules, MCP servers, and personas for cwd |
 
-`/reload` is useful after adding a new skill, rule, or MCP server — no restart needed.
+Bare `/skills` / `/mcp` / `/plugin` = multi-select toggle. `list` is read-only. `uninstall` always confirms (picker or typed). See [Skills](skills.md), [MCP](mcp-servers.md), [Plugins](plugins.md).
+
+### Hot-reload vs `/reload`
+
+You never need to quit cast or start a new session for these changes. The current chat continues.
+
+| Change | Apply how |
+|--------|-----------|
+| `/skills` / `/mcp` / `/plugin` toggle, `enable` / `disable` | Automatic (hot-reload) |
+| `/plugin install` / `uninstall`, `/skills uninstall`, `/mcp uninstall` | Automatic |
+| `/plugin marketplace remove` (drops installed packs) | Automatic (skills reload) |
+| New/edited files on disk: skills, `mcp.json`, rules, personas, context files (including `npx skills add`) | `/reload` in the same session |
+
+`/reload` only re-scans cwd resources — it does **not** reset the conversation.
 
 ## Rules
 
