@@ -203,7 +203,7 @@ Delegate a task to a sub-agent with an isolated context. The sub-agent runs inde
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `assignment` | Yes | Complete, self-contained task description |
-| `subagent` | No | Sub-agent name (e.g. `worker`) |
+| `subagent` | No | Sub-agent name (`explore`, `review`, or `worker`; default `worker`) |
 
 The `task` tool is only available when the current persona has `subagents: true` (e.g. the `coder-with-subagents` persona).
 
@@ -230,24 +230,30 @@ Availability is mode-gated: authoring tools exist only in plan mode, progress an
 
 The `task` tool delegates work to isolated sub-agents. Each sub-agent has:
 
-- **Own system prompt** — loaded from `prompts/subagents/` (currently a `worker` prompt)
+- **Own system prompt** — loaded from `prompts/subagents/` (`worker`, `explore`, `review`)
 - **Isolated context** — the parent agent sees only the final result, not intermediate tool calls
-- **Built-in tools** — by default the full builtin set except `task` (sub-agents can't delegate further). Frontmatter `tools:` on the subagent file can allowlist builtins (exact names or `*`-globs); MCP tools are not filtered by that list
+- **Built-in tools** — by default the full builtin set except `task` (sub-agents can't delegate further). Frontmatter `tools:` on the subagent file can allowlist builtins (exact names or `*`-globs); MCP tools are not filtered by that list. Built-in `explore` / `review` allowlist read/search/bash only (no `write`/`edit`)
 - **AGENTS.md** — injected into the child system prompt by default (`agentsMd: true`); set `agentsMd: false` in the subagent frontmatter to skip
 - **Optional model override** — `/subagent-model` sets a different model for sub-agents
+
+| Name | Role |
+|------|------|
+| `worker` | Default catch-all (edits, mixed work, or unclear fit) |
+| `explore` | Read-oriented mapping/research |
+| `review` | Independent validation; reports findings, does not patch |
 
 Sub-agent tokens are tracked separately in usage reporting (`/usage` status bar shows `sub` count).
 
 The `task` tool is only available when the current persona has `subagents: true` (e.g. `coder-with-subagents`). Other personas can't see or invoke it.
 
-Subagent frontmatter example (`prompts/subagents/explorer.md`):
+Subagent frontmatter example (`prompts/subagents/explore.md`):
 
 ```markdown
 ---
-name: explorer
-label: Explorer
+name: explore
+label: Explore
 description: Read-only codebase exploration
-tools: [read, grep, glob, ls]
+tools: [read, grep, glob, ls, bash]
 agentsMd: true
 ---
 

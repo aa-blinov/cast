@@ -10,6 +10,7 @@ All notable user-facing changes to cast, newest first.
 - Turn-end open-work gate in build mode with an active plan: if the model stops without tool calls while plan steps remain open, cast injects a `<system-reminder>` and continues sampling (up to 2 times per user prompt, then falls through with an exhausted notice).
 - After a mid-stream `/abort` (Esc) with no tool-result abort signal, cast appends a `<system-reminder>` (`[Request interrupted by user]`) so the next turn’s model sees that the prior turn was cut off.
 - Overnight sessions get a one-shot `<system-reminder>` when the local calendar date advances past the last announced day (persisted per session).
+- Built-in `explore` and `review` subagents for `task` (read-oriented tool allowlists). `coder-with-subagents` steers mapping to `explore` and validation to `review`; `worker` remains the default catch-all for everything else.
 
 ### Changed
 

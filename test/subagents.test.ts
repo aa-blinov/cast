@@ -110,9 +110,30 @@ describe("loadSubagentPrompts", () => {
 		}
 	});
 
-	it("builtins default to all tools and agentsMd true", () => {
-		for (const p of loadSubagentPrompts()) {
-			expect(p.tools).toBeUndefined();
+	it("loads explore and review with read-oriented tool allowlists", () => {
+		const prompts = loadSubagentPrompts();
+		const explore = prompts.find((p) => p.name === "explore");
+		const review = prompts.find((p) => p.name === "review");
+		expect(explore).toBeDefined();
+		expect(review).toBeDefined();
+		expect(explore!.label).toBe("Explore");
+		expect(review!.label).toBe("Review");
+		expect(explore!.tools).toEqual(["read", "grep", "glob", "ls", "bash"]);
+		expect(review!.tools).toEqual(["read", "grep", "glob", "ls", "bash"]);
+		expect(explore!.tools).not.toContain("write");
+		expect(explore!.tools).not.toContain("edit");
+		expect(review!.tools).not.toContain("write");
+		expect(review!.tools).not.toContain("edit");
+		expect(explore!.systemPrompt).toContain("## Agent discipline");
+		expect(review!.systemPrompt).toContain("## Agent discipline");
+	});
+
+	it("worker defaults to all tools; all builtins keep agentsMd true", () => {
+		const prompts = loadSubagentPrompts();
+		const worker = prompts.find((p) => p.name === "worker");
+		expect(worker).toBeDefined();
+		expect(worker!.tools).toBeUndefined();
+		for (const p of prompts) {
 			expect(p.agentsMd).toBe(true);
 		}
 	});

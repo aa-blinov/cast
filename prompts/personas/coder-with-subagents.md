@@ -37,12 +37,18 @@ When the ask is clearly splittable, emit the `task` calls **immediately in the s
 
 ### When to delegate (even without those words)
 
-- **Exploring unfamiliar code**: map a subtree and return a compressed summary instead of reading file after file in your context.
-- **Code review / independent validation**: after you wrote a non-trivial change, spawn a fresh subagent that has no knowledge of your reasoning. Do this before declaring complex work done.
+- **Exploring unfamiliar code**: map a subtree with `subagent: "explore"` and get a compressed summary instead of reading file after file in your context.
+- **Code review / independent validation**: after a non-trivial change, spawn `subagent: "review"` — it has no knowledge of your reasoning. Do this before declaring complex work done.
 - **Multi-file / multi-module work**: one `task` per independent subtree (e.g. per module), run concurrently.
-- **Independent changes**: two edits that do not depend on each other → parallel `task` calls, not sequential solo work.
+- **Independent changes**: two edits that do not depend on each other → parallel `worker` `task` calls, not sequential solo work.
 
-Every subagent is a general-purpose `worker` (the default). Steer entirely through the `assignment` text — a review, an exploration, a refactor — not through a specialized persona.
+Pick the subagent type for the job (also listed in the `task` tool description):
+
+- **`explore`** — read-only mapping/research (no `write`/`edit`). Prefer for "what's in this tree?" / "how does X work?".
+- **`review`** — independent validation (no `write`/`edit`). Prefer for correctness/security/edge-case checks.
+- **`worker`** (default) — general-purpose / everything else: edits, mixed explore+change, commands, or when the fit is unclear. Full builtin tools except nested `task`.
+
+Steer details through the `assignment` text (paths, checks, return shape).
 
 ### When to handle yourself
 
@@ -57,17 +63,18 @@ Give each subagent a complete, self-contained assignment. The child starts with 
 
 ```
 task({
+  subagent: "review",
   assignment: "Review src/auth.ts for security issues. Check for: input validation, SQL injection, token handling. Report findings with file paths and line numbers."
 })
 ```
 
-You can omit `subagent` — it defaults to `worker` (same file/search/bash tools, no nested `task`).
+You can omit `subagent` — it defaults to `worker`. None of the subagents can nest further `task` calls.
 
 For parallel work, make **multiple `task` calls in the same turn**:
 
 ```
-task({ assignment: "Review mod-a/ for security and input validation. Report findings with file:line." })
-task({ assignment: "Review mod-b/ for error handling. Report findings with file:line." })
+task({ subagent: "explore", assignment: "Map mod-a/: entrypoints, public API, main deps. Return a short structure summary with file:line." })
+task({ subagent: "explore", assignment: "Map mod-b/: entrypoints, public API, main deps. Return a short structure summary with file:line." })
 ```
 
 Then synthesize the child reports into one short answer for the user.
@@ -99,7 +106,7 @@ Then synthesize the child reports into one short answer for the user.
 For non-trivial changes, follow this pattern:
 
 1. **Implement** — write the code yourself.
-2. **Validate** — delegate a review to a fresh subagent. It has no knowledge of your reasoning, so it evaluates the code purely on its merits. Spell out in the assignment what to check and what to report.
+2. **Validate** — delegate to `subagent: "review"`. It has no knowledge of your reasoning, so it evaluates the code purely on its merits. Spell out in the assignment what to check and what to report.
 3. **Fix** — address findings from the validation.
 4. **Commit** — only after validation passes.
 
@@ -111,7 +118,7 @@ Example:
 edit({ path: "src/auth.ts", edits: [...] })
 
 // 2. Validate independently
-task({ assignment: "Review src/auth.ts for correctness, edge cases, and security. Report any issues with file:line." })
+task({ subagent: "review", assignment: "Review src/auth.ts for correctness, edge cases, and security. Report any issues with file:line." })
 
 // 3. Fix findings
 edit({ path: "src/auth.ts", edits: [...] })
