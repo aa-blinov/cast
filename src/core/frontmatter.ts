@@ -22,7 +22,13 @@ export interface ParsedFrontmatter {
 export function parseToolsAllowlist(frontmatter: Record<string, FrontmatterValue>): string[] | undefined {
 	const value = frontmatter.tools;
 	if (!Array.isArray(value)) return undefined;
-	return value.map((s) => String(s).trim()).filter(Boolean);
+	return (
+		value
+			.map((s) => String(s).trim())
+			.filter(Boolean)
+			// Pre-0.6.12 name — keep old persona frontmatter working.
+			.map((s) => (s === "find" ? "glob" : s))
+	);
 }
 
 /**

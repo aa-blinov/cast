@@ -148,6 +148,20 @@ export interface ParsedAnchor {
 }
 
 const ANCHOR_RE = /^(\d+):([a-z]+)(?::([a-z]+))?$/;
+/** Hash-only form models drop when they omit the line number: `LOCAL:CHUNK`. */
+const HASH_SUFFIX_RE = /^([a-z]+):([a-z]+)$/;
+
+/**
+ * Drop a pasted gutter's content after the arrow. Accepts both the real
+ * `→` separator and the ASCII `->` models sometimes type instead.
+ */
+export function stripAnchorGutter(anchor: string): string {
+	const uni = anchor.indexOf("→");
+	if (uni !== -1) return anchor.slice(0, uni).trim();
+	const ascii = anchor.indexOf("->");
+	if (ascii !== -1) return anchor.slice(0, ascii).trim();
+	return anchor.trim();
+}
 
 /**
  * Parse `LINE:LOCAL` or `LINE:LOCAL:CHUNK` into its parts. Returns `null`
@@ -155,11 +169,10 @@ const ANCHOR_RE = /^(\d+):([a-z]+)(?::([a-z]+))?$/;
  *
  * Models routinely paste the whole gutter (`22:abc:rst→content`) instead
  * of just the anchor, so anything from the arrow separator onward is
- * dropped before parsing. `→` can never appear inside a valid anchor.
+ * dropped before parsing. `→` / `->` can never appear inside a valid anchor.
  */
 export function parseAnchor(anchor: string): ParsedAnchor | null {
-	const arrowIdx = anchor.indexOf("→");
-	const head = (arrowIdx === -1 ? anchor : anchor.slice(0, arrowIdx)).trim();
+	const head = stripAnchorGutter(anchor);
 	const match = ANCHOR_RE.exec(head);
 	if (!match) return null;
 	const [, lineStr, local, chunk] = match;
@@ -168,6 +181,47 @@ export function parseAnchor(anchor: string): ParsedAnchor | null {
 		localHash: local ?? "",
 		...(chunk ? { chunkHash: chunk } : {}),
 	};
+}
+
+/**
+ * Recover a full anchor when the model dropped the line number and sent
+ * only `LOCAL:CHUNK` (or that suffix pasted with a gutter arrow). Accepts
+ * the match only when exactly one line in `hashes` carries that pair —
+ * never guesses between duplicates.
+ */
+export function recoverAnchorBySuffix(suffix: string, hashes: Array<[string, string]>): ParsedAnchor | null {
+	const head = stripAnchorGutter(suffix);
+	const match = HASH_SUFFIX_RE.exec(head);
+	if (!match) return null;
+	const local = match[1] ?? "";
+	const chunk = match[2] ?? "";
+	const hits: number[] = [];
+	for (let i = 0; i < hashes.length; i++) {
+		const [l, c] = hashes[i] ?? ["", ""];
+		if (l === local && c === chunk) hits.push(i + 1);
+	}
+	if (hits.length !== 1) return null;
+	return { line: hits[0]!, localHash: local, chunkHash: chunk };
+}
+
+export type ResolvedAnchor = {
+	anchor: ParsedAnchor;
+	/** True when the model omitted the line number and we recovered it. */
+	recoveredFromSuffix: boolean;
+};
+
+/**
+ * Parse a model-supplied anchor string against the current file hashes.
+ * Tries the normal `LINE:LOCAL:CHUNK` form first; if that fails, uniquely
+ * recovers from a hash-only `LOCAL:CHUNK` suffix. Returns `null` when
+ * neither path yields an unambiguous anchor.
+ */
+export function resolveAnchor(anchorStr: string, hashes: Array<[string, string]>): ResolvedAnchor | null {
+	const parsed = parseAnchor(anchorStr);
+	if (parsed) return { anchor: parsed, recoveredFromSuffix: false };
+	const recovered = recoverAnchorBySuffix(anchorStr, hashes);
+	if (recovered) return { anchor: recovered, recoveredFromSuffix: true };
+	return null;
 }
 
 export type AnchorValidation = "valid" | "stale" | "out_of_range";

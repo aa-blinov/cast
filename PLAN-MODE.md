@@ -106,7 +106,7 @@ Headless runs (`cast run`) have no plan mode: `run.ts` adds all `PLAN_TOOL_NAMES
 | Tool | Plan mode | Build mode | Notes |
 |---|---|---|---|
 | `read` | yes | yes | |
-| `find` | yes | yes | |
+| `glob` | yes | yes | |
 | `grep` | yes | yes | |
 | `ls` | yes | yes | |
 | `web_search` | **toggle** | toggle | Respects `/web` toggle. If user disabled web tools, they stay disabled in plan mode. |

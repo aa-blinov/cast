@@ -55,10 +55,10 @@ describe("listPersonas", () => {
 			// Slice up to (but not including) the next shared section, so
 			// the test stays stable as more shared blocks get appended.
 			const after = persona.systemPrompt.slice(idx);
-			const editIdx = after.indexOf("## edit / hashline anchors");
+			const editIdx = after.indexOf("## File tools / hashline anchors");
 			const section = editIdx === -1 ? after : after.slice(0, editIdx).trimEnd();
 			expect(section).toBe(expected);
-			expect(persona.systemPrompt).toContain("## edit / hashline anchors");
+			expect(persona.systemPrompt).toContain("## File tools / hashline anchors");
 		}
 
 		// It must come from prompts/error-handling.md, not be duplicated by hand
@@ -66,6 +66,7 @@ describe("listPersonas", () => {
 		for (const persona of personas) {
 			const raw = readFileSync(join(PERSONAS_DIR, `${persona.name}.md`), "utf-8");
 			expect(raw).not.toContain("## Error Handling");
+			expect(raw).not.toContain("## File tools / hashline anchors");
 			expect(raw).not.toContain("## edit / hashline anchors");
 		}
 

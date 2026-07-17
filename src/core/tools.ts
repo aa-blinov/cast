@@ -13,7 +13,7 @@ import {
 import type { SshHost } from "./ssh.ts";
 import { execBash } from "./tools/bash.ts";
 import { execEdit, execRead, execWrite } from "./tools/files.ts";
-import { execFind, execGrep, execLs } from "./tools/search.ts";
+import { execGlob, execGrep, execLs } from "./tools/search.ts";
 import type { ConfirmBash, ToolExecutor, ToolResult } from "./tools/shared.ts";
 import { execSsh } from "./tools/ssh.ts";
 import { execTask, type TaskExecutorDeps } from "./tools/task.ts";
@@ -72,11 +72,12 @@ export function getToolDefinitions(
 			function: {
 				name: "read",
 				description:
-					"Read the contents of a file. Supports text files and images (jpg, jpeg, png, gif, webp, bmp — " +
+					"Read the contents of a file. When you already know the path, call this directly — do not search with glob/ls first. " +
+					"Supports text files and images (jpg, jpeg, png, gif, webp, bmp — " +
 					"shown to you as an image in the next message; only works if the model supports vision). " +
 					"Output is truncated to 2000 lines or 64KB. Use offset/limit for large files. " +
 					"Images larger than 5MB are rejected. " +
-					"Each line is prefixed with `<LINE>:<LOCAL>:<CHUNK>→content` (a hashline anchor, e.g. `22:abc:rst`) so it can be passed directly to `edit`. " +
+					"Each line is prefixed with `<LINE>:<LOCAL>:<CHUNK>→content` (a hashline anchor, e.g. `22:abc:rst`) — copy the full three-part prefix into `edit`. " +
 					"You already have the contents of every file you read earlier in this session — do NOT read the " +
 					"same path again unless it has changed since (e.g. you just edited it); re-use the earlier result " +
 					"instead. Reading the same unchanged file repeatedly is treated as a doom loop and blocked.",
@@ -96,7 +97,7 @@ export function getToolDefinitions(
 			function: {
 				name: "write",
 				description:
-					"Write content to a file. Creates the file if it doesn't exist, overwrites if it does. " +
+					"Create a new file or overwrite an entire file. Prefer `edit` for surgical changes to existing files. " +
 					"Automatically creates parent directories.",
 				parameters: {
 					type: "object",
@@ -114,12 +115,13 @@ export function getToolDefinitions(
 				name: "edit",
 				description:
 					"Edit a file using hashline anchors from a recent `read` or `grep`. " +
-					"Each op targets a line (or a line range) by anchor instead of pasting text. " +
-					"Ops: 'replace' (one line or `anchor`+`end_anchor` range; the range is INCLUSIVE on both ends), " +
-					"'insert_after' / 'insert_before' (add new lines after/before an anchored line), 'write' (replace the whole file). " +
-					"Multiple ops in one call are validated against the pre-edit file and applied atomically. " +
-					"A successful edit returns the edited regions with fresh anchors — verify them before the next op. " +
-					"Anchors whose content merely moved or whose neighbourhood changed are recovered automatically (a Note in the reply says where the edit landed); errors occur only for ambiguous or vanished anchors, and include fresh anchors so a re-read is usually unnecessary.",
+					"Copy the full `<line>:<local>:<chunk>` prefix (include the line number). " +
+					"Put every change to this file in one call's ops[] — do not split into multiple edit rounds. " +
+					"Ops: 'replace' (one line or `anchor`+`end_anchor` range; INCLUSIVE on both ends), " +
+					"'insert_after' / 'insert_before' (add lines after/before an anchor), 'write' (replace the whole file). " +
+					"Success returns fresh anchors — use them for any follow-up; do not re-read just to confirm. " +
+					"Moved lines, neighbour drift, and unique hash-only anchors (missing line number) are recovered automatically; " +
+					"errors include fresh anchors so a re-read is usually unnecessary.",
 				parameters: {
 					type: "object",
 					properties: {
@@ -137,7 +139,7 @@ export function getToolDefinitions(
 									anchor: {
 										type: "string",
 										description:
-											"For replace/insert_after/insert_before: a hashline anchor of the form `<line>:<local>:<chunk>` exactly as printed by read/grep (e.g. `22:abc:rst`). For insert_after only, `0:` inserts at the top of the file.",
+											"Full hashline anchor `<line>:<local>:<chunk>` from read/grep (e.g. `22:abc:rst`). Include the line number. Pasting the whole gutter (`22:abc:rst→…`) is fine. For insert_after: `0:` = top of file, `EOF` = append at end.",
 									},
 									end_anchor: {
 										type: "string",
@@ -163,8 +165,11 @@ export function getToolDefinitions(
 		{
 			type: "function",
 			function: {
-				name: "find",
-				description: "Search for files by glob pattern (e.g. '*.ts', '**/*.json', 'src/**/*.spec.ts').",
+				name: "glob",
+				description:
+					"Search for files by glob pattern (e.g. '*.ts', '**/*.json', 'src/**/*.spec.ts'). " +
+					"Only when the path is unknown. If the user already named a file (greet.ts, CHANGELOG.md, config, …), " +
+					"call `read` on that name first — do not glob. One glob call is enough; then read a hit.",
 				parameters: {
 					type: "object",
 					properties: {
@@ -201,7 +206,8 @@ export function getToolDefinitions(
 			type: "function",
 			function: {
 				name: "ls",
-				description: "List directory contents. Shows file type, size, and name.",
+				description:
+					"List directory contents (type, size, name). For locating a named file use `read` or `glob`, not ls.",
 				parameters: {
 					type: "object",
 					properties: {
@@ -498,9 +504,10 @@ export function createToolExecutor(
 				case "write":
 					return await execWrite(args, cwd);
 				case "edit":
-					return await execEdit(args, cwd);
-				case "find":
-					return await execFind(args, cwd, config);
+					return await execEdit(args, cwd, config);
+				case "glob":
+				case "find": // legacy alias — same implementation as glob
+					return await execGlob(args, cwd, config);
 				case "grep":
 					return await execGrep(args, cwd, config);
 				case "ls":

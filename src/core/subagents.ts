@@ -12,7 +12,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseAgentsMd, parseFrontmatter, parseToolsAllowlist } from "./frontmatter.ts";
-import { promptsDir } from "./prompts.ts";
+import { promptsDir, withSharedToolPrompt } from "./prompts.ts";
 
 export interface SubagentPrompt {
 	name: string;
@@ -51,7 +51,9 @@ function loadSubagentFromFile(filePath: string): SubagentPrompt | null {
 		name,
 		label: typeof frontmatter.label === "string" && frontmatter.label ? frontmatter.label : name,
 		description: typeof frontmatter.description === "string" ? frontmatter.description : "",
-		systemPrompt: body.trimEnd(),
+		// Same shared error-handling + file-tool contract as personas — workers
+		// use the same read/edit/find tools and must not invent a different workflow.
+		systemPrompt: withSharedToolPrompt(body),
 		tools: parseToolsAllowlist(frontmatter),
 		agentsMd: parseAgentsMd(frontmatter),
 	};

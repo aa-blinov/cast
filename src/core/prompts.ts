@@ -39,3 +39,24 @@ export function readRequiredPrompt(promptsDir: string, fileName: string): string
 		);
 	}
 }
+
+/**
+ * Optional shared sections appended to every persona and subagent prompt:
+ * tool-failure mechanics and the read/edit/hashline contract. Missing files
+ * omit that section rather than failing the whole load — same policy as the
+ * previous private helpers in personas.ts.
+ */
+function readOptionalShared(fileName: string): string {
+	try {
+		return readFileSync(join(promptsDir, fileName), "utf-8").trim();
+	} catch {
+		return "";
+	}
+}
+
+/** Append error-handling + file-tool guidance after a role prompt body. */
+export function withSharedToolPrompt(body: string): string {
+	return [body.trimEnd(), readOptionalShared("error-handling.md"), readOptionalShared("tools-edit.md")]
+		.filter(Boolean)
+		.join("\n\n");
+}

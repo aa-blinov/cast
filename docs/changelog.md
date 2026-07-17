@@ -2,6 +2,20 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Changed
+
+- Renamed the file-search builtin from `find` to `glob` (same glob-pattern behavior). Legacy `find` calls and `tools: [find, …]` allowlists still work.
+- Shared file-tool guidance steers named-file tasks to `read` first; short `glob` results remind the model to `read` a hit instead of another search/`ls`.
+- `edit` `insert_after` accepts anchor `EOF` to append at the end of a file (alongside existing `0:` for the top).
+
+### Fixed
+
+- `edit` recovers unique hash-only anchors when the model omits the line number (`local:chunk` instead of `22:local:chunk`), and accepts ASCII `->` gutters the same way as `→`.
+- Shared file-tool guidance (all personas **and** subagents) now spells out the read→edit workflow: known path skips `glob`, one `edit` per file, copy the full three-part anchor, retry from tool-returned anchors instead of re-searching.
+- When `read`/`edit` miss a path, cast runs a basename `glob` under the hood and lists real matches so the model can retry the correct path without starting its own search loop.
+
 ## 0.6.11
 
 ### Added

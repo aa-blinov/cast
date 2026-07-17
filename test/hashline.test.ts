@@ -7,7 +7,9 @@ import {
 	findShifted,
 	lineHash,
 	parseAnchor,
+	recoverAnchorBySuffix,
 	renderAnchoredLine,
+	resolveAnchor,
 	validateAnchor,
 } from "../src/core/tools/hashline.ts";
 
@@ -73,6 +75,7 @@ describe("hashline", () => {
 		// the anchor; everything from the arrow onward must be ignored.
 		expect(parseAnchor("4:ddg:qwi→")).toEqual({ line: 4, localHash: "ddg", chunkHash: "qwi" });
 		expect(parseAnchor("22:abc:rst→\tconst x = 1;")).toEqual({ line: 22, localHash: "abc", chunkHash: "rst" });
+		expect(parseAnchor("22:abc:rst->\tconst x = 1;")).toEqual({ line: 22, localHash: "abc", chunkHash: "rst" });
 		expect(parseAnchor("  22:abc:rst  ")).toEqual({ line: 22, localHash: "abc", chunkHash: "rst" });
 	});
 
@@ -84,6 +87,41 @@ describe("hashline", () => {
 		expect(parseAnchor("42:abc:rst:extra")).toBeNull();
 		expect(parseAnchor("42:abc123")).toBeNull(); // digits are not part of the hash alphabet
 		expect(parseAnchor("")).toBeNull();
+		// Hash-only (no line) is not a full parse — recovered separately.
+		expect(parseAnchor("abc:rst")).toBeNull();
+	});
+
+	it("recoverAnchorBySuffix accepts a unique LOCAL:CHUNK pair", () => {
+		const hashes = computeHashesForLines(["alpha", "beta", "gamma"]);
+		const suffix = `${hashes[1]![0]}:${hashes[1]![1]}`;
+		expect(recoverAnchorBySuffix(suffix, hashes)).toEqual({
+			line: 2,
+			localHash: hashes[1]![0],
+			chunkHash: hashes[1]![1],
+		});
+		expect(recoverAnchorBySuffix(`${suffix}→beta`, hashes)?.line).toBe(2);
+		expect(recoverAnchorBySuffix("zzz:zzz", hashes)).toBeNull();
+	});
+
+	it("recoverAnchorBySuffix rejects ambiguous duplicates", () => {
+		const hashes = computeHashesForLines(["same", "x", "same"]);
+		// Identical content in the same chunk → same local+chunk; ambiguous.
+		const suffix = `${hashes[0]![0]}:${hashes[0]![1]}`;
+		expect(recoverAnchorBySuffix(suffix, hashes)).toBeNull();
+	});
+
+	it("resolveAnchor prefers the full form and falls back to suffix recovery", () => {
+		const hashes = computeHashesForLines(["alpha", "beta", "gamma"]);
+		const full = `2:${hashes[1]![0]}:${hashes[1]![1]}`;
+		expect(resolveAnchor(full, hashes)).toEqual({
+			anchor: { line: 2, localHash: hashes[1]![0], chunkHash: hashes[1]![1] },
+			recoveredFromSuffix: false,
+		});
+		expect(resolveAnchor(`${hashes[1]![0]}:${hashes[1]![1]}`, hashes)).toEqual({
+			anchor: { line: 2, localHash: hashes[1]![0], chunkHash: hashes[1]![1] },
+			recoveredFromSuffix: true,
+		});
+		expect(resolveAnchor("nope", hashes)).toBeNull();
 	});
 
 	it("validateAnchor accepts a fresh full anchor and rejects drift", () => {

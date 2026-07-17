@@ -192,6 +192,18 @@ describe("read", () => {
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
 		const result = await exec("read", { path: "nonexistent.txt" });
 		expect(result.isError).toBe(true);
+		expect(result.content).toContain("File not found: nonexistent.txt");
+	});
+
+	it("on missing path, searches by basename and suggests real hits", async () => {
+		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
+		writeFileSync(join(TEST_DIR, "src", "greet.ts"), "export const hi = 1;\n");
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const result = await exec("read", { path: "greet.ts" });
+		expect(result.isError).toBe(true);
+		expect(result.content).toContain("File not found: greet.ts");
+		expect(result.content).toContain("src/greet.ts");
+		expect(result.content).toMatch(/do not call glob/i);
 	});
 
 	it("uses a non-tab separator so a tab-indented line's leading tabs stay unambiguous", async () => {
@@ -284,6 +296,35 @@ describe("edit", () => {
 		expect(result.isError).toBeFalsy();
 		const after = readFileSync(join(TEST_DIR, "edit.txt"), "utf-8");
 		expect(after).toBe("goodbye world\nfoo bar\n");
+	});
+
+	it("recovers a unique hash-only anchor missing the line number", async () => {
+		// Models often drop the line and send `local:chunk` — recover when unique.
+		writeFileSync(join(TEST_DIR, "suffix.txt"), "alpha\nbeta\ngamma\n");
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const before = await exec("read", { path: "suffix.txt" });
+		const full = anchorForLine(before.content, 2);
+		const suffix = full.slice(full.indexOf(":") + 1); // drop "2:"
+		const result = await exec("edit", {
+			path: "suffix.txt",
+			ops: [{ op: "replace", anchor: suffix, content: "BETA" }],
+		});
+		expect(result.isError).toBeFalsy();
+		expect(result.content).toContain("missing line number");
+		expect(readFileSync(join(TEST_DIR, "suffix.txt"), "utf-8")).toBe("alpha\nBETA\ngamma\n");
+	});
+
+	it("accepts a pasted gutter with ASCII -> separator", async () => {
+		writeFileSync(join(TEST_DIR, "ascii-arrow.txt"), "one\ntwo\n");
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const before = await exec("read", { path: "ascii-arrow.txt" });
+		const full = anchorForLine(before.content, 1);
+		const result = await exec("edit", {
+			path: "ascii-arrow.txt",
+			ops: [{ op: "replace", anchor: `${full}->one`, content: "ONE" }],
+		});
+		expect(result.isError).toBeFalsy();
+		expect(readFileSync(join(TEST_DIR, "ascii-arrow.txt"), "utf-8")).toBe("ONE\ntwo\n");
 	});
 
 	it("replaces a line range using anchor + end_anchor", async () => {
@@ -527,6 +568,31 @@ describe("edit", () => {
 		expect(readFileSync(join(TEST_DIR, "top.txt"), "utf-8")).toBe("header\nfirst\nsecond\n");
 	});
 
+	it('appends at the end of the file with the "EOF" anchor', async () => {
+		writeFileSync(join(TEST_DIR, "eof.txt"), "first\nsecond\n");
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		await exec("read", { path: "eof.txt" });
+		const result = await exec("edit", {
+			path: "eof.txt",
+			ops: [{ op: "insert_after", anchor: "EOF", content: "## Usage\n\nrun it" }],
+		});
+		expect(result.isError).toBeFalsy();
+		expect(readFileSync(join(TEST_DIR, "eof.txt"), "utf-8")).toBe("first\nsecond\n## Usage\n\nrun it\n");
+	});
+
+	it("rejects insert_before with EOF", async () => {
+		writeFileSync(join(TEST_DIR, "eof-before.txt"), "only\n");
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		await exec("read", { path: "eof-before.txt" });
+		const result = await exec("edit", {
+			path: "eof-before.txt",
+			ops: [{ op: "insert_before", anchor: "EOF", content: "nope" }],
+		});
+		expect(result.isError).toBe(true);
+		expect(result.content).toMatch(/insert_after/i);
+		expect(readFileSync(join(TEST_DIR, "eof-before.txt"), "utf-8")).toBe("only\n");
+	});
+
 	it("rejects the whole batch when one anchor is stale", async () => {
 		// Two ops in one call. The first is valid; the second uses an
 		// anchor from a previous read of a now-different file. The valid
@@ -683,19 +749,28 @@ describe("edit", () => {
 });
 
 // ============================================================================
-// find
+// glob
 // ============================================================================
 
-describe("find", () => {
+describe("glob", () => {
 	it("finds files by pattern", async () => {
 		writeFileSync(join(TEST_DIR, "a.ts"), "");
 		writeFileSync(join(TEST_DIR, "b.ts"), "");
 		writeFileSync(join(TEST_DIR, "c.js"), "");
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
-		const result = await exec("find", { pattern: "*.ts", path: TEST_DIR });
+		const result = await exec("glob", { pattern: "*.ts", path: TEST_DIR });
 		expect(result.content).toContain("a.ts");
 		expect(result.content).toContain("b.ts");
 		expect(result.content).not.toContain("c.js");
+		expect(result.content).toContain("call read on one of these paths");
+	});
+
+	it("accepts legacy find as an alias for glob", async () => {
+		writeFileSync(join(TEST_DIR, "legacy.ts"), "");
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const result = await exec("find", { pattern: "legacy.ts", path: TEST_DIR });
+		expect(result.isError).toBeFalsy();
+		expect(result.content).toContain("legacy.ts");
 	});
 
 	it("does not let a pattern break out and run injected shell commands", async () => {
@@ -705,7 +780,7 @@ describe("find", () => {
 		// exploitable before this used execFileSync with an argument array).
 		const canary = join(TEST_DIR, "injected.txt");
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
-		await exec("find", {
+		await exec("glob", {
 			pattern: `x'; touch '${canary}`,
 			path: TEST_DIR,
 		});
@@ -796,7 +871,7 @@ describe("brace expansion", () => {
 		writeFileSync(join(TEST_DIR, "b.js"), "");
 		writeFileSync(join(TEST_DIR, "c.css"), "");
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
-		const result = await exec("find", { pattern: "*.{ts,js}", path: TEST_DIR });
+		const result = await exec("glob", { pattern: "*.{ts,js}", path: TEST_DIR });
 		expect(result.content).toContain("a.ts");
 		expect(result.content).toContain("b.js");
 		expect(result.content).not.toContain("c.css");
@@ -808,7 +883,7 @@ describe("brace expansion", () => {
 		writeFileSync(join(TEST_DIR, "z.css"), "");
 		writeFileSync(join(TEST_DIR, "w.md"), "");
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
-		const result = await exec("find", { pattern: "*.{ts,js,md}", path: TEST_DIR });
+		const result = await exec("glob", { pattern: "*.{ts,js,md}", path: TEST_DIR });
 		expect(result.content).toContain("x.ts");
 		expect(result.content).toContain("y.js");
 		expect(result.content).toContain("w.md");
@@ -820,7 +895,7 @@ describe("brace expansion", () => {
 		writeFileSync(join(TEST_DIR, "test.test.ts"), "");
 		writeFileSync(join(TEST_DIR, "bare.ts"), "");
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
-		const result = await exec("find", { pattern: "*.{spec,test}.ts", path: TEST_DIR });
+		const result = await exec("glob", { pattern: "*.{spec,test}.ts", path: TEST_DIR });
 		expect(result.content).toContain("test.spec.ts");
 		expect(result.content).toContain("test.test.ts");
 		expect(result.content).not.toContain("bare.ts");
@@ -829,7 +904,7 @@ describe("brace expansion", () => {
 	it("treats unmatched { as literal", async () => {
 		writeFileSync(join(TEST_DIR, "a{b"), "");
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
-		const result = await exec("find", { pattern: "a{b", path: TEST_DIR });
+		const result = await exec("glob", { pattern: "a{b", path: TEST_DIR });
 		expect(result.content).toContain("a{b");
 	});
 });
@@ -849,7 +924,7 @@ describe("symlink cycle detection", () => {
 
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
 		// Should complete without hanging
-		const result = await exec("find", { pattern: "*.txt", path: TEST_DIR, timeout: 5 });
+		const result = await exec("glob", { pattern: "*.txt", path: TEST_DIR, timeout: 5 });
 		expect(result.isError).toBeFalsy();
 		expect(result.content).toContain("file.txt");
 	});
@@ -862,7 +937,7 @@ describe("symlink cycle detection", () => {
 		symlinkSync(realDir, linkDir);
 
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
-		const result = await exec("find", { pattern: "data.txt", path: TEST_DIR });
+		const result = await exec("glob", { pattern: "data.txt", path: TEST_DIR });
 		// Should find data.txt once (via real/ or link/), not loop
 		expect(result.content).toContain("data.txt");
 	});
@@ -874,7 +949,7 @@ describe("symlink cycle detection", () => {
 		symlinkSync(selfDir, join(selfDir, "loop"));
 
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
-		const result = await exec("find", { pattern: "ok.txt", path: TEST_DIR, timeout: 5 });
+		const result = await exec("glob", { pattern: "ok.txt", path: TEST_DIR, timeout: 5 });
 		expect(result.isError).toBeFalsy();
 		expect(result.content).toContain("ok.txt");
 	});
@@ -891,7 +966,7 @@ describe("gitignore negation", () => {
 		writeFileSync(join(TEST_DIR, "app.ts"), "");
 
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
-		const result = await exec("find", { pattern: "*", path: TEST_DIR });
+		const result = await exec("glob", { pattern: "*", path: TEST_DIR });
 		expect(result.content).toContain("app.ts");
 		expect(result.content).not.toContain("app.log");
 	});
@@ -903,7 +978,7 @@ describe("gitignore negation", () => {
 		writeFileSync(join(TEST_DIR, "app.ts"), "");
 
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
-		const result = await exec("find", { pattern: "*", path: TEST_DIR });
+		const result = await exec("glob", { pattern: "*", path: TEST_DIR });
 		expect(result.content).toContain("app.ts");
 		expect(result.content).toContain("important.log");
 		expect(result.content).not.toContain("debug.log");
@@ -914,7 +989,7 @@ describe("gitignore negation", () => {
 		writeFileSync(join(TEST_DIR, "file.txt"), "");
 
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
-		const result = await exec("find", { pattern: "*.txt", path: TEST_DIR });
+		const result = await exec("glob", { pattern: "*.txt", path: TEST_DIR });
 		expect(result.content).not.toContain("file.txt");
 	});
 });
@@ -928,7 +1003,7 @@ describe("nested .gitignore", () => {
 		writeFileSync(join(TEST_DIR, "root.tmp"), "");
 
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
-		const result = await exec("find", { pattern: "*.tmp", path: TEST_DIR });
+		const result = await exec("glob", { pattern: "*.tmp", path: TEST_DIR });
 		// src/.gitignore ignores *.tmp only under src/
 		expect(result.content).toContain("root.tmp");
 		expect(result.content).not.toContain("cache.tmp");
@@ -943,7 +1018,7 @@ describe("nested .gitignore", () => {
 		writeFileSync(join(TEST_DIR, "sub", "cache.tmp"), "");
 
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
-		const result = await exec("find", { pattern: "*", path: TEST_DIR });
+		const result = await exec("glob", { pattern: "*", path: TEST_DIR });
 		expect(result.content).toContain("app.ts");
 		expect(result.content).not.toContain("debug.log"); // root rule
 		expect(result.content).not.toContain("cache.tmp"); // nested rule

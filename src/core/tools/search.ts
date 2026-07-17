@@ -1,8 +1,9 @@
 /**
- * Search tools — `find` (filename glob, via fd), `grep` (content, via rg), and
- * `ls`. fd/rg are used when installed; otherwise a built-in tree walk provides
- * a degraded fallback that still skips default-ignored dirs and honours
- * .gitignore (including nested ones), which a bare `find`/`grep -r` wouldn't.
+ * Search tools — `glob` (filename patterns, via fd), `grep` (content, via rg),
+ * and `ls`. fd/rg are used when installed; otherwise a built-in tree walk
+ * provides a degraded fallback that still skips default-ignored dirs and
+ * honours .gitignore (including nested ones), which a bare `find`/`grep -r`
+ * wouldn't.
  */
 
 import { execFileSync } from "node:child_process";
@@ -201,7 +202,7 @@ async function walkFiles(cwd: string, searchPath: string, maxFiles: number = MAX
 	return results;
 }
 
-export async function execFind(args: Record<string, unknown>, cwd: string, _config: AppConfig): Promise<ToolResult> {
+export async function execGlob(args: Record<string, unknown>, cwd: string, _config: AppConfig): Promise<ToolResult> {
 	const pattern = String(args.pattern ?? "");
 	const searchPath = args.path ? resolvePath(String(args.path), cwd) : cwd;
 	const limit = typeof args.limit === "number" ? args.limit : 1000;
@@ -250,7 +251,37 @@ export async function execFind(args: Record<string, unknown>, cwd: string, _conf
 	if (absolutePaths.length === 0) return { content: "No files found" };
 
 	const relativePaths = absolutePaths.map((p) => (p.startsWith(cwd) ? p.slice(cwd.length + 1) : p));
-	return { content: relativePaths.join("\n") };
+	let content = relativePaths.join("\n");
+	// Few hits → steer the model straight to read instead of another glob/ls.
+	if (relativePaths.length <= 3) {
+		content += "\n[note: call read on one of these paths — do not glob or ls again]";
+	}
+	return { content };
+}
+
+const MISSING_FILE_SUGGESTION_LIMIT = 5;
+
+/**
+ * Run the same basename search as `glob` (under the hood) when a tool path
+ * misses. Returns relative hits only — never invents paths that aren't on disk.
+ * Empty when nothing matches or the name is unusable.
+ */
+export async function findFilesByBasename(
+	name: string,
+	cwd: string,
+	config: AppConfig,
+	limit: number = MISSING_FILE_SUGGESTION_LIMIT,
+): Promise<string[]> {
+	const trimmed = name.trim();
+	if (!trimmed || trimmed === "." || trimmed === "..") return [];
+	// Exact basename match — same pattern shape a model would pass to `glob`.
+	const result = await execGlob({ pattern: trimmed, limit }, cwd, config);
+	if (result.isError || !result.content || result.content === "No files found") return [];
+	return result.content
+		.split("\n")
+		.map((line) => line.trim())
+		.filter((line) => line.length > 0 && !line.startsWith("[note:"))
+		.slice(0, limit);
 }
 
 /** True for filesystem errors that mean "not allowed to read this", as opposed
@@ -292,7 +323,7 @@ export async function execGrep(args: Record<string, unknown>, cwd: string, confi
 
 	let output: string;
 	try {
-		// See execFind for why this is execFileSync with an argument array and
+		// See execGlob for why this is execFileSync with an argument array and
 		// not execSync + string interpolation: pattern/glob come straight from
 		// a tool call argument, and a shell-interpolated `'${pattern}'` is
 		// exploitable by anything containing a single quote (confirmed with a
