@@ -16,7 +16,7 @@ $Repo = if ($env:CAST_REPO) { $env:CAST_REPO } else { "aa-blinov/cast" }
 $ApiBase = if ($env:CAST_API_BASE) { $env:CAST_API_BASE } else { "https://api.github.com" }
 $DownloadBaseOverride = $env:CAST_DOWNLOAD_BASE
 $InstallDir = if ($env:CAST_INSTALL_DIR) { $env:CAST_INSTALL_DIR } else { Join-Path $HOME ".cast\install" }
-$MinNodeMajor = 18
+$MinNodeMajor = 22
 
 $node = Get-Command node -ErrorAction SilentlyContinue
 if (-not $node) {

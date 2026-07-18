@@ -21,7 +21,7 @@ API_BASE="${CAST_API_BASE:-https://api.github.com}"
 DOWNLOAD_BASE_OVERRIDE="${CAST_DOWNLOAD_BASE:-}"
 INSTALL_DIR="${CAST_INSTALL_DIR:-$HOME/.cast/install}"
 BIN_DIR="${CAST_BIN_DIR:-$HOME/.local/bin}"
-MIN_NODE_MAJOR=18
+MIN_NODE_MAJOR=22
 
 info() { printf '\033[36m%s\033[0m\n' "$1"; }
 warn() { printf '\033[33m%s\033[0m\n' "$1"; }

@@ -450,7 +450,14 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 <div class="table-wrap"><table><thead><tr><th>Parameter</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>path</code></td><td>Yes</td><td>File path (relative or absolute)</td></tr><tr><td><code>offset</code></td><td>No</td><td>Line number to start from (1-indexed)</td></tr><tr><td><code>limit</code></td><td>No</td><td>Maximum lines to read</td></tr></tbody></table></div><p>Output is truncated to 2000 lines or 64KB. Images larger than 5MB are rejected. Each line is prefixed with a hashline anchor of the form <code>&lt;LINE&gt;:&lt;LOCAL&gt;:&lt;CHUNK&gt;→content</code> (e.g. <code>22:abc:rst</code>) so it can be passed directly to <code>edit</code>.</p>
 <h3><code>write</code></h3>
 <p>Write content to a file. Creates the file if it doesn&#39;t exist, overwrites if it does. Automatically creates parent directories.</p>
-<div class="table-wrap"><table><thead><tr><th>Parameter</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>path</code></td><td>Yes</td><td>File path</td></tr><tr><td><code>content</code></td><td>Yes</td><td>Content to write</td></tr></tbody></table></div><h3><code>edit</code></h3>
+<div class="table-wrap"><table><thead><tr><th>Parameter</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>path</code></td><td>Yes</td><td>File path</td></tr><tr><td><code>content</code></td><td>Yes</td><td>Content to write</td></tr></tbody></table></div><p>The reply is not a byte count — it shows what actually changed, so a from-memory rewrite that reproduced stale content is caught immediately:</p>
+<ul>
+<li><strong>Overwrite</strong> → a line diff vs the previous content (common prefix/suffix trimmed, <code>-</code>/<code>+</code> blocks, capped at 80 lines). A trailing-newline-only difference is reported as a <code>Note:</code> instead of polluting the diff.</li>
+<li><strong>New file</strong> → <code>Created … (N lines)</code>.</li>
+<li><strong>Identical content</strong> → says so explicitly.</li>
+<li><strong>Consecutive identical lines</strong> in the written file (the classic symptom of a botched edit being &quot;fixed&quot; by a rewrite) → a <code>Warning:</code> naming the duplicated lines. The same warning fires on <code>edit</code>.</li>
+</ul>
+<h3><code>edit</code></h3>
 <p>Edit a file using hashline anchors from a recent <code>read</code> or <code>grep</code>. Each <code>op</code> targets a line (or range) by anchor instead of pasting text.</p>
 <div class="table-wrap"><table><thead><tr><th>Parameter</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>path</code></td><td>Yes</td><td>File path</td></tr><tr><td><code>ops</code></td><td>Yes</td><td>Array of <code>replace</code> / <code>insert_after</code> / <code>insert_before</code> / <code>write</code> operations (see below)</td></tr></tbody></table></div><h4><code>ops[]</code> — anchor-based operations</h4>
 <p>Each op has an <code>op</code> discriminator and an inline <code>content</code>:</p>
@@ -472,7 +479,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 </ul>
 <p>Multiple ops in one call are validated against the pre-edit file and applied atomically. If any anchor is stale, the whole batch is rejected. Two <code>replace</code> ops whose ranges overlap are also rejected — merge them into one op with a wider range.</p>
 <p>A successful edit replies with the edited regions rendered with fresh anchors (±2 lines of context, overlapping windows merged, capped at 60 lines), so the result of the edit is immediately visible and follow-up ops can reuse the returned anchors without a re-<code>read</code>.</p>
-<p>Anchors are self-healing where the answer is unambiguous: if the anchored content merely moved (lines inserted above it), or a neighbour in the same chunk changed while the anchored line itself is intact, the edit is applied automatically and the reply carries a <code>Note:</code> describing the recovery. The tool never guesses — a stale anchor whose content is gone, or one that matches several nearby lines, is still an error, and that error returns fresh anchors plus a snippet around the target line so a re-<code>read</code> is usually unnecessary.</p>
+<p>Anchors are self-healing where the answer is unambiguous: if the anchored content merely moved (lines inserted above it), or a neighbour in the same chunk changed while the anchored line itself is intact, the edit is applied automatically and the reply carries a <code>Note:</code> describing the recovery. A stale anchor that matches a run of <strong>contiguous byte-identical lines</strong> (a line that got duplicated) is also recovered — the duplicates are interchangeable, so the edit applies to the nearest one. The tool never guesses beyond that — a stale anchor whose content is gone, or one that matches several <em>different</em> nearby lines, is still an error, and that error returns fresh anchors plus a snippet around the target line so a re-<code>read</code> is usually unnecessary.</p>
 <h4>Hashline anchors</h4>
 <p>Every line <code>read</code> and <code>grep</code> returns carries a two-part hash (the <code>chunk</code> anchor scheme): <code>LOCAL</code> fingerprints the line&#39;s own content, whitespace-normalized, so formatter-only edits don&#39;t invalidate anchors and a line that merely moved keeps its local hash; <code>CHUNK</code> fingerprints the 8-line chunk around the line, so nearby edits mark the anchor stale even when the line itself is untouched. To <code>edit</code> a line, copy the full <code>&lt;line&gt;:&lt;local&gt;:&lt;chunk&gt;</code> prefix into the <code>anchor</code> field of the op — do not re-type the line text. Pasting the whole gutter (<code>22:abc:rst→…</code>) or ASCII <code>-&gt;</code> is fine. If the model omits the line number and sends only <code>local:chunk</code>, <code>edit</code> recovers it when that pair is unique in the file.</p>
 <h2>Search Tools</h2>
@@ -490,6 +497,16 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 <p>For long-running commands (docker build, npm install, large test suites), increase the timeout:</p>
 <pre><code>bash(command=&quot;npm run build&quot;, timeout=600)
 </code></pre>
+<h4>Windows</h4>
+<p>A bare <code>bash</code> from PATH on Windows usually resolves to the WSL shim (<code>System32\bash.exe</code>), which loses piped output and can&#39;t see the Windows toolchain. cast therefore locates a native Git Bash, in this order:</p>
+<ol>
+<li><code>CAST_BASH</code> environment variable — used verbatim, overrides everything</li>
+<li>The <code>GitForWindows</code> registry key (<code>HKCU</code>, then <code>HKLM</code>) — covers installs on any drive</li>
+<li>Known install paths: <code>%ProgramFiles%\Git</code>, <code>%ProgramFiles(x86)%\Git</code>, <code>%LocalAppData%\Programs\Git</code> (no-admin install), scoop</li>
+<li>Derivation from <code>git.exe</code> on PATH (portable installs)</li>
+<li>Fallback to PATH <code>bash</code> — with a warning at startup and in the first tool result, since this is likely the WSL shim</li>
+</ol>
+<p>The system prompt tells the model the platform and that commands run via Git Bash (POSIX syntax), so it won&#39;t generate PowerShell.</p>
 <h2>SSH Tool</h2>
 <h3><code>ssh</code></h3>
 <p>Execute one command on a remote host via SSH. Only available when SSH hosts are configured.</p>
