@@ -134,3 +134,14 @@ describe("matchesToolsAllowlist", () => {
 		expect(matchesToolsAllowlist("my_plan_write", ["plan_*"])).toBe(false);
 	});
 });
+
+describe("BOM tolerance", () => {
+	it("parses frontmatter behind a UTF-8 BOM (Windows Notepad / Out-File)", async () => {
+		const { parseFrontmatter } = await import("../src/core/frontmatter.ts");
+		const withBom = "﻿---\nname: my-skill\ndescription: does things\n---\nbody text";
+		const parsed = parseFrontmatter(withBom);
+		expect(parsed.frontmatter.name).toBe("my-skill");
+		expect(parsed.frontmatter.description).toBe("does things");
+		expect(parsed.body).toBe("body text");
+	});
+});

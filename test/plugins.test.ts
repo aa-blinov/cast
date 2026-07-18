@@ -187,3 +187,17 @@ describe("ensureDefaultMarketplaces", () => {
 		expect(second.added).toEqual([]);
 	});
 });
+
+describe("stagingNameFor", () => {
+	it("derives a safe name from GitHub slugs and git URLs", async () => {
+		const { stagingNameFor } = await import("../src/core/plugins.ts");
+		expect(stagingNameFor("acme/market")).toBe("market");
+		expect(stagingNameFor("https://github.com/acme/market.git")).toBe("market");
+	});
+
+	it("never leaks backslashes or colons from Windows local paths", async () => {
+		const { stagingNameFor } = await import("../src/core/plugins.ts");
+		expect(stagingNameFor("C:\\dev\\my-marketplace")).toBe("my-marketplace");
+		expect(stagingNameFor("C:\\")).toBe("C-");
+	});
+});

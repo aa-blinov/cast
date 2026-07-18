@@ -4,6 +4,8 @@ Install reusable skill packs from catalogs — same `name@marketplace` shape as 
 
 MVP scope: plugins contribute **skills** (loaded into the agent catalog). MCP/hooks/agents inside plugins are not wired yet.
 
+Marketplaces are cloned with `git`, so git must be installed and in PATH (on Windows: Git for Windows — which cast's `bash` tool wants anyway). Without it, marketplace commands fail with an explicit message rather than a raw spawn error.
+
 ## Quick start
 
 On the first `/plugin` (or marketplace/install) cast seeds three default catalogs when missing:
