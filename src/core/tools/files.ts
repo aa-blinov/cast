@@ -169,10 +169,14 @@ export async function execWrite(args: Record<string, unknown>, cwd: string): Pro
 	const newDiffLines = hasTrailingNl ? newLines.slice(0, -1) : newLines;
 	let nlNote = "";
 	if (hadTrailingNl !== hasTrailingNl) {
-		nlNote = hasTrailingNl ? "\nNote: trailing newline added." : "\nNote: trailing newline removed — the file no longer ends with a newline.";
+		nlNote = hasTrailingNl
+			? "\nNote: trailing newline added."
+			: "\nNote: trailing newline removed — the file no longer ends with a newline.";
 	}
 	const diff = formatWriteDiff(oldDiffLines, newDiffLines);
-	return { content: `Overwrote ${filePath} (${newLines.length} lines). Diff vs previous content:\n\n${diff}${nlNote}${warn}` };
+	return {
+		content: `Overwrote ${filePath} (${newLines.length} lines). Diff vs previous content:\n\n${diff}${nlNote}${warn}`,
+	};
 }
 
 const MAX_DIFF_LINES = 80;

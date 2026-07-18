@@ -404,6 +404,26 @@ describe("streamChat — message sanitization", () => {
 		const parsed = JSON.parse(outToolCalls[0].function.arguments);
 		expect(parsed.error).toContain("truncated");
 	});
+
+	it("wraps non-object tool call arguments so mapping-only chat templates don't 400", async () => {
+		// Some providers' templates iterate arguments as a mapping; a bare
+		// array in history ("plan_check" called with ["step 1"]) then fails
+		// every request with "Can only get item pairs from a mapping".
+		const { client, sent } = capturingClient();
+		const toolMsg = {
+			role: "assistant",
+			content: null,
+			tool_calls: [
+				{ id: "call_1", type: "function", function: { name: "plan_check", arguments: '["1. step one"]' } },
+			],
+		};
+		const toolResult = { role: "tool", tool_call_id: "call_1", content: "ok" };
+		for await (const _ of streamChat(client, "m", [toolMsg, toolResult] as never, [], 100)) {
+			// drain
+		}
+		const outToolCalls = (sent()[0] as { tool_calls: Array<{ function: { arguments: string } }> }).tool_calls;
+		expect(JSON.parse(outToolCalls[0].function.arguments)).toEqual({ value: ["1. step one"] });
+	});
 });
 
 describe("describeTurnError", () => {

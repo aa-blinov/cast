@@ -336,7 +336,19 @@ export async function runStartup(
 		}
 		if (found) {
 			resumedSession = found;
-			if (!args.cliModel) model = found.model;
+			// Reuse the session's model only when it belongs to the current
+			// provider. After a provider switch the stored model likely doesn't
+			// exist at the new endpoint, and every resumed request would 400
+			// with an opaque provider error — fall back to the configured model
+			// instead and say so. Legacy sessions without providerUrl are
+			// treated the same way when their model differs from the current one.
+			if (!args.cliModel) {
+				if (found.providerUrl === config.baseURL) {
+					model = found.model;
+				} else if (found.model !== model) {
+					pickers.log(`Session was using "${found.model}" on a different provider — continuing with "${model}".`);
+				}
+			}
 			if (found.cwd && found.cwd !== cwd && existsSync(found.cwd)) {
 				cwd = found.cwd;
 			}
@@ -345,7 +357,9 @@ export async function runStartup(
 		}
 	}
 
-	const session = resumedSession ? { ...resumedSession, model } : createSession(model, cwd);
+	const session = resumedSession
+		? { ...resumedSession, model, providerUrl: config.baseURL }
+		: { ...createSession(model, cwd), providerUrl: config.baseURL };
 	const runner = createAgentRunner();
 	const systemPrompt = buildSystemPrompt(
 		persona,

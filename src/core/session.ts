@@ -1,4 +1,13 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	renameSync,
+	statSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import type { AppConfig } from "./config.ts";
@@ -56,6 +65,15 @@ export interface SessionState {
 	 * one-shot notice when the day advances. Optional for older session files.
 	 */
 	lastAnnouncedLocalDate?: string;
+	/**
+	 * Provider base URL this session's `model` belongs to. Resume only reuses
+	 * the stored model when the current provider matches — a session pinned to
+	 * "some-model" from provider A resumed against provider B otherwise sends
+	 * every request to a model that doesn't exist there, and providers answer
+	 * that with opaque 400s rather than a clean "unknown model". Optional for
+	 * sessions saved before this field existed (treated as "unknown provider").
+	 */
+	providerUrl?: string;
 }
 
 /** Fold one turn's usage into the session's running totals. When `opts.subagent`
@@ -495,9 +513,43 @@ function findSessionFilePath(id: string): string | null {
  */
 function readSessionFile(filePath: string): SessionState | null {
 	try {
-		return withUsageDefault(JSON.parse(readFileSync(filePath, "utf-8")));
+		const session = withUsageDefault(JSON.parse(readFileSync(filePath, "utf-8")));
+		normalizeStoredMessages(session);
+		return session;
 	} catch {
 		return null;
+	}
+}
+
+/**
+ * Undo provider-specific damage persisted by older builds: applyCacheControl
+ * used to mutate the live message objects (string content → [{type: "text",
+ * text, cache_control}]) and saveSession wrote that request-only shape to
+ * disk. A provider whose chat template expects plain string content then
+ * 400s on every resumed session ("Can only get item pairs from a mapping").
+ * Flatten all-text part arrays back to strings and drop cache_control
+ * everywhere; genuinely multimodal arrays (image parts) are kept as arrays,
+ * only stripped of cache_control.
+ */
+function normalizeStoredMessages(session: SessionState): void {
+	for (const message of session.messages as Array<{ content?: unknown }>) {
+		const content = message.content;
+		if (!Array.isArray(content)) continue;
+		const parts = content.map((p) => {
+			if (p && typeof p === "object" && "cache_control" in p) {
+				const { cache_control: _dropped, ...rest } = p as Record<string, unknown>;
+				return rest;
+			}
+			return p;
+		});
+		const allText = parts.every(
+			(p) =>
+				p &&
+				typeof p === "object" &&
+				(p as { type?: unknown }).type === "text" &&
+				typeof (p as { text?: unknown }).text === "string",
+		);
+		message.content = allText ? parts.map((p) => (p as { text: string }).text).join("") : parts;
 	}
 }
 
@@ -515,33 +567,212 @@ export function deleteSession(id: string): boolean {
 	return true;
 }
 
-export function listSessions(): SessionState[] {
+/** Every session file path: project subdirectories plus legacy flat files. */
+function listSessionFilePaths(): string[] {
 	const root = getSessionsRootDir();
-	const sessions: SessionState[] = [];
-
+	const paths: string[] = [];
 	for (const entry of readdirSync(root, { withFileTypes: true })) {
 		if (entry.isFile() && entry.name.endsWith(".json")) {
-			// Legacy flat file, pre-project-grouping.
-			const session = readSessionFile(join(root, entry.name));
-			if (session) sessions.push(session);
+			// Legacy flat session file, pre-project-grouping. The summary index
+			// lives at the root too and is NOT a session.
+			if (entry.name === INDEX_FILE_NAME) continue;
+			paths.push(join(root, entry.name));
 			continue;
 		}
 		if (!entry.isDirectory()) continue;
 		const projectDir = join(root, entry.name);
 		for (const f of readdirSync(projectDir).filter((name) => name.endsWith(".json"))) {
-			const session = readSessionFile(join(projectDir, f));
-			if (session) sessions.push(session);
+			paths.push(join(projectDir, f));
 		}
 	}
+	return paths;
+}
 
+export function listSessions(): SessionState[] {
+	const sessions: SessionState[] = [];
+	for (const filePath of listSessionFilePaths()) {
+		const session = readSessionFile(filePath);
+		if (session) sessions.push(session);
+	}
 	return sessions;
 }
 
-/** Most recently updated session, or null if none are saved yet. */
+// ============================================================================
+// Session summaries — the lightweight view the session picker runs on.
+//
+// Parsing every session file just to render a list row (and again on every
+// delete-menu round trip) reads tens of MB of JSON that is immediately thrown
+// away — only a few hundred bytes per session survive into the UI. The
+// summaries are cached in a single index file next to the sessions and
+// validated per-entry against each file's mtime: a stale, missing, or corrupt
+// index never returns wrong data, it just costs one re-parse of the affected
+// files. The index is a cache, not a source of truth — deleting it merely
+// makes the next listing rebuild it (the old full-parse cost, once).
+// ============================================================================
+
+const INDEX_FILE_NAME = "index.json";
+const INDEX_VERSION = 1;
+
+export interface SessionSummary {
+	id: string;
+	cwd?: string;
+	updatedAt: string;
+	msgCount: number;
+	/** First user message text — the list row's description. */
+	firstUserMessage: string;
+	/** Full-thread user/assistant text for the fuzzy filter. */
+	haystack: string;
+}
+
+interface IndexEntry extends SessionSummary {
+	mtimeMs: number;
+}
+
+interface SessionIndex {
+	version: number;
+	/** Keyed by absolute file path — ids are unique per directory, paths globally. */
+	entries: Record<string, IndexEntry>;
+}
+
+function indexFilePath(): string {
+	return join(getSessionsRootDir(), INDEX_FILE_NAME);
+}
+
+/** Tolerant read: missing, corrupt, or version-mismatched index → empty. */
+function readIndex(): SessionIndex {
+	try {
+		const parsed = JSON.parse(readFileSync(indexFilePath(), "utf-8")) as SessionIndex;
+		if (parsed?.version !== INDEX_VERSION || typeof parsed.entries !== "object" || parsed.entries === null) {
+			return { version: INDEX_VERSION, entries: {} };
+		}
+		return parsed;
+	} catch {
+		return { version: INDEX_VERSION, entries: {} };
+	}
+}
+
+/** Text of a message for indexing: plain string or first text part. */
+function messageText(m: { content?: unknown }): string {
+	const content = m.content;
+	if (typeof content === "string") return content;
+	if (Array.isArray(content)) {
+		const part = content.find((p: { type?: string }) => p.type === "text") as { text?: string } | undefined;
+		return part?.text ?? "";
+	}
+	return "";
+}
+
+/** First user message, newline-flattened — the picker row's description. */
+export function getFirstUserMessage(session: SessionState): string {
+	const msg = session.messages.find((m) => m.role === "user");
+	return msg ? messageText(msg).replace(/\n/g, " ").trim() : "";
+}
+
+/**
+ * Fuzzy-search haystack for a session: cwd + id + every user/assistant
+ * message text in the thread. System and tool messages are skipped — the
+ * system prompt alone is tens of KB of boilerplate shared by every session,
+ * and tool output is the bulk of a session's bytes; what's left (the actual
+ * dialog) measures ~1MB across hundreds of real sessions.
+ */
+export function getSearchHaystack(session: SessionState): string {
+	const parts: string[] = [];
+	if (session.cwd) parts.push(session.cwd);
+	parts.push(session.id);
+	for (const m of session.messages) {
+		if (m.role !== "user" && m.role !== "assistant") continue;
+		const text = messageText(m).replace(/\s+/g, " ").trim();
+		if (text) parts.push(text);
+	}
+	return parts.join("\n");
+}
+
+function summarizeSession(session: SessionState): SessionSummary {
+	return {
+		id: session.id,
+		...(session.cwd ? { cwd: session.cwd } : {}),
+		updatedAt: session.updatedAt,
+		msgCount: session.messages.length,
+		firstUserMessage: getFirstUserMessage(session),
+		haystack: getSearchHaystack(session),
+	};
+}
+
+/**
+ * Summaries of every saved session, served from the mtime-validated index.
+ * Only files that are new or changed since the index was written get parsed;
+ * entries for deleted files are pruned. The healed index is persisted (atomic
+ * rename, same as session files) whenever anything changed, so concurrent
+ * cast instances at worst overwrite each other with equally valid states.
+ */
+export function listSessionSummaries(): SessionSummary[] {
+	const index = readIndex();
+	const summaries: SessionSummary[] = [];
+	const seen = new Set<string>();
+	let dirty = false;
+
+	for (const path of listSessionFilePaths()) {
+		let mtimeMs: number;
+		try {
+			mtimeMs = statSync(path).mtimeMs;
+		} catch {
+			continue; // deleted between readdir and stat
+		}
+		seen.add(path);
+		const cached = index.entries[path];
+		if (cached && cached.mtimeMs === mtimeMs) {
+			summaries.push(cached);
+			continue;
+		}
+		const session = readSessionFile(path);
+		if (!session) continue; // corrupt file — don't index, don't list
+		const entry: IndexEntry = { ...summarizeSession(session), mtimeMs };
+		index.entries[path] = entry;
+		summaries.push(entry);
+		dirty = true;
+	}
+
+	for (const path of Object.keys(index.entries)) {
+		if (!seen.has(path)) {
+			delete index.entries[path];
+			dirty = true;
+		}
+	}
+
+	if (dirty) {
+		try {
+			writeFileAtomic(indexFilePath(), JSON.stringify(index));
+		} catch {
+			// Read-only FS or similar — the index is only a cache; listing
+			// still returned correct data, the next call just re-parses again.
+		}
+	}
+	return summaries;
+}
+
+/**
+ * Most recently updated session, or null if none are saved yet. Sorts by file
+ * mtime and parses only the newest file instead of parsing every session —
+ * `cast -c` needs exactly one session, and the full-parse version was paying
+ * tens of MB of JSON for it. mtime tracks updatedAt because saveSession is
+ * the only writer. Falls back to the next-newest file when the newest one is
+ * corrupt (half-written save), matching readSessionFile's tolerance.
+ */
 export function getMostRecentSession(): SessionState | null {
-	const sessions = listSessions();
-	if (sessions.length === 0) return null;
-	return sessions.reduce((latest, s) => (s.updatedAt > latest.updatedAt ? s : latest));
+	const stamped: Array<{ path: string; mtimeMs: number }> = [];
+	for (const path of listSessionFilePaths()) {
+		try {
+			stamped.push({ path, mtimeMs: statSync(path).mtimeMs });
+		} catch {
+			// Deleted between readdir and stat — skip.
+		}
+	}
+	stamped.sort((a, b) => b.mtimeMs - a.mtimeMs);
+	for (const { path } of stamped) {
+		const session = readSessionFile(path);
+		if (session) return session;
+	}
+	return null;
 }
 
 function generateSessionId(): string {
