@@ -202,12 +202,20 @@ function sanitizeMessages(messages: Message[]): Message[] {
 		const hasToolCalls = "tool_calls" in m && Array.isArray(m.tool_calls) && m.tool_calls.length > 0;
 		const hasContent = typeof m.content === "string" ? m.content.length > 0 : Boolean(m.content);
 
-		// Fix truncated tool call arguments in-place
+		// Fix malformed tool call arguments in-place
 		if (hasToolCalls) {
 			for (const tc of m.tool_calls!) {
 				if (tc.type !== "function") continue;
 				try {
-					JSON.parse(tc.function.arguments);
+					const parsed: unknown = JSON.parse(tc.function.arguments);
+					// Valid JSON but not an object (e.g. a bare array the model
+					// emitted for an array-typed parameter): some providers'
+					// chat templates iterate arguments as a mapping and 400 the
+					// whole request ("Can only get item pairs from a mapping").
+					// Wrap so the history stays replayable everywhere.
+					if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+						tc.function.arguments = JSON.stringify({ value: parsed });
+					}
 				} catch {
 					tc.function.arguments = '{"error": "arguments were truncated"}';
 				}
@@ -610,16 +618,23 @@ type ToolWithCacheControl = ChatCompletionTool & {
 
 const CACHE_CONTROL: CacheControlEphemeral = { type: "ephemeral" };
 
-function addCacheControlToTextContent(
+/**
+ * Return a copy of `message` with a cache_control marker on its (last) text
+ * content part, or null when there is nothing to mark. Never mutates the
+ * input: the caller's messages are the same objects saveSession persists,
+ * and writing the request-only structured-content shape into the session
+ * file bricks it on providers whose chat template expects plain strings.
+ */
+function withCacheControlOnText(
 	message: Extract<ChatCompletionMessageParam, { role: "system" | "user" | "assistant" | "developer" }>,
-): boolean {
+): ChatCompletionMessageParam | null {
 	const content = message.content;
 	if (typeof content === "string") {
-		if (content.length === 0) return false;
-		message.content = [
-			{ type: "text", text: content, cache_control: CACHE_CONTROL },
-		] as ContentPartWithCacheControl[];
-		return true;
+		if (content.length === 0) return null;
+		return {
+			...message,
+			content: [{ type: "text", text: content, cache_control: CACHE_CONTROL }] as ContentPartWithCacheControl[],
+		} as ChatCompletionMessageParam;
 	}
 	if (Array.isArray(content)) {
 		for (let i = content.length - 1; i >= 0; i--) {
@@ -630,40 +645,55 @@ function addCacheControlToTextContent(
 				"type" in part &&
 				(part as unknown as Record<string, unknown>).type === "text"
 			) {
-				(part as ContentPartWithCacheControl).cache_control = CACHE_CONTROL;
-				return true;
+				const parts = content.slice();
+				parts[i] = { ...(part as object), cache_control: CACHE_CONTROL } as ContentPartWithCacheControl;
+				return { ...message, content: parts } as ChatCompletionMessageParam;
 			}
 		}
 	}
-	return false;
+	return null;
 }
 
 /**
- * Apply Anthropic-style cache_control markers to messages and tools in-place.
- * Call right before sending each LLM request. The mutations are destructive
- * (messages are converted to structured content arrays), which is fine because
- * the messages array is rebuilt from session state each turn anyway.
+ * Apply Anthropic-style cache_control markers to messages and tools, returning
+ * request-ready copies. Call right before sending each LLM request and send
+ * the returned arrays — the inputs are left untouched, so session state never
+ * absorbs the provider-specific structured-content shape.
  */
-export function applyCacheControl(messages: Message[], tools: Tool[]): void {
+export function applyCacheControl(messages: Message[], tools: Tool[]): { messages: Message[]; tools: Tool[] } {
+	const outMessages = messages.slice();
+
 	// 1. System prompt — first system/developer message
-	for (const message of messages) {
+	for (let i = 0; i < outMessages.length; i++) {
+		const message = outMessages[i]!;
 		if (message.role === "system" || message.role === "developer") {
-			addCacheControlToTextContent(message);
+			const marked = withCacheControlOnText(message);
+			if (marked) outMessages[i] = marked as Message;
 			break;
 		}
 	}
 
 	// 2. Last tool definition
+	let outTools = tools;
 	if (tools.length > 0) {
-		const lastTool = tools[tools.length - 1] as ToolWithCacheControl;
-		lastTool.cache_control = CACHE_CONTROL;
+		outTools = tools.slice();
+		outTools[outTools.length - 1] = {
+			...tools[tools.length - 1]!,
+			cache_control: CACHE_CONTROL,
+		} as ToolWithCacheControl;
 	}
 
 	// 3. Last user or assistant message (walking backward)
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const message = messages[i];
+	for (let i = outMessages.length - 1; i >= 0; i--) {
+		const message = outMessages[i]!;
 		if (message.role === "user" || message.role === "assistant") {
-			if (addCacheControlToTextContent(message)) break;
+			const marked = withCacheControlOnText(message);
+			if (marked) {
+				outMessages[i] = marked as Message;
+				break;
+			}
 		}
 	}
+
+	return { messages: outMessages, tools: outTools };
 }

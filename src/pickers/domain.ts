@@ -1,7 +1,7 @@
 import { type AppConfig, fetchModels, runOnboardingCheck } from "../core/config.ts";
 import { DEFAULT_PERSONA, type LoadPersonasOptions, listPersonas, type Persona } from "../core/personas.ts";
 import { setModelsCache } from "../core/readline.ts";
-import { deleteSession, listSessions, type SessionState } from "../core/session.ts";
+import { deleteSession, listSessionSummaries, loadSession, type SessionState } from "../core/session.ts";
 import { getProjectTrust, type PermissionMode, type Settings, setProjectTrust } from "../core/settings.ts";
 import { buildReasoningParams, getReasoningOptions, type ModelReasoningMeta } from "../core/vendors.ts";
 import { type ModelSelection, PERMISSION_MODES, type Pickers, type PickOption } from "./types.ts";
@@ -139,18 +139,6 @@ export async function selectPersona(pickers: Pickers, options?: LoadPersonasOpti
 // Session resume
 // ============================================================================
 
-function getFirstUserMessage(session: SessionState): string {
-	const msg = session.messages.find((m) => m.role === "user");
-	if (!msg) return "";
-	const content =
-		typeof msg.content === "string"
-			? msg.content
-			: Array.isArray(msg.content)
-				? ((msg.content.find((p: { type?: string }) => p.type === "text") as { text?: string })?.text ?? "")
-				: "";
-	return content.replace(/\n/g, " ").trim();
-}
-
 function shortenCwd(cwd: string): string {
 	const parts = cwd.split("/").filter(Boolean);
 	if (parts.length <= 1) return cwd;
@@ -164,7 +152,11 @@ function pad(str: string, width: number): string {
 
 export async function selectSession(pickers: Pickers): Promise<SessionState | null> {
 	while (true) {
-		const sessions = listSessions().sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+		// Summaries, not full sessions: the list needs a few hundred bytes per
+		// row (and the fuzzy haystack), so the picker runs off the mtime-
+		// validated index. The full session is parsed only for the one actually
+		// chosen, via loadSession below.
+		const sessions = listSessionSummaries().sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
 
 		if (sessions.length === 0) {
 			pickers.log("No saved sessions to resume — starting fresh.");
@@ -172,38 +164,48 @@ export async function selectSession(pickers: Pickers): Promise<SessionState | nu
 		}
 
 		const options: PickOption<{
-			session: SessionState | null;
+			id: string | null;
 			action: "resume" | "fresh" | "delete";
 		}>[] = sessions.map((s) => {
-			const firstMsg = getFirstUserMessage(s);
+			const firstMsg = s.firstUserMessage;
 			const cwd = shortenCwd(s.cwd || "");
 			const date = s.updatedAt.slice(0, 10);
 			const time = s.updatedAt.slice(11, 16);
 			const msgCol = firstMsg.length > 40 ? `${firstMsg.slice(0, 40)}...` : firstMsg || "(empty)";
 			return {
-				value: { session: s, action: "resume" as const },
-				label: `${pad(cwd, 18)}${pad(msgCol, 43)}${date} ${time}  ${s.messages.length} msgs`,
+				value: { id: s.id, action: "resume" as const },
+				label: `${pad(cwd, 18)}${pad(msgCol, 43)}${date} ${time}  ${s.msgCount} msgs`,
 				description: firstMsg ? firstMsg : undefined,
+				searchText: s.haystack,
 			};
 		});
-		options.push({ value: { session: null, action: "fresh" as const }, label: "Start fresh" });
-		options.push({ value: { session: null, action: "delete" as const }, label: "Delete a session" });
+		options.push({ value: { id: null, action: "fresh" as const }, label: "Start fresh" });
+		options.push({ value: { id: null, action: "delete" as const }, label: "Delete a session" });
 
-		const picked = await pickers.pickOption(options, { title: "Sessions (most recent first)" });
+		const picked = await pickers.pickOption(options, {
+			title: "Sessions (most recent first)",
+			search: { placeholder: "filter by message, cwd, or id" },
+		});
 		if (!picked) return null;
 		if (picked.action === "fresh") return null;
-		if (picked.action === "resume" && picked.session) return picked.session;
+		if (picked.action === "resume" && picked.id) {
+			const session = loadSession(picked.id);
+			if (session) return session;
+			// Deleted (or corrupted) between listing and choosing — re-list.
+			pickers.log(`Session ${picked.id} is no longer readable — pick another.`);
+			continue;
+		}
 
 		const delOptions = sessions.map((s) => {
-			const firstMsg = getFirstUserMessage(s);
+			const firstMsg = s.firstUserMessage;
 			const cwd = shortenCwd(s.cwd || "");
 			const msgCol = firstMsg.length > 40 ? `${firstMsg.slice(0, 40)}...` : firstMsg || "(empty)";
-			return { value: s, label: `${pad(cwd, 18)}${pad(msgCol, 43)}${s.id}` };
+			return { value: s.id, label: `${pad(cwd, 18)}${pad(msgCol, 43)}${s.id}` };
 		});
 		const toDelete = await pickers.pickOption(delOptions, { title: "Delete which session?" });
 		if (toDelete) {
-			deleteSession(toDelete.id);
-			pickers.log(`Deleted session ${toDelete.id}.`);
+			deleteSession(toDelete);
+			pickers.log(`Deleted session ${toDelete}.`);
 		}
 	}
 }

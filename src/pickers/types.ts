@@ -6,6 +6,9 @@ export interface PickOption<T> {
 	value: T;
 	label: string;
 	description?: string;
+	/** Optional haystack for fuzzy search; concatenated into the match query
+	 *  alongside label + description. Not rendered. */
+	searchText?: string;
 	/** Dimmed label (e.g. skill whose plugin pack is disabled). */
 	muted?: boolean;
 	/** Space cannot toggle this row (still navigable). */
@@ -17,6 +20,9 @@ export interface PickOptions {
 	defaultIndex?: number;
 	/** A prior-attempt error shown in red above the title (e.g. failed validation). */
 	error?: string;
+	/** Enable inline fuzzy filter at the top of the modal. When set, the
+	 *  picker accepts printable input and Esc is the only cancel key. */
+	search?: { placeholder?: string };
 }
 
 /**
