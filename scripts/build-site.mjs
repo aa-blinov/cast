@@ -508,7 +508,7 @@ const LANDING_HTML = `<!DOCTYPE html>
 			<code>curl -fsSL https://aa-blinov.github.io/cast/install | bash</code>
 			<div class="label" style="margin-top:12px">Windows (PowerShell)</div>
 			<code>irm https://aa-blinov.github.io/cast/install.ps1 | iex</code>
-			<div class="note">Requires Node.js 18+. Self-contained bundle — no npm packages needed at runtime.</div>
+			<div class="note">Requires Node.js 22+. Self-contained bundle — no npm packages needed at runtime.</div>
 		</div>
 	</section>
 

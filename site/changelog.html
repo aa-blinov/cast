@@ -444,7 +444,34 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 	<article class="content">
 		<h1>Changelog</h1>
 <p>All notable user-facing changes to cast, newest first.</p>
-<h2>Unreleased</h2>
+<h2>0.7.1</h2>
+<h3>Added</h3>
+<ul>
+<li>Fuzzy search in the session picker (<code>--resume</code>, <code>/sessions</code>): type to filter by project path, session id, or any user/assistant message text in the thread; substring matches rank above subsequence (typo-tolerant) matches. <code>Esc</code> is the only cancel key while searching — <code>q</code> goes into the query.</li>
+<li><code>write</code> replies with a line diff vs the previous content (plus trailing-newline notes) instead of a byte count; new-file and identical-content cases are reported explicitly.</li>
+<li><code>write</code> and <code>edit</code> warn when the resulting file contains consecutive identical lines — the classic symptom of a duplicated-line botch.</li>
+<li><code>edit</code> auto-recovers a stale anchor that matches a run of contiguous byte-identical duplicate lines (they&#39;re interchangeable), instead of dead-ending with &quot;multiple lines match&quot;.</li>
+<li>Windows: the <code>bash</code> tool locates a native Git Bash (CAST_BASH env override → GitForWindows registry key → known install paths incl. no-admin and scoop → derivation from <code>git</code> on PATH) instead of picking up the WSL shim from PATH, which loses output. Falling back to PATH bash warns at startup and in the first tool result.</li>
+<li>Session summary index (<code>~/.cast/sessions/index.json</code>): the picker lists hundreds of sessions from an mtime-validated cache (~5ms warm) instead of parsing every session file; the full session is parsed only for the one you pick. Self-healing — safe to delete.</li>
+<li><code>cast -c</code> finds the most recent session by file mtime and parses only that file (was: parse everything).</li>
+</ul>
+<h3>Fixed</h3>
+<ul>
+<li>Prompt-cache markers (<code>cache_control</code>) no longer leak into saved sessions: <code>applyCacheControl</code> works on request-only copies, and loading normalizes sessions damaged by older builds — fixes opaque 400s (&quot;Can only get item pairs from a mapping&quot;) when resuming after a provider switch.</li>
+<li>Resuming a session created on a different provider falls back to the currently configured model (with a notice) instead of sending requests to a model the new provider doesn&#39;t serve.</li>
+<li>Tool-call arguments that are valid JSON but not an object (e.g. a bare array) are wrapped before sending, so providers whose chat template iterates arguments as a mapping don&#39;t reject the whole history.</li>
+<li>Stdio MCP servers inherit cast&#39;s full environment (config <code>env</code> wins) — shell-exported API keys now reach servers; the SDK&#39;s whitelist default silently stripped them.</li>
+<li>Remote MCP servers that only speak the legacy HTTP+SSE transport now connect: Streamable HTTP is tried first, then one SSE retry on rejection. SSE JSON-RPC POSTs run on a dedicated connection pool — the long-lived <code>/sse</code> stream otherwise serializes them behind itself in Node&#39;s fetch and the handshake hangs forever.</li>
+<li>SKILL.md / persona / rules frontmatter survives a UTF-8 BOM (Windows Notepad, <code>Out-File</code>); previously the whole frontmatter was silently discarded.</li>
+<li>Plugin marketplace commands report &quot;git is not installed or not in PATH&quot; instead of a raw <code>spawn git ENOENT</code>; staging directory names derived from Windows local paths no longer contain <code>\</code> or <code>:</code>; marketplace install retries <code>rm</code>/rename against transient Windows EPERM/EBUSY locks.</li>
+<li><code>getMostRecentSession</code> skips a corrupt (half-written) newest session file and falls back to the next one.</li>
+<li><code>bash</code> tool reports a clean error when the bash executable itself can&#39;t be spawned (e.g. a wrong <code>CAST_BASH</code>), instead of hanging.</li>
+</ul>
+<h3>Changed</h3>
+<ul>
+<li>Docs: provider credentials are configured only via <code>~/.cast/settings.json</code> / <code>/provider</code> — the <code>PROVIDER_BASE_URL</code> / <code>PROVIDER_API_KEY</code> environment variables were documented but never read; the docs no longer claim otherwise.</li>
+</ul>
+<h2>0.7.0</h2>
 <h3>Added</h3>
 <ul>
 <li>After compaction (auto or <code>/compact</code>), cast injects a separate trailing <code>&lt;system-reminder&gt;</code> user message with edited files and a TODO list of open plan steps. Steps come from <code>- [ ]</code> checkboxes when present, otherwise from <code>###</code> headings under <code>## Steps</code> (common in real plans). Omitted when there is nothing actionable; summary text stays reminder-free.</li>
@@ -462,6 +489,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 <li>Skill discovery loads skills.sh universal paths: <code>.agents/skills/</code> (project, trust-gated) and <code>~/.config/agents/skills/</code> / <code>~/.agents/skills/</code> (global), so <code>npx skills add … -a universal</code> works without copying into <code>.cast/skills/</code>.</li>
 <li><code>/skills</code>, <code>/mcp</code>, and <code>/plugin</code> pickers/lists sort entries alphabetically by name (skills were previously discovery-order, so plugin skills clustered at the bottom).</li>
 <li><code>/skills</code> labels plugin skills with their pack id (<code>plugin · name@marketplace</code>). Skills from a disabled pack stay visible but locked (muted) until <code>/plugin</code> re-enables the pack.</li>
+<li><code>/skills uninstall</code> lists plugin skills as muted/locked (remove the pack via <code>/plugin uninstall</code>); Enter on those rows is ignored.</li>
 </ul>
 <h3>Fixed</h3>
 <ul>
@@ -475,6 +503,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 <h3>Changed</h3>
 <ul>
 <li>Docs spell out hot-reload vs <code>/reload</code>: <code>/skills</code> / <code>/mcp</code> / <code>/plugin</code> toggle and install/uninstall apply in-session; <code>/reload</code> is only for on-disk file drops/edits (same chat, no restart).</li>
+<li><code>/skills</code> / <code>/mcp</code> / <code>/plugin</code> pickers put the full description on the focused second line (wrap), not truncated into the label.</li>
 <li><code>task</code> UI shows the delegated assignment text (not raw JSON <code>key=value</code> args). Non-default subagent names are prefixed (<code>explore · …</code>).</li>
 <li>Subagent final-answer extraction ignores empty placeholder turns (<code>(no response)</code>); the worker prompt requires a standalone closing report.</li>
 <li>Sync <code>task</code> subagents now receive the same environment grounding as the parent: Current System State (cwd/date/platform/model), always-apply + lazy rules, skills catalog, MCP server list, and SSH hosts.</li>

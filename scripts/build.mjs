@@ -24,7 +24,7 @@ import { build } from "esbuild";
 		bundle: true,
 		platform: "node",
 		format: "esm",
-		target: "node18", // matches the oldest Node version CI actually tests (see .github/workflows/ci.yml)
+		target: "node22", // matches the oldest Node version CI actually tests (see .github/workflows/ci.yml)
 		outfile: "dist/index.js",
 		// ink optionally imports react-devtools-core for its DevTools integration,
 		// gated behind `if (process.env.DEV === 'true')` — but that file (devtools.js)

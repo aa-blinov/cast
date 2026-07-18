@@ -34,7 +34,7 @@ Windows (PowerShell):
 irm https://aa-blinov.github.io/cast/install.ps1 | iex
 ```
 
-Requires Node.js 18+. Self-contained bundle — no npm packages needed at runtime.
+Requires Node.js 22+. Self-contained bundle — no npm packages needed at runtime.
 
 Pin a version: `CAST_VERSION=0.1.0 curl ... | bash`
 Upgrade later: `cast upgrade`
