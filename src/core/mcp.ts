@@ -20,11 +20,11 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { Agent } from "undici";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import { Agent } from "undici";
 import type { Tool } from "./llm.ts";
 import type { ToolResult } from "./tools.ts";
 
@@ -168,10 +168,13 @@ interface McpContentPart {
  */
 const sseAgent = new Agent({ pipelining: 0 });
 function sseFetch(url: string | URL, init?: RequestInit): Promise<Response> {
-	return fetch(url as Parameters<typeof fetch>[0], {
-		...init,
-		dispatcher: sseAgent,
-	} as RequestInit);
+	return fetch(
+		url as Parameters<typeof fetch>[0],
+		{
+			...init,
+			dispatcher: sseAgent,
+		} as RequestInit,
+	);
 }
 
 export function mcpHttpFetch(url: string | URL | Request, init?: RequestInit): Promise<Response> {
