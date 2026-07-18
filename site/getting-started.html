@@ -445,7 +445,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 		<h1>Getting Started</h1>
 <h2>Requirements</h2>
 <ul>
-<li><strong>Node.js 18+</strong></li>
+<li><strong>Node.js 22+</strong></li>
 <li>An OpenAI-compatible API endpoint (OpenRouter, OpenAI, Ollama, vLLM, LiteLLM, or your own)</li>
 </ul>
 <h2>Install</h2>
@@ -477,8 +477,8 @@ cast -c
 </code></pre>
 <h2>Provider Setup</h2>
 <p>On first run, cast asks for your provider URL and API key, then saves both to <code>~/.cast/settings.json</code>. No <code>.env</code> file needed.</p>
-<p>You can also set environment variables:</p>
-<div class="table-wrap"><table><thead><tr><th>Variable</th><th>Description</th></tr></thead><tbody><tr><td><code>PROVIDER_BASE_URL</code></td><td>OpenAI-compatible endpoint URL</td></tr><tr><td><code>PROVIDER_API_KEY</code></td><td>API key</td></tr><tr><td><code>CAST_CWD</code></td><td>Override working directory</td></tr><tr><td><code>CAST_VERSION</code></td><td>Pin install version (installer only)</td></tr></tbody></table></div><p>Works with anything that speaks the OpenAI API:</p>
+<p>Supported environment variables (provider credentials are <strong>not</strong> read from env — use the settings file or <code>/provider</code>):</p>
+<div class="table-wrap"><table><thead><tr><th>Variable</th><th>Description</th></tr></thead><tbody><tr><td><code>CAST_CWD</code></td><td>Override working directory</td></tr><tr><td><code>CAST_BASH</code></td><td>Path to the bash executable for the <code>bash</code> tool (Windows: non-standard Git Bash / msys2)</td></tr><tr><td><code>CAST_VERSION</code></td><td>Pin install version (installer only)</td></tr></tbody></table></div><p>Works with anything that speaks the OpenAI API:</p>
 <ul>
 <li><strong>OpenRouter</strong>: <code>https://openrouter.ai/api/v1</code></li>
 <li><strong>OpenAI</strong>: <code>https://api.openai.com/v1</code></li>

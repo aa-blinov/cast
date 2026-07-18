@@ -445,6 +445,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 		<h1>Plugins &amp; Marketplaces</h1>
 <p>Install reusable skill packs from catalogs — same <code>name@marketplace</code> shape as Claude Code / Grok Build.</p>
 <p>MVP scope: plugins contribute <strong>skills</strong> (loaded into the agent catalog). MCP/hooks/agents inside plugins are not wired yet.</p>
+<p>Marketplaces are cloned with <code>git</code>, so git must be installed and in PATH (on Windows: Git for Windows — which cast&#39;s <code>bash</code> tool wants anyway). Without it, marketplace commands fail with an explicit message rather than a raw spawn error.</p>
 <h2>Quick start</h2>
 <p>On the first <code>/plugin</code> (or marketplace/install) cast seeds three default catalogs when missing:</p>
 <div class="table-wrap"><table><thead><tr><th>Label</th><th>Source</th></tr></thead><tbody><tr><td>Codex</td><td><code>openai/plugins</code></td></tr><tr><td>Claude</td><td><code>anthropics/claude-plugins-official</code></td></tr><tr><td>Grok</td><td><code>xai-org/plugin-marketplace</code></td></tr></tbody></table></div><p>Then:</p>

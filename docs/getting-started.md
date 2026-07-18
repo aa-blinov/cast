@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- **Node.js 18+**
+- **Node.js 22+**
 - An OpenAI-compatible API endpoint (OpenRouter, OpenAI, Ollama, vLLM, LiteLLM, or your own)
 
 ## Install
