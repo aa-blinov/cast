@@ -335,6 +335,18 @@ function rawPluginSource(
 // Git helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Directory-safe staging name derived from a marketplace source. Handles
+ * Windows local paths too: `C:\dev\my-marketplace` must not yield a name
+ * containing `\` or `:` (invalid in a directory name) — split on both
+ * separators and strip anything else unsafe.
+ */
+export function stagingNameFor(source: string): string {
+	const last = source.split(/[/\\]/).filter(Boolean).pop() ?? "";
+	const cleaned = last.replace(/\.git$/, "").replace(/[^a-zA-Z0-9._-]/g, "-");
+	return cleaned || "marketplace";
+}
+
 function runGit(args: string[], cwd?: string): string {
 	try {
 		return execFileSync("git", args, {
@@ -343,7 +355,15 @@ function runGit(args: string[], cwd?: string): string {
 			stdio: ["ignore", "pipe", "pipe"],
 		}).trim();
 	} catch (error) {
-		const err = error as { stderr?: Buffer | string; message?: string };
+		const err = error as { stderr?: Buffer | string; message?: string; code?: string };
+		// git missing entirely (common on Windows) — a raw "spawn git ENOENT"
+		// tells the user nothing about what to install.
+		if (err.code === "ENOENT") {
+			throw new Error(
+				"git is not installed or not in PATH — plugin marketplaces are cloned with git. " +
+					"Install git (on Windows: Git for Windows) and retry.",
+			);
+		}
 		const stderr = err.stderr ? String(err.stderr).trim() : "";
 		throw new Error(stderr || err.message || `git ${args.join(" ")} failed`);
 	}
@@ -404,22 +424,19 @@ export function addMarketplace(source: string, paths: PluginsPaths = defaultPlug
 	}
 
 	const url = resolveGitUrl(source);
-	const tmpName = source.includes("/")
-		? source
-				.split("/")
-				.pop()!
-				.replace(/\.git$/, "")
-		: "marketplace";
-	const staging = join(marketplacesDir(paths), `.staging-${tmpName}-${process.pid}`);
+	const staging = join(marketplacesDir(paths), `.staging-${stagingNameFor(source)}-${process.pid}`);
 	try {
-		if (existsSync(staging)) rmSync(staging, { recursive: true, force: true });
+		if (existsSync(staging)) rmSync(staging, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
 		runGit(["clone", "--depth", "1", url, staging]);
 		const catalog = loadMarketplaceCatalog(staging);
 		const dest = join(marketplacesDir(paths), catalog.name);
-		if (existsSync(dest)) rmSync(dest, { recursive: true, force: true });
+		// Retries: on Windows an antivirus/indexer briefly holding a handle on
+		// freshly-cloned files makes rm/rename fail with EPERM/EBUSY — a couple
+		// of spaced attempts is the standard workaround.
+		if (existsSync(dest)) rmSync(dest, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
 		// rename staging → dest
 		cpSync(staging, dest, { recursive: true });
-		rmSync(staging, { recursive: true, force: true });
+		rmSync(staging, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
 		const known: KnownMarketplace = {
 			name: catalog.name,
 			source,

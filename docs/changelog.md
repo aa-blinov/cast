@@ -2,6 +2,33 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Added
+
+- Fuzzy search in the session picker (`--resume`, `/sessions`): type to filter by project path, session id, or any user/assistant message text in the thread; substring matches rank above subsequence (typo-tolerant) matches. `Esc` is the only cancel key while searching — `q` goes into the query.
+- `write` replies with a line diff vs the previous content (plus trailing-newline notes) instead of a byte count; new-file and identical-content cases are reported explicitly.
+- `write` and `edit` warn when the resulting file contains consecutive identical lines — the classic symptom of a duplicated-line botch.
+- `edit` auto-recovers a stale anchor that matches a run of contiguous byte-identical duplicate lines (they're interchangeable), instead of dead-ending with "multiple lines match".
+- Windows: the `bash` tool locates a native Git Bash (CAST_BASH env override → GitForWindows registry key → known install paths incl. no-admin and scoop → derivation from `git` on PATH) instead of picking up the WSL shim from PATH, which loses output. Falling back to PATH bash warns at startup and in the first tool result.
+- Session summary index (`~/.cast/sessions/index.json`): the picker lists hundreds of sessions from an mtime-validated cache (~5ms warm) instead of parsing every session file; the full session is parsed only for the one you pick. Self-healing — safe to delete.
+- `cast -c` finds the most recent session by file mtime and parses only that file (was: parse everything).
+
+### Fixed
+
+- Prompt-cache markers (`cache_control`) no longer leak into saved sessions: `applyCacheControl` works on request-only copies, and loading normalizes sessions damaged by older builds — fixes opaque 400s ("Can only get item pairs from a mapping") when resuming after a provider switch.
+- Resuming a session created on a different provider falls back to the currently configured model (with a notice) instead of sending requests to a model the new provider doesn't serve.
+- Tool-call arguments that are valid JSON but not an object (e.g. a bare array) are wrapped before sending, so providers whose chat template iterates arguments as a mapping don't reject the whole history.
+- Stdio MCP servers inherit cast's full environment (config `env` wins) — shell-exported API keys now reach servers; the SDK's whitelist default silently stripped them.
+- SKILL.md / persona / rules frontmatter survives a UTF-8 BOM (Windows Notepad, `Out-File`); previously the whole frontmatter was silently discarded.
+- Plugin marketplace commands report "git is not installed or not in PATH" instead of a raw `spawn git ENOENT`; staging directory names derived from Windows local paths no longer contain `\` or `:`; marketplace install retries `rm`/rename against transient Windows EPERM/EBUSY locks.
+- `getMostRecentSession` skips a corrupt (half-written) newest session file and falls back to the next one.
+- `bash` tool reports a clean error when the bash executable itself can't be spawned (e.g. a wrong `CAST_BASH`), instead of hanging.
+
+### Changed
+
+- Docs: provider credentials are configured only via `~/.cast/settings.json` / `/provider` — the `PROVIDER_BASE_URL` / `PROVIDER_API_KEY` environment variables were documented but never read; the docs no longer claim otherwise.
+
 ## 0.7.0
 
 ### Added
