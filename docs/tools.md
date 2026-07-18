@@ -25,6 +25,13 @@ Write content to a file. Creates the file if it doesn't exist, overwrites if it 
 | `path` | Yes | File path |
 | `content` | Yes | Content to write |
 
+The reply is not a byte count — it shows what actually changed, so a from-memory rewrite that reproduced stale content is caught immediately:
+
+- **Overwrite** → a line diff vs the previous content (common prefix/suffix trimmed, `-`/`+` blocks, capped at 80 lines). A trailing-newline-only difference is reported as a `Note:` instead of polluting the diff.
+- **New file** → `Created … (N lines)`.
+- **Identical content** → says so explicitly.
+- **Consecutive identical lines** in the written file (the classic symptom of a botched edit being "fixed" by a rewrite) → a `Warning:` naming the duplicated lines. The same warning fires on `edit`.
+
 ### `edit`
 
 Edit a file using hashline anchors from a recent `read` or `grep`. Each `op` targets a line (or range) by anchor instead of pasting text.
@@ -61,7 +68,7 @@ Multiple ops in one call are validated against the pre-edit file and applied ato
 
 A successful edit replies with the edited regions rendered with fresh anchors (±2 lines of context, overlapping windows merged, capped at 60 lines), so the result of the edit is immediately visible and follow-up ops can reuse the returned anchors without a re-`read`.
 
-Anchors are self-healing where the answer is unambiguous: if the anchored content merely moved (lines inserted above it), or a neighbour in the same chunk changed while the anchored line itself is intact, the edit is applied automatically and the reply carries a `Note:` describing the recovery. The tool never guesses — a stale anchor whose content is gone, or one that matches several nearby lines, is still an error, and that error returns fresh anchors plus a snippet around the target line so a re-`read` is usually unnecessary.
+Anchors are self-healing where the answer is unambiguous: if the anchored content merely moved (lines inserted above it), or a neighbour in the same chunk changed while the anchored line itself is intact, the edit is applied automatically and the reply carries a `Note:` describing the recovery. A stale anchor that matches a run of **contiguous byte-identical lines** (a line that got duplicated) is also recovered — the duplicates are interchangeable, so the edit applies to the nearest one. The tool never guesses beyond that — a stale anchor whose content is gone, or one that matches several *different* nearby lines, is still an error, and that error returns fresh anchors plus a snippet around the target line so a re-`read` is usually unnecessary.
 
 #### Hashline anchors
 
@@ -122,6 +129,18 @@ For long-running commands (docker build, npm install, large test suites), increa
 ```
 bash(command="npm run build", timeout=600)
 ```
+
+#### Windows
+
+A bare `bash` from PATH on Windows usually resolves to the WSL shim (`System32\bash.exe`), which loses piped output and can't see the Windows toolchain. cast therefore locates a native Git Bash, in this order:
+
+1. `CAST_BASH` environment variable — used verbatim, overrides everything
+2. The `GitForWindows` registry key (`HKCU`, then `HKLM`) — covers installs on any drive
+3. Known install paths: `%ProgramFiles%\Git`, `%ProgramFiles(x86)%\Git`, `%LocalAppData%\Programs\Git` (no-admin install), scoop
+4. Derivation from `git.exe` on PATH (portable installs)
+5. Fallback to PATH `bash` — with a warning at startup and in the first tool result, since this is likely the WSL shim
+
+The system prompt tells the model the platform and that commands run via Git Bash (POSIX syntax), so it won't generate PowerShell.
 
 ## SSH Tool
 

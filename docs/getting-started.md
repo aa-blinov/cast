@@ -53,13 +53,12 @@ cast -c
 
 On first run, cast asks for your provider URL and API key, then saves both to `~/.cast/settings.json`. No `.env` file needed.
 
-You can also set environment variables:
+Supported environment variables (provider credentials are **not** read from env — use the settings file or `/provider`):
 
 | Variable | Description |
 |----------|-------------|
-| `PROVIDER_BASE_URL` | OpenAI-compatible endpoint URL |
-| `PROVIDER_API_KEY` | API key |
 | `CAST_CWD` | Override working directory |
+| `CAST_BASH` | Path to the bash executable for the `bash` tool (Windows: non-standard Git Bash / msys2) |
 | `CAST_VERSION` | Pin install version (installer only) |
 
 Works with anything that speaks the OpenAI API:

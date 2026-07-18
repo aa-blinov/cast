@@ -191,13 +191,12 @@ run subcommand:
 
 On first run, cast asks for your provider URL and API key, then saves both to `~/.cast/settings.json`. No `.env` file needed.
 
-Or set env vars:
+Other environment variables (provider credentials live in the settings file, not env):
 
 | Variable | Description |
 |----------|-------------|
-| `PROVIDER_BASE_URL` | OpenAI-compatible endpoint URL |
-| `PROVIDER_API_KEY` | API key |
 | `CAST_CWD` | Override working directory |
+| `CAST_BASH` | Bash executable for the `bash` tool (Windows: non-standard Git Bash / msys2) |
 | `CAST_VERSION` | Pin install version (installer) |
 
 Works with anything that speaks the OpenAI API: OpenRouter, OpenAI, Ollama (`http://localhost:11434/v1`), vLLM, LiteLLM, Azure OpenAI, etc.

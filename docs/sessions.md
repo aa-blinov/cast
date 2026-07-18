@@ -17,6 +17,8 @@ Sessions are stored as JSON files in `~/.cast/sessions/`:
 
 Sessions are grouped by the project directory (`cwd`) they were created in. The directory name is an encoded version of the absolute path.
 
+`index.json` at the root is a summary cache for the session picker (metadata + search text per session, validated per-entry against file mtimes). It's a cache, not a source of truth — deleting it is safe; the next picker open rebuilds it.
+
 ## Session State
 
 Each session tracks:
@@ -44,13 +46,15 @@ cast -s nd4k8f2x           # Same (alias)
 
 When resuming a session from a different project directory, cast automatically switches to that project's `cwd` and reloads its skills, rules, and MCP servers.
 
+Sessions remember which provider their model belongs to. If you've switched providers since, resume falls back to your currently configured model (with a notice) instead of sending requests to a model the new provider doesn't have.
+
 ### Interactive
 
 ```
 /sessions                  # Opens session picker
 ```
 
-The picker shows sessions with their id, message count, model, and last-updated time. Type `d<N>` to delete a session.
+The picker shows each session's project, first message, last-updated time, and message count — and filters as you type. The search matches the project path, session id, and **every user/assistant message in the thread**: substring matches rank first (earlier = higher), then in-order subsequence matches (so minor typos still hit). `Backspace` edits the query, `Esc` closes, `Enter` resumes the highlighted session. Deleting goes through the `Delete a session` row at the bottom (find it by typing its name).
 
 ## Creating New Sessions
 

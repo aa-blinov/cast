@@ -33,12 +33,11 @@ Settings are written atomically (temp file + rename) to prevent corruption from 
 
 | Variable | Description |
 |----------|-------------|
-| `PROVIDER_BASE_URL` | OpenAI-compatible endpoint URL |
-| `PROVIDER_API_KEY` | API key |
 | `CAST_CWD` | Override working directory |
+| `CAST_BASH` | Path to the bash executable the `bash` tool spawns (overrides auto-detection; useful for msys2 or non-standard Git Bash installs on Windows) |
 | `CAST_VERSION` | Pin install version (installer only) |
 
-Environment variables are an alternative to the settings file for provider configuration.
+Provider URL and API key are configured **only** via `~/.cast/settings.json` (first-run prompt, or `/provider` in-session). cast does not read `PROVIDER_BASE_URL` / `PROVIDER_API_KEY` environment variables or a project `.env` — editing those changes nothing.
 
 ## .cast/ Directory Structure
 

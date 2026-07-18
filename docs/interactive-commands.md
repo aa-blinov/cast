@@ -7,7 +7,7 @@ All commands are typed at the TUI prompt, prefixed with `/`. Unknown slash comma
 | Command | Description |
 |---------|-------------|
 | `/new` | Start a new session (autosaves current if non-empty) |
-| `/sessions` | List saved sessions, switch to one, or type `d<N>` to delete |
+| `/sessions` | Session picker with type-to-filter search (by message text, project path, or id); switch or delete |
 | `/clear` | Clear conversation context (and save the cleared state) |
 | `/compact` | Force context compaction now (auto-triggers near the limit) |
 | `/copy` | Copy last assistant response to clipboard |

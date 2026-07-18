@@ -74,7 +74,10 @@ function parseInlineArray(value: string): string[] | undefined {
 }
 
 export function parseFrontmatter(content: string): ParsedFrontmatter {
-	const normalized = content.replace(/\r\n/g, "\n");
+	// Strip a UTF-8 BOM: Windows editors (Notepad, PowerShell Out-File) prepend
+	// one, and `﻿---` failing the startsWith check silently discarded the
+	// whole frontmatter — a skill would load with no name or description.
+	const normalized = content.replace(/^﻿/, "").replace(/\r\n/g, "\n");
 	if (!normalized.startsWith("---")) return { frontmatter: {}, body: normalized };
 
 	const end = normalized.indexOf("\n---", 3);

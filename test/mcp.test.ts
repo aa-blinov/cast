@@ -304,3 +304,27 @@ describe("connectMcpServers (real remote/streamableHTTP MCP server, not mocked)"
 		}
 	});
 });
+
+describe("buildServerEnv", () => {
+	it("inherits the parent environment so shell-exported API keys reach stdio servers", async () => {
+		const { buildServerEnv } = await import("../src/core/mcp.ts");
+		process.env.CAST_TEST_SECRET = "sekret";
+		try {
+			const env = buildServerEnv();
+			expect(env.CAST_TEST_SECRET).toBe("sekret");
+			expect(env.PATH).toBeTruthy();
+		} finally {
+			delete process.env.CAST_TEST_SECRET;
+		}
+	});
+
+	it("lets the server config override inherited variables", async () => {
+		const { buildServerEnv } = await import("../src/core/mcp.ts");
+		process.env.CAST_TEST_SECRET = "parent";
+		try {
+			expect(buildServerEnv({ CAST_TEST_SECRET: "config-wins" }).CAST_TEST_SECRET).toBe("config-wins");
+		} finally {
+			delete process.env.CAST_TEST_SECRET;
+		}
+	});
+});

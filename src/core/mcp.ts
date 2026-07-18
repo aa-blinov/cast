@@ -98,6 +98,22 @@ export interface McpSetupResult {
 // server unnoticed for too long.
 const CONNECT_TIMEOUT_MS = 30_000;
 
+/**
+ * Full parent environment for stdio MCP servers, with the config's `env`
+ * winning on conflicts. The SDK's default is a safe-vars whitelist (PATH,
+ * HOME, ...), which silently strips API keys the user exported in their
+ * shell — a server that works when launched by hand then fails under cast
+ * with no clue why. Inheriting everything adds no exposure here: the bash
+ * tool already hands the model the same environment.
+ */
+export function buildServerEnv(cfgEnv?: Record<string, string>): Record<string, string> {
+	const merged: Record<string, string> = {};
+	for (const [key, value] of Object.entries(process.env)) {
+		if (typeof value === "string") merged[key] = value;
+	}
+	return { ...merged, ...cfgEnv };
+}
+
 function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
 	let timer: ReturnType<typeof setTimeout>;
 	const timeout = new Promise<T>((_, reject) => {
@@ -168,7 +184,12 @@ export async function connectMcpServers(servers: Record<string, McpServerConfig>
 					fetch: mcpHttpFetch,
 				});
 			} else if (cfg.command) {
-				transport = new StdioClientTransport({ command: cfg.command, args: cfg.args, env: cfg.env, cwd: cfg.cwd });
+				transport = new StdioClientTransport({
+					command: cfg.command,
+					args: cfg.args,
+					env: buildServerEnv(cfg.env),
+					cwd: cfg.cwd,
+				});
 			} else {
 				diagnostics.push(
 					`mcp server "${serverName}": needs either "command" (local) or "url" (remote) in its config`,
