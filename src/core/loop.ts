@@ -743,9 +743,10 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 				syncSystemPrompt();
 
 				// Stream assistant response
-				// Apply prompt caching markers in-place before each request.
-				// Mutates messages/tools but session state is rebuilt each turn.
-				applyCacheControl(messages, tools);
+				// Apply prompt caching markers to request-ready copies; the live
+				// messages/tools arrays stay clean so saveSession never persists
+				// the provider-specific structured-content shape.
+				const cached = applyCacheControl(messages, tools);
 
 				// Vision fallback: if the model doesn't support images (404 from
 				// OpenRouter or similar), strip any image_url messages we added
@@ -760,8 +761,8 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 					completion = await streamAndCollect(
 						client,
 						currentModel,
-						messages,
-						tools,
+						cached.messages,
+						cached.tools,
 						config.maxResponseTokens,
 						signal,
 						(token) => {

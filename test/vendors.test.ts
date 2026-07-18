@@ -71,30 +71,46 @@ describe("isContextOverflow", () => {
 // ============================================================================
 
 describe("applyCacheControl", () => {
-	it("adds cache_control to the first system message", () => {
+	it("adds cache_control to the first system message in the returned copy", () => {
 		const messages: Message[] = [
 			{ role: "system", content: "You are helpful." },
 			{ role: "user", content: "Hello" },
 		];
 		const tools: Tool[] = [];
-		applyCacheControl(messages, tools);
+		const out = applyCacheControl(messages, tools);
 
-		const sysContent = messages[0]!.content;
+		const sysContent = out.messages[0]!.content;
 		expect(Array.isArray(sysContent)).toBe(true);
 		const parts = sysContent as Array<{ type: string; text: string; cache_control?: { type: string } }>;
 		expect(parts[0]!.cache_control).toEqual({ type: "ephemeral" });
 	});
 
-	it("adds cache_control to the last tool definition", () => {
+	it("does not mutate the input messages or tools (session state stays clean)", () => {
+		// The originals are the same objects saveSession persists — the
+		// structured-content shape leaking into the session file bricks it on
+		// providers whose chat template expects plain string content.
+		const messages: Message[] = [
+			{ role: "system", content: "sys" },
+			{ role: "user", content: "hello" },
+		];
+		const tools: Tool[] = [{ type: "function", function: { name: "bash", parameters: {} } }];
+		applyCacheControl(messages, tools);
+
+		expect(messages[0]!.content).toBe("sys");
+		expect(messages[1]!.content).toBe("hello");
+		expect((tools[0] as any).cache_control).toBeUndefined();
+	});
+
+	it("adds cache_control to the last tool definition in the returned copy", () => {
 		const messages: Message[] = [{ role: "system", content: "sys" }];
 		const tools: Tool[] = [
 			{ type: "function", function: { name: "bash", parameters: {} } },
 			{ type: "function", function: { name: "read", parameters: {} } },
 		];
-		applyCacheControl(messages, tools);
+		const out = applyCacheControl(messages, tools);
 
-		expect((tools[0] as any).cache_control).toBeUndefined();
-		expect((tools[1] as any).cache_control).toEqual({ type: "ephemeral" });
+		expect((out.tools[0] as any).cache_control).toBeUndefined();
+		expect((out.tools[1] as any).cache_control).toEqual({ type: "ephemeral" });
 	});
 
 	it("adds cache_control to the last user or assistant message", () => {
@@ -105,16 +121,16 @@ describe("applyCacheControl", () => {
 			{ role: "user", content: "last" },
 		];
 		const tools: Tool[] = [];
-		applyCacheControl(messages, tools);
+		const out = applyCacheControl(messages, tools);
 
 		// Last user message should have cache_control
-		const lastUser = messages[3]!.content;
+		const lastUser = out.messages[3]!.content;
 		expect(Array.isArray(lastUser)).toBe(true);
 		const parts = lastUser as Array<{ type: string; text: string; cache_control?: { type: string } }>;
 		expect(parts[0]!.cache_control).toEqual({ type: "ephemeral" });
 
 		// First user message should not
-		const firstUser = messages[1]!.content;
+		const firstUser = out.messages[1]!.content;
 		expect(typeof firstUser).toBe("string");
 	});
 
@@ -124,38 +140,39 @@ describe("applyCacheControl", () => {
 			{ role: "user", content: "Hello" },
 		];
 		const tools: Tool[] = [];
-		applyCacheControl(messages, tools);
+		const out = applyCacheControl(messages, tools);
 
 		// Empty system message stays empty (not converted)
-		expect(messages[0]!.content).toBe("");
+		expect(out.messages[0]!.content).toBe("");
 		// User message gets the marker instead
-		const userContent = messages[1]!.content;
+		const userContent = out.messages[1]!.content;
 		expect(Array.isArray(userContent)).toBe(true);
 	});
 
-	it("handles array content by adding marker to last text part", () => {
-		const messages: Message[] = [
-			{
-				role: "user",
-				content: [
-					{ type: "image_url", image_url: { url: "data:image/png;base64,abc" } },
-					{ type: "text", text: "What is this?" },
-				],
-			},
+	it("handles array content by adding marker to last text part, without mutating the original parts", () => {
+		const original = [
+			{ type: "image_url", image_url: { url: "data:image/png;base64,abc" } },
+			{ type: "text", text: "What is this?" },
 		];
+		const messages: Message[] = [{ role: "user", content: original as never }];
 		const tools: Tool[] = [];
-		applyCacheControl(messages, tools);
+		const out = applyCacheControl(messages, tools);
 
-		const content = messages[0]!.content as Array<{ type: string; text?: string; cache_control?: { type: string } }>;
+		const content = out.messages[0]!.content as Array<{
+			type: string;
+			text?: string;
+			cache_control?: { type: string };
+		}>;
 		expect(content[0]!.cache_control).toBeUndefined(); // image part
 		expect(content[1]!.cache_control).toEqual({ type: "ephemeral" }); // text part
+		expect((original[1] as any).cache_control).toBeUndefined(); // input untouched
 	});
 
 	it("no-op when tools array is empty", () => {
 		const messages: Message[] = [{ role: "system", content: "sys" }];
-		applyCacheControl(messages, []);
-		// Should not throw; system message still gets marker
-		expect(Array.isArray(messages[0]!.content)).toBe(true);
+		const out = applyCacheControl(messages, []);
+		// Should not throw; system message still gets marker in the copy
+		expect(Array.isArray(out.messages[0]!.content)).toBe(true);
 	});
 });
 

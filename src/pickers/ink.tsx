@@ -1,6 +1,7 @@
 import { Box, render, Text, useInput } from "ink";
-import { type JSX, useRef, useState } from "react";
+import { type JSX, useEffect, useMemo, useRef, useState } from "react";
 import { theme } from "../ui/themes/index.ts";
+import { score } from "./match.ts";
 import type { Pickers, PickOption, PickOptions } from "./types.ts";
 
 // Cap on option rows rendered at once. Without a window a long list (models,
@@ -27,26 +28,96 @@ export function ModalPicker<T>(props: {
 	onSelect: (value: T) => void;
 	onCancel: () => void;
 }): JSX.Element {
-	// defaultIndex may come from a findIndex miss (-1) — clamp so Enter can't
-	// dereference options[-1].
+	const searchable = !!props.opts?.search;
+	const [query, setQuery] = useState("");
 	const [idx, setIdx] = useState(() =>
 		Math.min(Math.max(0, props.opts?.defaultIndex ?? 0), Math.max(0, props.options.length - 1)),
 	);
+
+	// Pre-lowered haystacks: label + description + searchText, computed once per
+	// options array (keystrokes reuse the same strings). score() expects both
+	// sides pre-lowered, so all matching cost is one substring / subsequence
+	// pass per option per keystroke.
+	const haystacks = useMemo(
+		() => props.options.map((o) => `${o.label}\n${o.description ?? ""}\n${o.searchText ?? ""}`.toLowerCase()),
+		[props.options],
+	);
+	const qLower = query.toLowerCase();
+	const filtered = useMemo(() => {
+		if (qLower.length === 0) return props.options.map((o, i) => ({ o, i }));
+		const out: Array<{ o: PickOption<T>; i: number; s: number }> = [];
+		props.options.forEach((o, i) => {
+			const s = score(haystacks[i] ?? "", qLower);
+			if (s >= 0) out.push({ o, i, s });
+		});
+		out.sort((a, b) => b.s - a.s || a.i - b.i);
+		return out;
+	}, [props.options, haystacks, qLower]);
+	const visibleOptions = filtered.map((f) => f.o);
+	const visibleLen = visibleOptions.length;
+
+	// Reset the cursor when the query actually changes — the filtered list is
+	// reordered/shrunk, so a kept index would point at an arbitrary row (or
+	// past the end). Guarded by a prev-ref so mount keeps defaultIndex and
+	// arrow-key renders don't snap the cursor back to the top.
+	const prevQueryRef = useRef(qLower);
+	useEffect(() => {
+		if (prevQueryRef.current !== qLower) {
+			prevQueryRef.current = qLower;
+			setIdx(0);
+		}
+	}, [qLower]);
+
 	useInput((input, key) => {
 		if (key.upArrow) {
-			setIdx((i) => (i - 1 + props.options.length) % props.options.length);
+			if (visibleLen === 0) return;
+			setIdx((i) => (i - 1 + visibleLen) % visibleLen);
 			return;
 		}
 		if (key.downArrow) {
-			setIdx((i) => (i + 1) % props.options.length);
+			if (visibleLen === 0) return;
+			setIdx((i) => (i + 1) % visibleLen);
 			return;
 		}
 		if (key.return) {
-			if (props.options[idx]?.locked) return;
-			props.onSelect(props.options[idx]!.value);
+			if (visibleLen === 0) return;
+			const picked = visibleOptions[idx];
+			if (!picked || picked.locked) return;
+			props.onSelect(picked.value);
 			return;
 		}
-		if (key.escape || input === "q") {
+		if (key.escape) {
+			props.onCancel();
+			return;
+		}
+		// In searchable mode, `q` (and everything else printable) feeds the query
+		// instead of cancelling — otherwise typing "query", "sql", "qa" would
+		// close the modal on the first keystroke.
+		if (searchable) {
+			if (key.backspace || key.delete) {
+				setQuery((q) => q.slice(0, -1));
+				return;
+			}
+			if (input && !key.ctrl && !key.meta) {
+				// Accept multi-char paste (Cmd+V / Ctrl+V): terminals deliver
+				// clipboard contents as one string. Strip control characters
+				// and whitespace that bracketed-paste wrappers may add.
+				// Also strip DECXCPR cursor-position reports (\x1b[<row>;<col>R):
+				// the scroll-resync poll queries them every 500 ms, and once Ink
+				// eats the ESC the "[38;1R" tail reads as printable text the user
+				// never typed.
+				const printable = [...input]
+					.filter((c) => c >= " " && c !== String.fromCodePoint(0x7f))
+					.join("")
+					// biome-ignore lint/suspicious/noControlCharactersInRegex: DECXCPR response format
+					.replace(/\x1b?\[\d+(?:;\d+)*R/g, "");
+				if (printable) setQuery((q) => q + printable);
+				return;
+			}
+			return;
+		}
+		// Non-searchable: legacy `q` cancel still works.
+		if (input === "q") {
 			props.onCancel();
 		}
 	});
@@ -55,14 +126,15 @@ export function ModalPicker<T>(props: {
 	// terminal resize (which repaints the whole tree) resizes the window too.
 	const rows = pickerViewportRows(process.stdout.rows || 24);
 	const scrollRef = useRef(0);
-	const maxScroll = Math.max(0, props.options.length - rows);
+	const maxScroll = Math.max(0, visibleLen - rows);
 	if (scrollRef.current > maxScroll) scrollRef.current = maxScroll;
 	if (idx < scrollRef.current) scrollRef.current = idx;
 	else if (idx >= scrollRef.current + rows) scrollRef.current = idx - rows + 1;
 	const scroll = scrollRef.current;
-	const visible = props.options.slice(scroll, scroll + rows);
+	const visible = visibleOptions.slice(scroll, scroll + rows);
 	const title = props.opts?.title;
 	const error = props.opts?.error;
+	const searchPlaceholder = props.opts?.search?.placeholder;
 	return (
 		<Box flexDirection="column" padding={1}>
 			{error && (
@@ -75,36 +147,54 @@ export function ModalPicker<T>(props: {
 					{title}
 				</Text>
 			)}
-			{visible.map((o, vi) => {
-				const i = scroll + vi;
-				const selected = i === idx;
-				const rowColor = o.muted || o.locked ? theme().muted : selected ? theme().accent : "white";
-				return (
-					// Keyed by absolute index: options are static for the modal's
-					// lifetime, and labels can repeat. Rows are hard-truncated to one
-					// visual line each — pickerViewportRows budgets by option count,
-					// so a long label wrapping to two terminal lines would silently
-					// blow that budget on narrow terminals.
-					<Box key={i} flexDirection="column">
-						<Text wrap="truncate">
-							<Text color={selected ? theme().accent : theme().muted}>{selected ? ">" : " "}</Text>{" "}
-							<Text color={rowColor} bold={selected && !o.muted && !o.locked}>
-								{o.label}
+			{searchable && (
+				<Box>
+					<Text color={theme().muted}>{"> "}</Text>
+					<Text>{query}</Text>
+					<Text color="white" inverse>
+						{" "}
+					</Text>
+				</Box>
+			)}
+			{searchable && !query && searchPlaceholder && (
+				<Box marginTop={1}>
+					<Text color={theme().muted}>{searchPlaceholder}</Text>
+				</Box>
+			)}
+			{visibleLen === 0 ? (
+				<Text color={theme().muted}>No matches</Text>
+			) : (
+				visible.map((o, vi) => {
+					const i = scroll + vi;
+					const selected = i === idx;
+					const rowColor = o.muted || o.locked ? theme().muted : selected ? theme().accent : "white";
+					return (
+						// Keyed by absolute index: options are static for the modal's
+						// lifetime, and labels can repeat. Rows are hard-truncated to one
+						// visual line each — pickerViewportRows budgets by option count,
+						// so a long label wrapping to two terminal lines would silently
+						// blow that budget on narrow terminals.
+						<Box key={i} flexDirection="column">
+							<Text wrap="truncate">
+								<Text color={selected ? theme().accent : theme().muted}>{selected ? ">" : " "}</Text>{" "}
+								<Text color={rowColor} bold={selected && !o.muted && !o.locked}>
+									{o.label}
+								</Text>
 							</Text>
-						</Text>
-						{selected && o.description && (
-							<Text color={theme().muted} wrap="wrap">
-								{" "}
-								{o.description}
-							</Text>
-						)}
-					</Box>
-				);
-			})}
+							{selected && o.description && (
+								<Text color={theme().muted} wrap="wrap">
+									{" "}
+									{o.description}
+								</Text>
+							)}
+						</Box>
+					);
+				})
+			)}
 			<Box marginTop={1}>
 				<Text color={theme().muted}>
-					up/down select · Enter confirm · Esc cancel
-					{props.options.length > rows ? ` · ${idx + 1}/${props.options.length}` : ""}
+					{searchable ? "type to filter" : "up/down select"} · Enter confirm · Esc cancel
+					{visibleLen > rows ? ` · ${idx + 1}/${visibleLen}` : ""}
 				</Text>
 			</Box>
 		</Box>

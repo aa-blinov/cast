@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -10,6 +10,7 @@ import {
 	deleteSession,
 	estimateTokens,
 	getMostRecentSession,
+	listSessionSummaries,
 	listSessions,
 	loadSession,
 	saveSession,
@@ -434,6 +435,40 @@ describe("session persistence", () => {
 		expect(loaded?.messages).toEqual(session.messages);
 	});
 
+	it("normalizes cache_control-damaged messages on load", () => {
+		// Older builds let applyCacheControl mutate live message objects and
+		// persisted the request-only shape (text-part arrays with
+		// cache_control). Loading must flatten those back to plain strings so
+		// a provider switch doesn't 400 on the resumed history.
+		const session = createSession("gpt-4o", projectA);
+		session.messages.push(
+			{
+				role: "user",
+				content: [
+					{ type: "text", text: "hello ", cache_control: { type: "ephemeral" } },
+					{ type: "text", text: "world" },
+				],
+			} as never,
+			{
+				role: "user",
+				content: [
+					{ type: "image_url", image_url: { url: "data:image/png;base64,abc" } },
+					{ type: "text", text: "what is this?", cache_control: { type: "ephemeral" } },
+				],
+			} as never,
+		);
+		saveSession(session);
+
+		const loaded = loadSession(session.id);
+		// All-text array → flattened to a plain string, markers gone.
+		expect(loaded?.messages[0]?.content).toBe("hello world");
+		// Multimodal array stays an array but loses cache_control.
+		const parts = loaded?.messages[1]?.content as Array<Record<string, unknown>>;
+		expect(Array.isArray(parts)).toBe(true);
+		expect(parts[0]).toEqual({ type: "image_url", image_url: { url: "data:image/png;base64,abc" } });
+		expect(parts[1]).toEqual({ type: "text", text: "what is this?" });
+	});
+
 	it("keeps sessions from different projects in separate directories", () => {
 		const a = createSession("gpt-4o", projectA);
 		saveSession(a);
@@ -499,5 +534,78 @@ describe("session persistence", () => {
 		saveSession(newer);
 
 		expect(getMostRecentSession()?.id).toBe(newer.id);
+	});
+
+	it("listSessionSummaries builds the index and serves summaries from it", () => {
+		const a = createSession("gpt-4o", projectA);
+		a.messages.push({ role: "user", content: "hello alpha world" });
+		saveSession(a);
+		const b = createSession("gpt-4o", projectB);
+		b.messages.push({ role: "user", content: "beta question" }, { role: "assistant", content: "beta answer" });
+		saveSession(b);
+
+		const summaries = listSessionSummaries();
+		expect(summaries.map((s) => s.id).sort()).toEqual([a.id, b.id].sort());
+		const sb = summaries.find((s) => s.id === b.id)!;
+		expect(sb.msgCount).toBe(2);
+		expect(sb.firstUserMessage).toBe("beta question");
+		expect(sb.haystack).toContain("beta answer");
+		expect(sb.cwd).toBe(projectB);
+		// Index file materialized at the sessions root.
+		expect(existsSync(join(fakeHome, ".cast", "sessions", "index.json"))).toBe(true);
+	});
+
+	it("heals a stale index entry when the session file changes", async () => {
+		const s = createSession("gpt-4o", projectA);
+		s.messages.push({ role: "user", content: "original topic" });
+		saveSession(s);
+		listSessionSummaries(); // build index
+		await new Promise((r) => setTimeout(r, 5)); // ensure mtime moves
+		s.messages.push({ role: "assistant", content: "freshly added reply" });
+		saveSession(s);
+
+		const summary = listSessionSummaries().find((x) => x.id === s.id)!;
+		expect(summary.msgCount).toBe(2);
+		expect(summary.haystack).toContain("freshly added reply");
+	});
+
+	it("prunes index entries for deleted sessions and survives a corrupt index", () => {
+		const keep = createSession("gpt-4o", projectA);
+		saveSession(keep);
+		const gone = createSession("gpt-4o", projectB);
+		saveSession(gone);
+		listSessionSummaries(); // build index with both
+		deleteSession(gone.id);
+		expect(listSessionSummaries().map((s) => s.id)).toEqual([keep.id]);
+
+		// Corrupt index → rebuilt silently, correct data still served.
+		writeFileSync(join(fakeHome, ".cast", "sessions", "index.json"), "not json{");
+		expect(listSessionSummaries().map((s) => s.id)).toEqual([keep.id]);
+	});
+
+	it("does not mistake index.json for a legacy flat session", () => {
+		const s = createSession("gpt-4o", projectA);
+		saveSession(s);
+		listSessionSummaries(); // creates root-level index.json
+		// Neither the full listing nor the summaries may pick the index up as a session.
+		expect(listSessions().map((x) => x.id)).toEqual([s.id]);
+		expect(listSessionSummaries().map((x) => x.id)).toEqual([s.id]);
+		expect(getMostRecentSession()?.id).toBe(s.id);
+	});
+
+	it("getMostRecentSession falls back past a corrupt newest file", async () => {
+		const good = createSession("gpt-4o", projectA);
+		saveSession(good);
+		await new Promise((r) => setTimeout(r, 5));
+		const corrupt = createSession("gpt-4o", projectB);
+		saveSession(corrupt);
+		// Simulate a half-written save: newest file exists but isn't valid JSON.
+		const corruptPath = join(fakeHome, ".cast", "sessions");
+		for (const dir of readdirSync(corruptPath)) {
+			const p = join(corruptPath, dir, `${corrupt.id}.json`);
+			if (existsSync(p)) writeFileSync(p, '{"id": "trunc');
+		}
+
+		expect(getMostRecentSession()?.id).toBe(good.id);
 	});
 });
