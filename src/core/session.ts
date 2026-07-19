@@ -59,6 +59,14 @@ export interface SessionState {
 	 * Per-session on purpose: the mode is task state, and storing it globally
 	 * leaked plan mode from one project into every other one. */
 	mode?: "plan" | "build";
+	/** Persona name this thread was last driven by — restored on resume, same
+	 * rationale as `mode`: the persona shaped the conversation's reasoning and
+	 * tone, so reopening the thread under whatever persona happens to be the
+	 * current global one silently swaps the system prompt out from under the
+	 * history. Unset on sessions saved before this field existed (resume keeps
+	 * the current persona for those). The global settings.persona remains the
+	 * default for NEW sessions only. */
+	persona?: string;
 	/**
 	 * Local calendar date (`YYYY-MM-DD`) last announced to the model via the
 	 * date-rollover `<system-reminder>`. Used so overnight sessions get a

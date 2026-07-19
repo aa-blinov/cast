@@ -257,10 +257,10 @@ describe("subagents field", () => {
 		expect(p.subagents).toBe(false);
 	});
 
-	it("only coder-with-subagents has subagents: true among builtins", () => {
+	it("only the delegating coder personas have subagents: true among builtins", () => {
 		const personas = loadPersonas();
 		const withSub = personas.filter((p) => p.subagents);
-		expect(withSub.map((p) => p.name).sort()).toEqual(["coder-with-subagents"]);
+		expect(withSub.map((p) => p.name).sort()).toEqual(["coder-with-subagents", "coder-with-subagents-force-review"]);
 	});
 });
 
