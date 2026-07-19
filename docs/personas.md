@@ -35,7 +35,7 @@ Why `coder-with-subagents-force-review` reviews in a sub-agent rather than in pl
 - **Interactively**: `/persona` (opens picker) or `/persona <name>`
 - **First run**: persona is selected during onboarding
 
-The persona travels with the thread: each session remembers the persona that drove it, and resuming (`-c`, `--resume`, `/sessions`) restores that persona — same rule as plan/build mode. The global choice in `~/.cast/settings.json` is the default for *new* sessions only. If a session's persona was deleted, resume keeps the current one with a notice.
+The persona travels with the thread: each session remembers the persona that drove it, and resuming (`-c`, `--resume`, `/sessions`, `/continue`) restores that persona — same rule as plan/build mode. The global choice in `~/.cast/settings.json` is the default for *new* sessions only. If a session's persona was deleted, resume keeps the current one with a notice.
 
 Switching mid-conversation leaves the previous persona's reasoning in the context, so after switching to a *different* persona in a non-empty thread, cast offers to start a new session (the `/new` flow) — pick "Continue here" (or press Esc) to keep the current thread; the thread is then re-stamped with the new persona.
 

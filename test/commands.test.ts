@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
 import type { McpSetupResult } from "../src/core/mcp.ts";
 import type { Persona } from "../src/core/personas.ts";
-import type { SessionState } from "../src/core/session.ts";
+import { createSession, type SessionState, saveSession } from "../src/core/session.ts";
 import type { PermissionMode } from "../src/core/settings.ts";
 import type { Pickers } from "../src/pickers/types.ts";
 import type { CommandDeps } from "../src/ui/commands.ts";
@@ -579,6 +579,29 @@ describe("handleInput", () => {
 		const { deps, calls } = createFakeDeps({ permissionMode: "bypass" });
 		await handleInput("/permissions default", undefined, deps);
 		expect(calls.setPermissionMode).toEqual([["default"]]);
+	});
+
+	it("/continue resumes the most recent other session", async () => {
+		const { deps, calls } = createFakeDeps();
+		// Create and save a different session so /continue has something to find.
+		const other = createSession("test-model", "/tmp");
+		other.messages = [{ role: "user", content: "hello from other session" }];
+		saveSession(other);
+
+		await handleInput("/continue", undefined, deps);
+
+		// Session was switched to the other one.
+		expect(deps.session.id).toBe(other.id);
+		expect(deps.session.messages).toEqual(other.messages);
+		expect(noticeText(calls)).toContain("Continued session");
+		expect(noticeText(calls)).toContain(other.id);
+	});
+
+	it("/continue with no other session shows notice", async () => {
+		const { deps, calls } = createFakeDeps();
+		// No sessions saved — only the current in-memory one exists.
+		await handleInput("/continue", undefined, deps);
+		expect(noticeText(calls)).toContain("No other session");
 	});
 });
 
