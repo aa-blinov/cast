@@ -444,6 +444,22 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 	<article class="content">
 		<h1>Changelog</h1>
 <p>All notable user-facing changes to cast, newest first.</p>
+<h2>0.7.4</h2>
+<h3>Fixed</h3>
+<ul>
+<li>Provider requests fail on Node 24 with &quot;Cannot connect … (invalid content-length header)&quot;: the OpenAI SDK sets an explicit <code>content-length</code> header, which is a forbidden fetch request header — Node 24&#39;s undici rejects the request outright (Node 26 silently ignores it). cast now strips it and lets the runtime compute the value; model selection/chat work on Node 24 again.</li>
+</ul>
+<h2>0.7.3</h2>
+<h3>Fixed</h3>
+<ul>
+<li>Windows: <code>cast upgrade</code> no longer crashes on exit with <code>Assertion failed: !(handle-&gt;flags &amp; UV_HANDLE_CLOSING)</code> — the hard <code>process.exit()</code> right after the release-check fetch raced libuv&#39;s handle teardown; the command now returns and lets the process exit naturally.</li>
+</ul>
+<h2>0.7.2</h2>
+<h3>Fixed</h3>
+<ul>
+<li>&quot;Cannot connect to <url>&quot; errors now include the underlying network detail (<code>ECONNREFUSED</code> / <code>ENOTFOUND</code> / certificate errors, including ones buried in undici AggregateErrors) — DNS, dead-endpoint, and TLS-interception failures need different fixes and were indistinguishable.</li>
+<li>Windows: the Git Bash registry probe no longer leaks <code>reg.exe</code>&#39;s localized stderr into the TUI as mojibake when the GitForWindows key is absent.</li>
+</ul>
 <h2>0.7.1</h2>
 <h3>Added</h3>
 <ul>
