@@ -150,3 +150,27 @@ describe("unreachableDetail", () => {
 		expect(unreachableDetail("Connection error. | fetch failed")).toBe("fetch failed");
 	});
 });
+
+describe("providerFetch", () => {
+	it("strips the SDK's explicit content-length header (Node 24 undici rejects it)", async () => {
+		const { providerFetch } = await import("../src/core/config.ts");
+		const realFetch = globalThis.fetch;
+		let seen: Headers | undefined;
+		globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+			seen = init?.headers as Headers;
+			return new Response("{}");
+		}) as typeof fetch;
+		try {
+			await providerFetch("https://example.com/v1/chat", {
+				method: "POST",
+				headers: { "content-length": "42", authorization: "Bearer x", "content-type": "application/json" },
+				body: "{}",
+			});
+		} finally {
+			globalThis.fetch = realFetch;
+		}
+		expect(seen?.get("content-length")).toBeNull();
+		expect(seen?.get("authorization")).toBe("Bearer x");
+		expect(seen?.get("content-type")).toBe("application/json");
+	});
+});
