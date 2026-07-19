@@ -2,6 +2,27 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.7.6
+
+### Fixed
+
+- Streaming output no longer overflows the viewport when the composer grows taller than the static budget estimate: ChatLog now shrinks its live-region budget reactively based on the actual last-frame overflow, so one bad frame self-corrects instead of repeating every frame.
+- Composer ghost rows (streaks, duplicated borders) after deleting multi-line input: the frame now uses a sticky max height and pads back on shrink instead of letting Ink leave stale rows on screen.
+- Synchronized-output flash on terminal resync (clear + replay): both writes are now wrapped in CSI ?2026h/l so the terminal buffers and swaps atomically.
+- Resync no longer fires immediately after an aborted turn (Esc): the disruptive full clear + scrollback wipe lands on the next turn that actually completes instead.
+- Reasoning and content block labels (`[reasoning]`, `[agent]`) no longer repeat on every split-off line of the same streaming run.
+- Edit tool results no longer shown inline in ChatLog (same treatment as `read`).
+- Composer re-renders on every stdin chunk even when nothing changed (DECXCPR responses, focus reports, partial escapes): now skipped unless the buffer value or cursor position actually moved.
+- DECXCPR poll rate adapts: 200ms during streaming or when a resync is pending, 1s at idle to reduce unnecessary terminal traffic.
+- Spinner render cycles reduced ~35% (120ms interval vs 80ms) with no visible quality loss.
+
+### Internal
+
+- `splitCompleteLines` drains completed lines from the trailing streaming block incrementally, giving the final answer the same steady commit cadence reasoning already gets.
+- `useTerminalResync` scroll flags (`scrollUp`, `scrollUpStale`) reset after a resync clear, so the next Ink frame isn't swallowed by the scroll guard.
+- Vitest `NODE_OPTIONS=--no-deprecation` suppresses the punycode warning from `openai -> node-fetch -> whatwg-url`.
+
+
 ## 0.7.5
 
 ### Added

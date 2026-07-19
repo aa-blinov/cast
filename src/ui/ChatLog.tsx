@@ -1,5 +1,6 @@
 import { Box, Static, Text } from "ink";
-import { type JSX, useMemo } from "react";
+import { type JSX, useMemo, useRef } from "react";
+import { getLastFrameOverflow } from "../core/stdin-manager.ts";
 import { displayWidth } from "./display-width.ts";
 import { Spinner } from "./Spinner.tsx";
 import { formatTaskToolSummary } from "./task-tool-summary.ts";
@@ -160,7 +161,7 @@ function ToolCallView({ call, compact }: { call: ToolCallEntry; compact?: boolea
 	const statusColor =
 		call.status === "running" ? theme().warning : call.status === "error" ? theme().error : theme().success;
 	const resultColor = call.status === "error" ? theme().error : theme().muted;
-	const showResult = Boolean(call.result) && call.name !== "read" && !isWebTool(call.name);
+	const showResult = Boolean(call.result) && call.name !== "read" && call.name !== "edit" && !isWebTool(call.name);
 	// task: full wrapped report in history so the user can read the child answer;
 	// live/compact stays one truncated line so parallel tasks don't blow the clamp.
 	const taskResultFull = call.name === "task" && !compact && call.result;
@@ -242,7 +243,7 @@ function BlockView({
 	if (block.kind === "thinking") {
 		return (
 			<Text color={theme().muted} dimColor>
-				<Text bold>[reasoning] {truncated ? "… " : ""}</Text>
+				{!block.continued && `[reasoning] ${truncated ? "… " : ""}`}
 				{block.text}
 			</Text>
 		);
@@ -250,7 +251,7 @@ function BlockView({
 	if (block.kind === "content") {
 		return (
 			<Text color={theme().agent}>
-				<Text bold>[agent] {truncated ? "… " : ""}</Text>
+				{!block.continued && <Text bold>[agent] {truncated ? "… " : ""}</Text>}
 				{block.text}
 			</Text>
 		);
@@ -273,15 +274,23 @@ function BlockView({
  * Each entry carries the block's index in the *input* array so React keys
  * stay aligned with the unclamped list — keying by position in the clamped
  * output shifted identities whenever older blocks dropped out of the window.
+ *
+ * `extraReserve` shrinks the budget further, on top of the flat guess below.
+ * It exists because the flat guess is only ever an estimate — the composer
+ * grows with multi-line input, steer/queue notices stack, etc. — so ChatLog
+ * feeds back the *actual* overflow of the last real Ink frame (see
+ * getLastFrameOverflow) to keep the live region within the viewport even
+ * when the estimate falls short. See the ChatLog component below.
  */
 export function clampStreamingBlocks(
 	blocks: StreamBlock[],
 	rows: number,
 	columns: number,
+	extraReserve = 0,
 ): Array<{ block: StreamBlock; truncated: boolean; index: number }> {
 	// Rows reserved for everything below the streaming area: composer frame
 	// (3), status bar (1), notices/steer/queue lines and a safety margin.
-	const budget = Math.max(4, rows - 8);
+	const budget = Math.max(4, rows - 8 - extraReserve);
 	const cols = Math.max(20, columns);
 
 	const wrappedRows = (text: string, prefixLen: number): number => {
@@ -316,7 +325,7 @@ export function clampStreamingBlocks(
 			used += need;
 			continue;
 		}
-		const prefixLen = block.kind === "thinking" ? "[reasoning] ".length : "[agent] ".length;
+		const prefixLen = block.continued ? 0 : block.kind === "thinking" ? "[reasoning] ".length : "[agent] ".length;
 		const need = wrappedRows(block.text, prefixLen);
 		if (used + need <= budget) {
 			out.unshift({ block, truncated: false, index: i });
@@ -391,6 +400,24 @@ function MessageView({ message }: { message: ChatMessage }): JSX.Element {
 export function ChatLog({ messages, streaming, error, retry, repaintKey }: ChatLogProps): JSX.Element {
 	const liveParts: JSX.Element[] = [];
 
+	// Sticky overflow compensation: the flat "-8" budget guess in
+	// clampStreamingBlocks doesn't know the composer's actual height, open
+	// palette, steer/queue lines, etc., so it can still under-reserve and let
+	// the live region grow taller than the terminal. When that happens, the
+	// DECXCPR scroll guard has to stop trusting polls (see useTerminalResync),
+	// which is when scroll position gets lost. Once we observe a real
+	// overflow (from the last actual Ink frame, ground truth) we shrink the
+	// budget by that much for the rest of the turn — sticky, like the
+	// composer's own height tracking — so one bad frame self-corrects instead
+	// of repeating every frame. Resets when the turn ends.
+	const stickyOverflowRef = useRef(0);
+	if (streaming && streaming.blocks.length > 0) {
+		const observed = getLastFrameOverflow();
+		if (observed > stickyOverflowRef.current) stickyOverflowRef.current = observed;
+	} else {
+		stickyOverflowRef.current = 0;
+	}
+
 	// Error/warning before streaming — chronologically the error happened
 	// first (e.g. vision fallback), then the agent responded.
 	if (error) {
@@ -414,7 +441,12 @@ export function ChatLog({ messages, streaming, error, retry, repaintKey }: ChatL
 		if (streaming.blocks.length === 0) {
 			streamingParts.push(<Spinner key="wait" />);
 		}
-		const clamped = clampStreamingBlocks(streaming.blocks, process.stdout.rows || 24, process.stdout.columns || 80);
+		const clamped = clampStreamingBlocks(
+			streaming.blocks,
+			process.stdout.rows || 24,
+			process.stdout.columns || 80,
+			stickyOverflowRef.current,
+		);
 		for (const { block, truncated, index } of clamped) {
 			streamingParts.push(<BlockView key={blockKey(block, index)} block={block} truncated={truncated} compact />);
 		}

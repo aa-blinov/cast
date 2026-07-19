@@ -475,8 +475,15 @@ export function Composer({
 
 		const stdinDataHandler = (chunk: Buffer) => {
 			if (lockedRef.current) return;
+			const before = bufRef.current.value;
+			const cursorBefore = bufRef.current.cursorPos;
 			stdinBuf.process(chunk);
-			setVersion((v) => v + 1);
+			// Only re-render if the buffer actually changed — stdin delivers many
+			// chunks that don't mutate the buffer (DECXCPR responses, focus
+			// reports, partial escape sequences, mouse events). Cursor-only moves
+			// (arrows, word-nav, Home/End) leave `.value` untouched, so cursorPos
+			// must be compared too or the cursor stops visibly moving.
+			if (bufRef.current.value !== before || bufRef.current.cursorPos !== cursorBefore) setVersion((v) => v + 1);
 		};
 		stdinSource.on("data", stdinDataHandler);
 
@@ -524,6 +531,22 @@ export function Composer({
 		composerScrollRef.current = cursorLine - COMPOSER_ROWS + 1;
 	const offset = composerScrollRef.current;
 	const visibleLines = lines.slice(offset, offset + COMPOSER_ROWS);
+
+	// Dynamic height: grow with content, shrink back when lines are deleted.
+	// "Sticky" max — once the frame reaches a certain height, keep it there
+	// until the buffer is cleared. Ink handles cursor-up correctly when the
+	// frame grows, but shrinking leaves ghost rows (streaks, duplicated
+	// borders). Padding the frame back to the sticky max on shrink avoids the
+	// artifact without permanently wasting space.
+	const prevHeightRef = useRef(1);
+	const stickyMaxRef = useRef(1);
+	const currentContent = visibleLines.length;
+	if (currentContent > stickyMaxRef.current) stickyMaxRef.current = currentContent;
+	// Reset sticky max when the buffer is cleared (e.g. after submit or Esc)
+	if (lines.length === 0) stickyMaxRef.current = 1;
+	const frameRows = lines.length === 0 ? 1 : Math.max(currentContent, stickyMaxRef.current);
+	const padRows = frameRows - currentContent;
+	prevHeightRef.current = frameRows;
 
 	return (
 		<Box flexDirection="column">
@@ -608,6 +631,14 @@ export function Composer({
 						</Text>
 					);
 				})}
+				{/* Pad to frameRows to prevent ghost rows on shrink. Ink handles
+				    cursor-up correctly when the frame grows, but shrinking leaves
+				    stale rows on screen. The sticky max keeps the frame tall enough
+				    to overwrite its previous content; it resets to 1 on buffer clear. */}
+				{Array.from({ length: padRows }, (_, i) => (
+					// biome-ignore lint/suspicious/noArrayIndexKey: fixed-size padding, not a reorderable list
+					<Text key={`pad-${i}`}> </Text>
+				))}
 				{offset + visibleLines.length < lines.length && (
 					<Text color={theme().muted} dimColor>
 						{"  "}↓ {lines.length - offset - visibleLines.length} more{" "}

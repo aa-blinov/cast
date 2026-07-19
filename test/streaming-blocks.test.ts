@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type StreamBlock, settledPrefixLength } from "../src/ui/useAgentSession.ts";
+import { type StreamBlock, settledPrefixLength, splitCompleteLines } from "../src/ui/useAgentSession.ts";
 
 const think = (text: string): StreamBlock => ({ kind: "thinking", text });
 const content = (text: string): StreamBlock => ({ kind: "content", text });
@@ -42,5 +42,32 @@ describe("settledPrefixLength", () => {
 
 	it("returns 0 for an empty turn", () => {
 		expect(settledPrefixLength([])).toBe(0);
+	});
+});
+
+describe("splitCompleteLines", () => {
+	it("leaves a block with no newline untouched", () => {
+		const { settled, tail } = splitCompleteLines(content("still typing"));
+		expect(settled).toEqual([]);
+		expect(tail).toEqual(content("still typing"));
+	});
+
+	it("splits off complete lines, keeping the partial last line live", () => {
+		const { settled, tail } = splitCompleteLines(content("line one\nline two\npartial"));
+		expect(settled).toEqual([{ kind: "content", text: "line one\nline two", continued: undefined }]);
+		expect(tail).toEqual({ kind: "content", text: "partial", continued: true });
+	});
+
+	it("marks the settled piece as continued once the run already showed its label", () => {
+		const running = content("partial");
+		(running as { continued?: boolean }).continued = true;
+		const { settled, tail } = splitCompleteLines({ ...running, text: "partial\nmore" });
+		expect(settled).toEqual([{ kind: "content", text: "partial", continued: true }]);
+		expect(tail).toEqual({ kind: "content", text: "more", continued: true });
+	});
+
+	it("never splits a tool block", () => {
+		const t = tool("running");
+		expect(splitCompleteLines(t)).toEqual({ settled: [], tail: t });
 	});
 });
