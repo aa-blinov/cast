@@ -79,6 +79,7 @@ Interactive commands:
   /clear                 Clear context (and save the cleared state)
   /compact               Compact context now (auto-triggers near the limit)
   /new                   Start a new session (autosaves current if non-empty)
+  /continue              Resume the most recent session (like cast -c)
   /model [name]          Show/change model (validated)
   /reasoning             Change reasoning level
   /provider [name]       Switch / add / delete providers (validated)

@@ -2,7 +2,11 @@
 
 All notable user-facing changes to cast, newest first.
 
-## 0.7.6
+## 0.7.7
+
+### Added
+
+- `/continue` slash command — resumes the most recent session without leaving the current one. In-session equivalent of `cast -c`.
 
 ### Fixed
 

@@ -444,6 +444,37 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 	<article class="content">
 		<h1>Changelog</h1>
 <p>All notable user-facing changes to cast, newest first.</p>
+<h2>0.7.7</h2>
+<h3>Added</h3>
+<ul>
+<li><code>/continue</code> slash command — resumes the most recent session without leaving the current one. In-session equivalent of <code>cast -c</code>.</li>
+</ul>
+<h3>Fixed</h3>
+<ul>
+<li>Streaming output no longer overflows the viewport when the composer grows taller than the static budget estimate: ChatLog now shrinks its live-region budget reactively based on the actual last-frame overflow, so one bad frame self-corrects instead of repeating every frame.</li>
+<li>Composer ghost rows (streaks, duplicated borders) after deleting multi-line input: the frame now uses a sticky max height and pads back on shrink instead of letting Ink leave stale rows on screen.</li>
+<li>Synchronized-output flash on terminal resync (clear + replay): both writes are now wrapped in CSI ?2026h/l so the terminal buffers and swaps atomically.</li>
+<li>Resync no longer fires immediately after an aborted turn (Esc): the disruptive full clear + scrollback wipe lands on the next turn that actually completes instead.</li>
+<li>Reasoning and content block labels (<code>[reasoning]</code>, <code>[agent]</code>) no longer repeat on every split-off line of the same streaming run.</li>
+<li>Edit tool results no longer shown inline in ChatLog (same treatment as <code>read</code>).</li>
+<li>Composer re-renders on every stdin chunk even when nothing changed (DECXCPR responses, focus reports, partial escapes): now skipped unless the buffer value or cursor position actually moved.</li>
+<li>DECXCPR poll rate adapts: 200ms during streaming or when a resync is pending, 1s at idle to reduce unnecessary terminal traffic.</li>
+<li>Spinner render cycles reduced ~35% (120ms interval vs 80ms) with no visible quality loss.</li>
+</ul>
+<h3>Internal</h3>
+<ul>
+<li><code>splitCompleteLines</code> drains completed lines from the trailing streaming block incrementally, giving the final answer the same steady commit cadence reasoning already gets.</li>
+<li><code>useTerminalResync</code> scroll flags (<code>scrollUp</code>, <code>scrollUpStale</code>) reset after a resync clear, so the next Ink frame isn&#39;t swallowed by the scroll guard.</li>
+<li>Vitest <code>NODE_OPTIONS=--no-deprecation</code> suppresses the punycode warning from <code>openai -&gt; node-fetch -&gt; whatwg-url</code>.</li>
+</ul>
+<h2>0.7.5</h2>
+<h3>Added</h3>
+<ul>
+<li>Personas travel with the thread: each session remembers the persona that drove it, and resuming (<code>-c</code>, <code>--resume</code>, <code>/sessions</code>) restores it — same rule as plan/build mode. The global setting remains the default for new sessions; a deleted persona falls back to the current one with a notice.</li>
+<li>Switching to a different persona (<code>/persona</code>) in a non-empty thread now offers to start a new session, so the previous persona&#39;s context doesn&#39;t bleed into the new role; &quot;Continue here&quot; / Esc keeps the current thread.</li>
+<li>Four new built-in personas rounding out the IT-company role set: <code>architect</code> (trade-off analysis, ADRs, module boundaries), <code>analyst</code> (requirements from vague asks, contradictions, API contracts), <code>sre</code> (incident response, blameless postmortems, SLOs), and <code>product</code> (hypotheses, success metrics, prioritization — distinct from the ticket-writing Project Manager).</li>
+<li>Built-in persona <code>coder-with-subagents-force-review</code> (Coder · forced review): same delegation as <code>coder-with-subagents</code>, plus a mandatory review gate — every code change goes through an independent <code>review</code> sub-agent (fresh context, diff-based input, execution-confirmed findings, exactly one round) before being reported done. No &quot;too trivial to review&quot; exception for code.</li>
+</ul>
 <h2>0.7.4</h2>
 <h3>Fixed</h3>
 <ul>

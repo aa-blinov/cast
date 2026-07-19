@@ -34,7 +34,14 @@ import {
 } from "../core/project.ts";
 import { getModelsCache } from "../core/readline.ts";
 import { formatRuleInvocation, type Rule } from "../core/rules.ts";
-import { addUsage, createSession, type SessionState, saveSession } from "../core/session.ts";
+import {
+	addUsage,
+	createSession,
+	listSessionSummaries,
+	loadSession,
+	type SessionState,
+	saveSession,
+} from "../core/session.ts";
 import {
 	loadSettings,
 	type PermissionMode,
@@ -79,6 +86,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/build", description: "Exit plan mode, restore full toolset" },
 	{ name: "/clear", description: "Clear context (and save)" },
 	{ name: "/compact", description: "Compact context now" },
+	{ name: "/continue", description: "Resume the most recent session" },
 	{ name: "/copy", description: "Copy last assistant response" },
 	{ name: "/current", description: "Show all status bar data" },
 	{ name: "/exit", description: "Save and exit (alias for /quit)" },
@@ -1035,6 +1043,91 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 
 	if (running) {
 		showNotice("[Agent running — use /queue, /steer, or /abort]");
+		return;
+	}
+
+	if (input === "/continue") {
+		// Find the most recent session that isn't the current one — equivalent
+		// to `cast -c` but from within a running session.
+		const summaries = listSessionSummaries().sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+		const target = summaries.find((s) => s.id !== session.id);
+		if (!target) {
+			showNotice("[No other session to continue — this is the only one]");
+			return;
+		}
+		const chosen = loadSession(target.id);
+		if (!chosen) {
+			showNotice(`[Session ${target.id} is no longer readable]`);
+			return;
+		}
+		if (chosen.id === session.id) {
+			showNotice("[Already in that session.]");
+			return;
+		}
+		if (session.messages.length > 0) saveSession(session);
+		session.id = chosen.id;
+		session.messages = chosen.messages;
+		session.model = chosen.model;
+		session.createdAt = chosen.createdAt;
+		session.updatedAt = chosen.updatedAt;
+		session.usage = chosen.usage;
+		session.cwd = chosen.cwd;
+		session.lastPromptTokens = chosen.lastPromptTokens;
+		session.persona = chosen.persona;
+		deps.setPlanMode(chosen.mode === "plan");
+		let personaOpts = deps.personaOptions;
+		let contextFilesSuffix: string | undefined;
+		let rulesSuffix: string | undefined;
+		let rulesLazySuffix: string | undefined;
+		let skillsPromptSuffix: string | undefined;
+		if (chosen.cwd && chosen.cwd !== deps.cwd) {
+			deps.setCwd(chosen.cwd);
+			const trusted = await resolveProjectTrustForCwd(deps.projectDeps, chosen.cwd);
+			deps.setProjectTrusted(trusted);
+			const resolved = await resolveSkillsForCwd(deps.projectDeps, chosen.cwd, trusted);
+			deps.setSkills(resolved.skills);
+			skillsPromptSuffix = resolved.skillsPromptSuffix;
+			deps.setSkillsPromptSuffix(skillsPromptSuffix);
+			contextFilesSuffix = formatContextFilesForPrompt(loadProjectContextFiles(chosen.cwd, trusted));
+			deps.setContextFilesSuffix(contextFilesSuffix);
+			const resolvedRules = resolveRulesForCwd(chosen.cwd, trusted);
+			rulesSuffix = resolvedRules.alwaysApplySuffix;
+			rulesLazySuffix = resolvedRules.lazySuffix;
+			deps.setRulesSuffix(rulesSuffix);
+			deps.setRulesLazySuffix(rulesLazySuffix);
+			deps.setDirectoryRules(resolvedRules.directoryRules);
+			deps.setActiveAutoRules([]);
+			const newPersonaOpts = personaOptionsForCwd(chosen.cwd, trusted);
+			deps.setPersonaOptions(newPersonaOpts);
+			personaOpts = newPersonaOpts;
+			await closeMcpConnections(deps.mcpResult.connections);
+			deps.setMcpResult(
+				await resolveMcpForCwd(deps.projectDeps, chosen.cwd, trusted, loadSettings().disabledMcpServers ?? []),
+			);
+		}
+		let restoredPersona: Persona | undefined;
+		if (chosen.persona && chosen.persona !== deps.currentPersona.name) {
+			const sessionPersona = findPersona(chosen.persona, personaOpts);
+			if (sessionPersona) {
+				deps.setCurrentPersona(sessionPersona);
+				restoredPersona = sessionPersona;
+			} else {
+				showNotice(
+					`Session's persona "${chosen.persona}" no longer exists — keeping ${deps.currentPersona.label}.`,
+				);
+				session.persona = deps.currentPersona.name;
+			}
+		}
+		rebuildSystemPrompt(deps, chosen.cwd || deps.cwd, {
+			contextFilesSuffix,
+			rulesSuffix,
+			rulesLazySuffix,
+			skillsPromptSuffix,
+			...(restoredPersona ? { persona: restoredPersona } : {}),
+		});
+		agent.refresh();
+		const personaNote = restoredPersona ? ` · persona: ${restoredPersona.label}` : "";
+		showNotice(`[Continued session: ${session.id} (${session.messages.length} messages)${personaNote}]`);
 		return;
 	}
 
@@ -2131,6 +2224,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 				"  /current            Show all status bar data\n" +
 				"  /clear              Clear context\n" +
 				"  /compact            Compact context now\n" +
+				"  /continue           Resume the most recent session\n" +
 				"  /new                Start new session\n" +
 				"  /plan               Enter plan mode (explore + plan only)\n" +
 				"  /plan-model [m|off] Show or change the plan-mode model\n" +

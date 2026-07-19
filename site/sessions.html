@@ -481,8 +481,10 @@ cast -s nd4k8f2x           # Same (alias)
 <p>Sessions remember which provider their model belongs to. If you&#39;ve switched providers since, resume falls back to your currently configured model (with a notice) instead of sending requests to a model the new provider doesn&#39;t have.</p>
 <h3>Interactive</h3>
 <pre><code>/sessions                  # Opens session picker
+/continue                  # Resume the most recent session
 </code></pre>
-<p>The picker shows each session&#39;s project, first message, last-updated time, and message count — and filters as you type. The search matches the project path, session id, and <strong>every user/assistant message in the thread</strong>: substring matches rank first (earlier = higher), then in-order subsequence matches (so minor typos still hit). <code>Backspace</code> edits the query, <code>Esc</code> closes, <code>Enter</code> resumes the highlighted session. Deleting goes through the <code>Delete a session</code> row at the bottom (find it by typing its name).</p>
+<p>The <code>/sessions</code> picker shows each session&#39;s project, first message, last-updated time, and message count — and filters as you type. The search matches the project path, session id, and <strong>every user/assistant message in the thread</strong>: substring matches rank first (earlier = higher), then in-order subsequence matches (so minor typos still hit). <code>Backspace</code> edits the query, <code>Esc</code> closes, <code>Enter</code> resumes the highlighted session. Deleting goes through the <code>Delete a session</code> row at the bottom (find it by typing its name).</p>
+<p><code>/continue</code> is the quick path: it finds the most recently updated session that isn&#39;t the current one and switches to it — autosaving the current session first if it has messages. If there&#39;s no other session to resume, it shows a notice. This is the in-session equivalent of <code>cast -c</code>.</p>
 <h2>Creating New Sessions</h2>
 <pre><code>/new                       # Start fresh (autosaves current if non-empty)
 </code></pre>
