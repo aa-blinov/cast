@@ -1147,7 +1147,10 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		return;
 	}
 
-	if (input === "/new") {
+	// `personaName` override exists because the persona-switch flow calls this
+	// right after setCurrentPersona — deps.currentPersona still reads the OLD
+	// persona for the rest of this call (see the render-snapshot note above).
+	const startNewSession = (personaName?: string): void => {
 		if (session.messages.length > 0) saveSession(session);
 		const fresh = createSession(session.model, deps.cwd);
 		session.id = fresh.id;
@@ -1155,12 +1158,53 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		session.createdAt = fresh.createdAt;
 		session.updatedAt = fresh.updatedAt;
 		session.usage = fresh.usage;
+		session.persona = personaName ?? deps.currentPersona.name;
 		saveSession(session);
 		agent.clearContext();
 		// A fresh session starts in build mode — plan mode is a per-task state,
 		// not a sticky preference.
 		deps.setPlanMode(false);
 		showNotice(`[New session: ${session.id}]`);
+	};
+
+	// Persona is session-level state: switching mid-thread leaves the previous
+	// persona's reasoning and tone in the context, bleeding into the new role.
+	// After a switch in a non-empty thread, offer a clean start (the /new flow)
+	// — Esc/cancel keeps the current thread, matching "show, don't force".
+	// Stamp the thread with the persona now driving it — or, when the thread
+	// already has history under another persona, ask first. Ordering matters:
+	// choosing "New session" must leave the OLD thread stamped with the persona
+	// that actually drove it (stamping before asking rewrote the old thread's
+	// persona and broke restore-on-resume for it).
+	const applyPersonaToThread = async (persona: Persona, changed: boolean): Promise<void> => {
+		if (!changed || session.messages.length === 0) {
+			session.persona = persona.name;
+			saveSession(session);
+			return;
+		}
+		const choice = await deps.pickers.pickOption(
+			[
+				{
+					value: "new" as const,
+					label: "New session — clean context for the new persona (recommended)",
+				},
+				{
+					value: "keep" as const,
+					label: "Continue here — keep the current conversation context",
+				},
+			],
+			{ title: `Start a new session for ${persona.label}?` },
+		);
+		if (choice === "new") {
+			startNewSession(persona.name);
+		} else {
+			session.persona = persona.name;
+			saveSession(session);
+		}
+	};
+
+	if (input === "/new") {
+		startNewSession();
 		return;
 	}
 
@@ -1287,10 +1331,12 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			showNotice("[Cancelled — persona unchanged]");
 			return;
 		}
+		const changed = selected.name !== deps.currentPersona.name;
 		deps.setCurrentPersona(selected);
 		updateSettings({ persona: selected.name });
 		rebuildSystemPrompt(deps, deps.cwd, { persona: selected });
 		showNotice(`[Persona: ${selected.label}]`);
+		await applyPersonaToThread(selected, changed);
 		return;
 	}
 
@@ -1301,10 +1347,12 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			showNotice(`[Unknown persona "${name}". Use /persona to list available ones.]`);
 			return;
 		}
+		const changed = found.name !== deps.currentPersona.name;
 		deps.setCurrentPersona(found);
 		updateSettings({ persona: found.name });
 		rebuildSystemPrompt(deps, deps.cwd, { persona: found });
 		showNotice(`[Persona: ${found.label}]`);
+		await applyPersonaToThread(found, changed);
 		return;
 	}
 
@@ -1925,9 +1973,11 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		// Context-size signal belongs to the session being resumed — leaving the
 		// old session's value here feeds shouldCompact a foreign context size.
 		session.lastPromptTokens = chosen.lastPromptTokens;
+		session.persona = chosen.persona;
 		// Mode travels with the session: restore what the resumed session was
 		// left in instead of carrying over the current one.
 		deps.setPlanMode(chosen.mode === "plan");
+		let personaOpts = deps.personaOptions;
 		let contextFilesSuffix: string | undefined;
 		let rulesSuffix: string | undefined;
 		let rulesLazySuffix: string | undefined;
@@ -1950,19 +2000,39 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			deps.setDirectoryRules(resolvedRules.directoryRules);
 			const newPersonaOpts = personaOptionsForCwd(chosen.cwd, trusted);
 			deps.setPersonaOptions(newPersonaOpts);
+			personaOpts = newPersonaOpts;
 			await closeMcpConnections(deps.mcpResult.connections);
 			deps.setMcpResult(
 				await resolveMcpForCwd(deps.projectDeps, chosen.cwd, trusted, loadSettings().disabledMcpServers ?? []),
 			);
+		}
+		// Persona travels with the session, same as mode: reopening a thread
+		// under whatever persona is currently active silently swaps the system
+		// prompt out from under the history. A deleted persona (or a legacy
+		// session without the field) keeps the current one.
+		let restoredPersona: Persona | undefined;
+		if (chosen.persona && chosen.persona !== deps.currentPersona.name) {
+			const sessionPersona = findPersona(chosen.persona, personaOpts);
+			if (sessionPersona) {
+				deps.setCurrentPersona(sessionPersona);
+				restoredPersona = sessionPersona;
+			} else {
+				showNotice(
+					`[Session's persona "${chosen.persona}" no longer exists — keeping ${deps.currentPersona.label}.]`,
+				);
+				session.persona = deps.currentPersona.name;
+			}
 		}
 		rebuildSystemPrompt(deps, chosen.cwd || deps.cwd, {
 			contextFilesSuffix,
 			rulesSuffix,
 			rulesLazySuffix,
 			skillsPromptSuffix,
+			...(restoredPersona ? { persona: restoredPersona } : {}),
 		});
 		agent.refresh();
-		showNotice(`[Switched to session: ${session.id} (${session.messages.length} messages)]`);
+		const personaNote = restoredPersona ? ` · persona: ${restoredPersona.label}` : "";
+		showNotice(`[Switched to session: ${session.id} (${session.messages.length} messages)${personaNote}]`);
 		return;
 	}
 

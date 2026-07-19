@@ -343,6 +343,20 @@ export async function runStartup(
 		}
 		if (found) {
 			resumedSession = found;
+			// Persona travels with the thread (same rationale as mode): restore
+			// the one the session was driven by unless the CLI pinned another.
+			// A deleted persona falls back to the current one with a notice.
+			if (!args.cliPersona && found.persona && found.persona !== persona.name) {
+				const sessionPersona = findPersona(found.persona, personaOpts);
+				if (sessionPersona) {
+					persona = sessionPersona;
+					pickers.log(`[Persona restored from session: ${sessionPersona.label}]`);
+				} else {
+					pickers.log(
+						`Session's persona "${found.persona}" no longer exists — continuing with "${persona.label}".`,
+					);
+				}
+			}
 			// Reuse the session's model only when it belongs to the current
 			// provider. After a provider switch the stored model likely doesn't
 			// exist at the new endpoint, and every resumed request would 400
@@ -365,8 +379,8 @@ export async function runStartup(
 	}
 
 	const session = resumedSession
-		? { ...resumedSession, model, providerUrl: config.baseURL }
-		: { ...createSession(model, cwd), providerUrl: config.baseURL };
+		? { ...resumedSession, model, providerUrl: config.baseURL, persona: persona.name }
+		: { ...createSession(model, cwd), providerUrl: config.baseURL, persona: persona.name };
 	const runner = createAgentRunner();
 	const systemPrompt = buildSystemPrompt(
 		persona,
