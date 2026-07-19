@@ -20,6 +20,26 @@ export interface AppConfig {
 }
 
 /**
+ * fetch for every OpenAI client, replacing the bare `globalThis.fetch`.
+ *
+ * Strips `content-length` from request headers: the OpenAI SDK computes and
+ * sets it explicitly, but per the fetch spec it's a forbidden request header
+ * the runtime must set itself. undici in Node ≥26 silently ignores the
+ * user-supplied copy; Node 24's undici rejects the whole request with
+ * "invalid content-length header" — cast then can't reach a provider that
+ * plain fetch on the same machine reaches fine. Confirmed live on Windows,
+ * Node 24.15: SDK request fails, identical bare-fetch request succeeds.
+ */
+export function providerFetch(url: Parameters<typeof fetch>[0], init?: RequestInit): Promise<Response> {
+	if (init?.headers) {
+		const headers = new Headers(init.headers as HeadersInit);
+		headers.delete("content-length");
+		return fetch(url, { ...init, headers });
+	}
+	return fetch(url, init);
+}
+
+/**
  * Build the app config. The interactive CLI resolves a connection via saved
  * settings or an interactive prompt and always passes it explicitly; see
  * `resolveConnection` in select.ts.
@@ -85,7 +105,7 @@ export interface FetchModelsResult {
 export async function fetchModels(config: AppConfig): Promise<FetchModelsResult> {
 	// See llm.ts createClient: the SDK's bundled node-fetch shim mishandles a
 	// connection dying mid-response; native fetch doesn't have that failure mode.
-	const client = new OpenAI({ baseURL: config.baseURL, apiKey: config.apiKey, fetch: globalThis.fetch });
+	const client = new OpenAI({ baseURL: config.baseURL, apiKey: config.apiKey, fetch: providerFetch });
 
 	try {
 		const list = await client.models.list();
@@ -189,7 +209,7 @@ export interface ValidationResult {
 export async function validateModel(config: AppConfig, model: string): Promise<ValidationResult> {
 	// See llm.ts createClient: the SDK's bundled node-fetch shim mishandles a
 	// connection dying mid-response; native fetch doesn't have that failure mode.
-	const client = new OpenAI({ baseURL: config.baseURL, apiKey: config.apiKey, fetch: globalThis.fetch });
+	const client = new OpenAI({ baseURL: config.baseURL, apiKey: config.apiKey, fetch: providerFetch });
 
 	try {
 		const response = await client.chat.completions.create({
@@ -264,7 +284,7 @@ export async function runOnboardingCheck(
 ): Promise<boolean> {
 	// See llm.ts createClient: the SDK's bundled node-fetch shim mishandles a
 	// connection dying mid-response; native fetch doesn't have that failure mode.
-	const client = new OpenAI({ baseURL: config.baseURL, apiKey: config.apiKey, fetch: globalThis.fetch });
+	const client = new OpenAI({ baseURL: config.baseURL, apiKey: config.apiKey, fetch: providerFetch });
 
 	// Step 1: Check endpoint + key
 	try {
@@ -336,7 +356,7 @@ export function classifyProviderError(error: unknown): Exclude<ProviderProbe, "o
  */
 export async function probeProvider(config: AppConfig): Promise<ProviderProbe> {
 	// See llm.ts createClient: native fetch avoids the SDK shim's mid-response bug.
-	const client = new OpenAI({ baseURL: config.baseURL, apiKey: config.apiKey, fetch: globalThis.fetch });
+	const client = new OpenAI({ baseURL: config.baseURL, apiKey: config.apiKey, fetch: providerFetch });
 	try {
 		const list = await client.models.list();
 		await list[Symbol.asyncIterator]().next();

@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.7.4
+
+### Fixed
+
+- Provider requests fail on Node 24 with "Cannot connect … (invalid content-length header)": the OpenAI SDK sets an explicit `content-length` header, which is a forbidden fetch request header — Node 24's undici rejects the request outright (Node 26 silently ignores it). cast now strips it and lets the runtime compute the value; model selection/chat work on Node 24 again.
+
 ## 0.7.3
 
 ### Fixed

@@ -6,7 +6,7 @@ import OpenAI, {
 	RateLimitError,
 } from "openai";
 import type { ChatCompletionMessageParam, ChatCompletionTool } from "openai/resources/chat/completions";
-import type { AppConfig } from "./config.ts";
+import { type AppConfig, providerFetch } from "./config.ts";
 import { ThinkBlockParser } from "./vendors.ts";
 
 export type Message = ChatCompletionMessageParam;
@@ -18,7 +18,7 @@ export function createClient(config: AppConfig): OpenAI {
 	// retry logic can catch (confirmed by testing against a server that cuts
 	// the connection after headers). Node's native fetch doesn't have that
 	// failure mode, so use it explicitly rather than relying on the shim.
-	return new OpenAI({ baseURL: config.baseURL, apiKey: config.apiKey, fetch: globalThis.fetch });
+	return new OpenAI({ baseURL: config.baseURL, apiKey: config.apiKey, fetch: providerFetch });
 }
 
 export interface Usage {
