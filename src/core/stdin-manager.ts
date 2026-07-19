@@ -112,3 +112,47 @@ export function setStreamingActive(active: boolean): void {
 export function isStreamingActive(): boolean {
 	return streamingActive;
 }
+
+/**
+ * Rows by which the last Ink frame's CUU distance exceeded the terminal
+ * height (0 if it fit). Measured from the real `\x1b[<n>A` Ink emits (see
+ * useTerminalResync's scroll guard) — ground truth, not an estimate. ChatLog
+ * reads this to shrink its live-region budget reactively, so a turn that
+ * once overflowed doesn't keep overflowing (and losing DECXCPR scroll
+ * protection) for the rest of the turn.
+ */
+let lastFrameOverflow = 0;
+
+export function setLastFrameOverflow(rows: number): void {
+	lastFrameOverflow = rows;
+}
+
+export function getLastFrameOverflow(): number {
+	return lastFrameOverflow;
+}
+
+/**
+ * True when the most recently ended turn stopped via /abort (Esc) rather
+ * than completing normally. useAgentSession resets this to false at the
+ * start of every run and sets it true only from the "aborted" end reason, so
+ * it always reflects the run that just finished — never a stale one.
+ *
+ * Consumed by useTerminalResync's deferred-resync check so an aborted turn
+ * doesn't trigger the disruptive full clear + scrollback wipe + <Static>
+ * replay at the exact moment the user chose to interrupt it. A turn that
+ * overflowed the viewport can still leave stacked garbage in scrollback when
+ * aborted — that tradeoff is intentional: the cleanup fires on the next turn
+ * that actually completes/overflows instead.
+ */
+let lastTurnAborted = false;
+
+export function setLastTurnAborted(v: boolean): void {
+	lastTurnAborted = v;
+}
+
+/** Reads and clears the flag in one step — it must only suppress the one resync check immediately after the abort, never a later, unrelated one. */
+export function consumeLastTurnAborted(): boolean {
+	const v = lastTurnAborted;
+	lastTurnAborted = false;
+	return v;
+}

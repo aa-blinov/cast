@@ -8,7 +8,7 @@ import { readActivePlan } from "../core/plan.ts";
 import type { AgentRunner } from "../core/runner.ts";
 import { addUsage, appendMessage, type SessionState, type SessionUsage, saveSession } from "../core/session.ts";
 import type { PermissionMode } from "../core/settings.ts";
-import { setStreamingActive } from "../core/stdin-manager.ts";
+import { setLastTurnAborted, setStreamingActive } from "../core/stdin-manager.ts";
 import { displayWidthCacheFlush } from "./display-width.ts";
 
 export type AgentStatus = "idle" | "running" | "error";
@@ -31,8 +31,8 @@ export interface ToolCallEntry {
  * call breaks the run so whatever streams after it starts a fresh block.
  */
 export type StreamBlock =
-	| { kind: "thinking"; text: string }
-	| { kind: "content"; text: string }
+	| { kind: "thinking"; text: string; continued?: boolean }
+	| { kind: "content"; text: string; continued?: boolean }
 	| { kind: "tool"; call: ToolCallEntry };
 
 export interface ChatMessage {
@@ -63,9 +63,32 @@ export interface StreamingState {
 function appendText(blocks: StreamBlock[], kind: "thinking" | "content", text: string): StreamBlock[] {
 	const last = blocks[blocks.length - 1];
 	if (last && last.kind === kind) {
-		return [...blocks.slice(0, -1), { kind, text: last.text + text }];
+		return [...blocks.slice(0, -1), { kind, text: last.text + text, continued: last.continued }];
 	}
 	return [...blocks, { kind, text }];
+}
+
+/**
+ * Splits off any already-complete lines of a trailing thinking/content block,
+ * leaving only the still-growing partial last line behind. Reasoning settles
+ * the moment something else starts streaming after it (see
+ * settledPrefixLength) — but the final answer is normally the last block of
+ * the whole turn, so that boundary never comes and it would otherwise sit
+ * whole in the live region until the turn ends, then jump into history in
+ * one piece. Draining completed lines as they arrive gives it the same
+ * steady, incremental commit reasoning already gets. `continued` suppresses
+ * the repeated "[reasoning]"/"[agent]" label on every split-off piece of the
+ * same run — only the first piece shows it.
+ */
+/** Exported for unit tests. */
+export function splitCompleteLines(block: StreamBlock): { settled: StreamBlock[]; tail: StreamBlock } {
+	if (block.kind === "tool") return { settled: [], tail: block };
+	const idx = block.text.lastIndexOf("\n");
+	if (idx === -1) return { settled: [], tail: block };
+	return {
+		settled: [{ kind: block.kind, text: block.text.slice(0, idx), continued: block.continued }],
+		tail: { kind: block.kind, text: block.text.slice(idx + 1), continued: true },
+	};
 }
 
 /**
@@ -390,10 +413,20 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			// leaving the drained blocks visible in the live region for up to 16ms.
 			let settledNow = false;
 			if (next && next.blocks.length > 0) {
-				const settled = settledPrefixLength(next.blocks);
-				if (settled > 0) {
-					const promoted = next.blocks.slice(0, settled);
-					next = { blocks: next.blocks.slice(settled) };
+				const boundarySettled = settledPrefixLength(next.blocks);
+				let promoted = next.blocks.slice(0, boundarySettled);
+				let rest = next.blocks.slice(boundarySettled);
+				// The trailing block never crosses the boundary above (it's still
+				// live) — but any complete lines already inside it can drain too.
+				if (rest.length > 0) {
+					const { settled: lineSettled, tail } = splitCompleteLines(rest[0]!);
+					if (lineSettled.length > 0) {
+						promoted = [...promoted, ...lineSettled];
+						rest = [tail, ...rest.slice(1)];
+					}
+				}
+				if (promoted.length > 0) {
+					next = { blocks: rest };
 					setMessages((msgs) => [...msgs, { role: "assistant", content: "", blocks: promoted }]);
 					settledNow = true;
 				}
@@ -511,6 +544,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			toolNamesByIdRef.current.clear();
 			updateStreaming(() => ({ blocks: [] }), true);
 			setStreamingActive(true);
+			setLastTurnAborted(false);
 
 			try {
 				if (!session.lastAnnouncedLocalDate) {
@@ -740,6 +774,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 							}
 							case "end":
 								if (event.reason === "aborted") {
+									setLastTurnAborted(true);
 									setMessages((msgs) => [...msgs, { role: "warning", content: "[aborted]" }]);
 								} else if (event.reason === "disconnected") {
 									setMessages((msgs) => [...msgs, { role: "warning", content: "[terminated]" }]);

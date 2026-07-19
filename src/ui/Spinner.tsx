@@ -8,7 +8,9 @@ const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "
 export function Spinner(): JSX.Element {
 	const [frame, setFrame] = useState(0);
 	useEffect(() => {
-		const id = setInterval(() => setFrame((f) => (f + 1) % FRAMES.length), 80);
+		// 120ms (~8fps) — visually smooth for a braille spinner, saves ~35%
+		// render cycles vs the old 80ms (12.5fps).
+		const id = setInterval(() => setFrame((f) => (f + 1) % FRAMES.length), 120);
 		return () => clearInterval(id);
 	}, []);
 	// ponytail: gradientHex called per-render (10 calls × 80ms). Fine for a

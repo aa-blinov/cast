@@ -1,5 +1,10 @@
 import { useEffect } from "react";
-import { isStreamingActive, isTerminalSuspended } from "../core/stdin-manager.ts";
+import {
+	consumeLastTurnAborted,
+	isStreamingActive,
+	isTerminalSuspended,
+	setLastFrameOverflow,
+} from "../core/stdin-manager.ts";
 
 /**
  * Two distinct terminal desyncs, one shared remedy (clear + full <Static>
@@ -160,6 +165,40 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 		// polls, so staleness can't clear there — don't let it block forever.
 		const scrollKnown = () => !scrollUpStale || !process.stdin.isTTY;
 
+		// The clear below and the replayed frame it triggers (via onResync's state
+		// update, flushed by Ink on a later tick) are two separate writes with a
+		// gap between them — long enough for the terminal to paint the blank
+		// cleared screen before the redraw lands, i.e. a visible flash. Wrapping
+		// both in CSI ?2026h/l (synchronized output — the same mechanism Ink uses
+		// internally for its own frames, see ink's write-synchronized.js) tells
+		// the terminal to buffer everything until the closing marker and swap
+		// atomically. `setImmediate` gives Ink's next frame time to land before
+		// releasing; the timeout is a safety net so a delayed/failed commit can't
+		// leave the terminal stuck buffering output forever.
+		let releaseSync: (() => void) | null = null;
+		const withSyncedRepaint = (clearSeq: string, resync: () => void) => {
+			releaseSync?.(); // shouldn't overlap, but never leave a prior one dangling
+			origWrite("\x1b[?2026h");
+			let released = false;
+			const release = () => {
+				if (released) return;
+				released = true;
+				releaseSync = null;
+				origWrite("\x1b[?2026l");
+			};
+			releaseSync = release;
+			const safety = setTimeout(release, 250);
+			try {
+				origWrite(clearSeq);
+				resync();
+			} finally {
+				setImmediate(() => {
+					clearTimeout(safety);
+					release();
+				});
+			}
+		};
+
 		// Full clear: wipes scrollback (\x1b[3J) so the old banner disappears
 		// and the fresh one is the only copy. Used by theme changes.
 		const doFullResync = () => {
@@ -168,8 +207,12 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 				return;
 			}
 			resyncPending = false;
-			origWrite("\x1b[2J\x1b[3J\x1b[H");
-			onResync(false);
+			// After the clear + cursor-home the terminal is at a known position.
+			// Reset scroll flags so the next Ink frame isn't swallowed by the
+			// scroll guard while waiting for the next DECXCPR poll (up to 500ms).
+			scrollUp = false;
+			scrollUpStale = false;
+			withSyncedRepaint("\x1b[2J\x1b[3J\x1b[H", () => onResync(false));
 		};
 		// Light clear: only the visible screen (\x1b[2J), no scrollback wipe.
 		// Used by resize and focus-regain — the scrollback content is still
@@ -182,8 +225,9 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 				return;
 			}
 			resyncPending = false;
-			origWrite("\x1b[2J\x1b[H");
-			onResync(true);
+			scrollUp = false;
+			scrollUpStale = false;
+			withSyncedRepaint("\x1b[2J\x1b[H", () => onResync(true));
 		};
 
 		const onResize = () => {
@@ -239,8 +283,15 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 			// Streaming just ended after the live area outgrew the viewport at some
 			// point during it — request one cleanup repaint. It rides the same
 			// deferral/guards below (scroll, suspend, scroll-known), so it never
-			// clears while the user is scrolled up reading.
-			if (desyncTracker.onPoll(streamingNow)) resyncPending = true;
+			// clears while the user is scrolled up reading. Skipped when the turn
+			// that just ended was aborted (Esc): the user just interrupted the
+			// run, and a full clear + scrollback wipe + <Static> replay landing
+			// right then is more jarring than the stacked-frame garbage it would
+			// clean up — that cleanup rides along on the next turn that actually
+			// completes/overflows instead. consumeLastTurnAborted() must only be
+			// called here, exactly on the edge onPoll fires on, or it could
+			// suppress a later, unrelated turn's genuine cleanup.
+			if (desyncTracker.onPoll(streamingNow) && !consumeLastTurnAborted()) resyncPending = true;
 
 			if (streamingNow || isTerminalSuspended()) {
 				scrollUpStale = true;
@@ -269,6 +320,10 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 			// log-update starts each frame with `\x1b[<n>A` (move up past the
 			// previous frame). n > terminal rows means the live area doesn't fit
 			// on screen. Recompute both directions so the guard can never latch.
+			// This CUU_RE check must run on every frame (it's the only source of
+			// liveFits/desyncTracker truth) — it's cheap (one small regex against
+			// the start of the string), unlike the CURSOR_OR_ERASE_RE scan below,
+			// which is skipped unless scrollUp is actually latched.
 			const m = CUU_RE.exec(s);
 			if (m) {
 				// During streaming the live area routinely exceeds terminal height —
@@ -280,6 +335,7 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 				const cuuFits = cuuN <= rows;
 				const streamingNow = isStreamingActive();
 				liveFits = cuuFits;
+				setLastFrameOverflow(Math.max(0, cuuN - rows));
 				// Never clear scrollUp from CUU while streaming: a short spinner
 				// frame (cuuFits) would unlock Ink redraws while the user is still
 				// scrolled into history — trackpad inertia then fights CUU and the
@@ -292,6 +348,9 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 				desyncTracker.noteFrame(cuuFits, streamingNow);
 			}
 
+			// The broad erase/cursor scan only matters once scrollUp is actually
+			// latched — skip it otherwise (the common case) to avoid regex cost
+			// on every frame during normal idle/streaming rendering.
 			if (scrollUp && CURSOR_OR_ERASE_RE.test(s)) {
 				return true; // swallow — don't erase/redraw while scrolled
 			}
@@ -302,15 +361,18 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 		// biome-ignore lint/suspicious/noControlCharactersInRegex: DECXCPR response format
 		const DECXCPR_RE = /\x1b\[(\d+);(\d+)R/;
 		const QUERY = "\x1b[6n";
-		const POLL_MS = 500;
-		// Must stay strictly below POLL_MS: the "terminal didn't answer"
-		// fallback has to fire before the next poll tick. An earlier version
-		// had it the other way around (600 > 500) and unconditionally cleared
-		// the previous timeout at the top of each poll — on a terminal that
-		// never answers \x1b[6n the fallback therefore never ran: cleanup was
-		// skipped forever, a new stdin listener leaked every 500 ms, and a
-		// scrollUpStale flag set during streaming was never cleared, blocking
-		// every deferred resize-resync from that point on.
+		// "Terminal didn't answer" fallback. startQuery's `decxprActive` guard
+		// skips a tick outright while a query is still in flight, so a slow
+		// terminal just loses polls rather than stacking listeners — but this
+		// timeout still has to resolve *some* time, or `decxprActive` never
+		// clears and every later tick gets skipped forever. An earlier version
+		// had this fallback fire *after* the next poll tick (600ms vs. a 500ms
+		// poll) and unconditionally cleared the previous timeout at the top of
+		// each poll — on a terminal that never answers \x1b[6n the fallback
+		// therefore never ran: cleanup was skipped forever, a new stdin
+		// listener leaked every tick, and a scrollUpStale flag set during
+		// streaming was never cleared, blocking every deferred resize-resync
+		// from that point on.
 		const TIMEOUT_MS = 400;
 
 		let decxprActive = false;
@@ -377,7 +439,25 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 			}, TIMEOUT_MS);
 		}
 
-		const pollInterval = setInterval(startQuery, POLL_MS);
+		// Adaptive polling: fast (200ms) while streaming or when a resync is
+		// pending (the scroll flag matters most then); slow (1000ms) at idle
+		// to reduce unnecessary terminal traffic on mobile. Computed fresh on
+		// mount too — opening the CLI is almost always idle, and mobile is the
+		// case this exists to go easy on, so it shouldn't run fast for 3s
+		// before the periodic check below picks the right rate.
+		const initialPollRate = isStreamingActive() || resyncPending ? 200 : 1000;
+		let pollInterval = setInterval(startQuery, initialPollRate);
+		let lastPollRate = initialPollRate;
+		const updatePollRate = () => {
+			const rate = isStreamingActive() || resyncPending ? 200 : 1000;
+			if (rate !== lastPollRate) {
+				clearInterval(pollInterval);
+				pollInterval = setInterval(startQuery, rate);
+				lastPollRate = rate;
+			}
+		};
+		// Check rate every few seconds — cheap, only resets the interval when needed.
+		const rateCheck = setInterval(updatePollRate, 3000);
 
 		const restore = () => {
 			out.write = origWrite;
@@ -396,8 +476,10 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 			if (focusTimer) clearTimeout(focusTimer);
 			process.stdin.off("data", onFocusData);
 			clearInterval(pollInterval);
+			clearInterval(rateCheck);
 			clearInterval(rawModeCheck);
 			cancelActiveQuery?.();
+			releaseSync?.();
 			restore();
 			process.off("exit", restore);
 		};
