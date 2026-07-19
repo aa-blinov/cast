@@ -113,7 +113,7 @@ export async function fetchModels(config: AppConfig): Promise<FetchModelsResult>
 		}
 
 		if (UNREACHABLE_PATTERN.test(message)) {
-			return { ok: false, error: `Cannot connect to ${config.baseURL}` };
+			return { ok: false, error: `Cannot connect to ${config.baseURL} (${unreachableDetail(message)})` };
 		}
 
 		if (message.includes("401") || message.includes("Unauthorized") || message.includes("Invalid API key")) {
@@ -146,9 +146,17 @@ export function providerErrorText(error: unknown): string {
 	let current: unknown = error;
 	for (let depth = 0; current !== undefined && current !== null && depth < 5; depth++) {
 		parts.push(current instanceof Error ? current.message : String(current));
+		// undici wraps multi-address connect failures (e.g. IPv6+IPv4 both
+		// refused) in an AggregateError with an empty message whose real
+		// errno lives in `errors` — without this the chain dead-ends at
+		// "fetch failed".
+		const agg = current as { errors?: unknown[] };
+		if (Array.isArray(agg.errors) && agg.errors.length > 0) {
+			parts.push(agg.errors.map((e) => (e instanceof Error ? e.message : String(e))).join(" & "));
+		}
 		current = (current as { cause?: unknown }).cause;
 	}
-	return parts.join(" | ");
+	return parts.filter(Boolean).join(" | ");
 }
 
 // "Connection error." / "Request timed out." are the SDK's own wrapper
@@ -156,6 +164,21 @@ export function providerErrorText(error: unknown): string {
 // unreachable even when the cause chain got severed somewhere.
 const UNREACHABLE_PATTERN =
 	/ECONNREFUSED|ENOTFOUND|EHOSTUNREACH|ETIMEDOUT|fetch failed|Connection error|Request timed out/i;
+
+/**
+ * The most specific fragment of a flattened error chain, for display. "Cannot
+ * connect to <url>" alone is undebuggable — ECONNREFUSED (endpoint down),
+ * ENOTFOUND (DNS / no VPN), and CERT_* (TLS interception) all need different
+ * fixes, and the detail decides which. Prefer the deepest part carrying an
+ * errno-style code or TLS error; fall back to the last (deepest) part.
+ */
+export function unreachableDetail(flattened: string): string {
+	const parts = flattened.split(" | ");
+	for (let i = parts.length - 1; i >= 0; i--) {
+		if (/E[A-Z]{3,}|CERT_|certificate|SSL|TLS/i.test(parts[i]!)) return parts[i]!.slice(0, 120);
+	}
+	return (parts[parts.length - 1] ?? "").slice(0, 120);
+}
 
 export interface ValidationResult {
 	ok: boolean;
@@ -195,7 +218,7 @@ export async function validateModel(config: AppConfig, model: string): Promise<V
 		}
 
 		if (UNREACHABLE_PATTERN.test(message)) {
-			return { ok: false, error: `Cannot connect to ${config.baseURL}` };
+			return { ok: false, error: `Cannot connect to ${config.baseURL} (${unreachableDetail(message)})` };
 		}
 
 		if (message.includes("401") || message.includes("Unauthorized") || message.includes("Invalid API key")) {

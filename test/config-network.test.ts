@@ -130,3 +130,23 @@ describe("probeProvider", () => {
 		expect(await probeProvider(cfg)).toBe("unknown");
 	});
 });
+
+describe("unreachableDetail", () => {
+	it("surfaces the errno fragment from a flattened cause chain", async () => {
+		const { unreachableDetail } = await import("../src/core/config.ts");
+		expect(unreachableDetail("Connection error. | fetch failed | connect ECONNREFUSED 127.0.0.1:1")).toBe(
+			"connect ECONNREFUSED 127.0.0.1:1",
+		);
+		expect(unreachableDetail("Connection error. | fetch failed | getaddrinfo ENOTFOUND no.such.host")).toContain(
+			"ENOTFOUND",
+		);
+	});
+
+	it("prefers TLS/cert fragments and falls back to the deepest part", async () => {
+		const { unreachableDetail } = await import("../src/core/config.ts");
+		expect(unreachableDetail("Connection error. | fetch failed | unable to verify the first certificate")).toContain(
+			"certificate",
+		);
+		expect(unreachableDetail("Connection error. | fetch failed")).toBe("fetch failed");
+	});
+});

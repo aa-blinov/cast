@@ -133,7 +133,15 @@ export function resolveBashFrom(
 /** execFileSync wrapper for registry/where lookups — null on any failure. */
 function runCommandSync(file: string, args: string[]): string | null {
 	try {
-		return execFileSync(file, args, { encoding: "utf-8", timeout: 3000, windowsHide: true }).trim();
+		return execFileSync(file, args, {
+			encoding: "utf-8",
+			timeout: 3000,
+			windowsHide: true,
+			// stderr must NOT inherit (the execFileSync default): a missing
+			// GitForWindows registry key makes reg.exe print a localized error
+			// (CP866 on Russian Windows) straight into cast's TUI as mojibake.
+			stdio: ["ignore", "pipe", "ignore"],
+		}).trim();
 	} catch {
 		return null;
 	}
