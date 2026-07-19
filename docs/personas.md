@@ -7,7 +7,10 @@ A coding agent optimized for implementation isn't the best reviewer. A QA mindse
 | Persona | Label | Description |
 |---------|-------|-------------|
 | `coding` | Coding agent | Default persona — reads files, runs commands, edits code with precision |
+| `analyst` | Business Analyst | Requirements out of vague asks — contradictions, gaps, scenarios, acceptance criteria, API contracts |
+| `architect` | Architect | System design — trade-off analysis, ADRs, module boundaries; the deliverable is a decision, not a diff |
 | `coder-with-subagents` | Coder with subagents | Delegates parallel and isolated work to sub-agents via the task tool |
+| `coder-with-subagents-force-review` | Coder · forced review | Same delegation, plus a mandatory review gate: every code change goes through an independent `review` sub-agent (fresh context, diff-based, one round) before being reported done |
 | `senior` | Senior Developer | Lazy senior dev — the ladder, root-cause fixes, deletion over addition |
 | `tech-writer` | Technical Writer | Documentation — READMEs, guides, API references, changelogs, diagrams |
 | `qa` | QA Engineer | Functional testing — verifies features, builds test plans, catches regressions |
@@ -15,12 +18,16 @@ A coding agent optimized for implementation isn't the best reviewer. A QA mindse
 | `pm` | Project Manager | Task and spec writing — breaks work into clear, actionable tickets |
 | `marketer` | Marketer | Positioning, messaging, and go-to-market |
 | `fiction-writer` | Fiction Writer | Creative fiction and literary prose |
+| `product` | Product Manager | Product thinking — hypotheses, success metrics, prioritization, user stories from raw feedback |
+| `sre` | SRE / Incident Responder | Incident-mode thinking — logs first, hypothesis→check loops, blameless postmortems, SLOs |
 | `sysadmin` | System Administrator | Operations and infrastructure — diagnoses systems, manages services |
 | `devops` | DevOps Engineer | CI/CD, IaC, containers, Kubernetes, deployments, observability |
 | `dba` | Database Engineer | Schema design, migrations, query optimization, indexing |
 | `appsec` | Security Engineer | Application security — threat modeling, secure code review, vulnerability analysis |
 
-The `coding` persona is the default. The `coder-with-subagents` persona is the only one that enables the `task` tool for delegating work to sub-agents.
+The `coding` persona is the default. `coder-with-subagents` and `coder-with-subagents-force-review` are the personas that enable the `task` tool for delegating work to sub-agents.
+
+Why `coder-with-subagents-force-review` reviews in a sub-agent rather than in place: self-review in the same context is unreliable (the model is biased toward the reasoning that produced the code, and a contaminated context contaminates the check). The gate hands the reviewer only the task summary and the diff — never the implementation reasoning — requires findings to be confirmed by execution, and runs exactly one round to avoid review ping-pong.
 
 ## Switching Personas
 
@@ -28,7 +35,9 @@ The `coding` persona is the default. The `coder-with-subagents` persona is the o
 - **Interactively**: `/persona` (opens picker) or `/persona <name>`
 - **First run**: persona is selected during onboarding
 
-The persona choice is saved to `~/.cast/settings.json` and remembered across sessions.
+The persona travels with the thread: each session remembers the persona that drove it, and resuming (`-c`, `--resume`, `/sessions`) restores that persona — same rule as plan/build mode. The global choice in `~/.cast/settings.json` is the default for *new* sessions only. If a session's persona was deleted, resume keeps the current one with a notice.
+
+Switching mid-conversation leaves the previous persona's reasoning in the context, so after switching to a *different* persona in a non-empty thread, cast offers to start a new session (the `/new` flow) — pick "Continue here" (or press Esc) to keep the current thread; the thread is then re-stamped with the new persona.
 
 ## Custom Personas
 
