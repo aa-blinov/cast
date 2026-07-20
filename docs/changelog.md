@@ -2,6 +2,14 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.7.12
+
+### Fixed
+
+- Ink incremental rendering enabled (`incrementalRendering: true`) — only repaints lines that actually changed, reducing terminal traffic and eliminating flicker on frequent redraws. Frame rate cap raised from 30 to 60 FPS for a more responsive composer.
+
+
+
 ## 0.7.11
 
 ### Fixed
