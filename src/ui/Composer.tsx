@@ -128,7 +128,6 @@ export function Composer({
 	const lockedRef = useRef(locked);
 	lockedRef.current = locked;
 	const paletteScrollRef = useRef(0);
-	const composerScrollRef = useRef(0);
 	// Notice timers, kept in refs so a newer notice cancels the stale timer
 	// that would otherwise clear it early, and so unmount doesn't leave a
 	// timer calling setState on a dead component.
@@ -334,9 +333,6 @@ export function Composer({
 				case "input.submit":
 					doSubmit();
 					break;
-				case "input.newLine":
-					b.insertNewline();
-					break;
 				case "input.abort":
 					handleExitRequest();
 					break;
@@ -518,35 +514,15 @@ export function Composer({
 		};
 	}, [setRawMode, stdin, isRawModeSupported]);
 
-	const { lines, cursorLine, cursorCol } = buf.getLayout();
-	// Window follows the cursor (same pattern as the palette's scroll): a
-	// plain slice(-5) pinned the view to the last lines, so moving the cursor
-	// up past the window edge meant editing blind — the cursor row simply
-	// wasn't rendered.
-	const COMPOSER_ROWS = 5;
-	const maxScroll = Math.max(0, lines.length - COMPOSER_ROWS);
-	if (composerScrollRef.current > maxScroll) composerScrollRef.current = maxScroll;
-	if (cursorLine < composerScrollRef.current) composerScrollRef.current = cursorLine;
-	else if (cursorLine >= composerScrollRef.current + COMPOSER_ROWS)
-		composerScrollRef.current = cursorLine - COMPOSER_ROWS + 1;
-	const offset = composerScrollRef.current;
-	const visibleLines = lines.slice(offset, offset + COMPOSER_ROWS);
-
-	// Dynamic height: grow with content, shrink back when lines are deleted.
-	// "Sticky" max — once the frame reaches a certain height, keep it there
-	// until the buffer is cleared. Ink handles cursor-up correctly when the
-	// frame grows, but shrinking leaves ghost rows (streaks, duplicated
-	// borders). Padding the frame back to the sticky max on shrink avoids the
-	// artifact without permanently wasting space.
-	const prevHeightRef = useRef(1);
-	const stickyMaxRef = useRef(1);
-	const currentContent = visibleLines.length;
-	if (currentContent > stickyMaxRef.current) stickyMaxRef.current = currentContent;
-	// Reset sticky max when the buffer is cleared (e.g. after submit or Esc)
-	if (lines.length === 0) stickyMaxRef.current = 1;
-	const frameRows = lines.length === 0 ? 1 : Math.max(currentContent, stickyMaxRef.current);
-	const padRows = frameRows - currentContent;
-	prevHeightRef.current = frameRows;
+	// No keybinding ever inserts "\n" into the buffer (newline entry was
+	// removed — see keybindings.ts), and multi-line/long pastes collapse to a
+	// single chip character rather than literal newlines (see paste.ts), so
+	// the buffer is always exactly one line. That made the old scrolling
+	// window, sticky-max-height, and shrink-padding logic here dead weight —
+	// they existed only to handle a frame whose height could change, which
+	// can no longer happen.
+	const { lines, cursorCol } = buf.getLayout();
+	const line = lines[0] ?? "";
 
 	return (
 		<Box flexDirection="column">
@@ -586,66 +562,7 @@ export function Composer({
 				borderColor={locked ? theme().muted : running ? theme().warning : theme().success}
 				paddingX={1}
 			>
-				{/* Off-screen line counters: without them a scrolled window is
-				    indistinguishable from the whole message, so it wasn't clear
-				    there was anything to arrow-scroll to. */}
-				{offset > 0 && (
-					<Text color={theme().muted} dimColor>
-						{"  "}↑ {offset} more {offset === 1 ? "line" : "lines"}
-					</Text>
-				)}
-				{visibleLines.map((line, i) => {
-					const realLine = i + offset;
-					const isCursorLine = realLine === cursorLine;
-					const beforeCol = isCursorLine ? line.slice(0, cursorCol) : line;
-					// Take the full code point under the cursor — slicing a single
-					// UTF-16 unit would split an emoji's surrogate pair and render
-					// mojibake on both sides of the cursor.
-					let atCol = "";
-					if (isCursorLine && cursorCol < line.length) {
-						const cp = line.codePointAt(cursorCol) ?? 0;
-						atCol = line.slice(cursorCol, cursorCol + (cp > 0xffff ? 2 : 1));
-					}
-					const afterCol = isCursorLine ? line.slice(cursorCol + atCol.length) : "";
-					// If the cursor cell is a chip character, show the whole chip
-					// label in inverse (the chip is one buffer column, so the cursor
-					// can rest on it; backspace/delete then act on the whole chip).
-					const atColChip = isCursorLine ? (chipLabels.get(atCol) ?? null) : null;
-					return (
-						<Text key={realLine}>
-							<Text color={theme().accent} bold>
-								{realLine === 0 ? "> " : "  "}
-							</Text>
-							{renderWithChips(beforeCol, chipLabels, `${realLine}-before`)}
-							{isCursorLine &&
-								(atColChip !== null ? (
-									<Text color="black" backgroundColor="yellow" inverse>
-										{atColChip}
-									</Text>
-								) : (
-									<Text color="white" inverse>
-										{atCol || " "}
-									</Text>
-								))}
-							{renderWithChips(afterCol, chipLabels, `${realLine}-after`)}
-						</Text>
-					);
-				})}
-				{/* Pad to frameRows to prevent ghost rows on shrink. Ink handles
-				    cursor-up correctly when the frame grows, but shrinking leaves
-				    stale rows on screen. The sticky max keeps the frame tall enough
-				    to overwrite its previous content; it resets to 1 on buffer clear. */}
-				{Array.from({ length: padRows }, (_, i) => (
-					// biome-ignore lint/suspicious/noArrayIndexKey: fixed-size padding, not a reorderable list
-					<Text key={`pad-${i}`}> </Text>
-				))}
-				{offset + visibleLines.length < lines.length && (
-					<Text color={theme().muted} dimColor>
-						{"  "}↓ {lines.length - offset - visibleLines.length} more{" "}
-						{lines.length - offset - visibleLines.length === 1 ? "line" : "lines"}
-					</Text>
-				)}
-				{lines.length === 0 && (
+				{line.length === 0 ? (
 					<Text>
 						<Text color={theme().accent} bold>
 							{"> "}
@@ -653,9 +570,44 @@ export function Composer({
 						<Text color={theme().muted}>
 							{running
 								? "Esc to stop · /queue to queue, /steer to inject..."
-								: "type / for commands, Shift+Enter for newline, Ctrl+G to attach image"}
+								: "type / for commands, Ctrl+G to attach image"}
 						</Text>
 					</Text>
+				) : (
+					(() => {
+						const beforeCol = line.slice(0, cursorCol);
+						// Take the full code point under the cursor — slicing a single
+						// UTF-16 unit would split an emoji's surrogate pair and render
+						// mojibake on both sides of the cursor.
+						let atCol = "";
+						if (cursorCol < line.length) {
+							const cp = line.codePointAt(cursorCol) ?? 0;
+							atCol = line.slice(cursorCol, cursorCol + (cp > 0xffff ? 2 : 1));
+						}
+						const afterCol = line.slice(cursorCol + atCol.length);
+						// If the cursor cell is a chip character, show the whole chip
+						// label in inverse (the chip is one buffer column, so the cursor
+						// can rest on it; backspace/delete then act on the whole chip).
+						const atColChip = chipLabels.get(atCol) ?? null;
+						return (
+							<Text>
+								<Text color={theme().accent} bold>
+									{"> "}
+								</Text>
+								{renderWithChips(beforeCol, chipLabels, "before")}
+								{atColChip !== null ? (
+									<Text color="black" backgroundColor="yellow" inverse>
+										{atColChip}
+									</Text>
+								) : (
+									<Text color="white" inverse>
+										{atCol || " "}
+									</Text>
+								)}
+								{renderWithChips(afterCol, chipLabels, "after")}
+							</Text>
+						);
+					})()
 				)}
 			</Box>
 		</Box>

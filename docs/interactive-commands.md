@@ -145,7 +145,6 @@ Use `/statusbar` to toggle individual segments on/off and reorder them — usefu
 | Delete word | Ctrl+W / Alt+Backspace |
 | Delete to line start | Ctrl+U |
 | Delete to line end | Ctrl+K |
-| New line | Shift+Enter / Ctrl+J / Alt+Enter |
 | Submit | Enter |
 | Stop turn / clear input | Esc |
 | Exit (2× to confirm) | Ctrl+C |

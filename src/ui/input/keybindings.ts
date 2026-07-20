@@ -23,7 +23,6 @@ export const TUI_KEYBINDINGS = {
 	"editor.deleteWordForward": { defaultKeys: ["alt+d", "alt+delete"] },
 	"editor.deleteToLineStart": { defaultKeys: "ctrl+u" },
 	"editor.deleteToLineEnd": { defaultKeys: "ctrl+k" },
-	"input.newLine": { defaultKeys: ["shift+enter", "ctrl+j", "alt+enter"] },
 	"input.submit": { defaultKeys: "enter" },
 	"input.abort": { defaultKeys: "ctrl+c" },
 	"input.escape": { defaultKeys: "escape" },

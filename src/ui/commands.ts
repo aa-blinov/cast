@@ -2293,7 +2293,6 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			"editor.deleteWordForward": "Delete word forward",
 			"editor.deleteToLineStart": "Delete to line start",
 			"editor.deleteToLineEnd": "Delete to line end",
-			"input.newLine": "New line",
 			"input.submit": "Submit",
 			"input.abort": "Exit (2× to confirm)",
 			"input.escape": "Stop turn / clear input",
@@ -2321,7 +2320,6 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			"ctrl+f": "Ctrl+F",
 			"ctrl+a": "Ctrl+A",
 			"ctrl+e": "Ctrl+E",
-			"ctrl+j": "Ctrl+J",
 			"ctrl+g": "Ctrl+G",
 			"alt+b": "Alt+B",
 			"alt+f": "Alt+F",
@@ -2330,10 +2328,8 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			"alt+right": "Alt+→",
 			"alt+backspace": "Alt+Backspace",
 			"alt+delete": "Alt+Del",
-			"alt+enter": "Alt+Enter",
 			"ctrl+left": "Ctrl+←",
 			"ctrl+right": "Ctrl+→",
-			"shift+enter": "Shift+Enter",
 		};
 		const lines = Object.entries(TUI_KEYBINDINGS).map(([id, def]) => {
 			const label = ACTION_LABELS[id] ?? id;
