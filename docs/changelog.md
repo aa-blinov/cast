@@ -2,7 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
-## 0.7.9
+## 0.7.10
+
+### Fixed
+
+- Autoscroll breaks after Alt+Tab: switching away from the terminal and back no longer leaves the viewport stuck — resync respects the current scroll position instead of force-resetting it.
+
 
 ### Changed
 
