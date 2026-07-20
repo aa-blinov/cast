@@ -111,12 +111,28 @@ export async function runTui(args: ParsedArgs): Promise<void> {
 			onQuit={onQuit}
 			onRepaintBanner={onRepaintBanner}
 		/>,
-		// Ctrl+C is handled by the Composer (double-press confirmation, see
-		// handleExitRequest). Ink's default exitOnCtrlC would race it: on
-		// terminals without the Kitty protocol Ctrl+C arrives as raw \x03,
-		// which Ink's own input handler turns into an instant unmount before
-		// the composer's confirmation ever shows.
-		{ exitOnCtrlC: false },
+		{
+			// Ctrl+C is handled by the Composer (double-press confirmation, see
+			// handleExitRequest). Ink's default exitOnCtrlC would race it: on
+			// terminals without the Kitty protocol Ctrl+C arrives as raw \x03,
+			// which Ink's own input handler turns into an instant unmount before
+			// the composer's confirmation ever shows.
+			exitOnCtrlC: false,
+			// Only repaint lines that actually changed, and move the cursor with
+			// one combined jump instead of ansi-escapes' eraseLines() default
+			// (N erase-line calls interleaved with N-1 separate `\x1b[1A` hops —
+			// see useTerminalResync's coalesceEraseLines for the terminals that
+			// choke on that repeated-identical-escape pattern). Ink's own
+			// documented fix for the same class of problem ("reduce flickering
+			// ... for frequently updating UIs"); coalesceEraseLines stays as a
+			// belt-and-suspenders backstop for whatever incremental mode's own
+			// write shape doesn't happen to cover.
+			incrementalRendering: true,
+			// Border duplication is fixed (coalescing + incremental rendering
+			// above), so there's no more reason to hold the frame rate down —
+			// raise it from Ink's default (30) for a more responsive composer.
+			maxFps: 60,
+		},
 	);
 
 	// Ink's suspendTerminal (needed by execBash to hand the terminal to child
