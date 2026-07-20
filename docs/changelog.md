@@ -2,6 +2,13 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.7.11
+
+### Fixed
+
+- Removed focus-reporting mechanism (`\x1b[?1004h`) that triggered a terminal resync on alt-tab: some terminals send focus-in reports unprompted, causing spurious screen clears that wiped the banner and broke the viewport. Focus in/out sequences are still silently dropped by the input parser so they never surface as stray characters.
+
+
 ## 0.7.10
 
 ### Fixed

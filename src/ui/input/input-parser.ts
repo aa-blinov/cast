@@ -56,11 +56,12 @@ export class InputParser {
 	}
 
 	private handleSequence(sequence: string): void {
-		// Focus in/out reports (CSI I / CSI O), emitted because useTerminalResync
-		// enables focus reporting (\x1b[?1004h) to redraw after alt-tab. They are
-		// terminal control chatter, not input — drop them so they never surface as
-		// a stray char in the composer. (They would fall through to "ignore" below
-		// anyway; matched explicitly so the intent is clear and can't regress.)
+		// Focus in/out reports (CSI I / CSI O) — some terminals send these
+		// unprompted even though nothing here requests focus reporting. They're
+		// terminal control chatter, not input — drop them so they never surface
+		// as a stray char in the composer. (They would fall through to "ignore"
+		// below anyway; matched explicitly so the intent is clear and can't
+		// regress.)
 		if (sequence === "\x1b[I" || sequence === "\x1b[O") {
 			return;
 		}

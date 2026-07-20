@@ -40,15 +40,6 @@ function coalesceEraseLines(s: string): string {
  *    leave stale copies of the live region stacked on screen. Debounced so a
  *    drag-resize burst triggers one reset once it settles.
  *
- * 1b. Focus regain (alt-tab). While the window is unfocused the terminal
- *    (Termius, and others) may throttle or coalesce rendering and reset the
- *    scroll region, so Ink's cursor-relative incremental frames stack up —
- *    the composer's top border reappears several times over. The terminal
- *    itself emits no resize, so nothing triggered a redraw; the only known
- *    workaround was to resize manually. We now enable focus reporting
- *    (\x1b[?1004h) and treat a focus-in report (\x1b[I) as the same desync
- *    signal as a resize, running the shared remedy once the run settles.
- *
  * 2. Terminal scroll. Ink's log-update writes a full frame per redraw
  *    starting with CUU (`\x1b[<n>A`), assuming the cursor sits exactly where
  *    the previous frame left it. When the viewport is scrolled up that
@@ -79,12 +70,12 @@ function coalesceEraseLines(s: string): string {
  *
  * The resync itself has two tiers:
  *
- * - Light (resize, focus-regain): \x1b[2J (clear visible screen) + \x1b[H
- *   (cursor home) + <Static> replay. No \x1b[3J scrollback wipe — the
- *   scrollback content is still valid (reflowed by the terminal on resize,
- *   or untouched on focus), so wiping it would destroy the user's scroll
- *   position for no reason and cause a visible flash while the full history
- *   replays. The banner stays in scrollback from the initial print.
+ * - Light (resize): \x1b[2J (clear visible screen) + \x1b[H (cursor home) +
+ *   <Static> replay. No \x1b[3J scrollback wipe — the scrollback content is
+ *   still valid (reflowed by the terminal on resize), so wiping it would
+ *   destroy the user's scroll position for no reason and cause a visible
+ *   flash while the full history replays. The banner stays in scrollback
+ *   from the initial print.
  *
  * - Full (theme change, streaming desync): \x1b[2J + \x1b[3J (wipe
  *   scrollback) + banner reprint + <Static> replay. The old gradient banner
@@ -124,27 +115,6 @@ export function createDesyncTracker(streamingNow: boolean): {
 			if (!streaming) armed = false;
 			wasStreaming = streaming;
 			return request;
-		},
-	};
-}
-
-/**
- * Distinguishes a genuine alt-tab return (window lost focus, then regained it)
- * from the spurious focus-in some terminals emit the moment focus reporting is
- * enabled. Only a focus-in that FOLLOWS a focus-out should trigger a resync —
- * acting on the startup focus-in would clear the freshly printed banner, which
- * lives outside Ink's <Static> and so isn't restored by the resync's replay.
- * Pure so the rule is unit-testable.
- */
-export function createFocusReturnTracker(): { onData(data: string): boolean } {
-	let sawFocusOut = false;
-	return {
-		onData(data) {
-			if (data.includes("\x1b[O")) sawFocusOut = true; // focus lost
-			if (!data.includes("\x1b[I")) return false; // no focus-in in this chunk
-			if (!sawFocusOut) return false; // focus-in with no prior loss — ignore
-			sawFocusOut = false;
-			return true;
 		},
 	};
 }
@@ -250,10 +220,10 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 			withSyncedRepaint("\x1b[2J\x1b[3J\x1b[H", () => onResync(false));
 		};
 		// Light clear: only the visible screen (\x1b[2J), no scrollback wipe.
-		// Used by resize and focus-regain — the scrollback content is still
-		// valid (reflowed by the terminal on resize, or untouched on focus),
-		// so wiping it would destroy the user's scroll position for no reason
-		// and cause a visible flash while the full history replays.
+		// Used by resize — the scrollback content is still valid (reflowed by
+		// the terminal), so wiping it would destroy the user's scroll position
+		// for no reason and cause a visible flash while the full history
+		// replays.
 		const doLightResync = () => {
 			if (isStreamingActive() || isTerminalSuspended() || scrollUp || !scrollKnown()) {
 				resyncPending = true;
@@ -274,39 +244,6 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 			resizeTimer = setTimeout(doLightResync, 80);
 		};
 		out.on("resize", onResize);
-
-		// --- focus regain: enable focus reporting, resync on focus-in ---
-		// \x1b[?1004h asks the terminal to report focus changes as \x1b[I
-		// (in) / \x1b[O (out). Terminals that don't support it ignore the
-		// request. The composer's input parser drops both reports explicitly.
-		let focusReportingOn = false;
-		if (process.stdin.isTTY) {
-			origWrite("\x1b[?1004h");
-			focusReportingOn = true;
-		}
-		const focusTracker = createFocusReturnTracker();
-		let focusTimer: ReturnType<typeof setTimeout> | null = null;
-		// biome-ignore lint/suspicious/noControlCharactersInRegex: focus report sequences
-		const FOCUS_RE = /\x1b\[IO/g;
-		const onFocusData = (chunk: Buffer) => {
-			const s = chunk.toString("latin1");
-			// Process focus sequences for the tracker first.
-			if (focusTracker.onData(s)) {
-				if (focusTimer) clearTimeout(focusTimer);
-				focusTimer = setTimeout(doLightResync, 80);
-			}
-			// Strip focus sequences in-place so they don't reach Ink's useInput.
-			// Without this, \x1b can be parsed as an Escape keypress by readline,
-			// which breaks modal pickers (StatusBarPicker, etc.) after alt-tab.
-			if (FOCUS_RE.test(s)) {
-				FOCUS_RE.lastIndex = 0;
-				const cleaned = s.replace(FOCUS_RE, "");
-				const cleanedBuf = Buffer.from(cleaned, "latin1");
-				cleanedBuf.copy(chunk);
-				for (let i = cleanedBuf.length; i < chunk.length; i++) chunk[i] = 0;
-			}
-		};
-		if (process.stdin.isTTY) process.stdin.on("data", onFocusData);
 
 		// Flush a deferred resync once streaming ends / terminal is released /
 		// the user scrolls back to the bottom — but only after a fresh poll has
@@ -508,20 +445,12 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 
 		const restore = () => {
 			out.write = origWrite;
-			// Stop the terminal reporting focus once we're no longer listening,
-			// so a later plain shell doesn't receive \x1b[I / \x1b[O noise.
-			if (focusReportingOn) {
-				origWrite("\x1b[?1004l");
-				focusReportingOn = false;
-			}
 		};
 		process.on("exit", restore);
 
 		return () => {
 			out.off("resize", onResize);
 			if (resizeTimer) clearTimeout(resizeTimer);
-			if (focusTimer) clearTimeout(focusTimer);
-			process.stdin.off("data", onFocusData);
 			clearInterval(pollInterval);
 			clearInterval(rateCheck);
 			clearInterval(rawModeCheck);
