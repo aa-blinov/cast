@@ -149,7 +149,7 @@ export function createFocusReturnTracker(): { onData(data: string): boolean } {
 	};
 }
 
-export function useTerminalResync(onResync: (preserveScrollback: boolean) => void): void {
+export function useTerminalResync(onResync: (preserveScrollback: boolean) => void | Promise<void>): void {
 	useEffect(() => {
 		const out = process.stdout;
 		if (!out.isTTY) return;
@@ -197,11 +197,24 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 		// both in CSI ?2026h/l (synchronized output — the same mechanism Ink uses
 		// internally for its own frames, see ink's write-synchronized.js) tells
 		// the terminal to buffer everything until the closing marker and swap
-		// atomically. `setImmediate` gives Ink's next frame time to land before
-		// releasing; the timeout is a safety net so a delayed/failed commit can't
-		// leave the terminal stuck buffering output forever.
+		// atomically — but only if the closing marker actually waits for the
+		// replay to land. `resync` (App's onResync) awaits Ink's own
+		// `waitUntilRenderFlush()` before resolving, so awaiting it here is what
+		// makes the sync block honest. An earlier version released after a bare
+		// `setImmediate` (one event-loop tick) instead of awaiting the real
+		// completion signal: React's state update (bumping <Static>'s key) is
+		// scheduled, not committed, by the time a single tick has passed, and
+		// Ink additionally throttles its own render/write — so the block could
+		// close before any of the replayed history actually reached the
+		// terminal, swapping in the cleared-but-still-blank screen and leaving
+		// just the composer floating with the real history stuck above it in
+		// scrollback (only a manual scroll-up recovers it). The timeout is a
+		// safety net so a delayed/failed commit can't leave the terminal stuck
+		// buffering output forever; it's generous because a full history replay
+		// on a long conversation can legitimately take longer than the old
+		// single-tick heuristic ever allowed for.
 		let releaseSync: (() => void) | null = null;
-		const withSyncedRepaint = (clearSeq: string, resync: () => void) => {
+		const withSyncedRepaint = (clearSeq: string, resync: () => void | Promise<void>) => {
 			releaseSync?.(); // shouldn't overlap, but never leave a prior one dangling
 			origWrite("\x1b[?2026h");
 			let released = false;
@@ -209,19 +222,16 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 				if (released) return;
 				released = true;
 				releaseSync = null;
+				clearTimeout(safety);
 				origWrite("\x1b[?2026l");
 			};
 			releaseSync = release;
-			const safety = setTimeout(release, 250);
-			try {
-				origWrite(clearSeq);
-				resync();
-			} finally {
-				setImmediate(() => {
-					clearTimeout(safety);
-					release();
-				});
-			}
+			const safety = setTimeout(release, 3000);
+			origWrite(clearSeq);
+			Promise.resolve()
+				.then(resync)
+				.catch(() => {})
+				.finally(release);
 		};
 
 		// Full clear: wipes scrollback (\x1b[3J) so the old banner disappears

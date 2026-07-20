@@ -54,7 +54,7 @@ export function App(props: AppProps): JSX.Element {
 	// release bundle (ink is inlined by esbuild, there's no node_modules/ink
 	// to resolve against), silently leaving live bash output to interleave
 	// with Ink's frames and stack duplicated composer/status lines.
-	const { suspendTerminal } = useApp();
+	const { suspendTerminal, waitUntilRenderFlush } = useApp();
 	useEffect(() => {
 		setSuspendHook(async (cb) => {
 			await suspendTerminal(cb);
@@ -77,13 +77,21 @@ export function App(props: AppProps): JSX.Element {
 	const [repaintKey, setRepaintKey] = useState(0);
 	useTerminalResync(
 		useCallback(
-			(preserveScrollback: boolean) => {
-				void (async () => {
-					if (!preserveScrollback) await onRepaintBanner?.();
-					setRepaintKey((k) => k + 1);
-				})();
+			async (preserveScrollback: boolean) => {
+				if (!preserveScrollback) await onRepaintBanner?.();
+				setRepaintKey((k) => k + 1);
+				// The synchronized-output block useTerminalResync wraps this call
+				// in must stay open until the replayed <Static> content actually
+				// reaches the terminal — closing it right after the setRepaintKey
+				// call above (which only *schedules* the re-render) would swap in
+				// the cleared-but-not-yet-redrawn screen. waitUntilRenderFlush is
+				// Ink's own signal for "pending render output is flushed to
+				// stdout" (it also settles Ink's internal render throttle), so
+				// awaiting it here is the real fix for the setImmediate guess
+				// that used to gate the release.
+				await waitUntilRenderFlush();
 			},
-			[onRepaintBanner],
+			[onRepaintBanner, waitUntilRenderFlush],
 		),
 	);
 
