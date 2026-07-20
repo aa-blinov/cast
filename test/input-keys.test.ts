@@ -146,16 +146,6 @@ describe("keybindings.ts — KeybindingsManager", () => {
 		expect(km.matches("a", "input.submit")).toBe(false);
 	});
 
-	it("matches newLine binding to Shift+Enter", () => {
-		const km = new KeybindingsManager();
-		expect(km.matches("\x1b[13;2u", "input.newLine")).toBe(true);
-	});
-
-	it("matches newLine binding to Ctrl-J", () => {
-		const km = new KeybindingsManager();
-		expect(km.matches("\n", "input.newLine")).toBe(true);
-	});
-
 	it("matches abort binding to Ctrl-C", () => {
 		const km = new KeybindingsManager();
 		expect(km.matches("\x03", "input.abort")).toBe(true);

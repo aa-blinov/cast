@@ -60,37 +60,36 @@ describe("InputParser — sequence classification", () => {
 	});
 });
 
-describe("InputParser — newline vs submit", () => {
+describe("InputParser — submit-only Enter (no newline binding)", () => {
 	it("maps Enter (\\r) to input.submit", () => {
 		const { events, feed } = makeParser();
 		feed("\r");
 		expect(events).toEqual([{ type: "binding", binding: "input.submit", raw: "\r" }]);
 	});
 
-	it("maps Kitty Shift+Enter (CSI 13;2u) to input.newLine", () => {
+	it("ignores Kitty Shift+Enter (CSI 13;2u) — no binding claims it", () => {
 		const { events, feed } = makeParser();
 		feed("\x1b[13;2u");
-		expect(events).toEqual([{ type: "binding", binding: "input.newLine", raw: "\x1b[13;2u" }]);
+		expect(events).toEqual([]);
 	});
 
-	it("maps modifyOtherKeys Shift+Enter to input.newLine", () => {
+	it("ignores modifyOtherKeys Shift+Enter", () => {
 		const { events, feed } = makeParser();
 		feed("\x1b[27;2;13~");
-		expect(events).toEqual([{ type: "binding", binding: "input.newLine", raw: "\x1b[27;2;13~" }]);
+		expect(events).toEqual([]);
 	});
 
-	it("maps legacy Alt+Enter (\\x1b\\r) to input.newLine", () => {
+	it("ignores legacy Alt+Enter (\\x1b\\r)", () => {
 		const { events, feed } = makeParser();
 		feed("\x1b\r");
-		expect(events).toEqual([{ type: "binding", binding: "input.newLine", raw: "\x1b\r" }]);
+		expect(events).toEqual([]);
 	});
 
-	it("maps legacy Ctrl+J (\\n) to input.newLine, not submit", () => {
-		// On terminals without the Kitty protocol Shift+Enter is
-		// indistinguishable from Enter, so Ctrl+J is the documented newline
-		// fallback — it must not be shadowed by the "enter" matcher's \n arm.
+	it("maps legacy Ctrl+J (\\n) to input.submit, same as Enter", () => {
+		// With no newline binding to shadow it, the "enter" matcher's \n arm
+		// (for terminals without the Kitty protocol) wins — Ctrl+J submits.
 		const { events, feed } = makeParser();
 		feed("\n");
-		expect(events).toEqual([{ type: "binding", binding: "input.newLine", raw: "\n" }]);
+		expect(events).toEqual([{ type: "binding", binding: "input.submit", raw: "\n" }]);
 	});
 });
