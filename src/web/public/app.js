@@ -3,9 +3,10 @@
  * No build step: importmap loads preact and htm from esm.sh CDN.
  */
 
-import { h, render } from "preact";
-import { useState, useEffect, useRef, useCallback } from "preact/hooks";
 import htm from "htm";
+import { h, render } from "preact";
+import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import { icons } from "./icons.js";
 
 const html = htm.bind(h);
 
@@ -20,34 +21,10 @@ const CAST_BANNER = [
 	"\\___/\\__,_/____/\\__/  ",
 ].join("\n");
 
-// SVG icons via h() — htm mishandles SVG namespace, so we build them directly.
-const icons = {
-	send: (props) => h("svg", { width: 16, height: 16, viewBox: "0 0 20 20", fill: "currentColor", ...props }, h("path", { d: "M3.105 2.288a.75.75 0 0 0-.826.95l1.414 4.926A1.5 1.5 0 0 0 5.135 9.25h6.115a.75.75 0 0 1 0 1.5H5.135a1.5 1.5 0 0 0-1.442 1.086l-1.414 4.926a.75.75 0 0 0 .826.95 28.897 28.897 0 0 0 15.293-7.155.75.75 0 0 0 0-1.114A28.897 28.897 0 0 0 3.105 2.288Z" })),
-	stop: (props) => h("svg", { width: 16, height: 16, viewBox: "0 0 20 20", fill: "currentColor", ...props }, h("path", { d: "M5.25 3A2.25 2.25 0 0 0 3 5.25v9.5A2.25 2.25 0 0 0 5.25 17h9.5A2.25 2.25 0 0 0 17 14.75v-9.5A2.25 2.25 0 0 0 14.75 3h-9.5Z" })),
-	bookmark: (props) => h("svg", { width: 11, height: 11, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": 2, "stroke-linecap": "round", "stroke-linejoin": "round", ...props }, h("path", { d: "M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z" })),
-	chevronLeft: (props) => h("svg", { width: 20, height: 20, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": 1.5, "stroke-linecap": "round", "stroke-linejoin": "round", ...props }, h("path", { d: "M15.75 19.5 8.25 12l7.5-7.5" })),
-	chevronRight: (props) => h("svg", { width: 20, height: 20, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": 1.5, "stroke-linecap": "round", "stroke-linejoin": "round", ...props }, h("path", { d: "m8.25 4.5 7.5 7.5-7.5 7.5" })),
-	chevronDown: (props) => h("svg", { width: 16, height: 16, viewBox: "0 0 20 20", fill: "currentColor", ...props }, h("path", { d: "M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" })),
-	// Every icon below is a genuine Heroicons (heroicons.com) path — not
-	// hand-approximated — copied from tailwindlabs/heroicons so the whole
-	// set actually is what it looks like: same grid, same stroke weight.
-	help: (props) => h("svg", { width: 20, height: 20, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": 1.5, "stroke-linecap": "round", "stroke-linejoin": "round", ...props },
-		h("path", { d: "M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 5.25h.008v.008H12v-.008Z" }),
-	),
-	settings: (props) => h("svg", { width: 20, height: 20, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": 1.5, "stroke-linecap": "round", "stroke-linejoin": "round", ...props },
-		h("path", { d: "M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z" }),
-		h("path", { d: "M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" }),
-	),
-	info: (props) => h("svg", { width: 20, height: 20, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": 1.5, "stroke-linecap": "round", "stroke-linejoin": "round", ...props },
-		h("path", { d: "m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z" }),
-	),
-	xMark: (props) => h("svg", { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": 1.5, "stroke-linecap": "round", "stroke-linejoin": "round", ...props }, h("path", { d: "M6 18 18 6M6 6l12 12" })),
-	pencil: (props) => h("svg", { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": 1.5, "stroke-linecap": "round", "stroke-linejoin": "round", ...props }, h("path", { d: "m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Zm0 0L19.5 7.125" })),
-};
-
-const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "");
-const modKeys = isMac ? ["\u2318"] : ["Ctrl"];
-const modShiftKeys = isMac ? ["\u2318", "\u21e7"] : ["Ctrl", "Shift"];
+const isMac =
+	typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "");
+const modKeys = isMac ? ["⌘"] : ["Ctrl"];
+const modShiftKeys = isMac ? ["⌘", "⇧"] : ["Ctrl", "Shift"];
 const modKey = modKeys.join("");
 // kc() renders each key of a shortcut as its own key-cap chip instead of
 // one flat text/ASCII string, so multi-key combos read like a keyboard.
@@ -64,10 +41,10 @@ const hotkeysHtml = `
 	</div>
 	<div class="hotkey-group">
 		<div class="hotkey-group-title">Composer</div>
-		<div class="hotkey-row"><span class="hotkey-label">Send message</span><span class="hotkey-keys">${kc("\u21b5")}</span></div>
-		<div class="hotkey-row"><span class="hotkey-label">New line</span><span class="hotkey-keys">${kc("\u21e7", "\u21b5")}</span></div>
+		<div class="hotkey-row"><span class="hotkey-label">Send message</span><span class="hotkey-keys">${kc("↵")}</span></div>
+		<div class="hotkey-row"><span class="hotkey-label">New line</span><span class="hotkey-keys">${kc("⇧", "↵")}</span></div>
 		<div class="hotkey-row"><span class="hotkey-label">Abort run</span><span class="hotkey-keys">${kc("Esc")}</span></div>
-		<div class="hotkey-row"><span class="hotkey-label">Navigate suggestions</span><span class="hotkey-keys">${kc("\u2191", "\u2193")}</span></div>
+		<div class="hotkey-row"><span class="hotkey-label">Navigate suggestions</span><span class="hotkey-keys">${kc("↑", "↓")}</span></div>
 	</div>
 `;
 
@@ -124,7 +101,7 @@ function renderMarkdown(text) {
 	// Pull fenced code blocks out first so inline rules below can't mangle
 	// their contents; they go back in verbatim (already escaped) at the end.
 	const fences = [];
-	let src = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_m, lang, code) => {
+	const src = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_m, lang, code) => {
 		const i = fences.length;
 		const label = lang ? `<div class="code-lang">${escapeHtml(lang)}</div>` : "";
 		fences.push(`<pre>${label}<code>${escapeHtml(code.replace(/\n$/, ""))}</code></pre>`);
@@ -161,19 +138,19 @@ function renderMarkdown(text) {
 
 // Recursively renders a parsed arg value as indented "key: value" lines.
 // Plain JSON.stringify on nested objects (the previous approach) escapes any
-// newline inside a nested string as a literal two-character "\n" \u2014 exactly
+// newline inside a nested string as a literal two-character "\n" — exactly
 // the shape of the `edit` tool's args (ops: [{ content: "<multi-line code>" }]),
 // so that turned into an unreadable wall of "\n"/"\t" text. Recursing instead
 // of stringifying keeps every string's real line breaks intact at any depth.
 function formatValue(v, indent) {
 	if (typeof v === "string") return v;
 	if (Array.isArray(v)) {
-		return v.map((item, i) => `${indent}[${i}]\n${formatValue(item, indent + "  ")}`).join("\n");
+		return v.map((item, i) => `${indent}[${i}]\n${formatValue(item, `${indent}  `)}`).join("\n");
 	}
 	if (v && typeof v === "object") {
 		return Object.entries(v)
 			.map(([k, val]) => {
-				const formatted = formatValue(val, indent + "  ");
+				const formatted = formatValue(val, `${indent}  `);
 				return formatted.includes("\n") ? `${indent}${k}:\n${formatted}` : `${indent}${k}: ${formatted}`;
 			})
 			.join("\n");
@@ -181,7 +158,7 @@ function formatValue(v, indent) {
 	return `${indent}${JSON.stringify(v)}`;
 }
 
-// Full parameter dump, not a truncated hint \u2014 the point is to see exactly
+// Full parameter dump, not a truncated hint — the point is to see exactly
 // what the agent is about to run, not just enough to guess.
 function formatArgsFull(args) {
 	if (!args) return "";
@@ -204,7 +181,7 @@ function shortPath(p) {
 	if (!p) return "";
 	const parts = p.split("/").filter(Boolean);
 	if (parts.length <= 2) return p;
-	return "\u2026/" + parts.slice(-2).join("/");
+	return `…/${parts.slice(-2).join("/")}`;
 }
 
 const WEB_TOOLS_OPTIONS = [
@@ -212,8 +189,8 @@ const WEB_TOOLS_OPTIONS = [
 	{ value: "off", label: "Disable web_search / web_fetch" },
 ];
 
-// \u2500\u2500 URL routing \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-// A query param, not a path segment (`/s/:id`) \u2014 the server's static file
+// ── URL routing ──────────────────────────────────────────────────────
+// A query param, not a path segment (`/s/:id`) — the server's static file
 // route only knows how to serve index.html for "/" itself, so anything path
 // based would need a server-side change; "?session=" needs none, since the
 // query string never affects which file gets served.
@@ -264,7 +241,14 @@ function Message({ msg }) {
 	const role = msg.role || "assistant";
 	if (role === "tool") return null;
 
-	const labelMap = { user: "you", agent: "agent", assistant: "agent", system: "system", warning: "notice", error: "error" };
+	const labelMap = {
+		user: "you",
+		agent: "agent",
+		assistant: "agent",
+		system: "system",
+		warning: "notice",
+		error: "error",
+	};
 
 	// Messages flushed from a live turn this session carry the full ordered
 	// block sequence (reasoning / prose / tool calls, same shape as
@@ -299,24 +283,31 @@ function Message({ msg }) {
 
 	// content is `null` for a tool-call-only turn (see core/loop.ts) — treat
 	// that as "no text", not the literal string "null" JSON.stringify gives it.
-	const content = typeof msg.content === "string" ? msg.content : msg.content == null ? "" : JSON.stringify(msg.content);
+	const content =
+		typeof msg.content === "string" ? msg.content : msg.content == null ? "" : JSON.stringify(msg.content);
 
 	if (role === "assistant") {
 		return html`
 			<div class="message-group">
-				${msg.thinking && html`
+				${
+					msg.thinking &&
+					html`
 					<div class="message message-reasoning">
 						<div class="message-label">reasoning</div>
 						<div class="message-content">${msg.thinking}</div>
 					</div>
-				`}
-				${msg.toolCalls && msg.toolCalls.map((tc) => html`<${ToolCard} key=${tc.id} call=${tc} />`)}
-				${content && html`
+				`
+				}
+				${msg.toolCalls?.map((tc) => html`<${ToolCard} key=${tc.id} call=${tc} />`)}
+				${
+					content &&
+					html`
 					<div class="message message-assistant">
 						<div class="message-label">agent</div>
 						<div class="message-content" dangerouslySetInnerHTML=${{ __html: renderMarkdown(content) }} />
 					</div>
-				`}
+				`
+				}
 			</div>
 		`;
 	}
@@ -384,17 +375,19 @@ function ValueSuggest({ items, selectedIndex, onHover, onSelect }) {
 
 	return html`
 		<div class="cmd-palette open">
-			${items.map((it, i) => html`
+			${items.map(
+				(it, i) => html`
 				<div key=${it.value} class="cmd-item${i === selectedIndex ? " selected" : ""}" onMouseEnter=${() => onHover(i)} onClick=${() => onSelect(it.value)}>
 					<span class="cmd-name">${it.value}</span>
 					<span class="cmd-desc">${it.label}</span>
 				</div>
-			`)}
+			`,
+			)}
 		</div>
 	`;
 }
 
-function Composer({ running, ready, activeId, commands, personas, onSubmit, onAbort }) {
+function Composer({ running, ready, commands, personas, onSubmit, onAbort }) {
 	const [value, setValue] = useState("");
 	const [cmdVisible, setCmdVisible] = useState(false);
 	const [selectedIndex, setSelectedIndex] = useState(0);
@@ -411,7 +404,7 @@ function Composer({ running, ready, activeId, commands, personas, onSubmit, onAb
 		const el = textareaRef.current;
 		if (el) {
 			el.style.height = "auto";
-			el.style.height = Math.min(el.scrollHeight, 100) + "px";
+			el.style.height = `${Math.min(el.scrollHeight, 100)}px`;
 		}
 	}, []);
 
@@ -424,37 +417,46 @@ function Composer({ running, ready, activeId, commands, personas, onSubmit, onAb
 		if (textareaRef.current) textareaRef.current.style.height = "auto";
 	}, [value, onSubmit]);
 
-	const handleCmdSelect = useCallback((name) => {
-		// Argument-less commands (help, current, usage, ...) should just run —
-		// filling the box with "/current " and waiting for a second Enter is
-		// exactly the "picker doesn't work" feeling this is meant to fix.
-		const cmd = commands.find((c) => c.name === name);
-		if (cmd && !cmd.takesArgs) {
-			onSubmit(name);
-			setValue("");
+	const handleCmdSelect = useCallback(
+		(name) => {
+			// Argument-less commands (help, current, usage, ...) should just run —
+			// filling the box with "/current " and waiting for a second Enter is
+			// exactly the "picker doesn't work" feeling this is meant to fix.
+			const cmd = commands.find((c) => c.name === name);
+			if (cmd && !cmd.takesArgs) {
+				onSubmit(name);
+				setValue("");
+				setCmdVisible(false);
+				if (textareaRef.current) textareaRef.current.style.height = "auto";
+				return;
+			}
+			setValue(`${name} `);
 			setCmdVisible(false);
+			textareaRef.current?.focus();
+			requestAnimationFrame(resize);
+		},
+		[commands, onSubmit, resize],
+	);
+
+	const handlePersonaSelect = useCallback(
+		(name) => {
+			onSubmit(`/persona ${name}`);
+			setValue("");
 			if (textareaRef.current) textareaRef.current.style.height = "auto";
-			return;
-		}
-		setValue(name + " ");
-		setCmdVisible(false);
-		textareaRef.current?.focus();
-		requestAnimationFrame(resize);
-	}, [commands, onSubmit, resize]);
+		},
+		[onSubmit],
+	);
 
-	const handlePersonaSelect = useCallback((name) => {
-		onSubmit(`/persona ${name}`);
-		setValue("");
-		if (textareaRef.current) textareaRef.current.style.height = "auto";
-	}, [onSubmit]);
-
-	const handleInput = useCallback((e) => {
-		const val = e.target.value;
-		setValue(val);
-		setCmdVisible(val.startsWith("/") && !val.includes(" "));
-		setSelectedIndex(0);
-		resize();
-	}, [resize]);
+	const handleInput = useCallback(
+		(e) => {
+			const val = e.target.value;
+			setValue(val);
+			setCmdVisible(val.startsWith("/") && !val.includes(" "));
+			setSelectedIndex(0);
+			resize();
+		},
+		[resize],
+	);
 
 	// One active picker at a time — Composer owns the filtered list and the
 	// selection index so arrow keys and mouse clicks act on the exact same
@@ -476,58 +478,64 @@ function Composer({ running, ready, activeId, commands, personas, onSubmit, onAb
 	// Arrow-key nav must scroll the picker, not just select past the visible
 	// edge — mouse/scroll-wheel already worked, but the highlighted row could
 	// silently move off-screen when reached via the keyboard.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: clampedIndex isn't read in the body — it's the trigger to re-scroll to the now-selected row, found via DOM query instead of the value itself.
 	useEffect(() => {
 		pickerRef.current?.querySelector(".cmd-item.selected")?.scrollIntoView({ block: "nearest" });
 	}, [clampedIndex]);
 
-	const handleKeyDown = useCallback((e) => {
-		// Esc stops a running turn — checked before anything else so it wins
-		// regardless of what's in the composer (an open command palette, a
-		// half-typed /steer), matching the TUI's Escape-aborts behavior. The
-		// hotkeys reference has always listed this; the web port just never
-		// actually wired it up until now.
-		if (e.key === "Escape" && running) {
-			e.preventDefault();
-			onAbort();
-			return;
-		}
-		if (pickerItems.length > 0) {
-			if (e.key === "ArrowDown") {
+	const handleKeyDown = useCallback(
+		(e) => {
+			// Esc stops a running turn — checked before anything else so it wins
+			// regardless of what's in the composer (an open command palette, a
+			// half-typed /steer), matching the TUI's Escape-aborts behavior. The
+			// hotkeys reference has always listed this; the web port just never
+			// actually wired it up until now.
+			if (e.key === "Escape" && running) {
 				e.preventDefault();
-				setSelectedIndex((clampedIndex + 1) % pickerItems.length);
+				onAbort();
 				return;
 			}
-			if (e.key === "ArrowUp") {
-				e.preventDefault();
-				setSelectedIndex((clampedIndex - 1 + pickerItems.length) % pickerItems.length);
-				return;
-			}
-			if (e.key === "Escape") {
-				setCmdVisible(false);
-				return;
-			}
-			if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
-				const item = pickerItems[clampedIndex];
-				const disabled = item && "blocking" in item && item.blocking && running;
-				if (item && !disabled) {
+			if (pickerItems.length > 0) {
+				if (e.key === "ArrowDown") {
 					e.preventDefault();
-					pickerSelect(item.value ?? item.name ?? item.id);
+					setSelectedIndex((clampedIndex + 1) % pickerItems.length);
 					return;
 				}
+				if (e.key === "ArrowUp") {
+					e.preventDefault();
+					setSelectedIndex((clampedIndex - 1 + pickerItems.length) % pickerItems.length);
+					return;
+				}
+				if (e.key === "Escape") {
+					setCmdVisible(false);
+					return;
+				}
+				if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+					const item = pickerItems[clampedIndex];
+					const disabled = item && "blocking" in item && item.blocking && running;
+					if (item && !disabled) {
+						e.preventDefault();
+						pickerSelect(item.value ?? item.name ?? item.id);
+						return;
+					}
+				}
 			}
-		}
-		if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
-			e.preventDefault();
-			handleSubmit();
-		}
-	}, [pickerItems, clampedIndex, pickerSelect, running, handleSubmit]);
+			if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+				e.preventDefault();
+				handleSubmit();
+			}
+		},
+		// biome-ignore lint/correctness/useExhaustiveDependencies: pickerItems/pickerSelect are plain values recomputed every render (not memoized) — already fine since this callback is rebuilt on every keystroke (`value` is a dep) regardless.
+		[pickerItems, clampedIndex, pickerSelect, running, handleSubmit, onAbort],
+	);
 
 	return html`
 		<div class="composer-wrap">
 			<div ref=${pickerRef}>
-				${personaMatch
-					? html`<${ValueSuggest} items=${pickerItems} selectedIndex=${clampedIndex} onHover=${setSelectedIndex} onSelect=${pickerSelect} />`
-					: html`<${CommandPalette} items=${pickerItems} selectedIndex=${clampedIndex} running=${running} visible=${cmdVisible} onHover=${setSelectedIndex} onSelect=${handleCmdSelect} />`
+				${
+					personaMatch
+						? html`<${ValueSuggest} items=${pickerItems} selectedIndex=${clampedIndex} onHover=${setSelectedIndex} onSelect=${pickerSelect} />`
+						: html`<${CommandPalette} items=${pickerItems} selectedIndex=${clampedIndex} running=${running} visible=${cmdVisible} onHover=${setSelectedIndex} onSelect=${handleCmdSelect} />`
 				}
 			</div>
 			<div class="composer">
@@ -541,9 +549,10 @@ function Composer({ running, ready, activeId, commands, personas, onSubmit, onAb
 					onInput=${handleInput}
 					onKeyDown=${handleKeyDown}
 				/>
-				${running
-					? html`<button class="composer-abort" onClick=${onAbort} aria-label="Abort"><${icons.stop} /></button>`
-					: html`<button class="composer-send" onClick=${handleSubmit} disabled=${!ready || !value.trim()} aria-label="Send"><${icons.send} /></button>`
+				${
+					running
+						? html`<button class="composer-abort" onClick=${onAbort} aria-label="Abort"><${icons.stop} /></button>`
+						: html`<button class="composer-send" onClick=${handleSubmit} disabled=${!ready || !value.trim()} aria-label="Send"><${icons.send} /></button>`
 				}
 			</div>
 		</div>
@@ -552,7 +561,8 @@ function Composer({ running, ready, activeId, commands, personas, onSubmit, onAb
 
 function DiffPanel({ data, activeFile, onSelectFile, onClose, onResizeStart, open }) {
 	const openClass = open ? " open" : "";
-	if (!data) return html`
+	if (!data)
+		return html`
 		<aside class="diff-panel${openClass}">
 			<div class="diff-resize-handle" onPointerDown=${onResizeStart} />
 			<div class="diff-empty">Loading...</div>
@@ -580,8 +590,13 @@ function DiffPanel({ data, activeFile, onSelectFile, onClose, onResizeStart, ope
 			const lines = hunk.lines.map((line, li) => {
 				const typeClass = line.type === "+" ? "diff-line-add" : line.type === "-" ? "diff-line-del" : "";
 				let num = "";
-				if (line.type === "+") { num = addN; addN++; }
-				else if (line.type === "-") { num = delN; delN++; }
+				if (line.type === "+") {
+					num = addN;
+					addN++;
+				} else if (line.type === "-") {
+					num = delN;
+					delN++;
+				}
 				return { key: li, typeClass, num, content: line.content };
 			});
 			return { hi, hunk, lines };
@@ -596,7 +611,8 @@ function DiffPanel({ data, activeFile, onSelectFile, onClose, onResizeStart, ope
 				<button class="diff-close" onClick=${onClose} aria-label="Close"><${icons.xMark} /></button>
 			</div>
 			<div class="diff-file-list">
-				${files.map((f) => html`
+				${files.map(
+					(f) => html`
 					<div key=${f.path} class="diff-file-item${f.path === (activeFile || file?.path) ? " active" : ""}" onClick=${() => onSelectFile(f.path)} title=${f.path}>
 						<span class="diff-file-path">
 							<span class="diff-file-dir">${f.path.slice(0, f.path.lastIndexOf("/") + 1)}</span><span class="diff-file-base">${f.path.slice(f.path.lastIndexOf("/") + 1)}</span>
@@ -606,30 +622,73 @@ function DiffPanel({ data, activeFile, onSelectFile, onClose, onResizeStart, ope
 							<span class="del">-${f.deletions}</span>
 						</span>
 					</div>
-				`)}
+				`,
+				)}
 			</div>
 			<div class="diff-view">
-				${diffContent
-					? diffContent.map((h) => html`
+				${
+					diffContent
+						? diffContent.map(
+								(h) => html`
 						<div key=${h.hi}>
 							<div class="diff-hunk-header">@@ -${h.hunk.oldStart},${h.hunk.oldLines} +${h.hunk.newStart},${h.hunk.newLines} @@</div>
-							${h.lines.map((l) => html`
+							${h.lines.map(
+								(l) => html`
 								<div key=${l.key} class="diff-line ${l.typeClass}">
 									<span class="diff-line-num">${l.num}</span>
 									<span class="diff-line-content">${l.content}</span>
 								</div>
-							`)}
+							`,
+							)}
 						</div>
-					`)
-					: data.noRepo
-					? html`<div class="diff-empty diff-empty-hint">This directory isn't a git repository yet.<br/>Ask the agent to run <code>git init</code> to enable the diff view.</div>`
-					: data.error
-					? html`<div class="diff-empty diff-empty-error">${data.error}</div>`
-					: html`<div class="diff-empty">No changes</div>`
+					`,
+							)
+						: data.noRepo
+							? html`<div class="diff-empty diff-empty-hint">This directory isn't a git repository yet.<br/>Ask the agent to run <code>git init</code> to enable the diff view.</div>`
+							: data.error
+								? html`<div class="diff-empty diff-empty-error">${data.error}</div>`
+								: html`<div class="diff-empty">No changes</div>`
 				}
 			</div>
 		</aside>
 	`;
+}
+
+const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])';
+
+// Shared by every modal (dir picker, status, settings, hotkeys): moves focus
+// into the dialog on open, keeps Tab from leaking to the page behind the
+// backdrop, and hands focus back to whatever triggered it on close — none of
+// that happens for free just from the backdrop/click-outside handling.
+function useModalFocusTrap(active) {
+	const ref = useRef(null);
+	useEffect(() => {
+		if (!active) return;
+		const container = ref.current;
+		const previouslyFocused = document.activeElement;
+		(container?.querySelector(FOCUSABLE_SELECTOR) || container)?.focus();
+
+		const onKeyDown = (e) => {
+			if (e.key !== "Tab" || !container) return;
+			const focusables = Array.from(container.querySelectorAll(FOCUSABLE_SELECTOR));
+			if (focusables.length === 0) return;
+			const first = focusables[0];
+			const last = focusables[focusables.length - 1];
+			if (e.shiftKey && document.activeElement === first) {
+				e.preventDefault();
+				last.focus();
+			} else if (!e.shiftKey && document.activeElement === last) {
+				e.preventDefault();
+				first.focus();
+			}
+		};
+		document.addEventListener("keydown", onKeyDown, true);
+		return () => {
+			document.removeEventListener("keydown", onKeyDown, true);
+			previouslyFocused?.focus?.();
+		};
+	}, [active]);
+	return ref;
 }
 
 // Read-only folder browser (like a native "Open Folder" dialog) for picking
@@ -658,23 +717,32 @@ function DirectoryBrowser({ initialPath, onPick, onClose }) {
 		setLoading(false);
 	}, []);
 
-	useEffect(() => { load(initialPath); }, []);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: initialPath seeds the first load only — later navigation uses load(parent)/load(entry.path), so re-running this on prop changes would fight in-modal navigation. load itself never changes (empty deps).
+	useEffect(() => {
+		load(initialPath);
+	}, []);
+	const modalRef = useModalFocusTrap(true);
 
 	return html`
 		<div class="modal-backdrop" onClick=${onClose}>
-			<div class="modal" onClick=${(e) => e.stopPropagation()}>
+			<div class="modal" role="dialog" aria-modal="true" aria-label="Choose working directory" tabIndex="-1" ref=${modalRef} onClick=${(e) => e.stopPropagation()}>
 				<div class="modal-header">
 					<span>Choose working directory</span>
 					<button class="modal-close" onClick=${onClose} aria-label="Close"><${icons.xMark} /></button>
 				</div>
 				<div class="dir-path" title=${path}>${path}</div>
 				<div class="dir-list">
-					${parent !== null && html`
+					${
+						parent !== null &&
+						html`
 						<div class="dir-item dir-item-up" onClick=${() => load(parent)}>.. (parent directory)</div>
-					`}
-					${entries.map((e) => html`
+					`
+					}
+					${entries.map(
+						(e) => html`
 						<div key=${e.path} class="dir-item" onClick=${() => load(e.path)}>${e.name}</div>
-					`)}
+					`,
+					)}
 					${!loading && entries.length === 0 && !error && html`<div class="dir-empty">No subdirectories</div>`}
 					${error && html`<div class="dir-error">${error}</div>`}
 				</div>
@@ -730,7 +798,9 @@ function StatusPopover({ activeId, running }) {
 
 	useEffect(() => {
 		if (!open) return;
-		const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+		const onKey = (e) => {
+			if (e.key === "Escape") setOpen(false);
+		};
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
 	}, [open]);
@@ -744,14 +814,17 @@ function StatusPopover({ activeId, running }) {
 		if (open && wasRunning.current && !running) load();
 		wasRunning.current = running;
 	}, [running, open, load]);
+	const modalRef = useModalFocusTrap(open);
 
 	return html`
 		<button class="menu-toggle" onClick=${openModal} aria-label="Status" title="Status">
 			<${icons.info} />
 		</button>
-		${open && html`
+		${
+			open &&
+			html`
 			<div class="modal-backdrop" onClick=${() => setOpen(false)}>
-				<div class="modal modal-status" onClick=${(e) => e.stopPropagation()}>
+				<div class="modal modal-status" role="dialog" aria-modal="true" aria-label="Status" tabIndex="-1" ref=${modalRef} onClick=${(e) => e.stopPropagation()}>
 					<div class="modal-header">
 						<span>Status</span>
 						<button class="modal-close" onClick=${() => setOpen(false)} aria-label="Close"><${icons.xMark} /></button>
@@ -762,7 +835,8 @@ function StatusPopover({ activeId, running }) {
 					</div>
 				</div>
 			</div>
-		`}
+		`
+		}
 	`;
 }
 
@@ -772,80 +846,106 @@ function StatusPopover({ activeId, running }) {
 // consolidated here so the chat transcript stays just the conversation.
 // Every action still runs through the exact same POST /command endpoint the
 // composer used, just without ever appending a chat notice for it.
-function SettingsModal({ activeId, themes, currentThemeId, onApplyTheme, onThemeChange, onClose }) {
+function SettingsModal({ activeId, themes, currentThemeId, onApplyTheme, onThemeChange, onClose, confirm }) {
 	const [tab, setTab] = useState("model");
 	const [data, setData] = useState({});
 	const [errors, setErrors] = useState({});
 	const [busy, setBusy] = useState(false);
 
-	const run = useCallback(async (command) => {
-		try {
-			return await api("POST", `/api/sessions/${activeId}/command`, { command });
-		} catch (err) {
-			return { ok: false, error: err.message };
-		}
-	}, [activeId]);
+	const run = useCallback(
+		async (command) => {
+			try {
+				return await api("POST", `/api/sessions/${activeId}/command`, { command });
+			} catch (err) {
+				return { ok: false, error: err.message };
+			}
+		},
+		[activeId],
+	);
 
-	const load = useCallback(async (t) => {
-		setErrors((e) => ({ ...e, [t]: null }));
-		if (t === "model") {
-			const [models, reasoning, current] = await Promise.all([
-				api("GET", "/api/models").catch(() => null),
-				api("GET", `/api/sessions/${activeId}/reasoning-options`).catch(() => null),
-				run("/current"),
-			]);
-			setData((d) => ({
-				...d,
-				model: {
-					models: models?.models ?? [],
-					reasoningOptions: reasoning?.options ?? [],
-					current: current?.result,
-				},
-			}));
-		} else if (t === "tools") {
-			const [web, permissions] = await Promise.all([run("/web"), run("/permissions")]);
-			setData((d) => ({ ...d, tools: { web: web?.result, permissions: permissions?.result } }));
-		} else if (t === "mcp") {
-			const res = await run("/mcp list");
-			if (!res.ok) { setErrors((e) => ({ ...e, mcp: res.error })); return; }
-			setData((d) => ({ ...d, mcp: res.result }));
-		} else if (t === "skills") {
-			const res = await run("/skills list");
-			if (!res.ok) { setErrors((e) => ({ ...e, skills: res.error })); return; }
-			setData((d) => ({ ...d, skills: res.result }));
-		} else if (t === "plugins") {
-			const [plugins, marketplaces] = await Promise.all([run("/plugin list"), run("/plugin marketplace list")]);
-			setData((d) => ({ ...d, plugins: { plugins: plugins?.result ?? [], marketplaces: marketplaces?.result ?? [] } }));
-		} else if (t === "provider") {
-			const res = await run("/provider list");
-			if (!res.ok) { setErrors((e) => ({ ...e, provider: res.error })); return; }
-			setData((d) => ({ ...d, provider: res.result }));
-		} else if (t === "ssh") {
-			const res = await run("/ssh list");
-			if (!res.ok) { setErrors((e) => ({ ...e, ssh: res.error })); return; }
-			setData((d) => ({ ...d, ssh: res.result }));
-		}
-	}, [run, activeId]);
+	const load = useCallback(
+		async (t) => {
+			setErrors((e) => ({ ...e, [t]: null }));
+			if (t === "model") {
+				const [models, reasoning, current] = await Promise.all([
+					api("GET", "/api/models").catch(() => null),
+					api("GET", `/api/sessions/${activeId}/reasoning-options`).catch(() => null),
+					run("/current"),
+				]);
+				setData((d) => ({
+					...d,
+					model: {
+						models: models?.models ?? [],
+						reasoningOptions: reasoning?.options ?? [],
+						current: current?.result,
+					},
+				}));
+			} else if (t === "tools") {
+				const [web, permissions] = await Promise.all([run("/web"), run("/permissions")]);
+				setData((d) => ({ ...d, tools: { web: web?.result, permissions: permissions?.result } }));
+			} else if (t === "mcp") {
+				const res = await run("/mcp list");
+				if (!res.ok) {
+					setErrors((e) => ({ ...e, mcp: res.error }));
+					return;
+				}
+				setData((d) => ({ ...d, mcp: res.result }));
+			} else if (t === "skills") {
+				const res = await run("/skills list");
+				if (!res.ok) {
+					setErrors((e) => ({ ...e, skills: res.error }));
+					return;
+				}
+				setData((d) => ({ ...d, skills: res.result }));
+			} else if (t === "plugins") {
+				const [plugins, marketplaces] = await Promise.all([run("/plugin list"), run("/plugin marketplace list")]);
+				setData((d) => ({
+					...d,
+					plugins: { plugins: plugins?.result ?? [], marketplaces: marketplaces?.result ?? [] },
+				}));
+			} else if (t === "provider") {
+				const res = await run("/provider list");
+				if (!res.ok) {
+					setErrors((e) => ({ ...e, provider: res.error }));
+					return;
+				}
+				setData((d) => ({ ...d, provider: res.result }));
+			} else if (t === "ssh") {
+				const res = await run("/ssh list");
+				if (!res.ok) {
+					setErrors((e) => ({ ...e, ssh: res.error }));
+					return;
+				}
+				setData((d) => ({ ...d, ssh: res.result }));
+			}
+		},
+		[run, activeId],
+	);
 
 	// Preload every tab in parallel as soon as the modal mounts (or the active
 	// session changes) — clicking a tab then just shows what's already there
 	// instead of a fresh fetch-and-flash "Loading…" every single time.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: activeId isn't read in the body directly, but load() closes over it (see `run`'s deps above) — re-running this on session switch is the intended behavior.
 	useEffect(() => {
 		for (const t of SETTINGS_TABS) load(t.id);
-	}, [activeId]);
+	}, [activeId, load]);
+	const modalRef = useModalFocusTrap(true);
 
 	// Runs a mutating command, shows any error inline, and reloads the
 	// current tab's data on success so the list reflects the new state
 	// immediately instead of waiting for the next manual refresh.
-	const act = useCallback(async (command) => {
-		setBusy(true);
-		setErrors((e) => ({ ...e, [tab]: null }));
-		const res = await run(command);
-		if (!res.ok) setErrors((e) => ({ ...e, [tab]: res.error ?? "Failed" }));
-		await load(tab);
-		setBusy(false);
-		return res;
-	}, [run, load, tab]);
+	const act = useCallback(
+		async (command) => {
+			setBusy(true);
+			setErrors((e) => ({ ...e, [tab]: null }));
+			const res = await run(command);
+			if (!res.ok) setErrors((e) => ({ ...e, [tab]: res.error ?? "Failed" }));
+			await load(tab);
+			setBusy(false);
+			return res;
+		},
+		[run, load, tab],
+	);
 
 	// theme's data comes from the `themes` prop (fetched once at app boot,
 	// always present already) rather than the per-tab preload above.
@@ -853,34 +953,47 @@ function SettingsModal({ activeId, themes, currentThemeId, onApplyTheme, onTheme
 
 	return html`
 		<div class="modal-backdrop" onClick=${onClose}>
-			<div class="modal settings-modal" onClick=${(e) => e.stopPropagation()}>
+			<div class="modal settings-modal" role="dialog" aria-modal="true" aria-label="Settings" tabIndex="-1" ref=${modalRef} onClick=${(e) => e.stopPropagation()}>
 				<div class="modal-header">
 					<span>Settings</span>
 					<button class="modal-close" onClick=${onClose} aria-label="Close"><${icons.xMark} /></button>
 				</div>
 				<div class="settings-body">
 					<div class="settings-tabs">
-						${SETTINGS_TABS.map((t) => html`
+						${SETTINGS_TABS.map(
+							(t) => html`
 							<button key=${t.id} class="settings-tab${tab === t.id ? " active" : ""}" onClick=${() => setTab(t.id)}>${t.label}</button>
-						`)}
+						`,
+						)}
 					</div>
 					<div class="settings-pane">
 						${errors[tab] && html`<div class="settings-error">${errors[tab]}</div>`}
-						${!hasData
-							? html`<div class="settings-loading">Loading…</div>`
-							: tab === "model" ? html`<${SettingsModel} data=${data.model} busy=${busy} act=${act} />`
-							: tab === "theme" ? html`<${SettingsTheme} themes=${themes} currentThemeId=${currentThemeId} onPick=${async (id) => {
-								const res = await act(`/theme ${id}`);
-								if (res.ok && res.result?.colors) onApplyTheme(res.result.colors);
-								if (res.ok && res.result?.theme) onThemeChange(res.result.theme);
-							}} />`
-							: tab === "tools" ? html`<${SettingsTools} data=${data.tools} busy=${busy} act=${act} />`
-							: tab === "mcp" ? html`<${SettingsMcp} data=${data.mcp} busy=${busy} act=${act} />`
-							: tab === "skills" ? html`<${SettingsSkills} data=${data.skills} busy=${busy} act=${act} />`
-							: tab === "plugins" ? html`<${SettingsPlugins} data=${data.plugins} busy=${busy} act=${act} />`
-							: tab === "provider" ? html`<${SettingsProvider} data=${data.provider} busy=${busy} act=${act} />`
-							: tab === "ssh" ? html`<${SettingsSsh} data=${data.ssh} busy=${busy} act=${act} />`
-							: null
+						${
+							!hasData
+								? html`<div class="settings-loading">Loading…</div>`
+								: tab === "model"
+									? html`<${SettingsModel} data=${data.model} busy=${busy} act=${act} />`
+									: tab === "theme"
+										? html`<${SettingsTheme} themes=${themes} currentThemeId=${currentThemeId} onPick=${async (
+												id,
+											) => {
+												const res = await act(`/theme ${id}`);
+												if (res.ok && res.result?.colors) onApplyTheme(res.result.colors);
+												if (res.ok && res.result?.theme) onThemeChange(res.result.theme);
+											}} />`
+										: tab === "tools"
+											? html`<${SettingsTools} data=${data.tools} busy=${busy} act=${act} />`
+											: tab === "mcp"
+												? html`<${SettingsMcp} data=${data.mcp} busy=${busy} act=${act} confirm=${confirm} />`
+												: tab === "skills"
+													? html`<${SettingsSkills} data=${data.skills} busy=${busy} act=${act} confirm=${confirm} />`
+													: tab === "plugins"
+														? html`<${SettingsPlugins} data=${data.plugins} busy=${busy} act=${act} confirm=${confirm} />`
+														: tab === "provider"
+															? html`<${SettingsProvider} data=${data.provider} busy=${busy} act=${act} confirm=${confirm} />`
+															: tab === "ssh"
+																? html`<${SettingsSsh} data=${data.ssh} busy=${busy} act=${act} confirm=${confirm} />`
+																: null
 						}
 					</div>
 				</div>
@@ -912,11 +1025,11 @@ function SettingsStatus({ data }) {
 }
 
 function SettingsModel({ data, busy, act }) {
-	if (!data) return null;
 	const [modelValue, setModelValue] = useState("");
 	const [reasoningValue, setReasoningValue] = useState("");
 	const [subagentValue, setSubagentValue] = useState("");
 	const [planValue, setPlanValue] = useState("");
+	if (!data) return null;
 	const c = data.current || {};
 	return html`
 		<div class="settings-rows">
@@ -929,9 +1042,10 @@ function SettingsModel({ data, busy, act }) {
 				<button class="modal-btn modal-btn-primary" disabled=${busy || !modelValue} onClick=${() => act(`/model ${modelValue}`)}>Set</button>
 			</div>
 			<div class="settings-section-title">Reasoning — current: ${c.reasoningLevel ?? "off"}</div>
-			${data.reasoningOptions.length === 0
-				? html`<div class="settings-hint">This model exposes no reasoning controls.</div>`
-				: html`
+			${
+				data.reasoningOptions.length === 0
+					? html`<div class="settings-hint">This model exposes no reasoning controls.</div>`
+					: html`
 					<div class="settings-form-row">
 						<select onChange=${(e) => setReasoningValue(e.target.value)}>
 							<option value="">Pick a level…</option>
@@ -959,12 +1073,16 @@ function SettingsModel({ data, busy, act }) {
 function SettingsTheme({ themes, currentThemeId, onPick }) {
 	return html`
 		<div class="settings-theme-grid">
-			${[...(themes || [])].sort((a, b) => a.label.localeCompare(b.label)).map((t) => html`
+			${[...(themes || [])]
+				.sort((a, b) => a.label.localeCompare(b.label))
+				.map(
+					(t) => html`
 				<button key=${t.id} class="settings-theme-swatch${t.id === currentThemeId ? " active" : ""}" style=${{ "--swatch-accent": t.colors?.accent }} onClick=${() => onPick(t.id)} title=${t.description}>
 					<span class="settings-theme-dot" />
 					${t.label}
 				</button>
-			`)}
+			`,
+				)}
 		</div>
 	`;
 }
@@ -977,9 +1095,11 @@ function SettingsTools({ data, busy, act }) {
 		<div class="settings-rows">
 			<div class="settings-section-title">Web tools (web_search, web_fetch)</div>
 			<div class="settings-form-row">
-				${WEB_TOOLS_OPTIONS.map((o) => html`
+				${WEB_TOOLS_OPTIONS.map(
+					(o) => html`
 					<button key=${o.value} class="modal-btn${(web.webTools ? "on" : "off") === o.value ? " modal-btn-primary" : ""}" disabled=${busy} onClick=${() => act(`/web ${o.value}`)}>${o.label}</button>
-				`)}
+				`,
+				)}
 			</div>
 			<div class="settings-section-title">Bash confirmation mode</div>
 			<div class="settings-form-row">
@@ -990,120 +1110,170 @@ function SettingsTools({ data, busy, act }) {
 	`;
 }
 
-function SettingsMcp({ data, busy, act }) {
+function SettingsMcp({ data, busy, act, confirm }) {
 	return html`
 		<div class="settings-rows">
-			${[...(data || [])].sort((a, b) => a.name.localeCompare(b.name)).map((s) => html`
+			${[...(data || [])]
+				.sort((a, b) => a.name.localeCompare(b.name))
+				.map(
+					(s) => html`
 				<div key=${s.name} class="settings-item-row">
 					<span class="settings-item-status ${s.connected ? "ok" : "off"}" />
 					<span class="settings-item-name">${s.name}</span>
 					<span class="settings-item-meta">${s.disabled ? "disabled" : s.connected ? "connected" : "not connected"}</span>
 					<button class="modal-btn" disabled=${busy} onClick=${() => act(`/mcp ${s.disabled ? "enable" : "disable"} ${s.name}`)}>${s.disabled ? "Enable" : "Disable"}</button>
-					<button class="modal-btn modal-btn-danger" disabled=${busy} onClick=${() => confirm(`Uninstall MCP server "${s.name}"?`) && act(`/mcp uninstall ${s.name}`)}>Uninstall</button>
+					<button class="modal-btn modal-btn-danger" disabled=${busy} onClick=${async () => {
+						if (await confirm(`Uninstall MCP server "${s.name}"?`)) act(`/mcp uninstall ${s.name}`);
+					}}>Uninstall</button>
 				</div>
-			`)}
+			`,
+				)}
 			${(!data || data.length === 0) && html`<div class="settings-hint">No MCP servers configured.</div>`}
 			<div class="settings-form-row"><button class="modal-btn" disabled=${busy} onClick=${() => act("/reload")}>Reload project resources</button></div>
 		</div>
 	`;
 }
 
-function SettingsSkills({ data, busy, act }) {
+function SettingsSkills({ data, busy, act, confirm }) {
 	return html`
 		<div class="settings-rows">
-			${[...(data || [])].sort((a, b) => a.name.localeCompare(b.name)).map((s) => html`
+			${[...(data || [])]
+				.sort((a, b) => a.name.localeCompare(b.name))
+				.map(
+					(s) => html`
 				<div key=${s.name} class="settings-item-row">
 					<span class="settings-item-status ${s.enabled ? "ok" : "off"}" />
 					<span class="settings-item-name" title=${s.description}>${s.name}</span>
 					<span class="settings-item-meta">${s.source}</span>
 					<button class="modal-btn" disabled=${busy} onClick=${() => act(`/skills ${s.enabled ? "disable" : "enable"} ${s.name}`)}>${s.enabled ? "Disable" : "Enable"}</button>
-					${s.uninstallable && html`<button class="modal-btn modal-btn-danger" disabled=${busy} onClick=${() => confirm(`Uninstall skill "${s.name}"?`) && act(`/skills uninstall ${s.name}`)}>Uninstall</button>`}
+					${
+						s.uninstallable &&
+						html`<button class="modal-btn modal-btn-danger" disabled=${busy} onClick=${async () => {
+							if (await confirm(`Uninstall skill "${s.name}"?`)) act(`/skills uninstall ${s.name}`);
+						}}>Uninstall</button>`
+					}
 				</div>
-			`)}
+			`,
+				)}
 			${(!data || data.length === 0) && html`<div class="settings-hint">No skills found.</div>`}
 		</div>
 	`;
 }
 
-function SettingsPlugins({ data, busy, act }) {
+function SettingsPlugins({ data, busy, act, confirm }) {
 	const [installRef, setInstallRef] = useState("");
 	const [mpSource, setMpSource] = useState("");
 	if (!data) return null;
 	return html`
 		<div class="settings-rows">
 			<div class="settings-section-title">Installed plugins</div>
-			${[...data.plugins].sort((a, b) => a.id.localeCompare(b.id)).map((p) => html`
+			${[...data.plugins]
+				.sort((a, b) => a.id.localeCompare(b.id))
+				.map(
+					(p) => html`
 				<div key=${p.id} class="settings-item-row">
 					<span class="settings-item-status ${p.enabled ? "ok" : "off"}" />
 					<span class="settings-item-name" title=${p.description}>${p.id}</span>
 					<button class="modal-btn" disabled=${busy} onClick=${() => act(`/plugin ${p.enabled ? "disable" : "enable"} ${p.id}`)}>${p.enabled ? "Disable" : "Enable"}</button>
-					<button class="modal-btn modal-btn-danger" disabled=${busy} onClick=${() => confirm(`Uninstall plugin "${p.id}"?`) && act(`/plugin uninstall ${p.id}`)}>Uninstall</button>
+					<button class="modal-btn modal-btn-danger" disabled=${busy} onClick=${async () => {
+						if (await confirm(`Uninstall plugin "${p.id}"?`)) act(`/plugin uninstall ${p.id}`);
+					}}>Uninstall</button>
 				</div>
-			`)}
+			`,
+				)}
 			${data.plugins.length === 0 && html`<div class="settings-hint">No plugins installed.</div>`}
 			<div class="settings-form-row">
 				<input type="text" placeholder="name@marketplace" value=${installRef} onInput=${(e) => setInstallRef(e.target.value)} />
-				<button class="modal-btn modal-btn-primary" disabled=${busy || !installRef} onClick=${() => { act(`/plugin install ${installRef}`); setInstallRef(""); }}>Install</button>
+				<button class="modal-btn modal-btn-primary" disabled=${busy || !installRef} onClick=${() => {
+					act(`/plugin install ${installRef}`);
+					setInstallRef("");
+				}}>Install</button>
 			</div>
 			<div class="settings-section-title">Marketplaces</div>
-			${[...data.marketplaces].sort((a, b) => a.name.localeCompare(b.name)).map((mp) => html`
+			${[...data.marketplaces]
+				.sort((a, b) => a.name.localeCompare(b.name))
+				.map(
+					(mp) => html`
 				<div key=${mp.name} class="settings-item-row">
 					<span class="settings-item-name">${mp.name}</span>
 					<span class="settings-item-meta" title=${mp.source}>${shortPath(mp.source)}</span>
 					<button class="modal-btn" disabled=${busy} onClick=${() => act(`/plugin marketplace update ${mp.name}`)}>Update</button>
-					<button class="modal-btn modal-btn-danger" disabled=${busy} onClick=${() => confirm(`Remove marketplace "${mp.name}"?`) && act(`/plugin marketplace remove ${mp.name}`)}>Remove</button>
+					<button class="modal-btn modal-btn-danger" disabled=${busy} onClick=${async () => {
+						if (await confirm(`Remove marketplace "${mp.name}"?`)) act(`/plugin marketplace remove ${mp.name}`);
+					}}>Remove</button>
 				</div>
-			`)}
+			`,
+				)}
 			${data.marketplaces.length === 0 && html`<div class="settings-hint">No marketplaces added.</div>`}
 			<div class="settings-form-row">
 				<input type="text" placeholder="owner/repo, URL, or path" value=${mpSource} onInput=${(e) => setMpSource(e.target.value)} />
-				<button class="modal-btn modal-btn-primary" disabled=${busy || !mpSource} onClick=${() => { act(`/plugin marketplace add ${mpSource}`); setMpSource(""); }}>Add marketplace</button>
+				<button class="modal-btn modal-btn-primary" disabled=${busy || !mpSource} onClick=${() => {
+					act(`/plugin marketplace add ${mpSource}`);
+					setMpSource("");
+				}}>Add marketplace</button>
 			</div>
 		</div>
 	`;
 }
 
-function SettingsProvider({ data, busy, act }) {
+function SettingsProvider({ data, busy, act, confirm }) {
 	const [name, setName] = useState("");
 	const [url, setUrl] = useState("");
 	const [apiKey, setApiKey] = useState("");
 	return html`
 		<div class="settings-rows">
-			${[...(data || [])].sort((a, b) => a.name.localeCompare(b.name)).map((p) => html`
+			${[...(data || [])]
+				.sort((a, b) => a.name.localeCompare(b.name))
+				.map(
+					(p) => html`
 				<div key=${p.name} class="settings-item-row">
 					<span class="settings-item-status ${p.active ? "ok" : "off"}" />
 					<span class="settings-item-name">${p.name}</span>
 					<span class="settings-item-meta" title=${p.url}>${shortPath(p.url)}</span>
 					${!p.active && html`<button class="modal-btn" disabled=${busy} onClick=${() => act(`/provider ${p.name}`)}>Switch</button>`}
-					<button class="modal-btn modal-btn-danger" disabled=${busy} onClick=${() => confirm(`Delete provider "${p.name}"?`) && act(`/provider delete ${p.name}`)}>Delete</button>
+					<button class="modal-btn modal-btn-danger" disabled=${busy} onClick=${async () => {
+						if (await confirm(`Delete provider "${p.name}"?`)) act(`/provider delete ${p.name}`);
+					}}>Delete</button>
 				</div>
-			`)}
+			`,
+				)}
 			${(!data || data.length === 0) && html`<div class="settings-hint">No saved providers.</div>`}
 			<div class="settings-section-title">Add provider</div>
 			<div class="settings-form-row">
 				<input type="text" placeholder="name" value=${name} onInput=${(e) => setName(e.target.value)} />
 				<input type="text" placeholder="base URL" value=${url} onInput=${(e) => setUrl(e.target.value)} />
 				<input type="password" placeholder="API key" value=${apiKey} onInput=${(e) => setApiKey(e.target.value)} />
-				<button class="modal-btn modal-btn-primary" disabled=${busy || !name || !url || !apiKey} onClick=${() => { act(`/provider add ${name} ${url} ${apiKey}`); setName(""); setUrl(""); setApiKey(""); }}>Add</button>
+				<button class="modal-btn modal-btn-primary" disabled=${busy || !name || !url || !apiKey} onClick=${() => {
+					act(`/provider add ${name} ${url} ${apiKey}`);
+					setName("");
+					setUrl("");
+					setApiKey("");
+				}}>Add</button>
 			</div>
 		</div>
 	`;
 }
 
-function SettingsSsh({ data, busy, act }) {
+function SettingsSsh({ data, busy, act, confirm }) {
 	const [name, setName] = useState("");
 	const [host, setHost] = useState("");
 	const [username, setUsername] = useState("");
 	const [port, setPort] = useState("");
 	return html`
 		<div class="settings-rows">
-			${[...(data || [])].sort((a, b) => a.name.localeCompare(b.name)).map((h) => html`
+			${[...(data || [])]
+				.sort((a, b) => a.name.localeCompare(b.name))
+				.map(
+					(h) => html`
 				<div key=${h.name} class="settings-item-row">
 					<span class="settings-item-name">${h.name}</span>
 					<span class="settings-item-meta">${h.username ? `${h.username}@` : ""}${h.host}${h.port ? `:${h.port}` : ""}</span>
-					<button class="modal-btn modal-btn-danger" disabled=${busy} onClick=${() => confirm(`Remove host "${h.name}"?`) && act(`/ssh remove ${h.name}`)}>Remove</button>
+					<button class="modal-btn modal-btn-danger" disabled=${busy} onClick=${async () => {
+						if (await confirm(`Remove host "${h.name}"?`)) act(`/ssh remove ${h.name}`);
+					}}>Remove</button>
 				</div>
-			`)}
+			`,
+				)}
 			${(!data || data.length === 0) && html`<div class="settings-hint">No SSH hosts configured.</div>`}
 			<div class="settings-section-title">Add host</div>
 			<div class="settings-form-row">
@@ -1113,14 +1283,29 @@ function SettingsSsh({ data, busy, act }) {
 				<input type="text" placeholder="port (optional)" value=${port} onInput=${(e) => setPort(e.target.value)} />
 				<button class="modal-btn modal-btn-primary" disabled=${busy || !name || !host} onClick=${() => {
 					act(`/ssh add ${name} ${host}${username ? ` ${username}` : " -"}${port ? ` ${port}` : ""}`);
-					setName(""); setHost(""); setUsername(""); setPort("");
+					setName("");
+					setHost("");
+					setUsername("");
+					setPort("");
 				}}>Add</button>
 			</div>
 		</div>
 	`;
 }
 
-function Sidebar({ sessions, activeId, personas, cwd, onSelectSession, onCreateSession, onCloseSession, onOpenDirPicker, onRenameSession, onPinSession, open }) {
+function Sidebar({
+	sessions,
+	activeId,
+	personas,
+	cwd,
+	onSelectSession,
+	onCreateSession,
+	onCloseSession,
+	onOpenDirPicker,
+	onRenameSession,
+	onPinSession,
+	open,
+}) {
 	const [personaOpen, setPersonaOpen] = useState(false);
 	const [search, setSearch] = useState("");
 	const [editingId, setEditingId] = useState(null);
@@ -1138,8 +1323,12 @@ function Sidebar({ sessions, activeId, personas, cwd, onSelectSession, onCreateS
 		return a.updatedAt < b.updatedAt ? 1 : -1;
 	};
 	const q = search.trim().toLowerCase();
-	const filtered = sessions.filter((s) =>
-		!q || (s.title ?? "").toLowerCase().includes(q) || s.persona.toLowerCase().includes(q) || s.model.toLowerCase().includes(q)
+	const filtered = sessions.filter(
+		(s) =>
+			!q ||
+			(s.title ?? "").toLowerCase().includes(q) ||
+			s.persona.toLowerCase().includes(q) ||
+			s.model.toLowerCase().includes(q),
 	);
 	const pinnedGroup = filtered.filter((s) => s.pinned).sort(byRunningThenDate);
 	const otherGroup = filtered.filter((s) => !s.pinned).sort(byRunningThenDate);
@@ -1171,12 +1360,16 @@ function Sidebar({ sessions, activeId, personas, cwd, onSelectSession, onCreateS
 			<button
 				class="sidebar-item-pin${s.pinned ? " pinned" : ""}"
 				title=${s.pinned ? "Unpin" : "Pin to top"}
-				onClick=${(e) => { e.stopPropagation(); onPinSession(s.id, !s.pinned); }}
+				onClick=${(e) => {
+					e.stopPropagation();
+					onPinSession(s.id, !s.pinned);
+				}}
 			>
 				<${icons.bookmark} />
 			</button>
-			${editingId === s.id
-				? html`
+			${
+				editingId === s.id
+					? html`
 					<input
 						ref=${editInputRef}
 						class="sidebar-item-name-input"
@@ -1184,26 +1377,41 @@ function Sidebar({ sessions, activeId, personas, cwd, onSelectSession, onCreateS
 						onClick=${(e) => e.stopPropagation()}
 						onInput=${(e) => setEditValue(e.target.value)}
 						onKeyDown=${(e) => {
-							if (e.key === "Enter") { e.preventDefault(); commitEdit(); }
-							if (e.key === "Escape") { e.preventDefault(); setEditingId(null); }
+							if (e.key === "Enter") {
+								e.preventDefault();
+								commitEdit();
+							}
+							if (e.key === "Escape") {
+								e.preventDefault();
+								setEditingId(null);
+							}
 						}}
 						onBlur=${commitEdit}
 					/>
 				`
-				: html`<span class="sidebar-item-name" onDblClick=${(e) => { e.stopPropagation(); startEdit(s); }}>${s.title || s.persona || "unknown"}</span>`
+					: html`<span class="sidebar-item-name" onDblClick=${(e) => {
+							e.stopPropagation();
+							startEdit(s);
+						}}>${s.title || s.persona || "unknown"}</span>`
 			}
 			<span class="sidebar-item-meta">${s.messageCount} msg</span>
 			<button
 				class="sidebar-item-rename"
 				title="Rename"
 				aria-label="Rename"
-				onClick=${(e) => { e.stopPropagation(); startEdit(s); }}
+				onClick=${(e) => {
+					e.stopPropagation();
+					startEdit(s);
+				}}
 			><${icons.pencil} /></button>
 			<button
 				class="sidebar-item-close"
 				title=${s.status === "running" ? "Stop and close" : "Close"}
 				aria-label="Close"
-				onClick=${(e) => { e.stopPropagation(); onCloseSession(s.id); }}
+				onClick=${(e) => {
+					e.stopPropagation();
+					onCloseSession(s.id);
+				}}
 			><${icons.xMark} /></button>
 		</div>
 	`;
@@ -1217,19 +1425,26 @@ function Sidebar({ sessions, activeId, personas, cwd, onSelectSession, onCreateS
 						<span class="dir-row-label">Directory</span>
 						<button class="dir-row-value" title=${cwd} onClick=${onOpenDirPicker}>${shortPath(cwd)}</button>
 					</div>
-					${personas.map((p) => html`
-						<div key=${p.name} class="persona-item" onClick=${() => { onCreateSession(p.name, cwd); setPersonaOpen(false); }}>
+					${personas.map(
+						(p) => html`
+						<div key=${p.name} class="persona-item" onClick=${() => {
+							onCreateSession(p.name, cwd);
+							setPersonaOpen(false);
+						}}>
 							${p.label}
 							<span class="persona-label">${p.source}</span>
 						</div>
-					`)}
+					`,
+					)}
 				</div>
 			</div>
 			<div class="sidebar-divider" />
 			<div class="sidebar-scroll">
 				<div class="sidebar-section">
 					<div class="sidebar-section-title">Sessions</div>
-					${sessions.length > 4 && html`
+					${
+						sessions.length > 4 &&
+						html`
 						<input
 							class="sidebar-search"
 							type="text"
@@ -1237,22 +1452,29 @@ function Sidebar({ sessions, activeId, personas, cwd, onSelectSession, onCreateS
 							value=${search}
 							onInput=${(e) => setSearch(e.target.value)}
 						/>
-					`}
-					${pinnedGroup.length > 0 && html`
+					`
+					}
+					${
+						pinnedGroup.length > 0 &&
+						html`
 						<div class="sidebar-group-label">Pinned</div>
 						${pinnedGroup.map(renderItem)}
 						<div class="sidebar-group-divider" />
-					`}
+					`
+					}
 					${otherGroup.map(renderItem)}
 					${pinnedGroup.length === 0 && otherGroup.length === 0 && html`<div class="sidebar-empty">No sessions match "${search}"</div>`}
 				</div>
 			</div>
-			${active && html`
+			${
+				active &&
+				html`
 				<div class="sidebar-footer" title=${active.cwd}>
 					<span class="sidebar-footer-status ${active.status || "idle"}" />
 					<span class="sidebar-footer-model">${active.model}</span>
 				</div>
-			`}
+			`
+			}
 		</nav>
 	`;
 }
@@ -1285,6 +1507,12 @@ function App() {
 	const [dirPickerOpen, setDirPickerOpen] = useState(false);
 	const [hotkeysOpen, setHotkeysOpen] = useState(false);
 	const [settingsOpen, setSettingsOpen] = useState(false);
+	// Settings' destructive actions (uninstall/remove/delete) need a Yes/No
+	// gate. A single piece of state here — rather than one per callsite —
+	// means one confirm modal, styled like the rest of the app instead of
+	// the browser's native confirm(), reused by every "are you sure?" button.
+	const [confirmState, setConfirmState] = useState(null);
+	const requestConfirm = useCallback((message) => new Promise((resolve) => setConfirmState({ message, resolve })), []);
 	const cwd = selectedCwd ?? defaultCwd ?? "";
 
 	// Sessions the user explicitly closed (the × button) stay hidden from
@@ -1293,13 +1521,19 @@ function App() {
 	// is a per-browser "declutter", not a delete, and re-opening one by URL
 	// (a shared link, browser history) un-hides it again.
 	const [dismissedIds, setDismissedIds] = useState(() => {
-		try { return new Set(JSON.parse(localStorage.getItem("cast:dismissedSessions") || "[]")); } catch { return new Set(); }
+		try {
+			return new Set(JSON.parse(localStorage.getItem("cast:dismissedSessions") || "[]"));
+		} catch {
+			return new Set();
+		}
 	});
 	const dismiss = useCallback((id) => {
 		setDismissedIds((prev) => {
 			const next = new Set(prev);
 			next.add(id);
-			try { localStorage.setItem("cast:dismissedSessions", JSON.stringify([...next])); } catch {}
+			try {
+				localStorage.setItem("cast:dismissedSessions", JSON.stringify([...next]));
+			} catch {}
 			return next;
 		});
 	}, []);
@@ -1308,7 +1542,9 @@ function App() {
 			if (!prev.has(id)) return prev;
 			const next = new Set(prev);
 			next.delete(id);
-			try { localStorage.setItem("cast:dismissedSessions", JSON.stringify([...next])); } catch {}
+			try {
+				localStorage.setItem("cast:dismissedSessions", JSON.stringify([...next]));
+			} catch {}
 			return next;
 		});
 	}, []);
@@ -1365,50 +1601,60 @@ function App() {
 	// Select session — `push` controls whether this lands as a new browser
 	// history entry (a real click) or just replaces the current URL
 	// (programmatic: initial bootstrap, reconnect recovery, popstate).
-	const selectSession = useCallback(async (id, { push = true } = {}) => {
-		try {
-			const data = await api("GET", `/api/sessions/${id}`);
-			setSession(data);
-			setActiveId(id);
-			setStreaming([]);
-			setRunning(data.status === "running");
-			setSidebarOpen(false);
-			try { localStorage.setItem("cast:lastSessionId", id); } catch {}
-			setUrlSessionId(id, { push });
-			undismiss(id);
-		} catch (err) {
-			showToast(err.message, "error");
-		}
-	}, [showToast, undismiss]);
+	const selectSession = useCallback(
+		async (id, { push = true } = {}) => {
+			try {
+				const data = await api("GET", `/api/sessions/${id}`);
+				setSession(data);
+				setActiveId(id);
+				setStreaming([]);
+				setRunning(data.status === "running");
+				setSidebarOpen(false);
+				try {
+					localStorage.setItem("cast:lastSessionId", id);
+				} catch {}
+				setUrlSessionId(id, { push });
+				undismiss(id);
+			} catch (err) {
+				showToast(err.message, "error");
+			}
+		},
+		[showToast, undismiss],
+	);
 
 	// Create session — the POST already returns the full new (empty) session,
 	// so apply it directly instead of two more round trips (list + refetch)
 	// before anything shows up.
-	const createSession = useCallback(async (persona, cwd, { push = true } = {}) => {
-		try {
-			const data = await api("POST", "/api/sessions", { persona, cwd });
-			setActiveId(data.id);
-			setSession({
-				id: data.id,
-				persona: data.session.persona,
-				model: data.session.model,
-				cwd: data.session.cwd,
-				status: "idle",
-				messages: [],
-				usage: data.session.usage,
-				createdAt: data.session.createdAt,
-				updatedAt: data.session.updatedAt,
-			});
-			setStreaming([]);
-			setRunning(false);
-			setSidebarOpen(false);
-			try { localStorage.setItem("cast:lastSessionId", data.id); } catch {}
-			setUrlSessionId(data.id, { push });
-			loadSessions();
-		} catch (err) {
-			showToast(err.message, "error");
-		}
-	}, [loadSessions, showToast]);
+	const createSession = useCallback(
+		async (persona, cwd, { push = true } = {}) => {
+			try {
+				const data = await api("POST", "/api/sessions", { persona, cwd });
+				setActiveId(data.id);
+				setSession({
+					id: data.id,
+					persona: data.session.persona,
+					model: data.session.model,
+					cwd: data.session.cwd,
+					status: "idle",
+					messages: [],
+					usage: data.session.usage,
+					createdAt: data.session.createdAt,
+					updatedAt: data.session.updatedAt,
+				});
+				setStreaming([]);
+				setRunning(false);
+				setSidebarOpen(false);
+				try {
+					localStorage.setItem("cast:lastSessionId", data.id);
+				} catch {}
+				setUrlSessionId(data.id, { push });
+				loadSessions();
+			} catch (err) {
+				showToast(err.message, "error");
+			}
+		},
+		[loadSessions, showToast],
+	);
 
 	// Full client bootstrap — personas/commands/themes/config, then sessions,
 	// landing on whichever one was last active (see selectSession's
@@ -1423,17 +1669,26 @@ function App() {
 			if (!p) return false;
 			const sortedPersonas = [...p].sort((a, b) => a.label.localeCompare(b.label));
 			setPersonas(sortedPersonas);
-			api("GET", "/api/commands").then((c) => c && setCommands(c)).catch(() => {});
-			api("GET", "/api/themes").then((t) => {
-				if (!t) return;
-				setThemes(t);
-				api("GET", "/api/config").then((cfg) => {
-					if (!cfg) return;
-					setDefaultCwd(cfg.cwd ?? "");
-					const current = t.find((x) => x.id === cfg.theme) ?? t.find((x) => x.id === "cast");
-					if (current) { applyTheme(current.colors); setCurrentThemeId(current.id); }
-				}).catch(() => {});
-			}).catch(() => {});
+			api("GET", "/api/commands")
+				.then((c) => c && setCommands(c))
+				.catch(() => {});
+			api("GET", "/api/themes")
+				.then((t) => {
+					if (!t) return;
+					setThemes(t);
+					api("GET", "/api/config")
+						.then((cfg) => {
+							if (!cfg) return;
+							setDefaultCwd(cfg.cwd ?? "");
+							const current = t.find((x) => x.id === cfg.theme) ?? t.find((x) => x.id === "cast");
+							if (current) {
+								applyTheme(current.colors);
+								setCurrentThemeId(current.id);
+							}
+						})
+						.catch(() => {});
+				})
+				.catch(() => {});
 
 			const s = await api("GET", "/api/sessions");
 			if (!s) return false;
@@ -1443,10 +1698,15 @@ function App() {
 				// that exact thread) over the last-active fallback from localStorage.
 				const urlId = sessionIdFromUrl();
 				let lastId = null;
-				try { lastId = localStorage.getItem("cast:lastSessionId"); } catch {}
-				const target = (urlId && s.find((x) => x.id === urlId))
-					? urlId
-					: (lastId && s.find((x) => x.id === lastId)) ? lastId : s[0].id;
+				try {
+					lastId = localStorage.getItem("cast:lastSessionId");
+				} catch {}
+				const target =
+					urlId && s.find((x) => x.id === urlId)
+						? urlId
+						: lastId && s.find((x) => x.id === lastId)
+							? lastId
+							: s[0].id;
 				await selectSession(target, { push: false });
 			} else {
 				const defaultP = sortedPersonas.find((x) => x.name === "coding") ?? sortedPersonas[0];
@@ -1489,57 +1749,69 @@ function App() {
 
 	// Close (stop) a session — aborts it server-side if running and drops it
 	// from the live list. History stays on disk; it just stops being a tab.
-	const closeSession = useCallback(async (id) => {
-		// The DELETE also broadcasts session_closed over this same session's SSE
-		// connection, which can arrive before this fetch resolves — mark it as
-		// self-initiated so that handler doesn't flash a spurious error toast.
-		if (id === activeId) selfClosingRef.current = id;
-		try {
-			await api("DELETE", `/api/sessions/${id}`);
-		} catch (err) {
-			showToast(err.message, "error");
-			return;
-		}
-		// The backend still lists this session (still on disk) — closing only
-		// unloads it from the live runner, not the disk file — so hiding it
-		// from view is purely this browser's own dismissed-set, not something
-		// removed from `sessions` itself.
-		dismiss(id);
-		if (id !== activeId) return;
+	const closeSession = useCallback(
+		async (id) => {
+			// The DELETE also broadcasts session_closed over this same session's SSE
+			// connection, which can arrive before this fetch resolves — mark it as
+			// self-initiated so that handler doesn't flash a spurious error toast.
+			if (id === activeId) selfClosingRef.current = id;
+			try {
+				await api("DELETE", `/api/sessions/${id}`);
+			} catch (err) {
+				showToast(err.message, "error");
+				return;
+			}
+			// The backend still lists this session (still on disk) — closing only
+			// unloads it from the live runner, not the disk file — so hiding it
+			// from view is purely this browser's own dismissed-set, not something
+			// removed from `sessions` itself.
+			dismiss(id);
+			if (id !== activeId) return;
 
-		if (esRef.current) { esRef.current.close(); esRef.current = null; }
-		const remaining = sessions.filter((s) => s.id !== id && !dismissedIds.has(s.id));
-		if (remaining.length > 0) {
-			await selectSession(remaining[0].id, { push: false });
-			return;
-		}
-		setActiveId(null);
-		setSession(null);
-		setStreaming([]);
-		const defaultP = personas.find((x) => x.name === "coding") ?? personas[0];
-		if (defaultP) await createSession(defaultP.name, undefined, { push: false });
-	}, [sessions, activeId, personas, selectSession, createSession, showToast, dismiss, dismissedIds]);
+			if (esRef.current) {
+				esRef.current.close();
+				esRef.current = null;
+			}
+			const remaining = sessions.filter((s) => s.id !== id && !dismissedIds.has(s.id));
+			if (remaining.length > 0) {
+				await selectSession(remaining[0].id, { push: false });
+				return;
+			}
+			setActiveId(null);
+			setSession(null);
+			setStreaming([]);
+			const defaultP = personas.find((x) => x.name === "coding") ?? personas[0];
+			if (defaultP) await createSession(defaultP.name, undefined, { push: false });
+		},
+		[sessions, activeId, personas, selectSession, createSession, showToast, dismiss, dismissedIds],
+	);
 
 	// Rename — overrides the auto-derived-from-first-message title. Updates
 	// the sidebar list optimistically instead of waiting on a full refetch.
-	const renameSession = useCallback(async (id, title) => {
-		try {
-			const data = await api("POST", `/api/sessions/${id}/rename`, { title });
-			setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, title: data?.title } : s)));
-			if (id === activeId) setSession((prev) => (prev ? { ...prev, title: data?.title } : prev));
-		} catch (err) {
-			showToast(err.message, "error");
-		}
-	}, [activeId, showToast]);
+	const renameSession = useCallback(
+		async (id, title) => {
+			try {
+				const data = await api("POST", `/api/sessions/${id}/rename`, { title });
+				setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, title: data?.title } : s)));
+				if (id === activeId) setSession((prev) => (prev ? { ...prev, title: data?.title } : prev));
+			} catch (err) {
+				showToast(err.message, "error");
+			}
+		},
+		[activeId, showToast],
+	);
 
-	const pinSession = useCallback(async (id, pinned) => {
-		try {
-			const data = await api("POST", `/api/sessions/${id}/pin`, { pinned });
-			setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, pinned: data?.pinned } : s)));
-		} catch (err) {
-			showToast(err.message, "error");
-		}
-	}, [showToast]);
+	const pinSession = useCallback(
+		async (id, pinned) => {
+			try {
+				const data = await api("POST", `/api/sessions/${id}/pin`, { pinned });
+				setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, pinned: data?.pinned } : s)));
+			} catch (err) {
+				showToast(err.message, "error");
+			}
+		},
+		[showToast],
+	);
 
 	// Sidebar toggle — a drawer on mobile (existing transform-based behavior),
 	// a collapsible grid column on desktop (same button, different meaning).
@@ -1574,144 +1846,193 @@ function App() {
 		document.body.classList.remove("resizing-diff");
 		window.removeEventListener("pointermove", onDiffResizeMove);
 	}, [onDiffResizeMove]);
-	const startDiffResize = useCallback((e) => {
-		e.preventDefault();
-		const panel = document.querySelector(".diff-panel");
-		dragStateRef.current = { startX: e.clientX, startWidth: panel?.getBoundingClientRect().width ?? diffWidth ?? 560 };
-		document.body.classList.add("resizing-diff");
-		window.addEventListener("pointermove", onDiffResizeMove);
-		window.addEventListener("pointerup", onDiffResizeEnd, { once: true });
-	}, [diffWidth, onDiffResizeMove, onDiffResizeEnd]);
+	const startDiffResize = useCallback(
+		(e) => {
+			e.preventDefault();
+			const panel = document.querySelector(".diff-panel");
+			dragStateRef.current = {
+				startX: e.clientX,
+				startWidth: panel?.getBoundingClientRect().width ?? diffWidth ?? 560,
+			};
+			document.body.classList.add("resizing-diff");
+			window.addEventListener("pointermove", onDiffResizeMove);
+			window.addEventListener("pointerup", onDiffResizeEnd, { once: true });
+		},
+		[diffWidth, onDiffResizeMove, onDiffResizeEnd],
+	);
 
 	// Submit message
-	const submitMessage = useCallback(async (text) => {
-		if (!activeId) {
-			// Composer is disabled while !ready, so this only fires on a very
-			// fast Enter right as the page loads — surface it instead of eating
-			// the message silently.
-			showToast("Still connecting — try again in a moment", "error");
-			return;
-		}
-		if (text.startsWith("/")) {
-			// Client-only commands — no round trip to the agent session.
-			if (text === "/diff") { toggleDiff(); return; }
-			if (text === "/copy") {
-				const lastAssistant = [...(session?.messages ?? [])].reverse().find((m) => m.role === "assistant");
-				if (!lastAssistant) { addNotice("Nothing to copy yet"); return; }
-				// Live-flushed messages carry `blocks`, not a flat `content` string —
-				// copy the reply text only (skip reasoning/tool blocks).
-				const text2 = Array.isArray(lastAssistant.blocks)
-					? lastAssistant.blocks.filter((b) => b.kind === "content").map((b) => b.text).join("")
-					: typeof lastAssistant.content === "string" ? lastAssistant.content : JSON.stringify(lastAssistant.content);
-				try {
-					if (navigator.clipboard) {
-						await navigator.clipboard.writeText(text2);
-					} else {
-						// HTTP fallback — Clipboard API unavailable outside secure contexts.
-						const ta = document.createElement("textarea");
-						ta.value = text2;
-						ta.style.cssText = "position:fixed;opacity:0";
-						document.body.appendChild(ta);
-						ta.select();
-						document.execCommand("copy");
-						document.body.removeChild(ta);
+	const submitMessage = useCallback(
+		async (text) => {
+			if (!activeId) {
+				// Composer is disabled while !ready, so this only fires on a very
+				// fast Enter right as the page loads — surface it instead of eating
+				// the message silently.
+				showToast("Still connecting — try again in a moment", "error");
+				return;
+			}
+			if (text.startsWith("/")) {
+				// Client-only commands — no round trip to the agent session.
+				if (text === "/diff") {
+					toggleDiff();
+					return;
+				}
+				if (text === "/copy") {
+					const lastAssistant = [...(session?.messages ?? [])].reverse().find((m) => m.role === "assistant");
+					if (!lastAssistant) {
+						addNotice("Nothing to copy yet");
+						return;
 					}
-					addNotice("Copied to clipboard");
-				} catch {
-					addNotice("Copy failed", "error");
+					// Live-flushed messages carry `blocks`, not a flat `content` string —
+					// copy the reply text only (skip reasoning/tool blocks).
+					const text2 = Array.isArray(lastAssistant.blocks)
+						? lastAssistant.blocks
+								.filter((b) => b.kind === "content")
+								.map((b) => b.text)
+								.join("")
+						: typeof lastAssistant.content === "string"
+							? lastAssistant.content
+							: JSON.stringify(lastAssistant.content);
+					try {
+						if (navigator.clipboard) {
+							await navigator.clipboard.writeText(text2);
+						} else {
+							// HTTP fallback — Clipboard API unavailable outside secure contexts.
+							const ta = document.createElement("textarea");
+							ta.value = text2;
+							ta.style.cssText = "position:fixed;opacity:0";
+							document.body.appendChild(ta);
+							ta.select();
+							document.execCommand("copy");
+							document.body.removeChild(ta);
+						}
+						addNotice("Copied to clipboard");
+					} catch {
+						addNotice("Copy failed", "error");
+					}
+					return;
+				}
+				try {
+					const result = await api("POST", `/api/sessions/${activeId}/command`, { command: text });
+					if (text === "/sessions") await loadSessions();
+					if (text.startsWith("/new") && result?.result?.sessionId) {
+						await loadSessions();
+						await selectSession(result.result.sessionId);
+						return; // now viewing the fresh session — nothing to append a notice to
+					}
+					if (text === "/clear" && session) {
+						setSession({ ...session, messages: [] });
+						return; // context just got wiped — nothing left to append a notice to
+					}
+					if (text.startsWith("/persona") && result?.result?.persona) {
+						setSession((prev) => (prev ? { ...prev, persona: result.result.persona } : prev));
+						await loadSessions();
+						addNotice(`Persona: ${result.result.label ?? result.result.persona}`);
+					} else if (text.startsWith("/model") && result?.result?.model) {
+						setSession((prev) => (prev ? { ...prev, model: result.result.model } : prev));
+						await loadSessions();
+						addNotice(`Model: ${result.result.model}`);
+					} else if (text.startsWith("/theme") && result?.result?.theme) {
+						if (result.result.colors) applyTheme(result.result.colors);
+						setCurrentThemeId(result.result.theme);
+						addNotice(`Theme: ${result.result.label ?? result.result.theme}`);
+					} else if (text.startsWith("/current") && result?.result) {
+						const r = result.result;
+						addNotice(`${r.persona} · ${r.model} · ${r.status} · ${r.messageCount} msg`);
+					} else if (text.startsWith("/usage") && result?.result) {
+						const u = result.result;
+						const cost = u.cost ? ` · $${u.cost.toFixed(4)}` : "";
+						addNotice(
+							`${u.totalTokens ?? 0} tokens (${u.promptTokens ?? 0} in / ${u.completionTokens ?? 0} out)${cost}`,
+						);
+					} else if (text === "/sessions" && Array.isArray(result?.result)) {
+						addNotice(`${result.result.length} session${result.result.length === 1 ? "" : "s"}`);
+					} else if (text.startsWith("/repo") && result?.result) {
+						const r = result.result;
+						addNotice(
+							r.isGit ? `${r.cwd} · ${r.branch}${r.dirty ? " (dirty)" : ""}` : `${r.cwd} — not a git repository`,
+						);
+					} else if (text.startsWith("/reasoning") && result?.result) {
+						const r = result.result;
+						addNotice(
+							r.note ??
+								`Reasoning: ${r.reasoningLevel}${r.options?.length ? ` (options: ${r.options.join(", ")})` : ""}`,
+						);
+					} else if (text.startsWith("/web") && result?.result && "webTools" in result.result) {
+						addNotice(`Web tools: ${result.result.webTools ? "enabled" : "disabled"}`);
+					} else if ((text.startsWith("/steer") || text.startsWith("/s ")) && result?.ok) {
+						const msg = text.replace(/^\/(steer|s)\s*/, "");
+						if (msg) setPendingSteers((prev) => [...prev, msg]);
+						addNotice(result.result);
+					} else if ((text.startsWith("/queue") || text.startsWith("/q ")) && result?.ok) {
+						const msg = text.replace(/^\/(queue|q)\s*/, "");
+						if (msg) setPendingQueue((prev) => [...prev, msg]);
+						addNotice(result.result);
+					} else if ((text === "/plan" || text === "/build") && result?.ok) {
+						const mode = text === "/plan" ? "plan" : "build";
+						setSession((prev) => (prev ? { ...prev, mode } : prev));
+						addNotice(result.result);
+					} else if (result?.result && typeof result.result === "string") {
+						addNotice(result.result);
+					} else if (result?.result && typeof result.result === "object") {
+						// Fallback so an object/array result is never silently swallowed —
+						// this exact gap (POST succeeds, nothing visible) is what made
+						// /current, /usage, and /sessions look completely broken before.
+						addNotice(JSON.stringify(result.result));
+					}
+				} catch (err) {
+					addNotice(err.message, "error");
 				}
 				return;
 			}
+			// Show the message immediately — waiting for the POST to resolve before
+			// appending it made every send feel like it had a beat of lag, even
+			// though the round trip to localhost is fast.
+			setSession((prev) =>
+				prev ? { ...prev, messages: [...prev.messages, { role: "user", content: text }] } : prev,
+			);
+			turnStartRef.current.delete(activeId);
+			setElapsedMs(0);
 			try {
-				const result = await api("POST", `/api/sessions/${activeId}/command`, { command: text });
-				if (text === "/sessions") await loadSessions();
-				if (text.startsWith("/new") && result?.result?.sessionId) {
-					await loadSessions();
-					await selectSession(result.result.sessionId);
-					return; // now viewing the fresh session — nothing to append a notice to
-				}
-				if (text === "/clear" && session) {
-					setSession({ ...session, messages: [] });
-					return; // context just got wiped — nothing left to append a notice to
-				}
-				if (text.startsWith("/persona") && result?.result?.persona) {
-					setSession((prev) => (prev ? { ...prev, persona: result.result.persona } : prev));
-					await loadSessions();
-					addNotice(`Persona: ${result.result.label ?? result.result.persona}`);
-				} else if (text.startsWith("/model") && result?.result?.model) {
-					setSession((prev) => (prev ? { ...prev, model: result.result.model } : prev));
-					await loadSessions();
-					addNotice(`Model: ${result.result.model}`);
-				} else if (text.startsWith("/theme") && result?.result?.theme) {
-					if (result.result.colors) applyTheme(result.result.colors);
-					setCurrentThemeId(result.result.theme);
-					addNotice(`Theme: ${result.result.label ?? result.result.theme}`);
-				} else if (text.startsWith("/current") && result?.result) {
-					const r = result.result;
-					addNotice(`${r.persona} · ${r.model} · ${r.status} · ${r.messageCount} msg`);
-				} else if (text.startsWith("/usage") && result?.result) {
-					const u = result.result;
-					const cost = u.cost ? ` · $${u.cost.toFixed(4)}` : "";
-					addNotice(`${u.totalTokens ?? 0} tokens (${u.promptTokens ?? 0} in / ${u.completionTokens ?? 0} out)${cost}`);
-				} else if (text === "/sessions" && Array.isArray(result?.result)) {
-					addNotice(`${result.result.length} session${result.result.length === 1 ? "" : "s"}`);
-				} else if (text.startsWith("/repo") && result?.result) {
-					const r = result.result;
-					addNotice(r.isGit ? `${r.cwd} · ${r.branch}${r.dirty ? " (dirty)" : ""}` : `${r.cwd} — not a git repository`);
-				} else if (text.startsWith("/reasoning") && result?.result) {
-					const r = result.result;
-					addNotice(r.note ?? `Reasoning: ${r.reasoningLevel}${r.options?.length ? ` (options: ${r.options.join(", ")})` : ""}`);
-				} else if (text.startsWith("/web") && result?.result && "webTools" in result.result) {
-					addNotice(`Web tools: ${result.result.webTools ? "enabled" : "disabled"}`);
-				} else if ((text.startsWith("/steer") || text.startsWith("/s ")) && result?.ok) {
-					const msg = text.replace(/^\/(steer|s)\s*/, "");
-					if (msg) setPendingSteers((prev) => [...prev, msg]);
-					addNotice(result.result);
-				} else if ((text.startsWith("/queue") || text.startsWith("/q ")) && result?.ok) {
-					const msg = text.replace(/^\/(queue|q)\s*/, "");
-					if (msg) setPendingQueue((prev) => [...prev, msg]);
-					addNotice(result.result);
-				} else if ((text === "/plan" || text === "/build") && result?.ok) {
-					const mode = text === "/plan" ? "plan" : "build";
-					setSession((prev) => (prev ? { ...prev, mode } : prev));
-					addNotice(result.result);
-				} else if (result?.result && typeof result.result === "string") {
-					addNotice(result.result);
-				} else if (result?.result && typeof result.result === "object") {
-					// Fallback so an object/array result is never silently swallowed —
-					// this exact gap (POST succeeds, nothing visible) is what made
-					// /current, /usage, and /sessions look completely broken before.
-					addNotice(JSON.stringify(result.result));
-				}
+				await api("POST", `/api/sessions/${activeId}/chat`, { text });
+				// Picks up the auto-derived title after a session's first message
+				// (and keeps the sidebar's message counts from drifting stale).
+				loadSessions();
 			} catch (err) {
-				addNotice(err.message, "error");
+				showToast(err.message, "error");
 			}
-			return;
-		}
-		// Show the message immediately — waiting for the POST to resolve before
-		// appending it made every send feel like it had a beat of lag, even
-		// though the round trip to localhost is fast.
-		setSession((prev) => prev ? { ...prev, messages: [...prev.messages, { role: "user", content: text }] } : prev);
-		turnStartRef.current.delete(activeId);
-		setElapsedMs(0);
-		try {
-			await api("POST", `/api/sessions/${activeId}/chat`, { text });
-			// Picks up the auto-derived title after a session's first message
-			// (and keeps the sidebar's message counts from drifting stale).
-			loadSessions();
-		} catch (err) {
-			showToast(err.message, "error");
-		}
-	}, [activeId, session, loadSessions, selectSession, showToast, toggleDiff, addNotice]);
+		},
+		[activeId, session, loadSessions, selectSession, showToast, toggleDiff, addNotice],
+	);
 
 	// Abort
 	const abortRun = useCallback(async () => {
 		if (!activeId) return;
-		try { await api("POST", `/api/sessions/${activeId}/abort`); } catch {}
-		setSession((prev) => prev ? { ...prev, messages: [...prev.messages, { role: "warning", content: "Run aborted" }] } : prev);
+		try {
+			await api("POST", `/api/sessions/${activeId}/abort`);
+		} catch {}
+		setSession((prev) =>
+			prev ? { ...prev, messages: [...prev.messages, { role: "warning", content: "Run aborted" }] } : prev,
+		);
+	}, [activeId]);
+
+	// Load diff — always the full multi-file diff. Selecting a file in the
+	// list (setDiffFile below) just changes which of the already-fetched
+	// files is shown; it must never re-fetch a single-file diff, since that
+	// response would replace the whole list with just that one entry (and
+	// for a file git treats as binary, with none at all — "picking a file
+	// makes everything disappear").
+	const loadDiff = useCallback(async () => {
+		if (!activeId) return;
+		try {
+			setDiffData(await api("GET", `/api/sessions/${activeId}/diff`));
+		} catch {
+			setDiffData({ files: [] });
+		}
 	}, [activeId]);
 
 	// SSE
+	// biome-ignore lint/correctness/useExhaustiveDependencies: reconnectNonce isn't read in the body — bumping it is what forces this effect to re-subscribe after a backend restart (see startReconnectLoop).
 	useEffect(() => {
 		if (!activeId) return;
 		if (esRef.current) esRef.current.close();
@@ -1728,33 +2049,47 @@ function App() {
 				switch (event.type) {
 					case "status":
 						setRunning(event.status === "running");
-						setSession((prev) => prev ? { ...prev, status: event.status } : prev);
+						setSession((prev) => (prev ? { ...prev, status: event.status } : prev));
 						break;
 					case "token":
 						setStreaming((prev) => {
 							const last = prev[prev.length - 1];
-							if (last && last.kind === "content") return [...prev.slice(0, -1), { kind: "content", text: last.text + event.text }];
+							if (last && last.kind === "content")
+								return [...prev.slice(0, -1), { kind: "content", text: last.text + event.text }];
 							return [...prev, { kind: "content", text: event.text }];
 						});
 						break;
 					case "thinking":
 						setStreaming((prev) => {
 							const last = prev[prev.length - 1];
-							if (last && last.kind === "thinking") return [...prev.slice(0, -1), { kind: "thinking", text: last.text + event.text }];
+							if (last && last.kind === "thinking")
+								return [...prev.slice(0, -1), { kind: "thinking", text: last.text + event.text }];
 							return [...prev, { kind: "thinking", text: event.text }];
 						});
 						break;
 					case "tool_start":
-						setStreaming((prev) => [...prev, { kind: "tool", call: { id: event.id, name: event.name, args: event.args, status: "running" } }]);
+						setStreaming((prev) => [
+							...prev,
+							{ kind: "tool", call: { id: event.id, name: event.name, args: event.args, status: "running" } },
+						]);
 						break;
-						case "tool_end":
-							setStreaming((prev) => prev.map((b) =>
+					case "tool_end":
+						setStreaming((prev) =>
+							prev.map((b) =>
 								b.kind === "tool" && b.call.id === event.id
-									? { ...b, call: { ...b.call, status: event.result?.isError ? "error" : "ok", result: event.result?.content?.slice(0, 4000) ?? "" } }
-									: b
-							));
-							if (diffOpen) loadDiff();
-							break;
+									? {
+											...b,
+											call: {
+												...b.call,
+												status: event.result?.isError ? "error" : "ok",
+												result: event.result?.content?.slice(0, 4000) ?? "",
+											},
+										}
+									: b,
+							),
+						);
+						if (diffOpen) loadDiff();
+						break;
 					case "assistant_message":
 						// Keep reasoning, prose, and tool calls as separate ordered blocks
 						// (mirrors the TUI's [reasoning]/[agent] rows) instead of flattening
@@ -1773,60 +2108,123 @@ function App() {
 					case "end":
 						setStreaming([]);
 						setRunning(false);
-						setSession((prev) => prev ? { ...prev, status: "idle" } : prev);
-							setPendingSteers([]);
-							setPendingQueue([]);
+						setSession((prev) => (prev ? { ...prev, status: "idle" } : prev));
+						setPendingSteers([]);
+						setPendingQueue([]);
 						// Pull fresh usage numbers only — `messages` already holds this
 						// turn's full reasoning/tool-call blocks from live streaming, and
 						// the server's persisted form can't carry reasoning at all (it's
 						// never saved to disk), so overwriting messages here would silently
 						// collapse everything back down to just the final reply.
-						api("GET", `/api/sessions/${activeId}`).then((d) => {
-							if (d) setSession((prev) => prev ? { ...prev, usage: d.usage, updatedAt: d.updatedAt } : prev);
-						}).catch(() => {});
+						api("GET", `/api/sessions/${activeId}`)
+							.then((d) => {
+								if (d)
+									setSession((prev) => (prev ? { ...prev, usage: d.usage, updatedAt: d.updatedAt } : prev));
+							})
+							.catch(() => {});
 						break;
 					case "error":
 						setStreaming([]);
 						setRunning(false);
-						setSession((prev) => prev ? { ...prev, status: "error", messages: [...prev.messages, { role: "error", content: event.message ?? "Unknown error" }] } : prev);
+						setSession((prev) =>
+							prev
+								? {
+										...prev,
+										status: "error",
+										messages: [
+											...prev.messages,
+											{ role: "error", content: event.message ?? "Unknown error" },
+										],
+									}
+								: prev,
+						);
 						break;
 					case "compaction":
-						setSession((prev) => prev ? { ...prev, messages: [...prev.messages, { role: "system", content: `Context compacted (${event.messagesCompacted} messages)` }] } : prev);
+						setSession((prev) =>
+							prev
+								? {
+										...prev,
+										messages: [
+											...prev.messages,
+											{ role: "system", content: `Context compacted (${event.messagesCompacted} messages)` },
+										],
+									}
+								: prev,
+						);
 						break;
 					case "doom_loop":
-						setSession((prev) => prev ? { ...prev, messages: [...prev.messages, { role: "warning", content: `Doom loop: ${event.tool} called ${event.attempts} times` }] } : prev);
-							break;
-						case "steering_injected":
-						case "followup_injected": {
-							// Promote streaming to history first, then show injected messages.
-							setStreaming((prevStreaming) => {
-								setSession((prev) => {
-									if (!prev) return prev;
-									const msgs = prevStreaming.length > 0 ? [...prev.messages, { role: "assistant", blocks: prevStreaming }] : prev.messages;
-									const injected = event.messages.map((m) => ({ role: "user", content: typeof m.content === "string" ? m.content : JSON.stringify(m.content) }));
-									return { ...prev, messages: [...msgs, ...injected] };
-								});
-								return [];
+						setSession((prev) =>
+							prev
+								? {
+										...prev,
+										messages: [
+											...prev.messages,
+											{
+												role: "warning",
+												content: `Doom loop: ${event.tool} called ${event.attempts} times`,
+											},
+										],
+									}
+								: prev,
+						);
+						break;
+					case "steering_injected":
+					case "followup_injected": {
+						// Promote streaming to history first, then show injected messages.
+						setStreaming((prevStreaming) => {
+							setSession((prev) => {
+								if (!prev) return prev;
+								const msgs =
+									prevStreaming.length > 0
+										? [...prev.messages, { role: "assistant", blocks: prevStreaming }]
+										: prev.messages;
+								const injected = event.messages.map((m) => ({
+									role: "user",
+									content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+								}));
+								return { ...prev, messages: [...msgs, ...injected] };
 							});
-							if (event.type === "steering_injected") {
-								setPendingSteers((p) => p.slice(event.messages.length));
-							} else {
-								setPendingQueue((p) => p.slice(event.messages.length));
-							}
-							break;
-							}
-						case "interrupt_reminder":
-							setSession((prev) => prev ? { ...prev, messages: [...prev.messages, { role: "warning", content: "Context restored after interrupt" }] } : prev);
-							break;
-						case "date_rollover":
-							setSession((prev) => prev ? { ...prev, messages: [...prev.messages, { role: "warning", content: `Date rolled over to ${event.date}` }] } : prev);
-							break;
-						case "open_work_gate":
-							addNotice(`Plan steps still open — continuing (attempt ${event.fires})`);
-							break;
-						case "open_work_gate_exhausted":
-							addNotice("Plan steps still open — max retries reached, ending turn");
-							break;
+							return [];
+						});
+						if (event.type === "steering_injected") {
+							setPendingSteers((p) => p.slice(event.messages.length));
+						} else {
+							setPendingQueue((p) => p.slice(event.messages.length));
+						}
+						break;
+					}
+					case "interrupt_reminder":
+						setSession((prev) =>
+							prev
+								? {
+										...prev,
+										messages: [
+											...prev.messages,
+											{ role: "warning", content: "Context restored after interrupt" },
+										],
+									}
+								: prev,
+						);
+						break;
+					case "date_rollover":
+						setSession((prev) =>
+							prev
+								? {
+										...prev,
+										messages: [
+											...prev.messages,
+											{ role: "warning", content: `Date rolled over to ${event.date}` },
+										],
+									}
+								: prev,
+						);
+						break;
+					case "open_work_gate":
+						addNotice(`Plan steps still open — continuing (attempt ${event.fires})`);
+						break;
+					case "open_work_gate_exhausted":
+						addNotice("Plan steps still open — max retries reached, ending turn");
+						break;
 					case "session_closed":
 						// Reached if this session was closed by another client/tab —
 						// a self-initiated close clears the flag instead of toasting.
@@ -1849,15 +2247,22 @@ function App() {
 		es.onerror = () => {
 			setConnected(false);
 			if (es.readyState === EventSource.CLOSED) {
-				setSession((prev) => prev ? { ...prev, messages: [...prev.messages, { role: "warning", content: "Connection terminated" }] } : prev);
+				setSession((prev) =>
+					prev
+						? { ...prev, messages: [...prev.messages, { role: "warning", content: "Connection terminated" }] }
+						: prev,
+				);
 				startReconnectLoop();
 			}
 		};
 
-		return () => { es.close(); };
-	}, [activeId, reconnectNonce, startReconnectLoop]);
+		return () => {
+			es.close();
+		};
+	}, [activeId, reconnectNonce, startReconnectLoop, addNotice, loadDiff, showToast, diffOpen]);
 
 	// Auto-scroll
+	// biome-ignore lint/correctness/useExhaustiveDependencies: session?.messages/streaming aren't read in the body — they're the triggers to re-scroll whenever new content arrives, read indirectly via the DOM refs instead.
 	useEffect(() => {
 		if (autoScrollRef.current && messagesRef.current) {
 			requestAnimationFrame(() => {
@@ -1881,21 +2286,6 @@ function App() {
 		setAtBottom(bottom);
 	}, []);
 
-	// Load diff — always the full multi-file diff. Selecting a file in the
-	// list (setDiffFile below) just changes which of the already-fetched
-	// files is shown; it must never re-fetch a single-file diff, since that
-	// response would replace the whole list with just that one entry (and
-	// for a file git treats as binary, with none at all — "picking a file
-	// makes everything disappear").
-	const loadDiff = useCallback(async () => {
-		if (!activeId) return;
-		try {
-			setDiffData(await api("GET", `/api/sessions/${activeId}/diff`));
-		} catch {
-			setDiffData({ files: [] });
-		}
-	}, [activeId]);
-
 	// Toggle diff — reset the selected file so switching sessions (or
 	// reopening) doesn't leave a stale selection that no longer matches any
 	// file in the freshly loaded list.
@@ -1907,6 +2297,7 @@ function App() {
 	}, [diffOpen, activeId, loadDiff]);
 
 	// Init
+	// biome-ignore lint/correctness/useExhaustiveDependencies: deliberately mount-only — initClientState's own identity can change across renders, and re-running the full bootstrap on that would fight startReconnectLoop's manual retries.
 	useEffect(() => {
 		initClientState();
 	}, []);
@@ -1926,18 +2317,45 @@ function App() {
 	// Global hotkeys
 	useEffect(() => {
 		const onKey = (e) => {
-			if (e.key === "Escape" && hotkeysOpen) { setHotkeysOpen(false); return; }
-			if (e.key === "Escape" && dirPickerOpen) { setDirPickerOpen(false); return; }
+			if (e.key === "Escape" && hotkeysOpen) {
+				setHotkeysOpen(false);
+				return;
+			}
+			if (e.key === "Escape" && dirPickerOpen) {
+				setDirPickerOpen(false);
+				return;
+			}
 
 			// Ctrl/Cmd combos. Plain Ctrl+D/N/L are reserved by Chrome/Firefox
 			// (bookmark, new window, focus address bar) and never reach page
 			// JS at all, so those actions use Ctrl+Shift instead.
 			const mod = e.ctrlKey || e.metaKey;
-			if (mod && !e.shiftKey && e.key === "b") { e.preventDefault(); setSidebarCollapsed((v) => !v); return; }
-			if (mod && e.shiftKey && e.key === "D") { e.preventDefault(); toggleDiff(); return; }
-			if (mod && e.shiftKey && e.key === "N") { e.preventDefault(); const p = personas.find((x) => x.name === "coding") ?? personas[0]; if (p) createSession(p.name, cwd); return; }
-			if (mod && e.shiftKey && e.key === "L") { e.preventDefault(); if (activeId) submitMessage("/clear"); return; }
-			if (mod && !e.shiftKey && e.key === "/") { e.preventDefault(); setHotkeysOpen((v) => !v); return; }
+			if (mod && !e.shiftKey && e.key === "b") {
+				e.preventDefault();
+				setSidebarCollapsed((v) => !v);
+				return;
+			}
+			if (mod && e.shiftKey && e.key === "D") {
+				e.preventDefault();
+				toggleDiff();
+				return;
+			}
+			if (mod && e.shiftKey && e.key === "N") {
+				e.preventDefault();
+				const p = personas.find((x) => x.name === "coding") ?? personas[0];
+				if (p) createSession(p.name, cwd);
+				return;
+			}
+			if (mod && e.shiftKey && e.key === "L") {
+				e.preventDefault();
+				if (activeId) submitMessage("/clear");
+				return;
+			}
+			if (mod && !e.shiftKey && e.key === "/") {
+				e.preventDefault();
+				setHotkeysOpen((v) => !v);
+				return;
+			}
 		};
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
@@ -1948,7 +2366,9 @@ function App() {
 	// composer (not the header, which is shared chrome) so it's always clear
 	// which role a message is about to go to, especially when switching
 	// between sessions that don't share one.
-	const activePersonaLabel = session ? (personas.find((p) => p.name === session.persona)?.label ?? session.persona) : null;
+	const activePersonaLabel = session
+		? (personas.find((p) => p.name === session.persona)?.label ?? session.persona)
+		: null;
 	// The backend lists every persisted session (see bridge.ts), but a
 	// closed one should stay out of view in this browser until re-opened by
 	// URL/history — see dismiss()/undismiss() above.
@@ -1964,11 +2384,13 @@ function App() {
 	if (sidebarCollapsed) appStyle["--sidebar-col"] = "0px";
 	if (diffOpen && diffWidth) appStyle["--diff-w"] = `${diffWidth}px`;
 
-
 	// Hotkeys modal — rendered via dangerouslySetInnerHTML to avoid htm/h() issues.
-	const hotkeysModal = hotkeysOpen && html`
+	const hotkeysModalRef = useModalFocusTrap(hotkeysOpen);
+	const hotkeysModal =
+		hotkeysOpen &&
+		html`
 		<div class="modal-backdrop" onClick=${() => setHotkeysOpen(false)}>
-			<div class="modal modal-hotkeys" onClick=${(e) => e.stopPropagation()}>
+			<div class="modal modal-hotkeys" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" tabIndex="-1" ref=${hotkeysModalRef} onClick=${(e) => e.stopPropagation()}>
 				<div class="modal-header">
 					<span>Keyboard shortcuts</span>
 					<button class="modal-close" onClick=${() => setHotkeysOpen(false)} aria-label="Close"><${icons.xMark} /></button>
@@ -1978,13 +2400,34 @@ function App() {
 		</div>
 	`;
 
+	const closeConfirm = (result) => {
+		confirmState?.resolve(result);
+		setConfirmState(null);
+	};
+	const confirmModalRef = useModalFocusTrap(!!confirmState);
+	const confirmModal =
+		confirmState &&
+		html`
+		<div class="modal-backdrop" onClick=${() => closeConfirm(false)}>
+			<div class="modal modal-confirm" role="alertdialog" aria-modal="true" aria-label="Confirm" tabIndex="-1" ref=${confirmModalRef} onClick=${(e) => e.stopPropagation()}>
+				<div class="modal-confirm-body">${confirmState.message}</div>
+				<div class="modal-footer">
+					<button class="modal-btn" onClick=${() => closeConfirm(false)}>Cancel</button>
+					<button class="modal-btn modal-btn-danger" onClick=${() => closeConfirm(true)}>Confirm</button>
+				</div>
+			</div>
+		</div>
+	`;
+
 	return html`
 		<div class="app${diffOpen ? " with-diff" : ""}${sidebarCollapsed ? " sidebar-collapsed" : ""}" style=${appStyle}>
 			<!-- Toasts -->
 			<div class="toast-stack">
-				${toasts.map((t) => html`
+				${toasts.map(
+					(t) => html`
 					<div key=${t.id} class="toast toast-${t.type}">${t.text}</div>
-				`)}
+				`,
+				)}
 			</div>
 
 			<!-- Header -->
@@ -1993,7 +2436,7 @@ function App() {
 					<${icons.chevronRight} class="chevron-icon" />
 				</button>
 				<span class="header-logo">cast</span>
-				${!connected && html`<span class="conn-pill">reconnecting\u2026</span>`}
+				${!connected && html`<span class="conn-pill">reconnecting…</span>`}
 				<div class="header-right">
 					${activeId && html`<${StatusPopover} activeId=${activeId} running=${running} />`}
 					<button class="menu-toggle" onClick=${() => setSettingsOpen(true)} aria-label="Settings" title="Settings">
@@ -2031,17 +2474,26 @@ function App() {
 			     position:fixed descendant, trapping the modal inside the
 			     sidebar's own box on narrow screens instead of centering over the
 			     whole viewport. -->
-			${dirPickerOpen && html`
+			${
+				dirPickerOpen &&
+				html`
 				<${DirectoryBrowser}
 					initialPath=${cwd}
-					onPick=${(p) => { setSelectedCwd(p); setDirPickerOpen(false); }}
+					onPick=${(p) => {
+						setSelectedCwd(p);
+						setDirPickerOpen(false);
+					}}
 					onClose=${() => setDirPickerOpen(false)}
 				/>
-			`}
+			`
+			}
 
 			${hotkeysModal}
 
-			${settingsOpen && activeId && html`
+			${
+				settingsOpen &&
+				activeId &&
+				html`
 				<${SettingsModal}
 					activeId=${activeId}
 					themes=${themes}
@@ -2049,28 +2501,45 @@ function App() {
 					onApplyTheme=${applyTheme}
 					onThemeChange=${setCurrentThemeId}
 					onClose=${() => setSettingsOpen(false)}
+					confirm=${requestConfirm}
 				/>
-			`}
+			`
+			}
+
+			<!-- Rendered after SettingsModal (not before) so its backdrop paints
+			     on top and actually receives clicks — the confirm prompt is only
+			     ever triggered from inside a settings tab, so it must outrank it
+			     in DOM/paint order. -->
+			${confirmModal}
 
 			<!-- Chat area -->
 			<main class="chat-area">
 				<div class="messages" ref=${messagesRef} onScroll=${handleScroll}>
-					${messages.length === 0 && streaming.length === 0 && html`
+					${
+						messages.length === 0 &&
+						streaming.length === 0 &&
+						html`
 						<div class="empty-state">
 							<pre class="empty-state-banner">${CAST_BANNER}</pre>
 							<p class="empty-state-title">Ready when you are</p>
 							<p class="empty-state-hint">Send a message, or type <code>/</code> to see what this agent can do.</p>
 						</div>
-					`}
+					`
+					}
 					${messages.map((msg, i) => html`<${Message} key=${i} msg=${msg} />`)}
 					<${StreamingBlocks} blocks=${streaming} />
 				</div>
-				${!atBottom && html`
+				${
+					!atBottom &&
+					html`
 					<button class="scroll-bottom-btn" onClick=${scrollToBottom} aria-label="Scroll to latest">
 						<${icons.chevronDown} />
 					</button>
-				`}
-				${activePersonaLabel && html`
+				`
+				}
+				${
+					activePersonaLabel &&
+					html`
 					<div class="composer-role">
 						<div class="composer-role-left">
 							${activePersonaLabel}
@@ -2078,22 +2547,30 @@ function App() {
 						</div>
 						${elapsedMs > 0 && html`<span class="composer-elapsed">${(elapsedMs / 1000).toFixed(1)}s</span>`}
 					</div>
-				`}
-				${(pendingSteers.length > 0 || pendingQueue.length > 0) && html`
+				`
+				}
+				${
+					(pendingSteers.length > 0 || pendingQueue.length > 0) &&
+					html`
 					<div class="pending-items">
-						${pendingSteers.map((text, i) => html`
+						${pendingSteers.map(
+							(text, i) => html`
 							<div key=${`steer-${i}`} class="pending-item pending-steer">
 								<span class="pending-label">Steer${pendingSteers.length > 1 ? ` (${i + 1}/${pendingSteers.length})` : ""}:</span> ${text}
 							</div>
-						`)}
-						${pendingQueue.map((text, i) => html`
+						`,
+						)}
+						${pendingQueue.map(
+							(text, i) => html`
 							<div key=${`queue-${i}`} class="pending-item pending-queue">
 								<span class="pending-label">Queued${pendingQueue.length > 1 ? ` (${i + 1}/${pendingQueue.length})` : ""}:</span> ${text}
 							</div>
-						`)}
+						`,
+						)}
 					</div>
-				`}
-				<${Composer} running=${running} ready=${!!activeId} activeId=${activeId} commands=${commands} personas=${personas} onSubmit=${submitMessage} onAbort=${abortRun} />
+				`
+				}
+				<${Composer} running=${running} ready=${!!activeId} commands=${commands} personas=${personas} onSubmit=${submitMessage} onAbort=${abortRun} />
 			</main>
 
 			<!-- Diff — a wide right sidebar alongside the chat on desktop, a
@@ -2101,9 +2578,12 @@ function App() {
 			     Always mounted (like Sidebar) so the open/close is a pure CSS
 			     class/transform transition instead of a mount with no "from"
 			     state to animate out of. -->
-			${activeId && html`
+			${
+				activeId &&
+				html`
 				<${DiffPanel} data=${diffData} activeFile=${diffFile} onSelectFile=${setDiffFile} onClose=${() => setDiffOpen(false)} onResizeStart=${startDiffResize} open=${diffOpen} />
-			`}
+			`
+			}
 		</div>
 	`;
 }

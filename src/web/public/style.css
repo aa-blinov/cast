@@ -147,6 +147,16 @@ body.resizing-diff * { user-select: none; }
 	padding: 12px 14px;
 }
 
+/* ── Confirm modal ────────────────────────────────────────────────── */
+.modal-confirm {
+	max-width: 360px;
+}
+.modal-confirm-body {
+	padding: 16px 14px 4px;
+	font-size: .85rem;
+	color: var(--text);
+}
+
 
 /* ── Sidebar ──────────────────────────────────────────────────────── */
 .sidebar {
