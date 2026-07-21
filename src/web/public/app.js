@@ -1259,13 +1259,14 @@ function App() {
 					case "tool_start":
 						setStreaming((prev) => [...prev, { kind: "tool", call: { id: event.id, name: event.name, args: event.args, status: "running" } }]);
 						break;
-					case "tool_end":
-						setStreaming((prev) => prev.map((b) =>
-							b.kind === "tool" && b.call.id === event.id
-								? { ...b, call: { ...b.call, status: event.result?.isError ? "error" : "ok", result: event.result?.content?.slice(0, 4000) ?? "" } }
-								: b
-						));
-						break;
+						case "tool_end":
+							setStreaming((prev) => prev.map((b) =>
+								b.kind === "tool" && b.call.id === event.id
+									? { ...b, call: { ...b.call, status: event.result?.isError ? "error" : "ok", result: event.result?.content?.slice(0, 4000) ?? "" } }
+									: b
+							));
+							if (diffOpen) loadDiff();
+							break;
 					case "assistant_message":
 						// Keep reasoning, prose, and tool calls as separate ordered blocks
 						// (mirrors the TUI's [reasoning]/[agent] rows) instead of flattening
