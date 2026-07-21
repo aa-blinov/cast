@@ -54,7 +54,7 @@ cast web start           # Same as above
 cast web stop            # Stop the background server
 cast web status          # Check if running
 cast web --foreground    # Run inline (for dev/debug)
-cast web --port 8080     # Custom port (default: 3117, or set CAST_WEB_PORT)
+cast web --port 8080     # Custom port (default: 1337, or set CAST_WEB_PORT)
 ```
 
 First run generates a password, printed to the terminal and saved in `~/.cast/settings.json`. Username is always `cast`.

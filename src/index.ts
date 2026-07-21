@@ -326,7 +326,7 @@ async function handleWebCommand(args: string[]): Promise<void> {
 function getPort(args: string[]): number {
 	const idx = args.indexOf("--port");
 	if (idx >= 0 && args[idx + 1]) return parseInt(args[idx + 1]!, 10);
-	return parseInt(process.env.CAST_WEB_PORT ?? "3117", 10);
+	return parseInt(process.env.CAST_WEB_PORT ?? "1337", 10);
 }
 
 main().catch((err) => {

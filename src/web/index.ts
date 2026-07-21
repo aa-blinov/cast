@@ -29,7 +29,7 @@ async function main(): Promise<void> {
 	const args = process.argv.slice(2);
 
 	// Parse --port
-	let port = parseInt(process.env.CAST_WEB_PORT ?? "3117", 10);
+	let port = parseInt(process.env.CAST_WEB_PORT ?? "1337", 10);
 	for (let i = 0; i < args.length; i++) {
 		if (args[i] === "--port" && args[i + 1]) {
 			port = parseInt(args[i + 1]!, 10);
