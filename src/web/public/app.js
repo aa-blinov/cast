@@ -806,6 +806,8 @@ function App() {
 	const [themes, setThemes] = useState([]);
 	const [streaming, setStreaming] = useState([]);
 	const [running, setRunning] = useState(false);
+	const [pendingSteers, setPendingSteers] = useState([]);
+	const [pendingQueue, setPendingQueue] = useState([]);
 	const [diffOpen, setDiffOpen] = useState(false);
 	const [diffData, setDiffData] = useState(null);
 	const [diffFile, setDiffFile] = useState(null);
@@ -1164,6 +1166,14 @@ function App() {
 					addNotice(r.note ?? `Reasoning: ${r.reasoningLevel}${r.options?.length ? ` (options: ${r.options.join(", ")})` : ""}`);
 				} else if (text.startsWith("/web") && result?.result && "webTools" in result.result) {
 					addNotice(`Web tools: ${result.result.webTools ? "enabled" : "disabled"}`);
+				} else if ((text.startsWith("/steer") || text.startsWith("/s ")) && result?.ok) {
+					const msg = text.replace(/^\/(steer|s)\s*/, "");
+					if (msg) setPendingSteers((prev) => [...prev, msg]);
+					addNotice(result.result);
+				} else if ((text.startsWith("/queue") || text.startsWith("/q ")) && result?.ok) {
+					const msg = text.replace(/^\/(queue|q)\s*/, "");
+					if (msg) setPendingQueue((prev) => [...prev, msg]);
+					addNotice(result.result);
 				} else if ((text === "/plan" || text === "/build") && result?.ok) {
 					const mode = text === "/plan" ? "plan" : "build";
 					setSession((prev) => (prev ? { ...prev, mode } : prev));
@@ -1263,6 +1273,8 @@ function App() {
 						setStreaming([]);
 						setRunning(false);
 						setSession((prev) => prev ? { ...prev, status: "idle" } : prev);
+							setPendingSteers([]);
+							setPendingQueue([]);
 						// Pull fresh usage numbers only — `messages` already holds this
 						// turn's full reasoning/tool-call blocks from live streaming, and
 						// the server's persisted form can't carry reasoning at all (it's
@@ -1471,9 +1483,22 @@ function App() {
 				`}
 				${activePersonaLabel && html`
 					<div class="composer-role">
-						<span class="composer-role-dot" />
 						${activePersonaLabel}
 						${session?.mode && session.mode !== "build" && html`<span class="composer-role-mode">${session.mode}</span>`}
+					</div>
+				`}
+				${(pendingSteers.length > 0 || pendingQueue.length > 0) && html`
+					<div class="pending-items">
+						${pendingSteers.map((text, i) => html`
+							<div key=${`steer-${i}`} class="pending-item pending-steer">
+								<span class="pending-label">Steer${pendingSteers.length > 1 ? ` (${i + 1}/${pendingSteers.length})` : ""}:</span> ${text}
+							</div>
+						`)}
+						${pendingQueue.map((text, i) => html`
+							<div key=${`queue-${i}`} class="pending-item pending-queue">
+								<span class="pending-label">Queued${pendingQueue.length > 1 ? ` (${i + 1}/${pendingQueue.length})` : ""}:</span> ${text}
+							</div>
+						`)}
 					</div>
 				`}
 				<${Composer} running=${running} ready=${!!activeId} activeId=${activeId} commands=${commands} personas=${personas} themes=${themes} onSubmit=${submitMessage} onAbort=${abortRun} />

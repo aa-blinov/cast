@@ -660,6 +660,25 @@ body.resizing-diff * { user-select: none; }
 	text-transform: uppercase;
 	letter-spacing: .04em;
 }
+
+.pending-items {
+	max-width: 860px;
+	width: 100%;
+	margin: 0 auto;
+	padding: 0 max(16px, env(safe-area-inset-left)) 4px;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+.pending-item {
+	font-size: .72rem;
+	color: var(--amber);
+	line-height: 1.4;
+	opacity: .85;
+}
+.pending-label {
+	font-weight: 600;
+}
 .composer-wrap {
 	position: relative;
 	max-width: 860px;
