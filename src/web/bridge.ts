@@ -342,15 +342,18 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			mcpPromptSuffix: formatMcpForPrompt(mcpResult),
 			onEvent: (event: AgentEvent) => {
 				if (event.type === "assistant_message") thinkingByCompletion.push(event.thinking ?? "");
-				if (event.type === "usage" && !event.subagent) {
-					ws.lastTurn = {
-						generationMs: event.generationMs,
-						tokensPerSecond:
-							event.generationMs && event.usage.completionTokens
-								? Math.round((event.usage.completionTokens / (event.generationMs / 1000)) * 10) / 10
-								: undefined,
-						completedAt: new Date().toISOString(),
-					};
+				if (event.type === "usage") {
+					addUsage(ws.session, event.usage, { subagent: event.subagent });
+					if (!event.subagent) {
+						ws.lastTurn = {
+							generationMs: event.generationMs,
+							tokensPerSecond:
+								event.generationMs && event.usage.completionTokens
+									? Math.round((event.usage.completionTokens / (event.generationMs / 1000)) * 10) / 10
+									: undefined,
+							completedAt: new Date().toISOString(),
+						};
+					}
 				}
 				broadcast(ws, event);
 			},
@@ -1098,7 +1101,11 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			}
 			if (sub === "add") {
 				// Flat form (no wizard): /ssh add <name> <host> [username] [port] [keyPath]
-				const [hname, host, username, portStr, keyPath] = rest.split(/\s+/);
+				// "-" is an explicit placeholder for a skipped optional field (so a
+				// later positional arg, e.g. port, can be given without the earlier
+				// one) — it never means a literal username/key path of "-".
+				const parts = rest.split(/\s+/).map((p) => (p === "-" ? undefined : p));
+				const [hname, host, username, portStr, keyPath] = parts;
 				if (!hname || !host)
 					return { ok: false, error: "Usage: /ssh add <name> <host> [username] [port] [keyPath]" };
 				const port = portStr ? Number.parseInt(portStr, 10) : undefined;
@@ -1292,13 +1299,19 @@ export function createWebBridge(result: StartupResult): WebBridge {
 function getHelpText(): string {
 	// No column-padding here — this renders through the same proportional-font
 	// markdown pipe as chat prose, where fixed-width alignment doesn't hold.
-	const lines = SLASH_COMMANDS.map((c) => `- \`${c.name}\` — ${c.description}`);
-	const blocking = SLASH_COMMANDS.filter((c) => c.blocking).map((c) => c.name);
+	// Hidden commands (MCP/skills/plugins/provider/SSH/theme/...) live in the
+	// Settings modal now, not this list — repeating them here would be the
+	// exact chat clutter that modal exists to avoid.
+	const visible = SLASH_COMMANDS.filter((c) => !c.hidden);
+	const lines = visible.map((c) => `- \`${c.name}\` — ${c.description}`);
+	const blocking = visible.filter((c) => c.blocking).map((c) => c.name);
 	return [
 		"**Available commands:**",
 		"",
 		...lines,
 		"",
 		`*Blocking (require idle): ${blocking.join(", ")}. Everything else works while the agent runs.*`,
+		"",
+		"*MCP, skills, plugins, provider, SSH, theme, model/reasoning details, and usage live in Settings (gear icon).*",
 	].join("\n");
 }

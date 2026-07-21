@@ -9,6 +9,17 @@ import htm from "htm";
 
 const html = htm.bind(h);
 
+// Same ASCII mark as the CLI's startup banner (see core/help.ts's CAST_BANNER) —
+// kept as an array-of-lines join here too, since the backslashes need to stay
+// literal and a template literal would make that harder to read at a glance.
+const CAST_BANNER = [
+	"                   __",
+	"  _________ ______/ /_",
+	" / ___/ __ `/ ___/ __/",
+	"/ /__/ /_/ (__  ) /_  ",
+	"\\___/\\__,_/____/\\__/  ",
+].join("\n");
+
 // SVG icons via h() — htm mishandles SVG namespace, so we build them directly.
 const icons = {
 	send: (props) => h("svg", { width: 16, height: 16, viewBox: "0 0 20 20", fill: "currentColor", ...props }, h("path", { d: "M3.105 2.288a.75.75 0 0 0-.826.95l1.414 4.926A1.5 1.5 0 0 0 5.135 9.25h6.115a.75.75 0 0 1 0 1.5H5.135a1.5 1.5 0 0 0-1.442 1.086l-1.414 4.926a.75.75 0 0 0 .826.95 28.897 28.897 0 0 0 15.293-7.155.75.75 0 0 0 0-1.114A28.897 28.897 0 0 0 3.105 2.288Z" })),
@@ -17,7 +28,21 @@ const icons = {
 	chevronLeft: (props) => h("svg", { width: 20, height: 20, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": 1.5, "stroke-linecap": "round", "stroke-linejoin": "round", ...props }, h("path", { d: "M15.75 19.5 8.25 12l7.5-7.5" })),
 	chevronRight: (props) => h("svg", { width: 20, height: 20, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": 1.5, "stroke-linecap": "round", "stroke-linejoin": "round", ...props }, h("path", { d: "m8.25 4.5 7.5 7.5-7.5 7.5" })),
 	chevronDown: (props) => h("svg", { width: 16, height: 16, viewBox: "0 0 20 20", fill: "currentColor", ...props }, h("path", { d: "M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" })),
-	terminal: (props) => h("svg", { width: 20, height: 20, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": 1.5, "stroke-linecap": "round", "stroke-linejoin": "round", ...props }, h("path", { d: "m6.75 7.5 3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0 0 21 18V6a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 6v12a2.25 2.25 0 0 0 2.25 2.25Z" })),
+	// Every icon below is a genuine Heroicons (heroicons.com) path — not
+	// hand-approximated — copied from tailwindlabs/heroicons so the whole
+	// set actually is what it looks like: same grid, same stroke weight.
+	help: (props) => h("svg", { width: 20, height: 20, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": 1.5, "stroke-linecap": "round", "stroke-linejoin": "round", ...props },
+		h("path", { d: "M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 5.25h.008v.008H12v-.008Z" }),
+	),
+	settings: (props) => h("svg", { width: 20, height: 20, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": 1.5, "stroke-linecap": "round", "stroke-linejoin": "round", ...props },
+		h("path", { d: "M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z" }),
+		h("path", { d: "M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" }),
+	),
+	info: (props) => h("svg", { width: 20, height: 20, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": 1.5, "stroke-linecap": "round", "stroke-linejoin": "round", ...props },
+		h("path", { d: "m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z" }),
+	),
+	xMark: (props) => h("svg", { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": 1.5, "stroke-linecap": "round", "stroke-linejoin": "round", ...props }, h("path", { d: "M6 18 18 6M6 6l12 12" })),
+	pencil: (props) => h("svg", { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": 1.5, "stroke-linecap": "round", "stroke-linejoin": "round", ...props }, h("path", { d: "m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Zm0 0L19.5 7.125" })),
 };
 
 const hotkeysHtml = `
@@ -81,6 +106,8 @@ function applyTheme(colors) {
 	root.setProperty("--green", colors.success);
 	root.setProperty("--amber", colors.warning);
 	root.setProperty("--rose", colors.error);
+	root.setProperty("--persona", colors.persona);
+	root.setProperty("--text-muted", colors.muted);
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -130,6 +157,28 @@ function renderMarkdown(text) {
 	return out;
 }
 
+// Recursively renders a parsed arg value as indented "key: value" lines.
+// Plain JSON.stringify on nested objects (the previous approach) escapes any
+// newline inside a nested string as a literal two-character "\n" \u2014 exactly
+// the shape of the `edit` tool's args (ops: [{ content: "<multi-line code>" }]),
+// so that turned into an unreadable wall of "\n"/"\t" text. Recursing instead
+// of stringifying keeps every string's real line breaks intact at any depth.
+function formatValue(v, indent) {
+	if (typeof v === "string") return v;
+	if (Array.isArray(v)) {
+		return v.map((item, i) => `${indent}[${i}]\n${formatValue(item, indent + "  ")}`).join("\n");
+	}
+	if (v && typeof v === "object") {
+		return Object.entries(v)
+			.map(([k, val]) => {
+				const formatted = formatValue(val, indent + "  ");
+				return formatted.includes("\n") ? `${indent}${k}:\n${formatted}` : `${indent}${k}: ${formatted}`;
+			})
+			.join("\n");
+	}
+	return `${indent}${JSON.stringify(v)}`;
+}
+
 // Full parameter dump, not a truncated hint \u2014 the point is to see exactly
 // what the agent is about to run, not just enough to guess.
 function formatArgsFull(args) {
@@ -138,7 +187,12 @@ function formatArgsFull(args) {
 		const obj = JSON.parse(args);
 		const entries = Object.entries(obj);
 		if (entries.length === 0) return "";
-		return entries.map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v, null, 2)}`).join("\n");
+		return entries
+			.map(([k, v]) => {
+				const formatted = typeof v === "string" ? v : formatValue(v, "  ");
+				return formatted.includes("\n") ? `${k}:\n${formatted}` : `${k}: ${formatted}`;
+			})
+			.join("\n");
 	} catch {
 		return args;
 	}
@@ -172,16 +226,31 @@ function setUrlSessionId(id, { push } = {}) {
 
 // ── Components ───────────────────────────────────────────────────────
 
+// MCP tools are exposed to the model as "mcp_<server>_<tool>" (see
+// core/mcp.ts's mcpToolName) — sanitized-and-joined with no reversible
+// separator, so the server name can't be split back out exactly. Stripping
+// the "mcp_" prefix and loosening the rest into "word · word" reads far
+// better than the raw underscored blob without needing that split to be
+// exact — this is a label only, the real name stays in `call.name`/data-tool.
+function isMcpTool(name) {
+	return name.startsWith("mcp_");
+}
+function mcpToolLabel(name) {
+	return name.slice(4).replace(/_/g, " · ");
+}
+
 function ToolCard({ call }) {
 	// Shows what the agent is calling — full input parameters — and whether
 	// it's still running / succeeded / failed. Deliberately no result body:
 	// the point of this card is the request, not the (often huge) output.
 	const statusClass = call.status || "running";
 	const args = formatArgsFull(call.args);
+	const mcp = isMcpTool(call.name);
 	return html`
 		<div class="tool-card">
 			<div class="tool-card-header" data-tool=${call.name}>
-				<span class="tool-card-name">${call.name}</span>
+				${mcp && html`<span class="tool-card-mcp-badge">MCP</span>`}
+				<span class="tool-card-name">${mcp ? mcpToolLabel(call.name) : call.name}</span>
 				<span class="tool-card-status ${statusClass}" />
 			</div>
 			${args && html`<div class="tool-card-body">${args}</div>`}
@@ -323,60 +392,18 @@ function ValueSuggest({ items, selectedIndex, onHover, onSelect }) {
 	`;
 }
 
-function Composer({ running, ready, activeId, commands, personas, themes, onSubmit, onAbort }) {
+function Composer({ running, ready, activeId, commands, personas, onSubmit, onAbort }) {
 	const [value, setValue] = useState("");
 	const [cmdVisible, setCmdVisible] = useState(false);
 	const [selectedIndex, setSelectedIndex] = useState(0);
 	const textareaRef = useRef(null);
 	const pickerRef = useRef(null);
 
+	// Only /persona still lives in the composer — model, theme, reasoning,
+	// web-tools, MCP/skills/plugins/provider/SSH, and the rest of the former
+	// sub-arg pickers moved to the Settings modal (see SettingsModal) so
+	// typing "/" only ever surfaces conversation-flow commands.
 	const personaMatch = /^\/persona\s+(\S*)$/i.exec(value);
-	const themeMatch = /^\/theme\s+(\S*)$/i.exec(value);
-	const modelMatch = /^\/model\s+(\S*)$/i.exec(value);
-	const reasoningMatch = /^\/reasoning\s+(\S*)$/i.exec(value);
-	const webMatch = /^\/web\s+(\S*)$/i.exec(value);
-	const suggestMatch = /^\/(mcp|skills|plugin|provider|ssh|permissions|subagent-model|plan-model)\s+(\S*)$/i.exec(value);
-
-	// Both lazy-loaded (only worth a network round trip once the user is
-	// actually typing that command) and re-fetched whenever the picker they
-	// feed is opened again — a model switch or a live provider model list
-	// shouldn't require a page reload to show up.
-	const [models, setModels] = useState(null);
-	const [reasoningOptions, setReasoningOptions] = useState(null);
-	const [suggestions, setSuggestions] = useState(null);
-	useEffect(() => {
-		if (!modelMatch || models !== null) return;
-		let cancelled = false;
-		api("GET", "/api/models").then((d) => { if (!cancelled && d) setModels(d.models || []); }).catch(() => {});
-		return () => { cancelled = true; };
-	}, [Boolean(modelMatch), models]);
-	useEffect(() => {
-		if (!reasoningMatch || !activeId || reasoningOptions !== null) return;
-		let cancelled = false;
-		api("GET", `/api/sessions/${activeId}/reasoning-options`).then((d) => { if (!cancelled && d) setReasoningOptions(d.options || []); }).catch(() => {});
-		return () => { cancelled = true; };
-	}, [Boolean(reasoningMatch), activeId, reasoningOptions]);
-	// Switching sessions (a different model) invalidates any reasoning
-	// options fetched for the previous one.
-	useEffect(() => { setReasoningOptions(null); }, [activeId]);
-
-	// Reset suggestions when the typed command shifts (e.g. /mcp enable → /mcp disable).
-	const suggestKey = suggestMatch ? suggestMatch[0] : null;
-	const prevSuggestKey = useRef(null);
-	useEffect(() => {
-		if (suggestKey !== prevSuggestKey.current) {
-			setSuggestions(null);
-			prevSuggestKey.current = suggestKey;
-		}
-	}, [suggestKey]);
-	useEffect(() => {
-		if (!suggestMatch || !activeId || suggestions !== null) return;
-		let cancelled = false;
-		api("GET", `/api/suggest?q=${encodeURIComponent(value)}&session=${activeId}`)
-			.then((d) => { if (!cancelled && d) setSuggestions(d); })
-			.catch(() => {});
-		return () => { cancelled = true; };
-	}, [Boolean(suggestMatch), activeId, value, suggestions]);
 
 	const resize = useCallback(() => {
 		const el = textareaRef.current;
@@ -419,35 +446,6 @@ function Composer({ running, ready, activeId, commands, personas, themes, onSubm
 		if (textareaRef.current) textareaRef.current.style.height = "auto";
 	}, [onSubmit]);
 
-	const handleThemeSelect = useCallback((id) => {
-		onSubmit(`/theme ${id}`);
-		setValue("");
-		if (textareaRef.current) textareaRef.current.style.height = "auto";
-	}, [onSubmit]);
-
-	const handleModelSelect = useCallback((id) => {
-		onSubmit(`/model ${id}`);
-		setValue("");
-		if (textareaRef.current) textareaRef.current.style.height = "auto";
-	}, [onSubmit]);
-
-	const handleReasoningSelect = useCallback((level) => {
-		onSubmit(`/reasoning ${level}`);
-		setValue("");
-		if (textareaRef.current) textareaRef.current.style.height = "auto";
-	}, [onSubmit]);
-
-	const handleWebSelect = useCallback((v) => {
-		onSubmit(`/web ${v}`);
-		setValue("");
-		if (textareaRef.current) textareaRef.current.style.height = "auto";
-	}, [onSubmit]);
-
-	const handleGenericSuggest = useCallback((v) => {
-		onSubmit(value.replace(/\s+\S*$/, ` ${v}`));
-		setValue("");
-	}, [value, onSubmit]);
-
 	const handleInput = useCallback((e) => {
 		const val = e.target.value;
 		setValue(val);
@@ -458,9 +456,8 @@ function Composer({ running, ready, activeId, commands, personas, themes, onSubm
 
 	// One active picker at a time — Composer owns the filtered list and the
 	// selection index so arrow keys and mouse clicks act on the exact same
-	// row order, whichever picker happens to be showing. Persona/theme/model/
-	// reasoning/web all normalize to {value, label} so ValueSuggest can
-	// render any of them the same way.
+	// row order, whichever picker happens to be showing. Persona/model
+	// normalize to {value, label} so ValueSuggest can render either the same way.
 	let pickerItems = [];
 	let pickerSelect = null;
 	if (personaMatch) {
@@ -468,37 +465,10 @@ function Composer({ running, ready, activeId, commands, personas, themes, onSubm
 			.filter((p) => p.name.toLowerCase().startsWith(personaMatch[1].toLowerCase()))
 			.map((p) => ({ value: p.name, label: p.label }));
 		pickerSelect = handlePersonaSelect;
-	} else if (themeMatch) {
-		pickerItems = themes
-			.filter((t) => t.id.toLowerCase().startsWith(themeMatch[1].toLowerCase()))
-			.map((t) => ({ value: t.id, label: t.label }));
-		pickerSelect = handleThemeSelect;
-	} else if (modelMatch) {
-		const q = modelMatch[1].toLowerCase();
-		pickerItems = (models || [])
-			.filter((m) => m.id.toLowerCase().includes(q))
-			.map((m) => ({ value: m.id, label: m.reasoning ? `${m.id} · reasoning` : m.id }));
-		pickerSelect = handleModelSelect;
-	} else if (reasoningMatch) {
-		const q = reasoningMatch[1].toLowerCase();
-		pickerItems = (reasoningOptions || []).filter((o) => o.value.toLowerCase().startsWith(q));
-		pickerSelect = handleReasoningSelect;
-	} else if (webMatch) {
-		const q = webMatch[1].toLowerCase();
-		pickerItems = WEB_TOOLS_OPTIONS.filter((o) => o.value.startsWith(q));
-		pickerSelect = handleWebSelect;
-	} else if (suggestMatch) {
-		const q = suggestMatch[2].toLowerCase();
-		pickerItems = (suggestions || []).filter((o) => o.value.toLowerCase().startsWith(q));
-		pickerSelect = handleGenericSuggest;
 	} else if (cmdVisible) {
-		pickerItems = value ? commands.filter((c) => c.name.startsWith(value)) : commands;
+		pickerItems = (value ? commands.filter((c) => c.name.startsWith(value)) : commands).filter((c) => !c.hidden);
 		pickerSelect = handleCmdSelect;
 	}
-	// Fetched lazily (see the effects above) — without this, typing "/model "
-	// before the /v1/models round trip resolves just shows an empty, seemingly
-	// broken picker for a moment instead of any feedback that it's working.
-	const pickerLoading = (modelMatch && models === null) || (reasoningMatch && reasoningOptions === null) || (suggestMatch && suggestions === null);
 	const clampedIndex = pickerItems.length > 0 ? Math.min(selectedIndex, pickerItems.length - 1) : 0;
 
 	// Arrow-key nav must scroll the picker, not just select past the visible
@@ -509,6 +479,16 @@ function Composer({ running, ready, activeId, commands, personas, themes, onSubm
 	}, [clampedIndex]);
 
 	const handleKeyDown = useCallback((e) => {
+		// Esc stops a running turn — checked before anything else so it wins
+		// regardless of what's in the composer (an open command palette, a
+		// half-typed /steer), matching the TUI's Escape-aborts behavior. The
+		// hotkeys reference has always listed this; the web port just never
+		// actually wired it up until now.
+		if (e.key === "Escape" && running) {
+			e.preventDefault();
+			onAbort();
+			return;
+		}
 		if (pickerItems.length > 0) {
 			if (e.key === "ArrowDown") {
 				e.preventDefault();
@@ -543,9 +523,7 @@ function Composer({ running, ready, activeId, commands, personas, themes, onSubm
 	return html`
 		<div class="composer-wrap">
 			<div ref=${pickerRef}>
-				${pickerLoading
-					? html`<div class="cmd-palette open"><div class="cmd-item cmd-loading">Loading…</div></div>`
-					: (personaMatch || themeMatch || modelMatch || reasoningMatch || webMatch || suggestMatch)
+				${personaMatch
 					? html`<${ValueSuggest} items=${pickerItems} selectedIndex=${clampedIndex} onHover=${setSelectedIndex} onSelect=${pickerSelect} />`
 					: html`<${CommandPalette} items=${pickerItems} selectedIndex=${clampedIndex} running=${running} visible=${cmdVisible} onHover=${setSelectedIndex} onSelect=${handleCmdSelect} />`
 				}
@@ -570,15 +548,25 @@ function Composer({ running, ready, activeId, commands, personas, themes, onSubm
 	`;
 }
 
-function DiffPanel({ data, activeFile, onSelectFile, onClose, onResizeStart }) {
+function DiffPanel({ data, activeFile, onSelectFile, onClose, onResizeStart, open }) {
+	const openClass = open ? " open" : "";
 	if (!data) return html`
-		<aside class="diff-panel open">
+		<aside class="diff-panel${openClass}">
 			<div class="diff-resize-handle" onPointerDown=${onResizeStart} />
 			<div class="diff-empty">Loading...</div>
 		</aside>
 	`;
 
-	const files = data.files || [];
+	// Directories first (grouped and sorted alphabetically by their full
+	// path), then root-level files — same convention as a file explorer /
+	// GitLab's diff view, instead of one flat alphabetical list that
+	// interleaves nested and root files arbitrarily.
+	const files = [...(data.files || [])].sort((a, b) => {
+		const aRoot = !a.path.includes("/");
+		const bRoot = !b.path.includes("/");
+		if (aRoot !== bRoot) return aRoot ? 1 : -1;
+		return a.path.localeCompare(b.path);
+	});
 	const file = activeFile ? files.find((f) => f.path === activeFile) : files[0];
 
 	// Pre-compute hunk lines outside htm template
@@ -599,16 +587,18 @@ function DiffPanel({ data, activeFile, onSelectFile, onClose, onResizeStart }) {
 	}
 
 	return html`
-		<aside class="diff-panel open">
+		<aside class="diff-panel${openClass}">
 			<div class="diff-resize-handle" onPointerDown=${onResizeStart} />
 			<div class="diff-header">
 				<span class="diff-title">Changes</span>
-				<button class="diff-close" onClick=${onClose}>×</button>
+				<button class="diff-close" onClick=${onClose} aria-label="Close"><${icons.xMark} /></button>
 			</div>
 			<div class="diff-file-list">
 				${files.map((f) => html`
-					<div key=${f.path} class="diff-file-item${f.path === (activeFile || file?.path) ? " active" : ""}" onClick=${() => onSelectFile(f.path)}>
-						<span>${f.path.split("/").pop()}</span>
+					<div key=${f.path} class="diff-file-item${f.path === (activeFile || file?.path) ? " active" : ""}" onClick=${() => onSelectFile(f.path)} title=${f.path}>
+						<span class="diff-file-path">
+							<span class="diff-file-dir">${f.path.slice(0, f.path.lastIndexOf("/") + 1)}</span><span class="diff-file-base">${f.path.slice(f.path.lastIndexOf("/") + 1)}</span>
+						</span>
 						<span class="diff-file-stats">
 							<span class="add">+${f.additions}</span>
 							<span class="del">-${f.deletions}</span>
@@ -673,7 +663,7 @@ function DirectoryBrowser({ initialPath, onPick, onClose }) {
 			<div class="modal" onClick=${(e) => e.stopPropagation()}>
 				<div class="modal-header">
 					<span>Choose working directory</span>
-					<button class="modal-close" onClick=${onClose} aria-label="Close">×</button>
+					<button class="modal-close" onClick=${onClose} aria-label="Close"><${icons.xMark} /></button>
 				</div>
 				<div class="dir-path" title=${path}>${path}</div>
 				<div class="dir-list">
@@ -690,6 +680,439 @@ function DirectoryBrowser({ initialPath, onPick, onClose }) {
 					<button class="modal-btn" onClick=${onClose}>Cancel</button>
 					<button class="modal-btn modal-btn-primary" onClick=${() => onPick(path)}>Use this folder</button>
 				</div>
+			</div>
+		</div>
+	`;
+}
+
+const SETTINGS_TABS = [
+	{ id: "mcp", label: "MCP" },
+	{ id: "model", label: "Model" },
+	{ id: "plugins", label: "Plugins" },
+	{ id: "provider", label: "Provider" },
+	{ id: "skills", label: "Skills" },
+	{ id: "ssh", label: "SSH" },
+	{ id: "theme", label: "Theme" },
+	{ id: "tools", label: "Tools" },
+];
+
+// A centered modal, same treatment as the Hotkeys reference — an anchored
+// corner dropdown doesn't have anywhere safe to sit on a narrow screen (the
+// status button lives among 3 others in the header, nowhere near the actual
+// right edge, so "align to the button" pushed it half off the left side of
+// the viewport on mobile). Status is a glance-and-close read either way, so
+// a modal costs nothing here and works identically at any viewport width.
+// Reloads on every open since usage/message-count/git-dirty drift constantly.
+function StatusPopover({ activeId, running }) {
+	const [open, setOpen] = useState(false);
+	const [data, setData] = useState(null);
+	const [error, setError] = useState(null);
+
+	const load = useCallback(async () => {
+		setError(null);
+		try {
+			const [current, repo] = await Promise.all([
+				api("POST", `/api/sessions/${activeId}/command`, { command: "/current" }),
+				api("POST", `/api/sessions/${activeId}/command`, { command: "/repo" }),
+			]);
+			setData({ current: current?.result, repo: repo?.result });
+		} catch (err) {
+			setError(err.message);
+		}
+	}, [activeId]);
+
+	const openModal = useCallback(() => {
+		setOpen(true);
+		load();
+	}, [load]);
+
+	useEffect(() => {
+		if (!open) return;
+		const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	}, [open]);
+
+	// Left open across a turn, the numbers it showed on open go stale the
+	// moment a reply lands — reload the instant `running` flips back to
+	// false so it never needs a manual close/reopen (or a page refresh) to
+	// catch up.
+	const wasRunning = useRef(running);
+	useEffect(() => {
+		if (open && wasRunning.current && !running) load();
+		wasRunning.current = running;
+	}, [running, open, load]);
+
+	return html`
+		<button class="menu-toggle" onClick=${openModal} aria-label="Status" title="Status">
+			<${icons.info} />
+		</button>
+		${open && html`
+			<div class="modal-backdrop" onClick=${() => setOpen(false)}>
+				<div class="modal modal-status" onClick=${(e) => e.stopPropagation()}>
+					<div class="modal-header">
+						<span>Status</span>
+						<button class="modal-close" onClick=${() => setOpen(false)} aria-label="Close"><${icons.xMark} /></button>
+					</div>
+					<div class="modal-status-body">
+						${error && html`<div class="settings-error">${error}</div>`}
+						${!data && !error ? html`<div class="settings-loading">Loading…</div>` : html`<${SettingsStatus} data=${data} />`}
+					</div>
+				</div>
+			</div>
+		`}
+	`;
+}
+
+// Everything that used to be a slash command typed into the composer but
+// isn't part of the actual back-and-forth with the agent (MCP/skills/
+// plugins/provider/SSH management, theme, model/reasoning details, usage) —
+// consolidated here so the chat transcript stays just the conversation.
+// Every action still runs through the exact same POST /command endpoint the
+// composer used, just without ever appending a chat notice for it.
+function SettingsModal({ activeId, themes, currentThemeId, onApplyTheme, onThemeChange, onClose }) {
+	const [tab, setTab] = useState("model");
+	const [data, setData] = useState({});
+	const [errors, setErrors] = useState({});
+	const [busy, setBusy] = useState(false);
+
+	const run = useCallback(async (command) => {
+		try {
+			return await api("POST", `/api/sessions/${activeId}/command`, { command });
+		} catch (err) {
+			return { ok: false, error: err.message };
+		}
+	}, [activeId]);
+
+	const load = useCallback(async (t) => {
+		setErrors((e) => ({ ...e, [t]: null }));
+		if (t === "model") {
+			const [models, reasoning, current] = await Promise.all([
+				api("GET", "/api/models").catch(() => null),
+				api("GET", `/api/sessions/${activeId}/reasoning-options`).catch(() => null),
+				run("/current"),
+			]);
+			setData((d) => ({
+				...d,
+				model: {
+					models: models?.models ?? [],
+					reasoningOptions: reasoning?.options ?? [],
+					current: current?.result,
+				},
+			}));
+		} else if (t === "tools") {
+			const [web, permissions] = await Promise.all([run("/web"), run("/permissions")]);
+			setData((d) => ({ ...d, tools: { web: web?.result, permissions: permissions?.result } }));
+		} else if (t === "mcp") {
+			const res = await run("/mcp list");
+			if (!res.ok) { setErrors((e) => ({ ...e, mcp: res.error })); return; }
+			setData((d) => ({ ...d, mcp: res.result }));
+		} else if (t === "skills") {
+			const res = await run("/skills list");
+			if (!res.ok) { setErrors((e) => ({ ...e, skills: res.error })); return; }
+			setData((d) => ({ ...d, skills: res.result }));
+		} else if (t === "plugins") {
+			const [plugins, marketplaces] = await Promise.all([run("/plugin list"), run("/plugin marketplace list")]);
+			setData((d) => ({ ...d, plugins: { plugins: plugins?.result ?? [], marketplaces: marketplaces?.result ?? [] } }));
+		} else if (t === "provider") {
+			const res = await run("/provider list");
+			if (!res.ok) { setErrors((e) => ({ ...e, provider: res.error })); return; }
+			setData((d) => ({ ...d, provider: res.result }));
+		} else if (t === "ssh") {
+			const res = await run("/ssh list");
+			if (!res.ok) { setErrors((e) => ({ ...e, ssh: res.error })); return; }
+			setData((d) => ({ ...d, ssh: res.result }));
+		}
+	}, [run, activeId]);
+
+	// Preload every tab in parallel as soon as the modal mounts (or the active
+	// session changes) — clicking a tab then just shows what's already there
+	// instead of a fresh fetch-and-flash "Loading…" every single time.
+	useEffect(() => {
+		for (const t of SETTINGS_TABS) load(t.id);
+	}, [activeId]);
+
+	// Runs a mutating command, shows any error inline, and reloads the
+	// current tab's data on success so the list reflects the new state
+	// immediately instead of waiting for the next manual refresh.
+	const act = useCallback(async (command) => {
+		setBusy(true);
+		setErrors((e) => ({ ...e, [tab]: null }));
+		const res = await run(command);
+		if (!res.ok) setErrors((e) => ({ ...e, [tab]: res.error ?? "Failed" }));
+		await load(tab);
+		setBusy(false);
+		return res;
+	}, [run, load, tab]);
+
+	// theme's data comes from the `themes` prop (fetched once at app boot,
+	// always present already) rather than the per-tab preload above.
+	const hasData = tab === "theme" || data[tab] !== undefined;
+
+	return html`
+		<div class="modal-backdrop" onClick=${onClose}>
+			<div class="modal settings-modal" onClick=${(e) => e.stopPropagation()}>
+				<div class="modal-header">
+					<span>Settings</span>
+					<button class="modal-close" onClick=${onClose} aria-label="Close"><${icons.xMark} /></button>
+				</div>
+				<div class="settings-body">
+					<div class="settings-tabs">
+						${SETTINGS_TABS.map((t) => html`
+							<button key=${t.id} class="settings-tab${tab === t.id ? " active" : ""}" onClick=${() => setTab(t.id)}>${t.label}</button>
+						`)}
+					</div>
+					<div class="settings-pane">
+						${errors[tab] && html`<div class="settings-error">${errors[tab]}</div>`}
+						${!hasData
+							? html`<div class="settings-loading">Loading…</div>`
+							: tab === "model" ? html`<${SettingsModel} data=${data.model} busy=${busy} act=${act} />`
+							: tab === "theme" ? html`<${SettingsTheme} themes=${themes} currentThemeId=${currentThemeId} onPick=${async (id) => {
+								const res = await act(`/theme ${id}`);
+								if (res.ok && res.result?.colors) onApplyTheme(res.result.colors);
+								if (res.ok && res.result?.theme) onThemeChange(res.result.theme);
+							}} />`
+							: tab === "tools" ? html`<${SettingsTools} data=${data.tools} busy=${busy} act=${act} />`
+							: tab === "mcp" ? html`<${SettingsMcp} data=${data.mcp} busy=${busy} act=${act} />`
+							: tab === "skills" ? html`<${SettingsSkills} data=${data.skills} busy=${busy} act=${act} />`
+							: tab === "plugins" ? html`<${SettingsPlugins} data=${data.plugins} busy=${busy} act=${act} />`
+							: tab === "provider" ? html`<${SettingsProvider} data=${data.provider} busy=${busy} act=${act} />`
+							: tab === "ssh" ? html`<${SettingsSsh} data=${data.ssh} busy=${busy} act=${act} />`
+							: null
+						}
+					</div>
+				</div>
+			</div>
+		</div>
+	`;
+}
+
+function SettingsStatus({ data }) {
+	if (!data) return null;
+	const c = data.current || {};
+	const r = data.repo || {};
+	const u = c.usage || {};
+	return html`
+		<div class="settings-rows">
+			<div class="settings-row"><span>Persona</span><span>${c.persona ?? "—"}</span></div>
+			<div class="settings-row"><span>Model</span><span>${c.model ?? "—"}</span></div>
+			<div class="settings-row"><span>Mode</span><span>${c.mode ?? "build"}</span></div>
+			<div class="settings-row"><span>Status</span><span>${c.status ?? "—"}</span></div>
+			<div class="settings-row"><span>Messages</span><span>${c.messageCount ?? 0}</span></div>
+			<div class="settings-row"><span>Tokens</span><span>${u.totalTokens ?? 0} (${u.promptTokens ?? 0} in / ${u.completionTokens ?? 0} out)</span></div>
+			${u.cost ? html`<div class="settings-row"><span>Cost</span><span>$${u.cost.toFixed(4)}</span></div>` : null}
+			${c.lastTurn?.tokensPerSecond ? html`<div class="settings-row"><span>Last turn</span><span>${c.lastTurn.tokensPerSecond} tok/s (${(c.lastTurn.generationMs / 1000).toFixed(1)}s)</span></div>` : null}
+			<div class="settings-row"><span>Directory</span><span title=${r.cwd}>${shortPath(r.cwd)}</span></div>
+			${r.isGit && html`<div class="settings-row"><span>Git branch</span><span>${r.branch}${r.dirty ? " (dirty)" : ""}</span></div>`}
+			${r.isGit === false && html`<div class="settings-row"><span>Git</span><span>not a repository</span></div>`}
+		</div>
+	`;
+}
+
+function SettingsModel({ data, busy, act }) {
+	if (!data) return null;
+	const [modelValue, setModelValue] = useState("");
+	const [reasoningValue, setReasoningValue] = useState("");
+	const [subagentValue, setSubagentValue] = useState("");
+	const [planValue, setPlanValue] = useState("");
+	const c = data.current || {};
+	return html`
+		<div class="settings-rows">
+			<div class="settings-section-title">Model — current: ${c.model ?? "—"}</div>
+			<div class="settings-form-row">
+				<select onChange=${(e) => setModelValue(e.target.value)}>
+					<option value="">Pick a model…</option>
+					${[...data.models].sort((a, b) => a.id.localeCompare(b.id)).map((m) => html`<option key=${m.id} value=${m.id}>${m.id}${m.reasoning ? " (reasoning)" : ""}</option>`)}
+				</select>
+				<button class="modal-btn modal-btn-primary" disabled=${busy || !modelValue} onClick=${() => act(`/model ${modelValue}`)}>Set</button>
+			</div>
+			<div class="settings-section-title">Reasoning — current: ${c.reasoningLevel ?? "off"}</div>
+			${data.reasoningOptions.length === 0
+				? html`<div class="settings-hint">This model exposes no reasoning controls.</div>`
+				: html`
+					<div class="settings-form-row">
+						<select onChange=${(e) => setReasoningValue(e.target.value)}>
+							<option value="">Pick a level…</option>
+							${data.reasoningOptions.map((o) => html`<option key=${o.value} value=${o.value}>${o.label}</option>`)}
+						</select>
+						<button class="modal-btn modal-btn-primary" disabled=${busy || !reasoningValue} onClick=${() => act(`/reasoning ${reasoningValue}`)}>Set</button>
+					</div>
+				`
+			}
+			<div class="settings-section-title">Subagent model — current: ${c.subagentModel ?? "(same as main)"}</div>
+			<div class="settings-form-row">
+				<input type="text" placeholder="model id" value=${subagentValue} onInput=${(e) => setSubagentValue(e.target.value)} />
+				<button class="modal-btn modal-btn-primary" disabled=${busy || !subagentValue} onClick=${() => act(`/subagent-model ${subagentValue}`)}>Set</button>
+			</div>
+			<div class="settings-section-title">Plan-mode model — current: ${c.planModel ?? "(same as main)"}</div>
+			<div class="settings-form-row">
+				<input type="text" placeholder="model id" value=${planValue} onInput=${(e) => setPlanValue(e.target.value)} />
+				<button class="modal-btn modal-btn-primary" disabled=${busy || !planValue} onClick=${() => act(`/plan-model ${planValue}`)}>Set</button>
+				<button class="modal-btn" disabled=${busy} onClick=${() => act("/plan-model off")}>Clear</button>
+			</div>
+		</div>
+	`;
+}
+
+function SettingsTheme({ themes, currentThemeId, onPick }) {
+	return html`
+		<div class="settings-theme-grid">
+			${[...(themes || [])].sort((a, b) => a.label.localeCompare(b.label)).map((t) => html`
+				<button key=${t.id} class="settings-theme-swatch${t.id === currentThemeId ? " active" : ""}" style=${{ "--swatch-accent": t.colors?.accent }} onClick=${() => onPick(t.id)} title=${t.description}>
+					<span class="settings-theme-dot" />
+					${t.label}
+				</button>
+			`)}
+		</div>
+	`;
+}
+
+function SettingsTools({ data, busy, act }) {
+	if (!data) return null;
+	const web = data.web || {};
+	const perm = data.permissions || {};
+	return html`
+		<div class="settings-rows">
+			<div class="settings-section-title">Web tools (web_search, web_fetch)</div>
+			<div class="settings-form-row">
+				${WEB_TOOLS_OPTIONS.map((o) => html`
+					<button key=${o.value} class="modal-btn${(web.webTools ? "on" : "off") === o.value ? " modal-btn-primary" : ""}" disabled=${busy} onClick=${() => act(`/web ${o.value}`)}>${o.label}</button>
+				`)}
+			</div>
+			<div class="settings-section-title">Bash confirmation mode</div>
+			<div class="settings-form-row">
+				<button class="modal-btn${perm.permissionMode === "default" ? " modal-btn-primary" : ""}" disabled=${busy} onClick=${() => act("/permissions default")}>Default (confirm dangerous commands)</button>
+				<button class="modal-btn${perm.permissionMode === "bypass" ? " modal-btn-primary" : ""}" disabled=${busy} onClick=${() => act("/permissions bypass")}>Bypass</button>
+			</div>
+		</div>
+	`;
+}
+
+function SettingsMcp({ data, busy, act }) {
+	return html`
+		<div class="settings-rows">
+			${[...(data || [])].sort((a, b) => a.name.localeCompare(b.name)).map((s) => html`
+				<div key=${s.name} class="settings-item-row">
+					<span class="settings-item-status ${s.connected ? "ok" : "off"}" />
+					<span class="settings-item-name">${s.name}</span>
+					<span class="settings-item-meta">${s.disabled ? "disabled" : s.connected ? "connected" : "not connected"}</span>
+					<button class="modal-btn" disabled=${busy} onClick=${() => act(`/mcp ${s.disabled ? "enable" : "disable"} ${s.name}`)}>${s.disabled ? "Enable" : "Disable"}</button>
+					<button class="modal-btn modal-btn-danger" disabled=${busy} onClick=${() => confirm(`Uninstall MCP server "${s.name}"?`) && act(`/mcp uninstall ${s.name}`)}>Uninstall</button>
+				</div>
+			`)}
+			${(!data || data.length === 0) && html`<div class="settings-hint">No MCP servers configured.</div>`}
+			<div class="settings-form-row"><button class="modal-btn" disabled=${busy} onClick=${() => act("/reload")}>Reload project resources</button></div>
+		</div>
+	`;
+}
+
+function SettingsSkills({ data, busy, act }) {
+	return html`
+		<div class="settings-rows">
+			${[...(data || [])].sort((a, b) => a.name.localeCompare(b.name)).map((s) => html`
+				<div key=${s.name} class="settings-item-row">
+					<span class="settings-item-status ${s.enabled ? "ok" : "off"}" />
+					<span class="settings-item-name" title=${s.description}>${s.name}</span>
+					<span class="settings-item-meta">${s.source}</span>
+					<button class="modal-btn" disabled=${busy} onClick=${() => act(`/skills ${s.enabled ? "disable" : "enable"} ${s.name}`)}>${s.enabled ? "Disable" : "Enable"}</button>
+					${s.uninstallable && html`<button class="modal-btn modal-btn-danger" disabled=${busy} onClick=${() => confirm(`Uninstall skill "${s.name}"?`) && act(`/skills uninstall ${s.name}`)}>Uninstall</button>`}
+				</div>
+			`)}
+			${(!data || data.length === 0) && html`<div class="settings-hint">No skills found.</div>`}
+		</div>
+	`;
+}
+
+function SettingsPlugins({ data, busy, act }) {
+	const [installRef, setInstallRef] = useState("");
+	const [mpSource, setMpSource] = useState("");
+	if (!data) return null;
+	return html`
+		<div class="settings-rows">
+			<div class="settings-section-title">Installed plugins</div>
+			${[...data.plugins].sort((a, b) => a.id.localeCompare(b.id)).map((p) => html`
+				<div key=${p.id} class="settings-item-row">
+					<span class="settings-item-status ${p.enabled ? "ok" : "off"}" />
+					<span class="settings-item-name" title=${p.description}>${p.id}</span>
+					<button class="modal-btn" disabled=${busy} onClick=${() => act(`/plugin ${p.enabled ? "disable" : "enable"} ${p.id}`)}>${p.enabled ? "Disable" : "Enable"}</button>
+					<button class="modal-btn modal-btn-danger" disabled=${busy} onClick=${() => confirm(`Uninstall plugin "${p.id}"?`) && act(`/plugin uninstall ${p.id}`)}>Uninstall</button>
+				</div>
+			`)}
+			${data.plugins.length === 0 && html`<div class="settings-hint">No plugins installed.</div>`}
+			<div class="settings-form-row">
+				<input type="text" placeholder="name@marketplace" value=${installRef} onInput=${(e) => setInstallRef(e.target.value)} />
+				<button class="modal-btn modal-btn-primary" disabled=${busy || !installRef} onClick=${() => { act(`/plugin install ${installRef}`); setInstallRef(""); }}>Install</button>
+			</div>
+			<div class="settings-section-title">Marketplaces</div>
+			${[...data.marketplaces].sort((a, b) => a.name.localeCompare(b.name)).map((mp) => html`
+				<div key=${mp.name} class="settings-item-row">
+					<span class="settings-item-name">${mp.name}</span>
+					<span class="settings-item-meta" title=${mp.source}>${shortPath(mp.source)}</span>
+					<button class="modal-btn" disabled=${busy} onClick=${() => act(`/plugin marketplace update ${mp.name}`)}>Update</button>
+					<button class="modal-btn modal-btn-danger" disabled=${busy} onClick=${() => confirm(`Remove marketplace "${mp.name}"?`) && act(`/plugin marketplace remove ${mp.name}`)}>Remove</button>
+				</div>
+			`)}
+			${data.marketplaces.length === 0 && html`<div class="settings-hint">No marketplaces added.</div>`}
+			<div class="settings-form-row">
+				<input type="text" placeholder="owner/repo, URL, or path" value=${mpSource} onInput=${(e) => setMpSource(e.target.value)} />
+				<button class="modal-btn modal-btn-primary" disabled=${busy || !mpSource} onClick=${() => { act(`/plugin marketplace add ${mpSource}`); setMpSource(""); }}>Add marketplace</button>
+			</div>
+		</div>
+	`;
+}
+
+function SettingsProvider({ data, busy, act }) {
+	const [name, setName] = useState("");
+	const [url, setUrl] = useState("");
+	const [apiKey, setApiKey] = useState("");
+	return html`
+		<div class="settings-rows">
+			${[...(data || [])].sort((a, b) => a.name.localeCompare(b.name)).map((p) => html`
+				<div key=${p.name} class="settings-item-row">
+					<span class="settings-item-status ${p.active ? "ok" : "off"}" />
+					<span class="settings-item-name">${p.name}</span>
+					<span class="settings-item-meta" title=${p.url}>${shortPath(p.url)}</span>
+					${!p.active && html`<button class="modal-btn" disabled=${busy} onClick=${() => act(`/provider ${p.name}`)}>Switch</button>`}
+					<button class="modal-btn modal-btn-danger" disabled=${busy} onClick=${() => confirm(`Delete provider "${p.name}"?`) && act(`/provider delete ${p.name}`)}>Delete</button>
+				</div>
+			`)}
+			${(!data || data.length === 0) && html`<div class="settings-hint">No saved providers.</div>`}
+			<div class="settings-section-title">Add provider</div>
+			<div class="settings-form-row">
+				<input type="text" placeholder="name" value=${name} onInput=${(e) => setName(e.target.value)} />
+				<input type="text" placeholder="base URL" value=${url} onInput=${(e) => setUrl(e.target.value)} />
+				<input type="password" placeholder="API key" value=${apiKey} onInput=${(e) => setApiKey(e.target.value)} />
+				<button class="modal-btn modal-btn-primary" disabled=${busy || !name || !url || !apiKey} onClick=${() => { act(`/provider add ${name} ${url} ${apiKey}`); setName(""); setUrl(""); setApiKey(""); }}>Add</button>
+			</div>
+		</div>
+	`;
+}
+
+function SettingsSsh({ data, busy, act }) {
+	const [name, setName] = useState("");
+	const [host, setHost] = useState("");
+	const [username, setUsername] = useState("");
+	const [port, setPort] = useState("");
+	return html`
+		<div class="settings-rows">
+			${[...(data || [])].sort((a, b) => a.name.localeCompare(b.name)).map((h) => html`
+				<div key=${h.name} class="settings-item-row">
+					<span class="settings-item-name">${h.name}</span>
+					<span class="settings-item-meta">${h.username ? `${h.username}@` : ""}${h.host}${h.port ? `:${h.port}` : ""}</span>
+					<button class="modal-btn modal-btn-danger" disabled=${busy} onClick=${() => confirm(`Remove host "${h.name}"?`) && act(`/ssh remove ${h.name}`)}>Remove</button>
+				</div>
+			`)}
+			${(!data || data.length === 0) && html`<div class="settings-hint">No SSH hosts configured.</div>`}
+			<div class="settings-section-title">Add host</div>
+			<div class="settings-form-row">
+				<input type="text" placeholder="name" value=${name} onInput=${(e) => setName(e.target.value)} />
+				<input type="text" placeholder="host" value=${host} onInput=${(e) => setHost(e.target.value)} />
+				<input type="text" placeholder="username (optional)" value=${username} onInput=${(e) => setUsername(e.target.value)} />
+				<input type="text" placeholder="port (optional)" value=${port} onInput=${(e) => setPort(e.target.value)} />
+				<button class="modal-btn modal-btn-primary" disabled=${busy || !name || !host} onClick=${() => {
+					act(`/ssh add ${name} ${host}${username ? ` ${username}` : " -"}${port ? ` ${port}` : ""}`);
+					setName(""); setHost(""); setUsername(""); setPort("");
+				}}>Add</button>
 			</div>
 		</div>
 	`;
@@ -771,13 +1194,15 @@ function Sidebar({ sessions, activeId, personas, cwd, onSelectSession, onCreateS
 			<button
 				class="sidebar-item-rename"
 				title="Rename"
+				aria-label="Rename"
 				onClick=${(e) => { e.stopPropagation(); startEdit(s); }}
-			>✎</button>
+			><${icons.pencil} /></button>
 			<button
 				class="sidebar-item-close"
 				title=${s.status === "running" ? "Stop and close" : "Close"}
+				aria-label="Close"
 				onClick=${(e) => { e.stopPropagation(); onCloseSession(s.id); }}
-			>×</button>
+			><${icons.xMark} /></button>
 		</div>
 	`;
 
@@ -839,6 +1264,7 @@ function App() {
 	const [personas, setPersonas] = useState([]);
 	const [commands, setCommands] = useState([]);
 	const [themes, setThemes] = useState([]);
+	const [currentThemeId, setCurrentThemeId] = useState(null);
 	const [streaming, setStreaming] = useState([]);
 	const [running, setRunning] = useState(false);
 	const [pendingSteers, setPendingSteers] = useState([]);
@@ -856,6 +1282,7 @@ function App() {
 	const [selectedCwd, setSelectedCwd] = useState(null);
 	const [dirPickerOpen, setDirPickerOpen] = useState(false);
 	const [hotkeysOpen, setHotkeysOpen] = useState(false);
+	const [settingsOpen, setSettingsOpen] = useState(false);
 	const cwd = selectedCwd ?? defaultCwd ?? "";
 
 	// Sessions the user explicitly closed (the × button) stay hidden from
@@ -1002,7 +1429,7 @@ function App() {
 					if (!cfg) return;
 					setDefaultCwd(cfg.cwd ?? "");
 					const current = t.find((x) => x.id === cfg.theme) ?? t.find((x) => x.id === "cast");
-					if (current) applyTheme(current.colors);
+					if (current) { applyTheme(current.colors); setCurrentThemeId(current.id); }
 				}).catch(() => {});
 			}).catch(() => {});
 
@@ -1215,6 +1642,7 @@ function App() {
 					addNotice(`Model: ${result.result.model}`);
 				} else if (text.startsWith("/theme") && result?.result?.theme) {
 					if (result.result.colors) applyTheme(result.result.colors);
+					setCurrentThemeId(result.result.theme);
 					addNotice(`Theme: ${result.result.label ?? result.result.theme}`);
 				} else if (text.startsWith("/current") && result?.result) {
 					const r = result.result;
@@ -1543,7 +1971,7 @@ function App() {
 			<div class="modal modal-hotkeys" onClick=${(e) => e.stopPropagation()}>
 				<div class="modal-header">
 					<span>Keyboard shortcuts</span>
-					<button class="modal-close" onClick=${() => setHotkeysOpen(false)} aria-label="Close">×</button>
+					<button class="modal-close" onClick=${() => setHotkeysOpen(false)} aria-label="Close"><${icons.xMark} /></button>
 				</div>
 				<div class="hotkeys-list" dangerouslySetInnerHTML=${{ __html: hotkeysHtml }}></div>
 			</div>
@@ -1567,13 +1995,18 @@ function App() {
 				<span class="header-logo">cast</span>
 				${!connected && html`<span class="conn-pill">reconnecting\u2026</span>`}
 				<div class="header-right">
+					${activeId && html`<${StatusPopover} activeId=${activeId} running=${running} />`}
+					<button class="menu-toggle" onClick=${() => setSettingsOpen(true)} aria-label="Settings" title="Settings">
+						<${icons.settings} />
+					</button>
 					<button class="menu-toggle" onClick=${() => setHotkeysOpen(true)} aria-label="Keyboard shortcuts" title="Shortcuts (Ctrl+/)">
-						<${icons.terminal} />
+						<${icons.help} />
 					</button>
 					<button class="menu-toggle diff-toggle${diffOpen ? " active" : ""}" onClick=${toggleDiff} aria-label=${diffOpen ? "Close diff panel" : "Open diff panel"} title="Diff">
 						<${icons.chevronRight} class="chevron-icon" />
 					</button>
 				</div>
+			</header>
 
 			<!-- Sidebar backdrop (mobile) -->
 			<div class="sidebar-backdrop${sidebarOpen ? " visible" : ""}" onClick=${() => setSidebarOpen(false)} />
@@ -1608,12 +2041,23 @@ function App() {
 
 			${hotkeysModal}
 
+			${settingsOpen && activeId && html`
+				<${SettingsModal}
+					activeId=${activeId}
+					themes=${themes}
+					currentThemeId=${currentThemeId}
+					onApplyTheme=${applyTheme}
+					onThemeChange=${setCurrentThemeId}
+					onClose=${() => setSettingsOpen(false)}
+				/>
+			`}
+
 			<!-- Chat area -->
 			<main class="chat-area">
 				<div class="messages" ref=${messagesRef} onScroll=${handleScroll}>
 					${messages.length === 0 && streaming.length === 0 && html`
 						<div class="empty-state">
-							<div class="empty-state-mark">>_</div>
+							<pre class="empty-state-banner">${CAST_BANNER}</pre>
 							<p class="empty-state-title">Ready when you are</p>
 							<p class="empty-state-hint">Send a message, or type <code>/</code> to see what this agent can do.</p>
 						</div>
@@ -1649,13 +2093,16 @@ function App() {
 						`)}
 					</div>
 				`}
-				<${Composer} running=${running} ready=${!!activeId} activeId=${activeId} commands=${commands} personas=${personas} themes=${themes} onSubmit=${submitMessage} onAbort=${abortRun} />
+				<${Composer} running=${running} ready=${!!activeId} activeId=${activeId} commands=${commands} personas=${personas} onSubmit=${submitMessage} onAbort=${abortRun} />
 			</main>
 
 			<!-- Diff — a wide right sidebar alongside the chat on desktop, a
-			     full-screen overlay on mobile (see the max-width:768px rules). -->
-			${diffOpen && html`
-				<${DiffPanel} data=${diffData} activeFile=${diffFile} onSelectFile=${setDiffFile} onClose=${() => setDiffOpen(false)} onResizeStart=${startDiffResize} />
+			     full-screen overlay on mobile (see the max-width:768px rules).
+			     Always mounted (like Sidebar) so the open/close is a pure CSS
+			     class/transform transition instead of a mount with no "from"
+			     state to animate out of. -->
+			${activeId && html`
+				<${DiffPanel} data=${diffData} activeFile=${diffFile} onSelectFile=${setDiffFile} onClose=${() => setDiffOpen(false)} onResizeStart=${startDiffResize} open=${diffOpen} />
 			`}
 		</div>
 	`;
