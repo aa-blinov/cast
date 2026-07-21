@@ -54,7 +54,7 @@ cast web start           # Same as above
 cast web stop            # Stop the background server
 cast web status          # Check if running
 cast web --foreground    # Run inline (for dev/debug)
-cast web --port 8080     # Custom port (default: 3117)
+cast web --port 8080     # Custom port (default: 3117, or set CAST_WEB_PORT)
 ```
 
 First run generates a password, printed to the terminal and saved in `~/.cast/settings.json`. Username is always `cast`.
@@ -63,10 +63,12 @@ Features:
 - Create/switch/close sessions with different personas, running independently in parallel
 - Token-by-token streaming, with reasoning and tool calls shown inline as they happen
 - Tool call cards showing arguments and status
-- Git diff viewer (file tree + unified diff), as a side panel
+- Git diff viewer (file tree + unified diff) as a resizable side panel, auto-refreshing after each tool call
+- Settings modal (gear icon) — model & reasoning, color theme, web tools toggle, bash confirmation mode, and management for MCP servers, skills, plugins, providers, and SSH hosts; shared with the TUI's `~/.cast/settings.json`
+- Status popover (info icon) — persona, model, mode, token usage, and git branch for the active session
+- Keyboard shortcuts — `Ctrl+B` (`⌘B` on Mac) toggles the sidebar, `Ctrl+Shift+D` / `N` / `L` toggle the diff panel / start a new session / clear context, `Ctrl+/` shows the full reference
 - All slash commands, non-blocking ones work while agent runs
-- Mobile/tablet/desktop responsive
-- Color theme picker (`/theme`), shared with the TUI's `~/.cast/settings.json`
+- Mobile/tablet/desktop responsive — sidebar and diff panel become touch-friendly slide-over drawers on narrow screens
 - Auth via standard HTTP Basic Auth — the browser's own credential prompt, no custom login page
 
 On Windows, prints the install command to run in a new terminal (can't self-replace running process files).

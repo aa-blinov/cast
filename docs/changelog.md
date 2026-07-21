@@ -6,7 +6,7 @@ All notable user-facing changes to cast, newest first.
 
 ### Added
 
-- **Web UI** (`cast web`): browser-based control room for managing background agents. Creates sessions with different personas, streams responses token-by-token, shows tool calls as terminal-style cards, and includes a git diff viewer. Non-blocking slash commands (`/help`, `/current`, `/usage`) work while the agent runs. Auth with auto-generated password. Same sessions persisted to `~/.cast/sessions/` as the TUI.
+- **Web UI** (`cast web`): browser-based control room for managing background agents. Creates sessions with different personas, streams responses token-by-token, shows tool calls as terminal-style cards, and includes a resizable git diff viewer. Settings modal covers model/reasoning, theme, web tools, bash confirmation mode, and MCP/skills/plugins/provider/SSH management. Non-blocking slash commands (`/help`, `/current`, `/usage`) work while the agent runs. Keyboard shortcuts reference (`Ctrl+/` / `⌘/`) for sidebar, diff, new session, and clear-context. Auth with auto-generated password. Same sessions persisted to `~/.cast/sessions/` as the TUI.
   - `cast web` — start in background (daemon)
   - `cast web stop` / `cast web status` — manage the server
   - `cast web --foreground` — run inline for dev/debug
