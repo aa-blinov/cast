@@ -409,6 +409,12 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 		json(res, bridge.getReasoningOptionsForSession(params.id));
 	});
 
+	route("GET", "/api/suggest", (req, res) => {
+		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+		const input = url.searchParams.get("q") ?? "";
+		const sessionId = url.searchParams.get("session") ?? "";
+		json(res, bridge.suggestCommand(sessionId, input));
+	});
 	// Main request handler
 	const server = createServer(async (req, res) => {
 		const urlPath = req.url?.split("?")[0] ?? "/";
