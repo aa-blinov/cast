@@ -197,7 +197,15 @@ describe("web bridge", () => {
 		expect(skillsSuggestions.map((s) => s.value)).toEqual(["list", "enable", "disable", "uninstall", "help"]);
 
 		const pluginSuggestions = bridge.suggestCommand(ws.id, "/plugin");
-		expect(pluginSuggestions.map((s) => s.value)).toEqual(["list", "install", "uninstall", "enable", "disable", "marketplace", "help"]);
+		expect(pluginSuggestions.map((s) => s.value)).toEqual([
+			"list",
+			"install",
+			"uninstall",
+			"enable",
+			"disable",
+			"marketplace",
+			"help",
+		]);
 
 		const permissionsSuggestions = bridge.suggestCommand(ws.id, "/permissions");
 		expect(permissionsSuggestions.map((s) => s.value)).toEqual(["default", "bypass"]);

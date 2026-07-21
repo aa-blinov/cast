@@ -8,6 +8,7 @@ import { ayu } from "./ayu.ts";
 import { cast } from "./cast.ts";
 import { catppuccin } from "./catppuccin.ts";
 import { dracula } from "./dracula.ts";
+import { everforest } from "./everforest.ts";
 import { github } from "./github.ts";
 import { gruvbox } from "./gruvbox.ts";
 import { kanagawa } from "./kanagawa.ts";
@@ -18,6 +19,7 @@ import { nord } from "./nord.ts";
 import { oneDark } from "./one-dark.ts";
 import { rosePine } from "./rose-pine.ts";
 import { solarized } from "./solarized.ts";
+import { synthwave84 } from "./synthwave-84.ts";
 import { tokyoNight } from "./tokyo-night.ts";
 import { tomorrowNight } from "./tomorrow-night.ts";
 import type { Theme, ThemeColors } from "./types.ts";
@@ -27,6 +29,7 @@ export const ALL_THEMES: Theme[] = [
 	cast,
 	catppuccin,
 	dracula,
+	everforest,
 	github,
 	gruvbox,
 	kanagawa,
@@ -37,6 +40,7 @@ export const ALL_THEMES: Theme[] = [
 	oneDark,
 	rosePine,
 	solarized,
+	synthwave84,
 	tokyoNight,
 	tomorrowNight,
 ];
