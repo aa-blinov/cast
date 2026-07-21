@@ -22,11 +22,10 @@ import {
 	uninstallPlugin,
 	updateMarketplace,
 } from "../core/plugins.ts";
+
 import {
 	buildSystemPrompt,
 	discoverSkillsForCwd,
-	listUninstallableMcpServers,
-	personaOptionsForCwd,
 	removeMcpServerFromDisk,
 	resolveMcpForCwd,
 	resolvePersonasForCwd,
@@ -35,7 +34,8 @@ import {
 	resolveSkillsForCwd,
 } from "../core/project.ts";
 import { getModelsCache, setModelsCache } from "../core/readline.ts";
-import { formatRuleInvocation, type Rule } from "../core/rules.ts";
+
+import { formatRuleInvocation } from "../core/rules.ts";
 import { type AgentRunner, createAgentRunner } from "../core/runner.ts";
 import {
 	addUsage,
@@ -181,13 +181,7 @@ export interface WebBridge {
 export function createWebBridge(result: StartupResult): WebBridge {
 	const sessions = new Map<string, WebAgentSession>();
 
-	const {
-		config,
-		cwd,
-		persona: currentPersona,
-		reasoningMeta,
-		projectDeps,
-	} = result;
+	const { config, cwd, persona: currentPersona, reasoningMeta, projectDeps } = result;
 
 	// Everything below is captured once at startup by the TUI's own
 	// per-process App component, but the web bridge outlives many
@@ -201,7 +195,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 	let subagentModel = result.subagentModel;
 	let planModel = result.planModel;
 	let projectTrusted = result.projectTrusted;
-	let contextFilesSuffix = result.contextFilesSuffix;
+	const contextFilesSuffix = result.contextFilesSuffix;
 	let rulesSuffix = result.rulesSuffix;
 	let rulesLazySuffix = result.rulesLazySuffix;
 	let directoryRules = result.directoryRules;
@@ -534,7 +528,10 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		return true;
 	}
 
-	async function executeCommand(sessionId: string, command: string): Promise<{ ok: boolean; result?: unknown; error?: string }> {
+	async function executeCommand(
+		sessionId: string,
+		command: string,
+	): Promise<{ ok: boolean; result?: unknown; error?: string }> {
 		const ws = sessions.get(sessionId);
 		if (!ws) return { ok: false, error: "Session not found" };
 
@@ -848,7 +845,12 @@ export function createWebBridge(result: StartupResult): WebBridge {
 				directoryRules = rules.directoryRules;
 				personas = resolvePersonasForCwd(sessionCwd, projectTrusted).personas;
 				await closeMcpConnections(mcpResult.connections);
-				mcpResult = await resolveMcpForCwd(projectDeps, sessionCwd, projectTrusted, loadSettings().disabledMcpServers ?? []);
+				mcpResult = await resolveMcpForCwd(
+					projectDeps,
+					sessionCwd,
+					projectTrusted,
+					loadSettings().disabledMcpServers ?? [],
+				);
 				recomputeAllSystemPrompts();
 				return { ok: true, result: "Reloaded skills, rules, MCP, and personas for this directory" };
 			} catch (err) {
@@ -863,7 +865,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 					ok: true,
 					result: mcpResult.allServerNames.map((n) => ({
 						name: n,
-						connected: mcpResult.connections.some((c) => c.name === n),
+						connected: mcpResult.connections.some((c) => c.serverName === n),
 						disabled: (loadSettings().disabledMcpServers ?? []).includes(n),
 					})),
 				};
@@ -896,7 +898,12 @@ export function createWebBridge(result: StartupResult): WebBridge {
 				if (!removed) return { ok: false, error: `Unknown or already-removed MCP server: ${rest}` };
 				try {
 					await closeMcpConnections(mcpResult.connections);
-					mcpResult = await resolveMcpForCwd(projectDeps, sessionCwd, projectTrusted, loadSettings().disabledMcpServers ?? []);
+					mcpResult = await resolveMcpForCwd(
+						projectDeps,
+						sessionCwd,
+						projectTrusted,
+						loadSettings().disabledMcpServers ?? [],
+					);
 					recomputeAllSystemPrompts();
 					return { ok: true, result: `Uninstalled MCP server "${rest}" (${removed.origin})` };
 				} catch (err) {
@@ -945,7 +952,8 @@ export function createWebBridge(result: StartupResult): WebBridge {
 				const discovered = discoverSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
 				const skill = discovered.find((s) => s.name === rest);
 				if (!skill) return { ok: false, error: `Unknown skill: ${rest}` };
-				if (!isUninstallableSkill(skill)) return { ok: false, error: `"${rest}" isn't a removable skill (builtin/plugin)` };
+				if (!isUninstallableSkill(skill))
+					return { ok: false, error: `"${rest}" isn't a removable skill (builtin/plugin)` };
 				uninstallUserSkill(skill);
 				const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
 				skillsPromptSuffix = skillsResult.skillsPromptSuffix;
@@ -1074,7 +1082,10 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		if (name === "/ssh") {
 			const [sub, rest] = splitArg(arg);
 			if (!sub || sub === "list") {
-				return { ok: true, result: sshHosts.map((h) => ({ name: h.name, host: h.host, username: h.username, port: h.port })) };
+				return {
+					ok: true,
+					result: sshHosts.map((h) => ({ name: h.name, host: h.host, username: h.username, port: h.port })),
+				};
 			}
 			if (sub === "remove") {
 				if (!rest) return { ok: false, error: "Usage: /ssh remove <name>" };
@@ -1087,7 +1098,8 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			if (sub === "add") {
 				// Flat form (no wizard): /ssh add <name> <host> [username] [port] [keyPath]
 				const [hname, host, username, portStr, keyPath] = rest.split(/\s+/);
-				if (!hname || !host) return { ok: false, error: "Usage: /ssh add <name> <host> [username] [port] [keyPath]" };
+				if (!hname || !host)
+					return { ok: false, error: "Usage: /ssh add <name> <host> [username] [port] [keyPath]" };
 				const port = portStr ? Number.parseInt(portStr, 10) : undefined;
 				sshHosts = [...sshHosts.filter((h) => h.name !== hname), { name: hname, host, username, port, keyPath }];
 				saveSshConfig(sshHosts);

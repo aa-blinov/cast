@@ -109,80 +109,80 @@ describe("web bridge", () => {
 		expect(ws.systemPrompt).toContain("You are the senior persona.");
 	});
 
-	it("/persona with no arg reports the current persona without changing anything", () => {
+	it("/persona with no arg reports the current persona without changing anything", async () => {
 		const bridge = createWebBridge(makeResult());
 		const ws = bridge.createSession();
-		const res = bridge.executeCommand(ws.id, "/persona");
+		const res = await bridge.executeCommand(ws.id, "/persona");
 		expect(res).toEqual({ ok: true, result: { persona: "coding" } });
 	});
 
-	it("/persona <name> switches persona and rebuilds the system prompt", () => {
+	it("/persona <name> switches persona and rebuilds the system prompt", async () => {
 		const bridge = createWebBridge(makeResult());
 		const ws = bridge.createSession();
-		const res = bridge.executeCommand(ws.id, "/persona senior");
+		const res = await bridge.executeCommand(ws.id, "/persona senior");
 		expect(res.ok).toBe(true);
 		expect(ws.session.persona).toBe("senior");
 		expect(ws.systemPrompt).toContain("You are the senior persona.");
 	});
 
-	it("/persona <unknown> fails without mutating session state", () => {
+	it("/persona <unknown> fails without mutating session state", async () => {
 		const bridge = createWebBridge(makeResult());
 		const ws = bridge.createSession();
 		const before = ws.systemPrompt;
-		const res = bridge.executeCommand(ws.id, "/persona ghost");
+		const res = await bridge.executeCommand(ws.id, "/persona ghost");
 		expect(res.ok).toBe(false);
 		expect(ws.session.persona).toBe("coding");
 		expect(ws.systemPrompt).toBe(before);
 	});
 
-	it("/model <name> updates the session model", () => {
+	it("/model <name> updates the session model", async () => {
 		const bridge = createWebBridge(makeResult());
 		const ws = bridge.createSession();
-		const res = bridge.executeCommand(ws.id, "/model gpt-5");
+		const res = await bridge.executeCommand(ws.id, "/model gpt-5");
 		expect(res).toEqual({ ok: true, result: { model: "gpt-5" } });
 		expect(ws.session.model).toBe("gpt-5");
 	});
 
-	it("/model and /persona are rejected while the agent is running", () => {
+	it("/model and /persona are rejected while the agent is running", async () => {
 		const bridge = createWebBridge(makeResult());
 		const ws = bridge.createSession();
 		ws.status = "running";
-		expect(bridge.executeCommand(ws.id, "/model gpt-5").ok).toBe(false);
-		expect(bridge.executeCommand(ws.id, "/persona senior").ok).toBe(false);
+		expect((await bridge.executeCommand(ws.id, "/model gpt-5")).ok).toBe(false);
+		expect((await bridge.executeCommand(ws.id, "/persona senior")).ok).toBe(false);
 	});
 
-	it("/steer while idle just sends the message as a normal turn", () => {
+	it("/steer while idle just sends the message as a normal turn", async () => {
 		const bridge = createWebBridge(makeResult());
 		const ws = bridge.createSession();
-		const res = bridge.executeCommand(ws.id, "/steer hello");
+		const res = await bridge.executeCommand(ws.id, "/steer hello");
 		expect(res).toEqual({ ok: true, result: "Sent" });
 		expect(runAgentLoop).toHaveBeenCalledTimes(1);
 	});
 
-	it("/steer while running enqueues into the steering queue instead of starting a new turn", () => {
+	it("/steer while running enqueues into the steering queue instead of starting a new turn", async () => {
 		const bridge = createWebBridge(makeResult());
 		const ws = bridge.createSession();
 		ws.status = "running";
-		const res = bridge.executeCommand(ws.id, "/steer hello");
+		const res = await bridge.executeCommand(ws.id, "/steer hello");
 		expect(res).toEqual({ ok: true, result: "Steered into the running turn" });
 		expect(runAgentLoop).not.toHaveBeenCalled();
 		expect(ws.runner.steeringQueue.hasItems()).toBe(true);
 	});
 
-	it("/queue while running enqueues a follow-up; /queue-reset clears it", () => {
+	it("/queue while running enqueues a follow-up; /queue-reset clears it", async () => {
 		const bridge = createWebBridge(makeResult());
 		const ws = bridge.createSession();
 		ws.status = "running";
-		bridge.executeCommand(ws.id, "/queue after this turn");
+		await bridge.executeCommand(ws.id, "/queue after this turn");
 		expect(ws.runner.followUpQueue.hasItems()).toBe(true);
-		bridge.executeCommand(ws.id, "/queue-reset");
+		await bridge.executeCommand(ws.id, "/queue-reset");
 		expect(ws.runner.followUpQueue.hasItems()).toBe(false);
 	});
 
-	it("/steer and /queue require a message", () => {
+	it("/steer and /queue require a message", async () => {
 		const bridge = createWebBridge(makeResult());
 		const ws = bridge.createSession();
-		expect(bridge.executeCommand(ws.id, "/steer").ok).toBe(false);
-		expect(bridge.executeCommand(ws.id, "/queue").ok).toBe(false);
+		expect((await bridge.executeCommand(ws.id, "/steer")).ok).toBe(false);
+		expect((await bridge.executeCommand(ws.id, "/queue")).ok).toBe(false);
 	});
 });

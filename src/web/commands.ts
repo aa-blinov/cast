@@ -26,10 +26,31 @@ export const NON_BLOCKING_COMMANDS = new Set([
 	"/theme",
 	"/repo",
 	"/web",
+	"/rules",
+	"/rule:",
+	"/permissions",
 ]);
 
 /** Commands that require the agent to be idle. */
-export const BLOCKING_COMMANDS = new Set(["/clear", "/new", "/model", "/persona", "/compact", "/reasoning"]);
+export const BLOCKING_COMMANDS = new Set([
+	"/clear",
+	"/new",
+	"/model",
+	"/persona",
+	"/compact",
+	"/reasoning",
+	"/build",
+	"/continue",
+	"/mcp",
+	"/plan",
+	"/plan-model",
+	"/plugin",
+	"/provider",
+	"/reload",
+	"/skills",
+	"/ssh",
+	"/subagent-model",
+]);
 
 export const SLASH_COMMANDS: Array<{
 	name: string;
@@ -38,24 +59,39 @@ export const SLASH_COMMANDS: Array<{
 	blocking: boolean;
 }> = [
 	{ name: "/abort", description: "Abort the current run", blocking: false },
+	{ name: "/build", description: "Exit plan mode, restore full toolset", blocking: true },
 	{ name: "/clear", description: "Clear context (and save)", blocking: true },
 	{ name: "/compact", description: "Compact context now", blocking: true },
+	{ name: "/continue", description: "Resume the most recent session", blocking: true },
 	{ name: "/copy", description: "Copy last assistant response", blocking: false },
 	{ name: "/current", description: "Show session status", blocking: false },
 	{ name: "/diff", description: "Toggle the diff panel", blocking: false },
 	{ name: "/help", description: "Show this command list", blocking: false },
+	{ name: "/mcp", description: "Manage MCP servers", takesArgs: true, blocking: true },
 	{ name: "/model", description: "Show or change model", takesArgs: true, blocking: true },
 	{ name: "/new", description: "Start a new session", blocking: true },
+	{ name: "/permissions", description: "Change bash confirmation mode", takesArgs: true, blocking: false },
 	{ name: "/persona", description: "Show or change persona", takesArgs: true, blocking: true },
+	{ name: "/plan", description: "Enter plan mode (explore + plan only)", blocking: true },
+	{ name: "/plan-model", description: "Show or change the plan-mode model", takesArgs: true, blocking: true },
+	{ name: "/plugin", description: "Manage installed plugins", takesArgs: true, blocking: true },
+	{ name: "/provider", description: "Switch / add / delete providers", takesArgs: true, blocking: true },
 	{ name: "/q", description: "Alias for /queue", takesArgs: true, blocking: false },
+	{ name: "/qr", description: "Alias for /queue-reset", blocking: false },
 	{ name: "/queue", description: "Queue a message for after the run", takesArgs: true, blocking: false },
 	{ name: "/queue-reset", description: "Clear the message queue", blocking: false },
-	{ name: "/qr", description: "Alias for /queue-reset", blocking: false },
 	{ name: "/reasoning", description: "Show or change reasoning level", takesArgs: true, blocking: true },
+	{ name: "/reload", description: "Reload skills, rules, MCP, and personas", blocking: true },
 	{ name: "/repo", description: "Show cwd and git branch", blocking: false },
+	{ name: "/rule:", description: "Invoke a rule by name", takesArgs: true, blocking: false },
+	{ name: "/rules", description: "List loaded rules", blocking: false },
 	{ name: "/s", description: "Alias for /steer", takesArgs: true, blocking: false },
 	{ name: "/sessions", description: "List sessions", blocking: false },
+	{ name: "/skills", description: "Manage skills", takesArgs: true, blocking: true },
+	{ name: "/ssh", description: "Manage SSH hosts", takesArgs: true, blocking: true },
 	{ name: "/steer", description: "Inject a message while running", takesArgs: true, blocking: false },
+	{ name: "/stop", description: "Abort the current run (alias)", blocking: false },
+	{ name: "/subagent-model", description: "Show or change subagent model", takesArgs: true, blocking: true },
 	{ name: "/theme", description: "Show or change color theme", takesArgs: true, blocking: false },
 	{ name: "/usage", description: "Show token and cost usage", blocking: false },
 	{ name: "/web", description: "Toggle web tools (web_search, web_fetch)", takesArgs: true, blocking: false },
@@ -67,7 +103,10 @@ export function isCommandBlocking(input: string): boolean {
 	if (!trimmed.startsWith("/")) return false;
 	const name = trimmed.split(/\s+/)[0]!;
 	if (NON_BLOCKING_COMMANDS.has(name)) return false;
-	return BLOCKING_COMMANDS.has(name);
+	// /rule:NAME is one token (no space before the rule id) — the bridge
+	// handles it before this gate and checks `running` internally.
+	if (BLOCKING_COMMANDS.has(name)) return true;
+	return false;
 }
 
 /** Check if the input is a known slash command. */
