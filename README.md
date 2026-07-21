@@ -19,6 +19,7 @@ A role-based terminal agent harness. 13 built-in personas — senior dev, QA, DB
 **Runs where your code runs.** vLLM, Ollama, your own inference server, or any OpenAI-compatible API. No account, no telemetry, no cloud dependency.
 
 **Ink TUI.** A proper terminal interface with multiline paste, image attachments, smooth animations.
+**Web UI.** `cast web` launches a browser-based control room — background agents, token-by-token streaming, diff viewer, all slash commands. Same sessions as the TUI.
 
 ## Install
 

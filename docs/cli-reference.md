@@ -5,7 +5,8 @@
 ```
 cast [options] [prompt]
 cast run [options] <message>    Non-interactive mode
-cast upgrade [version] [--force]  Self-update
+    cast web [start|stop|status]    Web UI mode
+    cast upgrade [version] [--force]  Self-update
 ```
 
 TUI mode (Ink-based, multiline paste, image attachments) is the default. Non-TTY contexts (pipes, CI) are not supported — use `cast run` for scripting.
@@ -42,6 +43,31 @@ cast upgrade              # Upgrade to latest
 cast upgrade 0.3.0        # Upgrade to specific version
 cast upgrade --force      # Reinstall even if same version
 ```
+
+### `cast web`
+
+Web UI mode: launches a browser-based control room for managing background agents. Runs alongside the TUI — same sessions, same core engine.
+
+```bash
+cast web                 # Start in background (daemon)
+cast web start           # Same as above
+cast web stop            # Stop the background server
+cast web status          # Check if running
+cast web --foreground    # Run inline (for dev/debug)
+cast web --port 8080     # Custom port (default: 3117)
+```
+
+First run generates a password, printed to the terminal and saved in `~/.cast/settings.json`. Username is always `cast`.
+
+Features:
+- Create/switch/close sessions with different personas, running independently in parallel
+- Token-by-token streaming, with reasoning and tool calls shown inline as they happen
+- Tool call cards showing arguments and status
+- Git diff viewer (file tree + unified diff), as a side panel
+- All slash commands, non-blocking ones work while agent runs
+- Mobile/tablet/desktop responsive
+- Color theme picker (`/theme`), shared with the TUI's `~/.cast/settings.json`
+- Auth via standard HTTP Basic Auth — the browser's own credential prompt, no custom login page
 
 On Windows, prints the install command to run in a new terminal (can't self-replace running process files).
 

@@ -2,6 +2,17 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.8.0
+
+### Added
+
+- **Web UI** (`cast web`): browser-based control room for managing background agents. Creates sessions with different personas, streams responses token-by-token, shows tool calls as terminal-style cards, and includes a git diff viewer. Non-blocking slash commands (`/help`, `/current`, `/usage`) work while the agent runs. Auth with auto-generated password. Same sessions persisted to `~/.cast/sessions/` as the TUI.
+  - `cast web` — start in background (daemon)
+  - `cast web stop` / `cast web status` — manage the server
+  - `cast web --foreground` — run inline for dev/debug
+  - Default port 3117, configurable via `--port` or `CAST_WEB_PORT`
+
+
 ## 0.7.12
 
 ### Fixed

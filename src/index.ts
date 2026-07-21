@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { existsSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { printHelp } from "./core/help.ts";
@@ -25,6 +27,11 @@ async function main(): Promise<void> {
 
 	if (args[0] === "run") {
 		await handleRunCommand(args.slice(1), VERSION);
+		return;
+	}
+
+	if (args[0] === "web") {
+		await handleWebCommand(args.slice(1));
 		return;
 	}
 
@@ -210,6 +217,116 @@ Options:
 	};
 
 	await runNonInteractive(parsedArgs, { message, format });
+}
+
+async function handleWebCommand(args: string[]): Promise<void> {
+	const PID_FILE = join(homedir(), ".cast", "web.pid");
+	const LOG_FILE = join(homedir(), ".cast", "web.log");
+
+	// Subcommands
+	if (args[0] === "stop") {
+		if (!existsSync(PID_FILE)) {
+			console.log("[cast web] not running (no PID file)");
+			return;
+		}
+		const pid = parseInt(readFileSync(PID_FILE, "utf-8").trim(), 10);
+		try {
+			process.kill(pid, "SIGTERM");
+			console.log(`[cast web] stopped (pid ${pid})`);
+		} catch {
+			console.log(`[cast web] process ${pid} not found — cleaning up`);
+		}
+		try {
+			unlinkSync(PID_FILE);
+		} catch {
+			/* ignore */
+		}
+		return;
+	}
+
+	if (args[0] === "status") {
+		if (!existsSync(PID_FILE)) {
+			console.log("[cast web] not running");
+			return;
+		}
+		const pid = parseInt(readFileSync(PID_FILE, "utf-8").trim(), 10);
+		try {
+			process.kill(pid, 0); // signal 0 = check alive
+			console.log(`[cast web] running (pid ${pid}) — http://localhost:${getPort(args)}`);
+		} catch {
+			console.log("[cast web] stale PID file — process not running");
+			try {
+				unlinkSync(PID_FILE);
+			} catch {
+				/* ignore */
+			}
+		}
+		return;
+	}
+
+	// Determine mode: foreground or daemon
+	const foreground = args.includes("--foreground");
+	const port = getPort(args);
+	const restArgs = args.filter((a) => a !== "--foreground" && a !== "start" && a !== "--port" && a !== String(port));
+
+	if (foreground) {
+		// Run inline (no daemon)
+		const child = spawn(
+			process.execPath,
+			["--import", "tsx", "./src/web/index.ts", ...restArgs, "--port", String(port)],
+			{
+				cwd: join(dirname(fileURLToPath(import.meta.url)), ".."),
+				stdio: "inherit",
+				env: { ...process.env, CAST_CWD: process.cwd(), CAST_WEB_PORT: String(port) },
+			},
+		);
+		child.on("exit", (code) => process.exit(code ?? 0));
+		return;
+	}
+
+	// Daemon mode
+	if (existsSync(PID_FILE)) {
+		const pid = parseInt(readFileSync(PID_FILE, "utf-8").trim(), 10);
+		try {
+			process.kill(pid, 0);
+			console.error(`[cast web] already running (pid ${pid}). Use 'cast web stop' first.`);
+			process.exit(1);
+		} catch {
+			// Stale PID — clean up
+			try {
+				unlinkSync(PID_FILE);
+			} catch {
+				/* ignore */
+			}
+		}
+	}
+
+	const logFd = openSync(LOG_FILE, "a");
+	const child = spawn(
+		process.execPath,
+		["--import", "tsx", "./src/web/index.ts", ...restArgs, "--port", String(port)],
+		{
+			cwd: join(dirname(fileURLToPath(import.meta.url)), ".."),
+			detached: true,
+			stdio: ["ignore", logFd, logFd],
+			env: { ...process.env, CAST_CWD: process.cwd(), CAST_WEB_PORT: String(port) },
+		},
+	);
+
+	child.unref();
+
+	// Write PID
+	writeFileSync(PID_FILE, String(child.pid), "utf-8");
+
+	console.log(`[cast web] started (pid ${child.pid}) — http://localhost:${port}`);
+	console.log(`[cast web] logs: ${LOG_FILE}`);
+	console.log(`[cast web] stop: cast web stop`);
+}
+
+function getPort(args: string[]): number {
+	const idx = args.indexOf("--port");
+	if (idx >= 0 && args[idx + 1]) return parseInt(args[idx + 1]!, 10);
+	return parseInt(process.env.CAST_WEB_PORT ?? "3117", 10);
 }
 
 main().catch((err) => {

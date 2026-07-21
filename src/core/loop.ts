@@ -1009,8 +1009,8 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 					(!toolCalls || toolCalls.length === 0) &&
 					isOpenWorkGateActive(loopConfig.planState, openWorkGateConfig)
 				) {
-					const openSteps = collectOpenWorkSteps(loopConfig.planState);
-					const decision = evaluateOpenWorkGate({ openSteps });
+					const { steps: openSteps, closableViaPlanCheck } = collectOpenWorkSteps(loopConfig.planState);
+					const decision = evaluateOpenWorkGate({ openSteps, closableViaPlanCheck });
 					if (decision.type === "nudge") {
 						if (openWorkGateFires < openWorkGateConfig.maxFiresPerPrompt) {
 							openWorkGateFires += 1;

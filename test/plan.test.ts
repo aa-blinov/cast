@@ -11,6 +11,7 @@ import {
 	execPlanEnter,
 	execPlanRead,
 	execPlanWrite,
+	listOpenPlanSteps,
 	listPlanNames,
 	modeDisabledTools,
 	PLAN_TOOL_NAMES,
@@ -405,6 +406,100 @@ describe("plan", () => {
 			expect(result.content).toContain("limit is");
 			// The oversized edit must not have landed.
 			expect(readActivePlan(state).content).toContain("- [ ] x");
+		});
+
+		it("rejects a same-or-shallower-level heading inside the replacement body", () => {
+			const state = testState("edit-heading-collision");
+			execPlanWrite({ name: "main", content: "# Plan\n\n## Steps\n- [ ] x\n\n## Verification\nRun" }, state);
+
+			// Reproduces the real corruption: editing "## Steps" with a body that
+			// itself declares a new "## Design System" followed by another
+			// "## Steps" — both level 2, same as the section being edited.
+			const result = execPlanEdit(
+				{ heading: "Steps", content: "## Design System\n\nPalette.\n\n## Steps\n\n- [ ] y" },
+				state,
+			);
+			expect(result.isError).toBe(true);
+			expect(JSON.parse(result.content).error).toContain("Steps");
+
+			// The edit must not have landed — no duplicate heading on disk.
+			const content = readActivePlan(state).content;
+			expect(content.match(/^## Steps$/gm)?.length ?? 0).toBe(1);
+			expect(content).toContain("- [ ] x");
+		});
+
+		it("allows nested headings strictly deeper than the edited section", () => {
+			const state = testState("edit-heading-nested");
+			execPlanWrite({ name: "main", content: "# Plan\n\n## Steps\n- [ ] x" }, state);
+
+			const result = execPlanEdit({ heading: "Steps", content: "### Subsection\n\n- [ ] y" }, state);
+			expect(result.isError).toBeUndefined();
+
+			const content = readActivePlan(state).content;
+			expect(content).toContain("### Subsection");
+			expect(content).toContain("- [ ] y");
+		});
+	});
+
+	describe("Steps checklist normalization", () => {
+		it("plan_write inserts a checkbox under each bare ### step heading", () => {
+			const state = testState("normalize-write");
+			execPlanWrite(
+				{
+					name: "main",
+					content: "# Plan\n\n## Steps\n\n### 1. First step\n\nSome spec.\n\n### 2. Second step\n\nMore spec.",
+				},
+				state,
+			);
+
+			const file = readActivePlan(state);
+			expect(file.content).toContain("### 1. First step\n\n- [ ] 1. First step");
+			expect(file.content).toContain("### 2. Second step\n\n- [ ] 2. Second step");
+			// The heading itself, and the rest of the spec, survive untouched.
+			expect(file.content).toContain("Some spec.");
+			expect(file.content).toContain("More spec.");
+		});
+
+		it("plan_check can then close a heading-style step end to end", () => {
+			const state = testState("normalize-check");
+			execPlanWrite(
+				{
+					name: "main",
+					content: "# Plan\n\n## Steps\n\n### 1. Bridge\n\nWrap the runner.\n\n### 2. Server\n\nHTTP.",
+				},
+				state,
+			);
+
+			const parsed = JSON.parse(execPlanCheck({ item: "1. Bridge" }, state).content);
+			expect(parsed.success).toBe(true);
+			expect(parsed.remaining).toBe(1);
+
+			// The open-work gate's own source of open steps agrees: one left.
+			const remaining = listOpenPlanSteps(readActivePlan(state).content);
+			expect(remaining).toEqual(["2. Server"]);
+		});
+
+		it("does not double-insert a checkbox already present under a step heading", () => {
+			const state = testState("normalize-idempotent");
+			execPlanWrite(
+				{
+					name: "main",
+					content: "# Plan\n\n## Context\nInfo\n\n## Steps\n\n### 1. Bridge\n\n- [ ] 1. Bridge\n\nSpec text.",
+				},
+				state,
+			);
+			// A follow-up edit to an unrelated section re-runs normalization globally.
+			execPlanEdit({ heading: "Context", content: "Updated info" }, state);
+
+			const count = (readActivePlan(state).content.match(/- \[ \] 1\. Bridge/g) ?? []).length;
+			expect(count).toBe(1);
+		});
+
+		it("leaves plans without heading-style steps untouched", () => {
+			const state = testState("normalize-noop");
+			const content = "# Plan\n\n## Steps\n- [ ] a\n- [x] b\n\n## Verification\nRun tests";
+			execPlanWrite({ name: "main", content }, state);
+			expect(readActivePlan(state).content).toBe(content);
 		});
 	});
 
