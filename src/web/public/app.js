@@ -820,6 +820,7 @@ function App() {
 	const [defaultCwd, setDefaultCwd] = useState("");
 	const [selectedCwd, setSelectedCwd] = useState(null);
 	const [dirPickerOpen, setDirPickerOpen] = useState(false);
+	const [hotkeysOpen, setHotkeysOpen] = useState(false);
 	const cwd = selectedCwd ?? defaultCwd ?? "";
 
 	// Sessions the user explicitly closed (the × button) stay hidden from
@@ -1457,6 +1458,28 @@ function App() {
 		return () => window.removeEventListener("popstate", onPopState);
 	}, [selectSession]);
 
+	// Global hotkeys
+	useEffect(() => {
+		const onKey = (e) => {
+			// Don't fire when typing in an input/textarea
+			const tag = e.target.tagName;
+			const isInput = tag === "INPUT" || tag === "TEXTAREA";
+
+			if (e.key === "Escape" && hotkeysOpen) { setHotkeysOpen(false); return; }
+			if (e.key === "Escape" && dirPickerOpen) { setDirPickerOpen(false); return; }
+
+			// Ctrl/Cmd combos
+			const mod = e.ctrlKey || e.metaKey;
+			if (mod && e.key === "b") { e.preventDefault(); setSidebarCollapsed((v) => !v); return; }
+			if (mod && e.key === "d") { e.preventDefault(); toggleDiff(); return; }
+			if (mod && e.key === "n") { e.preventDefault(); const p = personas.find((x) => x.name === "coding") ?? personas[0]; if (p) createSession(p.name, cwd); return; }
+			if (mod && e.key === "l") { e.preventDefault(); if (activeId) submitMessage("/clear"); return; }
+			if (mod && e.key === "/") { e.preventDefault(); setHotkeysOpen((v) => !v); return; }
+		};
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	}, [hotkeysOpen, dirPickerOpen, activeId, personas, cwd, createSession, submitMessage, toggleDiff]);
+
 	const messages = session?.messages?.filter((m) => m.role !== "system") || [];
 	// Each thread can run under a different persona — shown right above the
 	// composer (not the header, which is shared chrome) so it's always clear
@@ -1498,6 +1521,9 @@ function App() {
 					<button class="menu-toggle diff-toggle${diffOpen ? " active" : ""}" onClick=${toggleDiff} aria-label=${diffOpen ? "Close diff panel" : "Open diff panel"} title="Diff">
 						<svg class="chevron-icon" width="18" height="18" viewBox="0 0 20 20" fill="none"><path d="M7.5 4l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
 					</button>
+					<button class="menu-toggle" onClick=${() => setHotkeysOpen(true)} aria-label="Keyboard shortcuts" title="Shortcuts (Ctrl+/)">
+						<svg width="18" height="18" viewBox="0 0 20 20" fill="none"><rect x="2" y="6" width="16" height="10" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M5 9h1.5M5 12h1.5M8.5 9h1.5M8.5 12h1.5M12 9h1.5M12 12h1.5M15 9h1.5M15 12h1.5M7 15h6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+					</button>
 				</div>
 			</header>
 
@@ -1530,6 +1556,40 @@ function App() {
 					onPick=${(p) => { setSelectedCwd(p); setDirPickerOpen(false); }}
 					onClose=${() => setDirPickerOpen(false)}
 				/>
+			`}
+
+			${hotkeysOpen && html`
+				<div class="modal-backdrop" onClick=${() => setHotkeysOpen(false)}>
+					<div class="modal modal-hotkeys" onClick=${(e) => e.stopPropagation()}>
+						<div class="modal-header">
+							<span>Keyboard shortcuts</span>
+							<button class="modal-close" onClick=${() => setHotkeysOpen(false)} aria-label="Close">×</button>
+						</div>
+						<div class="hotkeys-list">
+							<div class="hotkey-group">
+								<div class="hotkey-group-title">General</div>
+								<div class="hotkey-row"><span class="hotkey-label">Toggle sidebar</span><span class="hotkey-keys"><kbd>Ctrl</kbd>+<kbd>B</kbd></span></div>
+								<div class="hotkey-row"><span class="hotkey-label">Toggle diff</span><span class="hotkey-keys"><kbd>Ctrl</kbd>+<kbd>D</kbd></span></div>
+								<div class="hotkey-row"><span class="hotkey-label">New session</span><span class="hotkey-keys"><kbd>Ctrl</kbd>+<kbd>N</kbd></span></div>
+								<div class="hotkey-row"><span class="hotkey-label">Clear context</span><span class="hotkey-keys"><kbd>Ctrl</kbd>+<kbd>L</kbd></span></div>
+								<div class="hotkey-row"><span class="hotkey-label">Show shortcuts</span><span class="hotkey-keys"><kbd>Ctrl</kbd>+<kbd>/</kbd></span></div>
+							</div>
+							<div class="hotkey-group">
+								<div class="hotkey-group-title">Composer</div>
+								<div class="hotkey-row"><span class="hotkey-label">Send message</span><span class="hotkey-keys"><kbd>Enter</kbd></span></div>
+								<div class="hotkey-row"><span class="hotkey-label">New line</span><span class="hotkey-keys"><kbd>Shift</kbd>+<kbd>Enter</kbd></span></div>
+								<div class="hotkey-row"><span class="hotkey-label">Abort run</span><span class="hotkey-keys"><kbd>Escape</kbd></span></div>
+								<div class="hotkey-row"><span class="hotkey-label">Navigate suggestions</span><span class="hotkey-keys"><kbd>↑</kbd> <kbd>↓</kbd></span></div>
+							</div>
+							<div class="hotkey-group">
+								<div class="hotkey-group-title">Commands</div>
+								<div class="hotkey-row"><span class="hotkey-label">Command palette</span><span class="hotkey-keys"><kbd>/</kbd></span></div>
+								<div class="hotkey-row"><span class="hotkey-label">Plan mode</span><span class="hotkey-keys"><kbd>/plan</kbd></span></div>
+								<div class="hotkey-row"><span class="hotkey-label">Build mode</span><span class="hotkey-keys"><kbd>/build</kbd></span></div>
+							</div>
+						</div>
+					</div>
+				</div>
 			`}
 
 			<!-- Chat area -->

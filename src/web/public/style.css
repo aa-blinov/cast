@@ -1059,6 +1059,52 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 }
 .modal-btn-primary:hover { opacity: .9; background: var(--cyan); }
 
+/* ── Hotkeys modal ──────────────────────────────────────────────── */
+.modal-hotkeys {
+	max-width: 420px;
+}
+.hotkeys-list {
+	padding: 12px 14px;
+	overflow-y: auto;
+}
+.hotkey-group {
+	margin-bottom: 12px;
+}
+.hotkey-group:last-child { margin-bottom: 0; }
+.hotkey-group-title {
+	font-size: .65rem;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: .06em;
+	color: var(--cyan);
+	margin-bottom: 6px;
+}
+.hotkey-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 4px 0;
+	font-size: .8rem;
+	color: var(--text-dim);
+}
+.hotkey-label {
+	flex: 1;
+}
+.hotkey-keys {
+	display: flex;
+	align-items: center;
+	gap: 3px;
+}
+.hotkey-keys kbd {
+	font-family: var(--font-mono);
+	font-size: .7rem;
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: 4px;
+	padding: 1px 5px;
+	color: var(--text-muted);
+	line-height: 1.4;
+}
 /* ── Utilities ────────────────────────────────────────────────────── */
 .hidden { display: none !important; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); border: 0; }
