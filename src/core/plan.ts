@@ -362,26 +362,67 @@ export function listOpenPlanSteps(content: string): string[] {
 	return listHeadingStepsUnderSteps(content);
 }
 
-/** `###` (one level below `## Steps`) headings inside the Steps section. */
-function listHeadingStepsUnderSteps(content: string): string[] {
+/** Direct child heading sections (one level below `## Steps`) of the Steps
+ * section with the most children. Real plans sometimes emit a duplicate empty
+ * `## Steps` above the real one (email-tool.md) — the section that actually
+ * has children wins. */
+function stepHeadingSections(content: string): Section[] {
 	const sections = parseSections(content);
-	// Real plans sometimes emit a duplicate empty `## Steps` above the real one
-	// (email-tool.md). Prefer the Steps section that actually has ### children.
 	const candidates = sections.filter(
 		(s) => s.level === 2 && (s.heading.toLowerCase() === "steps" || s.heading.toLowerCase().startsWith("steps")),
 	);
-	let best: string[] = [];
+	let best: Section[] = [];
 	for (const stepsSection of candidates) {
 		const childLevel = stepsSection.level + 1;
-		const steps: string[] = [];
-		for (const s of sections) {
-			if (s.startLine <= stepsSection.startLine) continue;
-			if (s.startLine >= stepsSection.bodyEndLine) break;
-			if (s.level === childLevel) steps.push(s.heading);
-		}
+		const steps = sections.filter(
+			(s) =>
+				s.startLine > stepsSection.startLine && s.startLine < stepsSection.bodyEndLine && s.level === childLevel,
+		);
 		if (steps.length > best.length) best = steps;
 	}
 	return best;
+}
+
+/** `###` (one level below `## Steps`) headings inside the Steps section. */
+function listHeadingStepsUnderSteps(content: string): string[] {
+	return stepHeadingSections(content).map((s) => s.heading);
+}
+
+/**
+ * Auto-normalize Steps written as bare `###` headings by inserting a checkbox
+ * line under each one that doesn't already carry one. Without this, a plan
+ * authored one-heading-per-step (each step carrying its own spec — common in
+ * real plans) is invisible to plan_check, which only recognizes `- [ ]`/`- [x]`,
+ * while the open-work gate's heading fallback (listOpenPlanSteps) still flags
+ * those headings as outstanding. That mismatch left the model looping on
+ * plan_check against a plan it could never satisfy, with no in-mode way to
+ * fix the plan's format (plan_edit/plan_discard are build-mode-disabled).
+ * Idempotent (skips headings that already have a checkbox) and fence-aware.
+ */
+function normalizeStepChecklist(content: string): string {
+	const steps = stepHeadingSections(content);
+	if (steps.length === 0) return content;
+
+	const lines = content.split("\n");
+	const fenced = fencedLineMask(lines);
+	const insertions: Array<{ afterLine: number; text: string }> = [];
+	for (const step of steps) {
+		let hasCheckbox = false;
+		for (let i = step.bodyStartLine; i < step.bodyEndLine; i++) {
+			if (!fenced[i] && /^\s*[-*]\s+\[[ xX]\]/.test(lines[i]!)) {
+				hasCheckbox = true;
+				break;
+			}
+		}
+		if (!hasCheckbox) insertions.push({ afterLine: step.startLine, text: `- [ ] ${step.heading}` });
+	}
+	if (insertions.length === 0) return content;
+
+	// Back-to-front so earlier splices don't shift later insertion indices.
+	for (const { afterLine, text } of insertions.sort((a, b) => b.afterLine - a.afterLine)) {
+		lines.splice(afterLine + 1, 0, "", text);
+	}
+	return lines.join("\n");
 }
 
 // ============================================================================
@@ -450,10 +491,11 @@ export function execPlanWrite(args: Record<string, unknown>, planState: PlanStat
 			isError: true,
 		};
 	}
-	const content = typeof args.content === "string" ? args.content.trim() : "";
-	if (!content) {
+	const rawContent = typeof args.content === "string" ? args.content.trim() : "";
+	if (!rawContent) {
 		return { content: "Error: content is required and must not be empty.", isError: true };
 	}
+	const content = normalizeStepChecklist(rawContent);
 	if (content.length > MAX_PLAN_CHARS) {
 		return {
 			content: `Error: plan is ${content.length} chars — the limit is ${MAX_PLAN_CHARS}. A plan is an execution spec, not a document dump: cut decision-free prose, keep every step concrete.`,
@@ -527,11 +569,41 @@ export function execPlanEdit(args: Record<string, unknown>, planState: PlanState
 	const section = matches[0]!;
 	const matchingHeading = section.heading;
 
+	// A section's body may only contain headings strictly deeper than the
+	// section itself. A body heading at the same or shallower level splits the
+	// document into new top-level sections instead of nesting inside this one —
+	// that's how a real session ended up with the plan's `## Steps` heading
+	// duplicated (the model's replacement body for "Steps" itself contained a
+	// fresh "## Design System" followed by another "## Steps"), which then broke
+	// every later heading lookup (plan_edit, listOpenPlanSteps, plan_check).
+	const bodyLines = newBody.split("\n");
+	const bodyFenced = fencedLineMask(bodyLines);
+	const illegalHeadingIndex = bodyLines.findIndex((line, i) => {
+		if (bodyFenced[i]) return false;
+		const match = line.match(/^(#{1,6})\s+/);
+		return match ? match[1]!.length <= section.level : false;
+	});
+	if (illegalHeadingIndex !== -1) {
+		return {
+			content: JSON.stringify({
+				success: false,
+				error:
+					`The new content for "${matchingHeading}" contains a heading ` +
+					`("${bodyLines[illegalHeadingIndex]!.trim()}") at or above this section's own level (${"#".repeat(section.level)}). ` +
+					`That would split the document instead of nesting inside "${matchingHeading}" — likely producing a ` +
+					`duplicate "${matchingHeading}" heading. Use "${"#".repeat(section.level + 1)} ..." or deeper for ` +
+					`anything inside this section's content. To add a new top-level section, edit a different heading, ` +
+					`or rewrite the whole plan with plan_write.`,
+			}),
+			isError: true,
+		};
+	}
+
 	// Replace section body: keep heading line, replace everything until next same-level heading
 	const before = lines.slice(0, section.bodyStartLine);
 	const after = lines.slice(section.bodyEndLine);
 	const newLines = [...before, newBody.trimEnd(), ...after];
-	const newContent = newLines.join("\n");
+	const newContent = normalizeStepChecklist(newLines.join("\n"));
 	if (newContent.length > MAX_PLAN_CHARS) {
 		return {
 			content: `Error: the edit would grow the plan to ${newContent.length} chars — the limit is ${MAX_PLAN_CHARS}. Tighten the section instead of expanding it.`,

@@ -82,6 +82,28 @@ export interface SessionState {
 	 * sessions saved before this field existed (treated as "unknown provider").
 	 */
 	providerUrl?: string;
+	/**
+	 * Reasoning ("thinking") text for assistant messages, keyed by that
+	 * message's index in `messages`. The OpenAI wire format (`Message` in
+	 * core/llm.ts) has no field for it and it's never sent back to the model,
+	 * so it can't live on the message itself — it's only ever handed to
+	 * callers as an ephemeral `assistant_message` event (see core/loop.ts).
+	 * Only the web UI currently writes/reads this, so a page reload or
+	 * session switch can still show a turn's reasoning instead of silently
+	 * dropping it; the TUI continues to show reasoning live-only, matching
+	 * its prior behavior on resume.
+	 */
+	reasoning?: Record<number, string>;
+	/**
+	 * Display title for this thread — defaults to a truncation of the first
+	 * user message (set once, the first time one arrives) and can be
+	 * overridden by an explicit rename. Optional: sessions saved before this
+	 * field existed, or ones with no messages yet, fall back to showing the
+	 * persona name instead. Currently only read/written by the web UI.
+	 */
+	title?: string;
+	/** Pinned to the top of the web UI's session list. Web-only, like `title`. */
+	pinned?: boolean;
 }
 
 /** Fold one turn's usage into the session's running totals. When `opts.subagent`

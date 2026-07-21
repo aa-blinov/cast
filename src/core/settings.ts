@@ -85,6 +85,8 @@ export interface Settings {
 	 * session state, and storing it globally leaked plan mode across projects.
 	 * Kept only so old settings.json files still parse. */
 	mode?: "plan" | "build";
+	/** Web UI password — auto-generated on first `cast web` run. */
+	webPassword?: string;
 }
 
 // ============================================================================
