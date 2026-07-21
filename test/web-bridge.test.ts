@@ -185,4 +185,31 @@ describe("web bridge", () => {
 		expect((await bridge.executeCommand(ws.id, "/steer")).ok).toBe(false);
 		expect((await bridge.executeCommand(ws.id, "/queue")).ok).toBe(false);
 	});
+
+	it("suggestCommand returns subcommands for bare commands", async () => {
+		const bridge = createWebBridge(makeResult());
+		const ws = bridge.createSession();
+
+		const mcpSuggestions = bridge.suggestCommand(ws.id, "/mcp");
+		expect(mcpSuggestions.map((s) => s.value)).toEqual(["list", "enable", "disable", "uninstall", "help"]);
+
+		const skillsSuggestions = bridge.suggestCommand(ws.id, "/skills");
+		expect(skillsSuggestions.map((s) => s.value)).toEqual(["list", "enable", "disable", "uninstall", "help"]);
+
+		const pluginSuggestions = bridge.suggestCommand(ws.id, "/plugin");
+		expect(pluginSuggestions.map((s) => s.value)).toEqual(["list", "install", "uninstall", "enable", "disable", "marketplace", "help"]);
+
+		const permissionsSuggestions = bridge.suggestCommand(ws.id, "/permissions");
+		expect(permissionsSuggestions.map((s) => s.value)).toEqual(["default", "bypass"]);
+
+		const sshSuggestions = bridge.suggestCommand(ws.id, "/ssh");
+		expect(sshSuggestions.map((s) => s.value)).toEqual(["list", "add", "remove"]);
+	});
+
+	it("suggestCommand returns empty for unknown commands", async () => {
+		const bridge = createWebBridge(makeResult());
+		const ws = bridge.createSession();
+		expect(bridge.suggestCommand(ws.id, "/unknown")).toEqual([]);
+		expect(bridge.suggestCommand(ws.id, "/mcp enable unknown-server")).toEqual([]);
+	});
 });

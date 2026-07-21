@@ -176,6 +176,7 @@ export interface WebBridge {
 	getThemes(): Array<{ id: string; label: string; description: string; colors: ThemeColors }>;
 	getModels(): Promise<{ models: ModelInfo[]; error?: string }>;
 	getReasoningOptionsForSession(sessionId: string): { options: Array<{ value: string; label: string }> };
+	suggestCommand(sessionId: string, input: string): Array<{ value: string; label: string }>;
 }
 
 export function createWebBridge(result: StartupResult): WebBridge {
@@ -1153,6 +1154,120 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		return { options: reasoningOptionsFor(model) };
 	}
 
+	function suggestCommand(sessionId: string, input: string): Array<{ value: string; label: string }> {
+		const trimmed = input.trim();
+		if (!trimmed.startsWith("/")) return [];
+		const spaceIdx = trimmed.indexOf(" ");
+		const cmd = spaceIdx === -1 ? trimmed : trimmed.slice(0, spaceIdx);
+		const arg = spaceIdx === -1 ? "" : trimmed.slice(spaceIdx + 1).trim();
+		const settings = loadSettings();
+
+		if (cmd === "/mcp") {
+			if (!arg) return ["list", "enable", "disable", "uninstall", "help"].map((v) => ({ value: v, label: v }));
+			const [sub] = arg.split(/\s+/);
+			if (sub === "enable") {
+				const disabled = new Set(settings.disabledMcpServers ?? []);
+				return mcpResult.allServerNames.filter((n) => disabled.has(n)).map((v) => ({ value: v, label: v }));
+			}
+			if (sub === "disable") {
+				const disabled = new Set(settings.disabledMcpServers ?? []);
+				return mcpResult.allServerNames.filter((n) => !disabled.has(n)).map((v) => ({ value: v, label: v }));
+			}
+			if (sub === "uninstall") return mcpResult.allServerNames.map((v) => ({ value: v, label: v }));
+			return [];
+		}
+
+		if (cmd === "/skills") {
+			if (!arg) return ["list", "enable", "disable", "uninstall", "help"].map((v) => ({ value: v, label: v }));
+			const [sub] = arg.split(/\s+/);
+			const sessionCwd = sessions.get(sessionId)?.session.cwd ?? cwd;
+			const discovered = discoverSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
+			if (sub === "enable") {
+				const disabled = new Set(settings.disabledSkills ?? []);
+				return discovered.filter((s) => disabled.has(s.name)).map((s) => ({ value: s.name, label: s.description }));
+			}
+			if (sub === "disable") {
+				const disabled = new Set(settings.disabledSkills ?? []);
+				return discovered
+					.filter((s) => !disabled.has(s.name))
+					.map((s) => ({ value: s.name, label: s.description }));
+			}
+			if (sub === "uninstall")
+				return discovered.filter(isUninstallableSkill).map((s) => ({ value: s.name, label: s.description }));
+			return [];
+		}
+
+		if (cmd === "/plugin") {
+			if (!arg)
+				return ["list", "install", "uninstall", "enable", "disable", "marketplace", "help"].map((v) => ({
+					value: v,
+					label: v,
+				}));
+			const [sub] = arg.split(/\s+/);
+			if (sub === "marketplace" && !arg.slice(sub.length).trim())
+				return ["list", "add", "remove", "update"].map((v) => ({ value: v, label: v }));
+			if (sub === "enable" || sub === "disable" || sub === "uninstall") {
+				return listInstalledPlugins(settings).map((p) => ({ value: p.id, label: p.description ?? p.id }));
+			}
+			if (sub === "install") {
+				const catalogs = listKnownMarketplaces();
+				const items: Array<{ value: string; label: string }> = [];
+				for (const mp of catalogs) {
+					try {
+						const cat = getMarketplaceCatalog(mp.name);
+						for (const p of cat.plugins) items.push({ value: p.name, label: p.description ?? p.name });
+					} catch {
+						/* skip broken catalogs */
+					}
+				}
+				return items;
+			}
+			return [];
+		}
+
+		if (cmd === "/provider") {
+			const providers = settings.providers ?? [];
+			if (!arg)
+				return ["list", "add", "delete", ...providers.map((p) => p.name)].map((v) => ({ value: v, label: v }));
+			const [sub] = arg.split(/\s+/);
+			if (sub === "delete") return providers.map((p) => ({ value: p.name, label: p.name }));
+			return [];
+		}
+
+		if (cmd === "/ssh") {
+			if (!arg) return ["list", "add", "remove"].map((v) => ({ value: v, label: v }));
+			const [sub] = arg.split(/\s+/);
+			if (sub === "remove") return sshHosts.map((h) => ({ value: h.name, label: h.name }));
+			return [];
+		}
+
+		if (cmd === "/permissions") {
+			if (!arg) return ["default", "bypass"].map((v) => ({ value: v, label: v }));
+			return [];
+		}
+
+		if (cmd === "/plan-model") {
+			if (!arg) {
+				const models = getModelsCache() ?? [];
+				return [
+					...models.map((m) => ({ value: m.id, label: m.id })),
+					{ value: "off", label: "off" },
+					{ value: "reset", label: "reset" },
+				];
+			}
+			return [];
+		}
+
+		if (cmd === "/subagent-model") {
+			if (!arg) {
+				const models = getModelsCache() ?? [];
+				return models.map((m) => ({ value: m.id, label: m.id }));
+			}
+			return [];
+		}
+
+		return [];
+	}
 	return {
 		createSession: createSessionInstance,
 		getSession,
@@ -1170,6 +1285,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		getThemes,
 		getModels,
 		getReasoningOptionsForSession,
+		suggestCommand,
 	};
 }
 

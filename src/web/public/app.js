@@ -300,6 +300,7 @@ function Composer({ running, ready, activeId, commands, personas, themes, onSubm
 	const modelMatch = /^\/model\s+(\S*)$/i.exec(value);
 	const reasoningMatch = /^\/reasoning\s+(\S*)$/i.exec(value);
 	const webMatch = /^\/web\s+(\S*)$/i.exec(value);
+	const suggestMatch = /^\/(mcp|skills|plugin|provider|ssh|permissions|subagent-model|plan-model)\s+(\S*)$/i.exec(value);
 
 	// Both lazy-loaded (only worth a network round trip once the user is
 	// actually typing that command) and re-fetched whenever the picker they
@@ -307,6 +308,7 @@ function Composer({ running, ready, activeId, commands, personas, themes, onSubm
 	// shouldn't require a page reload to show up.
 	const [models, setModels] = useState(null);
 	const [reasoningOptions, setReasoningOptions] = useState(null);
+	const [suggestions, setSuggestions] = useState(null);
 	useEffect(() => {
 		if (!modelMatch || models !== null) return;
 		let cancelled = false;
@@ -322,6 +324,24 @@ function Composer({ running, ready, activeId, commands, personas, themes, onSubm
 	// Switching sessions (a different model) invalidates any reasoning
 	// options fetched for the previous one.
 	useEffect(() => { setReasoningOptions(null); }, [activeId]);
+
+	// Reset suggestions when the typed command shifts (e.g. /mcp enable → /mcp disable).
+	const suggestKey = suggestMatch ? suggestMatch[0] : null;
+	const prevSuggestKey = useRef(null);
+	useEffect(() => {
+		if (suggestKey !== prevSuggestKey.current) {
+			setSuggestions(null);
+			prevSuggestKey.current = suggestKey;
+		}
+	}, [suggestKey]);
+	useEffect(() => {
+		if (!suggestMatch || !activeId || suggestions !== null) return;
+		let cancelled = false;
+		api("GET", `/api/suggest?q=${encodeURIComponent(value)}&session=${activeId}`)
+			.then((d) => { if (!cancelled && d) setSuggestions(d); })
+			.catch(() => {});
+		return () => { cancelled = true; };
+	}, [Boolean(suggestMatch), activeId, value, suggestions]);
 
 	const resize = useCallback(() => {
 		const el = textareaRef.current;
@@ -388,6 +408,11 @@ function Composer({ running, ready, activeId, commands, personas, themes, onSubm
 		if (textareaRef.current) textareaRef.current.style.height = "auto";
 	}, [onSubmit]);
 
+	const handleGenericSuggest = useCallback((v) => {
+		onSubmit(value.replace(/\s+\S*$/, ` ${v}`));
+		setValue("");
+	}, [value, onSubmit]);
+
 	const handleInput = useCallback((e) => {
 		const val = e.target.value;
 		setValue(val);
@@ -427,6 +452,10 @@ function Composer({ running, ready, activeId, commands, personas, themes, onSubm
 		const q = webMatch[1].toLowerCase();
 		pickerItems = WEB_TOOLS_OPTIONS.filter((o) => o.value.startsWith(q));
 		pickerSelect = handleWebSelect;
+	} else if (suggestMatch) {
+		const q = suggestMatch[2].toLowerCase();
+		pickerItems = (suggestions || []).filter((o) => o.value.toLowerCase().startsWith(q));
+		pickerSelect = handleGenericSuggest;
 	} else if (cmdVisible) {
 		pickerItems = value ? commands.filter((c) => c.name.startsWith(value)) : commands;
 		pickerSelect = handleCmdSelect;
@@ -434,7 +463,7 @@ function Composer({ running, ready, activeId, commands, personas, themes, onSubm
 	// Fetched lazily (see the effects above) — without this, typing "/model "
 	// before the /v1/models round trip resolves just shows an empty, seemingly
 	// broken picker for a moment instead of any feedback that it's working.
-	const pickerLoading = (modelMatch && models === null) || (reasoningMatch && reasoningOptions === null);
+	const pickerLoading = (modelMatch && models === null) || (reasoningMatch && reasoningOptions === null) || (suggestMatch && suggestions === null);
 	const clampedIndex = pickerItems.length > 0 ? Math.min(selectedIndex, pickerItems.length - 1) : 0;
 
 	// Arrow-key nav must scroll the picker, not just select past the visible
@@ -481,7 +510,7 @@ function Composer({ running, ready, activeId, commands, personas, themes, onSubm
 			<div ref=${pickerRef}>
 				${pickerLoading
 					? html`<div class="cmd-palette open"><div class="cmd-item cmd-loading">Loading…</div></div>`
-					: (personaMatch || themeMatch || modelMatch || reasoningMatch || webMatch)
+					: (personaMatch || themeMatch || modelMatch || reasoningMatch || webMatch || suggestMatch)
 					? html`<${ValueSuggest} items=${pickerItems} selectedIndex=${clampedIndex} onHover=${setSelectedIndex} onSelect=${pickerSelect} />`
 					: html`<${CommandPalette} items=${pickerItems} selectedIndex=${clampedIndex} running=${running} visible=${cmdVisible} onHover=${setSelectedIndex} onSelect=${handleCmdSelect} />`
 				}
