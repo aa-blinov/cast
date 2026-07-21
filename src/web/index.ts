@@ -112,7 +112,7 @@ async function main(): Promise<void> {
 	const bridge = createWebBridge(result);
 	bridge.createSession();
 
-	startWebServer({ port, bridge, webUser: "cast", webPassword });
+	startWebServer({ port, bridge, webUser: "cast", webPassword, version: VERSION });
 }
 
 main().catch((err) => {

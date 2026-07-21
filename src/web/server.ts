@@ -28,10 +28,11 @@ export interface WebServerOptions {
 	bridge: WebBridge;
 	webUser: string;
 	webPassword: string;
+	version: string;
 }
 
 export function startWebServer(options: WebServerOptions): ReturnType<typeof createServer> {
-	const { port, bridge, webUser, webPassword } = options;
+	const { port, bridge, webUser, webPassword, version } = options;
 	const publicDir = join(import.meta.dirname ?? ".", "public");
 
 	console.log(`[cast web] auth enabled (user: ${webUser})`);
@@ -94,10 +95,21 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 			if (!stat.isFile()) return false;
 			const ext = extname(filePath);
 			const mime = MIME_TYPES[ext] ?? "application/octet-stream";
-			const content = readFileSync(filePath);
+			// index.html is never cached (below), but app.js/style.css are — so
+			// stamp their URLs with the running version here. A browser holding
+			// a stale cached index.html still asks for the JS/CSS it originally
+			// linked, which is fine; any fresh load after an upgrade gets new
+			// URLs and bypasses the old cache entry instead of racing it.
+			let content: Buffer | string = readFileSync(filePath);
+			if (ext === ".html") {
+				content = content
+					.toString("utf-8")
+					.replace('href="/style.css"', `href="/style.css?v=${version}"`)
+					.replace('src="/app.js"', `src="/app.js?v=${version}"`);
+			}
 			res.writeHead(200, {
 				"Content-Type": mime,
-				"Content-Length": content.length,
+				"Content-Length": Buffer.byteLength(content),
 				"Cache-Control": ext === ".html" ? "no-cache" : "public, max-age=3600",
 			});
 			res.end(content);
