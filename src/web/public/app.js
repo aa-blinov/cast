@@ -1329,7 +1329,38 @@ function App() {
 						break;
 					case "doom_loop":
 						setSession((prev) => prev ? { ...prev, messages: [...prev.messages, { role: "warning", content: `Doom loop: ${event.tool} called ${event.attempts} times` }] } : prev);
-						break;
+							break;
+						case "steering_injected":
+						case "followup_injected": {
+							// Promote streaming to history first, then show injected messages.
+							setStreaming((prevStreaming) => {
+								setSession((prev) => {
+									if (!prev) return prev;
+									const msgs = prevStreaming.length > 0 ? [...prev.messages, { role: "assistant", blocks: prevStreaming }] : prev.messages;
+									const injected = event.messages.map((m) => ({ role: "user", content: typeof m.content === "string" ? m.content : JSON.stringify(m.content) }));
+									return { ...prev, messages: [...msgs, ...injected] };
+								});
+								return [];
+							});
+							if (event.type === "steering_injected") {
+								setPendingSteers((p) => p.slice(event.messages.length));
+							} else {
+								setPendingQueue((p) => p.slice(event.messages.length));
+							}
+							break;
+							}
+						case "interrupt_reminder":
+							setSession((prev) => prev ? { ...prev, messages: [...prev.messages, { role: "warning", content: "Context restored after interrupt" }] } : prev);
+							break;
+						case "date_rollover":
+							setSession((prev) => prev ? { ...prev, messages: [...prev.messages, { role: "warning", content: `Date rolled over to ${event.date}` }] } : prev);
+							break;
+						case "open_work_gate":
+							addNotice(`Plan steps still open — continuing (attempt ${event.fires})`);
+							break;
+						case "open_work_gate_exhausted":
+							addNotice("Plan steps still open — max retries reached, ending turn");
+							break;
 					case "session_closed":
 						// Reached if this session was closed by another client/tab —
 						// a self-initiated close clears the flag instead of toasting.
