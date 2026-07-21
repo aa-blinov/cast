@@ -527,8 +527,8 @@ function Composer({ running, ready, activeId, commands, personas, themes, onSubm
 					onKeyDown=${handleKeyDown}
 				/>
 				${running
-					? html`<button class="composer-abort" onClick=${onAbort}>Abort</button>`
-					: html`<button class="composer-send" onClick=${handleSubmit} disabled=${!ready || !value.trim()}>Send</button>`
+					? html`<button class="composer-abort" onClick=${onAbort} aria-label="Abort"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="3" y="3" width="10" height="10" rx="2" fill="currentColor"/></svg></button>`
+					: html`<button class="composer-send" onClick=${handleSubmit} disabled=${!ready || !value.trim()} aria-label="Send"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M14 2L7 9M14 2L9.5 14L7 9M14 2L2 6.5L7 9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`
 				}
 			</div>
 		</div>

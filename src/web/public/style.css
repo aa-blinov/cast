@@ -718,12 +718,12 @@ body.resizing-diff * { user-select: none; }
 	background: var(--cyan);
 	border: 1px solid var(--cyan);
 	border-radius: var(--radius);
-	padding: 10px 16px;
+	padding: 8px;
 	color: var(--accent-fg);
-	font-family: var(--font);
-	font-size: .85rem; font-weight: 600;
 	cursor: pointer;
-	white-space: nowrap;
+	display: flex; align-items: center; justify-content: center;
+	width: 36px; height: 36px;
+	flex-shrink: 0;
 	transition: opacity .15s;
 }
 .composer-send:hover { opacity: .9; }
@@ -732,12 +732,12 @@ body.resizing-diff * { user-select: none; }
 	background: transparent;
 	border: 1px solid rgba(239,68,68,.4);
 	border-radius: var(--radius);
-	padding: 10px 16px;
+	padding: 8px;
 	color: #fca5a5;
-	font-family: var(--font);
-	font-size: .85rem; font-weight: 600;
 	cursor: pointer;
-	white-space: nowrap;
+	display: flex; align-items: center; justify-content: center;
+	width: 36px; height: 36px;
+	flex-shrink: 0;
 	transition: background .15s;
 }
 .composer-abort:hover { background: rgba(239,68,68,.1); }
