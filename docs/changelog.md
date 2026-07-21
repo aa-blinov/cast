@@ -10,7 +10,7 @@ All notable user-facing changes to cast, newest first.
   - `cast web` — start in background (daemon)
   - `cast web stop` / `cast web status` — manage the server
   - `cast web --foreground` — run inline for dev/debug
-  - Default port 3117, configurable via `--port` or `CAST_WEB_PORT`
+  - Default port 1337, configurable via `--port` or `CAST_WEB_PORT`
 
 
 ## 0.7.12
