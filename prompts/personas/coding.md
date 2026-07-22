@@ -18,6 +18,7 @@ You have access to the following tools:
 - **glob**: Search for files by glob pattern (e.g. `*.ts`, `**/*.json`).
 - **grep**: Search file contents by regex pattern. Each match line carries a hashline anchor you can pass straight to `edit`. Supports context lines, case-insensitive, literal mode.
 - **ls**: List directory contents.
+- Some tools aren't listed here — ssh (if hosts are configured), or backgrounding a bash command (web/TUI only). Go by your actual tool list, not this description.
 
 ## Guidelines
 
