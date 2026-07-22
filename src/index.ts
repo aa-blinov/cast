@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { openSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +9,7 @@ import { loadSettings } from "./core/settings.ts";
 import type { ParsedArgs } from "./core/startup.ts";
 import { runUpgrade } from "./core/upgrade.ts";
 import { runTui } from "./ui/tui.tsx";
+import { clearWebState, isProcessAlive, readLiveWebState, readWebState } from "./web/daemon-state.ts";
 
 const VERSION: string = JSON.parse(
 	readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf-8"),
@@ -220,113 +221,182 @@ Options:
 }
 
 async function handleWebCommand(args: string[]): Promise<void> {
-	const PID_FILE = join(homedir(), ".cast", "web.pid");
 	const LOG_FILE = join(homedir(), ".cast", "web.log");
 
-	// Subcommands
 	if (args[0] === "stop") {
-		if (!existsSync(PID_FILE)) {
-			console.log("[cast web] not running (no PID file)");
-			return;
-		}
-		const pid = parseInt(readFileSync(PID_FILE, "utf-8").trim(), 10);
-		try {
-			process.kill(pid, "SIGTERM");
-			console.log(`[cast web] stopped (pid ${pid})`);
-		} catch {
-			console.log(`[cast web] process ${pid} not found — cleaning up`);
-		}
-		try {
-			unlinkSync(PID_FILE);
-		} catch {
-			/* ignore */
-		}
+		await stopWebDaemon();
 		return;
 	}
 
 	if (args[0] === "status") {
-		if (!existsSync(PID_FILE)) {
-			console.log("[cast web] not running");
-			return;
-		}
-		const pid = parseInt(readFileSync(PID_FILE, "utf-8").trim(), 10);
-		try {
-			process.kill(pid, 0); // signal 0 = check alive
-			console.log(`[cast web] running (pid ${pid}) — http://localhost:${getPort(args)}`);
-		} catch {
-			console.log("[cast web] stale PID file — process not running");
-			try {
-				unlinkSync(PID_FILE);
-			} catch {
-				/* ignore */
-			}
-		}
+		printWebStatus();
 		return;
 	}
 
-	// Determine mode: foreground or daemon
 	const foreground = args.includes("--foreground");
 	const port = getPort(args);
-	const restArgs = args.filter((a) => a !== "--foreground" && a !== "start" && a !== "--port" && a !== String(port));
+	const host = getHost(args);
+
+	// Everything except lifecycle flags (subcommand, port/host/public,
+	// foreground) forwards to the server process as-is — model/persona/
+	// reasoning/bypass-permissions. Port and host are re-appended explicitly
+	// below so the child always gets one canonical `--port`/`--host`
+	// regardless of how the user spelled them (e.g. `--public` alone).
+	const restArgs: string[] = [];
+	for (let i = 0; i < args.length; i++) {
+		const a = args[i]!;
+		if (a === "start" || a === "--foreground" || a === "--public") continue;
+		if (a === "--port" || a === "--host") {
+			i++; // also skip this flag's value
+			continue;
+		}
+		restArgs.push(a);
+	}
+
+	const existing = readLiveWebState();
+	if (existing) {
+		const mode = existing.foreground ? " (foreground)" : "";
+		console.error(
+			`[cast web] already running (pid ${existing.pid})${mode} — http://${existing.host}:${existing.port}`,
+		);
+		console.error("[cast web] use 'cast web stop' first, or 'cast web status' to check.");
+		process.exit(1);
+	}
+
+	const spawnArgs = ["--import", "tsx", "./src/web/index.ts", ...restArgs, "--port", String(port), "--host", host];
+	const spawnCwd = join(dirname(fileURLToPath(import.meta.url)), "..");
+	const spawnEnv = {
+		...process.env,
+		CAST_CWD: process.cwd(),
+		CAST_WEB_PORT: String(port),
+		CAST_WEB_HOST: host,
+		CAST_WEB_FOREGROUND: foreground ? "1" : "0",
+	};
 
 	if (foreground) {
-		// Run inline (no daemon)
-		const child = spawn(
-			process.execPath,
-			["--import", "tsx", "./src/web/index.ts", ...restArgs, "--port", String(port)],
-			{
-				cwd: join(dirname(fileURLToPath(import.meta.url)), ".."),
-				stdio: "inherit",
-				env: { ...process.env, CAST_CWD: process.cwd(), CAST_WEB_PORT: String(port) },
-			},
-		);
+		const child = spawn(process.execPath, spawnArgs, { cwd: spawnCwd, stdio: "inherit", env: spawnEnv });
 		child.on("exit", (code) => process.exit(code ?? 0));
 		return;
 	}
 
-	// Daemon mode
-	if (existsSync(PID_FILE)) {
-		const pid = parseInt(readFileSync(PID_FILE, "utf-8").trim(), 10);
-		try {
-			process.kill(pid, 0);
-			console.error(`[cast web] already running (pid ${pid}). Use 'cast web stop' first.`);
-			process.exit(1);
-		} catch {
-			// Stale PID — clean up
-			try {
-				unlinkSync(PID_FILE);
-			} catch {
-				/* ignore */
-			}
-		}
-	}
-
+	// Daemon mode: spawn detached, then wait for the child to actually report
+	// success (its own state-file write, once really listening) or failure
+	// (it exits early — bad port, crash) instead of declaring victory the
+	// instant spawn() returns, which is true whether or not the child goes
+	// on to bind at all.
 	const logFd = openSync(LOG_FILE, "a");
-	const child = spawn(
-		process.execPath,
-		["--import", "tsx", "./src/web/index.ts", ...restArgs, "--port", String(port)],
-		{
-			cwd: join(dirname(fileURLToPath(import.meta.url)), ".."),
-			detached: true,
-			stdio: ["ignore", logFd, logFd],
-			env: { ...process.env, CAST_CWD: process.cwd(), CAST_WEB_PORT: String(port) },
-		},
-	);
-
+	const child = spawn(process.execPath, spawnArgs, {
+		cwd: spawnCwd,
+		detached: true,
+		stdio: ["ignore", logFd, logFd],
+		env: spawnEnv,
+	});
 	child.unref();
 
-	// Write PID
-	writeFileSync(PID_FILE, String(child.pid), "utf-8");
-
-	console.log(`[cast web] started (pid ${child.pid}) — http://localhost:${port}`);
+	const started = await waitForStartup(child.pid!);
+	if (!started) {
+		console.error(`[cast web] failed to start — see ${LOG_FILE} for details`);
+		process.exit(1);
+	}
+	console.log(`[cast web] started (pid ${child.pid}) — http://${host}:${port}`);
 	console.log(`[cast web] logs: ${LOG_FILE}`);
 	console.log(`[cast web] stop: cast web stop`);
+}
+
+/** Polls for the child's own state-file write (real success) or its early exit (real failure), up to 5s. */
+function waitForStartup(pid: number): Promise<boolean> {
+	return new Promise((resolvePromise) => {
+		let settled = false;
+		const finish = (ok: boolean) => {
+			if (settled) return;
+			settled = true;
+			clearInterval(poll);
+			resolvePromise(ok);
+		};
+		const poll = setInterval(() => {
+			const state = readWebState();
+			if (state?.pid === pid) finish(true);
+			else if (!isProcessAlive(pid)) finish(false);
+		}, 150);
+		setTimeout(() => finish(false), 5000).unref();
+	});
+}
+
+function waitForExit(pid: number, timeoutMs: number): Promise<boolean> {
+	return new Promise((resolvePromise) => {
+		const start = Date.now();
+		const poll = setInterval(() => {
+			if (!isProcessAlive(pid)) {
+				clearInterval(poll);
+				resolvePromise(true);
+			} else if (Date.now() - start >= timeoutMs) {
+				clearInterval(poll);
+				resolvePromise(false);
+			}
+		}, 100);
+	});
+}
+
+async function stopWebDaemon(): Promise<void> {
+	const state = readWebState();
+	if (!state) {
+		console.log("[cast web] not running");
+		return;
+	}
+	if (!isProcessAlive(state.pid)) {
+		// Killed out from under us — by the OS, an OOM killer, or the user
+		// directly. Nothing to signal; just say so honestly and clean up
+		// instead of claiming to have "stopped" a process that was already gone.
+		console.log(`[cast web] was not actually running (pid ${state.pid} is gone) — stale state cleaned up`);
+		clearWebState();
+		return;
+	}
+
+	process.kill(state.pid, "SIGTERM");
+	let died = await waitForExit(state.pid, 3000);
+	if (!died) {
+		// The in-process SIGTERM handler didn't finish in time (slow session
+		// drain, or an old build without the handler at all) — escalate
+		// rather than leave the caller thinking `stop` silently did nothing.
+		try {
+			process.kill(state.pid, "SIGKILL");
+		} catch {
+			/* already gone */
+		}
+		died = await waitForExit(state.pid, 1000);
+	}
+	clearWebState();
+	console.log(`[cast web] stopped (pid ${state.pid}) — was on http://${state.host}:${state.port}`);
+	if (!died) console.log("[cast web] warning: process may not have fully exited");
+}
+
+function printWebStatus(): void {
+	const state = readWebState();
+	if (!state) {
+		console.log("[cast web] not running");
+		return;
+	}
+	if (!isProcessAlive(state.pid)) {
+		console.log("[cast web] stale state — process not running");
+		clearWebState();
+		return;
+	}
+	const mode = state.foreground ? " (foreground)" : "";
+	console.log(`[cast web] running (pid ${state.pid})${mode} — http://${state.host}:${state.port}`);
+	console.log(`[cast web] started: ${state.startedAt}`);
 }
 
 function getPort(args: string[]): number {
 	const idx = args.indexOf("--port");
 	if (idx >= 0 && args[idx + 1]) return parseInt(args[idx + 1]!, 10);
 	return parseInt(process.env.CAST_WEB_PORT ?? "1337", 10);
+}
+
+function getHost(args: string[]): string {
+	const idx = args.indexOf("--host");
+	if (idx >= 0 && args[idx + 1]) return args[idx + 1]!;
+	if (args.includes("--public")) return "0.0.0.0";
+	return process.env.CAST_WEB_HOST ?? "127.0.0.1";
 }
 
 main().catch((err) => {

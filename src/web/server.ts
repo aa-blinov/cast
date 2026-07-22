@@ -25,14 +25,20 @@ const MIME_TYPES: Record<string, string> = {
 
 export interface WebServerOptions {
 	port: number;
+	/** Interface to bind — the caller decides the default (127.0.0.1 vs 0.0.0.0), this just binds what it's given. */
+	host: string;
 	bridge: WebBridge;
 	webUser: string;
 	webPassword: string;
 	version: string;
+	/** Fires once the server is actually bound and accepting connections. */
+	onListening?: () => void;
+	/** Fires on a listen failure (e.g. EADDRINUSE) instead of the process crashing on an unhandled error event. */
+	onError?: (err: NodeJS.ErrnoException) => void;
 }
 
 export function startWebServer(options: WebServerOptions): ReturnType<typeof createServer> {
-	const { port, bridge, webUser, webPassword, version } = options;
+	const { port, host, bridge, webUser, webPassword, version } = options;
 	const publicDir = join(import.meta.dirname ?? ".", "public");
 
 	console.log(`[cast web] auth enabled (user: ${webUser})`);
@@ -461,8 +467,19 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 		res.end("Not found");
 	});
 
-	server.listen(port, "0.0.0.0", () => {
-		console.log(`[cast web] listening on http://0.0.0.0:${port}`);
+	// A raw, unhandled "error" event on an http.Server crashes the process
+	// with a stack trace — the common case being EADDRINUSE (another 'cast
+	// web', or anything else, already on this port). Route it through
+	// `onError` instead of exiting here directly, so the caller controls what
+	// "failed to start" means for it (the CLI launcher prints a clear message
+	// and exits; a test can assert on the error without killing the runner).
+	server.on("error", (err: NodeJS.ErrnoException) => {
+		options.onError?.(err);
+	});
+
+	server.listen(port, host, () => {
+		console.log(`[cast web] listening on http://${host}:${port}`);
+		options.onListening?.();
 	});
 
 	return server;

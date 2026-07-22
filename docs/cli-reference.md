@@ -51,13 +51,19 @@ Web UI mode: launches a browser-based control room for managing background agent
 ```bash
 cast web                 # Start in background (daemon)
 cast web start           # Same as above
-cast web stop            # Stop the background server
-cast web status          # Check if running
+cast web stop            # Stop the background server (SIGTERM → SIGKILL after 3s)
+cast web status          # Check if running (auto-heals stale state)
 cast web --foreground    # Run inline (for dev/debug)
 cast web --port 8080     # Custom port (default: 1337, or set CAST_WEB_PORT)
+cast web --host 0.0.0.0  # Bind to all interfaces (reachable from network)
+cast web --public        # Alias for --host 0.0.0.0
 ```
 
 First run generates a password, printed to the terminal and saved in `~/.cast/settings.json`. Username is always `cast`.
+
+Binding to a non-loopback address (`--host 0.0.0.0` or `--public`) prints a warning — the server is reachable from other machines on the network, protected only by the password.
+
+Starting when another instance is already running prints an error and exits. `stop` gracefully shuts down open sessions (SIGTERM), escalating to SIGKILL after 3 seconds if the process doesn't exit. If the recorded process is already gone (crash, OOM, `kill -9`), `status` and `stop` detect the stale state, clean up, and report honestly.
 
 Features:
 - Create/switch/close sessions with different personas, running independently in parallel
