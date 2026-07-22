@@ -2,6 +2,25 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.8.4
+
+### Added
+
+- New shared prompt section (`verification-discipline.md`) instructs the agent to verify changes against the real running interface rather than trusting tests alone — appended to every persona and subagent prompt.
+
+
+### Fixed
+
+- Search tool (`grep`, `glob`) no longer blocks the Node event loop while `fd`/`rg` run — switched from sync to async subprocess execution, which matters under concurrent tool calls.
+
+### Internal
+
+- Eval harness restructured into `benches/` (basic, hashline, mutation) + `lib/` (runner, fixtures, results, trace-view).
+- Eval runner now supports model comparison (`--compare`, `--compare-x3`) and trace replay (`--trace`).
+- Added mutation bench for measuring tool robustness against prompt perturbations.
+- Added eval methodology doc (`docs/eval-methodology.md`).
+
+
 ## 0.8.3
 
 ### Changed

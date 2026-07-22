@@ -8,6 +8,7 @@ import { findSubagentPrompt, loadSubagentPrompts, type SubagentPrompt } from "..
 import { execTask } from "../src/core/tools/task.ts";
 
 const HARNESS_DISCIPLINE_FILE = join(import.meta.dirname, "..", "prompts", "harness-discipline.md");
+const VERIFICATION_DISCIPLINE_FILE = join(import.meta.dirname, "..", "prompts", "verification-discipline.md");
 
 const testConfig = {
 	baseURL: "http://localhost",
@@ -88,11 +89,15 @@ describe("loadSubagentPrompts", () => {
 		expect(worker!.systemPrompt).toContain("## Error Handling");
 		const disciplineExpected = readFileSync(HARNESS_DISCIPLINE_FILE, "utf-8").trim();
 		expect(worker!.systemPrompt).toContain(disciplineExpected);
+		const verificationExpected = readFileSync(VERIFICATION_DISCIPLINE_FILE, "utf-8").trim();
+		expect(worker!.systemPrompt).toContain(verificationExpected);
 		const errIdx = worker!.systemPrompt.indexOf("## Error Handling");
 		const editIdx = worker!.systemPrompt.indexOf("## File tools / hashline anchors");
 		const discIdx = worker!.systemPrompt.indexOf("## Agent discipline");
+		const verifIdx = worker!.systemPrompt.indexOf('## Verification before "done"');
 		expect(editIdx).toBeGreaterThan(errIdx);
 		expect(discIdx).toBeGreaterThan(editIdx);
+		expect(verifIdx).toBeGreaterThan(discIdx);
 	});
 
 	it("each prompt has name, label, description, systemPrompt", () => {
