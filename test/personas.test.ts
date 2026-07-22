@@ -9,6 +9,7 @@ const PERSONAS_DIR = join(import.meta.dirname, "..", "prompts", "personas");
 const ERROR_HANDLING_FILE = join(import.meta.dirname, "..", "prompts", "error-handling.md");
 const TOOLS_EDIT_FILE = join(import.meta.dirname, "..", "prompts", "tools-edit.md");
 const HARNESS_DISCIPLINE_FILE = join(import.meta.dirname, "..", "prompts", "harness-discipline.md");
+const VERIFICATION_DISCIPLINE_FILE = join(import.meta.dirname, "..", "prompts", "verification-discipline.md");
 
 describe("listPersonas", () => {
 	it("finds the shipped coding and fiction-writer personas", () => {
@@ -70,20 +71,26 @@ describe("listPersonas", () => {
 			expect(raw).not.toContain("## File tools / hashline anchors");
 			expect(raw).not.toContain("## edit / hashline anchors");
 			expect(raw).not.toContain("## Agent discipline");
+			expect(raw).not.toContain('## Verification before "done"');
 		}
 
-		// Same shared-source contract for the tool-guidance and discipline blocks.
+		// Same shared-source contract for the tool-guidance, discipline, and
+		// verification blocks.
 		const toolsExpected = readFileSync(TOOLS_EDIT_FILE, "utf-8").trim();
 		const disciplineExpected = readFileSync(HARNESS_DISCIPLINE_FILE, "utf-8").trim();
+		const verificationExpected = readFileSync(VERIFICATION_DISCIPLINE_FILE, "utf-8").trim();
 		for (const persona of personas) {
 			expect(persona.systemPrompt).toContain(toolsExpected);
 			expect(persona.systemPrompt).toContain(disciplineExpected);
+			expect(persona.systemPrompt).toContain(verificationExpected);
 			const errIdx = persona.systemPrompt.indexOf("## Error Handling");
 			const editIdx = persona.systemPrompt.indexOf("## File tools / hashline anchors");
 			const discIdx = persona.systemPrompt.indexOf("## Agent discipline");
+			const verifIdx = persona.systemPrompt.indexOf('## Verification before "done"');
 			expect(errIdx).toBeGreaterThan(-1);
 			expect(editIdx).toBeGreaterThan(errIdx);
 			expect(discIdx).toBeGreaterThan(editIdx);
+			expect(verifIdx).toBeGreaterThan(discIdx);
 		}
 	});
 });

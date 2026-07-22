@@ -42,10 +42,11 @@ export function readRequiredPrompt(promptsDir: string, fileName: string): string
 
 /**
  * Optional shared sections appended to every persona and subagent prompt:
- * tool-failure mechanics, the read/edit/hashline contract, and turn discipline
- * (safety / parallel / preamble / secrecy). Missing files omit that section
- * rather than failing the whole load — same policy as the previous private
- * helpers in personas.ts.
+ * tool-failure mechanics, the read/edit/hashline contract, turn discipline
+ * (safety / parallel / preamble / secrecy), and verifying against the real
+ * running thing rather than trusting a test suite alone. Missing files omit
+ * that section rather than failing the whole load — same policy as the
+ * previous private helpers in personas.ts.
  */
 function readOptionalShared(fileName: string): string {
 	try {
@@ -62,6 +63,7 @@ export function withSharedToolPrompt(body: string): string {
 		readOptionalShared("error-handling.md"),
 		readOptionalShared("tools-edit.md"),
 		readOptionalShared("harness-discipline.md"),
+		readOptionalShared("verification-discipline.md"),
 	]
 		.filter(Boolean)
 		.join("\n\n");
