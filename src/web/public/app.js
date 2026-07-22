@@ -55,7 +55,7 @@ async function api(method, path, body) {
 		opts.headers["Content-Type"] = "application/json";
 		opts.body = JSON.stringify(body);
 	}
-	const res = await fetch(path, opts);
+	const res = await fetch(`${window.location.origin}${path}`, opts);
 	if (res.status === 401) {
 		// The browser normally attaches cached HTTP Basic Auth credentials to
 		// every request automatically — a 401 here means they were rejected
@@ -1554,6 +1554,7 @@ function App() {
 	const autoScrollRef = useRef(true);
 	const selfClosingRef = useRef(null);
 	const reconnectTimerRef = useRef(null);
+	const wasRunningRef = useRef(false);
 	const [reconnectNonce, setReconnectNonce] = useState(0);
 
 	// Live stopwatch — ticks while running, freezes on stop. Per-session
@@ -1562,19 +1563,24 @@ function App() {
 	const turnStartRef = useRef(new Map());
 	const [elapsedMs, setElapsedMs] = useState(0);
 	useEffect(() => {
-		if (running) {
+		if (running && connected) {
 			if (!turnStartRef.current.has(activeId)) turnStartRef.current.set(activeId, Date.now());
 			const id = setInterval(() => {
 				const start = turnStartRef.current.get(activeId);
 				if (start) setElapsedMs(Date.now() - start);
 			}, 100);
 			return () => clearInterval(id);
-		} else {
+		} else if (!running) {
 			// Freeze the display for 5s after the run ends, then hide.
 			const timeout = setTimeout(() => setElapsedMs(0), 5000);
 			return () => clearTimeout(timeout);
 		}
-	}, [running, activeId]);
+		// Disconnected while running — freeze the timer at the last known
+		// value instead of counting up with a stale connection. When the SSE
+		// reconnects (connected→true) the interval resumes from the real
+		// start time; if the run ended server-side while offline, the next
+		// `end` event will transition to the "not running" branch.
+	}, [running, activeId, connected]);
 
 	// Toast helper — stacks; each entry removes itself after 4s.
 	const showToast = useCallback((text, type = "info") => {
@@ -1609,6 +1615,7 @@ function App() {
 				setActiveId(id);
 				setStreaming([]);
 				setRunning(data.status === "running");
+				wasRunningRef.current = data.status === "running";
 				setSidebarOpen(false);
 				try {
 					localStorage.setItem("cast:lastSessionId", id);
@@ -2037,7 +2044,7 @@ function App() {
 		if (!activeId) return;
 		if (esRef.current) esRef.current.close();
 
-		const es = new EventSource(`/api/sessions/${activeId}/events`);
+		const es = new EventSource(`${window.location.origin}/api/sessions/${activeId}/events`);
 		esRef.current = es;
 		setConnected(true);
 
@@ -2047,10 +2054,28 @@ function App() {
 			try {
 				const event = JSON.parse(e.data);
 				switch (event.type) {
-					case "status":
-						setRunning(event.status === "running");
+					case "status": {
+						const isRunning = event.status === "running";
+						setRunning(isRunning);
 						setSession((prev) => (prev ? { ...prev, status: event.status } : prev));
+						// If the run ended between our initial GET and the SSE
+						// connect, we missed the `end` event. Refetch messages
+						// so the final assistant reply appears on screen.
+						if (wasRunningRef.current && !isRunning) {
+							api("GET", `/api/sessions/${activeId}`)
+								.then((d) => {
+									if (d)
+										setSession((prev) =>
+											prev
+												? { ...prev, messages: d.messages, usage: d.usage, updatedAt: d.updatedAt }
+												: prev,
+										);
+								})
+								.catch(() => {});
+						}
+						wasRunningRef.current = isRunning;
 						break;
+					}
 					case "token":
 						setStreaming((prev) => {
 							const last = prev[prev.length - 1];
@@ -2111,15 +2136,27 @@ function App() {
 						setSession((prev) => (prev ? { ...prev, status: "idle" } : prev));
 						setPendingSteers([]);
 						setPendingQueue([]);
-						// Pull fresh usage numbers only — `messages` already holds this
-						// turn's full reasoning/tool-call blocks from live streaming, and
-						// the server's persisted form can't carry reasoning at all (it's
-						// never saved to disk), so overwriting messages here would silently
-						// collapse everything back down to just the final reply.
+						// Pull fresh usage numbers and messages. Messages merge is
+						// needed for the refresh-mid-run case: the client was rebuilt
+						// from the server's persisted array (no streaming blocks), and
+						// the end event arrives after reconnection — without a merge,
+						// the final assistant message would never appear on screen.
 						api("GET", `/api/sessions/${activeId}`)
 							.then((d) => {
-								if (d)
-									setSession((prev) => (prev ? { ...prev, usage: d.usage, updatedAt: d.updatedAt } : prev));
+								if (!d) return;
+								setSession((prev) => {
+									if (!prev) return prev;
+									const serverMsgs = d.messages || [];
+									// If the client has messages with streaming blocks (normal
+									// uninterrupted run), keep them — blocks carry reasoning and
+									// tool-call detail the server's flat form can't represent.
+									const clientHasBlocks = prev.messages.some(
+										(m) => Array.isArray(m.blocks) && m.blocks.length > 0,
+									);
+									const messages =
+										serverMsgs.length > prev.messages.length || !clientHasBlocks ? serverMsgs : prev.messages;
+									return { ...prev, messages, usage: d.usage, updatedAt: d.updatedAt };
+								});
 							})
 							.catch(() => {});
 						break;

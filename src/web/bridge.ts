@@ -315,6 +315,13 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		// final array (with real indices) comes back.
 		const startCount = ws.session.messages.length;
 		const thinkingByCompletion: string[] = [];
+		// Save the session NOW — before the run starts — so the user's message
+		// is persisted even if the process is killed mid-run (SIGTERM timeout,
+		// OOM, crash). runAgentLoop works on a private copy of the array (see
+		// its `const messages = [...initialMessages]`), so ws.session.messages
+		// stays at the pre-run snapshot during the entire run. The `.then()`
+		// below does the final authoritative save with assistant responses.
+		saveSession(ws.session);
 
 		// Read fresh each run (not captured once) so a mid-session /web toggle
 		// takes effect on the very next turn — matches core/run.ts's headless
@@ -354,6 +361,14 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			sshHosts,
 			backgroundBash: ws.backgroundBash,
 			mcpPromptSuffix: formatMcpForPrompt(mcpResult),
+			onMessagesChanged: (messages) => {
+				ws.session.messages = messages;
+				try {
+					saveSession(ws.session);
+				} catch {
+					// Best-effort: disk full / permissions shouldn't kill the run.
+				}
+			},
 			onEvent: (event: AgentEvent) => {
 				if (event.type === "assistant_message") thinkingByCompletion.push(event.thinking ?? "");
 				if (event.type === "usage") {
@@ -373,12 +388,11 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			},
 		})
 			.then((finalMessages) => {
-				// runAgentLoop works on a private copy of the array it's handed (see
-				// its `const messages = [...initialMessages]`) and returns that copy
-				// with every assistant/tool message appended — without writing it
-				// back here, every reply the agent produced would exist only in the
-				// SSE events it fired mid-run and vanish the moment anything (a page
-				// reload, the /end handler's session refetch) re-reads ws.session.
+				// Final authoritative save — onMessagesChanged has been snapshotting
+				// intermediate progress (tool calls, partial replies) throughout the
+				// run, so a crash only loses at most one event's worth of data.
+				// This save adds reasoning metadata that the intermediate snapshots
+				// don't carry.
 				ws.session.messages = finalMessages;
 
 				// Zip collected reasoning back onto the assistant messages this turn

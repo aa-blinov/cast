@@ -450,6 +450,43 @@ export interface LoopConfig {
 	 * later, and updates `.value` in place. Omit to disable.
 	 */
 	announcedLocalDate?: AnnouncedLocalDate;
+	/**
+	 * Called after every mutation to the internal messages array (push, splice,
+	 * etc.) so the caller can snapshot intermediate progress for crash recovery.
+	 * The array reference is the same one the loop operates on — taking a
+	 * shallow copy is enough to capture the current state.
+	 */
+	onMessagesChanged?: (messages: Message[]) => void;
+}
+
+/**
+ * Wrap an array with a Proxy that fires `onChange` after every structural
+ * mutation (push, splice, pop, shift, unshift, sort, reverse, fill).
+ * The callback receives the proxy itself so the caller can snapshot it.
+ *
+ * Indexed assignment (`arr[i] = …`) also triggers the callback — the loop
+ * occasionally does this to update a message in place.
+ */
+function makeObservable<T>(arr: T[], onChange: (arr: T[]) => void): T[] {
+	const mutating = new Set(["push", "pop", "splice", "shift", "unshift", "sort", "reverse", "fill"]);
+	return new Proxy(arr, {
+		get(target, prop, receiver) {
+			const val = Reflect.get(target, prop, receiver);
+			if (typeof prop === "string" && mutating.has(prop) && typeof val === "function") {
+				return (...args: unknown[]) => {
+					const result = val.apply(target, args);
+					onChange(receiver);
+					return result;
+				};
+			}
+			return val;
+		},
+		set(target, prop, value, receiver) {
+			const result = Reflect.set(target, prop, value, receiver);
+			if (typeof prop === "string" && !Number.isNaN(Number(prop))) onChange(receiver);
+			return result;
+		},
+	});
 }
 
 // ============================================================================
@@ -462,8 +499,9 @@ export interface LoopConfig {
  */
 export async function runAgentLoop(initialMessages: Message[], loopConfig: LoopConfig): Promise<Message[]> {
 	const messages = [...initialMessages];
-	await runLoop(messages, loopConfig);
-	return messages;
+	const tracked = loopConfig.onMessagesChanged ? makeObservable(messages, loopConfig.onMessagesChanged) : messages;
+	await runLoop(tracked, loopConfig);
+	return tracked;
 }
 
 // ============================================================================
@@ -966,6 +1004,12 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 					);
 					toolResults.push(...executedToolBatch);
 					hasMoreToolCalls = true;
+
+					// Snapshot after tools execute but before results are pushed —
+					// if the process dies mid-push, at least the assistant message
+					// (with tool_calls) is on disk so the model can see what was
+					// attempted on restart.
+					loopConfig.onMessagesChanged?.(messages);
 
 					// Track new tool result messages and extract context files
 					for (const r of executedToolBatch) {

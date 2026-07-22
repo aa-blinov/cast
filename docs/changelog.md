@@ -2,6 +2,16 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.8.8
+
+### Fixed
+
+- Web UI: page refresh during a running agent turn no longer loses the final assistant message — the `end` event now merges server-persisted messages into the client state.
+- Web UI: pre-run save ensures the user's message survives a mid-run process kill (SIGTERM timeout, OOM, crash).
+- Web UI: elapsed timer pauses when the SSE connection drops instead of counting up with a stale connection.
+- Web UI: `status` event on SSE reconnect now refetches messages if the run completed while the client was disconnected.
+- Web UI: `fetch()` and `EventSource` URLs now use `window.location.origin` explicitly to avoid cross-origin issues behind reverse proxies.
+
 ## 0.8.7
 
 ### Fixed
