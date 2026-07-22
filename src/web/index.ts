@@ -116,6 +116,12 @@ async function main(): Promise<void> {
 	}
 
 	console.log("[cast web] starting up...");
+
+	// Write state file IMMEDIATELY so the launcher's waitForStartup sees the
+	// PID right away — runStartup (MCP, model probe) can take 10+ seconds
+	// and the launcher would time out if we waited for listening.
+	writeWebState({ pid: process.pid, port, host, startedAt: new Date().toISOString(), foreground });
+
 	const result = await runStartup(parsedArgs, webPickers);
 	console.log(`[cast web] persona: ${result.persona.label}, model: ${result.session.model}`);
 	console.log("[cast web] ────────────────────────────────────");
