@@ -2059,20 +2059,9 @@ function App() {
 						setRunning(isRunning);
 						setSession((prev) => (prev ? { ...prev, status: event.status } : prev));
 						// If the run ended between our initial GET and the SSE
-						// connect, we missed the `end` event. Refetch messages
-						// so the final assistant reply appears on screen.
-						if (wasRunningRef.current && !isRunning) {
-							api("GET", `/api/sessions/${activeId}`)
-								.then((d) => {
-									if (d)
-										setSession((prev) =>
-											prev
-												? { ...prev, messages: d.messages, usage: d.usage, updatedAt: d.updatedAt }
-												: prev,
-										);
-								})
-								.catch(() => {});
-						}
+						// connect, we missed the `end` event. The `session_end`
+						// event (which follows `status: idle`) carries usage and
+						// messageCount — it handles the refetch when counts diverge.
 						wasRunningRef.current = isRunning;
 						break;
 					}
@@ -2136,29 +2125,37 @@ function App() {
 						setSession((prev) => (prev ? { ...prev, status: "idle" } : prev));
 						setPendingSteers([]);
 						setPendingQueue([]);
-						// Pull fresh usage numbers and messages. Messages merge is
-						// needed for the refresh-mid-run case: the client was rebuilt
-						// from the server's persisted array (no streaming blocks), and
-						// the end event arrives after reconnection — without a merge,
-						// the final assistant message would never appear on screen.
-						api("GET", `/api/sessions/${activeId}`)
-							.then((d) => {
-								if (!d) return;
-								setSession((prev) => {
-									if (!prev) return prev;
-									const serverMsgs = d.messages || [];
-									// If the client has messages with streaming blocks (normal
-									// uninterrupted run), keep them — blocks carry reasoning and
-									// tool-call detail the server's flat form can't represent.
-									const clientHasBlocks = prev.messages.some(
-										(m) => Array.isArray(m.blocks) && m.blocks.length > 0,
-									);
-									const messages =
-										serverMsgs.length > prev.messages.length || !clientHasBlocks ? serverMsgs : prev.messages;
-									return { ...prev, messages, usage: d.usage, updatedAt: d.updatedAt };
-								});
-							})
-							.catch(() => {});
+						break;
+					case "session_end":
+						setSession((prev) => {
+							if (!prev) return prev;
+							// If the client already has all messages from SSE streaming
+							// (normal uninterrupted run), just apply usage — skip the
+							// full refetch. Only refetch when message counts diverge
+							// (mid-run reconnect where SSE events were missed).
+							if (event.messageCount === prev.messages.length) {
+								return { ...prev, usage: event.usage };
+							}
+							// Reconnect recovery: pull full messages from server.
+							api("GET", `/api/sessions/${activeId}`)
+								.then((d) => {
+									if (!d) return;
+									setSession((inner) => {
+										if (!inner) return inner;
+										const serverMsgs = d.messages || [];
+										const clientHasBlocks = inner.messages.some(
+											(m) => Array.isArray(m.blocks) && m.blocks.length > 0,
+										);
+										const messages =
+											serverMsgs.length > inner.messages.length || !clientHasBlocks
+												? serverMsgs
+												: inner.messages;
+										return { ...inner, messages, usage: d.usage, updatedAt: d.updatedAt };
+									});
+								})
+								.catch(() => {});
+							return { ...prev, usage: event.usage };
+						});
 						break;
 					case "error":
 						setStreaming([]);

@@ -62,6 +62,7 @@ export type WebEvent =
 	| AgentEvent
 	| { type: "status"; status: WebAgentStatus }
 	| { type: "session_update"; session: SessionSummary }
+	| { type: "session_end"; usage: SessionState["usage"]; messageCount: number }
 	| { type: "session_closed" };
 
 export interface WebAgentSession {
@@ -434,6 +435,11 @@ export function createWebBridge(result: StartupResult): WebBridge {
 				ws.runner.endRun();
 				saveSession(ws.session);
 				broadcast(ws, { type: "status", status: "idle" });
+				broadcast(ws, {
+					type: "session_end",
+					usage: ws.session.usage,
+					messageCount: ws.session.messages.length,
+				});
 				broadcastSessionUpdate(ws);
 			})
 			.catch((err: unknown) => {
