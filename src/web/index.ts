@@ -1,7 +1,7 @@
 /**
- * Web server entry point — runs inside the child process (or foreground).
- * Parses args, runs startup with non-interactive pickers, creates the bridge,
- * starts the HTTP server.
+ * Web server entry point. Exported so src/index.ts can call it directly in
+ * foreground mode (no child-process spawn needed). The standalone `main()`
+ * at the bottom is only used when this file runs as a child process (daemon).
  */
 
 import { randomBytes } from "node:crypto";
@@ -15,22 +15,13 @@ import { startWebServer } from "./server.ts";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 
-const VERSION: string = JSON.parse(
-	(await import("node:fs")).readFileSync(
-		(await import("node:path")).join(
-			(await import("node:url")).fileURLToPath(import.meta.url),
-			"..",
-			"..",
-			"..",
-			"package.json",
-		),
-		"utf-8",
-	),
-).version;
+const VERSION: string = process.env.CAST_VERSION ?? "0.0.0";
 
-async function main(): Promise<void> {
-	const args = process.argv.slice(2);
-
+export async function runWebServerMain(
+	args: string[],
+	options: { foreground: boolean; version?: string },
+): Promise<void> {
+	const ver = options.version ?? VERSION;
 	// Parse --port / --host
 	let port = parseInt(process.env.CAST_WEB_PORT ?? "1337", 10);
 	let host = process.env.CAST_WEB_HOST ?? "127.0.0.1";
@@ -38,7 +29,7 @@ async function main(): Promise<void> {
 	// launcher already strips --foreground out of the args it forwards, since
 	// that flag only controls *how it spawns*, not anything the server itself
 	// does — except which lifecycle it reports in the state file.
-	const foreground = process.env.CAST_WEB_FOREGROUND === "1";
+	const foreground = options.foreground;
 	for (let i = 0; i < args.length; i++) {
 		if (args[i] === "--port" && args[i + 1]) {
 			port = parseInt(args[i + 1]!, 10);
@@ -103,7 +94,7 @@ async function main(): Promise<void> {
 		cliSkillPaths: [],
 		noMcp: false,
 		cliMcpPaths: [],
-		version: VERSION,
+		version: ver,
 	};
 
 	// Auth: ensure password exists in settings
@@ -144,7 +135,7 @@ async function main(): Promise<void> {
 		bridge,
 		webUser: "cast",
 		webPassword,
-		version: VERSION,
+		version: ver,
 		onListening: () => {
 			writeWebState({ pid: process.pid, port, host, startedAt: new Date().toISOString(), foreground });
 			console.log(`[cast web] stop: cast web stop`);
@@ -185,8 +176,16 @@ async function main(): Promise<void> {
 	process.on("SIGINT", () => shutdown("SIGINT"));
 }
 
-main().catch((err) => {
-	console.error("[cast web] fatal:", err);
-	clearWebState();
-	process.exit(1);
-});
+async function main(): Promise<void> {
+	await runWebServerMain(process.argv.slice(2), { foreground: process.env.CAST_WEB_FOREGROUND === "1" });
+}
+
+// Auto-run only when this file is the entry point (daemon spawn). The parent
+// sets CAST_WEB_SKIP_AUTORUN=1 before importing for inline foreground mode.
+if (!process.env.CAST_WEB_SKIP_AUTORUN) {
+	main().catch((err) => {
+		console.error("[cast web] fatal:", err);
+		clearWebState();
+		process.exit(1);
+	});
+}

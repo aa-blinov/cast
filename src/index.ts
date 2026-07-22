@@ -263,19 +263,32 @@ async function handleWebCommand(args: string[]): Promise<void> {
 		process.exit(1);
 	}
 
-	const spawnArgs = ["--import", "tsx", "./src/web/index.ts", ...restArgs, "--port", String(port), "--host", host];
-	const spawnCwd = join(dirname(fileURLToPath(import.meta.url)), "..");
+	// Dev mode (tsx + .ts source) vs release mode (bundled dist/index.js).
+	// import.meta.url is <repo>/src/index.ts in dev, <install>/dist/index.js in release.
+	const selfPath = fileURLToPath(import.meta.url);
+	const isRelease = selfPath.includes("/dist/");
+	const spawnCwd = join(dirname(selfPath), "..");
+	const spawnArgs = isRelease
+		? [join(spawnCwd, "dist", "index.js"), "web", ...restArgs, "--port", String(port), "--host", host]
+		: ["--import", "tsx", "./src/web/index.ts", ...restArgs, "--port", String(port), "--host", host];
 	const spawnEnv = {
 		...process.env,
 		CAST_CWD: process.cwd(),
 		CAST_WEB_PORT: String(port),
 		CAST_WEB_HOST: host,
 		CAST_WEB_FOREGROUND: foreground ? "1" : "0",
+		CAST_VERSION: VERSION,
 	};
 
-	if (foreground) {
-		const child = spawn(process.execPath, spawnArgs, { cwd: spawnCwd, stdio: "inherit", env: spawnEnv });
-		child.on("exit", (code) => process.exit(code ?? 0));
+	// Foreground: run inline. Daemon: spawn child. Daemon child: run inline.
+	// CAST_WEB_FOREGROUND distinguishes daemon-child from the launcher:
+	// "0" = I am the daemon child, run inline (set by spawnEnv below).
+	// "1" = user asked --foreground, run inline (set by the CLI flag).
+	// unset = I am the launcher, spawn a child.
+	if (foreground || process.env.CAST_WEB_FOREGROUND === "0") {
+		process.env.CAST_WEB_SKIP_AUTORUN = "1";
+		const { runWebServerMain } = await import("./web/index.ts");
+		runWebServerMain(restArgs, { foreground, version: VERSION });
 		return;
 	}
 
