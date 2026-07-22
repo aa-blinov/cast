@@ -18,6 +18,7 @@ import type { StartupResult } from "../core/startup.ts";
 import { setSuspendHook } from "../core/stdin-manager.ts";
 import { fetchLatestVersion, isNewerVersion, isReleaseInstall } from "../core/upgrade.ts";
 import { ModalPicker, MultiSelectPicker, TextInputModal } from "../pickers/ink.tsx";
+import { Banner } from "./Banner.tsx";
 import { ChatLog } from "./ChatLog.tsx";
 import { Composer } from "./Composer.tsx";
 import { canSubmitDuringRun, handleInput } from "./commands.ts";
@@ -66,6 +67,17 @@ export function App(props: AppProps): JSX.Element {
 	const showNotice = useCallback((text: string, duration?: number) => {
 		setNotice(text);
 		noticeDurationRef.current = duration ?? 6000;
+	}, []);
+
+	// Rows scrolled up from the bottom of the chat history (0 = pinned to the
+	// latest message). Needed because the app runs in Ink's alternate screen
+	// (see tui.tsx), which has no terminal scrollback of its own — PageUp/
+	// PageDown (wired through Composer below) are the only way back to
+	// earlier history once it scrolls past the viewport.
+	const [scrollOffset, setScrollOffset] = useState(0);
+	const onScroll = useCallback((direction: "up" | "down") => {
+		const page = Math.max(4, (process.stdout.rows || 24) - 10);
+		setScrollOffset((o) => Math.max(0, direction === "up" ? o + page : o - page));
 	}, []);
 
 	// Resize/reflow, terminal-scroll, and focus-return desyncs all need a
@@ -194,10 +206,12 @@ export function App(props: AppProps): JSX.Element {
 	// detect on its own.
 	const [_themeVer, setThemeVer] = useState(0);
 	const onThemeChange = useCallback(() => {
-		// Order matters: onRepaintBanner clears the screen (+ scrollback) and
-		// reprints the banner; only then bump the version so the <Static> key
-		// change replays the recolored history below the fresh banner. Bumping
-		// first would append a second copy of the transcript under the old one.
+		// Order matters: onRepaintBanner clears the alt-screen viewport first;
+		// only then bump the version so Ink's next render lands on a clean
+		// screen instead of drawing the recolored frame over the stale one.
+		// The banner itself lives in Ink's own tree now (see Banner.tsx), so
+		// bumping themeVer alone is what makes it (and everything else)
+		// recompute with the new theme's colors.
 		void (async () => {
 			await onRepaintBanner?.();
 			setThemeVer((v) => v + 1);
@@ -541,6 +555,10 @@ export function App(props: AppProps): JSX.Element {
 	};
 
 	const handleSubmit = useCallback(async (text: string) => {
+		// A new send always snaps the view back to the latest message — same
+		// as any chat app, and the one time auto-following a scrolled-up view
+		// would otherwise be surprising.
+		setScrollOffset(0);
 		let input = text;
 		// Refine armed (see the approval dialog): the next real message is the
 		// plan feedback — wrap it so the model updates the plan instead of
@@ -560,12 +578,15 @@ export function App(props: AppProps): JSX.Element {
 
 	return (
 		<Box flexDirection="column">
+			<Banner version={version} themeVer={_themeVer} />
+			<Text> </Text>
 			<ChatLogWithSize
 				messages={agent.messages}
 				streaming={agent.streaming}
 				error={agent.error}
 				retry={agent.retry}
 				repaintKey={repaintKey + _themeVer}
+				scrollOffset={scrollOffset}
 			/>
 			{notice && <Text color={theme().warning}>{notice}</Text>}
 			{modalRequest?.kind === "option" && (
@@ -637,6 +658,7 @@ export function App(props: AppProps): JSX.Element {
 				onPasteImage={onPasteImage}
 				running={running}
 				locked={modalRequest !== null}
+				onScroll={onScroll}
 			/>
 			<StatusBar
 				statusBar={statusBar}
@@ -726,22 +748,27 @@ function StatusBar(
 
 /**
  * Isolates the useWindowSize() subscription so its re-renders stay scoped to
- * ChatLog instead of bubbling up to App (and Composer with it). Ink's
- * useWindowSize fires on every raw 'resize' event with no debounce — during
- * a drag-resize that's a burst of ticks, and calling the hook directly in
- * App would re-render the whole tree, including the composer, once per
- * tick. Debouncing the committed value here (matching the 80ms settle used
- * elsewhere for resize handling, see useTerminalResync) keeps that burst
- * from reaching outside this component.
+ * ChatLog instead of bubbling up to App (and Composer with it) — React only
+ * re-renders this component's own subtree on its state changes, not its
+ * ancestors, so calling the hook here rather than in App keeps every resize
+ * tick from also re-rendering the composer.
+ *
+ * Deliberately NOT debounced: Ink's own resize handling re-wraps the real
+ * text immediately, synchronously, without waiting on anything (see
+ * ink.js's `resized()`). An earlier version debounced the value committed
+ * here to cut down on redraws, but that meant ChatLog's row-height estimate
+ * (used to decide how much history fits the viewport) kept judging by the
+ * *previous* width for up to 80ms after Ink had already re-wrapped at the
+ * new one — on a narrowing resize that under-estimates row heights, so the
+ * history window could overflow the viewport and push the composer
+ * off-screen until the debounce caught up (and never, if the user kept
+ * dragging). Re-rendering ChatLog every tick is the correct tradeoff here:
+ * it's isolated from Composer regardless, and Ink's own maxFps throttle
+ * still caps how often that actually reaches the terminal.
  */
-function ChatLogWithSize(props: Omit<Parameters<typeof ChatLog>[0], "columns">): JSX.Element {
-	const { columns: rawColumns } = useWindowSize();
-	const [columns, setColumns] = useState(rawColumns);
-	useEffect(() => {
-		const timer = setTimeout(() => setColumns(rawColumns), 80);
-		return () => clearTimeout(timer);
-	}, [rawColumns]);
-	return <ChatLog {...props} columns={columns} />;
+function ChatLogWithSize(props: Omit<Parameters<typeof ChatLog>[0], "columns" | "rows">): JSX.Element {
+	const { columns, rows } = useWindowSize();
+	return <ChatLog {...props} columns={columns} rows={rows} />;
 }
 
 /**

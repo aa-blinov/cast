@@ -1,6 +1,5 @@
 import { Box, render, Text } from "ink";
 import type { JSX } from "react";
-import { CAST_BANNER } from "../core/help.ts";
 import { closeMcpConnections } from "../core/mcp.ts";
 import { saveSession } from "../core/session.ts";
 import { type ParsedArgs, runStartup } from "../core/startup.ts";
@@ -8,7 +7,6 @@ import { suspendAndRun } from "../core/stdin-manager.ts";
 import { inkPickers } from "../pickers/ink.tsx";
 import type { Pickers } from "../pickers/types.ts";
 import { App } from "./App.tsx";
-import { gradientBanner } from "./gradient.ts";
 import { saveClipboardImageToTempFile } from "./readClipboardImage.ts";
 import { Spinner } from "./Spinner.tsx";
 import { loadTheme } from "./themes/index.ts";
@@ -75,7 +73,10 @@ export async function runTui(args: ParsedArgs): Promise<void> {
 	const result = await runStartup(args, pickersWithLoaderHandoff, showLoader);
 	hideLoader();
 
-	console.log(gradientBanner(CAST_BANNER, args.version));
+	// The banner itself is rendered by <Banner> inside App's own Ink tree
+	// (see Banner.tsx) rather than printed here via console.log — App mounts
+	// into the alternate screen below, and anything printed to the primary
+	// buffer beforehand is invisible once that switch happens.
 
 	// Background bash tasks are spawned detached (their own process group, see
 	// tools/bash-background.ts) specifically so a running command's own
@@ -97,18 +98,15 @@ export async function runTui(args: ParsedArgs): Promise<void> {
 		return filePath;
 	};
 
-	// Repaint the banner with the current theme's gradient. Uses suspendAndRun
-	// to temporarily pause Ink so raw stdout writes don't fight its managed
-	// frame. Clears the whole screen (+ scrollback) first: the banner scrolled
-	// into scrollback as soon as the conversation grew, so a relative
-	// cursor-up from the frame bottom would land mid-transcript and clobber
-	// whatever was there instead of the banner. App.onThemeChange replays the
-	// full history below the fresh banner afterwards (see its Static key
-	// bump), so nothing on screen is actually lost.
+	// Clears the alternate-screen viewport ahead of a theme change. Uses
+	// suspendAndRun so the raw write doesn't fight Ink's managed frame. No
+	// scrollback wipe needed — the alt screen (see below) has none — and no
+	// banner re-print either: <Banner> lives in Ink's own tree now, so
+	// App.onThemeChange's themeVer bump right after this is what redraws it
+	// (and everything else) with the new theme's colors.
 	const onRepaintBanner = async () => {
 		await suspendAndRun(async () => {
-			process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
-			process.stdout.write(`${gradientBanner(CAST_BANNER, args.version)}\n`);
+			process.stdout.write("\x1b[2J\x1b[H");
 		});
 	};
 
