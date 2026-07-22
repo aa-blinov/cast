@@ -558,16 +558,13 @@ export function App(props: AppProps): JSX.Element {
 		await handleInput(input, undefined, depsRef.current);
 	}, []);
 
-	const { columns } = useWindowSize();
-
 	return (
 		<Box flexDirection="column">
-			<ChatLog
+			<ChatLogWithSize
 				messages={agent.messages}
 				streaming={agent.streaming}
 				error={agent.error}
 				retry={agent.retry}
-				columns={columns}
 				repaintKey={repaintKey + _themeVer}
 			/>
 			{notice && <Text color={theme().warning}>{notice}</Text>}
@@ -641,66 +638,110 @@ export function App(props: AppProps): JSX.Element {
 				running={running}
 				locked={modalRequest !== null}
 			/>
-			{/* Status bar — rendered from the segment registry. Each segment
-			    renders itself based on SegmentContext; visibility and side are
-			    controlled by the statusBar config (see /statusbar command). */}
-			{(() => {
-				const segments = getStatusBarSegments();
-				const visibleSet = new Set(statusBar.visible);
-				const ctx: SegmentContext = {
-					persona: currentPersona.label,
-					planMode,
-					activeModel,
-					configuredModel: session.model,
-					planModel,
-					usage: agent.usage ?? undefined,
-					lastTurnUsage: agent.lastTurnUsage ?? undefined,
-					elapsedMs: agent.elapsedMs,
-					messageCount: session.messages.length,
-					contextWindow: config.contextWindow,
-					maxResponseTokens: config.maxResponseTokens,
-					messages: session.messages,
-					sessionId: session.id,
-				};
-
-				// Build ordered list from statusBar.order, then append any new segments
-				const ordered: StatusBarSegment[] = statusBar.order
-					.map((id) => segments.find((s) => s.id === id))
-					.filter(Boolean) as StatusBarSegment[];
-				for (const seg of segments) {
-					if (!ordered.some((s) => s.id === seg.id)) ordered.push(seg);
-				}
-
-				const leftElems: JSX.Element[] = [];
-				const rightElems: JSX.Element[] = [];
-				for (const seg of ordered) {
-					if (!visibleSet.has(seg.id)) continue;
-					const side = statusBar.sides[seg.id] ?? seg.side;
-					const node = seg.render(ctx);
-					if (!node) continue;
-					if (side === "left") leftElems.push(node);
-					else rightElems.push(node);
-				}
-
-				const sep = <Text color={theme().muted}> │ </Text>;
-				const renderGroup = (elems: JSX.Element[]) => elems.flatMap((el, i) => (i > 0 ? [sep, el] : [el]));
-
-				return (
-					<Box justifyContent="space-between">
-						<Text color={theme().muted} dimColor>
-							{...renderGroup(leftElems)}
-							{repaintKey % 2 === 1 ? "\u200b" : null}
-						</Text>
-						{rightElems.length > 0 && (
-							<Text color={theme().muted} dimColor>
-								{...renderGroup(rightElems)}
-							</Text>
-						)}
-					</Box>
-				);
-			})()}
+			<StatusBar
+				statusBar={statusBar}
+				persona={currentPersona.label}
+				planMode={planMode}
+				activeModel={activeModel}
+				configuredModel={session.model}
+				planModel={planModel}
+				usage={agent.usage ?? undefined}
+				lastTurnUsage={agent.lastTurnUsage ?? undefined}
+				turnStartedAt={agent.turnStartedAt}
+				getElapsedMs={agent.getElapsedMs}
+				messageCount={session.messages.length}
+				contextWindow={config.contextWindow}
+				maxResponseTokens={config.maxResponseTokens}
+				messages={session.messages}
+				sessionId={session.id}
+				repaintKey={repaintKey}
+			/>
 		</Box>
 	);
+}
+
+/**
+ * Status bar, in its own component so its elapsed-time tick doesn't force
+ * App (and Composer under it) to re-render every 200ms. `turnStartedAt`
+ * only changes at turn start/stop; the live "Xs" display ticks off a local
+ * interval scoped to this component instead of a state update in
+ * useAgentSession (which lives in App's own fiber).
+ */
+function StatusBar(
+	props: Omit<SegmentContext, "elapsedMs"> & {
+		statusBar: StatusBarConfig;
+		turnStartedAt: number | null;
+		getElapsedMs: () => number;
+		repaintKey: number;
+	},
+): JSX.Element {
+	const { statusBar, turnStartedAt, getElapsedMs, repaintKey, ...ctxRest } = props;
+	const [, forceTick] = useState(0);
+	useEffect(() => {
+		if (turnStartedAt === null) return;
+		const id = setInterval(() => forceTick((n) => n + 1), 200);
+		return () => clearInterval(id);
+	}, [turnStartedAt]);
+
+	const ctx: SegmentContext = { ...ctxRest, elapsedMs: getElapsedMs() };
+	const segments = getStatusBarSegments();
+	const visibleSet = new Set(statusBar.visible);
+
+	// Build ordered list from statusBar.order, then append any new segments
+	const ordered: StatusBarSegment[] = statusBar.order
+		.map((id) => segments.find((s) => s.id === id))
+		.filter(Boolean) as StatusBarSegment[];
+	for (const seg of segments) {
+		if (!ordered.some((s) => s.id === seg.id)) ordered.push(seg);
+	}
+
+	const leftElems: JSX.Element[] = [];
+	const rightElems: JSX.Element[] = [];
+	for (const seg of ordered) {
+		if (!visibleSet.has(seg.id)) continue;
+		const side = statusBar.sides[seg.id] ?? seg.side;
+		const node = seg.render(ctx);
+		if (!node) continue;
+		if (side === "left") leftElems.push(node);
+		else rightElems.push(node);
+	}
+
+	const sep = <Text color={theme().muted}> │ </Text>;
+	const renderGroup = (elems: JSX.Element[]) => elems.flatMap((el, i) => (i > 0 ? [sep, el] : [el]));
+
+	return (
+		<Box justifyContent="space-between">
+			<Text color={theme().muted} dimColor>
+				{...renderGroup(leftElems)}
+				{repaintKey % 2 === 1 ? "\u200b" : null}
+			</Text>
+			{rightElems.length > 0 && (
+				<Text color={theme().muted} dimColor>
+					{...renderGroup(rightElems)}
+				</Text>
+			)}
+		</Box>
+	);
+}
+
+/**
+ * Isolates the useWindowSize() subscription so its re-renders stay scoped to
+ * ChatLog instead of bubbling up to App (and Composer with it). Ink's
+ * useWindowSize fires on every raw 'resize' event with no debounce — during
+ * a drag-resize that's a burst of ticks, and calling the hook directly in
+ * App would re-render the whole tree, including the composer, once per
+ * tick. Debouncing the committed value here (matching the 80ms settle used
+ * elsewhere for resize handling, see useTerminalResync) keeps that burst
+ * from reaching outside this component.
+ */
+function ChatLogWithSize(props: Omit<Parameters<typeof ChatLog>[0], "columns">): JSX.Element {
+	const { columns: rawColumns } = useWindowSize();
+	const [columns, setColumns] = useState(rawColumns);
+	useEffect(() => {
+		const timer = setTimeout(() => setColumns(rawColumns), 80);
+		return () => clearTimeout(timer);
+	}, [rawColumns]);
+	return <ChatLog {...props} columns={columns} />;
 }
 
 /**

@@ -138,10 +138,15 @@ export async function runTui(args: ParsedArgs): Promise<void> {
 			// belt-and-suspenders backstop for whatever incremental mode's own
 			// write shape doesn't happen to cover.
 			incrementalRendering: true,
-			// Border duplication is fixed (coalescing + incremental rendering
-			// above), so there's no more reason to hold the frame rate down —
-			// raise it from Ink's default (30) for a more responsive composer.
-			maxFps: 60,
+			// Was raised to 60 for a more responsive composer once border
+			// duplication was fixed (coalescing + incremental rendering above).
+			// Reverted to Ink's default: doubling write frequency to the
+			// terminal doubled the odds of hitting the same class of
+			// desync/flicker on slow or unusual terminals (SSH with high RTT,
+			// tmux, mobile emulators) that the rest of the resync machinery
+			// exists to paper over.
+			maxFps: 30,
+			alternateScreen: true,
 		},
 	);
 
