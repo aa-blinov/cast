@@ -1319,7 +1319,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		if (selection.contextWindow && selection.contextWindow > 0) config.contextWindow = selection.contextWindow;
 		await selectReasoningLevel(config, session.model, deps.pickers, selection.reasoningMeta);
 		updateSettings({ model: session.model, reasoningLevel: config.reasoningLevel });
-		agent.refresh();
+		agent.refreshMeta();
 		showNotice(`[Model: ${session.model} (reasoning: ${config.reasoningLevel})]`);
 		return;
 	}
@@ -1337,7 +1337,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		if (found?.contextWindow && found.contextWindow > 0) config.contextWindow = found.contextWindow;
 		await selectReasoningLevel(config, newModel, deps.pickers, found?.reasoning);
 		updateSettings({ model: newModel, reasoningLevel: config.reasoningLevel });
-		agent.refresh();
+		agent.refreshMeta();
 		showNotice(`[Model: ${newModel} (reasoning: ${config.reasoningLevel})]`);
 		return;
 	}
@@ -1350,7 +1350,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		}
 		deps.setPlanModel(selection.model);
 		updateSettings({ planModel: selection.model });
-		agent.refresh();
+		agent.refreshMeta();
 		showNotice(`[Plan-mode model: ${selection.model}]`);
 		return;
 	}
@@ -1370,7 +1370,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		}
 		deps.setPlanModel(newModel);
 		updateSettings({ planModel: newModel });
-		agent.refresh();
+		agent.refreshMeta();
 		showNotice(`[Plan-mode model: ${newModel}]`);
 		return;
 	}
@@ -1384,7 +1384,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		}
 		deps.setSubagentModel(selection.model);
 		updateSettings({ subagentModel: selection.model });
-		agent.refresh();
+		agent.refreshMeta();
 		showNotice(`[Subagent model: ${selection.model}]`);
 		return;
 	}
@@ -1398,7 +1398,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		}
 		deps.setSubagentModel(newModel);
 		updateSettings({ subagentModel: newModel });
-		agent.refresh();
+		agent.refreshMeta();
 		showNotice(`[Subagent model: ${newModel}]`);
 		return;
 	}
@@ -1539,7 +1539,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		if (selection.contextWindow && selection.contextWindow > 0) config.contextWindow = selection.contextWindow;
 		await selectReasoningLevel(config, session.model, deps.pickers, selection.reasoningMeta);
 		updateSettings({ model: session.model, reasoningLevel: config.reasoningLevel });
-		agent.refresh();
+		agent.refreshMeta();
 		showNotice(`[Provider: ${p.name}. Model: ${session.model}]`);
 	}
 
@@ -1601,7 +1601,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			if (selection.contextWindow && selection.contextWindow > 0) config.contextWindow = selection.contextWindow;
 			await selectReasoningLevel(config, session.model, deps.pickers, selection.reasoningMeta);
 			updateSettings({ model: session.model, reasoningLevel: config.reasoningLevel });
-			agent.refresh();
+			agent.refreshMeta();
 		}
 		showNotice(`[Provider "${name}" added. Model: ${session.model}]`);
 	}
