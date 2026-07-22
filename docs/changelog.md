@@ -2,6 +2,13 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.8.2
+
+### Changed
+
+- Persona prompt tool lists no longer hardcode `ssh` — they now point the model at its actual tool list, so tools that are only conditionally available (ssh, background bash) aren't advertised when absent.
+
+
 ## 0.8.1
 
 ### Added
