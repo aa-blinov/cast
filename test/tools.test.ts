@@ -2,7 +2,9 @@ import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
+import { MessageQueue } from "../src/core/loop.ts";
 import { PLAN_TOOL_NAMES, type PlanState } from "../src/core/plan.ts";
+import { BackgroundTaskRegistry, type BashBackgroundDeps } from "../src/core/tools/bash-background.ts";
 import { isPermissionError, withAccessNote } from "../src/core/tools/search.ts";
 import { createToolExecutor, getToolDefinitions } from "../src/core/tools.ts";
 
@@ -161,6 +163,154 @@ describe("bash", () => {
 		const result = await exec("bash", { command: "sudo rm -rf /tmp/should-not-run" });
 		expect(result.isError).toBe(true);
 		expect(result.content).toContain("Blocked");
+	});
+});
+
+// ============================================================================
+// bash — run_in_background / bash_output / bash_kill
+// ============================================================================
+
+function makeBackgroundDeps(running = false) {
+	const registry = new BackgroundTaskRegistry();
+	const followUpQueue = new MessageQueue();
+	let isRunningFlag = running;
+	const deps: BashBackgroundDeps = { registry, followUpQueue, isRunning: () => isRunningFlag };
+	return {
+		deps,
+		registry,
+		followUpQueue,
+		setRunning: (v: boolean) => {
+			isRunningFlag = v;
+		},
+	};
+}
+
+describe("bash — run_in_background", () => {
+	it("returns immediately with a task id instead of waiting for the command", async () => {
+		const { deps } = makeBackgroundDeps();
+		const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, undefined, undefined, undefined, deps);
+		const start = Date.now();
+		const result = await exec("bash", { command: "sleep 1 && echo done", run_in_background: true });
+		const elapsed = Date.now() - start;
+		expect(elapsed).toBeLessThan(500);
+		expect(result.isError).toBeFalsy();
+		expect(result.content).toMatch(/Started in background as bg-\d+/);
+	});
+
+	it("falls back to running synchronously when no background deps are configured", async () => {
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const result = await exec("bash", { command: "echo hi", run_in_background: true });
+		expect(result.content.trim()).toBe("hi");
+		expect(result.content).not.toContain("Started in background");
+	});
+
+	it("delivers completion onto followUpQueue while the runner is still marked running", async () => {
+		const { deps, followUpQueue } = makeBackgroundDeps(true);
+		const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, undefined, undefined, undefined, deps);
+		await exec("bash", { command: "echo from-bg", run_in_background: true });
+		await new Promise((r) => setTimeout(r, 300));
+		const drained = followUpQueue.drain();
+		expect(drained).toHaveLength(1);
+		expect(drained[0]?.role).toBe("user");
+		expect(String(drained[0]?.content)).toContain("<system-reminder>");
+		expect(String(drained[0]?.content)).toContain("from-bg");
+	});
+
+	it("wakes an idle session via the registry's onIdleWake instead of the queue", async () => {
+		const { deps, registry, followUpQueue } = makeBackgroundDeps(false);
+		const wake = vi.fn();
+		registry.setOnIdleWake(wake);
+		const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, undefined, undefined, undefined, deps);
+		await exec("bash", { command: "echo idle-wake", run_in_background: true });
+		await new Promise((r) => setTimeout(r, 300));
+		expect(wake).toHaveBeenCalledTimes(1);
+		expect(String(wake.mock.calls[0]?.[0])).toContain("idle-wake");
+		expect(followUpQueue.drain()).toHaveLength(0);
+	});
+});
+
+describe("background bash tool definitions", () => {
+	it("omits bash_output, bash_kill, and bash's run_in_background param by default", () => {
+		const tools = getToolDefinitions();
+		expect(tools.find((t) => t.function.name === "bash_output")).toBeUndefined();
+		expect(tools.find((t) => t.function.name === "bash_kill")).toBeUndefined();
+		const bash = tools.find((t) => t.function.name === "bash");
+		expect(bash?.function.parameters.properties).not.toHaveProperty("run_in_background");
+	});
+
+	it("includes bash_output, bash_kill, and bash's run_in_background param when enabled", () => {
+		const tools = getToolDefinitions(undefined, undefined, undefined, undefined, true);
+		expect(tools.find((t) => t.function.name === "bash_output")).toBeDefined();
+		expect(tools.find((t) => t.function.name === "bash_kill")).toBeDefined();
+		const bash = tools.find((t) => t.function.name === "bash");
+		expect(bash?.function.parameters.properties).toHaveProperty("run_in_background");
+	});
+});
+
+describe("bash_output", () => {
+	it("errors on an unknown task_id", async () => {
+		const { deps } = makeBackgroundDeps();
+		const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, undefined, undefined, undefined, deps);
+		const result = await exec("bash_output", { task_id: "bg-999" });
+		expect(result.isError).toBe(true);
+		expect(result.content).toContain("bg-999");
+	});
+
+	it("errors when background support isn't configured", async () => {
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const result = await exec("bash_output", { task_id: "bg-1" });
+		expect(result.isError).toBe(true);
+		expect(result.content).toContain("not available");
+	});
+
+	it("reports running, then exited-with-output once the task finishes", async () => {
+		const { deps } = makeBackgroundDeps();
+		const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, undefined, undefined, undefined, deps);
+		const started = await exec("bash", { command: "sleep 0.3 && echo bg-output-marker", run_in_background: true });
+		const taskId = started.content.match(/bg-\d+/)?.[0];
+		expect(taskId).toBeDefined();
+
+		const running = await exec("bash_output", { task_id: taskId });
+		expect(running.content).toContain("running");
+
+		const finished = await exec("bash_output", { task_id: taskId, wait: 5 });
+		expect(finished.content).toContain("bg-output-marker");
+		expect(finished.content).toContain("exited with code 0");
+	});
+});
+
+describe("bash_kill", () => {
+	it("kills a running background task", async () => {
+		const { deps } = makeBackgroundDeps();
+		const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, undefined, undefined, undefined, deps);
+		const started = await exec("bash", { command: "sleep 30", run_in_background: true });
+		const taskId = started.content.match(/bg-\d+/)?.[0];
+
+		const killed = await exec("bash_kill", { task_id: taskId });
+		expect(killed.content).toContain("killed");
+
+		await new Promise((r) => setTimeout(r, 300));
+		const status = await exec("bash_output", { task_id: taskId });
+		expect(status.content).toContain("killed");
+	});
+
+	it("reports already-done on a second kill instead of erroring", async () => {
+		const { deps } = makeBackgroundDeps();
+		const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, undefined, undefined, undefined, deps);
+		const started = await exec("bash", { command: "echo quick", run_in_background: true });
+		const taskId = started.content.match(/bg-\d+/)?.[0];
+		await new Promise((r) => setTimeout(r, 300));
+
+		const result = await exec("bash_kill", { task_id: taskId });
+		expect(result.isError).toBeFalsy();
+		expect(result.content).toContain("already");
+	});
+
+	it("errors on an unknown task_id", async () => {
+		const { deps } = makeBackgroundDeps();
+		const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, undefined, undefined, undefined, deps);
+		const result = await exec("bash_kill", { task_id: "bg-999" });
+		expect(result.isError).toBe(true);
 	});
 });
 

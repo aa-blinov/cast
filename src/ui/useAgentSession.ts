@@ -9,6 +9,7 @@ import type { AgentRunner } from "../core/runner.ts";
 import { addUsage, appendMessage, type SessionState, type SessionUsage, saveSession } from "../core/session.ts";
 import type { PermissionMode } from "../core/settings.ts";
 import { setLastTurnAborted, setStreamingActive } from "../core/stdin-manager.ts";
+import type { BackgroundTaskRegistry, BashBackgroundDeps } from "../core/tools/bash-background.ts";
 import { displayWidthCacheFlush } from "./display-width.ts";
 
 export type AgentStatus = "idle" | "running" | "error";
@@ -167,6 +168,8 @@ interface UseAgentSessionParams {
 	cwd: string;
 	systemPrompt: string;
 	runner: AgentRunner;
+	/** Background bash task registry for this session — see LoopConfig.backgroundBash's doc comment. */
+	backgroundTasks: BackgroundTaskRegistry;
 	permissionMode: PermissionMode;
 	mcpResult: McpSetupResult;
 	confirmBash: (command: string, reason: string) => Promise<boolean>;
@@ -305,6 +308,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		cwd,
 		systemPrompt,
 		runner,
+		backgroundTasks,
 		permissionMode,
 		mcpResult,
 		confirmBash,
@@ -479,6 +483,17 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		setLastTurnUsage(null);
 	}, [session]);
 
+	// Built once (runner/backgroundTasks are stable props) — followUpQueue and
+	// isRunning don't depend on `submit` existing, so this can be constructed
+	// eagerly; only the "wake an idle session" callback below needs `submit`,
+	// wired separately via setOnIdleWake once it's defined.
+	const backgroundBashDeps = useRef<BashBackgroundDeps | undefined>(undefined);
+	backgroundBashDeps.current ??= {
+		registry: backgroundTasks,
+		followUpQueue: runner.followUpQueue,
+		isRunning: () => runner.isRunning,
+	};
+
 	const submit = useCallback(
 		async (text: string, images?: PendingImage[]) => {
 			if (runner.isRunning) {
@@ -581,6 +596,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					noSkills,
 					cliSkillPaths,
 					sshHosts: params.sshHosts,
+					backgroundBash: backgroundBashDeps.current,
 					mcpPromptSuffix: formatMcpForPrompt(mcpResult),
 					planState,
 					announcedLocalDate,
@@ -846,6 +862,16 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			params.sshHosts,
 		],
 	);
+
+	// `submit` doesn't exist yet at the point backgroundBashDeps is built
+	// above (it's defined by the useCallback right here) — wire the "wake an
+	// idle session" callback separately, once it does. Re-runs (overwriting,
+	// never going stale) whenever `submit`'s identity changes.
+	useEffect(() => {
+		backgroundTasks.setOnIdleWake((text) => {
+			void submit(text);
+		});
+	}, [submit, backgroundTasks]);
 
 	const steer = useCallback(
 		(text: string) => {

@@ -45,7 +45,7 @@ interface AppProps {
 
 export function App(props: AppProps): JSX.Element {
 	const { result, version, initialPrompt, onQuit, onPasteImage, onRepaintBanner } = props;
-	const { config, runner } = result;
+	const { config, runner, backgroundTasks } = result;
 
 	// Wire Ink's suspendTerminal so execBash can hand the terminal to child
 	// processes (live output, password prompts). Done here via the public
@@ -267,6 +267,7 @@ export function App(props: AppProps): JSX.Element {
 		cwd,
 		systemPrompt,
 		runner,
+		backgroundTasks,
 		permissionMode,
 		mcpResult,
 		confirmBash,

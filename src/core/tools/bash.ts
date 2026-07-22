@@ -13,10 +13,11 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { AppConfig } from "../config.ts";
 import { checkDangerousBash } from "../permissions.ts";
+import type { BashBackgroundDeps } from "./bash-background.ts";
 import type { ConfirmBash, ToolResult } from "./shared.ts";
 
 /** Strip ANSI escape sequences from output. */
-function stripAnsi(s: string): string {
+export function stripAnsi(s: string): string {
 	const ESC = String.fromCharCode(0x1b);
 	const BEL = String.fromCharCode(0x07);
 	// biome-ignore lint/suspicious/noUselessEscapeInString: [ must be escaped in regex
@@ -164,12 +165,49 @@ export function getBashResolution(): BashResolution {
 	return resolveBash();
 }
 
+export interface FormatBashResultOptions {
+	exitCode: number | null;
+	aborted?: boolean;
+	timedOut?: boolean;
+	timeoutSeconds?: number;
+	warnPrefix?: string;
+}
+
+/**
+ * Shared by the synchronous `bash` close handler and the background-task
+ * registry (tools/bash-background.ts) — both need the exact same ANSI-strip
+ * / prefix / line-truncation treatment on raw process output, just triggered
+ * from different call sites (a `Promise` resolve vs. a completion callback).
+ */
+export function formatBashResult(rawOutput: string, config: AppConfig, opts: FormatBashResultOptions): ToolResult {
+	const { exitCode, aborted = false, timedOut = false, timeoutSeconds, warnPrefix = "" } = opts;
+	let output = stripAnsi(rawOutput).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+	const prefix = aborted
+		? "[ABORTED] Command was interrupted by user.\n\n"
+		: timedOut
+			? `[TIMED OUT] after ${timeoutSeconds} seconds. If this command needs more time, retry with a larger timeout.\n\n`
+			: "";
+	if (exitCode !== 0 && !aborted && !timedOut) {
+		output += `\n\nProcess exited with code ${exitCode}`;
+	}
+	const lines = output.split("\n");
+	if (lines.length > config.maxToolOutputLines) {
+		const kept = lines.slice(-config.maxToolOutputLines);
+		output = `[Showing last ${config.maxToolOutputLines} of ${lines.length} lines]\n${kept.join("\n")}`;
+	}
+	return {
+		content: warnPrefix + prefix + (output || "(no output)"),
+		isError: aborted || timedOut || exitCode !== 0,
+	};
+}
+
 export async function execBash(
 	args: Record<string, unknown>,
 	cwd: string,
 	config: AppConfig,
 	confirmBash?: ConfirmBash,
 	signal?: AbortSignal,
+	background?: BashBackgroundDeps,
 ): Promise<ToolResult> {
 	const command = String(args.command ?? "");
 	const timeout = typeof args.timeout === "number" ? args.timeout : config.defaultBashTimeout;
@@ -194,6 +232,20 @@ export async function execBash(
 	if (bash.warning && !warningShown) {
 		warningShown = true;
 		warnPrefix = `[warning] ${bash.warning}\n\n`;
+	}
+
+	// Only advertised/wired when the caller (web/TUI) configured background
+	// support — see tools.ts's conditional getToolDefinitions. If the model
+	// sets this flag somewhere it's not wired (cast run, a subagent), fall
+	// through to the normal synchronous path below instead of erroring.
+	if (args.run_in_background === true && background) {
+		const task = background.registry.start(command, cwd, config, timeout, background);
+		return {
+			content:
+				`${warnPrefix}Started in background as ${task.id}. You don't need to poll — a <system-reminder> ` +
+				`will arrive automatically when it finishes. Call bash_output({task_id:"${task.id}"}) only if you ` +
+				`need progress sooner, or bash_kill({task_id:"${task.id}"}) to stop it early.`,
+		};
 	}
 
 	return new Promise<ToolResult>((resolve) => {
@@ -266,24 +318,13 @@ export async function execBash(
 			clearTimeout(timer);
 			signal?.removeEventListener("abort", onAbort);
 
-			let output = stripAnsi(rawOutput).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-			const prefix = aborted
-				? "[ABORTED] Command was interrupted by user.\n\n"
-				: timedOut
-					? `[TIMED OUT] after ${timeout} seconds. If this command needs more time, retry with a larger timeout.\n\n`
-					: "";
-			if (exitCode !== 0 && !aborted && !timedOut) {
-				output += `\n\nProcess exited with code ${exitCode}`;
-			}
-			const lines = output.split("\n");
-			if (lines.length > config.maxToolOutputLines) {
-				const kept = lines.slice(-config.maxToolOutputLines);
-				output = `[Showing last ${config.maxToolOutputLines} of ${lines.length} lines]\n${kept.join("\n")}`;
-			}
-			const result: ToolResult = {
-				content: warnPrefix + prefix + (output || "(no output)"),
-				isError: aborted || timedOut || exitCode !== 0,
-			};
+			const result = formatBashResult(rawOutput, config, {
+				exitCode,
+				aborted,
+				timedOut,
+				timeoutSeconds: timeout,
+				warnPrefix,
+			});
 			finalResult = result;
 			resolve(result);
 		});

@@ -40,13 +40,25 @@ import { promptsDir, readRequiredPrompt } from "./prompts.ts";
 import { compactMessages, estimateTokens, fileTagsFromCompactionSummary, shouldCompact } from "./session.ts";
 import type { SshHost } from "./ssh.ts";
 import type { SubagentPrompt } from "./subagents.ts";
-import { type ConfirmBash, createToolExecutor, getToolDefinitions, type ToolResult } from "./tools.ts";
+import {
+	type BashBackgroundDeps,
+	type ConfirmBash,
+	createToolExecutor,
+	getToolDefinitions,
+	type ToolResult,
+} from "./tools.ts";
 
 // How many identical consecutive tool calls (same name + same args) before
 // we treat it as a doom loop and block execution. Matches opencode's
 // DOOM_LOOP_THRESHOLD — the model gets an error result and must try something
 // different.
 const DOOM_LOOP_THRESHOLD = 3;
+
+// bash_output is a pure-read poll — repeated identical polls on the same
+// task_id are the expected usage pattern while waiting on a background task,
+// not a stuck model. bash_kill is deliberately NOT exempt: repeated identical
+// kills is a legitimate doom pattern.
+const DOOM_LOOP_EXEMPT = new Set<string>(["bash_output"]);
 
 // Terminal (signal) tools: once one succeeds, the turn ends — the UI opens a
 // mode-transition dialog when the run settles. Enforced by the loop, not by
@@ -415,6 +427,13 @@ export interface LoopConfig {
 	/** Configured SSH hosts — when non-empty, the `ssh` tool is registered. */
 	sshHosts?: SshHost[];
 	/**
+	 * Background bash task support (`run_in_background` on `bash`, plus
+	 * `bash_output`/`bash_kill`) — web/TUI only. Deliberately omitted for
+	 * `cast run` (process exits after one turn, nothing left to notify) and
+	 * `task` subagent child configs (ephemeral, no later turn either).
+	 */
+	backgroundBash?: BashBackgroundDeps;
+	/**
 	 * Parent MCP catalog block for the system prompt. Forwarded into sync
 	 * `task` subagents so they see the same `<available_mcp>` list.
 	 */
@@ -463,7 +482,13 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 	const subagentsEnabled = currentPersonaObj?.subagents === true;
 	const subagentNames = subagentsEnabled ? loopConfig.subagentPrompts?.map((p) => p.name) : undefined;
 	const sshHostNames = loopConfig.sshHosts?.map((h) => h.name);
-	const builtinTools = getToolDefinitions(subagentNames, initialModel, loopConfig.subagentModel, sshHostNames);
+	const builtinTools = getToolDefinitions(
+		subagentNames,
+		initialModel,
+		loopConfig.subagentModel,
+		sshHostNames,
+		Boolean(loopConfig.backgroundBash),
+	);
 	const mcpTools = loopConfig.mcpTools ?? [];
 	const allTools = [...builtinTools, ...mcpTools];
 	const disabledTools = loopConfig.disabledTools;
@@ -525,6 +550,7 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 			: undefined,
 		loopConfig.planState,
 		loopConfig.sshHosts,
+		loopConfig.backgroundBash,
 	);
 	const executeTool = (name: string, args: Record<string, unknown>, toolSignal?: AbortSignal): Promise<ToolResult> => {
 		// Legacy aliases (e.g. find → glob) before the allowlist / unknown check
@@ -1122,6 +1148,7 @@ async function executeToolCalls(
 	const doomBlocked = new Set<string>();
 	for (const tc of prepared) {
 		if (tc.args === null) continue;
+		if (DOOM_LOOP_EXEMPT.has(tc.name)) continue;
 		const argsKey = JSON.stringify(tc.args);
 		const recent = recentToolCalls.slice(-doomLoopThreshold);
 		if (recent.length === doomLoopThreshold && recent.every((r) => r.name === tc.name && r.argsKey === argsKey)) {

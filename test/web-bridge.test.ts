@@ -220,4 +220,62 @@ describe("web bridge", () => {
 		expect(bridge.suggestCommand(ws.id, "/unknown")).toEqual([]);
 		expect(bridge.suggestCommand(ws.id, "/mcp enable unknown-server")).toEqual([]);
 	});
+
+	describe("background bash tasks", () => {
+		it("submit() threads backgroundBash into the LoopConfig passed to runAgentLoop", () => {
+			const bridge = createWebBridge(makeResult());
+			const ws = bridge.createSession();
+			bridge.submit(ws.id, "hello");
+			expect(runAgentLoop).toHaveBeenCalledTimes(1);
+			const loopConfig = runAgentLoop.mock.calls[0]?.[1] as { backgroundBash?: unknown };
+			expect(loopConfig.backgroundBash).toBe(ws.backgroundBash);
+		});
+
+		it("closeSession() kills any still-running background tasks", () => {
+			const bridge = createWebBridge(makeResult());
+			const ws = bridge.createSession();
+			const killAllSpy = vi.spyOn(ws.backgroundBash.registry, "killAll");
+			bridge.closeSession(ws.id);
+			expect(killAllSpy).toHaveBeenCalledTimes(1);
+		});
+
+		// The whole point of the feature: a background task finishing while the
+		// session is fully idle (no turn to steer into) still gets the model's
+		// attention — via the registry's onIdleWake, wired to submit() at session
+		// construction (bridge.ts's makeBackgroundBash), starting a fresh turn.
+		it("a background task finishing while idle wakes a fresh turn with a <system-reminder>", async () => {
+			const bridge = createWebBridge(makeResult());
+			const ws = bridge.createSession();
+
+			runAgentLoop.mockImplementationOnce(async (messages: unknown[]) => messages);
+			bridge.submit(ws.id, "hello");
+			await new Promise((r) => setTimeout(r, 0));
+			expect(ws.status).toBe("idle");
+
+			runAgentLoop.mockClear();
+			runAgentLoop.mockImplementationOnce(async (messages: unknown[]) => messages);
+			ws.backgroundBash.registry.start("echo bg-wake-marker", cwd, testConfig, 5, ws.backgroundBash);
+			await new Promise((r) => setTimeout(r, 500));
+
+			expect(runAgentLoop).toHaveBeenCalledTimes(1);
+			const lastMessage = ws.session.messages.at(-1);
+			expect(lastMessage?.role).toBe("user");
+			expect(String(lastMessage?.content)).toContain("<system-reminder>");
+			expect(String(lastMessage?.content)).toContain("bg-wake-marker");
+		});
+
+		it("a background task finishing while a turn is still running enqueues onto followUpQueue instead", async () => {
+			const bridge = createWebBridge(makeResult());
+			const ws = bridge.createSession();
+			ws.runner.startRun(new AbortController());
+
+			ws.backgroundBash.registry.start("echo bg-followup-marker", cwd, testConfig, 5, ws.backgroundBash);
+			await new Promise((r) => setTimeout(r, 500));
+
+			expect(runAgentLoop).not.toHaveBeenCalled();
+			expect(ws.runner.followUpQueue.hasItems()).toBe(true);
+			const [queued] = ws.runner.followUpQueue.drain();
+			expect(String(queued?.content)).toContain("bg-followup-marker");
+		});
+	});
 });

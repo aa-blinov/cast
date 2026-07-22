@@ -2,6 +2,13 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.8.1
+
+### Added
+
+- **Background bash tasks**: the `bash` tool gains a `run_in_background` parameter (web and TUI only). Setting it to `true` spawns the command without blocking and returns a task id immediately. Completion arrives automatically as a `<system-reminder>` — no polling needed. Two companion tools (`bash_output`, `bash_kill`) let the agent check progress or terminate a task early. Background tasks survive across turns and are session-scoped; they're reaped on session close.
+
+
 ## 0.8.0
 
 ### Added

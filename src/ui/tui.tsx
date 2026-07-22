@@ -77,6 +77,16 @@ export async function runTui(args: ParsedArgs): Promise<void> {
 
 	console.log(gradientBanner(CAST_BANNER, args.version));
 
+	// Background bash tasks are spawned detached (their own process group, see
+	// tools/bash-background.ts) specifically so a running command's own
+	// Ctrl+C doesn't kill it — but that also means a terminal-delivered
+	// SIGINT to *this* process's group never reaches them either. `exit`
+	// fires synchronously on every normal termination path (explicit
+	// onQuit, an uncaught SIGINT with no other handler, a thrown error) short
+	// of `kill -9`, so it's the one place that reliably reaps orphans
+	// regardless of how the TUI is closed.
+	process.on("exit", () => result.backgroundTasks.killAll());
+
 	const onQuit = () => {
 		saveSession(result.session);
 		void closeMcpConnections(result.mcpResult.connections).finally(() => process.exit(0));
