@@ -17,6 +17,7 @@ cast - Coding agent harness with swappable personas
 Usage:
   cast [options] [prompt]
   cast run [options] <message>  Non-interactive mode (one prompt, stream to stdout, exit)
+  cast web [start|stop|status]  Web UI mode (browser-based control room)
   cast upgrade [version] [--force]
                               Re-run the installer to update (release installs
                               only) — no-op if already on that version, unless

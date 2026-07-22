@@ -10,7 +10,10 @@ import type { ParsedArgs } from "../core/startup.ts";
 import { runStartup } from "../core/startup.ts";
 import type { Pickers, PickOption } from "../pickers/types.ts";
 import { createWebBridge } from "./bridge.ts";
+import { clearWebState, writeWebState } from "./daemon-state.ts";
 import { startWebServer } from "./server.ts";
+
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 
 const VERSION: string = JSON.parse(
 	(await import("node:fs")).readFileSync(
@@ -28,12 +31,23 @@ const VERSION: string = JSON.parse(
 async function main(): Promise<void> {
 	const args = process.argv.slice(2);
 
-	// Parse --port
+	// Parse --port / --host
 	let port = parseInt(process.env.CAST_WEB_PORT ?? "1337", 10);
+	let host = process.env.CAST_WEB_HOST ?? "127.0.0.1";
+	// Set by the CLI launcher (src/index.ts), not passed as a CLI arg — the
+	// launcher already strips --foreground out of the args it forwards, since
+	// that flag only controls *how it spawns*, not anything the server itself
+	// does — except which lifecycle it reports in the state file.
+	const foreground = process.env.CAST_WEB_FOREGROUND === "1";
 	for (let i = 0; i < args.length; i++) {
 		if (args[i] === "--port" && args[i + 1]) {
 			port = parseInt(args[i + 1]!, 10);
 			i++;
+		} else if (args[i] === "--host" && args[i + 1]) {
+			host = args[i + 1]!;
+			i++;
+		} else if (args[i] === "--public") {
+			host = "0.0.0.0";
 		}
 	}
 
@@ -112,10 +126,61 @@ async function main(): Promise<void> {
 	const bridge = createWebBridge(result);
 	bridge.createSession();
 
-	startWebServer({ port, bridge, webUser: "cast", webPassword, version: VERSION });
+	if (!LOOPBACK_HOSTS.has(host)) {
+		console.log(
+			`[cast web] ⚠ binding ${host} — reachable from other machines on this network, protected only by the password above.`,
+		);
+	}
+
+	const server = startWebServer({
+		port,
+		host,
+		bridge,
+		webUser: "cast",
+		webPassword,
+		version: VERSION,
+		onListening: () => {
+			writeWebState({ pid: process.pid, port, host, startedAt: new Date().toISOString(), foreground });
+			console.log(`[cast web] stop: cast web stop`);
+		},
+		onError: (err) => {
+			if (err.code === "EADDRINUSE") {
+				console.error(`[cast web] port ${port} is already in use on ${host}.`);
+				console.error(
+					`[cast web] run 'cast web status' to check what's running, or pick a different port with --port.`,
+				);
+			} else {
+				console.error("[cast web] failed to start:", err.message);
+			}
+			process.exit(1);
+		},
+	});
+
+	// Graceful shutdown — closing every live session drains their background
+	// bash tasks and marks in-flight runs aborted before the process actually
+	// exits, instead of Node's default "just die" behavior on SIGTERM/SIGINT.
+	// SIGKILL (a hard `kill -9`, an OOM kill) can't be caught by anything —
+	// that's exactly why start/stop/status all treat a dead recorded PID as
+	// stale and self-heal, rather than assuming this handler always runs.
+	let shuttingDown = false;
+	const shutdown = (signal: string) => {
+		if (shuttingDown) return;
+		shuttingDown = true;
+		console.log(`[cast web] received ${signal}, shutting down...`);
+		for (const s of bridge.listSessions()) bridge.closeSession(s.id);
+		clearWebState();
+		server.close(() => process.exit(0));
+		// server.close() waits for existing connections (including open SSE
+		// streams) to end on their own — force exit if that takes too long
+		// rather than hanging a `cast web stop` caller indefinitely.
+		setTimeout(() => process.exit(0), 3000).unref();
+	};
+	process.on("SIGTERM", () => shutdown("SIGTERM"));
+	process.on("SIGINT", () => shutdown("SIGINT"));
 }
 
 main().catch((err) => {
 	console.error("[cast web] fatal:", err);
+	clearWebState();
 	process.exit(1);
 });

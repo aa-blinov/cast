@@ -7,6 +7,11 @@ All notable user-facing changes to cast, newest first.
 ### Added
 
 - New shared prompt section (`verification-discipline.md`) instructs the agent to verify changes against the real running interface rather than trusting tests alone — appended to every persona and subagent prompt.
+- `cast web` now detects already-running instances and refuses to start a duplicate (instead of silently spawning a second server on the same port).
+- `cast web --public` / `--host 0.0.0.0` — bind to all interfaces for network access (prints a security warning).
+- `cast web stop` gracefully shuts down open sessions (SIGTERM), escalating to SIGKILL after 3s. Detects and cleans up stale state when the process is already gone (crash, OOM, `kill -9`).
+- `cast web status` auto-heals stale PID files — reports honestly instead of claiming a dead process is running.
+- Built-in `skill-creator` skill (user-invoked): reference for writing predictable skills, based on Matt Pocock's methodology (invocation modes, information hierarchy, leading words, pruning, failure modes).
 
 
 ### Fixed
