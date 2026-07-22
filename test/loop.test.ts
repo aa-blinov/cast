@@ -1865,6 +1865,107 @@ describe("runAgentLoop — doom loop detection", () => {
 		expect(events.filter((e) => e.type === "doom_loop")).toHaveLength(0);
 	});
 
+	it("never blocks bash_output on repeated identical polls of the same task_id", async () => {
+		const events: AgentEvent[] = [];
+		const pollArgs = JSON.stringify({ task_id: "bg-1" });
+
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [{ id: "p1", name: "bash_output", arguments: pollArgs }],
+			}))
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [{ id: "p2", name: "bash_output", arguments: pollArgs }],
+			}))
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [{ id: "p3", name: "bash_output", arguments: pollArgs }],
+			}))
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [{ id: "p4", name: "bash_output", arguments: pollArgs }],
+			}))
+			.mockImplementationOnce(async () => ({
+				content: "polled enough",
+				thinking: "",
+				finishReason: "stop",
+			}));
+
+		await runAgentLoop([{ role: "user", content: "poll it" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			onEvent: (event) => events.push(structuredClone(event)),
+		});
+
+		// 4 identical bash_output calls in a row — would trip DOOM_LOOP_THRESHOLD (3)
+		// for any other tool, but bash_output is explicitly exempt.
+		expect(events.filter((e) => e.type === "doom_loop")).toHaveLength(0);
+		const toolEnds = events.filter((e) => e.type === "tool_end");
+		expect(toolEnds).toHaveLength(4);
+		for (const end of toolEnds) {
+			if (end.type === "tool_end") expect(end.result.content).not.toContain("Doom loop");
+		}
+	});
+
+	it("still blocks bash_kill on repeated identical calls (not exempt like bash_output)", async () => {
+		const events: AgentEvent[] = [];
+		const killArgs = JSON.stringify({ task_id: "bg-1" });
+
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [{ id: "k1", name: "bash_kill", arguments: killArgs }],
+			}))
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [{ id: "k2", name: "bash_kill", arguments: killArgs }],
+			}))
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [{ id: "k3", name: "bash_kill", arguments: killArgs }],
+			}))
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [{ id: "k4", name: "bash_kill", arguments: killArgs }],
+			}))
+			.mockImplementationOnce(async () => ({
+				content: "giving up",
+				thinking: "",
+				finishReason: "stop",
+			}));
+
+		await runAgentLoop([{ role: "user", content: "kill it" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			onEvent: (event) => events.push(structuredClone(event)),
+		});
+
+		const doomEvents = events.filter((e) => e.type === "doom_loop");
+		expect(doomEvents).toHaveLength(1);
+		expect(doomEvents[0]).toEqual({ type: "doom_loop", tool: "bash_kill", attempts: 3 });
+	});
+
 	it("detects a doom loop inside a single parallel batch (batch not blind to itself)", async () => {
 		const events: AgentEvent[] = [];
 		const loopArgs = JSON.stringify({ command: "echo hi" });

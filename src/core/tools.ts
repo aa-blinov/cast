@@ -12,6 +12,7 @@ import {
 } from "./plan.ts";
 import type { SshHost } from "./ssh.ts";
 import { execBash } from "./tools/bash.ts";
+import { type BashBackgroundDeps, execBashKill, execBashOutput } from "./tools/bash-background.ts";
 import { execEdit, execRead, execWrite } from "./tools/files.ts";
 import { execGlob, execGrep, execLs } from "./tools/search.ts";
 import type { ConfirmBash, ToolExecutor, ToolResult } from "./tools/shared.ts";
@@ -19,6 +20,7 @@ import { execSsh } from "./tools/ssh.ts";
 import { execTask, type TaskExecutorDeps } from "./tools/task.ts";
 import { execWebFetch, execWebSearch } from "./tools/web.ts";
 
+export type { BashBackgroundDeps } from "./tools/bash-background.ts";
 // Re-export the public tool types so existing importers of "./tools.ts"
 // (loop.ts, mcp.ts, tests) keep working after the split into tools/*.
 export type { ConfirmBash, ToolExecutor, ToolResult } from "./tools/shared.ts";
@@ -33,6 +35,7 @@ export function getToolDefinitions(
 	mainModel?: string,
 	subagentModel?: string,
 	sshHostNames?: string[],
+	backgroundBashEnabled?: boolean,
 ): Tool[] {
 	const personaList =
 		personaNames && personaNames.length > 0
@@ -62,6 +65,20 @@ export function getToolDefinitions(
 							description:
 								"Timeout in seconds. Default 180. Increase for long-running commands (e.g. 600 for docker build)",
 						},
+						...(backgroundBashEnabled
+							? {
+									run_in_background: {
+										type: "boolean",
+										description:
+											"Run this command in the background and return immediately with a task id, instead of " +
+											"waiting for it to finish. Use for commands you don't need to block on: dev servers, " +
+											"long builds/tests you'll check on later, anything open-ended. You don't need to poll — " +
+											"a <system-reminder> arrives automatically with the output when it finishes, even if you've " +
+											"moved on to something else. Check bash_output only if you want progress sooner, or " +
+											"bash_kill to stop it early.",
+									},
+								}
+							: {}),
 					},
 					required: ["command"],
 				},
@@ -334,6 +351,59 @@ export function getToolDefinitions(
 					},
 				]
 			: []),
+		// Background bash follow-ups — only when a session has background-task
+		// support wired in (web/TUI; not `cast run`, not subagents — see
+		// LoopConfig.backgroundBash's doc comment).
+		...(backgroundBashEnabled
+			? [
+					{
+						type: "function" as const,
+						function: {
+							name: "bash_output",
+							description:
+								"Check on a background bash task started with bash's run_in_background:true. Returns its " +
+								"current status (running/exited/killed) and captured output so far. You don't need this to " +
+								"find out when a task finishes — a <system-reminder> arrives automatically — only call it if " +
+								"you want progress sooner. Repeated identical calls on the same task_id are expected while " +
+								"waiting and are never treated as a doom loop.",
+							parameters: {
+								type: "object",
+								properties: {
+									task_id: {
+										type: "string",
+										description: "Task id returned by bash's run_in_background:true",
+									},
+									wait: {
+										type: "number",
+										description:
+											"Optional: block up to this many seconds (max 60) for the task to finish before " +
+											"returning, instead of returning the current status immediately.",
+									},
+								},
+								required: ["task_id"],
+							},
+						},
+					},
+					{
+						type: "function" as const,
+						function: {
+							name: "bash_kill",
+							description:
+								"Terminate a running background bash task started with bash's run_in_background:true.",
+							parameters: {
+								type: "object",
+								properties: {
+									task_id: {
+										type: "string",
+										description: "Task id returned by bash's run_in_background:true",
+									},
+								},
+								required: ["task_id"],
+							},
+						},
+					},
+				]
+			: []),
 		// Plan mode tools — always defined, filtered via disabledTools when not in
 		// plan mode, so the model only ever sees them while /plan is active (no
 		// "only available in plan mode" boilerplate needed in the descriptions).
@@ -498,12 +568,17 @@ export function createToolExecutor(
 	taskDeps?: TaskExecutorDeps,
 	planState?: PlanState,
 	sshHosts?: SshHost[],
+	backgroundBash?: BashBackgroundDeps,
 ): ToolExecutor {
 	return async (name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> => {
 		try {
 			switch (name) {
 				case "bash":
-					return await execBash(args, cwd, config, confirmBash, signal);
+					return await execBash(args, cwd, config, confirmBash, signal, backgroundBash);
+				case "bash_output":
+					return await execBashOutput(args, config, backgroundBash, signal);
+				case "bash_kill":
+					return await execBashKill(args, backgroundBash);
 				case "read":
 					return await execRead(args, cwd, config);
 				case "write":

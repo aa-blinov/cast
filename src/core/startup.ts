@@ -41,6 +41,7 @@ import type { SshHost } from "./ssh.ts";
 import { resolveSshHosts } from "./ssh.ts";
 import { loadSubagentPrompts, type SubagentPrompt } from "./subagents.ts";
 import { getBashResolution } from "./tools/bash.ts";
+import { BackgroundTaskRegistry } from "./tools/bash-background.ts";
 import { buildReasoningParams, type ModelReasoningMeta } from "./vendors.ts";
 
 export interface ParsedArgs {
@@ -67,6 +68,10 @@ export interface StartupResult {
 	systemPrompt: string;
 	session: SessionState;
 	runner: AgentRunner;
+	/** Background bash task registry for `runner`'s session — TUI-only (see
+	 * LoopConfig.backgroundBash's doc comment); unused by the web bridge,
+	 * which builds its own per-session registry instead. */
+	backgroundTasks: BackgroundTaskRegistry;
 	permissionMode: PermissionMode;
 	mcpResult: McpSetupResult;
 	skills: Skill[];
@@ -382,6 +387,7 @@ export async function runStartup(
 		? { ...resumedSession, model, providerUrl: config.baseURL, persona: persona.name }
 		: { ...createSession(model, cwd), providerUrl: config.baseURL, persona: persona.name };
 	const runner = createAgentRunner();
+	const backgroundTasks = new BackgroundTaskRegistry();
 	const systemPrompt = buildSystemPrompt(
 		persona,
 		contextFilesSuffix,
@@ -407,6 +413,7 @@ export async function runStartup(
 		systemPrompt,
 		session,
 		runner,
+		backgroundTasks,
 		permissionMode,
 		mcpResult,
 		skills,

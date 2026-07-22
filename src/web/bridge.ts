@@ -50,6 +50,7 @@ import { loadSettings, updateSettings } from "../core/settings.ts";
 import { isUninstallableSkill, uninstallUserSkill } from "../core/skills.ts";
 import { saveSshConfig } from "../core/ssh.ts";
 import type { StartupResult } from "../core/startup.ts";
+import { BackgroundTaskRegistry, type BashBackgroundDeps } from "../core/tools/bash-background.ts";
 import { getReasoningOptions } from "../core/vendors.ts";
 import { ALL_THEMES } from "../ui/themes/index.ts";
 import type { ThemeColors } from "../ui/themes/types.ts";
@@ -63,6 +64,7 @@ export interface WebAgentSession {
 	id: string;
 	session: SessionState;
 	runner: AgentRunner;
+	backgroundBash: BashBackgroundDeps;
 	status: WebAgentStatus;
 	error: string | null;
 	listeners: Set<(event: WebEvent) => void>;
@@ -242,6 +244,16 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		}
 	}
 
+	// `submit` (a hoisted function declared further down this closure) is only
+	// ever *invoked* by onIdleWake later, asynchronously, once a background
+	// task finishes — never called during construction — so referencing it
+	// here before its textual definition is safe.
+	function makeBackgroundBash(runner: AgentRunner, sessionId: string): BashBackgroundDeps {
+		const registry = new BackgroundTaskRegistry();
+		registry.setOnIdleWake((text) => submit(sessionId, text));
+		return { registry, followUpQueue: runner.followUpQueue, isRunning: () => runner.isRunning };
+	}
+
 	function createSessionInstance(personaName?: string, modelOverride?: string, cwdOverride?: string): WebAgentSession {
 		const persona = personaName ? (resolvePersona(personaName) ?? currentPersona) : currentPersona;
 		const model = modelOverride ?? result.session.model;
@@ -255,6 +267,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			id: session.id,
 			session,
 			runner,
+			backgroundBash: makeBackgroundBash(runner, session.id),
 			status: "idle",
 			error: null,
 			listeners: new Set(),
@@ -339,6 +352,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			subagentModel,
 			projectTrusted,
 			sshHosts,
+			backgroundBash: ws.backgroundBash,
 			mcpPromptSuffix: formatMcpForPrompt(mcpResult),
 			onEvent: (event: AgentEvent) => {
 				if (event.type === "assistant_message") thinkingByCompletion.push(event.thinking ?? "");
@@ -405,6 +419,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		const ws = sessions.get(sessionId);
 		if (!ws) return false;
 		if (ws.status === "running") ws.runner.abort();
+		ws.backgroundBash.registry.killAll();
 		saveSession(ws.session);
 		// Told before removal, and before clearing listeners, so any open SSE
 		// connection gets one last frame to close itself on (see server.ts).
@@ -444,6 +459,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			id: session.id,
 			session,
 			runner,
+			backgroundBash: makeBackgroundBash(runner, session.id),
 			status: "idle",
 			error: null,
 			listeners: new Set(),
