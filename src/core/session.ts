@@ -687,6 +687,34 @@ export function listSessions(): SessionState[] {
 	return sessions;
 }
 
+/**
+ * One-time migration: convert legacy single-file sessions (`.json` with
+ * embedded messages array) to the split JSONL format (`.json` metadata +
+ * `.jsonl` messages). Skips sessions that are already migrated. Returns
+ * the count of converted sessions.
+ */
+export function migrateSessionsToJsonl(): number {
+	let migrated = 0;
+	for (const filePath of listSessionFilePaths()) {
+		const jsonlPath = filePath.replace(/\.json$/, JSONL_EXT);
+		if (existsSync(jsonlPath)) continue; // already migrated
+		try {
+			const raw = JSON.parse(readFileSync(filePath, "utf-8")) as { messages?: unknown };
+			if (!Array.isArray(raw.messages) || raw.messages.length === 0) continue;
+			// Write messages to JSONL
+			const lines = `${(raw.messages as unknown[]).map((m) => JSON.stringify(m)).join("\n")}\n`;
+			writeFileSync(jsonlPath, lines, "utf-8");
+			// Strip messages from .json, rewrite metadata only
+			delete raw.messages;
+			writeFileSync(filePath, JSON.stringify(raw), "utf-8");
+			migrated++;
+		} catch {
+			// Corrupt file — skip silently, same as readSessionFile.
+		}
+	}
+	return migrated;
+}
+
 // ============================================================================
 // Session summaries — the lightweight view the session picker runs on.
 //
