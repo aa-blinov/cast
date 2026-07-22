@@ -6,13 +6,21 @@
  * wouldn't.
  */
 
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { constants, type Dirent } from "node:fs";
 import { access, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { basename, join, relative } from "node:path";
+import { promisify } from "node:util";
 import type { AppConfig } from "../config.ts";
 import { getCachedFile } from "./hashline-cache.ts";
 import { formatSize, resolvePath, type ToolResult } from "./shared.ts";
+
+// execFile (not execFileSync) — the sync variant blocks the whole Node event
+// loop for as long as fd/rg run. Under concurrent tool execution (several
+// eval cases, or several agent turns, spawning searches around the same
+// time) that stalls every other in-flight call, not just this one — a
+// correctness-neutral but real efficiency cost the async variant avoids.
+const execFileAsync = promisify(execFile);
 
 // ============================================================================
 // Fallback file walking — used when fd/rg aren't installed. fd/rg both skip
@@ -232,13 +240,12 @@ export async function execGlob(args: Record<string, unknown>, cwd: string, _conf
 		fdArgs.push(pattern, searchPath);
 		// Capture stderr rather than inheriting it — an invalid glob makes fd
 		// print "[fd error]: …" which would otherwise land in the TUI frame.
-		const output = execFileSync("fd", fdArgs, {
+		const { stdout } = await execFileAsync("fd", fdArgs, {
 			encoding: "utf-8",
 			timeout: 10_000,
 			cwd: searchPath,
-			stdio: ["ignore", "pipe", "pipe"],
 		});
-		absolutePaths = output.trim().split("\n").filter(Boolean);
+		absolutePaths = stdout.trim().split("\n").filter(Boolean);
 	} catch {
 		// fd isn't installed or returned an error (e.g. invalid glob
 		// pattern) — walk the tree ourselves, matching the pattern
@@ -323,26 +330,25 @@ export async function execGrep(args: Record<string, unknown>, cwd: string, confi
 
 	let output: string;
 	try {
-		// See execGlob for why this is execFileSync with an argument array and
-		// not execSync + string interpolation: pattern/glob come straight from
-		// a tool call argument, and a shell-interpolated `'${pattern}'` is
-		// exploitable by anything containing a single quote (confirmed with a
-		// payload that ran an injected command).
-		// stdio: capture stderr instead of letting it inherit the parent's —
-		// otherwise rg's per-file warnings ("path: Permission denied") print
-		// straight into the Ink TUI, corrupting the frame, and never reach the
-		// error object below where we want to inspect them.
-		output = execFileSync("rg", [...flags, "--", pattern, searchPath], {
+		// See execGlob for why this is execFile (argument array, not a shell
+		// string) — pattern/glob come straight from a tool call argument, and
+		// a shell-interpolated `'${pattern}'` is exploitable by anything
+		// containing a single quote (confirmed with a payload that ran an
+		// injected command).
+		const { stdout } = await execFileAsync("rg", [...flags, "--", pattern, searchPath], {
 			encoding: "utf-8",
 			timeout: 10_000,
 			maxBuffer: config.maxToolOutputBytes,
-			stdio: ["ignore", "pipe", "pipe"],
 		});
+		output = stdout;
 	} catch (err) {
 		// rg's exit codes: 0 = matches found, 1 = ran cleanly but nothing
-		// matched, 2 = a real error (bad regex, unreadable root, …). Node's
-		// execFileSync throws on any non-zero exit, so we have to disambiguate.
-		const e = err as { status?: number | null; code?: string; stderr?: string | Buffer };
+		// matched, 2 = a real error (bad regex, unreadable root, …). The
+		// promisified execFile rejects on any non-zero exit, with the exit
+		// code on `.code` (a number) — spawn-level failures like ENOENT put a
+		// string there instead ('ENOENT'), so `e.code === 1` only ever matches
+		// a real "ran cleanly, no matches" exit.
+		const e = err as { code?: number | string; stderr?: string | Buffer };
 		const rgStderr = typeof e.stderr === "string" ? e.stderr : e.stderr ? e.stderr.toString() : "";
 
 		// Exit 1 = "no matches". rg already did the work and found nothing —
@@ -350,7 +356,7 @@ export async function execGrep(args: Record<string, unknown>, cwd: string, confi
 		// walk here on *every* empty search: pointless work, and on a large
 		// tree under ~/Documents it re-walks macOS-protected folders, firing a
 		// TCC permission prompt for a query that was simply going to be empty.
-		if (e.status === 1) {
+		if (e.code === 1) {
 			return { content: withAccessNote("No matches found", rgStderr, 0) };
 		}
 
@@ -371,7 +377,19 @@ export async function execGrep(args: Record<string, unknown>, cwd: string, confi
 		const allFiles = await walkFiles(cwd, searchPath);
 		const candidates = globRe ? allFiles.filter((p) => globRe.test(basename(p))) : allFiles;
 
+		// `limit` caps matches PER FILE here, same as rg's own `--max-count` —
+		// the fallback used to treat it as a hard cap on the WHOLE search
+		// instead (found via evals/lib/trace-view.ts: a real eval run silently
+		// returned 100 of 238 matching lines this way, well before reaching
+		// most of the matching files, and the model reasonably reported what
+		// it was shown as the whole answer). `SAFETY_VALVE` is a much higher
+		// ceiling that exists only to bound memory on a pathological total
+		// match count — normal-sized "too many results" cases are truncated
+		// (and correctly labeled with a real total) by the existing
+		// `config.maxToolOutputLines` check below, same as the rg path.
+		const SAFETY_VALVE = config.maxToolOutputLines * 4;
 		const blocks: string[] = [];
+		let safetyValveHit = false;
 		outer: for (const absPath of candidates) {
 			let stats: Awaited<ReturnType<typeof stat>>;
 			try {
@@ -393,6 +411,7 @@ export async function execGrep(args: Record<string, unknown>, cwd: string, confi
 			const fileLines = fileText.split("\n");
 			const relPath = absPath.startsWith(cwd) ? absPath.slice(cwd.length + 1) : absPath;
 
+			let fileMatches = 0;
 			for (let i = 0; i < fileLines.length; i++) {
 				if (!patternRe.test(fileLines[i]!)) continue;
 				const start = Math.max(0, i - context);
@@ -403,11 +422,19 @@ export async function execGrep(args: Record<string, unknown>, cwd: string, confi
 						.map((line, j) => `${relPath}:${start + j + 1}:${line}`)
 						.join("\n"),
 				);
-				if (blocks.length >= limit) break outer;
+				fileMatches++;
+				if (blocks.length >= SAFETY_VALVE) {
+					safetyValveHit = true;
+					break outer;
+				}
+				if (fileMatches >= limit) break; // this file's own cap — move on to the next file
 			}
 		}
 
 		output = withAccessNote(blocks.join("\n"), rgStderr, permissionSkips);
+		if (safetyValveHit) {
+			output = `[note: rg unavailable or failed, used a slower fallback search — stopped after ${SAFETY_VALVE} total match(es) to bound memory use. Narrow the pattern/glob/path for a complete result.]\n${output}`;
+		}
 	}
 
 	const lines = output.trim().split("\n");

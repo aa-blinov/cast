@@ -10,8 +10,8 @@
 import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { fixtureDir, fixturePath, writeFixture } from "../fixtures.ts";
-import type { EvalCase } from "../runner.ts";
+import { fixtureDir, fixturePath, writeFixture } from "../../lib/fixtures.ts";
+import type { EvalCase } from "../../lib/runner.ts";
 
 export const basicCases: EvalCase[] = [
 	// ── No-tool baseline ─────────────────────────────────────────────────────
@@ -50,7 +50,7 @@ export const basicCases: EvalCase[] = [
 	{
 		id: "read-with-offset",
 		description: "Agent uses offset/limit for large files",
-		prompt: "Read src/loop.ts lines 1-10 only.",
+		prompt: "Read src/core/loop.ts lines 1-10 only.",
 		expect: {
 			toolsCalled: ["read"],
 			noErrors: true,
@@ -150,7 +150,7 @@ export const basicCases: EvalCase[] = [
 	{
 		id: "grep-search",
 		description: "Agent searches file contents with grep",
-		prompt: "Search for the word 'export' in src/config.ts.",
+		prompt: "Search for the word 'export' in src/core/config.ts.",
 		expect: {
 			toolsCalled: ["grep"],
 			containsAny: ["export"],
@@ -186,7 +186,7 @@ export const basicCases: EvalCase[] = [
 	{
 		id: "ls-directory",
 		description: "Agent lists directory contents",
-		prompt: "List the contents of the src/ directory.",
+		prompt: "List the contents of the src/core/ directory.",
 		expect: {
 			toolsCalled: ["ls"],
 			containsAny: ["config.ts", "loop.ts", "tools.ts"],
@@ -206,13 +206,14 @@ export const basicCases: EvalCase[] = [
 	{
 		id: "read-then-analyze",
 		description: "Agent reads a file and reports an exact count, checked against real ground truth",
-		prompt: "Read src/tools.ts and tell me exactly how many exported functions it has. Answer with just the number.",
+		prompt:
+			"Read src/core/tools.ts and tell me exactly how many exported functions it has. Answer with just the number.",
 		expect: {
 			toolsCalled: ["read"],
 			maxTurns: 3,
 			noErrors: true,
 			verify: ({ response, cwd }) => {
-				const source = readFileSync(join(cwd, "src/tools.ts"), "utf-8");
+				const source = readFileSync(join(cwd, "src/core/tools.ts"), "utf-8");
 				const expected = (source.match(/^export (async )?function/gm) ?? []).length;
 				const mentioned = (response.match(/\d+/g) ?? []).map(Number);
 				if (!mentioned.includes(expected)) {
@@ -225,14 +226,24 @@ export const basicCases: EvalCase[] = [
 
 	{
 		id: "glob-then-grep",
-		description: "Agent combines glob and grep to locate real matches",
+		description: "Agent finds files matching a pattern and containing a string, and reports which files matched",
 		prompt: "Find all .ts files in src/ and search for 'export function' in them. List which files matched.",
 		expect: {
-			toolsCalled: ["glob", "grep"],
+			// grep's own `glob` filter does this in one call — a valid,
+			// arguably more efficient answer than a separate `glob` call
+			// first. Requiring both tools used to penalize that; only `grep`
+			// is actually necessary, and the grounded `verify` below (real
+			// matching files present in the response) is what determines
+			// correctness either way.
+			toolsCalled: ["grep"],
 			maxTurns: 4,
 			noErrors: true,
 			verify: ({ response, cwd }) => {
-				const out = execSync(`grep -rl "export function" src`, { cwd, encoding: "utf-8" });
+				// --include='*.ts' matches the prompt's own ask ("find all .ts
+				// files") — without it this compared against every matching
+				// file including .tsx, which the agent was never asked for and
+				// correctly excluded via its own glob filter.
+				const out = execSync(`grep -rl --include='*.ts' "export function" src`, { cwd, encoding: "utf-8" });
 				const expectedFiles = out
 					.trim()
 					.split("\n")
