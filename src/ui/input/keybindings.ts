@@ -28,6 +28,8 @@ export const TUI_KEYBINDINGS = {
 	"input.escape": { defaultKeys: "escape" },
 	"input.attachImage": { defaultKeys: "ctrl+g" },
 	"input.tab": { defaultKeys: "tab" },
+	"history.scrollUp": { defaultKeys: "pageUp" },
+	"history.scrollDown": { defaultKeys: "pageDown" },
 } as const satisfies KeybindingDefinitions;
 
 export type Keybinding = keyof typeof TUI_KEYBINDINGS;

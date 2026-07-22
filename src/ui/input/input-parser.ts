@@ -33,6 +33,8 @@ const BINDING_ORDER: Keybinding[] = [
 	"editor.cursorLeft",
 	"editor.cursorRight",
 	"input.tab",
+	"history.scrollUp",
+	"history.scrollDown",
 ];
 
 /**

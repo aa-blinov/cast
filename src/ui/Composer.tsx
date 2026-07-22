@@ -20,6 +20,8 @@ interface ComposerProps {
 	onPasteImage?: () => Promise<string | null>;
 	running: boolean;
 	locked: boolean;
+	/** PageUp/PageDown — scrolls the chat history instead of the text buffer. */
+	onScroll?: (direction: "up" | "down") => void;
 }
 
 // Multi-line pastes are collapsed to a single PUA character ("chip") in the
@@ -94,6 +96,7 @@ export function Composer({
 	onPasteImage,
 	running,
 	locked,
+	onScroll,
 }: ComposerProps): JSX.Element {
 	const { stdin, setRawMode, isRawModeSupported } = useStdin();
 
@@ -116,6 +119,8 @@ export function Composer({
 	runningRef.current = running;
 	const onSubmitRef = useRef(onSubmit);
 	onSubmitRef.current = onSubmit;
+	const onScrollRef = useRef(onScroll);
+	onScrollRef.current = onScroll;
 	const canSubmitRef = useRef(canSubmit);
 	canSubmitRef.current = canSubmit;
 	const onAbortRef = useRef(onAbort);
@@ -279,6 +284,17 @@ export function Composer({
 		// that in-progress text isn't lost when the turn is aborted.
 		if (event.type === "binding" && event.binding === "input.escape" && runningRef.current) {
 			onAbortRef.current();
+			return;
+		}
+
+		// Scroll bindings act on the chat history, never the text buffer —
+		// handled before the palette/editing branches so paging works
+		// regardless of what else the composer is doing.
+		if (
+			event.type === "binding" &&
+			(event.binding === "history.scrollUp" || event.binding === "history.scrollDown")
+		) {
+			onScrollRef.current?.(event.binding === "history.scrollUp" ? "up" : "down");
 			return;
 		}
 
