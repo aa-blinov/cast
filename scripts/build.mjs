@@ -68,3 +68,9 @@ import { build } from "esbuild";
 	banner: { js: "import { createRequire as __createRequire } from 'node:module';\nconst require = __createRequire(import.meta.url);" },
 	logLevel: "info",
 });
+
+// Copy static web assets into dist/ so the bundled server can serve them.
+// In the bundle, import.meta.dirname resolves to dist/ — the server looks
+// for public/ as a sibling of dist/index.js.
+import { cpSync } from "node:fs";
+cpSync("src/web/public", "dist/public", { recursive: true });
