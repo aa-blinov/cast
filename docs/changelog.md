@@ -2,6 +2,14 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.8.6
+
+### Fixed
+
+- `cast web` daemon spawn now works in release installs (no longer requires `tsx` or TypeScript sources).
+- `cast web --foreground` runs inline instead of spawning a child process.
+
+
 ## 0.8.5
 
 ### Added
