@@ -13,6 +13,7 @@ import {
 	listSessionSummaries,
 	listSessions,
 	loadSession,
+	migrateSessionsToJsonl,
 	saveSession,
 	shouldCompact,
 } from "../src/core/session.ts";
@@ -607,5 +608,102 @@ describe("session persistence", () => {
 		}
 
 		expect(getMostRecentSession()?.id).toBe(good.id);
+	});
+});
+
+describe("migrateSessionsToJsonl", () => {
+	let fakeHome: string;
+	let realHome: string | undefined;
+	let projectA: string;
+
+	beforeEach(() => {
+		realHome = process.env.HOME;
+		fakeHome = mkdtempSync(join(tmpdir(), "cast-migrate-test-"));
+		process.env.HOME = fakeHome;
+		projectA = join(fakeHome, "project-a");
+		mkdirSync(projectA, { recursive: true });
+	});
+
+	afterEach(() => {
+		process.env.HOME = realHome;
+		rmSync(fakeHome, { recursive: true, force: true });
+	});
+
+	it("converts legacy .json sessions to .jsonl format", () => {
+		// Create and save a session (old format: messages in .json).
+		const s = createSession("gpt-4o", projectA);
+		s.messages.push({ role: "user", content: "hello" } as Message);
+		s.messages.push({ role: "assistant", content: "hi there" } as Message);
+		saveSession(s);
+
+		// Delete the .jsonl that saveSession now creates, simulating a legacy file.
+		const dir = join(fakeHome, ".cast", "sessions");
+		for (const d of readdirSync(dir)) {
+			const jsonl = join(dir, d, `${s.id}.jsonl`);
+			if (existsSync(jsonl)) {
+				const { unlinkSync } = require("node:fs");
+				unlinkSync(jsonl);
+			}
+		}
+
+		// Re-save in legacy format: embed messages in .json, no .jsonl.
+		const { readFileSync, writeFileSync: ws } = require("node:fs");
+		for (const d of readdirSync(dir)) {
+			const jsonPath = join(dir, d, `${s.id}.json`);
+			if (existsSync(jsonPath)) {
+				const raw = JSON.parse(readFileSync(jsonPath, "utf-8"));
+				raw.messages = s.messages;
+				ws(jsonPath, JSON.stringify(raw));
+			}
+		}
+
+		// Verify no .jsonl exists.
+		let jsonlExists = false;
+		for (const d of readdirSync(dir)) {
+			if (existsSync(join(dir, d, `${s.id}.jsonl`))) jsonlExists = true;
+		}
+		expect(jsonlExists).toBe(false);
+
+		// Migrate.
+		const count = migrateSessionsToJsonl();
+		expect(count).toBe(1);
+
+		// Verify .jsonl now exists with messages.
+		let jsonlPath = "";
+		for (const d of readdirSync(dir)) {
+			const p = join(dir, d, `${s.id}.jsonl`);
+			if (existsSync(p)) jsonlPath = p;
+		}
+		expect(jsonlPath).toBeTruthy();
+		const lines = readFileSync(jsonlPath, "utf-8")
+			.split("\n")
+			.filter((l: string) => l.trim());
+		expect(lines).toHaveLength(2);
+		expect(JSON.parse(lines[0])).toEqual({ role: "user", content: "hello" });
+		expect(JSON.parse(lines[1])).toEqual({ role: "assistant", content: "hi there" });
+
+		// Verify .json no longer has messages.
+		let jsonPath = "";
+		for (const d of readdirSync(dir)) {
+			const p = join(dir, d, `${s.id}.json`);
+			if (existsSync(p)) jsonPath = p;
+		}
+		const meta = JSON.parse(readFileSync(jsonPath, "utf-8"));
+		expect(meta.messages).toBeUndefined();
+		expect(meta.id).toBe(s.id);
+
+		// Verify loadSession still returns the messages.
+		const loaded = loadSession(s.id);
+		expect(loaded?.messages).toHaveLength(2);
+	});
+
+	it("skips sessions that are already migrated", () => {
+		const s = createSession("gpt-4o", projectA);
+		s.messages.push({ role: "user", content: "test" } as Message);
+		saveSession(s);
+
+		// Already in JSONL format (saveSession creates .jsonl now).
+		const count = migrateSessionsToJsonl();
+		expect(count).toBe(0);
 	});
 });

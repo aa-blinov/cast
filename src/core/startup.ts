@@ -34,7 +34,13 @@ import {
 import { setModelsCache } from "./readline.ts";
 import type { Rule } from "./rules.ts";
 import { type AgentRunner, createAgentRunner } from "./runner.ts";
-import { createSession, getMostRecentSession, loadSession, type SessionState } from "./session.ts";
+import {
+	createSession,
+	getMostRecentSession,
+	loadSession,
+	migrateSessionsToJsonl,
+	type SessionState,
+} from "./session.ts";
 import { loadSettings, type PermissionMode, type Settings, updateSettings } from "./settings.ts";
 import type { Skill } from "./skills.ts";
 import type { SshHost } from "./ssh.ts";
@@ -334,6 +340,10 @@ export async function runStartup(
 		apiKey: config.apiKey,
 		cwd,
 	});
+
+	// Migrate legacy session files to JSONL format (one-time, no-op if already done).
+	const migrated = migrateSessionsToJsonl();
+	if (migrated > 0) onProgress?.(`Migrated ${migrated} session(s) to JSONL format`);
 
 	// Session resume.
 	let resumedSession: SessionState | undefined;
