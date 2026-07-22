@@ -2403,3 +2403,89 @@ describe("runAgentLoop — allowedTools filtering", () => {
 		}
 	});
 });
+
+// ============================================================================
+// runAgentLoop — onMessagesChanged (crash recovery snapshots)
+// ============================================================================
+
+describe("runAgentLoop — onMessagesChanged", () => {
+	it("fires onMessagesChanged after each message push", async () => {
+		const snapshots: number[] = [];
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [{ id: "t1", name: "read", arguments: '{"path":"/tmp/f"}' }],
+			}))
+			.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
+
+		const result = await runAgentLoop([{ role: "user", content: "read file" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "test",
+			onEvent: () => {},
+			onMessagesChanged: (msgs) => snapshots.push(msgs.length),
+		});
+
+		// The callback fires multiple times per state (system prompt rebuild,
+		// message push, explicit post-executeToolCalls save). Filter to unique
+		// lengths to verify the messages array grows as expected.
+		const uniqueLengths = [...new Set(snapshots)];
+		// [system, user] → [system, user, assistant] → [+ tool] → [+ assistant]
+		expect(uniqueLengths).toEqual([2, 3, 4, 5]);
+		// Final returned messages match the last snapshot
+		expect(result.length).toBe(snapshots[snapshots.length - 1]);
+	});
+
+	it("does not create proxy when onMessagesChanged is omitted", async () => {
+		vi.mocked(streamAndCollect).mockImplementationOnce(async () => ({
+			content: "ok",
+			thinking: "",
+			finishReason: "stop",
+		}));
+
+		const result = await runAgentLoop([{ role: "user", content: "hi" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "test",
+			onEvent: () => {},
+		});
+
+		// system + user + assistant
+		expect(result.length).toBe(3);
+		expect(result[0]!.role).toBe("system");
+		expect(result[1]!.role).toBe("user");
+		expect(result[2]!.role).toBe("assistant");
+	});
+
+	it("snapshots contain correct message roles and content", async () => {
+		const snapshotRoles: string[][] = [];
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [{ id: "t1", name: "read", arguments: '{"path":"/tmp/f"}' }],
+			}))
+			.mockImplementationOnce(async () => ({ content: "answer", thinking: "", finishReason: "stop" }));
+
+		await runAgentLoop([{ role: "user", content: "do it" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "test",
+			onEvent: () => {},
+			onMessagesChanged: (msgs) => snapshotRoles.push(msgs.map((m) => m.role)),
+		});
+
+		// Find the first snapshot with an assistant message (after tool_calls push)
+		const withAssistant = snapshotRoles.find((r) => r.includes("assistant"));
+		expect(withAssistant).toEqual(["system", "user", "assistant"]);
+		// Last snapshot: system + user + assistant + tool + assistant
+		const last = snapshotRoles[snapshotRoles.length - 1]!;
+		expect(last).toEqual(["system", "user", "assistant", "tool", "assistant"]);
+	});
+});
