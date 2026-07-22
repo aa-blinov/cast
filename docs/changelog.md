@@ -2,6 +2,14 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.8.7
+
+### Fixed
+
+- Web UI static files (HTML, CSS, JS) now ship in release installs — `cast web` was returning 404 because `dist/public/` wasn't included in the archive.
+- `cast web --foreground` correctly uses the specified `--port` instead of always defaulting to 1337.
+
+
 ## 0.8.6
 
 ### Fixed
