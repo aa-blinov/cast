@@ -2025,7 +2025,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			planModel: deps.planModel,
 			usage: session.usage,
 			lastTurnUsage: agent.lastTurnUsage ? { tokensPerSecond: agent.lastTurnUsage.tokensPerSecond } : undefined,
-			elapsedMs: agent.elapsedMs,
+			elapsedMs: agent.getElapsedMs(),
 			messageCount: session.messages.length,
 			contextWindow: config.contextWindow,
 			maxResponseTokens: config.maxResponseTokens,

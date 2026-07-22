@@ -165,9 +165,13 @@ export interface UseAgentSession {
 	resetQueue: () => void;
 	/** Append a display-only message (not persisted to session). */
 	addDisplayMessage: (message: ChatMessage) => void;
-	/** Live stopwatch: ms since the current turn started. Freezes on the
-	 * final value when the turn ends, resets to 0 on next submit. */
-	elapsedMs: number;
+	/** Timestamp the current turn started, or null when idle. Changes only at
+	 * start/stop — consumers that need a live-ticking display (the status
+	 * bar) should tick locally off this instead of re-rendering on it. */
+	turnStartedAt: number | null;
+	/** Synchronous read of ms elapsed in the current (or last completed)
+	 * turn — for one-off snapshots like /current, not for live display. */
+	getElapsedMs: () => number;
 }
 
 interface UseAgentSessionParams {
@@ -340,10 +344,15 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	const [retry, setRetry] = useState<RetryInfo | null>(null);
 	const [usage, setUsage] = useState<UseAgentSession["usage"]>(() => ({ ...session.usage }));
 	const [lastTurnUsage, setLastTurnUsage] = useState<UseAgentSession["lastTurnUsage"]>(null);
-	// Live stopwatch: ticks while the agent is running, freezes on the final
-	// value when the turn ends, resets on the next submit.
-	const [elapsedMs, setElapsedMs] = useState(0);
+	// Live stopwatch: the timestamp the current turn started, or null when
+	// idle. Only changes at start/stop (not a per-tick state) — the status
+	// bar's elapsed segment ticks itself locally off this value instead of
+	// this hook re-rendering App every 200ms (see ElapsedSegment in App.tsx).
+	const [turnStartedAt, setTurnStartedAt] = useState<number | null>(null);
 	const turnStartRef = useRef(0);
+	// Frozen elapsed time of the last completed turn, for synchronous reads
+	// (e.g. /current) once the turn has ended.
+	const frozenElapsedRef = useRef(0);
 	// Mirrors runner.steeringQueue/followUpQueue's actual contents so the UI
 	// can show what's pending — the queues themselves are plain mutable
 	// classes with no reactivity of their own.
@@ -388,14 +397,24 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		contextFilesRef.current = [];
 	}
 
-	// Live stopwatch: start an interval when the agent starts running,
-	// freeze on the final value when it stops, reset on next submit.
+	// Live stopwatch: record the start timestamp when the agent starts
+	// running, freeze the elapsed value when it stops. No interval here —
+	// ticking lives in the status bar's own component so it doesn't force
+	// App (and the composer under it) to re-render every 200ms.
 	useEffect(() => {
 		if (status === "running") {
 			turnStartRef.current = Date.now();
-			const id = setInterval(() => setElapsedMs(Date.now() - turnStartRef.current), 200);
-			return () => clearInterval(id);
+			setTurnStartedAt(turnStartRef.current);
+		} else if (turnStartRef.current) {
+			frozenElapsedRef.current = Date.now() - turnStartRef.current;
+			setTurnStartedAt(null);
 		}
+	}, [status]);
+
+	const getElapsedMs = useCallback(() => {
+		return turnStartRef.current && status === "running"
+			? Date.now() - turnStartRef.current
+			: frozenElapsedRef.current;
 	}, [status]);
 
 	// Flush pending streaming state to React immediately.
@@ -518,7 +537,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			setError(null);
 			setRetry(null);
 			setLastTurnUsage(null);
-			setElapsedMs(0);
+			frozenElapsedRef.current = 0;
 
 			const userContent =
 				images && images.length > 0
@@ -977,6 +996,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		refreshMeta,
 		resetQueue,
 		addDisplayMessage,
-		elapsedMs,
+		turnStartedAt,
+		getElapsedMs,
 	};
 }
