@@ -154,6 +154,7 @@ export interface UseAgentSession {
 	abort: () => void;
 	clearContext: () => void;
 	refresh: () => void;
+	refreshMeta: () => void;
 	resetQueue: () => void;
 	/** Append a display-only message (not persisted to session). */
 	addDisplayMessage: (message: ChatMessage) => void;
@@ -479,6 +480,13 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	// session switch) invokes refresh() explicitly at a turn boundary.
 	const refresh = useCallback(() => {
 		setMessages(buildDisplayMessages(session.messages));
+		setUsage({ ...session.usage });
+		setLastTurnUsage(null);
+	}, [session]);
+
+	/** Lightweight refresh for metadata-only changes (/model, /persona, /provider).
+	 *  Skips the full message rebuild since no messages changed. */
+	const refreshMeta = useCallback(() => {
 		setUsage({ ...session.usage });
 		setLastTurnUsage(null);
 	}, [session]);
@@ -957,6 +965,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		abort,
 		clearContext,
 		refresh,
+		refreshMeta,
 		resetQueue,
 		addDisplayMessage,
 		elapsedMs,
