@@ -1,4 +1,4 @@
-import { Box, Text } from "ink";
+import { Box, Static, Text } from "ink";
 import { type JSX, useMemo, useRef } from "react";
 import { getLastFrameOverflow } from "../core/stdin-manager.ts";
 import { displayWidth } from "./display-width.ts";
@@ -12,32 +12,15 @@ interface ChatLogProps {
 	streaming: StreamingState | null;
 	error: string | null;
 	retry: RetryInfo | null;
-	/**
-	 * Terminal columns/rows for wrapping and budget calculations. Both come
-	 * from the same debounced resize tick (see ChatLogWithSize in App.tsx) —
-	 * reading rows live from process.stdout while columns lagged behind its
-	 * own debounce briefly disagreed with each other right after a resize,
-	 * which could under-estimate row heights and let history overflow the
-	 * viewport (pushing the composer below it) until the debounce settled.
-	 */
+	/** Terminal columns for wrapping calculations. */
 	columns: number;
-	rows: number;
 	/**
-	 * Bumped by App after a terminal resize (or theme change) settles. Used as
-	 * the history Box's key to force a clean remount — the resize/theme
-	 * handler clears the screen (see App.tsx's resize effect / onRepaintBanner)
-	 * and this guarantees a full re-render lands right after, rather than
-	 * relying on some other prop happening to change.
+	 * Bumped by App after a terminal resize settles. Used as the <Static> key so
+	 * the whole history is replayed from a clean top — Ink otherwise only prints
+	 * newly-added static items, so a resize-time screen clear would wipe the
+	 * on-screen history with no way to redraw it. See App.tsx's resize effect.
 	 */
 	repaintKey?: number;
-	/**
-	 * Rows scrolled up from the bottom (0 = pinned to the latest message).
-	 * We run in Ink's alternate screen (see tui.tsx), which has no terminal
-	 * scrollback of its own — once history exceeds the viewport height it
-	 * would simply be gone with no way back, so ChatLog windows the message
-	 * list itself and PageUp/PageDown (wired in App/Composer) move this.
-	 */
-	scrollOffset: number;
 }
 
 type ToolSummaryModel =
@@ -301,18 +284,6 @@ function BlockView({
  * getLastFrameOverflow) to keep the live region within the viewport even
  * when the estimate falls short. See the ChatLog component below.
  */
-/** Rendered row count of `text` (wrapped at `cols`), with `prefixLen` extra
- * cells charged to the first line only (e.g. a "[agent] " label). */
-function wrappedRows(text: string, prefixLen: number, cols: number): number {
-	let total = 0;
-	const lines = text.split("\n");
-	for (let i = 0; i < lines.length; i++) {
-		const len = displayWidth(lines[i]!) + (i === 0 ? prefixLen : 0);
-		total += Math.max(1, Math.ceil(len / cols));
-	}
-	return total;
-}
-
 export function clampStreamingBlocks(
 	blocks: StreamBlock[],
 	rows: number,
@@ -323,6 +294,16 @@ export function clampStreamingBlocks(
 	// (3), status bar (1), notices/steer/queue lines and a safety margin.
 	const budget = Math.max(4, rows - 8 - extraReserve);
 	const cols = Math.max(20, columns);
+
+	const wrappedRows = (text: string, prefixLen: number): number => {
+		let total = 0;
+		const lines = text.split("\n");
+		for (let i = 0; i < lines.length; i++) {
+			const len = displayWidth(lines[i]!) + (i === 0 ? prefixLen : 0);
+			total += Math.max(1, Math.ceil(len / cols));
+		}
+		return total;
+	};
 
 	const out: Array<{ block: StreamBlock; truncated: boolean; index: number }> = [];
 	let used = 0;
@@ -347,7 +328,7 @@ export function clampStreamingBlocks(
 			continue;
 		}
 		const prefixLen = block.continued ? 0 : block.kind === "thinking" ? "[reasoning] ".length : "[agent] ".length;
-		const need = wrappedRows(block.text, prefixLen, cols);
+		const need = wrappedRows(block.text, prefixLen);
 		if (used + need <= budget) {
 			out.unshift({ block, truncated: false, index: i });
 			used += need;
@@ -373,80 +354,6 @@ export function clampStreamingBlocks(
 		break;
 	}
 	return out;
-}
-
-/**
- * Approximate rendered row count of a committed (non-live, full-wrap)
- * block — mirrors BlockView/ToolCallView's non-compact rendering closely
- * enough for scroll pagination. Doesn't need to be exact: worst case the
- * window shows a line or two more/less than the viewport, not a
- * correctness issue like clampStreamingBlocks' budget is.
- */
-function estimateBlockRows(block: StreamBlock, cols: number): number {
-	if (block.kind === "tool") {
-		const showResult =
-			Boolean(block.call.result) &&
-			block.call.name !== "read" &&
-			block.call.name !== "edit" &&
-			!isWebTool(block.call.name);
-		if (!showResult) return 1;
-		if (block.call.name === "task") return 1 + wrappedRows(block.call.result ?? "", 0, cols);
-		return 2; // truncated single-line result
-	}
-	const prefixLen = block.continued ? 0 : block.kind === "thinking" ? "[reasoning] ".length : "[agent] ".length;
-	return wrappedRows(block.text, prefixLen, cols);
-}
-
-/** Approximate rendered row count of a whole history message. */
-function estimateMessageRows(message: ChatMessage, cols: number): number {
-	if (message.role === "user") return wrappedRows(message.content, "[user] ".length, cols);
-	if (message.role === "assistant") {
-		const rows = (message.blocks ?? []).reduce((sum, b) => sum + estimateBlockRows(b, cols), 0);
-		return Math.max(1, rows);
-	}
-	if (message.role === "warning") return wrappedRows(message.content, 0, cols);
-	return wrappedRows(`[${message.role}] ${message.content}`, 0, cols);
-}
-
-/**
- * Windows `messages` down to roughly `budgetRows` rows, `scrollOffset` rows
- * up from the bottom. Whole messages only (no mid-message clipping) — a
- * message straddling the window's edge just makes the window a bit taller
- * or shorter than budgetRows, which reads better than cutting a message
- * across an arbitrary line.
- */
-function windowMessages(
-	messages: ChatMessage[],
-	cols: number,
-	budgetRows: number,
-	scrollOffset: number,
-): { start: number; end: number } {
-	let end = messages.length;
-	let skipped = 0;
-	while (end > 0) {
-		const rows = estimateMessageRows(messages[end - 1]!, cols);
-		if (skipped + rows > scrollOffset) break;
-		skipped += rows;
-		end--;
-	}
-	if (end === 0 && skipped < scrollOffset) {
-		// Scrolled past the very top of history — pin to the beginning instead
-		// of showing nothing.
-		let start = 0;
-		let collected = 0;
-		while (start < messages.length && collected < budgetRows) {
-			collected += estimateMessageRows(messages[start]!, cols);
-			start++;
-		}
-		return { start: 0, end: start };
-	}
-	let start = end;
-	let collected = 0;
-	while (start > 0 && collected < budgetRows) {
-		collected += estimateMessageRows(messages[start - 1]!, cols);
-		start--;
-	}
-	return { start, end };
 }
 
 /**
@@ -492,16 +399,7 @@ function MessageView({ message }: { message: ChatMessage }): JSX.Element {
 	);
 }
 
-export function ChatLog({
-	messages,
-	streaming,
-	error,
-	retry,
-	columns,
-	rows,
-	repaintKey,
-	scrollOffset,
-}: ChatLogProps): JSX.Element {
+export function ChatLog({ messages, streaming, error, retry, columns, repaintKey }: ChatLogProps): JSX.Element {
 	const liveParts: JSX.Element[] = [];
 
 	const cols = Math.max(20, columns);
@@ -523,7 +421,7 @@ export function ChatLog({
 		stickyOverflowRef.current = 0;
 	}
 
-	const availableRows = Math.max(4, rows);
+	const availableRows = process.stdout.rows || 24;
 
 	// Error/warning before streaming — chronologically the error happened
 	// first (e.g. vision fallback), then the agent responded.
@@ -543,32 +441,14 @@ export function ChatLog({
 		);
 	}
 
-	// Rows the live region actually uses this frame — history gets whatever's
-	// left of the viewport, not a flat guess, so it doesn't collapse to
-	// nothing under a big streaming turn nor waste rows when idle.
-	let liveRowsUsed = error ? 1 : 0;
-	if (retry) liveRowsUsed += 1;
-
 	if (streaming) {
 		const streamingParts: JSX.Element[] = [];
 		if (streaming.blocks.length === 0) {
 			streamingParts.push(<Spinner key="wait" />);
-			liveRowsUsed += 1;
 		}
 		const clamped = clampStreamingBlocks(streaming.blocks, availableRows, cols, stickyOverflowRef.current);
 		for (const { block, truncated, index } of clamped) {
 			streamingParts.push(<BlockView key={blockKey(block, index)} block={block} truncated={truncated} compact />);
-			if (block.kind === "tool") {
-				const resultRows = block.call.result && block.call.name !== "read" && !isWebTool(block.call.name) ? 1 : 0;
-				liveRowsUsed += 1 + resultRows;
-			} else {
-				const prefixLen = block.continued
-					? 0
-					: block.kind === "thinking"
-						? "[reasoning] ".length
-						: "[agent] ".length;
-				liveRowsUsed += wrappedRows(block.text, prefixLen, cols);
-			}
 		}
 		liveParts.push(
 			<Box key="streaming" flexDirection="column">
@@ -577,31 +457,11 @@ export function ChatLog({
 		);
 	}
 
-	// Flat guess for everything below the history area that isn't the live
-	// region itself: composer frame, status bar, notices/steer/queue lines,
-	// plus one row for the scroll indicator below.
-	const belowReserve = 9;
-	const historyBudget = Math.max(3, availableRows - belowReserve - liveRowsUsed);
-	const { start, end } = windowMessages(messages, cols, historyBudget, Math.max(0, scrollOffset));
-	const visible = messages.slice(start, end);
-	const hiddenAbove = start > 0;
-	const hiddenBelow = end < messages.length;
-
 	return (
 		<>
-			<Box key={repaintKey} flexDirection="column">
-				{(hiddenAbove || hiddenBelow) && (
-					<Text color={theme().muted} dimColor>
-						{hiddenAbove ? "▲ more above" : ""}
-						{hiddenAbove && hiddenBelow ? " · " : ""}
-						{hiddenBelow ? "▼ scrolled — PageDown to catch up" : ""}
-						{" (PageUp/PageDown to scroll)"}
-					</Text>
-				)}
-				{visible.map((m, i) => (
-					<MessageView key={`m-${start + i}`} message={m} />
-				))}
-			</Box>
+			<Static key={repaintKey} items={messages}>
+				{(m, i) => <MessageView key={`m-${i}`} message={m} />}
+			</Static>
 			<Box flexDirection="column">{liveParts}</Box>
 		</>
 	);

@@ -9,8 +9,6 @@ All notable user-facing changes to cast, newest first.
 - Web UI: real-time sidebar updates — status, title, and message count changes are now broadcast to all connected browser tabs via SSE `session_update` events, eliminating the need for manual refresh.
 - Session summary index expanded with persona, model, title, pinned, and createdAt fields — cold session sidebar rows no longer require parsing full session JSON.
 - JSONL session persistence — messages are now appended incrementally to `.jsonl` files instead of rewriting the entire session JSON on every mutation. Legacy `.json` sessions are auto-migrated to JSONL on startup.
-- TUI: scrollable chat history with PageUp/PageDown. The app runs in Ink's alternate screen which has no terminal scrollback, so history that exceeds the viewport is now navigable via keyboard.
-- TUI: Banner rendered inside Ink's tree (Banner.tsx) instead of console.log, so it participates in theme changes and alt-screen rendering correctly.
 
 ### Fixed
 
