@@ -6,8 +6,8 @@
  */
 
 import { readFileSync } from "node:fs";
-import { fixturePath, writeFixture } from "../fixtures.ts";
-import type { EvalCase } from "../runner.ts";
+import { fixturePath, writeFixture } from "../../lib/fixtures.ts";
+import type { EvalCase } from "../../lib/runner.ts";
 
 const CHANGELOG = `# Changelog
 
@@ -234,7 +234,10 @@ export function run() {
 				if (content.length !== 1500) return `file has ${content.length} lines, expected 1500`;
 				if (content[1041] !== "export const item_1042 = 1042;")
 					return `line 1042 is ${JSON.stringify(content[1041])}`;
-				if (content[1040] !== "export const item_1041 = 1041;" || content[1042] !== "export const item_1043 = 1043;")
+				if (
+					content[1040] !== "export const item_1041 = 1041;" ||
+					content[1042] !== "export const item_1043 = 1043;"
+				)
 					return "neighbouring lines were damaged";
 				return undefined;
 			},
