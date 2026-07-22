@@ -288,7 +288,7 @@ async function handleWebCommand(args: string[]): Promise<void> {
 	if (foreground || process.env.CAST_WEB_FOREGROUND === "0") {
 		process.env.CAST_WEB_SKIP_AUTORUN = "1";
 		const { runWebServerMain } = await import("./web/index.ts");
-		runWebServerMain(restArgs, { foreground, version: VERSION });
+		runWebServerMain(args, { foreground, version: VERSION });
 		return;
 	}
 
