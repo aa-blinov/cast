@@ -1,6 +1,6 @@
 import { Box, Text, useStdin } from "ink";
 import { type JSX, useEffect, useMemo, useRef, useState } from "react";
-import { registerStdinOwner, type StdinOwner, unregisterStdinOwner } from "../core/stdin-manager.ts";
+import { registerStdinOwner, type StdinOwner, setRawModeActive, unregisterStdinOwner } from "../core/stdin-manager.ts";
 import { SLASH_COMMANDS } from "./commands.ts";
 import { type InputEvent, InputParser } from "./input/input-parser.ts";
 import { StdinBuffer } from "./input/stdin-buffer.ts";
@@ -396,6 +396,7 @@ export function Composer({
 
 	useEffect(() => {
 		setRawMode(true);
+		setRawModeActive(true);
 		// Write escape sequences to stderr — process.stdout is owned by Ink's
 		// renderer and may buffer/rewrite our sequences. stderr is uncontrolled
 		// by Ink and reaches the terminal immediately.
@@ -489,6 +490,7 @@ export function Composer({
 			id: "composer",
 			onPause: () => {
 				if (isRawModeSupported) setRawMode(false);
+				setRawModeActive(false);
 				esc.write(KITTY_POP);
 				esc.write(BRACKETED_PASTE_OFF);
 				stdinSource.off("data", stdinDataHandler);
@@ -496,6 +498,7 @@ export function Composer({
 			onResume: () => {
 				stdinSource.on("data", stdinDataHandler);
 				if (isRawModeSupported) setRawMode(true);
+				setRawModeActive(true);
 				esc.write(BRACKETED_PASTE_ON);
 				esc.write(KITTY_PUSH);
 			},
@@ -506,6 +509,7 @@ export function Composer({
 			unregisterStdinOwner(owner);
 			stdinBuf.destroy();
 			setRawMode(false);
+			setRawModeActive(false);
 			esc.write(KITTY_POP);
 			esc.write(BRACKETED_PASTE_OFF);
 			process.off("SIGCONT", onCont);

@@ -103,6 +103,17 @@ export function isTerminalSuspended(): boolean {
 	return terminalSuspended;
 }
 
+/** Whether stdin is currently in raw mode (set by Ink's useStdin). */
+let rawModeActive = false;
+
+export function setRawModeActive(active: boolean): void {
+	rawModeActive = active;
+}
+
+export function isRawModeActive(): boolean {
+	return rawModeActive;
+}
+
 /** Mark streaming as active or inactive. Called by useAgentSession. */
 export function setStreamingActive(active: boolean): void {
 	streamingActive = active;

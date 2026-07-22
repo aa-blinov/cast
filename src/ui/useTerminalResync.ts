@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import {
 	consumeLastTurnAborted,
+	isRawModeActive,
 	isStreamingActive,
 	isTerminalSuspended,
 	setLastFrameOverflow,
@@ -367,6 +368,11 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 
 		function startQuery() {
 			if (!process.stdin.isTTY) return;
+			// When stdin is not in raw mode (e.g. during suspendTerminal, or if
+			// Ink hasn't claimed it yet), the terminal echoes the DECXCPR response
+			// (\x1b[row;colR) back to stdout as visible garbage. Only query when
+			// raw mode is active so the response is captured by the stdin listener.
+			if (!isRawModeActive()) return;
 			if (isTerminalSuspended()) return;
 			// Tall live region while streaming: cursor sits below the viewport by
 			// design — DECXCPR would false-positive scrollUp, swallow Ink frames,
