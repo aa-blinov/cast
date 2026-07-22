@@ -12,6 +12,8 @@ interface ChatLogProps {
 	streaming: StreamingState | null;
 	error: string | null;
 	retry: RetryInfo | null;
+	/** Terminal columns for wrapping calculations. */
+	columns: number;
 	/**
 	 * Bumped by App after a terminal resize settles. Used as the <Static> key so
 	 * the whole history is replayed from a clean top — Ink otherwise only prints
@@ -397,9 +399,10 @@ function MessageView({ message }: { message: ChatMessage }): JSX.Element {
 	);
 }
 
-export function ChatLog({ messages, streaming, error, retry, repaintKey }: ChatLogProps): JSX.Element {
+export function ChatLog({ messages, streaming, error, retry, columns, repaintKey }: ChatLogProps): JSX.Element {
 	const liveParts: JSX.Element[] = [];
 
+	const cols = Math.max(20, columns);
 	// Sticky overflow compensation: the flat "-8" budget guess in
 	// clampStreamingBlocks doesn't know the composer's actual height, open
 	// palette, steer/queue lines, etc., so it can still under-reserve and let
@@ -417,6 +420,8 @@ export function ChatLog({ messages, streaming, error, retry, repaintKey }: ChatL
 	} else {
 		stickyOverflowRef.current = 0;
 	}
+
+	const availableRows = process.stdout.rows || 24;
 
 	// Error/warning before streaming — chronologically the error happened
 	// first (e.g. vision fallback), then the agent responded.
@@ -441,12 +446,7 @@ export function ChatLog({ messages, streaming, error, retry, repaintKey }: ChatL
 		if (streaming.blocks.length === 0) {
 			streamingParts.push(<Spinner key="wait" />);
 		}
-		const clamped = clampStreamingBlocks(
-			streaming.blocks,
-			process.stdout.rows || 24,
-			process.stdout.columns || 80,
-			stickyOverflowRef.current,
-		);
+		const clamped = clampStreamingBlocks(streaming.blocks, availableRows, cols, stickyOverflowRef.current);
 		for (const { block, truncated, index } of clamped) {
 			streamingParts.push(<BlockView key={blockKey(block, index)} block={block} truncated={truncated} compact />);
 		}

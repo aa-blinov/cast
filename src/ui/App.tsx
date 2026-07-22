@@ -1,4 +1,4 @@
-import { Box, Text, useApp } from "ink";
+import { Box, Text, useApp, useWindowSize } from "ink";
 import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AppConfig } from "../core/config.ts";
 import { formatContextFilesForPrompt, resolveNestedContextFiles } from "../core/context-files.ts";
@@ -558,6 +558,8 @@ export function App(props: AppProps): JSX.Element {
 		await handleInput(input, undefined, depsRef.current);
 	}, []);
 
+	const { columns } = useWindowSize();
+
 	return (
 		<Box flexDirection="column">
 			<ChatLog
@@ -565,6 +567,7 @@ export function App(props: AppProps): JSX.Element {
 				streaming={agent.streaming}
 				error={agent.error}
 				retry={agent.retry}
+				columns={columns}
 				repaintKey={repaintKey + _themeVer}
 			/>
 			{notice && <Text color={theme().warning}>{notice}</Text>}
