@@ -2,6 +2,13 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.8.3
+
+### Changed
+
+- All persona prompts now consistently mention conditional tools (ssh, background bash) via the "go by your actual tool list" note — `coding.md` and `sre.md` were missing it.
+
+
 ## 0.8.2
 
 ### Changed
