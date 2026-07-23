@@ -213,6 +213,7 @@ export async function resolveMcpForCwd(
 	cwd: string,
 	trusted: boolean,
 	disabledServers: string[] = [],
+	skipConnect = false,
 ): Promise<McpSetupResult> {
 	const emptyResult = {
 		toolIndex: new Map(),
@@ -238,6 +239,8 @@ export async function resolveMcpForCwd(
 	for (const name of Object.keys(projectServers)) serverSources[name] = "project";
 	for (const name of Object.keys(extraServers)) serverSources[name] = "project";
 	if (allNames.length === 0) return { ...emptyResult, allServerNames: [], serverSources };
+	if (skipConnect)
+		return { ...emptyResult, allServerNames: allNames.sort((a, b) => a.localeCompare(b)), serverSources };
 	// Filter out disabled servers before connecting
 	const disabledSet = new Set(disabledServers);
 	const filtered = Object.fromEntries(Object.entries(merged).filter(([name]) => !disabledSet.has(name)));
