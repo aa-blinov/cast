@@ -2,6 +2,18 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.8.14
+
+### Added
+
+- Shared prompts adapted from MiMoCode: Doing tasks, Executing with care, Tone and style.
+- Cast context prompt — all personas now know about cast-specific commands, rules, skills, and plan mode.
+
+### Fixed
+
+- Removed duplicate Action safety section from harness-discipline (now covered by Executing with care).
+- Renamed cast from "coding agent" to "agent harness" to reflect all persona types.
+
 ## 0.8.13
 
 ### Added
