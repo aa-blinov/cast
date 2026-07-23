@@ -2352,21 +2352,31 @@ function App() {
 
 		es.onopen = () => {
 			setConnected(true);
-			// Refetch session messages on reconnect — the server may have
+			// Refetch session state on reconnect — the server may have
 			// advanced while we were disconnected (e.g. mobile tab was
 			// backgrounded). This catches messages missed between the last
 			// SSE event we received and the reconnect.
 			api("GET", `/api/sessions/${activeId}`)
 				.then((data) => {
 					if (!data) return;
+					const isRunning = data.status === "running";
+					setRunning(isRunning);
+					wasRunningRef.current = isRunning;
 					setSession((prev) => {
 						if (!prev) return data;
-						// Only update if messages actually changed
-						if (data.messages.length !== prev.messages.length) return data;
-						return { ...prev, status: data.status, usage: data.usage };
+						return { ...data, messages: data.messages || [] };
 					});
-					setRunning(data.status === "running");
-					wasRunningRef.current = data.status === "running";
+					// Always clear streaming on reconnect — stale blocks from
+					// before the disconnect would conflict with new SSE events.
+					// If the agent is still running, new streaming events will
+					// arrive immediately via SSE and rebuild the live region.
+					setStreaming([]);
+					setPendingSteers([]);
+					setPendingQueue([]);
+					// Scroll to bottom after reconnect — user wants to see
+					// the latest messages, not where they were before disconnect.
+					autoScrollRef.current = true;
+					setAtBottom(true);
 				})
 				.catch(() => {});
 		};
@@ -2671,6 +2681,19 @@ function App() {
 	useEffect(() => {
 		initClientState();
 	}, []);
+
+	// Reconnect on visibility change — when the tab comes back to
+	// foreground after being backgrounded, the SSE connection may have
+	// dropped silently. Force a reconnect to sync state.
+	useEffect(() => {
+		const onVisibilityChange = () => {
+			if (document.visibilityState === "visible" && !connected) {
+				startReconnectLoop();
+			}
+		};
+		document.addEventListener("visibilitychange", onVisibilityChange);
+		return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+	}, [connected, startReconnectLoop]);
 
 	// Back/forward through browser history moves between sessions too, since
 	// each one now has its own URL — don't push a new entry for this or
