@@ -421,6 +421,8 @@ body.resizing-diff * { user-select: none; }
 	background-clip: text; -webkit-background-clip: text;
 	color: transparent; -webkit-text-fill-color: transparent;
 	margin-bottom: 14px;
+	white-space: pre;
+	max-width: 100%;
 }
 .empty-state-title { color: var(--text); font-size: .95rem; font-weight: 600; margin-bottom: 4px; }
 .empty-state-hint { font-size: .8rem; }
@@ -1023,7 +1025,13 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	   rather than a `~` combinator (which only looks forward). */
 	.sidebar:has(~ .diff-panel.open) { display: none; }
 	.diff-resize-handle { display: none; }
-	.empty-state-banner { font-size: .6rem; line-height: 1.2; letter-spacing: -0.5px; }
+	.empty-state-banner {
+		font-size: .55rem;
+		line-height: 1.2;
+		letter-spacing: -0.5px;
+		transform: scale(0.9);
+		transform-origin: center top;
+	}
 }
 
 /* Keyboard shortcuts are a physical-keyboard feature — not useful on a phone
