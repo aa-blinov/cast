@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.8.11
+
+### Fixed
+
+- Mobile: ASCII banner no longer overflows on vertical phone screens — font-size reduced to 0.6rem on viewports ≤768px.
+
 ## 0.8.10
 
 ### Added
