@@ -1797,6 +1797,7 @@ function App() {
 	const [diffWidth, setDiffWidth] = useState(null);
 	const [toasts, setToasts] = useState([]);
 	const [connected, setConnected] = useState(true);
+	const [backendUp, setBackendUp] = useState(true);
 	const [atBottom, setAtBottom] = useState(true);
 	const [defaultCwd, setDefaultCwd] = useState("");
 	const [selectedCwd, setSelectedCwd] = useState(null);
@@ -2042,8 +2043,10 @@ function App() {
 			const ok = await initClientState();
 			if (ok) {
 				reconnectTimerRef.current = null;
+				setBackendUp(true);
 				setReconnectNonce((n) => n + 1);
 			} else {
+				setBackendUp(false);
 				reconnectTimerRef.current = setTimeout(tryOnce, 3000);
 			}
 		};
@@ -2347,7 +2350,26 @@ function App() {
 		esRef.current = es;
 		setConnected(true);
 
-		es.onopen = () => setConnected(true);
+		es.onopen = () => {
+			setConnected(true);
+			// Refetch session messages on reconnect — the server may have
+			// advanced while we were disconnected (e.g. mobile tab was
+			// backgrounded). This catches messages missed between the last
+			// SSE event we received and the reconnect.
+			api("GET", `/api/sessions/${activeId}`)
+				.then((data) => {
+					if (!data) return;
+					setSession((prev) => {
+						if (!prev) return data;
+						// Only update if messages actually changed
+						if (data.messages.length !== prev.messages.length) return data;
+						return { ...prev, status: data.status, usage: data.usage };
+					});
+					setRunning(data.status === "running");
+					wasRunningRef.current = data.status === "running";
+				})
+				.catch(() => {});
+		};
 
 		es.onmessage = (e) => {
 			try {
@@ -2783,8 +2805,9 @@ function App() {
 				<button class="menu-toggle${sidebarVisible ? " active" : " collapsed"}" onClick=${toggleSidebar} aria-label=${sidebarVisible ? "Collapse sessions" : "Expand sessions"}>
 					<${icons.chevronRight} class="chevron-icon" />
 				</button>
-				<span class="header-logo">cast</span>
-				${!connected && html`<span class="conn-pill">reconnecting…</span>`}
+				<span class="header-logo">
+					<span class="status-dot ${backendUp ? (connected ? "connected" : "reconnecting") : "offline"}" />
+				</span>
 				<div class="header-right">
 					${activeId && html`<${StatusPopover} activeId=${activeId} running=${running} />`}
 					<button class="menu-toggle" onClick=${() => setSettingsOpen(true)} aria-label="Settings" title="Settings">
