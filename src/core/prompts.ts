@@ -60,6 +60,7 @@ function readOptionalShared(fileName: string): string {
 export function withSharedToolPrompt(body: string): string {
 	return [
 		body.trimEnd(),
+		readOptionalShared("cast-context.md"),
 		readOptionalShared("error-handling.md"),
 		readOptionalShared("tools-edit.md"),
 		readOptionalShared("harness-discipline.md"),
