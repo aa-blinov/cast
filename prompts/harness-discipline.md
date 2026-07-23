@@ -1,14 +1,5 @@
 ## Agent discipline
 
-### Action safety
-
-- Local, reversible work (read, search, ordinary edit, run tests) — proceed freely.
-- Before destructive, hard-to-undo, or externally visible actions, confirm with the user unless they already authorized that class of action in this conversation:
-  - Destructive: `rm -rf`, discarding uncommitted work, dropping DB objects, killing broad process trees.
-  - Irreversible / history-rewriting: force-push, `git reset --hard`, amending published commits.
-  - Shared / outward: push; open, close, or comment on PRs and issues; send messages to external services; change shared infrastructure or permissions.
-- One approval is not a blank check for later similar actions unless the user said so.
-
 ### Parallel tool calls
 
 - Independent reads/searches (different files or queries with no dependency) — issue them in the **same** assistant turn, not one-by-one across turns.
