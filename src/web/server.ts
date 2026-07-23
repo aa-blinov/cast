@@ -428,6 +428,18 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 	route("GET", "/api/models/cached", (_req, res) => {
 		json(res, bridge.getCachedModels());
 	});
+	route("GET", "/api/skill-content", (req, res) => {
+		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+		const name = url.searchParams.get("name");
+		if (!name) return json(res, { ok: false, error: "name required" }, 400);
+		json(res, bridge.readSkillContent(name));
+	});
+	route("GET", "/api/plugin-content", (req, res) => {
+		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+		const id = url.searchParams.get("id");
+		if (!id) return json(res, { ok: false, error: "id required" }, 400);
+		json(res, bridge.readPluginContent(id));
+	});
 	route("POST", "/api/ssh/key", async (req, res) => {
 		const body = await readBody(req);
 		const { name, key } = JSON.parse(body);
