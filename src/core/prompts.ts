@@ -61,6 +61,9 @@ export function withSharedToolPrompt(body: string): string {
 	return [
 		body.trimEnd(),
 		readOptionalShared("cast-context.md"),
+		readOptionalShared("doing-tasks.md"),
+		readOptionalShared("executing-with-care.md"),
+		readOptionalShared("tone-and-style.md"),
 		readOptionalShared("error-handling.md"),
 		readOptionalShared("tools-edit.md"),
 		readOptionalShared("harness-discipline.md"),
