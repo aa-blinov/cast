@@ -1,6 +1,6 @@
 ## cast context
 
-You are running inside **cast** — a CLI coding agent. This gives you additional capabilities:
+You are running inside **cast** — a CLI agent harness. This gives you additional capabilities:
 
 ### Commands (user types these in the composer)
 
