@@ -1193,6 +1193,55 @@ function SettingsTheme({ themes, currentThemeId, onPick }) {
 	`;
 }
 
+function InfoPopover({ text, readUrl }) {
+	const [open, setOpen] = useState(false);
+	const [fullContent, setFullContent] = useState(null);
+	const [loading, setLoading] = useState(false);
+	const loadFull = async () => {
+		setOpen(true);
+		setLoading(true);
+		try {
+			const res = await api("GET", readUrl);
+			setFullContent(res?.content || res?.error || "No content");
+		} catch {
+			setFullContent("Failed to load");
+		}
+		setLoading(false);
+	};
+	const close = () => {
+		setOpen(false);
+		setFullContent(null);
+	};
+	if (!text && !readUrl) return null;
+	return [
+		html`<span class="info-popover-wrap" style=${{ display: "inline-flex", gap: "2px" }}>
+			${
+				text
+					? html`<button class="modal-btn icon-btn" title="Description" onClick=${(e) => {
+							e.stopPropagation();
+							setFullContent(null);
+							setOpen(true);
+						}}><${icons.info} /></button>`
+					: null
+			}
+			${
+				readUrl
+					? html`<button class="modal-btn icon-btn" title="Read full content" onClick=${(e) => {
+							e.stopPropagation();
+							loadFull();
+						}}><${icons.bookOpen} /></button>`
+					: null
+			}
+		</span>`,
+		open && html`<div class="info-popover-backdrop" onClick=${close} />`,
+		open &&
+			html`<div class="info-popover" onClick=${(e) => e.stopPropagation()}>
+			<div class="info-popover-text">${loading ? "Loading…" : fullContent || text}</div>
+			<button class="modal-btn icon-btn" onClick=${close}><${icons.xMark} /></button>
+		</div>`,
+	];
+}
+
 function SettingsTools({ data, busy, act }) {
 	if (!data) return null;
 	const web = data.web || {};
@@ -1268,7 +1317,9 @@ function SettingsSkills({ data, busy, act, confirm }) {
 		<div key=${s.name} class="settings-item-row">
 			<div class="settings-item-info">
 				<span class="settings-item-status ${s.enabled ? "ok" : "off"}" />
-				<span class="settings-item-name" title=${s.description}>${s.name}</span>
+				<span class="settings-item-name">${s.name}</span>
+				<span class="settings-item-meta">${s.source}</span>
+				<${InfoPopover} text=${s.description} readUrl=${`/api/skill-content?name=${encodeURIComponent(s.name)}`} />
 			</div>
 			<div class="settings-item-actions">
 				<button class="modal-btn icon-btn" title=${s.enabled ? "Disable" : "Enable"} disabled=${busy} onClick=${() => act(`/skills ${s.enabled ? "disable" : "enable"} ${s.name}`)}>${s.enabled ? html`<${icons.pause} />` : html`<${icons.play} />`}</button>
@@ -1312,8 +1363,9 @@ function SettingsPlugins({ data, busy, act, confirm }) {
 				<div key=${p.id} class="settings-item-row">
 					<div class="settings-item-info">
 						<span class="settings-item-status ${p.enabled ? "ok" : "off"}" />
-						<span class="settings-item-name">${p.description || p.id}</span>
-						<span class="settings-item-meta">${p.id}</span>
+						<span class="settings-item-name">${p.plugin || p.id}</span>
+						<span class="settings-item-meta">${p.marketplace || ""}</span>
+						<${InfoPopover} text=${p.description} readUrl=${`/api/plugin-content?id=${encodeURIComponent(p.id)}`} />
 					</div>
 					<div class="settings-item-actions">
 						<button class="modal-btn icon-btn" title=${p.enabled ? "Disable" : "Enable"} disabled=${busy} onClick=${() => act(`/plugin ${p.enabled ? "disable" : "enable"} ${p.id}`)}>${p.enabled ? html`<${icons.pause} />` : html`<${icons.play} />`}</button>

@@ -5,7 +5,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fetchModels, type ModelInfo, probeProvider, resolveProvider } from "../core/config.ts";
@@ -193,6 +193,8 @@ export interface WebBridge {
 	getModels(providerName?: string): Promise<{ models: ModelInfo[]; error?: string }>;
 	getCachedModels(): { models: ModelInfo[] };
 	saveSshKey(name: string, keyContent: string): { ok: boolean; path?: string; error?: string };
+	readSkillContent(name: string): { ok: boolean; content?: string; error?: string };
+	readPluginContent(pluginId: string): { ok: boolean; content?: string; error?: string };
 	getReasoningOptionsForSession(sessionId: string): { options: Array<{ value: string; label: string }> };
 	suggestCommand(sessionId: string, input: string): Array<{ value: string; label: string }>;
 }
@@ -1305,6 +1307,61 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		}
 	}
 
+	function readSkillContent(name: string): { ok: boolean; content?: string; error?: string } {
+		try {
+			const sessionCwd = sessions.values().next().value?.session.cwd ?? cwd;
+			const discovered = discoverSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
+			const skill = discovered.find((s) => s.name === name);
+			if (!skill) return { ok: false, error: `Skill "${name}" not found` };
+			const raw = readFileSync(skill.filePath, "utf-8");
+			// Strip frontmatter
+			const content = raw.replace(/^---\n[\s\S]*?\n---\n?/, "");
+			return { ok: true, content };
+		} catch (err) {
+			return { ok: false, error: err instanceof Error ? err.message : String(err) };
+		}
+	}
+
+	function readPluginContent(pluginId: string): { ok: boolean; content?: string; error?: string } {
+		try {
+			const pluginDir = join(homedir(), ".cast", "plugins", "installs");
+			// pluginId format: name@marketplace
+			const parts = pluginId.split("@");
+			if (parts.length < 2) return { ok: false, error: `Invalid plugin id: ${pluginId}` };
+			const pluginName = parts[0];
+			const marketplace = parts.slice(1).join("@");
+			const root = join(pluginDir, marketplace, pluginName);
+			// Collect existing SKILL.md files: root first, then skills/*/SKILL.md
+			const candidates: string[] = [];
+			const rootSkill = join(root, "SKILL.md");
+			if (existsSync(rootSkill)) candidates.push(rootSkill);
+			try {
+				const skillsDir = join(root, "skills");
+				if (existsSync(skillsDir)) {
+					for (const d of readdirSync(skillsDir, { withFileTypes: true })) {
+						if (d.isDirectory()) {
+							const p = join(skillsDir, d.name, "SKILL.md");
+							if (existsSync(p)) candidates.push(p);
+						}
+					}
+				}
+			} catch {
+				/* ignore */
+			}
+			if (candidates.length === 0) return { ok: false, error: `No SKILL.md found in ${root}` };
+			// Concatenate all skill files
+			const content = candidates
+				.map((p) => {
+					const raw = readFileSync(p, "utf-8");
+					return raw.replace(/^---\n[\s\S]*?\n---\n?/, "");
+				})
+				.join("\n\n---\n\n");
+			return { ok: true, content };
+		} catch (err) {
+			return { ok: false, error: err instanceof Error ? err.message : String(err) };
+		}
+	}
+
 	function getReasoningOptionsForSession(sessionId: string): { options: Array<{ value: string; label: string }> } {
 		const ws = sessions.get(sessionId) ?? hydrateSession(sessionId);
 		const model = ws?.session.model ?? result.session.model;
@@ -1443,6 +1500,8 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		getModels,
 		getCachedModels,
 		saveSshKey,
+		readSkillContent,
+		readPluginContent,
 		getReasoningOptionsForSession,
 		suggestCommand,
 	};
