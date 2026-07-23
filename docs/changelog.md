@@ -2,6 +2,38 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.8.10
+
+### Added
+
+- Multi-provider per-model-slot selection: each model slot (main, subagent, plan) can now use a different saved provider. New commands `/subagent-model-provider` and `/plan-model-provider`. Web UI Settings shows cascading provider → model dropdowns for all three slots.
+- Web UI: skill/plugin full content reader — book icon loads SKILL.md from disk and displays in a centered popover with scroll. Info icon shows short description.
+- Web UI: skills grouped by source (Built-in, Global, Project, Plugin) with plugin ID shown for plugin-sourced skills. MCP servers grouped by source (Global, Project).
+- Web UI: markdown table rendering in chat messages.
+- Web UI: SSH key paste support — paste private key content directly in the SSH form, saved to `~/.cast/keys/` with 600 permissions.
+- Web UI: provider edit support — edit button pre-fills URL/API key for modification.
+- Web UI: `user_message` SSE broadcast — user messages from one tab appear in all other tabs viewing the same session.
+- Web UI: new block-char ASCII banner (`░▒▓█`) for both TUI and web.
+
+### Fixed
+
+- `/reload` skips MCP reconnect when config unchanged — 2.7s → 27ms (100x faster).
+- `/queue-reset` / `/qr` now clears pending queue badges in the web UI.
+- ESC key closes info popovers before settings modal (proper layered close via `stopPropagation`).
+- Markdown tables now render as `<table>` elements in web UI chat.
+- Provider tab no longer crashes with `i.push is not a function` (htm `&&` → ternary fix).
+- Models load instantly in Settings via `/api/models/cached` (no network call on open).
+- All icon buttons use unified cyan hover accent; focus outlines removed.
+- Pending steer (cyan) and queue (amber) items color-differentiated above the composer.
+
+### Changed
+
+- Web UI Settings modal: fixed height with scroll (no size jumping between tabs).
+- Web UI: all text buttons replaced with verified Heroicons v2.1.5 icons with title tooltips.
+- Web UI: `GET /api/models/cached` returns cached models instantly; `GET /api/models?provider=<name>` fetches from a specific provider.
+- Web UI: SSH form fields stacked vertically with key paste textarea.
+- Web UI: plugins show `plugin` name + `marketplace` as meta; skills show `name` + `source`/`pluginId` as meta.
+
 ## 0.8.9
 
 ### Added
