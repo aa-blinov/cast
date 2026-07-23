@@ -225,10 +225,18 @@ Cursor-compatible rule files (not a single `rules.md`):
 
 1. `~/.cast/rules/*.md` — global
 2. `.cast/rules/*.md` — project (trust-gated)
+3. Nested `.cast/rules/*.md` in subdirectories (up to 8 levels) — scoped to subtree
 
-Frontmatter: `always-apply`, `globs`, `description` (lazy), or manual via `/rule:name`. See docs/rules.md.
+**Four apply modes** (from frontmatter):
 
-**Commands:** `/rules` (list), `/rule:<name>` (force-load).
+| Mode | Frontmatter | Behavior |
+|------|-------------|----------|
+| always | `always-apply: true` | Injected every turn (globs ignored) |
+| auto | `always-apply: false` + `globs` | Auto-attach when matching files enter context; sticky |
+| lazy | `always-apply: false` + `description` | Model decides relevance, reads via read tool |
+| manual | `always-apply: false` (no globs, no description) | Only via `@rule-name` or `/rule:<name>` |
+
+**Commands:** `/rules` (list), `/rule:<name>` (force-load), `@rule-name` (mention in message).
 
 **Example:**
 
@@ -245,6 +253,37 @@ EOF
 ```
 
 Then `/reload`.
+
+## Commands Reference
+
+| Command | Description |
+|---------|-------------|
+| `/skills` | Toggle / list / enable\|disable / uninstall skills |
+| `/mcp` | Toggle / list / enable\|disable / uninstall MCP servers |
+| `/plugin` | Plugins palette (install / marketplace / toggle) |
+| `/rule:<name>` | Invoke a rule by name |
+| `/rules` | List loaded rules |
+| `/skill:<name>` | Invoke a skill |
+| `/reload` | Re-scan skills, MCP, rules, personas |
+| `/model [name]` | Show/change model |
+| `/subagent-model [name]` | Show/change subagent model |
+| `/subagent-model-provider [name]` | Set provider for subagent model |
+| `/plan-model [name\|off]` | Show/change plan-mode model |
+| `/plan-model-provider [name]` | Set provider for plan-mode model |
+| `/persona [name]` | Show/change persona |
+| `/provider [name]` | Switch / add / delete providers |
+| `/permissions` | Change bash confirmation mode |
+| `/web` | Toggle web tools (web_search, web_fetch) |
+| `/ssh` | Manage SSH hosts (list, add, remove) |
+| `/theme` | Change color theme |
+| `/statusbar` | Toggle and reorder status bar segments |
+| `/usage` | Show session token/cost usage |
+| `/sessions` | List/switch sessions |
+| `/plan` | Enter plan mode |
+| `/build` | Exit plan mode, restore full toolset |
+| `/clear` | Clear context |
+| `/compact` | Compact context now |
+| `/abort` | Abort running agent |
 
 ## Applying Changes
 
