@@ -99,6 +99,30 @@ body.resizing-diff * { user-select: none; }
 	background-clip: text; -webkit-background-clip: text;
 	color: transparent; -webkit-text-fill-color: transparent;
 }
+.status-dot {
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+	display: inline-block;
+	flex-shrink: 0;
+}
+.status-dot.connected {
+	background: var(--green);
+	box-shadow: 0 0 6px color-mix(in srgb, var(--green) 50%, transparent);
+}
+.status-dot.reconnecting {
+	background: var(--amber);
+	box-shadow: 0 0 6px color-mix(in srgb, var(--amber) 50%, transparent);
+	animation: pulse-status 1.5s ease-in-out infinite;
+}
+.status-dot.offline {
+	background: var(--rose);
+	box-shadow: 0 0 6px color-mix(in srgb, var(--rose) 50%, transparent);
+}
+@keyframes pulse-status {
+	0%, 100% { opacity: 1; }
+	50% { opacity: .5; }
+}
 .conn-pill {
 	font-size: .7rem;
 	color: var(--amber);
