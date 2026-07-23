@@ -966,15 +966,8 @@ export function createWebBridge(result: StartupResult): WebBridge {
 				rulesLazySuffix = rules.lazySuffix;
 				directoryRules = rules.directoryRules;
 				personas = resolvePersonasForCwd(sessionCwd, projectTrusted).personas;
-				await closeMcpConnections(mcpResult.connections);
-				mcpResult = await resolveMcpForCwd(
-					projectDeps,
-					sessionCwd,
-					projectTrusted,
-					loadSettings().disabledMcpServers ?? [],
-				);
 				recomputeAllSystemPrompts();
-				return { ok: true, result: "Reloaded skills, rules, MCP, and personas for this directory" };
+				return { ok: true, result: "Reloaded skills, rules, and personas" };
 			} catch (err) {
 				return { ok: false, error: `Reload failed: ${err instanceof Error ? err.message : String(err)}` };
 			}
