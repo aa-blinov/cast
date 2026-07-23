@@ -134,6 +134,35 @@ function renderMarkdown(text) {
 		return `<ol>${items}</ol>\n`;
 	});
 
+	// Tables: | header | header |\n| --- | --- |\n| cell | cell |
+	out = out.replace(/(?:^\|.+\|$\n?)+/gm, (block) => {
+		const rows = block
+			.trim()
+			.split("\n")
+			.filter((r) => r.trim());
+		if (rows.length < 2) return block;
+		// Check for separator row (| --- | --- |)
+		const sepIdx = rows.findIndex((r) => /^\|\s*[-:]+[-| :]*$/.test(r));
+		if (sepIdx < 1) return block;
+		const parseCells = (row) =>
+			row
+				.split("|")
+				.slice(1, -1)
+				.map((c) => c.trim());
+		const headers = parseCells(rows[0]);
+		const bodyRows = rows.slice(sepIdx + 1).map(parseCells);
+		let html = '<div class="md-table-wrap"><table><thead><tr>';
+		for (const h of headers) html += `<th>${h}</th>`;
+		html += "</tr></thead><tbody>";
+		for (const cells of bodyRows) {
+			html += "<tr>";
+			for (const c of cells) html += `<td>${c}</td>`;
+			html += "</tr>";
+		}
+		html += "</tbody></table></div>";
+		return html;
+	});
+
 	out = out.replace(/ FENCE(\d+) /g, (_m, i) => fences[Number(i)]);
 	return out;
 }
@@ -2242,6 +2271,9 @@ function App() {
 						const msg = text.replace(/^\/(queue|q)\s*/, "");
 						if (msg) setPendingQueue((prev) => [...prev, msg]);
 						addNotice(result.result);
+					} else if ((text === "/queue-reset" || text === "/qr") && result?.ok) {
+						setPendingQueue([]);
+						addNotice(result.result);
 					} else if ((text === "/plan" || text === "/build") && result?.ok) {
 						const mode = text === "/plan" ? "plan" : "build";
 						setSession((prev) => (prev ? { ...prev, mode } : prev));
@@ -2321,6 +2353,18 @@ function App() {
 			try {
 				const event = JSON.parse(e.data);
 				switch (event.type) {
+					case "user_message": {
+						// Another tab sent a user message — add it to our local state.
+						setSession((prev) => {
+							if (!prev) return prev;
+							// Avoid duplicates if this tab also has the message.
+							const msgs = prev.messages;
+							const last = msgs[msgs.length - 1];
+							if (last && last.role === "user" && last.content === event.message.content) return prev;
+							return { ...prev, messages: [...msgs, event.message] };
+						});
+						break;
+					}
 					case "status": {
 						const isRunning = event.status === "running";
 						setRunning(isRunning);
