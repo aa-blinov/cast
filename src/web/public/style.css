@@ -56,6 +56,8 @@ body {
 	outline-offset: 2px;
 	border-radius: 4px;
 }
+button:focus-visible { outline: none; }
+input:focus-visible, textarea:focus-visible, select:focus-visible { outline: none; border-color: var(--cyan); }
 button, input, textarea { font: inherit; }
 
 /* ── Layout ───────────────────────────────────────────────────────── */
@@ -118,9 +120,10 @@ body.resizing-diff * { user-select: none; }
 	cursor: pointer;
 	font-family: var(--font);
 	min-height: 30px;
+	outline: none;
 	transition: border-color .15s, color .15s, background .15s;
 }
-.header-btn:hover { border-color: var(--border-active); color: var(--text); background: var(--bg-hover); }
+.header-btn:hover { border-color: var(--cyan); color: var(--cyan); background: rgba(0,200,255,.08); }
 .header-btn.active { color: var(--text); border-color: var(--cyan); background: color-mix(in srgb, var(--cyan) 12%, transparent); }
 .menu-toggle {
 	display: flex;
@@ -702,13 +705,15 @@ body.resizing-diff * { user-select: none; }
 }
 .pending-item {
 	font-size: .72rem;
-	color: var(--amber);
 	line-height: 1.4;
 	opacity: .85;
+	padding: 2px 6px;
+	border-radius: var(--radius-sm);
+	background: rgba(255,200,0,.06);
 }
-.pending-label {
-	font-weight: 600;
-}
+.pending-item.pending-steer { color: var(--cyan); background: rgba(0,200,255,.06); }
+.pending-item.pending-queue { color: var(--amber); }
+.pending-label { font-weight: 600; }
 .composer-wrap {
 	position: relative;
 	max-width: 860px;
@@ -1290,6 +1295,12 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	position: fixed; inset: 0; z-index: 99; background: rgba(0,0,0,.3);
 }
 .info-popover-header { display: flex; justify-content: flex-end; flex-shrink: 0; }
+.md-table-wrap { overflow-x: auto; margin: 8px 0; }
+.md-table-wrap table { border-collapse: collapse; width: 100%; font-size: .8rem; }
+.md-table-wrap th, .md-table-wrap td { border: 1px solid var(--border); padding: 5px 8px; text-align: left; }
+.md-table-wrap th { background: var(--bg-raised); font-weight: 600; color: var(--text); }
+.md-table-wrap td { color: var(--text-dim); }
+.md-table-wrap tr:hover td { background: var(--bg-hover); }
 .info-popover-text { flex: 1; white-space: pre-wrap; overflow-y: auto; overflow-x: hidden; min-width: 0; min-height: 0; overflow-wrap: break-word; word-break: break-word; }
 .info-popover .icon-btn { flex-shrink: 0; padding: 2px; }
 .settings-item-status {

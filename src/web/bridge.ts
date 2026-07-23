@@ -65,6 +65,7 @@ export type WebAgentStatus = "idle" | "running" | "error";
 export type WebEvent =
 	| AgentEvent
 	| { type: "status"; status: WebAgentStatus }
+	| { type: "user_message"; message: { role: "user"; content: string } }
 	| { type: "session_update"; session: SessionSummary }
 	| { type: "session_end"; usage: SessionState["usage"]; messageCount: number }
 	| { type: "session_closed" };
@@ -330,7 +331,9 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			ws.session.title = deriveTitle(text);
 		}
 
-		appendMessage(ws.session, { role: "user", content: text });
+		const userMsg = { role: "user" as const, content: text };
+		appendMessage(ws.session, userMsg);
+		broadcast(ws, { type: "user_message", message: userMsg });
 		broadcast(ws, { type: "status", status: "running" });
 		ws.status = "running";
 		ws.error = null;
