@@ -966,8 +966,23 @@ export function createWebBridge(result: StartupResult): WebBridge {
 				rulesLazySuffix = rules.lazySuffix;
 				directoryRules = rules.directoryRules;
 				personas = resolvePersonasForCwd(sessionCwd, projectTrusted).personas;
+				// Only reconnect MCP if the config actually changed on disk.
+				const prevNames = mcpResult.allServerNames.slice().sort().join(",");
+				const disabledMcp = loadSettings().disabledMcpServers ?? [];
+				const freshMcp = await resolveMcpForCwd(
+					projectDeps,
+					sessionCwd,
+					projectTrusted,
+					disabledMcp,
+					/*skipConnect=*/ true,
+				);
+				const newNames = freshMcp.allServerNames.slice().sort().join(",");
+				if (prevNames !== newNames) {
+					await closeMcpConnections(mcpResult.connections);
+					mcpResult = await resolveMcpForCwd(projectDeps, sessionCwd, projectTrusted, disabledMcp);
+				}
 				recomputeAllSystemPrompts();
-				return { ok: true, result: "Reloaded skills, rules, and personas" };
+				return { ok: true, result: "Reloaded skills, rules, MCP, and personas" };
 			} catch (err) {
 				return { ok: false, error: `Reload failed: ${err instanceof Error ? err.message : String(err)}` };
 			}
