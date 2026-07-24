@@ -1633,6 +1633,7 @@ function Sidebar({
 	onCreateSession,
 	onCloseSession,
 	onOpenDirPicker,
+	onSetCwd,
 	onRenameSession,
 	onPinSession,
 	open,
@@ -1755,6 +1756,10 @@ function Sidebar({
 					<div class="dir-row">
 						<span class="dir-row-label">Directory</span>
 						<button class="dir-row-value" title=${cwd} onClick=${onOpenDirPicker}>${shortPath(cwd)}</button>
+						<button class="dir-row-tmp" title="Create temp directory" onClick=${() => {
+							const id = Math.random().toString(36).slice(2, 8);
+							onSetCwd(`/tmp/cast-${id}`);
+						}}>tmp</button>
 					</div>
 					${personas.map(
 						(p) => html`
@@ -3002,6 +3007,7 @@ function App() {
 				onCreateSession=${createSession}
 				onCloseSession=${closeSession}
 				onOpenDirPicker=${() => setDirPickerOpen(true)}
+				onSetCwd=${setSelectedCwd}
 				onRenameSession=${renameSession}
 				onPinSession=${pinSession}
 				open=${sidebarOpen}

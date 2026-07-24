@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.8.19
+
+### Added
+
+- "tmp" button next to the directory picker in the web UI sidebar — creates a `/tmp/cast-<id>` directory for throwaway sessions.
+
 ## 0.8.18
 
 ### Fixed

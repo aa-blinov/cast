@@ -389,6 +389,18 @@ body.resizing-diff * { user-select: none; }
 	transition: color .1s, background .1s;
 }
 .dir-row-value:hover { color: var(--cyan); background: var(--bg-hover); }
+.dir-row-tmp {
+	background: none; border: 1px solid var(--border);
+	color: var(--text-muted);
+	font-family: var(--font-mono);
+	font-size: .65rem;
+	padding: 1px 6px;
+	border-radius: 4px;
+	cursor: pointer;
+	flex-shrink: 0;
+	transition: color .1s, background .1s, border-color .1s;
+}
+.dir-row-tmp:hover { color: var(--text); background: var(--bg-hover); border-color: var(--border-active); }
 .persona-label { color: var(--text-muted); font-size: .7rem; margin-left: 4px; }
 
 /* ── Chat area ────────────────────────────────────────────────────── */
