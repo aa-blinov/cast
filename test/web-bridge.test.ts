@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,7 +18,7 @@ vi.mock("../src/core/loop.ts", async (importOriginal) => {
 	return { ...actual, runAgentLoop: (...args: unknown[]) => runAgentLoop(...args) };
 });
 
-const { createWebBridge } = await import("../src/web/bridge.ts");
+const { createWebBridge, TMP_CWD } = await import("../src/web/bridge.ts");
 
 const testConfig: AppConfig = {
 	baseURL: "http://localhost",
@@ -107,6 +107,24 @@ describe("web bridge", () => {
 		const bridge = createWebBridge(makeResult());
 		const ws = bridge.createSession("senior");
 		expect(ws.systemPrompt).toContain("You are the senior persona.");
+	});
+
+	it("tmp sentinel creates a scratch dir named after the session id", () => {
+		const bridge = createWebBridge(makeResult());
+		const ws = bridge.createSession(undefined, undefined, TMP_CWD);
+		try {
+			expect(ws.session.cwd).toBe(`/tmp/cast-${ws.id}`);
+			expect(statSync(ws.session.cwd).isDirectory()).toBe(true);
+			expect(ws.systemPrompt).toContain(`Current working directory: ${ws.session.cwd}`);
+		} finally {
+			rmSync(ws.session.cwd, { recursive: true, force: true });
+		}
+	});
+
+	it("a real cwd override is used as-is, not mistaken for the tmp sentinel", () => {
+		const bridge = createWebBridge(makeResult());
+		const ws = bridge.createSession(undefined, undefined, fakeHome);
+		expect(ws.session.cwd).toBe(fakeHome);
 	});
 
 	it("/persona with no arg reports the current persona without changing anything", async () => {

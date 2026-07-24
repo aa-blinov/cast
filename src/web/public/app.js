@@ -1624,11 +1624,18 @@ function SettingsSsh({ data, busy, act, confirm }) {
 	`;
 }
 
+// Sentinel sent to the server instead of a real path when the tmp toggle is
+// active — the actual /tmp/cast-<session id> directory is only created
+// server-side at session-creation time (see bridge.ts), so the UI never
+// holds a path that doesn't exist yet.
+const TMP_CWD = "tmp";
+
 function Sidebar({
 	sessions,
 	activeId,
 	personas,
 	cwd,
+	defaultCwd,
 	onSelectSession,
 	onCreateSession,
 	onCloseSession,
@@ -1664,7 +1671,7 @@ function Sidebar({
 	);
 	const pinnedGroup = filtered.filter((s) => s.pinned).sort(byRunningThenDate);
 	const otherGroup = filtered.filter((s) => !s.pinned).sort(byRunningThenDate);
-	const isTmp = cwd.startsWith("/tmp/cast-");
+	const isTmp = cwd === TMP_CWD;
 
 	const active = sessions.find((s) => s.id === activeId);
 
@@ -1759,16 +1766,13 @@ function Sidebar({
 						<div class="dir-toggle">
 							<button
 								class="dir-toggle-btn${!isTmp ? " active" : ""}"
-								title=${cwd}
-								onClick=${onOpenDirPicker}
-							>${shortPath(cwd)}</button>
+								title=${isTmp ? defaultCwd : cwd}
+								onClick=${isTmp ? () => onSetCwd(null) : onOpenDirPicker}
+							>${shortPath(isTmp ? defaultCwd : cwd)}</button>
 							<button
 								class="dir-toggle-btn dir-toggle-tmp${isTmp ? " active" : ""}"
 								title="Use a fresh scratch directory for a throwaway session"
-								onClick=${() => {
-									const id = Math.random().toString(36).slice(2, 8);
-									onSetCwd(`/tmp/cast-${id}`);
-								}}
+								onClick=${() => onSetCwd(TMP_CWD)}
 							>tmp</button>
 						</div>
 					</div>
@@ -3014,6 +3018,7 @@ function App() {
 				activeId=${activeId}
 				personas=${personas}
 				cwd=${cwd}
+				defaultCwd=${defaultCwd}
 				onSelectSession=${selectSession}
 				onCreateSession=${createSession}
 				onCloseSession=${closeSession}
