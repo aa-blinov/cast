@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.8.18
+
+### Fixed
+
+- Web server now defaults to `~` as the session working directory instead of the directory where `cast web` was launched. Use the directory picker in the UI to choose a project directory per session. TUI mode still uses the current working directory as before.
+
 ## 0.8.17
 
 ### Fixed
