@@ -828,6 +828,8 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 
 			// Inner loop: process tool calls and steering messages
 			let hasMoreToolCalls = true;
+			let effectiveMaxTokens = config.maxResponseTokens;
+			let reasoningRetryDone = false;
 
 			while (hasMoreToolCalls || pendingMessages.length > 0) {
 				// Inject pending steering messages
@@ -869,7 +871,7 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 						currentModel,
 						cached.messages,
 						cached.tools,
-						config.maxResponseTokens,
+						effectiveMaxTokens,
 						signal,
 						(token) => {
 							partialContent += token;
@@ -964,6 +966,21 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 					persistPartialAssistant(completion.content, completion.thinking);
 					onEvent({ type: "end", reason: "disconnected" });
 					return;
+				}
+
+				// Reasoning-only response: the model spent all max_tokens on
+				// reasoning_content and left content empty. Retry once with 2x the
+				// token budget so reasoning has room and content can follow.
+				const reasoningExhausted =
+					!completion.content &&
+					!completion.toolCalls?.length &&
+					completion.thinking &&
+					completion.finishReason === "length";
+				if (reasoningExhausted && !reasoningRetryDone) {
+					reasoningRetryDone = true;
+					effectiveMaxTokens *= 2;
+					onWarning?.("Reasoning consumed all tokens — retrying with doubled budget");
+					continue;
 				}
 
 				if (completion.usage) {
