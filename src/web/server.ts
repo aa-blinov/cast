@@ -368,22 +368,12 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 		});
 	});
 
-	route("GET", "/api/sessions/:id/diff", (req, res, params) => {
+	route("GET", "/api/sessions/:id/diff", (_req, res, params) => {
 		const ws = bridge.getSession(params.id);
 		if (!ws) return json(res, { error: "Not found" }, 404);
 
-		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
-		const file = url.searchParams.get("file");
-		const staged = url.searchParams.get("staged") === "true";
 		const targetCwd = ws.session.cwd ?? process.cwd();
 
-		// Checked separately, before running the real diff: a plain `git diff`
-		// outside any repo doesn't fail with a clean "not a git repository"
-		// message — it dumps git's entire `--no-index` usage text (hundreds of
-		// lines) as the error, which is useless to show a user. This gives a
-		// dedicated, unambiguous signal the client can render as an actual
-		// instruction instead of a wall of git help text or a misleading
-		// "No changes".
 		try {
 			execSync("git rev-parse --is-inside-work-tree", {
 				cwd: targetCwd,
@@ -392,23 +382,119 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 				stdio: ["ignore", "pipe", "ignore"],
 			});
 		} catch {
-			return json(res, { files: [], noRepo: true });
+			return json(res, { files: [], groups: emptyGroups(), noRepo: true });
 		}
 
-		try {
-			const args = ["git", "diff", "--no-color", "--unified=3"];
-			if (staged) args.push("--staged");
-			if (file) args.push("--", file);
-			const output = execSync(args.join(" "), {
+		const git = (args: string[]) =>
+			execSync(`git ${args.join(" ")}`, {
 				cwd: targetCwd,
 				encoding: "utf-8",
 				timeout: 10_000,
 				maxBuffer: 5 * 1024 * 1024,
 			});
-			const parsed = parseDiff(output);
-			json(res, parsed);
+
+		// git diff returns exit code 1 when files differ — that's expected,
+		// not an error. execSync throws on any non-zero exit, so we catch
+		// code-1 and return stdout normally.
+		const gitDiff = (args: string[]): string => {
+			try {
+				return git(args);
+			} catch (err: unknown) {
+				const e = err as { status?: number; stdout?: string };
+				if (e.status === 1 && typeof e.stdout === "string") return e.stdout;
+				throw err;
+			}
+		};
+
+		try {
+			const status = git(["status", "--porcelain", "-u"]);
+			const groups: FileGroups = { untracked: [], added: [], modified: [], deleted: [], renamed: [] };
+			const diffTargets: Array<{ path: string; args: string[] }> = [];
+
+			for (const line of status.split("\n")) {
+				if (line.length < 4) continue;
+				const xy = line.slice(0, 2);
+				const path = line.slice(3).split(" -> ").pop()!;
+
+				if (xy === "??") {
+					groups.untracked.push(path);
+					diffTargets.push({
+						path,
+						args: ["diff", "--no-color", "--unified=3", "--no-index", "--", "/dev/null", path],
+					});
+				} else if (xy === "A " || xy === "A" + " ") {
+					groups.added.push(path);
+					diffTargets.push({ path, args: ["diff", "--no-color", "--unified=3", "--staged", "--", path] });
+				} else if (xy === "R ") {
+					groups.renamed.push(path);
+					diffTargets.push({ path, args: ["diff", "--no-color", "--unified=3", "--staged", "--", path] });
+				} else if (xy === "D " || xy === " D") {
+					groups.deleted.push(path);
+					if (xy[0] === " ") diffTargets.push({ path, args: ["diff", "--no-color", "--unified=3", "--", path] });
+					else diffTargets.push({ path, args: ["diff", "--no-color", "--unified=3", "--staged", "--", path] });
+				} else if (xy[0] === "M" || xy[1] === "M" || xy === "AM") {
+					groups.modified.push(path);
+					// Unstaged diff (working tree vs index)
+					if (xy[1] === "M" || xy[1] === " ") {
+						diffTargets.push({ path, args: ["diff", "--no-color", "--unified=3", "--", path] });
+					}
+					// Staged diff (index vs HEAD) — append suffix to avoid key collision
+					if (xy[0] === "M" || xy[0] === "A") {
+						diffTargets.push({
+							path: `${path}:staged`,
+							args: ["diff", "--no-color", "--unified=3", "--staged", "--", path],
+						});
+					}
+				} else {
+					// Catch-all: anything else with changes goes to modified
+					groups.modified.push(path);
+					diffTargets.push({ path, args: ["diff", "--no-color", "--unified=3", "--", path] });
+				}
+			}
+
+			// Cap untracked to avoid huge diffs on first-open repos
+			const maxUntracked = 50;
+			if (diffTargets.filter((t) => groups.untracked.includes(t.path)).length > maxUntracked) {
+				const untrackedPaths = new Set(groups.untracked);
+				let kept = 0;
+				const filtered = diffTargets.filter((t) => {
+					if (!untrackedPaths.has(t.path)) return true;
+					kept++;
+					return kept <= maxUntracked;
+				});
+				diffTargets.length = 0;
+				diffTargets.push(...filtered);
+				groups.untracked = groups.untracked.slice(0, maxUntracked);
+			}
+
+			// Run per-file diffs in parallel batches
+			const allFiles: DiffFile[] = [];
+			const batchSize = 10;
+			for (let i = 0; i < diffTargets.length; i += batchSize) {
+				const batch = diffTargets.slice(i, i + batchSize);
+				const results = batch.map((t) => {
+					try {
+						const raw = gitDiff(t.args);
+						return parseDiff(raw).files;
+					} catch {
+						return [] as DiffFile[];
+					}
+				});
+				for (let j = 0; j < results.length; j++) {
+					for (const f of results[j]) {
+						// Unstrip the :staged suffix we added for collision avoidance
+						const target = batch[j]!;
+						if (target.path.endsWith(":staged")) {
+							f.path = target.path.slice(0, -7);
+						}
+						allFiles.push(f);
+					}
+				}
+			}
+
+			json(res, { files: allFiles, groups });
 		} catch (err) {
-			json(res, { files: [], error: err instanceof Error ? err.message : String(err) });
+			json(res, { files: [], groups: emptyGroups(), error: err instanceof Error ? err.message : String(err) });
 		}
 	});
 
@@ -558,6 +644,18 @@ interface DiffFile {
 	hunks: DiffHunk[];
 	additions: number;
 	deletions: number;
+}
+
+interface FileGroups {
+	untracked: string[];
+	added: string[];
+	modified: string[];
+	deleted: string[];
+	renamed: string[];
+}
+
+function emptyGroups(): FileGroups {
+	return { untracked: [], added: [], modified: [], deleted: [], renamed: [] };
 }
 
 function parseDiff(raw: string): { files: DiffFile[] } {

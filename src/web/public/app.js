@@ -600,19 +600,43 @@ function DiffPanel({ data, activeFile, onSelectFile, onClose, onResizeStart, ope
 		</aside>
 	`;
 
-	// Directories first (grouped and sorted alphabetically by their full
-	// path), then root-level files — same convention as a file explorer /
-	// GitLab's diff view, instead of one flat alphabetical list that
-	// interleaves nested and root files arbitrarily.
-	const files = [...(data.files || [])].sort((a, b) => {
-		const aRoot = !a.path.includes("/");
-		const bRoot = !b.path.includes("/");
-		if (aRoot !== bRoot) return aRoot ? 1 : -1;
-		return a.path.localeCompare(b.path);
-	});
-	const file = activeFile ? files.find((f) => f.path === activeFile) : files[0];
+	const allFiles = data.files || [];
+	const groups = data.groups || {};
 
-	// Pre-compute hunk lines outside htm template
+	const groupDefs = [
+		{ key: "untracked", label: "New files", cls: "badge-new" },
+		{ key: "added", label: "Staged", cls: "badge-added" },
+		{ key: "modified", label: "Modified", cls: "badge-modified" },
+		{ key: "deleted", label: "Deleted", cls: "badge-deleted" },
+		{ key: "renamed", label: "Renamed", cls: "badge-renamed" },
+	];
+
+	// Sort dirs first within each group
+	const sortFiles = (arr) =>
+		[...arr].sort((a, b) => {
+			const aRoot = !a.path.includes("/");
+			const bRoot = !b.path.includes("/");
+			if (aRoot !== bRoot) return aRoot ? 1 : -1;
+			return a.path.localeCompare(b.path);
+		});
+
+	const fileLookup = {};
+	for (const f of allFiles) fileLookup[f.path] = f;
+
+	// Build grouped file list with section headers
+	const sections = [];
+	for (const g of groupDefs) {
+		const paths = groups[g.key];
+		if (!paths || paths.length === 0) continue;
+		const files = sortFiles(paths.map((p) => fileLookup[p]).filter(Boolean));
+		if (files.length === 0) continue;
+		sections.push({ ...g, files });
+	}
+
+	const activePath = activeFile || (sections.length > 0 ? sections[0].files[0]?.path : null);
+	const file = activePath ? fileLookup[activePath] : null;
+
+	// Pre-compute hunk lines
 	let diffContent = null;
 	if (file && file.hunks.length > 0) {
 		diffContent = file.hunks.map((hunk, hi) => {
@@ -642,16 +666,27 @@ function DiffPanel({ data, activeFile, onSelectFile, onClose, onResizeStart, ope
 				<button class="diff-close" onClick=${onClose} aria-label="Close"><${icons.xMark} /></button>
 			</div>
 			<div class="diff-file-list">
-				${files.map(
-					(f) => html`
-					<div key=${f.path} class="diff-file-item${f.path === (activeFile || file?.path) ? " active" : ""}" onClick=${() => onSelectFile(f.path)} title=${f.path}>
-						<span class="diff-file-path">
-							<span class="diff-file-dir">${f.path.slice(0, f.path.lastIndexOf("/") + 1)}</span><span class="diff-file-base">${f.path.slice(f.path.lastIndexOf("/") + 1)}</span>
-						</span>
-						<span class="diff-file-stats">
-							<span class="add">+${f.additions}</span>
-							<span class="del">-${f.deletions}</span>
-						</span>
+				${sections.map(
+					(sec) => html`
+					<div key=${sec.key}>
+						<div class="diff-group-header">
+							<span class="diff-group-label">${sec.label}</span>
+							<span class="diff-group-count">${sec.files.length}</span>
+						</div>
+						${sec.files.map(
+							(f) => html`
+							<div key=${f.path} class="diff-file-item${f.path === activePath ? " active" : ""}" onClick=${() => onSelectFile(f.path)} title=${f.path}>
+								<span class="diff-file-badge ${sec.cls}"></span>
+								<span class="diff-file-path">
+									<span class="diff-file-dir">${f.path.slice(0, f.path.lastIndexOf("/") + 1)}</span><span class="diff-file-base">${f.path.slice(f.path.lastIndexOf("/") + 1)}</span>
+								</span>
+								<span class="diff-file-stats">
+									<span class="add">+${f.additions}</span>
+									<span class="del">-${f.deletions}</span>
+								</span>
+							</div>
+						`,
+						)}
 					</div>
 				`,
 				)}
