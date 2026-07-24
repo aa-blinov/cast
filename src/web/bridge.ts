@@ -43,9 +43,11 @@ import { type AgentRunner, createAgentRunner } from "../core/runner.ts";
 import {
 	addUsage,
 	appendMessage,
+	clearSessionMessages,
 	createSession,
 	listSessionSummaries,
 	loadSession,
+	recordCompaction,
 	resetSavedMessageCount,
 	type SessionState,
 	saveSession,
@@ -350,6 +352,19 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		const ws = sessions.get(sessionId);
 		if (!ws) return;
 
+		// A turn already running (e.g. the same session open in a second
+		// browser tab that also just hit send) must not start a second,
+		// concurrent runAgentLoop against the same ws.session — both would
+		// race to reassign ws.session.messages and scramble/interleave the
+		// persisted history. Mirrors the TUI's own submit() (useAgentSession.ts)
+		// and this bridge's /steer command: steer into the running turn
+		// instead. The loop drains steeringQueue and broadcasts
+		// "steering_injected" itself, so every connected tab sees it land.
+		if (ws.status === "running") {
+			ws.runner.steeringQueue.enqueue({ role: "user", content: text });
+			return;
+		}
+
 		// Auto-title from the first-ever user message, same idea as a browser
 		// tab title — only if nothing (auto or a manual rename) has set one yet.
 		if (!ws.session.title && !ws.session.messages.some((m) => m.role === "user")) {
@@ -434,6 +449,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			sshHosts,
 			backgroundBash: ws.backgroundBash,
 			mcpPromptSuffix: formatMcpForPrompt(mcpResult),
+			onCompaction: (full, compacted) => recordCompaction(ws.session, full, compacted),
 			onMessagesChanged: (messages) => {
 				ws.session.messages = messages;
 				try {
@@ -820,7 +836,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 
 		// Everything below requires idle (enforced by the isCommandBlocking gate above).
 		if (name === "/clear") {
-			ws.session.messages = [];
+			clearSessionMessages(ws.session);
 			resetSavedMessageCount(ws.session);
 			saveSession(ws.session);
 			return { ok: true, result: "Context cleared" };
@@ -841,6 +857,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 				.then((result) => {
 					ws.status = "idle";
 					if (result.compacted) {
+						recordCompaction(ws.session, ws.session.messages, result.messages);
 						ws.session.messages = result.messages;
 						resetSavedMessageCount(ws.session);
 						broadcast(ws, {

@@ -10,6 +10,9 @@ import type { AgentRunner } from "../core/runner.ts";
 import {
 	addUsage,
 	appendMessage,
+	clearSessionMessages,
+	getFullHistory,
+	recordCompaction,
 	resetSavedMessageCount,
 	type SessionState,
 	type SessionUsage,
@@ -361,7 +364,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		modelOverride,
 		planModelProvider,
 	} = params;
-	const [messages, setMessages] = useState<ChatMessage[]>(() => buildDisplayMessages(session.messages));
+	const [messages, setMessages] = useState<ChatMessage[]>(() => buildDisplayMessages(getFullHistory(session.id)));
 	const [streaming, setStreaming] = useState<StreamingState | null>(null);
 	const [status, setStatus] = useState<AgentStatus>("idle");
 	const [error, setError] = useState<string | null>(null);
@@ -529,7 +532,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	// below fires exactly once; every other call site (compaction, /clear,
 	// session switch) invokes refresh() explicitly at a turn boundary.
 	const refresh = useCallback(() => {
-		setMessages(buildDisplayMessages(session.messages));
+		setMessages(buildDisplayMessages(getFullHistory(session.id)));
 		setUsage({ ...session.usage });
 		setLastTurnUsage(null);
 	}, [session]);
@@ -668,6 +671,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					mcpPromptSuffix: formatMcpForPrompt(mcpResult),
 					planState,
 					announcedLocalDate,
+					onCompaction: (full, compacted) => recordCompaction(session, full, compacted),
 					// Append straight into the display history: warnings fire mid-run
 					// (e.g. vision fallback, before the response streams), so an
 					// append lands chronologically right — after the user message and
@@ -970,7 +974,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	}, [runner]);
 
 	const clearContext = useCallback(() => {
-		session.messages = [];
+		clearSessionMessages(session);
 		resetSavedMessageCount(session);
 		// The authoritative context-size signal must reset with the context it
 		// measured — otherwise shouldCompact still sees the pre-clear size and

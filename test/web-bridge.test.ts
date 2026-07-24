@@ -169,6 +169,22 @@ describe("web bridge", () => {
 		expect(ws.runner.steeringQueue.hasItems()).toBe(true);
 	});
 
+	it("submit() while a turn is already running steers instead of racing a second runAgentLoop", () => {
+		// Two browser tabs on the same session both hitting "send" hit this
+		// same code path — without the guard, both would call runAgentLoop
+		// concurrently against the same ws.session, scrambling/interleaving
+		// the persisted message order (see the real repro this fix closes).
+		const bridge = createWebBridge(makeResult());
+		const ws = bridge.createSession();
+
+		bridge.submit(ws.id, "first message");
+		expect(runAgentLoop).toHaveBeenCalledTimes(1);
+
+		bridge.submit(ws.id, "second message, from another tab");
+		expect(runAgentLoop).toHaveBeenCalledTimes(1); // still just the one run
+		expect(ws.runner.steeringQueue.hasItems()).toBe(true);
+	});
+
 	it("/queue while running enqueues a follow-up; /queue-reset clears it", async () => {
 		const bridge = createWebBridge(makeResult());
 		const ws = bridge.createSession();

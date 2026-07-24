@@ -306,8 +306,10 @@ async function performCompaction(
 		loopConfig.modelProvider,
 	);
 	if (result.compacted) {
+		const fullHistoryBeforeCompaction = [...messages];
 		messages.length = 0;
 		messages.push(...result.messages);
+		loopConfig.onCompaction?.(fullHistoryBeforeCompaction, result.messages);
 		onEvent({
 			type: "compaction",
 			messagesCompacted: result.messagesCompacted,
@@ -504,6 +506,15 @@ export interface LoopConfig {
 	 * shallow copy is enough to capture the current state.
 	 */
 	onMessagesChanged?: (messages: Message[]) => void;
+	/**
+	 * Fired synchronously right after a successful compaction builds its
+	 * replacement array but before it's spliced into the live `messages`
+	 * array — carries the full pre-truncation history and the new shrunk
+	 * array so a caller that knows which SessionState this belongs to (this
+	 * loop doesn't) can archive the raw messages before they're gone. Not
+	 * fired on failed or no-op compactions.
+	 */
+	onCompaction?: (fullHistoryBeforeCompaction: Message[], compacted: Message[]) => void;
 }
 
 /**

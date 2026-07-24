@@ -38,7 +38,7 @@ import {
 	createSession,
 	getMostRecentSession,
 	loadSession,
-	migrateSessionsToJsonl,
+	migrateLegacySessionsToDb,
 	type SessionState,
 } from "./session.ts";
 import { loadSettings, type PermissionMode, type Settings, updateSettings } from "./settings.ts";
@@ -345,9 +345,9 @@ export async function runStartup(
 		cwd,
 	});
 
-	// Migrate legacy session files to JSONL format (one-time, no-op if already done).
-	const migrated = migrateSessionsToJsonl();
-	if (migrated > 0) onProgress?.(`Migrated ${migrated} session(s) to JSONL format`);
+	// Import legacy file-store sessions into the DB (one-time per session, no-op once done).
+	const migrated = migrateLegacySessionsToDb();
+	if (migrated > 0) onProgress?.(`Imported ${migrated} session(s) into the session database`);
 
 	// Session resume.
 	let resumedSession: SessionState | undefined;

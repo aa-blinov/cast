@@ -5,7 +5,14 @@ import type { AgentEvent } from "./loop.ts";
 import { runAgentLoop } from "./loop.ts";
 import { closeMcpConnections, formatMcpForPrompt } from "./mcp.ts";
 import { createPlanState, PLAN_TOOL_NAMES } from "./plan.ts";
-import { addUsage, appendMessage, resetSavedMessageCount, type SessionState, saveSession } from "./session.ts";
+import {
+	addUsage,
+	appendMessage,
+	recordCompaction,
+	resetSavedMessageCount,
+	type SessionState,
+	saveSession,
+} from "./session.ts";
 import { loadSettings } from "./settings.ts";
 import type { ParsedArgs } from "./startup.ts";
 import { runStartup } from "./startup.ts";
@@ -96,6 +103,7 @@ export async function runNonInteractive(args: ParsedArgs, options: RunOptions): 
 			mcpPromptSuffix: formatMcpForPrompt(mcpResult),
 			planState,
 			announcedLocalDate,
+			onCompaction: (full, compacted) => recordCompaction(session, full, compacted),
 			onEvent: (event: AgentEvent) => handleEvent(event, session, options.format),
 		});
 
