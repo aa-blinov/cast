@@ -365,7 +365,7 @@ body.resizing-diff * { user-select: none; }
 .persona-item:hover { background: var(--bg-hover); color: var(--text); }
 .persona-item.selected { color: var(--cyan); }
 .dir-row {
-	display: flex; align-items: center; justify-content: space-between; gap: 8px;
+	display: flex; align-items: center; gap: 8px;
 	padding: 4px 10px 10px;
 	margin-bottom: 4px;
 	border-bottom: 1px solid var(--border);
@@ -376,31 +376,33 @@ body.resizing-diff * { user-select: none; }
 	color: var(--text-muted);
 	flex-shrink: 0;
 }
-.dir-row-value {
+.dir-toggle {
+	display: flex;
+	flex: 1;
+	min-width: 0;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	overflow: hidden;
+}
+.dir-toggle-btn {
 	background: none; border: none;
-	color: var(--text-dim);
+	color: var(--text-muted);
 	font-family: var(--font-mono);
 	font-size: .75rem;
 	cursor: pointer;
-	overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-	max-width: 65%;
-	padding: 2px 4px;
-	border-radius: 4px;
+	padding: 3px 8px;
 	transition: color .1s, background .1s;
 }
-.dir-row-value:hover { color: var(--cyan); background: var(--bg-hover); }
-.dir-row-tmp {
-	background: none; border: 1px solid var(--border);
-	color: var(--text-muted);
-	font-family: var(--font-mono);
-	font-size: .65rem;
-	padding: 1px 6px;
-	border-radius: 4px;
-	cursor: pointer;
-	flex-shrink: 0;
-	transition: color .1s, background .1s, border-color .1s;
+.dir-toggle-btn:not(:first-child) { border-left: 1px solid var(--border); }
+.dir-toggle-btn:hover { color: var(--text); background: var(--bg-hover); }
+.dir-toggle-btn.active { color: var(--cyan); background: var(--bg-hover); }
+.dir-toggle-btn:first-child {
+	flex: 1;
+	min-width: 0;
+	text-align: left;
+	overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.dir-row-tmp:hover { color: var(--text); background: var(--bg-hover); border-color: var(--border-active); }
+.dir-toggle-tmp { flex-shrink: 0; }
 .persona-label { color: var(--text-muted); font-size: .7rem; margin-left: 4px; }
 
 /* ── Chat area ────────────────────────────────────────────────────── */
