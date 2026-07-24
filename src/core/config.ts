@@ -240,7 +240,7 @@ export async function validateModel(config: AppConfig, model: string): Promise<V
 
 		// Check for reasoning in response
 		const msgAny = msg as unknown as Record<string, unknown> | undefined;
-		const reasoning = typeof msgAny?.reasoning === "string" ? msgAny.reasoning : undefined;
+		const reasoning = typeof msgAny?.reasoning === "string" ? msgAny.reasoning : typeof msgAny?.reasoning_content === "string" ? msgAny.reasoning_content : undefined;
 
 		if (!content && !reasoning) {
 			return { ok: false, error: `Model "${model}" returned empty response.` };
