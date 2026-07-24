@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.8.20
+
+### Fixed
+
+- New-session directory picker in the web UI sidebar now shows the current directory and the "tmp" option as a single segmented control, with the active choice highlighted — clearer than the previous cramped label+path+button row.
+
 ## 0.8.19
 
 ### Added
