@@ -6,7 +6,7 @@
  */
 
 import { execSync } from "node:child_process";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { dirname, extname, join, resolve } from "node:path";
@@ -190,6 +190,12 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 			cwd = parsed.cwd;
 		} catch {
 			// empty body is fine
+		}
+		// Auto-create temp directories for the tmp button
+		if (cwd?.startsWith("/tmp/cast-")) {
+			try {
+				mkdirSync(cwd, { recursive: true });
+			} catch {}
 		}
 		const ws = bridge.createSession(persona, model, cwd);
 		json(res, { id: ws.id, session: ws.session }, 201);
