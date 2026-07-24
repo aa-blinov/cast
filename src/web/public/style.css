@@ -943,6 +943,34 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 .diff-file-stats { margin-left: auto; flex-shrink: 0; font-size: .7rem; }
 .diff-file-stats .add { color: var(--green); }
 .diff-file-stats .del { color: var(--rose); }
+.diff-group-header {
+	display: flex; align-items: center; justify-content: space-between;
+	padding: 6px 12px 2px;
+	font-size: .7rem;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: .04em;
+	color: var(--text-muted);
+	border-top: 1px solid var(--border);
+}
+.diff-group-header:first-child { border-top: none; }
+.diff-group-count {
+	background: var(--bg-raised);
+	border-radius: 8px;
+	padding: 0 6px;
+	font-size: .65rem;
+	font-weight: 500;
+}
+.diff-file-badge {
+	width: 6px; height: 6px;
+	border-radius: 50%;
+	flex-shrink: 0;
+}
+.badge-new { background: var(--green); }
+.badge-added { background: var(--blue); }
+.badge-modified { background: var(--amber); }
+.badge-deleted { background: var(--rose); }
+.badge-renamed { background: var(--purple); }
 .diff-view {
 	flex: 1;
 	overflow: auto;

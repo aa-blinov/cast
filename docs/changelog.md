@@ -2,6 +2,17 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.8.17
+
+### Fixed
+
+- Web UI Changes panel now shows all file types including untracked files (previously only tracked-file diffs were visible).
+- `git diff --no-index` exit code 1 no longer silently drops untracked files from the diff response.
+
+### Added
+
+- Web UI Changes panel groups files by status: New files, Staged, Modified, Deleted, Renamed — each with a colored dot indicator and section count badge.
+
 ## 0.8.16
 
 ### Fixed
