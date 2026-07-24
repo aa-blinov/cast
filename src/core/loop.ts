@@ -276,6 +276,47 @@ export async function compactSessionMessages(
 	}
 }
 
+/**
+ * Run a compaction pass and, on success, splice the result back into
+ * `messages` in place and emit the `compaction` event. Centralizes the
+ * mutate-and-emit boilerplate shared by every call site (automatic
+ * shouldCompact check, mid-turn context guard, context-overflow retry) so
+ * they can't drift out of sync on what a successful compaction does to the
+ * live messages array. Callers still own failure handling — the overflow
+ * retry path wants a different message and to rethrow, so this only ever
+ * emits on success.
+ */
+async function performCompaction(
+	messages: Message[],
+	config: AppConfig,
+	model: string,
+	signal: AbortSignal | undefined,
+	loopConfig: LoopConfig,
+	onEvent: (event: AgentEvent) => void,
+): Promise<CompactSessionResult> {
+	const result = await compactSessionMessages(
+		messages,
+		config,
+		model,
+		signal,
+		(attempt, maxAttempts, reason) => onEvent({ type: "retry", attempt, maxAttempts, reason }),
+		(usage) => onEvent({ type: "usage", usage }),
+		loopConfig.planState?.enabled ? PLAN_COMPACTION_PROMPT : undefined,
+		reminderStateFromPlan(loopConfig.planState),
+		loopConfig.modelProvider,
+	);
+	if (result.compacted) {
+		messages.length = 0;
+		messages.push(...result.messages);
+		onEvent({
+			type: "compaction",
+			messagesCompacted: result.messagesCompacted,
+			tokensBefore: result.tokensBefore,
+		});
+	}
+	return result;
+}
+
 // ============================================================================
 // Message queue — from pi's PendingMessageQueue
 // ============================================================================
@@ -765,26 +806,8 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 
 			// Compaction
 			if (shouldCompact(messages, config, loopConfig.lastPromptTokens)) {
-				const result = await compactSessionMessages(
-					messages,
-					config,
-					currentModel,
-					signal,
-					(attempt, maxAttempts, reason) => onEvent({ type: "retry", attempt, maxAttempts, reason }),
-					(usage) => onEvent({ type: "usage", usage }),
-					loopConfig.planState?.enabled ? PLAN_COMPACTION_PROMPT : undefined,
-					reminderStateFromPlan(loopConfig.planState),
-					loopConfig.modelProvider,
-				);
-				if (result.compacted) {
-					messages.length = 0;
-					messages.push(...result.messages);
-					onEvent({
-						type: "compaction",
-						messagesCompacted: result.messagesCompacted,
-						tokensBefore: result.tokensBefore,
-					});
-				} else if (result.error) {
+				const result = await performCompaction(messages, config, currentModel, signal, loopConfig, onEvent);
+				if (!result.compacted && result.error) {
 					onEvent({ type: "compaction_failed", reason: result.error });
 				}
 			}
@@ -895,25 +918,8 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 						// surfacing a raw error. Matches opencode's auto-compaction
 						// on ContextOverflowError. Only once per turn to prevent
 						// infinite loops when even compacted context is too large.
-						const result = await compactSessionMessages(
-							messages,
-							config,
-							currentModel,
-							signal,
-							(attempt, maxAttempts, reason) => onEvent({ type: "retry", attempt, maxAttempts, reason }),
-							(usage) => onEvent({ type: "usage", usage }),
-							loopConfig.planState?.enabled ? PLAN_COMPACTION_PROMPT : undefined,
-							reminderStateFromPlan(loopConfig.planState),
-							loopConfig.modelProvider,
-						);
+						const result = await performCompaction(messages, config, currentModel, signal, loopConfig, onEvent);
 						if (result.compacted) {
-							messages.length = 0;
-							messages.push(...result.messages);
-							onEvent({
-								type: "compaction",
-								messagesCompacted: result.messagesCompacted,
-								tokensBefore: result.tokensBefore,
-							});
 							overflowCompacted = true;
 							// Restart the outer loop — system prompt, compaction
 							// check, and fresh streamAndCollect will all run again.
@@ -1068,6 +1074,21 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 				}
 
 				onEvent({ type: "turn_end", toolResults });
+
+				// ── Post-tool-results context guard ──
+				// Tool results (especially web_fetch, read of large files, grep)
+				// can push context well past the compaction threshold between the
+				// outer-loop's shouldCompact check (which runs against the previous
+				// turn's actual prompt-token count) and the next LLM call. There's
+				// no fresh usage reading yet at this point, so fall back to the
+				// char-based estimate — same threshold math as shouldCompact, just
+				// fed an estimate instead of a measured value.
+				if (toolCalls && toolCalls.length > 0 && shouldCompact(messages, config, estimateTokens(messages))) {
+					const result = await performCompaction(messages, config, currentModel, signal, loopConfig, onEvent);
+					if (!result.compacted && result.error) {
+						onEvent({ type: "compaction_failed", reason: result.error });
+					}
+				}
 
 				// A successful terminal (signal) tool ends the run. The whole batch
 				// has already executed and its tool results are in `messages` above —

@@ -2489,3 +2489,187 @@ describe("runAgentLoop — onMessagesChanged", () => {
 		expect(last).toEqual(["system", "user", "assistant", "tool", "assistant"]);
 	});
 });
+
+// ============================================================================
+// runAgentLoop — compaction (all three trigger sites share performCompaction)
+// ============================================================================
+
+describe("runAgentLoop — compaction", () => {
+	// A tiny budget plus real prior turns (so safeCutIndex has a user-message
+	// boundary to cut at) makes every compaction path reachable from a real
+	// runAgentLoop call instead of only from compactSessionMessages directly.
+	const tinyBudgetConfig: AppConfig = {
+		...testConfig,
+		contextWindow: 2000,
+		maxResponseTokens: 200,
+		compactionThreshold: 0.75,
+	};
+
+	// Several real user/assistant turns before the interesting turn, so
+	// compactMessages finds a safe cut point (old.length > 0) instead of
+	// silently no-oping.
+	function seedHistory(n: number): Message[] {
+		const seed: Message[] = [];
+		for (let i = 0; i < n; i++) {
+			seed.push({ role: "user", content: `filler question ${i}` });
+			seed.push({ role: "assistant", content: `filler answer ${i} `.repeat(20) });
+		}
+		return seed;
+	}
+
+	it("shouldCompact at the top of a turn compacts before the next model call", async () => {
+		const events: AgentEvent[] = [];
+		vi.mocked(streamAndCollect)
+			// Turn 1: no tool calls, just a reply — but lastPromptTokens (below)
+			// already reports the session over threshold, so the *next* outer
+			// turn's shouldCompact check should fire before it streams.
+			.mockImplementationOnce(async () => ({ content: "turn 1 done", thinking: "", finishReason: "stop" }))
+			// The compaction summarization call itself.
+			.mockImplementationOnce(async () => ({ content: "SUMMARY", thinking: "", finishReason: "stop" }))
+			.mockImplementationOnce(async () => ({ content: "turn 2 done", thinking: "", finishReason: "stop" }));
+
+		const followUpQueue = new MessageQueue();
+		followUpQueue.enqueue({ role: "user", content: "keep going" });
+
+		const result = await runAgentLoop([...seedHistory(6), { role: "user", content: "start" }], {
+			config: tinyBudgetConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "test",
+			followUpQueue,
+			// Reported by the provider on the previous response — this is what
+			// the real loop uses to decide shouldCompact at the top of a turn.
+			lastPromptTokens: 5000,
+			onEvent: (e) => events.push(e),
+		});
+
+		expect(events.some((e) => e.type === "compaction")).toBe(true);
+		expect(events.some((e) => e.type === "compaction_failed")).toBe(false);
+		// The seeded filler turns are gone from the final history — only the
+		// compaction summary/reminder plus the two real turns remain.
+		expect(result.length).toBeLessThan(seedHistory(6).length + 4);
+	});
+
+	it("mid-turn context guard compacts after a large tool result, before the next model call", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "cast-loop-compact-"));
+		try {
+			// Big enough that estimateTokens(messages) alone crosses the tiny
+			// budget's threshold once this lands in the tool result.
+			writeFileSync(join(cwd, "big.txt"), "x".repeat(20_000));
+
+			const events: AgentEvent[] = [];
+			vi.mocked(streamAndCollect)
+				.mockImplementationOnce(async () => ({
+					content: "",
+					thinking: "",
+					finishReason: "stop",
+					toolCalls: [{ id: "t1", name: "read", arguments: JSON.stringify({ path: "big.txt" }) }],
+				}))
+				// The compaction summarization call, triggered mid-turn by the
+				// post-tool-results guard — *before* the model is asked to
+				// continue past the tool result.
+				.mockImplementationOnce(async () => ({ content: "SUMMARY", thinking: "", finishReason: "stop" }))
+				.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
+
+			await runAgentLoop([...seedHistory(6), { role: "user", content: "read the big file" }], {
+				config: tinyBudgetConfig,
+				model: "test-model",
+				cwd,
+				systemPrompt: "test",
+				onEvent: (e) => events.push(e),
+			});
+
+			expect(events.some((e) => e.type === "compaction")).toBe(true);
+			// Confirms this fired from the mid-turn guard and not the top-of-turn
+			// shouldCompact check: no lastPromptTokens was ever supplied, so
+			// that check can never fire on its own in this test.
+			const compactionEvents = events.filter((e) => e.type === "compaction");
+			expect(compactionEvents.length).toBe(1);
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	it("does not compact on a small tool result that stays under threshold", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "cast-loop-nocompact-"));
+		try {
+			writeFileSync(join(cwd, "small.txt"), "hello world");
+
+			const events: AgentEvent[] = [];
+			vi.mocked(streamAndCollect)
+				.mockImplementationOnce(async () => ({
+					content: "",
+					thinking: "",
+					finishReason: "stop",
+					toolCalls: [{ id: "t1", name: "read", arguments: JSON.stringify({ path: "small.txt" }) }],
+				}))
+				.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
+
+			await runAgentLoop([{ role: "user", content: "read the small file" }], {
+				config: tinyBudgetConfig,
+				model: "test-model",
+				cwd,
+				systemPrompt: "test",
+				onEvent: (e) => events.push(e),
+			});
+
+			expect(events.some((e) => e.type === "compaction")).toBe(false);
+			// Only the two mocked calls above — no extra summarization call.
+			expect(vi.mocked(streamAndCollect)).toHaveBeenCalledTimes(2);
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	it("malformed tool-call JSON alone does not trigger compaction (not a context-size signal)", async () => {
+		const events: AgentEvent[] = [];
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				// Deliberately invalid JSON arguments.
+				toolCalls: [{ id: "t1", name: "read", arguments: "{not valid json" }],
+			}))
+			.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
+
+		await runAgentLoop([{ role: "user", content: "do something" }], {
+			config: tinyBudgetConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "test",
+			onEvent: (e) => events.push(e),
+		});
+
+		expect(events.some((e) => e.type === "compaction")).toBe(false);
+		expect(vi.mocked(streamAndCollect)).toHaveBeenCalledTimes(2);
+	});
+
+	it("context-overflow error from the model triggers compaction and retries the turn", async () => {
+		const events: AgentEvent[] = [];
+		let firstAttempt = true;
+		vi.mocked(streamAndCollect).mockImplementation(async () => {
+			if (firstAttempt) {
+				firstAttempt = false;
+				const err = new Error("400 context_length_exceeded") as Error & { code: string };
+				err.code = "context_length_exceeded";
+				throw err;
+			}
+			// Second call onward: could be the compaction summarization or the
+			// retried turn — either way, a clean stop response satisfies both.
+			return { content: "done", thinking: "", finishReason: "stop" };
+		});
+
+		const result = await runAgentLoop([...seedHistory(6), { role: "user", content: "go" }], {
+			config: tinyBudgetConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "test",
+			onEvent: (e) => events.push(e),
+		});
+
+		expect(events.some((e) => e.type === "compaction")).toBe(true);
+		expect(events.some((e) => e.type === "compaction_failed")).toBe(false);
+		expect(result.at(-1)?.content).toBe("done");
+	});
+});
