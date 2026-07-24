@@ -1664,6 +1664,7 @@ function Sidebar({
 	);
 	const pinnedGroup = filtered.filter((s) => s.pinned).sort(byRunningThenDate);
 	const otherGroup = filtered.filter((s) => !s.pinned).sort(byRunningThenDate);
+	const isTmp = cwd.startsWith("/tmp/cast-");
 
 	const active = sessions.find((s) => s.id === activeId);
 
@@ -1755,11 +1756,21 @@ function Sidebar({
 				<div class="persona-list${personaOpen ? " open" : ""}">
 					<div class="dir-row">
 						<span class="dir-row-label">Directory</span>
-						<button class="dir-row-value" title=${cwd} onClick=${onOpenDirPicker}>${shortPath(cwd)}</button>
-						<button class="dir-row-tmp" title="Create temp directory" onClick=${() => {
-							const id = Math.random().toString(36).slice(2, 8);
-							onSetCwd(`/tmp/cast-${id}`);
-						}}>tmp</button>
+						<div class="dir-toggle">
+							<button
+								class="dir-toggle-btn${!isTmp ? " active" : ""}"
+								title=${cwd}
+								onClick=${onOpenDirPicker}
+							>${shortPath(cwd)}</button>
+							<button
+								class="dir-toggle-btn dir-toggle-tmp${isTmp ? " active" : ""}"
+								title="Use a fresh scratch directory for a throwaway session"
+								onClick=${() => {
+									const id = Math.random().toString(36).slice(2, 8);
+									onSetCwd(`/tmp/cast-${id}`);
+								}}
+							>tmp</button>
+						</div>
 					</div>
 					${personas.map(
 						(p) => html`
