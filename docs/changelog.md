@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.8.21
+
+### Fixed
+
+- Opening the directory picker after choosing "tmp" in the web UI sidebar no longer shows an ENOENT error — the picker is now only reachable for real, existing paths. The scratch directory for tmp sessions is created server-side at session-creation time and named after the session id (`/tmp/cast-<session id>`).
+
 ## 0.8.20
 
 ### Fixed
