@@ -196,6 +196,12 @@ export function toDisplayMessages(messages: Message[], reasoning?: Record<number
 	return out;
 }
 
+/** Sentinel the web client sends as `cwd` for a throwaway tmp session. The
+ * real directory (`/tmp/cast-<session id>`) is only derived server-side once
+ * the session id exists — the client never holds a path that hasn't been
+ * created yet, so it can't stat/open a missing one. */
+export const TMP_CWD = "tmp";
+
 export interface WebBridge {
 	createSession(personaName?: string, modelOverride?: string, cwdOverride?: string): WebAgentSession;
 	getSession(id: string): WebAgentSession | undefined;
@@ -305,10 +311,18 @@ export function createWebBridge(result: StartupResult): WebBridge {
 	function createSessionInstance(personaName?: string, modelOverride?: string, cwdOverride?: string): WebAgentSession {
 		const persona = personaName ? (resolvePersona(personaName) ?? currentPersona) : currentPersona;
 		const model = modelOverride ?? result.session.model;
-		const sessionCwd = cwdOverride ?? cwd;
 
+		let sessionCwd = cwdOverride && cwdOverride !== TMP_CWD ? cwdOverride : cwd;
 		const session = createSession(model, sessionCwd);
 		session.persona = persona.name;
+
+		// Scratch dir for a tmp session: named after the fresh session id and
+		// created here, at the same moment the session starts existing.
+		if (cwdOverride === TMP_CWD) {
+			sessionCwd = join("/tmp", `cast-${session.id}`);
+			mkdirSync(sessionCwd, { recursive: true });
+			session.cwd = sessionCwd;
+		}
 
 		const runner = createAgentRunner();
 		const ws: WebAgentSession = {
