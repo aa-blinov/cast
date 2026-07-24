@@ -39,6 +39,7 @@ import {
 	createSession,
 	listSessionSummaries,
 	loadSession,
+	recordCompaction,
 	resetSavedMessageCount,
 	type SessionState,
 	saveSession,
@@ -1234,6 +1235,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 				reminderStateFromPlan(planState),
 			);
 			if (result.compacted) {
+				recordCompaction(session, session.messages, result.messages);
 				session.messages = result.messages;
 				resetSavedMessageCount(session);
 				agent.refresh();

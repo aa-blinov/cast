@@ -10,6 +10,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { dirname, extname, join, resolve } from "node:path";
+import { getFullHistoryWithReasoning } from "../core/session.ts";
 import { toDisplayMessages, type WebBridge, type WebEvent } from "./bridge.ts";
 import { SLASH_COMMANDS } from "./commands.ts";
 
@@ -197,6 +198,10 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 	route("GET", "/api/sessions/:id", (_req, res, params) => {
 		const ws = bridge.getSession(params.id);
 		if (!ws) return json(res, { error: "Not found" }, 404);
+		// Full transcript, not ws.session.messages — the latter is only the
+		// in-context working set once compaction has shrunk it; a reload should
+		// still show everything the thread ever said.
+		const { messages: full, reasoning } = getFullHistoryWithReasoning(params.id);
 		json(res, {
 			id: ws.id,
 			persona: ws.session.persona,
@@ -206,7 +211,7 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 			title: ws.session.title,
 			pinned: ws.session.pinned,
 			status: ws.status,
-			messages: toDisplayMessages(ws.session.messages, ws.session.reasoning),
+			messages: toDisplayMessages(full, reasoning),
 			usage: ws.session.usage,
 			createdAt: ws.session.createdAt,
 			updatedAt: ws.session.updatedAt,

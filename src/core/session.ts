@@ -1,18 +1,9 @@
-import {
-	appendFileSync,
-	existsSync,
-	mkdirSync,
-	readdirSync,
-	readFileSync,
-	renameSync,
-	statSync,
-	unlinkSync,
-	writeFileSync,
-} from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import type { AppConfig } from "./config.ts";
 import { formatLocalDate } from "./date-rollover-reminder.ts";
+import { getDb } from "./db.ts";
 import type { Message, Usage } from "./llm.ts";
 
 // ============================================================================
@@ -436,184 +427,252 @@ export async function compactMessages(
 }
 
 // ============================================================================
-// Session persistence (JSONL)
+// Session persistence (SQLite)
+//
+// One row per message, flagged `in_context` rather than deleted. Compaction
+// (recordCompaction) flips the flag on superseded rows and inserts the
+// summary marker — nothing is ever removed, so the full transcript survives
+// on disk regardless of how many times a session gets compacted.
+// `SessionState.messages` keeps its existing meaning: the in-context working
+// set fed to runAgentLoop (`WHERE in_context = 1`). getFullHistory() is the
+// new thing display/resume call sites read instead.
 // ============================================================================
 
-const SESSIONS_DIR = ".cast/sessions";
+/** Maps a live message object to the DB row it's already persisted as, so
+ *  saveSession/recordCompaction never have to reason about array indices —
+ *  those shift under compaction, but object identity doesn't. Populated both
+ *  on insert and on load (loadSession seeds every row it reads), so a
+ *  session swapped into a live SessionState (e.g. /continue) is recognized
+ *  as already-persisted instead of being re-inserted as new rows. */
+const messageSeq = new WeakMap<Message, number>();
 
-/** `~/.cast/sessions` — the root everything else lives under. */
-function getSessionsRootDir(): string {
-	const dir = join(homedir(), SESSIONS_DIR);
-	if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-	return dir;
+function nextSeqFor(sessionId: string): number {
+	const db = getDb();
+	const row = db
+		.prepare("SELECT COALESCE(MAX(seq), -1) + 1 AS next FROM messages WHERE session_id = ?")
+		.get(sessionId) as { next: number } | undefined;
+	return row?.next ?? 0;
 }
 
-/**
- * Encode an absolute cwd into a directory-safe name, matching pi's own
- * `--<cwd with /, \, : replaced by ->--` scheme — no reason to invent a
- * different one, and it keeps the two tools' session trees legible side by
- * side if someone has both installed.
- */
-function encodeCwdForSessionDir(cwd: string): string {
-	return `--${resolve(cwd)
-		.replace(/^[/\\]/, "")
-		.replace(/[/\\:]/g, "-")}--`;
-}
-
-/** `~/.cast/sessions/<encoded-cwd>/` path, without creating it. */
-function getProjectSessionDirPath(cwd: string): string {
-	return join(getSessionsRootDir(), encodeCwdForSessionDir(cwd));
-}
-
-/** Same, but ensures the directory exists — for callers about to write into it. */
-function getProjectSessionDir(cwd: string): string {
-	const dir = getProjectSessionDirPath(cwd);
-	if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-	return dir;
-}
-
-const JSONL_EXT = ".jsonl";
-
-/** Tracks how many messages from each session have been written to the
- *  `.jsonl` file, so saveSession can append only the delta. Keyed by
- *  the session object identity — a new object (fresh load or create)
- *  starts at 0, meaning "write all messages on next save". */
-const savedMessageCount = new WeakMap<SessionState, number>();
-
-/** Extract metadata-only snapshot (no messages) for the `.json` file. */
-function sessionMeta(session: SessionState): Omit<SessionState, "messages"> {
-	const { messages: _drop, ...meta } = session;
-	return meta;
+/** Extract metadata-only fields for the `sessions` row. */
+function sessionMetaRow(session: SessionState) {
+	return {
+		id: session.id,
+		cwd: session.cwd ?? null,
+		model: session.model,
+		persona: session.persona ?? null,
+		mode: session.mode ?? null,
+		title: session.title ?? null,
+		pinned: session.pinned ? 1 : 0,
+		created_at: session.createdAt,
+		updated_at: session.updatedAt,
+		last_prompt_tokens: session.lastPromptTokens ?? null,
+		last_announced_local_date: session.lastAnnouncedLocalDate ?? null,
+		provider_url: session.providerUrl ?? null,
+		usage_json: JSON.stringify(session.usage),
+	};
 }
 
 export function saveSession(session: SessionState): void {
 	session.updatedAt = new Date().toISOString();
-	const dir = session.cwd ? getProjectSessionDir(session.cwd) : getSessionsRootDir();
-	const filePath = join(dir, `${session.id}.json`);
-	const jsonlPath = join(dir, `${session.id}${JSONL_EXT}`);
+	const db = getDb();
+	const meta = sessionMetaRow(session);
+	db.prepare(
+		`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, usage_json)
+		 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :usage_json)
+		 ON CONFLICT(id) DO UPDATE SET
+		   cwd = excluded.cwd, model = excluded.model, persona = excluded.persona, mode = excluded.mode,
+		   title = excluded.title, pinned = excluded.pinned, updated_at = excluded.updated_at,
+		   last_prompt_tokens = excluded.last_prompt_tokens, last_announced_local_date = excluded.last_announced_local_date,
+		   provider_url = excluded.provider_url, usage_json = excluded.usage_json`,
+	).run(meta);
 
-	// 1. Write metadata (atomic rename — readers never see a half-written file).
-	writeFileAtomic(filePath, JSON.stringify(sessionMeta(session)));
+	const insertRow = db.prepare(
+		"INSERT INTO messages (session_id, seq, role, content_json, in_context, reasoning) VALUES (?, ?, ?, ?, 1, ?)",
+	);
+	const updateReasoning = db.prepare("UPDATE messages SET reasoning = ? WHERE session_id = ? AND seq = ?");
+	// syncSystemPrompt (loop.ts) rebuilds messages[0] fresh every turn — a new
+	// object even when the text is unchanged — so a naive "insert if this
+	// object was never seen before" would pile up one permanent in_context
+	// row per turn forever. The persona system message isn't a real
+	// conversation turn worth keeping every historical copy of in-context;
+	// superseding it here (not deleting — still visible via getFullHistory)
+	// keeps the in-context working set at exactly one current system row,
+	// same as it's always conceptually been. The compaction marker (also
+	// role "system") is deliberately exempt — that one IS a real turn.
+	const deactivateOldSystemRows = db.prepare(
+		"UPDATE messages SET in_context = 0 WHERE session_id = ? AND role = 'system' AND in_context = 1 AND content_json NOT LIKE ?",
+	);
+	// syncSystemPrompt re-runs (and rebuilds messages[0] as a new object) on
+	// every inner-loop iteration — every tool-call round within a turn, not
+	// just once per turn — but the text itself is usually unchanged between
+	// rounds. Without this check, a long tool-heavy turn would write one
+	// multi-KB near-duplicate persona blob per round; comparing against the
+	// currently active row first turns the common case into a plain lookup
+	// with no write at all.
+	const currentSystemRow = db.prepare(
+		"SELECT seq, content_json FROM messages WHERE session_id = ? AND role = 'system' AND in_context = 1 AND content_json NOT LIKE ? ORDER BY seq DESC LIMIT 1",
+	);
 
-	// 2. Append only new messages to the JSONL file.
-	const msgs = session.messages;
-	const prev = savedMessageCount.get(session) ?? 0;
-	if (Array.isArray(msgs) && msgs.length > prev) {
-		const delta = msgs.slice(prev);
-		const lines = `${delta.map((m) => JSON.stringify(m)).join("\n")}\n`;
-		if (prev === 0) {
-			// First write — use writeFileSync to create/overwrite the file.
-			writeFileSync(jsonlPath, lines, "utf-8");
-		} else {
-			appendFileSync(jsonlPath, lines, "utf-8");
+	let seq = nextSeqFor(session.id);
+	(Array.isArray(session.messages) ? session.messages : []).forEach((m, i) => {
+		const reasoning = session.reasoning?.[i] ?? null;
+		const existing = messageSeq.get(m);
+		if (existing !== undefined) {
+			if (reasoning) updateReasoning.run(reasoning, session.id, existing);
+			return;
 		}
-		savedMessageCount.set(session, session.messages.length);
+		if (m.role === "system" && typeof m.content === "string" && !m.content.startsWith(COMPACTION_MARKER_PREFIX)) {
+			const serialized = JSON.stringify(m);
+			const current = currentSystemRow.get(session.id, `%${COMPACTION_MARKER_PREFIX}%`) as
+				| { seq: number; content_json: string }
+				| undefined;
+			if (current && current.content_json === serialized) {
+				// Identical to the already-active row — alias this turn's fresh
+				// object to that row instead of writing a redundant duplicate.
+				messageSeq.set(m, current.seq);
+				return;
+			}
+			deactivateOldSystemRows.run(session.id, `%${COMPACTION_MARKER_PREFIX}%`);
+		}
+		insertRow.run(session.id, seq, m.role, JSON.stringify(m), reasoning);
+		messageSeq.set(m, seq);
+		seq++;
+	});
+}
+
+/** No-op kept for call-site compatibility — the old file store needed this
+ *  to force a full-file rewrite after compaction/restore; SQLite tracks
+ *  "already persisted" per message object (see messageSeq), which stays
+ *  correct across an array being replaced wholesale, so there's nothing to
+ *  reset. Real full clears go through clearSessionMessages instead. */
+export function resetSavedMessageCount(_session: SessionState): void {}
+
+/**
+ * Called from the compaction callback with the full pre-cut message array
+ * and the marker-bearing replacement compactMessages() built. Nothing is
+ * deleted: rows already in the DB that didn't survive into `compacted` get
+ * `in_context = 0`; any message in `fullHistoryBeforeCompaction` not yet
+ * persisted (e.g. added earlier this same turn, before any save) gets
+ * inserted now with the correct flag, so it's never lost even if it was
+ * folded into the summary before ever hitting disk on its own. The one new
+ * object in `compacted` (the summary marker) is inserted last.
+ */
+export function recordCompaction(
+	session: SessionState,
+	fullHistoryBeforeCompaction: Message[],
+	compacted: Message[],
+): void {
+	const db = getDb();
+	const kept = new Set(compacted);
+	const insertRow = db.prepare(
+		"INSERT INTO messages (session_id, seq, role, content_json, in_context) VALUES (?, ?, ?, ?, ?)",
+	);
+	const flipOut = db.prepare("UPDATE messages SET in_context = 0 WHERE session_id = ? AND seq = ?");
+
+	let seq = nextSeqFor(session.id);
+	for (const m of fullHistoryBeforeCompaction) {
+		const existing = messageSeq.get(m);
+		if (existing !== undefined) {
+			if (!kept.has(m)) flipOut.run(session.id, existing);
+			continue;
+		}
+		insertRow.run(session.id, seq, m.role, JSON.stringify(m), kept.has(m) ? 1 : 0);
+		messageSeq.set(m, seq);
+		seq++;
+	}
+
+	const marker = compacted.find((m) => !fullHistoryBeforeCompaction.includes(m));
+	if (marker && !messageSeq.has(marker)) {
+		// The marker must sort BEFORE the kept "recent" messages in the
+		// in-context view (summary, then what's still ongoing) even though
+		// those messages were inserted earlier and already hold lower seqs.
+		// Make room by shifting them (and anything already after them) up by
+		// one — one row at a time, descending, so the WITHOUT ROWID primary
+		// key never collides mid-shift — then insert the marker into the
+		// vacated slot.
+		const keptSeqs = compacted
+			.filter((m) => m !== marker)
+			.map((m) => messageSeq.get(m))
+			.filter((s): s is number => s !== undefined);
+		const insertAt = keptSeqs.length > 0 ? Math.min(...keptSeqs) : seq;
+		if (keptSeqs.length > 0) {
+			const shiftRows = db
+				.prepare("SELECT seq FROM messages WHERE session_id = ? AND seq >= ? ORDER BY seq DESC")
+				.all(session.id, insertAt) as Array<{ seq: number }>;
+			const shiftOne = db.prepare("UPDATE messages SET seq = seq + 1 WHERE session_id = ? AND seq = ?");
+			for (const row of shiftRows) shiftOne.run(session.id, row.seq);
+			for (const m of compacted) {
+				if (m === marker) continue;
+				const s = messageSeq.get(m);
+				if (s !== undefined && s >= insertAt) messageSeq.set(m, s + 1);
+			}
+		}
+		insertRow.run(session.id, insertAt, marker.role, JSON.stringify(marker), 1);
+		messageSeq.set(marker, insertAt);
 	}
 }
 
-/** Reset the saved-message counter so the next saveSession writes all
- *  messages. Call after replacing session.messages wholesale (e.g. after
- *  compaction or a full restore). */
-export function resetSavedMessageCount(session: SessionState): void {
-	savedMessageCount.set(session, 0);
+/** Full, never-truncated transcript for display/resume — every message the
+ *  session ever had, in order, regardless of `in_context`. Distinct from
+ *  `session.messages`, which after a compaction only holds the shrunk
+ *  context actually sent to the model. */
+export function getFullHistory(id: string): Message[] {
+	return getFullHistoryWithReasoning(id).messages;
 }
 
-/**
- * Write to a temp file in the same directory, then rename over the target.
- * rename is atomic within a filesystem, so a reader (or a crash) never sees a
- * half-written session file — the exact truncation that readSessionFile has to
- * defend against otherwise.
- */
-function writeFileAtomic(filePath: string, data: string): void {
-	const tmpPath = `${filePath}.${process.pid}.tmp`;
-	writeFileSync(tmpPath, data, "utf-8");
-	renameSync(tmpPath, filePath);
+/** Same as getFullHistory, plus each message's stored reasoning (if any),
+ *  re-keyed to indices into the returned (full-history) array — the row's
+ *  `reasoning` column, not the fragile index-into-session.messages map
+ *  `SessionState.reasoning` used for the in-context working set. */
+export function getFullHistoryWithReasoning(id: string): { messages: Message[]; reasoning: Record<number, string> } {
+	const db = getDb();
+	const rows = db
+		.prepare("SELECT content_json, reasoning FROM messages WHERE session_id = ? ORDER BY seq")
+		.all(id) as Array<{ content_json: string; reasoning: string | null }>;
+	const messages: Message[] = [];
+	const reasoning: Record<number, string> = {};
+	rows.forEach((r, i) => {
+		messages.push(JSON.parse(r.content_json) as Message);
+		if (r.reasoning) reasoning[i] = r.reasoning;
+	});
+	return { messages, reasoning };
 }
 
-/** Sessions saved before `usage` existed don't have it on disk — default it in.
- * Also backfills fields added after `usage` itself (e.g. `subagentTokens`). */
-function withUsageDefault(session: SessionState): SessionState {
-	const usage = session.usage ?? {
-		promptTokens: 0,
-		completionTokens: 0,
-		totalTokens: 0,
-		cost: 0,
-		cacheReadTokens: 0,
-		cacheWriteTokens: 0,
-		uncachedTokens: 0,
-		subagentTokens: 0,
+/** Full wipe: deletes every message row for the session (not just flags them
+ *  off) — `/clear`'s contract is "forget this thread's history entirely",
+ *  distinct from compaction's "keep it, just stop sending it to the model". */
+export function clearSessionMessages(session: SessionState): void {
+	getDb().prepare("DELETE FROM messages WHERE session_id = ?").run(session.id);
+	session.messages = [];
+}
+
+/** Sessions saved before `usage` existed don't have it on disk — default it in. */
+function withUsageDefault(usage: SessionUsage | undefined): SessionUsage {
+	return {
+		promptTokens: usage?.promptTokens ?? 0,
+		completionTokens: usage?.completionTokens ?? 0,
+		totalTokens: usage?.totalTokens ?? 0,
+		cost: usage?.cost ?? 0,
+		cacheReadTokens: usage?.cacheReadTokens ?? 0,
+		cacheWriteTokens: usage?.cacheWriteTokens ?? 0,
+		uncachedTokens: usage?.uncachedTokens ?? 0,
+		subagentTokens: usage?.subagentTokens ?? 0,
 	};
-	return { ...session, usage: { ...usage, subagentTokens: usage.subagentTokens ?? 0 } };
-}
-
-/**
- * Find a session's file by id without needing to know which project it
- * belongs to — checks the flat legacy root first, then every project
- * subdirectory. IDs are checked for uniqueness within a project dir at
- * creation time (see createSession), not globally, but a cross-project
- * collision is astronomically unlikely on top of an already-rare one.
- */
-function findSessionFilePath(id: string): string | null {
-	const root = getSessionsRootDir();
-	const legacyPath = join(root, `${id}.json`);
-	if (existsSync(legacyPath)) return legacyPath;
-
-	for (const entry of readdirSync(root, { withFileTypes: true })) {
-		if (!entry.isDirectory()) continue;
-		const candidate = join(root, entry.name, `${id}.json`);
-		if (existsSync(candidate)) return candidate;
-	}
-	return null;
-}
-
-/**
- * Read and parse a session file, returning null if it's missing, truncated,
- * or not valid JSON — a session file can be left half-written if the process
- * dies mid-save, and one bad file shouldn't take down the whole listing.
- *
- * Supports two formats:
- * - Legacy: single `.json` with messages array embedded.
- * - JSONL: `.json` (metadata only) + `.jsonl` (one message per line).
- *   Messages are read from the JSONL file when present; the `.json` file
- *   is the source of truth for everything else.
- */
-function readSessionFile(filePath: string): SessionState | null {
-	try {
-		const raw = JSON.parse(readFileSync(filePath, "utf-8")) as SessionState & { messages?: unknown };
-		const jsonlPath = filePath.replace(/\.json$/, JSONL_EXT);
-		if (existsSync(jsonlPath)) {
-			// JSONL format — read messages from the companion file.
-			const text = readFileSync(jsonlPath, "utf-8");
-			const messages: Message[] = text
-				.split("\n")
-				.filter((line) => line.trim())
-				.map((line) => JSON.parse(line) as Message);
-			raw.messages = messages;
-		} else if (!Array.isArray(raw.messages)) {
-			// Metadata-only .json with no .jsonl yet — empty session.
-			raw.messages = [];
-		}
-		// else: legacy format — messages already in the .json object.
-		const session = withUsageDefault(raw as SessionState);
-		normalizeStoredMessages(session);
-		return session;
-	} catch {
-		return null;
-	}
 }
 
 /**
  * Undo provider-specific damage persisted by older builds: applyCacheControl
  * used to mutate the live message objects (string content → [{type: "text",
- * text, cache_control}]) and saveSession wrote that request-only shape to
+ * text, cache_control}]) and older saves wrote that request-only shape to
  * disk. A provider whose chat template expects plain string content then
  * 400s on every resumed session ("Can only get item pairs from a mapping").
  * Flatten all-text part arrays back to strings and drop cache_control
  * everywhere; genuinely multimodal arrays (image parts) are kept as arrays,
  * only stripped of cache_control.
  */
-function normalizeStoredMessages(session: SessionState): void {
-	for (const message of session.messages as Array<{ content?: unknown }>) {
+function normalizeStoredMessages(messages: Message[]): void {
+	for (const message of messages as Array<{ content?: unknown }>) {
 		const content = message.content;
 		if (!Array.isArray(content)) continue;
 		const parts = content.map((p) => {
@@ -634,37 +693,105 @@ function normalizeStoredMessages(session: SessionState): void {
 	}
 }
 
+interface SessionRow {
+	id: string;
+	cwd: string | null;
+	model: string | null;
+	persona: string | null;
+	mode: "plan" | "build" | null;
+	title: string | null;
+	pinned: number;
+	created_at: string;
+	updated_at: string;
+	last_prompt_tokens: number | null;
+	last_announced_local_date: string | null;
+	provider_url: string | null;
+	usage_json: string;
+}
+
+function rowToMeta(row: SessionRow): Omit<SessionState, "messages"> {
+	return {
+		id: row.id,
+		cwd: row.cwd ?? undefined,
+		model: row.model ?? "",
+		persona: row.persona ?? undefined,
+		mode: row.mode ?? undefined,
+		title: row.title ?? undefined,
+		pinned: row.pinned === 1 ? true : undefined,
+		createdAt: row.created_at,
+		updatedAt: row.updated_at,
+		lastPromptTokens: row.last_prompt_tokens ?? undefined,
+		lastAnnouncedLocalDate: row.last_announced_local_date ?? undefined,
+		providerUrl: row.provider_url ?? undefined,
+		usage: withUsageDefault(JSON.parse(row.usage_json)),
+	};
+}
+
+/** Loads the in-context working set (`in_context = 1`) into
+ *  `SessionState.messages`, seeding messageSeq for every row read so a
+ *  later saveSession/recordCompaction on this object recognizes them as
+ *  already-persisted. */
 export function loadSession(id: string): SessionState | null {
-	const filePath = findSessionFilePath(id);
-	if (!filePath) return null;
-	return readSessionFile(filePath);
+	const db = getDb();
+	const row = db.prepare("SELECT * FROM sessions WHERE id = ?").get(id) as SessionRow | undefined;
+	if (!row) return null;
+	const msgRows = db
+		.prepare("SELECT seq, content_json, reasoning FROM messages WHERE session_id = ? AND in_context = 1 ORDER BY seq")
+		.all(id) as Array<{ seq: number; content_json: string; reasoning: string | null }>;
+
+	const messages: Message[] = [];
+	const reasoning: Record<number, string> = {};
+	msgRows.forEach((r, i) => {
+		const m = JSON.parse(r.content_json) as Message;
+		messageSeq.set(m, r.seq);
+		messages.push(m);
+		if (r.reasoning) reasoning[i] = r.reasoning;
+	});
+	normalizeStoredMessages(messages);
+
+	const session: SessionState = { ...rowToMeta(row), messages };
+	if (Object.keys(reasoning).length > 0) session.reasoning = reasoning;
+	return session;
 }
 
-/** Delete a saved session's file from disk. Returns false if it wasn't found. */
+/** Delete a saved session entirely — cascades to its message rows. Returns
+ *  false if it wasn't found. */
 export function deleteSession(id: string): boolean {
-	const filePath = findSessionFilePath(id);
-	if (!filePath) return false;
-	unlinkSync(filePath);
-	// Also remove the JSONL companion if present.
-	const jsonlPath = filePath.replace(/\.json$/, JSONL_EXT);
-	if (existsSync(jsonlPath)) {
-		try {
-			unlinkSync(jsonlPath);
-		} catch {
-			// Best-effort — the .json is already gone.
-		}
-	}
-	return true;
+	const result = getDb().prepare("DELETE FROM sessions WHERE id = ?").run(id);
+	return result.changes > 0;
 }
 
-/** Every session file path: project subdirectories plus legacy flat files. */
-function listSessionFilePaths(): string[] {
-	const root = getSessionsRootDir();
+export function listSessions(): SessionState[] {
+	const db = getDb();
+	const rows = db.prepare("SELECT id FROM sessions").all() as Array<{ id: string }>;
+	const sessions: SessionState[] = [];
+	for (const { id } of rows) {
+		const s = loadSession(id);
+		if (s) sessions.push(s);
+	}
+	return sessions;
+}
+
+// ----------------------------------------------------------------------------
+// Legacy file-store migration — one-time import of pre-SQLite sessions.
+// Old `.json`/`.jsonl` files are left untouched on disk as a rollback safety
+// net; only sessions whose id isn't already in the DB get imported.
+// ----------------------------------------------------------------------------
+
+const SESSIONS_DIR = ".cast/sessions";
+const JSONL_EXT = ".jsonl";
+const INDEX_FILE_NAME = "index.json";
+
+function legacySessionsRootDir(): string {
+	return join(homedir(), SESSIONS_DIR);
+}
+
+function legacySessionFilePaths(): string[] {
+	const root = legacySessionsRootDir();
+	if (!existsSync(root)) return [];
 	const paths: string[] = [];
 	for (const entry of readdirSync(root, { withFileTypes: true })) {
 		if (entry.isFile() && entry.name.endsWith(".json")) {
-			// Legacy flat session file, pre-project-grouping. The summary index
-			// lives at the root too and is NOT a session.
 			if (entry.name === INDEX_FILE_NAME) continue;
 			paths.push(join(root, entry.name));
 			continue;
@@ -678,58 +805,59 @@ function listSessionFilePaths(): string[] {
 	return paths;
 }
 
-export function listSessions(): SessionState[] {
-	const sessions: SessionState[] = [];
-	for (const filePath of listSessionFilePaths()) {
-		const session = readSessionFile(filePath);
-		if (session) sessions.push(session);
+function readLegacySessionFile(filePath: string): SessionState | null {
+	try {
+		const raw = JSON.parse(readFileSync(filePath, "utf-8")) as SessionState & { messages?: unknown };
+		const jsonlPath = filePath.replace(/\.json$/, JSONL_EXT);
+		if (existsSync(jsonlPath)) {
+			const text = readFileSync(jsonlPath, "utf-8");
+			raw.messages = text
+				.split("\n")
+				.filter((line) => line.trim())
+				.map((line) => JSON.parse(line) as Message);
+		} else if (!Array.isArray(raw.messages)) {
+			raw.messages = [];
+		}
+		raw.usage = withUsageDefault(raw.usage);
+		normalizeStoredMessages(raw.messages as Message[]);
+		return raw as SessionState;
+	} catch {
+		return null;
 	}
-	return sessions;
 }
 
 /**
- * One-time migration: convert legacy single-file sessions (`.json` with
- * embedded messages array) to the split JSONL format (`.json` metadata +
- * `.jsonl` messages). Skips sessions that are already migrated. Returns
- * the count of converted sessions.
+ * One-time import of legacy file-store sessions into the SQLite DB. Safe to
+ * call on every startup — skips any id already present. Returns the count of
+ * newly imported sessions. Source files are never modified or deleted.
  */
-export function migrateSessionsToJsonl(): number {
+export function migrateLegacySessionsToDb(): number {
+	const db = getDb();
+	const existing = new Set((db.prepare("SELECT id FROM sessions").all() as Array<{ id: string }>).map((r) => r.id));
 	let migrated = 0;
-	for (const filePath of listSessionFilePaths()) {
-		const jsonlPath = filePath.replace(/\.json$/, JSONL_EXT);
-		if (existsSync(jsonlPath)) continue; // already migrated
-		try {
-			const raw = JSON.parse(readFileSync(filePath, "utf-8")) as { messages?: unknown };
-			if (!Array.isArray(raw.messages) || raw.messages.length === 0) continue;
-			// Write messages to JSONL
-			const lines = `${(raw.messages as unknown[]).map((m) => JSON.stringify(m)).join("\n")}\n`;
-			writeFileSync(jsonlPath, lines, "utf-8");
-			// Strip messages from .json, rewrite metadata only
-			delete raw.messages;
-			writeFileSync(filePath, JSON.stringify(raw), "utf-8");
-			migrated++;
-		} catch {
-			// Corrupt file — skip silently, same as readSessionFile.
-		}
+	for (const filePath of legacySessionFilePaths()) {
+		const session = readLegacySessionFile(filePath);
+		if (!session || existing.has(session.id)) continue;
+		db.prepare(
+			`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, usage_json)
+			 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :usage_json)`,
+		).run(sessionMetaRow(session));
+		const insertRow = db.prepare(
+			"INSERT INTO messages (session_id, seq, role, content_json, in_context) VALUES (?, ?, ?, ?, 1)",
+		);
+		session.messages.forEach((m, seq) => {
+			insertRow.run(session.id, seq, m.role, JSON.stringify(m));
+		});
+		existing.add(session.id);
+		migrated++;
 	}
 	return migrated;
 }
 
 // ============================================================================
 // Session summaries — the lightweight view the session picker runs on.
-//
-// Parsing every session file just to render a list row (and again on every
-// delete-menu round trip) reads tens of MB of JSON that is immediately thrown
-// away — only a few hundred bytes per session survive into the UI. The
-// summaries are cached in a single index file next to the sessions and
-// validated per-entry against each file's mtime: a stale, missing, or corrupt
-// index never returns wrong data, it just costs one re-parse of the affected
-// files. The index is a cache, not a source of truth — deleting it merely
-// makes the next listing rebuild it (the old full-parse cost, once).
+// Direct SQL queries now (no separate mtime-cache index file needed).
 // ============================================================================
-
-const INDEX_FILE_NAME = "index.json";
-const INDEX_VERSION = 2;
 
 export interface SessionSummary {
 	id: string;
@@ -747,33 +875,6 @@ export interface SessionSummary {
 	haystack: string;
 }
 
-interface IndexEntry extends SessionSummary {
-	mtimeMs: number;
-}
-
-interface SessionIndex {
-	version: number;
-	/** Keyed by absolute file path — ids are unique per directory, paths globally. */
-	entries: Record<string, IndexEntry>;
-}
-
-function indexFilePath(): string {
-	return join(getSessionsRootDir(), INDEX_FILE_NAME);
-}
-
-/** Tolerant read: missing, corrupt, or version-mismatched index → empty. */
-function readIndex(): SessionIndex {
-	try {
-		const parsed = JSON.parse(readFileSync(indexFilePath(), "utf-8")) as SessionIndex;
-		if (parsed?.version !== INDEX_VERSION || typeof parsed.entries !== "object" || parsed.entries === null) {
-			return { version: INDEX_VERSION, entries: {} };
-		}
-		return parsed;
-	} catch {
-		return { version: INDEX_VERSION, entries: {} };
-	}
-}
-
 /** Text of a message for indexing: plain string or first text part. */
 function messageText(m: { content?: unknown }): string {
 	const content = m.content;
@@ -786,8 +887,8 @@ function messageText(m: { content?: unknown }): string {
 }
 
 /** First user message, newline-flattened — the picker row's description. */
-export function getFirstUserMessage(session: SessionState): string {
-	const msg = session.messages.find((m) => m.role === "user");
+export function getFirstUserMessage(subject: { messages: Message[] }): string {
+	const msg = subject.messages.find((m) => m.role === "user");
 	return msg ? messageText(msg).replace(/\n/g, " ").trim() : "";
 }
 
@@ -798,11 +899,11 @@ export function getFirstUserMessage(session: SessionState): string {
  * and tool output is the bulk of a session's bytes; what's left (the actual
  * dialog) measures ~1MB across hundreds of real sessions.
  */
-export function getSearchHaystack(session: SessionState): string {
+export function getSearchHaystack(subject: { id: string; cwd?: string; messages: Message[] }): string {
 	const parts: string[] = [];
-	if (session.cwd) parts.push(session.cwd);
-	parts.push(session.id);
-	for (const m of session.messages) {
+	if (subject.cwd) parts.push(subject.cwd);
+	parts.push(subject.id);
+	for (const m of subject.messages) {
 		if (m.role !== "user" && m.role !== "assistant") continue;
 		const text = messageText(m).replace(/\s+/g, " ").trim();
 		if (text) parts.push(text);
@@ -810,97 +911,38 @@ export function getSearchHaystack(session: SessionState): string {
 	return parts.join("\n");
 }
 
-function summarizeSession(session: SessionState): SessionSummary {
-	return {
-		id: session.id,
-		...(session.cwd ? { cwd: session.cwd } : {}),
-		...(session.persona ? { persona: session.persona } : {}),
-		...(session.model ? { model: session.model } : {}),
-		...(session.title ? { title: session.title } : {}),
-		...(session.pinned ? { pinned: session.pinned } : {}),
-		...(session.createdAt ? { createdAt: session.createdAt } : {}),
-		updatedAt: session.updatedAt,
-		msgCount: session.messages.filter((m) => m.role === "user" || m.role === "assistant").length,
-		firstUserMessage: getFirstUserMessage(session),
-		haystack: getSearchHaystack(session),
-	};
-}
-
-/**
- * Summaries of every saved session, served from the mtime-validated index.
- * Only files that are new or changed since the index was written get parsed;
- * entries for deleted files are pruned. The healed index is persisted (atomic
- * rename, same as session files) whenever anything changed, so concurrent
- * cast instances at worst overwrite each other with equally valid states.
- */
+/** Every session's summary, built from full history (not just the
+ *  in-context working set) so a compacted session's picker row and search
+ *  text still reflect everything that was ever said in it. */
 export function listSessionSummaries(): SessionSummary[] {
-	const index = readIndex();
-	const summaries: SessionSummary[] = [];
-	const seen = new Set<string>();
-	let dirty = false;
-
-	for (const path of listSessionFilePaths()) {
-		let mtimeMs: number;
-		try {
-			mtimeMs = statSync(path).mtimeMs;
-		} catch {
-			continue; // deleted between readdir and stat
-		}
-		seen.add(path);
-		const cached = index.entries[path];
-		if (cached && cached.mtimeMs === mtimeMs) {
-			summaries.push(cached);
-			continue;
-		}
-		const session = readSessionFile(path);
-		if (!session) continue; // corrupt file — don't index, don't list
-		const entry: IndexEntry = { ...summarizeSession(session), mtimeMs };
-		index.entries[path] = entry;
-		summaries.push(entry);
-		dirty = true;
-	}
-
-	for (const path of Object.keys(index.entries)) {
-		if (!seen.has(path)) {
-			delete index.entries[path];
-			dirty = true;
-		}
-	}
-
-	if (dirty) {
-		try {
-			writeFileAtomic(indexFilePath(), JSON.stringify(index));
-		} catch {
-			// Read-only FS or similar — the index is only a cache; listing
-			// still returned correct data, the next call just re-parses again.
-		}
-	}
-	return summaries;
+	const db = getDb();
+	const rows = db.prepare("SELECT * FROM sessions ORDER BY updated_at DESC").all() as unknown as SessionRow[];
+	return rows.map((row) => {
+		const messages = getFullHistory(row.id);
+		const subject = { id: row.id, cwd: row.cwd ?? undefined, messages };
+		return {
+			id: row.id,
+			...(row.cwd ? { cwd: row.cwd } : {}),
+			...(row.persona ? { persona: row.persona } : {}),
+			...(row.model ? { model: row.model } : {}),
+			...(row.title ? { title: row.title } : {}),
+			...(row.pinned === 1 ? { pinned: true } : {}),
+			...(row.created_at ? { createdAt: row.created_at } : {}),
+			updatedAt: row.updated_at,
+			msgCount: messages.filter((m) => m.role === "user" || m.role === "assistant").length,
+			firstUserMessage: getFirstUserMessage(subject),
+			haystack: getSearchHaystack(subject),
+		};
+	});
 }
 
-/**
- * Most recently updated session, or null if none are saved yet. Sorts by file
- * mtime and parses only the newest file instead of parsing every session —
- * `cast -c` needs exactly one session, and the full-parse version was paying
- * tens of MB of JSON for it. mtime tracks updatedAt because saveSession is
- * the only writer. Falls back to the next-newest file when the newest one is
- * corrupt (half-written save), matching readSessionFile's tolerance.
- */
+/** Most recently updated session, or null if none are saved yet. */
 export function getMostRecentSession(): SessionState | null {
-	const stamped: Array<{ path: string; mtimeMs: number }> = [];
-	for (const path of listSessionFilePaths()) {
-		try {
-			stamped.push({ path, mtimeMs: statSync(path).mtimeMs });
-		} catch {
-			// Deleted between readdir and stat — skip.
-		}
-	}
-	stamped.sort((a, b) => b.mtimeMs - a.mtimeMs);
-	for (const { path } of stamped) {
-		const session = readSessionFile(path);
-		if (session) return session;
-	}
-	return null;
+	const db = getDb();
+	const row = db.prepare("SELECT id FROM sessions ORDER BY updated_at DESC LIMIT 1").get() as
+		| { id: string }
+		| undefined;
+	return row ? loadSession(row.id) : null;
 }
 
 function generateSessionId(): string {
@@ -909,19 +951,13 @@ function generateSessionId(): string {
 
 export function createSession(model: string, cwd: string): SessionState {
 	const now = new Date().toISOString();
-	// Path only, no mkdir — the session may never actually get saved (e.g.
-	// the user immediately resumes/switches to a different one), and this
-	// used to leave an empty directory behind for every cwd cast was ever
-	// launched from, whether or not anything was saved there. existsSync
-	// against a not-yet-created directory just returns false, so the
-	// collision check below works fine without it existing yet.
-	const dir = getProjectSessionDirPath(cwd);
+	const db = getDb();
 	// The timestamp+random scheme is astronomically unlikely to collide, but
-	// "unlikely" isn't "impossible" and saveSession() would silently overwrite
-	// an existing session's file with no warning. Regenerating on an existsSync
-	// hit is nearly free — this loop virtually never runs more than once.
+	// "unlikely" isn't "impossible" and saveSession() would silently merge
+	// into an existing session's row with no warning. Regenerating on a hit
+	// is nearly free — this loop virtually never runs more than once.
 	let id = generateSessionId();
-	while (existsSync(join(dir, `${id}.json`))) {
+	while (db.prepare("SELECT 1 FROM sessions WHERE id = ?").get(id)) {
 		id = generateSessionId();
 	}
 	return {

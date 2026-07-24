@@ -1,19 +1,24 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { resetDbConnectionForTests } from "../src/core/db.ts";
 import type { Message } from "../src/core/llm.ts";
 import {
 	addUsage,
+	clearSessionMessages,
 	compactMessages,
 	createSession,
 	deleteSession,
 	estimateTokens,
+	getFullHistory,
+	getFullHistoryWithReasoning,
 	getMostRecentSession,
 	listSessionSummaries,
 	listSessions,
 	loadSession,
-	migrateSessionsToJsonl,
+	migrateLegacySessionsToDb,
+	recordCompaction,
 	saveSession,
 	shouldCompact,
 } from "../src/core/session.ts";
@@ -409,6 +414,7 @@ describe("session persistence", () => {
 		realHome = process.env.HOME;
 		fakeHome = mkdtempSync(join(tmpdir(), "cast-session-test-"));
 		process.env.HOME = fakeHome;
+		resetDbConnectionForTests();
 		projectA = join(fakeHome, "projects", "a");
 		projectB = join(fakeHome, "projects", "b");
 		mkdirSync(projectA, { recursive: true });
@@ -416,6 +422,7 @@ describe("session persistence", () => {
 	});
 
 	afterEach(() => {
+		resetDbConnectionForTests();
 		process.env.HOME = realHome;
 		rmSync(fakeHome, { recursive: true, force: true });
 	});
@@ -552,8 +559,6 @@ describe("session persistence", () => {
 		expect(sb.firstUserMessage).toBe("beta question");
 		expect(sb.haystack).toContain("beta answer");
 		expect(sb.cwd).toBe(projectB);
-		// Index file materialized at the sessions root.
-		expect(existsSync(join(fakeHome, ".cast", "sessions", "index.json"))).toBe(true);
 	});
 
 	it("heals a stale index entry when the session file changes", async () => {
@@ -594,116 +599,190 @@ describe("session persistence", () => {
 		expect(getMostRecentSession()?.id).toBe(s.id);
 	});
 
-	it("getMostRecentSession falls back past a corrupt newest file", async () => {
-		const good = createSession("gpt-4o", projectA);
-		saveSession(good);
-		await new Promise((r) => setTimeout(r, 5));
-		const corrupt = createSession("gpt-4o", projectB);
-		saveSession(corrupt);
-		// Simulate a half-written save: newest file exists but isn't valid JSON.
-		const corruptPath = join(fakeHome, ".cast", "sessions");
-		for (const dir of readdirSync(corruptPath)) {
-			const p = join(corruptPath, dir, `${corrupt.id}.json`);
-			if (existsSync(p)) writeFileSync(p, '{"id": "trunc');
-		}
+	it("recordCompaction flips superseded rows without deleting them, and getFullHistory still returns everything", () => {
+		const s = createSession("gpt-4o", projectA);
+		const m1: Message = { role: "user", content: "first" };
+		const m2: Message = { role: "assistant", content: "second" };
+		const m3: Message = { role: "user", content: "third" };
+		s.messages.push(m1, m2, m3);
+		saveSession(s);
 
-		expect(getMostRecentSession()?.id).toBe(good.id);
+		const marker: Message = { role: "system", content: "[Compacted context — 2 messages summarized]\nsummary" };
+		const compacted = [marker, m3];
+		recordCompaction(s, s.messages, compacted);
+		s.messages = compacted;
+		saveSession(s);
+
+		// The model-facing working set is just the shrunk view.
+		const reloaded = loadSession(s.id)!;
+		expect(reloaded.messages).toEqual(compacted);
+
+		// But nothing was actually deleted — full history still has all 4 rows
+		// (the 3 original messages plus the marker). The marker sorts right
+		// before the "recent" messages it precedes in the in-context view
+		// (m3 kept going, m1/m2 folded into it), not strictly by insertion time.
+		const full = getFullHistory(s.id);
+		expect(full).toEqual([m1, m2, marker, m3]);
+	});
+
+	it("clearSessionMessages deletes all message rows but keeps the session row", () => {
+		const s = createSession("gpt-4o", projectA);
+		s.messages.push({ role: "user", content: "hello" });
+		saveSession(s);
+		expect(getFullHistory(s.id)).toHaveLength(1);
+
+		clearSessionMessages(s);
+		saveSession(s);
+
+		expect(getFullHistory(s.id)).toHaveLength(0);
+		expect(loadSession(s.id)?.id).toBe(s.id);
+	});
+
+	it("a fresh system-prompt object every turn supersedes the previous one instead of piling up", () => {
+		// loop.ts's syncSystemPrompt rebuilds messages[0] as a brand-new object
+		// every turn, even when the text is identical — saveSession must treat
+		// that as "replaces the old system row", not "another permanent
+		// in-context row", or the working set balloons by one system message
+		// per turn forever.
+		const s = createSession("gpt-4o", projectA);
+		s.messages = [
+			{ role: "system", content: "SYS v1" },
+			{ role: "user", content: "hi" },
+		];
+		saveSession(s);
+
+		s.messages = [
+			{ role: "system", content: "SYS v2" },
+			{ role: "user", content: "hi" },
+			{ role: "assistant", content: "hello" },
+		];
+		saveSession(s);
+
+		const reloaded = loadSession(s.id)!;
+		expect(reloaded.messages.filter((m) => m.role === "system")).toHaveLength(1);
+		expect(reloaded.messages.find((m) => m.role === "system")?.content).toBe("SYS v2");
+
+		// Nothing lost — the old system prompt is still in full history.
+		const full = getFullHistory(s.id);
+		expect(full.filter((m) => m.role === "system")).toHaveLength(2);
+	});
+
+	it("a repeated identical system-prompt object (unchanged text) does not write a duplicate row", () => {
+		// Within one turn, syncSystemPrompt reruns on every tool-call round —
+		// a fresh object each time, but usually with identical text. Full
+		// history shouldn't grow a near-duplicate multi-KB row per round.
+		const s = createSession("gpt-4o", projectA);
+		s.messages = [
+			{ role: "system", content: "SYS unchanged" },
+			{ role: "user", content: "hi" },
+		];
+		saveSession(s);
+
+		// Same text, new object — simulates the next tool-call round's rebuild.
+		s.messages = [
+			{ role: "system", content: "SYS unchanged" },
+			{ role: "user", content: "hi" },
+			{ role: "assistant", content: "thinking..." },
+		];
+		saveSession(s);
+
+		const full = getFullHistory(s.id);
+		expect(full.filter((m) => m.role === "system")).toHaveLength(1);
+	});
+
+	it("persists per-message reasoning and survives a reload, re-keyed to full-history indices", () => {
+		const s = createSession("gpt-4o", projectA);
+		s.messages = [
+			{ role: "user", content: "explain" },
+			{ role: "assistant", content: "because X" },
+		];
+		// Web bridge sets this keyed by index into session.messages right
+		// before saving (see bridge.ts's post-turn reasoning zip).
+		s.reasoning = { 1: "thinking about X..." };
+		saveSession(s);
+
+		const { messages, reasoning } = getFullHistoryWithReasoning(s.id);
+		expect(messages).toHaveLength(2);
+		expect(reasoning[1]).toBe("thinking about X...");
+		expect(reasoning[0]).toBeUndefined();
+
+		// A plain loadSession (the in-context working set) also carries it.
+		const reloaded = loadSession(s.id)!;
+		expect(reloaded.reasoning?.[1]).toBe("thinking about X...");
 	});
 });
 
-describe("migrateSessionsToJsonl", () => {
+describe("migrateLegacySessionsToDb", () => {
 	let fakeHome: string;
 	let realHome: string | undefined;
-	let projectA: string;
+	let projectDir: string;
 
 	beforeEach(() => {
 		realHome = process.env.HOME;
 		fakeHome = mkdtempSync(join(tmpdir(), "cast-migrate-test-"));
 		process.env.HOME = fakeHome;
-		projectA = join(fakeHome, "project-a");
-		mkdirSync(projectA, { recursive: true });
+		resetDbConnectionForTests();
+		projectDir = join(fakeHome, ".cast", "sessions", "--project-a--");
+		mkdirSync(projectDir, { recursive: true });
 	});
 
 	afterEach(() => {
+		resetDbConnectionForTests();
 		process.env.HOME = realHome;
 		rmSync(fakeHome, { recursive: true, force: true });
 	});
 
-	it("converts legacy .json sessions to .jsonl format", () => {
-		// Create and save a session (old format: messages in .json).
-		const s = createSession("gpt-4o", projectA);
-		s.messages.push({ role: "user", content: "hello" } as Message);
-		s.messages.push({ role: "assistant", content: "hi there" } as Message);
-		saveSession(s);
+	/** Writes a pre-SQLite session file pair (metadata .json + messages
+	 *  .jsonl) directly to disk — the on-disk shape migrateLegacySessionsToDb
+	 *  has to import, independent of whatever the current saveSession writes. */
+	function writeLegacySession(id: string, messages: Message[]): void {
+		const meta = {
+			id,
+			model: "gpt-4o",
+			cwd: join(fakeHome, "project-a"),
+			createdAt: "2026-01-01T00:00:00.000Z",
+			updatedAt: "2026-01-01T00:00:00.000Z",
+			usage: {
+				promptTokens: 0,
+				completionTokens: 0,
+				totalTokens: 0,
+				cost: 0,
+				cacheReadTokens: 0,
+				cacheWriteTokens: 0,
+				uncachedTokens: 0,
+				subagentTokens: 0,
+			},
+		};
+		writeFileSync(join(projectDir, `${id}.json`), JSON.stringify(meta), "utf-8");
+		writeFileSync(join(projectDir, `${id}.jsonl`), `${messages.map((m) => JSON.stringify(m)).join("\n")}\n`, "utf-8");
+	}
 
-		// Delete the .jsonl that saveSession now creates, simulating a legacy file.
-		const dir = join(fakeHome, ".cast", "sessions");
-		for (const d of readdirSync(dir)) {
-			const jsonl = join(dir, d, `${s.id}.jsonl`);
-			if (existsSync(jsonl)) {
-				const { unlinkSync } = require("node:fs");
-				unlinkSync(jsonl);
-			}
-		}
+	it("imports a legacy .json/.jsonl session pair into the database, leaving the source files untouched", () => {
+		writeLegacySession("legacy-1", [
+			{ role: "user", content: "hello" },
+			{ role: "assistant", content: "hi there" },
+		]);
 
-		// Re-save in legacy format: embed messages in .json, no .jsonl.
-		const { readFileSync, writeFileSync: ws } = require("node:fs");
-		for (const d of readdirSync(dir)) {
-			const jsonPath = join(dir, d, `${s.id}.json`);
-			if (existsSync(jsonPath)) {
-				const raw = JSON.parse(readFileSync(jsonPath, "utf-8"));
-				raw.messages = s.messages;
-				ws(jsonPath, JSON.stringify(raw));
-			}
-		}
-
-		// Verify no .jsonl exists.
-		let jsonlExists = false;
-		for (const d of readdirSync(dir)) {
-			if (existsSync(join(dir, d, `${s.id}.jsonl`))) jsonlExists = true;
-		}
-		expect(jsonlExists).toBe(false);
-
-		// Migrate.
-		const count = migrateSessionsToJsonl();
+		const count = migrateLegacySessionsToDb();
 		expect(count).toBe(1);
 
-		// Verify .jsonl now exists with messages.
-		let jsonlPath = "";
-		for (const d of readdirSync(dir)) {
-			const p = join(dir, d, `${s.id}.jsonl`);
-			if (existsSync(p)) jsonlPath = p;
-		}
-		expect(jsonlPath).toBeTruthy();
-		const lines = readFileSync(jsonlPath, "utf-8")
-			.split("\n")
-			.filter((l: string) => l.trim());
-		expect(lines).toHaveLength(2);
-		expect(JSON.parse(lines[0])).toEqual({ role: "user", content: "hello" });
-		expect(JSON.parse(lines[1])).toEqual({ role: "assistant", content: "hi there" });
+		const loaded = loadSession("legacy-1");
+		expect(loaded?.messages).toEqual([
+			{ role: "user", content: "hello" },
+			{ role: "assistant", content: "hi there" },
+		]);
 
-		// Verify .json no longer has messages.
-		let jsonPath = "";
-		for (const d of readdirSync(dir)) {
-			const p = join(dir, d, `${s.id}.json`);
-			if (existsSync(p)) jsonPath = p;
-		}
-		const meta = JSON.parse(readFileSync(jsonPath, "utf-8"));
-		expect(meta.messages).toBeUndefined();
-		expect(meta.id).toBe(s.id);
-
-		// Verify loadSession still returns the messages.
-		const loaded = loadSession(s.id);
-		expect(loaded?.messages).toHaveLength(2);
+		// Source files are a rollback safety net — never touched.
+		expect(existsSync(join(projectDir, "legacy-1.json"))).toBe(true);
+		expect(existsSync(join(projectDir, "legacy-1.jsonl"))).toBe(true);
 	});
 
-	it("skips sessions that are already migrated", () => {
-		const s = createSession("gpt-4o", projectA);
-		s.messages.push({ role: "user", content: "test" } as Message);
-		saveSession(s);
+	it("skips sessions whose id is already in the database", () => {
+		writeLegacySession("legacy-2", [{ role: "user", content: "test" }]);
+		migrateLegacySessionsToDb();
 
-		// Already in JSONL format (saveSession creates .jsonl now).
-		const count = migrateSessionsToJsonl();
+		// Second run finds the id already present — nothing new to import.
+		const count = migrateLegacySessionsToDb();
 		expect(count).toBe(0);
 	});
 });
