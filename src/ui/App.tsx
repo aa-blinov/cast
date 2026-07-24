@@ -12,7 +12,7 @@ import {
 	selectMentionedRules,
 	unionStickyRules,
 } from "../core/rules.ts";
-import { estimateTokens, saveSession } from "../core/session.ts";
+import { countTurnMessages, estimateTokens, saveSession } from "../core/session.ts";
 import { loadSettings, type StatusBarConfig } from "../core/settings.ts";
 import type { StartupResult } from "../core/startup.ts";
 import { setSuspendHook } from "../core/stdin-manager.ts";
@@ -661,7 +661,7 @@ export function App(props: AppProps): JSX.Element {
 				lastTurnUsage={agent.lastTurnUsage ?? undefined}
 				turnStartedAt={agent.turnStartedAt}
 				getElapsedMs={agent.getElapsedMs}
-				messageCount={session.messages.length}
+				messageCount={countTurnMessages(session.messages)}
 				contextWindow={config.contextWindow}
 				maxResponseTokens={config.maxResponseTokens}
 				messages={session.messages}

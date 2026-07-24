@@ -185,6 +185,40 @@ describe("web bridge", () => {
 		expect(ws.runner.steeringQueue.hasItems()).toBe(true);
 	});
 
+	it("session_end's messageCount stays a raw per-completion count, not the turn count shown elsewhere", async () => {
+		// The web client (app.js) appends one local message per raw
+		// "assistant_message" SSE event — including tool-call-only
+		// intermediates — and compares that length against this field to
+		// decide whether a reconnect-recovery refetch is needed. If this were
+		// turn-based (like the sidebar/settings "N msg" counters), it would
+		// permanently mismatch on every tool-using turn and force a needless
+		// refetch every single time.
+		const bridge = createWebBridge(makeResult());
+		const ws = bridge.createSession();
+
+		runAgentLoop.mockImplementationOnce(async (messages: unknown[]) => [
+			...messages,
+			{
+				role: "assistant",
+				content: null,
+				tool_calls: [{ id: "c1", type: "function", function: { name: "read", arguments: "{}" } }],
+			},
+			{ role: "tool", tool_call_id: "c1", content: "ok" },
+			{ role: "assistant", content: "final reply" },
+		]);
+
+		const events: Array<{ type: string; messageCount?: number }> = [];
+		bridge.subscribe(ws.id, (e) => events.push(e as { type: string; messageCount?: number }));
+
+		bridge.submit(ws.id, "read a file");
+		await new Promise((r) => setTimeout(r, 0));
+
+		const sessionEnd = events.find((e) => e.type === "session_end");
+		// 1 user + 2 assistant completions = 3 raw rows, not the 2 "turns"
+		// (1 user + 1 final reply) countTurnMessages would report.
+		expect(sessionEnd?.messageCount).toBe(3);
+	});
+
 	it("/queue while running enqueues a follow-up; /queue-reset clears it", async () => {
 		const bridge = createWebBridge(makeResult());
 		const ws = bridge.createSession();

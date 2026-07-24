@@ -44,11 +44,11 @@ import {
 	addUsage,
 	appendMessage,
 	clearSessionMessages,
+	countTurnMessages,
 	createSession,
 	listSessionSummaries,
 	loadSession,
 	recordCompaction,
-	resetSavedMessageCount,
 	type SessionState,
 	saveSession,
 } from "../core/session.ts";
@@ -499,14 +499,18 @@ export function createWebBridge(result: StartupResult): WebBridge {
 
 				ws.status = "idle";
 				ws.runner.endRun();
-				// finalMessages is a fresh array from runAgentLoop — reset the
-				// JSONL append counter so saveSession writes all messages.
-				resetSavedMessageCount(ws.session);
 				saveSession(ws.session);
 				broadcast(ws, { type: "status", status: "idle" });
 				broadcast(ws, {
 					type: "session_end",
 					usage: ws.session.usage,
+					// NOT a user-facing counter — this is compared against the web
+					// client's local message array length (app.js) to decide whether
+					// SSE delivered every event or a reconnect-recovery refetch is
+					// needed. The client appends one entry per raw "assistant_message"
+					// event (including tool-call-only intermediates), so this has to
+					// match that same per-completion granularity, not the turn count
+					// shown elsewhere in the UI.
 					messageCount: ws.session.messages.filter((m) => m.role === "user" || m.role === "assistant").length,
 				});
 				broadcastSessionUpdate(ws);
@@ -595,7 +599,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			title: session.title,
 			pinned: session.pinned,
 			status,
-			messageCount: session.messages.filter((m) => m.role === "user" || m.role === "assistant").length,
+			messageCount: countTurnMessages(session.messages),
 			createdAt: session.createdAt,
 			updatedAt: session.updatedAt,
 		};
@@ -706,7 +710,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 					model: ws.session.model,
 					mode: ws.session.mode ?? "build",
 					status: ws.status,
-					messageCount: ws.session.messages.filter((m) => m.role === "user" || m.role === "assistant").length,
+					messageCount: countTurnMessages(ws.session.messages),
 					usage: ws.session.usage,
 					lastTurn: ws.lastTurn,
 					permissionMode,
@@ -837,7 +841,6 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		// Everything below requires idle (enforced by the isCommandBlocking gate above).
 		if (name === "/clear") {
 			clearSessionMessages(ws.session);
-			resetSavedMessageCount(ws.session);
 			saveSession(ws.session);
 			return { ok: true, result: "Context cleared" };
 		}
@@ -859,7 +862,6 @@ export function createWebBridge(result: StartupResult): WebBridge {
 					if (result.compacted) {
 						recordCompaction(ws.session, ws.session.messages, result.messages);
 						ws.session.messages = result.messages;
-						resetSavedMessageCount(ws.session);
 						broadcast(ws, {
 							type: "compaction",
 							messagesCompacted: result.messagesCompacted,

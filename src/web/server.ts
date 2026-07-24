@@ -10,7 +10,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { dirname, extname, join, resolve } from "node:path";
-import { getFullHistoryWithReasoning } from "../core/session.ts";
+import { getHistoryPage } from "../core/session.ts";
 import { toDisplayMessages, type WebBridge, type WebEvent } from "./bridge.ts";
 import { SLASH_COMMANDS } from "./commands.ts";
 
@@ -195,13 +195,20 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 		json(res, { id: ws.id, session: ws.session }, 201);
 	});
 
-	route("GET", "/api/sessions/:id", (_req, res, params) => {
+	route("GET", "/api/sessions/:id", (req, res, params) => {
 		const ws = bridge.getSession(params.id);
 		if (!ws) return json(res, { error: "Not found" }, 404);
-		// Full transcript, not ws.session.messages — the latter is only the
-		// in-context working set once compaction has shrunk it; a reload should
-		// still show everything the thread ever said.
-		const { messages: full, reasoning } = getFullHistoryWithReasoning(params.id);
+		// Most recent page of full history, not ws.session.messages (which is
+		// only the in-context working set once compaction has shrunk it) and
+		// not the *entire* history (which for a long-lived, heavily-compacted
+		// session can run to thousands of messages / megabytes — the scroll-up
+		// pagination below, GET /api/sessions/:id/history, is how the client
+		// fetches further back). turns query param lets a client ask for more
+		// than the default up front (unused today, room for e.g. a "?turns=200"
+		// power-user setting later).
+		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+		const turns = Number(url.searchParams.get("turns")) || undefined;
+		const page = getHistoryPage(params.id, undefined, turns);
 		json(res, {
 			id: ws.id,
 			persona: ws.session.persona,
@@ -211,10 +218,31 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 			title: ws.session.title,
 			pinned: ws.session.pinned,
 			status: ws.status,
-			messages: toDisplayMessages(full, reasoning),
+			messages: toDisplayMessages(page.messages, page.reasoning),
+			oldestSeq: page.oldestSeq ?? null,
+			hasMoreHistory: page.hasMore,
 			usage: ws.session.usage,
 			createdAt: ws.session.createdAt,
 			updatedAt: ws.session.updatedAt,
+		});
+	});
+
+	// Scroll-up pagination: older turns before `before` (a seq from a
+	// previous response's oldestSeq/hasMoreHistory). Always cut on a turn
+	// boundary (see getHistoryPage) so a page never splits a tool_calls/tool
+	// pair across the fetch.
+	route("GET", "/api/sessions/:id/history", (req, res, params) => {
+		const ws = bridge.getSession(params.id);
+		if (!ws) return json(res, { error: "Not found" }, 404);
+		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+		const before = Number(url.searchParams.get("before"));
+		if (!Number.isFinite(before)) return json(res, { error: "Missing/invalid 'before' seq" }, 400);
+		const turns = Number(url.searchParams.get("turns")) || undefined;
+		const page = getHistoryPage(params.id, before, turns);
+		json(res, {
+			messages: toDisplayMessages(page.messages, page.reasoning),
+			oldestSeq: page.oldestSeq ?? null,
+			hasMoreHistory: page.hasMore,
 		});
 	});
 

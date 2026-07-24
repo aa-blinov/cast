@@ -541,13 +541,6 @@ export function saveSession(session: SessionState): void {
 	});
 }
 
-/** No-op kept for call-site compatibility — the old file store needed this
- *  to force a full-file rewrite after compaction/restore; SQLite tracks
- *  "already persisted" per message object (see messageSeq), which stays
- *  correct across an array being replaced wholesale, so there's nothing to
- *  reset. Real full clears go through clearSessionMessages instead. */
-export function resetSavedMessageCount(_session: SessionState): void {}
-
 /**
  * Called from the compaction callback with the full pre-cut message array
  * and the marker-bearing replacement compactMessages() built. Nothing is
@@ -637,6 +630,81 @@ export function getFullHistoryWithReasoning(id: string): { messages: Message[]; 
 		if (r.reasoning) reasoning[i] = r.reasoning;
 	});
 	return { messages, reasoning };
+}
+
+export interface HistoryPage {
+	messages: Message[];
+	reasoning: Record<number, string>;
+	/** seq of the earliest message in this page — pass as `beforeSeq` to fetch
+	 *  the page before this one. undefined when the page is empty. */
+	oldestSeq: number | undefined;
+	/** True if there's at least one more turn further back than this page. */
+	hasMore: boolean;
+}
+
+const DEFAULT_HISTORY_PAGE_TURNS = 30;
+
+/**
+ * One page of full history, newest-first pagination, always cut on a turn
+ * boundary (a `role: "user"` row) — never mid-turn, so a page can't split a
+ * `tool_calls`/`tool` pair the way an arbitrary row-count cut could (same
+ * concern `safeCutIndex` in compaction handles for the same reason).
+ *
+ * `beforeSeq` omitted fetches the most recent page. Pass a previous call's
+ * `oldestSeq` to page further back. Reading a whole long-lived session's
+ * history in one shot (getFullHistory) is what `GET /api/sessions/:id` used
+ * to always do — fine for a normal thread, but a session with thousands of
+ * turns turned that into a multi-MB response and thousands of DOM nodes on
+ * every reload. This is what the web client's scroll-up pagination uses
+ * instead; getFullHistory/getFullHistoryWithReasoning are unchanged and
+ * still used where the whole thing genuinely is needed (e.g. summaries).
+ */
+export function getHistoryPage(
+	id: string,
+	beforeSeq?: number,
+	turns: number = DEFAULT_HISTORY_PAGE_TURNS,
+): HistoryPage {
+	const db = getDb();
+	// The seq of the earliest user-turn boundary among the `turns` most
+	// recent user messages before the cutoff — this is where the page starts.
+	const boundary = db
+		.prepare(
+			`SELECT seq FROM (
+				SELECT seq FROM messages
+				WHERE session_id = ? AND role = 'user' AND (? IS NULL OR seq < ?)
+				ORDER BY seq DESC LIMIT ?
+			) ORDER BY seq ASC LIMIT 1`,
+		)
+		.get(id, beforeSeq ?? null, beforeSeq ?? null, turns) as { seq: number } | undefined;
+
+	if (!boundary) return { messages: [], reasoning: {}, oldestSeq: undefined, hasMore: false };
+
+	const rows = db
+		.prepare(
+			`SELECT seq, content_json, reasoning FROM messages
+			 WHERE session_id = ? AND seq >= ? AND (? IS NULL OR seq < ?)
+			 ORDER BY seq ASC`,
+		)
+		.all(id, boundary.seq, beforeSeq ?? null, beforeSeq ?? null) as Array<{
+		seq: number;
+		content_json: string;
+		reasoning: string | null;
+	}>;
+
+	const messages: Message[] = [];
+	const reasoning: Record<number, string> = {};
+	let oldestSeq: number | undefined;
+	rows.forEach((r, i) => {
+		messages.push(JSON.parse(r.content_json) as Message);
+		if (r.reasoning) reasoning[i] = r.reasoning;
+		if (oldestSeq === undefined) oldestSeq = r.seq;
+	});
+
+	const hasMore = Boolean(
+		db.prepare("SELECT 1 FROM messages WHERE session_id = ? AND role = 'user' AND seq < ?").get(id, boundary.seq),
+	);
+
+	return { messages, reasoning, oldestSeq, hasMore };
 }
 
 /** Full wipe: deletes every message row for the session (not just flags them
@@ -875,6 +943,31 @@ export interface SessionSummary {
 	haystack: string;
 }
 
+/** True for an assistant message that's a pure tool-call step (no visible
+ *  reply yet) — one turn can produce several of these before its actual
+ *  answer, and they aren't separate exchanges from the user's point of view. */
+function isToolCallOnly(m: Message): boolean {
+	return "tool_calls" in m && Array.isArray(m.tool_calls) && m.tool_calls.length > 0;
+}
+
+/**
+ * Counts conversational turns rather than raw message rows: one for each
+ * user message, one for each assistant message that's an actual reply (not
+ * a tool-call-only intermediate step). A single turn that takes several
+ * tool-call rounds to answer only ever contributes its one final reply here
+ * — matches what a user thinks of as "how many messages have we exchanged",
+ * not the internal row count (which also includes every tool result and,
+ * for full history, every superseded system-prompt/tool-call step).
+ */
+export function countTurnMessages(messages: Message[]): number {
+	let count = 0;
+	for (const m of messages) {
+		if (m.role === "user") count++;
+		else if (m.role === "assistant" && !isToolCallOnly(m)) count++;
+	}
+	return count;
+}
+
 /** Text of a message for indexing: plain string or first text part. */
 function messageText(m: { content?: unknown }): string {
 	const content = m.content;
@@ -917,8 +1010,19 @@ export function getSearchHaystack(subject: { id: string; cwd?: string; messages:
 export function listSessionSummaries(): SessionSummary[] {
 	const db = getDb();
 	const rows = db.prepare("SELECT * FROM sessions ORDER BY updated_at DESC").all() as unknown as SessionRow[];
+	// msgCount/firstUserMessage/haystack only ever look at user/assistant text
+	// (see getFirstUserMessage/getSearchHaystack) — filtering role at the SQL
+	// level, not after loading, matters a lot in practice: tool-result rows
+	// (file reads, grep output, ...) are typically the overwhelming majority
+	// of a session's stored bytes, and this runs once per session on every
+	// session-list request (GET /api/sessions, the CLI picker).
+	const conversationOnly = db.prepare(
+		"SELECT content_json FROM messages WHERE session_id = ? AND role IN ('user', 'assistant') ORDER BY seq",
+	);
 	return rows.map((row) => {
-		const messages = getFullHistory(row.id);
+		const messages = (conversationOnly.all(row.id) as Array<{ content_json: string }>).map(
+			(r) => JSON.parse(r.content_json) as Message,
+		);
 		const subject = { id: row.id, cwd: row.cwd ?? undefined, messages };
 		return {
 			id: row.id,
@@ -929,7 +1033,7 @@ export function listSessionSummaries(): SessionSummary[] {
 			...(row.pinned === 1 ? { pinned: true } : {}),
 			...(row.created_at ? { createdAt: row.created_at } : {}),
 			updatedAt: row.updated_at,
-			msgCount: messages.filter((m) => m.role === "user" || m.role === "assistant").length,
+			msgCount: countTurnMessages(messages),
 			firstUserMessage: getFirstUserMessage(subject),
 			haystack: getSearchHaystack(subject),
 		};
