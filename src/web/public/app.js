@@ -1777,6 +1777,29 @@ function Sidebar({
 
 // ── App (root) ───────────────────────────────────────────────────────
 
+// Stable render key per message object, independent of its position in the
+// array. Needed because loadOlderMessages() prepends to the front of
+// session.messages — an index-based key would make every already-mounted
+// message look "changed" (its index shifted) and force Preact to remount
+// each one instead of just inserting the new items above them. Message
+// objects are only ever created once and then carried by reference through
+// spreads (`[...prev.messages, x]`), never cloned, so a WeakMap keyed by
+// that reference is a correct, zero-touch-site way to give every message a
+// permanent identity — no need to stamp an id at each of the many places a
+// message enters the array (initial fetch, scroll-up page, live SSE events,
+// steering/queue injections, ...).
+const messageKeys = new WeakMap();
+let nextMessageKey = 0;
+function keyForMessage(msg) {
+	if (typeof msg !== "object" || msg === null) return String(msg);
+	let k = messageKeys.get(msg);
+	if (k === undefined) {
+		k = ++nextMessageKey;
+		messageKeys.set(msg, k);
+	}
+	return k;
+}
+
 function App() {
 	const [sessions, setSessions] = useState([]);
 	const [activeId, setActiveId] = useState(null);
@@ -1854,6 +1877,19 @@ function App() {
 	const wasRunningRef = useRef(false);
 	const [reconnectNonce, setReconnectNonce] = useState(0);
 
+	// Scroll-up pagination for long threads: older pages already fetched this
+	// tab session, keyed by session id, so switching away and back doesn't
+	// refetch. Cleared only on a full reload — messages never change once
+	// fetched (compaction can't retroactively edit history, see recordCompaction),
+	// so there's no staleness to invalidate against.
+	const olderPagesCacheRef = useRef(new Map());
+	const loadingOlderRef = useRef(false);
+	// Set right before prepending older messages, to the scroll container's
+	// current scrollHeight — the restore effect below uses it to keep the
+	// same content visually in place instead of the view jumping as new
+	// (taller) content gets inserted above what's on screen.
+	const pendingScrollRestoreRef = useRef(null);
+
 	// Live stopwatch — ticks while running, freezes on stop. Per-session
 	// start times survive thread switches so the display is correct when
 	// you come back to a still-running session.
@@ -1908,6 +1944,27 @@ function App() {
 		async (id, { push = true } = {}) => {
 			try {
 				const data = await api("GET", `/api/sessions/${id}`);
+				// Splice in older pages already loaded via scroll-up earlier this
+				// tab session — only if nothing changed underneath: the cache's
+				// anchorSeq is the oldestSeq the *latest* page had when caching
+				// started, so a mismatch means new turns landed since (e.g. a
+				// background task woke this session while looking at another
+				// one) and the cache is stale for the gap. Simplest safe answer:
+				// drop it and let scroll-up refetch — correctness over a saved
+				// round trip in that rare case.
+				const cached = olderPagesCacheRef.current.get(id);
+				if (cached && cached.anchorSeq === data.oldestSeq) {
+					data.messages = [...cached.messages, ...data.messages];
+					data.oldestSeq = cached.oldestSeq;
+					data.hasMoreHistory = cached.hasMore;
+				} else {
+					olderPagesCacheRef.current.set(id, {
+						anchorSeq: data.oldestSeq,
+						messages: [],
+						oldestSeq: data.oldestSeq,
+						hasMore: data.hasMoreHistory,
+					});
+				}
 				setSession(data);
 				setActiveId(id);
 				setStreaming([]);
@@ -2227,7 +2284,8 @@ function App() {
 						return; // now viewing the fresh session — nothing to append a notice to
 					}
 					if (text === "/clear" && session) {
-						setSession({ ...session, messages: [] });
+						olderPagesCacheRef.current.delete(activeId);
+						setSession({ ...session, messages: [], oldestSeq: null, hasMoreHistory: false });
 						return; // context just got wiped — nothing left to append a notice to
 					}
 					if (text.startsWith("/persona") && result?.result?.persona) {
@@ -2479,20 +2537,19 @@ function App() {
 							if (event.messageCount === prev.messages.length) {
 								return { ...prev, usage: event.usage };
 							}
-							// Reconnect recovery: pull full messages from server.
+							// Reconnect recovery: pull the latest page from the server (only
+							// that page now, not full history — GET /api/sessions/:id is
+							// paginated). Only ever grow the visible thread, never shrink
+							// it: if the user has scrolled up and loaded older history via
+							// loadOlderMessages, that's more than a single fresh page can
+							// possibly contain, and must survive this reconnect merge.
 							api("GET", `/api/sessions/${activeId}`)
 								.then((d) => {
 									if (!d) return;
 									setSession((inner) => {
 										if (!inner) return inner;
 										const serverMsgs = d.messages || [];
-										const clientHasBlocks = inner.messages.some(
-											(m) => Array.isArray(m.blocks) && m.blocks.length > 0,
-										);
-										const messages =
-											serverMsgs.length > inner.messages.length || !clientHasBlocks
-												? serverMsgs
-												: inner.messages;
+										const messages = serverMsgs.length > inner.messages.length ? serverMsgs : inner.messages;
 										return { ...inner, messages, usage: d.usage, updatedAt: d.updatedAt };
 									});
 								})
@@ -2657,6 +2714,55 @@ function App() {
 		if (messagesRef.current) messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
 	}, []);
 
+	// Fetches the next older batch (GET /api/sessions/:id/history) and
+	// prepends it — turn-boundary safe server-side (getHistoryPage), so this
+	// never splices in half a tool_calls/tool pair. Guarded against overlap
+	// with a concurrent selectSession by checking prev.id === activeId in the
+	// setSession updater, since the fetch is async and the user could switch
+	// threads while it's in flight.
+	const loadOlderMessages = useCallback(async () => {
+		if (loadingOlderRef.current || !session?.hasMoreHistory || session.oldestSeq == null) return;
+		const forId = activeId;
+		loadingOlderRef.current = true;
+		try {
+			const res = await api("GET", `/api/sessions/${forId}/history?before=${session.oldestSeq}`);
+			const cached = olderPagesCacheRef.current.get(forId);
+			if (cached) {
+				cached.messages = [...res.messages, ...cached.messages];
+				cached.oldestSeq = res.oldestSeq;
+				cached.hasMore = res.hasMoreHistory;
+			}
+			if (messagesRef.current) pendingScrollRestoreRef.current = messagesRef.current.scrollHeight;
+			setSession((prev) =>
+				prev && prev.id === forId
+					? {
+							...prev,
+							messages: [...res.messages, ...prev.messages],
+							oldestSeq: res.oldestSeq,
+							hasMoreHistory: res.hasMoreHistory,
+						}
+					: prev,
+			);
+		} catch {
+			// Best-effort — hasMoreHistory stays as-is, the next scroll-up retries.
+		} finally {
+			loadingOlderRef.current = false;
+		}
+	}, [session, activeId]);
+
+	// Keeps the visible content stable when older messages get prepended
+	// above it — without this the browser's default "preserve scrollTop"
+	// behavior would make the view jump downward by the height of what just
+	// got inserted, reading as the thread suddenly scrolling on its own.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: session?.messages isn't read in the body — it's the trigger, so this re-runs exactly when loadOlderMessages just prepended content (the only place pendingScrollRestoreRef gets set).
+	useEffect(() => {
+		const delta = pendingScrollRestoreRef.current;
+		if (delta == null || !messagesRef.current) return;
+		const el = messagesRef.current;
+		el.scrollTop += el.scrollHeight - delta;
+		pendingScrollRestoreRef.current = null;
+	}, [session?.messages]);
+
 	// Scroll detection
 	const handleScroll = useCallback(() => {
 		const el = messagesRef.current;
@@ -2664,7 +2770,11 @@ function App() {
 		const bottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 80;
 		autoScrollRef.current = bottom;
 		setAtBottom(bottom);
-	}, []);
+		// Near the top — fetch the next older batch. 400px gives it a head
+		// start before the user actually hits the edge, so it doesn't feel
+		// like a hard stop-and-wait while scrolling fast.
+		if (el.scrollTop < 400) loadOlderMessages();
+	}, [loadOlderMessages]);
 
 	// Toggle diff — reset the selected file so switching sessions (or
 	// reopening) doesn't leave a stale selection that no longer matches any
@@ -2920,7 +3030,7 @@ function App() {
 						</div>
 					`
 					}
-					${messages.map((msg, i) => html`<${Message} key=${i} msg=${msg} />`)}
+					${messages.map((msg) => html`<${Message} key=${keyForMessage(msg)} msg=${msg} />`)}
 					<${StreamingBlocks} blocks=${streaming} />
 				</div>
 				${

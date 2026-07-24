@@ -13,7 +13,6 @@ import {
 	clearSessionMessages,
 	getFullHistory,
 	recordCompaction,
-	resetSavedMessageCount,
 	type SessionState,
 	type SessionUsage,
 	saveSession,
@@ -904,7 +903,6 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				process.off("uncaughtException", onUncaught);
 				runner.endRun();
 				acRef.current = null;
-				resetSavedMessageCount(session);
 				saveSession(session);
 			}
 		},
@@ -975,7 +973,6 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 
 	const clearContext = useCallback(() => {
 		clearSessionMessages(session);
-		resetSavedMessageCount(session);
 		// The authoritative context-size signal must reset with the context it
 		// measured — otherwise shouldCompact still sees the pre-clear size and
 		// the first turn after clearing a long session (e.g. the "clear context,

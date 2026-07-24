@@ -8,11 +8,13 @@ import {
 	addUsage,
 	clearSessionMessages,
 	compactMessages,
+	countTurnMessages,
 	createSession,
 	deleteSession,
 	estimateTokens,
 	getFullHistory,
 	getFullHistoryWithReasoning,
+	getHistoryPage,
 	getMostRecentSession,
 	listSessionSummaries,
 	listSessions,
@@ -64,6 +66,51 @@ describe("estimateTokens", () => {
 		const one: Message[] = [{ role: "user", content: "Hello" }];
 		const ten: Message[] = Array.from({ length: 10 }, () => ({ role: "user", content: "Hello" }));
 		expect(estimateTokens(ten)).toBeGreaterThan(estimateTokens(one));
+	});
+});
+
+// ============================================================================
+// countTurnMessages
+// ============================================================================
+
+describe("countTurnMessages", () => {
+	it("counts one per user message and one per non-tool-call assistant reply", () => {
+		const messages: Message[] = [
+			{ role: "system", content: "sys" },
+			{ role: "user", content: "hi" },
+			{ role: "assistant", content: "hello" },
+			{ role: "user", content: "read a file" },
+			{ role: "assistant", content: "reading now" },
+		];
+		expect(countTurnMessages(messages)).toBe(4); // system excluded, 2 user + 2 assistant
+	});
+
+	it("does not count tool-call-only assistant messages as separate turns", () => {
+		// One user request that takes two tool-call rounds before the real
+		// reply — three assistant completions in the raw array, but from the
+		// user's point of view this is still just "I asked, it answered".
+		const messages: Message[] = [
+			{ role: "user", content: "read a.ts then b.ts and summarize" },
+			{
+				role: "assistant",
+				content: null,
+				tool_calls: [{ id: "c1", type: "function", function: { name: "read", arguments: '{"path":"a.ts"}' } }],
+			} as unknown as Message,
+			{ role: "tool", tool_call_id: "c1", content: "ok" } as unknown as Message,
+			{
+				role: "assistant",
+				content: null,
+				tool_calls: [{ id: "c2", type: "function", function: { name: "read", arguments: '{"path":"b.ts"}' } }],
+			} as unknown as Message,
+			{ role: "tool", tool_call_id: "c2", content: "ok" } as unknown as Message,
+			{ role: "assistant", content: "Both files do X and Y." },
+		];
+		expect(countTurnMessages(messages)).toBe(2); // 1 user + 1 final reply
+	});
+
+	it("returns 0 for an empty or purely system/tool array", () => {
+		expect(countTurnMessages([])).toBe(0);
+		expect(countTurnMessages([{ role: "system", content: "sys" }])).toBe(0);
 	});
 });
 
@@ -561,6 +608,24 @@ describe("session persistence", () => {
 		expect(sb.cwd).toBe(projectB);
 	});
 
+	it("listSessionSummaries.msgCount excludes intermediate tool-call-only assistant steps", () => {
+		const s = createSession("gpt-4o", projectA);
+		s.messages.push(
+			{ role: "user", content: "read a.ts" },
+			{
+				role: "assistant",
+				content: null,
+				tool_calls: [{ id: "c1", type: "function", function: { name: "read", arguments: '{"path":"a.ts"}' } }],
+			} as unknown as Message,
+			{ role: "tool", tool_call_id: "c1", content: "ok" } as unknown as Message,
+			{ role: "assistant", content: "a.ts does X." },
+		);
+		saveSession(s);
+
+		const summary = listSessionSummaries().find((x) => x.id === s.id)!;
+		expect(summary.msgCount).toBe(2); // 1 user + 1 final reply, not 3
+	});
+
 	it("heals a stale index entry when the session file changes", async () => {
 		const s = createSession("gpt-4o", projectA);
 		s.messages.push({ role: "user", content: "original topic" });
@@ -709,6 +774,66 @@ describe("session persistence", () => {
 		// A plain loadSession (the in-context working set) also carries it.
 		const reloaded = loadSession(s.id)!;
 		expect(reloaded.reasoning?.[1]).toBe("thinking about X...");
+	});
+
+	it("getHistoryPage walks a long session back to front with no gaps or duplicates", () => {
+		const s = createSession("gpt-4o", projectA);
+		for (let i = 0; i < 50; i++) {
+			s.messages.push({ role: "user", content: `q${i}` }, { role: "assistant", content: `a${i}` });
+		}
+		saveSession(s);
+
+		const page1 = getHistoryPage(s.id, undefined, 5);
+		expect(page1.messages).toHaveLength(10); // 5 turns * (user + assistant)
+		expect(page1.messages.at(-1)).toEqual({ role: "assistant", content: "a49" });
+		expect(page1.hasMore).toBe(true);
+
+		let cursor = page1.oldestSeq;
+		let hasMore = page1.hasMore;
+		let total = page1.messages.length;
+		let pages = 1;
+		while (hasMore) {
+			const p = getHistoryPage(s.id, cursor, 5);
+			total += p.messages.length;
+			cursor = p.oldestSeq;
+			hasMore = p.hasMore;
+			pages++;
+		}
+		expect(total).toBe(100); // 50 turns * 2 messages, nothing missed or duplicated
+		expect(pages).toBe(10);
+	});
+
+	it("getHistoryPage never splits a tool_calls/tool pair across a page boundary", () => {
+		const s = createSession("gpt-4o", projectA);
+		for (let i = 0; i < 20; i++) {
+			s.messages.push(
+				{ role: "user", content: `q${i}` },
+				{
+					role: "assistant",
+					content: null,
+					tool_calls: [{ id: `c${i}`, type: "function", function: { name: "read", arguments: "{}" } }],
+				} as unknown as Message,
+				{ role: "tool", tool_call_id: `c${i}`, content: "ok" } as unknown as Message,
+				{ role: "assistant", content: `final${i}` },
+			);
+		}
+		saveSession(s);
+
+		let cursor: number | undefined;
+		let hasMore = true;
+		while (hasMore) {
+			const p = getHistoryPage(s.id, cursor, 3);
+			expect(p.messages[0]?.role).toBe("user"); // every page starts cleanly on a turn boundary
+			const toolResultIds = new Set(
+				p.messages.filter((m) => m.role === "tool").map((m) => (m as { tool_call_id: string }).tool_call_id),
+			);
+			for (const m of p.messages) {
+				if (m.role !== "assistant" || !("tool_calls" in m) || !m.tool_calls) continue;
+				for (const tc of m.tool_calls) expect(toolResultIds.has(tc.id)).toBe(true);
+			}
+			cursor = p.oldestSeq;
+			hasMore = p.hasMore;
+		}
 	});
 });
 

@@ -36,11 +36,11 @@ import { getModelsCache } from "../core/readline.ts";
 import { formatRuleInvocation, type Rule } from "../core/rules.ts";
 import {
 	addUsage,
+	countTurnMessages,
 	createSession,
 	listSessionSummaries,
 	loadSession,
 	recordCompaction,
-	resetSavedMessageCount,
 	type SessionState,
 	saveSession,
 } from "../core/session.ts";
@@ -1079,7 +1079,6 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		session.createdAt = chosen.createdAt;
 		session.updatedAt = chosen.updatedAt;
 		session.usage = chosen.usage;
-		resetSavedMessageCount(session);
 		session.cwd = chosen.cwd;
 		session.lastPromptTokens = chosen.lastPromptTokens;
 		session.persona = chosen.persona;
@@ -1237,7 +1236,6 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			if (result.compacted) {
 				recordCompaction(session, session.messages, result.messages);
 				session.messages = result.messages;
-				resetSavedMessageCount(session);
 				agent.refresh();
 				showNotice(`[Compacted: ${result.messagesCompacted} msgs (~${result.tokensBefore} tokens)]`);
 			} else if (result.error) {
@@ -1259,7 +1257,6 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		const fresh = createSession(session.model, deps.cwd);
 		session.id = fresh.id;
 		session.messages = fresh.messages;
-		resetSavedMessageCount(session);
 		session.createdAt = fresh.createdAt;
 		session.updatedAt = fresh.updatedAt;
 		session.usage = fresh.usage;
@@ -2140,7 +2137,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			usage: session.usage,
 			lastTurnUsage: agent.lastTurnUsage ? { tokensPerSecond: agent.lastTurnUsage.tokensPerSecond } : undefined,
 			elapsedMs: agent.getElapsedMs(),
-			messageCount: session.messages.length,
+			messageCount: countTurnMessages(session.messages),
 			contextWindow: config.contextWindow,
 			maxResponseTokens: config.maxResponseTokens,
 			messages: session.messages,
@@ -2180,7 +2177,6 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		session.createdAt = chosen.createdAt;
 		session.updatedAt = chosen.updatedAt;
 		session.usage = chosen.usage;
-		resetSavedMessageCount(session);
 		session.cwd = chosen.cwd;
 		// Context-size signal belongs to the session being resumed — leaving the
 		// old session's value here feeds shouldCompact a foreign context size.
