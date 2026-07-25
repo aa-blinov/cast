@@ -22,10 +22,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 // below) leaks files into the real `evals/baselines/history/` and pollutes
 // the git working tree. The module-level assignment runs once when vitest
 // imports this file, before any test code.
-const BASELINE_TEST_DIR = join(
-	tmpdir(),
-	`cast-baseline-test-${process.pid}-${process.env.VITEST_WORKER_ID ?? "0"}`,
-);
+const BASELINE_TEST_DIR = join(tmpdir(), `cast-baseline-test-${process.pid}-${process.env.VITEST_WORKER_ID ?? "0"}`);
 mkdirSync(BASELINE_TEST_DIR, { recursive: true });
 process.env.EVAL_BASELINES_DIR = BASELINE_TEST_DIR;
 
@@ -33,9 +30,6 @@ const TEST_BASELINES_ROOT = BASELINE_TEST_DIR; // "evals/baselines" equivalent
 const TEST_HISTORY_DIR = join(BASELINE_TEST_DIR, "history"); // "evals/baselines/history" equivalent
 function baselinePath(name: string): string {
 	return join(TEST_BASELINES_ROOT, `${name}.json`);
-}
-function historyPath(name: string): string {
-	return join(TEST_HISTORY_DIR, `${name}.json`);
 }
 
 afterEach(() => {
@@ -46,6 +40,7 @@ afterEach(() => {
 		rmSync(join(BASELINE_TEST_DIR, entry), { recursive: true, force: true });
 	}
 });
+
 import {
 	binomialTestOneSided,
 	compareToBaseline,
