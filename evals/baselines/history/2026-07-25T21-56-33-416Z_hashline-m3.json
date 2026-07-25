@@ -1,0 +1,173 @@
+{
+  "name": "hashline-m3",
+  "bench": "",
+  "model": "MiniMax-M3",
+  "commit": "b1f18a0",
+  "timestamp": "2026-07-25T21:56:33.416Z",
+  "total": 10,
+  "passed": 9,
+  "failed": 1,
+  "passRate": 0.9,
+  "duration": 321093,
+  "usage": {
+    "promptTokens": 1275281,
+    "completionTokens": 24696,
+    "totalTokens": 1299977,
+    "cost": 0,
+    "cacheReadTokens": 1155072,
+    "cacheWriteTokens": 0,
+    "uncachedTokens": 120209
+  },
+  "results": [
+    {
+      "caseId": "hashline-insert-above-heading",
+      "passed": true,
+      "duration": 5492.666666666667,
+      "turns": 3,
+      "usage": {
+        "promptTokens": 23676,
+        "completionTokens": 306,
+        "totalTokens": 23982,
+        "cost": 0,
+        "cacheReadTokens": 15616,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 8060
+      }
+    },
+    {
+      "caseId": "hashline-multi-edit-no-reread",
+      "passed": true,
+      "duration": 8123,
+      "turns": 3,
+      "usage": {
+        "promptTokens": 23469,
+        "completionTokens": 381,
+        "totalTokens": 23850,
+        "cost": 0,
+        "cacheReadTokens": 22528,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 941
+      }
+    },
+    {
+      "caseId": "hashline-range-replace-and-delete",
+      "passed": true,
+      "duration": 11954,
+      "turns": 3,
+      "usage": {
+        "promptTokens": 23503,
+        "completionTokens": 385,
+        "totalTokens": 23888,
+        "cost": 0,
+        "cacheReadTokens": 15616,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 7887
+      }
+    },
+    {
+      "caseId": "hashline-edit-among-duplicates",
+      "passed": true,
+      "duration": 17016,
+      "turns": 3.3333333333333335,
+      "usage": {
+        "promptTokens": 23424,
+        "completionTokens": 373,
+        "totalTokens": 23797,
+        "cost": 0,
+        "cacheReadTokens": 15104,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 8320
+      }
+    },
+    {
+      "caseId": "hashline-move-block",
+      "passed": false,
+      "duration": 6521.333333333333,
+      "turns": 4.333333333333333,
+      "usage": {
+        "promptTokens": 23464,
+        "completionTokens": 707,
+        "totalTokens": 24171,
+        "cost": 0,
+        "cacheReadTokens": 15360,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 8104
+      }
+    },
+    {
+      "caseId": "hashline-large-file-needle",
+      "passed": true,
+      "duration": 3640,
+      "turns": 3,
+      "usage": {
+        "promptTokens": 74378,
+        "completionTokens": 310,
+        "totalTokens": 74688,
+        "cost": 0,
+        "cacheReadTokens": 40832,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 33546
+      }
+    },
+    {
+      "caseId": "hashline-second-duplicate-block",
+      "passed": true,
+      "duration": 7710.666666666667,
+      "turns": 5,
+      "usage": {
+        "promptTokens": 23384,
+        "completionTokens": 437,
+        "totalTokens": 23821,
+        "cost": 0,
+        "cacheReadTokens": 15360,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 8024
+      }
+    },
+    {
+      "caseId": "hashline-makefile-tabs",
+      "passed": true,
+      "duration": 10995.333333333334,
+      "turns": 5.666666666666667,
+      "usage": {
+        "promptTokens": 40001,
+        "completionTokens": 485,
+        "totalTokens": 40486,
+        "cost": 0,
+        "cacheReadTokens": 31872,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 8129
+      }
+    },
+    {
+      "caseId": "hashline-json-nested",
+      "passed": true,
+      "duration": 10520.666666666666,
+      "turns": 6.333333333333333,
+      "usage": {
+        "promptTokens": 50942,
+        "completionTokens": 1168,
+        "totalTokens": 52110,
+        "cost": 0,
+        "cacheReadTokens": 42112,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 8830
+      }
+    },
+    {
+      "caseId": "hashline-dependent-edits",
+      "passed": true,
+      "duration": 15356.666666666666,
+      "turns": 9,
+      "usage": {
+        "promptTokens": 107866,
+        "completionTokens": 2328,
+        "totalTokens": 110194,
+        "cost": 0,
+        "cacheReadTokens": 105344,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 2522
+      }
+    }
+  ]
+}
