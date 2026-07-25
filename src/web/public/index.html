@@ -38,19 +38,36 @@ try {
 try {
 	const fontId = localStorage.getItem("cast:fontId");
 	if (fontId && fontId !== "jetbrains-mono") {
+		// [family, isMonospace] — isMonospace decides whether --font-mono (code
+		// blocks, tool output, tables, the ASCII banner) follows the pick too;
+		// a sans-serif family only ever changes --font. Keep in sync with
+		// FONT_OPTIONS in app.js.
 		const families = {
-			"fira-code": "'Fira Code', 'JetBrains Mono', monospace",
-			"source-code-pro": "'Source Code Pro', monospace",
-			"ibm-plex-mono": "'IBM Plex Mono', monospace",
-			"roboto-mono": "'Roboto Mono', monospace",
-			"space-mono": "'Space Mono', monospace",
-			"inconsolata": "'Inconsolata', monospace",
-			"ubuntu-mono": "'Ubuntu Mono', monospace",
+			"cousine": ["'Cousine', 'JetBrains Mono', monospace", true],
+			"fira-code": ["'Fira Code', 'JetBrains Mono', monospace", true],
+			"ibm-plex-mono": ["'IBM Plex Mono', monospace", true],
+			"inconsolata": ["'Inconsolata', monospace", true],
+			"roboto-mono": ["'Roboto Mono', monospace", true],
+			"source-code-pro": ["'Source Code Pro', monospace", true],
+			"space-mono": ["'Space Mono', monospace", true],
+			"ubuntu-mono": ["'Ubuntu Mono', monospace", true],
+			"victor-mono": ["'Victor Mono', 'JetBrains Mono', monospace", true],
+			"ibm-plex-sans": ["'IBM Plex Sans', sans-serif", false],
+			"inter": ["'Inter', sans-serif", false],
+			"lato": ["'Lato', sans-serif", false],
+			"montserrat": ["'Montserrat', sans-serif", false],
+			"nunito": ["'Nunito', sans-serif", false],
+			"open-sans": ["'Open Sans', sans-serif", false],
+			"poppins": ["'Poppins', sans-serif", false],
+			"roboto": ["'Roboto', sans-serif", false],
+			"source-sans-3": ["'Source Sans 3', sans-serif", false],
+			"work-sans": ["'Work Sans', sans-serif", false],
 		};
-		const family = families[fontId];
-		if (family) {
+		const picked = families[fontId];
+		if (picked) {
+			const [family, isMonospace] = picked;
 			document.documentElement.style.setProperty("--font", family);
-			document.documentElement.style.setProperty("--font-mono", family);
+			if (isMonospace) document.documentElement.style.setProperty("--font-mono", family);
 		}
 	}
 	const fontScale = localStorage.getItem("cast:fontScale");
