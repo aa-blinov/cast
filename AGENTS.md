@@ -42,6 +42,16 @@ Always run in this order before committing:
 2. `npm test` — full vitest suite
 3. `npm run build` — bundles into `dist/index.js` via esbuild
 
+**`npm run check` is not optional** even when `npm test` passes. Biome
+format/lint failures (un-sorted imports, multi-line `join()` calls
+where biome wants single-line, unused helpers) don't surface from
+`npm test` — they only fail at the `npm run check` step, and the CI
+job's "Type check + lint" step is the same `npm run check` invocation.
+If the local `npm test` was green and the commit is rushed, the next
+`gh run` will turn red on format errors that a 5-second `npm run
+check` would have caught. Lesson: always run *all three* before
+`git push` — never substitute `npm test` for `npm run check`.
+
 Other:
 - `npm run format` — `biome format --write` (tabs, width 3, 120-col)
 - `npx vitest run test/<file>.test.ts` — run one test file
