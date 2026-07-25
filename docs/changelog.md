@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.8.27
+
+### Fixed
+
+- The `super-research` skill's description exceeded the 1024-character limit, logging a warning on every startup — it is now trimmed to a concise summary. Added a test that guards every builtin SKILL.md description against the limit so it can't regress.
+
 ## 0.8.26
 
 ### Added
