@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -109,14 +109,19 @@ describe("web bridge", () => {
 		expect(ws.systemPrompt).toContain("You are the senior persona.");
 	});
 
-	it("sandbox sentinel creates a scratch dir named after the session id", () => {
+	it("sandbox sentinel derives a scratch dir named after the session id, created lazily on first message", () => {
 		const bridge = createWebBridge(makeResult());
 		const ws = bridge.createSession(undefined, undefined, SANDBOX_CWD);
 		const expectedDir = join(homedir(), ".cast", "sandbox", `cast-${ws.id}`);
 		try {
 			expect(ws.session.cwd).toBe(expectedDir);
-			expect(statSync(ws.session.cwd).isDirectory()).toBe(true);
 			expect(ws.systemPrompt).toContain(`Current working directory: ${ws.session.cwd}`);
+			// Not created yet — picking a persona/sandbox shouldn't leave a directory
+			// behind for a session the user never actually used.
+			expect(existsSync(ws.session.cwd)).toBe(false);
+
+			bridge.submit(ws.id, "hi");
+			expect(statSync(ws.session.cwd).isDirectory()).toBe(true);
 		} finally {
 			rmSync(ws.session.cwd, { recursive: true, force: true });
 		}
