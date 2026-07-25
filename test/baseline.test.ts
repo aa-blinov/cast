@@ -15,7 +15,15 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type Baseline, compareToBaseline, formatDelta, loadBaseline, saveBaseline } from "../evals/lib/baseline.ts";
+import {
+	binomialTestOneSided,
+	compareToBaseline,
+	formatDelta,
+	loadBaseline,
+	saveBaseline,
+	testSignificance,
+	wilsonScoreInterval,
+} from "../evals/lib/baseline.ts";
 import type { SuiteResult } from "../evals/lib/runner.ts";
 
 // ============================================================================
@@ -184,28 +192,31 @@ describe("compareToBaseline", () => {
 		expect(result).toBeNull();
 	});
 
-	it("flags a regression when pass-rate drops past the threshold", () => {
-		// Baseline: 10/10 pass. Current: 8/10 pass. Delta -20pp > 5pp threshold.
+	it("flags a regression when pass-rate drops are statistically significant", () => {
+		// Baseline: 100/100 pass. Current: 80/100 pass. Delta -20pp is well outside
+		// binomial noise — z ≈ -4.5, p < 0.001, comfortably significant at α=0.05.
 		const baselineSuite = makeSuite({
-			cases: Array.from({ length: 10 }, (_, i) => ({ id: `c${i}`, passed: true })),
+			cases: Array.from({ length: 100 }, (_, i) => ({ id: `c${i}`, passed: true })),
 			totalDuration: 10_000,
 		});
 		const currentSuite = makeSuite({
-			cases: Array.from({ length: 10 }, (_, i) => ({
+			cases: Array.from({ length: 100 }, (_, i) => ({
 				id: `c${i}`,
-				passed: i < 8, // first 8 pass, last 2 fail
+				passed: i < 80, // first 80 pass, last 20 fail
 			})),
 			totalDuration: 12_000,
 		});
 
-		const baseline = saveBaseline(baselineSuite, "test-regress", "regress-baseline");
-		const delta = compareToBaseline(currentSuite, "test-regress", "regress-baseline", 0.05);
+		saveBaseline(baselineSuite, "test-regress", "regress-baseline");
+		const delta = compareToBaseline(currentSuite, "test-regress", "regress-baseline", { threshold: 0.05 });
 
 		expect(delta).not.toBeNull();
-		expect(delta?.passedDelta).toBe(-2);
+		expect(delta?.passedDelta).toBe(-20);
 		expect(delta?.passRateDelta).toBeCloseTo(-0.2, 5);
 		expect(delta?.hasRegression).toBe(true);
-		expect(delta?.regressions).toHaveLength(2);
+		expect(delta?.significance.isSignificant).toBe(true);
+		expect(delta?.significance.pValue).toBeLessThan(0.01);
+		expect(delta?.regressions).toHaveLength(20);
 		expect(delta?.regressions[0]?.baselinePassed).toBe(true);
 		expect(delta?.regressions[0]?.currentPassed).toBe(false);
 
@@ -214,11 +225,10 @@ describe("compareToBaseline", () => {
 		});
 	});
 
-	it("does NOT flag a regression when drop is under threshold", () => {
-		// Baseline: 20/20 pass. Current: 19/20 pass. Delta -5pp = threshold,
-		// not strictly below, but using threshold 0.05 and a drop of exactly
-		// -0.05 → hasRegression uses <= so it's borderline; let's use a clearer
-		// under-threshold scenario: 19/20 with threshold 0.10 = no regression.
+	it("does NOT flag a regression when the drop is statistically inconclusive", () => {
+		// Baseline: 20/20 pass. Current: 19/20 pass. Delta -5pp. Binomial z-test
+		// gives z ≈ -1.01, p ≈ 0.16 — comfortably above α=0.05, so not significant.
+		// (A 1-case flip on a 20-case suite is plausibly noise.)
 		const baselineSuite = makeSuite({
 			cases: Array.from({ length: 20 }, (_, i) => ({ id: `c${i}`, passed: true })),
 		});
@@ -229,13 +239,14 @@ describe("compareToBaseline", () => {
 			})),
 		});
 
-		const baseline = saveBaseline(baselineSuite, "test-near", "near-miss-baseline");
-		const delta = compareToBaseline(currentSuite, "test-near", "near-miss-baseline", 0.1);
+		saveBaseline(baselineSuite, "test-near", "near-miss-baseline");
+		const delta = compareToBaseline(currentSuite, "test-near", "near-miss-baseline", { threshold: 0.05 });
 
 		expect(delta).not.toBeNull();
 		expect(delta?.passedDelta).toBe(-1);
 		expect(delta?.passRateDelta).toBeCloseTo(-0.05, 5);
-		expect(delta?.hasRegression).toBe(false); // 5pp drop < 10pp threshold
+		expect(delta?.hasRegression).toBe(false); // p ≈ 0.16 — noise
+		expect(delta?.significance.pValue).toBeGreaterThan(0.05);
 		expect(delta?.regressions).toHaveLength(1);
 
 		rmSync(join(import.meta.dirname, "..", "evals", "baselines", "near-miss-baseline.json"), {
@@ -259,7 +270,7 @@ describe("compareToBaseline", () => {
 			],
 		});
 
-		const baseline = saveBaseline(baselineSuite, "test-improve", "improvements-baseline");
+		saveBaseline(baselineSuite, "test-improve", "improvements-baseline");
 		const delta = compareToBaseline(currentSuite, "test-improve", "improvements-baseline");
 
 		expect(delta).not.toBeNull();
@@ -283,7 +294,7 @@ describe("compareToBaseline", () => {
 			],
 		});
 
-		const baseline = saveBaseline(baselineSuite, "test-newcase", "new-case-baseline");
+		saveBaseline(baselineSuite, "test-newcase", "new-case-baseline");
 		const delta = compareToBaseline(currentSuite, "test-newcase", "new-case-baseline");
 
 		expect(delta).not.toBeNull();
@@ -306,7 +317,7 @@ describe("compareToBaseline", () => {
 			totalDuration: 2000,
 		});
 
-		const baseline = saveBaseline(baselineSuite, "test-tokens", "tokens-baseline");
+		saveBaseline(baselineSuite, "test-tokens", "tokens-baseline");
 		const delta = compareToBaseline(currentSuite, "test-tokens", "tokens-baseline");
 
 		expect(delta).not.toBeNull();
@@ -354,31 +365,6 @@ describe("formatDelta", () => {
 });
 
 describe("regression detection edge cases", () => {
-	it("handles pass-rate drop exactly at threshold as regression (<= semantics)", () => {
-		// Baseline 20/20 = 100%. Current 19/20 = 95%. Delta -5pp. With
-		// threshold 5pp (0.05), hasRegression uses <= so -0.05 <= -0.05 = true.
-		const baselineSuite = makeSuite({
-			cases: Array.from({ length: 20 }, (_, i) => ({ id: `c${i}`, passed: true })),
-		});
-		const currentSuite = makeSuite({
-			cases: Array.from({ length: 20 }, (_, i) => ({
-				id: `c${i}`,
-				passed: i < 19,
-			})),
-		});
-
-		const baseline = saveBaseline(baselineSuite, "edge", "edge-baseline");
-		const delta = compareToBaseline(currentSuite, "edge", "edge-baseline", 0.05);
-
-		expect(delta).not.toBeNull();
-		expect(delta?.passRateDelta).toBeCloseTo(-0.05, 5);
-		expect(delta?.hasRegression).toBe(true); // exact threshold boundary IS a regression
-
-		rmSync(join(import.meta.dirname, "..", "evals", "baselines", "edge-baseline.json"), {
-			force: true,
-		});
-	});
-
 	it("ignores pass-rate changes from cases that were never in baseline", () => {
 		// A case removed entirely from the current run should NOT be a regression
 		// even though it "passed" in baseline.
@@ -392,7 +378,7 @@ describe("regression detection edge cases", () => {
 			cases: [{ id: "a", passed: true }], // 'removed' gone
 		});
 
-		const baseline = saveBaseline(baselineSuite, "edge-removed", "removed-baseline");
+		saveBaseline(baselineSuite, "edge-removed", "removed-baseline");
 		const delta = compareToBaseline(currentSuite, "edge-removed", "removed-baseline");
 
 		expect(delta).not.toBeNull();
@@ -404,5 +390,207 @@ describe("regression detection edge cases", () => {
 		rmSync(join(import.meta.dirname, "..", "evals", "baselines", "removed-baseline.json"), {
 			force: true,
 		});
+	});
+});
+
+// ============================================================================
+// Statistical significance primitives
+// ============================================================================
+
+describe("wilsonScoreInterval", () => {
+	it("returns [0, 1] for an empty sample (n=0)", () => {
+		const ci = wilsonScoreInterval(0, 0);
+		expect(ci.lower).toBe(0);
+		expect(ci.upper).toBe(1);
+	});
+
+	it("returns a point estimate at p=0", () => {
+		const ci = wilsonScoreInterval(0, 30);
+		// Wilson is asymmetric around 0 — the lower bound is exactly 0, the
+		// upper bound is a small positive number (not 0, the upper-tail mass
+		// matters here).
+		expect(ci.lower).toBe(0);
+		expect(ci.upper).toBeGreaterThan(0);
+		expect(ci.upper).toBeLessThan(0.1);
+	});
+
+	it("returns a point estimate at p=1", () => {
+		const ci = wilsonScoreInterval(30, 30);
+		expect(ci.lower).toBeGreaterThan(0.9);
+		expect(ci.upper).toBe(1);
+	});
+
+	it("narrows the interval as n grows", () => {
+		const small = wilsonScoreInterval(50, 100); // p=0.5
+		const large = wilsonScoreInterval(500, 1000); // p=0.5
+		const smallWidth = small.upper - small.lower;
+		const largeWidth = large.upper - large.lower;
+		expect(largeWidth).toBeLessThan(smallWidth / 2);
+	});
+
+	it("symmetric around 0.5 for symmetric samples", () => {
+		const ci = wilsonScoreInterval(50, 100);
+		expect(ci.lower).toBeCloseTo(0.5 - (ci.upper - 0.5), 2);
+	});
+});
+
+describe("binomialTestOneSided", () => {
+	it("returns p=1 when current >= baseline (no evidence of regression)", () => {
+		// 100/100 vs 100/100: identical, no drop — can't reject H0.
+		expect(binomialTestOneSided(100, 100, 100, 100)).toBeCloseTo(1, 5);
+		// 90/100 vs 95/100: actual improvement — one-sided test of "current worse"
+		// returns p=1 by convention.
+		expect(binomialTestOneSided(90, 100, 95, 100)).toBe(1);
+	});
+
+	it("returns a very small p-value for obvious regressions on large samples", () => {
+		// 100/100 vs 50/100: 50pp drop on n=100. Binomial z ≈ -7.07, p ≈ 0.
+		const p = binomialTestOneSided(100, 100, 50, 100);
+		expect(p).toBeLessThan(1e-6);
+	});
+
+	it("returns a non-significant p-value for small drops on small samples", () => {
+		// 5/5 vs 4/5: a single flip on 5 cases — binomial z ≈ -1.05, p ≈ 0.15,
+		// comfortably above α=0.05.
+		const p = binomialTestOneSided(5, 5, 4, 5);
+		expect(p).toBeGreaterThan(0.05);
+	});
+
+	it("returns an intermediate p-value for borderline cases on a moderate sample", () => {
+		// 20/20 vs 18/20: 10pp drop. Binomial z ≈ -1.49, p ≈ 0.07.
+		// Drops below the conventional significance threshold on this sample size.
+		const p = binomialTestOneSided(20, 20, 18, 20);
+		expect(p).toBeGreaterThan(0.001);
+		expect(p).toBeLessThan(0.15);
+	});
+
+	it("returns p=1 for empty samples (can't test what isn't there)", () => {
+		expect(binomialTestOneSided(0, 0, 1, 1)).toBe(1);
+		expect(binomialTestOneSided(0, 5, 1, 5)).toBe(1);
+	});
+});
+
+describe("testSignificance", () => {
+	it("flags a regression on large samples with clear effect", () => {
+		// 100/100 vs 80/100: 20pp drop, z ≈ -4.5, p < 0.0001.
+		const sig = testSignificance(100, 100, 80, 100);
+		expect(sig.isSignificant).toBe(true);
+		expect(sig.pValue).toBeLessThan(0.001);
+		expect(sig.effectSize).toBeGreaterThan(0.4); // Cohen's h threshold for "medium"
+		expect(sig.sampleSizeSufficient).toBe(true);
+	});
+
+	it("does NOT flag a small drop on a small sample", () => {
+		// 5/5 vs 4/5: 20pp drop, but n=5 each — sampleSizeSufficient=false,
+		// and even the significance test isn't precise enough at this n.
+		const sig = testSignificance(5, 5, 4, 5);
+		expect(sig.sampleSizeSufficient).toBe(false);
+		expect(sig.isSignificant).toBe(false); // sample-size guard, but also genuinely not significant
+	});
+
+	it("computes Cohen's h as a non-negative effect size", () => {
+		// Effect size should be non-negative since we always measure the drop.
+		const sig = testSignificance(100, 100, 80, 100);
+		expect(sig.effectSize).toBeGreaterThanOrEqual(0);
+	});
+
+	it("produces 95% confidence intervals around the observed proportions", () => {
+		const sig = testSignificance(100, 100, 80, 100);
+		expect(sig.baselineCI.level).toBe(0.95);
+		expect(sig.currentCI.level).toBe(0.95);
+		// Baseline 100/100 should have CI close to [1, 1] (Wilson lower is 0.96ish).
+		expect(sig.baselineCI.lower).toBeGreaterThan(0.95);
+		expect(sig.baselineCI.upper).toBe(1);
+		// Current 80/100 CI should cover around 0.8.
+		expect(sig.currentCI.lower).toBeGreaterThan(0.71);
+		expect(sig.currentCI.upper).toBeLessThan(0.87);
+	});
+
+	it("respects alpha parameter", () => {
+		// Mid-range drop: borderline at α=0.05.
+		const sig05 = testSignificance(100, 100, 90, 100, 0.05);
+		const sig01 = testSignificance(100, 100, 90, 100, 0.01);
+		// α=0.01 is stricter — isSignificant might flip.
+		expect(sig05.alpha).toBe(0.05);
+		expect(sig01.alpha).toBe(0.01);
+		// If p < 0.01, both flag; if 0.01 < p < 0.05, only α=0.05 flags.
+		if (sig05.pValue < 0.01) {
+			expect(sig01.isSignificant).toBe(true);
+		} else {
+			expect(sig01.isSignificant).toBe(false);
+		}
+	});
+});
+
+describe("compareToBaseline with statistical significance", () => {
+	it("populates the significance block on a large-sample regression", () => {
+		const baselineSuite = makeSuite({
+			cases: Array.from({ length: 50 }, (_, i) => ({ id: `c${i}`, passed: true })),
+		});
+		const currentSuite = makeSuite({
+			cases: Array.from({ length: 50 }, (_, i) => ({ id: `c${i}`, passed: i < 38 })),
+		});
+		saveBaseline(baselineSuite, "sig-large", "sig-large-baseline");
+		const delta = compareToBaseline(currentSuite, "sig-large", "sig-large-baseline");
+		expect(delta).not.toBeNull();
+		expect(delta?.significance.sampleSizeSufficient).toBe(true);
+		expect(delta?.significance.isSignificant).toBe(true);
+		expect(delta?.hasRegression).toBe(true); // significance-driven
+	});
+
+	it("falls back to threshold when sample size is too small for significance", () => {
+		// 3/3 vs 1/3: 67pp drop on n=3 — significance sample too small,
+		// but threshold fallback catches the >5pp drop.
+		const baselineSuite = makeSuite({
+			cases: Array.from({ length: 3 }, (_, i) => ({ id: `c${i}`, passed: true })),
+		});
+		const currentSuite = makeSuite({
+			cases: Array.from({ length: 3 }, (_, i) => ({ id: `c${i}`, passed: i === 0 })),
+		});
+		saveBaseline(baselineSuite, "sig-tiny", "sig-tiny-baseline");
+		const delta = compareToBaseline(currentSuite, "sig-tiny", "sig-tiny-baseline", {
+			threshold: 0.05,
+		});
+		expect(delta).not.toBeNull();
+		// Either significance-driven (p is very small here actually) or
+		// threshold fallback — both should agree on regression.
+		expect(delta?.hasRegression).toBe(true);
+	});
+
+	it("uses threshold fallback for small samples even if significance wouldn't fire", () => {
+		// 3/3 vs 2/3: 33pp drop on n=3 — sampleSizeSufficient=false (n<10).
+		// p-value at this n is huge (one of three flipped, plausibly noise).
+		const baselineSuite = makeSuite({
+			cases: Array.from({ length: 3 }, (_, i) => ({ id: `c${i}`, passed: true })),
+		});
+		const currentSuite = makeSuite({
+			cases: Array.from({ length: 3 }, (_, i) => ({ id: `c${i}`, passed: i < 2 })),
+		});
+		saveBaseline(baselineSuite, "sig-n3-mild", "sig-n3-mild-baseline");
+		const delta = compareToBaseline(currentSuite, "sig-n3-mild", "sig-n3-mild-baseline", {
+			threshold: 0.05,
+		});
+		expect(delta).not.toBeNull();
+		// 33pp drop > 5pp threshold → threshold fallback trips → hasRegression=true
+		expect(delta?.passRateDelta).toBeCloseTo(-1 / 3, 3);
+		expect(delta?.hasRegression).toBe(true);
+	});
+
+	it("respects --significance-alpha parameter", () => {
+		const baselineSuite = makeSuite({
+			cases: Array.from({ length: 100 }, (_, i) => ({ id: `c${i}`, passed: true })),
+		});
+		// 10pp drop on 100/100 → borderline p-value around 0.0015.
+		const currentSuite = makeSuite({
+			cases: Array.from({ length: 100 }, (_, i) => ({ id: `c${i}`, passed: i < 90 })),
+		});
+		saveBaseline(baselineSuite, "sig-alpha", "sig-alpha-baseline");
+		const delta = compareToBaseline(currentSuite, "sig-alpha", "sig-alpha-baseline", {
+			alpha: 0.01,
+		});
+		expect(delta).not.toBeNull();
+		expect(delta?.significance.alpha).toBe(0.01);
+		// 10pp on 100 cases is comfortably significant at α=0.01 (p < 0.01).
+		expect(delta?.hasRegression).toBe(true);
 	});
 });

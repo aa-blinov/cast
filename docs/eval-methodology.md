@@ -258,6 +258,15 @@ the pass rate and add 5% to the token spend, and no individual commit looks like
 when reviewed in isolation. Baselines are the mechanism that flips "did this PR regress?" from
 an inline review judgement call into a number.
 
+The regression flag is driven by a **two-proportion z-test** (one-sided: "current is worse than
+baseline") — the same logic oh-my-pi's edit benchmark uses internally for its ranking tables
+(`can1357/oh-my-pi/packages/typescript-edit-benchmark`). Reject H0 only when the observed pass-rate
+drop is unlikely under the assumption that the true rates are equal, calibrated by
+`--significance-alpha` (default 0.05 = 95%). Below ~10 common cases the test isn't reliable, so
+the run falls back to the simpler `--regression-threshold` percentage-point rule (default 5pp) —
+the same intuition as before, scoped to small samples where the z-test can't say anything
+informative.
+
 Baselines live in `evals/baselines/<bench>-<model>.json` (a name can be overridden with
 `--baseline <name>` when saving). Each baseline records the same shape `recordRun` writes — pass
 count, duration, full per-case pass/fail — plus the commit hash at capture time, so the comparison
@@ -273,7 +282,11 @@ node --import tsx evals/run.ts -m MiniMax-M3 --bench basic --save-baseline --bas
 # Compare the next run against the saved baseline; non-zero exit on regression
 node --import tsx evals/run.ts -m MiniMax-M3 --bench basic --baseline basic-MiniMax-M3
 
-# Tweak what counts as a regression (default 5pp)
+# Tighten / loosen the significance test (default α=0.05)
+node --import tsx evals/run.ts -m MiniMax-M3 --bench basic \
+  --baseline basic-MiniMax-M3 --significance-alpha 0.01
+
+# Tighten / loosen the small-sample fallback (default 5pp)
 node --import tsx evals/run.ts -m MiniMax-M3 --bench basic \
   --baseline basic-MiniMax-M3 --regression-threshold 3
 
@@ -281,33 +294,42 @@ node --import tsx evals/run.ts -m MiniMax-M3 --bench basic \
 node --import tsx evals/run.ts --list-baselines
 ```
 
-A regression report prints the delta on every tracked dimension plus a list of *which* cases moved:
+A regression report prints the statistical evidence first, then aggregate deltas, then the per-case
+moves that explain the drop:
 
 ```
 ==================================================================
 REGRESSION CHECK
 ==================================================================
-Comparing against baseline "basic-MiniMax-M3" (2026-07-25T..., @9fdac84 5/5 passing, 100.0%):
-  Pass rate: 1/1 (+0.0pp) (baseline: 5/1 (+0.0pp), -4/1 (+0.0pp))
-  Total tokens: 7,544 (baseline: 7,545, -1)
-  Duration: 1,344ms (baseline: 18,340ms, -16,996ms)
+Comparing against baseline "basic-MiniMax-M3" (..., @9fdac84 1/1 passing, 100.0%):
+  Pass rate: 1/1 (+0.0pp) (baseline: 1/1 (+0.0pp), +0/1 (+0.0pp))
+  Significance: p=1.0000 (α=0.05), effect size h=0.000, LOW N — see threshold fallback
+  Confidence intervals (95%): baseline 100.0%–100.0%, current 100.0%–100.0%
+  Total tokens: 7,564 (baseline: 7,545, +19)
+  Duration: 1,456ms (baseline: 18,340ms, -16,884ms)
 ```
 
-Per-case regression detection (cases passing in baseline but failing now) and improvement
-detection (failing → passing) is structural, not just summary-level — a run with the same pass
-rate can still surface individual case flips via the listed `Regressions` / `Improvements`.
+The "significance block" tells you *why* the run did or didn't trip the regression flag:
 
-Threshold semantics: `--regression-threshold <pp>` is the pass-rate drop (in percentage points)
-that flips the run to exit code 1. Default 5pp. On a 20-case suite, 1 case = 5pp; on a 2-case
-suite, 5pp > next case boundary, so tiny suites under-report regressions rather than over-alarm.
-The exit is independent of individual case failures — a run that passes every case but clears
-the threshold (e.g., 0.5pp threshold with 0pp delta, edge cases) still exits 0.
+- `p < α` (e.g. p=0.0031 < 0.05) → `*` marker, IS a statistically significant regression.
+- `p ≥ α` but sample is too small for the z-test to be reliable (n < 10) →
+  "LOW N — see threshold fallback" — and the flag follows `--regression-threshold` percentage points.
+- Effect size is Cohen's h, computed as `|2·asin(√p1) − 2·asin(√p2)|`; convention 0.2 small, 0.5 medium,
+  0.8 large. Reported alongside p so you can tell "significant but trivial" from "significant and
+  meaningful".
+- CIs are Wilson-score 95% intervals per run — the wider the overlap of the two, the less likely
+  the current drop is real rather than sampling noise.
 
-Limitations: the comparison uses *raw* case-id matching. Cases added since the baseline are
-ignored (no comparison possible — not a regression). Cases present in the baseline but removed
-from the current case set are likewise ignored. Renaming a case id (without rerunning its
-benchmark) looks like a removal + addition in the diff, which is fine — the new id is just
-fresh ground.
+Per-case regression / improvement detection is structural (case-id matching): cases passing in
+baseline but failing now go in `Regressions`, the symmetric move in `Improvements`. These are
+always computed on the *common* case subset — cases added since the baseline are silently ignored
+(no comparison possible — not a regression). The significance test uses the same subset, so a
+new or removed case can't tilt the z-test by inflating the denominator.
+
+When cases don't match 1:1 (e.g. baseline had 5 cases, current run covered 20) the report falls back
+to: pass rate reported as aggregate, significance computed on the common subset. If the current run
+covers a strict subset of baseline, only those common cases are tested for significance — running
+the full baseline and saving a new one is how you re-establish broader coverage.
 
 ## Troubleshooting a failure: `--trace`
 
