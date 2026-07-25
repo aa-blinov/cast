@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.8.24
+
+### Fixed
+
+- Web UI: picking a persona for "+ New session" no longer creates a session on the backend right away — it stages a local draft and only creates the real thread on your first message, like ChatGPT's new chat. Abandoned drafts no longer leave permanent "0 msg" entries in the sidebar.
+
 ## 0.8.22
 
 ### Fixed
