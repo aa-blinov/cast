@@ -1,5 +1,5 @@
 import { mkdtempSync, rmSync, statSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
@@ -18,7 +18,7 @@ vi.mock("../src/core/loop.ts", async (importOriginal) => {
 	return { ...actual, runAgentLoop: (...args: unknown[]) => runAgentLoop(...args) };
 });
 
-const { createWebBridge, TMP_CWD } = await import("../src/web/bridge.ts");
+const { createWebBridge, SANDBOX_CWD } = await import("../src/web/bridge.ts");
 
 const testConfig: AppConfig = {
 	baseURL: "http://localhost",
@@ -109,11 +109,12 @@ describe("web bridge", () => {
 		expect(ws.systemPrompt).toContain("You are the senior persona.");
 	});
 
-	it("tmp sentinel creates a scratch dir named after the session id", () => {
+	it("sandbox sentinel creates a scratch dir named after the session id", () => {
 		const bridge = createWebBridge(makeResult());
-		const ws = bridge.createSession(undefined, undefined, TMP_CWD);
+		const ws = bridge.createSession(undefined, undefined, SANDBOX_CWD);
+		const expectedDir = join(homedir(), ".cast", "sandbox", `cast-${ws.id}`);
 		try {
-			expect(ws.session.cwd).toBe(`/tmp/cast-${ws.id}`);
+			expect(ws.session.cwd).toBe(expectedDir);
 			expect(statSync(ws.session.cwd).isDirectory()).toBe(true);
 			expect(ws.systemPrompt).toContain(`Current working directory: ${ws.session.cwd}`);
 		} finally {
@@ -121,7 +122,7 @@ describe("web bridge", () => {
 		}
 	});
 
-	it("a real cwd override is used as-is, not mistaken for the tmp sentinel", () => {
+	it("a real cwd override is used as-is, not mistaken for the sandbox sentinel", () => {
 		const bridge = createWebBridge(makeResult());
 		const ws = bridge.createSession(undefined, undefined, fakeHome);
 		expect(ws.session.cwd).toBe(fakeHome);

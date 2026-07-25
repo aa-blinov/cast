@@ -196,11 +196,11 @@ export function toDisplayMessages(messages: Message[], reasoning?: Record<number
 	return out;
 }
 
-/** Sentinel the web client sends as `cwd` for a throwaway tmp session. The
- * real directory (`/tmp/cast-<session id>`) is only derived server-side once
- * the session id exists — the client never holds a path that hasn't been
- * created yet, so it can't stat/open a missing one. */
-export const TMP_CWD = "tmp";
+/** Sentinel the web client sends as `cwd` for a throwaway sandbox session. The
+ * real directory (`~/.cast/sandbox/cast-<session id>`) is only derived
+ * server-side once the session id exists — the client never holds a path that
+ * hasn't been created yet, so it can't stat/open a missing one. */
+export const SANDBOX_CWD = "sandbox";
 
 export interface WebBridge {
 	createSession(personaName?: string, modelOverride?: string, cwdOverride?: string): WebAgentSession;
@@ -312,14 +312,14 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		const persona = personaName ? (resolvePersona(personaName) ?? currentPersona) : currentPersona;
 		const model = modelOverride ?? result.session.model;
 
-		let sessionCwd = cwdOverride && cwdOverride !== TMP_CWD ? cwdOverride : cwd;
+		let sessionCwd = cwdOverride && cwdOverride !== SANDBOX_CWD ? cwdOverride : cwd;
 		const session = createSession(model, sessionCwd);
 		session.persona = persona.name;
 
-		// Scratch dir for a tmp session: named after the fresh session id and
+		// Scratch dir for a sandbox session: named after the fresh session id and
 		// created here, at the same moment the session starts existing.
-		if (cwdOverride === TMP_CWD) {
-			sessionCwd = join("/tmp", `cast-${session.id}`);
+		if (cwdOverride === SANDBOX_CWD) {
+			sessionCwd = join(homedir(), ".cast", "sandbox", `cast-${session.id}`);
 			mkdirSync(sessionCwd, { recursive: true });
 			session.cwd = sessionCwd;
 		}

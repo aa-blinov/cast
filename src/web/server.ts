@@ -191,10 +191,10 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 		} catch {
 			// empty body is fine
 		}
-		// Clients passing an explicit tmp path (pre-TMP_CWD-sentinel) still get
-		// it created for them; the current tmp button sends the sentinel and the
-		// bridge derives/creates the dir itself.
-		if (cwd?.startsWith("/tmp/cast-")) {
+		// Clients passing an explicit sandbox path (pre-SANDBOX_CWD-sentinel) still
+		// get it created for them; the current "new" button sends the sentinel and
+		// the bridge derives/creates the dir itself.
+		if (cwd?.includes(".cast/sandbox/cast-")) {
 			try {
 				mkdirSync(cwd, { recursive: true });
 			} catch {}
