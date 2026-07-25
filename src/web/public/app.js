@@ -107,52 +107,146 @@ function applyTheme(colors) {
 // all available from the same Google Fonts CDN style.css already depends
 // on. JetBrains Mono (the built-in default) is loaded eagerly by style.css's
 // own @import; every other family here is fetched on demand, only once
-// actually picked — adding 7 more @import families up front would undo the
+// actually picked — adding 9 more @import families up front would undo the
 // whole point of trimming the dead Inter import (see style.css).
 // index.html's inline bootstrap script keeps its own copy of each family
 // string (it runs before this module does, same reasoning as applyTheme's
 // cache) — update both if a family or id here changes.
+// Alphabetical by label within each group — same convention as SETTINGS_TABS
+// and SettingsTheme's swatch grid, so the picker order isn't just "however
+// they were added". `mono: true` fonts apply to both --font and --font-mono
+// (see applyFont) — a sans pick only ever touches --font, since --font-mono
+// backs code blocks, tool-arg dumps, tables, and the ASCII banner, all of
+// which depend on real monospace character alignment to not look broken.
+// Every google id here was verified to actually 200 from fonts.googleapis.com
+// (curled each css2?family=... individually) before adding it.
 const FONT_OPTIONS = [
+	// ── Monospace ──
 	{
-		id: "jetbrains-mono",
-		label: "JetBrains Mono",
-		family: "'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace",
-		google: null,
+		id: "cousine",
+		label: "Cousine",
+		mono: true,
+		family: "'Cousine', 'JetBrains Mono', monospace",
+		google: "Cousine:wght@400;700",
 	},
 	{
 		id: "fira-code",
 		label: "Fira Code",
+		mono: true,
 		family: "'Fira Code', 'JetBrains Mono', monospace",
 		google: "Fira+Code:wght@400;500;600;700",
 	},
 	{
-		id: "source-code-pro",
-		label: "Source Code Pro",
-		family: "'Source Code Pro', monospace",
-		google: "Source+Code+Pro:wght@400;500;600;700",
-	},
-	{
 		id: "ibm-plex-mono",
 		label: "IBM Plex Mono",
+		mono: true,
 		family: "'IBM Plex Mono', monospace",
 		google: "IBM+Plex+Mono:wght@400;500;600;700",
 	},
 	{
-		id: "roboto-mono",
-		label: "Roboto Mono",
-		family: "'Roboto Mono', monospace",
-		google: "Roboto+Mono:wght@400;500;600;700",
-	},
-	{ id: "space-mono", label: "Space Mono", family: "'Space Mono', monospace", google: "Space+Mono:wght@400;700" },
-	{
 		id: "inconsolata",
 		label: "Inconsolata",
+		mono: true,
 		family: "'Inconsolata', monospace",
 		google: "Inconsolata:wght@400;500;600;700",
 	},
-	{ id: "ubuntu-mono", label: "Ubuntu Mono", family: "'Ubuntu Mono', monospace", google: "Ubuntu+Mono:wght@400;700" },
+	{
+		id: "jetbrains-mono",
+		label: "JetBrains Mono",
+		mono: true,
+		family: "'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace",
+		google: null,
+	},
+	{
+		id: "roboto-mono",
+		label: "Roboto Mono",
+		mono: true,
+		family: "'Roboto Mono', monospace",
+		google: "Roboto+Mono:wght@400;500;600;700",
+	},
+	{
+		id: "source-code-pro",
+		label: "Source Code Pro",
+		mono: true,
+		family: "'Source Code Pro', monospace",
+		google: "Source+Code+Pro:wght@400;500;600;700",
+	},
+	{
+		id: "space-mono",
+		label: "Space Mono",
+		mono: true,
+		family: "'Space Mono', monospace",
+		google: "Space+Mono:wght@400;700",
+	},
+	{
+		id: "ubuntu-mono",
+		label: "Ubuntu Mono",
+		mono: true,
+		family: "'Ubuntu Mono', monospace",
+		google: "Ubuntu+Mono:wght@400;700",
+	},
+	{
+		id: "victor-mono",
+		label: "Victor Mono",
+		mono: true,
+		family: "'Victor Mono', 'JetBrains Mono', monospace",
+		google: "Victor+Mono:wght@400;500;600;700",
+	},
+	// ── Sans-serif (--font only; --font-mono stays whatever mono font is active) ──
+	{
+		id: "ibm-plex-sans",
+		label: "IBM Plex Sans",
+		mono: false,
+		family: "'IBM Plex Sans', sans-serif",
+		google: "IBM+Plex+Sans:wght@400;500;600;700",
+	},
+	{ id: "inter", label: "Inter", mono: false, family: "'Inter', sans-serif", google: "Inter:wght@400;500;600;700" },
+	{ id: "lato", label: "Lato", mono: false, family: "'Lato', sans-serif", google: "Lato:wght@400;700;900" },
+	{
+		id: "montserrat",
+		label: "Montserrat",
+		mono: false,
+		family: "'Montserrat', sans-serif",
+		google: "Montserrat:wght@400;500;600;700",
+	},
+	{
+		id: "nunito",
+		label: "Nunito",
+		mono: false,
+		family: "'Nunito', sans-serif",
+		google: "Nunito:wght@400;500;600;700",
+	},
+	{
+		id: "open-sans",
+		label: "Open Sans",
+		mono: false,
+		family: "'Open Sans', sans-serif",
+		google: "Open+Sans:wght@400;500;600;700",
+	},
+	{
+		id: "poppins",
+		label: "Poppins",
+		mono: false,
+		family: "'Poppins', sans-serif",
+		google: "Poppins:wght@400;500;600;700",
+	},
+	{ id: "roboto", label: "Roboto", mono: false, family: "'Roboto', sans-serif", google: "Roboto:wght@400;500;700" },
+	{
+		id: "source-sans-3",
+		label: "Source Sans 3",
+		mono: false,
+		family: "'Source Sans 3', sans-serif",
+		google: "Source+Sans+3:wght@400;500;600;700",
+	},
+	{
+		id: "work-sans",
+		label: "Work Sans",
+		mono: false,
+		family: "'Work Sans', sans-serif",
+		google: "Work+Sans:wght@400;500;600;700",
+	},
 ];
-const DEFAULT_FONT_ID = FONT_OPTIONS[0].id;
+const DEFAULT_FONT_ID = "jetbrains-mono";
 
 // Injects (once) a <link> for a picked font's Google Fonts family — the same
 // CDN style.css's @import already trusts, just loaded lazily per-pick
@@ -174,11 +268,14 @@ function loadGoogleFont(google) {
 // equivalent server-side setting to round-trip through, so this applies (and
 // persists) immediately, no `/command` involved.
 function applyFont(fontId) {
-	const font = FONT_OPTIONS.find((f) => f.id === fontId) ?? FONT_OPTIONS[0];
+	const font = FONT_OPTIONS.find((f) => f.id === fontId) ?? FONT_OPTIONS.find((f) => f.id === DEFAULT_FONT_ID);
 	loadGoogleFont(font.google);
 	const root = document.documentElement.style;
 	root.setProperty("--font", font.family);
-	root.setProperty("--font-mono", font.family);
+	// --font-mono backs code blocks/tool args/tables/the ASCII banner — all
+	// need real monospace alignment, so a sans pick only ever changes --font,
+	// leaving whichever monospace font is active untouched.
+	if (font.mono) root.setProperty("--font-mono", font.family);
 	try {
 		localStorage.setItem("cast:fontId", font.id);
 	} catch {}
@@ -1406,9 +1503,20 @@ function SettingsFont({ currentFontId, currentFontScale, onPickFont, onPickScale
 			</div>
 			<p class="settings-scale-preview" style=${{ fontSize: `calc(1em * ${currentFontScale})` }}>The quick brown fox jumps over the lazy dog</p>
 		</div>
-		<div class="settings-row-label">Family</div>
+		<div class="settings-row-label">Monospace</div>
 		<div class="settings-theme-grid">
-			${FONT_OPTIONS.map(
+			${FONT_OPTIONS.filter((f) => f.mono).map(
+				(f) => html`
+				<button key=${f.id} class="settings-theme-swatch${f.id === currentFontId ? " active" : ""}" style=${{ fontFamily: f.family }} onClick=${() => onPickFont(f.id)}>
+					${f.label}
+				</button>
+			`,
+			)}
+		</div>
+		<div class="settings-row-label" style=${{ marginTop: "14px" }}>Sans-serif</div>
+		<p class="settings-scale-preview" style=${{ marginTop: 0, marginBottom: "8px" }}>Applies to interface text only — code, tool output, and tables stay monospace.</p>
+		<div class="settings-theme-grid">
+			${FONT_OPTIONS.filter((f) => !f.mono).map(
 				(f) => html`
 				<button key=${f.id} class="settings-theme-swatch${f.id === currentFontId ? " active" : ""}" style=${{ fontFamily: f.family }} onClick=${() => onPickFont(f.id)}>
 					${f.label}
