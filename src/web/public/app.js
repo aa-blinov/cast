@@ -1624,11 +1624,11 @@ function SettingsSsh({ data, busy, act, confirm }) {
 	`;
 }
 
-// Sentinel sent to the server instead of a real path when the tmp toggle is
-// active — the actual /tmp/cast-<session id> directory is only created
-// server-side at session-creation time (see bridge.ts), so the UI never
-// holds a path that doesn't exist yet.
-const TMP_CWD = "tmp";
+// Sentinel sent to the server when the "new" (sandbox) toggle is active — the
+// actual ~/.cast/sandbox/cast-<session id> directory is only created server-side
+// at session-creation time (see bridge.ts), so the UI never holds a path that
+// doesn't exist yet.
+const SANDBOX_CWD = "sandbox";
 
 function Sidebar({
 	sessions,
@@ -1671,7 +1671,7 @@ function Sidebar({
 	);
 	const pinnedGroup = filtered.filter((s) => s.pinned).sort(byRunningThenDate);
 	const otherGroup = filtered.filter((s) => !s.pinned).sort(byRunningThenDate);
-	const isTmp = cwd === TMP_CWD;
+	const isSandbox = cwd === SANDBOX_CWD;
 
 	const active = sessions.find((s) => s.id === activeId);
 
@@ -1765,15 +1765,15 @@ function Sidebar({
 						<span class="dir-row-label">Directory</span>
 						<div class="dir-toggle">
 							<button
-								class="dir-toggle-btn${!isTmp ? " active" : ""}"
-								title=${isTmp ? defaultCwd : cwd}
-								onClick=${isTmp ? () => onSetCwd(null) : onOpenDirPicker}
-							>${shortPath(isTmp ? defaultCwd : cwd)}</button>
+								class="dir-toggle-btn${!isSandbox ? " active" : ""}"
+								title=${isSandbox ? defaultCwd : cwd}
+								onClick=${isSandbox ? () => onSetCwd(null) : onOpenDirPicker}
+							>${shortPath(isSandbox ? defaultCwd : cwd)}</button>
 							<button
-								class="dir-toggle-btn dir-toggle-tmp${isTmp ? " active" : ""}"
-								title="Use a fresh scratch directory for a throwaway session"
-								onClick=${() => onSetCwd(TMP_CWD)}
-							>tmp</button>
+								class="dir-toggle-btn dir-toggle-sandbox${isSandbox ? " active" : ""}"
+								title="Create a fresh sandbox directory for a throwaway session"
+								onClick=${() => onSetCwd(SANDBOX_CWD)}
+							>new</button>
 						</div>
 					</div>
 					${personas.map(

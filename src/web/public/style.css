@@ -402,7 +402,7 @@ body.resizing-diff * { user-select: none; }
 	text-align: left;
 	overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.dir-toggle-tmp { flex-shrink: 0; }
+.dir-toggle-sandbox { flex-shrink: 0; }
 .persona-label { color: var(--text-muted); font-size: .7rem; margin-left: 4px; }
 
 /* ── Chat area ────────────────────────────────────────────────────── */
