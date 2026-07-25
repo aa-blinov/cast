@@ -101,6 +101,99 @@ function applyTheme(colors) {
 	} catch {}
 }
 
+// ── Font ─────────────────────────────────────────────────────────────
+// A curated set of well-regarded monospace/coding fonts — not exhaustive,
+// just fonts actually built for reading code (ligature/legibility-focused),
+// all available from the same Google Fonts CDN style.css already depends
+// on. JetBrains Mono (the built-in default) is loaded eagerly by style.css's
+// own @import; every other family here is fetched on demand, only once
+// actually picked — adding 7 more @import families up front would undo the
+// whole point of trimming the dead Inter import (see style.css).
+// index.html's inline bootstrap script keeps its own copy of each family
+// string (it runs before this module does, same reasoning as applyTheme's
+// cache) — update both if a family or id here changes.
+const FONT_OPTIONS = [
+	{
+		id: "jetbrains-mono",
+		label: "JetBrains Mono",
+		family: "'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace",
+		google: null,
+	},
+	{
+		id: "fira-code",
+		label: "Fira Code",
+		family: "'Fira Code', 'JetBrains Mono', monospace",
+		google: "Fira+Code:wght@400;500;600;700",
+	},
+	{
+		id: "source-code-pro",
+		label: "Source Code Pro",
+		family: "'Source Code Pro', monospace",
+		google: "Source+Code+Pro:wght@400;500;600;700",
+	},
+	{
+		id: "ibm-plex-mono",
+		label: "IBM Plex Mono",
+		family: "'IBM Plex Mono', monospace",
+		google: "IBM+Plex+Mono:wght@400;500;600;700",
+	},
+	{
+		id: "roboto-mono",
+		label: "Roboto Mono",
+		family: "'Roboto Mono', monospace",
+		google: "Roboto+Mono:wght@400;500;600;700",
+	},
+	{ id: "space-mono", label: "Space Mono", family: "'Space Mono', monospace", google: "Space+Mono:wght@400;700" },
+	{
+		id: "inconsolata",
+		label: "Inconsolata",
+		family: "'Inconsolata', monospace",
+		google: "Inconsolata:wght@400;500;600;700",
+	},
+	{ id: "ubuntu-mono", label: "Ubuntu Mono", family: "'Ubuntu Mono', monospace", google: "Ubuntu+Mono:wght@400;700" },
+];
+const DEFAULT_FONT_ID = FONT_OPTIONS[0].id;
+
+// Injects (once) a <link> for a picked font's Google Fonts family — the same
+// CDN style.css's @import already trusts, just loaded lazily per-pick
+// instead of every family up front. `display=swap` means the UI keeps using
+// the current font (no invisible-text flash) until the new one is ready,
+// then swaps.
+function loadGoogleFont(google) {
+	if (!google) return;
+	const id = `google-font-${google}`;
+	if (document.getElementById(id)) return;
+	const link = document.createElement("link");
+	link.id = id;
+	link.rel = "stylesheet";
+	link.href = `https://fonts.googleapis.com/css2?family=${google}&display=swap`;
+	document.head.appendChild(link);
+}
+
+// Purely client-side (localStorage), unlike applyTheme — there's no
+// equivalent server-side setting to round-trip through, so this applies (and
+// persists) immediately, no `/command` involved.
+function applyFont(fontId) {
+	const font = FONT_OPTIONS.find((f) => f.id === fontId) ?? FONT_OPTIONS[0];
+	loadGoogleFont(font.google);
+	const root = document.documentElement.style;
+	root.setProperty("--font", font.family);
+	root.setProperty("--font-mono", font.family);
+	try {
+		localStorage.setItem("cast:fontId", font.id);
+	} catch {}
+}
+
+const FONT_SCALE_OPTIONS = [0.85, 0.9, 1, 1.1, 1.25, 1.5];
+const DEFAULT_FONT_SCALE = 1;
+
+function applyFontScale(scale) {
+	document.documentElement.style.setProperty("--font-scale", String(scale));
+	try {
+		localStorage.setItem("cast:fontScale", String(scale));
+	} catch {}
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────
 function escapeHtml(s) {
 	if (!s) return "";
@@ -832,6 +925,7 @@ function DirectoryBrowser({ initialPath, onPick, onClose }) {
 }
 
 const SETTINGS_TABS = [
+	{ id: "font", label: "Font" },
 	{ id: "mcp", label: "MCP" },
 	{ id: "model", label: "Model" },
 	{ id: "plugins", label: "Plugins" },
@@ -922,7 +1016,19 @@ function StatusPopover({ activeId, running }) {
 // consolidated here so the chat transcript stays just the conversation.
 // Every action still runs through the exact same POST /command endpoint the
 // composer used, just without ever appending a chat notice for it.
-function SettingsModal({ activeId, themes, currentThemeId, onApplyTheme, onThemeChange, onClose, confirm }) {
+function SettingsModal({
+	activeId,
+	themes,
+	currentThemeId,
+	onApplyTheme,
+	onThemeChange,
+	currentFontId,
+	currentFontScale,
+	onPickFont,
+	onPickScale,
+	onClose,
+	confirm,
+}) {
 	const [tab, setTab] = useState("model");
 	const [data, setData] = useState({});
 	const [errors, setErrors] = useState({});
@@ -1034,7 +1140,10 @@ function SettingsModal({ activeId, themes, currentThemeId, onApplyTheme, onTheme
 
 	// theme's data comes from the `themes` prop (fetched once at app boot,
 	// always present already) rather than the per-tab preload above.
-	const hasData = tab === "theme" || data[tab] !== undefined;
+	// theme and font both come from props/local state (fetched once at app
+	// boot, or never fetched at all for font — see applyFont) rather than the
+	// per-tab preload above.
+	const hasData = tab === "theme" || tab === "font" || data[tab] !== undefined;
 
 	return html`
 		<div class="modal-backdrop" onClick=${onClose}>
@@ -1059,29 +1168,31 @@ function SettingsModal({ activeId, themes, currentThemeId, onApplyTheme, onTheme
 						${
 							!hasData
 								? html`<div class="settings-loading">Loading…</div>`
-								: tab === "model"
-									? html`<${SettingsModel} data=${data.model} busy=${busy} act=${act} />`
-									: tab === "theme"
-										? html`<${SettingsTheme} themes=${themes} currentThemeId=${currentThemeId} onPick=${async (
-												id,
-											) => {
-												const res = await act(`/theme ${id}`);
-												if (res.ok && res.result?.colors) onApplyTheme(res.result.colors);
-												if (res.ok && res.result?.theme) onThemeChange(res.result.theme);
-											}} />`
-										: tab === "tools"
-											? html`<${SettingsTools} data=${data.tools} busy=${busy} act=${act} />`
-											: tab === "mcp"
-												? html`<${SettingsMcp} data=${data.mcp} busy=${busy} act=${act} confirm=${confirm} />`
-												: tab === "skills"
-													? html`<${SettingsSkills} data=${data.skills} busy=${busy} act=${act} confirm=${confirm} />`
-													: tab === "plugins"
-														? html`<${SettingsPlugins} data=${data.plugins} busy=${busy} act=${act} confirm=${confirm} />`
-														: tab === "provider"
-															? html`<${SettingsProvider} data=${data.provider} busy=${busy} act=${act} confirm=${confirm} />`
-															: tab === "ssh"
-																? html`<${SettingsSsh} data=${data.ssh} busy=${busy} act=${act} confirm=${confirm} />`
-																: null
+								: tab === "font"
+									? html`<${SettingsFont} currentFontId=${currentFontId} currentFontScale=${currentFontScale} onPickFont=${onPickFont} onPickScale=${onPickScale} />`
+									: tab === "model"
+										? html`<${SettingsModel} data=${data.model} busy=${busy} act=${act} />`
+										: tab === "theme"
+											? html`<${SettingsTheme} themes=${themes} currentThemeId=${currentThemeId} onPick=${async (
+													id,
+												) => {
+													const res = await act(`/theme ${id}`);
+													if (res.ok && res.result?.colors) onApplyTheme(res.result.colors);
+													if (res.ok && res.result?.theme) onThemeChange(res.result.theme);
+												}} />`
+											: tab === "tools"
+												? html`<${SettingsTools} data=${data.tools} busy=${busy} act=${act} />`
+												: tab === "mcp"
+													? html`<${SettingsMcp} data=${data.mcp} busy=${busy} act=${act} confirm=${confirm} />`
+													: tab === "skills"
+														? html`<${SettingsSkills} data=${data.skills} busy=${busy} act=${act} confirm=${confirm} />`
+														: tab === "plugins"
+															? html`<${SettingsPlugins} data=${data.plugins} busy=${busy} act=${act} confirm=${confirm} />`
+															: tab === "provider"
+																? html`<${SettingsProvider} data=${data.provider} busy=${busy} act=${act} confirm=${confirm} />`
+																: tab === "ssh"
+																	? html`<${SettingsSsh} data=${data.ssh} busy=${busy} act=${act} confirm=${confirm} />`
+																	: null
 						}
 					</div>
 				</div>
@@ -1272,6 +1383,38 @@ function SettingsTheme({ themes, currentThemeId, onPick }) {
 				</button>
 			`,
 				)}
+		</div>
+	`;
+}
+
+// Client-only (localStorage) — unlike SettingsTheme, picking here never
+// round-trips through `act`/`/command`, so it applies the instant it's
+// clicked/dragged. Each swatch renders its own label in its own font as a
+// live preview of what picking it actually looks like.
+function SettingsFont({ currentFontId, currentFontScale, onPickFont, onPickScale }) {
+	return html`
+		<div class="settings-rows" style=${{ marginBottom: "16px" }}>
+			<div class="settings-row-label">Scale</div>
+			<div class="settings-scale-row">
+				${FONT_SCALE_OPTIONS.map(
+					(s) => html`
+					<button key=${s} class="settings-scale-btn${s === currentFontScale ? " active" : ""}" onClick=${() => onPickScale(s)}>
+						${Math.round(s * 100)}%
+					</button>
+				`,
+				)}
+			</div>
+			<p class="settings-scale-preview" style=${{ fontSize: `calc(1em * ${currentFontScale})` }}>The quick brown fox jumps over the lazy dog</p>
+		</div>
+		<div class="settings-row-label">Family</div>
+		<div class="settings-theme-grid">
+			${FONT_OPTIONS.map(
+				(f) => html`
+				<button key=${f.id} class="settings-theme-swatch${f.id === currentFontId ? " active" : ""}" style=${{ fontFamily: f.family }} onClick=${() => onPickFont(f.id)}>
+					${f.label}
+				</button>
+			`,
+			)}
 		</div>
 	`;
 }
@@ -1873,6 +2016,25 @@ function App() {
 	const [commands, setCommands] = useState([]);
 	const [themes, setThemes] = useState([]);
 	const [currentThemeId, setCurrentThemeId] = useState(null);
+	// Font/scale, unlike theme, are purely client-side (localStorage — see
+	// applyFont/applyFontScale) — index.html's inline script already applied
+	// whatever was cached before this component ever mounted, so these just
+	// need to start in sync with that for Settings > Font's swatches/scale
+	// buttons to show the right one as selected from the first render.
+	const [currentFontId, setCurrentFontId] = useState(() => {
+		try {
+			return localStorage.getItem("cast:fontId") || DEFAULT_FONT_ID;
+		} catch {
+			return DEFAULT_FONT_ID;
+		}
+	});
+	const [currentFontScale, setCurrentFontScale] = useState(() => {
+		try {
+			return Number(localStorage.getItem("cast:fontScale")) || DEFAULT_FONT_SCALE;
+		} catch {
+			return DEFAULT_FONT_SCALE;
+		}
+	});
 	const [streaming, setStreaming] = useState([]);
 	const [running, setRunning] = useState(false);
 	const [pendingSteers, setPendingSteers] = useState([]);
@@ -2026,9 +2188,15 @@ function App() {
 	// history entry (a real click) or just replaces the current URL
 	// (programmatic: initial bootstrap, reconnect recovery, popstate).
 	const selectSession = useCallback(
-		async (id, { push = true } = {}) => {
+		async (id, { push = true, prefetch = null } = {}) => {
 			try {
-				const data = await api("GET", `/api/sessions/${id}`);
+				// initClientState may already have this in flight — kicked off
+				// alongside (not after) the personas/session-list calls when the
+				// URL names a session up front, saving a full round trip on a
+				// reload landing on ?session=<id>. Falls through to a normal fetch
+				// for every other caller (sidebar clicks, popstate, ...).
+				const data = prefetch ? await prefetch : await api("GET", `/api/sessions/${id}`);
+				if (!data) throw new Error("Not found");
 				// Splice in older pages already loaded via scroll-up earlier this
 				// tab session — only if nothing changed underneath: the cache's
 				// anchorSeq is the oldestSeq the *latest* page had when caching
@@ -2154,6 +2322,16 @@ function App() {
 	// visibly flash back in on every blip — see staticResourcesLoadedRef.
 	const initClientState = useCallback(async () => {
 		try {
+			// Fired immediately, before anything else, so a reload landing on
+			// ?session=<id> (the common case: a bookmarked/shared/reopened link)
+			// doesn't pay for personas -> session list -> this session's own GET
+			// as three round trips in a row when the id is already known up
+			// front. Awaited down in the `s.length > 0` branch below, by which
+			// point it's had the personas+session-list fetch time to resolve in
+			// the background — usually free.
+			const urlId = sessionIdFromUrl();
+			const sessionPrefetch = urlId ? api("GET", `/api/sessions/${urlId}`).catch(() => null) : null;
+
 			if (!staticResourcesLoadedRef.current) {
 				const p = await api("GET", "/api/personas");
 				if (!p) return false;
@@ -2188,7 +2366,6 @@ function App() {
 			if (s.length > 0) {
 				// URL wins (lets a shared/duplicated/bookmarked link always land on
 				// that exact thread) over the last-active fallback from localStorage.
-				const urlId = sessionIdFromUrl();
 				let lastId = null;
 				try {
 					lastId = localStorage.getItem("cast:lastSessionId");
@@ -2199,7 +2376,7 @@ function App() {
 						: lastId && s.find((x) => x.id === lastId)
 							? lastId
 							: s[0].id;
-				await selectSession(target, { push: false });
+				await selectSession(target, { push: false, prefetch: target === urlId ? sessionPrefetch : null });
 			} else {
 				const current = personasRef.current;
 				const defaultP = current.find((x) => x.name === "coding") ?? current[0];
@@ -3172,6 +3349,16 @@ function App() {
 					currentThemeId=${currentThemeId}
 					onApplyTheme=${applyTheme}
 					onThemeChange=${setCurrentThemeId}
+					currentFontId=${currentFontId}
+					currentFontScale=${currentFontScale}
+					onPickFont=${(id) => {
+						applyFont(id);
+						setCurrentFontId(id);
+					}}
+					onPickScale=${(scale) => {
+						applyFontScale(scale);
+						setCurrentFontScale(scale);
+					}}
 					onClose=${() => setSettingsOpen(false)}
 					confirm=${requestConfirm}
 				/>

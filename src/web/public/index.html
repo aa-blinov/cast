@@ -4,14 +4,17 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>cast web</title>
-	<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-	<link rel="stylesheet" href="/style.css">
 <script>
-// Applies the last-known theme (cached by applyTheme() in app.js) before the
-// first paint — otherwise the page shows style.css's hardcoded default
-// accent for however long /api/themes+/api/config take to answer, then
-// jumps to the real theme. Runs synchronously, blocking render, on purpose:
-// a flash of the wrong color is worse than a few extra ms before paint.
+// Applies the last-known theme/font/scale (cached by app.js — see
+// applyTheme/applyFont/applyFontScale) before the first paint, so a reload
+// shows the real saved look immediately instead of style.css's hardcoded
+// defaults for however long the network takes, then jumping. Deliberately
+// the very first thing in <head>, before any <link> — a browser defers
+// script execution until every *preceding* stylesheet's CSSOM is ready, so
+// this ran second-to-nothing-blocking, right after this document itself,
+// with no possibility of getting stuck behind style.css's own Google Fonts
+// @import (which is exactly the kind of slow external round trip this
+// exists to not wait on).
 try {
 	const colors = JSON.parse(localStorage.getItem("cast:themeColors"));
 	if (colors) {
@@ -29,7 +32,39 @@ try {
 		root.setProperty("--text-muted", colors.muted);
 	}
 } catch {}
+// Same idea for a picked font/scale (Settings > Font in app.js) — both are
+// pure client prefs (no server round trip at all), so nothing else needs to
+// resolve first; apply straight from cache before paint.
+try {
+	const fontId = localStorage.getItem("cast:fontId");
+	if (fontId && fontId !== "jetbrains-mono") {
+		const families = {
+			"fira-code": "'Fira Code', 'JetBrains Mono', monospace",
+			"source-code-pro": "'Source Code Pro', monospace",
+			"ibm-plex-mono": "'IBM Plex Mono', monospace",
+			"roboto-mono": "'Roboto Mono', monospace",
+			"space-mono": "'Space Mono', monospace",
+			"inconsolata": "'Inconsolata', monospace",
+			"ubuntu-mono": "'Ubuntu Mono', monospace",
+		};
+		const family = families[fontId];
+		if (family) {
+			document.documentElement.style.setProperty("--font", family);
+			document.documentElement.style.setProperty("--font-mono", family);
+		}
+	}
+	const fontScale = localStorage.getItem("cast:fontScale");
+	if (fontScale) document.documentElement.style.setProperty("--font-scale", fontScale);
+} catch {}
 </script>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<!-- Kicks off DNS+TCP+TLS for the CDNs style.css's @import and app.js's
+     importmap depend on, in parallel with HTML parsing, instead of only
+     starting once the parser reaches those actual requests. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://esm.sh" crossorigin>
+<link rel="stylesheet" href="/style.css">
 <script type="importmap">
 {
 	"imports": {
