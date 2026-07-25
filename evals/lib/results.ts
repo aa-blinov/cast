@@ -14,11 +14,14 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { type Baseline, historyFileName } from "./baseline.ts";
 import type { CompareResult, RepeatedCompareResult, SuiteResult } from "./runner.ts";
 
 const RESULTS_DIR = join(import.meta.dirname, "..", "results");
 const RUNS_DIR = join(RESULTS_DIR, "runs");
 const INDEX_PATH = join(RESULTS_DIR, "index.json");
+const BASELINES_DIR = join(import.meta.dirname, "..", "baselines");
+const HISTORY_DIR = join(BASELINES_DIR, "history");
 
 export interface IndexEntry {
 	timestamp: string;
@@ -279,6 +282,65 @@ export function recordCompareRepeated(compare: RepeatedCompareResult, caseFilter
 	});
 
 	return filePath;
+}
+
+/**
+ * Save a `RepeatedCompareResult` (single-model repeated run) as a baseline.
+ *
+ * The "passed" count for a case is the number of *consistent* passing attempts
+ * (all-or-nothing): a 3/3 case credits 1 pass, 0/3 credits 0, 1-2/3 credits
+ * 0 (the case is flaked and shouldn't anchor a regression comparison). This
+ * mirrors what `compareToBaseline`'s significance test wants to see — a
+ * repeated run that disagreed never appears "passing" in the baseline, so
+ * later comparison code won't silently mask regression behind prior flakiness.
+ */
+export function recordRepeatedBaseline(compare: RepeatedCompareResult, name: string): string {
+	ensureDirs();
+	const model = compare.models[0]!;
+	const suite = compare.suites[model]!;
+	const baseline: Baseline = {
+		name,
+		bench: "", // bench isn't tracked in RepeatedCompareResult; callers pass `name` like "basic-m3"
+		model,
+		commit: currentCommit(),
+		timestamp: new Date().toISOString(),
+		total: suite.casesTotal,
+		passed: suite.results.filter((r) => r.consistent && r.passed > 0).length,
+		failed: suite.results.length - suite.results.filter((r) => r.consistent && r.passed > 0).length,
+		passRate:
+			suite.casesTotal > 0
+				? suite.results.filter((r) => r.consistent && r.passed > 0).length / suite.casesTotal
+				: 0,
+		duration: suite.duration,
+		usage: { ...suite.usage },
+		results: suite.results.map((r) => ({
+			caseId: r.caseId,
+			passed: r.consistent && r.passed > 0,
+			duration: r.avgDuration,
+			turns: r.avgTurns,
+			usage: { ...r.attempts[0]?.usage ?? emptyUsage() },
+		})),
+	};
+	const filePath = join(BASELINES_DIR, `${baseline.name}.json`);
+	writeFileSync(filePath, JSON.stringify(baseline, null, 2), "utf-8");
+
+	// History copy
+	const historyPath = join(HISTORY_DIR, historyFileName(baseline.timestamp, baseline.name));
+	writeFileSync(historyPath, JSON.stringify(baseline, null, 2), "utf-8");
+
+	return filePath;
+}
+
+function emptyUsage(): import("../lib/runner.ts").RunResult["usage"] {
+	return {
+		promptTokens: 0,
+		completionTokens: 0,
+		totalTokens: 0,
+		cost: 0,
+		cacheReadTokens: 0,
+		cacheWriteTokens: 0,
+		uncachedTokens: 0,
+	};
 }
 
 /** Print a compact table of past runs — newest last, like `git log --oneline` in spirit. */

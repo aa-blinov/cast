@@ -173,6 +173,15 @@ export interface RunnerOptions {
 	provider?: string;
 	/** Persona whose system prompt the agent runs with; defaults to "senior". */
 	persona?: string;
+	/**
+	 * Milliseconds to sleep between launching cases — works around token-plan
+	 * rate limits (e.g. xiaomi-mimo's 429 "Token Plan rate limit reached")
+	 * by spacing requests instead of letting concurrency fire them all at once.
+	 * With `concurrency: 1` this becomes a per-case delay; with the default
+	 * `concurrency: 10` the delay only applies when a new task is started
+	 * after one just completed (still gates peak arrival rate to the provider).
+	 */
+	rateLimitDelayMs?: number;
 }
 
 /**
@@ -478,6 +487,7 @@ export async function runSuite(
 	options: RunnerOptions & { concurrency?: number },
 ): Promise<SuiteResult> {
 	const concurrency = options.concurrency ?? 10;
+	const rateLimitDelayMs = options.rateLimitDelayMs ?? 0;
 	const results: RunResult[] = new Array(cases.length);
 	const startTime = Date.now();
 	let completed = 0;
@@ -516,6 +526,13 @@ export async function runSuite(
 		// Wait if we hit the concurrency limit
 		if (executing.size >= concurrency) {
 			await Promise.race(executing);
+		}
+		// Rate-limit gate: throttle the start of each new case so a token-plan
+		// "rate limit reached" 429 doesn't fire after a burst. With concurrency>1
+		// this runs only after the first wave of cases has started, so the
+		// first ten still launch together; subsequent starts are spaced.
+		if (rateLimitDelayMs > 0) {
+			await sleep(rateLimitDelayMs);
 		}
 	}
 
@@ -602,6 +619,11 @@ function average(values: number[]): number {
 	return values.length === 0 ? 0 : values.reduce((a, b) => a + b, 0) / values.length;
 }
 
+/** Sleep `ms` milliseconds. Used by `--rate-limit-delay` to space out case starts. */
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export interface RepeatedCompareResult {
 	models: string[];
 	cases: EvalCase[];
@@ -625,6 +647,7 @@ export async function compareModelsRepeated(
 ): Promise<RepeatedCompareResult> {
 	const concurrency = options.concurrency ?? 10;
 	const repeat = Math.max(1, options.repeat);
+	const rateLimitDelayMs = options.rateLimitDelayMs ?? 0;
 	const overallStart = Date.now();
 
 	const attemptsByModelCase: Record<string, RunResult[][]> = Object.fromEntries(
@@ -664,6 +687,9 @@ export async function compareModelsRepeated(
 		task.then(() => executing.delete(task));
 		if (executing.size >= concurrency) {
 			await Promise.race(executing);
+		}
+		if (rateLimitDelayMs > 0) {
+			await sleep(rateLimitDelayMs);
 		}
 	}
 	await Promise.all(executing);
@@ -872,6 +898,7 @@ export async function compareModels(
 	options: Omit<RunnerOptions, "model"> & { concurrency?: number },
 ): Promise<CompareResult> {
 	const concurrency = options.concurrency ?? 10;
+	const rateLimitDelayMs = options.rateLimitDelayMs ?? 0;
 	const overallStart = Date.now();
 
 	const resultsByModel: Record<string, RunResult[]> = Object.fromEntries(
@@ -912,6 +939,9 @@ export async function compareModels(
 		task.then(() => executing.delete(task));
 		if (executing.size >= concurrency) {
 			await Promise.race(executing);
+		}
+		if (rateLimitDelayMs > 0) {
+			await sleep(rateLimitDelayMs);
 		}
 	}
 	await Promise.all(executing);

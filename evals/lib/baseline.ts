@@ -78,7 +78,12 @@ function ensureDirs(): void {
  * (with the `:` → `-` swap that the rest of the evals directory uses) keeps
  * `ls` ordering chronological without any extra indexing.
  */
-function historyFileName(timestamp: string, baselineName: string): string {
+/**
+ * Filename used for the timed-stamped history copy. The full ISO timestamp
+ * (with the `:` → `-` swap that the rest of the evals directory uses) keeps
+ * `ls` ordering chronological without any extra indexing.
+ */
+export function historyFileName(timestamp: string, baselineName: string): string {
 	return `${timestamp.replace(/[:.]/g, "-")}_${baselineName}.json`;
 }
 
