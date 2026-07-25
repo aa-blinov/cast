@@ -22,7 +22,14 @@
 
 import { resolve } from "node:path";
 import { BENCHES, DEFAULT_BENCH_IDS, findBench } from "./benches/index.ts";
-import { compareToBaseline, formatDelta, listBaselines, resolveBaseline, saveBaseline } from "./lib/baseline.ts";
+import {
+	compareToBaseline,
+	formatDelta,
+	listBaselineHistory,
+	listBaselines,
+	resolveBaseline,
+	saveBaseline,
+} from "./lib/baseline.ts";
 import { cleanupFixtures } from "./lib/fixtures.ts";
 import { printHistory, recordCompare, recordCompareRepeated, recordRun } from "./lib/results.ts";
 import {
@@ -73,6 +80,7 @@ async function main(): Promise<void> {
 	let regressionThreshold = 0.05;
 	let significanceAlpha = 0.05;
 	let listBaselinesFlag = false;
+	let listBaselineHistoryName: string | undefined;
 
 	for (let i = 0; i < args.length; i++) {
 		switch (args[i]) {
@@ -155,6 +163,9 @@ async function main(): Promise<void> {
 			case "--list-baselines":
 				listBaselinesFlag = true;
 				break;
+			case "--baseline-history":
+				listBaselineHistoryName = args[++i] ?? "";
+				break;
 			case "--help":
 			case "-h":
 				printHelp();
@@ -182,6 +193,29 @@ async function main(): Promise<void> {
 			console.log(`  ${b.name.padEnd(28)} ${benchStr.padEnd(12)} ${modelsStr.padEnd(14)} ${rate}${commitStr}`);
 		}
 		console.log();
+		return;
+	}
+
+	if (listBaselineHistoryName !== undefined) {
+		const history = listBaselineHistory(listBaselineHistoryName);
+		if (history.length === 0) {
+			console.log(
+				`No history for "${listBaselineHistoryName}". Run --save-baseline at least once to record one.`,
+			);
+			return;
+		}
+		console.log(`\nHistory for "${listBaselineHistoryName}" (${history.length} snapshot(s), newest first):\n`);
+		console.log("  timestamp                   pass rate    passed/total  commit");
+		for (const b of history) {
+			const ts = b.timestamp.replace("T", " ").replace(/\..+$/, "").replace(/Z$/, "");
+			const rate = `${(b.passRate * 100).toFixed(1)}%`;
+			const commit = b.commit ?? "-";
+			console.log(
+				`  ${ts.padEnd(26)}${rate.padStart(8)}    ${`${b.passed}/${b.total}`.padStart(11)}   ${commit}`,
+			);
+		}
+		console.log();
+		console.log(`  (use --baseline ${listBaselineHistoryName} to compare against the latest)`);
 		return;
 	}
 
@@ -472,7 +506,8 @@ Options:
                           too small for significance testing (default: 5)
   --significance-alpha <pp>  Significance level for the binomial test that drives the default
                           regression flag (default: 0.05 = 95% confidence)
-  --list-baselines       List all saved baselines
+  --list-baselines       List every "latest" baseline (one per bench+model)
+  --baseline-history <name>  List the per-save history of a single baseline (newest first)
   --trace <file|latest>  Troubleshoot a recorded run: full turn-by-turn record (thinking,
                           commentary, tool args + actual tool output) for one case. <file> is
                           "latest", a path, or a bare filename under evals/results/runs/. Omit
@@ -525,6 +560,7 @@ Examples:
   node --import tsx evals/run.ts -m MiniMax-M3 --bench basic -c simple-math --save-baseline
   node --import tsx evals/run.ts -m MiniMax-M3 --bench basic -c simple-math --baseline basic-MiniMax-M3
   node --import tsx evals/run.ts --list-baselines
+  node --import tsx evals/run.ts --baseline-history basic-MiniMax-M3
 `);
 }
 

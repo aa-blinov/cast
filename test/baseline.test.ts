@@ -11,7 +11,7 @@
  * and teardown via beforeEach/afterEach.
  */
 
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -19,6 +19,8 @@ import {
 	binomialTestOneSided,
 	compareToBaseline,
 	formatDelta,
+	listBaselineHistory,
+	listBaselines,
 	loadBaseline,
 	saveBaseline,
 	testSignificance,
@@ -182,6 +184,110 @@ describe("baseline save/load", () => {
 		const result = loadBaseline("corrupt-baseline");
 		expect(result).toBeNull();
 		rmSync(path, { force: true });
+	});
+});
+
+describe("baseline history", () => {
+	it("saveBaseline writes a dated history copy AND refreshes the latest pointer", () => {
+		const suite = makeSuite({ cases: [{ id: "a", passed: true }], model: "history-m" });
+		const saved = saveBaseline(suite, "hist-bench", "hist-pointer");
+
+		// Top-level latest pointer
+		const latestPath = join(import.meta.dirname, "..", "evals", "baselines", "hist-pointer.json");
+		expect(existsSync(latestPath)).toBe(true);
+
+		// History subdirectory gets one dated copy
+		const historyDir = join(import.meta.dirname, "..", "evals", "baselines", "history");
+		const entries = readdirSync(historyDir).filter((f) => f.endsWith("_hist-pointer.json"));
+		expect(entries).toHaveLength(1);
+		const expectedPrefix = saved.timestamp.replace(/[:.]/g, "-");
+		expect(entries[0]).toContain(expectedPrefix);
+
+		// Latest and history copies carry the same content
+		const historyPath = join(historyDir, entries[0]!);
+		const latestData = JSON.parse(readFileSync(latestPath, "utf-8"));
+		const historyData = JSON.parse(readFileSync(historyPath, "utf-8"));
+		expect(latestData).toEqual(historyData);
+
+		// Cleanup
+		rmSync(latestPath, { force: true });
+		rmSync(historyPath, { force: true });
+	});
+
+	it("each save appends a new history file (history grows; latest gets overwritten)", () => {
+		const suite1 = makeSuite({ cases: [{ id: "a", passed: true }], model: "grow-m" });
+		const suite2 = makeSuite({
+			cases: [
+				{ id: "a", passed: true },
+				{ id: "b", passed: true },
+			],
+			model: "grow-m",
+		});
+		saveBaseline(suite1, "grow", "grow-point");
+		saveBaseline(suite2, "grow", "grow-point");
+
+		const latestPath = join(import.meta.dirname, "..", "evals", "baselines", "grow-point.json");
+		const historyDir = join(import.meta.dirname, "..", "evals", "baselines", "history");
+		const entries = readdirSync(historyDir).filter((f) => f.endsWith("_grow-point.json"));
+		expect(entries).toHaveLength(2);
+
+		// Latest reflects the SECOND save (2/2 passing), not the first.
+		const latest = JSON.parse(readFileSync(latestPath, "utf-8"));
+		expect(latest.total).toBe(2);
+		expect(latest.passed).toBe(2);
+
+		// Cleanup — delete both history files and the latest pointer
+		for (const e of entries) {
+			rmSync(join(historyDir, e), { force: true });
+		}
+		rmSync(latestPath, { force: true });
+	});
+
+	it("listBaselines reads only the latest pointer (not history)", () => {
+		saveBaseline(makeSuite({ cases: [{ id: "a", passed: true }] }), "split", "split-latest");
+		saveBaseline(makeSuite({ cases: [{ id: "a", passed: false }] }), "split", "split-latest");
+
+		const all = listBaselines();
+		const ours = all.filter((b) => b.name === "split-latest");
+		expect(ours).toHaveLength(1);
+		// Should be the latest (failed), not history's pass
+		expect(ours[0]?.passed).toBe(0);
+
+		// Cleanup
+		const latestPath = join(import.meta.dirname, "..", "evals", "baselines", "split-latest.json");
+		const historyDir = join(import.meta.dirname, "..", "evals", "baselines", "history");
+		const entries = readdirSync(historyDir).filter((f) => f.endsWith("_split-latest.json"));
+		for (const e of entries) {
+			rmSync(join(historyDir, e), { force: true });
+		}
+		rmSync(latestPath, { force: true });
+	});
+
+	it("listBaselineHistory returns snapshots for a single baseline, newest first", () => {
+		const suite1 = makeSuite({ cases: [{ id: "a", passed: true }], model: "lh-m" });
+		saveBaseline(suite1, "hist-list", "lh-name");
+		saveBaseline(suite1, "hist-list", "lh-name");
+		saveBaseline(suite1, "hist-list", "lh-name");
+
+		const history = listBaselineHistory("lh-name");
+		expect(history.length).toBeGreaterThanOrEqual(3);
+		// Newest first
+		const timestamps = history.map((b) => b.timestamp);
+		const sorted = [...timestamps].sort().reverse();
+		expect(timestamps).toEqual(sorted);
+
+		// Different name → empty (don't pollute)
+		const other = listBaselineHistory("lh-other-name");
+		expect(other).toHaveLength(0);
+
+		// Cleanup
+		const latestPath = join(import.meta.dirname, "..", "evals", "baselines", "lh-name.json");
+		const historyDir = join(import.meta.dirname, "..", "evals", "baselines", "history");
+		const entries = readdirSync(historyDir).filter((f) => f.endsWith("_lh-name.json"));
+		for (const e of entries) {
+			rmSync(join(historyDir, e), { force: true });
+		}
+		rmSync(latestPath, { force: true });
 	});
 });
 
