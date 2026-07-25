@@ -250,6 +250,65 @@ Token buckets: `promptTokens` (input), `completionTokens` (output), `totalTokens
 price input). `cost` is USD from the provider when it reports one — `n/a` otherwise (not every
 provider returns it).
 
+## Regression detection: `--save-baseline` / `--baseline`
+
+A baseline is a saved snapshot of a suite result keyed by bench+model. Subsequent runs can compare
+against it to catch *gradual* drift that no single run can see: a series of PRs each shave 1–2pp off
+the pass rate and add 5% to the token spend, and no individual commit looks like it broke anything
+when reviewed in isolation. Baselines are the mechanism that flips "did this PR regress?" from
+an inline review judgement call into a number.
+
+Baselines live in `evals/baselines/<bench>-<model>.json` (a name can be overridden with
+`--baseline <name>` when saving). Each baseline records the same shape `recordRun` writes — pass
+count, duration, full per-case pass/fail — plus the commit hash at capture time, so the comparison
+links back to a specific harness version via `--history`.
+
+```bash
+# Save the current run's result as the baseline for bench=basic, model=m
+node --import tsx evals/run.ts -m MiniMax-M3 --bench basic --cases simple-math --save-baseline
+
+# Save to a custom name (otherwise name is auto-generated as <bench>-<model>)
+node --import tsx evals/run.ts -m MiniMax-M3 --bench basic --save-baseline --baseline "release-2026-07"
+
+# Compare the next run against the saved baseline; non-zero exit on regression
+node --import tsx evals/run.ts -m MiniMax-M3 --bench basic --baseline basic-MiniMax-M3
+
+# Tweak what counts as a regression (default 5pp)
+node --import tsx evals/run.ts -m MiniMax-M3 --bench basic \
+  --baseline basic-MiniMax-M3 --regression-threshold 3
+
+# List every saved baseline
+node --import tsx evals/run.ts --list-baselines
+```
+
+A regression report prints the delta on every tracked dimension plus a list of *which* cases moved:
+
+```
+==================================================================
+REGRESSION CHECK
+==================================================================
+Comparing against baseline "basic-MiniMax-M3" (2026-07-25T..., @9fdac84 5/5 passing, 100.0%):
+  Pass rate: 1/1 (+0.0pp) (baseline: 5/1 (+0.0pp), -4/1 (+0.0pp))
+  Total tokens: 7,544 (baseline: 7,545, -1)
+  Duration: 1,344ms (baseline: 18,340ms, -16,996ms)
+```
+
+Per-case regression detection (cases passing in baseline but failing now) and improvement
+detection (failing → passing) is structural, not just summary-level — a run with the same pass
+rate can still surface individual case flips via the listed `Regressions` / `Improvements`.
+
+Threshold semantics: `--regression-threshold <pp>` is the pass-rate drop (in percentage points)
+that flips the run to exit code 1. Default 5pp. On a 20-case suite, 1 case = 5pp; on a 2-case
+suite, 5pp > next case boundary, so tiny suites under-report regressions rather than over-alarm.
+The exit is independent of individual case failures — a run that passes every case but clears
+the threshold (e.g., 0.5pp threshold with 0pp delta, edge cases) still exits 0.
+
+Limitations: the comparison uses *raw* case-id matching. Cases added since the baseline are
+ignored (no comparison possible — not a regression). Cases present in the baseline but removed
+from the current case set are likewise ignored. Renaming a case id (without rerunning its
+benchmark) looks like a removal + addition in the diff, which is fine — the new id is just
+fresh ground.
+
 ## Troubleshooting a failure: `--trace`
 
 The pass/fail table (and even a failed-checks message) tells you *that* a case failed, not *why* —
