@@ -89,6 +89,16 @@ function applyTheme(colors) {
 	root.setProperty("--rose", colors.error);
 	root.setProperty("--persona", colors.persona);
 	root.setProperty("--text-muted", colors.muted);
+	// Cached so index.html's inline bootstrap script (which runs before this
+	// module even starts fetching /api/themes+/api/config) can apply the same
+	// colors synchronously on the very first paint — without it, every reload
+	// briefly shows the CSS file's hardcoded default accent instead of the
+	// theme actually saved on the server, most noticeable on a slow
+	// connection or a non-default theme (see loading-spinner, which is
+	// themed via --cyan same as everything else).
+	try {
+		localStorage.setItem("cast:themeColors", JSON.stringify(colors));
+	} catch {}
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────

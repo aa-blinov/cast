@@ -6,6 +6,30 @@
 <title>cast web</title>
 	<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 	<link rel="stylesheet" href="/style.css">
+<script>
+// Applies the last-known theme (cached by applyTheme() in app.js) before the
+// first paint — otherwise the page shows style.css's hardcoded default
+// accent for however long /api/themes+/api/config take to answer, then
+// jumps to the real theme. Runs synchronously, blocking render, on purpose:
+// a flash of the wrong color is worse than a few extra ms before paint.
+try {
+	const colors = JSON.parse(localStorage.getItem("cast:themeColors"));
+	if (colors) {
+		const root = document.documentElement.style;
+		root.setProperty("--cyan", colors.accent);
+		root.setProperty("--violet", colors.gradient.to);
+		root.setProperty("--gradient", `linear-gradient(135deg, ${colors.gradient.from}, ${colors.gradient.to})`);
+		root.setProperty("--teal", colors.user);
+		root.setProperty("--purple", colors.agent);
+		root.setProperty("--blue", colors.tool);
+		root.setProperty("--green", colors.success);
+		root.setProperty("--amber", colors.warning);
+		root.setProperty("--rose", colors.error);
+		root.setProperty("--persona", colors.persona);
+		root.setProperty("--text-muted", colors.muted);
+	}
+} catch {}
+</script>
 <script type="importmap">
 {
 	"imports": {
