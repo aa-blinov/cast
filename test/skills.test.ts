@@ -1,7 +1,9 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { parseFrontmatter } from "../src/core/frontmatter.ts";
 import {
+	builtinSkillsDir,
 	formatSkillInvocation,
 	formatSkillsForPrompt,
 	isUninstallableSkill,
@@ -30,6 +32,24 @@ beforeEach(() => {
 
 afterEach(() => {
 	rmSync(TEST_DIR, { recursive: true, force: true });
+});
+
+describe("builtin skills", () => {
+	// Shipped once already: an over-long description warns on every startup.
+	// Guard all builtin SKILL.md files against the spec limit directly.
+	it("every builtin SKILL.md description fits the 1024-char limit", () => {
+		for (const entry of readdirSync(builtinSkillsDir)) {
+			const p = join(builtinSkillsDir, entry, "SKILL.md");
+			try {
+				if (!statSync(p).isFile()) continue;
+			} catch {
+				continue;
+			}
+			const { frontmatter } = parseFrontmatter(readFileSync(p, "utf-8"));
+			const d = typeof frontmatter.description === "string" ? frontmatter.description : "";
+			expect(d.length, `${entry}: ${d.length} chars`).toBeLessThanOrEqual(1024);
+		}
+	});
 });
 
 describe("loadSkills discovery", () => {
