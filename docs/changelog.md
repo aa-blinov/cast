@@ -2,6 +2,21 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.8.26
+
+### Added
+
+- Web UI: Settings > Provider — a "Verify credentials" button probes the entered URL + key on demand, and credentials are now always verified before a provider is saved; invalid ones are rejected with the reason (auth / unreachable) shown inline. Backed by a new `POST /api/provider/verify` endpoint, matching the CLI add wizard's probe.
+
+### Fixed
+
+- Web UI: switching the active provider no longer leaves stale state — the model list refreshes immediately (no page reload needed), and the subagent/plan pickers no longer show a misleading "(inherits …)" hint for a model that isn't on the new provider. Selected models (main / subagent / plan) are reset on a provider switch since those ids belonged to the old endpoint.
+- Web UI: the Model tab pickers now show a consistent "Pick a model…" placeholder for every slot, and the model name is no longer duplicated in the section titles.
+
+### Changed
+
+- Web UI: the Provider tab is now a clean list (add / edit / delete). The provider a model slot uses is chosen in the Model tab next to each slot, and subagent / plan now clearly inherit the main model's provider ("same as main") rather than referencing a vague "active (default)" concept. `/provider add` makes the first-added provider the active default so the main model works without a manual switch.
+
 ## 0.8.25
 
 ### Fixed
