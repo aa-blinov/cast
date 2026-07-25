@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.8.22
+
+### Fixed
+
+- Sandbox ("new") sessions now create their scratch directory under `~/.cast/sandbox/cast-<id>` instead of `/tmp/cast-<id>`, avoiding tmpfs permission and quota issues. The sidebar button is renamed from "tmp" to "new".
+
 ## 0.8.21
 
 ### Fixed
