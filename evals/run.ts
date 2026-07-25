@@ -71,6 +71,7 @@ async function main(): Promise<void> {
 	let saveBaselineFlag = false;
 	let baselineName: string | undefined;
 	let regressionThreshold = 0.05;
+	let significanceAlpha = 0.05;
 	let listBaselinesFlag = false;
 
 	for (let i = 0; i < args.length; i++) {
@@ -147,6 +148,9 @@ async function main(): Promise<void> {
 				break;
 			case "--regression-threshold":
 				regressionThreshold = parseFloat(args[++i] ?? "0.05");
+				break;
+			case "--significance-alpha":
+				significanceAlpha = parseFloat(args[++i] ?? "0.05");
 				break;
 			case "--list-baselines":
 				listBaselinesFlag = true;
@@ -392,7 +396,10 @@ async function main(): Promise<void> {
 			);
 			process.exit(1);
 		}
-		const delta = compareToBaseline(suite, benchIds[0]!, resolved.name, regressionThreshold);
+		const delta = compareToBaseline(suite, benchIds[0]!, resolved.name, {
+			threshold: regressionThreshold,
+			alpha: significanceAlpha,
+		});
 		if (!delta) {
 			console.error(`Baseline "${resolved.name}" could not be compared — did you save it?`);
 			process.exit(1);
@@ -403,10 +410,16 @@ async function main(): Promise<void> {
 		console.log("=".repeat(60));
 		console.log(formatDelta(delta, regressionThreshold));
 
-		// Exit with failure if any case failed OR the pass-rate dropped.
+		// Exit with failure if any case failed OR the regression check triggered.
 		if (delta.hasRegression || suite.failed > 0) {
 			if (delta.hasRegression) {
-				console.log(`\n✗ Regression detected (threshold: ${regressionThreshold * 100}pp)`);
+				if (delta.significance.sampleSizeSufficient && delta.significance.isSignificant) {
+					console.log(
+						`\n✗ Statistically significant regression detected (p=${delta.significance.pValue.toFixed(4)} < α=${significanceAlpha})`,
+					);
+				} else {
+					console.log(`\n✗ Regression detected (threshold: ${regressionThreshold * 100}pp)`);
+				}
 			}
 			process.exit(1);
 		}
@@ -455,7 +468,10 @@ Options:
   --history              Show recorded runs from evals/results/index.json
   --save-baseline        Save the run's result as a baseline for regression detection
   --baseline <name>      Compare result against this saved baseline (default name: <bench>-<model>)
-  --regression-threshold <pp>  Pass-rate drop in pp that counts as a regression (default: 5)
+  --regression-threshold <pp>  Pass-rate drop in pp that counts as a regression when sample size is
+                          too small for significance testing (default: 5)
+  --significance-alpha <pp>  Significance level for the binomial test that drives the default
+                          regression flag (default: 0.05 = 95% confidence)
   --list-baselines       List all saved baselines
   --trace <file|latest>  Troubleshoot a recorded run: full turn-by-turn record (thinking,
                           commentary, tool args + actual tool output) for one case. <file> is
@@ -504,7 +520,8 @@ Examples:
   node --import tsx evals/run.ts --trace latest --case glob-then-grep -m mimo-v2.5-pro
 
   # Regression detection: save a baseline, then compare future runs against it.
-  # Exit code 1 if pass-rate drops by >= --regression-threshold (default 5pp).
+  # Default detection is statistical: a binomial z-test at --significance-alpha (0.05).
+  # For tiny samples (<10 cases) it falls back to --regression-threshold percentage points.
   node --import tsx evals/run.ts -m MiniMax-M3 --bench basic -c simple-math --save-baseline
   node --import tsx evals/run.ts -m MiniMax-M3 --bench basic -c simple-math --baseline basic-MiniMax-M3
   node --import tsx evals/run.ts --list-baselines
