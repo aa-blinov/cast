@@ -31,7 +31,7 @@ import {
 	saveBaseline,
 } from "./lib/baseline.ts";
 import { cleanupFixtures } from "./lib/fixtures.ts";
-import { printHistory, recordCompare, recordCompareRepeated, recordRun } from "./lib/results.ts";
+import { printHistory, recordCompare, recordCompareRepeated, recordRepeatedBaseline, recordRun } from "./lib/results.ts";
 import {
 	compareModels,
 	compareModelsRepeated,
@@ -69,6 +69,7 @@ async function main(): Promise<void> {
 	let listOnly = false;
 	let historyOnly = false;
 	let concurrency = 10;
+	let rateLimitDelayMs = 0;
 	let generateCount = 0;
 	let generateSeed = 1;
 	let generateSourceDir: string | undefined;
@@ -121,6 +122,9 @@ async function main(): Promise<void> {
 			case "--concurrency":
 			case "-j":
 				concurrency = parseInt(args[++i] ?? "10", 10);
+				break;
+			case "--rate-limit-delay":
+				rateLimitDelayMs = parseInt(args[++i] ?? "0", 10);
 				break;
 			case "--generate":
 			case "-g":
@@ -332,11 +336,27 @@ async function main(): Promise<void> {
 				provider,
 				persona,
 				repeat,
+				rateLimitDelayMs,
 			});
 			printRepeatedCompareReport(compare);
 
 			const recordedPath = recordCompareRepeated(compare, caseFilter);
 			console.log(`Recorded: ${recordedPath}`);
+
+			if (saveBaselineFlag) {
+				if (models.length !== 1) {
+					console.error(`--save-baseline with --repeat requires a single model; got ${models.length}`);
+					process.exit(1);
+				}
+				if (benchIds.length !== 1) {
+					console.error(`--save-baseline with --repeat requires exactly one --bench (got ${benchIds.length}: ${benchIds.join(", ")})`);
+					process.exit(1);
+				}
+				const repeatBaselineName = baselineName ?? `basic-m3-r${repeat}`;
+				const baselinePath = recordRepeatedBaseline(compare, repeatBaselineName);
+				console.log(`Baseline saved (from repeated run): ${baselinePath}`);
+				console.log(`  ${compare.suites[models[0]!]!.results.filter((r) => r.consistent && r.passed > 0).length}/${compare.cases.length} consistent-pass cases (of ${compare.suites[models[0]!]!.results.length} total)`);
+			}
 
 			if (Object.values(compare.suites).some((s) => s.casesPassed < s.casesTotal)) {
 				process.exit(1);
@@ -344,7 +364,7 @@ async function main(): Promise<void> {
 			return;
 		}
 
-		const compare = await compareModels(filteredCases, models, { cwd, verbose, concurrency, provider, persona });
+		const compare = await compareModels(filteredCases, models, { cwd, verbose, concurrency, provider, persona, rateLimitDelayMs });
 		printCompareReport(compare);
 
 		const recordedPath = recordCompare(compare, caseFilter);
@@ -372,11 +392,23 @@ async function main(): Promise<void> {
 			provider,
 			persona,
 			repeat,
+			rateLimitDelayMs,
 		});
 		printRepeatedCompareReport(compare);
 
 		const recordedPath = recordCompareRepeated(compare, caseFilter);
 		console.log(`Recorded: ${recordedPath}`);
+
+		if (saveBaselineFlag) {
+			if (benchIds.length !== 1) {
+				console.error(`--save-baseline requires exactly one --bench (got ${benchIds.length}: ${benchIds.join(", ")})`);
+				process.exit(1);
+			}
+			const repeatBaselineName = baselineName ?? `${benchIds[0]}-m3-r${repeat}`;
+			const baselinePath = recordRepeatedBaseline(compare, repeatBaselineName);
+			console.log(`Baseline saved (from repeated run): ${baselinePath}`);
+			console.log(`  ${compare.suites[model!]!.results.filter((r) => r.consistent && r.passed > 0).length}/${compare.cases.length} consistent-pass cases (of ${compare.suites[model!]!.results.length} total)`);
+		}
 
 		if (compare.suites[model!]!.casesPassed < compare.suites[model!]!.casesTotal) {
 			process.exit(1);
@@ -391,6 +423,7 @@ async function main(): Promise<void> {
 		concurrency,
 		provider,
 		persona,
+		rateLimitDelayMs,
 	};
 
 	const suite = await runSuite(filteredCases, options);
@@ -496,6 +529,11 @@ Options:
                           with one model, same report shape).
   --verbose, -v          Show per-case output
   --concurrency, -j <n>  Parallel case execution (default: 10)
+  --rate-limit-delay <ms>  Milliseconds to sleep between starting cases — throttles
+                          burst starts that hit token-plan 429 limits. With the
+                          default concurrency (10) only the 11th+ case is
+                          throttled; combine with --concurrency 1 to space
+                          every case.
   --save, -s <path>      Also save results to this exact JSON path (every run is auto-recorded
                           to evals/results/runs/ regardless — this is an extra, fixed-path copy)
   --list                 List available benches and their cases
@@ -561,6 +599,10 @@ Examples:
   node --import tsx evals/run.ts -m MiniMax-M3 --bench basic -c simple-math --baseline basic-MiniMax-M3
   node --import tsx evals/run.ts --list-baselines
   node --import tsx evals/run.ts --baseline-history basic-MiniMax-M3
+
+  # Throttle for token-plan rate limits (single-model, --repeat 3 + 5s spacing).
+  # Concurrency 1 + a delay = sequential cases, each spaced 5s apart.
+  node --import tsx evals/run.ts -m MiniMax-M3 --bench basic -c simple-math -r 3 --concurrency 1 --rate-limit-delay 5000
 `);
 }
 
