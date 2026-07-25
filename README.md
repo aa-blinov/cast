@@ -121,6 +121,31 @@ Models that support it (OpenRouter metadata) get reasoning controls: `off` / `lo
 
 Every conversation auto-saves. Resume with `--continue`, pick from a list with `--resume`, or switch mid-session with `/sessions`.
 
+### Web UI
+
+`cast web` launches a browser-based control room — same sessions as the TUI, with a diff viewer, background agents, and token-by-token streaming. The TUI is still the default for local interactive use; the Web UI is the answer when you want to share a session, keep one running in the background, or drive cast from a browser/phone.
+
+```bash
+# Start (default 127.0.0.1:1337)
+cast web
+
+# Start on a different port
+cast web --port 8080
+
+# Bind 0.0.0.0 so it's reachable from other machines on the network
+cast web --public
+
+# Lifecycle
+cast web status
+cast web stop
+```
+
+On first start, cast auto-generates a password and saves it to `webPassword` in `~/.cast/settings.json`. The login is always `cast`. HTTP Basic auth protects every API endpoint — the browser prompts for the password on first load. (Browser's own credential prompt, not a custom form.) The password is shown in the terminal on first run so you can copy it; after that, look it up in `~/.cast/settings.json`.
+
+The `--public` flag prints an explicit warning when binding to `0.0.0.0` — the password is the only thing standing between your machine and the rest of the network. Use it on a trusted LAN (or behind a reverse proxy / tunnel) — not on a public address.
+
+Env vars: `CAST_WEB_PORT` (default `1337`), `CAST_WEB_HOST` (default `127.0.0.1`).
+
 ## Interactive Commands
 
 | Command | Description |
@@ -204,6 +229,8 @@ Other environment variables (provider credentials live in the settings file, not
 | `CAST_CWD` | Override working directory |
 | `CAST_BASH` | Bash executable for the `bash` tool (Windows: non-standard Git Bash / msys2) |
 | `CAST_VERSION` | Pin install version (installer) |
+| `CAST_WEB_PORT` | `cast web` port (default `1337`) |
+| `CAST_WEB_HOST` | `cast web` bind address (default `127.0.0.1`; use `0.0.0.0` or `--public` for LAN) |
 
 Works with anything that speaks the OpenAI API: OpenRouter, OpenAI, Ollama (`http://localhost:11434/v1`), vLLM, LiteLLM, Azure OpenAI, etc.
 
