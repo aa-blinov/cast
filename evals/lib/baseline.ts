@@ -16,9 +16,20 @@
  * 1-case regression on a 2-case suite (where the same p-value is ~0.4) does
  * not. Configurable via `--significance-alpha` (default 0.05 = 95% confidence).
  *
- * Baselines live in `evals/baselines/<bench>-<model>.json` — one per
- * (bench, model) pair. Save with `--save-baseline`, compare against with
- * `--baseline <name>`.
+ * Baselines live under `evals/baselines/` in two layers:
+ *
+ *   evals/baselines/
+ *     <bench>-<model>.json          <-- latest snapshot (what `--baseline` reads)
+ *     history/
+ *       2026-07-25T14-30-00Z_<bench>-<model>.json    <-- every save is timed-stamped
+ *       2026-07-26T09-12-33Z_<bench>-<model>.json
+ *
+ * Every `--save-baseline` writes a new dated copy to `history/` *and*
+ * refreshes the top-level "latest" file in one shot. The dated history is
+ * what makes "how was the eval doing two weeks ago" cheap to answer — diff
+ * two snapshots, no extra tooling. Both layers are tracked in git so
+ * baselines move with the codebase they correspond to (a baseline pinned
+ * to a commit is what `--history` correlates via `commit`).
  */
 
 import { execFileSync } from "node:child_process";
@@ -27,6 +38,7 @@ import { join } from "node:path";
 import type { SuiteResult } from "./runner.ts";
 
 const BASELINES_DIR = join(import.meta.dirname, "..", "baselines");
+const HISTORY_DIR = join(BASELINES_DIR, "history");
 
 function currentCommit(): string | undefined {
 	try {
@@ -39,8 +51,18 @@ function currentCommit(): string | undefined {
 	}
 }
 
-function ensureBaselinesDir(): void {
+function ensureDirs(): void {
 	if (!existsSync(BASELINES_DIR)) mkdirSync(BASELINES_DIR, { recursive: true });
+	if (!existsSync(HISTORY_DIR)) mkdirSync(HISTORY_DIR, { recursive: true });
+}
+
+/**
+ * Filename used for the timed-stamped history copy. The full ISO timestamp
+ * (with the `:` → `-` swap that the rest of the evals directory uses) keeps
+ * `ls` ordering chronological without any extra indexing.
+ */
+function historyFileName(timestamp: string, baselineName: string): string {
+	return `${timestamp.replace(/[:.]/g, "-")}_${baselineName}.json`;
 }
 
 /** A saved suite result used as the reference point for regression detection. */
@@ -88,7 +110,7 @@ export interface Baseline {
 	}>;
 }
 
-function baselinePath(name: string): string {
+function latestPath(name: string): string {
 	return join(BASELINES_DIR, `${name}.json`);
 }
 
@@ -98,7 +120,7 @@ function defaultBaselineName(bench: string, model: string): string {
 
 /** Save a baseline from a suite result. Returns the saved baseline. */
 export function saveBaseline(suite: SuiteResult, bench: string, name?: string): Baseline {
-	ensureBaselinesDir();
+	ensureDirs();
 	const baselineName = name ?? defaultBaselineName(bench, suite.model);
 	const baseline: Baseline = {
 		name: baselineName,
@@ -121,7 +143,14 @@ export function saveBaseline(suite: SuiteResult, bench: string, name?: string): 
 		})),
 	};
 
-	writeFileSync(baselinePath(baselineName), JSON.stringify(baseline, null, 2), "utf-8");
+	const serialized = JSON.stringify(baseline, null, 2);
+
+	// Write the history file first, then refresh the latest pointer. If the
+	// second write fails for any reason, we still have a recoverable record
+	// in history/ for the run that just landed.
+	const historyPath = join(HISTORY_DIR, historyFileName(baseline.timestamp, baselineName));
+	writeFileSync(historyPath, serialized, "utf-8");
+	writeFileSync(latestPath(baselineName), serialized, "utf-8");
 	return baseline;
 }
 
@@ -136,7 +165,7 @@ export function saveBaseline(suite: SuiteResult, bench: string, name?: string): 
  */
 export function loadBaseline(nameOrBench: string, model?: string): Baseline | null {
 	const name = model ? defaultBaselineName(nameOrBench, model) : nameOrBench;
-	const path = baselinePath(name);
+	const path = latestPath(name);
 	if (!existsSync(path)) return null;
 	try {
 		return JSON.parse(readFileSync(path, "utf-8")) as Baseline;
@@ -159,17 +188,50 @@ export function resolveBaseline(nameOrBench: string, model?: string): Baseline |
 	return null;
 }
 
-/** List every saved baseline, newest first. */
+/**
+ * List every saved "latest" baseline (one per bench+model), newest first.
+ * Skips the `history/` subdir — see `listBaselineHistory` for the full
+ * timeline of a specific baseline.
+ */
 export function listBaselines(): Baseline[] {
 	if (!existsSync(BASELINES_DIR)) return [];
 	const results: Baseline[] = [];
 	for (const entry of readdirSync(BASELINES_DIR)) {
+		const fullPath = join(BASELINES_DIR, entry);
 		if (!entry.endsWith(".json")) continue;
+		if (entry.startsWith(".")) continue;
 		try {
-			const b = JSON.parse(readFileSync(join(BASELINES_DIR, entry), "utf-8")) as Baseline;
+			const b = JSON.parse(readFileSync(fullPath, "utf-8")) as Baseline;
 			results.push(b);
 		} catch {
 			// skip corrupt baselines
+		}
+	}
+	return results.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+}
+
+/**
+ * Read every historical snapshot of a single baseline (across all saves),
+ * newest first. Returns `[]` if there's no history — also returns `[]` if
+ * only the latest "pointer" exists without any history yet.
+ */
+export function listBaselineHistory(name: string): Baseline[] {
+	if (!existsSync(HISTORY_DIR)) return [];
+	const results: Baseline[] = [];
+	for (const entry of readdirSync(HISTORY_DIR)) {
+		if (!entry.endsWith(".json")) continue;
+		// Files are `<dateStamp>_<name>.json`; the date prefix sorts first
+		// chronologically under string compare because it's ISO8601 with
+		// `:` and `.` replaced.
+		const trailingUnderscore = entry.lastIndexOf("_");
+		if (trailingUnderscore < 0) continue;
+		const fileName = entry.slice(trailingUnderscore + 1, -".json".length);
+		if (fileName !== name) continue;
+		try {
+			const b = JSON.parse(readFileSync(join(HISTORY_DIR, entry), "utf-8")) as Baseline;
+			results.push(b);
+		} catch {
+			// skip corrupt entries
 		}
 	}
 	return results.sort((a, b) => b.timestamp.localeCompare(a.timestamp));

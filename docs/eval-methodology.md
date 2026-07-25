@@ -281,10 +281,29 @@ the run falls back to the simpler `--regression-threshold` percentage-point rule
 the same intuition as before, scoped to small samples where the z-test can't say anything
 informative.
 
-Baselines live in `evals/baselines/<bench>-<model>.json` (a name can be overridden with
-`--baseline <name>` when saving). Each baseline records the same shape `recordRun` writes — pass
-count, duration, full per-case pass/fail — plus the commit hash at capture time, so the comparison
-links back to a specific harness version via `--history`.
+Baselines live under `evals/baselines/` in two layers — one tier for the
+"latest" pointer that `compareToBaseline` actually reads, and a `history/`
+subdir for the full timeline of every `--save-baseline`:
+
+```
+evals/baselines/
+  basic-MiniMax-M3.json                              ← latest pointer (what --baseline reads)
+  history/
+    2026-07-25T19-28-39-590Z_basic-MiniMax-M3.json    ← every save is timed-stamped
+    2026-07-26T10-15-22-107Z_basic-MiniMax-M3.json    ← sorted chronologically by name
+```
+
+Every `--save-baseline` writes a new dated copy to `history/` *and* refreshes
+the top-level "latest" file in one shot — so the latest pointer is always the
+most recent snapshot, and `history/` is a complete audit log of what the
+benchmark looked like at every commit. Both tiers are tracked in git so
+baselines move with the codebase they correspond to (the `commit` recorded
+inside each baseline lets `--history` correlate snapshots to commits).
+
+`--baseline <name>` reads only the latest pointer. To see the full timeline
+of one baseline (e.g., to diff "two weeks ago vs today"), use
+`--baseline-history <name>`. `--list-baselines` lists the latest pointers
+(one per bench+model); `--baseline-history` lists snapshots of one.
 
 ```bash
 # Save the current run's result as the baseline for bench=basic, model=m
@@ -304,8 +323,11 @@ node --import tsx evals/run.ts -m MiniMax-M3 --bench basic \
 node --import tsx evals/run.ts -m MiniMax-M3 --bench basic \
   --baseline basic-MiniMax-M3 --regression-threshold 3
 
-# List every saved baseline
+# List every "latest" baseline (one per bench+model)
 node --import tsx evals/run.ts --list-baselines
+
+# Full per-save history for one baseline, newest first
+node --import tsx evals/run.ts --baseline-history basic-MiniMax-M3
 ```
 
 A regression report prints the statistical evidence first, then aggregate deltas, then the per-case

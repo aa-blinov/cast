@@ -1,0 +1,38 @@
+{
+  "name": "basic-MiniMax-M3",
+  "bench": "basic",
+  "model": "MiniMax-M3",
+  "commit": "505a59f",
+  "timestamp": "2026-07-25T20:14:31.517Z",
+  "total": 1,
+  "passed": 1,
+  "failed": 0,
+  "passRate": 1,
+  "duration": 1457,
+  "usage": {
+    "promptTokens": 7526,
+    "completionTokens": 24,
+    "totalTokens": 7550,
+    "cost": 0,
+    "cacheReadTokens": 128,
+    "cacheWriteTokens": 0,
+    "uncachedTokens": 7398
+  },
+  "results": [
+    {
+      "caseId": "simple-math",
+      "passed": true,
+      "duration": 1456,
+      "turns": 1,
+      "usage": {
+        "promptTokens": 7526,
+        "completionTokens": 24,
+        "totalTokens": 7550,
+        "cost": 0,
+        "cacheReadTokens": 128,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 7398
+      }
+    }
+  ]
+}
