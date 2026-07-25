@@ -1955,6 +1955,12 @@ function App() {
 	// every time the diff panel opens or closes.
 	const diffOpenRef = useRef(false);
 	diffOpenRef.current = diffOpen;
+	// Same idea, read by initClientState on a reconnect where personas were
+	// already loaded once (see staticResourcesLoadedRef) and it's just
+	// picking a default for a fresh draft — without needing `personas` as a
+	// dependency of that useCallback.
+	const personasRef = useRef([]);
+	personasRef.current = personas;
 
 	// Scroll-up pagination for long threads: older pages already fetched this
 	// tab session, keyed by session id, so switching away and back doesn't
@@ -2128,39 +2134,53 @@ function App() {
 		window.history.pushState({ sessionId: null }, "", url);
 	}, []);
 
-	// Full client bootstrap — personas/commands/themes/config, then sessions,
-	// landing on whichever one was last active (see selectSession's
-	// localStorage write). Used on first mount AND to recover after the
-	// backend goes away and comes back (see startReconnectLoop below):
-	// sessions live only in-memory server-side, so a backend restart loses
-	// every one of them, and re-running this exact sequence is what lets the
-	// page keep working without a manual reload once it's back.
+	// Static, rarely-changing resource lists — personas/commands/themes/config
+	// — only ever need fetching once per tab. Theme changes made mid-session
+	// (Settings modal, /theme) already call applyTheme()/setCurrentThemeId
+	// directly, so there's nothing here that goes stale between then and a
+	// reconnect. Guarded by this ref rather than state so initClientState
+	// (a useCallback) doesn't need it as a dependency.
+	const staticResourcesLoadedRef = useRef(false);
+
+	// Full client bootstrap — on first mount, personas/commands/themes/config
+	// too; every time (including reconnect), the session list, landing on
+	// whichever one was last active (see selectSession's localStorage write).
+	// Also used to recover after the backend goes away and comes back (see
+	// startReconnectLoop below): sessions live only in-memory server-side, so
+	// a backend restart loses every one of them, and re-running this exact
+	// sequence is what lets the page keep working without a manual reload
+	// once it's back. Re-fetching (and re-applying) the static resources on
+	// every one of those reconnects too used to make the theme/persona list
+	// visibly flash back in on every blip — see staticResourcesLoadedRef.
 	const initClientState = useCallback(async () => {
 		try {
-			const p = await api("GET", "/api/personas");
-			if (!p) return false;
-			const sortedPersonas = [...p].sort((a, b) => a.label.localeCompare(b.label));
-			setPersonas(sortedPersonas);
-			api("GET", "/api/commands")
-				.then((c) => c && setCommands(c))
-				.catch(() => {});
-			api("GET", "/api/themes")
-				.then((t) => {
-					if (!t) return;
-					setThemes(t);
-					api("GET", "/api/config")
-						.then((cfg) => {
-							if (!cfg) return;
-							setDefaultCwd(cfg.cwd ?? "");
-							const current = t.find((x) => x.id === cfg.theme) ?? t.find((x) => x.id === "cast");
-							if (current) {
-								applyTheme(current.colors);
-								setCurrentThemeId(current.id);
-							}
-						})
-						.catch(() => {});
-				})
-				.catch(() => {});
+			if (!staticResourcesLoadedRef.current) {
+				const p = await api("GET", "/api/personas");
+				if (!p) return false;
+				const sortedPersonas = [...p].sort((a, b) => a.label.localeCompare(b.label));
+				setPersonas(sortedPersonas);
+				api("GET", "/api/commands")
+					.then((c) => c && setCommands(c))
+					.catch(() => {});
+				api("GET", "/api/themes")
+					.then((t) => {
+						if (!t) return;
+						setThemes(t);
+						api("GET", "/api/config")
+							.then((cfg) => {
+								if (!cfg) return;
+								setDefaultCwd(cfg.cwd ?? "");
+								const current = t.find((x) => x.id === cfg.theme) ?? t.find((x) => x.id === "cast");
+								if (current) {
+									applyTheme(current.colors);
+									setCurrentThemeId(current.id);
+								}
+							})
+							.catch(() => {});
+					})
+					.catch(() => {});
+				staticResourcesLoadedRef.current = true;
+			}
 
 			const s = await api("GET", "/api/sessions");
 			if (!s) return false;
@@ -2181,7 +2201,8 @@ function App() {
 							: s[0].id;
 				await selectSession(target, { push: false });
 			} else {
-				const defaultP = sortedPersonas.find((x) => x.name === "coding") ?? sortedPersonas[0];
+				const current = personasRef.current;
+				const defaultP = current.find((x) => x.name === "coding") ?? current[0];
 				if (defaultP) startDraft(defaultP.name, undefined);
 			}
 			return true;
