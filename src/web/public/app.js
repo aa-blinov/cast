@@ -2040,37 +2040,69 @@ function App() {
 
 	// Create session — the POST already returns the full new (empty) session,
 	// so apply it directly instead of two more round trips (list + refetch)
-	// before anything shows up.
-	const createSession = useCallback(
+	// before anything shows up. Internal: only ever called once, either by
+	// startDraft's first-message handoff in submitMessage, or directly for
+	// the handful of places that still need a session to exist immediately
+	// (nothing left after this change — kept as the one place that actually
+	// talks to POST /api/sessions).
+	const commitSession = useCallback(
 		async (persona, cwd, { push = true } = {}) => {
+			const data = await api("POST", "/api/sessions", { persona, cwd });
+			setActiveId(data.id);
+			setSession({
+				id: data.id,
+				persona: data.session.persona,
+				model: data.session.model,
+				cwd: data.session.cwd,
+				status: "idle",
+				messages: [],
+				usage: data.session.usage,
+				createdAt: data.session.createdAt,
+				updatedAt: data.session.updatedAt,
+			});
+			setStreaming([]);
+			setRunning(false);
+			setSidebarOpen(false);
 			try {
-				const data = await api("POST", "/api/sessions", { persona, cwd });
-				setActiveId(data.id);
-				setSession({
-					id: data.id,
-					persona: data.session.persona,
-					model: data.session.model,
-					cwd: data.session.cwd,
-					status: "idle",
-					messages: [],
-					usage: data.session.usage,
-					createdAt: data.session.createdAt,
-					updatedAt: data.session.updatedAt,
-				});
-				setStreaming([]);
-				setRunning(false);
-				setSidebarOpen(false);
-				try {
-					localStorage.setItem("cast:lastSessionId", data.id);
-				} catch {}
-				setUrlSessionId(data.id, { push });
-				loadSessions();
-			} catch (err) {
-				showToast(err.message, "error");
-			}
+				localStorage.setItem("cast:lastSessionId", data.id);
+			} catch {}
+			setUrlSessionId(data.id, { push });
+			loadSessions();
+			return data.id;
 		},
-		[loadSessions, showToast],
+		[loadSessions],
 	);
+
+	// "+ New session" — picking a persona no longer hits the server at all.
+	// It stages a local-only draft (persona + cwd, empty transcript) so an
+	// abandoned "new chat" never shows up as a thread anywhere — the real
+	// POST /api/sessions only happens from submitMessage, the first time
+	// this draft actually gets a message (see there). Same idea as ChatGPT's
+	// "New chat": the conversation doesn't exist until you say something.
+	const startDraft = useCallback((persona, draftCwd) => {
+		if (esRef.current) {
+			esRef.current.close();
+			esRef.current = null;
+		}
+		setActiveId(null);
+		setSession({
+			id: null,
+			persona,
+			model: "",
+			cwd: draftCwd,
+			status: "idle",
+			messages: [],
+			usage: null,
+			createdAt: new Date().toISOString(),
+			updatedAt: new Date().toISOString(),
+			isDraft: true,
+		});
+		setStreaming([]);
+		setRunning(false);
+		setSidebarOpen(false);
+		const url = window.location.pathname;
+		window.history.pushState({ sessionId: null }, "", url);
+	}, []);
 
 	// Full client bootstrap — personas/commands/themes/config, then sessions,
 	// landing on whichever one was last active (see selectSession's
@@ -2126,13 +2158,13 @@ function App() {
 				await selectSession(target, { push: false });
 			} else {
 				const defaultP = sortedPersonas.find((x) => x.name === "coding") ?? sortedPersonas[0];
-				if (defaultP) await createSession(defaultP.name, undefined, { push: false });
+				if (defaultP) startDraft(defaultP.name, undefined);
 			}
 			return true;
 		} catch {
 			return false;
 		}
-	}, [selectSession, createSession]);
+	}, [selectSession, startDraft]);
 
 	// The browser's own EventSource retry only covers a connection that
 	// dropped after connecting fine (network blip, laptop sleep) — it does
@@ -2195,13 +2227,15 @@ function App() {
 				await selectSession(remaining[0].id, { push: false });
 				return;
 			}
-			setActiveId(null);
-			setSession(null);
-			setStreaming([]);
 			const defaultP = personas.find((x) => x.name === "coding") ?? personas[0];
-			if (defaultP) await createSession(defaultP.name, undefined, { push: false });
+			if (defaultP) startDraft(defaultP.name, undefined);
+			else {
+				setActiveId(null);
+				setSession(null);
+				setStreaming([]);
+			}
 		},
-		[sessions, activeId, personas, selectSession, createSession, showToast, dismiss, dismissedIds],
+		[sessions, activeId, personas, selectSession, startDraft, showToast, dismiss, dismissedIds],
 	);
 
 	// Rename — overrides the auto-derived-from-first-message title. Updates
@@ -2282,56 +2316,75 @@ function App() {
 	// Submit message
 	const submitMessage = useCallback(
 		async (text) => {
-			if (!activeId) {
-				// Composer is disabled while !ready, so this only fires on a very
-				// fast Enter right as the page loads — surface it instead of eating
-				// the message silently.
-				showToast("Still connecting — try again in a moment", "error");
+			// Pure client-side commands need no live (or even draft) session —
+			// handled before any draft-commit below so idly hitting /diff or
+			// /copy on a fresh "new session" draft can't spuriously create a
+			// real backend session with nothing actually said yet.
+			if (text === "/diff") {
+				toggleDiff();
 				return;
 			}
-			if (text.startsWith("/")) {
-				// Client-only commands — no round trip to the agent session.
-				if (text === "/diff") {
-					toggleDiff();
+			if (text === "/copy") {
+				const lastAssistant = [...(session?.messages ?? [])].reverse().find((m) => m.role === "assistant");
+				if (!lastAssistant) {
+					addNotice("Nothing to copy yet");
 					return;
 				}
-				if (text === "/copy") {
-					const lastAssistant = [...(session?.messages ?? [])].reverse().find((m) => m.role === "assistant");
-					if (!lastAssistant) {
-						addNotice("Nothing to copy yet");
+				// Live-flushed messages carry `blocks`, not a flat `content` string —
+				// copy the reply text only (skip reasoning/tool blocks).
+				const text2 = Array.isArray(lastAssistant.blocks)
+					? lastAssistant.blocks
+							.filter((b) => b.kind === "content")
+							.map((b) => b.text)
+							.join("")
+					: typeof lastAssistant.content === "string"
+						? lastAssistant.content
+						: JSON.stringify(lastAssistant.content);
+				try {
+					if (navigator.clipboard) {
+						await navigator.clipboard.writeText(text2);
+					} else {
+						// HTTP fallback — Clipboard API unavailable outside secure contexts.
+						const ta = document.createElement("textarea");
+						ta.value = text2;
+						ta.style.cssText = "position:fixed;opacity:0";
+						document.body.appendChild(ta);
+						ta.select();
+						document.execCommand("copy");
+						document.body.removeChild(ta);
+					}
+					addNotice("Copied to clipboard");
+				} catch {
+					addNotice("Copy failed", "error");
+				}
+				return;
+			}
+
+			// The composer is enabled for a local-only draft (see startDraft) as
+			// well as a real session — this is the one place a draft ever turns
+			// into an actual backend session, exactly when it gets its first
+			// real content, same as ChatGPT's "new chat" only existing once you
+			// send something into it.
+			let id = activeId;
+			if (!id) {
+				if (session?.isDraft) {
+					try {
+						id = await commitSession(session.persona, session.cwd, { push: true });
+					} catch (err) {
+						showToast(err.message, "error");
 						return;
 					}
-					// Live-flushed messages carry `blocks`, not a flat `content` string —
-					// copy the reply text only (skip reasoning/tool blocks).
-					const text2 = Array.isArray(lastAssistant.blocks)
-						? lastAssistant.blocks
-								.filter((b) => b.kind === "content")
-								.map((b) => b.text)
-								.join("")
-						: typeof lastAssistant.content === "string"
-							? lastAssistant.content
-							: JSON.stringify(lastAssistant.content);
-					try {
-						if (navigator.clipboard) {
-							await navigator.clipboard.writeText(text2);
-						} else {
-							// HTTP fallback — Clipboard API unavailable outside secure contexts.
-							const ta = document.createElement("textarea");
-							ta.value = text2;
-							ta.style.cssText = "position:fixed;opacity:0";
-							document.body.appendChild(ta);
-							ta.select();
-							document.execCommand("copy");
-							document.body.removeChild(ta);
-						}
-						addNotice("Copied to clipboard");
-					} catch {
-						addNotice("Copy failed", "error");
-					}
+				} else {
+					// Composer is disabled while !ready, so this only fires on a very
+					// fast Enter right as the page loads — surface it instead of eating
+					// the message silently.
+					showToast("Still connecting — try again in a moment", "error");
 					return;
 				}
+			}
+			if (text.startsWith("/")) {
 				try {
-					const result = await api("POST", `/api/sessions/${activeId}/command`, { command: text });
+					const result = await api("POST", `/api/sessions/${id}/command`, { command: text });
 					if (text === "/sessions") await loadSessions();
 					if (text.startsWith("/new") && result?.result?.sessionId) {
 						await loadSessions();
@@ -2339,7 +2392,7 @@ function App() {
 						return; // now viewing the fresh session — nothing to append a notice to
 					}
 					if (text === "/clear" && session) {
-						olderPagesCacheRef.current.delete(activeId);
+						olderPagesCacheRef.current.delete(id);
 						setSession({ ...session, messages: [], oldestSeq: null, hasMoreHistory: false });
 						return; // context just got wiped — nothing left to append a notice to
 					}
@@ -2413,10 +2466,10 @@ function App() {
 			setSession((prev) =>
 				prev ? { ...prev, messages: [...prev.messages, { role: "user", content: text }] } : prev,
 			);
-			turnStartRef.current.delete(activeId);
+			turnStartRef.current.delete(id);
 			setElapsedMs(0);
 			try {
-				await api("POST", `/api/sessions/${activeId}/chat`, { text });
+				await api("POST", `/api/sessions/${id}/chat`, { text });
 				// Picks up the auto-derived title after a session's first message
 				// (and keeps the sidebar's message counts from drifting stale).
 				loadSessions();
@@ -2424,7 +2477,7 @@ function App() {
 				showToast(err.message, "error");
 			}
 		},
-		[activeId, session, loadSessions, selectSession, showToast, toggleDiff, addNotice],
+		[activeId, session, commitSession, loadSessions, selectSession, showToast, toggleDiff, addNotice],
 	);
 
 	// Abort
@@ -2901,7 +2954,7 @@ function App() {
 			if (mod && e.shiftKey && e.key === "N") {
 				e.preventDefault();
 				const p = personas.find((x) => x.name === "coding") ?? personas[0];
-				if (p) createSession(p.name, cwd);
+				if (p) startDraft(p.name, cwd);
 				return;
 			}
 			if (mod && e.shiftKey && e.key === "L") {
@@ -2917,7 +2970,7 @@ function App() {
 		};
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
-	}, [hotkeysOpen, dirPickerOpen, activeId, personas, cwd, createSession, submitMessage, toggleDiff]);
+	}, [hotkeysOpen, dirPickerOpen, activeId, personas, cwd, startDraft, submitMessage, toggleDiff]);
 
 	const messages = session?.messages?.filter((m) => m.role !== "system") || [];
 	// Each thread can run under a different persona — shown right above the
@@ -3020,7 +3073,7 @@ function App() {
 				cwd=${cwd}
 				defaultCwd=${defaultCwd}
 				onSelectSession=${selectSession}
-				onCreateSession=${createSession}
+				onCreateSession=${startDraft}
 				onCloseSession=${closeSession}
 				onOpenDirPicker=${() => setDirPickerOpen(true)}
 				onSetCwd=${setSelectedCwd}
@@ -3131,7 +3184,7 @@ function App() {
 					</div>
 				`
 				}
-				<${Composer} running=${running} ready=${!!activeId} commands=${commands} personas=${personas} onSubmit=${submitMessage} onAbort=${abortRun} />
+				<${Composer} running=${running} ready=${!!session} commands=${commands} personas=${personas} onSubmit=${submitMessage} onAbort=${abortRun} />
 			</main>
 
 			<!-- Diff — a wide right sidebar alongside the chat on desktop, a

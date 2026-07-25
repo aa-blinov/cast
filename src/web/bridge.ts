@@ -316,11 +316,12 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		const session = createSession(model, sessionCwd);
 		session.persona = persona.name;
 
-		// Scratch dir for a sandbox session: named after the fresh session id and
-		// created here, at the same moment the session starts existing.
+		// Scratch dir for a sandbox session: named after the fresh session id.
+		// Not created yet — picking a persona shouldn't leave a directory behind
+		// for a session the user never actually used; submit() creates it lazily
+		// on the first real message (see the mkdirSync call there).
 		if (cwdOverride === SANDBOX_CWD) {
 			sessionCwd = join(homedir(), ".cast", "sandbox", `cast-${session.id}`);
-			mkdirSync(sessionCwd, { recursive: true });
 			session.cwd = sessionCwd;
 		}
 
@@ -383,6 +384,12 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		// tab title — only if nothing (auto or a manual rename) has set one yet.
 		if (!ws.session.title && !ws.session.messages.some((m) => m.role === "user")) {
 			ws.session.title = deriveTitle(text);
+		}
+
+		// The sandbox scratch dir (see createSessionInstance) is only derived,
+		// not created, until there's an actual message to act on it for.
+		if (ws.session.cwd && !existsSync(ws.session.cwd)) {
+			mkdirSync(ws.session.cwd, { recursive: true });
 		}
 
 		const userMsg = { role: "user" as const, content: text };
@@ -551,7 +558,15 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		if (!ws) return false;
 		if (ws.status === "running") ws.runner.abort();
 		ws.backgroundBash.registry.killAll();
-		saveSession(ws.session);
+		// A session with no real turns yet (freshly created — e.g. a persona
+		// picked in the sidebar — then closed or dropped on shutdown without
+		// ever sending a message) shouldn't leave a "0 msg" row behind forever.
+		// A session only ever reaches disk via submit()'s saveSession call,
+		// which never runs before the first message is appended, so a hydrated
+		// (already-on-disk) session always has turns here too.
+		if (countTurnMessages(ws.session.messages) > 0) {
+			saveSession(ws.session);
+		}
 		// Told before removal, and before clearing listeners, so any open SSE
 		// connection gets one last frame to close itself on (see server.ts).
 		broadcast(ws, { type: "session_closed" });
