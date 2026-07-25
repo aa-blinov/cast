@@ -14,10 +14,15 @@
  *   --save, -s <path>      Save results to JSON file
  *   --list                 List available benches and cases
  *   --trace <file|latest>  Troubleshoot a recorded run — see --case
+ *   --save-baseline        Save the run's result as a baseline (--baseline <name> to pick a custom one)
+ *   --baseline <name>      Compare result against this saved baseline (default name = <bench>-<model>)
+ *   --regression-threshold <pp>  Pass-rate drop (in pp) that counts as a regression (default: 5)
+ *   --list-baselines       List all saved baselines
  */
 
 import { resolve } from "node:path";
 import { BENCHES, DEFAULT_BENCH_IDS, findBench } from "./benches/index.ts";
+import { compareToBaseline, formatDelta, listBaselines, resolveBaseline, saveBaseline } from "./lib/baseline.ts";
 import { cleanupFixtures } from "./lib/fixtures.ts";
 import { printHistory, recordCompare, recordCompareRepeated, recordRun } from "./lib/results.ts";
 import {
@@ -63,6 +68,10 @@ async function main(): Promise<void> {
 	let repeat = 1;
 	let traceFile: string | undefined;
 	let traceCaseId: string | undefined;
+	let saveBaselineFlag = false;
+	let baselineName: string | undefined;
+	let regressionThreshold = 0.05;
+	let listBaselinesFlag = false;
 
 	for (let i = 0; i < args.length; i++) {
 		switch (args[i]) {
@@ -130,6 +139,18 @@ async function main(): Promise<void> {
 			case "--case":
 				traceCaseId = args[++i];
 				break;
+			case "--save-baseline":
+				saveBaselineFlag = true;
+				break;
+			case "--baseline":
+				baselineName = args[++i];
+				break;
+			case "--regression-threshold":
+				regressionThreshold = parseFloat(args[++i] ?? "0.05");
+				break;
+			case "--list-baselines":
+				listBaselinesFlag = true;
+				break;
 			case "--help":
 			case "-h":
 				printHelp();
@@ -139,6 +160,24 @@ async function main(): Promise<void> {
 
 	if (historyOnly) {
 		printHistory();
+		return;
+	}
+
+	if (listBaselinesFlag) {
+		const baselines = listBaselines();
+		if (baselines.length === 0) {
+			console.log("No saved baselines yet — run with --save-baseline first.");
+			return;
+		}
+		console.log(`\n${baselines.length} saved baseline(s):\n`);
+		for (const b of baselines) {
+			const modelsStr = b.model;
+			const benchStr = b.bench;
+			const rate = `${b.passed}/${b.total} (${(b.passRate * 100).toFixed(1)}%)`;
+			const commitStr = b.commit ? ` @${b.commit}` : "";
+			console.log(`  ${b.name.padEnd(28)} ${benchStr.padEnd(12)} ${modelsStr.padEnd(14)} ${rate}${commitStr}`);
+		}
+		console.log();
 		return;
 	}
 
@@ -327,6 +366,53 @@ async function main(): Promise<void> {
 		console.log(`Results also saved to: ${savePath}`);
 	}
 
+	// Save baseline if --save-baseline was given. Requires a single bench so we
+	// can key it by bench name (otherwise different benches would interleave
+	// into one baseline file and make per-case regressions meaningless).
+	if (saveBaselineFlag) {
+		if (benchIds.length !== 1) {
+			console.error(`--save-baseline requires exactly one --bench (got ${benchIds.length}: ${benchIds.join(", ")})`);
+			process.exit(1);
+		}
+		const baseline = saveBaseline(suite, benchIds[0]!, baselineName);
+		console.log(`Baseline saved: evals/baselines/${baseline.name}.json`);
+		console.log(`  ${baseline.passed}/${baseline.total} passing (${(baseline.passRate * 100).toFixed(1)}%)`);
+	}
+
+	// Compare against baseline if --baseline was given.
+	if (baselineName) {
+		if (benchIds.length !== 1) {
+			console.error(`--baseline requires exactly one --bench (got ${benchIds.length}: ${benchIds.join(", ")})`);
+			process.exit(1);
+		}
+		const resolved = resolveBaseline(baselineName, model!);
+		if (!resolved) {
+			console.error(
+				`No baseline named "${baselineName}" found. Run with --save-baseline first, or check --list-baselines.`,
+			);
+			process.exit(1);
+		}
+		const delta = compareToBaseline(suite, benchIds[0]!, resolved.name, regressionThreshold);
+		if (!delta) {
+			console.error(`Baseline "${resolved.name}" could not be compared — did you save it?`);
+			process.exit(1);
+		}
+		console.log("");
+		console.log("=".repeat(60));
+		console.log("REGRESSION CHECK");
+		console.log("=".repeat(60));
+		console.log(formatDelta(delta, regressionThreshold));
+
+		// Exit with failure if any case failed OR the pass-rate dropped.
+		if (delta.hasRegression || suite.failed > 0) {
+			if (delta.hasRegression) {
+				console.log(`\n✗ Regression detected (threshold: ${regressionThreshold * 100}pp)`);
+			}
+			process.exit(1);
+		}
+		return;
+	}
+
 	// Exit with failure if any case failed
 	if (suite.failed > 0) {
 		process.exit(1);
@@ -367,6 +453,10 @@ Options:
                           to evals/results/runs/ regardless — this is an extra, fixed-path copy)
   --list                 List available benches and their cases
   --history              Show recorded runs from evals/results/index.json
+  --save-baseline        Save the run's result as a baseline for regression detection
+  --baseline <name>      Compare result against this saved baseline (default name: <bench>-<model>)
+  --regression-threshold <pp>  Pass-rate drop in pp that counts as a regression (default: 5)
+  --list-baselines       List all saved baselines
   --trace <file|latest>  Troubleshoot a recorded run: full turn-by-turn record (thinking,
                           commentary, tool args + actual tool output) for one case. <file> is
                           "latest", a path, or a bare filename under evals/results/runs/. Omit
@@ -412,6 +502,12 @@ Examples:
 
   # Same, narrowed to one model from a --compare file
   node --import tsx evals/run.ts --trace latest --case glob-then-grep -m mimo-v2.5-pro
+
+  # Regression detection: save a baseline, then compare future runs against it.
+  # Exit code 1 if pass-rate drops by >= --regression-threshold (default 5pp).
+  node --import tsx evals/run.ts -m MiniMax-M3 --bench basic -c simple-math --save-baseline
+  node --import tsx evals/run.ts -m MiniMax-M3 --bench basic -c simple-math --baseline basic-MiniMax-M3
+  node --import tsx evals/run.ts --list-baselines
 `);
 }
 
