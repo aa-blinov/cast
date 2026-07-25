@@ -37,8 +37,23 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from "node:path";
 import type { SuiteResult } from "./runner.ts";
 
-const BASELINES_DIR = join(import.meta.dirname, "..", "baselines");
-const HISTORY_DIR = join(BASELINES_DIR, "history");
+/**
+ * Resolve where baselines live. Reads from `EVAL_BASELINES_DIR` so tests
+ * can point at an isolated tempdir via `process.env` before each case
+ * (the module-level `const BASELINES_DIR` made it impossible to per-test
+ * isolate without re-importing the entire module — env is the simplest
+ * scope the test framework already sets up).
+ *
+ * History always lives in `<baselinesDir>/history`, mirroring the latest
+ * pointer in `<baselinesDir>/<name>.json`.
+ */
+function baselinesDir(): string {
+	return process.env.EVAL_BASELINES_DIR ?? join(import.meta.dirname, "..", "baselines");
+}
+
+function historyDir(): string {
+	return join(baselinesDir(), "history");
+}
 
 function currentCommit(): string | undefined {
 	try {
@@ -52,8 +67,10 @@ function currentCommit(): string | undefined {
 }
 
 function ensureDirs(): void {
-	if (!existsSync(BASELINES_DIR)) mkdirSync(BASELINES_DIR, { recursive: true });
-	if (!existsSync(HISTORY_DIR)) mkdirSync(HISTORY_DIR, { recursive: true });
+	const bDir = baselinesDir();
+	const hDir = historyDir();
+	if (!existsSync(bDir)) mkdirSync(bDir, { recursive: true });
+	if (!existsSync(hDir)) mkdirSync(hDir, { recursive: true });
 }
 
 /**
@@ -111,7 +128,7 @@ export interface Baseline {
 }
 
 function latestPath(name: string): string {
-	return join(BASELINES_DIR, `${name}.json`);
+	return join(baselinesDir(), `${name}.json`);
 }
 
 function defaultBaselineName(bench: string, model: string): string {
@@ -148,7 +165,7 @@ export function saveBaseline(suite: SuiteResult, bench: string, name?: string): 
 	// Write the history file first, then refresh the latest pointer. If the
 	// second write fails for any reason, we still have a recoverable record
 	// in history/ for the run that just landed.
-	const historyPath = join(HISTORY_DIR, historyFileName(baseline.timestamp, baselineName));
+	const historyPath = join(historyDir(), historyFileName(baseline.timestamp, baselineName));
 	writeFileSync(historyPath, serialized, "utf-8");
 	writeFileSync(latestPath(baselineName), serialized, "utf-8");
 	return baseline;
@@ -194,10 +211,11 @@ export function resolveBaseline(nameOrBench: string, model?: string): Baseline |
  * timeline of a specific baseline.
  */
 export function listBaselines(): Baseline[] {
-	if (!existsSync(BASELINES_DIR)) return [];
+	const bDir = baselinesDir();
+	if (!existsSync(bDir)) return [];
 	const results: Baseline[] = [];
-	for (const entry of readdirSync(BASELINES_DIR)) {
-		const fullPath = join(BASELINES_DIR, entry);
+	for (const entry of readdirSync(bDir)) {
+		const fullPath = join(bDir, entry);
 		if (!entry.endsWith(".json")) continue;
 		if (entry.startsWith(".")) continue;
 		try {
@@ -216,9 +234,10 @@ export function listBaselines(): Baseline[] {
  * only the latest "pointer" exists without any history yet.
  */
 export function listBaselineHistory(name: string): Baseline[] {
-	if (!existsSync(HISTORY_DIR)) return [];
+	const hDir = historyDir();
+	if (!existsSync(hDir)) return [];
 	const results: Baseline[] = [];
-	for (const entry of readdirSync(HISTORY_DIR)) {
+	for (const entry of readdirSync(hDir)) {
 		if (!entry.endsWith(".json")) continue;
 		// Files are `<dateStamp>_<name>.json`; the date prefix sorts first
 		// chronologically under string compare because it's ISO8601 with
@@ -228,7 +247,7 @@ export function listBaselineHistory(name: string): Baseline[] {
 		const fileName = entry.slice(trailingUnderscore + 1, -".json".length);
 		if (fileName !== name) continue;
 		try {
-			const b = JSON.parse(readFileSync(join(HISTORY_DIR, entry), "utf-8")) as Baseline;
+			const b = JSON.parse(readFileSync(join(hDir, entry), "utf-8")) as Baseline;
 			results.push(b);
 		} catch {
 			// skip corrupt entries

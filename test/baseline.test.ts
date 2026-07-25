@@ -15,6 +15,37 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+// Redirect all baseline file writes to an isolated tmpdir for the lifetime
+// of this test file's worker process. Without this, every `saveBaseline()`
+// call (and the per-test cleanup scripts scattered through the suites
+// below) leaks files into the real `evals/baselines/history/` and pollutes
+// the git working tree. The module-level assignment runs once when vitest
+// imports this file, before any test code.
+const BASELINE_TEST_DIR = join(
+	tmpdir(),
+	`cast-baseline-test-${process.pid}-${process.env.VITEST_WORKER_ID ?? "0"}`,
+);
+mkdirSync(BASELINE_TEST_DIR, { recursive: true });
+process.env.EVAL_BASELINES_DIR = BASELINE_TEST_DIR;
+
+const TEST_BASELINES_ROOT = BASELINE_TEST_DIR; // "evals/baselines" equivalent
+const TEST_HISTORY_DIR = join(BASELINE_TEST_DIR, "history"); // "evals/baselines/history" equivalent
+function baselinePath(name: string): string {
+	return join(TEST_BASELINES_ROOT, `${name}.json`);
+}
+function historyPath(name: string): string {
+	return join(TEST_HISTORY_DIR, `${name}.json`);
+}
+
+afterEach(() => {
+	// Best-effort cleanup between tests — delete the BASELINE_TEST_DIR
+	// contents so an accidentally-orphaned test (e.g. one that asserts
+	// before cleanup runs) doesn't bleed into the next case.
+	for (const entry of readdirSync(BASELINE_TEST_DIR)) {
+		rmSync(join(BASELINE_TEST_DIR, entry), { recursive: true, force: true });
+	}
+});
 import {
 	binomialTestOneSided,
 	compareToBaseline,
@@ -148,7 +179,7 @@ describe("baseline save/load", () => {
 		expect(loaded?.results).toHaveLength(2);
 
 		// Cleanup the real-baselines file so tests are repeatable.
-		rmSync(join(import.meta.dirname, "..", "evals", "baselines", "round-trip-name.json"), {
+		rmSync(baselinePath("round-trip-name"), {
 			force: true,
 		});
 	});
@@ -166,7 +197,7 @@ describe("baseline save/load", () => {
 		expect(loaded).not.toBeNull();
 		expect(loaded?.name).toBe("default-bench-default-name-model");
 
-		rmSync(join(import.meta.dirname, "..", "evals", "baselines", "default-bench-default-name-model.json"), {
+		rmSync(baselinePath("default-bench-default-name-model"), {
 			force: true,
 		});
 	});
@@ -178,8 +209,7 @@ describe("baseline save/load", () => {
 
 	it("loadBaseline treats corrupt JSON as missing (returns null)", () => {
 		// Write a corrupt file to the baselines dir.
-		const path = join(import.meta.dirname, "..", "evals", "baselines", "corrupt-baseline.json");
-		mkdirSync(join(import.meta.dirname, "..", "evals", "baselines"), { recursive: true });
+		const path = baselinePath("corrupt-baseline");
 		writeFileSync(path, "{ not valid json");
 		const result = loadBaseline("corrupt-baseline");
 		expect(result).toBeNull();
@@ -193,11 +223,11 @@ describe("baseline history", () => {
 		const saved = saveBaseline(suite, "hist-bench", "hist-pointer");
 
 		// Top-level latest pointer
-		const latestPath = join(import.meta.dirname, "..", "evals", "baselines", "hist-pointer.json");
+		const latestPath = baselinePath("hist-pointer");
 		expect(existsSync(latestPath)).toBe(true);
 
 		// History subdirectory gets one dated copy
-		const historyDir = join(import.meta.dirname, "..", "evals", "baselines", "history");
+		const historyDir = TEST_HISTORY_DIR;
 		const entries = readdirSync(historyDir).filter((f) => f.endsWith("_hist-pointer.json"));
 		expect(entries).toHaveLength(1);
 		const expectedPrefix = saved.timestamp.replace(/[:.]/g, "-");
@@ -226,8 +256,8 @@ describe("baseline history", () => {
 		saveBaseline(suite1, "grow", "grow-point");
 		saveBaseline(suite2, "grow", "grow-point");
 
-		const latestPath = join(import.meta.dirname, "..", "evals", "baselines", "grow-point.json");
-		const historyDir = join(import.meta.dirname, "..", "evals", "baselines", "history");
+		const latestPath = baselinePath("grow-point");
+		const historyDir = TEST_HISTORY_DIR;
 		const entries = readdirSync(historyDir).filter((f) => f.endsWith("_grow-point.json"));
 		expect(entries).toHaveLength(2);
 
@@ -254,8 +284,8 @@ describe("baseline history", () => {
 		expect(ours[0]?.passed).toBe(0);
 
 		// Cleanup
-		const latestPath = join(import.meta.dirname, "..", "evals", "baselines", "split-latest.json");
-		const historyDir = join(import.meta.dirname, "..", "evals", "baselines", "history");
+		const latestPath = baselinePath("split-latest");
+		const historyDir = TEST_HISTORY_DIR;
 		const entries = readdirSync(historyDir).filter((f) => f.endsWith("_split-latest.json"));
 		for (const e of entries) {
 			rmSync(join(historyDir, e), { force: true });
@@ -281,8 +311,8 @@ describe("baseline history", () => {
 		expect(other).toHaveLength(0);
 
 		// Cleanup
-		const latestPath = join(import.meta.dirname, "..", "evals", "baselines", "lh-name.json");
-		const historyDir = join(import.meta.dirname, "..", "evals", "baselines", "history");
+		const latestPath = baselinePath("lh-name");
+		const historyDir = TEST_HISTORY_DIR;
 		const entries = readdirSync(historyDir).filter((f) => f.endsWith("_lh-name.json"));
 		for (const e of entries) {
 			rmSync(join(historyDir, e), { force: true });
@@ -326,7 +356,7 @@ describe("compareToBaseline", () => {
 		expect(delta?.regressions[0]?.baselinePassed).toBe(true);
 		expect(delta?.regressions[0]?.currentPassed).toBe(false);
 
-		rmSync(join(import.meta.dirname, "..", "evals", "baselines", "regress-baseline.json"), {
+		rmSync(baselinePath("regress-baseline"), {
 			force: true,
 		});
 	});
@@ -355,7 +385,7 @@ describe("compareToBaseline", () => {
 		expect(delta?.significance.pValue).toBeGreaterThan(0.05);
 		expect(delta?.regressions).toHaveLength(1);
 
-		rmSync(join(import.meta.dirname, "..", "evals", "baselines", "near-miss-baseline.json"), {
+		rmSync(baselinePath("near-miss-baseline"), {
 			force: true,
 		});
 	});
@@ -385,7 +415,7 @@ describe("compareToBaseline", () => {
 		expect(delta?.passedDelta).toBe(2);
 		expect(delta?.hasRegression).toBe(false);
 
-		rmSync(join(import.meta.dirname, "..", "evals", "baselines", "improvements-baseline.json"), { force: true });
+		rmSync(baselinePath("improvements-baseline"), { force: true });
 	});
 
 	it("ignores cases added since the baseline (no spurious regression)", () => {
@@ -408,7 +438,7 @@ describe("compareToBaseline", () => {
 		// (it wasn't in the baseline at all → no comparison possible).
 		expect(delta?.regressions).toHaveLength(0);
 
-		rmSync(join(import.meta.dirname, "..", "evals", "baselines", "new-case-baseline.json"), {
+		rmSync(baselinePath("new-case-baseline"), {
 			force: true,
 		});
 	});
@@ -430,7 +460,7 @@ describe("compareToBaseline", () => {
 		expect(delta?.totalTokensDelta).toBe(150);
 		expect(delta?.durationDelta).toBe(1000);
 
-		rmSync(join(import.meta.dirname, "..", "evals", "baselines", "tokens-baseline.json"), {
+		rmSync(baselinePath("tokens-baseline"), {
 			force: true,
 		});
 	});
@@ -464,7 +494,7 @@ describe("formatDelta", () => {
 		expect(text).toContain("Regressions");
 		expect(text).toContain("c1");
 
-		rmSync(join(import.meta.dirname, "..", "evals", "baselines", "demo.json"), {
+		rmSync(baselinePath("demo"), {
 			force: true,
 		});
 	});
@@ -493,7 +523,7 @@ describe("regression detection edge cases", () => {
 		// are compared.
 		expect(delta?.regressions).toHaveLength(0);
 
-		rmSync(join(import.meta.dirname, "..", "evals", "baselines", "removed-baseline.json"), {
+		rmSync(baselinePath("removed-baseline"), {
 			force: true,
 		});
 	});
