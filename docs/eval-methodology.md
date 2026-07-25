@@ -35,7 +35,7 @@ wasn't buying anything specific to cast's situation:
 | | oh-my-pi | cast |
 |---|---|---|
 | Parser | Babel | TypeScript Compiler API (already a devDependency for `tsc` — zero new deps) |
-| Mutation kinds | ~6 | 3 (comparison-operator swap, boolean flip, off-by-one) |
+| Mutation kinds | 20, across 10 categories (see below) | 3 (comparison-operator swap, boolean flip, off-by-one) |
 | Source corpus | vendored React files | cast's own `src/` (dogfooding, always in sync with the real codebase) |
 | Edit-tool formats compared | 3 | 1 (cast only has one edit format — hashline — today; see "What isn't built yet" below) |
 | Formatter for grading | prettier | biome (cast's own formatter) |
@@ -46,7 +46,21 @@ engine (`evals/benches/mutation/mutate.ts`) tests whether the model can locate a
 a described change through cast's actual edit tool — it is not trying to be a bug-finding
 benchmark. Three well-understood, syntactically-unambiguous mutation shapes are enough to exercise
 that; adding more categories would add surface area without adding a new failure mode worth
-distinguishing.
+distinguishing. The full upstream set (`can1357/oh-my-pi/packages/typescript-edit-benchmark/src/mutations.ts`,
+`ALL_MUTATIONS`/`CATEGORY_MAP`) as of this writing:
+
+| Category | Mutations | Ported to cast? |
+|---|---|---|
+| `operator` (7) | swap-comparison, swap-equality, swap-logical, remove-negation, swap-increment-decrement, swap-arithmetic, swap-nullish | swap-comparison only (`comparison-operator-swap`) |
+| `literal` (2) | flip-boolean, off-by-one | both (`boolean-flip`, `off-by-one`) |
+| `structural` (4) | swap-adjacent-lines, swap-if-else, remove-early-return, delete-statement | none |
+| `access` (1) | remove-optional-chain | none |
+| `call` (1) | swap-call-args | none |
+| `regex` (1) | swap-regex-quantifier | none |
+| `unicode` (1) | unicode-hyphen | none |
+| `identifier` (1) | identifier-multi-edit | none |
+| `duplicate` (1) | duplicate-line-flip | none |
+| `import` (1) | swap-named-imports | none |
 
 ## Directory layout
 
@@ -378,7 +392,10 @@ JSON file and pretty-prints it (truncating only the terminal display, never the 
   `compareModels`/`compareModelsRepeated` machinery in `evals/lib/runner.ts` generalizes to this
   directly if/when a second format exists — same report shape, same recording, just a different
   axis of `LoopConfig` held variable instead of `model`.
-- **More mutation categories**: deliberately deferred, not missing — see "Provenance" above.
+- **More mutation categories**: deliberately deferred, not missing — see the coverage table in
+  "Provenance" above for exactly which of the 17 unported upstream mutations (`access`, `call`,
+  `regex`, `unicode`, `identifier`, `duplicate`, `import`, plus 6 more `operator` kinds and 4
+  `structural` ones) would be the next candidates if the mutation set ever needs to grow.
 
 ## Practical usage
 
