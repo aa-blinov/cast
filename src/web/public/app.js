@@ -1228,7 +1228,9 @@ function SettingsModal({
 			setErrors((e) => ({ ...e, [tab]: null }));
 			const res = await run(command);
 			if (!res.ok) setErrors((e) => ({ ...e, [tab]: res.error ?? "Failed" }));
-			await load(tab);
+			// Always refresh the Model tab too: a /provider Switch changes the
+			// active provider, which the Model picker's model list depends on.
+			await Promise.all([load(tab), tab === "model" ? Promise.resolve() : load("model")]);
 			setBusy(false);
 			return res;
 		},
@@ -1346,47 +1348,61 @@ function SlotModelPicker({
 	initialModels,
 }) {
 	const initialProvider = currentProvider || "";
-	const effectiveModel = currentModel || fallbackModel || "";
+	// Only the slot's own chosen model is "selected"; an inherited
+	// fallback is shown via the placeholder, so every slot reads the
+	// same "Pick a model…" line instead of silently showing a model
+	// the slot never explicitly picked.
+	const effectiveModel = currentModel || "";
 	const [providerValue, setProviderValue] = useState(initialProvider);
 	const [modelValue, setModelValue] = useState(effectiveModel);
 	const [models, setModels] = useState(initialModels || []);
 	const [loading, setLoading] = useState(false);
 
 	// Label for the empty option in the provider dropdown.
-	const defaultLabel = activeProviderName || (providers.length > 1 ? "Select…" : "Active");
+	// Empty option label: the main slot shows the provider the main model
+	// currently uses; subagent/plan show that they inherit it (there's no
+	// separate "default" — the main model's provider IS the default).
+	const defaultLabel = isMainSlot
+		? activeProviderName || "Select…"
+		: activeProviderName
+			? `${activeProviderName} (same as main)`
+			: "Same as main";
 
-	// Fetch models on mount: use cached endpoint for instant load, then
-	// optionally re-fetch from a specific provider if one is pinned.
+	// Models for this slot: if a specific per-slot provider is pinned,
+	// fetch its list; otherwise the slot follows the *active* provider, so
+	// fetch that provider's models (resolved by name on the server) and
+	// re-fetch whenever activeProviderName changes — e.g. after a
+	// /provider Switch — so the picker reflects the new endpoint without
+	// a page reload.
+	const seededRef = useRef(false);
 	useEffect(() => {
 		let cancelled = false;
 		(async () => {
-			if (!initialModels?.length) {
-				// No models from parent — load cached ones instantly.
+			// Seed from cache instantly for first paint only.
+			if (!seededRef.current) {
+				seededRef.current = true;
 				try {
 					const res = await api("GET", "/api/models/cached");
-					if (!cancelled && res?.models?.length) {
-						setModels(res.models);
-					}
+					if (!cancelled && res?.models?.length) setModels(res.models);
 				} catch {
 					/* ignore */
 				}
 			}
-			// If a specific provider is pinned (not the active one), fetch from it.
-			if (initialProvider) {
-				setLoading(true);
-				try {
-					const res = await api("GET", `/api/models?provider=${encodeURIComponent(initialProvider)}`);
-					if (!cancelled) setModels(res?.models ?? []);
-				} catch {
-					if (!cancelled) setModels([]);
-				}
-				if (!cancelled) setLoading(false);
+			setLoading(true);
+			const effectiveProvider = initialProvider || activeProviderName || "";
+			const qs = effectiveProvider ? `?provider=${encodeURIComponent(effectiveProvider)}` : "";
+			try {
+				const res = await api("GET", `/api/models${qs}`);
+				if (!cancelled) setModels(res?.models ?? []);
+			} catch {
+				if (!cancelled) setModels([]);
 			}
+			if (!cancelled) setLoading(false);
 		})();
 		return () => {
 			cancelled = true;
 		};
-	}, [initialModels?.length, initialProvider]);
+	}, [initialProvider, activeProviderName]);
 
 	// Fetch models when provider changes.
 	const onProviderChange = useCallback(async (name) => {
@@ -1405,8 +1421,8 @@ function SlotModelPicker({
 
 	const doSet = useCallback(async () => {
 		if (providerValue) await act(`${providerCommand} ${providerValue}`);
-		if (modelValue) await act(`${modelCommand} ${modelValue}`);
-	}, [providerValue, modelValue, act, providerCommand, modelCommand]);
+		if (modelValue && models.some((m) => m.id === modelValue)) await act(`${modelCommand} ${modelValue}`);
+	}, [providerValue, modelValue, models, act, providerCommand, modelCommand]);
 
 	const doReset = useCallback(async () => {
 		if (providerCommand !== "/provider") await act(`${providerCommand} off`);
@@ -1422,13 +1438,13 @@ function SlotModelPicker({
 		<div class="settings-form-row">
 			<select disabled=${busy} value=${providerValue} onChange=${(e) => onProviderChange(e.target.value)}>
 				<option value="">${defaultLabel}</option>
-				${providers.map((p) => html`<option key=${p.name} value=${p.name}>${p.name} — ${p.url}</option>`)}
+				${providers.map((p) => html`<option key=${p.name} value=${p.name}>${p.name}</option>`)}
 			</select>
-			<select disabled=${busy || loading} onChange=${(e) => setModelValue(e.target.value)} value=${modelValue}>
-				<option value="">${loading ? "Loading…" : currentModel ? "Pick a model…" : fallbackModel ? `${fallbackModel} (default)` : "Pick a model…"}</option>
+			<select disabled=${busy || loading} onChange=${(e) => setModelValue(e.target.value)} value=${modelValue && models.some((m) => m.id === modelValue) ? modelValue : ""}>
+				<option value="">${loading ? "Loading…" : `Pick a model…${fallbackModel && models.some((m) => m.id === fallbackModel) ? ` (inherits ${fallbackModel})` : ""}`}</option>
 				${[...models].sort((a, b) => a.id.localeCompare(b.id)).map((m) => html`<option key=${m.id} value=${m.id}>${m.id}${m.reasoning ? " (reasoning)" : ""}</option>`)}
 			</select>
-			<button class="modal-btn icon-btn" title="Apply" disabled=${busy || !modelValue} onClick=${doSet}><${icons.check} /></button>
+			<button class="modal-btn icon-btn" title="Apply" disabled=${busy || !modelValue || !models.some((m) => m.id === modelValue)} onClick=${doSet}><${icons.check} /></button>
 			${!isMainSlot ? html`<button class="modal-btn icon-btn" title="Clear model override" disabled=${busy} onClick=${() => act(`${modelCommand} off`)}><${icons.xCircle} /></button>` : null}
 			${!isMainSlot && hasOverride ? html`<button class="modal-btn icon-btn" title="Reset all overrides" disabled=${busy} onClick=${doReset}><${icons.arrowUturnLeft} /></button>` : null}
 		</div>
@@ -1443,8 +1459,8 @@ function SettingsModel({ data, busy, act }) {
 	const activeProviderName = providers.find((p) => p.active)?.name ?? "";
 	return html`
 		<div class="settings-rows">
-			<div class="settings-section-title">Model — current: ${c.model ?? "—"}</div>
-			<${SlotModelPicker} busy=${busy} act=${act} providers=${providers} activeProviderName=${activeProviderName} currentModel=${c.model} providerCommand="/provider" modelCommand="/model" isMainSlot=${true} initialModels=${data.models} />
+			<div class="settings-section-title">Model</div>
+			<${SlotModelPicker} busy=${busy} act=${act} providers=${providers} activeProviderName=${activeProviderName} currentProvider=${activeProviderName} currentModel=${c.model} providerCommand="/provider" modelCommand="/model" isMainSlot=${true} initialModels=${data.models} />
 			<div class="settings-section-title">Reasoning — current: ${c.reasoningLevel ?? "off"}</div>
 			${
 				data.reasoningOptions.length === 0
@@ -1459,9 +1475,9 @@ function SettingsModel({ data, busy, act }) {
 					</div>
 				`
 			}
-			<div class="settings-section-title">Subagent model — current: ${c.subagentModel ?? c.model ?? "—"}${c.subagentModelProvider ? ` @ ${c.subagentModelProvider}` : ""}</div>
+			<div class="settings-section-title">Subagent model${c.subagentModelProvider ? ` — @ ${c.subagentModelProvider}` : ""}</div>
 			<${SlotModelPicker} busy=${busy} act=${act} providers=${providers} activeProviderName=${activeProviderName} currentProvider=${c.subagentModelProvider} currentModel=${c.subagentModel} fallbackModel=${c.model} providerCommand="/subagent-model-provider" modelCommand="/subagent-model" initialModels=${data.models} />
-			<div class="settings-section-title">Plan-mode model — current: ${c.planModel ?? c.model ?? "—"}${c.planModelProvider ? ` @ ${c.planModelProvider}` : ""}</div>
+			<div class="settings-section-title">Plan-mode model${c.planModelProvider ? ` — @ ${c.planModelProvider}` : ""}</div>
 			<${SlotModelPicker} busy=${busy} act=${act} providers=${providers} activeProviderName=${activeProviderName} currentProvider=${c.planModelProvider} currentModel=${c.planModel} fallbackModel=${c.model} providerCommand="/plan-model-provider" modelCommand="/plan-model" initialModels=${data.models} />
 		</div>
 	`;
@@ -1765,17 +1781,59 @@ function SettingsProvider({ data, busy, act, confirm }) {
 	const [url, setUrl] = useState("");
 	const [apiKey, setApiKey] = useState("");
 	const [editing, setEditing] = useState(null);
+	const [verifyState, setVerifyState] = useState(null);
+	const [saving, setSaving] = useState(false);
 	const startEdit = (p) => {
 		setEditing(p.name);
 		setName(p.name);
 		setUrl(p.url);
 		setApiKey(p.apiKey);
+		setVerifyState(p.url && p.apiKey ? { ok: true, msg: "Saved — re-verify to confirm changes" } : null);
 	};
 	const cancelEdit = () => {
 		setEditing(null);
 		setName("");
 		setUrl("");
 		setApiKey("");
+		setVerifyState(null);
+	};
+	// Probe the entered URL + key without saving. Rejects outright when either
+	// field is empty so the button can't fire a pointless round trip.
+	const doVerify = async () => {
+		if (!url || !apiKey) {
+			setVerifyState({ ok: false, msg: "Enter a base URL and API key first" });
+			return;
+		}
+		setVerifyState({ ok: null, msg: "Verifying…" });
+		try {
+			const res = await api("POST", "/api/provider/verify", { url, apiKey });
+			if (res?.ok) setVerifyState({ ok: true, msg: "Provider reachable" });
+			else setVerifyState({ ok: false, msg: res?.error || "Verification failed" });
+		} catch (_e) {
+			setVerifyState({ ok: false, msg: "Verification request failed" });
+		}
+	};
+	// Mandatory gate: a provider is never saved with unverified credentials.
+	const saveProvider = async () => {
+		if (!name || !url || !apiKey) return;
+		setSaving(true);
+		try {
+			const res = await api("POST", "/api/provider/verify", { url, apiKey });
+			if (!res?.ok) {
+				setVerifyState({ ok: false, msg: res?.error || "Verification failed — provider not saved" });
+				return;
+			}
+			if (editing) {
+				await act(`/provider delete ${editing}`);
+				await act(`/provider add ${name} ${url} ${apiKey}`);
+				if (data.find((p) => p.active && p.name === editing)) await act(`/provider ${name}`);
+			} else {
+				await act(`/provider add ${name} ${url} ${apiKey}`);
+			}
+			cancelEdit();
+		} finally {
+			setSaving(false);
+		}
 	};
 	return html`
 		<div class="settings-rows">
@@ -1785,13 +1843,11 @@ function SettingsProvider({ data, busy, act, confirm }) {
 					(p) => html`
 				<div key=${p.name} class="settings-item-row">
 					<div class="settings-item-info">
-						<span class="settings-item-status ${p.active ? "ok" : "off"}" />
 						<span class="settings-item-name">${p.name}</span>
 						<span class="settings-item-meta" title=${p.url}>${shortPath(p.url)}</span>
 					</div>
 					<div class="settings-item-actions">
 						<button class="modal-btn icon-btn" title="Edit" disabled=${busy} onClick=${() => startEdit(p)}><${icons.pencil} /></button>
-						${!p.active ? html`<button class="modal-btn icon-btn" title="Switch" disabled=${busy} onClick=${() => act(`/provider ${p.name}`)}><${icons.arrowRight} /></button>` : null}
 						<button class="modal-btn icon-btn modal-btn-danger" title="Delete" disabled=${busy} onClick=${async () => {
 							if (await confirm(`Delete provider "${p.name}"?`)) act(`/provider delete ${p.name}`);
 						}}><${icons.trash} /></button>
@@ -1800,23 +1856,27 @@ function SettingsProvider({ data, busy, act, confirm }) {
 			`,
 				)}
 			${!data || data.length === 0 ? html`<div class="settings-hint">No saved providers.</div>` : null}
+			${data && data.length > 0 ? html`<div class="settings-hint">Providers here are just a saved list. In the Model tab, pick which provider each model slot uses (main / subagent / plan) — they can be on different providers.</div>` : null}
 			<div class="settings-section-title">${editing ? `Edit provider: ${editing}` : "Add provider"}</div>
 			<div class="settings-form-row">
-				<input type="text" placeholder="name" value=${name} disabled=${!!editing} onInput=${(e) => setName(e.target.value)} />
-				<input type="text" placeholder="base URL" value=${url} onInput=${(e) => setUrl(e.target.value)} />
-				<input type="password" placeholder="API key" value=${apiKey} onInput=${(e) => setApiKey(e.target.value)} />
-				<button class="modal-btn icon-btn" title=${editing ? "Save changes" : "Add provider"} disabled=${busy || !name || !url || !apiKey} onClick=${async () => {
-					if (editing) {
-						await act(`/provider delete ${editing}`);
-						await act(`/provider add ${name} ${url} ${apiKey}`);
-						if (data.find((p) => p.active && p.name === editing)) await act(`/provider ${name}`);
-					} else {
-						await act(`/provider add ${name} ${url} ${apiKey}`);
-					}
-					cancelEdit();
-				}}><${icons.check} /></button>
-				${editing ? html`<button class="modal-btn icon-btn" title="Cancel" disabled=${busy} onClick=${cancelEdit}><${icons.xCircle} /></button>` : null}
+				<input type="text" placeholder="name" value=${name} disabled=${!!editing} onInput=${(e) => {
+					setName(e.target.value);
+					setVerifyState(null);
+				}} />
+				<input type="text" placeholder="base URL" value=${url} onInput=${(e) => {
+					setUrl(e.target.value);
+					setVerifyState(null);
+				}} />
+				<input type="password" placeholder="API key" value=${apiKey} onInput=${(e) => {
+					setApiKey(e.target.value);
+					setVerifyState(null);
+				}} />
+				<button class="modal-btn icon-btn" title="Verify credentials" disabled=${busy || saving || !url || !apiKey} onClick=${doVerify}><${icons.arrowPath} /></button>
+				<button class="modal-btn icon-btn" title=${editing ? "Save changes" : "Add provider"} disabled=${busy || saving || !name || !url || !apiKey} onClick=${saveProvider}><${icons.check} /></button>
+				${editing ? html`<button class="modal-btn icon-btn" title="Cancel" disabled=${busy || saving} onClick=${cancelEdit}><${icons.xCircle} /></button>` : null}
 			</div>
+			${verifyState ? html`<div class="settings-hint ${verifyState.ok === false ? "settings-error" : verifyState.ok === true ? "settings-ok" : ""}">${verifyState.ok === false ? "✕ " : verifyState.ok === true ? "✓ " : ""}${verifyState.msg}</div>` : null}
+			<div class="settings-hint">Credentials are verified before saving — the provider must be reachable.</div>
 		</div>
 	`;
 }

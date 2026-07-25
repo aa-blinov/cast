@@ -573,6 +573,12 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 		if (!name || !key) return json(res, { ok: false, error: "name and key required" }, 400);
 		json(res, bridge.saveSshKey(name, key));
 	});
+	route("POST", "/api/provider/verify", async (req, res) => {
+		const body = await readBody(req);
+		const { url, apiKey } = JSON.parse(body);
+		if (!url || !apiKey) return json(res, { ok: false, error: "url and apiKey required" }, 400);
+		json(res, await bridge.verifyProvider(url, apiKey));
+	});
 
 	route("GET", "/api/sessions/:id/reasoning-options", (_req, res, params) => {
 		if (!bridge.getSession(params.id)) return json(res, { error: "Not found" }, 404);
