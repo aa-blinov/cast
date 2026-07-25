@@ -2,7 +2,18 @@
 
 All notable user-facing changes to cast, newest first.
 
-## 0.8.24
+## 0.8.25
+
+### Fixed
+
+- Web UI: chat no longer flickers/remounts when toggling the diff panel, reconnecting, or reloading — an SSE reconnect effect was tearing down and rebuilding every message's DOM node on every diff-panel toggle and on every page load.
+- Web UI: the saved theme now applies before first paint instead of flashing the hardcoded default accent while `/api/themes` is in flight.
+- Web UI: personas/commands/themes/config are fetched once per tab instead of being re-fetched (and visibly re-flashed) on every SSE reconnect.
+- Web UI: trimmed the cold-load waterfall — dropped an unused Inter font import that was blocking the whole JS bootstrap behind an external round trip, added `preconnect` hints, and a reload landing on `?session=<id>` now fetches that thread in parallel with the session list instead of after it.
+
+### Added
+
+- Web UI: Settings > Font — pick from 10 monospace and 10 sans-serif fonts (sans only affects interface text; code/tool output/tables stay monospace) plus a text-scale control (85%–150%), both applying instantly with no server round trip.
 
 ### Fixed
 
