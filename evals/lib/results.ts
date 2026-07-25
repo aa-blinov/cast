@@ -62,7 +62,9 @@ function slugify(parts: string[]): string {
 function readIndex(): IndexEntry[] {
 	if (!existsSync(INDEX_PATH)) return [];
 	try {
-		return JSON.parse(readFileSync(INDEX_PATH, "utf-8")) as IndexEntry[];
+		const raw = JSON.parse(readFileSync(INDEX_PATH, "utf-8"));
+		// Tolerate legacy format (a single-run object) — treat as empty index.
+		return Array.isArray(raw) ? (raw as IndexEntry[]) : [];
 	} catch {
 		return []; // corrupt/empty — start fresh rather than crash a run over stale bookkeeping
 	}
@@ -98,6 +100,7 @@ export function recordRun(suite: SuiteResult, caseFilter?: string): string {
 				passed: suite.passed,
 				failed: suite.failed,
 				duration: suite.duration,
+				usage: suite.usage,
 				cases: suite.results.map((r) => ({
 					id: r.caseId,
 					description: r.description,
@@ -109,6 +112,7 @@ export function recordRun(suite: SuiteResult, caseFilter?: string): string {
 					errors: r.errors,
 					responsePreview: r.response.slice(0, 500),
 					trace: r.trace,
+					usage: r.usage,
 				})),
 			},
 			null,
@@ -161,6 +165,7 @@ export function recordCompare(compare: CompareResult, caseFilter?: string): stri
 							passed: s.passed,
 							failed: s.failed,
 							duration: s.duration,
+							usage: s.usage,
 							cases: s.results.map((r) => ({
 								id: r.caseId,
 								passed: r.passed,
@@ -169,6 +174,7 @@ export function recordCompare(compare: CompareResult, caseFilter?: string): stri
 								toolsCalled: r.toolsCalled,
 								failedChecks: r.failedChecks,
 								trace: r.trace,
+								usage: r.usage,
 							})),
 						},
 					]),
@@ -231,6 +237,7 @@ export function recordCompareRepeated(compare: RepeatedCompareResult, caseFilter
 							casesTotal: s.casesTotal,
 							casesPassed: s.casesPassed,
 							duration: s.duration,
+							usage: s.usage,
 							cases: s.results.map((r) => ({
 								id: r.caseId,
 								passed: r.passed,
@@ -244,6 +251,7 @@ export function recordCompareRepeated(compare: RepeatedCompareResult, caseFilter
 									turns: a.turns,
 									failedChecks: a.failedChecks,
 									trace: a.trace,
+									usage: a.usage,
 								})),
 							})),
 						},

@@ -219,6 +219,37 @@ prints the index as a compact log, newest last, including the `⚠N inconsistent
 repeated runs and the short commit hash the run was recorded at (`git rev-parse --short HEAD`) —
 enough to correlate a regression with a specific harness change.
 
+## Cost & token tracking
+
+Every run reports token usage and (when the provider reports it) USD cost alongside the pass/fail
+table — the same dimensions oh-my-pi's edit benchmark surfaces so a model's win doesn't hide behind
+a 10× token spend.
+
+For a single-model run the summary prints per-case `(tokens, cost)` and the suite ends with a
+`Usage:` block (total / prompt / completion / cache-hit / uncached / cost):
+
+```
+EVAL RESULTS: 1/1 passed (1796ms)
+Summary:
+  ✓ simple-math (1794ms, 1 turns, 7543 tokens, n/a)
+Usage:
+  Total tokens: 7,543
+    Prompt: 7,526
+    Completion: 17
+    Cache read: 128
+    Uncached: 7,398
+```
+
+`--compare` collapses these into a side-by-side row per model (`passed/total, duration, tokens,
+cost`), and `--repeat` aggregates across all attempts. Recorded JSON carries the same numbers at
+both the suite level (`usage`) and per case (`cases[i].usage`) so downstream tooling (dashboards,
+regression detectors) can read them without re-parsing the report.
+
+Token buckets: `promptTokens` (input), `completionTokens` (output), `totalTokens`, `cacheReadTokens`
+(provider prompt-cache hit), `cacheWriteTokens` (cache miss / new entry), `uncachedTokens` (full-
+price input). `cost` is USD from the provider when it reports one — `n/a` otherwise (not every
+provider returns it).
+
 ## Troubleshooting a failure: `--trace`
 
 The pass/fail table (and even a failed-checks message) tells you *that* a case failed, not *why* —
