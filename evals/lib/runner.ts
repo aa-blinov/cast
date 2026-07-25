@@ -149,6 +149,16 @@ export interface RunResult {
 	expectedSummary: ExpectedSummary;
 	/** Full turn-by-turn record — see `TraceTurn`. */
 	trace: TraceTurn[];
+	/** Token usage and cost for this run (aggregated across all turns). */
+	usage: {
+		promptTokens: number;
+		completionTokens: number;
+		totalTokens: number;
+		cost?: number;
+		cacheReadTokens?: number;
+		cacheWriteTokens?: number;
+		uncachedTokens?: number;
+	};
 }
 
 // ============================================================================
@@ -206,6 +216,15 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 	let thinking = "";
 	let turns = 0;
 	const errors: string[] = [];
+	const usage = {
+		promptTokens: 0,
+		completionTokens: 0,
+		totalTokens: 0,
+		cost: 0,
+		cacheReadTokens: 0,
+		cacheWriteTokens: 0,
+		uncachedTokens: 0,
+	};
 
 	const ac = new AbortController();
 	const timer = setTimeout(() => ac.abort(), timeout);
@@ -283,6 +302,15 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 				}
 				if (event.type === "error") {
 					errors.push(event.message);
+				}
+				if (event.type === "usage") {
+					usage.promptTokens += event.usage.promptTokens ?? 0;
+					usage.completionTokens += event.usage.completionTokens ?? 0;
+					usage.totalTokens += event.usage.totalTokens ?? 0;
+					usage.cost += event.usage.cost ?? 0;
+					usage.cacheReadTokens += event.usage.cacheReadTokens ?? 0;
+					usage.cacheWriteTokens += event.usage.cacheWriteTokens ?? 0;
+					usage.uncachedTokens += event.usage.uncachedTokens ?? 0;
 				}
 			},
 		});
@@ -417,6 +445,7 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 		failedChecks,
 		expectedSummary,
 		trace,
+		usage,
 	};
 }
 
@@ -432,6 +461,16 @@ export interface SuiteResult {
 	failed: number;
 	duration: number;
 	results: RunResult[];
+	/** Aggregated token usage and cost across all cases in the suite. */
+	usage: {
+		promptTokens: number;
+		completionTokens: number;
+		totalTokens: number;
+		cost: number;
+		cacheReadTokens: number;
+		cacheWriteTokens: number;
+		uncachedTokens: number;
+	};
 }
 
 export async function runSuite(
@@ -486,6 +525,28 @@ export async function runSuite(
 	const duration = Date.now() - startTime;
 	const passed = results.filter((r) => r.passed).length;
 
+	// Aggregate usage across all cases
+	const usage = results.reduce(
+		(acc, r) => ({
+			promptTokens: acc.promptTokens + r.usage.promptTokens,
+			completionTokens: acc.completionTokens + r.usage.completionTokens,
+			totalTokens: acc.totalTokens + r.usage.totalTokens,
+			cost: acc.cost + (r.usage.cost ?? 0),
+			cacheReadTokens: acc.cacheReadTokens + (r.usage.cacheReadTokens ?? 0),
+			cacheWriteTokens: acc.cacheWriteTokens + (r.usage.cacheWriteTokens ?? 0),
+			uncachedTokens: acc.uncachedTokens + (r.usage.uncachedTokens ?? 0),
+		}),
+		{
+			promptTokens: 0,
+			completionTokens: 0,
+			totalTokens: 0,
+			cost: 0,
+			cacheReadTokens: 0,
+			cacheWriteTokens: 0,
+			uncachedTokens: 0,
+		},
+	);
+
 	return {
 		model: options.model,
 		total: results.length,
@@ -493,6 +554,7 @@ export async function runSuite(
 		failed: results.length - passed,
 		duration,
 		results,
+		usage,
 	};
 }
 
@@ -524,6 +586,16 @@ export interface RepeatedSuiteResult {
 	casesPassed: number;
 	casesTotal: number;
 	duration: number;
+	/** Aggregated token usage and cost across all attempts. */
+	usage: {
+		promptTokens: number;
+		completionTokens: number;
+		totalTokens: number;
+		cost: number;
+		cacheReadTokens: number;
+		cacheWriteTokens: number;
+		uncachedTokens: number;
+	};
 }
 
 function average(values: number[]): number {
@@ -613,6 +685,50 @@ export async function compareModelsRepeated(
 				avgTurns: average(attempts.map((a) => a.turns)),
 			};
 		});
+		// Aggregate usage across all attempts for this model
+		const usage = results.reduce(
+			(acc, r) => {
+				const attemptUsage = r.attempts.reduce(
+					(a, attempt) => ({
+						promptTokens: a.promptTokens + attempt.usage.promptTokens,
+						completionTokens: a.completionTokens + attempt.usage.completionTokens,
+						totalTokens: a.totalTokens + attempt.usage.totalTokens,
+						cost: a.cost + (attempt.usage.cost ?? 0),
+						cacheReadTokens: a.cacheReadTokens + (attempt.usage.cacheReadTokens ?? 0),
+						cacheWriteTokens: a.cacheWriteTokens + (attempt.usage.cacheWriteTokens ?? 0),
+						uncachedTokens: a.uncachedTokens + (attempt.usage.uncachedTokens ?? 0),
+					}),
+					{
+						promptTokens: 0,
+						completionTokens: 0,
+						totalTokens: 0,
+						cost: 0,
+						cacheReadTokens: 0,
+						cacheWriteTokens: 0,
+						uncachedTokens: 0,
+					},
+				);
+				return {
+					promptTokens: acc.promptTokens + attemptUsage.promptTokens,
+					completionTokens: acc.completionTokens + attemptUsage.completionTokens,
+					totalTokens: acc.totalTokens + attemptUsage.totalTokens,
+					cost: acc.cost + attemptUsage.cost,
+					cacheReadTokens: acc.cacheReadTokens + attemptUsage.cacheReadTokens,
+					cacheWriteTokens: acc.cacheWriteTokens + attemptUsage.cacheWriteTokens,
+					uncachedTokens: acc.uncachedTokens + attemptUsage.uncachedTokens,
+				};
+			},
+			{
+				promptTokens: 0,
+				completionTokens: 0,
+				totalTokens: 0,
+				cost: 0,
+				cacheReadTokens: 0,
+				cacheWriteTokens: 0,
+				uncachedTokens: 0,
+			},
+		);
+
 		suites[model] = {
 			model,
 			repeat,
@@ -620,6 +736,7 @@ export async function compareModelsRepeated(
 			casesPassed: results.filter((r) => r.passed * 2 > r.total).length,
 			casesTotal: cases.length,
 			duration: modelEndTime[model]! - overallStart,
+			usage,
 		};
 	}
 
@@ -662,8 +779,9 @@ export function printRepeatedCompareReport(compare: RepeatedCompareResult): void
 	console.log("\nSummary (majority-pass cases):");
 	for (const model of compare.models) {
 		const s = compare.suites[model]!;
+		const cost = s.usage.cost > 0 ? `$${s.usage.cost.toFixed(4)}` : "n/a";
 		console.log(
-			`  ${padCell(model, idWidth)} ${s.casesPassed}/${s.casesTotal} cases  (${(s.duration / 1000).toFixed(1)}s total, ${s.repeat} runs/case)`,
+			`  ${padCell(model, idWidth)} ${s.casesPassed}/${s.casesTotal} cases  (${(s.duration / 1000).toFixed(1)}s, ${s.usage.totalTokens.toLocaleString()} tokens, ${cost}, ${s.repeat} runs/case)`,
 		);
 	}
 	const inconsistentCount = compare.cases.filter((c) =>
@@ -697,9 +815,28 @@ export function printReport(suite: SuiteResult): void {
 	console.log("\nSummary:");
 	for (const result of suite.results) {
 		const status = result.passed ? "\x1b[32m✓\x1b[0m" : "\x1b[31m✗\x1b[0m";
+		const cost = result.usage.cost ? `$${result.usage.cost.toFixed(4)}` : "n/a";
 		console.log(
-			`  ${status} ${result.caseId} (${result.duration}ms, ${result.turns} turns, tools: [${result.toolsCalled.join(", ")}])`,
+			`  ${status} ${result.caseId} (${result.duration}ms, ${result.turns} turns, ${result.usage.totalTokens} tokens, ${cost})`,
 		);
+	}
+
+	console.log("\n" + "-".repeat(60));
+	console.log("Usage:");
+	console.log(`  Total tokens: ${suite.usage.totalTokens.toLocaleString()}`);
+	console.log(`    Prompt: ${suite.usage.promptTokens.toLocaleString()}`);
+	console.log(`    Completion: ${suite.usage.completionTokens.toLocaleString()}`);
+	if (suite.usage.cacheReadTokens > 0) {
+		console.log(`    Cache read: ${suite.usage.cacheReadTokens.toLocaleString()}`);
+	}
+	if (suite.usage.cacheWriteTokens > 0) {
+		console.log(`    Cache write: ${suite.usage.cacheWriteTokens.toLocaleString()}`);
+	}
+	if (suite.usage.uncachedTokens > 0) {
+		console.log(`    Uncached: ${suite.usage.uncachedTokens.toLocaleString()}`);
+	}
+	if (suite.usage.cost > 0) {
+		console.log(`  Total cost: $${suite.usage.cost.toFixed(4)}`);
 	}
 }
 
@@ -783,6 +920,27 @@ export async function compareModels(
 	for (const model of models) {
 		const results = resultsByModel[model]!;
 		const passed = results.filter((r) => r.passed).length;
+		// Aggregate usage across all cases for this model
+		const usage = results.reduce(
+			(acc, r) => ({
+				promptTokens: acc.promptTokens + r.usage.promptTokens,
+				completionTokens: acc.completionTokens + r.usage.completionTokens,
+				totalTokens: acc.totalTokens + r.usage.totalTokens,
+				cost: acc.cost + (r.usage.cost ?? 0),
+				cacheReadTokens: acc.cacheReadTokens + (r.usage.cacheReadTokens ?? 0),
+				cacheWriteTokens: acc.cacheWriteTokens + (r.usage.cacheWriteTokens ?? 0),
+				uncachedTokens: acc.uncachedTokens + (r.usage.uncachedTokens ?? 0),
+			}),
+			{
+				promptTokens: 0,
+				completionTokens: 0,
+				totalTokens: 0,
+				cost: 0,
+				cacheReadTokens: 0,
+				cacheWriteTokens: 0,
+				uncachedTokens: 0,
+			},
+		);
 		suites[model] = {
 			model,
 			total: results.length,
@@ -790,6 +948,7 @@ export async function compareModels(
 			failed: results.length - passed,
 			duration: modelEndTime[model]! - overallStart,
 			results,
+			usage,
 		};
 	}
 
@@ -837,8 +996,9 @@ export function printCompareReport(compare: CompareResult): void {
 	console.log("\nSummary:");
 	for (const model of compare.models) {
 		const s = compare.suites[model]!;
+		const cost = s.usage.cost > 0 ? `$${s.usage.cost.toFixed(4)}` : "n/a";
 		console.log(
-			`  ${padCell(model, idWidth)} ${s.passed}/${s.total} passed  (${(s.duration / 1000).toFixed(1)}s total)`,
+			`  ${padCell(model, idWidth)} ${s.passed}/${s.total} passed  (${(s.duration / 1000).toFixed(1)}s, ${s.usage.totalTokens.toLocaleString()} tokens, ${cost})`,
 		);
 	}
 	console.log();
@@ -860,6 +1020,7 @@ export function saveCompareResults(compare: CompareResult, path: string): void {
 					passed: s.passed,
 					failed: s.failed,
 					duration: s.duration,
+					usage: s.usage,
 					cases: s.results.map((r) => ({
 						id: r.caseId,
 						passed: r.passed,
@@ -868,6 +1029,7 @@ export function saveCompareResults(compare: CompareResult, path: string): void {
 						toolsCalled: r.toolsCalled,
 						failedChecks: r.failedChecks,
 						trace: r.trace,
+						usage: r.usage,
 					})),
 				},
 			]),
@@ -891,6 +1053,7 @@ export function saveResults(suite: SuiteResult, path: string): void {
 		passed: suite.passed,
 		failed: suite.failed,
 		duration: suite.duration,
+		usage: suite.usage,
 		cases: suite.results.map((r) => ({
 			id: r.caseId,
 			description: r.description,
@@ -904,6 +1067,7 @@ export function saveResults(suite: SuiteResult, path: string): void {
 			errors: r.errors,
 			responsePreview: r.response.slice(0, 500),
 			trace: r.trace,
+			usage: r.usage,
 		})),
 	};
 
