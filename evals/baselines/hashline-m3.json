@@ -1,0 +1,173 @@
+{
+  "name": "hashline-m3",
+  "bench": "hashline",
+  "model": "MiniMax-M3",
+  "commit": "305c401",
+  "timestamp": "2026-07-25T21:00:32.483Z",
+  "total": 10,
+  "passed": 9,
+  "failed": 1,
+  "passRate": 0.9,
+  "duration": 17367,
+  "usage": {
+    "promptTokens": 441596,
+    "completionTokens": 8310,
+    "totalTokens": 449906,
+    "cost": 0,
+    "cacheReadTokens": 354048,
+    "cacheWriteTokens": 0,
+    "uncachedTokens": 87548
+  },
+  "results": [
+    {
+      "caseId": "hashline-insert-above-heading",
+      "passed": true,
+      "duration": 13576,
+      "turns": 4,
+      "usage": {
+        "promptTokens": 32172,
+        "completionTokens": 1698,
+        "totalTokens": 33870,
+        "cost": 0,
+        "cacheReadTokens": 23552,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 8620
+      }
+    },
+    {
+      "caseId": "hashline-multi-edit-no-reread",
+      "passed": true,
+      "duration": 4788,
+      "turns": 3,
+      "usage": {
+        "promptTokens": 23466,
+        "completionTokens": 379,
+        "totalTokens": 23845,
+        "cost": 0,
+        "cacheReadTokens": 15360,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 8106
+      }
+    },
+    {
+      "caseId": "hashline-range-replace-and-delete",
+      "passed": true,
+      "duration": 17362,
+      "turns": 11,
+      "usage": {
+        "promptTokens": 97744,
+        "completionTokens": 1580,
+        "totalTokens": 99324,
+        "cost": 0,
+        "cacheReadTokens": 88704,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 9040
+      }
+    },
+    {
+      "caseId": "hashline-edit-among-duplicates",
+      "passed": false,
+      "duration": 4773,
+      "turns": 3,
+      "usage": {
+        "promptTokens": 23493,
+        "completionTokens": 311,
+        "totalTokens": 23804,
+        "cost": 0,
+        "cacheReadTokens": 15616,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 7877
+      }
+    },
+    {
+      "caseId": "hashline-move-block",
+      "passed": true,
+      "duration": 5633,
+      "turns": 3,
+      "usage": {
+        "promptTokens": 23429,
+        "completionTokens": 304,
+        "totalTokens": 23733,
+        "cost": 0,
+        "cacheReadTokens": 22784,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 645
+      }
+    },
+    {
+      "caseId": "hashline-large-file-needle",
+      "passed": true,
+      "duration": 9305,
+      "turns": 3,
+      "usage": {
+        "promptTokens": 74446,
+        "completionTokens": 324,
+        "totalTokens": 74770,
+        "cost": 0,
+        "cacheReadTokens": 48256,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 26190
+      }
+    },
+    {
+      "caseId": "hashline-second-duplicate-block",
+      "passed": true,
+      "duration": 7785,
+      "turns": 3,
+      "usage": {
+        "promptTokens": 23363,
+        "completionTokens": 281,
+        "totalTokens": 23644,
+        "cost": 0,
+        "cacheReadTokens": 15360,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 8003
+      }
+    },
+    {
+      "caseId": "hashline-makefile-tabs",
+      "passed": true,
+      "duration": 5337,
+      "turns": 3,
+      "usage": {
+        "promptTokens": 23427,
+        "completionTokens": 287,
+        "totalTokens": 23714,
+        "cost": 0,
+        "cacheReadTokens": 22784,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 643
+      }
+    },
+    {
+      "caseId": "hashline-json-nested",
+      "passed": true,
+      "duration": 14526,
+      "turns": 8,
+      "usage": {
+        "promptTokens": 70421,
+        "completionTokens": 1394,
+        "totalTokens": 71815,
+        "cost": 0,
+        "cacheReadTokens": 60928,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 9493
+      }
+    },
+    {
+      "caseId": "hashline-dependent-edits",
+      "passed": true,
+      "duration": 14092,
+      "turns": 6,
+      "usage": {
+        "promptTokens": 49635,
+        "completionTokens": 1752,
+        "totalTokens": 51387,
+        "cost": 0,
+        "cacheReadTokens": 40704,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 8931
+      }
+    }
+  ]
+}

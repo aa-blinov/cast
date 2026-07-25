@@ -1,0 +1,308 @@
+{
+  "name": "basic-m3",
+  "bench": "basic",
+  "model": "MiniMax-M3",
+  "commit": "305c401",
+  "timestamp": "2026-07-25T20:59:36.985Z",
+  "total": 19,
+  "passed": 17,
+  "failed": 2,
+  "passRate": 0.8947368421052632,
+  "duration": 12239,
+  "usage": {
+    "promptTokens": 392043,
+    "completionTokens": 5176,
+    "totalTokens": 397219,
+    "cost": 0,
+    "cacheReadTokens": 325223,
+    "cacheWriteTokens": 0,
+    "uncachedTokens": 66820
+  },
+  "results": [
+    {
+      "caseId": "simple-math",
+      "passed": true,
+      "duration": 1556,
+      "turns": 1,
+      "usage": {
+        "promptTokens": 7526,
+        "completionTokens": 18,
+        "totalTokens": 7544,
+        "cost": 0,
+        "cacheReadTokens": 7424,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 102
+      }
+    },
+    {
+      "caseId": "read-file",
+      "passed": true,
+      "duration": 2270,
+      "turns": 2,
+      "usage": {
+        "promptTokens": 15807,
+        "completionTokens": 64,
+        "totalTokens": 15871,
+        "cost": 0,
+        "cacheReadTokens": 7655,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 8152
+      }
+    },
+    {
+      "caseId": "read-with-offset",
+      "passed": true,
+      "duration": 4230,
+      "turns": 2,
+      "usage": {
+        "promptTokens": 15299,
+        "completionTokens": 60,
+        "totalTokens": 15359,
+        "cost": 0,
+        "cacheReadTokens": 14848,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 451
+      }
+    },
+    {
+      "caseId": "read-nonexistent",
+      "passed": true,
+      "duration": 4124,
+      "turns": 2,
+      "usage": {
+        "promptTokens": 15117,
+        "completionTokens": 129,
+        "totalTokens": 15246,
+        "cost": 0,
+        "cacheReadTokens": 14848,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 269
+      }
+    },
+    {
+      "caseId": "write-file",
+      "passed": true,
+      "duration": 2539,
+      "turns": 2,
+      "usage": {
+        "promptTokens": 15274,
+        "completionTokens": 95,
+        "totalTokens": 15369,
+        "cost": 0,
+        "cacheReadTokens": 7680,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 7594
+      }
+    },
+    {
+      "caseId": "edit-file",
+      "passed": true,
+      "duration": 9396,
+      "turns": 4,
+      "usage": {
+        "promptTokens": 31195,
+        "completionTokens": 367,
+        "totalTokens": 31562,
+        "cost": 0,
+        "cacheReadTokens": 23040,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 8155
+      }
+    },
+    {
+      "caseId": "bash-simple",
+      "passed": true,
+      "duration": 2296,
+      "turns": 2,
+      "usage": {
+        "promptTokens": 15102,
+        "completionTokens": 72,
+        "totalTokens": 15174,
+        "cost": 0,
+        "cacheReadTokens": 14976,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 126
+      }
+    },
+    {
+      "caseId": "bash-multi",
+      "passed": true,
+      "duration": 2719,
+      "turns": 2,
+      "usage": {
+        "promptTokens": 15149,
+        "completionTokens": 75,
+        "totalTokens": 15224,
+        "cost": 0,
+        "cacheReadTokens": 14976,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 173
+      }
+    },
+    {
+      "caseId": "bash-error-handling",
+      "passed": true,
+      "duration": 3269,
+      "turns": 2,
+      "usage": {
+        "promptTokens": 15142,
+        "completionTokens": 89,
+        "totalTokens": 15231,
+        "cost": 0,
+        "cacheReadTokens": 14848,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 294
+      }
+    },
+    {
+      "caseId": "grep-search",
+      "passed": true,
+      "duration": 2407,
+      "turns": 2,
+      "usage": {
+        "promptTokens": 15120,
+        "completionTokens": 99,
+        "totalTokens": 15219,
+        "cost": 0,
+        "cacheReadTokens": 14976,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 144
+      }
+    },
+    {
+      "caseId": "glob-files",
+      "passed": false,
+      "duration": 2527,
+      "turns": 2,
+      "usage": {
+        "promptTokens": 15109,
+        "completionTokens": 79,
+        "totalTokens": 15188,
+        "cost": 0,
+        "cacheReadTokens": 14976,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 133
+      }
+    },
+    {
+      "caseId": "ls-directory",
+      "passed": true,
+      "duration": 4760,
+      "turns": 2,
+      "usage": {
+        "promptTokens": 15471,
+        "completionTokens": 369,
+        "totalTokens": 15840,
+        "cost": 0,
+        "cacheReadTokens": 15360,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 111
+      }
+    },
+    {
+      "caseId": "read-then-analyze",
+      "passed": true,
+      "duration": 1898,
+      "turns": 2,
+      "usage": {
+        "promptTokens": 25319,
+        "completionTokens": 50,
+        "totalTokens": 25369,
+        "cost": 0,
+        "cacheReadTokens": 25088,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 231
+      }
+    },
+    {
+      "caseId": "glob-then-grep",
+      "passed": true,
+      "duration": 4188,
+      "turns": 2,
+      "usage": {
+        "promptTokens": 21179,
+        "completionTokens": 679,
+        "totalTokens": 21858,
+        "cost": 0,
+        "cacheReadTokens": 7552,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 13627
+      }
+    },
+    {
+      "caseId": "write-then-read-back",
+      "passed": false,
+      "duration": 3192,
+      "turns": 3,
+      "usage": {
+        "promptTokens": 23149,
+        "completionTokens": 278,
+        "totalTokens": 23427,
+        "cost": 0,
+        "cacheReadTokens": 22656,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 493
+      }
+    },
+    {
+      "caseId": "error-recovery",
+      "passed": true,
+      "duration": 4380,
+      "turns": 2,
+      "usage": {
+        "promptTokens": 15861,
+        "completionTokens": 419,
+        "totalTokens": 16280,
+        "cost": 0,
+        "cacheReadTokens": 14848,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 1013
+      }
+    },
+    {
+      "caseId": "rename-function-multi-file",
+      "passed": true,
+      "duration": 6965,
+      "turns": 4,
+      "usage": {
+        "promptTokens": 32783,
+        "completionTokens": 843,
+        "totalTokens": 33626,
+        "cost": 0,
+        "cacheReadTokens": 24064,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 8719
+      }
+    },
+    {
+      "caseId": "fix-bug-execution-grounded",
+      "passed": true,
+      "duration": 5716,
+      "turns": 4,
+      "usage": {
+        "promptTokens": 32638,
+        "completionTokens": 576,
+        "totalTokens": 33214,
+        "cost": 0,
+        "cacheReadTokens": 24192,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 8446
+      }
+    },
+    {
+      "caseId": "find-fix-typo-across-files",
+      "passed": true,
+      "duration": 7935,
+      "turns": 6,
+      "usage": {
+        "promptTokens": 49803,
+        "completionTokens": 815,
+        "totalTokens": 50618,
+        "cost": 0,
+        "cacheReadTokens": 41216,
+        "cacheWriteTokens": 0,
+        "uncachedTokens": 8587
+      }
+    }
+  ]
+}
