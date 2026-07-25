@@ -1312,6 +1312,11 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	padding: 8px 10px;
 	margin-bottom: 10px;
 }
+.settings-ok {
+	color: #6ee7b7;
+	font-size: .8rem;
+	padding: 6px 0;
+}
 .settings-rows { display: flex; flex-direction: column; gap: 4px; }
 .settings-group { margin-top: 4px; }
 .settings-group:first-child { margin-top: 0; }

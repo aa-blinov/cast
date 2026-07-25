@@ -225,6 +225,8 @@ export interface WebBridge {
 	getPersonas(): Array<{ name: string; label: string; description: string; source: string }>;
 	getThemes(): Array<{ id: string; label: string; description: string; colors: ThemeColors }>;
 	getModels(providerName?: string): Promise<{ models: ModelInfo[]; error?: string }>;
+	/** Verify arbitrary provider credentials without saving (web UI gate). */
+	verifyProvider(url: string, apiKey: string): Promise<{ ok: boolean; probe: string; error?: string }>;
 	getCachedModels(): { models: ModelInfo[] };
 	saveSshKey(name: string, keyContent: string): { ok: boolean; path?: string; error?: string };
 	readSkillContent(name: string): { ok: boolean; content?: string; error?: string };
@@ -1274,8 +1276,17 @@ export function createWebBridge(result: StartupResult): WebBridge {
 				const [pname, url, apiKey] = parts;
 				if (!pname || !url || !apiKey) return { ok: false, error: "Usage: /provider add <name> <url> <apiKey>" };
 				const next = [...providers.filter((p) => p.name !== pname), { name: pname, url, apiKey }];
+				// No active provider yet (e.g. first add) → make this the default
+				// so the main model has a working endpoint. Selection of a
+				// different provider for any slot happens in the Model tab.
+				if (!config.baseURL) {
+					config.baseURL = url;
+					config.apiKey = apiKey;
+					updateSettings({ providers: next, providerUrl: url, apiKey });
+					return { ok: true, result: `Added provider "${pname}" and set it active (default)` };
+				}
 				updateSettings({ providers: next });
-				return { ok: true, result: `Added provider "${pname}" (not switched — use /provider ${pname})` };
+				return { ok: true, result: `Added provider "${pname}" — pick it in the Model tab to use it` };
 			}
 			// Bare name — switch to it.
 			const target = providers.find((p) => p.name === sub);
@@ -1286,7 +1297,21 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			}
 			config.baseURL = target.url;
 			config.apiKey = target.apiKey;
-			updateSettings({ providerUrl: target.url, apiKey: target.apiKey });
+			// Switching the active provider invalidates every model id that was
+			// chosen against the old endpoint, so reset them — the user re-picks on
+			// the new provider. Slots with their own provider override keep their
+			// model (it isn't tied to the active provider).
+			ws.session.model = "";
+			if (!subagentModelProvider) subagentModel = undefined;
+			if (!planModelProvider) planModel = undefined;
+			updateSettings({
+				providerUrl: target.url,
+				apiKey: target.apiKey,
+				model: "",
+				...(subagentModelProvider ? {} : { subagentModel: undefined }),
+				...(planModelProvider ? {} : { planModel: undefined }),
+			});
+			saveSession(ws.session);
 			return { ok: true, result: `Switched to provider "${sub}" — pick a model with /model` };
 		}
 		if (name === "/ssh") {
@@ -1352,6 +1377,19 @@ export function createWebBridge(result: StartupResult): WebBridge {
 	 * (core/config.ts's fetchModels), fetched fresh per request rather than
 	 * cached, since a stale list would just silently hide newly available
 	 * models from the picker. */
+	/**
+	 * Verify arbitrary provider credentials without saving them — used by the
+	 * web Settings UI's "Verify" button and as a mandatory pre-save gate.
+	 * Returns the classified probe result so the UI can show a specific reason
+	 * (auth / permission / unreachable) rather than a bare failure.
+	 */
+	async function verifyProvider(url: string, apiKey: string): Promise<{ ok: boolean; probe: string; error?: string }> {
+		if (!url || !apiKey) return { ok: false, probe: "unknown", error: "URL and API key are required" };
+		const probe = await probeProvider({ ...config, baseURL: url, apiKey });
+		if (probe === "ok" || probe === "unknown") return { ok: true, probe };
+		return { ok: false, probe, error: probe };
+	}
+
 	async function getModels(providerName?: string): Promise<{ models: ModelInfo[]; error?: string }> {
 		let fetchConfig = config;
 		if (providerName) {
@@ -1575,6 +1613,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		getPersonas,
 		getThemes,
 		getModels,
+		verifyProvider,
 		getCachedModels,
 		saveSshKey,
 		readSkillContent,
