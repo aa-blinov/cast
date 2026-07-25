@@ -1501,7 +1501,6 @@ function SettingsFont({ currentFontId, currentFontScale, onPickFont, onPickScale
 				`,
 				)}
 			</div>
-			<p class="settings-scale-preview" style=${{ fontSize: `calc(1em * ${currentFontScale})` }}>The quick brown fox jumps over the lazy dog</p>
 		</div>
 		<div class="settings-row-label">Monospace</div>
 		<div class="settings-theme-grid">
@@ -1514,7 +1513,6 @@ function SettingsFont({ currentFontId, currentFontScale, onPickFont, onPickScale
 			)}
 		</div>
 		<div class="settings-row-label" style=${{ marginTop: "14px" }}>Sans-serif</div>
-		<p class="settings-scale-preview" style=${{ marginTop: 0, marginBottom: "8px" }}>Applies to interface text only — code, tool output, and tables stay monospace.</p>
 		<div class="settings-theme-grid">
 			${FONT_OPTIONS.filter((f) => !f.mono).map(
 				(f) => html`
