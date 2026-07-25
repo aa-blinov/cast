@@ -1876,6 +1876,13 @@ function App() {
 	const [toasts, setToasts] = useState([]);
 	const [connected, setConnected] = useState(true);
 	const [backendUp, setBackendUp] = useState(true);
+	// True only for the very first bootstrap (page load / hard refresh),
+	// before initClientState has picked a session (or, with none saved yet,
+	// staged a draft) — see the empty-state render below. Without this, a
+	// reload landing on ?session=<id> shows the "Ready when you are" empty
+	// thread banner for the beat it takes the GET to resolve, then swaps to
+	// the real transcript — reading as the thread flashing/reloading.
+	const [bootstrapping, setBootstrapping] = useState(true);
 	const [atBottom, setAtBottom] = useState(true);
 	const [defaultCwd, setDefaultCwd] = useState("");
 	const [selectedCwd, setSelectedCwd] = useState(null);
@@ -1931,6 +1938,13 @@ function App() {
 	const reconnectTimerRef = useRef(null);
 	const wasRunningRef = useRef(false);
 	const [reconnectNonce, setReconnectNonce] = useState(0);
+	// Read inside the SSE effect's onmessage handler instead of closing over
+	// `diffOpen` directly — that effect only needs the *current* value at
+	// event time, not to itself re-run (and tear down/reopen the whole
+	// EventSource, refetching and remounting every message — see below)
+	// every time the diff panel opens or closes.
+	const diffOpenRef = useRef(false);
+	diffOpenRef.current = diffOpen;
 
 	// Scroll-up pagination for long threads: older pages already fetched this
 	// tab session, keyed by session id, so switching away and back doesn't
@@ -2507,7 +2521,7 @@ function App() {
 	}, [activeId]);
 
 	// SSE
-	// biome-ignore lint/correctness/useExhaustiveDependencies: reconnectNonce isn't read in the body — bumping it is what forces this effect to re-subscribe after a backend restart (see startReconnectLoop).
+	// biome-ignore lint/correctness/useExhaustiveDependencies: reconnectNonce isn't read in the body — bumping it is what forces this effect to re-subscribe after a backend restart (see startReconnectLoop). diffOpen is deliberately not a dependency — see diffOpenRef above; making it one would tear down and reopen the EventSource (full refetch, full message remount) on every diff-panel toggle.
 	useEffect(() => {
 		if (!activeId) return;
 		if (esRef.current) esRef.current.close();
@@ -2530,6 +2544,19 @@ function App() {
 					wasRunningRef.current = isRunning;
 					setSession((prev) => {
 						if (!prev) return data;
+						// This fires on every connect, not just a true reconnect after a
+						// drop — including the very first open right after selectSession
+						// already fetched the same page. Swapping in the freshly-parsed
+						// `data.messages` there too would hand every message a brand new
+						// object identity, and keyForMessage's WeakMap keys off identity —
+						// so every message in the DOM would unmount/remount and replay its
+						// entrance animation, reading as the whole chat blinking. Nothing
+						// was actually missed when the count already matches, so keep the
+						// existing message objects and just refresh the rest of the
+						// session fields.
+						if (prev.id === data.id && (data.messages || []).length === prev.messages.length) {
+							return { ...prev, status: data.status, usage: data.usage, updatedAt: data.updatedAt };
+						}
 						return { ...data, messages: data.messages || [] };
 					});
 					// Always clear streaming on reconnect — stale blocks from
@@ -2611,7 +2638,7 @@ function App() {
 									: b,
 							),
 						);
-						if (diffOpen) loadDiff();
+						if (diffOpenRef.current) loadDiff();
 						break;
 					case "assistant_message":
 						// Keep reasoning, prose, and tool calls as separate ordered blocks
@@ -2804,7 +2831,7 @@ function App() {
 		return () => {
 			es.close();
 		};
-	}, [activeId, reconnectNonce, startReconnectLoop, addNotice, loadDiff, showToast, diffOpen]);
+	}, [activeId, reconnectNonce, startReconnectLoop, addNotice, loadDiff, showToast]);
 
 	// Auto-scroll
 	// biome-ignore lint/correctness/useExhaustiveDependencies: session?.messages/streaming aren't read in the body — they're the triggers to re-scroll whenever new content arrives, read indirectly via the DOM refs instead.
@@ -2897,7 +2924,7 @@ function App() {
 	// Init
 	// biome-ignore lint/correctness/useExhaustiveDependencies: deliberately mount-only — initClientState's own identity can change across renders, and re-running the full bootstrap on that would fight startReconnectLoop's manual retries.
 	useEffect(() => {
-		initClientState();
+		initClientState().finally(() => setBootstrapping(false));
 	}, []);
 
 	// Reconnect on visibility change — when the tab comes back to
@@ -3130,6 +3157,16 @@ function App() {
 			<main class="chat-area">
 				<div class="messages" ref=${messagesRef} onScroll=${handleScroll}>
 					${
+						bootstrapping &&
+						!session &&
+						html`
+						<div class="empty-state">
+							<div class="loading-spinner" />
+						</div>
+					`
+					}
+					${
+						!bootstrapping &&
 						messages.length === 0 &&
 						streaming.length === 0 &&
 						html`
