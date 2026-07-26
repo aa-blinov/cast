@@ -1549,6 +1549,57 @@ describe("ls", () => {
 		expect(result.content).toContain("file2.txt");
 		expect(result.content).toContain("subdir/");
 	});
+
+	it("classifies a symlink pointing at a directory as a directory, not a file", async () => {
+		// entry.isDirectory() reflects the symlink itself (false), not its
+		// target — without following it, this used to print the linked
+		// directory as a "file" with the target inode's meaningless "size"
+		// and no trailing slash.
+		const realDir = join(TEST_DIR, "real");
+		mkdirSync(realDir);
+		symlinkSync(realDir, join(TEST_DIR, "linkdir"));
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const result = await exec("ls", { path: TEST_DIR });
+		const line = result.content.split("\n").find((l) => l.includes("linkdir"));
+		expect(line).toContain("linkdir/");
+		expect(line?.trimStart().startsWith("d")).toBe(true);
+	});
+
+	it("still classifies a symlink pointing at a file as a file", async () => {
+		writeFileSync(join(TEST_DIR, "real.txt"), "hi");
+		symlinkSync(join(TEST_DIR, "real.txt"), join(TEST_DIR, "linkfile"));
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const result = await exec("ls", { path: TEST_DIR });
+		const line = result.content.split("\n").find((l) => l.includes("linkfile"));
+		expect(line).not.toContain("linkfile/");
+		expect(line?.trimStart().startsWith("f")).toBe(true);
+	});
+
+	it("does not throw on a broken symlink", async () => {
+		symlinkSync(join(TEST_DIR, "does-not-exist"), join(TEST_DIR, "broken-link"));
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const result = await exec("ls", { path: TEST_DIR });
+		expect(result.isError).toBeFalsy();
+		expect(result.content).toContain("broken-link");
+	});
+
+	it("reports a friendly error for a missing directory instead of a raw ENOENT", async () => {
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const result = await exec("ls", { path: join(TEST_DIR, "does-not-exist") });
+		expect(result.isError).toBe(true);
+		expect(result.content).toContain("Directory not found");
+		expect(result.content).not.toContain("ENOENT");
+		expect(result.content).not.toContain("scandir");
+	});
+
+	it("reports a friendly error when the path is a file instead of a raw ENOTDIR", async () => {
+		writeFileSync(join(TEST_DIR, "notadir.txt"), "");
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const result = await exec("ls", { path: join(TEST_DIR, "notadir.txt") });
+		expect(result.isError).toBe(true);
+		expect(result.content).toContain("Not a directory");
+		expect(result.content).not.toContain("ENOTDIR");
+	});
 });
 
 // ============================================================================
