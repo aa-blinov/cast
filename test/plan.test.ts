@@ -443,6 +443,82 @@ describe("plan", () => {
 			expect(parsed.allDone).toBe(true);
 		});
 
+		// A real model-authored plan wraps long step descriptions across
+		// several lines (only the first carries the "- [ ]" marker) and
+		// routinely decorates them with markdown (**bold**, `code`) — a style
+		// the plan-mode prompt explicitly encourages ("concrete", "name the
+		// exact target"). Confirmed live against a real generated plan: neither
+		// a plain-text recall of the visible words nor a decoration-stripped
+		// paraphrase matched before this was fixed — only a byte-exact copy of
+		// the markdown did, which no model naturally reproduces a turn later.
+		describe("wrapped, markdown-decorated steps (real-plan shape)", () => {
+			const WRAPPED_PLAN =
+				"# Plan\n\n## Steps\n\n" +
+				"- [ ] **Add the `deleted` Set** at the top of `server.js`,\n" +
+				"      immediately after the existing `const widgets = [];` on line 3.\n" +
+				"      One line: `const deleted = new Set();`. No abstraction.\n" +
+				"- [ ] **Add the DELETE branch** in `server.js`, placed inside the\n" +
+				"      existing `http.createServer` callback.\n" +
+				"\n## Verification\nnpm test";
+
+			it("matches a plain-text recall with no markdown decoration", () => {
+				const state = testState("check-wrap-1");
+				writePlan(state, "main", WRAPPED_PLAN);
+
+				const parsed = JSON.parse(execPlanCheck({ item: "Add the deleted Set" }, state).content);
+				expect(parsed.success).toBe(true);
+				expect(readActivePlan(state).content).toContain("[x] **Add the `deleted` Set**");
+			});
+
+			it("matches text that only appears in a wrapped continuation line", () => {
+				const state = testState("check-wrap-2");
+				writePlan(state, "main", WRAPPED_PLAN);
+
+				const parsed = JSON.parse(
+					execPlanCheck({ item: "immediately after the existing const widgets" }, state).content,
+				);
+				expect(parsed.success).toBe(true);
+			});
+
+			it("still matches an exact copy of the markdown-decorated text", () => {
+				const state = testState("check-wrap-3");
+				writePlan(state, "main", WRAPPED_PLAN);
+
+				const parsed = JSON.parse(execPlanCheck({ item: "**Add the `deleted` Set**" }, state).content);
+				expect(parsed.success).toBe(true);
+			});
+
+			it("matches a short natural paraphrase of a different wrapped item", () => {
+				const state = testState("check-wrap-4");
+				writePlan(state, "main", WRAPPED_PLAN);
+
+				const parsed = JSON.parse(execPlanCheck({ item: "add the delete branch" }, state).content);
+				expect(parsed.success).toBe(true);
+				expect(parsed.item).toContain("DELETE branch");
+			});
+
+			it("stops the continuation at the next bullet, not bleeding into the following item", () => {
+				const state = testState("check-wrap-5");
+				writePlan(state, "main", WRAPPED_PLAN);
+
+				const parsed = JSON.parse(execPlanCheck({ item: "no abstraction" }, state).content);
+				expect(parsed.success).toBe(true);
+				expect(parsed.item).not.toContain("DELETE branch");
+			});
+
+			it("only flips the marker line's checkbox, leaving continuation lines untouched", () => {
+				const state = testState("check-wrap-6");
+				writePlan(state, "main", WRAPPED_PLAN);
+
+				execPlanCheck({ item: "Add the deleted Set" }, state);
+				const content = readActivePlan(state).content;
+				expect(content).toContain("      immediately after the existing `const widgets = [];` on line 3.");
+				expect(content).toContain("      One line: `const deleted = new Set();`. No abstraction.");
+				// The second item's marker is untouched.
+				expect(content).toContain("- [ ] **Add the DELETE branch**");
+			});
+		});
+
 		it("matches case-insensitively and prefers exact over substring", () => {
 			const state = testState("check-3");
 			writePlan(state, "main", "# Plan\n\n## Steps\n- [ ] add tool\n- [ ] add tool docs");
