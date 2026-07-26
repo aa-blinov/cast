@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
 <title>Changelog — cast</title>
 <meta name="description" content="Changelog documentation for cast, a role-based terminal agent harness.">
 <style>
@@ -103,7 +103,6 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 
 	/* Hero */
 	.hero { padding: 56px 16px 40px; }
-	.hero-ascii { font-size: .65rem; }
 	.hero h1 { font-size: 2rem; }
 	.hero p { font-size: 1rem; margin-bottom: 24px; }
 	.hero-buttons a { padding: 10px 22px; font-size: .9rem; }
@@ -254,12 +253,13 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 
 /* ── Landing page ───────────────────────────────────────────────────── */
 .hero {
-	text-align: center; padding: 100px 24px 60px;
+	text-align: center; padding: 100px 24px 60px; overflow-x: hidden;
 	background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg) 100%);
 }
+.hero-ascii-wrap { margin-bottom: 24px; }
 .hero-ascii {
 	font-family: var(--font-mono); font-size: .875rem;
-	white-space: pre; margin-bottom: 24px; line-height: 1.2;
+	white-space: pre; display: inline-block; line-height: 1.2;
 	background: linear-gradient(90deg, #38e0ff, #38bdf8, #a78bfa, #a855f7);
 	-webkit-background-clip: text; -webkit-text-fill-color: transparent;
 	background-clip: text;
@@ -291,7 +291,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 .install-block .note { font-size: .8rem; color: var(--text-muted); margin-top: 8px; }
 
 .features {
-	display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+	display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
 	gap: 20px; padding: 40px 48px 60px; max-width: 1200px; margin: 0 auto;
 }
 .feature {
@@ -324,7 +324,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 	border: none; padding: 0;
 }
 .docs-grid {
-	display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+	display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
 	gap: 12px;
 }
 .doc-card {
@@ -412,6 +412,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 .comparison > p {
 	text-align: center; color: var(--text-secondary); max-width: 540px; margin: 0 auto 24px;
 }
+.comparison-table-wrap { overflow-x: auto; }
 .comparison table {
 	width: 100%; border-collapse: collapse;
 	font-size: .875rem; background: var(--bg-secondary);
@@ -474,6 +475,30 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 	<article class="content">
 		<h1>Changelog</h1>
 <p>All notable user-facing changes to cast, newest first.</p>
+<h2>0.8.28</h2>
+<h3>Fixed</h3>
+<ul>
+<li>Web UI: reasoning text no longer mixes into the answer (with stray leading blank lines) when a provider streams <code>&lt;think&gt;...&lt;/think&gt;</code> tags that split across chunk boundaries (MiniMax-M3 and similar) — the tag parser now buffers across chunks instead of scanning each one in isolation.</li>
+<li>Web UI: the composer&#39;s elapsed-time counter is now legible (accent color, larger) — it&#39;s the only signal that a still-running request is alive.</li>
+<li><code>glob</code>: <code>**</code> now recurses into subdirectories instead of matching only the top level.</li>
+<li><code>grep</code>: the no-<code>rg</code> fallback now matches <code>--glob</code> directory components correctly instead of only comparing basenames.</li>
+<li><code>edit</code>: no longer corrupts CRLF files into mixed line endings; multiple <code>insert_after</code>/<code>insert_before</code> ops sharing one anchor now apply in the model&#39;s listed order instead of reversed.</li>
+<li><code>write</code>: byte count in the tool result now reflects real UTF-8 byte length instead of JS string length.</li>
+<li><code>read</code>: <code>limit: 0</code> is no longer silently treated as &quot;no limit&quot;; output is now also capped by byte size, not just line count.</li>
+<li><code>ls</code>: symlinked directories are now classified as directories; missing/non-directory paths return a friendly message instead of a raw error.</li>
+<li><code>web_search</code>: a cached query no longer permanently caps <code>maxResults</code> for later, larger requests against the same query.</li>
+<li><code>web_fetch</code>: a request whose abort signal was already aborted before the fetch started is now aborted immediately instead of running to completion.</li>
+<li><code>ssh</code>: a failure to spawn <code>ssh</code>/<code>sshpass</code> no longer crashes the whole process.</li>
+<li>Background bash tasks: a spawn failure no longer gets silently overwritten with a bogus &quot;exited&quot; status.</li>
+<li>The <code>task</code> tool no longer discards a subagent&#39;s usage/cost accounting when the subagent&#39;s loop throws.</li>
+<li>Ink TUI: the tool-call summary line now counts <code>insert_before</code> edits (previously always showed &quot;+0 -0&quot; for them).</li>
+<li>Plan mode: <code>plan_check</code> reliably matches real, markdown-formatted plan steps, including a step&#39;s own nested sub-bullets, regardless of exact wording.</li>
+<li>Plan mode: the &quot;write a plan first&quot; error from <code>plan_done</code> no longer references the removed <code>plan_write</code> tool.</li>
+</ul>
+<h3>Changed</h3>
+<ul>
+<li>Plan mode: writing, editing, and reading a plan file now goes through the normal <code>write</code>/<code>edit</code>/<code>read</code> tools (gated to the plan file&#39;s path) instead of dedicated <code>plan_write</code>/<code>plan_edit</code>/<code>plan_read</code> tools — one less parallel implementation to keep in sync.</li>
+</ul>
 <h2>0.8.27</h2>
 <h3>Fixed</h3>
 <ul>
