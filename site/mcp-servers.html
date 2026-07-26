@@ -263,6 +263,12 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 	background: linear-gradient(90deg, #38e0ff, #38bdf8, #a78bfa, #a855f7);
 	-webkit-background-clip: text; -webkit-text-fill-color: transparent;
 	background-clip: text;
+	/* Hidden until the inline script (right after this element, so it runs
+	   synchronously before first paint) measures and applies a fit — avoids
+	   a visible flash of the full-size banner snapping down to size on
+	   narrow screens. (A transition is added via JS, but only ahead of the
+	   later webfont-swap re-fit — the initial one must stay instant.) */
+	visibility: hidden;
 }
 .hero h1 { font-size: 3rem; font-weight: 800; margin: 0 0 16px; }
 .hero h1 .accent { color: #38e0ff; }
