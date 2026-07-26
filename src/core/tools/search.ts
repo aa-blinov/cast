@@ -404,9 +404,18 @@ export async function execGrep(args: Record<string, unknown>, cwd: string, confi
 			return { content: `Invalid pattern: ${pattern}`, isError: true };
 		}
 
-		const globRe = glob ? globToFileRegExp(glob) : undefined;
+		// Mirrors execGlob's fd/no-fd parity fix: rg's own --glob matches a
+		// slash-free pattern against the basename anywhere, but anchors a
+		// pattern containing "/" against the path relative to the search
+		// root. Testing every glob against basename() here (as this used to)
+		// silently dropped the directory-component case in this fallback,
+		// even though the primary rg path handled it correctly.
+		const globHasDir = glob?.includes("/") ?? false;
+		const globRe = glob ? globToFileRegExp(globHasDir && !glob.startsWith("**/") ? `**/${glob}` : glob) : undefined;
 		const allFiles = await walkFiles(cwd, searchPath);
-		const candidates = globRe ? allFiles.filter((p) => globRe.test(basename(p))) : allFiles;
+		const candidates = globRe
+			? allFiles.filter((p) => globRe.test(globHasDir ? relative(searchPath, p) : basename(p)))
+			: allFiles;
 
 		// `limit` caps matches PER FILE here, same as rg's own `--max-count` —
 		// the fallback used to treat it as a hard cap on the WHOLE search
