@@ -109,47 +109,115 @@ export function getReasoningOptions(meta: ModelReasoningMeta | null): Array<{ va
 // Parse <think> blocks from content (for raw Qwen/DeepSeek without OpenRouter)
 // ============================================================================
 
+const THINK_OPEN = "<think>";
+const THINK_CLOSE = "</think>";
+
+/**
+ * Length of the longest suffix of `buffer` that is also a prefix of `tag` —
+ * i.e. how many trailing chars of `buffer` could be the start of `tag` if
+ * the rest arrives in a later chunk. 0 when no such overlap exists.
+ */
+function partialTagSuffixLength(buffer: string, tag: string): number {
+	const max = Math.min(buffer.length, tag.length - 1);
+	for (let k = max; k > 0; k--) {
+		if (buffer.slice(buffer.length - k) === tag.slice(0, k)) return k;
+	}
+	return 0;
+}
+
 export class ThinkBlockParser {
 	private inThinkBlock = false;
+	// Chunk boundaries never align with tag boundaries — a provider streaming
+	// "...answer.</thi" then "nk>\n\nFinal: 360" is normal, not pathological.
+	// `indexOf` on a single chunk can't see a tag split across two calls: the
+	// closing-tag half in the first chunk was silently treated as unterminated
+	// thinking, the parser never saw a matching "</think>" again, and every
+	// real answer token from then on stayed classified as "thinking" — the
+	// visible reply reads as empty while the whole answer hides in the
+	// reasoning panel. A split "<think>" has the opposite failure: the reader
+	// never recognizes the block opened, so the literal tag fragment and the
+	// actual reasoning both leak into the visible reply. `buffer` holds back
+	// only the minimal trailing slice that could still be a tag prefix, so a
+	// split tag resolves correctly once its other half arrives.
+	private buffer = "";
+	// Set right after consuming a tag, cleared the moment real (non-newline)
+	// text of that kind has been emitted. Models routinely emit a tag
+	// immediately followed by "\n\n" as pure visual separation (confirmed
+	// live: MiniMax-M3 sending "</think>\n\n# Heading...") — without this,
+	// that separator newline becomes a real leading blank line in the
+	// rendered reply/reasoning block, on top of the label/spacing the UI
+	// already adds for the block itself.
+	private thinkAtBlockStart = false;
+	private contentAtBlockStart = false;
 
-	parseContent(text: string): { thinking?: string; content?: string } {
-		const result: { thinking?: string; content?: string } = {};
-
-		if (this.inThinkBlock) {
-			const endIdx = text.indexOf("</think>");
-			if (endIdx !== -1) {
-				result.thinking = text.slice(0, endIdx);
-				this.inThinkBlock = false;
-				const remaining = text.slice(endIdx + 8);
-				if (remaining) result.content = remaining;
-			} else {
-				result.thinking = text;
-			}
-		} else {
-			const startIdx = text.indexOf("<think>");
-			if (startIdx !== -1) {
-				const before = text.slice(0, startIdx);
-				if (before) result.content = before;
-				const afterStart = text.slice(startIdx + 7);
-				const endIdx = afterStart.indexOf("</think>");
-				if (endIdx !== -1) {
-					result.thinking = afterStart.slice(0, endIdx);
-					const remaining = afterStart.slice(endIdx + 8);
-					if (remaining) result.content = (result.content ?? "") + remaining;
-				} else {
-					this.inThinkBlock = true;
-					result.thinking = afterStart;
-				}
-			} else {
-				result.content = text;
-			}
-		}
-
-		return result;
+	private takeThinking(text: string): string | undefined {
+		if (!text) return undefined;
+		if (!this.thinkAtBlockStart) return text;
+		const stripped = text.replace(/^\n+/, "");
+		if (stripped) this.thinkAtBlockStart = false;
+		return stripped || undefined;
 	}
 
-	flush(): string | undefined {
+	private takeContent(text: string): string | undefined {
+		if (!text) return undefined;
+		if (!this.contentAtBlockStart) return text;
+		const stripped = text.replace(/^\n+/, "");
+		if (stripped) this.contentAtBlockStart = false;
+		return stripped || undefined;
+	}
+
+	parseContent(text: string): { thinking?: string; content?: string } {
+		this.buffer += text;
+		let thinking: string | undefined;
+		let content: string | undefined;
+
+		// Bounded by construction: each iteration either finds a tag (consumes
+		// past it) or hits the holdback branch and returns — never spins.
+		for (;;) {
+			if (this.inThinkBlock) {
+				const endIdx = this.buffer.indexOf(THINK_CLOSE);
+				if (endIdx !== -1) {
+					const piece = this.takeThinking(this.buffer.slice(0, endIdx));
+					if (piece) thinking = (thinking ?? "") + piece;
+					this.buffer = this.buffer.slice(endIdx + THINK_CLOSE.length);
+					this.inThinkBlock = false;
+					this.contentAtBlockStart = true;
+					continue;
+				}
+				const holdback = partialTagSuffixLength(this.buffer, THINK_CLOSE);
+				const emitEnd = this.buffer.length - holdback;
+				const piece = this.takeThinking(this.buffer.slice(0, emitEnd));
+				if (piece) thinking = (thinking ?? "") + piece;
+				this.buffer = this.buffer.slice(emitEnd);
+				return { thinking, content };
+			}
+			const startIdx = this.buffer.indexOf(THINK_OPEN);
+			if (startIdx !== -1) {
+				const piece = this.takeContent(this.buffer.slice(0, startIdx));
+				if (piece) content = (content ?? "") + piece;
+				this.buffer = this.buffer.slice(startIdx + THINK_OPEN.length);
+				this.inThinkBlock = true;
+				this.thinkAtBlockStart = true;
+				continue;
+			}
+			const holdback = partialTagSuffixLength(this.buffer, THINK_OPEN);
+			const emitEnd = this.buffer.length - holdback;
+			const piece = this.takeContent(this.buffer.slice(0, emitEnd));
+			if (piece) content = (content ?? "") + piece;
+			this.buffer = this.buffer.slice(emitEnd);
+			return { thinking, content };
+		}
+	}
+
+	/** Whatever's left in the holdback buffer at stream end was never a real
+	 * tag (nothing more is coming to complete it) — flush it as whichever
+	 * kind is currently open, instead of silently dropping trailing text. */
+	flush(): { thinking?: string; content?: string } {
+		const leftover = this.buffer;
+		this.buffer = "";
+		const wasInThinkBlock = this.inThinkBlock;
 		this.inThinkBlock = false;
-		return undefined;
+		if (!leftover) return {};
+		return wasInThinkBlock ? { thinking: this.takeThinking(leftover) } : { content: this.takeContent(leftover) };
 	}
 }
