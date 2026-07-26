@@ -1,6 +1,6 @@
 # Plan Mode
 
-Plan mode restricts the agent to exploration and planning — it can read files and produce a structured plan, but cannot execute code, write files, or run arbitrary shell commands.
+Plan mode restricts the agent to exploration and planning — it can read files and produce a structured plan, but cannot execute code, touch real files, or run arbitrary shell commands. The one exception is the plan file itself: `write`/`edit` still work, just scoped to a `.md` file inside the session's plans directory (see [Plan Tools](#plan-tools) below).
 
 ## Workflow
 
@@ -138,12 +138,13 @@ PLAN MODE ACTIVE — no changes allowed
 You are in plan mode: read, search, and think — change nothing.
 
 Restrictions:
-- write and edit are unavailable
+- write and edit only reach the plan file itself — any .md file directly
+  inside <plans directory> (no subdirectories). Anything else is refused
 - bash is INSPECTION-ONLY (allowlisted read-only binaries)
 - You cannot switch modes yourself
 ```
 
-The model is instructed to: understand the task → explore the codebase → write a plan → call `plan_done`.
+The block names the session's actual plans directory (a `{{PLANS_DIR}}` template filled in per-session), so the model knows exactly where it may write. It is instructed to: understand the task → explore the codebase → write a plan with `write`/`edit` → call `plan_done`.
 
 ### Build Mode
 
