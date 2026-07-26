@@ -42,7 +42,7 @@ import type { ToolResult } from "./tools.ts";
 /** All plan tool names — used to disable them wherever plan mode can't apply
  * (headless runs, subagents). Within the TUI they split by mode: the authoring
  * tools are plan-mode-only, plan_check/plan_enter are build-mode-only (see App.tsx). */
-export const PLAN_TOOL_NAMES = ["plan_read", "plan_done", "plan_check", "plan_enter", "plan_discard"] as const;
+export const PLAN_TOOL_NAMES = ["plan_done", "plan_check", "plan_enter", "plan_discard"] as const;
 
 /**
  * Terminal (signal) tools: a successful call ends the turn. Their contract is
@@ -57,18 +57,20 @@ export const TERMINAL_TOOL_NAMES: readonly string[] = ["plan_done", "plan_enter"
 
 /**
  * Mode policy as data: which tools the TUI hides for a given mode. Plan mode
- * blocks writers (bash stays advertised — the executor gate restricts it to
- * the read-only allowlist) plus the build-only plan tools; build mode blocks
- * the plan-authoring tools. plan_read is deliberately in neither list — it is
- * available in both modes. Kept next to PLAN_TOOL_NAMES so a new plan tool
- * can't be added without deciding its mode here (a test enforces this).
+ * blocks bash's writer surface (bash stays advertised — the executor gate
+ * restricts it to the read-only allowlist) plus the build-only plan tools;
+ * build mode blocks the plan-authoring signal tools. Kept next to
+ * PLAN_TOOL_NAMES so a new plan tool can't be added without deciding its
+ * mode here (a test enforces this).
  */
 export function modeDisabledTools(planMode: boolean): readonly string[] {
-	// write/edit are NOT in either list: they stay advertised in both modes.
-	// In plan mode they're gated per-call to the active plan file's path
-	// (checkPlanFileGate, called from tools.ts) instead of being blanket
-	// hidden — the model uses the exact same tools it already uses for real
-	// code, just pointed at one file.
+	// write/edit/read are NOT in either list: they stay advertised (and
+	// executable) in both modes. In plan mode write/edit are gated per-call to
+	// the active plan file's path (checkPlanFileGate, called from tools.ts)
+	// instead of being blanket hidden, and a read of that same path sets it
+	// active (maybeActivatePlanOnRead) — no plan_read tool needed. The model
+	// uses the exact same tools it already uses for real code, just pointed
+	// at one file.
 	return planMode ? ["plan_check", "plan_enter"] : ["plan_done", "plan_discard"];
 }
 
@@ -279,8 +281,8 @@ export function listPlanNames(plansDir: string): string[] {
 	}
 }
 
-/** The plan the plan_edit/plan_read/plan_done tools operate on: the one most
- * recently written via plan_write, or — after a resume, when that in-memory
+/** The plan write/edit/plan_check/plan_done operate on: the one most
+ * recently written/edited/read, or — after a resume, when that in-memory
  * marker is gone — the newest .md file in the session's plans directory. */
 export function resolveActivePlanPath(planState: PlanState): string | undefined {
 	if (planState.activePlanPath && existsSync(planState.activePlanPath)) return planState.activePlanPath;
@@ -405,7 +407,7 @@ function listHeadingStepsUnderSteps(content: string): string[] {
  * while the open-work gate's heading fallback (listOpenPlanSteps) still flags
  * those headings as outstanding. That mismatch left the model looping on
  * plan_check against a plan it could never satisfy, with no in-mode way to
- * fix the plan's format (plan_edit/plan_discard are build-mode-disabled).
+ * fix the plan's format (edit/plan_discard are build-mode-disabled).
  * Idempotent (skips headings that already have a checkbox) and fence-aware.
  */
 function normalizeStepChecklist(content: string): string {
@@ -527,8 +529,8 @@ export function checkPlanFileGate(
  * Called after a successful write/edit to a plan-mode path: normalizes any
  * bare "###" step headings into "- [ ]" checkboxes (so plan_check and the
  * open-work gate can see them — see normalizeStepChecklist), and makes this
- * the active plan for plan_read/plan_check/plan_done, mirroring what
- * plan_write's `activePlanPath = path` used to do explicitly.
+ * the active plan for plan_check/plan_done, same as maybeActivatePlanOnRead
+ * does for a plain read of the file.
  */
 export function finalizePlanFileWrite(absolutePath: string, planState: PlanState): void {
 	let raw: string;
@@ -572,54 +574,23 @@ export function enforcePlanCapAfterEdit(
 	};
 }
 
-export function execPlanRead(args: Record<string, unknown>, planState: PlanState): ToolResult {
-	// Optional name: read a specific plan and make it the active one — this is
-	// how the model switches between several plans without rewriting them.
-	const requested = typeof args.name === "string" && args.name.trim() ? slugifyPlanName(args.name) : undefined;
-	let result: ReturnType<typeof readActivePlan>;
-	if (requested) {
-		const path = join(planState.plansDir, `${requested}.md`);
-		if (!existsSync(path)) {
-			return {
-				content: JSON.stringify({
-					success: false,
-					error: `No plan named "${requested}" in this session.`,
-					plans: listPlanNames(planState.plansDir),
-				}),
-				isError: true,
-			};
-		}
-		result = { ...readPlanFile(path), path };
-	} else {
-		result = readActivePlan(planState);
+/**
+ * Called after a successful `read` of a path inside plansDir while plan mode
+ * is active: makes it the active plan, the same way a write/edit to it would
+ * (finalizePlanFileWrite). This is how the model switches between several
+ * named plans without a dedicated plan_read tool — it can `ls`/`glob` the
+ * plans directory (whose path is in the plan-mode system prompt block) to
+ * discover other plans by name, then `read` one to make it active.
+ *
+ * Build-mode reads are NOT wired to this (see tools.ts's dispatcher): the
+ * approved plan must keep steering implementation via the mirror block
+ * regardless of what the model reads for reference — swapping it mid-build
+ * would bypass the /build approval.
+ */
+export function maybeActivatePlanOnRead(absolutePath: string, planState: PlanState): void {
+	if (planState.enabled && isPlanFilePath(absolutePath, planState.plansDir)) {
+		planState.activePlanPath = absolutePath;
 	}
-
-	const { exists, content, headings, error, path } = result;
-	if (error) {
-		return { content: `Error reading plan file: ${error}`, isError: true };
-	}
-	if (!exists || !path) {
-		return { content: JSON.stringify({ exists: false, plans: listPlanNames(planState.plansDir) }) };
-	}
-	// In plan mode the plan just read becomes the target of plan_edit/plan_done.
-	// In build mode reading is reference-only: the approved plan keeps steering
-	// the implementation (mirror block + plan_check default) — swapping it mid-
-	// build would bypass the /build approval.
-	if (planState.enabled) {
-		planState.activePlanPath = path;
-	}
-	return {
-		content: JSON.stringify({
-			exists: true,
-			name: basename(path, ".md"),
-			content,
-			headings,
-			charCount: content.length,
-			// Other plans in this session — plan_read with one of these names
-			// switches to that plan; plan_write with one replaces it.
-			plans: listPlanNames(planState.plansDir),
-		}),
-	};
 }
 
 export function execPlanCheck(args: Record<string, unknown>, planState: PlanState): ToolResult {
