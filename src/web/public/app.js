@@ -2307,7 +2307,9 @@ function App() {
 	const [bootstrapping, setBootstrapping] = useState(true);
 	const [atBottom, setAtBottom] = useState(true);
 	const [defaultCwd, setDefaultCwd] = useState("");
-	const [selectedCwd, setSelectedCwd] = useState(null);
+	// "new" (a fresh sandbox dir) is the default for a new session, not the
+	// project root — picking the root path is the deliberate action here.
+	const [selectedCwd, setSelectedCwd] = useState(SANDBOX_CWD);
 	const [dirPickerOpen, setDirPickerOpen] = useState(false);
 	const [hotkeysOpen, setHotkeysOpen] = useState(false);
 	const [settingsOpen, setSettingsOpen] = useState(false);
