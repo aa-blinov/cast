@@ -77,6 +77,28 @@ describe("searchDuckDuckGo", () => {
 
 		expect(fetch).toHaveBeenCalledTimes(1);
 	});
+
+	it("a later call with a larger maxResults isn't capped by an earlier call's smaller maxResults on cache hit", async () => {
+		// The cache key doesn't include maxResults. A first call for maxResults:2
+		// used to cache only the 2 parsed results, so a later call for the same
+		// query with maxResults:10 would silently get stuck at 2 for the rest of
+		// the TTL instead of the 5 actually available on the page.
+		const html = ddgHtml(
+			Array.from({ length: 5 }, (_, i) => ({
+				title: `Result ${i}`,
+				href: `https://example.com/${i}`,
+				snippet: "s",
+			})),
+		);
+		mockFetchOnce({ ok: true, status: 200, text: html });
+
+		const first = await searchDuckDuckGo("unique query cache-cap", { maxResults: 2 });
+		expect(first.results).toHaveLength(2);
+
+		const second = await searchDuckDuckGo("unique query cache-cap", { maxResults: 10 });
+		expect(second.results).toHaveLength(5);
+		expect(fetch).toHaveBeenCalledTimes(1);
+	});
 });
 
 // ============================================================================
@@ -120,6 +142,32 @@ describe("fetchUrl", () => {
 		);
 		expect(result.content).not.toContain("URL Source:");
 		expect(result.content).not.toContain("Warning:");
+	});
+
+	it("rejects immediately when given a signal that was already aborted before the call", async () => {
+		// An AbortSignal's 'abort' event fires once, at the moment abort() is
+		// called. A signal aborted before fetchUrl runs (Esc pressed, or the
+		// turn already ended) has already fired that event — a listener added
+		// now would never see it, so the fetch used to run to completion
+		// unaborted instead of being cancelled.
+		//
+		// mockFetchOnce ignores the signal it's given entirely, so it can't
+		// catch this — it would "pass" whether or not fetchUrl actually wires
+		// the abort through. This mock instead reproduces the real Fetch API
+		// contract that matters here: reject immediately if the signal passed
+		// to it is already aborted, exactly like undici/native fetch does.
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockImplementation((_url: string, init?: { signal?: AbortSignal }) => {
+				if (init?.signal?.aborted)
+					return Promise.reject(new DOMException("The operation was aborted.", "AbortError"));
+				return Promise.resolve({ ok: true, status: 200, statusText: "", text: async () => "" });
+			}),
+		);
+		const controller = new AbortController();
+		controller.abort();
+
+		await expect(fetchUrl("https://example.com/", { signal: controller.signal })).rejects.toThrow();
 	});
 
 	it("removes its abort listener from an externally-supplied signal once the request settles", async () => {
