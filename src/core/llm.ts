@@ -376,11 +376,13 @@ export async function* streamChat(
 				yield result;
 			}
 
-			// Flush any remaining thinking buffer
+			// Flush whatever the tag-boundary holdback buffer was still sitting
+			// on — the stream ended, so it was never a split tag after all;
+			// deliver it as whichever kind was open instead of dropping it.
 			const remaining = thinkParser.flush();
-			if (remaining) {
+			if (remaining.thinking || remaining.content) {
 				yieldedAny = true;
-				yield { thinking: remaining };
+				yield { thinking: remaining.thinking, content: remaining.content };
 			}
 			return;
 		} catch (error) {

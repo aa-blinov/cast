@@ -215,13 +215,13 @@ describe("ThinkBlockParser", () => {
 		parser.parseContent("<think>incomplete");
 		// Intermediate chunks already yielded their portions; flush is a no-op.
 		const flushed = parser.flush();
-		expect(flushed).toBeUndefined();
+		expect(flushed).toEqual({});
 	});
 
 	it("flush returns undefined when not in think block", () => {
 		const parser = new ThinkBlockParser();
 		parser.parseContent("no think block here");
-		expect(parser.flush()).toBeUndefined();
+		expect(parser.flush()).toEqual({});
 	});
 
 	it("handles plain content with no think blocks", () => {
@@ -234,11 +234,7 @@ describe("ThinkBlockParser", () => {
 	it("handles empty string", () => {
 		const parser = new ThinkBlockParser();
 		const result = parser.parseContent("");
-		// Empty string is falsy but the code checks `if (before)` which is
-		// false for empty string, so content stays undefined.
-		// Actually: the else branch assigns `result.content = text` which is "".
-		// "" is falsy for the `if (remaining)` check but it IS assigned.
-		expect(result.content).toBe("");
+		expect(result.content).toBeUndefined();
 		expect(result.thinking).toBeUndefined();
 	});
 
@@ -247,6 +243,98 @@ describe("ThinkBlockParser", () => {
 		const result = parser.parseContent("<think>only thinking</think>");
 		expect(result.thinking).toBe("only thinking");
 		expect(result.content).toBeUndefined();
+	});
+
+	// Regression coverage for a real, live-confirmed bug: MiniMax-M3 (and any
+	// other raw-<think>-tag provider) streams in chunks that don't line up
+	// with tag boundaries. A naive per-chunk indexOf() can't see a tag split
+	// across two parseContent() calls.
+	describe("tag split across chunk boundaries", () => {
+		it("resolves a </think> split across chunks instead of swallowing the rest of the reply as thinking", () => {
+			// Before the fix: chunk 1's indexOf("</think>") fails (only "</thi" is
+			// present), the parser stays in the think block forever, and every
+			// later chunk — including "nk>" itself and the whole real answer —
+			// gets misclassified as thinking. The visible reply reads as empty.
+			const parser = new ThinkBlockParser();
+			const r1 = parser.parseContent("<think>reasoning...</thi");
+			const r2 = parser.parseContent("nk>\n\nFinal: 360");
+			const r3 = parser.parseContent(" and done.");
+			expect(r1.thinking).toBe("reasoning...");
+			expect(r2.content).toBe("Final: 360");
+			expect(r3.content).toBe(" and done.");
+			// The literal tag fragment "nk>" must never leak into either output.
+			expect((r1.thinking ?? "") + (r2.thinking ?? "") + (r3.thinking ?? "")).not.toContain("nk>");
+		});
+
+		it("resolves a <think> split across chunks instead of leaking the tag and the reasoning into the reply", () => {
+			// Before the fix: chunk 1's indexOf("<think>") fails (only "<thi" is
+			// present), so the parser never realizes a think block opened — the
+			// tag fragment and the actual reasoning both show up as visible content.
+			const parser = new ThinkBlockParser();
+			const r1 = parser.parseContent("<thi");
+			const r2 = parser.parseContent("nk>reasoning here</think>answer");
+			expect(r1.content).toBeUndefined();
+			expect(r2.thinking).toBe("reasoning here");
+			expect(r2.content).toBe("answer");
+		});
+
+		it("resolves a split tag even when chunks arrive one character at a time", () => {
+			const parser = new ThinkBlockParser();
+			const text = "<think>hidden reasoning</think>visible answer";
+			let thinking = "";
+			let content = "";
+			for (const ch of text) {
+				const r = parser.parseContent(ch);
+				if (r.thinking) thinking += r.thinking;
+				if (r.content) content += r.content;
+			}
+			expect(thinking).toBe("hidden reasoning");
+			expect(content).toBe("visible answer");
+		});
+
+		it("does not hold back text that merely resembles a tag prefix but never completes one", () => {
+			// "< think tank>" contains "<" followed eventually by "think" but with
+			// a space — never a real "<think>" — so it must flow through as
+			// ordinary content, and flush() must not need to rescue anything.
+			const parser = new ThinkBlockParser();
+			const result = parser.parseContent("price is < think tank>");
+			expect(result.content).toBe("price is < think tank>");
+			expect(parser.flush()).toEqual({});
+		});
+	});
+
+	// Regression coverage for the second half of the same live bug report:
+	// providers commonly emit "</think>\n\n" (or "<think>\n\n") as pure visual
+	// separation from the tag — left unstripped, that becomes a real leading
+	// blank line in the rendered reasoning/reply block, on top of whatever
+	// spacing the UI already adds around the block itself.
+	describe("leading-newline trim at a block's start", () => {
+		it("strips newlines right after </think> from the start of the reply", () => {
+			const parser = new ThinkBlockParser();
+			const result = parser.parseContent("<think>r</think>\n\n# Heading\n\nBody");
+			expect(result.content).toBe("# Heading\n\nBody");
+		});
+
+		it("strips newlines right after <think> from the start of the reasoning", () => {
+			const parser = new ThinkBlockParser();
+			const result = parser.parseContent("<think>\n\nreasoning text</think>answer");
+			expect(result.thinking).toBe("reasoning text");
+			expect(result.content).toBe("answer");
+		});
+
+		it("only trims once per block — a legitimate blank line further into the same block is preserved", () => {
+			const parser = new ThinkBlockParser();
+			const result = parser.parseContent("<think>r</think>Para one.\n\nPara two.");
+			expect(result.content).toBe("Para one.\n\nPara two.");
+		});
+
+		it("keeps holding back a leading newline split across chunks until real text arrives", () => {
+			const parser = new ThinkBlockParser();
+			const r1 = parser.parseContent("<think>r</think>\n");
+			const r2 = parser.parseContent("\nReal content");
+			expect(r1.content).toBeUndefined();
+			expect(r2.content).toBe("Real content");
+		});
 	});
 });
 
