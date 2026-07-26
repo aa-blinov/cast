@@ -227,6 +227,41 @@ describe("bash — run_in_background", () => {
 		expect(String(wake.mock.calls[0]?.[0])).toContain("idle-wake");
 		expect(followUpQueue.drain()).toHaveLength(0);
 	});
+
+	it("reports a spawn failure as a single 'error' status, not overwritten by a later 'close'", async () => {
+		// Node fires 'close' right behind 'error' for a failed spawn (ENOENT).
+		// Without a guard, close's handler downgraded status "error" back to
+		// "exited" with a meaningless exit code and re-ran settle(), both
+		// losing the real error message and delivering two completion
+		// notifications for one failure. An empty PATH makes the OS-level
+		// lookup for "bash" fail at spawn time — resolveBash()'s own
+		// process-wide cache (already warmed to a real "bash" by earlier
+		// tests in this file) is irrelevant here since it just returns the
+		// literal string "bash" on non-win32; PATH resolution happens fresh
+		// on every spawn() call, not at resolveBash() time.
+		const originalPath = process.env.PATH;
+		const emptyPathDir = join(TEST_DIR, "__empty_path_for_bg_spawn_test__");
+		mkdirSync(emptyPathDir, { recursive: true });
+		process.env.PATH = emptyPathDir;
+		try {
+			const { deps, registry } = makeBackgroundDeps(false);
+			const wake = vi.fn();
+			registry.setOnIdleWake(wake);
+			const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, undefined, undefined, undefined, deps);
+			const started = await exec("bash", { command: "echo hi", run_in_background: true });
+			const taskId = started.content.match(/bg-\d+/)?.[0];
+			await new Promise((r) => setTimeout(r, 300));
+
+			expect(wake).toHaveBeenCalledTimes(1);
+			expect(String(wake.mock.calls[0]?.[0])).toContain("failed to start");
+
+			const status = await exec("bash_output", { task_id: taskId });
+			expect(status.isError).toBe(true);
+			expect(status.content).toContain("failed to start");
+		} finally {
+			process.env.PATH = originalPath;
+		}
+	});
 });
 
 describe("background bash tool definitions", () => {
