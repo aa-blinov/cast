@@ -318,6 +318,16 @@ export async function execTask(
 			sshHosts: deps.sshHosts,
 			// ponytail: no personas/currentPersona/subagentModel — child can't delegate further
 		});
+	} catch (error) {
+		// A genuine runtime failure (network error, provider outage, …) mid-run
+		// — as opposed to a clean-but-unsuccessful "end" event, handled below.
+		// subagentUsage is the ONLY channel loop.ts uses to fold a subagent's
+		// spend into the session total (see its `r.result.subagentUsage`
+		// check) — letting this exception propagate uncaught used to discard
+		// any usage/cost already accumulated from real, billed LLM calls the
+		// subagent made before failing.
+		const message = error instanceof Error ? error.message : String(error);
+		return { content: `Subagent failed with an error: ${message}`, isError: true, subagentUsage };
 	} finally {
 		subagentSemaphore.release();
 	}
