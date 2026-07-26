@@ -476,13 +476,16 @@ export function getToolDefinitions(
 				name: "plan_check",
 				description:
 					"Mark a checklist item in the approved plan as done ('- [ ]' → '- [x]'). " +
-					"Call it right after completing each plan step.",
+					"Call it right after completing each plan step. Matching is forgiving — a short paraphrase " +
+					"in your own words is fine, no need to copy the plan's exact wording or markdown formatting " +
+					"(`**bold**`, `` `code` ``); no need to re-read the plan first just to get the item text exact.",
 				parameters: {
 					type: "object",
 					properties: {
 						item: {
 							type: "string",
-							description: "Text of the checklist item (case-insensitive; exact match wins over substring)",
+							description:
+								"The step, in your own words — case-insensitive, markdown-decoration-insensitive; exact match wins over substring",
 						},
 						plan: {
 							type: "string",
