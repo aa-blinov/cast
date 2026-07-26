@@ -72,8 +72,19 @@ function globToRegExpSource(glob: string): string {
 		const ch = glob[i]!;
 		if (ch === "*") {
 			if (glob[i + 1] === "*") {
-				out += ".*";
-				i++;
+				if (glob[i + 2] === "/") {
+					// `**/` matches zero or more whole path segments —
+					// `**/*.ts` must also match a root-level `top.ts`,
+					// not just files at least one directory deep. A bare
+					// ".*" + literal "/" would demand a slash even when
+					// ** matches nothing, so fold the separator into an
+					// optional group instead of emitting it as a literal.
+					out += "(?:.*/)?";
+					i += 2;
+				} else {
+					out += ".*";
+					i++;
+				}
 			} else {
 				out += "[^/]*";
 			}
@@ -237,7 +248,19 @@ export async function execGlob(args: Record<string, unknown>, cwd: string, _conf
 		// fallback handles them when fd is absent.
 		const fdArgs = ["--glob", "--type", "f", "--max-results", String(limit)];
 		if (hasGitignore) fdArgs.push("--ignore-file", gitignorePath);
-		fdArgs.push(pattern, searchPath);
+		// Without -p, fd matches the pattern against the basename only — a
+		// pattern with a directory component (`src/**/*.ts`, `**/tools/*.ts`)
+		// would then never match anything, since a basename never contains a
+		// "/". Only opt into full-path matching (and only then anchor with a
+		// leading "**/") for such patterns, so plain patterns like `*.ts` keep
+		// matching by basename exactly as before — full-path matching would
+		// otherwise break them, since a bare `*` never crosses a "/".
+		let fdPattern = pattern;
+		if (pattern.includes("/")) {
+			fdArgs.push("--full-path");
+			fdPattern = pattern.startsWith("**/") ? pattern : `**/${pattern}`;
+		}
+		fdArgs.push(fdPattern, searchPath);
 		// Capture stderr rather than inheriting it — an invalid glob makes fd
 		// print "[fd error]: …" which would otherwise land in the TUI frame.
 		const { stdout } = await execFileAsync("fd", fdArgs, {
@@ -248,11 +271,19 @@ export async function execGlob(args: Record<string, unknown>, cwd: string, _conf
 		absolutePaths = stdout.trim().split("\n").filter(Boolean);
 	} catch {
 		// fd isn't installed or returned an error (e.g. invalid glob
-		// pattern) — walk the tree ourselves, matching the pattern
-		// against basenames like `find -name` does.
-		const nameRe = globToFileRegExp(pattern);
+		// pattern) — walk the tree ourselves. Patterns with a directory
+		// component match against the path relative to searchPath (mirrors
+		// the --full-path handling above); plain patterns match the basename,
+		// same as `find -name`.
 		const allFiles = await walkFiles(cwd, searchPath);
-		absolutePaths = allFiles.filter((p) => nameRe.test(basename(p))).slice(0, limit);
+		if (pattern.includes("/")) {
+			const anchoredPattern = pattern.startsWith("**/") ? pattern : `**/${pattern}`;
+			const pathRe = globToFileRegExp(anchoredPattern);
+			absolutePaths = allFiles.filter((p) => pathRe.test(relative(searchPath, p))).slice(0, limit);
+		} else {
+			const nameRe = globToFileRegExp(pattern);
+			absolutePaths = allFiles.filter((p) => nameRe.test(basename(p))).slice(0, limit);
+		}
 	}
 
 	if (absolutePaths.length === 0) return { content: "No files found" };

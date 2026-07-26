@@ -1047,6 +1047,168 @@ describe("glob", () => {
 });
 
 // ============================================================================
+// glob: ** / directory-component patterns, and fd vs. no-fd fallback parity
+// ============================================================================
+//
+// fd only matches a pattern against the full path when --full-path is passed;
+// without it, matching is basename-only, so a pattern containing "/" (like
+// `src/**/*.ts` or `**/tools/*.ts`) would silently match nothing. The no-fd
+// fallback walks the tree in JS and must mirror this exactly, or the two code
+// paths return different results for the same pattern depending on whether
+// fd happens to be installed.
+
+/** Runs fn with PATH pointing at an empty directory, so `execFile("fd", ...)`
+ * and `execFile("rg", ...)` fail with ENOENT and glob/grep fall back to the
+ * pure-JS tree walk — without actually needing fd/rg absent on the host. */
+async function withoutFdOnPath<T>(fn: () => Promise<T>): Promise<T> {
+	const emptyPathDir = join(TEST_DIR, "__empty_path__");
+	mkdirSync(emptyPathDir, { recursive: true });
+	const originalPath = process.env.PATH;
+	process.env.PATH = emptyPathDir;
+	try {
+		return await fn();
+	} finally {
+		process.env.PATH = originalPath;
+	}
+}
+
+// Nested tree lives under NESTED_ROOT rather than directly in TEST_DIR:
+// TEST_DIR's own basename is "tools" (see TEST_DIR above), which would make
+// a `**/tools/*.ts` pattern match the search root itself, not just the
+// nested src/core/tools/ directory the test is trying to isolate.
+const NESTED_ROOT = join(TEST_DIR, "proj");
+
+function buildNestedTree() {
+	mkdirSync(join(NESTED_ROOT, "src", "core", "tools"), { recursive: true });
+	mkdirSync(join(NESTED_ROOT, "src", "ui"), { recursive: true });
+	mkdirSync(join(NESTED_ROOT, "test"), { recursive: true });
+	writeFileSync(join(NESTED_ROOT, "src", "core", "tools", "search.ts"), "");
+	writeFileSync(join(NESTED_ROOT, "src", "core", "tools", "files.ts"), "");
+	writeFileSync(join(NESTED_ROOT, "src", "ui", "App.tsx"), "");
+	writeFileSync(join(NESTED_ROOT, "test", "tools.test.ts"), "");
+	writeFileSync(join(NESTED_ROOT, "top-level.ts"), "");
+}
+
+describe("glob: ** and directory-component patterns (fd path)", () => {
+	it("`**/*.ts` recurses into subdirectories", async () => {
+		buildNestedTree();
+		const exec = createToolExecutor(NESTED_ROOT, mockConfig);
+		const result = await exec("glob", { pattern: "**/*.ts", path: NESTED_ROOT });
+		expect(result.content).toContain("src/core/tools/search.ts");
+		expect(result.content).toContain("src/core/tools/files.ts");
+		expect(result.content).toContain("top-level.ts");
+		expect(result.content).not.toContain("App.tsx");
+	});
+
+	it("`src/**/*.ts` (leading literal directory + **) matches nested files", async () => {
+		buildNestedTree();
+		const exec = createToolExecutor(NESTED_ROOT, mockConfig);
+		const result = await exec("glob", { pattern: "src/**/*.ts", path: NESTED_ROOT });
+		expect(result.content).toContain("src/core/tools/search.ts");
+		expect(result.content).toContain("src/core/tools/files.ts");
+		expect(result.content).not.toContain("top-level.ts");
+	});
+
+	it("`**/tools/*.ts` (directory literal in the middle) matches", async () => {
+		buildNestedTree();
+		const exec = createToolExecutor(NESTED_ROOT, mockConfig);
+		const result = await exec("glob", { pattern: "**/tools/*.ts", path: NESTED_ROOT });
+		expect(result.content).toContain("src/core/tools/search.ts");
+		expect(result.content).toContain("src/core/tools/files.ts");
+		expect(result.content).not.toContain("App.tsx");
+		expect(result.content).not.toContain("top-level.ts");
+	});
+
+	it("a fully literal directory path with a trailing wildcard matches", async () => {
+		buildNestedTree();
+		const exec = createToolExecutor(NESTED_ROOT, mockConfig);
+		const result = await exec("glob", { pattern: "src/core/tools/*.ts", path: NESTED_ROOT });
+		expect(result.content).toContain("src/core/tools/search.ts");
+		expect(result.content).toContain("src/core/tools/files.ts");
+		expect(result.content).not.toContain("top-level.ts");
+	});
+
+	it("a slash-free pattern still matches by basename only (unaffected by the fix)", async () => {
+		buildNestedTree();
+		const exec = createToolExecutor(NESTED_ROOT, mockConfig);
+		const result = await exec("glob", { pattern: "*.ts", path: NESTED_ROOT });
+		expect(result.content).toContain("src/core/tools/search.ts");
+		expect(result.content).toContain("src/core/tools/files.ts");
+		expect(result.content).toContain("top-level.ts");
+		expect(result.content).toContain("test/tools.test.ts");
+	});
+});
+
+describe("glob: no-fd fallback parity", () => {
+	it("falls back to the JS tree walk when fd is not on PATH", async () => {
+		mkdirSync(NESTED_ROOT, { recursive: true });
+		writeFileSync(join(NESTED_ROOT, "a.ts"), "");
+		writeFileSync(join(NESTED_ROOT, "b.js"), "");
+		const exec = createToolExecutor(NESTED_ROOT, mockConfig);
+		const result = await withoutFdOnPath(() => exec("glob", { pattern: "*.ts", path: NESTED_ROOT }));
+		expect(result.content).toContain("a.ts");
+		expect(result.content).not.toContain("b.js");
+	});
+
+	it("`**/*.ts` recurses into subdirectories without fd", async () => {
+		buildNestedTree();
+		const exec = createToolExecutor(NESTED_ROOT, mockConfig);
+		const result = await withoutFdOnPath(() => exec("glob", { pattern: "**/*.ts", path: NESTED_ROOT }));
+		expect(result.content).toContain("src/core/tools/search.ts");
+		expect(result.content).toContain("src/core/tools/files.ts");
+		expect(result.content).toContain("top-level.ts");
+		expect(result.content).not.toContain("App.tsx");
+	});
+
+	it("`src/**/*.ts` matches nested files without fd", async () => {
+		buildNestedTree();
+		const exec = createToolExecutor(NESTED_ROOT, mockConfig);
+		const result = await withoutFdOnPath(() => exec("glob", { pattern: "src/**/*.ts", path: NESTED_ROOT }));
+		expect(result.content).toContain("src/core/tools/search.ts");
+		expect(result.content).toContain("src/core/tools/files.ts");
+		expect(result.content).not.toContain("top-level.ts");
+	});
+
+	it("`**/tools/*.ts` matches a directory literal in the middle without fd", async () => {
+		buildNestedTree();
+		const exec = createToolExecutor(NESTED_ROOT, mockConfig);
+		const result = await withoutFdOnPath(() => exec("glob", { pattern: "**/tools/*.ts", path: NESTED_ROOT }));
+		expect(result.content).toContain("src/core/tools/search.ts");
+		expect(result.content).toContain("src/core/tools/files.ts");
+		expect(result.content).not.toContain("App.tsx");
+		expect(result.content).not.toContain("top-level.ts");
+	});
+
+	it("a fully literal directory path with a trailing wildcard matches without fd", async () => {
+		buildNestedTree();
+		const exec = createToolExecutor(NESTED_ROOT, mockConfig);
+		const result = await withoutFdOnPath(() => exec("glob", { pattern: "src/core/tools/*.ts", path: NESTED_ROOT }));
+		expect(result.content).toContain("src/core/tools/search.ts");
+		expect(result.content).toContain("src/core/tools/files.ts");
+		expect(result.content).not.toContain("top-level.ts");
+	});
+
+	it("produces the same matched file set with and without fd", async () => {
+		buildNestedTree();
+		const exec = createToolExecutor(NESTED_ROOT, mockConfig);
+		const patterns = ["*.ts", "**/*.ts", "src/**/*.ts", "**/tools/*.ts", "src/core/tools/*.ts"];
+
+		for (const pattern of patterns) {
+			const withFd = await exec("glob", { pattern, path: NESTED_ROOT });
+			const withoutFd = await withoutFdOnPath(() => exec("glob", { pattern, path: NESTED_ROOT }));
+
+			const normalize = (content: string) =>
+				content
+					.split("\n")
+					.filter((line) => !line.startsWith("[note:"))
+					.sort();
+
+			expect(normalize(withoutFd.content)).toEqual(normalize(withFd.content));
+		}
+	});
+});
+
+// ============================================================================
 // grep
 // ============================================================================
 
