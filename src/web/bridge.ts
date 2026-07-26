@@ -46,6 +46,7 @@ import {
 	clearSessionMessages,
 	countTurnMessages,
 	createSession,
+	deleteSession,
 	listSessionSummaries,
 	loadSession,
 	recordCompaction,
@@ -210,6 +211,11 @@ export interface WebBridge {
 	 * stays on disk (autosaved already), it just stops appearing as a running
 	 * background agent. Returns false if the id doesn't exist. */
 	closeSession(sessionId: string): boolean;
+	/** Unlike closeSession, this actually removes the session (and its
+	 * messages) from disk — not recoverable. Aborts/cleans up the live
+	 * instance first if one exists. Returns false if the id doesn't exist
+	 * either live or on disk. */
+	deleteSessionPermanently(sessionId: string): boolean;
 	/** Manual rename — overrides the auto-derived title permanently. Returns
 	 * false if the id doesn't exist. Empty/whitespace-only clears back to
 	 * showing the persona name. */
@@ -575,6 +581,24 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		ws.listeners.clear();
 		sessions.delete(sessionId);
 		return true;
+	}
+
+	function deleteSessionPermanently(sessionId: string): boolean {
+		const ws = sessions.get(sessionId);
+		if (ws) {
+			if (ws.status === "running") ws.runner.abort();
+			ws.backgroundBash.registry.killAll();
+			// No saveSession here — it's about to be deleted from disk anyway.
+			broadcast(ws, { type: "session_closed" });
+			ws.listeners.clear();
+			sessions.delete(sessionId);
+		}
+		// Also remove from disk regardless of whether it was live — a session
+		// closed earlier in this process (or one from a previous run) only
+		// exists on disk, and deleteSession() is what actually makes "Delete"
+		// mean delete instead of just closeSession's "unload from memory".
+		const removedFromDisk = deleteSession(sessionId);
+		return Boolean(ws) || removedFromDisk;
 	}
 
 	function subscribe(sessionId: string, callback: (event: WebEvent) => void): void {
@@ -1635,6 +1659,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		getSession,
 		listSessions,
 		closeSession,
+		deleteSessionPermanently,
 		renameSession,
 		pinSession,
 		submit,

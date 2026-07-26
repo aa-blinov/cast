@@ -103,6 +103,48 @@ describe("web bridge", () => {
 		};
 	}
 
+	describe("deleteSessionPermanently", () => {
+		it("returns false for a session that never existed, live or on disk", () => {
+			const bridge = createWebBridge(makeResult());
+			expect(bridge.deleteSessionPermanently("no-such-session")).toBe(false);
+		});
+
+		it("removes a live session from the registry, unlike closeSession which just unloads it", async () => {
+			const { appendMessage, loadSession, saveSession } = await import("../src/core/session.ts");
+			const bridge = createWebBridge(makeResult());
+			const ws = bridge.createSession();
+			appendMessage(ws.session, { role: "user", content: "hi" });
+			saveSession(ws.session);
+			expect(loadSession(ws.id)).toBeDefined();
+
+			expect(bridge.deleteSessionPermanently(ws.id)).toBe(true);
+
+			expect(bridge.getSession(ws.id)).toBeUndefined();
+			expect(loadSession(ws.id)).toBeNull();
+		});
+
+		it("removes a session that's only on disk (not currently live)", async () => {
+			const { createSession, loadSession, saveSession } = await import("../src/core/session.ts");
+			const bridge = createWebBridge(makeResult());
+			const orphan = createSession("gpt-4o", cwd);
+			saveSession(orphan);
+			expect(loadSession(orphan.id)).toBeDefined();
+
+			expect(bridge.deleteSessionPermanently(orphan.id)).toBe(true);
+
+			expect(loadSession(orphan.id)).toBeNull();
+		});
+
+		it("aborts a running session before deleting it", () => {
+			const bridge = createWebBridge(makeResult());
+			const ws = bridge.createSession();
+			ws.status = "running";
+			const abortSpy = vi.spyOn(ws.runner, "abort");
+			bridge.deleteSessionPermanently(ws.id);
+			expect(abortSpy).toHaveBeenCalledTimes(1);
+		});
+	});
+
 	it("builds a persona-specific system prompt at session creation", () => {
 		const bridge = createWebBridge(makeResult());
 		const ws = bridge.createSession("senior");
@@ -431,6 +473,14 @@ describe("web bridge", () => {
 			const ws = bridge.createSession();
 			const killAllSpy = vi.spyOn(ws.backgroundBash.registry, "killAll");
 			bridge.closeSession(ws.id);
+			expect(killAllSpy).toHaveBeenCalledTimes(1);
+		});
+
+		it("deleteSessionPermanently() kills any still-running background tasks", () => {
+			const bridge = createWebBridge(makeResult());
+			const ws = bridge.createSession();
+			const killAllSpy = vi.spyOn(ws.backgroundBash.registry, "killAll");
+			bridge.deleteSessionPermanently(ws.id);
 			expect(killAllSpy).toHaveBeenCalledTimes(1);
 		});
 

@@ -2036,7 +2036,7 @@ function Sidebar({
 	defaultCwd,
 	onSelectSession,
 	onCreateSession,
-	onCloseSession,
+	onDeleteSession,
 	onOpenDirPicker,
 	onSetCwd,
 	onRenameSession,
@@ -2049,6 +2049,32 @@ function Sidebar({
 	const [editingId, setEditingId] = useState(null);
 	const [editValue, setEditValue] = useState("");
 	const editInputRef = useRef(null);
+	// One shared menu (Rename/Delete) rather than per-row state — opened by
+	// the ⋮ button or a right-click anywhere on the row, closed by an outside
+	// click/Escape/picking an action. Frees up the row for one icon instead
+	// of two permanently-visible ones.
+	const [menuFor, setMenuFor] = useState(null);
+	useEffect(() => {
+		if (!menuFor) return;
+		const close = () => setMenuFor(null);
+		const onKey = (e) => {
+			if (e.key === "Escape") close();
+		};
+		// Capture phase + next-tick registration: the same click that opens
+		// the menu (button click / contextmenu) would otherwise immediately
+		// bubble up and close it again.
+		const id = setTimeout(() => {
+			window.addEventListener("click", close);
+			window.addEventListener("contextmenu", close);
+		}, 0);
+		window.addEventListener("keydown", onKey);
+		return () => {
+			clearTimeout(id);
+			window.removeEventListener("click", close);
+			window.removeEventListener("contextmenu", close);
+			window.removeEventListener("keydown", onKey);
+		};
+	}, [menuFor]);
 
 	// Pinned is its own group above a divider (a deliberate, manual choice —
 	// it shouldn't just be one more sort key mixed into the rest). Within
@@ -2093,8 +2119,26 @@ function Sidebar({
 		}
 	}, [editingId]);
 
+	const doDelete = async (s) => {
+		const message =
+			s.status === "running"
+				? "Stop the running agent and permanently delete this thread? This can't be undone."
+				: "Permanently delete this thread? This can't be undone.";
+		if (await confirm(message)) onDeleteSession(s.id);
+	};
+
 	const renderItem = (s) => html`
-		<div key=${s.id} class="sidebar-item${s.id === activeId ? " active" : ""}" title=${s.cwd} onClick=${() => onSelectSession(s.id)}>
+		<div
+			key=${s.id}
+			class="sidebar-item${s.id === activeId ? " active" : ""}"
+			title=${s.cwd}
+			onClick=${() => onSelectSession(s.id)}
+			onContextMenu=${(e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				setMenuFor(s.id);
+			}}
+		>
 			<span class="sidebar-item-status ${s.status || "idle"}" />
 			<button
 				class="sidebar-item-pin${s.pinned ? " pinned" : ""}"
@@ -2134,28 +2178,38 @@ function Sidebar({
 						}}>${s.title || s.persona || "unknown"}</span>`
 			}
 			<span class="sidebar-item-meta">${s.messageCount} msg</span>
-			<button
-				class="sidebar-item-rename"
-				title="Rename"
-				aria-label="Rename"
-				onClick=${(e) => {
-					e.stopPropagation();
-					startEdit(s);
-				}}
-			><${icons.pencil} /></button>
-			<button
-				class="sidebar-item-close"
-				title=${s.status === "running" ? "Stop and close" : "Close"}
-				aria-label="Close"
-				onClick=${async (e) => {
-					e.stopPropagation();
-					const message =
-						s.status === "running"
-							? "Stop the running agent and close this thread? History stays saved — you can still open it by URL."
-							: "Close this thread? History stays saved — you can still open it by URL.";
-					if (await confirm(message)) onCloseSession(s.id);
-				}}
-			><${icons.xMark} /></button>
+			<div class="sidebar-item-menu-anchor">
+				<button
+					class="sidebar-item-more"
+					title="More"
+					aria-label="More"
+					onClick=${(e) => {
+						e.stopPropagation();
+						setMenuFor(menuFor === s.id ? null : s.id);
+					}}
+				><${icons.ellipsisVertical} /></button>
+				${
+					menuFor === s.id &&
+					html`
+					<div class="sidebar-item-menu" onClick=${(e) => e.stopPropagation()}>
+						<button
+							class="sidebar-item-menu-item"
+							onClick=${() => {
+								setMenuFor(null);
+								startEdit(s);
+							}}
+						><${icons.pencil} /> Rename</button>
+						<button
+							class="sidebar-item-menu-item danger"
+							onClick=${() => {
+								setMenuFor(null);
+								doDelete(s);
+							}}
+						><${icons.trash} /> Delete</button>
+					</div>
+				`
+				}
+			</div>
 		</div>
 	`;
 
@@ -2321,11 +2375,11 @@ function App() {
 	const requestConfirm = useCallback((message) => new Promise((resolve) => setConfirmState({ message, resolve })), []);
 	const cwd = selectedCwd ?? defaultCwd ?? "";
 
-	// Sessions the user explicitly closed (the × button) stay hidden from
-	// this browser's sidebar even though the backend now shows every
-	// persisted session ever saved (see bridge.ts's listSessions) — closing
-	// is a per-browser "declutter", not a delete, and re-opening one by URL
-	// (a shared link, browser history) un-hides it again.
+	// Legacy per-browser "declutter" set from the old soft-close action (now
+	// replaced by the sidebar menu's real Delete) — kept so anyone with
+	// entries already in localStorage doesn't have old dismissed sessions
+	// reappear, and re-opening one by URL (a shared link, browser history)
+	// still un-hides it again.
 	const [dismissedIds, setDismissedIds] = useState(() => {
 		try {
 			return new Set(JSON.parse(localStorage.getItem("cast:dismissedSessions") || "[]"));
@@ -2333,16 +2387,6 @@ function App() {
 			return new Set();
 		}
 	});
-	const dismiss = useCallback((id) => {
-		setDismissedIds((prev) => {
-			const next = new Set(prev);
-			next.add(id);
-			try {
-				localStorage.setItem("cast:dismissedSessions", JSON.stringify([...next]));
-			} catch {}
-			return next;
-		});
-	}, []);
 	const undismiss = useCallback((id) => {
 		setDismissedIds((prev) => {
 			if (!prev.has(id)) return prev;
@@ -2671,30 +2715,20 @@ function App() {
 		tryOnce();
 	}, [initClientState]);
 
-	// Close (stop) a session — aborts it server-side if running and drops it
-	// from the live list. History stays on disk; it just stops being a tab.
-	const closeSession = useCallback(
+	// The sidebar's Delete action — actually removes the session (and its
+	// messages) from disk, unlike the old close/soft-hide it replaced. Drops
+	// the row from `sessions` entirely instead of hiding it via the
+	// per-browser dismissed-set, and aborts first if it's still running.
+	const deleteSessionPermanently = useCallback(
 		async (id) => {
-			// The DELETE also broadcasts session_closed over this same session's SSE
-			// connection, which can arrive before this fetch resolves — mark it as
-			// self-initiated so that handler doesn't flash a spurious error toast.
 			if (id === activeId) selfClosingRef.current = id;
 			try {
-				await api("DELETE", `/api/sessions/${id}`);
+				await api("DELETE", `/api/sessions/${id}/permanent`);
 			} catch (err) {
 				showToast(err.message, "error");
 				return;
 			}
-			// The backend still lists this session (still on disk) — closing only
-			// unloads it from the live runner, not the disk file — so hiding it
-			// from view is purely this browser's own dismissed-set, not something
-			// removed from `sessions` itself.
-			dismiss(id);
-			// Without this, closing the session that's also the remembered
-			// "last active" one (the common case, since every switch/select
-			// stamps this) left it as the bare-URL fallback in initClientState —
-			// reopening http://host:port/ with no ?session= would silently
-			// resurrect the very thread just closed.
+			setSessions((prev) => prev.filter((s) => s.id !== id));
 			try {
 				if (localStorage.getItem("cast:lastSessionId") === id) localStorage.removeItem("cast:lastSessionId");
 			} catch {}
@@ -2717,7 +2751,7 @@ function App() {
 				setStreaming([]);
 			}
 		},
-		[sessions, activeId, personas, selectSession, startDraft, showToast, dismiss, dismissedIds],
+		[sessions, activeId, personas, selectSession, startDraft, showToast, dismissedIds],
 	);
 
 	// Rename — overrides the auto-derived-from-first-message title. Updates
@@ -3572,7 +3606,7 @@ function App() {
 				defaultCwd=${defaultCwd}
 				onSelectSession=${selectSession}
 				onCreateSession=${startDraft}
-				onCloseSession=${closeSession}
+				onDeleteSession=${deleteSessionPermanently}
 				onOpenDirPicker=${() => setDirPickerOpen(true)}
 				onSetCwd=${setSelectedCwd}
 				onRenameSession=${renameSession}
