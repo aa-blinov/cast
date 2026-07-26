@@ -149,6 +149,23 @@ export async function execSsh(
 
 		let finalResult: ToolResult | null = null;
 
+		// Spawn failure (ssh/sshpass missing, permission denied, …): without
+		// this handler an unhandled 'error' event on the child process crashes
+		// the whole cast process instead of the tool call returning a clean
+		// error (confirmed — a missing `ssh` binary took the process down).
+		// Mirrors execBash's identical handler in bash.ts.
+		proc.on("error", (err) => {
+			clearTimeout(timer);
+			signal?.removeEventListener("abort", onAbort);
+			if (finalResult) return;
+			const result: ToolResult = {
+				content: `Failed to start "${spawnCmd}": ${err.message}`,
+				isError: true,
+			};
+			finalResult = result;
+			resolve(result);
+		});
+
 		proc.on("close", (exitCode) => {
 			clearTimeout(timer);
 			signal?.removeEventListener("abort", onAbort);

@@ -237,4 +237,26 @@ describe("SSH tool executor", () => {
 		expect(result.isError).toBe(true);
 		expect(result.content).toContain("not found");
 	});
+
+	it("returns a clean error instead of crashing the process when the ssh binary can't be spawned", async () => {
+		// The child process has no 'error' listener path distinct from 'close'
+		// — an unhandled 'error' event (spawn ENOENT, permission denied, …) on
+		// a ChildProcess throws and takes the whole process down if nothing is
+		// listening for it. An empty PATH makes `spawn("ssh", ...)` fail this
+		// way without needing the real ssh binary absent on the host.
+		const originalPath = process.env.PATH;
+		const emptyPathDir = join(TEST_DIR, "__empty_path__");
+		mkdirSync(emptyPathDir, { recursive: true });
+		process.env.PATH = emptyPathDir;
+		try {
+			const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, undefined, undefined, [
+				{ name: "h", host: "1.2.3.4" },
+			]);
+			const result = await exec("ssh", { host: "h", command: "echo hi" });
+			expect(result.isError).toBe(true);
+			expect(result.content).toContain("Failed to start");
+		} finally {
+			process.env.PATH = originalPath;
+		}
+	});
 });
