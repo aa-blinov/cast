@@ -2,6 +2,21 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.8.29
+
+### Added
+
+- `web_search` supports Tavily as an optional backend for anyone hitting DuckDuckGo's scrape rate limit (~4 requests per IP before a CAPTCHA blocks further searches) — Tavily's free tier is a recurring 1000 requests/month instead. Configure with `/web-search-provider` (TUI) or the Tools settings tab (`cast web`); DuckDuckGo stays the zero-config default.
+- Web UI: tool call results are now expandable — click a tool card to see its full output (previously request-only), lazily rendered and capped at 64KB.
+- Docs: a new research-grounded page on why persona/role framing changes agent behavior, linked from the personas doc and the landing page.
+
+### Fixed
+
+- `web_search`: an empty query or one over Tavily's undocumented 400-character limit no longer fails with an opaque HTTP 400 — empty queries are rejected with a clear message, over-length ones are truncated so the search still runs.
+- `web_search`: the tool's advertised parameters now match the active backend — `region`/`time` (DuckDuckGo-only) are no longer offered to the model when Tavily is active, where they silently did nothing.
+- GitHub Pages landing page and README: the ASCII banner no longer overflows or visibly snaps to size on narrow mobile viewports — replaced with a static SVG that scales like any other image.
+- Docs: corrected two fabricated author citations in the persona-research motivation section.
+
 ## 0.8.28
 
 ### Fixed
