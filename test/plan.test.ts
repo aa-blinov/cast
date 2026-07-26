@@ -517,6 +517,44 @@ describe("plan", () => {
 				// The second item's marker is untouched.
 				expect(content).toContain("- [ ] **Add the DELETE branch**");
 			});
+
+			// Confirmed live: a step with its own nested sub-bullets (elaborating
+			// on that one step, not separate steps) gets passed back to
+			// plan_check by the model as ONE continuous string, sub-bullets
+			// included verbatim. Capturing only the marker line's text (stopping
+			// at ANY bullet, regardless of indentation) made the stored text a
+			// strict prefix of what the model actually sent — a real failure
+			// against a real generated plan.
+			it("includes a step's own nested (more-indented) sub-bullets in its matchable text", () => {
+				const state = testState("check-wrap-nested");
+				const NESTED_PLAN =
+					"# Plan\n\n## Steps\n\n" +
+					"- [ ] Parse the path segment:\n" +
+					"  - Require a leading slash.\n" +
+					"  - Reject empty segments.\n" +
+					"- [ ] Another sibling step\n";
+				writePlan(state, "main", NESTED_PLAN);
+
+				const item = "Parse the path segment:\n  - Require a leading slash.\n  - Reject empty segments.";
+				const parsed = JSON.parse(execPlanCheck({ item }, state).content);
+				expect(parsed.success).toBe(true);
+				expect(readActivePlan(state).content).toContain("- [x] Parse the path segment:");
+			});
+
+			it("still stops at a sibling bullet at the same indentation as the marker", () => {
+				const state = testState("check-wrap-sibling");
+				const NESTED_PLAN =
+					"# Plan\n\n## Steps\n\n" +
+					"- [ ] Parse the path segment:\n" +
+					"  - Require a leading slash.\n" +
+					"- [ ] Another sibling step\n";
+				writePlan(state, "main", NESTED_PLAN);
+
+				const parsed = JSON.parse(execPlanCheck({ item: "Another sibling step" }, state).content);
+				expect(parsed.success).toBe(true);
+				expect(parsed.item).toBe("Another sibling step");
+				expect(parsed.item).not.toContain("leading slash");
+			});
 		});
 
 		it("matches case-insensitively and prefers exact over substring", () => {
