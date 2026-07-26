@@ -24,6 +24,13 @@ const MAX_CONTENT_CHARS = 12_000;
 const MAX_SEARCH_RESULTS = 10;
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const CACHE_MAX_ENTRIES = 100;
+// How many results a single DDG page fetch parses, independent of any one
+// caller's `maxResults`. The cache key doesn't include maxResults, so a
+// query first run with a small maxResults must not permanently cap what a
+// later call for the same query (with a larger maxResults) can get out of
+// the cache for the rest of the TTL — parse the full page once and truncate
+// per-caller on the way out instead.
+const PARSE_RESULTS_LIMIT = 25;
 
 // ============================================================================
 // DDG Search — html.duckduckgo.com
@@ -154,7 +161,7 @@ export async function searchDuckDuckGo(
 	const blocks = html.split(/<div[^>]+class="result\s/);
 	const results: SearchResult[] = [];
 
-	for (let i = 1; i < blocks.length && results.length < maxResults; i++) {
+	for (let i = 1; i < blocks.length && results.length < PARSE_RESULTS_LIMIT; i++) {
 		const block = blocks[i];
 
 		const titleMatch = /<a[^>]+class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/.exec(block);
@@ -173,10 +180,11 @@ export async function searchDuckDuckGo(
 
 	const searchResults = { query, results };
 
-	// Cache even empty results to avoid re-hitting DDG
+	// Cache the full parsed set (see PARSE_RESULTS_LIMIT) even when empty, to
+	// avoid re-hitting DDG; truncate to this caller's maxResults on the way out.
 	cacheSet(key, searchResults);
 
-	return searchResults;
+	return { ...searchResults, results: results.slice(0, maxResults) };
 }
 
 // ============================================================================
@@ -197,7 +205,13 @@ export async function fetchUrl(
 	const controller = new AbortController();
 	const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 	const onAbort = () => controller.abort(signal?.reason);
-	signal?.addEventListener("abort", onAbort, { once: true });
+	// A signal aborted before this call ("Esc" already pressed, or the turn
+	// already ended) has already fired its one-shot 'abort' event — adding a
+	// listener now would never see it, silently letting the fetch run to
+	// completion unaborted. Check the already-tripped state explicitly
+	// instead of only listening for a future event.
+	if (signal?.aborted) controller.abort(signal.reason);
+	else signal?.addEventListener("abort", onAbort, { once: true });
 
 	try {
 		const resp = await fetch(`https://r.jina.ai/${url}`, {
