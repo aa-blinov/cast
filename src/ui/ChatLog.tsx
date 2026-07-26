@@ -66,7 +66,7 @@ export function parseToolSummary(name: string, args: string): ToolSummaryModel {
 			const o = op as Record<string, unknown>;
 			if (o.op === "write") continue;
 			const content = typeof o.content === "string" ? o.content : "";
-			if (o.op === "insert_after") {
+			if (o.op === "insert_after" || o.op === "insert_before") {
 				added += content.split("\n").length;
 			} else if (o.op === "replace") {
 				// Approximate line churn from the anchor range. The model
