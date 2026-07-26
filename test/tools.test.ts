@@ -1092,6 +1092,82 @@ describe("edit", () => {
 });
 
 // ============================================================================
+// edit: CRLF line-ending preservation
+// ============================================================================
+//
+// hashline-cache/hashline.ts only ever split file content on "\n", so a
+// CRLF file's lines keep their own trailing "\r" embedded as ordinary
+// content — untouched lines round-trip correctly through mutated.join("\n").
+// Model-authored replace/insert content is always plain "\n" text, though:
+// without normalizing it to the file's line-ending style, only the lines an
+// edit actually touched ended up "\n"-only while the rest of the file
+// stayed "\r\n", corrupting a CRLF file into inconsistent mixed line
+// endings on every edit (confirmed: editing one line of "a\r\nb\r\nc\r\n"
+// used to produce "a\r\nB\nc\r\n").
+
+describe("edit: CRLF line-ending preservation", () => {
+	it("keeps CRLF consistent when replacing a single line", async () => {
+		writeFileSync(join(TEST_DIR, "crlf1.txt"), "a\r\nb\r\nc\r\n");
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const before = await exec("read", { path: "crlf1.txt" });
+		const anchor = before.content.split("\n")[1]!.split("→")[0]!;
+		const result = await exec("edit", { path: "crlf1.txt", ops: [{ op: "replace", anchor, content: "B" }] });
+		expect(result.isError).toBeFalsy();
+		expect(readFileSync(join(TEST_DIR, "crlf1.txt"), "utf-8")).toBe("a\r\nB\r\nc\r\n");
+	});
+
+	it("applies CRLF to every new line from a multi-line replace", async () => {
+		writeFileSync(join(TEST_DIR, "crlf2.txt"), "a\r\nb\r\nc\r\n");
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const before = await exec("read", { path: "crlf2.txt" });
+		const anchor = before.content.split("\n")[1]!.split("→")[0]!;
+		await exec("edit", { path: "crlf2.txt", ops: [{ op: "replace", anchor, content: "B1\nB2\nB3" }] });
+		expect(readFileSync(join(TEST_DIR, "crlf2.txt"), "utf-8")).toBe("a\r\nB1\r\nB2\r\nB3\r\nc\r\n");
+	});
+
+	it("applies CRLF to insert_after and insert_before content", async () => {
+		writeFileSync(join(TEST_DIR, "crlf3.txt"), "a\r\nb\r\n");
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const before = await exec("read", { path: "crlf3.txt" });
+		const anchors = before.content.split("\n").map((l) => l.split("→")[0]!);
+		await exec("edit", {
+			path: "crlf3.txt",
+			ops: [
+				{ op: "insert_after", anchor: anchors[0], content: "AFTER" },
+				{ op: "insert_before", anchor: anchors[1], content: "BEFORE" },
+			],
+		});
+		expect(readFileSync(join(TEST_DIR, "crlf3.txt"), "utf-8")).toBe("a\r\nAFTER\r\nBEFORE\r\nb\r\n");
+	});
+
+	it("applies CRLF to EOF and top-of-file (0:) inserts", async () => {
+		writeFileSync(join(TEST_DIR, "crlf4.txt"), "a\r\nb\r\n");
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		await exec("edit", { path: "crlf4.txt", ops: [{ op: "insert_after", anchor: "0:", content: "TOP" }] });
+		await exec("edit", { path: "crlf4.txt", ops: [{ op: "insert_after", anchor: "EOF", content: "BOTTOM" }] });
+		expect(readFileSync(join(TEST_DIR, "crlf4.txt"), "utf-8")).toBe("TOP\r\na\r\nb\r\nBOTTOM\r\n");
+	});
+
+	it("does not double a \\r if the model's content already includes one", async () => {
+		writeFileSync(join(TEST_DIR, "crlf5.txt"), "a\r\nb\r\n");
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const before = await exec("read", { path: "crlf5.txt" });
+		const anchor = before.content.split("\n")[1]!.split("→")[0]!;
+		await exec("edit", { path: "crlf5.txt", ops: [{ op: "replace", anchor, content: "B\r" }] });
+		expect(readFileSync(join(TEST_DIR, "crlf5.txt"), "utf-8")).toBe("a\r\nB\r\n");
+	});
+
+	it("leaves an LF file's edits plain LF, and strips a stray \\r from model content", async () => {
+		writeFileSync(join(TEST_DIR, "lf1.txt"), "a\nb\nc\n");
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const before = await exec("read", { path: "lf1.txt" });
+		const anchor = before.content.split("\n")[1]!.split("→")[0]!;
+		await exec("edit", { path: "lf1.txt", ops: [{ op: "replace", anchor, content: "B\r" }] });
+		expect(readFileSync(join(TEST_DIR, "lf1.txt"), "utf-8")).toBe("a\nB\nc\n");
+	});
+});
+
+// ============================================================================
 // glob
 // ============================================================================
 
