@@ -276,6 +276,7 @@ body.resizing-diff * { user-select: none; }
 	margin: 4px 0 8px;
 }
 .sidebar-item {
+	position: relative;
 	display: flex; align-items: center; gap: 8px;
 	padding: 7px 8px;
 	border-radius: var(--radius-sm);
@@ -314,7 +315,7 @@ body.resizing-diff * { user-select: none; }
 .sidebar-item-meta {
 	font-size: .7rem; color: var(--text-muted);
 }
-.sidebar-item-close, .sidebar-item-rename, .sidebar-item-pin {
+.sidebar-item-more, .sidebar-item-pin {
 	flex-shrink: 0;
 	width: 22px; height: 22px;
 	border-radius: 4px;
@@ -326,14 +327,37 @@ body.resizing-diff * { user-select: none; }
 	display: flex; align-items: center; justify-content: center;
 	transition: opacity .1s, background .1s, color .1s;
 }
-.sidebar-item:hover .sidebar-item-close, .sidebar-item:hover .sidebar-item-rename, .sidebar-item:hover .sidebar-item-pin,
-.sidebar-item.active .sidebar-item-close, .sidebar-item.active .sidebar-item-rename, .sidebar-item.active .sidebar-item-pin { opacity: 1; }
-.sidebar-item-close:hover { background: rgba(239,68,68,.15); color: var(--rose); }
-.sidebar-item-rename:hover { background: var(--bg-hover); color: var(--cyan); }
+.sidebar-item:hover .sidebar-item-more, .sidebar-item:hover .sidebar-item-pin,
+.sidebar-item.active .sidebar-item-more, .sidebar-item.active .sidebar-item-pin { opacity: 1; }
+.sidebar-item-more:hover { background: var(--bg-hover); color: var(--cyan); }
 .sidebar-item-pin:hover { background: var(--bg-hover); color: var(--cyan); }
 /* Pinned is a persistent marker, not just a hover affordance — stays visible
  * and tinted even when the row isn't hovered/active. */
 .sidebar-item-pin.pinned { opacity: 1; color: var(--cyan); }
+.sidebar-item-menu-anchor { position: relative; flex-shrink: 0; display: flex; }
+.sidebar-item-menu {
+	position: absolute; top: calc(100% + 4px); right: 0; z-index: 20;
+	min-width: 140px;
+	background: var(--bg-raised);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	box-shadow: 0 8px 24px rgba(0,0,0,.35);
+	padding: 4px;
+	display: flex; flex-direction: column; gap: 2px;
+}
+.sidebar-item-menu-item {
+	display: flex; align-items: center; gap: 8px;
+	padding: 6px 8px;
+	border: none; background: none; border-radius: 4px;
+	color: var(--text);
+	font-size: .8rem;
+	font-family: var(--font);
+	text-align: left;
+	cursor: pointer;
+}
+.sidebar-item-menu-item:hover { background: var(--bg-hover); }
+.sidebar-item-menu-item.danger { color: var(--rose); }
+.sidebar-item-menu-item.danger:hover { background: rgba(239,68,68,.15); }
 .sidebar-divider {
 	height: 1px;
 	background: var(--border);
@@ -1095,8 +1119,8 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 		z-index: 15;
 	}
 	.sidebar.open { transform: translateX(0); }
-	/* No hover on touch — the close/rename/pin buttons must be reachable without it. */
-	.sidebar-item-close, .sidebar-item-rename, .sidebar-item-pin { opacity: 1; }
+	/* No hover on touch — the menu/pin buttons must be reachable without it. */
+	.sidebar-item-more, .sidebar-item-pin { opacity: 1; }
 	.sidebar-backdrop {
 		top: calc(var(--header-h) + env(safe-area-inset-top));
 		background: rgba(0,0,0,.6);

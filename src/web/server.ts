@@ -260,6 +260,16 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 		json(res, { ok: true });
 	});
 
+	// Permanently removes the session from disk — unlike the plain DELETE
+	// above, which only unloads it from the live runner (see closeSession's
+	// own doc comment). A distinct route rather than a query flag on the same
+	// one, since the two have very different blast radii.
+	route("DELETE", "/api/sessions/:id/permanent", (_req, res, params) => {
+		const deleted = bridge.deleteSessionPermanently(params.id);
+		if (!deleted) return json(res, { error: "Not found" }, 404);
+		json(res, { ok: true });
+	});
+
 	route("POST", "/api/sessions/:id/rename", async (req, res, params) => {
 		const ws = bridge.getSession(params.id);
 		if (!ws) return json(res, { error: "Not found" }, 404);
