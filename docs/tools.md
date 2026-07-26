@@ -1,6 +1,6 @@
 # Tools
 
-The agent has access to 10 built-in tools plus optional MCP server tools. Multiple tools run in parallel within a single turn via `Promise.all`.
+The agent has access to a set of built-in tools (some gated by persona, mode, or configuration — see each section below) plus optional MCP server tools. Multiple tools run in parallel within a single turn via `Promise.all`.
 
 ## File System Tools
 

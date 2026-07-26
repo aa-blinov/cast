@@ -81,7 +81,7 @@ A single trust decision per project gates all local resources (skills, MCP, cont
 
 ### Plan Mode
 
-Plan mode is a restricted agent state: read-only bash, read tool, plan tools. The read-only bash gate uses a curated allowlist of inspection binaries. Plan files persist as markdown with checkbox tracking.
+Plan mode is a restricted agent state: read-only bash (a curated allowlist of inspection binaries), unrestricted read, and write/edit narrowed to the session's plans directory — the model authors the plan with the same tools it edits real code with, no dedicated plan-write/plan-edit/plan-read tool (see [Plan Mode](plan-mode.md)). Plan files persist as markdown with checkbox tracking.
 
 ## Development
 
