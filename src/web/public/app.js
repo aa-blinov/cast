@@ -1636,7 +1636,7 @@ function SettingsTools({ data, busy, act }) {
 				<button class="modal-btn${webOn ? " modal-btn-primary" : ""}" title="Enable web_search and web_fetch" disabled=${busy} onClick=${() => act("/web on")}>Enabled</button>
 				<button class="modal-btn${!webOn ? " modal-btn-primary" : ""}" title="Disable web_search and web_fetch" disabled=${busy} onClick=${() => act("/web off")}>Disabled</button>
 			</div>
-			<div class="settings-section-title">web_search backend</div>
+			<div class="settings-section-title">Web search backend</div>
 			<div class="settings-form-row">
 				<button class="modal-btn${provider === "ddg" ? " modal-btn-primary" : ""}" title="Free, no key — ~4 searches per IP before rate-limited" disabled=${busy} onClick=${() => act("/web-search-provider ddg")}>DuckDuckGo</button>
 				<button class="modal-btn${provider === "tavily" ? " modal-btn-primary" : ""}" title="API key required — 1000 free searches/month" disabled=${busy} onClick=${() => {

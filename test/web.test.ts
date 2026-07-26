@@ -218,6 +218,31 @@ describe("searchTavily", () => {
 
 		expect(fetch).toHaveBeenCalledTimes(1);
 	});
+
+	it("rejects an empty query before making a request", async () => {
+		vi.stubGlobal("fetch", vi.fn());
+
+		await expect(searchTavily("   ", "tvly-key")).rejects.toThrow(/empty/i);
+		expect(fetch).not.toHaveBeenCalled();
+	});
+
+	it("truncates a query over Tavily's undocumented 400-char limit instead of failing", async () => {
+		mockFetchJsonOnce({ ok: true, status: 200, json: { results: [] } });
+		const longQuery = "a".repeat(500);
+
+		const { query } = await searchTavily(longQuery, "tvly-key");
+
+		expect(query.length).toBe(400);
+		const call = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls[0];
+		const body = JSON.parse((call[1] as { body: string }).body);
+		expect(body.query.length).toBe(400);
+	});
+
+	it("surfaces Tavily's own error detail on a 400 instead of a bare status code", async () => {
+		mockFetchJsonOnce({ ok: false, status: 400, json: { detail: { error: "Something specific broke." } } });
+
+		await expect(searchTavily("unique tavily query detail", "tvly-key")).rejects.toThrow(/Something specific broke/);
+	});
 });
 
 // ============================================================================
