@@ -802,7 +802,7 @@ export function execPlanDone(args: Record<string, unknown>, planState: PlanState
 	}
 	if (!exists || !path) {
 		return {
-			content: "Error: No plan exists. Write a plan first using plan_write.",
+			content: "Error: No plan exists. Write a plan file first (write inside the plans directory).",
 			isError: true,
 		};
 	}
