@@ -629,26 +629,48 @@ export function execPlanCheck(args: Record<string, unknown>, planState: PlanStat
 
 	const lines = content.split("\n");
 	const checkboxRe = /^(\s*[-*]\s+)\[ \]\s*(.*)$/;
+	// A wrapped step reads as one paragraph in the file (marker line + indented
+	// prose continuation, no bullet of its own) but is genuinely one list item —
+	// real plans do this constantly (long step descriptions wrap at ~100 chars).
+	// A continuation line is anything that isn't blank, isn't fenced, and
+	// doesn't start a new bullet/heading of its own.
+	const continuationBoundaryRe = /^\s*(?:[-*]\s+|#{1,6}\s+)/;
 	// Fence-aware: a checkbox-like line inside a code example is content, not
 	// a step — matching it would corrupt the example.
 	const fenced = fencedLineMask(lines);
-	const unchecked = lines
-		.map((line, index) => {
-			if (fenced[index]) return undefined;
-			const match = line.match(checkboxRe);
-			return match ? { index, prefix: match[1]!, text: match[2]!.trim() } : undefined;
-		})
-		.filter((c) => c !== undefined);
+	const unchecked: Array<{ index: number; prefix: string; text: string }> = [];
+	for (let i = 0; i < lines.length; i++) {
+		if (fenced[i]) continue;
+		const match = lines[i]!.match(checkboxRe);
+		if (!match) continue;
+		let text = match[2]!.trim();
+		for (let j = i + 1; j < lines.length; j++) {
+			if (fenced[j]) break;
+			const cont = lines[j]!;
+			if (cont.trim() === "" || continuationBoundaryRe.test(cont)) break;
+			text += ` ${cont.trim()}`;
+		}
+		unchecked.push({ index: i, prefix: match[1]!, text });
+	}
 
 	if (unchecked.length === 0) {
 		return { content: "Error: The plan has no unchecked checklist items.", isError: true };
 	}
 
-	// Same matching contract as plan_edit: case-insensitive, exact wins over substring.
-	const target = item.toLowerCase();
-	let matches = unchecked.filter((c) => c.text.toLowerCase() === target);
+	// Same matching contract as plan_edit: case-insensitive, exact wins over
+	// substring. Markdown emphasis/code-span punctuation (**bold**, `code`,
+	// _italic_) is stripped from both sides before comparing — a model
+	// recalling "add the deleted set" a turn later has no reason to reproduce
+	// the exact "**Add the `deleted` Set**" decoration the step was written
+	// with, and requiring a byte-exact match on that punctuation made this
+	// tool fail on real plans essentially every time (confirmed against a
+	// live-generated plan: neither the plain-text recall nor a decoration-free
+	// paraphrase matched — only a verbatim copy of the markdown did).
+	const normalize = (s: string) => s.toLowerCase().replace(/[`*_]/g, "").replace(/\s+/g, " ").trim();
+	const target = normalize(item);
+	let matches = unchecked.filter((c) => normalize(c.text) === target);
 	if (matches.length === 0) {
-		matches = unchecked.filter((c) => c.text.toLowerCase().includes(target));
+		matches = unchecked.filter((c) => normalize(c.text).includes(target));
 	}
 	if (matches.length === 0) {
 		return {
