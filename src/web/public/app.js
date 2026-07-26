@@ -450,20 +450,31 @@ function mcpToolLabel(name) {
 }
 
 function ToolCard({ call }) {
-	// Shows what the agent is calling — full input parameters — and whether
-	// it's still running / succeeded / failed. Deliberately no result body:
-	// the point of this card is the request, not the (often huge) output.
+	// The header always shows the request (name + full input params) and a
+	// status dot, so the terminal-like default view stays a quick "what's it
+	// doing / is it still alive" scan. The result body is collapsed by
+	// default and rendered lazily on first expand — unlike the TUI, the web
+	// UI has room (and a scrollable DOM) to show it on demand without
+	// cluttering the log.
+	const [open, setOpen] = useState(false);
 	const statusClass = call.status || "running";
 	const args = formatArgsFull(call.args);
 	const mcp = isMcpTool(call.name);
+	const hasResult = Boolean(call.result);
 	return html`
 		<div class="tool-card">
-			<div class="tool-card-header" data-tool=${call.name}>
+			<div
+				class="tool-card-header${hasResult ? " clickable" : ""}"
+				data-tool=${call.name}
+				onClick=${hasResult ? () => setOpen((o) => !o) : undefined}
+			>
 				${mcp && html`<span class="tool-card-mcp-badge">MCP</span>`}
 				<span class="tool-card-name">${mcp ? mcpToolLabel(call.name) : call.name}</span>
 				<span class="tool-card-status ${statusClass}" />
+				${hasResult && html`<span class="tool-card-toggle">${open ? "▾" : "▸"}</span>`}
 			</div>
 			${args && html`<div class="tool-card-body">${args}</div>`}
+			${open && hasResult && html`<div class="tool-card-result">${call.result}</div>`}
 		</div>
 	`;
 }
@@ -3006,7 +3017,10 @@ function App() {
 											call: {
 												...b.call,
 												status: event.result?.isError ? "error" : "ok",
-												result: event.result?.content?.slice(0, 4000) ?? "",
+												// Matches core's maxToolOutputBytes default (64KB) — tool
+												// output is already capped upstream, so this just guards
+												// against an unbounded MCP tool that ignores that cap.
+												result: event.result?.content?.slice(0, 64 * 1024) ?? "",
 											},
 										}
 									: b,

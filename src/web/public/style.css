@@ -683,6 +683,13 @@ body.resizing-diff * { user-select: none; }
 	display: flex; align-items: center; gap: 8px;
 	padding: 7px 10px;
 }
+.tool-card-header.clickable { cursor: pointer; }
+.tool-card-header.clickable:hover { background: var(--bg-raised); }
+.tool-card-toggle {
+	color: var(--text-muted);
+	font-size: .7rem;
+	line-height: 1;
+}
 .tool-card-name {
 	color: var(--blue);
 	font-weight: 500;
@@ -717,6 +724,17 @@ body.resizing-diff * { user-select: none; }
 	white-space: pre-wrap;
 	word-break: break-word;
 	max-height: 340px;
+	overflow-y: auto;
+}
+.tool-card-result {
+	padding: 8px 10px;
+	border-top: 1px dashed var(--border);
+	background: var(--bg);
+	color: var(--text-dim);
+	font-size: .75rem;
+	white-space: pre-wrap;
+	word-break: break-word;
+	max-height: 400px;
 	overflow-y: auto;
 }
 
