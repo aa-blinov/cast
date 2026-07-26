@@ -632,9 +632,18 @@ export function execPlanCheck(args: Record<string, unknown>, planState: PlanStat
 	// A wrapped step reads as one paragraph in the file (marker line + indented
 	// prose continuation, no bullet of its own) but is genuinely one list item —
 	// real plans do this constantly (long step descriptions wrap at ~100 chars).
-	// A continuation line is anything that isn't blank, isn't fenced, and
-	// doesn't start a new bullet/heading of its own.
-	const continuationBoundaryRe = /^\s*(?:[-*]\s+|#{1,6}\s+)/;
+	// A step can ALSO carry its own nested sub-bullets elaborating on it (e.g.
+	// "- [ ] Parse the path:\n  - Require a leading slash\n  - Reject empty
+	// segments") — a model naturally treats those as part of the step's
+	// identity and includes them verbatim in a plan_check call (confirmed
+	// live: passing only the marker line's text failed to match because the
+	// stored text — captured without the sub-bullets — was a strict prefix of
+	// the model's query). A line only ends the continuation when it's blank,
+	// a heading, or a bullet at the SAME OR SHALLOWER indentation as the
+	// step's own marker (a true sibling item); a more-indented bullet is a
+	// child of this step and stays part of its text.
+	const headingRe = /^\s*#{1,6}\s+/;
+	const bulletIndentRe = /^(\s*)[-*]\s+/;
 	// Fence-aware: a checkbox-like line inside a code example is content, not
 	// a step — matching it would corrupt the example.
 	const fenced = fencedLineMask(lines);
@@ -643,11 +652,14 @@ export function execPlanCheck(args: Record<string, unknown>, planState: PlanStat
 		if (fenced[i]) continue;
 		const match = lines[i]!.match(checkboxRe);
 		if (!match) continue;
+		const markerIndent = lines[i]!.match(/^\s*/)![0]!.length;
 		let text = match[2]!.trim();
 		for (let j = i + 1; j < lines.length; j++) {
 			if (fenced[j]) break;
 			const cont = lines[j]!;
-			if (cont.trim() === "" || continuationBoundaryRe.test(cont)) break;
+			if (cont.trim() === "" || headingRe.test(cont)) break;
+			const bulletIndent = cont.match(bulletIndentRe)?.[1]?.length;
+			if (bulletIndent !== undefined && bulletIndent <= markerIndent) break;
 			text += ` ${cont.trim()}`;
 		}
 		unchecked.push({ index: i, prefix: match[1]!, text });
