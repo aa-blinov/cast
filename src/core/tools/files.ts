@@ -148,7 +148,13 @@ export async function execWrite(args: Record<string, unknown>, cwd: string): Pro
 	const warn = dupWarning ? `\nWarning: ${dupWarning}` : "";
 
 	if (oldContent === null) {
-		return { content: `Created ${filePath} (${newLines.length} lines, ${content.length} bytes).${warn}` };
+		// content.length counts UTF-16 code units, not bytes — for any
+		// non-ASCII content (Cyrillic, CJK, emoji) that undercounts what
+		// writeFile's "utf-8" encoding actually put on disk (confirmed: a
+		// 13-character Cyrillic+emoji string reported "13 bytes" for a file
+		// that was actually 24 bytes). Buffer.byteLength gives the real count.
+		const byteLength = Buffer.byteLength(content, "utf-8");
+		return { content: `Created ${filePath} (${newLines.length} lines, ${byteLength} bytes).${warn}` };
 	}
 	if (oldContent === content) {
 		return { content: `Wrote ${filePath} — content is identical to what was already on disk.${warn}` };

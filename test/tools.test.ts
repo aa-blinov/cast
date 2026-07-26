@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
@@ -432,6 +432,19 @@ describe("write", () => {
 		await exec("write", { path: "deep/nested/file.txt", content: "ok" });
 		const readResult = await exec("read", { path: "deep/nested/file.txt" });
 		expect(readResult.content).toContain("ok");
+	});
+
+	it("reports the real UTF-8 byte count for non-ASCII content, not the JS string length", async () => {
+		// content.length counts UTF-16 code units — for Cyrillic/CJK/emoji that
+		// undercounts what writeFile's "utf-8" encoding actually puts on disk
+		// (a 13-character Cyrillic+emoji string is 24 bytes on disk, not 13).
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const content = "привет мир 🎉";
+		const result = await exec("write", { path: "unicode.txt", content });
+		const onDiskBytes = statSync(join(TEST_DIR, "unicode.txt")).size;
+		expect(onDiskBytes).toBe(Buffer.byteLength(content, "utf-8"));
+		expect(result.content).toContain(`${onDiskBytes} bytes`);
+		expect(result.content).not.toContain(`${content.length} bytes`);
 	});
 
 	it("rejects empty path", async () => {
