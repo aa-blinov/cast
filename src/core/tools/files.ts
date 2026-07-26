@@ -279,7 +279,8 @@ export async function execEdit(args: Record<string, unknown>, cwd: string, confi
 	// file. Validation here is what catches "stale anchor", "anchor not
 	// found", "ambiguous anchor" and "range overlap" before anything is
 	// written — the model gets the fresh-anchor snippet it needs to retry.
-	const bucketResult = bucketOps(ops, lines, hashes, filePath);
+	const isCRLF = detectCRLF(cached.raw);
+	const bucketResult = bucketOps(ops, lines, hashes, filePath, isCRLF);
 	if (!bucketResult.ok) return bucketResult.result;
 
 	// Apply bottom-up so each splice stays inside the original line
@@ -488,6 +489,7 @@ function bucketOps(
 	lines: string[],
 	hashes: Array<[string, string]>,
 	filePath: string,
+	isCRLF: boolean,
 ): BucketSuccess | BucketFailure {
 	const result: BucketedOp[] = [];
 	const notes: string[] = [];
@@ -529,7 +531,7 @@ function bucketOps(
 				kind: "replace",
 				lineStart: startLine - 1,
 				lineEnd: endLine - 1,
-				textLinesToInsert: splitContent(op.content),
+				textLinesToInsert: splitContent(op.content, isCRLF),
 				anchorStr: op.anchorStr,
 				idx: i,
 			});
@@ -540,7 +542,7 @@ function bucketOps(
 				result.push({
 					kind: "insert",
 					line: -1,
-					textLinesToInsert: splitContent(op.content),
+					textLinesToInsert: splitContent(op.content, isCRLF),
 					anchorStr: op.anchorStr,
 					idx: i,
 				});
@@ -559,7 +561,7 @@ function bucketOps(
 				result.push({
 					kind: "insert",
 					line: insertAt - 1,
-					textLinesToInsert: splitContent(op.content),
+					textLinesToInsert: splitContent(op.content, isCRLF),
 					anchorStr: op.anchorStr,
 					idx: i,
 				});
@@ -578,7 +580,7 @@ function bucketOps(
 			result.push({
 				kind: "insert",
 				line: check.line - (op.before ? 2 : 1),
-				textLinesToInsert: splitContent(op.content),
+				textLinesToInsert: splitContent(op.content, isCRLF),
 				anchorStr: op.anchorStr,
 				idx: i,
 			});
@@ -759,13 +761,34 @@ function renderParsedAnchor(anchor: NonNullable<ReturnType<typeof resolveAnchor>
 	return `${anchor.line}:${anchor.localHash}${anchor.chunkHash ? `:${anchor.chunkHash}` : ""}`;
 }
 
-function splitContent(content: string): string[] {
+/**
+ * Split model-authored op content into lines, normalized to the target
+ * file's line-ending style. `lines`/`mutated` keep each original line's own
+ * trailing "\r" embedded as ordinary content (hashline-cache/hashline.ts
+ * only ever split on "\n"), so `mutated.join("\n")` reproduces "\r\n" for
+ * every UNTOUCHED line automatically. Model content is always plain "\n"
+ * text, though — without normalizing it here, only the lines an edit
+ * actually replaces/inserts would end up "\n"-only while the rest of the
+ * file stayed "\r\n", corrupting a CRLF file into mixed line endings on
+ * every edit (confirmed: editing one line of "a\r\nb\r\nc\r\n" produced
+ * "a\r\nB\nc\r\n").
+ */
+function splitContent(content: string, isCRLF: boolean): string[] {
 	// Empty content means "insert nothing": a replace with "" deletes the
 	// range outright instead of leaving a blank line behind.
 	if (content === "") return [];
 	// Preserve the trailing-newline semantics of the old `newText` shape:
 	// a content with a trailing newline produced an empty final line.
-	return content.split("\n");
+	const rawLines = content.split("\n");
+	if (!isCRLF) return rawLines.map((l) => (l.endsWith("\r") ? l.slice(0, -1) : l));
+	return rawLines.map((l) => (l.endsWith("\r") ? l : `${l}\r`));
+}
+
+/** Whether `raw` uses CRLF line endings — checked once per edit against the
+ * file's actual bytes, not per line, since a file is virtually always
+ * consistently one or the other. */
+function detectCRLF(raw: string): boolean {
+	return raw.includes("\r\n");
 }
 
 function failBucket(message: string): BucketFailure {
