@@ -6,6 +6,7 @@
 <title>cast — One agent, many roles</title>
 <meta name="description" content="A role-based terminal agent harness. 13 built-in personas, same tools, different judgment. Runs on any OpenAI-compatible model — including the one on your own hardware.">
 <style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 :root {
 	/* cast palette — cyan→violet gradient */
 	--bg: #0a0e14;
@@ -25,8 +26,8 @@
 	--code-bg: #0f1520;
 	--sidebar-w: 280px;
 	--header-h: 64px;
-	--font: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-	--font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+	--font: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+	--font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
 }
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { font-size: 16px; scroll-behavior: smooth; }
@@ -373,6 +374,34 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 .roles-terminal-body .cmd { color: var(--green); }
 .roles-terminal-body .out { color: var(--text-secondary); }
 
+/* ── Motivation ────────────────────────────────────────────────────── */
+.motivation {
+	max-width: 760px; margin: 0 auto; padding: 48px 24px 40px;
+}
+.motivation h2 {
+	text-align: center; font-size: 1.5rem; font-weight: 700; margin: 0 0 12px;
+}
+.motivation > p.lede {
+	text-align: center; color: var(--text-secondary); max-width: 620px; margin: 0 auto 24px;
+}
+.motivation ul {
+	list-style: none; margin: 0 0 20px; padding: 0;
+	display: flex; flex-direction: column; gap: 12px;
+}
+.motivation li {
+	background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px;
+	padding: 14px 16px; font-size: .9rem; color: var(--text-secondary); line-height: 1.55;
+}
+.motivation li a { font-size: .85em; }
+.motivation p.closing {
+	color: var(--text-secondary); font-size: .95rem; line-height: 1.6;
+}
+.motivation code {
+	font-family: var(--font-mono); font-size: .875em;
+	background: var(--code-bg); padding: 2px 6px; border-radius: 4px;
+	border: 1px solid var(--border); color: var(--accent);
+}
+
 /* ── Comparison ────────────────────────────────────────────────────── */
 .comparison {
 	max-width: 700px; margin: 0 auto; padding: 40px 24px 60px;
@@ -401,6 +430,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 @media (max-width: 768px) {
 	.roles-showcase { padding: 32px 16px; }
 	.roles-terminal-body { font-size: .75rem; padding: 12px; }
+	.motivation { padding: 32px 16px 24px; }
 	.comparison { padding: 32px 16px 48px; }
 }
 </style>
@@ -416,11 +446,13 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 
 <div class="main main-landing">
 	<section class="hero">
-		<pre class="hero-ascii">                   __
-  _________ ______/ /_
- / ___/ __ `/ ___/ __/
-/ /__/ /_/ (__  ) /_
-\___/\__,_/____/\__/</pre>
+		<pre class="hero-ascii"> ░▒▓██████▓▒░ ░▒▓██████▓▒░ ░▒▓███████▓▒░▒▓████████▓▒░
+░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░         ░▒▓█▓▒░
+░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░         ░▒▓█▓▒░
+░▒▓█▓▒░      ░▒▓████████▓▒░░▒▓██████▓▒░   ░▒▓█▓▒░
+░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░      ░▒▓█▓▒░  ░▒▓█▓▒░
+░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░      ░▒▓█▓▒░  ░▒▓█▓▒░
+ ░▒▓██████▓▒░░▒▓█▓▒░░▒▓█▓▒░▒▓███████▓▒░   ░▒▓█▓▒░</pre>
 		<h1>One agent, <span class="accent">many roles</span></h1>
 		<p>cast brings a full cast to your terminal: senior dev, QA, DBA, security reviewer, PM, tech writer. Swap the role, not the tool. Runs on any OpenAI-compatible model, including the one on your own hardware.</p>
 		<div class="hero-buttons">
@@ -452,6 +484,17 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 				<div class="out">Document the new auth flow in the README</div>
 			</div>
 		</div>
+	</section>
+
+	<section class="motivation">
+		<h2>Why personas, not just prompts</h2>
+		<p class="lede">Point a generic coding agent and a role-specific one at the same file, and they don't just answer differently — they look for different things. An appsec persona reading a schema flags the injection surface; a DBA persona reading the same schema flags missing indexes. Same repo, same tools, different definition of "done."</p>
+		<ul>
+			<li>Assigning an LLM an expert role measurably changes the <em>shape</em> of its output — deeper domain framing at the cost of some plain-language clarity, a real trade-off rather than a free upgrade. <a href="https://arxiv.org/abs/2605.29420" target="_blank" rel="noopener">Malik &amp; Chinnappa, 2024 ↗</a></li>
+			<li>For tool-using agents specifically, persona/role structure acts as a <strong>decision filter on tool calls</strong> — not just tone, but whether and when the agent reaches for a tool at all, catching the "under-acting" failure mode where agents skip tools their role should obviously use. <a href="https://arxiv.org/abs/2509.00482" target="_blank" rel="noopener">Xu et al., 2024 ↗</a></li>
+			<li>The effect isn't universal — persona framing helps most on open-ended, advisory, judgment-heavy tasks, and least on narrow factual lookups. A persona only pays for itself when it actually matches the task.</li>
+		</ul>
+		<p class="closing">cast leans into that instead of working around it: swap <code>/persona</code> and the same tools, the same repo, and the same model produce a different investigation — different priorities, different tool sequencing, different conclusions, different follow-up questions. A security review that reasons like a senior dev misses different things than one that reasons like an appsec engineer, even reading identical code.</p>
 	</section>
 
 	<section class="features">

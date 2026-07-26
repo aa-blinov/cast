@@ -6,6 +6,7 @@
 <title>Plan Mode — cast</title>
 <meta name="description" content="Plan Mode documentation for cast, a role-based terminal agent harness.">
 <style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 :root {
 	/* cast palette — cyan→violet gradient */
 	--bg: #0a0e14;
@@ -25,8 +26,8 @@
 	--code-bg: #0f1520;
 	--sidebar-w: 280px;
 	--header-h: 64px;
-	--font: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-	--font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+	--font: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+	--font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
 }
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { font-size: 16px; scroll-behavior: smooth; }
@@ -373,6 +374,34 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 .roles-terminal-body .cmd { color: var(--green); }
 .roles-terminal-body .out { color: var(--text-secondary); }
 
+/* ── Motivation ────────────────────────────────────────────────────── */
+.motivation {
+	max-width: 760px; margin: 0 auto; padding: 48px 24px 40px;
+}
+.motivation h2 {
+	text-align: center; font-size: 1.5rem; font-weight: 700; margin: 0 0 12px;
+}
+.motivation > p.lede {
+	text-align: center; color: var(--text-secondary); max-width: 620px; margin: 0 auto 24px;
+}
+.motivation ul {
+	list-style: none; margin: 0 0 20px; padding: 0;
+	display: flex; flex-direction: column; gap: 12px;
+}
+.motivation li {
+	background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px;
+	padding: 14px 16px; font-size: .9rem; color: var(--text-secondary); line-height: 1.55;
+}
+.motivation li a { font-size: .85em; }
+.motivation p.closing {
+	color: var(--text-secondary); font-size: .95rem; line-height: 1.6;
+}
+.motivation code {
+	font-family: var(--font-mono); font-size: .875em;
+	background: var(--code-bg); padding: 2px 6px; border-radius: 4px;
+	border: 1px solid var(--border); color: var(--accent);
+}
+
 /* ── Comparison ────────────────────────────────────────────────────── */
 .comparison {
 	max-width: 700px; margin: 0 auto; padding: 40px 24px 60px;
@@ -401,6 +430,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 @media (max-width: 768px) {
 	.roles-showcase { padding: 32px 16px; }
 	.roles-terminal-body { font-size: .75rem; padding: 12px; }
+	.motivation { padding: 32px 16px 24px; }
 	.comparison { padding: 32px 16px 48px; }
 }
 </style>
@@ -443,7 +473,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 <main class="main">
 	<article class="content">
 		<h1>Plan Mode</h1>
-<p>Plan mode restricts the agent to exploration and planning — it can read files and produce a structured plan, but cannot execute code, write files, or run arbitrary shell commands.</p>
+<p>Plan mode restricts the agent to exploration and planning — it can read files and produce a structured plan, but cannot execute code, touch real files, or run arbitrary shell commands. The one exception is the plan file itself: <code>write</code>/<code>edit</code> still work, just scoped to a <code>.md</code> file inside the session&#39;s plans directory (see <a href="#plan-tools">Plan Tools</a> below).</p>
 <h2>Workflow</h2>
 <pre class="mermaid" data-raw="LS0tCmNvbmZpZzoKICBsYXlvdXQ6IGVsawogIGVsazoKICAgIG5vZGVQbGFjZW1lbnRTdHJhdGVneTogTkVUV09SS19TSU1QTEVYCi0tLQpmbG93Y2hhcnQgTFIKICBBWyIvcGxhbiBvciBwbGFuX2VudGVyIl0gLS0+IEJbRXhwbG9yZSBjb2RlYmFzZV0KICBCIC0tPiBDW1dyaXRlIHBsYW5dCiAgQyAtLT4gRFsicGxhbl9kb25lIl0KICBEIC0tPiBFe0FwcHJvdmFsIGRpYWxvZ30KICBFIC0tPnxJbXBsZW1lbnQgbm93fCBGW0ltcGxlbWVudCBwbGFuXQogIEUgLS0+fENsZWFyIGNvbnRleHQgKyBpbXBsZW1lbnR8IEYKICBFIC0tPnwiSSdsbCBzdGFydCBteXNlbGYifCBHWyIvYnVpbGQg4oaSIHlvdXIgbWVzc2FnZSJdCiAgRSAtLT58UmVmaW5lfCBCCiAgRyAtLT4gRgogIEYgLS0+IEhbInBsYW5fY2hlY2sgc3RlcHMiXQ==">---
 config:
@@ -481,13 +511,21 @@ flowchart LR
 <li>Command and process substitution (<code>$()</code>, backticks, <code>&lt;()</code>)</li>
 <li>Any binary not on the allowlist (<code>env</code> included — it launches arbitrary binaries; same for test runners and package managers)</li>
 <li>Argument-level writers on allowlisted binaries: <code>find -delete</code>/<code>-exec</code>, <code>fd -x</code>, <code>sort -o</code>, <code>tree -o</code>, <code>--output</code>, <code>uniq in out</code></li>
-<li><code>write</code>, <code>edit</code> tools</li>
+<li><code>write</code>/<code>edit</code> outside the plan file — they stay available (same tools used for real code) but only reach a <code>.md</code> file directly inside the session&#39;s plans directory; anything else is refused</li>
 </ul>
 <p><code>web_search</code>/<code>web_fetch</code> follow the <code>/web</code> toggle in both modes — plan mode doesn&#39;t change them.</p>
 <h3>MCP Tools: A Deliberate Exception</h3>
 <p>MCP tools stay <strong>fully enabled</strong> in plan mode — they are not hard-gated the way bash/write/edit are. Many MCP servers are read-only research tools (docs lookup, code search) and exactly what planning needs, and cast can&#39;t know which of an arbitrary server&#39;s tools mutate state. The model is instructed to use MCP for inspection and retrieval only, and you get a warning on plan-mode entry when MCP tools are connected — but if your MCP server can write to a database or trigger a deploy, plan mode does not physically prevent that. Keep that in mind when planning with mutating MCP servers connected.</p>
 <h2>Plan Tools</h2>
-<div class="table-wrap"><table><thead><tr><th>Tool</th><th>Mode</th><th>Description</th></tr></thead><tbody><tr><td><code>plan_write</code></td><td>Plan</td><td>Write or replace a named plan file</td></tr><tr><td><code>plan_edit</code></td><td>Plan</td><td>Edit a section by heading</td></tr><tr><td><code>plan_read</code></td><td>Both</td><td>Read plan content and headings</td></tr><tr><td><code>plan_done</code></td><td>Plan</td><td>Signal plan is ready for review</td></tr><tr><td><code>plan_discard</code></td><td>Plan</td><td>Delete a plan</td></tr><tr><td><code>plan_enter</code></td><td>Build</td><td>Suggest switching to plan mode</td></tr><tr><td><code>plan_check</code></td><td>Build</td><td>Mark a checklist item as done</td></tr></tbody></table></div><h2>Plan Files</h2>
+<p>The plan file itself is authored and read with the ordinary <code>write</code>/<code>edit</code>/
+<code>read</code> tools — the same ones used for real code. <code>write</code>/<code>edit</code> are gated to
+a <code>.md</code> file directly inside the session&#39;s plans directory while plan mode is
+active; reading that same file makes it the active plan (no <code>name</code> argument
+needed). Other plans in the session are discoverable with <code>ls</code>/<code>glob</code> on the
+plans directory. There is no separate plan-write/plan-edit/plan-read tool
+(mirrors how Claude Code&#39;s own plan mode works: no dedicated authoring or
+reading tool, just a permission-level path exception for the plan file).</p>
+<div class="table-wrap"><table><thead><tr><th>Tool</th><th>Mode</th><th>Description</th></tr></thead><tbody><tr><td><code>plan_done</code></td><td>Plan</td><td>Signal plan is ready for review</td></tr><tr><td><code>plan_discard</code></td><td>Plan</td><td>Delete a plan</td></tr><tr><td><code>plan_enter</code></td><td>Build</td><td>Suggest switching to plan mode</td></tr><tr><td><code>plan_check</code></td><td>Build</td><td>Mark a checklist item as done</td></tr></tbody></table></div><h2>Plan Files</h2>
 <p>Plans are stored as markdown files:</p>
 <pre><code>~/.cast/plans/&lt;session-id&gt;/
   auth-refactor.md
@@ -527,11 +565,12 @@ PLAN MODE ACTIVE — no changes allowed
 You are in plan mode: read, search, and think — change nothing.
 
 Restrictions:
-- write and edit are unavailable
+- write and edit only reach the plan file itself — any .md file directly
+  inside &lt;plans directory&gt; (no subdirectories). Anything else is refused
 - bash is INSPECTION-ONLY (allowlisted read-only binaries)
 - You cannot switch modes yourself
 </code></pre>
-<p>The model is instructed to: understand the task → explore the codebase → write a plan → call <code>plan_done</code>.</p>
+<p>The block names the session&#39;s actual plans directory (a <code>{{PLANS_DIR}}</code> template filled in per-session), so the model knows exactly where it may write. It is instructed to: understand the task → explore the codebase → write a plan with <code>write</code>/<code>edit</code> → call <code>plan_done</code>.</p>
 <h3>Build Mode</h3>
 <p>When you type <code>/build</code> with an approved plan, the plan is injected into the system prompt:</p>
 <pre><code>An approved plan exists for this task. It was written in plan mode and reviewed by the user:

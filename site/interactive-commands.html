@@ -6,6 +6,7 @@
 <title>Interactive Commands — cast</title>
 <meta name="description" content="Interactive Commands documentation for cast, a role-based terminal agent harness.">
 <style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 :root {
 	/* cast palette — cyan→violet gradient */
 	--bg: #0a0e14;
@@ -25,8 +26,8 @@
 	--code-bg: #0f1520;
 	--sidebar-w: 280px;
 	--header-h: 64px;
-	--font: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-	--font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+	--font: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+	--font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
 }
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { font-size: 16px; scroll-behavior: smooth; }
@@ -373,6 +374,34 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 .roles-terminal-body .cmd { color: var(--green); }
 .roles-terminal-body .out { color: var(--text-secondary); }
 
+/* ── Motivation ────────────────────────────────────────────────────── */
+.motivation {
+	max-width: 760px; margin: 0 auto; padding: 48px 24px 40px;
+}
+.motivation h2 {
+	text-align: center; font-size: 1.5rem; font-weight: 700; margin: 0 0 12px;
+}
+.motivation > p.lede {
+	text-align: center; color: var(--text-secondary); max-width: 620px; margin: 0 auto 24px;
+}
+.motivation ul {
+	list-style: none; margin: 0 0 20px; padding: 0;
+	display: flex; flex-direction: column; gap: 12px;
+}
+.motivation li {
+	background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px;
+	padding: 14px 16px; font-size: .9rem; color: var(--text-secondary); line-height: 1.55;
+}
+.motivation li a { font-size: .85em; }
+.motivation p.closing {
+	color: var(--text-secondary); font-size: .95rem; line-height: 1.6;
+}
+.motivation code {
+	font-family: var(--font-mono); font-size: .875em;
+	background: var(--code-bg); padding: 2px 6px; border-radius: 4px;
+	border: 1px solid var(--border); color: var(--accent);
+}
+
 /* ── Comparison ────────────────────────────────────────────────────── */
 .comparison {
 	max-width: 700px; margin: 0 auto; padding: 40px 24px 60px;
@@ -401,6 +430,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 @media (max-width: 768px) {
 	.roles-showcase { padding: 32px 16px; }
 	.roles-terminal-body { font-size: .75rem; padding: 12px; }
+	.motivation { padding: 32px 16px 24px; }
 	.comparison { padding: 32px 16px 48px; }
 }
 </style>
@@ -470,7 +500,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 <div class="table-wrap"><table><thead><tr><th>Command</th><th>Description</th></tr></thead><tbody><tr><td><code>/usage</code></td><td>Show cumulative session token/cost usage (prompt, completion, cache hits, sub-agent tokens)</td></tr></tbody></table></div><h2>Configuration</h2>
 <div class="table-wrap"><table><thead><tr><th>Command</th><th>Description</th></tr></thead><tbody><tr><td><code>/permissions</code></td><td>Open permission mode picker</td></tr><tr><td><code>/permissions default</code></td><td>Switch to gated mode (confirm dangerous commands)</td></tr><tr><td><code>/permissions bypass</code></td><td>Switch to bypass mode (no confirmation)</td></tr><tr><td><code>/web</code></td><td>Toggle web tools (web_search, web_fetch) on/off</td></tr><tr><td><code>/statusbar</code></td><td>Toggle and reorder status bar segments (multi-select picker)</td></tr><tr><td><code>/theme</code></td><td>Open theme picker</td></tr><tr><td><code>/theme &lt;id&gt;</code></td><td>Switch to a specific theme</td></tr></tbody></table></div><h2>Utility</h2>
 <div class="table-wrap"><table><thead><tr><th>Command</th><th>Description</th></tr></thead><tbody><tr><td><code>/repo</code></td><td>Show cwd, git branch, dirty state, remote, and HEAD</td></tr><tr><td><code>/keys</code></td><td>List all keybindings</td></tr><tr><td><code>/help</code></td><td>Show the command list</td></tr><tr><td><code>/ssh</code></td><td>Manage SSH hosts — list, add, remove (persists to <code>~/.cast/ssh.json</code>)</td></tr></tbody></table></div><h2>Keybindings</h2>
-<div class="table-wrap"><table><thead><tr><th>Action</th><th>Keys</th></tr></thead><tbody><tr><td>Cursor up/down/left/right</td><td>↑ / ↓ / ← / →</td></tr><tr><td>Word left/right</td><td>Alt+← / Alt+→ (or Ctrl+← / Ctrl+→)</td></tr><tr><td>Line start/end</td><td>Home / End (or Ctrl+A / Ctrl+E)</td></tr><tr><td>Delete char</td><td>Backspace / Delete</td></tr><tr><td>Delete word</td><td>Ctrl+W / Alt+Backspace</td></tr><tr><td>Delete to line start</td><td>Ctrl+U</td></tr><tr><td>Delete to line end</td><td>Ctrl+K</td></tr><tr><td>New line</td><td>Shift+Enter / Ctrl+J / Alt+Enter</td></tr><tr><td>Submit</td><td>Enter</td></tr><tr><td>Stop turn / clear input</td><td>Esc</td></tr><tr><td>Exit (2× to confirm)</td><td>Ctrl+C</td></tr><tr><td>Attach image</td><td>Ctrl+G</td></tr><tr><td>Autocomplete</td><td>Tab</td></tr></tbody></table></div><p><strong>Esc</strong> stops the current turn while generating; clears the input otherwise.</p>
+<div class="table-wrap"><table><thead><tr><th>Action</th><th>Keys</th></tr></thead><tbody><tr><td>Cursor up/down/left/right</td><td>↑ / ↓ / ← / →</td></tr><tr><td>Word left/right</td><td>Alt+← / Alt+→ (or Ctrl+← / Ctrl+→)</td></tr><tr><td>Line start/end</td><td>Home / End (or Ctrl+A / Ctrl+E)</td></tr><tr><td>Delete char</td><td>Backspace / Delete</td></tr><tr><td>Delete word</td><td>Ctrl+W / Alt+Backspace</td></tr><tr><td>Delete to line start</td><td>Ctrl+U</td></tr><tr><td>Delete to line end</td><td>Ctrl+K</td></tr><tr><td>Submit</td><td>Enter</td></tr><tr><td>Stop turn / clear input</td><td>Esc</td></tr><tr><td>Exit (2× to confirm)</td><td>Ctrl+C</td></tr><tr><td>Attach image</td><td>Ctrl+G</td></tr><tr><td>Autocomplete</td><td>Tab</td></tr></tbody></table></div><p><strong>Esc</strong> stops the current turn while generating; clears the input otherwise.</p>
 <p><strong>Ctrl+C</strong> — press twice within 2s to exit. Does not stop a turn — use Esc for that.</p>
 <h2>During a Running Agent</h2>
 <p>While the agent is executing, only these commands are accepted:</p>
