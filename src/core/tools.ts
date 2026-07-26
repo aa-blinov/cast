@@ -13,6 +13,7 @@ import {
 	MAX_PLAN_CHARS,
 	maybeActivatePlanOnRead,
 } from "./plan.ts";
+import { loadSettings } from "./settings.ts";
 import type { SshHost } from "./ssh.ts";
 import { execBash } from "./tools/bash.ts";
 import { type BashBackgroundDeps, execBashKill, execBashOutput } from "./tools/bash-background.ts";
@@ -45,6 +46,10 @@ export function getToolDefinitions(
 			? `Available subagents: ${personaNames.join(", ")}. Defaults to "${personaNames.includes("worker") ? "worker" : personaNames[0]}" if omitted.`
 			: "";
 	const modelInfo = subagentModel && subagentModel !== mainModel ? ` Subagent model: ${subagentModel}.` : "";
+	// Read fresh each call (this function runs once per turn) so a
+	// /web-search-provider switch changes what's advertised on the very next
+	// turn, same as execWebSearch's own fresh read of the same setting.
+	const usingTavily = loadSettings().searchProvider === "tavily";
 
 	return [
 		{
@@ -244,10 +249,13 @@ export function getToolDefinitions(
 			type: "function",
 			function: {
 				name: "web_search",
-				description:
-					"Search the web via DuckDuckGo. Returns titles, URLs, and snippets. " +
-					"No API key required. Good for finding current information, documentation, " +
-					"and answers to questions that require up-to-date knowledge.",
+				description: usingTavily
+					? "Search the web via Tavily. Returns titles, URLs, and snippets. " +
+						"Good for finding current information, documentation, and answers to questions " +
+						"that require up-to-date knowledge."
+					: "Search the web via DuckDuckGo. Returns titles, URLs, and snippets. " +
+						"No API key required. Good for finding current information, documentation, " +
+						"and answers to questions that require up-to-date knowledge.",
 				parameters: {
 					type: "object",
 					properties: {
@@ -256,14 +264,23 @@ export function getToolDefinitions(
 							type: "number",
 							description: "Maximum number of results (default: 10)",
 						},
-						region: {
-							type: "string",
-							description: "Region code, e.g. 'us-en', 'ru-ru', 'wt-wt' (default: wt-wt)",
-						},
-						time: {
-							type: "string",
-							description: "Time filter: 'd' (day), 'w' (week), 'm' (month), 'y' (year)",
-						},
+						// region/time are DuckDuckGo-only — Tavily has no equivalent
+						// filters, and silently ignoring them if the model still sent
+						// them (e.g. leftover habit from a DDG-era conversation) is
+						// better than advertising a knob that does nothing on this
+						// backend.
+						...(usingTavily
+							? {}
+							: {
+									region: {
+										type: "string",
+										description: "Region code, e.g. 'us-en', 'ru-ru', 'wt-wt' (default: wt-wt)",
+									},
+									time: {
+										type: "string",
+										description: "Time filter: 'd' (day), 'w' (week), 'm' (month), 'y' (year)",
+									},
+								}),
 					},
 					required: ["query"],
 				},
