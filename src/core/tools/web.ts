@@ -226,7 +226,7 @@ export async function searchTavily(
 	});
 
 	if (resp.status === 401 || resp.status === 403) {
-		throw new Error("Tavily rejected the API key — check /search-provider or the tavilyApiKey setting.");
+		throw new Error("Tavily rejected the API key — check /web-search-provider or the tavilyApiKey setting.");
 	}
 	if (resp.status === 429) {
 		throw new Error("Tavily rate limit or free-tier quota exceeded for this month.");
@@ -325,7 +325,7 @@ export async function execWebSearch(args: Record<string, unknown>, signal?: Abor
 	const time = typeof args.time === "string" ? args.time : undefined;
 
 	// Read fresh each call (not cached at startup) — same pattern as webTools,
-	// so switching provider via /search-provider takes effect on the next
+	// so switching provider via /web-search-provider takes effect on the next
 	// search without needing a restart.
 	const settings = loadSettings();
 
@@ -335,7 +335,7 @@ export async function execWebSearch(args: Record<string, unknown>, signal?: Abor
 				return {
 					content:
 						"Error: search provider is set to Tavily but no API key is configured. " +
-						"Set one via /search-provider (TUI) or the Tools settings tab (cast web), or switch back to /search-provider ddg.",
+						"Set one via /web-search-provider (TUI) or the Tools settings tab (cast web), or switch back to /web-search-provider ddg.",
 					isError: true,
 				};
 			}

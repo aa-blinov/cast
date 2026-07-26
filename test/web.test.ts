@@ -95,7 +95,7 @@ describe("execWebSearch", () => {
 
 		expect(result.isError).toBe(true);
 		expect(result.content).toContain("Tavily");
-		expect(result.content).toContain("/search-provider");
+		expect(result.content).toContain("/web-search-provider");
 	});
 });
 

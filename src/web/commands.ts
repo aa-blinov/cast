@@ -26,7 +26,7 @@ export const NON_BLOCKING_COMMANDS = new Set([
 	"/theme",
 	"/repo",
 	"/web",
-	"/search-provider",
+	"/web-search-provider",
 	"/rules",
 	"/rule:",
 	"/permissions",
@@ -128,7 +128,7 @@ export const SLASH_COMMANDS: Array<{
 		hidden: true,
 	},
 	{
-		name: "/search-provider",
+		name: "/web-search-provider",
 		description: "Switch web_search backend (DuckDuckGo / Tavily)",
 		takesArgs: true,
 		blocking: false,

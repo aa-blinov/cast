@@ -822,7 +822,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			updateSettings({ webTools: arg === "on" });
 			return { ok: true, result: { webTools: arg === "on" } };
 		}
-		if (name === "/search-provider") {
+		if (name === "/web-search-provider") {
 			// Same fresh-read pattern as /web — the next web_search call picks
 			// this up via loadSettings() inside execWebSearch, no restart needed.
 			if (!arg) {
@@ -836,11 +836,11 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			}
 			if (provider === "tavily") {
 				const key = rest.join(" ").trim() || loadSettings().tavilyApiKey;
-				if (!key) return { ok: false, error: "Usage: /search-provider tavily <api-key>" };
+				if (!key) return { ok: false, error: "Usage: /web-search-provider tavily <api-key>" };
 				updateSettings({ searchProvider: "tavily", tavilyApiKey: key });
 				return { ok: true, result: { searchProvider: "tavily", tavilyApiKey: key } };
 			}
-			return { ok: false, error: "Usage: /search-provider ddg | tavily <api-key>" };
+			return { ok: false, error: "Usage: /web-search-provider ddg | tavily <api-key>" };
 		}
 		if (name === "/theme") {
 			// A UI preference, not agent state — shared with the TUI's settings.json

@@ -148,7 +148,6 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/rule:", description: "Invoke a rule by name", takesArgs: true },
 	{ name: "/rules", description: "List loaded rules" },
 	{ name: "/s", description: "Alias for /steer", takesArgs: true },
-	{ name: "/search-provider", description: "Switch web_search backend (DuckDuckGo / Tavily)" },
 	{ name: "/sessions", description: "List / switch / delete sessions" },
 	{ name: "/skills", description: "Toggle skills on/off" },
 	{ name: "/skills disable", description: "Disable one skill — name", takesArgs: true },
@@ -168,6 +167,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/theme", description: "Change color theme" },
 	{ name: "/usage", description: "Show session token and cost usage" },
 	{ name: "/web", description: "Toggle web tools (web_search, web_fetch)" },
+	{ name: "/web-search-provider", description: "Switch web_search backend (DuckDuckGo / Tavily)" },
 ];
 
 export interface CommandDeps {
@@ -1860,7 +1860,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		return;
 	}
 
-	if (input === "/search-provider") {
+	if (input === "/web-search-provider") {
 		const settings = loadSettings();
 		const current = settings.searchProvider ?? "ddg";
 		const picked = await deps.pickers.pickOption(
@@ -2400,7 +2400,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 				"  /provider [name]    Switch / add / delete providers\n" +
 				"  /permissions        Change bash confirmation mode\n" +
 				"  /web                Toggle web tools (web_search, web_fetch)\n" +
-				"  /search-provider    Switch web_search backend (DuckDuckGo / Tavily)\n" +
+				"  /web-search-provider    Switch web_search backend (DuckDuckGo / Tavily)\n" +
 				"  /ssh                Manage SSH hosts (list, add, remove)\n" +
 				"  /statusbar          Toggle and reorder status bar segments\n" +
 				"  /theme              Change color theme\n" +
