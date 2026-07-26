@@ -2689,6 +2689,14 @@ function App() {
 			// from view is purely this browser's own dismissed-set, not something
 			// removed from `sessions` itself.
 			dismiss(id);
+			// Without this, closing the session that's also the remembered
+			// "last active" one (the common case, since every switch/select
+			// stamps this) left it as the bare-URL fallback in initClientState —
+			// reopening http://host:port/ with no ?session= would silently
+			// resurrect the very thread just closed.
+			try {
+				if (localStorage.getItem("cast:lastSessionId") === id) localStorage.removeItem("cast:lastSessionId");
+			} catch {}
 			if (id !== activeId) return;
 
 			if (esRef.current) {
