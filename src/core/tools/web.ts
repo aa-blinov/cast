@@ -200,6 +200,10 @@ export async function searchDuckDuckGo(
  * key (https://app.tavily.com) — the free tier is 1000 requests/month, a
  * recurring monthly allowance rather than DDG's hard ~4-requests-per-IP cap.
  */
+// Confirmed empirically against the live API (undocumented): a query over
+// this length gets a flat 400, with no partial/best-effort behavior.
+const TAVILY_MAX_QUERY_CHARS = 400;
+
 export async function searchTavily(
 	query: string,
 	apiKey: string,
@@ -208,10 +212,17 @@ export async function searchTavily(
 		signal?: AbortSignal;
 	},
 ): Promise<SearchResults> {
+	if (!query.trim()) throw new Error("Tavily search error: query is empty.");
+
+	// Truncate rather than fail — an agent-generated query that runs long is
+	// still a valid search intent; cutting it to the API's actual limit keeps
+	// the call working instead of erroring on something the caller can't see.
+	const truncatedQuery = query.length > TAVILY_MAX_QUERY_CHARS ? query.slice(0, TAVILY_MAX_QUERY_CHARS) : query;
+
 	const maxResults = Math.min(options?.maxResults ?? MAX_SEARCH_RESULTS, 20); // Tavily caps at 20
 	const signal = options?.signal;
 
-	const key = cacheKey("tavily", query);
+	const key = cacheKey("tavily", truncatedQuery);
 	const cached = cacheGet(key);
 	if (cached) return { ...cached, results: cached.results.slice(0, maxResults) };
 
@@ -221,7 +232,12 @@ export async function searchTavily(
 			"Content-Type": "application/json",
 			Authorization: `Bearer ${apiKey}`,
 		},
-		body: JSON.stringify({ query, max_results: 20 }),
+		// Always request Tavily's own max (20), independent of this caller's
+		// maxResults — same reasoning as DDG's PARSE_RESULTS_LIMIT: cache the
+		// full set once, slice per-caller below, so a query first run with a
+		// small maxResults doesn't cap what a later, larger request can get
+		// out of the cache for the rest of the TTL.
+		body: JSON.stringify({ query: truncatedQuery, max_results: 20 }),
 		signal,
 	});
 
@@ -231,7 +247,19 @@ export async function searchTavily(
 	if (resp.status === 429) {
 		throw new Error("Tavily rate limit or free-tier quota exceeded for this month.");
 	}
-	if (!resp.ok) throw new Error(`Tavily HTTP ${resp.status}`);
+	if (!resp.ok) {
+		// Tavily returns a JSON body describing the actual problem
+		// (e.g. `{"detail":{"error":"..."}}`) — surface it instead of a bare
+		// status code whenever it parses.
+		const detail = await resp
+			.json()
+			.then((body: unknown) => {
+				const err = (body as { detail?: { error?: string } } | undefined)?.detail?.error;
+				return err ? `: ${err}` : "";
+			})
+			.catch(() => "");
+		throw new Error(`Tavily HTTP ${resp.status}${detail}`);
+	}
 
 	const data = (await resp.json()) as {
 		results?: Array<{ title?: string; url?: string; content?: string }>;
@@ -243,7 +271,7 @@ export async function searchTavily(
 		snippet: r.content ?? "",
 	}));
 
-	const searchResults = { query, results };
+	const searchResults = { query: truncatedQuery, results };
 	cacheSet(key, searchResults);
 
 	return { ...searchResults, results: results.slice(0, maxResults) };

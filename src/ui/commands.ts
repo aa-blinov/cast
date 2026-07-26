@@ -1874,7 +1874,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 					label: `Tavily — API key required, 1000 free searches/month${current === "tavily" ? " (current)" : ""}`,
 				},
 			],
-			{ title: "web_search backend" },
+			{ title: "Web search backend" },
 		);
 		if (picked === null) {
 			showNotice("[Cancelled — search provider unchanged]");
@@ -1882,7 +1882,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		}
 		if (picked === "ddg") {
 			updateSettings({ searchProvider: "ddg" });
-			showNotice("[web_search backend: DuckDuckGo]");
+			showNotice("[Web search backend: DuckDuckGo]");
 			return;
 		}
 		const key = await deps.pickers.promptText(
@@ -1895,7 +1895,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			return;
 		}
 		updateSettings({ searchProvider: "tavily", tavilyApiKey: key });
-		showNotice("[web_search backend: Tavily]");
+		showNotice("[Web search backend: Tavily]");
 		return;
 	}
 
