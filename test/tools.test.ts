@@ -282,6 +282,39 @@ describe("background bash tool definitions", () => {
 	});
 });
 
+describe("web_search tool definition — provider-dependent schema", () => {
+	let realHome: string | undefined;
+	let fakeHome: string;
+
+	beforeEach(async () => {
+		realHome = process.env.HOME;
+		fakeHome = join(TEST_DIR, "fake-home");
+		mkdirSync(fakeHome, { recursive: true });
+		process.env.HOME = fakeHome;
+	});
+
+	afterEach(() => {
+		process.env.HOME = realHome;
+	});
+
+	it("advertises DDG's region/time params by default", () => {
+		const def = getToolDefinitions().find((t) => t.function.name === "web_search")?.function;
+		expect(def?.description).toContain("DuckDuckGo");
+		expect(def?.parameters.properties).toHaveProperty("region");
+		expect(def?.parameters.properties).toHaveProperty("time");
+	});
+
+	it("omits region/time and names Tavily once searchProvider is 'tavily'", async () => {
+		const { updateSettings } = await import("../src/core/settings.ts");
+		updateSettings({ searchProvider: "tavily", tavilyApiKey: "tvly-fake" });
+
+		const def = getToolDefinitions().find((t) => t.function.name === "web_search")?.function;
+		expect(def?.description).toContain("Tavily");
+		expect(def?.parameters.properties).not.toHaveProperty("region");
+		expect(def?.parameters.properties).not.toHaveProperty("time");
+	});
+});
+
 describe("bash_output", () => {
 	it("errors on an unknown task_id", async () => {
 		const { deps } = makeBackgroundDeps();
