@@ -675,8 +675,7 @@ body.resizing-diff * { user-select: none; }
 .tool-card-header.clickable:hover { background: var(--bg-raised); }
 .tool-card-toggle {
 	color: var(--text-muted);
-	font-size: .7rem;
-	line-height: 1;
+	flex-shrink: 0;
 }
 .tool-card-name {
 	color: var(--blue);

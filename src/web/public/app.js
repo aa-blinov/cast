@@ -508,7 +508,7 @@ function ToolCard({ call }) {
 				${mcp && html`<span class="tool-card-mcp-badge">MCP</span>`}
 				<span class="tool-card-name">${mcp ? mcpToolLabel(call.name) : call.name}</span>
 				<span class="tool-card-status ${statusClass}" />
-				${hasResult && html`<span class="tool-card-toggle">${open ? "▾" : "▸"}</span>`}
+				${hasResult && html`<${open ? icons.chevronUp : icons.chevronDown} class="tool-card-toggle" />`}
 			</div>
 			${args && html`<div class="tool-card-body">${args}</div>`}
 			${open && hasResult && html`<div class="tool-card-result">${call.result}</div>`}
