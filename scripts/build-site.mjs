@@ -327,17 +327,10 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 }
 .hero-ascii-wrap { margin-bottom: 24px; }
 .hero-ascii {
-	font-family: var(--font-mono); font-size: .875rem;
-	white-space: pre; display: inline-block; line-height: 1.2;
-	background: linear-gradient(90deg, #38e0ff, #38bdf8, #a78bfa, #a855f7);
-	-webkit-background-clip: text; -webkit-text-fill-color: transparent;
-	background-clip: text;
-	/* Hidden until the inline script (right after this element, so it runs
-	   synchronously before first paint) measures and applies a fit — avoids
-	   a visible flash of the full-size banner snapping down to size on
-	   narrow screens. (A transition is added via JS, but only ahead of the
-	   later webfont-swap re-fit — the initial one must stay instant.) */
-	visibility: hidden;
+	/* An <img>, not text — scales like any other image (GitHub's own
+	   markdown CSS caps images at max-width:100%, and so do we below), no
+	   runtime measuring/fit script needed. */
+	max-width: 100%; height: auto;
 }
 .hero h1 { font-size: 3rem; font-weight: 800; margin: 0 0 16px; }
 .hero h1 .accent { color: #38e0ff; }
@@ -532,48 +525,7 @@ const LANDING_HTML = `<!DOCTYPE html>
 
 <div class="main main-landing">
 	<section class="hero">
-		<div class="hero-ascii-wrap"><pre class="hero-ascii" id="hero-ascii"> ░▒▓██████▓▒░ ░▒▓██████▓▒░ ░▒▓███████▓▒░▒▓████████▓▒░
-░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░         ░▒▓█▓▒░
-░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░         ░▒▓█▓▒░
-░▒▓█▓▒░      ░▒▓████████▓▒░░▒▓██████▓▒░   ░▒▓█▓▒░
-░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░      ░▒▓█▓▒░  ░▒▓█▓▒░
-░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░      ░▒▓█▓▒░  ░▒▓█▓▒░
- ░▒▓██████▓▒░░▒▓█▓▒░░▒▓█▓▒░▒▓███████▓▒░   ░▒▓█▓▒░</pre></div>
-		<script>
-			(function () {
-				var pre = document.getElementById("hero-ascii");
-				var wrap = pre.parentElement;
-				var baseFontSize = Number.parseFloat(getComputedStyle(pre).fontSize);
-				// Measuring must never happen mid-transition — an active
-				// transition makes scrollWidth reflect an in-flight
-				// interpolated value, not the size the just-set fontSize
-				// actually needs, which throws the whole calculation off.
-				function fit(animate) {
-					pre.style.transition = "none";
-					pre.style.fontSize = baseFontSize + "px";
-					void pre.offsetWidth; // flush layout before measuring
-					var natural = pre.scrollWidth;
-					var avail = wrap.clientWidth;
-					var target = natural > avail ? (baseFontSize * avail) / natural : baseFontSize;
-					if (animate) {
-						void pre.offsetWidth;
-						pre.style.transition = "font-size .15s ease-out";
-					}
-					pre.style.fontSize = target + "px";
-					pre.style.visibility = "visible";
-				}
-				fit(false);
-				window.addEventListener("resize", function () {
-					fit(false);
-				});
-				// The web font (JetBrains Mono) loads async — re-measure once it's
-				// actually applied, since the fallback font's metrics can differ
-				// enough to leave the banner over- or under-scaled. The initial
-				// fit() above must stay instant since the banner is still hidden
-				// then; this follow-up happens after it's visible, so animate it.
-				if (document.fonts?.ready) document.fonts.ready.then(function () { fit(true); });
-			})();
-		</script>
+		<div class="hero-ascii-wrap"><img class="hero-ascii" src="assets/cast-banner.svg" alt="cast" width="440"></div>
 		<h1>One agent, <span class="accent">many roles</span></h1>
 		<p>cast brings a full cast to your terminal: senior dev, QA, DBA, security reviewer, PM, tech writer. Swap the role, not the tool. Runs on any OpenAI-compatible model, including the one on your own hardware.</p>
 		<div class="hero-buttons">
@@ -903,6 +855,13 @@ mkdirSync(SITE, { recursive: true });
 cpSync(join(ROOT, "install.sh"), join(SITE, "install"));
 cpSync(join(ROOT, "install.ps1"), join(SITE, "install.ps1"));
 writeFileSync(join(SITE, ".nojekyll"), "");
+
+// Same banner asset the README uses — an <img> scales for free (the
+// browser's normal image layout, no measuring/JS involved), unlike the
+// text-in-a-<pre> version this replaced, which needed a runtime fit script
+// to avoid overflowing on narrow phones and still had its own timing bugs.
+mkdirSync(join(SITE, "assets"), { recursive: true });
+cpSync(join(ROOT, "assets", "cast-banner.svg"), join(SITE, "assets", "cast-banner.svg"));
 
 // Landing page
 writeFileSync(join(SITE, "index.html"), LANDING_HTML);
