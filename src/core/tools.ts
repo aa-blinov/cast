@@ -1,21 +1,24 @@
+import { readFileSync } from "node:fs";
 import type { AppConfig } from "./config.ts";
 import type { Tool } from "./llm.ts";
 import type { PlanState } from "./plan.ts";
 import {
+	checkPlanFileGate,
+	enforcePlanCapAfterEdit,
 	execPlanCheck,
 	execPlanDiscard,
 	execPlanDone,
-	execPlanEdit,
 	execPlanEnter,
 	execPlanRead,
-	execPlanWrite,
+	finalizePlanFileWrite,
+	MAX_PLAN_CHARS,
 } from "./plan.ts";
 import type { SshHost } from "./ssh.ts";
 import { execBash } from "./tools/bash.ts";
 import { type BashBackgroundDeps, execBashKill, execBashOutput } from "./tools/bash-background.ts";
 import { execEdit, execRead, execWrite } from "./tools/files.ts";
 import { execGlob, execGrep, execLs } from "./tools/search.ts";
-import type { ConfirmBash, ToolExecutor, ToolResult } from "./tools/shared.ts";
+import { type ConfirmBash, resolvePath, type ToolExecutor, type ToolResult } from "./tools/shared.ts";
 import { execSsh } from "./tools/ssh.ts";
 import { execTask, type TaskExecutorDeps } from "./tools/task.ts";
 import { execWebFetch, execWebSearch } from "./tools/web.ts";
@@ -407,59 +410,15 @@ export function getToolDefinitions(
 		// Plan mode tools — always defined, filtered via disabledTools when not in
 		// plan mode, so the model only ever sees them while /plan is active (no
 		// "only available in plan mode" boilerplate needed in the descriptions).
-		{
-			type: "function",
-			function: {
-				name: "plan_write",
-				description:
-					"Write or replace a named plan file; the plan just written becomes the active one for plan_edit/plan_read/plan_done. " +
-					"Use markdown with sections: Context, Steps (as a '- [ ]' checklist), Verification, and Assumptions when needed.",
-				parameters: {
-					type: "object",
-					properties: {
-						name: {
-							type: "string",
-							description: "Short descriptive kebab-case name for the plan, e.g. 'auth-refactor'",
-						},
-						content: {
-							type: "string",
-							description: "Full plan markdown content",
-						},
-					},
-					required: ["name", "content"],
-				},
-			},
-		},
-		{
-			type: "function",
-			function: {
-				name: "plan_edit",
-				description:
-					"Edit a section of the active plan by matching its heading (case-insensitive; exact match wins over substring). " +
-					"Replaces the section body while preserving the heading.",
-				parameters: {
-					type: "object",
-					properties: {
-						heading: {
-							type: "string",
-							description: "Section heading to match (case-insensitive; exact match wins over substring)",
-						},
-						content: {
-							type: "string",
-							description: "New content for that section (heading is preserved)",
-						},
-					},
-					required: ["heading", "content"],
-				},
-			},
-		},
+		// Authoring the plan itself uses the ordinary write/edit tools above,
+		// gated to the active plan file's path — see plan.ts's file doc comment.
 		{
 			type: "function",
 			function: {
 				name: "plan_read",
 				description:
 					"Read a plan's content and headings, plus the names of all plans in this session. " +
-					"In plan mode the plan read becomes the active one for plan_edit/plan_done — use `name` to switch between plans. " +
+					"In plan mode the plan read becomes the active one for write/edit/plan_done — use `name` to switch between plans. " +
 					"In build mode it is reference-only.",
 				parameters: {
 					type: "object",
@@ -581,10 +540,51 @@ export function createToolExecutor(
 					return await execBashKill(args, backgroundBash);
 				case "read":
 					return await execRead(args, cwd, config);
-				case "write":
+				case "write": {
+					if (planState?.enabled) {
+						const absolutePath = resolvePath(String(args.path ?? ""), cwd);
+						const gate = checkPlanFileGate(absolutePath, planState);
+						if (!gate.ok) return { content: gate.error, isError: true };
+						// write's full content is known up front — enforce the size
+						// cap before touching disk, same as the old plan_write.
+						const content = typeof args.content === "string" ? args.content : "";
+						if (content.length > MAX_PLAN_CHARS) {
+							return {
+								content: `Error: plan is ${content.length} chars — the limit is ${MAX_PLAN_CHARS}. A plan is an execution spec, not a document dump: cut decision-free prose, keep every step concrete.`,
+								isError: true,
+							};
+						}
+						const result = await execWrite(args, cwd);
+						if (!result.isError) finalizePlanFileWrite(absolutePath, planState);
+						return result;
+					}
 					return await execWrite(args, cwd);
-				case "edit":
+				}
+				case "edit": {
+					if (planState?.enabled) {
+						const absolutePath = resolvePath(String(args.path ?? ""), cwd);
+						const gate = checkPlanFileGate(absolutePath, planState);
+						if (!gate.ok) return { content: gate.error, isError: true };
+						// Snapshot before the edit — ops apply as anchored deltas, so
+						// the resulting size isn't known until after. If it lands over
+						// the cap, enforcePlanCapAfterEdit rolls back to this content.
+						let beforeContent = "";
+						try {
+							beforeContent = readFileSync(absolutePath, "utf-8");
+						} catch {
+							// No existing file to snapshot — execEdit itself will
+							// surface the real "file not found" error below.
+						}
+						const result = await execEdit(args, cwd, config);
+						if (!result.isError) {
+							const capResult = enforcePlanCapAfterEdit(absolutePath, beforeContent);
+							if (!capResult.ok) return { content: capResult.error, isError: true };
+							finalizePlanFileWrite(absolutePath, planState);
+						}
+						return result;
+					}
 					return await execEdit(args, cwd, config);
+				}
 				case "glob":
 				case "find": // legacy alias — same implementation as glob
 					return await execGlob(args, cwd, config);
@@ -602,12 +602,6 @@ export function createToolExecutor(
 					if (!taskDeps)
 						return { content: "Task tool not available — no dependencies configured.", isError: true };
 					return await execTask(args, cwd, config, taskDeps, signal);
-				case "plan_write":
-					if (!planState) return { content: "Plan tool not available.", isError: true };
-					return execPlanWrite(args, planState);
-				case "plan_edit":
-					if (!planState) return { content: "Plan tool not available.", isError: true };
-					return execPlanEdit(args, planState);
 				case "plan_read":
 					if (!planState) return { content: "Plan tool not available.", isError: true };
 					return execPlanRead(args, planState);

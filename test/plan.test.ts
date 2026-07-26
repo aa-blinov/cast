@@ -1,18 +1,20 @@
-import { existsSync, mkdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+	checkPlanFileGate,
 	checkReadOnlyCommand,
 	createPlanState,
+	enforcePlanCapAfterEdit,
 	execPlanCheck,
 	execPlanDiscard,
 	execPlanDone,
-	execPlanEdit,
 	execPlanEnter,
 	execPlanRead,
-	execPlanWrite,
+	finalizePlanFileWrite,
+	isPlanFilePath,
 	listOpenPlanSteps,
-	listPlanNames,
+	MAX_PLAN_CHARS,
 	modeDisabledTools,
 	PLAN_TOOL_NAMES,
 	type PlanState,
@@ -31,6 +33,22 @@ function testState(sessionId: string): PlanState {
 	return { enabled: false, plansDir: join(TEST_PLANS_DIR, sessionId) };
 }
 
+/**
+ * Stand-in for what tools.ts's createToolExecutor does around a real
+ * write/edit call while plan mode is active: write the file, then run the
+ * same finalize step (checklist normalization + activePlanPath). Plan
+ * authoring itself goes through the ordinary write/edit tools now (see
+ * plan.ts's file doc comment) — this only exercises the plan.ts-side gate
+ * primitives, not the dispatcher wiring (that's test/tools.test.ts's job).
+ */
+function writePlan(state: PlanState, name: string, content: string): string {
+	const path = join(state.plansDir, `${name}.md`);
+	mkdirSync(dirname(path), { recursive: true });
+	writeFileSync(path, content, "utf-8");
+	finalizePlanFileWrite(path, state);
+	return path;
+}
+
 describe("plan", () => {
 	beforeEach(() => {
 		if (existsSync(TEST_PLANS_DIR)) rmSync(TEST_PLANS_DIR, { recursive: true });
@@ -42,21 +60,22 @@ describe("plan", () => {
 	});
 
 	describe("modeDisabledTools", () => {
-		it("plan mode blocks writers and build-only plan tools, never bash", () => {
+		it("plan mode blocks only the build-only plan tools — write/edit stay advertised", () => {
 			const gated = modeDisabledTools(true);
-			expect(gated).toContain("write");
-			expect(gated).toContain("edit");
+			// write/edit are gated per-call (checkPlanFileGate), not hidden outright —
+			// the model authors the plan file with the same tools it edits code with.
+			expect(gated).not.toContain("write");
+			expect(gated).not.toContain("edit");
 			expect(gated).toContain("plan_check");
 			expect(gated).toContain("plan_enter");
 			// bash stays advertised — the executor's read-only gate handles it
 			expect(gated).not.toContain("bash");
-			expect(gated).not.toContain("plan_write");
 			expect(gated).not.toContain("plan_read");
 		});
 
-		it("build mode blocks exactly the authoring tools", () => {
+		it("build mode blocks exactly the authoring-signal plan tools", () => {
 			const gated = modeDisabledTools(false);
-			expect([...gated].sort()).toEqual(["plan_discard", "plan_done", "plan_edit", "plan_write"]);
+			expect([...gated].sort()).toEqual(["plan_discard", "plan_done"]);
 		});
 
 		it("every plan tool has an explicit mode decision (or is dual-mode plan_read)", () => {
@@ -209,11 +228,11 @@ describe("plan", () => {
 	});
 
 	describe("active plan resolution", () => {
-		it("prefers the plan most recently written via plan_write", () => {
+		it("prefers the plan most recently written", () => {
 			const state = testState("active-1");
-			execPlanWrite({ name: "first", content: "# First" }, state);
-			execPlanWrite({ name: "second", content: "# Second" }, state);
-			execPlanWrite({ name: "first", content: "# First again" }, state);
+			writePlan(state, "first", "# First");
+			writePlan(state, "second", "# Second");
+			writePlan(state, "first", "# First again");
 
 			expect(resolveActivePlanPath(state)).toBe(join(state.plansDir, "first.md"));
 			expect(readActivePlan(state).content).toBe("# First again");
@@ -221,8 +240,8 @@ describe("plan", () => {
 
 		it("falls back to the newest file on disk when the in-memory marker is gone (resume)", () => {
 			const state = testState("active-2");
-			execPlanWrite({ name: "old", content: "# Old" }, state);
-			execPlanWrite({ name: "new", content: "# New" }, state);
+			writePlan(state, "old", "# Old");
+			writePlan(state, "new", "# New");
 			// Distinct mtimes — same-ms writes would make the order ambiguous.
 			const past = new Date(Date.now() - 60_000);
 			utimesSync(join(state.plansDir, "old.md"), past, past);
@@ -238,237 +257,86 @@ describe("plan", () => {
 		});
 	});
 
-	describe("execPlanWrite", () => {
-		it("writes a named plan and makes it active", () => {
-			const state = testState("write-1");
-
-			const result = execPlanWrite({ name: "Auth Refactor", content: "# Plan\n\n## Steps\n1. Do thing" }, state);
-			const parsed = JSON.parse(result.content);
-			expect(parsed.success).toBe(true);
-			expect(parsed.name).toBe("auth-refactor");
-			expect(parsed.charCount).toBeGreaterThan(0);
-
-			expect(state.activePlanPath).toBe(join(state.plansDir, "auth-refactor.md"));
-			const file = readPlanFile(state.activePlanPath!);
-			expect(file.exists).toBe(true);
-			expect(file.headings).toEqual(["Plan", "Steps"]);
+	describe("isPlanFilePath / checkPlanFileGate", () => {
+		it("accepts a .md file directly inside plansDir", () => {
+			const state = testState("gate-1");
+			const path = join(state.plansDir, "auth-refactor.md");
+			expect(isPlanFilePath(path, state.plansDir)).toBe(true);
+			expect(checkPlanFileGate(path, state).ok).toBe(true);
 		});
 
-		it("rejects a missing or unusable name", () => {
-			const state = testState("write-2");
-			expect(execPlanWrite({ content: "# Plan" }, state).isError).toBe(true);
-			expect(execPlanWrite({ name: "..", content: "# Plan" }, state).isError).toBe(true);
+		it("rejects a path outside plansDir — real source files stay off-limits", () => {
+			const state = testState("gate-2");
+			const outside = "/home/user/project/src/index.ts";
+			expect(isPlanFilePath(outside, state.plansDir)).toBe(false);
+			const result = checkPlanFileGate(outside, state);
+			expect(result.ok).toBe(false);
+			expect(result.ok || result.error).toContain(state.plansDir);
 		});
 
-		it("rejects empty content", () => {
-			const state = testState("write-3");
-			const result = execPlanWrite({ name: "x", content: "" }, state);
-			expect(result.isError).toBe(true);
+		it("rejects a non-.md file even inside plansDir", () => {
+			const state = testState("gate-3");
+			const path = join(state.plansDir, "notes.txt");
+			expect(checkPlanFileGate(path, state).ok).toBe(false);
 		});
 
-		it("overwrites a plan written under the same name", () => {
-			const state = testState("write-4");
-
-			execPlanWrite({ name: "main", content: "# First plan\n\n## Steps\nOld steps" }, state);
-			execPlanWrite({ name: "main", content: "# Second plan\n\n## Steps\nNew steps" }, state);
-
-			const file = readActivePlan(state);
-			expect(file.content).toContain("Second plan");
-			expect(file.content).not.toContain("First plan");
-			expect(listPlanNames(state.plansDir)).toEqual(["main"]);
+		it("rejects a nested subdirectory inside plansDir (no dirname match)", () => {
+			const state = testState("gate-4");
+			const path = join(state.plansDir, "sub", "plan.md");
+			expect(checkPlanFileGate(path, state).ok).toBe(false);
 		});
 
-		it("keeps several named plans side by side", () => {
-			const state = testState("write-5");
-
-			execPlanWrite({ name: "backend", content: "# Backend" }, state);
-			execPlanWrite({ name: "frontend", content: "# Frontend" }, state);
-
-			expect(listPlanNames(state.plansDir)).toEqual(["backend", "frontend"]);
-		});
-
-		it("rejects a plan over the size cap — it rides in every build-mode request", () => {
-			const state = testState("write-cap");
-			const huge = `# Plan\n\n## Steps\n${"- [ ] step\n".repeat(4000)}`;
-			const result = execPlanWrite({ name: "huge", content: huge }, state);
-			expect(result.isError).toBe(true);
-			expect(result.content).toContain("limit is");
-			expect(listPlanNames(state.plansDir)).toEqual([]);
+		it("rejects path traversal out of plansDir", () => {
+			const state = testState("gate-5");
+			const escaped = join(state.plansDir, "..", "escaped.md");
+			expect(checkPlanFileGate(escaped, state).ok).toBe(false);
 		});
 	});
 
-	describe("execPlanEdit", () => {
-		it("edits a section of the active plan by heading match", () => {
-			const state = testState("edit-1");
+	describe("finalizePlanFileWrite", () => {
+		it("makes the written path the active plan", () => {
+			const state = testState("finalize-1");
+			const path = writePlan(state, "main", "# Plan\n\n## Steps\n- [ ] x");
+			expect(state.activePlanPath).toBe(path);
+		});
 
-			execPlanWrite(
-				{
-					name: "main",
-					content:
-						"# Plan\n\n## Context\nOld context\n\n## Steps\n1. Step one\n\n## Verification\nOld verification",
-				},
+		it("normalizes bare ### step headings into checkboxes", () => {
+			const state = testState("finalize-2");
+			const path = writePlan(
 				state,
+				"main",
+				"# Plan\n\n## Steps\n\n### 1. First step\n\nSome spec.\n\n### 2. Second step\n\nMore spec.",
 			);
-
-			const result = execPlanEdit({ heading: "Steps", content: "1. New step A\n2. New step B" }, state);
-			const parsed = JSON.parse(result.content);
-			expect(parsed.success).toBe(true);
-			expect(parsed.section).toBe("Steps");
-			expect(parsed.plan).toBe("main");
-
-			const file = readActivePlan(state);
-			expect(file.content).toContain("New step A");
-			expect(file.content).toContain("New step B");
-			expect(file.content).toContain("## Context\nOld context");
-			expect(file.content).toContain("## Verification\nOld verification");
+			const content = readFileSync(path, "utf-8");
+			expect(content).toContain("### 1. First step\n\n- [ ] 1. First step");
+			expect(content).toContain("### 2. Second step\n\n- [ ] 2. Second step");
+			expect(content).toContain("Some spec.");
+			expect(content).toContain("More spec.");
 		});
 
-		it("matches heading case-insensitively", () => {
-			const state = testState("edit-2");
-
-			execPlanWrite({ name: "main", content: "# Plan\n\n## Verification\nOld" }, state);
-
-			const result = execPlanEdit({ heading: "verification", content: "New verification" }, state);
-			const parsed = JSON.parse(result.content);
-			expect(parsed.success).toBe(true);
-		});
-
-		it("returns error when heading not found", () => {
-			const state = testState("edit-3");
-
-			execPlanWrite({ name: "main", content: "# Plan\n\n## Steps\n1. Step" }, state);
-
-			const result = execPlanEdit({ heading: "Nonexistent", content: "New" }, state);
-			expect(result.isError).toBe(true);
-			const parsed = JSON.parse(result.content);
-			expect(parsed.currentHeadings).toEqual(["Plan", "Steps"]);
-		});
-
-		it("returns error when no plan exists", () => {
-			const state = testState("edit-4");
-
-			const result = execPlanEdit({ heading: "Steps", content: "New" }, state);
-			expect(result.isError).toBe(true);
-		});
-
-		it("prefers exact heading match over substring", () => {
-			const state = testState("edit-5");
-
-			execPlanWrite({ name: "main", content: "# Plan\n\n## Next Steps\nLater\n\n## Steps\n1. Now" }, state);
-
-			const result = execPlanEdit({ heading: "Steps", content: "1. Edited" }, state);
-			const parsed = JSON.parse(result.content);
-			expect(parsed.success).toBe(true);
-			expect(parsed.section).toBe("Steps");
-
-			const file = readActivePlan(state);
-			expect(file.content).toContain("## Next Steps\nLater");
-			expect(file.content).toContain("## Steps\n1. Edited");
-		});
-
-		it("returns error when substring matches multiple sections", () => {
-			const state = testState("edit-6");
-
-			execPlanWrite({ name: "main", content: "# Plan\n\n## Steps: backend\nA\n\n## Steps: frontend\nB" }, state);
-
-			const result = execPlanEdit({ heading: "Steps", content: "New" }, state);
-			expect(result.isError).toBe(true);
-			const parsed = JSON.parse(result.content);
-			expect(parsed.matchingHeadings).toEqual(["Steps: backend", "Steps: frontend"]);
-		});
-
-		it("does not treat fenced code comments as section boundaries", () => {
-			const state = testState("edit-7");
-
-			execPlanWrite(
-				{
-					name: "main",
-					content: "# Plan\n\n## Steps\n```bash\n# comment in code\necho hi\n```\nTail\n\n## Verification\nRun",
-				},
+		it("does not double-insert a checkbox already present under a step heading", () => {
+			const state = testState("finalize-3");
+			const path = writePlan(
 				state,
+				"main",
+				"# Plan\n\n## Context\nInfo\n\n## Steps\n\n### 1. Bridge\n\n- [ ] 1. Bridge\n\nSpec text.",
 			);
-
-			const result = execPlanEdit({ heading: "Verification", content: "New checks" }, state);
-			const parsed = JSON.parse(result.content);
-			expect(parsed.success).toBe(true);
-
-			const file = readActivePlan(state);
-			expect(file.content).toContain("# comment in code");
-			expect(file.content).toContain("## Verification\nNew checks");
+			// A follow-up write/edit to the same file re-runs normalization.
+			finalizePlanFileWrite(path, state);
+			const count = (readFileSync(path, "utf-8").match(/- \[ \] 1\. Bridge/g) ?? []).length;
+			expect(count).toBe(1);
 		});
 
-		it("rejects an edit that would grow the plan past the size cap", () => {
-			const state = testState("edit-cap");
-			execPlanWrite({ name: "main", content: "# Plan\n\n## Steps\n- [ ] x" }, state);
-
-			const result = execPlanEdit({ heading: "Steps", content: "y".repeat(40_000) }, state);
-			expect(result.isError).toBe(true);
-			expect(result.content).toContain("limit is");
-			// The oversized edit must not have landed.
-			expect(readActivePlan(state).content).toContain("- [ ] x");
+		it("leaves plans without heading-style steps untouched", () => {
+			const state = testState("finalize-4");
+			const content = "# Plan\n\n## Steps\n- [ ] a\n- [x] b\n\n## Verification\nRun tests";
+			const path = writePlan(state, "main", content);
+			expect(readFileSync(path, "utf-8")).toBe(content);
 		});
 
-		it("rejects a same-or-shallower-level heading inside the replacement body", () => {
-			const state = testState("edit-heading-collision");
-			execPlanWrite({ name: "main", content: "# Plan\n\n## Steps\n- [ ] x\n\n## Verification\nRun" }, state);
-
-			// Reproduces the real corruption: editing "## Steps" with a body that
-			// itself declares a new "## Design System" followed by another
-			// "## Steps" — both level 2, same as the section being edited.
-			const result = execPlanEdit(
-				{ heading: "Steps", content: "## Design System\n\nPalette.\n\n## Steps\n\n- [ ] y" },
-				state,
-			);
-			expect(result.isError).toBe(true);
-			expect(JSON.parse(result.content).error).toContain("Steps");
-
-			// The edit must not have landed — no duplicate heading on disk.
-			const content = readActivePlan(state).content;
-			expect(content.match(/^## Steps$/gm)?.length ?? 0).toBe(1);
-			expect(content).toContain("- [ ] x");
-		});
-
-		it("allows nested headings strictly deeper than the edited section", () => {
-			const state = testState("edit-heading-nested");
-			execPlanWrite({ name: "main", content: "# Plan\n\n## Steps\n- [ ] x" }, state);
-
-			const result = execPlanEdit({ heading: "Steps", content: "### Subsection\n\n- [ ] y" }, state);
-			expect(result.isError).toBeUndefined();
-
-			const content = readActivePlan(state).content;
-			expect(content).toContain("### Subsection");
-			expect(content).toContain("- [ ] y");
-		});
-	});
-
-	describe("Steps checklist normalization", () => {
-		it("plan_write inserts a checkbox under each bare ### step heading", () => {
-			const state = testState("normalize-write");
-			execPlanWrite(
-				{
-					name: "main",
-					content: "# Plan\n\n## Steps\n\n### 1. First step\n\nSome spec.\n\n### 2. Second step\n\nMore spec.",
-				},
-				state,
-			);
-
-			const file = readActivePlan(state);
-			expect(file.content).toContain("### 1. First step\n\n- [ ] 1. First step");
-			expect(file.content).toContain("### 2. Second step\n\n- [ ] 2. Second step");
-			// The heading itself, and the rest of the spec, survive untouched.
-			expect(file.content).toContain("Some spec.");
-			expect(file.content).toContain("More spec.");
-		});
-
-		it("plan_check can then close a heading-style step end to end", () => {
-			const state = testState("normalize-check");
-			execPlanWrite(
-				{
-					name: "main",
-					content: "# Plan\n\n## Steps\n\n### 1. Bridge\n\nWrap the runner.\n\n### 2. Server\n\nHTTP.",
-				},
-				state,
-			);
+		it("plan_check can close a heading-style step end to end after normalization", () => {
+			const state = testState("finalize-5");
+			writePlan(state, "main", "# Plan\n\n## Steps\n\n### 1. Bridge\n\nWrap the runner.\n\n### 2. Server\n\nHTTP.");
 
 			const parsed = JSON.parse(execPlanCheck({ item: "1. Bridge" }, state).content);
 			expect(parsed.success).toBe(true);
@@ -478,28 +346,30 @@ describe("plan", () => {
 			const remaining = listOpenPlanSteps(readActivePlan(state).content);
 			expect(remaining).toEqual(["2. Server"]);
 		});
+	});
 
-		it("does not double-insert a checkbox already present under a step heading", () => {
-			const state = testState("normalize-idempotent");
-			execPlanWrite(
-				{
-					name: "main",
-					content: "# Plan\n\n## Context\nInfo\n\n## Steps\n\n### 1. Bridge\n\n- [ ] 1. Bridge\n\nSpec text.",
-				},
-				state,
-			);
-			// A follow-up edit to an unrelated section re-runs normalization globally.
-			execPlanEdit({ heading: "Context", content: "Updated info" }, state);
-
-			const count = (readActivePlan(state).content.match(/- \[ \] 1\. Bridge/g) ?? []).length;
-			expect(count).toBe(1);
+	describe("enforcePlanCapAfterEdit", () => {
+		it("accepts a result within the cap", () => {
+			const state = testState("cap-1");
+			const path = writePlan(state, "main", "# Plan\n\n## Steps\n- [ ] x");
+			const before = readFileSync(path, "utf-8");
+			expect(enforcePlanCapAfterEdit(path, before)).toEqual({ ok: true });
+			expect(readFileSync(path, "utf-8")).toBe(before);
 		});
 
-		it("leaves plans without heading-style steps untouched", () => {
-			const state = testState("normalize-noop");
-			const content = "# Plan\n\n## Steps\n- [ ] a\n- [x] b\n\n## Verification\nRun tests";
-			execPlanWrite({ name: "main", content }, state);
-			expect(readActivePlan(state).content).toBe(content);
+		it("rolls back and errors when the file landed over MAX_PLAN_CHARS", () => {
+			const state = testState("cap-2");
+			const path = writePlan(state, "main", "# Plan\n\n## Steps\n- [ ] x");
+			const before = readFileSync(path, "utf-8");
+			// Simulate an edit that already landed on disk (as execEdit would have
+			// done) before the cap gets checked.
+			writeFileSync(path, "y".repeat(MAX_PLAN_CHARS + 1), "utf-8");
+
+			const result = enforcePlanCapAfterEdit(path, before);
+			expect(result.ok).toBe(false);
+			expect(result.ok || result.error).toContain("limit is");
+			// Reverted — the oversized edit must not have landed.
+			expect(readFileSync(path, "utf-8")).toBe(before);
 		});
 	});
 
@@ -516,8 +386,8 @@ describe("plan", () => {
 		it("returns the active plan plus the names of all session plans", () => {
 			const state = testState("read-2");
 
-			execPlanWrite({ name: "alt", content: "# Alt" }, state);
-			execPlanWrite({ name: "main", content: "# Plan\n\n## Context\nInfo" }, state);
+			writePlan(state, "alt", "# Alt");
+			writePlan(state, "main", "# Plan\n\n## Context\nInfo");
 
 			const result = execPlanRead({}, state);
 			const parsed = JSON.parse(result.content);
@@ -532,25 +402,25 @@ describe("plan", () => {
 			const state = testState("read-3");
 			state.enabled = true;
 
-			execPlanWrite({ name: "backend", content: "# Backend\n\n## Steps\n- [ ] api" }, state);
-			execPlanWrite({ name: "frontend", content: "# Frontend\n\n## Steps\n- [ ] ui" }, state);
+			writePlan(state, "backend", "# Backend\n\n## Steps\n- [ ] api");
+			writePlan(state, "frontend", "# Frontend\n\n## Steps\n- [ ] ui");
 
 			// frontend is active; switch to backend by reading it
 			const read = JSON.parse(execPlanRead({ name: "backend" }, state).content);
 			expect(read.name).toBe("backend");
 			expect(read.content).toContain("api");
+			expect(state.activePlanPath).toBe(join(state.plansDir, "backend.md"));
 
-			// plan_edit now targets backend, not frontend
-			const edit = JSON.parse(execPlanEdit({ heading: "Steps", content: "- [ ] api v2" }, state).content);
-			expect(edit.plan).toBe("backend");
+			// A subsequent write/edit now targets backend, not frontend
+			writePlan(state, "backend", "# Backend\n\n## Steps\n- [ ] api v2");
 			expect(readPlanFile(join(state.plansDir, "frontend.md")).content).toContain("- [ ] ui");
 		});
 
 		it("in build mode, reading a named plan is reference-only and does not switch the active plan", () => {
 			const state = testState("read-3b"); // enabled stays false — build mode
 
-			execPlanWrite({ name: "backend", content: "# Backend" }, state);
-			execPlanWrite({ name: "frontend", content: "# Frontend" }, state);
+			writePlan(state, "backend", "# Backend");
+			writePlan(state, "frontend", "# Frontend");
 
 			const read = JSON.parse(execPlanRead({ name: "backend" }, state).content);
 			expect(read.name).toBe("backend");
@@ -561,7 +431,7 @@ describe("plan", () => {
 
 		it("returns error with the plan list when the named plan does not exist", () => {
 			const state = testState("read-4");
-			execPlanWrite({ name: "main", content: "# Plan" }, state);
+			writePlan(state, "main", "# Plan");
 
 			const result = execPlanRead({ name: "nonexistent" }, state);
 			expect(result.isError).toBe(true);
@@ -576,7 +446,7 @@ describe("plan", () => {
 
 		it("marks a checklist item done and reports the remaining count", () => {
 			const state = testState("check-1");
-			execPlanWrite({ name: "main", content: CHECKLIST_PLAN }, state);
+			writePlan(state, "main", CHECKLIST_PLAN);
 
 			const result = execPlanCheck({ item: "wire disabledTools" }, state);
 			const parsed = JSON.parse(result.content);
@@ -591,7 +461,7 @@ describe("plan", () => {
 
 		it("reports allDone when the last item is checked", () => {
 			const state = testState("check-2");
-			execPlanWrite({ name: "main", content: "# Plan\n\n## Steps\n- [ ] only step" }, state);
+			writePlan(state, "main", "# Plan\n\n## Steps\n- [ ] only step");
 
 			const parsed = JSON.parse(execPlanCheck({ item: "only step" }, state).content);
 			expect(parsed.remaining).toBe(0);
@@ -600,7 +470,7 @@ describe("plan", () => {
 
 		it("matches case-insensitively and prefers exact over substring", () => {
 			const state = testState("check-3");
-			execPlanWrite({ name: "main", content: "# Plan\n\n## Steps\n- [ ] add tool\n- [ ] add tool docs" }, state);
+			writePlan(state, "main", "# Plan\n\n## Steps\n- [ ] add tool\n- [ ] add tool docs");
 
 			const parsed = JSON.parse(execPlanCheck({ item: "Add Tool" }, state).content);
 			expect(parsed.success).toBe(true);
@@ -613,7 +483,7 @@ describe("plan", () => {
 
 		it("returns error with candidates when the item is ambiguous", () => {
 			const state = testState("check-4");
-			execPlanWrite({ name: "main", content: "# Plan\n\n## Steps\n- [ ] fix loop.ts\n- [ ] fix tools.ts" }, state);
+			writePlan(state, "main", "# Plan\n\n## Steps\n- [ ] fix loop.ts\n- [ ] fix tools.ts");
 
 			const result = execPlanCheck({ item: "fix" }, state);
 			expect(result.isError).toBe(true);
@@ -623,7 +493,7 @@ describe("plan", () => {
 
 		it("resolves ambiguity with a 1-based index", () => {
 			const state = testState("check-idx");
-			execPlanWrite({ name: "main", content: "# Plan\n\n## Steps\n- [ ] fix loop.ts\n- [ ] fix tools.ts" }, state);
+			writePlan(state, "main", "# Plan\n\n## Steps\n- [ ] fix loop.ts\n- [ ] fix tools.ts");
 
 			const parsed = JSON.parse(execPlanCheck({ item: "fix", index: 2 }, state).content);
 			expect(parsed.success).toBe(true);
@@ -636,7 +506,7 @@ describe("plan", () => {
 
 		it("rejects an out-of-range index with the numbered candidates", () => {
 			const state = testState("check-idx-oob");
-			execPlanWrite({ name: "main", content: "# Plan\n\n## Steps\n- [ ] fix loop.ts\n- [ ] fix tools.ts" }, state);
+			writePlan(state, "main", "# Plan\n\n## Steps\n- [ ] fix loop.ts\n- [ ] fix tools.ts");
 
 			const result = execPlanCheck({ item: "fix", index: 5 }, state);
 			expect(result.isError).toBe(true);
@@ -645,7 +515,7 @@ describe("plan", () => {
 
 		it("returns error with the remaining items when nothing matches", () => {
 			const state = testState("check-5");
-			execPlanWrite({ name: "main", content: CHECKLIST_PLAN }, state);
+			writePlan(state, "main", CHECKLIST_PLAN);
 
 			const result = execPlanCheck({ item: "nonexistent step" }, state);
 			expect(result.isError).toBe(true);
@@ -658,19 +528,13 @@ describe("plan", () => {
 			const state = testState("check-6");
 			expect(execPlanCheck({ item: "x" }, state).isError).toBe(true);
 
-			execPlanWrite({ name: "main", content: "# Plan\n\n## Steps\n- [x] all done" }, state);
+			writePlan(state, "main", "# Plan\n\n## Steps\n- [x] all done");
 			expect(execPlanCheck({ item: "all done" }, state).isError).toBe(true);
 		});
 
 		it("never matches checkbox-like lines inside code fences", () => {
 			const state = testState("check-fence");
-			execPlanWrite(
-				{
-					name: "main",
-					content: "# Plan\n\n## Steps\n- [ ] update template\n```markdown\n- [ ] update sample\n```",
-				},
-				state,
-			);
+			writePlan(state, "main", "# Plan\n\n## Steps\n- [ ] update template\n```markdown\n- [ ] update sample\n```");
 
 			// Substring common to both — only the real step is a candidate, so no
 			// ambiguity error and the fenced example stays untouched.
@@ -685,8 +549,8 @@ describe("plan", () => {
 
 		it("checks an item off in a named plan without touching the active one", () => {
 			const state = testState("check-7");
-			execPlanWrite({ name: "backend", content: "# Backend\n\n## Steps\n- [ ] api" }, state);
-			execPlanWrite({ name: "frontend", content: "# Frontend\n\n## Steps\n- [ ] ui" }, state);
+			writePlan(state, "backend", "# Backend\n\n## Steps\n- [ ] api");
+			writePlan(state, "frontend", "# Frontend\n\n## Steps\n- [ ] ui");
 
 			const parsed = JSON.parse(execPlanCheck({ item: "api", plan: "backend" }, state).content);
 			expect(parsed.success).toBe(true);
@@ -700,7 +564,7 @@ describe("plan", () => {
 
 		it("returns error with the plan list for an unknown plan name", () => {
 			const state = testState("check-8");
-			execPlanWrite({ name: "main", content: "# Plan\n\n## Steps\n- [ ] x" }, state);
+			writePlan(state, "main", "# Plan\n\n## Steps\n- [ ] x");
 
 			const result = execPlanCheck({ item: "x", plan: "ghost" }, state);
 			expect(result.isError).toBe(true);
@@ -711,8 +575,8 @@ describe("plan", () => {
 	describe("execPlanDiscard", () => {
 		it("deletes a named plan; active falls back to the newest remaining", () => {
 			const state = testState("discard-1");
-			execPlanWrite({ name: "keep", content: "# Keep" }, state);
-			execPlanWrite({ name: "drop", content: "# Drop" }, state);
+			writePlan(state, "keep", "# Keep");
+			writePlan(state, "drop", "# Drop");
 			expect(state.activePlanPath).toBe(join(state.plansDir, "drop.md"));
 
 			const parsed = JSON.parse(execPlanDiscard({ name: "drop" }, state).content);
@@ -726,7 +590,7 @@ describe("plan", () => {
 
 		it("errors with the plan list for an unknown name", () => {
 			const state = testState("discard-2");
-			execPlanWrite({ name: "main", content: "# Plan" }, state);
+			writePlan(state, "main", "# Plan");
 
 			const result = execPlanDiscard({ name: "ghost" }, state);
 			expect(result.isError).toBe(true);
@@ -767,7 +631,7 @@ describe("plan", () => {
 		it("returns the plan ready signal without echoing the plan content back", () => {
 			const state = testState("done-2");
 
-			execPlanWrite({ name: "auth", content: "# Plan\n\n## Steps\n1. Do it" }, state);
+			writePlan(state, "auth", "# Plan\n\n## Steps\n1. Do it");
 
 			const result = execPlanDone({ summary: "Auth refactor" }, state);
 			const parsed = JSON.parse(result.content);

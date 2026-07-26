@@ -49,7 +49,7 @@ Git read-only subcommands: `log`, `show`, `diff`, `status`, `blame`, `rev-parse`
 - Command and process substitution (`$()`, backticks, `<()`)
 - Any binary not on the allowlist (`env` included — it launches arbitrary binaries; same for test runners and package managers)
 - Argument-level writers on allowlisted binaries: `find -delete`/`-exec`, `fd -x`, `sort -o`, `tree -o`, `--output`, `uniq in out`
-- `write`, `edit` tools
+- `write`/`edit` outside the plan file — they stay available (same tools used for real code) but only reach a `.md` file directly inside the session's plans directory; anything else is refused
 
 `web_search`/`web_fetch` follow the `/web` toggle in both modes — plan mode doesn't change them.
 
@@ -59,10 +59,15 @@ MCP tools stay **fully enabled** in plan mode — they are not hard-gated the wa
 
 ## Plan Tools
 
+The plan file itself is authored with the ordinary `write`/`edit` tools — the
+same ones used for real code — gated to a `.md` file directly inside the
+session's plans directory while plan mode is active. There is no separate
+plan-write/plan-edit tool (mirrors how Claude Code's own plan mode works: no
+dedicated authoring tool, just a permission-level path exception for the plan
+file).
+
 | Tool | Mode | Description |
 |------|------|-------------|
-| `plan_write` | Plan | Write or replace a named plan file |
-| `plan_edit` | Plan | Edit a section by heading |
 | `plan_read` | Both | Read plan content and headings |
 | `plan_done` | Plan | Signal plan is ready for review |
 | `plan_discard` | Plan | Delete a plan |

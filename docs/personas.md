@@ -90,7 +90,7 @@ When set, only matching **built-in** tools are advertised to the model and execu
 
 ```yaml
 tools: [read, grep, ls]           # readonly builtins
-tools: [read, grep, plan_*, web_*] # globs expand to plan_write, web_search, …
+tools: [read, grep, plan_*, web_*] # globs expand to plan_read, web_search, …
 tools: []                          # no builtins (MCP still available)
 # omit the field entirely         # all builtins
 ```

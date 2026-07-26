@@ -9,7 +9,7 @@ import {
 	defaultOpenWorkGateConfig,
 	evaluateOpenWorkGate,
 } from "../src/core/open-work-gate.ts";
-import { execPlanWrite, type PlanState } from "../src/core/plan.ts";
+import type { PlanState } from "../src/core/plan.ts";
 
 const TEST_PLANS_DIR = join(import.meta.dirname, "__test_tmp__", "open-work-gate-plans");
 
@@ -78,15 +78,16 @@ describe("collectOpenWorkSteps", () => {
 
 	it("is closable via plan_check when the plan uses checkboxes", () => {
 		const state = testState("checklist");
-		execPlanWrite({ name: "main", content: "# Plan\n\n## Steps\n- [ ] a\n- [x] b" }, state);
+		mkdirSync(state.plansDir, { recursive: true });
+		writeFileSync(join(state.plansDir, "main.md"), "# Plan\n\n## Steps\n- [ ] a\n- [x] b", "utf-8");
 
 		expect(collectOpenWorkSteps(state)).toEqual({ steps: ["a"], closableViaPlanCheck: true });
 	});
 
 	it("is not closable via plan_check for a plan without checkboxes (heading fallback)", () => {
 		const state = testState("headings-only");
-		// Written directly to disk, bypassing plan_write's normalization — the
-		// shape an older or hand-edited plan can still be in.
+		// Written directly to disk, bypassing the write/edit gate's
+		// normalization — the shape an older or hand-edited plan can still be in.
 		mkdirSync(state.plansDir, { recursive: true });
 		writeFileSync(
 			join(state.plansDir, "main.md"),

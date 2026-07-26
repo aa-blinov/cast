@@ -742,7 +742,8 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 		// silently drop a block added earlier. The restriction must be the
 		// first thing the model sees, persona and rules included.
 		if (loopConfig.planState?.enabled) {
-			prompt = `${PLAN_MODE_PROMPT}\n\n${prompt}`;
+			const plansDir = loopConfig.planState.plansDir;
+			prompt = `${PLAN_MODE_PROMPT.replace(/\{\{PLANS_DIR\}\}/g, () => plansDir)}\n\n${prompt}`;
 		} else if (loopConfig.readOnlyBash) {
 			// Subagent of a plan-mode parent: no plan-mode block (its authoring
 			// tools aren't in this toolset), but the bash restriction must be
