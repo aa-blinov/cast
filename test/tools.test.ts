@@ -373,6 +373,43 @@ describe("read", () => {
 		expect(result.content).not.toMatch(/\b4:[a-z]{3}:[a-z]{3}→d/);
 	});
 
+	it("treats limit:0 as zero lines, not 'no limit' (0 is falsy)", async () => {
+		// `limit ? ... : allLines.length` used to treat an explicit `limit: 0`
+		// the same as "no limit given" (0 is falsy in JS) and dumped the whole
+		// file instead of reading zero lines.
+		writeFileSync(join(TEST_DIR, "limit-zero.txt"), "a\nb\nc\nd\ne\n");
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const result = await exec("read", { path: "limit-zero.txt", limit: 0 });
+		expect(result.isError).toBeFalsy();
+		expect(result.content).not.toContain("→a");
+		expect(result.content).not.toContain("→e");
+		expect(result.content).toContain("Showing 0 lines");
+	});
+
+	it("caps output by bytes, not just line count, for a file with one huge line", async () => {
+		// maxToolOutputLines doesn't help when a single line (minified bundle,
+		// binary content with no newlines) is many times larger than the
+		// output budget — read used to return the whole line regardless of
+		// size, unlike every other tool (bash/ssh/grep) which enforces
+		// config.maxToolOutputBytes.
+		writeFileSync(join(TEST_DIR, "huge-line.txt"), "x".repeat(10 * mockConfig.maxToolOutputBytes));
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const result = await exec("read", { path: "huge-line.txt" });
+		expect(Buffer.byteLength(result.content, "utf-8")).toBeLessThan(mockConfig.maxToolOutputBytes * 1.1);
+		expect(result.content).toContain("truncated");
+	});
+
+	it("caps output by bytes across multiple long lines, stopping on a line boundary", async () => {
+		const lineCount = 40;
+		const line = `${"y".repeat(3000)}\n`;
+		writeFileSync(join(TEST_DIR, "many-long-lines.txt"), line.repeat(lineCount));
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const result = await exec("read", { path: "many-long-lines.txt" });
+		expect(Buffer.byteLength(result.content, "utf-8")).toBeLessThanOrEqual(mockConfig.maxToolOutputBytes);
+		expect(result.content).toMatch(new RegExp(`Showing lines 1-\\d+ of ${lineCount + 1}.*stopped at`));
+		expect(result.content).toContain("Use offset=");
+	});
+
 	it("errors on missing file", async () => {
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
 		const result = await exec("read", { path: "nonexistent.txt" });

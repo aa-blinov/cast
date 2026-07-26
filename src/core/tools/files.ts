@@ -97,7 +97,10 @@ export async function execRead(args: Record<string, unknown>, cwd: string, confi
 		return { content: `Offset ${offset} is beyond end of file (${allLines.length} lines total)`, isError: true };
 	}
 
-	const endLine = limit ? Math.min(startLine + limit, allLines.length) : allLines.length;
+	// `limit ? ... : allLines.length` would treat an explicit `limit: 0` as
+	// "no limit" (0 is falsy) and dump the whole file instead of reading zero
+	// lines — check for "was a limit given at all" instead of truthiness.
+	const endLine = limit !== undefined ? Math.min(startLine + limit, allLines.length) : allLines.length;
 	let selectedLines = allLines.slice(startLine, endLine);
 
 	// Truncate if too many lines
@@ -110,16 +113,57 @@ export async function execRead(args: Record<string, unknown>, cwd: string, confi
 	// text. The arrow separator is never legal leading whitespace in source,
 	// so a tab-indented file's real tabs stay unambiguous against the gutter.
 	// See `hashline.ts` for the anchor scheme.
-	const numbered = selectedLines
-		.map((line, i) => renderAnchoredLine(startLine + i + 1, cached.hashes[startLine + i] ?? ["", ""], line))
-		.join("\n");
+	const rendered = selectedLines.map((line, i) =>
+		renderAnchoredLine(startLine + i + 1, cached.hashes[startLine + i] ?? ["", ""], line),
+	);
+
+	// Cap total output bytes too, not just line count: maxToolOutputLines
+	// doesn't help when a handful of lines — or even one, e.g. a minified
+	// bundle or a binary file with no newlines — are each many MB long.
+	// Without this a single-line file blew straight past
+	// config.maxToolOutputBytes regardless of size (confirmed: a 10MB
+	// one-line file was returned in full against a 64KB budget), unlike
+	// every other tool (bash/ssh/grep) which enforces this cap.
+	const maxBytes = config.maxToolOutputBytes;
+	let usedBytes = 0;
+	let cutIndex = rendered.length;
+	for (let i = 0; i < rendered.length; i++) {
+		usedBytes += Buffer.byteLength(rendered[i]!, "utf-8") + 1; // +1 for the joining "\n"
+		if (usedBytes > maxBytes) {
+			cutIndex = i;
+			break;
+		}
+	}
+	let displayLines = rendered.slice(0, cutIndex);
+	let firstLineTruncated = false;
+	if (cutIndex === 0 && rendered.length > 0) {
+		// Even the first line alone blows the byte budget — truncate its text
+		// directly so `read` still returns something bounded instead of an
+		// empty result for a file that does have content.
+		const buf = Buffer.from(rendered[0]!, "utf-8");
+		displayLines = [`${buf.subarray(0, maxBytes).toString("utf-8")}… [line truncated, too large]`];
+		firstLineTruncated = true;
+	}
+	const byteTruncated = cutIndex < rendered.length;
+	const numbered = displayLines.join("\n");
 
 	// Build continuation hint
 	const totalLines = allLines.length;
-	const shownEnd = startLine + selectedLines.length;
+	const shownLineCount = firstLineTruncated ? 1 : displayLines.length;
+	const shownEnd = startLine + shownLineCount;
 	let hint = "";
-	if (shownEnd < totalLines) {
-		hint = `\n\n[Showing lines ${startLine + 1}-${shownEnd} of ${totalLines}. Use offset=${shownEnd + 1} to continue.]`;
+	if (byteTruncated) {
+		hint = firstLineTruncated
+			? `\n\n[Line ${startLine + 1} truncated at ${formatSize(maxBytes)} — the line itself is larger than the output limit.]`
+			: `\n\n[Showing lines ${startLine + 1}-${shownEnd} of ${totalLines} (stopped at ${formatSize(maxBytes)}). Use offset=${shownEnd + 1} to continue.]`;
+	} else if (shownEnd < totalLines) {
+		hint =
+			shownLineCount > 0
+				? `\n\n[Showing lines ${startLine + 1}-${shownEnd} of ${totalLines}. Use offset=${shownEnd + 1} to continue.]`
+				: // limit:0 (or any zero-width request) selects no lines — "lines 1-0"
+					// misreads as a range rather than an explicit zero, and shownEnd
+					// equals startLine here so it can't anchor the message either.
+					`\n\n[Showing 0 lines of ${totalLines}. Use offset=${startLine + 1} to continue.]`;
 	}
 
 	return { content: numbered + hint };
