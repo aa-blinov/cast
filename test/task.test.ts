@@ -113,6 +113,58 @@ describe("execTask — final extract", () => {
 		expect(systemPrompt).toContain("Current working directory:");
 	});
 
+	it("preserves already-accumulated subagentUsage when runAgentLoop throws mid-run", async () => {
+		// subagentUsage is the only channel loop.ts uses to fold a subagent's
+		// spend into the session total. Letting a genuine runtime failure
+		// (network error, provider outage) propagate uncaught used to discard
+		// every usage event already reported before the throw — real, billed
+		// tokens vanishing from cost tracking.
+		const result = await execTask({ assignment: "review mod-a" }, "/tmp", testConfig, {
+			model: "test-model",
+			subagentPrompts: [
+				{ name: "worker", label: "Worker", description: "", systemPrompt: "worker", agentsMd: false },
+			],
+			runAgentLoop: async (_messages, config) => {
+				config.onEvent({ type: "usage", usage: { promptTokens: 1000, completionTokens: 500, totalTokens: 1500 } });
+				config.onEvent({ type: "usage", usage: { promptTokens: 2000, completionTokens: 800, totalTokens: 2800 } });
+				throw new Error("network error mid-run");
+			},
+		});
+		expect(result.isError).toBe(true);
+		expect(result.content).toContain("network error mid-run");
+		expect(result.subagentUsage).toEqual({
+			promptTokens: 3000,
+			completionTokens: 1300,
+			totalTokens: 4300,
+		});
+	});
+
+	it("releases its semaphore slot after runAgentLoop throws, so the next queued task still runs", async () => {
+		const failing = await execTask({ assignment: "will fail" }, "/tmp", testConfig, {
+			model: "test-model",
+			subagentPrompts: [
+				{ name: "worker", label: "Worker", description: "", systemPrompt: "worker", agentsMd: false },
+			],
+			runAgentLoop: async () => {
+				throw new Error("boom");
+			},
+		});
+		expect(failing.isError).toBe(true);
+
+		const following = await execTask({ assignment: "should still run" }, "/tmp", testConfig, {
+			model: "test-model",
+			subagentPrompts: [
+				{ name: "worker", label: "Worker", description: "", systemPrompt: "worker", agentsMd: false },
+			],
+			runAgentLoop: async (messages, config) => {
+				config.onEvent({ type: "end", reason: "stop" });
+				return [...messages, { role: "assistant", content: "ran fine" }];
+			},
+		});
+		expect(following.isError).toBeFalsy();
+		expect(following.content).toBe("ran fine");
+	});
+
 	it("cancels while queued on the semaphore without starting the loop", async () => {
 		const ac = new AbortController();
 		let started = 0;
