@@ -1173,8 +1173,15 @@ function SettingsModal({
 					},
 				}));
 			} else if (t === "tools") {
-				const [web, permissions] = await Promise.all([run("/web"), run("/permissions")]);
-				setData((d) => ({ ...d, tools: { web: web?.result, permissions: permissions?.result } }));
+				const [web, permissions, searchProvider] = await Promise.all([
+					run("/web"),
+					run("/permissions"),
+					run("/search-provider"),
+				]);
+				setData((d) => ({
+					...d,
+					tools: { web: web?.result, permissions: permissions?.result, searchProvider: searchProvider?.result },
+				}));
 			} else if (t === "mcp") {
 				const res = await run("/mcp list");
 				if (!res.ok) {
@@ -1614,10 +1621,14 @@ function InfoPopover({ text, readUrl }) {
 }
 
 function SettingsTools({ data, busy, act }) {
+	const [tavilyKey, setTavilyKey] = useState("");
 	if (!data) return null;
 	const web = data.web || {};
 	const perm = data.permissions || {};
+	const search = data.searchProvider || {};
 	const webOn = web.webTools;
+	const provider = search.searchProvider || "ddg";
+	const key = tavilyKey || search.tavilyApiKey || "";
 	return html`
 		<div class="settings-rows">
 			<div class="settings-section-title">Web tools</div>
@@ -1625,6 +1636,18 @@ function SettingsTools({ data, busy, act }) {
 				<button class="modal-btn${webOn ? " modal-btn-primary" : ""}" title="Enable web_search and web_fetch" disabled=${busy} onClick=${() => act("/web on")}>Enabled</button>
 				<button class="modal-btn${!webOn ? " modal-btn-primary" : ""}" title="Disable web_search and web_fetch" disabled=${busy} onClick=${() => act("/web off")}>Disabled</button>
 			</div>
+			<div class="settings-section-title">web_search backend</div>
+			<div class="settings-form-row">
+				<button class="modal-btn${provider === "ddg" ? " modal-btn-primary" : ""}" title="Free, no key — ~4 searches per IP before rate-limited" disabled=${busy} onClick=${() => act("/search-provider ddg")}>DuckDuckGo</button>
+				<button class="modal-btn${provider === "tavily" ? " modal-btn-primary" : ""}" title="API key required — 1000 free searches/month" disabled=${busy} onClick=${() => {
+					if (key) act(`/search-provider tavily ${key}`);
+				}}>Tavily</button>
+			</div>
+			<div class="settings-form-row">
+				<input type="text" placeholder="Tavily API key (tvly-...)" value=${key} onInput=${(e) => setTavilyKey(e.target.value)} />
+				<button class="modal-btn" disabled=${busy || !key} onClick=${() => act(`/search-provider tavily ${key}`)}>Save &amp; use Tavily</button>
+			</div>
+			<div class="settings-hint">Only affects web_search — web_fetch (page reading) is unchanged either way. Get a free Tavily key at <a href="https://app.tavily.com" target="_blank" rel="noopener">app.tavily.com</a> — 1000 requests/month, no card required.</div>
 			<div class="settings-section-title">Bash confirmation mode</div>
 			<div class="settings-form-row">
 				<button class="modal-btn${perm.permissionMode === "default" ? " modal-btn-primary" : ""}" title="Confirm dangerous commands" disabled=${busy} onClick=${() => act("/permissions default")}>Default</button>

@@ -195,14 +195,19 @@ Web tools are disabled by default. Enable them with `/web` (persists to settings
 
 ### `web_search`
 
-Search the web via DuckDuckGo. No API key required.
+Searches via DuckDuckGo's HTML endpoint by default — no API key required, but DDG
+rate-limits scraping to roughly 4 requests per IP before serving a CAPTCHA. If you hit
+that limit, switch the backend to [Tavily](https://app.tavily.com) (free tier: 1000
+requests/month, no card) with `/search-provider` (TUI) or the **Tools** tab in `cast
+web`'s settings. The switch takes effect on the next `web_search` call, no restart
+needed.
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `query` | Yes | Search query |
 | `maxResults` | No | Maximum results (default: 10) |
-| `region` | No | Region code (default: `wt-wt`) |
-| `time` | No | Time filter: `d` (day), `w` (week), `m` (month), `y` (year) |
+| `region` | No | Region code (default: `wt-wt`) — DDG backend only |
+| `time` | No | Time filter: `d` (day), `w` (week), `m` (month), `y` (year) — DDG backend only |
 
 ### `web_fetch`
 

@@ -148,6 +148,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/rule:", description: "Invoke a rule by name", takesArgs: true },
 	{ name: "/rules", description: "List loaded rules" },
 	{ name: "/s", description: "Alias for /steer", takesArgs: true },
+	{ name: "/search-provider", description: "Switch web_search backend (DuckDuckGo / Tavily)" },
 	{ name: "/sessions", description: "List / switch / delete sessions" },
 	{ name: "/skills", description: "Toggle skills on/off" },
 	{ name: "/skills disable", description: "Disable one skill — name", takesArgs: true },
@@ -1859,6 +1860,45 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		return;
 	}
 
+	if (input === "/search-provider") {
+		const settings = loadSettings();
+		const current = settings.searchProvider ?? "ddg";
+		const picked = await deps.pickers.pickOption(
+			[
+				{
+					value: "ddg" as const,
+					label: `DuckDuckGo — free, no key, ~4 searches per IP before rate-limited${current === "ddg" ? " (current)" : ""}`,
+				},
+				{
+					value: "tavily" as const,
+					label: `Tavily — API key required, 1000 free searches/month${current === "tavily" ? " (current)" : ""}`,
+				},
+			],
+			{ title: "web_search backend" },
+		);
+		if (picked === null) {
+			showNotice("[Cancelled — search provider unchanged]");
+			return;
+		}
+		if (picked === "ddg") {
+			updateSettings({ searchProvider: "ddg" });
+			showNotice("[web_search backend: DuckDuckGo]");
+			return;
+		}
+		const key = await deps.pickers.promptText(
+			"Tavily API key (https://app.tavily.com)",
+			settings.tavilyApiKey,
+			"tvly-...",
+		);
+		if (!key) {
+			showNotice("[Cancelled — search provider unchanged]");
+			return;
+		}
+		updateSettings({ searchProvider: "tavily", tavilyApiKey: key });
+		showNotice("[web_search backend: Tavily]");
+		return;
+	}
+
 	if (input === "/statusbar") {
 		const allSegments = getStatusBarSegments();
 		if (!deps.pickers.pickStatusBar) {
@@ -2360,6 +2400,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 				"  /provider [name]    Switch / add / delete providers\n" +
 				"  /permissions        Change bash confirmation mode\n" +
 				"  /web                Toggle web tools (web_search, web_fetch)\n" +
+				"  /search-provider    Switch web_search backend (DuckDuckGo / Tavily)\n" +
 				"  /ssh                Manage SSH hosts (list, add, remove)\n" +
 				"  /statusbar          Toggle and reorder status bar segments\n" +
 				"  /theme              Change color theme\n" +

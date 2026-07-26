@@ -1,15 +1,19 @@
 /**
- * Web tools — DDG search (html.duckduckgo.com scraper) + Jina Reader (fetch).
+ * Web tools — DDG search (html.duckduckgo.com scraper) or Tavily (API), + Jina Reader (fetch).
  *
  * DDG search scrapes the HTML lite endpoint — no JS challenge, no VQD,
  * no Python dependency. Returns title + URL + snippet per result.
  * DDG rate-limits after ~4 requests per IP — cached results don't count
- * toward the limit, so repeated queries are free.
+ * toward the limit, so repeated queries are free. Tavily (settings.searchProvider
+ * === "tavily", needs settings.tavilyApiKey) is the opt-in alternative for
+ * anyone hitting that cap — a recurring 1000 requests/month free tier instead
+ * of a hard per-IP scrape limit.
  *
  * Web fetch uses Jina Reader (`r.jina.ai`) — free, no API key, returns
  * clean markdown optimized for LLM consumption.
  */
 
+import { loadSettings } from "../settings.ts";
 import type { ToolResult } from "./shared.ts";
 
 // ============================================================================
@@ -50,8 +54,8 @@ interface SearchResults {
 /** In-memory search cache — avoids wasting DDG's ~4 request budget on repeats. */
 const searchCache = new Map<string, { results: SearchResults; ts: number }>();
 
-function cacheKey(query: string, region?: string, time?: string): string {
-	return `${query}\0${region ?? ""}\0${time ?? ""}`;
+function cacheKey(provider: string, query: string, region?: string, time?: string): string {
+	return `${provider}\0${query}\0${region ?? ""}\0${time ?? ""}`;
 }
 
 function cacheGet(key: string): SearchResults | null {
@@ -125,7 +129,7 @@ export async function searchDuckDuckGo(
 	const signal = options?.signal;
 
 	// Check cache first
-	const key = cacheKey(query, options?.region, options?.time);
+	const key = cacheKey("ddg", query, options?.region, options?.time);
 	const cached = cacheGet(key);
 	if (cached) return { ...cached, results: cached.results.slice(0, maxResults) };
 
@@ -182,6 +186,64 @@ export async function searchDuckDuckGo(
 
 	// Cache the full parsed set (see PARSE_RESULTS_LIMIT) even when empty, to
 	// avoid re-hitting DDG; truncate to this caller's maxResults on the way out.
+	cacheSet(key, searchResults);
+
+	return { ...searchResults, results: results.slice(0, maxResults) };
+}
+
+// ============================================================================
+// Tavily Search — api.tavily.com
+// ============================================================================
+
+/**
+ * Search via the Tavily Search API (https://docs.tavily.com). Needs an API
+ * key (https://app.tavily.com) — the free tier is 1000 requests/month, a
+ * recurring monthly allowance rather than DDG's hard ~4-requests-per-IP cap.
+ */
+export async function searchTavily(
+	query: string,
+	apiKey: string,
+	options?: {
+		maxResults?: number;
+		signal?: AbortSignal;
+	},
+): Promise<SearchResults> {
+	const maxResults = Math.min(options?.maxResults ?? MAX_SEARCH_RESULTS, 20); // Tavily caps at 20
+	const signal = options?.signal;
+
+	const key = cacheKey("tavily", query);
+	const cached = cacheGet(key);
+	if (cached) return { ...cached, results: cached.results.slice(0, maxResults) };
+
+	const resp = await fetch("https://api.tavily.com/search", {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			Authorization: `Bearer ${apiKey}`,
+		},
+		body: JSON.stringify({ query, max_results: 20 }),
+		signal,
+	});
+
+	if (resp.status === 401 || resp.status === 403) {
+		throw new Error("Tavily rejected the API key — check /search-provider or the tavilyApiKey setting.");
+	}
+	if (resp.status === 429) {
+		throw new Error("Tavily rate limit or free-tier quota exceeded for this month.");
+	}
+	if (!resp.ok) throw new Error(`Tavily HTTP ${resp.status}`);
+
+	const data = (await resp.json()) as {
+		results?: Array<{ title?: string; url?: string; content?: string }>;
+	};
+
+	const results: SearchResult[] = (data.results ?? []).map((r) => ({
+		title: r.title ?? "",
+		url: r.url ?? "",
+		snippet: r.content ?? "",
+	}));
+
+	const searchResults = { query, results };
 	cacheSet(key, searchResults);
 
 	return { ...searchResults, results: results.slice(0, maxResults) };
@@ -262,7 +324,27 @@ export async function execWebSearch(args: Record<string, unknown>, signal?: Abor
 	const region = typeof args.region === "string" ? args.region : undefined;
 	const time = typeof args.time === "string" ? args.time : undefined;
 
+	// Read fresh each call (not cached at startup) — same pattern as webTools,
+	// so switching provider via /search-provider takes effect on the next
+	// search without needing a restart.
+	const settings = loadSettings();
+
 	try {
+		if (settings.searchProvider === "tavily") {
+			if (!settings.tavilyApiKey) {
+				return {
+					content:
+						"Error: search provider is set to Tavily but no API key is configured. " +
+						"Set one via /search-provider (TUI) or the Tools settings tab (cast web), or switch back to /search-provider ddg.",
+					isError: true,
+				};
+			}
+			const { results } = await searchTavily(query, settings.tavilyApiKey, { maxResults, signal });
+			if (results.length === 0) return { content: `No results found for "${query}".` };
+			const lines = results.map((r, i) => `${i + 1}. **${r.title}**\n   ${r.url}\n   ${r.snippet}`);
+			return { content: `<!--${JSON.stringify({ count: results.length })}-->\n${lines.join("\n\n")}` };
+		}
+
 		const { results } = await searchDuckDuckGo(query, { maxResults, region, time, signal });
 
 		if (results.length === 0) return { content: `No results found for "${query}".` };
