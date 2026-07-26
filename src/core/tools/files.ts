@@ -290,6 +290,11 @@ export async function execEdit(args: Record<string, unknown>, cwd: string, confi
 		// replacement shifts the insertion point into its own middle.
 		if (a.kind === "insert" && b.kind === "replace") return -1;
 		if (a.kind === "replace" && b.kind === "insert") return 1;
+		// Two inserts at the same splice point: each splice pushes whatever
+		// is already there further down, so whichever is applied LAST ends
+		// up on top. To make the on-disk order match the order the model
+		// listed them in ops[], process the later-indexed one first.
+		if (a.kind === "insert" && b.kind === "insert") return b.idx - a.idx;
 		return 0;
 	});
 	for (const op of sorted) {
@@ -449,12 +454,16 @@ interface BucketedReplace {
 	lineEnd: number;
 	textLinesToInsert: string[];
 	anchorStr: string;
+	/** Position in the original ops[] — breaks ties between inserts sharing a splice point. */
+	idx: number;
 }
 interface BucketedInsert {
 	kind: "insert";
 	line: number;
 	textLinesToInsert: string[];
 	anchorStr: string;
+	/** Position in the original ops[] — breaks ties between inserts sharing a splice point. */
+	idx: number;
 }
 type BucketedOp = BucketedReplace | BucketedInsert;
 interface BucketFailure {
@@ -516,6 +525,7 @@ function bucketOps(
 				lineEnd: endLine - 1,
 				textLinesToInsert: splitContent(op.content),
 				anchorStr: op.anchorStr,
+				idx: i,
 			});
 		} else {
 			// "0" / "0:" is the documented way to insert before the first
@@ -526,6 +536,7 @@ function bucketOps(
 					line: -1,
 					textLinesToInsert: splitContent(op.content),
 					anchorStr: op.anchorStr,
+					idx: i,
 				});
 				continue;
 			}
@@ -544,6 +555,7 @@ function bucketOps(
 					line: insertAt - 1,
 					textLinesToInsert: splitContent(op.content),
 					anchorStr: op.anchorStr,
+					idx: i,
 				});
 				continue;
 			}
@@ -562,6 +574,7 @@ function bucketOps(
 				line: check.line - (op.before ? 2 : 1),
 				textLinesToInsert: splitContent(op.content),
 				anchorStr: op.anchorStr,
+				idx: i,
 			});
 		}
 	}
