@@ -478,6 +478,25 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 	<article class="content">
 		<h1>Changelog</h1>
 <p>All notable user-facing changes to cast, newest first.</p>
+<h2>0.8.30</h2>
+<h3>Added</h3>
+<ul>
+<li><code>web_search</code> supports Brave Search as a third optional backend alongside DuckDuckGo (default) and Tavily. Unlike Tavily&#39;s AI-search aggregation, Brave is an actual general web index — a more direct drop-in replacement for DDG. Configure with <code>/web-search-provider</code> (TUI) or the Tools settings tab (<code>cast web</code>).</li>
+</ul>
+<h2>0.8.29</h2>
+<h3>Added</h3>
+<ul>
+<li><code>web_search</code> supports Tavily as an optional backend for anyone hitting DuckDuckGo&#39;s scrape rate limit (~4 requests per IP before a CAPTCHA blocks further searches) — Tavily&#39;s free tier is a recurring 1000 requests/month instead. Configure with <code>/web-search-provider</code> (TUI) or the Tools settings tab (<code>cast web</code>); DuckDuckGo stays the zero-config default.</li>
+<li>Web UI: tool call results are now expandable — click a tool card to see its full output (previously request-only), lazily rendered and capped at 64KB.</li>
+<li>Docs: a new research-grounded page on why persona/role framing changes agent behavior, linked from the personas doc and the landing page.</li>
+</ul>
+<h3>Fixed</h3>
+<ul>
+<li><code>web_search</code>: an empty query or one over Tavily&#39;s undocumented 400-character limit no longer fails with an opaque HTTP 400 — empty queries are rejected with a clear message, over-length ones are truncated so the search still runs.</li>
+<li><code>web_search</code>: the tool&#39;s advertised parameters now match the active backend — <code>region</code>/<code>time</code> (DuckDuckGo-only) are no longer offered to the model when Tavily is active, where they silently did nothing.</li>
+<li>GitHub Pages landing page and README: the ASCII banner no longer overflows or visibly snaps to size on narrow mobile viewports — replaced with a static SVG that scales like any other image.</li>
+<li>Docs: corrected two fabricated author citations in the persona-research motivation section.</li>
+</ul>
 <h2>0.8.28</h2>
 <h3>Fixed</h3>
 <ul>

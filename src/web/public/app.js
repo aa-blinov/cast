@@ -10,20 +10,14 @@ import { icons } from "./icons.js";
 
 const html = htm.bind(h);
 
-// Same mark as the CLI's startup banner (see core/help.ts's CAST_BANNER) and
-// the GitHub Pages site's SVG logo — kept here as a grid of lines rather than
-// imported so this file has no build step (see the header comment above);
-// rendered as an inline SVG below, not text, so it stays crisp and its
-// gradient can track the live theme (see CastLogo).
-const CAST_BANNER_LINES = [
-	" ░▒▓██████▓▒░ ░▒▓██████▓▒░ ░▒▓███████▓▒░▒▓████████▓▒░",
-	"░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░         ░▒▓█▓▒░    ",
-	"░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░         ░▒▓█▓▒░    ",
-	"░▒▓█▓▒░      ░▒▓████████▓▒░░▒▓██████▓▒░   ░▒▓█▓▒░    ",
-	"░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░      ░▒▓█▓▒░  ░▒▓█▓▒░    ",
-	"░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░      ░▒▓█▓▒░  ░▒▓█▓▒░    ",
-	" ░▒▓██████▓▒░░▒▓█▓▒░░▒▓█▓▒░▒▓███████▓▒░   ░▒▓█▓▒░    ",
-];
+// Same mark as the CLI's startup banner (core/help.ts's CAST_BANNER) and the
+// GitHub Pages/README SVG logo (scripts/build-banner-svg.mjs) — all three now
+// read this one grid instead of each keeping its own copy that could drift.
+// Fetched (not statically imported) because this file has no build step —
+// see the header comment above — and a top-level await here blocks the rest
+// of the module (including the initial render() call) until it resolves, so
+// there's no flash of a missing logo while it loads.
+const CAST_BANNER_LINES = await fetch("./cast-banner-grid.json").then((r) => r.json());
 
 // Terminal block-drawing chars, darkest→lightest fill (matches the CLI/site
 // banner's own weighting so the shape reads the same everywhere).

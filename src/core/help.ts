@@ -2,15 +2,13 @@
 // Help
 // ============================================================================
 
-export const CAST_BANNER = [
-	" ░▒▓██████▓▒░ ░▒▓██████▓▒░ ░▒▓███████▓▒░▒▓████████▓▒░",
-	"░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░         ░▒▓█▓▒░    ",
-	"░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░         ░▒▓█▓▒░    ",
-	"░▒▓█▓▒░      ░▒▓████████▓▒░░▒▓██████▓▒░   ░▒▓█▓▒░    ",
-	"░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░      ░▒▓█▓▒░  ░▒▓█▓▒░    ",
-	"░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░      ░▒▓█▓▒░  ░▒▓█▓▒░    ",
-	" ░▒▓██████▓▒░░▒▓█▓▒░░▒▓█▓▒░▒▓███████▓▒░   ░▒▓█▓▒░    ",
-].join("\n");
+// Single source of truth for the block-character "cast" mark, shared with
+// the GitHub Pages/README SVG generator (scripts/build-banner-svg.mjs) and
+// cast web's own inline SVG logo (src/web/public/app.js) — all three used to
+// carry their own copy of this grid and could silently drift out of sync.
+import castBannerGrid from "../web/public/cast-banner-grid.json" with { type: "json" };
+
+export const CAST_BANNER = (castBannerGrid as string[]).join("\n");
 
 export function printHelp(): void {
 	console.log(`
