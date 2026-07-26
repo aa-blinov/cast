@@ -263,6 +263,12 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 	background: linear-gradient(90deg, #38e0ff, #38bdf8, #a78bfa, #a855f7);
 	-webkit-background-clip: text; -webkit-text-fill-color: transparent;
 	background-clip: text;
+	/* Hidden until the inline script (right after this element, so it runs
+	   synchronously before first paint) measures and applies a fit — avoids
+	   a visible flash of the full-size banner snapping down to size on
+	   narrow screens. (A transition is added via JS, but only ahead of the
+	   later webfont-swap re-fit — the initial one must stay instant.) */
+	visibility: hidden;
 }
 .hero h1 { font-size: 3rem; font-weight: 800; margin: 0 0 16px; }
 .hero h1 .accent { color: #38e0ff; }
@@ -459,18 +465,34 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 				var pre = document.getElementById("hero-ascii");
 				var wrap = pre.parentElement;
 				var baseFontSize = Number.parseFloat(getComputedStyle(pre).fontSize);
-				function fit() {
+				// Measuring must never happen mid-transition — an active
+				// transition makes scrollWidth reflect an in-flight
+				// interpolated value, not the size the just-set fontSize
+				// actually needs, which throws the whole calculation off.
+				function fit(animate) {
+					pre.style.transition = "none";
 					pre.style.fontSize = baseFontSize + "px";
+					void pre.offsetWidth; // flush layout before measuring
 					var natural = pre.scrollWidth;
 					var avail = wrap.clientWidth;
-					if (natural > avail) pre.style.fontSize = (baseFontSize * avail) / natural + "px";
+					var target = natural > avail ? (baseFontSize * avail) / natural : baseFontSize;
+					if (animate) {
+						void pre.offsetWidth;
+						pre.style.transition = "font-size .15s ease-out";
+					}
+					pre.style.fontSize = target + "px";
+					pre.style.visibility = "visible";
 				}
-				fit();
-				window.addEventListener("resize", fit);
+				fit(false);
+				window.addEventListener("resize", function () {
+					fit(false);
+				});
 				// The web font (JetBrains Mono) loads async — re-measure once it's
 				// actually applied, since the fallback font's metrics can differ
-				// enough to leave the banner over- or under-scaled.
-				if (document.fonts?.ready) document.fonts.ready.then(fit);
+				// enough to leave the banner over- or under-scaled. The initial
+				// fit() above must stay instant since the banner is still hidden
+				// then; this follow-up happens after it's visible, so animate it.
+				if (document.fonts?.ready) document.fonts.ready.then(function () { fit(true); });
 			})();
 		</script>
 		<h1>One agent, <span class="accent">many roles</span></h1>
