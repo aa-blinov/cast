@@ -10,10 +10,12 @@ import { icons } from "./icons.js";
 
 const html = htm.bind(h);
 
-// Same ASCII mark as the CLI's startup banner (see core/help.ts's CAST_BANNER) —
-// kept as an array-of-lines join here too, since the backslashes need to stay
-// literal and a template literal would make that harder to read at a glance.
-const CAST_BANNER = [
+// Same mark as the CLI's startup banner (see core/help.ts's CAST_BANNER) and
+// the GitHub Pages site's SVG logo — kept here as a grid of lines rather than
+// imported so this file has no build step (see the header comment above);
+// rendered as an inline SVG below, not text, so it stays crisp and its
+// gradient can track the live theme (see CastLogo).
+const CAST_BANNER_LINES = [
 	" ░▒▓██████▓▒░ ░▒▓██████▓▒░ ░▒▓███████▓▒░▒▓████████▓▒░",
 	"░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░         ░▒▓█▓▒░    ",
 	"░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░         ░▒▓█▓▒░    ",
@@ -21,7 +23,43 @@ const CAST_BANNER = [
 	"░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░      ░▒▓█▓▒░  ░▒▓█▓▒░    ",
 	"░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░      ░▒▓█▓▒░  ░▒▓█▓▒░    ",
 	" ░▒▓██████▓▒░░▒▓█▓▒░░▒▓█▓▒░▒▓███████▓▒░   ░▒▓█▓▒░    ",
-].join("\n");
+];
+
+// Terminal block-drawing chars, darkest→lightest fill (matches the CLI/site
+// banner's own weighting so the shape reads the same everywhere).
+const CAST_LOGO_OPACITY = { "░": 0.35, "▒": 0.6, "▓": 0.85, "█": 1 };
+const CAST_LOGO_CELL = 10;
+
+// Rendered as an inline SVG (not a static file/<img>) specifically so its
+// gradient can be driven by the live theme via plain CSS `stop-color: var(...)`
+// on the two <stop> elements below — an <img src="*.svg"> bakes its colors in
+// at file-save time and can't react to a runtime /theme change the way the
+// old text-clip ASCII version could.
+function CastLogo({ class: className }) {
+	const rects = [];
+	CAST_BANNER_LINES.forEach((line, y) => {
+		for (let x = 0; x < line.length; x++) {
+			const opacity = CAST_LOGO_OPACITY[line[x]];
+			if (!opacity) continue;
+			rects.push(
+				html`<rect key=${`${x}-${y}`} x=${x * CAST_LOGO_CELL} y=${y * CAST_LOGO_CELL} width=${CAST_LOGO_CELL} height=${CAST_LOGO_CELL} fill="url(#cast-logo-grad)" opacity=${opacity} />`,
+			);
+		}
+	});
+	const width = Math.max(...CAST_BANNER_LINES.map((l) => l.length)) * CAST_LOGO_CELL;
+	const height = CAST_BANNER_LINES.length * CAST_LOGO_CELL;
+	return html`
+		<svg class=${className} viewBox="0 0 ${width} ${height}" role="img" aria-label="cast">
+			<defs>
+				<linearGradient id="cast-logo-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+					<stop class="cast-logo-grad-from" offset="0%" />
+					<stop class="cast-logo-grad-to" offset="100%" />
+				</linearGradient>
+			</defs>
+			${rects}
+		</svg>
+	`;
+}
 
 const isMac =
 	typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "");
@@ -81,6 +119,11 @@ function applyTheme(colors) {
 	root.setProperty("--cyan", colors.accent);
 	root.setProperty("--violet", colors.gradient.to);
 	root.setProperty("--gradient", `linear-gradient(135deg, ${colors.gradient.from}, ${colors.gradient.to})`);
+	// Standalone stops (not just the composed `--gradient` shorthand) — needed
+	// so the SVG logo's <linearGradient> stops can track the theme via plain
+	// CSS `stop-color: var(...)`, which can't parse a `linear-gradient(...)` value.
+	root.setProperty("--gradient-from", colors.gradient.from);
+	root.setProperty("--gradient-to", colors.gradient.to);
 	root.setProperty("--teal", colors.user);
 	root.setProperty("--purple", colors.agent);
 	root.setProperty("--blue", colors.tool);
@@ -569,7 +612,7 @@ function StreamingBlocks({ blocks }) {
 			${blocks.map((block, i) => {
 				if (block.kind === "content") {
 					return html`<div key=${i} class="streaming-block">
-						<div class="streaming-content streaming-cursor" dangerouslySetInnerHTML=${{ __html: renderMarkdown(block.text) }} />
+						<div class="streaming-content" dangerouslySetInnerHTML=${{ __html: renderMarkdown(block.text) }} />
 					</div>`;
 				}
 				if (block.kind === "thinking") {
@@ -2006,6 +2049,7 @@ function Sidebar({
 	onRenameSession,
 	onPinSession,
 	open,
+	confirm,
 }) {
 	const [personaOpen, setPersonaOpen] = useState(false);
 	const [search, setSearch] = useState("");
@@ -2110,9 +2154,13 @@ function Sidebar({
 				class="sidebar-item-close"
 				title=${s.status === "running" ? "Stop and close" : "Close"}
 				aria-label="Close"
-				onClick=${(e) => {
+				onClick=${async (e) => {
 					e.stopPropagation();
-					onCloseSession(s.id);
+					const message =
+						s.status === "running"
+							? "Stop the running agent and close this thread? History stays saved — you can still open it by URL."
+							: "Close this thread? History stays saved — you can still open it by URL.";
+					if (await confirm(message)) onCloseSession(s.id);
 				}}
 			><${icons.xMark} /></button>
 		</div>
@@ -3527,6 +3575,7 @@ function App() {
 				onRenameSession=${renameSession}
 				onPinSession=${pinSession}
 				open=${sidebarOpen}
+				confirm=${requestConfirm}
 			/>
 
 			<!-- Directory picker — rendered here (not inside Sidebar) because
@@ -3601,7 +3650,7 @@ function App() {
 						streaming.length === 0 &&
 						html`
 						<div class="empty-state">
-							<pre class="empty-state-banner">${CAST_BANNER}</pre>
+							<${CastLogo} class="empty-state-banner" />
 							<p class="empty-state-title">Ready when you are</p>
 							<p class="empty-state-hint">Send a message, or type <code>/</code> to see what this agent can do.</p>
 						</div>
