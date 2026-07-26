@@ -1,23 +1,16 @@
 // Generates assets/cast-banner.svg from the same block-character grid as
-// CAST_BANNER (src/core/help.ts) — a static vector so the banner scales
-// cleanly wherever <img> is honored (README on github.com, npm, forks),
-// unlike a plain-text code fence which GitHub only ever lets scroll
-// horizontally on narrow screens, never shrink.
-import { writeFileSync } from "node:fs";
+// CAST_BANNER (src/core/help.ts) and cast web's inline logo (app.js) — a
+// static vector so the banner scales cleanly wherever <img> is honored
+// (README on github.com, npm, forks), unlike a plain-text code fence which
+// GitHub only ever lets scroll horizontally on narrow screens, never shrink.
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 
-// Keep in sync with src/core/help.ts's CAST_BANNER.
-const BANNER = [
-	" ░▒▓██████▓▒░ ░▒▓██████▓▒░ ░▒▓███████▓▒░▒▓████████▓▒░",
-	"░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░         ░▒▓█▓▒░    ",
-	"░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░         ░▒▓█▓▒░    ",
-	"░▒▓█▓▒░      ░▒▓████████▓▒░░▒▓██████▓▒░   ░▒▓█▓▒░    ",
-	"░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░      ░▒▓█▓▒░  ░▒▓█▓▒░    ",
-	"░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░      ░▒▓█▓▒░  ░▒▓█▓▒░    ",
-	" ░▒▓██████▓▒░░▒▓█▓▒░░▒▓█▓▒░▒▓███████▓▒░   ░▒▓█▓▒░    ",
-];
+// Single source of truth, shared with src/core/help.ts (CLI banner) and
+// src/web/public/app.js (cast web's logo) — see that JSON file's own comment.
+const BANNER = JSON.parse(readFileSync(join(ROOT, "src", "web", "public", "cast-banner-grid.json"), "utf-8"));
 
 // Terminal block-drawing chars, darkest→lightest fill.
 const OPACITY = { "░": 0.35, "▒": 0.6, "▓": 0.85, "█": 1 };

@@ -571,8 +571,17 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 <h2>Web Tools</h2>
 <p>Web tools are disabled by default. Enable them with <code>/web</code> (persists to settings.json). When disabled, the tools are not advertised to the model — it doesn&#39;t know they exist.</p>
 <h3><code>web_search</code></h3>
-<p>Search the web via DuckDuckGo. No API key required.</p>
-<div class="table-wrap"><table><thead><tr><th>Parameter</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>query</code></td><td>Yes</td><td>Search query</td></tr><tr><td><code>maxResults</code></td><td>No</td><td>Maximum results (default: 10)</td></tr><tr><td><code>region</code></td><td>No</td><td>Region code (default: <code>wt-wt</code>)</td></tr><tr><td><code>time</code></td><td>No</td><td>Time filter: <code>d</code> (day), <code>w</code> (week), <code>m</code> (month), <code>y</code> (year)</td></tr></tbody></table></div><h3><code>web_fetch</code></h3>
+<p>Searches via DuckDuckGo&#39;s HTML endpoint by default — no API key required, but DDG
+rate-limits scraping to roughly 4 requests per IP before serving a CAPTCHA. If you hit
+that limit, switch the backend with <code>/web-search-provider</code> (TUI) or the <strong>Tools</strong> tab in
+<code>cast web</code>&#39;s settings — no restart needed, it takes effect on the next <code>web_search</code> call:</p>
+<ul>
+<li><a href="https://app.tavily.com">Tavily</a> — an AI-search aggregator with a recurring 1000
+requests/month free tier, no card required.</li>
+<li><a href="https://api-dashboard.search.brave.com">Brave Search</a> — Brave&#39;s own general web
+index, a more direct DDG replacement.</li>
+</ul>
+<div class="table-wrap"><table><thead><tr><th>Parameter</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>query</code></td><td>Yes</td><td>Search query</td></tr><tr><td><code>maxResults</code></td><td>No</td><td>Maximum results (default: 10)</td></tr><tr><td><code>region</code></td><td>No</td><td>Region code (default: <code>wt-wt</code>) — DDG backend only</td></tr><tr><td><code>time</code></td><td>No</td><td>Time filter: <code>d</code> (day), <code>w</code> (week), <code>m</code> (month), <code>y</code> (year) — DDG backend only</td></tr></tbody></table></div><h3><code>web_fetch</code></h3>
 <p>Fetch a web page and return clean markdown via Jina Reader. Handles JS rendering, PDFs, and content extraction.</p>
 <div class="table-wrap"><table><thead><tr><th>Parameter</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>url</code></td><td>Yes</td><td>URL to fetch</td></tr><tr><td><code>maxChars</code></td><td>No</td><td>Maximum characters (default: 12,000)</td></tr></tbody></table></div><h2>Task Tool</h2>
 <h3><code>task</code></h3>
