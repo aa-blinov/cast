@@ -573,16 +573,39 @@ export async function execLs(args: Record<string, unknown>, cwd: string, _config
 	const dirPath = args.path ? resolvePath(String(args.path), cwd) : cwd;
 	const limit = typeof args.limit === "number" ? args.limit : 500;
 
-	const entries = await readdir(dirPath, { withFileTypes: true });
+	let entries: Dirent[];
+	try {
+		entries = await readdir(dirPath, { withFileTypes: true });
+	} catch (err) {
+		const code = (err as { code?: string })?.code;
+		if (code === "ENOENT") return { content: `Directory not found: ${dirPath}`, isError: true };
+		if (code === "ENOTDIR") return { content: `Not a directory: ${dirPath}`, isError: true };
+		throw err;
+	}
 	const lines: string[] = [];
 
 	for (const entry of entries.slice(0, limit)) {
-		const isDir = entry.isDirectory();
+		// entry.isDirectory() reflects the dirent itself: a symlink pointing
+		// at a directory reports false here (it's a symlink, not a
+		// directory), which used to print it as a "file" with the target
+		// directory's meaningless inode "size" and no trailing slash. Follow
+		// the symlink with stat to classify it by what it actually points to,
+		// same as walkFiles does for glob/grep's fallback tree walk.
+		let isDir = entry.isDirectory();
+		const statTarget = join(dirPath, entry.name);
+		if (entry.isSymbolicLink()) {
+			try {
+				const target = await stat(statTarget);
+				isDir = target.isDirectory();
+			} catch {
+				// Broken symlink — keep the dirent's own (non-directory) type.
+			}
+		}
 		const prefix = isDir ? "d" : "f";
 		let size = "";
 		if (!isDir) {
 			try {
-				const s = await stat(join(dirPath, entry.name));
+				const s = await stat(statTarget);
 				size = formatSize(s.size);
 			} catch {
 				size = "?";
