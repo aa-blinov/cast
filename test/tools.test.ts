@@ -793,6 +793,45 @@ describe("edit", () => {
 		expect(readFileSync(join(TEST_DIR, "before-top.txt"), "utf-8")).toBe("header\nfirst\nsecond\n");
 	});
 
+	it("preserves ops[] order for multiple insert_after at the same anchor", async () => {
+		// Each splice at the same point pushes prior content further down, so
+		// applying ops bottom-up naively reverses same-anchor inserts (AAA/BBB
+		// in ops[] order used to land as BBB/AAA on disk). idx-based tie-
+		// breaking in the sort must keep the model's listed order.
+		writeFileSync(join(TEST_DIR, "same-anchor.txt"), "line1\nline2\nline3\n");
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const before = await exec("read", { path: "same-anchor.txt" });
+		const anchor = anchorForLine(before.content, 2);
+		const result = await exec("edit", {
+			path: "same-anchor.txt",
+			ops: [
+				{ op: "insert_after", anchor, content: "AAA" },
+				{ op: "insert_after", anchor, content: "BBB" },
+			],
+		});
+		expect(result.isError).toBeFalsy();
+		expect(readFileSync(join(TEST_DIR, "same-anchor.txt"), "utf-8")).toBe("line1\nline2\nAAA\nBBB\nline3\n");
+	});
+
+	it("preserves ops[] order for multiple insert_before at the same anchor", async () => {
+		writeFileSync(join(TEST_DIR, "same-anchor-before.txt"), "line1\nline2\nline3\n");
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const before = await exec("read", { path: "same-anchor-before.txt" });
+		const anchor = anchorForLine(before.content, 2);
+		const result = await exec("edit", {
+			path: "same-anchor-before.txt",
+			ops: [
+				{ op: "insert_before", anchor, content: "X1" },
+				{ op: "insert_before", anchor, content: "X2" },
+				{ op: "insert_before", anchor, content: "X3" },
+			],
+		});
+		expect(result.isError).toBeFalsy();
+		expect(readFileSync(join(TEST_DIR, "same-anchor-before.txt"), "utf-8")).toBe(
+			"line1\nX1\nX2\nX3\nline2\nline3\n",
+		);
+	});
+
 	it("rejects an insert_before anchored strictly inside a replace range", async () => {
 		writeFileSync(join(TEST_DIR, "before-overlap.txt"), "l1\nl2\nl3\nl4\nl5\n");
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
