@@ -1,11 +1,23 @@
 /**
  * Plan mode — restricted agent state for exploring and planning before implementation.
  *
- * The model can read files and produce a structured plan, but cannot execute code,
- * write files, or run shell commands. Plans are persisted as markdown files at
+ * The model can read files and produce a structured plan, but cannot execute code
+ * or run shell commands. Plans are persisted as markdown files at
  * ~/.cast/plans/<session-id>/<name>.md — one directory per session, so a session
- * can hold several named plans. The name comes from the model via plan_write and
- * is slugified before hitting the filesystem.
+ * can hold several named plans.
+ *
+ * Authoring the plan itself goes through the SAME `write`/`edit` tools the model
+ * already uses for real code (mirrors how Claude Code's ExitPlanMode works: no
+ * separate plan-write/plan-edit tool — the plan-mode permission gate just carves
+ * out one path exception). `checkPlanFileGate`/`finalizePlanFileWrite`/
+ * `enforcePlanCapAfterEdit` below are that gate, called from tools.ts's
+ * createToolExecutor around the ordinary execWrite/execEdit calls whenever
+ * planState.enabled is true. This used to be two dedicated tools
+ * (plan_write/plan_edit) with their own heading-based section editor; removed
+ * because the model, already calibrated by write/edit's own "prefer edit over
+ * write" description, kept reaching for a full plan_write rewrite instead of
+ * plan_edit far more than it did for real files — reusing write/edit directly
+ * gives it the same tool (and the same nudge) it already uses correctly.
  */
 
 import {
@@ -19,7 +31,8 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
+import { invalidateCachedFile } from "./tools/hashline-cache.ts";
 import type { ToolResult } from "./tools.ts";
 
 // ============================================================================
@@ -29,15 +42,7 @@ import type { ToolResult } from "./tools.ts";
 /** All plan tool names — used to disable them wherever plan mode can't apply
  * (headless runs, subagents). Within the TUI they split by mode: the authoring
  * tools are plan-mode-only, plan_check/plan_enter are build-mode-only (see App.tsx). */
-export const PLAN_TOOL_NAMES = [
-	"plan_write",
-	"plan_edit",
-	"plan_read",
-	"plan_done",
-	"plan_check",
-	"plan_enter",
-	"plan_discard",
-] as const;
+export const PLAN_TOOL_NAMES = ["plan_read", "plan_done", "plan_check", "plan_enter", "plan_discard"] as const;
 
 /**
  * Terminal (signal) tools: a successful call ends the turn. Their contract is
@@ -59,17 +64,21 @@ export const TERMINAL_TOOL_NAMES: readonly string[] = ["plan_done", "plan_enter"
  * can't be added without deciding its mode here (a test enforces this).
  */
 export function modeDisabledTools(planMode: boolean): readonly string[] {
-	return planMode
-		? ["write", "edit", "plan_check", "plan_enter"]
-		: ["plan_write", "plan_edit", "plan_done", "plan_discard"];
+	// write/edit are NOT in either list: they stay advertised in both modes.
+	// In plan mode they're gated per-call to the active plan file's path
+	// (checkPlanFileGate, called from tools.ts) instead of being blanket
+	// hidden — the model uses the exact same tools it already uses for real
+	// code, just pointed at one file.
+	return planMode ? ["plan_check", "plan_enter"] : ["plan_done", "plan_discard"];
 }
 
 export interface PlanState {
 	enabled: boolean;
 	/** Directory holding this session's plans: ~/.cast/plans/<session-id>/ */
 	plansDir: string;
-	/** Plan most recently written via plan_write in this process. When unset
-	 * (e.g. a resumed session), the newest file in plansDir is the active plan. */
+	/** Plan most recently written via write/edit (gated to plansDir) in this
+	 * process. When unset (e.g. a resumed session), the newest file in
+	 * plansDir is the active plan. */
 	activePlanPath?: string;
 }
 
@@ -478,148 +487,88 @@ function parseSections(content: string): Section[] {
 // Tool executors
 // ============================================================================
 
+// ============================================================================
+// write/edit gate for plan mode — replaces the old plan_write/plan_edit tools
+// ============================================================================
+//
+// The model authors the plan file with the SAME write/edit tools it uses for
+// real code; these three functions are the gate tools.ts's createToolExecutor
+// applies around execWrite/execEdit whenever planState.enabled is true. See
+// the file-level doc comment for why this replaced a dedicated tool pair.
+
+/** True for a real .md file directly inside `plansDir` — no subdirectories,
+ * no `..` traversal. The only paths write/edit may touch while plan mode is
+ * active. dirname()/extname() on the resolved absolute path reject both
+ * cheaply without needing a realpath syscall. */
+export function isPlanFilePath(absolutePath: string, plansDir: string): boolean {
+	return dirname(absolutePath) === plansDir && extname(absolutePath).toLowerCase() === ".md";
+}
+
+/**
+ * Checked before every write/edit call while plan mode is active. Anything
+ * outside the session's plans directory — real source files, configs, the
+ * repo in general — is refused, same net effect as the old blanket
+ * write/edit disablement, but scoped per-path instead of per-tool.
+ */
+export function checkPlanFileGate(
+	absolutePath: string,
+	planState: PlanState,
+): { ok: true } | { ok: false; error: string } {
+	if (isPlanFilePath(absolutePath, planState.plansDir)) return { ok: true };
+	return {
+		ok: false,
+		error:
+			`write/edit only reach the plan file while plan mode is active — "${absolutePath}" is outside ${planState.plansDir}. ` +
+			`Use a path directly inside that directory ending in .md, e.g. ${join(planState.plansDir, "short-name.md")}.`,
+	};
+}
+
+/**
+ * Called after a successful write/edit to a plan-mode path: normalizes any
+ * bare "###" step headings into "- [ ]" checkboxes (so plan_check and the
+ * open-work gate can see them — see normalizeStepChecklist), and makes this
+ * the active plan for plan_read/plan_check/plan_done, mirroring what
+ * plan_write's `activePlanPath = path` used to do explicitly.
+ */
+export function finalizePlanFileWrite(absolutePath: string, planState: PlanState): void {
+	let raw: string;
+	try {
+		raw = readFileSync(absolutePath, "utf-8");
+	} catch {
+		return; // Shouldn't happen right after a successful write/edit; nothing to normalize.
+	}
+	const normalized = normalizeStepChecklist(raw);
+	if (normalized !== raw) {
+		writeFileAtomic(absolutePath, normalized);
+		invalidateCachedFile(absolutePath);
+	}
+	planState.activePlanPath = absolutePath;
+}
+
 /** Hard cap on a plan file's size. The plan rides in the system prompt of
  * every build-mode request — an unbounded plan inflates every request for the
  * rest of the session. ~32k chars ≈ 8k tokens is already a very large spec. */
 export const MAX_PLAN_CHARS = 32_000;
 
-export function execPlanWrite(args: Record<string, unknown>, planState: PlanState): ToolResult {
-	const name = slugifyPlanName(typeof args.name === "string" ? args.name : "");
-	if (!name) {
-		return {
-			content: "Error: name is required — a short descriptive slug like 'auth-refactor'.",
-			isError: true,
-		};
-	}
-	const rawContent = typeof args.content === "string" ? args.content.trim() : "";
-	if (!rawContent) {
-		return { content: "Error: content is required and must not be empty.", isError: true };
-	}
-	const content = normalizeStepChecklist(rawContent);
-	if (content.length > MAX_PLAN_CHARS) {
-		return {
-			content: `Error: plan is ${content.length} chars — the limit is ${MAX_PLAN_CHARS}. A plan is an execution spec, not a document dump: cut decision-free prose, keep every step concrete.`,
-			isError: true,
-		};
-	}
-
-	const path = join(planState.plansDir, `${name}.md`);
-	writePlanFile(path, content);
-	// The plan just written becomes the one plan_edit/plan_read/plan_done target.
-	planState.activePlanPath = path;
+/**
+ * Enforces MAX_PLAN_CHARS after an edit to a plan file. `write` gets the hard
+ * cap checked up front (the full new content is known before anything is
+ * written); `edit` applies anchored deltas, so there's no way to reject an
+ * over-budget change before it lands — instead, roll back to the pre-edit
+ * snapshot and report the size, same net effect (the file never ends up over
+ * cap) with the same message shape plan_edit used to give.
+ */
+export function enforcePlanCapAfterEdit(
+	absolutePath: string,
+	beforeContent: string,
+): { ok: true } | { ok: false; error: string } {
+	const after = readFileSync(absolutePath, "utf-8");
+	if (after.length <= MAX_PLAN_CHARS) return { ok: true };
+	writeFileAtomic(absolutePath, beforeContent);
+	invalidateCachedFile(absolutePath);
 	return {
-		content: JSON.stringify({
-			success: true,
-			name,
-			path,
-			charCount: content.length,
-		}),
-	};
-}
-
-export function execPlanEdit(args: Record<string, unknown>, planState: PlanState): ToolResult {
-	const heading = typeof args.heading === "string" ? args.heading.trim() : "";
-	const newBody = typeof args.content === "string" ? args.content : "";
-
-	if (!heading) {
-		return { content: "Error: heading is required.", isError: true };
-	}
-
-	const { exists, content, error, path } = readActivePlan(planState);
-	if (error) {
-		return { content: `Error reading plan file: ${error}`, isError: true };
-	}
-	if (!exists || !path) {
-		return {
-			content: `Error: No plan exists yet. Use plan_write to create one first.`,
-			isError: true,
-		};
-	}
-
-	const lines = content.split("\n");
-	const sections = parseSections(content);
-
-	// Exact heading match wins over substring, so "Steps" edits "Steps" even
-	// when "Next Steps" also exists. Both are case-insensitive.
-	const target = heading.toLowerCase();
-	let matches = sections.filter((s) => s.heading.toLowerCase() === target);
-	if (matches.length === 0) {
-		matches = sections.filter((s) => s.heading.toLowerCase().includes(target));
-	}
-	if (matches.length === 0) {
-		return {
-			content: JSON.stringify({
-				success: false,
-				error: `No section heading matches "${heading}".`,
-				currentHeadings: sections.map((s) => s.heading),
-			}),
-			isError: true,
-		};
-	}
-	if (matches.length > 1) {
-		return {
-			content: JSON.stringify({
-				success: false,
-				error: `Heading "${heading}" is ambiguous — matches ${matches.length} sections. Use a more specific heading.`,
-				matchingHeadings: matches.map((s) => s.heading),
-			}),
-			isError: true,
-		};
-	}
-	const section = matches[0]!;
-	const matchingHeading = section.heading;
-
-	// A section's body may only contain headings strictly deeper than the
-	// section itself. A body heading at the same or shallower level splits the
-	// document into new top-level sections instead of nesting inside this one —
-	// that's how a real session ended up with the plan's `## Steps` heading
-	// duplicated (the model's replacement body for "Steps" itself contained a
-	// fresh "## Design System" followed by another "## Steps"), which then broke
-	// every later heading lookup (plan_edit, listOpenPlanSteps, plan_check).
-	const bodyLines = newBody.split("\n");
-	const bodyFenced = fencedLineMask(bodyLines);
-	const illegalHeadingIndex = bodyLines.findIndex((line, i) => {
-		if (bodyFenced[i]) return false;
-		const match = line.match(/^(#{1,6})\s+/);
-		return match ? match[1]!.length <= section.level : false;
-	});
-	if (illegalHeadingIndex !== -1) {
-		return {
-			content: JSON.stringify({
-				success: false,
-				error:
-					`The new content for "${matchingHeading}" contains a heading ` +
-					`("${bodyLines[illegalHeadingIndex]!.trim()}") at or above this section's own level (${"#".repeat(section.level)}). ` +
-					`That would split the document instead of nesting inside "${matchingHeading}" — likely producing a ` +
-					`duplicate "${matchingHeading}" heading. Use "${"#".repeat(section.level + 1)} ..." or deeper for ` +
-					`anything inside this section's content. To add a new top-level section, edit a different heading, ` +
-					`or rewrite the whole plan with plan_write.`,
-			}),
-			isError: true,
-		};
-	}
-
-	// Replace section body: keep heading line, replace everything until next same-level heading
-	const before = lines.slice(0, section.bodyStartLine);
-	const after = lines.slice(section.bodyEndLine);
-	const newLines = [...before, newBody.trimEnd(), ...after];
-	const newContent = normalizeStepChecklist(newLines.join("\n"));
-	if (newContent.length > MAX_PLAN_CHARS) {
-		return {
-			content: `Error: the edit would grow the plan to ${newContent.length} chars — the limit is ${MAX_PLAN_CHARS}. Tighten the section instead of expanding it.`,
-			isError: true,
-		};
-	}
-
-	writePlanFile(path, newContent);
-
-	return {
-		content: JSON.stringify({
-			success: true,
-			plan: basename(path, ".md"),
-			section: matchingHeading,
-			charCount: newContent.length,
-		}),
+		ok: false,
+		error: `Error: this edit would grow the plan to ${after.length} chars — the limit is ${MAX_PLAN_CHARS}. Reverted — tighten the section instead of expanding it.`,
 	};
 }
 

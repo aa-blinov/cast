@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
 import { MessageQueue } from "../src/core/loop.ts";
-import { PLAN_TOOL_NAMES, type PlanState } from "../src/core/plan.ts";
+import { MAX_PLAN_CHARS, PLAN_TOOL_NAMES, type PlanState } from "../src/core/plan.ts";
 import { BackgroundTaskRegistry, type BashBackgroundDeps } from "../src/core/tools/bash-background.ts";
 import { isPermissionError, withAccessNote } from "../src/core/tools/search.ts";
 import { createToolExecutor, getToolDefinitions } from "../src/core/tools.ts";
@@ -2045,9 +2045,12 @@ describe("plan tools dispatch", () => {
 		const planState = planStateInTestDir();
 		const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, undefined, planState);
 
-		const write = await exec("plan_write", { name: "lifecycle", content: "# P\n\n## Steps\n- [ ] only step" });
+		// Plan authoring goes through the ordinary write/edit tools, gated to
+		// the plan file's path — see plan.ts's file doc comment.
+		const planPath = join(TEST_DIR, "plans", "lifecycle.md");
+		const write = await exec("write", { path: planPath, content: "# P\n\n## Steps\n- [ ] only step" });
 		expect(write.isError).toBeFalsy();
-		expect(existsSync(join(TEST_DIR, "plans", "lifecycle.md"))).toBe(true);
+		expect(existsSync(planPath)).toBe(true);
 
 		const read = JSON.parse((await exec("plan_read", {})).content);
 		expect(read.name).toBe("lifecycle");
@@ -2064,7 +2067,70 @@ describe("plan tools dispatch", () => {
 
 		const discard = JSON.parse((await exec("plan_discard", { name: "lifecycle" })).content);
 		expect(discard.discarded).toBe("lifecycle");
-		expect(existsSync(join(TEST_DIR, "plans", "lifecycle.md"))).toBe(false);
+		expect(existsSync(planPath)).toBe(false);
+	});
+
+	it("write/edit reach the real code tree normally when plan mode is off", async () => {
+		const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, undefined, {
+			enabled: false,
+			plansDir: join(TEST_DIR, "plans"),
+		});
+		const result = await exec("write", { path: join(TEST_DIR, "real-file.ts"), content: "export const x = 1;\n" });
+		expect(result.isError).toBeFalsy();
+		expect(existsSync(join(TEST_DIR, "real-file.ts"))).toBe(true);
+	});
+
+	it("blocks write/edit outside the plans directory while plan mode is active", async () => {
+		const planState = planStateInTestDir();
+		const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, undefined, planState);
+
+		const result = await exec("write", { path: join(TEST_DIR, "real-file.ts"), content: "export const x = 1;\n" });
+		expect(result.isError).toBe(true);
+		expect(result.content).toContain(planState.plansDir);
+		expect(existsSync(join(TEST_DIR, "real-file.ts"))).toBe(false);
+	});
+
+	it("blocks a non-.md file even inside the plans directory", async () => {
+		const planState = planStateInTestDir();
+		const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, undefined, planState);
+
+		const result = await exec("write", { path: join(planState.plansDir, "notes.txt"), content: "hi" });
+		expect(result.isError).toBe(true);
+	});
+
+	it("rejects a write over MAX_PLAN_CHARS before touching disk", async () => {
+		const planState = planStateInTestDir();
+		const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, undefined, planState);
+		const planPath = join(planState.plansDir, "huge.md");
+
+		const result = await exec("write", { path: planPath, content: "y".repeat(MAX_PLAN_CHARS + 1) });
+		expect(result.isError).toBe(true);
+		expect(result.content).toContain("limit is");
+		expect(existsSync(planPath)).toBe(false);
+	});
+
+	it("rolls back an edit that would grow the plan past MAX_PLAN_CHARS", async () => {
+		const planState = planStateInTestDir();
+		const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, undefined, planState);
+		const planPath = join(planState.plansDir, "grows.md");
+
+		await exec("write", { path: planPath, content: "# Plan\n\n## Steps\n- [ ] x" });
+		const before = await exec("read", { path: planPath });
+		const anchor = before.content.split("\n")[3]!.split("→")[0]!; // "- [ ] x" line
+
+		const result = await exec("edit", {
+			path: planPath,
+			ops: [{ op: "replace", anchor, content: `- [ ] ${"y".repeat(MAX_PLAN_CHARS + 1)}` }],
+		});
+		expect(result.isError).toBe(true);
+		expect(result.content).toContain("limit is");
+		expect(readFileSync(planPath, "utf-8")).toBe("# Plan\n\n## Steps\n- [ ] x");
+	});
+
+	it("write/edit on the plan path stay unaffected when planState is undefined (no plan mode configured at all)", async () => {
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const result = await exec("write", { path: join(TEST_DIR, "anything.md"), content: "hi" });
+		expect(result.isError).toBeFalsy();
 	});
 });
 

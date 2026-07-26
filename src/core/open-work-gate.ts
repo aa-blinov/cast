@@ -5,8 +5,9 @@
  *
  * Open work is read from the plan on disk: `- [ ]` checklist items, or `###`
  * headings under `## Steps` when there is no checklist (an older plan, or one
- * edited by hand — plan_write/plan_edit now normalize fresh headings into
- * checkboxes). The two sources aren't equally actionable: checklist items can
+ * edited by hand — write/edit on the plan file now normalize fresh headings
+ * into checkboxes, see plan.ts's finalizePlanFileWrite). The two sources
+ * aren't equally actionable: checklist items can
  * be closed with plan_check; heading-only items can't, since plan_check only
  * ever recognizes `- [ ]`. `closableViaPlanCheck` tracks which source is in
  * play so the reminder doesn't send the model chasing a tool call that can

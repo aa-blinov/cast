@@ -564,7 +564,7 @@ export function App(props: AppProps): JSX.Element {
 				refineArmedRef.current = false;
 			} else if (!text.trim().startsWith("/")) {
 				refineArmedRef.current = false;
-				input = `Refine the plan based on this feedback, update it with plan_edit/plan_write, then call plan_done again:\n\n${text.trim()}`;
+				input = `Refine the plan based on this feedback, update the plan file with edit/write, then call plan_done again:\n\n${text.trim()}`;
 			}
 		}
 		await handleInput(input, undefined, depsRef.current);

@@ -233,12 +233,14 @@ Use for:
 
 ## Plan Tools
 
-Availability is mode-gated: authoring tools exist only in plan mode, progress and suggestion tools only in build mode, `plan_read` in both. See [Plan Mode](plan-mode.md) for details.
+Availability is mode-gated: progress and suggestion tools only in build mode, `plan_read` in both. See [Plan Mode](plan-mode.md) for details.
+
+The plan file is authored with the ordinary `write`/`edit` tools above — no
+separate plan-write/plan-edit tool. In plan mode they're restricted to a
+`.md` file directly inside the session's plans directory.
 
 | Tool | Mode | Description |
 |------|------|-------------|
-| `plan_write` | Plan | Write or replace a named plan file |
-| `plan_edit` | Plan | Edit a section of the active plan by heading |
 | `plan_read` | Both | Read a plan's content and headings (switches the active plan only in plan mode) |
 | `plan_done` | Plan | Signal that the plan is ready for review |
 | `plan_discard` | Plan | Delete a plan from the session |

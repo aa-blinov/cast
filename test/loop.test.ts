@@ -2207,7 +2207,7 @@ describe("runAgentLoop — allowedTools filtering", () => {
 		expect(names.has("read")).toBe(true);
 		expect(names.has("web_search")).toBe(true);
 		expect(names.has("web_fetch")).toBe(true);
-		expect(names.has("plan_write")).toBe(true);
+		expect(names.has("plan_read")).toBe(true);
 		expect(names.has("plan_done")).toBe(true);
 		expect(names.has("bash")).toBe(false);
 		expect(names.has("write")).toBe(false);
