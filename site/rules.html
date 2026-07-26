@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
 <title>Rules — cast</title>
 <meta name="description" content="Rules documentation for cast, a role-based terminal agent harness.">
 <style>
@@ -103,7 +103,6 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 
 	/* Hero */
 	.hero { padding: 56px 16px 40px; }
-	.hero-ascii { font-size: .65rem; }
 	.hero h1 { font-size: 2rem; }
 	.hero p { font-size: 1rem; margin-bottom: 24px; }
 	.hero-buttons a { padding: 10px 22px; font-size: .9rem; }
@@ -254,12 +253,13 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 
 /* ── Landing page ───────────────────────────────────────────────────── */
 .hero {
-	text-align: center; padding: 100px 24px 60px;
+	text-align: center; padding: 100px 24px 60px; overflow-x: hidden;
 	background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg) 100%);
 }
+.hero-ascii-wrap { margin-bottom: 24px; }
 .hero-ascii {
 	font-family: var(--font-mono); font-size: .875rem;
-	white-space: pre; margin-bottom: 24px; line-height: 1.2;
+	white-space: pre; display: inline-block; line-height: 1.2;
 	background: linear-gradient(90deg, #38e0ff, #38bdf8, #a78bfa, #a855f7);
 	-webkit-background-clip: text; -webkit-text-fill-color: transparent;
 	background-clip: text;
@@ -291,7 +291,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 .install-block .note { font-size: .8rem; color: var(--text-muted); margin-top: 8px; }
 
 .features {
-	display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+	display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
 	gap: 20px; padding: 40px 48px 60px; max-width: 1200px; margin: 0 auto;
 }
 .feature {
@@ -324,7 +324,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 	border: none; padding: 0;
 }
 .docs-grid {
-	display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+	display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
 	gap: 12px;
 }
 .doc-card {
@@ -412,6 +412,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 .comparison > p {
 	text-align: center; color: var(--text-secondary); max-width: 540px; margin: 0 auto 24px;
 }
+.comparison-table-wrap { overflow-x: auto; }
 .comparison table {
 	width: 100%; border-collapse: collapse;
 	font-size: .875rem; background: var(--bg-secondary);

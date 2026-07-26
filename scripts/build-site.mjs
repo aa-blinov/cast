@@ -172,7 +172,6 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 
 	/* Hero */
 	.hero { padding: 56px 16px 40px; }
-	.hero-ascii { font-size: .65rem; }
 	.hero h1 { font-size: 2rem; }
 	.hero p { font-size: 1rem; margin-bottom: 24px; }
 	.hero-buttons a { padding: 10px 22px; font-size: .9rem; }
@@ -323,12 +322,13 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 
 /* ── Landing page ───────────────────────────────────────────────────── */
 .hero {
-	text-align: center; padding: 100px 24px 60px;
+	text-align: center; padding: 100px 24px 60px; overflow-x: hidden;
 	background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg) 100%);
 }
+.hero-ascii-wrap { margin-bottom: 24px; }
 .hero-ascii {
 	font-family: var(--font-mono); font-size: .875rem;
-	white-space: pre; margin-bottom: 24px; line-height: 1.2;
+	white-space: pre; display: inline-block; line-height: 1.2;
 	background: linear-gradient(90deg, #38e0ff, #38bdf8, #a78bfa, #a855f7);
 	-webkit-background-clip: text; -webkit-text-fill-color: transparent;
 	background-clip: text;
@@ -360,7 +360,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 .install-block .note { font-size: .8rem; color: var(--text-muted); margin-top: 8px; }
 
 .features {
-	display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+	display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
 	gap: 20px; padding: 40px 48px 60px; max-width: 1200px; margin: 0 auto;
 }
 .feature {
@@ -393,7 +393,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 	border: none; padding: 0;
 }
 .docs-grid {
-	display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+	display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
 	gap: 12px;
 }
 .doc-card {
@@ -481,6 +481,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 .comparison > p {
 	text-align: center; color: var(--text-secondary); max-width: 540px; margin: 0 auto 24px;
 }
+.comparison-table-wrap { overflow-x: auto; }
 .comparison table {
 	width: 100%; border-collapse: collapse;
 	font-size: .875rem; background: var(--bg-secondary);
@@ -509,7 +510,7 @@ const LANDING_HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
 <title>cast — One agent, many roles</title>
 <meta name="description" content="A role-based terminal agent harness. 13 built-in personas, same tools, different judgment. Runs on any OpenAI-compatible model — including the one on your own hardware.">
 <style>${CSS}</style>
@@ -525,13 +526,32 @@ const LANDING_HTML = `<!DOCTYPE html>
 
 <div class="main main-landing">
 	<section class="hero">
-		<pre class="hero-ascii"> ░▒▓██████▓▒░ ░▒▓██████▓▒░ ░▒▓███████▓▒░▒▓████████▓▒░
+		<div class="hero-ascii-wrap"><pre class="hero-ascii" id="hero-ascii"> ░▒▓██████▓▒░ ░▒▓██████▓▒░ ░▒▓███████▓▒░▒▓████████▓▒░
 ░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░         ░▒▓█▓▒░
 ░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░         ░▒▓█▓▒░
 ░▒▓█▓▒░      ░▒▓████████▓▒░░▒▓██████▓▒░   ░▒▓█▓▒░
 ░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░      ░▒▓█▓▒░  ░▒▓█▓▒░
 ░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░      ░▒▓█▓▒░  ░▒▓█▓▒░
- ░▒▓██████▓▒░░▒▓█▓▒░░▒▓█▓▒░▒▓███████▓▒░   ░▒▓█▓▒░</pre>
+ ░▒▓██████▓▒░░▒▓█▓▒░░▒▓█▓▒░▒▓███████▓▒░   ░▒▓█▓▒░</pre></div>
+		<script>
+			(function () {
+				var pre = document.getElementById("hero-ascii");
+				var wrap = pre.parentElement;
+				var baseFontSize = Number.parseFloat(getComputedStyle(pre).fontSize);
+				function fit() {
+					pre.style.fontSize = baseFontSize + "px";
+					var natural = pre.scrollWidth;
+					var avail = wrap.clientWidth;
+					if (natural > avail) pre.style.fontSize = (baseFontSize * avail) / natural + "px";
+				}
+				fit();
+				window.addEventListener("resize", fit);
+				// The web font (JetBrains Mono) loads async — re-measure once it's
+				// actually applied, since the fallback font's metrics can differ
+				// enough to leave the banner over- or under-scaled.
+				if (document.fonts?.ready) document.fonts.ready.then(fit);
+			})();
+		</script>
 		<h1>One agent, <span class="accent">many roles</span></h1>
 		<p>cast brings a full cast to your terminal: senior dev, QA, DBA, security reviewer, PM, tech writer. Swap the role, not the tool. Runs on any OpenAI-compatible model, including the one on your own hardware.</p>
 		<div class="hero-buttons">
@@ -612,6 +632,7 @@ const LANDING_HTML = `<!DOCTYPE html>
 	<section class="comparison">
 		<h2>Why not opencode?</h2>
 		<p>Both are terminal agents with tools. Different philosophy.</p>
+		<div class="comparison-table-wrap">
 		<table>
 			<tr><th></th><th>opencode</th><th>cast</th></tr>
 			<tr><td>Approach</td><td>Universal agent</td><td>Role-based harness</td></tr>
@@ -619,6 +640,7 @@ const LANDING_HTML = `<!DOCTYPE html>
 			<tr><td>Self-hosted focus</td><td>Works with any provider</td><td>Designed for local inference</td></tr>
 			<tr><td>Telemetry</td><td>Varies</td><td>None. Ever.</td></tr>
 		</table>
+		</div>
 	</section>
 
 	<section class="landing-docs">
@@ -655,7 +677,7 @@ function docPage(title, bodyHtml, activeFile) {
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
 <title>${title} — cast</title>
 <meta name="description" content="${title} documentation for cast, a role-based terminal agent harness.">
 <style>${CSS}</style>
