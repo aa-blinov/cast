@@ -26,6 +26,12 @@ import { personaOptionsForCwd } from "../../src/core/project.ts";
 export interface ObservedToolCall {
 	name: string;
 	args: Record<string, unknown>;
+	/** Raw tool output, filled in at turn_end when the result lands. `verify`
+	 *  can read this to grade against real tool output rather than the
+	 *  model's self-reported prose. The hashline-guttered `read` tool, for
+	 *  example, returns its line-prefixed content here, which a verify can
+	 *  strip before applying a regex. */
+	result?: { content: string; isError?: boolean };
 }
 
 /** Context passed to a case's `verify` hook after the run completes. */
@@ -34,7 +40,10 @@ export interface VerifyContext {
 	response: string;
 	/** Working directory the agent ran in. */
 	cwd: string;
-	/** Every tool call the agent made, in order, with parsed arguments. */
+	/** Every tool call the agent made, in order, with parsed arguments
+	 *  and (when available) the tool's raw result. Result is filled in at
+	 *  turn_end — verify may read it to grade against real tool output
+	 *  rather than the model's self-reported response text. */
 	toolCalls: ObservedToolCall[];
 	/** Number of tool-call rounds. */
 	turns: number;
@@ -217,6 +226,10 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 	const events: AgentEvent[] = [];
 	const toolsCalled: string[] = [];
 	const toolCalls: ObservedToolCall[] = [];
+	// Side-index by tool call id so turn_end can attach the tool's result
+	// back to the ObservedToolCall it corresponds to (the push only
+	// carries name+args at tool_start time; result lands later).
+	const toolById = new Map<string, ObservedToolCall>();
 	const trace: TraceTurn[] = [];
 	let pendingAssistant:
 		| { content: string; thinking: string; toolCalls?: Array<{ id: string; name: string; arguments: string }> }
@@ -273,6 +286,14 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 						// leave empty — args string wasn't valid JSON
 					}
 					toolCalls.push({ name: event.name, args });
+					// toolStart events carry a call id; track the latest entry
+					// for the id so turn_end can attach the result. (For calls
+					// without a streamed id we just leave the matching entry
+					// without a result — verify should fall back to disk.)
+					const callId = (event as { id?: string }).id;
+					if (callId) {
+						toolById.set(callId, toolCalls[toolCalls.length - 1]!);
+					}
 				}
 				if (event.type === "assistant_message") {
 					response = event.content;
@@ -321,8 +342,7 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 					usage.cacheWriteTokens += event.usage.cacheWriteTokens ?? 0;
 					usage.uncachedTokens += event.usage.uncachedTokens ?? 0;
 				}
-			},
-		});
+			}});
 	} catch (error) {
 		errors.push(error instanceof Error ? error.message : String(error));
 	}

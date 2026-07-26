@@ -255,6 +255,7 @@ export function recordCompareRepeated(compare: RepeatedCompareResult, caseFilter
 									failedChecks: a.failedChecks,
 									trace: a.trace,
 									usage: a.usage,
+									responsePreview: a.response.slice(0, 500),
 								})),
 							})),
 						},
