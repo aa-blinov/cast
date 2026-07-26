@@ -21,8 +21,9 @@ Point a generic coding agent and a role-specific one at the same file, and they 
 
 This isn't a skin. Research on role/persona prompting backs the shift on both sides of that gap:
 
-- Assigning an LLM an expert role measurably changes the *shape* of its output — deeper domain framing at the cost of some plain-language clarity, a real trade-off rather than a free upgrade ([Malik & Chinnappa, 2024](https://arxiv.org/abs/2605.29420)).
-- For tool-using agents specifically, persona/role structure acts as a **decision filter on tool calls** — not just tone, but whether and when the agent reaches for a tool at all, catching the "under-acting" failure mode where agents skip tools their role should obviously use ([Xu et al., 2024](https://arxiv.org/abs/2509.00482)).
+- Assigning an LLM an expert role measurably changes the *shape* of its output — deeper domain framing at the cost of some plain-language clarity, a real trade-off rather than a free upgrade ([Xiao et al., 2026](https://arxiv.org/abs/2605.29420)).
+- The effect isn't free-floating flavor text: matching the persona to the task helps, mismatching it hurts, and a mismatched persona measurably breaks more answers than a matched one fixes ([Kim et al., 2024](https://arxiv.org/abs/2408.08631)).
+- For tool-using agents specifically, explicit role/behavior rules — not just a persona label — are what fixes "under-acting" (skipping a tool the role should obviously use) and "over-speaking" (chatting instead of calling) ([Ruangtanusak et al., 2025](https://arxiv.org/abs/2509.00482)).
 - The effect isn't universal — persona framing helps most on open-ended, advisory, judgment-heavy tasks, and least on narrow factual lookups, so a persona only pays for itself when it actually matches the task.
 
 cast leans into that instead of working around it: swap `/persona` and the same tools, the same repo, and the same model produce a different investigation — different priorities, different tool sequencing, different conclusions, different follow-up questions. A security review that reasons like a senior dev misses different things than one that reasons like an appsec engineer, even reading identical code.
