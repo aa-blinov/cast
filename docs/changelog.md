@@ -2,6 +2,31 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.8.28
+
+### Fixed
+
+- Web UI: reasoning text no longer mixes into the answer (with stray leading blank lines) when a provider streams `<think>...</think>` tags that split across chunk boundaries (MiniMax-M3 and similar) — the tag parser now buffers across chunks instead of scanning each one in isolation.
+- Web UI: the composer's elapsed-time counter is now legible (accent color, larger) — it's the only signal that a still-running request is alive.
+- `glob`: `**` now recurses into subdirectories instead of matching only the top level.
+- `grep`: the no-`rg` fallback now matches `--glob` directory components correctly instead of only comparing basenames.
+- `edit`: no longer corrupts CRLF files into mixed line endings; multiple `insert_after`/`insert_before` ops sharing one anchor now apply in the model's listed order instead of reversed.
+- `write`: byte count in the tool result now reflects real UTF-8 byte length instead of JS string length.
+- `read`: `limit: 0` is no longer silently treated as "no limit"; output is now also capped by byte size, not just line count.
+- `ls`: symlinked directories are now classified as directories; missing/non-directory paths return a friendly message instead of a raw error.
+- `web_search`: a cached query no longer permanently caps `maxResults` for later, larger requests against the same query.
+- `web_fetch`: a request whose abort signal was already aborted before the fetch started is now aborted immediately instead of running to completion.
+- `ssh`: a failure to spawn `ssh`/`sshpass` no longer crashes the whole process.
+- Background bash tasks: a spawn failure no longer gets silently overwritten with a bogus "exited" status.
+- The `task` tool no longer discards a subagent's usage/cost accounting when the subagent's loop throws.
+- Ink TUI: the tool-call summary line now counts `insert_before` edits (previously always showed "+0 -0" for them).
+- Plan mode: `plan_check` reliably matches real, markdown-formatted plan steps, including a step's own nested sub-bullets, regardless of exact wording.
+- Plan mode: the "write a plan first" error from `plan_done` no longer references the removed `plan_write` tool.
+
+### Changed
+
+- Plan mode: writing, editing, and reading a plan file now goes through the normal `write`/`edit`/`read` tools (gated to the plan file's path) instead of dedicated `plan_write`/`plan_edit`/`plan_read` tools — one less parallel implementation to keep in sync.
+
 ## 0.8.27
 
 ### Fixed
