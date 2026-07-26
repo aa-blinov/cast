@@ -1072,6 +1072,10 @@ async function withoutFdOnPath<T>(fn: () => Promise<T>): Promise<T> {
 	}
 }
 
+// Same mechanism as withoutFdOnPath — an empty PATH hides rg too — named
+// separately at grep call sites purely for readability.
+const withoutRgOnPath = withoutFdOnPath;
+
 // Nested tree lives under NESTED_ROOT rather than directly in TEST_DIR:
 // TEST_DIR's own basename is "tools" (see TEST_DIR above), which would make
 // a `**/tools/*.ts` pattern match the search root itself, not just the
@@ -1251,6 +1255,54 @@ describe("grep", () => {
 		const result = await exec("grep", { pattern: "zzz_definitely_absent_zzz", path: TEST_DIR });
 		expect(result.content).toBe("No matches found");
 		expect(result.isError).toBeUndefined();
+	});
+
+	function buildGrepDirTree(root: string) {
+		mkdirSync(join(root, "src", "core", "tools"), { recursive: true });
+		mkdirSync(join(root, "src", "ui"), { recursive: true });
+		writeFileSync(join(root, "src", "core", "tools", "search.ts"), "needle here\n");
+		writeFileSync(join(root, "src", "ui", "App.tsx"), "needle here\n");
+		writeFileSync(join(root, "top-level.ts"), "needle here\n");
+	}
+
+	it("`--glob` with a directory component only matches under that directory (rg path)", async () => {
+		buildGrepDirTree(TEST_DIR);
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const result = await exec("grep", { pattern: "needle", path: TEST_DIR, glob: "src/core/tools/*.ts" });
+		expect(result.content).toContain("search.ts");
+		expect(result.content).not.toContain("App.tsx");
+		expect(result.content).not.toContain("top-level.ts");
+	});
+
+	it("`--glob` with a directory component matches the same files without rg (fallback)", async () => {
+		buildGrepDirTree(TEST_DIR);
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const result = await withoutRgOnPath(() =>
+			exec("grep", { pattern: "needle", path: TEST_DIR, glob: "src/core/tools/*.ts" }),
+		);
+		expect(result.content).toContain("search.ts");
+		expect(result.content).not.toContain("App.tsx");
+		expect(result.content).not.toContain("top-level.ts");
+	});
+
+	it("produces the same matched file set for a directory-component --glob with and without rg", async () => {
+		buildGrepDirTree(TEST_DIR);
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const globs = ["*.ts", "src/core/tools/*.ts", "**/tools/*.ts"];
+
+		for (const glob of globs) {
+			const withRg = await exec("grep", { pattern: "needle", path: TEST_DIR, glob });
+			const withoutRg = await withoutRgOnPath(() => exec("grep", { pattern: "needle", path: TEST_DIR, glob }));
+
+			const filesOf = (content: string) =>
+				content
+					.split("\n")
+					.map((line) => line.split(":")[0])
+					.filter(Boolean)
+					.sort();
+
+			expect(filesOf(withoutRg.content)).toEqual(filesOf(withRg.content));
+		}
 	});
 });
 
