@@ -1,13 +1,14 @@
 /**
- * Web tools — DDG search (html.duckduckgo.com scraper) or Tavily (API), + Jina Reader (fetch).
+ * Web tools — DDG search (html.duckduckgo.com scraper) or Tavily/Brave (API), + Jina Reader (fetch).
  *
  * DDG search scrapes the HTML lite endpoint — no JS challenge, no VQD,
  * no Python dependency. Returns title + URL + snippet per result.
  * DDG rate-limits after ~4 requests per IP — cached results don't count
- * toward the limit, so repeated queries are free. Tavily (settings.searchProvider
- * === "tavily", needs settings.tavilyApiKey) is the opt-in alternative for
- * anyone hitting that cap — a recurring 1000 requests/month free tier instead
- * of a hard per-IP scrape limit.
+ * toward the limit, so repeated queries are free. Tavily and Brave
+ * (settings.searchProvider, needs tavilyApiKey/braveApiKey respectively) are
+ * opt-in alternatives for anyone hitting that cap: Tavily is an AI-search
+ * aggregator with a recurring 1000 requests/month free tier; Brave is an
+ * actual general web index, a more direct DDG replacement.
  *
  * Web fetch uses Jina Reader (`r.jina.ai`) — free, no API key, returns
  * clean markdown optimized for LLM consumption.
@@ -278,6 +279,80 @@ export async function searchTavily(
 }
 
 // ============================================================================
+// Brave Search — api.search.brave.com
+// ============================================================================
+
+/**
+ * Search via the Brave Search API (https://api-dashboard.search.brave.com).
+ * Needs an API key. Unlike Tavily (an AI-search aggregator), this is Brave's
+ * own general web index — a straightforward SERP alternative to DDG.
+ */
+export async function searchBrave(
+	query: string,
+	apiKey: string,
+	options?: {
+		maxResults?: number;
+		signal?: AbortSignal;
+	},
+): Promise<SearchResults> {
+	if (!query.trim()) throw new Error("Brave search error: query is empty.");
+
+	const maxResults = Math.min(options?.maxResults ?? MAX_SEARCH_RESULTS, 20); // Brave caps count at 20
+	const signal = options?.signal;
+
+	const key = cacheKey("brave", query);
+	const cached = cacheGet(key);
+	if (cached) return { ...cached, results: cached.results.slice(0, maxResults) };
+
+	const url = new URL("https://api.search.brave.com/res/v1/web/search");
+	url.searchParams.set("q", query);
+	// Always request Brave's own max (20) — same cache-the-full-set-once
+	// reasoning as Tavily/DDG above.
+	url.searchParams.set("count", "20");
+
+	const resp = await fetch(url, {
+		headers: {
+			Accept: "application/json",
+			"X-Subscription-Token": apiKey,
+		},
+		signal,
+	});
+
+	if (resp.status === 429) {
+		throw new Error("Brave rate limit or free-tier quota exceeded.");
+	}
+	if (!resp.ok) {
+		// Brave returns 422 for both an invalid key and a bad request, with a
+		// JSON body naming the actual problem — surface it instead of a bare
+		// status code. Recognize the invalid-key case specifically since it's
+		// the one a user is most likely to hit and can fix themselves.
+		const body = await resp
+			.json()
+			.catch(() => undefined as { error?: { code?: string; detail?: string } } | undefined);
+		if (body?.error?.code === "SUBSCRIPTION_TOKEN_INVALID") {
+			throw new Error("Brave rejected the API key — check /web-search-provider or the braveApiKey setting.");
+		}
+		const detail = body?.error?.detail ? `: ${body.error.detail}` : "";
+		throw new Error(`Brave HTTP ${resp.status}${detail}`);
+	}
+
+	const data = (await resp.json()) as {
+		web?: { results?: Array<{ title?: string; url?: string; description?: string }> };
+	};
+
+	const results: SearchResult[] = (data.web?.results ?? []).map((r) => ({
+		title: stripTags(r.title ?? ""),
+		url: r.url ?? "",
+		snippet: stripTags(r.description ?? ""),
+	}));
+
+	const searchResults = { query, results };
+	cacheSet(key, searchResults);
+
+	return { ...searchResults, results: results.slice(0, maxResults) };
+}
+
+// ============================================================================
 // Web Fetch — Jina Reader API
 // ============================================================================
 
@@ -344,6 +419,21 @@ export async function fetchUrl(
 // Tool executors
 // ============================================================================
 
+function formatSearchResult(query: string, results: SearchResult[]): ToolResult {
+	if (results.length === 0) return { content: `No results found for "${query}".` };
+	const lines = results.map((r, i) => `${i + 1}. **${r.title}**\n   ${r.url}\n   ${r.snippet}`);
+	return { content: `<!--${JSON.stringify({ count: results.length })}-->\n${lines.join("\n\n")}` };
+}
+
+function missingApiKeyResult(provider: "Tavily" | "Brave"): ToolResult {
+	return {
+		content:
+			`Error: search provider is set to ${provider} but no API key is configured. ` +
+			"Set one via /web-search-provider (TUI) or the Tools settings tab (cast web), or switch back to /web-search-provider ddg.",
+		isError: true,
+	};
+}
+
 export async function execWebSearch(args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> {
 	const query = String(args.query ?? "").trim();
 	if (!query) return { content: "Error: 'query' is required.", isError: true };
@@ -359,26 +449,18 @@ export async function execWebSearch(args: Record<string, unknown>, signal?: Abor
 
 	try {
 		if (settings.searchProvider === "tavily") {
-			if (!settings.tavilyApiKey) {
-				return {
-					content:
-						"Error: search provider is set to Tavily but no API key is configured. " +
-						"Set one via /web-search-provider (TUI) or the Tools settings tab (cast web), or switch back to /web-search-provider ddg.",
-					isError: true,
-				};
-			}
+			if (!settings.tavilyApiKey) return missingApiKeyResult("Tavily");
 			const { results } = await searchTavily(query, settings.tavilyApiKey, { maxResults, signal });
-			if (results.length === 0) return { content: `No results found for "${query}".` };
-			const lines = results.map((r, i) => `${i + 1}. **${r.title}**\n   ${r.url}\n   ${r.snippet}`);
-			return { content: `<!--${JSON.stringify({ count: results.length })}-->\n${lines.join("\n\n")}` };
+			return formatSearchResult(query, results);
+		}
+		if (settings.searchProvider === "brave") {
+			if (!settings.braveApiKey) return missingApiKeyResult("Brave");
+			const { results } = await searchBrave(query, settings.braveApiKey, { maxResults, signal });
+			return formatSearchResult(query, results);
 		}
 
 		const { results } = await searchDuckDuckGo(query, { maxResults, region, time, signal });
-
-		if (results.length === 0) return { content: `No results found for "${query}".` };
-
-		const lines = results.map((r, i) => `${i + 1}. **${r.title}**\n   ${r.url}\n   ${r.snippet}`);
-		return { content: `<!--${JSON.stringify({ count: results.length })}-->\n${lines.join("\n\n")}` };
+		return formatSearchResult(query, results);
 	} catch (error) {
 		const msg = error instanceof Error ? error.message : String(error);
 		return { content: `Search error: ${msg}`, isError: true };

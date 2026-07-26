@@ -49,7 +49,7 @@ export function getToolDefinitions(
 	// Read fresh each call (this function runs once per turn) so a
 	// /web-search-provider switch changes what's advertised on the very next
 	// turn, same as execWebSearch's own fresh read of the same setting.
-	const usingTavily = loadSettings().searchProvider === "tavily";
+	const searchProviderName = loadSettings().searchProvider ?? "ddg";
 
 	return [
 		{
@@ -249,13 +249,18 @@ export function getToolDefinitions(
 			type: "function",
 			function: {
 				name: "web_search",
-				description: usingTavily
-					? "Search the web via Tavily. Returns titles, URLs, and snippets. " +
-						"Good for finding current information, documentation, and answers to questions " +
-						"that require up-to-date knowledge."
-					: "Search the web via DuckDuckGo. Returns titles, URLs, and snippets. " +
-						"No API key required. Good for finding current information, documentation, " +
-						"and answers to questions that require up-to-date knowledge.",
+				description:
+					searchProviderName === "tavily"
+						? "Search the web via Tavily. Returns titles, URLs, and snippets. " +
+							"Good for finding current information, documentation, and answers to questions " +
+							"that require up-to-date knowledge."
+						: searchProviderName === "brave"
+							? "Search the web via Brave Search. Returns titles, URLs, and snippets. " +
+								"Good for finding current information, documentation, and answers to questions " +
+								"that require up-to-date knowledge."
+							: "Search the web via DuckDuckGo. Returns titles, URLs, and snippets. " +
+								"No API key required. Good for finding current information, documentation, " +
+								"and answers to questions that require up-to-date knowledge.",
 				parameters: {
 					type: "object",
 					properties: {
@@ -264,14 +269,13 @@ export function getToolDefinitions(
 							type: "number",
 							description: "Maximum number of results (default: 10)",
 						},
-						// region/time are DuckDuckGo-only — Tavily has no equivalent
-						// filters, and silently ignoring them if the model still sent
-						// them (e.g. leftover habit from a DDG-era conversation) is
-						// better than advertising a knob that does nothing on this
-						// backend.
-						...(usingTavily
-							? {}
-							: {
+						// region/time are DuckDuckGo-only — Tavily/Brave have no
+						// equivalent filters exposed here, and silently ignoring them
+						// if the model still sent them (e.g. leftover habit from a
+						// DDG-era conversation) is better than advertising a knob that
+						// does nothing on this backend.
+						...(searchProviderName === "ddg"
+							? {
 									region: {
 										type: "string",
 										description: "Region code, e.g. 'us-en', 'ru-ru', 'wt-wt' (default: wt-wt)",
@@ -280,7 +284,8 @@ export function getToolDefinitions(
 										type: "string",
 										description: "Time filter: 'd' (day), 'w' (week), 'm' (month), 'y' (year)",
 									},
-								}),
+								}
+							: {}),
 					},
 					required: ["query"],
 				},

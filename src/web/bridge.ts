@@ -827,7 +827,14 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			// this up via loadSettings() inside execWebSearch, no restart needed.
 			if (!arg) {
 				const s = loadSettings();
-				return { ok: true, result: { searchProvider: s.searchProvider ?? "ddg", tavilyApiKey: s.tavilyApiKey } };
+				return {
+					ok: true,
+					result: {
+						searchProvider: s.searchProvider ?? "ddg",
+						tavilyApiKey: s.tavilyApiKey,
+						braveApiKey: s.braveApiKey,
+					},
+				};
 			}
 			const [provider, ...rest] = arg.split(" ");
 			if (provider === "ddg") {
@@ -840,7 +847,13 @@ export function createWebBridge(result: StartupResult): WebBridge {
 				updateSettings({ searchProvider: "tavily", tavilyApiKey: key });
 				return { ok: true, result: { searchProvider: "tavily", tavilyApiKey: key } };
 			}
-			return { ok: false, error: "Usage: /web-search-provider ddg | tavily <api-key>" };
+			if (provider === "brave") {
+				const key = rest.join(" ").trim() || loadSettings().braveApiKey;
+				if (!key) return { ok: false, error: "Usage: /web-search-provider brave <api-key>" };
+				updateSettings({ searchProvider: "brave", braveApiKey: key });
+				return { ok: true, result: { searchProvider: "brave", braveApiKey: key } };
+			}
+			return { ok: false, error: "Usage: /web-search-provider ddg | tavily <api-key> | brave <api-key>" };
 		}
 		if (name === "/theme") {
 			// A UI preference, not agent state — shared with the TUI's settings.json
