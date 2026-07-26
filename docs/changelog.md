@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.8.30
+
+### Added
+
+- `web_search` supports Brave Search as a third optional backend alongside DuckDuckGo (default) and Tavily. Unlike Tavily's AI-search aggregation, Brave is an actual general web index — a more direct drop-in replacement for DDG. Configure with `/web-search-provider` (TUI) or the Tools settings tab (`cast web`).
+
 ## 0.8.29
 
 ### Added
