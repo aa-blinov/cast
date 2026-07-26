@@ -6,6 +6,7 @@
 <title>Sessions — cast</title>
 <meta name="description" content="Sessions documentation for cast, a role-based terminal agent harness.">
 <style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 :root {
 	/* cast palette — cyan→violet gradient */
 	--bg: #0a0e14;
@@ -25,8 +26,8 @@
 	--code-bg: #0f1520;
 	--sidebar-w: 280px;
 	--header-h: 64px;
-	--font: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-	--font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+	--font: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+	--font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
 }
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { font-size: 16px; scroll-behavior: smooth; }
@@ -373,6 +374,34 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 .roles-terminal-body .cmd { color: var(--green); }
 .roles-terminal-body .out { color: var(--text-secondary); }
 
+/* ── Motivation ────────────────────────────────────────────────────── */
+.motivation {
+	max-width: 760px; margin: 0 auto; padding: 48px 24px 40px;
+}
+.motivation h2 {
+	text-align: center; font-size: 1.5rem; font-weight: 700; margin: 0 0 12px;
+}
+.motivation > p.lede {
+	text-align: center; color: var(--text-secondary); max-width: 620px; margin: 0 auto 24px;
+}
+.motivation ul {
+	list-style: none; margin: 0 0 20px; padding: 0;
+	display: flex; flex-direction: column; gap: 12px;
+}
+.motivation li {
+	background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px;
+	padding: 14px 16px; font-size: .9rem; color: var(--text-secondary); line-height: 1.55;
+}
+.motivation li a { font-size: .85em; }
+.motivation p.closing {
+	color: var(--text-secondary); font-size: .95rem; line-height: 1.6;
+}
+.motivation code {
+	font-family: var(--font-mono); font-size: .875em;
+	background: var(--code-bg); padding: 2px 6px; border-radius: 4px;
+	border: 1px solid var(--border); color: var(--accent);
+}
+
 /* ── Comparison ────────────────────────────────────────────────────── */
 .comparison {
 	max-width: 700px; margin: 0 auto; padding: 40px 24px 60px;
@@ -401,6 +430,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 @media (max-width: 768px) {
 	.roles-showcase { padding: 32px 16px; }
 	.roles-terminal-body { font-size: .75rem; padding: 12px; }
+	.motivation { padding: 32px 16px 24px; }
 	.comparison { padding: 32px 16px 48px; }
 }
 </style>
@@ -445,16 +475,8 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 		<h1>Sessions</h1>
 <p>Every conversation is automatically saved and can be resumed later.</p>
 <h2>Session Storage</h2>
-<p>Sessions are stored as JSON files in <code>~/.cast/sessions/</code>:</p>
-<pre><code>~/.cast/sessions/
-  --Users-me-my-project--/
-    nd4k8f2x.json
-    m2p9ab3c.json
-  --Users-me-other-project--/
-    q7r1ts5v.json
-</code></pre>
-<p>Sessions are grouped by the project directory (<code>cwd</code>) they were created in. The directory name is an encoded version of the absolute path.</p>
-<p><code>index.json</code> at the root is a summary cache for the session picker (metadata + search text per session, validated per-entry against file mtimes). It&#39;s a cache, not a source of truth — deleting it is safe; the next picker open rebuilds it.</p>
+<p>Sessions are stored in a single SQLite database at <code>~/.cast/sessions/sessions.db</code> — one row per session (metadata) and one row per message. Every message is kept forever: compaction flags older messages as no longer part of the model&#39;s context instead of deleting them, so the full conversation is always there to look back on even in a session that&#39;s been compacted many times over. What&#39;s sent to the model is only the still-in-context rows; what you see when reopening a session (<code>/sessions</code>, <code>/continue</code>, <code>-c</code>, or the web UI) is everything, regardless of that flag.</p>
+<p>Sessions saved by older versions of cast (individual <code>.json</code>/<code>.jsonl</code> files under <code>~/.cast/sessions/&lt;encoded-cwd&gt;/</code>) are imported into the database automatically on first run after upgrading — the original files are left on disk untouched.</p>
 <h2>Session State</h2>
 <p>Each session tracks:</p>
 <ul>
@@ -502,7 +524,7 @@ cast -s nd4k8f2x           # Same (alias)
 <li>The split point snaps to a turn boundary (a <code>user</code> message) so tool calls and results stay together</li>
 <li>Old messages are summarized by the LLM</li>
 <li>File paths from read/write/edit operations are extracted deterministically and appended to the summary</li>
-<li>The summary replaces the old messages as a system message</li>
+<li>The summary replaces the old messages as a system message in what gets sent to the model — the originals stay on disk (see Session Storage above) and are always visible when you reopen the session</li>
 </ol>
 <p>If this isn&#39;t the first compaction, the previous summary is passed to the LLM as update-in-place context — the running summary improves over time rather than starting from scratch each round.</p>
 <h3>Resilience</h3>

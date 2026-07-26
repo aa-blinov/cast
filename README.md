@@ -3,11 +3,13 @@
 A role-based terminal agent harness. 18 built-in personas — senior dev, QA, DBA, security reviewer, PM, tech writer, and more — same tools, different judgment. Runs on any OpenAI-compatible model, including the one on your own hardware.
 
 ```
-                   __
-  _________ ______/ /_
- / ___/ __ `/ ___/ __/
-/ /__/ /_/ (__  ) /_
-\___/\__,_/____/\__/
+ ░▒▓██████▓▒░ ░▒▓██████▓▒░ ░▒▓███████▓▒░▒▓████████▓▒░
+░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░         ░▒▓█▓▒░
+░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░         ░▒▓█▓▒░
+░▒▓█▓▒░      ░▒▓████████▓▒░░▒▓██████▓▒░   ░▒▓█▓▒░
+░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░      ░▒▓█▓▒░  ░▒▓█▓▒░
+░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░      ░▒▓█▓▒░  ░▒▓█▓▒░
+ ░▒▓██████▓▒░░▒▓█▓▒░░▒▓█▓▒░▒▓███████▓▒░   ░▒▓█▓▒░
 ```
 
 ## Why cast?
@@ -20,6 +22,18 @@ A role-based terminal agent harness. 18 built-in personas — senior dev, QA, DB
 
 **Ink TUI.** A proper terminal interface with multiline paste, image attachments, smooth animations.
 **Web UI.** `cast web` launches a browser-based control room — background agents, token-by-token streaming, diff viewer, all slash commands. Same sessions as the TUI.
+
+## Why personas, not just prompts
+
+Point a generic coding agent and a role-specific one at the same file, and they don't just answer differently — they look for different things. Give an appsec persona a schema and it flags the injection surface; give a DBA persona the same schema and it flags missing indexes and normalization. A QA persona treats an untested edge case as unfinished work; a PM persona treats an unwritten spec as unfinished work — same repo, same tools, different definition of "done."
+
+This isn't a skin. Research on role/persona prompting backs the shift on both sides of that gap:
+
+- Assigning an LLM an expert role measurably changes the *shape* of its output — deeper domain framing at the cost of some plain-language clarity, a real trade-off rather than a free upgrade ([Malik & Chinnappa, 2024](https://arxiv.org/abs/2605.29420)).
+- For tool-using agents specifically, persona/role structure acts as a **decision filter on tool calls** — not just tone, but whether and when the agent reaches for a tool at all, catching the "under-acting" failure mode where agents skip tools their role should obviously use ([Xu et al., 2024](https://arxiv.org/abs/2509.00482)).
+- The effect isn't universal — persona framing helps most on open-ended, advisory, judgment-heavy tasks, and least on narrow factual lookups, so a persona only pays for itself when it actually matches the task.
+
+cast leans into that instead of working around it: swap `/persona` and the same tools, the same repo, and the same model produce a different investigation — different priorities, different tool sequencing, different conclusions, different follow-up questions. A security review that reasons like a senior dev misses different things than one that reasons like an appsec engineer, even reading identical code.
 
 ## Install
 

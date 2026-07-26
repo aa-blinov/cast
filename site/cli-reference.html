@@ -6,6 +6,7 @@
 <title>CLI Reference — cast</title>
 <meta name="description" content="CLI Reference documentation for cast, a role-based terminal agent harness.">
 <style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 :root {
 	/* cast palette — cyan→violet gradient */
 	--bg: #0a0e14;
@@ -25,8 +26,8 @@
 	--code-bg: #0f1520;
 	--sidebar-w: 280px;
 	--header-h: 64px;
-	--font: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-	--font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+	--font: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+	--font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
 }
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { font-size: 16px; scroll-behavior: smooth; }
@@ -373,6 +374,34 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 .roles-terminal-body .cmd { color: var(--green); }
 .roles-terminal-body .out { color: var(--text-secondary); }
 
+/* ── Motivation ────────────────────────────────────────────────────── */
+.motivation {
+	max-width: 760px; margin: 0 auto; padding: 48px 24px 40px;
+}
+.motivation h2 {
+	text-align: center; font-size: 1.5rem; font-weight: 700; margin: 0 0 12px;
+}
+.motivation > p.lede {
+	text-align: center; color: var(--text-secondary); max-width: 620px; margin: 0 auto 24px;
+}
+.motivation ul {
+	list-style: none; margin: 0 0 20px; padding: 0;
+	display: flex; flex-direction: column; gap: 12px;
+}
+.motivation li {
+	background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px;
+	padding: 14px 16px; font-size: .9rem; color: var(--text-secondary); line-height: 1.55;
+}
+.motivation li a { font-size: .85em; }
+.motivation p.closing {
+	color: var(--text-secondary); font-size: .95rem; line-height: 1.6;
+}
+.motivation code {
+	font-family: var(--font-mono); font-size: .875em;
+	background: var(--code-bg); padding: 2px 6px; border-radius: 4px;
+	border: 1px solid var(--border); color: var(--accent);
+}
+
 /* ── Comparison ────────────────────────────────────────────────────── */
 .comparison {
 	max-width: 700px; margin: 0 auto; padding: 40px 24px 60px;
@@ -401,6 +430,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 @media (max-width: 768px) {
 	.roles-showcase { padding: 32px 16px; }
 	.roles-terminal-body { font-size: .75rem; padding: 12px; }
+	.motivation { padding: 32px 16px 24px; }
 	.comparison { padding: 32px 16px 48px; }
 }
 </style>
@@ -446,7 +476,8 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 <h2>Usage</h2>
 <pre><code>cast [options] [prompt]
 cast run [options] &lt;message&gt;    Non-interactive mode
-cast upgrade [version] [--force]  Self-update
+    cast web [start|stop|status]    Web UI mode
+    cast upgrade [version] [--force]  Self-update
 </code></pre>
 <p>TUI mode (Ink-based, multiline paste, image attachments) is the default. Non-TTY contexts (pipes, CI) are not supported — use <code>cast run</code> for scripting.</p>
 <h2>Subcommands</h2>
@@ -468,6 +499,33 @@ cast run -c &quot;continue the refactoring&quot;
 cast upgrade 0.3.0        # Upgrade to specific version
 cast upgrade --force      # Reinstall even if same version
 </code></pre>
+<h3><code>cast web</code></h3>
+<p>Web UI mode: launches a browser-based control room for managing background agents. Runs alongside the TUI — same sessions, same core engine.</p>
+<pre><code class="language-bash">cast web                 # Start in background (daemon)
+cast web start           # Same as above
+cast web stop            # Stop the background server (SIGTERM → SIGKILL after 3s)
+cast web status          # Check if running (auto-heals stale state)
+cast web --foreground    # Run inline (for dev/debug)
+cast web --port 8080     # Custom port (default: 1337, or set CAST_WEB_PORT)
+cast web --host 0.0.0.0  # Bind to all interfaces (reachable from network)
+cast web --public        # Alias for --host 0.0.0.0
+</code></pre>
+<p>First run generates a password, printed to the terminal and saved in <code>~/.cast/settings.json</code>. Username is always <code>cast</code>.</p>
+<p>Binding to a non-loopback address (<code>--host 0.0.0.0</code> or <code>--public</code>) prints a warning — the server is reachable from other machines on the network, protected only by the password.</p>
+<p>Starting when another instance is already running prints an error and exits. <code>stop</code> gracefully shuts down open sessions (SIGTERM), escalating to SIGKILL after 3 seconds if the process doesn&#39;t exit. If the recorded process is already gone (crash, OOM, <code>kill -9</code>), <code>status</code> and <code>stop</code> detect the stale state, clean up, and report honestly.</p>
+<p>Features:</p>
+<ul>
+<li>Create/switch/close sessions with different personas, running independently in parallel</li>
+<li>Token-by-token streaming, with reasoning and tool calls shown inline as they happen</li>
+<li>Tool call cards showing arguments and status</li>
+<li>Git diff viewer (file tree + unified diff) as a resizable side panel, auto-refreshing after each tool call</li>
+<li>Settings modal (gear icon) — model &amp; reasoning, color theme, web tools toggle, bash confirmation mode, and management for MCP servers, skills, plugins, providers, and SSH hosts; shared with the TUI&#39;s <code>~/.cast/settings.json</code></li>
+<li>Status popover (info icon) — persona, model, mode, token usage, and git branch for the active session</li>
+<li>Keyboard shortcuts — <code>Ctrl+B</code> (<code>⌘B</code> on Mac) toggles the sidebar, <code>Ctrl+Shift+D</code> / <code>N</code> / <code>L</code> toggle the diff panel / start a new session / clear context, <code>Ctrl+/</code> shows the full reference</li>
+<li>All slash commands, non-blocking ones work while agent runs</li>
+<li>Mobile/tablet/desktop responsive — sidebar and diff panel become touch-friendly slide-over drawers on narrow screens</li>
+<li>Auth via standard HTTP Basic Auth — the browser&#39;s own credential prompt, no custom login page</li>
+</ul>
 <p>On Windows, prints the install command to run in a new terminal (can&#39;t self-replace running process files).</p>
 <h2>Options</h2>
 <h3>Model Selection</h3>

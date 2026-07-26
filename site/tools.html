@@ -6,6 +6,7 @@
 <title>Tools — cast</title>
 <meta name="description" content="Tools documentation for cast, a role-based terminal agent harness.">
 <style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 :root {
 	/* cast palette — cyan→violet gradient */
 	--bg: #0a0e14;
@@ -25,8 +26,8 @@
 	--code-bg: #0f1520;
 	--sidebar-w: 280px;
 	--header-h: 64px;
-	--font: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-	--font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+	--font: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+	--font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
 }
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { font-size: 16px; scroll-behavior: smooth; }
@@ -373,6 +374,34 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 .roles-terminal-body .cmd { color: var(--green); }
 .roles-terminal-body .out { color: var(--text-secondary); }
 
+/* ── Motivation ────────────────────────────────────────────────────── */
+.motivation {
+	max-width: 760px; margin: 0 auto; padding: 48px 24px 40px;
+}
+.motivation h2 {
+	text-align: center; font-size: 1.5rem; font-weight: 700; margin: 0 0 12px;
+}
+.motivation > p.lede {
+	text-align: center; color: var(--text-secondary); max-width: 620px; margin: 0 auto 24px;
+}
+.motivation ul {
+	list-style: none; margin: 0 0 20px; padding: 0;
+	display: flex; flex-direction: column; gap: 12px;
+}
+.motivation li {
+	background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px;
+	padding: 14px 16px; font-size: .9rem; color: var(--text-secondary); line-height: 1.55;
+}
+.motivation li a { font-size: .85em; }
+.motivation p.closing {
+	color: var(--text-secondary); font-size: .95rem; line-height: 1.6;
+}
+.motivation code {
+	font-family: var(--font-mono); font-size: .875em;
+	background: var(--code-bg); padding: 2px 6px; border-radius: 4px;
+	border: 1px solid var(--border); color: var(--accent);
+}
+
 /* ── Comparison ────────────────────────────────────────────────────── */
 .comparison {
 	max-width: 700px; margin: 0 auto; padding: 40px 24px 60px;
@@ -401,6 +430,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 @media (max-width: 768px) {
 	.roles-showcase { padding: 32px 16px; }
 	.roles-terminal-body { font-size: .75rem; padding: 12px; }
+	.motivation { padding: 32px 16px 24px; }
 	.comparison { padding: 32px 16px 48px; }
 }
 </style>
@@ -443,7 +473,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 <main class="main">
 	<article class="content">
 		<h1>Tools</h1>
-<p>The agent has access to 10 built-in tools plus optional MCP server tools. Multiple tools run in parallel within a single turn via <code>Promise.all</code>.</p>
+<p>The agent has access to a set of built-in tools (some gated by persona, mode, or configuration — see each section below) plus optional MCP server tools. Multiple tools run in parallel within a single turn via <code>Promise.all</code>.</p>
 <h2>File System Tools</h2>
 <h3><code>read</code></h3>
 <p>Read file contents. Supports text files and images (jpg, jpeg, png, gif, webp, bmp). Images are sent directly to vision-capable models.</p>
@@ -551,8 +581,12 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 <li>Delegating well-defined subtasks</li>
 </ul>
 <h2>Plan Tools</h2>
-<p>Availability is mode-gated: authoring tools exist only in plan mode, progress and suggestion tools only in build mode, <code>plan_read</code> in both. See <a href="plan-mode.html">Plan Mode</a> for details.</p>
-<div class="table-wrap"><table><thead><tr><th>Tool</th><th>Mode</th><th>Description</th></tr></thead><tbody><tr><td><code>plan_write</code></td><td>Plan</td><td>Write or replace a named plan file</td></tr><tr><td><code>plan_edit</code></td><td>Plan</td><td>Edit a section of the active plan by heading</td></tr><tr><td><code>plan_read</code></td><td>Both</td><td>Read a plan&#39;s content and headings (switches the active plan only in plan mode)</td></tr><tr><td><code>plan_done</code></td><td>Plan</td><td>Signal that the plan is ready for review</td></tr><tr><td><code>plan_discard</code></td><td>Plan</td><td>Delete a plan from the session</td></tr><tr><td><code>plan_enter</code></td><td>Build</td><td>Suggest switching to plan mode</td></tr><tr><td><code>plan_check</code></td><td>Build</td><td>Mark a checklist item as done</td></tr></tbody></table></div><h2>Subagent System</h2>
+<p>Availability is mode-gated: progress and suggestion tools only in build mode. See <a href="plan-mode.html">Plan Mode</a> for details.</p>
+<p>The plan file is authored and read with the ordinary <code>write</code>/<code>edit</code>/<code>read</code>
+tools above — no separate plan-write/plan-edit/plan-read tool. In plan mode
+<code>write</code>/<code>edit</code> are restricted to a <code>.md</code> file directly inside the session&#39;s
+plans directory; <code>read</code>ing that file makes it the active plan.</p>
+<div class="table-wrap"><table><thead><tr><th>Tool</th><th>Mode</th><th>Description</th></tr></thead><tbody><tr><td><code>plan_done</code></td><td>Plan</td><td>Signal that the plan is ready for review</td></tr><tr><td><code>plan_discard</code></td><td>Plan</td><td>Delete a plan from the session</td></tr><tr><td><code>plan_enter</code></td><td>Build</td><td>Suggest switching to plan mode</td></tr><tr><td><code>plan_check</code></td><td>Build</td><td>Mark a checklist item as done</td></tr></tbody></table></div><h2>Subagent System</h2>
 <p>The <code>task</code> tool delegates work to isolated sub-agents. Each sub-agent has:</p>
 <ul>
 <li><strong>Own system prompt</strong> — loaded from <code>prompts/subagents/</code> (<code>worker</code>, <code>explore</code>, <code>review</code>)</li>
