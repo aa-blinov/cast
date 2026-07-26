@@ -9,9 +9,9 @@ import {
 	execPlanDiscard,
 	execPlanDone,
 	execPlanEnter,
-	execPlanRead,
 	finalizePlanFileWrite,
 	MAX_PLAN_CHARS,
+	maybeActivatePlanOnRead,
 } from "./plan.ts";
 import type { SshHost } from "./ssh.ts";
 import { execBash } from "./tools/bash.ts";
@@ -410,27 +410,11 @@ export function getToolDefinitions(
 		// Plan mode tools — always defined, filtered via disabledTools when not in
 		// plan mode, so the model only ever sees them while /plan is active (no
 		// "only available in plan mode" boilerplate needed in the descriptions).
-		// Authoring the plan itself uses the ordinary write/edit tools above,
-		// gated to the active plan file's path — see plan.ts's file doc comment.
-		{
-			type: "function",
-			function: {
-				name: "plan_read",
-				description:
-					"Read a plan's content and headings, plus the names of all plans in this session. " +
-					"In plan mode the plan read becomes the active one for write/edit/plan_done — use `name` to switch between plans. " +
-					"In build mode it is reference-only.",
-				parameters: {
-					type: "object",
-					properties: {
-						name: {
-							type: "string",
-							description: "Plan name to read (omit for the currently active plan)",
-						},
-					},
-				},
-			},
-		},
+		// Authoring AND reading the plan itself use the ordinary write/edit/read
+		// tools above, gated (write/edit) or side-effected (read) against the
+		// active plan file's path — see plan.ts's file doc comment. Other plans
+		// in the session are discoverable with ls/glob on the plans directory
+		// named in the plan-mode system prompt block.
 		{
 			type: "function",
 			function: {
@@ -538,8 +522,19 @@ export function createToolExecutor(
 					return await execBashOutput(args, config, backgroundBash, signal);
 				case "bash_kill":
 					return await execBashKill(args, backgroundBash);
-				case "read":
-					return await execRead(args, cwd, config);
+				case "read": {
+					const result = await execRead(args, cwd, config);
+					// A read of the active-or-other plan file while plan mode is
+					// active makes it the active plan — same effect plan_read's
+					// `name` argument used to have, without a dedicated tool. Build
+					// mode intentionally skips this: the approved plan must keep
+					// steering via the mirror block regardless of what gets read.
+					if (planState?.enabled && !result.isError) {
+						const absolutePath = resolvePath(String(args.path ?? ""), cwd);
+						maybeActivatePlanOnRead(absolutePath, planState);
+					}
+					return result;
+				}
 				case "write": {
 					if (planState?.enabled) {
 						const absolutePath = resolvePath(String(args.path ?? ""), cwd);
@@ -602,9 +597,6 @@ export function createToolExecutor(
 					if (!taskDeps)
 						return { content: "Task tool not available — no dependencies configured.", isError: true };
 					return await execTask(args, cwd, config, taskDeps, signal);
-				case "plan_read":
-					if (!planState) return { content: "Plan tool not available.", isError: true };
-					return execPlanRead(args, planState);
 				case "plan_done":
 					if (!planState) return { content: "Plan tool not available.", isError: true };
 					return execPlanDone(args, planState);

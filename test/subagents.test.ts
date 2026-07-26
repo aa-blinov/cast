@@ -48,7 +48,7 @@ describe("execTask — plan state handoff", () => {
 			disabledTools: new Set(["web_search"]),
 		});
 		expect(child.planState).toEqual({ enabled: false, plansDir: "/tmp/plans-x" });
-		expect(child.disabledTools!.has("plan_read")).toBe(true);
+		expect(child.disabledTools!.has("plan_done")).toBe(true);
 		expect(child.disabledTools!.has("plan_check")).toBe(true);
 		expect(child.disabledTools!.has("web_search")).toBe(true);
 		expect(child.disabledTools!.has("bash")).toBe(false);

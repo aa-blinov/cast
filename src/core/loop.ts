@@ -710,8 +710,8 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 	// Neutral wording: this line rides along with BOTH mirror variants, and the
 	// done-variant explicitly says the plan no longer steers.
 	const otherPlansLine =
-		otherPlanNames.length > 0
-			? `\n\nOther plans in this session: ${otherPlanNames.join(", ")} — use plan_read with a name to view one; none of them steers the work unless approved.`
+		otherPlanNames.length > 0 && loopConfig.planState
+			? `\n\nOther plans in this session: ${otherPlanNames.join(", ")} — read \`${loopConfig.planState.plansDir}/<name>.md\` to view one; none of them steers the work unless approved.`
 			: "";
 
 	// Recompute the system prompt from the latest contextFiles/@-mentions and

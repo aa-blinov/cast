@@ -32,9 +32,10 @@ failed plan. When brevity and decision-completeness collide, completeness wins.
 
 ## Workflow
 
-0. RE-ENTRY — call plan_read first: if a plan for THIS task already exists,
-   read it and edit that same file instead of duplicating; a different task
-   gets a fresh file. plan_discard drops an abandoned draft when the user asks.
+0. RE-ENTRY — `ls`/`glob` {{PLANS_DIR}} first: if a plan for THIS task already
+   exists, `read` it (this makes it the active plan) and `edit` that same file
+   instead of duplicating; a different task gets a fresh file. plan_discard
+   drops an abandoned draft when the user asks.
 1. UNDERSTAND — restate the literal ask to yourself, then read the material
    behind it. When scope goes beyond a couple of known files AND the task tool
    is in your toolset, launch task subagents IN PARALLEL (one message, several

@@ -10,11 +10,11 @@ import {
 	execPlanDiscard,
 	execPlanDone,
 	execPlanEnter,
-	execPlanRead,
 	finalizePlanFileWrite,
 	isPlanFilePath,
 	listOpenPlanSteps,
 	MAX_PLAN_CHARS,
+	maybeActivatePlanOnRead,
 	modeDisabledTools,
 	PLAN_TOOL_NAMES,
 	type PlanState,
@@ -70,7 +70,9 @@ describe("plan", () => {
 			expect(gated).toContain("plan_enter");
 			// bash stays advertised — the executor's read-only gate handles it
 			expect(gated).not.toContain("bash");
-			expect(gated).not.toContain("plan_read");
+			// read has no plan-mode-specific gating at all (see
+			// maybeActivatePlanOnRead) — it's simply never in either list.
+			expect(gated).not.toContain("read");
 		});
 
 		it("build mode blocks exactly the authoring-signal plan tools", () => {
@@ -78,17 +80,15 @@ describe("plan", () => {
 			expect([...gated].sort()).toEqual(["plan_discard", "plan_done"]);
 		});
 
-		it("every plan tool has an explicit mode decision (or is dual-mode plan_read)", () => {
+		it("every plan tool has an explicit mode decision", () => {
 			// A new PLAN_TOOL_NAMES entry must be placed in exactly one mode's
-			// gate list — or knowingly left dual-mode like plan_read. This test
-			// fails the moment someone adds a tool without deciding.
+			// gate list. This test fails the moment someone adds a tool without
+			// deciding (there is no dual-mode plan tool anymore — plan_read was
+			// the last one, replaced by plain read + maybeActivatePlanOnRead).
 			const planGated = new Set(modeDisabledTools(true).filter((n) => n.startsWith("plan_")));
 			const buildGated = new Set(modeDisabledTools(false));
-			const dualMode = ["plan_read"];
 			for (const name of PLAN_TOOL_NAMES) {
-				const decisions = [planGated.has(name), buildGated.has(name), dualMode.includes(name)].filter(
-					Boolean,
-				).length;
+				const decisions = [planGated.has(name), buildGated.has(name)].filter(Boolean).length;
 				expect(decisions, `tool ${name} needs exactly one mode decision`).toBe(1);
 			}
 		});
@@ -373,42 +373,19 @@ describe("plan", () => {
 		});
 	});
 
-	describe("execPlanRead", () => {
-		it("returns exists=false and an empty plan list when no plan", () => {
-			const state = testState("read-1");
+	describe("maybeActivatePlanOnRead", () => {
+		// Stand-in for what tools.ts's dispatcher does after a successful `read`
+		// while plan mode is active — see plan.ts's file doc comment for why
+		// there's no dedicated plan_read tool anymore.
 
-			const result = execPlanRead({}, state);
-			const parsed = JSON.parse(result.content);
-			expect(parsed.exists).toBe(false);
-			expect(parsed.plans).toEqual([]);
-		});
-
-		it("returns the active plan plus the names of all session plans", () => {
-			const state = testState("read-2");
-
-			writePlan(state, "alt", "# Alt");
-			writePlan(state, "main", "# Plan\n\n## Context\nInfo");
-
-			const result = execPlanRead({}, state);
-			const parsed = JSON.parse(result.content);
-			expect(parsed.exists).toBe(true);
-			expect(parsed.name).toBe("main");
-			expect(parsed.headings).toEqual(["Plan", "Context"]);
-			expect(parsed.content).toContain("Info");
-			expect(parsed.plans).toEqual(["alt", "main"]);
-		});
-
-		it("in plan mode, reads a named plan and makes it active for subsequent edits", () => {
+		it("in plan mode, reading a plan file makes it the active one", () => {
 			const state = testState("read-3");
 			state.enabled = true;
 
 			writePlan(state, "backend", "# Backend\n\n## Steps\n- [ ] api");
 			writePlan(state, "frontend", "# Frontend\n\n## Steps\n- [ ] ui");
-
-			// frontend is active; switch to backend by reading it
-			const read = JSON.parse(execPlanRead({ name: "backend" }, state).content);
-			expect(read.name).toBe("backend");
-			expect(read.content).toContain("api");
+			// frontend is active (written last); switch to backend by reading it.
+			maybeActivatePlanOnRead(join(state.plansDir, "backend.md"), state);
 			expect(state.activePlanPath).toBe(join(state.plansDir, "backend.md"));
 
 			// A subsequent write/edit now targets backend, not frontend
@@ -416,27 +393,25 @@ describe("plan", () => {
 			expect(readPlanFile(join(state.plansDir, "frontend.md")).content).toContain("- [ ] ui");
 		});
 
-		it("in build mode, reading a named plan is reference-only and does not switch the active plan", () => {
+		it("in build mode, reading a plan file is reference-only and does not switch the active plan", () => {
 			const state = testState("read-3b"); // enabled stays false — build mode
 
 			writePlan(state, "backend", "# Backend");
 			writePlan(state, "frontend", "# Frontend");
 
-			const read = JSON.parse(execPlanRead({ name: "backend" }, state).content);
-			expect(read.name).toBe("backend");
+			maybeActivatePlanOnRead(join(state.plansDir, "backend.md"), state);
 			// frontend (last written) keeps steering the implementation
 			expect(state.activePlanPath).toBe(join(state.plansDir, "frontend.md"));
 			expect(readActivePlan(state).content).toBe("# Frontend");
 		});
 
-		it("returns error with the plan list when the named plan does not exist", () => {
-			const state = testState("read-4");
+		it("does nothing for a path outside plansDir, even in plan mode", () => {
+			const state = testState("read-3c");
+			state.enabled = true;
 			writePlan(state, "main", "# Plan");
 
-			const result = execPlanRead({ name: "nonexistent" }, state);
-			expect(result.isError).toBe(true);
-			const parsed = JSON.parse(result.content);
-			expect(parsed.plans).toEqual(["main"]);
+			maybeActivatePlanOnRead("/home/user/project/src/index.ts", state);
+			expect(state.activePlanPath).toBe(join(state.plansDir, "main.md"));
 		});
 	});
 

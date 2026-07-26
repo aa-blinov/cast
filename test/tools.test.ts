@@ -2052,9 +2052,11 @@ describe("plan tools dispatch", () => {
 		expect(write.isError).toBeFalsy();
 		expect(existsSync(planPath)).toBe(true);
 
-		const read = JSON.parse((await exec("plan_read", {})).content);
-		expect(read.name).toBe("lifecycle");
-		expect(read.plans).toEqual(["lifecycle"]);
+		// A plain `read` of the plan file confirms it's readable and (via
+		// maybeActivatePlanOnRead) stays the active plan — no plan_read tool.
+		const read = await exec("read", { path: planPath });
+		expect(read.isError).toBeFalsy();
+		expect(read.content).toContain("only step");
 
 		const done = JSON.parse((await exec("plan_done", { summary: "s" })).content);
 		expect(done.planReady).toBe(true);
