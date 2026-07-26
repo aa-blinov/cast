@@ -28,6 +28,8 @@ This isn't a skin. Research on role/persona prompting backs the shift on both si
 
 cast leans into that instead of working around it: swap `/persona` and the same tools, the same repo, and the same model produce a different investigation — different priorities, different tool sequencing, different conclusions, different follow-up questions. A security review that reasons like a senior dev misses different things than one that reasons like an appsec engineer, even reading identical code.
 
+Full writeup, with direct quotes and sources: [docs/persona-research.md](docs/persona-research.md).
+
 ## Install
 
 macOS / Linux:
