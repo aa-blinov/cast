@@ -26,6 +26,7 @@ export const NON_BLOCKING_COMMANDS = new Set([
 	"/theme",
 	"/repo",
 	"/web",
+	"/search-provider",
 	"/rules",
 	"/rule:",
 	"/permissions",
@@ -122,6 +123,13 @@ export const SLASH_COMMANDS: Array<{
 	{
 		name: "/web",
 		description: "Toggle web tools (web_search, web_fetch)",
+		takesArgs: true,
+		blocking: false,
+		hidden: true,
+	},
+	{
+		name: "/search-provider",
+		description: "Switch web_search backend (DuckDuckGo / Tavily)",
 		takesArgs: true,
 		blocking: false,
 		hidden: true,

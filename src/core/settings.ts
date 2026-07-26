@@ -73,6 +73,16 @@ export interface Settings {
 	theme?: string;
 	/** When false, web_search and web_fetch tools are not advertised to the model. */
 	webTools?: boolean;
+	/**
+	 * Search backend for web_search. "ddg" (default when unset) scrapes
+	 * DuckDuckGo's HTML endpoint — free, no key, but rate-limited to ~4
+	 * requests per IP before a CAPTCHA blocks further scraping. "tavily"
+	 * uses the Tavily Search API (needs `tavilyApiKey`) — a generous,
+	 * recurring free tier (1000 requests/month) instead of a hard per-IP cap.
+	 */
+	searchProvider?: "ddg" | "tavily";
+	/** Tavily API key — required when searchProvider is "tavily". Get one at https://app.tavily.com */
+	tavilyApiKey?: string;
 	/** MCP server names the user has disabled via /mcp toggle. Persisted so
 	 * they stay disabled across sessions and /reload. */
 	disabledMcpServers?: string[];

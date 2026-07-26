@@ -1,6 +1,10 @@
 import { getEventListeners } from "node:events";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { execWebFetch, execWebSearch, fetchUrl, searchDuckDuckGo } from "../src/core/tools/web.ts";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { updateSettings } from "../src/core/settings.ts";
+import { execWebFetch, execWebSearch, fetchUrl, searchDuckDuckGo, searchTavily } from "../src/core/tools/web.ts";
 
 function ddgHtml(results: { title: string; href: string; snippet: string }[]): string {
 	return results
@@ -26,8 +30,19 @@ function mockFetchOnce(response: { ok: boolean; status: number; statusText?: str
 	);
 }
 
+let realHome: string | undefined;
+let fakeHome: string;
+
+beforeEach(() => {
+	realHome = process.env.HOME;
+	fakeHome = mkdtempSync(join(tmpdir(), "cast-web-test-"));
+	process.env.HOME = fakeHome;
+});
+
 afterEach(() => {
 	vi.unstubAllGlobals();
+	process.env.HOME = realHome;
+	rmSync(fakeHome, { recursive: true, force: true });
 });
 
 // ============================================================================
@@ -39,6 +54,48 @@ describe("execWebSearch", () => {
 		const result = await execWebSearch({});
 		expect(result.isError).toBe(true);
 		expect(result.content).toContain("query");
+	});
+
+	it("uses DDG by default when no searchProvider is configured", async () => {
+		const html = ddgHtml([{ title: "Default", href: "https://default.example/", snippet: "s" }]);
+		mockFetchOnce({ ok: true, status: 200, text: html });
+
+		const result = await execWebSearch({ query: "unique query default-provider" });
+
+		expect(result.isError).toBeFalsy();
+		expect(result.content).toContain("Default");
+		expect((fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0]).toContain("duckduckgo.com");
+	});
+
+	it("routes to Tavily when searchProvider is 'tavily' and a key is configured", async () => {
+		updateSettings({ searchProvider: "tavily", tavilyApiKey: "tvly-test-key" });
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockResolvedValue({
+				ok: true,
+				status: 200,
+				json: async () => ({
+					results: [{ title: "Tavily Result", url: "https://tavily.example/", content: "tavily snippet" }],
+				}),
+			}),
+		);
+
+		const result = await execWebSearch({ query: "unique query tavily-routing" });
+
+		expect(result.isError).toBeFalsy();
+		expect(result.content).toContain("Tavily Result");
+		const call = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls[0];
+		expect(call[0]).toBe("https://api.tavily.com/search");
+	});
+
+	it("errors clearly when searchProvider is 'tavily' but no API key is configured", async () => {
+		updateSettings({ searchProvider: "tavily" });
+
+		const result = await execWebSearch({ query: "unique query tavily-no-key" });
+
+		expect(result.isError).toBe(true);
+		expect(result.content).toContain("Tavily");
+		expect(result.content).toContain("/search-provider");
 	});
 });
 
@@ -97,6 +154,68 @@ describe("searchDuckDuckGo", () => {
 
 		const second = await searchDuckDuckGo("unique query cache-cap", { maxResults: 10 });
 		expect(second.results).toHaveLength(5);
+		expect(fetch).toHaveBeenCalledTimes(1);
+	});
+});
+
+function mockFetchJsonOnce(response: { ok: boolean; status: number; json: unknown }): void {
+	vi.stubGlobal(
+		"fetch",
+		vi.fn().mockResolvedValue({
+			ok: response.ok,
+			status: response.status,
+			json: async () => response.json,
+		}),
+	);
+}
+
+describe("searchTavily", () => {
+	it("parses title, url, and content into title/url/snippet", async () => {
+		mockFetchJsonOnce({
+			ok: true,
+			status: 200,
+			json: { results: [{ title: "Tavily Title", url: "https://tavily.example/page", content: "Tavily content." }] },
+		});
+
+		const { results } = await searchTavily("unique tavily query one", "tvly-key");
+
+		expect(results).toEqual([
+			{ title: "Tavily Title", url: "https://tavily.example/page", snippet: "Tavily content." },
+		]);
+	});
+
+	it("sends the API key as a Bearer token", async () => {
+		mockFetchJsonOnce({ ok: true, status: 200, json: { results: [] } });
+
+		await searchTavily("unique tavily query auth", "tvly-secret");
+
+		const call = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls[0];
+		const init = call[1] as { headers: Record<string, string> };
+		expect(init.headers.Authorization).toBe("Bearer tvly-secret");
+	});
+
+	it("throws a clear error on an invalid API key (401/403)", async () => {
+		mockFetchJsonOnce({ ok: false, status: 401, json: {} });
+
+		await expect(searchTavily("unique tavily query two", "bad-key")).rejects.toThrow(/api key/i);
+	});
+
+	it("throws a clear error when Tavily's own rate limit/quota is hit (429)", async () => {
+		mockFetchJsonOnce({ ok: false, status: 429, json: {} });
+
+		await expect(searchTavily("unique tavily query three", "tvly-key")).rejects.toThrow(/rate limit|quota/i);
+	});
+
+	it("caches results so a repeated query doesn't hit Tavily again", async () => {
+		mockFetchJsonOnce({
+			ok: true,
+			status: 200,
+			json: { results: [{ title: "Cached", url: "https://cached.example/", content: "s" }] },
+		});
+
+		await searchTavily("unique tavily query cache", "tvly-key");
+		await searchTavily("unique tavily query cache", "tvly-key");
+
 		expect(fetch).toHaveBeenCalledTimes(1);
 	});
 });
