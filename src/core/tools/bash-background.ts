@@ -174,6 +174,14 @@ export class BackgroundTaskRegistry {
 
 		proc.on("close", (exitCode) => {
 			clearTimeout(timer);
+			// Node fires 'close' after a failed spawn too (ENOENT, EACCES, …),
+			// right behind 'error' — which already recorded the real failure
+			// reason and settled the task once. Without this guard, close
+			// downgraded "error" back to "exited" with a meaningless exit code
+			// (confirmed: -2, "Process exited with code -2"), discarding the
+			// actual error message, and settle() ran a second time — duplicating
+			// the completion reminder for a single spawn failure.
+			if (task.status === "error") return;
 			task.exitCode = exitCode;
 			task.endedAt = Date.now();
 			// kill() already set "killed" — a later close mustn't downgrade it
