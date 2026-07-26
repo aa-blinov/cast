@@ -79,10 +79,15 @@ export interface Settings {
 	 * requests per IP before a CAPTCHA blocks further scraping. "tavily"
 	 * uses the Tavily Search API (needs `tavilyApiKey`) — a generous,
 	 * recurring free tier (1000 requests/month) instead of a hard per-IP cap.
+	 * "brave" uses the Brave Search API (needs `braveApiKey`) — an actual
+	 * general web index (not an AI-search aggregator like Tavily), free tier
+	 * varies by plan/region.
 	 */
-	searchProvider?: "ddg" | "tavily";
+	searchProvider?: "ddg" | "tavily" | "brave";
 	/** Tavily API key — required when searchProvider is "tavily". Get one at https://app.tavily.com */
 	tavilyApiKey?: string;
+	/** Brave Search API key — required when searchProvider is "brave". Get one at https://api-dashboard.search.brave.com */
+	braveApiKey?: string;
 	/** MCP server names the user has disabled via /mcp toggle. Persisted so
 	 * they stay disabled across sessions and /reload. */
 	disabledMcpServers?: string[];

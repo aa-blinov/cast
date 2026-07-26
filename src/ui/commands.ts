@@ -1873,6 +1873,10 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 					value: "tavily" as const,
 					label: `Tavily — API key required, 1000 free searches/month${current === "tavily" ? " (current)" : ""}`,
 				},
+				{
+					value: "brave" as const,
+					label: `Brave Search — API key required, general web index${current === "brave" ? " (current)" : ""}`,
+				},
 			],
 			{ title: "Web search backend" },
 		);
@@ -1885,17 +1889,31 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			showNotice("[Web search backend: DuckDuckGo]");
 			return;
 		}
+		if (picked === "tavily") {
+			const key = await deps.pickers.promptText(
+				"Tavily API key (https://app.tavily.com)",
+				settings.tavilyApiKey,
+				"tvly-...",
+			);
+			if (!key) {
+				showNotice("[Cancelled — search provider unchanged]");
+				return;
+			}
+			updateSettings({ searchProvider: "tavily", tavilyApiKey: key });
+			showNotice("[Web search backend: Tavily]");
+			return;
+		}
 		const key = await deps.pickers.promptText(
-			"Tavily API key (https://app.tavily.com)",
-			settings.tavilyApiKey,
-			"tvly-...",
+			"Brave Search API key (https://api-dashboard.search.brave.com)",
+			settings.braveApiKey,
+			"BSA...",
 		);
 		if (!key) {
 			showNotice("[Cancelled — search provider unchanged]");
 			return;
 		}
-		updateSettings({ searchProvider: "tavily", tavilyApiKey: key });
-		showNotice("[Web search backend: Tavily]");
+		updateSettings({ searchProvider: "brave", braveApiKey: key });
+		showNotice("[Web search backend: Brave]");
 		return;
 	}
 

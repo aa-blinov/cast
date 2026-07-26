@@ -313,6 +313,16 @@ describe("web_search tool definition — provider-dependent schema", () => {
 		expect(def?.parameters.properties).not.toHaveProperty("region");
 		expect(def?.parameters.properties).not.toHaveProperty("time");
 	});
+
+	it("omits region/time and names Brave once searchProvider is 'brave'", async () => {
+		const { updateSettings } = await import("../src/core/settings.ts");
+		updateSettings({ searchProvider: "brave", braveApiKey: "brave-fake" });
+
+		const def = getToolDefinitions().find((t) => t.function.name === "web_search")?.function;
+		expect(def?.description).toContain("Brave");
+		expect(def?.parameters.properties).not.toHaveProperty("region");
+		expect(def?.parameters.properties).not.toHaveProperty("time");
+	});
 });
 
 describe("bash_output", () => {

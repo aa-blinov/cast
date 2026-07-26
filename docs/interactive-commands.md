@@ -121,7 +121,7 @@ Use `/statusbar` to toggle individual segments on/off and reorder them — usefu
 | `/permissions default` | Switch to gated mode (confirm dangerous commands) |
 | `/permissions bypass` | Switch to bypass mode (no confirmation) |
 | `/web` | Toggle web tools (web_search, web_fetch) on/off |
-| `/web-search-provider` | Switch the `web_search` backend between DuckDuckGo (free, rate-limited) and Tavily (API key, 1000 free/month) |
+| `/web-search-provider` | Switch the `web_search` backend between DuckDuckGo (free, rate-limited), Tavily (API key, 1000 free/month), and Brave Search (API key) |
 | `/statusbar` | Toggle and reorder status bar segments (multi-select picker) |
 | `/theme` | Open theme picker |
 | `/theme <id>` | Switch to a specific theme |

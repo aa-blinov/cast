@@ -4,7 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { updateSettings } from "../src/core/settings.ts";
-import { execWebFetch, execWebSearch, fetchUrl, searchDuckDuckGo, searchTavily } from "../src/core/tools/web.ts";
+import {
+	execWebFetch,
+	execWebSearch,
+	fetchUrl,
+	searchBrave,
+	searchDuckDuckGo,
+	searchTavily,
+} from "../src/core/tools/web.ts";
 
 function ddgHtml(results: { title: string; href: string; snippet: string }[]): string {
 	return results
@@ -95,6 +102,39 @@ describe("execWebSearch", () => {
 
 		expect(result.isError).toBe(true);
 		expect(result.content).toContain("Tavily");
+		expect(result.content).toContain("/web-search-provider");
+	});
+
+	it("routes to Brave when searchProvider is 'brave' and a key is configured", async () => {
+		updateSettings({ searchProvider: "brave", braveApiKey: "brave-test-key" });
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockResolvedValue({
+				ok: true,
+				status: 200,
+				json: async () => ({
+					web: {
+						results: [{ title: "Brave Result", url: "https://brave.example/", description: "brave snippet" }],
+					},
+				}),
+			}),
+		);
+
+		const result = await execWebSearch({ query: "unique query brave-routing" });
+
+		expect(result.isError).toBeFalsy();
+		expect(result.content).toContain("Brave Result");
+		const call = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls[0];
+		expect(String(call[0])).toContain("api.search.brave.com");
+	});
+
+	it("errors clearly when searchProvider is 'brave' but no API key is configured", async () => {
+		updateSettings({ searchProvider: "brave" });
+
+		const result = await execWebSearch({ query: "unique query brave-no-key" });
+
+		expect(result.isError).toBe(true);
+		expect(result.content).toContain("Brave");
 		expect(result.content).toContain("/web-search-provider");
 	});
 });
@@ -242,6 +282,78 @@ describe("searchTavily", () => {
 		mockFetchJsonOnce({ ok: false, status: 400, json: { detail: { error: "Something specific broke." } } });
 
 		await expect(searchTavily("unique tavily query detail", "tvly-key")).rejects.toThrow(/Something specific broke/);
+	});
+});
+
+describe("searchBrave", () => {
+	it("parses title, url, and description into title/url/snippet, decoding HTML entities", async () => {
+		mockFetchJsonOnce({
+			ok: true,
+			status: 200,
+			json: {
+				web: {
+					results: [
+						{ title: "Brave Title", url: "https://brave.example/page", description: "It&#x27;s content." },
+					],
+				},
+			},
+		});
+
+		const { results } = await searchBrave("unique brave query one", "brave-key");
+
+		expect(results).toEqual([{ title: "Brave Title", url: "https://brave.example/page", snippet: "It's content." }]);
+	});
+
+	it("sends the API key via the X-Subscription-Token header", async () => {
+		mockFetchJsonOnce({ ok: true, status: 200, json: { web: { results: [] } } });
+
+		await searchBrave("unique brave query auth", "brave-secret");
+
+		const call = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls[0];
+		const init = call[1] as { headers: Record<string, string> };
+		expect(init.headers["X-Subscription-Token"]).toBe("brave-secret");
+	});
+
+	it("rejects an empty query before making a request", async () => {
+		vi.stubGlobal("fetch", vi.fn());
+
+		await expect(searchBrave("   ", "brave-key")).rejects.toThrow(/empty/i);
+		expect(fetch).not.toHaveBeenCalled();
+	});
+
+	it("throws a clear error on an invalid API key (422 SUBSCRIPTION_TOKEN_INVALID)", async () => {
+		mockFetchJsonOnce({
+			ok: false,
+			status: 422,
+			json: { error: { code: "SUBSCRIPTION_TOKEN_INVALID", detail: "The provided subscription token is invalid." } },
+		});
+
+		await expect(searchBrave("unique brave query two", "bad-key")).rejects.toThrow(/api key/i);
+	});
+
+	it("throws a clear error when Brave's own rate limit/quota is hit (429)", async () => {
+		mockFetchJsonOnce({ ok: false, status: 429, json: {} });
+
+		await expect(searchBrave("unique brave query three", "brave-key")).rejects.toThrow(/rate limit|quota/i);
+	});
+
+	it("surfaces Brave's own error detail on an unrecognized 4xx instead of a bare status code", async () => {
+		mockFetchJsonOnce({ ok: false, status: 400, json: { error: { detail: "Something specific broke." } } });
+
+		await expect(searchBrave("unique brave query detail", "brave-key")).rejects.toThrow(/Something specific broke/);
+	});
+
+	it("caches results so a repeated query doesn't hit Brave again", async () => {
+		mockFetchJsonOnce({
+			ok: true,
+			status: 200,
+			json: { web: { results: [{ title: "Cached", url: "https://cached.example/", description: "s" }] } },
+		});
+
+		await searchBrave("unique brave query cache", "brave-key");
+		await searchBrave("unique brave query cache", "brave-key");
+
+		expect(fetch).toHaveBeenCalledTimes(1);
 	});
 });
 

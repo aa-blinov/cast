@@ -21,8 +21,9 @@ User settings are persisted to `~/.cast/settings.json`. This file is loaded on s
 | `projectTrust` | Record<string, boolean> | Per-project trust decisions |
 | `theme` | string | Active color theme id |
 | `webTools` | boolean | Whether web tools are enabled (default: `false` — use `/web` to enable) |
-| `searchProvider` | `"ddg"` \| `"tavily"` | `web_search` backend (default: `"ddg"`) — use `/web-search-provider` to change |
+| `searchProvider` | `"ddg"` \| `"tavily"` \| `"brave"` | `web_search` backend (default: `"ddg"`) — use `/web-search-provider` to change |
 | `tavilyApiKey` | string | API key for the Tavily backend, from https://app.tavily.com |
+| `braveApiKey` | string | API key for the Brave Search backend, from https://api-dashboard.search.brave.com |
 | `disabledMcpServers` | string[] | MCP server names disabled via `/mcp` toggle |
 | `disabledSkills` | string[] | Skill names disabled via `/skills` toggle |
 | `enabledPlugins` | Record<string, boolean> | Marketplace plugins keyed by `name@marketplace` |
