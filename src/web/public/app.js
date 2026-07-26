@@ -1686,14 +1686,13 @@ function SettingsTools({ data, busy, act }) {
 				}}>Brave Search</button>
 			</div>
 			<div class="settings-form-row">
-				<input type="text" placeholder="Tavily API key (tvly-...)" value=${tKey} onInput=${(e) => setTavilyKey(e.target.value)} />
-				<button class="modal-btn" disabled=${busy || !tKey} onClick=${() => act(`/web-search-provider tavily ${tKey}`)}>Save &amp; use Tavily</button>
+				<input type="password" autocomplete="off" placeholder="Tavily API key (tvly-...)" value=${tKey} onInput=${(e) => setTavilyKey(e.target.value)} />
+				<button class="modal-btn" disabled=${busy || !tKey} onClick=${() => act(`/web-search-provider tavily ${tKey}`)}>Save & use Tavily</button>
 			</div>
 			<div class="settings-form-row">
-				<input type="text" placeholder="Brave Search API key (BSA...)" value=${bKey} onInput=${(e) => setBraveKey(e.target.value)} />
-				<button class="modal-btn" disabled=${busy || !bKey} onClick=${() => act(`/web-search-provider brave ${bKey}`)}>Save &amp; use Brave</button>
+				<input type="password" autocomplete="off" placeholder="Brave Search API key (BSA...)" value=${bKey} onInput=${(e) => setBraveKey(e.target.value)} />
+				<button class="modal-btn" disabled=${busy || !bKey} onClick=${() => act(`/web-search-provider brave ${bKey}`)}>Save & use Brave</button>
 			</div>
-			<div class="settings-hint">Only affects web_search — web_fetch (page reading) is unchanged either way. Free keys: <a href="https://app.tavily.com" target="_blank" rel="noopener">Tavily</a> (1000 requests/month, no card) or <a href="https://api-dashboard.search.brave.com" target="_blank" rel="noopener">Brave Search</a>.</div>
 			<div class="settings-section-title">Bash confirmation mode</div>
 			<div class="settings-form-row">
 				<button class="modal-btn${perm.permissionMode === "default" ? " modal-btn-primary" : ""}" title="Confirm dangerous commands" disabled=${busy} onClick=${() => act("/permissions default")}>Default</button>
