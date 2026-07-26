@@ -2,6 +2,8 @@
 
 A coding agent optimized for implementation isn't the best reviewer. A QA mindset doesn't write good specs. Personas let you swap the judgment — the lens through which the agent approaches your code — and optionally constrain which built-in tools that role may use. Different priorities, different questions, different output.
 
+See [Persona Research](persona-research.md) for the science behind why role framing changes agent behavior — and where it doesn't.
+
 ## Built-in Personas
 
 | Persona | Label | Description |
