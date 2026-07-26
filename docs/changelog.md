@@ -2,6 +2,22 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.8.31
+
+### Added
+
+- Web UI: sessions can now actually be deleted — the sidebar row's rename/close icons were replaced with a single ⋮ menu (also opens on right-click) offering Rename and a real, permanent Delete. Previously the × only unloaded a session from memory; it stayed on disk regardless.
+- Web UI: a themed confirmation dialog now appears before closing/deleting a thread, matching the rest of the app instead of nothing at all.
+- Web UI: new sessions default to a fresh sandbox directory instead of the project root — using the actual project root is now the deliberate choice.
+- Web UI: the empty-thread "cast" banner is now a crisp SVG logo (larger than before) that recolors with the active theme, replacing the old ASCII-art text render.
+
+### Fixed
+
+- Web UI: closing a thread no longer leaves it as the fallback session when reopening the app with no `?session=` in the URL.
+- Web UI: the Tavily/Brave Search API key fields are now masked, the "Save & use ..." button label no longer renders literally as `&amp;`, and a low-contrast hint line was removed.
+- Web UI: the tool-call result expand/collapse arrow is now a proper icon instead of a tiny text glyph.
+- Web UI: the streaming response no longer shows a blinking cursor (the composer's input caret is the only one now).
+
 ## 0.8.30
 
 ### Added
