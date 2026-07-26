@@ -753,9 +753,12 @@ body.resizing-diff * { user-select: none; }
 	letter-spacing: .04em;
 }
 .composer-elapsed {
-	font-size: .65rem;
-	font-weight: 500;
-	color: var(--text-muted);
+	/* Bigger and in the theme accent (not muted gray) — this is the one
+	   ticking indicator that a run is still alive, so it needs to read at a
+	   glance instead of blending into the row like a passive label. */
+	font-size: .9rem;
+	font-weight: 700;
+	color: var(--cyan);
 	font-variant-numeric: tabular-nums;
 }
 
