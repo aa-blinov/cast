@@ -827,9 +827,7 @@ describe("edit", () => {
 			],
 		});
 		expect(result.isError).toBeFalsy();
-		expect(readFileSync(join(TEST_DIR, "same-anchor-before.txt"), "utf-8")).toBe(
-			"line1\nX1\nX2\nX3\nline2\nline3\n",
-		);
+		expect(readFileSync(join(TEST_DIR, "same-anchor-before.txt"), "utf-8")).toBe("line1\nX1\nX2\nX3\nline2\nline3\n");
 	});
 
 	it("rejects an insert_before anchored strictly inside a replace range", async () => {
