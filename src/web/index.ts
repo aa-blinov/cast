@@ -163,7 +163,7 @@ export async function runWebServerMain(
 		if (shuttingDown) return;
 		shuttingDown = true;
 		console.log(`[cast web] received ${signal}, shutting down...`);
-		for (const s of bridge.listSessions()) bridge.closeSession(s.id);
+		for (const s of bridge.listSessions()) bridge.closeSession(s.id, "shutdown");
 		clearWebState();
 		server.close(() => process.exit(0));
 		// server.close() waits for existing connections (including open SSE

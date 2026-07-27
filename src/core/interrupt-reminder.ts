@@ -8,10 +8,17 @@ import type { Message } from "./llm.ts";
 
 /** Body text (wrapped by {@link buildInterruptReminder}). */
 export const INTERRUPT_REMINDER_BODY = "[Request interrupted by user]";
+/** Body text for a turn cut off by the backend process restarting/shutting
+ * down rather than an actual user action — telling the model "by user" here
+ * would be false and could make it think it did something wrong. */
+export const INTERRUPT_REMINDER_BODY_SHUTDOWN = "[Request interrupted — server restarted]";
+
+const INTERRUPT_REMINDER_PREFIX = "[Request interrupted";
 
 /** Full user-message content ready to append to the transcript. */
-export function buildInterruptReminder(): string {
-	return `<system-reminder>\n${INTERRUPT_REMINDER_BODY}\n</system-reminder>`;
+export function buildInterruptReminder(reason?: "shutdown"): string {
+	const body = reason === "shutdown" ? INTERRUPT_REMINDER_BODY_SHUTDOWN : INTERRUPT_REMINDER_BODY;
+	return `<system-reminder>\n${body}\n</system-reminder>`;
 }
 
 /** True when `messages` already ends with our interrupt reminder (idempotent). */
@@ -20,7 +27,7 @@ export function messagesEndWithInterruptReminder(messages: Message[]): boolean {
 		const m = messages[i]!;
 		if (m.role !== "user") continue;
 		const text = typeof m.content === "string" ? m.content : "";
-		return text.includes(INTERRUPT_REMINDER_BODY) && text.includes("<system-reminder>");
+		return text.includes(INTERRUPT_REMINDER_PREFIX) && text.includes("<system-reminder>");
 	}
 	return false;
 }
@@ -41,9 +48,9 @@ export function trailingToolsSignalUserAbort(messages: Message[]): boolean {
 /**
  * Append the interrupt reminder when needed. Returns true if a message was pushed.
  */
-export function appendInterruptReminder(messages: Message[]): boolean {
+export function appendInterruptReminder(messages: Message[], reason?: "shutdown"): boolean {
 	if (messagesEndWithInterruptReminder(messages)) return false;
 	if (trailingToolsSignalUserAbort(messages)) return false;
-	messages.push({ role: "user", content: buildInterruptReminder() });
+	messages.push({ role: "user", content: buildInterruptReminder(reason) });
 	return true;
 }

@@ -347,25 +347,39 @@ function renderMarkdown(text) {
 		return ` FENCE${i} `;
 	});
 
-	let out = escapeHtml(src);
+	// Collapse runs of 2+ blank lines into one — .message-content renders with
+	// white-space: pre-wrap, so every blank line in the source is a literal
+	// gap on screen, and models frequently emit 2-3 in a row (especially
+	// around lists/headings). Safe to do unconditionally on every render
+	// (streaming included): it's a pure function of the current text, so it
+	// can't desync from what's already on screen or cause a flicker.
+	const collapsed = src.replace(/\n{3,}/g, "\n\n");
+
+	let out = escapeHtml(collapsed);
 	out = out.replace(/`([^`\n]+)`/g, "<code>$1</code>");
 	out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
 	out = out.replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, "<em>$1</em>");
 	out = out.replace(/^#{1,6} (.+)$/gm, "<strong>$1</strong>");
 
-	// Group consecutive list lines into a single <ul>/<ol>.
-	out = out.replace(/(?:^[ \t]*[-*] .+$\n?)+/gm, (block) => {
+	// Group consecutive list lines into a single <ul>/<ol>. A blank line
+	// between items is swallowed too (but only when another item follows —
+	// the lookahead keeps it from also eating a blank line before unrelated
+	// prose after the list), since "loose" lists with a blank line between
+	// each item are common LLM output; without this, each item became its
+	// own single-item <ol>, so every line rendered as "1." instead of
+	// counting up.
+	out = out.replace(/(?:^[ \t]*[-*] .+$\n?(?:\n(?=[ \t]*[-*] ))?)+/gm, (block) => {
 		const items = block
 			.trim()
-			.split("\n")
+			.split(/\n+/)
 			.map((l) => `<li>${l.replace(/^[ \t]*[-*] /, "")}</li>`)
 			.join("");
 		return `<ul>${items}</ul>\n`;
 	});
-	out = out.replace(/(?:^[ \t]*\d+\. .+$\n?)+/gm, (block) => {
+	out = out.replace(/(?:^[ \t]*\d+\. .+$\n?(?:\n(?=[ \t]*\d+\. ))?)+/gm, (block) => {
 		const items = block
 			.trim()
-			.split("\n")
+			.split(/\n+/)
 			.map((l) => `<li>${l.replace(/^[ \t]*\d+\. /, "")}</li>`)
 			.join("");
 		return `<ol>${items}</ol>\n`;
@@ -1096,11 +1110,12 @@ function StatusPopover({ activeId, running }) {
 	const load = useCallback(async () => {
 		setError(null);
 		try {
-			const [current, repo] = await Promise.all([
+			const [current, repo, providers] = await Promise.all([
 				api("POST", `/api/sessions/${activeId}/command`, { command: "/current" }),
 				api("POST", `/api/sessions/${activeId}/command`, { command: "/repo" }),
+				api("POST", `/api/sessions/${activeId}/command`, { command: "/provider list" }),
 			]);
-			setData({ current: current?.result, repo: repo?.result });
+			setData({ current: current?.result, repo: repo?.result, providers: providers?.result });
 		} catch (err) {
 			setError(err.message);
 		}
@@ -1360,14 +1375,21 @@ function SettingsStatus({ data }) {
 	const c = data.current || {};
 	const r = data.repo || {};
 	const u = c.usage || {};
+	const providerName = (data.providers || []).find((p) => p.active)?.name;
 	return html`
 		<div class="settings-rows">
 			<div class="settings-row"><span>Persona</span><span>${c.persona ?? "—"}</span></div>
+			${providerName ? html`<div class="settings-row"><span>Provider</span><span>${providerName}</span></div>` : null}
 			<div class="settings-row"><span>Model</span><span>${c.model ?? "—"}</span></div>
 			<div class="settings-row"><span>Mode</span><span>${c.mode ?? "build"}</span></div>
 			<div class="settings-row"><span>Status</span><span>${c.status ?? "—"}</span></div>
 			<div class="settings-row"><span>Messages</span><span>${c.messageCount ?? 0}</span></div>
 			<div class="settings-row"><span>Tokens</span><span>${u.totalTokens ?? 0} (${u.promptTokens ?? 0} in / ${u.completionTokens ?? 0} out)</span></div>
+			${
+				u.cacheReadTokens > 0 && u.promptTokens > 0
+					? html`<div class="settings-row"><span>Cached</span><span>${u.cacheReadTokens} (${Math.round((u.cacheReadTokens / u.promptTokens) * 100)}% of input)</span></div>`
+					: null
+			}
 			${u.cost ? html`<div class="settings-row"><span>Cost</span><span>$${u.cost.toFixed(4)}</span></div>` : null}
 			${c.lastTurn?.tokensPerSecond ? html`<div class="settings-row"><span>Last turn</span><span>${c.lastTurn.tokensPerSecond} tok/s (${(c.lastTurn.generationMs / 1000).toFixed(1)}s)</span></div>` : null}
 			<div class="settings-row"><span>Directory</span><span title=${r.cwd}>${shortPath(r.cwd)}</span></div>
@@ -1716,6 +1738,7 @@ function SettingsMcp({ data, busy, act, confirm }) {
 				<span class="settings-item-meta">${s.disabled ? "disabled" : s.connected ? "connected" : "not connected"}</span>
 			</div>
 			<div class="settings-item-actions">
+				${!s.disabled && html`<button class="modal-btn icon-btn" title="Reconnect" disabled=${busy} onClick=${() => act(`/mcp reconnect ${s.name}`)}><${icons.arrowPath} /></button>`}
 				<button class="modal-btn icon-btn" title=${s.disabled ? "Enable" : "Disable"} disabled=${busy} onClick=${() => act(`/mcp ${s.disabled ? "enable" : "disable"} ${s.name}`)}>${s.disabled ? html`<${icons.play} />` : html`<${icons.pause} />`}</button>
 				<button class="modal-btn icon-btn modal-btn-danger" title="Uninstall" disabled=${busy} onClick=${async () => {
 					if (await confirm(`Uninstall MCP server "${s.name}"?`)) act(`/mcp uninstall ${s.name}`);
@@ -2340,6 +2363,48 @@ function App() {
 		}
 	});
 	const [streaming, setStreaming] = useState([]);
+	// SSE delivers token/thinking deltas at the model's raw generation rate,
+	// which can spike well past 60fps for a fast model or a burst of buffered
+	// events. Calling setStreaming (full markdown re-render + reflow of the
+	// whole growing block) on every single delta was measured causing 300ms+
+	// main-thread stalls and dropped frames on long, tool-heavy replies — so
+	// high-frequency updates go through this ref and get coalesced to at most
+	// one React commit per animation frame instead of one per SSE event.
+	const streamingRef = useRef([]);
+	const streamingRafRef = useRef(null);
+	const flushStreaming = useCallback(() => {
+		streamingRafRef.current = null;
+		setStreaming(streamingRef.current);
+	}, []);
+	const updateStreaming = useCallback(
+		(updater) => {
+			streamingRef.current = updater(streamingRef.current);
+			if (streamingRafRef.current == null) streamingRafRef.current = requestAnimationFrame(flushStreaming);
+		},
+		[flushStreaming],
+	);
+	// Discrete transitions (turn end, abort, reconnect) that must land
+	// immediately rather than risk sitting behind a still-pending frame.
+	const resetStreamingNow = useCallback(() => {
+		if (streamingRafRef.current != null) {
+			cancelAnimationFrame(streamingRafRef.current);
+			streamingRafRef.current = null;
+		}
+		streamingRef.current = [];
+		setStreaming([]);
+	}, []);
+	// Same, but for call sites that need the accumulated blocks (streaming
+	// content being promoted into a real persisted message) before clearing.
+	const takeStreamingNow = useCallback(() => {
+		if (streamingRafRef.current != null) {
+			cancelAnimationFrame(streamingRafRef.current);
+			streamingRafRef.current = null;
+		}
+		const snapshot = streamingRef.current;
+		streamingRef.current = [];
+		setStreaming([]);
+		return snapshot;
+	}, []);
 	const [running, setRunning] = useState(false);
 	const [pendingSteers, setPendingSteers] = useState([]);
 	const [pendingQueue, setPendingQueue] = useState([]);
@@ -2516,7 +2581,7 @@ function App() {
 				}
 				setSession(data);
 				setActiveId(id);
-				setStreaming([]);
+				resetStreamingNow();
 				setRunning(data.status === "running");
 				wasRunningRef.current = data.status === "running";
 				setSidebarOpen(false);
@@ -2529,7 +2594,7 @@ function App() {
 				showToast(err.message, "error");
 			}
 		},
-		[showToast, undismiss],
+		[showToast, undismiss, resetStreamingNow],
 	);
 
 	// Create session — the POST already returns the full new (empty) session,
@@ -2554,7 +2619,7 @@ function App() {
 				createdAt: data.session.createdAt,
 				updatedAt: data.session.updatedAt,
 			});
-			setStreaming([]);
+			resetStreamingNow();
 			setRunning(false);
 			setSidebarOpen(false);
 			try {
@@ -2564,7 +2629,7 @@ function App() {
 			loadSessions();
 			return data.id;
 		},
-		[loadSessions],
+		[loadSessions, resetStreamingNow],
 	);
 
 	// "+ New session" — picking a persona no longer hits the server at all.
@@ -2573,30 +2638,33 @@ function App() {
 	// POST /api/sessions only happens from submitMessage, the first time
 	// this draft actually gets a message (see there). Same idea as ChatGPT's
 	// "New chat": the conversation doesn't exist until you say something.
-	const startDraft = useCallback((persona, draftCwd) => {
-		if (esRef.current) {
-			esRef.current.close();
-			esRef.current = null;
-		}
-		setActiveId(null);
-		setSession({
-			id: null,
-			persona,
-			model: "",
-			cwd: draftCwd,
-			status: "idle",
-			messages: [],
-			usage: null,
-			createdAt: new Date().toISOString(),
-			updatedAt: new Date().toISOString(),
-			isDraft: true,
-		});
-		setStreaming([]);
-		setRunning(false);
-		setSidebarOpen(false);
-		const url = window.location.pathname;
-		window.history.pushState({ sessionId: null }, "", url);
-	}, []);
+	const startDraft = useCallback(
+		(persona, draftCwd) => {
+			if (esRef.current) {
+				esRef.current.close();
+				esRef.current = null;
+			}
+			setActiveId(null);
+			setSession({
+				id: null,
+				persona,
+				model: "",
+				cwd: draftCwd,
+				status: "idle",
+				messages: [],
+				usage: null,
+				createdAt: new Date().toISOString(),
+				updatedAt: new Date().toISOString(),
+				isDraft: true,
+			});
+			resetStreamingNow();
+			setRunning(false);
+			setSidebarOpen(false);
+			const url = window.location.pathname;
+			window.history.pushState({ sessionId: null }, "", url);
+		},
+		[resetStreamingNow],
+	);
 
 	// Static, rarely-changing resource lists — personas/commands/themes/config
 	// — only ever need fetching once per tab. Theme changes made mid-session
@@ -2748,10 +2816,10 @@ function App() {
 			else {
 				setActiveId(null);
 				setSession(null);
-				setStreaming([]);
+				resetStreamingNow();
 			}
 		},
-		[sessions, activeId, personas, selectSession, startDraft, showToast, dismissedIds],
+		[sessions, activeId, personas, selectSession, startDraft, showToast, dismissedIds, resetStreamingNow],
 	);
 
 	// Rename — overrides the auto-derived-from-first-message title. Updates
@@ -3065,7 +3133,7 @@ function App() {
 					// before the disconnect would conflict with new SSE events.
 					// If the agent is still running, new streaming events will
 					// arrive immediately via SSE and rebuild the live region.
-					setStreaming([]);
+					resetStreamingNow();
 					setPendingSteers([]);
 					setPendingQueue([]);
 					// Scroll to bottom after reconnect — user wants to see
@@ -3104,7 +3172,7 @@ function App() {
 						break;
 					}
 					case "token":
-						setStreaming((prev) => {
+						updateStreaming((prev) => {
 							const last = prev[prev.length - 1];
 							if (last && last.kind === "content")
 								return [...prev.slice(0, -1), { kind: "content", text: last.text + event.text }];
@@ -3112,7 +3180,7 @@ function App() {
 						});
 						break;
 					case "thinking":
-						setStreaming((prev) => {
+						updateStreaming((prev) => {
 							const last = prev[prev.length - 1];
 							if (last && last.kind === "thinking")
 								return [...prev.slice(0, -1), { kind: "thinking", text: last.text + event.text }];
@@ -3120,13 +3188,13 @@ function App() {
 						});
 						break;
 					case "tool_start":
-						setStreaming((prev) => [
+						updateStreaming((prev) => [
 							...prev,
 							{ kind: "tool", call: { id: event.id, name: event.name, args: event.args, status: "running" } },
 						]);
 						break;
 					case "tool_end":
-						setStreaming((prev) =>
+						updateStreaming((prev) =>
 							prev.map((b) =>
 								b.kind === "tool" && b.call.id === event.id
 									? {
@@ -3145,23 +3213,22 @@ function App() {
 						);
 						if (diffOpenRef.current) loadDiff();
 						break;
-					case "assistant_message":
+					case "assistant_message": {
 						// Keep reasoning, prose, and tool calls as separate ordered blocks
 						// (mirrors the TUI's [reasoning]/[agent] rows) instead of flattening
 						// them into one string — otherwise a turn's thinking text silently
 						// merges into the visible reply with no label or distinction.
-						setStreaming((prevStreaming) => {
-							setSession((prev) => {
-								if (!prev) return prev;
-								if (prevStreaming.length === 0) return prev;
-								const msg = { role: "assistant", blocks: prevStreaming };
-								return { ...prev, messages: [...prev.messages, msg] };
-							});
-							return [];
+						const prevStreaming = takeStreamingNow();
+						setSession((prev) => {
+							if (!prev) return prev;
+							if (prevStreaming.length === 0) return prev;
+							const msg = { role: "assistant", blocks: prevStreaming };
+							return { ...prev, messages: [...prev.messages, msg] };
 						});
 						break;
+					}
 					case "end":
-						setStreaming([]);
+						resetStreamingNow();
 						setRunning(false);
 						setSession((prev) => (prev ? { ...prev, status: "idle" } : prev));
 						setPendingSteers([]);
@@ -3198,7 +3265,7 @@ function App() {
 						});
 						break;
 					case "error":
-						setStreaming([]);
+						resetStreamingNow();
 						setRunning(false);
 						setSession((prev) =>
 							prev
@@ -3248,7 +3315,8 @@ function App() {
 					case "steering_injected":
 					case "followup_injected": {
 						// Promote streaming to history first, then show injected messages.
-						setStreaming((prevStreaming) => {
+						{
+							const prevStreaming = takeStreamingNow();
 							setSession((prev) => {
 								if (!prev) return prev;
 								const msgs =
@@ -3261,8 +3329,7 @@ function App() {
 								}));
 								return { ...prev, messages: [...msgs, ...injected] };
 							});
-							return [];
-						});
+						}
 						if (event.type === "steering_injected") {
 							setPendingSteers((p) => p.slice(event.messages.length));
 						} else {
@@ -3337,6 +3404,22 @@ function App() {
 			es.close();
 		};
 	}, [activeId, reconnectNonce, startReconnectLoop, addNotice, loadDiff, showToast]);
+
+	// Sidebar-wide SSE — independent of activeId, so message-count badges for
+	// other/background threads update live instead of only on page reload.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: reconnectNonce isn't read in the body — bumping it is what forces this effect to re-subscribe after a backend restart (see startReconnectLoop), same as the per-session SSE effect above.
+	useEffect(() => {
+		const es = new EventSource(`${window.location.origin}/api/sessions/events`);
+		es.onmessage = (e) => {
+			try {
+				const event = JSON.parse(e.data);
+				if (event.type === "session_update") {
+					setSessions((prev) => prev.map((s) => (s.id === event.session.id ? { ...s, ...event.session } : s)));
+				}
+			} catch {}
+		};
+		return () => es.close();
+	}, [reconnectNonce]);
 
 	// Auto-scroll
 	// biome-ignore lint/correctness/useExhaustiveDependencies: session?.messages/streaming aren't read in the body — they're the triggers to re-scroll whenever new content arrives, read indirectly via the DOM refs instead.

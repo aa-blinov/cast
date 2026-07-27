@@ -140,11 +140,17 @@ export const SLASH_COMMANDS: Array<{
 export function isCommandBlocking(input: string): boolean {
 	const trimmed = input.trim();
 	if (!trimmed.startsWith("/")) return false;
-	const name = trimmed.split(/\s+/)[0]!;
-	if (NON_BLOCKING_COMMANDS.has(name)) return false;
+	const [name, ...rest] = trimmed.split(/\s+/);
+	if (NON_BLOCKING_COMMANDS.has(name!)) return false;
+	// "/provider" (bare, or explicit "list") only reads the configured
+	// providers — it's just "/provider <name>"/"add"/"delete" that mutate the
+	// active endpoint. Reading it is what the web UI's status popover does on
+	// every open (including mid-run), so it can't sit behind the same gate as
+	// an actual switch.
+	if (name === "/provider" && (rest.length === 0 || rest[0] === "list")) return false;
 	// /rule:NAME is one token (no space before the rule id) — the bridge
 	// handles it before this gate and checks `running` internally.
-	if (BLOCKING_COMMANDS.has(name)) return true;
+	if (BLOCKING_COMMANDS.has(name!)) return true;
 	return false;
 }
 
