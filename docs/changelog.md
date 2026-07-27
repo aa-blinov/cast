@@ -2,6 +2,14 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.9.0
+
+### Added
+
+- Build mode: a `todo_write` tool for tracking multi-step work as a checklist — persisted separately from the message history (survives compaction and process restarts), re-injected into the system prompt every turn, and enforced by the harness: after several tool calls with no list started, every further tool call is refused until `todo_write` runs. Not available in plan mode, which already has the plan checklist for the same job.
+- Every persona's tool list now describes `todo_write` in its own voice — from qa's "one item per check in your verification pass" to architect's "rarely central here", matching how each persona already describes the rest of its tools.
+- Web UI: code blocks in the chat now have a copy button (top-right of the block) that swaps to a checkmark on successful copy.
+
 ## 0.8.32
 
 ### Added
