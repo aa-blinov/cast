@@ -2,6 +2,19 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.9.1
+
+### Added
+
+- Web UI: the final reply now shows a small, muted line with the provider, model, and response time — so a model switch is easy to confirm, and it's clear which model actually answered before deciding whether to switch again.
+- The "Coder with subagents + forced review" persona was renamed to "Coder with mandatory review" for a more natural label.
+
+### Fixed
+
+- Web UI and TUI: providers that interleave content/reasoning deltas out of order mid-turn (observed on MiniMax-M2) no longer render as broken alternating "agent"/"reasoning" blocks with a word split across the seam — same-kind text now merges back together across the interruption.
+- Web UI: switching the model (`/model`) now updates the sidebar immediately and becomes the default for every session created afterward — previously a new session always reopened on whichever model was active when the server started, no matter how many times you'd switched since.
+- `bash`, `ssh`, and background bash now cap output at true UTF-8 bytes instead of JS string length, matching how `read` already worked — for non-ASCII text (e.g. Cyrillic) the old comparison let through roughly double the configured byte limit. The default cap was also raised from 64KB to 128KB.
+
 ## 0.9.0
 
 ### Added

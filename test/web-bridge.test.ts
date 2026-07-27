@@ -209,6 +209,27 @@ describe("web bridge", () => {
 		expect(ws.session.model).toBe("gpt-5");
 	});
 
+	it("/model <name> becomes the default for sessions created afterward", async () => {
+		const bridge = createWebBridge(makeResult());
+		const first = bridge.createSession();
+		expect(first.session.model).toBe("gpt-4o");
+		await bridge.executeCommand(first.session.id, "/model gpt-5");
+		const second = bridge.createSession();
+		expect(second.session.model).toBe("gpt-5");
+	});
+
+	it("/model <name> broadcasts a session_update so the sidebar reflects it immediately", async () => {
+		const bridge = createWebBridge(makeResult());
+		const ws = bridge.createSession();
+		const events: Array<{ type: string }> = [];
+		bridge.subscribeAll((e) => events.push(e));
+		await bridge.executeCommand(ws.id, "/model gpt-5");
+		const update = events.find((e) => e.type === "session_update") as
+			| { type: "session_update"; session: { model: string } }
+			| undefined;
+		expect(update?.session.model).toBe("gpt-5");
+	});
+
 	it("/model and /persona are rejected while the agent is running", async () => {
 		const bridge = createWebBridge(makeResult());
 		const ws = bridge.createSession();
@@ -283,6 +304,27 @@ describe("web bridge", () => {
 		// 1 user + 2 assistant completions = 3 raw rows, not the 2 "turns"
 		// (1 user + 1 final reply) countTurnMessages would report.
 		expect(sessionEnd?.messageCount).toBe(3);
+	});
+
+	it("submit() broadcasts turn_meta with the model that answered, so the client can show it under the reply", async () => {
+		const bridge = createWebBridge(makeResult());
+		const ws = bridge.createSession(undefined, "gpt-5");
+
+		runAgentLoop.mockImplementationOnce(async (messages: unknown[]) => [
+			...messages,
+			{ role: "assistant", content: "final reply" },
+		]);
+
+		const events: Array<{ type: string; model?: string; provider?: string; totalMs?: number }> = [];
+		bridge.subscribe(ws.id, (e) => events.push(e as (typeof events)[number]));
+
+		bridge.submit(ws.id, "hi");
+		await new Promise((r) => setTimeout(r, 0));
+
+		const turnMeta = events.find((e) => e.type === "turn_meta");
+		expect(turnMeta?.model).toBe("gpt-5");
+		expect(turnMeta?.provider).toBe("default");
+		expect(typeof turnMeta?.totalMs).toBe("number");
 	});
 
 	it("/queue while running enqueues a follow-up; /queue-reset clears it", async () => {

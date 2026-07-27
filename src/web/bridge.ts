@@ -71,7 +71,8 @@ export type WebEvent =
 	| { type: "user_message"; message: { role: "user"; content: string } }
 	| { type: "session_update"; session: SessionSummary }
 	| { type: "session_end"; usage: SessionState["usage"]; messageCount: number }
-	| { type: "session_closed" };
+	| { type: "session_closed" }
+	| { type: "turn_meta"; model: string; provider: string; totalMs: number };
 
 export interface WebAgentSession {
 	id: string;
@@ -86,7 +87,14 @@ export interface WebAgentSession {
 	/** Ephemeral, like the TUI's `lastTurnUsage` (useAgentSession.ts) — not
 	 * persisted to disk, cleared implicitly by just being overwritten each
 	 * turn. Surfaced via /current. */
-	lastTurn?: { generationMs?: number; tokensPerSecond?: number; completedAt: string };
+	lastTurn?: {
+		generationMs?: number;
+		tokensPerSecond?: number;
+		completedAt: string;
+		model?: string;
+		provider?: string;
+		totalMs?: number;
+	};
 }
 
 export interface SessionSummary {
@@ -282,6 +290,11 @@ export function createWebBridge(result: StartupResult): WebBridge {
 	let sshHosts = result.sshHosts;
 	let permissionMode = result.permissionMode;
 	const subPrompts = result.subagentPrompts;
+	// The model a brand-new session should start on. Seeded from the very
+	// first session built at startup, but /model updates it too — otherwise a
+	// mid-run model switch never reached new sessions, which kept defaulting
+	// to whatever was active when the server started.
+	let defaultModel = result.session.model;
 
 	/**
 	 * Same `buildSystemPrompt` core call the TUI's /persona and /model handlers
@@ -329,7 +342,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 
 	function createSessionInstance(personaName?: string, modelOverride?: string, cwdOverride?: string): WebAgentSession {
 		const persona = personaName ? (resolvePersona(personaName) ?? currentPersona) : currentPersona;
-		const model = modelOverride ?? result.session.model;
+		const model = modelOverride ?? defaultModel;
 
 		let sessionCwd = cwdOverride && cwdOverride !== SANDBOX_CWD ? cwdOverride : cwd;
 		const session = createSession(model, sessionCwd);
@@ -473,6 +486,13 @@ export function createWebBridge(result: StartupResult): WebBridge {
 				? resolveProvider(providers, planModelProvider, activeCreds)
 				: undefined;
 		const resolvedSubagentProvider = resolveProvider(providers, subagentModelProvider, activeCreds);
+		// Which provider actually served this run — shown under the reply so
+		// the user knows what answered before deciding whether to /model away
+		// from it. Matched by URL since that's the only thing a resolved
+		// provider and a saved provider entry share.
+		const turnStart = Date.now();
+		const effectiveBaseURL = resolvedModelProvider?.baseURL ?? config.baseURL;
+		const runProviderName = providers.find((p) => p.url === effectiveBaseURL)?.name ?? "default";
 
 		runAgentLoop(ws.session.messages, {
 			config,
@@ -520,6 +540,8 @@ export function createWebBridge(result: StartupResult): WebBridge {
 									? Math.round((event.usage.completionTokens / (event.generationMs / 1000)) * 10) / 10
 									: undefined,
 							completedAt: new Date().toISOString(),
+							model: runModel,
+							provider: runProviderName,
 						};
 					}
 				}
@@ -549,8 +571,15 @@ export function createWebBridge(result: StartupResult): WebBridge {
 
 				ws.status = "idle";
 				ws.runner.endRun();
+				if (ws.lastTurn) ws.lastTurn.totalMs = Date.now() - turnStart;
 				saveSession(ws.session);
 				broadcast(ws, { type: "status", status: "idle" });
+				broadcast(ws, {
+					type: "turn_meta",
+					model: runModel,
+					provider: runProviderName,
+					totalMs: Date.now() - turnStart,
+				});
 				broadcast(ws, {
 					type: "session_end",
 					usage: ws.session.usage,
@@ -1012,6 +1041,16 @@ export function createWebBridge(result: StartupResult): WebBridge {
 				ws.session.mode,
 			);
 			saveSession(ws.session);
+			// Persist as the default for future sessions too — otherwise a model
+			// switch only ever applied to the session it was issued on, and every
+			// new session kept starting on whatever was active when the server
+			// started (confirmed: switching M2 -> M3 then /new still opened M2).
+			defaultModel = arg;
+			updateSettings({ model: arg });
+			// Sidebar footer reads the model off the session-list summary, not the
+			// open session's live state — without this it kept showing the old
+			// model until the turn ended (which resends it) or the page reloaded.
+			broadcastSessionUpdate(ws);
 			return { ok: true, result: { model: arg } };
 		}
 		if (name === "/reasoning") {
@@ -1458,7 +1497,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 	function getConfig() {
 		return {
 			baseURL: config.baseURL,
-			model: result.session.model,
+			model: defaultModel,
 			persona: currentPersona.name,
 			theme: loadSettings().theme ?? "cast",
 			cwd,
@@ -1584,7 +1623,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 
 	function getReasoningOptionsForSession(sessionId: string): { options: Array<{ value: string; label: string }> } {
 		const ws = sessions.get(sessionId) ?? hydrateSession(sessionId);
-		const model = ws?.session.model ?? result.session.model;
+		const model = ws?.session.model ?? defaultModel;
 		return { options: reasoningOptionsFor(model) };
 	}
 

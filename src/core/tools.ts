@@ -59,7 +59,7 @@ export function getToolDefinitions(
 				name: "bash",
 				description:
 					"Execute a bash command in the current working directory. Returns stdout and stderr. " +
-					"Output is truncated to last 2000 lines or 64KB (whichever is hit first). " +
+					"Output is truncated to last 2000 lines or 128KB (whichever is hit first). " +
 					"Default timeout 180s. For long-running commands (docker build, npm install, large test suites), " +
 					"pass a higher timeout value. " +
 					"Do NOT re-run an identical command to 'double-check' a result you already have — the previous " +
@@ -101,7 +101,7 @@ export function getToolDefinitions(
 					"Read the contents of a file. When you already know the path, call this directly — do not search with glob/ls first. " +
 					"Supports text files and images (jpg, jpeg, png, gif, webp, bmp — " +
 					"shown to you as an image in the next message; only works if the model supports vision). " +
-					"Output is truncated to 2000 lines or 64KB. Use offset/limit for large files. " +
+					"Output is truncated to 2000 lines or 128KB. Use offset/limit for large files. " +
 					"Images larger than 5MB are rejected. " +
 					"Each line is prefixed with `<LINE>:<LOCAL>:<CHUNK>→content` (a hashline anchor, e.g. `22:abc:rst`) — copy the full three-part prefix into `edit`. " +
 					"You already have the contents of every file you read earlier in this session — do NOT read the " +

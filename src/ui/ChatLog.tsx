@@ -176,25 +176,28 @@ function ToolCallView({ call, compact }: { call: ToolCallEntry; compact?: boolea
 		call.status === "running" ? theme().warning : call.status === "error" ? theme().error : theme().success;
 	const resultColor = call.status === "error" ? theme().error : theme().muted;
 	const showResult = Boolean(call.result) && call.name !== "read" && call.name !== "edit" && !isWebTool(call.name);
+	const mcp = isMcpTool(call.name);
+	const displayResult = call.result && mcp ? stripMcpMarkdownDecoration(call.result) : call.result;
 	// task: full wrapped report in history so the user can read the child answer;
 	// live/compact stays one truncated line so parallel tasks don't blow the clamp.
 	const taskResultFull = call.name === "task" && !compact && call.result;
 	return (
 		<Box flexDirection="column">
 			<Text>
-				<Text color={theme().tool}>[{call.name}]</Text> <Text color={statusColor}>[{call.status}]</Text>{" "}
+				<Text color={theme().tool}>[{mcp ? mcpToolLabel(call.name) : call.name}]</Text>{" "}
+				<Text color={statusColor}>[{call.status}]</Text>{" "}
 				<ToolSummary name={call.name} args={call.args} compact={compact} />
 				{call.result && <WebResultSummary name={call.name} result={call.result} />}
 			</Text>
 			{showResult && taskResultFull && (
 				<Text color={resultColor} wrap="wrap">
-					{call.result}
+					{displayResult}
 				</Text>
 			)}
 			{showResult && !taskResultFull && (
 				<Text color={resultColor} wrap="truncate">
-					{call.result!.slice(0, 500)}
-					{call.result!.length > 500 ? " ..." : ""}
+					{displayResult!.slice(0, 500)}
+					{displayResult!.length > 500 ? " ..." : ""}
 				</Text>
 			)}
 		</Box>
@@ -203,6 +206,32 @@ function ToolCallView({ call, compact }: { call: ToolCallEntry; compact?: boolea
 
 function isWebTool(name: string): boolean {
 	return name === "web_search" || name === "web_fetch";
+}
+
+// MCP tools are exposed to the model as "mcp_<server>_<tool>" (see
+// core/mcp.ts's mcpToolName) — same prefix-strip-and-loosen treatment the
+// web UI already applies (app.js's isMcpTool/mcpToolLabel), so the TUI
+// doesn't show the raw underscored wire name where the web UI shows a
+// readable "server · tool" label.
+function isMcpTool(name: string): boolean {
+	return name.startsWith("mcp_");
+}
+function mcpToolLabel(name: string): string {
+	return name.slice(4).replace(/_/g, " · ");
+}
+
+// A terminal can't render actual markdown HTML the way the web UI now does
+// for MCP results (see app.js's ToolCard) — Ink has no inline bold/heading
+// primitives to retrofit onto an already-streamed plain-text Text node. This
+// just strips the decoration MCP servers commonly wrap their output in
+// (fenced code, "#" headers) so it reads as plain text instead of literal
+// "```"/"###" noise; a built-in tool's result keeps its exact original text
+// (e.g. read's hashline anchors must never be touched).
+function stripMcpMarkdownDecoration(text: string): string {
+	return text
+		.replace(/^```\w*\n?/gm, "")
+		.replace(/^```$/gm, "")
+		.replace(/^#{1,6}\s+/gm, "");
 }
 
 function WebResultSummary({ name, result }: { name: string; result: string }): JSX.Element | null {

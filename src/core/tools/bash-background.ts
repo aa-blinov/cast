@@ -149,10 +149,10 @@ export class BackgroundTaskRegistry {
 
 		const maxBytes = config.maxToolOutputBytes;
 		proc.stdout?.on("data", (d: Buffer) => {
-			if (task.rawOutput.length < maxBytes) task.rawOutput += d.toString("utf-8");
+			if (Buffer.byteLength(task.rawOutput, "utf-8") < maxBytes) task.rawOutput += d.toString("utf-8");
 		});
 		proc.stderr?.on("data", (d: Buffer) => {
-			if (task.rawOutput.length < maxBytes) task.rawOutput += d.toString("utf-8");
+			if (Buffer.byteLength(task.rawOutput, "utf-8") < maxBytes) task.rawOutput += d.toString("utf-8");
 		});
 
 		const timer = setTimeout(() => {

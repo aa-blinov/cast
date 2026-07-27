@@ -1,6 +1,6 @@
 ---
 name: coder-with-subagents-force-review
-label: Coder · forced review
+label: Coder with mandatory review
 description: Coding agent that must pass every code change through an independent review subagent (fresh context, diff-based, one round) before reporting done.
 subagents: true
 ---

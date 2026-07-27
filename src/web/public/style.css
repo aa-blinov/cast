@@ -586,6 +586,13 @@ body.resizing-diff * { user-select: none; }
 	border-radius: var(--radius);
 	padding: 8px 12px;
 }
+.turn-meta {
+	font-size: .72rem;
+	color: var(--text-muted);
+	opacity: .65;
+	padding: 2px 4px 10px;
+	font-family: var(--font);
+}
 .message-reasoning .message-label { color: var(--text-muted); }
 .message-reasoning .message-content { color: var(--text-muted); font-style: italic; }
 .message-label {
@@ -770,6 +777,39 @@ pre:hover .code-copy-btn, .code-copy-btn:focus-visible { opacity: 1; }
 	max-height: 400px;
 	overflow-y: auto;
 }
+/* MCP results render as real markdown (see ToolCard) — same child styling
+ * as .message-content, just smaller to match this panel's font-size. */
+.tool-card-result ul, .tool-card-result ol { margin: 4px 0 4px 1.2em; }
+.tool-card-result li { margin: 2px 0; }
+.tool-card-result strong { color: var(--text); font-weight: 600; }
+.tool-card-result code {
+	font-family: var(--font-mono);
+	background: var(--bg-raised);
+	border: 1px solid var(--border);
+	padding: 1px 5px;
+	border-radius: 4px;
+}
+.tool-card-result pre {
+	background: var(--bg-raised);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	padding: 8px 10px;
+	overflow-x: auto;
+	margin: 6px 0;
+	white-space: pre;
+}
+.tool-card-result pre code { background: none; padding: 0; border: none; }
+.tool-card-result .code-lang {
+	font-family: var(--font-mono);
+	font-size: .6rem;
+	text-transform: uppercase;
+	letter-spacing: .05em;
+	color: var(--text-muted);
+	margin-bottom: 4px;
+}
+.tool-card-result .md-table-wrap { overflow-x: auto; }
+.tool-card-result table { border-collapse: collapse; margin: 6px 0; }
+.tool-card-result th, .tool-card-result td { border: 1px solid var(--border); padding: 3px 6px; text-align: left; }
 
 /* ── Composer ─────────────────────────────────────────────────────── */
 .composer-role {
@@ -1143,6 +1183,7 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	.sidebar.open { transform: translateX(0); }
 	/* No hover on touch — the menu/pin buttons must be reachable without it. */
 	.sidebar-item-more, .sidebar-item-pin { opacity: 1; }
+	.code-copy-btn, .dir-item-delete { opacity: 1; }
 	.sidebar-backdrop {
 		top: calc(var(--header-h) + env(safe-area-inset-top));
 		background: rgba(0,0,0,.6);
@@ -1264,6 +1305,29 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 }
 .dir-item:hover { background: var(--bg-hover); color: var(--text); }
 .dir-item-up { color: var(--text-muted); }
+.dir-item-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 6px;
+	padding: 0;
+}
+.dir-item-name {
+	flex: 1;
+	padding: 7px 10px;
+	cursor: pointer;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.dir-item-delete {
+	flex-shrink: 0;
+	margin-right: 4px;
+	opacity: 0;
+	transition: opacity .1s;
+}
+.dir-item-row:hover .dir-item-delete, .dir-item-delete:focus-visible { opacity: 1; }
 .dir-empty, .dir-error {
 	padding: 16px;
 	text-align: center;
@@ -1271,6 +1335,29 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	font-size: .8rem;
 }
 .dir-error { color: #fca5a5; }
+.dir-new-folder {
+	margin: 6px;
+	align-self: flex-start;
+}
+.dir-create-row {
+	display: flex;
+	gap: 6px;
+	padding: 6px;
+	border-top: 1px solid var(--border);
+}
+.dir-create-row input {
+	flex: 1;
+	min-width: 0;
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	padding: 6px 8px;
+	color: var(--text);
+	font-family: var(--font);
+	font-size: .8rem;
+	outline: none;
+}
+.dir-create-row input:focus { border-color: var(--cyan); }
 .modal-footer {
 	display: flex; justify-content: flex-end; gap: 8px;
 	padding: 10px 14px;
