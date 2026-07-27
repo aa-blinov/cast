@@ -70,11 +70,22 @@ export interface StreamingState {
 	blocks: StreamBlock[];
 }
 
-/** Append text to the trailing block if it's the same kind, else start a new one. */
-function appendText(blocks: StreamBlock[], kind: "thinking" | "content", text: string): StreamBlock[] {
-	const last = blocks[blocks.length - 1];
-	if (last && last.kind === kind) {
-		return [...blocks.slice(0, -1), { kind, text: last.text + text, continued: last.continued }];
+/**
+ * Append text, merging into the most recent block of the same kind rather
+ * than only the trailing one. Some providers (observed on MiniMax-M2)
+ * interleave content/reasoning deltas out of order mid-turn — a token, a
+ * thinking chunk, then more tokens — which used to split into alternating
+ * blocks with words cut across the seam. A tool call is still a hard
+ * boundary: text never merges across one, since that ordering is real.
+ */
+/** Exported for unit tests. */
+export function appendText(blocks: StreamBlock[], kind: "thinking" | "content", text: string): StreamBlock[] {
+	for (let j = blocks.length - 1; j >= 0; j--) {
+		const b = blocks[j]!;
+		if (b.kind === "tool") break;
+		if (b.kind === kind) {
+			return [...blocks.slice(0, j), { kind, text: b.text + text, continued: b.continued }, ...blocks.slice(j + 1)];
+		}
 	}
 	return [...blocks, { kind, text }];
 }

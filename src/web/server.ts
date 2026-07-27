@@ -6,7 +6,7 @@
  */
 
 import { execSync } from "node:child_process";
-import { mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmdirSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { dirname, extname, join, resolve } from "node:path";
@@ -585,6 +585,49 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 				entries: [],
 				error: err instanceof Error ? err.message : String(err),
 			});
+		}
+	});
+
+	// Only the basename, never a path — "name" comes from a plain text input
+	// in the picker, not a path the user is otherwise navigating, so there's
+	// no legitimate reason for it to contain a separator or "..".
+	route("POST", "/api/browse/mkdir", async (req, res) => {
+		let parsed: { path?: string; name?: string };
+		try {
+			parsed = JSON.parse(await readBody(req));
+		} catch {
+			return json(res, { error: "Invalid JSON" }, 400);
+		}
+		const name = (parsed.name ?? "").trim();
+		if (!name || name.includes("/") || name.includes("\\") || name === "." || name === "..") {
+			return json(res, { error: "Invalid folder name" }, 400);
+		}
+		const parent = resolve(parsed.path || bridge.getConfig().cwd || homedir());
+		const target = join(parent, name);
+		try {
+			mkdirSync(target);
+			json(res, { ok: true, path: target });
+		} catch (err) {
+			json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
+		}
+	});
+
+	// Non-recursive on purpose — this is one click away in a folder-picker
+	// modal, not a deliberate "rm -rf" the user typed out. An OS ENOTEMPTY
+	// error is the safety net for a directory that still has something in it;
+	// the client surfaces it as-is rather than silently escalating to -r.
+	route("DELETE", "/api/browse", (req, res) => {
+		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+		const target = resolve(url.searchParams.get("path") ?? "");
+		const home = homedir();
+		if (!target || target === "/" || target === home) {
+			return json(res, { error: "Refusing to delete this directory" }, 400);
+		}
+		try {
+			rmdirSync(target);
+			json(res, { ok: true });
+		} catch (err) {
+			json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
 		}
 	});
 

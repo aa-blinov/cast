@@ -71,7 +71,7 @@ export function loadConfig(connection: { baseURL: string; apiKey: string }): App
 		maxResponseTokens: 8192,
 		compactionThreshold: 0.75,
 		maxToolOutputLines: 2000,
-		maxToolOutputBytes: 64 * 1024,
+		maxToolOutputBytes: 128 * 1024,
 		defaultBashTimeout: 180,
 		reasoningLevel: "off",
 		reasoningParams: { body: {}, enabled: false },

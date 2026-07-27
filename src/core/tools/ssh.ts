@@ -115,10 +115,10 @@ export async function execSsh(
 		const maxBytes = config.maxToolOutputBytes;
 
 		proc.stdout.on("data", (d: Buffer) => {
-			if (rawOutput.length < maxBytes) rawOutput += d.toString("utf-8");
+			if (Buffer.byteLength(rawOutput, "utf-8") < maxBytes) rawOutput += d.toString("utf-8");
 		});
 		proc.stderr.on("data", (d: Buffer) => {
-			if (rawOutput.length < maxBytes) rawOutput += d.toString("utf-8");
+			if (Buffer.byteLength(rawOutput, "utf-8") < maxBytes) rawOutput += d.toString("utf-8");
 		});
 
 		const timer = setTimeout(() => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type StreamBlock, settledPrefixLength, splitCompleteLines } from "../src/ui/useAgentSession.ts";
+import { appendText, type StreamBlock, settledPrefixLength, splitCompleteLines } from "../src/ui/useAgentSession.ts";
 
 const think = (text: string): StreamBlock => ({ kind: "thinking", text });
 const content = (text: string): StreamBlock => ({ kind: "content", text });
@@ -69,5 +69,25 @@ describe("splitCompleteLines", () => {
 	it("never splits a tool block", () => {
 		const t = tool("running");
 		expect(splitCompleteLines(t)).toEqual({ settled: [], tail: t });
+	});
+});
+
+describe("appendText", () => {
+	it("merges into the trailing block of the same kind", () => {
+		expect(appendText([content("Hel")], "content", "lo")).toEqual([content("Hello")]);
+	});
+
+	it("starts a new block when the kind switches", () => {
+		expect(appendText([content("answering")], "thinking", "hmm")).toEqual([content("answering"), think("hmm")]);
+	});
+
+	it("merges back into an earlier same-kind block across intervening thinking (MiniMax-M2 interleaving)", () => {
+		const blocks = [content("Привет! Я помогу с пит"), think("...")];
+		expect(appendText(blocks, "content", "чами")).toEqual([content("Привет! Я помогу с питчами"), think("...")]);
+	});
+
+	it("does not merge across a tool call boundary", () => {
+		const blocks = [content("before"), tool("ok")];
+		expect(appendText(blocks, "content", "after")).toEqual([content("before"), tool("ok"), content("after")]);
 	});
 });

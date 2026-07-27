@@ -552,7 +552,17 @@ function ToolCard({ call }) {
 				${hasResult && html`<${open ? icons.chevronUp : icons.chevronDown} class="tool-card-toggle" />`}
 			</div>
 			${args && html`<div class="tool-card-body">${args}</div>`}
-			${open && hasResult && html`<div class="tool-card-result">${formatToolResult(call.name, call.result)}</div>`}
+			${
+				open &&
+				hasResult &&
+				(mcp
+					? // MCP servers commonly format their own results as markdown (headers,
+						// code fences, tables) — worth actually rendering, unlike a built-in
+						// tool's result, which has a fixed non-markdown shape (e.g. read's
+						// hashline anchors) that markdown rendering would corrupt.
+						html`<div class="tool-card-result" dangerouslySetInnerHTML=${{ __html: renderMarkdown(call.result) }}></div>`
+					: html`<div class="tool-card-result">${formatToolResult(call.name, call.result)}</div>`)
+			}
 		</div>
 	`;
 }
@@ -638,6 +648,23 @@ function Message({ msg }) {
 			<div class="message-content" dangerouslySetInnerHTML=${{ __html: role === "user" ? escapeHtml(content) : renderMarkdown(content) }} />
 		</div>
 	`;
+}
+
+// Some providers (observed on MiniMax-M2) interleave content/reasoning deltas
+// out of order mid-turn — a token, a thinking chunk, then more tokens — which
+// used to render as alternating "agent"/"reasoning" blocks with words split
+// across the seam. Merge into the most recent block of the same kind instead
+// of only the immediately-preceding one, so thrashing between the two channels
+// collapses back into one coherent block each. Tool calls remain hard
+// boundaries: text never merges across one, since that ordering is real.
+function appendTextBlock(prev, kind, text) {
+	for (let j = prev.length - 1; j >= 0; j--) {
+		if (prev[j].kind === "tool") break;
+		if (prev[j].kind === kind) {
+			return [...prev.slice(0, j), { kind, text: prev[j].text + text }, ...prev.slice(j + 1)];
+		}
+	}
+	return [...prev, { kind, text }];
 }
 
 function StreamingBlocks({ blocks }) {
@@ -1049,12 +1076,16 @@ function useModalFocusTrap(active) {
 // Read-only folder browser (like a native "Open Folder" dialog) for picking
 // a new session's working directory — /api/browse lists subdirectories only,
 // server-side, and this just walks that one level at a time.
-function DirectoryBrowser({ initialPath, onPick, onClose }) {
+function DirectoryBrowser({ initialPath, onPick, onClose, confirm }) {
 	const [path, setPath] = useState(initialPath || "");
 	const [parent, setParent] = useState(null);
 	const [entries, setEntries] = useState([]);
 	const [error, setError] = useState(null);
 	const [loading, setLoading] = useState(true);
+	const [busy, setBusy] = useState(false);
+	const [creating, setCreating] = useState(false);
+	const [newName, setNewName] = useState("");
+	const newNameRef = useRef(null);
 
 	const load = useCallback(async (p) => {
 		setLoading(true);
@@ -1078,6 +1109,46 @@ function DirectoryBrowser({ initialPath, onPick, onClose }) {
 	}, []);
 	const modalRef = useModalFocusTrap(true);
 
+	const openCreate = useCallback(() => {
+		setCreating(true);
+		setNewName("");
+		// Input isn't mounted yet this tick — focus on the next one.
+		requestAnimationFrame(() => newNameRef.current?.focus());
+	}, []);
+
+	const submitCreate = useCallback(async () => {
+		const name = newName.trim();
+		if (!name) {
+			setCreating(false);
+			return;
+		}
+		setBusy(true);
+		try {
+			await api("POST", "/api/browse/mkdir", { path, name });
+			setCreating(false);
+			await load(path);
+		} catch (err) {
+			setError(err.message);
+		}
+		setBusy(false);
+	}, [newName, path, load]);
+
+	const deleteEntry = useCallback(
+		async (entry) => {
+			const ok = await confirm(`Delete empty folder "${entry.name}"? This can't be undone.`);
+			if (!ok) return;
+			setBusy(true);
+			try {
+				await api("DELETE", `/api/browse?path=${encodeURIComponent(entry.path)}`);
+				await load(path);
+			} catch (err) {
+				setError(err.message);
+			}
+			setBusy(false);
+		},
+		[confirm, path, load],
+	);
+
 	return html`
 		<div class="modal-backdrop" onClick=${onClose}>
 			<div class="modal" role="dialog" aria-modal="true" aria-label="Choose working directory" tabIndex="-1" ref=${modalRef} onClick=${(e) => e.stopPropagation()}>
@@ -1095,12 +1166,45 @@ function DirectoryBrowser({ initialPath, onPick, onClose }) {
 					}
 					${entries.map(
 						(e) => html`
-						<div key=${e.path} class="dir-item" onClick=${() => load(e.path)}>${e.name}</div>
+						<div key=${e.path} class="dir-item dir-item-row">
+							<span class="dir-item-name" onClick=${() => load(e.path)}>${e.name}</span>
+							<button
+								class="modal-btn icon-btn dir-item-delete"
+								title="Delete folder"
+								disabled=${busy}
+								onClick=${(ev) => {
+									ev.stopPropagation();
+									deleteEntry(e);
+								}}
+							><${icons.trash} /></button>
+						</div>
 					`,
 					)}
 					${!loading && entries.length === 0 && !error && html`<div class="dir-empty">No subdirectories</div>`}
 					${error && html`<div class="dir-error">${error}</div>`}
 				</div>
+				${
+					creating
+						? html`
+						<div class="dir-create-row">
+							<input
+								ref=${newNameRef}
+								type="text"
+								placeholder="New folder name"
+								value=${newName}
+								disabled=${busy}
+								onInput=${(e) => setNewName(e.target.value)}
+								onKeyDown=${(e) => {
+									if (e.key === "Enter") submitCreate();
+									if (e.key === "Escape") setCreating(false);
+								}}
+							/>
+							<button class="modal-btn" disabled=${busy} onClick=${() => setCreating(false)}>Cancel</button>
+							<button class="modal-btn modal-btn-primary" disabled=${busy || !newName.trim()} onClick=${submitCreate}>Create</button>
+						</div>
+					`
+						: html`<button class="modal-btn dir-new-folder" disabled=${busy} onClick=${openCreate}>+ New folder</button>`
+				}
 				<div class="modal-footer">
 					<button class="modal-btn" onClick=${onClose}>Cancel</button>
 					<button class="modal-btn modal-btn-primary" onClick=${() => onPick(path)}>Use this folder</button>
@@ -2433,6 +2537,10 @@ function App() {
 		return snapshot;
 	}, []);
 	const [running, setRunning] = useState(false);
+	// Shown as a small gray line under the last reply so the user knows which
+	// provider/model actually answered before deciding whether to /model away
+	// from it. Ephemeral — reset on session switch, not part of `session`.
+	const [turnMeta, setTurnMeta] = useState(null);
 	const [pendingSteers, setPendingSteers] = useState([]);
 	const [pendingQueue, setPendingQueue] = useState([]);
 	const [diffOpen, setDiffOpen] = useState(false);
@@ -2609,6 +2717,7 @@ function App() {
 				setSession(data);
 				setActiveId(id);
 				resetStreamingNow();
+				setTurnMeta(null);
 				setRunning(data.status === "running");
 				wasRunningRef.current = data.status === "running";
 				setSidebarOpen(false);
@@ -3190,6 +3299,7 @@ function App() {
 					case "status": {
 						const isRunning = event.status === "running";
 						setRunning(isRunning);
+						if (isRunning) setTurnMeta(null);
 						setSession((prev) => (prev ? { ...prev, status: event.status } : prev));
 						// If the run ended between our initial GET and the SSE
 						// connect, we missed the `end` event. The `session_end`
@@ -3199,20 +3309,10 @@ function App() {
 						break;
 					}
 					case "token":
-						updateStreaming((prev) => {
-							const last = prev[prev.length - 1];
-							if (last && last.kind === "content")
-								return [...prev.slice(0, -1), { kind: "content", text: last.text + event.text }];
-							return [...prev, { kind: "content", text: event.text }];
-						});
+						updateStreaming((prev) => appendTextBlock(prev, "content", event.text));
 						break;
 					case "thinking":
-						updateStreaming((prev) => {
-							const last = prev[prev.length - 1];
-							if (last && last.kind === "thinking")
-								return [...prev.slice(0, -1), { kind: "thinking", text: last.text + event.text }];
-							return [...prev, { kind: "thinking", text: event.text }];
-						});
+						updateStreaming((prev) => appendTextBlock(prev, "thinking", event.text));
 						break;
 					case "tool_start":
 						updateStreaming((prev) => [
@@ -3229,10 +3329,12 @@ function App() {
 											call: {
 												...b.call,
 												status: event.result?.isError ? "error" : "ok",
-												// Matches core's maxToolOutputBytes default (64KB) — tool
-												// output is already capped upstream, so this just guards
-												// against an unbounded MCP tool that ignores that cap.
-												result: event.result?.content?.slice(0, 64 * 1024) ?? "",
+												// Full, untruncated — same text the model actually saw.
+												// A page reload already shows this in full (bridge.ts's
+												// toDisplayMessages applies no cap), so a live turn
+												// truncating it here just meant the same result read
+												// differently depending on when you looked at it.
+												result: event.result?.content ?? "",
 											},
 										}
 									: b,
@@ -3260,6 +3362,9 @@ function App() {
 						setSession((prev) => (prev ? { ...prev, status: "idle" } : prev));
 						setPendingSteers([]);
 						setPendingQueue([]);
+						break;
+					case "turn_meta":
+						setTurnMeta({ model: event.model, provider: event.provider, totalMs: event.totalMs });
 						break;
 					case "session_end":
 						setSession((prev) => {
@@ -3741,6 +3846,7 @@ function App() {
 						setDirPickerOpen(false);
 					}}
 					onClose=${() => setDirPickerOpen(false)}
+					confirm=${requestConfirm}
 				/>
 			`
 			}
@@ -3805,6 +3911,13 @@ function App() {
 					}
 					${messages.map((msg) => html`<${Message} key=${keyForMessage(msg)} msg=${msg} />`)}
 					<${StreamingBlocks} blocks=${streaming} />
+					${
+						!running &&
+						turnMeta &&
+						html`
+						<div class="turn-meta">${turnMeta.provider} · ${turnMeta.model} · ${(turnMeta.totalMs / 1000).toFixed(1)}s</div>
+					`
+					}
 				</div>
 				${
 					!atBottom &&
