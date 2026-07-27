@@ -123,6 +123,33 @@ export const icons = {
 	link: icon(
 		"M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244",
 	),
+	// Simple, self-authored shapes (not heroicons) for the file explorer —
+	// small enough that a wrong path is easy to verify at a glance, unlike
+	// reproducing a multi-curve heroicon path from memory.
+	folder: (props) =>
+		h(
+			"svg",
+			{ width: 14, height: 14, viewBox: "0 0 16 16", fill: "currentColor", ...props },
+			h("path", {
+				d: "M2 4.5C2 3.67 2.67 3 3.5 3h3l1.5 1.5h5.5c.83 0 1.5.67 1.5 1.5V12c0 .83-.67 1.5-1.5 1.5h-9C2.67 13.5 2 12.83 2 12V4.5Z",
+			}),
+		),
+	docFile: (props) =>
+		h(
+			"svg",
+			{
+				width: 14,
+				height: 14,
+				viewBox: "0 0 16 16",
+				fill: "none",
+				stroke: "currentColor",
+				"stroke-width": 1.3,
+				"stroke-linejoin": "round",
+				...props,
+			},
+			h("path", { d: "M4 2.5c0-.28.22-.5.5-.5H9l3 3v8.5c0 .28-.22.5-.5.5h-7c-.28 0-.5-.22-.5-.5V2.5Z" }),
+			h("path", { d: "M9 2v3h3" }),
+		),
 	bookOpen: icon2(
 		"M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25",
 	),

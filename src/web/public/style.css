@@ -169,6 +169,8 @@ body.resizing-diff * { user-select: none; }
 	transition: color .15s, background .15s;
 }
 .menu-toggle:hover { color: var(--cyan); background: rgba(0,200,255,.08); }
+.menu-toggle:disabled { opacity: .35; cursor: default; }
+.menu-toggle:disabled:hover { color: var(--text); background: none; }
 /* diff-toggle reuses .menu-toggle's plain icon-button look (no border/box)
  * so both header chevrons read as the same control — only the rotation
  * direction and which side of the layout they act on differ. */
@@ -180,17 +182,15 @@ body.resizing-diff * { user-select: none; }
 .menu-toggle.active .chevron-icon { transform: rotate(180deg); }
 
 /* ── Status modal ─────────────────────────────────────────────────── */
-.modal-status {
-	max-width: 340px;
-}
+/* max-width lives with the rest of .modal's own overrides, further down —
+   this class and .modal share equal specificity, so declaring it here (before
+   .modal in the cascade) got silently discarded in favor of .modal's 480px
+   every time; same story for .modal-confirm/.modal-share/.modal-preview. */
 .modal-status-body {
 	padding: 12px 14px;
 }
 
 /* ── Confirm modal ────────────────────────────────────────────────── */
-.modal-confirm {
-	max-width: 360px;
-}
 .modal-confirm-body {
 	padding: 16px 14px 4px;
 	font-size: .85rem;
@@ -199,9 +199,6 @@ body.resizing-diff * { user-select: none; }
 
 
 /* ── Share modal ──────────────────────────────────────────────────── */
-.modal-share {
-	max-width: 440px;
-}
 .modal-share-body {
 	padding: 12px 14px;
 }
@@ -1125,12 +1122,30 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	background: var(--bg-surface);
 	gap: 8px;
 }
-.diff-title {
-	font-size: .78rem; font-weight: 600;
-	text-transform: uppercase;
-	letter-spacing: .04em;
-	color: var(--text-muted);
+.diff-tabs {
+	display: flex;
+	gap: 2px;
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	padding: 2px;
 }
+.diff-tab {
+	background: none;
+	border: none;
+	color: var(--text-muted);
+	font-family: var(--font);
+	font-size: .72rem;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: .03em;
+	padding: 4px 10px;
+	border-radius: 4px;
+	cursor: pointer;
+	transition: background .12s, color .12s;
+}
+.diff-tab:hover { color: var(--text); }
+.diff-tab.active { background: var(--bg-raised); color: var(--text); }
 .diff-close {
 	margin-left: auto;
 	background: none; border: none;
@@ -1280,6 +1295,194 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	overflow-y: auto;
 }
 
+/* ── File explorer (diff panel's "Files" tab) ────────────────────── */
+.fs-explorer {
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	min-height: 0;
+}
+.fs-toolbar {
+	display: flex;
+	gap: 6px;
+	padding: 8px;
+	border-bottom: 1px solid var(--border);
+	flex-shrink: 0;
+}
+.fs-search {
+	flex: 1;
+	min-width: 0;
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	padding: 5px 9px;
+	color: var(--text);
+	font-family: var(--font);
+	font-size: .78rem;
+}
+.fs-search:focus { border-color: var(--cyan); outline: none; }
+.fs-collapse-btn {
+	flex-shrink: 0;
+	width: 28px; height: 28px;
+	display: flex; align-items: center; justify-content: center;
+	background: none;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	color: var(--text-muted);
+	cursor: pointer;
+}
+.fs-collapse-btn:hover { color: var(--cyan); border-color: var(--border-active); }
+.fs-tree {
+	flex: 1;
+	overflow-y: auto;
+	padding: 4px 0;
+}
+.fs-row {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	min-height: 30px;
+	padding-right: 8px;
+	font-size: .8rem;
+	color: var(--text-dim);
+}
+.fs-row:hover { background: var(--bg-hover); }
+.fs-row-main {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex: 1;
+	min-width: 0;
+	padding: 5px 4px;
+	cursor: pointer;
+}
+.fs-chevron {
+	display: flex; align-items: center; justify-content: center;
+	width: 14px; height: 14px;
+	flex-shrink: 0;
+	color: var(--text-muted);
+	transition: transform .1s;
+}
+.fs-chevron.open { transform: rotate(90deg); }
+.fs-chevron-spacer { width: 14px; flex-shrink: 0; }
+.fs-icon {
+	display: flex; align-items: center; justify-content: center;
+	flex-shrink: 0;
+	color: var(--text-muted);
+}
+.fs-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--text-dim);
+}
+.fs-row:hover .fs-name { color: var(--text); }
+.fs-size {
+	flex-shrink: 0;
+	font-size: .68rem;
+	color: var(--text-muted);
+	margin-left: auto;
+	padding-left: 8px;
+}
+.fs-row-actions {
+	display: flex;
+	gap: 2px;
+	flex-shrink: 0;
+	/* Desktop: hidden until the row is hovered — a touch device (no hover)
+	   makes them permanently visible, same fix already used for the
+	   directory-picker's delete button and code-copy buttons. */
+	opacity: 0;
+	transition: opacity .1s;
+}
+.fs-row:hover .fs-row-actions,
+.fs-row:focus-within .fs-row-actions { opacity: 1; }
+.fs-action {
+	width: 26px; height: 26px;
+	display: flex; align-items: center; justify-content: center;
+	background: none;
+	border: none;
+	color: var(--text-muted);
+	border-radius: 4px;
+	cursor: pointer;
+	text-decoration: none;
+}
+.fs-action:hover { color: var(--cyan); background: rgba(0,200,255,.08); }
+.fs-action:disabled { opacity: .4; cursor: default; }
+.fs-loading {
+	padding: 6px 8px;
+	font-size: .75rem;
+	color: var(--text-muted);
+}
+.fs-rename-input {
+	flex: 1;
+	min-width: 0;
+	background: var(--bg);
+	border: 1px solid var(--cyan);
+	border-radius: 4px;
+	padding: 1px 5px;
+	color: var(--text);
+	font-family: var(--font);
+	font-size: .8rem;
+}
+
+/* ── File preview modal ──────────────────────────────────────────── */
+/* max-width/height live with .modal's other overrides, further down. */
+.fs-preview-body {
+	flex: 1;
+	min-height: 0;
+	overflow: auto;
+	display: flex;
+}
+.fs-preview-text {
+	margin: 0;
+	padding: 14px 16px;
+	font-family: var(--font-mono);
+	font-size: .8rem;
+	line-height: 1.6;
+	white-space: pre-wrap;
+	word-break: break-word;
+	color: var(--text);
+	width: 100%;
+}
+.fs-preview-image {
+	margin: auto;
+	max-width: 100%;
+	max-height: 100%;
+	object-fit: contain;
+}
+.fs-preview-pdf {
+	width: 100%;
+	height: 100%;
+	border: none;
+}
+.fs-preview-table-wrap {
+	width: 100%;
+	overflow: auto;
+}
+.fs-preview-table {
+	border-collapse: collapse;
+	font-family: var(--font-mono);
+	font-size: .78rem;
+	white-space: nowrap;
+}
+.fs-preview-table th, .fs-preview-table td {
+	border: 1px solid var(--border);
+	padding: 5px 10px;
+	text-align: left;
+}
+.fs-preview-table th {
+	background: var(--bg-raised);
+	color: var(--text);
+	position: sticky;
+	top: 0;
+}
+.fs-preview-table td { color: var(--text-dim); }
+.fs-preview-table-note {
+	padding: 10px 16px;
+	font-size: .75rem;
+	color: var(--text-muted);
+}
+
 /* ── Mobile / Responsive ──────────────────────────────────────────── */
 @media (max-width: 768px) {
 	.app {
@@ -1297,6 +1500,7 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	/* No hover on touch — the menu/pin buttons must be reachable without it. */
 	.sidebar-item-more, .sidebar-item-pin { opacity: 1; }
 	.code-copy-btn, .dir-item-delete { opacity: 1; }
+	.fs-row-actions { opacity: 1; }
 	.sidebar-backdrop {
 		top: calc(var(--header-h) + env(safe-area-inset-top));
 		background: rgba(0,0,0,.6);
@@ -1392,6 +1596,19 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	transition: background .1s, color .1s;
 }
 .modal-close:hover { color: var(--cyan); background: rgba(0,200,255,.08); }
+/* Per-modal size overrides — must come after the base .modal rule above:
+   equal specificity means whichever is declared later in the file wins, and
+   these were previously declared earlier (near their own feature's other
+   styles), so .modal's 480px silently beat every one of them. */
+.modal-status { max-width: 340px; }
+.modal-confirm { max-width: 360px; }
+.modal-share { max-width: 440px; }
+.modal-preview {
+	max-width: min(1100px, 92vw);
+	width: 100%;
+	height: 85vh;
+	max-height: 900px;
+}
 .dir-path {
 	padding: 8px 14px;
 	font-family: var(--font-mono);
@@ -1742,6 +1959,10 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 		border-bottom: 1px solid var(--border);
 		overflow-x: auto;
 		overflow-y: hidden;
+		/* SSH/Theme/Tools sit past the fold with nothing else hinting there's
+		   more to scroll to — a "Skills" tab cut mid-word at the edge was the
+		   only clue. Fade both edges so the row visibly continues offscreen. */
+		mask-image: linear-gradient(to right, transparent, black 12px, black calc(100% - 12px), transparent);
 	}
 	.settings-tab { white-space: nowrap; }
 	.settings-pane { min-height: 0; }

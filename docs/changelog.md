@@ -2,6 +2,20 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.9.3
+
+### Added
+
+- Web UI: the Files panel now shows a live preview when you click a file — text/code renders as-is, images render inline, PDFs open in the browser's own viewer, and CSV/TSV render as a real table (auto-detecting the delimiter — semicolon, tab, or pipe, not just comma).
+- Web UI: files and folders in the Files panel can be renamed in place, the same inline-edit as renaming a session in the sidebar.
+- Web UI: the Files panel now refreshes on its own — a write/edit that lands while it's open shows up without collapsing and reopening the folder, and the diff/Files panel's open state and active tab now survive a page reload instead of resetting.
+
+### Fixed
+
+- Web UI: the Changes/Files panel used to only mount once a session actually existed, so opening it on a brand-new draft thread reserved its column and left the space empty instead of showing anything — it now always renders, with a "No session yet" state instead of a gap.
+- Web UI: the Settings tab strip on narrow/mobile screens scrolls but gave no hint that SSH/Theme/Tools were reachable further right — added a fade at both edges.
+- Web UI: `.modal-status`, `.modal-confirm`, and `.modal-share` were silently stuck at the same 480px width as every other modal — a stylesheet ordering bug meant their intended (smaller) widths never actually applied.
+
 ## 0.9.2
 
 ### Added

@@ -6,10 +6,19 @@
  */
 
 import { execSync } from "node:child_process";
-import { mkdirSync, readdirSync, readFileSync, rmdirSync, statSync } from "node:fs";
+import {
+	createReadStream,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	renameSync,
+	rmdirSync,
+	rmSync,
+	statSync,
+} from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
-import { dirname, extname, join, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { getHistoryPage } from "../core/session.ts";
 import { toDisplayMessages, type WebBridge, type WebEvent } from "./bridge.ts";
 import { SLASH_COMMANDS } from "./commands.ts";
@@ -568,6 +577,196 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 			json(res, { files: allFiles, groups });
 		} catch (err) {
 			json(res, { files: [], groups: emptyGroups(), error: err instanceof Error ? err.message : String(err) });
+		}
+	});
+
+	// True whenever `target` is `root` itself or somewhere underneath it — the
+	// one check every /fs/* route below relies on to keep a session's file
+	// browser from reading/downloading/deleting anything outside its own cwd,
+	// no matter what `..`-laden path a request sends.
+	function isInsideRoot(root: string, target: string): boolean {
+		const rel = relative(root, target);
+		return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+	}
+
+	function sessionCwd(sessionId: string): string | null {
+		const ws = bridge.getSession(sessionId);
+		if (!ws) return null;
+		return resolve(ws.session.cwd ?? bridge.getConfig().cwd);
+	}
+
+	// Single-directory, lazy listing — the client fetches one level at a time
+	// as folders are expanded, rather than one eager recursive walk. Without
+	// respecting .gitignore (deliberately, for now) a project's node_modules
+	// alone can be tens of thousands of entries; lazy listing keeps every
+	// request cheap regardless of project size.
+	route("GET", "/api/sessions/:id/fs", (req, res, params) => {
+		const cwd = sessionCwd(params.id);
+		if (!cwd) return json(res, { error: "Not found" }, 404);
+		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+		const target = resolve(cwd, url.searchParams.get("path") || ".");
+		if (!isInsideRoot(cwd, target)) return json(res, { error: "Path outside project" }, 400);
+		try {
+			const st = statSync(target);
+			if (!st.isDirectory()) return json(res, { error: "Not a directory" }, 400);
+			const entries = readdirSync(target, { withFileTypes: true })
+				.filter((e) => e.name !== ".git")
+				.map((e) => {
+					const full = join(target, e.name);
+					const isDir = e.isDirectory();
+					let size: number | undefined;
+					if (!isDir) {
+						try {
+							size = statSync(full).size;
+						} catch {
+							size = undefined;
+						}
+					}
+					return { name: e.name, type: isDir ? "dir" : "file", size };
+				})
+				.sort((a, b) => (a.type !== b.type ? (a.type === "dir" ? -1 : 1) : a.name.localeCompare(b.name)));
+			json(res, { path: relative(cwd, target), entries });
+		} catch (err) {
+			json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
+		}
+	});
+
+	// Recursive name search across the whole project tree (not just expanded
+	// folders) — a synchronous walk, capped on both matches and nodes visited
+	// so a query with zero hits in a huge, gitignore-less tree still returns
+	// promptly instead of walking the entire filesystem underneath cwd.
+	route("GET", "/api/sessions/:id/fs/search", (req, res, params) => {
+		const sessionRoot = sessionCwd(params.id);
+		if (!sessionRoot) return json(res, { error: "Not found" }, 404);
+		const cwd = sessionRoot;
+		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+		const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
+		if (!q) return json(res, { results: [] });
+
+		const MAX_RESULTS = 200;
+		const MAX_VISITED = 20_000;
+		let visited = 0;
+		const results: Array<{ path: string; type: "file" | "dir" }> = [];
+
+		function walk(dir: string) {
+			if (results.length >= MAX_RESULTS || visited >= MAX_VISITED) return;
+			let entries: import("node:fs").Dirent[];
+			try {
+				entries = readdirSync(dir, { withFileTypes: true });
+			} catch {
+				return;
+			}
+			for (const e of entries) {
+				if (results.length >= MAX_RESULTS || visited >= MAX_VISITED) return;
+				if (e.name === ".git") continue;
+				visited++;
+				const full = join(dir, e.name);
+				if (e.name.toLowerCase().includes(q)) {
+					results.push({ path: relative(cwd, full), type: e.isDirectory() ? "dir" : "file" });
+				}
+				if (e.isDirectory()) walk(full);
+			}
+		}
+		walk(cwd);
+		json(res, { results, truncated: results.length >= MAX_RESULTS || visited >= MAX_VISITED });
+	});
+
+	// Extensions the preview modal can render directly in the browser (an
+	// <img>/<iframe> pointed straight at this route) — everything else stays
+	// application/octet-stream, which is fine for a plain download but would
+	// make a PDF open as a blank/broken embed instead of rendering.
+	const PREVIEW_MIME: Record<string, string> = {
+		pdf: "application/pdf",
+		png: "image/png",
+		jpg: "image/jpeg",
+		jpeg: "image/jpeg",
+		gif: "image/gif",
+		webp: "image/webp",
+		bmp: "image/bmp",
+		ico: "image/x-icon",
+		svg: "image/svg+xml",
+	};
+
+	// Streams one file's raw bytes — the whole point being this works
+	// regardless of git state (untracked, committed, no repo at all), unlike
+	// the Changes panel above. Defaults to a download disposition; the
+	// preview modal passes ?inline=1 to instead get a disposition (and, for
+	// known types, a real Content-Type) a browser will render in place
+	// rather than offering to save.
+	route("GET", "/api/sessions/:id/fs/download", (req, res, params) => {
+		const cwd = sessionCwd(params.id);
+		if (!cwd) return json(res, { error: "Not found" }, 404);
+		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+		const rel = url.searchParams.get("path") ?? "";
+		const target = resolve(cwd, rel);
+		if (!rel || target === cwd || !isInsideRoot(cwd, target)) return json(res, { error: "Invalid path" }, 400);
+		try {
+			const st = statSync(target);
+			if (!st.isFile()) return json(res, { error: "Not a file" }, 400);
+			const name = basename(target);
+			const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1).toLowerCase() : "";
+			const inline = url.searchParams.get("inline") === "1";
+			res.writeHead(200, {
+				"Content-Type": inline ? (PREVIEW_MIME[ext] ?? "application/octet-stream") : "application/octet-stream",
+				"Content-Length": st.size,
+				"Content-Disposition": `${inline ? "inline" : "attachment"}; filename="${name.replace(/"/g, "")}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+			});
+			createReadStream(target).pipe(res);
+		} catch (err) {
+			if (!res.headersSent) json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
+		}
+	});
+
+	// Recursive delete — a file or an entire folder. The client is expected to
+	// have already confirmed with the user (a themed confirm dialog, worded
+	// harder for a folder than a file); this route's only job is the same
+	// path-containment check every other /fs/* route makes, refusing to ever
+	// touch cwd itself or anything outside it.
+	route("DELETE", "/api/sessions/:id/fs", (req, res, params) => {
+		const cwd = sessionCwd(params.id);
+		if (!cwd) return json(res, { error: "Not found" }, 404);
+		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+		const rel = url.searchParams.get("path") ?? "";
+		const target = resolve(cwd, rel);
+		if (!rel || target === cwd || !isInsideRoot(cwd, target)) {
+			return json(res, { error: "Refusing to delete this path" }, 400);
+		}
+		try {
+			rmSync(target, { recursive: true, force: false });
+			json(res, { ok: true });
+		} catch (err) {
+			json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
+		}
+	});
+
+	// Renames a file or folder in place (same parent directory) — the new
+	// name only, never a path, same rule as the "new folder" name field
+	// below: no separators, no "..", so this can never turn into a move.
+	route("POST", "/api/sessions/:id/fs/rename", async (req, res, params) => {
+		const cwd = sessionCwd(params.id);
+		if (!cwd) return json(res, { error: "Not found" }, 404);
+		let parsed: { path?: string; name?: string };
+		try {
+			parsed = JSON.parse(await readBody(req));
+		} catch {
+			return json(res, { error: "Invalid JSON" }, 400);
+		}
+		const rel = parsed.path ?? "";
+		const name = (parsed.name ?? "").trim();
+		if (!name || name.includes("/") || name.includes("\\") || name === "." || name === "..") {
+			return json(res, { error: "Invalid name" }, 400);
+		}
+		const target = resolve(cwd, rel);
+		if (!rel || target === cwd || !isInsideRoot(cwd, target)) {
+			return json(res, { error: "Invalid path" }, 400);
+		}
+		const dest = join(dirname(target), name);
+		if (!isInsideRoot(cwd, dest)) return json(res, { error: "Invalid destination" }, 400);
+		try {
+			renameSync(target, dest);
+			json(res, { ok: true, path: relative(cwd, dest) });
+		} catch (err) {
+			json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
 		}
 	});
 

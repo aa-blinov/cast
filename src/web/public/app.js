@@ -937,12 +937,75 @@ function Composer({ running, ready, commands, personas, onSubmit, onAbort }) {
 	`;
 }
 
-function DiffPanel({ data, activeFile, onSelectFile, onClose, onResizeStart, open }) {
+function DiffPanel({
+	data,
+	activeFile,
+	onSelectFile,
+	onClose,
+	onResizeStart,
+	open,
+	activeId,
+	tab,
+	onTabChange,
+	confirm,
+	fsRefreshNonce,
+	bootstrapping,
+}) {
 	const openClass = open ? " open" : "";
+
+	const header = html`
+		<div class="diff-header">
+			<div class="diff-tabs">
+				<button class="diff-tab${tab === "changes" ? " active" : ""}" onClick=${() => onTabChange("changes")}>Changes</button>
+				<button class="diff-tab${tab === "fs" ? " active" : ""}" onClick=${() => onTabChange("fs")}>Files</button>
+			</div>
+			<button class="diff-close" onClick=${onClose} aria-label="Close"><${icons.xMark} /></button>
+		</div>
+	`;
+
+	// A draft session (nothing sent yet) has no cwd on the server to diff or
+	// browse — show that plainly instead of either tab's normal content
+	// (which would otherwise sit on a permanent "Loading…"/blank state).
+	// During bootstrap, though, activeId is only briefly null while the last
+	// session is still being resolved — a real session is about to load, so
+	// this must say "Loading", not "No session yet" (which read as wrong the
+	// instant a real session's data landed a moment later).
+	if (!activeId) {
+		return html`
+			<aside class="diff-panel${openClass}">
+				<div class="diff-resize-handle" onPointerDown=${onResizeStart} />
+				${header}
+				${
+					bootstrapping
+						? html`<div class="diff-empty">Loading…</div>`
+						: html`
+						<div class="diff-empty diff-empty-hint">
+							<div>
+								<p class="diff-empty-title">No session yet</p>
+								<p>Send a message to start this thread, then its changes and files show up here.</p>
+							</div>
+						</div>
+					`
+				}
+			</aside>
+		`;
+	}
+
+	if (tab === "fs") {
+		return html`
+			<aside class="diff-panel${openClass}">
+				<div class="diff-resize-handle" onPointerDown=${onResizeStart} />
+				${header}
+				<${FileExplorer} activeId=${activeId} confirm=${confirm} refreshNonce=${fsRefreshNonce} />
+			</aside>
+		`;
+	}
+
 	if (!data)
 		return html`
 		<aside class="diff-panel${openClass}">
 			<div class="diff-resize-handle" onPointerDown=${onResizeStart} />
+			${header}
 			<div class="diff-empty">Loading...</div>
 		</aside>
 	`;
@@ -1008,10 +1071,7 @@ function DiffPanel({ data, activeFile, onSelectFile, onClose, onResizeStart, ope
 	return html`
 		<aside class="diff-panel${openClass}">
 			<div class="diff-resize-handle" onPointerDown=${onResizeStart} />
-			<div class="diff-header">
-				<span class="diff-title">Changes</span>
-				<button class="diff-close" onClick=${onClose} aria-label="Close"><${icons.xMark} /></button>
-			</div>
+			${header}
 			<div class="diff-file-list">
 				${sections.map(
 					(sec) => html`
@@ -1071,6 +1131,549 @@ function DiffPanel({ data, activeFile, onSelectFile, onClose, onResizeStart, ope
 				}
 			</div>
 		</aside>
+	`;
+}
+
+// Read/download/delete view of the session's actual working directory — the
+// Changes tab above only shows uncommitted git diffs, which is empty (or
+// wrong) the moment something's been committed, or the cwd isn't a git repo
+// at all. This reads the real filesystem directly, so it works regardless.
+// Lazily loads one directory at a time (no .gitignore filtering, so an eager
+// full walk could mean tens of thousands of node_modules entries) and always
+// hides .git itself.
+function FileExplorer({ activeId, confirm, refreshNonce }) {
+	const [tree, setTree] = useState({});
+	const [expanded, setExpanded] = useState(new Set());
+	const [loadingDirs, setLoadingDirs] = useState(new Set());
+	const [query, setQuery] = useState("");
+	const [searchResults, setSearchResults] = useState(null);
+	const [searching, setSearching] = useState(false);
+	const [busyPath, setBusyPath] = useState(null);
+	const [error, setError] = useState(null);
+	const [renamingPath, setRenamingPath] = useState(null);
+	const [renameValue, setRenameValue] = useState("");
+	const [previewPath, setPreviewPath] = useState(null);
+	const renameInputRef = useRef(null);
+	const searchTimerRef = useRef(null);
+
+	const loadDir = useCallback(
+		async (relPath) => {
+			setLoadingDirs((prev) => new Set(prev).add(relPath));
+			try {
+				const data = await api("GET", `/api/sessions/${activeId}/fs?path=${encodeURIComponent(relPath || ".")}`);
+				if (data?.entries) {
+					setTree((prev) => ({ ...prev, [relPath]: data.entries }));
+					setError(null);
+				} else if (data?.error) {
+					setError(data.error);
+				}
+			} catch (err) {
+				setError(err.message);
+			} finally {
+				setLoadingDirs((prev) => {
+					const next = new Set(prev);
+					next.delete(relPath);
+					return next;
+				});
+			}
+		},
+		[activeId],
+	);
+
+	useEffect(() => {
+		setTree({});
+		setExpanded(new Set());
+		setSearchResults(null);
+		setQuery("");
+		setError(null);
+		if (activeId) loadDir("");
+	}, [activeId, loadDir]);
+
+	const toggleDir = (relPath) => {
+		setExpanded((prev) => {
+			const next = new Set(prev);
+			if (next.has(relPath)) {
+				next.delete(relPath);
+			} else {
+				next.add(relPath);
+				if (!tree[relPath]) loadDir(relPath);
+			}
+			return next;
+		});
+	};
+
+	const collapseAll = () => setExpanded(new Set());
+
+	const runSearch = useCallback(
+		async (q) => {
+			setSearching(true);
+			try {
+				const data = await api("GET", `/api/sessions/${activeId}/fs/search?q=${encodeURIComponent(q)}`);
+				setSearchResults(data?.results ?? []);
+			} catch (err) {
+				setError(err.message);
+			} finally {
+				setSearching(false);
+			}
+		},
+		[activeId],
+	);
+
+	const onSearchInput = (value) => {
+		setQuery(value);
+		clearTimeout(searchTimerRef.current);
+		if (!value.trim()) {
+			setSearchResults(null);
+			return;
+		}
+		searchTimerRef.current = setTimeout(() => runSearch(value.trim()), 300);
+	};
+
+	// A write/edit tool call while this tab is open should show up without
+	// the user having to manually collapse and reopen a folder — re-fetch
+	// every directory that's currently loaded (not just expanded ones still
+	// visible) and re-run an active search, so new/changed/deleted files
+	// surface on their own.
+	const isFirstRunRef = useRef(true);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: only refreshNonce should trigger this — loadDir/runSearch/tree/query are read fresh via closures but must not themselves cause a re-run (tree changes every time loadDir resolves, which would otherwise loop).
+	useEffect(() => {
+		if (isFirstRunRef.current) {
+			isFirstRunRef.current = false;
+			return;
+		}
+		if (!activeId) return;
+		for (const relPath of Object.keys(tree)) loadDir(relPath);
+		if (query.trim()) runSearch(query.trim());
+	}, [refreshNonce]);
+
+	const doDelete = async (relPath, type) => {
+		const message =
+			type === "dir"
+				? `Delete folder "${relPath}" and everything inside it? This can't be undone.`
+				: `Delete "${relPath}"? This can't be undone.`;
+		if (!(await confirm(message))) return;
+		setBusyPath(relPath);
+		try {
+			await api("DELETE", `/api/sessions/${activeId}/fs?path=${encodeURIComponent(relPath)}`);
+			if (searchResults) {
+				setSearchResults((prev) => prev.filter((r) => r.path !== relPath));
+			}
+			const parent = relPath.includes("/") ? relPath.slice(0, relPath.lastIndexOf("/")) : "";
+			await loadDir(parent);
+		} catch (err) {
+			setError(err.message);
+		} finally {
+			setBusyPath(null);
+		}
+	};
+
+	const startRename = (fullPath, currentName) => {
+		setRenamingPath(fullPath);
+		setRenameValue(currentName);
+		requestAnimationFrame(() => {
+			renameInputRef.current?.focus();
+			renameInputRef.current?.select();
+		});
+	};
+
+	const commitRename = async (fullPath) => {
+		const name = renameValue.trim();
+		setRenamingPath(null);
+		const oldName = fullPath.includes("/") ? fullPath.slice(fullPath.lastIndexOf("/") + 1) : fullPath;
+		if (!name || name === oldName) return;
+		const parent = fullPath.includes("/") ? fullPath.slice(0, fullPath.lastIndexOf("/")) : "";
+		try {
+			await api("POST", `/api/sessions/${activeId}/fs/rename`, { path: fullPath, name });
+			await loadDir(parent);
+			if (searchResults) runSearch(query.trim());
+		} catch (err) {
+			setError(err.message);
+		}
+	};
+
+	const downloadHref = (relPath) => `/api/sessions/${activeId}/fs/download?path=${encodeURIComponent(relPath)}`;
+	const previewHref = (relPath) => `${downloadHref(relPath)}&inline=1`;
+
+	const humanSize = (bytes) => {
+		if (bytes == null) return "";
+		if (bytes < 1024) return `${bytes} B`;
+		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+		return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+	};
+
+	// Shared between the tree view and the flat search-results list — a name
+	// cell that swaps to an inline rename input, and an actions cell with
+	// download/rename/delete — so the two render paths don't drift apart.
+	const renderName = (fullPath, name, isDir) =>
+		renamingPath === fullPath
+			? html`
+				<input
+					ref=${renameInputRef}
+					class="fs-rename-input"
+					value=${renameValue}
+					onClick=${(e) => e.stopPropagation()}
+					onInput=${(e) => setRenameValue(e.target.value)}
+					onKeyDown=${(e) => {
+						if (e.key === "Enter") {
+							e.preventDefault();
+							commitRename(fullPath);
+						}
+						if (e.key === "Escape") {
+							e.preventDefault();
+							setRenamingPath(null);
+						}
+					}}
+					onBlur=${() => commitRename(fullPath)}
+				/>
+			`
+			: html`<span
+					class="fs-name"
+					title=${fullPath}
+					onClick=${(e) => {
+						if (isDir) return;
+						e.stopPropagation();
+						setPreviewPath(fullPath);
+					}}
+				>${name}</span>`;
+
+	const renderActions = (fullPath, name, type, isBusy) => html`
+		<div class="fs-row-actions">
+			${
+				type !== "dir"
+					? html`<a class="fs-action" href=${downloadHref(fullPath)} download title="Download" onClick=${(e) => e.stopPropagation()}><${icons.arrowDownTray} /></a>`
+					: null
+			}
+			<button
+				class="fs-action"
+				disabled=${isBusy}
+				title="Rename"
+				onClick=${(e) => {
+					e.stopPropagation();
+					startRename(fullPath, name);
+				}}
+			><${icons.pencil} /></button>
+			<button
+				class="fs-action"
+				disabled=${isBusy}
+				title=${type === "dir" ? "Delete folder" : "Delete file"}
+				onClick=${(e) => {
+					e.stopPropagation();
+					doDelete(fullPath, type);
+				}}
+			><${icons.trash} /></button>
+		</div>
+	`;
+
+	const renderEntry = (parentPath, entry, depth) => {
+		const fullPath = parentPath ? `${parentPath}/${entry.name}` : entry.name;
+		const isDir = entry.type === "dir";
+		const isOpen = expanded.has(fullPath);
+		const isLoading = loadingDirs.has(fullPath);
+		const isBusy = busyPath === fullPath;
+		return html`
+			<div key=${fullPath}>
+				<div class="fs-row">
+					<div class="fs-row-main" style=${{ paddingLeft: `${depth * 16}px` }} onClick=${() => isDir && toggleDir(fullPath)}>
+						${
+							isDir
+								? html`<span class="fs-chevron${isOpen ? " open" : ""}"><${icons.chevronRight} /></span>`
+								: html`<span class="fs-chevron-spacer"></span>`
+						}
+						<span class="fs-icon">${isDir ? html`<${icons.folder} />` : html`<${icons.docFile} />`}</span>
+						${renderName(fullPath, entry.name, isDir)}
+						${!isDir && entry.size != null ? html`<span class="fs-size">${humanSize(entry.size)}</span>` : null}
+					</div>
+					${renderActions(fullPath, entry.name, entry.type, isBusy)}
+				</div>
+				${
+					isDir && isOpen
+						? isLoading
+							? html`<div class="fs-loading" style=${{ paddingLeft: `${(depth + 1) * 16}px` }}>Loading…</div>`
+							: (tree[fullPath] || []).map((child) => renderEntry(fullPath, child, depth + 1))
+						: null
+				}
+			</div>
+		`;
+	};
+
+	return html`
+		<div class="fs-explorer">
+			<div class="fs-toolbar">
+				<input class="fs-search" placeholder="Search files…" value=${query} onInput=${(e) => onSearchInput(e.target.value)} />
+				<button class="fs-collapse-btn" title="Collapse all folders" onClick=${collapseAll}><${icons.chevronUp} /></button>
+			</div>
+			<div class="fs-tree">
+				${error ? html`<div class="diff-empty diff-empty-error">${error}</div>` : null}
+				${
+					searchResults
+						? searching
+							? html`<div class="fs-loading">Searching…</div>`
+							: searchResults.length === 0
+								? html`<div class="diff-empty">No matches</div>`
+								: searchResults.map((r) => {
+										const baseName = r.path.includes("/")
+											? r.path.slice(r.path.lastIndexOf("/") + 1)
+											: r.path;
+										const isBusy = busyPath === r.path;
+										return html`
+										<div key=${r.path} class="fs-row">
+											<div class="fs-row-main">
+												<span class="fs-chevron-spacer"></span>
+												<span class="fs-icon">${r.type === "dir" ? html`<${icons.folder} />` : html`<${icons.docFile} />`}</span>
+												${renderName(r.path, r.path, r.type === "dir")}
+											</div>
+											${renderActions(r.path, baseName, r.type, isBusy)}
+										</div>
+									`;
+									})
+						: tree[""]
+							? tree[""].map((entry) => renderEntry("", entry, 0))
+							: loadingDirs.has("")
+								? html`<div class="fs-loading">Loading…</div>`
+								: null
+				}
+			</div>
+		</div>
+		<${FilePreviewModal}
+			path=${previewPath}
+			onClose=${() => setPreviewPath(null)}
+			downloadHref=${previewPath ? downloadHref(previewPath) : null}
+			previewHref=${previewPath ? previewHref(previewPath) : null}
+		/>
+	`;
+}
+
+// Extensions previewable as text vs. image — anything else just gets a
+// "no preview" message with a download button, rather than dumping raw
+// binary bytes into a <pre> or guessing wrong from a magic-byte sniff.
+const FS_TEXT_EXTENSIONS = new Set([
+	"txt",
+	"md",
+	"markdown",
+	"js",
+	"mjs",
+	"cjs",
+	"jsx",
+	"ts",
+	"tsx",
+	"json",
+	"jsonc",
+	"yaml",
+	"yml",
+	"toml",
+	"ini",
+	"cfg",
+	"conf",
+	"env",
+	"sh",
+	"bash",
+	"zsh",
+	"fish",
+	"py",
+	"rb",
+	"go",
+	"rs",
+	"java",
+	"kt",
+	"c",
+	"h",
+	"cpp",
+	"hpp",
+	"cs",
+	"php",
+	"sql",
+	"css",
+	"scss",
+	"less",
+	"html",
+	"htm",
+	"xml",
+	"svg",
+	"log",
+	"lock",
+]);
+const FS_IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "svg"]);
+const FS_TABLE_EXTENSIONS = new Set(["csv", "tsv"]);
+const FS_PREVIEW_MAX_BYTES = 512 * 1024;
+const FS_TABLE_MAX_ROWS = 1000;
+
+// csv's delimiter isn't always a comma in practice (Excel exports in some
+// locales default to ";", and plenty of "csv" files out there are secretly
+// tab- or pipe-separated) — tsv's extension already tells us, but for csv
+// sniff the first line rather than assuming.
+function detectDelimiter(text, ext) {
+	if (ext === "tsv") return "\t";
+	const firstLine = text.slice(0, text.indexOf("\n") === -1 ? text.length : text.indexOf("\n"));
+	const candidates = [",", ";", "\t", "|"];
+	let best = ",";
+	let bestCount = -1;
+	for (const d of candidates) {
+		const count = firstLine.split(d).length - 1;
+		if (count > bestCount) {
+			best = d;
+			bestCount = count;
+		}
+	}
+	return bestCount > 0 ? best : ",";
+}
+
+// A minimal RFC 4180 parser (quoted fields, "" as an escaped quote, quoted
+// fields that contain the delimiter or a literal newline) — a naive
+// text.split(delimiter) breaks on exactly the files this is for.
+function parseDelimited(text, delimiter) {
+	const rows = [];
+	let row = [];
+	let field = "";
+	let inQuotes = false;
+	for (let i = 0; i < text.length; i++) {
+		const ch = text[i];
+		if (inQuotes) {
+			if (ch === '"') {
+				if (text[i + 1] === '"') {
+					field += '"';
+					i++;
+				} else {
+					inQuotes = false;
+				}
+			} else {
+				field += ch;
+			}
+			continue;
+		}
+		if (ch === '"') inQuotes = true;
+		else if (ch === delimiter) {
+			row.push(field);
+			field = "";
+		} else if (ch === "\n") {
+			row.push(field);
+			rows.push(row);
+			row = [];
+			field = "";
+		} else if (ch === "\r") {
+			// swallowed — a following \n (CRLF) closes the row on its own
+		} else {
+			field += ch;
+		}
+	}
+	if (field !== "" || row.length > 0) {
+		row.push(field);
+		rows.push(row);
+	}
+	// Trailing blank line from a file ending in a newline produces one
+	// single-empty-string row — not a real data row.
+	while (rows.length > 0 && rows[rows.length - 1].length === 1 && rows[rows.length - 1][0] === "") rows.pop();
+	return rows;
+}
+
+// "" for a dotfile with no further extension (.bashrc, .gitignore, .env) or
+// a file with no extension at all (Makefile, Dockerfile, LICENSE) — treated
+// as previewable text by default below rather than needing every possible
+// rc-file name enumerated in FS_TEXT_EXTENSIONS.
+function fileExtOf(path) {
+	const base = path.includes("/") ? path.slice(path.lastIndexOf("/") + 1) : path;
+	const dot = base.lastIndexOf(".");
+	if (dot <= 0) return "";
+	return base.slice(dot + 1).toLowerCase();
+}
+
+// Read/download/delete's neighbor — a quick look at a file's content without
+// leaving the panel. Text files render as-is; images render inline; anything
+// else (or anything too large) just offers the download button that's
+// already one click away on the row itself.
+function FilePreviewModal({ path, onClose, downloadHref, previewHref }) {
+	const [content, setContent] = useState(null);
+	const [tooLarge, setTooLarge] = useState(false);
+	const [error, setError] = useState(null);
+	const modalRef = useModalFocusTrap(!!path);
+	const ext = path ? fileExtOf(path) : "";
+	const isImage = FS_IMAGE_EXTENSIONS.has(ext);
+	const isPdf = !isImage && ext === "pdf";
+	const isTable = !isImage && !isPdf && FS_TABLE_EXTENSIONS.has(ext);
+	const isText = !isImage && !isPdf && !isTable && (ext === "" || FS_TEXT_EXTENSIONS.has(ext));
+	const fetchesContent = isText || isTable;
+
+	// biome-ignore lint/correctness/useExhaustiveDependencies: fetchesContent is derived from path every render, including it would refetch on every unrelated re-render.
+	useEffect(() => {
+		setContent(null);
+		setTooLarge(false);
+		setError(null);
+		if (!path || !fetchesContent) return;
+		let cancelled = false;
+		(async () => {
+			try {
+				const res = await fetch(`${window.location.origin}${downloadHref}`);
+				if (!res.ok) throw new Error(`HTTP ${res.status}`);
+				const len = Number(res.headers.get("content-length") ?? 0);
+				if (len > FS_PREVIEW_MAX_BYTES) {
+					if (!cancelled) setTooLarge(true);
+					return;
+				}
+				const text = await res.text();
+				if (!cancelled) setContent(text);
+			} catch (err) {
+				if (!cancelled) setError(err.message);
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, [path, downloadHref]);
+
+	if (!path) return null;
+	const name = path.includes("/") ? path.slice(path.lastIndexOf("/") + 1) : path;
+
+	let body;
+	if (isImage) {
+		body = html`<img class="fs-preview-image" src=${previewHref} alt=${name} />`;
+	} else if (isPdf) {
+		body = html`<iframe class="fs-preview-pdf" src=${previewHref} title=${name}></iframe>`;
+	} else if (error) {
+		body = html`<div class="diff-empty diff-empty-error">${error}</div>`;
+	} else if (!isText && !isTable) {
+		body = html`<div class="diff-empty">No preview for this file type.</div>`;
+	} else if (tooLarge) {
+		body = html`<div class="diff-empty">Too large to preview — use Download instead.</div>`;
+	} else if (content == null) {
+		body = html`<div class="diff-empty">Loading…</div>`;
+	} else if (isTable) {
+		const delimiter = detectDelimiter(content, ext);
+		const rows = parseDelimited(content, delimiter);
+		const shown = rows.slice(0, FS_TABLE_MAX_ROWS);
+		body =
+			rows.length === 0
+				? html`<div class="diff-empty">Empty file.</div>`
+				: html`
+				<div class="fs-preview-table-wrap">
+					<table class="fs-preview-table">
+						<thead><tr>${shown[0].map((cell, i) => html`<th key=${i}>${cell}</th>`)}</tr></thead>
+						<tbody>
+							${shown.slice(1).map(
+								(row, ri) => html`
+								<tr key=${ri}>${row.map((cell, ci) => html`<td key=${ci}>${cell}</td>`)}</tr>
+							`,
+							)}
+						</tbody>
+					</table>
+					${rows.length > FS_TABLE_MAX_ROWS ? html`<div class="fs-preview-table-note">Showing first ${FS_TABLE_MAX_ROWS} of ${rows.length} rows — download for the rest.</div>` : null}
+				</div>
+			`;
+	} else {
+		body = html`<pre class="fs-preview-text">${content}</pre>`;
+	}
+
+	return html`
+		<div class="modal-backdrop" onClick=${onClose}>
+			<div class="modal modal-preview" role="dialog" aria-modal="true" aria-label="File preview" tabIndex="-1" ref=${modalRef} onClick=${(e) => e.stopPropagation()}>
+				<div class="modal-header">
+					<span title=${path}>${name}</span>
+					<div style=${{ display: "flex", gap: "6px", alignItems: "center" }}>
+						<a class="modal-btn icon-btn" href=${downloadHref} download title="Download"><${icons.arrowDownTray} /></a>
+						<button class="modal-close" onClick=${onClose} aria-label="Close"><${icons.xMark} /></button>
+					</div>
+				</div>
+				<div class="fs-preview-body">${body}</div>
+			</div>
+		</div>
 	`;
 }
 
@@ -2781,9 +3384,41 @@ function App() {
 	const [turnMeta, setTurnMeta] = useState(null);
 	const [pendingSteers, setPendingSteers] = useState([]);
 	const [pendingQueue, setPendingQueue] = useState([]);
-	const [diffOpen, setDiffOpen] = useState(false);
+	// Open/closed and which tab, like theme/font below, survive a page
+	// reload via localStorage — losing "I had Files open" on every refresh
+	// (or worse, having to reload while it was mid-task) was just annoying.
+	const [diffOpen, setDiffOpen] = useState(() => {
+		try {
+			return localStorage.getItem("cast:diffOpen") === "1";
+		} catch {
+			return false;
+		}
+	});
 	const [diffData, setDiffData] = useState(null);
 	const [diffFile, setDiffFile] = useState(null);
+	const [diffTab, setDiffTab] = useState(() => {
+		try {
+			return localStorage.getItem("cast:diffTab") || "changes";
+		} catch {
+			return "changes";
+		}
+	});
+	// Bumped on every tool_end while the diff panel is open, same trigger as
+	// loadDiff() below — the Files tab's tree is fetched once per expanded
+	// folder and otherwise never refetched on its own, so a write/edit that
+	// landed while you had it open wouldn't show up until you manually
+	// collapsed and reopened that folder.
+	const [fsRefreshNonce, setFsRefreshNonce] = useState(0);
+	useEffect(() => {
+		try {
+			localStorage.setItem("cast:diffOpen", diffOpen ? "1" : "0");
+		} catch {}
+	}, [diffOpen]);
+	useEffect(() => {
+		try {
+			localStorage.setItem("cast:diffTab", diffTab);
+		} catch {}
+	}, [diffTab]);
 	const [sidebarOpen, setSidebarOpen] = useState(false);
 	const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 	const [diffWidth, setDiffWidth] = useState(null);
@@ -3559,7 +4194,10 @@ function App() {
 									: b,
 							),
 						);
-						if (diffOpenRef.current) loadDiff();
+						if (diffOpenRef.current) {
+							loadDiff();
+							setFsRefreshNonce((n) => n + 1);
+						}
 						break;
 					case "assistant_message": {
 						// Keep reasoning, prose, and tool calls as separate ordered blocks
@@ -4192,13 +4830,12 @@ function App() {
 			     full-screen overlay on mobile (see the max-width:768px rules).
 			     Always mounted (like Sidebar) so the open/close is a pure CSS
 			     class/transform transition instead of a mount with no "from"
-			     state to animate out of. -->
-			${
-				activeId &&
-				html`
-				<${DiffPanel} data=${diffData} activeFile=${diffFile} onSelectFile=${setDiffFile} onClose=${() => setDiffOpen(false)} onResizeStart=${startDiffResize} open=${diffOpen} />
-			`
-			}
+			     state to animate out of — genuinely always, not just once
+			     activeId exists: a draft session (nothing sent yet) used to
+			     leave this unmounted entirely while still reserving its grid
+			     column on open, which read as content shifting into an empty
+			     void with no panel there to show for it. -->
+			<${DiffPanel} data=${diffData} activeFile=${diffFile} onSelectFile=${setDiffFile} onClose=${() => setDiffOpen(false)} onResizeStart=${startDiffResize} open=${diffOpen} activeId=${activeId} tab=${diffTab} onTabChange=${setDiffTab} confirm=${requestConfirm} fsRefreshNonce=${fsRefreshNonce} bootstrapping=${bootstrapping} />
 		</div>
 	`;
 }
