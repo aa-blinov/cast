@@ -102,6 +102,11 @@ export interface SessionState {
 	 * compaction, and restored on resume/continue so a long task list isn't
 	 * silently dropped by ending the process mid-run. */
 	todos?: TodoItem[];
+	/** Set when the web UI has generated a public read-only link for this
+	 * thread (`/shared/<token>`) — unset means never shared or since revoked.
+	 * That route serves messages with no auth at all, so this must be an
+	 * unguessable random token, not a derived/sequential id. */
+	shareToken?: string;
 }
 
 /** Fold one turn's usage into the session's running totals. When `opts.subagent`
@@ -477,6 +482,7 @@ function sessionMetaRow(session: SessionState) {
 		provider_url: session.providerUrl ?? null,
 		usage_json: JSON.stringify(session.usage),
 		todos_json: session.todos ? JSON.stringify(session.todos) : null,
+		share_token: session.shareToken ?? null,
 	};
 }
 
@@ -485,13 +491,14 @@ export function saveSession(session: SessionState): void {
 	const db = getDb();
 	const meta = sessionMetaRow(session);
 	db.prepare(
-		`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, usage_json, todos_json)
-		 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :usage_json, :todos_json)
+		`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, usage_json, todos_json, share_token)
+		 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :usage_json, :todos_json, :share_token)
 		 ON CONFLICT(id) DO UPDATE SET
 		   cwd = excluded.cwd, model = excluded.model, persona = excluded.persona, mode = excluded.mode,
 		   title = excluded.title, pinned = excluded.pinned, updated_at = excluded.updated_at,
 		   last_prompt_tokens = excluded.last_prompt_tokens, last_announced_local_date = excluded.last_announced_local_date,
-		   provider_url = excluded.provider_url, usage_json = excluded.usage_json, todos_json = excluded.todos_json`,
+		   provider_url = excluded.provider_url, usage_json = excluded.usage_json, todos_json = excluded.todos_json,
+		   share_token = excluded.share_token`,
 	).run(meta);
 
 	const insertRow = db.prepare(
@@ -783,6 +790,7 @@ interface SessionRow {
 	provider_url: string | null;
 	usage_json: string;
 	todos_json: string | null;
+	share_token: string | null;
 }
 
 function rowToMeta(row: SessionRow): Omit<SessionState, "messages"> {
@@ -801,6 +809,7 @@ function rowToMeta(row: SessionRow): Omit<SessionState, "messages"> {
 		providerUrl: row.provider_url ?? undefined,
 		usage: withUsageDefault(JSON.parse(row.usage_json)),
 		todos: row.todos_json ? JSON.parse(row.todos_json) : undefined,
+		shareToken: row.share_token ?? undefined,
 	};
 }
 
@@ -809,12 +818,25 @@ function rowToMeta(row: SessionRow): Omit<SessionState, "messages"> {
  *  later saveSession/recordCompaction on this object recognizes them as
  *  already-persisted. */
 export function loadSession(id: string): SessionState | null {
-	const db = getDb();
-	const row = db.prepare("SELECT * FROM sessions WHERE id = ?").get(id) as SessionRow | undefined;
+	return loadSessionByRow(getDb().prepare("SELECT * FROM sessions WHERE id = ?").get(id) as SessionRow | undefined);
+}
+
+/** Same lookup as `loadSession`, keyed by the public share link's token
+ *  instead of the session id — used by the unauthenticated `/shared/:token`
+ *  route, so it never has to expose real session ids to a logged-out
+ *  visitor. Returns null for an unshared/revoked/unknown token. */
+export function loadSessionByShareToken(token: string): SessionState | null {
+	return loadSessionByRow(
+		getDb().prepare("SELECT * FROM sessions WHERE share_token = ?").get(token) as SessionRow | undefined,
+	);
+}
+
+function loadSessionByRow(row: SessionRow | undefined): SessionState | null {
 	if (!row) return null;
+	const db = getDb();
 	const msgRows = db
 		.prepare("SELECT seq, content_json, reasoning FROM messages WHERE session_id = ? AND in_context = 1 ORDER BY seq")
-		.all(id) as Array<{ seq: number; content_json: string; reasoning: string | null }>;
+		.all(row.id) as Array<{ seq: number; content_json: string; reasoning: string | null }>;
 
 	const messages: Message[] = [];
 	const reasoning: Record<number, string> = {};
@@ -916,8 +938,8 @@ export function migrateLegacySessionsToDb(): number {
 		const session = readLegacySessionFile(filePath);
 		if (!session || existing.has(session.id)) continue;
 		db.prepare(
-			`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, usage_json, todos_json)
-			 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :usage_json, :todos_json)`,
+			`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, usage_json, todos_json, share_token)
+			 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :usage_json, :todos_json, :share_token)`,
 		).run(sessionMetaRow(session));
 		const insertRow = db.prepare(
 			"INSERT INTO messages (session_id, seq, role, content_json, in_context) VALUES (?, ?, ?, ?, 1)",

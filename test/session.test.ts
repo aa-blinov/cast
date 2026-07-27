@@ -19,6 +19,7 @@ import {
 	listSessionSummaries,
 	listSessions,
 	loadSession,
+	loadSessionByShareToken,
 	migrateLegacySessionsToDb,
 	recordCompaction,
 	saveSession,
@@ -488,6 +489,28 @@ describe("session persistence", () => {
 		expect(loaded?.id).toBe(session.id);
 		expect(loaded?.cwd).toBe(projectA);
 		expect(loaded?.messages).toEqual(session.messages);
+	});
+
+	it("loadSessionByShareToken finds a session by its share token, not its id", () => {
+		const session = createSession("gpt-4o", projectA);
+		session.shareToken = "tok_abc123";
+		saveSession(session);
+
+		expect(loadSessionByShareToken("tok_abc123")?.id).toBe(session.id);
+		expect(loadSessionByShareToken(session.id)).toBeNull();
+		expect(loadSessionByShareToken("wrong-token")).toBeNull();
+	});
+
+	it("clearing shareToken on an already-shared session revokes the old token", () => {
+		const session = createSession("gpt-4o", projectA);
+		session.shareToken = "tok_to_revoke";
+		saveSession(session);
+		expect(loadSessionByShareToken("tok_to_revoke")).not.toBeNull();
+
+		session.shareToken = undefined;
+		saveSession(session);
+		expect(loadSessionByShareToken("tok_to_revoke")).toBeNull();
+		expect(loadSession(session.id)?.shareToken).toBeUndefined();
 	});
 
 	it("normalizes cache_control-damaged messages on load", () => {

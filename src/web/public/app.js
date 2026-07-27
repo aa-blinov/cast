@@ -17,7 +17,10 @@ const html = htm.bind(h);
 // see the header comment above — and a top-level await here blocks the rest
 // of the module (including the initial render() call) until it resolves, so
 // there's no flash of a missing logo while it loads.
-const CAST_BANNER_LINES = await fetch("./cast-banner-grid.json").then((r) => r.json());
+// Absolute, not relative — a relative fetch resolves against the current
+// page URL, which breaks on /shared/<token> (a different path serving this
+// same app.js) since it'd then look for /shared/cast-banner-grid.json.
+const CAST_BANNER_LINES = await fetch("/cast-banner-grid.json").then((r) => r.json());
 
 // Terminal block-drawing chars, darkest→lightest fill (matches the CLI/site
 // banner's own weighting so the shape reads the same everywhere).
@@ -370,6 +373,33 @@ function renderMarkdown(text) {
 
 	let out = escapeHtml(collapsed);
 	out = out.replace(/`([^`\n]+)`/g, "<code>$1</code>");
+
+	// Links: markdown [text](url) first, then bare http(s) URLs — both pulled
+	// into placeholders (same trick as the fenced-code blocks above) so the
+	// second pass can't re-match text/attributes already inside an <a> the
+	// first pass produced. `out` is already HTML-escaped at this point, so
+	// the extracted url is safe to drop straight into an href attribute.
+	const links = [];
+	out = out.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (_m, linkText, url) => {
+		const i = links.length;
+		links.push(`<a href="${url}" target="_blank" rel="noopener noreferrer">${linkText}</a>`);
+		return ` LINK${i} `;
+	});
+	out = out.replace(/https?:\/\/[^\s<>()]+/g, (m) => {
+		// Trailing sentence punctuation ("see https://x.com." or "(https://x.com)")
+		// usually isn't part of the URL — trim it off before linking.
+		let url = m;
+		let trail = "";
+		while (/[.,!?;:]$/.test(url)) {
+			trail = url.slice(-1) + trail;
+			url = url.slice(0, -1);
+		}
+		if (!url) return m;
+		const i = links.length;
+		links.push(`<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`);
+		return ` LINK${i} ${trail}`;
+	});
+
 	out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
 	out = out.replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, "<em>$1</em>");
 	out = out.replace(/^#{1,6} (.+)$/gm, "<strong>$1</strong>");
@@ -428,6 +458,7 @@ function renderMarkdown(text) {
 	});
 
 	out = out.replace(/ FENCE(\d+) /g, (_m, i) => fences[Number(i)]);
+	out = out.replace(/ ?LINK(\d+) ?/g, (_m, i) => links[Number(i)]);
 	return out;
 }
 
@@ -1026,7 +1057,14 @@ function DiffPanel({ data, activeFile, onSelectFile, onClose, onResizeStart, ope
 					`,
 							)
 						: data.noRepo
-							? html`<div class="diff-empty diff-empty-hint">This directory isn't a git repository yet.<br/>Ask the agent to run <code>git init</code> to enable the diff view.</div>`
+							? html`
+						<div class="diff-empty diff-empty-hint">
+							<div>
+								<p class="diff-empty-title">Not a git repository</p>
+								<p>Ask the agent to run <code>git init</code> to enable the diff view.</p>
+							</div>
+						</div>
+					`
 							: data.error
 								? html`<div class="diff-empty diff-empty-error">${data.error}</div>`
 								: html`<div class="diff-empty">No changes</div>`
@@ -1309,6 +1347,8 @@ function StatusPopover({ activeId, running }) {
 // composer used, just without ever appending a chat notice for it.
 function SettingsModal({
 	activeId,
+	personas,
+	onQuickSessionPersonaChange,
 	themes,
 	currentThemeId,
 	onApplyTheme,
@@ -1356,14 +1396,20 @@ function SettingsModal({
 					},
 				}));
 			} else if (t === "tools") {
-				const [web, permissions, searchProvider] = await Promise.all([
+				const [web, permissions, searchProvider, quickSessionPersona] = await Promise.all([
 					run("/web"),
 					run("/permissions"),
 					run("/web-search-provider"),
+					run("/quick-session-persona"),
 				]);
 				setData((d) => ({
 					...d,
-					tools: { web: web?.result, permissions: permissions?.result, searchProvider: searchProvider?.result },
+					tools: {
+						web: web?.result,
+						permissions: permissions?.result,
+						searchProvider: searchProvider?.result,
+						quickSessionPersona: quickSessionPersona?.result,
+					},
 				}));
 			} else if (t === "mcp") {
 				const res = await run("/mcp list");
@@ -1481,7 +1527,7 @@ function SettingsModal({
 													if (res.ok && res.result?.theme) onThemeChange(res.result.theme);
 												}} />`
 											: tab === "tools"
-												? html`<${SettingsTools} data=${data.tools} busy=${busy} act=${act} />`
+												? html`<${SettingsTools} data=${data.tools} busy=${busy} act=${act} personas=${personas} onQuickSessionPersonaChange=${onQuickSessionPersonaChange} />`
 												: tab === "mcp"
 													? html`<${SettingsMcp} data=${data.mcp} busy=${busy} act=${act} confirm=${confirm} />`
 													: tab === "skills"
@@ -1582,20 +1628,14 @@ function SlotModelPicker({
 	// re-fetch whenever activeProviderName changes — e.g. after a
 	// /provider Switch — so the picker reflects the new endpoint without
 	// a page reload.
-	const seededRef = useRef(false);
 	useEffect(() => {
 		let cancelled = false;
 		(async () => {
-			// Seed from cache instantly for first paint only.
-			if (!seededRef.current) {
-				seededRef.current = true;
-				try {
-					const res = await api("GET", "/api/models/cached");
-					if (!cancelled && res?.models?.length) setModels(res.models);
-				} catch {
-					/* ignore */
-				}
-			}
+			// `initialModels` (the parent's own /api/models/cached call, made
+			// once for all three slots) already seeded state for first paint —
+			// re-fetching that same cache per-slot here was pure duplicate
+			// traffic, and its state can not affect anything, since this
+			// followup live fetch always overwrites it moments later anyway.
 			setLoading(true);
 			const effectiveProvider = initialProvider || activeProviderName || "";
 			const qs = effectiveProvider ? `?provider=${encodeURIComponent(effectiveProvider)}` : "";
@@ -1648,11 +1688,25 @@ function SlotModelPicker({
 				<option value="">${defaultLabel}</option>
 				${providers.map((p) => html`<option key=${p.name} value=${p.name}>${p.name}</option>`)}
 			</select>
-			<select disabled=${busy || loading} onChange=${(e) => setModelValue(e.target.value)} value=${modelValue && models.some((m) => m.id === modelValue) ? modelValue : ""}>
-				<option value="">${loading ? "Loading…" : `Pick a model…${fallbackModel && models.some((m) => m.id === fallbackModel) ? ` (inherits ${fallbackModel})` : ""}`}</option>
+			<select disabled=${busy || (loading && models.length === 0)} onChange=${(e) => setModelValue(e.target.value)} value=${modelValue && models.some((m) => m.id === modelValue) ? modelValue : ""}>
+				<option value="">${
+					loading && models.length === 0
+						? "Loading…"
+						: `Pick a model…${fallbackModel && models.some((m) => m.id === fallbackModel) ? ` (inherits ${fallbackModel})` : ""}`
+				}</option>
 				${[...models].sort((a, b) => a.id.localeCompare(b.id)).map((m) => html`<option key=${m.id} value=${m.id}>${m.id}${m.reasoning ? " (reasoning)" : ""}</option>`)}
 			</select>
-			<button class="modal-btn icon-btn" title="Apply" disabled=${busy || !modelValue || !models.some((m) => m.id === modelValue)} onClick=${doSet}><${icons.check} /></button>
+			<button
+				class="modal-btn icon-btn"
+				title="Apply"
+				disabled=${
+					busy ||
+					!modelValue ||
+					!models.some((m) => m.id === modelValue) ||
+					(providerValue === initialProvider && modelValue === effectiveModel)
+				}
+				onClick=${doSet}
+			><${icons.check} /></button>
 			${!isMainSlot ? html`<button class="modal-btn icon-btn" title="Clear model override" disabled=${busy} onClick=${() => act(`${modelCommand} off`)}><${icons.xCircle} /></button>` : null}
 			${!isMainSlot && hasOverride ? html`<button class="modal-btn icon-btn" title="Reset all overrides" disabled=${busy} onClick=${doReset}><${icons.arrowUturnLeft} /></button>` : null}
 		</div>
@@ -1810,13 +1864,15 @@ function InfoPopover({ text, readUrl }) {
 	];
 }
 
-function SettingsTools({ data, busy, act }) {
+function SettingsTools({ data, busy, act, personas, onQuickSessionPersonaChange }) {
 	const [tavilyKey, setTavilyKey] = useState("");
 	const [braveKey, setBraveKey] = useState("");
+	const [quickPersonaValue, setQuickPersonaValue] = useState("");
 	if (!data) return null;
 	const web = data.web || {};
 	const perm = data.permissions || {};
 	const search = data.searchProvider || {};
+	const quickPersona = data.quickSessionPersona?.quickSessionPersona ?? "coding";
 	const webOn = web.webTools;
 	const provider = search.searchProvider || "ddg";
 	const tKey = tavilyKey || search.tavilyApiKey || "";
@@ -1850,6 +1906,29 @@ function SettingsTools({ data, busy, act }) {
 			<div class="settings-form-row">
 				<button class="modal-btn${perm.permissionMode === "default" ? " modal-btn-primary" : ""}" title="Confirm dangerous commands" disabled=${busy} onClick=${() => act("/permissions default")}>Default</button>
 				<button class="modal-btn${perm.permissionMode === "bypass" ? " modal-btn-primary" : ""}" title="Skip confirmation prompts" disabled=${busy} onClick=${() => act("/permissions bypass")}>Bypass</button>
+			</div>
+			<div class="settings-section-title">Quick session persona</div>
+			<p class="settings-hint">Persona the sidebar's "Quick" button uses — skips the picker, opens straight into a fresh sandbox directory.</p>
+			<div class="settings-form-row">
+				<select
+					disabled=${busy || !(personas || []).length}
+					value=${quickPersonaValue || quickPersona}
+					onChange=${(e) => setQuickPersonaValue(e.target.value)}
+				>
+					${(personas || []).map((p) => html`<option key=${p.name} value=${p.name}>${p.label}</option>`)}
+				</select>
+				<button
+					class="modal-btn icon-btn"
+					title="Apply quick session persona"
+					disabled=${busy || !quickPersonaValue || quickPersonaValue === quickPersona}
+					onClick=${async () => {
+						const res = await act(`/quick-session-persona ${quickPersonaValue}`);
+						if (res.ok) {
+							onQuickSessionPersonaChange?.(quickPersonaValue);
+							setQuickPersonaValue("");
+						}
+					}}
+				><${icons.check} /></button>
 			</div>
 		</div>
 	`;
@@ -2188,6 +2267,7 @@ function Sidebar({
 	personas,
 	cwd,
 	defaultCwd,
+	quickSessionPersona,
 	onSelectSession,
 	onCreateSession,
 	onDeleteSession,
@@ -2195,6 +2275,7 @@ function Sidebar({
 	onSetCwd,
 	onRenameSession,
 	onPinSession,
+	onShareSession,
 	open,
 	confirm,
 }) {
@@ -2208,6 +2289,19 @@ function Sidebar({
 	// click/Escape/picking an action. Frees up the row for one icon instead
 	// of two permanently-visible ones.
 	const [menuFor, setMenuFor] = useState(null);
+	// Whether the last-opened menu should render above its anchor instead of
+	// below — a row near the bottom of the (often short, scrolled) sidebar
+	// otherwise had the menu's fixed "always opens downward" positioning push
+	// it straight past the viewport edge, unreachable and unclickable.
+	const [menuUpward, setMenuUpward] = useState(false);
+	const openMenu = useCallback((id, rowEl) => {
+		if (rowEl) {
+			const rect = rowEl.getBoundingClientRect();
+			const ESTIMATED_MENU_HEIGHT = 150; // 3 items + padding, roomy on purpose
+			setMenuUpward(rect.bottom + ESTIMATED_MENU_HEIGHT > window.innerHeight);
+		}
+		setMenuFor(id);
+	}, []);
 	useEffect(() => {
 		if (!menuFor) return;
 		const close = () => setMenuFor(null);
@@ -2290,7 +2384,7 @@ function Sidebar({
 			onContextMenu=${(e) => {
 				e.preventDefault();
 				e.stopPropagation();
-				setMenuFor(s.id);
+				openMenu(s.id, e.currentTarget);
 			}}
 		>
 			<span class="sidebar-item-status ${s.status || "idle"}" />
@@ -2339,13 +2433,13 @@ function Sidebar({
 					aria-label="More"
 					onClick=${(e) => {
 						e.stopPropagation();
-						setMenuFor(menuFor === s.id ? null : s.id);
+						openMenu(menuFor === s.id ? null : s.id, e.currentTarget.closest(".sidebar-item"));
 					}}
 				><${icons.ellipsisVertical} /></button>
 				${
 					menuFor === s.id &&
 					html`
-					<div class="sidebar-item-menu" onClick=${(e) => e.stopPropagation()}>
+					<div class="sidebar-item-menu${menuUpward ? " upward" : ""}" onClick=${(e) => e.stopPropagation()}>
 						<button
 							class="sidebar-item-menu-item"
 							onClick=${() => {
@@ -2353,6 +2447,13 @@ function Sidebar({
 								startEdit(s);
 							}}
 						><${icons.pencil} /> Rename</button>
+						<button
+							class="sidebar-item-menu-item"
+							onClick=${() => {
+								setMenuFor(null);
+								onShareSession(s);
+							}}
+						><${icons.link} /> Share</button>
 						<button
 							class="sidebar-item-menu-item danger"
 							onClick=${() => {
@@ -2370,7 +2471,25 @@ function Sidebar({
 	return html`
 		<nav class="sidebar${open ? " open" : ""}">
 			<div class="sidebar-new-section">
-				<button class="new-session-btn" onClick=${() => setPersonaOpen(!personaOpen)}>+ New session</button>
+				<div class="sidebar-new-buttons">
+					<button
+						class="new-session-btn"
+						title="Pick a persona and directory for a new session"
+						onClick=${() => setPersonaOpen(!personaOpen)}
+					><${icons.plus} /> New session</button>
+					<button
+						class="new-session-btn-quick"
+						title=${`Quick session — ${personas.find((p) => p.name === quickSessionPersona)?.label ?? quickSessionPersona}, fresh sandbox directory (configurable in Settings > Tools)`}
+						aria-label="Quick session"
+						onClick=${() => {
+							setPersonaOpen(false);
+							onCreateSession(quickSessionPersona, SANDBOX_CWD);
+						}}
+					><${icons.bolt} /></button>
+				</div>
+			</div>
+			<div class="sidebar-divider" />
+			<div class="sidebar-scroll">
 				<div class="persona-list${personaOpen ? " open" : ""}">
 					<div class="dir-row">
 						<span class="dir-row-label">Directory</span>
@@ -2399,9 +2518,6 @@ function Sidebar({
 					`,
 					)}
 				</div>
-			</div>
-			<div class="sidebar-divider" />
-			<div class="sidebar-scroll">
 				<div class="sidebar-section">
 					<div class="sidebar-section-title">Sessions</div>
 					${
@@ -2466,9 +2582,131 @@ function keyForMessage(msg) {
 	return k;
 }
 
+// Generates (idempotent) or revokes a thread's public /shared/<token> link.
+// Opened from the sidebar's ⋮ menu — `session` is null when closed.
+function ShareModal({ session, onClose }) {
+	const [url, setUrl] = useState(null);
+	const [busy, setBusy] = useState(false);
+	const [copied, setCopied] = useState(false);
+	const modalRef = useModalFocusTrap(!!session);
+
+	useEffect(() => {
+		if (!session) {
+			setUrl(null);
+			setCopied(false);
+			return;
+		}
+		setBusy(true);
+		api("POST", `/api/sessions/${session.id}/share`)
+			.then((data) => {
+				if (data) setUrl(`${window.location.origin}${data.url}`);
+			})
+			.finally(() => setBusy(false));
+	}, [session]);
+
+	if (!session) return null;
+
+	const copy = async () => {
+		try {
+			if (navigator.clipboard) await navigator.clipboard.writeText(url);
+			else {
+				const ta = document.createElement("textarea");
+				ta.value = url;
+				document.body.appendChild(ta);
+				ta.select();
+				document.execCommand("copy");
+				ta.remove();
+			}
+			setCopied(true);
+			setTimeout(() => setCopied(false), 1500);
+		} catch {}
+	};
+
+	const revoke = async () => {
+		setBusy(true);
+		try {
+			await api("DELETE", `/api/sessions/${session.id}/share`);
+			onClose();
+		} finally {
+			setBusy(false);
+		}
+	};
+
+	return html`
+		<div class="modal-backdrop" onClick=${onClose}>
+			<div class="modal modal-share" role="dialog" aria-modal="true" aria-label="Share thread" tabIndex="-1" ref=${modalRef} onClick=${(e) => e.stopPropagation()}>
+				<div class="modal-header">
+					<span>Share "${session.title || session.persona}"</span>
+					<button class="modal-close" onClick=${onClose} aria-label="Close"><${icons.xMark} /></button>
+				</div>
+				<div class="modal-share-body">
+					<p class="modal-hint">Anyone with this link can read the conversation, read-only — no cast login needed.</p>
+					${
+						url
+							? html`
+							<div class="share-link-row">
+								<input class="share-link-input" readOnly value=${url} onClick=${(e) => e.target.select()} />
+								<button class="modal-btn icon-btn" title="Copy link" onClick=${copy}>
+									<${copied ? icons.check : icons.link} />
+								</button>
+							</div>
+						`
+							: html`<div class="modal-hint">Generating link…</div>`
+					}
+				</div>
+				<div class="modal-footer">
+					<button class="modal-btn modal-btn-danger" disabled=${busy || !url} onClick=${revoke}>Revoke link</button>
+					<button class="modal-btn" onClick=${onClose}>Done</button>
+				</div>
+			</div>
+		</div>
+	`;
+}
+
+// Live stopwatch shown in the composer footer while a turn runs — split out
+// as its own component (rather than state living in App) so its 10Hz tick
+// only re-renders this one tiny <span>, not the entire app (sidebar, header,
+// message list) ten times a second. That whole-tree churn was visible as a
+// flicker across the UI (the header's "i" button included) for the entire
+// duration of every run.
+// turnStartRef is owned by App (see there) and mutated directly by
+// handleSubmit right when a new turn starts — a ref write triggers no
+// re-render on its own, so App can clear the previous entry there without
+// reintroducing the whole-tree churn this component exists to avoid.
+function ElapsedTimer({ running, activeId, connected, turnStartRef }) {
+	const [elapsedMs, setElapsedMs] = useState(0);
+	useEffect(() => {
+		if (running && connected) {
+			if (!turnStartRef.current.has(activeId)) turnStartRef.current.set(activeId, Date.now());
+			const id = setInterval(() => {
+				const start = turnStartRef.current.get(activeId);
+				if (start) setElapsedMs(Date.now() - start);
+			}, 100);
+			return () => clearInterval(id);
+		} else if (!running) {
+			// Freeze the display for 5s after the run ends, then hide.
+			const timeout = setTimeout(() => setElapsedMs(0), 5000);
+			return () => clearTimeout(timeout);
+		}
+		// Disconnected while running — freeze the timer at the last known
+		// value instead of counting up with a stale connection. When the SSE
+		// reconnects (connected→true) the interval resumes from the real
+		// start time; if the run ended server-side while offline, the next
+		// `end` event will transition to the "not running" branch.
+	}, [running, activeId, connected, turnStartRef]);
+
+	if (elapsedMs <= 0) return null;
+	return html`<span class="composer-elapsed">${(elapsedMs / 1000).toFixed(1)}s</span>`;
+}
+
 function App() {
 	const [sessions, setSessions] = useState([]);
 	const [activeId, setActiveId] = useState(null);
+	// Per-session turn start times for ElapsedTimer's stopwatch — a plain ref
+	// (not state) so handleSubmit can clear the previous entry on a new turn
+	// without causing a re-render; see ElapsedTimer's own comment for why the
+	// tick itself lives there instead of here.
+	const turnStartRef = useRef(new Map());
 	const [session, setSession] = useState(null);
 	const [personas, setPersonas] = useState([]);
 	const [commands, setCommands] = useState([]);
@@ -2561,6 +2799,9 @@ function App() {
 	const [bootstrapping, setBootstrapping] = useState(true);
 	const [atBottom, setAtBottom] = useState(true);
 	const [defaultCwd, setDefaultCwd] = useState("");
+	// Persona the sidebar's "Quick session" button uses — configurable in
+	// Settings > Tools, defaults to "coding" server-side when never set.
+	const [quickSessionPersona, setQuickSessionPersona] = useState("coding");
 	// "new" (a fresh sandbox dir) is the default for a new session, not the
 	// project root — picking the root path is the deliberate action here.
 	const [selectedCwd, setSelectedCwd] = useState(SANDBOX_CWD);
@@ -2632,31 +2873,6 @@ function App() {
 	// same content visually in place instead of the view jumping as new
 	// (taller) content gets inserted above what's on screen.
 	const pendingScrollRestoreRef = useRef(null);
-
-	// Live stopwatch — ticks while running, freezes on stop. Per-session
-	// start times survive thread switches so the display is correct when
-	// you come back to a still-running session.
-	const turnStartRef = useRef(new Map());
-	const [elapsedMs, setElapsedMs] = useState(0);
-	useEffect(() => {
-		if (running && connected) {
-			if (!turnStartRef.current.has(activeId)) turnStartRef.current.set(activeId, Date.now());
-			const id = setInterval(() => {
-				const start = turnStartRef.current.get(activeId);
-				if (start) setElapsedMs(Date.now() - start);
-			}, 100);
-			return () => clearInterval(id);
-		} else if (!running) {
-			// Freeze the display for 5s after the run ends, then hide.
-			const timeout = setTimeout(() => setElapsedMs(0), 5000);
-			return () => clearTimeout(timeout);
-		}
-		// Disconnected while running — freeze the timer at the last known
-		// value instead of counting up with a stale connection. When the SSE
-		// reconnects (connected→true) the interval resumes from the real
-		// start time; if the run ended server-side while offline, the next
-		// `end` event will transition to the "not running" branch.
-	}, [running, activeId, connected]);
 
 	// Toast helper — stacks; each entry removes itself after 4s.
 	const showToast = useCallback((text, type = "info") => {
@@ -2848,6 +3064,7 @@ function App() {
 							.then((cfg) => {
 								if (!cfg) return;
 								setDefaultCwd(cfg.cwd ?? "");
+								if (cfg.quickSessionPersona) setQuickSessionPersona(cfg.quickSessionPersona);
 								const current = t.find((x) => x.id === cfg.theme) ?? t.find((x) => x.id === "cast");
 								if (current) {
 									applyTheme(current.colors);
@@ -2984,6 +3201,9 @@ function App() {
 		},
 		[showToast],
 	);
+
+	// Holds the session the Share modal is open for — null when closed.
+	const [shareModalSession, setShareModalSession] = useState(null);
 
 	// Sidebar toggle — a drawer on mobile (existing transform-based behavior),
 	// a collapsible grid column on desktop (same button, different meaning).
@@ -3187,7 +3407,6 @@ function App() {
 				prev ? { ...prev, messages: [...prev.messages, { role: "user", content: text }] } : prev,
 			);
 			turnStartRef.current.delete(id);
-			setElapsedMs(0);
 			try {
 				await api("POST", `/api/sessions/${id}/chat`, { text });
 				// Picks up the auto-derived title after a session's first message
@@ -3819,6 +4038,7 @@ function App() {
 				personas=${personas}
 				cwd=${cwd}
 				defaultCwd=${defaultCwd}
+				quickSessionPersona=${quickSessionPersona}
 				onSelectSession=${selectSession}
 				onCreateSession=${startDraft}
 				onDeleteSession=${deleteSessionPermanently}
@@ -3826,9 +4046,12 @@ function App() {
 				onSetCwd=${setSelectedCwd}
 				onRenameSession=${renameSession}
 				onPinSession=${pinSession}
+				onShareSession=${setShareModalSession}
 				open=${sidebarOpen}
 				confirm=${requestConfirm}
 			/>
+
+			<${ShareModal} session=${shareModalSession} onClose=${() => setShareModalSession(null)} />
 
 			<!-- Directory picker — rendered here (not inside Sidebar) because
 			     .sidebar gets a CSS transform for its mobile drawer slide, and a
@@ -3859,6 +4082,8 @@ function App() {
 				html`
 				<${SettingsModal}
 					activeId=${activeId}
+					personas=${personas}
+					onQuickSessionPersonaChange=${setQuickSessionPersona}
 					themes=${themes}
 					currentThemeId=${currentThemeId}
 					onApplyTheme=${applyTheme}
@@ -3935,7 +4160,7 @@ function App() {
 							${activePersonaLabel}
 							${session?.mode && session.mode !== "build" && html`<span class="composer-role-mode">${session.mode}</span>`}
 						</div>
-						${elapsedMs > 0 && html`<span class="composer-elapsed">${(elapsedMs / 1000).toFixed(1)}s</span>`}
+						<${ElapsedTimer} running=${running} activeId=${activeId} connected=${connected} turnStartRef=${turnStartRef} />
 					</div>
 				`
 				}
@@ -4012,5 +4237,63 @@ document.addEventListener("click", async (e) => {
 	}
 });
 
+// ── Shared (read-only, unauthenticated) thread view ─────────────────
+// Served at /shared/<token> — see server.ts's isPublicShareRoute. No
+// composer, no sidebar, no settings: this is the one page in the app a
+// visitor can open with no cast credentials at all, so it only ever reads
+// data through /api/shared/<token>, never the authenticated /api/sessions/*
+// routes.
+function SharedThreadView({ token }) {
+	const [data, setData] = useState(null);
+	const [error, setError] = useState(null);
+
+	useEffect(() => {
+		api("GET", `/api/shared/${encodeURIComponent(token)}`)
+			.then((d) => {
+				if (!d) return;
+				setData(d);
+			})
+			.catch((err) => setError(err.message));
+	}, [token]);
+
+	if (error) {
+		return html`
+			<div class="shared-view shared-view-error">
+				<${CastLogo} class="empty-state-banner" />
+				<p class="empty-state-title">Link not found</p>
+				<p class="empty-state-hint">This shared link is invalid or was revoked.</p>
+			</div>
+		`;
+	}
+	if (!data) {
+		return html`
+			<div class="shared-view">
+				<div class="loading-spinner" />
+			</div>
+		`;
+	}
+
+	return html`
+		<div class="shared-view">
+			<div class="shared-view-header">
+				<${CastLogo} class="shared-view-logo" />
+				<div class="shared-view-meta">
+					<div class="shared-view-title">${data.title || "Shared thread"}</div>
+					<div class="shared-view-sub">${data.persona} · ${data.model} · read-only</div>
+				</div>
+			</div>
+			<div class="shared-view-messages">
+				${data.messages.map((msg, i) => html`<${Message} key=${i} msg=${msg} />`)}
+			</div>
+		</div>
+	`;
+}
+
 // ── Mount ────────────────────────────────────────────────────────────
-render(html`<${App} />`, document.getElementById("app"));
+const sharedToken = window.location.pathname.startsWith("/shared/")
+	? decodeURIComponent(window.location.pathname.slice("/shared/".length))
+	: null;
+render(
+	sharedToken ? html`<${SharedThreadView} token=${sharedToken} />` : html`<${App} />`,
+	document.getElementById("app"),
+);

@@ -268,6 +268,7 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 			mode: ws.session.mode ?? "build",
 			title: ws.session.title,
 			pinned: ws.session.pinned,
+			shareToken: ws.session.shareToken ?? null,
 			status: ws.status,
 			messages: toDisplayMessages(page.messages, page.reasoning),
 			oldestSeq: page.oldestSeq ?? null,
@@ -341,6 +342,17 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 		}
 		bridge.pinSession(params.id, pinned);
 		json(res, { ok: true, pinned: Boolean(ws.session.pinned) });
+	});
+
+	route("POST", "/api/sessions/:id/share", (_req, res, params) => {
+		const shared = bridge.shareSession(params.id);
+		if (!shared) return json(res, { error: "Not found" }, 404);
+		json(res, { ok: true, token: shared.token, url: `/shared/${shared.token}` });
+	});
+
+	route("DELETE", "/api/sessions/:id/share", (_req, res, params) => {
+		const revoked = bridge.unshareSession(params.id);
+		json(res, { ok: revoked });
 	});
 
 	route("POST", "/api/sessions/:id/chat", async (req, res, params) => {
@@ -687,14 +699,52 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 		const sessionId = url.searchParams.get("session") ?? "";
 		json(res, bridge.suggestCommand(sessionId, input));
 	});
+
+	// Public, unauthenticated read-only view of one shared thread. The token
+	// itself (24 random bytes) is the only credential — anyone with the link
+	// can read the conversation, no basic-auth prompt, matching a "share"
+	// feature's whole point (send it to someone with no cast account).
+	route("GET", "/api/shared/:token", (_req, res, params) => {
+		const shared = bridge.getSharedSession(params.token);
+		if (!shared) return json(res, { error: "Not found" }, 404);
+		json(res, shared);
+	});
+
 	// Main request handler
 	const server = createServer(async (req, res) => {
 		const urlPath = req.url?.split("?")[0] ?? "/";
 		const method = req.method ?? "GET";
 
-		if (!checkBasicAuth(req)) {
+		// /shared/<token> (the page) and /api/shared/<token> (its data) are the
+		// one deliberate hole in auth — everything else still needs Basic Auth.
+		// The static assets the shared page itself loads (app.js, style.css,
+		// icons.js) have to be exempt too, or the browser 401s fetching them and
+		// hangs on its native credentials prompt with nothing ever rendering —
+		// they carry no secrets (the actual password check happens server-side
+		// against every real /api/* route, which stays gated) so this doesn't
+		// widen what an unauthenticated visitor can actually do.
+		const PUBLIC_STATIC_ASSETS = new Set([
+			"/app.js",
+			"/style.css",
+			"/icons.js",
+			"/favicon.svg",
+			"/cast-banner-grid.json",
+		]);
+		const isPublicShareRoute =
+			urlPath === "/shared" ||
+			urlPath.startsWith("/shared/") ||
+			urlPath.startsWith("/api/shared/") ||
+			PUBLIC_STATIC_ASSETS.has(urlPath);
+		if (!isPublicShareRoute && !checkBasicAuth(req)) {
 			requireAuth(res);
 			return;
+		}
+
+		// The share page is a client-side route with no matching static file
+		// (there's no shared.html — it's the same SPA, reading the token off
+		// location.pathname) — serve index.html for it like any other deep link.
+		if (method === "GET" && urlPath.startsWith("/shared/") && !urlPath.startsWith("/api/")) {
+			if (serveStatic({ url: "/" } as IncomingMessage, res)) return;
 		}
 
 		// API routes

@@ -198,6 +198,73 @@ body.resizing-diff * { user-select: none; }
 }
 
 
+/* ── Share modal ──────────────────────────────────────────────────── */
+.modal-share {
+	max-width: 440px;
+}
+.modal-share-body {
+	padding: 12px 14px;
+}
+.share-link-row {
+	display: flex;
+	gap: 6px;
+	margin-top: 10px;
+}
+.share-link-input {
+	flex: 1;
+	min-width: 0;
+	font-family: var(--font-mono);
+	font-size: .78rem;
+	padding: 6px 8px;
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: 4px;
+	color: var(--text);
+}
+
+/* ── Shared (read-only, unauthenticated) thread view ─────────────── */
+.shared-view {
+	max-width: 760px;
+	margin: 0 auto;
+	padding: 32px 20px 80px;
+	height: 100vh;
+	height: 100dvh;
+	overflow-y: auto;
+}
+.shared-view-error {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	min-height: 60vh;
+	text-align: center;
+}
+.shared-view-header {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding-bottom: 18px;
+	margin-bottom: 18px;
+	border-bottom: 1px solid var(--border);
+}
+.shared-view-logo {
+	width: 32px;
+	height: 32px;
+	flex-shrink: 0;
+}
+.shared-view-logo .cast-logo-grad-from { stop-color: var(--gradient-from); }
+.shared-view-logo .cast-logo-grad-to { stop-color: var(--gradient-to); }
+.shared-view-title {
+	font-size: 1rem;
+	font-weight: 600;
+	color: var(--text);
+}
+.shared-view-sub {
+	font-size: .78rem;
+	color: var(--text-muted);
+	margin-top: 2px;
+}
+
 /* ── Sidebar ──────────────────────────────────────────────────────── */
 .sidebar {
 	background: var(--bg-surface);
@@ -345,6 +412,9 @@ body.resizing-diff * { user-select: none; }
 	padding: 4px;
 	display: flex; flex-direction: column; gap: 2px;
 }
+/* Applied when the row is near the bottom of the sidebar — opening downward
+   (the default above) would push the menu past the viewport edge. */
+.sidebar-item-menu.upward { top: auto; bottom: calc(100% + 4px); }
 .sidebar-item-menu-item {
 	display: flex; align-items: center; gap: 8px;
 	padding: 6px 8px;
@@ -370,10 +440,15 @@ body.resizing-diff * { user-select: none; }
 	padding-top: 12px;
 	flex-shrink: 0;
 }
-.new-session-btn {
-	display: flex; align-items: center; gap: 6px;
-	padding: 7px 10px;
+.sidebar-new-buttons {
+	display: flex;
+	gap: 8px;
 	margin: 0 12px 12px;
+}
+.new-session-btn {
+	display: flex; align-items: center; justify-content: center; gap: 6px;
+	height: 32px;
+	padding: 0 10px;
 	border-radius: var(--radius-sm);
 	cursor: pointer;
 	font-size: .85rem;
@@ -381,11 +456,37 @@ body.resizing-diff * { user-select: none; }
 	border: 1px dashed var(--border-active);
 	background: none;
 	font-family: var(--font);
-	width: calc(100% - 24px);
+	flex: 1;
+	min-width: 0;
 	transition: border-color .15s, color .15s, background .15s;
 }
 .new-session-btn:hover { border-color: var(--cyan); color: var(--text); background: var(--bg-hover); }
-.persona-list { display: none; padding: 0 12px 8px; }
+.new-session-btn svg { width: 14px; height: 14px; flex-shrink: 0; }
+/* Icon-only companion button — a small square rather than a second full-width
+   text button, so "New session" (the primary action) stays visually
+   dominant and this reads as a quick secondary shortcut next to it, not a
+   competing equal choice. */
+.new-session-btn-quick {
+	display: flex; align-items: center; justify-content: center;
+	flex: 0 0 auto;
+	width: 32px;
+	height: 32px;
+	padding: 0;
+	border-radius: var(--radius-sm);
+	cursor: pointer;
+	color: var(--text-muted);
+	border: 1px dashed var(--border-active);
+	background: none;
+	transition: border-color .15s, color .15s, background .15s;
+}
+.new-session-btn-quick:hover { border-color: var(--cyan); color: var(--cyan); background: var(--bg-hover); }
+.new-session-btn-quick svg { width: 15px; height: 15px; }
+/* Lives inside .sidebar-scroll (not .sidebar-new-section) precisely so it
+   scrolls as part of the same single region as the session list below it —
+   at high page zoom or with many personas this can grow taller than the
+   sidebar itself, and a separate inner scrollbar here would just mean two
+   scrollbars fighting for attention in one narrow column. */
+.persona-list { display: none; padding: 0 12px 12px; }
 .persona-list.open { display: block; }
 .persona-item {
 	padding: 6px 10px;
@@ -610,6 +711,13 @@ body.resizing-diff * { user-select: none; }
 	line-height: 1.65;
 	white-space: pre-wrap;
 }
+.message-content a, .streaming-content a, .tool-card-result a {
+	color: var(--cyan);
+	text-decoration: underline;
+	text-underline-offset: 2px;
+	word-break: break-word;
+}
+.message-content a:hover, .streaming-content a:hover, .tool-card-result a:hover { opacity: .85; }
 .message-content code {
 	font-family: var(--font-mono);
 	background: var(--bg-raised);
@@ -1149,6 +1257,11 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	padding: 24px;
 	line-height: 1.6;
 }
+/* Title + hint as separate stacked lines (like the chat's own empty state)
+   instead of one centered sentence split by a <br/> — that read as an
+   uneven, floating one-liner rather than a clear two-part message. */
+.diff-empty-title { color: var(--text); font-size: .9rem; font-weight: 600; margin-bottom: 4px; }
+.diff-empty-hint p { margin: 0; }
 .diff-empty-hint code {
 	font-family: var(--font-mono);
 	background: var(--bg-raised);

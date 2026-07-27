@@ -30,6 +30,7 @@ export const NON_BLOCKING_COMMANDS = new Set([
 	"/rules",
 	"/rule:",
 	"/permissions",
+	"/quick-session-persona",
 ]);
 
 /** Commands that require the agent to be idle. */
@@ -110,6 +111,13 @@ export const SLASH_COMMANDS: Array<{
 	{ name: "/skills", description: "Manage skills", takesArgs: true, blocking: true, hidden: true },
 	{ name: "/ssh", description: "Manage SSH hosts", takesArgs: true, blocking: true, hidden: true },
 	{ name: "/steer", description: "Inject a message while running", takesArgs: true, blocking: false },
+	{
+		name: "/quick-session-persona",
+		description: "Show or change the persona the sidebar's Quick session button uses",
+		takesArgs: true,
+		blocking: false,
+		hidden: true,
+	},
 	{ name: "/stop", description: "Abort the current run (alias)", blocking: false, hidden: true },
 	{
 		name: "/subagent-model",
