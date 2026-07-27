@@ -2,6 +2,23 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.8.32
+
+### Added
+
+- Web UI: an MCP server row in Settings now has a Reconnect button (next to the pause/resume toggle), so a server that was fixed on disk (new URL/token) doesn't need a full server restart to pick it up.
+- Web UI: the sidebar's message-count badges now update live for every thread, including ones you don't currently have open, instead of only refreshing on a full page reload.
+- Web UI: the status popover ("i") now shows the active provider and how many tokens were served from cache.
+
+### Fixed
+
+- Web UI: numbered/bulleted lists with a blank line between items (common in model output) no longer render every item as "1." — each used to become its own single-item list.
+- Web UI: runs of 3+ blank lines in a reply no longer render as an oversized gap between paragraphs.
+- Web UI: opening a long thread no longer occasionally leaves the view short of the very bottom — the scroll-to-bottom jump is instant instead of an animated scroll that could lose a race with content still loading in.
+- Web UI: streaming replies re-render at most once per animation frame instead of once per token, cutting the worst-case main-thread stall during a long, tool-heavy reply roughly 4x.
+- Web UI: the status popover ("i") could fail to open entirely while the agent was running (reading the active provider was wrongly gated behind the same "must be idle" check as switching it).
+- A turn cut short by the backend restarting no longer tells the model the user interrupted it — the reminder now says the server restarted instead of misattributing it.
+
 ## 0.8.31
 
 ### Added
