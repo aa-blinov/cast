@@ -201,6 +201,29 @@ describe("web bridge", () => {
 		expect(ws.systemPrompt).toBe(before);
 	});
 
+	it("/quick-session-persona with no arg reports the current default ('coding' when never set)", async () => {
+		const bridge = createWebBridge(makeResult());
+		const ws = bridge.createSession();
+		const res = await bridge.executeCommand(ws.id, "/quick-session-persona");
+		expect(res).toEqual({ ok: true, result: { quickSessionPersona: "coding" } });
+	});
+
+	it("/quick-session-persona <name> persists it and getConfig reflects the change", async () => {
+		const bridge = createWebBridge(makeResult());
+		const ws = bridge.createSession();
+		const res = await bridge.executeCommand(ws.id, "/quick-session-persona senior");
+		expect(res).toEqual({ ok: true, result: { quickSessionPersona: "senior" } });
+		expect(bridge.getConfig().quickSessionPersona).toBe("senior");
+	});
+
+	it("/quick-session-persona <unknown> fails without changing the current default", async () => {
+		const bridge = createWebBridge(makeResult());
+		const ws = bridge.createSession();
+		const res = await bridge.executeCommand(ws.id, "/quick-session-persona ghost");
+		expect(res.ok).toBe(false);
+		expect(bridge.getConfig().quickSessionPersona).toBe("coding");
+	});
+
 	it("/model <name> updates the session model", async () => {
 		const bridge = createWebBridge(makeResult());
 		const ws = bridge.createSession();
@@ -228,6 +251,51 @@ describe("web bridge", () => {
 			| { type: "session_update"; session: { model: string } }
 			| undefined;
 		expect(update?.session.model).toBe("gpt-5");
+	});
+
+	it("shareSession generates a token and getSharedSession returns a read-only projection by that token", () => {
+		const bridge = createWebBridge(makeResult());
+		const ws = bridge.createSession();
+		ws.session.title = "My thread";
+		ws.session.messages.push(
+			{ role: "system", content: "You are the coding persona. Project root: /home/secret/project" },
+			{ role: "user", content: "hello" },
+			{ role: "assistant", content: "hi there" },
+		);
+
+		const shared = bridge.shareSession(ws.id);
+		expect(shared?.token).toBeTruthy();
+
+		const view = bridge.getSharedSession(shared.token);
+		expect(view?.title).toBe("My thread");
+		expect(view?.model).toBe(ws.session.model);
+		expect(view?.messages.some((m) => m.content === "hi there")).toBe(true);
+		// The persona's system prompt (paths, tool internals) is for the
+		// session's own owner, not an anonymous visitor with the link.
+		expect(view?.messages.some((m) => m.role === "system")).toBe(false);
+	});
+
+	it("shareSession is idempotent — calling it twice returns the same token", () => {
+		const bridge = createWebBridge(makeResult());
+		const ws = bridge.createSession();
+		const first = bridge.shareSession(ws.id);
+		const second = bridge.shareSession(ws.id);
+		expect(second?.token).toBe(first?.token);
+	});
+
+	it("unshareSession revokes the token — getSharedSession no longer resolves it", () => {
+		const bridge = createWebBridge(makeResult());
+		const ws = bridge.createSession();
+		const shared = bridge.shareSession(ws.id);
+		expect(bridge.unshareSession(ws.id)).toBe(true);
+		expect(bridge.getSharedSession(shared.token)).toBeNull();
+	});
+
+	it("getSharedSession returns null for an unknown token, and shareSession/unshareSession return null/false for an unknown session", () => {
+		const bridge = createWebBridge(makeResult());
+		expect(bridge.getSharedSession("nonexistent")).toBeNull();
+		expect(bridge.shareSession("nonexistent")).toBeNull();
+		expect(bridge.unshareSession("nonexistent")).toBe(false);
 	});
 
 	it("/model and /persona are rejected while the agent is running", async () => {

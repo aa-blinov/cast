@@ -2,6 +2,23 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.9.2
+
+### Added
+
+- Web UI: threads can now be shared as a public, read-only link (`/shared/<token>`) — no login required to open it, and it can be revoked at any time. The shared view never includes the persona's system prompt, only the conversation itself.
+- Web UI: a "Quick session" button next to "New session" starts a fresh thread on a configurable default persona and a clean sandbox directory in one click, instead of going through the persona picker every time. The default persona is set in Settings → Tools.
+- The favicon and browser tab title now match the app's actual identity — the tab reads "Cast" instead of "cast web", and the icon is the same pixel-block mark used in the app's own logo instead of a plain letter.
+
+### Fixed
+
+- Web UI: the sidebar's session menu (rename/share/delete) no longer opens off-screen for a thread near the bottom of a short or scrolled sidebar — it now opens upward when there isn't room below.
+- Web UI: markdown links (`[text](url)` and bare URLs) in replies are now rendered as real clickable links instead of plain text.
+- Web UI: the persona picker under "New session" is no longer clipped with no way to scroll to the rest of the list at high page zoom or with many personas — it now shares one scroll region with the session list instead of a second, cut-off one of its own.
+- Web UI: the "Apply" checkmark next to a model/provider picker in Settings no longer stays active when nothing was actually changed, matching how every other picker in Settings already behaved.
+- Web UI: a stopwatch tick during every running turn was re-rendering the entire app ten times a second, visible as flicker across the whole page; it's now isolated to just the composer's own elapsed-time display. Settings' model pickers also no longer flash between a cached and a freshly-fetched list on open.
+- Web UI: the "not a git repository" message in the Changes panel no longer renders as one lopsided centered line — it's a proper two-line message now.
+
 ## 0.9.1
 
 ### Added

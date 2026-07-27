@@ -31,7 +31,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   last_announced_local_date TEXT,
   provider_url TEXT,
   usage_json TEXT NOT NULL,
-  todos_json TEXT
+  todos_json TEXT,
+  share_token TEXT
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -82,6 +83,16 @@ export function getDb(): DatabaseSync {
 	if (!columns.some((c) => c.name === "todos_json")) {
 		instance.exec("ALTER TABLE sessions ADD COLUMN todos_json TEXT");
 	}
+	if (!columns.some((c) => c.name === "share_token")) {
+		instance.exec("ALTER TABLE sessions ADD COLUMN share_token TEXT");
+	}
+	// Created after the column migration above, not inside SCHEMA — an
+	// existing DB predating share_token would otherwise fail this index's
+	// CREATE with "no such column" the moment SCHEMA runs, before the ALTER
+	// TABLE ever gets a chance to add it.
+	instance.exec(
+		"CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_share_token ON sessions(share_token) WHERE share_token IS NOT NULL",
+	);
 	return instance;
 }
 

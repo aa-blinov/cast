@@ -108,6 +108,12 @@ export interface Settings {
 	mode?: "plan" | "build";
 	/** Web UI password — auto-generated on first `cast web` run. */
 	webPassword?: string;
+	/**
+	 * Persona used by the web UI's "Quick session" button — skips the persona
+	 * picker entirely and opens straight into a fresh sandbox directory.
+	 * Defaults to "coding" (DEFAULT_PERSONA in core/personas.ts) when unset.
+	 */
+	quickSessionPersona?: string;
 }
 
 // ============================================================================

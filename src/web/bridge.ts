@@ -5,6 +5,7 @@
  */
 
 import { execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -12,7 +13,7 @@ import { fetchModels, type ModelInfo, probeProvider, resolveProvider } from "../
 import type { Message } from "../core/llm.ts";
 import { type AgentEvent, compactSessionMessages, runAgentLoop } from "../core/loop.ts";
 import { closeMcpConnections, formatMcpForPrompt } from "../core/mcp.ts";
-import type { Persona } from "../core/personas.ts";
+import { DEFAULT_PERSONA, type Persona } from "../core/personas.ts";
 import { createPlanState, modeDisabledTools } from "../core/plan.ts";
 import {
 	addMarketplace,
@@ -49,6 +50,7 @@ import {
 	deleteSession,
 	listSessionSummaries,
 	loadSession,
+	loadSessionByShareToken,
 	recordCompaction,
 	type SessionState,
 	saveSession,
@@ -232,6 +234,16 @@ export interface WebBridge {
 	renameSession(sessionId: string, title: string): boolean;
 	/** Toggle pin-to-top in the session list. Returns false if the id doesn't exist. */
 	pinSession(sessionId: string, pinned: boolean): boolean;
+	/** Generates (or returns the existing) public `/shared/:token` link for a
+	 * thread. Null if the session doesn't exist. */
+	shareSession(sessionId: string): { token: string } | null;
+	/** Revokes a thread's public link. False if it doesn't exist or wasn't shared. */
+	unshareSession(sessionId: string): boolean;
+	/** The read-only data served at the unauthenticated `/shared/:token`
+	 * route. Null for an unknown/revoked token. */
+	getSharedSession(
+		token: string,
+	): { title?: string; persona: string; model: string; messages: DisplayMessage[] } | null;
 	submit(sessionId: string, text: string): void;
 	abort(sessionId: string): void;
 	subscribe(sessionId: string, callback: (event: WebEvent) => void): void;
@@ -241,7 +253,14 @@ export interface WebBridge {
 	subscribeAll(callback: (event: WebEvent) => void): void;
 	unsubscribeAll(callback: (event: WebEvent) => void): void;
 	executeCommand(sessionId: string, command: string): Promise<{ ok: boolean; result?: unknown; error?: string }>;
-	getConfig(): { baseURL: string; model: string; persona: string; theme: string; cwd: string };
+	getConfig(): {
+		baseURL: string;
+		model: string;
+		persona: string;
+		theme: string;
+		cwd: string;
+		quickSessionPersona: string;
+	};
 	getPersonas(): Array<{ name: string; label: string; description: string; source: string }>;
 	getThemes(): Array<{ id: string; label: string; description: string; colors: ThemeColors }>;
 	getModels(providerName?: string): Promise<{ models: ModelInfo[]; error?: string }>;
@@ -295,6 +314,12 @@ export function createWebBridge(result: StartupResult): WebBridge {
 	// mid-run model switch never reached new sessions, which kept defaulting
 	// to whatever was active when the server started.
 	let defaultModel = result.session.model;
+	// Persona the web UI's "Quick session" sidebar button uses — skips the
+	// full persona picker. Read from settings.json at startup (not part of
+	// StartupResult, which has no concept of this — it's a web-only
+	// preference), same "read once into a mutable var, updateSettings on
+	// change" shape as defaultModel above.
+	let quickSessionPersona = loadSettings().quickSessionPersona ?? DEFAULT_PERSONA;
 
 	/**
 	 * Same `buildSystemPrompt` core call the TUI's /persona and /model handlers
@@ -787,6 +812,53 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		return true;
 	}
 
+	/** Generates (or returns the existing) public read-only link for this
+	 * thread. Idempotent — calling it twice doesn't invalidate a link already
+	 * handed out. Uses `getSession` (not the bare in-memory map) so a thread
+	 * from before the last server restart can still be shared. */
+	function shareSession(sessionId: string): { token: string } | null {
+		const ws = getSession(sessionId);
+		if (!ws) return null;
+		if (!ws.session.shareToken) {
+			ws.session.shareToken = randomBytes(24).toString("base64url");
+			saveSession(ws.session);
+		}
+		return { token: ws.session.shareToken };
+	}
+
+	/** Revokes a thread's public link, if it has one — the old token
+	 * immediately stops resolving. Returns false if the session doesn't exist
+	 * or was never shared. */
+	function unshareSession(sessionId: string): boolean {
+		const ws = getSession(sessionId);
+		if (!ws || !ws.session.shareToken) return false;
+		ws.session.shareToken = undefined;
+		saveSession(ws.session);
+		return true;
+	}
+
+	/** The read-only projection served (with no auth at all) at
+	 * `/shared/:token`. Deliberately narrow — no cwd, no persona system
+	 * prompt, no tool internals beyond what toDisplayMessages already shows
+	 * for the authenticated view; just enough to read the conversation. */
+	function getSharedSession(
+		token: string,
+	): { title?: string; persona: string; model: string; messages: DisplayMessage[] } | null {
+		const session = loadSessionByShareToken(token);
+		if (!session) return null;
+		return {
+			title: session.title,
+			persona: resolvePersona(session.persona ?? "")?.label ?? currentPersona.label,
+			model: session.model,
+			// Drop system messages (the persona's full system prompt, compaction
+			// markers) — the authenticated view shows these to the session's own
+			// owner, but a public link's anonymous visitor has no business
+			// reading the persona's internal instructions, tool descriptions, or
+			// project paths baked into it.
+			messages: toDisplayMessages(session.messages, session.reasoning).filter((m) => m.role !== "system"),
+		};
+	}
+
 	async function executeCommand(
 		sessionId: string,
 		command: string,
@@ -1095,6 +1167,19 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			ws.systemPrompt = computeSystemPrompt(persona, ws.session.model, ws.session.cwd ?? cwd, ws.session.mode);
 			saveSession(ws.session);
 			return { ok: true, result: { persona: persona.name, label: persona.label } };
+		}
+		if (name === "/quick-session-persona") {
+			if (!arg) return { ok: true, result: { quickSessionPersona } };
+			const persona = resolvePersona(arg);
+			if (!persona) {
+				return {
+					ok: false,
+					error: `Unknown persona: ${arg}. Available: ${personas.map((p) => p.name).join(", ")}`,
+				};
+			}
+			quickSessionPersona = persona.name;
+			updateSettings({ quickSessionPersona: persona.name });
+			return { ok: true, result: { quickSessionPersona: persona.name } };
 		}
 		if (name === "/subagent-model") {
 			if (!arg) return { ok: true, result: { subagentModel: subagentModel ?? null } };
@@ -1501,6 +1586,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			persona: currentPersona.name,
 			theme: loadSettings().theme ?? "cast",
 			cwd,
+			quickSessionPersona,
 		};
 	}
 
@@ -1749,6 +1835,9 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		deleteSessionPermanently,
 		renameSession,
 		pinSession,
+		shareSession,
+		unshareSession,
+		getSharedSession,
 		submit,
 		abort,
 		subscribe,
