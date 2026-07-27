@@ -669,6 +669,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					backgroundBash: backgroundBashDeps.current,
 					mcpPromptSuffix: formatMcpForPrompt(mcpResult),
 					planState,
+					initialTodos: session.todos,
 					announcedLocalDate,
 					onCompaction: (full, compacted) => recordCompaction(session, full, compacted),
 					// Append straight into the display history: warnings fire mid-run
@@ -859,6 +860,9 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 								});
 								break;
 							}
+							case "todos_updated":
+								session.todos = event.todos;
+								break;
 							case "end":
 								if (event.reason === "aborted") {
 									setLastTurnAborted(true);

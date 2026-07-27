@@ -487,6 +487,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			confirmBash: permissionMode === "bypass" ? undefined : async () => true,
 			disabledTools,
 			planState,
+			initialTodos: ws.session.todos,
 			mcpTools: mcpResult.toolDefinitions,
 			mcpToolIndex: mcpResult.toolIndex,
 			personas,
@@ -508,6 +509,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			},
 			onEvent: (event: AgentEvent) => {
 				if (event.type === "assistant_message") thinkingByCompletion.push(event.thinking ?? "");
+				if (event.type === "todos_updated") ws.session.todos = event.todos;
 				if (event.type === "usage") {
 					addUsage(ws.session, event.usage, { subagent: event.subagent });
 					if (!event.subagent) {

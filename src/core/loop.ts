@@ -40,6 +40,7 @@ import { promptsDir, readRequiredPrompt } from "./prompts.ts";
 import { compactMessages, estimateTokens, fileTagsFromCompactionSummary, shouldCompact } from "./session.ts";
 import type { SshHost } from "./ssh.ts";
 import type { SubagentPrompt } from "./subagents.ts";
+import { formatTodoList, remainingTodoCount, type TodoItem, validateTodos } from "./todo.ts";
 import {
 	type BashBackgroundDeps,
 	type ConfirmBash,
@@ -164,6 +165,15 @@ const BUILD_MODE_DONE_PROMPT = readRequiredPrompt(promptsDir, join("modes", "bui
 // findings not yet written into the plan file must survive the summary.
 // Exported for the manual /compact command, which runs outside the loop.
 export const PLAN_COMPACTION_PROMPT = readRequiredPrompt(promptsDir, join("modes", "plan-compaction.md"));
+// Build mode only (see doing-tasks.md): the model's own todo_write list,
+// re-rendered into the prompt every turn — same "survives compaction, can't
+// silently drift out of view" rationale as BUILD_MODE_PROMPT above, just for
+// ad-hoc task tracking instead of an approved plan file. {{TODOS}} replaced.
+const TODO_LIST_PROMPT = readRequiredPrompt(promptsDir, join("modes", "todo-list.md"));
+// Tool calls (build mode, empty list) before todoGateActive trips — see
+// toolCallsSinceTodoNudge/todoGateActive above.
+const TODO_NUDGE_THRESHOLD = 4;
+const READONLY_TOOLS = new Set(["read", "grep", "glob", "ls", "web_search", "web_fetch"]);
 // One-liner for subagents running under readOnlyBash (plan-mode parent): they
 // don't get the full plan-mode block (it references authoring tools they lack),
 // but they must know why a mutating bash command bounces.
@@ -382,6 +392,8 @@ export type AgentEvent =
 	| { type: "open_work_gate_exhausted"; openSteps: number; maxFires: number }
 	/** Prior turn was aborted mid-stream; a `<system-reminder>` was appended for the model. */
 	| { type: "interrupt_reminder" }
+	/** Build-mode todo_write call landed — carries the full replacement list. */
+	| { type: "todos_updated"; todos: TodoItem[] }
 	/** Session crossed local midnight; a date-rollover `<system-reminder>` was appended. */
 	| { type: "date_rollover"; date: string }
 	| { type: "retry"; attempt: number; maxAttempts: number; reason: string }
@@ -453,6 +465,10 @@ export interface LoopConfig {
 	 * (their planState arrives with enabled=false). Implied by
 	 * planState.enabled for the main agent. */
 	readOnlyBash?: boolean;
+	/** Build-mode todo list carried over from the session (resume/continue) —
+	 * seeds the in-run list so it's advertised, prompted, and editable from
+	 * the first turn instead of starting empty every run. */
+	initialTodos?: TodoItem[];
 	/** promptTokens from the most recent API response — used by shouldCompact
 	 * as the authoritative context size instead of character-based estimation. */
 	lastPromptTokens?: number;
@@ -578,12 +594,30 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 	const subagentsEnabled = currentPersonaObj?.subagents === true;
 	const subagentNames = subagentsEnabled ? loopConfig.subagentPrompts?.map((p) => p.name) : undefined;
 	const sshHostNames = loopConfig.sshHosts?.map((h) => h.name);
+	// Build mode only — plan mode has its own checklist (plan_check) for the
+	// same "track progress through a multi-step task" job; advertising both
+	// would just leave the model picking one arbitrarily.
+	const todoModeActive = !loopConfig.planState?.enabled;
+	let todos: TodoItem[] = todoModeActive ? (loopConfig.initialTodos ?? []) : [];
+	// The passive "use todo_write when appropriate" prompt guidance alone
+	// isn't enough — measured empirically: real multi-step tasks (5 sequential
+	// file writes, an explicit numbered list, a mid-task discovered bug) never
+	// triggered spontaneous use, with or without a stronger prompt. Cline hit
+	// the same wall and ships a forced periodic reminder (`remindClineInterval`)
+	// rather than relying on the model to remember on its own — same fix here.
+	let toolCallsSinceTodoNudge = 0;
+	// Harder than a reminder: once tripped, every non-todo_write tool call is
+	// refused outright until todo_write runs. A soft `<system-reminder>` was
+	// measured (repeatedly, across many real multi-step tasks) to just get
+	// ignored — this makes compliance not optional instead of asking nicer.
+	let todoGateActive = false;
 	const builtinTools = getToolDefinitions(
 		subagentNames,
 		initialModel,
 		loopConfig.subagentModel,
 		sshHostNames,
 		Boolean(loopConfig.backgroundBash),
+		todoModeActive,
 	);
 	const mcpTools = loopConfig.mcpTools ?? [];
 	const allTools = [...builtinTools, ...mcpTools];
@@ -681,6 +715,27 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 				});
 			}
 		}
+		// Handled here (not in tools.ts's dispatcher) because it needs direct
+		// access to this closure's `todos` — the list must be visible to
+		// syncSystemPrompt on the very next request, not round-tripped through
+		// a separate store.
+		if (name === "todo_write") {
+			const result = validateTodos(args.todos);
+			if (!result.ok) return Promise.resolve({ content: `Error: ${result.error}`, isError: true });
+			todos = result.todos;
+			todoGateActive = false;
+			toolCallsSinceTodoNudge = 0;
+			onEvent({ type: "todos_updated", todos });
+			return Promise.resolve({ content: JSON.stringify({ todos, remaining: remainingTodoCount(todos) }) });
+		}
+		if (todoGateActive) {
+			return Promise.resolve({
+				content:
+					"Blocked: this turn has had several tool calls with no todo list. Call todo_write now (with the full " +
+					"list of what's left to do) before continuing — this and every other tool call will keep failing until you do.",
+				isError: true,
+			});
+		}
 		const mcpTool = mcpToolIndex?.get(name);
 		if (mcpTool) return mcpTool.call(args, toolSignal);
 		return builtinExecuteTool(name, args, toolSignal);
@@ -765,6 +820,9 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 			} else {
 				prompt = `${prompt}\n\n${BUILD_MODE_PROMPT.replace("{{PLAN}}", () => buildPlanSnapshot.content)}${otherPlansLine}`;
 			}
+		}
+		if (todoModeActive && todos.length > 0) {
+			prompt = `${prompt}\n\n${TODO_LIST_PROMPT.replace("{{TODOS}}", () => formatTodoList(todos))}`;
 		}
 		if (messages.length === 0 || messages[0]?.role !== "system") {
 			messages.unshift({ role: "system", content: prompt });
@@ -1099,6 +1157,27 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 								content: [{ type: "image_url", image_url: { url: r.result.imageDataUrl } }],
 							};
 							messages.push(imageMsg);
+						}
+					}
+
+					if (todoModeActive && !executedToolBatch.some((r) => r.name === "todo_write")) {
+						// Read-only investigation (read/grep/glob/ls/web_*) doesn't count —
+						// measured empirically: a single focused "is there a bug in this
+						// file" debugging task naturally racks up 20-30 reads/greps with
+						// no distinct items to lose track of, and gating on raw tool-call
+						// volume blocked it dozens of times for no benefit, just wasted
+						// turns re-attempting the same read. Only actions that produce
+						// distinct pieces of work (write/edit/bash/task) count toward the
+						// threshold — that's the failure mode the gate exists for.
+						const workCalls = executedToolBatch.filter((r) => !READONLY_TOOLS.has(r.name));
+						toolCallsSinceTodoNudge += workCalls.length;
+						if (todos.length === 0 && toolCallsSinceTodoNudge >= TODO_NUDGE_THRESHOLD) {
+							// Trips the gate in executeTool above — every subsequent
+							// non-todo_write call is refused until todo_write runs. A
+							// pushed `<system-reminder>` message (the softer version of
+							// this) was measured to just get ignored across many real
+							// multi-step tasks; refusing execution isn't optional.
+							todoGateActive = true;
 						}
 					}
 				}

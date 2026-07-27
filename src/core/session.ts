@@ -5,6 +5,7 @@ import type { AppConfig } from "./config.ts";
 import { formatLocalDate } from "./date-rollover-reminder.ts";
 import { getDb } from "./db.ts";
 import type { Message, Usage } from "./llm.ts";
+import type { TodoItem } from "./todo.ts";
 
 // ============================================================================
 // Session state
@@ -96,6 +97,11 @@ export interface SessionState {
 	title?: string;
 	/** Pinned to the top of the web UI's session list. Web-only, like `title`. */
 	pinned?: boolean;
+	/** Build-mode task list written via the todo_write tool (see core/todo.ts
+	 * and loop.ts's syncSystemPrompt) — kept off `messages` so it survives
+	 * compaction, and restored on resume/continue so a long task list isn't
+	 * silently dropped by ending the process mid-run. */
+	todos?: TodoItem[];
 }
 
 /** Fold one turn's usage into the session's running totals. When `opts.subagent`
@@ -470,6 +476,7 @@ function sessionMetaRow(session: SessionState) {
 		last_announced_local_date: session.lastAnnouncedLocalDate ?? null,
 		provider_url: session.providerUrl ?? null,
 		usage_json: JSON.stringify(session.usage),
+		todos_json: session.todos ? JSON.stringify(session.todos) : null,
 	};
 }
 
@@ -478,13 +485,13 @@ export function saveSession(session: SessionState): void {
 	const db = getDb();
 	const meta = sessionMetaRow(session);
 	db.prepare(
-		`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, usage_json)
-		 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :usage_json)
+		`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, usage_json, todos_json)
+		 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :usage_json, :todos_json)
 		 ON CONFLICT(id) DO UPDATE SET
 		   cwd = excluded.cwd, model = excluded.model, persona = excluded.persona, mode = excluded.mode,
 		   title = excluded.title, pinned = excluded.pinned, updated_at = excluded.updated_at,
 		   last_prompt_tokens = excluded.last_prompt_tokens, last_announced_local_date = excluded.last_announced_local_date,
-		   provider_url = excluded.provider_url, usage_json = excluded.usage_json`,
+		   provider_url = excluded.provider_url, usage_json = excluded.usage_json, todos_json = excluded.todos_json`,
 	).run(meta);
 
 	const insertRow = db.prepare(
@@ -775,6 +782,7 @@ interface SessionRow {
 	last_announced_local_date: string | null;
 	provider_url: string | null;
 	usage_json: string;
+	todos_json: string | null;
 }
 
 function rowToMeta(row: SessionRow): Omit<SessionState, "messages"> {
@@ -792,6 +800,7 @@ function rowToMeta(row: SessionRow): Omit<SessionState, "messages"> {
 		lastAnnouncedLocalDate: row.last_announced_local_date ?? undefined,
 		providerUrl: row.provider_url ?? undefined,
 		usage: withUsageDefault(JSON.parse(row.usage_json)),
+		todos: row.todos_json ? JSON.parse(row.todos_json) : undefined,
 	};
 }
 
@@ -907,8 +916,8 @@ export function migrateLegacySessionsToDb(): number {
 		const session = readLegacySessionFile(filePath);
 		if (!session || existing.has(session.id)) continue;
 		db.prepare(
-			`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, usage_json)
-			 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :usage_json)`,
+			`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, usage_json, todos_json)
+			 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :usage_json, :todos_json)`,
 		).run(sessionMetaRow(session));
 		const insertRow = db.prepare(
 			"INSERT INTO messages (session_id, seq, role, content_json, in_context) VALUES (?, ?, ?, ?, 1)",

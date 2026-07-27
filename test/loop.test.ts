@@ -2673,3 +2673,255 @@ describe("runAgentLoop — compaction", () => {
 		expect(result.at(-1)?.content).toBe("done");
 	});
 });
+
+// ============================================================================
+// runAgentLoop — todo list (build mode only)
+// ============================================================================
+
+describe("runAgentLoop — todo list (build mode only)", () => {
+	it("advertises todo_write in build mode, not in plan mode", async () => {
+		let buildTools: ToolDef[] = [];
+		vi.mocked(streamAndCollect).mockImplementationOnce(async (_c, _m, _msgs, tools) => {
+			buildTools = tools as ToolDef[];
+			return { content: "ok", thinking: "", finishReason: "stop" };
+		});
+		await runAgentLoop([{ role: "user", content: "hi" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "test",
+			onEvent: () => {},
+		});
+		expect(buildTools.map((t) => t.function.name)).toContain("todo_write");
+
+		let planTools: ToolDef[] = [];
+		vi.mocked(streamAndCollect).mockImplementationOnce(async (_c, _m, _msgs, tools) => {
+			planTools = tools as ToolDef[];
+			return { content: "ok", thinking: "", finishReason: "stop" };
+		});
+		await runAgentLoop([{ role: "user", content: "hi" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "test",
+			planState: { enabled: true, plansDir: "/tmp/never-existing-plans-dir" },
+			onEvent: () => {},
+		});
+		expect(planTools.map((t) => t.function.name)).not.toContain("todo_write");
+	});
+
+	it("a todo_write call updates state, fires todos_updated, and steers the next turn's prompt", async () => {
+		const systemPrompts: string[] = [];
+		const events: AgentEvent[] = [];
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async (_c, _m, messages) => {
+				systemPrompts.push(contentToText((messages as Message[])[0]!.content));
+				return {
+					content: "",
+					thinking: "",
+					finishReason: "stop",
+					toolCalls: [
+						{
+							id: "t1",
+							name: "todo_write",
+							arguments: JSON.stringify({
+								todos: [
+									{ content: "Step one", status: "in_progress", priority: "high" },
+									{ content: "Step two", status: "pending", priority: "medium" },
+								],
+							}),
+						},
+					],
+				};
+			})
+			.mockImplementationOnce(async (_c, _m, messages) => {
+				systemPrompts.push(contentToText((messages as Message[])[0]!.content));
+				return { content: "done", thinking: "", finishReason: "stop" };
+			});
+
+		await runAgentLoop([{ role: "user", content: "do the multi-step thing" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "BASE_PROMPT",
+			onEvent: (e) => events.push(e),
+		});
+
+		const updated = events.find((e) => e.type === "todos_updated");
+		expect(updated).toBeDefined();
+		if (updated?.type === "todos_updated") expect(updated.todos).toHaveLength(2);
+
+		// First request has no todos yet — nothing injected.
+		expect(systemPrompts[0]).toBe("BASE_PROMPT");
+		// Second request sees the list the tool call just wrote.
+		expect(systemPrompts[1]).toContain("Step one");
+		expect(systemPrompts[1]).toContain("Step two");
+		expect(systemPrompts[1]).toContain("[~] (high) Step one");
+	});
+
+	it("rejects more than one in_progress item without updating state", async () => {
+		const events: AgentEvent[] = [];
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [
+					{
+						id: "t1",
+						name: "todo_write",
+						arguments: JSON.stringify({
+							todos: [
+								{ content: "a", status: "in_progress", priority: "high" },
+								{ content: "b", status: "in_progress", priority: "low" },
+							],
+						}),
+					},
+				],
+			}))
+			.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
+
+		await runAgentLoop([{ role: "user", content: "go" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "test",
+			onEvent: (e) => events.push(e),
+		});
+
+		expect(events.some((e) => e.type === "todos_updated")).toBe(false);
+		expect(events.some((e) => e.type === "tool_end" && e.name === "todo_write" && e.result.isError)).toBe(true);
+	});
+
+	it("blocks non-todo_write tool calls once the gate trips, and unblocks right after todo_write", async () => {
+		const events: AgentEvent[] = [];
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [{ id: "t1", name: "bash", arguments: JSON.stringify({ command: "echo 1" }) }],
+			}))
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [{ id: "t2", name: "bash", arguments: JSON.stringify({ command: "echo 2" }) }],
+			}))
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [{ id: "t3", name: "bash", arguments: JSON.stringify({ command: "echo 3" }) }],
+			}))
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [{ id: "t4", name: "bash", arguments: JSON.stringify({ command: "echo 4" }) }],
+			}))
+			// Gate should now be active — this call must be refused, not executed.
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [{ id: "t5", name: "bash", arguments: JSON.stringify({ command: "echo 5" }) }],
+			}))
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [
+					{
+						id: "t6",
+						name: "todo_write",
+						arguments: JSON.stringify({ todos: [{ content: "a", status: "in_progress", priority: "low" }] }),
+					},
+				],
+			}))
+			// Gate lifted — this one must go through normally.
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [{ id: "t7", name: "bash", arguments: JSON.stringify({ command: "echo 7" }) }],
+			}))
+			.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
+
+		await runAgentLoop([{ role: "user", content: "do several unrelated bash things" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "test",
+			onEvent: (e) => events.push(e),
+		});
+
+		const toolEnd = (id: string) =>
+			events.find((e) => e.type === "tool_end" && e.id === id) as
+				| { type: "tool_end"; id: string; name: string; result: { content: string; isError?: boolean } }
+				| undefined;
+
+		expect(toolEnd("t1")?.result.isError).toBeFalsy();
+		expect(toolEnd("t4")?.result.isError).toBeFalsy();
+		expect(toolEnd("t5")?.result.isError).toBe(true);
+		expect(toolEnd("t5")?.result.content).toContain("Blocked");
+		expect(toolEnd("t6")?.result.isError).toBeFalsy();
+		expect(toolEnd("t7")?.result.isError).toBeFalsy();
+	});
+
+	it("never blocks once the list has been started", async () => {
+		const events: AgentEvent[] = [];
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [
+					{
+						id: "t0",
+						name: "todo_write",
+						arguments: JSON.stringify({ todos: [{ content: "a", status: "in_progress", priority: "low" }] }),
+					},
+				],
+			}))
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [{ id: "t1", name: "bash", arguments: JSON.stringify({ command: "echo 1" }) }],
+			}))
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [{ id: "t2", name: "bash", arguments: JSON.stringify({ command: "echo 2" }) }],
+			}))
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [{ id: "t3", name: "bash", arguments: JSON.stringify({ command: "echo 3" }) }],
+			}))
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [{ id: "t4", name: "bash", arguments: JSON.stringify({ command: "echo 4" }) }],
+			}))
+			.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
+
+		await runAgentLoop([{ role: "user", content: "go" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "test",
+			onEvent: (e) => events.push(e),
+		});
+
+		const sawAnyNudge = events.some(
+			(e) => e.type === "tool_end" && e.result.isError && e.result.content.includes("Blocked"),
+		);
+
+		expect(sawAnyNudge).toBe(false);
+	});
+});
