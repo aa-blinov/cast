@@ -451,7 +451,6 @@ body.resizing-diff * { user-select: none; }
 	padding-left: max(20px, env(safe-area-inset-left));
 	padding-right: max(20px, env(safe-area-inset-right));
 	display: flex; flex-direction: column; gap: 6px;
-	scroll-behavior: smooth;
 	max-width: 860px;
 	width: 100%;
 	margin: 0 auto;

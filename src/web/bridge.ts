@@ -209,8 +209,10 @@ export interface WebBridge {
 	listSessions(): SessionSummary[];
 	/** Aborts any in-flight run and drops the session from the live list — it
 	 * stays on disk (autosaved already), it just stops appearing as a running
-	 * background agent. Returns false if the id doesn't exist. */
-	closeSession(sessionId: string): boolean;
+	 * background agent. Returns false if the id doesn't exist. `reason:
+	 * "shutdown"` (used by the process shutdown handler) tells an in-flight
+	 * run's interrupt reminder not to blame the user for a backend restart. */
+	closeSession(sessionId: string, reason?: "shutdown"): boolean;
 	/** Unlike closeSession, this actually removes the session (and its
 	 * messages) from disk — not recoverable. Aborts/cleans up the live
 	 * instance first if one exists. Returns false if the id doesn't exist
@@ -226,6 +228,10 @@ export interface WebBridge {
 	abort(sessionId: string): void;
 	subscribe(sessionId: string, callback: (event: WebEvent) => void): void;
 	unsubscribe(sessionId: string, callback: (event: WebEvent) => void): void;
+	/** Sidebar-wide event stream — fires for every session's session_update,
+	 * not just the one this listener is scoped to. */
+	subscribeAll(callback: (event: WebEvent) => void): void;
+	unsubscribeAll(callback: (event: WebEvent) => void): void;
 	executeCommand(sessionId: string, command: string): Promise<{ ok: boolean; result?: unknown; error?: string }>;
 	getConfig(): { baseURL: string; model: string; persona: string; theme: string; cwd: string };
 	getPersonas(): Array<{ name: string; label: string; description: string; source: string }>;
@@ -243,6 +249,11 @@ export interface WebBridge {
 
 export function createWebBridge(result: StartupResult): WebBridge {
 	const sessions = new Map<string, WebAgentSession>();
+	// Sidebar listeners, one per connected browser tab, independent of which
+	// session (if any) that tab currently has open — this is what lets the
+	// message-count badges for background/other threads update live instead
+	// of only refreshing on a full page reload.
+	const sessionListListeners = new Set<(event: WebEvent) => void>();
 
 	const { config, cwd, persona: currentPersona, reasoningMeta, projectDeps } = result;
 
@@ -364,7 +375,15 @@ export function createWebBridge(result: StartupResult): WebBridge {
 	 *  without a full refetch. */
 	function broadcastSessionUpdate(ws: WebAgentSession): void {
 		try {
-			broadcast(ws, { type: "session_update", session: summaryFor(ws.session, ws.status) });
+			const event: WebEvent = { type: "session_update", session: summaryFor(ws.session, ws.status) };
+			broadcast(ws, event);
+			for (const listener of sessionListListeners) {
+				try {
+					listener(event);
+				} catch {
+					// Listener threw — remove it to avoid poisoning the set.
+				}
+			}
 		} catch {
 			// Defensive: summaryFor reads session.messages.length — if the run
 			// left messages in an unexpected state, don't crash the broadcast.
@@ -561,10 +580,10 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		ws.runner.abort();
 	}
 
-	function closeSession(sessionId: string): boolean {
+	function closeSession(sessionId: string, reason?: "shutdown"): boolean {
 		const ws = sessions.get(sessionId);
 		if (!ws) return false;
-		if (ws.status === "running") ws.runner.abort();
+		if (ws.status === "running") ws.runner.abort(reason);
 		ws.backgroundBash.registry.killAll();
 		// A session with no real turns yet (freshly created — e.g. a persona
 		// picked in the sidebar — then closed or dropped on shutdown without
@@ -611,6 +630,14 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		const ws = sessions.get(sessionId);
 		if (!ws) return;
 		ws.listeners.delete(callback);
+	}
+
+	function subscribeAll(callback: (event: WebEvent) => void): void {
+		sessionListListeners.add(callback);
+	}
+
+	function unsubscribeAll(callback: (event: WebEvent) => void): void {
+		sessionListListeners.delete(callback);
 	}
 
 	/**
@@ -1141,8 +1168,27 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			if (sub === "help") {
 				return {
 					ok: true,
-					result: "/mcp list · /mcp enable <name> · /mcp disable <name> · /mcp uninstall <name>",
+					result:
+						"/mcp list · /mcp enable <name> · /mcp disable <name> · /mcp reconnect <name> · /mcp uninstall <name>",
 				};
+			}
+			if (sub === "reconnect") {
+				if (!rest) return { ok: false, error: "Usage: /mcp reconnect <name>" };
+				if (!mcpResult.allServerNames.includes(rest)) return { ok: false, error: `Unknown MCP server: ${rest}` };
+				try {
+					await closeMcpConnections(mcpResult.connections);
+					mcpResult = await resolveMcpForCwd(
+						projectDeps,
+						sessionCwd,
+						projectTrusted,
+						loadSettings().disabledMcpServers ?? [],
+					);
+					recomputeAllSystemPrompts();
+					const connected = mcpResult.connections.some((c) => c.serverName === rest);
+					return { ok: true, result: `MCP server "${rest}" ${connected ? "reconnected" : "reconnect failed"}` };
+				} catch (err) {
+					return { ok: false, error: `Reconnect failed: ${err instanceof Error ? err.message : String(err)}` };
+				}
 			}
 			if (sub === "enable" || sub === "disable") {
 				if (!rest) return { ok: false, error: `Usage: /mcp ${sub} <name>` };
@@ -1666,6 +1712,8 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		abort,
 		subscribe,
 		unsubscribe,
+		subscribeAll,
+		unsubscribeAll,
 		executeCommand,
 		getConfig,
 		getPersonas,

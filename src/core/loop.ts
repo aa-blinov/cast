@@ -787,7 +787,8 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 
 	/** Abort end: optional interrupt reminder for the next model turn, then settle. */
 	const endAborted = () => {
-		if (appendInterruptReminder(messages)) {
+		const shutdown = signal?.reason === "shutdown";
+		if (appendInterruptReminder(messages, shutdown ? "shutdown" : undefined)) {
 			onEvent({ type: "interrupt_reminder" });
 		}
 		onEvent({ type: "end", reason: "aborted" });

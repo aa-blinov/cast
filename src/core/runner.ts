@@ -9,8 +9,10 @@ export interface AgentRunner {
 	followUpQueue: MessageQueue;
 	/** True while the agent loop is running. */
 	isRunning: boolean;
-	/** Abort the current run. */
-	abort: () => void;
+	/** Abort the current run. `reason` reaches the loop as `signal.reason`,
+	 * letting it tell a real user-initiated abort apart from e.g. a backend
+	 * process shutdown when it decides what to tell the model happened. */
+	abort: (reason?: string) => void;
 	/** Promise that resolves when the current run finishes. */
 	waitForIdle: () => Promise<void>;
 	/** Mark a run as started; called by runPrompt. */
@@ -28,8 +30,8 @@ export function createAgentRunner(): AgentRunner {
 		followUpQueue: new MessageQueue(),
 		isRunning: false,
 
-		abort() {
-			currentAbort?.abort();
+		abort(reason?: string) {
+			currentAbort?.abort(reason);
 			// Anything queued for this run is moot once it's cancelled —
 			// otherwise a /steer or /queue typed just before /abort would
 			// silently surface at the start of the next, unrelated prompt.

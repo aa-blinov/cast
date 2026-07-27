@@ -203,6 +203,49 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 		json(res, { id: ws.id, session: ws.session }, 201);
 	});
 
+	// One stream per browser tab, independent of which session (if any) is
+	// currently open — lets the sidebar's message-count badges update live
+	// for background threads instead of only refreshing on a page reload.
+	// Must stay registered before /api/sessions/:id below — that pattern's
+	// single-segment `:id` would otherwise swallow "events" as an id first
+	// (routes are matched in registration order) and this route would never
+	// be reached, which is exactly what happened before this comment existed.
+	route("GET", "/api/sessions/events", (req, res) => {
+		res.writeHead(200, {
+			"Content-Type": "text/event-stream",
+			"Cache-Control": "no-cache",
+			Connection: "keep-alive",
+			"X-Accel-Buffering": "no",
+		});
+		// Without an initial write, writeHead's headers sit unflushed until the
+		// first real event — which for a quiet sidebar can be minutes away — so
+		// the client's EventSource never reaches readyState OPEN and just hangs.
+		res.write(": connected\n\n");
+
+		const listener = (event: WebEvent) => {
+			try {
+				res.write(`data: ${JSON.stringify(event)}\n\n`);
+			} catch {
+				bridge.unsubscribeAll(listener);
+			}
+		};
+		bridge.subscribeAll(listener);
+
+		const heartbeat = setInterval(() => {
+			try {
+				res.write(": keepalive\n\n");
+			} catch {
+				clearInterval(heartbeat);
+				bridge.unsubscribeAll(listener);
+			}
+		}, 15_000);
+
+		req.on("close", () => {
+			clearInterval(heartbeat);
+			bridge.unsubscribeAll(listener);
+		});
+	});
+
 	route("GET", "/api/sessions/:id", (req, res, params) => {
 		const ws = bridge.getSession(params.id);
 		if (!ws) return json(res, { error: "Not found" }, 404);
