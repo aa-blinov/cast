@@ -103,6 +103,18 @@ export function parseToolSummary(name: string, args: string): ToolSummaryModel {
 		if (taskText) return { kind: "task", text: taskText };
 	}
 
+	// The raw args are the full todo list as one unindented JSON blob — fine
+	// for the model (it's what gets echoed back to keep it grounded), but
+	// unreadable as a terminal one-liner. "N/M done — current item" instead.
+	if (parsed && name === "todo_write" && Array.isArray(parsed.todos)) {
+		const todos = parsed.todos as Array<{ content?: unknown; status?: unknown }>;
+		const done = todos.filter((t) => t.status === "completed").length;
+		const active = todos.find((t) => t.status === "in_progress");
+		const activeText = typeof active?.content === "string" ? active.content : "";
+		const suffix = activeText ? ` — ${activeText.slice(0, 60)}` : "";
+		return { kind: "generic", text: `${done}/${todos.length} done${suffix}` };
+	}
+
 	const generic = parsed
 		? Object.entries(parsed)
 				.map(([k, v]) => `${k}=${JSON.stringify(v)}`)

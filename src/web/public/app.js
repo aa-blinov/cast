@@ -334,6 +334,14 @@ function escapeHtml(s) {
 	return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+// Raw SVG markup (not preact elements — these live inside dangerouslySetInnerHTML
+// markdown output) for the code-block copy button's two states. Same paths as
+// icons.js's document-duplicate/check, genuine Heroicons v2.1.5 outline/24.
+const CODE_COPY_ICON_SVG =
+	'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75"/></svg>';
+const CODE_COPY_ICON_CHECK_SVG =
+	'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m4.5 12.75 6 6 9-13.5"/></svg>';
+
 function renderMarkdown(text) {
 	if (!text) return "";
 
@@ -343,7 +351,12 @@ function renderMarkdown(text) {
 	const src = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_m, lang, code) => {
 		const i = fences.length;
 		const label = lang ? `<div class="code-lang">${escapeHtml(lang)}</div>` : "";
-		fences.push(`<pre>${label}<code>${escapeHtml(code.replace(/\n$/, ""))}</code></pre>`);
+		// Copy button reads the sibling <code>'s textContent at click time (see
+		// the delegated listener below) rather than carrying the code in a data
+		// attribute — simpler, and avoids double-escaping a large code block
+		// into an HTML attribute.
+		const copyBtn = `<button type="button" class="code-copy-btn" title="Copy" aria-label="Copy code">${CODE_COPY_ICON_SVG}</button>`;
+		fences.push(`<pre>${copyBtn}${label}<code>${escapeHtml(code.replace(/\n$/, ""))}</code></pre>`);
 		return ` FENCE${i} `;
 	});
 
@@ -500,6 +513,20 @@ function mcpToolLabel(name) {
 	return name.slice(4).replace(/_/g, " · ");
 }
 
+// todo_write's result is the same {todos, remaining} shape as its args
+// (the full list echoed back) — but as one unindented JSON line, it reads
+// as a wall of text next to the nicely indented args right above it.
+// Reuse the same key:value renderer instead of dumping raw JSON.
+function formatToolResult(name, result) {
+	if (name !== "todo_write") return result;
+	try {
+		const parsed = JSON.parse(result);
+		return formatValue(parsed, "");
+	} catch {
+		return result;
+	}
+}
+
 function ToolCard({ call }) {
 	// The header always shows the request (name + full input params) and a
 	// status dot, so the terminal-like default view stays a quick "what's it
@@ -525,7 +552,7 @@ function ToolCard({ call }) {
 				${hasResult && html`<${open ? icons.chevronUp : icons.chevronDown} class="tool-card-toggle" />`}
 			</div>
 			${args && html`<div class="tool-card-body">${args}</div>`}
-			${open && hasResult && html`<div class="tool-card-result">${call.result}</div>`}
+			${open && hasResult && html`<div class="tool-card-result">${formatToolResult(call.name, call.result)}</div>`}
 		</div>
 	`;
 }
@@ -3837,6 +3864,40 @@ function App() {
 		</div>
 	`;
 }
+
+// Code-block copy buttons — delegated on document since they live inside
+// dangerouslySetInnerHTML markdown output, not real preact elements, so they
+// can't take an onClick prop directly.
+document.addEventListener("click", async (e) => {
+	const btn = e.target.closest?.(".code-copy-btn");
+	if (!btn) return;
+	const code = btn.closest("pre")?.querySelector("code");
+	if (!code) return;
+	const text = code.textContent ?? "";
+	try {
+		if (navigator.clipboard) {
+			await navigator.clipboard.writeText(text);
+		} else {
+			// HTTP fallback — Clipboard API unavailable outside secure contexts.
+			const ta = document.createElement("textarea");
+			ta.value = text;
+			ta.style.cssText = "position:fixed;opacity:0";
+			document.body.appendChild(ta);
+			ta.select();
+			document.execCommand("copy");
+			document.body.removeChild(ta);
+		}
+		btn.classList.add("copied");
+		btn.innerHTML = CODE_COPY_ICON_CHECK_SVG;
+		clearTimeout(btn._copyRevertTimer);
+		btn._copyRevertTimer = setTimeout(() => {
+			btn.classList.remove("copied");
+			btn.innerHTML = CODE_COPY_ICON_SVG;
+		}, 1200);
+	} catch {
+		// Best-effort — no toast wired up outside the App component's addNotice.
+	}
+});
 
 // ── Mount ────────────────────────────────────────────────────────────
 render(html`<${App} />`, document.getElementById("app"));

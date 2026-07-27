@@ -282,6 +282,20 @@ describe("background bash tool definitions", () => {
 	});
 });
 
+describe("todo_write tool definition — build-mode only", () => {
+	it("is omitted by default (plan mode / not passed)", () => {
+		const tools = getToolDefinitions();
+		expect(tools.find((t) => t.function.name === "todo_write")).toBeUndefined();
+	});
+
+	it("is included when includeTodoTool is true", () => {
+		const tools = getToolDefinitions(undefined, undefined, undefined, undefined, undefined, true);
+		const def = tools.find((t) => t.function.name === "todo_write");
+		expect(def).toBeDefined();
+		expect(def?.function.parameters.required).toEqual(["todos"]);
+	});
+});
+
 describe("web_search tool definition — provider-dependent schema", () => {
 	let realHome: string | undefined;
 	let fakeHome: string;

@@ -95,6 +95,7 @@ export async function runNonInteractive(args: ParsedArgs, options: RunOptions): 
 			sshHosts: result.sshHosts,
 			mcpPromptSuffix: formatMcpForPrompt(mcpResult),
 			planState,
+			initialTodos: session.todos,
 			announcedLocalDate,
 			onCompaction: (full, compacted) => recordCompaction(session, full, compacted),
 			onEvent: (event: AgentEvent) => handleEvent(event, session, options.format),
@@ -160,6 +161,11 @@ function handleEvent(event: AgentEvent, session: SessionState, format: "default"
 		case "usage":
 			addUsage(session, event.usage, { subagent: event.subagent });
 			emit("usage", { usage: event.usage, subagent: event.subagent });
+			break;
+
+		case "todos_updated":
+			session.todos = event.todos;
+			emit("todos_updated", { todos: event.todos });
 			break;
 
 		case "end":

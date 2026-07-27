@@ -40,6 +40,7 @@ export function getToolDefinitions(
 	subagentModel?: string,
 	sshHostNames?: string[],
 	backgroundBashEnabled?: boolean,
+	includeTodoTool?: boolean,
 ): Tool[] {
 	const personaList =
 		personaNames && personaNames.length > 0
@@ -522,6 +523,49 @@ export function getToolDefinitions(
 				},
 			},
 		},
+		...(includeTodoTool
+			? [
+					{
+						type: "function" as const,
+						function: {
+							name: "todo_write",
+							description:
+								"Create/update the task list for this session. Pass the FULL list every call, not just " +
+								"changed items — this is a full rewrite, not a patch. Use for any task with 3+ distinct " +
+								"steps, multiple user-provided items, or work that benefits from planning; skip it for a " +
+								"single straightforward task. Exactly one item may be in_progress at a time. Mark an item " +
+								"completed the moment the work (including any required verification) is actually done — " +
+								"never batched, never based on intent. Never mark something completed to look efficient " +
+								"or to move on faster — an item falsely marked done is worse than one honestly left pending.",
+							parameters: {
+								type: "object",
+								properties: {
+									todos: {
+										type: "array",
+										description: "The complete, updated todo list",
+										items: {
+											type: "object",
+											properties: {
+												content: {
+													type: "string",
+													description: "Brief, specific, actionable description of the task",
+												},
+												status: {
+													type: "string",
+													enum: ["pending", "in_progress", "completed", "cancelled"],
+												},
+												priority: { type: "string", enum: ["high", "medium", "low"] },
+											},
+											required: ["content", "status", "priority"],
+										},
+									},
+								},
+								required: ["todos"],
+							},
+						},
+					},
+				]
+			: []),
 	];
 }
 

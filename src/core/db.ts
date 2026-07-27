@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   last_prompt_tokens INTEGER,
   last_announced_local_date TEXT,
   provider_url TEXT,
-  usage_json TEXT NOT NULL
+  usage_json TEXT NOT NULL,
+  todos_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -73,6 +74,14 @@ export function getDb(): DatabaseSync {
 	instance.exec("PRAGMA busy_timeout = 5000");
 	instance.exec("PRAGMA foreign_keys = ON");
 	instance.exec(SCHEMA);
+	// `CREATE TABLE IF NOT EXISTS` only creates the table on a first run — an
+	// existing sessions.db from before todos_json existed needs the column
+	// added explicitly. SQLite has no `ADD COLUMN IF NOT EXISTS`, hence the
+	// pragma check first.
+	const columns = instance.prepare("PRAGMA table_info(sessions)").all() as Array<{ name: string }>;
+	if (!columns.some((c) => c.name === "todos_json")) {
+		instance.exec("ALTER TABLE sessions ADD COLUMN todos_json TEXT");
+	}
 	return instance;
 }
 
