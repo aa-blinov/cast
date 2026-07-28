@@ -19,7 +19,7 @@ import {
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
-import { getHistoryPage } from "../core/session.ts";
+import { getHistoryPage, getMessageImage } from "../core/session.ts";
 import { toDisplayMessages, type WebBridge, type WebEvent } from "./bridge.ts";
 
 const MIME_TYPES: Record<string, string> = {
@@ -283,7 +283,7 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 			// assistant reply carries its own "provider · model · Ns" footer,
 			// persisted to disk, instead of a single session-level "last turn"
 			// value that only ever covered the most recent one.
-			messages: toDisplayMessages(page.messages, page.reasoning, page.turnMeta),
+			messages: toDisplayMessages(page.messages, page.reasoning, page.turnMeta, ws.id, page.seqs),
 			oldestSeq: page.oldestSeq ?? null,
 			hasMoreHistory: page.hasMore,
 			usage: ws.session.usage,
@@ -305,10 +305,30 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 		const turns = Number(url.searchParams.get("turns")) || undefined;
 		const page = getHistoryPage(params.id, before, turns);
 		json(res, {
-			messages: toDisplayMessages(page.messages, page.reasoning, page.turnMeta),
+			messages: toDisplayMessages(page.messages, page.reasoning, page.turnMeta, params.id, page.seqs),
 			oldestSeq: page.oldestSeq ?? null,
 			hasMoreHistory: page.hasMore,
 		});
+	});
+
+	// Raw bytes for one image embedded in a `read`-on-image-file message (see
+	// core/session.ts's getMessageImage) — toDisplayMessages points `images`
+	// at this instead of inlining the data: URL, so a handful of photos in a
+	// thread doesn't turn every session/history load into a multi-MB payload.
+	route("GET", "/api/sessions/:id/image", (req, res, params) => {
+		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+		const seq = Number(url.searchParams.get("seq"));
+		const idx = Number(url.searchParams.get("idx"));
+		if (!Number.isFinite(seq) || !Number.isFinite(idx)) return json(res, { error: "Missing/invalid seq/idx" }, 400);
+		const image = getMessageImage(params.id, seq, idx);
+		if (!image) return json(res, { error: "Not found" }, 404);
+		res.writeHead(200, {
+			"Content-Type": image.mimeType,
+			"Content-Length": image.buffer.length,
+			// Content at a given (session, seq, idx) never changes once written.
+			"Cache-Control": "private, max-age=31536000, immutable",
+		});
+		res.end(image.buffer);
 	});
 
 	route("DELETE", "/api/sessions/:id", (_req, res, params) => {
@@ -368,19 +388,39 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 		json(res, { ok: revoked });
 	});
 
+	// A single image's data: URL, resized+re-encoded client-side (see app.js's
+	// resizeImageToDataUrl) before it ever reaches here — this cap is defense
+	// in depth against a client that skips that step, not the primary
+	// control. Matches the incident this whole feature was built after: 8
+	// unresized photos in one request got a bare, undebuggable 400 from the
+	// provider — reject oversized/too-numerous images up front with an
+	// actual explanation instead of forwarding them and letting that happen
+	// again several turns later.
+	const MAX_IMAGES_PER_MESSAGE = 6;
+	const MAX_IMAGE_DATA_URL_BYTES = 4 * 1024 * 1024;
+
 	route("POST", "/api/sessions/:id/chat", async (req, res, params) => {
 		const ws = bridge.getSession(params.id);
 		if (!ws) return json(res, { error: "Not found" }, 404);
 		const body = await readBody(req);
 		let text: string;
+		let images: string[] | undefined;
 		try {
-			const parsed = JSON.parse(body) as { text?: string };
+			const parsed = JSON.parse(body) as { text?: string; images?: string[] };
 			text = parsed.text ?? "";
+			images = Array.isArray(parsed.images) && parsed.images.length > 0 ? parsed.images : undefined;
 		} catch {
 			return json(res, { error: "Invalid JSON" }, 400);
 		}
-		if (!text.trim()) return json(res, { error: "Empty message" }, 400);
-		bridge.submit(params.id, text);
+		if (!text.trim() && !images) return json(res, { error: "Empty message" }, 400);
+		if (images) {
+			if (images.length > MAX_IMAGES_PER_MESSAGE) {
+				return json(res, { error: `Too many images — max ${MAX_IMAGES_PER_MESSAGE} per message` }, 400);
+			}
+			const tooBig = images.find((url) => url.length > MAX_IMAGE_DATA_URL_BYTES);
+			if (tooBig) return json(res, { error: "One of the images is too large" }, 400);
+		}
+		bridge.submit(params.id, text, images);
 		json(res, { ok: true }, 202);
 	});
 
@@ -631,6 +671,15 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 				.sort((a, b) => (a.type !== b.type ? (a.type === "dir" ? -1 : 1) : a.name.localeCompare(b.name)));
 			json(res, { path: relative(cwd, target), entries });
 		} catch (err) {
+			// A brand-new sandbox session's cwd (see bridge.ts's SANDBOX_CWD) is
+			// only created lazily on the first submitted message, not at session
+			// creation — the Files panel loading before that first send is a
+			// completely normal state, not an error. Without this, the raw ENOENT
+			// ("no such file or directory, stat '...'") surfaced verbatim in the
+			// UI, reading like a crash for something that just hadn't happened yet.
+			if (target === cwd && (err as NodeJS.ErrnoException)?.code === "ENOENT") {
+				return json(res, { path: "", entries: [] });
+			}
 			json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
 		}
 	});

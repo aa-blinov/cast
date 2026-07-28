@@ -72,7 +72,13 @@ export type WebAgentStatus = "idle" | "running" | "error";
 export type WebEvent =
 	| AgentEvent
 	| { type: "status"; status: WebAgentStatus }
-	| { type: "user_message"; message: { role: "user"; content: string } }
+	| {
+			type: "user_message";
+			message: {
+				role: "user";
+				content: string | Array<{ type: string; text?: string; image_url?: { url: string } }>;
+			};
+	  }
 	| { type: "session_update"; session: SessionSummary }
 	| { type: "session_end"; usage: SessionState["usage"]; messageCount: number }
 	| { type: "session_closed" }
@@ -120,6 +126,10 @@ export interface DisplayToolCall {
 	args: string;
 	status: "ok" | "error";
 	result: string;
+	/** Set for a `read` on an image file — the photo it returned, so the UI
+	 * can show it inside this card instead of as an unexplained separate
+	 * message below (see toDisplayMessages' castToolCallId handling). */
+	images?: string[];
 }
 
 /** UI-friendly shape — matches what the client already builds live from SSE
@@ -131,6 +141,11 @@ export interface DisplayMessage {
 	toolCalls?: DisplayToolCall[];
 	thinking?: string;
 	turnMeta?: TurnMeta;
+	/** data: URLs from a `read` on an image file (see loop.ts's imageDataUrl
+	 * handling) — carried on the synthetic `role: "user"` message the loop
+	 * pushes after such a tool result, since a plain string `content` can't
+	 * hold both text and inline images. */
+	images?: string[];
 }
 
 /**
@@ -152,12 +167,41 @@ export function toDisplayMessages(
 	messages: Message[],
 	reasoning?: Record<number, string>,
 	turnMeta?: Record<number, TurnMeta>,
+	// Both needed to build an out-of-band image URL (`/api/sessions/:id/image?
+	// seq=&idx=`) instead of inlining the data: URL — a handful of read photos
+	// otherwise turns every session load into a multi-MB JSON payload. Falls
+	// back to inlining when either is missing (e.g. a message not yet
+	// persisted, so it has no seq — happens during a live-streaming turn).
+	sessionId?: string,
+	seqs?: number[],
 ): DisplayMessage[] {
 	// Pre-index tool results by call_id — turns O(N*M) lookups into O(M).
 	const toolResults = new Map<string, Message>();
 	for (const m of messages) {
 		if (m.role === "tool" && "tool_call_id" in m && m.tool_call_id) toolResults.set(m.tool_call_id, m);
 	}
+	// Same, for a `read`-on-image-file's synthetic image_url message (see
+	// loop.ts's castToolCallId) — keyed so the image renders inside the
+	// originating ToolCard instead of as an unexplained message below it.
+	// Resolved once here (URL vs inline, per this function's own rule) so the
+	// second pass below can just look it up.
+	const imagesByToolCallId = new Map<string, string[]>();
+	messages.forEach((m, i) => {
+		if (m.role !== "user" || !Array.isArray(m.content)) return;
+		const toolCallId = (m as { castToolCallId?: string }).castToolCallId;
+		if (!toolCallId) return;
+		const dataUrls = (m.content as Array<{ type?: string; image_url?: { url?: string } }>)
+			.filter((p) => p.type === "image_url" && p.image_url?.url)
+			.map((p) => p.image_url!.url!);
+		if (dataUrls.length === 0) return;
+		const seq = seqs?.[i];
+		imagesByToolCallId.set(
+			toolCallId,
+			sessionId && seq !== undefined
+				? dataUrls.map((_, idx) => `/api/sessions/${sessionId}/image?seq=${seq}&idx=${idx}`)
+				: dataUrls,
+		);
+	});
 	const out: DisplayMessage[] = [];
 	messages.forEach((m, i) => {
 		if (m.role === "tool") return;
@@ -166,12 +210,14 @@ export function toDisplayMessages(
 				.filter((tc) => tc.type === "function")
 				.map((tc) => {
 					const resultMsg = toolResults.get(tc.id);
+					const images = imagesByToolCallId.get(tc.id);
 					return {
 						id: tc.id,
 						name: tc.function.name,
 						args: tc.function.arguments,
 						status: resultMsg && (resultMsg as { castIsError?: boolean }).castIsError ? "error" : "ok",
 						result: resultMsg ? String(resultMsg.content ?? "") : "",
+						...(images ? { images } : {}),
 					};
 				});
 			out.push({
@@ -182,6 +228,35 @@ export function toDisplayMessages(
 				turnMeta: turnMeta?.[i],
 			});
 			return;
+		}
+		// Array `content` on a role:"user" message is either a `read`-on-
+		// image-file's synthetic relay (no text part — see loop.ts's
+		// castToolCallId comment; already attributed to its ToolCard above,
+		// skipped here so it doesn't also render as a separate floating
+		// message) or a real turn with an attached photo (a text part is
+		// always present, even empty — see bridge.ts's buildUserContent).
+		// Sessions saved before castToolCallId existed have neither tag, so
+		// they still fall through to the inline rendering below.
+		if (m.role === "user" && Array.isArray(m.content)) {
+			const toolCallId = (m as { castToolCallId?: string }).castToolCallId;
+			if (toolCallId && imagesByToolCallId.has(toolCallId)) return;
+			const parts = m.content as Array<{ type?: string; text?: string; image_url?: { url?: string } }>;
+			const dataUrls = parts.filter((p) => p.type === "image_url" && p.image_url?.url).map((p) => p.image_url!.url!);
+			// Present-but-empty text (a caption-less real send — see buildUserContent,
+			// which always includes this part) must stay distinguishable from no
+			// text part at all (the tool-only relay) — the client uses exactly this
+			// null-vs-string distinction to label the message "you" vs "image (read)".
+			const textPartObj = parts.find((p) => p.type === "text");
+			const textPart = textPartObj ? (textPartObj.text ?? "") : null;
+			if (dataUrls.length > 0) {
+				const seq = seqs?.[i];
+				const images =
+					sessionId && seq !== undefined
+						? dataUrls.map((_, idx) => `/api/sessions/${sessionId}/image?seq=${seq}&idx=${idx}`)
+						: dataUrls;
+				out.push({ role: m.role, content: textPart, images });
+				return;
+			}
 		}
 		// Extract <system-reminder> blocks and render them as warning
 		// messages instead of raw XML. These are internal protocol
@@ -255,7 +330,7 @@ export interface WebBridge {
 	getSharedSession(
 		token: string,
 	): { title?: string; persona: string; model: string; messages: DisplayMessage[] } | null;
-	submit(sessionId: string, text: string): void;
+	submit(sessionId: string, text: string, images?: string[]): void;
 	abort(sessionId: string): void;
 	subscribe(sessionId: string, callback: (event: WebEvent) => void): void;
 	unsubscribe(sessionId: string, callback: (event: WebEvent) => void): void;
@@ -448,7 +523,19 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		}
 	}
 
-	function submit(sessionId: string, text: string): void {
+	/** Builds a real user turn's `content` — plain text when there are no
+	 * images (matches every existing persisted message and the tests that
+	 * assert on it), or a `[{type:"text"},...image_url]` array otherwise.
+	 * Always includes the text part, even empty, when images are present —
+	 * that's what session.ts's isRealTurnStart (compaction's safe-cut-point
+	 * search) uses to tell a real turn from the tool-only image_url relay
+	 * loop.ts inserts after a `read` on an image file, which never has one. */
+	function buildUserContent(text: string, images?: string[]): string | Array<Record<string, unknown>> {
+		if (!images || images.length === 0) return text;
+		return [{ type: "text", text }, ...images.map((url) => ({ type: "image_url", image_url: { url } }))];
+	}
+
+	function submit(sessionId: string, text: string, images?: string[]): void {
 		const ws = sessions.get(sessionId);
 		if (!ws) return;
 
@@ -461,7 +548,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		// instead. The loop drains steeringQueue and broadcasts
 		// "steering_injected" itself, so every connected tab sees it land.
 		if (ws.status === "running") {
-			ws.runner.steeringQueue.enqueue({ role: "user", content: text });
+			ws.runner.steeringQueue.enqueue({ role: "user", content: buildUserContent(text, images) } as Message);
 			return;
 		}
 
@@ -477,7 +564,9 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			mkdirSync(ws.session.cwd, { recursive: true });
 		}
 
-		const userMsg = { role: "user" as const, content: text };
+		const userMsg = { role: "user" as const, content: buildUserContent(text, images) } as Message & {
+			role: "user";
+		};
 		appendMessage(ws.session, userMsg);
 		broadcast(ws, { type: "user_message", message: userMsg });
 		broadcast(ws, { type: "status", status: "running" });
@@ -894,6 +983,11 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			// owner, but a public link's anonymous visitor has no business
 			// reading the persona's internal instructions, tool descriptions, or
 			// project paths baked into it.
+			// No sessionId/seqs passed: the image-blob route needs the same auth
+			// as the rest of /api/sessions, but this view is deliberately
+			// unauthenticated — inline data: URLs here instead (this is a public
+			// link's read view, not the main session load the multi-MB-payload
+			// problem is about).
 			messages: toDisplayMessages(session.messages, session.reasoning, session.turnMeta).filter(
 				(m) => m.role !== "system",
 			),
