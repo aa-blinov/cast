@@ -1783,9 +1783,9 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 
 /* ── Settings modal ───────────────────────────────────────────────── */
 .settings-modal {
-	max-width: 620px;
+	max-width: 820px;
 	width: 92vw;
-	height: min(640px, 84vh);
+	height: min(700px, 88vh);
 	max-height: none;
 	overflow: hidden;
 }
@@ -1848,13 +1848,24 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	color: var(--text-muted);
 	cursor: pointer;
 	list-style: none;
+	display: flex;
+	align-items: baseline;
+	gap: 3px;
 }
 .settings-collapsible summary::-webkit-details-marker { display: none; }
 .settings-collapsible summary::before {
-	content: "▸";
+	content: "";
 	display: inline-block;
-	width: 1em;
-	transition: transform .1s;
+	width: 11px;
+	height: 11px;
+	flex-shrink: 0;
+	align-self: center;
+	background-color: currentColor;
+	mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8.25 4.5l7.5 7.5-7.5 7.5'/%3E%3C/svg%3E");
+	mask-size: contain;
+	mask-repeat: no-repeat;
+	mask-position: center;
+	transition: transform .15s;
 }
 .settings-collapsible[open] summary::before { transform: rotate(90deg); }
 .settings-collapsible summary:hover { color: var(--text); }
