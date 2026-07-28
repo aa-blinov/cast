@@ -61,7 +61,7 @@ export const icons = {
 			"svg",
 			{ width: 16, height: 16, viewBox: "0 0 20 20", fill: "currentColor", ...props },
 			h("path", {
-				d: "M14.77 12.79a.75.75 0 0 1-1.06.02L10 9.06l-3.71 3.75a.75.75 0 1 1-1.08-1.04l4.25-4.5a.75.75 0 0 1 1.08 0l4.25 4.5a.75.75 0 0 1-.02 1.06Z",
+				d: "M9.47 6.47a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 1 1-1.06 1.06L10 8.06l-3.72 3.72a.75.75 0 0 1-1.06-1.06l4.25-4.25Z",
 			}),
 		),
 	// Heroicons v2.1.5 outline/24 — verified from unpkg.com/heroicons@2.1.5
