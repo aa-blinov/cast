@@ -2,6 +2,13 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.9.8
+
+### Fixed
+
+- Web UI: tooltips display as a single horizontal line instead of wrapping into a narrow column due to `max-width` and `word-break` constraints.
+- Web UI: `assistant_message` handler now uses event payload (`content`/`thinking`/`toolCalls`) as fallback when streaming blocks are empty, preventing silently dropped messages on SSE interruptions.
+
 ## 0.9.7
 
 ### Added

@@ -4746,9 +4746,22 @@ function App() {
 						const prevStreaming = takeStreamingNow();
 						setSession((prev) => {
 							if (!prev) return prev;
-							if (prevStreaming.length === 0) return prev;
-							const msg = { role: "assistant", blocks: prevStreaming };
-							return { ...prev, messages: [...prev.messages, msg] };
+							if (prevStreaming.length > 0) {
+								return { ...prev, messages: [...prev.messages, { role: "assistant", blocks: prevStreaming }] };
+							}
+							const blocks = [];
+							if (event.thinking) blocks.push({ kind: "thinking", text: event.thinking });
+							if (event.toolCalls?.length) {
+								for (const tc of event.toolCalls) {
+									blocks.push({
+										kind: "tool",
+										call: { id: tc.id ?? "", name: tc.name, args: tc.arguments, status: "ok" },
+									});
+								}
+							}
+							if (event.content) blocks.push({ kind: "content", text: event.content });
+							if (blocks.length === 0) return prev;
+							return { ...prev, messages: [...prev.messages, { role: "assistant", blocks }] };
 						});
 						break;
 					}

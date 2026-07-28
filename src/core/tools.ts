@@ -148,7 +148,7 @@ export function getToolDefinitions(
 					"verbatim from a recent `read`, don't retype it from memory. Include enough surrounding context (a few lines) " +
 					"to make `oldString` uniquely match one location in the file, or the edit is rejected as ambiguous. " +
 					"By default only the first occurrence is checked and it must be unique; set `replaceAll` to replace every " +
-					"occurrence instead. Use `oldString: \"\"` on a path that doesn't exist yet to create a new file with " +
+					'occurrence instead. Use `oldString: ""` on a path that doesn\'t exist yet to create a new file with ' +
 					"`newString` as its content (prefer `write` for that, but this works too). " +
 					"If the edit fails because the text wasn't found or matched more than once, re-read the file and retry with " +
 					"the exact current text and more context — never give up and rewrite the whole file with `write`.",
@@ -167,7 +167,8 @@ export function getToolDefinitions(
 						},
 						replaceAll: {
 							type: "boolean",
-							description: "Replace all occurrences of oldString instead of requiring exactly one match (default: false).",
+							description:
+								"Replace all occurrences of oldString instead of requiring exactly one match (default: false).",
 						},
 					},
 					required: ["filePath", "oldString", "newString"],

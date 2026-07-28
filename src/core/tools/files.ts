@@ -133,9 +133,7 @@ export async function execRead(args: Record<string, unknown>, cwd: string, confi
 		} catch (err) {
 			throw err;
 		}
-		const names = entries
-			.map((e) => (e.isDirectory() ? `${e.name}/` : e.name))
-			.sort((a, b) => a.localeCompare(b));
+		const names = entries.map((e) => (e.isDirectory() ? `${e.name}/` : e.name)).sort((a, b) => a.localeCompare(b));
 		const start = offset ? Math.max(0, offset - 1) : 0;
 		const cap = limit ?? config.maxToolOutputLines;
 		const sliced = names.slice(start, start + cap);

@@ -2226,9 +2226,8 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	font-size: .75rem;
 	font-weight: 400;
 	line-height: 1.35;
-	white-space: normal;
-	max-width: 320px;
-	word-break: break-word;
+	white-space: nowrap;
+	max-width: none;
 }
 
 
