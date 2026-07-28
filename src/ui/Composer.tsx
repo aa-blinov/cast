@@ -434,7 +434,7 @@ export function Composer({
 		let lastChip: { char: string; at: number } | null = null;
 
 		const handlePasteContent = (raw: string) => {
-			// Normalize line endings (like opencode)
+			// Normalize line endings
 			const text = raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 			if (!text) return;
 

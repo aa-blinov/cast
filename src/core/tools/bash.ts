@@ -2,10 +2,8 @@
  * The `bash` tool — runs a shell command and returns its output.
  *
  * stdin is always "ignore" (EOF) — any command waiting for input exits
- * immediately instead of hanging. This is how OpenCode handles it: no PTY,
- * no prompt detection, no interactive command blocking at runtime.
- *
-
+ * immediately instead of hanging: no PTY, no prompt detection, no
+ * interactive command blocking at runtime.
  */
 
 import { execFileSync, spawn } from "node:child_process";
@@ -249,8 +247,8 @@ export async function execBash(
 	}
 
 	return new Promise<ToolResult>((resolve) => {
-		// stdin: "ignore" — the key pattern from OpenCode. Any command waiting
-		// for input gets EOF and exits immediately. No PTY, no prompt detection.
+		// stdin: "ignore" — any command waiting for input gets EOF and exits
+		// immediately. No PTY, no prompt detection.
 		const proc = spawn(bash.path, ["-c", command], {
 			cwd,
 			env: { ...process.env, PAGER: "cat", GIT_PAGER: "cat" },

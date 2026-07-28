@@ -229,7 +229,7 @@ export function App(props: AppProps): JSX.Element {
 
 			// 4. Nested AGENTS.md/CLAUDE.md for files touched this session — a
 			//    subdirectory instruction file attaches once a file from its
-			//    subtree enters context (opencode's per-file resolve model).
+			//    subtree enters context (per-file resolve model).
 			//    Trust-gated like the cwd context file.
 			const nestedContext = projectTrusted
 				? formatContextFilesForPrompt(resolveNestedContextFiles(cwd, ctxFiles))

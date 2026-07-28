@@ -5,10 +5,10 @@
  * `edit` whose `ops[]` (`replace`/`insert_after`/`insert_before`/`write`)
  * address lines by `<line>:<local>:<chunk>` anchor instead of literal text.
  *
- * The active files.ts now matches opencode's approach instead: plain
- * line-numbered `read`, and an `edit` keyed on `oldString`/`newString`
- * literal-text matching with a fallback chain of increasingly fuzzy
- * matchers (see tools/text-replace.ts). This module — and the hashline.ts /
+ * The active files.ts now uses plain line-numbered `read` instead, and an
+ * `edit` keyed on `oldString`/`newString` literal-text matching with a
+ * fallback chain of increasingly fuzzy matchers (see tools/text-replace.ts).
+ * This module — and the hashline.ts /
  * hashline-cache.ts modules it depends on — are not deleted because the
  * hash-anchor approach has a real advantage the text-matching one doesn't:
  * a stale anchor is a hard, explicit failure (the file changed since the
@@ -69,12 +69,12 @@ const IMAGE_MIME_TYPES: Record<string, string> = {
 	".webp": "image/webp",
 	".bmp": "image/bmp",
 };
-// A sanity ceiling, not a normal-case limit — matches opencode's read tool,
-// which has no per-file image cap at all and leaves shrinking to a later
-// layer (see image-resize.ts). Anything under this gets read and, if it's a
-// jpeg/png over SKIP_RESIZE_BELOW_BYTES, downscaled before being embedded;
-// this ceiling only guards against decoding something absurd (a many-hundred-
-// MB file) into memory.
+// A sanity ceiling, not a normal-case limit — there's no per-file image cap
+// at all beyond this, shrinking is left to a later layer (see
+// image-resize.ts). Anything under this gets read and, if it's a jpeg/png
+// over SKIP_RESIZE_BELOW_BYTES, downscaled before being embedded; this
+// ceiling only guards against decoding something absurd (a many-hundred-MB
+// file) into memory.
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
 
 export async function execRead(args: Record<string, unknown>, cwd: string, config: AppConfig): Promise<ToolResult> {

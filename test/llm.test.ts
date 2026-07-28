@@ -279,10 +279,9 @@ describe("streamAndCollect — usage accounting", () => {
 				() => vi.advanceTimersByTime(500),
 			);
 			const result = await streamAndCollect(client, "test-model", [], [], 100);
-			// Now measures from first chunk to stream exhaustion (done), matching
-			// opencode's tsLastByte-on-done pattern. The fake client advances
-			// 500ms per read() including the final done-read, so: firstChunk at
-			// 500ms, Date.now() after loop at 2000ms -> 1500ms.
+			// Now measures from first chunk to stream exhaustion (done). The fake
+			// client advances 500ms per read() including the final done-read, so:
+			// firstChunk at 500ms, Date.now() after loop at 2000ms -> 1500ms.
 			expect(result.generationMs).toBe(1500);
 		} finally {
 			vi.useRealTimers();

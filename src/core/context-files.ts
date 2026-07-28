@@ -92,9 +92,9 @@ export function loadProjectContextFiles(cwd: string, projectTrusted: boolean): C
  * session. For each context file, walk up from its directory toward `cwd` and
  * collect any instruction file found *strictly below* cwd — the cwd file and
  * everything above it already load as the static base (loadProjectContextFiles),
- * so this only adds the per-subtree ones. This is opencode's per-file
- * `resolve()` model (walk up from the edited file, attach nearby AGENTS.md),
- * driven by the loop's accumulated contextFiles instead of a single filepath.
+ * so this only adds the per-subtree ones. A per-file `resolve()` model (walk
+ * up from the edited file, attach nearby AGENTS.md), driven by the loop's
+ * accumulated contextFiles instead of a single filepath.
  *
  * `contextFiles` are paths from read/write/edit tool calls, relative to cwd
  * (absolute paths outside cwd are ignored). Deduped by path, ordered shallow

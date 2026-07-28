@@ -1,9 +1,8 @@
 /**
- * File tools — `read`, `write`, and `edit`. Matches opencode's approach
- * (see docs/tools.md): `read` numbers lines plainly (`N: content`, no
- * hash), and `edit` takes `oldString`/`newString` literal text instead of
- * anchors, matched via tools/text-replace.ts's fallback chain of matchers
- * (ported near-verbatim from opencode's tool/edit.ts). The original
+ * File tools — `read`, `write`, and `edit` (see docs/tools.md): `read`
+ * numbers lines plainly (`N: content`, no hash), and `edit` takes
+ * `oldString`/`newString` literal text instead of anchors, matched via
+ * tools/text-replace.ts's fallback chain of matchers. The original
  * hashline-anchored implementation is preserved, unused, in
  * tools/files-legacy-hashline.ts — see that file's deprecation note for
  * why it wasn't just deleted. All paths resolve against the agent's cwd
@@ -50,18 +49,17 @@ const IMAGE_MIME_TYPES: Record<string, string> = {
 	".webp": "image/webp",
 	".bmp": "image/bmp",
 };
-// A sanity ceiling, not a normal-case limit — matches opencode's read tool,
-// which has no per-file image cap at all and leaves shrinking to a later
-// layer (see image-resize.ts). Anything under this gets read and, if it's a
-// jpeg/png over SKIP_RESIZE_BELOW_BYTES, downscaled before being embedded;
-// this ceiling only guards against decoding something absurd (a many-hundred-
-// MB file) into memory.
+// A sanity ceiling, not a normal-case limit — there's no per-file image cap
+// at all beyond this, shrinking is left to a later layer (see
+// image-resize.ts). Anything under this gets read and, if it's a jpeg/png
+// over SKIP_RESIZE_BELOW_BYTES, downscaled before being embedded; this
+// ceiling only guards against decoding something absurd (a many-hundred-MB
+// file) into memory.
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
 
-// Binary-file detection, ported from opencode's read.ts isBinaryFile: a
-// known-binary extension short-circuits, otherwise a sample of the file's
-// own bytes is checked for null bytes or a high proportion of non-printable
-// control characters.
+// Binary-file detection: a known-binary extension short-circuits, otherwise
+// a sample of the file's own bytes is checked for null bytes or a high
+// proportion of non-printable control characters.
 const BINARY_EXTENSIONS = new Set([
 	".zip",
 	".tar",
@@ -125,10 +123,9 @@ export async function execRead(args: Record<string, unknown>, cwd: string, confi
 	}
 
 	// Directory: list entries one per line (files and subdirectories, the
-	// latter with a trailing "/"), same shape as opencode's read on a
-	// directory path — not a replacement for `ls` (no size/type column),
-	// just enough that pointing `read` at a directory by mistake doesn't
-	// throw and does something useful.
+	// latter with a trailing "/") — not a replacement for `ls` (no
+	// size/type column), just enough that pointing `read` at a directory by
+	// mistake doesn't throw and does something useful.
 	if (stats.isDirectory()) {
 		let entries: Dirent[];
 		try {
@@ -168,9 +165,9 @@ export async function execRead(args: Record<string, unknown>, cwd: string, confi
 	}
 
 	// Sample the first few KB to classify binary-vs-text before committing to
-	// a full read — same idea as opencode's readSample, just without the
-	// separate streaming-read path (this file's below-64KB-typical sizes
-	// don't need it; large files are already bounded by the byte budget below).
+	// a full read, without a separate streaming-read path (this file's
+	// below-64KB-typical sizes don't need it; large files are already bounded
+	// by the byte budget below).
 	const fullBuffer = await readFile(absolutePath);
 	if (isBinaryFile(absolutePath, fullBuffer.subarray(0, SAMPLE_BYTES))) {
 		return { content: `Cannot read binary file: ${filePath}`, isError: true };
@@ -363,9 +360,9 @@ function duplicateRunWarning(lines: string[]): string | null {
 
 /**
  * `oldString`/`newString` literal-text edit — see tools/text-replace.ts for
- * the matching algorithm itself (ported from opencode's tool/edit.ts).
- * Unlike the legacy anchor-based edit, there's no separate read-then-cache
- * step: the file is read fresh on every call, matched, and rewritten.
+ * the matching algorithm itself. Unlike the legacy anchor-based edit,
+ * there's no separate read-then-cache step: the file is read fresh on
+ * every call, matched, and rewritten.
  */
 export async function execEdit(args: Record<string, unknown>, cwd: string, config: AppConfig): Promise<ToolResult> {
 	const filePath = String(args.filePath ?? "");
@@ -379,9 +376,8 @@ export async function execEdit(args: Record<string, unknown>, cwd: string, confi
 
 	const absolutePath = resolvePath(filePath, cwd);
 
-	// oldString: "" means "create a new file with newString" — mirrors
-	// opencode's edit tool exactly (it's the documented way to create a file
-	// via `edit` instead of `write`).
+	// oldString: "" means "create a new file with newString" — the documented
+	// way to create a file via `edit` instead of `write`.
 	if (oldString === "") {
 		let existed = false;
 		try {

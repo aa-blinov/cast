@@ -64,9 +64,9 @@ The plan file itself is authored and read with the ordinary `write`/`edit`/
 a `.md` file directly inside the session's plans directory while plan mode is
 active; reading that same file makes it the active plan (no `name` argument
 needed). Other plans in the session are discoverable with `ls`/`glob` on the
-plans directory. There is no separate plan-write/plan-edit/plan-read tool
-(mirrors how Claude Code's own plan mode works: no dedicated authoring or
-reading tool, just a permission-level path exception for the plan file).
+plans directory. There is no separate plan-write/plan-edit/plan-read tool: no dedicated
+authoring or reading tool, just a permission-level path exception for the
+plan file.
 
 | Tool | Mode | Description |
 |------|------|-------------|

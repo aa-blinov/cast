@@ -7,9 +7,9 @@
  * can hold several named plans.
  *
  * Authoring the plan itself goes through the SAME `write`/`edit` tools the model
- * already uses for real code (mirrors how Claude Code's ExitPlanMode works: no
- * separate plan-write/plan-edit tool — the plan-mode permission gate just carves
- * out one path exception). `checkPlanFileGate`/`finalizePlanFileWrite`/
+ * already uses for real code: no separate plan-write/plan-edit tool — the
+ * plan-mode permission gate just carves out one path exception.
+ * `checkPlanFileGate`/`finalizePlanFileWrite`/
  * `enforcePlanCapAfterEdit` below are that gate, called from tools.ts's
  * createToolExecutor around the ordinary execWrite/execEdit calls whenever
  * planState.enabled is true. This used to be two dedicated tools
