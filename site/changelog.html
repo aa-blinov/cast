@@ -478,6 +478,96 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 	<article class="content">
 		<h1>Changelog</h1>
 <p>All notable user-facing changes to cast, newest first.</p>
+<h2>0.9.4</h2>
+<h3>Added</h3>
+<ul>
+<li>A loaded skill can now be invoked as a native <code>/&lt;skill-id&gt;</code> slash command in both the terminal and web composer — it shows up in autocomplete with its own description, no <code>/skill:name</code> prefix needed. <code>/reload</code> (and enabling/disabling a skill in the web Settings modal) refreshes the list immediately.</li>
+</ul>
+<h3>Fixed</h3>
+<ul>
+<li>Web UI: Settings could only be opened once a session existed — the gear icon did nothing on a brand-new draft thread. It now always opens; tabs that need a session (Model, MCP, Provider, etc.) show a hint instead of hanging on &quot;Loading…&quot; until one exists.</li>
+<li>Web UI: removed the redundant close button on the Changes/Files panel — the topbar toggle already closes it.</li>
+<li>Web UI, mobile: opening the sidebar while the Changes/Files panel was open (or vice versa) used to leave the one you just opened hidden behind the other, forcing a manual close-then-open. Opening either drawer now closes the other automatically.</li>
+</ul>
+<h2>0.9.3</h2>
+<h3>Added</h3>
+<ul>
+<li>Web UI: the Files panel now shows a live preview when you click a file — text/code renders as-is, images render inline, PDFs open in the browser&#39;s own viewer, and CSV/TSV render as a real table (auto-detecting the delimiter — semicolon, tab, or pipe, not just comma).</li>
+<li>Web UI: files and folders in the Files panel can be renamed in place, the same inline-edit as renaming a session in the sidebar.</li>
+<li>Web UI: the Files panel now refreshes on its own — a write/edit that lands while it&#39;s open shows up without collapsing and reopening the folder, and the diff/Files panel&#39;s open state and active tab now survive a page reload instead of resetting.</li>
+</ul>
+<h3>Fixed</h3>
+<ul>
+<li>Web UI: the Changes/Files panel used to only mount once a session actually existed, so opening it on a brand-new draft thread reserved its column and left the space empty instead of showing anything — it now always renders, with a &quot;No session yet&quot; state instead of a gap.</li>
+<li>Web UI: the Settings tab strip on narrow/mobile screens scrolls but gave no hint that SSH/Theme/Tools were reachable further right — added a fade at both edges.</li>
+<li>Web UI: <code>.modal-status</code>, <code>.modal-confirm</code>, and <code>.modal-share</code> were silently stuck at the same 480px width as every other modal — a stylesheet ordering bug meant their intended (smaller) widths never actually applied.</li>
+</ul>
+<h2>0.9.2</h2>
+<h3>Added</h3>
+<ul>
+<li>Web UI: threads can now be shared as a public, read-only link (<code>/shared/&lt;token&gt;</code>) — no login required to open it, and it can be revoked at any time. The shared view never includes the persona&#39;s system prompt, only the conversation itself.</li>
+<li>Web UI: a &quot;Quick session&quot; button next to &quot;New session&quot; starts a fresh thread on a configurable default persona and a clean sandbox directory in one click, instead of going through the persona picker every time. The default persona is set in Settings → Tools.</li>
+<li>The favicon and browser tab title now match the app&#39;s actual identity — the tab reads &quot;Cast&quot; instead of &quot;cast web&quot;, and the icon is the same pixel-block mark used in the app&#39;s own logo instead of a plain letter.</li>
+</ul>
+<h3>Fixed</h3>
+<ul>
+<li>Web UI: the sidebar&#39;s session menu (rename/share/delete) no longer opens off-screen for a thread near the bottom of a short or scrolled sidebar — it now opens upward when there isn&#39;t room below.</li>
+<li>Web UI: markdown links (<code>[text](url)</code> and bare URLs) in replies are now rendered as real clickable links instead of plain text.</li>
+<li>Web UI: the persona picker under &quot;New session&quot; is no longer clipped with no way to scroll to the rest of the list at high page zoom or with many personas — it now shares one scroll region with the session list instead of a second, cut-off one of its own.</li>
+<li>Web UI: the &quot;Apply&quot; checkmark next to a model/provider picker in Settings no longer stays active when nothing was actually changed, matching how every other picker in Settings already behaved.</li>
+<li>Web UI: a stopwatch tick during every running turn was re-rendering the entire app ten times a second, visible as flicker across the whole page; it&#39;s now isolated to just the composer&#39;s own elapsed-time display. Settings&#39; model pickers also no longer flash between a cached and a freshly-fetched list on open.</li>
+<li>Web UI: the &quot;not a git repository&quot; message in the Changes panel no longer renders as one lopsided centered line — it&#39;s a proper two-line message now.</li>
+</ul>
+<h2>0.9.1</h2>
+<h3>Added</h3>
+<ul>
+<li>Web UI: the final reply now shows a small, muted line with the provider, model, and response time — so a model switch is easy to confirm, and it&#39;s clear which model actually answered before deciding whether to switch again.</li>
+<li>The &quot;Coder with subagents + forced review&quot; persona was renamed to &quot;Coder with mandatory review&quot; for a more natural label.</li>
+</ul>
+<h3>Fixed</h3>
+<ul>
+<li>Web UI and TUI: providers that interleave content/reasoning deltas out of order mid-turn (observed on MiniMax-M2) no longer render as broken alternating &quot;agent&quot;/&quot;reasoning&quot; blocks with a word split across the seam — same-kind text now merges back together across the interruption.</li>
+<li>Web UI: switching the model (<code>/model</code>) now updates the sidebar immediately and becomes the default for every session created afterward — previously a new session always reopened on whichever model was active when the server started, no matter how many times you&#39;d switched since.</li>
+<li><code>bash</code>, <code>ssh</code>, and background bash now cap output at true UTF-8 bytes instead of JS string length, matching how <code>read</code> already worked — for non-ASCII text (e.g. Cyrillic) the old comparison let through roughly double the configured byte limit. The default cap was also raised from 64KB to 128KB.</li>
+</ul>
+<h2>0.9.0</h2>
+<h3>Added</h3>
+<ul>
+<li>Build mode: a <code>todo_write</code> tool for tracking multi-step work as a checklist — persisted separately from the message history (survives compaction and process restarts), re-injected into the system prompt every turn, and enforced by the harness: after several tool calls with no list started, every further tool call is refused until <code>todo_write</code> runs. Not available in plan mode, which already has the plan checklist for the same job.</li>
+<li>Every persona&#39;s tool list now describes <code>todo_write</code> in its own voice — from qa&#39;s &quot;one item per check in your verification pass&quot; to architect&#39;s &quot;rarely central here&quot;, matching how each persona already describes the rest of its tools.</li>
+<li>Web UI: code blocks in the chat now have a copy button (top-right of the block) that swaps to a checkmark on successful copy.</li>
+</ul>
+<h2>0.8.32</h2>
+<h3>Added</h3>
+<ul>
+<li>Web UI: an MCP server row in Settings now has a Reconnect button (next to the pause/resume toggle), so a server that was fixed on disk (new URL/token) doesn&#39;t need a full server restart to pick it up.</li>
+<li>Web UI: the sidebar&#39;s message-count badges now update live for every thread, including ones you don&#39;t currently have open, instead of only refreshing on a full page reload.</li>
+<li>Web UI: the status popover (&quot;i&quot;) now shows the active provider and how many tokens were served from cache.</li>
+</ul>
+<h3>Fixed</h3>
+<ul>
+<li>Web UI: numbered/bulleted lists with a blank line between items (common in model output) no longer render every item as &quot;1.&quot; — each used to become its own single-item list.</li>
+<li>Web UI: runs of 3+ blank lines in a reply no longer render as an oversized gap between paragraphs.</li>
+<li>Web UI: opening a long thread no longer occasionally leaves the view short of the very bottom — the scroll-to-bottom jump is instant instead of an animated scroll that could lose a race with content still loading in.</li>
+<li>Web UI: streaming replies re-render at most once per animation frame instead of once per token, cutting the worst-case main-thread stall during a long, tool-heavy reply roughly 4x.</li>
+<li>Web UI: the status popover (&quot;i&quot;) could fail to open entirely while the agent was running (reading the active provider was wrongly gated behind the same &quot;must be idle&quot; check as switching it).</li>
+<li>A turn cut short by the backend restarting no longer tells the model the user interrupted it — the reminder now says the server restarted instead of misattributing it.</li>
+</ul>
+<h2>0.8.31</h2>
+<h3>Added</h3>
+<ul>
+<li>Web UI: sessions can now actually be deleted — the sidebar row&#39;s rename/close icons were replaced with a single ⋮ menu (also opens on right-click) offering Rename and a real, permanent Delete. Previously the × only unloaded a session from memory; it stayed on disk regardless.</li>
+<li>Web UI: a themed confirmation dialog now appears before closing/deleting a thread, matching the rest of the app instead of nothing at all.</li>
+<li>Web UI: new sessions default to a fresh sandbox directory instead of the project root — using the actual project root is now the deliberate choice.</li>
+<li>Web UI: the empty-thread &quot;cast&quot; banner is now a crisp SVG logo (larger than before) that recolors with the active theme, replacing the old ASCII-art text render.</li>
+</ul>
+<h3>Fixed</h3>
+<ul>
+<li>Web UI: closing a thread no longer leaves it as the fallback session when reopening the app with no <code>?session=</code> in the URL.</li>
+<li>Web UI: the Tavily/Brave Search API key fields are now masked, the &quot;Save &amp; use ...&quot; button label no longer renders literally as <code>&amp;amp;</code>, and a low-contrast hint line was removed.</li>
+<li>Web UI: the tool-call result expand/collapse arrow is now a proper icon instead of a tiny text glyph.</li>
+<li>Web UI: the streaming response no longer shows a blinking cursor (the composer&#39;s input caret is the only one now).</li>
+</ul>
 <h2>0.8.30</h2>
 <h3>Added</h3>
 <ul>
