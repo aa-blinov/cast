@@ -2,6 +2,31 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.9.7
+
+### Added
+
+- Web UI: custom tooltip system — themed bubbles with fast appearance, viewport-aware positioning, no truncation.
+- Web UI: keyboard shortcuts icon (heroicons-compatible outline style).
+- Web UI: all settings tabs now have collapsible help sections (Model, Tools, MCP, Skills, SSH, Plugins).
+- Web UI: SSH settings now support password authentication (requires `sshpass`).
+
+### Changed
+
+- Web UI: Settings modal widened from 620px to 820px for better readability.
+- Web UI: help sections in Tools and Model tabs now use inline hints after each section title instead of a single collapsible block.
+- Web UI: theme swatches redesigned with grid layout — dot left-aligned, label centered.
+- Web UI: every theme now carries its own background palette (bg, bgSurface, bgRaised, bgHover, border, borderActive) with improved contrast between UI layers.
+- Web UI: 6 themes (Nord, Solarized, Catppuccin, GitHub, Dracula, Gruvbox) use official background colors from their design specifications.
+- Web UI: reasoning blocks and turn-meta footer now use `--text-dim` for better readability.
+- Web UI: chevron icon in collapsible sections replaced from CSS triangle to genuine Heroicon.
+
+### Fixed
+
+- Web UI: loading spinners now centered in settings pane, diff panel, and file previews.
+- Web UI: Tavily and Brave Search input fields aligned to equal widths.
+- Web UI: SSH hosts form reordered — password field before key field.
+
 ## 0.9.6
 
 ### Internal
