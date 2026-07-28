@@ -55,6 +55,7 @@ import {
 	recordCompaction,
 	type SessionState,
 	saveSession,
+	type TurnMeta,
 } from "../core/session.ts";
 import { loadSettings, updateSettings } from "../core/settings.ts";
 import { formatSkillInvocation, isUninstallableSkill, uninstallUserSkill } from "../core/skills.ts";
@@ -129,6 +130,7 @@ export interface DisplayMessage {
 	content: string | null;
 	toolCalls?: DisplayToolCall[];
 	thinking?: string;
+	turnMeta?: TurnMeta;
 }
 
 /**
@@ -143,8 +145,14 @@ export interface DisplayMessage {
  * merged-in) `tool` messages entirely. `reasoning` (SessionState's sidecar
  * map, index -> thinking text — see core/session.ts) reattaches each
  * assistant message's reasoning so a reload looks the same as a live turn.
+ * `turnMeta` is the same kind of sidecar map for the "provider · model · Ns"
+ * footer under whichever assistant message actually ended a turn.
  */
-export function toDisplayMessages(messages: Message[], reasoning?: Record<number, string>): DisplayMessage[] {
+export function toDisplayMessages(
+	messages: Message[],
+	reasoning?: Record<number, string>,
+	turnMeta?: Record<number, TurnMeta>,
+): DisplayMessage[] {
 	// Pre-index tool results by call_id — turns O(N*M) lookups into O(M).
 	const toolResults = new Map<string, Message>();
 	for (const m of messages) {
@@ -171,6 +179,7 @@ export function toDisplayMessages(messages: Message[], reasoning?: Record<number
 				content: typeof m.content === "string" ? m.content : null,
 				toolCalls,
 				thinking: reasoning?.[i],
+				turnMeta: turnMeta?.[i],
 			});
 			return;
 		}
@@ -203,6 +212,7 @@ export function toDisplayMessages(messages: Message[], reasoning?: Record<number
 			role: m.role,
 			content,
 			thinking: m.role === "assistant" ? reasoning?.[i] : undefined,
+			turnMeta: m.role === "assistant" ? turnMeta?.[i] : undefined,
 		});
 	});
 	return out;
@@ -599,6 +609,25 @@ export function createWebBridge(result: StartupResult): WebBridge {
 				ws.status = "idle";
 				ws.runner.endRun();
 				if (ws.lastTurn) ws.lastTurn.totalMs = Date.now() - turnStart;
+				// Persisted per-turn (unlike ws.lastTurn above, which is the same
+				// data but ephemeral/in-memory-only) so every past reply in this
+				// thread shows its own "provider · model · Ns" footer on reload,
+				// not just whichever turn happened to be most recent. Attached to
+				// the turn-ending assistant message specifically — the loop only
+				// ever ends on one (tool-call rounds always continue), so this is
+				// never a tool/user message.
+				const turnEndIndex = finalMessages.length - 1;
+				if (finalMessages[turnEndIndex]?.role === "assistant") {
+					ws.session.turnMeta ??= {};
+					ws.session.turnMeta[turnEndIndex] = {
+						provider: runProviderName,
+						model: runModel,
+						totalMs: Date.now() - turnStart,
+						generationMs: ws.lastTurn?.generationMs,
+						tokensPerSecond: ws.lastTurn?.tokensPerSecond,
+						completedAt: new Date().toISOString(),
+					} satisfies TurnMeta;
+				}
 				saveSession(ws.session);
 				broadcast(ws, { type: "status", status: "idle" });
 				broadcast(ws, {
@@ -857,7 +886,9 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			// owner, but a public link's anonymous visitor has no business
 			// reading the persona's internal instructions, tool descriptions, or
 			// project paths baked into it.
-			messages: toDisplayMessages(session.messages, session.reasoning).filter((m) => m.role !== "system"),
+			messages: toDisplayMessages(session.messages, session.reasoning, session.turnMeta).filter(
+				(m) => m.role !== "system",
+			),
 		};
 	}
 

@@ -27,6 +27,17 @@ export interface SessionUsage {
 	subagentTokens: number;
 }
 
+/** One turn's "how it ran" summary — provider/model/timing. See
+ *  `SessionState.turnMeta` for how it's keyed and persisted. */
+export interface TurnMeta {
+	provider?: string;
+	model?: string;
+	totalMs?: number;
+	generationMs?: number;
+	tokensPerSecond?: number;
+	completedAt: string;
+}
+
 export interface SessionState {
 	id: string;
 	messages: Message[];
@@ -87,6 +98,17 @@ export interface SessionState {
 	 * its prior behavior on resume.
 	 */
 	reasoning?: Record<number, string>;
+	/**
+	 * Per-turn "provider · model · Ns" summary, keyed by the index of the
+	 * assistant message that concluded that turn — same sidecar-map shape and
+	 * rationale as `reasoning` above (no field on the wire-format `Message`
+	 * itself to hold it). Unlike `reasoning`, this used to be purely ephemeral
+	 * (WebAgentSession.lastTurn, in-memory only, one entry for the whole
+	 * session) — now persisted per-turn so every past reply in a thread shows
+	 * its own footer on reload, not just whichever turn happened to be most
+	 * recent when the page loaded. Only the web UI currently writes/reads this.
+	 */
+	turnMeta?: Record<number, TurnMeta>;
 	/**
 	 * Display title for this thread — defaults to a truncation of the first
 	 * user message (set once, the first time one arrives) and can be
@@ -502,9 +524,10 @@ export function saveSession(session: SessionState): void {
 	).run(meta);
 
 	const insertRow = db.prepare(
-		"INSERT INTO messages (session_id, seq, role, content_json, in_context, reasoning) VALUES (?, ?, ?, ?, 1, ?)",
+		"INSERT INTO messages (session_id, seq, role, content_json, in_context, reasoning, turn_meta) VALUES (?, ?, ?, ?, 1, ?, ?)",
 	);
 	const updateReasoning = db.prepare("UPDATE messages SET reasoning = ? WHERE session_id = ? AND seq = ?");
+	const updateTurnMeta = db.prepare("UPDATE messages SET turn_meta = ? WHERE session_id = ? AND seq = ?");
 	// syncSystemPrompt (loop.ts) rebuilds messages[0] fresh every turn — a new
 	// object even when the text is unchanged — so a naive "insert if this
 	// object was never seen before" would pile up one permanent in_context
@@ -531,9 +554,12 @@ export function saveSession(session: SessionState): void {
 	let seq = nextSeqFor(session.id);
 	(Array.isArray(session.messages) ? session.messages : []).forEach((m, i) => {
 		const reasoning = session.reasoning?.[i] ?? null;
+		const turnMetaEntry = session.turnMeta?.[i];
+		const turnMetaJson = turnMetaEntry ? JSON.stringify(turnMetaEntry) : null;
 		const existing = messageSeq.get(m);
 		if (existing !== undefined) {
 			if (reasoning) updateReasoning.run(reasoning, session.id, existing);
+			if (turnMetaJson) updateTurnMeta.run(turnMetaJson, session.id, existing);
 			return;
 		}
 		if (m.role === "system" && typeof m.content === "string" && !m.content.startsWith(COMPACTION_MARKER_PREFIX)) {
@@ -549,7 +575,7 @@ export function saveSession(session: SessionState): void {
 			}
 			deactivateOldSystemRows.run(session.id, `%${COMPACTION_MARKER_PREFIX}%`);
 		}
-		insertRow.run(session.id, seq, m.role, JSON.stringify(m), reasoning);
+		insertRow.run(session.id, seq, m.role, JSON.stringify(m), reasoning, turnMetaJson);
 		messageSeq.set(m, seq);
 		seq++;
 	});
@@ -628,27 +654,35 @@ export function getFullHistory(id: string): Message[] {
 	return getFullHistoryWithReasoning(id).messages;
 }
 
-/** Same as getFullHistory, plus each message's stored reasoning (if any),
- *  re-keyed to indices into the returned (full-history) array — the row's
- *  `reasoning` column, not the fragile index-into-session.messages map
- *  `SessionState.reasoning` used for the in-context working set. */
-export function getFullHistoryWithReasoning(id: string): { messages: Message[]; reasoning: Record<number, string> } {
+/** Same as getFullHistory, plus each message's stored reasoning and turn-meta
+ *  (if any), re-keyed to indices into the returned (full-history) array —
+ *  the row's `reasoning`/`turn_meta` columns, not the fragile
+ *  index-into-session.messages maps (`SessionState.reasoning`/`turnMeta`)
+ *  used for the in-context working set. */
+export function getFullHistoryWithReasoning(id: string): {
+	messages: Message[];
+	reasoning: Record<number, string>;
+	turnMeta: Record<number, TurnMeta>;
+} {
 	const db = getDb();
 	const rows = db
-		.prepare("SELECT content_json, reasoning FROM messages WHERE session_id = ? ORDER BY seq")
-		.all(id) as Array<{ content_json: string; reasoning: string | null }>;
+		.prepare("SELECT content_json, reasoning, turn_meta FROM messages WHERE session_id = ? ORDER BY seq")
+		.all(id) as Array<{ content_json: string; reasoning: string | null; turn_meta: string | null }>;
 	const messages: Message[] = [];
 	const reasoning: Record<number, string> = {};
+	const turnMeta: Record<number, TurnMeta> = {};
 	rows.forEach((r, i) => {
 		messages.push(JSON.parse(r.content_json) as Message);
 		if (r.reasoning) reasoning[i] = r.reasoning;
+		if (r.turn_meta) turnMeta[i] = JSON.parse(r.turn_meta) as TurnMeta;
 	});
-	return { messages, reasoning };
+	return { messages, reasoning, turnMeta };
 }
 
 export interface HistoryPage {
 	messages: Message[];
 	reasoning: Record<number, string>;
+	turnMeta: Record<number, TurnMeta>;
 	/** seq of the earliest message in this page — pass as `beforeSeq` to fetch
 	 *  the page before this one. undefined when the page is empty. */
 	oldestSeq: number | undefined;
@@ -691,11 +725,11 @@ export function getHistoryPage(
 		)
 		.get(id, beforeSeq ?? null, beforeSeq ?? null, turns) as { seq: number } | undefined;
 
-	if (!boundary) return { messages: [], reasoning: {}, oldestSeq: undefined, hasMore: false };
+	if (!boundary) return { messages: [], reasoning: {}, turnMeta: {}, oldestSeq: undefined, hasMore: false };
 
 	const rows = db
 		.prepare(
-			`SELECT seq, content_json, reasoning FROM messages
+			`SELECT seq, content_json, reasoning, turn_meta FROM messages
 			 WHERE session_id = ? AND seq >= ? AND (? IS NULL OR seq < ?)
 			 ORDER BY seq ASC`,
 		)
@@ -703,14 +737,17 @@ export function getHistoryPage(
 		seq: number;
 		content_json: string;
 		reasoning: string | null;
+		turn_meta: string | null;
 	}>;
 
 	const messages: Message[] = [];
 	const reasoning: Record<number, string> = {};
+	const turnMeta: Record<number, TurnMeta> = {};
 	let oldestSeq: number | undefined;
 	rows.forEach((r, i) => {
 		messages.push(JSON.parse(r.content_json) as Message);
 		if (r.reasoning) reasoning[i] = r.reasoning;
+		if (r.turn_meta) turnMeta[i] = JSON.parse(r.turn_meta) as TurnMeta;
 		if (oldestSeq === undefined) oldestSeq = r.seq;
 	});
 
@@ -718,7 +755,7 @@ export function getHistoryPage(
 		db.prepare("SELECT 1 FROM messages WHERE session_id = ? AND role = 'user' AND seq < ?").get(id, boundary.seq),
 	);
 
-	return { messages, reasoning, oldestSeq, hasMore };
+	return { messages, reasoning, turnMeta, oldestSeq, hasMore };
 }
 
 /** Full wipe: deletes every message row for the session (not just flags them
@@ -835,21 +872,26 @@ function loadSessionByRow(row: SessionRow | undefined): SessionState | null {
 	if (!row) return null;
 	const db = getDb();
 	const msgRows = db
-		.prepare("SELECT seq, content_json, reasoning FROM messages WHERE session_id = ? AND in_context = 1 ORDER BY seq")
-		.all(row.id) as Array<{ seq: number; content_json: string; reasoning: string | null }>;
+		.prepare(
+			"SELECT seq, content_json, reasoning, turn_meta FROM messages WHERE session_id = ? AND in_context = 1 ORDER BY seq",
+		)
+		.all(row.id) as Array<{ seq: number; content_json: string; reasoning: string | null; turn_meta: string | null }>;
 
 	const messages: Message[] = [];
 	const reasoning: Record<number, string> = {};
+	const turnMeta: Record<number, TurnMeta> = {};
 	msgRows.forEach((r, i) => {
 		const m = JSON.parse(r.content_json) as Message;
 		messageSeq.set(m, r.seq);
 		messages.push(m);
 		if (r.reasoning) reasoning[i] = r.reasoning;
+		if (r.turn_meta) turnMeta[i] = JSON.parse(r.turn_meta) as TurnMeta;
 	});
 	normalizeStoredMessages(messages);
 
 	const session: SessionState = { ...rowToMeta(row), messages };
 	if (Object.keys(reasoning).length > 0) session.reasoning = reasoning;
+	if (Object.keys(turnMeta).length > 0) session.turnMeta = turnMeta;
 	return session;
 }
 

@@ -597,6 +597,15 @@ function ToolCard({ call }) {
 		</div>
 	`;
 }
+// Small gray "provider · model · Ns" line under a finished agent reply —
+// per-message (persisted server-side, see core/session.ts's SessionState.turnMeta)
+// rather than a single page-level "last turn" value, so every past reply in
+// a thread shows its own footer on reload, not just whichever one happened
+// to be most recent when the page loaded.
+function TurnMetaLine({ turnMeta }) {
+	if (!turnMeta || turnMeta.totalMs == null) return null;
+	return html`<div class="turn-meta">${turnMeta.provider} · ${turnMeta.model} · ${(turnMeta.totalMs / 1000).toFixed(1)}s</div>`;
+}
 
 function Message({ msg }) {
 	const role = msg.role || "assistant";
@@ -638,6 +647,7 @@ function Message({ msg }) {
 						</div>
 					`;
 				})}
+					<${TurnMetaLine} turnMeta=${msg.turnMeta} />
 			</div>
 		`;
 	}
@@ -669,6 +679,7 @@ function Message({ msg }) {
 					</div>
 				`
 				}
+					<${TurnMetaLine} turnMeta=${msg.turnMeta} />
 			</div>
 		`;
 	}
@@ -3570,10 +3581,6 @@ function App() {
 		return snapshot;
 	}, []);
 	const [running, setRunning] = useState(false);
-	// Shown as a small gray line under the last reply so the user knows which
-	// provider/model actually answered before deciding whether to /model away
-	// from it. Ephemeral — reset on session switch, not part of `session`.
-	const [turnMeta, setTurnMeta] = useState(null);
 	const [pendingSteers, setPendingSteers] = useState([]);
 	const [pendingQueue, setPendingQueue] = useState([]);
 	// Open/closed and which tab, like theme/font below, survive a page
@@ -3760,15 +3767,6 @@ function App() {
 				setSession(data);
 				setActiveId(id);
 				resetStreamingNow();
-				// Restores the "provider · model · Ns" footer for this session's
-				// last turn if the server still has it in memory (see
-				// WebAgentSession.lastTurn) — only genuinely new sessions
-				// (startDraft) should show nothing here.
-				setTurnMeta(
-					data.lastTurn?.totalMs != null
-						? { provider: data.lastTurn.provider, model: data.lastTurn.model, totalMs: data.lastTurn.totalMs }
-						: null,
-				);
 				setRunning(data.status === "running");
 				wasRunningRef.current = data.status === "running";
 				setSidebarOpen(false);
@@ -3845,7 +3843,6 @@ function App() {
 				isDraft: true,
 			});
 			resetStreamingNow();
-			setTurnMeta(null);
 			setRunning(false);
 			setSidebarOpen(false);
 			const url = window.location.pathname;
@@ -4006,7 +4003,6 @@ function App() {
 				setActiveId(null);
 				setSession(null);
 				resetStreamingNow();
-				setTurnMeta(null);
 			}
 		},
 		[sessions, activeId, personas, selectSession, startDraft, showToast, dismissedIds, resetStreamingNow],
@@ -4366,7 +4362,6 @@ function App() {
 					case "status": {
 						const isRunning = event.status === "running";
 						setRunning(isRunning);
-						if (isRunning) setTurnMeta(null);
 						setSession((prev) => (prev ? { ...prev, status: event.status } : prev));
 						// If the run ended between our initial GET and the SSE
 						// connect, we missed the `end` event. The `session_end`
@@ -4434,7 +4429,20 @@ function App() {
 						setPendingQueue([]);
 						break;
 					case "turn_meta":
-						setTurnMeta({ model: event.model, provider: event.provider, totalMs: event.totalMs });
+						// Fires once, right after the "assistant_message" event that
+						// pushed this turn's concluding reply — attach to that (now
+						// last) message so it's per-reply, persisted, and correct on
+						// reload, instead of a page-level "last turn" singleton.
+						setSession((prev) => {
+							if (!prev || prev.messages.length === 0) return prev;
+							const messages = prev.messages.slice();
+							const i = messages.length - 1;
+							messages[i] = {
+								...messages[i],
+								turnMeta: { provider: event.provider, model: event.model, totalMs: event.totalMs },
+							};
+							return { ...prev, messages };
+						});
 						break;
 					case "session_end":
 						setSession((prev) => {
@@ -4987,13 +4995,6 @@ function App() {
 					}
 					${messages.map((msg) => html`<${Message} key=${keyForMessage(msg)} msg=${msg} />`)}
 					<${StreamingBlocks} blocks=${streaming} />
-					${
-						!running &&
-						turnMeta &&
-						html`
-						<div class="turn-meta">${turnMeta.provider} · ${turnMeta.model} · ${(turnMeta.totalMs / 1000).toFixed(1)}s</div>
-					`
-					}
 				</div>
 				${
 					!atBottom &&

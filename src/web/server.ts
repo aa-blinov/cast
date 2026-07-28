@@ -279,18 +279,16 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 			pinned: ws.session.pinned,
 			shareToken: ws.session.shareToken ?? null,
 			status: ws.status,
-			messages: toDisplayMessages(page.messages, page.reasoning),
+			// turnMeta is per-message now (see toDisplayMessages) — each
+			// assistant reply carries its own "provider · model · Ns" footer,
+			// persisted to disk, instead of a single session-level "last turn"
+			// value that only ever covered the most recent one.
+			messages: toDisplayMessages(page.messages, page.reasoning, page.turnMeta),
 			oldestSeq: page.oldestSeq ?? null,
 			hasMoreHistory: page.hasMore,
 			usage: ws.session.usage,
 			createdAt: ws.session.createdAt,
 			updatedAt: ws.session.updatedAt,
-			// Ephemeral (see WebAgentSession.lastTurn) — survives a session
-			// switch/page reload as long as this server process hasn't
-			// restarted, so the client can restore the "provider · model · Ns"
-			// footer under the last reply instead of only ever showing it live
-			// via the turn_meta SSE event right after a turn finishes.
-			lastTurn: ws.lastTurn ?? null,
 		});
 	});
 
@@ -307,7 +305,7 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 		const turns = Number(url.searchParams.get("turns")) || undefined;
 		const page = getHistoryPage(params.id, before, turns);
 		json(res, {
-			messages: toDisplayMessages(page.messages, page.reasoning),
+			messages: toDisplayMessages(page.messages, page.reasoning, page.turnMeta),
 			oldestSeq: page.oldestSeq ?? null,
 			hasMoreHistory: page.hasMore,
 		});
