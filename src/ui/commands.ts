@@ -1221,7 +1221,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 				config,
 				session.model,
 				undefined,
-				(attempt, maxAttempts, reason) => showNotice(`[Retry ${attempt}/${maxAttempts}: ${reason}]`),
+				(attempt, reason) => showNotice(`[Retry ${attempt}: ${reason}]`),
 				(usage) => addUsage(session, usage),
 				deps.planMode ? PLAN_COMPACTION_PROMPT : undefined,
 				reminderStateFromPlan(planState),

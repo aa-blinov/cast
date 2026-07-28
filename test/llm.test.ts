@@ -5,6 +5,7 @@ import {
 	EMPTY_ASSISTANT_PLACEHOLDER,
 	isRetryableStreamError,
 	parseHermesToolCalls,
+	retryDelayMs,
 	streamAndCollect,
 	streamChat,
 	stripHermesToolCalls,
@@ -194,6 +195,36 @@ describe("isRetryableStreamError", () => {
 	});
 });
 
+describe("retryDelayMs", () => {
+	it("honors a retry-after-ms response header over backoff", () => {
+		const err = rateLimitError({ message: "rate limited" });
+		(err as { headers: Headers }).headers = new Headers({ "retry-after-ms": "1234" });
+		expect(retryDelayMs(1, err)).toBe(1234);
+	});
+
+	it("honors a retry-after header in seconds", () => {
+		const err = rateLimitError({ message: "rate limited" });
+		(err as { headers: Headers }).headers = new Headers({ "retry-after": "5" });
+		expect(retryDelayMs(1, err)).toBe(5000);
+	});
+
+	it("caps an absurdly large retry-after at the same ceiling as backoff", () => {
+		const err = rateLimitError({ message: "rate limited" });
+		(err as { headers: Headers }).headers = new Headers({ "retry-after": "999999" });
+		expect(retryDelayMs(1, err)).toBe(30_000);
+	});
+
+	it("falls back to capped exponential backoff with no headers", () => {
+		const err = new Error("socket hang up");
+		expect(retryDelayMs(1, err)).toBe(500);
+		expect(retryDelayMs(2, err)).toBe(1000);
+		expect(retryDelayMs(3, err)).toBe(2000);
+		// Uncapped attempt count (see llm.ts's streamChat) — must still not
+		// blow past the 30s ceiling however high the attempt count climbs.
+		expect(retryDelayMs(10, err)).toBe(30_000);
+	});
+});
+
 describe("streamAndCollect — usage accounting", () => {
 	it("recomputes totalTokens instead of trusting a mismatched raw total_tokens", async () => {
 		// A real OpenAI-compatible gateway reporting an internally inconsistent
@@ -331,6 +362,61 @@ describe("streamAndCollect — interrupted / disconnected flags", () => {
 		const result = await streamAndCollect(client, "m", [], [], 100, controller.signal);
 		expect(result.interrupted).toBe(true);
 		expect(result.disconnected).toBe(false);
+	});
+});
+
+describe("streamChat — uncapped retry count for genuinely transient errors", () => {
+	function failThenSucceedClient(failures: number, chunks: unknown[]): OpenAI {
+		let call = 0;
+		return {
+			chat: {
+				completions: {
+					create: async () => {
+						call++;
+						if (call <= failures) throw new Error("socket hang up");
+						return {
+							async *[Symbol.asyncIterator]() {
+								for (const chunk of chunks) yield chunk;
+							},
+						};
+					},
+				},
+			},
+		} as unknown as OpenAI;
+	}
+
+	it("keeps retrying past the old 3-attempt cap — succeeds on the 5th try", async () => {
+		// The whole point of this session's retry fix: cast used to hard-stop
+		// after MAX_STREAM_RETRIES (3) and surface an error even for a
+		// still-transient failure. 4 failures (one more than the old cap) then
+		// a success must now still complete normally.
+		vi.useFakeTimers();
+		try {
+			const client = failThenSucceedClient(4, [
+				{ choices: [{ delta: { content: "ok" } }] },
+				{ choices: [{ delta: {}, finish_reason: "stop" }] },
+			]);
+			const resultPromise = streamAndCollect(client, "m", [], [], 100);
+			// Backoff for attempts 1-4: 500 + 1000 + 2000 + 4000ms.
+			await vi.advanceTimersByTimeAsync(500 + 1000 + 2000 + 4000 + 100);
+			const result = await resultPromise;
+			expect(result.content).toBe("ok");
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("still gives up immediately on a non-retryable error, no matter the attempt count", async () => {
+		const nonRetryable: OpenAI = {
+			chat: {
+				completions: {
+					create: async () => {
+						throw new OpenAI.APIUserAbortError();
+					},
+				},
+			},
+		} as unknown as OpenAI;
+		await expect(streamAndCollect(nonRetryable, "m", [], [], 100)).rejects.toThrow();
 	});
 });
 

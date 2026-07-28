@@ -135,7 +135,6 @@ export function settledPrefixLength(blocks: StreamBlock[]): number {
 
 export interface RetryInfo {
 	attempt: number;
-	maxAttempts: number;
 	reason: string;
 }
 
@@ -847,7 +846,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 								);
 								break;
 							case "retry":
-								setRetry({ attempt: event.attempt, maxAttempts: event.maxAttempts, reason: event.reason });
+								setRetry({ attempt: event.attempt, reason: event.reason });
 								clearRetryOnNextChunk.current = true;
 								break;
 							case "usage": {

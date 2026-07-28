@@ -48,8 +48,12 @@ export interface StreamChunk {
 		arguments: string;
 	}>;
 	finishReason?: string;
-	/** Emitted instead of a real chunk when a transient error is about to be retried. */
-	retrying?: { attempt: number; maxAttempts: number; reason: string };
+	/** Emitted instead of a real chunk when a transient error is about to be
+	 * retried. No attempt cap for genuinely transient errors (rate limits,
+	 * 5xx, connection drops) — matches opencode's retry policy, which retries
+	 * for as long as the error stays classified retryable rather than giving
+	 * up after a fixed count. */
+	retrying?: { attempt: number; reason: string };
 	/** Present on the final chunk when the provider honors `stream_options.include_usage`. */
 	usage?: Usage;
 }
@@ -64,14 +68,27 @@ export interface StreamChunk {
 // scratch would duplicate output, so a later failure is surfaced as-is.
 // ============================================================================
 
-const MAX_STREAM_RETRIES = 3;
+// No cap on retry *count* for a genuinely transient error (rate limit, 5xx,
+// connection drop) — matches opencode's session/retry.ts, which keeps
+// retrying for as long as the error stays classified retryable rather than
+// giving up after a fixed number of attempts. cast previously hard-stopped
+// at 3 (~3.5s of total backoff) and surfaced an error to the user even for
+// sustained rate-limiting a provider would clear on its own given more time;
+// the abort signal (checked before every retry) is what actually bounds
+// this, same as it already bounds the rest of the agent loop.
 const RETRY_BASE_DELAY_MS = 500;
+// Backoff per attempt still grows (and is still capped) — only the attempt
+// *count* is uncapped. Without this ceiling, 2^(attempt-1)*500ms blows past
+// any reasonable wait within a dozen attempts. Matches opencode's
+// RETRY_MAX_DELAY_NO_HEADERS.
+const RETRY_MAX_DELAY_MS = 30_000;
 
 // Quota/billing exhaustion surfaces as the exact same 429 RateLimitError as a
 // transient "too many requests" — the SDK doesn't distinguish them by class,
 // only by the error body's `code` (OpenAI's `insufficient_quota`) or wording
-// (gateways vary). Retrying it wastes MAX_STREAM_RETRIES attempts on
-// something that won't resolve until the account's quota/billing changes.
+// (gateways vary). Without this exclusion, retries (now uncapped — see
+// RETRY_MAX_DELAY_MS above) would retry indefinitely on something that won't
+// resolve until the account's quota/billing changes.
 const NON_RETRYABLE_QUOTA_PATTERN = /insufficient_quota|quota exceeded|out of budget|billing/i;
 
 // Context overflow detection — borrowed from opencode's llm/provider-error.ts.
@@ -140,6 +157,32 @@ export function isRetryableStreamError(error: unknown): boolean {
 }
 
 /**
+ * How long to wait before the next retry. Provider-supplied `retry-after-ms`
+ * / `retry-after` response headers win when present (a 429 telling you
+ * exactly when its window resets is more accurate than guessing) — mirrors
+ * opencode's session/retry.ts. Otherwise capped exponential backoff.
+ */
+export function retryDelayMs(attempt: number, error: unknown): number {
+	const headers = (error as { headers?: Headers } | undefined)?.headers;
+	if (headers && typeof headers.get === "function") {
+		const ms = headers.get("retry-after-ms");
+		if (ms) {
+			const parsed = Number.parseFloat(ms);
+			if (!Number.isNaN(parsed)) return Math.min(parsed, RETRY_MAX_DELAY_MS);
+		}
+		const seconds = headers.get("retry-after");
+		if (seconds) {
+			const parsedSeconds = Number.parseFloat(seconds);
+			if (!Number.isNaN(parsedSeconds)) return Math.min(Math.ceil(parsedSeconds * 1000), RETRY_MAX_DELAY_MS);
+			// HTTP-date form, e.g. "Wed, 21 Oct 2026 07:28:00 GMT".
+			const parsedDate = Date.parse(seconds) - Date.now();
+			if (!Number.isNaN(parsedDate) && parsedDate > 0) return Math.min(parsedDate, RETRY_MAX_DELAY_MS);
+		}
+	}
+	return Math.min(RETRY_BASE_DELAY_MS * 2 ** (attempt - 1), RETRY_MAX_DELAY_MS);
+}
+
+/**
  * Turn a raw turn-failure error into something a user can act on. The SDK
  * surfaces auth/quota failures as terse strings — often just "401 status code
  * (no body)" for gateways that send no body — which don't tell the user their
@@ -201,6 +244,14 @@ function sanitizeMessages(messages: Message[]): Message[] {
 		if (m.role === "tool" && m && typeof m === "object" && "castIsError" in m) {
 			const tool = m as { role: "tool"; tool_call_id: string; content: string; castIsError?: boolean };
 			return { role: "tool", tool_call_id: tool.tool_call_id, content: tool.content };
+		}
+		// Same for the `castToolCallId` tag on a `read`-on-image-file's
+		// synthetic image_url message (see loop.ts) — UI-only, lets the client
+		// attribute the image back to its tool card instead of a provider
+		// receiving a field it never asked for.
+		if (m.role === "user" && m && typeof m === "object" && "castToolCallId" in m) {
+			const withTag = m as { role: "user"; content: unknown; castToolCallId?: string };
+			return { role: "user", content: withTag.content } as Message;
 		}
 		if (m.role !== "assistant") return m;
 		const hasToolCalls = "tool_calls" in m && Array.isArray(m.tool_calls) && m.tool_calls.length > 0;
@@ -386,13 +437,13 @@ export async function* streamChat(
 			}
 			return;
 		} catch (error) {
-			if (yieldedAny || signal?.aborted || attempt >= MAX_STREAM_RETRIES || !isRetryableStreamError(error)) {
+			if (yieldedAny || signal?.aborted || !isRetryableStreamError(error)) {
 				throw error;
 			}
 			attempt++;
 			const reason = error instanceof Error ? error.message : String(error);
-			yield { retrying: { attempt, maxAttempts: MAX_STREAM_RETRIES, reason } };
-			await sleep(RETRY_BASE_DELAY_MS * 2 ** (attempt - 1));
+			yield { retrying: { attempt, reason } };
+			await sleep(retryDelayMs(attempt, error));
 		}
 	}
 }
@@ -504,7 +555,7 @@ export async function streamAndCollect(
 	onToken?: (token: string) => void,
 	onThinking?: (token: string) => void,
 	reasoningBody: Record<string, unknown> = {},
-	onRetry?: (attempt: number, maxAttempts: number, reason: string) => void,
+	onRetry?: (attempt: number, reason: string) => void,
 ): Promise<CompletionResult> {
 	let content = "";
 	let thinking = "";
@@ -520,7 +571,7 @@ export async function streamAndCollect(
 
 	for await (const chunk of streamChat(client, model, messages, tools, maxTokens, signal, reasoningBody)) {
 		if (chunk.retrying) {
-			onRetry?.(chunk.retrying.attempt, chunk.retrying.maxAttempts, chunk.retrying.reason);
+			onRetry?.(chunk.retrying.attempt, chunk.retrying.reason);
 			continue;
 		}
 		firstChunkAt ??= Date.now();
