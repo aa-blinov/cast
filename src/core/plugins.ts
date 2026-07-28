@@ -22,22 +22,6 @@ const MARKETPLACE_MANIFESTS = [
 	".agents/plugins/marketplace.json", // Codex
 ] as const;
 
-/**
- * Bundled default catalogs (Codex / Claude / Grok). Seeded once into
- * ~/.cast/plugins on first plugin command — not on every startup, so offline
- * launches stay fast. Users can `/plugin marketplace remove` any of them;
- * we do not re-add after a successful seed.
- */
-export const DEFAULT_MARKETPLACE_SOURCES: ReadonlyArray<{ source: string; label: string }> = [
-	{ source: "openai/plugins", label: "codex" },
-	{ source: "anthropics/claude-plugins-official", label: "claude" },
-	{ source: "xai-org/plugin-marketplace", label: "grok" },
-];
-
-function defaultsSeedPath(paths: PluginsPaths): string {
-	return join(paths.root, "defaults-seeded.json");
-}
-
 export interface PluginsPaths {
 	root: string;
 }
@@ -126,81 +110,6 @@ function writeKnownMarketplaces(paths: PluginsPaths, data: Record<string, KnownM
 
 export function listKnownMarketplaces(paths: PluginsPaths = defaultPluginsPaths()): KnownMarketplace[] {
 	return Object.values(readKnownMarketplaces(paths)).sort((a, b) => a.name.localeCompare(b.name));
-}
-
-export interface EnsureDefaultsResult {
-	/** Marketplace names newly cloned/registered. */
-	added: string[];
-	/** Per-source errors (offline, missing manifest, …). */
-	errors: string[];
-	/** True when this call performed the one-shot seed (success or permanent skip). */
-	seeded: boolean;
-}
-
-/**
- * Clone + register the default Codex/Claude/Grok marketplaces if we have not
- * seeded before. Retries on the next call when every source failed (typical:
- * no network on first run). Partial success still writes the flag so we do not
- * re-clone on every `/plugin` — failed sources can be added manually.
- */
-export function ensureDefaultMarketplaces(
-	paths: PluginsPaths = defaultPluginsPaths(),
-	sources: ReadonlyArray<{ source: string; label: string }> = DEFAULT_MARKETPLACE_SOURCES,
-): EnsureDefaultsResult {
-	const flag = defaultsSeedPath(paths);
-	if (existsSync(flag)) {
-		return { added: [], errors: [], seeded: false };
-	}
-
-	mkdirSync(paths.root, { recursive: true });
-	const knownSources = new Set(Object.values(readKnownMarketplaces(paths)).map((k) => normalizeSourceKey(k.source)));
-	const added: string[] = [];
-	const errors: string[] = [];
-
-	for (const { source, label } of sources) {
-		const key = normalizeSourceKey(source);
-		if (knownSources.has(key)) continue;
-		try {
-			const mp = addMarketplace(source, paths);
-			knownSources.add(key);
-			knownSources.add(normalizeSourceKey(mp.source));
-			added.push(`${mp.name} (${label})`);
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			errors.push(`${label} (${source}): ${message}`);
-		}
-	}
-
-	const afterKeys = new Set(Object.values(readKnownMarketplaces(paths)).map((k) => normalizeSourceKey(k.source)));
-	const allPresent = sources.every((s) => afterKeys.has(normalizeSourceKey(s.source)));
-	if (!allPresent && added.length === 0) {
-		return { added, errors, seeded: false };
-	}
-
-	writeFileSync(
-		flag,
-		JSON.stringify(
-			{
-				seededAt: new Date().toISOString(),
-				sources: sources.map((s) => s.source),
-				added,
-				errors,
-			},
-			null,
-			2,
-		),
-		"utf-8",
-	);
-	return { added, errors, seeded: true };
-}
-
-function normalizeSourceKey(source: string): string {
-	return source
-		.trim()
-		.replace(/\.git$/i, "")
-		.replace(/^https?:\/\/github\.com\//i, "")
-		.replace(/^git@github\.com:/i, "")
-		.toLowerCase();
 }
 
 // ---------------------------------------------------------------------------
