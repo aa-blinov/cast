@@ -279,6 +279,14 @@ export interface WebBridge {
 	verifyProvider(url: string, apiKey: string): Promise<{ ok: boolean; probe: string; error?: string }>;
 	getCachedModels(): { models: ModelInfo[] };
 	saveSshKey(name: string, keyContent: string): { ok: boolean; path?: string; error?: string };
+	addSshHost(
+		name: string,
+		host: string,
+		username: string | undefined,
+		port: number | undefined,
+		keyPath: string | undefined,
+		password: string | undefined,
+	): { ok: boolean; error?: string };
 	readSkillContent(name: string): { ok: boolean; content?: string; error?: string };
 	readPluginContent(pluginId: string): { ok: boolean; content?: string; error?: string };
 	getReasoningOptionsForSession(sessionId: string): { options: Array<{ value: string; label: string }> };
@@ -1585,7 +1593,14 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			if (!sub || sub === "list") {
 				return {
 					ok: true,
-					result: sshHosts.map((h) => ({ name: h.name, host: h.host, username: h.username, port: h.port })),
+					result: sshHosts.map((h) => ({
+						name: h.name,
+						host: h.host,
+						username: h.username,
+						port: h.port,
+						keyPath: h.keyPath,
+						password: !!h.password,
+					})),
 				};
 			}
 			if (sub === "remove") {
@@ -1597,16 +1612,19 @@ export function createWebBridge(result: StartupResult): WebBridge {
 				return { ok: true, result: `Removed host "${rest}"` };
 			}
 			if (sub === "add") {
-				// Flat form (no wizard): /ssh add <name> <host> [username] [port] [keyPath]
+				// Flat form (no wizard): /ssh add <name> <host> [username] [port] [keyPath] [password]
 				// "-" is an explicit placeholder for a skipped optional field (so a
 				// later positional arg, e.g. port, can be given without the earlier
 				// one) — it never means a literal username/key path of "-".
 				const parts = rest.split(/\s+/).map((p) => (p === "-" ? undefined : p));
-				const [hname, host, username, portStr, keyPath] = parts;
+				const [hname, host, username, portStr, keyPath, password] = parts;
 				if (!hname || !host)
-					return { ok: false, error: "Usage: /ssh add <name> <host> [username] [port] [keyPath]" };
+					return { ok: false, error: "Usage: /ssh add <name> <host> [username] [port] [keyPath] [password]" };
 				const port = portStr ? Number.parseInt(portStr, 10) : undefined;
-				sshHosts = [...sshHosts.filter((h) => h.name !== hname), { name: hname, host, username, port, keyPath }];
+				sshHosts = [
+					...sshHosts.filter((h) => h.name !== hname),
+					{ name: hname, host, username, port, keyPath, password },
+				];
 				saveSshConfig(sshHosts);
 				return { ok: true, result: `Added host "${hname}"` };
 			}
@@ -1705,6 +1723,20 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		} catch (err) {
 			return { ok: false, error: err instanceof Error ? err.message : String(err) };
 		}
+	}
+
+	function addSshHost(
+		name: string,
+		host: string,
+		username: string | undefined,
+		port: number | undefined,
+		keyPath: string | undefined,
+		password: string | undefined,
+	): { ok: boolean; error?: string } {
+		if (!name || !host) return { ok: false, error: "Name and host are required" };
+		sshHosts = [...sshHosts.filter((h) => h.name !== name), { name, host, username, port, keyPath, password }];
+		saveSshConfig(sshHosts);
+		return { ok: true };
 	}
 
 	function readSkillContent(name: string): { ok: boolean; content?: string; error?: string } {
@@ -1933,6 +1965,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		verifyProvider,
 		getCachedModels,
 		saveSshKey,
+		addSshHost,
 		readSkillContent,
 		readPluginContent,
 		getReasoningOptionsForSession,

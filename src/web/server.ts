@@ -885,6 +885,22 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 		if (!name || !key) return json(res, { ok: false, error: "name and key required" }, 400);
 		json(res, bridge.saveSshKey(name, key));
 	});
+	route("POST", "/api/ssh/add", async (req, res) => {
+		const body = await readBody(req);
+		const { name, host, username, port, keyPath, password } = JSON.parse(body);
+		if (!name || !host) return json(res, { ok: false, error: "name and host required" }, 400);
+		json(
+			res,
+			bridge.addSshHost(
+				name,
+				host,
+				username ?? undefined,
+				port ?? undefined,
+				keyPath ?? undefined,
+				password ?? undefined,
+			),
+		);
+	});
 	route("POST", "/api/provider/verify", async (req, res) => {
 		const body = await readBody(req);
 		const { url, apiKey } = JSON.parse(body);

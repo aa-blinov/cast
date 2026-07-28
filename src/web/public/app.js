@@ -2452,6 +2452,10 @@ function SettingsModel({ data, busy, act }) {
 	const activeProviderName = providers.find((p) => p.active)?.name ?? "";
 	return html`
 		<div class="settings-rows">
+			<details class="settings-collapsible">
+				<summary>How model settings work</summary>
+				<p>Pick a <strong>provider</strong> first, then its dropdown populates with that provider's models — pick one and click Apply. The <strong>Reasoning</strong> level controls how much internal thinking the model does before answering (available on some models). <strong>Subagent</strong> and <strong>Plan-mode</strong> model slots inherit the main model unless you override them. Click "Reset all overrides" (↩) to revert a slot back to inheriting.</p>
+			</details>
 			<div class="settings-section-title">Model</div>
 			<${SlotModelPicker} busy=${busy} act=${act} providers=${providers} activeProviderName=${activeProviderName} currentProvider=${activeProviderName} currentModel=${c.model} providerCommand="/provider" modelCommand="/model" isMainSlot=${true} initialModels=${data.models} />
 			<div class="settings-section-title">Reasoning — current: ${c.reasoningLevel ?? "off"}</div>
@@ -2655,6 +2659,10 @@ function SettingsTools({ data, busy, act, personas, onQuickSessionPersonaChange 
 	const bKey = braveKey || search.braveApiKey || "";
 	return html`
 		<div class="settings-rows">
+			<details class="settings-collapsible">
+				<summary>How tool settings work</summary>
+				<p><strong>Web tools</strong> — enable or disable <code>web_search</code> and <code>web_fetch</code> for the agent globally. When enabled, the agent can search the web and read pages to answer questions with current information. <strong>Web search backend</strong> — DuckDuckGo works without a key but is rate-limited (~4 searches before throttling). Tavily and Brave Search require an API key for more reliable access. <strong>Bash confirmation</strong> — in Default mode, the agent asks before running potentially dangerous shell commands; Bypass skips all prompts. <strong>Quick session persona</strong> — which persona the sidebar's ⚡ button uses to launch a fresh sandbox session instantly.</p>
+			</details>
 			<div class="settings-section-title">Web tools</div>
 			<div class="settings-form-row">
 				<button class="modal-btn${webOn ? " modal-btn-primary" : ""}" title="Enable web_search and web_fetch" disabled=${busy} onClick=${() => act("/web on")}>Enabled</button>
@@ -2672,11 +2680,11 @@ function SettingsTools({ data, busy, act, personas, onQuickSessionPersonaChange 
 			</div>
 			<div class="settings-form-row">
 				<input type="password" autocomplete="off" placeholder="Tavily API key (tvly-...)" value=${tKey} onInput=${(e) => setTavilyKey(e.target.value)} />
-				<button class="modal-btn" disabled=${busy || !tKey} onClick=${() => act(`/web-search-provider tavily ${tKey}`)}>Save & use Tavily</button>
+				<button class="modal-btn" style=${{ minWidth: "142px" }} disabled=${busy || !tKey} onClick=${() => act(`/web-search-provider tavily ${tKey}`)}>Save & use Tavily</button>
 			</div>
 			<div class="settings-form-row">
 				<input type="password" autocomplete="off" placeholder="Brave Search API key (BSA...)" value=${bKey} onInput=${(e) => setBraveKey(e.target.value)} />
-				<button class="modal-btn" disabled=${busy || !bKey} onClick=${() => act(`/web-search-provider brave ${bKey}`)}>Save & use Brave</button>
+				<button class="modal-btn" style=${{ minWidth: "142px" }} disabled=${busy || !bKey} onClick=${() => act(`/web-search-provider brave ${bKey}`)}>Save & use Brave</button>
 			</div>
 			<div class="settings-section-title">Bash confirmation mode</div>
 			<div class="settings-form-row">
@@ -2734,6 +2742,10 @@ function SettingsMcp({ data, busy, act, confirm }) {
 	`;
 	return html`
 		<div class="settings-rows">
+			<details class="settings-collapsible">
+				<summary>What are MCP servers?</summary>
+				<p>MCP (Model Context Protocol) servers are background processes the agent connects to for extra tools. Configure them in your project's <code>.cast/mcp.json</code> or globally at <code>~/.cast/mcp.json</code>. <strong>Enable/Disable</strong> toggles a server per session — disabled servers won't connect and their tools are hidden. <strong>Reconnect</strong> drops and re-resolves the connection. <strong>Uninstall</strong> removes the server from the config file permanently.</p>
+			</details>
 			${groups
 				.filter((g) => g.items.length > 0)
 				.map(
@@ -2782,6 +2794,10 @@ function SettingsSkills({ data, busy, act, confirm }) {
 	`;
 	return html`
 		<div class="settings-rows">
+			<details class="settings-collapsible">
+				<summary>What are skills?</summary>
+				<p>Skills are specialized instruction sets the agent loads on demand — think of them as "expertise plugins." In the chat, the agent will pick up a skill's instructions when the task matches its description; you can also invoke one explicitly with <code>/skill-name</code> or by asking for it by name. <strong>Enable/Disable</strong> toggles a skill — disabled skills won't appear in the agent's available list. <strong>Uninstall</strong> removes a user-installed skill permanently. Click the info button (ℹ) on any skill to preview its instructions.</p>
+			</details>
 			${groups
 				.filter((g) => g.items.length > 0)
 				.map(
@@ -2827,7 +2843,7 @@ function SettingsPlugins({ data, busy, act, confirm }) {
 			${data.plugins.length === 0 && html`<div class="settings-hint">No plugins installed.</div>`}
 			<details class="settings-collapsible">
 				<summary>Where do I get a plugin to install?</summary>
-				<p>Browse a marketplace's plugins from the composer with <code>/plugin marketplace list</code> plus the marketplace name — e.g. <code>/plugin marketplace list xai-official</code> for one of the built-in ones below. Then install with <code>plugin@marketplace</code>, e.g. <code>superpowers@xai-official</code>.</p>
+				<p>Plugins are published in marketplaces (listed below). Check a marketplace's repository to see what plugins it offers, then install by typing <code>plugin@marketplace</code> in the field below — e.g. <code>superpowers@xai-official</code>.</p>
 			</details>
 			<div class="settings-form-row">
 				<input type="text" placeholder="name@marketplace" value=${installRef} onInput=${(e) => setInstallRef(e.target.value)} />
@@ -2985,9 +3001,14 @@ function SettingsSsh({ data, busy, act, confirm }) {
 	const [host, setHost] = useState("");
 	const [username, setUsername] = useState("");
 	const [port, setPort] = useState("");
+	const [password, setPassword] = useState("");
 	const [keyContent, setKeyContent] = useState("");
 	return html`
 		<div class="settings-rows">
+			<details class="settings-collapsible">
+				<summary>How SSH hosts work</summary>
+				<p>SSH hosts let the agent connect to remote machines. Add a host by filling in its <strong>name</strong> (a short label), <strong>host</strong> (IP or hostname), <strong>username</strong>, and optionally a <strong>port</strong>, private key, or <strong>password</strong> (requires <code>sshpass</code>). Once saved, the agent can use the <code>ssh</code> tool to run commands on that host — for example, deploying code or inspecting logs on a staging server.</p>
+			</details>
 			${[...(data || [])]
 				.sort((a, b) => a.name.localeCompare(b.name))
 				.map(
@@ -2995,7 +3016,7 @@ function SettingsSsh({ data, busy, act, confirm }) {
 				<div key=${h.name} class="settings-item-row">
 					<div class="settings-item-info">
 						<span class="settings-item-name">${h.name}</span>
-						<span class="settings-item-meta">${h.username ? `${h.username}@` : ""}${h.host}${h.port ? `:${h.port}` : ""}${h.keyPath ? " (key)" : ""}</span>
+						<span class="settings-item-meta">${h.username ? `${h.username}@` : ""}${h.host}${h.port ? `:${h.port}` : ""}${h.keyPath ? " (key)" : ""}${h.password ? " (password)" : ""}</span>
 					</div>
 					<div class="settings-item-actions">
 						<button class="modal-btn icon-btn modal-btn-danger" title="Remove" disabled=${busy} onClick=${async () => {
@@ -3016,10 +3037,13 @@ function SettingsSsh({ data, busy, act, confirm }) {
 					<input type="text" placeholder="username" value=${username} onInput=${(e) => setUsername(e.target.value)} />
 					<input type="text" placeholder="port" value=${port} style=${{ maxWidth: "80px" }} onInput=${(e) => setPort(e.target.value)} />
 				</div>
+				<div class="settings-form-row">
+					<input type="password" autocomplete="off" placeholder="Password (optional, requires sshpass)" value=${password} onInput=${(e) => setPassword(e.target.value)} />
+				</div>
 				<textarea class="settings-textarea" placeholder="Paste SSH private key (optional)" onInput=${(e) => setKeyContent(e.target.value)} rows="4">${keyContent}</textarea>
 				<div class="settings-form-row" style=${{ justifyContent: "flex-end" }}>
 					<button class="modal-btn icon-btn" title="Add SSH host" disabled=${busy || !name || !host} onClick=${async () => {
-						let kp = "-";
+						let kp;
 						if (keyContent.trim()) {
 							const res = await api("POST", "/api/ssh/key", { name, key: keyContent.trim() });
 							if (!res?.ok) {
@@ -3028,12 +3052,25 @@ function SettingsSsh({ data, busy, act, confirm }) {
 							}
 							kp = res.path;
 						}
-						const parts = [name, host, username || "-", port || "-", kp];
-						await act(`/ssh add ${parts.join(" ")}`);
+						if (password) {
+							const res = await api("POST", "/api/ssh/add", {
+								name,
+								host,
+								username: username || undefined,
+								port: port ? Number(port) : undefined,
+								keyPath: kp,
+								password,
+							});
+							if (!res?.ok) alert(res?.error || "Failed to add host");
+						} else {
+							const parts = [name, host, username || "-", port || "-", kp || "-"];
+							await act(`/ssh add ${parts.join(" ")}`);
+						}
 						setName("");
 						setHost("");
 						setUsername("");
 						setPort("");
+						setPassword("");
 						setKeyContent("");
 					}}><${icons.plus} /></button>
 				</div>
