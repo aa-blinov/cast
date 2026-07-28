@@ -2,6 +2,25 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.9.5
+
+### Added
+
+- Two new built-in personas: `researcher` (web-search-driven investigation, cites sources) and `assistant` (general-purpose everyday help — advice, quick lookups, drafts — that reaches for tools only when a task actually needs them).
+- Web UI: the Files panel's `.md` preview now renders through a real markdown engine (headings, lists, tables, links) and code files get real per-language syntax highlighting, both vendored for fully offline use. The Settings → Skills "read full content" view got the same treatment, in the same size modal as the file preview.
+- Web UI: every finished agent reply now shows its own "provider · model · Ns" footer, persisted per-turn — a thread with several exchanges shows a footer under each one, not just whichever was most recent, and it survives a full page reload.
+
+### Fixed
+
+- Web UI: a disabled plugin's skill still worked as a native slash command and stayed listed in the composer palette — both now correctly disappear.
+- TUI: `/plugin` silently cloned three GitHub-hosted default marketplaces on first use with no way to tell where they came from. They're back as permanent, always-present catalogs (labeled "built-in" in the web UI), but non-removable and no longer a surprise — `/plugin marketplace add` is the documented way to add your own.
+- Web UI: Chinese trigger phrases removed from three built-in skill descriptions; the command palette now truncates a long description with an ellipsis instead of letting it overflow the row.
+- Web UI: clicking a file's icon or the empty space in its row (not just the filename text) now opens its preview, matching the whole row's hover/click-target styling.
+- Web UI: fixed the Files preview's markdown spacing (was inheriting the chat's pre-wrap styling, doubling up as huge line gaps), added Escape-to-close, and removed a raw-then-rendered flash on a slow connection.
+- Web UI: the stale "provider · model · Ns" footer and elapsed-time counter from a just-finished session no longer bleed into a brand-new session.
+- Web UI: centered "Loading…" states that were pinned top-left instead of filling their container (Settings tabs, Status popover, Files panel's initial load).
+- Web UI: a hand-approximated `chevronUp` icon path was fixed to match its actual Heroicons source.
+
 ## 0.9.4
 
 ### Added
