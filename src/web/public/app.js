@@ -2523,36 +2523,64 @@ function SettingsFont({ currentFontId, currentFontScale, onPickFont, onPickScale
 	`;
 }
 
+// The small "i" description popover and the "book" full-content viewer
+// (readUrl — currently only SKILL.md, always markdown) are different enough
+// in scale that they get different chrome: a short description stays a
+// small anchored popover, but a whole document reuses the exact same
+// modal-preview treatment (size, markdown rendering) as the Files panel's
+// file preview, so "read the full skill" looks the same wherever it's
+// triggered from instead of being its own smaller, plain-text-only thing.
 function InfoPopover({ text, readUrl }) {
-	const [open, setOpen] = useState(false);
+	const [infoOpen, setInfoOpen] = useState(false);
+	const [bookOpen, setBookOpen] = useState(false);
 	const [fullContent, setFullContent] = useState(null);
-	const [loading, setLoading] = useState(false);
+	// Same anti-flicker discipline as FilePreviewModal: stays null (renders
+	// "Loading…") through marked's async load+parse instead of flashing the
+	// raw markdown source first — see that component's comment for why.
+	const [renderedHtml, setRenderedHtml] = useState(null);
+	const [renderFailed, setRenderFailed] = useState(false);
 	useEffect(() => {
-		if (!open) return;
+		if (!infoOpen) return;
 		const onKey = (e) => {
 			if (e.key === "Escape") {
 				e.stopPropagation();
-				setOpen(false);
-				setFullContent(null);
+				setInfoOpen(false);
 			}
 		};
 		window.addEventListener("keydown", onKey, true);
 		return () => window.removeEventListener("keydown", onKey, true);
-	}, [open]);
+	}, [infoOpen]);
+	useEffect(() => {
+		if (!bookOpen) return;
+		const onKey = (e) => {
+			if (e.key === "Escape") {
+				e.stopPropagation();
+				setBookOpen(false);
+			}
+		};
+		window.addEventListener("keydown", onKey, true);
+		return () => window.removeEventListener("keydown", onKey, true);
+	}, [bookOpen]);
+	const modalRef = useModalFocusTrap(bookOpen);
 	const loadFull = async () => {
-		setOpen(true);
-		setLoading(true);
+		setBookOpen(true);
+		setFullContent(null);
+		setRenderedHtml(null);
+		setRenderFailed(false);
+		let content;
 		try {
 			const res = await api("GET", readUrl);
-			setFullContent(res?.content || res?.error || "No content");
+			content = res?.content || res?.error || "No content";
 		} catch {
-			setFullContent("Failed to load");
+			content = "Failed to load";
 		}
-		setLoading(false);
-	};
-	const close = () => {
-		setOpen(false);
-		setFullContent(null);
+		setFullContent(content);
+		try {
+			const { marked } = await loadMarked();
+			setRenderedHtml(marked.parse(content));
+		} catch {
+			setRenderFailed(true);
+		}
 	};
 	if (!text && !readUrl) return null;
 	return [
@@ -2561,8 +2589,7 @@ function InfoPopover({ text, readUrl }) {
 				text
 					? html`<button class="modal-btn icon-btn" title="Description" onClick=${(e) => {
 							e.stopPropagation();
-							setFullContent(null);
-							setOpen(true);
+							setInfoOpen(true);
 						}}><${icons.info} /></button>`
 					: null
 			}
@@ -2575,11 +2602,29 @@ function InfoPopover({ text, readUrl }) {
 					: null
 			}
 		</span>`,
-		open && html`<div class="info-popover-backdrop" onClick=${close} />`,
-		open &&
+		infoOpen && html`<div class="info-popover-backdrop" onClick=${() => setInfoOpen(false)} />`,
+		infoOpen &&
 			html`<div class="info-popover" onClick=${(e) => e.stopPropagation()}>
-			<div class="info-popover-header"><button class="modal-btn icon-btn" onClick=${close}><${icons.xMark} /></button></div>
-			<div class="info-popover-text">${loading ? "Loading…" : fullContent || text}</div>
+			<div class="info-popover-header"><button class="modal-btn icon-btn" onClick=${() => setInfoOpen(false)}><${icons.xMark} /></button></div>
+			<div class="info-popover-text">${text}</div>
+		</div>`,
+		bookOpen &&
+			html`<div class="modal-backdrop" onClick=${() => setBookOpen(false)}>
+			<div class="modal modal-preview" role="dialog" aria-modal="true" aria-label="Skill content" tabIndex="-1" ref=${modalRef} onClick=${(e) => e.stopPropagation()}>
+				<div class="modal-header">
+					<span>Skill content</span>
+					<button class="modal-close" onClick=${() => setBookOpen(false)} aria-label="Close"><${icons.xMark} /></button>
+				</div>
+				<div class="fs-preview-body">
+					${
+						fullContent == null || (renderedHtml == null && !renderFailed)
+							? html`<div class="diff-empty">Loading…</div>`
+							: renderFailed
+								? html`<pre class="fs-preview-text">${fullContent}</pre>`
+								: html`<div class="fs-preview-markdown message-content" dangerouslySetInnerHTML=${{ __html: renderedHtml }} />`
+					}
+				</div>
+			</div>
 		</div>`,
 	];
 }
