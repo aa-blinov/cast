@@ -941,7 +941,6 @@ function DiffPanel({
 	data,
 	activeFile,
 	onSelectFile,
-	onClose,
 	onResizeStart,
 	open,
 	activeId,
@@ -959,7 +958,6 @@ function DiffPanel({
 				<button class="diff-tab${tab === "changes" ? " active" : ""}" onClick=${() => onTabChange("changes")}>Changes</button>
 				<button class="diff-tab${tab === "fs" ? " active" : ""}" onClick=${() => onTabChange("fs")}>Files</button>
 			</div>
-			<button class="diff-close" onClick=${onClose} aria-label="Close"><${icons.xMark} /></button>
 		</div>
 	`;
 
@@ -1962,14 +1960,16 @@ function SettingsModal({
 	onPickScale,
 	onClose,
 	confirm,
+	onReload,
 }) {
-	const [tab, setTab] = useState("model");
+	const [tab, setTab] = useState(activeId ? "model" : "theme");
 	const [data, setData] = useState({});
 	const [errors, setErrors] = useState({});
 	const [busy, setBusy] = useState(false);
 
 	const run = useCallback(
 		async (command) => {
+			if (!activeId) return { ok: false, error: "No active session" };
 			try {
 				return await api("POST", `/api/sessions/${activeId}/command`, { command });
 			} catch (err) {
@@ -1982,6 +1982,7 @@ function SettingsModal({
 	const load = useCallback(
 		async (t) => {
 			setErrors((e) => ({ ...e, [t]: null }));
+			if (!activeId && t !== "theme" && t !== "font") return;
 			if (t === "model") {
 				const [models, reasoning, current, providers] = await Promise.all([
 					api("GET", "/api/models/cached").catch(() => null),
@@ -2081,10 +2082,14 @@ function SettingsModal({
 			// Always refresh the Model tab too: a /provider Switch changes the
 			// active provider, which the Model picker's model list depends on.
 			await Promise.all([load(tab), tab === "model" ? Promise.resolve() : load("model")]);
+			// /reload and any /skills mutation can change which skills are
+			// loaded/enabled — those show up as native /<skill-id> slash commands,
+			// so the composer's palette needs to catch up too.
+			if (res.ok && (command === "/reload" || command.startsWith("/skills "))) onReload?.();
 			setBusy(false);
 			return res;
 		},
-		[run, load, tab],
+		[run, load, tab, onReload],
 	);
 
 	// theme's data comes from the `themes` prop (fetched once at app boot,
@@ -2092,7 +2097,8 @@ function SettingsModal({
 	// theme and font both come from props/local state (fetched once at app
 	// boot, or never fetched at all for font — see applyFont) rather than the
 	// per-tab preload above.
-	const hasData = tab === "theme" || tab === "font" || data[tab] !== undefined;
+	const needsSession = tab !== "theme" && tab !== "font";
+	const hasData = !needsSession || data[tab] !== undefined;
 
 	return html`
 		<div class="modal-backdrop" onClick=${onClose}>
@@ -2115,33 +2121,35 @@ function SettingsModal({
 					<div class="settings-pane">
 						${errors[tab] && html`<div class="settings-error">${errors[tab]}</div>`}
 						${
-							!hasData
-								? html`<div class="settings-loading">Loading…</div>`
-								: tab === "font"
-									? html`<${SettingsFont} currentFontId=${currentFontId} currentFontScale=${currentFontScale} onPickFont=${onPickFont} onPickScale=${onPickScale} />`
-									: tab === "model"
-										? html`<${SettingsModel} data=${data.model} busy=${busy} act=${act} />`
-										: tab === "theme"
-											? html`<${SettingsTheme} themes=${themes} currentThemeId=${currentThemeId} onPick=${async (
-													id,
-												) => {
-													const res = await act(`/theme ${id}`);
-													if (res.ok && res.result?.colors) onApplyTheme(res.result.colors);
-													if (res.ok && res.result?.theme) onThemeChange(res.result.theme);
-												}} />`
-											: tab === "tools"
-												? html`<${SettingsTools} data=${data.tools} busy=${busy} act=${act} personas=${personas} onQuickSessionPersonaChange=${onQuickSessionPersonaChange} />`
-												: tab === "mcp"
-													? html`<${SettingsMcp} data=${data.mcp} busy=${busy} act=${act} confirm=${confirm} />`
-													: tab === "skills"
-														? html`<${SettingsSkills} data=${data.skills} busy=${busy} act=${act} confirm=${confirm} />`
-														: tab === "plugins"
-															? html`<${SettingsPlugins} data=${data.plugins} busy=${busy} act=${act} confirm=${confirm} />`
-															: tab === "provider"
-																? html`<${SettingsProvider} data=${data.provider} busy=${busy} act=${act} confirm=${confirm} />`
-																: tab === "ssh"
-																	? html`<${SettingsSsh} data=${data.ssh} busy=${busy} act=${act} confirm=${confirm} />`
-																	: null
+							!activeId && needsSession
+								? html`<div class="settings-hint">Open or create a session to access this tab.</div>`
+								: !hasData
+									? html`<div class="settings-loading">Loading…</div>`
+									: tab === "font"
+										? html`<${SettingsFont} currentFontId=${currentFontId} currentFontScale=${currentFontScale} onPickFont=${onPickFont} onPickScale=${onPickScale} />`
+										: tab === "model"
+											? html`<${SettingsModel} data=${data.model} busy=${busy} act=${act} />`
+											: tab === "theme"
+												? html`<${SettingsTheme} themes=${themes} currentThemeId=${currentThemeId} onPick=${async (
+														id,
+													) => {
+														const res = await act(`/theme ${id}`);
+														if (res.ok && res.result?.colors) onApplyTheme(res.result.colors);
+														if (res.ok && res.result?.theme) onThemeChange(res.result.theme);
+													}} />`
+												: tab === "tools"
+													? html`<${SettingsTools} data=${data.tools} busy=${busy} act=${act} personas=${personas} onQuickSessionPersonaChange=${onQuickSessionPersonaChange} />`
+													: tab === "mcp"
+														? html`<${SettingsMcp} data=${data.mcp} busy=${busy} act=${act} confirm=${confirm} />`
+														: tab === "skills"
+															? html`<${SettingsSkills} data=${data.skills} busy=${busy} act=${act} confirm=${confirm} />`
+															: tab === "plugins"
+																? html`<${SettingsPlugins} data=${data.plugins} busy=${busy} act=${act} confirm=${confirm} />`
+																: tab === "provider"
+																	? html`<${SettingsProvider} data=${data.provider} busy=${busy} act=${act} confirm=${confirm} />`
+																	: tab === "ssh"
+																		? html`<${SettingsSsh} data=${data.ssh} busy=${busy} act=${act} confirm=${confirm} />`
+																		: null
 						}
 					</div>
 				</div>
@@ -3313,6 +3321,18 @@ function App() {
 	const [session, setSession] = useState(null);
 	const [personas, setPersonas] = useState([]);
 	const [commands, setCommands] = useState([]);
+	// Re-fetched per active session (not just once at boot) because the list
+	// now includes one live slash-command entry per loaded, enabled skill —
+	// those vary by session cwd and change after /reload, so a stale one-shot
+	// fetch would leave the palette missing/showing skills that no longer
+	// match reality.
+	const refreshCommands = useCallback(async (id) => {
+		const c = await api("GET", `/api/commands${id ? `?session=${encodeURIComponent(id)}` : ""}`).catch(() => null);
+		if (c) setCommands(c);
+	}, []);
+	useEffect(() => {
+		if (activeId) refreshCommands(activeId);
+	}, [activeId, refreshCommands]);
 	const [themes, setThemes] = useState([]);
 	const [currentThemeId, setCurrentThemeId] = useState(null);
 	// Font/scale, unlike theme, are purely client-side (localStorage — see
@@ -3842,18 +3862,29 @@ function App() {
 
 	// Sidebar toggle — a drawer on mobile (existing transform-based behavior),
 	// a collapsible grid column on desktop (same button, different meaning).
+	// On mobile both drawers are full-screen, so opening this one closes the
+	// diff/Files drawer if it was open — otherwise the most-recently-opened
+	// one wins by CSS accident and the other requires an extra manual close.
 	const toggleSidebar = useCallback(() => {
-		if (window.innerWidth <= 768) setSidebarOpen((v) => !v);
-		else setSidebarCollapsed((v) => !v);
+		if (window.innerWidth <= 768) {
+			setSidebarOpen((v) => {
+				const next = !v;
+				if (next) setDiffOpen(false);
+				return next;
+			});
+		} else setSidebarCollapsed((v) => !v);
 	}, []);
 
 	// Opening the diff panel on a mid-width viewport leaves too little room for
 	// the chat column otherwise — auto-collapse the sidebar to compensate. Only
 	// on open, and only if the user hasn't already dealt with it; closing diff
-	// doesn't force the sidebar back (that'd fight a manual re-expand).
+	// doesn't force the sidebar back (that'd fight a manual re-expand). On
+	// mobile, both drawers are full-screen, so opening this one closes the
+	// sidebar drawer if it was open — same reasoning as toggleSidebar above.
 	const toggleDiff = useCallback(() => {
 		setDiffOpen((v) => {
 			const next = !v;
+			if (next && window.innerWidth <= 768) setSidebarOpen(false);
 			if (next && window.innerWidth > 768 && window.innerWidth < 1200) setSidebarCollapsed(true);
 			return next;
 		});
@@ -4716,7 +4747,6 @@ function App() {
 
 			${
 				settingsOpen &&
-				activeId &&
 				html`
 				<${SettingsModal}
 					activeId=${activeId}
@@ -4738,6 +4768,7 @@ function App() {
 					}}
 					onClose=${() => setSettingsOpen(false)}
 					confirm=${requestConfirm}
+					onReload=${() => refreshCommands(activeId)}
 				/>
 			`
 			}
@@ -4835,7 +4866,7 @@ function App() {
 			     leave this unmounted entirely while still reserving its grid
 			     column on open, which read as content shifting into an empty
 			     void with no panel there to show for it. -->
-			<${DiffPanel} data=${diffData} activeFile=${diffFile} onSelectFile=${setDiffFile} onClose=${() => setDiffOpen(false)} onResizeStart=${startDiffResize} open=${diffOpen} activeId=${activeId} tab=${diffTab} onTabChange=${setDiffTab} confirm=${requestConfirm} fsRefreshNonce=${fsRefreshNonce} bootstrapping=${bootstrapping} />
+			<${DiffPanel} data=${diffData} activeFile=${diffFile} onSelectFile=${setDiffFile} onResizeStart=${startDiffResize} open=${diffOpen} activeId=${activeId} tab=${diffTab} onTabChange=${setDiffTab} confirm=${requestConfirm} fsRefreshNonce=${fsRefreshNonce} bootstrapping=${bootstrapping} />
 		</div>
 	`;
 }

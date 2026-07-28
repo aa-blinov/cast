@@ -1146,16 +1146,6 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 }
 .diff-tab:hover { color: var(--text); }
 .diff-tab.active { background: var(--bg-raised); color: var(--text); }
-.diff-close {
-	margin-left: auto;
-	background: none; border: none;
-	color: var(--text-muted); cursor: pointer;
-	width: 22px; height: 22px;
-	border-radius: 4px;
-	display: flex; align-items: center; justify-content: center;
-	transition: background .1s, color .1s;
-}
-.diff-close:hover { color: var(--cyan); background: rgba(0,200,255,.08); }
 .diff-file-list {
 	overflow-y: auto;
 	border-bottom: 1px solid var(--border);

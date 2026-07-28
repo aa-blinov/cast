@@ -1,5 +1,6 @@
 import { Box, Text, useStdin } from "ink";
 import { type JSX, useEffect, useMemo, useRef, useState } from "react";
+import type { Skill } from "../core/skills.ts";
 import { registerStdinOwner, type StdinOwner, setRawModeActive, unregisterStdinOwner } from "../core/stdin-manager.ts";
 import { SLASH_COMMANDS } from "./commands.ts";
 import { type InputEvent, InputParser } from "./input/input-parser.ts";
@@ -20,6 +21,10 @@ interface ComposerProps {
 	onPasteImage?: () => Promise<string | null>;
 	running: boolean;
 	locked: boolean;
+	/** Loaded, enabled skills — merged into the palette as native `/<skill-id>`
+	 * rows (see filteredCmds below) so a skill is just as fast to invoke as any
+	 * built-in command, no `/skill:` prefix needed. */
+	skills?: Skill[];
 }
 
 // Multi-line pastes are collapsed to a single PUA character ("chip") in the
@@ -94,6 +99,7 @@ export function Composer({
 	onPasteImage,
 	running,
 	locked,
+	skills,
 }: ComposerProps): JSX.Element {
 	const { stdin, setRawMode, isRawModeSupported } = useStdin();
 
@@ -149,9 +155,21 @@ export function Composer({
 	// second "/", so requiring that rules out paths without needing a
 	// filesystem check.
 	const paletteOpen = val.startsWith("/") && !val.includes("\n") && !val.includes(" ") && !val.slice(1).includes("/");
+	// One live palette row per loaded, enabled skill, named `/<skill-id>` — same
+	// treatment as the web composer's palette. Skips any id that collides with
+	// a built-in command name (the built-in always wins; see commands.ts's
+	// dispatch order for the matching rule on the execution side).
+	const allCommands = useMemo(() => {
+		if (!skills || skills.length === 0) return SLASH_COMMANDS;
+		const builtinNames = new Set(SLASH_COMMANDS.map((c) => c.name));
+		const skillCmds = skills
+			.filter((s) => !builtinNames.has(`/${s.name}`))
+			.map((s) => ({ name: `/${s.name}`, description: s.description, takesArgs: true }));
+		return [...SLASH_COMMANDS, ...skillCmds];
+	}, [skills]);
 	const filteredCmds = useMemo(
-		() => (paletteOpen ? SLASH_COMMANDS.filter((c) => c.name.startsWith(val)) : []),
-		[paletteOpen, val],
+		() => (paletteOpen ? allCommands.filter((c) => c.name.startsWith(val)) : []),
+		[paletteOpen, val, allCommands],
 	);
 	const safeIdx = paletteOpen ? Math.min(paletteIdx, Math.max(0, filteredCmds.length - 1)) : 0;
 

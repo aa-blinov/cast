@@ -56,7 +56,7 @@ import {
 	saveSession,
 } from "../core/session.ts";
 import { loadSettings, updateSettings } from "../core/settings.ts";
-import { isUninstallableSkill, uninstallUserSkill } from "../core/skills.ts";
+import { formatSkillInvocation, isUninstallableSkill, uninstallUserSkill } from "../core/skills.ts";
 import { saveSshConfig } from "../core/ssh.ts";
 import type { StartupResult } from "../core/startup.ts";
 import { BackgroundTaskRegistry, type BashBackgroundDeps } from "../core/tools/bash-background.ts";
@@ -272,6 +272,7 @@ export interface WebBridge {
 	readPluginContent(pluginId: string): { ok: boolean; content?: string; error?: string };
 	getReasoningOptionsForSession(sessionId: string): { options: Array<{ value: string; label: string }> };
 	suggestCommand(sessionId: string, input: string): Array<{ value: string; label: string }>;
+	getSlashCommands(sessionId?: string): typeof SLASH_COMMANDS;
 }
 
 export function createWebBridge(result: StartupResult): WebBridge {
@@ -1576,6 +1577,24 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			return { ok: false, error: `Unknown /ssh subcommand: ${sub}` };
 		}
 
+		// Native `/<skill-id>` invocation — falls through here only once every
+		// built-in name above has failed to match, so a skill can never shadow a
+		// built-in command. Mirrors /rule:'s "submit as a real user turn" shape,
+		// including the manual idle gate (skill commands aren't blocking, so they
+		// don't hit the isCommandBlocking gate above, same as /rule:).
+		const skillId = name.slice(1);
+		if (skillId) {
+			const sessionCwd = ws.session.cwd ?? cwd;
+			const discovered = discoverSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
+			const disabled = new Set(loadSettings().disabledSkills ?? []);
+			const skill = discovered.find((s) => s.name === skillId && !disabled.has(s.name));
+			if (skill) {
+				if (running) return { ok: false, error: "Agent running — use /queue, /steer, or /abort" };
+				submit(sessionId, formatSkillInvocation(skill, arg));
+				return { ok: true, result: `Invoked skill: ${skill.name}` };
+			}
+		}
+
 		return { ok: false, error: `Unknown command: ${cmd}` };
 	}
 
@@ -1827,6 +1846,32 @@ export function createWebBridge(result: StartupResult): WebBridge {
 
 		return [];
 	}
+
+	// Merges the static built-in palette with one live entry per loaded,
+	// enabled skill — this is what makes `/some-skill` a first-class slash
+	// command instead of routing through a generic `/skill:name` prefix, and
+	// why the client needs to re-fetch this (see GET /api/sessions/:id/commands)
+	// after /reload or a session/cwd switch instead of caching it once at boot.
+	// Skips any skill whose id collides with a built-in command name — the
+	// built-in always wins (executeCommand's dispatch order guarantees this
+	// too: every built-in `name ===` check runs before the skill fallback).
+	function getSlashCommands(sessionId?: string): typeof SLASH_COMMANDS {
+		if (!sessionId) return SLASH_COMMANDS;
+		const sessionCwd = sessions.get(sessionId)?.session.cwd ?? cwd;
+		const disabled = new Set(loadSettings().disabledSkills ?? []);
+		const builtinNames = new Set(SLASH_COMMANDS.map((c) => c.name));
+		const discovered = discoverSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
+		const skillCommands = discovered
+			.filter((s) => !disabled.has(s.name) && !builtinNames.has(`/${s.name}`))
+			.map((s) => ({
+				name: `/${s.name}`,
+				description: s.description,
+				takesArgs: true,
+				blocking: false,
+			}));
+		return [...SLASH_COMMANDS, ...skillCommands];
+	}
+
 	return {
 		createSession: createSessionInstance,
 		getSession,
@@ -1856,6 +1901,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		readPluginContent,
 		getReasoningOptionsForSession,
 		suggestCommand,
+		getSlashCommands,
 	};
 }
 
