@@ -50,9 +50,8 @@ export interface StreamChunk {
 	finishReason?: string;
 	/** Emitted instead of a real chunk when a transient error is about to be
 	 * retried. No attempt cap for genuinely transient errors (rate limits,
-	 * 5xx, connection drops) — matches opencode's retry policy, which retries
-	 * for as long as the error stays classified retryable rather than giving
-	 * up after a fixed count. */
+	 * 5xx, connection drops) — retries for as long as the error stays
+	 * classified retryable rather than giving up after a fixed count. */
 	retrying?: { attempt: number; reason: string };
 	/** Present on the final chunk when the provider honors `stream_options.include_usage`. */
 	usage?: Usage;
@@ -69,18 +68,17 @@ export interface StreamChunk {
 // ============================================================================
 
 // No cap on retry *count* for a genuinely transient error (rate limit, 5xx,
-// connection drop) — matches opencode's session/retry.ts, which keeps
-// retrying for as long as the error stays classified retryable rather than
-// giving up after a fixed number of attempts. cast previously hard-stopped
-// at 3 (~3.5s of total backoff) and surfaced an error to the user even for
-// sustained rate-limiting a provider would clear on its own given more time;
-// the abort signal (checked before every retry) is what actually bounds
-// this, same as it already bounds the rest of the agent loop.
+// connection drop) — keeps retrying for as long as the error stays
+// classified retryable rather than giving up after a fixed number of
+// attempts. cast previously hard-stopped at 3 (~3.5s of total backoff) and
+// surfaced an error to the user even for sustained rate-limiting a provider
+// would clear on its own given more time; the abort signal (checked before
+// every retry) is what actually bounds this, same as it already bounds the
+// rest of the agent loop.
 const RETRY_BASE_DELAY_MS = 500;
 // Backoff per attempt still grows (and is still capped) — only the attempt
 // *count* is uncapped. Without this ceiling, 2^(attempt-1)*500ms blows past
-// any reasonable wait within a dozen attempts. Matches opencode's
-// RETRY_MAX_DELAY_NO_HEADERS.
+// any reasonable wait within a dozen attempts.
 const RETRY_MAX_DELAY_MS = 30_000;
 
 // Quota/billing exhaustion surfaces as the exact same 429 RateLimitError as a
@@ -91,7 +89,7 @@ const RETRY_MAX_DELAY_MS = 30_000;
 // resolve until the account's quota/billing changes.
 const NON_RETRYABLE_QUOTA_PATTERN = /insufficient_quota|quota exceeded|out of budget|billing/i;
 
-// Context overflow detection — borrowed from opencode's llm/provider-error.ts.
+// Context overflow detection.
 // Matches every provider's wording when the conversation exceeds the model's
 // context window. Used to trigger auto-compaction instead of surfacing a raw
 // error to the user.
@@ -159,8 +157,8 @@ export function isRetryableStreamError(error: unknown): boolean {
 /**
  * How long to wait before the next retry. Provider-supplied `retry-after-ms`
  * / `retry-after` response headers win when present (a 429 telling you
- * exactly when its window resets is more accurate than guessing) — mirrors
- * opencode's session/retry.ts. Otherwise capped exponential backoff.
+ * exactly when its window resets is more accurate than guessing). Otherwise
+ * capped exponential backoff.
  */
 export function retryDelayMs(attempt: number, error: unknown): number {
 	const headers = (error as { headers?: Headers } | undefined)?.headers;
@@ -458,9 +456,8 @@ export interface CompletionResult {
 	 * Wall-clock time from the first streamed chunk to the last, in ms —
 	 * undefined if nothing ever streamed (e.g. the request failed before any
 	 * chunk arrived). Deliberately excludes time-to-first-token/prefill
-	 * latency, matching how opencode's own TPS tracking defines it
-	 * (packages/console/.../modelTpsLimiter.ts: tokens / (tsLastByte -
-	 * tsFirstByte)) — this measures decoding throughput, not request latency.
+	 * latency: tokens / (tsLastByte - tsFirstByte) measures decoding
+	 * throughput, not request latency.
 	 */
 	generationMs?: number;
 	/**
@@ -591,8 +588,8 @@ export async function streamAndCollect(
 			sawFinish = true;
 		}
 	}
-	// Capture wall-clock end after the stream is fully consumed (matching
-	// opencode's tsLastByte-on-done pattern) rather than on the last chunk.
+	// Capture wall-clock end after the stream is fully consumed (tsLastByte
+	// on done) rather than on the last chunk.
 	const lastChunkAt = firstChunkAt !== undefined ? Date.now() : undefined;
 
 	const generationMs =

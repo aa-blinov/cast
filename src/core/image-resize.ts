@@ -1,10 +1,9 @@
 /**
- * Downscales an image before it's embedded in a tool result — mirrors
- * opencode's architecture (session/processor.ts's `image.normalize()`):
- * the `read` tool itself doesn't reject on file size, this layer decides
- * whether/how to shrink what it read. Uses WASM codecs (no native binary —
- * confirmed sharp doesn't fit cast's single-esbuild-file distribution
- * model) ported from Squoosh, the same engine opencode itself is built on.
+ * Downscales an image before it's embedded in a tool result — the `read`
+ * tool itself doesn't reject on file size, this layer decides whether/how
+ * to shrink what it read. Uses WASM codecs (no native binary — confirmed
+ * sharp doesn't fit cast's single-esbuild-file distribution model) from the
+ * Squoosh project.
  *
  * The .wasm binaries are vendored under wasm/ (same "sibling of dist/" or
  * "sibling of src/" two-candidate resolution as prompts/ — see prompts.ts)
@@ -72,8 +71,7 @@ export interface ResizedImage {
  * codecs vendored here (gif/webp/bmp — the caller's existing size cap is the
  * only protection for those) or when decode/resize/encode itself throws
  * (corrupt file, decoder bug) — callers fall back to the original buffer
- * rather than fail the whole `read`, same as opencode's "omit on failure"
- * philosophy but one level up: fail the *resize*, not the read.
+ * rather than fail the whole `read`: fail the *resize*, not the read.
  */
 export async function resizeImageForEmbedding(buffer: Buffer, mimeType: string): Promise<ResizedImage | undefined> {
 	if (!SUPPORTED_MIME_TYPES.has(mimeType)) return undefined;

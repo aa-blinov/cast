@@ -204,9 +204,9 @@ interface CompactionSummary {
  *
  * Uses the API-reported promptTokens from the last call (authoritative).
  * Returns false when no API data is available (e.g. before the first turn
- * or session loaded from disk) — matching opencode's approach where missing
- * usage simply means no compaction trigger; the provider will error with
- * "context exceeded" if the conversation grows too large.
+ * or session loaded from disk) — missing usage simply means no compaction
+ * trigger; the provider will error with "context exceeded" if the
+ * conversation grows too large.
  */
 export function shouldCompact(_messages: Message[], config: AppConfig, lastPromptTokens?: number): boolean {
 	if (lastPromptTokens === undefined) return false;

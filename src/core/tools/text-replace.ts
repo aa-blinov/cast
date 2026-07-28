@@ -1,17 +1,12 @@
 /**
- * Ported (near-verbatim, ~one-to-one) from opencode's tool/edit.ts —
- * https://github.com/sst/opencode/blob/main/packages/opencode/src/tool/edit.ts
- * (MIT license, Copyright (c) 2025 opencode). opencode's own header credits
- * these approaches to Cline's diff-apply evals and Gemini CLI's
- * editCorrector; kept here verbatim rather than rewritten so this module's
- * behavior — success/failure on the exact same inputs — matches opencode's
- * `edit` tool exactly, which was the point of porting it at all.
- *
- * `oldString`/`newString` literal-text matching with a fallback chain of
- * increasingly fuzzy matchers (line-trimmed, block-anchor with Levenshtein
- * similarity, whitespace/indentation/escape-normalized, ...) instead of
- * cast's original hashline-anchor scheme (tools/hashline.ts) — see
- * tools/files-legacy-hashline.ts's deprecation note for the trade-off.
+ * `oldString`/`newString` literal-text matching for `edit`, with a fallback
+ * chain of increasingly fuzzy matchers (line-trimmed, block-anchor with
+ * Levenshtein similarity, whitespace/indentation/escape-normalized, trimmed-
+ * boundary, context-aware, multi-occurrence) so minor formatting drift
+ * between what the model remembers and what's actually on disk doesn't
+ * always cause a hard failure — instead of cast's original hashline-anchor
+ * scheme (tools/hashline.ts). See tools/files-legacy-hashline.ts's
+ * deprecation note for that trade-off.
  */
 
 export function normalizeLineEndings(text: string): string {
@@ -499,11 +494,10 @@ function isDisproportionateMatch(search: string, oldString: string): boolean {
 
 /**
  * Finds `oldString` in `content` via a chain of increasingly fuzzy
- * matchers and replaces it with `newString`. Throws (matching opencode's
- * own contract — the caller turns this into a tool-error result) when
- * nothing matches, multiple things match (and replaceAll wasn't asked
- * for), or the best match is wildly disproportionate to what was searched
- * for.
+ * matchers and replaces it with `newString`. Throws (the caller turns this
+ * into a tool-error result) when nothing matches, multiple things match
+ * (and replaceAll wasn't asked for), or the best match is wildly
+ * disproportionate to what was searched for.
  */
 export function replace(content: string, oldString: string, newString: string, replaceAll = false): string {
 	if (oldString === newString) {

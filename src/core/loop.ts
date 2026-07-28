@@ -50,9 +50,8 @@ import {
 } from "./tools.ts";
 
 // How many identical consecutive tool calls (same name + same args) before
-// we treat it as a doom loop and block execution. Matches opencode's
-// DOOM_LOOP_THRESHOLD — the model gets an error result and must try something
-// different.
+// we treat it as a doom loop and block execution — the model gets an error
+// result and must try something different.
 const DOOM_LOOP_THRESHOLD = 3;
 
 // Running cap on embedded image_url data across the whole live context (see
@@ -626,9 +625,9 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 	// The passive "use todo_write when appropriate" prompt guidance alone
 	// isn't enough — measured empirically: real multi-step tasks (5 sequential
 	// file writes, an explicit numbered list, a mid-task discovered bug) never
-	// triggered spontaneous use, with or without a stronger prompt. Cline hit
-	// the same wall and ships a forced periodic reminder (`remindClineInterval`)
-	// rather than relying on the model to remember on its own — same fix here.
+	// triggered spontaneous use, with or without a stronger prompt. A forced
+	// periodic reminder, rather than relying on the model to remember on its
+	// own, fixes it.
 	let toolCallsSinceTodoNudge = 0;
 	// Harder than a reminder: once tripped, every non-todo_write tool call is
 	// refused outright until todo_write runs. A soft `<system-reminder>` was
@@ -1012,9 +1011,8 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 						);
 					} else if (isContextOverflow(err) && !overflowCompacted) {
 						// Context overflow — compact and retry the turn instead of
-						// surfacing a raw error. Matches opencode's auto-compaction
-						// on ContextOverflowError. Only once per turn to prevent
-						// infinite loops when even compacted context is too large.
+						// surfacing a raw error. Only once per turn to prevent infinite
+						// loops when even compacted context is too large.
 						const result = await performCompaction(messages, config, currentModel, signal, loopConfig, onEvent);
 						if (result.compacted) {
 							overflowCompacted = true;
@@ -1180,12 +1178,10 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 							// individually-fine images could pile up in one context —
 							// a real incident had 5 unresized photos (~1.6MB of base64
 							// combined) get a bare, undebuggable 400 from the provider.
-							// No image-resize library is bundled here (cast ships as a
-							// single esbuild file; sharp's native binary doesn't fit that
-							// model), so — mirroring opencode's tool-result attachment
-							// handling, which resizes and then *omits with a note* what
-							// still doesn't fit — cap the running total instead of the
-							// individual file, and omit gracefully past it.
+							// No native image-resize library is bundled here (cast ships as
+							// a single esbuild file; sharp's native binary doesn't fit that
+							// model) — cap the running total instead of the individual
+							// file, and omit gracefully past it, with a note.
 							const existingImageBytes = sumEmbeddedImageBytes(messages);
 							if (existingImageBytes + r.result.imageDataUrl.length > MAX_TOTAL_EMBEDDED_IMAGE_BYTES) {
 								toolMsg.content = `${toolMsg.content}\n\n[Image omitted: already ${formatMB(existingImageBytes)} of images in context (limit ${formatMB(MAX_TOTAL_EMBEDDED_IMAGE_BYTES)}). Ask the user to remove earlier images, or /compact, before reading more.]`;

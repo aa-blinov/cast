@@ -232,8 +232,8 @@ export async function connectMcpServers(servers: Record<string, McpServerConfig>
 						`didn't respond within ${CONNECT_TIMEOUT_MS / 1000}s`,
 					);
 				} catch (error) {
-					// Legacy SSE fallback (the pattern Claude Code and friends use):
-					// a server that only speaks the deprecated HTTP+SSE transport
+					// Legacy SSE fallback: a server that only speaks the deprecated
+					// HTTP+SSE transport
 					// answers the Streamable HTTP initialize POST with an HTTP
 					// error (DeepWiki's /sse: "Method Not Allowed"). Retry once
 					// over SSEClientTransport. Only for url servers, and not for
