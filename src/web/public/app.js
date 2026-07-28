@@ -147,6 +147,70 @@ function applyTheme(colors) {
 	} catch {}
 }
 
+// ── Custom tooltips ──────────────────────────────────────────────────
+// Replaces native title tooltips (slow, unstyled) with themed bubbles.
+// On any element with a title attribute, copies it to data-tooltip and
+// suppresses the native tooltip by clearing title on mouseenter (restored
+// on mouseleave for accessibility). Runs once + observes DOM for new nodes.
+
+function initTooltips() {
+	const tip = document.createElement("div");
+	tip.className = "cast-tooltip";
+	tip.style.cssText = "position:fixed;pointer-events:none;opacity:0;z-index:9999;transition:opacity .1s ease;";
+	document.body.appendChild(tip);
+
+	function show(el) {
+		const text = el.getAttribute("data-tooltip") || "";
+		tip.textContent = text;
+		// Force layout so we can measure the tooltip width
+		tip.style.opacity = "0";
+		tip.style.transition = "none";
+		const tw = tip.getBoundingClientRect().width;
+		tip.style.transition = "opacity .1s ease";
+		const PAD = 8;
+
+		const r = el.getBoundingClientRect();
+		const above = r.top > 60;
+		let x = r.left + r.width / 2;
+		const y = above ? r.top - 8 : r.bottom + 8;
+
+		// Clamp x so the tooltip stays inside the viewport
+		const half = tw / 2;
+		if (x - half < PAD) x = half + PAD;
+		else if (x + half > window.innerWidth - PAD) x = window.innerWidth - half - PAD;
+
+		tip.style.left = x + "px";
+		tip.style.top = y + "px";
+		tip.style.transform = "translate(-50%, " + (above ? "-100%" : "0") + ")";
+		tip.style.opacity = "1";
+		el.removeAttribute("title");
+	}
+	function hide(el) {
+		tip.style.opacity = "0";
+		el.setAttribute("title", el.getAttribute("data-tooltip") || "");
+	}
+
+	function setup(el) {
+		if (!el.hasAttribute("title") || el.hasAttribute("data-tooltip")) return;
+		el.setAttribute("data-tooltip", el.getAttribute("title"));
+		el.addEventListener("mouseenter", () => show(el));
+		el.addEventListener("mouseleave", () => hide(el));
+		el.addEventListener("focus", () => show(el));
+		el.addEventListener("blur", () => hide(el));
+	}
+	document.querySelectorAll("[title]").forEach(setup);
+	new MutationObserver((mutations) => {
+		for (const m of mutations) {
+			for (const node of m.addedNodes) {
+				if (node.nodeType === 1) {
+					if (node.hasAttribute?.("title")) setup(node);
+					node.querySelectorAll?.("[title]")?.forEach(setup);
+				}
+			}
+		}
+	}).observe(document.body, { childList: true, subtree: true });
+}
+
 // ── Font ─────────────────────────────────────────────────────────────
 // A curated set of well-regarded monospace/coding fonts — not exhaustive,
 // just fonts actually built for reading code (ligature/legibility-focused),
@@ -2232,7 +2296,7 @@ function SettingsModal({
 				<div class="modal-header">
 					<span>Settings</span>
 					<div style=${{ display: "flex", gap: "6px", alignItems: "center" }}>
-						<button class="modal-btn" disabled=${busy} onClick=${() => act("/reload")}>Reload resources</button>
+						<button class="modal-btn" disabled=${busy} onClick=${() => act("/reload")} title="Re-scan .cast/ directories for skills, rules, MCP servers, and personas from disk">Reload resources</button>
 						<button class="modal-close" onClick=${onClose} aria-label="Close"><${icons.xMark} /></button>
 					</div>
 				</div>
@@ -2458,17 +2522,15 @@ function SettingsModel({ data, busy, act }) {
 	const activeProviderName = providers.find((p) => p.active)?.name ?? "";
 	return html`
 		<div class="settings-rows">
-			<details class="settings-collapsible">
-				<summary>How model settings work</summary>
-				<p>Pick a <strong>provider</strong> first, then its dropdown populates with that provider's models — pick one and click Apply. The <strong>Reasoning</strong> level controls how much internal thinking the model does before answering (available on some models). <strong>Subagent</strong> and <strong>Plan-mode</strong> model slots inherit the main model unless you override them. Click "Reset all overrides" (↩) to revert a slot back to inheriting.</p>
-			</details>
 			<div class="settings-section-title">Model</div>
+			<p class="settings-hint">Pick a provider first — its dropdown populates with that provider's models. Pick a model and click Apply.</p>
 			<${SlotModelPicker} busy=${busy} act=${act} providers=${providers} activeProviderName=${activeProviderName} currentProvider=${activeProviderName} currentModel=${c.model} providerCommand="/provider" modelCommand="/model" isMainSlot=${true} initialModels=${data.models} />
 			<div class="settings-section-title">Reasoning — current: ${c.reasoningLevel ?? "off"}</div>
 			${
 				data.reasoningOptions.length === 0
 					? html`<div class="settings-hint">This model exposes no reasoning controls.</div>`
 					: html`
+					<p class="settings-hint">Controls how much internal thinking the model does before answering. Higher levels use more tokens but can improve complex task performance.</p>
 					<div class="settings-form-row">
 						<select onChange=${(e) => setReasoningValue(e.target.value)}>
 							<option value="">Pick a level…</option>
@@ -2479,8 +2541,10 @@ function SettingsModel({ data, busy, act }) {
 				`
 			}
 			<div class="settings-section-title">Subagent model${c.subagentModelProvider ? ` — @ ${c.subagentModelProvider}` : ""}</div>
+			<p class="settings-hint">Model used for task subagents — inherits the main model unless overridden here. Click "Reset all overrides" (↩) to revert.</p>
 			<${SlotModelPicker} busy=${busy} act=${act} providers=${providers} activeProviderName=${activeProviderName} currentProvider=${c.subagentModelProvider} currentModel=${c.subagentModel} fallbackModel=${c.model} providerCommand="/subagent-model-provider" modelCommand="/subagent-model" initialModels=${data.models} />
 			<div class="settings-section-title">Plan-mode model${c.planModelProvider ? ` — @ ${c.planModelProvider}` : ""}</div>
+			<p class="settings-hint">Model used when the agent enters plan mode — inherits the main model unless overridden here.</p>
 			<${SlotModelPicker} busy=${busy} act=${act} providers=${providers} activeProviderName=${activeProviderName} currentProvider=${c.planModelProvider} currentModel=${c.planModel} fallbackModel=${c.model} providerCommand="/plan-model-provider" modelCommand="/plan-model" initialModels=${data.models} />
 		</div>
 	`;
@@ -2665,16 +2729,14 @@ function SettingsTools({ data, busy, act, personas, onQuickSessionPersonaChange 
 	const bKey = braveKey || search.braveApiKey || "";
 	return html`
 		<div class="settings-rows">
-			<details class="settings-collapsible">
-				<summary>How tool settings work</summary>
-				<p><strong>Web tools</strong> — enable or disable <code>web_search</code> and <code>web_fetch</code> for the agent globally. When enabled, the agent can search the web and read pages to answer questions with current information. <strong>Web search backend</strong> — DuckDuckGo works without a key but is rate-limited (~4 searches before throttling). Tavily and Brave Search require an API key for more reliable access. <strong>Bash confirmation</strong> — in Default mode, the agent asks before running potentially dangerous shell commands; Bypass skips all prompts. <strong>Quick session persona</strong> — which persona the sidebar's ⚡ button uses to launch a fresh sandbox session instantly.</p>
-			</details>
 			<div class="settings-section-title">Web tools</div>
+			<p class="settings-hint">Enable or disable <code>web_search</code> and <code>web_fetch</code> globally. When on, the agent can search the web and read pages.</p>
 			<div class="settings-form-row">
 				<button class="modal-btn${webOn ? " modal-btn-primary" : ""}" title="Enable web_search and web_fetch" disabled=${busy} onClick=${() => act("/web on")}>Enabled</button>
 				<button class="modal-btn${!webOn ? " modal-btn-primary" : ""}" title="Disable web_search and web_fetch" disabled=${busy} onClick=${() => act("/web off")}>Disabled</button>
 			</div>
 			<div class="settings-section-title">Web search backend</div>
+			<p class="settings-hint">DuckDuckGo is free with no key but rate-limited (~4 searches). Tavily and Brave Search need an API key for reliable access.</p>
 			<div class="settings-form-row">
 				<button class="modal-btn${provider === "ddg" ? " modal-btn-primary" : ""}" title="Free, no key — ~4 searches per IP before rate-limited" disabled=${busy} onClick=${() => act("/web-search-provider ddg")}>DuckDuckGo</button>
 				<button class="modal-btn${provider === "tavily" ? " modal-btn-primary" : ""}" title="API key required — 1000 free searches/month" disabled=${busy} onClick=${() => {
@@ -2693,6 +2755,7 @@ function SettingsTools({ data, busy, act, personas, onQuickSessionPersonaChange 
 				<button class="modal-btn" style=${{ minWidth: "142px" }} disabled=${busy || !bKey} onClick=${() => act(`/web-search-provider brave ${bKey}`)}>Save & use Brave</button>
 			</div>
 			<div class="settings-section-title">Bash confirmation mode</div>
+			<p class="settings-hint">Default asks before running potentially dangerous shell commands. Bypass skips all confirmation prompts.</p>
 			<div class="settings-form-row">
 				<button class="modal-btn${perm.permissionMode === "default" ? " modal-btn-primary" : ""}" title="Confirm dangerous commands" disabled=${busy} onClick=${() => act("/permissions default")}>Default</button>
 				<button class="modal-btn${perm.permissionMode === "bypass" ? " modal-btn-primary" : ""}" title="Skip confirmation prompts" disabled=${busy} onClick=${() => act("/permissions bypass")}>Bypass</button>
@@ -4923,7 +4986,7 @@ function App() {
 						<${icons.settings} />
 					</button>
 					<button class="menu-toggle hotkeys-toggle" onClick=${() => setHotkeysOpen(true)} aria-label="Keyboard shortcuts" title=${`Shortcuts (${modKey}/)`}>
-						<${icons.help} />
+						<${icons.keyboard} />
 					</button>
 					<button class="menu-toggle diff-toggle${diffOpen ? " active" : ""}" onClick=${toggleDiff} aria-label=${diffOpen ? "Close diff panel" : "Open diff panel"} title="Diff">
 						<${icons.chevronLeft} class="chevron-icon" />
@@ -5189,6 +5252,7 @@ function SharedThreadView({ token }) {
 const sharedToken = window.location.pathname.startsWith("/shared/")
 	? decodeURIComponent(window.location.pathname.slice("/shared/".length))
 	: null;
+initTooltips();
 render(
 	sharedToken ? html`<${SharedThreadView} token=${sharedToken} />` : html`<${App} />`,
 	document.getElementById("app"),
