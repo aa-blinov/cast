@@ -1,6 +1,6 @@
 ---
 name: learn-everything
-description: Turn an uploaded PDF, paper, book chapter, document, URL, or user-provided topic into a structured, interactive learning course. Use when the user wants to learn, study, understand, master, review, or practice a subject chapter by chapter; asks for a tutorial or curriculum from source material; wants exercises, quizzes, answer grading, hints, spaced review, or a final assessment; or says "teach me this", "learn this PDF", "分章节教学", "带我学", or similar; or returns to continue a previous course ("continue my course", "接着上次学") or supplies a saved course-state file or state block. Adapt explanations and practice to the learner's level, preserve page or section references for documents, and teach incrementally rather than dumping all content at once.
+description: Turn an uploaded PDF, paper, book chapter, document, URL, or topic into a structured, interactive learning course — chapter by chapter, with exercises, quizzes, grading, hints, and spaced review. Use for "teach me this", "learn this PDF", a request to study/master/review a subject, or to continue a previously saved course.
 ---
 
 # Learn Everything

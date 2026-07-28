@@ -1069,8 +1069,16 @@ pre:hover .code-copy-btn, .code-copy-btn:focus-visible { opacity: 1; }
 }
 .cmd-item:hover, .cmd-item.selected { background: var(--bg-hover); }
 .cmd-item.disabled { opacity: .4; cursor: default; }
-.cmd-name { font-family: var(--font-mono); font-size: .8rem; color: var(--text); }
-.cmd-desc { font-size: .78rem; color: var(--text-muted); }
+.cmd-name { font-family: var(--font-mono); font-size: .8rem; color: var(--text); flex-shrink: 0; }
+.cmd-desc {
+	font-size: .78rem;
+	color: var(--text-muted);
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
 .cmd-loading { color: var(--text-muted); font-size: .8rem; cursor: default; }
 .cmd-blocked-hint {
 	font-size: .7rem; color: var(--rose); margin-left: auto;
