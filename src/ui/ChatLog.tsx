@@ -477,7 +477,7 @@ export function ChatLog({ messages, streaming, error, retry, columns, repaintKey
 	if (retry) {
 		liveParts.push(
 			<Text key="retry" color={theme().warning}>
-				[Retrying ({retry.attempt}/{retry.maxAttempts}): {retry.reason}]
+				[Retrying (attempt {retry.attempt}): {retry.reason}]
 			</Text>,
 		);
 	}

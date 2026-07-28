@@ -341,6 +341,109 @@ describe("runAgentLoop — abort vs. error", () => {
 });
 
 // ============================================================================
+// runAgentLoop — truncated response retry (finishReason "length", no tool call)
+// ============================================================================
+
+describe("runAgentLoop — retries a length-truncated response with no tool call", () => {
+	it("retries with doubled budget when content is empty (pure reasoning exhaustion)", async () => {
+		const events: AgentEvent[] = [];
+
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "still thinking...",
+				finishReason: "length",
+			}))
+			.mockImplementationOnce(async () => ({ content: "final answer", thinking: "", finishReason: "stop" }));
+
+		await runAgentLoop([{ role: "user", content: "hi" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			onEvent: (event) => events.push(event),
+			onWarning: (message) => events.push({ type: "warning_probe", message } as unknown as AgentEvent),
+		});
+
+		expect(vi.mocked(streamAndCollect)).toHaveBeenCalledTimes(2);
+		expect(events.find((e) => e.type === "end")).toEqual({ type: "end", reason: "stop" });
+	});
+
+	it("retries with doubled budget when content is non-empty but no tool call was reached", async () => {
+		// The real-world case: the model wrote a partial reply ("I'll rewrite the
+		// file now...") and got cut off by finishReason "length" before it ever
+		// called a tool. The old !completion.content check missed this — a
+		// non-empty stub got committed as if it were the model's real answer,
+		// and the model could repeat this same stub turn after turn since
+		// nothing forced more budget into the retry.
+		const events: AgentEvent[] = [];
+
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({
+				content: "I'll rewrite the file now.",
+				thinking: "",
+				finishReason: "length",
+			}))
+			.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
+
+		const messages = await runAgentLoop([{ role: "user", content: "hi" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			onEvent: (event) => events.push(event),
+		});
+
+		expect(vi.mocked(streamAndCollect)).toHaveBeenCalledTimes(2);
+		// The truncated stub must not appear anywhere in history — it was
+		// discarded and replaced by the retried, complete turn.
+		expect(messages.some((m) => m.role === "assistant" && m.content === "I'll rewrite the file now.")).toBe(false);
+	});
+
+	it("does not retry a second time — commits whatever the retry produced", async () => {
+		const events: AgentEvent[] = [];
+
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({ content: "stub one", thinking: "", finishReason: "length" }))
+			.mockImplementationOnce(async () => ({ content: "stub two", thinking: "", finishReason: "length" }));
+
+		const messages = await runAgentLoop([{ role: "user", content: "hi" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			onEvent: (event) => events.push(event),
+		});
+
+		expect(vi.mocked(streamAndCollect)).toHaveBeenCalledTimes(2);
+		expect(messages.some((m) => m.role === "assistant" && m.content === "stub two")).toBe(true);
+	});
+
+	it("does not retry when a tool call was reached despite finishReason 'length'", async () => {
+		const events: AgentEvent[] = [];
+
+		vi.mocked(streamAndCollect).mockImplementationOnce(async () => ({
+			content: "",
+			thinking: "",
+			finishReason: "length",
+			toolCalls: [{ id: "1", name: "bash", arguments: '{"command":"echo hi"}' }],
+		}));
+
+		await runAgentLoop([{ role: "user", content: "hi" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			onEvent: (event) => events.push(event),
+		});
+
+		// One call to start the tool round; a second real completion call
+		// follows to close the loop, but neither is the length-truncation retry.
+		expect(vi.mocked(streamAndCollect)).toHaveBeenCalled();
+	});
+});
+
+// ============================================================================
 // runAgentLoop — /steer and /fu (steering + follow-up injection)
 // ============================================================================
 
@@ -583,6 +686,110 @@ describe("runAgentLoop — context files drive rule auto-attach", () => {
 			expect(sentPrompts).toHaveLength(2);
 			expect(sentPrompts[0]).not.toContain("WEB_RULE_BODY"); // before the read
 			expect(sentPrompts[1]).toContain("WEB_RULE_BODY"); // right after the read, same turn
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+});
+
+// ============================================================================
+// runAgentLoop — cumulative embedded-image budget (real incident regression)
+// ============================================================================
+
+describe("runAgentLoop — caps total embedded image bytes across reads, not just per-file", () => {
+	it("embeds the first image but gracefully omits a second that would push the running total over budget", async () => {
+		// Reproduces the real incident: several individually-small images (each
+		// under tools/files.ts's per-file MAX_IMAGE_BYTES) piling up in one
+		// context got a bare, undebuggable 400 from the provider. Two 3MB raw
+		// files (~4MB base64 each) — the first fits under the 6MB running cap,
+		// the second alone would push it to ~8MB and must be omitted instead of
+		// silently exceeding the budget.
+		const cwd = mkdtempSync(join(tmpdir(), "cast-loop-image-budget-"));
+		try {
+			writeFileSync(join(cwd, "a.jpg"), Buffer.alloc(3 * 1024 * 1024, 1));
+			writeFileSync(join(cwd, "b.jpg"), Buffer.alloc(3 * 1024 * 1024, 2));
+
+			vi.mocked(streamAndCollect)
+				.mockImplementationOnce(async () => ({
+					content: "",
+					thinking: "",
+					finishReason: "stop",
+					toolCalls: [
+						{ id: "r1", name: "read", arguments: JSON.stringify({ path: "a.jpg" }) },
+						{ id: "r2", name: "read", arguments: JSON.stringify({ path: "b.jpg" }) },
+					],
+				}))
+				.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
+
+			const messages = await runAgentLoop([{ role: "user", content: "look at both photos" }], {
+				config: testConfig,
+				model: "test-model",
+				cwd,
+				systemPrompt: "SYS",
+				onEvent: () => {},
+			});
+
+			const imageMessages = messages.filter(
+				(m) => m.role === "user" && Array.isArray(m.content) && m.content.some((p: any) => p.type === "image_url"),
+			);
+			expect(imageMessages).toHaveLength(1); // only the first image actually embedded
+
+			const toolResults = messages.filter((m) => m.role === "tool") as Array<{
+				tool_call_id: string;
+				content: string;
+			}>;
+			const secondResult = toolResults.find((m) => m.tool_call_id === "r2");
+			expect(secondResult?.content).toContain("[Image omitted:");
+			expect(secondResult?.content).toContain("already");
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	it("embeds images from separate reads across turns, still respecting the same running total", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "cast-loop-image-budget2-"));
+		try {
+			writeFileSync(join(cwd, "a.jpg"), Buffer.alloc(3 * 1024 * 1024, 1));
+			writeFileSync(join(cwd, "b.jpg"), Buffer.alloc(3 * 1024 * 1024, 2));
+			const followUpQueue = new MessageQueue();
+
+			vi.mocked(streamAndCollect)
+				.mockImplementationOnce(async () => ({
+					content: "",
+					thinking: "",
+					finishReason: "stop",
+					toolCalls: [{ id: "r1", name: "read", arguments: JSON.stringify({ path: "a.jpg" }) }],
+				}))
+				.mockImplementationOnce(async () => {
+					followUpQueue.enqueue({ role: "user", content: "now the other one" });
+					return { content: "ok", thinking: "", finishReason: "stop" };
+				})
+				.mockImplementationOnce(async () => ({
+					content: "",
+					thinking: "",
+					finishReason: "stop",
+					toolCalls: [{ id: "r2", name: "read", arguments: JSON.stringify({ path: "b.jpg" }) }],
+				}))
+				.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
+
+			const messages = await runAgentLoop([{ role: "user", content: "look at the first photo" }], {
+				config: testConfig,
+				model: "test-model",
+				cwd,
+				followUpQueue,
+				systemPrompt: "SYS",
+				onEvent: () => {},
+			});
+
+			const imageMessages = messages.filter(
+				(m) => m.role === "user" && Array.isArray(m.content) && m.content.some((p: any) => p.type === "image_url"),
+			);
+			expect(imageMessages).toHaveLength(1); // the second read's image is omitted, budget carries across turns
+
+			const secondResult = messages.find(
+				(m) => m.role === "tool" && (m as { tool_call_id: string }).tool_call_id === "r2",
+			) as { content: string } | undefined;
+			expect(secondResult?.content).toContain("[Image omitted:");
 		} finally {
 			rmSync(cwd, { recursive: true, force: true });
 		}

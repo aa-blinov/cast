@@ -55,6 +55,30 @@ import {
 // different.
 const DOOM_LOOP_THRESHOLD = 3;
 
+// Running cap on embedded image_url data across the whole live context (see
+// the `read`-on-image-file handling below) — a per-file cap already exists
+// (tools/files.ts's MAX_IMAGE_BYTES) but did nothing to stop several
+// individually-small images from piling up into one oversized request.
+const MAX_TOTAL_EMBEDDED_IMAGE_BYTES = 6 * 1024 * 1024;
+
+/** Sum of every image_url data: URL's length across `messages` — a rough but
+ * cheap proxy for request payload weight (base64 chars, not decoded bytes;
+ * close enough for a soft budget, no need to decode to check a cap). */
+function sumEmbeddedImageBytes(messages: Message[]): number {
+	let total = 0;
+	for (const m of messages) {
+		if (m.role !== "user" || !Array.isArray(m.content)) continue;
+		for (const p of m.content as Array<{ type?: string; image_url?: { url?: string } }>) {
+			if (p.type === "image_url" && p.image_url?.url) total += p.image_url.url.length;
+		}
+	}
+	return total;
+}
+
+function formatMB(bytes: number): string {
+	return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
 // bash_output is a pure-read poll — repeated identical polls on the same
 // task_id are the expected usage pattern while waiting on a background task,
 // not a stuck model. bash_kill is deliberately NOT exempt: repeated identical
@@ -204,7 +228,7 @@ export async function compactSessionMessages(
 	config: AppConfig,
 	model: string,
 	signal?: AbortSignal,
-	onRetry?: (attempt: number, maxAttempts: number, reason: string) => void,
+	onRetry?: (attempt: number, reason: string) => void,
 	onUsage?: (usage: Usage) => void,
 	/** Extra mode-specific summarization guidance (e.g. plan mode: keep
 	 * exploration findings not yet written into the plan file). */
@@ -309,7 +333,7 @@ async function performCompaction(
 		config,
 		model,
 		signal,
-		(attempt, maxAttempts, reason) => onEvent({ type: "retry", attempt, maxAttempts, reason }),
+		(attempt, reason) => onEvent({ type: "retry", attempt, reason }),
 		(usage) => onEvent({ type: "usage", usage }),
 		loopConfig.planState?.enabled ? PLAN_COMPACTION_PROMPT : undefined,
 		reminderStateFromPlan(loopConfig.planState),
@@ -396,7 +420,7 @@ export type AgentEvent =
 	| { type: "todos_updated"; todos: TodoItem[] }
 	/** Session crossed local midnight; a date-rollover `<system-reminder>` was appended. */
 	| { type: "date_rollover"; date: string }
-	| { type: "retry"; attempt: number; maxAttempts: number; reason: string }
+	| { type: "retry"; attempt: number; reason: string }
 	// generationMs is only set for the main completion's usage — compaction's
 	// own summarization call reports usage too (for cumulative cost tracking)
 	// but isn't a user-facing turn, so there's no "last request" TPS to show for it.
@@ -942,7 +966,7 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 							onEvent({ type: "thinking", text: token });
 						},
 						config.reasoningParams.body,
-						(attempt, maxAttempts, reason) => onEvent({ type: "retry", attempt, maxAttempts, reason }),
+						(attempt, reason) => onEvent({ type: "retry", attempt, reason }),
 					);
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
@@ -984,7 +1008,7 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 								onEvent({ type: "thinking", text: token });
 							},
 							config.reasoningParams.body,
-							(attempt, maxAttempts, reason) => onEvent({ type: "retry", attempt, maxAttempts, reason }),
+							(attempt, reason) => onEvent({ type: "retry", attempt, reason }),
 						);
 					} else if (isContextOverflow(err) && !overflowCompacted) {
 						// Context overflow — compact and retry the turn instead of
@@ -1028,18 +1052,17 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 					return;
 				}
 
-				// Reasoning-only response: the model spent all max_tokens on
-				// reasoning_content and left content empty. Retry once with 2x the
-				// token budget so reasoning has room and content can follow.
-				const reasoningExhausted =
-					!completion.content &&
-					!completion.toolCalls?.length &&
-					completion.thinking &&
-					completion.finishReason === "length";
-				if (reasoningExhausted && !reasoningRetryDone) {
+				// Truncated with no tool call: the model spent all max_tokens without
+				// reaching a tool call — whether it burned the budget on hidden
+				// reasoning_content, a verbose preamble/plan, or anything else, the
+				// result is the same: no usable turn to commit yet. Retry once with
+				// 2x the token budget instead of accepting a stub reply (e.g. "I'll
+				// rewrite the file now" with no actual write) as the model's answer.
+				const truncatedNoToolCall = !completion.toolCalls?.length && completion.finishReason === "length";
+				if (truncatedNoToolCall && !reasoningRetryDone) {
 					reasoningRetryDone = true;
 					effectiveMaxTokens *= 2;
-					onWarning?.("Reasoning consumed all tokens — retrying with doubled budget");
+					onWarning?.("Response truncated before a tool call — retrying with doubled budget");
 					continue;
 				}
 
@@ -1152,11 +1175,34 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 						// supports vision; otherwise the provider surfaces its own
 						// error, which is the honest outcome here).
 						if (r.result.imageDataUrl) {
-							const imageMsg: Message = {
-								role: "user",
-								content: [{ type: "image_url", image_url: { url: r.result.imageDataUrl } }],
-							};
-							messages.push(imageMsg);
+							// Per-file size is already capped (tools/files.ts's
+							// MAX_IMAGE_BYTES), but nothing bounded how many of those
+							// individually-fine images could pile up in one context —
+							// a real incident had 5 unresized photos (~1.6MB of base64
+							// combined) get a bare, undebuggable 400 from the provider.
+							// No image-resize library is bundled here (cast ships as a
+							// single esbuild file; sharp's native binary doesn't fit that
+							// model), so — mirroring opencode's tool-result attachment
+							// handling, which resizes and then *omits with a note* what
+							// still doesn't fit — cap the running total instead of the
+							// individual file, and omit gracefully past it.
+							const existingImageBytes = sumEmbeddedImageBytes(messages);
+							if (existingImageBytes + r.result.imageDataUrl.length > MAX_TOTAL_EMBEDDED_IMAGE_BYTES) {
+								toolMsg.content = `${toolMsg.content}\n\n[Image omitted: already ${formatMB(existingImageBytes)} of images in context (limit ${formatMB(MAX_TOTAL_EMBEDDED_IMAGE_BYTES)}). Ask the user to remove earlier images, or /compact, before reading more.]`;
+							} else {
+								// castToolCallId isn't part of the wire format —
+								// sanitizeMessages strips it before this ever reaches a
+								// provider (see llm.ts). It's only here so the UI can
+								// attribute this image back to the `read` call that
+								// produced it instead of showing it as an unexplained
+								// floating message (see toDisplayMessages).
+								const imageMsg = {
+									role: "user",
+									content: [{ type: "image_url", image_url: { url: r.result.imageDataUrl } }],
+									castToolCallId: r.id,
+								} as Message;
+								messages.push(imageMsg);
+							}
 						}
 					}
 
