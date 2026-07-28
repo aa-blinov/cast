@@ -1,4 +1,8 @@
 /**
+ * @deprecated Only consumed by tools/files-legacy-hashline.ts now, which
+ * itself isn't wired into the active tool executor — see that file's own
+ * deprecation note for why this is kept rather than deleted.
+ *
  * Hashline anchors — every line in a file is prefixed with a short
  * content-derived hash so `edit` can reference lines without the model
  * having to copy their text. Uses a two-part `chunk` scheme (`LOCAL` +

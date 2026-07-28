@@ -57,10 +57,10 @@ describe("listPersonas", () => {
 			// Slice up to (but not including) the next shared section, so
 			// the test stays stable as more shared blocks get appended.
 			const after = persona.systemPrompt.slice(idx);
-			const editIdx = after.indexOf("## File tools / hashline anchors");
+			const editIdx = after.indexOf("## File tools");
 			const section = editIdx === -1 ? after : after.slice(0, editIdx).trimEnd();
 			expect(section).toBe(expected);
-			expect(persona.systemPrompt).toContain("## File tools / hashline anchors");
+			expect(persona.systemPrompt).toContain("## File tools");
 		}
 
 		// It must come from prompts/error-handling.md, not be duplicated by hand
@@ -68,8 +68,8 @@ describe("listPersonas", () => {
 		for (const persona of personas) {
 			const raw = readFileSync(join(PERSONAS_DIR, `${persona.name}.md`), "utf-8");
 			expect(raw).not.toContain("## Error Handling");
-			expect(raw).not.toContain("## File tools / hashline anchors");
-			expect(raw).not.toContain("## edit / hashline anchors");
+			expect(raw).not.toContain("## File tools");
+			expect(raw).not.toContain("## edit — oldString/newString");
 			expect(raw).not.toContain("## Agent discipline");
 			expect(raw).not.toContain('## Verification before "done"');
 		}
@@ -84,7 +84,7 @@ describe("listPersonas", () => {
 			expect(persona.systemPrompt).toContain(disciplineExpected);
 			expect(persona.systemPrompt).toContain(verificationExpected);
 			const errIdx = persona.systemPrompt.indexOf("## Error Handling");
-			const editIdx = persona.systemPrompt.indexOf("## File tools / hashline anchors");
+			const editIdx = persona.systemPrompt.indexOf("## File tools");
 			const discIdx = persona.systemPrompt.indexOf("## Agent discipline");
 			const verifIdx = persona.systemPrompt.indexOf('## Verification before "done"');
 			expect(errIdx).toBeGreaterThan(-1);

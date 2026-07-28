@@ -31,18 +31,6 @@ type ToolSummaryModel =
 	| { kind: "generic"; text: string };
 
 /**
- * Parse the leading line number out of a hashline anchor like
- * `42:abc123` or `42:abc123:1f2`. Returns null for garbage — the
- * caller already falls back to a generic summary in that case.
- */
-function anchorLineOf(anchor: unknown): number | null {
-	if (typeof anchor !== "string") return null;
-	const m = /^(\d+):/.exec(anchor);
-	if (!m) return null;
-	return Number.parseInt(m[1]!, 10);
-}
-
-/**
  * Data half of the tool-call summary. edit/write get a readable file + change
  * summary instead of a truncated JSON blob; every other tool keeps the generic
  * `key=value` args. Args stream in as partial JSON, so anything that fails to
@@ -58,30 +46,16 @@ export function parseToolSummary(name: string, args: string): ToolSummaryModel {
 		parsed = null;
 	}
 
-	if (parsed && name === "edit" && typeof parsed.path === "string" && Array.isArray(parsed.ops)) {
-		let added = 0;
-		let removed = 0;
-		for (const op of parsed.ops) {
-			if (!op || typeof op !== "object") continue;
-			const o = op as Record<string, unknown>;
-			if (o.op === "write") continue;
-			const content = typeof o.content === "string" ? o.content : "";
-			if (o.op === "insert_after" || o.op === "insert_before") {
-				added += content.split("\n").length;
-			} else if (o.op === "replace") {
-				// Approximate line churn from the anchor range. The model
-				// only sends anchors, not the original line text, so we
-				// can't run `lineChurn` here without re-reading the file.
-				// This is UI-only — the underlying tool is exact.
-				const startLine = anchorLineOf(o.anchor);
-				const endLine = o.end_anchor ? anchorLineOf(o.end_anchor) : startLine;
-				if (startLine && endLine) {
-					removed += Math.abs(endLine - startLine) + 1;
-				}
-				added += content.split("\n").length;
-			}
-		}
-		return { kind: "edit", path: parsed.path, added, removed };
+	if (
+		parsed &&
+		name === "edit" &&
+		typeof parsed.filePath === "string" &&
+		typeof parsed.oldString === "string" &&
+		typeof parsed.newString === "string"
+	) {
+		const removed = parsed.oldString.length === 0 ? 0 : parsed.oldString.split("\n").length;
+		const added = parsed.newString.length === 0 ? 0 : parsed.newString.split("\n").length;
+		return { kind: "edit", path: parsed.filePath, added, removed };
 	}
 
 	if (parsed && name === "read" && typeof parsed.path === "string") {

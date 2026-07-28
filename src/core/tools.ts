@@ -102,8 +102,8 @@ export function getToolDefinitions(
 					"Supports text files and images (jpg, jpeg, png, gif, webp, bmp — " +
 					"shown to you as an image in the next message; only works if the model supports vision). " +
 					"Output is truncated to 2000 lines or 128KB. Use offset/limit for large files. " +
-					"Images larger than 5MB are rejected. " +
-					"Each line is prefixed with `<LINE>:<LOCAL>:<CHUNK>→content` (a hashline anchor, e.g. `22:abc:rst`) — copy the full three-part prefix into `edit`. " +
+					"Large images are automatically downscaled to fit; only rejected if truly huge (25MB+). " +
+					"Each line is prefixed with its line number (`N: content`) — use the exact text (not the number) when calling `edit`. " +
 					"You already have the contents of every file you read earlier in this session — do NOT read the " +
 					"same path again unless it has changed since (e.g. you just edited it); re-use the earlier result " +
 					"instead. Reading the same unchanged file repeatedly is treated as a doom loop and blocked.",
@@ -124,7 +124,7 @@ export function getToolDefinitions(
 				name: "write",
 				description:
 					"Create a new file or overwrite an entire file. Prefer `edit` for surgical changes to existing files. " +
-					"Do NOT fall back to write because an edit failed — retry the edit with the fresh anchors from the error instead; " +
+					"Do NOT fall back to write because an edit failed — retry the edit with more surrounding context in oldString instead; " +
 					"a from-memory rewrite tends to reproduce stale content. " +
 					"Automatically creates parent directories.",
 				parameters: {
@@ -142,52 +142,35 @@ export function getToolDefinitions(
 			function: {
 				name: "edit",
 				description:
-					"Edit a file using hashline anchors from a recent `read` or `grep`. " +
-					"Copy the full `<line>:<local>:<chunk>` prefix (include the line number). " +
-					"Put every change to this file in one call's ops[] — do not split into multiple edit rounds. " +
-					"Ops: 'replace' (one line or `anchor`+`end_anchor` range; INCLUSIVE on both ends), " +
-					"'insert_after' / 'insert_before' (add lines after/before an anchor), 'write' (replace the whole file). " +
-					"Success returns fresh anchors — use them for any follow-up; do not re-read just to confirm. " +
-					"Moved lines, neighbour drift, and unique hash-only anchors (missing line number) are recovered automatically; " +
-					"errors include fresh anchors so a re-read is usually unnecessary. " +
-					"If an op fails, fix that op using the anchors from the error and retry edit — never give up and rewrite the whole file with `write`.",
+					"Performs exact string replacement in a file. You must read the file (or already have its contents from this " +
+					"session) before editing it. " +
+					"`oldString` must be the exact literal text to replace, including all whitespace and indentation — copy it " +
+					"verbatim from a recent `read`, don't retype it from memory. Include enough surrounding context (a few lines) " +
+					"to make `oldString` uniquely match one location in the file, or the edit is rejected as ambiguous. " +
+					"By default only the first occurrence is checked and it must be unique; set `replaceAll` to replace every " +
+					"occurrence instead. Use `oldString: \"\"` on a path that doesn't exist yet to create a new file with " +
+					"`newString` as its content (prefer `write` for that, but this works too). " +
+					"If the edit fails because the text wasn't found or matched more than once, re-read the file and retry with " +
+					"the exact current text and more context — never give up and rewrite the whole file with `write`.",
 				parameters: {
 					type: "object",
 					properties: {
-						path: { type: "string", description: "Path to the file to edit (relative or absolute)" },
-						ops: {
-							type: "array",
-							items: {
-								type: "object",
-								properties: {
-									op: {
-										type: "string",
-										enum: ["replace", "insert_after", "insert_before", "write"],
-										description: "Kind of edit operation.",
-									},
-									anchor: {
-										type: "string",
-										description:
-											"Full hashline anchor `<line>:<local>:<chunk>` from read/grep (e.g. `22:abc:rst`). Include the line number. Pasting the whole gutter (`22:abc:rst→…`) is fine. For insert_after: `0:` = top of file, `EOF` = append at end.",
-									},
-									end_anchor: {
-										type: "string",
-										description:
-											"Optional second anchor for `replace`; the range from `anchor` to `end_anchor` (inclusive) is replaced by `content`. Without it exactly one line is replaced, regardless of how many lines `content` has.",
-									},
-									content: {
-										type: "string",
-										description:
-											"New text to write at the target range / after the anchor / as the new file content. Newlines split it into multiple lines; indentation is preserved verbatim. Do NOT end it with a trailing newline unless you want an extra blank line. An empty string on `replace` deletes the range.",
-									},
-								},
-								required: ["op", "content"],
-							},
+						filePath: { type: "string", description: "Path to the file to edit (relative or absolute)" },
+						oldString: {
+							type: "string",
 							description:
-								"One or more anchor-based edit operations, applied atomically against the pre-edit file.",
+								"The exact literal text to replace, copied verbatim (including whitespace/indentation) from a recent read. Empty string creates a new file.",
+						},
+						newString: {
+							type: "string",
+							description: "The text to replace it with. Must differ from oldString.",
+						},
+						replaceAll: {
+							type: "boolean",
+							description: "Replace all occurrences of oldString instead of requiring exactly one match (default: false).",
 						},
 					},
-					required: ["path", "ops"],
+					required: ["filePath", "oldString", "newString"],
 				},
 			},
 		},
@@ -626,7 +609,7 @@ export function createToolExecutor(
 				}
 				case "edit": {
 					if (planState?.enabled) {
-						const absolutePath = resolvePath(String(args.path ?? ""), cwd);
+						const absolutePath = resolvePath(String(args.filePath ?? ""), cwd);
 						const gate = checkPlanFileGate(absolutePath, planState);
 						if (!gate.ok) return { content: gate.error, isError: true };
 						// Snapshot before the edit — ops apply as anchored deltas, so

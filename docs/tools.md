@@ -14,7 +14,7 @@ Read file contents. Supports text files and images (jpg, jpeg, png, gif, webp, b
 | `offset` | No | Line number to start from (1-indexed) |
 | `limit` | No | Maximum lines to read |
 
-Output is truncated to 2000 lines or 64KB. Images larger than 5MB are rejected. Each line is prefixed with a hashline anchor of the form `<LINE>:<LOCAL>:<CHUNK>→content` (e.g. `22:abc:rst`) so it can be passed directly to `edit`.
+Output is truncated to 2000 lines or 64KB. Images are automatically downscaled to fit within model vision limits; only rejected if truly huge (25MB+). Each line is prefixed with its line number (`N: content`) — copy the exact text (not the number) when calling `edit`.
 
 ### `write`
 
@@ -34,45 +34,22 @@ The reply is not a byte count — it shows what actually changed, so a from-memo
 
 ### `edit`
 
-Edit a file using hashline anchors from a recent `read` or `grep`. Each `op` targets a line (or range) by anchor instead of pasting text.
+Edit a file by replacing an exact block of literal text (`oldString`) with new text (`newString`) — no anchors, no line numbers, just the real text of the file.
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `path` | Yes | File path |
-| `ops` | Yes | Array of `replace` / `insert_after` / `insert_before` / `write` operations (see below) |
+| `filePath` | Yes | File path |
+| `oldString` | Yes | Exact literal text to replace, copied verbatim (whitespace/indentation included) from a recent `read`. Empty string creates a new file. |
+| `newString` | Yes | Replacement text. Must differ from `oldString`. |
+| `replaceAll` | No | Replace every occurrence instead of requiring exactly one match (default: `false`) |
 
-#### `ops[]` — anchor-based operations
+`oldString` must match the file's actual content — the tool tries an exact match first, then falls back through a chain of increasingly fuzzy matchers (line-trimmed, block-anchored with similarity scoring, whitespace-normalized, indentation-flexible, escape-normalized, …) so minor formatting drift between what the model remembers and what's on disk doesn't always cause a hard failure. It still fails if:
 
-Each op has an `op` discriminator and an inline `content`:
+- **Not found** — no matcher's candidate appears in the file. Re-`read` and retry with the exact current text.
+- **Multiple matches** — `oldString` isn't unique and `replaceAll` wasn't set. Add more surrounding context to `oldString` to disambiguate, or pass `replaceAll: true` if every occurrence should change.
+- **Disproportionate match** — the best fuzzy match is far larger than what was searched for; refused rather than risk replacing the wrong block.
 
-- `replace` — change one line or a range. Use `anchor` and an optional `end_anchor` (the range from `anchor` to `end_anchor` is INCLUSIVE on both ends). To delete lines, pass `content: ""`. To insert a line in the middle of the file, use `insert_after` instead.
-  ```json
-  { "op": "replace", "anchor": "42:abc:rst", "content": "    let x = 42;" }
-  { "op": "replace", "anchor": "10:def:rst", "end_anchor": "12:ghi:rst", "content": "block of three lines\nspanning multiple\nlines" }
-  ```
-- `insert_after` — add new lines after the anchor. The new lines go between the anchored line and what was originally the next line; existing content is preserved. Special anchors: `"0:"` inserts at the top of the file; `"EOF"` appends at the end.
-  ```json
-  { "op": "insert_after", "anchor": "42:abc:rst", "content": "new line one\nnew line two" }
-  { "op": "insert_after", "anchor": "EOF", "content": "## Usage\n\n…" }
-  ```
-- `insert_before` — add new lines above the anchored line. Same semantics as `insert_after` on the previous line, but the anchor names the line the text goes above — handy at section boundaries (headings, function starts).
-  ```json
-  { "op": "insert_before", "anchor": "42:abc:rst", "content": "// explanatory comment" }
-  ```
-- `write` — replace the entire file. No anchors required.
-  ```json
-  { "op": "write", "content": "full file content here" }
-  ```
-
-Multiple ops in one call are validated against the pre-edit file and applied atomically. If any anchor is stale, the whole batch is rejected. Two `replace` ops whose ranges overlap are also rejected — merge them into one op with a wider range.
-
-A successful edit replies with the edited regions rendered with fresh anchors (±2 lines of context, overlapping windows merged, capped at 60 lines), so the result of the edit is immediately visible and follow-up ops can reuse the returned anchors without a re-`read`.
-
-Anchors are self-healing where the answer is unambiguous: if the anchored content merely moved (lines inserted above it), or a neighbour in the same chunk changed while the anchored line itself is intact, the edit is applied automatically and the reply carries a `Note:` describing the recovery. A stale anchor that matches a run of **contiguous byte-identical lines** (a line that got duplicated) is also recovered — the duplicates are interchangeable, so the edit applies to the nearest one. The tool never guesses beyond that — a stale anchor whose content is gone, or one that matches several *different* nearby lines, is still an error, and that error returns fresh anchors plus a snippet around the target line so a re-`read` is usually unnecessary.
-
-#### Hashline anchors
-
-Every line `read` and `grep` returns carries a two-part hash (the `chunk` anchor scheme): `LOCAL` fingerprints the line's own content, whitespace-normalized, so formatter-only edits don't invalidate anchors and a line that merely moved keeps its local hash; `CHUNK` fingerprints the 8-line chunk around the line, so nearby edits mark the anchor stale even when the line itself is untouched. To `edit` a line, copy the full `<line>:<local>:<chunk>` prefix into the `anchor` field of the op — do not re-type the line text. Pasting the whole gutter (`22:abc:rst→…`) or ASCII `->` is fine. If the model omits the line number and sends only `local:chunk`, `edit` recovers it when that pair is unique in the file.
+A successful edit replies with a diff of what actually changed (common prefix/suffix trimmed, `-`/`+` blocks, capped at 80 lines) — check it before issuing the next edit. `oldString: ""` on a path that doesn't exist creates the file with `newString` as its content (prefer `write` for that).
 
 ## Search Tools
 
@@ -100,7 +77,7 @@ Search file contents by regex pattern.
 | `context` | No | Lines before/after each match |
 | `limit` | No | Maximum matches (default: 100) |
 
-Each output line is prefixed with the same hashline anchor as `read` (`<relPath>:<line>:<local>:<chunk>:<content>`), so a match can be edited without a separate `read`.
+Output is plain `<relPath>:<line>:<content>`, same shape as ripgrep's own default output.
 
 ### `ls`
 
@@ -308,7 +285,7 @@ This prevents the agent from getting stuck retrying the same failing operation.
 
 Images can be attached to messages and are sent directly to vision-capable models.
 
-**Attach**: `Ctrl+G` opens a file picker. Supported formats: jpg, jpeg, png, gif, webp, bmp. Images larger than 5MB are rejected.
+**Attach**: `Ctrl+G` opens a file picker. Supported formats: jpg, jpeg, png, gif, webp, bmp. Large images are automatically downscaled to fit; only rejected if truly huge (25MB+).
 
 **Read tool**: When the `read` tool opens an image file, the image is sent as a separate user message alongside the tool result text.
 
