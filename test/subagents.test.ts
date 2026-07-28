@@ -85,14 +85,14 @@ describe("loadSubagentPrompts", () => {
 		expect(worker!.label).toBe("Worker");
 		expect(worker!.systemPrompt.length).toBeGreaterThan(0);
 		// Same shared file-tool + discipline contract as personas — not role-specific.
-		expect(worker!.systemPrompt).toContain("## File tools / hashline anchors");
+		expect(worker!.systemPrompt).toContain("## File tools");
 		expect(worker!.systemPrompt).toContain("## Error Handling");
 		const disciplineExpected = readFileSync(HARNESS_DISCIPLINE_FILE, "utf-8").trim();
 		expect(worker!.systemPrompt).toContain(disciplineExpected);
 		const verificationExpected = readFileSync(VERIFICATION_DISCIPLINE_FILE, "utf-8").trim();
 		expect(worker!.systemPrompt).toContain(verificationExpected);
 		const errIdx = worker!.systemPrompt.indexOf("## Error Handling");
-		const editIdx = worker!.systemPrompt.indexOf("## File tools / hashline anchors");
+		const editIdx = worker!.systemPrompt.indexOf("## File tools");
 		const discIdx = worker!.systemPrompt.indexOf("## Agent discipline");
 		const verifIdx = worker!.systemPrompt.indexOf('## Verification before "done"');
 		expect(editIdx).toBeGreaterThan(errIdx);

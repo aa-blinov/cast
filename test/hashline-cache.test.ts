@@ -1,22 +1,9 @@
 import { mkdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { AppConfig } from "../src/core/config.ts";
 import { clearHashlineCache, getCachedFile, hashlineCacheSize } from "../src/core/tools/hashline-cache.ts";
-import { createToolExecutor } from "../src/core/tools.ts";
 
 const TEST_DIR = join(import.meta.dirname, "__test_tmp__", "hashline-cache");
-
-const mockConfig: AppConfig = {
-	baseURL: "http://localhost",
-	apiKey: "test",
-	contextWindow: 128_000,
-	maxResponseTokens: 8192,
-	compactionThreshold: 0.75,
-	maxToolOutputLines: 2000,
-	maxToolOutputBytes: 64 * 1024,
-	defaultBashTimeout: 10,
-};
 
 beforeEach(() => {
 	// mkdtempSync analogue: rely on beforeEach mkdir in other tests, but
@@ -32,19 +19,16 @@ afterEach(() => {
 
 describe("hashline-cache", () => {
 	it("serves a second read of the same file from the LRU", async () => {
-		writeFileSync(join(TEST_DIR, "a.txt"), "one\ntwo\nthree\n");
+		const path = join(TEST_DIR, "a.txt");
+		writeFileSync(path, "one\ntwo\nthree\n");
 
-		const exec = createToolExecutor(TEST_DIR, mockConfig);
-		const r1 = await exec("read", { path: "a.txt" });
-		expect(r1.isError).toBeFalsy();
-		const sizeAfterFirst = hashlineCacheSize();
-		expect(sizeAfterFirst).toBe(1);
+		const r1 = await getCachedFile(path);
+		expect(hashlineCacheSize()).toBe(1);
 
 		// A second read on the same path should not grow the cache.
-		const r2 = await exec("read", { path: "a.txt" });
-		expect(r2.isError).toBeFalsy();
+		const r2 = await getCachedFile(path);
 		expect(hashlineCacheSize()).toBe(1);
-		expect(r1.content).toBe(r2.content);
+		expect(r1.raw).toBe(r2.raw);
 	});
 
 	it("invalidates the cache when the file's mtime changes (external edit)", async () => {
@@ -66,16 +50,20 @@ describe("hashline-cache", () => {
 		expect(second.hashes[0]![0]).not.toBe(firstHashes[0]);
 	});
 
-	it("invalidates on internal write/edit so a follow-up read sees the new file", async () => {
+	it("invalidateCachedFile drops an entry so a follow-up read sees the new file", async () => {
+		// The active read/write/edit tools (tools/files.ts) don't populate this
+		// cache at all anymore — only the deprecated hashline-anchored path
+		// (tools/files-legacy-hashline.ts) and plan.ts's plan-file writes do.
+		// This exercises invalidateCachedFile directly rather than through the
+		// active tool executor.
+		const { invalidateCachedFile } = await import("../src/core/tools/hashline-cache.ts");
 		const path = join(TEST_DIR, "c.txt");
 		writeFileSync(path, "first\n");
 		await getCachedFile(path); // warm cache
 
-		const exec = createToolExecutor(TEST_DIR, mockConfig);
-		await exec("write", { path: "c.txt", content: "second\nthird\n" });
+		writeFileSync(path, "second\nthird\n");
+		invalidateCachedFile(path);
 
-		// The write hook must have dropped the cache entry, so the next
-		// read sees the new content rather than the old cached "first\n".
 		const cached = await getCachedFile(path);
 		expect(cached.raw).toBe("second\nthird\n");
 	});

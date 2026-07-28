@@ -1,4 +1,11 @@
 /**
+ * @deprecated Only consumed by tools/files-legacy-hashline.ts now (the
+ * active read/write/edit and grep no longer hash lines at all) — kept
+ * because the legacy module still depends on it. `plan.ts` still calls
+ * `invalidateCachedFile` on plan-file writes; that's a harmless no-op
+ * against the active tools (nothing populates this cache anymore) and
+ * only matters if the legacy module is ever reinstated.
+ *
  * In-memory LRU cache of `computeLineHashes` results, keyed by absolute
  * path. The mtime at read time is stored alongside the hashes; on the
  * next `get` we re-stat the file and discard the cached entry if it
