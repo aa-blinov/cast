@@ -17,6 +17,7 @@ import { DEFAULT_PERSONA, type Persona } from "../core/personas.ts";
 import { createPlanState, modeDisabledTools } from "../core/plan.ts";
 import {
 	addMarketplace,
+	ensureDefaultMarketplaces,
 	getMarketplaceCatalog,
 	installPlugin,
 	listInstalledPlugins,
@@ -1408,6 +1409,10 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			const [sub, rest] = splitArg(arg);
 			const sessionCwd = ws.session.cwd ?? cwd;
 			const settings = loadSettings();
+			// Codex/Claude/Grok catalogs are always present — cheap no-op once all
+			// three are known (a single JSON read), so calling it unconditionally
+			// here is fine rather than gating on which subcommand this is.
+			ensureDefaultMarketplaces();
 			try {
 				if (!sub || sub === "list") {
 					return { ok: true, result: listInstalledPlugins(settings) };

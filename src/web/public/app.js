@@ -2829,14 +2829,17 @@ function SettingsPlugins({ data, busy, act, confirm }) {
 				<div key=${mp.name} class="settings-item-row">
 					<div class="settings-item-info">
 						<span class="settings-item-name">${mp.name}</span>
-						<span class="settings-item-meta" title=${mp.source}>${shortPath(mp.source)}</span>
+						<span class="settings-item-meta" title=${mp.source}>${mp.isDefault ? "built-in" : shortPath(mp.source)}</span>
 					</div>
 					<div class="settings-item-actions">
 						<button class="modal-btn icon-btn" title="Update" disabled=${busy} onClick=${() => act(`/plugin marketplace update ${mp.name}`)}><${icons.arrowPath} /></button>
-						<button class="modal-btn icon-btn modal-btn-danger" title="Remove" disabled=${busy} onClick=${async () => {
-							if (await confirm(`Remove marketplace "${mp.name}"?`))
-								act(`/plugin marketplace remove ${mp.name}`);
-						}}><${icons.trash} /></button>
+						${
+							!mp.isDefault &&
+							html`<button class="modal-btn icon-btn modal-btn-danger" title="Remove" disabled=${busy} onClick=${async () => {
+								if (await confirm(`Remove marketplace "${mp.name}"?`))
+									act(`/plugin marketplace remove ${mp.name}`);
+							}}><${icons.trash} /></button>`
+						}
 					</div>
 				</div>
 			`,

@@ -22,6 +22,20 @@ const MARKETPLACE_MANIFESTS = [
 	".agents/plugins/marketplace.json", // Codex
 ] as const;
 
+/**
+ * Bundled default catalogs (Codex / Claude / Grok) — always present, seeded
+ * once into ~/.cast/plugins on first plugin command (not on every startup,
+ * so offline launches stay fast). Unlike user-added marketplaces, these
+ * can't be removed: no trash icon in the UI, and removeMarketplace rejects
+ * them outright. Re-seeded on every call until all three exist, so a
+ * first-run offline failure gets retried on the next /plugin use.
+ */
+export const DEFAULT_MARKETPLACE_SOURCES: ReadonlyArray<{ source: string; label: string }> = [
+	{ source: "openai/plugins", label: "codex" },
+	{ source: "anthropics/claude-plugins-official", label: "claude" },
+	{ source: "xai-org/plugin-marketplace", label: "grok" },
+];
+
 export interface PluginsPaths {
 	root: string;
 }
@@ -53,6 +67,8 @@ export interface KnownMarketplace {
 	/** Local checkout path. */
 	path: string;
 	installedAt: string;
+	/** One of the bundled Codex/Claude/Grok catalogs — not user-removable. */
+	isDefault?: boolean;
 }
 
 export interface MarketplacePluginEntry {
@@ -110,6 +126,52 @@ function writeKnownMarketplaces(paths: PluginsPaths, data: Record<string, KnownM
 
 export function listKnownMarketplaces(paths: PluginsPaths = defaultPluginsPaths()): KnownMarketplace[] {
 	return Object.values(readKnownMarketplaces(paths)).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export interface EnsureDefaultsResult {
+	/** Marketplace names newly cloned/registered. */
+	added: string[];
+	/** Per-source errors (offline, missing manifest, …). */
+	errors: string[];
+}
+
+/**
+ * Clone + register any of the default Codex/Claude/Grok marketplaces not
+ * already known. Cheap no-op once all three exist (a single JSON read, no
+ * network) — safe to call on every `/plugin` use rather than gating behind
+ * a one-shot flag, so a source that failed on a previous offline run gets
+ * retried automatically instead of needing a manual re-add.
+ */
+export function ensureDefaultMarketplaces(
+	paths: PluginsPaths = defaultPluginsPaths(),
+	sources: ReadonlyArray<{ source: string; label: string }> = DEFAULT_MARKETPLACE_SOURCES,
+): EnsureDefaultsResult {
+	const known = readKnownMarketplaces(paths);
+	const added: string[] = [];
+	const errors: string[] = [];
+	for (const { source, label } of sources) {
+		const alreadyKnown = Object.values(known).some(
+			(k) => k.isDefault && normalizeSourceKey(k.source) === normalizeSourceKey(source),
+		);
+		if (alreadyKnown) continue;
+		try {
+			const mp = addMarketplace(source, paths, { isDefault: true });
+			added.push(`${mp.name} (${label})`);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			errors.push(`${label} (${source}): ${message}`);
+		}
+	}
+	return { added, errors };
+}
+
+function normalizeSourceKey(source: string): string {
+	return source
+		.trim()
+		.replace(/\.git$/i, "")
+		.replace(/^https?:\/\/github\.com\//i, "")
+		.replace(/^git@github\.com:/i, "")
+		.toLowerCase();
 }
 
 // ---------------------------------------------------------------------------
@@ -310,7 +372,11 @@ function copyLocalPlugin(src: string, dest: string): void {
 // Marketplace add / remove / update
 // ---------------------------------------------------------------------------
 
-export function addMarketplace(source: string, paths: PluginsPaths = defaultPluginsPaths()): KnownMarketplace {
+export function addMarketplace(
+	source: string,
+	paths: PluginsPaths = defaultPluginsPaths(),
+	opts: { isDefault?: boolean } = {},
+): KnownMarketplace {
 	mkdirSync(marketplacesDir(paths), { recursive: true });
 
 	const abs = isAbsolute(source) || source.startsWith(".") ? resolve(source) : null;
@@ -325,6 +391,7 @@ export function addMarketplace(source: string, paths: PluginsPaths = defaultPlug
 			source: abs,
 			path: dest,
 			installedAt: new Date().toISOString(),
+			...(opts.isDefault ? { isDefault: true } : {}),
 		};
 		const all = readKnownMarketplaces(paths);
 		all[catalog.name] = known;
@@ -351,6 +418,7 @@ export function addMarketplace(source: string, paths: PluginsPaths = defaultPlug
 			source,
 			path: dest,
 			installedAt: new Date().toISOString(),
+			...(opts.isDefault ? { isDefault: true } : {}),
 		};
 		const all = readKnownMarketplaces(paths);
 		all[catalog.name] = known;
@@ -370,6 +438,7 @@ export function removeMarketplace(name: string, paths: PluginsPaths = defaultPlu
 	const all = readKnownMarketplaces(paths);
 	const entry = all[name];
 	if (!entry) throw new Error(`Unknown marketplace "${name}"`);
+	if (entry.isDefault) throw new Error(`"${name}" is a default marketplace and can't be removed`);
 	delete all[name];
 	writeKnownMarketplaces(paths, all);
 	if (existsSync(entry.path)) rmSync(entry.path, { recursive: true, force: true });
