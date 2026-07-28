@@ -23,6 +23,9 @@
 		"web": "node --import tsx ./src/web/index.ts"
 	},
 	"dependencies": {
+		"@jsquash/jpeg": "^1.6.0",
+		"@jsquash/png": "^3.1.1",
+		"@jsquash/resize": "^2.1.1",
 		"@modelcontextprotocol/sdk": "^1.29.0",
 		"@types/react": "^19.2.17",
 		"ink": "^7.1.0",

@@ -8,6 +8,7 @@ import { constants } from "node:fs";
 import { access, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname } from "node:path";
 import type { AppConfig } from "../config.ts";
+import { resizeImageForEmbedding } from "../image-resize.ts";
 import {
 	computeHashesForLines,
 	findShifted,
@@ -53,7 +54,13 @@ const IMAGE_MIME_TYPES: Record<string, string> = {
 	".webp": "image/webp",
 	".bmp": "image/bmp",
 };
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+// A sanity ceiling, not a normal-case limit — matches opencode's read tool,
+// which has no per-file image cap at all and leaves shrinking to a later
+// layer (see image-resize.ts). Anything under this gets read and, if it's a
+// jpeg/png over SKIP_RESIZE_BELOW_BYTES, downscaled before being embedded;
+// this ceiling only guards against decoding something absurd (a many-hundred-
+// MB file) into memory.
+const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
 
 export async function execRead(args: Record<string, unknown>, cwd: string, config: AppConfig): Promise<ToolResult> {
 	const filePath = String(args.path ?? "");
@@ -78,10 +85,13 @@ export async function execRead(args: Record<string, unknown>, cwd: string, confi
 				isError: true,
 			};
 		}
-		const buffer = await readFile(absolutePath);
+		const original = await readFile(absolutePath);
+		const resized = await resizeImageForEmbedding(original, mimeType);
+		const embedded = resized?.buffer ?? original;
+		const note = resized ? ` — downscaled from ${formatSize(stats.size)} to ${formatSize(embedded.length)}` : "";
 		return {
-			content: `[Image: ${filePath} (${mimeType}, ${formatSize(stats.size)}) — shown in the next message]`,
-			imageDataUrl: `data:${mimeType};base64,${buffer.toString("base64")}`,
+			content: `[Image: ${filePath} (${mimeType}, ${formatSize(stats.size)}${note}) — shown in the next message]`,
+			imageDataUrl: `data:${mimeType};base64,${embedded.toString("base64")}`,
 		};
 	}
 

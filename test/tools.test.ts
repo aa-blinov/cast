@@ -508,6 +508,65 @@ describe("read", () => {
 });
 
 // ============================================================================
+// read — images (resize pipeline wiring — see test/image-resize.test.ts for
+// the codec logic itself; this just proves execRead actually calls it)
+// ============================================================================
+
+describe("read — images", () => {
+	it("embeds a small image unresized", async () => {
+		// 1x1 PNG — far under SKIP_RESIZE_BELOW_BYTES, so resizeImageForEmbedding
+		// returns undefined and execRead must fall back to the original bytes.
+		const onePixelPng = Buffer.from(
+			"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+			"base64",
+		);
+		writeFileSync(join(TEST_DIR, "tiny.png"), onePixelPng);
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const result = await exec("read", { path: "tiny.png" });
+		expect(result.isError).toBeFalsy();
+		expect(result.imageDataUrl).toBe(`data:image/png;base64,${onePixelPng.toString("base64")}`);
+		expect(result.content).not.toContain("downscaled");
+	});
+
+	it("rejects a file over the sanity ceiling before ever trying to decode it", async () => {
+		// Doesn't need to be a real image — the reject happens on stat.size,
+		// before any read/decode is attempted.
+		writeFileSync(join(TEST_DIR, "huge.jpg"), Buffer.alloc(26 * 1024 * 1024, 1));
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const result = await exec("read", { path: "huge.jpg" });
+		expect(result.isError).toBe(true);
+		expect(result.content).toContain("too large");
+	});
+
+	it("downscales a real oversized jpeg and notes it in the result text", async () => {
+		const { default: encodeJpeg, init: initJpegEncode } = await import("@jsquash/jpeg/encode.js");
+		const { readFileSync: rf } = await import("node:fs");
+		const wasmDir = join(import.meta.dirname, "..", "wasm");
+		await initJpegEncode(await WebAssembly.compile(rf(join(wasmDir, "mozjpeg_enc.wasm"))));
+		const width = 2000;
+		const height = 1500;
+		const data = new Uint8ClampedArray(width * height * 4);
+		for (let i = 0; i < data.length; i += 4) {
+			data[i] = Math.floor(Math.random() * 256);
+			data[i + 1] = Math.floor(Math.random() * 256);
+			data[i + 2] = Math.floor(Math.random() * 256);
+			data[i + 3] = 255;
+		}
+		const encoded = await encodeJpeg({ width, height, data, colorSpace: "srgb" }, { quality: 90 });
+		const original = Buffer.from(encoded);
+		expect(original.byteLength).toBeGreaterThan(300 * 1024);
+		writeFileSync(join(TEST_DIR, "big.jpg"), original);
+
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const result = await exec("read", { path: "big.jpg" });
+		expect(result.isError).toBeFalsy();
+		expect(result.content).toContain("downscaled");
+		const embeddedBase64 = result.imageDataUrl!.split("base64,")[1]!;
+		expect(Buffer.from(embeddedBase64, "base64").byteLength).toBeLessThan(original.byteLength);
+	}, 20_000);
+});
+
+// ============================================================================
 // write
 // ============================================================================
 
