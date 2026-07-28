@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS messages (
   content_json TEXT NOT NULL,
   in_context INTEGER NOT NULL DEFAULT 1,
   reasoning TEXT,
+  turn_meta TEXT,
   PRIMARY KEY (session_id, seq)
 ) WITHOUT ROWID;
 
@@ -85,6 +86,10 @@ export function getDb(): DatabaseSync {
 	}
 	if (!columns.some((c) => c.name === "share_token")) {
 		instance.exec("ALTER TABLE sessions ADD COLUMN share_token TEXT");
+	}
+	const messageColumns = instance.prepare("PRAGMA table_info(messages)").all() as Array<{ name: string }>;
+	if (!messageColumns.some((c) => c.name === "turn_meta")) {
+		instance.exec("ALTER TABLE messages ADD COLUMN turn_meta TEXT");
 	}
 	// Created after the column migration above, not inside SCHEMA — an
 	// existing DB predating share_token would otherwise fail this index's

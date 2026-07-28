@@ -799,6 +799,39 @@ describe("session persistence", () => {
 		expect(reloaded.reasoning?.[1]).toBe("thinking about X...");
 	});
 
+	it("persists per-turn provider/model/timing and survives a reload, re-keyed to full-history indices", () => {
+		const s = createSession("gpt-4o", projectA);
+		s.messages = [
+			{ role: "user", content: "explain" },
+			{ role: "assistant", content: "because X" },
+		];
+		// Web bridge sets this keyed by index into session.messages right
+		// before saving (see bridge.ts's post-turn write, mirrors reasoning above).
+		s.turnMeta = {
+			1: { provider: "minimax", model: "MiniMax-M3", totalMs: 11700, completedAt: "2026-01-01T00:00:00.000Z" },
+		};
+		saveSession(s);
+
+		const { messages, turnMeta } = getFullHistoryWithReasoning(s.id);
+		expect(messages).toHaveLength(2);
+		expect(turnMeta[1]).toEqual({
+			provider: "minimax",
+			model: "MiniMax-M3",
+			totalMs: 11700,
+			completedAt: "2026-01-01T00:00:00.000Z",
+		});
+		expect(turnMeta[0]).toBeUndefined();
+
+		// A plain loadSession (the in-context working set) also carries it.
+		const reloaded = loadSession(s.id)!;
+		expect(reloaded.turnMeta?.[1]?.model).toBe("MiniMax-M3");
+
+		// getHistoryPage (the paginated view the web client actually reads)
+		// carries it too, re-keyed to the page's own array indices.
+		const page = getHistoryPage(s.id);
+		expect(page.turnMeta[1]?.totalMs).toBe(11700);
+	});
+
 	it("getHistoryPage walks a long session back to front with no gaps or duplicates", () => {
 		const s = createSession("gpt-4o", projectA);
 		for (let i = 0; i < 50; i++) {
