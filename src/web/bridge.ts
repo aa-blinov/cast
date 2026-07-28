@@ -1587,7 +1587,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			const sessionCwd = ws.session.cwd ?? cwd;
 			const discovered = discoverSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
 			const disabled = new Set(loadSettings().disabledSkills ?? []);
-			const skill = discovered.find((s) => s.name === skillId && !disabled.has(s.name));
+			const skill = discovered.find((s) => s.name === skillId && !disabled.has(s.name) && s.pluginEnabled !== false);
 			if (skill) {
 				if (running) return { ok: false, error: "Agent running — use /queue, /steer, or /abort" };
 				submit(sessionId, formatSkillInvocation(skill, arg));
@@ -1862,7 +1862,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		const builtinNames = new Set(SLASH_COMMANDS.map((c) => c.name));
 		const discovered = discoverSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
 		const skillCommands = discovered
-			.filter((s) => !disabled.has(s.name) && !builtinNames.has(`/${s.name}`))
+			.filter((s) => !disabled.has(s.name) && s.pluginEnabled !== false && !builtinNames.has(`/${s.name}`))
 			.map((s) => ({
 				name: `/${s.name}`,
 				description: s.description,
