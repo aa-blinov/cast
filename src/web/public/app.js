@@ -3449,6 +3449,13 @@ function ShareModal({ session, onClose }) {
 // handleSubmit right when a new turn starts — a ref write triggers no
 // re-render on its own, so App can clear the previous entry there without
 // reintroducing the whole-tree churn this component exists to avoid.
+// Mounted with key=${activeId} at the call site — the 5s post-run freeze
+// below is meant to hold the *finished* time steady on the session it just
+// ran on, not survive a session switch. Without the key, switching to a
+// brand-new draft mid-freeze kept showing the old session's elapsed time
+// for however much of those 5s was left, since `elapsedMs` state itself
+// only resets when the freeze's own timeout finally fires — remounting on
+// activeId change resets it immediately instead.
 function ElapsedTimer({ running, activeId, connected, turnStartRef }) {
 	const [elapsedMs, setElapsedMs] = useState(0);
 	useEffect(() => {
@@ -3830,6 +3837,7 @@ function App() {
 				isDraft: true,
 			});
 			resetStreamingNow();
+			setTurnMeta(null);
 			setRunning(false);
 			setSidebarOpen(false);
 			const url = window.location.pathname;
@@ -3990,6 +3998,7 @@ function App() {
 				setActiveId(null);
 				setSession(null);
 				resetStreamingNow();
+				setTurnMeta(null);
 			}
 		},
 		[sessions, activeId, personas, selectSession, startDraft, showToast, dismissedIds, resetStreamingNow],
@@ -4994,7 +5003,7 @@ function App() {
 							${activePersonaLabel}
 							${session?.mode && session.mode !== "build" && html`<span class="composer-role-mode">${session.mode}</span>`}
 						</div>
-						<${ElapsedTimer} running=${running} activeId=${activeId} connected=${connected} turnStartRef=${turnStartRef} />
+						<${ElapsedTimer} key=${activeId} running=${running} activeId=${activeId} connected=${connected} turnStartRef=${turnStartRef} />
 					</div>
 				`
 				}
