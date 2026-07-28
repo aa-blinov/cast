@@ -1302,7 +1302,7 @@ function FileExplorer({ activeId, confirm, refreshNonce }) {
 	// Shared between the tree view and the flat search-results list — a name
 	// cell that swaps to an inline rename input, and an actions cell with
 	// download/rename/delete — so the two render paths don't drift apart.
-	const renderName = (fullPath, name, isDir) =>
+	const renderName = (fullPath, name) =>
 		renamingPath === fullPath
 			? html`
 				<input
@@ -1324,15 +1324,7 @@ function FileExplorer({ activeId, confirm, refreshNonce }) {
 					onBlur=${() => commitRename(fullPath)}
 				/>
 			`
-			: html`<span
-					class="fs-name"
-					title=${fullPath}
-					onClick=${(e) => {
-						if (isDir) return;
-						e.stopPropagation();
-						setPreviewPath(fullPath);
-					}}
-				>${name}</span>`;
+			: html`<span class="fs-name" title=${fullPath}>${name}</span>`;
 
 	const renderActions = (fullPath, name, type, isBusy) => html`
 		<div class="fs-row-actions">
@@ -1371,14 +1363,14 @@ function FileExplorer({ activeId, confirm, refreshNonce }) {
 		return html`
 			<div key=${fullPath}>
 				<div class="fs-row">
-					<div class="fs-row-main" style=${{ paddingLeft: `${depth * 16}px` }} onClick=${() => isDir && toggleDir(fullPath)}>
+					<div class="fs-row-main" style=${{ paddingLeft: `${depth * 16}px` }} onClick=${() => (isDir ? toggleDir(fullPath) : setPreviewPath(fullPath))}>
 						${
 							isDir
 								? html`<span class="fs-chevron${isOpen ? " open" : ""}"><${icons.chevronRight} /></span>`
 								: html`<span class="fs-chevron-spacer"></span>`
 						}
 						<span class="fs-icon">${isDir ? html`<${icons.folder} />` : html`<${icons.docFile} />`}</span>
-						${renderName(fullPath, entry.name, isDir)}
+						${renderName(fullPath, entry.name)}
 						${!isDir && entry.size != null ? html`<span class="fs-size">${humanSize(entry.size)}</span>` : null}
 					</div>
 					${renderActions(fullPath, entry.name, entry.type, isBusy)}
@@ -1415,10 +1407,10 @@ function FileExplorer({ activeId, confirm, refreshNonce }) {
 										const isBusy = busyPath === r.path;
 										return html`
 										<div key=${r.path} class="fs-row">
-											<div class="fs-row-main">
+											<div class="fs-row-main" onClick=${() => r.type !== "dir" && setPreviewPath(r.path)}>
 												<span class="fs-chevron-spacer"></span>
 												<span class="fs-icon">${r.type === "dir" ? html`<${icons.folder} />` : html`<${icons.docFile} />`}</span>
-												${renderName(r.path, r.path, r.type === "dir")}
+												${renderName(r.path, r.path)}
 											</div>
 											${renderActions(r.path, baseName, r.type, isBusy)}
 										</div>
