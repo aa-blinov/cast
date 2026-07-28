@@ -32,6 +32,12 @@ try {
 		root.setProperty("--rose", colors.error);
 		root.setProperty("--persona", colors.persona);
 		root.setProperty("--text-muted", colors.muted);
+		if (colors.bg) root.setProperty("--bg", colors.bg);
+		if (colors.bgSurface) root.setProperty("--bg-surface", colors.bgSurface);
+		if (colors.bgRaised) root.setProperty("--bg-raised", colors.bgRaised);
+		if (colors.bgHover) root.setProperty("--bg-hover", colors.bgHover);
+		if (colors.border) root.setProperty("--border", colors.border);
+		if (colors.borderActive) root.setProperty("--border-active", colors.borderActive);
 	}
 } catch {}
 // Same idea for a picked font/scale (Settings > Font in app.js) — both are

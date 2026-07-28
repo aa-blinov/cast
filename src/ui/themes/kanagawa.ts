@@ -16,5 +16,11 @@ export const kanagawa: Theme = {
 		warning: "#dca561",
 		error: "#c34043",
 		muted: "#727169",
+		bg: "#08080a",
+		bgSurface: "#13161c",
+		bgRaised: "#22242a",
+		bgHover: "#282a30",
+		border: "#282a30",
+		borderActive: "#282a30",
 	},
 };

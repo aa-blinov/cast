@@ -16,5 +16,11 @@ export const everforest: Theme = {
 		warning: "#dbbc7f",
 		error: "#e67e80",
 		muted: "#859289",
+		bg: "#08080a",
+		bgSurface: "#151614",
+		bgRaised: "#232522",
+		bgHover: "#2b2d2a",
+		border: "#2b2d2a",
+		borderActive: "#2b2d2a",
 	},
 };

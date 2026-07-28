@@ -16,5 +16,11 @@ export const synthwave84: Theme = {
 		warning: "#fede5d",
 		error: "#fe4450",
 		muted: "#848bbd",
+		bg: "#08080a",
+		bgSurface: "#20111c",
+		bgRaised: "#2e202b",
+		bgHover: "#31222d",
+		border: "#31222d",
+		borderActive: "#31222d",
 	},
 };

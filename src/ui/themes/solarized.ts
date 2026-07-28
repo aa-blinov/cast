@@ -16,5 +16,11 @@ export const solarized: Theme = {
 		warning: "#b58900",
 		error: "#dc322f",
 		muted: "#586e75",
+		bg: "#002b36",
+		bgSurface: "#04303d",
+		bgRaised: "#094351",
+		bgHover: "#135f6c",
+		border: "#1d616b",
+		borderActive: "#268bd2",
 	},
 };

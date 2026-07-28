@@ -15,5 +15,11 @@ export const nord: Theme = {
 		warning: "#ebcb8b",
 		error: "#bf616a",
 		muted: "#4c566a",
+		bg: "#2e3440",
+		bgSurface: "#343a4a",
+		bgRaised: "#434c5e",
+		bgHover: "#4c566a",
+		border: "#4c566a",
+		borderActive: "#5e81ac",
 	},
 };

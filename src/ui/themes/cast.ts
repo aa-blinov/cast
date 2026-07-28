@@ -16,5 +16,11 @@ export const cast: Theme = {
 		warning: "#fbbf24",
 		error: "#fb7185",
 		muted: "#64748b",
+		bg: "#08080a",
+		bgSurface: "#0c181c",
+		bgRaised: "#1b262a",
+		bgHover: "#232f33",
+		border: "#232f33",
+		borderActive: "#232f33",
 	},
 };

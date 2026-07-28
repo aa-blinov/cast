@@ -15,5 +15,11 @@ export const dracula: Theme = {
 		warning: "#f1fa8c",
 		error: "#ff5555",
 		muted: "#6272a4",
+		bg: "#21222c",
+		bgSurface: "#282a36",
+		bgRaised: "#343746",
+		bgHover: "#44475a",
+		border: "#44475a",
+		borderActive: "#6272a4",
 	},
 };

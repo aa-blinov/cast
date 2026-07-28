@@ -129,6 +129,12 @@ function applyTheme(colors) {
 	root.setProperty("--rose", colors.error);
 	root.setProperty("--persona", colors.persona);
 	root.setProperty("--text-muted", colors.muted);
+	if (colors.bg) root.setProperty("--bg", colors.bg);
+	if (colors.bgSurface) root.setProperty("--bg-surface", colors.bgSurface);
+	if (colors.bgRaised) root.setProperty("--bg-raised", colors.bgRaised);
+	if (colors.bgHover) root.setProperty("--bg-hover", colors.bgHover);
+	if (colors.border) root.setProperty("--border", colors.border);
+	if (colors.borderActive) root.setProperty("--border-active", colors.borderActive);
 	// Cached so index.html's inline bootstrap script (which runs before this
 	// module even starts fetching /api/themes+/api/config) can apply the same
 	// colors synchronously on the very first paint — without it, every reload
@@ -5156,7 +5162,9 @@ function SharedThreadView({ token }) {
 	if (!data) {
 		return html`
 			<div class="shared-view">
-				<div class="loading-spinner" />
+				<div class="shared-view-loading">
+					<div class="loading-spinner" />
+				</div>
 			</div>
 		`;
 	}

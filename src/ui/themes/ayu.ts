@@ -16,5 +16,11 @@ export const ayu: Theme = {
 		warning: "#ffee99",
 		error: "#ff3333",
 		muted: "#5c6773",
+		bg: "#08080a",
+		bgSurface: "#1b150e",
+		bgRaised: "#2a231c",
+		bgHover: "#302a23",
+		border: "#302a23",
+		borderActive: "#302a23",
 	},
 };

@@ -15,5 +15,11 @@ export const gruvbox: Theme = {
 		warning: "#fabd2f",
 		error: "#fb4934",
 		muted: "#928374",
+		bg: "#1d2021",
+		bgSurface: "#282828",
+		bgRaised: "#3c3836",
+		bgHover: "#504945",
+		border: "#665c54",
+		borderActive: "#7c6f64",
 	},
 };
