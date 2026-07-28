@@ -74,3 +74,8 @@ import { build } from "esbuild";
 // for public/ as a sibling of dist/index.js.
 import { cpSync } from "node:fs";
 cpSync("src/web/public", "dist/public", { recursive: true });
+
+// Same idea for the vendored image-codec WASM binaries (image-resize.ts) —
+// esbuild only bundles the @jsquash/* JS glue, not these; they're read from
+// disk at runtime via a path resolved relative to dist/index.js.
+cpSync("wasm", "dist/wasm", { recursive: true });
