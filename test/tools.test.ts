@@ -774,7 +774,8 @@ describe("edit", () => {
 		const result = await exec("edit", {
 			filePath: "indent.txt",
 			oldString: "\tif (x) {\n\t}",
-			newString: "\tif (x) {\n\t\tconst y = 1;\n\t\tif (y) {\n\t\t\treturn y;\n\t\t}\n        // space-indented too\n\t}",
+			newString:
+				"\tif (x) {\n\t\tconst y = 1;\n\t\tif (y) {\n\t\t\treturn y;\n\t\t}\n        // space-indented too\n\t}",
 		});
 		expect(result.isError).toBeFalsy();
 		expect(readFileSync(join(TEST_DIR, "indent.txt"), "utf-8")).toBe(
