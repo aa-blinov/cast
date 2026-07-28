@@ -13,12 +13,12 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
 :root {
-	--bg: #09090b;
-	--bg-surface: #0e0e11;
-	--bg-raised: #18181b;
-	--bg-hover: #1f1f23;
-	--border: #27272a;
-	--border-active: #3f3f46;
+	--bg: #08080a;
+	--bg-surface: #131317;
+	--bg-raised: #1e1e24;
+	--bg-hover: #28282e;
+	--border: #35353d;
+	--border-active: #4a4a55;
 	--text: #fafafa;
 	--text-dim: #a1a1aa;
 	--text-muted: #71717a;
@@ -227,6 +227,12 @@ body.resizing-diff * { user-select: none; }
 	height: 100vh;
 	height: 100dvh;
 	overflow-y: auto;
+}
+.shared-view-loading {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	height: 100%;
 }
 .shared-view-error {
 	display: flex;
@@ -683,16 +689,16 @@ body.resizing-diff * { user-select: none; }
 	border: 1px dashed var(--border-active);
 	border-radius: var(--radius);
 	padding: 8px 12px;
+	background: var(--bg-surface);
 }
 .turn-meta {
 	font-size: .72rem;
-	color: var(--text-muted);
-	opacity: .65;
+	color: var(--text-dim);
 	padding: 2px 4px 10px;
 	font-family: var(--font);
 }
-.message-reasoning .message-label { color: var(--text-muted); }
-.message-reasoning .message-content { color: var(--text-muted); font-style: italic; }
+.message-reasoning .message-label { color: var(--text-dim); }
+.message-reasoning .message-content { color: var(--text-dim); font-style: italic; }
 .message-label {
 	font-size: .68rem; font-weight: 600;
 	text-transform: uppercase;
@@ -811,7 +817,7 @@ pre:hover .code-copy-btn, .code-copy-btn:focus-visible { opacity: 1; }
 	background: transparent;
 }
 .streaming-thinking .streaming-content {
-	color: var(--text-muted);
+	color: var(--text-dim);
 	font-style: italic;
 }
 
@@ -1822,7 +1828,11 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	min-width: 0;
 	overflow-y: auto;
 	padding: 14px 16px;
+	display: flex;
+	flex-direction: column;
 }
+.settings-pane > * { flex-shrink: 0; }
+.settings-pane > .settings-loading { flex: 1; }
 .settings-hint {
 	color: var(--text-muted);
 	font-size: .82rem;
@@ -1835,8 +1845,6 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	height: 100%;
-	min-height: 120px;
 	color: var(--text-muted);
 	font-size: .82rem;
 }

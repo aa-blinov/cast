@@ -16,5 +16,11 @@ export const rosePine: Theme = {
 		warning: "#f6c177",
 		error: "#eb6f92",
 		muted: "#6e6a86",
+		bg: "#08080a",
+		bgSurface: "#17151b",
+		bgRaised: "#26242a",
+		bgHover: "#2d2b31",
+		border: "#2d2b31",
+		borderActive: "#2d2b31",
 	},
 };

@@ -16,5 +16,11 @@ export const catppuccin: Theme = {
 		warning: "#f9e2af",
 		error: "#f38ba8",
 		muted: "#6c7086",
+		bg: "#11111b",
+		bgSurface: "#181825",
+		bgRaised: "#1e1e2e",
+		bgHover: "#313244",
+		border: "#45475a",
+		borderActive: "#585b70",
 	},
 };

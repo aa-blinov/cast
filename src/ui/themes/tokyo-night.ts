@@ -14,6 +14,12 @@ export const tokyoNight: Theme = {
 		success: "#73daca",
 		warning: "#e0af68",
 		error: "#f7768e",
-		muted: "#565f89",
+		muted: "#a9b1d6",
+		bg: "#08080a",
+		bgSurface: "#13161d",
+		bgRaised: "#22242c",
+		bgHover: "#282b33",
+		border: "#282b33",
+		borderActive: "#282b33",
 	},
 };

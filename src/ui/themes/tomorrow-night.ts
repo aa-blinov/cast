@@ -15,5 +15,11 @@ export const tomorrowNight: Theme = {
 		warning: "#f0c674",
 		error: "#cc6666",
 		muted: "#969896",
+		bg: "#08080a",
+		bgSurface: "#14161a",
+		bgRaised: "#222529",
+		bgHover: "#282b2f",
+		border: "#282b2f",
+		borderActive: "#282b2f",
 	},
 };

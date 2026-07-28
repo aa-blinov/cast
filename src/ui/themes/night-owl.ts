@@ -15,5 +15,11 @@ export const nightOwl: Theme = {
 		warning: "#FFCA28",
 		error: "#EF5350",
 		muted: "#5f7e97",
+		bg: "#08080a",
+		bgSurface: "#13161e",
+		bgRaised: "#21242c",
+		bgHover: "#292b33",
+		border: "#292b33",
+		borderActive: "#292b33",
 	},
 };

@@ -15,5 +15,11 @@ export const molokai: Theme = {
 		warning: "#e6db74",
 		error: "#f92672",
 		muted: "#75715e",
+		bg: "#08080a",
+		bgSurface: "#0f171b",
+		bgRaised: "#1e2629",
+		bgHover: "#272f32",
+		border: "#272f32",
+		borderActive: "#272f32",
 	},
 };

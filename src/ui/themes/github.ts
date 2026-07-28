@@ -15,5 +15,11 @@ export const github: Theme = {
 		warning: "#d29922",
 		error: "#f85149",
 		muted: "#656d76",
+		bg: "#0d1117",
+		bgSurface: "#161b22",
+		bgRaised: "#21262d",
+		bgHover: "#30363d",
+		border: "#30363d",
+		borderActive: "#484f58",
 	},
 };

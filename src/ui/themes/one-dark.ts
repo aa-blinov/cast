@@ -16,5 +16,11 @@ export const oneDark: Theme = {
 		warning: "#e5c07b",
 		error: "#e06c75",
 		muted: "#5c6370",
+		bg: "#08080a",
+		bgSurface: "#11161d",
+		bgRaised: "#1f252b",
+		bgHover: "#262c32",
+		border: "#262c32",
+		borderActive: "#262c32",
 	},
 };

@@ -23,6 +23,18 @@ export interface ThemeColors {
 	error: string;
 	/** Dimmed text: timestamps, separators, inactive palette rows, help hints. */
 	muted: string;
+	/** Deepest page background. */
+	bg: string;
+	/** Surface panels — sidebar, composer, modals, tool cards. */
+	bgSurface: string;
+	/** Raised surfaces — active tabs, toasts, inline code, table headers. */
+	bgRaised: string;
+	/** Hover/highlight surfaces — list items, settings tabs, menu items. */
+	bgHover: string;
+	/** Subtle borders — separators, inputs, cards. */
+	border: string;
+	/** Active/focused borders. */
+	borderActive: string;
 }
 
 export interface Theme {

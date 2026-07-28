@@ -15,5 +15,11 @@ export const monokai: Theme = {
 		warning: "#e6db74",
 		error: "#f92672",
 		muted: "#75715e",
+		bg: "#08080a",
+		bgSurface: "#201219",
+		bgRaised: "#2f2027",
+		bgHover: "#312229",
+		border: "#312229",
+		borderActive: "#312229",
 	},
 };
