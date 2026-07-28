@@ -285,6 +285,12 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 			usage: ws.session.usage,
 			createdAt: ws.session.createdAt,
 			updatedAt: ws.session.updatedAt,
+			// Ephemeral (see WebAgentSession.lastTurn) — survives a session
+			// switch/page reload as long as this server process hasn't
+			// restarted, so the client can restore the "provider · model · Ns"
+			// footer under the last reply instead of only ever showing it live
+			// via the turn_meta SSE event right after a turn finishes.
+			lastTurn: ws.lastTurn ?? null,
 		});
 	});
 
