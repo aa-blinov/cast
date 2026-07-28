@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	addMarketplace,
-	ensureDefaultMarketplaces,
 	installPlugin,
 	listInstalledPlugins,
 	listKnownMarketplaces,
@@ -169,22 +168,6 @@ describe("marketplace + install (local)", () => {
 		expect(removed).toEqual(["hello@ponytail"]);
 		expect(listInstalledPlugins({}, p)).toHaveLength(0);
 		expect(listKnownMarketplaces(p)).toEqual([]);
-	});
-});
-
-describe("ensureDefaultMarketplaces", () => {
-	it("seeds local defaults once and is a no-op afterward", () => {
-		const mpDir = join(TEST_DIR, "default-mp");
-		writeMarketplace(mpDir);
-		const p = paths();
-		const first = ensureDefaultMarketplaces(p, [{ source: mpDir, label: "test" }]);
-		expect(first.seeded).toBe(true);
-		expect(first.added.some((a) => a.includes("ponytail"))).toBe(true);
-		expect(listKnownMarketplaces(p).map((m) => m.name)).toContain("ponytail");
-
-		const second = ensureDefaultMarketplaces(p, [{ source: mpDir, label: "test" }]);
-		expect(second.seeded).toBe(false);
-		expect(second.added).toEqual([]);
 	});
 });
 

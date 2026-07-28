@@ -8,31 +8,31 @@ Marketplaces are cloned with `git`, so git must be installed and in PATH (on Win
 
 ## Quick start
 
-On the first `/plugin` (or marketplace/install) cast seeds three default catalogs when missing:
+No marketplace is registered by default — cast doesn't clone anything until you tell it to. Add one first:
 
-| Label | Source |
-|-------|--------|
-| Codex | `openai/plugins` |
-| Claude | `anthropics/claude-plugins-official` |
-| Grok | `xai-org/plugin-marketplace` |
+```
+/plugin marketplace add owner/repo        # GitHub shorthand
+/plugin marketplace add https://...       # any git URL
+/plugin marketplace add ./my-marketplace  # local path (testing / private plugins)
+```
 
 Then:
 
 ```
 /plugin marketplace list
+/plugin marketplace list <name>
+/plugin install <plugin>@<name>
+/skills
+```
+
+Full example against a real public marketplace:
+
+```
+/plugin marketplace add xai-org/plugin-marketplace
 /plugin marketplace list xai-official
 /plugin install superpowers@xai-official
 /skills
 ```
-
-Or a local catalog (for testing / private plugins):
-
-```
-/plugin marketplace add ./my-marketplace
-/plugin install ponytail@ponytail
-```
-
-Seed runs once (`~/.cast/plugins/defaults-seeded.json`). Removed defaults are not re-added; failed clones (offline) retry until at least one succeeds.
 
 ## Hot-reload
 
