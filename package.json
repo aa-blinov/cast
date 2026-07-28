@@ -1,7 +1,7 @@
 {
 	"name": "cast",
 	"version": "0.9.4",
-	"description": "Role-based terminal agent harness with 13 built-in personas",
+	"description": "Role-based terminal agent harness with 20 built-in personas",
 	"type": "module",
 	"engines": {
 		"node": ">=22"
