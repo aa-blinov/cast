@@ -707,12 +707,23 @@ body.resizing-diff * { user-select: none; }
 	color: var(--text-muted);
 }
 .message-user .message-label { color: var(--teal); }
+.message-image-result .message-label { color: var(--text-dim); }
 .message-assistant .message-label { color: var(--purple); }
 .message-content {
 	font-family: var(--font);
 	font-size: .9rem;
 	line-height: 1.65;
 	white-space: pre-wrap;
+}
+.message-images {
+	display: flex; flex-wrap: wrap; gap: 8px;
+}
+.message-image {
+	max-width: 280px; max-height: 280px;
+	border-radius: 8px;
+	border: 1px solid var(--border);
+	object-fit: contain;
+	cursor: pointer;
 }
 .message-content a, .streaming-content a, .tool-card-result a {
 	color: var(--cyan);
@@ -876,6 +887,10 @@ pre:hover .code-copy-btn, .code-copy-btn:focus-visible { opacity: 1; }
 	word-break: break-word;
 	max-height: 340px;
 	overflow-y: auto;
+}
+.tool-card-images {
+	padding: 8px 10px;
+	border-top: 1px solid var(--border);
 }
 .tool-card-result {
 	padding: 8px 10px;
@@ -1046,6 +1061,46 @@ pre:hover .code-copy-btn, .code-copy-btn:focus-visible { opacity: 1; }
 	transition: background .15s;
 }
 .composer-abort:hover { background: rgba(239,68,68,.1); }
+.composer-drag-over { border-color: var(--cyan); background: color-mix(in srgb, var(--cyan) 8%, var(--bg-surface)); }
+.composer-attach {
+	background: transparent;
+	border: none;
+	padding: 8px;
+	color: var(--text-muted);
+	cursor: pointer;
+	display: flex; align-items: center; justify-content: center;
+	width: 36px; height: 36px;
+	flex-shrink: 0;
+	border-radius: var(--radius);
+	transition: color .15s, background .15s;
+}
+.composer-attach:hover { color: var(--text); background: var(--bg-hover); }
+.composer-attach:disabled { opacity: .4; cursor: default; }
+.composer-images {
+	display: flex; flex-wrap: wrap; gap: 8px;
+	padding: 0 max(16px, env(safe-area-inset-left)) 8px;
+}
+.composer-image-thumb {
+	position: relative;
+	width: 56px; height: 56px;
+	border-radius: 6px;
+	overflow: hidden;
+	border: 1px solid var(--border);
+}
+.composer-image-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.composer-image-remove {
+	position: absolute; top: 2px; right: 2px;
+	width: 16px; height: 16px;
+	display: flex; align-items: center; justify-content: center;
+	background: rgba(0,0,0,.6);
+	border: none;
+	border-radius: 50%;
+	color: #fff;
+	cursor: pointer;
+	padding: 0;
+}
+.composer-image-remove svg { width: 10px; height: 10px; }
+.composer-image-remove:hover { background: rgba(0,0,0,.85); }
 
 /* ── Command palette ──────────────────────────────────────────────── */
 .cmd-palette {
@@ -1339,6 +1394,8 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 .fs-collapse-btn:hover { color: var(--cyan); border-color: var(--border-active); }
 .fs-tree {
 	flex: 1;
+	display: flex;
+	flex-direction: column;
 	overflow-y: auto;
 	padding: 4px 0;
 }

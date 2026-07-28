@@ -18,7 +18,7 @@ vi.mock("../src/core/loop.ts", async (importOriginal) => {
 	return { ...actual, runAgentLoop: (...args: unknown[]) => runAgentLoop(...args) };
 });
 
-const { createWebBridge, SANDBOX_CWD } = await import("../src/web/bridge.ts");
+const { createWebBridge, SANDBOX_CWD, toDisplayMessages } = await import("../src/web/bridge.ts");
 
 const testConfig: AppConfig = {
 	baseURL: "http://localhost",
@@ -340,6 +340,46 @@ describe("web bridge", () => {
 		expect(ws.runner.steeringQueue.hasItems()).toBe(true);
 	});
 
+	it("submit with images builds a [text, image_url...] content array, always including the text part", () => {
+		const bridge = createWebBridge(makeResult());
+		const ws = bridge.createSession();
+
+		bridge.submit(ws.id, "is this a Bengal?", ["data:image/jpeg;base64,ONE", "data:image/jpeg;base64,TWO"]);
+
+		const sent = ws.session.messages.at(-1);
+		expect(sent?.role).toBe("user");
+		expect(sent?.content).toEqual([
+			{ type: "text", text: "is this a Bengal?" },
+			{ type: "image_url", image_url: { url: "data:image/jpeg;base64,ONE" } },
+			{ type: "image_url", image_url: { url: "data:image/jpeg;base64,TWO" } },
+		]);
+	});
+
+	it("submit with no images stays a plain string (unchanged behavior)", () => {
+		const bridge = createWebBridge(makeResult());
+		const ws = bridge.createSession();
+
+		bridge.submit(ws.id, "hello");
+
+		expect(ws.session.messages.at(-1)?.content).toBe("hello");
+	});
+
+	it("submit with images while a turn is running steers with the same array content instead of dropping the images", () => {
+		const bridge = createWebBridge(makeResult());
+		const ws = bridge.createSession();
+		bridge.submit(ws.id, "first message");
+		expect(runAgentLoop).toHaveBeenCalledTimes(1);
+
+		bridge.submit(ws.id, "and this photo", ["data:image/png;base64,X"]);
+
+		expect(ws.runner.steeringQueue.hasItems()).toBe(true);
+		const [queued] = ws.runner.steeringQueue.drain();
+		expect(queued?.content).toEqual([
+			{ type: "text", text: "and this photo" },
+			{ type: "image_url", image_url: { url: "data:image/png;base64,X" } },
+		]);
+	});
+
 	it("session_end's messageCount stays a raw per-completion count, not the turn count shown elsewhere", async () => {
 		// The web client (app.js) appends one local message per raw
 		// "assistant_message" SSE event — including tool-call-only
@@ -632,5 +672,159 @@ describe("web bridge", () => {
 			const [queued] = ws.runner.followUpQueue.drain();
 			expect(String(queued?.content)).toContain("bg-followup-marker");
 		});
+	});
+});
+
+// ============================================================================
+// toDisplayMessages — image_url user messages (a `read` on an image file)
+// ============================================================================
+
+describe("toDisplayMessages — inline images from a read on an image file", () => {
+	it("extracts data: URLs from an image_url user message instead of dropping them to null", () => {
+		const out = toDisplayMessages([
+			{ role: "user", content: "look at this" },
+			{
+				role: "user",
+				content: [{ type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } }],
+			} as never,
+		]);
+
+		expect(out).toHaveLength(2);
+		expect(out[1]).toEqual({ role: "user", content: null, images: ["data:image/png;base64,AAAA"] });
+	});
+
+	it("extracts multiple images from a single image_url message", () => {
+		const out = toDisplayMessages([
+			{
+				role: "user",
+				content: [
+					{ type: "image_url", image_url: { url: "data:image/png;base64,ONE" } },
+					{ type: "image_url", image_url: { url: "data:image/png;base64,TWO" } },
+				],
+			} as never,
+		]);
+
+		expect(out[0]?.images).toEqual(["data:image/png;base64,ONE", "data:image/png;base64,TWO"]);
+	});
+
+	it("points at the image-blob route instead of inlining when sessionId+seqs are given", () => {
+		// The whole point of the route: a session load must not carry full
+		// base64 payloads for every embedded photo (that's what made this
+		// session slow to load — see server.ts's /image route).
+		const out = toDisplayMessages(
+			[
+				{
+					role: "user",
+					content: [
+						{ type: "image_url", image_url: { url: "data:image/jpeg;base64,ONE" } },
+						{ type: "image_url", image_url: { url: "data:image/jpeg;base64,TWO" } },
+					],
+				} as never,
+			],
+			undefined,
+			undefined,
+			"abc123",
+			[42],
+		);
+
+		expect(out[0]?.images).toEqual([
+			"/api/sessions/abc123/image?seq=42&idx=0",
+			"/api/sessions/abc123/image?seq=42&idx=1",
+		]);
+	});
+
+	it("falls back to inlining when seqs is given but this index has none (not yet persisted)", () => {
+		const out = toDisplayMessages(
+			[{ role: "user", content: [{ type: "image_url", image_url: { url: "data:image/png;base64,X" } }] } as never],
+			undefined,
+			undefined,
+			"abc123",
+			[], // no seq recorded for index 0
+		);
+
+		expect(out[0]?.images).toEqual(["data:image/png;base64,X"]);
+	});
+
+	it("attributes the image to its originating ToolCard via castToolCallId, not a floating message", () => {
+		const out = toDisplayMessages([
+			{
+				role: "assistant",
+				content: null,
+				tool_calls: [{ id: "call_1", type: "function", function: { name: "read", arguments: "{}" } }],
+			} as never,
+			{ role: "tool", tool_call_id: "call_1", content: "1:abc:def→(image content)" } as never,
+			{
+				role: "user",
+				content: [{ type: "image_url", image_url: { url: "data:image/jpeg;base64,PHOTO" } }],
+				castToolCallId: "call_1",
+			} as never,
+		]);
+
+		// Exactly one display message (the assistant/tool-call one) — the
+		// image_url message must not also become its own floating entry.
+		expect(out).toHaveLength(1);
+		expect(out[0]?.role).toBe("assistant");
+		expect(out[0]?.toolCalls?.[0]).toMatchObject({ id: "call_1", images: ["data:image/jpeg;base64,PHOTO"] });
+	});
+
+	it("resolves the attributed image through the same URL-vs-inline rule as the fallback path", () => {
+		const out = toDisplayMessages(
+			[
+				{
+					role: "assistant",
+					content: null,
+					tool_calls: [{ id: "call_1", type: "function", function: { name: "read", arguments: "{}" } }],
+				} as never,
+				{ role: "tool", tool_call_id: "call_1", content: "ok" } as never,
+				{
+					role: "user",
+					content: [{ type: "image_url", image_url: { url: "data:image/jpeg;base64,PHOTO" } }],
+					castToolCallId: "call_1",
+				} as never,
+			],
+			undefined,
+			undefined,
+			"sess1",
+			[10, 11, 12],
+		);
+
+		expect(out[0]?.toolCalls?.[0]?.images).toEqual(["/api/sessions/sess1/image?seq=12&idx=0"]);
+	});
+
+	it("leaves a normal string user message untouched (no images field)", () => {
+		const out = toDisplayMessages([{ role: "user", content: "hello" }]);
+		expect(out[0]).toEqual({ role: "user", content: "hello" });
+		expect(out[0]?.images).toBeUndefined();
+	});
+
+	it("keeps the caption alongside the photo for a real user send (text part present)", () => {
+		// A real attach-and-send (see bridge.ts's buildUserContent) always
+		// includes a text part, even when empty — that's what distinguishes it
+		// from the tool-only image_url relay, which never has one.
+		const out = toDisplayMessages([
+			{
+				role: "user",
+				content: [
+					{ type: "text", text: "is this a Bengal?" },
+					{ type: "image_url", image_url: { url: "data:image/jpeg;base64,CAT" } },
+				],
+			} as never,
+		]);
+		expect(out[0]).toEqual({ role: "user", content: "is this a Bengal?", images: ["data:image/jpeg;base64,CAT"] });
+	});
+
+	it("keeps a caption-less real send distinguishable (empty string, not null) from a tool relay", () => {
+		const out = toDisplayMessages([
+			{
+				role: "user",
+				content: [
+					{ type: "text", text: "" },
+					{ type: "image_url", image_url: { url: "data:image/png;base64,X" } },
+				],
+			} as never,
+		]);
+		// content: "" (a real, if caption-less, send) — not null (which the
+		// client renders as "image (read)" instead of "you").
+		expect(out[0]?.content).toBe("");
 	});
 });

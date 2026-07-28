@@ -631,15 +631,16 @@ function formatToolResult(name, result) {
 function ToolCard({ call }) {
 	// The header always shows the request (name + full input params) and a
 	// status dot, so the terminal-like default view stays a quick "what's it
-	// doing / is it still alive" scan. The result body is collapsed by
-	// default and rendered lazily on first expand — unlike the TUI, the web
-	// UI has room (and a scrollable DOM) to show it on demand without
-	// cluttering the log.
+	// doing / is it still alive" scan. The result body — including any image
+	// a `read` on a photo returned — is collapsed by default and rendered
+	// lazily on first expand — unlike the TUI, the web UI has room (and a
+	// scrollable DOM) to show it on demand without cluttering the log.
 	const [open, setOpen] = useState(false);
+	const [previewSrc, setPreviewSrc] = useState(null);
 	const statusClass = call.status || "running";
 	const args = formatArgsFull(call.args);
 	const mcp = isMcpTool(call.name);
-	const hasResult = Boolean(call.result);
+	const hasResult = Boolean(call.result) || Boolean(call.images?.length);
 	return html`
 		<div class="tool-card">
 			<div
@@ -655,7 +656,28 @@ function ToolCard({ call }) {
 			${args && html`<div class="tool-card-body">${args}</div>`}
 			${
 				open &&
-				hasResult &&
+				call.images?.length &&
+				html`
+				<div class="message-content message-images tool-card-images">
+					${call.images.map(
+						(src, i) =>
+							html`<img key=${i} src=${src} class="message-image" onClick=${() => setPreviewSrc(src)} />`,
+					)}
+				</div>
+			`
+			}
+			${
+				previewSrc &&
+				html`<${FilePreviewModal}
+					path="image.jpg"
+					downloadHref=${previewSrc}
+					previewHref=${previewSrc}
+					onClose=${() => setPreviewSrc(null)}
+				/>`
+			}
+			${
+				open &&
+				call.result &&
 				(mcp
 					? // MCP servers commonly format their own results as markdown (headers,
 						// code fences, tables) — worth actually rendering, unlike a built-in
@@ -679,6 +701,10 @@ function TurnMetaLine({ turnMeta }) {
 
 function Message({ msg }) {
 	const role = msg.role || "assistant";
+	// Only used by the legacy floating image-result branch below (pre
+	// castToolCallId sessions) — declared unconditionally so hook order stays
+	// stable across renders regardless of which branch a given msg takes.
+	const [previewSrc, setPreviewSrc] = useState(null);
 	if (role === "tool") return null;
 
 	const labelMap = {
@@ -750,6 +776,43 @@ function Message({ msg }) {
 				`
 				}
 					<${TurnMetaLine} turnMeta=${msg.turnMeta} />
+			</div>
+		`;
+	}
+
+	if (msg.images?.length) {
+		// Array `content` on a role:"user" message is either a real send with
+		// an attached photo (a text part is always present, even empty — see
+		// bridge.ts's buildUserContent, and toDisplayMessages preserves that
+		// as content:"" vs content:null) or a `read` on an image file: wire
+		// role is "user" too (only role that can carry image_url content per
+		// the OpenAI-compatible API — see loop.ts), but the person didn't
+		// send that one, the read tool did. Only the latter case is reached
+		// for sessions saved before castToolCallId existed — newer ones show
+		// inside their ToolCard instead.
+		const isRealSend = msg.content !== null;
+		return html`
+			<div class="message ${isRealSend ? "message-user" : "message-image-result"}">
+				<div class="message-label">${isRealSend ? "you" : "image (read)"}</div>
+				${
+					content &&
+					html`<div class="message-content" dangerouslySetInnerHTML=${{ __html: escapeHtml(content) }} />`
+				}
+				<div class="message-content message-images">
+					${msg.images.map(
+						(src, i) =>
+							html`<img key=${i} src=${src} class="message-image" onClick=${() => setPreviewSrc(src)} />`,
+					)}
+				</div>
+				${
+					previewSrc &&
+					html`<${FilePreviewModal}
+						path="image.jpg"
+						downloadHref=${previewSrc}
+						previewHref=${previewSrc}
+						onClose=${() => setPreviewSrc(null)}
+					/>`
+				}
 			</div>
 		`;
 	}
@@ -846,12 +909,84 @@ function ValueSuggest({ items, selectedIndex, onHover, onSelect }) {
 	`;
 }
 
+// Downscales+re-encodes a pasted/dropped/picked image before it ever leaves
+// the browser — a real incident (see docs/changelog.md) had 8 unresized
+// photos in one turn's history get a bare, undebuggable 400 from the
+// provider; MiniMax's own docs recommend keeping images to ~1024px. Encodes
+// as JPEG regardless of source format (simplest way to bound size — a lossy
+// re-encode of a screenshot/photo is an acceptable tradeoff here).
+const IMAGE_MAX_DIMENSION = 1568;
+const IMAGE_JPEG_QUALITY = 0.85;
+function resizeImageToDataUrl(file) {
+	return new Promise((resolve, reject) => {
+		const img = new Image();
+		const objectUrl = URL.createObjectURL(file);
+		img.onload = () => {
+			URL.revokeObjectURL(objectUrl);
+			const scale = Math.min(1, IMAGE_MAX_DIMENSION / Math.max(img.width, img.height));
+			const w = Math.max(1, Math.round(img.width * scale));
+			const h = Math.max(1, Math.round(img.height * scale));
+			const canvas = document.createElement("canvas");
+			canvas.width = w;
+			canvas.height = h;
+			const ctx = canvas.getContext("2d");
+			ctx.drawImage(img, 0, 0, w, h);
+			resolve(canvas.toDataURL("image/jpeg", IMAGE_JPEG_QUALITY));
+		};
+		img.onerror = () => {
+			URL.revokeObjectURL(objectUrl);
+			reject(new Error("Could not load image"));
+		};
+		img.src = objectUrl;
+	});
+}
+
 function Composer({ running, ready, commands, personas, onSubmit, onAbort }) {
 	const [value, setValue] = useState("");
 	const [cmdVisible, setCmdVisible] = useState(false);
 	const [selectedIndex, setSelectedIndex] = useState(0);
+	const [images, setImages] = useState([]);
+	const [dragOver, setDragOver] = useState(false);
 	const textareaRef = useRef(null);
 	const pickerRef = useRef(null);
+	const fileInputRef = useRef(null);
+
+	const addImageFiles = useCallback(async (files) => {
+		const imageFiles = Array.from(files).filter((f) => f.type.startsWith("image/"));
+		if (imageFiles.length === 0) return;
+		const resized = await Promise.all(imageFiles.map((f) => resizeImageToDataUrl(f).catch(() => null)));
+		setImages((prev) => [...prev, ...resized.filter(Boolean)]);
+	}, []);
+
+	const handlePaste = useCallback(
+		(e) => {
+			const files = Array.from(e.clipboardData?.items ?? [])
+				.filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+				.map((item) => item.getAsFile())
+				.filter(Boolean);
+			if (files.length === 0) return; // let normal text paste proceed
+			e.preventDefault();
+			addImageFiles(files);
+		},
+		[addImageFiles],
+	);
+
+	const handleDrop = useCallback(
+		(e) => {
+			e.preventDefault();
+			setDragOver(false);
+			if (e.dataTransfer?.files?.length) addImageFiles(e.dataTransfer.files);
+		},
+		[addImageFiles],
+	);
+
+	const handleFilePick = useCallback(
+		(e) => {
+			if (e.target.files?.length) addImageFiles(e.target.files);
+			e.target.value = ""; // same file picked twice in a row must still fire onChange
+		},
+		[addImageFiles],
+	);
 
 	// Only /persona still lives in the composer — model, theme, reasoning,
 	// web-tools, MCP/skills/plugins/provider/SSH, and the rest of the former
@@ -869,12 +1004,15 @@ function Composer({ running, ready, commands, personas, onSubmit, onAbort }) {
 
 	const handleSubmit = useCallback(() => {
 		const trimmed = value.trim();
-		if (!trimmed) return;
-		onSubmit(trimmed);
+		// A caption-less image send is allowed — an attached photo alone is a
+		// complete message, same as any chat app.
+		if (!trimmed && images.length === 0) return;
+		onSubmit(trimmed, images);
 		setValue("");
+		setImages([]);
 		setCmdVisible(false);
 		if (textareaRef.current) textareaRef.current.style.height = "auto";
-	}, [value, onSubmit]);
+	}, [value, images, onSubmit]);
 
 	const handleCmdSelect = useCallback(
 		(name) => {
@@ -997,7 +1135,51 @@ function Composer({ running, ready, commands, personas, onSubmit, onAbort }) {
 						: html`<${CommandPalette} items=${pickerItems} selectedIndex=${clampedIndex} running=${running} visible=${cmdVisible} onHover=${setSelectedIndex} onSelect=${handleCmdSelect} />`
 				}
 			</div>
-			<div class="composer">
+			${
+				images.length > 0 &&
+				html`
+				<div class="composer-images">
+					${images.map(
+						(src, i) => html`
+						<div key=${i} class="composer-image-thumb">
+							<img src=${src} />
+							<button
+								type="button"
+								class="composer-image-remove"
+								onClick=${() => setImages((prev) => prev.filter((_, j) => j !== i))}
+								aria-label="Remove image"
+							><${icons.xMark} /></button>
+						</div>
+					`,
+					)}
+				</div>
+			`
+			}
+			<div
+				class="composer${dragOver ? " composer-drag-over" : ""}"
+				onDragOver=${(e) => {
+					e.preventDefault();
+					setDragOver(true);
+				}}
+				onDragLeave=${() => setDragOver(false)}
+				onDrop=${handleDrop}
+			>
+				<input
+					ref=${fileInputRef}
+					type="file"
+					accept="image/*"
+					multiple
+					style="display:none"
+					onChange=${handleFilePick}
+				/>
+				<button
+					type="button"
+					class="composer-attach"
+					onClick=${() => fileInputRef.current?.click()}
+					disabled=${!ready}
+					aria-label="Attach image"
+					title="Attach image"
+				><${icons.paperclip} /></button>
 				<textarea
 					ref=${textareaRef}
 					class="composer-input"
@@ -1007,11 +1189,12 @@ function Composer({ running, ready, commands, personas, onSubmit, onAbort }) {
 					value=${value}
 					onInput=${handleInput}
 					onKeyDown=${handleKeyDown}
+					onPaste=${handlePaste}
 				/>
 				${
 					running
 						? html`<button class="composer-abort" onClick=${onAbort} aria-label="Abort"><${icons.stop} /></button>`
-						: html`<button class="composer-send" onClick=${handleSubmit} disabled=${!ready || !value.trim()} aria-label="Send"><${icons.send} /></button>`
+						: html`<button class="composer-send" onClick=${handleSubmit} disabled=${!ready || (!value.trim() && images.length === 0)} aria-label="Send"><${icons.send} /></button>`
 				}
 			</div>
 		</div>
@@ -1498,7 +1681,9 @@ function FileExplorer({ activeId, confirm, refreshNonce }) {
 									`;
 									})
 						: tree[""]
-							? tree[""].map((entry) => renderEntry("", entry, 0))
+							? tree[""].length > 0
+								? tree[""].map((entry) => renderEntry("", entry, 0))
+								: html`<div class="diff-empty">No files yet</div>`
 							: loadingDirs.has("")
 								? html`<div class="diff-empty">Loading…</div>`
 								: null
@@ -4205,7 +4390,7 @@ function App() {
 
 	// Submit message
 	const submitMessage = useCallback(
-		async (text) => {
+		async (text, images) => {
 			// Pure client-side commands need no live (or even draft) session —
 			// handled before any draft-commit below so idly hitting /diff or
 			// /copy on a fresh "new session" draft can't spuriously create a
@@ -4352,13 +4537,23 @@ function App() {
 			}
 			// Show the message immediately — waiting for the POST to resolve before
 			// appending it made every send feel like it had a beat of lag, even
-			// though the round trip to localhost is fast.
+			// though the round trip to localhost is fast. Rendered the same shape
+			// toDisplayMessages produces (content: text, images: [...]) so a page
+			// reload looks identical to what was just shown live.
 			setSession((prev) =>
-				prev ? { ...prev, messages: [...prev.messages, { role: "user", content: text }] } : prev,
+				prev
+					? {
+							...prev,
+							messages: [
+								...prev.messages,
+								{ role: "user", content: text, ...(images?.length ? { images } : {}) },
+							],
+						}
+					: prev,
 			);
 			turnStartRef.current.delete(id);
 			try {
-				await api("POST", `/api/sessions/${id}/chat`, { text });
+				await api("POST", `/api/sessions/${id}/chat`, images?.length ? { text, images } : { text });
 				// Picks up the auto-derived title after a session's first message
 				// (and keeps the sidebar's message counts from drifting stale).
 				loadSessions();
@@ -4455,13 +4650,40 @@ function App() {
 				switch (event.type) {
 					case "user_message": {
 						// Another tab sent a user message — add it to our local state.
+						// The wire event's content is the raw send shape (a string, or
+						// an array with a text part + image_url parts when images were
+						// attached — see bridge.ts's buildUserContent); the optimistic
+						// local append below instead uses the toDisplayMessages shape
+						// (content: text, images: [...]). Normalize both before
+						// comparing so a caption+photo send doesn't fail this dedup
+						// check (array !== string) and land twice in the sending tab.
+						const normalize = (content) => {
+							if (typeof content === "string") return { text: content, images: [] };
+							if (Array.isArray(content)) {
+								return {
+									text: content.find((p) => p.type === "text")?.text ?? "",
+									images: content.filter((p) => p.type === "image_url").map((p) => p.image_url.url),
+								};
+							}
+							return { text: "", images: [] };
+						};
 						setSession((prev) => {
 							if (!prev) return prev;
-							// Avoid duplicates if this tab also has the message.
 							const msgs = prev.messages;
 							const last = msgs[msgs.length - 1];
-							if (last && last.role === "user" && last.content === event.message.content) return prev;
-							return { ...prev, messages: [...msgs, event.message] };
+							if (last && last.role === "user") {
+								const a = { text: last.content, images: last.images ?? [] };
+								const b = normalize(event.message.content);
+								if (a.text === b.text && a.images.length === b.images.length) return prev;
+							}
+							const evt = normalize(event.message.content);
+							return {
+								...prev,
+								messages: [
+									...msgs,
+									{ role: "user", content: evt.text, ...(evt.images.length ? { images: evt.images } : {}) },
+								],
+							};
 						});
 						break;
 					}
@@ -4503,6 +4725,9 @@ function App() {
 												// truncating it here just meant the same result read
 												// differently depending on when you looked at it.
 												result: event.result?.content ?? "",
+												// A `read` on an image file: inline it live instead of
+												// only after a reload picks it up via toDisplayMessages.
+												...(event.result?.imageDataUrl ? { images: [event.result.imageDataUrl] } : {}),
 											},
 										}
 									: b,
