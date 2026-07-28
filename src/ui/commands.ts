@@ -9,6 +9,7 @@ import { findPersona, type LoadPersonasOptions, type Persona } from "../core/per
 import { createPlanState, readActivePlan } from "../core/plan.ts";
 import {
 	addMarketplace,
+	ensureDefaultMarketplaces,
 	getMarketplaceCatalog,
 	installPlugin,
 	listInstalledPlugins,
@@ -322,29 +323,29 @@ CLI --mcp paths are not removable with /mcp uninstall.`;
 
 const PLUGIN_HELP = `Plugins — pick a row from the /plugin palette, or type:
 
-No marketplace is registered by default — add one first:
-
-  /plugin marketplace add owner/repo   GitHub shorthand, e.g. xai-org/plugin-marketplace
-  /plugin marketplace add <url>        Any git URL
-  /plugin marketplace add <path>       Local path (testing / private catalogs)
-
-Then:
-
-  /plugin marketplace list           Registered catalogs
-  /plugin marketplace list SHOP      Plugins inside one catalog
-  /plugin install NAME@SHOP          e.g. superpowers@xai-official
-  /plugin marketplace update|remove SHOP
-
   /plugin                      Toggle installed on/off (like /skills /mcp)
   /plugin list                 What's installed
+  /plugin install NAME@SHOP    e.g. superpowers@xai-official
   /plugin uninstall            Pick installed to remove
   /plugin uninstall NAME@SHOP
   /plugin enable|disable NAME@SHOP
 
-Flow:  /plugin marketplace add xai-org/plugin-marketplace
-       /plugin marketplace list xai-official
+  /plugin marketplace list           Catalogs (openai-curated, claude-…, xai-official, + any you add)
+  /plugin marketplace list SHOP      Plugins inside one catalog
+  /plugin marketplace add owner/repo|<url>|<path>
+  /plugin marketplace update|remove SHOP
+
+Codex/Claude/Grok catalogs are always present and can't be removed —
+add your own with /plugin marketplace add.
+
+Flow:  /plugin marketplace list xai-official
        /plugin install superpowers@xai-official
        /skills`;
+
+/** Codex/Claude/Grok catalogs — cheap no-op once all three are known, safe to call on every /plugin use. */
+function seedDefaultMarketplaces(): void {
+	ensureDefaultMarketplaces();
+}
 
 async function confirmUninstall(deps: CommandDeps, title: string, yesLabel: string): Promise<boolean> {
 	const confirm = await deps.pickers.pickOption(
@@ -362,6 +363,7 @@ async function confirmUninstall(deps: CommandDeps, title: string, yesLabel: stri
 }
 
 async function togglePluginsPicker(deps: CommandDeps): Promise<void> {
+	seedDefaultMarketplaces();
 	const installed = listInstalledPlugins(loadSettings());
 	if (installed.length === 0) {
 		deps.agent.addDisplayMessage({
@@ -811,6 +813,11 @@ async function handlePluginCommand(input: string, deps: CommandDeps): Promise<vo
 
 	const [verb, ...rest] = args.split(/\s+/);
 	const restJoined = rest.join(" ").trim();
+
+	// Any marketplace/install/list command should see the defaults.
+	if (verb === "marketplace" || verb === "install" || verb === "list") {
+		seedDefaultMarketplaces();
+	}
 
 	try {
 		if (verb === "list") {

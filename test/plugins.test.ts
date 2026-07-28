@@ -169,6 +169,36 @@ describe("marketplace + install (local)", () => {
 		expect(listInstalledPlugins({}, p)).toHaveLength(0);
 		expect(listKnownMarketplaces(p)).toEqual([]);
 	});
+
+	it("removeMarketplace refuses a default marketplace", () => {
+		const mpDir = join(TEST_DIR, "default-mp");
+		writeMarketplace(mpDir);
+		const p = paths();
+		addMarketplace(mpDir, p, { isDefault: true });
+		expect(() => removeMarketplace("ponytail", p)).toThrow(/can't be removed/);
+		expect(listKnownMarketplaces(p)).toHaveLength(1);
+	});
+});
+
+describe("ensureDefaultMarketplaces", () => {
+	it("adds missing defaults, marks them isDefault, and is a no-op once all exist", async () => {
+		const { ensureDefaultMarketplaces } = await import("../src/core/plugins.ts");
+		const mpDir = join(TEST_DIR, "default-mp-2");
+		writeMarketplace(mpDir);
+		const p = paths();
+
+		const first = ensureDefaultMarketplaces(p, [{ source: mpDir, label: "test" }]);
+		expect(first.added.some((a) => a.includes("ponytail"))).toBe(true);
+		expect(first.errors).toEqual([]);
+		const known = listKnownMarketplaces(p);
+		expect(known).toHaveLength(1);
+		expect(known[0]).toMatchObject({ name: "ponytail", isDefault: true });
+
+		const second = ensureDefaultMarketplaces(p, [{ source: mpDir, label: "test" }]);
+		expect(second.added).toEqual([]);
+		expect(second.errors).toEqual([]);
+		expect(listKnownMarketplaces(p)).toHaveLength(1);
+	});
 });
 
 describe("stagingNameFor", () => {
