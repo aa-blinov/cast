@@ -20,6 +20,7 @@ import {
 } from "./config.ts";
 import { formatContextFilesForPrompt, loadProjectContextFiles } from "./context-files.ts";
 import type { McpSetupResult } from "./mcp.ts";
+import { fetchModelsDevCatalog, lookupContextWindowFromCatalog } from "./models-dev.ts";
 import { findPersona, type LoadPersonasOptions, listPersonas, type Persona } from "./personas.ts";
 import {
 	buildSystemPrompt,
@@ -316,10 +317,29 @@ export async function runStartup(
 	}
 
 	if (contextWindow && contextWindow > 0) config.contextWindow = contextWindow;
-	// Fallback: known model context windows when /v1/models doesn't expose them.
+	// Fallback chain when /v1/models doesn't expose context_length (many
+	// providers don't — confirmed on api.minimax.io, which returns bare
+	// {id, owned_by} with nothing about context size):
+	// 1. KNOWN_MODEL_CONTEXT_WINDOWS — a short, hand-verified-against-
+	//    official-docs list. Checked first: it's trustworthy where the next
+	//    step is only best-effort, so it must win when both have an entry
+	//    (e.g. minimax-m3: this list has the vendor's real 1M; models.dev
+	//    only has three disagreeing reseller numbers — 262k/512k/1024k —
+	//    and no entry at all for the official api.minimax.io provider).
+	// 2. models.dev's crowd-sourced catalog — broader coverage for
+	//    everything not in (1), at the cost of being best-effort (see
+	//    models-dev.ts's doc comment on how it resolves reseller conflicts).
+	// Runs regardless of network reachability (fetchModelsDevCatalog never
+	// throws) so a flaky models.dev doesn't block startup.
 	if (!contextWindow || contextWindow <= 0) {
 		const known = lookupContextWindow(model);
-		if (known) config.contextWindow = known;
+		if (known) {
+			config.contextWindow = known;
+		} else {
+			const catalog = await fetchModelsDevCatalog();
+			const fromCatalog = catalog ? lookupContextWindowFromCatalog(model, catalog) : undefined;
+			if (fromCatalog) config.contextWindow = fromCatalog;
+		}
 	}
 
 	// Reasoning: CLI > saved (same model) > interactive.
