@@ -477,27 +477,6 @@ function renderRuleBodies(rules: Rule[]): string[] {
 }
 
 /**
- * Format sticky auto rules + mentioned rules for injection into the system
- * prompt. Used by the per-turn rebuild path. Returns an empty string when
- * there are none.
- */
-export function formatActiveRulesPrompt(sticky: Rule[], mentioned: Rule[]): string {
-	const seen = new Set<string>();
-	const all: Rule[] = [];
-	// Deduplicate (by id) and exclude always rules (already injected via formatAlwaysApplyRules)
-	for (const r of [...sticky, ...mentioned]) {
-		if (r.applyMode === "always") continue;
-		if (!seen.has(r.id)) {
-			seen.add(r.id);
-			all.push(r);
-		}
-	}
-	const parts = renderRuleBodies(all);
-	if (parts.length === 0) return "";
-	return `\n\n<rules>\n${parts.join("\n\n")}\n</rules>`;
-}
-
-/**
  * Build the complete `<rules>` section for a single turn: every always-apply
  * rule (Cursor: "always included") followed by the sticky auto-attached rules
  * and any @-mentioned rules, deduplicated by id into one block. This is the

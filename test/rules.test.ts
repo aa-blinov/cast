@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	discoverProjectRuleDirs,
 	fileMatchesGlob,
-	formatActiveRulesPrompt,
 	formatAlwaysApplyRules,
 	formatLazyRulesForPrompt,
 	formatRuleInvocation,
@@ -625,31 +624,6 @@ describe("rules", () => {
 			];
 			const mentioned = selectMentionedRules(catalog, "@myrule");
 			expect(mentioned).toHaveLength(1);
-		});
-	});
-
-	describe("formatActiveRulesPrompt", () => {
-		it("returns empty string when no active rules", () => {
-			expect(formatActiveRulesPrompt([], [])).toBe("");
-		});
-
-		it("formats sticky rules as <rules> block", () => {
-			const dir = join(fakeHome, ".cast", "rules");
-			mkdirSync(dir, { recursive: true });
-			writeFileSync(join(dir, "sticky.md"), '---\nalwaysApply: false\nglobs: ["**/*.ts"]\n---\nSticky content.');
-			const rules = loadDirectoryRules({ globalDir: dir });
-			const formatted = formatActiveRulesPrompt(rules, []);
-			expect(formatted).toContain("<rules>");
-			expect(formatted).toContain("Sticky content.");
-		});
-
-		it("deduplicates sticky and mentioned rules", () => {
-			const dir = join(fakeHome, ".cast", "rules");
-			mkdirSync(dir, { recursive: true });
-			writeFileSync(join(dir, "dup.md"), '---\nalwaysApply: false\nglobs: ["**/*.ts"]\n---\nDup body.');
-			const rules = loadDirectoryRules({ globalDir: dir });
-			const formatted = formatActiveRulesPrompt(rules, rules);
-			expect(formatted.split("Dup body.")).toHaveLength(2); // appears exactly once
 		});
 	});
 

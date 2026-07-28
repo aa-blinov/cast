@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.9.6
+
+### Internal
+
+- Removed unused `formatActiveRulesPrompt` — the per-turn rules path has used `formatRulesForTurn` (single combined `<rules>` block) since it was introduced; the legacy two-part formatter had no callers outside its own tests.
+
 ## 0.9.5
 
 ### Added
