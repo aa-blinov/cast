@@ -1491,6 +1491,65 @@ const FS_TEXT_EXTENSIONS = new Set([
 	"lock",
 ]);
 const FS_IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "svg"]);
+// Maps a subset of FS_TEXT_EXTENSIONS to the highlight.js language name that
+// renders it — omitted extensions (txt, log, lock, env) fall back to plain
+// text, either because there's no real syntax (a lockfile/log) or the
+// "language" (dotenv key=value) isn't distinct enough from bash to bother.
+const EXT_TO_HLJS = {
+	js: "javascript",
+	jsx: "javascript",
+	mjs: "javascript",
+	cjs: "javascript",
+	ts: "typescript",
+	tsx: "typescript",
+	json: "json",
+	jsonc: "json",
+	yaml: "yaml",
+	yml: "yaml",
+	toml: "ini",
+	ini: "ini",
+	cfg: "ini",
+	conf: "ini",
+	sh: "bash",
+	bash: "bash",
+	zsh: "bash",
+	fish: "bash",
+	py: "python",
+	rb: "ruby",
+	go: "go",
+	rs: "rust",
+	java: "java",
+	kt: "kotlin",
+	c: "c",
+	h: "c",
+	cpp: "cpp",
+	hpp: "cpp",
+	cs: "csharp",
+	php: "php",
+	sql: "sql",
+	css: "css",
+	scss: "scss",
+	less: "less",
+	html: "xml",
+	htm: "xml",
+	xml: "xml",
+	svg: "xml",
+};
+// Vendored (not CDN-at-request-time) so file preview works fully offline —
+// see src/web/public/vendor/README.md for provenance/update instructions.
+// Cached module-level so re-opening the preview never re-imports; the
+// browser's own module cache would dedupe the request anyway, but this also
+// skips the microtask overhead of a repeat dynamic import() call.
+let markedModulePromise = null;
+function loadMarked() {
+	if (!markedModulePromise) markedModulePromise = import("/vendor/marked.min.mjs");
+	return markedModulePromise;
+}
+let hljsModulePromise = null;
+function loadHljs() {
+	if (!hljsModulePromise) hljsModulePromise = import("/vendor/highlight.min.mjs");
+	return hljsModulePromise;
+}
 const FS_TABLE_EXTENSIONS = new Set(["csv", "tsv"]);
 const FS_PREVIEW_MAX_BYTES = 512 * 1024;
 const FS_TABLE_MAX_ROWS = 1000;
@@ -1582,11 +1641,18 @@ function FilePreviewModal({ path, onClose, downloadHref, previewHref }) {
 	const [content, setContent] = useState(null);
 	const [tooLarge, setTooLarge] = useState(false);
 	const [error, setError] = useState(null);
+	// Filled in asynchronously once marked/highlight.js finish loading and
+	// rendering — starts null so the plain-text `content` shows immediately
+	// instead of a blank pane while the (vendored, but still ~1MB for hljs)
+	// module loads. { kind: "markdown" | "code", html }
+	const [enhanced, setEnhanced] = useState(null);
 	const modalRef = useModalFocusTrap(!!path);
 	const ext = path ? fileExtOf(path) : "";
 	const isImage = FS_IMAGE_EXTENSIONS.has(ext);
 	const isPdf = !isImage && ext === "pdf";
 	const isTable = !isImage && !isPdf && FS_TABLE_EXTENSIONS.has(ext);
+	const isMarkdown = ext === "md" || ext === "markdown";
+	const hljsLang = EXT_TO_HLJS[ext];
 	const isText = !isImage && !isPdf && !isTable && (ext === "" || FS_TEXT_EXTENSIONS.has(ext));
 	const fetchesContent = isText || isTable;
 
@@ -1616,6 +1682,33 @@ function FilePreviewModal({ path, onClose, downloadHref, previewHref }) {
 			cancelled = true;
 		};
 	}, [path, downloadHref]);
+
+	// biome-ignore lint/correctness/useExhaustiveDependencies: isMarkdown/hljsLang are both pure functions of ext, which is itself derived from path — re-running whenever content or path changes is correct without listing every derived value.
+	useEffect(() => {
+		setEnhanced(null);
+		if (content == null) return;
+		let cancelled = false;
+		if (isMarkdown) {
+			loadMarked()
+				.then(({ marked }) => {
+					if (!cancelled) setEnhanced({ kind: "markdown", html: marked.parse(content) });
+				})
+				.catch(() => {});
+		} else if (hljsLang) {
+			loadHljs()
+				.then(({ default: hljs }) => {
+					if (cancelled) return;
+					const result = hljs.getLanguage(hljsLang)
+						? hljs.highlight(content, { language: hljsLang })
+						: hljs.highlightAuto(content);
+					setEnhanced({ kind: "code", html: result.value });
+				})
+				.catch(() => {});
+		}
+		return () => {
+			cancelled = true;
+		};
+	}, [content, path]);
 
 	if (!path) return null;
 	const name = path.includes("/") ? path.slice(path.lastIndexOf("/") + 1) : path;
@@ -1655,6 +1748,10 @@ function FilePreviewModal({ path, onClose, downloadHref, previewHref }) {
 					${rows.length > FS_TABLE_MAX_ROWS ? html`<div class="fs-preview-table-note">Showing first ${FS_TABLE_MAX_ROWS} of ${rows.length} rows — download for the rest.</div>` : null}
 				</div>
 			`;
+	} else if (isMarkdown && enhanced?.kind === "markdown") {
+		body = html`<div class="fs-preview-markdown message-content" dangerouslySetInnerHTML=${{ __html: enhanced.html }} />`;
+	} else if (hljsLang && enhanced?.kind === "code") {
+		body = html`<pre class="fs-preview-text fs-preview-code hljs"><code dangerouslySetInnerHTML=${{ __html: enhanced.html }} /></pre>`;
 	} else {
 		body = html`<pre class="fs-preview-text">${content}</pre>`;
 	}
