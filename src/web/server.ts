@@ -21,7 +21,6 @@ import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { getHistoryPage } from "../core/session.ts";
 import { toDisplayMessages, type WebBridge, type WebEvent } from "./bridge.ts";
-import { SLASH_COMMANDS } from "./commands.ts";
 
 const MIME_TYPES: Record<string, string> = {
 	".html": "text/html; charset=utf-8",
@@ -846,8 +845,9 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 		json(res, bridge.getConfig());
 	});
 
-	route("GET", "/api/commands", (_req, res) => {
-		json(res, SLASH_COMMANDS);
+	route("GET", "/api/commands", (req, res) => {
+		const sessionId = new URL(req.url ?? "", "http://localhost").searchParams.get("session") ?? undefined;
+		json(res, bridge.getSlashCommands(sessionId));
 	});
 
 	route("GET", "/api/themes", (_req, res) => {

@@ -649,6 +649,7 @@ export function App(props: AppProps): JSX.Element {
 				onPasteImage={onPasteImage}
 				running={running}
 				locked={modalRequest !== null}
+				skills={skills}
 			/>
 			<StatusBar
 				statusBar={statusBar}

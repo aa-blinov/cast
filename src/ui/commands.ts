@@ -2413,7 +2413,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 				"  /plugin …           Plugins palette (install / marketplace / toggle)\n" +
 				"  /mcp …              Toggle / list / enable|disable / uninstall (/mcp help)\n" +
 				"  /reload             Re-scan skills, MCP, rules\n" +
-				"  /skill:<name>       Invoke a skill\n" +
+				"  /<skill-id>         Invoke a loaded skill directly (also: /skill:<name>)\n" +
 				"  /rule:<name>        Invoke a rule\n" +
 				"  /provider [name]    Switch / add / delete providers\n" +
 				"  /permissions        Change bash confirmation mode\n" +
@@ -2522,6 +2522,23 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			content: `${header}\n${lines.join("\n")}${notes}`,
 		});
 		return;
+	}
+
+	// Native `/<skill-id>` invocation — same body as /skill:<name> above, just
+	// reached without the prefix. Falls through here only once every built-in
+	// command above has failed to match, so a skill can never shadow one.
+	if (input.startsWith("/")) {
+		const spaceIdx = input.indexOf(" ");
+		const name = spaceIdx === -1 ? input : input.slice(0, spaceIdx);
+		const skillId = name.slice(1);
+		const skillArgs = spaceIdx === -1 ? undefined : input.slice(spaceIdx + 1).trim();
+		if (skillId) {
+			const skill = deps.skills.find((s) => s.name === skillId);
+			if (skill) {
+				await agent.submit(formatSkillInvocation(skill, skillArgs));
+				return;
+			}
+		}
 	}
 
 	// Unknown slash command — submit to agent as regular text (could be a
