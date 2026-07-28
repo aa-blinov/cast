@@ -2,6 +2,18 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.9.4
+
+### Added
+
+- A loaded skill can now be invoked as a native `/<skill-id>` slash command in both the terminal and web composer — it shows up in autocomplete with its own description, no `/skill:name` prefix needed. `/reload` (and enabling/disabling a skill in the web Settings modal) refreshes the list immediately.
+
+### Fixed
+
+- Web UI: Settings could only be opened once a session existed — the gear icon did nothing on a brand-new draft thread. It now always opens; tabs that need a session (Model, MCP, Provider, etc.) show a hint instead of hanging on "Loading…" until one exists.
+- Web UI: removed the redundant close button on the Changes/Files panel — the topbar toggle already closes it.
+- Web UI, mobile: opening the sidebar while the Changes/Files panel was open (or vice versa) used to leave the one you just opened hidden behind the other, forcing a manual close-then-open. Opening either drawer now closes the other automatically.
+
 ## 0.9.3
 
 ### Added
