@@ -2814,6 +2814,10 @@ function SettingsPlugins({ data, busy, act, confirm }) {
 			`,
 				)}
 			${data.plugins.length === 0 && html`<div class="settings-hint">No plugins installed.</div>`}
+			<details class="settings-collapsible">
+				<summary>Where do I get a plugin to install?</summary>
+				<p>Browse a marketplace's plugins from the composer with <code>/plugin marketplace list</code> plus the marketplace name — e.g. <code>/plugin marketplace list xai-official</code> for one of the built-in ones below. Then install with <code>plugin@marketplace</code>, e.g. <code>superpowers@xai-official</code>.</p>
+			</details>
 			<div class="settings-form-row">
 				<input type="text" placeholder="name@marketplace" value=${installRef} onInput=${(e) => setInstallRef(e.target.value)} />
 				<button class="modal-btn icon-btn" title="Install plugin" disabled=${busy || !installRef} onClick=${() => {
@@ -2845,6 +2849,10 @@ function SettingsPlugins({ data, busy, act, confirm }) {
 			`,
 				)}
 			${data.marketplaces.length === 0 && html`<div class="settings-hint">No marketplaces added.</div>`}
+			<details class="settings-collapsible">
+				<summary>Where do I get a marketplace?</summary>
+				<p>Any git repo with a <code>marketplace.json</code> catalog (Claude/Grok/Codex plugin format) works. Three well-known ones are already built in above. Add another by GitHub shorthand (<code>owner/repo</code>), a full git URL, or a local path for testing/private catalogs.</p>
+			</details>
 			<div class="settings-form-row">
 				<input type="text" placeholder="owner/repo, URL, or path" value=${mpSource} onInput=${(e) => setMpSource(e.target.value)} />
 				<button class="modal-btn icon-btn" title="Add marketplace" disabled=${busy || !mpSource} onClick=${() => {
