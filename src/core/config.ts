@@ -68,7 +68,7 @@ export function loadConfig(connection: { baseURL: string; apiKey: string }): App
 		baseURL,
 		apiKey,
 		contextWindow: 128_000,
-		maxResponseTokens: 8192,
+		maxResponseTokens: 32_000,
 		compactionThreshold: 0.75,
 		maxToolOutputLines: 2000,
 		maxToolOutputBytes: 128 * 1024,
@@ -91,6 +91,10 @@ export function loadConfig(connection: { baseURL: string; apiKey: string }): App
 const KNOWN_MODEL_CONTEXT_WINDOWS: Record<string, number> = {
 	"mimo-v2.5": 1_000_000,
 	"mimo-v2.5-pro": 1_000_000,
+	// MiniMax's own /v1/models omits context_length entirely — without this,
+	// loadConfig's 128k generic default stood in for the real 1,048,576,
+	// tripping compaction roughly 8x earlier than the model actually needs.
+	"minimax-m3": 1_000_000,
 };
 
 export function lookupContextWindow(modelId: string): number | undefined {

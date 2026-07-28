@@ -238,14 +238,36 @@ export function shouldCompact(_messages: Message[], config: AppConfig, lastPromp
  * which we don't need since our split is a rough 60/40 index cut rather
  * than a strict token budget — there's already slack either side of it.
  */
+/**
+ * A `role: "user"` row that actually opens a turn — as opposed to the
+ * synthetic image_url message loop.ts inserts mid-turn after a `read` on an
+ * image file (there's no `role: "tool"` slot for images in the
+ * OpenAI-compatible API, so it's smuggled in as a `user` message instead;
+ * see loop.ts's castToolCallId comment). Landing a cut right after one of
+ * those — indistinguishable from a real turn boundary by role alone — drops
+ * the assistant message that declared the tool_calls while keeping later
+ * `tool` results that reference it, producing exactly the "tool result's
+ * tool id not found" 400 this function exists to prevent. A real turn
+ * (typed text, or an image attached *to* that turn) always contains a text
+ * part; the synthetic relay never does — image_url parts only. Checked
+ * structurally (not via castToolCallId alone) so it also covers sessions
+ * that predate that tag.
+ */
+function isRealTurnStart(m: Message | undefined): boolean {
+	if (m?.role !== "user") return false;
+	if (typeof m.content === "string") return true;
+	if (!Array.isArray(m.content)) return false;
+	return (m.content as Array<{ type?: string }>).some((p) => p.type === "text");
+}
+
 function safeCutIndex(messages: Message[], idx: number): number {
 	const target = Math.max(0, Math.min(idx, messages.length));
 
 	for (let i = target; i < messages.length; i++) {
-		if (messages[i]?.role === "user") return i;
+		if (isRealTurnStart(messages[i])) return i;
 	}
 	for (let i = target; i > 0; i--) {
-		if (messages[i]?.role === "user") return i;
+		if (isRealTurnStart(messages[i])) return i;
 	}
 	return 0;
 }
@@ -663,26 +685,62 @@ export function getFullHistoryWithReasoning(id: string): {
 	messages: Message[];
 	reasoning: Record<number, string>;
 	turnMeta: Record<number, TurnMeta>;
+	/** DB `seq` per returned index — lets a caller address a specific row
+	 *  later (e.g. to stream an embedded image out-of-band) without re-doing
+	 *  the array-position bookkeeping that reasoning/turnMeta already need. */
+	seqs: number[];
 } {
 	const db = getDb();
 	const rows = db
-		.prepare("SELECT content_json, reasoning, turn_meta FROM messages WHERE session_id = ? ORDER BY seq")
-		.all(id) as Array<{ content_json: string; reasoning: string | null; turn_meta: string | null }>;
+		.prepare("SELECT seq, content_json, reasoning, turn_meta FROM messages WHERE session_id = ? ORDER BY seq")
+		.all(id) as Array<{ seq: number; content_json: string; reasoning: string | null; turn_meta: string | null }>;
 	const messages: Message[] = [];
 	const reasoning: Record<number, string> = {};
 	const turnMeta: Record<number, TurnMeta> = {};
+	const seqs: number[] = [];
 	rows.forEach((r, i) => {
 		messages.push(JSON.parse(r.content_json) as Message);
 		if (r.reasoning) reasoning[i] = r.reasoning;
 		if (r.turn_meta) turnMeta[i] = JSON.parse(r.turn_meta) as TurnMeta;
+		seqs.push(r.seq);
 	});
-	return { messages, reasoning, turnMeta };
+	return { messages, reasoning, turnMeta, seqs };
+}
+
+/** One image embedded in a `read`-on-image-file message (see loop.ts's
+ *  imageDataUrl handling), decoded back to raw bytes for the image-blob
+ *  route — the JSON session/history responses carry a URL to this instead
+ *  of the inline data: URL so a handful of photos doesn't turn a session
+ *  load into a multi-MB payload (same class of problem getHistoryPage's
+ *  pagination already solves for message count). */
+export function getMessageImage(
+	id: string,
+	seq: number,
+	imageIndex: number,
+): { mimeType: string; buffer: Buffer } | undefined {
+	const db = getDb();
+	const row = db.prepare("SELECT content_json FROM messages WHERE session_id = ? AND seq = ?").get(id, seq) as
+		| { content_json: string }
+		| undefined;
+	if (!row) return undefined;
+	const message = JSON.parse(row.content_json) as Message;
+	if (message.role !== "user" || !Array.isArray(message.content)) return undefined;
+	const parts = message.content as Array<{ type?: string; image_url?: { url?: string } }>;
+	const imageParts = parts.filter((p) => p.type === "image_url" && p.image_url?.url);
+	const url = imageParts[imageIndex]?.image_url?.url;
+	if (!url) return undefined;
+	const match = /^data:([^;]+);base64,(.*)$/s.exec(url);
+	if (!match) return undefined;
+	return { mimeType: match[1], buffer: Buffer.from(match[2], "base64") };
 }
 
 export interface HistoryPage {
 	messages: Message[];
 	reasoning: Record<number, string>;
 	turnMeta: Record<number, TurnMeta>;
+	/** DB `seq` per returned index — see getFullHistoryWithReasoning's field
+	 *  of the same name. */
+	seqs: number[];
 	/** seq of the earliest message in this page — pass as `beforeSeq` to fetch
 	 *  the page before this one. undefined when the page is empty. */
 	oldestSeq: number | undefined;
@@ -725,7 +783,7 @@ export function getHistoryPage(
 		)
 		.get(id, beforeSeq ?? null, beforeSeq ?? null, turns) as { seq: number } | undefined;
 
-	if (!boundary) return { messages: [], reasoning: {}, turnMeta: {}, oldestSeq: undefined, hasMore: false };
+	if (!boundary) return { messages: [], reasoning: {}, turnMeta: {}, seqs: [], oldestSeq: undefined, hasMore: false };
 
 	const rows = db
 		.prepare(
@@ -743,11 +801,13 @@ export function getHistoryPage(
 	const messages: Message[] = [];
 	const reasoning: Record<number, string> = {};
 	const turnMeta: Record<number, TurnMeta> = {};
+	const seqs: number[] = [];
 	let oldestSeq: number | undefined;
 	rows.forEach((r, i) => {
 		messages.push(JSON.parse(r.content_json) as Message);
 		if (r.reasoning) reasoning[i] = r.reasoning;
 		if (r.turn_meta) turnMeta[i] = JSON.parse(r.turn_meta) as TurnMeta;
+		seqs.push(r.seq);
 		if (oldestSeq === undefined) oldestSeq = r.seq;
 	});
 
@@ -755,7 +815,7 @@ export function getHistoryPage(
 		db.prepare("SELECT 1 FROM messages WHERE session_id = ? AND role = 'user' AND seq < ?").get(id, boundary.seq),
 	);
 
-	return { messages, reasoning, turnMeta, oldestSeq, hasMore };
+	return { messages, reasoning, turnMeta, seqs, oldestSeq, hasMore };
 }
 
 /** Full wipe: deletes every message row for the session (not just flags them

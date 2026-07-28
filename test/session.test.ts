@@ -15,6 +15,7 @@ import {
 	getFullHistory,
 	getFullHistoryWithReasoning,
 	getHistoryPage,
+	getMessageImage,
 	getMostRecentSession,
 	listSessionSummaries,
 	listSessions,
@@ -416,6 +417,16 @@ describe("compaction cut points never split a tool_calls/tool pair", () => {
 					tool_call_id: `c${callId}`,
 					content: `result ${callId}`,
 				} as unknown as Message);
+				// A `read` on an image file mixed in ~1/4 of the time — the
+				// synthetic role:"user" relay message (no text part, only
+				// image_url) that must never be mistaken for a real turn
+				// boundary (see safeCutIndex's isRealTurnStart).
+				if (rand() < 0.25) {
+					messages.push({
+						role: "user",
+						content: [{ type: "image_url", image_url: { url: `data:image/png;base64,c${callId}` } }],
+					} as unknown as Message);
+				}
 				callId++;
 			}
 			messages.push({ role: "assistant", content: `done with turn ${t}` });
@@ -445,6 +456,71 @@ describe("compaction cut points never split a tool_calls/tool pair", () => {
 				expect(firstDanglingToolIndex(result.messages)).toBe(-1);
 			}
 		}
+	});
+
+	/** Unlike firstDanglingToolIndex (which assumes one tool_calls per
+	 *  assistant message and checks only the immediately preceding row — fine
+	 *  for buildRealisticHistory's serial rounds), this tolerates a *parallel*
+	 *  batch: several tool results (each possibly followed by its own
+	 *  image_url relay) all declared by one earlier assistant message, not
+	 *  each other. Tracks every tool_call_id declared so far instead. */
+	function findOrphanedToolResult(messages: Message[]): number {
+		const declared = new Set<string>();
+		for (let i = 0; i < messages.length; i++) {
+			const m = messages[i] as { role: string; tool_calls?: Array<{ id: string }>; tool_call_id?: string };
+			if (m.role === "assistant" && Array.isArray(m.tool_calls)) {
+				for (const tc of m.tool_calls) declared.add(tc.id);
+			}
+			if (m.role === "tool" && m.tool_call_id && !declared.has(m.tool_call_id)) return i;
+		}
+		return -1;
+	}
+
+	it("compactMessages doesn't land mid-batch on a parallel read-image call, orphaning later tool results (regression)", async () => {
+		// Reproduces the production incident: one assistant message fires 5
+		// parallel `read` calls on images; each tool result is immediately
+		// followed by its own synthetic image_url "user" message (no text
+		// part — see loop.ts's castToolCallId comment). safeCutIndex used to
+		// treat every role:"user" row as a valid turn boundary, so a cut could
+		// land right after the *first* image relay — keeping tool results 2-5
+		// while discarding the one assistant message that declared all of
+		// them, producing exactly the provider's "tool result's tool id not
+		// found" 400.
+		const messages: Message[] = [
+			{ role: "system", content: "sys" },
+			{ role: "user", content: "check these 5 photos" },
+			{
+				role: "assistant",
+				content: null,
+				tool_calls: Array.from({ length: 5 }, (_, i) => ({
+					id: `read${i}`,
+					type: "function",
+					function: { name: "read", arguments: "{}" },
+				})),
+			} as unknown as Message,
+			...Array.from({ length: 5 }, (_, i) => [
+				{ role: "tool", tool_call_id: `read${i}`, content: `[Image: photo${i}.jpg]` } as unknown as Message,
+				{
+					role: "user",
+					content: [{ type: "image_url", image_url: { url: `data:image/jpeg;base64,p${i}` } }],
+				} as unknown as Message,
+			]).flat(),
+			{ role: "assistant", content: "None of these are Bengals." },
+			{ role: "user", content: "are you sure?" },
+			{ role: "assistant", content: "Yes." },
+		];
+
+		const summarize = async () => "summary";
+		// A target that (before the fix) lands squarely inside the batch —
+		// right after the first image relay, index 5 (system, user, assistant,
+		// tool0, image0 = indices 0-4; landing at 5 is mid-batch).
+		const result = await compactMessages(messages, summarize, {
+			contextWindow: 1,
+			maxResponseTokens: 0,
+			compactionThreshold: 0,
+		} as any);
+
+		expect(findOrphanedToolResult(result.messages)).toBe(-1);
 	});
 });
 
@@ -830,6 +906,51 @@ describe("session persistence", () => {
 		// carries it too, re-keyed to the page's own array indices.
 		const page = getHistoryPage(s.id);
 		expect(page.turnMeta[1]?.totalMs).toBe(11700);
+	});
+
+	it("getFullHistoryWithReasoning and getHistoryPage report the DB seq per message", () => {
+		const s = createSession("gpt-4o", projectA);
+		s.messages = [
+			{ role: "user", content: "hi" },
+			{ role: "assistant", content: "hello" },
+		];
+		saveSession(s);
+
+		const full = getFullHistoryWithReasoning(s.id);
+		expect(full.seqs).toHaveLength(2);
+		expect(full.seqs[1]).toBeGreaterThan(full.seqs[0]!);
+
+		const page = getHistoryPage(s.id);
+		expect(page.seqs).toEqual(full.seqs);
+	});
+
+	describe("getMessageImage", () => {
+		it("decodes the raw bytes back out of an image_url data: URL at the given seq/index", () => {
+			const s = createSession("gpt-4o", projectA);
+			const b64 = Buffer.from("not a real jpeg, just test bytes").toString("base64");
+			s.messages = [
+				{
+					role: "user",
+					content: [{ type: "image_url", image_url: { url: `data:image/jpeg;base64,${b64}` } }],
+				} as unknown as Message,
+			];
+			saveSession(s);
+
+			const { seqs } = getFullHistoryWithReasoning(s.id);
+			const image = getMessageImage(s.id, seqs[0]!, 0);
+			expect(image?.mimeType).toBe("image/jpeg");
+			expect(image?.buffer.toString()).toBe("not a real jpeg, just test bytes");
+		});
+
+		it("returns undefined for a seq/index that doesn't hold an image", () => {
+			const s = createSession("gpt-4o", projectA);
+			s.messages = [{ role: "user", content: "just text" }];
+			saveSession(s);
+
+			const { seqs } = getFullHistoryWithReasoning(s.id);
+			expect(getMessageImage(s.id, seqs[0]!, 0)).toBeUndefined();
+			expect(getMessageImage(s.id, 999_999, 0)).toBeUndefined();
+		});
 	});
 
 	it("getHistoryPage walks a long session back to front with no gaps or duplicates", () => {

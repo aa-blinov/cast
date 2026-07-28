@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyProviderError, loadConfig } from "../src/core/config.ts";
+import { classifyProviderError, loadConfig, lookupContextWindow } from "../src/core/config.ts";
 
 // ============================================================================
 // loadConfig
@@ -14,7 +14,7 @@ describe("loadConfig", () => {
 		expect(config.baseURL).toBe("https://api.openai.com/v1");
 		expect(config.apiKey).toBe("sk-test");
 		expect(config.contextWindow).toBe(128_000);
-		expect(config.maxResponseTokens).toBe(8192);
+		expect(config.maxResponseTokens).toBe(32_000);
 		expect(config.defaultBashTimeout).toBe(180);
 	});
 
@@ -68,5 +68,24 @@ describe("classifyProviderError", () => {
 		// a connection failure — otherwise startup would nag for credentials that
 		// are actually fine.
 		expect(classifyProviderError(Object.assign(new Error("404 Not Found"), { status: 404 }))).toBe("unknown");
+	});
+});
+
+describe("lookupContextWindow", () => {
+	it("finds MiniMax-M3's real 1M window — its own /v1/models omits context_length entirely", () => {
+		// Without this fallback entry, loadConfig's generic 128k default stood
+		// in for the real 1,048,576 and tripped compaction ~8x earlier than
+		// the model actually needs (verified live against api.minimax.io).
+		expect(lookupContextWindow("MiniMax-M3")).toBe(1_000_000);
+	});
+
+	it("matches by substring, case-insensitively", () => {
+		expect(lookupContextWindow("minimax-m3-highspeed")).toBe(1_000_000);
+		expect(lookupContextWindow("provider/MINIMAX-M3")).toBe(1_000_000);
+	});
+
+	it("returns undefined for an unknown model — callers fall back to the generic default", () => {
+		expect(lookupContextWindow("gpt-4o")).toBeUndefined();
+		expect(lookupContextWindow("MiniMax-M2")).toBeUndefined();
 	});
 });
