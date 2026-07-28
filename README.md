@@ -1,12 +1,12 @@
 # cast
 
-A role-based terminal agent harness. 18 built-in personas — senior dev, QA, DBA, security reviewer, PM, tech writer, and more — same tools, different judgment. Runs on any OpenAI-compatible model, including the one on your own hardware.
+A role-based terminal agent harness. 20 built-in personas — senior dev, QA, DBA, security reviewer, PM, tech writer, and more — same tools, different judgment. Runs on any OpenAI-compatible model, including the one on your own hardware.
 
 <p align="center"><img src="assets/cast-banner.svg" alt="cast" width="440"></p>
 
 ## Why cast?
 
-**A cast, not a coder.** 18 built-in personas swap the agent's role without changing its tools. Senior dev for root-cause fixes, QA for edge cases, DBA for schema design, PM for specs, appsec for threat modeling — same tools, different judgment. Add your own with a single markdown file.
+**A cast, not a coder.** 20 built-in personas swap the agent's role without changing its tools. Senior dev for root-cause fixes, QA for edge cases, DBA for schema design, PM for specs, appsec for threat modeling — same tools, different judgment. Add your own with a single markdown file.
 
 **Real tools, real work.** It reads files, writes code, runs shell commands, searches your codebase — and does it all in parallel. Delegates sub-tasks to isolated sub-agents. Rules, skills, and MCP servers extend capabilities without touching the codebase.
 
