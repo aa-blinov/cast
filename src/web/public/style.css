@@ -1828,6 +1828,37 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	font-size: .82rem;
 	padding: 8px 0;
 }
+.settings-collapsible {
+	margin: 6px 0;
+	font-size: .78rem;
+}
+.settings-collapsible summary {
+	color: var(--text-muted);
+	cursor: pointer;
+	list-style: none;
+}
+.settings-collapsible summary::-webkit-details-marker { display: none; }
+.settings-collapsible summary::before {
+	content: "▸";
+	display: inline-block;
+	width: 1em;
+	transition: transform .1s;
+}
+.settings-collapsible[open] summary::before { transform: rotate(90deg); }
+.settings-collapsible summary:hover { color: var(--text); }
+.settings-collapsible p {
+	margin: 6px 0 4px 1em;
+	color: var(--text-dim);
+	line-height: 1.5;
+}
+.settings-collapsible code {
+	font-family: var(--font-mono);
+	background: var(--bg-raised);
+	border: 1px solid var(--border);
+	padding: 1px 4px;
+	border-radius: 4px;
+	font-size: .95em;
+}
 .settings-error {
 	background: rgba(239,68,68,.08);
 	border: 1px solid rgba(239,68,68,.3);
