@@ -1419,7 +1419,7 @@ function FileExplorer({ activeId, confirm, refreshNonce }) {
 						: tree[""]
 							? tree[""].map((entry) => renderEntry("", entry, 0))
 							: loadingDirs.has("")
-								? html`<div class="fs-loading">Loading…</div>`
+								? html`<div class="diff-empty">Loading…</div>`
 								: null
 				}
 			</div>
@@ -3760,7 +3760,15 @@ function App() {
 				setSession(data);
 				setActiveId(id);
 				resetStreamingNow();
-				setTurnMeta(null);
+				// Restores the "provider · model · Ns" footer for this session's
+				// last turn if the server still has it in memory (see
+				// WebAgentSession.lastTurn) — only genuinely new sessions
+				// (startDraft) should show nothing here.
+				setTurnMeta(
+					data.lastTurn?.totalMs != null
+						? { provider: data.lastTurn.provider, model: data.lastTurn.model, totalMs: data.lastTurn.totalMs }
+						: null,
+				);
 				setRunning(data.status === "running");
 				wasRunningRef.current = data.status === "running";
 				setSidebarOpen(false);
