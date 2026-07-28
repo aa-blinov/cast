@@ -1434,6 +1434,49 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	color: var(--text);
 	width: 100%;
 }
+.fs-preview-code {
+	white-space: pre;
+	overflow-x: auto;
+}
+.fs-preview-markdown {
+	padding: 14px 18px;
+	width: 100%;
+	overflow: auto;
+	font-size: .88rem;
+}
+/* highlight.js's own class names (see vendor/highlight.min.mjs) restyled to
+ * pull from the active theme's vars instead of importing one of hljs's fixed
+ * theme stylesheets — this way code coloring tracks whichever theme (dark or
+ * light) the user picked in Settings, not a hardcoded palette. */
+.hljs { background: none; color: var(--text); }
+.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-type, .hljs-meta .hljs-keyword { color: var(--purple); }
+.hljs-string, .hljs-attr, .hljs-symbol, .hljs-bullet, .hljs-addition { color: var(--green); }
+.hljs-number { color: var(--amber); }
+.hljs-comment, .hljs-quote, .hljs-deletion { color: var(--text-muted); font-style: italic; }
+.hljs-title, .hljs-title.function_, .hljs-section, .hljs-name, .hljs-selector-id, .hljs-selector-class { color: var(--blue); }
+.hljs-built_in, .hljs-tag, .hljs-variable, .hljs-template-variable { color: var(--teal); }
+.hljs-doctag, .hljs-strong { font-weight: 600; }
+.hljs-emphasis { font-style: italic; }
+/* Markdown preview's rendered HTML (marked's output — see vendor/marked.min.mjs)
+ * needs its own code-block styling since it's not routed through
+ * renderMarkdown's fence handling (.message-content pre already covers
+ * chat), but reuses .message-content's link/inline-code/table rules as-is. */
+.fs-preview-markdown pre {
+	background: var(--bg-raised);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	padding: 10px 12px;
+	overflow-x: auto;
+	margin: 8px 0;
+}
+.fs-preview-markdown h1, .fs-preview-markdown h2, .fs-preview-markdown h3 { margin: 1em 0 .4em; }
+.fs-preview-markdown ul, .fs-preview-markdown ol { padding-left: 1.4em; }
+.fs-preview-markdown blockquote {
+	border-left: 3px solid var(--border);
+	margin: 8px 0;
+	padding: 2px 12px;
+	color: var(--text-dim);
+}
 .fs-preview-image {
 	margin: auto;
 	max-width: 100%;
