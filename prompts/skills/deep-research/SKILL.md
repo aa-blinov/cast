@@ -1,6 +1,6 @@
 ---
 name: deep-research
-description: Deep research on any topic using parallel sub-agents and built-in tools only (WebSearch/WebFetch + free APIs, no keys). Use when the user asks for a thorough multi-source investigation with a cited report — "深度调研X"、"deep research"、"帮我全面研究一下"、"多方求证"、"写一份调研报告". NOT for simple lookups (single WebSearch suffices) and NOT for academic literature surveys (use auto-research skill instead).
+description: Deep research on any topic using parallel sub-agents and built-in tools only (WebSearch/WebFetch + free APIs, no keys). Use for a thorough multi-source investigation with a cited report. NOT for simple lookups (a single WebSearch suffices) and NOT for academic literature surveys (use the auto-research skill instead).
 ---
 
 # Deep Research
