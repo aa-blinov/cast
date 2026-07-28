@@ -1234,6 +1234,8 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 .diff-view {
 	flex: 1;
 	overflow: auto;
+	display: flex;
+	flex-direction: column;
 	font-family: var(--font-mono);
 	font-size: .78rem;
 	line-height: 1.6;
@@ -1269,11 +1271,10 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 .diff-line-del .diff-line-content { color: var(--text-dim); }
 .diff-empty {
 	display: flex; align-items: center; justify-content: center;
-	height: 100%;
+	flex: 1;
 	color: var(--text-muted);
 	font-size: .85rem;
 	text-align: center;
-	padding: 24px;
 	line-height: 1.6;
 }
 /* Title + hint as separate stacked lines (like the chat's own empty state)
@@ -2025,7 +2026,10 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	gap: 8px;
 }
 .settings-theme-swatch {
-	display: flex; align-items: center; gap: 7px;
+	display: grid;
+	grid-template-columns: 12px 1fr;
+	align-items: center;
+	gap: 7px;
 	background: var(--bg);
 	border: 1px solid var(--border);
 	border-radius: var(--radius-sm);
@@ -2033,6 +2037,7 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	color: var(--text-dim);
 	font-family: var(--font);
 	font-size: .78rem;
+	text-align: center;
 	cursor: pointer;
 	transition: border-color .15s, background .15s, color .15s;
 }
@@ -2143,4 +2148,31 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 }
 /* ── Utilities ────────────────────────────────────────────────────── */
 .hidden { display: none !important; }
+
+/* ── Custom tooltips ──────────────────────────────────────────────── */
+/* Replaces native title tooltips with themed, instant-appearing bubbles.
+   Uses a single DOM element in document.body (app.js initTooltips) to
+   escape overflow:hidden parents (sidebar, header, settings modal). */
+
+.cast-tooltip {
+	position: fixed;
+	pointer-events: none;
+	opacity: 0;
+	z-index: 9999;
+	transition: opacity .1s ease;
+	background: var(--bg-raised);
+	color: var(--text);
+	border: 1px solid var(--border-active);
+	border-radius: var(--radius-sm);
+	padding: 5px 9px;
+	font-family: var(--font);
+	font-size: .75rem;
+	font-weight: 400;
+	line-height: 1.35;
+	white-space: normal;
+	max-width: 320px;
+	word-break: break-word;
+}
+
+
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); border: 0; }
