@@ -1656,6 +1656,15 @@ function FilePreviewModal({ path, onClose, downloadHref, previewHref }) {
 	const isText = !isImage && !isPdf && !isTable && (ext === "" || FS_TEXT_EXTENSIONS.has(ext));
 	const fetchesContent = isText || isTable;
 
+	useEffect(() => {
+		if (!path) return;
+		const onKey = (e) => {
+			if (e.key === "Escape") onClose();
+		};
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	}, [path, onClose]);
+
 	// biome-ignore lint/correctness/useExhaustiveDependencies: fetchesContent is derived from path every render, including it would refetch on every unrelated re-render.
 	useEffect(() => {
 		setContent(null);
@@ -1693,7 +1702,9 @@ function FilePreviewModal({ path, onClose, downloadHref, previewHref }) {
 				.then(({ marked }) => {
 					if (!cancelled) setEnhanced({ kind: "markdown", html: marked.parse(content) });
 				})
-				.catch(() => {});
+				.catch(() => {
+					if (!cancelled) setEnhanced({ kind: "error" });
+				});
 		} else if (hljsLang) {
 			loadHljs()
 				.then(({ default: hljs }) => {
@@ -1703,7 +1714,9 @@ function FilePreviewModal({ path, onClose, downloadHref, previewHref }) {
 						: hljs.highlightAuto(content);
 					setEnhanced({ kind: "code", html: result.value });
 				})
-				.catch(() => {});
+				.catch(() => {
+					if (!cancelled) setEnhanced({ kind: "error" });
+				});
 		}
 		return () => {
 			cancelled = true;
@@ -1725,6 +1738,13 @@ function FilePreviewModal({ path, onClose, downloadHref, previewHref }) {
 	} else if (tooLarge) {
 		body = html`<div class="diff-empty">Too large to preview — use Download instead.</div>`;
 	} else if (content == null) {
+		body = html`<div class="diff-empty">Loading…</div>`;
+	} else if ((isMarkdown || hljsLang) && !enhanced) {
+		// Holds the loading state through marked/highlight.js's async load+parse
+		// instead of showing the raw, unrendered source in between — going
+		// straight from "Loading…" to the finished render (or, on failure
+		// below, straight to plain text) avoids a jarring raw-then-formatted
+		// flash on a slow connection.
 		body = html`<div class="diff-empty">Loading…</div>`;
 	} else if (isTable) {
 		const delimiter = detectDelimiter(content, ext);

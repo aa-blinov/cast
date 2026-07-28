@@ -1443,7 +1443,18 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	width: 100%;
 	overflow: auto;
 	font-size: .88rem;
+	/* .message-content (reused for its link/code/table rules) sets
+	 * white-space: pre-wrap for its own hand-rolled renderer, which has no
+	 * real block elements and relies on literal newlines for paragraph
+	 * breaks. marked's output is real <p>/<li>/<h*> markup — under pre-wrap,
+	 * the newlines marked's own output has *between* those tags render as
+	 * extra visible blank space on top of each element's normal margin,
+	 * which is what produced the huge/doubled line gaps. */
+	white-space: normal;
 }
+.fs-preview-markdown > :first-child { margin-top: 0; }
+.fs-preview-markdown > :last-child { margin-bottom: 0; }
+.fs-preview-markdown p { margin: .5em 0; }
 /* highlight.js's own class names (see vendor/highlight.min.mjs) restyled to
  * pull from the active theme's vars instead of importing one of hljs's fixed
  * theme stylesheets — this way code coloring tracks whichever theme (dark or
@@ -1469,8 +1480,14 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	overflow-x: auto;
 	margin: 8px 0;
 }
-.fs-preview-markdown h1, .fs-preview-markdown h2, .fs-preview-markdown h3 { margin: 1em 0 .4em; }
-.fs-preview-markdown ul, .fs-preview-markdown ol { padding-left: 1.4em; }
+.fs-preview-markdown h1, .fs-preview-markdown h2, .fs-preview-markdown h3,
+.fs-preview-markdown h4, .fs-preview-markdown h5, .fs-preview-markdown h6 {
+	margin: 1em 0 .4em;
+	line-height: 1.3;
+}
+.fs-preview-markdown ul, .fs-preview-markdown ol { margin: .5em 0; padding-left: 1.4em; }
+.fs-preview-markdown li { margin: 2px 0; }
+.fs-preview-markdown li > p { margin: 0; }
 .fs-preview-markdown blockquote {
 	border-left: 3px solid var(--border);
 	margin: 8px 0;

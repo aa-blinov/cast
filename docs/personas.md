@@ -8,24 +8,26 @@ See [Persona Research](persona-research.md) for the science behind why role fram
 
 | Persona | Label | Description |
 |---------|-------|-------------|
-| `coding` | Coding agent | Default persona — reads files, runs commands, edits code with precision |
 | `analyst` | Business Analyst | Requirements out of vague asks — contradictions, gaps, scenarios, acceptance criteria, API contracts |
+| `appsec` | Security Engineer | Application security — threat modeling, secure code review, vulnerability analysis |
 | `architect` | Architect | System design — trade-off analysis, ADRs, module boundaries; the deliverable is a decision, not a diff |
+| `assistant` | Assistant | General-purpose everyday help — questions, planning, writing, quick lookups; uses tools only when a task needs them |
 | `coder-with-subagents` | Coder with subagents | Delegates parallel and isolated work to sub-agents via the task tool |
-| `coder-with-subagents-force-review` | Coder · forced review | Same delegation, plus a mandatory review gate: every code change goes through an independent `review` sub-agent (fresh context, diff-based, one round) before being reported done |
-| `senior` | Senior Developer | Lazy senior dev — the ladder, root-cause fixes, deletion over addition |
-| `tech-writer` | Technical Writer | Documentation — READMEs, guides, API references, changelogs, diagrams |
+| `coder-with-subagents-force-review` | Coder with mandatory review | Same delegation, plus a mandatory review gate: every code change goes through an independent `review` sub-agent (fresh context, diff-based, one round) before being reported done |
+| `coding` | Coding agent | Default persona — reads files, runs commands, edits code with precision |
+| `dba` | Database Engineer | Schema design, migrations, query optimization, indexing |
+| `devops` | DevOps Engineer | CI/CD, IaC, containers, Kubernetes, deployments, observability |
+| `fiction-writer` | Fiction Writer | Creative fiction and literary prose |
+| `marketer` | Marketer | Positioning, messaging, and go-to-market |
+| `pm` | Project Manager | Task and spec writing — breaks work into clear, actionable tickets |
+| `product` | Product Manager | Product thinking — hypotheses, success metrics, prioritization, user stories from raw feedback |
 | `qa` | QA Engineer | Functional testing — verifies features, builds test plans, catches regressions |
 | `qa-nfr` | QA Non-Functional | Non-functional testing — performance, security, reliability, scalability |
-| `pm` | Project Manager | Task and spec writing — breaks work into clear, actionable tickets |
-| `marketer` | Marketer | Positioning, messaging, and go-to-market |
-| `fiction-writer` | Fiction Writer | Creative fiction and literary prose |
-| `product` | Product Manager | Product thinking — hypotheses, success metrics, prioritization, user stories from raw feedback |
+| `researcher` | Researcher | Open-ended questions and investigations — searches, reads sources, cross-checks claims, answers with citations |
+| `senior` | Senior Developer | Lazy senior dev — the ladder, root-cause fixes, deletion over addition |
 | `sre` | SRE / Incident Responder | Incident-mode thinking — logs first, hypothesis→check loops, blameless postmortems, SLOs |
 | `sysadmin` | System Administrator | Operations and infrastructure — diagnoses systems, manages services |
-| `devops` | DevOps Engineer | CI/CD, IaC, containers, Kubernetes, deployments, observability |
-| `dba` | Database Engineer | Schema design, migrations, query optimization, indexing |
-| `appsec` | Security Engineer | Application security — threat modeling, secure code review, vulnerability analysis |
+| `tech-writer` | Technical Writer | Documentation — READMEs, guides, API references, changelogs, diagrams |
 
 The `coding` persona is the default. `coder-with-subagents` and `coder-with-subagents-force-review` are the personas that enable the `task` tool for delegating work to sub-agents.
 
