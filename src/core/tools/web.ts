@@ -1,5 +1,5 @@
 /**
- * Web tools — DDG search (html.duckduckgo.com scraper) or Tavily/Brave (API), + Jina Reader (fetch).
+ * Web tools — DDG search (html.duckduckgo.com scraper) or Tavily/Brave (API), + web fetch.
  *
  * DDG search scrapes the HTML lite endpoint — no JS challenge, no VQD,
  * no Python dependency. Returns title + URL + snippet per result.
@@ -10,10 +10,17 @@
  * aggregator with a recurring 1000 requests/month free tier; Brave is an
  * actual general web index, a more direct DDG replacement.
  *
- * Web fetch uses Jina Reader (`r.jina.ai`) — free, no API key, returns
- * clean markdown optimized for LLM consumption.
+ * web_fetch has two backends (settings.webFetchProvider):
+ * "jina" (default) proxies through Jina Reader (`r.jina.ai`) — free, no API
+ * key, handles JS-rendered pages, always returns markdown. "local" fetches
+ * the URL directly from this process instead — modeled on opencode's
+ * webfetch tool: a Cloudflare-challenge UA-swap retry, a 5MB response cap, a
+ * content-type check that rejects images/binaries, and text/markdown/html
+ * output via htmlparser2/turndown instead of a third party's conversion.
  */
 
+import { Parser } from "htmlparser2";
+import TurndownService from "turndown";
 import { loadSettings } from "../settings.ts";
 import type { ToolResult } from "./shared.ts";
 
@@ -34,6 +41,11 @@ const CACHE_MAX_ENTRIES = 100;
 // trip's time instead of tripling the caller's wait.
 const FETCH_MAX_ATTEMPTS = 2;
 const FETCH_RETRY_DELAY_MS = 500;
+// Matches opencode's webfetch limit — caps memory use on a response that
+// never declares (or lies about) Content-Length; checked both on the header
+// (fails fast, before downloading) and again on the actual decoded byte
+// count (catches a missing/wrong header).
+const LOCAL_MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 // How many results a single DDG page fetch parses, independent of any one
 // caller's `maxResults`. The cache key doesn't include maxResults, so a
 // query first run with a small maxResults must not permanently cap what a
@@ -480,6 +492,177 @@ export async function fetchUrl(
 }
 
 // ============================================================================
+// Web Fetch — local (direct fetch + HTML conversion, no third party)
+// ============================================================================
+
+type FetchFormat = "text" | "markdown" | "html";
+
+const LOCAL_BROWSER_UA =
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36";
+
+function acceptHeaderForFormat(format: FetchFormat): string {
+	switch (format) {
+		case "markdown":
+			return "text/markdown;q=1.0, text/x-markdown;q=0.9, text/plain;q=0.8, text/html;q=0.7, */*;q=0.1";
+		case "text":
+			return "text/plain;q=1.0, text/markdown;q=0.9, text/html;q=0.8, */*;q=0.1";
+		case "html":
+			return "text/html;q=1.0, application/xhtml+xml;q=0.9, text/plain;q=0.8, text/markdown;q=0.7, */*;q=0.1";
+	}
+}
+
+function mimeFrom(contentType: string): string {
+	return contentType.split(";")[0]?.trim().toLowerCase() ?? "";
+}
+
+function isImageMime(mime: string): boolean {
+	// SVG is text (XML) underneath and reasonable to hand back as markup —
+	// only raster/binary image types get rejected.
+	return mime.startsWith("image/") && mime !== "image/svg+xml";
+}
+
+function isTextualMime(mime: string): boolean {
+	return (
+		!mime ||
+		mime.startsWith("text/") ||
+		mime === "application/json" ||
+		mime.endsWith("+json") ||
+		mime === "application/xml" ||
+		mime.endsWith("+xml") ||
+		mime === "application/javascript" ||
+		mime === "application/x-javascript"
+	);
+}
+
+/** Strip everything but visible text — drops script/style/embedded-document
+ *  tags entirely (their content isn't prose, and script/style bodies would
+ *  otherwise get concatenated straight into the output). */
+function extractTextFromHTML(html: string): string {
+	let text = "";
+	let skipDepth = 0;
+	const parser = new Parser({
+		onopentag(name) {
+			// "title" is deliberately included even though opencode's own list
+			// (which this otherwise mirrors) omits it — without it, the page
+			// <title>'s text has no special handling here either and gets
+			// concatenated straight into the output, duplicating whatever the
+			// visible <h1>/heading already says (same issue as, and fixed the
+			// same way as, convertHTMLToMarkdown above).
+			if (skipDepth > 0 || ["script", "style", "noscript", "iframe", "object", "embed", "title"].includes(name))
+				skipDepth++;
+		},
+		ontext(input) {
+			if (skipDepth === 0) text += input;
+		},
+		onclosetag() {
+			if (skipDepth > 0) skipDepth--;
+		},
+	});
+	parser.write(html);
+	parser.end();
+	return text.trim();
+}
+
+function convertHTMLToMarkdown(html: string): string {
+	const turndownService = new TurndownService({
+		headingStyle: "atx",
+		hr: "---",
+		bulletListMarker: "-",
+		codeBlockStyle: "fenced",
+		emDelimiter: "*",
+	});
+	// "title" is deliberately in this list even though opencode's own
+	// turndown setup (which this otherwise mirrors) omits it — without it,
+	// <head><title>Page Name</title></head>'s text has no special handling in
+	// turndown and gets rendered as a stray line of plain prose right before
+	// the real content, duplicating whatever the page's <h1> already says.
+	turndownService.remove(["script", "style", "meta", "link", "title"]);
+	return turndownService.turndown(html);
+}
+
+/**
+ * Fetch a URL directly (no third-party proxy) and convert HTML to the
+ * requested format locally. Mirrors opencode's webfetch tool: a Cloudflare
+ * bot-challenge (403 + `cf-mitigated: challenge`) is retried once with a
+ * plain, non-browser-spoofed User-Agent — the spoofed UA is what tripped the
+ * TLS/behavioral fingerprint check in the first place, so dropping the
+ * pretense sometimes sails through where repeating the same request
+ * wouldn't. Response size is capped at 5MB and non-textual content
+ * (images, other binaries) is rejected rather than silently mangled into
+ * "text".
+ */
+export async function fetchUrlLocal(
+	url: string,
+	options?: { format?: FetchFormat; maxChars?: number; signal?: AbortSignal },
+): Promise<{ url: string; title: string; content: string }> {
+	const format = options?.format ?? "markdown";
+	const maxChars = options?.maxChars ?? MAX_CONTENT_CHARS;
+	const signal = options?.signal;
+
+	const controller = new AbortController();
+	const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+	const onAbort = () => controller.abort(signal?.reason);
+	if (signal?.aborted) controller.abort(signal.reason);
+	else signal?.addEventListener("abort", onAbort, { once: true });
+
+	try {
+		const doFetch = (userAgent: string) =>
+			fetch(url, {
+				headers: {
+					"User-Agent": userAgent,
+					Accept: acceptHeaderForFormat(format),
+					"Accept-Language": "en-US,en;q=0.9",
+				},
+				redirect: "follow",
+				signal: controller.signal,
+			});
+
+		let resp = await doFetch(LOCAL_BROWSER_UA);
+		if (resp.status === 403 && resp.headers.get("cf-mitigated") === "challenge") {
+			resp = await doFetch("cast");
+		}
+		if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
+
+		const contentLengthHeader = resp.headers.get("content-length");
+		if (contentLengthHeader && Number(contentLengthHeader) > LOCAL_MAX_RESPONSE_BYTES) {
+			throw new Error(`Response too large (exceeds ${LOCAL_MAX_RESPONSE_BYTES} byte limit)`);
+		}
+
+		const contentType = resp.headers.get("content-type") ?? "";
+		const mime = mimeFrom(contentType);
+		if (isImageMime(mime)) throw new Error(`Unsupported fetched image content type: ${mime}`);
+		if (!isTextualMime(mime)) throw new Error(`Unsupported fetched file content type: ${mime}`);
+
+		const buf = await resp.arrayBuffer();
+		if (buf.byteLength > LOCAL_MAX_RESPONSE_BYTES) {
+			throw new Error(`Response too large (exceeds ${LOCAL_MAX_RESPONSE_BYTES} byte limit)`);
+		}
+
+		const raw = new TextDecoder().decode(buf);
+		let content = raw;
+		if (contentType.includes("text/html")) {
+			if (format === "markdown") content = convertHTMLToMarkdown(raw);
+			else if (format === "text") content = extractTextFromHTML(raw);
+			// format === "html" keeps the raw markup as-is.
+		}
+
+		return {
+			url,
+			// Unlike Jina Reader, a raw HTTP response has no separate metadata
+			// block to pull a title from — opencode's own webfetch doesn't
+			// extract one either. Left blank rather than approximated from the
+			// URL, so a caller checking for a real page title can tell the two
+			// cases apart.
+			title: "",
+			content: truncateAtBoundary(content.trim(), maxChars),
+		};
+	} finally {
+		clearTimeout(timeout);
+		signal?.removeEventListener("abort", onAbort);
+	}
+}
+
+// ============================================================================
 // Tool executors
 // ============================================================================
 
@@ -553,9 +736,22 @@ export async function execWebFetch(args: Record<string, unknown>, signal?: Abort
 	}
 
 	const maxChars = typeof args.maxChars === "number" ? args.maxChars : MAX_CONTENT_CHARS;
+	// "format" only has an effect on the "local" backend below — Jina Reader
+	// is always asked for markdown (X-Return-Format), matching this tool's
+	// existing, already-tested default behavior when that provider is active.
+	const format: FetchFormat =
+		args.format === "text" || args.format === "html" || args.format === "markdown" ? args.format : "markdown";
+
+	// Read fresh each call, same reasoning as execWebSearch's settings read —
+	// switching provider via /web-fetch-provider takes effect on the very
+	// next call, no restart needed.
+	const provider = loadSettings().webFetchProvider ?? "jina";
 
 	try {
-		const result = await fetchUrl(url, { maxChars, signal });
+		const result =
+			provider === "local"
+				? await fetchUrlLocal(url, { format, maxChars, signal })
+				: await fetchUrl(url, { maxChars, signal });
 
 		const parts: string[] = [];
 		if (result.title) parts.push(`# ${result.title}`);

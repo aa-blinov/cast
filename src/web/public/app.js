@@ -2375,10 +2375,11 @@ function SettingsModal({
 					},
 				}));
 			} else if (t === "tools") {
-				const [web, permissions, searchProvider, quickSessionPersona] = await Promise.all([
+				const [web, permissions, searchProvider, fetchProvider, quickSessionPersona] = await Promise.all([
 					run("/web"),
 					run("/permissions"),
 					run("/web-search-provider"),
+					run("/web-fetch-provider"),
 					run("/quick-session-persona"),
 				]);
 				setData((d) => ({
@@ -2387,6 +2388,7 @@ function SettingsModal({
 						web: web?.result,
 						permissions: permissions?.result,
 						searchProvider: searchProvider?.result,
+						fetchProvider: fetchProvider?.result,
 						quickSessionPersona: quickSessionPersona?.result,
 					},
 				}));
@@ -2907,11 +2909,13 @@ function SettingsTools({ data, busy, act, personas, onQuickSessionPersonaChange 
 	const web = data.web || {};
 	const perm = data.permissions || {};
 	const search = data.searchProvider || {};
+	const fetchProvider = data.fetchProvider || {};
 	const quickPersona = data.quickSessionPersona?.quickSessionPersona ?? "coding";
 	const webOn = web.webTools;
 	const provider = search.searchProvider || "ddg";
 	const tKey = tavilyKey || search.tavilyApiKey || "";
 	const bKey = braveKey || search.braveApiKey || "";
+	const fetchBackend = fetchProvider.webFetchProvider || "jina";
 	return html`
 		<div class="settings-rows">
 			<div class="settings-section-title">Web tools</div>
@@ -2938,6 +2942,12 @@ function SettingsTools({ data, busy, act, personas, onQuickSessionPersonaChange 
 			<div class="settings-form-row">
 				<input type="password" autocomplete="off" placeholder="Brave Search API key (BSA...)" value=${bKey} onInput=${(e) => setBraveKey(e.target.value)} />
 				<button class="modal-btn" style=${{ minWidth: "142px" }} disabled=${busy || !bKey} onClick=${() => act(`/web-search-provider brave ${bKey}`)}>Save & use Brave</button>
+			</div>
+			<div class="settings-section-title">Web fetch backend</div>
+			<p class="settings-hint">Jina Reader needs no key and handles JS-rendered pages/PDFs, but sends every fetched URL through a third party. Local fetches the page directly from this process instead — no third party involved — and converts HTML itself.</p>
+			<div class="settings-form-row">
+				<button class="modal-btn${fetchBackend === "jina" ? " modal-btn-primary" : ""}" title="Free, no key — handles JS rendering and PDFs" disabled=${busy} onClick=${() => act("/web-fetch-provider jina")}>Jina Reader</button>
+				<button class="modal-btn${fetchBackend === "local" ? " modal-btn-primary" : ""}" title="Direct fetch — no third party sees the URL" disabled=${busy} onClick=${() => act("/web-fetch-provider local")}>Local</button>
 			</div>
 			<div class="settings-section-title">Bash confirmation mode</div>
 			<p class="settings-hint">Default asks before running potentially dangerous shell commands. Bypass skips all confirmation prompts.</p>

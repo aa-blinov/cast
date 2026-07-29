@@ -281,8 +281,9 @@ export function getToolDefinitions(
 			function: {
 				name: "web_fetch",
 				description:
-					"Fetch a web page and return clean markdown via Jina Reader. " +
-					"Handles JS rendering, PDFs, and content extraction. " +
+					"Fetch a web page and return its content as markdown, plain text, or raw HTML. " +
+					"Backend is configurable via /web-fetch-provider: Jina Reader (default, handles JS " +
+					"rendering and PDFs) or a local direct fetch (no third party sees the URL). " +
 					"Useful for reading articles, documentation, and any web content.",
 				parameters: {
 					type: "object",
@@ -291,6 +292,13 @@ export function getToolDefinitions(
 						maxChars: {
 							type: "number",
 							description: "Maximum characters to return (default: 12000)",
+						},
+						format: {
+							type: "string",
+							enum: ["markdown", "text", "html"],
+							description:
+								"Output format (default: markdown). Only affects the 'local' backend — " +
+								"Jina Reader always returns markdown.",
 						},
 					},
 					required: ["url"],
