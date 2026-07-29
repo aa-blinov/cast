@@ -3441,11 +3441,13 @@ function SettingsPlugins({ data, busy, act, confirm }) {
 
 			<div class="settings-section-title">Browse marketplaces</div>
 			<div class="plugin-mp-tabs">
-				${catalog.map(
-					(mp) => html`
+				${[...catalog]
+					.sort((a, b) => a.name.localeCompare(b.name))
+					.map(
+						(mp) => html`
 				<button key=${mp.name} class="plugin-mp-tab${mpTab === mp.name ? " active" : ""}" onClick=${() => setMpTab(mp.name)}>${mp.name}</button>
 			`,
-				)}
+					)}
 			</div>
 			${(() => {
 				const mp = catalog.find((m) => m.name === mpTab);
@@ -3457,28 +3459,28 @@ function SettingsPlugins({ data, busy, act, confirm }) {
 				if (mp.plugins.length === 0) return html`<div class="settings-hint">No plugins in "${mp.name}".</div>`;
 				return html`
 						<div class="plugin-catalog-list">
-							${mp.plugins.map((p) => {
-								const pkg = p.package || p.name;
-								const id = `${p.name || pkg}@${mp.name}`;
-								const installed = installedNames.has(p.name || pkg) || installedIds.has(id);
-								return html`
-									<div key=${p.name || id} class="settings-item-row">
-										<div class="settings-item-info">
+							${[...mp.plugins]
+								.sort((a, b) => (a.name || a.package || "").localeCompare(b.name || b.package || ""))
+								.map((p) => {
+									const pkg = p.package || p.name;
+									const name = p.name || pkg;
+									const id = `${name}@${mp.name}`;
+									const installed = installedNames.has(name) || installedIds.has(id);
+									return html`
+									<div key=${name} class="plugin-catalog-item">
+										<div class="plugin-catalog-header">
 											<span class="settings-item-status ${installed ? "ok" : ""}" />
-											<span class="settings-item-name">${p.name || pkg}</span>
-											<span class="settings-item-meta">${mp.name}</span>
-											${p.description && html`<${InfoPopover} text=${p.description} />`}
-										</div>
-										<div class="settings-item-actions">
+											<span class="settings-item-name">${name}</span>
 											${
 												installed
 													? html`<span class="plugin-installed-label">installed</span>`
 													: html`<button class="modal-btn icon-btn" title="Install" disabled=${busy} onClick=${() => act(`/plugin install ${id}`)}><${icons.arrowDownTray} /></button>`
 											}
 										</div>
+										${p.description && html`<div class="plugin-catalog-desc">${p.description}</div>`}
 									</div>
 								`;
-							})}
+								})}
 						</div>
 					`;
 			})()}

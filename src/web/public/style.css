@@ -2088,6 +2088,21 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	opacity: .6;
 	padding: 4px 6px;
 }
+.plugin-catalog-item {
+	padding: 6px 0;
+	border-bottom: 1px solid var(--border-subtle);
+}
+.plugin-catalog-item:last-child { border-bottom: none; }
+.plugin-catalog-header {
+	display: flex; align-items: center; gap: 6px;
+}
+.plugin-catalog-header .settings-item-name { flex: 1; }
+.plugin-catalog-desc {
+	font-size: .72rem;
+	color: var(--text-muted);
+	margin: 3px 0 0 18px;
+	line-height: 1.4;
+}
 .settings-item-row {
 	display: flex; flex-wrap: wrap; gap: 6px 8px;
 	padding: 6px 4px;
