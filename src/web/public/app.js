@@ -2529,9 +2529,9 @@ function DirectoryBrowser({ initialPath, onPick, onClose, confirm }) {
 const SETTINGS_TABS = [
 	{ id: "bash", label: "Bash" },
 	{ id: "font", label: "Font" },
+	{ id: "plugins", label: "Marketplace" },
 	{ id: "mcp", label: "MCP" },
 	{ id: "model", label: "Model" },
-	{ id: "plugins", label: "Plugins" },
 	{ id: "provider", label: "Provider" },
 	{ id: "quick-mode", label: "Quick Mode" },
 	{ id: "skills", label: "Skills" },
