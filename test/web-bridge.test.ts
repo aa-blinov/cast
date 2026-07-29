@@ -881,4 +881,26 @@ describe("toDisplayMessages — inline images from a read on an image file", () 
 		// client renders as "image (read)" instead of "you").
 		expect(out[0]?.content).toBe("");
 	});
+
+	it("strips a <system-reminder> out of the visible caption when images and an attached document are sent together", () => {
+		// A message with both an image and an attached document (see
+		// inputs.ts) carries its reminder inside the same text part images
+		// use — without extraction here, it used to leak as raw XML into the
+		// visible bubble instead of surfacing as a separate notice the way
+		// the plain-string branch already handles it.
+		const out = toDisplayMessages([
+			{
+				role: "user",
+				content: [
+					{
+						type: "text",
+						text: "check this out\n\n<system-reminder>\nAttached: /tmp/report.pdf\n</system-reminder>",
+					},
+					{ type: "image_url", image_url: { url: "data:image/jpeg;base64,X" } },
+				],
+			} as never,
+		]);
+		expect(out.find((m) => m.role === "user")?.content).toBe("check this out");
+		expect(out.find((m) => m.role === "warning")?.content).toBe("[system] Attached: /tmp/report.pdf");
+	});
 });
