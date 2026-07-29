@@ -2,6 +2,28 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.10.0
+
+### Added
+
+- Hooks: full implementation matching the Claude Code protocol — shell/HTTP commands fire on lifecycle events to validate/block a tool call, log activity, or keep the agent working before it stops. Configure via `.cast/hooks.json` (project) or `~/.cast/hooks.json` (global); manage with `/hooks`, `/hooks enable|disable <id>`, `/hooks help`.
+- Web UI: Settings → Hooks tab, mirroring `/hooks` (per-source grouping, enable/disable toggle).
+- Skills: dedicated `skill` tool replaces the model reading `SKILL.md` via the generic `read` tool — validates the name, enforces `disable-model-invocation`, and performs argument substitution in one call.
+- Skills: `$ARGUMENTS`, `$ARGUMENTS[0]`/`$0`, and `${CLAUDE_SKILL_DIR}` substitution in skill bodies, plus a `when_to_use` frontmatter field surfaced in the skill listing as `description — whenToUse`.
+- Web UI: marketplace tabs with a plugin catalog browser (alphabetically sorted tabs and plugins, full descriptions).
+
+### Changed
+
+- Web UI: Settings panel restyled — MCP/Skills/SSH intro text switched from a collapsible `<details>` to an always-visible summary line; item rows, plugin catalog entries, and theme/font swatches share a consistent card/hover treatment; Plugins tab renamed to Marketplace, settings tabs sorted alphabetically (opens first tab by default).
+- Web UI: font swatches load their Google Fonts stylesheet so every option previews in its own font instead of falling back to the system font.
+
+### Fixed
+
+- Case-insensitive tool name matching in hook `if` conditions.
+- `${CLAUDE_PLUGIN_ROOT}` substitution in hook command strings for plugin compatibility.
+- Hook protocol parity — missing payload fields and output formats now match Claude Code's.
+- MCP/Skills/SSH settings tabs now work while the agent is running.
+
 ## 0.9.14
 
 ### Fixed
