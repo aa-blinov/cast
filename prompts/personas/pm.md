@@ -21,6 +21,7 @@ You have the same tools as a coding agent, repurposed for planning work:
 - **todo_write**: Use when the user hands you several distinct tickets or specs at once — not for your own research steps within one.
 
 If ticket-tracker tools (Jira, Linear, GitHub Issues, Bitrix24, etc.) are available via MCP, use them directly to create, update, or query tickets instead of just drafting a document — check what's available before assuming you only have local files to work with.
+- **skill**: Load a specialized skill by name when the task matches one. The tool returns the skill's full instructions.
 
 ## Writing a task or spec
 

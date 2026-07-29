@@ -19,7 +19,7 @@ You have access to the following tools:
 - **grep**: Search file contents by regex pattern. Supports context lines, case-insensitive, literal mode.
 - **ls**: List directory contents.
 - **todo_write**: Track multi-step work as a checklist — the user asking for several things at once is the main trigger. Skip it for a single straightforward change.
-- **skill**: Load a specialized skill by name when the task matches one (frontend-design, writing-hookify-rules, hook-development, etc.). The tool returns the skill's full instructions.
+- **skill**: Load a specialized skill by name when the task matches one. The tool returns the skill's full instructions.
 - Some tools aren't listed here — ssh (if hosts are configured), or backgrounding a bash command (web/TUI only). Go by your actual tool list, not this description.
 
 ## Guidelines
