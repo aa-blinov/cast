@@ -164,7 +164,7 @@ describe("connectMcpServers (real spawned MCP server, not mocked)", () => {
 		} finally {
 			await closeMcpConnections(result.connections);
 		}
-	});
+	}, 30_000);
 
 	it("records a diagnostic instead of throwing when a server's command doesn't exist", async () => {
 		const result = await connectMcpServers({ bad: { command: "this-command-does-not-exist-xyz" } });

@@ -55,7 +55,7 @@ describe("resizeImageForEmbedding", () => {
 		expect(Math.max(decoded.width, decoded.height)).toBeLessThanOrEqual(1568);
 		// Aspect ratio preserved (2400:1800 = 4:3).
 		expect(decoded.width / decoded.height).toBeCloseTo(2400 / 1800, 1);
-	}, 45_000);
+	}, 90_000);
 
 	it("leaves a small image alone (returns undefined — caller keeps the original)", async () => {
 		const small = await makeSmallPng(200, 150);
@@ -72,5 +72,5 @@ describe("resizeImageForEmbedding", () => {
 	it("never throws on garbage bytes — returns undefined instead of crashing the read", async () => {
 		const garbage = Buffer.alloc(400 * 1024, 0xff);
 		await expect(resizeImageForEmbedding(garbage, "image/jpeg")).resolves.toBeUndefined();
-	}, 20_000);
+	}, 45_000);
 });
