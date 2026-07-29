@@ -14,3 +14,59 @@ import { join } from "node:path";
 export function sessionInputsDir(sessionId: string): string {
 	return join(homedir(), ".cast", "inputs", sessionId);
 }
+
+/**
+ * Executable/binary formats rejected as a document attachment — the model
+ * would only ever be asked to *read* an attachment (via `read`/`bash` or a
+ * format-specific skill), never run it, so there's no legitimate reason to
+ * accept something whose only real use is being executed. Archives (zip,
+ * tar, 7z, ...) and ordinary documents (pdf, docx, csv, ...) are explicitly
+ * NOT on this list — those are exactly what this feature exists for.
+ * Extension-based, not magic-byte sniffing: good enough to stop someone
+ * dragging in an .exe by mistake or on purpose, not a hardened sandbox
+ * boundary (the file is never executed by anything cast does either way).
+ */
+export const BLOCKED_ATTACHMENT_EXTENSIONS = new Set([
+	"exe",
+	"msi",
+	"dll",
+	"so",
+	"dylib",
+	"bin",
+	"com",
+	"bat",
+	"cmd",
+	"scr",
+	"vbs",
+	"vbe",
+	"ps1",
+	"psm1",
+	"jar",
+	"app",
+	"deb",
+	"rpm",
+	"apk",
+	"run",
+	"out",
+	"elf",
+	"cpl",
+	"gadget",
+	"wsf",
+	"wsh",
+	"ocx",
+	"sys",
+	"action",
+	"workflow",
+	"command",
+]);
+
+/** Lowercased extension without the dot, or "" if the name has none. */
+export function extensionOf(name: string): string {
+	const idx = name.lastIndexOf(".");
+	return idx === -1 ? "" : name.slice(idx + 1).toLowerCase();
+}
+
+/** True if this filename's extension is on the executable/binary blocklist. */
+export function isBlockedAttachmentName(name: string): boolean {
+	return BLOCKED_ATTACHMENT_EXTENSIONS.has(extensionOf(name));
+}

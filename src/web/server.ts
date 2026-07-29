@@ -8,6 +8,7 @@
 import { execSync } from "node:child_process";
 import {
 	createReadStream,
+	existsSync,
 	mkdirSync,
 	readdirSync,
 	readFileSync,
@@ -15,13 +16,14 @@ import {
 	rmdirSync,
 	rmSync,
 	statSync,
+	writeFileSync,
 } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { getHistoryPage, getMessageImage } from "../core/session.ts";
 import { toDisplayMessages, type WebBridge, type WebEvent } from "./bridge.ts";
-import { sessionInputsDir } from "./inputs.ts";
+import { isBlockedAttachmentName, sessionInputsDir } from "./inputs.ts";
 
 const MIME_TYPES: Record<string, string> = {
 	".html": "text/html; charset=utf-8",
@@ -853,6 +855,58 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 			if ((err as NodeJS.ErrnoException)?.code === "ENOENT") return json(res, { entries: [] });
 			json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
 		}
+	});
+
+	// 25MB — generous for a PDF/docx/small archive, small enough that a
+	// mistaken multi-gigabyte drop doesn't fill the disk or hang the request
+	// buffering the whole base64 body in memory (see readBody).
+	const MAX_INPUT_FILE_BYTES = 25 * 1024 * 1024;
+
+	route("POST", "/api/sessions/:id/inputs/upload", async (req, res, params) => {
+		if (!bridge.getSession(params.id)) return json(res, { error: "Not found" }, 404);
+		let parsed: { name?: string; dataUrl?: string };
+		try {
+			parsed = JSON.parse(await readBody(req));
+		} catch {
+			return json(res, { error: "Invalid JSON" }, 400);
+		}
+		// basename() so a full path (or a client sending one by mistake/malice)
+		// can't escape the flat inputs directory — same rule as download/delete.
+		const name = basename((parsed.name ?? "").trim());
+		if (!name || name === "." || name === "..") return json(res, { error: "Invalid file name" }, 400);
+		if (isBlockedAttachmentName(name)) {
+			return json(res, { error: `Executable/binary files aren't accepted as attachments: "${name}"` }, 400);
+		}
+		const dataUrl = parsed.dataUrl ?? "";
+		const comma = dataUrl.indexOf(",");
+		if (!dataUrl.startsWith("data:") || comma === -1) {
+			return json(res, { error: "Expected a data: URL" }, 400);
+		}
+		let buf: Buffer;
+		try {
+			buf = Buffer.from(dataUrl.slice(comma + 1), "base64");
+		} catch {
+			return json(res, { error: "Invalid base64 payload" }, 400);
+		}
+		if (buf.length > MAX_INPUT_FILE_BYTES) {
+			return json(res, { error: `File too large — max ${MAX_INPUT_FILE_BYTES / (1024 * 1024)}MB` }, 400);
+		}
+		const dir = sessionInputsDir(params.id);
+		mkdirSync(dir, { recursive: true });
+		// Same name attached twice (re-upload, or two files that happen to
+		// share a name) gets a " (2)", " (3)", ... suffix rather than silently
+		// clobbering the first one — the model and the user both still have
+		// distinct files to refer to instead of one overwriting the other.
+		let finalName = name;
+		if (existsSync(join(dir, finalName))) {
+			const dot = name.lastIndexOf(".");
+			const stem = dot === -1 ? name : name.slice(0, dot);
+			const ext = dot === -1 ? "" : name.slice(dot);
+			for (let n = 2; existsSync(join(dir, finalName)); n++) finalName = `${stem} (${n})${ext}`;
+		}
+		const target = join(dir, finalName);
+		writeFileSync(target, buf);
+		json(res, { ok: true, name: finalName, path: target, size: buf.length });
 	});
 
 	route("GET", "/api/sessions/:id/inputs/download", (req, res, params) => {

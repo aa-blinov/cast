@@ -166,6 +166,22 @@ export interface DisplayMessage {
  * `turnMeta` is the same kind of sidecar map for the "provider · model · Ns"
  * footer under whichever assistant message actually ended a turn.
  */
+/** Strips every `<system-reminder>...</system-reminder>` block out of `text`,
+ *  returning the visible remainder plus each reminder's body separately —
+ *  shared by both branches below (plain-string user messages, and the
+ *  array-content branch for a message that also carries images) so a
+ *  reminder is never left as raw XML in what the user sees. */
+function extractSystemReminders(text: string): { cleaned: string; reminders: string[] } {
+	const reminders: string[] = [];
+	const cleaned = text
+		.replace(/<system-reminder>([\s\S]*?)<\/system-reminder>/g, (_, body: string) => {
+			reminders.push(body.trim());
+			return "";
+		})
+		.trim();
+	return { cleaned, reminders };
+}
+
 export function toDisplayMessages(
 	messages: Message[],
 	reasoning?: Record<number, string>,
@@ -250,8 +266,18 @@ export function toDisplayMessages(
 			// text part at all (the tool-only relay) — the client uses exactly this
 			// null-vs-string distinction to label the message "you" vs "image (read)".
 			const textPartObj = parts.find((p) => p.type === "text");
-			const textPart = textPartObj ? (textPartObj.text ?? "") : null;
+			let textPart = textPartObj ? (textPartObj.text ?? "") : null;
 			if (dataUrls.length > 0) {
+				// A message with both images and an attached document (see
+				// inputs.ts) carries its <system-reminder> inside this same text
+				// part — extract it the same way the plain-string branch below
+				// does, so it surfaces as a separate notice instead of leaking
+				// raw <system-reminder> tags into the visible bubble.
+				if (m.role === "user" && textPart) {
+					const extracted = extractSystemReminders(textPart);
+					for (const body of extracted.reminders) out.push({ role: "warning", content: `[system] ${body}` });
+					textPart = extracted.cleaned || (textPart ? "" : null);
+				}
 				const seq = seqs?.[i];
 				const images =
 					sessionId && seq !== undefined
@@ -263,17 +289,12 @@ export function toDisplayMessages(
 		}
 		// Extract <system-reminder> blocks and render them as warning
 		// messages instead of raw XML. These are internal protocol
-		// (compaction, date-rollover, interrupt reminders) injected as
-		// role:"user" because the wire format has no dedicated role.
+		// (compaction, date-rollover, interrupt reminders, attached-file
+		// notices) injected as role:"user" because the wire format has no
+		// dedicated role.
 		let content = typeof m.content === "string" ? m.content : null;
 		if (m.role === "user" && content) {
-			const reminders: string[] = [];
-			const cleaned = content
-				.replace(/<system-reminder>([\s\S]*?)<\/system-reminder>/g, (_, body: string) => {
-					reminders.push(body.trim());
-					return "";
-				})
-				.trim();
+			const { cleaned, reminders } = extractSystemReminders(content);
 			// Show each reminder as a styled warning message
 			for (const body of reminders) {
 				if (body) out.push({ role: "warning", content: `[system] ${body}` });

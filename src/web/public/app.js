@@ -941,22 +941,147 @@ function resizeImageToDataUrl(file) {
 	});
 }
 
-function Composer({ running, ready, commands, personas, onSubmit, onAbort }) {
+// Same blocklist as inputs.ts (server-side, authoritative) — duplicated here
+// only so a blocked file gets an instant, no-round-trip rejection instead of
+// waiting on an upload + 400 response. The server re-checks regardless; this
+// is UX polish, not the actual boundary.
+const BLOCKED_ATTACHMENT_EXTENSIONS = new Set([
+	"exe",
+	"msi",
+	"dll",
+	"so",
+	"dylib",
+	"bin",
+	"com",
+	"bat",
+	"cmd",
+	"scr",
+	"vbs",
+	"vbe",
+	"ps1",
+	"psm1",
+	"jar",
+	"app",
+	"deb",
+	"rpm",
+	"apk",
+	"run",
+	"out",
+	"elf",
+	"cpl",
+	"gadget",
+	"wsf",
+	"wsh",
+	"ocx",
+	"sys",
+	"action",
+	"workflow",
+	"command",
+]);
+
+function isBlockedAttachmentName(name) {
+	const idx = name.lastIndexOf(".");
+	const ext = idx === -1 ? "" : name.slice(idx + 1).toLowerCase();
+	return BLOCKED_ATTACHMENT_EXTENSIONS.has(ext);
+}
+
+function partitionFiles(fileList) {
+	const files = Array.from(fileList ?? []);
+	return {
+		images: files.filter((f) => f.type.startsWith("image/")),
+		docs: files.filter((f) => !f.type.startsWith("image/")),
+	};
+}
+
+function readFileAsDataUrl(file) {
+	return new Promise((resolvePromise, reject) => {
+		const reader = new FileReader();
+		reader.onload = () => resolvePromise(reader.result);
+		reader.onerror = () => reject(new Error("Could not read file"));
+		reader.readAsDataURL(file);
+	});
+}
+
+function Composer({ running, ready, activeId, commands, personas, onSubmit, onAbort }) {
 	const [value, setValue] = useState("");
 	const [cmdVisible, setCmdVisible] = useState(false);
 	const [selectedIndex, setSelectedIndex] = useState(0);
 	const [images, setImages] = useState([]);
+	// Non-image attachments — unlike images (embedded as image_url content
+	// parts on send), these upload to ~/.cast/inputs/<session-id>/ the moment
+	// they're attached (see inputs.ts / server.ts's upload route), so the
+	// composer just tracks {id, name, path, uploading, error} for each and
+	// references the already-on-disk path via a <system-reminder> at send time.
+	const [docs, setDocs] = useState([]);
 	const [dragOver, setDragOver] = useState(false);
 	const textareaRef = useRef(null);
 	const pickerRef = useRef(null);
 	const fileInputRef = useRef(null);
 
 	const addImageFiles = useCallback(async (files) => {
-		const imageFiles = Array.from(files).filter((f) => f.type.startsWith("image/"));
-		if (imageFiles.length === 0) return;
-		const resized = await Promise.all(imageFiles.map((f) => resizeImageToDataUrl(f).catch(() => null)));
+		if (files.length === 0) return;
+		const resized = await Promise.all(files.map((f) => resizeImageToDataUrl(f).catch(() => null)));
 		setImages((prev) => [...prev, ...resized.filter(Boolean)]);
 	}, []);
+
+	const addDocFiles = useCallback(
+		async (files) => {
+			if (files.length === 0) return;
+			if (!activeId) {
+				// A brand-new draft session has no id yet (see submitMessage's
+				// commitSession handoff) — nowhere on the server to upload into
+				// until the conversation actually exists. Images don't have this
+				// problem since they're embedded directly in the message rather
+				// than uploaded ahead of time.
+				setDocs((prev) => [
+					...prev,
+					...files.map((f) => ({
+						id: `${f.name}-${Date.now()}-${Math.random()}`,
+						name: f.name,
+						error: "Send a text message first to start the chat, then attach files",
+					})),
+				]);
+				return;
+			}
+			for (const file of files) {
+				const id = `${file.name}-${Date.now()}-${Math.random()}`;
+				if (isBlockedAttachmentName(file.name)) {
+					setDocs((prev) => [
+						...prev,
+						{ id, name: file.name, error: "Executable/binary files aren't accepted as attachments" },
+					]);
+					continue;
+				}
+				setDocs((prev) => [...prev, { id, name: file.name, uploading: true }]);
+				try {
+					const dataUrl = await readFileAsDataUrl(file);
+					const result = await api("POST", `/api/sessions/${activeId}/inputs/upload`, {
+						name: file.name,
+						dataUrl,
+					});
+					setDocs((prev) =>
+						prev.map((d) => (d.id === id ? { id, name: result.name, path: result.path, size: result.size } : d)),
+					);
+				} catch (err) {
+					setDocs((prev) => prev.map((d) => (d.id === id ? { ...d, uploading: false, error: err.message } : d)));
+				}
+			}
+		},
+		[activeId],
+	);
+
+	const removeDoc = useCallback(
+		(doc) => {
+			setDocs((prev) => prev.filter((d) => d.id !== doc.id));
+			// Only ever uploaded (has a path) once it's actually on disk —
+			// nothing to clean up server-side for a still-uploading or
+			// already-failed/rejected entry.
+			if (activeId && doc.path) {
+				api("DELETE", `/api/sessions/${activeId}/inputs?path=${encodeURIComponent(doc.name)}`).catch(() => {});
+			}
+		},
+		[activeId],
+	);
 
 	const handlePaste = useCallback(
 		(e) => {
@@ -975,17 +1100,21 @@ function Composer({ running, ready, commands, personas, onSubmit, onAbort }) {
 		(e) => {
 			e.preventDefault();
 			setDragOver(false);
-			if (e.dataTransfer?.files?.length) addImageFiles(e.dataTransfer.files);
+			const { images: imageFiles, docs: docFiles } = partitionFiles(e.dataTransfer?.files);
+			addImageFiles(imageFiles);
+			addDocFiles(docFiles);
 		},
-		[addImageFiles],
+		[addImageFiles, addDocFiles],
 	);
 
 	const handleFilePick = useCallback(
 		(e) => {
-			if (e.target.files?.length) addImageFiles(e.target.files);
+			const { images: imageFiles, docs: docFiles } = partitionFiles(e.target.files);
+			addImageFiles(imageFiles);
+			addDocFiles(docFiles);
 			e.target.value = ""; // same file picked twice in a row must still fire onChange
 		},
-		[addImageFiles],
+		[addImageFiles, addDocFiles],
 	);
 
 	// Only /persona still lives in the composer — model, theme, reasoning,
@@ -1004,15 +1133,26 @@ function Composer({ running, ready, commands, personas, onSubmit, onAbort }) {
 
 	const handleSubmit = useCallback(() => {
 		const trimmed = value.trim();
-		// A caption-less image send is allowed — an attached photo alone is a
-		// complete message, same as any chat app.
-		if (!trimmed && images.length === 0) return;
-		onSubmit(trimmed, images);
+		const readyDocs = docs.filter((d) => d.path && !d.uploading && !d.error);
+		// A caption-less image/document send is allowed — an attachment alone
+		// is a complete message, same as any chat app.
+		if (!trimmed && images.length === 0 && readyDocs.length === 0) return;
+		// Invisible to the user (toDisplayMessages strips <system-reminder>
+		// blocks and shows them as a separate "[system] ..." notice instead of
+		// leaving them in the message bubble) — the model gets the absolute
+		// path so it can `read`/`bash` (or a format-specific skill) the file
+		// itself; nothing here parses the attachment's actual content.
+		const text =
+			readyDocs.length > 0
+				? `${trimmed}\n\n<system-reminder>\nThe user attached the following file(s) to this message:\n${readyDocs.map((d) => `- ${d.name}: ${d.path}`).join("\n")}\n</system-reminder>`
+				: trimmed;
+		onSubmit(text, images);
 		setValue("");
 		setImages([]);
+		setDocs([]);
 		setCmdVisible(false);
 		if (textareaRef.current) textareaRef.current.style.height = "auto";
-	}, [value, images, onSubmit]);
+	}, [value, images, docs, onSubmit]);
 
 	const handleCmdSelect = useCallback(
 		(name) => {
@@ -1155,6 +1295,26 @@ function Composer({ running, ready, commands, personas, onSubmit, onAbort }) {
 				</div>
 			`
 			}
+			${
+				docs.length > 0 &&
+				html`
+				<div class="composer-docs">
+					${docs.map(
+						(d) => html`
+						<div key=${d.id} class="composer-doc-chip${d.error ? " composer-doc-chip-error" : ""}" title=${d.error ?? d.name}>
+							<span class="composer-doc-name">${d.uploading ? "Uploading… " : ""}${d.name}</span>
+							<button
+								type="button"
+								class="composer-doc-remove"
+								onClick=${() => removeDoc(d)}
+								aria-label="Remove ${d.name}"
+							><${icons.xMark} /></button>
+						</div>
+					`,
+					)}
+				</div>
+			`
+			}
 			<div
 				class="composer${dragOver ? " composer-drag-over" : ""}"
 				onDragOver=${(e) => {
@@ -1167,7 +1327,6 @@ function Composer({ running, ready, commands, personas, onSubmit, onAbort }) {
 				<input
 					ref=${fileInputRef}
 					type="file"
-					accept="image/*"
 					multiple
 					style="display:none"
 					onChange=${handleFilePick}
@@ -1177,8 +1336,8 @@ function Composer({ running, ready, commands, personas, onSubmit, onAbort }) {
 					class="composer-attach"
 					onClick=${() => fileInputRef.current?.click()}
 					disabled=${!ready}
-					aria-label="Attach image"
-					title="Attach image"
+					aria-label="Attach image or file"
+					title="Attach image or file"
 				><${icons.paperclip} /></button>
 				<textarea
 					ref=${textareaRef}
@@ -5557,7 +5716,7 @@ function App() {
 					</div>
 				`
 				}
-				<${Composer} running=${running} ready=${!!session} commands=${commands} personas=${personas} onSubmit=${submitMessage} onAbort=${abortRun} />
+				<${Composer} running=${running} ready=${!!session} activeId=${activeId} commands=${commands} personas=${personas} onSubmit=${submitMessage} onAbort=${abortRun} />
 			</main>
 
 			<!-- Diff — a wide right sidebar alongside the chat on desktop, a
