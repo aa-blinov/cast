@@ -862,13 +862,15 @@ function StreamingBlocks({ blocks }) {
 		<div>
 			${blocks.map((block, i) => {
 				if (block.kind === "content") {
-					return html`<div key=${i} class="streaming-block">
-						<div class="streaming-content" dangerouslySetInnerHTML=${{ __html: renderMarkdown(block.text) }} />
+					if (!block.text.trim()) return null;
+					return html`<div key=${i} class="message message-assistant">
+						<div class="message-content" dangerouslySetInnerHTML=${{ __html: renderMarkdown(block.text) }} />
 					</div>`;
 				}
 				if (block.kind === "thinking") {
-					return html`<div key=${i} class="streaming-block streaming-thinking">
-						<div class="streaming-content">${block.text}</div>
+					if (!block.text.trim()) return null;
+					return html`<div key=${i} class="message message-reasoning">
+						<div class="message-content">${block.text}</div>
 					</div>`;
 				}
 				if (block.kind === "tool") {
