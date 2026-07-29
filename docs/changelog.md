@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.9.11
+
+### Fixed
+
+- Web UI: the Inputs tab loading state now uses the same "Loading…" style as every other panel instead of an inconsistent title-sized label.
+
 ## 0.9.10
 
 ### Fixed
