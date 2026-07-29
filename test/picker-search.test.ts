@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { getSearchHaystack } from "../src/core/session.ts";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { resetDbConnectionForTests } from "../src/core/db.ts";
+import { createSession, saveSession, searchSessionSummaries } from "../src/core/session.ts";
 import { score } from "../src/pickers/match.ts";
 
 // ============================================================================
@@ -59,9 +63,14 @@ describe("score", () => {
 		expect(deep).toBeGreaterThan(score("nxexexdxlxe", "nedle")); // any subsequence
 	});
 
-	it("subsequence with huge gaps is weak but never dropped", () => {
+	it("subsequence with huge gaps is rejected — scattered letters aren't a real match", () => {
 		const hay = `n${"x".repeat(10_000)}eedle`;
-		expect(score(hay, "needle")).toBe(1);
+		expect(score(hay, "needle")).toBe(-1);
+	});
+
+	it("subsequence with small gaps still passes the relevance floor", () => {
+		// "abc" via 'a' at 0, 'b' at 2 (gap 1), 'c' at 4 (gap 1) → gaps=2 → 98
+		expect(score("axbxc", "abc")).toBeGreaterThanOrEqual(50);
 	});
 });
 
@@ -153,46 +162,107 @@ describe("pickSessions (filter contract)", () => {
 });
 
 // ============================================================================
-// getSearchHaystack() — what the session filter actually searches over
+// searchSessionSummaries() — the FTS5-backed replacement for the old
+// getSearchHaystack()+score() combo. The index is now built and maintained
+// by SQLite itself (messages_fts + triggers, see core/db.ts), not by
+// concatenating every message into one JS string per session.
 // ============================================================================
 
-describe("getSearchHaystack", () => {
-	const mkSession = (messages: Array<{ role: string; content: unknown }>) =>
-		({ id: "sess-id-123", cwd: "/home/user/proj", messages }) as never;
+describe("searchSessionSummaries", () => {
+	let realHome: string | undefined;
+	let fakeHome: string;
+	let projectDir: string;
 
-	it("skips the system prompt so it cannot exhaust the char budget", () => {
-		// The system prompt is tens of thousands of shared boilerplate chars;
-		// with it included, no user message ever made it under the cap.
-		const hay = getSearchHaystack(
-			mkSession([
-				{ role: "system", content: "BOILERPLATE ".repeat(200) },
-				{ role: "user", content: "find the needle here" },
-			]),
-		);
-		expect(hay).not.toContain("BOILERPLATE");
-		expect(hay).toContain("find the needle here");
+	beforeEach(() => {
+		realHome = process.env.HOME;
+		fakeHome = mkdtempSync(join(tmpdir(), "cast-picker-search-test-"));
+		process.env.HOME = fakeHome;
+		resetDbConnectionForTests();
+		projectDir = join(fakeHome, "proj");
 	});
 
-	it("skips tool messages but walks user/assistant text from the whole thread", () => {
-		const hay = getSearchHaystack(
-			mkSession([
-				{ role: "user", content: "first question" },
-				{ role: "assistant", content: "first answer" },
-				{ role: "tool", content: "TOOL OUTPUT NOISE" },
-				{ role: "user", content: "late follow-up topic" },
-			]),
-		);
-		expect(hay).toContain("first question");
-		expect(hay).toContain("first answer");
-		expect(hay).not.toContain("TOOL OUTPUT NOISE");
-		expect(hay).toContain("late follow-up topic");
+	afterEach(() => {
+		resetDbConnectionForTests();
+		process.env.HOME = realHome;
+		rmSync(fakeHome, { recursive: true, force: true });
 	});
 
-	it("includes cwd, id, and text from arbitrarily deep in the thread (no cap)", () => {
-		const filler = Array.from({ length: 200 }, (_, i) => ({ role: "user", content: `message number ${i}` }));
-		const hay = getSearchHaystack(mkSession([...filler, { role: "assistant", content: "deep unique needle" }]));
-		expect(hay).toContain("/home/user/proj");
-		expect(hay).toContain("sess-id-123");
-		expect(hay).toContain("deep unique needle");
+	it("skips the system prompt — it can't be found by content search", () => {
+		const s = createSession("gpt-4o", projectDir);
+		s.messages.push(
+			{ role: "system", content: "BOILERPLATE_MARKER shared by every session" },
+			{ role: "user", content: "find the needle here" },
+		);
+		saveSession(s);
+
+		expect(searchSessionSummaries("needle").map((x) => x.id)).toEqual([s.id]);
+		expect(searchSessionSummaries("BOILERPLATE_MARKER")).toEqual([]);
+	});
+
+	it("skips tool messages but finds user/assistant text from the whole thread", () => {
+		const s = createSession("gpt-4o", projectDir);
+		s.messages.push(
+			{ role: "user", content: "first question" },
+			{ role: "assistant", content: "first answer" },
+			{ role: "tool", content: "TOOL_OUTPUT_NOISE_MARKER" } as unknown as import("../src/core/llm.ts").Message,
+			{ role: "user", content: "late follow-up topic" },
+		);
+		saveSession(s);
+
+		expect(searchSessionSummaries("first answer").map((x) => x.id)).toEqual([s.id]);
+		expect(searchSessionSummaries("late follow-up").map((x) => x.id)).toEqual([s.id]);
+		expect(searchSessionSummaries("TOOL_OUTPUT_NOISE_MARKER")).toEqual([]);
+	});
+
+	it("finds a session by a multi-word query even when the words are in different messages", () => {
+		// Regression: messages_fts indexes one row per message, so a single
+		// combined MATCH query (all words ANDed) only ever found a session
+		// where every word appeared in the SAME message — a query like "hello
+		// mood" would miss a session that said "hello" in one turn and asked
+		// about "mood" three turns later, even though both terms individually
+		// matched that session just fine on their own.
+		const s = createSession("gpt-4o", projectDir);
+		s.messages.push(
+			{ role: "user", content: "greetingword" },
+			{ role: "assistant", content: "reply one" },
+			{ role: "user", content: "moodword" },
+		);
+		saveSession(s);
+
+		expect(searchSessionSummaries("greetingword").map((x) => x.id)).toEqual([s.id]);
+		expect(searchSessionSummaries("moodword").map((x) => x.id)).toEqual([s.id]);
+		expect(searchSessionSummaries("greetingword moodword").map((x) => x.id)).toEqual([s.id]);
+		// A word that's genuinely absent must still fail the intersection.
+		expect(searchSessionSummaries("greetingword nonexistentword")).toEqual([]);
+	});
+
+	it("finds text arbitrarily deep in a long thread (no cap)", () => {
+		const s = createSession("gpt-4o", projectDir);
+		for (let i = 0; i < 200; i++) s.messages.push({ role: "user", content: `message number ${i}` });
+		s.messages.push({ role: "assistant", content: "deep unique needle" });
+		saveSession(s);
+
+		expect(searchSessionSummaries("deep unique needle").map((x) => x.id)).toEqual([s.id]);
+	});
+
+	it("also matches on session metadata (cwd/id/title), not just message content", () => {
+		const s = createSession("gpt-4o", projectDir);
+		s.title = "My distinctive title";
+		saveSession(s);
+
+		expect(searchSessionSummaries("distinctive title").map((x) => x.id)).toEqual([s.id]);
+		expect(searchSessionSummaries(s.id).map((x) => x.id)).toEqual([s.id]);
+	});
+
+	it("ranks a metadata match above a pure content match", () => {
+		const contentOnly = createSession("gpt-4o", projectDir);
+		contentOnly.messages.push({ role: "user", content: "mentions apple in passing" });
+		saveSession(contentOnly);
+
+		const titleMatch = createSession("gpt-4o", projectDir);
+		titleMatch.title = "apple";
+		saveSession(titleMatch);
+
+		expect(searchSessionSummaries("apple").map((x) => x.id)[0]).toBe(titleMatch.id);
 	});
 });

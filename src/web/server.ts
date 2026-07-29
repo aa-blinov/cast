@@ -183,8 +183,10 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 		json(res, bridge.getPersonas());
 	});
 
-	route("GET", "/api/sessions", (_req, res) => {
-		json(res, bridge.listSessions());
+	route("GET", "/api/sessions", (req, res) => {
+		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+		const q = url.searchParams.get("q");
+		json(res, q ? bridge.searchSessions(q) : bridge.listSessions());
 	});
 
 	route("POST", "/api/sessions", async (req, res) => {

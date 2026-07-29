@@ -9,7 +9,8 @@ import type { Pickers, PickOption, PickOptions } from "../src/pickers/types.ts";
 // selectSession now runs the picker off lightweight summaries and only parses
 // the chosen session's file — these tests pin that contract: the returned
 // object must still be the FULL session (messages included), and the picker
-// must receive search-enabled options with per-row haystacks.
+// must receive a dynamicSearch callback backed by the SQLite FTS index
+// (core/session.ts's searchSessionSummaries) instead of per-row haystack text.
 
 describe("selectSession over summaries", () => {
 	let realHome: string | undefined;
@@ -44,11 +45,9 @@ describe("selectSession over summaries", () => {
 		saveSession(s);
 
 		let sawSearch: unknown;
-		let sawHaystack = "";
 		const pickers = fakePickers((options, opts) => {
 			sawSearch = opts?.search;
 			const row = options.find((o) => (o.value as { action?: string }).action === "resume")!;
-			sawHaystack = row.searchText ?? "";
 			return row.value;
 		});
 
@@ -56,9 +55,13 @@ describe("selectSession over summaries", () => {
 		expect(resumed?.id).toBe(s.id);
 		// Not a summary — the actual message bodies must be there.
 		expect(resumed?.messages.some((m) => m.content === "the real payload")).toBe(true);
-		// The picker ran in search mode with a real haystack.
+		// The picker ran in search mode, backed by a live FTS query rather than
+		// a precomputed haystack string — dynamicSearch itself must find the
+		// same row by message content.
 		expect(sawSearch).toBeTruthy();
-		expect(sawHaystack).toContain("the real payload");
+		const dynamicSearch = (sawSearch as { dynamicSearch?: (q: string) => PickOption<unknown>[] })?.dynamicSearch;
+		const hits = dynamicSearch?.("the real payload") ?? [];
+		expect(hits.some((o) => (o.value as { id?: string }).id === s.id)).toBe(true);
 	});
 
 	it("returns null on cancel and on 'Start fresh'", async () => {

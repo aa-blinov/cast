@@ -1072,8 +1072,6 @@ export interface SessionSummary {
 	msgCount: number;
 	/** First user message text — the list row's description. */
 	firstUserMessage: string;
-	/** Full-thread user/assistant text for the fuzzy filter. */
-	haystack: string;
 }
 
 /** True for an assistant message that's a pure tool-call step (no visible
@@ -1118,37 +1116,13 @@ export function getFirstUserMessage(subject: { messages: Message[] }): string {
 	return msg ? messageText(msg).replace(/\n/g, " ").trim() : "";
 }
 
-/**
- * Fuzzy-search haystack for a session: cwd + id + every user/assistant
- * message text in the thread. System and tool messages are skipped — the
- * system prompt alone is tens of KB of boilerplate shared by every session,
- * and tool output is the bulk of a session's bytes; what's left (the actual
- * dialog) measures ~1MB across hundreds of real sessions.
- */
-export function getSearchHaystack(subject: { id: string; cwd?: string; messages: Message[] }): string {
-	const parts: string[] = [];
-	if (subject.cwd) parts.push(subject.cwd);
-	parts.push(subject.id);
-	for (const m of subject.messages) {
-		if (m.role !== "user" && m.role !== "assistant") continue;
-		const text = messageText(m).replace(/\s+/g, " ").trim();
-		if (text) parts.push(text);
-	}
-	return parts.join("\n");
-}
-
-/** Every session's summary, built from full history (not just the
- *  in-context working set) so a compacted session's picker row and search
- *  text still reflect everything that was ever said in it. */
-export function listSessionSummaries(): SessionSummary[] {
-	const db = getDb();
-	const rows = db.prepare("SELECT * FROM sessions ORDER BY updated_at DESC").all() as unknown as SessionRow[];
-	// msgCount/firstUserMessage/haystack only ever look at user/assistant text
-	// (see getFirstUserMessage/getSearchHaystack) — filtering role at the SQL
-	// level, not after loading, matters a lot in practice: tool-result rows
-	// (file reads, grep output, ...) are typically the overwhelming majority
-	// of a session's stored bytes, and this runs once per session on every
-	// session-list request (GET /api/sessions, the CLI picker).
+/** Shared row → summary mapping for both listSessionSummaries and
+ *  searchSessionSummaries — msgCount/firstUserMessage only ever look at
+ *  user/assistant text (see getFirstUserMessage), so filtering role at the
+ *  SQL level, not after loading, matters a lot in practice: tool-result rows
+ *  (file reads, grep output, ...) are typically the overwhelming majority of
+ *  a session's stored bytes. */
+function buildSummaries(db: ReturnType<typeof getDb>, rows: SessionRow[]): SessionSummary[] {
 	const conversationOnly = db.prepare(
 		"SELECT content_json FROM messages WHERE session_id = ? AND role IN ('user', 'assistant') ORDER BY seq",
 	);
@@ -1156,7 +1130,7 @@ export function listSessionSummaries(): SessionSummary[] {
 		const messages = (conversationOnly.all(row.id) as Array<{ content_json: string }>).map(
 			(r) => JSON.parse(r.content_json) as Message,
 		);
-		const subject = { id: row.id, cwd: row.cwd ?? undefined, messages };
+		const subject = { messages };
 		return {
 			id: row.id,
 			...(row.cwd ? { cwd: row.cwd } : {}),
@@ -1168,9 +1142,99 @@ export function listSessionSummaries(): SessionSummary[] {
 			updatedAt: row.updated_at,
 			msgCount: countTurnMessages(messages),
 			firstUserMessage: getFirstUserMessage(subject),
-			haystack: getSearchHaystack(subject),
 		};
 	});
+}
+
+/** Every session's summary, built from full history (not just the
+ *  in-context working set) so a compacted session's picker row still
+ *  reflects everything that was ever said in it. */
+export function listSessionSummaries(): SessionSummary[] {
+	const db = getDb();
+	const rows = db.prepare("SELECT * FROM sessions ORDER BY updated_at DESC").all() as unknown as SessionRow[];
+	return buildSummaries(db, rows);
+}
+
+/** Turns one word into a safe FTS5 MATCH term: quoted (neutralizes MATCH's
+ *  own syntax characters — AND/OR/NOT, "-", "*", ":", ... — so a token
+ *  containing them is searched literally instead of parsed as a query
+ *  operator) and given a trailing "*" for prefix matching, so a still-being-
+ *  typed word ("auth") reaches its finished form ("authentication"). */
+function toFtsTerm(token: string): string {
+	return `"${token.replace(/"/g, '""')}"*`;
+}
+
+/**
+ * Sessions matching `query`, ranked by relevance — replaces the old approach
+ * of shipping every session's full message text to the caller (TUI picker or
+ * web sidebar) to score in JS. Two match sources, merged:
+ *  - message content, via the messages_fts index (bm25-ranked; lower is
+ *    better in SQLite's convention, so ranks compare with plain `<`);
+ *  - session metadata (cwd/id/title/persona/model), via LIKE — cheap (one
+ *    short row per session, no message text involved) and always outranks a
+ *    pure content hit, the same way the old score() made a substring match
+ *    on the visible label beat a fuzzy match buried in the body.
+ * Empty query returns the unranked full list, same as listSessionSummaries.
+ */
+export function searchSessionSummaries(query: string): SessionSummary[] {
+	const q = query.trim();
+	if (!q) return listSessionSummaries();
+	const db = getDb();
+
+	const tokens = q.split(/\s+/).filter(Boolean);
+	// messages_fts has one row per message, not one per session — a combined
+	// multi-word MATCH (`"a"* "b"*`) requires every word in the SAME message
+	// row, so "привет" and "настроение" typed in different turns of one
+	// conversation would never match together even though the session
+	// obviously contains both. Querying each word separately and intersecting
+	// the matching session_id sets in JS finds a session where the words are
+	// scattered across different messages, same as the old single-haystack
+	// JS scorer did before this index existed.
+	const contentStmt = db.prepare(
+		"SELECT session_id, bm25(messages_fts) AS rank FROM messages_fts WHERE messages_fts MATCH ?",
+	);
+	let matchedSessionIds: Set<string> | null = null;
+	const bestRankById = new Map<string, number>();
+	for (const token of tokens) {
+		const rows = contentStmt.all(toFtsTerm(token)) as Array<{ session_id: string; rank: number }>;
+		const idsForToken = new Set<string>();
+		for (const row of rows) {
+			idsForToken.add(row.session_id);
+			bestRankById.set(row.session_id, Math.min(bestRankById.get(row.session_id) ?? 0, row.rank));
+		}
+		if (matchedSessionIds === null) {
+			matchedSessionIds = idsForToken;
+		} else {
+			const next = new Set<string>();
+			for (const id of matchedSessionIds) if (idsForToken.has(id)) next.add(id);
+			matchedSessionIds = next;
+		}
+		if (matchedSessionIds.size === 0) break;
+	}
+
+	// Escape LIKE's own wildcards so a literal "%" or "_" in the typed query
+	// matches itself instead of acting as a pattern character.
+	const like = `%${q.replace(/[\\%_]/g, "\\$&")}%`;
+	const metaMatches = db
+		.prepare(
+			"SELECT id FROM sessions WHERE cwd LIKE ? ESCAPE '\\' OR id LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\' OR persona LIKE ? ESCAPE '\\' OR model LIKE ? ESCAPE '\\'",
+		)
+		.all(like, like, like, like, like) as Array<{ id: string }>;
+
+	const rankById = new Map<string, number>();
+	for (const id of matchedSessionIds ?? []) rankById.set(id, bestRankById.get(id) ?? 0);
+	const METADATA_RANK = -1000; // more negative than any real bm25 score → always sorts first
+	for (const m of metaMatches) rankById.set(m.id, Math.min(rankById.get(m.id) ?? 0, METADATA_RANK));
+	if (rankById.size === 0) return [];
+
+	const ids = [...rankById.keys()];
+	const placeholders = ids.map(() => "?").join(",");
+	const rows = db
+		.prepare(`SELECT * FROM sessions WHERE id IN (${placeholders})`)
+		.all(...ids) as unknown as SessionRow[];
+	const summaries = buildSummaries(db, rows);
+	summaries.sort((a, b) => (rankById.get(a.id) ?? 0) - (rankById.get(b.id) ?? 0));
+	return summaries;
 }
 
 /** Most recently updated session, or null if none are saved yet. */

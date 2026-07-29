@@ -592,6 +592,35 @@ describe("web bridge", () => {
 			expect(goodEvents[1]).toEqual({ type: "end", reason: "stop" });
 		});
 
+		it("searchSessions finds a live (hydrated) session by message content via the FTS index", async () => {
+			const { saveSession } = await import("../src/core/session.ts");
+			const bridge = createWebBridge(makeResult());
+			const ws = bridge.createSession();
+			ws.session.messages.push(
+				{ role: "user", content: "find the needle here" },
+				{ role: "assistant", content: "got it" },
+			);
+			saveSession(ws.session); // every real mutation path saves synchronously — mirror that here
+
+			const results = bridge.searchSessions("find the needle");
+			expect(results.map((s) => s.id)).toContain(ws.id);
+			// Live overlay still applies — status comes from the in-memory
+			// session, not a fresh "idle" cold-load default.
+			expect(results.find((s) => s.id === ws.id)?.status).toBe(ws.status);
+		});
+
+		it("searchSessions finds a cold session loaded from disk too, and empty query behaves like listSessions", async () => {
+			const { appendMessage, createSession, saveSession } = await import("../src/core/session.ts");
+			const bridge = createWebBridge(makeResult());
+			const orphan = createSession("gpt-4o", cwd);
+			appendMessage(orphan, { role: "user", content: "deep unique needle in an unhydrated session" });
+			saveSession(orphan);
+
+			expect(bridge.searchSessions("deep unique needle").map((s) => s.id)).toContain(orphan.id);
+			expect(bridge.searchSessions("no-such-term-anywhere")).toEqual([]);
+			expect(bridge.searchSessions("").map((s) => s.id)).toEqual(bridge.listSessions().map((s) => s.id));
+		});
+
 		it("subscribe receives current status immediately on connection", () => {
 			const bridge = createWebBridge(makeResult());
 			const ws = bridge.createSession();

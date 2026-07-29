@@ -1,7 +1,14 @@
 import { type AppConfig, fetchModels, runOnboardingCheck } from "../core/config.ts";
 import { DEFAULT_PERSONA, type LoadPersonasOptions, listPersonas, type Persona } from "../core/personas.ts";
 import { setModelsCache } from "../core/readline.ts";
-import { deleteSession, listSessionSummaries, loadSession, type SessionState } from "../core/session.ts";
+import {
+	deleteSession,
+	listSessionSummaries,
+	loadSession,
+	type SessionState,
+	type SessionSummary,
+	searchSessionSummaries,
+} from "../core/session.ts";
 import { getProjectTrust, type PermissionMode, type Settings, setProjectTrust } from "../core/settings.ts";
 import { buildReasoningParams, getReasoningOptions, type ModelReasoningMeta } from "../core/vendors.ts";
 import { type ModelSelection, PERMISSION_MODES, type Pickers, type PickOption } from "./types.ts";
@@ -150,12 +157,28 @@ function pad(str: string, width: number): string {
 	return str.length >= width ? `${str.slice(0, width - 1)}\u200b ` : str.padEnd(width);
 }
 
+type SessionPickValue = { id: string | null; action: "resume" | "fresh" | "delete" };
+
+function sessionRowOptions(sessions: SessionSummary[]): PickOption<SessionPickValue>[] {
+	return sessions.map((s) => {
+		const firstMsg = s.firstUserMessage;
+		const cwd = shortenCwd(s.cwd || "");
+		const date = s.updatedAt.slice(0, 10);
+		const time = s.updatedAt.slice(11, 16);
+		const msgCol = firstMsg.length > 40 ? `${firstMsg.slice(0, 40)}...` : firstMsg || "(empty)";
+		return {
+			value: { id: s.id, action: "resume" as const },
+			label: `${pad(cwd, 18)}${pad(msgCol, 43)}${date} ${time}  ${s.msgCount} msgs`,
+			description: firstMsg ? firstMsg : undefined,
+		};
+	});
+}
+
 export async function selectSession(pickers: Pickers): Promise<SessionState | null> {
 	while (true) {
 		// Summaries, not full sessions: the list needs a few hundred bytes per
-		// row (and the fuzzy haystack), so the picker runs off the mtime-
-		// validated index. The full session is parsed only for the one actually
-		// chosen, via loadSession below.
+		// row, so the picker runs off the DB-backed index. The full session is
+		// parsed only for the one actually chosen, via loadSession below.
 		const sessions = listSessionSummaries().sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
 
 		if (sessions.length === 0) {
@@ -163,28 +186,26 @@ export async function selectSession(pickers: Pickers): Promise<SessionState | nu
 			return null;
 		}
 
-		const options: PickOption<{
-			id: string | null;
-			action: "resume" | "fresh" | "delete";
-		}>[] = sessions.map((s) => {
-			const firstMsg = s.firstUserMessage;
-			const cwd = shortenCwd(s.cwd || "");
-			const date = s.updatedAt.slice(0, 10);
-			const time = s.updatedAt.slice(11, 16);
-			const msgCol = firstMsg.length > 40 ? `${firstMsg.slice(0, 40)}...` : firstMsg || "(empty)";
-			return {
-				value: { id: s.id, action: "resume" as const },
-				label: `${pad(cwd, 18)}${pad(msgCol, 43)}${date} ${time}  ${s.msgCount} msgs`,
-				description: firstMsg ? firstMsg : undefined,
-				searchText: s.haystack,
-			};
-		});
-		options.push({ value: { id: null, action: "fresh" as const }, label: "Start fresh" });
-		options.push({ value: { id: null, action: "delete" as const }, label: "Delete a session" });
+		const trailingOptions: PickOption<SessionPickValue>[] = [
+			{ value: { id: null, action: "fresh" as const }, label: "Start fresh" },
+			{ value: { id: null, action: "delete" as const }, label: "Delete a session" },
+		];
+		const options = [...sessionRowOptions(sessions), ...trailingOptions];
 
+		// dynamicSearch re-queries the SQLite FTS index (core/session.ts's
+		// searchSessionSummaries) on every keystroke instead of fuzzy-scoring a
+		// haystack string built from every session's full message history up
+		// front — the DB read is a sub-millisecond indexed lookup either way,
+		// so there's no latency cost to paying it live instead of once at
+		// picker-open time. "Start fresh"/"Delete a session" aren't sessions
+		// the index knows about, so they're appended unconditionally, matching
+		// their fixed position in the unfiltered list above.
 		const picked = await pickers.pickOption(options, {
 			title: "Sessions (most recent first)",
-			search: { placeholder: "filter by message, cwd, or id" },
+			search: {
+				placeholder: "filter by message, cwd, or id",
+				dynamicSearch: (query) => [...sessionRowOptions(searchSessionSummaries(query)), ...trailingOptions],
+			},
 		});
 		if (!picked) return null;
 		if (picked.action === "fresh") return null;
