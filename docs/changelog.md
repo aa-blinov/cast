@@ -2,6 +2,26 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.9.9
+
+### Added
+
+- Session search (TUI and web) now runs on a SQLite FTS5 index over full message history instead of a JS fuzzy scorer — same relevance ranking in both interfaces, and a multi-word query now matches across different messages in the same conversation instead of only within one.
+- `web_fetch` gets a second backend: "local" fetches the URL directly (no third party sees it) and converts HTML itself, with a Cloudflare-challenge retry, a 5MB response cap, and content-type checks that reject binaries. Switch with `/web-fetch-provider jina|local` (default stays `jina`).
+- Web UI: an "Inputs" tab (right sidebar, ordered Inputs/Files/Changes) for a session's attached documents.
+- Web UI: the composer's attach button now accepts documents, not just images — non-image files upload to a session-scoped directory and the model gets told their path via an invisible reminder on send. Executable/binary formats are rejected; archives and ordinary documents are allowed.
+- `cast web`'s MCP servers now connect in the background after the HTTP server starts listening, instead of blocking startup on every configured server (npx spawns, browser launches, remote handshakes) — the server accepts requests immediately, and connected tools become available in any open session automatically once the connect finishes.
+
+### Changed
+
+- Web UI: the "Tools" settings tab split into three — Bash, Web, Quick Mode — each loading only the data it needs instead of five settings commands on every open.
+- `web_fetch`: one retry on a transient network failure or 5xx (never on an intentional abort or a 4xx), and truncation now prefers the nearest paragraph break over a mid-sentence cut.
+
+### Fixed
+
+- `web_fetch` now rejects non-http(s) URL schemes (`file://`, `data:`, ...) before ever making a network call.
+- `cast web status`/"already running" could report a server as up before it was actually accepting connections — the daemon state file is now written only once the HTTP server is truly listening, matching its own documented contract.
+
 ## 0.9.8
 
 ### Fixed
