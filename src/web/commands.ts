@@ -77,7 +77,7 @@ export const SLASH_COMMANDS: Array<{
 	{ name: "/current", description: "Show session status", blocking: false, hidden: true },
 	{ name: "/diff", description: "Toggle the diff panel", blocking: false, hidden: true },
 	{ name: "/help", description: "Show this command list", blocking: false },
-	{ name: "/mcp", description: "Manage MCP servers", takesArgs: true, blocking: true, hidden: true },
+	{ name: "/mcp", description: "Manage MCP servers", takesArgs: true, blocking: false, hidden: true },
 	{ name: "/model", description: "Show or change model", takesArgs: true, blocking: true, hidden: true },
 	{ name: "/new", description: "Start a new session", blocking: true },
 	{
@@ -109,8 +109,8 @@ export const SLASH_COMMANDS: Array<{
 	{ name: "/rules", description: "List loaded rules", blocking: false },
 	{ name: "/s", description: "Alias for /steer", takesArgs: true, blocking: false },
 	{ name: "/sessions", description: "List sessions", blocking: false, hidden: true },
-	{ name: "/skills", description: "Manage skills", takesArgs: true, blocking: true, hidden: true },
-	{ name: "/ssh", description: "Manage SSH hosts", takesArgs: true, blocking: true, hidden: true },
+	{ name: "/skills", description: "Manage skills", takesArgs: true, blocking: false, hidden: true },
+	{ name: "/ssh", description: "Manage SSH hosts", takesArgs: true, blocking: false, hidden: true },
 	{ name: "/steer", description: "Inject a message while running", takesArgs: true, blocking: false },
 	{
 		name: "/quick-session-persona",
