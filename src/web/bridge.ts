@@ -1169,6 +1169,19 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			}
 			return { ok: false, error: "Usage: /web-search-provider ddg | tavily <api-key> | brave <api-key>" };
 		}
+		if (name === "/web-fetch-provider") {
+			// Same fresh-read pattern as /web-search-provider — the next
+			// web_fetch call picks this up via loadSettings() inside
+			// execWebFetch, no restart needed.
+			if (!arg) {
+				return { ok: true, result: { webFetchProvider: loadSettings().webFetchProvider ?? "jina" } };
+			}
+			if (arg !== "jina" && arg !== "local") {
+				return { ok: false, error: "Usage: /web-fetch-provider jina | local" };
+			}
+			updateSettings({ webFetchProvider: arg });
+			return { ok: true, result: { webFetchProvider: arg } };
+		}
 		if (name === "/theme") {
 			// A UI preference, not agent state — shared with the TUI's settings.json
 			// `theme` field so picking one here also changes what `cast` shows next.

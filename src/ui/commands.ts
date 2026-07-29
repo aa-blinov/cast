@@ -167,7 +167,8 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/theme", description: "Change color theme" },
 	{ name: "/usage", description: "Show session token and cost usage" },
 	{ name: "/web", description: "Toggle web tools (web_search, web_fetch)" },
-	{ name: "/web-search-provider", description: "Switch web_search backend (DuckDuckGo / Tavily)" },
+	{ name: "/web-fetch-provider", description: "Switch web_fetch backend (Jina Reader / local)" },
+	{ name: "/web-search-provider", description: "Switch web_search backend (DuckDuckGo / Tavily / Brave)" },
 ];
 
 export interface CommandDeps {
@@ -1909,6 +1910,31 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		return;
 	}
 
+	if (input === "/web-fetch-provider") {
+		const settings = loadSettings();
+		const current = settings.webFetchProvider ?? "jina";
+		const picked = await deps.pickers.pickOption(
+			[
+				{
+					value: "jina" as const,
+					label: `Jina Reader — free, no key, handles JS rendering/PDFs${current === "jina" ? " (current)" : ""}`,
+				},
+				{
+					value: "local" as const,
+					label: `Local — direct fetch, no third party sees the URL${current === "local" ? " (current)" : ""}`,
+				},
+			],
+			{ title: "Web fetch backend" },
+		);
+		if (picked === null) {
+			showNotice("[Cancelled — fetch provider unchanged]");
+			return;
+		}
+		updateSettings({ webFetchProvider: picked });
+		showNotice(`[Web fetch backend: ${picked === "jina" ? "Jina Reader" : "Local"}]`);
+		return;
+	}
+
 	if (input === "/statusbar") {
 		const allSegments = getStatusBarSegments();
 		if (!deps.pickers.pickStatusBar) {
@@ -2410,7 +2436,8 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 				"  /provider [name]    Switch / add / delete providers\n" +
 				"  /permissions        Change bash confirmation mode\n" +
 				"  /web                Toggle web tools (web_search, web_fetch)\n" +
-				"  /web-search-provider    Switch web_search backend (DuckDuckGo / Tavily)\n" +
+				"  /web-search-provider    Switch web_search backend (DuckDuckGo / Tavily / Brave)\n" +
+				"  /web-fetch-provider     Switch web_fetch backend (Jina Reader / local)\n" +
 				"  /ssh                Manage SSH hosts (list, add, remove)\n" +
 				"  /statusbar          Toggle and reorder status bar segments\n" +
 				"  /theme              Change color theme\n" +

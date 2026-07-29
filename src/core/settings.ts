@@ -88,6 +88,16 @@ export interface Settings {
 	tavilyApiKey?: string;
 	/** Brave Search API key — required when searchProvider is "brave". Get one at https://api-dashboard.search.brave.com */
 	braveApiKey?: string;
+	/**
+	 * web_fetch backend. "jina" (default) proxies through Jina Reader
+	 * (r.jina.ai) — no key, handles JS-rendered pages, always returns markdown.
+	 * "local" fetches the URL directly from this process (no third party sees
+	 * the URL) and converts HTML to the requested format itself — same
+	 * approach as opencode's webfetch tool: a Cloudflare-challenge retry with
+	 * a plain User-Agent, a 5MB response cap, and a content-type check that
+	 * rejects images/binaries instead of returning them as "text".
+	 */
+	webFetchProvider?: "jina" | "local";
 	/** MCP server names the user has disabled via /mcp toggle. Persisted so
 	 * they stay disabled across sessions and /reload. */
 	disabledMcpServers?: string[];

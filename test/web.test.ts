@@ -8,6 +8,7 @@ import {
 	execWebFetch,
 	execWebSearch,
 	fetchUrl,
+	fetchUrlLocal,
 	searchBrave,
 	searchDuckDuckGo,
 	searchTavily,
@@ -535,5 +536,233 @@ describe("fetchUrl", () => {
 		const result = await fetchUrl("https://example.com/", { maxChars: 100 });
 
 		expect(result.content).toHaveLength(100);
+	});
+});
+
+// ============================================================================
+// web_fetch — local backend (no Jina, direct fetch + HTML conversion)
+// ============================================================================
+
+function mockLocalResponse(opts: {
+	ok?: boolean;
+	status?: number;
+	statusText?: string;
+	headers?: Record<string, string>;
+	body: string;
+}) {
+	const headerMap = new Map(Object.entries(opts.headers ?? {}).map(([k, v]) => [k.toLowerCase(), v]));
+	const bytes = new TextEncoder().encode(opts.body);
+	return {
+		ok: opts.ok ?? true,
+		status: opts.status ?? 200,
+		statusText: opts.statusText ?? "",
+		headers: { get: (name: string) => headerMap.get(name.toLowerCase()) ?? null },
+		arrayBuffer: async () => bytes.buffer,
+	};
+}
+
+describe("fetchUrlLocal", () => {
+	it("converts an HTML response to markdown by default", async () => {
+		const fetchMock = vi.fn().mockResolvedValue(
+			mockLocalResponse({
+				headers: { "content-type": "text/html; charset=utf-8" },
+				body: "<html><body><h1>Hello</h1><p>World <b>bold</b></p></body></html>",
+			}),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+
+		const result = await fetchUrlLocal("https://example.com/");
+
+		expect(result.content).toContain("# Hello");
+		expect(result.content).toContain("World **bold**");
+	});
+
+	it("drops the <head><title> text instead of duplicating it as stray prose before the real heading", async () => {
+		// Regression: turndown has no special handling for <title> on its own,
+		// so without excluding it explicitly its text gets rendered as a plain
+		// line right before the page's real <h1>, restating the same words twice.
+		const fetchMock = vi.fn().mockResolvedValue(
+			mockLocalResponse({
+				headers: { "content-type": "text/html" },
+				body: "<html><head><title>Example Domain</title></head><body><h1>Example Domain</h1><p>Body text.</p></body></html>",
+			}),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+
+		const markdown = await fetchUrlLocal("https://example.com/", { format: "markdown" });
+		expect(markdown.content).toBe("# Example Domain\n\nBody text.");
+
+		const text = await fetchUrlLocal("https://example.com/", { format: "text" });
+		expect(text.content).toBe("Example DomainBody text.");
+	});
+
+	it("extracts plain text and drops script/style content when format is 'text'", async () => {
+		const fetchMock = vi.fn().mockResolvedValue(
+			mockLocalResponse({
+				headers: { "content-type": "text/html" },
+				body: "<html><head><style>.x{color:red}</style></head><body><script>evil()</script><p>Visible text</p></body></html>",
+			}),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+
+		const result = await fetchUrlLocal("https://example.com/", { format: "text" });
+
+		expect(result.content).toBe("Visible text");
+		expect(result.content).not.toContain("evil()");
+		expect(result.content).not.toContain("color:red");
+	});
+
+	it("returns raw markup unmodified when format is 'html'", async () => {
+		const html = "<html><body><p>raw</p></body></html>";
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValue(mockLocalResponse({ headers: { "content-type": "text/html" }, body: html }));
+		vi.stubGlobal("fetch", fetchMock);
+
+		const result = await fetchUrlLocal("https://example.com/", { format: "html" });
+
+		expect(result.content).toBe(html);
+	});
+
+	it("does not attempt HTML conversion on a non-HTML content type", async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValue(mockLocalResponse({ headers: { "content-type": "application/json" }, body: '{"a":1}' }));
+		vi.stubGlobal("fetch", fetchMock);
+
+		const result = await fetchUrlLocal("https://example.com/data.json");
+
+		expect(result.content).toBe('{"a":1}');
+	});
+
+	it("rejects an image content type instead of returning it as text", async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValue(mockLocalResponse({ headers: { "content-type": "image/png" }, body: "binary-ish" }));
+		vi.stubGlobal("fetch", fetchMock);
+
+		await expect(fetchUrlLocal("https://example.com/pic.png")).rejects.toThrow(/image/i);
+	});
+
+	it("allows SVG through — it's text (XML) underneath, unlike raster images", async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValue(mockLocalResponse({ headers: { "content-type": "image/svg+xml" }, body: "<svg></svg>" }));
+		vi.stubGlobal("fetch", fetchMock);
+
+		const result = await fetchUrlLocal("https://example.com/pic.svg");
+		expect(result.content).toBe("<svg></svg>");
+	});
+
+	it("rejects a non-textual, non-image binary content type", async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValue(
+				mockLocalResponse({ headers: { "content-type": "application/octet-stream" }, body: "\x00\x01" }),
+			);
+		vi.stubGlobal("fetch", fetchMock);
+
+		await expect(fetchUrlLocal("https://example.com/file.bin")).rejects.toThrow(/Unsupported/i);
+	});
+
+	it("rejects up front on a Content-Length header over the 5MB limit, without reading the body", async () => {
+		const fetchMock = vi.fn().mockResolvedValue(
+			mockLocalResponse({
+				headers: { "content-type": "text/plain", "content-length": String(6 * 1024 * 1024) },
+				body: "irrelevant",
+			}),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+
+		await expect(fetchUrlLocal("https://example.com/huge")).rejects.toThrow(/too large/i);
+	});
+
+	it("rejects on actual body size even if Content-Length was absent or understated", async () => {
+		const bigBody = "x".repeat(6 * 1024 * 1024);
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValue(mockLocalResponse({ headers: { "content-type": "text/plain" }, body: bigBody }));
+		vi.stubGlobal("fetch", fetchMock);
+
+		await expect(fetchUrlLocal("https://example.com/huge")).rejects.toThrow(/too large/i);
+	});
+
+	it("retries once with a plain User-Agent on a Cloudflare bot challenge (403 + cf-mitigated)", async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce(
+				mockLocalResponse({
+					ok: false,
+					status: 403,
+					headers: { "cf-mitigated": "challenge" },
+					body: "",
+				}),
+			)
+			.mockResolvedValueOnce(mockLocalResponse({ headers: { "content-type": "text/plain" }, body: "got through" }));
+		vi.stubGlobal("fetch", fetchMock);
+
+		const result = await fetchUrlLocal("https://example.com/");
+
+		expect(result.content).toBe("got through");
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		const secondCallHeaders = fetchMock.mock.calls[1][1].headers;
+		expect(secondCallHeaders["User-Agent"]).toBe("cast");
+	});
+
+	it("does not retry a 403 that isn't a Cloudflare challenge", async () => {
+		const fetchMock = vi.fn().mockResolvedValue(mockLocalResponse({ ok: false, status: 403, body: "" }));
+		vi.stubGlobal("fetch", fetchMock);
+
+		await expect(fetchUrlLocal("https://example.com/")).rejects.toThrow("403");
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+	});
+
+	it("has no title — a raw HTTP response has no metadata block to extract one from", async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValue(mockLocalResponse({ headers: { "content-type": "text/plain" }, body: "content" }));
+		vi.stubGlobal("fetch", fetchMock);
+
+		const result = await fetchUrlLocal("https://example.com/");
+		expect(result.title).toBe("");
+	});
+});
+
+describe("execWebFetch — provider dispatch", () => {
+	it("uses Jina by default (webFetchProvider unset)", async () => {
+		mockFetchOnce({ ok: true, status: 200, text: "Title: t\n\nMarkdown Content:\nvia jina" });
+		const result = await execWebFetch({ url: "https://example.com/" });
+		expect(result.content).toContain("via jina");
+		// Jina always goes through r.jina.ai — confirms the jina path (not local) ran.
+		expect((fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0]).toContain("r.jina.ai");
+	});
+
+	it("uses the local backend once /web-fetch-provider is switched to 'local'", async () => {
+		updateSettings({ webFetchProvider: "local" });
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValue(
+				mockLocalResponse({ headers: { "content-type": "text/html" }, body: "<p>local content</p>" }),
+			);
+		vi.stubGlobal("fetch", fetchMock);
+
+		const result = await execWebFetch({ url: "https://example.com/" });
+
+		expect(result.content).toContain("local content");
+		expect(fetchMock.mock.calls[0][0]).toBe("https://example.com/");
+	});
+
+	it("passes the format arg through to the local backend", async () => {
+		updateSettings({ webFetchProvider: "local" });
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValue(
+				mockLocalResponse({ headers: { "content-type": "text/html" }, body: "<p>plain text please</p>" }),
+			);
+		vi.stubGlobal("fetch", fetchMock);
+
+		const result = await execWebFetch({ url: "https://example.com/", format: "text" });
+
+		expect(result.content).toBe("plain text please");
 	});
 });
