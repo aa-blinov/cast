@@ -487,7 +487,11 @@ function deduplicateHooks(groups: HookMatcherGroup[]): HookMatcherGroup[] {
 function substitutePluginVars(command: string, pluginRoot: string | undefined): string {
 	if (!pluginRoot) return command;
 	const dataDir = join(homedir(), ".cast", "plugins", "data", pluginRoot.replace(/[^a-zA-Z0-9]/g, "_"));
-	return command.replace(/\$\{CAST_PLUGIN_ROOT\}/g, pluginRoot).replace(/\$\{CAST_PLUGIN_DATA\}/g, dataDir);
+	return command
+		.replace(/\$\{CAST_PLUGIN_ROOT\}/g, pluginRoot)
+		.replace(/\$\{CAST_PLUGIN_DATA\}/g, dataDir)
+		.replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, pluginRoot)
+		.replace(/\$\{CLAUDE_PLUGIN_DATA\}/g, dataDir);
 }
 
 function runCommandHook(
