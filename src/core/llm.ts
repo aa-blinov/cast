@@ -574,13 +574,17 @@ export async function streamAndCollect(
 		firstChunkAt ??= Date.now();
 
 		if (chunk.usage) usage = chunk.usage;
-		if (chunk.content) {
-			content += chunk.content;
-			onToken?.(chunk.content);
-		}
+		// Thinking before content so a single chunk that closes the <think> tag and
+		// immediately starts the answer (common for Qwen/DeepSeek/MiniMax-M3) creates
+		// the thinking block first and appends content after it — the other order
+		// puts the content block first and the thinking block behind it.
 		if (chunk.thinking) {
 			thinking += chunk.thinking;
 			onThinking?.(chunk.thinking);
+		}
+		if (chunk.content) {
+			content += chunk.content;
+			onToken?.(chunk.content);
 		}
 		if (chunk.toolCalls) toolCalls = chunk.toolCalls;
 		if (chunk.finishReason) {
