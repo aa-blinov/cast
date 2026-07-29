@@ -3485,8 +3485,7 @@ function SettingsPlugins({ data, busy, act, confirm }) {
 					`;
 			})()}
 
-			<details class="settings-collapsible">
-				<summary>Manage marketplaces</summary>
+			<div class="settings-section-title">Marketplaces</div>
 				<div class="settings-rows">
 					${[...data.marketplaces]
 						.sort((a, b) => a.name.localeCompare(b.name))
@@ -3520,7 +3519,6 @@ function SettingsPlugins({ data, busy, act, confirm }) {
 						}}><${icons.plus} /></button>
 					</div>
 				</div>
-			</details>
 		</div>
 	`;
 }
