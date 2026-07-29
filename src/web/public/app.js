@@ -2529,6 +2529,7 @@ function DirectoryBrowser({ initialPath, onPick, onClose, confirm }) {
 const SETTINGS_TABS = [
 	{ id: "bash", label: "Bash" },
 	{ id: "font", label: "Font" },
+	{ id: "hooks", label: "Hooks" },
 	{ id: "plugins", label: "Marketplace" },
 	{ id: "mcp", label: "MCP" },
 	{ id: "model", label: "Model" },
@@ -2694,6 +2695,13 @@ function SettingsModal({
 			} else if (t === "quick-mode") {
 				const quickSessionPersona = await run("/quick-session-persona");
 				setData((d) => ({ ...d, "quick-mode": { quickSessionPersona: quickSessionPersona?.result } }));
+			} else if (t === "hooks") {
+				const res = await run("/hooks");
+				if (!res.ok) {
+					setErrors((e) => ({ ...e, hooks: res.error }));
+					return;
+				}
+				setData((d) => ({ ...d, hooks: res.result }));
 			} else if (t === "mcp") {
 				const res = await run("/mcp list");
 				if (!res.ok) {
@@ -2830,17 +2838,19 @@ function SettingsModal({
 														? html`<${SettingsWeb} data=${data.web} busy=${busy} act=${act} />`
 														: tab === "quick-mode"
 															? html`<${SettingsQuickMode} data=${data["quick-mode"]} busy=${busy} act=${act} personas=${personas} onQuickSessionPersonaChange=${onQuickSessionPersonaChange} />`
-															: tab === "mcp"
-																? html`<${SettingsMcp} data=${data.mcp} busy=${busy} act=${act} confirm=${confirm} />`
-																: tab === "skills"
-																	? html`<${SettingsSkills} data=${data.skills} busy=${busy} act=${act} confirm=${confirm} />`
-																	: tab === "plugins"
-																		? html`<${SettingsPlugins} data=${data.plugins} busy=${busy} act=${act} confirm=${confirm} />`
-																		: tab === "provider"
-																			? html`<${SettingsProvider} data=${data.provider} busy=${busy} act=${act} confirm=${confirm} />`
-																			: tab === "ssh"
-																				? html`<${SettingsSsh} data=${data.ssh} busy=${busy} act=${act} confirm=${confirm} />`
-																				: null
+															: tab === "hooks"
+																? html`<${SettingsHooks} data=${data.hooks} busy=${busy} act=${act} />`
+																: tab === "mcp"
+																	? html`<${SettingsMcp} data=${data.mcp} busy=${busy} act=${act} confirm=${confirm} />`
+																	: tab === "skills"
+																		? html`<${SettingsSkills} data=${data.skills} busy=${busy} act=${act} confirm=${confirm} />`
+																		: tab === "plugins"
+																			? html`<${SettingsPlugins} data=${data.plugins} busy=${busy} act=${act} confirm=${confirm} />`
+																			: tab === "provider"
+																				? html`<${SettingsProvider} data=${data.provider} busy=${busy} act=${act} confirm=${confirm} />`
+																				: tab === "ssh"
+																					? html`<${SettingsSsh} data=${data.ssh} busy=${busy} act=${act} confirm=${confirm} />`
+																					: null
 						}
 					</div>
 				</div>
@@ -3073,6 +3083,13 @@ function SettingsTheme({ themes, currentThemeId, onPick }) {
 // clicked/dragged. Each swatch renders its own label in its own font as a
 // live preview of what picking it actually looks like.
 function SettingsFont({ currentFontId, currentFontScale, onPickFont, onPickScale }) {
+	// The active font is already loaded by applyFont(), but the swatches below
+	// render every option's label in its own font as a preview — those need
+	// their Google Fonts stylesheets loaded too, or they'd all fall back to
+	// the system font and look identical.
+	useEffect(() => {
+		for (const f of FONT_OPTIONS) loadGoogleFont(f.google);
+	}, []);
 	return html`
 		<div class="settings-rows" style=${{ marginBottom: "16px" }}>
 			<div class="settings-row-label">Scale</div>
@@ -3087,20 +3104,20 @@ function SettingsFont({ currentFontId, currentFontScale, onPickFont, onPickScale
 			</div>
 		</div>
 		<div class="settings-row-label">Monospace</div>
-		<div class="settings-theme-grid">
+		<div class="settings-font-grid">
 			${FONT_OPTIONS.filter((f) => f.mono).map(
 				(f) => html`
-				<button key=${f.id} class="settings-theme-swatch${f.id === currentFontId ? " active" : ""}" style=${{ fontFamily: f.family }} onClick=${() => onPickFont(f.id)}>
+				<button key=${f.id} class="settings-font-swatch${f.id === currentFontId ? " active" : ""}" style=${{ fontFamily: f.family }} onClick=${() => onPickFont(f.id)}>
 					${f.label}
 				</button>
 			`,
 			)}
 		</div>
 		<div class="settings-row-label" style=${{ marginTop: "14px" }}>Sans-serif</div>
-		<div class="settings-theme-grid">
+		<div class="settings-font-grid">
 			${FONT_OPTIONS.filter((f) => !f.mono).map(
 				(f) => html`
-				<button key=${f.id} class="settings-theme-swatch${f.id === currentFontId ? " active" : ""}" style=${{ fontFamily: f.family }} onClick=${() => onPickFont(f.id)}>
+				<button key=${f.id} class="settings-font-swatch${f.id === currentFontId ? " active" : ""}" style=${{ fontFamily: f.family }} onClick=${() => onPickFont(f.id)}>
 					${f.label}
 				</button>
 			`,
@@ -3336,10 +3353,7 @@ function SettingsMcp({ data, busy, act, confirm }) {
 	`;
 	return html`
 		<div class="settings-rows">
-			<details class="settings-collapsible">
-				<summary>What are MCP servers?</summary>
-				<p>MCP (Model Context Protocol) servers are background processes the agent connects to for extra tools. Configure them in your project's <code>.cast/mcp.json</code> or globally at <code>~/.cast/mcp.json</code>. <strong>Enable/Disable</strong> toggles a server per session — disabled servers won't connect and their tools are hidden. <strong>Reconnect</strong> drops and re-resolves the connection. <strong>Uninstall</strong> removes the server from the config file permanently.</p>
-			</details>
+			<p class="settings-intro"><span>Background processes that give the agent extra tools. Configured in <code>.cast/mcp.json</code> (project) or <code>~/.cast/mcp.json</code> (global).</span></p>
 			${groups
 				.filter((g) => g.items.length > 0)
 				.map(
@@ -3388,10 +3402,7 @@ function SettingsSkills({ data, busy, act, confirm }) {
 	`;
 	return html`
 		<div class="settings-rows">
-			<details class="settings-collapsible">
-				<summary>What are skills?</summary>
-				<p>Skills are specialized instruction sets the agent loads on demand — think of them as "expertise plugins." In the chat, the agent will pick up a skill's instructions when the task matches its description; you can also invoke one explicitly with <code>/skill-name</code> or by asking for it by name. <strong>Enable/Disable</strong> toggles a skill — disabled skills won't appear in the agent's available list. <strong>Uninstall</strong> removes a user-installed skill permanently. Click the info button (ℹ) on any skill to preview its instructions.</p>
-			</details>
+			<p class="settings-intro"><span>On-demand instruction sets — "expertise plugins" the agent picks up when a task matches, or you invoke with <code>/skill-name</code>. Click ℹ to preview one.</span></p>
 			${groups
 				.filter((g) => g.items.length > 0)
 				.map(
@@ -3403,6 +3414,49 @@ function SettingsSkills({ data, busy, act, confirm }) {
 			`,
 				)}
 			${skills.length === 0 && html`<div class="settings-hint">No skills found.</div>`}
+		</div>
+	`;
+}
+
+function SettingsHooks({ data, busy, act }) {
+	const hooks = data || [];
+	const groups = [
+		{ key: "global", label: "Global", items: hooks.filter((h) => h.source === "global") },
+		{ key: "project", label: "Project", items: hooks.filter((h) => h.source === "project") },
+		{ key: "plugin", label: "Plugin", items: hooks.filter((h) => h.source === "plugin") },
+	];
+	const summarize = (h) => {
+		const first = h.commands?.[0];
+		if (!first) return "";
+		if (first.type === "http") return first.url ?? "";
+		return first.command ?? "";
+	};
+	const renderHook = (h) => html`
+		<div key=${h.id} class="settings-item-row">
+			<div class="settings-item-info">
+				<span class="settings-item-status ${h.enabled ? "ok" : "off"}" />
+				<span class="settings-item-name">${h.event}${h.matcher ? html` <span style=${{ opacity: 0.6 }}>(${h.matcher})</span>` : ""}</span>
+				<span class="settings-item-meta truncate">${summarize(h)}</span>
+			</div>
+			<div class="settings-item-actions">
+				<button class="modal-btn icon-btn" title=${h.enabled ? "Disable" : "Enable"} disabled=${busy} onClick=${() => act(`/hooks ${h.enabled ? "disable" : "enable"} ${h.id}`)}>${h.enabled ? html`<${icons.pause} />` : html`<${icons.play} />`}</button>
+			</div>
+		</div>
+	`;
+	return html`
+		<div class="settings-rows">
+			<p class="settings-intro"><span>Shell (or HTTP) commands that fire on lifecycle events — validate/block a tool call, log activity, or force the agent to keep working before it stops. Configure in <code>.cast/hooks.json</code> (project) or <code>~/.cast/hooks.json</code> (global).</span></p>
+			${groups
+				.filter((g) => g.items.length > 0)
+				.map(
+					(g) => html`
+				<div key=${g.key} class="settings-group">
+					<div class="settings-section-title">${g.label}</div>
+					${[...g.items].sort((a, b) => a.event.localeCompare(b.event)).map(renderHook)}
+				</div>
+			`,
+				)}
+			${hooks.length === 0 && html`<div class="settings-hint">No hooks configured.</div>`}
 		</div>
 	`;
 }
@@ -3636,10 +3690,7 @@ function SettingsSsh({ data, busy, act, confirm }) {
 	const [keyContent, setKeyContent] = useState("");
 	return html`
 		<div class="settings-rows">
-			<details class="settings-collapsible">
-				<summary>How SSH hosts work</summary>
-				<p>SSH hosts let the agent connect to remote machines. Add a host by filling in its <strong>name</strong> (a short label), <strong>host</strong> (IP or hostname), <strong>username</strong>, and optionally a <strong>port</strong>, private key, or <strong>password</strong> (requires <code>sshpass</code>). Once saved, the agent can use the <code>ssh</code> tool to run commands on that host — for example, deploying code or inspecting logs on a staging server.</p>
-			</details>
+			<p class="settings-intro"><span>Remote machines the agent can run commands on via the <code>ssh</code> tool — deploy code, inspect logs, and more.</span></p>
 			${[...(data || [])]
 				.sort((a, b) => a.name.localeCompare(b.name))
 				.map(

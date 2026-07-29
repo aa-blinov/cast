@@ -4,7 +4,7 @@ Skills are self-contained instruction packages the agent loads on demand. They f
 
 ## How Skills Work
 
-The agent sees a list of available skills (name + description) in its system prompt. When a task matches a skill's description, the agent reads the skill file using the `read` tool to get full instructions. Skills with `disable-model-invocation: true` are hidden from the agent and can only be invoked manually via `/skill:<name>`.
+The agent sees a list of available skills (name + description, and `description — whenToUse` when `when_to_use` is set) in its system prompt. When a task matches a skill's description, the agent calls the dedicated `skill` tool with the skill's name to get full instructions — it no longer reads the skill file via the generic `read` tool. Skills with `disable-model-invocation: true` are hidden from the agent and can only be invoked manually via `/skill:<name>`.
 
 ## Built-in Skills
 
@@ -78,6 +78,7 @@ Always check `templates/` for reference material.
 | `name` | No | Identifier (defaults to parent directory name) |
 | `description` | **Yes** | What the skill does — skills without a description are dropped |
 | `disable-model-invocation` | No | `true` to hide from the agent (manual `/skill:<name>` only) |
+| `when_to_use` | No | Extra matching guidance shown to the model as `description — whenToUse` in the skill listing |
 
 ### Name Rules
 
@@ -134,6 +135,22 @@ Force-load a skill by name:
 ```
 
 The `/skill:<name>` command reads the skill's full content and submits it to the agent as context, followed by any additional arguments.
+
+### Argument Substitution
+
+Skill bodies can reference invocation arguments and their own directory:
+
+| Placeholder | Substituted with |
+|-------------|-------------------|
+| `$ARGUMENTS` | The full argument string |
+| `$ARGUMENTS[0]`, `$ARGUMENTS[1]`, ... / `$0`, `$1`, ... | An individual argument (shell-quote-style parsing — quoted strings stay intact) |
+| `${CLAUDE_SKILL_DIR}` | Absolute path to the skill's own directory, for resolving relative paths |
+
+If arguments are supplied but the skill body contains no `$ARGUMENTS` placeholder, they're appended as a trailing `User: <args>` line instead of being silently dropped.
+
+### The `skill` Tool
+
+The agent invokes skills through a dedicated `skill` tool (`name`, optional `args`) rather than reading `SKILL.md` via the generic `read` tool. It validates the name, enforces `disable-model-invocation`, performs the substitution above, and returns the formatted skill content in one call.
 
 ## CLI Flags
 
