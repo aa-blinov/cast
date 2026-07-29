@@ -2,6 +2,19 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.10.1
+
+### Fixed
+
+- Hooks: `${CLAUDE_PLUGIN_ROOT}` substitution in command strings so plugins shipped with Claude Code's marketplace (e.g. hookify, ralph-loop) load and execute unmodified.
+- Hooks: case-insensitive tool-name matching in `if` conditions so `if: "Bash(git commit:*)"` matches payloads where the tool name is lowercase "bash".
+- Skills: `skill` tool description in `/skill-instructions` now explicitly tells the model to call the `skill` tool (not `read`) and to load skills FIRST when the request matches a description.
+- Personas: every persona's Tools section mentions the `skill` tool with a generic description (no skill-name examples, to avoid locking in a specific subset).
+
+### Changed
+
+- Skills prompt listing now includes `whenToUse` alongside `description` (formatted as `description — whenToUse`) for richer model matching.
+
 ## 0.10.0
 
 ### Added
