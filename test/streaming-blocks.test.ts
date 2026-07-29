@@ -77,8 +77,20 @@ describe("appendText", () => {
 		expect(appendText([content("Hel")], "content", "lo")).toEqual([content("Hello")]);
 	});
 
-	it("starts a new block when the kind switches", () => {
-		expect(appendText([content("answering")], "thinking", "hmm")).toEqual([content("answering"), think("hmm")]);
+	it("starts a new block when the kind switches, marking the previous as settled", () => {
+		// The previous content block gets continued:false so it renders its label,
+		// instead of bleeding into the next block's label line.
+		const prev = { ...content("answering"), continued: false };
+		expect(appendText([content("answering")], "thinking", "hmm")).toEqual([prev, think("hmm")]);
+	});
+
+	it("marks a continued (streaming) block as settled when a different kind starts", () => {
+		// The trailing tail of a thinking stream was continued:true (no label
+		// shown so far). When content begins, the thinking tail settles so its
+		// last line gets its [reasoning] label back — otherwise that letter
+		// runs straight into [agent] on the next line.
+		const settledTail = { ...think("last word"), continued: false };
+		expect(appendText([think("last word")], "content", "answer")).toEqual([settledTail, content("answer")]);
 	});
 
 	it("merges back into an earlier same-kind block across intervening thinking (MiniMax-M2 interleaving)", () => {
