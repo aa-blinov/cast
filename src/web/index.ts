@@ -107,11 +107,18 @@ export async function runWebServerMain(
 
 	console.log("[cast web] starting up...");
 
-	// Write state file IMMEDIATELY so the launcher's waitForStartup sees the
-	// PID right away — runStartup (MCP, model probe) can take 10+ seconds
-	// and the launcher would time out if we waited for listening.
-	writeWebState({ pid: process.pid, port, host, startedAt: new Date().toISOString(), foreground });
-
+	// Deliberately NOT writing the state file here, before the server actually
+	// binds — daemon-state.ts's whole contract is that the file only exists
+	// once a server is truly listening, which is what lets readLiveWebState
+	// answer "already running" correctly and lets a status/health check that
+	// sees the file trust it can actually connect. Writing early (as this once
+	// did, to dodge the launcher's old fixed timeout) reintroduces exactly the
+	// race that contract exists to prevent: up to runStartup's full duration
+	// (MCP setup, model probe — can be 10+ seconds) where the file claims a
+	// server is running that isn't accepting connections yet. See
+	// waitForStartup in index.ts for the other half of this fix — its timeout
+	// is generous enough to tolerate that same delay instead of needing this
+	// early write as a workaround.
 	const result = await runStartup(parsedArgs, webPickers);
 	console.log(`[cast web] persona: ${result.persona.label}, model: ${result.session.model}`);
 	console.log("[cast web] ────────────────────────────────────");

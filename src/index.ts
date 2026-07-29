@@ -293,10 +293,10 @@ async function handleWebCommand(args: string[]): Promise<void> {
 	}
 
 	// Daemon mode: spawn detached, then wait for the child to actually report
-	// success (its own state-file write, once really listening) or failure
-	// (it exits early — bad port, crash) instead of declaring victory the
-	// instant spawn() returns, which is true whether or not the child goes
-	// on to bind at all.
+	// success (its own state-file write, only made once really listening —
+	// see web/index.ts) or failure (it exits early — bad port, crash, a
+	// runStartup error) instead of declaring victory the instant spawn()
+	// returns, which is true whether or not the child goes on to bind at all.
 	const logFd = openSync(LOG_FILE, "a");
 	const child = spawn(process.execPath, spawnArgs, {
 		cwd: spawnCwd,
@@ -316,7 +316,21 @@ async function handleWebCommand(args: string[]): Promise<void> {
 	console.log(`[cast web] stop: cast web stop`);
 }
 
-/** Polls for the child's own state-file write (real success) or its early exit (real failure), up to 5s. */
+/**
+ * Polls for the child's own state-file write (real success, only made once
+ * it's actually listening) or its early exit (real failure) — up to 60s, not
+ * 5s: the child's own startup runs `runStartup` first (MCP server setup,
+ * model probe), which the code that write the state file explicitly notes
+ * can take 10+ seconds on its own before the HTTP server ever binds. A
+ * shorter timeout here previously forced the state file to be written before
+ * that finished just so this wouldn't time out on a slow-but-successful
+ * startup — which broke the file's own contract (see daemon-state.ts) that
+ * its existence means a server is truly bound. A genuinely broken startup
+ * (bad port, crash) is still caught quickly regardless of this timeout,
+ * since the process-death check below fires as soon as the child actually
+ * exits — this number only matters for how long a legitimately slow but
+ * still-succeeding startup gets before being called a failure.
+ */
 function waitForStartup(pid: number): Promise<boolean> {
 	return new Promise((resolvePromise) => {
 		let settled = false;
@@ -331,7 +345,7 @@ function waitForStartup(pid: number): Promise<boolean> {
 			if (state?.pid === pid) finish(true);
 			else if (!isProcessAlive(pid)) finish(false);
 		}, 150);
-		setTimeout(() => finish(false), 5000).unref();
+		setTimeout(() => finish(false), 60_000).unref();
 	});
 }
 
