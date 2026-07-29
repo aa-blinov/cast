@@ -502,6 +502,8 @@ export interface LoopConfig {
 	hooks?: HooksFile;
 	/** Current session id — included in every hook payload/env (CAST_SESSION_ID). */
 	sessionId?: string;
+	/** Permission mode — included in hook payloads as permission_mode. */
+	permissionMode?: string;
 	/** Restrict bash to the read-only allowlist without the rest of plan mode.
 	 * Used for subagents spawned from a plan-mode parent: they inherit the
 	 * inspection-only bash but not the authoring tools or the plan prompt
@@ -766,7 +768,12 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 		loopConfig.sshHosts,
 		loopConfig.backgroundBash,
 	);
-	const executeTool = (name: string, args: Record<string, unknown>, toolSignal?: AbortSignal): Promise<ToolResult> => {
+	const executeTool = (
+		name: string,
+		args: Record<string, unknown>,
+		toolSignal?: AbortSignal,
+		toolCallId?: string,
+	): Promise<ToolResult> => {
 		// Legacy aliases (e.g. find → glob) before the allowlist / unknown check
 		// so old model habits and allowlists keep working against one tool.
 		name = normalizeToolName(name);
@@ -850,6 +857,8 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 					config,
 					model: currentModel,
 					onWarning,
+					toolCallId,
+					permissionMode: loopConfig.permissionMode,
 				},
 				async (finalArgs) => {
 					const mcpTool = mcpToolIndex?.get(name);
@@ -1472,6 +1481,8 @@ interface ToolHookContext {
 	config: AppConfig;
 	model: string;
 	onWarning?: (message: string) => void;
+	toolCallId?: string;
+	permissionMode?: string;
 }
 
 /**
@@ -1488,18 +1499,20 @@ async function runToolWithHooks(
 	ctx: ToolHookContext,
 	dispatch: (args: Record<string, unknown>) => Promise<ToolResult>,
 ): Promise<ToolResult> {
-	const { hooks, name, cwd, sessionId, signal, mcpToolIndex, config, model, onWarning } = ctx;
+	const { hooks, name, cwd, sessionId, signal, mcpToolIndex, config, model, onWarning, toolCallId, permissionMode } =
+		ctx;
 	let args = ctx.args;
 	const pre = await runHooksForEvent(hooks, {
 		event: "PreToolUse",
 		matchTarget: name,
 		cwd,
 		sessionId,
-		payload: { tool_name: name, tool_input: args },
+		payload: { tool_name: name, tool_input: args, tool_use_id: toolCallId },
 		signal,
 		mcpToolIndex,
 		config,
 		model,
+		permissionMode,
 	});
 	if (pre.permissionDecision === "ask" || pre.permissionDecision === "defer") {
 		onWarning?.(
@@ -1516,11 +1529,19 @@ async function runToolWithHooks(
 		matchTarget: name,
 		cwd,
 		sessionId,
-		payload: { tool_name: name, tool_input: args, tool_response: result.content },
+		payload: {
+			tool_name: name,
+			tool_input: args,
+			tool_response: result.content,
+			tool_use_id: toolCallId,
+			error: result.isError ? result.content : undefined,
+			is_interrupt: signal?.aborted === true,
+		},
 		signal,
 		mcpToolIndex,
 		config,
 		model,
+		permissionMode,
 	});
 	if (post.updatedToolOutput !== undefined) return { ...result, content: post.updatedToolOutput };
 	if (post.blocked && post.reason) {
@@ -1541,7 +1562,12 @@ interface ToolCallResult {
 
 async function executeToolCalls(
 	toolCalls: Array<{ id: string; name: string; arguments: string }>,
-	executeTool: (name: string, args: Record<string, unknown>, signal?: AbortSignal) => Promise<ToolResult>,
+	executeTool: (
+		name: string,
+		args: Record<string, unknown>,
+		signal?: AbortSignal,
+		toolCallId?: string,
+	) => Promise<ToolResult>,
 	onEvent: (event: AgentEvent) => void,
 	signal: AbortSignal | undefined,
 	recentToolCalls: Array<{ name: string; argsKey: string }>,
@@ -1630,7 +1656,7 @@ async function executeToolCalls(
 
 			let result: ToolResult;
 			try {
-				result = await executeTool(tc.name, tc.args, signal);
+				result = await executeTool(tc.name, tc.args, signal, tc.id);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				result = { content: message, isError: true };

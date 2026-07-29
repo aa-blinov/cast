@@ -118,6 +118,7 @@ export async function runNonInteractive(args: ParsedArgs, options: RunOptions): 
 			mcpToolIndex: mcpResult.toolIndex,
 			hooks,
 			sessionId: session.id,
+			permissionMode,
 			lastPromptTokens: session.lastPromptTokens,
 			personas,
 			currentPersona: persona.name,

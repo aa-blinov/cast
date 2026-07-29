@@ -272,7 +272,7 @@ export async function execTask(
 			matchTarget: subagent?.name ?? "worker",
 			cwd,
 			sessionId: deps.sessionId,
-			payload: { subagent: subagent?.name ?? "worker", assignment },
+			payload: { agent_type: subagent?.name ?? "worker", assignment },
 			signal,
 		});
 	}
@@ -357,7 +357,7 @@ export async function execTask(
 				matchTarget: subagent?.name ?? "worker",
 				cwd,
 				sessionId: deps.sessionId,
-				payload: { subagent: subagent?.name ?? "worker", end_reason: endReason },
+				payload: { agent_type: subagent?.name ?? "worker", end_reason: endReason },
 				signal,
 			});
 		}

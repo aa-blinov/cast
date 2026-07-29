@@ -279,6 +279,12 @@ export interface HookRunResult {
 	updatedToolOutput?: string;
 	permissionDecision?: "allow" | "deny" | "ask" | "defer";
 	additionalContext?: string;
+	/** PermissionRequest: the structured decision from hookSpecificOutput.decision. */
+	permissionRequestResult?:
+		| { behavior: "allow"; updatedInput?: Record<string, unknown> }
+		| { behavior: "deny"; message?: string };
+	/** PermissionDenied: hook-specific retry flag. */
+	retry?: boolean;
 	stdout: string;
 	exitCode: number | null;
 }
@@ -309,6 +315,8 @@ interface ParsedHookOutput {
 		permissionDecisionReason?: string;
 		updatedInput?: Record<string, unknown>;
 		updatedToolOutput?: string;
+		decision?: { behavior: "allow" | "deny"; updatedInput?: Record<string, unknown>; message?: string };
+		retry?: boolean;
 	};
 }
 
@@ -733,9 +741,32 @@ function interpretHookOutput(stdout: string, stderr: string, exitCode: number | 
 		permissionDecisionRaw === "defer"
 			? permissionDecisionRaw
 			: undefined;
-	const blocked = parsed?.decision === "block" || blockedByExit || permissionDecision === "deny";
+
+	// Top-level decision: "block" blocks, "approve" allows (matching Claude Code).
+	const isBlocked = parsed?.decision === "block";
+	const isApproved = parsed?.decision === "approve";
+
+	// PermissionRequest: hookSpecificOutput.decision is an object {behavior, updatedInput?, message?}
+	let permissionRequestResult: HookRunResult["permissionRequestResult"];
+	let updatedInputFromPermission: Record<string, unknown> | undefined;
+	const hsoDecision = parsed?.hookSpecificOutput?.decision;
+	if (hsoDecision && typeof hsoDecision === "object" && "behavior" in hsoDecision) {
+		if (hsoDecision.behavior === "deny") {
+			permissionRequestResult = { behavior: "deny", message: hsoDecision.message };
+		} else {
+			permissionRequestResult = { behavior: "allow", updatedInput: hsoDecision.updatedInput };
+			updatedInputFromPermission = hsoDecision.updatedInput;
+		}
+	}
+
+	// PermissionDenied: hookSpecificOutput.retry tells the model it may retry.
+	const retry = parsed?.hookSpecificOutput?.retry === true;
+
+	const blocked =
+		isBlocked || blockedByExit || permissionDecision === "deny" || permissionRequestResult?.behavior === "deny";
 	const reason =
 		parsed?.stopReason ??
+		(permissionRequestResult?.behavior === "deny" ? permissionRequestResult.message : undefined) ??
 		parsed?.hookSpecificOutput?.permissionDecisionReason ??
 		parsed?.reason ??
 		(blockedByExit ? stderr.trim() || stdout.trim() || undefined : undefined);
@@ -743,10 +774,12 @@ function interpretHookOutput(stdout: string, stderr: string, exitCode: number | 
 		blocked,
 		reason,
 		forceStop,
-		updatedInput: parsed?.hookSpecificOutput?.updatedInput,
+		updatedInput: updatedInputFromPermission ?? parsed?.hookSpecificOutput?.updatedInput,
 		updatedToolOutput: parsed?.hookSpecificOutput?.updatedToolOutput,
-		permissionDecision,
+		permissionDecision: isApproved && !permissionDecision ? "allow" : permissionDecision,
 		additionalContext: softContext,
+		permissionRequestResult,
+		retry,
 		stdout,
 		exitCode,
 	};
@@ -762,6 +795,7 @@ export interface RunHooksOptions {
 	mcpToolIndex?: Map<string, McpToolHandle>;
 	config?: AppConfig;
 	model?: string;
+	permissionMode?: string;
 }
 
 /**
@@ -800,6 +834,7 @@ export async function runHooksForEvent(hooks: HooksFile, opts: RunHooksOptions):
 				hook_event_name: opts.event,
 				cwd: opts.cwd,
 				session_id: opts.sessionId,
+				permission_mode: opts.permissionMode,
 				...opts.payload,
 			};
 			if (cmd.type === "http" && cmd.url) {
@@ -830,6 +865,8 @@ export async function runHooksForEvent(hooks: HooksFile, opts: RunHooksOptions):
 	let updatedInput: Record<string, unknown> | undefined;
 	let updatedToolOutput: string | undefined;
 	let permissionDecision: HookRunResult["permissionDecision"];
+	let permissionRequestResult: HookRunResult["permissionRequestResult"];
+	let retry: boolean | undefined;
 	const additionalContexts: string[] = [];
 	const allStdout: string[] = [];
 	let lastExitCode: number | null = null;
@@ -839,6 +876,8 @@ export async function runHooksForEvent(hooks: HooksFile, opts: RunHooksOptions):
 		if (result.updatedInput) updatedInput = result.updatedInput;
 		if (result.updatedToolOutput !== undefined) updatedToolOutput = result.updatedToolOutput;
 		if (result.permissionDecision) permissionDecision = result.permissionDecision;
+		if (result.permissionRequestResult) permissionRequestResult = result.permissionRequestResult;
+		if (result.retry) retry = result.retry;
 		if (result.additionalContext) additionalContexts.push(result.additionalContext);
 		if (result.stdout) allStdout.push(result.stdout);
 		lastExitCode = result.exitCode;
@@ -848,7 +887,15 @@ export async function runHooksForEvent(hooks: HooksFile, opts: RunHooksOptions):
 	const combinedContext = additionalContexts.length > 0 ? additionalContexts.join("\n") : undefined;
 	const combinedStdout = allStdout.join("\n");
 	if (firstBlock)
-		return { ...firstBlock, updatedInput, updatedToolOutput, permissionDecision, additionalContext: combinedContext };
+		return {
+			...firstBlock,
+			updatedInput,
+			updatedToolOutput,
+			permissionDecision,
+			additionalContext: combinedContext,
+			permissionRequestResult,
+			retry,
+		};
 	return {
 		blocked: false,
 		stdout: combinedStdout,
@@ -857,5 +904,7 @@ export async function runHooksForEvent(hooks: HooksFile, opts: RunHooksOptions):
 		updatedToolOutput,
 		permissionDecision,
 		additionalContext: combinedContext,
+		permissionRequestResult,
+		retry,
 	};
 }
