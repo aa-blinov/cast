@@ -2,6 +2,13 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.9.14
+
+### Fixed
+
+- Vision error fallback now catches 400 status codes in addition to 404, so provider image-rejection errors (e.g. oversized base64) trigger image stripping and retry instead of surfacing a raw 400 to the user.
+- Per-file image read cap lowered from 25MB to 5MB to match provider limits, preventing images from being embedded only to get rejected at the API.
+
 ## 0.9.13
 
 ### Internal
