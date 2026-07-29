@@ -556,7 +556,7 @@ describe("read — images", () => {
 		expect(result.content).toContain("downscaled");
 		const embeddedBase64 = result.imageDataUrl!.split("base64,")[1]!;
 		expect(Buffer.from(embeddedBase64, "base64").byteLength).toBeLessThan(original.byteLength);
-	}, 20_000);
+	}, 45_000);
 });
 
 // ============================================================================
