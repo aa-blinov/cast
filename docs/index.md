@@ -22,6 +22,7 @@ A terminal coding agent that works with **any** OpenAI-compatible API. Point it 
 | [Plugins](plugins.md) | Marketplace install (`name@marketplace`) |
 | [Rules](rules.md) | Cursor-compatible rule system |
 | [MCP Servers](mcp-servers.md) | MCP configuration (local and remote) |
+| [Hooks](hooks.md) | PreToolUse/PostToolUse/Stop shell hooks |
 | [Context Files](context-files.md) | AGENTS.md / CLAUDE.md hierarchy |
 | [Sessions](sessions.md) | Persistence, resume, compaction |
 | [Plan Mode](plan-mode.md) | Explore and plan before implementing |

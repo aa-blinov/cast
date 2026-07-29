@@ -2,10 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { AppConfig } from "../core/config.ts";
 import { resolveProvider } from "../core/config.ts";
 import { initialAnnouncedLocalDate } from "../core/date-rollover-reminder.ts";
+import { hasHooks, runHooksForEvent } from "../core/hooks.ts";
 import { describeTurnError, isRetryableStreamError, stripHermesToolCalls } from "../core/llm.ts";
 import { type AgentEvent, runAgentLoop } from "../core/loop.ts";
 import { formatMcpForPrompt, type McpSetupResult } from "../core/mcp.ts";
 import { readActivePlan } from "../core/plan.ts";
+import { resolveHooksForCwd } from "../core/project.ts";
 import type { AgentRunner } from "../core/runner.ts";
 import {
 	addUsage,
@@ -575,6 +577,24 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			setLastTurnUsage(null);
 			frozenElapsedRef.current = 0;
 
+			// Re-resolved fresh (not the `hooks` prop captured at startup) so a
+			// /hooks enable|disable or an edited hooks.json takes effect on the
+			// very next message, matching the web bridge's per-turn resolve.
+			const turnHooks = resolveHooksForCwd(cwd, projectTrusted === true);
+			if (hasHooks(turnHooks)) {
+				const submitResult = await runHooksForEvent(turnHooks, {
+					event: "UserPromptSubmit",
+					cwd,
+					sessionId: session.id,
+					payload: { prompt: text },
+				});
+				if (submitResult.blocked) {
+					setError(`Prompt blocked by hook: ${submitResult.reason ?? "no reason given"}`);
+					return;
+				}
+				if (submitResult.reason) text = `${text}\n\n<hook-context>${submitResult.reason}</hook-context>`;
+			}
+
 			const userContent =
 				images && images.length > 0
 					? [
@@ -664,6 +684,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					confirmBash: permissionMode === "bypass" ? undefined : confirmBash,
 					mcpTools: mcpResult.toolDefinitions,
 					mcpToolIndex: mcpResult.toolIndex,
+					hooks: turnHooks,
+					sessionId: session.id,
 					lastPromptTokens: session.lastPromptTokens,
 					rebuildSystemPrompt,
 					contextFiles: contextFilesRef.current,

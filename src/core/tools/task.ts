@@ -7,6 +7,7 @@
 
 import type { AppConfig } from "../config.ts";
 import { formatContextFilesForPrompt, loadProjectContextFiles } from "../context-files.ts";
+import { type HooksFile, runHooksForEvent } from "../hooks.ts";
 import { EMPTY_ASSISTANT_PLACEHOLDER, type Message, type Tool, type Usage } from "../llm.ts";
 import type { LoopConfig } from "../loop.ts";
 import type { McpToolHandle } from "../mcp.ts";
@@ -150,6 +151,10 @@ export interface TaskExecutorDeps {
 	mcpPromptSuffix?: string;
 	/** Parent SSH hosts so the child can use the `ssh` tool when configured. */
 	sshHosts?: SshHost[];
+	/** Parent's hooks — subagents inherit them so a hook that gates a tool applies everywhere that tool can run. */
+	hooks?: HooksFile;
+	/** Current session id, for hook payloads/env. */
+	sessionId?: string;
 	/** Injected to avoid circular dependency with loop.ts. */
 	runAgentLoop: (messages: Message[], config: LoopConfig) => Promise<Message[]>;
 }
@@ -261,6 +266,16 @@ export async function execTask(
 			subagentUsage,
 		};
 	}
+	if (deps.hooks) {
+		await runHooksForEvent(deps.hooks, {
+			event: "SubagentStart",
+			matchTarget: subagent?.name ?? "worker",
+			cwd,
+			sessionId: deps.sessionId,
+			payload: { subagent: subagent?.name ?? "worker", assignment },
+			signal,
+		});
+	}
 	let finalMessages: Message[];
 	try {
 		finalMessages = await deps.runAgentLoop(childMessages, {
@@ -298,6 +313,8 @@ export async function execTask(
 			confirmBash: serializeConfirm(deps.confirmBash),
 			mcpTools: deps.mcpTools,
 			mcpToolIndex: deps.mcpToolIndex,
+			hooks: deps.hooks,
+			sessionId: deps.sessionId,
 			// Subagents inherit the parent's restrictions (write/edit stay blocked
 			// in plan mode) but never get the plan tools themselves — they explore
 			// and report back; the parent owns the plan file.
@@ -330,6 +347,20 @@ export async function execTask(
 		return { content: `Subagent failed with an error: ${message}`, isError: true, subagentUsage };
 	} finally {
 		subagentSemaphore.release();
+		// Observation-only (the child's own recursive runLoop already handles
+		// blocking/continuation via its own `Stop` hook — this is a distinct
+		// "a subagent finished" signal for logging/notification, not a second
+		// gate on the same decision).
+		if (deps.hooks) {
+			void runHooksForEvent(deps.hooks, {
+				event: "SubagentStop",
+				matchTarget: subagent?.name ?? "worker",
+				cwd,
+				sessionId: deps.sessionId,
+				payload: { subagent: subagent?.name ?? "worker", end_reason: endReason },
+				signal,
+			});
+		}
 	}
 
 	const text = extractTaskResult(finalMessages);

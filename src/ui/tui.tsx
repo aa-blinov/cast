@@ -1,6 +1,7 @@
 import { Box, render, Text } from "ink";
 import type { JSX } from "react";
 import { CAST_BANNER } from "../core/help.ts";
+import { runHooksForEvent } from "../core/hooks.ts";
 import { closeMcpConnections } from "../core/mcp.ts";
 import { saveSession } from "../core/session.ts";
 import { type ParsedArgs, runStartup } from "../core/startup.ts";
@@ -87,8 +88,25 @@ export async function runTui(args: ParsedArgs): Promise<void> {
 	// regardless of how the TUI is closed.
 	process.on("exit", () => result.backgroundTasks.killAll());
 
+	if (result.hooks) {
+		void runHooksForEvent(result.hooks, {
+			event: "SessionStart",
+			cwd: result.cwd,
+			sessionId: result.session.id,
+			payload: { source: result.resumed ? "resume" : "startup" },
+		});
+	}
+
 	const onQuit = () => {
 		saveSession(result.session);
+		if (result.hooks) {
+			void runHooksForEvent(result.hooks, {
+				event: "SessionEnd",
+				cwd: result.cwd,
+				sessionId: result.session.id,
+				payload: { reason: "quit" },
+			});
+		}
 		void closeMcpConnections(result.mcpResult.connections).finally(() => process.exit(0));
 	};
 
@@ -157,5 +175,13 @@ export async function runTui(args: ParsedArgs): Promise<void> {
 
 	await waitUntilExit();
 	saveSession(result.session);
+	if (result.hooks) {
+		await runHooksForEvent(result.hooks, {
+			event: "SessionEnd",
+			cwd: result.cwd,
+			sessionId: result.session.id,
+			payload: { reason: "exit" },
+		});
+	}
 	await closeMcpConnections(result.mcpResult.connections);
 }
