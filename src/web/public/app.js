@@ -2709,10 +2709,18 @@ function SettingsModal({
 				}
 				setData((d) => ({ ...d, skills: res.result }));
 			} else if (t === "plugins") {
-				const [plugins, marketplaces] = await Promise.all([run("/plugin list"), run("/plugin marketplace list")]);
+				const [plugins, marketplaces, catalog] = await Promise.all([
+					run("/plugin list"),
+					run("/plugin marketplace list"),
+					run("/plugin marketplace catalog"),
+				]);
 				setData((d) => ({
 					...d,
-					plugins: { plugins: plugins?.result ?? [], marketplaces: marketplaces?.result ?? [] },
+					plugins: {
+						plugins: plugins?.result ?? [],
+						marketplaces: marketplaces?.result ?? [],
+						catalog: catalog?.result ?? [],
+					},
 				}));
 			} else if (t === "provider") {
 				const res = await run("/provider list");
@@ -3400,9 +3408,12 @@ function SettingsSkills({ data, busy, act, confirm }) {
 }
 
 function SettingsPlugins({ data, busy, act, confirm }) {
-	const [installRef, setInstallRef] = useState("");
+	const [mpTab, setMpTab] = useState("installed");
 	const [mpSource, setMpSource] = useState("");
 	if (!data) return null;
+	const catalog = data.catalog || [];
+	const installedIds = new Set(data.plugins.map((p) => p.id));
+	const installedNames = new Set(data.plugins.map((p) => p.plugin || p.id));
 	return html`
 		<div class="settings-rows">
 			<div class="settings-section-title">Installed plugins</div>
@@ -3427,52 +3438,87 @@ function SettingsPlugins({ data, busy, act, confirm }) {
 			`,
 				)}
 			${data.plugins.length === 0 && html`<div class="settings-hint">No plugins installed.</div>`}
-			<details class="settings-collapsible">
-				<summary>Where do I get a plugin to install?</summary>
-				<p>Plugins are published in marketplaces (listed below). Check a marketplace's repository to see what plugins it offers, then install by typing <code>plugin@marketplace</code> in the field below — e.g. <code>superpowers@xai-official</code>.</p>
-			</details>
-			<div class="settings-form-row">
-				<input type="text" placeholder="name@marketplace" value=${installRef} onInput=${(e) => setInstallRef(e.target.value)} />
-				<button class="modal-btn icon-btn" title="Install plugin" disabled=${busy || !installRef} onClick=${() => {
-					act(`/plugin install ${installRef}`);
-					setInstallRef("");
-				}}><${icons.arrowDownTray} /></button>
-			</div>
-			<div class="settings-section-title">Marketplaces</div>
-			${[...data.marketplaces]
-				.sort((a, b) => a.name.localeCompare(b.name))
-				.map(
+
+			<div class="settings-section-title">Browse marketplaces</div>
+			<div class="plugin-mp-tabs">
+				${catalog.map(
 					(mp) => html`
-				<div key=${mp.name} class="settings-item-row">
-					<div class="settings-item-info">
-						<span class="settings-item-name">${mp.name}</span>
-						<span class="settings-item-meta" title=${mp.source}>${mp.isDefault ? "built-in" : shortPath(mp.source)}</span>
-					</div>
-					<div class="settings-item-actions">
-						<button class="modal-btn icon-btn" title="Update" disabled=${busy} onClick=${() => act(`/plugin marketplace update ${mp.name}`)}><${icons.arrowPath} /></button>
-						${
-							!mp.isDefault &&
-							html`<button class="modal-btn icon-btn modal-btn-danger" title="Remove" disabled=${busy} onClick=${async () => {
-								if (await confirm(`Remove marketplace "${mp.name}"?`))
-									act(`/plugin marketplace remove ${mp.name}`);
-							}}><${icons.trash} /></button>`
-						}
-					</div>
-				</div>
+				<button key=${mp.name} class="plugin-mp-tab${mpTab === mp.name ? " active" : ""}" onClick=${() => setMpTab(mp.name)}>${mp.name}</button>
 			`,
 				)}
-			${data.marketplaces.length === 0 && html`<div class="settings-hint">No marketplaces added.</div>`}
-			<details class="settings-collapsible">
-				<summary>Where do I get a marketplace?</summary>
-				<p>Any git repo with a <code>marketplace.json</code> catalog (Claude/Grok/Codex plugin format) works. Three well-known ones are already built in above. Add another by GitHub shorthand (<code>owner/repo</code>), a full git URL, or a local path for testing/private catalogs.</p>
-			</details>
-			<div class="settings-form-row">
-				<input type="text" placeholder="owner/repo, URL, or path" value=${mpSource} onInput=${(e) => setMpSource(e.target.value)} />
-				<button class="modal-btn icon-btn" title="Add marketplace" disabled=${busy || !mpSource} onClick=${() => {
-					act(`/plugin marketplace add ${mpSource}`);
-					setMpSource("");
-				}}><${icons.plus} /></button>
 			</div>
+			${(() => {
+				const mp = catalog.find((m) => m.name === mpTab);
+				if (!mp) {
+					if (catalog.length === 0) return html`<div class="settings-hint">Loading catalog…</div>`;
+					return html`<div class="settings-hint">Select a marketplace above to browse its plugins.</div>`;
+				}
+				if (mp.error) return html`<div class="settings-hint">Failed to load catalog for "${mp.name}".</div>`;
+				if (mp.plugins.length === 0) return html`<div class="settings-hint">No plugins in "${mp.name}".</div>`;
+				return html`
+						<div class="plugin-catalog-list">
+							${mp.plugins.map((p) => {
+								const pkg = p.package || p.name;
+								const id = `${p.name || pkg}@${mp.name}`;
+								const installed = installedNames.has(p.name || pkg) || installedIds.has(id);
+								return html`
+									<div key=${p.name || id} class="settings-item-row">
+										<div class="settings-item-info">
+											<span class="settings-item-status ${installed ? "ok" : ""}" />
+											<span class="settings-item-name">${p.name || pkg}</span>
+											<span class="settings-item-meta">${mp.name}</span>
+											${p.description && html`<${InfoPopover} text=${p.description} />`}
+										</div>
+										<div class="settings-item-actions">
+											${
+												installed
+													? html`<span class="plugin-installed-label">installed</span>`
+													: html`<button class="modal-btn icon-btn" title="Install" disabled=${busy} onClick=${() => act(`/plugin install ${id}`)}><${icons.arrowDownTray} /></button>`
+											}
+										</div>
+									</div>
+								`;
+							})}
+						</div>
+					`;
+			})()}
+
+			<details class="settings-collapsible">
+				<summary>Manage marketplaces</summary>
+				<div class="settings-rows">
+					${[...data.marketplaces]
+						.sort((a, b) => a.name.localeCompare(b.name))
+						.map(
+							(mp) => html`
+						<div key=${mp.name} class="settings-item-row">
+							<div class="settings-item-info">
+								<span class="settings-item-name">${mp.name}</span>
+								<span class="settings-item-meta" title=${mp.source}>${mp.isDefault ? "built-in" : shortPath(mp.source)}</span>
+							</div>
+							<div class="settings-item-actions">
+								<button class="modal-btn icon-btn" title="Update" disabled=${busy} onClick=${() => act(`/plugin marketplace update ${mp.name}`)}><${icons.arrowPath} /></button>
+								${
+									!mp.isDefault &&
+									html`<button class="modal-btn icon-btn modal-btn-danger" title="Remove" disabled=${busy} onClick=${async () => {
+										if (await confirm(`Remove marketplace "${mp.name}"?`))
+											act(`/plugin marketplace remove ${mp.name}`);
+									}}><${icons.trash} /></button>`
+								}
+							</div>
+						</div>
+					`,
+						)}
+					${data.marketplaces.length === 0 && html`<div class="settings-hint">No marketplaces added.</div>`}
+					<p style="margin-top:8px;color:var(--fg-muted);font-size:12px">Any git repo with a <code>marketplace.json</code> catalog (Claude/Grok/Codex format) works. Add by GitHub shorthand (<code>owner/repo</code>), URL, or local path.</p>
+					<div class="settings-form-row">
+						<input type="text" placeholder="owner/repo, URL, or path" value=${mpSource} onInput=${(e) => setMpSource(e.target.value)} />
+						<button class="modal-btn icon-btn" title="Add marketplace" disabled=${busy || !mpSource} onClick=${() => {
+							act(`/plugin marketplace add ${mpSource}`);
+							setMpSource("");
+						}}><${icons.plus} /></button>
+					</div>
+				</div>
+			</details>
 		</div>
 	`;
 }

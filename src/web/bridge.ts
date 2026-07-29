@@ -1669,6 +1669,19 @@ export function createWebBridge(result: StartupResult): WebBridge {
 						if (rest2) return { ok: true, result: getMarketplaceCatalog(rest2).plugins };
 						return { ok: true, result: listKnownMarketplaces() };
 					}
+					if (subsub === "catalog") {
+						const mps = listKnownMarketplaces();
+						const results = [];
+						for (const mp of mps) {
+							try {
+								const cat = getMarketplaceCatalog(mp.name);
+								results.push({ name: mp.name, source: mp.source, plugins: cat.plugins });
+							} catch {
+								results.push({ name: mp.name, source: mp.source, plugins: [], error: true });
+							}
+						}
+						return { ok: true, result: results };
+					}
 					if (subsub === "add") {
 						if (!rest2) return { ok: false, error: "Usage: /plugin marketplace add <owner/repo|url|path>" };
 						const mp = addMarketplace(rest2);
