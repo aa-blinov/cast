@@ -522,13 +522,31 @@ export function getToolDefinitions(
 						function: {
 							name: "todo_write",
 							description:
-								"Create/update the task list for this session. Pass the FULL list every call, not just " +
-								"changed items — this is a full rewrite, not a patch. Use for any task with 3+ distinct " +
-								"steps, multiple user-provided items, or work that benefits from planning; skip it for a " +
-								"single straightforward task. Exactly one item may be in_progress at a time. Mark an item " +
-								"completed the moment the work (including any required verification) is actually done — " +
-								"never batched, never based on intent. Never mark something completed to look efficient " +
-								"or to move on faster — an item falsely marked done is worse than one honestly left pending.",
+								"Create and maintain a structured task list for the current coding session. Tracks progress, organizes multi-step work, and surfaces status to the user.\n\n" +
+								"## When to use\n" +
+								"Use proactively when:\n" +
+								"- The task requires 3+ distinct steps or actions (not just 3 tool calls for a single conceptual step)\n" +
+								"- The work is non-trivial and benefits from planning\n" +
+								"- The user provides multiple tasks (numbered or comma-separated) or explicitly asks for a todo list\n" +
+								"- New instructions arrive — capture them as todos\n" +
+								"- You start a task — mark it `in_progress` (only one at a time) before working\n" +
+								"- You finish a task — mark it `completed` and add any follow-ups discovered during the work\n\n" +
+								"## When NOT to use\n" +
+								"Skip when:\n" +
+								"- The work is a single, straightforward task (or <3 trivial steps)\n" +
+								"- The request is purely informational or conversational\n" +
+								"- Tracking adds no organizational value\n\n" +
+								"## States\n" +
+								"- `pending` — not started\n" +
+								"- `in_progress` — actively working (exactly ONE at a time)\n" +
+								"- `completed` — finished successfully\n" +
+								"- `cancelled` — no longer needed\n\n" +
+								"## Rules\n" +
+								"- Update status in real time; don't batch completions\n" +
+								"- Mark `completed` only after the required work is actually done, including any required verification. Never based on intent.\n" +
+								"- Keep exactly one `in_progress` while work remains\n" +
+								"- If blocked or partial, keep it `in_progress` and add a follow-up todo describing the blocker\n" +
+								"- Pass the FULL list every call, not just changed items — this is a full rewrite, not a patch",
 							parameters: {
 								type: "object",
 								properties: {
