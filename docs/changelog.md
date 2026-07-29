@@ -2,6 +2,19 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.9.10
+
+### Fixed
+
+- Web UI: the Inputs sidebar no longer shows a stale "No files attached" flash when re-fetching after a document upload or during agent-response re-renders.
+- Web UI: attached documents in a draft session (before the first message was sent) now work — the upload is deferred to `submitMessage` after `commitSession` creates the real session, instead of blocking with "send a message first".
+- Web UI: a double `commitSession` call when drafting a session with pending documents created two separate sessions — files landed in the first, the message in the second, so the Inputs tab was empty while the chat showed the files. A single `id` variable now flows through both blocks.
+- Web UI: the sidebar's "No sessions match" empty state no longer flashes during initial load before the session list arrives.
+
+### Changed
+
+- Web UI: tightened chat vertical spacing — smaller gap, leaner padding, and reduced line-height for denser messages.
+
 ## 0.9.9
 
 ### Added
