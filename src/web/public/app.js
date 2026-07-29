@@ -179,9 +179,9 @@ function initTooltips() {
 		if (x - half < PAD) x = half + PAD;
 		else if (x + half > window.innerWidth - PAD) x = window.innerWidth - half - PAD;
 
-		tip.style.left = x + "px";
-		tip.style.top = y + "px";
-		tip.style.transform = "translate(-50%, " + (above ? "-100%" : "0") + ")";
+		tip.style.left = `${x}px`;
+		tip.style.top = `${y}px`;
+		tip.style.transform = `translate(-50%, ${above ? "-100%" : "0"})`;
 		tip.style.opacity = "1";
 		el.removeAttribute("title");
 	}

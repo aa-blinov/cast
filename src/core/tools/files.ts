@@ -9,9 +9,9 @@
  * via resolvePath.
  */
 
-import { constants, type Dirent } from "node:fs";
+import { constants } from "node:fs";
 import { access, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, extname, relative } from "node:path";
+import { basename, dirname, extname } from "node:path";
 import type { AppConfig } from "../config.ts";
 import { resizeImageForEmbedding } from "../image-resize.ts";
 import { findFilesByBasename } from "./search.ts";
@@ -127,12 +127,7 @@ export async function execRead(args: Record<string, unknown>, cwd: string, confi
 	// size/type column), just enough that pointing `read` at a directory by
 	// mistake doesn't throw and does something useful.
 	if (stats.isDirectory()) {
-		let entries: Dirent[];
-		try {
-			entries = await readdir(absolutePath, { withFileTypes: true });
-		} catch (err) {
-			throw err;
-		}
+		const entries = await readdir(absolutePath, { withFileTypes: true });
 		const names = entries.map((e) => (e.isDirectory() ? `${e.name}/` : e.name)).sort((a, b) => a.localeCompare(b));
 		const start = offset ? Math.max(0, offset - 1) : 0;
 		const cap = limit ?? config.maxToolOutputLines;
