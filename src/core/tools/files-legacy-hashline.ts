@@ -75,7 +75,7 @@ const IMAGE_MIME_TYPES: Record<string, string> = {
 // over SKIP_RESIZE_BELOW_BYTES, downscaled before being embedded; this
 // ceiling only guards against decoding something absurd (a many-hundred-MB
 // file) into memory.
-const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 export async function execRead(args: Record<string, unknown>, cwd: string, config: AppConfig): Promise<ToolResult> {
 	const filePath = String(args.path ?? "");

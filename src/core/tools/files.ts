@@ -49,13 +49,13 @@ const IMAGE_MIME_TYPES: Record<string, string> = {
 	".webp": "image/webp",
 	".bmp": "image/bmp",
 };
-// A sanity ceiling, not a normal-case limit — there's no per-file image cap
-// at all beyond this, shrinking is left to a later layer (see
-// image-resize.ts). Anything under this gets read and, if it's a jpeg/png
-// over SKIP_RESIZE_BELOW_BYTES, downscaled before being embedded; this
-// ceiling only guards against decoding something absurd (a many-hundred-MB
-// file) into memory.
-const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
+// Providers reject image data URLs over ~5MB (Anthropic, the most permissive
+// of the widely-used providers). A file that's 5MB raw balloons to ~6.7MB as
+// base64 data URL — still over most provider limits — but the cross-message
+// total cap (MAX_TOTAL_EMBEDDED_IMAGE_BYTES, 6MB) catches the remaining
+// overhead. This ceiling keeps individual reads of absurdly large files from
+// even attempting embed.
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 // Binary-file detection: a known-binary extension short-circuits, otherwise
 // a sample of the file's own bytes is checked for null bytes or a high
