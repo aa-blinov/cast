@@ -283,6 +283,7 @@ export function App(props: AppProps): JSX.Element {
 		projectTrusted,
 		noSkills: projectDeps.noSkills,
 		cliSkillPaths: projectDeps.cliSkillPaths,
+		skills,
 		sshHosts,
 		planState,
 		onPlanSignal,

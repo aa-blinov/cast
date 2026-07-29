@@ -155,6 +155,8 @@ export interface TaskExecutorDeps {
 	hooks?: HooksFile;
 	/** Current session id, for hook payloads/env. */
 	sessionId?: string;
+	/** Loaded skills — for the skill tool. */
+	skills?: import("../skills.ts").Skill[];
 	/** Injected to avoid circular dependency with loop.ts. */
 	runAgentLoop: (messages: Message[], config: LoopConfig) => Promise<Message[]>;
 }

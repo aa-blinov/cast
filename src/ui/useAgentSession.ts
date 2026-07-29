@@ -220,6 +220,8 @@ interface UseAgentSessionParams {
 	noSkills?: boolean;
 	/** Parent `--skill` paths — forwarded to task subagents. */
 	cliSkillPaths?: string[];
+	/** Loaded skills — for the skill tool. */
+	skills?: import("../core/skills.ts").Skill[];
 	/** Configured SSH hosts for the ssh tool. */
 	sshHosts?: import("../core/ssh.ts").SshHost[];
 	/** Plan mode state — passed to the agent loop for system prompt injection and tool gating. */
@@ -370,6 +372,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		projectTrusted,
 		noSkills,
 		cliSkillPaths,
+		skills,
 		planState,
 		onPlanSignal,
 		modelOverride,
@@ -687,6 +690,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					hooks: turnHooks,
 					sessionId: session.id,
 					permissionMode,
+					skills,
 					lastPromptTokens: session.lastPromptTokens,
 					rebuildSystemPrompt,
 					contextFiles: contextFilesRef.current,
@@ -964,6 +968,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			projectTrusted,
 			noSkills,
 			cliSkillPaths,
+			skills,
 			planState,
 			onPlanSignal,
 			modelOverride,
