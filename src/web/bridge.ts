@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { fetchModels, type ModelInfo, probeProvider, resolveProvider } from "../core/config.ts";
 import type { Message } from "../core/llm.ts";
 import { type AgentEvent, compactSessionMessages, runAgentLoop } from "../core/loop.ts";
-import { closeMcpConnections, formatMcpForPrompt } from "../core/mcp.ts";
+import { closeMcpConnections, formatMcpForPrompt, type McpSetupResult } from "../core/mcp.ts";
 import { DEFAULT_PERSONA, type Persona } from "../core/personas.ts";
 import { createPlanState, modeDisabledTools } from "../core/plan.ts";
 import {
@@ -310,6 +310,14 @@ export interface WebBridge {
 	 *  `query` (message content via SQLite FTS, plus cwd/id/title/persona/
 	 *  model). Empty/whitespace-only query is equivalent to listSessions(). */
 	searchSessions(query: string): SessionSummary[];
+	/** Swaps in a freshly-connected MCP result — for the web daemon's deferred
+	 *  startup (see ParsedArgs.deferMcp): the server starts with an
+	 *  unconnected placeholder so it can begin listening immediately, then
+	 *  calls this once the real background connect finishes. Every run reads
+	 *  the current MCP result fresh at turn-start (same mechanism /mcp
+	 *  enable/disable already uses), so the very next message in any open
+	 *  session picks up the newly connected tools with no restart needed. */
+	applyMcpResult(result: McpSetupResult): void;
 	/** Aborts any in-flight run and drops the session from the live list — it
 	 * stays on disk (autosaved already), it just stops appearing as a running
 	 * background agent. Returns false if the id doesn't exist. `reason:
@@ -929,6 +937,10 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			const live = sessions.get(cold.id);
 			return live ? summaryFor(live.session, live.status) : coldSummary(cold);
 		});
+	}
+
+	function applyMcpResult(result: McpSetupResult): void {
+		mcpResult = result;
 	}
 
 	/** Splits "sub rest of args" into its first word and everything after —
@@ -2084,6 +2096,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		getSession,
 		listSessions,
 		searchSessions,
+		applyMcpResult,
 		closeSession,
 		deleteSessionPermanently,
 		renameSession,
