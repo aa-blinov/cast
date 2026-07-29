@@ -21,6 +21,7 @@ import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { getHistoryPage, getMessageImage } from "../core/session.ts";
 import { toDisplayMessages, type WebBridge, type WebEvent } from "./bridge.ts";
+import { sessionInputsDir } from "./inputs.ts";
 
 const MIME_TYPES: Record<string, string> = {
 	".html": "text/html; charset=utf-8",
@@ -820,6 +821,80 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 		try {
 			renameSync(target, dest);
 			json(res, { ok: true, path: relative(cwd, dest) });
+		} catch (err) {
+			json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
+		}
+	});
+
+	// Attached documents (see inputs.ts) — a flat, session-scoped directory
+	// outside the project tree, so unlike /fs/* above there's no subdirectory
+	// nesting to walk and no cwd-relative path resolution needed.
+	route("GET", "/api/sessions/:id/inputs", (_req, res, params) => {
+		if (!bridge.getSession(params.id)) return json(res, { error: "Not found" }, 404);
+		const dir = sessionInputsDir(params.id);
+		try {
+			const entries = readdirSync(dir, { withFileTypes: true })
+				.filter((e) => e.isFile())
+				.map((e) => {
+					let size: number | undefined;
+					try {
+						size = statSync(join(dir, e.name)).size;
+					} catch {
+						size = undefined;
+					}
+					return { name: e.name, size };
+				})
+				.sort((a, b) => a.name.localeCompare(b.name));
+			json(res, { entries });
+		} catch (err) {
+			// No attachments yet is the common case, not an error — same
+			// reasoning as GET /fs's ENOENT handling for a not-yet-created
+			// sandbox cwd.
+			if ((err as NodeJS.ErrnoException)?.code === "ENOENT") return json(res, { entries: [] });
+			json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
+		}
+	});
+
+	route("GET", "/api/sessions/:id/inputs/download", (req, res, params) => {
+		if (!bridge.getSession(params.id)) return json(res, { error: "Not found" }, 404);
+		const dir = sessionInputsDir(params.id);
+		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+		const name = url.searchParams.get("path") ?? "";
+		// Flat directory — a filename is anything with no separator and no
+		// "..", the same rule /fs/rename uses for its own "name" field. This
+		// (not isInsideRoot) is the containment check here, since there's no
+		// subdirectory structure for a relative path to escape in the first place.
+		if (!name || name.includes("/") || name.includes("\\") || name === "." || name === "..") {
+			return json(res, { error: "Invalid path" }, 400);
+		}
+		const target = join(dir, name);
+		try {
+			const st = statSync(target);
+			if (!st.isFile()) return json(res, { error: "Not a file" }, 400);
+			const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1).toLowerCase() : "";
+			const inline = url.searchParams.get("inline") === "1";
+			res.writeHead(200, {
+				"Content-Type": inline ? (PREVIEW_MIME[ext] ?? "application/octet-stream") : "application/octet-stream",
+				"Content-Length": st.size,
+				"Content-Disposition": `${inline ? "inline" : "attachment"}; filename="${name.replace(/"/g, "")}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+			});
+			createReadStream(target).pipe(res);
+		} catch (err) {
+			if (!res.headersSent) json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
+		}
+	});
+
+	route("DELETE", "/api/sessions/:id/inputs", (req, res, params) => {
+		if (!bridge.getSession(params.id)) return json(res, { error: "Not found" }, 404);
+		const dir = sessionInputsDir(params.id);
+		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+		const name = url.searchParams.get("path") ?? "";
+		if (!name || name.includes("/") || name.includes("\\") || name === "." || name === "..") {
+			return json(res, { error: "Refusing to delete this path" }, 400);
+		}
+		try {
+			rmSync(join(dir, name), { force: false });
+			json(res, { ok: true });
 		} catch (err) {
 			json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
 		}

@@ -143,6 +143,31 @@ describe("web bridge", () => {
 			bridge.deleteSessionPermanently(ws.id);
 			expect(abortSpy).toHaveBeenCalledTimes(1);
 		});
+
+		it("also removes the session's attached-documents directory (~/.cast/inputs/<id>)", async () => {
+			const { existsSync, mkdirSync, writeFileSync } = await import("node:fs");
+			const { sessionInputsDir } = await import("../src/web/inputs.ts");
+			const bridge = createWebBridge(makeResult());
+			const ws = bridge.createSession();
+			const dir = sessionInputsDir(ws.id);
+			mkdirSync(dir, { recursive: true });
+			writeFileSync(join(dir, "report.pdf"), "fake pdf bytes");
+			expect(existsSync(dir)).toBe(true);
+
+			bridge.deleteSessionPermanently(ws.id);
+
+			expect(existsSync(dir)).toBe(false);
+		});
+
+		it("doesn't error when a session with no attachments (the common case) is deleted", async () => {
+			const { existsSync } = await import("node:fs");
+			const { sessionInputsDir } = await import("../src/web/inputs.ts");
+			const bridge = createWebBridge(makeResult());
+			const ws = bridge.createSession();
+			expect(existsSync(sessionInputsDir(ws.id))).toBe(false);
+
+			expect(() => bridge.deleteSessionPermanently(ws.id)).not.toThrow();
+		});
 	});
 
 	it("builds a persona-specific system prompt at session creation", () => {
