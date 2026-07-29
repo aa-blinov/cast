@@ -1645,7 +1645,7 @@ function InputsExplorer({ activeId, confirm, refreshNonce }) {
 	if (loading) {
 		return html`
 			<div class="fs-explorer">
-				<div class="diff-empty"><p class="diff-empty-title">Loading inputs…</p></div>
+				<div class="diff-empty">Loading…</div>
 			</div>
 		`;
 	}
