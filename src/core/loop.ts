@@ -504,6 +504,8 @@ export interface LoopConfig {
 	sessionId?: string;
 	/** Permission mode — included in hook payloads as permission_mode. */
 	permissionMode?: string;
+	/** Loaded skills — for the skill tool. */
+	skills?: import("./skills.ts").Skill[];
 	/** Restrict bash to the read-only allowlist without the rest of plan mode.
 	 * Used for subagents spawned from a plan-mode parent: they inherit the
 	 * inspection-only bash but not the authoring tools or the plan prompt
@@ -761,12 +763,14 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 					sshHosts: loopConfig.sshHosts,
 					hooks: loopConfig.hooks,
 					sessionId: loopConfig.sessionId,
+					skills: loopConfig.skills,
 					runAgentLoop,
 				}
 			: undefined,
 		loopConfig.planState,
 		loopConfig.sshHosts,
 		loopConfig.backgroundBash,
+		loopConfig.skills ? { skills: loopConfig.skills } : undefined,
 	);
 	const executeTool = (
 		name: string,

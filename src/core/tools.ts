@@ -20,6 +20,7 @@ import { type BashBackgroundDeps, execBashKill, execBashOutput } from "./tools/b
 import { execEdit, execRead, execWrite } from "./tools/files.ts";
 import { execGlob, execGrep, execLs } from "./tools/search.ts";
 import { type ConfirmBash, resolvePath, type ToolExecutor, type ToolResult } from "./tools/shared.ts";
+import { execSkill, type SkillToolDeps } from "./tools/skill.ts";
 import { execSsh } from "./tools/ssh.ts";
 import { execTask, type TaskExecutorDeps } from "./tools/task.ts";
 import { execWebFetch, execWebSearch } from "./tools/web.ts";
@@ -576,6 +577,28 @@ export function getToolDefinitions(
 					},
 				]
 			: []),
+		{
+			type: "function",
+			function: {
+				name: "skill",
+				description:
+					"Load a specialized skill by name. Skills contain detailed workflows and instructions for specific tasks. Call this when the user's request matches a skill's description, or when they invoke /skill:name.",
+				parameters: {
+					type: "object",
+					properties: {
+						name: {
+							type: "string",
+							description: "The skill name to load (e.g. 'deep-research', 'arxiv', 'learn-everything')",
+						},
+						args: {
+							type: "string",
+							description: "Optional arguments to pass to the skill (replaces $ARGUMENTS in the skill body)",
+						},
+					},
+					required: ["name"],
+				},
+			},
+		},
 	];
 }
 
@@ -591,6 +614,7 @@ export function createToolExecutor(
 	planState?: PlanState,
 	sshHosts?: SshHost[],
 	backgroundBash?: BashBackgroundDeps,
+	skillDeps?: SkillToolDeps,
 ): ToolExecutor {
 	return async (name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> => {
 		try {
@@ -688,6 +712,9 @@ export function createToolExecutor(
 				case "plan_discard":
 					if (!planState) return { content: "Plan tool not available.", isError: true };
 					return execPlanDiscard(args, planState);
+				case "skill":
+					if (!skillDeps) return { content: "Skill tool not available.", isError: true };
+					return execSkill(args, skillDeps);
 				default:
 					return { content: `Unknown tool: ${name}`, isError: true };
 			}

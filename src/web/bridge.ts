@@ -437,6 +437,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 	let rulesLazySuffix = result.rulesLazySuffix;
 	let directoryRules = result.directoryRules;
 	let skillsPromptSuffix = result.skillsPromptSuffix;
+	const skills = result.skills;
 	// SSH hosts and permission mode are simple settings-backed values with no
 	// prompt-rebuild fan-out, but still need to be mutable so /ssh and
 	// /permissions actually take effect without a server restart.
@@ -725,6 +726,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			hooks: submitHooks,
 			sessionId: ws.session.id,
 			permissionMode,
+			skills,
 			personas,
 			currentPersona: persona.name,
 			subagentPrompts: subPrompts,
