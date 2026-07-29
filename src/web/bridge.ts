@@ -6,7 +6,7 @@
 
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fetchModels, type ModelInfo, probeProvider, resolveProvider } from "../core/config.ts";
@@ -68,6 +68,7 @@ import { getReasoningOptions } from "../core/vendors.ts";
 import { ALL_THEMES } from "../ui/themes/index.ts";
 import type { ThemeColors } from "../ui/themes/types.ts";
 import { isCommandBlocking, SLASH_COMMANDS } from "./commands.ts";
+import { sessionInputsDir } from "./inputs.ts";
 
 export type WebAgentStatus = "idle" | "running" | "error";
 
@@ -807,6 +808,12 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		// exists on disk, and deleteSession() is what actually makes "Delete"
 		// mean delete instead of just closeSession's "unload from memory".
 		const removedFromDisk = deleteSession(sessionId);
+		// Attached documents live outside the session's own cwd (see
+		// inputs.ts) specifically so they're never a project file the user has
+		// to manage — that only holds if deleting the session also deletes
+		// them. force:true since a session that never had any attachments is
+		// the common case, not an error.
+		rmSync(sessionInputsDir(sessionId), { recursive: true, force: true });
 		return Boolean(ws) || removedFromDisk;
 	}
 

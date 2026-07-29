@@ -1219,8 +1219,9 @@ function DiffPanel({
 	const header = html`
 		<div class="diff-header">
 			<div class="diff-tabs">
-				<button class="diff-tab${tab === "changes" ? " active" : ""}" onClick=${() => onTabChange("changes")}>Changes</button>
+				<button class="diff-tab${tab === "inputs" ? " active" : ""}" onClick=${() => onTabChange("inputs")}>Inputs</button>
 				<button class="diff-tab${tab === "fs" ? " active" : ""}" onClick=${() => onTabChange("fs")}>Files</button>
+				<button class="diff-tab${tab === "changes" ? " active" : ""}" onClick=${() => onTabChange("changes")}>Changes</button>
 			</div>
 		</div>
 	`;
@@ -1249,6 +1250,16 @@ function DiffPanel({
 						</div>
 					`
 				}
+			</aside>
+		`;
+	}
+
+	if (tab === "inputs") {
+		return html`
+			<aside class="diff-panel${openClass}">
+				<div class="diff-resize-handle" onPointerDown=${onResizeStart} />
+				${header}
+				<${InputsExplorer} activeId=${activeId} confirm=${confirm} />
 			</aside>
 		`;
 	}
@@ -1393,6 +1404,107 @@ function DiffPanel({
 				}
 			</div>
 		</aside>
+	`;
+}
+
+function humanSize(bytes) {
+	if (bytes == null) return "";
+	if (bytes < 1024) return `${bytes} B`;
+	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// Flat list of a session's attached (non-image) documents — see inputs.ts
+// for why they live in a global, session-scoped directory instead of inside
+// the project's own cwd. No tree/search/rename like FileExplorer below:
+// attachments aren't expected to have subdirectories, so there's nothing to
+// expand or navigate, only a list to download/preview/remove from.
+function InputsExplorer({ activeId, confirm }) {
+	const [entries, setEntries] = useState([]);
+	const [error, setError] = useState(null);
+	const [busyName, setBusyName] = useState(null);
+
+	const load = useCallback(async () => {
+		if (!activeId) return;
+		try {
+			const data = await api("GET", `/api/sessions/${activeId}/inputs`);
+			setEntries(data?.entries ?? []);
+			setError(null);
+		} catch (err) {
+			setError(err.message);
+		}
+	}, [activeId]);
+
+	useEffect(() => {
+		setEntries([]);
+		setError(null);
+		load();
+	}, [load]);
+
+	const downloadHref = (name) => `/api/sessions/${activeId}/inputs/download?path=${encodeURIComponent(name)}`;
+	const previewHref = (name) => `${downloadHref(name)}&inline=1`;
+
+	const doDelete = async (name) => {
+		if (!(await confirm(`Remove attached file "${name}"? This can't be undone.`))) return;
+		setBusyName(name);
+		try {
+			await api("DELETE", `/api/sessions/${activeId}/inputs?path=${encodeURIComponent(name)}`);
+			await load();
+		} catch (err) {
+			setError(err.message);
+		} finally {
+			setBusyName(null);
+		}
+	};
+
+	return html`
+		<div class="fs-explorer">
+			${error && html`<div class="diff-empty diff-empty-error">${error}</div>`}
+			${
+				!error && entries.length === 0
+					? html`
+					<div class="diff-empty diff-empty-hint">
+						<div>
+							<p class="diff-empty-title">No files attached</p>
+							<p>Attach a document from the composer's paperclip button — it'll show up here.</p>
+						</div>
+					</div>
+				`
+					: html`
+					<div class="fs-tree">
+						${entries.map(
+							(e) => html`
+							<div key=${e.name} class="fs-row">
+								<div class="fs-row-main" onClick=${() => window.open(previewHref(e.name), "_blank", "noopener")}>
+									<span class="fs-icon"><${icons.docFile} /></span>
+									<span class="fs-name">${e.name}</span>
+									${e.size != null ? html`<span class="fs-size">${humanSize(e.size)}</span>` : null}
+								</div>
+								<div class="fs-row-actions">
+									<a
+										class="fs-action"
+										href=${downloadHref(e.name)}
+										download
+										title="Download"
+										onClick=${(ev) => ev.stopPropagation()}
+									><${icons.arrowDownTray} /></a>
+									<button
+										class="fs-action"
+										disabled=${busyName === e.name}
+										title="Remove"
+										onClick=${(ev) => {
+											ev.stopPropagation();
+											doDelete(e.name);
+										}}
+									><${icons.trash} /></button>
+								</div>
+							</div>
+						`,
+						)}
+					</div>
+				`
+			}
+		</div>
 	`;
 }
 
@@ -1555,13 +1667,6 @@ function FileExplorer({ activeId, confirm, refreshNonce }) {
 
 	const downloadHref = (relPath) => `/api/sessions/${activeId}/fs/download?path=${encodeURIComponent(relPath)}`;
 	const previewHref = (relPath) => `${downloadHref(relPath)}&inline=1`;
-
-	const humanSize = (bytes) => {
-		if (bytes == null) return "";
-		if (bytes < 1024) return `${bytes} B`;
-		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-		return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-	};
 
 	// Shared between the tree view and the flat search-results list — a name
 	// cell that swaps to an inline rename input, and an actions cell with
