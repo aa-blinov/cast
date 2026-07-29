@@ -29,6 +29,11 @@ const MAX_CONTENT_CHARS = 12_000;
 const MAX_SEARCH_RESULTS = 10;
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const CACHE_MAX_ENTRIES = 100;
+// One retry for a transient failure (connection reset, Jina briefly 5xx-ing)
+// — not more, so a genuinely dead endpoint still fails in one extra round
+// trip's time instead of tripling the caller's wait.
+const FETCH_MAX_ATTEMPTS = 2;
+const FETCH_RETRY_DELAY_MS = 500;
 // How many results a single DDG page fetch parses, independent of any one
 // caller's `maxResults`. The cache key doesn't include maxResults, so a
 // query first run with a small maxResults must not permanently cap what a
@@ -356,6 +361,39 @@ export async function searchBrave(
 // Web Fetch — Jina Reader API
 // ============================================================================
 
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** HTTP status worth retrying once — transient server-side trouble, not a
+ *  client error (4xx) that a second identical request won't fix. */
+function isRetryableStatus(status: number): boolean {
+	return status >= 500;
+}
+
+/** A thrown fetch failure worth retrying once — connection-level trouble
+ *  (reset, DNS hiccup), never an intentional abort (timeout or the caller's
+ *  own signal) since retrying something deliberately cancelled would ignore
+ *  why it was cancelled in the first place. */
+function isRetryableError(error: unknown): boolean {
+	if (error instanceof DOMException && error.name === "AbortError") return false;
+	return true;
+}
+
+// Cutting content at a hard character count can land mid-sentence or
+// mid-table-row — if a paragraph break exists reasonably close to the limit,
+// prefer cutting there instead so the truncated result still reads as
+// complete prose up to that point. "Reasonably close" is deliberately loose
+// (70% of the budget) — a boundary near the very start of a long page would
+// throw away most of the allowance for no good reason.
+function truncateAtBoundary(text: string, maxChars: number): string {
+	if (text.length <= maxChars) return text;
+	const hardCut = text.slice(0, maxChars);
+	const lastBreak = hardCut.lastIndexOf("\n\n");
+	if (lastBreak >= maxChars * 0.7) return hardCut.slice(0, lastBreak).trimEnd();
+	return hardCut;
+}
+
 /**
  * Fetch a URL via Jina Reader (`r.jina.ai`).
  * Returns clean markdown content optimized for LLM consumption.
@@ -379,36 +417,62 @@ export async function fetchUrl(
 	else signal?.addEventListener("abort", onAbort, { once: true });
 
 	try {
-		const resp = await fetch(`https://r.jina.ai/${url}`, {
-			headers: {
-				Accept: "text/markdown",
-				"X-Return-Format": "markdown",
-			},
-			redirect: "follow",
-			signal: controller.signal,
-		});
+		for (let attempt = 1; attempt <= FETCH_MAX_ATTEMPTS; attempt++) {
+			// The fetch call itself (network/DNS/reset failures) and a non-ok
+			// HTTP response are different failure kinds with different retry
+			// rules — kept in separate try/catch and if-blocks rather than one
+			// shared catch, so a deliberate "this status isn't retryable" throw
+			// below can't be re-caught by the network-error handler and retried
+			// anyway just because it's also an Error.
+			let resp: Response;
+			try {
+				resp = await fetch(`https://r.jina.ai/${url}`, {
+					headers: {
+						Accept: "text/markdown",
+						"X-Return-Format": "markdown",
+					},
+					redirect: "follow",
+					signal: controller.signal,
+				});
+			} catch (error) {
+				if (attempt < FETCH_MAX_ATTEMPTS && isRetryableError(error)) {
+					await sleep(FETCH_RETRY_DELAY_MS);
+					continue;
+				}
+				throw error;
+			}
 
-		if (!resp.ok) throw new Error(`Jina Reader HTTP ${resp.status} ${resp.statusText}`);
+			if (!resp.ok) {
+				if (attempt < FETCH_MAX_ATTEMPTS && isRetryableStatus(resp.status)) {
+					await sleep(FETCH_RETRY_DELAY_MS);
+					continue;
+				}
+				throw new Error(`Jina Reader HTTP ${resp.status} ${resp.statusText}`);
+			}
 
-		const text = await resp.text();
+			const text = await resp.text();
 
-		// Jina Reader's response is a metadata block followed by the actual
-		// content, not a bare markdown document:
-		//   Title: ...\n\nURL Source: ...\n\n[Warning: ...\n\n]Markdown Content:\n\n<content>
-		let title = "";
-		const titleMatch = /^Title: (.+)$/m.exec(text);
-		if (titleMatch) title = titleMatch[1].trim();
+			// Jina Reader's response is a metadata block followed by the actual
+			// content, not a bare markdown document:
+			//   Title: ...\n\nURL Source: ...\n\n[Warning: ...\n\n]Markdown Content:\n\n<content>
+			let title = "";
+			const titleMatch = /^Title: (.+)$/m.exec(text);
+			if (titleMatch) title = titleMatch[1].trim();
 
-		let content = text;
-		const marker = "Markdown Content:";
-		const markerIdx = text.indexOf(marker);
-		if (markerIdx !== -1) content = text.slice(markerIdx + marker.length);
+			let content = text;
+			const marker = "Markdown Content:";
+			const markerIdx = text.indexOf(marker);
+			if (markerIdx !== -1) content = text.slice(markerIdx + marker.length);
 
-		return {
-			url,
-			title,
-			content: content.trim().slice(0, maxChars),
-		};
+			return {
+				url,
+				title,
+				content: truncateAtBoundary(content.trim(), maxChars),
+			};
+		}
+		// Unreachable — the loop above always either returns or throws on its
+		// last iteration — but TS can't see that, so give it a definite exit.
+		throw new Error("fetchUrl: exhausted retries");
 	} finally {
 		clearTimeout(timeout);
 		signal?.removeEventListener("abort", onAbort);
@@ -471,10 +535,21 @@ export async function execWebFetch(args: Record<string, unknown>, signal?: Abort
 	const url = String(args.url ?? "").trim();
 	if (!url) return { content: "Error: 'url' is required.", isError: true };
 
+	let parsed: URL;
 	try {
-		new URL(url);
+		parsed = new URL(url);
 	} catch {
 		return { content: `Error: invalid URL "${url}".`, isError: true };
+	}
+	// Jina Reader (r.jina.ai/<url>) only ever fetches http(s) targets itself,
+	// but nothing stopped a model from asking for file://, data:, or other
+	// schemes here before this fetch ever reaches Jina — reject those
+	// upfront with a clear reason instead of an opaque failure downstream.
+	if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+		return {
+			content: `Error: unsupported URL scheme "${parsed.protocol}" — only http/https are fetchable.`,
+			isError: true,
+		};
 	}
 
 	const maxChars = typeof args.maxChars === "number" ? args.maxChars : MAX_CONTENT_CHARS;

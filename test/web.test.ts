@@ -373,6 +373,23 @@ describe("execWebFetch", () => {
 		expect(result.isError).toBe(true);
 		expect(result.content).toContain("invalid URL");
 	});
+
+	it("rejects a non-http(s) scheme before ever calling fetch", async () => {
+		const fetchMock = vi.fn();
+		vi.stubGlobal("fetch", fetchMock);
+
+		const result = await execWebFetch({ url: "file:///etc/passwd" });
+
+		expect(result.isError).toBe(true);
+		expect(result.content).toContain("unsupported URL scheme");
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it("still accepts plain http (not just https)", async () => {
+		mockFetchOnce({ ok: true, status: 200, text: "Title: t\n\nMarkdown Content:\nbody" });
+		const result = await execWebFetch({ url: "http://example.com/" });
+		expect(result.isError).toBeUndefined();
+	});
 });
 
 describe("fetchUrl", () => {
@@ -435,5 +452,88 @@ describe("fetchUrl", () => {
 		// The signal is long-lived and shared across every tool call in a session
 		// (see loop.ts) — a listener left behind here would leak on every fetch.
 		expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+	});
+
+	it("retries once on a 5xx and succeeds on the second attempt", async () => {
+		vi.useFakeTimers();
+		try {
+			const fetchMock = vi
+				.fn()
+				.mockResolvedValueOnce({ ok: false, status: 503, statusText: "Service Unavailable", text: async () => "" })
+				.mockResolvedValueOnce({
+					ok: true,
+					status: 200,
+					statusText: "",
+					text: async () => "Title: t\n\nMarkdown Content:\nbody",
+				});
+			vi.stubGlobal("fetch", fetchMock);
+
+			const promise = fetchUrl("https://example.com/");
+			await vi.runAllTimersAsync();
+			const result = await promise;
+
+			expect(fetchMock).toHaveBeenCalledTimes(2);
+			expect(result.content).toBe("body");
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("does not retry a 4xx — a second identical request won't fix a client error", async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValue({ ok: false, status: 404, statusText: "Not Found", text: async () => "" });
+		vi.stubGlobal("fetch", fetchMock);
+
+		await expect(fetchUrl("https://example.com/")).rejects.toThrow("404");
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not retry an aborted request even though a thrown error is otherwise retryable", async () => {
+		const fetchMock = vi.fn().mockRejectedValue(new DOMException("The operation was aborted.", "AbortError"));
+		vi.stubGlobal("fetch", fetchMock);
+
+		await expect(fetchUrl("https://example.com/")).rejects.toThrow();
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+	});
+
+	it("gives up after exhausting retries on a persistent 5xx", async () => {
+		vi.useFakeTimers();
+		try {
+			const fetchMock = vi
+				.fn()
+				.mockResolvedValue({ ok: false, status: 500, statusText: "Internal Error", text: async () => "" });
+			vi.stubGlobal("fetch", fetchMock);
+
+			const promise = fetchUrl("https://example.com/");
+			const expectation = expect(promise).rejects.toThrow("500");
+			await vi.runAllTimersAsync();
+			await expectation;
+
+			expect(fetchMock).toHaveBeenCalledTimes(2);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("truncates at the last paragraph break within budget instead of mid-sentence", async () => {
+		const para1 = "First paragraph. ".repeat(20); // well past the 70% cutoff on its own
+		const para2 = "Second paragraph continues on and on. ".repeat(20);
+		mockFetchOnce({ ok: true, status: 200, text: `Title: t\n\nMarkdown Content:\n${para1}\n\n${para2}` });
+
+		const maxChars = para1.length + 20; // lands partway into para2
+		const result = await fetchUrl("https://example.com/", { maxChars });
+
+		expect(result.content).toBe(para1.trim());
+		expect(result.content).not.toContain("Second paragraph");
+	});
+
+	it("falls back to a hard cut when no paragraph break exists near the budget", async () => {
+		const body = "x".repeat(1000); // one giant paragraph, no "\n\n" anywhere
+		mockFetchOnce({ ok: true, status: 200, text: `Title: t\n\nMarkdown Content:\n${body}` });
+
+		const result = await fetchUrl("https://example.com/", { maxChars: 100 });
+
+		expect(result.content).toHaveLength(100);
 	});
 });
