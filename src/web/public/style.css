@@ -2061,6 +2061,33 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 }
 .settings-form-row select:focus,
 .settings-form-row input:focus { border-color: var(--cyan); }
+.plugin-mp-tabs {
+	display: flex; flex-wrap: wrap; gap: 4px;
+	margin: 8px 0 10px;
+}
+.plugin-mp-tab {
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	padding: 4px 10px;
+	color: var(--text-muted);
+	font-family: var(--font);
+	font-size: .75rem;
+	cursor: pointer;
+	transition: background .15s;
+}
+.plugin-mp-tab:hover { background: var(--bg-hover); color: var(--text); }
+.plugin-mp-tab.active { background: var(--cyan); color: var(--bg); border-color: var(--cyan); font-weight: 600; }
+.plugin-catalog-list {
+	max-height: 280px; overflow-y: auto;
+	margin-bottom: 10px;
+}
+.plugin-installed-label {
+	font-size: .7rem;
+	color: var(--text-muted);
+	opacity: .6;
+	padding: 4px 6px;
+}
 .settings-item-row {
 	display: flex; flex-wrap: wrap; gap: 6px 8px;
 	padding: 6px 4px;
