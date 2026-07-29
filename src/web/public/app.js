@@ -2229,15 +2229,17 @@ function DirectoryBrowser({ initialPath, onPick, onClose, confirm }) {
 }
 
 const SETTINGS_TABS = [
+	{ id: "bash", label: "Bash" },
 	{ id: "font", label: "Font" },
 	{ id: "mcp", label: "MCP" },
 	{ id: "model", label: "Model" },
 	{ id: "plugins", label: "Plugins" },
 	{ id: "provider", label: "Provider" },
+	{ id: "quick-mode", label: "Quick Mode" },
 	{ id: "skills", label: "Skills" },
 	{ id: "ssh", label: "SSH" },
 	{ id: "theme", label: "Theme" },
-	{ id: "tools", label: "Tools" },
+	{ id: "web", label: "Web" },
 ];
 
 // A centered modal, same treatment as the Hotkeys reference — an anchored
@@ -2374,24 +2376,26 @@ function SettingsModal({
 						providers: providers?.result ?? [],
 					},
 				}));
-			} else if (t === "tools") {
-				const [web, permissions, searchProvider, fetchProvider, quickSessionPersona] = await Promise.all([
+			} else if (t === "bash") {
+				const permissions = await run("/permissions");
+				setData((d) => ({ ...d, bash: { permissions: permissions?.result } }));
+			} else if (t === "web") {
+				const [webTools, searchProvider, fetchProvider] = await Promise.all([
 					run("/web"),
-					run("/permissions"),
 					run("/web-search-provider"),
 					run("/web-fetch-provider"),
-					run("/quick-session-persona"),
 				]);
 				setData((d) => ({
 					...d,
-					tools: {
-						web: web?.result,
-						permissions: permissions?.result,
+					web: {
+						webTools: webTools?.result,
 						searchProvider: searchProvider?.result,
 						fetchProvider: fetchProvider?.result,
-						quickSessionPersona: quickSessionPersona?.result,
 					},
 				}));
+			} else if (t === "quick-mode") {
+				const quickSessionPersona = await run("/quick-session-persona");
+				setData((d) => ({ ...d, "quick-mode": { quickSessionPersona: quickSessionPersona?.result } }));
 			} else if (t === "mcp") {
 				const res = await run("/mcp list");
 				if (!res.ok) {
@@ -2514,19 +2518,23 @@ function SettingsModal({
 														if (res.ok && res.result?.colors) onApplyTheme(res.result.colors);
 														if (res.ok && res.result?.theme) onThemeChange(res.result.theme);
 													}} />`
-												: tab === "tools"
-													? html`<${SettingsTools} data=${data.tools} busy=${busy} act=${act} personas=${personas} onQuickSessionPersonaChange=${onQuickSessionPersonaChange} />`
-													: tab === "mcp"
-														? html`<${SettingsMcp} data=${data.mcp} busy=${busy} act=${act} confirm=${confirm} />`
-														: tab === "skills"
-															? html`<${SettingsSkills} data=${data.skills} busy=${busy} act=${act} confirm=${confirm} />`
-															: tab === "plugins"
-																? html`<${SettingsPlugins} data=${data.plugins} busy=${busy} act=${act} confirm=${confirm} />`
-																: tab === "provider"
-																	? html`<${SettingsProvider} data=${data.provider} busy=${busy} act=${act} confirm=${confirm} />`
-																	: tab === "ssh"
-																		? html`<${SettingsSsh} data=${data.ssh} busy=${busy} act=${act} confirm=${confirm} />`
-																		: null
+												: tab === "bash"
+													? html`<${SettingsBash} data=${data.bash} busy=${busy} act=${act} />`
+													: tab === "web"
+														? html`<${SettingsWeb} data=${data.web} busy=${busy} act=${act} />`
+														: tab === "quick-mode"
+															? html`<${SettingsQuickMode} data=${data["quick-mode"]} busy=${busy} act=${act} personas=${personas} onQuickSessionPersonaChange=${onQuickSessionPersonaChange} />`
+															: tab === "mcp"
+																? html`<${SettingsMcp} data=${data.mcp} busy=${busy} act=${act} confirm=${confirm} />`
+																: tab === "skills"
+																	? html`<${SettingsSkills} data=${data.skills} busy=${busy} act=${act} confirm=${confirm} />`
+																	: tab === "plugins"
+																		? html`<${SettingsPlugins} data=${data.plugins} busy=${busy} act=${act} confirm=${confirm} />`
+																		: tab === "provider"
+																			? html`<${SettingsProvider} data=${data.provider} busy=${busy} act=${act} confirm=${confirm} />`
+																			: tab === "ssh"
+																				? html`<${SettingsSsh} data=${data.ssh} busy=${busy} act=${act} confirm=${confirm} />`
+																				: null
 						}
 					</div>
 				</div>
@@ -2901,17 +2909,29 @@ function InfoPopover({ text, readUrl }) {
 	];
 }
 
-function SettingsTools({ data, busy, act, personas, onQuickSessionPersonaChange }) {
+function SettingsBash({ data, busy, act }) {
+	if (!data) return null;
+	const perm = data.permissions || {};
+	return html`
+		<div class="settings-rows">
+			<div class="settings-section-title">Bash confirmation mode</div>
+			<p class="settings-hint">Default asks before running potentially dangerous shell commands. Bypass skips all confirmation prompts.</p>
+			<div class="settings-form-row">
+				<button class="modal-btn${perm.permissionMode === "default" ? " modal-btn-primary" : ""}" title="Confirm dangerous commands" disabled=${busy} onClick=${() => act("/permissions default")}>Default</button>
+				<button class="modal-btn${perm.permissionMode === "bypass" ? " modal-btn-primary" : ""}" title="Skip confirmation prompts" disabled=${busy} onClick=${() => act("/permissions bypass")}>Bypass</button>
+			</div>
+		</div>
+	`;
+}
+
+function SettingsWeb({ data, busy, act }) {
 	const [tavilyKey, setTavilyKey] = useState("");
 	const [braveKey, setBraveKey] = useState("");
-	const [quickPersonaValue, setQuickPersonaValue] = useState("");
 	if (!data) return null;
-	const web = data.web || {};
-	const perm = data.permissions || {};
+	const webTools = data.webTools || {};
 	const search = data.searchProvider || {};
 	const fetchProvider = data.fetchProvider || {};
-	const quickPersona = data.quickSessionPersona?.quickSessionPersona ?? "coding";
-	const webOn = web.webTools;
+	const webOn = webTools.webTools;
 	const provider = search.searchProvider || "ddg";
 	const tKey = tavilyKey || search.tavilyApiKey || "";
 	const bKey = braveKey || search.braveApiKey || "";
@@ -2949,12 +2969,16 @@ function SettingsTools({ data, busy, act, personas, onQuickSessionPersonaChange 
 				<button class="modal-btn${fetchBackend === "jina" ? " modal-btn-primary" : ""}" title="Free, no key — handles JS rendering and PDFs" disabled=${busy} onClick=${() => act("/web-fetch-provider jina")}>Jina Reader</button>
 				<button class="modal-btn${fetchBackend === "local" ? " modal-btn-primary" : ""}" title="Direct fetch — no third party sees the URL" disabled=${busy} onClick=${() => act("/web-fetch-provider local")}>Local</button>
 			</div>
-			<div class="settings-section-title">Bash confirmation mode</div>
-			<p class="settings-hint">Default asks before running potentially dangerous shell commands. Bypass skips all confirmation prompts.</p>
-			<div class="settings-form-row">
-				<button class="modal-btn${perm.permissionMode === "default" ? " modal-btn-primary" : ""}" title="Confirm dangerous commands" disabled=${busy} onClick=${() => act("/permissions default")}>Default</button>
-				<button class="modal-btn${perm.permissionMode === "bypass" ? " modal-btn-primary" : ""}" title="Skip confirmation prompts" disabled=${busy} onClick=${() => act("/permissions bypass")}>Bypass</button>
-			</div>
+		</div>
+	`;
+}
+
+function SettingsQuickMode({ data, busy, act, personas, onQuickSessionPersonaChange }) {
+	const [quickPersonaValue, setQuickPersonaValue] = useState("");
+	if (!data) return null;
+	const quickPersona = data.quickSessionPersona?.quickSessionPersona ?? "coding";
+	return html`
+		<div class="settings-rows">
 			<div class="settings-section-title">Quick session persona</div>
 			<p class="settings-hint">Persona the sidebar's "Quick" button uses — skips the picker, opens straight into a fresh sandbox directory.</p>
 			<div class="settings-form-row">
