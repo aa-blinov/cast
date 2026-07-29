@@ -5,7 +5,7 @@
 
 import htm from "htm";
 import { h, render } from "preact";
-import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { icons } from "./icons.js";
 
 const html = htm.bind(h);
@@ -821,6 +821,20 @@ function Message({ msg }) {
 		<div class="message message-${role}">
 			<div class="message-label">${labelMap[role] ?? role}</div>
 			<div class="message-content" dangerouslySetInnerHTML=${{ __html: role === "user" ? escapeHtml(content) : renderMarkdown(content) }} />
+			${
+				msg.attachments?.length > 0 &&
+				html`
+				<div class="message-attachments">
+					${msg.attachments.map(
+						(a) => html`
+						<span key=${a.name} class="message-attachment-chip" title=${a.path}>
+							<${icons.docFile} /><span class="message-attachment-name">${a.name}</span>
+						</span>
+					`,
+					)}
+				</div>
+				`
+			}
 		</div>
 	`;
 }
@@ -1002,7 +1016,7 @@ function readFileAsDataUrl(file) {
 	});
 }
 
-function Composer({ running, ready, activeId, commands, personas, onSubmit, onAbort }) {
+function Composer({ running, ready, activeId, commands, personas, onSubmit, onAbort, onDocUploaded }) {
 	const [value, setValue] = useState("");
 	const [cmdVisible, setCmdVisible] = useState(false);
 	const [selectedIndex, setSelectedIndex] = useState(0);
@@ -1018,6 +1032,14 @@ function Composer({ running, ready, activeId, commands, personas, onSubmit, onAb
 	const pickerRef = useRef(null);
 	const fileInputRef = useRef(null);
 
+	// Docs and images are per-session — switching sessions must drop
+	// any attachments the user added while viewing a different session.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: activeId is a prop that changes on session switch
+	useEffect(() => {
+		setDocs([]);
+		setImages([]);
+	}, [activeId]);
+
 	const addImageFiles = useCallback(async (files) => {
 		if (files.length === 0) return;
 		const resized = await Promise.all(files.map((f) => resizeImageToDataUrl(f).catch(() => null)));
@@ -1027,22 +1049,6 @@ function Composer({ running, ready, activeId, commands, personas, onSubmit, onAb
 	const addDocFiles = useCallback(
 		async (files) => {
 			if (files.length === 0) return;
-			if (!activeId) {
-				// A brand-new draft session has no id yet (see submitMessage's
-				// commitSession handoff) — nowhere on the server to upload into
-				// until the conversation actually exists. Images don't have this
-				// problem since they're embedded directly in the message rather
-				// than uploaded ahead of time.
-				setDocs((prev) => [
-					...prev,
-					...files.map((f) => ({
-						id: `${f.name}-${Date.now()}-${Math.random()}`,
-						name: f.name,
-						error: "Send a text message first to start the chat, then attach files",
-					})),
-				]);
-				return;
-			}
 			for (const file of files) {
 				const id = `${file.name}-${Date.now()}-${Math.random()}`;
 				if (isBlockedAttachmentName(file.name)) {
@@ -1050,6 +1056,19 @@ function Composer({ running, ready, activeId, commands, personas, onSubmit, onAb
 						...prev,
 						{ id, name: file.name, error: "Executable/binary files aren't accepted as attachments" },
 					]);
+					continue;
+				}
+				// Draft sessions have no server-side session yet — defer the
+				// actual upload until the compose sends (submitMessage handles
+				// it after commitSession creates the real session). Store the
+				// dataUrl so the composer can show the file is ready.
+				if (!activeId) {
+					try {
+						const dataUrl = await readFileAsDataUrl(file);
+						setDocs((prev) => [...prev, { id, name: file.name, dataUrl, pending: true }]);
+					} catch (err) {
+						setDocs((prev) => [...prev, { id, name: file.name, error: err.message }]);
+					}
 					continue;
 				}
 				setDocs((prev) => [...prev, { id, name: file.name, uploading: true }]);
@@ -1062,20 +1081,20 @@ function Composer({ running, ready, activeId, commands, personas, onSubmit, onAb
 					setDocs((prev) =>
 						prev.map((d) => (d.id === id ? { id, name: result.name, path: result.path, size: result.size } : d)),
 					);
+					onDocUploaded?.();
 				} catch (err) {
 					setDocs((prev) => prev.map((d) => (d.id === id ? { ...d, uploading: false, error: err.message } : d)));
 				}
 			}
 		},
-		[activeId],
+		[activeId, onDocUploaded],
 	);
 
 	const removeDoc = useCallback(
 		(doc) => {
 			setDocs((prev) => prev.filter((d) => d.id !== doc.id));
-			// Only ever uploaded (has a path) once it's actually on disk —
-			// nothing to clean up server-side for a still-uploading or
-			// already-failed/rejected entry.
+			// A pending doc (draft session) was never uploaded — nothing to
+			// clean up server-side. Only DELETE real, already-on-disk files.
 			if (activeId && doc.path) {
 				api("DELETE", `/api/sessions/${activeId}/inputs?path=${encodeURIComponent(doc.name)}`).catch(() => {});
 			}
@@ -1133,7 +1152,8 @@ function Composer({ running, ready, activeId, commands, personas, onSubmit, onAb
 
 	const handleSubmit = useCallback(() => {
 		const trimmed = value.trim();
-		const readyDocs = docs.filter((d) => d.path && !d.uploading && !d.error);
+		const readyDocs = docs.filter((d) => (d.path || d.pending) && !d.uploading && !d.error);
+		const pendingDocs = docs.filter((d) => d.pending && d.dataUrl);
 		// A caption-less image/document send is allowed — an attachment alone
 		// is a complete message, same as any chat app.
 		if (!trimmed && images.length === 0 && readyDocs.length === 0) return;
@@ -1144,9 +1164,9 @@ function Composer({ running, ready, activeId, commands, personas, onSubmit, onAb
 		// itself; nothing here parses the attachment's actual content.
 		const text =
 			readyDocs.length > 0
-				? `${trimmed}\n\n<system-reminder>\nThe user attached the following file(s) to this message:\n${readyDocs.map((d) => `- ${d.name}: ${d.path}`).join("\n")}\n</system-reminder>`
+				? `${trimmed}\n\n<system-reminder>\nThe user attached the following file(s) to this message:\n${readyDocs.map((d) => `- ${d.name}: ${d.path ?? `(pending — will be uploaded on send)`}`).join("\n")}\n</system-reminder>`
 				: trimmed;
-		onSubmit(text, images);
+		onSubmit(text, images, pendingDocs.length > 0 ? pendingDocs : undefined);
 		setValue("");
 		setImages([]);
 		setDocs([]);
@@ -1371,6 +1391,7 @@ function DiffPanel({
 	onTabChange,
 	confirm,
 	fsRefreshNonce,
+	inputsRefreshNonce,
 	bootstrapping,
 }) {
 	const openClass = open ? " open" : "";
@@ -1418,7 +1439,7 @@ function DiffPanel({
 			<aside class="diff-panel${openClass}">
 				<div class="diff-resize-handle" onPointerDown=${onResizeStart} />
 				${header}
-				<${InputsExplorer} activeId=${activeId} confirm=${confirm} />
+				<${InputsExplorer} activeId=${activeId} confirm=${confirm} refreshNonce=${inputsRefreshNonce} />
 			</aside>
 		`;
 	}
@@ -1578,27 +1599,32 @@ function humanSize(bytes) {
 // the project's own cwd. No tree/search/rename like FileExplorer below:
 // attachments aren't expected to have subdirectories, so there's nothing to
 // expand or navigate, only a list to download/preview/remove from.
-function InputsExplorer({ activeId, confirm }) {
+function InputsExplorer({ activeId, confirm, refreshNonce }) {
 	const [entries, setEntries] = useState([]);
 	const [error, setError] = useState(null);
 	const [busyName, setBusyName] = useState(null);
+	const [loading, setLoading] = useState(true);
 
 	const load = useCallback(async () => {
 		if (!activeId) return;
+		setLoading(true);
 		try {
 			const data = await api("GET", `/api/sessions/${activeId}/inputs`);
 			setEntries(data?.entries ?? []);
 			setError(null);
 		} catch (err) {
 			setError(err.message);
+		} finally {
+			setLoading(false);
 		}
 	}, [activeId]);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies: refreshNonce prop triggers reload when docs uploaded
 	useEffect(() => {
-		setEntries([]);
 		setError(null);
+		setLoading(false);
 		load();
-	}, [load]);
+	}, [load, refreshNonce]);
 
 	const downloadHref = (name) => `/api/sessions/${activeId}/inputs/download?path=${encodeURIComponent(name)}`;
 	const previewHref = (name) => `${downloadHref(name)}&inline=1`;
@@ -1615,6 +1641,14 @@ function InputsExplorer({ activeId, confirm }) {
 			setBusyName(null);
 		}
 	};
+
+	if (loading) {
+		return html`
+			<div class="fs-explorer">
+				<div class="diff-empty"><p class="diff-empty-title">Loading inputs…</p></div>
+			</div>
+		`;
+	}
 
 	return html`
 		<div class="fs-explorer">
@@ -3654,6 +3688,7 @@ function Sidebar({
 	onShareSession,
 	open,
 	confirm,
+	sessionsLoaded,
 }) {
 	const [personaOpen, setPersonaOpen] = useState(false);
 	const [search, setSearch] = useState("");
@@ -3953,8 +3988,9 @@ function Sidebar({
 					`
 					}
 					${otherGroup.map(renderItem)}
-					${searching && html`<div class="sidebar-empty">Searching…</div>`}
-					${!searching && pinnedGroup.length === 0 && otherGroup.length === 0 && html`<div class="sidebar-empty">No sessions match "${search}"</div>`}
+					${!sessionsLoaded && html`<div class="sidebar-empty">Loading sessions…</div>`}
+					${sessionsLoaded && searching && html`<div class="sidebar-empty">Searching…</div>`}
+					${sessionsLoaded && !searching && pinnedGroup.length === 0 && otherGroup.length === 0 && html`<div class="sidebar-empty">No sessions match "${search}"</div>`}
 				</div>
 			</div>
 			${
@@ -4121,6 +4157,7 @@ function ElapsedTimer({ running, activeId, connected, turnStartRef }) {
 
 function App() {
 	const [sessions, setSessions] = useState([]);
+	const [sessionsLoaded, setSessionsLoaded] = useState(false);
 	const [activeId, setActiveId] = useState(null);
 	// Per-session turn start times for ElapsedTimer's stopwatch — a plain ref
 	// (not state) so handleSubmit can clear the previous entry on a new turn
@@ -4234,6 +4271,7 @@ function App() {
 	// landed while you had it open wouldn't show up until you manually
 	// collapsed and reopened that folder.
 	const [fsRefreshNonce, setFsRefreshNonce] = useState(0);
+	const [inputsRefreshNonce, setInputsRefreshNonce] = useState(0);
 	useEffect(() => {
 		try {
 			localStorage.setItem("cast:diffOpen", diffOpen ? "1" : "0");
@@ -4354,6 +4392,7 @@ function App() {
 			const data = await api("GET", "/api/sessions");
 			setSessions(data);
 		} catch {}
+		setSessionsLoaded(true);
 	}, []);
 
 	// Select session — `push` controls whether this lands as a new browser
@@ -4725,7 +4764,7 @@ function App() {
 
 	// Submit message
 	const submitMessage = useCallback(
-		async (text, images) => {
+		async (text, images, pendingDocs) => {
 			// Pure client-side commands need no live (or even draft) session —
 			// handled before any draft-commit below so idly hitting /diff or
 			// /copy on a fresh "new session" draft can't spuriously create a
@@ -4770,12 +4809,58 @@ function App() {
 				return;
 			}
 
+			// Deferred documents from a draft session — upload them now that we
+			// have (or are about to create) a real session id.
+			let finalText = text;
+			let id = activeId;
+			if (pendingDocs && pendingDocs.length > 0) {
+				// Must commit the session before uploading — the server needs a
+				// real session id for the inputs directory.
+				if (!id) {
+					if (session?.isDraft) {
+						try {
+							id = await commitSession(session.persona, session.cwd, { push: true });
+						} catch (err) {
+							showToast(err.message, "error");
+							return;
+						}
+					} else {
+						showToast("Still connecting — try again in a moment", "error");
+						return;
+					}
+				}
+				const paths = [];
+				for (const doc of pendingDocs) {
+					try {
+						const result = await api("POST", `/api/sessions/${id}/inputs/upload`, {
+							name: doc.name,
+							dataUrl: doc.dataUrl,
+						});
+						paths.push({ name: result.name, path: result.path });
+					} catch (err) {
+						showToast(`Failed to upload ${doc.name}: ${err.message}`, "error");
+						// Still send the message without the failed file
+					}
+				}
+				// Rebuild the system-reminder with real server-side paths —
+				// replaces the placeholder text the composer stashed.
+				if (paths.length > 0) {
+					const userText = text.replace(/\n\n<system-reminder>[\s\S]*<\/system-reminder>/, "").trim();
+					finalText =
+						userText +
+						`\n\n<system-reminder>\nThe user attached the following file(s) to this message:\n` +
+						paths.map((p) => `- ${p.name}: ${p.path}`).join("\n") +
+						`\n</system-reminder>`;
+				}
+				// Refresh the Inputs panel now that files are on disk
+				setInputsRefreshNonce((n) => n + 1);
+			}
+
 			// The composer is enabled for a local-only draft (see startDraft) as
 			// well as a real session — this is the one place a draft ever turns
 			// into an actual backend session, exactly when it gets its first
 			// real content, same as ChatGPT's "new chat" only existing once you
 			// send something into it.
-			let id = activeId;
 			if (!id) {
 				if (session?.isDraft) {
 					try {
@@ -4792,7 +4877,7 @@ function App() {
 					return;
 				}
 			}
-			if (text.startsWith("/")) {
+			if (finalText.startsWith("/")) {
 				try {
 					const result = await api("POST", `/api/sessions/${id}/command`, { command: text });
 					if (text === "/sessions") await loadSessions();
@@ -4881,14 +4966,18 @@ function App() {
 							...prev,
 							messages: [
 								...prev.messages,
-								{ role: "user", content: text, ...(images?.length ? { images } : {}) },
+								{ role: "user", content: finalText, ...(images?.length ? { images } : {}) },
 							],
 						}
 					: prev,
 			);
 			turnStartRef.current.delete(id);
 			try {
-				await api("POST", `/api/sessions/${id}/chat`, images?.length ? { text, images } : { text });
+				await api(
+					"POST",
+					`/api/sessions/${id}/chat`,
+					images?.length ? { text: finalText, images } : { text: finalText },
+				);
 				// Picks up the auto-derived title after a session's first message
 				// (and keeps the sidebar's message counts from drifting stale).
 				loadSessions();
@@ -5476,7 +5565,60 @@ function App() {
 		return () => window.removeEventListener("keydown", onKey);
 	}, [hotkeysOpen, dirPickerOpen, activeId, personas, cwd, startDraft, submitMessage, toggleDiff]);
 
-	const messages = session?.messages?.filter((m) => m.role !== "system") || [];
+	const messages = useMemo(() => {
+		const raw = session?.messages?.filter((m) => m.role !== "system") || [];
+		const processed = [];
+		let pendingAttachments = null;
+		for (const m of raw) {
+			if (m.role === "user") {
+				const content = typeof m.content === "string" ? m.content : "";
+				const reminderRe = /<system-reminder>([\s\S]*?)<\/system-reminder>/g;
+				const attachments = [...(pendingAttachments ?? [])];
+				// History loaded via REST may still carry inline <system-reminder>
+				// (the bridge strips them only for SSE, not for the REST API).
+				// Also extract from the warning the server split off — those
+				// arrive as a separate "warning" message right before the user
+				// message. We stash them in pendingAttachments and attach here.
+				let cleaned = content;
+				let match = reminderRe.exec(content);
+				while (match !== null) {
+					for (const line of match[1].split("\n")) {
+						const fileMatch = line.match(/^- (.+?): (.+)$/);
+						if (fileMatch) attachments.push({ name: fileMatch[1], path: fileMatch[2] });
+					}
+					cleaned = cleaned.replace(match[0], "");
+					match = reminderRe.exec(content);
+				}
+				cleaned = cleaned.trim();
+				pendingAttachments = null;
+				processed.push({
+					...m,
+					content: cleaned,
+					attachments: attachments.length > 0 ? attachments : undefined,
+				});
+			} else if (
+				m.role === "warning" &&
+				typeof m.content === "string" &&
+				m.content.includes("The user attached the following file(s)")
+			) {
+				// Extract file names from the warning and stash them for the
+				// next user message — the server splits these out before the
+				// user message, so we carry them forward instead of showing
+				// a redundant "[system]" notice in the chat.
+				const lines = m.content.split("\n");
+				const files = [];
+				for (const line of lines) {
+					const fm = line.match(/^- (.+?): (.+)$/);
+					if (fm) files.push({ name: fm[1], path: fm[2] });
+				}
+				if (files.length > 0) pendingAttachments = files;
+			} else {
+				pendingAttachments = null;
+				processed.push(m);
+			}
+		}
+		return processed;
+	}, [session?.messages]);
 	// Each thread can run under a different persona — shown right above the
 	// composer (not the header, which is shared chrome) so it's always clear
 	// which role a message is about to go to, especially when switching
@@ -5586,6 +5728,7 @@ function App() {
 				onPinSession=${pinSession}
 				onShareSession=${setShareModalSession}
 				open=${sidebarOpen}
+				sessionsLoaded=${sessionsLoaded}
 				confirm=${requestConfirm}
 			/>
 
@@ -5716,7 +5859,7 @@ function App() {
 					</div>
 				`
 				}
-				<${Composer} running=${running} ready=${!!session} activeId=${activeId} commands=${commands} personas=${personas} onSubmit=${submitMessage} onAbort=${abortRun} />
+				<${Composer} running=${running} ready=${!!session} activeId=${activeId} commands=${commands} personas=${personas} onSubmit=${submitMessage} onAbort=${abortRun} onDocUploaded=${() => setInputsRefreshNonce((n) => n + 1)} />
 			</main>
 
 			<!-- Diff — a wide right sidebar alongside the chat on desktop, a
@@ -5728,7 +5871,7 @@ function App() {
 			     leave this unmounted entirely while still reserving its grid
 			     column on open, which read as content shifting into an empty
 			     void with no panel there to show for it. -->
-			<${DiffPanel} data=${diffData} activeFile=${diffFile} onSelectFile=${setDiffFile} onResizeStart=${startDiffResize} open=${diffOpen} activeId=${activeId} tab=${diffTab} onTabChange=${setDiffTab} confirm=${requestConfirm} fsRefreshNonce=${fsRefreshNonce} bootstrapping=${bootstrapping} />
+			<${DiffPanel} data=${diffData} activeFile=${diffFile} onSelectFile=${setDiffFile} onResizeStart=${startDiffResize} open=${diffOpen} activeId=${activeId} tab=${diffTab} onTabChange=${setDiffTab} confirm=${requestConfirm} fsRefreshNonce=${fsRefreshNonce} inputsRefreshNonce=${inputsRefreshNonce} bootstrapping=${bootstrapping} />
 		</div>
 	`;
 }

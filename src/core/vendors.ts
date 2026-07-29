@@ -50,9 +50,11 @@ export interface ReasoningParams {
 
 export function buildReasoningParams(effort: string): ReasoningParams {
 	if (effort === "unknown") {
-		// Provider didn't report reasoning capabilities — don't send any
-		// reasoning params so the provider uses its own default.
-		return { body: {}, enabled: false };
+		// Provider didn't report reasoning capabilities. Some models (e.g.
+		// MiniMax-M3) nevertheless default to reasoning ON when no params are
+		// sent — explicitly disable so the user isn't surprised by <think>
+		// blocks wrapping answers they expected to be plain.
+		return { body: { reasoning: { enabled: false } }, enabled: false };
 	}
 	if (effort === "off") {
 		// Must be explicit. Some models (e.g. OpenRouter's `default_enabled:
