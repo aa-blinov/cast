@@ -3469,7 +3469,6 @@ function SettingsPlugins({ data, busy, act, confirm }) {
 									return html`
 									<div key=${name} class="plugin-catalog-item">
 										<div class="plugin-catalog-header">
-											<span class="settings-item-status ${installed ? "ok" : ""}" />
 											<span class="settings-item-name">${name}</span>
 											${
 												installed
