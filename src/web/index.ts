@@ -6,6 +6,8 @@
 
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
+import { closeMcpConnections } from "../core/mcp.ts";
+import { resolveMcpForCwd } from "../core/project.ts";
 import { loadSettings, updateSettings } from "../core/settings.ts";
 import type { ParsedArgs } from "../core/startup.ts";
 import { runStartup } from "../core/startup.ts";
@@ -94,6 +96,12 @@ export async function runWebServerMain(
 		noMcp: false,
 		cliMcpPaths: [],
 		version: ver,
+		// Real MCP connections (npx package resolution, browser launches for
+		// something like @playwright/mcp, remote-server handshakes) can take
+		// far longer than everything else runStartup does combined — there's
+		// no reason the HTTP server should sit unreachable for that whole
+		// window. Connect for real in the background, after listen(), instead.
+		deferMcp: true,
 	};
 
 	// Auth: ensure password exists in settings
@@ -135,6 +143,12 @@ export async function runWebServerMain(
 		);
 	}
 
+	// Set before the server is even created so the background MCP connect
+	// below (which can finish after a shutdown was already requested) has
+	// something to check — declared here, read (never reassigned) by that
+	// connect's .then(), and set true by the shutdown handler further down.
+	let shuttingDown = false;
+
 	const server = startWebServer({
 		port,
 		host,
@@ -145,6 +159,38 @@ export async function runWebServerMain(
 		onListening: () => {
 			writeWebState({ pid: process.pid, port, host, startedAt: new Date().toISOString(), foreground });
 			console.log(`[cast web] stop: cast web stop`);
+
+			// The deferred half of ParsedArgs.deferMcp above: now that the HTTP
+			// server is actually accepting connections, do the real connect
+			// (npx resolution, browser launches, remote handshakes — whatever
+			// was skipped to get here fast) and swap it in once it's done.
+			// Every run reads bridge's MCP result fresh at turn-start (the same
+			// mechanism /mcp enable/disable already relies on), so the very
+			// next message in any open session picks up the newly connected
+			// tools automatically — no restart needed.
+			const mcpConnectStart = Date.now();
+			resolveMcpForCwd(
+				result.projectDeps,
+				result.cwd,
+				result.projectTrusted,
+				loadSettings().disabledMcpServers ?? [],
+			)
+				.then((mcpResult) => {
+					if (shuttingDown) {
+						// Nothing applied these connections anywhere — close them
+						// rather than leaking a subprocess/browser past shutdown.
+						closeMcpConnections(mcpResult.connections);
+						return;
+					}
+					bridge.applyMcpResult(mcpResult);
+					console.log(`[cast web] MCP servers connected in background (${Date.now() - mcpConnectStart}ms)`);
+				})
+				.catch((err) => {
+					console.error(
+						"[cast web] background MCP connect failed:",
+						err instanceof Error ? err.message : String(err),
+					);
+				});
 		},
 		onError: (err) => {
 			if (err.code === "EADDRINUSE") {
@@ -165,7 +211,8 @@ export async function runWebServerMain(
 	// SIGKILL (a hard `kill -9`, an OOM kill) can't be caught by anything —
 	// that's exactly why start/stop/status all treat a dead recorded PID as
 	// stale and self-heal, rather than assuming this handler always runs.
-	let shuttingDown = false;
+	// (shuttingDown itself is declared above, before onListening — the
+	// background MCP connect's .then() needs to read it too.)
 	const shutdown = (signal: string) => {
 		if (shuttingDown) return;
 		shuttingDown = true;

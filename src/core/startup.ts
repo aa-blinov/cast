@@ -67,6 +67,17 @@ export interface ParsedArgs {
 	noMcp: boolean;
 	cliMcpPaths: string[];
 	version: string;
+	/**
+	 * Skip actually connecting to MCP servers during this call — still
+	 * resolves and returns `allServerNames`/`serverSources` (cheap, no
+	 * network/subprocess cost), just with zero live `connections`. Used by
+	 * the web daemon so the HTTP server can start listening immediately
+	 * instead of blocking on however long every configured MCP server (npx
+	 * package resolution, browser launches, remote handshakes) takes to
+	 * connect — the caller is expected to run the real connect afterward and
+	 * swap the result in once it resolves (see WebBridge.applyMcpResult).
+	 */
+	deferMcp?: boolean;
 }
 
 export interface StartupResult {
@@ -436,8 +447,21 @@ export async function runStartup(
 			reasoningMeta,
 		},
 	);
-	onProgress?.("Connecting MCP servers...");
-	const mcpResult = await resolveMcpForCwd(projectDeps, cwd, projectTrusted, settings.disabledMcpServers ?? []);
+	let mcpResult: McpSetupResult;
+	if (args.deferMcp) {
+		// Cheap and synchronous-ish (no network/subprocess) — just resolves
+		// config + names. The real connect happens later, in the background.
+		mcpResult = await resolveMcpForCwd(
+			projectDeps,
+			cwd,
+			projectTrusted,
+			settings.disabledMcpServers ?? [],
+			true, // skipConnect
+		);
+	} else {
+		onProgress?.("Connecting MCP servers...");
+		mcpResult = await resolveMcpForCwd(projectDeps, cwd, projectTrusted, settings.disabledMcpServers ?? []);
+	}
 	const confirmBash = makeConfirmBash(pickers, permissionMode);
 	const sshHosts = resolveSshHosts(cwd, projectTrusted);
 
