@@ -423,7 +423,7 @@ function matchesIfCondition(ifCondition: string, payload: Record<string, unknown
 	const toolName = typeof payload.tool_name === "string" ? payload.tool_name : "";
 	const m = ifCondition.match(/^(\w+)(?:\((.*)\))?$/);
 	if (!m) return false;
-	if (m[1] !== toolName) return false;
+	if (m[1].toLowerCase() !== toolName.toLowerCase()) return false;
 	if (!m[2]) return true;
 	const pattern = m[2].trim();
 	const toolInput = payload.tool_input;
