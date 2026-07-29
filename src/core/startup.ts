@@ -19,6 +19,7 @@ import {
 	runOnboardingCheck,
 } from "./config.ts";
 import { formatContextFilesForPrompt, loadProjectContextFiles } from "./context-files.ts";
+import { type HooksFile, runHooksForEvent } from "./hooks.ts";
 import type { McpSetupResult } from "./mcp.ts";
 import { fetchModelsDevCatalog, lookupContextWindowFromCatalog } from "./models-dev.ts";
 import { findPersona, type LoadPersonasOptions, listPersonas, type Persona } from "./personas.ts";
@@ -27,6 +28,7 @@ import {
 	makeConfirmBash,
 	type ProjectResolverDeps,
 	personaOptionsForCwd,
+	resolveHooksForCwd,
 	resolveMcpForCwd,
 	resolveProjectTrustForCwd,
 	resolveRulesForCwd,
@@ -92,6 +94,8 @@ export interface StartupResult {
 	backgroundTasks: BackgroundTaskRegistry;
 	permissionMode: PermissionMode;
 	mcpResult: McpSetupResult;
+	/** Merged PreToolUse/PostToolUse/Stop hook config for this cwd (see resolveHooksForCwd). */
+	hooks: HooksFile;
 	skills: Skill[];
 	persona: Persona;
 	personaOptions: LoadPersonasOptions;
@@ -464,6 +468,19 @@ export async function runStartup(
 	}
 	const confirmBash = makeConfirmBash(pickers, permissionMode);
 	const sshHosts = resolveSshHosts(cwd, projectTrusted);
+	const hooks = resolveHooksForCwd(cwd, projectTrusted);
+	// Observation-only, fire-and-forget — matches the official event closely
+	// enough to be useful (AGENTS.md/CLAUDE.md + always-apply rules loaded for
+	// this session) without cast having Claude Code's finer-grained load
+	// reasons (nested directory traversal, post-compaction reload).
+	if ((contextFilesSuffix || rulesSuffix) && Object.keys(hooks).length > 0) {
+		void runHooksForEvent(hooks, {
+			event: "InstructionsLoaded",
+			matchTarget: "session_start",
+			cwd,
+			payload: { has_context_files: Boolean(contextFilesSuffix), has_rules: Boolean(rulesSuffix) },
+		});
+	}
 
 	// Validate per-slot provider references — warn and clear if the provider was deleted.
 	const providerSlots: Array<[keyof Settings, string | undefined]> = [
@@ -489,6 +506,7 @@ export async function runStartup(
 		backgroundTasks,
 		permissionMode,
 		mcpResult,
+		hooks,
 		skills,
 		persona,
 		personaOptions: personaOpts,

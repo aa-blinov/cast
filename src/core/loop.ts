@@ -9,6 +9,7 @@ import {
 import type { AppConfig } from "./config.ts";
 import { type AnnouncedLocalDate, appendDateRolloverReminder } from "./date-rollover-reminder.ts";
 import { matchesToolsAllowlist } from "./frontmatter.ts";
+import { type HooksFile, runHooksForEvent } from "./hooks.ts";
 import { appendInterruptReminder } from "./interrupt-reminder.ts";
 import type { Message, Tool, Usage } from "./llm.ts";
 import {
@@ -324,6 +325,15 @@ async function performCompaction(
 	loopConfig: LoopConfig,
 	onEvent: (event: AgentEvent) => void,
 ): Promise<CompactSessionResult> {
+	if (loopConfig.hooks) {
+		await runHooksForEvent(loopConfig.hooks, {
+			event: "PreCompact",
+			cwd: loopConfig.cwd,
+			sessionId: loopConfig.sessionId,
+			payload: { trigger: "auto" },
+			signal,
+		});
+	}
 	const result = await compactSessionMessages(
 		messages,
 		config,
@@ -345,6 +355,15 @@ async function performCompaction(
 			messagesCompacted: result.messagesCompacted,
 			tokensBefore: result.tokensBefore,
 		});
+		if (loopConfig.hooks) {
+			await runHooksForEvent(loopConfig.hooks, {
+				event: "PostCompact",
+				cwd: loopConfig.cwd,
+				sessionId: loopConfig.sessionId,
+				payload: { trigger: "auto", messagesCompacted: result.messagesCompacted },
+				signal,
+			});
+		}
 	}
 	return result;
 }
@@ -479,6 +498,10 @@ export interface LoopConfig {
 	cliSkillPaths?: string[];
 	/** Plan mode state — when enabled, injects plan system prompt block. */
 	planState?: import("./plan.ts").PlanState;
+	/** Hooks config (see resolveHooksForCwd in project.ts). */
+	hooks?: HooksFile;
+	/** Current session id — included in every hook payload/env (CAST_SESSION_ID). */
+	sessionId?: string;
 	/** Restrict bash to the read-only allowlist without the rest of plan mode.
 	 * Used for subagents spawned from a plan-mode parent: they inherit the
 	 * inspection-only bash but not the authoring tools or the plan prompt
@@ -659,11 +682,61 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 	};
 	// Cap is per outer-loop user prompt; reset when follow-up injects.
 	let openWorkGateFires = 0;
+	// Bounds a Stop hook that keeps blocking — a misconfigured hook shouldn't
+	// be able to wedge the run into a permanent loop.
+	let stopHookBlocks = 0;
+	// Matches Grok Build/Claude Code's cap: after this many continuations in a
+	// single turn, the gate is overridden and the turn ends regardless.
+	const MAX_STOP_HOOK_BLOCKS = 8;
+
+	// Wraps the interactive bash-confirmation callback with PermissionRequest/
+	// PermissionDenied — the closest thing cast has to Claude Code's
+	// permission-prompt lifecycle (there's no generic "any tool needs
+	// permission" dispatcher; only bash has one). Placed here (not per call
+	// site) so it applies to subagents too — they recurse through this same
+	// function with `hooks` inherited from the parent.
+	const confirmBashWithHooks: ConfirmBash | undefined =
+		loopConfig.confirmBash && loopConfig.hooks
+			? async (command, reason) => {
+					const hooksForConfirm = loopConfig.hooks!;
+					const pr = await runHooksForEvent(hooksForConfirm, {
+						event: "PermissionRequest",
+						matchTarget: "bash",
+						cwd,
+						sessionId: loopConfig.sessionId,
+						payload: { tool_name: "bash", tool_input: { command, description: reason } },
+						signal,
+					});
+					if (pr.blocked) {
+						void runHooksForEvent(hooksForConfirm, {
+							event: "PermissionDenied",
+							matchTarget: "bash",
+							cwd,
+							sessionId: loopConfig.sessionId,
+							payload: { tool_name: "bash", tool_input: { command } },
+							signal,
+						});
+						return false;
+					}
+					const allowed = await loopConfig.confirmBash!(command, reason);
+					if (!allowed) {
+						void runHooksForEvent(hooksForConfirm, {
+							event: "PermissionDenied",
+							matchTarget: "bash",
+							cwd,
+							sessionId: loopConfig.sessionId,
+							payload: { tool_name: "bash", tool_input: { command } },
+							signal,
+						});
+					}
+					return allowed;
+				}
+			: loopConfig.confirmBash;
 
 	const builtinExecuteTool = createToolExecutor(
 		cwd,
 		config,
-		loopConfig.confirmBash,
+		confirmBashWithHooks,
 		// Gate the executor on the same condition as tool advertisement: a persona
 		// without `subagents: true` can neither see nor run `task`, even if the
 		// model fabricates a call to it.
@@ -684,6 +757,8 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 					cliSkillPaths: loopConfig.cliSkillPaths,
 					mcpPromptSuffix: loopConfig.mcpPromptSuffix,
 					sshHosts: loopConfig.sshHosts,
+					hooks: loopConfig.hooks,
+					sessionId: loopConfig.sessionId,
 					runAgentLoop,
 				}
 			: undefined,
@@ -730,9 +805,58 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 		if (name === "todo_write") {
 			const result = validateTodos(args.todos);
 			if (!result.ok) return Promise.resolve({ content: `Error: ${result.error}`, isError: true });
+			const previousTodos = todos;
 			todos = result.todos;
 			onEvent({ type: "todos_updated", todos });
+			// Observation-only, fire-and-forget — content is the only stable
+			// identity todos have (no id field), so this is a best-effort diff,
+			// not a guaranteed one (renaming a todo reads as create+drop).
+			if (loopConfig.hooks) {
+				const previousByContent = new Map(previousTodos.map((t) => [t.content, t]));
+				for (const t of todos) {
+					const prev = previousByContent.get(t.content);
+					if (!prev) {
+						void runHooksForEvent(loopConfig.hooks, {
+							event: "TaskCreated",
+							cwd,
+							sessionId: loopConfig.sessionId,
+							payload: { content: t.content, priority: t.priority },
+							signal,
+						});
+					} else if (prev.status !== "completed" && t.status === "completed") {
+						void runHooksForEvent(loopConfig.hooks, {
+							event: "TaskCompleted",
+							cwd,
+							sessionId: loopConfig.sessionId,
+							payload: { content: t.content, priority: t.priority },
+							signal,
+						});
+					}
+				}
+			}
 			return Promise.resolve({ content: JSON.stringify({ todos, remaining: remainingTodoCount(todos) }) });
+		}
+		const hooks = loopConfig.hooks;
+		if (hooks) {
+			return runToolWithHooks(
+				{
+					hooks,
+					name,
+					args,
+					cwd,
+					sessionId: loopConfig.sessionId,
+					signal: toolSignal ?? signal,
+					mcpToolIndex,
+					config,
+					model: currentModel,
+					onWarning,
+				},
+				async (finalArgs) => {
+					const mcpTool = mcpToolIndex?.get(name);
+					if (mcpTool) return mcpTool.call(finalArgs, toolSignal);
+					return builtinExecuteTool(name, finalArgs, toolSignal);
+				},
+			);
 		}
 		const mcpTool = mcpToolIndex?.get(name);
 		if (mcpTool) return mcpTool.call(args, toolSignal);
@@ -1106,6 +1230,21 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 					toolResults.push(...executedToolBatch);
 					hasMoreToolCalls = true;
 
+					// Observation-only, matching the official spec (no blocking
+					// semantics documented) — fire-and-forget so a slow hook here
+					// doesn't add latency to every multi-tool turn.
+					if (loopConfig.hooks && executedToolBatch.length > 1) {
+						void runHooksForEvent(loopConfig.hooks, {
+							event: "PostToolBatch",
+							cwd,
+							sessionId: loopConfig.sessionId,
+							payload: {
+								tools: executedToolBatch.map((r) => ({ name: r.name, is_error: r.result.isError === true })),
+							},
+							signal,
+						});
+					}
+
 					// Snapshot after tools execute but before results are pushed —
 					// if the process dies mid-push, at least the assistant message
 					// (with tool_calls) is on disk so the model can see what was
@@ -1260,7 +1399,27 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 				continue;
 			}
 
-			// No more messages — done
+			// No more messages — done, unless a Stop hook says otherwise.
+			if (loopConfig.hooks && stopHookBlocks < MAX_STOP_HOOK_BLOCKS) {
+				const stopResult = await runHooksForEvent(loopConfig.hooks, {
+					event: "Stop",
+					cwd,
+					sessionId: loopConfig.sessionId,
+					payload: { stop_hook_active: stopHookBlocks > 0 },
+					signal,
+				});
+				// forceStop (`{"continue":false}`) wins over a block from another
+				// hook in the same run — end right now instead of continuing.
+				if (stopResult.blocked && !stopResult.forceStop) {
+					stopHookBlocks += 1;
+					messages.push({
+						role: "user",
+						content: stopResult.reason || "A Stop hook requested more work before ending this turn.",
+					});
+					onEvent({ type: "followup_injected", messages: [messages[messages.length - 1]] });
+					continue;
+				}
+			}
 			onEvent({ type: "end", reason: "stop" });
 			break;
 		}
@@ -1276,9 +1435,98 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 			endAborted();
 			return;
 		}
-		onEvent({ type: "error", message: describeTurnError(error) });
+		const message = describeTurnError(error);
+		// StopFailure is observation-only (matching Grok Build) — its output is
+		// never awaited-on for a decision, so it can't affect what already
+		// happened; fire it and move on regardless of the result.
+		if (loopConfig.hooks) {
+			void runHooksForEvent(loopConfig.hooks, {
+				event: "StopFailure",
+				cwd,
+				sessionId: loopConfig.sessionId,
+				payload: { error: message },
+				signal,
+			});
+		}
+		onEvent({ type: "error", message });
 		onEvent({ type: "end", reason: "error" });
 	}
+}
+
+/**
+ * Wraps one tool dispatch with PreToolUse/PostToolUse(Failure) hooks. A
+ * PreToolUse block skips `dispatch` entirely and returns the hook's reason
+ * as the tool result. Afterward, PostToolUse fires on success and
+ * PostToolUseFailure fires on an error result (mutually exclusive, matching
+ * Grok Build) — either way a block appends the hook's reason to the real
+ * result instead of replacing it, since the tool already ran.
+ */
+interface ToolHookContext {
+	hooks: HooksFile;
+	name: string;
+	args: Record<string, unknown>;
+	cwd: string;
+	sessionId: string | undefined;
+	signal: AbortSignal | undefined;
+	mcpToolIndex: Map<string, McpToolHandle> | undefined;
+	config: AppConfig;
+	model: string;
+	onWarning?: (message: string) => void;
+}
+
+/**
+ * Wraps one tool dispatch with PreToolUse/PostToolUse(Failure) hooks. A
+ * PreToolUse `deny`/block skips `dispatch` entirely and returns the hook's
+ * reason as the tool result; `updatedInput` rewrites the arguments `dispatch`
+ * actually runs with. Afterward, PostToolUse fires on success and
+ * PostToolUseFailure fires on an error result (mutually exclusive, matching
+ * the official spec) — `updatedToolOutput` replaces the real result outright,
+ * or (without it) a block just appends the hook's reason as feedback since
+ * the tool already ran.
+ */
+async function runToolWithHooks(
+	ctx: ToolHookContext,
+	dispatch: (args: Record<string, unknown>) => Promise<ToolResult>,
+): Promise<ToolResult> {
+	const { hooks, name, cwd, sessionId, signal, mcpToolIndex, config, model, onWarning } = ctx;
+	let args = ctx.args;
+	const pre = await runHooksForEvent(hooks, {
+		event: "PreToolUse",
+		matchTarget: name,
+		cwd,
+		sessionId,
+		payload: { tool_name: name, tool_input: args },
+		signal,
+		mcpToolIndex,
+		config,
+		model,
+	});
+	if (pre.permissionDecision === "ask" || pre.permissionDecision === "defer") {
+		onWarning?.(
+			`A PreToolUse hook for "${name}" returned "${pre.permissionDecision}" — cast has no interactive mid-turn prompt to honor that, so the call was allowed.`,
+		);
+	}
+	if (pre.blocked) {
+		return { content: pre.reason || `Blocked by a PreToolUse hook for "${name}".`, isError: true };
+	}
+	if (pre.updatedInput) args = pre.updatedInput;
+	const result = await dispatch(args);
+	const post = await runHooksForEvent(hooks, {
+		event: result.isError ? "PostToolUseFailure" : "PostToolUse",
+		matchTarget: name,
+		cwd,
+		sessionId,
+		payload: { tool_name: name, tool_input: args, tool_response: result.content },
+		signal,
+		mcpToolIndex,
+		config,
+		model,
+	});
+	if (post.updatedToolOutput !== undefined) return { ...result, content: post.updatedToolOutput };
+	if (post.blocked && post.reason) {
+		return { ...result, content: `${result.content}\n\n[Hook feedback: ${post.reason}]` };
+	}
+	return result;
 }
 
 // ============================================================================

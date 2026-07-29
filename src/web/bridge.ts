@@ -10,6 +10,7 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, wr
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fetchModels, type ModelInfo, probeProvider, resolveProvider } from "../core/config.ts";
+import { hasHooks, runHooksForEvent } from "../core/hooks.ts";
 import type { Message } from "../core/llm.ts";
 import { type AgentEvent, compactSessionMessages, runAgentLoop } from "../core/loop.ts";
 import { closeMcpConnections, formatMcpForPrompt, type McpSetupResult } from "../core/mcp.ts";
@@ -31,7 +32,9 @@ import {
 import {
 	buildSystemPrompt,
 	discoverSkillsForCwd,
+	listHooksForCwdSettings,
 	removeMcpServerFromDisk,
+	resolveHooksForCwd,
 	resolveMcpForCwd,
 	resolvePersonasForCwd,
 	resolveProjectTrustForCwd,
@@ -366,7 +369,7 @@ export interface WebBridge {
 	getSharedSession(
 		token: string,
 	): { title?: string; persona: string; model: string; messages: DisplayMessage[] } | null;
-	submit(sessionId: string, text: string, images?: string[]): void;
+	submit(sessionId: string, text: string, images?: string[]): Promise<void>;
 	abort(sessionId: string): void;
 	subscribe(sessionId: string, callback: (event: WebEvent) => void): void;
 	unsubscribe(sessionId: string, callback: (event: WebEvent) => void): void;
@@ -526,6 +529,14 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		};
 
 		sessions.set(session.id, ws);
+		// Fire-and-forget (SessionStart is non-blocking, matching Grok Build) —
+		// this function is sync and callers don't need to wait on a hook script.
+		void runHooksForEvent(resolveHooksForCwd(sessionCwd, projectTrusted), {
+			event: "SessionStart",
+			cwd: sessionCwd,
+			sessionId: session.id,
+			payload: { source: "startup" },
+		});
 		return ws;
 	}
 
@@ -571,7 +582,19 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		return [{ type: "text", text }, ...images.map((url) => ({ type: "image_url", image_url: { url } }))];
 	}
 
-	function submit(sessionId: string, text: string, images?: string[]): void {
+	/** Observation-only, fire-and-forget — a skill/rule name expanding into its actual prompt content. */
+	function fireUserPromptExpansion(sessionCwd: string, name: string): void {
+		const hooks = resolveHooksForCwd(sessionCwd, projectTrusted);
+		if (!hasHooks(hooks)) return;
+		void runHooksForEvent(hooks, {
+			event: "UserPromptExpansion",
+			matchTarget: name,
+			cwd: sessionCwd,
+			payload: { command_name: name },
+		});
+	}
+
+	async function submit(sessionId: string, text: string, images?: string[]): Promise<void> {
 		const ws = sessions.get(sessionId);
 		if (!ws) return;
 
@@ -586,6 +609,25 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		if (ws.status === "running") {
 			ws.runner.steeringQueue.enqueue({ role: "user", content: buildUserContent(text, images) } as Message);
 			return;
+		}
+
+		const sessionCwd = ws.session.cwd ?? cwd;
+		const submitHooks = resolveHooksForCwd(sessionCwd, projectTrusted);
+		if (hasHooks(submitHooks)) {
+			const submitResult = await runHooksForEvent(submitHooks, {
+				event: "UserPromptSubmit",
+				cwd: sessionCwd,
+				sessionId: ws.session.id,
+				payload: { prompt: text },
+			});
+			if (submitResult.blocked) {
+				broadcast(ws, {
+					type: "error",
+					message: `Prompt blocked by hook: ${submitResult.reason ?? "no reason given"}`,
+				});
+				return;
+			}
+			if (submitResult.reason) text = `${text}\n\n<hook-context>${submitResult.reason}</hook-context>`;
 		}
 
 		// Auto-title from the first-ever user message, same idea as a browser
@@ -680,6 +722,8 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			initialTodos: ws.session.todos,
 			mcpTools: mcpResult.toolDefinitions,
 			mcpToolIndex: mcpResult.toolIndex,
+			hooks: submitHooks,
+			sessionId: ws.session.id,
 			personas,
 			currentPersona: persona.name,
 			subagentPrompts: subPrompts,
@@ -814,6 +858,12 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		if (countTurnMessages(ws.session.messages) > 0) {
 			saveSession(ws.session);
 		}
+		void runHooksForEvent(resolveHooksForCwd(ws.session.cwd ?? cwd, projectTrusted), {
+			event: "SessionEnd",
+			cwd: ws.session.cwd ?? cwd,
+			sessionId: ws.session.id,
+			payload: { reason: reason ?? "closed" },
+		});
 		// Told before removal, and before clearing listeners, so any open SSE
 		// connection gets one last frame to close itself on (see server.ts).
 		broadcast(ws, { type: "session_closed" });
@@ -891,6 +941,12 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			systemPrompt: computeSystemPrompt(persona, session.model, session.cwd ?? cwd, session.mode),
 		};
 		sessions.set(session.id, ws);
+		void runHooksForEvent(resolveHooksForCwd(session.cwd ?? cwd, projectTrusted), {
+			event: "SessionStart",
+			cwd: session.cwd ?? cwd,
+			sessionId: session.id,
+			payload: { source: "resume" },
+		});
 		return ws;
 	}
 
@@ -1154,6 +1210,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			if (running) return { ok: false, error: "Agent running — use /queue, /steer, or /abort" };
 			const rule = directoryRules.find((r) => r.id === ruleId) ?? directoryRules.find((r) => r.name === ruleId);
 			if (!rule) return { ok: false, error: `Unknown rule: ${ruleId}. See /rules for the list.` };
+			fireUserPromptExpansion(ws.session.cwd ?? cwd, rule.name);
 			submit(sessionId, formatRuleInvocation(rule));
 			return { ok: true, result: `Invoked rule: ${rule.name}` };
 		}
@@ -1267,6 +1324,33 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		if (name === "/queue-reset" || name === "/qr") {
 			ws.runner.followUpQueue.clear();
 			return { ok: true, result: "Queue cleared" };
+		}
+
+		if (name === "/hooks") {
+			const sessionCwd = ws.session.cwd ?? cwd;
+			const [verb, ...rest] = arg.split(/\s+/).filter(Boolean);
+			if (verb === "help") {
+				return {
+					ok: true,
+					result: "/hooks · /hooks enable <id> · /hooks disable <id> — see docs/hooks.md",
+				};
+			}
+			const entries = listHooksForCwdSettings(sessionCwd, projectTrusted);
+			if (!verb) {
+				return { ok: true, result: entries };
+			}
+			if (verb === "enable" || verb === "disable") {
+				const id = rest.join(" ").trim();
+				if (!id) return { ok: false, error: `Usage: /hooks ${verb} <id>` };
+				if (!entries.some((e) => e.id === id)) return { ok: false, error: `No hook with id "${id}"` };
+				const settings = loadSettings();
+				const disabled = new Set(settings.disabledHooks ?? []);
+				if (verb === "disable") disabled.add(id);
+				else disabled.delete(id);
+				updateSettings({ disabledHooks: [...disabled] });
+				return { ok: true, result: `Hook ${id} ${verb}d` };
+			}
+			return { ok: false, error: `Unknown /hooks ${verb}` };
 		}
 
 		// Everything below requires idle (enforced by the isCommandBlocking gate above).
@@ -1829,6 +1913,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			const skill = discovered.find((s) => s.name === skillId && !disabled.has(s.name) && s.pluginEnabled !== false);
 			if (skill) {
 				if (running) return { ok: false, error: "Agent running — use /queue, /steer, or /abort" };
+				fireUserPromptExpansion(sessionCwd, skill.name);
 				submit(sessionId, formatSkillInvocation(skill, arg));
 				return { ok: true, result: `Invoked skill: ${skill.name}` };
 			}

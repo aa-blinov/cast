@@ -4,9 +4,10 @@ import { join } from "node:path";
 import { resolveProjectTrust } from "../pickers/domain.ts";
 import type { Pickers } from "../pickers/types.ts";
 import { hasContextFileInDir } from "./context-files.ts";
+import { type HooksFile, listHooksForCwd, loadHooksForCwd, type ResolvedHookEntry } from "./hooks.ts";
 import { connectMcpServers, loadMcpConfig, type McpServerConfig, type McpSetupResult, saveMcpConfig } from "./mcp.ts";
 import { globalPersonasDir, type LoadPersonasOptions, loadPersonas, type Persona } from "./personas.ts";
-import { pluginSkillContributions } from "./plugins.ts";
+import { pluginHookFiles, pluginSkillContributions } from "./plugins.ts";
 import {
 	formatAlwaysApplyRules,
 	formatLazyRulesForPrompt,
@@ -206,6 +207,18 @@ export function removeMcpServerFromDisk(name: string, cwd: string, trusted: bool
 	delete servers[name];
 	saveMcpConfig(entry.configPath, servers);
 	return entry;
+}
+
+/** Merged, disabled-filtered hook config for a cwd — global + trust-gated project + enabled plugins. */
+export function resolveHooksForCwd(cwd: string, trusted: boolean): HooksFile {
+	const settings = loadSettings();
+	return loadHooksForCwd(cwd, trusted, pluginHookFiles(settings), new Set(settings.disabledHooks ?? []));
+}
+
+/** Every hook group for a cwd (enabled and disabled) with stable ids — for `/hooks` listing/toggling. */
+export function listHooksForCwdSettings(cwd: string, trusted: boolean): ResolvedHookEntry[] {
+	const settings = loadSettings();
+	return listHooksForCwd(cwd, trusted, pluginHookFiles(settings), new Set(settings.disabledHooks ?? []));
 }
 
 export async function resolveMcpForCwd(

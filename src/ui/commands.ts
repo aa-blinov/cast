@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { reminderStateFromPlan } from "../core/compaction-reminder.ts";
 import { type AppConfig, probeProvider, resolveProvider, runOnboardingCheck } from "../core/config.ts";
 import { formatContextFilesForPrompt, loadProjectContextFiles } from "../core/context-files.ts";
+import { runHooksForEvent } from "../core/hooks.ts";
 import { compactSessionMessages, PLAN_COMPACTION_PROMPT } from "../core/loop.ts";
 import { closeMcpConnections, formatMcpForPrompt, type McpSetupResult, mcpServerToolBlurbs } from "../core/mcp.ts";
 import { findPersona, type LoadPersonasOptions, type Persona } from "../core/personas.ts";
@@ -23,10 +24,12 @@ import {
 import {
 	buildSystemPrompt,
 	discoverSkillsForCwd,
+	listHooksForCwdSettings,
 	listUninstallableMcpServers,
 	type ProjectResolverDeps,
 	personaOptionsForCwd,
 	removeMcpServerFromDisk,
+	resolveHooksForCwd,
 	resolveMcpForCwd,
 	resolveProjectTrustForCwd,
 	resolveRulesForCwd,
@@ -93,6 +96,10 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/current", description: "Show all status bar data" },
 	{ name: "/exit", description: "Save and exit (alias for /quit)" },
 	{ name: "/help", description: "Show this command list" },
+	{ name: "/hooks", description: "List configured hooks" },
+	{ name: "/hooks disable", description: "Disable a hook — id", takesArgs: true },
+	{ name: "/hooks enable", description: "Enable a hook — id", takesArgs: true },
+	{ name: "/hooks help", description: "Show hooks command cheat sheet" },
 	{ name: "/keys", description: "List all keybindings" },
 	{ name: "/mcp", description: "Toggle MCP servers on/off" },
 	{ name: "/mcp disable", description: "Disable one server — name", takesArgs: true },
@@ -292,6 +299,18 @@ async function applyPermissionMode(deps: CommandDeps, newMode: PermissionMode): 
 	deps.showNotice(`Permission mode: ${newMode}`);
 }
 
+/** Observation-only, fire-and-forget — a skill/rule name expanding into its actual prompt content. */
+function fireUserPromptExpansion(deps: CommandDeps, name: string): void {
+	const hooks = resolveHooksForCwd(deps.cwd, deps.projectTrusted);
+	if (Object.keys(hooks).length === 0) return;
+	void runHooksForEvent(hooks, {
+		event: "UserPromptExpansion",
+		matchTarget: name,
+		cwd: deps.cwd,
+		payload: { command_name: name },
+	});
+}
+
 async function reloadSkillsAfterPluginChange(deps: CommandDeps): Promise<void> {
 	const { skills, skillsPromptSuffix } = await resolveSkillsForCwd(deps.projectDeps, deps.cwd, deps.projectTrusted);
 	deps.setSkills(skills);
@@ -310,6 +329,16 @@ const SKILLS_HELP = `Skills — pick a row from the /skills palette, or type:
 Add skills via ~/.cast/skills/, .cast/skills/, .agents/skills/ (npx skills add),
 /plugin install, or --skill.
 Builtin and plugin skills: disable or /plugin uninstall — not /skills uninstall.`;
+
+const HOOKS_HELP = `Hooks — shell/HTTP commands that fire on lifecycle events:
+
+  /hooks                       List merged hooks (global/project/plugin) + status
+  /hooks enable|disable ID     Toggle one — id shown by /hooks
+  /hooks help                  This cheat sheet
+
+Config: ~/.cast/hooks.json (global), .cast/hooks.json (project, requires trust),
+or <installed plugin>/hooks/hooks.json. See docs/hooks.md for the event list
+and JSON shape (same as Claude Code / Grok Build).`;
 
 const MCP_HELP = `MCP — pick a row from the /mcp palette, or type:
 
@@ -331,12 +360,12 @@ const PLUGIN_HELP = `Plugins — pick a row from the /plugin palette, or type:
   /plugin uninstall NAME@SHOP
   /plugin enable|disable NAME@SHOP
 
-  /plugin marketplace list           Catalogs (openai-curated, claude-…, xai-official, + any you add)
+  /plugin marketplace list           Catalogs (claude-market, claude-…, xai-official, + any you add)
   /plugin marketplace list SHOP      Plugins inside one catalog
   /plugin marketplace add owner/repo|<url>|<path>
   /plugin marketplace update|remove SHOP
 
-Codex/Claude/Grok catalogs are always present and can't be removed —
+Community/Claude/Grok catalogs are always present and can't be removed —
 add your own with /plugin marketplace add.
 
 Flow:  /plugin marketplace list xai-official
@@ -1206,6 +1235,47 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		return;
 	}
 
+	if (input === "/hooks" || input.startsWith("/hooks ")) {
+		const args = input === "/hooks" ? "" : input.slice("/hooks ".length).trim();
+		const [verb, ...rest] = args.split(/\s+/).filter(Boolean);
+		if (verb === "help") {
+			deps.agent.addDisplayMessage({ role: "warning", content: HOOKS_HELP });
+			return;
+		}
+		const entries = listHooksForCwdSettings(deps.cwd, deps.projectTrusted);
+		if (!verb) {
+			if (entries.length === 0) {
+				showNotice("[No hooks configured — see docs/hooks.md. Global: ~/.cast/hooks.json]");
+				return;
+			}
+			const lines = entries.map(
+				(e) => `${e.enabled ? "●" : "○"} ${e.id}  ${e.event}${e.matcher ? ` (${e.matcher})` : ""}  [${e.source}]`,
+			);
+			showNotice(`[Hooks — /hooks enable|disable <id> to toggle:\n${lines.join("\n")}]`, 15000);
+			return;
+		}
+		if (verb === "enable" || verb === "disable") {
+			const id = rest.join(" ").trim();
+			if (!id) {
+				showNotice(`[Usage: /hooks ${verb} <id> — run /hooks to see ids]`);
+				return;
+			}
+			if (!entries.some((e) => e.id === id)) {
+				showNotice(`[No hook with id "${id}". Run /hooks to list.]`);
+				return;
+			}
+			const settings = loadSettings();
+			const disabled = new Set(settings.disabledHooks ?? []);
+			if (verb === "disable") disabled.add(id);
+			else disabled.delete(id);
+			updateSettings({ disabledHooks: [...disabled] });
+			showNotice(`[Hook ${id} ${verb}d — takes effect on the next message]`);
+			return;
+		}
+		showNotice(`[Unknown /hooks ${verb}. See /hooks help]`);
+		return;
+	}
+
 	if (input === "/clear") {
 		agent.clearContext();
 		showNotice("[Context cleared]");
@@ -1608,6 +1678,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			}
 			return;
 		}
+		fireUserPromptExpansion(deps, skill.name);
 		await agent.submit(formatSkillInvocation(skill, skillArgs));
 		return;
 	}
@@ -2430,6 +2501,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 				"  /skills …           Toggle / list / enable|disable / uninstall (/skills help)\n" +
 				"  /plugin …           Plugins palette (install / marketplace / toggle)\n" +
 				"  /mcp …              Toggle / list / enable|disable / uninstall (/mcp help)\n" +
+				"  /hooks              List hooks; /hooks enable|disable <id>\n" +
 				"  /reload             Re-scan skills, MCP, rules\n" +
 				"  /<skill-id>         Invoke a loaded skill directly (also: /skill:<name>)\n" +
 				"  /rule:<name>        Invoke a rule\n" +
@@ -2465,6 +2537,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			showNotice(`[No rule named "${ruleName}". Use /rules to list available.]`);
 			return;
 		}
+		fireUserPromptExpansion(deps, rule.name);
 		await agent.submit(formatRuleInvocation(rule));
 		return;
 	}
@@ -2554,6 +2627,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		if (skillId) {
 			const skill = deps.skills.find((s) => s.name === skillId);
 			if (skill) {
+				fireUserPromptExpansion(deps, skill.name);
 				await agent.submit(formatSkillInvocation(skill, skillArgs));
 				return;
 			}

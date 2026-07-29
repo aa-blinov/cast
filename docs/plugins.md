@@ -2,7 +2,7 @@
 
 Install reusable skill packs from catalogs — same `name@marketplace` shape as Claude Code / Grok Build.
 
-MVP scope: plugins contribute **skills** (loaded into the agent catalog). MCP/hooks/agents inside plugins are not wired yet.
+Plugins contribute **skills** (loaded into the agent catalog) and **hooks** (`<root>/hooks/hooks.json`, merged into the same config `.cast/hooks.json` uses — see [Hooks](hooks.md)). MCP servers/agents bundled inside a plugin aren't wired up yet — only skills and hooks are read from an installed plugin's contents.
 
 Marketplaces are cloned with `git`, so git must be installed and in PATH (on Windows: Git for Windows — which cast's `bash` tool wants anyway). Without it, marketplace commands fail with an explicit message rather than a raw spawn error.
 
@@ -12,7 +12,7 @@ Three catalogs are always registered and can't be removed:
 
 | Label | Source |
 |-------|--------|
-| Codex | `openai/plugins` |
+| Community | `jeremylongshore/claude-code-plugins-plus-skills` |
 | Claude | `anthropics/claude-plugins-official` |
 | Grok | `xai-org/plugin-marketplace` |
 

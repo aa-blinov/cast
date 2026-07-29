@@ -1,6 +1,7 @@
 import { EOL } from "node:os";
 import { noPickers } from "../pickers/no-pickers.ts";
 import { initialAnnouncedLocalDate } from "./date-rollover-reminder.ts";
+import { runHooksForEvent } from "./hooks.ts";
 import type { AgentEvent } from "./loop.ts";
 import { runAgentLoop } from "./loop.ts";
 import { closeMcpConnections, formatMcpForPrompt } from "./mcp.ts";
@@ -32,6 +33,7 @@ export async function runNonInteractive(args: ParsedArgs, options: RunOptions): 
 		systemPrompt,
 		runner,
 		mcpResult,
+		hooks,
 		confirmBash,
 		permissionMode,
 		personas,
@@ -40,7 +42,38 @@ export async function runNonInteractive(args: ParsedArgs, options: RunOptions): 
 		subagentModel,
 	} = result;
 
-	appendMessage(session, { role: "user", content: options.message });
+	if (hooks) {
+		await runHooksForEvent(hooks, {
+			event: "SessionStart",
+			cwd: result.cwd,
+			sessionId: session.id,
+			payload: { source: session.messages.length > 0 ? "resume" : "startup" },
+		});
+	}
+
+	let promptText = options.message;
+	if (hooks) {
+		const submitResult = await runHooksForEvent(hooks, {
+			event: "UserPromptSubmit",
+			cwd: result.cwd,
+			sessionId: session.id,
+			payload: { prompt: promptText },
+		});
+		if (submitResult.blocked) {
+			console.error(`[Prompt blocked by hook: ${submitResult.reason ?? "no reason given"}]`);
+			await runHooksForEvent(hooks, {
+				event: "SessionEnd",
+				cwd: result.cwd,
+				sessionId: session.id,
+				payload: { reason: "prompt_denied" },
+			});
+			await closeMcpConnections(mcpResult.connections);
+			process.exitCode = 1;
+			process.exit(1);
+		}
+		if (submitResult.reason) promptText = `${promptText}\n\n<hook-context>${submitResult.reason}</hook-context>`;
+	}
+	appendMessage(session, { role: "user", content: promptText });
 
 	const settings = loadSettings();
 	const disabledTools = new Set<string>();
@@ -83,6 +116,8 @@ export async function runNonInteractive(args: ParsedArgs, options: RunOptions): 
 			confirmBash: permissionMode === "bypass" ? undefined : confirmBash,
 			mcpTools: mcpResult.toolDefinitions,
 			mcpToolIndex: mcpResult.toolIndex,
+			hooks,
+			sessionId: session.id,
 			lastPromptTokens: session.lastPromptTokens,
 			personas,
 			currentPersona: persona.name,
@@ -107,6 +142,14 @@ export async function runNonInteractive(args: ParsedArgs, options: RunOptions): 
 		saveSession(session);
 		process.off("SIGINT", onSigint);
 		await closeMcpConnections(mcpResult.connections);
+		if (hooks) {
+			await runHooksForEvent(hooks, {
+				event: "SessionEnd",
+				cwd: result.cwd,
+				sessionId: session.id,
+				payload: { reason: "exit" },
+			});
+		}
 	}
 
 	process.exit(0);

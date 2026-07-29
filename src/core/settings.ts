@@ -104,6 +104,10 @@ export interface Settings {
 	/** Skill names disabled via /skills toggle. Still discovered for the picker;
 	 * omitted from the agent catalog and /skill: invocation until re-enabled. */
 	disabledSkills?: string[];
+	/** Hook group ids (see hookGroupId in hooks.ts) disabled via /hooks toggle.
+	 * A group's id is content-derived, so it survives edits to unrelated hooks
+	 * in the same file. */
+	disabledHooks?: string[];
 	/**
 	 * Installed marketplace plugins keyed by `name@marketplace`.
 	 * `true`/absent-after-install = enabled; `false` = installed but disabled.

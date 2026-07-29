@@ -6,7 +6,8 @@
  * Remote plugin checkouts: ~/.cast/plugins/installs/<marketplace>/<plugin>/
  *
  * UX: `/plugin install name@marketplace` (same shape as Claude/Grok).
- * MVP loads skills from installed plugins; MCP/hooks/agents can come later.
+ * Skills and hooks (`<root>/hooks.json`) are fully wired from installed
+ * plugins; MCP servers/agents bundled inside a plugin are not read yet.
  */
 
 import { execFileSync } from "node:child_process";
@@ -31,7 +32,7 @@ const MARKETPLACE_MANIFESTS = [
  * first-run offline failure gets retried on the next /plugin use.
  */
 export const DEFAULT_MARKETPLACE_SOURCES: ReadonlyArray<{ source: string; label: string }> = [
-	{ source: "openai/plugins", label: "codex" },
+	{ source: "jeremylongshore/claude-code-plugins-plus-skills", label: "community" },
 	{ source: "anthropics/claude-plugins-official", label: "claude" },
 	{ source: "xai-org/plugin-marketplace", label: "grok" },
 ];
@@ -684,6 +685,38 @@ export function pluginSkillContributions(
 		const dir = pluginSkillRoot(plugin.root);
 		if (!dir) continue;
 		out.push({ dir, pluginId: plugin.id, enabled: plugin.enabled });
+	}
+	return out;
+}
+
+/**
+ * `<root>/hooks/hooks.json` when present — Claude Code's real convention for
+ * plugin-contributed hooks (verified against installed marketplace plugins,
+ * e.g. anthropics/claude-plugins-official's "hookify", "ralph-loop", …).
+ * Falls back to a bare `<root>/hooks.json` for a plugin authored against
+ * cast's own docs before this was corrected.
+ */
+function pluginHookFile(pluginRoot: string): string | null {
+	const nested = join(pluginRoot, "hooks", "hooks.json");
+	if (existsSync(nested)) return nested;
+	const flat = join(pluginRoot, "hooks.json");
+	return existsSync(flat) ? flat : null;
+}
+
+/**
+ * `hooks.json` paths (with their plugin's install root, for CAST_PLUGIN_ROOT)
+ * from enabled installed plugins, for merging into the hook config the same
+ * way `pluginSkillDirs` feeds skill discovery.
+ */
+export function pluginHookFiles(
+	settings: Settings,
+	paths: PluginsPaths = defaultPluginsPaths(),
+): Array<{ path: string; pluginRoot: string }> {
+	const out: Array<{ path: string; pluginRoot: string }> = [];
+	for (const plugin of listInstalledPlugins(settings, paths)) {
+		if (!plugin.enabled) continue;
+		const file = pluginHookFile(plugin.root);
+		if (file) out.push({ path: file, pluginRoot: plugin.root });
 	}
 	return out;
 }
