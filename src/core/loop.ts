@@ -946,7 +946,9 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 					const msg = err instanceof Error ? err.message : String(err);
 					const isVisionError =
 						/image|vision/i.test(msg) ||
-						(err instanceof Error && "status" in err && (err as { status: number }).status === 404);
+						(err instanceof Error &&
+							"status" in err &&
+							([404, 400] as number[]).includes((err as { status: number }).status));
 					const hasImages = messages.some(
 						(m) =>
 							m.role === "user" &&
