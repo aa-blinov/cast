@@ -31,6 +31,8 @@ export type SkillSource = "builtin" | "global" | "project" | "agents" | "plugin"
 export interface Skill {
 	name: string;
 	description: string;
+	/** Extended description for model matching — shown alongside description in the skill listing. */
+	whenToUse?: string;
 	filePath: string;
 	/** Directory containing the skill file — relative paths inside it resolve against this. */
 	baseDir: string;
@@ -134,6 +136,7 @@ function loadSkillFromFile(
 		skill: {
 			name,
 			description,
+			whenToUse: typeof frontmatter.when_to_use === "string" ? frontmatter.when_to_use : undefined,
 			filePath,
 			baseDir: dirname(filePath),
 			source,
@@ -308,9 +311,10 @@ export function formatSkillsForPrompt(skills: Skill[]): string {
 
 	const lines = ["", "", SKILLS_INSTRUCTIONS, "", "<available_skills>"];
 	for (const skill of visible) {
+		const desc = skill.whenToUse ? `${skill.description} — ${skill.whenToUse}` : skill.description;
 		lines.push("  <skill>");
 		lines.push(`    <name>${escapeXml(skill.name)}</name>`);
-		lines.push(`    <description>${escapeXml(skill.description)}</description>`);
+		lines.push(`    <description>${escapeXml(desc)}</description>`);
 		lines.push(`    <location>${escapeXml(skill.filePath)}</location>`);
 		lines.push("  </skill>");
 	}
@@ -318,9 +322,77 @@ export function formatSkillsForPrompt(skills: Skill[]): string {
 	return lines.join("\n");
 }
 
+/**
+ * Parse an arguments string into an array. Handles quoted strings.
+ * "foo bar baz" => ["foo", "bar", "baz"]
+ * 'foo "hello world" baz' => ["foo", "hello world", "baz"]
+ */
+function parseArguments(args: string): string[] {
+	if (!args?.trim()) return [];
+	const result: string[] = [];
+	let current = "";
+	let inQuote: string | null = null;
+	for (const ch of args) {
+		if (inQuote) {
+			if (ch === inQuote) {
+				inQuote = null;
+			} else {
+				current += ch;
+			}
+		} else if (ch === '"' || ch === "'") {
+			inQuote = ch;
+		} else if (ch === " " || ch === "\t") {
+			if (current) {
+				result.push(current);
+				current = "";
+			}
+		} else {
+			current += ch;
+		}
+	}
+	if (current) result.push(current);
+	return result;
+}
+
+/**
+ * Substitute $ARGUMENTS placeholders in content with actual argument values.
+ * Supports: $ARGUMENTS (full string), $ARGUMENTS[0]/$0 (indexed), ${CLAUDE_SKILL_DIR}.
+ * Returns the substituted content. Caller decides what to do if no placeholders matched.
+ */
+function substituteArguments(content: string, args: string | undefined, baseDir: string): string {
+	// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for skill template variable, not JS template
+	content = content.replaceAll("${CLAUDE_SKILL_DIR}", baseDir);
+
+	if (!args?.trim()) return content;
+
+	const parsed = parseArguments(args);
+
+	// $ARGUMENTS[0], $ARGUMENTS[1], etc.
+	content = content.replace(/\$ARGUMENTS\[(\d+)\]/g, (_, idx) => parsed[parseInt(idx, 10)] ?? "");
+
+	// $0, $1, etc. (but not $0x or $10+ which are different patterns)
+	content = content.replace(/\$(\d+)(?!\w)/g, (_, idx) => parsed[parseInt(idx, 10)] ?? "");
+
+	// $ARGUMENTS — full string
+	content = content.replaceAll("$ARGUMENTS", args);
+
+	return content;
+}
+
 /** Format a skill's full content for `/skill:name` invocation, optionally with trailing user args. */
 export function formatSkillInvocation(skill: Skill, additionalArgs?: string): string {
 	const content = readSkillBody(skill);
-	const block = `<skill name="${escapeXml(skill.name)}" location="${escapeXml(skill.filePath)}">\nReferences are relative to ${skill.baseDir}.\n\n${content}\n</skill>`;
-	return additionalArgs ? `${block}\n\nUser: ${additionalArgs}` : block;
+	const substituted = substituteArguments(content, additionalArgs, skill.baseDir);
+	// Check if any $ARGUMENTS placeholders were actually substituted
+	const hadPlaceholders =
+		content.includes("$ARGUMENTS") ||
+		content.includes("$0") ||
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: checking for literal placeholder in content
+		content.includes("${CLAUDE_SKILL_DIR}");
+	const block = `<skill name="${escapeXml(skill.name)}" location="${escapeXml(skill.filePath)}">\nReferences are relative to ${skill.baseDir}.\n\n${substituted}\n</skill>`;
+	// If args were provided but no $ARGUMENTS placeholder consumed them, append as User: line
+	if (additionalArgs && !hadPlaceholders) {
+		return `${block}\n\nUser: ${additionalArgs}`;
+	}
+	return block;
 }
