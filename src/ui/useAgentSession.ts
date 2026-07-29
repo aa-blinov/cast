@@ -89,7 +89,11 @@ export function appendText(blocks: StreamBlock[], kind: "thinking" | "content", 
 			return [...blocks.slice(0, j), { kind, text: b.text + text, continued: b.continued }, ...blocks.slice(j + 1)];
 		}
 	}
-	return [...blocks, { kind, text }];
+	// New block of a different kind — the previous trailing block is now settled
+	// (it can't grow any more), so mark continued: false so it gets its label.
+	const last = blocks[blocks.length - 1];
+	const settledLast = last && last.kind !== "tool" && last.kind !== kind ? { ...last, continued: false } : last;
+	return [...blocks.slice(0, -1), ...(settledLast ? [settledLast] : []), { kind, text }];
 }
 
 /**
