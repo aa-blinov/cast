@@ -2637,7 +2637,7 @@ function SettingsModal({
 	confirm,
 	onReload,
 }) {
-	const [tab, setTab] = useState(activeId ? "model" : "theme");
+	const [tab, setTab] = useState(activeId ? SETTINGS_TABS[0].id : "theme");
 	const [data, setData] = useState({});
 	const [errors, setErrors] = useState({});
 	const [busy, setBusy] = useState(false);
