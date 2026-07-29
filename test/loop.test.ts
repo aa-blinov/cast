@@ -3000,7 +3000,7 @@ describe("runAgentLoop — todo list (build mode only)", () => {
 		expect(events.some((e) => e.type === "tool_end" && e.name === "todo_write" && e.result.isError)).toBe(true);
 	});
 
-	it("blocks non-todo_write tool calls once the gate trips, and unblocks right after todo_write", async () => {
+	it("multiple successive tool calls without a todo list do not get blocked", async () => {
 		const events: AgentEvent[] = [];
 		vi.mocked(streamAndCollect)
 			.mockImplementationOnce(async () => ({
@@ -3027,7 +3027,6 @@ describe("runAgentLoop — todo list (build mode only)", () => {
 				finishReason: "stop",
 				toolCalls: [{ id: "t4", name: "bash", arguments: JSON.stringify({ command: "echo 4" }) }],
 			}))
-			// Gate should now be active — this call must be refused, not executed.
 			.mockImplementationOnce(async () => ({
 				content: "",
 				thinking: "",
@@ -3046,7 +3045,6 @@ describe("runAgentLoop — todo list (build mode only)", () => {
 					},
 				],
 			}))
-			// Gate lifted — this one must go through normally.
 			.mockImplementationOnce(async () => ({
 				content: "",
 				thinking: "",
@@ -3068,15 +3066,15 @@ describe("runAgentLoop — todo list (build mode only)", () => {
 				| { type: "tool_end"; id: string; name: string; result: { content: string; isError?: boolean } }
 				| undefined;
 
+		// Without the hard gate, all tool calls (including bash #5) succeed normally.
 		expect(toolEnd("t1")?.result.isError).toBeFalsy();
 		expect(toolEnd("t4")?.result.isError).toBeFalsy();
-		expect(toolEnd("t5")?.result.isError).toBe(true);
-		expect(toolEnd("t5")?.result.content).toContain("Blocked");
+		expect(toolEnd("t5")?.result.isError).toBeFalsy();
 		expect(toolEnd("t6")?.result.isError).toBeFalsy();
 		expect(toolEnd("t7")?.result.isError).toBeFalsy();
 	});
 
-	it("never blocks once the list has been started", async () => {
+	it("todo_write updates state and steers subsequent prompt even without a gate", async () => {
 		const events: AgentEvent[] = [];
 		vi.mocked(streamAndCollect)
 			.mockImplementationOnce(async () => ({

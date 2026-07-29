@@ -193,10 +193,7 @@ export const PLAN_COMPACTION_PROMPT = readRequiredPrompt(promptsDir, join("modes
 // silently drift out of view" rationale as BUILD_MODE_PROMPT above, just for
 // ad-hoc task tracking instead of an approved plan file. {{TODOS}} replaced.
 const TODO_LIST_PROMPT = readRequiredPrompt(promptsDir, join("modes", "todo-list.md"));
-// Tool calls (build mode, empty list) before todoGateActive trips — see
-// toolCallsSinceTodoNudge/todoGateActive above.
-const TODO_NUDGE_THRESHOLD = 4;
-const READONLY_TOOLS = new Set(["read", "grep", "glob", "ls", "web_search", "web_fetch"]);
+
 // One-liner for subagents running under readOnlyBash (plan-mode parent): they
 // don't get the full plan-mode block (it references authoring tools they lack),
 // but they must know why a mutating bash command bounces.
@@ -622,18 +619,6 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 	// would just leave the model picking one arbitrarily.
 	const todoModeActive = !loopConfig.planState?.enabled;
 	let todos: TodoItem[] = todoModeActive ? (loopConfig.initialTodos ?? []) : [];
-	// The passive "use todo_write when appropriate" prompt guidance alone
-	// isn't enough — measured empirically: real multi-step tasks (5 sequential
-	// file writes, an explicit numbered list, a mid-task discovered bug) never
-	// triggered spontaneous use, with or without a stronger prompt. A forced
-	// periodic reminder, rather than relying on the model to remember on its
-	// own, fixes it.
-	let toolCallsSinceTodoNudge = 0;
-	// Harder than a reminder: once tripped, every non-todo_write tool call is
-	// refused outright until todo_write runs. A soft `<system-reminder>` was
-	// measured (repeatedly, across many real multi-step tasks) to just get
-	// ignored — this makes compliance not optional instead of asking nicer.
-	let todoGateActive = false;
 	const builtinTools = getToolDefinitions(
 		subagentNames,
 		initialModel,
@@ -746,18 +731,8 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 			const result = validateTodos(args.todos);
 			if (!result.ok) return Promise.resolve({ content: `Error: ${result.error}`, isError: true });
 			todos = result.todos;
-			todoGateActive = false;
-			toolCallsSinceTodoNudge = 0;
 			onEvent({ type: "todos_updated", todos });
 			return Promise.resolve({ content: JSON.stringify({ todos, remaining: remainingTodoCount(todos) }) });
-		}
-		if (todoGateActive) {
-			return Promise.resolve({
-				content:
-					"Blocked: this turn has had several tool calls with no todo list. Call todo_write now (with the full " +
-					"list of what's left to do) before continuing — this and every other tool call will keep failing until you do.",
-				isError: true,
-			});
 		}
 		const mcpTool = mcpToolIndex?.get(name);
 		if (mcpTool) return mcpTool.call(args, toolSignal);
@@ -1199,27 +1174,6 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 								} as Message;
 								messages.push(imageMsg);
 							}
-						}
-					}
-
-					if (todoModeActive && !executedToolBatch.some((r) => r.name === "todo_write")) {
-						// Read-only investigation (read/grep/glob/ls/web_*) doesn't count —
-						// measured empirically: a single focused "is there a bug in this
-						// file" debugging task naturally racks up 20-30 reads/greps with
-						// no distinct items to lose track of, and gating on raw tool-call
-						// volume blocked it dozens of times for no benefit, just wasted
-						// turns re-attempting the same read. Only actions that produce
-						// distinct pieces of work (write/edit/bash/task) count toward the
-						// threshold — that's the failure mode the gate exists for.
-						const workCalls = executedToolBatch.filter((r) => !READONLY_TOOLS.has(r.name));
-						toolCallsSinceTodoNudge += workCalls.length;
-						if (todos.length === 0 && toolCallsSinceTodoNudge >= TODO_NUDGE_THRESHOLD) {
-							// Trips the gate in executeTool above — every subsequent
-							// non-todo_write call is refused until todo_write runs. A
-							// pushed `<system-reminder>` message (the softer version of
-							// this) was measured to just get ignored across many real
-							// multi-step tasks; refusing execution isn't optional.
-							todoGateActive = true;
 						}
 					}
 				}

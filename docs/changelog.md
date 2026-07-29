@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.9.12
+
+### Changed
+
+- `todo_write` is now guidance-based — the hard gate that blocked non-todo tool calls after 4 work actions is removed. The model decides when to use `todo_write` based on task complexity, same as opencode's `todowrite`.
+
 ## 0.9.11
 
 ### Fixed
