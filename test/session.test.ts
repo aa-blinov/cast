@@ -24,6 +24,7 @@ import {
 	migrateLegacySessionsToDb,
 	recordCompaction,
 	saveSession,
+	searchSessionSummaries,
 	shouldCompact,
 } from "../src/core/session.ts";
 
@@ -703,8 +704,24 @@ describe("session persistence", () => {
 		const sb = summaries.find((s) => s.id === b.id)!;
 		expect(sb.msgCount).toBe(2);
 		expect(sb.firstUserMessage).toBe("beta question");
-		expect(sb.haystack).toContain("beta answer");
 		expect(sb.cwd).toBe(projectB);
+	});
+
+	it("searchSessionSummaries finds a session by message content via the FTS index", () => {
+		const a = createSession("gpt-4o", projectA);
+		a.messages.push({ role: "user", content: "hello alpha world" });
+		saveSession(a);
+		const b = createSession("gpt-4o", projectB);
+		b.messages.push({ role: "user", content: "beta question" }, { role: "assistant", content: "beta answer" });
+		saveSession(b);
+
+		expect(searchSessionSummaries("beta answer").map((s) => s.id)).toEqual([b.id]);
+		expect(searchSessionSummaries("nonexistent-term")).toEqual([]);
+		expect(
+			searchSessionSummaries("")
+				.map((s) => s.id)
+				.sort(),
+		).toEqual([a.id, b.id].sort());
 	});
 
 	it("listSessionSummaries.msgCount excludes intermediate tool-call-only assistant steps", () => {
@@ -736,7 +753,7 @@ describe("session persistence", () => {
 
 		const summary = listSessionSummaries().find((x) => x.id === s.id)!;
 		expect(summary.msgCount).toBe(2);
-		expect(summary.haystack).toContain("freshly added reply");
+		expect(searchSessionSummaries("freshly added reply").map((x) => x.id)).toEqual([s.id]);
 	});
 
 	it("prunes index entries for deleted sessions and survives a corrupt index", () => {

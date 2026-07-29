@@ -45,6 +45,7 @@ import { type AgentRunner, createAgentRunner } from "../core/runner.ts";
 import {
 	addUsage,
 	appendMessage,
+	type SessionSummary as CoreSessionSummary,
 	clearSessionMessages,
 	countTurnMessages,
 	createSession,
@@ -55,6 +56,7 @@ import {
 	recordCompaction,
 	type SessionState,
 	saveSession,
+	searchSessionSummaries,
 	type TurnMeta,
 } from "../core/session.ts";
 import { loadSettings, updateSettings } from "../core/settings.ts";
@@ -303,6 +305,10 @@ export interface WebBridge {
 	createSession(personaName?: string, modelOverride?: string, cwdOverride?: string): WebAgentSession;
 	getSession(id: string): WebAgentSession | undefined;
 	listSessions(): SessionSummary[];
+	/** Same shape as listSessions, filtered and ranked by relevance against
+	 *  `query` (message content via SQLite FTS, plus cwd/id/title/persona/
+	 *  model). Empty/whitespace-only query is equivalent to listSessions(). */
+	searchSessions(query: string): SessionSummary[];
 	/** Aborts any in-flight run and drops the session from the live list — it
 	 * stays on disk (autosaved already), it just stops appearing as a running
 	 * background agent. Returns false if the id doesn't exist. `reason:
@@ -871,6 +877,21 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		};
 	}
 
+	function coldSummary(cold: CoreSessionSummary): SessionSummary {
+		return {
+			id: cold.id,
+			persona: cold.persona ?? "coding",
+			model: cold.model ?? "",
+			cwd: cold.cwd ?? cwd,
+			title: cold.title,
+			pinned: cold.pinned,
+			status: "idle",
+			messageCount: cold.msgCount,
+			createdAt: cold.createdAt ?? cold.updatedAt,
+			updatedAt: cold.updatedAt,
+		};
+	}
+
 	function listSessions(): SessionSummary[] {
 		const out: SessionSummary[] = [];
 		const seen = new Set<string>();
@@ -883,20 +904,24 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		// still a real thread the user should be able to find and reopen.
 		for (const cold of listSessionSummaries()) {
 			if (seen.has(cold.id)) continue;
-			out.push({
-				id: cold.id,
-				persona: cold.persona ?? "coding",
-				model: cold.model ?? "",
-				cwd: cold.cwd ?? cwd,
-				title: cold.title,
-				pinned: cold.pinned,
-				status: "idle",
-				messageCount: cold.msgCount,
-				createdAt: cold.createdAt ?? cold.updatedAt,
-				updatedAt: cold.updatedAt,
-			});
+			out.push(coldSummary(cold));
 		}
 		return out;
+	}
+
+	/** Same live/cold split as listSessions, but ranked by relevance against
+	 *  `query` using the SQLite FTS index (core/session.ts's
+	 *  searchSessionSummaries) instead of shipping every session's full
+	 *  message text to the browser for client-side scoring. Safe to trust the
+	 *  DB even for a session mutated moments ago — every mutation path in this
+	 *  file calls saveSession() synchronously right after touching in-memory
+	 *  state, so there's no meaningful window where the index is stale. */
+	function searchSessions(query: string): SessionSummary[] {
+		if (!query.trim()) return listSessions();
+		return searchSessionSummaries(query).map((cold) => {
+			const live = sessions.get(cold.id);
+			return live ? summaryFor(live.session, live.status) : coldSummary(cold);
+		});
 	}
 
 	/** Splits "sub rest of args" into its first word and everything after —
@@ -2038,6 +2063,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		createSession: createSessionInstance,
 		getSession,
 		listSessions,
+		searchSessions,
 		closeSession,
 		deleteSessionPermanently,
 		renameSession,

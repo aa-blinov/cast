@@ -50,6 +50,58 @@ CREATE INDEX IF NOT EXISTS idx_messages_context ON messages(session_id, in_conte
 CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at DESC);
 `;
 
+/** Same text-extraction rule as session.ts's messageText() — plain string
+ *  content, or the first `type: "text"` part of a content-block array.
+ *  Duplicated here (not imported) because it must be registered as a SQL
+ *  scalar function before SCHEMA's triggers run, and session.ts imports
+ *  this module, not the other way around. */
+function extractMessageText(contentJson: unknown): string {
+	try {
+		const m = JSON.parse(String(contentJson)) as { content?: unknown };
+		const content = m.content;
+		if (typeof content === "string") return content;
+		if (Array.isArray(content)) {
+			const part = content.find((p: { type?: string }) => p?.type === "text") as { text?: string } | undefined;
+			return part?.text ?? "";
+		}
+	} catch {
+		// Malformed content_json (shouldn't happen — session.ts always writes
+		// JSON.stringify'd messages) — index nothing rather than throw inside
+		// a trigger and abort the write it's attached to.
+	}
+	return "";
+}
+
+/**
+ * Full-text index over user/assistant message bodies, kept in sync purely by
+ * triggers — every INSERT/DELETE on `messages` updates it automatically, so
+ * no call site in session.ts (saveSession, recordCompaction, the legacy
+ * migration, clearSessionMessages) needs to remember to maintain it
+ * separately. content_json is never UPDATEd after insert (only reasoning/
+ * turn_meta are), so no AFTER UPDATE trigger is needed for the indexed body.
+ * Replaces the old approach of JSON.parsing every user/assistant message on
+ * every session listing just to build a throwaway search string in JS.
+ */
+const FTS_SCHEMA = `
+CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+  session_id UNINDEXED,
+  seq UNINDEXED,
+  body,
+  tokenize = 'unicode61'
+);
+
+CREATE TRIGGER IF NOT EXISTS messages_fts_ai AFTER INSERT ON messages
+WHEN NEW.role IN ('user', 'assistant')
+BEGIN
+  INSERT INTO messages_fts(session_id, seq, body) VALUES (NEW.session_id, NEW.seq, cast_message_text(NEW.content_json));
+END;
+
+CREATE TRIGGER IF NOT EXISTS messages_fts_ad AFTER DELETE ON messages
+BEGIN
+  DELETE FROM messages_fts WHERE session_id = OLD.session_id AND seq = OLD.seq;
+END;
+`;
+
 let instance: DatabaseSync | null = null;
 let instancePath: string | null = null;
 
@@ -75,6 +127,11 @@ export function getDb(): DatabaseSync {
 	instance.exec("PRAGMA journal_mode = WAL");
 	instance.exec("PRAGMA busy_timeout = 5000");
 	instance.exec("PRAGMA foreign_keys = ON");
+	// Must exist before FTS_SCHEMA below — CREATE TRIGGER doesn't resolve the
+	// function name until the trigger actually fires, but every getDb() call
+	// re-opens a fresh DatabaseSync (see the reopen branch above), so it has
+	// to be re-registered on this connection every time regardless.
+	instance.function("cast_message_text", { deterministic: true }, extractMessageText);
 	instance.exec(SCHEMA);
 	// `CREATE TABLE IF NOT EXISTS` only creates the table on a first run — an
 	// existing sessions.db from before todos_json existed needs the column
@@ -98,6 +155,24 @@ export function getDb(): DatabaseSync {
 	instance.exec(
 		"CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_share_token ON sessions(share_token) WHERE share_token IS NOT NULL",
 	);
+	instance.exec(FTS_SCHEMA);
+	// One-time backfill: an existing sessions.db from before messages_fts
+	// existed has years of messages the triggers above never saw. Only the
+	// first getDb() after upgrading hits this — an empty fts table with a
+	// non-empty messages table is exactly (and only) that situation, since
+	// clearing every session's messages also clears every fts row for it.
+	const ftsIsEmpty = (instance.prepare("SELECT 1 FROM messages_fts LIMIT 1").get() as unknown) === undefined;
+	if (ftsIsEmpty) {
+		const hasMessages = (instance.prepare("SELECT 1 FROM messages LIMIT 1").get() as unknown) !== undefined;
+		if (hasMessages) {
+			instance.exec(`
+				INSERT INTO messages_fts(session_id, seq, body)
+				SELECT session_id, seq, cast_message_text(content_json)
+				FROM messages
+				WHERE role IN ('user', 'assistant')
+			`);
+		}
+	}
 	return instance;
 }
 

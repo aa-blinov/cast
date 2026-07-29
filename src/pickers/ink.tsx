@@ -24,11 +24,12 @@ export function pickerViewportRows(terminalRows: number): number {
 
 export function ModalPicker<T>(props: {
 	options: PickOption<T>[];
-	opts?: PickOptions;
+	opts?: PickOptions<T>;
 	onSelect: (value: T) => void;
 	onCancel: () => void;
 }): JSX.Element {
 	const searchable = !!props.opts?.search;
+	const dynamicSearch = props.opts?.search?.dynamicSearch;
 	const [query, setQuery] = useState("");
 	const [idx, setIdx] = useState(() =>
 		Math.min(Math.max(0, props.opts?.defaultIndex ?? 0), Math.max(0, props.options.length - 1)),
@@ -37,23 +38,25 @@ export function ModalPicker<T>(props: {
 	// Pre-lowered haystacks: label + description + searchText, computed once per
 	// options array (keystrokes reuse the same strings). score() expects both
 	// sides pre-lowered, so all matching cost is one substring / subsequence
-	// pass per option per keystroke.
+	// pass per option per keystroke. Unused when dynamicSearch is set — that
+	// path re-fetches its own already-filtered/ranked list per keystroke
+	// instead of scoring this fixed array in memory.
 	const haystacks = useMemo(
 		() => props.options.map((o) => `${o.label}\n${o.description ?? ""}\n${o.searchText ?? ""}`.toLowerCase()),
 		[props.options],
 	);
 	const qLower = query.toLowerCase();
-	const filtered = useMemo(() => {
-		if (qLower.length === 0) return props.options.map((o, i) => ({ o, i }));
-		const out: Array<{ o: PickOption<T>; i: number; s: number }> = [];
+	const visibleOptions = useMemo(() => {
+		if (dynamicSearch) return qLower.length === 0 ? props.options : dynamicSearch(query);
+		if (qLower.length === 0) return props.options;
+		const out: Array<{ o: PickOption<T>; s: number; i: number }> = [];
 		props.options.forEach((o, i) => {
 			const s = score(haystacks[i] ?? "", qLower);
-			if (s >= 0) out.push({ o, i, s });
+			if (s >= 0) out.push({ o, s, i });
 		});
 		out.sort((a, b) => b.s - a.s || a.i - b.i);
-		return out;
-	}, [props.options, haystacks, qLower]);
-	const visibleOptions = filtered.map((f) => f.o);
+		return out.map((f) => f.o);
+	}, [props.options, haystacks, qLower, query, dynamicSearch]);
 	const visibleLen = visibleOptions.length;
 
 	// Reset the cursor when the query actually changes — the filtered list is
@@ -369,7 +372,7 @@ export function MultiSelectPicker<T>(props: {
  * instead of racing it for stdin/raw-mode with a second render() call.
  */
 export const inkPickers: Pickers = {
-	pickOption<T>(options: PickOption<T>[], opts?: PickOptions): Promise<T | null> {
+	pickOption<T>(options: PickOption<T>[], opts?: PickOptions<T>): Promise<T | null> {
 		if (options.length === 0) return Promise.resolve(null);
 		return new Promise((resolve) => {
 			const instance = render(
@@ -410,7 +413,7 @@ export const inkPickers: Pickers = {
 		});
 	},
 
-	pickMulti<T>(options: PickOption<T>[], opts?: PickOptions & { initialSelected?: T[] }): Promise<T[] | null> {
+	pickMulti<T>(options: PickOption<T>[], opts?: PickOptions<T> & { initialSelected?: T[] }): Promise<T[] | null> {
 		if (options.length === 0) return Promise.resolve([]);
 		const initialIndices = new Set<number>();
 		if (opts?.initialSelected) {

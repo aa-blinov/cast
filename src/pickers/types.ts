@@ -15,14 +15,27 @@ export interface PickOption<T> {
 	locked?: boolean;
 }
 
-export interface PickOptions {
+export interface PickOptions<T = unknown> {
 	title?: string;
 	defaultIndex?: number;
 	/** A prior-attempt error shown in red above the title (e.g. failed validation). */
 	error?: string;
 	/** Enable inline fuzzy filter at the top of the modal. When set, the
 	 *  picker accepts printable input and Esc is the only cancel key. */
-	search?: { placeholder?: string };
+	search?: {
+		placeholder?: string;
+		/**
+		 * When set, ModalPicker calls this on every query change and renders
+		 * exactly what it returns, instead of scoring the initial `options`
+		 * array client-side against precomputed haystacks. Lets a picker back
+		 * its filtering with a live data source (e.g. a SQLite FTS query)
+		 * instead of a fixed in-memory list — the session picker uses this to
+		 * search full message history without shipping every session's text
+		 * into the terminal process up front. The `options` passed to
+		 * pickOption is still what's shown before the user types anything.
+		 */
+		dynamicSearch?: (query: string) => PickOption<T>[];
+	};
 }
 
 /**
@@ -34,14 +47,14 @@ export interface PickOptions {
  * that means (usually exit, since onboarding has no sensible no-op).
  */
 export interface Pickers {
-	pickOption<T>(options: PickOption<T>[], opts?: PickOptions): Promise<T | null>;
+	pickOption<T>(options: PickOption<T>[], opts?: PickOptions<T>): Promise<T | null>;
 	promptText(label: string, defaultValue?: string, placeholder?: string, error?: string): Promise<string | null>;
 	/**
 	 * Multi-select picker. Returns null on cancel, array of selected values
 	 * on confirm. `initialSelected` seeds the checked set (=== equality
 	 * against option values); unset means "all unchecked".
 	 */
-	pickMulti<T>(options: PickOption<T>[], opts?: PickOptions & { initialSelected?: T[] }): Promise<T[] | null>;
+	pickMulti<T>(options: PickOption<T>[], opts?: PickOptions<T> & { initialSelected?: T[] }): Promise<T[] | null>;
 	/** Status bar configurator. Optional — readline CLI doesn't implement it. */
 	pickStatusBar?(
 		segments: readonly StatusBarSegment[],

@@ -3359,6 +3359,43 @@ function Sidebar({
 }) {
 	const [personaOpen, setPersonaOpen] = useState(false);
 	const [search, setSearch] = useState("");
+	// null when there's no active search (show `sessions` as-is); an array
+	// once a query has resolved, already filtered and ranked server-side by
+	// GET /api/sessions?q= (core/session.ts's searchSessionSummaries — SQLite
+	// FTS over full message history, not just title/persona/model). Debounced
+	// the same way the in-session file search above it is (300ms).
+	const [searchResults, setSearchResults] = useState(null);
+	const searchTimerRef = useRef(null);
+	useEffect(() => {
+		clearTimeout(searchTimerRef.current);
+		const q = search.trim();
+		if (!q) {
+			setSearchResults(null);
+			return;
+		}
+		// clearTimeout above only cancels a timer that hasn't fired yet — once
+		// a fetch is in flight (typing continued past the 300ms debounce while
+		// a slower request from an earlier keystroke was still pending),
+		// there's nothing to abort it. A slow response for a stale query could
+		// otherwise land after a faster response for the current one and
+		// silently overwrite it with results for text that's no longer in the
+		// box. `cancelled` (closed over per effect run, flipped by cleanup the
+		// moment `search` changes again) makes a stale response a no-op.
+		let cancelled = false;
+		searchTimerRef.current = setTimeout(() => {
+			api("GET", `/api/sessions?q=${encodeURIComponent(q)}`)
+				.then((data) => {
+					if (!cancelled) setSearchResults(Array.isArray(data) ? data : []);
+				})
+				.catch(() => {
+					if (!cancelled) setSearchResults([]);
+				});
+		}, 300);
+		return () => {
+			cancelled = true;
+			clearTimeout(searchTimerRef.current);
+		};
+	}, [search]);
 	const [editingId, setEditingId] = useState(null);
 	const [editValue, setEditValue] = useState("");
 	const editInputRef = useRef(null);
@@ -3412,16 +3449,15 @@ function Sidebar({
 		if (runningA !== runningB) return runningB - runningA;
 		return a.updatedAt < b.updatedAt ? 1 : -1;
 	};
-	const q = search.trim().toLowerCase();
-	const filtered = sessions.filter(
-		(s) =>
-			!q ||
-			(s.title ?? "").toLowerCase().includes(q) ||
-			s.persona.toLowerCase().includes(q) ||
-			s.model.toLowerCase().includes(q),
-	);
-	const pinnedGroup = filtered.filter((s) => s.pinned).sort(byRunningThenDate);
-	const otherGroup = filtered.filter((s) => !s.pinned).sort(byRunningThenDate);
+	// Search results already come back relevance-ranked from the server —
+	// respect that order (don't re-sort into the pinned/running/date groups
+	// below, which only make sense for "here's everything" browsing, not "did
+	// you mean this specific session").
+	const isSearching = search.trim().length > 0;
+	const searching = isSearching && searchResults === null;
+	const filtered = isSearching ? (searchResults ?? []) : sessions;
+	const pinnedGroup = isSearching ? [] : filtered.filter((s) => s.pinned).sort(byRunningThenDate);
+	const otherGroup = isSearching ? filtered : filtered.filter((s) => !s.pinned).sort(byRunningThenDate);
 	const isSandbox = cwd === SANDBOX_CWD;
 
 	const active = sessions.find((s) => s.id === activeId);
@@ -3619,7 +3655,8 @@ function Sidebar({
 					`
 					}
 					${otherGroup.map(renderItem)}
-					${pinnedGroup.length === 0 && otherGroup.length === 0 && html`<div class="sidebar-empty">No sessions match "${search}"</div>`}
+					${searching && html`<div class="sidebar-empty">Searching…</div>`}
+					${!searching && pinnedGroup.length === 0 && otherGroup.length === 0 && html`<div class="sidebar-empty">No sessions match "${search}"</div>`}
 				</div>
 			</div>
 			${
