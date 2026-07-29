@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.9.13
+
+### Internal
+
+- Zero biome lint warnings/errors project-wide.
+
 ## 0.9.12
 
 ### Changed
