@@ -3440,6 +3440,7 @@ function SettingsPlugins({ data, busy, act, confirm }) {
 			${data.plugins.length === 0 && html`<div class="settings-hint">No plugins installed.</div>`}
 
 			<div class="settings-section-title">Browse marketplaces</div>
+			<div class="plugin-mp-tabs">
 				${[...catalog]
 					.sort((a, b) => a.name.localeCompare(b.name))
 					.map(
