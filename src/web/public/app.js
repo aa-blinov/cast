@@ -3511,7 +3511,7 @@ function SettingsPlugins({ data, busy, act, confirm }) {
 					`,
 						)}
 					${data.marketplaces.length === 0 && html`<div class="settings-hint">No marketplaces added.</div>`}
-					<p style="margin-top:8px;color:var(--fg-muted);font-size:12px">Any git repo with a <code>marketplace.json</code> catalog (Claude/Grok/Codex format) works. Add by GitHub shorthand (<code>owner/repo</code>), URL, or local path.</p>
+					<div class="settings-hint" style="margin-bottom:6px">Any git repo with a <code>marketplace.json</code> catalog works. Add by <code>owner/repo</code>, URL, or path.</div>
 					<div class="settings-form-row">
 						<input type="text" placeholder="owner/repo, URL, or path" value=${mpSource} onInput=${(e) => setMpSource(e.target.value)} />
 						<button class="modal-btn icon-btn" title="Add marketplace" disabled=${busy || !mpSource} onClick=${() => {
