@@ -686,6 +686,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					mcpToolIndex: mcpResult.toolIndex,
 					hooks: turnHooks,
 					sessionId: session.id,
+					permissionMode,
 					lastPromptTokens: session.lastPromptTokens,
 					rebuildSystemPrompt,
 					contextFiles: contextFilesRef.current,

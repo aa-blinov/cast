@@ -724,6 +724,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			mcpToolIndex: mcpResult.toolIndex,
 			hooks: submitHooks,
 			sessionId: ws.session.id,
+			permissionMode,
 			personas,
 			currentPersona: persona.name,
 			subagentPrompts: subPrompts,
