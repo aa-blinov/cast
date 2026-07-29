@@ -3408,10 +3408,12 @@ function SettingsSkills({ data, busy, act, confirm }) {
 }
 
 function SettingsPlugins({ data, busy, act, confirm }) {
-	const [mpTab, setMpTab] = useState("installed");
+	const [mpTab, setMpTab] = useState("");
 	const [mpSource, setMpSource] = useState("");
 	if (!data) return null;
 	const catalog = data.catalog || [];
+	const sortedCatalog = [...catalog].sort((a, b) => a.name.localeCompare(b.name));
+	const activeTab = mpTab || (sortedCatalog.length > 0 ? sortedCatalog[0].name : "");
 	const installedIds = new Set(data.plugins.map((p) => p.id));
 	const installedNames = new Set(data.plugins.map((p) => p.plugin || p.id));
 	return html`
@@ -3441,16 +3443,14 @@ function SettingsPlugins({ data, busy, act, confirm }) {
 
 			<div class="settings-section-title">Browse marketplaces</div>
 			<div class="plugin-mp-tabs">
-				${[...catalog]
-					.sort((a, b) => a.name.localeCompare(b.name))
-					.map(
-						(mp) => html`
-				<button key=${mp.name} class="plugin-mp-tab${mpTab === mp.name ? " active" : ""}" onClick=${() => setMpTab(mp.name)}>${mp.name}</button>
+				${sortedCatalog.map(
+					(mp) => html`
+				<button key=${mp.name} class="plugin-mp-tab${activeTab === mp.name ? " active" : ""}" onClick=${() => setMpTab(mp.name)}>${mp.name}</button>
 			`,
-					)}
+				)}
 			</div>
 			${(() => {
-				const mp = catalog.find((m) => m.name === mpTab);
+				const mp = sortedCatalog.find((m) => m.name === activeTab);
 				if (!mp) {
 					if (catalog.length === 0) return html`<div class="settings-hint">Loading catalog…</div>`;
 					return html`<div class="settings-hint">Select a marketplace above to browse its plugins.</div>`;
