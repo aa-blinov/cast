@@ -21,6 +21,16 @@ async function main(): Promise<void> {
 	if (args[0] === "upgrade") {
 		const rest = args.slice(1);
 		const force = rest.includes("--force");
+		// A mistyped flag (e.g. `--forse`) isn't `--force`, so the old
+		// `rest.find((a) => a !== "--force")` picked it up as the *pinned
+		// version* instead — silently attempting to upgrade to a "version"
+		// literally named "--forse" instead of erroring on the bad flag.
+		const unknownFlags = rest.filter((a) => a.startsWith("--") && a !== "--force");
+		if (unknownFlags.length > 0) {
+			console.error(`Unknown option(s) for 'cast upgrade': ${unknownFlags.join(", ")}`);
+			console.error("Usage: cast upgrade [version] [--force]");
+			process.exit(1);
+		}
 		const pinnedVersion = rest.find((a) => a !== "--force");
 		await runUpgrade(VERSION, pinnedVersion, force);
 		return;
@@ -231,6 +241,18 @@ async function handleWebCommand(args: string[]): Promise<void> {
 	if (args[0] === "status") {
 		printWebStatus();
 		return;
+	}
+
+	// Anything else non-flag-shaped falls through to "start the server"
+	// below by default — so a typo of "stop"/"status" (e.g. "stpo", "statu")
+	// used to silently start a new daemon instead of erroring, which is the
+	// opposite of what stopping/checking status was trying to do.
+	if (args[0] && args[0] !== "start" && !args[0].startsWith("-")) {
+		console.error(`[cast web] unknown subcommand "${args[0]}"`);
+		console.error(
+			"Usage: cast web [start] [--port <n>] [--host <addr>] [--public] [--foreground] | cast web stop | cast web status",
+		);
+		process.exit(1);
 	}
 
 	const foreground = args.includes("--foreground");
