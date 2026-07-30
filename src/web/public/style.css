@@ -2148,6 +2148,31 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	display: flex; gap: 4px; align-items: center;
 	flex-shrink: 0;
 }
+.settings-item-row-stack {
+	display: block;
+}
+.settings-item-row-stack .settings-item-header {
+	display: flex; align-items: center; gap: 8px;
+}
+.settings-item-row-stack .settings-item-header > .settings-item-name { flex: 1; min-width: 0; }
+.settings-item-row-stack .settings-item-body {
+	margin-top: 6px; padding: 6px 8px;
+	background: var(--bg-inset); border-radius: var(--radius-sm);
+	font-family: var(--font-mono); font-size: .74rem;
+}
+.settings-item-cmd {
+	display: flex; gap: 6px; align-items: baseline;
+	white-space: pre-wrap; word-break: break-all;
+}
+.settings-item-cmd + .settings-item-cmd { margin-top: 3px; }
+.settings-item-cmd code { flex: 1; min-width: 0; color: var(--text); }
+.settings-item-cmd-type {
+	font-size: .62rem; color: var(--text-muted);
+	text-transform: uppercase; letter-spacing: .04em; flex-shrink: 0;
+}
+.settings-item-cmd-if, .settings-item-cmd-timeout {
+	font-size: .68rem; color: var(--text-muted); flex-shrink: 0;
+}
 .settings-ssh-form { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
 .settings-textarea {
 	background: var(--bg);
