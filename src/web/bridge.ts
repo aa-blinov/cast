@@ -33,6 +33,7 @@ import {
 	buildSystemPrompt,
 	discoverSkillsForCwd,
 	listHooksForCwdSettings,
+	readSkillsShSources,
 	removeMcpServerFromDisk,
 	resolveHooksForCwd,
 	resolveMcpForCwd,
@@ -66,6 +67,7 @@ import { loadSettings, updateSettings } from "../core/settings.ts";
 import { formatSkillInvocation, isUninstallableSkill, uninstallUserSkill } from "../core/skills.ts";
 import { saveSshConfig } from "../core/ssh.ts";
 import type { StartupResult } from "../core/startup.ts";
+import { stripAnsi } from "../core/tools/bash.ts";
 import { BackgroundTaskRegistry, type BashBackgroundDeps } from "../core/tools/bash-background.ts";
 import { getReasoningOptions } from "../core/vendors.ts";
 import { ALL_THEMES } from "../ui/themes/index.ts";
@@ -1338,9 +1340,9 @@ export function createWebBridge(result: StartupResult): WebBridge {
 					result: "/hooks · /hooks enable <id> · /hooks disable <id> — see docs/hooks.md",
 				};
 			}
-			const entries = listHooksForCwdSettings(sessionCwd, projectTrusted);
+			const { entries, diagnostics } = listHooksForCwdSettings(sessionCwd, projectTrusted);
 			if (!verb) {
-				return { ok: true, result: entries };
+				return { ok: true, result: { entries, diagnostics } };
 			}
 			if (verb === "enable" || verb === "disable") {
 				const id = rest.join(" ").trim();
@@ -1658,6 +1660,10 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			if (!sub || sub === "list") {
 				const discovered = discoverSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
 				const disabled = new Set(loadSettings().disabledSkills ?? []);
+				// `npx skills add` installs flat (`~/.agents/skills/<name>/SKILL.md`,
+				// no repo-named subdirectory), so the source repo can only come
+				// from its lockfile, keyed by skill name — never from the path.
+				const skillsShSources = readSkillsShSources();
 				return {
 					ok: true,
 					result: discovered.map((s) => ({
@@ -1668,11 +1674,10 @@ export function createWebBridge(result: StartupResult): WebBridge {
 						description: s.description,
 						enabled: !disabled.has(s.name) && s.pluginEnabled !== false,
 						uninstallable: isUninstallableSkill(s),
-						// Skills installed via `npx skills add` land in
-						// `agentsGlobalDirs` (`~/.config/agents/skills/` etc.)
-						skillssh:
-							(s.source === "agents" && s.filePath?.includes("/.config/agents/skills/")) ||
-							(s.source === "agents" && s.filePath?.includes("/.agents/skills/")),
+						// Skills installed via `npx skills add` land in one of the
+						// agentsGlobalDirs (`~/.agents/skills/`, `~/.config/agents/skills/`).
+						skillssh: s.source === "agents",
+						skillsshSource: s.source === "agents" ? skillsShSources[s.name] : undefined,
 					})),
 				};
 			}
@@ -1715,9 +1720,36 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			const rest = restParts.join(" ");
 			try {
 				if (sub === "install") {
-					if (!rest)
-						return { ok: false, error: "Usage: /skills-sh install <owner/repo> --skill <name> [-a <agent>]" };
-					const out = execFileSync("npx", ["--yes", "skills", "add", ...rest.split(/\s+/)], {
+					if (!rest) return { ok: false, error: "Usage: /skills-sh install <owner/repo> --skill <name>" };
+					// skills.sh's own "copy install command" button gives the full
+					// `npx skills add <pkg> --skill <name>` line, not just the tail —
+					// tolerate that being pasted in whole by dropping a leading
+					// `npx [--yes|-y] skills [add|a]` prefix before parsing.
+					const rawArgs = rest.split(/\s+/);
+					if (rawArgs[0] === "npx") rawArgs.shift();
+					if (rawArgs[0] === "--yes" || rawArgs[0] === "-y") rawArgs.shift();
+					if (rawArgs[0] === "skills") rawArgs.shift();
+					if (rawArgs[0] === "add" || rawArgs[0] === "a") rawArgs.shift();
+					if (rawArgs.length === 0)
+						return { ok: false, error: "Usage: /skills-sh install <owner/repo> --skill <name>" };
+					// Drop any `-a`/`--agent` the caller passed and force `-g`/`--global`:
+					// `skills add` with `-a <agent>` installs (only) into that agent's own
+					// dir (e.g. `.claude/skills/`), never the universal `~/.agents/skills/`
+					// tree Cast actually scans (see agentsGlobalSkillsDirs in project.ts) —
+					// an `-a claude-code` install would silently never show up in Cast.
+					// Omitting `-a` makes `add` install the universal copy and symlink it
+					// into every agent dir it detects, so nothing is lost either way.
+					const installArgs: string[] = [];
+					for (let i = 0; i < rawArgs.length; i++) {
+						const a = rawArgs[i];
+						if (a === "-a" || a === "--agent") {
+							i++; // skip its value too
+							continue;
+						}
+						if (a !== "-g" && a !== "--global") installArgs.push(a);
+					}
+					installArgs.push("-g");
+					const out = execFileSync("npx", ["--yes", "skills", "add", ...installArgs], {
 						cwd: homedir(),
 						encoding: "utf-8",
 						timeout: 120_000,
@@ -1725,7 +1757,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 					const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
 					skillsPromptSuffix = skillsResult.skillsPromptSuffix;
 					recomputeAllSystemPrompts();
-					return { ok: true, result: out.trim() || "Installed." };
+					return { ok: true, result: stripAnsi(out).trim() || "Installed." };
 				}
 				if (sub === "list-available") {
 					if (!rest) return { ok: false, error: "Usage: /skills-sh list-available <owner/repo>" };
@@ -1734,7 +1766,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 						encoding: "utf-8",
 						timeout: 60_000,
 					});
-					return { ok: true, result: out };
+					return { ok: true, result: stripAnsi(out) };
 				}
 				if (sub === "search") {
 					if (!rest) return { ok: false, error: "Usage: /skills-sh search <query>" };
@@ -1743,7 +1775,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 						encoding: "utf-8",
 						timeout: 60_000,
 					});
-					return { ok: true, result: out };
+					return { ok: true, result: stripAnsi(out) };
 				}
 				if (sub === "uninstall") {
 					if (!rest) return { ok: false, error: "Usage: /skills-sh uninstall <name>" };
@@ -1755,7 +1787,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 					const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
 					skillsPromptSuffix = skillsResult.skillsPromptSuffix;
 					recomputeAllSystemPrompts();
-					return { ok: true, result: out.trim() || "Uninstalled." };
+					return { ok: true, result: stripAnsi(out).trim() || "Uninstalled." };
 				}
 				return {
 					ok: false,

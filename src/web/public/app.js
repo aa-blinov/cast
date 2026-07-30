@@ -2791,31 +2791,41 @@ function SettingsModal({
 		async (command) => {
 			setBusy(true);
 			setErrors((e) => ({ ...e, [tab]: null }));
-			const res = await run(command);
-			if (!res.ok) setErrors((e) => ({ ...e, [tab]: res.error ?? "Failed" }));
-			// Always refresh the Model tab too: a /provider Switch changes the
-			// active provider, which the Model picker's model list depends on.
-			await Promise.all([load(tab), tab === "model" ? Promise.resolve() : load("model")]);
-			// /reload and any /skills mutation can change which skills are
-			// loaded/enabled — those show up as native /<skill-id> slash commands,
-			// so the composer's palette needs to catch up too.
-			// Same for /plugin install/uninstall/enable/disable — they change
-			// which hooks appear in the Hooks tab.
-			if (res.ok) {
-				if (command === "/reload" || command.startsWith("/skills ")) onReload?.();
-				if (
-					command === "/reload" ||
-					command.startsWith("/plugin ") ||
-					command.startsWith("/mcp ") ||
-					command.startsWith("/skills-sh ")
-				) {
-					load("hooks");
-					load("mcp");
-					load("skills");
+			try {
+				const res = await run(command);
+				if (!res.ok) setErrors((e) => ({ ...e, [tab]: res.error ?? "Failed" }));
+				// Always refresh the Model tab too: a /provider Switch changes the
+				// active provider, which the Model picker's model list depends on.
+				await Promise.all([load(tab), tab === "model" ? Promise.resolve() : load("model")]);
+				// /reload and any /skills mutation can change which skills are
+				// loaded/enabled — those show up as native /<skill-id> slash commands,
+				// so the composer's palette needs to catch up too.
+				// Same for /plugin install/uninstall/enable/disable — they change
+				// which hooks appear in the Hooks tab.
+				if (res.ok) {
+					if (command === "/reload" || command.startsWith("/skills ")) onReload?.();
+					if (
+						command === "/reload" ||
+						command.startsWith("/plugin ") ||
+						command.startsWith("/mcp ") ||
+						command.startsWith("/skills-sh ")
+					) {
+						load("hooks");
+						load("mcp");
+						load("skills");
+					}
 				}
+				return res;
+			} catch (err) {
+				// A failure anywhere above (e.g. a tab reload throwing) must not
+				// leave `busy` stuck true forever — every button in the modal
+				// would stay disabled until it's closed and reopened.
+				const message = err instanceof Error ? err.message : String(err);
+				setErrors((e) => ({ ...e, [tab]: message }));
+				return { ok: false, error: message };
+			} finally {
+				setBusy(false);
 			}
-			setBusy(false);
-			return res;
 		},
 		[run, load, tab, onReload],
 	);
@@ -3455,7 +3465,8 @@ function SettingsSkills({ data, busy, act, confirm }) {
 }
 
 function SettingsHooks({ data, busy, act }) {
-	const hooks = data || [];
+	const hooks = data?.entries || [];
+	const diagnostics = data?.diagnostics || [];
 	// Group plugins by pluginId — each plugin gets its own collapsible subsection.
 	// Global/project stay flat since they have no pluginId.
 	const globalHooks = hooks.filter((h) => h.source === "global");
@@ -3507,6 +3518,12 @@ function SettingsHooks({ data, busy, act }) {
 	return html`
 		<div class="settings-rows">
 			<p class="settings-intro"><span>Shell (or HTTP) commands that fire on lifecycle events — validate/block a tool call, log activity, or force the agent to keep working before it stops. Configure in <code>.cast/hooks.json</code> (project) or <code>~/.cast/hooks.json</code> (global). Plugin-contributed hooks are grouped under their plugin; uninstall the plugin to remove all its hooks.</span></p>
+			${
+				diagnostics.length > 0 &&
+				html`<div class="settings-error">
+					${diagnostics.map((d) => html`<div key=${d.path}>Failed to parse <code>${d.path}</code>: ${d.message}</div>`)}
+				</div>`
+			}
 			${renderGroup("Global", globalHooks, { key: "global" })}
 			${renderGroup("Project", projectHooks, { key: "project" })}
 			${[...pluginGroups.entries()]
@@ -3529,51 +3546,18 @@ function SettingsHooks({ data, busy, act }) {
 
 function SettingsSkillssh({ data, busy, act, confirm }) {
 	const [installArgs, setInstallArgs] = useState("");
-	const [searchQuery, setSearchQuery] = useState("");
-	const [listRepo, setListRepo] = useState("");
-	const [searchOutput, setSearchOutput] = useState("");
-	const [listOutput, setListOutput] = useState("");
 	const allSkills = data || [];
 	// Filter to skills installed via npx skills add (flagged by the bridge)
 	const shSkills = allSkills.filter((s) => s.skillssh);
-	const shRepo = (s) => {
-		// filePath is ~/.config/agents/skills/<repo>/<skill>/SKILL.md → extract repo
-		const m = s.filePath?.match(/\/(skills-sh|agents)\/skills\/([^/]+)\//);
-		return m ? m[2] : "";
-	};
-	const runCommand = (cmd, onOutput) => async () => {
-		const res = await act(cmd);
-		if (res?.ok && onOutput && typeof res.result === "string") onOutput(res.result);
-	};
 	return html`
 		<div class="settings-rows">
-			<p class="settings-intro"><span><a href="https://skills.sh" target="_blank" rel="noopener">skills.sh</a> is the open agent-skills ecosystem (70+ agents, 27k stars). Cast already loads anything in <code>~/.config/agents/skills/</code> automatically — this tab wraps the <code>npx skills</code> CLI so you can install, search, and manage without leaving the UI.</span></p>
+			<p class="settings-intro"><span><a href="https://skills.sh" target="_blank" rel="noopener">skills.sh</a> is the open agent-skills ecosystem (70+ agents, 27k stars) — browse it there for a package name, then install below. Cast already loads anything in <code>~/.agents/skills/</code> automatically.</span></p>
 
 			<div class="settings-section-title">Install a skill</div>
 			<div class="settings-form-row">
-				<input type="text" placeholder="owner/repo --skill name [-a claude-code]" value=${installArgs} onInput=${(e) => setInstallArgs(e.target.value)} onKeyDown=${(e) => e.key === "Enter" && installArgs && act(`/skills-sh install ${installArgs}`).then(() => setInstallArgs(""))} />
-				<button class="modal-btn icon-btn" title="Run npx skills add" disabled=${busy || !installArgs} onClick=${() => act(`/skills-sh install ${installArgs}`).then(() => setInstallArgs(""))}><${icons.arrowDownTray} /></button>
+				<input type="text" placeholder="owner/repo --skill name (or paste skills.sh's npx command)" value=${installArgs} onInput=${(e) => setInstallArgs(e.target.value)} onKeyDown=${(e) => e.key === "Enter" && installArgs && act(`/skills-sh install ${installArgs}`).then(() => setInstallArgs(""))} />
+				<button class="modal-btn icon-btn" title="Run npx skills add -g" disabled=${busy || !installArgs} onClick=${() => act(`/skills-sh install ${installArgs}`).then(() => setInstallArgs(""))}><${icons.arrowDownTray} /></button>
 			</div>
-
-			<div class="settings-section-title">Browse (skills.sh)</div>
-			<div class="settings-form-row">
-				<input type="text" placeholder="search skills (e.g. typescript)" value=${searchQuery} onInput=${(e) => setSearchQuery(e.target.value)} onKeyDown=${(e) => e.key === "Enter" && searchQuery && act(`/skills-sh search ${searchQuery}`).then(() => setSearchOutput(""))} />
-				<button class="modal-btn icon-btn" title="Run npx skills find" disabled=${busy || !searchQuery} onClick=${runCommand(`/skills-sh search ${searchQuery}`, setSearchOutput)}><${icons.magnifyingGlass} /></button>
-			</div>
-			<div class="settings-form-row">
-				<input type="text" placeholder="owner/repo (browse available skills in this repo)" value=${listRepo} onInput=${(e) => setListRepo(e.target.value)} />
-				<button class="modal-btn" disabled=${busy || !listRepo} onClick=${runCommand(`/skills-sh list-available ${listRepo}`, setListOutput)}><${icons.magnifyingGlass} /> List available</button>
-			</div>
-			${
-				(listOutput || searchOutput) &&
-				html`
-				<div class="settings-pre">${listOutput || searchOutput}</div>
-				<button class="modal-btn" disabled=${busy} onClick=${() => {
-					setSearchOutput("");
-					setListOutput("");
-				}}>Clear output</button>
-			`
-			}
 
 			<div class="settings-section-title">Installed via skills.sh (${shSkills.length})</div>
 			${shSkills.length === 0 && html`<div class="settings-hint">No skills installed via skills.sh yet. Install one above.</div>`}
@@ -3584,7 +3568,7 @@ function SettingsSkillssh({ data, busy, act, confirm }) {
 				<div key=${s.name} class="settings-item-row">
 					<div class="settings-item-info">
 						<span class="settings-item-name">${s.name}</span>
-						<span class="settings-item-meta">${shRepo(s)}</span>
+						<span class="settings-item-meta">${s.skillsshSource || ""}</span>
 						<${InfoPopover} text=${s.description} readUrl=${`/api/skill-content?name=${encodeURIComponent(s.name)}`} />
 					</div>
 					<div class="settings-item-actions">
@@ -3631,60 +3615,83 @@ function SettingsPlugins({ data, busy, act, confirm }) {
 }
 
 function SettingsMarketplace({ data, busy, act, confirm }) {
-	const [mpTab, setMpTab] = useState("");
 	const [mpSource, setMpSource] = useState("");
+	const [mpQuery, setMpQuery] = useState("");
 	if (!data) return null;
 	const catalog = data.catalog || [];
 	const sortedCatalog = [...catalog].sort((a, b) => a.name.localeCompare(b.name));
-	const activeTab = mpTab || (sortedCatalog.length > 0 ? sortedCatalog[0].name : "");
 	const installedNames = new Set(data.plugins?.map?.((p) => p.plugin || p.id) ?? []);
 	const installedIds = new Set(data.plugins?.map?.((p) => p.id) ?? []);
+	const renderInstallable = (mp, p) => {
+		const pkg = p.package || p.name;
+		const name = p.name || pkg;
+		const id = `${name}@${mp.name}`;
+		const installed = installedNames.has(name) || installedIds.has(id);
+		return html`
+			<div key=${`${mp.name}:${name}`} class="plugin-catalog-item">
+				<div class="plugin-catalog-header">
+					<span class="settings-item-name">${name}</span>
+					<span class="settings-item-meta">${mp.name}</span>
+					${
+						installed
+							? html`<span class="plugin-installed-label">installed</span>`
+							: html`<button class="modal-btn icon-btn" title="Install" disabled=${busy} onClick=${() => act(`/plugin install ${id}`)}><${icons.arrowDownTray} /></button>`
+					}
+				</div>
+				${p.description && html`<div class="plugin-catalog-desc">${p.description}</div>`}
+			</div>
+		`;
+	};
+	// Every marketplace's plugins merged into one flat list (already loaded
+	// in memory — no network round trip) instead of a per-marketplace tab,
+	// filtered live by the search box.
+	const query = mpQuery.trim().toLowerCase();
+	const allPlugins = sortedCatalog
+		.filter((mp) => !mp.error)
+		.flatMap((mp) =>
+			(mp.plugins || [])
+				.filter((p) => {
+					if (!query) return true;
+					const name = (p.name || p.package || "").toLowerCase();
+					const desc = (p.description || "").toLowerCase();
+					return name.includes(query) || desc.includes(query);
+				})
+				.map((p) => ({ mp, p })),
+		);
+	const erroredMarketplaces = sortedCatalog.filter((mp) => mp.error);
 	return html`
 		<div class="settings-rows">
 			<p class="settings-intro"><span>Browse plugin catalogs from configured marketplaces, and manage which marketplaces cast knows about. Plugins you install from here will appear in the <strong>Plugins</strong> tab.</span></p>
 
-			<div class="settings-section-title">Browse marketplaces</div>
-			<div class="plugin-mp-tabs">
-				${sortedCatalog.map(
-					(mp) => html`
-				<button key=${mp.name} class="plugin-mp-tab${activeTab === mp.name ? " active" : ""}" onClick=${() => setMpTab(mp.name)}>${mp.name}</button>
-			`,
-				)}
-			</div>
-			${(() => {
-				const mp = sortedCatalog.find((m) => m.name === activeTab);
-				if (!mp) {
-					if (catalog.length === 0) return html`<div class="settings-hint">Loading catalog…</div>`;
-					return html`<div class="settings-hint">Select a marketplace above to browse its plugins.</div>`;
+			<div class="settings-section-title">Browse marketplaces (${allPlugins.length})</div>
+			<div class="settings-form-row">
+				<input type="text" placeholder="search all marketplaces (e.g. testing)" value=${mpQuery} onInput=${(e) => setMpQuery(e.target.value)} />
+				${
+					mpQuery &&
+					html`<button class="modal-btn icon-btn" title="Clear search" onClick=${() => setMpQuery("")}><${icons.xMark} /></button>`
 				}
-				if (mp.error) return html`<div class="settings-hint">Failed to load catalog for "${mp.name}".</div>`;
-				if (mp.plugins.length === 0) return html`<div class="settings-hint">No plugins in "${mp.name}".</div>`;
-				return html`
-						<div class="plugin-catalog-list">
-							${[...mp.plugins]
-								.sort((a, b) => (a.name || a.package || "").localeCompare(b.name || b.package || ""))
-								.map((p) => {
-									const pkg = p.package || p.name;
-									const name = p.name || pkg;
-									const id = `${name}@${mp.name}`;
-									const installed = installedNames.has(name) || installedIds.has(id);
-									return html`
-									<div key=${name} class="plugin-catalog-item">
-										<div class="plugin-catalog-header">
-											<span class="settings-item-name">${name}</span>
-											${
-												installed
-													? html`<span class="plugin-installed-label">installed</span>`
-													: html`<button class="modal-btn icon-btn" title="Install" disabled=${busy} onClick=${() => act(`/plugin install ${id}`)}><${icons.arrowDownTray} /></button>`
-											}
-										</div>
-										${p.description && html`<div class="plugin-catalog-desc">${p.description}</div>`}
-									</div>
-								`;
-								})}
-						</div>
-					`;
-			})()}
+			</div>
+			${
+				catalog.length === 0
+					? html`<div class="settings-hint">Loading catalog…</div>`
+					: html`
+					<div class="plugin-catalog-list">
+						${
+							allPlugins.length === 0
+								? html`<div class="settings-hint">${query ? `No plugins match "${mpQuery}".` : "No plugins found."}</div>`
+								: allPlugins
+										.sort((a, b) =>
+											(a.p.name || a.p.package || "").localeCompare(b.p.name || b.p.package || ""),
+										)
+										.map(({ mp, p }) => renderInstallable(mp, p))
+						}
+					</div>
+				`
+			}
+			${
+				erroredMarketplaces.length > 0 &&
+				html`<div class="settings-hint">Failed to load catalog for: ${erroredMarketplaces.map((mp) => mp.name).join(", ")}.</div>`
+			}
 
 			<div class="settings-section-title">Marketplaces</div>
 				<div class="settings-rows">
@@ -4528,7 +4535,22 @@ function App() {
 	}, [diffTab]);
 	const [sidebarOpen, setSidebarOpen] = useState(false);
 	const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-	const [diffWidth, setDiffWidth] = useState(null);
+	// Dragged width, same persistence as diffOpen/diffTab above — otherwise
+	// every reload snaps a manually-widened panel back to the CSS default.
+	const [diffWidth, setDiffWidth] = useState(() => {
+		try {
+			const saved = Number(localStorage.getItem("cast:diffWidth"));
+			return saved > 0 ? saved : null;
+		} catch {
+			return null;
+		}
+	});
+	useEffect(() => {
+		if (!diffWidth) return;
+		try {
+			localStorage.setItem("cast:diffWidth", String(diffWidth));
+		} catch {}
+	}, [diffWidth]);
 	const [toasts, setToasts] = useState([]);
 	const [connected, setConnected] = useState(true);
 	const [backendUp, setBackendUp] = useState(true);

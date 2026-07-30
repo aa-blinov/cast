@@ -1528,8 +1528,9 @@ async function runToolWithHooks(
 	}
 	if (pre.updatedInput) args = pre.updatedInput;
 	const result = await dispatch(args);
+	const postEvent = result.isError ? "PostToolUseFailure" : "PostToolUse";
 	const post = await runHooksForEvent(hooks, {
-		event: result.isError ? "PostToolUseFailure" : "PostToolUse",
+		event: postEvent,
 		matchTarget: name,
 		cwd,
 		sessionId,
@@ -1548,8 +1549,13 @@ async function runToolWithHooks(
 		permissionMode,
 	});
 	if (post.updatedToolOutput !== undefined) return { ...result, content: post.updatedToolOutput };
-	if (post.blocked && post.reason) {
-		return { ...result, content: `${result.content}\n\n[Hook feedback: ${post.reason}]` };
+	if (post.blocked) {
+		// A hook can block with exit 2 and no stdout/stderr at all — reason
+		// is then empty (see interpretHookOutput), and gating on `post.reason`
+		// here used to silently drop the block entirely, unlike PreToolUse's
+		// equivalent branch above which always falls back to a message.
+		const reason = post.reason || `Blocked by a ${postEvent} hook for "${name}".`;
+		return { ...result, content: `${result.content}\n\n[Hook feedback: ${reason}]` };
 	}
 	return result;
 }

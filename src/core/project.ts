@@ -1,10 +1,17 @@
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { arch, homedir, platform } from "node:os";
 import { join } from "node:path";
 import { resolveProjectTrust } from "../pickers/domain.ts";
 import type { Pickers } from "../pickers/types.ts";
 import { hasContextFileInDir } from "./context-files.ts";
-import { type HooksFile, listHooksForCwd, loadHooksForCwd, type ResolvedHookEntry } from "./hooks.ts";
+import {
+	type HookDiagnostic,
+	type HooksFile,
+	hooksFileDiagnostics,
+	listHooksForCwd,
+	loadHooksForCwd,
+	type ResolvedHookEntry,
+} from "./hooks.ts";
 import { connectMcpServers, loadMcpConfig, type McpServerConfig, type McpSetupResult, saveMcpConfig } from "./mcp.ts";
 import { globalPersonasDir, type LoadPersonasOptions, loadPersonas, type Persona } from "./personas.ts";
 import { pluginHookFiles, pluginSkillContributions } from "./plugins.ts";
@@ -34,9 +41,14 @@ function globalSkillsDir(): string {
 	return join(homedir(), ".cast", "skills");
 }
 
-/** skills.sh universal global paths (canonical first, then `~/.agents/skills`). */
+/**
+ * skills.sh universal global paths. `~/.agents/skills` is the one the real
+ * `npx skills add` CLI actually writes to (confirmed against its source —
+ * `~/.config/agents/skills` isn't a path it ever uses); kept as a second
+ * candidate in case some other tool in the ecosystem adopts that layout.
+ */
 function agentsGlobalSkillsDirs(): string[] {
-	const dirs = [join(homedir(), ".config", "agents", "skills"), join(homedir(), ".agents", "skills")];
+	const dirs = [join(homedir(), ".agents", "skills"), join(homedir(), ".config", "agents", "skills")];
 	const seen = new Set<string>();
 	const out: string[] = [];
 	for (const dir of dirs) {
@@ -45,6 +57,29 @@ function agentsGlobalSkillsDirs(): string[] {
 		out.push(dir);
 	}
 	return out;
+}
+
+/**
+ * `npx skills add` records each universal-scope install's source repo in
+ * `~/.agents/.skill-lock.json` (`{ skills: { <name>: { source: "owner/repo" } } }`)
+ * — the file layout itself is flat (`~/.agents/skills/<name>/SKILL.md`, no
+ * repo-named subdirectory), so this lockfile is the only place the source
+ * repo can be recovered from for display.
+ */
+export function readSkillsShSources(): Record<string, string> {
+	const lockPath = join(homedir(), ".agents", ".skill-lock.json");
+	if (!existsSync(lockPath)) return {};
+	try {
+		const parsed = JSON.parse(readFileSync(lockPath, "utf-8"));
+		const out: Record<string, string> = {};
+		for (const [name, entry] of Object.entries(parsed?.skills ?? {})) {
+			const source = (entry as { source?: unknown })?.source;
+			if (typeof source === "string") out[name] = source;
+		}
+		return out;
+	} catch {
+		return {};
+	}
 }
 
 function globalMcpPath(): string {
@@ -216,9 +251,16 @@ export function resolveHooksForCwd(cwd: string, trusted: boolean): HooksFile {
 }
 
 /** Every hook group for a cwd (enabled and disabled) with stable ids — for `/hooks` listing/toggling. */
-export function listHooksForCwdSettings(cwd: string, trusted: boolean): ResolvedHookEntry[] {
+export function listHooksForCwdSettings(
+	cwd: string,
+	trusted: boolean,
+): { entries: ResolvedHookEntry[]; diagnostics: HookDiagnostic[] } {
 	const settings = loadSettings();
-	return listHooksForCwd(cwd, trusted, pluginHookFiles(settings), new Set(settings.disabledHooks ?? []));
+	const files = pluginHookFiles(settings);
+	return {
+		entries: listHooksForCwd(cwd, trusted, files, new Set(settings.disabledHooks ?? [])),
+		diagnostics: hooksFileDiagnostics(cwd, trusted, files),
+	};
 }
 
 export async function resolveMcpForCwd(

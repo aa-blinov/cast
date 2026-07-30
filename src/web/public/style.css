@@ -2073,27 +2073,6 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 }
 .settings-form-row select:focus,
 .settings-form-row input:focus { border-color: var(--cyan); }
-.plugin-mp-tabs {
-	display: flex; flex-wrap: wrap; gap: 2px;
-	margin: 8px 0 12px;
-	padding: 3px;
-	background: var(--bg);
-	border: 1px solid var(--border);
-	border-radius: var(--radius-sm);
-}
-.plugin-mp-tab {
-	background: transparent;
-	border: 1px solid transparent;
-	border-radius: calc(var(--radius-sm) - 2px);
-	padding: 5px 11px;
-	color: var(--text-muted);
-	font-family: var(--font);
-	font-size: .75rem;
-	cursor: pointer;
-	transition: background .15s, color .15s;
-}
-.plugin-mp-tab:hover { background: var(--bg-hover); color: var(--text); }
-.plugin-mp-tab.active { background: var(--bg-raised); color: var(--cyan); font-weight: 600; box-shadow: 0 1px 0 rgba(0,0,0,.06); }
 .plugin-catalog-list {
 	max-height: 320px; overflow-y: auto;
 	margin-bottom: 10px;
@@ -2121,7 +2100,9 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 .plugin-catalog-header {
 	display: flex; align-items: center; gap: 8px;
 }
-.plugin-catalog-header .settings-item-name { flex: 1; font-weight: 500; }
+.plugin-catalog-header .settings-item-name { flex: none; font-weight: 500; }
+.plugin-catalog-header .settings-item-meta { flex: none; font-family: var(--font); }
+.plugin-catalog-header > *:last-child { margin-left: auto; }
 .plugin-catalog-desc {
 	font-size: .74rem;
 	color: var(--text-muted);
