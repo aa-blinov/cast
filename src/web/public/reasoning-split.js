@@ -34,7 +34,7 @@ export function splitReasoningForDisplay(reasoning) {
 	const lines = reasoning.split("\n");
 	let splitIdx = -1;
 	for (let i = lines.length - 1; i >= 0; i--) {
-		if (/^#{1,2}\s/.test(lines[i].trim())) {
+		if (/^#{1,6}\s/.test(lines[i].trim())) {
 			// Require at least one non-empty content line after the heading —
 			// a heading alone (or followed only by whitespace) is the model
 			// planning, not a draft.
@@ -44,6 +44,43 @@ export function splitReasoningForDisplay(reasoning) {
 				.trim();
 			if (after.length > 0) {
 				splitIdx = i;
+				break;
+			}
+		}
+	}
+	if (splitIdx === -1) {
+		// Fallback for MiniMax-M3 (and similar) that exhausts max_tokens
+		// inside <think>...</think> before writing any heading. The last
+		// non-empty paragraph is then the actual answer, and should land
+		// in the [agent] block — otherwise it disappears into reasoning and
+		// the user sees an empty draft + a populated reasoning bubble.
+		//
+		// Triggered only when the thinking side already contains markdown
+		// structure (a heading, list, or numbered item). Without that signal
+		// a blank line is just a normal paragraph break inside a single
+		// reasoning block, and the "draft" we'd extract is indistinguishable
+		// from the middle of a thought — splitting it out would put random
+		// prose in [agent] and look like a hallucinated response.
+		const thinkingHasStructure = lines.some((l) => /^\s*(?:#{1,6}\s|[-*]\s|\d+\.\s)/.test(l));
+		if (thinkingHasStructure) {
+			for (let i = lines.length - 1; i >= 0; i--) {
+				if (lines[i].trim() === "") continue;
+				let j = i;
+				while (j > 0 && lines[j - 1].trim() !== "") j--;
+				if (j === 0) break;
+				if (lines[j - 1].trim() !== "") break;
+				if (j - 1 < 1) break;
+				// Refuse if the candidate draft is only headings (the model
+				// planning structure but no prose yet) — same guard as the
+				// heading-based branch above, just on a different boundary.
+				const candidateDraft = lines.slice(j).join("\n").trim();
+				const draftLines = candidateDraft
+					.split("\n")
+					.map((l) => l.trim())
+					.filter(Boolean);
+				const onlyHeadings = draftLines.length > 0 && draftLines.every((l) => /^#{1,6}\s+\S/.test(l));
+				if (onlyHeadings) break;
+				splitIdx = j;
 				break;
 			}
 		}

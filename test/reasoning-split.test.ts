@@ -96,10 +96,16 @@ describe("splitReasoningForDisplay", () => {
 		expect(splitReasoningForDisplay(withH1).draft).toBe("# H1\n\nanswer body");
 		const withH2 = "thinking\n\n## H2\n\nanswer body";
 		expect(splitReasoningForDisplay(withH2).draft).toBe("## H2\n\nanswer body");
-		// Level 3+ are NOT split — reasoning legitimately uses ### sub-sections
-		// mid-thought without intending to draft a final answer.
+		// Level 3+ ALSO split — if we don't, h3+ headings mid-thought get
+		// swallowed into [reasoning] and the user sees an empty [agent] block
+		// even though the model wrote a real answer. The previous behaviour
+		// (h3+ = planning, no split) preserved draft: null for the rare
+		// "model outlined its structure under h3 then kept thinking" case
+		// but also hid the actual draft answer in the much more common
+		// max_tokens-truncated-mid-h3 case. The blank-line fallback below
+		// catches the truly-no-heading case, so this trade is safe.
 		const withH3 = "thinking\n\n### H3\n\nanswer body";
-		expect(splitReasoningForDisplay(withH3).draft).toBeNull();
+		expect(splitReasoningForDisplay(withH3).draft).toBe("### H3\n\nanswer body");
 	});
 
 	it("trims trailing whitespace from both halves", () => {
@@ -123,6 +129,26 @@ describe("splitReasoningForDisplay", () => {
 		// second line "Answer body" is not a heading. Just confirms no false
 		// split when there's content but no real heading-with-content.
 		const result = splitReasoningForDisplay(reasoning);
+		expect(result.draft).toBeNull();
+	});
+
+	it("recovers the draft when no heading is present (max_tokens truncated mid-think)", () => {
+		// MiniMax-M3 observed case: the model exhausted its token budget
+		// inside the <think>...</think> block, so the stream never produced
+		// a "## Answer" heading. The last paragraph is the real answer, but
+		// without this fallback it stays inside [reasoning] and the user
+		// sees an empty [agent] block.
+		const reasoning =
+			"thinking through options\n\nconsidering tradeoffs\n\nNow I will answer directly:\n1. alpha\n2. beta";
+		const result = splitReasoningForDisplay(reasoning);
+		expect(result.thinking).toBe("thinking through options\n\nconsidering tradeoffs");
+		expect(result.draft).toBe("Now I will answer directly:\n1. alpha\n2. beta");
+	});
+
+	it("does not split a single-paragraph reasoning with no blank lines", () => {
+		// Without blank lines we can't tell where the model transitioned from
+		// planning to drafting, so the whole text stays in [reasoning].
+		const result = splitReasoningForDisplay("just one long line of thinking with no blank line and an answer: 1+1=2");
 		expect(result.draft).toBeNull();
 	});
 });
