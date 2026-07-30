@@ -1983,6 +1983,13 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	flex: 1;
 	min-width: 0;
 }
+.settings-intro a {
+	color: var(--purple);
+	text-decoration: underline;
+}
+.settings-intro a:hover {
+	color: var(--text);
+}
 .settings-intro::before {
 	content: "";
 	flex-shrink: 0;
