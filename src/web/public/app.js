@@ -3468,13 +3468,13 @@ function SettingsHooks({ data, busy, act }) {
 				.sort(([a], [b]) => a.localeCompare(b))
 				.map(
 					([pluginId, items]) => html`
-					<details key=${pluginId} class="settings-group settings-group-collapsible" open>
-						<summary class="settings-section-title">
-							<span>${pluginId}</span>
-							<span class="settings-group-count">${items.length} hook${items.length === 1 ? "" : "s"}</span>
-						</summary>
+					<div key=${pluginId} class="settings-group">
+						<div class="settings-section-title settings-section-title-plugin">
+							<span class="settings-section-title-name">${pluginId}</span>
+							<span class="settings-section-title-count">${items.length} hook${items.length === 1 ? "" : "s"}</span>
+						</div>
 						${[...items].sort((a, b) => a.event.localeCompare(b.event)).map((h) => renderHook(h, false))}
-					</details>
+					</div>
 				`,
 				)}
 			${hooks.length === 0 && html`<div class="settings-hint">No hooks configured.</div>`}
