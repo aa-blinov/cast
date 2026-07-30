@@ -780,6 +780,19 @@ describe("/ssh", () => {
 		await handleInput("/ssh remove nonexistent", undefined, deps);
 		expect(noticeText(calls)).toContain("Unknown host");
 	});
+
+	it("REGRESSION: /ssh <typo of a subcommand> errors instead of silently listing hosts", async () => {
+		// A typo like "/ssh ad" (missing the second "d") matched neither "add"
+		// nor "remove", so it fell through to the same "no subcommand" branch
+		// bare `/ssh` uses — silently listing hosts instead of surfacing that
+		// the subcommand wasn't recognized.
+		const hosts = [{ name: "myserver", host: "1.2.3.4" }];
+		const { deps, calls } = createFakeDeps({ sshHosts: hosts });
+		await handleInput("/ssh ad", undefined, deps);
+		expect(noticeText(calls)).toContain("Unknown /ssh subcommand");
+		const msg = String(calls["agent.addDisplayMessage"]?.[1]?.[0]?.content ?? "");
+		expect(msg).not.toContain("myserver");
+	});
 });
 
 describe("/provider", () => {

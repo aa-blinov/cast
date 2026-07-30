@@ -2203,6 +2203,15 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			return;
 		}
 
+		// Anything else non-empty used to fall straight through to the "list
+		// hosts" default below — a typo like "/ssh ad" (missing the second d)
+		// silently listed hosts instead of erroring on the unrecognized
+		// subcommand, same as bare /ssh.
+		if (sub) {
+			showNotice(`[Unknown /ssh subcommand "${sub}". Use /ssh add or /ssh remove.]`);
+			return;
+		}
+
 		// /ssh (no subcommand) — list hosts
 		deps.agent.addDisplayMessage({ role: "user", content: input });
 		if (deps.sshHosts.length === 0) {
