@@ -45,7 +45,7 @@ import {
 	type SessionState,
 } from "./session.ts";
 import { loadSettings, type PermissionMode, type Settings, updateSettings } from "./settings.ts";
-import type { Skill } from "./skills.ts";
+import { formatSkillsForPrompt, type Skill } from "./skills.ts";
 import type { SshHost } from "./ssh.ts";
 import { resolveSshHosts } from "./ssh.ts";
 import { loadSubagentPrompts, type SubagentPrompt } from "./subagents.ts";
@@ -442,7 +442,7 @@ export async function runStartup(
 		contextFilesSuffix,
 		rulesSuffix,
 		rulesLazySuffix,
-		skillsPromptSuffix,
+		persona.skills !== undefined ? formatSkillsForPrompt(skills, persona.skills) : skillsPromptSuffix,
 		"", // MCP not connected yet — will be populated on first turn
 		cwd,
 		{

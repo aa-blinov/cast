@@ -13,8 +13,6 @@ See [Persona Research](persona-research.md) for the science behind why role fram
 | `architect` | Architect | System design — trade-off analysis, ADRs, module boundaries; the deliverable is a decision, not a diff |
 | `assistant` | Assistant | General-purpose everyday help — questions, planning, writing, quick lookups; uses tools only when a task needs them |
 | `coder-with-subagents` | Coder with subagents | Delegates parallel and isolated work to sub-agents via the task tool |
-| `coder-with-subagents-force-review` | Coder with mandatory review | Same delegation, plus a mandatory review gate: every code change goes through an independent `review` sub-agent (fresh context, diff-based, one round) before being reported done |
-| `coding` | Coding agent | Default persona — reads files, runs commands, edits code with precision |
 | `dba` | Database Engineer | Schema design, migrations, query optimization, indexing |
 | `devops` | DevOps Engineer | CI/CD, IaC, containers, Kubernetes, deployments, observability |
 | `fiction-writer` | Fiction Writer | Creative fiction and literary prose |
@@ -24,14 +22,12 @@ See [Persona Research](persona-research.md) for the science behind why role fram
 | `qa` | QA Engineer | Functional testing — verifies features, builds test plans, catches regressions |
 | `qa-nfr` | QA Non-Functional | Non-functional testing — performance, security, reliability, scalability |
 | `researcher` | Researcher | Open-ended questions and investigations — searches, reads sources, cross-checks claims, answers with citations |
-| `senior` | Senior Developer | Lazy senior dev — the ladder, root-cause fixes, deletion over addition |
+| `senior` (default) | Senior Developer | Lazy senior dev — the ladder, root-cause fixes, deletion over addition |
 | `sre` | SRE / Incident Responder | Incident-mode thinking — logs first, hypothesis→check loops, blameless postmortems, SLOs |
 | `sysadmin` | System Administrator | Operations and infrastructure — diagnoses systems, manages services |
 | `tech-writer` | Technical Writer | Documentation — READMEs, guides, API references, changelogs, diagrams |
 
-The `coding` persona is the default. `coder-with-subagents` and `coder-with-subagents-force-review` are the personas that enable the `task` tool for delegating work to sub-agents.
-
-Why `coder-with-subagents-force-review` reviews in a sub-agent rather than in place: self-review in the same context is unreliable (the model is biased toward the reasoning that produced the code, and a contaminated context contaminates the check). The gate hands the reviewer only the task summary and the diff — never the implementation reasoning — requires findings to be confirmed by execution, and runs exactly one round to avoid review ping-pong.
+The `senior` persona is the default. `coder-with-subagents` is the persona that enables the `task` tool for delegating work to sub-agents.
 
 ## Switching Personas
 
@@ -60,7 +56,10 @@ name: my-persona
 label: My Custom Persona
 description: What this persona does
 subagents: false
+subagentTypes: [explore, review]
 tools: [read, grep, ls, plan_*, web_*]
+skills: [research, deep-research]
+mcp: [postgres, playwright*]
 agentsMd: true
 ---
 
@@ -83,23 +82,33 @@ When analyzing code, always consider:
 | `label` | No | Display name (defaults to `name`) |
 | `description` | No | Shown in persona listings |
 | `subagents` | No | `true` to enable the `task` tool (default: `false`) |
-| `tools` | No | Allowlist of **built-in** tools. Omit = all builtins. Exact names or `*`-globs (`plan_*`, `web_*`). MCP tools are never filtered by this list |
+| `subagentTypes` | No | Allowlist of subagent role names this persona may spawn via `task` (narrows `subagents: true` further). Omit = every configured role. Exact names or `*`-globs |
+| `tools` | No | Allowlist of **built-in** tools. Omit = all builtins. Exact names or `*`-globs (`plan_*`, `web_*`) |
+| `skills` | No | Allowlist of skill names this persona may invoke via the `skill` tool. Omit = every discovered skill. Exact names or `*`-globs |
+| `mcp` | No | Allowlist of MCP **server** names (not individual tool names) whose tools stay available. Omit = every connected server. Exact names or `*`-globs |
 | `agentsMd` | No | Inject `AGENTS.md` / `CLAUDE.md` into the system prompt (default: `true`) |
 
 The body (after frontmatter) becomes the system prompt. A shared error-handling section is appended automatically from `prompts/error-handling.md` — you don't need to include tool-failure mechanics in your persona.
 
-### Tool allowlist (`tools`)
+### Isolating a persona's zone of responsibility
 
-When set, only matching **built-in** tools are advertised to the model and executable (a fabricated call to a filtered tool returns "not available"). Connected MCP servers are unaffected — their tools stay available whenever the session has them connected.
+`tools`, `skills`, `mcp`, and `subagentTypes` all follow the same allowlist shape and the same enforcement guarantee: a disallowed call is **rejected at runtime** (not just left out of the system prompt text), so these actually isolate what a persona can reach rather than just asking it nicely.
 
 ```yaml
-tools: [read, grep, ls]           # readonly builtins
-tools: [read, grep, plan_*, web_*] # globs expand to plan_check, web_search, …
-tools: []                          # no builtins (MCP still available)
-# omit the field entirely         # all builtins
+tools: [read, grep, ls]            # readonly builtins
+tools: [read, grep, plan_*, web_*]  # globs expand to plan_check, web_search, …
+tools: []                           # no builtins at all
+# omit the field entirely          # all builtins
+
+skills: [research, deep-research]   # only these skill names are invokable
+mcp: [postgres]                     # only this MCP server's tools are callable
+mcp: [staging-*]                    # glob over server names
+subagentTypes: [explore]            # `task` can only spawn the "explore" role
 ```
 
-Session policy still applies on top of the allowlist: plan/build mode, the web-tools toggle, and headless `cast run` can disable tools via their own denylist even if the persona listed them. The `task` tool additionally requires `subagents: true`.
+`skills`/`mcp` restrictions also apply to anything the persona delegates to via `task` — a restriction can't be routed around by spawning a subagent to do the disallowed thing instead.
+
+Session policy still applies on top of every allowlist: plan/build mode, the web-tools toggle, and headless `cast run` can disable tools via their own denylist even if the persona listed them. `subagentTypes` has no effect unless `subagents: true`.
 
 ### AGENTS.md (`agentsMd`)
 

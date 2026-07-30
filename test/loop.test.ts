@@ -2612,6 +2612,213 @@ describe("runAgentLoop — allowedTools filtering", () => {
 });
 
 // ============================================================================
+// runAgentLoop — persona mcp: / skills: / subagentTypes: enforcement
+// ============================================================================
+
+function makeMcpDef(name: string, serverName: string): ToolDef {
+	return {
+		type: "function",
+		function: {
+			name,
+			// Description carries the `[serverName]` prefix that loop.ts parses to
+			// decide which server the tool belongs to. Real MCP tools get this in
+			// mcp.ts (see formatMcpForPrompt and the connection setup).
+			description: `[${serverName}] A tool from ${serverName}`,
+			parameters: { type: "object", properties: {} },
+		},
+	};
+}
+
+function personaWith(overrides: {
+	name: string;
+	mcp?: string[];
+	skills?: string[];
+	subagents?: boolean;
+	subagentTypes?: string[];
+	tools?: string[];
+}): Parameters<typeof runAgentLoop>[1]["personas"] {
+	return [
+		{
+			name: overrides.name,
+			label: overrides.name,
+			description: "",
+			systemPrompt: "test",
+			source: "builtin",
+			filePath: "",
+			subagents: overrides.subagents ?? false,
+			tools: overrides.tools,
+			skills: overrides.skills,
+			mcp: overrides.mcp,
+			subagentTypes: overrides.subagentTypes,
+			agentsMd: true,
+		},
+	];
+}
+
+describe("runAgentLoop — persona mcp: filtering", () => {
+	it("advertises only tools from allowlisted servers", async () => {
+		let capturedTools: ToolDef[] = [];
+		vi.mocked(streamAndCollect).mockImplementationOnce(async (_c, _m, _msgs, tools) => {
+			capturedTools = tools as ToolDef[];
+			return { content: "ok", thinking: "", finishReason: "stop" };
+		});
+
+		const postgresDef = makeMcpDef("mcp_postgres_query", "postgres");
+		const githubDef = makeMcpDef("mcp_github_create-issue", "github");
+
+		await runAgentLoop([{ role: "user", content: "hi" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "SYS",
+			personas: personaWith({ name: "db-only", mcp: ["postgres"] }),
+			currentPersona: "db-only",
+			mcpTools: [postgresDef, githubDef],
+			mcpToolIndex: new Map([
+				["mcp_postgres_query", { definition: postgresDef, call: vi.fn() }],
+				["mcp_github_create-issue", { definition: githubDef, call: vi.fn() }],
+			]),
+			onEvent: () => {},
+		});
+
+		const names = capturedTools.map((t) => t.function.name).sort();
+		expect(names).toContain("mcp_postgres_query");
+		expect(names).not.toContain("mcp_github_create-issue");
+	});
+
+	it("refuses a real call to a tool from a non-allowlisted server", async () => {
+		const events: AgentEvent[] = [];
+		const githubDef = makeMcpDef("mcp_github_create-issue", "github");
+		const githubCall = vi.fn(async () => ({ content: "GH_OK", isError: false }));
+
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [{ id: "t1", name: "mcp_github_create-issue", arguments: "{}" }],
+			}))
+			.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
+
+		await runAgentLoop([{ role: "user", content: "go" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "SYS",
+			personas: personaWith({ name: "no-github", mcp: ["postgres"] }),
+			currentPersona: "no-github",
+			mcpTools: [githubDef],
+			mcpToolIndex: new Map([["mcp_github_create-issue", { definition: githubDef, call: githubCall }]]),
+			onEvent: (e) => events.push(e),
+		});
+
+		// Tool was advertised as known but the persona's `mcp:` filter keeps it
+		// out of the callable set — same "not available" message a builtin filter
+		// produces, so the model doesn't try a different spelling.
+		expect(githubCall).not.toHaveBeenCalled();
+		const toolEnd = events.find((e) => e.type === "tool_end");
+		expect(toolEnd?.type === "tool_end").toBe(true);
+		if (toolEnd?.type === "tool_end") {
+			expect(toolEnd.result.isError).toBe(true);
+			expect(toolEnd.result.content).toContain("not available");
+		}
+	});
+});
+
+describe("runAgentLoop — persona skills: filtering", () => {
+	it("drops skills not in the persona allowlist from the skill tool", async () => {
+		const { execSkill } = await import("../src/core/tools/skill.ts");
+		const skills = [
+			{
+				name: "research",
+				description: "Research skill.",
+				filePath: "/skills/research/SKILL.md",
+				body: "Research body.",
+				disableModelInvocation: false,
+			},
+			{
+				name: "dangerous",
+				description: "Dangerous skill.",
+				filePath: "/skills/dangerous/SKILL.md",
+				body: "Danger body.",
+				disableModelInvocation: false,
+			},
+		] as Parameters<typeof execSkill>[1]["skills"];
+
+		// Persona `skills:` filter — drop the disallowed skill before execSkill
+		// ever sees it. Same shape loop.ts builds `allowedSkills` from.
+		const restricted = skills.filter((s) => s.name !== "dangerous");
+
+		const ok = execSkill({ name: "research" }, { skills: restricted });
+		expect(ok.isError).not.toBe(true);
+		expect(ok.content).toContain("Research body");
+
+		const denied = execSkill({ name: "dangerous" }, { skills: restricted });
+		expect(denied.isError).toBe(true);
+		expect(denied.content).toContain("not found");
+		// "Available skills" only lists the persona-restricted set — a filtered
+		// skill doesn't even appear in the error's available list, so the
+		// model can't retry with a similar-but-different name.
+		expect(denied.content).toContain("Available skills: research");
+	});
+});
+
+describe("runAgentLoop — persona subagentTypes: filtering", () => {
+	it("advertises only allowlisted subagent types in the task tool description", async () => {
+		let capturedTools: ToolDef[] = [];
+		vi.mocked(streamAndCollect).mockImplementationOnce(async (_c, _m, _msgs, tools) => {
+			capturedTools = tools as ToolDef[];
+			return { content: "ok", thinking: "", finishReason: "stop" };
+		});
+
+		await runAgentLoop([{ role: "user", content: "hi" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "SYS",
+			personas: personaWith({ name: "explorer", subagents: true, subagentTypes: ["explore"] }),
+			currentPersona: "explorer",
+			subagentPrompts: [
+				{ name: "explore", label: "Explore", description: "", systemPrompt: "explore", agentsMd: false },
+				{ name: "review", label: "Review", description: "", systemPrompt: "review", agentsMd: false },
+				{ name: "worker", label: "Worker", description: "", systemPrompt: "worker", agentsMd: false },
+			],
+			onEvent: () => {},
+		});
+
+		const taskTool = capturedTools.find((t) => t.function.name === "task");
+		expect(taskTool).toBeDefined();
+		// Description advertises exactly the filtered set — the model can't
+		// ask for a type that's merely hidden from the description.
+		// "Available subagents: <names>" is the trailing list; check it parses
+		// to just "explore" rather than relying on substring match (the
+		// description also uses the words "review" / "exploration" elsewhere).
+		const desc = taskTool?.function.description ?? "";
+		const m = desc.match(/Available subagents:\s*([^.]+)/);
+		expect(m).not.toBeNull();
+		expect(m?.[1].trim()).toBe("explore");
+	});
+
+	it("rejects a task call to a subagent type outside the allowlist", async () => {
+		const { execTask } = await import("../src/core/tools/task.ts");
+		const result = await execTask({ assignment: "review this", subagent: "review" }, "/tmp", testConfig, {
+			model: "test-model",
+			subagentPrompts: [
+				// Only `explore` is forwarded by the parent's persona filter —
+				// `review` and `worker` are dropped before execTask sees them.
+				{ name: "explore", label: "Explore", description: "", systemPrompt: "explore", agentsMd: false },
+			],
+			runAgentLoop: async () => {
+				throw new Error("should not run");
+			},
+		});
+		expect(result.isError).toBe(true);
+		expect(result.content).toContain('Unknown subagent "review"');
+		expect(result.content).toContain("explore");
+	});
+});
+
+// ============================================================================
 // runAgentLoop — onMessagesChanged (crash recovery snapshots)
 // ============================================================================
 

@@ -247,6 +247,44 @@ describe("formatSkillsForPrompt", () => {
 	});
 });
 
+describe("formatSkillsForPrompt with persona allowlist", () => {
+	function makeSkills(): { skills: ReturnType<typeof loadSkills>["skills"] } {
+		writeSkill(GLOBAL_DIR, "alpha/SKILL.md", { name: "alpha", description: "Alpha skill." });
+		writeSkill(GLOBAL_DIR, "beta/SKILL.md", { name: "beta", description: "Beta skill." });
+		writeSkill(GLOBAL_DIR, "gamma/SKILL.md", { name: "gamma", description: "Gamma skill." });
+		return loadSkills({ globalDir: GLOBAL_DIR, extraPaths: [] });
+	}
+
+	it("returns the full catalog when no allowlist is given", () => {
+		const { skills } = makeSkills();
+		const prompt = formatSkillsForPrompt(skills);
+		expect(prompt).toContain("<name>alpha</name>");
+		expect(prompt).toContain("<name>beta</name>");
+		expect(prompt).toContain("<name>gamma</name>");
+	});
+
+	it("drops skills not named in the allowlist", () => {
+		const { skills } = makeSkills();
+		const prompt = formatSkillsForPrompt(skills, ["alpha"]);
+		expect(prompt).toContain("<name>alpha</name>");
+		expect(prompt).not.toContain("<name>beta</name>");
+		expect(prompt).not.toContain("<name>gamma</name>");
+	});
+
+	it("expands globs in the allowlist", () => {
+		const { skills } = makeSkills();
+		const prompt = formatSkillsForPrompt(skills, ["alp*"]);
+		expect(prompt).toContain("<name>alpha</name>");
+		expect(prompt).not.toContain("<name>beta</name>");
+		expect(prompt).not.toContain("<name>gamma</name>");
+	});
+
+	it("returns an empty catalog when the allowlist is empty", () => {
+		const { skills } = makeSkills();
+		expect(formatSkillsForPrompt(skills, [])).toBe("");
+	});
+});
+
 describe("formatSkillInvocation", () => {
 	it("wraps the skill body in a <skill> block, appending user args", () => {
 		writeSkill(

@@ -73,7 +73,7 @@ Works with anything that speaks the OpenAI API:
 
 When you launch `cast` without a saved configuration, an interactive onboarding flow walks you through setup:
 
-1. **Persona selection** — choose the agent's role (coding, senior dev, QA, etc.). This sets the system prompt but not the tools. Defaults to `coding`.
+1. **Persona selection** — choose the agent's role (senior dev, QA, etc.). This sets the system prompt but not the tools. Defaults to `senior`.
 
 2. **Provider connection** — enter your API endpoint URL and API key. cast validates both by hitting `/v1/models`. Saved to `~/.cast/settings.json`.
 

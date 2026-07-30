@@ -20,7 +20,7 @@ import {
 	isContextOverflow,
 	streamAndCollect,
 } from "./llm.ts";
-import type { McpToolHandle } from "./mcp.ts";
+import { type McpToolHandle, mcpServerNameFromDescription } from "./mcp.ts";
 import {
 	buildOpenWorkGateExhaustedReminder,
 	collectOpenWorkSteps,
@@ -639,7 +639,17 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 	if (signal) setMaxListeners(100, signal);
 	const currentPersonaObj = loopConfig.personas?.find((p) => p.name === loopConfig.currentPersona);
 	const subagentsEnabled = currentPersonaObj?.subagents === true;
-	const subagentNames = subagentsEnabled ? loopConfig.subagentPrompts?.map((p) => p.name) : undefined;
+	// Persona `subagentTypes:` narrows which subagent roles this persona may
+	// spawn via `task`, on top of the `subagents: true/false` gate above.
+	// Filtered here (not just in the advertised name list) so the same
+	// restricted set is what execTask's own lookup sees below — a persona
+	// can't be routed around by asking for a type that was merely hidden
+	// from the description.
+	const allowedSubagentPrompts =
+		currentPersonaObj?.subagentTypes !== undefined
+			? loopConfig.subagentPrompts?.filter((p) => matchesToolsAllowlist(p.name, currentPersonaObj.subagentTypes!))
+			: loopConfig.subagentPrompts;
+	const subagentNames = subagentsEnabled ? allowedSubagentPrompts?.map((p) => p.name) : undefined;
 	const sshHostNames = loopConfig.sshHosts?.map((h) => h.name);
 	// Build mode only — plan mode has its own checklist (plan_check) for the
 	// same "track progress through a multi-step task" job; advertising both
@@ -659,13 +669,24 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 	const disabledTools = loopConfig.disabledTools;
 	// Persona/subagent frontmatter `tools:` allowlists builtins only.
 	// LoopConfig wins when set (subagent spawn); otherwise the active persona.
-	// MCP tools stay available whenever connected — their names are
-	// user/session-specific and must not require listing in the persona file.
 	const allowedTools = loopConfig.allowedTools ?? currentPersonaObj?.tools;
 	let builtins = disabledTools?.size ? builtinTools.filter((t) => !disabledTools.has(t.function.name)) : builtinTools;
-	const mcps = disabledTools?.size ? mcpTools.filter((t) => !disabledTools.has(t.function.name)) : mcpTools;
+	let mcps = disabledTools?.size ? mcpTools.filter((t) => !disabledTools.has(t.function.name)) : mcpTools;
 	if (allowedTools !== undefined) {
 		builtins = builtins.filter((t) => matchesToolsAllowlist(t.function.name, allowedTools));
+	}
+	// Persona `mcp:` allowlists by *server* name (matched against the
+	// `[serverName] ...` prefix cast stamps on every MCP tool's description —
+	// see mcpToolName/description in mcp.ts), not individual tool names:
+	// users think "can this role touch postgres", not per-tool. Omitted =
+	// every connected server stays visible, same "no restriction" default as
+	// `tools:`.
+	if (currentPersonaObj?.mcp !== undefined) {
+		const mcpAllowlist = currentPersonaObj.mcp;
+		mcps = mcps.filter((t) => {
+			const server = mcpServerNameFromDescription(t.function.description);
+			return server !== undefined && matchesToolsAllowlist(server, mcpAllowlist);
+		});
 	}
 	const tools = [...builtins, ...mcps];
 	// Names registered before allowlist/denylist filters — so a call to a
@@ -737,6 +758,15 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 				}
 			: loopConfig.confirmBash;
 
+	// Persona `skills:` allowlists which skill names this persona (and, so a
+	// restriction can't be routed around by delegating, anything it spawns
+	// via `task`) may invoke — same glob semantics as `tools:`. Omitted =
+	// every discovered skill stays available.
+	const allowedSkills =
+		currentPersonaObj?.skills !== undefined
+			? loopConfig.skills?.filter((s) => matchesToolsAllowlist(s.name, currentPersonaObj.skills!))
+			: loopConfig.skills;
+
 	const builtinExecuteTool = createToolExecutor(
 		cwd,
 		config,
@@ -747,8 +777,11 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 		subagentsEnabled
 			? {
 					model: loopConfig.subagentModel ?? initialModel,
-					subagentPrompts: loopConfig.subagentPrompts,
-					mcpTools: loopConfig.mcpTools,
+					subagentPrompts: allowedSubagentPrompts,
+					// Forward the already persona-filtered mcps/skills (not the raw
+					// loopConfig lists) — otherwise a `mcp:`/`skills:` restriction on
+					// the parent persona would be a no-op the moment it delegates.
+					mcpTools: mcps,
 					mcpToolIndex,
 					confirmBash: loopConfig.confirmBash,
 					mainModel: initialModel,
@@ -763,14 +796,14 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 					sshHosts: loopConfig.sshHosts,
 					hooks: loopConfig.hooks,
 					sessionId: loopConfig.sessionId,
-					skills: loopConfig.skills,
+					skills: allowedSkills,
 					runAgentLoop,
 				}
 			: undefined,
 		loopConfig.planState,
 		loopConfig.sshHosts,
 		loopConfig.backgroundBash,
-		loopConfig.skills ? { skills: loopConfig.skills, sessionId: loopConfig.sessionId } : undefined,
+		allowedSkills ? { skills: allowedSkills, sessionId: loopConfig.sessionId } : undefined,
 	);
 	const executeTool = (
 		name: string,
@@ -782,8 +815,9 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 		// so old model habits and allowlists keep working against one tool.
 		name = normalizeToolName(name);
 		// Advertised set is the single source of truth for both definitions and
-		// real calls: disabledTools denylist and the builtin tools allowlist.
-		// (MCP tools are not subject to the persona/subagent allowlist.)
+		// real calls: disabledTools denylist, the persona/subagent builtin
+		// `tools:` allowlist, and the persona `mcp:` allowlist (server-scoped
+		// — see the mcp filter further up).
 		if (!advertisedNames.has(name)) {
 			if (knownToolNames.has(name) || disabledTools?.has(name)) {
 				return Promise.resolve({

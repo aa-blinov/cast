@@ -13,7 +13,7 @@
 
 import { type Dirent, existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { parseFrontmatter } from "./frontmatter.ts";
+import { matchesToolsAllowlist, parseFrontmatter } from "./frontmatter.ts";
 import { promptsDir, readRequiredPrompt } from "./prompts.ts";
 
 const MAX_NAME_LENGTH = 64;
@@ -319,9 +319,18 @@ function escapeXml(str: string): string {
 		.replace(/'/g, "&apos;");
 }
 
-/** Skills with `disable-model-invocation: true` are omitted — usable only via /skill:name. */
-export function formatSkillsForPrompt(skills: Skill[]): string {
-	const visible = skills.filter((s) => !s.disableModelInvocation);
+/**
+ * Skills with `disable-model-invocation: true` are omitted — usable only via
+ * /skill:name. `personaSkillsAllowlist` (a persona's `skills:` frontmatter,
+ * when set) additionally drops anything the active persona can't invoke —
+ * keeps what's described here in sync with what loop.ts actually enforces,
+ * so the model isn't pointed at a skill it'll then get rejected for calling.
+ */
+export function formatSkillsForPrompt(skills: Skill[], personaSkillsAllowlist?: string[]): string {
+	let visible = skills.filter((s) => !s.disableModelInvocation);
+	if (personaSkillsAllowlist !== undefined) {
+		visible = visible.filter((s) => matchesToolsAllowlist(s.name, personaSkillsAllowlist));
+	}
 	if (visible.length === 0) return "";
 
 	const lines = ["", "", SKILLS_INSTRUCTIONS, "", "<available_skills>"];
