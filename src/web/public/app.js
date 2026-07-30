@@ -2789,6 +2789,7 @@ function SettingsModal({
 				if (command === "/reload" || command.startsWith("/plugin ") || command.startsWith("/mcp ")) {
 					load("hooks");
 					load("mcp");
+					load("skills");
 				}
 			}
 			setBusy(false);
