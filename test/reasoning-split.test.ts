@@ -152,14 +152,41 @@ describe("mergeMidWordBoundary", () => {
 		expect(r.contentText).toBe("Сейчас уточню текущую погоду в Астане.");
 	});
 
-	it("merges Latin mid-word boundary", () => {
-		// "weath" is a partial word that the model was mid-typing when
-		// its reasoning boundary landed. The fragment has no sentence-ending
-		// punctuation (the `"` is a quote, not a sentence terminator), so
-		// the whole fragment moves onto content as-is.
-		const r = mergeMidWordBoundary('The model wrote the word "weath', 'er is nice today".');
-		expect(r.thinkingText).toBe("The model wrote the word");
-		expect(r.contentText).toBe('"weather is nice today".');
+	it("merges Latin mid-word boundary when fragment has internal sentence-ending punctuation", () => {
+		// "...weather.Сейчас" — the period inside the fragment is the
+		// sentence boundary the model intended; only the partial word
+		// "Сей" crosses onto content.
+		const r = mergeMidWordBoundary(
+			"The user is asking about the weather in Astana. I should use web_search to get the current weather.Сей",
+			"час уточню текущую погоду в Астане.",
+		);
+		expect(r.thinkingText).toBe(
+			"The user is asking about the weather in Astana. I should use web_search to get the current weather.",
+		);
+		expect(r.contentText).toBe("Сейчас уточню текущую погоду в Астане.");
+	});
+
+	it("does NOT merge when the fragment ends with sentence-ending punctuation (clean sentence boundary)", () => {
+		// Trailing period in the fragment is the sentence terminator —
+		// the model meant a complete sentence in thinking and a new one
+		// in content. Merging would strip the period off thinking and
+		// paste it onto content, which reads worse than the split.
+		const r = mergeMidWordBoundary("I should search for the weather.", "Now I will search for the forecast.");
+		expect(r).toEqual({
+			thinkingText: "I should search for the weather.",
+			contentText: "Now I will search for the forecast.",
+		});
+	});
+
+	it("does NOT merge when the fragment has no internal punctuation and content starts with a capital letter", () => {
+		// Ambiguous case the heuristic can't safely resolve — could be
+		// mid-word ("weather" + "Now" forming "weatherNow", as the model
+		// truncated without a space) or a clean sentence boundary where
+		// the model just omitted whitespace. Lean conservative — leave
+		// the boundary alone. The user's bug (model emits </think>
+		// mid-word) is caught by the punctuation-in-fragment case above.
+		const r = mergeMidWordBoundary("I will check", "Now what is X");
+		expect(r).toEqual({ thinkingText: "I will check", contentText: "Now what is X" });
 	});
 
 	it("does NOT merge when boundary is at whitespace, even mid-content", () => {

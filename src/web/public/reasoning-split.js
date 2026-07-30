@@ -86,6 +86,10 @@ export function mergeMidWordBoundary(thinkingText, contentText) {
 	if (!/\S/.test(lastChar) || !/\S/.test(firstChar)) {
 		return { thinkingText, contentText };
 	}
+	// Same-script guard — without this an "API" reasoning tail glued onto
+	// "час уточню..." content would form a meaningless fake word. Punctuation
+	// (".", "!", "?", ":", "…") is script-agnostic, so a thinking side
+	// ending in "." or content starting with ":" is naturally excluded here.
 	const lastCode = lastChar.charCodeAt(0);
 	const firstCode = firstChar.charCodeAt(0);
 	const isLatin = (c) => c >= 0x41 && c <= 0x7a;
@@ -95,34 +99,44 @@ export function mergeMidWordBoundary(thinkingText, contentText) {
 	const fragmentMatch = thinkingText.match(/(\S+)$/);
 	if (!fragmentMatch) return { thinkingText, contentText };
 	const fragment = fragmentMatch[1];
-	// Find the LAST sentence-ending punctuation in the fragment that's
-	// followed by at least one more character — splitting there keeps
-	// the period in thinking (sentence termination) and moves only the
-	// partial word to content. Walking from the end so we don't pick up
-	// earlier internal punctuation (e.g. an abbreviation "etc.").
+	// Trailing sentence-ending punctuation in the fragment means the
+	// reasoning sentence terminated at the boundary — keep the fragment
+	// (period included) in thinking, do not merge. Catches the clean
+	// "...weather." | "Now I will search" case where merging would
+	// strip the period off thinking and paste it onto content.
+	if (/[.!?…]$/.test(fragment)) {
+		return { thinkingText, contentText };
+	}
+	// No trailing punct — look for the last sentence-ending punctuation
+	// INSIDE the fragment (preceded by at least one more character so
+	// it's a real boundary, not a single trailing period). Splitting
+	// there keeps the period in thinking and moves only the partial
+	// word to content — observed case: "...weather.Сей" | "час уточню".
 	let lastPunctIdx = -1;
-	for (let i = fragment.length - 1; i >= 0; i--) {
+	for (let i = fragment.length - 2; i >= 0; i--) {
 		const c = fragment[i];
-		if ((c === "." || c === "!" || c === "?" || c === ":" || c === "…") && i < fragment.length - 1) {
+		if (c === "." || c === "!" || c === "?" || c === ":" || c === "…") {
 			lastPunctIdx = i;
 			break;
 		}
 	}
-	if (lastPunctIdx === -1) {
-		// No sentence boundary inside the fragment — merge the whole
-		// fragment onto content. Safe to do because both sides are in the
-		// same script (checked above).
+	if (lastPunctIdx !== -1) {
+		const keepInThinking = fragment.slice(0, lastPunctIdx + 1);
+		const moveToContent = fragment.slice(lastPunctIdx + 1);
 		return {
-			thinkingText: thinkingText.slice(0, -fragment.length).trimEnd(),
-			contentText: fragment + contentText,
+			thinkingText: thinkingText.slice(0, -fragment.length + keepInThinking.length).trimEnd(),
+			contentText: moveToContent + contentText,
 		};
 	}
-	const keepInThinking = fragment.slice(0, lastPunctIdx + 1);
-	const moveToContent = fragment.slice(lastPunctIdx + 1);
-	return {
-		thinkingText: thinkingText.slice(0, -fragment.length + keepInThinking.length).trimEnd(),
-		contentText: moveToContent + contentText,
-	};
+	// No sentence-ending punctuation anywhere in the fragment — we
+	// can't tell whether the boundary is mid-word (truncated mid-token)
+	// or a clean sentence break where the model just omitted whitespace
+	// ("weather" + "Now I will"). Lean conservative: leave the boundary
+	// alone. The mid-word cases that matter (MiniMax-M3 emitting
+	// </think> inside a Cyrillic word) all have internal punctuation in
+	// the fragment because the parser split mid-word right after a
+	// sentence-ending period — caught by the branch above.
+	return { thinkingText, contentText };
 }
 
 /**
