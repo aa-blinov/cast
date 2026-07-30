@@ -1757,20 +1757,9 @@ export function createWebBridge(result: StartupResult): WebBridge {
 					recomputeAllSystemPrompts();
 					return { ok: true, result: out.trim() || "Uninstalled." };
 				}
-				if (sub === "update") {
-					const out = execFileSync("npx", ["--yes", "skills", "update", "-y"], {
-						cwd: homedir(),
-						encoding: "utf-8",
-						timeout: 180_000,
-					});
-					const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
-					skillsPromptSuffix = skillsResult.skillsPromptSuffix;
-					recomputeAllSystemPrompts();
-					return { ok: true, result: out.trim() || "Updated." };
-				}
 				return {
 					ok: false,
-					error: `Unknown /skills-sh subcommand: "${sub}". Try: install, list-available, search, uninstall, update.`,
+					error: `Unknown /skills-sh subcommand: "${sub}". Try: install, list-available, search, uninstall.`,
 				};
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
