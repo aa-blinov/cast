@@ -154,6 +154,23 @@ function applyTheme(colors) {
 // suppresses the native tooltip by clearing title on mouseenter (restored
 // on mouseleave for accessibility). Runs once + observes DOM for new nodes.
 
+// Hover-intent: a tooltip should only appear after the pointer has
+// been still on the element long enough to suggest a real read, not
+// on every accidental fly-by while moving the cursor across the
+// screen. A 500ms delay matches the de-facto OS standard (also
+// what GitHub, GitLab, Linear, VSCode use). The mousemove cancel
+// is the second half: it suppresses the popup if the user is
+// still actively moving the cursor even after the delay, which
+// is what makes tooltips feel "snappy" instead of "triggered by
+// whatever I last passed over". Keyboard focus (tab) skips the
+// timer entirely — a focused element is an intentional navigation
+// target, not a fly-by.
+//
+// Returns {hide} so callers (e.g. App opening a modal over a still-
+// hovered button) can dismiss any in-flight tooltip without waiting
+// for the next mousemove. Without that, hovering the Reload button
+// in the settings header and then opening the modal would leave
+// the "Reload resources" bubble floating on top of the dialog.
 function initTooltips() {
 	const tip = document.createElement("div");
 	tip.className = "cast-tooltip";
@@ -191,12 +208,43 @@ function initTooltips() {
 		el.setAttribute("title", el.getAttribute("data-tooltip") || "");
 	}
 
+	const HOVER_DELAY_MS = 500;
+	const pendingShows = new WeakMap(); // el → timer id
+
+	function cancelPending(el) {
+		const t = pendingShows.get(el);
+		if (t !== undefined) {
+			clearTimeout(t);
+			pendingShows.delete(el);
+		}
+	}
+
+	function scheduleShow(el) {
+		cancelPending(el);
+		const t = setTimeout(() => {
+			pendingShows.delete(el);
+			show(el);
+		}, HOVER_DELAY_MS);
+		pendingShows.set(el, t);
+	}
+
 	function setup(el) {
 		if (!el.hasAttribute("title") || el.hasAttribute("data-tooltip")) return;
 		el.setAttribute("data-tooltip", el.getAttribute("title"));
-		el.addEventListener("mouseenter", () => show(el));
-		el.addEventListener("mouseleave", () => hide(el));
-		el.addEventListener("focus", () => show(el));
+		el.addEventListener("mouseenter", () => scheduleShow(el));
+		el.addEventListener("mouseleave", () => {
+			cancelPending(el);
+			hide(el);
+		});
+		// Active motion = still mid-flight; cancel the pending show even
+		// if the cursor is technically still over the element. Without
+		// this, a slow diagonal sweep across a row of icon buttons
+		// would pop a tooltip on every one once the delay elapses.
+		el.addEventListener("mousemove", () => cancelPending(el));
+		el.addEventListener("focus", () => {
+			cancelPending(el);
+			show(el);
+		});
 		el.addEventListener("blur", () => hide(el));
 	}
 	document.querySelectorAll("[title]").forEach(setup);
@@ -205,11 +253,20 @@ function initTooltips() {
 			for (const node of m.addedNodes) {
 				if (node.nodeType === 1) {
 					if (node.hasAttribute?.("title")) setup(node);
-					node.querySelectorAll?.("[title]")?.forEach(setup);
+					node.querySelectorAll?.("[title]").forEach(setup);
 				}
 			}
 		}
 	}).observe(document.body, { childList: true, subtree: true });
+
+	return {
+		// Dismiss any in-flight tooltip immediately. Callers use this
+		// when they open a modal/dropdown over a still-hovered button,
+		// so the bubble doesn't outlive the thing that triggered it.
+		hide() {
+			tip.style.opacity = "0";
+		},
+	};
 }
 
 // ── Font ─────────────────────────────────────────────────────────────
@@ -4759,6 +4816,18 @@ function App() {
 			return new Set();
 		}
 	});
+	// Any modal opening over a still-hovered header button would leave
+	// that button's tooltip floating on top of the dialog — visually
+	// confusing (a phantom label hovering over unrelated content) and
+	// the only thing the user can do about it is jiggle the mouse, which
+	// they may not do if they're moving the cursor toward a click target.
+	// Closing any modal also fires this (back to null/false) — the
+	// mouseleave the user produces by moving the cursor onto the modal
+	// already hid the bubble, but the cleanup is harmless and the
+	// intent is symmetric.
+	useEffect(() => {
+		if (settingsOpen || hotkeysOpen || dirPickerOpen || confirmState) tooltips.hide();
+	}, [settingsOpen, hotkeysOpen, dirPickerOpen, confirmState]);
 	const undismiss = useCallback((id) => {
 		setDismissedIds((prev) => {
 			if (!prev.has(id)) return prev;
@@ -6401,7 +6470,7 @@ function SharedThreadView({ token }) {
 const sharedToken = window.location.pathname.startsWith("/shared/")
 	? decodeURIComponent(window.location.pathname.slice("/shared/".length))
 	: null;
-initTooltips();
+const tooltips = initTooltips();
 render(
 	sharedToken ? html`<${SharedThreadView} token=${sharedToken} />` : html`<${App} />`,
 	document.getElementById("app"),
