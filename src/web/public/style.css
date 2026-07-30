@@ -2052,6 +2052,14 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	color: var(--text);
 	font-family: var(--font);
 	font-size: .8rem;
+	flex: 1; min-width: 0;
+}
+.settings-pre {
+	background: var(--bg-inset); border: 1px solid var(--border-subtle);
+	border-radius: var(--radius-sm); padding: 8px 10px;
+	font-family: var(--font-mono); font-size: .74rem; line-height: 1.5;
+	max-height: 240px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+	margin-bottom: 6px;
 	outline: none;
 	min-width: 0;
 	flex: 1;
