@@ -711,12 +711,13 @@ function pluginHookFile(pluginRoot: string): string | null {
 export function pluginHookFiles(
 	settings: Settings,
 	paths: PluginsPaths = defaultPluginsPaths(),
-): Array<{ path: string; pluginRoot: string }> {
-	const out: Array<{ path: string; pluginRoot: string }> = [];
+): Array<{ path: string; pluginRoot: string; pluginId: string }> {
+	const out: Array<{ path: string; pluginRoot: string; pluginId: string }> = [];
 	for (const plugin of listInstalledPlugins(settings, paths)) {
 		if (!plugin.enabled) continue;
 		const file = pluginHookFile(plugin.root);
-		if (file) out.push({ path: file, pluginRoot: plugin.root });
+		if (file)
+			out.push({ path: file, pluginRoot: plugin.root, pluginId: pluginId(plugin.plugin, plugin.marketplace) });
 	}
 	return out;
 }
