@@ -64,7 +64,12 @@ import {
 	type TurnMeta,
 } from "../core/session.ts";
 import { loadSettings, updateSettings } from "../core/settings.ts";
-import { formatSkillInvocation, isUninstallableSkill, uninstallUserSkill } from "../core/skills.ts";
+import {
+	formatSkillInvocation,
+	formatSkillsForPrompt,
+	isUninstallableSkill,
+	uninstallUserSkill,
+} from "../core/skills.ts";
 import { saveSshConfig } from "../core/ssh.ts";
 import type { StartupResult } from "../core/startup.ts";
 import { stripAnsi } from "../core/tools/bash.ts";
@@ -438,8 +443,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 	let rulesSuffix = result.rulesSuffix;
 	let rulesLazySuffix = result.rulesLazySuffix;
 	let directoryRules = result.directoryRules;
-	let skillsPromptSuffix = result.skillsPromptSuffix;
-	const skills = result.skills;
+	let skills = result.skills;
 	// SSH hosts and permission mode are simple settings-backed values with no
 	// prompt-rebuild fan-out, but still need to be mutable so /ssh and
 	// /permissions actually take effect without a server restart.
@@ -465,13 +469,18 @@ export function createWebBridge(result: StartupResult): WebBridge {
 	 * copy of the assembly logic.
 	 */
 	function computeSystemPrompt(persona: Persona, model: string, sessionCwd: string, mode?: "plan" | "build"): string {
+		// Formatted fresh from the raw `skills` array (rather than caching one
+		// pre-formatted string for every persona) so a `skills:` restriction on
+		// the active persona is reflected in what the model is told is
+		// available — kept in sync with what loop.ts actually lets it call.
+		const suffix = formatSkillsForPrompt(skills, persona.skills);
 		return buildSystemPrompt(
 			persona,
 			contextFilesSuffix,
 			rulesSuffix,
 			rulesLazySuffix,
-			skillsPromptSuffix,
-			formatMcpForPrompt(mcpResult),
+			suffix,
+			formatMcpForPrompt(mcpResult, persona.mcp),
 			sessionCwd,
 			{ model, reasoningLevel: config.reasoningLevel, reasoningMeta, mode },
 		);
@@ -736,7 +745,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			projectTrusted,
 			sshHosts,
 			backgroundBash: ws.backgroundBash,
-			mcpPromptSuffix: formatMcpForPrompt(mcpResult),
+			mcpPromptSuffix: formatMcpForPrompt(mcpResult, persona.mcp),
 			onCompaction: (full, compacted) => recordCompaction(ws.session, full, compacted),
 			onMessagesChanged: (messages) => {
 				ws.session.messages = messages;
@@ -977,7 +986,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 	function coldSummary(cold: CoreSessionSummary): SessionSummary {
 		return {
 			id: cold.id,
-			persona: cold.persona ?? "coding",
+			persona: cold.persona ?? DEFAULT_PERSONA,
 			model: cold.model ?? "",
 			cwd: cold.cwd ?? cwd,
 			title: cold.title,
@@ -1552,7 +1561,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			try {
 				projectTrusted = await resolveProjectTrustForCwd(projectDeps, sessionCwd);
 				const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
-				skillsPromptSuffix = skillsResult.skillsPromptSuffix;
+				skills = skillsResult.skills;
 				const rules = resolveRulesForCwd(sessionCwd, projectTrusted);
 				rulesSuffix = rules.alwaysApplySuffix;
 				rulesLazySuffix = rules.lazySuffix;
@@ -1695,7 +1704,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 				else disabled.delete(rest);
 				updateSettings({ disabledSkills: [...disabled] });
 				const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
-				skillsPromptSuffix = skillsResult.skillsPromptSuffix;
+				skills = skillsResult.skills;
 				recomputeAllSystemPrompts();
 				return { ok: true, result: `Skill "${rest}" ${sub}d` };
 			}
@@ -1708,7 +1717,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 					return { ok: false, error: `"${rest}" isn't a removable skill (builtin/plugin)` };
 				uninstallUserSkill(skill);
 				const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
-				skillsPromptSuffix = skillsResult.skillsPromptSuffix;
+				skills = skillsResult.skills;
 				recomputeAllSystemPrompts();
 				return { ok: true, result: `Uninstalled skill "${rest}"` };
 			}
@@ -1755,7 +1764,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 						timeout: 120_000,
 					});
 					const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
-					skillsPromptSuffix = skillsResult.skillsPromptSuffix;
+					skills = skillsResult.skills;
 					recomputeAllSystemPrompts();
 					return { ok: true, result: stripAnsi(out).trim() || "Installed." };
 				}
@@ -1785,7 +1794,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 						timeout: 30_000,
 					});
 					const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
-					skillsPromptSuffix = skillsResult.skillsPromptSuffix;
+					skills = skillsResult.skills;
 					recomputeAllSystemPrompts();
 					return { ok: true, result: stripAnsi(out).trim() || "Uninstalled." };
 				}
@@ -1823,7 +1832,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 					const r = installPlugin(rest, settings);
 					updateSettings({ enabledPlugins: r.enabledPlugins });
 					const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
-					skillsPromptSuffix = skillsResult.skillsPromptSuffix;
+					skills = skillsResult.skills;
 					recomputeAllSystemPrompts();
 					return { ok: true, result: `Installed plugin "${r.id}"` };
 				}
@@ -1832,7 +1841,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 					const r = uninstallPlugin(rest, settings);
 					updateSettings({ enabledPlugins: r.enabledPlugins });
 					const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
-					skillsPromptSuffix = skillsResult.skillsPromptSuffix;
+					skills = skillsResult.skills;
 					recomputeAllSystemPrompts();
 					return { ok: true, result: `Uninstalled plugin "${r.id}"` };
 				}
@@ -1841,7 +1850,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 					const r = setPluginEnabled(rest, sub === "enable", settings);
 					updateSettings({ enabledPlugins: r.enabledPlugins });
 					const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
-					skillsPromptSuffix = skillsResult.skillsPromptSuffix;
+					skills = skillsResult.skills;
 					recomputeAllSystemPrompts();
 					return { ok: true, result: `Plugin "${r.id}" ${sub}d` };
 				}
@@ -1877,7 +1886,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 							for (const id of removedIds) delete enabled[id];
 							updateSettings({ enabledPlugins: enabled });
 							const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
-							skillsPromptSuffix = skillsResult.skillsPromptSuffix;
+							skills = skillsResult.skills;
 							recomputeAllSystemPrompts();
 						}
 						return { ok: true, result: `Removed marketplace "${rest2}"` };

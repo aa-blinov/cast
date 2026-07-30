@@ -12,9 +12,9 @@ const HARNESS_DISCIPLINE_FILE = join(import.meta.dirname, "..", "prompts", "harn
 const VERIFICATION_DISCIPLINE_FILE = join(import.meta.dirname, "..", "prompts", "verification-discipline.md");
 
 describe("listPersonas", () => {
-	it("finds the shipped coding and fiction-writer personas", () => {
+	it("finds the shipped senior and fiction-writer personas", () => {
 		const names = listPersonas().map((p) => p.name);
-		expect(names).toContain("coding");
+		expect(names).toContain("senior");
 		expect(names).toContain("fiction-writer");
 	});
 
@@ -24,9 +24,9 @@ describe("listPersonas", () => {
 	});
 
 	it("parses label and description from frontmatter", () => {
-		const coding = listPersonas().find((p) => p.name === "coding")!;
-		expect(coding.label).toBe("Coding agent");
-		expect(coding.description.length).toBeGreaterThan(0);
+		const senior = listPersonas().find((p) => p.name === "senior")!;
+		expect(senior.label).toBe("Senior Developer");
+		expect(senior.description.length).toBeGreaterThan(0);
 	});
 
 	it("strips frontmatter from the system prompt body", () => {
@@ -40,9 +40,9 @@ describe("listPersonas", () => {
 	});
 
 	it("gives each persona a distinct system prompt", () => {
-		const coding = findPersona("coding")!;
+		const senior = findPersona("senior")!;
 		const writer = findPersona("fiction-writer")!;
-		expect(coding.systemPrompt).not.toBe(writer.systemPrompt);
+		expect(senior.systemPrompt).not.toBe(writer.systemPrompt);
 		expect(writer.systemPrompt.toLowerCase()).toContain("fiction");
 	});
 
@@ -163,12 +163,12 @@ describe("loadPersonas multi-source", () => {
 	});
 
 	it("global persona wins over builtin on name collision", () => {
-		writePersona(GLOBAL_DIR, "coding", "Overridden coding.", "My Coding");
+		writePersona(GLOBAL_DIR, "senior", "Overridden senior.", "My Senior");
 		const personas = loadPersonas({ globalDir: GLOBAL_DIR });
-		const codings = personas.filter((p) => p.name === "coding");
-		expect(codings).toHaveLength(1);
-		expect(codings[0].source).toBe("global");
-		expect(codings[0].label).toBe("My Coding");
+		const seniors = personas.filter((p) => p.name === "senior");
+		expect(seniors).toHaveLength(1);
+		expect(seniors[0].source).toBe("global");
+		expect(seniors[0].label).toBe("My Senior");
 	});
 
 	it("findPersona respects multi-source options", () => {
@@ -202,6 +202,59 @@ describe("tools and agentsMd fields", () => {
 		);
 		const p = loadPersonas({ globalDir: GLOBAL_DIR }).find((x) => x.name === "readonly")!;
 		expect(p.tools).toEqual(["read", "grep", "ls"]);
+	});
+
+	it("defaults skills, mcp, and subagentTypes to undefined (no restriction)", () => {
+		writeFileSync(
+			join(GLOBAL_DIR, "unrestricted.md"),
+			`---\nname: unrestricted\nlabel: Unrestricted\n---\n\nBody.\n`,
+			"utf-8",
+		);
+		const p = loadPersonas({ globalDir: GLOBAL_DIR }).find((x) => x.name === "unrestricted")!;
+		expect(p.skills).toBeUndefined();
+		expect(p.mcp).toBeUndefined();
+		expect(p.subagentTypes).toBeUndefined();
+	});
+
+	it("parses skills allowlist from frontmatter", () => {
+		writeFileSync(
+			join(GLOBAL_DIR, "research-only.md"),
+			`---\nname: research-only\nlabel: Research Only\nskills: [research, deep-research]\n---\n\nBody.\n`,
+			"utf-8",
+		);
+		const p = loadPersonas({ globalDir: GLOBAL_DIR }).find((x) => x.name === "research-only")!;
+		expect(p.skills).toEqual(["research", "deep-research"]);
+	});
+
+	it("parses mcp allowlist from frontmatter", () => {
+		writeFileSync(
+			join(GLOBAL_DIR, "postgres-only.md"),
+			`---\nname: postgres-only\nlabel: Postgres Only\nmcp: [postgres, playwright-*]\n---\n\nBody.\n`,
+			"utf-8",
+		);
+		const p = loadPersonas({ globalDir: GLOBAL_DIR }).find((x) => x.name === "postgres-only")!;
+		expect(p.mcp).toEqual(["postgres", "playwright-*"]);
+	});
+
+	it("parses subagentTypes allowlist from frontmatter", () => {
+		writeFileSync(
+			join(GLOBAL_DIR, "deleg-explore.md"),
+			`---\nname: deleg-explore\nlabel: Deleg Explore\nsubagents: true\nsubagentTypes: [explore, review]\n---\n\nBody.\n`,
+			"utf-8",
+		);
+		const p = loadPersonas({ globalDir: GLOBAL_DIR }).find((x) => x.name === "deleg-explore")!;
+		expect(p.subagents).toBe(true);
+		expect(p.subagentTypes).toEqual(["explore", "review"]);
+	});
+
+	it("keeps an explicit empty mcp allowlist (no servers allowed)", () => {
+		writeFileSync(
+			join(GLOBAL_DIR, "no-mcp.md"),
+			`---\nname: no-mcp\nlabel: No MCP\nmcp: []\n---\n\nBody.\n`,
+			"utf-8",
+		);
+		const p = loadPersonas({ globalDir: GLOBAL_DIR }).find((x) => x.name === "no-mcp")!;
+		expect(p.mcp).toEqual([]);
 	});
 
 	it("parses agentsMd: false from frontmatter", () => {
@@ -264,10 +317,10 @@ describe("subagents field", () => {
 		expect(p.subagents).toBe(false);
 	});
 
-	it("only the delegating coder personas have subagents: true among builtins", () => {
+	it("only the delegating coder persona has subagents: true among builtins", () => {
 		const personas = loadPersonas();
 		const withSub = personas.filter((p) => p.subagents);
-		expect(withSub.map((p) => p.name).sort()).toEqual(["coder-with-subagents", "coder-with-subagents-force-review"]);
+		expect(withSub.map((p) => p.name).sort()).toEqual(["coder-with-subagents"]);
 	});
 });
 
@@ -312,8 +365,8 @@ describe("getToolDefinitions + subagents", () => {
 });
 
 describe("subagents integration with getToolDefinitions", () => {
-	it("coding persona (subagents: false) produces no task tool", () => {
-		const persona = findPersona("coding")!;
+	it("senior persona (subagents: false) produces no task tool", () => {
+		const persona = findPersona("senior")!;
 		const subagentNames = persona.subagents ? ["worker"] : undefined;
 		const tools = getToolDefinitions(subagentNames);
 		expect(tools.some((t) => t.function.name === "task")).toBe(false);

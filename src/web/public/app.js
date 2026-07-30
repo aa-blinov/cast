@@ -3346,7 +3346,7 @@ function SettingsWeb({ data, busy, act }) {
 function SettingsQuickMode({ data, busy, act, personas, onQuickSessionPersonaChange }) {
 	const [quickPersonaValue, setQuickPersonaValue] = useState("");
 	if (!data) return null;
-	const quickPersona = data.quickSessionPersona?.quickSessionPersona ?? "coding";
+	const quickPersona = data.quickSessionPersona?.quickSessionPersona ?? "senior";
 	return html`
 		<div class="settings-rows">
 			<div class="settings-section-title">Quick session persona</div>
@@ -4564,8 +4564,8 @@ function App() {
 	const [atBottom, setAtBottom] = useState(true);
 	const [defaultCwd, setDefaultCwd] = useState("");
 	// Persona the sidebar's "Quick session" button uses — configurable in
-	// Settings > Tools, defaults to "coding" server-side when never set.
-	const [quickSessionPersona, setQuickSessionPersona] = useState("coding");
+	// Settings > Tools, defaults to "senior" server-side when never set.
+	const [quickSessionPersona, setQuickSessionPersona] = useState("senior");
 	// "new" (a fresh sandbox dir) is the default for a new session, not the
 	// project root — picking the root path is the deliberate action here.
 	const [selectedCwd, setSelectedCwd] = useState(SANDBOX_CWD);
@@ -4860,7 +4860,7 @@ function App() {
 				await selectSession(target, { push: false, prefetch: target === urlId ? sessionPrefetch : null });
 			} else {
 				const current = personasRef.current;
-				const defaultP = current.find((x) => x.name === "coding") ?? current[0];
+				const defaultP = current.find((x) => x.name === "senior") ?? current[0];
 				if (defaultP) startDraft(defaultP.name, undefined);
 			}
 			return true;
@@ -4928,7 +4928,7 @@ function App() {
 				await selectSession(remaining[0].id, { push: false });
 				return;
 			}
-			const defaultP = personas.find((x) => x.name === "coding") ?? personas[0];
+			const defaultP = personas.find((x) => x.name === "senior") ?? personas[0];
 			if (defaultP) startDraft(defaultP.name, undefined);
 			else {
 				setActiveId(null);
@@ -5812,7 +5812,7 @@ function App() {
 			}
 			if (mod && e.shiftKey && e.key === "N") {
 				e.preventDefault();
-				const p = personas.find((x) => x.name === "coding") ?? personas[0];
+				const p = personas.find((x) => x.name === "senior") ?? personas[0];
 				if (p) startDraft(p.name, cwd);
 				return;
 			}

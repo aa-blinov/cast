@@ -25,6 +25,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { Agent } from "undici";
+import { matchesToolsAllowlist } from "./frontmatter.ts";
 import type { Tool } from "./llm.ts";
 import type { ToolResult } from "./tools.ts";
 
@@ -69,6 +70,18 @@ export function sanitizeToolNamePart(name: string): string {
 
 export function mcpToolName(serverName: string, toolName: string): string {
 	return `mcp_${sanitizeToolNamePart(serverName)}_${sanitizeToolNamePart(toolName)}`;
+}
+
+/**
+ * Recovers the server name cast stamped onto an MCP tool's description
+ * (`[serverName] ...`, set below where the tool definition is built) — the
+ * one place a tool can be traced back to its server without re-parsing the
+ * sanitized, ambiguous `mcp_<server>_<tool>` name (server/tool names may
+ * themselves contain underscores, so splitting the name back apart isn't
+ * reliable). Used for persona-level `mcp:` allowlists (loop.ts).
+ */
+export function mcpServerNameFromDescription(description: string | undefined): string | undefined {
+	return description?.match(/^\[([^\]]+)\]/)?.[1];
 }
 
 export interface McpToolHandle {
@@ -371,11 +384,20 @@ export function mcpServerToolBlurbs(result: McpSetupResult): Record<string, stri
 /** Format connected MCP servers for the system prompt as <available_mcp>.
  * Only currently enabled servers appear — disabled ones are excluded entirely.
  * If a server is configured in mcp.json but missing here, the user has
- * disabled it via /mcp; do not attempt to call its tools. */
-export function formatMcpForPrompt(result: McpSetupResult): string {
-	if (result.connections.length === 0) return "";
+ * disabled it via /mcp; do not attempt to call its tools.
+ *
+ * `personaMcpAllowlist` (a persona's `mcp:` frontmatter, when set) drops
+ * servers the active persona can't reach — keeps this in sync with what
+ * loop.ts actually filters out of the callable tool list.
+ */
+export function formatMcpForPrompt(result: McpSetupResult, personaMcpAllowlist?: string[]): string {
+	const servers =
+		personaMcpAllowlist !== undefined
+			? result.connections.filter((c) => matchesToolsAllowlist(c.serverName, personaMcpAllowlist))
+			: result.connections;
+	if (servers.length === 0) return "";
 	const lines = ["\n<available_mcp>", "  <!-- Only enabled MCP servers are listed. -->"];
-	for (const c of result.connections) {
+	for (const c of servers) {
 		lines.push(`  <server name="${escapeXml(c.serverName)}" tools="${c.toolCount}">`);
 		for (const t of result.toolDefinitions) {
 			if (t.function.description?.startsWith(`[${c.serverName}]`)) {

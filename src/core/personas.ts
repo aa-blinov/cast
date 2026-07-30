@@ -1,15 +1,19 @@
 /**
  * Personas — swappable agent definitions: system prompt plus optional
- * capability knobs from frontmatter (`tools`, `agentsMd`, `subagents`).
- * When `tools` is omitted all builtins are available; when set, only listed
- * builtin names are advertised and executable (MCP tools are unaffected).
+ * capability knobs from frontmatter (`tools`, `skills`, `mcp`,
+ * `subagentTypes`, `subagents`, `agentsMd`) that isolate a persona's zone of
+ * responsibility. Every knob follows the same allowlist shape: omitted =
+ * no restriction, exact names or `*`-globs, `[]` = explicitly nothing
+ * allowed. Enforced in loop.ts (runtime — what's actually callable), not
+ * just left to the system prompt text.
  *
  * Personas are loaded from three sources (highest priority first):
  *   1. Project:  <cwd>/.cast/personas/*.md  (trust-gated, like skills)
  *   2. Global:   ~/.cast/personas/*.md       (always loaded)
  *   3. Builtin:  prompts/personas/*.md       (ships with cast)
  *
- * Frontmatter: name, label, description, subagents, tools, agentsMd.
+ * Frontmatter: name, label, description, subagents, tools, skills, mcp,
+ * subagentTypes, agentsMd.
  * Only one persona is active at a time; its body becomes the system prompt.
  * Shared error-handling + file-tool guidance is appended via
  * `withSharedToolPrompt` (same append used for subagents).
@@ -18,7 +22,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { parseAgentsMd, parseFrontmatter, parseToolsAllowlist } from "./frontmatter.ts";
+import { parseAgentsMd, parseFrontmatter, parseNameAllowlist, parseToolsAllowlist } from "./frontmatter.ts";
 import { promptsDir, withSharedToolPrompt } from "./prompts.ts";
 
 export type PersonaSource = "builtin" | "global" | "project";
@@ -37,9 +41,32 @@ export interface Persona {
 	 * Optional allowlist for built-in tools from frontmatter
 	 * (`tools: [read, grep, plan_*, web_*]`). Exact names or `*`-globs.
 	 * `undefined` = all builtins; when set, only matching builtin names are
-	 * advertised and executable. Connected MCP tools are never filtered here.
+	 * advertised and executable. MCP tools are a separate lever — see `mcp`.
 	 */
 	tools?: string[];
+	/**
+	 * Optional allowlist of skill names this persona may invoke (`skill:
+	 * [research, deep-research]`). Exact names or `*`-globs. `undefined` =
+	 * every discovered skill stays available. Also applied to anything this
+	 * persona delegates to via `task`, so the restriction can't be routed
+	 * around by spawning a subagent.
+	 */
+	skills?: string[];
+	/**
+	 * Optional allowlist of MCP *server* names (`mcp: [postgres, playwright]`)
+	 * whose tools stay visible/callable — not individual tool names, since
+	 * users reason about "can this role touch server X", not per-tool.
+	 * Exact names or `*`-globs. `undefined` = every connected server stays
+	 * available.
+	 */
+	mcp?: string[];
+	/**
+	 * Optional allowlist of subagent role names (`subagentTypes: [explore,
+	 * review]`) this persona may spawn via `task` — narrows `subagents: true`
+	 * further. Exact names or `*`-globs. `undefined` = every configured
+	 * subagent role stays available (when `subagents: true`).
+	 */
+	subagentTypes?: string[];
 	/**
 	 * Whether to inject AGENTS.md / CLAUDE.md into the system prompt.
 	 * Defaults to true; set `agentsMd: false` in frontmatter to disable.
@@ -47,7 +74,7 @@ export interface Persona {
 	agentsMd: boolean;
 }
 
-export const DEFAULT_PERSONA = "coding";
+export const DEFAULT_PERSONA = "senior";
 
 export const globalPersonasDir = join(homedir(), ".cast", "personas");
 
@@ -109,6 +136,9 @@ function loadPersonaFromFile(filePath: string, source: PersonaSource): Persona |
 		filePath,
 		subagents: frontmatter.subagents === true,
 		tools: parseToolsAllowlist(frontmatter),
+		skills: parseNameAllowlist(frontmatter, "skills"),
+		mcp: parseNameAllowlist(frontmatter, "mcp"),
+		subagentTypes: parseNameAllowlist(frontmatter, "subagentTypes"),
 		agentsMd: parseAgentsMd(frontmatter),
 	};
 }

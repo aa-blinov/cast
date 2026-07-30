@@ -226,11 +226,11 @@ describe("web bridge", () => {
 		expect(ws.systemPrompt).toBe(before);
 	});
 
-	it("/quick-session-persona with no arg reports the current default ('coding' when never set)", async () => {
+	it("/quick-session-persona with no arg reports the current default ('senior' when never set)", async () => {
 		const bridge = createWebBridge(makeResult());
 		const ws = bridge.createSession();
 		const res = await bridge.executeCommand(ws.id, "/quick-session-persona");
-		expect(res).toEqual({ ok: true, result: { quickSessionPersona: "coding" } });
+		expect(res).toEqual({ ok: true, result: { quickSessionPersona: "senior" } });
 	});
 
 	it("/quick-session-persona <name> persists it and getConfig reflects the change", async () => {
@@ -246,7 +246,7 @@ describe("web bridge", () => {
 		const ws = bridge.createSession();
 		const res = await bridge.executeCommand(ws.id, "/quick-session-persona ghost");
 		expect(res.ok).toBe(false);
-		expect(bridge.getConfig().quickSessionPersona).toBe("coding");
+		expect(bridge.getConfig().quickSessionPersona).toBe("senior");
 	});
 
 	it("/model <name> updates the session model", async () => {

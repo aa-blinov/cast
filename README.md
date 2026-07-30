@@ -93,10 +93,8 @@ Swap the agent's role — and optionally which built-in tools that role may use:
 
 | Persona | What it does |
 |---------|-------------|
-| `coding` (default) | Reads files, runs commands, edits code |
+| `senior` (default) | Lazy senior dev — root-cause fixes, deletion over addition |
 | `coder-with-subagents` | Delegates work to sub-agents via the `task` tool for parallel exploration |
-| `coder-with-subagents-force-review` | Coder that forces a QA persona review on every sub-agent result before accepting |
-| `senior` | Lazy senior dev — root-cause fixes, deletion over addition |
 | `analyst` | Stakeholder interviews, requirements synthesis, gap analysis |
 | `architect` | System design — trade-off analysis, ADR drafts, dependency choice |
 | `pm` | Product strategy, specs, prioritization |

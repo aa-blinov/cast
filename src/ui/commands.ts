@@ -54,7 +54,13 @@ import {
 	type StatusBarConfig,
 	updateSettings,
 } from "../core/settings.ts";
-import { formatSkillInvocation, isUninstallableSkill, type Skill, uninstallUserSkill } from "../core/skills.ts";
+import {
+	formatSkillInvocation,
+	formatSkillsForPrompt,
+	isUninstallableSkill,
+	type Skill,
+	uninstallUserSkill,
+} from "../core/skills.ts";
 import { type SshHost, saveSshConfig, scanSshKeys, validateKeyPermissions } from "../core/ssh.ts";
 import { getReasoningOptions, type ModelReasoningMeta } from "../core/vendors.ts";
 import {
@@ -258,14 +264,23 @@ function rebuildSystemPrompt(
 		skillsPromptSuffix?: string;
 	} = {},
 ): void {
+	const activePersona = overrides.persona ?? deps.currentPersona;
+	// Same "recompute from the raw list when the persona restricts it" shape
+	// as bridge.ts's computeSystemPrompt — keeps the described skill/MCP
+	// catalog in sync with what loop.ts actually lets this persona call.
+	const skillsSuffix =
+		overrides.skillsPromptSuffix ??
+		(activePersona.skills !== undefined
+			? formatSkillsForPrompt(deps.skills, activePersona.skills)
+			: deps.skillsPromptSuffix);
 	deps.setSystemPrompt(
 		buildSystemPrompt(
-			overrides.persona ?? deps.currentPersona,
+			activePersona,
 			overrides.contextFilesSuffix ?? deps.contextFilesSuffix,
 			overrides.rulesSuffix ?? deps.rulesSuffix,
 			overrides.rulesLazySuffix ?? deps.rulesLazySuffix,
-			overrides.skillsPromptSuffix ?? deps.skillsPromptSuffix,
-			formatMcpForPrompt(deps.mcpResult),
+			skillsSuffix,
+			formatMcpForPrompt(deps.mcpResult, activePersona.mcp),
 			cwd,
 			{
 				// The Model line reports the model actually in use — in plan mode

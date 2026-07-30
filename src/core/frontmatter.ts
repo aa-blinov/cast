@@ -32,6 +32,19 @@ export function parseToolsAllowlist(frontmatter: Record<string, FrontmatterValue
 }
 
 /**
+ * Same allowlist semantics as `parseToolsAllowlist` (undefined = omitted →
+ * no restriction, `[]` = explicitly nothing allowed, exact names or
+ * `*`-globs) for any other persona frontmatter field that names things by
+ * a list — `skills:`, `mcp:`, `subagentTypes:`. Kept generic instead of one
+ * copy-pasted parser per field.
+ */
+export function parseNameAllowlist(frontmatter: Record<string, FrontmatterValue>, field: string): string[] | undefined {
+	const value = frontmatter[field];
+	if (!Array.isArray(value)) return undefined;
+	return value.map((s) => String(s).trim()).filter(Boolean);
+}
+
+/**
  * Whether a builtin tool name is covered by a persona/subagent `tools:` list.
  * Exact match, or shell-style `*` globs (`plan_*` → `plan_check`, `web_*` →
  * `web_search`, `*` → everything).

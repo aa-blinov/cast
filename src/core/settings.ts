@@ -42,7 +42,7 @@ export interface Settings {
 	planModelProvider?: string;
 	/** Last used reasoning level */
 	reasoningLevel?: string;
-	/** Last used persona name (see personas.ts) — defaults to "coding" when unset. */
+	/** Last used persona name (see personas.ts) — defaults to DEFAULT_PERSONA when unset. */
 	persona?: string;
 	/** Last used provider URL */
 	providerUrl?: string;
@@ -125,7 +125,7 @@ export interface Settings {
 	/**
 	 * Persona used by the web UI's "Quick session" button — skips the persona
 	 * picker entirely and opens straight into a fresh sandbox directory.
-	 * Defaults to "coding" (DEFAULT_PERSONA in core/personas.ts) when unset.
+	 * Defaults to DEFAULT_PERSONA (core/personas.ts) when unset.
 	 */
 	quickSessionPersona?: string;
 }

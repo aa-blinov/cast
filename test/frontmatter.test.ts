@@ -3,6 +3,7 @@ import {
 	matchesToolsAllowlist,
 	parseAgentsMd,
 	parseFrontmatter,
+	parseNameAllowlist,
 	parseToolsAllowlist,
 } from "../src/core/frontmatter.ts";
 
@@ -89,6 +90,43 @@ describe("parseToolsAllowlist", () => {
 	it("treats a non-array tools value as omitted", () => {
 		const { frontmatter } = parseFrontmatter("---\ntools: true\n---\n");
 		expect(parseToolsAllowlist(frontmatter)).toBeUndefined();
+	});
+});
+
+describe("parseNameAllowlist", () => {
+	it("returns undefined when the field is omitted", () => {
+		expect(parseNameAllowlist({}, "skills")).toBeUndefined();
+		expect(parseNameAllowlist({}, "mcp")).toBeUndefined();
+		expect(parseNameAllowlist({}, "subagentTypes")).toBeUndefined();
+	});
+
+	it("parses an inline array for any named field", () => {
+		const { frontmatter } = parseFrontmatter("---\nskills: [research, deep-research]\nmcp: [postgres]\n---\n");
+		expect(parseNameAllowlist(frontmatter, "skills")).toEqual(["research", "deep-research"]);
+		expect(parseNameAllowlist(frontmatter, "mcp")).toEqual(["postgres"]);
+	});
+
+	it("keeps an explicit empty array (nothing allowed)", () => {
+		const { frontmatter } = parseFrontmatter("---\nmcp: []\n---\n");
+		expect(parseNameAllowlist(frontmatter, "mcp")).toEqual([]);
+	});
+
+	it("treats a non-array value as omitted", () => {
+		const { frontmatter } = parseFrontmatter("---\nskills: true\nmcp: all\n---\n");
+		expect(parseNameAllowlist(frontmatter, "skills")).toBeUndefined();
+		expect(parseNameAllowlist(frontmatter, "mcp")).toBeUndefined();
+	});
+
+	it("trims whitespace and drops empty entries", () => {
+		const { frontmatter } = parseFrontmatter('---\nskills: [ " a ", "", "  b  " ]\n---\n');
+		expect(parseNameAllowlist(frontmatter, "skills")).toEqual(["a", "b"]);
+	});
+
+	it("does not rewrite legacy names (unlike parseToolsAllowlist)", () => {
+		// The find → glob rewrite is a tools-only courtesy for pre-0.6.12
+		// frontmatter; skills/mcp/subagentTypes never had a legacy alias.
+		const { frontmatter } = parseFrontmatter("---\nskills: [find]\n---\n");
+		expect(parseNameAllowlist(frontmatter, "skills")).toEqual(["find"]);
 	});
 });
 

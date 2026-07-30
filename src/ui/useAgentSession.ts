@@ -678,6 +678,10 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 						? resolveProvider(providers, planModelProvider, activeCreds)
 						: undefined;
 				const resolvedSubagentProvider = resolveProvider(providers, subagentModelProvider, activeCreds);
+				// Keeps the MCP catalog text in sync with what loop.ts's own
+				// persona.mcp filtering actually lets this persona call — same
+				// lookup bridge.ts's computeSystemPrompt does.
+				const activePersonaObj = personas?.find((p) => p.name === currentPersona);
 				const result = await runAgentLoop(session.messages, {
 					config,
 					model: modelOverride ?? session.model,
@@ -708,7 +712,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					cliSkillPaths,
 					sshHosts: params.sshHosts,
 					backgroundBash: backgroundBashDeps.current,
-					mcpPromptSuffix: formatMcpForPrompt(mcpResult),
+					mcpPromptSuffix: formatMcpForPrompt(mcpResult, activePersonaObj?.mcp),
 					planState,
 					initialTodos: session.todos,
 					announcedLocalDate,
