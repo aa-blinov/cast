@@ -2,6 +2,26 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.11.0
+
+### Fixed
+
+- Skills.sh: installing via the web UI now actually lands where cast scans (`~/.agents/skills/`) — installs used to silently vanish depending on which agent flag was used.
+- Skills.sh: pasting skills.sh's own "npx skills add ..." command into the install field now works, not just the bare `owner/repo --skill name` args.
+- Skills.sh: the installed-skill list now shows the real source repo (read from the skills.sh lockfile) instead of a mis-parsed label that was always empty.
+- Skills.sh / SSH: command output no longer leaks raw ANSI escape codes (cursor show/hide sequences) into the UI.
+- Settings modal: a failed action no longer leaves every button in the modal permanently disabled.
+- Diff/Files panel: a manually resized width now survives a page reload.
+- Hooks: a hook that force-stops the turn no longer silently drops `updatedInput`/`additionalContext` contributed by other hooks in the same run.
+- Hooks: a `PostToolUse`/`PostToolUseFailure` hook that blocks with no output of its own no longer has its block silently dropped.
+- Hooks: two identical hook groups from different sources (e.g. a plugin and a project file) no longer share an id, so disabling one no longer disables the other.
+- Hooks: a malformed `hooks.json` now surfaces a parse-error diagnostic in Settings and `/hooks` instead of silently loading as empty.
+
+### Changed
+
+- Web UI: Marketplace tab browsing merged into one flat, searchable list across all configured marketplaces instead of per-marketplace tabs.
+- Web UI: Skills.sh tab dropped the "list available" (browse-a-repo) field and the network-backed search box.
+
 ## 0.10.1
 
 ### Fixed
