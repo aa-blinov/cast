@@ -183,16 +183,12 @@ function initTooltips() {
 		// Force layout so we can measure the tooltip width
 		tip.style.opacity = "0";
 		tip.style.transition = "none";
-		const tw = tip.getBoundingClientRect().width;
-		tip.style.transition = "opacity .1s ease";
-		const PAD = 8;
-
+		// `tw` (tooltip width) measured below in the clamp step.
 		const r = el.getBoundingClientRect();
 		const above = r.top > 60;
 		let x = r.left + r.width / 2;
 		const y = above ? r.top - 8 : r.bottom + 8;
-
-		// Clamp x so the tooltip stays inside the viewport
+		const tw = tip.getBoundingClientRect().width;
 		const half = tw / 2;
 		if (x - half < PAD) x = half + PAD;
 		else if (x + half > window.innerWidth - PAD) x = window.innerWidth - half - PAD;
@@ -201,13 +197,11 @@ function initTooltips() {
 		tip.style.top = `${y}px`;
 		tip.style.transform = `translate(-50%, ${above ? "-100%" : "0"})`;
 		tip.style.opacity = "1";
-		el.removeAttribute("title");
 	}
 	function hide(el) {
 		tip.style.opacity = "0";
 		el.setAttribute("title", el.getAttribute("data-tooltip") || "");
 	}
-
 	const HOVER_DELAY_MS = 500;
 	const pendingShows = new WeakMap(); // el → timer id
 
@@ -232,6 +226,16 @@ function initTooltips() {
 		if (!el.hasAttribute("title") || el.hasAttribute("data-tooltip")) return;
 		el.setAttribute("data-tooltip", el.getAttribute("title"));
 		el.addEventListener("mouseenter", () => scheduleShow(el));
+		// Strip the native title attribute as soon as the cursor
+		// enters the element — before the browser's own ~500ms
+		// hover-delay tooltip can fire. Without this, the native
+		// OS/Chrome bubble and our themed one appear in lockstep
+		// (both at the same ~500ms mark) and stack on top of each
+		// other. Removing title in the show() callback (the
+		// previous wiring) was too late — by the time the timer
+		// fired, the browser had already grabbed the title text
+		// for its own bubble.
+		el.addEventListener("mouseenter", () => el.removeAttribute("title"));
 		el.addEventListener("mouseleave", () => {
 			cancelPending(el);
 			hide(el);
