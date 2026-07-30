@@ -10,6 +10,8 @@ import type { ToolResult } from "./shared.ts";
 
 export interface SkillToolDeps {
 	skills: Skill[];
+	/** Current session id — substituted into ${CAST_SESSION_ID} / ${CLAUDE_SESSION_ID} in the skill body. */
+	sessionId?: string;
 }
 
 export function getSkillToolDescription(skills: Skill[]): string {
@@ -42,6 +44,6 @@ export function execSkill(args: Record<string, unknown>, deps: SkillToolDeps): T
 		};
 	}
 
-	const content = formatSkillInvocation(skill, userArgs);
+	const content = formatSkillInvocation(skill, userArgs, deps.sessionId);
 	return { content };
 }
