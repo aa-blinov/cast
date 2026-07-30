@@ -2538,7 +2538,6 @@ const SETTINGS_TABS = [
 	{ id: "plugins", label: "Plugins" },
 	{ id: "provider", label: "Provider" },
 	{ id: "skillssh", label: "Skills.sh" },
-	{ id: "ssh", label: "SSH" },
 	{ id: "quick-mode", label: "Quick Mode" },
 	{ id: "skills", label: "Skills" },
 	{ id: "ssh", label: "SSH" },
@@ -2729,6 +2728,7 @@ function SettingsModal({
 					const res = await run("/skills list");
 					setData((d) => ({ ...d, skills: res?.result ?? [] }));
 				}
+				setData((d) => ({ ...d, skillssh: true }));
 			} else if (t === "plugins") {
 				const res = await run("/plugin list");
 				setData((d) => ({
