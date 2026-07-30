@@ -2,6 +2,20 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.12.0
+
+### Added
+
+- **Per-persona allowlists** for tools, skills, MCP servers, and subagent types. Each persona's frontmatter now supports four knobs that all share the same shape (omitted = no restriction, `[]` = explicitly nothing allowed, exact names or `*`-globs):
+  - `tools:` — built-in tool names (existing). `tools: [read, grep, ls, plan_*, web_*]` narrows the persona's builtin reach.
+  - `skills:` — skill names invokable via the `skill` tool. `skills: [research, deep-research]` hides every other skill from the catalog and the runtime.
+  - `mcp:` — MCP **server** names (not individual tool names). `mcp: [postgres, playwright*]` keeps only those servers' tools callable.
+  - `subagentTypes:` — narrows `subagents: true` further. `subagentTypes: [explore, review]` is the only set this persona can spawn via `task`.
+
+  Enforced at runtime (not just in the prompt text) — a disallowed call gets the same "not available" / "not found" / "Unknown subagent" message the model already gets for any hidden tool, so these actually isolate a persona's zone of responsibility. `skills:` / `mcp:` restrictions also forward to anything the persona delegates to via `task`, so the restriction can't be routed around by spawning a subagent.
+
+  Default persona is now `senior` (the previous `coding` persona was a strict subset and is removed). `coder-with-subagents-force-review` is also removed — its review gate now lives in `coder-with-subagents`'s own validation pattern.
+
 ## 0.11.1
 
 ### Fixed
