@@ -2782,7 +2782,12 @@ function SettingsModal({
 			// /reload and any /skills mutation can change which skills are
 			// loaded/enabled — those show up as native /<skill-id> slash commands,
 			// so the composer's palette needs to catch up too.
-			if (res.ok && (command === "/reload" || command.startsWith("/skills "))) onReload?.();
+			// Same for /plugin install/uninstall/enable/disable — they change
+			// which hooks appear in the Hooks tab.
+			if (res.ok) {
+				if (command === "/reload" || command.startsWith("/skills ")) onReload?.();
+				if (command === "/reload" || command.startsWith("/plugin ") || command.startsWith("/mcp ")) load("hooks");
+			}
 			setBusy(false);
 			return res;
 		},
