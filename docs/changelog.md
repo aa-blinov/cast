@@ -2,6 +2,13 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.12.1
+
+### Fixed
+
+- Web UI: when a reasoning block ended with a markdown heading (a truncated answer draft that the parser flushed into reasoning because the model ran out of `max_tokens` inside `<think>` without emitting a close tag), the post-heading tail is now rendered as a separate `[agent]` block instead of sitting inside `[reasoning]` next to a blank agent area. Applies to live streaming, settled turns, and reload from disk.
+- Web UI: when the model's `<think>...</think>` boundary landed *mid-word* (observed on MiniMax-M3 emitting `</think>` inside the Cyrillic word "Сейчас", so reasoning ended "...Сей" and content started "час уточню..."), the trailing word fragment is now glued back onto the agent's content. The user sees the model-intended continuous word — "Сейчас уточню текущую погоду в Астане." — instead of two halves separated across blocks. Same-script check (Latin↔Latin, Cyrillic↔Cyrillic) guards against false merges across alphabets; sentence-ending punctuation inside the fragment stays in reasoning.
+
 ## 0.12.0
 
 ### Added
