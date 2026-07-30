@@ -2786,7 +2786,10 @@ function SettingsModal({
 			// which hooks appear in the Hooks tab.
 			if (res.ok) {
 				if (command === "/reload" || command.startsWith("/skills ")) onReload?.();
-				if (command === "/reload" || command.startsWith("/plugin ") || command.startsWith("/mcp ")) load("hooks");
+				if (command === "/reload" || command.startsWith("/plugin ") || command.startsWith("/mcp ")) {
+					load("hooks");
+					load("mcp");
+				}
 			}
 			setBusy(false);
 			return res;
