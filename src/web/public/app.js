@@ -3,7 +3,6 @@
  * No build step: importmap loads preact and htm from esm.sh CDN.
  */
 
-import { homedir } from "node:os";
 import htm from "htm";
 import { h, render } from "preact";
 import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
@@ -3536,10 +3535,8 @@ function SettingsSkillssh({ data, busy, act, confirm }) {
 	const [searchOutput, setSearchOutput] = useState("");
 	const [listOutput, setListOutput] = useState("");
 	const allSkills = data || [];
-	// Filter to skills loaded from skills.sh agents dir
-	const isSkillsshPath = (p) =>
-		p?.startsWith(`${homedir()}/.config/agents/skills`) || p?.startsWith(`${homedir()}/.agents/skills`);
-	const shSkills = allSkills.filter((s) => isSkillsshPath(s.filePath));
+	// Filter to skills installed via npx skills add (flagged by the bridge)
+	const shSkills = allSkills.filter((s) => s.skillssh);
 	const shRepo = (s) => {
 		// filePath is ~/.config/agents/skills/<repo>/<skill>/SKILL.md → extract repo
 		const m = s.filePath?.match(/\/(skills-sh|agents)\/skills\/([^/]+)\//);

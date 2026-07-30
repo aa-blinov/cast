@@ -1663,10 +1663,16 @@ export function createWebBridge(result: StartupResult): WebBridge {
 					result: discovered.map((s) => ({
 						name: s.name,
 						source: s.source,
+						filePath: s.filePath,
 						pluginId: s.pluginId,
 						description: s.description,
 						enabled: !disabled.has(s.name) && s.pluginEnabled !== false,
 						uninstallable: isUninstallableSkill(s),
+						// Skills installed via `npx skills add` land in
+						// `agentsGlobalDirs` (`~/.config/agents/skills/` etc.)
+						skillssh:
+							(s.source === "agents" && s.filePath?.includes("/.config/agents/skills/")) ||
+							(s.source === "agents" && s.filePath?.includes("/.agents/skills/")),
 					})),
 				};
 			}
