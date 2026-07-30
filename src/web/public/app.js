@@ -2532,9 +2532,10 @@ const SETTINGS_TABS = [
 	{ id: "bash", label: "Bash" },
 	{ id: "font", label: "Font" },
 	{ id: "hooks", label: "Hooks" },
-	{ id: "plugins", label: "Marketplace" },
 	{ id: "mcp", label: "MCP" },
 	{ id: "model", label: "Model" },
+	{ id: "plugins", label: "Plugins" },
+	{ id: "marketplace", label: "Marketplace" },
 	{ id: "provider", label: "Provider" },
 	{ id: "quick-mode", label: "Quick Mode" },
 	{ id: "skills", label: "Skills" },
@@ -2719,15 +2720,21 @@ function SettingsModal({
 				}
 				setData((d) => ({ ...d, skills: res.result }));
 			} else if (t === "plugins") {
-				const [plugins, marketplaces, catalog] = await Promise.all([
-					run("/plugin list"),
+				const res = await run("/plugin list");
+				setData((d) => ({
+					...d,
+					plugins: {
+						plugins: res?.result ?? [],
+					},
+				}));
+			} else if (t === "marketplace") {
+				const [marketplaces, catalog] = await Promise.all([
 					run("/plugin marketplace list"),
 					run("/plugin marketplace catalog"),
 				]);
 				setData((d) => ({
 					...d,
-					plugins: {
-						plugins: plugins?.result ?? [],
+					marketplace: {
 						marketplaces: marketplaces?.result ?? [],
 						catalog: catalog?.result ?? [],
 					},
@@ -2857,11 +2864,13 @@ function SettingsModal({
 																		? html`<${SettingsSkills} data=${data.skills} busy=${busy} act=${act} confirm=${confirm} />`
 																		: tab === "plugins"
 																			? html`<${SettingsPlugins} data=${data.plugins} busy=${busy} act=${act} confirm=${confirm} />`
-																			: tab === "provider"
-																				? html`<${SettingsProvider} data=${data.provider} busy=${busy} act=${act} confirm=${confirm} />`
-																				: tab === "ssh"
-																					? html`<${SettingsSsh} data=${data.ssh} busy=${busy} act=${act} confirm=${confirm} />`
-																					: null
+																			: tab === "marketplace"
+																				? html`<${SettingsMarketplace} data=${data.marketplace} busy=${busy} act=${act} confirm=${confirm} />`
+																				: tab === "provider"
+																					? html`<${SettingsProvider} data=${data.provider} busy=${busy} act=${act} confirm=${confirm} />`
+																					: tab === "ssh"
+																						? html`<${SettingsSsh} data=${data.ssh} busy=${busy} act=${act} confirm=${confirm} />`
+																						: null
 						}
 					</div>
 				</div>
@@ -3503,17 +3512,10 @@ function SettingsHooks({ data, busy, act }) {
 }
 
 function SettingsPlugins({ data, busy, act, confirm }) {
-	const [mpTab, setMpTab] = useState("");
-	const [mpSource, setMpSource] = useState("");
 	if (!data) return null;
-	const catalog = data.catalog || [];
-	const sortedCatalog = [...catalog].sort((a, b) => a.name.localeCompare(b.name));
-	const activeTab = mpTab || (sortedCatalog.length > 0 ? sortedCatalog[0].name : "");
-	const installedIds = new Set(data.plugins.map((p) => p.id));
-	const installedNames = new Set(data.plugins.map((p) => p.plugin || p.id));
 	return html`
 		<div class="settings-rows">
-			<div class="settings-section-title">Installed plugins</div>
+			<p class="settings-intro"><span>Plugins installed on this machine. Each plugin can ship skills, hooks, and MCP servers. To browse and install more, see the <strong>Marketplace</strong> tab.</span></p>
 			${[...data.plugins]
 				.sort((a, b) => a.id.localeCompare(b.id))
 				.map(
@@ -3534,7 +3536,23 @@ function SettingsPlugins({ data, busy, act, confirm }) {
 				</div>
 			`,
 				)}
-			${data.plugins.length === 0 && html`<div class="settings-hint">No plugins installed.</div>`}
+			${data.plugins.length === 0 && html`<div class="settings-hint">No plugins installed. Browse the Marketplace tab to add some.</div>`}
+		</div>
+	`;
+}
+
+function SettingsMarketplace({ data, busy, act, confirm }) {
+	const [mpTab, setMpTab] = useState("");
+	const [mpSource, setMpSource] = useState("");
+	if (!data) return null;
+	const catalog = data.catalog || [];
+	const sortedCatalog = [...catalog].sort((a, b) => a.name.localeCompare(b.name));
+	const activeTab = mpTab || (sortedCatalog.length > 0 ? sortedCatalog[0].name : "");
+	const installedNames = new Set(data.plugins?.map?.((p) => p.plugin || p.id) ?? []);
+	const installedIds = new Set(data.plugins?.map?.((p) => p.id) ?? []);
+	return html`
+		<div class="settings-rows">
+			<p class="settings-intro"><span>Browse plugin catalogs from configured marketplaces, and manage which marketplaces cast knows about. Plugins you install from here will appear in the <strong>Plugins</strong> tab.</span></p>
 
 			<div class="settings-section-title">Browse marketplaces</div>
 			<div class="plugin-mp-tabs">
