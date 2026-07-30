@@ -3450,7 +3450,6 @@ function SettingsSkills({ data, busy, act, confirm }) {
 				</div>
 			`,
 				)}
-			${skills.length === 0 && html`<div class="settings-hint">No skills found.</div>`}
 		</div>
 	`;
 }
@@ -3597,10 +3596,6 @@ function SettingsSkillssh({ data, busy, act, confirm }) {
 				</div>
 			`,
 				)}
-
-			<div class="settings-form-row">
-				<button class="modal-btn" disabled=${busy} onClick=${() => act("/reload")}><${icons.arrowPath} /> Reload installed skills</button>
-			</div>
 		</div>
 	`;
 }
