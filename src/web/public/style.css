@@ -2396,6 +2396,20 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	white-space: nowrap;
 	max-width: none;
 }
+/* The themed bubble replaces the native browser tooltip, but on a
+ * touch device there's no hover — the only path to "show" was
+ * `focus`, which fires the moment a tap activates a button. That
+ * made tooltips pop up at every accidental tap, in places the user
+ * wasn't actually asking about (most buttons have an icon-only
+ * label that's self-explanatory, the bubble is for desktop mouse
+ * users). Suppress the whole bubble under (hover: none) — touch
+ * devices, regardless of size, including the iPad and touchscreen
+ * laptops in tablet mode. (hover: none) is the correct signal:
+ * a normal desktop browser reports (hover: hover) and still gets
+ * tooltips; an iPad Pro with Magic Keyboard also reports
+ * (hover: hover) and gets them too. */
+@media (hover: none) {
+	.cast-tooltip { display: none !important; }
+}
 
-
-.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); border: 0; }
+ .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); border: 0; }
