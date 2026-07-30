@@ -2,6 +2,14 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.11.1
+
+### Fixed
+
+- `cast web <typo of stop|status>` no longer silently starts a new server daemon — any unrecognized subcommand now errors instead of falling through to the default "start" behavior.
+- `cast upgrade --<typo of --force>` no longer silently attempts to upgrade to a "version" named after the mistyped flag — unknown flags now error before that logic runs.
+- `/ssh <typo of add|remove>` (terminal UI) no longer silently falls back to listing hosts — unrecognized subcommands now error.
+
 ## 0.11.0
 
 ### Fixed
