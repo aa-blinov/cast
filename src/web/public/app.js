@@ -3438,7 +3438,7 @@ function SettingsHooks({ data, busy, act }) {
 			<div class="settings-item-info">
 				<span class="settings-item-status ${h.enabled ? "ok" : "off"}" />
 				<span class="settings-item-name">${h.event}${h.matcher ? html` <span style=${{ opacity: 0.6 }}>(${h.matcher})</span>` : ""}</span>
-				<span class="settings-item-meta truncate">${summarize(h)}</span>
+				<span class="settings-item-meta truncate">${h.pluginId ? html`<span style=${{ color: "var(--purple)", marginRight: "6px" }}>${h.pluginId}</span>` : ""}${summarize(h)}</span>
 			</div>
 			<div class="settings-item-actions">
 				<button class="modal-btn icon-btn" title=${h.enabled ? "Disable" : "Enable"} disabled=${busy} onClick=${() => act(`/hooks ${h.enabled ? "disable" : "enable"} ${h.id}`)}>${h.enabled ? html`<${icons.pause} />` : html`<${icons.play} />`}</button>

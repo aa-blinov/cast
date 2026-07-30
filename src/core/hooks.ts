@@ -158,11 +158,18 @@ export interface HookMatcherGroup {
 	hooks: HookCommand[];
 	_source?: "global" | "project" | "plugin";
 	_pluginRoot?: string;
+	/** Plugin marketplace id (`name@marketplace`) when `_source === "plugin"`. */
+	_pluginId?: string;
 }
 
 export type HooksFile = Partial<Record<HookEvent, HookMatcherGroup[]>>;
 
-function readHooksFile(path: string, source: HookMatcherGroup["_source"], pluginRoot?: string): HooksFile {
+function readHooksFile(
+	path: string,
+	source: HookMatcherGroup["_source"],
+	pluginRoot?: string,
+	pluginId?: string,
+): HooksFile {
 	if (!existsSync(path)) return {};
 	try {
 		const parsed = JSON.parse(readFileSync(path, "utf-8")) as { hooks?: HooksFile } & HooksFile;
@@ -170,7 +177,7 @@ function readHooksFile(path: string, source: HookMatcherGroup["_source"], plugin
 		const tagged: HooksFile = {};
 		for (const [event, groups] of Object.entries(file) as [HookEvent, HookMatcherGroup[] | undefined][]) {
 			if (!HOOK_EVENTS.includes(event) || !groups?.length) continue;
-			tagged[event] = groups.map((g) => ({ ...g, _source: source, _pluginRoot: pluginRoot }));
+			tagged[event] = groups.map((g) => ({ ...g, _source: source, _pluginRoot: pluginRoot, _pluginId: pluginId }));
 		}
 		return tagged;
 	} catch {
@@ -212,13 +219,15 @@ export interface ResolvedHookEntry {
 	matcher?: string;
 	commands: HookCommand[];
 	source: "global" | "project" | "plugin";
+	/** Plugin marketplace id (`name@marketplace`) when `source === "plugin"`. */
+	pluginId?: string;
 	enabled: boolean;
 }
 
 export function listHooksForCwd(
 	cwd: string,
 	trusted: boolean,
-	pluginHookFilePaths: Array<{ path: string; pluginRoot: string }> = [],
+	pluginHookFilePaths: Array<{ path: string; pluginRoot: string; pluginId: string }> = [],
 	disabledIds: ReadonlySet<string> = new Set(),
 ): ResolvedHookEntry[] {
 	const merged = mergeHooksFiles(cwd, trusted, pluginHookFilePaths);
@@ -232,6 +241,7 @@ export function listHooksForCwd(
 				matcher: group.matcher,
 				commands: group.hooks,
 				source: group._source ?? "global",
+				pluginId: group._pluginId,
 				enabled: !disabledIds.has(id),
 			});
 		}
@@ -242,19 +252,19 @@ export function listHooksForCwd(
 function mergeHooksFiles(
 	cwd: string,
 	trusted: boolean,
-	pluginHookFilePaths: Array<{ path: string; pluginRoot: string }>,
+	pluginHookFilePaths: Array<{ path: string; pluginRoot: string; pluginId: string }>,
 ): HooksFile {
 	const global = readHooksFile(globalHooksPath(), "global");
 	const projectPath = projectHooksPath(cwd);
 	const project = trusted && projectPath !== globalHooksPath() ? readHooksFile(projectPath, "project") : {};
-	const plugins = pluginHookFilePaths.map((p) => readHooksFile(p.path, "plugin", p.pluginRoot));
+	const plugins = pluginHookFilePaths.map((p) => readHooksFile(p.path, "plugin", p.pluginRoot, p.pluginId));
 	return mergeHooks(global, ...plugins, project);
 }
 
 export function loadHooksForCwd(
 	cwd: string,
 	trusted: boolean,
-	pluginHookFilePaths: Array<{ path: string; pluginRoot: string }> = [],
+	pluginHookFilePaths: Array<{ path: string; pluginRoot: string; pluginId: string }> = [],
 	disabledIds: ReadonlySet<string> = new Set(),
 ): HooksFile {
 	const merged = mergeHooksFiles(cwd, trusted, pluginHookFilePaths);
