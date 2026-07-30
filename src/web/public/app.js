@@ -3422,41 +3422,60 @@ function SettingsSkills({ data, busy, act, confirm }) {
 
 function SettingsHooks({ data, busy, act }) {
 	const hooks = data || [];
-	const groups = [
-		{ key: "global", label: "Global", items: hooks.filter((h) => h.source === "global") },
-		{ key: "project", label: "Project", items: hooks.filter((h) => h.source === "project") },
-		{ key: "plugin", label: "Plugin", items: hooks.filter((h) => h.source === "plugin") },
-	];
+	// Group plugins by pluginId — each plugin gets its own collapsible subsection.
+	// Global/project stay flat since they have no pluginId.
+	const globalHooks = hooks.filter((h) => h.source === "global");
+	const projectHooks = hooks.filter((h) => h.source === "project");
+	const pluginGroups = new Map();
+	for (const h of hooks.filter((h) => h.source === "plugin")) {
+		const key = h.pluginId ?? "(unknown plugin)";
+		if (!pluginGroups.has(key)) pluginGroups.set(key, []);
+		pluginGroups.get(key).push(h);
+	}
 	const summarize = (h) => {
 		const first = h.commands?.[0];
 		if (!first) return "";
 		if (first.type === "http") return first.url ?? "";
 		return first.command ?? "";
 	};
-	const renderHook = (h) => html`
+	const renderHook = (h, showPlugin = false) => html`
 		<div key=${h.id} class="settings-item-row">
 			<div class="settings-item-info">
 				<span class="settings-item-status ${h.enabled ? "ok" : "off"}" />
 				<span class="settings-item-name">${h.event}${h.matcher ? html` <span style=${{ opacity: 0.6 }}>(${h.matcher})</span>` : ""}</span>
-				<span class="settings-item-meta truncate">${h.pluginId ? html`<span style=${{ color: "var(--purple)", marginRight: "6px" }}>${h.pluginId}</span>` : ""}${summarize(h)}</span>
+				<span class="settings-item-meta truncate">${showPlugin && h.pluginId ? html`<span style=${{ color: "var(--purple)", marginRight: "6px" }}>${h.pluginId}</span>` : ""}${summarize(h)}</span>
 			</div>
 			<div class="settings-item-actions">
 				<button class="modal-btn icon-btn" title=${h.enabled ? "Disable" : "Enable"} disabled=${busy} onClick=${() => act(`/hooks ${h.enabled ? "disable" : "enable"} ${h.id}`)}>${h.enabled ? html`<${icons.pause} />` : html`<${icons.play} />`}</button>
 			</div>
 		</div>
 	`;
+	const renderGroup = (label, items, opts = {}) => {
+		if (items.length === 0) return null;
+		return html`
+			<div key=${opts.key ?? label} class="settings-group">
+				<div class="settings-section-title">${label}</div>
+				${[...items].sort((a, b) => a.event.localeCompare(b.event)).map((h) => renderHook(h, opts.showPlugin ?? false))}
+			</div>
+		`;
+	};
 	return html`
 		<div class="settings-rows">
-			<p class="settings-intro"><span>Shell (or HTTP) commands that fire on lifecycle events — validate/block a tool call, log activity, or force the agent to keep working before it stops. Configure in <code>.cast/hooks.json</code> (project) or <code>~/.cast/hooks.json</code> (global).</span></p>
-			${groups
-				.filter((g) => g.items.length > 0)
+			<p class="settings-intro"><span>Shell (or HTTP) commands that fire on lifecycle events — validate/block a tool call, log activity, or force the agent to keep working before it stops. Configure in <code>.cast/hooks.json</code> (project) or <code>~/.cast/hooks.json</code> (global). Plugin-contributed hooks are grouped under their plugin; uninstall the plugin to remove all its hooks.</span></p>
+			${renderGroup("Global", globalHooks, { key: "global" })}
+			${renderGroup("Project", projectHooks, { key: "project" })}
+			${[...pluginGroups.entries()]
+				.sort(([a], [b]) => a.localeCompare(b))
 				.map(
-					(g) => html`
-				<div key=${g.key} class="settings-group">
-					<div class="settings-section-title">${g.label}</div>
-					${[...g.items].sort((a, b) => a.event.localeCompare(b.event)).map(renderHook)}
-				</div>
-			`,
+					([pluginId, items]) => html`
+					<details key=${pluginId} class="settings-group settings-group-collapsible" open>
+						<summary class="settings-section-title">
+							<span>${pluginId}</span>
+							<span class="settings-group-count">${items.length} hook${items.length === 1 ? "" : "s"}</span>
+						</summary>
+						${[...items].sort((a, b) => a.event.localeCompare(b.event)).map((h) => renderHook(h, false))}
+					</details>
+				`,
 				)}
 			${hooks.length === 0 && html`<div class="settings-hint">No hooks configured.</div>`}
 		</div>

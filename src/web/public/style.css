@@ -2117,6 +2117,21 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 .settings-group .settings-item-row + .settings-item-row {
 	margin-top: 6px;
 }
+.settings-group-collapsible { margin-top: 8px; }
+.settings-group-collapsible > summary {
+	display: flex; justify-content: space-between; align-items: center;
+	cursor: pointer; padding: 4px 0; user-select: none;
+	list-style: none;
+}
+.settings-group-collapsible > summary::-webkit-details-marker { display: none; }
+.settings-group-collapsible > summary::before {
+	content: "▸"; margin-right: 6px; color: var(--text-muted); transition: transform .12s;
+	display: inline-block;
+}
+.settings-group-collapsible[open] > summary::before { content: "▾"; }
+.settings-group-collapsible > summary > .settings-group-count {
+	font-size: .72rem; color: var(--text-muted); font-weight: 400;
+}
 .settings-item-row {
 	display: flex; flex-wrap: wrap; gap: 6px 8px;
 	align-items: center;
