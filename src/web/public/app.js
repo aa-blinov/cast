@@ -240,11 +240,12 @@ function initTooltips() {
 			cancelPending(el);
 			hide(el);
 		});
-		// Active motion = still mid-flight; cancel the pending show even
-		// if the cursor is technically still over the element. Without
-		// this, a slow diagonal sweep across a row of icon buttons
-		// would pop a tooltip on every one once the delay elapses.
-		el.addEventListener("mousemove", () => cancelPending(el));
+		// Note: no active-motion cancel on this element. Every real
+		// cursor micro-movement (mouse jitter, breathing) would
+		// fire mousemove and cancel the pending show, so the
+		// bubble would never appear. The 500ms delay alone is
+		// enough to filter fly-bys — a user has to hold the
+		// anything, which is the hover-intent.
 		el.addEventListener("focus", () => {
 			cancelPending(el);
 			show(el);
