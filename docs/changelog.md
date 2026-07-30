@@ -2,15 +2,15 @@
 
 All notable user-facing changes to cast, newest first.
 
-## Unreleased
+## 0.12.2
 
 ### Fixed
 
-- Web UI: streaming token updates no longer flicker the whole reply. The entrance `rise` animation is now applied via an explicit `.message-entering` class on freshly-mounted message nodes only — same keyframe, but it stops being the default for every `.message`/`.message-group`, so a re-render that reuses the same DOM node (every streaming RAF commit) doesn't replay it. Streaming text blocks now render as a single, stable text node that the layout effect mutates via `node.data` on every commit, instead of re-running `renderMarkdown` + `dangerouslySetInnerHTML` (which used to destroy and rebuild the entire content subtree on every commit). The result: a growing reply stays still while tokens arrive.
-- Web UI: settled messages (the user message on send, the assistant message on stream end) no longer play the entrance `rise` animation. Previously those two moments were the visible "blink" right after clicking send and right when the final chunk landed — the rise is now reserved for blocks that appear *during* a stream (a new reasoning chunk, a new tool card) where it visually marks "the model just emitted this".
-- Web UI: the elapsed-time counter now ticks at 4 Hz (250ms) instead of 10 Hz (100ms) — same `.1s` displayed precision, but 2.5× less main-thread churn during long runs.
-- Web UI: the header status dot no longer pulses on a stable SSE connection. The `pulse-status` animation is now reserved for `reconnecting` and `offline` states, so the connected indicator is a static green dot instead of a 1.5s opacity oscillation in peripheral vision.
-- Web UI: streaming blocks now render the `agent` / `reasoning` role label from the first frame, not just on settle. Previously the streaming subtree had no label and the settled `Message` re-rendered with one on `case "message"`, which read at the end of every reply as "tokens grow → then the word 'agent' appears above them". With the label in place throughout the stream, the final transition is content-only (raw text → rendered markdown) instead of structural.
+- Web UI: hover tooltips were silently broken on message rows after the mid-word boundary-merge rework — the `PAD` constant the tooltip layout depended on had been removed alongside the dead hover-cancel code path. Restored; tooltips on user / agent / reasoning rows, tool cards, and MCP tool rows are back.
+- Web UI: when a streaming reply was truncated by `max_tokens` *inside* a model-emitted draft answer (i.e. reasoning had already closed and the model was emitting real content for the user when it ran out of budget), the partial answer was being discarded. The last accumulated content is now flushed into its own `[agent]` block — same way the answer-after-reasoning case was handled in 0.12.1.
+- Web UI: mid-stream mouse movement no longer cancels a hover tooltip before it appears. The previous `mousemove` → cancel handler kept the tooltip code technically alive but fired on every cursor wiggle and never let the 500ms hover-intent timer complete. Removed; tooltips open on the intended timer and only the standard `mouseleave` / scroll / modal-open paths dismiss them.
+- Web UI: the browser's native tooltip is stripped the moment the cursor enters the trigger element. Otherwise both tooltips render and the native one wins the race on leaving the page, briefly showing the plain `title` text over the styled bubble.
+- Web UI: custom hover tooltips are suppressed on coarse-pointer / touch devices, where they have no interaction model and were firing on tap-and-release.
 
 
 ## 0.12.1
