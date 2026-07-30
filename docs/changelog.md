@@ -12,6 +12,9 @@ All notable user-facing changes to cast, newest first.
 - Web UI: the browser's native tooltip is stripped the moment the cursor enters the trigger element. Otherwise both tooltips render and the native one wins the race on leaving the page, briefly showing the plain `title` text over the styled bubble.
 - Web UI: custom hover tooltips are suppressed on coarse-pointer / touch devices, where they have no interaction model and were firing on tap-and-release.
 
+### Changed
+
+- Built-in `cast` configuration skill: split the 397-line `SKILL.md` into a short index + seven `references/*.md` topic files (personas, skills, marketplace, mcp, rules, hooks, commands). The skill now follows the agentskills.io progressive-disclosure convention — only the frontmatter + topic map (~1.6 KB) is loaded every time `cast` is invoked for a config question, and the matching reference file is read on demand. For a focused question (e.g. "how do I add an MCP server?") the model pulls just `references/mcp.md` instead of every topic.
 
 ## 0.12.1
 
