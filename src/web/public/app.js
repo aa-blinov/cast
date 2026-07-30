@@ -3432,22 +3432,33 @@ function SettingsHooks({ data, busy, act }) {
 		if (!pluginGroups.has(key)) pluginGroups.set(key, []);
 		pluginGroups.get(key).push(h);
 	}
-	const summarize = (h) => {
-		const first = h.commands?.[0];
-		if (!first) return "";
-		if (first.type === "http") return first.url ?? "";
-		return first.command ?? "";
-	};
 	const renderHook = (h, showPlugin = false) => html`
-		<div key=${h.id} class="settings-item-row">
-			<div class="settings-item-info">
+		<div key=${h.id} class="settings-item-row settings-item-row-stack">
+			<div class="settings-item-header">
 				<span class="settings-item-status ${h.enabled ? "ok" : "off"}" />
 				<span class="settings-item-name">${h.event}${h.matcher ? html` <span style=${{ opacity: 0.6 }}>(${h.matcher})</span>` : ""}</span>
-				<span class="settings-item-meta truncate">${showPlugin && h.pluginId ? html`<span style=${{ color: "var(--purple)", marginRight: "6px" }}>${h.pluginId}</span>` : ""}${summarize(h)}</span>
+				${showPlugin && h.pluginId ? html`<span class="settings-item-meta">${h.pluginId}</span>` : ""}
+				<div class="settings-item-actions">
+					<button class="modal-btn icon-btn" title=${h.enabled ? "Disable" : "Enable"} disabled=${busy} onClick=${() => act(`/hooks ${h.enabled ? "disable" : "enable"} ${h.id}`)}>${h.enabled ? html`<${icons.pause} />` : html`<${icons.play} />`}</button>
+				</div>
 			</div>
-			<div class="settings-item-actions">
-				<button class="modal-btn icon-btn" title=${h.enabled ? "Disable" : "Enable"} disabled=${busy} onClick=${() => act(`/hooks ${h.enabled ? "disable" : "enable"} ${h.id}`)}>${h.enabled ? html`<${icons.pause} />` : html`<${icons.play} />`}</button>
-			</div>
+			${
+				h.commands?.length > 0 &&
+				html`
+				<div class="settings-item-body">
+					${h.commands.map(
+						(c) => html`
+						<div class="settings-item-cmd">
+							<span class="settings-item-cmd-type">${c.type ?? "command"}</span>
+							<code>${c.type === "http" ? c.url : c.command}</code>
+							${c.if ? html`<span class="settings-item-cmd-if">if: ${c.if}</span>` : ""}
+							${c.timeout ? html`<span class="settings-item-cmd-timeout">${c.timeout}s</span>` : ""}
+						</div>
+					`,
+					)}
+				</div>
+			`
+			}
 		</div>
 	`;
 	const renderGroup = (label, items, opts = {}) => {
