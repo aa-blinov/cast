@@ -526,9 +526,9 @@ flowchart LR
 a <code>.md</code> file directly inside the session&#39;s plans directory while plan mode is
 active; reading that same file makes it the active plan (no <code>name</code> argument
 needed). Other plans in the session are discoverable with <code>ls</code>/<code>glob</code> on the
-plans directory. There is no separate plan-write/plan-edit/plan-read tool
-(mirrors how Claude Code&#39;s own plan mode works: no dedicated authoring or
-reading tool, just a permission-level path exception for the plan file).</p>
+plans directory. There is no separate plan-write/plan-edit/plan-read tool: no dedicated
+authoring or reading tool, just a permission-level path exception for the
+plan file.</p>
 <div class="table-wrap"><table><thead><tr><th>Tool</th><th>Mode</th><th>Description</th></tr></thead><tbody><tr><td><code>plan_done</code></td><td>Plan</td><td>Signal plan is ready for review</td></tr><tr><td><code>plan_discard</code></td><td>Plan</td><td>Delete a plan</td></tr><tr><td><code>plan_enter</code></td><td>Build</td><td>Suggest switching to plan mode</td></tr><tr><td><code>plan_check</code></td><td>Build</td><td>Mark a checklist item as done</td></tr></tbody></table></div><h2>Plan Files</h2>
 <p>Plans are stored as markdown files:</p>
 <pre><code>~/.cast/plans/&lt;session-id&gt;/

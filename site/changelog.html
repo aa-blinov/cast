@@ -478,6 +478,170 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 	<article class="content">
 		<h1>Changelog</h1>
 <p>All notable user-facing changes to cast, newest first.</p>
+<h2>0.11.1</h2>
+<h3>Fixed</h3>
+<ul>
+<li><code>cast web &lt;typo of stop|status&gt;</code> no longer silently starts a new server daemon — any unrecognized subcommand now errors instead of falling through to the default &quot;start&quot; behavior.</li>
+<li><code>cast upgrade --&lt;typo of --force&gt;</code> no longer silently attempts to upgrade to a &quot;version&quot; named after the mistyped flag — unknown flags now error before that logic runs.</li>
+<li><code>/ssh &lt;typo of add|remove&gt;</code> (terminal UI) no longer silently falls back to listing hosts — unrecognized subcommands now error.</li>
+</ul>
+<h2>0.11.0</h2>
+<h3>Fixed</h3>
+<ul>
+<li>Skills.sh: installing via the web UI now actually lands where cast scans (<code>~/.agents/skills/</code>) — installs used to silently vanish depending on which agent flag was used.</li>
+<li>Skills.sh: pasting skills.sh&#39;s own &quot;npx skills add ...&quot; command into the install field now works, not just the bare <code>owner/repo --skill name</code> args.</li>
+<li>Skills.sh: the installed-skill list now shows the real source repo (read from the skills.sh lockfile) instead of a mis-parsed label that was always empty.</li>
+<li>Skills.sh / SSH: command output no longer leaks raw ANSI escape codes (cursor show/hide sequences) into the UI.</li>
+<li>Settings modal: a failed action no longer leaves every button in the modal permanently disabled.</li>
+<li>Diff/Files panel: a manually resized width now survives a page reload.</li>
+<li>Hooks: a hook that force-stops the turn no longer silently drops <code>updatedInput</code>/<code>additionalContext</code> contributed by other hooks in the same run.</li>
+<li>Hooks: a <code>PostToolUse</code>/<code>PostToolUseFailure</code> hook that blocks with no output of its own no longer has its block silently dropped.</li>
+<li>Hooks: two identical hook groups from different sources (e.g. a plugin and a project file) no longer share an id, so disabling one no longer disables the other.</li>
+<li>Hooks: a malformed <code>hooks.json</code> now surfaces a parse-error diagnostic in Settings and <code>/hooks</code> instead of silently loading as empty.</li>
+</ul>
+<h3>Changed</h3>
+<ul>
+<li>Web UI: Marketplace tab browsing merged into one flat, searchable list across all configured marketplaces instead of per-marketplace tabs.</li>
+<li>Web UI: Skills.sh tab dropped the &quot;list available&quot; (browse-a-repo) field and the network-backed search box.</li>
+</ul>
+<h2>0.10.1</h2>
+<h3>Fixed</h3>
+<ul>
+<li>Hooks: <code>${CLAUDE_PLUGIN_ROOT}</code> substitution in command strings so plugins shipped with Claude Code&#39;s marketplace (e.g. hookify, ralph-loop) load and execute unmodified.</li>
+<li>Hooks: case-insensitive tool-name matching in <code>if</code> conditions so <code>if: &quot;Bash(git commit:*)&quot;</code> matches payloads where the tool name is lowercase &quot;bash&quot;.</li>
+<li>Skills: <code>skill</code> tool description in <code>/skill-instructions</code> now explicitly tells the model to call the <code>skill</code> tool (not <code>read</code>) and to load skills FIRST when the request matches a description.</li>
+<li>Personas: every persona&#39;s Tools section mentions the <code>skill</code> tool with a generic description (no skill-name examples, to avoid locking in a specific subset).</li>
+</ul>
+<h3>Changed</h3>
+<ul>
+<li>Skills prompt listing now includes <code>whenToUse</code> alongside <code>description</code> (formatted as <code>description — whenToUse</code>) for richer model matching.</li>
+</ul>
+<h2>0.10.0</h2>
+<h3>Added</h3>
+<ul>
+<li>Hooks: full implementation matching the Claude Code protocol — shell/HTTP commands fire on lifecycle events to validate/block a tool call, log activity, or keep the agent working before it stops. Configure via <code>.cast/hooks.json</code> (project) or <code>~/.cast/hooks.json</code> (global); manage with <code>/hooks</code>, <code>/hooks enable|disable &lt;id&gt;</code>, <code>/hooks help</code>.</li>
+<li>Web UI: Settings → Hooks tab, mirroring <code>/hooks</code> (per-source grouping, enable/disable toggle).</li>
+<li>Skills: dedicated <code>skill</code> tool replaces the model reading <code>SKILL.md</code> via the generic <code>read</code> tool — validates the name, enforces <code>disable-model-invocation</code>, and performs argument substitution in one call.</li>
+<li>Skills: <code>$ARGUMENTS</code>, <code>$ARGUMENTS[0]</code>/<code>$0</code>, and <code>${CLAUDE_SKILL_DIR}</code> substitution in skill bodies, plus a <code>when_to_use</code> frontmatter field surfaced in the skill listing as <code>description — whenToUse</code>.</li>
+<li>Web UI: marketplace tabs with a plugin catalog browser (alphabetically sorted tabs and plugins, full descriptions).</li>
+</ul>
+<h3>Changed</h3>
+<ul>
+<li>Web UI: Settings panel restyled — MCP/Skills/SSH intro text switched from a collapsible <code>&lt;details&gt;</code> to an always-visible summary line; item rows, plugin catalog entries, and theme/font swatches share a consistent card/hover treatment; Plugins tab renamed to Marketplace, settings tabs sorted alphabetically (opens first tab by default).</li>
+<li>Web UI: font swatches load their Google Fonts stylesheet so every option previews in its own font instead of falling back to the system font.</li>
+</ul>
+<h3>Fixed</h3>
+<ul>
+<li>Case-insensitive tool name matching in hook <code>if</code> conditions.</li>
+<li><code>${CLAUDE_PLUGIN_ROOT}</code> substitution in hook command strings for plugin compatibility.</li>
+<li>Hook protocol parity — missing payload fields and output formats now match Claude Code&#39;s.</li>
+<li>MCP/Skills/SSH settings tabs now work while the agent is running.</li>
+</ul>
+<h2>0.9.14</h2>
+<h3>Fixed</h3>
+<ul>
+<li>Vision error fallback now catches 400 status codes in addition to 404, so provider image-rejection errors (e.g. oversized base64) trigger image stripping and retry instead of surfacing a raw 400 to the user.</li>
+<li>Per-file image read cap lowered from 25MB to 5MB to match provider limits, preventing images from being embedded only to get rejected at the API.</li>
+</ul>
+<h2>0.9.13</h2>
+<h3>Internal</h3>
+<ul>
+<li>Zero biome lint warnings/errors project-wide.</li>
+</ul>
+<h2>0.9.12</h2>
+<h3>Changed</h3>
+<ul>
+<li><code>todo_write</code> is now guidance-based — the hard gate that blocked non-todo tool calls after 4 work actions is removed. The model decides when to use <code>todo_write</code> based on task complexity, same as opencode&#39;s <code>todowrite</code>.</li>
+</ul>
+<h2>0.9.11</h2>
+<h3>Fixed</h3>
+<ul>
+<li>Web UI: the Inputs tab loading state now uses the same &quot;Loading…&quot; style as every other panel instead of an inconsistent title-sized label.</li>
+</ul>
+<h2>0.9.10</h2>
+<h3>Fixed</h3>
+<ul>
+<li>Web UI: the Inputs sidebar no longer shows a stale &quot;No files attached&quot; flash when re-fetching after a document upload or during agent-response re-renders.</li>
+<li>Web UI: attached documents in a draft session (before the first message was sent) now work — the upload is deferred to <code>submitMessage</code> after <code>commitSession</code> creates the real session, instead of blocking with &quot;send a message first&quot;.</li>
+<li>Web UI: a double <code>commitSession</code> call when drafting a session with pending documents created two separate sessions — files landed in the first, the message in the second, so the Inputs tab was empty while the chat showed the files. A single <code>id</code> variable now flows through both blocks.</li>
+<li>Web UI: the sidebar&#39;s &quot;No sessions match&quot; empty state no longer flashes during initial load before the session list arrives.</li>
+</ul>
+<h3>Changed</h3>
+<ul>
+<li>Web UI: tightened chat vertical spacing — smaller gap, leaner padding, and reduced line-height for denser messages.</li>
+</ul>
+<h2>0.9.9</h2>
+<h3>Added</h3>
+<ul>
+<li>Session search (TUI and web) now runs on a SQLite FTS5 index over full message history instead of a JS fuzzy scorer — same relevance ranking in both interfaces, and a multi-word query now matches across different messages in the same conversation instead of only within one.</li>
+<li><code>web_fetch</code> gets a second backend: &quot;local&quot; fetches the URL directly (no third party sees it) and converts HTML itself, with a Cloudflare-challenge retry, a 5MB response cap, and content-type checks that reject binaries. Switch with <code>/web-fetch-provider jina|local</code> (default stays <code>jina</code>).</li>
+<li>Web UI: an &quot;Inputs&quot; tab (right sidebar, ordered Inputs/Files/Changes) for a session&#39;s attached documents.</li>
+<li>Web UI: the composer&#39;s attach button now accepts documents, not just images — non-image files upload to a session-scoped directory and the model gets told their path via an invisible reminder on send. Executable/binary formats are rejected; archives and ordinary documents are allowed.</li>
+<li><code>cast web</code>&#39;s MCP servers now connect in the background after the HTTP server starts listening, instead of blocking startup on every configured server (npx spawns, browser launches, remote handshakes) — the server accepts requests immediately, and connected tools become available in any open session automatically once the connect finishes.</li>
+</ul>
+<h3>Changed</h3>
+<ul>
+<li>Web UI: the &quot;Tools&quot; settings tab split into three — Bash, Web, Quick Mode — each loading only the data it needs instead of five settings commands on every open.</li>
+<li><code>web_fetch</code>: one retry on a transient network failure or 5xx (never on an intentional abort or a 4xx), and truncation now prefers the nearest paragraph break over a mid-sentence cut.</li>
+</ul>
+<h3>Fixed</h3>
+<ul>
+<li><code>web_fetch</code> now rejects non-http(s) URL schemes (<code>file://</code>, <code>data:</code>, ...) before ever making a network call.</li>
+<li><code>cast web status</code>/&quot;already running&quot; could report a server as up before it was actually accepting connections — the daemon state file is now written only once the HTTP server is truly listening, matching its own documented contract.</li>
+</ul>
+<h2>0.9.8</h2>
+<h3>Fixed</h3>
+<ul>
+<li>Web UI: tooltips display as a single horizontal line instead of wrapping into a narrow column due to <code>max-width</code> and <code>word-break</code> constraints.</li>
+<li>Web UI: <code>assistant_message</code> handler now uses event payload (<code>content</code>/<code>thinking</code>/<code>toolCalls</code>) as fallback when streaming blocks are empty, preventing silently dropped messages on SSE interruptions.</li>
+</ul>
+<h2>0.9.7</h2>
+<h3>Added</h3>
+<ul>
+<li>Web UI: custom tooltip system — themed bubbles with fast appearance, viewport-aware positioning, no truncation.</li>
+<li>Web UI: keyboard shortcuts icon (heroicons-compatible outline style).</li>
+<li>Web UI: all settings tabs now have collapsible help sections (Model, Tools, MCP, Skills, SSH, Plugins).</li>
+<li>Web UI: SSH settings now support password authentication (requires <code>sshpass</code>).</li>
+</ul>
+<h3>Changed</h3>
+<ul>
+<li>Web UI: Settings modal widened from 620px to 820px for better readability.</li>
+<li>Web UI: help sections in Tools and Model tabs now use inline hints after each section title instead of a single collapsible block.</li>
+<li>Web UI: theme swatches redesigned with grid layout — dot left-aligned, label centered.</li>
+<li>Web UI: every theme now carries its own background palette (bg, bgSurface, bgRaised, bgHover, border, borderActive) with improved contrast between UI layers.</li>
+<li>Web UI: 6 themes (Nord, Solarized, Catppuccin, GitHub, Dracula, Gruvbox) use official background colors from their design specifications.</li>
+<li>Web UI: reasoning blocks and turn-meta footer now use <code>--text-dim</code> for better readability.</li>
+<li>Web UI: chevron icon in collapsible sections replaced from CSS triangle to genuine Heroicon.</li>
+</ul>
+<h3>Fixed</h3>
+<ul>
+<li>Web UI: loading spinners now centered in settings pane, diff panel, and file previews.</li>
+<li>Web UI: Tavily and Brave Search input fields aligned to equal widths.</li>
+<li>Web UI: SSH hosts form reordered — password field before key field.</li>
+</ul>
+<h2>0.9.6</h2>
+<h3>Internal</h3>
+<ul>
+<li>Removed unused <code>formatActiveRulesPrompt</code> — the per-turn rules path has used <code>formatRulesForTurn</code> (single combined <code>&lt;rules&gt;</code> block) since it was introduced; the legacy two-part formatter had no callers outside its own tests.</li>
+</ul>
+<h2>0.9.5</h2>
+<h3>Added</h3>
+<ul>
+<li>Two new built-in personas: <code>researcher</code> (web-search-driven investigation, cites sources) and <code>assistant</code> (general-purpose everyday help — advice, quick lookups, drafts — that reaches for tools only when a task actually needs them).</li>
+<li>Web UI: the Files panel&#39;s <code>.md</code> preview now renders through a real markdown engine (headings, lists, tables, links) and code files get real per-language syntax highlighting, both vendored for fully offline use. The Settings → Skills &quot;read full content&quot; view got the same treatment, in the same size modal as the file preview.</li>
+<li>Web UI: every finished agent reply now shows its own &quot;provider · model · Ns&quot; footer, persisted per-turn — a thread with several exchanges shows a footer under each one, not just whichever was most recent, and it survives a full page reload.</li>
+</ul>
+<h3>Fixed</h3>
+<ul>
+<li>Web UI: a disabled plugin&#39;s skill still worked as a native slash command and stayed listed in the composer palette — both now correctly disappear.</li>
+<li>TUI: <code>/plugin</code> silently cloned three GitHub-hosted default marketplaces on first use with no way to tell where they came from. They&#39;re back as permanent, always-present catalogs (labeled &quot;built-in&quot; in the web UI), but non-removable and no longer a surprise — <code>/plugin marketplace add</code> is the documented way to add your own.</li>
+<li>Web UI: Chinese trigger phrases removed from three built-in skill descriptions; the command palette now truncates a long description with an ellipsis instead of letting it overflow the row.</li>
+<li>Web UI: clicking a file&#39;s icon or the empty space in its row (not just the filename text) now opens its preview, matching the whole row&#39;s hover/click-target styling.</li>
+<li>Web UI: fixed the Files preview&#39;s markdown spacing (was inheriting the chat&#39;s pre-wrap styling, doubling up as huge line gaps), added Escape-to-close, and removed a raw-then-rendered flash on a slow connection.</li>
+<li>Web UI: the stale &quot;provider · model · Ns&quot; footer and elapsed-time counter from a just-finished session no longer bleed into a brand-new session.</li>
+<li>Web UI: centered &quot;Loading…&quot; states that were pinned top-left instead of filling their container (Settings tabs, Status popover, Files panel&#39;s initial load).</li>
+<li>Web UI: a hand-approximated <code>chevronUp</code> icon path was fixed to match its actual Heroicons source.</li>
+</ul>
 <h2>0.9.4</h2>
 <h3>Added</h3>
 <ul>

@@ -478,21 +478,22 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 	<article class="content">
 		<h1>Plugins &amp; Marketplaces</h1>
 <p>Install reusable skill packs from catalogs — same <code>name@marketplace</code> shape as Claude Code / Grok Build.</p>
-<p>MVP scope: plugins contribute <strong>skills</strong> (loaded into the agent catalog). MCP/hooks/agents inside plugins are not wired yet.</p>
+<p>Plugins contribute <strong>skills</strong> (loaded into the agent catalog) and <strong>hooks</strong> (<code>&lt;root&gt;/hooks/hooks.json</code>, merged into the same config <code>.cast/hooks.json</code> uses — see <a href="hooks.html">Hooks</a>). MCP servers/agents bundled inside a plugin aren&#39;t wired up yet — only skills and hooks are read from an installed plugin&#39;s contents.</p>
 <p>Marketplaces are cloned with <code>git</code>, so git must be installed and in PATH (on Windows: Git for Windows — which cast&#39;s <code>bash</code> tool wants anyway). Without it, marketplace commands fail with an explicit message rather than a raw spawn error.</p>
 <h2>Quick start</h2>
-<p>On the first <code>/plugin</code> (or marketplace/install) cast seeds three default catalogs when missing:</p>
-<div class="table-wrap"><table><thead><tr><th>Label</th><th>Source</th></tr></thead><tbody><tr><td>Codex</td><td><code>openai/plugins</code></td></tr><tr><td>Claude</td><td><code>anthropics/claude-plugins-official</code></td></tr><tr><td>Grok</td><td><code>xai-org/plugin-marketplace</code></td></tr></tbody></table></div><p>Then:</p>
+<p>Three catalogs are always registered and can&#39;t be removed:</p>
+<div class="table-wrap"><table><thead><tr><th>Label</th><th>Source</th></tr></thead><tbody><tr><td>Community</td><td><code>jeremylongshore/claude-code-plugins-plus-skills</code></td></tr><tr><td>Claude</td><td><code>anthropics/claude-plugins-official</code></td></tr><tr><td>Grok</td><td><code>xai-org/plugin-marketplace</code></td></tr></tbody></table></div><p>They&#39;re seeded on first use of <code>/plugin</code> (a cheap check after that — no re-cloning). Browse and install straight away:</p>
 <pre><code>/plugin marketplace list
 /plugin marketplace list xai-official
 /plugin install superpowers@xai-official
 /skills
 </code></pre>
-<p>Or a local catalog (for testing / private plugins):</p>
-<pre><code>/plugin marketplace add ./my-marketplace
-/plugin install ponytail@ponytail
+<p>Add your own catalog alongside the defaults:</p>
+<pre><code>/plugin marketplace add owner/repo        # GitHub shorthand
+/plugin marketplace add https://...       # any git URL
+/plugin marketplace add ./my-marketplace  # local path (testing / private plugins)
 </code></pre>
-<p>Seed runs once (<code>~/.cast/plugins/defaults-seeded.json</code>). Removed defaults are not re-added; failed clones (offline) retry until at least one succeeds.</p>
+<p>Only marketplaces you added yourself can be removed with <code>/plugin marketplace remove &lt;name&gt;</code> — the three defaults reject removal.</p>
 <h2>Hot-reload</h2>
 <p><code>/plugin install</code>, <code>uninstall</code>, <code>enable</code> / <code>disable</code>, bare <code>/plugin</code> toggle, and <code>marketplace remove</code> reload the skill catalog <strong>in the current session</strong>. No <code>/reload</code> and no new session.</p>
 <p><code>/reload</code> is only for skills/rules/MCP/personas you added or edited as files outside these commands. See <a href="interactive-commands.html#hot-reload-vs-reload">Interactive commands</a>.</p>
