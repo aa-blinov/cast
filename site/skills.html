@@ -479,7 +479,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 		<h1>Skills</h1>
 <p>Skills are self-contained instruction packages the agent loads on demand. They follow the <a href="https://agentskills.io">Agent Skills spec</a> — a standard for packaging reusable agent capabilities.</p>
 <h2>How Skills Work</h2>
-<p>The agent sees a list of available skills (name + description) in its system prompt. When a task matches a skill&#39;s description, the agent reads the skill file using the <code>read</code> tool to get full instructions. Skills with <code>disable-model-invocation: true</code> are hidden from the agent and can only be invoked manually via <code>/skill:&lt;name&gt;</code>.</p>
+<p>The agent sees a list of available skills (name + description, and <code>description — whenToUse</code> when <code>when_to_use</code> is set) in its system prompt. When a task matches a skill&#39;s description, the agent calls the dedicated <code>skill</code> tool with the skill&#39;s name to get full instructions — it no longer reads the skill file via the generic <code>read</code> tool. Skills with <code>disable-model-invocation: true</code> are hidden from the agent and can only be invoked manually via <code>/skill:&lt;name&gt;</code>.</p>
 <h2>Built-in Skills</h2>
 <p>Skills ship with cast in <code>prompts/skills/</code>. Use <code>/skills list</code> to see what&#39;s loaded; bare <code>/skills</code> toggles them on/off.</p>
 <h2>Loading Priority</h2>
@@ -527,7 +527,7 @@ When invoked, follow these steps:
 Always check `templates/` for reference material.
 </code></pre>
 <h3>Frontmatter Fields</h3>
-<div class="table-wrap"><table><thead><tr><th>Field</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>name</code></td><td>No</td><td>Identifier (defaults to parent directory name)</td></tr><tr><td><code>description</code></td><td><strong>Yes</strong></td><td>What the skill does — skills without a description are dropped</td></tr><tr><td><code>disable-model-invocation</code></td><td>No</td><td><code>true</code> to hide from the agent (manual <code>/skill:&lt;name&gt;</code> only)</td></tr></tbody></table></div><h3>Name Rules</h3>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>name</code></td><td>No</td><td>Identifier (defaults to parent directory name)</td></tr><tr><td><code>description</code></td><td><strong>Yes</strong></td><td>What the skill does — skills without a description are dropped</td></tr><tr><td><code>disable-model-invocation</code></td><td>No</td><td><code>true</code> to hide from the agent (manual <code>/skill:&lt;name&gt;</code> only)</td></tr><tr><td><code>when_to_use</code></td><td>No</td><td>Extra matching guidance shown to the model as <code>description — whenToUse</code> in the skill listing</td></tr></tbody></table></div><h3>Name Rules</h3>
 <p>Per the Agent Skills spec:</p>
 <ul>
 <li>Lowercase letters, digits, and hyphens only (<code>[a-z0-9-]+</code>)</li>
@@ -555,6 +555,11 @@ Always check `templates/` for reference material.
 /skill:cast add a new persona
 </code></pre>
 <p>The <code>/skill:&lt;name&gt;</code> command reads the skill&#39;s full content and submits it to the agent as context, followed by any additional arguments.</p>
+<h3>Argument Substitution</h3>
+<p>Skill bodies can reference invocation arguments and their own directory:</p>
+<div class="table-wrap"><table><thead><tr><th>Placeholder</th><th>Substituted with</th></tr></thead><tbody><tr><td><code>$ARGUMENTS</code></td><td>The full argument string</td></tr><tr><td><code>$ARGUMENTS[0]</code>, <code>$ARGUMENTS[1]</code>, ... / <code>$0</code>, <code>$1</code>, ...</td><td>An individual argument (shell-quote-style parsing — quoted strings stay intact)</td></tr><tr><td><code>${CLAUDE_SKILL_DIR}</code></td><td>Absolute path to the skill&#39;s own directory, for resolving relative paths</td></tr></tbody></table></div><p>If arguments are supplied but the skill body contains no <code>$ARGUMENTS</code> placeholder, they&#39;re appended as a trailing <code>User: &lt;args&gt;</code> line instead of being silently dropped.</p>
+<h3>The <code>skill</code> Tool</h3>
+<p>The agent invokes skills through a dedicated <code>skill</code> tool (<code>name</code>, optional <code>args</code>) rather than reading <code>SKILL.md</code> via the generic <code>read</code> tool. It validates the name, enforces <code>disable-model-invocation</code>, performs the substitution above, and returns the formatted skill content in one call.</p>
 <h2>CLI Flags</h2>
 <div class="table-wrap"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody><tr><td><code>--skill &lt;path&gt;</code></td><td>Load an extra skill file or directory (repeatable)</td></tr><tr><td><code>--no-skills</code></td><td>Skip project/agents/global/plugin/builtin skill discovery</td></tr></tbody></table></div><pre><code class="language-bash">cast --skill ./my-project-skill.md
 cast --no-skills --skill ~/.cast/skills/arxiv/SKILL.md
