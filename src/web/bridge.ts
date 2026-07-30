@@ -1703,6 +1703,74 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			}
 			return { ok: false, error: `Unknown /skills subcommand: ${sub}` };
 		}
+		if (name === "/skills-sh") {
+			const sessionCwd = ws.session.cwd ?? cwd;
+			const [sub, ...restParts] = arg ? arg.split(/\s+/) : [""];
+			const rest = restParts.join(" ");
+			try {
+				if (sub === "install") {
+					if (!rest)
+						return { ok: false, error: "Usage: /skills-sh install <owner/repo> --skill <name> [-a <agent>]" };
+					const out = execFileSync("npx", ["--yes", "skills", "add", ...rest.split(/\s+/)], {
+						cwd: homedir(),
+						encoding: "utf-8",
+						timeout: 120_000,
+					});
+					const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
+					skillsPromptSuffix = skillsResult.skillsPromptSuffix;
+					recomputeAllSystemPrompts();
+					return { ok: true, result: out.trim() || "Installed." };
+				}
+				if (sub === "list-available") {
+					if (!rest) return { ok: false, error: "Usage: /skills-sh list-available <owner/repo>" };
+					const out = execFileSync("npx", ["--yes", "skills", "add", rest, "--list"], {
+						cwd: homedir(),
+						encoding: "utf-8",
+						timeout: 60_000,
+					});
+					return { ok: true, result: out };
+				}
+				if (sub === "search") {
+					if (!rest) return { ok: false, error: "Usage: /skills-sh search <query>" };
+					const out = execFileSync("npx", ["--yes", "skills", "find", ...rest.split(/\s+/)], {
+						cwd: homedir(),
+						encoding: "utf-8",
+						timeout: 60_000,
+					});
+					return { ok: true, result: out };
+				}
+				if (sub === "uninstall") {
+					if (!rest) return { ok: false, error: "Usage: /skills-sh uninstall <name>" };
+					const out = execFileSync("npx", ["--yes", "skills", "rm", ...rest.split(/\s+/)], {
+						cwd: homedir(),
+						encoding: "utf-8",
+						timeout: 30_000,
+					});
+					const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
+					skillsPromptSuffix = skillsResult.skillsPromptSuffix;
+					recomputeAllSystemPrompts();
+					return { ok: true, result: out.trim() || "Uninstalled." };
+				}
+				if (sub === "update") {
+					const out = execFileSync("npx", ["--yes", "skills", "update", "-y"], {
+						cwd: homedir(),
+						encoding: "utf-8",
+						timeout: 180_000,
+					});
+					const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
+					skillsPromptSuffix = skillsResult.skillsPromptSuffix;
+					recomputeAllSystemPrompts();
+					return { ok: true, result: out.trim() || "Updated." };
+				}
+				return {
+					ok: false,
+					error: `Unknown /skills-sh subcommand: "${sub}". Try: install, list-available, search, uninstall, update.`,
+				};
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				return { ok: false, error: message };
+			}
+		}
 		if (name === "/plugin") {
 			const [sub, rest] = splitArg(arg);
 			const sessionCwd = ws.session.cwd ?? cwd;

@@ -3,6 +3,7 @@
  * No build step: importmap loads preact and htm from esm.sh CDN.
  */
 
+import { homedir } from "node:os";
 import htm from "htm";
 import { h, render } from "preact";
 import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
@@ -2532,11 +2533,13 @@ const SETTINGS_TABS = [
 	{ id: "bash", label: "Bash" },
 	{ id: "font", label: "Font" },
 	{ id: "hooks", label: "Hooks" },
+	{ id: "marketplace", label: "Marketplace" },
 	{ id: "mcp", label: "MCP" },
 	{ id: "model", label: "Model" },
 	{ id: "plugins", label: "Plugins" },
-	{ id: "marketplace", label: "Marketplace" },
 	{ id: "provider", label: "Provider" },
+	{ id: "skillssh", label: "Skills.sh" },
+	{ id: "ssh", label: "SSH" },
 	{ id: "quick-mode", label: "Quick Mode" },
 	{ id: "skills", label: "Skills" },
 	{ id: "ssh", label: "SSH" },
@@ -2719,6 +2722,14 @@ function SettingsModal({
 					return;
 				}
 				setData((d) => ({ ...d, skills: res.result }));
+			} else if (t === "skillssh") {
+				// Reuses the same data as the Skills tab — Skills.sh skills are
+				// already loaded from ~/.config/agents/skills/ as part of the
+				// agentsGlobalDirs list.
+				if (data.skills === undefined) {
+					const res = await run("/skills list");
+					setData((d) => ({ ...d, skills: res?.result ?? [] }));
+				}
 			} else if (t === "plugins") {
 				const res = await run("/plugin list");
 				setData((d) => ({
@@ -2755,7 +2766,7 @@ function SettingsModal({
 				setData((d) => ({ ...d, ssh: res.result }));
 			}
 		},
-		[run, activeId],
+		[run, activeId, data.skills],
 	);
 
 	// Preload every tab in parallel as soon as the modal mounts (or the active
@@ -2793,7 +2804,12 @@ function SettingsModal({
 			// which hooks appear in the Hooks tab.
 			if (res.ok) {
 				if (command === "/reload" || command.startsWith("/skills ")) onReload?.();
-				if (command === "/reload" || command.startsWith("/plugin ") || command.startsWith("/mcp ")) {
+				if (
+					command === "/reload" ||
+					command.startsWith("/plugin ") ||
+					command.startsWith("/mcp ") ||
+					command.startsWith("/skills-sh ")
+				) {
 					load("hooks");
 					load("mcp");
 					load("skills");
@@ -2866,11 +2882,13 @@ function SettingsModal({
 																			? html`<${SettingsPlugins} data=${data.plugins} busy=${busy} act=${act} confirm=${confirm} />`
 																			: tab === "marketplace"
 																				? html`<${SettingsMarketplace} data=${data.marketplace} busy=${busy} act=${act} confirm=${confirm} />`
-																				: tab === "provider"
-																					? html`<${SettingsProvider} data=${data.provider} busy=${busy} act=${act} confirm=${confirm} />`
-																					: tab === "ssh"
-																						? html`<${SettingsSsh} data=${data.ssh} busy=${busy} act=${act} confirm=${confirm} />`
-																						: null
+																				: tab === "skillssh"
+																					? html`<${SettingsSkillssh} data=${data.skills} busy=${busy} act=${act} confirm=${confirm} />`
+																					: tab === "provider"
+																						? html`<${SettingsProvider} data=${data.provider} busy=${busy} act=${act} confirm=${confirm} />`
+																						: tab === "ssh"
+																							? html`<${SettingsSsh} data=${data.ssh} busy=${busy} act=${act} confirm=${confirm} />`
+																							: null
 						}
 					</div>
 				</div>
@@ -3507,6 +3525,86 @@ function SettingsHooks({ data, busy, act }) {
 				`,
 				)}
 			${hooks.length === 0 && html`<div class="settings-hint">No hooks configured.</div>`}
+		</div>
+	`;
+}
+
+function SettingsSkillssh({ data, busy, act, confirm }) {
+	const [installArgs, setInstallArgs] = useState("");
+	const [searchQuery, setSearchQuery] = useState("");
+	const [listRepo, setListRepo] = useState("");
+	const [searchOutput, setSearchOutput] = useState("");
+	const [listOutput, setListOutput] = useState("");
+	const allSkills = data || [];
+	// Filter to skills loaded from skills.sh agents dir
+	const isSkillsshPath = (p) =>
+		p?.startsWith(`${homedir()}/.config/agents/skills`) || p?.startsWith(`${homedir()}/.agents/skills`);
+	const shSkills = allSkills.filter((s) => isSkillsshPath(s.filePath));
+	const shRepo = (s) => {
+		// filePath is ~/.config/agents/skills/<repo>/<skill>/SKILL.md → extract repo
+		const m = s.filePath?.match(/\/(skills-sh|agents)\/skills\/([^/]+)\//);
+		return m ? m[2] : "";
+	};
+	const runCommand = (cmd, onOutput) => async () => {
+		const res = await act(cmd);
+		if (res?.ok && onOutput && typeof res.result === "string") onOutput(res.result);
+	};
+	return html`
+		<div class="settings-rows">
+			<p class="settings-intro"><span><a href="https://skills.sh" target="_blank" rel="noopener">Skills.sh</a> is the open agent-skills ecosystem (70+ agents, 27k stars). Cast already loads anything in <code>~/.config/agents/skills/</code> automatically — this tab wraps the <code>npx skills</code> CLI so you can install, search, and manage without leaving the UI.</span></p>
+
+			<div class="settings-section-title">Install a skill</div>
+			<div class="settings-form-row">
+				<input type="text" placeholder="owner/repo --skill name [-a claude-code]" value=${installArgs} onInput=${(e) => setInstallArgs(e.target.value)} onKeyDown=${(e) => e.key === "Enter" && installArgs && act(`/skills-sh install ${installArgs}`).then(() => setInstallArgs(""))} />
+				<button class="modal-btn icon-btn" title="Run npx skills add" disabled=${busy || !installArgs} onClick=${() => act(`/skills-sh install ${installArgs}`).then(() => setInstallArgs(""))}><${icons.arrowDownTray} /></button>
+			</div>
+
+			<div class="settings-section-title">Browse (skills.sh)</div>
+			<div class="settings-form-row">
+				<input type="text" placeholder="search skills (e.g. typescript)" value=${searchQuery} onInput=${(e) => setSearchQuery(e.target.value)} onKeyDown=${(e) => e.key === "Enter" && searchQuery && act(`/skills-sh search ${searchQuery}`).then(() => setSearchOutput(""))} />
+				<button class="modal-btn icon-btn" title="Run npx skills find" disabled=${busy || !searchQuery} onClick=${runCommand(`/skills-sh search ${searchQuery}`, setSearchOutput)}><${icons.search} /></button>
+			</div>
+			<div class="settings-form-row">
+				<input type="text" placeholder="owner/repo (browse available skills in this repo)" value=${listRepo} onInput=${(e) => setListRepo(e.target.value)} />
+				<button class="modal-btn" disabled=${busy || !listRepo} onClick=${runCommand(`/skills-sh list-available ${listRepo}`, setListOutput)}><${icons.magnifyingGlass} /> List available</button>
+			</div>
+			${
+				(listOutput || searchOutput) &&
+				html`
+				<div class="settings-pre">${listOutput || searchOutput}</div>
+				<button class="modal-btn" disabled=${busy} onClick=${() => {
+					setSearchOutput("");
+					setListOutput("");
+				}}>Clear output</button>
+			`
+			}
+
+			<div class="settings-section-title">Installed via skills.sh (${shSkills.length})</div>
+			${shSkills.length === 0 && html`<div class="settings-hint">No skills installed via skills.sh yet. Install one above.</div>`}
+			${shSkills
+				.sort((a, b) => a.name.localeCompare(b.name))
+				.map(
+					(s) => html`
+				<div key=${s.name} class="settings-item-row">
+					<div class="settings-item-info">
+						<span class="settings-item-name">${s.name}</span>
+						<span class="settings-item-meta">${shRepo(s)}</span>
+						<${InfoPopover} text=${s.description} readUrl=${`/api/skill-content?name=${encodeURIComponent(s.name)}`} />
+					</div>
+					<div class="settings-item-actions">
+						<button class="modal-btn icon-btn modal-btn-danger" title="Uninstall" disabled=${busy} onClick=${async () => {
+							if (await confirm(`Uninstall skill "${s.name}" (via npx skills rm)?`))
+								act(`/skills-sh uninstall ${s.name}`);
+						}}><${icons.trash} /></button>
+					</div>
+				</div>
+			`,
+				)}
+
+			<div class="settings-section-title">Manage</div>
+			<div class="settings-form-row">
+				<button class="modal-btn" disabled=${busy} onClick=${() => act("/skills-sh update")}><${icons.arrowPath} /> Update all skills</button>
+			</div>
 		</div>
 	`;
 }
