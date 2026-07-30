@@ -4,7 +4,14 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type HooksFile, hookGroupId, listHooksForCwd, loadHooksForCwd, runHooksForEvent } from "../src/core/hooks.ts";
+import {
+	type HooksFile,
+	hookGroupId,
+	hooksFileDiagnostics,
+	listHooksForCwd,
+	loadHooksForCwd,
+	runHooksForEvent,
+} from "../src/core/hooks.ts";
 
 describe("loadHooksForCwd", () => {
 	let dir: string;
@@ -110,6 +117,50 @@ describe("listHooksForCwd", () => {
 		const b = listHooksForCwd(dir, true, [{ path: pluginFile, pluginRoot: dir }]);
 		expect(a[0]?.id).toBe(b[0]?.id);
 	});
+
+	it("REGRESSION: byte-identical hook content from different sources gets different ids (no cross-source collision)", () => {
+		// Before the fix, hookGroupId hashed only event|matcher|hooks — two
+		// groups with identical content from a project file and a plugin file
+		// collided onto the same id, so disabling one via Settings silently
+		// disabled the other too.
+		const identical = JSON.stringify({ Stop: [{ hooks: [{ command: "true" }] }] });
+		mkdirSync(join(dir, ".cast"), { recursive: true });
+		writeFileSync(join(dir, ".cast", "hooks.json"), identical);
+		const pluginFile = join(dir, "plugin-hooks.json");
+		writeFileSync(pluginFile, identical);
+
+		const entries = listHooksForCwd(dir, true, [{ path: pluginFile, pluginRoot: dir, pluginId: "some-plugin" }]);
+		const projectEntry = entries.find((e) => e.source === "project");
+		const pluginEntry = entries.find((e) => e.source === "plugin");
+		expect(projectEntry).toBeTruthy();
+		expect(pluginEntry).toBeTruthy();
+		expect(projectEntry!.id).not.toBe(pluginEntry!.id);
+	});
+
+	it("REGRESSION: hooksFileDiagnostics surfaces a malformed hooks.json instead of the silent empty-config fallback", () => {
+		mkdirSync(join(dir, ".cast"), { recursive: true });
+		writeFileSync(join(dir, ".cast", "hooks.json"), "{not valid json");
+		const diagnostics = hooksFileDiagnostics(dir, true, []);
+		expect(diagnostics).toHaveLength(1);
+		expect(diagnostics[0]!.path).toBe(join(dir, ".cast", "hooks.json"));
+		expect(diagnostics[0]!.message).toBeTruthy();
+	});
+
+	it("hooksFileDiagnostics reports nothing for valid hooks.json files", () => {
+		mkdirSync(join(dir, ".cast"), { recursive: true });
+		writeFileSync(join(dir, ".cast", "hooks.json"), JSON.stringify({ Stop: [{ hooks: [{ command: "true" }] }] }));
+		expect(hooksFileDiagnostics(dir, true, [])).toEqual([]);
+	});
+
+	it("hooksFileDiagnostics also checks plugin-contributed hook files", () => {
+		const pluginFile = join(dir, "plugin-hooks.json");
+		writeFileSync(pluginFile, "not json at all");
+		const diagnostics = hooksFileDiagnostics(dir, true, [
+			{ path: pluginFile, pluginRoot: dir, pluginId: "broken-plugin" },
+		]);
+		expect(diagnostics).toHaveLength(1);
+		expect(diagnostics[0]!.path).toBe(pluginFile);
+	});
 });
 
 describe("runHooksForEvent", () => {
@@ -177,6 +228,29 @@ describe("runHooksForEvent", () => {
 		const result = await runHooksForEvent(hooks, { event: "Stop", cwd: "/tmp", payload: {} });
 		expect(result.forceStop).toBe(true);
 		expect(result.reason).toBe("budget exhausted");
+	});
+
+	it("a forceStop from one hook still merges additionalContext/updatedInput from sibling hooks in the same run", async () => {
+		// Regression: the aggregation loop used to `return result` the instant
+		// it saw forceStop, skipping the same merge the blocked-path gets —
+		// silently dropping whatever other hooks in the batch had already set,
+		// depending on array order.
+		const hooks: HooksFile = {
+			PreToolUse: [
+				{
+					hooks: [
+						{ command: 'echo \'{"hookSpecificOutput":{"updatedInput":{"foo":"bar"}}}\'' },
+						{ command: 'echo \'{"hookSpecificOutput":{"additionalContext":"context from sibling"}}\'' },
+						{ command: 'echo \'{"continue":false,"stopReason":"stop from third hook"}\'' },
+					],
+				},
+			],
+		};
+		const result = await runHooksForEvent(hooks, { event: "PreToolUse", cwd: "/tmp", payload: {} });
+		expect(result.forceStop).toBe(true);
+		expect(result.reason).toBe("stop from third hook");
+		expect(result.updatedInput).toEqual({ foo: "bar" });
+		expect(result.additionalContext).toBe("context from sibling");
 	});
 
 	it("a non-blocking failure (plain non-zero, non-2 exit) doesn't block", async () => {

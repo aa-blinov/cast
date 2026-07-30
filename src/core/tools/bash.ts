@@ -18,8 +18,12 @@ import type { ConfirmBash, ToolResult } from "./shared.ts";
 export function stripAnsi(s: string): string {
 	const ESC = String.fromCharCode(0x1b);
 	const BEL = String.fromCharCode(0x07);
+	// CSI: ESC '[' + parameter bytes (0x30-0x3F: digits, `;:<=>?` — the `?`
+	// covers private sequences like `\x1b[?25l`/`\x1b[?25h` for cursor
+	// show/hide, which plain `[0-9;]*` missed) + intermediate bytes
+	// (0x20-0x2F) + one final byte (0x40-0x7E).
 	// biome-ignore lint/suspicious/noUselessEscapeInString: [ must be escaped in regex
-	const csi = new RegExp(`${ESC}\[[0-9;]*[a-zA-Z]`, "g");
+	const csi = new RegExp(`${ESC}\[[0-?]*[ -/]*[@-~]`, "g");
 	// biome-ignore lint/suspicious/noUselessEscapeInString: ] must be escaped in regex
 	const osc = new RegExp(`${ESC}\][^${BEL}]*${BEL}`, "g");
 	return s.replace(csi, "").replace(osc, "");

@@ -8,18 +8,8 @@ import {
 	type SshHost,
 	validateKeyPermissions,
 } from "../ssh.ts";
+import { stripAnsi } from "./bash.ts";
 import type { ConfirmBash, ToolResult } from "./shared.ts";
-
-/** Strip ANSI escape sequences from output. */
-function stripAnsi(s: string): string {
-	const ESC = String.fromCharCode(0x1b);
-	const BEL = String.fromCharCode(0x07);
-	// biome-ignore lint/suspicious/noUselessEscapeInString: [ must be escaped in regex
-	const csi = new RegExp(`${ESC}\[[0-9;]*[a-zA-Z]`, "g");
-	// biome-ignore lint/suspicious/noUselessEscapeInString: ] must be escaped in regex
-	const osc = new RegExp(`${ESC}\][^${BEL}]*${BEL}`, "g");
-	return s.replace(csi, "").replace(osc, "");
-}
 
 export async function execSsh(
 	args: Record<string, unknown>,

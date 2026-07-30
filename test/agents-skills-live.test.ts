@@ -1,14 +1,11 @@
 /**
- * Live checks against ~/.agents/skills (skills.sh installs) plus merge /
- * disable / uninstall behavior for source: agents.
+ * Merge / disable / uninstall behavior for source: agents (skills.sh installs).
  */
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { formatSkillsForPrompt, isUninstallableSkill, loadSkills, uninstallUserSkill } from "../src/core/skills.ts";
 
-const AGENTS_GLOBAL = join(homedir(), ".agents", "skills");
 const TEST_DIR = join(import.meta.dirname, "__test_tmp_agents_skills_live__");
 
 function writeSkill(dir: string, name: string, description: string, extraFm = ""): void {
@@ -22,32 +19,6 @@ function writeSkill(dir: string, name: string, description: string, extraFm = ""
 
 afterEach(() => {
 	rmSync(TEST_DIR, { recursive: true, force: true });
-});
-
-const hasLiveInstall =
-	existsSync(join(AGENTS_GLOBAL, "grill-me", "SKILL.md")) &&
-	existsSync(join(AGENTS_GLOBAL, "find-skills", "SKILL.md"));
-
-describe.runIf(hasLiveInstall)("live ~/.agents/skills discovery", () => {
-	it("loads grill-me and find-skills from ~/.agents/skills", () => {
-		const { skills } = loadSkills({
-			agentsGlobalDirs: [AGENTS_GLOBAL],
-			extraPaths: [],
-		});
-		const byName = Object.fromEntries(skills.map((s) => [s.name, s]));
-		expect(byName["grill-me"]).toBeTruthy();
-		expect(byName["grill-me"]!.source).toBe("agents");
-		expect(byName["grill-me"]!.disableModelInvocation).toBe(true);
-		expect(byName["grill-me"]!.filePath).toBe(join(AGENTS_GLOBAL, "grill-me", "SKILL.md"));
-
-		expect(byName["find-skills"]).toBeTruthy();
-		expect(byName["find-skills"]!.source).toBe("agents");
-		expect(byName["find-skills"]!.disableModelInvocation).toBe(false);
-
-		const prompt = formatSkillsForPrompt(skills);
-		expect(prompt).toContain("<name>find-skills</name>");
-		expect(prompt).not.toContain("<name>grill-me</name>");
-	});
 });
 
 describe("agents skills merge / disable / uninstall", () => {

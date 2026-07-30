@@ -204,8 +204,62 @@ export function projectHooksPath(cwd: string): string {
 	return join(cwd, ".cast", "hooks.json");
 }
 
+export interface HookDiagnostic {
+	message: string;
+	path: string;
+}
+
+function checkHooksFileSyntax(path: string): HookDiagnostic | undefined {
+	if (!existsSync(path)) return undefined;
+	try {
+		JSON.parse(readFileSync(path, "utf-8"));
+		return undefined;
+	} catch (error) {
+		return { path, message: error instanceof Error ? error.message : String(error) };
+	}
+}
+
+/**
+ * Surfaces malformed hooks.json files instead of the silent empty-config
+ * fallback `readHooksFile` uses everywhere else. Deliberately a separate,
+ * standalone check (not threaded into `mergeHooksFiles`/`readHooksFile`
+ * themselves) — those get called fresh on every single hook firing via
+ * `resolveHooksForCwd`, and logging there would spam the console once per
+ * tool call for as long as the file stayed broken. This is only meant to be
+ * called from the Settings-triggered `/hooks` listing, a user-initiated,
+ * infrequent action.
+ */
+export function hooksFileDiagnostics(
+	cwd: string,
+	trusted: boolean,
+	pluginHookFilePaths: Array<{ path: string; pluginRoot: string; pluginId: string }> = [],
+): HookDiagnostic[] {
+	const out: HookDiagnostic[] = [];
+	const global = checkHooksFileSyntax(globalHooksPath());
+	if (global) out.push(global);
+	const projectPath = projectHooksPath(cwd);
+	if (trusted && projectPath !== globalHooksPath()) {
+		const project = checkHooksFileSyntax(projectPath);
+		if (project) out.push(project);
+	}
+	for (const p of pluginHookFilePaths) {
+		const diag = checkHooksFileSyntax(p.path);
+		if (diag) out.push(diag);
+	}
+	return out;
+}
+
+/**
+ * Content-addressed so re-resolving unchanged config yields the same id
+ * across reloads (see the "stable across repeated resolves" test) — but
+ * includes the source (global/project/which plugin) precisely so two
+ * byte-identical hook groups from *different* sources don't collide onto
+ * the same id, which would make disabling one from Settings silently
+ * disable the other too.
+ */
 export function hookGroupId(event: HookEvent, group: HookMatcherGroup): string {
-	const key = `${event}|${group.matcher ?? ""}|${JSON.stringify(group.hooks)}`;
+	const sourceKey = `${group._source ?? "global"}|${group._pluginId ?? group._pluginRoot ?? ""}`;
+	const key = `${event}|${sourceKey}|${group.matcher ?? ""}|${JSON.stringify(group.hooks)}`;
 	let hash = 0;
 	for (let i = 0; i < key.length; i++) {
 		hash = (Math.imul(hash, 31) + key.charCodeAt(i)) | 0;
@@ -876,6 +930,7 @@ export async function runHooksForEvent(hooks: HooksFile, opts: RunHooksOptions):
 	const results = await Promise.all(promises);
 
 	let firstBlock: HookRunResult | undefined;
+	let firstForceStop: HookRunResult | undefined;
 	let updatedInput: Record<string, unknown> | undefined;
 	let updatedToolOutput: string | undefined;
 	let permissionDecision: HookRunResult["permissionDecision"];
@@ -885,8 +940,14 @@ export async function runHooksForEvent(hooks: HooksFile, opts: RunHooksOptions):
 	const allStdout: string[] = [];
 	let lastExitCode: number | null = null;
 
+	// `results` is already fully resolved (Promise.all above already awaited
+	// every hook), so returning early here on the first forceStop wouldn't
+	// save any actual wait — it would only truncate the merge below, silently
+	// dropping updatedInput/additionalContext/etc. from sibling hooks in this
+	// same batch depending on array order. Collect firstForceStop like
+	// firstBlock instead, and merge before returning either.
 	for (const result of results) {
-		if (result.forceStop) return result;
+		if (result.forceStop && !firstForceStop) firstForceStop = result;
 		if (result.updatedInput) updatedInput = result.updatedInput;
 		if (result.updatedToolOutput !== undefined) updatedToolOutput = result.updatedToolOutput;
 		if (result.permissionDecision) permissionDecision = result.permissionDecision;
@@ -900,6 +961,18 @@ export async function runHooksForEvent(hooks: HooksFile, opts: RunHooksOptions):
 
 	const combinedContext = additionalContexts.length > 0 ? additionalContexts.join("\n") : undefined;
 	const combinedStdout = allStdout.join("\n");
+	// forceStop wins over a block from another hook in the same run (see
+	// the doc comment above) — checked first, same merge shape as firstBlock.
+	if (firstForceStop)
+		return {
+			...firstForceStop,
+			updatedInput,
+			updatedToolOutput,
+			permissionDecision,
+			additionalContext: combinedContext,
+			permissionRequestResult,
+			retry,
+		};
 	if (firstBlock)
 		return {
 			...firstBlock,

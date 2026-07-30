@@ -1242,16 +1242,19 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			deps.agent.addDisplayMessage({ role: "warning", content: HOOKS_HELP });
 			return;
 		}
-		const entries = listHooksForCwdSettings(deps.cwd, deps.projectTrusted);
+		const { entries, diagnostics } = listHooksForCwdSettings(deps.cwd, deps.projectTrusted);
 		if (!verb) {
+			const diagLines = diagnostics.map((d) => `⚠ Failed to parse ${d.path}: ${d.message}`);
 			if (entries.length === 0) {
-				showNotice("[No hooks configured — see docs/hooks.md. Global: ~/.cast/hooks.json]");
+				showNotice(
+					[...diagLines, "[No hooks configured — see docs/hooks.md. Global: ~/.cast/hooks.json]"].join("\n"),
+				);
 				return;
 			}
 			const lines = entries.map(
 				(e) => `${e.enabled ? "●" : "○"} ${e.id}  ${e.event}${e.matcher ? ` (${e.matcher})` : ""}  [${e.source}]`,
 			);
-			showNotice(`[Hooks — /hooks enable|disable <id> to toggle:\n${lines.join("\n")}]`, 15000);
+			showNotice(`[Hooks — /hooks enable|disable <id> to toggle:\n${[...diagLines, ...lines].join("\n")}]`, 15000);
 			return;
 		}
 		if (verb === "enable" || verb === "disable") {
