@@ -976,12 +976,24 @@ function StreamingBlocks({ blocks }) {
 	// content block after a tool, a new tool card, etc.) creates a new
 	// DOM element and the rise plays once. Streaming-token updates on
 	// the same block stay still.
+	// All streaming blocks carry their role label from the start of the
+	// stream — the previous version rendered just `<div class="message">
+	// <div class="message-content">…</div></div>` with no label, then
+	// `case "message"` swapped the whole subtree for a settled version
+	// that included `<div class="message-label">agent</div>`. That swap
+	// read as "text grew → then the word 'agent' appeared above it" at
+	// the end of every reply. Keeping the label in the streaming DOM
+	// from the first render means the final settled transition is
+	// content-only (markdown rendering kicks in for `agent` blocks,
+	// since raw text during the stream is the `StreamingText` plain-
+	// text node), not a structural change.
 	return html`
 		<div>
 			${collapsed.map((block, i) => {
 				if (block.kind === "content") {
 					if (!block.text.trim()) return null;
 					return html`<div key=${i} class="message message-assistant message-entering">
+						<div class="message-label">agent</div>
 						<${StreamingText} text=${block.text} />
 					</div>`;
 				}
@@ -995,6 +1007,7 @@ function StreamingBlocks({ blocks }) {
 						${
 							split.thinking &&
 							html`<div class="message message-reasoning message-entering">
+								<div class="message-label">reasoning</div>
 								<${StreamingText} text=${split.thinking} className="message-content" />
 							</div>`
 						}
