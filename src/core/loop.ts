@@ -770,7 +770,7 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 		loopConfig.planState,
 		loopConfig.sshHosts,
 		loopConfig.backgroundBash,
-		loopConfig.skills ? { skills: loopConfig.skills } : undefined,
+		loopConfig.skills ? { skills: loopConfig.skills, sessionId: loopConfig.sessionId } : undefined,
 	);
 	const executeTool = (
 		name: string,

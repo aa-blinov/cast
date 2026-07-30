@@ -368,14 +368,21 @@ function parseArguments(args: string): string[] {
 
 /**
  * Substitute $ARGUMENTS placeholders in content with actual argument values.
- * Supports: $ARGUMENTS (full string), $ARGUMENTS[0]/$0 (indexed), ${CLAUDE_SKILL_DIR}.
+ * Supports: $ARGUMENTS (full string), $ARGUMENTS[0]/$0 (indexed), ${CAST_SKILL_DIR},
+ * ${CAST_SESSION_ID} (the active session's id, when provided).
  * Returns the substituted content. Caller decides what to do if no placeholders matched.
  */
-function substituteArguments(content: string, args: string | undefined, baseDir: string): string {
+function substituteArguments(content: string, args: string | undefined, baseDir: string, sessionId?: string): string {
 	// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for skill template variable, not JS template
 	content = content.replaceAll("${CAST_SKILL_DIR}", baseDir);
 	// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for skill template variable, not JS template
 	content = content.replaceAll("${CLAUDE_SKILL_DIR}", baseDir);
+	if (sessionId) {
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for skill template variable, not JS template
+		content = content.replaceAll("${CAST_SESSION_ID}", sessionId);
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for skill template variable, not JS template
+		content = content.replaceAll("${CLAUDE_SESSION_ID}", sessionId);
+	}
 
 	if (!args?.trim()) return content;
 
@@ -394,15 +401,17 @@ function substituteArguments(content: string, args: string | undefined, baseDir:
 }
 
 /** Format a skill's full content for `/skill:name` invocation, optionally with trailing user args. */
-export function formatSkillInvocation(skill: Skill, additionalArgs?: string): string {
+export function formatSkillInvocation(skill: Skill, additionalArgs?: string, sessionId?: string): string {
 	const content = readSkillBody(skill);
-	const substituted = substituteArguments(content, additionalArgs, skill.baseDir);
+	const substituted = substituteArguments(content, additionalArgs, skill.baseDir, sessionId);
 	// Check if any $ARGUMENTS placeholders were actually substituted
 	const hadPlaceholders =
 		content.includes("$ARGUMENTS") ||
 		content.includes("$0") ||
 		// biome-ignore lint/suspicious/noTemplateCurlyInString: checking for literal placeholder in content
-		content.includes("${CLAUDE_SKILL_DIR}");
+		content.includes("${CLAUDE_SKILL_DIR}") ||
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: checking for literal placeholder in content
+		content.includes("${CAST_SESSION_ID}");
 	const block = `<skill name="${escapeXml(skill.name)}" location="${escapeXml(skill.filePath)}">\nReferences are relative to ${skill.baseDir}.\n\n${substituted}\n</skill>`;
 	// If args were provided but no $ARGUMENTS placeholder consumed them, append as User: line
 	if (additionalArgs && !hadPlaceholders) {
