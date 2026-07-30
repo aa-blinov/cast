@@ -5,7 +5,7 @@
 
 import htm from "htm";
 import { h, render } from "preact";
-import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { icons } from "./icons.js";
 import { collapseMidWordBoundaries, mergeMidWordBoundary, splitReasoningForDisplay } from "./reasoning-split.js";
 
@@ -728,6 +728,20 @@ function Message({ msg }) {
 		// content starts "час уточню..."), glue the boundary back together
 		// before rendering. See reasoning-split.js's mergeMidWordBoundary.
 		const collapsed = collapseMidWordBoundaries(msg.blocks);
+		// Settled-message blocks render without the `message-entering`
+		// class — the entrance rise keyframe is reserved for blocks
+		// that appear *during* a stream (a new reasoning chunk, a new
+		// tool card, etc.) where it visually marks "the model just
+		// emitted this". On settled messages the rise was the source of
+		// the "blink on submit" / "blink on final chunk" flicker: the
+		// user message mounted on send and the assistant message
+		// remounted when the stream settled both ran the 150ms fade-up,
+		// which read as a UI stutter on a quiet chat. The settled
+		// Message subtree is keyed by msg object identity, so a
+		// re-render of the same history row reuses the same DOM and
+		// wouldn't replay the animation anyway — but the *first* mount
+		// of every new settled msg (the user just clicked send, the
+		// assistant just finished) was the visible one. Now silent.
 		return html`
 			<div class="message-group">
 				${collapsed.map((block, i) => {
@@ -837,51 +851,47 @@ function Message({ msg }) {
 		// inside their ToolCard instead.
 		const isRealSend = msg.content !== null;
 		return html`
-			<div class="message ${isRealSend ? "message-user" : "message-image-result"}">
-				<div class="message-label">${isRealSend ? "you" : "image (read)"}</div>
-				${
-					content &&
-					html`<div class="message-content" dangerouslySetInnerHTML=${{ __html: escapeHtml(content) }} />`
-				}
-				<div class="message-content message-images">
-					${msg.images.map(
-						(src, i) =>
-							html`<img key=${i} src=${src} class="message-image" onClick=${() => setPreviewSrc(src)} />`,
-					)}
-				</div>
-				${
-					previewSrc &&
-					html`<${FilePreviewModal}
-						path="image.jpg"
-						downloadHref=${previewSrc}
-						previewHref=${previewSrc}
-						onClose=${() => setPreviewSrc(null)}
-					/>`
-				}
+		<div class="message ${isRealSend ? "message-user" : "message-image-result"}">
+			<div class="message-label">${isRealSend ? "you" : "image (read)"}</div>
+			${content && html`<div class="message-content" dangerouslySetInnerHTML=${{ __html: escapeHtml(content) }} />`}
+			<div class="message-content message-images">
+				${msg.images.map(
+					(src, i) => html`<img key=${i} src=${src} class="message-image" onClick=${() => setPreviewSrc(src)} />`,
+				)}
 			</div>
-		`;
-	}
-
-	return html`
-		<div class="message message-${role}">
-			<div class="message-label">${labelMap[role] ?? role}</div>
-			<div class="message-content" dangerouslySetInnerHTML=${{ __html: role === "user" ? escapeHtml(content) : renderMarkdown(content) }} />
 			${
-				msg.attachments?.length > 0 &&
-				html`
-				<div class="message-attachments">
-					${msg.attachments.map(
-						(a) => html`
-						<span key=${a.name} class="message-attachment-chip" title=${a.path}>
-							<${icons.docFile} /><span class="message-attachment-name">${a.name}</span>
-						</span>
-					`,
-					)}
-				</div>
-				`
+				previewSrc &&
+				html`<${FilePreviewModal}
+					path="image.jpg"
+					downloadHref=${previewSrc}
+					previewHref=${previewSrc}
+					onClose=${() => setPreviewSrc(null)}
+				/>`
 			}
 		</div>
 	`;
+	}
+
+	return html`
+	<div class="message message-${role}">
+		<div class="message-label">${labelMap[role] ?? role}</div>
+		<div class="message-content" dangerouslySetInnerHTML=${{ __html: role === "user" ? escapeHtml(content) : renderMarkdown(content) }} />
+		${
+			msg.attachments?.length > 0 &&
+			html`
+			<div class="message-attachments">
+				${msg.attachments.map(
+					(a) => html`
+					<span key=${a.name} class="message-attachment-chip" title=${a.path}>
+						<${icons.docFile} /><span class="message-attachment-name">${a.name}</span>
+					</span>
+				`,
+				)}
+			</div>
+			`
+		}
+	</div>
+`;
 }
 
 // Some providers (observed on MiniMax-M2) interleave content/reasoning deltas
@@ -901,6 +911,55 @@ function appendTextBlock(prev, kind, text) {
 	return [...prev, { kind, text }];
 }
 
+// Renders a streaming text block (content or reasoning) into a single,
+// stable text node. The previous implementation used
+// `dangerouslySetInnerHTML` with the full `renderMarkdown(text)` result on
+// every RAF commit, which destroyed the entire DOM subtree under
+// `.message-content` and rebuilt it from the new HTML string — for a 4KB
+// reply streaming over 20s, that's hundreds of full subtree teardowns
+// while the user is just trying to read the words appearing. By
+// contrast, mutating `node.data` on a single text node is O(1) and
+// leaves the surrounding DOM, including any markdown formatting that
+// has already been laid out, completely untouched. The trade-off is
+// that the block shows as raw text (so partial `**bold**` boundaries
+// are visible as the literal characters) until it settles — at which
+// point the settled `Message` component takes over and renders the
+// full markdown. This is the same trade-off ChatGPT and Claude.ai make
+// for their live-typing view; the eye reads tokens as they arrive, not
+// as formatted text, and the 100-200ms where the text becomes "real"
+// happens between turns when the user is already looking at the
+// finished block.
+function StreamingText({ text, className }) {
+	const ref = useRef(null);
+	// Stable ref to the text node we own. Preact's keyed reconciliation
+	// reuses this same DOM element across renders (the parent
+	// <StreamingBlocks> keys each block by its array index), so the
+	// text node persists — we just mutate its `.data` on every
+	// streaming commit, the cheapest possible DOM update (no parse,
+	// no subtree walk, no relayout unless the new string is longer,
+	// which an append always is).
+	const textNodeRef = useRef(null);
+	// First commit: the ref callback fires while Preact is still
+	// assembling the DOM, so we can append the text node synchronously
+	// and avoid the empty→populated flash a useLayoutEffect would
+	// cause (the first frame would otherwise render an empty div).
+	const setRef = (el) => {
+		ref.current = el;
+		if (el && !textNodeRef.current) {
+			textNodeRef.current = document.createTextNode(text);
+			el.appendChild(textNodeRef.current);
+		}
+	};
+	useLayoutEffect(() => {
+		// Subsequent commits (text grew): just rewrite the existing
+		// text node's data. The layout effect runs synchronously after
+		// the DOM update but before paint, so the user sees the new
+		// length in the same frame the state changed.
+		if (textNodeRef.current) textNodeRef.current.data = text;
+	}, [text]);
+	return html`<div ref=${setRef} class=${className ?? "message-content"}></div>`;
+}
+
 function StreamingBlocks({ blocks }) {
 	if (!blocks || blocks.length === 0) return null;
 	// Same mid-word boundary collapse as the settled `Message` path — the
@@ -909,13 +968,21 @@ function StreamingBlocks({ blocks }) {
 	// which case the visible reasoning and content blocks are at the same
 	// word. Glide them back together at render time.
 	const collapsed = collapseMidWordBoundaries(blocks);
+	// Every block DOM element here is keyed by its index in the array, so
+	// a block at the same index across renders reuses the same DOM node
+	// and therefore does NOT replay the `rise` animation on subsequent
+	// renders — CSS `animation` is bound to the element, not the
+	// re-render, and only plays on initial mount. A *new* index (new
+	// content block after a tool, a new tool card, etc.) creates a new
+	// DOM element and the rise plays once. Streaming-token updates on
+	// the same block stay still.
 	return html`
 		<div>
 			${collapsed.map((block, i) => {
 				if (block.kind === "content") {
 					if (!block.text.trim()) return null;
-					return html`<div key=${i} class="message message-assistant">
-						<div class="message-content" dangerouslySetInnerHTML=${{ __html: renderMarkdown(block.text) }} />
+					return html`<div key=${i} class="message message-assistant message-entering">
+						<${StreamingText} text=${block.text} />
 					</div>`;
 				}
 				if (block.kind === "thinking") {
@@ -927,15 +994,15 @@ function StreamingBlocks({ blocks }) {
 					return html`<div key=${i}>
 						${
 							split.thinking &&
-							html`<div class="message message-reasoning">
-								<div class="message-content">${split.thinking}</div>
+							html`<div class="message message-reasoning message-entering">
+								<${StreamingText} text=${split.thinking} className="message-content" />
 							</div>`
 						}
 						${
 							split.draft &&
-							html`<div class="message message-assistant message-draft-from-thinking">
+							html`<div class="message message-assistant message-draft-from-thinking message-entering">
 								<div class="message-label">agent</div>
-								<div class="message-content" dangerouslySetInnerHTML=${{ __html: renderMarkdown(split.draft) }} />
+								<${StreamingText} text=${split.draft} className="message-content" />
 							</div>`
 						}
 					</div>`;
@@ -948,7 +1015,6 @@ function StreamingBlocks({ blocks }) {
 		</div>
 	`;
 }
-
 // The three pickers below are pure display: Composer owns filtering AND
 // selection so arrow-key nav and mouse click always agree on the same list.
 function CommandPalette({ items, selectedIndex, running, onHover, onSelect, visible }) {
@@ -4349,6 +4415,20 @@ function keyForMessage(msg) {
 	return k;
 }
 
+// The "first-paint" animation for messages is handled entirely in CSS
+// via the `.message-entering` class — the entrance `rise` keyframe
+// fires on initial DOM mount and never again. Correct because every
+// message and every streaming block is keyed by a stable identity (msg
+// object identity via keyForMessage's WeakMap for settled messages,
+// array index for streaming blocks), so a re-render reuses the same
+// DOM node; the class is re-applied on each render but the browser
+// only triggers the animation on the first mount. No JS-side tracking
+// needed — the previous implementation put `animation: rise` on every
+// `.message`/`.message-group` by default, which meant a streaming
+// content block — whose parent re-renders on every RAF commit —
+// replayed the fade-in on every commit, reading as a low-amplitude
+// shimmer on the whole reply.
+
 // Generates (idempotent) or revokes a thread's public /shared/<token> link.
 // Opened from the sidebar's ⋮ menu — `session` is null when closed.
 function ShareModal({ session, onClose }) {
@@ -4452,10 +4532,17 @@ function ElapsedTimer({ running, activeId, connected, turnStartRef }) {
 	useEffect(() => {
 		if (running && connected) {
 			if (!turnStartRef.current.has(activeId)) turnStartRef.current.set(activeId, Date.now());
+			// 4 Hz is plenty — a .1s-precision counter updates visibly four
+			// times a second, which reads as "live" without making the rest
+			// of the UI re-render that often. Was 10 Hz; the extra ticks
+			// were invisible (the eye can't resolve a 0.1s change 10 times
+			// in a row) but every one of them cost a full subtree diff
+			// because this component is a child of App and App's state
+			// changes once per tick.
 			const id = setInterval(() => {
 				const start = turnStartRef.current.get(activeId);
 				if (start) setElapsedMs(Date.now() - start);
-			}, 100);
+			}, 250);
 			return () => clearInterval(id);
 		} else if (!running) {
 			// Freeze the display for 5s after the run ends, then hide.
