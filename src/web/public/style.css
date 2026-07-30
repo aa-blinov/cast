@@ -125,11 +125,16 @@ body.resizing-diff * { user-select: none; }
 .status-dot.reconnecting {
 	background: var(--amber);
 	box-shadow: 0 0 6px color-mix(in srgb, var(--amber) 50%, transparent);
-	animation: pulse-status 1.5s ease-in-out infinite;
+	/* Reserve the pulse for genuinely-attention-worthy states. A stable
+	 * SSE connection was getting the same 1.5s opacity oscillation as a
+	 * reconnecting one — for a UI that's mostly staring at a connected
+	 * indicator, that's a constant low-frequency blink in peripheral
+	 * vision. The static green dot is enough to read "connected". */
 }
 .status-dot.offline {
 	background: var(--rose);
 	box-shadow: 0 0 6px color-mix(in srgb, var(--rose) 50%, transparent);
+	animation: pulse-status 1.5s ease-in-out infinite;
 }
 @keyframes pulse-status {
 	0%, 100% { opacity: 1; }
@@ -567,7 +572,15 @@ body.resizing-diff * { user-select: none; }
 	width: 100%;
 	margin: 0 auto;
 }
-.message-group { animation: rise .15s ease; }
+/* The rise animation used to be the default for every .message and
+ * .message-group — but a streaming content block re-mounts (and therefore
+ * replays the animation) on every RAF commit while the model is still
+ * typing, which read as a constant low-amplitude shimmer across the whole
+ * reply. Now only nodes carrying the explicit .message-entering class —
+ * applied once by the client on first paint, then removed — play it.
+ * Streaming updates on the same DOM subtree don't re-add it, so the
+ * growing reply stays still while tokens arrive. */
+.message-entering { animation: rise .15s ease; }
 .messages > * + * { border-top: 1px solid var(--border); padding-top: 6px; }
 @keyframes rise {
 	from { opacity: 0; transform: translateY(3px); }
@@ -583,7 +596,6 @@ body.resizing-diff * { user-select: none; }
 	word-wrap: break-word;
 	font-size: .9rem;
 	line-height: 1.5;
-	animation: rise .15s ease;
 }
 
 /* ── Empty state ──────────────────────────────────────────────────── */

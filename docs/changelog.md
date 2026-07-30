@@ -2,6 +2,16 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Fixed
+
+- Web UI: streaming token updates no longer flicker the whole reply. The entrance `rise` animation is now applied via an explicit `.message-entering` class on freshly-mounted message nodes only — same keyframe, but it stops being the default for every `.message`/`.message-group`, so a re-render that reuses the same DOM node (every streaming RAF commit) doesn't replay it. Streaming text blocks now render as a single, stable text node that the layout effect mutates via `node.data` on every commit, instead of re-running `renderMarkdown` + `dangerouslySetInnerHTML` (which used to destroy and rebuild the entire content subtree on every commit). The result: a growing reply stays still while tokens arrive.
+- Web UI: settled messages (the user message on send, the assistant message on stream end) no longer play the entrance `rise` animation. Previously those two moments were the visible "blink" right after clicking send and right when the final chunk landed — the rise is now reserved for blocks that appear *during* a stream (a new reasoning chunk, a new tool card) where it visually marks "the model just emitted this".
+- Web UI: the elapsed-time counter now ticks at 4 Hz (250ms) instead of 10 Hz (100ms) — same `.1s` displayed precision, but 2.5× less main-thread churn during long runs.
+- Web UI: the header status dot no longer pulses on a stable SSE connection. The `pulse-status` animation is now reserved for `reconnecting` and `offline` states, so the connected indicator is a static green dot instead of a 1.5s opacity oscillation in peripheral vision.
+
+
 ## 0.12.1
 
 ### Fixed
