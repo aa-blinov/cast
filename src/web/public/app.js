@@ -3559,7 +3559,7 @@ function SettingsSkillssh({ data, busy, act, confirm }) {
 			<div class="settings-section-title">Browse (skills.sh)</div>
 			<div class="settings-form-row">
 				<input type="text" placeholder="search skills (e.g. typescript)" value=${searchQuery} onInput=${(e) => setSearchQuery(e.target.value)} onKeyDown=${(e) => e.key === "Enter" && searchQuery && act(`/skills-sh search ${searchQuery}`).then(() => setSearchOutput(""))} />
-				<button class="modal-btn icon-btn" title="Run npx skills find" disabled=${busy || !searchQuery} onClick=${runCommand(`/skills-sh search ${searchQuery}`, setSearchOutput)}><${icons.search} /></button>
+				<button class="modal-btn icon-btn" title="Run npx skills find" disabled=${busy || !searchQuery} onClick=${runCommand(`/skills-sh search ${searchQuery}`, setSearchOutput)}><${icons.magnifyingGlass} /></button>
 			</div>
 			<div class="settings-form-row">
 				<input type="text" placeholder="owner/repo (browse available skills in this repo)" value=${listRepo} onInput=${(e) => setListRepo(e.target.value)} />
