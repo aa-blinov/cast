@@ -273,7 +273,10 @@ export function loadSkills(options: LoadSkillsOptions): { skills: Skill[]; diagn
 		...(options.pluginDirs ?? []).map((dir) => ({ dir, pluginId: "", enabled: true })),
 	];
 	for (const contrib of pluginContributions) {
-		const loaded = loadSkillsFromDirInternal(contrib.dir, "plugin", true);
+		// Plugins follow Claude Code's directory convention (skill-name/SKILL.md) —
+		// loose .md files at the plugin root are docs (README.md, etc.), not skills.
+		// Passing false for includeRootFiles matches claude-code's loader.
+		const loaded = loadSkillsFromDirInternal(contrib.dir, "plugin", false);
 		for (const skill of loaded.skills) {
 			if (contrib.pluginId) skill.pluginId = contrib.pluginId;
 			skill.pluginEnabled = contrib.enabled;
