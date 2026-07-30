@@ -3548,7 +3548,7 @@ function SettingsSkillssh({ data, busy, act, confirm }) {
 	};
 	return html`
 		<div class="settings-rows">
-			<p class="settings-intro"><span>The open agent-skills ecosystem (70+ agents, 27k stars). Cast already loads anything in <code>~/.config/agents/skills/</code> automatically — this tab wraps the <code>npx skills</code> CLI so you can install, search, and manage without leaving the UI.</span></p>
+			<p class="settings-intro"><span><a href="https://skills.sh" target="_blank" rel="noopener">skills.sh</a> is the open agent-skills ecosystem (70+ agents, 27k stars). Cast already loads anything in <code>~/.config/agents/skills/</code> automatically — this tab wraps the <code>npx skills</code> CLI so you can install, search, and manage without leaving the UI.</span></p>
 
 			<div class="settings-section-title">Install a skill</div>
 			<div class="settings-form-row">
