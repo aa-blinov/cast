@@ -176,6 +176,16 @@ function initTooltips() {
 	tip.className = "cast-tooltip";
 	tip.style.cssText = "position:fixed;pointer-events:none;opacity:0;z-index:9999;transition:opacity .1s ease;";
 	document.body.appendChild(tip);
+	// Minimum gap between the tooltip bubble and the viewport edge. Used
+	// when clamping x so the bubble doesn't bleed off-screen on narrow
+	// viewports (a long status bar tooltip on a 600px-wide window is the
+	// usual trigger). Was missing entirely when the tooltip code was
+	// refactored into a shared module — every setup() call hit
+	// "ReferenceError: PAD is not defined" and the whole observer was
+	// torn down, which is why no native OR themed tooltips rendered at all
+	// until the user reloaded the page and the inline title attr briefly
+	// survived the observer's failure.
+	const PAD = 8;
 
 	function show(el) {
 		const text = el.getAttribute("data-tooltip") || "";
