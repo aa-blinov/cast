@@ -7,7 +7,7 @@ import htm from "htm";
 import { h, render } from "preact";
 import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { icons } from "./icons.js";
-import { splitReasoningForDisplay } from "./reasoning-split.js";
+import { collapseMidWordBoundaries, mergeMidWordBoundary, splitReasoningForDisplay } from "./reasoning-split.js";
 
 const html = htm.bind(h);
 
@@ -723,9 +723,14 @@ function Message({ msg }) {
 	// distinctly so reasoning doesn't silently blend into the reply, and so
 	// every tool call this turn made stays visible after it settles.
 	if (role === "assistant" && Array.isArray(msg.blocks)) {
+		// When the parser splits the model output mid-word (e.g. </think>
+		// landed inside "Сейчас" so the reasoning ends "...Сей" and the
+		// content starts "час уточню..."), glue the boundary back together
+		// before rendering. See reasoning-split.js's mergeMidWordBoundary.
+		const collapsed = collapseMidWordBoundaries(msg.blocks);
 		return html`
 			<div class="message-group">
-				${msg.blocks.map((block, i) => {
+				${collapsed.map((block, i) => {
 					if (block.kind === "tool") return html`<${ToolCard} key=${block.call.id} call=${block.call} />`;
 					if (block.kind === "thinking") {
 						if (!block.text.trim()) return null;
@@ -764,16 +769,27 @@ function Message({ msg }) {
 
 	// content is `null` for a tool-call-only turn (see core/loop.ts) — treat
 	// that as "no text", not the literal string "null" JSON.stringify gives it.
-	const content =
-		typeof msg.content === "string" ? msg.content : msg.content == null ? "" : JSON.stringify(msg.content);
+	let content = typeof msg.content === "string" ? msg.content : msg.content == null ? "" : JSON.stringify(msg.content);
 
 	if (role === "assistant") {
 		// Same draft-answer extraction as the blocks path — the reasoning
 		// string can carry a truncated answer draft if the model ran out of
 		// tokens inside `<think>` without emitting a closing tag.
 		const splitThinking = msg.thinking ? splitReasoningForDisplay(msg.thinking) : null;
-		const visibleThinking = splitThinking ? splitThinking.thinking : msg.thinking;
+		let visibleThinking = splitThinking ? splitThinking.thinking : msg.thinking;
 		const visibleDraft = splitThinking ? splitThinking.draft : null;
+		// The parser may have split the model's output mid-word (e.g.
+		// </think> landed inside "Сейчас" — observed on MiniMax-M3) so
+		// msg.thinking ends "...Сей" and content starts "час уточню...".
+		// Glide the boundary back together so the user sees the model-intended
+		// continuous word, not two halves separated across blocks.
+		if (visibleThinking && content) {
+			const merged = mergeMidWordBoundary(visibleThinking, content);
+			if (merged.thinkingText !== visibleThinking) {
+				visibleThinking = merged.thinkingText;
+				content = merged.contentText;
+			}
+		}
 		return html`
 			<div class="message-group">
 				${
@@ -887,9 +903,15 @@ function appendTextBlock(prev, kind, text) {
 
 function StreamingBlocks({ blocks }) {
 	if (!blocks || blocks.length === 0) return null;
+	// Same mid-word boundary collapse as the settled `Message` path — the
+	// parser may have split the model's `<think>...</think>` boundary inside
+	// a word (observed on MiniMax-M3 emitting `</think>` mid-Cyrillic), in
+	// which case the visible reasoning and content blocks are at the same
+	// word. Glide them back together at render time.
+	const collapsed = collapseMidWordBoundaries(blocks);
 	return html`
 		<div>
-			${blocks.map((block, i) => {
+			${collapsed.map((block, i) => {
 				if (block.kind === "content") {
 					if (!block.text.trim()) return null;
 					return html`<div key=${i} class="message message-assistant">

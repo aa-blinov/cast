@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { splitReasoningForDisplay } from "../src/web/public/reasoning-split.js";
+import {
+	collapseMidWordBoundaries,
+	mergeMidWordBoundary,
+	splitReasoningForDisplay,
+} from "../src/web/public/reasoning-split.js";
 
 describe("splitReasoningForDisplay", () => {
 	it("returns the original reasoning unchanged when no markdown heading is present", () => {
@@ -120,5 +124,131 @@ describe("splitReasoningForDisplay", () => {
 		// split when there's content but no real heading-with-content.
 		const result = splitReasoningForDisplay(reasoning);
 		expect(result.draft).toBeNull();
+	});
+});
+
+describe("mergeMidWordBoundary", () => {
+	it("returns inputs unchanged when either side is empty", () => {
+		expect(mergeMidWordBoundary("", "час уточню")).toEqual({ thinkingText: "", contentText: "час уточню" });
+		expect(mergeMidWordBoundary("...weather.", "")).toEqual({ thinkingText: "...weather.", contentText: "" });
+	});
+
+	it("returns inputs unchanged when boundary is whitespace (clean split)", () => {
+		const r = mergeMidWordBoundary("...weather. ", "час уточню");
+		expect(r).toEqual({ thinkingText: "...weather. ", contentText: "час уточню" });
+	});
+
+	it("merges Cyrillic mid-word boundary — observed MiniMax-M3 case", () => {
+		// Model emitted `<think>...weather.Сей</think>час уточню...` — the
+		// parser split at the `</think>`, leaving "Сей" trailing in
+		// reasoning and "час" leading in content. Glue back to "Сейчас".
+		const r = mergeMidWordBoundary(
+			"The user is asking about the weather in Astana. This is a current information query. I should use web_search to get the current weather.Сей",
+			"час уточню текущую погоду в Астане.",
+		);
+		expect(r.thinkingText).toBe(
+			"The user is asking about the weather in Astana. This is a current information query. I should use web_search to get the current weather.",
+		);
+		expect(r.contentText).toBe("Сейчас уточню текущую погоду в Астане.");
+	});
+
+	it("merges Latin mid-word boundary", () => {
+		// "weath" is a partial word that the model was mid-typing when
+		// its reasoning boundary landed. The fragment has no sentence-ending
+		// punctuation (the `"` is a quote, not a sentence terminator), so
+		// the whole fragment moves onto content as-is.
+		const r = mergeMidWordBoundary('The model wrote the word "weath', 'er is nice today".');
+		expect(r.thinkingText).toBe("The model wrote the word");
+		expect(r.contentText).toBe('"weather is nice today".');
+	});
+
+	it("does NOT merge when boundary is at whitespace, even mid-content", () => {
+		const r = mergeMidWordBoundary("Answer starts here. ", "Next sentence.");
+		expect(r).toEqual({ thinkingText: "Answer starts here. ", contentText: "Next sentence." });
+	});
+
+	it("does NOT merge across scripts (Latin thinking + Cyrillic content)", () => {
+		// Guards against e.g. "API" + "час уточню" being merged into a fake word.
+		const r = mergeMidWordBoundary("call the API", "час уточню");
+		expect(r).toEqual({ thinkingText: "call the API", contentText: "час уточню" });
+	});
+
+	it("does NOT merge across scripts the other way (Cyrillic thinking + Latin content)", () => {
+		// Last char of thinking is Cyrillic, first char of content is
+		// Latin — different scripts, no merge. (The "web_sea" in the
+		// middle is irrelevant; only the boundary chars matter.)
+		const r = mergeMidWordBoundary("модель использует веб_поиск для выборк", "data");
+		expect(r).toEqual({ thinkingText: "модель использует веб_поиск для выборк", contentText: "data" });
+	});
+
+	it("preserves all characters when merging (no silent loss)", () => {
+		const thinkingText = "reasoning ends here.Сей";
+		const contentText = "час уточню.";
+		const r = mergeMidWordBoundary(thinkingText, contentText);
+		// Concatenation must reproduce the original concatenation exactly.
+		expect(r.thinkingText + r.contentText).toBe(thinkingText + contentText);
+	});
+
+	it("keeps a sentence-ending period in thinking, moves only the partial word to content", () => {
+		// The fragment "weather.Сей" contains a `.` followed by "Сей" —
+		// that's a real sentence boundary inside the fragment, so split
+		// at it. Thinking keeps "weather." (with the period); content
+		// picks up "Сейчас уточню...".
+		const r = mergeMidWordBoundary(
+			"The user is asking about the weather in Astana. I should use web_search to get the current weather.Сей",
+			"час уточню текущую погоду в Астане.",
+		);
+		expect(r.thinkingText.endsWith("weather.")).toBe(true);
+		expect(r.contentText.startsWith("Сейчас")).toBe(true);
+		// Full concatenation still equals the original — no silent loss.
+		const original =
+			"The user is asking about the weather in Astana. I should use web_search to get the current weather.Сейчас уточню текущую погоду в Астане.";
+		expect(r.thinkingText + r.contentText).toBe(original);
+	});
+});
+
+describe("collapseMidWordBoundaries", () => {
+	it("returns inputs unchanged when there are no thinking→content adjacencies", () => {
+		const blocks = [
+			{ kind: "thinking", text: "think" },
+			{ kind: "tool", call: { id: "t1" } },
+			{ kind: "content", text: "answer" },
+		];
+		expect(collapseMidWordBoundaries(blocks)).toEqual(blocks);
+	});
+
+	it("merges a thinking→content mid-word boundary", () => {
+		// "...weather.Сей" → "...weather." (sentence boundary kept in
+		// thinking); content picks up at "Сейчас" with the original
+		// "час уточню..." glued on.
+		const blocks = [
+			{ kind: "thinking", text: "I should use web_search to get the current weather.Сей" },
+			{ kind: "content", text: "час уточню..." },
+		];
+		const out = collapseMidWordBoundaries(blocks);
+		expect(out[0]).toEqual({ kind: "thinking", text: "I should use web_search to get the current weather." });
+		expect(out[1]).toEqual({ kind: "content", text: "Сейчас уточню..." });
+	});
+
+	it("leaves a clean whitespace boundary alone", () => {
+		const blocks = [
+			{ kind: "thinking", text: "I think about it." },
+			{ kind: "content", text: "Here is my answer." },
+		];
+		expect(collapseMidWordBoundaries(blocks)).toEqual(blocks);
+	});
+
+	it("handles non-array input by returning it unchanged", () => {
+		expect(collapseMidWordBoundaries(undefined)).toBeUndefined();
+		expect(collapseMidWordBoundaries(null)).toBeNull();
+	});
+
+	it("does not merge across a tool block between thinking and content", () => {
+		const blocks = [
+			{ kind: "thinking", text: "...weather.Сей" },
+			{ kind: "tool", call: { id: "t1" } },
+			{ kind: "content", text: "час уточню..." },
+		];
+		expect(collapseMidWordBoundaries(blocks)).toEqual(blocks);
 	});
 });
