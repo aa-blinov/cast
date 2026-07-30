@@ -7,6 +7,7 @@ import htm from "htm";
 import { h, render } from "preact";
 import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { icons } from "./icons.js";
+import { splitReasoningForDisplay } from "./reasoning-split.js";
 
 const html = htm.bind(h);
 
@@ -728,12 +729,25 @@ function Message({ msg }) {
 					if (block.kind === "tool") return html`<${ToolCard} key=${block.call.id} call=${block.call} />`;
 					if (block.kind === "thinking") {
 						if (!block.text.trim()) return null;
-						return html`
-							<div key=${i} class="message message-reasoning">
-								<div class="message-label">reasoning</div>
-								<div class="message-content">${block.text}</div>
-							</div>
-						`;
+						// Same split as StreamingBlocks — pull a model-truncated
+						// draft answer out of the reasoning block.
+						const split = splitReasoningForDisplay(block.text);
+						return html`<div key=${i}>
+							${
+								split.thinking &&
+								html`<div class="message message-reasoning">
+									<div class="message-label">reasoning</div>
+									<div class="message-content">${split.thinking}</div>
+								</div>`
+							}
+							${
+								split.draft &&
+								html`<div class="message message-assistant message-draft-from-thinking">
+									<div class="message-label">agent</div>
+									<div class="message-content" dangerouslySetInnerHTML=${{ __html: renderMarkdown(split.draft) }} />
+								</div>`
+							}
+						</div>`;
 					}
 					if (!block.text.trim()) return null;
 					return html`
@@ -754,14 +768,29 @@ function Message({ msg }) {
 		typeof msg.content === "string" ? msg.content : msg.content == null ? "" : JSON.stringify(msg.content);
 
 	if (role === "assistant") {
+		// Same draft-answer extraction as the blocks path — the reasoning
+		// string can carry a truncated answer draft if the model ran out of
+		// tokens inside `<think>` without emitting a closing tag.
+		const splitThinking = msg.thinking ? splitReasoningForDisplay(msg.thinking) : null;
+		const visibleThinking = splitThinking ? splitThinking.thinking : msg.thinking;
+		const visibleDraft = splitThinking ? splitThinking.draft : null;
 		return html`
 			<div class="message-group">
 				${
-					msg.thinking &&
+					visibleThinking &&
 					html`
 					<div class="message message-reasoning">
 						<div class="message-label">reasoning</div>
-						<div class="message-content">${msg.thinking}</div>
+						<div class="message-content">${visibleThinking}</div>
+					</div>
+				`
+				}
+				${
+					visibleDraft &&
+					html`
+					<div class="message message-assistant message-draft-from-thinking">
+						<div class="message-label">agent</div>
+						<div class="message-content" dangerouslySetInnerHTML=${{ __html: renderMarkdown(visibleDraft) }} />
 					</div>
 				`
 				}
@@ -869,8 +898,24 @@ function StreamingBlocks({ blocks }) {
 				}
 				if (block.kind === "thinking") {
 					if (!block.text.trim()) return null;
-					return html`<div key=${i} class="message message-reasoning">
-						<div class="message-content">${block.text}</div>
+					// Reasoning block whose `<think>` never closed — the model
+					// spent its budget on thinking and ran out mid-draft. Pull
+					// the answer tail into a separate agent block below.
+					const split = splitReasoningForDisplay(block.text);
+					return html`<div key=${i}>
+						${
+							split.thinking &&
+							html`<div class="message message-reasoning">
+								<div class="message-content">${split.thinking}</div>
+							</div>`
+						}
+						${
+							split.draft &&
+							html`<div class="message message-assistant message-draft-from-thinking">
+								<div class="message-label">agent</div>
+								<div class="message-content" dangerouslySetInnerHTML=${{ __html: renderMarkdown(split.draft) }} />
+							</div>`
+						}
 					</div>`;
 				}
 				if (block.kind === "tool") {
