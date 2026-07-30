@@ -3598,9 +3598,8 @@ function SettingsSkillssh({ data, busy, act, confirm }) {
 			`,
 				)}
 
-			<div class="settings-section-title">Manage</div>
 			<div class="settings-form-row">
-				<button class="modal-btn" disabled=${busy} onClick=${() => act("/skills-sh update")}><${icons.arrowPath} /> Update all skills</button>
+				<button class="modal-btn" disabled=${busy} onClick=${() => act("/reload")}><${icons.arrowPath} /> Reload installed skills</button>
 			</div>
 		</div>
 	`;
