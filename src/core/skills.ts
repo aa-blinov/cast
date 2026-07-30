@@ -42,6 +42,13 @@ export interface Skill {
 	pluginId?: string;
 	/** False when the contributing plugin pack is disabled via `/plugin`. */
 	pluginEnabled?: boolean;
+	/**
+	 * Cached skill body (frontmatter stripped) — read once at discovery time so
+	 * `/skill:name` and the skill tool don't I/O on every invocation. Stale
+	 * only if the file changes on disk between discoveries; `/reload`
+	 * re-discovers and naturally invalidates.
+	 */
+	body?: string;
 }
 
 /** One plugin pack's skill root for `loadSkills`. */
@@ -56,9 +63,13 @@ export interface SkillDiagnostic {
 	path: string;
 }
 
-/** Read a skill's body (frontmatter stripped) fresh from disk, for /skill:name invocation. */
+/**
+ * Read a skill's body (frontmatter stripped) — uses the cached body if it was
+ * loaded by `loadSkillFromFile`, falls back to a disk read for legacy callers.
+ * `/reload` re-discovers skills, so a stale cache is naturally invalidated.
+ */
 function readSkillBody(skill: Skill): string {
-	return parseFrontmatter(readFileSync(skill.filePath, "utf-8")).body;
+	return skill.body ?? parseFrontmatter(readFileSync(skill.filePath, "utf-8")).body;
 }
 
 /** User-managed skills that `/skills uninstall` may delete (not builtin/plugin/--skill). */
@@ -122,7 +133,7 @@ function loadSkillFromFile(
 		return { skill: null, diagnostics };
 	}
 
-	const { frontmatter } = parseFrontmatter(raw);
+	const { frontmatter, body } = parseFrontmatter(raw);
 	const parentDirName = basename(dirname(filePath));
 	const name = typeof frontmatter.name === "string" && frontmatter.name ? frontmatter.name : parentDirName;
 	const description = typeof frontmatter.description === "string" ? frontmatter.description : undefined;
@@ -141,6 +152,7 @@ function loadSkillFromFile(
 			baseDir: dirname(filePath),
 			source,
 			disableModelInvocation: frontmatter["disable-model-invocation"] === true,
+			body,
 		},
 		diagnostics,
 	};
@@ -360,6 +372,8 @@ function parseArguments(args: string): string[] {
  * Returns the substituted content. Caller decides what to do if no placeholders matched.
  */
 function substituteArguments(content: string, args: string | undefined, baseDir: string): string {
+	// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for skill template variable, not JS template
+	content = content.replaceAll("${CAST_SKILL_DIR}", baseDir);
 	// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for skill template variable, not JS template
 	content = content.replaceAll("${CLAUDE_SKILL_DIR}", baseDir);
 
