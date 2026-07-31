@@ -51,7 +51,7 @@ import { resolveSshHosts } from "./ssh.ts";
 import { loadSubagentPrompts, type SubagentPrompt } from "./subagents.ts";
 import { getBashResolution } from "./tools/bash.ts";
 import { BackgroundTaskRegistry } from "./tools/bash-background.ts";
-import { buildReasoningParams, type ModelReasoningMeta } from "./vendors.ts";
+import { buildReasoningParams, type ModelReasoningMeta, resolveReasoningFormat } from "./vendors.ts";
 
 export interface ParsedArgs {
 	cwd: string;
@@ -272,6 +272,10 @@ export async function runStartup(
 
 	const { baseURL, apiKey } = await resolveConnection(pickers, settings);
 	const config = loadConfig({ baseURL, apiKey });
+	const activeProvider = settings.providers?.find(
+		(provider) => provider.url === baseURL && provider.apiKey === apiKey,
+	);
+	config.reasoningFormat = resolveReasoningFormat(baseURL, activeProvider?.reasoningFormat);
 
 	// Model: CLI > saved > interactive.
 	let model: string;
@@ -360,10 +364,10 @@ export async function runStartup(
 	// Reasoning: CLI > saved (same model) > interactive.
 	if (args.cliReasoning) {
 		config.reasoningLevel = args.cliReasoning;
-		config.reasoningParams = buildReasoningParams(args.cliReasoning);
+		config.reasoningParams = buildReasoningParams(args.cliReasoning, config.reasoningFormat);
 	} else if (settings.reasoningLevel && settings.model === model) {
 		config.reasoningLevel = settings.reasoningLevel;
-		config.reasoningParams = buildReasoningParams(settings.reasoningLevel);
+		config.reasoningParams = buildReasoningParams(settings.reasoningLevel, config.reasoningFormat);
 	} else {
 		await selectReasoningLevel(config, model, pickers, reasoningMeta);
 	}

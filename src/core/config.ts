@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import type { Provider } from "./settings.ts";
-import type { ModelReasoningMeta, ReasoningParams } from "./vendors.ts";
-import { extractReasoningMeta } from "./vendors.ts";
+import type { ModelReasoningMeta, ReasoningFormat, ReasoningParams } from "./vendors.ts";
+import { extractReasoningMeta, resolveReasoningFormat } from "./vendors.ts";
 
 // ============================================================================
 // Config
@@ -18,6 +18,7 @@ export interface AppConfig {
 	defaultBashTimeout: number;
 	reasoningLevel: string;
 	reasoningParams: ReasoningParams;
+	reasoningFormat: ReasoningFormat;
 }
 
 export interface ProviderCredentials {
@@ -75,6 +76,7 @@ export function loadConfig(connection: { baseURL: string; apiKey: string }): App
 		defaultBashTimeout: 180,
 		reasoningLevel: "off",
 		reasoningParams: { body: {}, enabled: false },
+		reasoningFormat: resolveReasoningFormat(baseURL),
 	};
 }
 

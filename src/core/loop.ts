@@ -1238,9 +1238,12 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 				// `content: null` with no tool_calls, a shape providers reject
 				// (400) on every following turn once it's in the session.
 				const hasToolCalls = Boolean(completion.toolCalls && completion.toolCalls.length > 0);
-				const assistantMsg: Message = {
+				const assistantMsg: Message & { reasoning_content?: string } = {
 					role: "assistant",
 					content: completion.content || (hasToolCalls ? null : EMPTY_ASSISTANT_PLACEHOLDER),
+					// Kimi and Z.ai also require this native trace to be preserved for
+					// subsequent turns. It is only present when the provider emitted it.
+					...(completion.reasoningContent ? { reasoning_content: completion.reasoningContent } : {}),
 					...(hasToolCalls
 						? {
 								tool_calls: completion.toolCalls!.map((tc) => ({

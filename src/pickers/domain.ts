@@ -10,7 +10,13 @@ import {
 	searchSessionSummaries,
 } from "../core/session.ts";
 import { getProjectTrust, type PermissionMode, type Settings, setProjectTrust } from "../core/settings.ts";
-import { buildReasoningParams, getReasoningOptions, type ModelReasoningMeta } from "../core/vendors.ts";
+import {
+	buildReasoningParams,
+	getReasoningOptionsForFormat,
+	type ModelReasoningMeta,
+	REASONING_FORMAT_OPTIONS,
+	type ReasoningFormat,
+} from "../core/vendors.ts";
 import { type ModelSelection, PERMISSION_MODES, type Pickers, type PickOption } from "./types.ts";
 
 // ============================================================================
@@ -394,7 +400,7 @@ export async function selectReasoningLevel(
 	pickers: Pickers,
 	reasoningMeta?: ModelReasoningMeta,
 ): Promise<void> {
-	const options = getReasoningOptions(reasoningMeta ?? null);
+	const options = getReasoningOptionsForFormat(reasoningMeta ?? null, config.reasoningFormat);
 	if (options.length === 0) {
 		config.reasoningLevel = "unknown";
 		config.reasoningParams = { body: {}, enabled: false };
@@ -411,7 +417,18 @@ export async function selectReasoningLevel(
 	// config already holds whatever reasoning level was in effect before.
 	if (!picked) return;
 	config.reasoningLevel = picked;
-	config.reasoningParams = buildReasoningParams(picked);
+	config.reasoningParams = buildReasoningParams(picked, config.reasoningFormat);
+}
+
+export async function selectReasoningFormat(
+	pickers: Pickers,
+	current: ReasoningFormat = "auto",
+): Promise<ReasoningFormat | null> {
+	const index = Math.max(
+		0,
+		REASONING_FORMAT_OPTIONS.findIndex((option) => option.value === current),
+	);
+	return await pickers.pickOption(REASONING_FORMAT_OPTIONS, { title: "Reasoning protocol", defaultIndex: index });
 }
 
 // ============================================================================

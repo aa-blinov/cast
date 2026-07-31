@@ -443,6 +443,30 @@ describe("runAgentLoop — retries a length-truncated response with no tool call
 	});
 });
 
+describe("runAgentLoop — preserved reasoning", () => {
+	it("keeps native reasoning_content on every assistant turn for compatible providers", async () => {
+		vi.mocked(streamAndCollect).mockImplementationOnce(async () => ({
+			content: "answer",
+			thinking: "private reasoning",
+			reasoningContent: "provider-native trace",
+			finishReason: "stop",
+		}));
+
+		const messages = await runAgentLoop([{ role: "user", content: "hi" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			onEvent: () => {},
+		});
+
+		const assistant = messages.find((message) => message.role === "assistant") as
+			| (Message & { reasoning_content?: string })
+			| undefined;
+		expect(assistant?.reasoning_content).toBe("provider-native trace");
+	});
+});
+
 // ============================================================================
 // runAgentLoop — /steer and /fu (steering + follow-up injection)
 // ============================================================================

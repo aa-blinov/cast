@@ -74,7 +74,7 @@ import { saveSshConfig } from "../core/ssh.ts";
 import type { StartupResult } from "../core/startup.ts";
 import { stripAnsi } from "../core/tools/bash.ts";
 import { BackgroundTaskRegistry, type BashBackgroundDeps } from "../core/tools/bash-background.ts";
-import { getReasoningOptions } from "../core/vendors.ts";
+import { buildReasoningParams, getReasoningOptionsForFormat, resolveReasoningFormat } from "../core/vendors.ts";
 import { ALL_THEMES } from "../ui/themes/index.ts";
 import type { ThemeColors } from "../ui/themes/types.ts";
 import { isCommandBlocking, SLASH_COMMANDS } from "./commands.ts";
@@ -1056,7 +1056,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 	 * model list cache says about the model it's actually running now. */
 	function reasoningOptionsFor(model: string): Array<{ value: string; label: string }> {
 		const meta = reasoningMeta ?? getModelsCache().find((m) => m.id === model)?.reasoning;
-		return getReasoningOptions(meta ?? null);
+		return getReasoningOptionsForFormat(meta ?? null, config.reasoningFormat);
 	}
 
 	function renameSession(sessionId: string, title: string): boolean {
@@ -1462,6 +1462,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			// Global, same as the TUI — `config` is a shared mutable object, so this
 			// takes effect on the next turn in every session, not just this one.
 			config.reasoningLevel = arg;
+			config.reasoningParams = buildReasoningParams(arg, config.reasoningFormat);
 			updateSettings({ reasoningLevel: arg });
 			return { ok: true, result: { reasoningLevel: arg } };
 		}
@@ -1925,7 +1926,10 @@ export function createWebBridge(result: StartupResult): WebBridge {
 				const parts = rest.split(/\s+/);
 				const [pname, url, apiKey] = parts;
 				if (!pname || !url || !apiKey) return { ok: false, error: "Usage: /provider add <name> <url> <apiKey>" };
-				const next = [...providers.filter((p) => p.name !== pname), { name: pname, url, apiKey }];
+				const next = [
+					...providers.filter((p) => p.name !== pname),
+					{ name: pname, url, apiKey, reasoningFormat: "auto" as const },
+				];
 				// No active provider yet (e.g. first add) → make this the default
 				// so the main model has a working endpoint. Selection of a
 				// different provider for any slot happens in the Model tab.
@@ -1947,6 +1951,8 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			}
 			config.baseURL = target.url;
 			config.apiKey = target.apiKey;
+			config.reasoningFormat = resolveReasoningFormat(target.url, target.reasoningFormat);
+			config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat);
 			// Switching the active provider invalidates every model id that was
 			// chosen against the old endpoint, so reset them — the user re-picks on
 			// the new provider. Slots with their own provider override keep their

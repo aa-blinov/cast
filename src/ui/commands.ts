@@ -62,7 +62,7 @@ import {
 	uninstallUserSkill,
 } from "../core/skills.ts";
 import { type SshHost, saveSshConfig, scanSshKeys, validateKeyPermissions } from "../core/ssh.ts";
-import { getReasoningOptions, type ModelReasoningMeta } from "../core/vendors.ts";
+import { buildReasoningParams, type ModelReasoningMeta, resolveReasoningFormat } from "../core/vendors.ts";
 import {
 	formatSkillPickLabel,
 	selectMcpServers,
@@ -70,6 +70,7 @@ import {
 	selectPermissionMode,
 	selectPersona,
 	selectPlugins,
+	selectReasoningFormat,
 	selectReasoningLevel,
 	selectSession,
 	selectSkills,
@@ -156,6 +157,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/queue-reset", description: "Clear the message queue" },
 	{ name: "/quit", description: "Save and exit" },
 	{ name: "/reasoning", description: "Change reasoning level" },
+	{ name: "/reasoning-format", description: "Set provider reasoning protocol" },
 	{ name: "/reload", description: "Reload skills, rules, MCP, and personas for cwd" },
 	{ name: "/repo", description: "Show cwd and git branch" },
 	{ name: "/rule:", description: "Invoke a rule by name", takesArgs: true },
@@ -1584,16 +1586,28 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 
 	if (input === "/reasoning") {
 		const meta = deps.reasoningMeta ?? getModelsCache().find((m) => m.id === session.model)?.reasoning;
-		const options = getReasoningOptions(meta ?? null);
-		if (options.length === 0) {
-			showNotice(
-				"[This provider exposes no reasoning controls — the model uses its own default; any reasoning shows as it streams]",
-			);
-			return;
-		}
 		await selectReasoningLevel(config, session.model, deps.pickers, meta);
 		updateSettings({ reasoningLevel: config.reasoningLevel });
 		showNotice(`[Reasoning: ${config.reasoningLevel}]`);
+		return;
+	}
+
+	if (input === "/reasoning-format") {
+		const selected = await selectReasoningFormat(deps.pickers, config.reasoningFormat);
+		if (!selected) {
+			showNotice("[Cancelled]");
+			return;
+		}
+		const settings = loadSettings();
+		const providers = settings.providers?.map((provider) =>
+			provider.url === config.baseURL && provider.apiKey === config.apiKey
+				? { ...provider, reasoningFormat: selected }
+				: provider,
+		);
+		config.reasoningFormat = resolveReasoningFormat(config.baseURL, selected);
+		config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat);
+		updateSettings({ providers });
+		showNotice(`[Reasoning protocol: ${selected}]`);
 		return;
 	}
 
@@ -1732,6 +1746,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		}
 		config.baseURL = p.url;
 		config.apiKey = p.apiKey;
+		config.reasoningFormat = resolveReasoningFormat(p.url, p.reasoningFormat);
 		updateSettings({ providerUrl: p.url, apiKey: p.apiKey });
 		await applyProviderSelection(p);
 	}
@@ -1764,7 +1779,12 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			return;
 		}
 
-		const newProvider: Provider = { name, url, apiKey: key };
+		const reasoningFormat = await selectReasoningFormat(deps.pickers);
+		if (!reasoningFormat) {
+			showNotice("[Cancelled]");
+			return;
+		}
+		const newProvider: Provider = { name, url, apiKey: key, reasoningFormat };
 		// Single atomic write: providers array + active URL/key in one go.
 		updateSettings({
 			providers: [...existing, newProvider],
@@ -1773,6 +1793,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		});
 		config.baseURL = url;
 		config.apiKey = key;
+		config.reasoningFormat = resolveReasoningFormat(url, reasoningFormat);
 		showNotice(`[Provider "${name}" added and selected. Select a model.]`);
 		const selection = await selectModel(config, deps.pickers);
 		if (selection) {

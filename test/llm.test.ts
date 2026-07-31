@@ -306,6 +306,7 @@ describe("streamAndCollect — usage accounting", () => {
 		]);
 		const result = await streamAndCollect(client, "test-model", [], [], 100);
 		expect(result.thinking).toBe("let me think step by step");
+		expect(result.reasoningContent).toBe("let me think step by step");
 		expect(result.content).toBe("the answer is 42");
 	});
 
