@@ -230,6 +230,14 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 }
 .content th { background: var(--bg-tertiary); font-weight: 600; }
 .content tr:hover td { background: var(--bg-tertiary); }
+.badge-pass, .badge-fail {
+	display: inline-block; padding: 2px 8px; border-radius: 999px;
+	font-size: .8rem; font-weight: 500; white-space: nowrap;
+}
+.badge-pass { background: var(--green-subtle); color: var(--green); }
+.badge-fail { background: var(--bg-tertiary); color: var(--text-secondary); }
+.content details { margin: 0 0 8px; }
+.content details summary { cursor: pointer; font-weight: 500; padding: 4px 0; }
 
 /* ── Doc page navigation ─────────────────────────────────────────────── */
 .doc-nav {
@@ -470,6 +478,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 			<a href="themes.html">Themes</a>
 			<a href="non-interactive-mode.html">Non-Interactive Mode</a>
 			<a href="architecture.html">Architecture</a>
+			<a href="eval-scoreboard.html">Model Scoreboard</a>
 			<a href="changelog.html" class="active">Changelog</a>
 	</div>
 </nav>
@@ -478,6 +487,79 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 	<article class="content">
 		<h1>Changelog</h1>
 <p>All notable user-facing changes to cast, newest first.</p>
+<h2>0.12.7</h2>
+<h3>Added</h3>
+<ul>
+<li>Added a behavior evaluation bench covering planning, tool use, task execution, and other core interaction contracts.</li>
+</ul>
+<h3>Fixed</h3>
+<ul>
+<li>Completed web planning transitions so plan decisions consistently reach the intended next state.</li>
+<li>Aligned <code>grep</code> glob paths across the ripgrep-backed and built-in fallback implementations.</li>
+<li>Rendered escaped Unicode in tool results as readable text.</li>
+<li>Stabilized web settings and session interactions.</li>
+</ul>
+<h3>Internal</h3>
+<ul>
+<li>Added plan, task, and skill judgment cases plus single-tool core contract coverage.</li>
+<li>Synchronized evaluation and tool documentation with the current behavior bench and background Bash behavior.</li>
+</ul>
+<h2>0.12.6</h2>
+<h3>Fixed</h3>
+<ul>
+<li><code>grep</code>: the built-in JS fallback (used when ripgrep isn&#39;t on <code>PATH</code>) failed to find matches when the search path named a single file instead of a directory — it called <code>readdir()</code> on the file and silently swallowed the resulting <code>ENOTDIR</code>. The ripgrep-backed path already handled this case; the fallback now does too.</li>
+<li>Plan mode&#39;s read-only command check rejected safe commands like <code>ls -la 2&gt;&amp;1</code> or <code>cmd &gt;/dev/null 2&gt;&amp;1</code> — fd-duplication and null-device redirects were caught by the blanket output-redirection guard even though neither writes a persistent file.</li>
+<li><code>bash</code>: background tasks (<code>run_in_background: true</code>) no longer get killed by a default timeout — they&#39;re open-ended by default (dev servers, long builds) and only get a kill timer when the model explicitly passes <code>timeout</code>. A <code>timeout</code> of <code>0</code> or negative is treated as &quot;no timeout&quot; rather than firing almost immediately.</li>
+<li><code>/continue</code> and starting a new session now restore the full session state (reasoning settings, turn metadata, title, pinned flag, todos, share token) instead of a partial subset, and reset SSH host resolution and provider/model validation consistently when switching sessions or projects.</li>
+</ul>
+<h2>0.12.5</h2>
+<h3>Fixed</h3>
+<ul>
+<li>Planning flow: complex build-mode tasks now consistently request planning before implementation, while an explicit user choice to continue in Build is preserved across subsequent turns.</li>
+<li>Web UI: plan-mode entry and plan approval now use the same choices as the terminal UI, including refine, immediate implementation, fresh-context implementation, and manual Build handoff.</li>
+<li>Web UI: every plan-mode decision is saved as a persistent system card in the chat history, so the selected path remains clear after reload.</li>
+</ul>
+<h2>0.12.4</h2>
+<h3>Fixed</h3>
+<ul>
+<li>Web UI: settings remain responsive when adding or removing Skills.sh skills, including when Settings is opened from a fresh root draft with no visible session.</li>
+<li>Tool output: valid JSON containing Unicode escape sequences now renders as readable text in both the web UI and terminal UI.</li>
+<li>Web UI: font previews are local and stable, so the picker shows each typeface immediately without late-loading flicker.</li>
+<li><code>grep</code>: directory-component globs now match relative to the requested search path consistently whether ripgrep is installed or the built-in fallback is used.</li>
+</ul>
+<h2>0.12.2</h2>
+<h3>Fixed</h3>
+<ul>
+<li>Web UI: hover tooltips were silently broken on message rows after the mid-word boundary-merge rework — the <code>PAD</code> constant the tooltip layout depended on had been removed alongside the dead hover-cancel code path. Restored; tooltips on user / agent / reasoning rows, tool cards, and MCP tool rows are back.</li>
+<li>Web UI: when a streaming reply was truncated by <code>max_tokens</code> <em>inside</em> a model-emitted draft answer (i.e. reasoning had already closed and the model was emitting real content for the user when it ran out of budget), the partial answer was being discarded. The last accumulated content is now flushed into its own <code>[agent]</code> block — same way the answer-after-reasoning case was handled in 0.12.1.</li>
+<li>Web UI: mid-stream mouse movement no longer cancels a hover tooltip before it appears. The previous <code>mousemove</code> → cancel handler kept the tooltip code technically alive but fired on every cursor wiggle and never let the 500ms hover-intent timer complete. Removed; tooltips open on the intended timer and only the standard <code>mouseleave</code> / scroll / modal-open paths dismiss them.</li>
+<li>Web UI: the browser&#39;s native tooltip is stripped the moment the cursor enters the trigger element. Otherwise both tooltips render and the native one wins the race on leaving the page, briefly showing the plain <code>title</code> text over the styled bubble.</li>
+<li>Web UI: custom hover tooltips are suppressed on coarse-pointer / touch devices, where they have no interaction model and were firing on tap-and-release.</li>
+</ul>
+<h3>Changed</h3>
+<ul>
+<li>Built-in <code>cast</code> configuration skill: split the 397-line <code>SKILL.md</code> into a short index + seven <code>references/*.md</code> topic files (personas, skills, marketplace, mcp, rules, hooks, commands). The skill now follows the agentskills.io progressive-disclosure convention — only the frontmatter + topic map (~1.6 KB) is loaded every time <code>cast</code> is invoked for a config question, and the matching reference file is read on demand. For a focused question (e.g. &quot;how do I add an MCP server?&quot;) the model pulls just <code>references/mcp.md</code> instead of every topic.</li>
+</ul>
+<h2>0.12.1</h2>
+<h3>Fixed</h3>
+<ul>
+<li>Web UI: when a reasoning block ended with a markdown heading (a truncated answer draft that the parser flushed into reasoning because the model ran out of <code>max_tokens</code> inside <code>&lt;think&gt;</code> without emitting a close tag), the post-heading tail is now rendered as a separate <code>[agent]</code> block instead of sitting inside <code>[reasoning]</code> next to a blank agent area. Applies to live streaming, settled turns, and reload from disk.</li>
+<li>Web UI: when the model&#39;s <code>&lt;think&gt;...&lt;/think&gt;</code> boundary landed <em>mid-word</em> (observed on MiniMax-M3 emitting <code>&lt;/think&gt;</code> inside the Cyrillic word &quot;Сейчас&quot;, so reasoning ended &quot;...Сей&quot; and content started &quot;час уточню...&quot;), the trailing word fragment is now glued back onto the agent&#39;s content. The user sees the model-intended continuous word — &quot;Сейчас уточню текущую погоду в Астане.&quot; — instead of two halves separated across blocks. Same-script check (Latin↔Latin, Cyrillic↔Cyrillic) guards against false merges across alphabets; sentence-ending punctuation inside the fragment stays in reasoning.</li>
+</ul>
+<h2>0.12.0</h2>
+<h3>Added</h3>
+<ul>
+<li><p><strong>Per-persona allowlists</strong> for tools, skills, MCP servers, and subagent types. Each persona&#39;s frontmatter now supports four knobs that all share the same shape (omitted = no restriction, <code>[]</code> = explicitly nothing allowed, exact names or <code>*</code>-globs):</p>
+<ul>
+<li><code>tools:</code> — built-in tool names (existing). <code>tools: [read, grep, ls, plan_*, web_*]</code> narrows the persona&#39;s builtin reach.</li>
+<li><code>skills:</code> — skill names invokable via the <code>skill</code> tool. <code>skills: [research, deep-research]</code> hides every other skill from the catalog and the runtime.</li>
+<li><code>mcp:</code> — MCP <strong>server</strong> names (not individual tool names). <code>mcp: [postgres, playwright*]</code> keeps only those servers&#39; tools callable.</li>
+<li><code>subagentTypes:</code> — narrows <code>subagents: true</code> further. <code>subagentTypes: [explore, review]</code> is the only set this persona can spawn via <code>task</code>.</li>
+</ul>
+<p>Enforced at runtime (not just in the prompt text) — a disallowed call gets the same &quot;not available&quot; / &quot;not found&quot; / &quot;Unknown subagent&quot; message the model already gets for any hidden tool, so these actually isolate a persona&#39;s zone of responsibility. <code>skills:</code> / <code>mcp:</code> restrictions also forward to anything the persona delegates to via <code>task</code>, so the restriction can&#39;t be routed around by spawning a subagent.</p>
+<p>Default persona is now <code>senior</code> (the previous <code>coding</code> persona was a strict subset and is removed). <code>coder-with-subagents-force-review</code> is also removed — its review gate now lives in <code>coder-with-subagents</code>&#39;s own validation pattern.</p>
+</li>
+</ul>
 <h2>0.11.1</h2>
 <h3>Fixed</h3>
 <ul>
@@ -1547,7 +1629,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 
 	</article>
 		<nav class="doc-nav">
-			<a href="architecture.html" class="doc-nav-prev">← Architecture</a>
+			<a href="eval-scoreboard.html" class="doc-nav-prev">← Model Scoreboard</a>
 			<a href="getting-started.html" class="doc-nav-next">Getting Started →</a>
 		</nav>
 </main>

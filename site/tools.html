@@ -230,6 +230,14 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 }
 .content th { background: var(--bg-tertiary); font-weight: 600; }
 .content tr:hover td { background: var(--bg-tertiary); }
+.badge-pass, .badge-fail {
+	display: inline-block; padding: 2px 8px; border-radius: 999px;
+	font-size: .8rem; font-weight: 500; white-space: nowrap;
+}
+.badge-pass { background: var(--green-subtle); color: var(--green); }
+.badge-fail { background: var(--bg-tertiary); color: var(--text-secondary); }
+.content details { margin: 0 0 8px; }
+.content details summary { cursor: pointer; font-weight: 500; padding: 4px 0; }
 
 /* ── Doc page navigation ─────────────────────────────────────────────── */
 .doc-nav {
@@ -470,6 +478,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 			<a href="themes.html">Themes</a>
 			<a href="non-interactive-mode.html">Non-Interactive Mode</a>
 			<a href="architecture.html">Architecture</a>
+			<a href="eval-scoreboard.html">Model Scoreboard</a>
 			<a href="changelog.html">Changelog</a>
 	</div>
 </nav>
@@ -481,7 +490,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 <h2>File System Tools</h2>
 <h3><code>read</code></h3>
 <p>Read file contents. Supports text files and images (jpg, jpeg, png, gif, webp, bmp). Images are sent directly to vision-capable models.</p>
-<div class="table-wrap"><table><thead><tr><th>Parameter</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>path</code></td><td>Yes</td><td>File path (relative or absolute)</td></tr><tr><td><code>offset</code></td><td>No</td><td>Line number to start from (1-indexed)</td></tr><tr><td><code>limit</code></td><td>No</td><td>Maximum lines to read</td></tr></tbody></table></div><p>Output is truncated to 2000 lines or 64KB. Images are automatically downscaled to fit within model vision limits; only rejected if truly huge (25MB+). Each line is prefixed with its line number (<code>N: content</code>) — copy the exact text (not the number) when calling <code>edit</code>.</p>
+<div class="table-wrap"><table><thead><tr><th>Parameter</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>path</code></td><td>Yes</td><td>File path (relative or absolute)</td></tr><tr><td><code>offset</code></td><td>No</td><td>Line number to start from (1-indexed)</td></tr><tr><td><code>limit</code></td><td>No</td><td>Maximum lines to read</td></tr></tbody></table></div><p>Output is truncated to 2000 lines or 128KB. Images are automatically downscaled to fit within model vision limits; only rejected if truly huge (25MB+). Each line is prefixed with its line number (<code>N: content</code>) — copy the exact text (not the number) when calling <code>edit</code>.</p>
 <h3><code>write</code></h3>
 <p>Write content to a file. Creates the file if it doesn&#39;t exist, overwrites if it does. Automatically creates parent directories.</p>
 <div class="table-wrap"><table><thead><tr><th>Parameter</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>path</code></td><td>Yes</td><td>File path</td></tr><tr><td><code>content</code></td><td>Yes</td><td>Content to write</td></tr></tbody></table></div><p>The reply is not a byte count — it shows what actually changed, so a from-memory rewrite that reproduced stale content is caught immediately:</p>
@@ -511,10 +520,15 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 <div class="table-wrap"><table><thead><tr><th>Parameter</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>path</code></td><td>No</td><td>Directory to list (default: cwd)</td></tr><tr><td><code>limit</code></td><td>No</td><td>Maximum entries (default: 500)</td></tr></tbody></table></div><h2>Shell Tool</h2>
 <h3><code>bash</code></h3>
 <p>Execute a bash command in the current working directory.</p>
-<div class="table-wrap"><table><thead><tr><th>Parameter</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>command</code></td><td>Yes</td><td>Bash command to execute</td></tr><tr><td><code>timeout</code></td><td>No</td><td>Timeout in seconds (default: 180)</td></tr></tbody></table></div><p>Output is truncated to the last 2000 lines or 64KB (whichever is hit first).</p>
+<div class="table-wrap"><table><thead><tr><th>Parameter</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>command</code></td><td>Yes</td><td>Bash command to execute</td></tr><tr><td><code>timeout</code></td><td>No</td><td>Timeout in seconds (default: 180)</td></tr></tbody></table></div><p>Output is truncated to the last 2000 lines or 128KB (whichever is hit first).</p>
 <p>For long-running commands (docker build, npm install, large test suites), increase the timeout:</p>
 <pre><code>bash(command=&quot;npm run build&quot;, timeout=600)
 </code></pre>
+<h3>Background execution</h3>
+<p>Only available in the TUI and web UI (not <code>cast run</code> or subagents — the tool falls through to the normal blocking path there). Pass <code>run_in_background: true</code> on the same <code>bash</code> call to start a command without blocking the turn:</p>
+<div class="table-wrap"><table><thead><tr><th>Parameter</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>run_in_background</code></td><td>No</td><td>Start the command in the background and return immediately with a task id instead of waiting for it to finish</td></tr></tbody></table></div><p>The call returns immediately with a task id (<code>bg-N</code>). Unlike a normal blocking <code>bash</code> call, a background task has <strong>no default timeout</strong> — it&#39;s meant for open-ended work (dev servers, long builds) and keeps running until it exits on its own or is stopped. Pass <code>timeout</code> on the same call if the task itself should be force-killed after N seconds.</p>
+<p>Completion is delivered automatically as a system reminder once the process exits, even if the agent has moved on to something else in the meantime. Two more tools manage a task while it&#39;s running:</p>
+<div class="table-wrap"><table><thead><tr><th>Tool</th><th>Parameter</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>bash_output</code></td><td><code>task_id</code></td><td>Yes</td><td>Task id returned by <code>run_in_background</code></td></tr><tr><td></td><td><code>wait</code></td><td>No</td><td>Seconds to block waiting for the task to finish before returning (0–60, default: 0)</td></tr><tr><td><code>bash_kill</code></td><td><code>task_id</code></td><td>Yes</td><td>Task id to terminate early</td></tr></tbody></table></div><p>Background tasks are session-scoped: they stay pollable and killable across every later turn until the session itself closes, at which point anything still running is killed.</p>
 <h4>Windows</h4>
 <p>A bare <code>bash</code> from PATH on Windows usually resolves to the WSL shim (<code>System32\bash.exe</code>), which loses piped output and can&#39;t see the Windows toolchain. cast therefore locates a native Git Bash, in this order:</p>
 <ol>
@@ -528,7 +542,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 <h2>SSH Tool</h2>
 <h3><code>ssh</code></h3>
 <p>Execute one command on a remote host via SSH. Only available when SSH hosts are configured.</p>
-<div class="table-wrap"><table><thead><tr><th>Parameter</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>host</code></td><td>Yes</td><td>Host name key from configured SSH hosts</td></tr><tr><td><code>command</code></td><td>Yes</td><td>Remote command to execute</td></tr><tr><td><code>timeout</code></td><td>No</td><td>Timeout in seconds (default: 180)</td></tr></tbody></table></div><p>Output is combined stdout+stderr, truncated to the last 2000 lines or 64KB.</p>
+<div class="table-wrap"><table><thead><tr><th>Parameter</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>host</code></td><td>Yes</td><td>Host name key from configured SSH hosts</td></tr><tr><td><code>command</code></td><td>Yes</td><td>Remote command to execute</td></tr><tr><td><code>timeout</code></td><td>No</td><td>Timeout in seconds (default: 180)</td></tr></tbody></table></div><p>Output is combined stdout+stderr, truncated to the last 2000 lines or 128KB.</p>
 <h3>Configuration</h3>
 <p>SSH hosts are configured in <code>~/.cast/ssh.json</code> (global) or <code>.cast/ssh.json</code> (project):</p>
 <pre><code class="language-json">{
