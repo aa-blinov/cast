@@ -21,6 +21,12 @@ import { taskParallelDelegation } from "./task-parallel-delegation.ts";
 import { todoWriteMarksStepDone } from "./todo-write-marks-step-done.ts";
 import { mcpLookupReportsNotFound } from "./mcp-lookup-reports-not-found.ts";
 import { planStepImplementsAndChecks } from "./plan-step-implements-and-checks.ts";
+import { planReentryReusesExistingPlan } from "./plan-reentry-reuses-existing-plan.ts";
+import { planOpenQuestionBlocksDone } from "./plan-open-question-blocks-done.ts";
+import { buildModeFlagsPlanDivergence } from "./build-mode-flags-plan-divergence.ts";
+import { taskWorkerDelegatesRealEdit } from "./task-worker-delegates-real-edit.ts";
+import { taskReviewFollowsNontrivialChange } from "./task-review-follows-nontrivial-change.ts";
+import { skillNotLoadedForGenericRequest } from "./skill-not-loaded-for-generic-request.ts";
 
 export const chainCases: EvalCase[] = [
 	searchThenRead,
@@ -45,4 +51,10 @@ export const chainCases: EvalCase[] = [
 	todoWriteMarksStepDone,
 	mcpLookupReportsNotFound,
 	planStepImplementsAndChecks,
+	planReentryReusesExistingPlan,
+	planOpenQuestionBlocksDone,
+	buildModeFlagsPlanDivergence,
+	taskWorkerDelegatesRealEdit,
+	taskReviewFollowsNontrivialChange,
+	skillNotLoadedForGenericRequest,
 ];

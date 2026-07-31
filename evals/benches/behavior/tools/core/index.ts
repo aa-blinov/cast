@@ -10,6 +10,10 @@ import { unicodeToolResultPreserved } from "./unicode-tool-result-preserved.ts";
 import { bashNonzeroResultIsVisible } from "./bash-nonzero-result-is-visible.ts";
 import { lsDirectoryArgument } from "./ls-directory-argument.ts";
 import { todoWriteStructuredList } from "./todo-write-structured-list.ts";
+import { bashArgumentGrounding } from "./bash-argument-grounding.ts";
+import { grepFlagsAreGrounded } from "./grep-flags-are-grounded.ts";
+import { readImageVision } from "./read-image-vision.ts";
+import { writeOverwritesExistingFile } from "./write-overwrites-existing-file.ts";
 
 export const coreCases: EvalCase[] = [
 	requiredReadTool,
@@ -23,4 +27,8 @@ export const coreCases: EvalCase[] = [
 	bashNonzeroResultIsVisible,
 	lsDirectoryArgument,
 	todoWriteStructuredList,
+	bashArgumentGrounding,
+	grepFlagsAreGrounded,
+	readImageVision,
+	writeOverwritesExistingFile,
 ];
