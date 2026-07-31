@@ -429,7 +429,15 @@ export async function execGrep(args: Record<string, unknown>, cwd: string, confi
 		// even though the primary rg path handled it correctly.
 		const globHasDir = glob?.includes("/") ?? false;
 		const globRe = glob ? globToFileRegExp(globHasDir && !glob.startsWith("**/") ? `**/${glob}` : glob) : undefined;
-		const allFiles = await walkFiles(cwd, searchPath);
+		// walkFiles assumes a directory (readdir); a searchPath that names a
+		// single file made it `readdir` an ENOTDIR, get swallowed by the
+		// catch-and-skip below, and silently return zero candidates — the rg
+		// path above already special-cases this (searchPathIsDirectory), the
+		// fallback needs the same.
+		const searchPathIsFile = await stat(searchPath)
+			.then((stats) => stats.isFile())
+			.catch(() => false);
+		const allFiles = searchPathIsFile ? [searchPath] : await walkFiles(cwd, searchPath);
 		const candidates = globRe
 			? allFiles.filter((p) => globRe.test(globHasDir ? relative(searchPath, p) : basename(p)))
 			: allFiles;

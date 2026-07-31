@@ -1117,6 +1117,24 @@ describe("grep", () => {
 		expect(result.isError).toBeUndefined();
 	});
 
+	it("finds a match when path names a single file, not a directory (rg path)", async () => {
+		writeFileSync(join(TEST_DIR, "single.txt"), "INFO startup\nERROR disk full\n");
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const result = await exec("grep", { pattern: "error", path: join(TEST_DIR, "single.txt"), ignoreCase: true });
+		expect(result.content).toContain("ERROR disk full");
+	});
+
+	it("finds a match when path names a single file, not a directory (fallback)", async () => {
+		// walkFiles assumes a directory (readdir) — a single-file searchPath
+		// used to hit ENOTDIR, get swallowed, and silently report zero matches.
+		writeFileSync(join(TEST_DIR, "single.txt"), "INFO startup\nERROR disk full\n");
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const result = await withoutRgOnPath(() =>
+			exec("grep", { pattern: "error", path: join(TEST_DIR, "single.txt"), ignoreCase: true }),
+		);
+		expect(result.content).toContain("ERROR disk full");
+	});
+
 	function buildGrepDirTree(root: string) {
 		mkdirSync(join(root, "src", "core", "tools"), { recursive: true });
 		mkdirSync(join(root, "src", "ui"), { recursive: true });
