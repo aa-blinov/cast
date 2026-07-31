@@ -14,7 +14,7 @@ Read file contents. Supports text files and images (jpg, jpeg, png, gif, webp, b
 | `offset` | No | Line number to start from (1-indexed) |
 | `limit` | No | Maximum lines to read |
 
-Output is truncated to 2000 lines or 64KB. Images are automatically downscaled to fit within model vision limits; only rejected if truly huge (25MB+). Each line is prefixed with its line number (`N: content`) — copy the exact text (not the number) when calling `edit`.
+Output is truncated to 2000 lines or 128KB. Images are automatically downscaled to fit within model vision limits; only rejected if truly huge (25MB+). Each line is prefixed with its line number (`N: content`) — copy the exact text (not the number) when calling `edit`.
 
 ### `write`
 
@@ -99,13 +99,33 @@ Execute a bash command in the current working directory.
 | `command` | Yes | Bash command to execute |
 | `timeout` | No | Timeout in seconds (default: 180) |
 
-Output is truncated to the last 2000 lines or 64KB (whichever is hit first).
+Output is truncated to the last 2000 lines or 128KB (whichever is hit first).
 
 For long-running commands (docker build, npm install, large test suites), increase the timeout:
 
 ```
 bash(command="npm run build", timeout=600)
 ```
+
+### Background execution
+
+Only available in the TUI and web UI (not `cast run` or subagents — the tool falls through to the normal blocking path there). Pass `run_in_background: true` on the same `bash` call to start a command without blocking the turn:
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `run_in_background` | No | Start the command in the background and return immediately with a task id instead of waiting for it to finish |
+
+The call returns immediately with a task id (`bg-N`). Unlike a normal blocking `bash` call, a background task has **no default timeout** — it's meant for open-ended work (dev servers, long builds) and keeps running until it exits on its own or is stopped. Pass `timeout` on the same call if the task itself should be force-killed after N seconds.
+
+Completion is delivered automatically as a system reminder once the process exits, even if the agent has moved on to something else in the meantime. Two more tools manage a task while it's running:
+
+| Tool | Parameter | Required | Description |
+|------|-----------|----------|-------------|
+| `bash_output` | `task_id` | Yes | Task id returned by `run_in_background` |
+| | `wait` | No | Seconds to block waiting for the task to finish before returning (0–60, default: 0) |
+| `bash_kill` | `task_id` | Yes | Task id to terminate early |
+
+Background tasks are session-scoped: they stay pollable and killable across every later turn until the session itself closes, at which point anything still running is killed.
 
 #### Windows
 
@@ -131,7 +151,7 @@ Execute one command on a remote host via SSH. Only available when SSH hosts are 
 | `command` | Yes | Remote command to execute |
 | `timeout` | No | Timeout in seconds (default: 180) |
 
-Output is combined stdout+stderr, truncated to the last 2000 lines or 64KB.
+Output is combined stdout+stderr, truncated to the last 2000 lines or 128KB.
 
 ### Configuration
 
