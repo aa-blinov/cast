@@ -9,7 +9,7 @@
  * Options:
  *   --model, -m <model>    Model to use (required)
  *   --bench <id[,id...]>   Run only these benches (see evals/benches/, --list to enumerate)
- *   --cases, -c <filter>   Further filter to cases matching this id prefix
+ *   --cases, -c <filter>   Filter to cases matching this id (comma-separated exact ids or prefixes)
  *   --verbose, -v          Show per-case output
  *   --save, -s <path>      Save results to JSON file
  *   --list                 List available benches and cases
@@ -31,6 +31,7 @@ import {
 	listBaselines,
 	resolveBaseline,
 	saveBaseline,
+	toComparableSuiteResult,
 } from "./lib/baseline.ts";
 import { cleanupFixtures } from "./lib/fixtures.ts";
 import {
@@ -48,11 +49,13 @@ import {
 	printRepeatedCompareReport,
 	printReport,
 	type ProviderConnection,
+	type RepeatedSuiteResult,
 	type RunnerOptions,
 	runSuite,
 	saveCompareResults,
 	saveResults,
 } from "./lib/runner.ts";
+import { buildScoreboardEntry, mergeScoreboardEntry, readScoreboard, upsertScoreboard } from "./lib/scoreboard.ts";
 import { listCaseIds, printTrace, resolveRunFile } from "./lib/trace-view.ts";
 
 // Fixture files live under a per-process temp dir (see evals/lib/fixtures.ts) — wipe
@@ -63,6 +66,100 @@ process.on("exit", cleanupFixtures);
 // ============================================================================
 // CLI
 // ============================================================================
+
+/**
+ * Writes/updates one scoreboard entry per model in `compare` — see
+ * `evals/lib/scoreboard.ts` for why this only ever runs from a --repeat
+ * result (validated before either call site below is reached), never a
+ * single run.
+ *
+ * `isFullRun` (no `--cases` filter) fully replaces each model's entry;
+ * otherwise (a cherry-picked rerun — e.g. a couple of cases that flaked on a
+ * network error) merges the fresh per-case results into whatever's already
+ * there, so the rest of the suite's data isn't lost. A partial rerun for a
+ * model with no prior entry has nothing to merge into and is rejected —
+ * run the full suite once first.
+ */
+function updateScoreboard(
+	compare: Parameters<typeof buildScoreboardEntry>[0],
+	benchIds: string[],
+	isFullRun: boolean,
+	targets?: Record<string, { model: string; provider?: string }>,
+): void {
+	const existingAll = readScoreboard();
+	for (const modelName of compare.models) {
+		const fresh = buildScoreboardEntry(compare, modelName, benchIds);
+		// `--compare provider:model` keys `compare.models`/`compare.suites` by the
+		// raw "provider:model" entry (needed to resolve each model's connection
+		// during the run) — but the scoreboard should key by the bare model name
+		// only, so the same model always lands in one row regardless of which
+		// provider ran it.
+		const cleanName = targets?.[modelName]?.model ?? modelName;
+		fresh.model = cleanName;
+		// Entries written before `results` existed (aggregates only, no raw
+		// per-case data) can't be merged into — treat them the same as no
+		// entry at all rather than crashing on a missing array.
+		const rawExisting = existingAll[cleanName];
+		const existing = rawExisting && Array.isArray(rawExisting.results) ? rawExisting : undefined;
+		if (!isFullRun && !existing) {
+			console.error(
+				`--scoreboard --cases has no existing (mergeable) entry for "${cleanName}" — run the full suite once first.`,
+			);
+			process.exit(1);
+		}
+		const entry = mergeScoreboardEntry(existing, fresh, isFullRun);
+		const path = upsertScoreboard(entry);
+		const pct = (entry.score * 100).toFixed(1);
+		const badge = entry.certified ? " ✓ certified" : "";
+		const scope = isFullRun ? "" : ` (merged ${fresh.results.length}/${entry.casesTotal} cases)`;
+		console.log(`Scoreboard updated (${modelName}): ${path} — ${pct}% (${entry.casesPassed}/${entry.casesTotal})${badge}${scope}`);
+	}
+}
+
+/**
+ * `--baseline <name>` comparison for a `--repeat` result — the non-repeat
+ * path already had this (see `compareToBaseline` below `main`); repeat runs
+ * only had `--save-baseline` wired, never the compare-against-existing-name
+ * side, so a `--repeat --baseline x` run silently did nothing. Uses
+ * `toComparableSuiteResult` (baseline.ts) to adapt the repeated shape without
+ * faking full `RunResult` objects. Returns whether a regression was flagged,
+ * for the caller's exit code.
+ */
+function checkRepeatedBaseline(
+	suite: RepeatedSuiteResult,
+	benchIds: string[],
+	name: string,
+	threshold: number,
+	alpha: number,
+): boolean {
+	if (benchIds.length !== 1) {
+		console.error(`--baseline with --repeat requires exactly one --bench (got ${benchIds.length}: ${benchIds.join(", ")})`);
+		process.exit(1);
+	}
+	const resolved = resolveBaseline(name, suite.model);
+	if (!resolved) {
+		console.error(`No baseline named "${name}" found. Run with --save-baseline first, or check --list-baselines.`);
+		process.exit(1);
+	}
+	const delta = compareToBaseline(toComparableSuiteResult(suite), benchIds[0]!, resolved.name, { threshold, alpha });
+	if (!delta) {
+		console.error(`Baseline "${resolved.name}" could not be compared — did you save it?`);
+		process.exit(1);
+	}
+	console.log("");
+	console.log("=".repeat(60));
+	console.log(`REGRESSION CHECK (${suite.model})`);
+	console.log("=".repeat(60));
+	console.log(formatDelta(delta, threshold));
+	if (delta.hasRegression) {
+		if (delta.significance.sampleSizeSufficient && delta.significance.isSignificant) {
+			console.log(`\n✗ Statistically significant regression detected (p=${delta.significance.pValue.toFixed(4)} < α=${alpha})`);
+		} else {
+			console.log(`\n✗ Regression detected (threshold: ${threshold * 100}pp)`);
+		}
+	}
+	return delta.hasRegression;
+}
 
 async function main(): Promise<void> {
 	const args = process.argv.slice(2);
@@ -88,6 +185,7 @@ async function main(): Promise<void> {
 	let significanceAlpha = 0.05;
 	let listBaselinesFlag = false;
 	let listBaselineHistoryName: string | undefined;
+	let scoreboardFlag = false;
 
 	for (let i = 0; i < args.length; i++) {
 		switch (args[i]) {
@@ -165,6 +263,9 @@ async function main(): Promise<void> {
 				break;
 			case "--baseline-history":
 				listBaselineHistoryName = args[++i] ?? "";
+				break;
+			case "--scoreboard":
+				scoreboardFlag = true;
 				break;
 			case "--help":
 			case "-h":
@@ -266,10 +367,29 @@ async function main(): Promise<void> {
 		process.exit(1);
 	}
 
-	// Further filter by case id prefix, on top of the bench selection
+	// A single (or barely-repeated) stochastic run can't support a
+	// certification claim — the scoreboard is only ever built from a
+	// --repeat >= 3 result, matching the "run --repeat 3 before calling a
+	// change a regression" convention (docs/eval-methodology.md). A
+	// --cases-filtered run is allowed (e.g. rerunning a couple of cases that
+	// flaked on a network error) but merges into an existing entry rather
+	// than standing alone as the model's score — see updateScoreboard.
+	if (scoreboardFlag && repeat < 3) {
+		console.error("--scoreboard requires --repeat >= 3 (fewer attempts can't support a certification score)");
+		process.exit(1);
+	}
+
+	// Further filter by case id, on top of the bench selection. Comma-separated:
+	// each part matches either an exact id (cherry-pick a handful of unrelated
+	// cases, e.g. after a partial network-error rerun) or a prefix (existing
+	// behavior, e.g. "plan-" for every plan-mode case).
 	let filteredCases = cases;
 	if (caseFilter) {
-		filteredCases = cases.filter((c) => c.id.startsWith(caseFilter));
+		const filterParts = caseFilter
+			.split(",")
+			.map((f) => f.trim())
+			.filter(Boolean);
+		filteredCases = cases.filter((c) => filterParts.some((f) => c.id === f || c.id.startsWith(f)));
 		if (filteredCases.length === 0) {
 			console.error(`No cases match filter: ${caseFilter}`);
 			console.error("Use --list to see available benches and cases.");
@@ -366,6 +486,8 @@ async function main(): Promise<void> {
 			const recordedPath = recordCompareRepeated(compare, caseFilter);
 			console.log(`Recorded: ${recordedPath}`);
 
+			if (scoreboardFlag) updateScoreboard(compare, benchIds, !caseFilter, targets);
+
 			if (saveBaselineFlag) {
 				if (models.length !== 1) {
 					console.error(`--save-baseline with --repeat requires a single model; got ${models.length}`);
@@ -385,7 +507,22 @@ async function main(): Promise<void> {
 				);
 			}
 
-			if (Object.values(compare.suites).some((s) => s.casesPassed < s.casesTotal)) {
+			let repeatedRegression = false;
+			if (baselineName) {
+				if (models.length !== 1) {
+					console.error(`--baseline with --repeat requires a single model; got ${models.length}`);
+					process.exit(1);
+				}
+				repeatedRegression = checkRepeatedBaseline(
+					compare.suites[models[0]!]!,
+					benchIds,
+					baselineName,
+					regressionThreshold,
+					significanceAlpha,
+				);
+			}
+
+			if (repeatedRegression || Object.values(compare.suites).some((s) => s.casesPassed < s.casesTotal)) {
 				process.exit(1);
 			}
 			return;
@@ -424,9 +561,11 @@ async function main(): Promise<void> {
 	if (repeat > 1) {
 		const compare = await compareModelsRepeated(filteredCases, [model!], {
 			cwd,
+			connection: defaultConnection,
+			connections: providerConnections,
 			verbose,
 			concurrency,
-			provider,
+			provider: selectedProvider,
 			persona,
 			repeat,
 			rateLimitDelayMs,
@@ -435,6 +574,8 @@ async function main(): Promise<void> {
 
 		const recordedPath = recordCompareRepeated(compare, caseFilter);
 		console.log(`Recorded: ${recordedPath}`);
+
+		if (scoreboardFlag) updateScoreboard(compare, benchIds, !caseFilter);
 
 		if (saveBaselineFlag) {
 			if (benchIds.length !== 1) {
@@ -451,7 +592,18 @@ async function main(): Promise<void> {
 			);
 		}
 
-		if (compare.suites[model!]!.casesPassed < compare.suites[model!]!.casesTotal) {
+		let repeatedRegression = false;
+		if (baselineName) {
+			repeatedRegression = checkRepeatedBaseline(
+				compare.suites[model!]!,
+				benchIds,
+				baselineName,
+				regressionThreshold,
+				significanceAlpha,
+			);
+		}
+
+		if (repeatedRegression || compare.suites[model!]!.casesPassed < compare.suites[model!]!.casesTotal) {
 			process.exit(1);
 		}
 		return;
@@ -559,7 +711,10 @@ Options:
   --persona, -P <name>   Persona system prompt to run with (default: senior)
   --bench, -b <id,...>   Only run these benches (default: behavior — see --list).
                           Benches live under evals/benches/<id>/; see docs/eval-methodology.md.
-  --cases, -c <filter>   Further filter the selected benches' cases to this id prefix
+  --cases, -c <filter>   Filter cases by id — comma-separated, each part an exact id or a prefix
+                          (e.g. "plan-done-signal,background-bash-kill" or "plan-" for every
+                          plan-mode case). Cherry-pick a handful of cases to rerun without
+                          the whole suite.
   --repeat, -r <n>       Run each case n times (fresh session each attempt) instead of once —
                           reports N/n per case plus a ⚠ when attempts disagreed, so a real
                           effect can be told apart from a one-off flake. Works with -m or
@@ -577,13 +732,21 @@ Options:
   --list                 List available benches and their cases
   --history              Show recorded runs from evals/results/index.json
   --save-baseline        Save the run's result as a baseline for regression detection
-  --baseline <name>      Compare result against this saved baseline (default name: <bench>-<model>)
+  --baseline <name>      Compare result against this saved baseline (default name: <bench>-<model>).
+                          Works with --repeat too (single model, single --bench required) — the
+                          per-case pass rule matches --save-baseline's (consistent && passed > 0).
   --regression-threshold <pp>  Pass-rate drop in pp that counts as a regression when sample size is
                           too small for significance testing (default: 5)
   --significance-alpha <pp>  Significance level for the binomial test that drives the default
                           regression flag (default: 0.05 = 95% confidence)
   --list-baselines       List every "latest" baseline (one per bench+model)
   --baseline-history <name>  List the per-save history of a single baseline (newest first)
+  --scoreboard           Update docs/eval-scoreboard.json (site: "Model Scoreboard" page) with
+                          this model's certification score. Requires --repeat >= 3 — fewer
+                          attempts can't support a certification claim. Combine with --cases to
+                          rerun just a handful of cases (e.g. after a network-error flake) and
+                          merge them into the model's existing entry instead of a full rerun —
+                          errors if that model has no existing entry to merge into yet.
   --trace <file|latest>  Troubleshoot a recorded run: full turn-by-turn record (thinking,
                           commentary, tool args + actual tool output) for one case. <file> is
                           "latest", a path, or a bare filename under evals/results/runs/. Omit
