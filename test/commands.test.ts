@@ -13,7 +13,11 @@ import type { UseAgentSession } from "../src/ui/useAgentSession.ts";
 
 vi.mock("../src/core/config.ts", async (importOriginal) => {
 	const mod = await importOriginal<typeof import("../src/core/config.ts")>();
-	return { ...mod, probeProvider: vi.fn().mockResolvedValue("ok") };
+	return {
+		...mod,
+		probeProvider: vi.fn().mockResolvedValue("ok"),
+		runOnboardingCheck: vi.fn().mockResolvedValue(true),
+	};
 });
 
 const { handleInput } = await import("../src/ui/commands.ts");
@@ -56,6 +60,7 @@ function createFakeDeps(overrides?: Partial<CommandDeps> & { running?: boolean }
 		clearContext: track("agent.clearContext"),
 		resetQueue: track("agent.resetQueue"),
 		refresh: track("agent.refresh"),
+		refreshMeta: track("agent.refreshMeta"),
 		addDisplayMessage: track("agent.addDisplayMessage"),
 		messages: [],
 		streaming: null,
@@ -127,6 +132,8 @@ function createFakeDeps(overrides?: Partial<CommandDeps> & { running?: boolean }
 		setRulesLazySuffix: track("setRulesLazySuffix"),
 		directoryRules: [],
 		setDirectoryRules: track("setDirectoryRules"),
+		activeAutoRules: [],
+		setActiveAutoRules: track("setActiveAutoRules"),
 		systemPrompt: "",
 		setSystemPrompt: track("setSystemPrompt"),
 		mcpResult: {
@@ -586,6 +593,7 @@ describe("handleInput", () => {
 		// Create and save a different session so /continue has something to find.
 		const other = createSession("test-model", "/tmp");
 		other.messages = [{ role: "user", content: "hello from other session" }];
+		other.todos = [{ content: "restored task", status: "pending" }];
 		saveSession(other);
 
 		await handleInput("/continue", undefined, deps);
@@ -593,8 +601,35 @@ describe("handleInput", () => {
 		// Session was switched to the other one.
 		expect(deps.session.id).toBe(other.id);
 		expect(deps.session.messages).toEqual(other.messages);
+		expect(deps.session.todos).toEqual(other.todos);
 		expect(noticeText(calls)).toContain("Continued session");
 		expect(noticeText(calls)).toContain(other.id);
+	});
+
+	it("/continue refreshes SSH hosts for the resumed project", async () => {
+		const { deps, calls } = createFakeDeps();
+		const other = createSession("test-model", join(tmpdir(), `cast-other-project-${Date.now()}`));
+		other.messages = [{ role: "user", content: "other project" }];
+		saveSession(other);
+
+		await handleInput("/continue", undefined, deps);
+
+		expect(calls.setSshHosts).toHaveLength(1);
+		expect(noticeText(calls)).toContain("Continued session");
+	});
+
+	it("/continue does not send a foreign-provider model to the active provider", async () => {
+		const { deps, calls } = createFakeDeps();
+		const other = createSession("foreign-model", "/tmp");
+		other.providerUrl = "https://other.example/v1";
+		other.messages = [{ role: "user", content: "foreign provider" }];
+		saveSession(other);
+
+		await handleInput("/continue", undefined, deps);
+
+		expect(deps.session.model).toBe("test-model");
+		expect(deps.session.providerUrl).toBe(deps.config.baseURL);
+		expect(noticeText(calls)).toContain("another provider");
 	});
 
 	it("/continue with no other session shows notice", async () => {
@@ -602,6 +637,15 @@ describe("handleInput", () => {
 		// No sessions saved — only the current in-memory one exists.
 		await handleInput("/continue", undefined, deps);
 		expect(noticeText(calls)).toContain("No other session");
+	});
+
+	it("/sessions cancellation keeps the current session unchanged", async () => {
+		const { deps, calls } = createFakeDeps();
+		const originalId = deps.session.id;
+		await handleInput("/sessions", undefined, deps);
+		expect(deps.session.id).toBe(originalId);
+		expect(noticeText(calls)).toContain("Cancelled");
+		expect(noticeText(calls)).not.toContain("Starting fresh");
 	});
 });
 
@@ -665,8 +709,13 @@ describe("plan mode commands", () => {
 
 	it("/new resets the mode to build", async () => {
 		const { deps, calls } = createFakeDeps({ planMode: true });
+		deps.session.todos = [{ content: "old task", status: "in_progress" }];
+		deps.session.reasoning = { 1: "old reasoning" };
 		await handleInput("/new", undefined, deps);
 		expect(calls.setPlanMode?.[0]).toEqual([false]);
+		expect(deps.session.todos).toBeUndefined();
+		expect(deps.session.reasoning).toBeUndefined();
+		expect(deps.session.providerUrl).toBe(deps.config.baseURL);
 	});
 
 	it("/plan-model cancelled leaves the override unchanged", async () => {
@@ -676,11 +725,60 @@ describe("plan mode commands", () => {
 		expect(noticeText(calls)).toContain("Cancelled");
 	});
 
+	it("/subagent-model-provider cancelled leaves the override unchanged", async () => {
+		const { deps, calls } = createFakeDeps({ subagentModelProvider: "remote" });
+		await handleInput("/subagent-model-provider", undefined, deps);
+		expect(calls.setSubagentModelProvider).toBeUndefined();
+		expect(noticeText(calls)).toContain("Cancelled");
+	});
+
+	it("/reasoning cancellation leaves the setting unchanged", async () => {
+		const { deps, calls } = createFakeDeps();
+		const before = deps.config.reasoningLevel;
+		await handleInput("/reasoning", undefined, deps);
+		expect(deps.config.reasoningLevel).toBe(before);
+		expect(noticeText(calls)).toContain("reasoning unchanged");
+	});
+
 	it("/plan-model off clears the override so plan mode uses the main model", async () => {
 		const { deps, calls } = createFakeDeps({ planModel: "expensive-model" });
 		await handleInput("/plan-model off", undefined, deps);
 		expect(calls.setPlanModel?.[0]).toEqual([undefined]);
 		expect(noticeText(calls)).toContain("plan mode uses the main model");
+	});
+
+	it("/plan-model typed validation uses the configured plan provider", async () => {
+		const { runOnboardingCheck } = await import("../src/core/config.ts");
+		const settingsDir = join(process.env.HOME!, ".cast");
+		mkdirSync(settingsDir, { recursive: true });
+		writeFileSync(
+			join(settingsDir, "settings.json"),
+			JSON.stringify({ providers: [{ name: "plan-provider", url: "https://plan.example/v1", apiKey: "plan-key" }] }),
+		);
+		const { deps } = createFakeDeps({ planModelProvider: "plan-provider" });
+		await handleInput("/plan-model plan-model", undefined, deps);
+		expect(vi.mocked(runOnboardingCheck)).toHaveBeenCalledWith(
+			expect.objectContaining({ baseURL: "https://plan.example/v1", apiKey: "plan-key" }),
+			"plan-model",
+			expect.any(Object),
+		);
+	});
+
+	it("/subagent-model typed validation uses the configured subagent provider", async () => {
+		const { runOnboardingCheck } = await import("../src/core/config.ts");
+		const settingsDir = join(process.env.HOME!, ".cast");
+		mkdirSync(settingsDir, { recursive: true });
+		writeFileSync(
+			join(settingsDir, "settings.json"),
+			JSON.stringify({ providers: [{ name: "sub-provider", url: "https://sub.example/v1", apiKey: "sub-key" }] }),
+		);
+		const { deps } = createFakeDeps({ subagentModelProvider: "sub-provider" });
+		await handleInput("/subagent-model sub-model", undefined, deps);
+		expect(vi.mocked(runOnboardingCheck)).toHaveBeenCalledWith(
+			expect.objectContaining({ baseURL: "https://sub.example/v1", apiKey: "sub-key" }),
+			"sub-model",
+			expect.any(Object),
+		);
 	});
 });
 

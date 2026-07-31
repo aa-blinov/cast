@@ -20,7 +20,9 @@
  *   --list-baselines       List all saved baselines
  */
 
-import { resolve } from "node:path";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { BENCHES, DEFAULT_BENCH_IDS, findBench } from "./benches/index.ts";
 import {
 	compareToBaseline,
@@ -45,6 +47,7 @@ import {
 	printCompareReport,
 	printRepeatedCompareReport,
 	printReport,
+	type ProviderConnection,
 	type RunnerOptions,
 	runSuite,
 	saveCompareResults,
@@ -274,6 +277,44 @@ async function main(): Promise<void> {
 		}
 	}
 
+	// Capture provider credentials before switching HOME. The agent, bash, and
+	// local MCP processes then inherit an isolated home and cannot touch the
+	// developer's global ~/.cast while the runner still has explicit credentials.
+	const settingsPath = join(homedir(), ".cast", "settings.json");
+	const settings = (existsSync(settingsPath) ? JSON.parse(readFileSync(settingsPath, "utf-8")) : {}) as {
+		providerUrl?: string;
+		apiKey?: string;
+		modelProvider?: string;
+		providers?: Array<{ name: string; url: string; apiKey: string }>;
+	};
+	const providerConnections: Record<string, ProviderConnection> = Object.fromEntries(
+		(settings.providers ?? []).map((entry) => [entry.name, { baseURL: entry.url, apiKey: entry.apiKey }]),
+	);
+	const envConnection =
+		process.env.PROVIDER_BASE_URL && process.env.PROVIDER_API_KEY
+			? { baseURL: process.env.PROVIDER_BASE_URL, apiKey: process.env.PROVIDER_API_KEY }
+			: undefined;
+	const selectedProvider = provider ?? (envConnection ? undefined : settings.modelProvider);
+	const defaultConnection = selectedProvider
+		? providerConnections[selectedProvider]
+		: envConnection
+			? envConnection
+			: settings.providerUrl && settings.apiKey
+				? { baseURL: settings.providerUrl, apiKey: settings.apiKey }
+				: undefined;
+	if (!defaultConnection && Object.keys(providerConnections).length === 0) {
+		console.error("Eval settings need providerUrl/apiKey or at least one named provider in ~/.cast/settings.json");
+		process.exit(1);
+	}
+	const originalHome = process.env.HOME;
+	const evalHome = mkdtempSync(join(tmpdir(), "cast-eval-home-"));
+	mkdirSync(join(evalHome, ".cast"), { recursive: true });
+	process.env.HOME = evalHome;
+	process.on("exit", () => {
+		process.env.HOME = originalHome;
+		rmSync(evalHome, { recursive: true, force: true });
+	});
+
 	// Set PROVIDER_BASE_URL and PROVIDER_API_KEY if not set
 	if (!process.env.PROVIDER_BASE_URL) {
 		process.env.PROVIDER_BASE_URL = "https://openrouter.ai/api/v1";
@@ -310,9 +351,11 @@ async function main(): Promise<void> {
 		if (repeat > 1) {
 			const compare = await compareModelsRepeated(filteredCases, models, {
 				cwd,
+				connection: defaultConnection,
+				connections: providerConnections,
 				verbose,
 				concurrency,
-				provider,
+				provider: selectedProvider,
 				targets,
 				persona,
 				repeat,
@@ -350,9 +393,11 @@ async function main(): Promise<void> {
 
 		const compare = await compareModels(filteredCases, models, {
 			cwd,
+			connection: defaultConnection,
+			connections: providerConnections,
 			verbose,
 			concurrency,
-			provider,
+			provider: selectedProvider,
 			targets,
 			persona,
 			rateLimitDelayMs,
@@ -415,9 +460,11 @@ async function main(): Promise<void> {
 	const options: RunnerOptions & { concurrency: number } = {
 		model: model!,
 		cwd,
+		connection: defaultConnection,
+		connections: providerConnections,
 		verbose,
 		concurrency,
-		provider,
+		provider: selectedProvider,
 		persona,
 		rateLimitDelayMs,
 	};

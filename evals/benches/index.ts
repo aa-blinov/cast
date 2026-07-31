@@ -6,8 +6,8 @@
  */
 
 import type { EvalCase } from "../lib/runner.ts";
-import { chainCases } from "./behavior/chain/cases.ts";
-import { coreCases } from "./behavior/core/cases.ts";
+import { chainCases } from "./behavior/tools/chain/index.ts";
+import { coreCases } from "./behavior/tools/core/index.ts";
 
 export interface Bench {
 	id: string;
