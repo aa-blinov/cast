@@ -596,18 +596,30 @@ function mcpToolLabel(name) {
 	return name.slice(4).replace(/_/g, " · ");
 }
 
-// todo_write's result is the same {todos, remaining} shape as its args
-// (the full list echoed back) — but as one unindented JSON line, it reads
-// as a wall of text next to the nicely indented args right above it.
-// Reuse the same key:value renderer instead of dumping raw JSON.
+// Tool providers often return JSON text rather than a structured object. A
+// parsed value restores Unicode escapes before it reaches Preact's text node;
+// otherwise a Playwright result such as `{"text":"\\u041f"}` shows its
+// transport encoding to the user instead of the actual character.
 function formatToolResult(name, result) {
-	if (name !== "todo_write") return result;
-	try {
-		const parsed = JSON.parse(result);
-		return formatValue(parsed, "");
-	} catch {
-		return result;
+	if (name === "todo_write") {
+		try {
+			return formatValue(JSON.parse(result), "");
+		} catch {
+			return result;
+		}
 	}
+	if (!/\\u[\dA-Fa-f]{4}/.test(result)) return result;
+	let value = result;
+	for (let depth = 0; depth < 2; depth++) {
+		try {
+			const parsed = JSON.parse(value);
+			if (typeof parsed !== "string") return formatValue(parsed, "");
+			value = parsed;
+		} catch {
+			return value;
+		}
+	}
+	return value;
 }
 
 function ToolCard({ call }) {
@@ -665,7 +677,7 @@ function ToolCard({ call }) {
 						// code fences, tables) — worth actually rendering, unlike a built-in
 						// tool's result, which has a fixed non-markdown shape (e.g. read's
 						// hashline anchors) that markdown rendering would corrupt.
-						html`<div class="tool-card-result" dangerouslySetInnerHTML=${{ __html: renderMarkdown(call.result) }}></div>`
+						html`<div class="tool-card-result" dangerouslySetInnerHTML=${{ __html: renderMarkdown(formatToolResult(call.name, call.result)) }}></div>`
 					: html`<div class="tool-card-result">${formatToolResult(call.name, call.result)}</div>`)
 			}
 		</div>
