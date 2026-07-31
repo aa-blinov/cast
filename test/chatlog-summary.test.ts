@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { parseToolSummary } from "../src/ui/ChatLog.tsx";
+import { formatToolResultForDisplay, parseToolSummary } from "../src/ui/ChatLog.tsx";
+
+describe("formatToolResultForDisplay", () => {
+	it("renders Unicode escapes from a JSON tool result as readable text", () => {
+		expect(formatToolResultForDisplay('{"text":"\\u041f\\u0440\\u0438\\u0432\\u0435\\u0442"}')).toBe(
+			'{\n  "text": "Привет"\n}',
+		);
+	});
+
+	it("keeps non-JSON output intact even when it contains a Unicode escape", () => {
+		expect(formatToolResultForDisplay('const escaped = "\\u041f";')).toBe('const escaped = "\\u041f";');
+	});
+});
 
 describe("parseToolSummary — edit +added/-removed", () => {
 	it("counts newString lines as added and oldString lines as removed", () => {

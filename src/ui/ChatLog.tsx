@@ -98,6 +98,27 @@ export function parseToolSummary(name: string, args: string): ToolSummaryModel {
 }
 
 /**
+ * Providers and MCP servers sometimes serialize user-facing JSON with Unicode
+ * escapes. Keep non-JSON output byte-for-byte intact, but make a complete JSON
+ * result readable in the terminal instead of exposing its wire encoding.
+ */
+export function formatToolResultForDisplay(result: string): string {
+	if (!/\\u[\dA-Fa-f]{4}/.test(result)) return result;
+	let value = result;
+	for (let depth = 0; depth < 2; depth++) {
+		try {
+			const parsed: unknown = JSON.parse(value);
+			if (typeof parsed !== "string") return JSON.stringify(parsed, null, 2);
+			value = parsed;
+		} catch {
+			if (depth === 0) return result;
+			return value.replace(/\\u([\dA-Fa-f]{4})/g, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)));
+		}
+	}
+	return value.replace(/\\u([\dA-Fa-f]{4})/g, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)));
+}
+
+/**
  * One-line summary for a tool call. Only the parse is memoized — the JSX is
  * rebuilt every render so theme() colors stay live: memoizing the whole
  * element on [name, args] kept the previous theme's colors on still-visible
@@ -151,7 +172,8 @@ function ToolCallView({ call, compact }: { call: ToolCallEntry; compact?: boolea
 	const resultColor = call.status === "error" ? theme().error : theme().muted;
 	const showResult = Boolean(call.result) && call.name !== "read" && call.name !== "edit" && !isWebTool(call.name);
 	const mcp = isMcpTool(call.name);
-	const displayResult = call.result && mcp ? stripMcpMarkdownDecoration(call.result) : call.result;
+	const rawResult = call.result && mcp ? stripMcpMarkdownDecoration(call.result) : call.result;
+	const displayResult = rawResult ? formatToolResultForDisplay(rawResult) : rawResult;
 	// task: full wrapped report in history so the user can read the child answer;
 	// live/compact stays one truncated line so parallel tasks don't blow the clamp.
 	const taskResultFull = call.name === "task" && !compact && call.result;
