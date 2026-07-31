@@ -35,7 +35,41 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { SuiteResult } from "./runner.ts";
+import type { RepeatedSuiteResult, SuiteResult } from "./runner.ts";
+
+/**
+ * Structural subset of `SuiteResult` that `compareToBaseline` actually reads
+ * — lets a `RepeatedSuiteResult` be compared without faking a full
+ * `RunResult` (13+ fields, mostly unused here) per case. `SuiteResult`
+ * already satisfies this shape, so every existing single-run caller keeps
+ * working unchanged; `toComparableSuiteResult` below adapts the repeated
+ * shape to it.
+ */
+export interface ComparableSuiteResult {
+	total: number;
+	passed: number;
+	duration: number;
+	usage: SuiteResult["usage"];
+	results: Array<{ caseId: string; passed: boolean }>;
+}
+
+/**
+ * Adapts a repeated run's suite result for `compareToBaseline`, using the
+ * same strict per-case pass rule as `recordRepeatedBaseline` (results.ts):
+ * every attempt must agree AND pass (`consistent && passed > 0`) — a case
+ * that only passed 2/3 times doesn't count as "passing" for either baseline
+ * or regression-check purposes, so the two stay consistent with each other.
+ */
+export function toComparableSuiteResult(suite: RepeatedSuiteResult): ComparableSuiteResult {
+	const results = suite.results.map((r) => ({ caseId: r.caseId, passed: r.consistent && r.passed > 0 }));
+	return {
+		total: suite.casesTotal,
+		passed: results.filter((r) => r.passed).length,
+		duration: suite.duration,
+		usage: suite.usage,
+		results,
+	};
+}
 
 /**
  * Resolve where baselines live. Reads from `EVAL_BASELINES_DIR` so tests
@@ -480,7 +514,7 @@ function normalQuantile(p: number): number {
  */
 export interface BaselineDelta {
 	baseline: Baseline;
-	current: SuiteResult;
+	current: ComparableSuiteResult;
 	/** Pass-rate delta in absolute terms: `current - baseline`. Positive = improved. */
 	passRateDelta: number;
 	/** Raw passed-count delta (positive = more cases passing now). */
@@ -525,7 +559,7 @@ export interface BaselineDelta {
  * can't be trusted.
  */
 export function compareToBaseline(
-	suite: SuiteResult,
+	suite: ComparableSuiteResult,
 	bench: string,
 	baselineName: string,
 	options: { threshold?: number; alpha?: number } = {},

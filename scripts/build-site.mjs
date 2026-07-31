@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync, cpSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, cpSync, existsSync } from "node:fs";
 import { join, basename } from "node:path";
 import { marked } from "marked";
 
@@ -26,6 +26,11 @@ const NAV_ORDER = [
 	{ file: "themes.md", label: "Themes" },
 	{ file: "non-interactive-mode.md", label: "Non-Interactive Mode" },
 	{ file: "architecture.md", label: "Architecture" },
+	// Not a real markdown file — rendered from docs/eval-scoreboard.json by the
+	// special case in the build loop below. The ".md" suffix is kept purely so
+	// the existing `.replace(".md", ".html")` calls (sidebar, prev/next, landing
+	// grid) keep working unmodified; nothing here ever reads this as markdown.
+	{ file: "eval-scoreboard.md", label: "Model Scoreboard" },
 	{ file: "changelog.md", label: "Changelog" },
 ];
 
@@ -300,6 +305,14 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 }
 .content th { background: var(--bg-tertiary); font-weight: 600; }
 .content tr:hover td { background: var(--bg-tertiary); }
+.badge-pass, .badge-fail {
+	display: inline-block; padding: 2px 8px; border-radius: 999px;
+	font-size: .8rem; font-weight: 500; white-space: nowrap;
+}
+.badge-pass { background: var(--green-subtle); color: var(--green); }
+.badge-fail { background: var(--bg-tertiary); color: var(--text-secondary); }
+.content details { margin: 0 0 8px; }
+.content details summary { cursor: pointer; font-weight: 500; padding: 4px 0; }
 
 /* ── Doc page navigation ─────────────────────────────────────────────── */
 .doc-nav {
@@ -846,6 +859,7 @@ function getDescription(file) {
 		"themes.md": "Color themes for the TUI",
 		"non-interactive-mode.md": "cast run and JSON output",
 		"architecture.md": "Source layout and design decisions",
+		"eval-scoreboard.md": "Per-model certification scores against the behavior eval suite",
 		"changelog.md": "Version history and feature highlights",
 	};
 	return descs[file] || "";
@@ -853,6 +867,92 @@ function getDescription(file) {
 
 function mdToHtml(md) {
 	return marked.parse(md);
+}
+
+// Certification bar a model's score must clear to show as "certified" below —
+// kept as a plain literal (not imported) because this script runs under plain
+// `node`, not `tsx`, and can't load evals/lib/scoreboard.ts's TS source; the
+// authoritative value (and the `certified` boolean actually used per row) is
+// computed on the eval side and simply carried in the JSON as-is.
+const SCOREBOARD_CERTIFICATION_THRESHOLD = 0.8;
+
+function formatDuration(ms) {
+	return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
+}
+
+function formatTokens(n) {
+	return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${Math.round(n)}`;
+}
+
+function formatGroupScore(group) {
+	if (!group || group.casesTotal === 0) return "—";
+	return `${(group.score * 100).toFixed(0)}% (${group.casesPassed}/${group.casesTotal})`;
+}
+
+/** Renders docs/eval-scoreboard.json (a `Record<model, ScoreboardEntry>`,
+ * written by `evals/run.ts --scoreboard`) into the Model Scoreboard page body.
+ * Reuses the same `.table-wrap`/`.content table` CSS every markdown table on
+ * this site already gets — no new styles needed. */
+function scoreboardToHtml(scoreboard) {
+	const entries = Object.values(scoreboard);
+	if (entries.length === 0) {
+		return `<p>No scoreboard data yet. Populate it by running the full behavior suite with
+			<code>--repeat 3</code> (or more) and <code>--scoreboard</code>:</p>
+			<pre><code>node --import tsx evals/run.ts -m &lt;model&gt; --repeat 3 --scoreboard</code></pre>
+			<p>See <a href="https://github.com/aa-blinov/cast/blob/master/docs/eval-methodology.md">Eval Methodology</a> for what the score means.</p>`;
+	}
+
+	entries.sort((a, b) => b.score - a.score);
+
+	const rows = entries
+		.map((e) => {
+			const pct = (e.score * 100).toFixed(1);
+			const badge = e.certified
+				? '<span class="badge-pass">✓ certified</span>'
+				: '<span class="badge-fail">not yet</span>';
+			const date = e.timestamp.slice(0, 10);
+			const commit = e.commit ? `<code>${e.commit}</code>` : "—";
+			const tokens = `${formatTokens(e.avgPromptTokens ?? 0)} / ${formatTokens(e.avgCompletionTokens ?? 0)}`;
+			const timing = [e.avgDurationMs, e.medianDurationMs, e.p75DurationMs, e.p95DurationMs, e.p99DurationMs]
+				.map((ms) => formatDuration(ms ?? 0))
+				.join(" / ");
+			return `<tr><td>${e.model}</td><td>${pct}%</td><td>${e.casesPassed}/${e.casesTotal}</td><td>${badge}</td><td>${formatGroupScore(e.core)}</td><td>${formatGroupScore(e.chain)}</td><td>${e.consistentCases}/${e.casesTotal}</td><td>${timing}</td><td>${tokens}</td><td>×${e.repeat}</td><td>${date}</td><td>${commit}</td></tr>`;
+		})
+		.join("\n");
+
+	const mainTable = `<div class="table-wrap"><table><thead><tr>
+		<th>Model</th><th>Score</th><th>Passed</th><th>Certified</th><th>Core</th><th>Chain</th><th>Consistent</th><th>Time (avg/p50/p75/p95/p99)</th><th>Avg tokens in/out</th><th>Attempts/case</th><th>Last updated</th><th>Commit</th>
+	</tr></thead><tbody>
+${rows}
+	</tbody></table></div>`;
+
+	const signalSections = entries
+		.map((e) => {
+			const signalRows = Object.entries(e.bySignal)
+				.sort(([a], [b]) => a.localeCompare(b))
+				.map(([signal, s]) => `<tr><td>${signal}</td><td>${s.passed}/${s.total}</td></tr>`)
+				.join("\n");
+			return `<details><summary>${e.model} — signal breakdown</summary>
+	<div class="table-wrap"><table><thead><tr><th>Signal</th><th>Passed</th></tr></thead><tbody>
+${signalRows}
+	</tbody></table></div>
+</details>`;
+		})
+		.join("\n");
+
+	return `<p>A model is <strong>certified</strong> once it clears ${(SCOREBOARD_CERTIFICATION_THRESHOLD * 100).toFixed(0)}%
+		of the full behavior suite — scored from a <code>--repeat</code> run where every attempt on a case must
+		agree (a case that only passes sometimes doesn't count). <strong>Core</strong>/<strong>Chain</strong> break
+		the same score down by single-turn tool contracts vs. multi-turn stateful workflows (see
+		<a href="https://github.com/aa-blinov/cast/blob/master/docs/eval-behavior.md">Behavior Evals</a>).
+		"Consistent" is how many cases had every attempt agree, pass or fail — a flakiness signal independent of
+		the score itself. Tokens are per-attempt averages; the time column is avg/median/p75/p95/p99 over every
+		individual attempt's duration — comparable across models regardless of repeat count. See
+		<a href="https://github.com/aa-blinov/cast/blob/master/docs/eval-methodology.md">Eval Methodology</a>
+		for the full methodology.</p>
+${mainTable}
+<h2>Per-signal breakdown</h2>
+${signalSections}`;
 }
 
 // ── Build ───────────────────────────────────────────────────────────────────
@@ -875,9 +975,12 @@ writeFileSync(join(SITE, "index.html"), LANDING_HTML);
 console.log("  index.html");
 
 // Doc pages
+const SCOREBOARD_PATH = join(DOCS, "eval-scoreboard.json");
 for (const item of NAV_ORDER) {
-	const md = readFileSync(join(DOCS, item.file), "utf-8");
-	const bodyHtml = mdToHtml(md);
+	const bodyHtml =
+		item.file === "eval-scoreboard.md"
+			? scoreboardToHtml(existsSync(SCOREBOARD_PATH) ? JSON.parse(readFileSync(SCOREBOARD_PATH, "utf-8")) : {})
+			: mdToHtml(readFileSync(join(DOCS, item.file), "utf-8"));
 	const html = docPage(item.label, bodyHtml, item.file);
 	const outFile = item.file.replace(".md", ".html");
 	writeFileSync(join(SITE, outFile), html);
