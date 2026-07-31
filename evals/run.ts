@@ -31,7 +31,13 @@ import {
 	saveBaseline,
 } from "./lib/baseline.ts";
 import { cleanupFixtures } from "./lib/fixtures.ts";
-import { printHistory, recordCompare, recordCompareRepeated, recordRepeatedBaseline, recordRun } from "./lib/results.ts";
+import {
+	printHistory,
+	recordCompare,
+	recordCompareRepeated,
+	recordRepeatedBaseline,
+	recordRun,
+} from "./lib/results.ts";
 import {
 	compareModels,
 	compareModelsRepeated,
@@ -70,9 +76,6 @@ async function main(): Promise<void> {
 	let historyOnly = false;
 	let concurrency = 10;
 	let rateLimitDelayMs = 0;
-	let generateCount = 0;
-	let generateSeed = 1;
-	let generateSourceDir: string | undefined;
 	let repeat = 1;
 	let traceFile: string | undefined;
 	let traceCaseId: string | undefined;
@@ -125,16 +128,6 @@ async function main(): Promise<void> {
 				break;
 			case "--rate-limit-delay":
 				rateLimitDelayMs = parseInt(args[++i] ?? "0", 10);
-				break;
-			case "--generate":
-			case "-g":
-				generateCount = parseInt(args[++i] ?? "0", 10);
-				break;
-			case "--seed":
-				generateSeed = parseInt(args[++i] ?? "1", 10);
-				break;
-			case "--source-dir":
-				generateSourceDir = args[++i];
 				break;
 			case "--repeat":
 			case "-r":
@@ -203,9 +196,7 @@ async function main(): Promise<void> {
 	if (listBaselineHistoryName !== undefined) {
 		const history = listBaselineHistory(listBaselineHistoryName);
 		if (history.length === 0) {
-			console.log(
-				`No history for "${listBaselineHistoryName}". Run --save-baseline at least once to record one.`,
-			);
+			console.log(`No history for "${listBaselineHistoryName}". Run --save-baseline at least once to record one.`);
 			return;
 		}
 		console.log(`\nHistory for "${listBaselineHistoryName}" (${history.length} snapshot(s), newest first):\n`);
@@ -214,9 +205,7 @@ async function main(): Promise<void> {
 			const ts = b.timestamp.replace("T", " ").replace(/\..+$/, "").replace(/Z$/, "");
 			const rate = `${(b.passRate * 100).toFixed(1)}%`;
 			const commit = b.commit ?? "-";
-			console.log(
-				`  ${ts.padEnd(26)}${rate.padStart(8)}    ${`${b.passed}/${b.total}`.padStart(11)}   ${commit}`,
-			);
+			console.log(`  ${ts.padEnd(26)}${rate.padStart(8)}    ${`${b.passed}/${b.total}`.padStart(11)}   ${commit}`);
 		}
 		console.log();
 		console.log(`  (use --baseline ${listBaselineHistoryName} to compare against the latest)`);
@@ -242,9 +231,8 @@ async function main(): Promise<void> {
 		return;
 	}
 
-	// Which benches to pull cases from — explicit --bench, or every static
-	// (non-generated) bench by default so a plain run stays hand-authored-only
-	// unless asked otherwise.
+	// Which benches to pull cases from — explicit --bench, or the behavior
+	// contracts by default.
 	const benchIds = benchFilter ?? DEFAULT_BENCH_IDS;
 	const cases: EvalCase[] = [];
 	for (const id of benchIds) {
@@ -254,34 +242,17 @@ async function main(): Promise<void> {
 			console.error(`Available benches: ${BENCHES.map((b) => b.id).join(", ")}`);
 			process.exit(1);
 		}
-		if (bench.cases) cases.push(...bench.cases);
-	}
-
-	// The "mutation" bench is generated, not static — pulled in by an explicit
-	// --generate/-g count (works regardless of --bench, for backward
-	// compatibility), or by naming it via --bench with a sensible default
-	// count so `--bench mutation` alone isn't a silent no-op.
-	const wantsMutation = generateCount > 0 || benchIds.includes("mutation");
-	if (wantsMutation) {
-		const mutationBench = findBench("mutation")!;
-		const count = generateCount > 0 ? generateCount : 10;
-		cases.push(...mutationBench.generate!({ count, seed: generateSeed, sourceDir: generateSourceDir }));
+		cases.push(...bench.cases);
 	}
 
 	if (listOnly) {
 		console.log("Available benches (see evals/benches/<id>/, or docs/eval-methodology.md):\n");
-		for (const bench of BENCHES) {
-			const note = bench.generate ? " [generated — needs --generate/-g, or a default applies via --bench]" : "";
-			console.log(`  ${bench.id.padEnd(12)} ${bench.description}${note}`);
-		}
-		console.log(`\nCases in the current selection (${benchIds.join(", ")}${wantsMutation ? ", mutation" : ""}):\n`);
+		for (const bench of BENCHES) console.log(`  ${bench.id.padEnd(12)} ${bench.description}`);
+		console.log(`\nCases in the current selection (${benchIds.join(", ")}):\n`);
 		for (const c of cases) {
 			console.log(`  ${c.id.padEnd(25)} ${c.description}`);
 		}
 		console.log(`\nTotal: ${cases.length} cases`);
-		if (!wantsMutation) {
-			console.log(`(add --generate <n>, or --bench mutation, to also list freshly-generated mutation cases)`);
-		}
 		return;
 	}
 
@@ -311,10 +282,18 @@ async function main(): Promise<void> {
 	const cwd = resolve(".");
 
 	if (compareList) {
-		const models = compareList
-			.split(",")
-			.map((m) => m.trim())
-			.filter(Boolean);
+		const targets = Object.fromEntries(
+			compareList
+				.split(",")
+				.map((entry) => entry.trim())
+				.filter(Boolean)
+				.map((entry) => {
+					const separator = entry.indexOf(":");
+					if (separator < 1 || separator === entry.length - 1) return [entry, { model: entry }] as const;
+					return [entry, { provider: entry.slice(0, separator), model: entry.slice(separator + 1) }] as const;
+				}),
+		);
+		const models = Object.keys(targets);
 		if (models.length < 2) {
 			console.error("Error: --compare needs at least 2 comma-separated models");
 			process.exit(1);
@@ -334,6 +313,7 @@ async function main(): Promise<void> {
 				verbose,
 				concurrency,
 				provider,
+				targets,
 				persona,
 				repeat,
 				rateLimitDelayMs,
@@ -349,13 +329,17 @@ async function main(): Promise<void> {
 					process.exit(1);
 				}
 				if (benchIds.length !== 1) {
-					console.error(`--save-baseline with --repeat requires exactly one --bench (got ${benchIds.length}: ${benchIds.join(", ")})`);
+					console.error(
+						`--save-baseline with --repeat requires exactly one --bench (got ${benchIds.length}: ${benchIds.join(", ")})`,
+					);
 					process.exit(1);
 				}
 				const repeatBaselineName = baselineName ?? `basic-m3-r${repeat}`;
 				const baselinePath = recordRepeatedBaseline(compare, repeatBaselineName);
 				console.log(`Baseline saved (from repeated run): ${baselinePath}`);
-				console.log(`  ${compare.suites[models[0]!]!.results.filter((r) => r.consistent && r.passed > 0).length}/${compare.cases.length} consistent-pass cases (of ${compare.suites[models[0]!]!.results.length} total)`);
+				console.log(
+					`  ${compare.suites[models[0]!]!.results.filter((r) => r.consistent && r.passed > 0).length}/${compare.cases.length} consistent-pass cases (of ${compare.suites[models[0]!]!.results.length} total)`,
+				);
 			}
 
 			if (Object.values(compare.suites).some((s) => s.casesPassed < s.casesTotal)) {
@@ -364,7 +348,15 @@ async function main(): Promise<void> {
 			return;
 		}
 
-		const compare = await compareModels(filteredCases, models, { cwd, verbose, concurrency, provider, persona, rateLimitDelayMs });
+		const compare = await compareModels(filteredCases, models, {
+			cwd,
+			verbose,
+			concurrency,
+			provider,
+			targets,
+			persona,
+			rateLimitDelayMs,
+		});
 		printCompareReport(compare);
 
 		const recordedPath = recordCompare(compare, caseFilter);
@@ -401,13 +393,17 @@ async function main(): Promise<void> {
 
 		if (saveBaselineFlag) {
 			if (benchIds.length !== 1) {
-				console.error(`--save-baseline requires exactly one --bench (got ${benchIds.length}: ${benchIds.join(", ")})`);
+				console.error(
+					`--save-baseline requires exactly one --bench (got ${benchIds.length}: ${benchIds.join(", ")})`,
+				);
 				process.exit(1);
 			}
 			const repeatBaselineName = baselineName ?? `${benchIds[0]}-m3-r${repeat}`;
 			const baselinePath = recordRepeatedBaseline(compare, repeatBaselineName);
 			console.log(`Baseline saved (from repeated run): ${baselinePath}`);
-			console.log(`  ${compare.suites[model!]!.results.filter((r) => r.consistent && r.passed > 0).length}/${compare.cases.length} consistent-pass cases (of ${compare.suites[model!]!.results.length} total)`);
+			console.log(
+				`  ${compare.suites[model!]!.results.filter((r) => r.consistent && r.passed > 0).length}/${compare.cases.length} consistent-pass cases (of ${compare.suites[model!]!.results.length} total)`,
+			);
 		}
 
 		if (compare.suites[model!]!.casesPassed < compare.suites[model!]!.casesTotal) {
@@ -511,17 +507,12 @@ Options:
   --model, -m <model>    Model to use (required unless --compare)
   --compare <m1,m2,...>  Run the same cases once per model, same harness — a side-by-side
                           pass/fail + turns + duration table instead of one model's summary.
+                          Use provider:model for cross-provider comparison.
   --provider, -p <name>  Provider entry from settings providers[] (default: active provider)
   --persona, -P <name>   Persona system prompt to run with (default: senior)
-  --bench, -b <id,...>   Only run these benches (default: every static bench — see --list).
+  --bench, -b <id,...>   Only run these benches (default: behavior — see --list).
                           Benches live under evals/benches/<id>/; see docs/eval-methodology.md.
   --cases, -c <filter>   Further filter the selected benches' cases to this id prefix
-  --generate, -g <n>     Pull n fresh cases from the "mutation" bench (mutate.ts) — real files
-                          from --source-dir, one mechanical bug each. Implies the mutation bench
-                          even without --bench mutation; combine with --bench mutation -c mutate
-                          to run ONLY the generated ones.
-  --seed <n>             Seed for --generate (default: 1) — same seed, same mutations.
-  --source-dir <path>    Source dir --generate pulls files from (default: src/core).
   --repeat, -r <n>       Run each case n times (fresh session each attempt) instead of once —
                           reports N/n per case plus a ⚠ when attempts disagreed, so a real
                           effect can be told apart from a one-off flake. Works with -m or
@@ -559,25 +550,13 @@ Environment variables:
   PROVIDER_API_KEY       API key
 
 Examples:
-  # Run every static bench (basic + hashline)
+  # Run the behavior suite
   node --import tsx evals/run.ts -m qwen/qwen3.7-max -v
-
-  # Run just one bench
-  node --import tsx evals/run.ts -m gpt-4o --bench hashline -v
 
   # Save results for regression tracking (also auto-recorded either way)
   node --import tsx evals/run.ts -m qwen/qwen3.7-max -v -s evals/results/latest.json
 
-  # Compare two models on the same bench, same harness
-  node --import tsx evals/run.ts --compare mimo-v2.5,mimo-v2.5-pro --bench hashline -v
-
-  # 20 fresh auto-generated edit-precision cases from src/core, compared across models
-  node --import tsx evals/run.ts --compare mimo-v2.5,mimo-v2.5-pro --bench mutation -g 20 -v
-
-  # Same compare, but 3 attempts per case per model — tells a real gap from noise
-  node --import tsx evals/run.ts --compare mimo-v2.5,mimo-v2.5-pro --bench mutation -g 15 --seed 7 -r 3 -v
-
-  # List available benches and cases (pass --generate too to preview generated ones)
+  # List available benches and cases
   node --import tsx evals/run.ts --list
 
   # What's been run before

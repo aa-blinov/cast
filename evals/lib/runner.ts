@@ -16,7 +16,8 @@ import { dirname, join } from "node:path";
 import { loadConfig } from "../../src/core/config.ts";
 import { type AgentEvent, runAgentLoop } from "../../src/core/loop.ts";
 import { findPersona } from "../../src/core/personas.ts";
-import { personaOptionsForCwd } from "../../src/core/project.ts";
+import { createPlanState, modeDisabledTools } from "../../src/core/plan.ts";
+import { buildSystemPrompt, personaOptionsForCwd } from "../../src/core/project.ts";
 
 // ============================================================================
 // Case definition
@@ -47,6 +48,8 @@ export interface VerifyContext {
 	toolCalls: ObservedToolCall[];
 	/** Number of tool-call rounds. */
 	turns: number;
+	/** Full trace, including which calls were grouped in the same tool turn. */
+	trace: TraceTurn[];
 }
 
 export interface EvalCase {
@@ -54,10 +57,18 @@ export interface EvalCase {
 	id: string;
 	/** Human-readable description */
 	description: string;
+	/** Independent behavioral dimensions reported separately after a run. */
+	signals?: string[];
 	/** User prompt */
 	prompt: string;
 	/** Model to use (overrides default) */
 	model?: string;
+	/**
+	 * Runs the case with the interactive mode contract that the TUI gives the
+	 * parent agent. Headless `cast run` deliberately has no plan controls, so
+	 * behavior cases that exercise plan transitions must opt in explicitly.
+	 */
+	mode?: "build" | "plan";
 	/**
 	 * Runs before the prompt. Used to (re)create fixture files on disk (see
 	 * `evals/fixtures.ts`) so grounded checks in `verify` have known starting state.
@@ -77,6 +88,8 @@ export interface EvalCase {
 		toolsNotCalled?: string[];
 		/** Exact tool call sequence (ordered) */
 		toolSequence?: string[];
+		/** Required ordered subsequence of calls; unrelated inspection calls are allowed. */
+		toolSubsequence?: string[];
 		/** Minimum number of calls per tool name (e.g. bash called at least twice) */
 		toolCallCounts?: Record<string, number>;
 		/** Max number of tool call rounds */
@@ -112,6 +125,7 @@ export interface ExpectedSummary {
 	toolsCalled?: string[];
 	toolsNotCalled?: string[];
 	toolSequence?: string[];
+	toolSubsequence?: string[];
 	toolCallCounts?: Record<string, number>;
 	maxTurns?: number;
 	noErrors?: boolean;
@@ -145,6 +159,7 @@ export interface TraceTurn {
 export interface RunResult {
 	caseId: string;
 	description: string;
+	signals: string[];
 	model: string;
 	passed: boolean;
 	duration: number;
@@ -191,6 +206,12 @@ export interface RunnerOptions {
 	 * after one just completed (still gates peak arrival rate to the provider).
 	 */
 	rateLimitDelayMs?: number;
+}
+
+/** A compare label may point at a different provider than the suite default. */
+export interface CompareTarget {
+	model: string;
+	provider?: string;
 }
 
 /**
@@ -264,15 +285,26 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 		// the shipping agent uses; an unknown name fails loudly rather than
 		// silently benchmarking the wrong prompt.
 		const personaName = options.persona ?? "senior";
-		const personaPrompt = findPersona(personaName, personaOptionsForCwd(options.cwd, false))?.systemPrompt;
-		if (!personaPrompt) {
+		const persona = findPersona(personaName, personaOptionsForCwd(options.cwd, false));
+		if (!persona) {
 			throw new Error(`Persona "${personaName}" not found — check prompts/personas/ and ~/.cast/personas/.`);
 		}
+		const planState = evalCase.mode ? createPlanState(`eval-${evalCase.id}-${Date.now()}`) : undefined;
+		if (planState) planState.enabled = evalCase.mode === "plan";
+		const systemPrompt = evalCase.mode
+			? buildSystemPrompt(persona, "", "", "", "", "", options.cwd, {
+					model,
+					reasoningLevel: config.reasoningLevel,
+					mode: evalCase.mode,
+				})
+			: persona.systemPrompt;
 		await runAgentLoop([{ role: "user", content: evalCase.prompt }], {
 			config,
 			model,
 			cwd: options.cwd,
-			systemPrompt: personaPrompt,
+			systemPrompt,
+			disabledTools: planState ? new Set(modeDisabledTools(planState.enabled)) : undefined,
+			planState,
 			signal: ac.signal,
 			onEvent: (event) => {
 				events.push(event);
@@ -342,7 +374,8 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 					usage.cacheWriteTokens += event.usage.cacheWriteTokens ?? 0;
 					usage.uncachedTokens += event.usage.uncachedTokens ?? 0;
 				}
-			}});
+			},
+		});
 	} catch (error) {
 		errors.push(error instanceof Error ? error.message : String(error));
 	}
@@ -414,6 +447,18 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 		}
 	}
 
+	if (expect.toolSubsequence) {
+		let cursor = 0;
+		for (const tool of toolsCalled) {
+			if (tool === expect.toolSubsequence[cursor]) cursor++;
+		}
+		if (cursor !== expect.toolSubsequence.length) {
+			failedChecks.push(
+				`Tool subsequence: expected [${expect.toolSubsequence.join(", ")}], got [${toolsCalled.join(", ")}]`,
+			);
+		}
+	}
+
 	// toolCallCounts
 	if (expect.toolCallCounts) {
 		for (const [tool, min] of Object.entries(expect.toolCallCounts)) {
@@ -437,7 +482,7 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 	// verify — grounded check against real state (disk, execution output)
 	if (expect.verify) {
 		try {
-			const verifyError = await expect.verify({ response, cwd: options.cwd, toolCalls, turns });
+			const verifyError = await expect.verify({ response, cwd: options.cwd, toolCalls, turns, trace });
 			if (verifyError) failedChecks.push(`Verify failed: ${verifyError}`);
 		} catch (error) {
 			failedChecks.push(`Verify threw: ${error instanceof Error ? error.message : String(error)}`);
@@ -453,6 +498,7 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 		toolsCalled: expect.toolsCalled,
 		toolsNotCalled: expect.toolsNotCalled,
 		toolSequence: expect.toolSequence,
+		toolSubsequence: expect.toolSubsequence,
 		toolCallCounts: expect.toolCallCounts,
 		maxTurns: expect.maxTurns,
 		noErrors: expect.noErrors,
@@ -462,6 +508,7 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 	return {
 		caseId: evalCase.id,
 		description: evalCase.description,
+		signals: evalCase.signals ?? [],
 		model,
 		passed,
 		duration,
@@ -490,6 +537,8 @@ export interface SuiteResult {
 	failed: number;
 	duration: number;
 	results: RunResult[];
+	/** Pass/fail totals per dimension; intentionally not collapsed into one score. */
+	bySignal: Record<string, { passed: number; total: number }>;
 	/** Aggregated token usage and cost across all cases in the suite. */
 	usage: {
 		promptTokens: number;
@@ -583,6 +632,18 @@ export async function runSuite(
 			uncachedTokens: 0,
 		},
 	);
+	const bySignal: SuiteResult["bySignal"] = {};
+	for (const result of results) {
+		for (const signal of result.signals) {
+			let summary = bySignal[signal];
+			if (!summary) {
+				summary = { passed: 0, total: 0 };
+				bySignal[signal] = summary;
+			}
+			summary.total++;
+			if (result.passed) summary.passed++;
+		}
+	}
 
 	return {
 		model: options.model,
@@ -591,6 +652,7 @@ export async function runSuite(
 		failed: results.length - passed,
 		duration,
 		results,
+		bySignal,
 		usage,
 	};
 }
@@ -663,7 +725,11 @@ export interface RepeatedCompareResult {
 export async function compareModelsRepeated(
 	cases: EvalCase[],
 	models: string[],
-	options: Omit<RunnerOptions, "model"> & { concurrency?: number; repeat: number },
+	options: Omit<RunnerOptions, "model"> & {
+		concurrency?: number;
+		repeat: number;
+		targets?: Record<string, CompareTarget>;
+	},
 ): Promise<RepeatedCompareResult> {
 	const concurrency = options.concurrency ?? 10;
 	const repeat = Math.max(1, options.repeat);
@@ -689,7 +755,12 @@ export async function compareModelsRepeated(
 	for (const job of jobs) {
 		const evalCase = cases[job.caseIndex]!;
 		const task = (async () => {
-			const result = await runCase(evalCase, { ...options, model: job.model });
+			const target = options.targets?.[job.model];
+			const result = await runCase(evalCase, {
+				...options,
+				model: target?.model ?? job.model,
+				provider: target?.provider ?? options.provider,
+			});
 			const attempts = attemptsByModelCase[job.model]![job.caseIndex]!;
 			attempts.push(result);
 			completedJobs++;
@@ -844,7 +915,7 @@ export function printRepeatedCompareReport(compare: RepeatedCompareResult): void
 // ============================================================================
 
 export function printReport(suite: SuiteResult): void {
-	console.log("\n" + "=".repeat(60));
+	console.log(`\n${"=".repeat(60)}`);
 	console.log(`EVAL RESULTS: ${suite.passed}/${suite.total} passed (${suite.duration}ms)`);
 	console.log("=".repeat(60));
 
@@ -867,7 +938,7 @@ export function printReport(suite: SuiteResult): void {
 		);
 	}
 
-	console.log("\n" + "-".repeat(60));
+	console.log(`\n${"-".repeat(60)}`);
 	console.log("Usage:");
 	console.log(`  Total tokens: ${suite.usage.totalTokens.toLocaleString()}`);
 	console.log(`    Prompt: ${suite.usage.promptTokens.toLocaleString()}`);
@@ -883,6 +954,12 @@ export function printReport(suite: SuiteResult): void {
 	}
 	if (suite.usage.cost > 0) {
 		console.log(`  Total cost: $${suite.usage.cost.toFixed(4)}`);
+	}
+	if (Object.keys(suite.bySignal).length > 0) {
+		console.log("\nBehavior signals:");
+		for (const [signal, summary] of Object.entries(suite.bySignal).sort(([a], [b]) => a.localeCompare(b))) {
+			console.log(`  ${signal}: ${summary.passed}/${summary.total}`);
+		}
 	}
 }
 
@@ -915,7 +992,7 @@ export interface CompareResult {
 export async function compareModels(
 	cases: EvalCase[],
 	models: string[],
-	options: Omit<RunnerOptions, "model"> & { concurrency?: number },
+	options: Omit<RunnerOptions, "model"> & { concurrency?: number; targets?: Record<string, CompareTarget> },
 ): Promise<CompareResult> {
 	const concurrency = options.concurrency ?? 10;
 	const rateLimitDelayMs = options.rateLimitDelayMs ?? 0;
@@ -938,7 +1015,12 @@ export async function compareModels(
 	for (const job of jobs) {
 		const evalCase = cases[job.caseIndex]!;
 		const task = (async () => {
-			const result = await runCase(evalCase, { ...options, model: job.model });
+			const target = options.targets?.[job.model];
+			const result = await runCase(evalCase, {
+				...options,
+				model: target?.model ?? job.model,
+				provider: target?.provider ?? options.provider,
+			});
 			resultsByModel[job.model]![job.caseIndex] = result;
 			completed++;
 			modelEndTime[job.model] = Date.now();
