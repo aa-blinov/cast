@@ -34,6 +34,7 @@ const MIME_TYPES: Record<string, string> = {
 	".png": "image/png",
 	".svg": "image/svg+xml",
 	".ico": "image/x-icon",
+	".ttf": "font/ttf",
 };
 
 export interface WebServerOptions {
@@ -519,6 +520,20 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 			const status = result.error?.includes("Agent running") ? 409 : 400;
 			return json(res, { error: result.error }, status);
 		}
+		json(res, { ok: true, result: result.result });
+	});
+
+	route("POST", "/api/settings/command", async (req, res) => {
+		const body = await readBody(req);
+		let command: string;
+		try {
+			const parsed = JSON.parse(body) as { command?: string };
+			command = parsed.command ?? "";
+		} catch {
+			return json(res, { error: "Invalid JSON" }, 400);
+		}
+		const result = await bridge.executeSettingsCommand(command);
+		if (!result.ok) return json(res, { error: result.error }, 400);
 		json(res, { ok: true, result: result.result });
 	});
 
@@ -1150,6 +1165,10 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 		json(res, bridge.getReasoningOptionsForSession(params.id));
 	});
 
+	route("GET", "/api/settings/reasoning-options", (_req, res) => {
+		json(res, bridge.getReasoningOptionsForSession(""));
+	});
+
 	route("GET", "/api/suggest", (req, res) => {
 		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
 		const input = url.searchParams.get("q") ?? "";
@@ -1191,7 +1210,8 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 			urlPath === "/shared" ||
 			urlPath.startsWith("/shared/") ||
 			urlPath.startsWith("/api/shared/") ||
-			PUBLIC_STATIC_ASSETS.has(urlPath);
+			PUBLIC_STATIC_ASSETS.has(urlPath) ||
+			urlPath.startsWith("/fonts/");
 		if (!isPublicShareRoute && !checkBasicAuth(req)) {
 			requireAuth(res);
 			return;

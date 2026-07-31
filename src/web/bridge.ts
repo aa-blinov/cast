@@ -402,6 +402,10 @@ export interface WebBridge {
 	subscribeAll(callback: (event: WebEvent) => void): void;
 	unsubscribeAll(callback: (event: WebEvent) => void): void;
 	executeCommand(sessionId: string, command: string): Promise<{ ok: boolean; result?: unknown; error?: string }>;
+	/** Runs a settings-only command without requiring a visible chat session.
+	 * This is intentionally separate from executeCommand so the TUI keeps its
+	 * session-bound command path unchanged. */
+	executeSettingsCommand(command: string): Promise<{ ok: boolean; result?: unknown; error?: string }>;
 	getConfig(): {
 		baseURL: string;
 		model: string;
@@ -528,7 +532,12 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		return { registry, followUpQueue: runner.followUpQueue, isRunning: () => runner.isRunning };
 	}
 
-	function createSessionInstance(personaName?: string, modelOverride?: string, cwdOverride?: string): WebAgentSession {
+	function createSessionInstance(
+		personaName?: string,
+		modelOverride?: string,
+		cwdOverride?: string,
+		runSessionStartHook = true,
+	): WebAgentSession {
 		const persona = personaName ? (resolvePersona(personaName) ?? currentPersona) : currentPersona;
 		const model = modelOverride ?? defaultModel;
 
@@ -558,14 +567,16 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		};
 
 		sessions.set(session.id, ws);
-		// Fire-and-forget (SessionStart is non-blocking, matching Grok Build) —
-		// this function is sync and callers don't need to wait on a hook script.
-		void runHooksForEvent(resolveHooksForCwd(sessionCwd, projectTrusted), {
-			event: "SessionStart",
-			cwd: sessionCwd,
-			sessionId: session.id,
-			payload: { source: "startup" },
-		});
+		if (runSessionStartHook) {
+			// Fire-and-forget (SessionStart is non-blocking, matching Grok Build) —
+			// this function is sync and callers don't need to wait on a hook script.
+			void runHooksForEvent(resolveHooksForCwd(sessionCwd, projectTrusted), {
+				event: "SessionStart",
+				cwd: sessionCwd,
+				sessionId: session.id,
+				payload: { source: "startup" },
+			});
+		}
 		return ws;
 	}
 
@@ -1697,19 +1708,22 @@ export function createWebBridge(result: StartupResult): WebBridge {
 				const skillsShSources = readSkillsShSources();
 				return {
 					ok: true,
-					result: discovered.map((s) => ({
-						name: s.name,
-						source: s.source,
-						filePath: s.filePath,
-						pluginId: s.pluginId,
-						description: s.description,
-						enabled: !disabled.has(s.name) && s.pluginEnabled !== false,
-						uninstallable: isUninstallableSkill(s),
-						// Skills installed via `npx skills add` land in one of the
-						// agentsGlobalDirs (`~/.agents/skills/`, `~/.config/agents/skills/`).
-						skillssh: s.source === "agents",
-						skillsshSource: s.source === "agents" ? skillsShSources[s.name] : undefined,
-					})),
+					result: discovered.map((s) => {
+						const skillsShSource = s.source === "agents" ? skillsShSources[s.name] : undefined;
+						return {
+							name: s.name,
+							source: s.source,
+							filePath: s.filePath,
+							pluginId: s.pluginId,
+							description: s.description,
+							enabled: !disabled.has(s.name) && s.pluginEnabled !== false,
+							uninstallable: isUninstallableSkill(s),
+							// Agent directories are shared with other tools (Amp, Codex,
+							// etc.). Only Skills.sh's lockfile establishes its provenance.
+							skillssh: skillsShSource !== undefined,
+							skillsshSource: skillsShSource,
+						};
+					}),
 				};
 			}
 			if (sub === "help") {
@@ -1796,7 +1810,10 @@ export function createWebBridge(result: StartupResult): WebBridge {
 				}
 				if (sub === "uninstall") {
 					if (!rest) return { ok: false, error: "Usage: /skills-sh uninstall <name>" };
-					const out = await runSkillsSh(["rm", ...rest.split(/\s+/)], 30_000);
+					// Cast installs Skills.sh entries into the universal scope. Without
+					// --global, the CLI only searches the current project and reports a
+					// successful no-op for skills such as ~/.config/agents/skills/pr-review.
+					const out = await runSkillsSh(["remove", "--global", "--yes", ...rest.split(/\s+/)], 30_000);
 					const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
 					skills = skillsResult.skills;
 					recomputeAllSystemPrompts();
@@ -2036,6 +2053,46 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		}
 
 		return { ok: false, error: `Unknown command: ${cmd}` };
+	}
+
+	async function executeSettingsCommand(command: string): Promise<{ ok: boolean; result?: unknown; error?: string }> {
+		const name = command.trim().split(/\s+/, 1)[0];
+		const allowed = new Set([
+			"/current",
+			"/permissions",
+			"/web",
+			"/web-search-provider",
+			"/web-fetch-provider",
+			"/theme",
+			"/hooks",
+			"/model",
+			"/reasoning",
+			"/quick-session-persona",
+			"/subagent-model",
+			"/subagent-model-provider",
+			"/plan-model",
+			"/plan-model-provider",
+			"/reload",
+			"/mcp",
+			"/skills",
+			"/skills-sh",
+			"/plugin",
+			"/provider",
+			"/ssh",
+		]);
+		if (!allowed.has(name ?? "")) return { ok: false, error: "Command requires an active session" };
+
+		// The command implementation is shared with the TUI and normally needs a
+		// session for its current model/cwd. Keep this context private: it never
+		// reaches the sidebar, disk, or user hooks, and is removed synchronously.
+		const ws = createSessionInstance(undefined, undefined, undefined, false);
+		try {
+			return await executeCommand(ws.id, command);
+		} finally {
+			ws.backgroundBash.registry.killAll();
+			sessions.delete(ws.id);
+			deleteSession(ws.id);
+		}
 	}
 
 	function getConfig() {
@@ -2346,6 +2403,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		subscribeAll,
 		unsubscribeAll,
 		executeCommand,
+		executeSettingsCommand,
 		getConfig,
 		getPersonas,
 		getThemes,

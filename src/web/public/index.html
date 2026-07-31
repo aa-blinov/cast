@@ -51,24 +51,11 @@ try {
 		// a sans-serif family only ever changes --font. Keep in sync with
 		// FONT_OPTIONS in app.js.
 		const families = {
-			"cousine": ["'Cousine', 'JetBrains Mono', monospace", true],
 			"fira-code": ["'Fira Code', 'JetBrains Mono', monospace", true],
 			"ibm-plex-mono": ["'IBM Plex Mono', monospace", true],
-			"inconsolata": ["'Inconsolata', monospace", true],
-			"roboto-mono": ["'Roboto Mono', monospace", true],
-			"source-code-pro": ["'Source Code Pro', monospace", true],
-			"space-mono": ["'Space Mono', monospace", true],
-			"ubuntu-mono": ["'Ubuntu Mono', monospace", true],
-			"victor-mono": ["'Victor Mono', 'JetBrains Mono', monospace", true],
+			"jetbrains-mono": ["'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace", true],
 			"ibm-plex-sans": ["'IBM Plex Sans', sans-serif", false],
 			"inter": ["'Inter', sans-serif", false],
-			"lato": ["'Lato', sans-serif", false],
-			"montserrat": ["'Montserrat', sans-serif", false],
-			"nunito": ["'Nunito', sans-serif", false],
-			"open-sans": ["'Open Sans', sans-serif", false],
-			"poppins": ["'Poppins', sans-serif", false],
-			"roboto": ["'Roboto', sans-serif", false],
-			"source-sans-3": ["'Source Sans 3', sans-serif", false],
 			"work-sans": ["'Work Sans', sans-serif", false],
 		};
 		const picked = families[fontId];
@@ -83,12 +70,17 @@ try {
 } catch {}
 </script>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<!-- Kicks off DNS+TCP+TLS for the CDNs style.css's @import and app.js's
-     importmap depend on, in parallel with HTML parsing, instead of only
-     starting once the parser reaches those actual requests. -->
+<!-- Kicks off DNS+TCP+TLS for optional selected-font weights and the
+     importmap in parallel with HTML parsing. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preconnect" href="https://esm.sh" crossorigin>
+<link rel="preload" href="/fonts/jetbrains-mono-regular.ttf" as="font" type="font/ttf" crossorigin>
+<link rel="preload" href="/fonts/fira-code-regular.ttf" as="font" type="font/ttf" crossorigin>
+<link rel="preload" href="/fonts/ibm-plex-mono-regular.ttf" as="font" type="font/ttf" crossorigin>
+<link rel="preload" href="/fonts/inter-regular.ttf" as="font" type="font/ttf" crossorigin>
+<link rel="preload" href="/fonts/ibm-plex-sans-regular.ttf" as="font" type="font/ttf" crossorigin>
+<link rel="preload" href="/fonts/work-sans-regular.ttf" as="font" type="font/ttf" crossorigin>
 <link rel="stylesheet" href="/style.css">
 <script type="importmap">
 {

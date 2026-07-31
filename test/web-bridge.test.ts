@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -174,6 +174,53 @@ describe("web bridge", () => {
 		const bridge = createWebBridge(makeResult());
 		const ws = bridge.createSession("senior");
 		expect(ws.systemPrompt).toContain("You are the senior persona.");
+	});
+
+	it("runs settings commands without creating a visible session", async () => {
+		const bridge = createWebBridge(makeResult());
+
+		expect((await bridge.executeSettingsCommand("/permissions")).ok).toBe(true);
+		expect((await bridge.executeSettingsCommand("/model gpt-5")).result).toEqual({ model: "gpt-5" });
+		expect(bridge.listSessions()).toEqual([]);
+		expect(await bridge.executeSettingsCommand("/clear")).toEqual({
+			ok: false,
+			error: "Command requires an active session",
+		});
+	});
+
+	it("marks an agent skill as Skills.sh only when its lockfile records it", async () => {
+		const skillsShDir = join(fakeHome, ".agents", "skills", "from-skills-sh");
+		const ampSkillDir = join(fakeHome, ".config", "agents", "skills", "from-amp");
+		mkdirSync(skillsShDir, { recursive: true });
+		mkdirSync(ampSkillDir, { recursive: true });
+		writeFileSync(
+			join(skillsShDir, "SKILL.md"),
+			"---\nname: from-skills-sh\ndescription: Installed by Skills.sh\n---\n",
+		);
+		writeFileSync(join(ampSkillDir, "SKILL.md"), "---\nname: from-amp\ndescription: Installed by Amp\n---\n");
+		writeFileSync(
+			join(fakeHome, ".agents", ".skill-lock.json"),
+			JSON.stringify({ skills: { "from-skills-sh": { source: "owner/repo" } } }),
+		);
+		const bridge = createWebBridge(
+			makeResult({
+				projectDeps: {
+					noSkills: false,
+					noMcp: false,
+					cliSkillPaths: [],
+					cliMcpPaths: [],
+				} as StartupResult["projectDeps"],
+			}),
+		);
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/skills list");
+		const skills = result.result as Array<{ name: string; skillssh: boolean; skillsshSource?: string }>;
+
+		expect(skills.find((skill) => skill.name === "from-skills-sh")).toMatchObject({
+			skillssh: true,
+			skillsshSource: "owner/repo",
+		});
+		expect(skills.find((skill) => skill.name === "from-amp")).toMatchObject({ skillssh: false });
 	});
 
 	it("sandbox sentinel creates a scratch dir named after the session id before hooks can use its cwd", () => {
