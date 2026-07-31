@@ -180,15 +180,25 @@ const READONLY_GIT_SUBCOMMANDS = new Set([
  * on the allowlist. False negatives (a safe command rejected) are acceptable;
  * false positives (a mutating command allowed) are not.
  */
+// Fd-duplication (`2>&1`, `1>&2`) and redirecting to the null device
+// (`2>/dev/null`, `&>/dev/null`) never write a persistent file — stripped
+// before the blanket `>` check below so a plain `ls -la 2>&1` isn't rejected
+// alongside a real `> realfile.txt`.
+const SAFE_REDIRECTS = /\d*>&\d+\b|&?\d*>\s*\/dev\/null\b/g;
+
 export function checkReadOnlyCommand(command: string): { ok: boolean; reason?: string } {
-	if (/[>]/.test(command)) {
+	// Stripped once, up front: the stage-splitter below treats a bare `&` as
+	// a background-job separator, which would otherwise chop "2>&1" into
+	// bogus stages "2>" and "1" and reject it for the wrong reason.
+	const sanitized = command.replace(SAFE_REDIRECTS, "");
+	if (/>/.test(sanitized)) {
 		return { ok: false, reason: "output redirection (>) can write files" };
 	}
 	if (/\$\(|`|<\(/.test(command)) {
 		return { ok: false, reason: "command/process substitution can run arbitrary commands" };
 	}
 	// Split into pipeline/sequence stages; every stage must be read-only.
-	const stages = command
+	const stages = sanitized
 		.split(/\|\||&&|;|\||\n|&/)
 		.map((s) => s.trim())
 		.filter(Boolean);
