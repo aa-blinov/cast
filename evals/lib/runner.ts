@@ -13,6 +13,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import type { AppConfig } from "../../src/core/config.ts";
 import { loadConfig } from "../../src/core/config.ts";
 import { BackgroundTaskRegistry } from "../../src/core/tools/bash-background.ts";
 import { type AgentEvent, MessageQueue, runAgentLoop } from "../../src/core/loop.ts";
@@ -87,6 +88,18 @@ export interface EvalCase {
 	mode?: "build" | "plan";
 	/** Prepare a session-local active plan file before running the case. */
 	planFixture?: { name: string; content: string };
+	/**
+	 * Working directory override — defaults to `RunnerOptions.cwd` (the real
+	 * project repo). Set this to an isolated empty directory (e.g.
+	 * `fixtureDir(...)` after `writeFixture(id, {})`) for a case whose prompt
+	 * describes a self-contained scenario: with the real repo as cwd, a
+	 * capable model's GROUND instinct can and will go looking for whatever
+	 * the scenario mentions — confirmed once by a model that searched the
+	 * filesystem for a supposedly-fictional package name, found nothing, and
+	 * kept digging until it grep'd its way into this very eval case's own
+	 * source file.
+	 */
+	cwd?: string;
 	/**
 	 * Runs before the prompt. Used to (re)create fixture files on disk (see
 	 * `evals/fixtures.ts`) so grounded checks in `verify` have known starting state.
@@ -268,11 +281,30 @@ function loadConnection(providerName: string | undefined, options: RunnerOptions
 	return { baseURL: settings.providerUrl, apiKey: settings.apiKey };
 }
 
-export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promise<RunResult> {
-	const config = loadConfig(loadConnection(options.provider, options));
-	const model = evalCase.model ?? options.model;
-	const timeout = evalCase.timeout ?? 60_000;
+/** One case attempt's raw outcome — see `runCase`'s retry loop below. */
+interface AttemptResult {
+	toolsCalled: string[];
+	toolCalls: ObservedToolCall[];
+	trace: TraceTurn[];
+	response: string;
+	thinking: string;
+	turns: number;
+	errors: string[];
+	usage: RunResult["usage"];
+}
 
+/** Infra-only retries: a case that dies before a single tool call or turn
+ *  landed (bad connection, DNS hiccup, transient 5xx that outran the LLM
+ *  client's own retry budget — see src/core/llm.ts's isRetryable/backoff,
+ *  which already retries indefinitely *within* one request) is far more
+ *  likely a flake than a real behavioral finding. A case that got partway
+ *  through and then hit an error is never retried here — that's real signal,
+ *  not infra noise, and retrying it would risk masking an actual regression. */
+const MAX_INFRA_RETRIES = 2;
+
+async function runAttempt(evalCase: EvalCase, options: RunnerOptions, config: AppConfig, model: string): Promise<AttemptResult> {
+	const cwd = evalCase.cwd ?? options.cwd;
+	const timeout = evalCase.timeout ?? 60_000;
 	const events: AgentEvent[] = [];
 	const toolsCalled: string[] = [];
 	const toolCalls: ObservedToolCall[] = [];
@@ -303,7 +335,6 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 	const backgroundQueue = new MessageQueue();
 	const timer = setTimeout(() => ac.abort(), timeout);
 
-	const startTime = Date.now();
 	let planState: ReturnType<typeof createPlanState> | undefined;
 	let mcpSetup: McpSetupResult | undefined;
 
@@ -318,7 +349,7 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 		// the shipping agent uses; an unknown name fails loudly rather than
 		// silently benchmarking the wrong prompt.
 		const personaName = evalCase.persona ?? options.persona ?? "senior";
-		const persona = findPersona(personaName, personaOptionsForCwd(options.cwd, false, false));
+		const persona = findPersona(personaName, personaOptionsForCwd(cwd, false, false));
 		if (!persona) {
 			throw new Error(`Persona "${personaName}" not found — check prompts/personas/ and ~/.cast/personas/.`);
 		}
@@ -330,7 +361,7 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 			writeFileSync(planPath, evalCase.planFixture.content, "utf-8");
 			planState.activePlanPath = planPath;
 		}
-		const personas = resolvePersonasForCwd(options.cwd, false, false).personas;
+		const personas = resolvePersonasForCwd(cwd, false, false).personas;
 		const subagentPrompts = evalCase.persona === "coder-with-subagents" ? loadSubagentPrompts() : undefined;
 		const skills = evalCase.withSkills
 			? loadSkills({ builtinDir: builtinSkillsDir, extraPaths: [] }).skills
@@ -344,7 +375,7 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 		const skillsSuffix = skills ? formatSkillsForPrompt(skills) : "";
 		const systemPrompt =
 			evalCase.mode || evalCase.withSkills
-				? buildSystemPrompt(persona, "", "", "", skillsSuffix, "", options.cwd, {
+				? buildSystemPrompt(persona, "", "", "", skillsSuffix, "", cwd, {
 						model,
 						reasoningLevel: config.reasoningLevel,
 						mode: evalCase.mode,
@@ -353,7 +384,7 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 		await runAgentLoop([{ role: "user", content: evalCase.prompt }], {
 			config,
 			model,
-			cwd: options.cwd,
+			cwd,
 			systemPrompt,
 			disabledTools: planState ? new Set(modeDisabledTools(planState.enabled)) : undefined,
 			personas,
@@ -451,6 +482,27 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 	if (planState) rmSync(planState.plansDir, { recursive: true, force: true });
 
 	clearTimeout(timer);
+	return { toolsCalled, toolCalls, trace, response, thinking, turns, errors, usage };
+}
+
+export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promise<RunResult> {
+	const config = loadConfig(loadConnection(options.provider, options));
+	const model = evalCase.model ?? options.model;
+	const startTime = Date.now();
+
+	let attempt = await runAttempt(evalCase, options, config, model);
+	let retries = 0;
+	// Only a hard, zero-progress failure (nothing landed — no tool call, no
+	// turn) gets retried: that's the signature of an infra hiccup (dropped
+	// connection, DNS, a transient error that outran the LLM client's own
+	// retry budget), not a real behavioral disagreement. A case that got
+	// partway through and then errored is real signal and is never retried.
+	while (attempt.errors.length > 0 && attempt.turns === 0 && retries < MAX_INFRA_RETRIES) {
+		retries++;
+		attempt = await runAttempt(evalCase, options, config, model);
+	}
+	const { toolsCalled, toolCalls, trace, response, thinking, turns, errors, usage } = attempt;
+
 	const duration = Date.now() - startTime;
 
 	// Check expectations
@@ -552,7 +604,7 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 	// verify — grounded check against real state (disk, execution output)
 	if (expect.verify) {
 		try {
-			const verifyError = await expect.verify({ response, cwd: options.cwd, toolCalls, turns, trace });
+			const verifyError = await expect.verify({ response, cwd: evalCase.cwd ?? options.cwd, toolCalls, turns, trace });
 			if (verifyError) failedChecks.push(`Verify failed: ${verifyError}`);
 		} catch (error) {
 			failedChecks.push(`Verify threw: ${error instanceof Error ? error.message : String(error)}`);
@@ -811,36 +863,48 @@ export async function compareModelsRepeated(
 	);
 	const modelEndTime: Record<string, number> = Object.fromEntries(models.map((m) => [m, overallStart]));
 
+	// One job per (model, case) — NOT per attempt. Attempts of the same case
+	// run sequentially inside the job (see below); different (model, case)
+	// jobs still run concurrently against each other through the same pool.
 	const jobs: Array<{ model: string; caseIndex: number }> = [];
 	for (const model of models) {
 		for (let i = 0; i < cases.length; i++) {
-			for (let r = 0; r < repeat; r++) jobs.push({ model, caseIndex: i });
+			jobs.push({ model, caseIndex: i });
 		}
 	}
 
 	let completedJobs = 0;
-	const totalJobs = jobs.length;
+	const totalJobs = jobs.length * repeat;
 	const executing = new Set<Promise<void>>();
 
 	for (const job of jobs) {
 		const evalCase = cases[job.caseIndex]!;
 		const task = (async () => {
 			const target = options.targets?.[job.model];
-			const result = await runCase(evalCase, {
-				...options,
-				model: target?.model ?? job.model,
-				provider: target?.provider ?? options.provider,
-			});
 			const attempts = attemptsByModelCase[job.model]![job.caseIndex]!;
-			attempts.push(result);
-			completedJobs++;
-			modelEndTime[job.model] = Date.now();
+			// Sequential, not Promise.all/parallel: `writeFixture` (evals/lib/fixtures.ts)
+			// always (re)writes the same fixed path for a given case id — running
+			// this case's attempts concurrently means one attempt's setup() can
+			// wipe/recreate the fixture out from under another attempt's still-running
+			// agent loop. Confirmed: 3 cases that flaked under the old flat
+			// one-job-per-attempt scheduling (default concurrency) went a clean 3/3
+			// once forced serial — not model non-determinism, fixture corruption.
+			for (let r = 0; r < repeat; r++) {
+				const result = await runCase(evalCase, {
+					...options,
+					model: target?.model ?? job.model,
+					provider: target?.provider ?? options.provider,
+				});
+				attempts.push(result);
+				completedJobs++;
+				modelEndTime[job.model] = Date.now();
 
-			if (options.verbose) {
-				const status = result.passed ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m";
-				console.log(
-					`  [${completedJobs}/${totalJobs}] ${job.model} :: ${evalCase.id} (attempt ${attempts.length}/${repeat}): ${status} (${result.duration}ms, ${result.turns} turns)`,
-				);
+				if (options.verbose) {
+					const status = result.passed ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m";
+					console.log(
+						`  [${completedJobs}/${totalJobs}] ${job.model} :: ${evalCase.id} (attempt ${attempts.length}/${repeat}): ${status} (${result.duration}ms, ${result.turns} turns)`,
+					);
+				}
 			}
 		})();
 
