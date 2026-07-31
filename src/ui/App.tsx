@@ -391,7 +391,7 @@ export function App(props: AppProps): JSX.Element {
 					// otherwise declining leaves the session hanging in silence.
 					showNotice("[Staying in build mode]");
 					setPendingAutoSubmit({
-						text: "Plan mode declined — proceed with the task directly in build mode.",
+						text: "The user has decided to complete this task in build mode. Continue directly with the task; do not suggest or enter plan mode again unless the user materially changes the request.",
 						wantPlanMode: false,
 					});
 				}

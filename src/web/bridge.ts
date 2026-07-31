@@ -107,7 +107,8 @@ export type WebEvent =
 	| { type: "session_update"; session: SessionSummary }
 	| { type: "session_end"; usage: SessionState["usage"]; messageCount: number }
 	| { type: "session_closed" }
-	| { type: "turn_meta"; model: string; provider: string; totalMs: number };
+	| { type: "turn_meta"; model: string; provider: string; totalMs: number }
+	| { type: "plan_decision"; content: string };
 
 export interface WebAgentSession {
 	id: string;
@@ -1188,6 +1189,15 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		// nothing running, both just submit the message as a normal turn.
 		if (name === "/help") {
 			return { ok: true, result: getHelpText() };
+		}
+		if (name === "/plan-note") {
+			if (!arg) return { ok: false, error: "Usage: /plan-note <decision>" };
+			const content = `<system-reminder>${arg}</system-reminder>`;
+			appendMessage(ws.session, { role: "user", content });
+			saveSession(ws.session);
+			broadcast(ws, { type: "plan_decision", content: arg });
+			broadcastSessionUpdate(ws);
+			return { ok: true, result: "Recorded" };
 		}
 		if (name === "/current") {
 			return {

@@ -4659,6 +4659,34 @@ function ElapsedTimer({ running, activeId, connected, turnStartRef }) {
 	return html`<span class="composer-elapsed">${(elapsedMs / 1000).toFixed(1)}s</span>`;
 }
 
+function PlanTransitionModal({ transition, onChoose }) {
+	const modalRef = useModalFocusTrap(!!transition);
+	if (!transition) return null;
+	const entering = transition.kind === "enter";
+	return html`
+		<div class="modal-backdrop" onClick=${() => onChoose("cancel")}>
+			<div class="modal modal-confirm" role="dialog" aria-modal="true" aria-label="Plan mode" tabIndex="-1" ref=${modalRef} onClick=${(e) => e.stopPropagation()}>
+				<div class="modal-confirm-body">${entering ? "Agent suggests planning this task first. Enter plan mode?" : "Plan ready. What next?"}</div>
+				<div class="modal-footer">
+					${
+						entering
+							? html`
+								<button class="modal-btn" onClick=${() => onChoose("enter")}>Yes — enter plan mode</button>
+								<button class="modal-btn modal-btn-danger" onClick=${() => onChoose("decline")}>No — continue in build mode</button>
+							`
+							: html`
+								<button class="modal-btn" onClick=${() => onChoose("refine")}>Keep planning — I'll give feedback</button>
+								<button class="modal-btn" onClick=${() => onChoose("implement")}>Approve — switch to build and implement now</button>
+								<button class="modal-btn" onClick=${() => onChoose("fresh")}>Approve — clear context, then implement</button>
+								<button class="modal-btn" onClick=${() => onChoose("build")}>Approve — switch to build, I'll start myself</button>
+							`
+					}
+				</div>
+			</div>
+		</div>
+	`;
+}
+
 function App() {
 	const [sessions, setSessions] = useState([]);
 	const [sessionsLoaded, setSessionsLoaded] = useState(false);
@@ -4715,6 +4743,9 @@ function App() {
 	const [running, setRunning] = useState(false);
 	const [pendingSteers, setPendingSteers] = useState([]);
 	const [pendingQueue, setPendingQueue] = useState([]);
+	const [planTransition, setPlanTransition] = useState(null);
+	const pendingPlanSignalRef = useRef(null);
+	const planRefineArmedRef = useRef(false);
 	// Open/closed and which tab, like theme/font below, survive a page
 	// reload via localStorage — losing "I had Files open" on every refresh
 	// (or worse, having to reload while it was mid-task) was just annoying.
@@ -4822,8 +4853,8 @@ function App() {
 	// already hid the bubble, but the cleanup is harmless and the
 	// intent is symmetric.
 	useEffect(() => {
-		if (settingsOpen || hotkeysOpen || dirPickerOpen || confirmState) tooltips.hide();
-	}, [settingsOpen, hotkeysOpen, dirPickerOpen, confirmState]);
+		if (settingsOpen || hotkeysOpen || dirPickerOpen || confirmState || planTransition) tooltips.hide();
+	}, [settingsOpen, hotkeysOpen, dirPickerOpen, confirmState, planTransition]);
 	const undismiss = useCallback((id) => {
 		setDismissedIds((prev) => {
 			if (!prev.has(id)) return prev;
@@ -5285,6 +5316,10 @@ function App() {
 	// Submit message
 	const submitMessage = useCallback(
 		async (text, images, pendingDocs) => {
+			if (planRefineArmedRef.current && !text.trim().startsWith("/")) {
+				planRefineArmedRef.current = false;
+				text = `The user wants to refine the plan. Update it using this feedback:\n\n${text}`;
+			}
 			const draftVersion = session?.isDraft ? session.draftVersion : null;
 			const isCurrentDraft = () => draftVersion == null || draftVersion === draftVersionRef.current;
 			// Pure client-side commands need no live (or even draft) session —
@@ -5510,6 +5545,68 @@ function App() {
 		[activeId, session, commitSession, loadSessions, selectSession, showToast, toggleDiff, addNotice],
 	);
 
+	const handlePlanTransition = useCallback(
+		async (choice) => {
+			const transition = planTransition;
+			if (!transition) return;
+			setPlanTransition(null);
+			if (choice === "cancel") {
+				if (transition.kind === "done") addNotice("Staying in plan mode — describe what to change");
+				return;
+			}
+			const setMode = async (mode) => {
+				await api("POST", `/api/sessions/${transition.sessionId}/command`, {
+					command: mode === "plan" ? "/plan" : "/build",
+				});
+				setSession((prev) => (prev?.id === transition.sessionId ? { ...prev, mode } : prev));
+			};
+			const recordChoice = async (text) => {
+				await api("POST", `/api/sessions/${transition.sessionId}/command`, { command: `/plan-note ${text}` });
+			};
+			try {
+				if (transition.kind === "enter") {
+					if (choice === "enter") {
+						await recordChoice("Plan mode: continue with planning");
+						await setMode("plan");
+						await submitMessage(
+							"<system-reminder>Plan mode: the user chose to plan before implementation.</system-reminder>\n\nExplore the material and write the plan.",
+						);
+					} else {
+						await recordChoice("Plan mode: continue in Build");
+						await submitMessage(
+							"<system-reminder>Plan mode: the user chose to continue this task in Build.</system-reminder>\n\nContinue directly with the task; do not suggest or enter plan mode again unless the user materially changes the request.",
+						);
+					}
+					return;
+				}
+				if (choice === "refine") {
+					await recordChoice("Plan: keep planning and refine it");
+					planRefineArmedRef.current = true;
+					addNotice("Plan: keep planning — add feedback below");
+					return;
+				}
+				if (choice === "fresh") {
+					await api("POST", `/api/sessions/${transition.sessionId}/command`, { command: "/clear" });
+					setSession((prev) => (prev?.id === transition.sessionId ? { ...prev, messages: [] } : prev));
+				}
+				await setMode("build");
+				if (choice === "fresh") await recordChoice("Plan: approved — clear context, then implement in Build");
+				if (choice === "build") {
+					await recordChoice("Plan: approved — switch to Build; user will start implementation");
+					addNotice("Plan: approved — your next message starts implementation");
+				} else {
+					if (choice !== "fresh") await recordChoice("Plan: approved — implement in Build");
+					await submitMessage(
+						"<system-reminder>Plan: approved — start implementation in Build.</system-reminder>\n\nImplement it step by step.",
+					);
+				}
+			} catch (err) {
+				showToast(err.message, "error");
+			}
+		},
+		[planTransition, submitMessage, addNotice, showToast],
+	);
+
 	// Abort
 	const abortRun = useCallback(async () => {
 		if (!activeId) return;
@@ -5699,6 +5796,12 @@ function App() {
 						if (diffOpenRef.current) {
 							queueDiffRefresh();
 						}
+						if (!event.result?.isError && (event.name === "plan_enter" || event.name === "plan_done")) {
+							pendingPlanSignalRef.current = {
+								kind: event.name === "plan_enter" ? "enter" : "done",
+								sessionId: streamSessionId,
+							};
+						}
 						break;
 					case "assistant_message": {
 						// Keep reasoning, prose, and tool calls as separate ordered blocks
@@ -5733,6 +5836,10 @@ function App() {
 						setSession((prev) => (prev ? { ...prev, status: "idle" } : prev));
 						setPendingSteers([]);
 						setPendingQueue([]);
+						if (pendingPlanSignalRef.current?.sessionId === streamSessionId) {
+							setPlanTransition(pendingPlanSignalRef.current);
+							pendingPlanSignalRef.current = null;
+						}
 						break;
 					case "turn_meta":
 						// Fires once, right after the "assistant_message" event that
@@ -5782,6 +5889,13 @@ function App() {
 								.catch(() => {});
 							return { ...prev, usage: event.usage };
 						});
+						break;
+					case "plan_decision":
+						setSession((prev) =>
+							prev
+								? { ...prev, messages: [...prev.messages, { role: "warning", content: event.content }] }
+								: prev,
+						);
 						break;
 					case "error":
 						resetStreamingNow();
@@ -6332,6 +6446,8 @@ function App() {
 			     ever triggered from inside a settings tab, so it must outrank it
 			     in DOM/paint order. -->
 			${confirmModal}
+
+			<${PlanTransitionModal} transition=${planTransition} onChoose=${handlePlanTransition} />
 
 			<!-- Chat area -->
 			<main class="chat-area">

@@ -2,6 +2,14 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.12.5
+
+### Fixed
+
+- Planning flow: complex build-mode tasks now consistently request planning before implementation, while an explicit user choice to continue in Build is preserved across subsequent turns.
+- Web UI: plan-mode entry and plan approval now use the same choices as the terminal UI, including refine, immediate implementation, fresh-context implementation, and manual Build handoff.
+- Web UI: every plan-mode decision is saved as a persistent system card in the chat history, so the selected path remains clear after reload.
+
 ## 0.12.4
 
 ### Fixed

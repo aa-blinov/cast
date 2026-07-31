@@ -471,9 +471,10 @@ export function getToolDefinitions(
 			function: {
 				name: "plan_enter",
 				description:
-					"Suggest switching to plan mode when the user's request is complex enough to benefit from planning " +
-					"before implementation (multiple files, architectural decisions, unclear scope). The user is asked to " +
-					"confirm — call this, then END YOUR TURN and wait. Do not call it for simple, direct tasks.",
+					"Before making changes or writing an implementation plan, call this and end your turn when the request spans " +
+					"multiple subsystems, a migration, authentication/security, an API contract, rollout/rollback, architectural " +
+					"decisions, or unclear scope. The user is asked to confirm. Do not write the plan in build mode; call this, then " +
+					"END YOUR TURN and wait. If the user has declined plan mode or chosen build mode, proceed directly without calling this again unless they materially change the request. Do not call it for simple, direct tasks.",
 				parameters: {
 					type: "object",
 					properties: {
