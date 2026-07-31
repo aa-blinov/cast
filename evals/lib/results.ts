@@ -104,9 +104,11 @@ export function recordRun(suite: SuiteResult, caseFilter?: string): string {
 				failed: suite.failed,
 				duration: suite.duration,
 				usage: suite.usage,
+				bySignal: suite.bySignal,
 				cases: suite.results.map((r) => ({
 					id: r.caseId,
 					description: r.description,
+					signals: r.signals,
 					passed: r.passed,
 					duration: r.duration,
 					turns: r.turns,
@@ -309,9 +311,7 @@ export function recordRepeatedBaseline(compare: RepeatedCompareResult, name: str
 		passed: suite.results.filter((r) => r.consistent && r.passed > 0).length,
 		failed: suite.results.length - suite.results.filter((r) => r.consistent && r.passed > 0).length,
 		passRate:
-			suite.casesTotal > 0
-				? suite.results.filter((r) => r.consistent && r.passed > 0).length / suite.casesTotal
-				: 0,
+			suite.casesTotal > 0 ? suite.results.filter((r) => r.consistent && r.passed > 0).length / suite.casesTotal : 0,
 		duration: suite.duration,
 		usage: { ...suite.usage },
 		results: suite.results.map((r) => ({
@@ -319,7 +319,7 @@ export function recordRepeatedBaseline(compare: RepeatedCompareResult, name: str
 			passed: r.consistent && r.passed > 0,
 			duration: r.avgDuration,
 			turns: r.avgTurns,
-			usage: { ...r.attempts[0]?.usage ?? emptyUsage() },
+			usage: { ...(r.attempts[0]?.usage ?? emptyUsage()) },
 		})),
 	};
 	const filePath = join(BASELINES_DIR, `${baseline.name}.json`);

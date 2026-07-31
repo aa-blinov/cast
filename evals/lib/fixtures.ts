@@ -12,7 +12,7 @@
 
 import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 const FIXTURES_ROOT = join("/tmp/cast-eval", randomUUID());
 
@@ -25,7 +25,9 @@ export function writeFixture(id: string, files: Record<string, string>): string 
 	rmSync(dir, { recursive: true, force: true });
 	mkdirSync(dir, { recursive: true });
 	for (const [relPath, content] of Object.entries(files)) {
-		writeFileSync(join(dir, relPath), content, "utf-8");
+		const path = join(dir, relPath);
+		mkdirSync(dirname(path), { recursive: true });
+		writeFileSync(path, content, "utf-8");
 	}
 	return dir;
 }
