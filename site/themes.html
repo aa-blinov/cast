@@ -230,6 +230,14 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 }
 .content th { background: var(--bg-tertiary); font-weight: 600; }
 .content tr:hover td { background: var(--bg-tertiary); }
+.badge-pass, .badge-fail {
+	display: inline-block; padding: 2px 8px; border-radius: 999px;
+	font-size: .8rem; font-weight: 500; white-space: nowrap;
+}
+.badge-pass { background: var(--green-subtle); color: var(--green); }
+.badge-fail { background: var(--bg-tertiary); color: var(--text-secondary); }
+.content details { margin: 0 0 8px; }
+.content details summary { cursor: pointer; font-weight: 500; padding: 4px 0; }
 
 /* ── Doc page navigation ─────────────────────────────────────────────── */
 .doc-nav {
@@ -470,6 +478,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 			<a href="themes.html" class="active">Themes</a>
 			<a href="non-interactive-mode.html">Non-Interactive Mode</a>
 			<a href="architecture.html">Architecture</a>
+			<a href="eval-scoreboard.html">Model Scoreboard</a>
 			<a href="changelog.html">Changelog</a>
 	</div>
 </nav>
