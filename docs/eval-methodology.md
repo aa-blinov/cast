@@ -8,236 +8,101 @@ layout: `evals/` is not part of the shipped package), not end-user documentation
 
 A coding agent's behavior is a product of two things that are easy to conflate: the **model**
 (does it understand the task, can it reason about the diff it needs to make) and the **harness**
-(does the tool schema communicate the constraint clearly, does the edit format let the model
-express its intent precisely, does the prompt wording bias it toward the right tool). When a task
-fails, "the model is dumb" and "the harness set the model up to fail" produce the same visible
-symptom — a wrong or rejected edit — but call for opposite fixes.
+(does the tool schema communicate the constraint clearly, does the system prompt bias it toward
+the right tool, does a documented protocol like plan-mode's RE-ENTRY step actually get followed).
+When a case fails, "the model is dumb" and "the harness set the model up to fail" produce the same
+visible symptom — a wrong tool call, a skipped step — but call for opposite fixes.
 
-`evals/` exists to pull those two apart. Every case in it runs the real agent loop
-(`runAgentLoop`, not a mock) against a real model through a real provider, so a passing case is
-evidence about the actual system, not a simulation of it. The design choices below all serve one
-goal: making it possible to tell "this is a model-capability gap" apart from "this is a
-harness-communication gap" apart from "this is noise."
-
-## Provenance
-
-The mutation-based cases and the comparison methodology are a deliberate port of
-[`can1357/oh-my-pi`](https://github.com/can1357/oh-my-pi)'s `packages/typescript-edit-benchmark`.
-That project benchmarks coding-agent harnesses by injecting small mechanical bugs into real
-TypeScript/React source files via AST mutation (Babel), describing each bug in plain English, and
-grading whether the agent's edit restores the original file — run across ~180 tasks, 16 models,
-3 edit-tool formats, 3 runs per task, with prettier-normalized comparison so formatting noise
-doesn't count as failure.
-
-cast's port keeps the core idea and deliberately narrows scope where the original's breadth
-wasn't buying anything specific to cast's situation:
-
-| | oh-my-pi | cast |
-|---|---|---|
-| Parser | Babel | TypeScript Compiler API (already a devDependency for `tsc` — zero new deps) |
-| Mutation kinds | 20, across 10 categories (see below) | 3 (comparison-operator swap, boolean flip, off-by-one) |
-| Source corpus | vendored React files | cast's own `src/` (dogfooding, always in sync with the real codebase) |
-| Edit-tool formats compared | 3 | 1 (cast only has one edit format — hashline — today; see "What isn't built yet" below) |
-| Formatter for grading | prettier | biome (cast's own formatter) |
-| Runs per task | 3 | configurable via `--repeat` (see below) |
-
-The narrower mutation set is a precision choice, not a limitation worth fixing: cast's mutation
-engine (`evals/benches/mutation/mutate.ts`) tests whether the model can locate and precisely apply
-a described change through cast's actual edit tool — it is not trying to be a bug-finding
-benchmark. Three well-understood, syntactically-unambiguous mutation shapes are enough to exercise
-that; adding more categories would add surface area without adding a new failure mode worth
-distinguishing. The full upstream set (`can1357/oh-my-pi/packages/typescript-edit-benchmark/src/mutations.ts`,
-`ALL_MUTATIONS`/`CATEGORY_MAP`) as of this writing:
-
-| Category | Mutations | Ported to cast? |
-|---|---|---|
-| `operator` (7) | swap-comparison, swap-equality, swap-logical, remove-negation, swap-increment-decrement, swap-arithmetic, swap-nullish | swap-comparison only (`comparison-operator-swap`) |
-| `literal` (2) | flip-boolean, off-by-one | both (`boolean-flip`, `off-by-one`) |
-| `structural` (4) | swap-adjacent-lines, swap-if-else, remove-early-return, delete-statement | none |
-| `access` (1) | remove-optional-chain | none |
-| `call` (1) | swap-call-args | none |
-| `regex` (1) | swap-regex-quantifier | none |
-| `unicode` (1) | unicode-hyphen | none |
-| `identifier` (1) | identifier-multi-edit | none |
-| `duplicate` (1) | duplicate-line-flip | none |
-| `import` (1) | swap-named-imports | none |
+`evals/` exists to pull those two apart. Every case runs the real agent loop (`runAgentLoop`, not a
+mock) against a real model through a real provider, so a passing case is evidence about the actual
+system, not a simulation of it. See `docs/eval-behavior.md` for what's actually being measured
+(signals, the `core`/`chain` split); this doc covers the runner mechanics: comparison, statistical
+validity, baselines, and trace-based debugging.
 
 ## Directory layout
 
 ```
 evals/
-  lib/                  shared engine — not a bench itself
-    runner.ts            EvalCase, runCase/runSuite, compareModels(Repeated), report printers
-    results.ts           evals/results/ recording + history (index.json, runs/*.json)
-    fixtures.ts           per-process /tmp fixture roots for grounded verify() checks
-    trace-view.ts         --trace/--case: reads a recorded run back out turn-by-turn
+  lib/                       shared engine — not a bench itself
+    runner.ts                 EvalCase, runCase/runSuite, compareModels(Repeated), report printers
+    baseline.ts                saved-snapshot regression detection (statistical significance)
+    results.ts                 evals/results/ recording + history (index.json, runs/*.json)
+    fixtures.ts                 per-process /tmp fixture roots for grounded verify() checks
+    trace-view.ts               --trace/--case: reads a recorded run back out turn-by-turn
   benches/
-    index.ts             the bench registry — single source of truth for --bench/--list
-    basic/cases.ts        hand-authored: fundamental agent capabilities
-    hashline/cases.ts     hand-authored: cast's hashline edit-format regressions
-    mutation/
-      mutate.ts           AST mutation engine (TS Compiler API)
-      format-compare.ts   biome-based format-tolerant grading
-      cases.ts            generateMutationCases() — builds EvalCase[] on demand
-  results/               output — timestamped run files + index.json (see "Recording results")
-  run.ts                 CLI entrypoint
+    index.ts                  the bench registry — single source of truth for --bench/--list
+    behavior/tools/
+      core/                    single-turn tool contracts, one file per case + index.ts
+      chain/                   multi-turn stateful workflows, one file per case + index.ts
+  fixtures/                  committed fixtures cases need on disk (e.g. an MCP test server, an image)
+  results/                   output — timestamped run files + index.json (see "Recording results")
+  baselines/                 saved regression-detection snapshots (see below)
+  run.ts                     CLI entrypoint
 ```
 
-Each subdirectory under `evals/benches/` is a self-contained unit: a hand-authored bench is just a
-`cases.ts` exporting an `EvalCase[]`; the mutation bench additionally owns its generator and
-grading logic since neither is shared with anything else. `evals/benches/index.ts` is what wires a
-directory into the CLI — adding a new bench means adding a subdirectory and one entry in that
-registry's `BENCHES` array, nothing in `run.ts` itself needs to change.
+`evals/benches/index.ts` is what wires a bench into the CLI — currently a single `behavior` bench
+combining `core` and `chain` cases, since `DEFAULT_BENCH_IDS` includes every bench with a static
+`cases` list and there's only the one. Adding a second bench means adding a subdirectory under
+`evals/benches/` and one entry in that registry's `BENCHES` array — nothing in `run.ts` itself
+needs to change.
 
 ## The independence thesis
 
 The reason model-vs-harness separation is achievable at all: **hold the harness fixed, vary the
 model** (`--compare model1,model2`), and any behavior difference that shows up is attributable to
-the model, because every other variable — tool schemas, system prompt, edit format, grading logic
-— is byte-for-byte identical between the two runs. Conversely, **hold the model fixed, vary the
-harness** (a change to `tools.ts`'s schema wording, a different edit-format anchor scheme) and
-re-run the same case set: any behavior difference is now attributable to the harness. cast's
-`evals/run.ts --compare` implements the first axis today. The second axis — a `--edit-format`
-switch analogous to oh-my-pi's 3-format comparison — isn't built, because cast currently ships
-exactly one edit tool (hashline anchors); there is nothing to switch between yet. If cast grows a
-second edit format, `compareModels`'s machinery generalizes directly to `compareFormats` with the
-same report/record code, just varying `LoopConfig` instead of the model string.
+the model, because every other variable — tool schemas, system prompt, loop, grading logic — is
+byte-for-byte identical between the two runs. Conversely, **hold the model fixed, vary the
+harness** (a change to `tools.ts`'s schema wording, a prompt edit) and re-run the same case set: any
+behavior difference is now attributable to the harness.
 
-`compareModels`/`compareModelsRepeated` flatten model×case (×repeat) into a single job list and
-run it through one `--concurrency`-limited pool, not one model's full suite followed by the next
-— every request across every model is independent, so there was never a reason to serialize
-models behind each other. A 2-model compare over N cases now takes roughly as long as running N
-cases against one model, not 2N; the `[k/total]` progress lines are labeled `<model> :: <case id>`
-since jobs from both models now interleave in the log instead of appearing as two back-to-back
-blocks.
-
-## Two kinds of benches
-
-**Hand-authored benches** (`evals/benches/basic/`, `evals/benches/hashline/`) encode specific
-behavioral contracts: does the agent call the right tool, respect a `maxTurns` budget, avoid a
-tool it shouldn't need. These are read by a human, so they're the right place for cases that check
-something qualitative ("did it explain why," "did it avoid touching an unrelated file"). Both are
-included by default (`DEFAULT_BENCH_IDS` in `evals/benches/index.ts` is every bench with a static
-`cases` list) — a plain `-m <model>` run with no `--bench` covers them both.
-
-**The auto-generated mutation bench** (`evals/benches/mutation/`) exists because hand-authoring an
-edit-precision case is slow and the interesting variable — which file, which line, which token —
-should be sampled, not curated. `generateMutationCases({count, seed, sourceDir})`
-(`evals/benches/mutation/cases.ts`) walks `.ts` files in `sourceDir` (default `src/core`) in a
-seeded-shuffled order, injects one AST-level mutation into a candidate file
-(`evals/benches/mutation/mutate.ts`), and builds an `EvalCase` whose `verify` step reformats both
-the agent's output and the known-correct original through biome and compares them
-(`evals/benches/mutation/format-compare.ts`) — so an agent that fixes the bug but reindents a
-line, or uses single vs. double quotes, still passes. Grading precision, not style, is the point.
-It's excluded by default (it's not in `DEFAULT_BENCH_IDS`, since it costs real generation work and
-a run count decision) — opt in with `--bench mutation` or `--generate/-g <n>`.
-
-The mutation is described to the model in plain English naming the *category* and *location*
-("A comparison or logical operator on line 47 was flipped, inverting the condition's logic"),
-never the exact before/after values. This mirrors oh-my-pi's framing directly: the case measures
-whether the agent can read the description, find the site, and make the precise edit through the
-tool — not whether it can pattern-match a diff it was already handed.
-
-Same `seed` always produces the same case set (`mulberry32` PRNG for site selection inside a file,
-a separate seeded Fisher-Yates shuffle for file order) — a `--seed 7 -g 15` run today and the same
-flags next month select identical mutations, so a regression between two dated runs in
-`evals/results/` is comparing the same tasks, not different ones.
+`compareModels`/`compareModelsRepeated` flatten model×case (×repeat) into a single job list and run
+it through one `--concurrency`-limited pool, not one model's full suite followed by the next —
+every request across every model is independent, so there was never a reason to serialize models
+behind each other. A 2-model compare over N cases takes roughly as long as running N cases against
+one model, not 2N; the `[k/total]` progress lines are labeled `<model> :: <case id>` since jobs from
+both models interleave in the log instead of appearing as two back-to-back blocks.
 
 ## Statistical validity: why `--repeat` exists
 
 A single run of a stochastic model against a case set produces a pass/fail — but a model that
 "passes" a case 2 times out of 3 will, on any single run, produce either a pass or a fail with no
-way to tell which one you got. Treating a single-run comparison as a stable ranking silently
-assumes attempts are deterministic, which they aren't.
-
-This surfaced concretely, not hypothetically. An early `--compare mimo-v2.5,mimo-v2.5-pro --bench
-mutation -g 15 --seed 7` single-run comparison showed mimo-v2.5 passing 15/15 generated cases
-while mimo-v2.5-pro passed only 13/15 — both failures on structurally similar mutations (a boolean
-literal flipped inside a comparison expression). That's a real, specific, reproducible-looking
-signal... on one sample. It could mean the "pro" variant has a genuine blind spot around
-compound boolean mutations, or it could mean two coin flips landed tails in a row. A single run
-cannot distinguish these, and reporting it as a finding without a repeat would be exactly the kind
-of overclaim this methodology exists to prevent.
+way to tell which one you got. Treating a single-run result as a stable signal silently assumes
+attempts are deterministic, which they aren't — this session's own work on `plan-done-signal` and
+`plan-open-question-blocks-done` hit exactly this: the same model, same case, disagreeing with
+itself across consecutive runs on a genuine judgment call.
 
 `--repeat N` (`evals/run.ts`, backed by `runSuiteRepeated`/`compareModelsRepeated` in
 `evals/lib/runner.ts`) runs every case N times, each attempt a **fresh agent session** (no shared
-state between attempts — matching oh-my-pi's "fresh session each time," so an attempt's outcome
-can't be contaminated by conversation history from a prior attempt), and reports `passed/N` per
-case plus a consistency flag: `consistent: passed === 0 || passed === attempts.length`. A case
-where every attempt agreed is a stable result. A case where attempts split is flagged with `⚠` in
-the report and counted into `inconsistentCases` in the recorded JSON — visible at a glance instead
-of silently averaged away. Concurrency spans the full case×repeat job list (not case-then-repeat
-sequentially), so N repeats of one case don't serialize behind each other while unrelated cases
-sit idle.
+state between attempts, so an attempt's outcome can't be contaminated by conversation history from
+a prior one), and reports `passed/N` per case plus a consistency flag:
+`consistent: passed === 0 || passed === attempts.length`. A case where every attempt agreed is a
+stable result. A case where attempts split is flagged with `⚠` in the report and counted into
+`inconsistentCases` in the recorded JSON — visible at a glance instead of silently averaged away.
+Concurrency spans the full case×repeat job list (not case-then-repeat sequentially), so N repeats
+of one case don't serialize behind each other while unrelated cases sit idle.
 
-A case's aggregate "pass" under `--repeat` is majority-vote (`passed * 2 > total`), the same
-convention oh-my-pi uses — a case is credited if the model gets it right more often than not,
-while the `consistent` flag keeps the "how often" visible instead of collapsing it into a single
-bit.
+A case's aggregate "pass" under `--repeat` is majority-vote (`passed * 2 > total`) — a case is
+credited if the model gets it right more often than not, while the `consistent` flag keeps the "how
+often" visible instead of collapsing it into a single bit.
 
-### Applying it to the anomaly above
-
-Re-running the same seed-7, 15-case set with `-r 3`:
-
-```
-node --import tsx evals/run.ts --compare mimo-v2.5,mimo-v2.5-pro --bench mutation -g 15 --seed 7 -r 3 -v
-```
-
-```
-Summary (majority-pass cases):
-  mimo-v2.5                                               14/15 cases  (381.0s total, 3 runs/case)
-  mimo-v2.5-pro                                           14/15 cases  (372.5s total, 3 runs/case)
-
-⚠ 4 case(s) had disagreeing attempts on at least one model — see ⚠ above.
-```
-
-The aggregate gap disappeared: 14/15 vs 14/15, not 15/15 vs 13/15. The single-run "pro is worse"
-read was, as suspected, mostly noise — 4 of the 15 cases had at least one model disagree with
-itself across attempts, which is exactly the instability a single run can't see and shouldn't be
-trusted to rank against.
-
-That said, the repeat run isn't just "nothing to see here" — it surfaced a *real* difference the
-single run had mislabeled. `mutate-boolean-flip-run-15` (a boolean literal flipped inside `if
-(settings.webTools !== false)`) went **3/3 for mimo-v2.5 and a consistent 0/3 for
-mimo-v2.5-pro** — every attempt on both sides agreed with itself, which is the strongest signal
-`--repeat` can produce: not a coin flip, a stable behavioral split on one specific mutation shape.
-Conversely `mutate-comparison-operator-swap-mcp-9` went the other way (0/3 for mimo-v2.5, 2/3 ⚠ for
-mimo-v2.5-pro). Neither of these was visible in the original single-run table, which happened to
-land on a different pair of cases entirely.
-
-The methodological point: a single run's pass/fail table and a `--repeat` run's per-case
-consistency table are answering different questions. The first tells you what happened once. The
-second tells you which of those outcomes you can actually trust, and sometimes reveals a real,
-narrow, reproducible gap that the aggregate score was hiding.
-
-## Format-tolerant grading
-
-`evals/benches/mutation/format-compare.ts` runs both the agent's output and the known-correct original through
-biome (`biome format --stdin-file-path=...`) before comparing them, so a correct fix that happens
-to differ in whitespace, quote style, or trailing-comma placement is not penalized. The
-`--stdin-file-path` value doesn't need to point at a real file — biome only uses it to resolve
-which `files.includes` glob in `biome.json` applies, so a synthetic `src/__eval_mutation__.ts`
-path is always passed regardless of where the fixture actually lives on disk. This is the same
-principle as oh-my-pi's prettier-normalization step: grade the *content* of the fix, not its
-incidental formatting.
+Practical rule: before calling a change a regression (or a model gap a real finding), run
+`--repeat 3`. A split result is evidence of instability, not a partial pass — investigate the
+disagreeing attempts with `--trace` (see below) before concluding anything.
 
 ## Recording results
 
 Every run — `-m`, `--compare`, with or without `--repeat` — is auto-recorded to
 `evals/results/runs/<timestamp>_<kind>_<models>.json` (full per-case detail, including every
 attempt's individual pass/fail under `--repeat`) with a one-line summary appended to
-`evals/results/index.json` (`evals/lib/results.ts`). This replaced an earlier design that overwrote a
-single `latest.json` on every run — useless for "how has this eval trended" or "what did the
-2026-07-20 compare actually show" once a newer run has overwritten it. `evals/run.ts --history`
-prints the index as a compact log, newest last, including the `⚠N inconsistent` marker for
-repeated runs and the short commit hash the run was recorded at (`git rev-parse --short HEAD`) —
-enough to correlate a regression with a specific harness change.
+`evals/results/index.json` (`evals/lib/results.ts`). `evals/run.ts --history` prints the index as a
+compact log, newest last, including the `⚠N inconsistent` marker for repeated runs and the short
+commit hash the run was recorded at (`git rev-parse --short HEAD`) — enough to correlate a
+regression with a specific harness change.
 
 ## Cost & token tracking
 
 Every run reports token usage and (when the provider reports it) USD cost alongside the pass/fail
-table — the same dimensions oh-my-pi's edit benchmark surfaces so a model's win doesn't hide behind
-a 10× token spend.
+table, so a model's win doesn't hide behind a much larger token spend.
 
 For a single-model run the summary prints per-case `(tokens, cost)` and the suite ends with a
 `Usage:` block (total / prompt / completion / cache-hit / uncached / cost):
@@ -245,13 +110,14 @@ For a single-model run the summary prints per-case `(tokens, cost)` and the suit
 ```
 EVAL RESULTS: 1/1 passed (1796ms)
 Summary:
-  ✓ simple-math (1794ms, 1 turns, 7543 tokens, n/a)
+  ✓ background-bash-output (8125ms, 4 turns, 32442 tokens, $0.0009)
 Usage:
-  Total tokens: 7,543
-    Prompt: 7,526
-    Completion: 17
-    Cache read: 128
-    Uncached: 7,398
+  Total tokens: 32,442
+    Prompt: 32,196
+    Completion: 246
+    Cache read: 28,448
+    Uncached: 3,748
+  Total cost: $0.0009
 ```
 
 `--compare` collapses these into a side-by-side row per model (`passed/total, duration, tokens,
@@ -268,81 +134,75 @@ provider returns it).
 
 A baseline is a saved snapshot of a suite result keyed by bench+model. Subsequent runs can compare
 against it to catch *gradual* drift that no single run can see: a series of PRs each shave 1–2pp off
-the pass rate and add 5% to the token spend, and no individual commit looks like it broke anything
-when reviewed in isolation. Baselines are the mechanism that flips "did this PR regress?" from
-an inline review judgement call into a number.
+the pass rate, and no individual commit looks like it broke anything when reviewed in isolation.
+Baselines are the mechanism that flips "did this PR regress?" from an inline review judgement call
+into a number.
 
 The regression flag is driven by a **two-proportion z-test** (one-sided: "current is worse than
-baseline") — the same logic oh-my-pi's edit benchmark uses internally for its ranking tables
-(`can1357/oh-my-pi/packages/typescript-edit-benchmark`). Reject H0 only when the observed pass-rate
-drop is unlikely under the assumption that the true rates are equal, calibrated by
-`--significance-alpha` (default 0.05 = 95%). Below ~10 common cases the test isn't reliable, so
-the run falls back to the simpler `--regression-threshold` percentage-point rule (default 5pp) —
-the same intuition as before, scoped to small samples where the z-test can't say anything
-informative.
+baseline"). Reject H0 only when the observed pass-rate drop is unlikely under the assumption that
+the true rates are equal, calibrated by `--significance-alpha` (default 0.05 = 95%). Below ~10
+common cases the test isn't reliable, so the run falls back to the simpler
+`--regression-threshold` percentage-point rule (default 5pp) — the same intuition, scoped to small
+samples where the z-test can't say anything informative.
 
-Baselines live under `evals/baselines/` in two layers — one tier for the
-"latest" pointer that `compareToBaseline` actually reads, and a `history/`
-subdir for the full timeline of every `--save-baseline`:
+Baselines live under `evals/baselines/` in two layers — one tier for the "latest" pointer that
+`compareToBaseline` actually reads, and a `history/` subdir for the full timeline of every
+`--save-baseline`:
 
 ```
 evals/baselines/
-  basic-MiniMax-M3.json                              ← latest pointer (what --baseline reads)
+  behavior-poolside-laguna-s-2.1.json                 ← latest pointer (what --baseline reads)
   history/
-    2026-07-25T19-28-39-590Z_basic-MiniMax-M3.json    ← every save is timed-stamped
-    2026-07-26T10-15-22-107Z_basic-MiniMax-M3.json    ← sorted chronologically by name
+    2026-07-25T19-28-39-590Z_behavior-poolside-laguna-s-2.1.json  ← every save is timed-stamped
+    2026-07-26T10-15-22-107Z_behavior-poolside-laguna-s-2.1.json  ← sorted chronologically by name
 ```
 
-Every `--save-baseline` writes a new dated copy to `history/` *and* refreshes
-the top-level "latest" file in one shot — so the latest pointer is always the
-most recent snapshot, and `history/` is a complete audit log of what the
-benchmark looked like at every commit. Both tiers are tracked in git so
-baselines move with the codebase they correspond to (the `commit` recorded
+Every `--save-baseline` writes a new dated copy to `history/` *and* refreshes the top-level
+"latest" file in one shot — so the latest pointer is always the most recent snapshot, and
+`history/` is a complete audit log of what the benchmark looked like at every commit. Both tiers
+are tracked in git so baselines move with the codebase they correspond to (the `commit` recorded
 inside each baseline lets `--history` correlate snapshots to commits).
 
-`--baseline <name>` reads only the latest pointer. To see the full timeline
-of one baseline (e.g., to diff "two weeks ago vs today"), use
-`--baseline-history <name>`. `--list-baselines` lists the latest pointers
-(one per bench+model); `--baseline-history` lists snapshots of one.
+`--baseline <name>` reads only the latest pointer. To see the full timeline of one baseline (e.g.,
+to diff "two weeks ago vs today"), use `--baseline-history <name>`. `--list-baselines` lists the
+latest pointers (one per bench+model); `--baseline-history` lists snapshots of one.
 
 ```bash
-# Save the current run's result as the baseline for bench=basic, model=m
-node --import tsx evals/run.ts -m MiniMax-M3 --bench basic --cases simple-math --save-baseline
+# Save the current run's result as the baseline for bench=behavior, model=m
+node --import tsx evals/run.ts -m <model> --save-baseline
 
 # Save to a custom name (otherwise name is auto-generated as <bench>-<model>)
-node --import tsx evals/run.ts -m MiniMax-M3 --bench basic --save-baseline --baseline "release-2026-07"
+node --import tsx evals/run.ts -m <model> --save-baseline --baseline "release-2026-07"
 
 # Compare the next run against the saved baseline; non-zero exit on regression
-node --import tsx evals/run.ts -m MiniMax-M3 --bench basic --baseline basic-MiniMax-M3
+node --import tsx evals/run.ts -m <model> --baseline behavior-<model>
 
 # Tighten / loosen the significance test (default α=0.05)
-node --import tsx evals/run.ts -m MiniMax-M3 --bench basic \
-  --baseline basic-MiniMax-M3 --significance-alpha 0.01
+node --import tsx evals/run.ts -m <model> --baseline behavior-<model> --significance-alpha 0.01
 
 # Tighten / loosen the small-sample fallback (default 5pp)
-node --import tsx evals/run.ts -m MiniMax-M3 --bench basic \
-  --baseline basic-MiniMax-M3 --regression-threshold 3
+node --import tsx evals/run.ts -m <model> --baseline behavior-<model> --regression-threshold 3
 
 # List every "latest" baseline (one per bench+model)
 node --import tsx evals/run.ts --list-baselines
 
 # Full per-save history for one baseline, newest first
-node --import tsx evals/run.ts --baseline-history basic-MiniMax-M3
+node --import tsx evals/run.ts --baseline-history behavior-<model>
 ```
 
 A regression report prints the statistical evidence first, then aggregate deltas, then the per-case
-moves that explain the drop:
+moves that explain the drop. Illustrative shape (numbers made up, not a real recorded run):
 
 ```
 ==================================================================
 REGRESSION CHECK
 ==================================================================
-Comparing against baseline "basic-MiniMax-M3" (..., @9fdac84 1/1 passing, 100.0%):
-  Pass rate: 1/1 (+0.0pp) (baseline: 1/1 (+0.0pp), +0/1 (+0.0pp))
-  Significance: p=1.0000 (α=0.05), effect size h=0.000, LOW N — see threshold fallback
-  Confidence intervals (95%): baseline 100.0%–100.0%, current 100.0%–100.0%
-  Total tokens: 7,564 (baseline: 7,545, +19)
-  Duration: 1,456ms (baseline: 18,340ms, -16,884ms)
+Comparing against baseline "behavior-poolside-laguna-s-2.1" (..., @9fdac84 31/33 passing, 93.9%):
+  Pass rate: 29/33 (-6.1pp) (baseline: 31/33 (+0.0pp), -2/33 (-6.1pp))
+  Significance: p=0.1421 (α=0.05), effect size h=0.184, LOW N — see threshold fallback
+  Confidence intervals (95%): baseline 79.8%–98.3%, current 71.3%–95.3%
+  Total tokens: 965,877 (baseline: 940,332, +25,545)
+  Duration: 118,605ms (baseline: 73,758ms, +44,847ms)
 ```
 
 The "significance block" tells you *why* the run did or didn't trip the regression flag:
@@ -359,33 +219,33 @@ The "significance block" tells you *why* the run did or didn't trip the regressi
 Per-case regression / improvement detection is structural (case-id matching): cases passing in
 baseline but failing now go in `Regressions`, the symmetric move in `Improvements`. These are
 always computed on the *common* case subset — cases added since the baseline are silently ignored
-(no comparison possible — not a regression). The significance test uses the same subset, so a
-new or removed case can't tilt the z-test by inflating the denominator.
+(no comparison possible — not a regression). The significance test uses the same subset, so a new
+or removed case can't tilt the z-test by inflating the denominator.
 
-When cases don't match 1:1 (e.g. baseline had 5 cases, current run covered 20) the report falls back
-to: pass rate reported as aggregate, significance computed on the common subset. If the current run
-covers a strict subset of baseline, only those common cases are tested for significance — running
-the full baseline and saving a new one is how you re-establish broader coverage.
+When cases don't match 1:1 (e.g. baseline had 20 cases, current run covers 33 after new cases were
+added) the report falls back to: pass rate reported as aggregate, significance computed on the
+common subset. Running the full current suite and saving a new baseline is how you re-establish
+broader coverage.
 
 ## Troubleshooting a failure: `--trace`
 
 The pass/fail table (and even a failed-checks message) tells you *that* a case failed, not *why* —
-and "why" is the only thing that turns a benchmark number into a harness fix. Every recorded case
-now carries a full turn-by-turn `trace`: for each turn, the model's reasoning (`thinking`), any
-user-visible commentary it produced, and — for every tool call it made — the exact args passed and
-what the tool actually returned. Not just "it called `edit`," but what the `read` right before it
-actually showed the model, and whether the `edit` result confirms the fix landed where the model
-thought it did.
+and "why" is the only thing that turns a benchmark number into a harness fix or a real model-gap
+finding. Every recorded case carries a full turn-by-turn `trace`: for each turn, the model's
+reasoning (`thinking`), any user-visible commentary it produced, and — for every tool call it
+made — the exact args passed and what the tool actually returned. Not just "it called `edit`," but
+what the `read` right before it actually showed the model, and whether the tool's own result
+confirms what the model claimed happened.
 
 ```bash
 # List the case ids in the most recent recorded run
 node --import tsx evals/run.ts --trace latest
 
 # Full turn-by-turn trace for one case
-node --import tsx evals/run.ts --trace latest --case glob-then-grep
+node --import tsx evals/run.ts --trace latest --case plan-done-signal
 
 # From a --compare file, narrow to one model's attempt(s)
-node --import tsx evals/run.ts --trace latest --case glob-then-grep -m mimo-v2.5-pro
+node --import tsx evals/run.ts --trace latest --case plan-done-signal -m gpt-5.6-luna
 ```
 
 `<file>` can be `latest`, a path, or a bare filename under `evals/results/runs/`; `--case` selects
@@ -394,12 +254,15 @@ attempt is printed as its own block, in order — reading them side by side is o
 to see *what specifically* differed between an attempt that passed and one that didn't, rather than
 just knowing they disagreed.
 
-This is genuinely how a harness bug gets found, not a hypothetical: reading the trace of a
-`--repeat` run's disagreeing attempts is exactly how you'd distinguish "the model's edit was
-correct but the grading is comparing against the wrong ground truth" from "the model changed a
-different line than it said it did" from "the tool result the model based its next step on was
-truncated and it never noticed" — three different bugs (eval hygiene, model behavior, harness
-UX) that produce the identical outer symptom (a red row in the compare table).
+This is genuinely how a harness bug gets found, not a hypothetical. Reading a case's trace is how
+this project's own eval work told apart, on separate occasions: a genuinely wrong `expect` contract
+(`maxTurns: 1` on a plan-mode case whose own system prompt mandates a preliminary `ls`+`read`), a
+wrong argument name in a `verify` function (`args.path` vs. `edit`'s actual `args.filePath`), a real
+product bug two layers down (the `grep` fallback silently returning zero matches when `path` named
+a single file, not a directory) — and a genuine, reproducible model weakness (hedging a plan with
+both options instead of converging, then calling `plan_done` anyway). Four different failure
+classes that would otherwise look identical from the pass/fail table alone: a red row saying the
+same thing regardless of which of those it actually was.
 
 Implementation: `evals/lib/runner.ts`'s `runCase` builds `trace` from the same `AgentEvent` stream
 the TUI and web UI render live (`assistant_message` for thinking/commentary/requested tool calls,
@@ -409,31 +272,26 @@ JSON file and pretty-prints it (truncating only the terminal display, never the 
 
 ## What isn't built yet
 
-- **Format comparison** (`--edit-format`, analogous to `--compare` but varying the edit tool
-  instead of the model): not implemented, because cast has only one edit format today. The
-  `compareModels`/`compareModelsRepeated` machinery in `evals/lib/runner.ts` generalizes to this
-  directly if/when a second format exists — same report shape, same recording, just a different
-  axis of `LoopConfig` held variable instead of `model`.
-- **More mutation categories**: deliberately deferred, not missing — see the coverage table in
-  "Provenance" above for exactly which of the 17 unported upstream mutations (`access`, `call`,
-  `regex`, `unicode`, `identifier`, `duplicate`, `import`, plus 6 more `operator` kinds and 4
-  `structural` ones) would be the next candidates if the mutation set ever needs to grow.
+Harness-level guardrails (doom-loop detection, dangerous-command confirmation, the automatic
+background-task completion reminder) are deliberately covered by `test/` unit tests, not behavior
+cases here — they're enforced by code regardless of what the model does, so a behavior case would
+just be re-testing the guardrail rather than the model. See `docs/eval-behavior.md`'s "What belongs
+where" for the split.
 
 ## Practical usage
 
 ```bash
-# Every static bench (basic + hashline), one model
-node --import tsx evals/run.ts -m mimo-v2.5 -v
+# The full behavior suite, one model
+node --import tsx evals/run.ts -m <model> -v
 
-# Just one bench
-node --import tsx evals/run.ts -m mimo-v2.5 --bench hashline -v
+# Narrow to cases matching a prefix
+node --import tsx evals/run.ts -m <model> --cases plan- -v
 
-# Compare two models, same harness, same bench
-node --import tsx evals/run.ts --compare mimo-v2.5,mimo-v2.5-pro --bench hashline -v
+# Compare two models, same harness, same suite
+node --import tsx evals/run.ts --compare <model1>,<model2> -v
 
-# 15 fresh auto-generated edit-precision cases, compared across models, 3 attempts each
-# (this is the way to get a result you can actually trust, not a single-sample anecdote)
-node --import tsx evals/run.ts --compare mimo-v2.5,mimo-v2.5-pro --bench mutation -g 15 --seed 7 -r 3 -v
+# The way to get a result you can actually trust, not a single-sample anecdote
+node --import tsx evals/run.ts --compare <model1>,<model2> --repeat 3 -v
 
 # List benches and the cases the current flag selection would run
 node --import tsx evals/run.ts --list
