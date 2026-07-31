@@ -355,7 +355,14 @@ export async function execGrep(args: Record<string, unknown>, cwd: string, confi
 	if (ignoreCase) flags.push("--ignore-case");
 	if (literal) flags.push("--fixed-strings");
 	if (context > 0) flags.push(`--context=${context}`);
-	if (glob) flags.push(`--glob=${glob}`);
+	if (glob) {
+		// Normalize directory globs the same way as the JS fallback so both
+		// implementations accept `src/**/*.ts` as well as `**/src/**/*.ts`.
+		const negated = glob.startsWith("!");
+		const globBody = negated ? glob.slice(1) : glob;
+		const rgGlob = globBody.includes("/") && !globBody.startsWith("**/") ? `**/${globBody}` : globBody;
+		flags.push(`--glob=${negated ? "!" : ""}${rgGlob}`);
+	}
 	flags.push("--max-count", String(limit));
 
 	let output: string;
@@ -365,12 +372,23 @@ export async function execGrep(args: Record<string, unknown>, cwd: string, confi
 		// a shell-interpolated `'${pattern}'` is exploitable by anything
 		// containing a single quote (confirmed with a payload that ran an
 		// injected command).
-		const { stdout } = await execFileAsync("rg", [...flags, "--", pattern, searchPath], {
-			encoding: "utf-8",
-			timeout: 10_000,
-			maxBuffer: config.maxToolOutputBytes,
-		});
-		output = stdout;
+		const searchPathIsDirectory = await stat(searchPath)
+			.then((stats) => stats.isDirectory())
+			.catch(() => false);
+		const { stdout } = await execFileAsync(
+			"rg",
+			[...flags, "--", pattern, searchPathIsDirectory ? "." : searchPath],
+			{
+				encoding: "utf-8",
+				timeout: 10_000,
+				maxBuffer: config.maxToolOutputBytes,
+				...(searchPathIsDirectory ? { cwd: searchPath } : {}),
+			},
+		);
+		// Match globs relative to the requested directory, rather than an
+		// absolute command argument whose parent names could accidentally match
+		// a directory component. The fallback uses the same root-relative form.
+		output = searchPathIsDirectory ? stdout.replace(/^\.\//gm, "") : stdout;
 	} catch (err) {
 		// rg's exit codes: 0 = matches found, 1 = ran cleanly but nothing
 		// matched, 2 = a real error (bad regex, unreadable root, …). The
