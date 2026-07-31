@@ -7,6 +7,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { ReasoningFormat } from "./vendors.ts";
 
 // ============================================================================
 // Settings schema
@@ -24,6 +25,8 @@ export interface Provider {
 	name: string;
 	url: string;
 	apiKey: string;
+	/** Reasoning request dialect. `auto` is safe for ordinary OpenAI-compatible endpoints. */
+	reasoningFormat?: ReasoningFormat;
 }
 
 export interface Settings {

@@ -4,6 +4,8 @@ import {
 	buildReasoningParams,
 	extractReasoningMeta,
 	getReasoningOptions,
+	getReasoningOptionsForFormat,
+	resolveReasoningFormat,
 	ThinkBlockParser,
 } from "../src/core/vendors.ts";
 
@@ -391,24 +393,70 @@ describe("extractReasoningMeta", () => {
 // ============================================================================
 
 describe("buildReasoningParams", () => {
+	it("detects Xiaomi MiMo Token Plan as DeepSeek-compatible", () => {
+		expect(resolveReasoningFormat("https://token-plan-sgp.xiaomimimo.com/v1")).toBe("deepseek");
+	});
+
+	it("detects Kimi, Z.ai, and xAI endpoint dialects", () => {
+		expect(resolveReasoningFormat("https://api.moonshot.ai/v1")).toBe("kimi");
+		expect(resolveReasoningFormat("https://open.bigmodel.cn/api/paas/v4")).toBe("zai");
+		expect(resolveReasoningFormat("https://api.x.ai/v1")).toBe("xai");
+		expect(resolveReasoningFormat("https://qianfan.baidubce.com/v2")).toBe("qianfan");
+		expect(resolveReasoningFormat("https://ark.cn-beijing.volces.com/api/v3")).toBe("deepseek");
+		expect(resolveReasoningFormat("https://api.modelarts.huaweicloud.com/v1")).toBe("huawei");
+	});
+
+	it("does not send undocumented reasoning controls to MiniMax", () => {
+		expect(resolveReasoningFormat("https://api.minimax.io/v1")).toBe("minimax");
+		expect(buildReasoningParams("on", "minimax").body).toEqual({});
+		expect(getReasoningOptionsForFormat(null, "minimax").map((option) => option.value)).toEqual(["on"]);
+	});
+
 	it("off returns explicit enabled: false", () => {
-		const params = buildReasoningParams("off");
-		expect(params.body).toEqual({ reasoning: { enabled: false } });
+		const params = buildReasoningParams("off", "openai");
+		expect(params.body).toEqual({ reasoning_effort: "none" });
 		expect(params.enabled).toBe(false);
 	});
 
 	it("on returns explicit enabled: true", () => {
-		const params = buildReasoningParams("on");
-		expect(params.body).toEqual({ reasoning: { enabled: true } });
+		const params = buildReasoningParams("on", "openai");
+		expect(params.body).toEqual({ reasoning_effort: "medium" });
 		expect(params.enabled).toBe(true);
 	});
 
 	it("low/medium/high/max return effort level", () => {
 		for (const effort of ["low", "medium", "high", "max"]) {
-			const params = buildReasoningParams(effort);
-			expect(params.body).toEqual({ reasoning: { effort } });
+			const params = buildReasoningParams(effort, "openai");
+			expect(params.body).toEqual({ reasoning_effort: effort });
 			expect(params.enabled).toBe(true);
 		}
+	});
+
+	it("omits reasoning controls by default for unknown OpenAI-compatible endpoints", () => {
+		expect(resolveReasoningFormat("https://api.mistral.ai/v1")).toBe("generic");
+		expect(buildReasoningParams("off", "generic").body).toEqual({});
+	});
+
+	it("uses the configured OpenRouter dialect", () => {
+		expect(buildReasoningParams("high", "openrouter").body).toEqual({ reasoning: { effort: "high" } });
+		expect(buildReasoningParams("off", "openrouter").body).toEqual({ reasoning: { enabled: false } });
+	});
+
+	it("uses binary controls for DeepSeek and Qwen-compatible providers", () => {
+		expect(buildReasoningParams("on", "deepseek").body).toEqual({ thinking: { type: "enabled" } });
+		expect(buildReasoningParams("off", "qwen").body).toEqual({ enable_thinking: false });
+	});
+
+	it("uses Kimi preserved thinking and xAI's supported effort field", () => {
+		expect(buildReasoningParams("on", "kimi").body).toEqual({ thinking: { type: "enabled", keep: "all" } });
+		expect(buildReasoningParams("medium", "xai").body).toEqual({ reasoning_effort: "medium" });
+	});
+
+	it("uses Qianfan and Huawei's documented thinking fields", () => {
+		expect(buildReasoningParams("on", "qianfan").body).toEqual({ enable_thinking: true });
+		expect(buildReasoningParams("off", "huawei").body).toEqual({
+			chat_template_kwargs: { enable_thinking: false },
+		});
 	});
 });
 
@@ -417,8 +465,8 @@ describe("buildReasoningParams", () => {
 // ============================================================================
 
 describe("getReasoningOptions", () => {
-	it("returns empty array for null meta", () => {
-		expect(getReasoningOptions(null)).toEqual([]);
+	it("returns generic choices when metadata is absent", () => {
+		expect(getReasoningOptions(null).map((option) => option.value)).toEqual(["off", "low", "medium", "high", "max"]);
 	});
 
 	it("returns on/off for binary toggle (no supported_efforts)", () => {
@@ -447,5 +495,25 @@ describe("getReasoningOptions", () => {
 		expect(options[2]!.value).toBe("medium");
 		expect(options[2]!.label).toContain("default");
 		expect(options[3]!.value).toBe("high");
+	});
+
+	it("does not offer disable for a mandatory reasoning model", () => {
+		const options = getReasoningOptions({
+			mandatory: true,
+			defaultEnabled: true,
+			supportedEfforts: ["low", "medium", "high"],
+			defaultEffort: "medium",
+		});
+		expect(options.map((option) => option.value)).toEqual(["low", "medium", "high"]);
+	});
+
+	it("does not offer unsupported generic effort levels for binary provider dialects", () => {
+		expect(getReasoningOptionsForFormat(null, "kimi").map((option) => option.value)).toEqual(["off", "on"]);
+		expect(getReasoningOptionsForFormat(null, "zai").map((option) => option.value)).toEqual(["off", "on"]);
+		expect(getReasoningOptionsForFormat(null, "xai").map((option) => option.value)).toEqual([
+			"low",
+			"medium",
+			"high",
+		]);
 	});
 });

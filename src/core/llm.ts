@@ -42,6 +42,9 @@ export interface Usage {
 export interface StreamChunk {
 	content?: string;
 	thinking?: string;
+	/** Native DeepSeek-compatible reasoning trace that must be replayed on a
+	 * tool-call assistant message by providers such as Xiaomi MiMo. */
+	reasoningContent?: string;
 	toolCalls?: Array<{
 		id: string;
 		name: string;
@@ -387,6 +390,7 @@ export async function* streamChat(
 					result.thinking = deltaAny.reasoning;
 				} else if (typeof deltaAny.reasoning_content === "string" && deltaAny.reasoning_content) {
 					result.thinking = deltaAny.reasoning_content;
+					result.reasoningContent = deltaAny.reasoning_content;
 				}
 
 				// 2. Parse content for <think>...</think> blocks (Qwen/DeepSeek raw).
@@ -449,6 +453,7 @@ export async function* streamChat(
 export interface CompletionResult {
 	content: string;
 	thinking: string;
+	reasoningContent: string;
 	toolCalls?: Array<{ id: string; name: string; arguments: string }>;
 	finishReason: string;
 	usage?: Usage;
@@ -556,6 +561,7 @@ export async function streamAndCollect(
 ): Promise<CompletionResult> {
 	let content = "";
 	let thinking = "";
+	let reasoningContent = "";
 	let toolCalls: Array<{ id: string; name: string; arguments: string }> | undefined;
 	let finishReason = "stop";
 	let usage: Usage | undefined;
@@ -582,6 +588,7 @@ export async function streamAndCollect(
 			thinking += chunk.thinking;
 			onThinking?.(chunk.thinking);
 		}
+		if (chunk.reasoningContent) reasoningContent += chunk.reasoningContent;
 		if (chunk.content) {
 			content += chunk.content;
 			onToken?.(chunk.content);
@@ -644,7 +651,17 @@ export async function streamAndCollect(
 		}
 	}
 
-	return { content, thinking, toolCalls, finishReason, usage, generationMs, interrupted, disconnected };
+	return {
+		content,
+		thinking,
+		reasoningContent,
+		toolCalls,
+		finishReason,
+		usage,
+		generationMs,
+		interrupted,
+		disconnected,
+	};
 }
 
 // ============================================================================

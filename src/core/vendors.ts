@@ -23,6 +23,61 @@ export interface ModelReasoningMeta {
 	defaultEffort: string;
 }
 
+/** Request dialect for reasoning controls on OpenAI-compatible APIs.
+ * `auto` follows the common OpenAI `reasoning_effort` convention and recognizes
+ * the few endpoints whose public compatibility contract differs. */
+export type ReasoningFormat =
+	| "auto"
+	| "generic"
+	| "openai"
+	| "openrouter"
+	| "deepseek"
+	| "kimi"
+	| "qianfan"
+	| "qwen"
+	| "together"
+	| "xai"
+	| "zai"
+	| "huawei"
+	| "minimax";
+
+export const REASONING_FORMAT_OPTIONS: Array<{ value: ReasoningFormat; label: string }> = [
+	{ value: "auto", label: "Auto (OpenAI-compatible; detects known endpoints)" },
+	{ value: "generic", label: "Generic OpenAI-compatible (omit controls when off)" },
+	{ value: "openai", label: "OpenAI (reasoning_effort)" },
+	{ value: "openrouter", label: "OpenRouter (reasoning.effort)" },
+	{ value: "deepseek", label: "DeepSeek / Xiaomi MiMo (thinking.type)" },
+	{ value: "kimi", label: "Kimi / Moonshot (thinking.type, preserved thinking)" },
+	{ value: "qianfan", label: "Baidu Qianfan / ERNIE (enable_thinking)" },
+	{ value: "qwen", label: "Qwen / DashScope (enable_thinking)" },
+	{ value: "together", label: "Together (reasoning.enabled)" },
+	{ value: "xai", label: "xAI / Grok (reasoning_effort)" },
+	{ value: "zai", label: "Z.ai / GLM (thinking.type)" },
+	{ value: "huawei", label: "Huawei ModelArts (chat_template_kwargs.enable_thinking)" },
+	{ value: "minimax", label: "MiniMax (always-on reasoning)" },
+];
+
+export function resolveReasoningFormat(
+	baseURL: string,
+	configured: ReasoningFormat = "auto",
+): Exclude<ReasoningFormat, "auto"> {
+	if (configured !== "auto") return configured;
+	const host = baseURL.toLowerCase();
+	if (host.includes("openrouter")) return "openrouter";
+	if (host.includes("xiaomimimo")) return "deepseek";
+	if (host.includes("minimax")) return "minimax";
+	if (host.includes("moonshot") || host.includes("kimi.com")) return "kimi";
+	if (host.includes("deepseek")) return "deepseek";
+	if (host.includes("qianfan") || host.includes("baidubce") || host.includes("baidu")) return "qianfan";
+	if (host.includes("dashscope") || host.includes("alibaba")) return "qwen";
+	if (host.includes("together")) return "together";
+	if (host.includes("x.ai")) return "xai";
+	if (host.includes("z.ai") || host.includes("bigmodel")) return "zai";
+	if (host.includes("volces") || host.includes("volcengine")) return "deepseek";
+	if (host.includes("huaweicloud")) return "huawei";
+	return "generic";
+}
+
 /**
  * Extract reasoning metadata from OpenRouter model object.
  * Returns null if model doesn't support reasoning.
@@ -48,33 +103,58 @@ export interface ReasoningParams {
 	enabled: boolean;
 }
 
-export function buildReasoningParams(effort: string): ReasoningParams {
-	if (effort === "unknown") {
-		// Provider didn't report reasoning capabilities. Some models (e.g.
-		// MiniMax-M3) nevertheless default to reasoning ON when no params are
-		// sent — explicitly disable so the user isn't surprised by <think>
-		// blocks wrapping answers they expected to be plain.
-		return { body: { reasoning: { enabled: false } }, enabled: false };
+export function buildReasoningParams(effort: string, format: ReasoningFormat = "auto"): ReasoningParams {
+	if (effort === "unknown") return { body: {}, enabled: false };
+	const enabled = effort !== "off";
+	const normalized = effort === "off" || effort === "on" ? undefined : effort;
+	switch (format) {
+		case "openrouter":
+			return {
+				body: {
+					reasoning: enabled ? (normalized ? { effort: normalized } : { enabled: true }) : { enabled: false },
+				},
+				enabled,
+			};
+		case "deepseek":
+			return {
+				body: { thinking: { type: enabled ? "enabled" : "disabled" } },
+				enabled,
+			};
+		case "kimi":
+			return {
+				// Kimi requires reasoning_content from tool-call turns to be replayed.
+				// `keep: all` additionally preserves it across ordinary turns.
+				body: { thinking: { type: enabled ? "enabled" : "disabled", ...(enabled ? { keep: "all" } : {}) } },
+				enabled,
+			};
+		case "qianfan":
+			return { body: { enable_thinking: enabled }, enabled };
+		case "qwen":
+			return {
+				body: { enable_thinking: enabled, ...(normalized ? { reasoning_effort: normalized } : {}) },
+				enabled,
+			};
+		case "together":
+			return { body: { reasoning: { enabled }, ...(normalized ? { reasoning_effort: normalized } : {}) }, enabled };
+		case "xai":
+			return { body: { reasoning_effort: normalized ?? "high" }, enabled: true };
+		case "zai":
+			return {
+				body: { thinking: { type: enabled ? "enabled" : "disabled", clear_thinking: false } },
+				enabled,
+			};
+		case "huawei":
+			return { body: { chat_template_kwargs: { enable_thinking: enabled } }, enabled };
+		case "minimax":
+			return { body: {}, enabled: true };
+		case "generic":
+			return enabled
+				? { body: { reasoning_effort: normalized ?? "medium" }, enabled: true }
+				: { body: {}, enabled: false };
+		case "auto":
+		case "openai":
+			return { body: { reasoning_effort: enabled ? (normalized ?? "medium") : "none" }, enabled };
 	}
-	if (effort === "off") {
-		// Must be explicit. Some models (e.g. OpenRouter's `default_enabled:
-		// true` ones) reason by default when the `reasoning` key is omitted
-		// entirely — an empty body doesn't turn reasoning off, it just leaves
-		// the provider's own default in place. Confirmed live: omitting the
-		// key returns a populated `reasoning` field even though we asked for
-		// "off". Sending `enabled: false` on a model with no reasoning support
-		// at all is a harmless no-op (verified against gpt-4o-mini).
-		return { body: { reasoning: { enabled: false } }, enabled: false };
-	}
-	if (effort === "on") {
-		// Binary-toggle models (see getReasoningOptions) don't take an effort
-		// level — just turn reasoning on.
-		return { body: { reasoning: { enabled: true } }, enabled: true };
-	}
-	return {
-		body: { reasoning: { effort } },
-		enabled: true,
-	};
 }
 
 // ============================================================================
@@ -82,21 +162,32 @@ export function buildReasoningParams(effort: string): ReasoningParams {
 // ============================================================================
 
 export function getReasoningOptions(meta: ModelReasoningMeta | null): Array<{ value: string; label: string }> {
-	if (!meta) return [];
+	if (!meta) {
+		return ["off", "low", "medium", "high", "max"].map((value) => ({
+			value,
+			label:
+				value === "off"
+					? "Off (provider default unknown)"
+					: `${value.charAt(0).toUpperCase()}${value.slice(1)} (generic)`,
+		}));
+	}
 
 	if (meta.supportedEfforts.length === 0) {
 		// Model reports reasoning support but as a binary toggle only (e.g.
 		// OpenRouter's `{ mandatory, default_enabled }` shape with no
 		// `supported_efforts` list) — offer on/off instead of an effort menu.
 		return [
-			{ value: "off", label: "Off (no reasoning)" },
+			...(meta.mandatory ? [] : [{ value: "off", label: "Off (no reasoning)" }]),
 			{ value: "on", label: `On${meta.defaultEnabled ? " (default)" : ""}` },
 		];
 	}
 
-	const options: Array<{ value: string; label: string }> = [{ value: "off", label: "Off (no reasoning)" }];
+	const options: Array<{ value: string; label: string }> = meta.mandatory
+		? []
+		: [{ value: "off", label: "Off (no reasoning)" }];
 
 	for (const effort of meta.supportedEfforts) {
+		if (effort === "none") continue;
 		const label = effort.charAt(0).toUpperCase() + effort.slice(1);
 		options.push({
 			value: effort,
@@ -105,6 +196,26 @@ export function getReasoningOptions(meta: ModelReasoningMeta | null): Array<{ va
 	}
 
 	return options;
+}
+
+export function getReasoningOptionsForFormat(
+	meta: ModelReasoningMeta | null,
+	format: ReasoningFormat,
+): Array<{ value: string; label: string }> {
+	if (!meta && format === "minimax") return [{ value: "on", label: "On (always enabled by MiniMax)" }];
+	if (!meta && ["deepseek", "kimi", "qianfan", "qwen", "together", "zai", "huawei"].includes(format)) {
+		return [
+			{ value: "off", label: "Off (no reasoning)" },
+			{ value: "on", label: "On (provider default effort)" },
+		];
+	}
+	if (!meta && format === "xai") {
+		return ["low", "medium", "high"].map((value) => ({
+			value,
+			label: `${value.charAt(0).toUpperCase()}${value.slice(1)}${value === "high" ? " (default)" : ""}`,
+		}));
+	}
+	return getReasoningOptions(meta);
 }
 
 // ============================================================================
