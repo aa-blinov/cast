@@ -4,11 +4,12 @@
  * background. SSE listeners receive AgentEvent broadcasts in real time.
  */
 
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { fetchModels, type ModelInfo, probeProvider, resolveProvider } from "../core/config.ts";
 import { hasHooks, runHooksForEvent } from "../core/hooks.ts";
 import type { Message } from "../core/llm.ts";
@@ -79,6 +80,17 @@ import { ALL_THEMES } from "../ui/themes/index.ts";
 import type { ThemeColors } from "../ui/themes/types.ts";
 import { isCommandBlocking, SLASH_COMMANDS } from "./commands.ts";
 import { sessionInputsDir } from "./inputs.ts";
+
+const execFileAsync = promisify(execFile);
+
+async function runSkillsSh(args: string[], timeout: number): Promise<string> {
+	const { stdout } = await execFileAsync("npx", ["--yes", "skills", ...args], {
+		cwd: homedir(),
+		encoding: "utf-8",
+		timeout,
+	});
+	return stripAnsi(stdout).trim();
+}
 
 export type WebAgentStatus = "idle" | "running" | "error";
 
@@ -519,13 +531,13 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		const session = createSession(model, sessionCwd);
 		session.persona = persona.name;
 
-		// Scratch dir for a sandbox session: named after the fresh session id.
-		// Not created yet — picking a persona shouldn't leave a directory behind
-		// for a session the user never actually used; submit() creates it lazily
-		// on the first real message (see the mkdirSync call there).
+		// Scratch dirs must exist before SessionStart hooks run: hooks receive this
+		// cwd and are allowed to prepare the workspace. Web drafts don't reach this
+		// code until their first real message, so this still avoids abandoned dirs.
 		if (cwdOverride === SANDBOX_CWD) {
 			sessionCwd = join(homedir(), ".cast", "sandbox", `cast-${session.id}`);
 			session.cwd = sessionCwd;
+			mkdirSync(sessionCwd, { recursive: true });
 		}
 
 		const runner = createAgentRunner();
@@ -624,6 +636,15 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		}
 
 		const sessionCwd = ws.session.cwd ?? cwd;
+		// Claim the turn before awaiting hooks. Otherwise two requests can both
+		// observe "idle" while the first UserPromptSubmit hook is pending and
+		// start concurrent loops against the same mutable session history.
+		const ac = new AbortController();
+		ws.status = "running";
+		ws.error = null;
+		ws.runner.startRun(ac);
+		broadcast(ws, { type: "status", status: "running" });
+		broadcastSessionUpdate(ws);
 		const submitHooks = resolveHooksForCwd(sessionCwd, projectTrusted);
 		if (hasHooks(submitHooks)) {
 			const submitResult = await runHooksForEvent(submitHooks, {
@@ -633,6 +654,11 @@ export function createWebBridge(result: StartupResult): WebBridge {
 				payload: { prompt: text },
 			});
 			if (submitResult.blocked) {
+				ws.status = "idle";
+				ws.runner.abort();
+				ws.runner.endRun();
+				broadcast(ws, { type: "status", status: "idle" });
+				broadcastSessionUpdate(ws);
 				broadcast(ws, {
 					type: "error",
 					message: `Prompt blocked by hook: ${submitResult.reason ?? "no reason given"}`,
@@ -648,8 +674,6 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			ws.session.title = deriveTitle(text);
 		}
 
-		// The sandbox scratch dir (see createSessionInstance) is only derived,
-		// not created, until there's an actual message to act on it for.
 		if (ws.session.cwd && !existsSync(ws.session.cwd)) {
 			mkdirSync(ws.session.cwd, { recursive: true });
 		}
@@ -659,14 +683,6 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		};
 		appendMessage(ws.session, userMsg);
 		broadcast(ws, { type: "user_message", message: userMsg });
-		broadcast(ws, { type: "status", status: "running" });
-		ws.status = "running";
-		ws.error = null;
-		broadcastSessionUpdate(ws);
-
-		const ac = new AbortController();
-		ws.runner.startRun(ac);
-
 		const persona = personas.find((p) => p.name === ws.session.persona) ?? currentPersona;
 
 		// One `assistant_message` event fires per assistant completion this
@@ -1759,45 +1775,27 @@ export function createWebBridge(result: StartupResult): WebBridge {
 						if (a !== "-g" && a !== "--global") installArgs.push(a);
 					}
 					installArgs.push("-g");
-					const out = execFileSync("npx", ["--yes", "skills", "add", ...installArgs], {
-						cwd: homedir(),
-						encoding: "utf-8",
-						timeout: 120_000,
-					});
+					const out = await runSkillsSh(["add", ...installArgs], 120_000);
 					const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
 					skills = skillsResult.skills;
 					recomputeAllSystemPrompts();
-					return { ok: true, result: stripAnsi(out).trim() || "Installed." };
+					return { ok: true, result: out || "Installed." };
 				}
 				if (sub === "list-available") {
 					if (!rest) return { ok: false, error: "Usage: /skills-sh list-available <owner/repo>" };
-					const out = execFileSync("npx", ["--yes", "skills", "add", rest, "--list"], {
-						cwd: homedir(),
-						encoding: "utf-8",
-						timeout: 60_000,
-					});
-					return { ok: true, result: stripAnsi(out) };
+					return { ok: true, result: await runSkillsSh(["add", rest, "--list"], 60_000) };
 				}
 				if (sub === "search") {
 					if (!rest) return { ok: false, error: "Usage: /skills-sh search <query>" };
-					const out = execFileSync("npx", ["--yes", "skills", "find", ...rest.split(/\s+/)], {
-						cwd: homedir(),
-						encoding: "utf-8",
-						timeout: 60_000,
-					});
-					return { ok: true, result: stripAnsi(out) };
+					return { ok: true, result: await runSkillsSh(["find", ...rest.split(/\s+/)], 60_000) };
 				}
 				if (sub === "uninstall") {
 					if (!rest) return { ok: false, error: "Usage: /skills-sh uninstall <name>" };
-					const out = execFileSync("npx", ["--yes", "skills", "rm", ...rest.split(/\s+/)], {
-						cwd: homedir(),
-						encoding: "utf-8",
-						timeout: 30_000,
-					});
+					const out = await runSkillsSh(["rm", ...rest.split(/\s+/)], 30_000);
 					const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
 					skills = skillsResult.skills;
 					recomputeAllSystemPrompts();
-					return { ok: true, result: stripAnsi(out).trim() || "Uninstalled." };
+					return { ok: true, result: out || "Uninstalled." };
 				}
 				return {
 					ok: false,

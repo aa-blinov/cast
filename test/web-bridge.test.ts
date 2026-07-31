@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -176,18 +176,13 @@ describe("web bridge", () => {
 		expect(ws.systemPrompt).toContain("You are the senior persona.");
 	});
 
-	it("sandbox sentinel derives a scratch dir named after the session id, created lazily on first message", () => {
+	it("sandbox sentinel creates a scratch dir named after the session id before hooks can use its cwd", () => {
 		const bridge = createWebBridge(makeResult());
 		const ws = bridge.createSession(undefined, undefined, SANDBOX_CWD);
 		const expectedDir = join(homedir(), ".cast", "sandbox", `cast-${ws.id}`);
 		try {
 			expect(ws.session.cwd).toBe(expectedDir);
 			expect(ws.systemPrompt).toContain(`Current working directory: ${ws.session.cwd}`);
-			// Not created yet — picking a persona/sandbox shouldn't leave a directory
-			// behind for a session the user never actually used.
-			expect(existsSync(ws.session.cwd)).toBe(false);
-
-			bridge.submit(ws.id, "hi");
 			expect(statSync(ws.session.cwd).isDirectory()).toBe(true);
 		} finally {
 			rmSync(ws.session.cwd, { recursive: true, force: true });
@@ -363,6 +358,26 @@ describe("web bridge", () => {
 		bridge.submit(ws.id, "second message, from another tab");
 		expect(runAgentLoop).toHaveBeenCalledTimes(1); // still just the one run
 		expect(ws.runner.steeringQueue.hasItems()).toBe(true);
+	});
+
+	it("claims the turn before an async UserPromptSubmit hook so concurrent sends cannot start two loops", async () => {
+		const { mkdirSync, writeFileSync } = await import("node:fs");
+		mkdirSync(join(cwd, ".cast"));
+		writeFileSync(
+			join(cwd, ".cast", "hooks.json"),
+			JSON.stringify({ UserPromptSubmit: [{ hooks: [{ command: "sleep 0.05" }] }] }),
+		);
+		const bridge = createWebBridge(makeResult());
+		const ws = bridge.createSession();
+
+		bridge.submit(ws.id, "first message");
+		bridge.submit(ws.id, "second message");
+
+		expect(ws.status).toBe("running");
+		expect(runAgentLoop).not.toHaveBeenCalled();
+		expect(ws.runner.steeringQueue.hasItems()).toBe(true);
+		await new Promise((resolve) => setTimeout(resolve, 100));
+		expect(runAgentLoop).toHaveBeenCalledTimes(1);
 	});
 
 	it("submit with images builds a [text, image_url...] content array, always including the text part", () => {
