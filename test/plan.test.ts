@@ -124,6 +124,15 @@ describe("plan", () => {
 			expect(checkReadOnlyCommand("LC_ALL=C sort file.txt | uniq -c").ok).toBe(true);
 		});
 
+		it("allows fd-duplication and null-device redirects — neither writes a real file", () => {
+			expect(checkReadOnlyCommand("ls -la /tmp/foo 2>&1").ok).toBe(true);
+			expect(checkReadOnlyCommand("cat foo 2>&1 | grep bar").ok).toBe(true);
+			expect(checkReadOnlyCommand("ls -la /tmp/foo 2>/dev/null").ok).toBe(true);
+			expect(checkReadOnlyCommand("ls -la /tmp/foo >/dev/null 2>&1").ok).toBe(true);
+			// The redirect being safe doesn't whitelist an otherwise-unsafe command.
+			expect(checkReadOnlyCommand("rm -rf /tmp/x 2>&1").ok).toBe(false);
+		});
+
 		it("rejects anything that can write", () => {
 			expect(checkReadOnlyCommand("rm -rf /tmp/x").ok).toBe(false);
 			expect(checkReadOnlyCommand("echo hi > out.txt").ok).toBe(false);
