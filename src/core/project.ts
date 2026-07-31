@@ -435,7 +435,7 @@ export function formatSystemEnvironmentBlock(cwd: string, options?: SystemEnviro
 			);
 		} else if (options.mode === "build") {
 			lines.push(
-				"- Mode: build — full toolset; for a complex task worth planning first, suggest it with the plan_enter tool (the user can also enter plan mode with the /plan command)",
+				"- Mode: build — full toolset. Before making changes or writing an implementation plan, call plan_enter and end the turn when the request spans multiple subsystems, a migration, authentication/security, an API contract, rollout/rollback, architectural decisions, or unclear scope. Do not write that plan in build mode: wait for the user's confirmation. If the user declines plan mode or says to continue in build mode, that decision takes precedence: proceed directly and do not call plan_enter again unless they materially change the request. Handle simple, direct requests normally. The user can also enter plan mode with /plan.",
 			);
 		}
 		if (options.reasoningMeta?.supportedEfforts?.length) {
