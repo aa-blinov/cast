@@ -2,6 +2,15 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.12.4
+
+### Fixed
+
+- Web UI: settings remain responsive when adding or removing Skills.sh skills, including when Settings is opened from a fresh root draft with no visible session.
+- Tool output: valid JSON containing Unicode escape sequences now renders as readable text in both the web UI and terminal UI.
+- Web UI: font previews are local and stable, so the picker shows each typeface immediately without late-loading flicker.
+- `grep`: directory-component globs now match relative to the requested search path consistently whether ripgrep is installed or the built-in fallback is used.
+
 ## 0.12.2
 
 ### Fixed
