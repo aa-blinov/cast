@@ -35,6 +35,8 @@ export interface BackgroundTask {
 	/** Accumulated stdout+stderr, capped at config.maxToolOutputBytes — mirrors bash.ts's sync path. */
 	rawOutput: string;
 	timedOut: boolean;
+	/** The kill-timer duration, when one was set — only meaningful once `timedOut` is true. */
+	timeoutSeconds?: number;
 	/** Set only when status is "error" (the process failed to even start). */
 	errorMessage?: string;
 }
@@ -87,7 +89,11 @@ function buildCompletionReminder(task: BackgroundTask, config: AppConfig): strin
 	const body =
 		task.status === "error"
 			? (task.errorMessage ?? "Failed to start.")
-			: formatBashResult(task.rawOutput, config, { exitCode: task.exitCode, timedOut: task.timedOut }).content;
+			: formatBashResult(task.rawOutput, config, {
+					exitCode: task.exitCode,
+					timedOut: task.timedOut,
+					timeoutSeconds: task.timeoutSeconds,
+				}).content;
 	return (
 		"<system-reminder>\n" +
 		`Background task ${task.id} (\`${task.command}\`) ${statusLine(task)}.\n\n` +
@@ -118,7 +124,10 @@ export class BackgroundTaskRegistry {
 		command: string,
 		cwd: string,
 		config: AppConfig,
-		timeoutSeconds: number,
+		/** Undefined means no kill timer — background tasks are open-ended by
+		 *  default (dev servers, long builds); the foreground default timeout
+		 *  only applies here if the model explicitly passed one. */
+		timeoutSeconds: number | undefined,
 		deps: BashBackgroundDeps,
 	): BackgroundTask {
 		const bash = getBashResolution();
@@ -144,6 +153,7 @@ export class BackgroundTaskRegistry {
 			startedAt: Date.now(),
 			rawOutput: "",
 			timedOut: false,
+			timeoutSeconds,
 		};
 		this.tasks.set(id, task);
 
@@ -155,14 +165,17 @@ export class BackgroundTaskRegistry {
 			if (Buffer.byteLength(task.rawOutput, "utf-8") < maxBytes) task.rawOutput += d.toString("utf-8");
 		});
 
-		const timer = setTimeout(() => {
-			task.timedOut = true;
-			try {
-				process.kill(-proc.pid!, "SIGKILL");
-			} catch {
-				// already dead
-			}
-		}, timeoutSeconds * 1000);
+		const timer =
+			timeoutSeconds === undefined
+				? undefined
+				: setTimeout(() => {
+						task.timedOut = true;
+						try {
+							process.kill(-proc.pid!, "SIGKILL");
+						} catch {
+							// already dead
+						}
+					}, timeoutSeconds * 1000);
 
 		proc.on("error", (err) => {
 			clearTimeout(timer);
@@ -273,6 +286,7 @@ export async function execBashOutput(
 	const formatted = formatBashResult(task.rawOutput, config, {
 		exitCode: task.exitCode,
 		timedOut: task.timedOut,
+		timeoutSeconds: task.timeoutSeconds,
 	});
 	return { content: `${header}\n\n${formatted.content}` };
 }

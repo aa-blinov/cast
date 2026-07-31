@@ -3,6 +3,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
 	test: {
 		include: ["test/**/*.test.ts"],
+		setupFiles: ["test/setup.ts"],
 		testTimeout: 30_000,
 		// openai -> node-fetch -> whatwg-url pulls in Node's deprecated builtin
 		// punycode module; nothing in this repo requires it directly, so the

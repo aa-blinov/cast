@@ -72,8 +72,11 @@ export function getToolDefinitions(
 						command: { type: "string", description: "Bash command to execute" },
 						timeout: {
 							type: "number",
-							description:
-								"Timeout in seconds. Default 180. Increase for long-running commands (e.g. 600 for docker build)",
+							description: backgroundBashEnabled
+								? "Timeout in seconds. Default 180 for a normal (blocking) call. With run_in_background:true " +
+									"there is no default timeout — the task runs until it exits or you call bash_kill — so only " +
+									"set this if the task itself should be force-killed after a fixed time."
+								: "Timeout in seconds. Default 180. Increase for long-running commands (e.g. 600 for docker build)",
 						},
 						...(backgroundBashEnabled
 							? {
@@ -82,10 +85,10 @@ export function getToolDefinitions(
 										description:
 											"Run this command in the background and return immediately with a task id, instead of " +
 											"waiting for it to finish. Use for commands you don't need to block on: dev servers, " +
-											"long builds/tests you'll check on later, anything open-ended. You don't need to poll — " +
-											"a <system-reminder> arrives automatically with the output when it finishes, even if you've " +
-											"moved on to something else. Check bash_output only if you want progress sooner, or " +
-											"bash_kill to stop it early.",
+											"long builds/tests you'll check on later, anything open-ended. Runs with no timeout by " +
+											"default — it keeps going until it exits on its own or you call bash_kill. You don't need " +
+											"to poll — a <system-reminder> arrives automatically with the output when it finishes, even " +
+											"if you've moved on to something else. Check bash_output only if you want progress sooner.",
 									},
 								}
 							: {}),

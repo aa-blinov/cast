@@ -212,7 +212,12 @@ export async function execBash(
 	background?: BashBackgroundDeps,
 ): Promise<ToolResult> {
 	const command = String(args.command ?? "");
-	const timeout = typeof args.timeout === "number" ? args.timeout : config.defaultBashTimeout;
+	// 0 (or negative) is treated as "no explicit timeout" rather than taken
+	// literally — a bare `setTimeout(fn, 0)` fires almost immediately, and
+	// callers reasonably expect 0 to mean unlimited (curl's --max-time 0, etc.)
+	// rather than an instant kill.
+	const explicitTimeout = typeof args.timeout === "number" && args.timeout > 0 ? args.timeout : undefined;
+	const timeout = explicitTimeout ?? config.defaultBashTimeout;
 
 	// Block dangerous commands (rm -rf, sudo, etc.)
 	if (confirmBash) {
@@ -241,7 +246,9 @@ export async function execBash(
 	// sets this flag somewhere it's not wired (cast run, a subagent), fall
 	// through to the normal synchronous path below instead of erroring.
 	if (args.run_in_background === true && background) {
-		const task = background.registry.start(command, cwd, config, timeout, background);
+		// Background tasks are open-ended by default (dev servers, long builds)
+		// — only apply a kill timer when the model explicitly asked for one.
+		const task = background.registry.start(command, cwd, config, explicitTimeout, background);
 		return {
 			content:
 				`${warnPrefix}Started in background as ${task.id}. You don't need to poll — a <system-reminder> ` +

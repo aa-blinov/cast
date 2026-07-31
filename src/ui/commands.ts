@@ -61,7 +61,7 @@ import {
 	type Skill,
 	uninstallUserSkill,
 } from "../core/skills.ts";
-import { type SshHost, saveSshConfig, scanSshKeys, validateKeyPermissions } from "../core/ssh.ts";
+import { resolveSshHosts, type SshHost, saveSshConfig, scanSshKeys, validateKeyPermissions } from "../core/ssh.ts";
 import { buildReasoningParams, type ModelReasoningMeta, resolveReasoningFormat } from "../core/vendors.ts";
 import {
 	formatSkillPickLabel,
@@ -1094,6 +1094,29 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		return;
 	}
 
+	const restoreSessionState = (source: SessionState): void => {
+		Object.assign(session, {
+			id: source.id,
+			messages: source.messages,
+			model: source.model,
+			createdAt: source.createdAt,
+			updatedAt: source.updatedAt,
+			usage: source.usage,
+			lastPromptTokens: source.lastPromptTokens,
+			cwd: source.cwd,
+			mode: source.mode,
+			persona: source.persona,
+			lastAnnouncedLocalDate: source.lastAnnouncedLocalDate,
+			providerUrl: source.providerUrl,
+			reasoning: source.reasoning,
+			turnMeta: source.turnMeta,
+			title: source.title,
+			pinned: source.pinned,
+			todos: source.todos,
+			shareToken: source.shareToken,
+		});
+	};
+
 	if (input === "/continue") {
 		// Find the most recent session that isn't the current one — equivalent
 		// to `cast -c` but from within a running session.
@@ -1113,15 +1136,13 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			return;
 		}
 		if (session.messages.length > 0) saveSession(session);
-		session.id = chosen.id;
-		session.messages = chosen.messages;
-		session.model = chosen.model;
-		session.createdAt = chosen.createdAt;
-		session.updatedAt = chosen.updatedAt;
-		session.usage = chosen.usage;
-		session.cwd = chosen.cwd;
-		session.lastPromptTokens = chosen.lastPromptTokens;
-		session.persona = chosen.persona;
+		const fallbackModel = session.model;
+		const providerMatches = chosen.providerUrl === config.baseURL;
+		const restoredModel = providerMatches ? chosen.model : fallbackModel;
+		restoreSessionState({ ...chosen, model: restoredModel, providerUrl: config.baseURL });
+		if (!providerMatches && chosen.model !== fallbackModel) {
+			showNotice(`[Session model "${chosen.model}" belongs to another provider — keeping "${fallbackModel}".]`);
+		}
 		deps.setPlanMode(chosen.mode === "plan");
 		let personaOpts = deps.personaOptions;
 		let contextFilesSuffix: string | undefined;
@@ -1145,6 +1166,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			deps.setRulesLazySuffix(rulesLazySuffix);
 			deps.setDirectoryRules(resolvedRules.directoryRules);
 			deps.setActiveAutoRules([]);
+			deps.setSshHosts(resolveSshHosts(chosen.cwd, trusted));
 			const newPersonaOpts = personaOptionsForCwd(chosen.cwd, trusted);
 			deps.setPersonaOptions(newPersonaOpts);
 			personaOpts = newPersonaOpts;
@@ -1339,12 +1361,18 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 	const startNewSession = (personaName?: string): void => {
 		if (session.messages.length > 0) saveSession(session);
 		const fresh = createSession(session.model, deps.cwd);
-		session.id = fresh.id;
-		session.messages = fresh.messages;
-		session.createdAt = fresh.createdAt;
-		session.updatedAt = fresh.updatedAt;
-		session.usage = fresh.usage;
-		session.persona = personaName ?? deps.currentPersona.name;
+		Object.assign(session, fresh, {
+			persona: personaName ?? deps.currentPersona.name,
+			mode: undefined,
+			lastPromptTokens: undefined,
+			providerUrl: config.baseURL,
+			reasoning: undefined,
+			turnMeta: undefined,
+			title: undefined,
+			pinned: undefined,
+			todos: undefined,
+			shareToken: undefined,
+		});
 		saveSession(session);
 		agent.clearContext();
 		// A fresh session starts in build mode — plan mode is a per-task state,
@@ -1467,7 +1495,12 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			showNotice("[Plan-mode model: off — plan mode uses the main model]");
 			return;
 		}
-		const ok = await runOnboardingCheck(config, newModel, { log: deps.pickers.log });
+		const providers = loadSettings().providers ?? [];
+		const providerCreds = resolveProvider(providers, deps.planModelProvider, {
+			baseURL: config.baseURL,
+			apiKey: config.apiKey,
+		});
+		const ok = await runOnboardingCheck({ ...config, ...providerCreds }, newModel, { log: deps.pickers.log });
 		if (!ok) {
 			showNotice(`[Model ${newModel} failed validation]`);
 			return;
@@ -1495,7 +1528,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 				...providers.map((p) => ({ value: p.name, label: `${p.name}  ${p.url}` })),
 			];
 			const picked = await deps.pickers.pickOption(options, { title: "Plan-model provider" });
-			if (picked === undefined) {
+			if (picked === null) {
 				showNotice("[Cancelled]");
 				return;
 			}
@@ -1536,7 +1569,12 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 
 	if (input.startsWith("/subagent-model ")) {
 		const newModel = input.slice(16).trim();
-		const ok = await runOnboardingCheck(config, newModel, { log: deps.pickers.log });
+		const providers = loadSettings().providers ?? [];
+		const providerCreds = resolveProvider(providers, deps.subagentModelProvider, {
+			baseURL: config.baseURL,
+			apiKey: config.apiKey,
+		});
+		const ok = await runOnboardingCheck({ ...config, ...providerCreds }, newModel, { log: deps.pickers.log });
 		if (!ok) {
 			showNotice(`[Model ${newModel} failed validation]`);
 			return;
@@ -1564,7 +1602,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 				...providers.map((p) => ({ value: p.name, label: `${p.name}  ${p.url}` })),
 			];
 			const picked = await deps.pickers.pickOption(options, { title: "Subagent-model provider" });
-			if (picked === undefined) {
+			if (picked === null) {
 				showNotice("[Cancelled]");
 				return;
 			}
@@ -1586,7 +1624,11 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 
 	if (input === "/reasoning") {
 		const meta = deps.reasoningMeta ?? getModelsCache().find((m) => m.id === session.model)?.reasoning;
-		await selectReasoningLevel(config, session.model, deps.pickers, meta);
+		const changed = await selectReasoningLevel(config, session.model, deps.pickers, meta);
+		if (!changed) {
+			showNotice("[Cancelled — reasoning unchanged]");
+			return;
+		}
 		updateSettings({ reasoningLevel: config.reasoningLevel });
 		showNotice(`[Reasoning: ${config.reasoningLevel}]`);
 		return;
@@ -2358,7 +2400,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 	if (input === "/sessions") {
 		const chosen = await selectSession(deps.pickers);
 		if (!chosen) {
-			showNotice("[Starting fresh — no session resumed.]");
+			showNotice("[Cancelled — current session unchanged]");
 			return;
 		}
 		if (chosen.id === session.id) {
@@ -2366,17 +2408,13 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			return;
 		}
 		if (session.messages.length > 0) saveSession(session);
-		session.id = chosen.id;
-		session.messages = chosen.messages;
-		session.model = chosen.model;
-		session.createdAt = chosen.createdAt;
-		session.updatedAt = chosen.updatedAt;
-		session.usage = chosen.usage;
-		session.cwd = chosen.cwd;
-		// Context-size signal belongs to the session being resumed — leaving the
-		// old session's value here feeds shouldCompact a foreign context size.
-		session.lastPromptTokens = chosen.lastPromptTokens;
-		session.persona = chosen.persona;
+		const fallbackModel = session.model;
+		const providerMatches = chosen.providerUrl === config.baseURL;
+		const restoredModel = providerMatches ? chosen.model : fallbackModel;
+		restoreSessionState({ ...chosen, model: restoredModel, providerUrl: config.baseURL });
+		if (!providerMatches && chosen.model !== fallbackModel) {
+			showNotice(`[Session model "${chosen.model}" belongs to another provider — keeping "${fallbackModel}".]`);
+		}
 		// Mode travels with the session: restore what the resumed session was
 		// left in instead of carrying over the current one.
 		deps.setPlanMode(chosen.mode === "plan");
@@ -2401,6 +2439,8 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			deps.setRulesSuffix(rulesSuffix);
 			deps.setRulesLazySuffix(rulesLazySuffix);
 			deps.setDirectoryRules(resolvedRules.directoryRules);
+			deps.setActiveAutoRules([]);
+			deps.setSshHosts(resolveSshHosts(chosen.cwd, trusted));
 			const newPersonaOpts = personaOptionsForCwd(chosen.cwd, trusted);
 			deps.setPersonaOptions(newPersonaOpts);
 			personaOpts = newPersonaOpts;

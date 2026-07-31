@@ -144,6 +144,25 @@ describe("BackgroundTaskRegistry", () => {
 		expect(task.rawOutput.split("\n").filter(Boolean).length).toBe(20);
 	});
 
+	it("does not apply the foreground default timeout when background timeout is omitted", async () => {
+		const registry = new BackgroundTaskRegistry();
+		const { deps } = makeDeps(true);
+		deps.registry = registry;
+		const task = registry.start(
+			"sleep 1",
+			process.cwd(),
+			{ ...mockConfig, defaultBashTimeout: 0.1 },
+			undefined,
+			deps,
+		);
+
+		await new Promise((r) => setTimeout(r, 300));
+		expect(task.status).toBe("running");
+		expect(task.timedOut).toBe(false);
+		registry.kill(task.id);
+		await new Promise((r) => setTimeout(r, 100));
+	});
+
 	it("auto-kills a task that exceeds its timeout", async () => {
 		const registry = new BackgroundTaskRegistry();
 		const { deps } = makeDeps(true);

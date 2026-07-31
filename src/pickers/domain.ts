@@ -399,12 +399,12 @@ export async function selectReasoningLevel(
 	_model: string,
 	pickers: Pickers,
 	reasoningMeta?: ModelReasoningMeta,
-): Promise<void> {
+): Promise<boolean> {
 	const options = getReasoningOptionsForFormat(reasoningMeta ?? null, config.reasoningFormat);
 	if (options.length === 0) {
 		config.reasoningLevel = "unknown";
 		config.reasoningParams = { body: {}, enabled: false };
-		return;
+		return true;
 	}
 
 	const picked = await pickers.pickOption(
@@ -415,9 +415,10 @@ export async function selectReasoningLevel(
 	// runs mid-session too (TUI's /model, /reasoning, /provider), where
 	// exiting on cancel would kill the whole running app. Safe to just no-op:
 	// config already holds whatever reasoning level was in effect before.
-	if (!picked) return;
+	if (!picked) return false;
 	config.reasoningLevel = picked;
 	config.reasoningParams = buildReasoningParams(picked, config.reasoningFormat);
+	return true;
 }
 
 export async function selectReasoningFormat(

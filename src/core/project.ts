@@ -307,9 +307,9 @@ export async function resolveMcpForCwd(
 }
 
 /** Assemble the full system prompt from persona + project suffixes + cwd/date. */
-export function personaOptionsForCwd(cwd: string, trusted: boolean): LoadPersonasOptions {
+export function personaOptionsForCwd(cwd: string, trusted: boolean, includeGlobal = true): LoadPersonasOptions {
 	return {
-		globalDir: globalPersonasDir,
+		globalDir: includeGlobal ? globalPersonasDir : undefined,
 		projectDir: trusted ? projectPersonasDir(cwd) : undefined,
 	};
 }
@@ -321,8 +321,9 @@ export function personaOptionsForCwd(cwd: string, trusted: boolean): LoadPersona
 export function resolvePersonasForCwd(
 	cwd: string,
 	trusted: boolean,
+	includeGlobal = true,
 ): { personas: Persona[]; options: LoadPersonasOptions } {
-	const options = personaOptionsForCwd(cwd, trusted);
+	const options = personaOptionsForCwd(cwd, trusted, includeGlobal);
 	return { personas: loadPersonas(options), options };
 }
 

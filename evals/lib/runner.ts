@@ -10,14 +10,24 @@
  * - Timeout
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { loadConfig } from "../../src/core/config.ts";
-import { type AgentEvent, runAgentLoop } from "../../src/core/loop.ts";
+import { BackgroundTaskRegistry } from "../../src/core/tools/bash-background.ts";
+import { type AgentEvent, MessageQueue, runAgentLoop } from "../../src/core/loop.ts";
 import { findPersona } from "../../src/core/personas.ts";
 import { createPlanState, modeDisabledTools } from "../../src/core/plan.ts";
-import { buildSystemPrompt, personaOptionsForCwd } from "../../src/core/project.ts";
+import { buildSystemPrompt, personaOptionsForCwd, resolvePersonasForCwd } from "../../src/core/project.ts";
+import { loadSubagentPrompts } from "../../src/core/subagents.ts";
+import { builtinSkillsDir, formatSkillsForPrompt, loadSkills } from "../../src/core/skills.ts";
+import {
+	closeMcpConnections,
+	connectMcpServers,
+	formatMcpForPrompt,
+	type McpServerConfig,
+	type McpSetupResult,
+} from "../../src/core/mcp.ts";
 
 // ============================================================================
 // Case definition
@@ -63,12 +73,20 @@ export interface EvalCase {
 	prompt: string;
 	/** Model to use (overrides default) */
 	model?: string;
+	/** Persona override used by cases that exercise task/subagent behavior. */
+	persona?: string;
+	/** Load builtin skills and advertise the skill catalog for this case. */
+	withSkills?: boolean;
+	/** Local or remote MCP servers made available to this case's agent loop. */
+	mcpServers?: Record<string, McpServerConfig>;
 	/**
 	 * Runs the case with the interactive mode contract that the TUI gives the
 	 * parent agent. Headless `cast run` deliberately has no plan controls, so
 	 * behavior cases that exercise plan transitions must opt in explicitly.
 	 */
 	mode?: "build" | "plan";
+	/** Prepare a session-local active plan file before running the case. */
+	planFixture?: { name: string; content: string };
 	/**
 	 * Runs before the prompt. Used to (re)create fixture files on disk (see
 	 * `evals/fixtures.ts`) so grounded checks in `verify` have known starting state.
@@ -192,6 +210,10 @@ export interface RunResult {
 export interface RunnerOptions {
 	model: string;
 	cwd: string;
+	/** Provider connection captured before the eval switches to its isolated HOME. */
+	connection?: ProviderConnection;
+	/** Named provider connections captured before the eval switches HOME. */
+	connections?: Record<string, ProviderConnection>;
 	verbose?: boolean;
 	/** Named entry from settings `providers[]`; defaults to the active provider. */
 	provider?: string;
@@ -214,12 +236,19 @@ export interface CompareTarget {
 	provider?: string;
 }
 
+export interface ProviderConnection {
+	baseURL: string;
+	apiKey: string;
+}
+
 /**
  * Provider connection for eval runs — the user's own cast settings.
  * With no name, the active `providerUrl`/`apiKey` pair is used; with a
  * name, the matching entry from `providers[]` is picked.
  */
-function loadConnection(providerName?: string): { baseURL: string; apiKey: string } {
+function loadConnection(providerName: string | undefined, options: RunnerOptions): ProviderConnection {
+	if (providerName && options.connections?.[providerName]) return options.connections[providerName];
+	if (!providerName && options.connection) return options.connection;
 	const settings = JSON.parse(readFileSync(join(homedir(), ".cast", "settings.json"), "utf-8")) as {
 		providerUrl?: string;
 		apiKey?: string;
@@ -240,7 +269,7 @@ function loadConnection(providerName?: string): { baseURL: string; apiKey: strin
 }
 
 export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promise<RunResult> {
-	const config = loadConfig(loadConnection(options.provider));
+	const config = loadConfig(loadConnection(options.provider, options));
 	const model = evalCase.model ?? options.model;
 	const timeout = evalCase.timeout ?? 60_000;
 
@@ -270,9 +299,13 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 	};
 
 	const ac = new AbortController();
+	const backgroundRegistry = new BackgroundTaskRegistry();
+	const backgroundQueue = new MessageQueue();
 	const timer = setTimeout(() => ac.abort(), timeout);
 
 	const startTime = Date.now();
+	let planState: ReturnType<typeof createPlanState> | undefined;
+	let mcpSetup: McpSetupResult | undefined;
 
 	try {
 		await evalCase.setup?.();
@@ -284,27 +317,59 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 		// across personas, and resolves through the same builtin/global dirs
 		// the shipping agent uses; an unknown name fails loudly rather than
 		// silently benchmarking the wrong prompt.
-		const personaName = options.persona ?? "senior";
-		const persona = findPersona(personaName, personaOptionsForCwd(options.cwd, false));
+		const personaName = evalCase.persona ?? options.persona ?? "senior";
+		const persona = findPersona(personaName, personaOptionsForCwd(options.cwd, false, false));
 		if (!persona) {
 			throw new Error(`Persona "${personaName}" not found — check prompts/personas/ and ~/.cast/personas/.`);
 		}
-		const planState = evalCase.mode ? createPlanState(`eval-${evalCase.id}-${Date.now()}`) : undefined;
+		planState = evalCase.mode ? createPlanState(`eval-${evalCase.id}-${Date.now()}`) : undefined;
 		if (planState) planState.enabled = evalCase.mode === "plan";
-		const systemPrompt = evalCase.mode
-			? buildSystemPrompt(persona, "", "", "", "", "", options.cwd, {
-					model,
-					reasoningLevel: config.reasoningLevel,
-					mode: evalCase.mode,
-				})
-			: persona.systemPrompt;
+		if (planState && evalCase.planFixture) {
+			mkdirSync(planState.plansDir, { recursive: true });
+			const planPath = join(planState.plansDir, `${evalCase.planFixture.name}.md`);
+			writeFileSync(planPath, evalCase.planFixture.content, "utf-8");
+			planState.activePlanPath = planPath;
+		}
+		const personas = resolvePersonasForCwd(options.cwd, false, false).personas;
+		const subagentPrompts = evalCase.persona === "coder-with-subagents" ? loadSubagentPrompts() : undefined;
+		const skills = evalCase.withSkills
+			? loadSkills({ builtinDir: builtinSkillsDir, extraPaths: [] }).skills
+			: undefined;
+		if (evalCase.mcpServers) {
+			mcpSetup = await connectMcpServers(evalCase.mcpServers);
+			if (mcpSetup.diagnostics.length > 0) {
+				throw new Error(`MCP setup failed: ${mcpSetup.diagnostics.join("; ")}`);
+			}
+		}
+		const skillsSuffix = skills ? formatSkillsForPrompt(skills) : "";
+		const systemPrompt =
+			evalCase.mode || evalCase.withSkills
+				? buildSystemPrompt(persona, "", "", "", skillsSuffix, "", options.cwd, {
+						model,
+						reasoningLevel: config.reasoningLevel,
+						mode: evalCase.mode,
+					})
+				: persona.systemPrompt;
 		await runAgentLoop([{ role: "user", content: evalCase.prompt }], {
 			config,
 			model,
 			cwd: options.cwd,
 			systemPrompt,
 			disabledTools: planState ? new Set(modeDisabledTools(planState.enabled)) : undefined,
+			personas,
+			currentPersona: persona.name,
+			subagentPrompts,
+			skills,
+			mcpTools: mcpSetup?.toolDefinitions,
+			mcpToolIndex: mcpSetup?.toolIndex,
+			mcpPromptSuffix: mcpSetup ? formatMcpForPrompt(mcpSetup) : undefined,
 			planState,
+			followUpQueue: backgroundQueue,
+			backgroundBash: {
+				registry: backgroundRegistry,
+				followUpQueue: backgroundQueue,
+				isRunning: () => true,
+			},
 			signal: ac.signal,
 			onEvent: (event) => {
 				events.push(event);
@@ -343,6 +408,8 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 						thinking: pendingAssistant?.thinking ?? "",
 						commentary: pendingAssistant?.content ?? "",
 						toolCalls: event.toolResults.map((tr) => {
+							const observed = toolById.get(tr.id);
+							if (observed) observed.result = { content: tr.result.content, isError: tr.result.isError };
 							let args: Record<string, unknown> = {};
 							const requested = requestedById.get(tr.id);
 							if (requested) {
@@ -379,6 +446,9 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 	} catch (error) {
 		errors.push(error instanceof Error ? error.message : String(error));
 	}
+	backgroundRegistry.killAll();
+	if (mcpSetup) await closeMcpConnections(mcpSetup.connections);
+	if (planState) rmSync(planState.plansDir, { recursive: true, force: true });
 
 	clearTimeout(timer);
 	const duration = Date.now() - startTime;
