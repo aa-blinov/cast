@@ -2,6 +2,28 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.12.7
+
+### Added
+
+- Added a behavior evaluation bench covering planning, tool use, task execution, and other core interaction contracts, with a certification "Model Scoreboard" published on the docs site (`--scoreboard` on the eval runner records each model's per-case pass rate across at least 3 attempts per case).
+
+### Fixed
+
+- Completed web planning transitions so plan decisions consistently reach the intended next state.
+- `grep`: aligned glob paths across the ripgrep-backed and built-in fallback implementations, and fixed the fallback failing to match when the search path names a single file instead of a directory.
+- Rendered escaped Unicode in tool results as readable text.
+- Stabilized web settings and session interactions.
+- Plan mode's read-only command check rejected safe commands like `ls -la 2>&1` or `cmd >/dev/null 2>&1` — fd-duplication and null-device redirects were caught by the blanket output-redirection guard even though neither writes a persistent file.
+- `bash`: background tasks (`run_in_background: true`) no longer get killed by a default timeout — they're open-ended by default (dev servers, long builds) and only get a kill timer when the model explicitly passes `timeout`. A `timeout` of `0` or negative is treated as "no timeout" rather than firing almost immediately.
+- `/continue` and starting a new session now restore the full session state (reasoning settings, turn metadata, title, pinned flag, todos, share token) instead of a partial subset, and reset SSH host resolution and provider/model validation consistently when switching sessions or projects.
+
+### Internal
+
+- Added plan, task, and skill judgment cases plus single-tool core contract coverage; eval cases now support an isolated per-case working directory so a case's synthetic scenario can't be second-guessed against the real repo.
+- Fixed a fixture race condition in the eval runner's `--repeat` mode where concurrent attempts of the same case corrupted each other's on-disk fixture state, and wired `--baseline` regression comparison into `--repeat` runs (previously single-run only).
+- Synchronized evaluation and tool documentation with the current behavior bench and background Bash behavior.
+
 ## 0.12.5
 
 ### Fixed
