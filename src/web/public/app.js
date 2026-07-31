@@ -2618,21 +2618,23 @@ function DirectoryBrowser({ initialPath, onPick, onClose, confirm }) {
 	const [creating, setCreating] = useState(false);
 	const [newName, setNewName] = useState("");
 	const newNameRef = useRef(null);
+	const loadVersionRef = useRef(0);
 
 	const load = useCallback(async (p) => {
+		const version = ++loadVersionRef.current;
 		setLoading(true);
 		try {
 			const data = await api("GET", `/api/browse?path=${encodeURIComponent(p ?? "")}`);
-			if (data) {
+			if (data && version === loadVersionRef.current) {
 				setPath(data.path);
 				setParent(data.parent);
 				setEntries(data.entries || []);
 				setError(data.error ?? null);
 			}
 		} catch (err) {
-			setError(err.message);
+			if (version === loadVersionRef.current) setError(err.message);
 		}
-		setLoading(false);
+		if (version === loadVersionRef.current) setLoading(false);
 	}, []);
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: initialPath seeds the first load only — later navigation uses load(parent)/load(entry.path), so re-running this on prop changes would fight in-modal navigation. load itself never changes (empty deps).
@@ -2864,6 +2866,7 @@ function SettingsModal({
 	const [data, setData] = useState({});
 	const [errors, setErrors] = useState({});
 	const [busy, setBusy] = useState(false);
+	const loadVersions = useRef(new Map());
 
 	const run = useCallback(
 		async (command) => {
@@ -2879,6 +2882,18 @@ function SettingsModal({
 
 	const load = useCallback(
 		async (t) => {
+			// Initial preloading and post-mutation refreshes race by design. Only
+			// the newest request for a resource may update its visible state.
+			const resource = t === "skillssh" ? "skills" : t;
+			const version = (loadVersions.current.get(resource) || 0) + 1;
+			loadVersions.current.set(resource, version);
+			const isCurrent = () => loadVersions.current.get(resource) === version;
+			const commit = (update) => {
+				if (isCurrent()) setData(update);
+			};
+			const setLoadError = (error) => {
+				if (isCurrent()) setErrors((e) => ({ ...e, [t]: error }));
+			};
 			setErrors((e) => ({ ...e, [t]: null }));
 			if (!activeId && t !== "theme" && t !== "font") return;
 			if (t === "model") {
@@ -2888,7 +2903,7 @@ function SettingsModal({
 					run("/current"),
 					run("/provider list"),
 				]);
-				setData((d) => ({
+				commit((d) => ({
 					...d,
 					model: {
 						models: models?.models ?? [],
@@ -2899,14 +2914,14 @@ function SettingsModal({
 				}));
 			} else if (t === "bash") {
 				const permissions = await run("/permissions");
-				setData((d) => ({ ...d, bash: { permissions: permissions?.result } }));
+				commit((d) => ({ ...d, bash: { permissions: permissions?.result } }));
 			} else if (t === "web") {
 				const [webTools, searchProvider, fetchProvider] = await Promise.all([
 					run("/web"),
 					run("/web-search-provider"),
 					run("/web-fetch-provider"),
 				]);
-				setData((d) => ({
+				commit((d) => ({
 					...d,
 					web: {
 						webTools: webTools?.result,
@@ -2916,40 +2931,37 @@ function SettingsModal({
 				}));
 			} else if (t === "quick-mode") {
 				const quickSessionPersona = await run("/quick-session-persona");
-				setData((d) => ({ ...d, "quick-mode": { quickSessionPersona: quickSessionPersona?.result } }));
+				commit((d) => ({ ...d, "quick-mode": { quickSessionPersona: quickSessionPersona?.result } }));
 			} else if (t === "hooks") {
 				const res = await run("/hooks");
 				if (!res.ok) {
-					setErrors((e) => ({ ...e, hooks: res.error }));
+					setLoadError(res.error);
 					return;
 				}
-				setData((d) => ({ ...d, hooks: res.result }));
+				commit((d) => ({ ...d, hooks: res.result }));
 			} else if (t === "mcp") {
 				const res = await run("/mcp list");
 				if (!res.ok) {
-					setErrors((e) => ({ ...e, mcp: res.error }));
+					setLoadError(res.error);
 					return;
 				}
-				setData((d) => ({ ...d, mcp: res.result }));
+				commit((d) => ({ ...d, mcp: res.result }));
 			} else if (t === "skills") {
 				const res = await run("/skills list");
 				if (!res.ok) {
-					setErrors((e) => ({ ...e, skills: res.error }));
+					setLoadError(res.error);
 					return;
 				}
-				setData((d) => ({ ...d, skills: res.result }));
+				commit((d) => ({ ...d, skills: res.result }));
 			} else if (t === "skillssh") {
 				// Reuses the same data as the Skills tab — Skills.sh skills are
 				// already loaded from ~/.config/agents/skills/ as part of the
 				// agentsGlobalDirs list.
-				if (data.skills === undefined) {
-					const res = await run("/skills list");
-					setData((d) => ({ ...d, skills: res?.result ?? [] }));
-				}
-				setData((d) => ({ ...d, skillssh: true }));
+				const res = await run("/skills list");
+				commit((d) => ({ ...d, skills: res?.result ?? [], skillssh: true }));
 			} else if (t === "plugins") {
 				const res = await run("/plugin list");
-				setData((d) => ({
+				commit((d) => ({
 					...d,
 					plugins: {
 						plugins: res?.result ?? [],
@@ -2960,7 +2972,7 @@ function SettingsModal({
 					run("/plugin marketplace list"),
 					run("/plugin marketplace catalog"),
 				]);
-				setData((d) => ({
+				commit((d) => ({
 					...d,
 					marketplace: {
 						marketplaces: marketplaces?.result ?? [],
@@ -2970,20 +2982,20 @@ function SettingsModal({
 			} else if (t === "provider") {
 				const res = await run("/provider list");
 				if (!res.ok) {
-					setErrors((e) => ({ ...e, provider: res.error }));
+					setLoadError(res.error);
 					return;
 				}
-				setData((d) => ({ ...d, provider: res.result }));
+				commit((d) => ({ ...d, provider: res.result }));
 			} else if (t === "ssh") {
 				const res = await run("/ssh list");
 				if (!res.ok) {
-					setErrors((e) => ({ ...e, ssh: res.error }));
+					setLoadError(res.error);
 					return;
 				}
-				setData((d) => ({ ...d, ssh: res.result }));
+				commit((d) => ({ ...d, ssh: res.result }));
 			}
 		},
-		[run, activeId, data.skills],
+		[run, activeId],
 	);
 
 	// Preload every tab in parallel as soon as the modal mounts (or the active
@@ -3007,14 +3019,15 @@ function SettingsModal({
 	// immediately instead of waiting for the next manual refresh.
 	const act = useCallback(
 		async (command) => {
+			const actionTab = tab;
 			setBusy(true);
-			setErrors((e) => ({ ...e, [tab]: null }));
+			setErrors((e) => ({ ...e, [actionTab]: null }));
 			try {
 				const res = await run(command);
 				if (!res.ok) setErrors((e) => ({ ...e, [tab]: res.error ?? "Failed" }));
 				// Always refresh the Model tab too: a /provider Switch changes the
 				// active provider, which the Model picker's model list depends on.
-				await Promise.all([load(tab), tab === "model" ? Promise.resolve() : load("model")]);
+				await Promise.all([load(actionTab), actionTab === "model" ? Promise.resolve() : load("model")]);
 				// /reload and any /skills mutation can change which skills are
 				// loaded/enabled — those show up as native /<skill-id> slash commands,
 				// so the composer's palette needs to catch up too.
@@ -3028,9 +3041,7 @@ function SettingsModal({
 						command.startsWith("/mcp ") ||
 						command.startsWith("/skills-sh ")
 					) {
-						load("hooks");
-						load("mcp");
-						load("skills");
+						await Promise.all([load("hooks"), load("mcp"), load("skills")]);
 					}
 				}
 				return res;
@@ -3039,7 +3050,7 @@ function SettingsModal({
 				// leave `busy` stuck true forever — every button in the modal
 				// would stay disabled until it's closed and reopened.
 				const message = err instanceof Error ? err.message : String(err);
-				setErrors((e) => ({ ...e, [tab]: message }));
+				setErrors((e) => ({ ...e, [actionTab]: message }));
 				return { ok: false, error: message };
 			} finally {
 				setBusy(false);
@@ -3070,7 +3081,7 @@ function SettingsModal({
 					<div class="settings-tabs">
 						${SETTINGS_TABS.map(
 							(t) => html`
-							<button key=${t.id} class="settings-tab${tab === t.id ? " active" : ""}" onClick=${() => setTab(t.id)}>${t.label}</button>
+							<button key=${t.id} class="settings-tab${tab === t.id ? " active" : ""}" disabled=${busy} onClick=${() => setTab(t.id)}>${t.label}</button>
 						`,
 						)}
 					</div>
@@ -3188,6 +3199,7 @@ function SlotModelPicker({
 	const [modelValue, setModelValue] = useState(effectiveModel);
 	const [models, setModels] = useState(initialModels || []);
 	const [loading, setLoading] = useState(false);
+	const modelRequestVersion = useRef(0);
 
 	// Label for the empty option in the provider dropdown.
 	// Empty option label: the main slot shows the provider the main model
@@ -3207,6 +3219,7 @@ function SlotModelPicker({
 	// a page reload.
 	useEffect(() => {
 		let cancelled = false;
+		const version = ++modelRequestVersion.current;
 		(async () => {
 			// `initialModels` (the parent's own /api/models/cached call, made
 			// once for all three slots) already seeded state for first paint —
@@ -3218,11 +3231,11 @@ function SlotModelPicker({
 			const qs = effectiveProvider ? `?provider=${encodeURIComponent(effectiveProvider)}` : "";
 			try {
 				const res = await api("GET", `/api/models${qs}`);
-				if (!cancelled) setModels(res?.models ?? []);
+				if (!cancelled && version === modelRequestVersion.current) setModels(res?.models ?? []);
 			} catch {
-				if (!cancelled) setModels([]);
+				if (!cancelled && version === modelRequestVersion.current) setModels([]);
 			}
-			if (!cancelled) setLoading(false);
+			if (!cancelled && version === modelRequestVersion.current) setLoading(false);
 		})();
 		return () => {
 			cancelled = true;
@@ -3231,17 +3244,18 @@ function SlotModelPicker({
 
 	// Fetch models when provider changes.
 	const onProviderChange = useCallback(async (name) => {
+		const version = ++modelRequestVersion.current;
 		setProviderValue(name);
 		setModelValue("");
 		setLoading(true);
 		try {
 			const qs = name ? `?provider=${encodeURIComponent(name)}` : "";
 			const res = await api("GET", `/api/models${qs}`);
-			setModels(res?.models ?? []);
+			if (version === modelRequestVersion.current) setModels(res?.models ?? []);
 		} catch {
-			setModels([]);
+			if (version === modelRequestVersion.current) setModels([]);
 		}
-		setLoading(false);
+		if (version === modelRequestVersion.current) setLoading(false);
 	}, []);
 
 	const doSet = useCallback(async () => {
@@ -3773,13 +3787,13 @@ function SettingsSkillssh({ data, busy, act, confirm }) {
 
 			<div class="settings-section-title">Install a skill</div>
 			<div class="settings-form-row">
-				<input type="text" placeholder="owner/repo --skill name (or paste skills.sh's npx command)" value=${installArgs} onInput=${(e) => setInstallArgs(e.target.value)} onKeyDown=${(e) => e.key === "Enter" && installArgs && act(`/skills-sh install ${installArgs}`).then(() => setInstallArgs(""))} />
-				<button class="modal-btn icon-btn" title="Run npx skills add -g" disabled=${busy || !installArgs} onClick=${() => act(`/skills-sh install ${installArgs}`).then(() => setInstallArgs(""))}><${icons.arrowDownTray} /></button>
+				<input type="text" placeholder="owner/repo --skill name (or paste skills.sh's npx command)" value=${installArgs} onInput=${(e) => setInstallArgs(e.target.value)} onKeyDown=${(e) => e.key === "Enter" && installArgs && act(`/skills-sh install ${installArgs}`).then((res) => res.ok && setInstallArgs(""))} />
+				<button class="modal-btn icon-btn" title="Run npx skills add -g" disabled=${busy || !installArgs} onClick=${() => act(`/skills-sh install ${installArgs}`).then((res) => res.ok && setInstallArgs(""))}><${icons.arrowDownTray} /></button>
 			</div>
 
 			<div class="settings-section-title">Installed via skills.sh (${shSkills.length})</div>
 			${shSkills.length === 0 && html`<div class="settings-hint">No skills installed via skills.sh yet. Install one above.</div>`}
-			${shSkills
+			${[...shSkills]
 				.sort((a, b) => a.name.localeCompare(b.name))
 				.map(
 					(s) => html`
@@ -3939,9 +3953,9 @@ function SettingsMarketplace({ data, busy, act, confirm }) {
 					<div class="settings-hint" style="margin-bottom:6px">Any git repo with a <code>marketplace.json</code> catalog works. Add by <code>owner/repo</code>, URL, or path.</div>
 					<div class="settings-form-row">
 						<input type="text" placeholder="owner/repo, URL, or path" value=${mpSource} onInput=${(e) => setMpSource(e.target.value)} />
-						<button class="modal-btn icon-btn" title="Add marketplace" disabled=${busy || !mpSource} onClick=${() => {
-							act(`/plugin marketplace add ${mpSource}`);
-							setMpSource("");
+						<button class="modal-btn icon-btn" title="Add marketplace" disabled=${busy || !mpSource} onClick=${async () => {
+							const res = await act(`/plugin marketplace add ${mpSource}`);
+							if (res.ok) setMpSource("");
 						}}><${icons.plus} /></button>
 					</div>
 				</div>
@@ -3956,6 +3970,8 @@ function SettingsProvider({ data, busy, act, confirm }) {
 	const [editing, setEditing] = useState(null);
 	const [verifyState, setVerifyState] = useState(null);
 	const [saving, setSaving] = useState(false);
+	const [verifying, setVerifying] = useState(false);
+	const verifyVersion = useRef(0);
 	const startEdit = (p) => {
 		setEditing(p.name);
 		setName(p.name);
@@ -3977,13 +3993,18 @@ function SettingsProvider({ data, busy, act, confirm }) {
 			setVerifyState({ ok: false, msg: "Enter a base URL and API key first" });
 			return;
 		}
+		const version = ++verifyVersion.current;
+		setVerifying(true);
 		setVerifyState({ ok: null, msg: "Verifying…" });
 		try {
 			const res = await api("POST", "/api/provider/verify", { url, apiKey });
+			if (version !== verifyVersion.current) return;
 			if (res?.ok) setVerifyState({ ok: true, msg: "Provider reachable" });
 			else setVerifyState({ ok: false, msg: res?.error || "Verification failed" });
 		} catch (_e) {
-			setVerifyState({ ok: false, msg: "Verification request failed" });
+			if (version === verifyVersion.current) setVerifyState({ ok: false, msg: "Verification request failed" });
+		} finally {
+			if (version === verifyVersion.current) setVerifying(false);
 		}
 	};
 	// Mandatory gate: a provider is never saved with unverified credentials.
@@ -4034,18 +4055,21 @@ function SettingsProvider({ data, busy, act, confirm }) {
 			<div class="settings-form-row">
 				<input type="text" placeholder="name" value=${name} disabled=${!!editing} onInput=${(e) => {
 					setName(e.target.value);
+					verifyVersion.current++;
 					setVerifyState(null);
 				}} />
 				<input type="text" placeholder="base URL" value=${url} onInput=${(e) => {
 					setUrl(e.target.value);
+					verifyVersion.current++;
 					setVerifyState(null);
 				}} />
 				<input type="password" placeholder="API key" value=${apiKey} onInput=${(e) => {
 					setApiKey(e.target.value);
+					verifyVersion.current++;
 					setVerifyState(null);
 				}} />
-				<button class="modal-btn icon-btn" title="Verify credentials" disabled=${busy || saving || !url || !apiKey} onClick=${doVerify}><${icons.arrowPath} /></button>
-				<button class="modal-btn icon-btn" title=${editing ? "Save changes" : "Add provider"} disabled=${busy || saving || !name || !url || !apiKey} onClick=${saveProvider}><${icons.check} /></button>
+				<button class="modal-btn icon-btn" title="Verify credentials" disabled=${busy || saving || verifying || !url || !apiKey} onClick=${doVerify}><${icons.arrowPath} /></button>
+				<button class="modal-btn icon-btn" title=${editing ? "Save changes" : "Add provider"} disabled=${busy || saving || verifying || !name || !url || !apiKey} onClick=${saveProvider}><${icons.check} /></button>
 				${editing ? html`<button class="modal-btn icon-btn" title="Cancel" disabled=${busy || saving} onClick=${cancelEdit}><${icons.xCircle} /></button>` : null}
 			</div>
 			${verifyState ? html`<div class="settings-hint ${verifyState.ok === false ? "settings-error" : verifyState.ok === true ? "settings-ok" : ""}">${verifyState.ok === false ? "✕ " : verifyState.ok === true ? "✓ " : ""}${verifyState.msg}</div>` : null}
@@ -4861,6 +4885,10 @@ function App() {
 	const selfClosingRef = useRef(null);
 	const reconnectTimerRef = useRef(null);
 	const wasRunningRef = useRef(false);
+	const sessionViewVersionRef = useRef(0);
+	const draftVersionRef = useRef(0);
+	const draftCommitsRef = useRef(new Map());
+	const sessionsLoadVersionRef = useRef(0);
 	const [reconnectNonce, setReconnectNonce] = useState(0);
 	// Read inside the SSE effect's onmessage handler instead of closing over
 	// `diffOpen` directly — that effect only needs the *current* value at
@@ -4905,11 +4933,12 @@ function App() {
 
 	// Load sessions
 	const loadSessions = useCallback(async () => {
+		const version = ++sessionsLoadVersionRef.current;
 		try {
 			const data = await api("GET", "/api/sessions");
-			setSessions(data);
+			if (version === sessionsLoadVersionRef.current) setSessions(data);
 		} catch {}
-		setSessionsLoaded(true);
+		if (version === sessionsLoadVersionRef.current) setSessionsLoaded(true);
 	}, []);
 
 	// Select session — `push` controls whether this lands as a new browser
@@ -4917,6 +4946,8 @@ function App() {
 	// (programmatic: initial bootstrap, reconnect recovery, popstate).
 	const selectSession = useCallback(
 		async (id, { push = true, prefetch = null } = {}) => {
+			const version = ++sessionViewVersionRef.current;
+			++draftVersionRef.current;
 			try {
 				// initClientState may already have this in flight — kicked off
 				// alongside (not after) the personas/session-list calls when the
@@ -4925,6 +4956,7 @@ function App() {
 				// for every other caller (sidebar clicks, popstate, ...).
 				const data = prefetch ? await prefetch : await api("GET", `/api/sessions/${id}`);
 				if (!data) throw new Error("Not found");
+				if (version !== sessionViewVersionRef.current) return;
 				// Splice in older pages already loaded via scroll-up earlier this
 				// tab session — only if nothing changed underneath: the cache's
 				// anchorSeq is the oldestSeq the *latest* page had when caching
@@ -4958,7 +4990,7 @@ function App() {
 				setUrlSessionId(id, { push });
 				undismiss(id);
 			} catch (err) {
-				showToast(err.message, "error");
+				if (version === sessionViewVersionRef.current) showToast(err.message, "error");
 			}
 		},
 		[showToast, undismiss, resetStreamingNow],
@@ -4972,8 +5004,20 @@ function App() {
 	// (nothing left after this change — kept as the one place that actually
 	// talks to POST /api/sessions).
 	const commitSession = useCallback(
-		async (persona, cwd, { push = true } = {}) => {
-			const data = await api("POST", "/api/sessions", { persona, cwd });
+		async (persona, cwd, { push = true, draftVersion } = {}) => {
+			const create = async () => api("POST", "/api/sessions", { persona, cwd });
+			const pending = draftVersion == null ? create() : (draftCommitsRef.current.get(draftVersion) ?? create());
+			if (draftVersion != null) draftCommitsRef.current.set(draftVersion, pending);
+			let data;
+			try {
+				data = await pending;
+			} finally {
+				if (draftVersion != null && draftCommitsRef.current.get(draftVersion) === pending) {
+					draftCommitsRef.current.delete(draftVersion);
+				}
+			}
+			if (draftVersion != null && draftVersion !== draftVersionRef.current) return data.id;
+			++sessionViewVersionRef.current;
 			setActiveId(data.id);
 			setSession({
 				id: data.id,
@@ -4993,7 +5037,7 @@ function App() {
 				localStorage.setItem("cast:lastSessionId", data.id);
 			} catch {}
 			setUrlSessionId(data.id, { push });
-			loadSessions();
+			void loadSessions();
 			return data.id;
 		},
 		[loadSessions, resetStreamingNow],
@@ -5007,6 +5051,8 @@ function App() {
 	// "New chat": the conversation doesn't exist until you say something.
 	const startDraft = useCallback(
 		(persona, draftCwd) => {
+			++sessionViewVersionRef.current;
+			const draftVersion = ++draftVersionRef.current;
 			if (esRef.current) {
 				esRef.current.close();
 				esRef.current = null;
@@ -5023,6 +5069,7 @@ function App() {
 				createdAt: new Date().toISOString(),
 				updatedAt: new Date().toISOString(),
 				isDraft: true,
+				draftVersion,
 			});
 			resetStreamingNow();
 			setRunning(false);
@@ -5282,6 +5329,8 @@ function App() {
 	// Submit message
 	const submitMessage = useCallback(
 		async (text, images, pendingDocs) => {
+			const draftVersion = session?.isDraft ? session.draftVersion : null;
+			const isCurrentDraft = () => draftVersion == null || draftVersion === draftVersionRef.current;
 			// Pure client-side commands need no live (or even draft) session —
 			// handled before any draft-commit below so idly hitting /diff or
 			// /copy on a fresh "new session" draft can't spuriously create a
@@ -5336,7 +5385,7 @@ function App() {
 				if (!id) {
 					if (session?.isDraft) {
 						try {
-							id = await commitSession(session.persona, session.cwd, { push: true });
+							id = await commitSession(session.persona, session.cwd, { push: true, draftVersion });
 						} catch (err) {
 							showToast(err.message, "error");
 							return;
@@ -5381,7 +5430,7 @@ function App() {
 			if (!id) {
 				if (session?.isDraft) {
 					try {
-						id = await commitSession(session.persona, session.cwd, { push: true });
+						id = await commitSession(session.persona, session.cwd, { push: true, draftVersion });
 					} catch (err) {
 						showToast(err.message, "error");
 						return;
@@ -5478,7 +5527,7 @@ function App() {
 			// toDisplayMessages produces (content: text, images: [...]) so a page
 			// reload looks identical to what was just shown live.
 			setSession((prev) =>
-				prev
+				prev?.id === id && isCurrentDraft()
 					? {
 							...prev,
 							messages: [
@@ -5499,7 +5548,7 @@ function App() {
 				// (and keeps the sidebar's message counts from drifting stale).
 				loadSessions();
 			} catch (err) {
-				showToast(err.message, "error");
+				if (isCurrentDraft()) showToast(err.message, "error");
 			}
 		},
 		[activeId, session, commitSession, loadSessions, selectSession, showToast, toggleDiff, addNotice],
