@@ -163,6 +163,9 @@ export interface DisplayToolCall {
 export interface DisplayMessage {
 	role: string;
 	content: string | null;
+	/** Persistent row sequence, used by the web client to retain DOM identity
+	 * when an SSE reconnect refreshes the latest history page. */
+	seq?: number;
 	toolCalls?: DisplayToolCall[];
 	thinking?: string;
 	turnMeta?: TurnMeta;
@@ -264,6 +267,7 @@ export function toDisplayMessages(
 			out.push({
 				role: "assistant",
 				content: typeof m.content === "string" ? m.content : null,
+				seq: seqs?.[i],
 				toolCalls,
 				thinking: reasoning?.[i],
 				turnMeta: turnMeta?.[i],
@@ -305,7 +309,7 @@ export function toDisplayMessages(
 					sessionId && seq !== undefined
 						? dataUrls.map((_, idx) => `/api/sessions/${sessionId}/image?seq=${seq}&idx=${idx}`)
 						: dataUrls;
-				out.push({ role: m.role, content: textPart, images });
+				out.push({ role: m.role, content: textPart, seq: seqs?.[i], images });
 				return;
 			}
 		}
@@ -332,6 +336,7 @@ export function toDisplayMessages(
 		out.push({
 			role: m.role,
 			content,
+			seq: seqs?.[i],
 			thinking: m.role === "assistant" ? reasoning?.[i] : undefined,
 			turnMeta: m.role === "assistant" ? turnMeta?.[i] : undefined,
 		});

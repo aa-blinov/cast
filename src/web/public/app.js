@@ -1100,6 +1100,51 @@ function StreamingBlocks({ blocks }) {
 		</div>
 	`;
 }
+
+function LiveStreamingBlocks({ controllerRef, onFrame }) {
+	const [blocks, setBlocks] = useState([]);
+	const blocksRef = useRef([]);
+	const rafRef = useRef(null);
+	const flush = useCallback(() => {
+		rafRef.current = null;
+		setBlocks(blocksRef.current);
+		onFrame();
+	}, [onFrame]);
+	const update = useCallback(
+		(updater) => {
+			blocksRef.current = updater(blocksRef.current);
+			if (rafRef.current == null) rafRef.current = requestAnimationFrame(flush);
+		},
+		[flush],
+	);
+	const reset = useCallback(() => {
+		if (rafRef.current != null) {
+			cancelAnimationFrame(rafRef.current);
+			rafRef.current = null;
+		}
+		blocksRef.current = [];
+		setBlocks([]);
+	}, []);
+	const take = useCallback(() => {
+		if (rafRef.current != null) {
+			cancelAnimationFrame(rafRef.current);
+			rafRef.current = null;
+		}
+		const snapshot = blocksRef.current;
+		blocksRef.current = [];
+		setBlocks([]);
+		return snapshot;
+	}, []);
+	controllerRef.current = { update, reset, take };
+	useEffect(
+		() => () => {
+			if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+			if (controllerRef.current?.reset === reset) controllerRef.current = null;
+		},
+		[controllerRef, reset],
+	);
+	return html`<${StreamingBlocks} blocks=${blocks} />`;
+}
 // The three pickers below are pure display: Composer owns filtering AND
 // selection so arrow-key nav and mouse click always agree on the same list.
 function CommandPalette({ items, selectedIndex, running, onHover, onSelect, visible }) {
@@ -4516,12 +4561,27 @@ const messageKeys = new WeakMap();
 let nextMessageKey = 0;
 function keyForMessage(msg) {
 	if (typeof msg !== "object" || msg === null) return String(msg);
+	if (typeof msg.seq === "number") return `seq:${msg.seq}`;
 	let k = messageKeys.get(msg);
 	if (k === undefined) {
 		k = ++nextMessageKey;
 		messageKeys.set(msg, k);
 	}
 	return k;
+}
+
+function mergeHistoryPage(previous, incoming) {
+	if (!Array.isArray(incoming)) return previous;
+	if (incoming.length === 0) return [];
+	const firstSeq = incoming.find((message) => typeof message.seq === "number")?.seq;
+	const before =
+		typeof firstSeq === "number"
+			? previous.filter((message) => typeof message.seq === "number" && message.seq < firstSeq)
+			: [];
+	const existing = new Map(
+		previous.filter((message) => typeof message.seq === "number").map((message) => [message.seq, message]),
+	);
+	return [...before, ...incoming.map((message) => existing.get(message.seq) ?? message)];
 }
 
 // The "first-paint" animation for messages is handled entirely in CSS
@@ -4679,6 +4739,8 @@ function App() {
 	// tick itself lives there instead of here.
 	const turnStartRef = useRef(new Map());
 	const [session, setSession] = useState(null);
+	const activeSessionIdRef = useRef(null);
+	activeSessionIdRef.current = activeId;
 	const [personas, setPersonas] = useState([]);
 	const [commands, setCommands] = useState([]);
 	// Re-fetched per active session (not just once at boot) because the list
@@ -4714,49 +4776,12 @@ function App() {
 			return DEFAULT_FONT_SCALE;
 		}
 	});
-	const [streaming, setStreaming] = useState([]);
-	// SSE delivers token/thinking deltas at the model's raw generation rate,
-	// which can spike well past 60fps for a fast model or a burst of buffered
-	// events. Calling setStreaming (full markdown re-render + reflow of the
-	// whole growing block) on every single delta was measured causing 300ms+
-	// main-thread stalls and dropped frames on long, tool-heavy replies — so
-	// high-frequency updates go through this ref and get coalesced to at most
-	// one React commit per animation frame instead of one per SSE event.
-	const streamingRef = useRef([]);
-	const streamingRafRef = useRef(null);
-	const flushStreaming = useCallback(() => {
-		streamingRafRef.current = null;
-		setStreaming(streamingRef.current);
-	}, []);
-	const updateStreaming = useCallback(
-		(updater) => {
-			streamingRef.current = updater(streamingRef.current);
-			if (streamingRafRef.current == null) streamingRafRef.current = requestAnimationFrame(flushStreaming);
-		},
-		[flushStreaming],
-	);
-	// Discrete transitions (turn end, abort, reconnect) that must land
-	// immediately rather than risk sitting behind a still-pending frame.
-	const resetStreamingNow = useCallback(() => {
-		if (streamingRafRef.current != null) {
-			cancelAnimationFrame(streamingRafRef.current);
-			streamingRafRef.current = null;
-		}
-		streamingRef.current = [];
-		setStreaming([]);
-	}, []);
-	// Same, but for call sites that need the accumulated blocks (streaming
-	// content being promoted into a real persisted message) before clearing.
-	const takeStreamingNow = useCallback(() => {
-		if (streamingRafRef.current != null) {
-			cancelAnimationFrame(streamingRafRef.current);
-			streamingRafRef.current = null;
-		}
-		const snapshot = streamingRef.current;
-		streamingRef.current = [];
-		setStreaming([]);
-		return snapshot;
-	}, []);
+	// Streaming state lives in LiveStreamingBlocks, so token commits never
+	// reconcile the sidebar or full settled transcript.
+	const streamingControllerRef = useRef(null);
+	const updateStreaming = useCallback((updater) => streamingControllerRef.current?.update(updater), []);
+	const resetStreamingNow = useCallback(() => streamingControllerRef.current?.reset(), []);
+	const takeStreamingNow = useCallback(() => streamingControllerRef.current?.take() ?? [], []);
 	const [running, setRunning] = useState(false);
 	const [pendingSteers, setPendingSteers] = useState([]);
 	const [pendingQueue, setPendingQueue] = useState([]);
@@ -4771,6 +4796,8 @@ function App() {
 		}
 	});
 	const [diffData, setDiffData] = useState(null);
+	const diffRequestVersionRef = useRef(0);
+	const diffRefreshRafRef = useRef(null);
 	const [diffFile, setDiffFile] = useState(null);
 	const [diffTab, setDiffTab] = useState(() => {
 		try {
@@ -4881,6 +4908,12 @@ function App() {
 
 	const esRef = useRef(null);
 	const messagesRef = useRef(null);
+	const scrollStreamingFrame = useCallback(() => {
+		requestAnimationFrame(() => {
+			if (autoScrollRef.current && messagesRef.current)
+				messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
+		});
+	}, []);
 	const autoScrollRef = useRef(true);
 	const selfClosingRef = useRef(null);
 	const reconnectTimerRef = useRef(null);
@@ -5115,6 +5148,7 @@ function App() {
 				if (!p) return false;
 				const sortedPersonas = [...p].sort((a, b) => a.label.localeCompare(b.label));
 				setPersonas(sortedPersonas);
+				personasRef.current = sortedPersonas;
 				api("GET", "/api/commands")
 					.then((c) => c && setCommands(c))
 					.catch(() => {});
@@ -5142,21 +5176,13 @@ function App() {
 			const s = await api("GET", "/api/sessions");
 			if (!s) return false;
 			setSessions(s);
-			if (s.length > 0) {
-				// URL wins (lets a shared/duplicated/bookmarked link always land on
-				// that exact thread) over the last-active fallback from localStorage.
-				let lastId = null;
-				try {
-					lastId = localStorage.getItem("cast:lastSessionId");
-				} catch {}
-				const target =
-					urlId && s.find((x) => x.id === urlId)
-						? urlId
-						: lastId && s.find((x) => x.id === lastId)
-							? lastId
-							: s[0].id;
-				await selectSession(target, { push: false, prefetch: target === urlId ? sessionPrefetch : null });
+			if (urlId && s.find((x) => x.id === urlId)) {
+				// A session is restored only when the URL explicitly names it. The
+				// bare root is a deliberate fresh draft, never an implicit return to
+				// a previous agent's cwd, model, or conversation.
+				await selectSession(urlId, { push: false, prefetch: sessionPrefetch });
 			} else {
+				if (urlId) showToast("Session not found — started a new session", "error");
 				const current = personasRef.current;
 				const defaultP = current.find((x) => x.name === "senior") ?? current[0];
 				if (defaultP) startDraft(defaultP.name, undefined);
@@ -5165,7 +5191,7 @@ function App() {
 		} catch {
 			return false;
 		}
-	}, [selectSession, startDraft]);
+	}, [selectSession, showToast, startDraft]);
 
 	// The browser's own EventSource retry only covers a connection that
 	// dropped after connecting fine (network blip, laptop sleep) — it does
@@ -5573,12 +5599,24 @@ function App() {
 	// makes everything disappear").
 	const loadDiff = useCallback(async () => {
 		if (!activeId) return;
+		const sessionId = activeId;
+		const version = ++diffRequestVersionRef.current;
 		try {
-			setDiffData(await api("GET", `/api/sessions/${activeId}/diff`));
+			const data = await api("GET", `/api/sessions/${sessionId}/diff`);
+			if (version === diffRequestVersionRef.current && activeSessionIdRef.current === sessionId) setDiffData(data);
 		} catch {
-			setDiffData({ files: [] });
+			if (version === diffRequestVersionRef.current && activeSessionIdRef.current === sessionId)
+				setDiffData({ files: [] });
 		}
 	}, [activeId]);
+	const queueDiffRefresh = useCallback(() => {
+		if (!diffOpenRef.current || diffRefreshRafRef.current != null) return;
+		diffRefreshRafRef.current = requestAnimationFrame(() => {
+			diffRefreshRafRef.current = null;
+			loadDiff();
+			setFsRefreshNonce((n) => n + 1);
+		});
+	}, [loadDiff]);
 
 	// SSE
 	// biome-ignore lint/correctness/useExhaustiveDependencies: reconnectNonce isn't read in the body — bumping it is what forces this effect to re-subscribe after a backend restart (see startReconnectLoop). diffOpen is deliberately not a dependency — see diffOpenRef above; making it one would tear down and reopen the EventSource (full refetch, full message remount) on every diff-panel toggle.
@@ -5586,19 +5624,22 @@ function App() {
 		if (!activeId) return;
 		if (esRef.current) esRef.current.close();
 
-		const es = new EventSource(`${window.location.origin}/api/sessions/${activeId}/events`);
+		const streamSessionId = activeId;
+		const es = new EventSource(`${window.location.origin}/api/sessions/${streamSessionId}/events`);
 		esRef.current = es;
 		setConnected(true);
+		const isCurrent = () => esRef.current === es && activeSessionIdRef.current === streamSessionId;
 
 		es.onopen = () => {
+			if (!isCurrent()) return;
 			setConnected(true);
 			// Refetch session state on reconnect — the server may have
 			// advanced while we were disconnected (e.g. mobile tab was
 			// backgrounded). This catches messages missed between the last
 			// SSE event we received and the reconnect.
-			api("GET", `/api/sessions/${activeId}`)
+			api("GET", `/api/sessions/${streamSessionId}`)
 				.then((data) => {
-					if (!data) return;
+					if (!data || !isCurrent()) return;
 					const isRunning = data.status === "running";
 					setRunning(isRunning);
 					wasRunningRef.current = isRunning;
@@ -5614,10 +5655,11 @@ function App() {
 						// was actually missed when the count already matches, so keep the
 						// existing message objects and just refresh the rest of the
 						// session fields.
-						if (prev.id === data.id && (data.messages || []).length === prev.messages.length) {
-							return { ...prev, status: data.status, usage: data.usage, updatedAt: data.updatedAt };
-						}
-						return { ...data, messages: data.messages || [] };
+						if (prev.id !== data.id) return prev;
+						return {
+							...data,
+							messages: mergeHistoryPage(prev.messages, data.messages || []),
+						};
 					});
 					// Always clear streaming on reconnect — stale blocks from
 					// before the disconnect would conflict with new SSE events.
@@ -5635,6 +5677,7 @@ function App() {
 		};
 
 		es.onmessage = (e) => {
+			if (!isCurrent()) return;
 			try {
 				const event = JSON.parse(e.data);
 				switch (event.type) {
@@ -5724,8 +5767,7 @@ function App() {
 							),
 						);
 						if (diffOpenRef.current) {
-							loadDiff();
-							setFsRefreshNonce((n) => n + 1);
+							queueDiffRefresh();
 						}
 						break;
 					case "assistant_message": {
@@ -5794,14 +5836,17 @@ function App() {
 							// it: if the user has scrolled up and loaded older history via
 							// loadOlderMessages, that's more than a single fresh page can
 							// possibly contain, and must survive this reconnect merge.
-							api("GET", `/api/sessions/${activeId}`)
+							api("GET", `/api/sessions/${streamSessionId}`)
 								.then((d) => {
-									if (!d) return;
+									if (!d || !isCurrent()) return;
 									setSession((inner) => {
-										if (!inner) return inner;
-										const serverMsgs = d.messages || [];
-										const messages = serverMsgs.length > inner.messages.length ? serverMsgs : inner.messages;
-										return { ...inner, messages, usage: d.usage, updatedAt: d.updatedAt };
+										if (!inner || inner.id !== streamSessionId) return inner;
+										return {
+											...inner,
+											messages: mergeHistoryPage(inner.messages, d.messages || []),
+											usage: d.usage,
+											updatedAt: d.updatedAt,
+										};
 									});
 								})
 								.catch(() => {});
@@ -5933,6 +5978,7 @@ function App() {
 		// non-2xx, e.g. this session id no longer exists after a backend
 		// restart) and needs our own recovery loop instead.
 		es.onerror = () => {
+			if (!isCurrent()) return;
 			setConnected(false);
 			if (es.readyState === EventSource.CLOSED) {
 				setSession((prev) =>
@@ -5947,7 +5993,7 @@ function App() {
 		return () => {
 			es.close();
 		};
-	}, [activeId, reconnectNonce, startReconnectLoop, addNotice, loadDiff, showToast]);
+	}, [activeId, reconnectNonce, startReconnectLoop, addNotice, queueDiffRefresh, showToast]);
 
 	// Sidebar-wide SSE — independent of activeId, so message-count badges for
 	// other/background threads update live instead of only on page reload.
@@ -5973,7 +6019,7 @@ function App() {
 				messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
 			});
 		}
-	}, [session?.messages, streaming]);
+	}, [session?.messages]);
 
 	const scrollToBottom = useCallback(() => {
 		autoScrollRef.current = true;
@@ -6372,7 +6418,6 @@ function App() {
 					${
 						!bootstrapping &&
 						messages.length === 0 &&
-						streaming.length === 0 &&
 						html`
 						<div class="empty-state">
 							<${CastLogo} class="empty-state-banner" />
@@ -6382,7 +6427,7 @@ function App() {
 					`
 					}
 					${messages.map((msg) => html`<${Message} key=${keyForMessage(msg)} msg=${msg} />`)}
-					<${StreamingBlocks} blocks=${streaming} />
+					<${LiveStreamingBlocks} controllerRef=${streamingControllerRef} onFrame=${scrollStreamingFrame} />
 				</div>
 				${
 					!atBottom &&
