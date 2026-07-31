@@ -285,13 +285,9 @@ function initTooltips() {
 }
 
 // ── Font ─────────────────────────────────────────────────────────────
-// A curated set of well-regarded monospace/coding fonts — not exhaustive,
-// just fonts actually built for reading code (ligature/legibility-focused),
-// all available from the same Google Fonts CDN style.css already depends
-// on. JetBrains Mono (the built-in default) is loaded eagerly by style.css's
-// own @import; every other family here is fetched on demand, only once
-// actually picked — adding 9 more @import families up front would undo the
-// whole point of trimming the dead Inter import (see style.css).
+// A compact gallery of proven coding/UI fonts. Their regular faces are served
+// locally so the picker always shows genuine samples without a network-driven
+// reflow; extra weights load only after a user selects a font.
 // index.html's inline bootstrap script keeps its own copy of each family
 // string (it runs before this module does, same reasoning as applyTheme's
 // cache) — update both if a family or id here changes.
@@ -301,79 +297,29 @@ function initTooltips() {
 // (see applyFont) — a sans pick only ever touches --font, since --font-mono
 // backs code blocks, tool-arg dumps, tables, and the ASCII banner, all of
 // which depend on real monospace character alignment to not look broken.
-// Every google id here was verified to actually 200 from fonts.googleapis.com
-// (curled each css2?family=... individually) before adding it.
+// Google family IDs below provide only the heavier weights after selection.
 const FONT_OPTIONS = [
 	// ── Monospace ──
-	{
-		id: "cousine",
-		label: "Cousine",
-		mono: true,
-		family: "'Cousine', 'JetBrains Mono', monospace",
-		google: "Cousine:wght@400;700",
-	},
 	{
 		id: "fira-code",
 		label: "Fira Code",
 		mono: true,
 		family: "'Fira Code', 'JetBrains Mono', monospace",
-		google: "Fira+Code:wght@400;500;600;700",
+		google: "Fira+Code:wght@500;600;700",
 	},
 	{
 		id: "ibm-plex-mono",
 		label: "IBM Plex Mono",
 		mono: true,
 		family: "'IBM Plex Mono', monospace",
-		google: "IBM+Plex+Mono:wght@400;500;600;700",
-	},
-	{
-		id: "inconsolata",
-		label: "Inconsolata",
-		mono: true,
-		family: "'Inconsolata', monospace",
-		google: "Inconsolata:wght@400;500;600;700",
+		google: "IBM+Plex+Mono:wght@500;600;700",
 	},
 	{
 		id: "jetbrains-mono",
 		label: "JetBrains Mono",
 		mono: true,
 		family: "'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace",
-		google: null,
-	},
-	{
-		id: "roboto-mono",
-		label: "Roboto Mono",
-		mono: true,
-		family: "'Roboto Mono', monospace",
-		google: "Roboto+Mono:wght@400;500;600;700",
-	},
-	{
-		id: "source-code-pro",
-		label: "Source Code Pro",
-		mono: true,
-		family: "'Source Code Pro', monospace",
-		google: "Source+Code+Pro:wght@400;500;600;700",
-	},
-	{
-		id: "space-mono",
-		label: "Space Mono",
-		mono: true,
-		family: "'Space Mono', monospace",
-		google: "Space+Mono:wght@400;700",
-	},
-	{
-		id: "ubuntu-mono",
-		label: "Ubuntu Mono",
-		mono: true,
-		family: "'Ubuntu Mono', monospace",
-		google: "Ubuntu+Mono:wght@400;700",
-	},
-	{
-		id: "victor-mono",
-		label: "Victor Mono",
-		mono: true,
-		family: "'Victor Mono', 'JetBrains Mono', monospace",
-		google: "Victor+Mono:wght@400;500;600;700",
+		google: "JetBrains+Mono:wght@500;600;700",
 	},
 	// ── Sans-serif (--font only; --font-mono stays whatever mono font is active) ──
 	{
@@ -381,52 +327,15 @@ const FONT_OPTIONS = [
 		label: "IBM Plex Sans",
 		mono: false,
 		family: "'IBM Plex Sans', sans-serif",
-		google: "IBM+Plex+Sans:wght@400;500;600;700",
+		google: "IBM+Plex+Sans:wght@500;600;700",
 	},
-	{ id: "inter", label: "Inter", mono: false, family: "'Inter', sans-serif", google: "Inter:wght@400;500;600;700" },
-	{ id: "lato", label: "Lato", mono: false, family: "'Lato', sans-serif", google: "Lato:wght@400;700;900" },
-	{
-		id: "montserrat",
-		label: "Montserrat",
-		mono: false,
-		family: "'Montserrat', sans-serif",
-		google: "Montserrat:wght@400;500;600;700",
-	},
-	{
-		id: "nunito",
-		label: "Nunito",
-		mono: false,
-		family: "'Nunito', sans-serif",
-		google: "Nunito:wght@400;500;600;700",
-	},
-	{
-		id: "open-sans",
-		label: "Open Sans",
-		mono: false,
-		family: "'Open Sans', sans-serif",
-		google: "Open+Sans:wght@400;500;600;700",
-	},
-	{
-		id: "poppins",
-		label: "Poppins",
-		mono: false,
-		family: "'Poppins', sans-serif",
-		google: "Poppins:wght@400;500;600;700",
-	},
-	{ id: "roboto", label: "Roboto", mono: false, family: "'Roboto', sans-serif", google: "Roboto:wght@400;500;700" },
-	{
-		id: "source-sans-3",
-		label: "Source Sans 3",
-		mono: false,
-		family: "'Source Sans 3', sans-serif",
-		google: "Source+Sans+3:wght@400;500;600;700",
-	},
+	{ id: "inter", label: "Inter", mono: false, family: "'Inter', sans-serif", google: "Inter:wght@500;600;700" },
 	{
 		id: "work-sans",
 		label: "Work Sans",
 		mono: false,
 		family: "'Work Sans', sans-serif",
-		google: "Work+Sans:wght@400;500;600;700",
+		google: "Work+Sans:wght@500;600;700",
 	},
 ];
 const DEFAULT_FONT_ID = "jetbrains-mono";
@@ -2907,7 +2816,7 @@ function SettingsModal({
 	confirm,
 	onReload,
 }) {
-	const [tab, setTab] = useState(activeId ? SETTINGS_TABS[0].id : "theme");
+	const [tab, setTab] = useState(SETTINGS_TABS[0].id);
 	const [data, setData] = useState({});
 	const [errors, setErrors] = useState({});
 	const [busy, setBusy] = useState(false);
@@ -2915,9 +2824,9 @@ function SettingsModal({
 
 	const run = useCallback(
 		async (command) => {
-			if (!activeId) return { ok: false, error: "No active session" };
 			try {
-				return await api("POST", `/api/sessions/${activeId}/command`, { command });
+				const endpoint = activeId ? `/api/sessions/${activeId}/command` : "/api/settings/command";
+				return await api("POST", endpoint, { command });
 			} catch (err) {
 				return { ok: false, error: err.message };
 			}
@@ -2929,10 +2838,9 @@ function SettingsModal({
 		async (t) => {
 			// Initial preloading and post-mutation refreshes race by design. Only
 			// the newest request for a resource may update its visible state.
-			const resource = t === "skillssh" ? "skills" : t;
-			const version = (loadVersions.current.get(resource) || 0) + 1;
-			loadVersions.current.set(resource, version);
-			const isCurrent = () => loadVersions.current.get(resource) === version;
+			const version = (loadVersions.current.get(t) || 0) + 1;
+			loadVersions.current.set(t, version);
+			const isCurrent = () => loadVersions.current.get(t) === version;
 			const commit = (update) => {
 				if (isCurrent()) setData(update);
 			};
@@ -2940,11 +2848,13 @@ function SettingsModal({
 				if (isCurrent()) setErrors((e) => ({ ...e, [t]: error }));
 			};
 			setErrors((e) => ({ ...e, [t]: null }));
-			if (!activeId && t !== "theme" && t !== "font") return;
 			if (t === "model") {
 				const [models, reasoning, current, providers] = await Promise.all([
 					api("GET", "/api/models/cached").catch(() => null),
-					api("GET", `/api/sessions/${activeId}/reasoning-options`).catch(() => null),
+					api(
+						"GET",
+						activeId ? `/api/sessions/${activeId}/reasoning-options` : "/api/settings/reasoning-options",
+					).catch(() => null),
 					run("/current"),
 					run("/provider list"),
 				]);
@@ -3109,8 +3019,7 @@ function SettingsModal({
 	// theme and font both come from props/local state (fetched once at app
 	// boot, or never fetched at all for font — see applyFont) rather than the
 	// per-tab preload above.
-	const needsSession = tab !== "theme" && tab !== "font";
-	const hasData = !needsSession || data[tab] !== undefined;
+	const hasData = tab === "theme" || tab === "font" || data[tab] !== undefined;
 
 	return html`
 		<div class="modal-backdrop" onClick=${onClose}>
@@ -3133,45 +3042,43 @@ function SettingsModal({
 					<div class="settings-pane">
 						${errors[tab] && html`<div class="settings-error">${errors[tab]}</div>`}
 						${
-							!activeId && needsSession
-								? html`<div class="settings-hint">Open or create a session to access this tab.</div>`
-								: !hasData
-									? html`<div class="settings-loading">Loading…</div>`
-									: tab === "font"
-										? html`<${SettingsFont} currentFontId=${currentFontId} currentFontScale=${currentFontScale} onPickFont=${onPickFont} onPickScale=${onPickScale} />`
-										: tab === "model"
-											? html`<${SettingsModel} data=${data.model} busy=${busy} act=${act} />`
-											: tab === "theme"
-												? html`<${SettingsTheme} themes=${themes} currentThemeId=${currentThemeId} onPick=${async (
-														id,
-													) => {
-														const res = await act(`/theme ${id}`);
-														if (res.ok && res.result?.colors) onApplyTheme(res.result.colors);
-														if (res.ok && res.result?.theme) onThemeChange(res.result.theme);
-													}} />`
-												: tab === "bash"
-													? html`<${SettingsBash} data=${data.bash} busy=${busy} act=${act} />`
-													: tab === "web"
-														? html`<${SettingsWeb} data=${data.web} busy=${busy} act=${act} />`
-														: tab === "quick-mode"
-															? html`<${SettingsQuickMode} data=${data["quick-mode"]} busy=${busy} act=${act} personas=${personas} onQuickSessionPersonaChange=${onQuickSessionPersonaChange} />`
-															: tab === "hooks"
-																? html`<${SettingsHooks} data=${data.hooks} busy=${busy} act=${act} />`
-																: tab === "mcp"
-																	? html`<${SettingsMcp} data=${data.mcp} busy=${busy} act=${act} confirm=${confirm} />`
-																	: tab === "skills"
-																		? html`<${SettingsSkills} data=${data.skills} busy=${busy} act=${act} confirm=${confirm} />`
-																		: tab === "plugins"
-																			? html`<${SettingsPlugins} data=${data.plugins} busy=${busy} act=${act} confirm=${confirm} />`
-																			: tab === "marketplace"
-																				? html`<${SettingsMarketplace} data=${data.marketplace} busy=${busy} act=${act} confirm=${confirm} />`
-																				: tab === "skillssh"
-																					? html`<${SettingsSkillssh} data=${data.skills} busy=${busy} act=${act} confirm=${confirm} />`
-																					: tab === "provider"
-																						? html`<${SettingsProvider} data=${data.provider} busy=${busy} act=${act} confirm=${confirm} />`
-																						: tab === "ssh"
-																							? html`<${SettingsSsh} data=${data.ssh} busy=${busy} act=${act} confirm=${confirm} />`
-																							: null
+							!hasData
+								? html`<div class="settings-loading">Loading…</div>`
+								: tab === "font"
+									? html`<${SettingsFont} currentFontId=${currentFontId} currentFontScale=${currentFontScale} onPickFont=${onPickFont} onPickScale=${onPickScale} />`
+									: tab === "model"
+										? html`<${SettingsModel} data=${data.model} busy=${busy} act=${act} />`
+										: tab === "theme"
+											? html`<${SettingsTheme} themes=${themes} currentThemeId=${currentThemeId} onPick=${async (
+													id,
+												) => {
+													const res = await act(`/theme ${id}`);
+													if (res.ok && res.result?.colors) onApplyTheme(res.result.colors);
+													if (res.ok && res.result?.theme) onThemeChange(res.result.theme);
+												}} />`
+											: tab === "bash"
+												? html`<${SettingsBash} data=${data.bash} busy=${busy} act=${act} />`
+												: tab === "web"
+													? html`<${SettingsWeb} data=${data.web} busy=${busy} act=${act} />`
+													: tab === "quick-mode"
+														? html`<${SettingsQuickMode} data=${data["quick-mode"]} busy=${busy} act=${act} personas=${personas} onQuickSessionPersonaChange=${onQuickSessionPersonaChange} />`
+														: tab === "hooks"
+															? html`<${SettingsHooks} data=${data.hooks} busy=${busy} act=${act} />`
+															: tab === "mcp"
+																? html`<${SettingsMcp} data=${data.mcp} busy=${busy} act=${act} confirm=${confirm} />`
+																: tab === "skills"
+																	? html`<${SettingsSkills} data=${data.skills} busy=${busy} act=${act} confirm=${confirm} />`
+																	: tab === "plugins"
+																		? html`<${SettingsPlugins} data=${data.plugins} busy=${busy} act=${act} confirm=${confirm} />`
+																		: tab === "marketplace"
+																			? html`<${SettingsMarketplace} data=${data.marketplace} busy=${busy} act=${act} confirm=${confirm} />`
+																			: tab === "skillssh"
+																				? html`<${SettingsSkillssh} data=${data.skills} busy=${busy} act=${act} confirm=${confirm} />`
+																				: tab === "provider"
+																					? html`<${SettingsProvider} data=${data.provider} busy=${busy} act=${act} confirm=${confirm} />`
+																					: tab === "ssh"
+																						? html`<${SettingsSsh} data=${data.ssh} busy=${busy} act=${act} confirm=${confirm} />`
+																						: null
 						}
 					</div>
 				</div>
@@ -3404,16 +3311,8 @@ function SettingsTheme({ themes, currentThemeId, onPick }) {
 
 // Client-only (localStorage) — unlike SettingsTheme, picking here never
 // round-trips through `act`/`/command`, so it applies the instant it's
-// clicked/dragged. Each swatch renders its own label in its own font as a
-// live preview of what picking it actually looks like.
+// clicked/dragged. The local regular faces are already ready for every tile.
 function SettingsFont({ currentFontId, currentFontScale, onPickFont, onPickScale }) {
-	// The active font is already loaded by applyFont(), but the swatches below
-	// render every option's label in its own font as a preview — those need
-	// their Google Fonts stylesheets loaded too, or they'd all fall back to
-	// the system font and look identical.
-	useEffect(() => {
-		for (const f of FONT_OPTIONS) loadGoogleFont(f.google);
-	}, []);
 	return html`
 		<div class="settings-rows" style=${{ marginBottom: "16px" }}>
 			<div class="settings-row-label">Scale</div>
@@ -3823,18 +3722,37 @@ function SettingsHooks({ data, busy, act }) {
 
 function SettingsSkillssh({ data, busy, act, confirm }) {
 	const [installArgs, setInstallArgs] = useState("");
+	const [installing, setInstalling] = useState(false);
 	const allSkills = data || [];
 	// Filter to skills installed via npx skills add (flagged by the bridge)
 	const shSkills = allSkills.filter((s) => s.skillssh);
+	const install = async () => {
+		if (!installArgs || busy || installing) return;
+		setInstalling(true);
+		try {
+			const res = await act(`/skills-sh install ${installArgs}`);
+			if (res.ok) setInstallArgs("");
+		} finally {
+			setInstalling(false);
+		}
+	};
 	return html`
 		<div class="settings-rows">
 			<p class="settings-intro"><span><a href="https://skills.sh" target="_blank" rel="noopener">skills.sh</a> is the open agent-skills ecosystem (70+ agents, 27k stars) — browse it there for a package name, then install below. Cast already loads anything in <code>~/.agents/skills/</code> automatically.</span></p>
 
 			<div class="settings-section-title">Install a skill</div>
 			<div class="settings-form-row">
-				<input type="text" placeholder="owner/repo --skill name (or paste skills.sh's npx command)" value=${installArgs} onInput=${(e) => setInstallArgs(e.target.value)} onKeyDown=${(e) => e.key === "Enter" && installArgs && act(`/skills-sh install ${installArgs}`).then((res) => res.ok && setInstallArgs(""))} />
-				<button class="modal-btn icon-btn" title="Run npx skills add -g" disabled=${busy || !installArgs} onClick=${() => act(`/skills-sh install ${installArgs}`).then((res) => res.ok && setInstallArgs(""))}><${icons.arrowDownTray} /></button>
+				<input type="text" placeholder="owner/repo --skill name (or paste skills.sh's npx command)" value=${installArgs} disabled=${installing} onInput=${(e) => setInstallArgs(e.target.value)} onKeyDown=${(
+					e,
+				) => {
+					if (e.key === "Enter") {
+						e.preventDefault();
+						void install();
+					}
+				}} />
+				<button class="modal-btn icon-btn" title=${installing ? "Installing skill" : "Run npx skills add -g"} aria-busy=${installing} disabled=${busy || installing || !installArgs} onClick=${install}>${installing ? html`<span class="settings-inline-loader" aria-label="Installing" />` : html`<${icons.arrowDownTray} />`}</button>
 			</div>
+			${installing && html`<div class="settings-install-status" role="status">Installing skill… this can take a minute.</div>`}
 
 			<div class="settings-section-title">Installed via skills.sh (${shSkills.length})</div>
 			${shSkills.length === 0 && html`<div class="settings-hint">No skills installed via skills.sh yet. Install one above.</div>`}
