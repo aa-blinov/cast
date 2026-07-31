@@ -135,7 +135,6 @@ export async function runWebServerMain(
 	console.log("[cast web] ────────────────────────────────────");
 
 	const bridge = createWebBridge(result);
-	bridge.createSession();
 
 	if (!LOOPBACK_HOSTS.has(host)) {
 		console.log(

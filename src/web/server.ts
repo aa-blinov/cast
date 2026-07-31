@@ -97,6 +97,82 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 		});
 	}
 
+	function createSseWriter(
+		res: ServerResponse,
+		unsubscribe: () => void,
+	): {
+		write: (event: string) => void;
+		end: () => void;
+		close: () => void;
+	} {
+		const pending: string[] = [];
+		let pendingBytes = 0;
+		const maxPendingBytes = 1024 * 1024;
+		let closed = false;
+		let blocked = false;
+		let endRequested = false;
+		const close = () => {
+			if (closed) return;
+			closed = true;
+			pending.length = 0;
+			pendingBytes = 0;
+			res.off("drain", flush);
+			unsubscribe();
+		};
+		const flush = () => {
+			if (closed) return;
+			blocked = false;
+			while (pending.length > 0) {
+				try {
+					const event = pending.shift()!;
+					pendingBytes -= Buffer.byteLength(event);
+					if (!res.write(event)) {
+						blocked = true;
+						return;
+					}
+				} catch {
+					close();
+					return;
+				}
+			}
+			if (endRequested) {
+				res.end();
+				close();
+			}
+		};
+		const write = (event: string) => {
+			if (closed || endRequested) return;
+			if (blocked) {
+				const eventBytes = Buffer.byteLength(event);
+				if (pendingBytes + eventBytes > maxPendingBytes) {
+					// A hidden or slow client reconnects and recovers history instead
+					// of retaining an unbounded token backlog in this process.
+					res.end();
+					close();
+					return;
+				}
+				pending.push(event);
+				pendingBytes += eventBytes;
+				return;
+			}
+			try {
+				if (!res.write(event)) blocked = true;
+			} catch {
+				close();
+			}
+		};
+		const end = () => {
+			if (closed) return;
+			endRequested = true;
+			if (!blocked && pending.length === 0) {
+				res.end();
+				close();
+			}
+		};
+		res.on("drain", flush);
+		return { write, end, close };
+	}
+
 	function serveStatic(req: IncomingMessage, res: ServerResponse): boolean {
 		let urlPath = req.url?.split("?")[0] ?? "/";
 		if (urlPath === "/") urlPath = "/index.html";
@@ -234,29 +310,20 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 		// Without an initial write, writeHead's headers sit unflushed until the
 		// first real event — which for a quiet sidebar can be minutes away — so
 		// the client's EventSource never reaches readyState OPEN and just hangs.
-		res.write(": connected\n\n");
-
 		const listener = (event: WebEvent) => {
-			try {
-				res.write(`data: ${JSON.stringify(event)}\n\n`);
-			} catch {
-				bridge.unsubscribeAll(listener);
-			}
+			writer.write(`data: ${JSON.stringify(event)}\n\n`);
 		};
+		const writer = createSseWriter(res, () => bridge.unsubscribeAll(listener));
+		writer.write(": connected\n\n");
 		bridge.subscribeAll(listener);
 
 		const heartbeat = setInterval(() => {
-			try {
-				res.write(": keepalive\n\n");
-			} catch {
-				clearInterval(heartbeat);
-				bridge.unsubscribeAll(listener);
-			}
+			writer.write(": keepalive\n\n");
 		}, 15_000);
 
 		req.on("close", () => {
 			clearInterval(heartbeat);
-			bridge.unsubscribeAll(listener);
+			writer.close();
 		});
 	});
 
@@ -466,36 +533,26 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 			"X-Accel-Buffering": "no",
 		});
 
-		// Send current status immediately
-		res.write(`data: ${JSON.stringify({ type: "status", status: ws.status })}\n\n`);
-
 		const listener = (event: WebEvent) => {
-			try {
-				res.write(`data: ${JSON.stringify(event)}\n\n`);
-				// The session is gone from the bridge's map by the time this fires —
-				// nothing left to unsubscribe from, just end the stream so the
-				// client's EventSource doesn't spend its retry budget on a 404.
-				if (event.type === "session_closed") res.end();
-			} catch {
-				// Client disconnected
-				bridge.unsubscribe(params.id, listener);
-			}
+			writer.write(`data: ${JSON.stringify(event)}\n\n`);
+			// The session is gone from the bridge's map by the time this fires —
+			// nothing left to unsubscribe from, just end the stream so the
+			// client's EventSource doesn't spend its retry budget on a 404.
+			if (event.type === "session_closed") writer.end();
 		};
+		const writer = createSseWriter(res, () => bridge.unsubscribe(params.id, listener));
+		// Send current status immediately
+		writer.write(`data: ${JSON.stringify({ type: "status", status: ws.status })}\n\n`);
 		bridge.subscribe(params.id, listener);
 
 		// Heartbeat
 		const heartbeat = setInterval(() => {
-			try {
-				res.write(": keepalive\n\n");
-			} catch {
-				clearInterval(heartbeat);
-				bridge.unsubscribe(params.id, listener);
-			}
+			writer.write(": keepalive\n\n");
 		}, 15_000);
 
 		req.on("close", () => {
 			clearInterval(heartbeat);
-			bridge.unsubscribe(params.id, listener);
+			writer.close();
 		});
 	});
 

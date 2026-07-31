@@ -866,6 +866,11 @@ describe("toDisplayMessages — inline images from a read on an image file", () 
 		expect(out[0]?.images).toBeUndefined();
 	});
 
+	it("carries persisted message sequences so a reconnect can retain DOM identity", () => {
+		const out = toDisplayMessages([{ role: "user", content: "hello" }], undefined, undefined, "session-1", [42]);
+		expect(out[0]).toMatchObject({ role: "user", content: "hello", seq: 42 });
+	});
+
 	it("keeps the caption alongside the photo for a real user send (text part present)", () => {
 		// A real attach-and-send (see bridge.ts's buildUserContent) always
 		// includes a text part, even when empty — that's what distinguishes it
