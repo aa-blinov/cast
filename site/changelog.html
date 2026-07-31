@@ -490,27 +490,23 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 <h2>0.12.7</h2>
 <h3>Added</h3>
 <ul>
-<li>Added a behavior evaluation bench covering planning, tool use, task execution, and other core interaction contracts.</li>
+<li>Added a behavior evaluation bench covering planning, tool use, task execution, and other core interaction contracts, with a certification &quot;Model Scoreboard&quot; published on the docs site (<code>--scoreboard</code> on the eval runner records each model&#39;s per-case pass rate across at least 3 attempts per case).</li>
 </ul>
 <h3>Fixed</h3>
 <ul>
 <li>Completed web planning transitions so plan decisions consistently reach the intended next state.</li>
-<li>Aligned <code>grep</code> glob paths across the ripgrep-backed and built-in fallback implementations.</li>
+<li><code>grep</code>: aligned glob paths across the ripgrep-backed and built-in fallback implementations, and fixed the fallback failing to match when the search path names a single file instead of a directory.</li>
 <li>Rendered escaped Unicode in tool results as readable text.</li>
 <li>Stabilized web settings and session interactions.</li>
-</ul>
-<h3>Internal</h3>
-<ul>
-<li>Added plan, task, and skill judgment cases plus single-tool core contract coverage.</li>
-<li>Synchronized evaluation and tool documentation with the current behavior bench and background Bash behavior.</li>
-</ul>
-<h2>0.12.6</h2>
-<h3>Fixed</h3>
-<ul>
-<li><code>grep</code>: the built-in JS fallback (used when ripgrep isn&#39;t on <code>PATH</code>) failed to find matches when the search path named a single file instead of a directory — it called <code>readdir()</code> on the file and silently swallowed the resulting <code>ENOTDIR</code>. The ripgrep-backed path already handled this case; the fallback now does too.</li>
 <li>Plan mode&#39;s read-only command check rejected safe commands like <code>ls -la 2&gt;&amp;1</code> or <code>cmd &gt;/dev/null 2&gt;&amp;1</code> — fd-duplication and null-device redirects were caught by the blanket output-redirection guard even though neither writes a persistent file.</li>
 <li><code>bash</code>: background tasks (<code>run_in_background: true</code>) no longer get killed by a default timeout — they&#39;re open-ended by default (dev servers, long builds) and only get a kill timer when the model explicitly passes <code>timeout</code>. A <code>timeout</code> of <code>0</code> or negative is treated as &quot;no timeout&quot; rather than firing almost immediately.</li>
 <li><code>/continue</code> and starting a new session now restore the full session state (reasoning settings, turn metadata, title, pinned flag, todos, share token) instead of a partial subset, and reset SSH host resolution and provider/model validation consistently when switching sessions or projects.</li>
+</ul>
+<h3>Internal</h3>
+<ul>
+<li>Added plan, task, and skill judgment cases plus single-tool core contract coverage; eval cases now support an isolated per-case working directory so a case&#39;s synthetic scenario can&#39;t be second-guessed against the real repo.</li>
+<li>Fixed a fixture race condition in the eval runner&#39;s <code>--repeat</code> mode where concurrent attempts of the same case corrupted each other&#39;s on-disk fixture state, and wired <code>--baseline</code> regression comparison into <code>--repeat</code> runs (previously single-run only).</li>
+<li>Synchronized evaluation and tool documentation with the current behavior bench and background Bash behavior.</li>
 </ul>
 <h2>0.12.5</h2>
 <h3>Fixed</h3>
