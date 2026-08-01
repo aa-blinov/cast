@@ -1,8 +1,8 @@
 /**
  * Plan mode — restricted agent state for exploring and planning before implementation.
  *
- * The model can read files and produce a structured plan, but cannot execute code
- * or run shell commands. Plans are persisted as markdown files at
+ * The model can read files, run a narrow read-only Bash allowlist, and produce a
+ * structured plan. Plans are persisted as markdown files at
  * <project>/.cast/plans/<session-id>/<name>.md — one directory per session, so a session
  * can hold several named plans.
  *
@@ -21,7 +21,9 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { basename, dirname, extname, join } from "node:path";
+import * as TreeSitter from "web-tree-sitter";
 import type { TodoItem } from "./todo.ts";
 import { invalidateCachedFile } from "./tools/hashline-cache.ts";
 import type { ToolResult } from "./tools.ts";
@@ -178,8 +180,10 @@ const READONLY_BINARIES = new Set([
 const FORBIDDEN_FLAGS: Record<string, RegExp> = {
 	find: /^-(delete|exec|execdir|ok|okdir|fprint0?|fprintf|fls)$/,
 	fd: /^(-x|-X|--exec|--exec-batch)$/,
-	sort: /^(-o|--output)$/,
+	sort: /^(-o|--output|--compress-program)$/,
 	tree: /^-o$/,
+	yq: /^(-i|--inplace)$/,
+	date: /^(-s|--set)$/,
 };
 
 /** Git subcommands that cannot mutate the repository. `branch`/`tag`/`remote`
@@ -204,68 +208,103 @@ const READONLY_GIT_SUBCOMMANDS = new Set([
 ]);
 
 /**
- * Conservative read-only check for a bash command in plan mode. Allows plain
- * pipelines of inspection binaries; rejects anything that can write: output
- * redirection, command substitution, or a pipeline stage whose binary is not
- * on the allowlist. False negatives (a safe command rejected) are acceptable;
- * false positives (a mutating command allowed) are not.
+ * Conservative read-only check for a bash command in plan mode. The AST gives
+ * every command in a pipeline/sequence its own verdict; unsupported syntax
+ * fails closed rather than relying on a whitespace split to guess intent.
  */
-// Fd-duplication (`2>&1`, `1>&2`) and redirecting to the null device
-// (`2>/dev/null`, `&>/dev/null`) never write a persistent file — stripped
-// before the blanket `>` check below so a plain `ls -la 2>&1` isn't rejected
-// alongside a real `> realfile.txt`.
-const SAFE_REDIRECTS = /\d*>&\d+\b|&?\d*>\s*\/dev\/null\b/g;
+const planRequire = createRequire(import.meta.url);
+let parserPromise: Promise<TreeSitter.Parser> | undefined;
 
-export function checkReadOnlyCommand(command: string): { ok: boolean; reason?: string } {
-	// Stripped once, up front: the stage-splitter below treats a bare `&` as
-	// a background-job separator, which would otherwise chop "2>&1" into
-	// bogus stages "2>" and "1" and reject it for the wrong reason.
-	const sanitized = command.replace(SAFE_REDIRECTS, "");
-	if (/>/.test(sanitized)) {
-		return { ok: false, reason: "output redirection (>) can write files" };
+function unquoteShellToken(token: string): string {
+	return token.length >= 2 &&
+		((token.startsWith('"') && token.endsWith('"')) || (token.startsWith("'") && token.endsWith("'")))
+		? token.slice(1, -1)
+		: token;
+}
+
+async function getBashParser(): Promise<TreeSitter.Parser> {
+	parserPromise ??= (async () => {
+		await TreeSitter.Parser.init({ locateFile: () => planRequire.resolve("web-tree-sitter/web-tree-sitter.wasm") });
+		const language = await TreeSitter.Language.load(planRequire.resolve("tree-sitter-bash/tree-sitter-bash.wasm"));
+		const parser = new TreeSitter.Parser();
+		parser.setLanguage(language);
+		return parser;
+	})();
+	return parserPromise;
+}
+
+function unsupportedSyntax(root: TreeSitter.Node): string | undefined {
+	for (const type of [
+		"command_substitution",
+		"process_substitution",
+		"subshell",
+		"function_definition",
+		"if_statement",
+		"for_statement",
+		"while_statement",
+		"case_statement",
+		"heredoc_redirect",
+	]) {
+		if (root.descendantsOfType(type).length > 0) return type.replaceAll("_", " ");
 	}
-	if (/\$\(|`|<\(/.test(command)) {
-		return { ok: false, reason: "command/process substitution can run arbitrary commands" };
-	}
-	// Split into pipeline/sequence stages; every stage must be read-only.
-	const stages = sanitized
-		.split(/\|\||&&|;|\||\n|&/)
-		.map((s) => s.trim())
-		.filter(Boolean);
-	if (stages.length === 0) return { ok: false, reason: "empty command" };
-	for (const stage of stages) {
-		const tokens = stage.split(/\s+/);
-		// Skip leading VAR=value assignments — they only affect the stage env.
-		let i = 0;
-		while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i]!)) i++;
-		const binary = tokens[i]?.replace(/^.*\//, "");
-		if (!binary) return { ok: false, reason: "empty pipeline stage" };
-		const args = tokens.slice(i + 1);
-		// Output flags write files without any `>` — git log --output, sort -o, …
-		if (args.some((t) => t === "--output" || t.startsWith("--output="))) {
-			return { ok: false, reason: "--output writes a file" };
-		}
-		if (binary === "git") {
-			const sub = args.find((t) => !t.startsWith("-"));
-			if (!sub || !READONLY_GIT_SUBCOMMANDS.has(sub)) {
-				return { ok: false, reason: `git ${sub ?? "(none)"} is not a read-only subcommand` };
+	return undefined;
+}
+
+export async function checkReadOnlyCommand(command: string): Promise<{ ok: boolean; reason?: string }> {
+	if (!command.trim()) return { ok: false, reason: "empty command" };
+	let tree: TreeSitter.Tree | null = null;
+	try {
+		tree = (await getBashParser()).parse(command);
+		if (!tree || tree.rootNode.hasError) return { ok: false, reason: "bash syntax could not be parsed safely" };
+		const unsupported = unsupportedSyntax(tree.rootNode);
+		if (unsupported) return { ok: false, reason: `${unsupported} can run arbitrary commands` };
+		for (const redirect of tree.rootNode.descendantsOfType("file_redirect")) {
+			if (!/^\d*>&\d+$/.test(redirect.text) && !/^&?\d*>\s*\/dev\/null$/.test(redirect.text)) {
+				return { ok: false, reason: "redirection can write files or change command input" };
 			}
-			continue;
 		}
-		if (!READONLY_BINARIES.has(binary)) {
-			return { ok: false, reason: `"${binary}" is not on the read-only allowlist` };
+		const commands = tree.rootNode.descendantsOfType("command");
+		if (commands.length === 0) return { ok: false, reason: "no executable command" };
+		for (const stage of commands) {
+			const name = stage.childForFieldName("name");
+			const binary = name?.text.replace(/^.*\//, "");
+			if (!binary) return { ok: false, reason: "empty command stage" };
+			const args = Array.from({ length: stage.childCount }, (_, index) => stage.child(index))
+				.filter(
+					(node): node is TreeSitter.Node =>
+						node !== null && node.type !== "command_name" && node.type !== "variable_assignment",
+				)
+				.map((node) => unquoteShellToken(node.text));
+			// Output flags write files without any `>` — git log --output, sort -o, …
+			if (args.some((t) => t === "--output" || t.startsWith("--output="))) {
+				return { ok: false, reason: "--output writes a file" };
+			}
+			if (binary === "git") {
+				const sub = args.find((t) => !t.startsWith("-"));
+				if (!sub || !READONLY_GIT_SUBCOMMANDS.has(sub)) {
+					return { ok: false, reason: `git ${sub ?? "(none)"} is not a read-only subcommand` };
+				}
+				continue;
+			}
+			if (!READONLY_BINARIES.has(binary)) {
+				return { ok: false, reason: `"${binary}" is not on the read-only allowlist` };
+			}
+			const forbidden = FORBIDDEN_FLAGS[binary];
+			if (forbidden) {
+				const hit = args.find((t) => forbidden.test(t.split("=", 1)[0]));
+				if (hit) return { ok: false, reason: `${binary} ${hit} can modify files or run commands` };
+			}
+			// `uniq input output` writes its second positional argument.
+			if (binary === "uniq" && args.filter((t) => !t.startsWith("-")).length > 1) {
+				return { ok: false, reason: "uniq with two file arguments writes the second one" };
+			}
 		}
-		const forbidden = FORBIDDEN_FLAGS[binary];
-		if (forbidden) {
-			const hit = args.find((t) => forbidden.test(t));
-			if (hit) return { ok: false, reason: `${binary} ${hit} can modify files or run commands` };
-		}
-		// `uniq input output` writes its second positional argument.
-		if (binary === "uniq" && args.filter((t) => !t.startsWith("-")).length > 1) {
-			return { ok: false, reason: "uniq with two file arguments writes the second one" };
-		}
+		return { ok: true };
+	} catch {
+		return { ok: false, reason: "bash parser unavailable" };
+	} finally {
+		tree?.delete();
 	}
-	return { ok: true };
 }
 
 // ============================================================================

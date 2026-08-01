@@ -798,7 +798,7 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 		loopConfig.backgroundBash,
 		allowedSkills ? { skills: allowedSkills, sessionId: loopConfig.sessionId } : undefined,
 	);
-	const executeTool = (
+	const executeTool = async (
 		name: string,
 		args: Record<string, unknown>,
 		toolSignal?: AbortSignal,
@@ -828,7 +828,7 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 		// is refused with the reason. Subagents of a plan-mode parent inherit
 		// the same gate via readOnlyBash.
 		if (name === "bash" && (loopConfig.planState?.enabled || loopConfig.readOnlyBash)) {
-			const verdict = checkReadOnlyCommand(typeof args.command === "string" ? args.command : "");
+			const verdict = await checkReadOnlyCommand(typeof args.command === "string" ? args.command : "");
 			if (!verdict.ok) {
 				return Promise.resolve({
 					content: `Plan mode allows read-only commands only — rejected: ${verdict.reason}. Inspect with ls/cat/grep/find/git log|show|diff|status|blame.`,

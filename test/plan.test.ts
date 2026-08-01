@@ -132,57 +132,67 @@ describe("plan", () => {
 	});
 
 	describe("checkReadOnlyCommand", () => {
-		it("allows inspection pipelines", () => {
-			expect(checkReadOnlyCommand("ls -la").ok).toBe(true);
-			expect(checkReadOnlyCommand("cat src/app.ts | grep -n handler | head -5").ok).toBe(true);
-			expect(checkReadOnlyCommand("git log --oneline -10 && git status").ok).toBe(true);
-			expect(checkReadOnlyCommand("git diff HEAD~1 -- src/").ok).toBe(true);
-			expect(checkReadOnlyCommand("LC_ALL=C sort file.txt | uniq -c").ok).toBe(true);
+		async function expectCommand(command: string, ok: boolean): Promise<void> {
+			expect((await checkReadOnlyCommand(command)).ok).toBe(ok);
+		}
+
+		it("allows inspection pipelines", async () => {
+			await expectCommand("ls -la", true);
+			await expectCommand("cat src/app.ts | grep -n handler | head -5", true);
+			await expectCommand("git log --oneline -10 && git status", true);
+			await expectCommand("git diff HEAD~1 -- src/", true);
+			await expectCommand("LC_ALL=C sort file.txt | uniq -c", true);
 		});
 
-		it("allows fd-duplication and null-device redirects — neither writes a real file", () => {
-			expect(checkReadOnlyCommand("ls -la /tmp/foo 2>&1").ok).toBe(true);
-			expect(checkReadOnlyCommand("cat foo 2>&1 | grep bar").ok).toBe(true);
-			expect(checkReadOnlyCommand("ls -la /tmp/foo 2>/dev/null").ok).toBe(true);
-			expect(checkReadOnlyCommand("ls -la /tmp/foo >/dev/null 2>&1").ok).toBe(true);
+		it("allows fd-duplication and null-device redirects — neither writes a real file", async () => {
+			await expectCommand("ls -la /tmp/foo 2>&1", true);
+			await expectCommand("cat foo 2>&1 | grep bar", true);
+			await expectCommand("ls -la /tmp/foo 2>/dev/null", true);
+			await expectCommand("ls -la /tmp/foo >/dev/null 2>&1", true);
 			// The redirect being safe doesn't whitelist an otherwise-unsafe command.
-			expect(checkReadOnlyCommand("rm -rf /tmp/x 2>&1").ok).toBe(false);
+			await expectCommand("rm -rf /tmp/x 2>&1", false);
 		});
 
-		it("rejects anything that can write", () => {
-			expect(checkReadOnlyCommand("rm -rf /tmp/x").ok).toBe(false);
-			expect(checkReadOnlyCommand("echo hi > out.txt").ok).toBe(false);
-			expect(checkReadOnlyCommand("cat $(find_evil)").ok).toBe(false);
-			expect(checkReadOnlyCommand("ls `rm -rf .`").ok).toBe(false);
-			expect(checkReadOnlyCommand("npm test").ok).toBe(false);
-			expect(checkReadOnlyCommand("sed -i 's/a/b/' file").ok).toBe(false);
-			expect(checkReadOnlyCommand("git checkout main").ok).toBe(false);
-			expect(checkReadOnlyCommand("git branch new-branch").ok).toBe(false);
-			expect(checkReadOnlyCommand("ls && touch x").ok).toBe(false);
-			expect(checkReadOnlyCommand("find . -name '*.md' | xargs rm").ok).toBe(false);
-			expect(checkReadOnlyCommand("").ok).toBe(false);
+		it("rejects anything that can write", async () => {
+			for (const command of [
+				"rm -rf /tmp/x",
+				"echo hi > out.txt",
+				"cat $(find_evil)",
+				"ls `rm -rf .`",
+				"npm test",
+				"sed -i 's/a/b/' file",
+				"git checkout main",
+				"git branch new-branch",
+				"ls && touch x",
+				"find . -name '*.md' | xargs rm",
+				"",
+			])
+				await expectCommand(command, false);
 		});
 
-		it("rejects argument-level writers and executors on allowlisted binaries", () => {
+		it("rejects argument-level writers and executors on allowlisted binaries", async () => {
 			// find/fd can delete or exec through flags
-			expect(checkReadOnlyCommand("find . -name '*.tmp' -delete").ok).toBe(false);
-			expect(checkReadOnlyCommand("find . -exec rm {} \\;").ok).toBe(false);
-			expect(checkReadOnlyCommand("fd -x rm").ok).toBe(false);
+			await expectCommand("find . -name '*.tmp' -delete", false);
+			await expectCommand("find . -exec rm {} \\;", false);
+			await expectCommand("fd -x rm", false);
 			// output flags write without any `>`
-			expect(checkReadOnlyCommand("sort -o out.txt in.txt").ok).toBe(false);
-			expect(checkReadOnlyCommand("tree -o out.txt").ok).toBe(false);
-			expect(checkReadOnlyCommand("git log --output=/tmp/x").ok).toBe(false);
-			expect(checkReadOnlyCommand("git log --output /tmp/x").ok).toBe(false);
+			await expectCommand("sort -o out.txt in.txt", false);
+			await expectCommand("sort --compress-program='touch should-not-run' in.txt", false);
+			await expectCommand("tree -o out.txt", false);
+			await expectCommand("git log --output=/tmp/x", false);
+			await expectCommand("git log --output /tmp/x", false);
 			// process substitution executes commands
-			expect(checkReadOnlyCommand("diff <(rm -rf x) file").ok).toBe(false);
+			await expectCommand("diff <(rm -rf x) file", false);
 			// env launches arbitrary binaries
-			expect(checkReadOnlyCommand("env sh -c 'rm -rf x'").ok).toBe(false);
+			await expectCommand("env sh -c 'rm -rf x'", false);
 			// uniq's second positional argument is an output file
-			expect(checkReadOnlyCommand("uniq input.txt output.txt").ok).toBe(false);
+			await expectCommand("uniq input.txt output.txt", false);
 			// ...while the plain read-only forms of the same binaries still pass
-			expect(checkReadOnlyCommand("find . -name '*.md' -type f").ok).toBe(true);
-			expect(checkReadOnlyCommand("sort in.txt | uniq -c").ok).toBe(true);
-			expect(checkReadOnlyCommand("git log --oneline").ok).toBe(true);
+			await expectCommand("find . -name '*.md' -type f", true);
+			await expectCommand("sort in.txt | uniq -c", true);
+			await expectCommand("git log --oneline", true);
+			await expectCommand("yq -i '.version = 2' package.yaml", false);
+			await expectCommand("date -s 'next week'", false);
 		});
 	});
 
