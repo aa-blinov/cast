@@ -100,6 +100,7 @@ const webJavaScript = [
 	"reasoning-split.js",
 	"sidebar-utils.js",
 	"sse-connection.js",
+	"sse-events.js",
 	"status-popover.js",
 	"settings-modal.js",
 	"streaming-blocks.js",
