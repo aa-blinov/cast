@@ -105,6 +105,7 @@ const webJavaScript = [
 	"turn-meta.js",
 	"tool-card.js",
 	"sidebar-session-item.js",
+	"sidebar.js",
 	"share-modal.js",
 	"settings-model.js",
 	"settings-appearance.js",
