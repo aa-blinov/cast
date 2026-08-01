@@ -28,6 +28,7 @@ import { SANDBOX_CWD, shortPath } from "./sidebar-utils.js";
 import { StatusPopover } from "./status-popover.js";
 import { blocksFromAssistantCompletion } from "./stream-blocks.js";
 import { LiveStreamingBlocks as LiveStreamingBlocksModule } from "./streaming-blocks.js";
+import { useWorkspaceState } from "./use-workspace-state.js";
 
 const html = htm.bind(h);
 
@@ -1483,100 +1484,58 @@ function App() {
 	// Open/closed and which tab, like theme/font below, survive a page
 	// reload via localStorage — losing "I had Files open" on every refresh
 	// (or worse, having to reload while it was mid-task) was just annoying.
-	const [diffOpen, setDiffOpen] = useState(() => {
-		try {
-			return localStorage.getItem("cast:diffOpen") === "1";
-		} catch {
-			return false;
-		}
-	});
-	const [diffData, setDiffData] = useState(null);
-	const diffRequestVersionRef = useRef(0);
-	const diffRefreshRafRef = useRef(null);
-	const [diffFile, setDiffFile] = useState(null);
-	const [diffTab, setDiffTab] = useState(() => {
-		try {
-			return localStorage.getItem("cast:diffTab") || "changes";
-		} catch {
-			return "changes";
-		}
-	});
-	// Bumped on every tool_end while the diff panel is open, same trigger as
-	// loadDiff() below — the Files tab's tree is fetched once per expanded
-	// folder and otherwise never refetched on its own, so a write/edit that
-	// landed while you had it open wouldn't show up until you manually
-	// collapsed and reopened that folder.
-	const [fsRefreshNonce, setFsRefreshNonce] = useState(0);
-	const [inputsRefreshNonce, setInputsRefreshNonce] = useState(0);
-	useEffect(() => {
-		try {
-			localStorage.setItem("cast:diffOpen", diffOpen ? "1" : "0");
-		} catch {}
-	}, [diffOpen]);
-	useEffect(() => {
-		try {
-			localStorage.setItem("cast:diffTab", diffTab);
-		} catch {}
-	}, [diffTab]);
-	const [sidebarOpen, setSidebarOpen] = useState(false);
-	const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-	const [sidebarWidth, setSidebarWidth] = useState(() => {
-		try {
-			const saved = Number(localStorage.getItem("cast:sidebarWidth"));
-			return saved >= 272 && saved <= 420 ? saved : null;
-		} catch {
-			return null;
-		}
-	});
-	useEffect(() => {
-		if (!sidebarWidth) return;
-		try {
-			localStorage.setItem("cast:sidebarWidth", String(sidebarWidth));
-		} catch {}
-	}, [sidebarWidth]);
-	// Dragged width, same persistence as diffOpen/diffTab above — otherwise
-	// every reload snaps a manually-widened panel back to the CSS default.
-	const [diffWidth, setDiffWidth] = useState(() => {
-		try {
-			const saved = Number(localStorage.getItem("cast:diffWidth"));
-			return saved > 0 ? saved : null;
-		} catch {
-			return null;
-		}
-	});
-	useEffect(() => {
-		if (!diffWidth) return;
-		try {
-			localStorage.setItem("cast:diffWidth", String(diffWidth));
-		} catch {}
-	}, [diffWidth]);
-	const [toasts, setToasts] = useState([]);
-	const [connected, setConnected] = useState(true);
-	const [backendUp, setBackendUp] = useState(true);
-	// True only for the very first bootstrap (page load / hard refresh),
-	// before initClientState has picked a session (or, with none saved yet,
-	// staged a draft) — see the empty-state render below. Without this, a
-	// reload landing on ?session=<id> shows the "Ready when you are" empty
-	// thread banner for the beat it takes the GET to resolve, then swaps to
-	// the real transcript — reading as the thread flashing/reloading.
-	const [bootstrapping, setBootstrapping] = useState(true);
-	const [atBottom, setAtBottom] = useState(true);
-	const [defaultCwd, setDefaultCwd] = useState("");
-	// Persona the sidebar's "Quick session" button uses — configurable in
-	// Settings > Tools, defaults to "senior" server-side when never set.
-	const [quickSessionPersona, setQuickSessionPersona] = useState("senior");
-	// "new" (a fresh sandbox dir) is the default for a new session, not the
-	// project root — picking the root path is the deliberate action here.
-	const [selectedCwd, setSelectedCwd] = useState(SANDBOX_CWD);
-	const [dirPickerOpen, setDirPickerOpen] = useState(false);
-	const [hotkeysOpen, setHotkeysOpen] = useState(false);
-	const [settingsOpen, setSettingsOpen] = useState(false);
-	// Settings' destructive actions (uninstall/remove/delete) need a Yes/No
-	// gate. A single piece of state here — rather than one per callsite —
-	// means one confirm modal, styled like the rest of the app instead of
-	// the browser's native confirm(), reused by every "are you sure?" button.
-	const [confirmState, setConfirmState] = useState(null);
-	const requestConfirm = useCallback((message) => new Promise((resolve) => setConfirmState({ message, resolve })), []);
+	const {
+		diffOpen,
+		setDiffOpen,
+		diffData,
+		setDiffData,
+		diffRequestVersionRef,
+		diffRefreshRafRef,
+		diffFile,
+		setDiffFile,
+		diffTab,
+		setDiffTab,
+		fsRefreshNonce,
+		setFsRefreshNonce,
+		inputsRefreshNonce,
+		setInputsRefreshNonce,
+		sidebarOpen,
+		setSidebarOpen,
+		sidebarCollapsed,
+		setSidebarCollapsed,
+		sidebarWidth,
+		setSidebarWidth,
+		diffWidth,
+		setDiffWidth,
+		toasts,
+		setToasts,
+		connected,
+		setConnected,
+		backendUp,
+		setBackendUp,
+		bootstrapping,
+		setBootstrapping,
+		atBottom,
+		setAtBottom,
+		defaultCwd,
+		setDefaultCwd,
+		quickSessionPersona,
+		setQuickSessionPersona,
+		selectedCwd,
+		setSelectedCwd,
+		dirPickerOpen,
+		setDirPickerOpen,
+		hotkeysOpen,
+		setHotkeysOpen,
+		settingsOpen,
+		setSettingsOpen,
+		confirmState,
+		setConfirmState,
+	} = useWorkspaceState({ initialCwd: SANDBOX_CWD });
+	const requestConfirm = useCallback(
+		(message) => new Promise((resolve) => setConfirmState({ message, resolve })),
+		[setConfirmState],
+	);
 	const cwd = selectedCwd ?? defaultCwd ?? "";
 
 	// Legacy per-browser "declutter" set from the old soft-close action (now
@@ -1660,11 +1619,14 @@ function App() {
 	const pendingScrollRestoreRef = useRef(null);
 
 	// Toast helper — stacks; each entry removes itself after 4s.
-	const showToast = useCallback((text, type = "info") => {
-		const id = `${Date.now()}-${Math.random()}`;
-		setToasts((prev) => [...prev, { id, text, type }]);
-		setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4000);
-	}, []);
+	const showToast = useCallback(
+		(text, type = "info") => {
+			const id = `${Date.now()}-${Math.random()}`;
+			setToasts((prev) => [...prev, { id, text, type }]);
+			setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4000);
+		},
+		[setToasts],
+	);
 
 	// Command feedback belongs in the permanent transcript, not a 4-second
 	// toast — role "warning" (not "system") since the real system-prompt
@@ -1735,7 +1697,7 @@ function App() {
 				if (version === sessionViewVersionRef.current) showToast(err.message, "error");
 			}
 		},
-		[showToast, undismiss, resetStreamingNow],
+		[showToast, undismiss, resetStreamingNow, setSidebarOpen],
 	);
 
 	// Create session — the POST already returns the full new (empty) session,
@@ -1782,7 +1744,7 @@ function App() {
 			void loadSessions();
 			return data.id;
 		},
-		[loadSessions, resetStreamingNow],
+		[loadSessions, resetStreamingNow, setSidebarOpen],
 	);
 
 	// "+ New session" — picking a persona no longer hits the server at all.
@@ -1819,7 +1781,7 @@ function App() {
 			const url = window.location.pathname;
 			window.history.pushState({ sessionId: null }, "", url);
 		},
-		[resetStreamingNow],
+		[resetStreamingNow, setSidebarOpen],
 	);
 
 	// Static, rarely-changing resource lists — personas/commands/themes/config
@@ -1901,7 +1863,7 @@ function App() {
 		} catch {
 			return false;
 		}
-	}, [selectSession, showToast, startDraft]);
+	}, [selectSession, showToast, startDraft, setDefaultCwd, setQuickSessionPersona]);
 
 	// The browser's own EventSource retry only covers a connection that
 	// dropped after connecting fine (network blip, laptop sleep) — it does
@@ -1932,7 +1894,7 @@ function App() {
 			}
 		};
 		tryOnce();
-	}, [initClientState]);
+	}, [initClientState, setBackendUp]);
 
 	// The sidebar's Delete action — actually removes the session (and its
 	// messages) from disk, unlike the old close/soft-hide it replaced. Drops
@@ -2016,7 +1978,7 @@ function App() {
 				return next;
 			});
 		} else setSidebarCollapsed((v) => !v);
-	}, []);
+	}, [setDiffOpen, setSidebarCollapsed, setSidebarOpen]);
 
 	// Opening the diff panel on a mid-width viewport leaves too little room for
 	// the chat column otherwise — auto-collapse the sidebar to compensate. Only
@@ -2031,23 +1993,26 @@ function App() {
 			if (next && window.innerWidth > 768 && window.innerWidth < 1200) setSidebarCollapsed(true);
 			return next;
 		});
-	}, []);
+	}, [setDiffOpen, setSidebarCollapsed, setSidebarOpen]);
 
 	// Diff panel drag-to-resize — pointer events so mouse and touch both work.
 	const dragStateRef = useRef(null);
-	const onDiffResizeMove = useCallback((e) => {
-		const st = dragStateRef.current;
-		if (!st) return;
-		const delta = st.startX - e.clientX;
-		const sidebarWidthNow = document.querySelector(".sidebar")?.getBoundingClientRect().width ?? 0;
-		const minChatWidth = window.innerWidth <= 1100 ? 280 : 320;
-		const maxWidth = Math.max(
-			320,
-			Math.min(Math.round(window.innerWidth * 0.85), window.innerWidth - sidebarWidthNow - minChatWidth),
-		);
-		const next = Math.min(Math.max(st.startWidth + delta, 320), maxWidth);
-		setDiffWidth(next);
-	}, []);
+	const onDiffResizeMove = useCallback(
+		(e) => {
+			const st = dragStateRef.current;
+			if (!st) return;
+			const delta = st.startX - e.clientX;
+			const sidebarWidthNow = document.querySelector(".sidebar")?.getBoundingClientRect().width ?? 0;
+			const minChatWidth = window.innerWidth <= 1100 ? 280 : 320;
+			const maxWidth = Math.max(
+				320,
+				Math.min(Math.round(window.innerWidth * 0.85), window.innerWidth - sidebarWidthNow - minChatWidth),
+			);
+			const next = Math.min(Math.max(st.startWidth + delta, 320), maxWidth);
+			setDiffWidth(next);
+		},
+		[setDiffWidth],
+	);
 	const onDiffResizeEnd = useCallback(() => {
 		dragStateRef.current = null;
 		document.body.classList.remove("resizing-diff");
@@ -2086,7 +2051,7 @@ function App() {
 			);
 			setSidebarWidth(Math.min(Math.max(st.startWidth + e.clientX - st.startX, 272), maxWidth));
 		},
-		[diffOpen],
+		[diffOpen, setSidebarWidth],
 	);
 	const onSidebarResizeEnd = useCallback(() => {
 		sidebarDragStateRef.current = null;
@@ -2338,7 +2303,17 @@ function App() {
 				if (isCurrentDraft()) showToast(err.message, "error");
 			}
 		},
-		[activeId, session, commitSession, loadSessions, selectSession, showToast, toggleDiff, addNotice],
+		[
+			activeId,
+			session,
+			commitSession,
+			loadSessions,
+			selectSession,
+			showToast,
+			toggleDiff,
+			addNotice, // Refresh the Inputs panel now that files are on disk
+			setInputsRefreshNonce,
+		],
 	);
 
 	const handlePlanTransition = useCallback(
@@ -2424,7 +2399,7 @@ function App() {
 			if (version === diffRequestVersionRef.current && activeSessionIdRef.current === sessionId)
 				setDiffData({ files: [] });
 		}
-	}, [activeId]);
+	}, [activeId, diffRequestVersionRef, setDiffData]);
 	const queueDiffRefresh = useCallback(() => {
 		if (!diffOpenRef.current || diffRefreshRafRef.current != null) return;
 		diffRefreshRafRef.current = requestAnimationFrame(() => {
@@ -2432,7 +2407,7 @@ function App() {
 			loadDiff();
 			setFsRefreshNonce((n) => n + 1);
 		});
-	}, [loadDiff]);
+	}, [loadDiff, diffRefreshRafRef, setFsRefreshNonce]);
 
 	// SSE
 	// biome-ignore lint/correctness/useExhaustiveDependencies: reconnectNonce isn't read in the body — bumping it is what forces this effect to re-subscribe after a backend restart (see startReconnectLoop). diffOpen is deliberately not a dependency — see diffOpenRef above; making it one would tear down and reopen the EventSource (full refetch, full message remount) on every diff-panel toggle.
@@ -2853,7 +2828,7 @@ function App() {
 		autoScrollRef.current = true;
 		setAtBottom(true);
 		if (messagesRef.current) messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
-	}, []);
+	}, [setAtBottom]);
 
 	// Fetches the next older batch (GET /api/sessions/:id/history) and
 	// prepends it — turn-boundary safe server-side (getHistoryPage), so this
@@ -2915,7 +2890,7 @@ function App() {
 		// start before the user actually hits the edge, so it doesn't feel
 		// like a hard stop-and-wait while scrolling fast.
 		if (el.scrollTop < 400) loadOlderMessages();
-	}, [loadOlderMessages]);
+	}, [loadOlderMessages, setAtBottom]);
 
 	// Toggle diff — reset the selected file so switching sessions (or
 	// reopening) doesn't leave a stale selection that no longer matches any
@@ -2925,7 +2900,7 @@ function App() {
 			setDiffFile(null);
 			loadDiff();
 		}
-	}, [diffOpen, activeId, loadDiff]);
+	}, [diffOpen, activeId, loadDiff, setDiffFile]);
 
 	// Init
 	// biome-ignore lint/correctness/useExhaustiveDependencies: deliberately mount-only — initClientState's own identity can change across renders, and re-running the full bootstrap on that would fight startReconnectLoop's manual retries.
@@ -3003,7 +2978,19 @@ function App() {
 		};
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
-	}, [hotkeysOpen, dirPickerOpen, activeId, personas, cwd, startDraft, submitMessage, toggleDiff]);
+	}, [
+		hotkeysOpen,
+		dirPickerOpen,
+		activeId,
+		personas,
+		cwd,
+		startDraft,
+		submitMessage,
+		toggleDiff,
+		setDirPickerOpen,
+		setHotkeysOpen,
+		setSidebarCollapsed,
+	]);
 
 	const messages = useMemo(() => {
 		const raw = session?.messages?.filter((m) => m.role !== "system") || [];
