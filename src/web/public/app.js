@@ -8,6 +8,7 @@ import { h, render } from "preact";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { api } from "./api.js";
 import { icons } from "./icons.js";
+import { useModalFocusTrap } from "./modal-focus.js";
 import { collapseMidWordBoundaries, mergeMidWordBoundary } from "./reasoning-split.js";
 import { blocksFromAssistantCompletion, reduceStreamEvent } from "./stream-blocks.js";
 
@@ -2457,47 +2458,6 @@ function FilePreviewModal({ path, onClose, downloadHref, previewHref }) {
 			</div>
 		</div>
 	`;
-}
-
-const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])';
-
-// Shared by every modal (dir picker, status, settings, hotkeys): moves focus
-// into the dialog on open, keeps Tab from leaking to the page behind the
-// backdrop, and hands focus back to whatever triggered it on close — none of
-// that happens for free just from the backdrop/click-outside handling.
-function useModalFocusTrap(active, initialFocusSelector) {
-	const ref = useRef(null);
-	useEffect(() => {
-		if (!active) return;
-		const container = ref.current;
-		const previouslyFocused = document.activeElement;
-		(
-			(initialFocusSelector && container?.querySelector(initialFocusSelector)) ||
-			container?.querySelector(FOCUSABLE_SELECTOR) ||
-			container
-		)?.focus();
-
-		const onKeyDown = (e) => {
-			if (e.key !== "Tab" || !container) return;
-			const focusables = Array.from(container.querySelectorAll(FOCUSABLE_SELECTOR));
-			if (focusables.length === 0) return;
-			const first = focusables[0];
-			const last = focusables[focusables.length - 1];
-			if (e.shiftKey && document.activeElement === first) {
-				e.preventDefault();
-				last.focus();
-			} else if (!e.shiftKey && document.activeElement === last) {
-				e.preventDefault();
-				first.focus();
-			}
-		};
-		document.addEventListener("keydown", onKeyDown, true);
-		return () => {
-			document.removeEventListener("keydown", onKeyDown, true);
-			previouslyFocused?.focus?.();
-		};
-	}, [active, initialFocusSelector]);
-	return ref;
 }
 
 // Read-only folder browser (like a native "Open Folder" dialog) for picking
