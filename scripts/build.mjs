@@ -99,6 +99,7 @@ const webJavaScript = [
 	"plan-cards.js",
 	"reasoning-split.js",
 	"sidebar-utils.js",
+	"sse-connection.js",
 	"status-popover.js",
 	"settings-modal.js",
 	"streaming-blocks.js",

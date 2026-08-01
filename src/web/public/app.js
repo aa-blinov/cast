@@ -25,6 +25,7 @@ import { SettingsModel } from "./settings-model.js";
 import { ShareModal } from "./share-modal.js";
 import { Sidebar as SidebarModule } from "./sidebar.js";
 import { SANDBOX_CWD, shortPath } from "./sidebar-utils.js";
+import { closeSseConnection, openSseConnection } from "./sse-connection.js";
 import { StatusPopover } from "./status-popover.js";
 import { blocksFromAssistantCompletion } from "./stream-blocks.js";
 import { LiveStreamingBlocks as LiveStreamingBlocksModule } from "./streaming-blocks.js";
@@ -2149,10 +2150,10 @@ function App() {
 	// biome-ignore lint/correctness/useExhaustiveDependencies: reconnectNonce isn't read in the body — bumping it is what forces this effect to re-subscribe after a backend restart (see startReconnectLoop). diffOpen is deliberately not a dependency — see diffOpenRef above; making it one would tear down and reopen the EventSource (full refetch, full message remount) on every diff-panel toggle.
 	useEffect(() => {
 		if (!activeId) return;
-		if (esRef.current) esRef.current.close();
+		closeSseConnection(esRef.current);
 
 		const streamSessionId = activeId;
-		const es = new EventSource(`${window.location.origin}/api/sessions/${streamSessionId}/events`);
+		const es = openSseConnection(`${window.location.origin}/api/sessions/${streamSessionId}/events`);
 		esRef.current = es;
 		setConnected(true);
 		const isCurrent = () => esRef.current === es && activeSessionIdRef.current === streamSessionId;
@@ -2530,7 +2531,7 @@ function App() {
 		};
 
 		return () => {
-			es.close();
+			closeSseConnection(es);
 		};
 	}, [activeId, reconnectNonce, startReconnectLoop, addNotice, queueDiffRefresh, showToast]);
 
@@ -2538,7 +2539,7 @@ function App() {
 	// other/background threads update live instead of only on page reload.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: reconnectNonce isn't read in the body — bumping it is what forces this effect to re-subscribe after a backend restart (see startReconnectLoop), same as the per-session SSE effect above.
 	useEffect(() => {
-		const es = new EventSource(`${window.location.origin}/api/sessions/events`);
+		const es = openSseConnection(`${window.location.origin}/api/sessions/events`);
 		es.onmessage = (e) => {
 			try {
 				const event = JSON.parse(e.data);
@@ -2547,7 +2548,7 @@ function App() {
 				}
 			} catch {}
 		};
-		return () => es.close();
+		return () => closeSseConnection(es);
 	}, [reconnectNonce]);
 
 	// Auto-scroll
