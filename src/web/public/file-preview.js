@@ -218,7 +218,7 @@ export function FilePreviewModal({ path, onClose, downloadHref, previewHref }) {
 		return () => {
 			cancelled = true;
 		};
-	}, [path, downloadHref]);
+	}, [path, downloadHref, fetchesContent]);
 
 	useEffect(() => {
 		setEnhanced(null);
@@ -251,7 +251,7 @@ export function FilePreviewModal({ path, onClose, downloadHref, previewHref }) {
 		return () => {
 			cancelled = true;
 		};
-	}, [content, path]);
+	}, [content, isMarkdown, hljsLang]);
 
 	if (!path) return null;
 	const name = fileName(path);

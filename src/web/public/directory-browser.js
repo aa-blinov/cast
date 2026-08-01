@@ -39,7 +39,7 @@ export function DirectoryBrowser({ initialPath, onPick, onClose, confirm }) {
 	// initialPath seeds the first load; later navigation is controlled by clicks.
 	useEffect(() => {
 		load(initialPath);
-	}, []);
+	}, [initialPath, load]);
 	const modalRef = useModalFocusTrap(true);
 
 	const openCreate = useCallback(() => {

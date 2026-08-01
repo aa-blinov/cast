@@ -5,7 +5,7 @@ const html = htm.bind(h);
 
 export function DiffPanel({
 	InputsExplorer,
-	FileExplorer,
+	FileExplorer: FileExplorerModule,
 	data,
 	activeFile,
 	onSelectFile,
