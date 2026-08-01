@@ -98,6 +98,8 @@ const webJavaScript = [
 	"reasoning-split.js",
 	"sidebar-utils.js",
 	"status-popover.js",
+	"tool-card.js",
+	"tool-card.js",
 	"sidebar-session-item.js",
 	"share-modal.js",
 	"settings-model.js",

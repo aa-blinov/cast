@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
-	SANDBOX_CWD,
 	groupSessionsByDirectory,
 	isSandboxSessionCwd,
+	SANDBOX_CWD,
 	sessionDirectoryName,
 	sortSessionsByActivity,
 } from "../src/web/public/sidebar-utils.js";

@@ -8,40 +8,26 @@ import { h, render } from "preact";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { api } from "./api.js";
 import { CastLogo } from "./cast-logo.js";
-import {
-	isBlockedAttachmentName,
-	partitionFiles,
-	readFileAsDataUrl,
-	resizeImageToDataUrl,
-} from "./composer-attachments.js";
-import { CommandPalette, ValueSuggest } from "./composer-pickers.js";
 import { Composer as ComposerModule } from "./composer.js";
-import { DirectoryBrowser } from "./directory-browser.js";
 import { DiffPanel as DiffPanelModule } from "./diff-panel.js";
+import { DirectoryBrowser } from "./directory-browser.js";
 import { ElapsedTimer } from "./elapsed-timer.js";
-import { FilePreviewModal } from "./file-preview.js";
 import { FileExplorer as FileExplorerModule } from "./file-explorer.js";
+import { FilePreviewModal } from "./file-preview.js";
 import { humanSize } from "./file-size.js";
 import { hotkeysHtml, modKey } from "./hotkeys.js";
 import { icons } from "./icons.js";
 import { useModalFocusTrap } from "./modal-focus.js";
 import { PlanDecisionCard, QuestionCard } from "./plan-cards.js";
 import { collapseMidWordBoundaries, mergeMidWordBoundary } from "./reasoning-split.js";
-import { ShareModal } from "./share-modal.js";
 import { SettingsAppearance } from "./settings-appearance.js";
 import { SettingsModel } from "./settings-model.js";
-import { SlotModelPicker } from "./slot-model-picker.js";
-import { StatusPopover } from "./status-popover.js";
-import {
-	SANDBOX_CWD,
-	groupSessionsByDirectory,
-	isSandboxSessionCwd,
-	sessionDirectoryName,
-	shortPath,
-	sortSessionsByActivity,
-} from "./sidebar-utils.js";
+import { ShareModal } from "./share-modal.js";
 import { SidebarSessionItem } from "./sidebar-session-item.js";
+import { groupSessionsByDirectory, SANDBOX_CWD, shortPath, sortSessionsByActivity } from "./sidebar-utils.js";
+import { StatusPopover } from "./status-popover.js";
 import { blocksFromAssistantCompletion, reduceStreamEvent } from "./stream-blocks.js";
+import { ToolCard as ToolCardModule } from "./tool-card.js";
 
 const html = htm.bind(h);
 
@@ -476,7 +462,7 @@ function formatValue(v, indent) {
 
 // Full parameter dump, not a truncated hint — the point is to see exactly
 // what the agent is about to run, not just enough to guess.
-function formatArgsFull(args) {
+function _formatArgsFull(args) {
 	if (!args) return "";
 	try {
 		const obj = JSON.parse(args);
@@ -520,10 +506,10 @@ function setUrlSessionId(id, { push } = {}) {
 // the "mcp_" prefix and loosening the rest into "word · word" reads far
 // better than the raw underscored blob without needing that split to be
 // exact — this is a label only, the real name stays in `call.name`/data-tool.
-function isMcpTool(name) {
+function _isMcpTool(name) {
 	return name.startsWith("mcp_");
 }
-function mcpToolLabel(name) {
+function _mcpToolLabel(name) {
 	return name.slice(4).replace(/_/g, " · ");
 }
 
@@ -531,7 +517,7 @@ function mcpToolLabel(name) {
 // parsed value restores Unicode escapes before it reaches Preact's text node;
 // otherwise a Playwright result such as `{"text":"\\u041f"}` shows its
 // transport encoding to the user instead of the actual character.
-function formatToolResult(name, result) {
+function _formatToolResult(name, result) {
 	if (name === "todo_write") {
 		try {
 			return formatValue(JSON.parse(result), "");
@@ -553,68 +539,6 @@ function formatToolResult(name, result) {
 	return value;
 }
 
-function ToolCard({ call }) {
-	// The header always shows the request (name + full input params) and a
-	// status dot, so the terminal-like default view stays a quick "what's it
-	// doing / is it still alive" scan. The result body — including any image
-	// a `read` on a photo returned — is collapsed by default and rendered
-	// lazily on first expand — unlike the TUI, the web UI has room (and a
-	// scrollable DOM) to show it on demand without cluttering the log.
-	const [open, setOpen] = useState(false);
-	const [previewSrc, setPreviewSrc] = useState(null);
-	const statusClass = call.status || "running";
-	const args = formatArgsFull(call.args);
-	const mcp = isMcpTool(call.name);
-	const hasResult = Boolean(call.result) || Boolean(call.images?.length);
-	return html`
-		<div class="tool-card">
-			<div
-				class="tool-card-header${hasResult ? " clickable" : ""}"
-				data-tool=${call.name}
-				onClick=${hasResult ? () => setOpen((o) => !o) : undefined}
-			>
-				${mcp && html`<span class="tool-card-mcp-badge">MCP</span>`}
-				<span class="tool-card-name">${mcp ? mcpToolLabel(call.name) : call.name}</span>
-				<span class="tool-card-status ${statusClass}" />
-				${hasResult && html`<${open ? icons.chevronUp : icons.chevronDown} class="tool-card-toggle" />`}
-			</div>
-			${args && html`<div class="tool-card-body">${args}</div>`}
-			${
-				open &&
-				call.images?.length &&
-				html`
-				<div class="message-content message-images tool-card-images">
-					${call.images.map(
-						(src, i) =>
-							html`<img key=${i} src=${src} class="message-image" onClick=${() => setPreviewSrc(src)} />`,
-					)}
-				</div>
-			`
-			}
-			${
-				previewSrc &&
-				html`<${FilePreviewModal}
-					path="image.jpg"
-					downloadHref=${previewSrc}
-					previewHref=${previewSrc}
-					onClose=${() => setPreviewSrc(null)}
-				/>`
-			}
-			${
-				open &&
-				call.result &&
-				(mcp
-					? // MCP servers commonly format their own results as markdown (headers,
-						// code fences, tables) — worth actually rendering, unlike a built-in
-						// tool's result, which has a fixed non-markdown shape (e.g. read's
-						// hashline anchors) that markdown rendering would corrupt.
-						html`<div class="tool-card-result" dangerouslySetInnerHTML=${{ __html: renderMarkdown(formatToolResult(call.name, call.result)) }}></div>`
-					: html`<div class="tool-card-result">${formatToolResult(call.name, call.result)}</div>`)
-			}
-		</div>
-	`;
-}
-// Small gray "provider · model · Ns" line under a finished agent reply —
 // per-message (persisted server-side, see core/session.ts's SessionState.turnMeta)
 // rather than a single page-level "last turn" value, so every past reply in
 // a thread shows its own footer on reload, not just whichever one happened
@@ -712,7 +636,7 @@ function Message({ msg }) {
 					</div>
 				`
 				}
-				${msg.toolCalls?.map((tc) => html`<${ToolCard} key=${tc.id} call=${tc} />`)}
+				${msg.toolCalls?.map((tc) => html`<${ToolCardModule} key=${tc.id} call=${tc} renderMarkdown=${renderMarkdown} />`)}
 					<${TurnMetaLine} turnMeta=${msg.turnMeta} />
 			</div>
 		`;
@@ -823,7 +747,7 @@ function StreamingText({ text, className }) {
 }
 
 function BlockView({ block, streaming = false }) {
-	if (block.kind === "tool") return html`<${ToolCard} call=${block.call} />`;
+	if (block.kind === "tool") return html`<${ToolCardModule} call=${block.call} renderMarkdown=${renderMarkdown} />`;
 	if (!block.text.trim()) return null;
 	const kind = block.kind === "thinking" ? "reasoning" : "assistant";
 	const className = `message message-${kind}${streaming ? " message-entering" : ""}`;
