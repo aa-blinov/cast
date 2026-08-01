@@ -18,6 +18,7 @@ import {
 	sessionDirectoryName,
 	sortSessionsByActivity,
 } from "./sidebar-utils.js";
+import { SidebarSessionItem } from "./sidebar-session-item.js";
 import { blocksFromAssistantCompletion, reduceStreamEvent } from "./stream-blocks.js";
 
 const html = htm.bind(h);
@@ -3866,97 +3867,25 @@ function Sidebar({
 		if (await confirm(message)) onDeleteSession(s.id);
 	};
 
-	const renderItem = (s) => html`
-		<div
-			key=${s.id}
-			class="sidebar-item${s.id === activeId ? " active" : ""}"
-			title=${s.cwd}
-			onClick=${() => onSelectSession(s.id)}
-			onContextMenu=${(e) => {
-				e.preventDefault();
-				e.stopPropagation();
-				openMenu(s.id, e.currentTarget);
-			}}
-		>
-			<span class="sidebar-item-status ${s.status || "idle"}" />
-			<button
-				class="sidebar-item-pin${s.pinned ? " pinned" : ""}"
-				title=${s.pinned ? "Unpin" : "Pin to top"}
-				onClick=${(e) => {
-					e.stopPropagation();
-					onPinSession(s.id, !s.pinned);
-				}}
-			>
-				<${icons.bookmark} />
-			</button>
-			${
-				editingId === s.id
-					? html`
-					<input
-						ref=${editInputRef}
-						class="sidebar-item-name-input"
-						value=${editValue}
-						onClick=${(e) => e.stopPropagation()}
-						onInput=${(e) => setEditValue(e.target.value)}
-						onKeyDown=${(e) => {
-							if (e.key === "Enter") {
-								e.preventDefault();
-								commitEdit();
-							}
-							if (e.key === "Escape") {
-								e.preventDefault();
-								setEditingId(null);
-							}
-						}}
-						onBlur=${commitEdit}
-					/>
-				`
-					: html`<span class="sidebar-item-name" onDblClick=${(e) => {
-							e.stopPropagation();
-							startEdit(s);
-						}}>${s.title || s.persona || "unknown"}</span>`
-			}
-			<div class="sidebar-item-menu-anchor">
-				<button
-					class="sidebar-item-more"
-					title="More"
-					aria-label="More"
-					onClick=${(e) => {
-						e.stopPropagation();
-						openMenu(menuFor === s.id ? null : s.id, e.currentTarget.closest(".sidebar-item"));
-					}}
-				><${icons.ellipsisVertical} /></button>
-				${
-					menuFor === s.id &&
-					html`
-					<div class="sidebar-item-menu${menuUpward ? " upward" : ""}" onClick=${(e) => e.stopPropagation()}>
-						<button
-							class="sidebar-item-menu-item"
-							onClick=${() => {
-								setMenuFor(null);
-								startEdit(s);
-							}}
-						><${icons.pencil} /> Rename</button>
-						<button
-							class="sidebar-item-menu-item"
-							onClick=${() => {
-								setMenuFor(null);
-								onShareSession(s);
-							}}
-						><${icons.link} /> Share</button>
-						<button
-							class="sidebar-item-menu-item danger"
-							onClick=${() => {
-								setMenuFor(null);
-								doDelete(s);
-							}}
-						><${icons.trash} /> Delete</button>
-					</div>
-				`
-				}
-			</div>
-		</div>
-	`;
+	const renderItem = (s) => html`<${SidebarSessionItem}
+		session=${s}
+		activeId=${activeId}
+		onSelect=${onSelectSession}
+		onPin=${onPinSession}
+		onDelete=${doDelete}
+		onShare=${onShareSession}
+		editingId=${editingId}
+		editInputRef=${editInputRef}
+		editValue=${editValue}
+		setEditValue=${setEditValue}
+		commitEdit=${commitEdit}
+		cancelEdit=${() => setEditingId(null)}
+		startEdit=${startEdit}
+		menuFor=${menuFor}
+		menuUpward=${menuUpward}
+		openMenu=${openMenu}
+		setMenuFor=${setMenuFor}
+	/>`;
 	const renderGroup = ([key, group]) => {
 		const groupSessions = [...group.sessions].sort((a, b) => {
 			if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
