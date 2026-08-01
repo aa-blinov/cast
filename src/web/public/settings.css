@@ -1,5 +1,5 @@
 /* ── Settings modal ───────────────────────────────────────────────── */
-.settings-modal {
+.modal.settings-modal {
 	max-width: 820px;
 	width: 92vw;
 	height: min(700px, 88vh);
@@ -386,7 +386,7 @@
 .settings-scale-row { display: flex; gap: 6px; flex-wrap: wrap; }
 .settings-scale-btn { flex: 0 0 auto; }
 @media (max-width: 768px) {
-	.settings-modal { width: 100%; max-width: 100%; height: 100%; max-height: 100%; border-radius: 0; }
+	.modal.settings-modal { width: 100%; max-width: 100%; height: 100%; max-height: 100%; border-radius: 0; }
 	.settings-body { flex-direction: column; min-height: 0; }
 	.settings-tabs {
 		flex-direction: row;
