@@ -6,6 +6,9 @@ function setUrlSessionId(id, { push } = {}) {
 	if (push) window.history.pushState({ sessionId: id }, "", url);
 	else window.history.replaceState({ sessionId: id }, "", url);
 }
+function sessionIdFromUrl() {
+	return new URLSearchParams(window.location.search).get("session");
+}
 
 export function useSessionController({
 	setSessions,
@@ -24,6 +27,19 @@ export function useSessionController({
 	undismiss,
 	showToast,
 	esRef,
+	staticResourcesLoadedRef,
+	personasRef,
+	reconnectTimerRef,
+	setPersonas,
+	setCommands,
+	setThemes,
+	setCurrentThemeId,
+	setDefaultCwd,
+	setDefaultModel,
+	setQuickSessionPersona,
+	setReconnectNonce,
+	setBackendUp,
+	applyTheme,
 }) {
 	// Load sessions
 	const loadSessions = useCallback(async () => {
@@ -207,6 +223,142 @@ export function useSessionController({
 			sessionViewVersionRef,
 		],
 	);
+	// Static, rarely-changing resource lists — personas/commands/themes/config
+	// — only ever need fetching once per tab. Theme changes made mid-session
+	// (Settings modal, /theme) already call applyTheme()/setCurrentThemeId
+	// directly, so there's nothing here that goes stale between then and a
+	// reconnect. Guarded by this ref rather than state so initClientState
+	// (a useCallback) doesn't need it as a dependency.
 
-	return { loadSessions, selectSession, commitSession, startDraft };
+	// Full client bootstrap — on first mount, personas/commands/themes/config
+	// too; every time (including reconnect), the session list, landing on
+	// whichever one was last active (see selectSession's localStorage write).
+	// Also used to recover after the backend goes away and comes back (see
+	// startReconnectLoop below): sessions live only in-memory server-side, so
+	// a backend restart loses every one of them, and re-running this exact
+	// sequence is what lets the page keep working without a manual reload
+	// once it's back. Re-fetching (and re-applying) the static resources on
+	// every one of those reconnects too used to make the theme/persona list
+	// visibly flash back in on every blip — see staticResourcesLoadedRef.
+	const initClientState = useCallback(async () => {
+		try {
+			// Fired immediately, before anything else, so a reload landing on
+			// ?session=<id> (the common case: a bookmarked/shared/reopened link)
+			// doesn't pay for personas -> session list -> this session's own GET
+			// as three round trips in a row when the id is already known up
+			// front. Awaited down in the `s.length > 0` branch below, by which
+			// point it's had the personas+session-list fetch time to resolve in
+			// the background — usually free.
+			const urlId = sessionIdFromUrl();
+			const sessionPrefetch = urlId ? api("GET", `/api/sessions/${urlId}`).catch(() => null) : null;
+
+			if (!staticResourcesLoadedRef.current) {
+				const p = await api("GET", "/api/personas");
+				if (!p) return false;
+				const sortedPersonas = [...p].sort((a, b) => a.label.localeCompare(b.label));
+				setPersonas(sortedPersonas);
+				personasRef.current = sortedPersonas;
+				api("GET", "/api/commands")
+					.then((c) => c && setCommands(c))
+					.catch(() => {});
+				Promise.all([api("GET", "/api/themes"), api("GET", "/api/config")])
+					.then(([t, cfg]) => {
+						// The model belongs to app config, not the theme request. Keep
+						// it available for the new-session footer independently.
+						if (cfg) {
+							setDefaultCwd(cfg.cwd ?? "");
+							setDefaultModel(cfg.model ?? "");
+							if (cfg.quickSessionPersona) setQuickSessionPersona(cfg.quickSessionPersona);
+						}
+						if (!t) return;
+						setThemes(t);
+						const current = t.find((x) => x.id === cfg?.theme) ?? t.find((x) => x.id === "cast");
+						if (current) {
+							applyTheme(current.colors);
+							setCurrentThemeId(current.id);
+						}
+					})
+					.catch(() => {});
+				staticResourcesLoadedRef.current = true;
+			}
+
+			const s = await api("GET", "/api/sessions");
+			if (!s) return false;
+			setSessions(s);
+			setSessionsLoaded(true);
+			if (urlId && s.find((x) => x.id === urlId)) {
+				// A session is restored only when the URL explicitly names it. The
+				// bare root is a deliberate fresh draft, never an implicit return to
+				// a previous agent's cwd, model, or conversation.
+				await selectSession(urlId, { push: false, prefetch: sessionPrefetch });
+			} else {
+				if (urlId) showToast("Session not found — started a new session", "error");
+				const current = personasRef.current;
+				const defaultP = current.find((x) => x.name === "senior") ?? current[0];
+				if (defaultP) startDraft(defaultP.name, undefined);
+			}
+			return true;
+		} catch {
+			return false;
+		}
+	}, [
+		selectSession,
+		showToast,
+		startDraft,
+		setDefaultCwd,
+		setQuickSessionPersona,
+		setCommands,
+		setDefaultModel,
+		setPersonas,
+		setSessions,
+		setSessionsLoaded,
+		applyTheme,
+		personasRef,
+		setCurrentThemeId,
+		setThemes,
+		staticResourcesLoadedRef,
+	]);
+
+	// The browser's own EventSource retry only covers a connection that
+	// dropped after connecting fine (network blip, laptop sleep) — it does
+	// NOT retry when the very first request comes back non-2xx (readyState
+	// goes straight to CLOSED), which is exactly what happens when the
+	// backend restarts: every session lived only in memory, so the old
+	// session id 404s forever. This polls until the backend responds again,
+	// then re-bootstraps and bumps reconnectNonce so the SSE effect below
+	// re-subscribes even if selectSession happens to land back on the same id.
+	const startReconnectLoop = useCallback(() => {
+		if (reconnectTimerRef.current) return;
+		// Set synchronously, before the first async attempt even starts — a
+		// dropped connection can fire `onerror` more than once in a row (each
+		// EventSource the SSE effect spins up during recovery has its own),
+		// and without a guard that's set immediately, two overlapping retry
+		// loops can each see "no sessions yet" and each create their own
+		// default session (a real duplicate-session race, caught in testing).
+		reconnectTimerRef.current = "pending";
+		const tryOnce = async () => {
+			const ok = await initClientState();
+			if (ok) {
+				reconnectTimerRef.current = null;
+				setBackendUp(true);
+				setReconnectNonce((n) => n + 1);
+			} else {
+				setBackendUp(false);
+				reconnectTimerRef.current = setTimeout(tryOnce, 3000);
+			}
+		};
+		tryOnce();
+	}, [
+		initClientState,
+		setBackendUp, // Set synchronously, before the first async attempt even starts — a
+		// dropped connection can fire `onerror` more than once in a row (each
+		// EventSource the SSE effect spins up during recovery has its own),
+		// and without a guard that's set immediately, two overlapping retry
+		// loops can each see "no sessions yet" and each create their own
+		// default session (a real duplicate-session race, caught in testing).
+		reconnectTimerRef,
+		setReconnectNonce,
+	]);
+
+	return { loadSessions, selectSession, commitSession, startDraft, initClientState, startReconnectLoop };
 }
