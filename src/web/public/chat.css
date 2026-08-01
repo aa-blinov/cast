@@ -142,10 +142,10 @@
 }
 .message-error {
 	background: rgba(239,68,68,.06);
-	border: 1px solid rgba(239,68,68,.3);
+	border: 1px solid var(--danger-border);
 	border-radius: var(--radius);
 	padding: 10px 14px;
-	color: #fca5a5;
+	color: var(--status-error-fg);
 	font-size: .85rem;
 }
 .message-reasoning {

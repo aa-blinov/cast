@@ -103,16 +103,16 @@
 	font-size: .95em;
 }
 .settings-error {
-	background: rgba(239,68,68,.08);
-	border: 1px solid rgba(239,68,68,.3);
+	background: var(--danger-subtle);
+	border: 1px solid var(--danger-border);
 	border-radius: var(--radius-sm);
-	color: #fca5a5;
+	color: var(--status-error-fg);
 	font-size: .8rem;
 	padding: 8px 10px;
 	margin-bottom: 10px;
 }
 .settings-ok {
-	color: #6ee7b7;
+	color: var(--status-success-fg);
 	font-size: .8rem;
 	padding: 6px 0;
 }
@@ -190,7 +190,7 @@
 .plugin-installed-label {
 	font-size: .68rem;
 	color: var(--cyan);
-	background: rgba(0,200,255,.1);
+	background: var(--accent-muted);
 	border-radius: 999px;
 	padding: 3px 9px;
 	white-space: nowrap;
