@@ -85,6 +85,7 @@ const webJavaScript = [
 	"icons.js",
 	"modal-focus.js",
 	"reasoning-split.js",
+	"sidebar-utils.js",
 	"stream-blocks.js",
 	"login.js",
 ];

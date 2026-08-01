@@ -11,6 +11,13 @@ import { FilePreviewModal } from "./file-preview.js";
 import { icons } from "./icons.js";
 import { useModalFocusTrap } from "./modal-focus.js";
 import { collapseMidWordBoundaries, mergeMidWordBoundary } from "./reasoning-split.js";
+import {
+	SANDBOX_CWD,
+	groupSessionsByDirectory,
+	isSandboxSessionCwd,
+	sessionDirectoryName,
+	sortSessionsByActivity,
+} from "./sidebar-utils.js";
 import { blocksFromAssistantCompletion, reduceStreamEvent } from "./stream-blocks.js";
 
 const html = htm.bind(h);
@@ -3714,23 +3721,6 @@ function SettingsSsh({ data, busy, act, confirm }) {
 	`;
 }
 
-// Sentinel sent to the server when the "new" (sandbox) toggle is active — the
-// actual ~/.cast/sandbox/cast-<session id> directory is only created server-side
-// at session-creation time (see bridge.ts), so the UI never holds a path that
-// doesn't exist yet.
-const SANDBOX_CWD = "sandbox";
-
-function isSandboxSessionCwd(cwd) {
-	return cwd === SANDBOX_CWD || /(?:^|[\\/])\.cast[\\/]sandbox(?:[\\/]|$)/.test(cwd ?? "");
-}
-
-function sessionDirectoryName(cwd) {
-	if (isSandboxSessionCwd(cwd)) return "Sandbox";
-	const normalized = (cwd ?? "").replace(/[\\/]+$/, "");
-	const name = normalized.split(/[\\/]/).filter(Boolean).at(-1);
-	return name || normalized || "Unknown directory";
-}
-
 function Sidebar({
 	sessions,
 	activeId,
@@ -3839,12 +3829,6 @@ function Sidebar({
 	// it shouldn't just be one more sort key mixed into the rest). Within
 	// each group, running floats to the top (that's the "control room" — see
 	// what's actually working), then most-recently-active.
-	const byRunningThenDate = (a, b) => {
-		const runningA = a.status === "running" ? 1 : 0;
-		const runningB = b.status === "running" ? 1 : 0;
-		if (runningA !== runningB) return runningB - runningA;
-		return a.updatedAt < b.updatedAt ? 1 : -1;
-	};
 	// Search results already come back relevance-ranked from the server —
 	// respect that order (don't re-sort into the pinned/running/date groups
 	// below, which only make sense for "here's everything" browsing, not "did
@@ -3852,26 +3836,7 @@ function Sidebar({
 	const isSearching = search.trim().length > 0;
 	const searching = isSearching && searchResults === null;
 	const filtered = isSearching ? (searchResults ?? []) : sessions;
-	const sessionGroups = isSearching
-		? []
-		: [
-				...filtered.reduce((groups, session) => {
-					const key = isSandboxSessionCwd(session.cwd) ? "__sandbox__" : sessionDirectoryName(session.cwd);
-					const group = groups.get(key) ?? {
-						label: sessionDirectoryName(session.cwd),
-						paths: new Set(),
-						sessions: [],
-					};
-					group.paths.add(session.cwd);
-					group.sessions.push(session);
-					groups.set(key, group);
-					return groups;
-				}, new Map()),
-			].sort(([, a], [, b]) => {
-				const aLatest = [...a.sessions].sort(byRunningThenDate)[0];
-				const bLatest = [...b.sessions].sort(byRunningThenDate)[0];
-				return byRunningThenDate(aLatest, bLatest);
-			});
+	const sessionGroups = isSearching ? [] : groupSessionsByDirectory(filtered);
 	const isSandbox = cwd === SANDBOX_CWD;
 
 	const startEdit = useCallback((s) => {
@@ -3995,7 +3960,7 @@ function Sidebar({
 	const renderGroup = ([key, group]) => {
 		const groupSessions = [...group.sessions].sort((a, b) => {
 			if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-			return byRunningThenDate(a, b);
+			return sortSessionsByActivity(a, b);
 		});
 		const fullPaths = [...group.paths].filter(Boolean);
 		return html`
