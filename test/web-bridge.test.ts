@@ -885,8 +885,35 @@ describe("web bridge", () => {
 });
 
 // ============================================================================
-// toDisplayMessages — image_url user messages (a `read` on an image file)
+// toDisplayMessages — tool status reconstruction and image_url user messages
 // ============================================================================
+
+describe("toDisplayMessages — tool status reconstruction", () => {
+	it("uses the shared terminal vocabulary for persisted successful and failed MCP calls", () => {
+		const out = toDisplayMessages([
+			{
+				role: "assistant",
+				content: null,
+				tool_calls: [
+					{ id: "ok", type: "function", function: { name: "bash", arguments: '{"command":"pwd"}' } },
+					{ id: "failed", type: "function", function: { name: "mcp_demo_lookup", arguments: '{"id":1}' } },
+				],
+			} as never,
+			{ role: "tool", tool_call_id: "ok", content: "/workspace" } as never,
+			{
+				role: "tool",
+				tool_call_id: "failed",
+				content: "not found",
+				castIsError: true,
+			} as never,
+		]);
+
+		expect(out[0]?.toolCalls?.map((call) => [call.name, call.status])).toEqual([
+			["bash", "ok"],
+			["mcp_demo_lookup", "error"],
+		]);
+	});
+});
 
 describe("toDisplayMessages — inline images from a read on an image file", () => {
 	it("extracts data: URLs from an image_url user message instead of dropping them to null", () => {

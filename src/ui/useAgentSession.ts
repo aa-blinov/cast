@@ -23,6 +23,7 @@ import {
 import { loadSettings, type PermissionMode } from "../core/settings.ts";
 import { setLastTurnAborted, setStreamingActive } from "../core/stdin-manager.ts";
 import type { BackgroundTaskRegistry, BashBackgroundDeps } from "../core/tools/bash-background.ts";
+import { completedToolCallStatus, type ToolCallStatus } from "../core/tools/shared.ts";
 import { displayWidthCacheFlush } from "./display-width.ts";
 
 export type AgentStatus = "idle" | "running" | "error";
@@ -31,7 +32,7 @@ export interface ToolCallEntry {
 	id: string;
 	name: string;
 	args: string;
-	status: "running" | "ok" | "error";
+	status: ToolCallStatus;
 	result?: string;
 }
 
@@ -71,6 +72,10 @@ export interface PendingImage {
 
 export interface StreamingState {
 	blocks: StreamBlock[];
+	/** Whitespace content received after reasoning, held until the next visible
+	 * content delta proves it belongs to the answer rather than to a provider's
+	 * SSE framing. */
+	pendingContentWhitespace?: string;
 }
 
 /**
@@ -98,20 +103,35 @@ export function appendText(blocks: StreamBlock[], kind: "thinking" | "content", 
 }
 
 /**
- * Splits off any already-complete lines of a trailing thinking/content block,
- * leaving only the still-growing partial last line behind. Reasoning settles
- * the moment something else starts streaming after it (see
- * settledPrefixLength) — but the final answer is normally the last block of
- * the whole turn, so that boundary never comes and it would otherwise sit
- * whole in the live region until the turn ends, then jump into history in
- * one piece. Draining completed lines as they arrive gives it the same
- * steady, incremental commit reasoning already gets. `continued` suppresses
- * the repeated "[reasoning]"/"[agent]" label on every split-off piece of the
- * same run — only the first piece shows it.
+ * Normalize raw provider text deltas before they become visible blocks.
+ * Whitespace after reasoning is ambiguous: it can be the answer's leading
+ * formatting or a transport-only split. Buffer it until the following delta
+ * resolves that ambiguity, so only visible content ends reasoning.
+ */
+export function appendStreamText(state: StreamingState, kind: "thinking" | "content", text: string): StreamingState {
+	if (kind === "content" && text.trim() === "" && state.blocks.at(-1)?.kind === "thinking") {
+		return {
+			...state,
+			pendingContentWhitespace: `${state.pendingContentWhitespace ?? ""}${text}`,
+		};
+	}
+	if (kind === "thinking") {
+		return { blocks: appendText(state.blocks, kind, text) };
+	}
+	return {
+		blocks: appendText(state.blocks, kind, `${state.pendingContentWhitespace ?? ""}${text}`),
+	};
+}
+
+/**
+ * Splits off already-complete answer lines, leaving only the still-growing
+ * partial last line behind. A reasoning run stays intact until a real boundary
+ * (content/tool): splitting its paragraphs into static rows makes the TUI
+ * repeat its label despite one continuous provider reasoning stream.
  */
 /** Exported for unit tests. */
 export function splitCompleteLines(block: StreamBlock): { settled: StreamBlock[]; tail: StreamBlock } {
-	if (block.kind === "tool") return { settled: [], tail: block };
+	if (block.kind !== "content") return { settled: [], tail: block };
 	const idx = block.text.lastIndexOf("\n");
 	if (idx === -1) return { settled: [], tail: block };
 	return {
@@ -345,7 +365,7 @@ export function buildDisplayMessages(sessionMessages: SessionState["messages"]):
 				const target = toolBlocks.find((t) => t.call.id === tr.tool_call_id);
 				if (target) {
 					target.call.result = String(tr.content).slice(0, 4000);
-					if (tr.castIsError) target.call.status = "error";
+					target.call.status = completedToolCallStatus(tr.castIsError);
 				}
 				next++;
 			}
@@ -494,8 +514,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				const boundarySettled = settledPrefixLength(next.blocks);
 				let promoted = next.blocks.slice(0, boundarySettled);
 				let rest = next.blocks.slice(boundarySettled);
-				// The trailing block never crosses the boundary above (it's still
-				// live) — but any complete lines already inside it can drain too.
+				// splitCompleteLines preserves reasoning as one logical block; answer
+				// lines can still commit incrementally.
 				if (rest.length > 0) {
 					const { settled: lineSettled, tail } = splitCompleteLines(rest[0]!);
 					if (lineSettled.length > 0) {
@@ -734,7 +754,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 									clearRetryOnNextChunk.current = false;
 									setRetry(null);
 								}
-								updateStreaming((s) => (s ? { blocks: appendText(s.blocks, "thinking", event.text) } : s));
+								updateStreaming((s) => (s ? appendStreamText(s, "thinking", event.text) : s));
 								break;
 							case "token": {
 								if (clearRetryOnNextChunk.current) {
@@ -743,7 +763,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 								}
 								updateStreaming((s) => {
 									if (!s) return s;
-									const appended = appendText(s.blocks, "content", event.text);
+									const next = appendStreamText(s, "content", event.text);
+									const appended = next.blocks;
 									// Strip duplicate Hermes XML tool-call blocks as they accumulate.
 									// Only strip if we see <tool_call> to avoid accidentally removing
 									// user-provided XML that happens to contain <function=.
@@ -756,7 +777,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 											};
 										}
 									}
-									return { blocks: appended };
+									return { ...next, blocks: appended };
 								});
 								break;
 							}
@@ -774,7 +795,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 																id: event.id,
 																name: event.name,
 																args: event.args,
-																status: "running",
+																status: event.status,
 															},
 														},
 													],
@@ -793,7 +814,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 														kind: "tool",
 														call: {
 															...b.call,
-															status: event.result.isError ? "error" : "ok",
+															status: event.status,
 															result: event.result.content.slice(0, 4000),
 														},
 													}

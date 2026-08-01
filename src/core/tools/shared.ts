@@ -21,6 +21,16 @@ export interface ToolResult {
 	subagentUsage?: Usage;
 }
 
+/** One lifecycle vocabulary shared by the loop, TUI, SSE bridge, and history
+ * reconstruction. A tool has one in-flight state and two terminal states. */
+export type ToolCallStatus = "running" | "ok" | "error";
+export type CompletedToolCallStatus = Exclude<ToolCallStatus, "running">;
+
+/** Convert the executor's canonical outcome flag into the terminal UI state. */
+export function completedToolCallStatus(isError?: boolean): CompletedToolCallStatus {
+	return isError ? "error" : "ok";
+}
+
 export type ToolExecutor = (name: string, args: Record<string, unknown>, signal?: AbortSignal) => Promise<ToolResult>;
 
 /** Asked before running a bash command that matches a known-dangerous pattern. Return false to block it. */

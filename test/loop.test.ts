@@ -1321,14 +1321,19 @@ describe("runAgentLoop — plan mode", () => {
 		});
 
 		const ends = events.filter((e) => e.type === "tool_end");
+		const starts = events.filter((e) => e.type === "tool_start");
+		expect(starts).toHaveLength(2);
+		expect(starts.every((event) => event.type === "tool_start" && event.status === "running")).toBe(true);
 		expect(ends).toHaveLength(2);
 		const mutating = ends.find((e) => e.type === "tool_end" && e.id === "t1");
 		const readonly = ends.find((e) => e.type === "tool_end" && e.id === "t2");
 		if (mutating?.type === "tool_end") {
+			expect(mutating.status).toBe("error");
 			expect(mutating.result.isError).toBe(true);
 			expect(mutating.result.content).toContain("read-only");
 		}
 		if (readonly?.type === "tool_end") {
+			expect(readonly.status).toBe("ok");
 			expect(readonly.result.isError).toBeFalsy();
 			expect(readonly.result.content).toContain("PLAN_OK");
 		}
@@ -2585,9 +2590,12 @@ describe("runAgentLoop — allowedTools filtering", () => {
 		expect(names).toContain("mcp_demo_ping");
 		expect(names).not.toContain("bash");
 		expect(mcpCall).toHaveBeenCalledOnce();
+		const toolStart = events.find((e) => e.type === "tool_start");
+		expect(toolStart?.type === "tool_start" && toolStart.status).toBe("running");
 		const toolEnd = events.find((e) => e.type === "tool_end");
 		expect(toolEnd?.type === "tool_end" && !toolEnd.result.isError).toBe(true);
 		if (toolEnd?.type === "tool_end") {
+			expect(toolEnd.status).toBe("ok");
 			expect(toolEnd.result.content).toBe("MCP_OK");
 		}
 	});

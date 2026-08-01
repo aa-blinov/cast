@@ -36,6 +36,7 @@ import { compactMessages, estimateTokens, fileTagsFromCompactionSummary, shouldC
 import type { SshHost } from "./ssh.ts";
 import type { SubagentPrompt } from "./subagents.ts";
 import { formatTodoList, remainingTodoCount, type TodoItem, validateTodos } from "./todo.ts";
+import { type CompletedToolCallStatus, completedToolCallStatus } from "./tools/shared.ts";
 import {
 	type BashBackgroundDeps,
 	type ConfirmBash,
@@ -407,8 +408,8 @@ export type AgentEvent =
 			thinking: string;
 			toolCalls?: Array<{ id: string; name: string; arguments: string }>;
 	  }
-	| { type: "tool_start"; id: string; name: string; args: string }
-	| { type: "tool_end"; id: string; name: string; result: ToolResult }
+	| { type: "tool_start"; id: string; name: string; args: string; status: "running" }
+	| { type: "tool_end"; id: string; name: string; result: ToolResult; status: CompletedToolCallStatus }
 	| { type: "turn_end"; toolResults: Array<{ id: string; name: string; result: ToolResult }> }
 	// Carries the actual injected messages (not just a count) so the UI can show
 	// them as permanent history entries immediately, the same way it does for
@@ -1632,7 +1633,13 @@ async function executeToolCalls(
 	}
 
 	for (const tc of prepared) {
-		onEvent({ type: "tool_start", id: tc.id, name: tc.name, args: tc.args ? JSON.stringify(tc.args) : "{}" });
+		onEvent({
+			type: "tool_start",
+			id: tc.id,
+			name: tc.name,
+			args: tc.args ? JSON.stringify(tc.args) : "{}",
+			status: "running",
+		});
 	}
 
 	// Doom-loop detection, decided sequentially in call order BEFORE the
@@ -1711,7 +1718,7 @@ async function executeToolCalls(
 	);
 
 	for (const { id, name, result } of results) {
-		onEvent({ type: "tool_end", id, name, result });
+		onEvent({ type: "tool_end", id, name, result, status: completedToolCallStatus(result.isError) });
 	}
 
 	return results;

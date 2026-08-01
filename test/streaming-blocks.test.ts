@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { appendText, type StreamBlock, settledPrefixLength, splitCompleteLines } from "../src/ui/useAgentSession.ts";
+import {
+	appendStreamText,
+	appendText,
+	type StreamBlock,
+	settledPrefixLength,
+	splitCompleteLines,
+} from "../src/ui/useAgentSession.ts";
 
 const think = (text: string): StreamBlock => ({ kind: "thinking", text });
 const content = (text: string): StreamBlock => ({ kind: "content", text });
@@ -70,6 +76,11 @@ describe("splitCompleteLines", () => {
 		const t = tool("running");
 		expect(splitCompleteLines(t)).toEqual({ settled: [], tail: t });
 	});
+
+	it("keeps multi-paragraph reasoning as one logical block", () => {
+		const reasoning = think("First paragraph.\n\nSecond paragraph.");
+		expect(splitCompleteLines(reasoning)).toEqual({ settled: [], tail: reasoning });
+	});
 });
 
 describe("appendText", () => {
@@ -101,5 +112,21 @@ describe("appendText", () => {
 	it("does not merge across a tool call boundary", () => {
 		const blocks = [content("before"), tool("ok")];
 		expect(appendText(blocks, "content", "after")).toEqual([content("before"), tool("ok"), content("after")]);
+	});
+
+	it("keeps a reasoning run intact across an ambiguous whitespace content delta", () => {
+		const initial = appendStreamText({ blocks: [] }, "thinking", "First reasoning chunk.");
+		const buffered = appendStreamText(initial, "content", "\n\n");
+		const combined = appendStreamText(buffered, "thinking", " Second reasoning chunk.");
+		expect(buffered).toEqual({ blocks: [think("First reasoning chunk.")], pendingContentWhitespace: "\n\n" });
+		expect(combined).toEqual({ blocks: [think("First reasoning chunk. Second reasoning chunk.")] });
+	});
+
+	it("keeps buffered whitespace when visible content confirms the answer has started", () => {
+		const initial = appendStreamText({ blocks: [think("Reasoning done.")] }, "content", "\n\n");
+		const answer = appendStreamText(initial, "content", "Answer.");
+		expect(answer).toEqual({
+			blocks: [{ ...think("Reasoning done."), continued: false }, content("\n\nAnswer.")],
+		});
 	});
 });
