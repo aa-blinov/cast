@@ -17,6 +17,7 @@ import { useModalFocusTrap } from "./modal-focus.js";
 import { PlanDecisionCard, QuestionCard } from "./plan-cards.js";
 import { collapseMidWordBoundaries, mergeMidWordBoundary } from "./reasoning-split.js";
 import { ShareModal } from "./share-modal.js";
+import { SlotModelPicker } from "./slot-model-picker.js";
 import { StatusPopover } from "./status-popover.js";
 import {
 	SANDBOX_CWD,
@@ -2351,132 +2352,6 @@ function SettingsModal({
  * @param providerCommand  e.g. "/subagent-model-provider" or "/provider"
  * @param modelCommand      e.g. "/subagent-model" or "/model"
  */
-function SlotModelPicker({
-	busy,
-	act,
-	providers,
-	activeProviderName,
-	currentProvider,
-	currentModel,
-	fallbackModel,
-	providerCommand,
-	modelCommand,
-	isMainSlot,
-	initialModels,
-}) {
-	const initialProvider = currentProvider || "";
-	// Only the slot's own chosen model is "selected"; an inherited
-	// fallback is shown via the placeholder, so every slot reads the
-	// same "Pick a model…" line instead of silently showing a model
-	// the slot never explicitly picked.
-	const effectiveModel = currentModel || "";
-	const [providerValue, setProviderValue] = useState(initialProvider);
-	const [modelValue, setModelValue] = useState(effectiveModel);
-	const [models, setModels] = useState(initialModels || []);
-	const [loading, setLoading] = useState(false);
-	const modelRequestVersion = useRef(0);
-
-	// Label for the empty option in the provider dropdown.
-	// Empty option label: the main slot shows the provider the main model
-	// currently uses; subagent/plan show that they inherit it (there's no
-	// separate "default" — the main model's provider IS the default).
-	const defaultLabel = isMainSlot
-		? activeProviderName || "Select…"
-		: activeProviderName
-			? `${activeProviderName} (same as main)`
-			: "Same as main";
-
-	// Models for this slot: if a specific per-slot provider is pinned,
-	// fetch its list; otherwise the slot follows the *active* provider, so
-	// fetch that provider's models (resolved by name on the server) and
-	// re-fetch whenever activeProviderName changes — e.g. after a
-	// /provider Switch — so the picker reflects the new endpoint without
-	// a page reload.
-	useEffect(() => {
-		let cancelled = false;
-		const version = ++modelRequestVersion.current;
-		(async () => {
-			// `initialModels` (the parent's own /api/models/cached call, made
-			// once for all three slots) already seeded state for first paint —
-			// re-fetching that same cache per-slot here was pure duplicate
-			// traffic, and its state can not affect anything, since this
-			// followup live fetch always overwrites it moments later anyway.
-			setLoading(true);
-			const effectiveProvider = initialProvider || activeProviderName || "";
-			const qs = effectiveProvider ? `?provider=${encodeURIComponent(effectiveProvider)}` : "";
-			try {
-				const res = await api("GET", `/api/models${qs}`);
-				if (!cancelled && version === modelRequestVersion.current) setModels(res?.models ?? []);
-			} catch {
-				if (!cancelled && version === modelRequestVersion.current) setModels([]);
-			}
-			if (!cancelled && version === modelRequestVersion.current) setLoading(false);
-		})();
-		return () => {
-			cancelled = true;
-		};
-	}, [initialProvider, activeProviderName]);
-
-	// Fetch models when provider changes.
-	const onProviderChange = useCallback(async (name) => {
-		const version = ++modelRequestVersion.current;
-		setProviderValue(name);
-		setModelValue("");
-		setLoading(true);
-		try {
-			const qs = name ? `?provider=${encodeURIComponent(name)}` : "";
-			const res = await api("GET", `/api/models${qs}`);
-			if (version === modelRequestVersion.current) setModels(res?.models ?? []);
-		} catch {
-			if (version === modelRequestVersion.current) setModels([]);
-		}
-		if (version === modelRequestVersion.current) setLoading(false);
-	}, []);
-
-	const doSet = useCallback(async () => {
-		if (providerValue) await act(`${providerCommand} ${providerValue}`);
-		if (modelValue && models.some((m) => m.id === modelValue)) await act(`${modelCommand} ${modelValue}`);
-	}, [providerValue, modelValue, models, act, providerCommand, modelCommand]);
-
-	const doReset = useCallback(async () => {
-		await act(`${modelCommand} reset`);
-		setProviderValue("");
-		setModelValue("");
-		setModels([]);
-	}, [act, modelCommand]);
-
-	const hasOverride = currentProvider || currentModel;
-
-	return html`
-		<div class="settings-form-row">
-			<select disabled=${busy} value=${providerValue} onChange=${(e) => onProviderChange(e.target.value)}>
-				<option value="">${defaultLabel}</option>
-				${providers.map((p) => html`<option key=${p.name} value=${p.name}>${p.name}</option>`)}
-			</select>
-			<select disabled=${busy || (loading && models.length === 0)} onChange=${(e) => setModelValue(e.target.value)} value=${modelValue && models.some((m) => m.id === modelValue) ? modelValue : ""}>
-				<option value="">${
-					loading && models.length === 0
-						? "Loading…"
-						: `Pick a model…${fallbackModel && models.some((m) => m.id === fallbackModel) ? ` (inherits ${fallbackModel})` : ""}`
-				}</option>
-				${[...models].sort((a, b) => a.id.localeCompare(b.id)).map((m) => html`<option key=${m.id} value=${m.id}>${m.id}${m.reasoning ? " (reasoning)" : ""}</option>`)}
-			</select>
-			<button
-				class="modal-btn icon-btn"
-				title="Apply"
-				disabled=${
-					busy ||
-					!modelValue ||
-					!models.some((m) => m.id === modelValue) ||
-					(providerValue === initialProvider && modelValue === effectiveModel)
-				}
-				onClick=${doSet}
-			><${icons.check} /></button>
-			${!isMainSlot && hasOverride ? html`<button class="modal-btn icon-btn" title="Use the main model and provider" disabled=${busy} onClick=${doReset}><${icons.arrowUturnLeft} /></button>` : null}
-		</div>
-	`;
-}
-
 function SettingsModel({ data, busy, act }) {
 	const [reasoningValue, setReasoningValue] = useState("");
 	if (!data) return null;

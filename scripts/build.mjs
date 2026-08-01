@@ -94,6 +94,7 @@ const webJavaScript = [
 	"status-popover.js",
 	"sidebar-session-item.js",
 	"share-modal.js",
+	"slot-model-picker.js",
 	"stream-blocks.js",
 	"login.js",
 ];
