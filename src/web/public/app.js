@@ -15,6 +15,7 @@ import {
 	resizeImageToDataUrl,
 } from "./composer-attachments.js";
 import { CommandPalette, ValueSuggest } from "./composer-pickers.js";
+import { Composer as ComposerModule } from "./composer.js";
 import { DirectoryBrowser } from "./directory-browser.js";
 import { ElapsedTimer } from "./elapsed-timer.js";
 import { FilePreviewModal } from "./file-preview.js";
@@ -5258,7 +5259,7 @@ function App() {
 					</div>
 				`
 				}
-				<${Composer} running=${running} ready=${!!session} activeId=${activeId} commands=${commands} personas=${personas} onSubmit=${submitMessage} onAbort=${abortRun} onDocUploaded=${() => setInputsRefreshNonce((n) => n + 1)} />
+				<${ComposerModule} running=${running} ready=${!!session} activeId=${activeId} commands=${commands} personas=${personas} onSubmit=${submitMessage} onAbort=${abortRun} onDocUploaded=${() => setInputsRefreshNonce((n) => n + 1)} />
 			</main>
 
 			<!-- Diff — a wide right sidebar alongside the chat on desktop, a
