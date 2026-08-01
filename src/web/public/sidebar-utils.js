@@ -11,6 +11,12 @@ export function sessionDirectoryName(cwd) {
 	return name || normalized || "Unknown directory";
 }
 
+export function shortPath(path) {
+	if (!path) return "";
+	const parts = path.split("/").filter(Boolean);
+	return parts.length <= 2 ? path : `…/${parts.slice(-2).join("/")}`;
+}
+
 export function sortSessionsByActivity(a, b) {
 	const runningA = a.status === "running" ? 1 : 0;
 	const runningB = b.status === "running" ? 1 : 0;
