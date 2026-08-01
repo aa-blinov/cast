@@ -97,6 +97,7 @@ const webJavaScript = [
 	"sidebar-session-item.js",
 	"share-modal.js",
 	"settings-model.js",
+	"settings-appearance.js",
 	"slot-model-picker.js",
 	"stream-blocks.js",
 	"login.js",
