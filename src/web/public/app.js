@@ -2638,8 +2638,8 @@ function DirectoryBrowser({ initialPath, onPick, onClose, confirm }) {
 }
 
 const SETTINGS_TABS = [
+	{ id: "appearance", label: "Appearance" },
 	{ id: "bash", label: "Bash" },
-	{ id: "font", label: "Font" },
 	{ id: "hooks", label: "Hooks" },
 	{ id: "marketplace", label: "Marketplace" },
 	{ id: "mcp", label: "MCP" },
@@ -2650,7 +2650,6 @@ const SETTINGS_TABS = [
 	{ id: "quick-mode", label: "Quick Mode" },
 	{ id: "skills", label: "Skills" },
 	{ id: "ssh", label: "SSH" },
-	{ id: "theme", label: "Theme" },
 	{ id: "web", label: "Web" },
 ];
 
@@ -2954,7 +2953,7 @@ function SettingsModal({
 	// theme and font both come from props/local state (fetched once at app
 	// boot, or never fetched at all for font — see applyFont) rather than the
 	// per-tab preload above.
-	const hasData = tab === "theme" || tab === "font" || data[tab] !== undefined;
+	const hasData = tab === "appearance" || data[tab] !== undefined;
 
 	return html`
 		<div class="modal-backdrop" onClick=${onClose}>
@@ -2979,41 +2978,39 @@ function SettingsModal({
 						${
 							!hasData
 								? html`<div class="settings-loading">Loading…</div>`
-								: tab === "font"
-									? html`<${SettingsFont} currentFontId=${currentFontId} currentFontScale=${currentFontScale} onPickFont=${onPickFont} onPickScale=${onPickScale} />`
+								: tab === "appearance"
+									? html`<${SettingsAppearance} themes=${themes} currentThemeId=${currentThemeId} onPickTheme=${async (
+											id,
+										) => {
+											const res = await act(`/theme ${id}`);
+											if (res.ok && res.result?.colors) onApplyTheme(res.result.colors);
+											if (res.ok && res.result?.theme) onThemeChange(res.result.theme);
+										}} currentFontId=${currentFontId} currentFontScale=${currentFontScale} onPickFont=${onPickFont} onPickScale=${onPickScale} />`
 									: tab === "model"
 										? html`<${SettingsModel} data=${data.model} busy=${busy} act=${act} />`
-										: tab === "theme"
-											? html`<${SettingsTheme} themes=${themes} currentThemeId=${currentThemeId} onPick=${async (
-													id,
-												) => {
-													const res = await act(`/theme ${id}`);
-													if (res.ok && res.result?.colors) onApplyTheme(res.result.colors);
-													if (res.ok && res.result?.theme) onThemeChange(res.result.theme);
-												}} />`
-											: tab === "bash"
-												? html`<${SettingsBash} data=${data.bash} busy=${busy} act=${act} />`
-												: tab === "web"
-													? html`<${SettingsWeb} data=${data.web} busy=${busy} act=${act} />`
-													: tab === "quick-mode"
-														? html`<${SettingsQuickMode} data=${data["quick-mode"]} busy=${busy} act=${act} personas=${personas} onQuickSessionPersonaChange=${onQuickSessionPersonaChange} />`
-														: tab === "hooks"
-															? html`<${SettingsHooks} data=${data.hooks} busy=${busy} act=${act} />`
-															: tab === "mcp"
-																? html`<${SettingsMcp} data=${data.mcp} busy=${busy} act=${act} confirm=${confirm} />`
-																: tab === "skills"
-																	? html`<${SettingsSkills} data=${data.skills} busy=${busy} act=${act} confirm=${confirm} />`
-																	: tab === "plugins"
-																		? html`<${SettingsPlugins} data=${data.plugins} busy=${busy} act=${act} confirm=${confirm} />`
-																		: tab === "marketplace"
-																			? html`<${SettingsMarketplace} data=${data.marketplace} busy=${busy} act=${act} confirm=${confirm} />`
-																			: tab === "skillssh"
-																				? html`<${SettingsSkillssh} data=${data.skills} busy=${busy} act=${act} confirm=${confirm} />`
-																				: tab === "provider"
-																					? html`<${SettingsProvider} data=${data.provider} busy=${busy} act=${act} confirm=${confirm} />`
-																					: tab === "ssh"
-																						? html`<${SettingsSsh} data=${data.ssh} busy=${busy} act=${act} confirm=${confirm} />`
-																						: null
+										: tab === "bash"
+											? html`<${SettingsBash} data=${data.bash} busy=${busy} act=${act} />`
+											: tab === "web"
+												? html`<${SettingsWeb} data=${data.web} busy=${busy} act=${act} />`
+												: tab === "quick-mode"
+													? html`<${SettingsQuickMode} data=${data["quick-mode"]} busy=${busy} act=${act} personas=${personas} onQuickSessionPersonaChange=${onQuickSessionPersonaChange} />`
+													: tab === "hooks"
+														? html`<${SettingsHooks} data=${data.hooks} busy=${busy} act=${act} />`
+														: tab === "mcp"
+															? html`<${SettingsMcp} data=${data.mcp} busy=${busy} act=${act} confirm=${confirm} />`
+															: tab === "skills"
+																? html`<${SettingsSkills} data=${data.skills} busy=${busy} act=${act} confirm=${confirm} />`
+																: tab === "plugins"
+																	? html`<${SettingsPlugins} data=${data.plugins} busy=${busy} act=${act} confirm=${confirm} />`
+																	: tab === "marketplace"
+																		? html`<${SettingsMarketplace} data=${data.marketplace} busy=${busy} act=${act} confirm=${confirm} />`
+																		: tab === "skillssh"
+																			? html`<${SettingsSkillssh} data=${data.skills} busy=${busy} act=${act} confirm=${confirm} />`
+																			: tab === "provider"
+																				? html`<${SettingsProvider} data=${data.provider} busy=${busy} act=${act} confirm=${confirm} />`
+																				: tab === "ssh"
+																					? html`<${SettingsSsh} data=${data.ssh} busy=${busy} act=${act} confirm=${confirm} />`
+																					: null
 						}
 					</div>
 				</div>
@@ -3241,12 +3238,31 @@ function SettingsTheme({ themes, currentThemeId, onPick }) {
 	`;
 }
 
+function SettingsAppearance({
+	themes,
+	currentThemeId,
+	onPickTheme,
+	currentFontId,
+	currentFontScale,
+	onPickFont,
+	onPickScale,
+}) {
+	return html`
+		<div class="settings-rows">
+			<div class="settings-section-title">Theme</div>
+			<${SettingsTheme} themes=${themes} currentThemeId=${currentThemeId} onPick=${onPickTheme} />
+			<div class="settings-section-title">Font</div>
+			<${SettingsFont} currentFontId=${currentFontId} currentFontScale=${currentFontScale} onPickFont=${onPickFont} onPickScale=${onPickScale} />
+		</div>
+	`;
+}
+
 // Client-only (localStorage) — unlike SettingsTheme, picking here never
 // round-trips through `act`/`/command`, so it applies the instant it's
 // clicked/dragged. The local regular faces are already ready for every tile.
 function SettingsFont({ currentFontId, currentFontScale, onPickFont, onPickScale }) {
 	return html`
-		<div class="settings-rows" style=${{ marginBottom: "16px" }}>
+		<div class="settings-font-settings">
 			<div class="settings-row-label">Scale</div>
 			<div class="settings-scale-row">
 				${FONT_SCALE_OPTIONS.map(
@@ -3257,9 +3273,8 @@ function SettingsFont({ currentFontId, currentFontScale, onPickFont, onPickScale
 				`,
 				)}
 			</div>
-		</div>
-		<div class="settings-row-label">Monospace</div>
-		<div class="settings-font-grid">
+			<div class="settings-row-label">Monospace</div>
+			<div class="settings-font-grid">
 			${FONT_OPTIONS.filter((f) => f.mono).map(
 				(f) => html`
 				<button key=${f.id} class="settings-font-swatch${f.id === currentFontId ? " active" : ""}" style=${{ fontFamily: f.family }} onClick=${() => onPickFont(f.id)}>
@@ -3267,9 +3282,9 @@ function SettingsFont({ currentFontId, currentFontScale, onPickFont, onPickScale
 				</button>
 			`,
 			)}
-		</div>
-		<div class="settings-row-label" style=${{ marginTop: "14px" }}>Sans-serif</div>
-		<div class="settings-font-grid">
+			</div>
+			<div class="settings-row-label">Sans-serif</div>
+			<div class="settings-font-grid">
 			${FONT_OPTIONS.filter((f) => !f.mono).map(
 				(f) => html`
 				<button key=${f.id} class="settings-font-swatch${f.id === currentFontId ? " active" : ""}" style=${{ fontFamily: f.family }} onClick=${() => onPickFont(f.id)}>
@@ -3277,6 +3292,7 @@ function SettingsFont({ currentFontId, currentFontScale, onPickFont, onPickScale
 				</button>
 			`,
 			)}
+			</div>
 		</div>
 	`;
 }
@@ -3405,47 +3421,51 @@ function SettingsBash({ data, busy, act }) {
 function SettingsWeb({ data, busy, act }) {
 	const [tavilyKey, setTavilyKey] = useState("");
 	const [braveKey, setBraveKey] = useState("");
+	const [pendingSearchProvider, setPendingSearchProvider] = useState("");
 	if (!data) return null;
 	const webTools = data.webTools || {};
 	const search = data.searchProvider || {};
 	const fetchProvider = data.fetchProvider || {};
 	const webOn = webTools.webTools;
 	const provider = search.searchProvider || "ddg";
+	const selectedSearchProvider = pendingSearchProvider || provider;
 	const tKey = tavilyKey || search.tavilyApiKey || "";
 	const bKey = braveKey || search.braveApiKey || "";
 	const fetchBackend = fetchProvider.webFetchProvider || "jina";
+	const selectSearchProvider = async (nextProvider) => {
+		setPendingSearchProvider(nextProvider);
+		if (nextProvider !== "ddg") return;
+		const result = await act("/web-search-provider ddg");
+		if (result.ok) setPendingSearchProvider("");
+	};
+	const saveSearchProvider = async () => {
+		const key = selectedSearchProvider === "tavily" ? tKey : bKey;
+		if (!key) return;
+		const result = await act(`/web-search-provider ${selectedSearchProvider} ${key}`);
+		if (result.ok) setPendingSearchProvider("");
+	};
 	return html`
-		<div class="settings-rows">
-			<div class="settings-section-title">Web tools</div>
-			<p class="settings-hint">Enable or disable <code>web_search</code> and <code>web_fetch</code> globally. When on, the agent can search the web and read pages.</p>
-			<div class="settings-form-row">
-				<button class="modal-btn${webOn ? " modal-btn-primary" : ""}" title="Enable web_search and web_fetch" disabled=${busy} onClick=${() => act("/web on")}>Enabled</button>
-				<button class="modal-btn${!webOn ? " modal-btn-primary" : ""}" title="Disable web_search and web_fetch" disabled=${busy} onClick=${() => act("/web off")}>Disabled</button>
+		<div class="settings-compact-list">
+			<div class="settings-compact-row">
+				<div class="settings-compact-copy"><span class="settings-compact-title">Web tools</span><span>Lets the agent search the web and read pages.</span></div>
+				<button class="settings-toggle" role="switch" aria-checked=${webOn ? "true" : "false"} disabled=${busy} onClick=${() => act(`/web ${webOn ? "off" : "on"}`)}><span class="settings-toggle-thumb" />${webOn ? "Enabled" : "Disabled"}</button>
 			</div>
-			<div class="settings-section-title">Web search backend</div>
-			<p class="settings-hint">DuckDuckGo is free with no key but rate-limited (~4 searches). Tavily and Brave Search need an API key for reliable access.</p>
-			<div class="settings-form-row">
-				<button class="modal-btn${provider === "ddg" ? " modal-btn-primary" : ""}" title="Free, no key — ~4 searches per IP before rate-limited" disabled=${busy} onClick=${() => act("/web-search-provider ddg")}>DuckDuckGo</button>
-				<button class="modal-btn${provider === "tavily" ? " modal-btn-primary" : ""}" title="API key required — 1000 free searches/month" disabled=${busy} onClick=${() => {
-					if (tKey) act(`/web-search-provider tavily ${tKey}`);
-				}}>Tavily</button>
-				<button class="modal-btn${provider === "brave" ? " modal-btn-primary" : ""}" title="API key required — Brave's own general web index" disabled=${busy} onClick=${() => {
-					if (bKey) act(`/web-search-provider brave ${bKey}`);
-				}}>Brave Search</button>
+			<div class="settings-compact-row">
+				<div class="settings-compact-copy"><span class="settings-compact-title">Search</span><span>DuckDuckGo is free but rate-limited; Tavily and Brave need a key.</span></div>
+				<select disabled=${busy} value=${selectedSearchProvider} onChange=${(e) => selectSearchProvider(e.target.value)}>
+					<option value="ddg">DuckDuckGo</option>
+					<option value="tavily">Tavily</option>
+					<option value="brave">Brave Search</option>
+				</select>
 			</div>
-			<div class="settings-form-row">
-				<input type="password" autocomplete="off" placeholder="Tavily API key (tvly-...)" value=${tKey} onInput=${(e) => setTavilyKey(e.target.value)} />
-				<button class="modal-btn" style=${{ minWidth: "142px" }} disabled=${busy || !tKey} onClick=${() => act(`/web-search-provider tavily ${tKey}`)}>Save & use Tavily</button>
-			</div>
-			<div class="settings-form-row">
-				<input type="password" autocomplete="off" placeholder="Brave Search API key (BSA...)" value=${bKey} onInput=${(e) => setBraveKey(e.target.value)} />
-				<button class="modal-btn" style=${{ minWidth: "142px" }} disabled=${busy || !bKey} onClick=${() => act(`/web-search-provider brave ${bKey}`)}>Save & use Brave</button>
-			</div>
-			<div class="settings-section-title">Web fetch backend</div>
-			<p class="settings-hint">Jina Reader needs no key and handles JS-rendered pages/PDFs, but sends every fetched URL through a third party. Local fetches the page directly from this process instead — no third party involved — and converts HTML itself.</p>
-			<div class="settings-form-row">
-				<button class="modal-btn${fetchBackend === "jina" ? " modal-btn-primary" : ""}" title="Free, no key — handles JS rendering and PDFs" disabled=${busy} onClick=${() => act("/web-fetch-provider jina")}>Jina Reader</button>
-				<button class="modal-btn${fetchBackend === "local" ? " modal-btn-primary" : ""}" title="Direct fetch — no third party sees the URL" disabled=${busy} onClick=${() => act("/web-fetch-provider local")}>Local</button>
+			${
+				selectedSearchProvider !== "ddg"
+					? html`<div class="settings-compact-detail"><input type="password" autocomplete="off" placeholder=${selectedSearchProvider === "tavily" ? "Tavily API key (tvly-...)" : "Brave Search API key (BSA...)"} value=${selectedSearchProvider === "tavily" ? tKey : bKey} onInput=${(e) => (selectedSearchProvider === "tavily" ? setTavilyKey(e.target.value) : setBraveKey(e.target.value))} /><button class="modal-btn" disabled=${busy || !(selectedSearchProvider === "tavily" ? tKey : bKey)} onClick=${saveSearchProvider}>Save</button></div>`
+					: null
+			}
+			<div class="settings-compact-row">
+				<div class="settings-compact-copy"><span class="settings-compact-title">Fetch pages</span><span>${fetchBackend === "jina" ? "Handles JavaScript pages and PDFs; URLs go through Jina Reader." : "Fetches directly from this machine; no third party receives the URL."}</span></div>
+				<div class="settings-segmented"><button class="modal-btn${fetchBackend === "jina" ? " modal-btn-primary" : ""}" disabled=${busy} onClick=${() => act("/web-fetch-provider jina")}>Jina</button><button class="modal-btn${fetchBackend === "local" ? " modal-btn-primary" : ""}" disabled=${busy} onClick=${() => act("/web-fetch-provider local")}>Local</button></div>
 			</div>
 		</div>
 	`;
@@ -3744,6 +3764,7 @@ function SettingsPlugins({ data, busy, act, confirm }) {
 function SettingsMarketplace({ data, busy, act, confirm }) {
 	const [mpSource, setMpSource] = useState("");
 	const [mpQuery, setMpQuery] = useState("");
+	const [addStatus, setAddStatus] = useState("");
 	if (!data) return null;
 	const catalog = data.catalog || [];
 	const sortedCatalog = [...catalog].sort((a, b) => a.name.localeCompare(b.name));
@@ -3847,12 +3868,19 @@ function SettingsMarketplace({ data, busy, act, confirm }) {
 					${data.marketplaces.length === 0 && html`<div class="settings-hint">No marketplaces added.</div>`}
 					<div class="settings-hint" style="margin-bottom:6px">Any git repo with a <code>marketplace.json</code> catalog works. Add by <code>owner/repo</code>, URL, or path.</div>
 					<div class="settings-form-row">
-						<input type="text" placeholder="owner/repo, URL, or path" value=${mpSource} onInput=${(e) => setMpSource(e.target.value)} />
+						<input type="text" placeholder="owner/repo, URL, or path" value=${mpSource} onInput=${(e) => {
+							setMpSource(e.target.value);
+							setAddStatus("");
+						}} />
 						<button class="modal-btn icon-btn" title="Add marketplace" disabled=${busy || !mpSource} onClick=${async () => {
 							const res = await act(`/plugin marketplace add ${mpSource}`);
-							if (res.ok) setMpSource("");
+							if (res.ok) {
+								setAddStatus(typeof res.result === "string" ? res.result : "Marketplace added");
+								setMpSource("");
+							}
 						}}><${icons.plus} /></button>
 					</div>
+					${addStatus && html`<div class="settings-ok" role="status">${addStatus}</div>`}
 				</div>
 		</div>
 	`;
@@ -3978,8 +4006,64 @@ function SettingsSsh({ data, busy, act, confirm }) {
 	const [host, setHost] = useState("");
 	const [username, setUsername] = useState("");
 	const [port, setPort] = useState("");
+	const [authMode, setAuthMode] = useState("agent");
 	const [password, setPassword] = useState("");
 	const [keyContent, setKeyContent] = useState("");
+	const [saving, setSaving] = useState(false);
+	const [formStatus, setFormStatus] = useState(null);
+	const addHost = async () => {
+		const parsedPort = port ? Number(port) : undefined;
+		if (port && (!Number.isInteger(parsedPort) || parsedPort < 1 || parsedPort > 65535)) {
+			setFormStatus({ ok: false, message: "Port must be a number from 1 to 65535" });
+			return;
+		}
+		if (authMode === "key" && !keyContent.trim()) {
+			setFormStatus({ ok: false, message: "Paste a private key or choose SSH agent" });
+			return;
+		}
+		if (authMode === "password" && !password) {
+			setFormStatus({ ok: false, message: "Enter a password or choose another sign-in method" });
+			return;
+		}
+		setSaving(true);
+		setFormStatus(null);
+		try {
+			let keyPath;
+			if (authMode === "key") {
+				const keyResult = await api("POST", "/api/ssh/key", { name, key: keyContent.trim() });
+				if (!keyResult?.ok) {
+					setFormStatus({ ok: false, message: keyResult?.error || "Could not save the private key" });
+					return;
+				}
+				keyPath = keyResult.path;
+			}
+			const result = await api("POST", "/api/ssh/add", {
+				name,
+				host,
+				username: username || undefined,
+				port: parsedPort,
+				keyPath,
+				password: authMode === "password" ? password : undefined,
+			});
+			if (!result?.ok) {
+				setFormStatus({ ok: false, message: result?.error || "Could not add the host" });
+				return;
+			}
+			setName("");
+			setHost("");
+			setUsername("");
+			setPort("");
+			setAuthMode("agent");
+			setPassword("");
+			setKeyContent("");
+			setFormStatus({ ok: true, message: `Added ${name}` });
+			await act("/ssh list");
+		} catch (err) {
+			setFormStatus({ ok: false, message: err instanceof Error ? err.message : "Could not add the host" });
+		} finally {
+			setSaving(false);
+		}
+	};
 	return html`
 		<div class="settings-rows">
 			<p class="settings-intro"><span>Remote machines the agent can run commands on via the <code>ssh</code> tool — deploy code, inspect logs, and more.</span></p>
@@ -3990,7 +4074,7 @@ function SettingsSsh({ data, busy, act, confirm }) {
 				<div key=${h.name} class="settings-item-row">
 					<div class="settings-item-info">
 						<span class="settings-item-name">${h.name}</span>
-						<span class="settings-item-meta">${h.username ? `${h.username}@` : ""}${h.host}${h.port ? `:${h.port}` : ""}${h.keyPath ? " (key)" : ""}${h.password ? " (password)" : ""}</span>
+						<span class="settings-item-meta">${h.username ? `${h.username}@` : ""}${h.host}${h.port ? `:${h.port}` : ""} · ${h.keyPath ? "private key" : h.password ? "password" : "SSH agent"}</span>
 					</div>
 					<div class="settings-item-actions">
 						<button class="modal-btn icon-btn modal-btn-danger" title="Remove" disabled=${busy} onClick=${async () => {
@@ -4004,49 +4088,29 @@ function SettingsSsh({ data, busy, act, confirm }) {
 			<div class="settings-section-title">Add host</div>
 			<div class="settings-ssh-form">
 				<div class="settings-form-row">
-					<input type="text" placeholder="name" value=${name} onInput=${(e) => setName(e.target.value)} />
-					<input type="text" placeholder="host or IP" value=${host} onInput=${(e) => setHost(e.target.value)} />
+					<input type="text" placeholder="Name (e.g. production)" value=${name} disabled=${saving} onInput=${(e) => setName(e.target.value)} />
+					<input type="text" placeholder="Host or IP" value=${host} disabled=${saving} onInput=${(e) => setHost(e.target.value)} />
 				</div>
 				<div class="settings-form-row">
-					<input type="text" placeholder="username" value=${username} onInput=${(e) => setUsername(e.target.value)} />
-					<input type="text" placeholder="port" value=${port} style=${{ maxWidth: "80px" }} onInput=${(e) => setPort(e.target.value)} />
+					<input type="text" autocomplete="username" placeholder="Username (optional)" value=${username} disabled=${saving} onInput=${(e) => setUsername(e.target.value)} />
+					<input type="text" inputMode="numeric" placeholder="Port (22)" value=${port} disabled=${saving} style=${{ maxWidth: "100px" }} onInput=${(e) => setPort(e.target.value)} />
 				</div>
+				<div class="settings-row-label">Sign in with</div>
 				<div class="settings-form-row">
-					<input type="password" autocomplete="off" placeholder="Password (optional, requires sshpass)" value=${password} onInput=${(e) => setPassword(e.target.value)} />
+					<button class="modal-btn${authMode === "agent" ? " modal-btn-primary" : ""}" disabled=${saving} onClick=${() => setAuthMode("agent")}>SSH agent</button>
+					<button class="modal-btn${authMode === "key" ? " modal-btn-primary" : ""}" disabled=${saving} onClick=${() => setAuthMode("key")}>Private key</button>
+					<button class="modal-btn${authMode === "password" ? " modal-btn-primary" : ""}" disabled=${saving} onClick=${() => setAuthMode("password")}>Password</button>
 				</div>
-				<textarea class="settings-textarea" placeholder="Paste SSH private key (optional)" onInput=${(e) => setKeyContent(e.target.value)} rows="4">${keyContent}</textarea>
+				${authMode === "agent" ? html`<div class="settings-hint">Uses your system SSH configuration and agent. No credential is stored by cast.</div>` : null}
+				${authMode === "key" ? html`<textarea class="settings-textarea" autocomplete="off" placeholder="Paste private key" value=${keyContent} disabled=${saving} onInput=${(e) => setKeyContent(e.target.value)} rows="4" />` : null}
+				${
+					authMode === "password"
+						? html`<div class="settings-form-row"><input type="password" autocomplete="off" placeholder="Password (requires sshpass on this machine)" value=${password} disabled=${saving} onInput=${(e) => setPassword(e.target.value)} /></div>`
+						: null
+				}
+				${formStatus ? html`<div class="settings-hint ${formStatus.ok ? "settings-ok" : "settings-error"}" role="status">${formStatus.message}</div>` : null}
 				<div class="settings-form-row" style=${{ justifyContent: "flex-end" }}>
-					<button class="modal-btn icon-btn" title="Add SSH host" disabled=${busy || !name || !host} onClick=${async () => {
-						let kp;
-						if (keyContent.trim()) {
-							const res = await api("POST", "/api/ssh/key", { name, key: keyContent.trim() });
-							if (!res?.ok) {
-								alert(res?.error || "Failed to save key");
-								return;
-							}
-							kp = res.path;
-						}
-						if (password) {
-							const res = await api("POST", "/api/ssh/add", {
-								name,
-								host,
-								username: username || undefined,
-								port: port ? Number(port) : undefined,
-								keyPath: kp,
-								password,
-							});
-							if (!res?.ok) alert(res?.error || "Failed to add host");
-						} else {
-							const parts = [name, host, username || "-", port || "-", kp || "-"];
-							await act(`/ssh add ${parts.join(" ")}`);
-						}
-						setName("");
-						setHost("");
-						setUsername("");
-						setPort("");
-						setPassword("");
-						setKeyContent("");
-					}}><${icons.plus} /></button>
+					<button class="modal-btn modal-btn-primary" disabled=${busy || saving || !name || !host} onClick=${addHost}>${saving ? "Adding…" : "Add host"}</button>
 				</div>
 			</div>
 		</div>
