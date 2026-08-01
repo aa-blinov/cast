@@ -8,6 +8,12 @@ import { h, render } from "preact";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { api } from "./api.js";
 import { CastLogo } from "./cast-logo.js";
+import {
+	isBlockedAttachmentName,
+	partitionFiles,
+	readFileAsDataUrl,
+	resizeImageToDataUrl,
+} from "./composer-attachments.js";
 import { CommandPalette, ValueSuggest } from "./composer-pickers.js";
 import { DirectoryBrowser } from "./directory-browser.js";
 import { ElapsedTimer } from "./elapsed-timer.js";
@@ -908,99 +914,6 @@ function LiveStreamingBlocks({ controllerRef, onFrame }) {
 	);
 	return html`<${StreamingBlocks} blocks=${stream.blocks} />`;
 }
-// Downscales+re-encodes a pasted/dropped/picked image before it ever leaves
-// the browser — a real incident (see docs/changelog.md) had 8 unresized
-// photos in one turn's history get a bare, undebuggable 400 from the
-// provider; MiniMax's own docs recommend keeping images to ~1024px. Encodes
-// as JPEG regardless of source format (simplest way to bound size — a lossy
-// re-encode of a screenshot/photo is an acceptable tradeoff here).
-const IMAGE_MAX_DIMENSION = 1568;
-const IMAGE_JPEG_QUALITY = 0.85;
-function resizeImageToDataUrl(file) {
-	return new Promise((resolve, reject) => {
-		const img = new Image();
-		const objectUrl = URL.createObjectURL(file);
-		img.onload = () => {
-			URL.revokeObjectURL(objectUrl);
-			const scale = Math.min(1, IMAGE_MAX_DIMENSION / Math.max(img.width, img.height));
-			const w = Math.max(1, Math.round(img.width * scale));
-			const h = Math.max(1, Math.round(img.height * scale));
-			const canvas = document.createElement("canvas");
-			canvas.width = w;
-			canvas.height = h;
-			const ctx = canvas.getContext("2d");
-			ctx.drawImage(img, 0, 0, w, h);
-			resolve(canvas.toDataURL("image/jpeg", IMAGE_JPEG_QUALITY));
-		};
-		img.onerror = () => {
-			URL.revokeObjectURL(objectUrl);
-			reject(new Error("Could not load image"));
-		};
-		img.src = objectUrl;
-	});
-}
-
-// Same blocklist as inputs.ts (server-side, authoritative) — duplicated here
-// only so a blocked file gets an instant, no-round-trip rejection instead of
-// waiting on an upload + 400 response. The server re-checks regardless; this
-// is UX polish, not the actual boundary.
-const BLOCKED_ATTACHMENT_EXTENSIONS = new Set([
-	"exe",
-	"msi",
-	"dll",
-	"so",
-	"dylib",
-	"bin",
-	"com",
-	"bat",
-	"cmd",
-	"scr",
-	"vbs",
-	"vbe",
-	"ps1",
-	"psm1",
-	"jar",
-	"app",
-	"deb",
-	"rpm",
-	"apk",
-	"run",
-	"out",
-	"elf",
-	"cpl",
-	"gadget",
-	"wsf",
-	"wsh",
-	"ocx",
-	"sys",
-	"action",
-	"workflow",
-	"command",
-]);
-
-function isBlockedAttachmentName(name) {
-	const idx = name.lastIndexOf(".");
-	const ext = idx === -1 ? "" : name.slice(idx + 1).toLowerCase();
-	return BLOCKED_ATTACHMENT_EXTENSIONS.has(ext);
-}
-
-function partitionFiles(fileList) {
-	const files = Array.from(fileList ?? []);
-	return {
-		images: files.filter((f) => f.type.startsWith("image/")),
-		docs: files.filter((f) => !f.type.startsWith("image/")),
-	};
-}
-
-function readFileAsDataUrl(file) {
-	return new Promise((resolvePromise, reject) => {
-		const reader = new FileReader();
-		reader.onload = () => resolvePromise(reader.result);
-		reader.onerror = () => reject(new Error("Could not read file"));
-		reader.readAsDataURL(file);
-	});
-}
-
 function Composer({ running, ready, activeId, commands, personas, onSubmit, onAbort, onDocUploaded }) {
 	const [value, setValue] = useState("");
 	const [cmdVisible, setCmdVisible] = useState(false);

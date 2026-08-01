@@ -83,6 +83,7 @@ const webJavaScript = [
 	"api.js",
 	"cast-logo.js",
 	"composer-pickers.js",
+	"composer-attachments.js",
 	"directory-browser.js",
 	"elapsed-timer.js",
 	"file-preview.js",
