@@ -6,12 +6,6 @@ dist/
 qa/
 qa-nfr/
 test/__test_tmp__/
-# Eval results are runtime artifacts produced by every `--help`-style run
-# (see evals/lib/results.ts); only the committed baselines under
-# evals/baselines/ are persisted. The `runs/` files that were already
-# committed before this rule was added are kept as historical traces
-# (git ignores don't apply to already-tracked files).
-evals/results/
 # IDE-specific state — not part of the cast codebase.
 # Coding agents (Cursor, Claude, Codex, Aider, Windsurf, Continue, Cline, Roo,
 # Bolt, OpenCode, Kiro, Amazon Q, Qodo, Tabnine, Gemini Code Assist) and IDEs

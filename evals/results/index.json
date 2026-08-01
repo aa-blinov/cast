@@ -1,0 +1,48 @@
+[
+  {
+    "timestamp": "2026-07-31T20:46:59.989Z",
+    "kind": "compare",
+    "models": [
+      "deepseek/deepseek-v4-flash-0731"
+    ],
+    "total": 43,
+    "passed": 40,
+    "failed": 3,
+    "commit": "56c09f4",
+    "file": "runs/2026-07-31T20-46-59-989Z_compare-x3_deepseek-deepseek-v4-flash-0731.json",
+    "repeat": 3,
+    "inconsistentCases": 2
+  },
+  {
+    "timestamp": "2026-07-31T21:14:26.811Z",
+    "kind": "compare",
+    "models": [
+      "openrouter-eora-blinov:poolside/laguna-s-2.1",
+      "openrouter-eora-blinov:stepfun/step-3.7-flash",
+      "openrouter-eora-blinov:minimax/minimax-m3",
+      "openrouter-eora-blinov:openai/gpt-5.6-luna"
+    ],
+    "total": 172,
+    "passed": 156,
+    "failed": 16,
+    "commit": "56c09f4",
+    "file": "runs/2026-07-31T21-14-26-811Z_compare-x3_openrouter-eora-blinov-poolside-laguna-s-2.1_openrouter-eora-blinov-stepfun-step.json",
+    "repeat": 3,
+    "inconsistentCases": 18
+  },
+  {
+    "timestamp": "2026-07-31T21:32:59.277Z",
+    "kind": "compare",
+    "models": [
+      "openrouter-eora-blinov:deepseek/deepseek-v4-pro",
+      "openrouter-eora-blinov:z-ai/glm-5.2"
+    ],
+    "total": 86,
+    "passed": 82,
+    "failed": 4,
+    "commit": "56c09f4",
+    "file": "runs/2026-07-31T21-32-59-277Z_compare-x3_openrouter-eora-blinov-deepseek-deepseek-v4-pro_openrouter-eora-blinov-z-ai-glm-.json",
+    "repeat": 3,
+    "inconsistentCases": 5
+  }
+]
