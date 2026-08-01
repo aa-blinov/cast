@@ -84,6 +84,7 @@ const webJavaScript = [
 	"cast-logo.js",
 	"elapsed-timer.js",
 	"file-preview.js",
+	"hotkeys.js",
 	"icons.js",
 	"modal-focus.js",
 	"plan-cards.js",
