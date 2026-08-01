@@ -7,6 +7,7 @@ import htm from "htm";
 import { h, render } from "preact";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { api } from "./api.js";
+import { ElapsedTimer } from "./elapsed-timer.js";
 import { FilePreviewModal } from "./file-preview.js";
 import { icons } from "./icons.js";
 import { useModalFocusTrap } from "./modal-focus.js";
@@ -4035,53 +4036,6 @@ function mergeHistoryPage(previous, incoming) {
 // content block — whose parent re-renders on every RAF commit —
 // replayed the fade-in on every commit, reading as a low-amplitude
 // shimmer on the whole reply.
-
-// Live stopwatch shown in the composer footer while a turn runs — split out
-// as its own component (rather than state living in App) so its 10Hz tick
-// only re-renders this one tiny <span>, not the entire app (sidebar, header,
-// message list) ten times a second. That whole-tree churn was visible as a
-// flicker across the UI (the header's "i" button included) for the entire
-// duration of every run.
-// `turnStartedAt` is supplied by the backend, so a reload joins the existing
-// request instead of treating its SSE connection time as the start. Mounted
-// with key=${activeId} at the call site — the 5s post-run freeze
-// below is meant to hold the *finished* time steady on the session it just
-// ran on, not survive a session switch. Without the key, switching to a
-// brand-new draft mid-freeze kept showing the old session's elapsed time
-// for however much of those 5s was left, since `elapsedMs` state itself
-// only resets when the freeze's own timeout finally fires — remounting on
-// activeId change resets it immediately instead.
-function ElapsedTimer({ running, connected, turnStartedAt }) {
-	const [elapsedMs, setElapsedMs] = useState(0);
-	useEffect(() => {
-		if (running && connected && typeof turnStartedAt === "number") {
-			setElapsedMs(Math.max(0, Date.now() - turnStartedAt));
-			// 4 Hz is plenty — a .1s-precision counter updates visibly four
-			// times a second, which reads as "live" without making the rest
-			// of the UI re-render that often. Was 10 Hz; the extra ticks
-			// were invisible (the eye can't resolve a 0.1s change 10 times
-			// in a row) but every one of them cost a full subtree diff
-			// because this component is a child of App and App's state
-			// changes once per tick.
-			const id = setInterval(() => {
-				setElapsedMs(Math.max(0, Date.now() - turnStartedAt));
-			}, 250);
-			return () => clearInterval(id);
-		} else if (!running) {
-			// Freeze the display for 5s after the run ends, then hide.
-			const timeout = setTimeout(() => setElapsedMs(0), 5000);
-			return () => clearTimeout(timeout);
-		}
-		// Disconnected while running — freeze the timer at the last known
-		// value instead of counting up with a stale connection. When the SSE
-		// reconnects (connected→true) the interval resumes from the real
-		// start time; if the run ended server-side while offline, the next
-		// `end` event will transition to the "not running" branch.
-	}, [running, connected, turnStartedAt]);
-
-	if (elapsedMs <= 0) return null;
-	return html`<span class="composer-elapsed">${(elapsedMs / 1000).toFixed(1)}s</span>`;
-}
 
 function PlanDecisionCard({ transition, onChoose }) {
 	if (!transition) return null;

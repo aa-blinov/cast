@@ -81,6 +81,7 @@ cpSync("src/web/public", "dist/public", { recursive: true });
 const webJavaScript = [
 	"app.js",
 	"api.js",
+	"elapsed-timer.js",
 	"file-preview.js",
 	"icons.js",
 	"modal-focus.js",
