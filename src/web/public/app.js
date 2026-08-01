@@ -5,7 +5,7 @@
 
 import htm from "htm";
 import { h, render } from "preact";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { api } from "./api.js";
 import { CastLogo } from "./cast-logo.js";
 import { Composer as ComposerModule } from "./composer.js";
@@ -26,7 +26,8 @@ import { ShareModal } from "./share-modal.js";
 import { SidebarSessionItem } from "./sidebar-session-item.js";
 import { groupSessionsByDirectory, SANDBOX_CWD, shortPath, sortSessionsByActivity } from "./sidebar-utils.js";
 import { StatusPopover } from "./status-popover.js";
-import { blocksFromAssistantCompletion, reduceStreamEvent } from "./stream-blocks.js";
+import { blocksFromAssistantCompletion } from "./stream-blocks.js";
+import { BlockView as BlockViewModule, LiveStreamingBlocks as LiveStreamingBlocksModule } from "./streaming-blocks.js";
 import { ToolCard as ToolCardModule } from "./tool-card.js";
 
 const html = htm.bind(h);
@@ -592,7 +593,7 @@ function Message({ msg }) {
 		// assistant just finished) was the visible one. Now silent.
 		return html`
 			<div class="message-group">
-				${collapsed.map((block, i) => html`<${BlockView} key=${block.kind === "tool" ? block.call.id : i} block=${block} />`)}
+				${collapsed.map((block, i) => html`<${BlockViewModule} key=${block.kind === "tool" ? block.call.id : i} block=${block} renderMarkdown=${renderMarkdown} />`)}
 					<${TurnMetaLine} turnMeta=${msg.turnMeta} />
 			</div>
 		`;
@@ -697,154 +698,6 @@ function Message({ msg }) {
 `;
 }
 
-// Renders a streaming text block (content or reasoning) into a single,
-// stable text node. The previous implementation used
-// `dangerouslySetInnerHTML` with the full `renderMarkdown(text)` result on
-// every RAF commit, which destroyed the entire DOM subtree under
-// `.message-content` and rebuilt it from the new HTML string — for a 4KB
-// reply streaming over 20s, that's hundreds of full subtree teardowns
-// while the user is just trying to read the words appearing. By
-// contrast, mutating `node.data` on a single text node is O(1) and
-// leaves the surrounding DOM, including any markdown formatting that
-// has already been laid out, completely untouched. The trade-off is
-// that the block shows as raw text (so partial `**bold**` boundaries
-// are visible as the literal characters) until it settles — at which
-// point the settled `Message` component takes over and renders the
-// full markdown. This is the same trade-off ChatGPT and Claude.ai make
-// for their live-typing view; the eye reads tokens as they arrive, not
-// as formatted text, and the 100-200ms where the text becomes "real"
-// happens between turns when the user is already looking at the
-// finished block.
-function StreamingText({ text, className }) {
-	const ref = useRef(null);
-	// Stable ref to the text node we own. Preact's keyed reconciliation
-	// reuses this same DOM element across renders (the parent
-	// <StreamingBlocks> keys each block by its array index), so the
-	// text node persists — we just mutate its `.data` on every
-	// streaming commit, the cheapest possible DOM update (no parse,
-	// no subtree walk, no relayout unless the new string is longer,
-	// which an append always is).
-	const textNodeRef = useRef(null);
-	// First commit: the ref callback fires while Preact is still
-	// assembling the DOM, so we can append the text node synchronously
-	// and avoid the empty→populated flash a useLayoutEffect would
-	// cause (the first frame would otherwise render an empty div).
-	const setRef = (el) => {
-		ref.current = el;
-		if (el && !textNodeRef.current) {
-			textNodeRef.current = document.createTextNode(text);
-			el.appendChild(textNodeRef.current);
-		}
-	};
-	useLayoutEffect(() => {
-		// Subsequent commits (text grew): just rewrite the existing
-		// text node's data. The layout effect runs synchronously after
-		// the DOM update but before paint, so the user sees the new
-		// length in the same frame the state changed.
-		if (textNodeRef.current) textNodeRef.current.data = text;
-	}, [text]);
-	return html`<div ref=${setRef} class=${className ?? "message-content"}></div>`;
-}
-
-function BlockView({ block, streaming = false }) {
-	if (block.kind === "tool") return html`<${ToolCardModule} call=${block.call} renderMarkdown=${renderMarkdown} />`;
-	if (!block.text.trim()) return null;
-	const kind = block.kind === "thinking" ? "reasoning" : "assistant";
-	const className = `message message-${kind}${streaming ? " message-entering" : ""}`;
-	return html`
-		<div class=${className}>
-			<div class="message-label">${block.kind === "thinking" ? "reasoning" : "agent"}</div>
-			${
-				streaming
-					? html`<${StreamingText} text=${block.text} />`
-					: block.kind === "thinking"
-						? html`<div class="message-content">${block.text}</div>`
-						: html`<div class="message-content" dangerouslySetInnerHTML=${{ __html: renderMarkdown(block.text) }} />`
-			}
-		</div>
-	`;
-}
-
-function StreamingBlocks({ blocks }) {
-	if (!blocks || blocks.length === 0) return null;
-	// Same mid-word boundary collapse as the settled `Message` path — the
-	// parser may have split the model's `<think>...</think>` boundary inside
-	// a word (observed on MiniMax-M3 emitting `</think>` mid-Cyrillic), in
-	// which case the visible reasoning and content blocks are at the same
-	// word. Glide them back together at render time.
-	const collapsed = collapseMidWordBoundaries(blocks);
-	// Every block DOM element here is keyed by its index in the array, so
-	// a block at the same index across renders reuses the same DOM node
-	// and therefore does NOT replay the `rise` animation on subsequent
-	// renders — CSS `animation` is bound to the element, not the
-	// re-render, and only plays on initial mount. A *new* index (new
-	// content block after a tool, a new tool card, etc.) creates a new
-	// DOM element and the rise plays once. Streaming-token updates on
-	// the same block stay still.
-	// All streaming blocks carry their role label from the start of the
-	// stream — the previous version rendered just `<div class="message">
-	// <div class="message-content">…</div></div>` with no label, then
-	// `case "message"` swapped the whole subtree for a settled version
-	// that included `<div class="message-label">agent</div>`. That swap
-	// read as "text grew → then the word 'agent' appeared above it" at
-	// the end of every reply. Keeping the label in the streaming DOM
-	// from the first render means the final settled transition is
-	// content-only (markdown rendering kicks in for `agent` blocks,
-	// since raw text during the stream is the `StreamingText` plain-
-	// text node), not a structural change.
-	return html`
-		<div class="message-group">
-			${collapsed.map((block, i) => html`<${BlockView} key=${block.kind === "tool" ? block.call.id : i} block=${block} streaming />`)}
-		</div>
-	`;
-}
-
-function LiveStreamingBlocks({ controllerRef, onFrame }) {
-	const [stream, setStream] = useState({ blocks: [] });
-	const streamRef = useRef({ blocks: [] });
-	const rafRef = useRef(null);
-	const flush = useCallback(() => {
-		rafRef.current = null;
-		setStream(streamRef.current);
-		onFrame();
-	}, [onFrame]);
-	const reduce = useCallback(
-		(event) => {
-			streamRef.current = reduceStreamEvent(streamRef.current, event);
-			if (rafRef.current == null) rafRef.current = requestAnimationFrame(flush);
-		},
-		[flush],
-	);
-	const reset = useCallback(() => {
-		if (rafRef.current != null) {
-			cancelAnimationFrame(rafRef.current);
-			rafRef.current = null;
-		}
-		streamRef.current = { blocks: [] };
-		setStream({ blocks: [] });
-	}, []);
-	const take = useCallback(() => {
-		if (rafRef.current != null) {
-			cancelAnimationFrame(rafRef.current);
-			rafRef.current = null;
-		}
-		const snapshot = streamRef.current.blocks;
-		streamRef.current = { blocks: [] };
-		setStream({ blocks: [] });
-		return snapshot;
-	}, []);
-	controllerRef.current = { reduce, reset, take };
-	useEffect(
-		() => () => {
-			if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
-			if (controllerRef.current?.reset === reset) controllerRef.current = null;
-		},
-		[controllerRef, reset],
-	);
-	return html`<${StreamingBlocks} blocks=${stream.blocks} />`;
-}
-
-// Flat list of a session's attached (non-image) documents — see inputs.ts
 // for why they live in a global, session-scoped directory instead of inside
 // the project's own cwd. No tree/search/rename like FileExplorer below:
 // attachments aren't expected to have subdirectories, so there's nothing to
@@ -4271,7 +4124,7 @@ function App() {
 					`
 					}
 					${messages.map((msg) => html`<${Message} key=${keyForMessage(msg)} msg=${msg} />`)}
-					<${LiveStreamingBlocks} controllerRef=${streamingControllerRef} onFrame=${scrollStreamingFrame} />
+					<${LiveStreamingBlocksModule} controllerRef=${streamingControllerRef} onFrame=${scrollStreamingFrame} renderMarkdown=${renderMarkdown} />
 					${
 						!running &&
 						html`
