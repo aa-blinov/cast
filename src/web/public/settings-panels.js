@@ -1,0 +1,836 @@
+import htm from "htm";
+import { h } from "preact";
+import { useEffect, useState } from "preact/hooks";
+import { api } from "./api.js";
+import { icons } from "./icons.js";
+import { useModalFocusTrap } from "./modal-focus.js";
+import { shortPath } from "./sidebar-utils.js";
+
+const html = htm.bind(h);
+
+function SettingsBash({ data, busy, act }) {
+	if (!data) return null;
+	const perm = data.permissions || {};
+	return html`
+		<div class="settings-rows">
+			<div class="settings-section-title">Bash confirmation mode</div>
+			<p class="settings-hint">Default asks before running potentially dangerous shell commands. Bypass skips all confirmation prompts.</p>
+			<div class="settings-form-row">
+				<button class="modal-btn${perm.permissionMode === "default" ? " modal-btn-primary" : ""}" title="Confirm dangerous commands" disabled=${busy} onClick=${() => act("/permissions default")}>Default</button>
+				<button class="modal-btn${perm.permissionMode === "bypass" ? " modal-btn-primary" : ""}" title="Skip confirmation prompts" disabled=${busy} onClick=${() => act("/permissions bypass")}>Bypass</button>
+			</div>
+		</div>
+	`;
+}
+
+function SettingsWeb({ data, busy, act }) {
+	const [tavilyKey, setTavilyKey] = useState("");
+	const [braveKey, setBraveKey] = useState("");
+	const [pendingSearchProvider, setPendingSearchProvider] = useState("");
+	if (!data) return null;
+	const webTools = data.webTools || {};
+	const search = data.searchProvider || {};
+	const fetchProvider = data.fetchProvider || {};
+	const webOn = webTools.webTools;
+	const provider = search.searchProvider || "ddg";
+	const selectedSearchProvider = pendingSearchProvider || provider;
+	const tKey = tavilyKey || search.tavilyApiKey || "";
+	const bKey = braveKey || search.braveApiKey || "";
+	const fetchBackend = fetchProvider.webFetchProvider || "jina";
+	const selectSearchProvider = async (nextProvider) => {
+		setPendingSearchProvider(nextProvider);
+		if (nextProvider !== "ddg") return;
+		const result = await act("/web-search-provider ddg");
+		if (result.ok) setPendingSearchProvider("");
+	};
+	const saveSearchProvider = async () => {
+		const key = selectedSearchProvider === "tavily" ? tKey : bKey;
+		if (!key) return;
+		const result = await act(`/web-search-provider ${selectedSearchProvider} ${key}`);
+		if (result.ok) setPendingSearchProvider("");
+	};
+	return html`
+		<div class="settings-compact-list">
+			<div class="settings-compact-row">
+				<div class="settings-compact-copy"><span class="settings-compact-title">Web tools</span><span>Lets the agent search the web and read pages.</span></div>
+				<button class="settings-toggle" role="switch" aria-checked=${webOn ? "true" : "false"} disabled=${busy} onClick=${() => act(`/web ${webOn ? "off" : "on"}`)}><span class="settings-toggle-thumb" />${webOn ? "Enabled" : "Disabled"}</button>
+			</div>
+			<div class="settings-compact-row">
+				<div class="settings-compact-copy"><span class="settings-compact-title">Search</span><span>DuckDuckGo is free but rate-limited; Tavily and Brave need a key.</span></div>
+				<select disabled=${busy} value=${selectedSearchProvider} onChange=${(e) => selectSearchProvider(e.target.value)}>
+					<option value="ddg">DuckDuckGo</option>
+					<option value="tavily">Tavily</option>
+					<option value="brave">Brave Search</option>
+				</select>
+			</div>
+			${
+				selectedSearchProvider !== "ddg"
+					? html`<div class="settings-compact-detail"><input type="password" autocomplete="off" placeholder=${selectedSearchProvider === "tavily" ? "Tavily API key (tvly-...)" : "Brave Search API key (BSA...)"} value=${selectedSearchProvider === "tavily" ? tKey : bKey} onInput=${(e) => (selectedSearchProvider === "tavily" ? setTavilyKey(e.target.value) : setBraveKey(e.target.value))} /><button class="modal-btn" disabled=${busy || !(selectedSearchProvider === "tavily" ? tKey : bKey)} onClick=${saveSearchProvider}>Save</button></div>`
+					: null
+			}
+			<div class="settings-compact-row">
+				<div class="settings-compact-copy"><span class="settings-compact-title">Fetch pages</span><span>${fetchBackend === "jina" ? "Handles JavaScript pages and PDFs; URLs go through Jina Reader." : "Fetches directly from this machine; no third party receives the URL."}</span></div>
+				<div class="settings-segmented"><button class="modal-btn${fetchBackend === "jina" ? " modal-btn-primary" : ""}" disabled=${busy} onClick=${() => act("/web-fetch-provider jina")}>Jina</button><button class="modal-btn${fetchBackend === "local" ? " modal-btn-primary" : ""}" disabled=${busy} onClick=${() => act("/web-fetch-provider local")}>Local</button></div>
+			</div>
+		</div>
+	`;
+}
+
+function SettingsQuickMode({ data, busy, act, personas, onQuickSessionPersonaChange }) {
+	const [quickPersonaValue, setQuickPersonaValue] = useState("");
+	if (!data) return null;
+	const quickPersona = data.quickSessionPersona?.quickSessionPersona ?? "senior";
+	return html`
+		<div class="settings-rows">
+			<div class="settings-section-title">Quick session persona</div>
+			<p class="settings-hint">Persona the sidebar's "Quick" button uses — skips the picker, opens straight into a fresh sandbox directory.</p>
+			<div class="settings-form-row">
+				<select
+					disabled=${busy || !(personas || []).length}
+					value=${quickPersonaValue || quickPersona}
+					onChange=${(e) => setQuickPersonaValue(e.target.value)}
+				>
+					${(personas || []).map((p) => html`<option key=${p.name} value=${p.name}>${p.label}</option>`)}
+				</select>
+				<button
+					class="modal-btn icon-btn"
+					title="Apply quick session persona"
+					disabled=${busy || !quickPersonaValue || quickPersonaValue === quickPersona}
+					onClick=${async () => {
+						const res = await act(`/quick-session-persona ${quickPersonaValue}`);
+						if (res.ok) {
+							onQuickSessionPersonaChange?.(quickPersonaValue);
+							setQuickPersonaValue("");
+						}
+					}}
+				><${icons.check} /></button>
+			</div>
+		</div>
+	`;
+}
+
+function SettingsMcp({ data, busy, act, confirm }) {
+	const servers = data || [];
+	const groups = [
+		{ key: "global", label: "Global", items: servers.filter((s) => s.source === "global") },
+		{ key: "project", label: "Project", items: servers.filter((s) => s.source === "project") },
+	];
+	const renderServer = (s) => html`
+		<div key=${s.name} class="settings-item-row">
+			<div class="settings-item-info">
+				<span class="settings-item-status ${s.connected ? "ok" : "off"}" />
+				<span class="settings-item-name">${s.name}</span>
+				<span class="settings-item-meta">${s.disabled ? "disabled" : s.connected ? "connected" : "not connected"}</span>
+			</div>
+			<div class="settings-item-actions">
+				${!s.disabled && html`<button class="modal-btn icon-btn" title="Reconnect" disabled=${busy} onClick=${() => act(`/mcp reconnect ${s.name}`)}><${icons.arrowPath} /></button>`}
+				<button class="modal-btn icon-btn" title=${s.disabled ? "Enable" : "Disable"} disabled=${busy} onClick=${() => act(`/mcp ${s.disabled ? "enable" : "disable"} ${s.name}`)}>${s.disabled ? html`<${icons.play} />` : html`<${icons.pause} />`}</button>
+				<button class="modal-btn icon-btn modal-btn-danger" title="Uninstall" disabled=${busy} onClick=${async () => {
+					if (await confirm(`Uninstall MCP server "${s.name}"?`)) act(`/mcp uninstall ${s.name}`);
+				}}><${icons.trash} /></button>
+			</div>
+		</div>
+	`;
+	return html`
+		<div class="settings-rows">
+			<p class="settings-intro"><span>Background processes that give the agent extra tools. Configured in <code>.cast/mcp.json</code> (project) or <code>~/.cast/mcp.json</code> (global).</span></p>
+			${groups
+				.filter((g) => g.items.length > 0)
+				.map(
+					(g) => html`
+				<div key=${g.key} class="settings-group">
+					<div class="settings-section-title">${g.label}</div>
+					${[...g.items].sort((a, b) => a.name.localeCompare(b.name)).map(renderServer)}
+				</div>
+			`,
+				)}
+			${servers.length === 0 && html`<div class="settings-hint">No MCP servers configured.</div>`}
+		</div>
+	`;
+}
+function SettingsSkills({ data, busy, act, confirm }) {
+	const skills = data || [];
+	const groups = [
+		{ key: "builtin", label: "Built-in", items: skills.filter((s) => s.source === "builtin") },
+		{ key: "global", label: "Global", items: skills.filter((s) => s.source === "global") },
+		{
+			key: "project",
+			label: "Project",
+			items: skills.filter((s) => s.source === "project" || s.source === "agents" || s.source === "path"),
+		},
+		{ key: "plugin", label: "Plugins", items: skills.filter((s) => s.source === "plugin") },
+	];
+	const renderSkill = (s) => html`
+		<div key=${s.name} class="settings-item-row">
+			<div class="settings-item-info">
+				<span class="settings-item-status ${s.enabled ? "ok" : "off"}" />
+				<span class="settings-item-name">${s.name}</span>
+				<span class="settings-item-meta">${s.source === "plugin" && s.pluginId ? s.pluginId : s.source}</span>
+				<${InfoPopover} text=${s.description} readUrl=${`/api/skill-content?name=${encodeURIComponent(s.name)}`} />
+			</div>
+			<div class="settings-item-actions">
+				<button class="modal-btn icon-btn" title=${s.enabled ? "Disable" : "Enable"} disabled=${busy} onClick=${() => act(`/skills ${s.enabled ? "disable" : "enable"} ${s.name}`)}>${s.enabled ? html`<${icons.pause} />` : html`<${icons.play} />`}</button>
+				${
+					s.uninstallable &&
+					html`<button class="modal-btn icon-btn modal-btn-danger" title="Uninstall" disabled=${busy} onClick=${async () => {
+						if (await confirm(`Uninstall skill "${s.name}"?`)) act(`/skills uninstall ${s.name}`);
+					}}><${icons.trash} /></button>`
+				}
+			</div>
+		</div>
+	`;
+	return html`
+		<div class="settings-rows">
+			<p class="settings-intro"><span>On-demand instruction sets — "expertise plugins" the agent picks up when a task matches, or you invoke with <code>/skill-name</code>. Click ℹ to preview one.</span></p>
+			${groups
+				.filter((g) => g.items.length > 0)
+				.map(
+					(g) => html`
+				<div key=${g.key} class="settings-group">
+					<div class="settings-section-title">${g.label}</div>
+					${[...g.items].sort((a, b) => a.name.localeCompare(b.name)).map(renderSkill)}
+				</div>
+			`,
+				)}
+		</div>
+	`;
+}
+
+function SettingsHooks({ data, busy, act }) {
+	const hooks = data?.entries || [];
+	const diagnostics = data?.diagnostics || [];
+	// Group plugins by pluginId — each plugin gets its own collapsible subsection.
+	// Global/project stay flat since they have no pluginId.
+	const globalHooks = hooks.filter((h) => h.source === "global");
+	const projectHooks = hooks.filter((h) => h.source === "project");
+	const pluginGroups = new Map();
+	for (const h of hooks.filter((h) => h.source === "plugin")) {
+		const key = h.pluginId ?? "(unknown plugin)";
+		if (!pluginGroups.has(key)) pluginGroups.set(key, []);
+		pluginGroups.get(key).push(h);
+	}
+	const renderHook = (h, showPlugin = false) => html`
+		<div key=${h.id} class="settings-item-row settings-item-row-stack">
+			<div class="settings-item-header">
+				<span class="settings-item-status ${h.enabled ? "ok" : "off"}" />
+				<span class="settings-item-name">${h.event}${h.matcher ? html` <span style=${{ opacity: 0.6 }}>(${h.matcher})</span>` : ""}</span>
+				${showPlugin && h.pluginId ? html`<span class="settings-item-meta">${h.pluginId}</span>` : ""}
+				<div class="settings-item-actions">
+					<button class="modal-btn icon-btn" title=${h.enabled ? "Disable" : "Enable"} disabled=${busy} onClick=${() => act(`/hooks ${h.enabled ? "disable" : "enable"} ${h.id}`)}>${h.enabled ? html`<${icons.pause} />` : html`<${icons.play} />`}</button>
+				</div>
+			</div>
+			${
+				h.commands?.length > 0 &&
+				html`
+				<div class="settings-item-body">
+					${h.commands.map(
+						(c) => html`
+						<div class="settings-item-cmd">
+							<span class="settings-item-cmd-type">${c.type ?? "command"}</span>
+							<code>${c.type === "http" ? c.url : c.command}</code>
+							${c.if ? html`<span class="settings-item-cmd-if">if: ${c.if}</span>` : ""}
+							${c.timeout ? html`<span class="settings-item-cmd-timeout">${c.timeout}s</span>` : ""}
+						</div>
+					`,
+					)}
+				</div>
+			`
+			}
+		</div>
+	`;
+	const renderGroup = (label, items, opts = {}) => {
+		if (items.length === 0) return null;
+		return html`
+			<div key=${opts.key ?? label} class="settings-group">
+				<div class="settings-section-title">${label}</div>
+				${[...items].sort((a, b) => a.event.localeCompare(b.event)).map((h) => renderHook(h, opts.showPlugin ?? false))}
+			</div>
+		`;
+	};
+	return html`
+		<div class="settings-rows">
+			<p class="settings-intro"><span>Shell (or HTTP) commands that fire on lifecycle events — validate/block a tool call, log activity, or force the agent to keep working before it stops. Configure in <code>.cast/hooks.json</code> (project) or <code>~/.cast/hooks.json</code> (global). Plugin-contributed hooks are grouped under their plugin; uninstall the plugin to remove all its hooks.</span></p>
+			${
+				diagnostics.length > 0 &&
+				html`<div class="settings-error">
+					${diagnostics.map((d) => html`<div key=${d.path}>Failed to parse <code>${d.path}</code>: ${d.message}</div>`)}
+				</div>`
+			}
+			${renderGroup("Global", globalHooks, { key: "global" })}
+			${renderGroup("Project", projectHooks, { key: "project" })}
+			${[...pluginGroups.entries()]
+				.sort(([a], [b]) => a.localeCompare(b))
+				.map(
+					([pluginId, items]) => html`
+					<div key=${pluginId} class="settings-group">
+						<div class="settings-section-title settings-section-title-plugin">
+							<span class="settings-section-title-name">${pluginId}</span>
+							<span class="settings-section-title-count">${items.length} hook${items.length === 1 ? "" : "s"}</span>
+						</div>
+						${[...items].sort((a, b) => a.event.localeCompare(b.event)).map((h) => renderHook(h, false))}
+					</div>
+				`,
+				)}
+			${hooks.length === 0 && html`<div class="settings-hint">No hooks configured.</div>`}
+		</div>
+	`;
+}
+
+function SettingsSkillssh({ data, busy, act, confirm }) {
+	const [installArgs, setInstallArgs] = useState("");
+	const [installing, setInstalling] = useState(false);
+	const allSkills = data || [];
+	// Filter to skills installed via npx skills add (flagged by the bridge)
+	const shSkills = allSkills.filter((s) => s.skillssh);
+	const install = async () => {
+		if (!installArgs || busy || installing) return;
+		setInstalling(true);
+		try {
+			const res = await act(`/skills-sh install ${installArgs}`);
+			if (res.ok) setInstallArgs("");
+		} finally {
+			setInstalling(false);
+		}
+	};
+	return html`
+		<div class="settings-rows">
+			<p class="settings-intro"><span><a href="https://skills.sh" target="_blank" rel="noopener">skills.sh</a> is the open agent-skills ecosystem (70+ agents, 27k stars) — browse it there for a package name, then install below. Cast already loads anything in <code>~/.agents/skills/</code> automatically.</span></p>
+
+			<div class="settings-section-title">Install a skill</div>
+			<div class="settings-form-row">
+				<input type="text" placeholder="owner/repo --skill name (or paste skills.sh's npx command)" value=${installArgs} disabled=${installing} onInput=${(e) => setInstallArgs(e.target.value)} onKeyDown=${(
+					e,
+				) => {
+					if (e.key === "Enter") {
+						e.preventDefault();
+						void install();
+					}
+				}} />
+				<button class="modal-btn icon-btn" title=${installing ? "Installing skill" : "Run npx skills add -g"} aria-busy=${installing} disabled=${busy || installing || !installArgs} onClick=${install}>${installing ? html`<span class="settings-inline-loader" aria-label="Installing" />` : html`<${icons.arrowDownTray} />`}</button>
+			</div>
+			${installing && html`<div class="settings-install-status" role="status">Installing skill… this can take a minute.</div>`}
+
+			<div class="settings-section-title">Installed via skills.sh (${shSkills.length})</div>
+			${shSkills.length === 0 && html`<div class="settings-hint">No skills installed via skills.sh yet. Install one above.</div>`}
+			${[...shSkills]
+				.sort((a, b) => a.name.localeCompare(b.name))
+				.map(
+					(s) => html`
+				<div key=${s.name} class="settings-item-row">
+					<div class="settings-item-info">
+						<span class="settings-item-name">${s.name}</span>
+						<span class="settings-item-meta">${s.skillsshSource || ""}</span>
+						<${InfoPopover} text=${s.description} readUrl=${`/api/skill-content?name=${encodeURIComponent(s.name)}`} />
+					</div>
+					<div class="settings-item-actions">
+						<button class="modal-btn icon-btn modal-btn-danger" title="Uninstall" disabled=${busy} onClick=${async () => {
+							if (await confirm(`Uninstall skill "${s.name}" (via npx skills rm)?`))
+								act(`/skills-sh uninstall ${s.name}`);
+						}}><${icons.trash} /></button>
+					</div>
+				</div>
+			`,
+				)}
+		</div>
+	`;
+}
+
+function SettingsPlugins({ data, busy, act, confirm }) {
+	if (!data) return null;
+	return html`
+		<div class="settings-rows">
+			<p class="settings-intro"><span>Plugins installed on this machine. Each plugin can ship skills, hooks, and MCP servers. To browse and install more, see the <strong>Marketplace</strong> tab.</span></p>
+			${[...data.plugins]
+				.sort((a, b) => a.id.localeCompare(b.id))
+				.map(
+					(p) => html`
+				<div key=${p.id} class="settings-item-row">
+					<div class="settings-item-info">
+						<span class="settings-item-status ${p.enabled ? "ok" : "off"}" />
+						<span class="settings-item-name">${p.plugin || p.id}</span>
+						<span class="settings-item-meta">${p.marketplace || ""}</span>
+						<${InfoPopover} text=${p.description} />
+					</div>
+					<div class="settings-item-actions">
+						<button class="modal-btn icon-btn" title=${p.enabled ? "Disable" : "Enable"} disabled=${busy} onClick=${() => act(`/plugin ${p.enabled ? "disable" : "enable"} ${p.id}`)}>${p.enabled ? html`<${icons.pause} />` : html`<${icons.play} />`}</button>
+						<button class="modal-btn icon-btn modal-btn-danger" title="Uninstall" disabled=${busy} onClick=${async () => {
+							if (await confirm(`Uninstall plugin "${p.id}"?`)) act(`/plugin uninstall ${p.id}`);
+						}}><${icons.trash} /></button>
+					</div>
+				</div>
+			`,
+				)}
+			${data.plugins.length === 0 && html`<div class="settings-hint">No plugins installed. Browse the Marketplace tab to add some.</div>`}
+		</div>
+	`;
+}
+
+function SettingsMarketplace({ data, busy, act, confirm }) {
+	const [mpSource, setMpSource] = useState("");
+	const [mpQuery, setMpQuery] = useState("");
+	const [addStatus, setAddStatus] = useState("");
+	if (!data) return null;
+	const catalog = data.catalog || [];
+	const sortedCatalog = [...catalog].sort((a, b) => a.name.localeCompare(b.name));
+	const installedNames = new Set(data.plugins?.map?.((p) => p.plugin || p.id) ?? []);
+	const installedIds = new Set(data.plugins?.map?.((p) => p.id) ?? []);
+	const renderInstallable = (mp, p) => {
+		const pkg = p.package || p.name;
+		const name = p.name || pkg;
+		const id = `${name}@${mp.name}`;
+		const installed = installedNames.has(name) || installedIds.has(id);
+		return html`
+			<div key=${`${mp.name}:${name}`} class="plugin-catalog-item">
+				<div class="plugin-catalog-header">
+					<span class="settings-item-name">${name}</span>
+					<span class="settings-item-meta">${mp.name}</span>
+					${
+						installed
+							? html`<span class="plugin-installed-label">installed</span>`
+							: html`<button class="modal-btn icon-btn" title="Install" disabled=${busy} onClick=${() => act(`/plugin install ${id}`)}><${icons.arrowDownTray} /></button>`
+					}
+				</div>
+				${p.description && html`<div class="plugin-catalog-desc">${p.description}</div>`}
+			</div>
+		`;
+	};
+	// Every marketplace's plugins merged into one flat list (already loaded
+	// in memory — no network round trip) instead of a per-marketplace tab,
+	// filtered live by the search box.
+	const query = mpQuery.trim().toLowerCase();
+	const allPlugins = sortedCatalog
+		.filter((mp) => !mp.error)
+		.flatMap((mp) =>
+			(mp.plugins || [])
+				.filter((p) => {
+					if (!query) return true;
+					const name = (p.name || p.package || "").toLowerCase();
+					const desc = (p.description || "").toLowerCase();
+					return name.includes(query) || desc.includes(query);
+				})
+				.map((p) => ({ mp, p })),
+		);
+	const erroredMarketplaces = sortedCatalog.filter((mp) => mp.error);
+	return html`
+		<div class="settings-rows">
+			<p class="settings-intro"><span>Browse plugin catalogs from configured marketplaces, and manage which marketplaces cast knows about. Plugins you install from here will appear in the <strong>Plugins</strong> tab.</span></p>
+
+			<div class="settings-section-title">Browse marketplaces (${allPlugins.length})</div>
+			<div class="settings-form-row">
+				<input type="text" placeholder="search all marketplaces (e.g. testing)" value=${mpQuery} onInput=${(e) => setMpQuery(e.target.value)} />
+				${
+					mpQuery &&
+					html`<button class="modal-btn icon-btn" title="Clear search" onClick=${() => setMpQuery("")}><${icons.xMark} /></button>`
+				}
+			</div>
+			${
+				catalog.length === 0
+					? html`<div class="settings-hint">Loading catalog…</div>`
+					: html`
+					<div class="plugin-catalog-list">
+						${
+							allPlugins.length === 0
+								? html`<div class="settings-hint">${query ? `No plugins match "${mpQuery}".` : "No plugins found."}</div>`
+								: allPlugins
+										.sort((a, b) =>
+											(a.p.name || a.p.package || "").localeCompare(b.p.name || b.p.package || ""),
+										)
+										.map(({ mp, p }) => renderInstallable(mp, p))
+						}
+					</div>
+				`
+			}
+			${
+				erroredMarketplaces.length > 0 &&
+				html`<div class="settings-hint">Failed to load catalog for: ${erroredMarketplaces.map((mp) => mp.name).join(", ")}.</div>`
+			}
+
+			<div class="settings-section-title">Marketplaces</div>
+				<div class="settings-rows">
+					${[...data.marketplaces]
+						.sort((a, b) => a.name.localeCompare(b.name))
+						.map(
+							(mp) => html`
+						<div key=${mp.name} class="settings-item-row">
+							<div class="settings-item-info">
+								<span class="settings-item-name">${mp.name}</span>
+								<span class="settings-item-meta" title=${mp.source}>${mp.isDefault ? "built-in" : shortPath(mp.source)}</span>
+							</div>
+							<div class="settings-item-actions">
+								<button class="modal-btn icon-btn" title="Update" disabled=${busy} onClick=${() => act(`/plugin marketplace update ${mp.name}`)}><${icons.arrowPath} /></button>
+								${
+									!mp.isDefault &&
+									html`<button class="modal-btn icon-btn modal-btn-danger" title="Remove" disabled=${busy} onClick=${async () => {
+										if (await confirm(`Remove marketplace "${mp.name}"?`))
+											act(`/plugin marketplace remove ${mp.name}`);
+									}}><${icons.trash} /></button>`
+								}
+							</div>
+						</div>
+					`,
+						)}
+					${data.marketplaces.length === 0 && html`<div class="settings-hint">No marketplaces added.</div>`}
+					<div class="settings-hint" style="margin-bottom:6px">Any git repo with a <code>marketplace.json</code> catalog works. Add by <code>owner/repo</code>, URL, or path.</div>
+					<div class="settings-form-row">
+						<input type="text" placeholder="owner/repo, URL, or path" value=${mpSource} onInput=${(e) => {
+							setMpSource(e.target.value);
+							setAddStatus("");
+						}} />
+						<button class="modal-btn icon-btn" title="Add marketplace" disabled=${busy || !mpSource} onClick=${async () => {
+							const res = await act(`/plugin marketplace add ${mpSource}`);
+							if (res.ok) {
+								setAddStatus(typeof res.result === "string" ? res.result : "Marketplace added");
+								setMpSource("");
+							}
+						}}><${icons.plus} /></button>
+					</div>
+					${addStatus && html`<div class="settings-ok" role="status">${addStatus}</div>`}
+				</div>
+		</div>
+	`;
+}
+
+function SettingsProvider({ data, busy, act, confirm }) {
+	const [name, setName] = useState("");
+	const [url, setUrl] = useState("");
+	const [apiKey, setApiKey] = useState("");
+	const [editing, setEditing] = useState(null);
+	const [verifyState, setVerifyState] = useState(null);
+	const [saving, setSaving] = useState(false);
+	const [verifying, setVerifying] = useState(false);
+	const verifyVersion = useRef(0);
+	const startEdit = (p) => {
+		setEditing(p.name);
+		setName(p.name);
+		setUrl(p.url);
+		setApiKey(p.apiKey);
+		setVerifyState(p.url && p.apiKey ? { ok: true, msg: "Saved — re-verify to confirm changes" } : null);
+	};
+	const cancelEdit = () => {
+		setEditing(null);
+		setName("");
+		setUrl("");
+		setApiKey("");
+		setVerifyState(null);
+	};
+	// Probe the entered URL + key without saving. Rejects outright when either
+	// field is empty so the button can't fire a pointless round trip.
+	const doVerify = async () => {
+		if (!url || !apiKey) {
+			setVerifyState({ ok: false, msg: "Enter a base URL and API key first" });
+			return;
+		}
+		const version = ++verifyVersion.current;
+		setVerifying(true);
+		setVerifyState({ ok: null, msg: "Verifying…" });
+		try {
+			const res = await api("POST", "/api/provider/verify", { url, apiKey });
+			if (version !== verifyVersion.current) return;
+			if (res?.ok) setVerifyState({ ok: true, msg: "Provider reachable" });
+			else setVerifyState({ ok: false, msg: res?.error || "Verification failed" });
+		} catch (_e) {
+			if (version === verifyVersion.current) setVerifyState({ ok: false, msg: "Verification request failed" });
+		} finally {
+			if (version === verifyVersion.current) setVerifying(false);
+		}
+	};
+	// Mandatory gate: a provider is never saved with unverified credentials.
+	const saveProvider = async () => {
+		if (!name || !url || !apiKey) return;
+		setSaving(true);
+		try {
+			const res = await api("POST", "/api/provider/verify", { url, apiKey });
+			if (!res?.ok) {
+				setVerifyState({ ok: false, msg: res?.error || "Verification failed — provider not saved" });
+				return;
+			}
+			if (editing) {
+				await act(`/provider delete ${editing}`);
+				await act(`/provider add ${name} ${url} ${apiKey}`);
+				if (data.find((p) => p.active && p.name === editing)) await act(`/provider ${name}`);
+			} else {
+				await act(`/provider add ${name} ${url} ${apiKey}`);
+			}
+			cancelEdit();
+		} finally {
+			setSaving(false);
+		}
+	};
+	return html`
+		<div class="settings-rows">
+			${[...(data || [])]
+				.sort((a, b) => a.name.localeCompare(b.name))
+				.map(
+					(p) => html`
+				<div key=${p.name} class="settings-item-row">
+					<div class="settings-item-info">
+						<span class="settings-item-name">${p.name}</span>
+						<span class="settings-item-meta" title=${p.url}>${shortPath(p.url)}</span>
+					</div>
+					<div class="settings-item-actions">
+						<button class="modal-btn icon-btn" title="Edit" disabled=${busy} onClick=${() => startEdit(p)}><${icons.pencil} /></button>
+						<button class="modal-btn icon-btn modal-btn-danger" title="Delete" disabled=${busy} onClick=${async () => {
+							if (await confirm(`Delete provider "${p.name}"?`)) act(`/provider delete ${p.name}`);
+						}}><${icons.trash} /></button>
+					</div>
+				</div>
+			`,
+				)}
+			${!data || data.length === 0 ? html`<div class="settings-hint">No saved providers.</div>` : null}
+			${data && data.length > 0 ? html`<div class="settings-hint">Providers here are just a saved list. In the Model tab, pick which provider each model slot uses (main / subagent / plan) — they can be on different providers.</div>` : null}
+			<div class="settings-section-title">${editing ? `Edit provider: ${editing}` : "Add provider"}</div>
+			<div class="settings-form-row">
+				<input type="text" placeholder="name" value=${name} disabled=${!!editing} onInput=${(e) => {
+					setName(e.target.value);
+					verifyVersion.current++;
+					setVerifyState(null);
+				}} />
+				<input type="text" placeholder="base URL" value=${url} onInput=${(e) => {
+					setUrl(e.target.value);
+					verifyVersion.current++;
+					setVerifyState(null);
+				}} />
+				<input type="password" placeholder="API key" value=${apiKey} onInput=${(e) => {
+					setApiKey(e.target.value);
+					verifyVersion.current++;
+					setVerifyState(null);
+				}} />
+				<button class="modal-btn icon-btn" title="Verify credentials" disabled=${busy || saving || verifying || !url || !apiKey} onClick=${doVerify}><${icons.arrowPath} /></button>
+				<button class="modal-btn icon-btn" title=${editing ? "Save changes" : "Add provider"} disabled=${busy || saving || verifying || !name || !url || !apiKey} onClick=${saveProvider}><${icons.check} /></button>
+				${editing ? html`<button class="modal-btn icon-btn" title="Cancel" disabled=${busy || saving} onClick=${cancelEdit}><${icons.xCircle} /></button>` : null}
+			</div>
+			${verifyState ? html`<div class="settings-hint ${verifyState.ok === false ? "settings-error" : verifyState.ok === true ? "settings-ok" : ""}">${verifyState.ok === false ? "✕ " : verifyState.ok === true ? "✓ " : ""}${verifyState.msg}</div>` : null}
+			<div class="settings-hint">Credentials are verified before saving — the provider must be reachable.</div>
+		</div>
+	`;
+}
+
+function SettingsSsh({ data, busy, act, confirm }) {
+	const [name, setName] = useState("");
+	const [host, setHost] = useState("");
+	const [username, setUsername] = useState("");
+	const [port, setPort] = useState("");
+	const [authMode, setAuthMode] = useState("agent");
+	const [password, setPassword] = useState("");
+	const [keyContent, setKeyContent] = useState("");
+	const [saving, setSaving] = useState(false);
+	const [formStatus, setFormStatus] = useState(null);
+	const addHost = async () => {
+		const parsedPort = port ? Number(port) : undefined;
+		if (port && (!Number.isInteger(parsedPort) || parsedPort < 1 || parsedPort > 65535)) {
+			setFormStatus({ ok: false, message: "Port must be a number from 1 to 65535" });
+			return;
+		}
+		if (authMode === "key" && !keyContent.trim()) {
+			setFormStatus({ ok: false, message: "Paste a private key or choose SSH agent" });
+			return;
+		}
+		if (authMode === "password" && !password) {
+			setFormStatus({ ok: false, message: "Enter a password or choose another sign-in method" });
+			return;
+		}
+		setSaving(true);
+		setFormStatus(null);
+		try {
+			let keyPath;
+			if (authMode === "key") {
+				const keyResult = await api("POST", "/api/ssh/key", { name, key: keyContent.trim() });
+				if (!keyResult?.ok) {
+					setFormStatus({ ok: false, message: keyResult?.error || "Could not save the private key" });
+					return;
+				}
+				keyPath = keyResult.path;
+			}
+			const result = await api("POST", "/api/ssh/add", {
+				name,
+				host,
+				username: username || undefined,
+				port: parsedPort,
+				keyPath,
+				password: authMode === "password" ? password : undefined,
+			});
+			if (!result?.ok) {
+				setFormStatus({ ok: false, message: result?.error || "Could not add the host" });
+				return;
+			}
+			setName("");
+			setHost("");
+			setUsername("");
+			setPort("");
+			setAuthMode("agent");
+			setPassword("");
+			setKeyContent("");
+			setFormStatus({ ok: true, message: `Added ${name}` });
+			await act("/ssh list");
+		} catch (err) {
+			setFormStatus({ ok: false, message: err instanceof Error ? err.message : "Could not add the host" });
+		} finally {
+			setSaving(false);
+		}
+	};
+	return html`
+		<div class="settings-rows">
+			<p class="settings-intro"><span>Remote machines the agent can run commands on via the <code>ssh</code> tool — deploy code, inspect logs, and more.</span></p>
+			${[...(data || [])]
+				.sort((a, b) => a.name.localeCompare(b.name))
+				.map(
+					(h) => html`
+				<div key=${h.name} class="settings-item-row">
+					<div class="settings-item-info">
+						<span class="settings-item-name">${h.name}</span>
+						<span class="settings-item-meta">${h.username ? `${h.username}@` : ""}${h.host}${h.port ? `:${h.port}` : ""} · ${h.keyPath ? "private key" : h.password ? "password" : "SSH agent"}</span>
+					</div>
+					<div class="settings-item-actions">
+						<button class="modal-btn icon-btn modal-btn-danger" title="Remove" disabled=${busy} onClick=${async () => {
+							if (await confirm(`Remove host "${h.name}"?`)) act(`/ssh remove ${h.name}`);
+						}}><${icons.trash} /></button>
+					</div>
+				</div>
+			`,
+				)}
+			${(!data || data.length === 0) && html`<div class="settings-hint">No SSH hosts configured.</div>`}
+			<div class="settings-section-title">Add host</div>
+			<div class="settings-ssh-form">
+				<div class="settings-form-row">
+					<input type="text" placeholder="Name (e.g. production)" value=${name} disabled=${saving} onInput=${(e) => setName(e.target.value)} />
+					<input type="text" placeholder="Host or IP" value=${host} disabled=${saving} onInput=${(e) => setHost(e.target.value)} />
+				</div>
+				<div class="settings-form-row">
+					<input type="text" autocomplete="username" placeholder="Username (optional)" value=${username} disabled=${saving} onInput=${(e) => setUsername(e.target.value)} />
+					<input type="text" inputMode="numeric" placeholder="Port (22)" value=${port} disabled=${saving} style=${{ maxWidth: "100px" }} onInput=${(e) => setPort(e.target.value)} />
+				</div>
+				<div class="settings-row-label">Sign in with</div>
+				<div class="settings-form-row">
+					<button class="modal-btn${authMode === "agent" ? " modal-btn-primary" : ""}" disabled=${saving} onClick=${() => setAuthMode("agent")}>SSH agent</button>
+					<button class="modal-btn${authMode === "key" ? " modal-btn-primary" : ""}" disabled=${saving} onClick=${() => setAuthMode("key")}>Private key</button>
+					<button class="modal-btn${authMode === "password" ? " modal-btn-primary" : ""}" disabled=${saving} onClick=${() => setAuthMode("password")}>Password</button>
+				</div>
+				${authMode === "agent" ? html`<div class="settings-hint">Uses your system SSH configuration and agent. No credential is stored by cast.</div>` : null}
+				${authMode === "key" ? html`<textarea class="settings-textarea" autocomplete="off" placeholder="Paste private key" value=${keyContent} disabled=${saving} onInput=${(e) => setKeyContent(e.target.value)} rows="4" />` : null}
+				${
+					authMode === "password"
+						? html`<div class="settings-form-row"><input type="password" autocomplete="off" placeholder="Password (requires sshpass on this machine)" value=${password} disabled=${saving} onInput=${(e) => setPassword(e.target.value)} /></div>`
+						: null
+				}
+				${formStatus ? html`<div class="settings-hint ${formStatus.ok ? "settings-ok" : "settings-error"}" role="status">${formStatus.message}</div>` : null}
+				<div class="settings-form-row" style=${{ justifyContent: "flex-end" }}>
+					<button class="modal-btn modal-btn-primary" disabled=${busy || saving || !name || !host} onClick=${addHost}>${saving ? "Adding…" : "Add host"}</button>
+				</div>
+			</div>
+		</div>
+	`;
+}
+
+function InfoPopover({ text, readUrl }) {
+	const [infoOpen, setInfoOpen] = useState(false);
+	const [bookOpen, setBookOpen] = useState(false);
+	const [fullContent, setFullContent] = useState(null);
+	// Same anti-flicker discipline as FilePreviewModal: stays null (renders
+	// "Loading…") through marked's async load+parse instead of flashing the
+	// raw markdown source first — see that component's comment for why.
+	const [renderedHtml, setRenderedHtml] = useState(null);
+	const [renderFailed, setRenderFailed] = useState(false);
+	useEffect(() => {
+		if (!infoOpen) return;
+		const onKey = (e) => {
+			if (e.key === "Escape") {
+				e.stopPropagation();
+				setInfoOpen(false);
+			}
+		};
+		window.addEventListener("keydown", onKey, true);
+		return () => window.removeEventListener("keydown", onKey, true);
+	}, [infoOpen]);
+	useEffect(() => {
+		if (!bookOpen) return;
+		const onKey = (e) => {
+			if (e.key === "Escape") {
+				e.stopPropagation();
+				setBookOpen(false);
+			}
+		};
+		window.addEventListener("keydown", onKey, true);
+		return () => window.removeEventListener("keydown", onKey, true);
+	}, [bookOpen]);
+	const modalRef = useModalFocusTrap(bookOpen);
+	const loadFull = async () => {
+		setBookOpen(true);
+		setFullContent(null);
+		setRenderedHtml(null);
+		setRenderFailed(false);
+		let content;
+		try {
+			const res = await api("GET", readUrl);
+			content = res?.content || res?.error || "No content";
+		} catch {
+			content = "Failed to load";
+		}
+		setFullContent(content);
+		try {
+			const { marked } = await loadMarked();
+			setRenderedHtml(marked.parse(content));
+		} catch {
+			setRenderFailed(true);
+		}
+	};
+	if (!text && !readUrl) return null;
+	return [
+		html`<span class="info-popover-wrap" style=${{ display: "inline-flex", gap: "2px" }}>
+			${
+				text
+					? html`<button class="modal-btn icon-btn" title="Description" onClick=${(e) => {
+							e.stopPropagation();
+							setInfoOpen(true);
+						}}><${icons.info} /></button>`
+					: null
+			}
+			${
+				readUrl
+					? html`<button class="modal-btn icon-btn" title="Read full content" onClick=${(e) => {
+							e.stopPropagation();
+							loadFull();
+						}}><${icons.bookOpen} /></button>`
+					: null
+			}
+		</span>`,
+		infoOpen && html`<div class="info-popover-backdrop" onClick=${() => setInfoOpen(false)} />`,
+		infoOpen &&
+			html`<div class="info-popover" onClick=${(e) => e.stopPropagation()}>
+			<div class="info-popover-header"><button class="modal-btn icon-btn" onClick=${() => setInfoOpen(false)}><${icons.xMark} /></button></div>
+			<div class="info-popover-text">${text}</div>
+		</div>`,
+		bookOpen &&
+			html`<div class="modal-backdrop" onClick=${() => setBookOpen(false)}>
+			<div class="modal modal-preview" role="dialog" aria-modal="true" aria-label="Skill content" tabIndex="-1" ref=${modalRef} onClick=${(e) => e.stopPropagation()}>
+				<div class="modal-header">
+					<span>Skill content</span>
+					<button class="modal-close" onClick=${() => setBookOpen(false)} aria-label="Close"><${icons.xMark} /></button>
+				</div>
+				<div class="fs-preview-body">
+					${
+						fullContent == null || (renderedHtml == null && !renderFailed)
+							? html`<div class="diff-empty">Loading…</div>`
+							: renderFailed
+								? html`<pre class="fs-preview-text">${fullContent}</pre>`
+								: html`<div class="fs-preview-markdown message-content" dangerouslySetInnerHTML=${{ __html: renderedHtml }} />`
+					}
+				</div>
+			</div>
+		</div>`,
+	];
+}
+
+export {
+	InfoPopover,
+	SettingsBash,
+	SettingsHooks,
+	SettingsMcp,
+	SettingsMarketplace,
+	SettingsPlugins,
+	SettingsProvider,
+	SettingsQuickMode,
+	SettingsSkills,
+	SettingsSkillssh,
+	SettingsSsh,
+	SettingsWeb,
+};
