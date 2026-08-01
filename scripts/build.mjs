@@ -95,6 +95,7 @@ const webJavaScript = [
 	"inputs-explorer.js",
 	"icons.js",
 	"modal-focus.js",
+	"message.js",
 	"plan-cards.js",
 	"reasoning-split.js",
 	"sidebar-utils.js",
