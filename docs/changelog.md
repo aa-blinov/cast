@@ -2,6 +2,24 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.12.8
+
+### Added
+
+- Added a themed web sign-in page with HttpOnly, SameSite session cookies, SQLite-backed web sessions, disabled API caching, and failed-login rate limiting.
+- Added provider-aware reasoning configuration documentation and built-in references for providers, web access, and project configuration.
+
+### Fixed
+
+- Project-local hooks now participate in the project trust prompt even when `.cast/hooks.json` is the only local resource.
+- Existing sessions now derive missing sidebar titles from their first user message, while explicit blank titles remain unchanged.
+- Updated plan, MCP, hooks, skills.sh, tool, and eval documentation to match the current runtime and CLI behavior.
+
+### Changed
+
+- Simplified the shared Cast prompt so configuration guidance has one source of truth in the built-in `cast` skill.
+- Removed the obsolete prompt-secrecy rule from the open-project harness discipline.
+
 ## 0.12.7
 
 ### Added
