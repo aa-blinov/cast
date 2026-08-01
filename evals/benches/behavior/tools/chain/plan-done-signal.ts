@@ -33,7 +33,7 @@ export const planDoneSignal: EvalCase = {
 	setup: () => void writeFixture(CWD_FIXTURE, {}),
 	cwd: fixtureDir(CWD_FIXTURE),
 	planFixture: { name: "release-plan", content: PLAN_CONTENT },
-	// `planFixture` only wires up activePlanPath for plan_check/plan_done to
+	// `planFixture` wires up activePlanPath for plan_done to
 	// act on — it does not inject the plan's text into context. Quoting it
 	// back in the prompt (as if the user is pasting the plan they already
 	// reviewed) is what makes "I have reviewed this" true for the model,

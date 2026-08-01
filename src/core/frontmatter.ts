@@ -46,7 +46,7 @@ export function parseNameAllowlist(frontmatter: Record<string, FrontmatterValue>
 
 /**
  * Whether a builtin tool name is covered by a persona/subagent `tools:` list.
- * Exact match, or shell-style `*` globs (`plan_*` → `plan_check`, `web_*` →
+ * Exact match, or shell-style `*` globs (`plan_*` → `plan_done`, `web_*` →
  * `web_search`, `*` → everything).
  */
 export function matchesToolsAllowlist(name: string, patterns: string[]): boolean {

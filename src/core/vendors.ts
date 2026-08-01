@@ -146,7 +146,10 @@ export function buildReasoningParams(effort: string, format: ReasoningFormat = "
 		case "huawei":
 			return { body: { chat_template_kwargs: { enable_thinking: enabled } }, enabled };
 		case "minimax":
-			return { body: {}, enabled: true };
+			// MiniMax otherwise puts <think> and the answer into content. Its
+			// OpenAI-compatible streaming API can also interleave those chunks;
+			// requesting the split format makes the channels unambiguous.
+			return { body: { reasoning_split: true }, enabled: true };
 		case "generic":
 			return enabled
 				? { body: { reasoning_effort: normalized ?? "medium" }, enabled: true }

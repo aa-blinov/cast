@@ -744,11 +744,6 @@ body.resizing-diff * { user-select: none; }
 }
 .message-image-result .message-label { color: var(--text-dim); }
 .message-assistant .message-label { color: var(--purple); }
-/* Agent reply that came from a model-truncated `<think>` block — extracted
- * from the reasoning field at render time (see reasoning-split.js). Slightly
- * muted label so the user sees the draft and the actual reasoning block
- * together as one coherent recovery, not two unrelated messages. */
-.message-draft-from-thinking .message-label { color: var(--text-muted); }
 .message-content {
 	font-family: var(--font);
 	font-size: .9rem;
@@ -1904,6 +1899,43 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	transition: border-color .15s, color .15s, background .15s;
 }
 .modal-btn:hover { border-color: var(--border-active); color: var(--text); background: var(--bg-hover); }
+.modal-choice-description { display: block; margin-top: 4px; color: var(--text-dim); font-size: 11px; line-height: 1.35; text-align: left; }
+.plan-decision-card {
+	font-family: var(--font-mono);
+	font-size: .8rem;
+	border-radius: var(--radius-sm);
+	margin: 4px 0;
+	overflow: hidden;
+	background: var(--bg-surface);
+	border: 1px solid var(--border);
+}
+.plan-decision-header { display: flex; align-items: center; gap: 8px; padding: 7px 10px; }
+.plan-decision-name {
+	color: var(--blue);
+	font-weight: 500;
+	background: var(--bg-raised);
+	border: 1px solid var(--border);
+	border-radius: 4px;
+	padding: 1px 6px;
+	font-size: .75rem;
+}
+.plan-decision-kind { color: var(--text-muted); font-size: .72rem; }
+.plan-decision-body { padding: 8px 10px; border-top: 1px solid var(--border); color: var(--text-dim); line-height: 1.45; }
+.plan-decision-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 6px; padding: 8px 10px; border-top: 1px dashed var(--border); background: var(--bg); }
+.plan-decision-option {
+	padding: 8px 9px;
+	border: 1px solid var(--border);
+	border-radius: 4px;
+	background: var(--bg-surface);
+	color: var(--text);
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+	transition: border-color .15s, background .15s;
+}
+.plan-decision-option:hover { border-color: var(--border-active); background: var(--bg-raised); }
+.plan-decision-option-label { display: block; font-size: .8rem; font-weight: 600; }
+.plan-decision-option-description { display: block; margin-top: 4px; color: var(--text-dim); font-size: .74rem; line-height: 1.35; }
 .icon-btn { padding: 4px 6px; border: none; background: none; color: var(--text-dim); cursor: pointer; border-radius: var(--radius-sm); display: inline-flex; align-items: center; outline: none; }
 .icon-btn:focus { outline: none; box-shadow: none; }
 .icon-btn:hover { color: var(--cyan); background: rgba(0,200,255,.08); }

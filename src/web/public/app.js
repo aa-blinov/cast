@@ -7,7 +7,7 @@ import htm from "htm";
 import { h, render } from "preact";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { icons } from "./icons.js";
-import { collapseMidWordBoundaries, mergeMidWordBoundary, splitReasoningForDisplay } from "./reasoning-split.js";
+import { collapseMidWordBoundaries, mergeMidWordBoundary } from "./reasoning-split.js";
 
 const html = htm.bind(h);
 
@@ -741,24 +741,9 @@ function Message({ msg }) {
 					if (block.kind === "tool") return html`<${ToolCard} key=${block.call.id} call=${block.call} />`;
 					if (block.kind === "thinking") {
 						if (!block.text.trim()) return null;
-						// Same split as StreamingBlocks — pull a model-truncated
-						// draft answer out of the reasoning block.
-						const split = splitReasoningForDisplay(block.text);
-						return html`<div key=${i}>
-							${
-								split.thinking &&
-								html`<div class="message message-reasoning">
-									<div class="message-label">reasoning</div>
-									<div class="message-content">${split.thinking}</div>
-								</div>`
-							}
-							${
-								split.draft &&
-								html`<div class="message message-assistant message-draft-from-thinking">
-									<div class="message-label">agent</div>
-									<div class="message-content" dangerouslySetInnerHTML=${{ __html: renderMarkdown(split.draft) }} />
-								</div>`
-							}
+						return html`<div key=${i} class="message message-reasoning">
+							<div class="message-label">reasoning</div>
+							<div class="message-content">${block.text}</div>
 						</div>`;
 					}
 					if (!block.text.trim()) return null;
@@ -779,12 +764,7 @@ function Message({ msg }) {
 	let content = typeof msg.content === "string" ? msg.content : msg.content == null ? "" : JSON.stringify(msg.content);
 
 	if (role === "assistant") {
-		// Same draft-answer extraction as the blocks path — the reasoning
-		// string can carry a truncated answer draft if the model ran out of
-		// tokens inside `<think>` without emitting a closing tag.
-		const splitThinking = msg.thinking ? splitReasoningForDisplay(msg.thinking) : null;
-		let visibleThinking = splitThinking ? splitThinking.thinking : msg.thinking;
-		const visibleDraft = splitThinking ? splitThinking.draft : null;
+		let visibleThinking = msg.thinking;
 		// The parser may have split the model's output mid-word (e.g.
 		// </think> landed inside "Сейчас" — observed on MiniMax-M3) so
 		// msg.thinking ends "...Сей" and content starts "час уточню...".
@@ -805,15 +785,6 @@ function Message({ msg }) {
 					<div class="message message-reasoning">
 						<div class="message-label">reasoning</div>
 						<div class="message-content">${visibleThinking}</div>
-					</div>
-				`
-				}
-				${
-					visibleDraft &&
-					html`
-					<div class="message message-assistant message-draft-from-thinking">
-						<div class="message-label">agent</div>
-						<div class="message-content" dangerouslySetInnerHTML=${{ __html: renderMarkdown(visibleDraft) }} />
 					</div>
 				`
 				}
@@ -992,25 +963,9 @@ function StreamingBlocks({ blocks }) {
 				}
 				if (block.kind === "thinking") {
 					if (!block.text.trim()) return null;
-					// Reasoning block whose `<think>` never closed — the model
-					// spent its budget on thinking and ran out mid-draft. Pull
-					// the answer tail into a separate agent block below.
-					const split = splitReasoningForDisplay(block.text);
-					return html`<div key=${i}>
-						${
-							split.thinking &&
-							html`<div class="message message-reasoning message-entering">
-								<div class="message-label">reasoning</div>
-								<${StreamingText} text=${split.thinking} className="message-content" />
-							</div>`
-						}
-						${
-							split.draft &&
-							html`<div class="message message-assistant message-draft-from-thinking message-entering">
-								<div class="message-label">agent</div>
-								<${StreamingText} text=${split.draft} className="message-content" />
-							</div>`
-						}
+					return html`<div key=${i} class="message message-reasoning message-entering">
+						<div class="message-label">reasoning</div>
+						<${StreamingText} text=${block.text} className="message-content" />
 					</div>`;
 				}
 				if (block.kind === "tool") {
@@ -4615,22 +4570,20 @@ function ShareModal({ session, onClose }) {
 // message list) ten times a second. That whole-tree churn was visible as a
 // flicker across the UI (the header's "i" button included) for the entire
 // duration of every run.
-// turnStartRef is owned by App (see there) and mutated directly by
-// handleSubmit right when a new turn starts — a ref write triggers no
-// re-render on its own, so App can clear the previous entry there without
-// reintroducing the whole-tree churn this component exists to avoid.
-// Mounted with key=${activeId} at the call site — the 5s post-run freeze
+// `turnStartedAt` is supplied by the backend, so a reload joins the existing
+// request instead of treating its SSE connection time as the start. Mounted
+// with key=${activeId} at the call site — the 5s post-run freeze
 // below is meant to hold the *finished* time steady on the session it just
 // ran on, not survive a session switch. Without the key, switching to a
 // brand-new draft mid-freeze kept showing the old session's elapsed time
 // for however much of those 5s was left, since `elapsedMs` state itself
 // only resets when the freeze's own timeout finally fires — remounting on
 // activeId change resets it immediately instead.
-function ElapsedTimer({ running, activeId, connected, turnStartRef }) {
+function ElapsedTimer({ running, connected, turnStartedAt }) {
 	const [elapsedMs, setElapsedMs] = useState(0);
 	useEffect(() => {
-		if (running && connected) {
-			if (!turnStartRef.current.has(activeId)) turnStartRef.current.set(activeId, Date.now());
+		if (running && connected && typeof turnStartedAt === "number") {
+			setElapsedMs(Math.max(0, Date.now() - turnStartedAt));
 			// 4 Hz is plenty — a .1s-precision counter updates visibly four
 			// times a second, which reads as "live" without making the rest
 			// of the UI re-render that often. Was 10 Hz; the extra ticks
@@ -4639,8 +4592,7 @@ function ElapsedTimer({ running, activeId, connected, turnStartRef }) {
 			// because this component is a child of App and App's state
 			// changes once per tick.
 			const id = setInterval(() => {
-				const start = turnStartRef.current.get(activeId);
-				if (start) setElapsedMs(Date.now() - start);
+				setElapsedMs(Math.max(0, Date.now() - turnStartedAt));
 			}, 250);
 			return () => clearInterval(id);
 		} else if (!running) {
@@ -4653,37 +4605,74 @@ function ElapsedTimer({ running, activeId, connected, turnStartRef }) {
 		// reconnects (connected→true) the interval resumes from the real
 		// start time; if the run ended server-side while offline, the next
 		// `end` event will transition to the "not running" branch.
-	}, [running, activeId, connected, turnStartRef]);
+	}, [running, connected, turnStartedAt]);
 
 	if (elapsedMs <= 0) return null;
 	return html`<span class="composer-elapsed">${(elapsedMs / 1000).toFixed(1)}s</span>`;
 }
 
-function PlanTransitionModal({ transition, onChoose }) {
-	const modalRef = useModalFocusTrap(!!transition);
+function PlanDecisionCard({ transition, onChoose }) {
 	if (!transition) return null;
-	const entering = transition.kind === "enter";
+	const options = [
+		{ value: "continue", label: "Continue planning", description: "Keep refining the plan with feedback." },
+		{
+			value: "implement",
+			label: "Approve and implement",
+			description: "Switch to build and execute this plan now.",
+		},
+		{
+			value: "clean",
+			label: "Approve and implement in clean context",
+			description: "Keep this thread visible, but start implementation without its prior model context.",
+		},
+	];
 	return html`
-		<div class="modal-backdrop" onClick=${() => onChoose("cancel")}>
-			<div class="modal modal-confirm" role="dialog" aria-modal="true" aria-label="Plan mode" tabIndex="-1" ref=${modalRef} onClick=${(e) => e.stopPropagation()}>
-				<div class="modal-confirm-body">${entering ? "Agent suggests planning this task first. Enter plan mode?" : "Plan ready. What next?"}</div>
-				<div class="modal-footer">
-					${
-						entering
-							? html`
-								<button class="modal-btn" onClick=${() => onChoose("enter")}>Yes — enter plan mode</button>
-								<button class="modal-btn modal-btn-danger" onClick=${() => onChoose("decline")}>No — continue in build mode</button>
-							`
-							: html`
-								<button class="modal-btn" onClick=${() => onChoose("refine")}>Keep planning — I'll give feedback</button>
-								<button class="modal-btn" onClick=${() => onChoose("implement")}>Approve — switch to build and implement now</button>
-								<button class="modal-btn" onClick=${() => onChoose("fresh")}>Approve — clear context, then implement</button>
-								<button class="modal-btn" onClick=${() => onChoose("build")}>Approve — switch to build, I'll start myself</button>
-							`
-					}
-				</div>
+		<section class="plan-decision-card" aria-label="Plan review">
+			<div class="plan-decision-header">
+				<span class="plan-decision-name">plan</span>
+				<span class="plan-decision-kind">review</span>
 			</div>
-		</div>
+			<div class="plan-decision-body">Plan ready. What next?</div>
+			<div class="plan-decision-options">
+				${options.map(
+					(option) => html`
+						<button class="plan-decision-option" onClick=${() => onChoose(option.value)}>
+							<span class="plan-decision-option-label">${option.label}${option.recommended ? " · recommended" : ""}</span>
+							${option.description && html`<span class="plan-decision-option-description">${option.description}</span>`}
+						</button>
+					`,
+				)}
+			</div>
+		</section>
+	`;
+}
+
+function QuestionCard({ question, onChoose }) {
+	const [answers, setAnswers] = useState(() => Array(question.questions.length).fill(null));
+	const complete = answers.every(Boolean);
+	return html`
+		<section class="plan-decision-card" aria-label="Questions from agent">
+			<div class="plan-decision-header">
+				<span class="plan-decision-name">agent</span>
+				<span class="plan-decision-kind">questions</span>
+			</div>
+			${question.questions.map(
+				(item, index) => html`
+					<div class="plan-decision-body">${item.question}</div>
+					<div class="plan-decision-options">
+						${item.options.map(
+							(option) => html`
+								<button class="plan-decision-option ${answers[index] === option.value ? "selected" : ""}" onClick=${() => setAnswers((prev) => prev.map((value, i) => (i === index ? option.value : value)))}>
+									<span class="plan-decision-option-label">${option.label}${option.value === item.recommended ? " · recommended" : ""}</span>
+									${option.description && html`<span class="plan-decision-option-description">${option.description}</span>`}
+								</button>
+							`,
+						)}
+					</div>
+				`,
+			)}
+			<div class="plan-decision-options"><button class="plan-decision-option" disabled=${!complete} onClick=${() => onChoose(answers)}>Continue</button></div>
+		</section>
 	`;
 }
 
@@ -4691,11 +4680,6 @@ function App() {
 	const [sessions, setSessions] = useState([]);
 	const [sessionsLoaded, setSessionsLoaded] = useState(false);
 	const [activeId, setActiveId] = useState(null);
-	// Per-session turn start times for ElapsedTimer's stopwatch — a plain ref
-	// (not state) so handleSubmit can clear the previous entry on a new turn
-	// without causing a re-render; see ElapsedTimer's own comment for why the
-	// tick itself lives there instead of here.
-	const turnStartRef = useRef(new Map());
 	const [session, setSession] = useState(null);
 	const activeSessionIdRef = useRef(null);
 	activeSessionIdRef.current = activeId;
@@ -4853,8 +4837,8 @@ function App() {
 	// already hid the bubble, but the cleanup is harmless and the
 	// intent is symmetric.
 	useEffect(() => {
-		if (settingsOpen || hotkeysOpen || dirPickerOpen || confirmState || planTransition) tooltips.hide();
-	}, [settingsOpen, hotkeysOpen, dirPickerOpen, confirmState, planTransition]);
+		if (settingsOpen || hotkeysOpen || dirPickerOpen || confirmState) tooltips.hide();
+	}, [settingsOpen, hotkeysOpen, dirPickerOpen, confirmState]);
 	const undismiss = useCallback((id) => {
 		setDismissedIds((prev) => {
 			if (!prev.has(id)) return prev;
@@ -5528,7 +5512,6 @@ function App() {
 						}
 					: prev,
 			);
-			turnStartRef.current.delete(id);
 			try {
 				await api(
 					"POST",
@@ -5547,64 +5530,57 @@ function App() {
 
 	const handlePlanTransition = useCallback(
 		async (choice) => {
-			const transition = planTransition;
-			if (!transition) return;
-			setPlanTransition(null);
+			const transition = planTransition ?? session?.planTransition;
+			const transitionSessionId = transition?.sessionId ?? activeId;
+			if (!transition || !transitionSessionId) return;
 			if (choice === "cancel") {
 				if (transition.kind === "done") addNotice("Staying in plan mode — describe what to change");
 				return;
 			}
-			const setMode = async (mode) => {
-				await api("POST", `/api/sessions/${transition.sessionId}/command`, {
-					command: mode === "plan" ? "/plan" : "/build",
-				});
-				setSession((prev) => (prev?.id === transition.sessionId ? { ...prev, mode } : prev));
-			};
 			const recordChoice = async (text) => {
-				await api("POST", `/api/sessions/${transition.sessionId}/command`, { command: `/plan-note ${text}` });
+				await api("POST", `/api/sessions/${transitionSessionId}/command`, { command: `/plan-note ${text}` });
 			};
 			try {
-				if (transition.kind === "enter") {
-					if (choice === "enter") {
-						await recordChoice("Plan mode: continue with planning");
-						await setMode("plan");
-						await submitMessage(
-							"<system-reminder>Plan mode: the user chose to plan before implementation.</system-reminder>\n\nExplore the material and write the plan.",
-						);
-					} else {
-						await recordChoice("Plan mode: continue in Build");
-						await submitMessage(
-							"<system-reminder>Plan mode: the user chose to continue this task in Build.</system-reminder>\n\nContinue directly with the task; do not suggest or enter plan mode again unless the user materially changes the request.",
-						);
-					}
-					return;
-				}
-				if (choice === "refine") {
-					await recordChoice("Plan: keep planning and refine it");
+				await api("POST", `/api/sessions/${transitionSessionId}/plan-transition`, { kind: transition.kind });
+				setPlanTransition(null);
+				setSession((prev) => (prev ? { ...prev, planTransition: undefined } : prev));
+				if (choice === "continue") {
+					await recordChoice("Plan: continue planning");
 					planRefineArmedRef.current = true;
 					addNotice("Plan: keep planning — add feedback below");
 					return;
 				}
-				if (choice === "fresh") {
-					await api("POST", `/api/sessions/${transition.sessionId}/command`, { command: "/clear" });
-					setSession((prev) => (prev?.id === transition.sessionId ? { ...prev, messages: [] } : prev));
+				let originalTask;
+				if (choice === "clean") {
+					const result = await api("POST", `/api/sessions/${transitionSessionId}/clean-context`);
+					originalTask = result.originalTask;
 				}
-				await setMode("build");
-				if (choice === "fresh") await recordChoice("Plan: approved — clear context, then implement in Build");
-				if (choice === "build") {
-					await recordChoice("Plan: approved — switch to Build; user will start implementation");
-					addNotice("Plan: approved — your next message starts implementation");
-				} else {
-					if (choice !== "fresh") await recordChoice("Plan: approved — implement in Build");
-					await submitMessage(
-						"<system-reminder>Plan: approved — start implementation in Build.</system-reminder>\n\nImplement it step by step.",
-					);
-				}
+				await api("POST", `/api/sessions/${transitionSessionId}/command`, { command: "/build" });
+				setSession((prev) => (prev?.id === transitionSessionId ? { ...prev, mode: "build" } : prev));
+				if (choice !== "clean") await recordChoice("Plan: approved — implement in Build");
+				await submitMessage(
+					choice === "clean"
+						? `<system-reminder>Clean build context. Original task: ${originalTask ?? "Use the approved plan as the task definition."}</system-reminder>\n\nThe plan is approved. Implement it step by step.`
+						: "<system-reminder>Plan: approved — start implementation in Build.</system-reminder>\n\nImplement it step by step.",
+				);
 			} catch (err) {
 				showToast(err.message, "error");
 			}
 		},
-		[planTransition, submitMessage, addNotice, showToast],
+		[activeId, planTransition, session?.planTransition, submitMessage, addNotice, showToast],
+	);
+
+	const answerQuestion = useCallback(
+		async (values) => {
+			if (!activeId || !session?.question) return;
+			try {
+				await api("POST", `/api/sessions/${activeId}/question`, { values });
+				setSession((prev) => (prev ? { ...prev, question: undefined } : prev));
+			} catch (err) {
+				showToast(err.message, "error");
+			}
+		},
+		[activeId, session?.question, showToast],
 	);
 
 	// Abort
@@ -5750,7 +5726,15 @@ function App() {
 					case "status": {
 						const isRunning = event.status === "running";
 						setRunning(isRunning);
-						setSession((prev) => (prev ? { ...prev, status: event.status } : prev));
+						setSession((prev) =>
+							prev
+								? {
+										...prev,
+										status: event.status,
+										turnStartedAt: isRunning ? (event.startedAt ?? prev.turnStartedAt) : null,
+									}
+								: prev,
+						);
 						// If the run ended between our initial GET and the SSE
 						// connect, we missed the `end` event. The `session_end`
 						// event (which follows `status: idle`) carries usage and
@@ -5765,10 +5749,12 @@ function App() {
 						updateStreaming((prev) => appendTextBlock(prev, "thinking", event.text));
 						break;
 					case "tool_start":
-						updateStreaming((prev) => [
-							...prev,
-							{ kind: "tool", call: { id: event.id, name: event.name, args: event.args, status: "running" } },
-						]);
+						updateStreaming((prev) => {
+							const index = prev.findIndex((block) => block.kind === "tool" && block.call.id === event.id);
+							const call = { id: event.id, name: event.name, args: event.args, status: "running" };
+							if (index === -1) return [...prev, { kind: "tool", call }];
+							return prev.map((block, i) => (i === index ? { kind: "tool", call } : block));
+						});
 						break;
 					case "tool_end":
 						updateStreaming((prev) =>
@@ -5796,11 +5782,23 @@ function App() {
 						if (diffOpenRef.current) {
 							queueDiffRefresh();
 						}
-						if (!event.result?.isError && (event.name === "plan_enter" || event.name === "plan_done")) {
-							pendingPlanSignalRef.current = {
-								kind: event.name === "plan_enter" ? "enter" : "done",
+						if (!event.result?.isError && event.name === "plan_done") {
+							const transition = {
+								kind: "done",
 								sessionId: streamSessionId,
 							};
+							pendingPlanSignalRef.current = transition;
+							setSession((prev) => (prev ? { ...prev, planTransition: transition } : prev));
+						}
+						if (!event.result?.isError && event.name === "question") {
+							try {
+								const question = JSON.parse(event.result.content);
+								if (question.question) {
+									setSession((prev) => (prev ? { ...prev, question } : prev));
+								}
+							} catch {
+								// A malformed tool result stays visible in the transcript; it cannot open a picker.
+							}
 						}
 						break;
 					case "assistant_message": {
@@ -6447,8 +6445,6 @@ function App() {
 			     in DOM/paint order. -->
 			${confirmModal}
 
-			<${PlanTransitionModal} transition=${planTransition} onChoose=${handlePlanTransition} />
-
 			<!-- Chat area -->
 			<main class="chat-area">
 				<div class="messages" ref=${messagesRef} onScroll=${handleScroll}>
@@ -6474,6 +6470,13 @@ function App() {
 					}
 					${messages.map((msg) => html`<${Message} key=${keyForMessage(msg)} msg=${msg} />`)}
 					<${LiveStreamingBlocks} controllerRef=${streamingControllerRef} onFrame=${scrollStreamingFrame} />
+					${
+						!running &&
+						html`
+							<${PlanDecisionCard} transition=${session?.planTransition ?? planTransition} onChoose=${handlePlanTransition} />
+							<${QuestionCard} question=${session?.question} onChoose=${answerQuestion} />
+						`
+					}
 				</div>
 				${
 					!atBottom &&
@@ -6491,7 +6494,7 @@ function App() {
 							${activePersonaLabel}
 							${session?.mode && session.mode !== "build" && html`<span class="composer-role-mode">${session.mode}</span>`}
 						</div>
-						<${ElapsedTimer} key=${activeId} running=${running} activeId=${activeId} connected=${connected} turnStartRef=${turnStartRef} />
+						<${ElapsedTimer} key=${activeId} running=${running} connected=${connected} turnStartedAt=${session?.turnStartedAt} />
 					</div>
 				`
 				}

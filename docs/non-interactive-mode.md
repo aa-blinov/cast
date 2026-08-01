@@ -2,6 +2,11 @@
 
 `cast run` sends a single prompt, streams the response to stdout, and exits. Designed for CI/CD, scripting, and piping.
 
+For a persistent, machine-driven session, use `cast run --interactive`. It uses
+the same startup and agent loop as the TUI and web UI, but exchanges JSONL
+actions and state snapshots. This is the entry point for multi-step evals and
+agents that need to inspect a pending picker before deciding what to do next.
+
 ## Usage
 
 ```bash
@@ -65,6 +70,7 @@ Structured JSON events, one per line (JSONL). Each event has:
 | `--reasoning <level>` | `-r` | Reasoning level |
 | `--persona <name>` | `-p` | Persona to use |
 | `--format <default\|json>` | | Output format |
+| `--interactive` | | Persistent JSONL session protocol (no positional message) |
 | `--bypass-permissions` | | Skip bash confirmation |
 | `--skill <path>` | | Load extra skill |
 | `--no-skills` | | Skip project/agents/global/plugin/builtin skill discovery |
@@ -76,6 +82,32 @@ The message is everything after the flags (no quoting required for single words,
 ## Plan Mode
 
 Plan tools are not available in non-interactive mode. However, if you resume a session that has an approved plan (`cast run -c "..."`), the plan is injected into the build-mode system prompt to steer implementation.
+
+## Persistent JSONL Sessions
+
+```bash
+cast run --interactive
+```
+
+Send one JSON object per line on stdin. Cast emits the normal streaming JSON
+events plus a `state` snapshot at startup and after every action. The snapshot
+includes the full visible transcript, model-facing context size, current mode,
+pending question or plan review, and the active plan content.
+
+```jsonl
+{"type":"set_mode","mode":"plan"}
+{"type":"prompt","text":"Plan a migration and ask questions first."}
+{"type":"answer_question","values":["postgres","online"]}
+{"type":"plan_review","choice":"clean"}
+{"type":"prompt","text":"Run the migration tests."}
+{"type":"exit"}
+```
+
+Actions are `prompt`, `set_mode` (`plan` or `build`), `answer_question`,
+`plan_review` (`continue`, `implement`, or `clean`), `state`, and `exit`.
+`answer_question` and `plan_review` run the next real turn when appropriate;
+they do not fake UI state. `clean` retains the visible transcript while
+starting implementation with a fresh model context.
 
 ## Exit Code
 

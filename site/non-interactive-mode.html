@@ -487,6 +487,10 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 	<article class="content">
 		<h1>Non-Interactive Mode</h1>
 <p><code>cast run</code> sends a single prompt, streams the response to stdout, and exits. Designed for CI/CD, scripting, and piping.</p>
+<p>For a persistent, machine-driven session, use <code>cast run --interactive</code>. It uses
+the same startup and agent loop as the TUI and web UI, but exchanges JSONL
+actions and state snapshots. This is the entry point for multi-step evals and
+agents that need to inspect a pending picker before deciding what to do next.</p>
 <h2>Usage</h2>
 <pre><code class="language-bash">cast run &quot;what changed in the last commit&quot;
 cast run --format json &quot;list all TODO comments&quot;
@@ -516,9 +520,28 @@ cast run -m gpt-4o -r medium &quot;explain the session module&quot;
 <h3>Event Types</h3>
 <div class="table-wrap"><table><thead><tr><th>Type</th><th>Fields</th><th>Description</th></tr></thead><tbody><tr><td><code>token</code></td><td><code>text</code></td><td>Streaming text chunk</td></tr><tr><td><code>thinking</code></td><td><code>text</code></td><td>Reasoning/thinking content</td></tr><tr><td><code>assistant_message</code></td><td><code>content</code>, <code>toolCalls</code></td><td>Complete assistant message</td></tr><tr><td><code>tool_start</code></td><td><code>id</code>, <code>name</code>, <code>args</code></td><td>Tool execution started</td></tr><tr><td><code>tool_end</code></td><td><code>id</code>, <code>name</code>, <code>result</code></td><td>Tool execution completed</td></tr><tr><td><code>doom_loop</code></td><td><code>tool</code>, <code>attempts</code></td><td>Tool blocked after identical calls</td></tr><tr><td><code>usage</code></td><td><code>usage</code>, <code>subagent</code></td><td>Token/cost usage update</td></tr><tr><td><code>end</code></td><td><code>reason</code></td><td>Run completed (<code>stop</code>, <code>error</code>, etc.)</td></tr><tr><td><code>error</code></td><td><code>message</code></td><td>Error occurred</td></tr></tbody></table></div><h2>Flags</h2>
 <p><code>cast run</code> accepts a subset of the main CLI flags:</p>
-<div class="table-wrap"><table><thead><tr><th>Flag</th><th>Short</th><th>Description</th></tr></thead><tbody><tr><td><code>--continue</code></td><td><code>-c</code></td><td>Continue the most recent session</td></tr><tr><td><code>--session &lt;id&gt;</code></td><td><code>-s</code></td><td>Continue a specific session</td></tr><tr><td><code>--model &lt;model&gt;</code></td><td><code>-m</code></td><td>Model to use</td></tr><tr><td><code>--reasoning &lt;level&gt;</code></td><td><code>-r</code></td><td>Reasoning level</td></tr><tr><td><code>--persona &lt;name&gt;</code></td><td><code>-p</code></td><td>Persona to use</td></tr><tr><td><code>--format &lt;default|json&gt;</code></td><td></td><td>Output format</td></tr><tr><td><code>--bypass-permissions</code></td><td></td><td>Skip bash confirmation</td></tr><tr><td><code>--skill &lt;path&gt;</code></td><td></td><td>Load extra skill</td></tr><tr><td><code>--no-skills</code></td><td></td><td>Skip project/agents/global/plugin/builtin skill discovery</td></tr><tr><td><code>--mcp &lt;path&gt;</code></td><td></td><td>Load extra MCP config</td></tr><tr><td><code>--no-mcp</code></td><td></td><td>Skip MCP discovery</td></tr></tbody></table></div><p>The message is everything after the flags (no quoting required for single words, but shell quoting helps for multi-word messages).</p>
+<div class="table-wrap"><table><thead><tr><th>Flag</th><th>Short</th><th>Description</th></tr></thead><tbody><tr><td><code>--continue</code></td><td><code>-c</code></td><td>Continue the most recent session</td></tr><tr><td><code>--session &lt;id&gt;</code></td><td><code>-s</code></td><td>Continue a specific session</td></tr><tr><td><code>--model &lt;model&gt;</code></td><td><code>-m</code></td><td>Model to use</td></tr><tr><td><code>--reasoning &lt;level&gt;</code></td><td><code>-r</code></td><td>Reasoning level</td></tr><tr><td><code>--persona &lt;name&gt;</code></td><td><code>-p</code></td><td>Persona to use</td></tr><tr><td><code>--format &lt;default|json&gt;</code></td><td></td><td>Output format</td></tr><tr><td><code>--interactive</code></td><td></td><td>Persistent JSONL session protocol (no positional message)</td></tr><tr><td><code>--bypass-permissions</code></td><td></td><td>Skip bash confirmation</td></tr><tr><td><code>--skill &lt;path&gt;</code></td><td></td><td>Load extra skill</td></tr><tr><td><code>--no-skills</code></td><td></td><td>Skip project/agents/global/plugin/builtin skill discovery</td></tr><tr><td><code>--mcp &lt;path&gt;</code></td><td></td><td>Load extra MCP config</td></tr><tr><td><code>--no-mcp</code></td><td></td><td>Skip MCP discovery</td></tr></tbody></table></div><p>The message is everything after the flags (no quoting required for single words, but shell quoting helps for multi-word messages).</p>
 <h2>Plan Mode</h2>
 <p>Plan tools are not available in non-interactive mode. However, if you resume a session that has an approved plan (<code>cast run -c &quot;...&quot;</code>), the plan is injected into the build-mode system prompt to steer implementation.</p>
+<h2>Persistent JSONL Sessions</h2>
+<pre><code class="language-bash">cast run --interactive
+</code></pre>
+<p>Send one JSON object per line on stdin. Cast emits the normal streaming JSON
+events plus a <code>state</code> snapshot at startup and after every action. The snapshot
+includes the full visible transcript, model-facing context size, current mode,
+pending question or plan review, and the active plan content.</p>
+<pre><code class="language-jsonl">{&quot;type&quot;:&quot;set_mode&quot;,&quot;mode&quot;:&quot;plan&quot;}
+{&quot;type&quot;:&quot;prompt&quot;,&quot;text&quot;:&quot;Plan a migration and ask questions first.&quot;}
+{&quot;type&quot;:&quot;answer_question&quot;,&quot;values&quot;:[&quot;postgres&quot;,&quot;online&quot;]}
+{&quot;type&quot;:&quot;plan_review&quot;,&quot;choice&quot;:&quot;clean&quot;}
+{&quot;type&quot;:&quot;prompt&quot;,&quot;text&quot;:&quot;Run the migration tests.&quot;}
+{&quot;type&quot;:&quot;exit&quot;}
+</code></pre>
+<p>Actions are <code>prompt</code>, <code>set_mode</code> (<code>plan</code> or <code>build</code>), <code>answer_question</code>,
+<code>plan_review</code> (<code>continue</code>, <code>implement</code>, or <code>clean</code>), <code>state</code>, and <code>exit</code>.
+<code>answer_question</code> and <code>plan_review</code> run the next real turn when appropriate;
+they do not fake UI state. <code>clean</code> retains the visible transcript while
+starting implementation with a fresh model context.</p>
 <h2>Exit Code</h2>
 <ul>
 <li><code>0</code> — success</li>

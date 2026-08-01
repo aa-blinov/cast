@@ -11,7 +11,7 @@ import { type HooksFile, runHooksForEvent } from "../hooks.ts";
 import { EMPTY_ASSISTANT_PLACEHOLDER, type Message, type Tool, type Usage } from "../llm.ts";
 import type { LoopConfig } from "../loop.ts";
 import type { McpToolHandle } from "../mcp.ts";
-import { PLAN_TOOL_NAMES } from "../plan.ts";
+import { PLAN_TOOL_NAMES, QUESTION_TOOL_NAME } from "../plan.ts";
 import { formatSystemEnvironmentBlock, resolvePromptContextForCwd } from "../project.ts";
 import type { SshHost } from "../ssh.ts";
 import type { SubagentPrompt } from "../subagents.ts";
@@ -317,10 +317,15 @@ export async function execTask(
 			mcpToolIndex: deps.mcpToolIndex,
 			hooks: deps.hooks,
 			sessionId: deps.sessionId,
-			// Subagents inherit the parent's restrictions (write/edit stay blocked
-			// in plan mode) but never get the plan tools themselves — they explore
-			// and report back; the parent owns the plan file.
-			disabledTools: new Set([...(deps.disabledTools ?? []), ...PLAN_TOOL_NAMES]),
+			// The parent alone owns the plan artifact. Passing enabled=false below
+			// avoids giving the child plan-authoring tools, so write/edit must be
+			// denied explicitly or a plan-mode child could edit the project.
+			disabledTools: new Set([
+				...(deps.disabledTools ?? []),
+				...PLAN_TOOL_NAMES,
+				QUESTION_TOOL_NAME,
+				...(deps.planState?.enabled ? ["write", "edit"] : []),
+			]),
 			// Frontmatter `tools:` on the subagent — undefined means all (minus
 			// disabledTools above); when set, only listed names are advertised
 			// and executable.

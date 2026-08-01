@@ -96,7 +96,7 @@ The body (after frontmatter) becomes the system prompt. A shared error-handling 
 
 ```yaml
 tools: [read, grep, ls]            # readonly builtins
-tools: [read, grep, plan_*, web_*]  # globs expand to plan_check, web_search, …
+tools: [read, grep, plan_*, web_*]  # globs expand to plan_done, web_search, …
 tools: []                           # no builtins at all
 # omit the field entirely          # all builtins
 

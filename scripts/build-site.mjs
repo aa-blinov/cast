@@ -897,8 +897,8 @@ function scoreboardToHtml(scoreboard) {
 	const entries = Object.values(scoreboard);
 	if (entries.length === 0) {
 		return `<p>No scoreboard data yet. Populate it by running the full behavior suite with
-			<code>--repeat 3</code> (or more) and <code>--scoreboard</code>:</p>
-			<pre><code>node --import tsx evals/run.ts -m &lt;model&gt; --repeat 3 --scoreboard</code></pre>
+			<code>--scoreboard</code> (it runs three attempts per case):</p>
+			<pre><code>node --import tsx evals/run.ts -m &lt;model&gt; --scoreboard</code></pre>
 			<p>See <a href="https://github.com/aa-blinov/cast/blob/master/docs/eval-methodology.md">Eval Methodology</a> for what the score means.</p>`;
 	}
 
@@ -916,12 +916,16 @@ function scoreboardToHtml(scoreboard) {
 			const timing = [e.avgDurationMs, e.medianDurationMs, e.p75DurationMs, e.p95DurationMs, e.p99DurationMs]
 				.map((ms) => formatDuration(ms ?? 0))
 				.join(" / ");
-			return `<tr><td>${e.model}</td><td>${pct}%</td><td>${e.casesPassed}/${e.casesTotal}</td><td>${badge}</td><td>${formatGroupScore(e.core)}</td><td>${formatGroupScore(e.chain)}</td><td>${e.consistentCases}/${e.casesTotal}</td><td>${timing}</td><td>${tokens}</td><td>×${e.repeat}</td><td>${date}</td><td>${commit}</td></tr>`;
+			const turns = [e.avgTurns, e.medianTurns, e.p75Turns, e.p95Turns, e.p99Turns]
+				.map((value) => Number(value ?? 0).toFixed(1))
+				.join(" / ");
+			const source = e.providerUrl ? `${commit}<br><code>${e.providerUrl}</code>` : commit;
+			return `<tr><td>${e.model}</td><td>${pct}%</td><td>${e.casesPassed}/${e.casesTotal}</td><td>${badge}</td><td>${formatGroupScore(e.core)}</td><td>${formatGroupScore(e.chain)}</td><td>${e.consistentCases}/${e.casesTotal}</td><td>${timing}</td><td>${turns}</td><td>${tokens}</td><td>${date}</td><td>${source}</td></tr>`;
 		})
 		.join("\n");
 
 	const mainTable = `<div class="table-wrap"><table><thead><tr>
-		<th>Model</th><th>Score</th><th>Passed</th><th>Certified</th><th>Core</th><th>Chain</th><th>Consistent</th><th>Time (avg/p50/p75/p95/p99)</th><th>Avg tokens in/out</th><th>Attempts/case</th><th>Last updated</th><th>Commit</th>
+		<th>Model</th><th>Score</th><th>Passed</th><th>Certified</th><th>Core</th><th>Chain</th><th>Consistent</th><th>Time (avg/p50/p75/p95/p99)</th><th>Turns (avg/p50/p75/p95/p99)</th><th>Avg tokens in/out</th><th>Last updated</th><th>Commit / provider URL</th>
 	</tr></thead><tbody>
 ${rows}
 	</tbody></table></div>`;
@@ -940,14 +944,15 @@ ${signalRows}
 		})
 		.join("\n");
 
-	return `<p>A model is <strong>certified</strong> once it clears ${(SCOREBOARD_CERTIFICATION_THRESHOLD * 100).toFixed(0)}%
-		of the full behavior suite — scored from a <code>--repeat</code> run where every attempt on a case must
+	return `<p>This scoreboard answers one question: how reliably does a model operate the <em>Cast</em> harness?
+		It is not a general intelligence ranking. A model is <strong>certified</strong> once it clears ${(SCOREBOARD_CERTIFICATION_THRESHOLD * 100).toFixed(0)}%
+		of the full behavior suite across exactly three fresh attempts per case, where every attempt on a case must
 		agree (a case that only passes sometimes doesn't count). <strong>Core</strong>/<strong>Chain</strong> break
 		the same score down by single-turn tool contracts vs. multi-turn stateful workflows (see
 		<a href="https://github.com/aa-blinov/cast/blob/master/docs/eval-behavior.md">Behavior Evals</a>).
 		"Consistent" is how many cases had every attempt agree, pass or fail — a flakiness signal independent of
-		the score itself. Tokens are per-attempt averages; the time column is avg/median/p75/p95/p99 over every
-		individual attempt's duration — comparable across models regardless of repeat count. See
+		the score itself. Tokens are per-attempt averages; the time and turns columns are avg/median/p75/p95/p99 over every
+		individual attempt. See
 		<a href="https://github.com/aa-blinov/cast/blob/master/docs/eval-methodology.md">Eval Methodology</a>
 		for the full methodology.</p>
 ${mainTable}

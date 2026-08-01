@@ -489,6 +489,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 <h2>Usage</h2>
 <pre><code>cast [options] [prompt]
 cast run [options] &lt;message&gt;    Non-interactive mode
+cast run --interactive [options] Persistent JSONL session
     cast web [start|stop|status]    Web UI mode
     cast upgrade [version] [--force]  Self-update
 </code></pre>
@@ -506,6 +507,9 @@ cast run --format json &quot;list all TODO comments&quot;
 cast run -c &quot;continue the refactoring&quot;
 </code></pre>
 <p>See <a href="non-interactive-mode.html">Non-Interactive Mode</a> for output formats and JSON event types.</p>
+<p><code>cast run --interactive</code> keeps one real session open over JSONL. It is suited
+to eval runners and programmatic clients that must react to <code>question</code> and
+plan-review state between agent turns.</p>
 <h3><code>cast upgrade</code></h3>
 <p>Re-run the installer to update cast. Only works for release installs (not <code>npm link</code> / dev mode).</p>
 <pre><code class="language-bash">cast upgrade              # Upgrade to latest
@@ -562,7 +566,7 @@ cast --mcp ./custom-mcp.json
 <h3>General</h3>
 <div class="table-wrap"><table><thead><tr><th>Flag</th><th>Short</th><th>Description</th></tr></thead><tbody><tr><td><code>--version</code></td><td><code>-v</code></td><td>Show installed version</td></tr><tr><td><code>--help</code></td><td><code>-h</code></td><td>Show help text</td></tr></tbody></table></div><h2><code>cast run</code> Flags</h2>
 <p>The <code>run</code> subcommand accepts a subset of the main flags:</p>
-<div class="table-wrap"><table><thead><tr><th>Flag</th><th>Short</th><th>Description</th></tr></thead><tbody><tr><td><code>--continue</code></td><td><code>-c</code></td><td>Continue the most recent session</td></tr><tr><td><code>--session &lt;id&gt;</code></td><td><code>-s</code></td><td>Continue a specific session</td></tr><tr><td><code>--model &lt;model&gt;</code></td><td><code>-m</code></td><td>Model to use</td></tr><tr><td><code>--reasoning &lt;level&gt;</code></td><td><code>-r</code></td><td>Reasoning level</td></tr><tr><td><code>--persona &lt;name&gt;</code></td><td><code>-p</code></td><td>Persona to use</td></tr><tr><td><code>--format &lt;default|json&gt;</code></td><td></td><td>Output format</td></tr><tr><td><code>--bypass-permissions</code></td><td></td><td>Skip bash confirmation prompts</td></tr><tr><td><code>--skill &lt;path&gt;</code></td><td></td><td>Load extra skill (repeatable)</td></tr><tr><td><code>--no-skills</code></td><td></td><td>Skip project/agents/global/plugin/builtin skill discovery</td></tr><tr><td><code>--mcp &lt;path&gt;</code></td><td></td><td>Load extra MCP config (repeatable)</td></tr><tr><td><code>--no-mcp</code></td><td></td><td>Skip MCP discovery</td></tr></tbody></table></div><pre><code class="language-bash">cast run --format json &quot;list all test files&quot;
+<div class="table-wrap"><table><thead><tr><th>Flag</th><th>Short</th><th>Description</th></tr></thead><tbody><tr><td><code>--continue</code></td><td><code>-c</code></td><td>Continue the most recent session</td></tr><tr><td><code>--session &lt;id&gt;</code></td><td><code>-s</code></td><td>Continue a specific session</td></tr><tr><td><code>--model &lt;model&gt;</code></td><td><code>-m</code></td><td>Model to use</td></tr><tr><td><code>--reasoning &lt;level&gt;</code></td><td><code>-r</code></td><td>Reasoning level</td></tr><tr><td><code>--persona &lt;name&gt;</code></td><td><code>-p</code></td><td>Persona to use</td></tr><tr><td><code>--format &lt;default|json&gt;</code></td><td></td><td>Output format</td></tr><tr><td><code>--interactive</code></td><td></td><td>Persistent JSONL session protocol; no positional message</td></tr><tr><td><code>--bypass-permissions</code></td><td></td><td>Skip bash confirmation prompts</td></tr><tr><td><code>--skill &lt;path&gt;</code></td><td></td><td>Load extra skill (repeatable)</td></tr><tr><td><code>--no-skills</code></td><td></td><td>Skip project/agents/global/plugin/builtin skill discovery</td></tr><tr><td><code>--mcp &lt;path&gt;</code></td><td></td><td>Load extra MCP config (repeatable)</td></tr><tr><td><code>--no-mcp</code></td><td></td><td>Skip MCP discovery</td></tr></tbody></table></div><pre><code class="language-bash">cast run --format json &quot;list all test files&quot;
 cast run -m gpt-4o -r medium &quot;explain the session module&quot;
 </code></pre>
 

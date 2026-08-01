@@ -408,7 +408,7 @@ describe("buildReasoningParams", () => {
 
 	it("does not send undocumented reasoning controls to MiniMax", () => {
 		expect(resolveReasoningFormat("https://api.minimax.io/v1")).toBe("minimax");
-		expect(buildReasoningParams("on", "minimax").body).toEqual({});
+		expect(buildReasoningParams("on", "minimax").body).toEqual({ reasoning_split: true });
 		expect(getReasoningOptionsForFormat(null, "minimax").map((option) => option.value)).toEqual(["on"]);
 	});
 

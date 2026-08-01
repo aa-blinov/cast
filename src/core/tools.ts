@@ -5,10 +5,8 @@ import type { PlanState } from "./plan.ts";
 import {
 	checkPlanFileGate,
 	enforcePlanCapAfterEdit,
-	execPlanCheck,
-	execPlanDiscard,
 	execPlanDone,
-	execPlanEnter,
+	execQuestion,
 	finalizePlanFileWrite,
 	MAX_PLAN_CHARS,
 	maybeActivatePlanOnRead,
@@ -426,9 +424,7 @@ export function getToolDefinitions(
 					},
 				]
 			: []),
-		// Plan mode tools — always defined, filtered via disabledTools when not in
-		// plan mode, so the model only ever sees them while /plan is active (no
-		// "only available in plan mode" boilerplate needed in the descriptions).
+		// Plan mode tools are filtered via disabledTools when not in plan mode.
 		// Authoring AND reading the plan itself use the ordinary write/edit/read
 		// tools above, gated (write/edit) or side-effected (read) against the
 		// active plan file's path — see plan.ts's file doc comment. Other plans
@@ -453,70 +449,39 @@ export function getToolDefinitions(
 		{
 			type: "function",
 			function: {
-				name: "plan_discard",
+				name: "question",
 				description:
-					"Delete a plan from this session (e.g. an abandoned draft the user asked to drop). " +
-					"If it was the active plan, the newest remaining one becomes active.",
+					"Ask the user one to four concrete questions when their decision is needed. This opens a picker and ends your turn. Each question needs 2–4 options; recommend one when appropriate.",
 				parameters: {
 					type: "object",
 					properties: {
-						name: {
-							type: "string",
-							description: "Name of the plan to discard",
+						questions: {
+							type: "array",
+							description: "One to four questions for the user",
+							items: {
+								type: "object",
+								properties: {
+									question: { type: "string", description: "The decision the user must make" },
+									options: {
+										type: "array",
+										description: "Two to four choices for this question",
+										items: {
+											type: "object",
+											properties: {
+												value: { type: "string", description: "Stable machine-readable choice" },
+												label: { type: "string", description: "Short user-facing choice" },
+												description: { type: "string", description: "One-sentence tradeoff" },
+											},
+											required: ["value", "label"],
+										},
+									},
+									recommended: { type: "string", description: "The value of the recommended option" },
+								},
+								required: ["question", "options"],
+							},
 						},
 					},
-					required: ["name"],
-				},
-			},
-		},
-		{
-			type: "function",
-			function: {
-				name: "plan_enter",
-				description:
-					"Before making changes or writing an implementation plan, call this and end your turn when the request spans " +
-					"multiple subsystems, a migration, authentication/security, an API contract, rollout/rollback, architectural " +
-					"decisions, or unclear scope. The user is asked to confirm. Do not write the plan in build mode; call this, then " +
-					"END YOUR TURN and wait. If the user has declined plan mode or chosen build mode, proceed directly without calling this again unless they materially change the request. Do not call it for simple, direct tasks.",
-				parameters: {
-					type: "object",
-					properties: {
-						reason: {
-							type: "string",
-							description: "One sentence on why this task benefits from planning first",
-						},
-					},
-					required: ["reason"],
-				},
-			},
-		},
-		{
-			type: "function",
-			function: {
-				name: "plan_check",
-				description:
-					"Mark a checklist item in the approved plan as done ('- [ ]' → '- [x]'). " +
-					"Call it right after completing each plan step. Matching is forgiving — a short paraphrase " +
-					"in your own words is fine, no need to copy the plan's exact wording or markdown formatting " +
-					"(`**bold**`, `` `code` ``); no need to re-read the plan first just to get the item text exact.",
-				parameters: {
-					type: "object",
-					properties: {
-						item: {
-							type: "string",
-							description:
-								"The step, in your own words — case-insensitive, markdown-decoration-insensitive; exact match wins over substring",
-						},
-						plan: {
-							type: "string",
-							description: "Plan name to check the item off in (omit for the active plan)",
-						},
-						index: {
-							type: "number",
-							description: "1-based pick when several items match the same text (from the ambiguity error)",
-						},
-					},
-					required: ["item"],
+					required: ["questions"],
 				},
 			},
 		},
@@ -707,15 +672,9 @@ export function createToolExecutor(
 				case "plan_done":
 					if (!planState) return { content: "Plan tool not available.", isError: true };
 					return execPlanDone(args, planState);
-				case "plan_check":
-					if (!planState) return { content: "Plan tool not available.", isError: true };
-					return execPlanCheck(args, planState);
-				case "plan_enter":
-					if (!planState) return { content: "Plan tool not available.", isError: true };
-					return execPlanEnter(args, planState);
-				case "plan_discard":
-					if (!planState) return { content: "Plan tool not available.", isError: true };
-					return execPlanDiscard(args, planState);
+				case "question":
+					if (!planState) return { content: "Question tool not available.", isError: true };
+					return execQuestion(args, planState);
 				case "skill":
 					if (!skillDeps) return { content: "Skill tool not available.", isError: true };
 					return execSkill(args, skillDeps);

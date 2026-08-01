@@ -16,7 +16,14 @@ import type { Message } from "../core/llm.ts";
 import { type AgentEvent, compactSessionMessages, runAgentLoop } from "../core/loop.ts";
 import { closeMcpConnections, formatMcpForPrompt, type McpSetupResult } from "../core/mcp.ts";
 import { DEFAULT_PERSONA, type Persona } from "../core/personas.ts";
-import { createPlanState, modeDisabledTools } from "../core/plan.ts";
+import {
+	createPlanState,
+	createPlanTodos,
+	modeDisabledTools,
+	type PlanQuestion,
+	resolvePlanQuestion,
+	resolvePlanTransition,
+} from "../core/plan.ts";
 import {
 	addMarketplace,
 	ensureDefaultMarketplaces,
@@ -59,6 +66,7 @@ import {
 	loadSession,
 	loadSessionByShareToken,
 	recordCompaction,
+	resetSessionContext,
 	type SessionState,
 	saveSession,
 	searchSessionSummaries,
@@ -96,7 +104,7 @@ export type WebAgentStatus = "idle" | "running" | "error";
 
 export type WebEvent =
 	| AgentEvent
-	| { type: "status"; status: WebAgentStatus }
+	| { type: "status"; status: WebAgentStatus; startedAt?: number }
 	| {
 			type: "user_message";
 			message: {
@@ -117,6 +125,9 @@ export interface WebAgentSession {
 	backgroundBash: BashBackgroundDeps;
 	status: WebAgentStatus;
 	error: string | null;
+	/** Epoch milliseconds, owned by the backend so a page reload can resume the
+	 * live request timer instead of starting it from zero. */
+	turnStartedAt?: number;
 	listeners: Set<(event: WebEvent) => void>;
 	/** Rebuilt whenever persona or model changes — see `computeSystemPrompt`. */
 	systemPrompt: string;
@@ -395,6 +406,13 @@ export interface WebBridge {
 		token: string,
 	): { title?: string; persona: string; model: string; messages: DisplayMessage[] } | null;
 	submit(sessionId: string, text: string, images?: string[]): Promise<void>;
+	/** Outstanding user questions, if the agent is waiting for choices. */
+	getQuestion(sessionId: string): PlanQuestion | undefined;
+	/** Records choices and resumes the same conversation in either mode. */
+	answerQuestion(sessionId: string, values: string[]): { ok: true } | { ok: false; error: string };
+	getPlanTransition(sessionId: string): { kind: "done" } | undefined;
+	resolvePlanTransition(sessionId: string, kind: "done"): { ok: true } | { ok: false; error: string };
+	resetContext(sessionId: string): { ok: true; originalTask?: string } | { ok: false; error: string };
 	abort(sessionId: string): void;
 	subscribe(sessionId: string, callback: (event: WebEvent) => void): void;
 	unsubscribe(sessionId: string, callback: (event: WebEvent) => void): void;
@@ -659,8 +677,9 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		const ac = new AbortController();
 		ws.status = "running";
 		ws.error = null;
+		ws.turnStartedAt = Date.now();
 		ws.runner.startRun(ac);
-		broadcast(ws, { type: "status", status: "running" });
+		broadcast(ws, { type: "status", status: "running", startedAt: ws.turnStartedAt });
 		broadcastSessionUpdate(ws);
 		const submitHooks = resolveHooksForCwd(sessionCwd, projectTrusted);
 		if (hasHooks(submitHooks)) {
@@ -672,6 +691,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			});
 			if (submitResult.blocked) {
 				ws.status = "idle";
+				ws.turnStartedAt = undefined;
 				ws.runner.abort();
 				ws.runner.endRun();
 				broadcast(ws, { type: "status", status: "idle" });
@@ -727,7 +747,15 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			disabledTools.add("web_search");
 			disabledTools.add("web_fetch");
 		}
-		const planState = createPlanState(ws.session.id);
+		const planState = createPlanState(ws.session.cwd ?? cwd, ws.session.id, {
+			question: ws.session.planQuestion,
+			transition: ws.session.planTransition,
+			onChange: (question, transition) => {
+				ws.session.planQuestion = question;
+				ws.session.planTransition = transition;
+				saveSession(ws.session);
+			},
+		});
 		planState.enabled = planMode;
 		// Plan mode can run under a separate, usually-cheaper model (matches the
 		// TUI's App.tsx activeModel calc) — this only affects THIS run, session.model
@@ -747,7 +775,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		// the user knows what answered before deciding whether to /model away
 		// from it. Matched by URL since that's the only thing a resolved
 		// provider and a saved provider entry share.
-		const turnStart = Date.now();
+		const turnStart = ws.turnStartedAt ?? Date.now();
 		const effectiveBaseURL = resolvedModelProvider?.baseURL ?? config.baseURL;
 		const runProviderName = providers.find((p) => p.url === effectiveBaseURL)?.name ?? "default";
 
@@ -853,6 +881,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 					} satisfies TurnMeta;
 				}
 				saveSession(ws.session);
+				ws.turnStartedAt = undefined;
 				broadcast(ws, { type: "status", status: "idle" });
 				broadcast(ws, {
 					type: "turn_meta",
@@ -879,6 +908,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 				ws.error = err instanceof Error ? err.message : String(err);
 				ws.runner.endRun();
 				saveSession(ws.session);
+				ws.turnStartedAt = undefined;
 				broadcast(ws, { type: "error", message: ws.error });
 				broadcast(ws, { type: "status", status: "error" });
 				broadcastSessionUpdate(ws);
@@ -889,6 +919,85 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		const ws = sessions.get(sessionId);
 		if (!ws) return;
 		ws.runner.abort();
+	}
+
+	function getQuestion(sessionId: string): PlanQuestion | undefined {
+		const ws = sessions.get(sessionId);
+		if (!ws) return undefined;
+		return ws.session.planQuestion;
+	}
+
+	function getPlanTransition(sessionId: string): { kind: "done" } | undefined {
+		const ws = sessions.get(sessionId);
+		if (!ws) return undefined;
+		return ws.session.planTransition;
+	}
+
+	function resolvePersistedPlanTransition(
+		sessionId: string,
+		kind: "done",
+	): { ok: true } | { ok: false; error: string } {
+		const ws = sessions.get(sessionId);
+		if (!ws) return { ok: false, error: "Session not found" };
+		if (ws.status === "running") return { ok: false, error: "Agent running" };
+		const planState = createPlanState(ws.session.cwd ?? cwd, ws.session.id, {
+			question: ws.session.planQuestion,
+			transition: ws.session.planTransition,
+			onChange: (question, nextTransition) => {
+				ws.session.planQuestion = question;
+				ws.session.planTransition = nextTransition;
+				saveSession(ws.session);
+			},
+		});
+		const transition = ws.session.planTransition;
+		if (!transition || transition.kind !== kind)
+			return { ok: false, error: "No matching plan transition is awaiting a choice" };
+		ws.session.todos = createPlanTodos(planState);
+		resolvePlanTransition(planState);
+		saveSession(ws.session);
+		return { ok: true };
+	}
+
+	function answerQuestion(sessionId: string, values: string[]): { ok: true } | { ok: false; error: string } {
+		const ws = sessions.get(sessionId);
+		if (!ws) return { ok: false, error: "Session not found" };
+		if (ws.status === "running") return { ok: false, error: "Agent running" };
+
+		const planState = createPlanState(ws.session.cwd ?? cwd, ws.session.id, {
+			question: ws.session.planQuestion,
+			transition: ws.session.planTransition,
+			onChange: (nextQuestion, transition) => {
+				ws.session.planQuestion = nextQuestion;
+				ws.session.planTransition = transition;
+				saveSession(ws.session);
+			},
+		});
+		const question = ws.session.planQuestion;
+		if (!question) return { ok: false, error: "No question is awaiting an answer" };
+		if (values.length !== question.questions.length)
+			return { ok: false, error: "An answer is required for every question" };
+		const selected = question.questions.map((item, index) =>
+			item.options.find((option) => option.value === values[index]),
+		);
+		if (selected.some((option) => !option)) return { ok: false, error: "Unknown question option" };
+
+		resolvePlanQuestion(planState);
+		void submit(
+			sessionId,
+			question.questions
+				.map((item, index) => `The user selected "${selected[index]!.label}" for: ${item.question}`)
+				.join("\n"),
+		);
+		return { ok: true };
+	}
+
+	function resetContext(sessionId: string): { ok: true; originalTask?: string } | { ok: false; error: string } {
+		const ws = sessions.get(sessionId);
+		if (!ws) return { ok: false, error: "Session not found" };
+		if (ws.status === "running") return { ok: false, error: "Agent running" };
+		const originalTask = resetSessionContext(ws.session);
+		saveSession(ws.session);
+		return { ok: true, ...(originalTask ? { originalTask } : {}) };
 	}
 
 	function closeSession(sessionId: string, reason?: "shutdown"): boolean {
@@ -2407,6 +2516,11 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		unshareSession,
 		getSharedSession,
 		submit,
+		getQuestion,
+		answerQuestion,
+		getPlanTransition,
+		resolvePlanTransition: resolvePersistedPlanTransition,
+		resetContext,
 		abort,
 		subscribe,
 		unsubscribe,

@@ -11,7 +11,6 @@ export const readBeforeEdit: EvalCase = {
 	expect: {
 		toolsCalled: ["read", "edit"],
 		toolSubsequence: ["read", "edit"],
-		toolsNotCalled: ["plan_enter"],
 		noErrors: true,
 		verify: () =>
 			readFileSync(fixturePath("behavior-read-edit", "settings.txt"), "utf-8") === "channel=published\nkeep=this\n"

@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { printHelp } from "./core/help.ts";
-import { runNonInteractive } from "./core/run.ts";
+import { runInteractive, runNonInteractive } from "./core/run.ts";
 import { loadSettings } from "./core/settings.ts";
 import type { ParsedArgs } from "./core/startup.ts";
 import { runUpgrade } from "./core/upgrade.ts";
@@ -142,6 +142,7 @@ async function handleRunCommand(args: string[], version: string): Promise<void> 
 	let resumeId: string | undefined;
 	let cliBypassPermissions = false;
 	let format: "default" | "json" = "default";
+	let interactive = false;
 	let noSkills = false;
 	const cliSkillPaths: string[] = [];
 	let noMcp = false;
@@ -168,6 +169,8 @@ async function handleRunCommand(args: string[], version: string): Promise<void> 
 			const f = args[i + 1];
 			if (f === "json") format = "json";
 			i++;
+		} else if (args[i] === "--interactive") {
+			interactive = true;
 		} else if (args[i] === "--bypass-permissions") {
 			cliBypassPermissions = true;
 		} else if (args[i] === "--skill") {
@@ -184,6 +187,7 @@ async function handleRunCommand(args: string[], version: string): Promise<void> 
 			noMcp = true;
 		} else if (args[i] === "--help" || args[i] === "-h") {
 			console.log(`Usage: cast run [options] <message>
+       cast run --interactive [options]
 
 Options:
   -c, --continue         Continue the most recent session
@@ -192,6 +196,7 @@ Options:
   -r, --reasoning <lvl>  Reasoning level
   -p, --persona <name>   Persona to use
   --format <default|json>  Output format
+  --interactive          Persistent JSONL session protocol on stdin/stdout
   --bypass-permissions   Skip bash confirmation prompts`);
 			return;
 		} else {
@@ -201,7 +206,7 @@ Options:
 	}
 
 	const message = messageParts.join(" ").trim();
-	if (!message) {
+	if (!interactive && !message) {
 		console.error("Usage: cast run [options] <message>");
 		console.error("Run 'cast run --help' for options.");
 		process.exit(1);
@@ -227,6 +232,10 @@ Options:
 		version,
 	};
 
+	if (interactive) {
+		await runInteractive(parsedArgs);
+		return;
+	}
 	await runNonInteractive(parsedArgs, { message, format });
 }
 

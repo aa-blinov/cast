@@ -59,12 +59,14 @@ export interface ScoreboardCaseResult {
 	durationsMs: number[];
 	promptTokens: number[];
 	completionTokens: number[];
+	turns: number[];
 }
 
 export interface ScoreboardEntry {
 	bench: string;
 	model: string;
 	provider?: string;
+	providerUrl?: string;
 	timestamp: string;
 	commit?: string;
 	/** Attempts per case this entry is based on. */
@@ -92,6 +94,11 @@ export interface ScoreboardEntry {
 	 *  regardless of how many cases or repeats went into this entry. */
 	avgPromptTokens: number;
 	avgCompletionTokens: number;
+	avgTurns: number;
+	medianTurns: number;
+	p75Turns: number;
+	p95Turns: number;
+	p99Turns: number;
 }
 
 export const CERTIFICATION_THRESHOLD = 0.8;
@@ -134,10 +141,14 @@ function buildCaseResults(suite: RepeatedSuiteResult): ScoreboardCaseResult[] {
 		durationsMs: r.attempts.map((a) => a.duration),
 		promptTokens: r.attempts.map((a) => a.usage.promptTokens),
 		completionTokens: r.attempts.map((a) => a.usage.completionTokens),
+		turns: r.attempts.map((a) => a.turns),
 	}));
 }
 
-type Aggregates = Omit<ScoreboardEntry, "bench" | "model" | "provider" | "timestamp" | "commit" | "repeat" | "results">;
+type Aggregates = Omit<
+	ScoreboardEntry,
+	"bench" | "model" | "provider" | "providerUrl" | "timestamp" | "commit" | "repeat" | "results"
+>;
 
 /** Recomputes every derived field from `results` — called after a fresh
  *  build and after every merge, so a partial rerun's aggregates are never
@@ -149,6 +160,7 @@ function computeAggregates(results: ScoreboardCaseResult[]): Aggregates {
 	const corePasses: boolean[] = [];
 	const chainPasses: boolean[] = [];
 	const durations: number[] = [];
+	const turns: number[] = [];
 	let promptSum = 0;
 	let completionSum = 0;
 	let attemptCount = 0;
@@ -164,6 +176,7 @@ function computeAggregates(results: ScoreboardCaseResult[]): Aggregates {
 		if (CORE_CASE_IDS.has(r.caseId)) corePasses.push(r.passed);
 		else if (CHAIN_CASE_IDS.has(r.caseId)) chainPasses.push(r.passed);
 		durations.push(...r.durationsMs);
+		turns.push(...(r.turns ?? []));
 		for (const t of r.promptTokens) {
 			promptSum += t;
 			attemptCount++;
@@ -174,6 +187,7 @@ function computeAggregates(results: ScoreboardCaseResult[]): Aggregates {
 	const casesTotal = results.length;
 	const score = casesTotal > 0 ? casesPassed / casesTotal : 0;
 	const sorted = [...durations].sort((a, b) => a - b);
+	const sortedTurns = [...turns].sort((a, b) => a - b);
 
 	return {
 		casesTotal,
@@ -191,11 +205,21 @@ function computeAggregates(results: ScoreboardCaseResult[]): Aggregates {
 		p99DurationMs: percentile(sorted, 99),
 		avgPromptTokens: attemptCount > 0 ? promptSum / attemptCount : 0,
 		avgCompletionTokens: attemptCount > 0 ? completionSum / attemptCount : 0,
+		avgTurns: turns.length > 0 ? turns.reduce((a, b) => a + b, 0) / turns.length : 0,
+		medianTurns: median(sortedTurns),
+		p75Turns: percentile(sortedTurns, 75),
+		p95Turns: percentile(sortedTurns, 95),
+		p99Turns: percentile(sortedTurns, 99),
 	};
 }
 
 /** Builds one model's scoreboard entry from a repeated compare result. */
-export function buildScoreboardEntry(compare: RepeatedCompareResult, model: string, benchIds: string[]): ScoreboardEntry {
+export function buildScoreboardEntry(
+	compare: RepeatedCompareResult,
+	model: string,
+	benchIds: string[],
+	providerUrl?: string,
+): ScoreboardEntry {
 	const suite = compare.suites[model];
 	if (!suite) throw new Error(`No repeated suite result for model "${model}" in this compare.`);
 
@@ -205,23 +229,29 @@ export function buildScoreboardEntry(compare: RepeatedCompareResult, model: stri
 		model,
 		timestamp: new Date().toISOString(),
 		commit: currentCommit(),
+		...(providerUrl ? { providerUrl } : {}),
 		repeat: compare.repeat,
 		results,
 		...computeAggregates(results),
 	};
 }
 
+export function recomputeScoreboardEntry(entry: ScoreboardEntry): ScoreboardEntry {
+	return { ...entry, ...computeAggregates(entry.results) };
+}
+
 /**
  * Merges a partial rerun's fresh per-case results into an existing entry —
  * cases not covered by `fresh` (e.g. everything except the couple of cases
  * that flaked on a network error last time) keep their previous data
- * untouched. Pass `isFullRun: true` (no `--cases` filter) to instead fully
- * replace `existing` outright, so a case removed from the suite since the
- * last run doesn't linger forever in the merged results.
+ * untouched. Removed cases are always pruned: a partial rerun must not leave
+ * an obsolete contract contributing to a current score. Pass `isFullRun: true`
+ * (no `--cases` filter) to fully replace `existing` outright.
  */
 export function mergeScoreboardEntry(existing: ScoreboardEntry | undefined, fresh: ScoreboardEntry, isFullRun: boolean): ScoreboardEntry {
 	if (!existing || isFullRun) return fresh;
-	const byId = new Map(existing.results.map((r) => [r.caseId, r]));
+	const activeCaseIds = new Set(ALL_CASES.map((evalCase) => evalCase.id));
+	const byId = new Map(existing.results.filter((r) => activeCaseIds.has(r.caseId)).map((r) => [r.caseId, r]));
 	for (const r of fresh.results) byId.set(r.caseId, r);
 	const results = [...byId.values()];
 	return { ...fresh, results, ...computeAggregates(results) };

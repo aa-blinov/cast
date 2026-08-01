@@ -1194,7 +1194,7 @@ describe("runAgentLoop — plan mode", () => {
 			};
 			vi.mocked(streamAndCollect)
 				// Request 1: model asks for a read; between requests the plan file
-				// changes on disk (as plan_check would do).
+				// changes on disk while the run is active.
 				.mockImplementationOnce(async (_c: unknown, _m: string, messages: unknown) => {
 					systemPrompts.push(contentToText((messages as Message[])[0]!.content));
 					writeFileSync(planPath, "# Plan\n\n## Steps\n- [x] SNAPSHOT_V2", "utf-8");
@@ -1227,7 +1227,7 @@ describe("runAgentLoop — plan mode", () => {
 		}
 	});
 
-	it("replaces the mirror with a short reference once every checklist item is checked", async () => {
+	it("replaces the mirror with a short reference once every linked task is complete", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "cast-plan-done-"));
 		writeFileSync(join(dir, "feature.md"), "# Plan\n\n## Steps\n- [x] step one\n- [x] step two", "utf-8");
 		try {
@@ -1245,13 +1245,16 @@ describe("runAgentLoop — plan mode", () => {
 				cwd: "/tmp",
 				systemPrompt: "BASE",
 				planState: { enabled: false, plansDir: dir },
+				initialTodos: [
+					{ content: "step one", status: "completed", priority: "medium", planStep: "step one" },
+					{ content: "step two", status: "completed", priority: "medium", planStep: "step two" },
+				],
 				onEvent: () => {},
 			});
 
 			const prompt = systemPrompts[0]!;
 			expect(prompt).toContain("fully executed");
 			expect(prompt).toContain("feature");
-			expect(prompt).not.toContain("step one");
 			expect(prompt).not.toContain("<plan>");
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
@@ -1522,13 +1525,13 @@ describe("runAgentLoop — open-work gate", () => {
 						toolCalls: [
 							{
 								id: "t1",
-								name: "plan_check",
-								arguments: JSON.stringify({ item: "do the work" }),
-							},
-							{
-								id: "t2",
-								name: "plan_check",
-								arguments: JSON.stringify({ item: "verify" }),
+								name: "todo_write",
+								arguments: JSON.stringify({
+									todos: [
+										{ content: "do the work", status: "completed", priority: "medium" },
+										{ content: "verify", status: "completed", priority: "medium" },
+									],
+								}),
 							},
 						],
 					};
@@ -1546,6 +1549,10 @@ describe("runAgentLoop — open-work gate", () => {
 				cwd: dir,
 				systemPrompt: "BASE",
 				planState: { enabled: false, plansDir: dir },
+				initialTodos: [
+					{ content: "do the work", status: "pending", priority: "medium", planStep: "do the work" },
+					{ content: "verify", status: "pending", priority: "medium", planStep: "verify" },
+				],
 				onEvent: (e) => events.push(e),
 			});
 
@@ -1558,7 +1565,7 @@ describe("runAgentLoop — open-work gate", () => {
 			const reminderText = (secondCallMessages ?? [])
 				.filter((m) => m.role === "user")
 				.map((m) => contentToText(m.content))
-				.find((t) => t.includes("outstanding plan steps"));
+				.find((t) => t.includes("unfinished approved-plan tasks"));
 			expect(reminderText).toBeDefined();
 			expect(reminderText).toContain("<system-reminder>");
 			expect(reminderText).toContain("do the work");
@@ -1585,6 +1592,10 @@ describe("runAgentLoop — open-work gate", () => {
 				cwd: dir,
 				systemPrompt: "BASE",
 				planState: { enabled: false, plansDir: dir },
+				initialTodos: [
+					{ content: "do the work", status: "pending", priority: "medium", planStep: "do the work" },
+					{ content: "verify", status: "pending", priority: "medium", planStep: "verify" },
+				],
 				onEvent: (e) => events.push(e),
 			});
 
@@ -1619,6 +1630,9 @@ describe("runAgentLoop — open-work gate", () => {
 				cwd: dir,
 				systemPrompt: "BASE",
 				planState: { enabled: false, plansDir: dir },
+				initialTodos: [
+					{ content: "done already", status: "completed", priority: "medium", planStep: "done already" },
+				],
 				onEvent: (e) => events.push(e),
 			});
 
@@ -1676,6 +1690,10 @@ describe("runAgentLoop — open-work gate", () => {
 				cwd: dir,
 				systemPrompt: "BASE",
 				planState: { enabled: false, plansDir: dir },
+				initialTodos: [
+					{ content: "do the work", status: "pending", priority: "medium", planStep: "do the work" },
+					{ content: "verify", status: "pending", priority: "medium", planStep: "verify" },
+				],
 				onEvent: (e) => events.push(e),
 			});
 
@@ -1710,6 +1728,10 @@ describe("runAgentLoop — open-work gate", () => {
 				cwd: dir,
 				systemPrompt: "BASE",
 				planState: { enabled: false, plansDir: dir },
+				initialTodos: [
+					{ content: "Implement stub", status: "pending", priority: "medium", planStep: "Implement stub" },
+					{ content: "Verify", status: "pending", priority: "medium", planStep: "Verify" },
+				],
 				// Cap at 1 so we don't need three content-only turns.
 				openWorkGate: { maxFiresPerPrompt: 1 },
 				onEvent: (e) => events.push(e),
@@ -1737,8 +1759,18 @@ describe("runAgentLoop — open-work gate", () => {
 					toolCalls: [
 						{
 							id: `t${calls}`,
-							name: "plan_enter",
-							arguments: JSON.stringify({ reason: "switch to plan" }),
+							name: "question",
+							arguments: JSON.stringify({
+								questions: [
+									{
+										question: "Choose an approach",
+										options: [
+											{ value: "one", label: "One" },
+											{ value: "two", label: "Two" },
+										],
+									},
+								],
+							}),
 						},
 					],
 				};
@@ -1786,6 +1818,10 @@ describe("runAgentLoop — open-work gate", () => {
 				cwd: dir,
 				systemPrompt: "BASE",
 				planState: { enabled: false, plansDir: dir },
+				initialTodos: [
+					{ content: "do the work", status: "pending", priority: "medium", planStep: "do the work" },
+					{ content: "verify", status: "pending", priority: "medium", planStep: "verify" },
+				],
 				followUpQueue,
 				onEvent: (e) => events.push(e),
 			});
@@ -1802,7 +1838,7 @@ describe("runAgentLoop — open-work gate", () => {
 		}
 	});
 
-	it("re-reads the plan after plan_check clears the last open item", async () => {
+	it("stops gating after todo_write completes the last linked task", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "cast-owg-check-"));
 		writeFileSync(join(dir, "feature.md"), "# Plan\n\n## Steps\n- [ ] only step\n", "utf-8");
 		try {
@@ -1814,8 +1850,10 @@ describe("runAgentLoop — open-work gate", () => {
 					toolCalls: [
 						{
 							id: "t1",
-							name: "plan_check",
-							arguments: JSON.stringify({ item: "only step" }),
+							name: "todo_write",
+							arguments: JSON.stringify({
+								todos: [{ content: "only step", status: "completed", priority: "medium" }],
+							}),
 						},
 					],
 				}))
@@ -1832,6 +1870,7 @@ describe("runAgentLoop — open-work gate", () => {
 				cwd: dir,
 				systemPrompt: "BASE",
 				planState: { enabled: false, plansDir: dir },
+				initialTodos: [{ content: "only step", status: "pending", priority: "medium", planStep: "only step" }],
 				onEvent: (e) => events.push(e),
 			});
 
@@ -2438,7 +2477,6 @@ describe("runAgentLoop — allowedTools filtering", () => {
 		expect(names.has("read")).toBe(true);
 		expect(names.has("web_search")).toBe(true);
 		expect(names.has("web_fetch")).toBe(true);
-		expect(names.has("plan_check")).toBe(true);
 		expect(names.has("plan_done")).toBe(true);
 		expect(names.has("bash")).toBe(false);
 		expect(names.has("write")).toBe(false);

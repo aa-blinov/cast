@@ -1,4 +1,4 @@
-Your current task list for this session:
+Your current task list for this session. Some items are projected from the approved plan; preserve their wording and use them as the live execution status:
 
 <todos>
 {{TODOS}}

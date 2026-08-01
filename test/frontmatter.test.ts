@@ -164,7 +164,7 @@ describe("matchesToolsAllowlist", () => {
 
 	it("treats bare * as match-all", () => {
 		expect(matchesToolsAllowlist("bash", ["*"])).toBe(true);
-		expect(matchesToolsAllowlist("plan_check", ["*"])).toBe(true);
+		expect(matchesToolsAllowlist("plan_done", ["*"])).toBe(true);
 	});
 
 	it("does not match names outside the glob prefix", () => {

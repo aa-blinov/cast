@@ -488,14 +488,14 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 		<h1>Plan Mode</h1>
 <p>Plan mode restricts the agent to exploration and planning — it can read files and produce a structured plan, but cannot execute code, touch real files, or run arbitrary shell commands. The one exception is the plan file itself: <code>write</code>/<code>edit</code> still work, just scoped to a <code>.md</code> file inside the session&#39;s plans directory (see <a href="#plan-tools">Plan Tools</a> below).</p>
 <h2>Workflow</h2>
-<pre class="mermaid" data-raw="LS0tCmNvbmZpZzoKICBsYXlvdXQ6IGVsawogIGVsazoKICAgIG5vZGVQbGFjZW1lbnRTdHJhdGVneTogTkVUV09SS19TSU1QTEVYCi0tLQpmbG93Y2hhcnQgTFIKICBBWyIvcGxhbiBvciBwbGFuX2VudGVyIl0gLS0+IEJbRXhwbG9yZSBjb2RlYmFzZV0KICBCIC0tPiBDW1dyaXRlIHBsYW5dCiAgQyAtLT4gRFsicGxhbl9kb25lIl0KICBEIC0tPiBFe0FwcHJvdmFsIGRpYWxvZ30KICBFIC0tPnxJbXBsZW1lbnQgbm93fCBGW0ltcGxlbWVudCBwbGFuXQogIEUgLS0+fENsZWFyIGNvbnRleHQgKyBpbXBsZW1lbnR8IEYKICBFIC0tPnwiSSdsbCBzdGFydCBteXNlbGYifCBHWyIvYnVpbGQg4oaSIHlvdXIgbWVzc2FnZSJdCiAgRSAtLT58UmVmaW5lfCBCCiAgRyAtLT4gRgogIEYgLS0+IEhbInBsYW5fY2hlY2sgc3RlcHMiXQ==">---
+<pre class="mermaid" data-raw="LS0tCmNvbmZpZzoKICBsYXlvdXQ6IGVsawogIGVsazoKICAgIG5vZGVQbGFjZW1lbnRTdHJhdGVneTogTkVUV09SS19TSU1QTEVYCi0tLQpmbG93Y2hhcnQgTFIKICBBWyIvcGxhbiJdIC0tPiBCW0V4cGxvcmUgY29kZWJhc2VdCiAgQiAtLT4gQ1tXcml0ZSBwbGFuXQogIEMgLS0+IERbInBsYW5fZG9uZSJdCiAgRCAtLT4gRXtBcHByb3ZhbCBkaWFsb2d9CiAgRSAtLT58SW1wbGVtZW50IG5vd3wgRltJbXBsZW1lbnQgcGxhbl0KICBFIC0tPnxDbGVhciBjb250ZXh0ICsgaW1wbGVtZW50fCBGCiAgRSAtLT58IkknbGwgc3RhcnQgbXlzZWxmInwgR1siL2J1aWxkIOKGkiB5b3VyIG1lc3NhZ2UiXQogIEUgLS0+fFJlZmluZXwgQgogIEcgLS0+IEYKICBGIC0tPiBIWyJVcGRhdGUgbGlua2VkIHRhc2tzIl0=">---
 config:
   layout: elk
   elk:
     nodePlacementStrategy: NETWORK_SIMPLEX
 ---
 flowchart LR
-  A["/plan or plan_enter"] --> B[Explore codebase]
+  A["/plan"] --> B[Explore codebase]
   B --> C[Write plan]
   C --> D["plan_done"]
   D --> E{Approval dialog}
@@ -504,15 +504,14 @@ flowchart LR
   E -->|"I'll start myself"| G["/build → your message"]
   E -->|Refine| B
   G --> F
-  F --> H["plan_check steps"]</pre><ol>
-<li><strong>Enter plan mode</strong> — type <code>/plan</code> or the agent suggests it via <code>plan_enter</code></li>
+  F --> H["Update linked tasks"]</pre><ol>
+<li><strong>Enter plan mode</strong> — type <code>/plan</code></li>
 <li><strong>Explore</strong> — the agent reads files, runs read-only shell commands, and analyzes the codebase</li>
 <li><strong>Write plan</strong> — the agent produces a structured markdown plan with a checklist</li>
 <li><strong>Review</strong> — the agent signals completion with <code>plan_done</code>; the full plan file path is shown (cmd-click to open it in your editor)</li>
 <li><strong>Approve</strong> — when the turn ends, an approval dialog opens: refine (first — it returns you to the regular composer, where multi-line and image paste work, and your next message goes back to planning as feedback), implement now, clear context and implement (the plan survives in the system prompt, the exploration chatter doesn&#39;t), or approve and start yourself. <code>/build</code> remains as the manual gesture</li>
-<li><strong>Implement</strong> — the agent works through the plan, checking off steps with <code>plan_check</code></li>
+<li><strong>Implement</strong> — the agent works through the plan and updates its linked task list after each verified step</li>
 </ol>
-<p>Declining the agent&#39;s own <code>plan_enter</code> suggestion is safe: the session auto-continues in build mode.</p>
 <h2>What&#39;s Allowed in Plan Mode</h2>
 <h3>Read-Only Bash</h3>
 <p>Only inspection commands are allowed. The allowlist includes:</p>
@@ -538,7 +537,7 @@ needed). Other plans in the session are discoverable with <code>ls</code>/<code>
 plans directory. There is no separate plan-write/plan-edit/plan-read tool: no dedicated
 authoring or reading tool, just a permission-level path exception for the
 plan file.</p>
-<div class="table-wrap"><table><thead><tr><th>Tool</th><th>Mode</th><th>Description</th></tr></thead><tbody><tr><td><code>plan_done</code></td><td>Plan</td><td>Signal plan is ready for review</td></tr><tr><td><code>plan_discard</code></td><td>Plan</td><td>Delete a plan</td></tr><tr><td><code>plan_enter</code></td><td>Build</td><td>Suggest switching to plan mode</td></tr><tr><td><code>plan_check</code></td><td>Build</td><td>Mark a checklist item as done</td></tr></tbody></table></div><h2>Plan Files</h2>
+<div class="table-wrap"><table><thead><tr><th>Tool</th><th>Mode</th><th>Description</th></tr></thead><tbody><tr><td><code>plan_done</code></td><td>Plan</td><td>Signal plan is ready for review</td></tr></tbody></table></div><h2>Plan Files</h2>
 <p>Plans are stored as markdown files:</p>
 <pre><code>~/.cast/plans/&lt;session-id&gt;/
   auth-refactor.md
@@ -565,7 +564,7 @@ How to confirm the changes work.
 
 Any assumptions made during planning.
 </code></pre>
-<p>The checklist (<code>- [ ]</code>) format is important — <code>plan_check</code> marks items as <code>- [x]</code> and tracks progress.</p>
+<p>The checklist (<code>- [ ]</code>) format identifies the steps projected into the build-mode task list. The plan stays unchanged after approval; task status tracks execution.</p>
 <h2>Commands</h2>
 <div class="table-wrap"><table><thead><tr><th>Command</th><th>Description</th></tr></thead><tbody><tr><td><code>/plan</code></td><td>Enter plan mode</td></tr><tr><td><code>/build</code></td><td>Exit plan mode, restore full toolset</td></tr><tr><td><code>/plan-model [name|off]</code></td><td>Model used while plan mode is active</td></tr></tbody></table></div><p>Mode switching is rejected while a run is active — modes flip only between runs.</p>
 <p><code>/build</code> with an existing plan is the approval gesture — the plan is injected into the build-mode system prompt so the agent&#39;s next message starts implementation guided by it.</p>
@@ -592,13 +591,13 @@ Restrictions:
 [plan content]
 &lt;/plan&gt;
 
-Follow the plan step by step. Right after completing each step, mark it done with plan_check.
+Follow the plan step by step. Its steps are projected into the task list; update the matching task after completing and verifying each step.
 </code></pre>
 <p>The plan stays in the system prompt across turns and survives compaction — it&#39;s re-read from disk on each run.</p>
 <h3>Plan Fully Executed</h3>
-<p>Once every checklist item is checked, the plan is replaced with a brief reference:</p>
-<pre><code>The approved plan &quot;name&quot; for this task has been fully executed — every checklist
-item is checked. It no longer steers the work; treat new requests on their own terms.
+<p>Once every linked task is complete, the plan is replaced with a brief reference:</p>
+<pre><code>The approved plan &quot;name&quot; for this task has been fully executed — every linked
+task is complete. It no longer steers the work; treat new requests on their own terms.
 </code></pre>
 <h2>Per-Phase Model</h2>
 <p><code>/plan-model</code> sets a model used only while plan mode is active (stored as <code>planModel</code> in settings, like <code>subagentModel</code>). The typical split: an expensive high-quality model for planning, a cheap one for building, a fast one for sub-agents. The status bar, the system prompt <code>Model:</code> line, and the actual requests all report the model in use; <code>/plan-model off</code> returns plan mode to the main model.</p>

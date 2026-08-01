@@ -24,14 +24,15 @@ The npm package is `cast`, but source lives directly under `src/` (no wrapping `
 **Source code** — always `src/`:
 - `src/core/` — engine (no UI): loop, tools, LLM, session, config, MCP, skills, personas
 - `src/ui/` — Ink TUI: App, ChatLog, Composer, commands, input handling
+- `src/web/` — optional web server, REST/SSE bridge, and browser client
 - `src/pickers/` — onboarding pickers (model/persona/reasoning selection)
 
 **Other top-level dirs** — not source code:
 - `prompts/` — system prompt, persona, compaction markdown files
 - `test/` — vitest, one `test/<module>.test.ts` per `src/<module>.ts`
-- `evals/` — regression eval runner (not part of the main application)
+- `evals/` — real-model behavior eval runner and committed scoreboard data (not part of the package)
 - `bin/` — published CLI launcher
-- `scripts/` — esbuild bundle step
+- `scripts/` — build, documentation-site, and focused end-to-end scripts
 
 When the user asks about "code", "source", "сколько кода", or similar — they mean `src/`. Never navigate to `evals/`, `test/`, or `scripts/` unless explicitly asked.
 
@@ -59,7 +60,9 @@ Other:
 ## Testing
 
 - Framework: vitest, one `test/<module>.test.ts` per `src/<module>.ts`.
-- No real LLM/provider API calls — use mock configs with a fake `baseURL`/`apiKey`.
+- `test/` never makes real LLM/provider API calls — use mock configs with a fake `baseURL`/`apiKey`.
+- `evals/` intentionally uses real configured providers; its normal run is diagnostic (one attempt),
+  while `--scoreboard` runs exactly three fresh attempts per case for comparable certification data.
 - MCP tests are the one exception: `test/mcp.test.ts` spawns a real local test-fixture server.
 - Tool tests use `test/__test_tmp__/`, created in `beforeEach`, removed in `afterEach`.
 - After adding/changing a tool, skill, persona, or MCP behavior: add or update its test file in the same change.
@@ -140,10 +143,14 @@ If the workflow is still running, wait and re-check. Do not declare the release 
 
 ## Architecture
 
-- Single OpenAI-compatible provider via `PROVIDER_BASE_URL`/`PROVIDER_API_KEY`.
+- OpenAI-compatible providers are saved in settings; one named provider is active at a time and
+  sessions retain the endpoint they used. The eval runner can compare named providers explicitly.
 - Compaction: LLM-based summarization past a token threshold (falls back to pruning).
 - Parallel tool execution: tool calls within one assistant message run concurrently via `Promise.all`.
-- Reasoning: `vendors.ts` reads metadata from `/v1/models`, sends `reasoning.effort` param, parses `<think>` blocks.
+- Reasoning: `vendors.ts` selects the configured or detected provider dialect, sends its native
+  reasoning control, and normalizes native reasoning plus `<think>` blocks for the UIs.
 - Skills and MCP servers: global paths load unconditionally (`~/.cast/skills/`, agents universal globals); project paths (`.cast/skills/`, `.agents/skills/`, `.cast/mcp.json`) are trust-gated.
-- MCP: stdio and streamable-HTTP only; tool names namespaced `mcp_<server>_<tool>`.
-- Pure CLI with `node:readline` — no TUI framework, no server, no orchestrator.
+- MCP: stdio and streamable HTTP, with legacy HTTP+SSE fallback; tool names are namespaced
+  `mcp_<server>_<tool>`.
+- Two interactive surfaces share the same core loop: Ink TUI and an optional web server with a
+  REST/SSE bridge. Non-interactive `cast run` remains a readline/JSONL protocol.

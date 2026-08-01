@@ -30,13 +30,7 @@ import {
 	type OpenWorkGateConfig,
 } from "./open-work-gate.ts";
 import type { Persona } from "./personas.ts";
-import {
-	checkReadOnlyCommand,
-	listPlanNames,
-	planChecklistState,
-	readActivePlan,
-	TERMINAL_TOOL_NAMES,
-} from "./plan.ts";
+import { checkReadOnlyCommand, listPlanNames, readActivePlan, TERMINAL_TOOL_NAMES } from "./plan.ts";
 import { promptsDir, readRequiredPrompt } from "./prompts.ts";
 import { compactMessages, estimateTokens, fileTagsFromCompactionSummary, shouldCompact } from "./session.ts";
 import type { SshHost } from "./ssh.ts";
@@ -651,9 +645,8 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 			: loopConfig.subagentPrompts;
 	const subagentNames = subagentsEnabled ? allowedSubagentPrompts?.map((p) => p.name) : undefined;
 	const sshHostNames = loopConfig.sshHosts?.map((h) => h.name);
-	// Build mode only — plan mode has its own checklist (plan_check) for the
-	// same "track progress through a multi-step task" job; advertising both
-	// would just leave the model picking one arbitrarily.
+	// A plan is authored before build mode; only build mode exposes its live
+	// todo projection as execution state.
 	const todoModeActive = !loopConfig.planState?.enabled;
 	let todos: TodoItem[] = todoModeActive ? (loopConfig.initialTodos ?? []) : [];
 	const builtinTools = getToolDefinitions(
@@ -851,7 +844,13 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 			const result = validateTodos(args.todos);
 			if (!result.ok) return Promise.resolve({ content: `Error: ${result.error}`, isError: true });
 			const previousTodos = todos;
-			todos = result.todos;
+			const planStepsByContent = new Map(
+				previousTodos.flatMap((todo) => (todo.planStep ? [[todo.content, todo.planStep] as const] : [])),
+			);
+			todos = result.todos.map((todo) => {
+				const planStep = planStepsByContent.get(todo.content);
+				return planStep ? { ...todo, planStep } : todo;
+			});
 			onEvent({ type: "todos_updated", todos });
 			// Observation-only, fire-and-forget — content is the only stable
 			// identity todos have (no id field), so this is a best-effort diff,
@@ -918,9 +917,7 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 	// earlier message keeps its glob rule attached); otherwise per-call.
 	const contextFiles = loopConfig.contextFiles ?? [];
 
-	// Build-mode plan snapshot, read ONCE per run: re-reading on every request
-	// meant each plan_check rewrote the system prompt mid-run and invalidated
-	// the provider's prompt cache for the whole conversation. Mode toggles are
+	// Build-mode plan snapshot, read ONCE per run. Mode toggles are
 	// rejected while a run is active, so a per-run snapshot loses nothing; the
 	// next submit picks up fresh checkbox state from disk.
 	const buildPlanSnapshot =
@@ -981,8 +978,8 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 			// next run — that's what makes it survive compaction and resume.
 			// Appended (not prepended) because it's guidance, not a restriction:
 			// the persona keeps its place at the top.
-			const { unchecked, checked } = planChecklistState(buildPlanSnapshot.content);
-			if (unchecked === 0 && checked > 0) {
+			const linkedTodos = todos.filter((todo) => todo.planStep);
+			if (linkedTodos.length > 0 && remainingTodoCount(linkedTodos) === 0) {
 				// Fully executed plan: stop steering (and stop paying for the full
 				// content every request) — leave a one-line reference instead.
 				prompt = `${prompt}\n\n${BUILD_MODE_DONE_PROMPT.replace("{{NAME}}", () => basename(buildPlanSnapshot.path!, ".md")).replace("{{PATH}}", () => buildPlanSnapshot.path!)}${otherPlansLine}`;
@@ -1403,10 +1400,10 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 				// → inject a system-reminder and keep sampling (capped).
 				if (
 					(!toolCalls || toolCalls.length === 0) &&
-					isOpenWorkGateActive(loopConfig.planState, openWorkGateConfig)
+					isOpenWorkGateActive(loopConfig.planState, todos, openWorkGateConfig)
 				) {
-					const { steps: openSteps, closableViaPlanCheck } = collectOpenWorkSteps(loopConfig.planState);
-					const decision = evaluateOpenWorkGate({ openSteps, closableViaPlanCheck });
+					const openSteps = collectOpenWorkSteps(todos);
+					const decision = evaluateOpenWorkGate({ openSteps });
 					if (decision.type === "nudge") {
 						if (openWorkGateFires < openWorkGateConfig.maxFiresPerPrompt) {
 							openWorkGateFires += 1;

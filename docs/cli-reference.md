@@ -5,6 +5,7 @@
 ```
 cast [options] [prompt]
 cast run [options] <message>    Non-interactive mode
+cast run --interactive [options] Persistent JSONL session
     cast web [start|stop|status]    Web UI mode
     cast upgrade [version] [--force]  Self-update
 ```
@@ -33,6 +34,10 @@ cast run -c "continue the refactoring"
 ```
 
 See [Non-Interactive Mode](non-interactive-mode.md) for output formats and JSON event types.
+
+`cast run --interactive` keeps one real session open over JSONL. It is suited
+to eval runners and programmatic clients that must react to `question` and
+plan-review state between agent turns.
 
 ### `cast upgrade`
 
@@ -154,6 +159,7 @@ The `run` subcommand accepts a subset of the main flags:
 | `--reasoning <level>` | `-r` | Reasoning level |
 | `--persona <name>` | `-p` | Persona to use |
 | `--format <default\|json>` | | Output format |
+| `--interactive` | | Persistent JSONL session protocol; no positional message |
 | `--bypass-permissions` | | Skip bash confirmation prompts |
 | `--skill <path>` | | Load extra skill (repeatable) |
 | `--no-skills` | | Skip project/agents/global/plugin/builtin skill discovery |

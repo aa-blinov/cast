@@ -32,7 +32,9 @@ CREATE TABLE IF NOT EXISTS sessions (
   provider_url TEXT,
   usage_json TEXT NOT NULL,
   todos_json TEXT,
-  share_token TEXT
+  share_token TEXT,
+  plan_question_json TEXT,
+  plan_transition_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -143,6 +145,12 @@ export function getDb(): DatabaseSync {
 	}
 	if (!columns.some((c) => c.name === "share_token")) {
 		instance.exec("ALTER TABLE sessions ADD COLUMN share_token TEXT");
+	}
+	if (!columns.some((c) => c.name === "plan_question_json")) {
+		instance.exec("ALTER TABLE sessions ADD COLUMN plan_question_json TEXT");
+	}
+	if (!columns.some((c) => c.name === "plan_transition_json")) {
+		instance.exec("ALTER TABLE sessions ADD COLUMN plan_transition_json TEXT");
 	}
 	const messageColumns = instance.prepare("PRAGMA table_info(messages)").all() as Array<{ name: string }>;
 	if (!messageColumns.some((c) => c.name === "turn_meta")) {

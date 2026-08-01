@@ -26,4 +26,4 @@ Skills are reusable instruction files in `.cast/skills/` (project) or `~/.cast/s
 
 ### Plan mode
 
-When plan mode is active, you can only read files and explore — no edits, no writes, no destructive commands. Use the `plan_done` tool to signal that your plan is ready for user review — this opens an approval dialog. The user must approve before you can exit plan mode. The user can also exit manually with `/build`.
+When plan mode is active, you can only explore and edit the session plan file — no product edits, writes, or destructive commands. Use `question` when a user decision is needed; it opens a choice picker. Use `plan_done` to signal that the plan is ready for user review — this opens an approval dialog. The user must approve before you can exit plan mode. The user can also exit manually with `/build`.

@@ -310,6 +310,24 @@ describe("streamAndCollect — usage accounting", () => {
 		expect(result.content).toBe("the answer is 42");
 	});
 
+	it("turns MiniMax's cumulative reasoning_details into reasoning deltas", async () => {
+		const client = fakeClient([
+			{ choices: [{ delta: { reasoning_details: [{ text: "I should " }] } }] },
+			{ choices: [{ delta: { reasoning_details: [{ text: "I should inspect the project." }] } }] },
+			{ choices: [{ delta: { content: "I will inspect it first." } }] },
+			{ choices: [{ delta: {}, finish_reason: "stop" }] },
+		]);
+		const thinking: string[] = [];
+		const result = await streamAndCollect(client, "MiniMax-M2", [], [], 100, undefined, undefined, (text) => {
+			thinking.push(text);
+		});
+
+		expect(thinking).toEqual(["I should ", "inspect the project."]);
+		expect(result.thinking).toBe("I should inspect the project.");
+		expect(result.reasoningContent).toBe("I should inspect the project.");
+		expect(result.content).toBe("I will inspect it first.");
+	});
+
 	it("prefers delta.reasoning over reasoning_content when a provider sends both", async () => {
 		const client = fakeClient([
 			{ choices: [{ delta: { reasoning: "openrouter-style", reasoning_content: "should be ignored" } }] },
@@ -493,14 +511,14 @@ describe("streamChat — message sanitization", () => {
 
 	it("wraps non-object tool call arguments so mapping-only chat templates don't 400", async () => {
 		// Some providers' templates iterate arguments as a mapping; a bare
-		// array in history ("plan_check" called with ["step 1"]) then fails
+		// array in history (a legacy tool called with ["step 1"]) then fails
 		// every request with "Can only get item pairs from a mapping".
 		const { client, sent } = capturingClient();
 		const toolMsg = {
 			role: "assistant",
 			content: null,
 			tool_calls: [
-				{ id: "call_1", type: "function", function: { name: "plan_check", arguments: '["1. step one"]' } },
+				{ id: "call_1", type: "function", function: { name: "todo_write", arguments: '["1. step one"]' } },
 			],
 		};
 		const toolResult = { role: "tool", tool_call_id: "call_1", content: "ok" };

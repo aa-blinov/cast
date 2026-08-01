@@ -4,11 +4,12 @@
 #
 #   npm run e2e:plan
 #
-# Flow: launch → /plan → model writes a one-step plan + plan_done → approval
-# dialog → "Approve and implement now" → model implements + plan_check → quit.
-# Asserts on the terminal capture and on disk. Requires: tmux, a provider in
-# ~/.cast/settings.json. Runs in an isolated HOME (provider creds copied in),
-# so real sessions/plans/settings are never touched.
+# Flow: launch → /plan → model asks two questions → scripted picker choices →
+# model writes a one-step plan + plan_done → clean-context approval picker →
+# model implements + plan_check → quit. Asserts on the terminal capture and on
+# disk. Requires: tmux, a provider in ~/.cast/settings.json. Runs in an
+# isolated HOME (provider creds copied in), so real sessions/plans/settings are
+# never touched.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -50,6 +51,13 @@ say() {
 	send Enter
 }
 
+pick_first() {
+	# The fixture asks with the expected answer first. Enter drives the real TUI
+	# picker rather than bypassing it through an internal API.
+	send Enter
+	sleep 2
+}
+
 command -v tmux >/dev/null || { echo "SKIP: tmux not installed"; exit 0; }
 [ -f "$HOME/.cast/settings.json" ] || { echo "SKIP: no provider configured (~/.cast/settings.json)"; exit 0; }
 
@@ -73,22 +81,28 @@ wait_for '\[BUILD\]' 30 "TUI up in build mode"
 echo "== plan phase =="
 send "/plan"; sleep 1; send Enter; sleep 1
 wait_for '\[PLAN\]' 15 "plan mode badge"
-say "Write a one-step plan via plan_write named e2e-smoke: single checklist item '- [ ] add a farewell(n) function to utils.js returning \\\`Bye, \${n}!\\\` and export it'. Then call plan_done."
+say "Before planning, call question exactly once with two questions, each with two options: (1) 'Should farewell punctuation be included?' with first option value 'yes', label 'Include !'; second value 'no', label 'No punctuation'. (2) 'Should the function be exported?' with first option value 'yes', label 'Export it'; second value 'no', label 'Keep private'. After I answer, write a one-step plan file named e2e-smoke with checklist item '- [ ] add a farewell(n) function to utils.js returning \\\`Bye, \${n}!\\\` and export it'. Then call plan_done."
+wait_for 'Should farewell punctuation be included' 180 "first question picker open"
+pick_first
+wait_for 'Should the function be exported' 60 "second question picker open"
+pick_first
+wait_for 'The user selected "Include !"' 60 "picker answers returned to agent"
 # The transcript "[Plan ready: …]" line lands mid-turn; the dialog itself only
 # opens when the turn settles — wait for the dialog's own option text.
 wait_for 'Plan ready: ' 180 "plan_done fired (path in transcript)"
-wait_for 'Approve — switch to build and implement now' 60 "approval dialog open"
+wait_for 'Approve and implement in clean context' 60 "approval dialog open"
 
 PLAN_FILE="$FAKE_HOME/.cast/plans"/*/e2e-smoke.md
 grep -q '\- \[ \]' $PLAN_FILE || fail "plan file has no unchecked checklist item"
 echo "ok: plan file on disk with checklist"
 
-echo "== approve & implement =="
-# "Keep planning" sits first now — step down to "Approve — switch to build and implement now".
+echo "== approve & implement in clean context =="
+# Continue planning, regular implementation, then clean-context implementation.
+send Down; sleep 1
 send Down; sleep 1
 send Enter
 sleep 2
-wait_for 'The plan is approved' 15 "auto-submitted approval message"
+wait_for 'Clean build context' 15 "clean handoff auto-submitted"
 wait_for 'plan_check' 240 "implementation reached plan_check"
 sleep 5
 
