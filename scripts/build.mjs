@@ -86,6 +86,7 @@ const webJavaScript = [
 	"composer-attachments.js",
 	"composer.js",
 	"directory-browser.js",
+	"diff-panel.js",
 	"elapsed-timer.js",
 	"file-preview.js",
 	"file-size.js",
