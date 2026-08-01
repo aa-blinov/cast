@@ -17,11 +17,13 @@ import { useModalFocusTrap } from "./modal-focus.js";
 import { PlanDecisionCard, QuestionCard } from "./plan-cards.js";
 import { collapseMidWordBoundaries, mergeMidWordBoundary } from "./reasoning-split.js";
 import { ShareModal } from "./share-modal.js";
+import { StatusPopover } from "./status-popover.js";
 import {
 	SANDBOX_CWD,
 	groupSessionsByDirectory,
 	isSandboxSessionCwd,
 	sessionDirectoryName,
+	shortPath,
 	sortSessionsByActivity,
 } from "./sidebar-utils.js";
 import { SidebarSessionItem } from "./sidebar-session-item.js";
@@ -475,13 +477,6 @@ function formatArgsFull(args) {
 	} catch {
 		return args;
 	}
-}
-
-function shortPath(p) {
-	if (!p) return "";
-	const parts = p.split("/").filter(Boolean);
-	if (parts.length <= 2) return p;
-	return `…/${parts.slice(-2).join("/")}`;
 }
 
 const _WEB_TOOLS_OPTIONS = [
@@ -2050,74 +2045,6 @@ const SETTINGS_TABS = [
 // the viewport on mobile). Status is a glance-and-close read either way, so
 // a modal costs nothing here and works identically at any viewport width.
 // Reloads on every open since usage/message-count/git-dirty drift constantly.
-function StatusPopover({ activeId, running }) {
-	const [open, setOpen] = useState(false);
-	const [data, setData] = useState(null);
-	const [error, setError] = useState(null);
-
-	const load = useCallback(async () => {
-		setError(null);
-		try {
-			const [current, repo, providers] = await Promise.all([
-				api("POST", `/api/sessions/${activeId}/command`, { command: "/current" }),
-				api("POST", `/api/sessions/${activeId}/command`, { command: "/repo" }),
-				api("POST", `/api/sessions/${activeId}/command`, { command: "/provider list" }),
-			]);
-			setData({ current: current?.result, repo: repo?.result, providers: providers?.result });
-		} catch (err) {
-			setError(err.message);
-		}
-	}, [activeId]);
-
-	const openModal = useCallback(() => {
-		setOpen(true);
-		load();
-	}, [load]);
-
-	useEffect(() => {
-		if (!open) return;
-		const onKey = (e) => {
-			if (e.key === "Escape") setOpen(false);
-		};
-		window.addEventListener("keydown", onKey);
-		return () => window.removeEventListener("keydown", onKey);
-	}, [open]);
-
-	// Left open across a turn, the numbers it showed on open go stale the
-	// moment a reply lands — reload the instant `running` flips back to
-	// false so it never needs a manual close/reopen (or a page refresh) to
-	// catch up.
-	const wasRunning = useRef(running);
-	useEffect(() => {
-		if (open && wasRunning.current && !running) load();
-		wasRunning.current = running;
-	}, [running, open, load]);
-	const modalRef = useModalFocusTrap(open);
-
-	return html`
-		<button class="menu-toggle" onClick=${openModal} aria-label="Status" title="Status">
-			<${icons.info} />
-		</button>
-		${
-			open &&
-			html`
-			<div class="modal-backdrop" onClick=${() => setOpen(false)}>
-				<div class="modal modal-status" role="dialog" aria-modal="true" aria-label="Status" tabIndex="-1" ref=${modalRef} onClick=${(e) => e.stopPropagation()}>
-					<div class="modal-header">
-						<span>Status</span>
-						<button class="modal-close" onClick=${() => setOpen(false)} aria-label="Close"><${icons.xMark} /></button>
-					</div>
-					<div class="modal-status-body">
-						${error && html`<div class="settings-error">${error}</div>`}
-						${!data && !error ? html`<div class="settings-loading">Loading…</div>` : html`<${SettingsStatus} data=${data} />`}
-					</div>
-				</div>
-			</div>
-		`
-		}
-	`;
-}
-
 // Everything that used to be a slash command typed into the composer but
 // isn't part of the actual back-and-forth with the agent (MCP/skills/
 // plugins/provider/SSH management, theme, model/reasoning details, usage) —
@@ -2409,35 +2336,6 @@ function SettingsModal({
 					</div>
 				</div>
 			</div>
-		</div>
-	`;
-}
-
-function SettingsStatus({ data }) {
-	if (!data) return null;
-	const c = data.current || {};
-	const r = data.repo || {};
-	const u = c.usage || {};
-	const providerName = (data.providers || []).find((p) => p.active)?.name;
-	return html`
-		<div class="settings-rows">
-			<div class="settings-row"><span>Persona</span><span>${c.persona ?? "—"}</span></div>
-			${providerName ? html`<div class="settings-row"><span>Provider</span><span>${providerName}</span></div>` : null}
-			<div class="settings-row"><span>Model</span><span>${c.model ?? "—"}</span></div>
-			<div class="settings-row"><span>Mode</span><span>${c.mode ?? "build"}</span></div>
-			<div class="settings-row"><span>Status</span><span>${c.status ?? "—"}</span></div>
-			<div class="settings-row"><span>Messages</span><span>${c.messageCount ?? 0}</span></div>
-			<div class="settings-row"><span>Tokens</span><span>${u.totalTokens ?? 0} (${u.promptTokens ?? 0} in / ${u.completionTokens ?? 0} out)</span></div>
-			${
-				u.cacheReadTokens > 0 && u.promptTokens > 0
-					? html`<div class="settings-row"><span>Cached</span><span>${u.cacheReadTokens} (${Math.round((u.cacheReadTokens / u.promptTokens) * 100)}% of input)</span></div>`
-					: null
-			}
-			${u.cost ? html`<div class="settings-row"><span>Cost</span><span>$${u.cost.toFixed(4)}</span></div>` : null}
-			${c.lastTurn?.tokensPerSecond ? html`<div class="settings-row"><span>Last turn</span><span>${c.lastTurn.tokensPerSecond} tok/s (${(c.lastTurn.generationMs / 1000).toFixed(1)}s)</span></div>` : null}
-			<div class="settings-row"><span>Directory</span><span title=${r.cwd}>${shortPath(r.cwd)}</span></div>
-			${r.isGit && html`<div class="settings-row"><span>Git branch</span><span>${r.branch}${r.dirty ? " (dirty)" : ""}</span></div>`}
-			${r.isGit === false && html`<div class="settings-row"><span>Git</span><span>not a repository</span></div>`}
 		</div>
 	`;
 }
