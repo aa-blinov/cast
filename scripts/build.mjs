@@ -78,7 +78,15 @@ cpSync("src/web/public", "dist/public", { recursive: true });
 // Keep the source web assets readable for the dev server, but ship compact
 // browser assets in release builds. Each module is transformed independently
 // so the importmap and the browser's native ES-module graph remain intact.
-const webJavaScript = ["app.js", "api.js", "icons.js", "reasoning-split.js", "stream-blocks.js", "login.js"];
+const webJavaScript = [
+	"app.js",
+	"api.js",
+	"icons.js",
+	"modal-focus.js",
+	"reasoning-split.js",
+	"stream-blocks.js",
+	"login.js",
+];
 for (const file of webJavaScript) {
 	const source = readFileSync(`dist/public/${file}`, "utf8");
 	const result = await transform(source, {
