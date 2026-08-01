@@ -87,6 +87,7 @@ const webJavaScript = [
 	"reasoning-split.js",
 	"sidebar-utils.js",
 	"sidebar-session-item.js",
+	"share-modal.js",
 	"stream-blocks.js",
 	"login.js",
 ];
