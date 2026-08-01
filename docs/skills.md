@@ -17,7 +17,7 @@ Skills are discovered from multiple locations. On a name collision, the first-lo
 1. **Project (cast)** — `.cast/skills/` (trust-gated)
 2. **Project (agents)** — `.agents/skills/` (trust-gated; skills.sh / `npx skills add` universal path)
 3. **Global (cast)** — `~/.cast/skills/` (always loaded)
-4. **Global (agents)** — `~/.config/agents/skills/` then `~/.agents/skills/` (skills.sh universal global)
+4. **Global (agents)** — `~/.agents/skills/` then the compatible `~/.config/agents/skills/` (skills.sh universal global)
 5. **Plugin** — skills from enabled `/plugin install name@marketplace` packages
 6. **Builtin** — `prompts/skills/` (ships with cast)
 7. **Extra paths** — `--skill <path>` flags (loaded even with `--no-skills`)
@@ -30,7 +30,7 @@ Use `--no-skills` to skip auto-discovery (including `.agents/skills`). Extra pat
 npx -y skills add mattpocock/skills --skill grill-me -a universal
 ```
 
-Installs into `.agents/skills/` (project) or `~/.config/agents/skills/` (global). Cast loads those automatically after `/reload` (or on next start). Invoke with `/skill:grill-me` (not `/grill-me`).
+Installs into `.agents/skills/` (project) or `~/.agents/skills/` (global). Cast also recognizes the compatible `~/.config/agents/skills/` location. It loads these automatically after `/reload` (or on next start). Invoke with `/skill:grill-me` (not `/grill-me`).
 
 ## Creating a Skill
 

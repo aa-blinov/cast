@@ -41,7 +41,7 @@ Each entry in a matcher group's `hooks` array is one of:
 - **`command`** (default `type`) — a shell command. Relative paths resolve against the cwd the hook runs for.
 - **`http`** — POSTs the event envelope as the JSON body; the response body is read the same way stdout is.
 - **`mcp_tool`** — calls an already-connected MCP server's tool (`server`/`tool` unqualified names) and interprets its result the same way as a command hook's stdout. No-ops (fails open) if that server/tool isn't connected.
-- **`prompt`** — a short, tool-free, capped (200 token) model completion. A response starting with "yes" (case-insensitive) blocks, with the full response as the reason — this is cast's documented convention for the ambiguous "respond yes/no" pattern in the official docs, since the exact interpretation isn't otherwise specified. No-ops if the caller didn't have model/config access at that point in the run (see Scope).
+- **`prompt`** — a short, tool-free, capped (500 token) model completion. Cast asks it to return `{"ok":true}` to allow or `{"ok":false,"reason":"…"}` to block. Invalid output and unavailable model/config access fail open (see Scope).
 
 `input`/`prompt` support `${field.path}` interpolation against the event's JSON payload (e.g. `${tool_input.command}`, `${cwd}`). Unresolvable paths are left as the literal placeholder.
 
@@ -95,7 +95,7 @@ The hook receives one JSON object on **stdin** (or as the HTTP/`mcp_tool` payloa
 ### Response contract
 
 - Exit **2**, or `{"decision":"block","reason":"..."}` on stdout — blocks.
-- `{"hookSpecificOutput":{"additionalContext":"..."}}` — same "keep going" effect as a block, without being logged as an error.
+- `{"hookSpecificOutput":{"additionalContext":"..."}}` — appends context for the model without blocking the event.
 - **`PreToolUse` only** — `{"hookSpecificOutput":{"permissionDecision":"deny","permissionDecisionReason":"...","updatedInput":{...}}}`:
   - `permissionDecision: "deny"` blocks, same as `decision:"block"` (with `permissionDecisionReason` as the reason).
   - `updatedInput` replaces the tool call's arguments with whatever object you provide, before it runs — works whether or not the call is also allowed/denied.

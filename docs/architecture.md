@@ -8,7 +8,7 @@ An overview of cast's source layout and key design decisions. For contributors a
 src/
   core/               Agent logic (no UI dependency)
     loop.ts           Agent loop — streaming, tool dispatch, compaction
-    tools.ts          17 tool definitions + executors
+    tools.ts          Built-in tool definitions + executors
     tools/
       bash.ts         Shell execution
       files.ts        Read/write/edit
@@ -18,18 +18,18 @@ src/
       shared.ts       Shared types (ToolResult, ConfirmBash)
     llm.ts            LLM interaction, streaming, retry, prompt caching
     session.ts        Session persistence, token estimation, compaction
-    mcp.ts            MCP server connection (stdio + streamable HTTP)
+    mcp.ts            MCP server connection (stdio + Streamable HTTP, legacy HTTP+SSE fallback)
     personas.ts       Persona loading (project > global > builtin)
     rules.ts          Cursor-compatible rule system (always/auto/lazy/manual)
     skills.ts         Agent Skills spec implementation
-    plugins.ts        Marketplace catalogs + plugin install (skills)
+    plugins.ts        Marketplace catalogs + plugin install (skills and hooks)
     config.ts         AppConfig, model validation, onboarding
     context-files.ts  AGENTS.md / CLAUDE.md discovery
     project.ts        System prompt assembly, trust gating
     startup.ts        Unified startup orchestration
     runner.ts         Queue management (steering, follow-ups)
     run.ts            Non-interactive runner (cast run)
-    vendors.ts        Reasoning metadata, think-block parsing
+    vendors.ts        Reasoning provider dialects, metadata, and think-block parsing
     upgrade.ts        Self-update via GitHub releases
     permissions.ts    Dangerous bash command detection
     plan.ts           Plan mode state, file I/O, read-only bash gate
@@ -50,6 +50,7 @@ src/
     input/            Keybindings, input handling
     ...
   pickers/            Onboarding pickers (model, persona, reasoning)
+  web/                HTTP server, REST/SSE bridge, browser client
   index.ts            CLI entry point
 ```
 
@@ -57,7 +58,7 @@ src/
 
 ### Single OpenAI-Compatible Provider
 
-cast speaks one API: the OpenAI chat completions format. Any provider that implements this API works — OpenRouter, OpenAI, Ollama, vLLM, LiteLLM, Azure OpenAI. No provider-specific code paths.
+cast speaks the OpenAI chat completions format. Any provider that implements it works — OpenRouter, OpenAI, Ollama, vLLM, LiteLLM, Azure OpenAI. A small provider-dialect layer only normalizes reasoning controls and native reasoning streams; it does not fork the agent loop.
 
 ### Parallel Tool Execution
 
@@ -77,7 +78,7 @@ MCP tools are namespaced as `mcp_<server>_<tool>` and converted to the same `Too
 
 ### Trust Gating
 
-A single trust decision per project gates all local resources (skills, MCP, context files, personas). Global resources (`~/.cast/`) always load. Asked once, remembered in settings.json.
+A single trust decision per project gates local skills, MCP, context files, personas, rules, hooks, and SSH configuration. Global resources (`~/.cast/`) always load. Asked once, remembered in settings.json.
 
 ### Plan Mode
 

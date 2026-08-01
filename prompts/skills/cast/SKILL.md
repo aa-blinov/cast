@@ -30,5 +30,8 @@ This skill ships as an **index + reference files**. Read only what the task need
 | Rules — apply modes, globs, `@rule-name` vs `/rule:` | `references/rules.md` |
 | Hooks — `hooks.json` shape, events, matchers, env vars | `references/hooks.md` |
 | Slash commands — full table, hot-reload vs `/reload` | `references/commands.md` |
+| Providers and model slots — OpenAI-compatible endpoint, reasoning, validation | `references/providers.md` |
+| Web access — local/public server, login, SSH tunnel, security boundary | `references/web.md` |
+| Project configuration — `.cast/` layout, trust, git policy, reload | `references/project-config.md` |
 
 When the user asks for a specific concern ("how do I add an MCP server?", "where do personas live?"), open the matching reference file. For multi-topic requests ("install a plugin from a non-default marketplace that exposes a custom hook"), follow the references in order.

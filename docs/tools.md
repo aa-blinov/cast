@@ -238,7 +238,7 @@ Use for:
 
 ## Plan Tools
 
-Availability is mode-gated: progress and suggestion tools only in build mode. See [Plan Mode](plan-mode.md) for details.
+Mode-specific tools are deliberately narrow: `plan_done` is available only in plan mode; `todo_write` is available only in build mode. `question` is available in both modes and persists until the user answers it, including across TUI/web restarts. See [Plan Mode](plan-mode.md) for the write and bash gates.
 
 The plan file is authored and read with the ordinary `write`/`edit`/`read`
 tools above — no separate plan-write/plan-edit/plan-read tool. In plan mode
@@ -248,6 +248,8 @@ plans directory; `read`ing that file makes it the active plan.
 | Tool | Mode | Description |
 |------|------|-------------|
 | `plan_done` | Plan | Signal that the plan is ready for review |
+| `question` | Plan or build | Ask one to four multiple-choice questions and end the turn until the user answers |
+| `todo_write` | Build | Maintain the task list; approved plan checkboxes are projected into it |
 
 ## Subagent System
 

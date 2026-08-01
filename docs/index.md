@@ -30,5 +30,7 @@ A terminal coding agent that works with **any** OpenAI-compatible API. Point it 
 | [Configuration](configuration.md) | settings.json, env vars, .cast/ layout |
 | [Themes](themes.md) | Color themes |
 | [Non-Interactive Mode](non-interactive-mode.md) | `cast run` and JSON output |
+| [Behavior Evals](eval-behavior.md) | Real-model behavioral contracts and signals |
+| [Eval Methodology](eval-methodology.md) | Scoreboard, repeats, traces, and regressions |
 | [Architecture](architecture.md) | Source layout and design decisions |
 | [Changelog](changelog.md) | Version history and feature highlights |

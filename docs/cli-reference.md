@@ -66,7 +66,7 @@ cast web --public        # Alias for --host 0.0.0.0
 
 First run generates a password, printed to the terminal and saved in `~/.cast/settings.json`. Username is always `cast`.
 
-Binding to a non-loopback address (`--host 0.0.0.0` or `--public`) prints a warning — the server is reachable from other machines on the network, protected only by the password.
+Binding to a non-loopback address (`--host 0.0.0.0` or `--public`) exposes plain HTTP. Use it only on a trusted LAN: without HTTPS, a network observer can read the password and session. For remote access without a domain, keep the default loopback binding and use `ssh -L 1337:127.0.0.1:1337 user@host`.
 
 Starting when another instance is already running prints an error and exits. `stop` gracefully shuts down open sessions (SIGTERM), escalating to SIGKILL after 3 seconds if the process doesn't exit. If the recorded process is already gone (crash, OOM, `kill -9`), `status` and `stop` detect the stale state, clean up, and report honestly.
 
@@ -75,12 +75,12 @@ Features:
 - Token-by-token streaming, with reasoning and tool calls shown inline as they happen
 - Tool call cards showing arguments and status
 - Git diff viewer (file tree + unified diff) as a resizable side panel, auto-refreshing after each tool call
-- Settings modal (gear icon) — model & reasoning, color theme, web tools toggle, bash confirmation mode, and management for MCP servers, skills, plugins, providers, and SSH hosts; shared with the TUI's `~/.cast/settings.json`
+- Settings modal (gear icon) — model & reasoning, color theme, web tools toggle, bash confirmation mode, Quick session persona, and management for MCP servers, skills, plugins, hooks, providers, and SSH hosts; shared with the TUI's `~/.cast/settings.json`
 - Status popover (info icon) — persona, model, mode, token usage, and git branch for the active session
 - Keyboard shortcuts — `Ctrl+B` (`⌘B` on Mac) toggles the sidebar, `Ctrl+Shift+D` / `N` / `L` toggle the diff panel / start a new session / clear context, `Ctrl+/` shows the full reference
-- All slash commands, non-blocking ones work while agent runs
+- Chat slash commands are available in the composer; provider, MCP, skills, plugins, hooks, and SSH are managed through Settings. Non-blocking commands work while an agent runs.
 - Mobile/tablet/desktop responsive — sidebar and diff panel become touch-friendly slide-over drawers on narrow screens
-- Auth via standard HTTP Basic Auth — the browser's own credential prompt, no custom login page
+- Themed sign-in screen with an HttpOnly, SameSite session cookie; repeated failed sign-ins are rate-limited
 
 On Windows, prints the install command to run in a new terminal (can't self-replace running process files).
 

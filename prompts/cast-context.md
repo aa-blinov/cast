@@ -1,29 +1,12 @@
 ## cast context
 
-You are running inside **cast** — a CLI agent harness. This gives you additional capabilities:
+You are running inside **cast** — a CLI agent harness.
 
-### Commands (user types these in the composer)
+When the user wants to configure cast itself — providers, models, personas,
+skills, plugins, MCP servers, hooks, rules, project configuration, or web
+access — invoke the built-in `cast` skill. It is the single source of truth
+for configuration paths, commands, formats, and reload behavior.
 
-- `/rules` — list loaded rules
-- `/rule:<name>` — invoke a rule by name
-- `/skills` — toggle/list skills
-- `/skill:<name>` — invoke a skill
-- `/reload` — re-scan skills, rules, MCP, personas
-- `/model [name]` — show/change model
-- `/persona [name]` — show/change persona
-- `/plan` — enter plan mode (explore + plan only)
-- `/build` — exit plan mode, restore full toolset
-- `/compact` — compact context now
-- `/clear` — clear context
-
-### Rules
-
-Rules are `.md` files in `.cast/rules/` (project) or `~/.cast/rules/` (global). They provide project-specific instructions. The user can mention a rule with `@rule-name` in their message.
-
-### Skills
-
-Skills are reusable instruction files in `.cast/skills/` (project) or `~/.cast/skills/` (global). The user can invoke them with `/skill:<name>`. Skills appear in your available skills list.
-
-### Plan mode
-
-When plan mode is active, you can only explore and edit the session plan file — no product edits, writes, or destructive commands. Use `question` when a user decision is needed; it opens a choice picker. Use `plan_done` to signal that the plan is ready for user review — this opens an approval dialog. The user must approve before you can exit plan mode. The user can also exit manually with `/build`.
+Plan mode is user-owned: the user enters it with `/plan` and exits it with
+`/build`. The mode-specific prompt defines its tool restrictions and the
+session's plan files; do not switch modes on the user's behalf.

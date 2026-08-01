@@ -286,6 +286,20 @@ body.resizing-diff * { user-select: none; }
 }
 .sidebar-footer-status { display: none; }
 .sidebar-footer-model { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-logout {
+	display: grid;
+	place-items: center;
+	width: 26px;
+	height: 26px;
+	margin-left: auto;
+	border: 0;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--text-muted);
+	cursor: pointer;
+	transition: color var(--transition-fast), background var(--transition-fast);
+}
+.sidebar-logout:hover { color: var(--cyan); background: var(--accent-subtle); }
 /* Always out-of-flow, even on desktop where it's never shown — otherwise
  * this unconditionally-rendered div is a plain static block and grid
  * auto-placement slots it into .app's first content cell, pushing .sidebar

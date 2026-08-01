@@ -1,4 +1,4 @@
-Plugins are installable packs (usually skills) from catalogs — same `name@marketplace` shape as Claude Code / Grok Build. MVP loads **skills** from plugins only (not MCP/hooks inside the pack).
+Plugins are installable packs (usually skills) from catalogs — same `name@marketplace` shape as Claude Code / Grok Build. Cast loads **skills and hooks** from enabled plugins. MCP servers and agents bundled inside a plugin are not loaded yet.
 
 **Defaults** (seeded once on first `/plugin` / marketplace / install):
 

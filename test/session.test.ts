@@ -2,10 +2,11 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { resetDbConnectionForTests } from "../src/core/db.ts";
+import { getDb, resetDbConnectionForTests } from "../src/core/db.ts";
 import type { Message } from "../src/core/llm.ts";
 import {
 	addUsage,
+	appendMessage,
 	clearSessionMessages,
 	compactMessages,
 	countTurnMessages,
@@ -567,6 +568,31 @@ describe("session persistence", () => {
 		expect(loaded?.id).toBe(session.id);
 		expect(loaded?.cwd).toBe(projectA);
 		expect(loaded?.messages).toEqual(session.messages);
+	});
+
+	it("derives the title when any caller appends the first user message", () => {
+		const session = createSession("gpt-4o", projectA);
+		appendMessage(session, { role: "user", content: "  First\nmessage becomes the session title  " });
+		appendMessage(session, { role: "user", content: "A later message does not replace it" });
+		expect(session.title).toBe("First message becomes the session title");
+	});
+
+	it("backfills legacy untitled sessions without restoring an explicitly cleared title", () => {
+		const session = createSession("gpt-4o", projectA);
+		session.messages.push({ role: "user", content: "  First\nmessage becomes the session title  " });
+		saveSession(session);
+
+		const db = getDb();
+		db.prepare("UPDATE sessions SET title = NULL WHERE id = ?").run(session.id);
+		migrateLegacySessionsToDb();
+
+		expect(listSessionSummaries().find((summary) => summary.id === session.id)?.title).toBe(
+			"First message becomes the session title",
+		);
+
+		getDb().prepare("UPDATE sessions SET title = '' WHERE id = ?").run(session.id);
+		migrateLegacySessionsToDb();
+		expect(loadSession(session.id)?.title).toBe("");
 	});
 
 	it("persists pending plan picker state in SQLite", () => {

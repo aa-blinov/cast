@@ -6,6 +6,7 @@ import { formatLocalDate } from "./date-rollover-reminder.ts";
 import { getDb } from "./db.ts";
 import type { Message, Usage } from "./llm.ts";
 import type { PlanQuestion, PlanTransition } from "./plan.ts";
+import { deriveSessionTitle } from "./session-title.ts";
 import type { TodoItem } from "./todo.ts";
 
 // ============================================================================
@@ -1070,6 +1071,7 @@ export function migrateLegacySessionsToDb(): number {
 	for (const filePath of legacySessionFilePaths()) {
 		const session = readLegacySessionFile(filePath);
 		if (!session || existing.has(session.id)) continue;
+		if (!session.title) session.title = deriveSessionTitle(getFirstUserMessage(session));
 		db.prepare(
 			`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, usage_json, todos_json, share_token, plan_question_json, plan_transition_json)
 			 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :usage_json, :todos_json, :share_token, :plan_question_json, :plan_transition_json)`,
@@ -1082,6 +1084,28 @@ export function migrateLegacySessionsToDb(): number {
 		});
 		existing.add(session.id);
 		migrated++;
+	}
+	// Titles became a shared session concern after earlier TUI/run sessions
+	// had already been persisted. An explicit clear now stores an empty string,
+	// so only NULL represents the legacy state this migration repairs.
+	const untitled = db
+		.prepare(
+			`SELECT s.id, m.content_json
+			 FROM sessions s
+			 JOIN messages m ON m.session_id = s.id
+			 WHERE s.title IS NULL
+			   AND m.role = 'user'
+			   AND m.seq = (
+			     SELECT MIN(first_message.seq)
+			     FROM messages first_message
+			     WHERE first_message.session_id = s.id AND first_message.role = 'user'
+			   )`,
+		)
+		.all() as Array<{ id: string; content_json: string }>;
+	const setTitle = db.prepare("UPDATE sessions SET title = ? WHERE id = ? AND title IS NULL");
+	for (const row of untitled) {
+		const title = deriveSessionTitle(messageText(JSON.parse(row.content_json) as Message));
+		if (title) setTitle.run(title, row.id);
 	}
 	return migrated;
 }
@@ -1314,5 +1338,9 @@ export function createSession(model: string, cwd: string): SessionState {
 }
 
 export function appendMessage(session: SessionState, message: Message): void {
+	if (!session.title && message.role === "user" && !session.messages.some((existing) => existing.role === "user")) {
+		const title = deriveSessionTitle(messageText(message));
+		if (title) session.title = title;
+	}
 	session.messages.push(message);
 }
