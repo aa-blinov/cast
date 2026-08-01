@@ -26,8 +26,8 @@ import { ShareModal } from "./share-modal.js";
 import { Sidebar as SidebarModule } from "./sidebar.js";
 import { SANDBOX_CWD, shortPath } from "./sidebar-utils.js";
 import { closeSseConnection, openSseConnection } from "./sse-connection.js";
+import { handleSseEvent } from "./sse-events.js";
 import { StatusPopover } from "./status-popover.js";
-import { blocksFromAssistantCompletion } from "./stream-blocks.js";
 import { LiveStreamingBlocks as LiveStreamingBlocksModule } from "./streaming-blocks.js";
 import { useSessionController } from "./use-session-controller.js";
 import { useSessionState } from "./use-session-state.js";
@@ -2205,309 +2205,30 @@ function App() {
 		};
 
 		es.onmessage = (e) => {
-			if (!isCurrent()) return;
 			try {
-				const event = JSON.parse(e.data);
-				switch (event.type) {
-					case "user_message": {
-						// Another tab sent a user message — add it to our local state.
-						// The wire event's content is the raw send shape (a string, or
-						// an array with a text part + image_url parts when images were
-						// attached — see bridge.ts's buildUserContent); the optimistic
-						// local append below instead uses the toDisplayMessages shape
-						// (content: text, images: [...]). Normalize both before
-						// comparing so a caption+photo send doesn't fail this dedup
-						// check (array !== string) and land twice in the sending tab.
-						const normalize = (content) => {
-							if (typeof content === "string") return { text: content, images: [] };
-							if (Array.isArray(content)) {
-								return {
-									text: content.find((p) => p.type === "text")?.text ?? "",
-									images: content.filter((p) => p.type === "image_url").map((p) => p.image_url.url),
-								};
-							}
-							return { text: "", images: [] };
-						};
-						setSession((prev) => {
-							if (!prev) return prev;
-							const msgs = prev.messages;
-							const last = msgs[msgs.length - 1];
-							if (last && last.role === "user") {
-								const a = { text: last.content, images: last.images ?? [] };
-								const b = normalize(event.message.content);
-								if (a.text === b.text && a.images.length === b.images.length) return prev;
-							}
-							const evt = normalize(event.message.content);
-							return {
-								...prev,
-								messages: [
-									...msgs,
-									{ role: "user", content: evt.text, ...(evt.images.length ? { images: evt.images } : {}) },
-								],
-							};
-						});
-						break;
-					}
-					case "status": {
-						const isRunning = event.status === "running";
-						setRunning(isRunning);
-						setSession((prev) =>
-							prev
-								? {
-										...prev,
-										status: event.status,
-										turnStartedAt: isRunning ? (event.startedAt ?? prev.turnStartedAt) : null,
-									}
-								: prev,
-						);
-						// If the run ended between our initial GET and the SSE
-						// connect, we missed the `end` event. The `session_end`
-						// event (which follows `status: idle`) carries usage and
-						// messageCount — it handles the refetch when counts diverge.
-						wasRunningRef.current = isRunning;
-						break;
-					}
-					case "token":
-						updateStreaming({ type: "content", text: event.text });
-						break;
-					case "thinking":
-						updateStreaming({ type: "thinking", text: event.text });
-						break;
-					case "tool_start":
-						updateStreaming({
-							type: "tool_start",
-							call: { id: event.id, name: event.name, args: event.args, status: event.status },
-						});
-						break;
-					case "tool_end":
-						updateStreaming({
-							type: "tool_end",
-							id: event.id,
-							status: event.status,
-							result: event.result?.content ?? "",
-							...(event.result?.imageDataUrl ? { images: [event.result.imageDataUrl] } : {}),
-						});
-						if (diffOpenRef.current) {
-							queueDiffRefresh();
-						}
-						if (!event.result?.isError && event.name === "plan_done") {
-							const transition = {
-								kind: "done",
-								sessionId: streamSessionId,
-							};
-							pendingPlanSignalRef.current = transition;
-							setSession((prev) => (prev ? { ...prev, planTransition: transition } : prev));
-						}
-						if (!event.result?.isError && event.name === "question") {
-							try {
-								const question = JSON.parse(event.result.content);
-								if (question.question) {
-									setSession((prev) => (prev ? { ...prev, question } : prev));
-								}
-							} catch {
-								// A malformed tool result stays visible in the transcript; it cannot open a picker.
-							}
-						}
-						break;
-					case "assistant_message": {
-						// Keep reasoning, prose, and tool calls as separate ordered blocks
-						// (mirrors the TUI's [reasoning]/[agent] rows) instead of flattening
-						// them into one string — otherwise a turn's thinking text silently
-						// merges into the visible reply with no label or distinction.
-						const prevStreaming = takeStreamingNow();
-						setSession((prev) => {
-							if (!prev) return prev;
-							if (prevStreaming.length > 0) {
-								return { ...prev, messages: [...prev.messages, { role: "assistant", blocks: prevStreaming }] };
-							}
-							const blocks = blocksFromAssistantCompletion(event);
-							if (blocks.length === 0) return prev;
-							return { ...prev, messages: [...prev.messages, { role: "assistant", blocks }] };
-						});
-						break;
-					}
-					case "end":
-						resetStreamingNow();
-						setRunning(false);
-						setSession((prev) => (prev ? { ...prev, status: "idle" } : prev));
-						setPendingSteers([]);
-						setPendingQueue([]);
-						if (pendingPlanSignalRef.current?.sessionId === streamSessionId) {
-							setPlanTransition(pendingPlanSignalRef.current);
-							pendingPlanSignalRef.current = null;
-						}
-						break;
-					case "turn_meta":
-						// Fires once, right after the "assistant_message" event that
-						// pushed this turn's concluding reply — attach to that (now
-						// last) message so it's per-reply, persisted, and correct on
-						// reload, instead of a page-level "last turn" singleton.
-						setSession((prev) => {
-							if (!prev || prev.messages.length === 0) return prev;
-							const messages = prev.messages.slice();
-							const i = messages.length - 1;
-							messages[i] = {
-								...messages[i],
-								turnMeta: { provider: event.provider, model: event.model, totalMs: event.totalMs },
-							};
-							return { ...prev, messages };
-						});
-						break;
-					case "session_end":
-						setSession((prev) => {
-							if (!prev) return prev;
-							// If the client already has all messages from SSE streaming
-							// (normal uninterrupted run), just apply usage — skip the
-							// full refetch. Only refetch when message counts diverge
-							// (mid-run reconnect where SSE events were missed).
-							if (event.messageCount === prev.messages.length) {
-								return { ...prev, usage: event.usage };
-							}
-							// Reconnect recovery: pull the latest page from the server (only
-							// that page now, not full history — GET /api/sessions/:id is
-							// paginated). Only ever grow the visible thread, never shrink
-							// it: if the user has scrolled up and loaded older history via
-							// loadOlderMessages, that's more than a single fresh page can
-							// possibly contain, and must survive this reconnect merge.
-							api("GET", `/api/sessions/${streamSessionId}`)
-								.then((d) => {
-									if (!d || !isCurrent()) return;
-									setSession((inner) => {
-										if (!inner || inner.id !== streamSessionId) return inner;
-										return {
-											...inner,
-											messages: mergeHistoryPage(inner.messages, d.messages || []),
-											usage: d.usage,
-											updatedAt: d.updatedAt,
-										};
-									});
-								})
-								.catch(() => {});
-							return { ...prev, usage: event.usage };
-						});
-						break;
-					case "plan_decision":
-						setSession((prev) =>
-							prev
-								? { ...prev, messages: [...prev.messages, { role: "warning", content: event.content }] }
-								: prev,
-						);
-						break;
-					case "error":
-						resetStreamingNow();
-						setRunning(false);
-						setSession((prev) =>
-							prev
-								? {
-										...prev,
-										status: "error",
-										messages: [
-											...prev.messages,
-											{ role: "error", content: event.message ?? "Unknown error" },
-										],
-									}
-								: prev,
-						);
-						break;
-					case "session_update":
-						setSessions((prev) => prev.map((s) => (s.id === event.session.id ? { ...s, ...event.session } : s)));
-						break;
-					case "compaction":
-						setSession((prev) =>
-							prev
-								? {
-										...prev,
-										messages: [
-											...prev.messages,
-											{ role: "system", content: `Context compacted (${event.messagesCompacted} messages)` },
-										],
-									}
-								: prev,
-						);
-						break;
-					case "doom_loop":
-						setSession((prev) =>
-							prev
-								? {
-										...prev,
-										messages: [
-											...prev.messages,
-											{
-												role: "warning",
-												content: `Doom loop: ${event.tool} called ${event.attempts} times`,
-											},
-										],
-									}
-								: prev,
-						);
-						break;
-					case "steering_injected":
-					case "followup_injected": {
-						// Promote streaming to history first, then show injected messages.
-						{
-							const prevStreaming = takeStreamingNow();
-							setSession((prev) => {
-								if (!prev) return prev;
-								const msgs =
-									prevStreaming.length > 0
-										? [...prev.messages, { role: "assistant", blocks: prevStreaming }]
-										: prev.messages;
-								const injected = event.messages.map((m) => ({
-									role: "user",
-									content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
-								}));
-								return { ...prev, messages: [...msgs, ...injected] };
-							});
-						}
-						if (event.type === "steering_injected") {
-							setPendingSteers((p) => p.slice(event.messages.length));
-						} else {
-							setPendingQueue((p) => p.slice(event.messages.length));
-						}
-						break;
-					}
-					case "interrupt_reminder":
-						setSession((prev) =>
-							prev
-								? {
-										...prev,
-										messages: [
-											...prev.messages,
-											{ role: "warning", content: "Context restored after interrupt" },
-										],
-									}
-								: prev,
-						);
-						break;
-					case "date_rollover":
-						setSession((prev) =>
-							prev
-								? {
-										...prev,
-										messages: [
-											...prev.messages,
-											{ role: "warning", content: `Date rolled over to ${event.date}` },
-										],
-									}
-								: prev,
-						);
-						break;
-					case "open_work_gate":
-						addNotice(`Plan steps still open — continuing (attempt ${event.fires})`);
-						break;
-					case "open_work_gate_exhausted":
-						addNotice("Plan steps still open — max retries reached, ending turn");
-						break;
-					case "session_closed":
-						// Reached if this session was closed by another client/tab —
-						// a self-initiated close clears the flag instead of toasting.
-						if (selfClosingRef.current === activeId) {
-							selfClosingRef.current = null;
-						} else {
-							showToast("This session was closed", "error");
-						}
-						break;
-				}
+				handleSseEvent(JSON.parse(e.data), {
+					streamSessionId,
+					setSession,
+					setSessions,
+					setRunning,
+					setPendingSteers,
+					setPendingQueue,
+					setPlanTransition,
+					pendingPlanSignalRef,
+					selfClosingRef,
+					activeId,
+					wasRunningRef,
+					updateStreaming,
+					resetStreamingNow,
+					takeStreamingNow,
+					diffOpenRef,
+					queueDiffRefresh,
+					addNotice,
+					showToast,
+					api,
+					isCurrent,
+					mergeHistoryPage,
+				});
 			} catch {}
 		};
 
