@@ -3053,10 +3053,9 @@ function SettingsStatus({ data }) {
 
 /**
  * Cascading provider → model picker.  When the user picks a provider its
- * /v1/models list is fetched and shown in the model dropdown.  The "Set"
- * button fires two commands: one to set the provider, one to set the model.
- * "Reset" clears both overrides so the slot falls back to the active provider
- * and main model.
+ * /v1/models list is fetched and shown in the model dropdown. The "Set"
+ * button applies the provider and model. "Reset" is one atomic command that
+ * returns a secondary slot to the main model and provider.
  */
 /**
  * Cascading provider → model picker.
@@ -3151,12 +3150,11 @@ function SlotModelPicker({
 	}, [providerValue, modelValue, models, act, providerCommand, modelCommand]);
 
 	const doReset = useCallback(async () => {
-		if (providerCommand !== "/provider") await act(`${providerCommand} off`);
-		await act(`${modelCommand} off`);
+		await act(`${modelCommand} reset`);
 		setProviderValue("");
 		setModelValue("");
 		setModels([]);
-	}, [act, providerCommand, modelCommand]);
+	}, [act, modelCommand]);
 
 	const hasOverride = currentProvider || currentModel;
 
@@ -3185,8 +3183,7 @@ function SlotModelPicker({
 				}
 				onClick=${doSet}
 			><${icons.check} /></button>
-			${!isMainSlot ? html`<button class="modal-btn icon-btn" title="Clear model override" disabled=${busy} onClick=${() => act(`${modelCommand} off`)}><${icons.xCircle} /></button>` : null}
-			${!isMainSlot && hasOverride ? html`<button class="modal-btn icon-btn" title="Reset all overrides" disabled=${busy} onClick=${doReset}><${icons.arrowUturnLeft} /></button>` : null}
+			${!isMainSlot && hasOverride ? html`<button class="modal-btn icon-btn" title="Use the main model and provider" disabled=${busy} onClick=${doReset}><${icons.arrowUturnLeft} /></button>` : null}
 		</div>
 	`;
 }
@@ -3218,7 +3215,7 @@ function SettingsModel({ data, busy, act }) {
 				`
 			}
 			<div class="settings-section-title">Subagent model${c.subagentModelProvider ? ` — @ ${c.subagentModelProvider}` : ""}</div>
-			<p class="settings-hint">Model used for task subagents — inherits the main model unless overridden here. Click "Reset all overrides" (↩) to revert.</p>
+			<p class="settings-hint">Model used for task subagents — inherits the main model unless overridden here. Use ↩ to return to inheritance.</p>
 			<${SlotModelPicker} busy=${busy} act=${act} providers=${providers} activeProviderName=${activeProviderName} currentProvider=${c.subagentModelProvider} currentModel=${c.subagentModel} fallbackModel=${c.model} providerCommand="/subagent-model-provider" modelCommand="/subagent-model" initialModels=${data.models} />
 			<div class="settings-section-title">Plan-mode model${c.planModelProvider ? ` — @ ${c.planModelProvider}` : ""}</div>
 			<p class="settings-hint">Model used when the agent enters plan mode — inherits the main model unless overridden here.</p>

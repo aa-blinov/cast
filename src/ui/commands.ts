@@ -1491,7 +1491,11 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		const newModel = input.slice("/plan-model ".length).trim();
 		if (newModel === "off" || newModel === "reset") {
 			deps.setPlanModel(undefined);
-			updateSettings({ planModel: undefined });
+			if (newModel === "reset") deps.setPlanModelProvider(undefined);
+			updateSettings({
+				planModel: undefined,
+				...(newModel === "reset" ? { planModelProvider: undefined } : {}),
+			});
 			showNotice("[Plan-mode model: off — plan mode uses the main model]");
 			return;
 		}
@@ -1569,6 +1573,16 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 
 	if (input.startsWith("/subagent-model ")) {
 		const newModel = input.slice(16).trim();
+		if (newModel === "off" || newModel === "reset") {
+			deps.setSubagentModel(undefined);
+			if (newModel === "reset") deps.setSubagentModelProvider(undefined);
+			updateSettings({
+				subagentModel: undefined,
+				...(newModel === "reset" ? { subagentModelProvider: undefined } : {}),
+			});
+			showNotice("[Subagent model: off — subagents use the main model]");
+			return;
+		}
 		const providers = loadSettings().providers ?? [];
 		const providerCreds = resolveProvider(providers, deps.subagentModelProvider, {
 			baseURL: config.baseURL,
