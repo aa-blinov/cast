@@ -173,9 +173,9 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	white-space: pre-wrap;
 	word-break: break-word;
 }
-.diff-line-add { background: rgba(34,197,94,.08); }
+.diff-line-add { background: var(--success-subtle); }
 .diff-line-add .diff-line-content { color: var(--text); }
-.diff-line-del { background: rgba(239,68,68,.08); }
+.diff-line-del { background: var(--danger-subtle); }
 .diff-line-del .diff-line-content { color: var(--text-dim); }
 .diff-empty {
 	display: flex; align-items: center; justify-content: center;
@@ -321,7 +321,7 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	cursor: pointer;
 	text-decoration: none;
 }
-.fs-action:hover { color: var(--cyan); background: rgba(0,200,255,.08); }
+.fs-action:hover { color: var(--cyan); background: var(--accent-subtle); }
 .fs-action:disabled { opacity: .4; cursor: default; }
 .fs-loading {
 	padding: 6px 8px;

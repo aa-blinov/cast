@@ -203,6 +203,7 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 			if (ext === ".html") {
 				content = content
 					.toString("utf-8")
+					.replace('href="/tokens.css"', `href="/tokens.css?v=${assetVersion("/tokens.css")}"`)
 					.replace('href="/style.css"', `href="/style.css?v=${assetVersion("/style.css")}"`)
 					.replace('href="/chat.css"', `href="/chat.css?v=${assetVersion("/chat.css")}"`)
 					.replace('href="/tools.css"', `href="/tools.css?v=${assetVersion("/tools.css")}"`)
@@ -1271,6 +1272,7 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 		// widen what an unauthenticated visitor can actually do.
 		const PUBLIC_STATIC_ASSETS = new Set([
 			"/app.js",
+			"/tokens.css",
 			"/style.css",
 			"/chat.css",
 			"/tools.css",

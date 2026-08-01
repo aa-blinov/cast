@@ -1,0 +1,47 @@
+/* Shared visual vocabulary. Theme selection overrides only the primitive
+ * values on :root; derived values stay consistent with the selected theme. */
+@layer tokens {
+	:root {
+		--bg: #08080a;
+		--bg-surface: #131317;
+		--bg-raised: #1e1e24;
+		--bg-hover: #28282e;
+		--bg-inset: var(--bg);
+		--border: #35353d;
+		--border-active: #4a4a55;
+		--border-subtle: color-mix(in srgb, var(--border) 55%, transparent);
+		--text: #fafafa;
+		--text-dim: #a1a1aa;
+		--text-muted: #71717a;
+		--cyan: #8b5cf6;
+		--accent-fg: #ffffff;
+		--violet: #8b5cf6;
+		--teal: #2dd4bf;
+		--purple: #a78bfa;
+		--blue: #60a5fa;
+		--green: #22c55e;
+		--amber: #eab308;
+		--rose: #ef4444;
+		--persona: #c084fc;
+		--gradient-from: var(--cyan);
+		--gradient-to: var(--violet);
+		--gradient: linear-gradient(135deg, var(--gradient-from), var(--gradient-to));
+
+		--accent-subtle: color-mix(in srgb, var(--cyan) 8%, transparent);
+		--accent-muted: color-mix(in srgb, var(--cyan) 10%, transparent);
+		--danger-subtle: color-mix(in srgb, var(--rose) 8%, transparent);
+		--danger-muted: color-mix(in srgb, var(--rose) 15%, transparent);
+		--danger-border: color-mix(in srgb, var(--rose) 30%, transparent);
+		--success-subtle: color-mix(in srgb, var(--green) 8%, transparent);
+		--status-error-fg: color-mix(in srgb, var(--rose) 64%, var(--text));
+		--status-success-fg: color-mix(in srgb, var(--green) 64%, var(--text));
+		--font: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+		--font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+		--font-scale: 1;
+		--radius: 8px;
+		--radius-sm: 6px;
+		--transition-fast: .15s ease;
+		--sidebar-w: 272px;
+		--header-h: 48px;
+	}
+}
