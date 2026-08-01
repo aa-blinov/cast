@@ -101,6 +101,7 @@ const webJavaScript = [
 	"status-popover.js",
 	"streaming-blocks.js",
 	"tool-card.js",
+	"turn-meta.js",
 	"tool-card.js",
 	"sidebar-session-item.js",
 	"share-modal.js",
