@@ -10,6 +10,7 @@ import { api } from "./api.js";
 import { CastLogo } from "./cast-logo.js";
 import { ElapsedTimer } from "./elapsed-timer.js";
 import { FilePreviewModal } from "./file-preview.js";
+import { hotkeysHtml, modKey } from "./hotkeys.js";
 import { icons } from "./icons.js";
 import { useModalFocusTrap } from "./modal-focus.js";
 import { PlanDecisionCard, QuestionCard } from "./plan-cards.js";
@@ -26,33 +27,6 @@ import { SidebarSessionItem } from "./sidebar-session-item.js";
 import { blocksFromAssistantCompletion, reduceStreamEvent } from "./stream-blocks.js";
 
 const html = htm.bind(h);
-
-const isMac =
-	typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "");
-const modKeys = isMac ? ["⌘"] : ["Ctrl"];
-const modShiftKeys = isMac ? ["⌘", "⇧"] : ["Ctrl", "Shift"];
-const modKey = modKeys.join("");
-// kc() renders each key of a shortcut as its own key-cap chip instead of
-// one flat text/ASCII string, so multi-key combos read like a keyboard.
-const kc = (...keys) => keys.map((k) => `<kbd class="hotkey-key">${k}</kbd>`).join("");
-
-const hotkeysHtml = `
-	<div class="hotkey-group">
-		<div class="hotkey-group-title">General</div>
-		<div class="hotkey-row"><span class="hotkey-label">Toggle sidebar</span><span class="hotkey-keys">${kc(...modKeys, "B")}</span></div>
-		<div class="hotkey-row"><span class="hotkey-label">Toggle diff</span><span class="hotkey-keys">${kc(...modShiftKeys, "D")}</span></div>
-		<div class="hotkey-row"><span class="hotkey-label">New session</span><span class="hotkey-keys">${kc(...modShiftKeys, "N")}</span></div>
-		<div class="hotkey-row"><span class="hotkey-label">Clear context</span><span class="hotkey-keys">${kc(...modShiftKeys, "L")}</span></div>
-		<div class="hotkey-row"><span class="hotkey-label">Show shortcuts</span><span class="hotkey-keys">${kc(...modKeys, "/")}</span></div>
-	</div>
-	<div class="hotkey-group">
-		<div class="hotkey-group-title">Composer</div>
-		<div class="hotkey-row"><span class="hotkey-label">Send message</span><span class="hotkey-keys">${kc("↵")}</span></div>
-		<div class="hotkey-row"><span class="hotkey-label">New line</span><span class="hotkey-keys">${kc("⇧", "↵")}</span></div>
-		<div class="hotkey-row"><span class="hotkey-label">Abort run</span><span class="hotkey-keys">${kc("Esc")}</span></div>
-		<div class="hotkey-row"><span class="hotkey-label">Navigate suggestions</span><span class="hotkey-keys">${kc("↑", "↓")}</span></div>
-	</div>
-`;
 
 // ── Theme ────────────────────────────────────────────────────────────
 // Only accent colors are themed (16 palettes, shared with the TUI via
