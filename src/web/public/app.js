@@ -24,6 +24,7 @@ import { useModalFocusTrap } from "./modal-focus.js";
 import { PlanDecisionCard, QuestionCard } from "./plan-cards.js";
 import { collapseMidWordBoundaries, mergeMidWordBoundary } from "./reasoning-split.js";
 import { ShareModal } from "./share-modal.js";
+import { SettingsAppearance } from "./settings-appearance.js";
 import { SettingsModel } from "./settings-model.js";
 import { SlotModelPicker } from "./slot-model-picker.js";
 import { StatusPopover } from "./status-popover.js";
@@ -2173,7 +2174,7 @@ function SettingsModal({
 							!hasData
 								? html`<div class="settings-loading">Loading…</div>`
 								: tab === "appearance"
-									? html`<${SettingsAppearance} themes=${themes} currentThemeId=${currentThemeId} onPickTheme=${async (
+									? html`<${SettingsAppearance} themes=${themes} currentThemeId=${currentThemeId} fontOptions=${FONT_OPTIONS} fontScales=${FONT_SCALE_OPTIONS} onPickTheme=${async (
 											id,
 										) => {
 											const res = await act(`/theme ${id}`);
@@ -2208,82 +2209,6 @@ function SettingsModal({
 						}
 					</div>
 				</div>
-			</div>
-		</div>
-	`;
-}
-
-function SettingsTheme({ themes, currentThemeId, onPick }) {
-	return html`
-		<div class="settings-theme-grid">
-			${[...(themes || [])]
-				.sort((a, b) => a.label.localeCompare(b.label))
-				.map(
-					(t) => html`
-				<button key=${t.id} class="settings-theme-swatch${t.id === currentThemeId ? " active" : ""}" style=${{ "--swatch-accent": t.colors?.accent }} onClick=${() => onPick(t.id)} title=${t.description}>
-					<span class="settings-theme-dot" />
-					${t.label}
-				</button>
-			`,
-				)}
-		</div>
-	`;
-}
-
-function SettingsAppearance({
-	themes,
-	currentThemeId,
-	onPickTheme,
-	currentFontId,
-	currentFontScale,
-	onPickFont,
-	onPickScale,
-}) {
-	return html`
-		<div class="settings-rows">
-			<div class="settings-section-title">Theme</div>
-			<${SettingsTheme} themes=${themes} currentThemeId=${currentThemeId} onPick=${onPickTheme} />
-			<div class="settings-section-title">Font</div>
-			<${SettingsFont} currentFontId=${currentFontId} currentFontScale=${currentFontScale} onPickFont=${onPickFont} onPickScale=${onPickScale} />
-		</div>
-	`;
-}
-
-// Client-only (localStorage) — unlike SettingsTheme, picking here never
-// round-trips through `act`/`/command`, so it applies the instant it's
-// clicked/dragged. The local regular faces are already ready for every tile.
-function SettingsFont({ currentFontId, currentFontScale, onPickFont, onPickScale }) {
-	return html`
-		<div class="settings-font-settings">
-			<div class="settings-row-label">Scale</div>
-			<div class="settings-scale-row">
-				${FONT_SCALE_OPTIONS.map(
-					(s) => html`
-					<button key=${s} class="settings-scale-btn${s === currentFontScale ? " active" : ""}" onClick=${() => onPickScale(s)}>
-						${Math.round(s * 100)}%
-					</button>
-				`,
-				)}
-			</div>
-			<div class="settings-row-label">Monospace</div>
-			<div class="settings-font-grid">
-			${FONT_OPTIONS.filter((f) => f.mono).map(
-				(f) => html`
-				<button key=${f.id} class="settings-font-swatch${f.id === currentFontId ? " active" : ""}" style=${{ fontFamily: f.family }} onClick=${() => onPickFont(f.id)}>
-					${f.label}
-				</button>
-			`,
-			)}
-			</div>
-			<div class="settings-row-label">Sans-serif</div>
-			<div class="settings-font-grid">
-			${FONT_OPTIONS.filter((f) => !f.mono).map(
-				(f) => html`
-				<button key=${f.id} class="settings-font-swatch${f.id === currentFontId ? " active" : ""}" style=${{ fontFamily: f.family }} onClick=${() => onPickFont(f.id)}>
-					${f.label}
-				</button>
-			`,
-			)}
 			</div>
 		</div>
 	`;
