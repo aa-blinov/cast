@@ -293,8 +293,8 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 				content = content
 					.toString("utf-8")
 					.replace(
-						'from "./stream-blocks.js"',
-						`from "./stream-blocks.js?v=${assetVersion("/stream-blocks.js")}"`,
+						/from\s+"\.\/stream-blocks\.js"/,
+						`from"./stream-blocks.js?v=${assetVersion("/stream-blocks.js")}"`,
 					);
 			}
 			const accepts = req.headers["accept-encoding"] ?? "";
