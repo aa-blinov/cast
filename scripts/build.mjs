@@ -85,6 +85,7 @@ const webJavaScript = [
 	"file-preview.js",
 	"icons.js",
 	"modal-focus.js",
+	"plan-cards.js",
 	"reasoning-split.js",
 	"sidebar-utils.js",
 	"sidebar-session-item.js",
