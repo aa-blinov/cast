@@ -440,47 +440,6 @@ function renderMarkdown(text) {
 	return out;
 }
 
-// Recursively renders a parsed arg value as indented "key: value" lines.
-// Plain JSON.stringify on nested objects (the previous approach) escapes any
-// newline inside a nested string as a literal two-character "\n" — exactly
-// the shape of the `edit` tool's args (ops: [{ content: "<multi-line code>" }]),
-// so that turned into an unreadable wall of "\n"/"\t" text. Recursing instead
-// of stringifying keeps every string's real line breaks intact at any depth.
-function formatValue(v, indent) {
-	if (typeof v === "string") return v;
-	if (Array.isArray(v)) {
-		return v.map((item, i) => `${indent}[${i}]\n${formatValue(item, `${indent}  `)}`).join("\n");
-	}
-	if (v && typeof v === "object") {
-		return Object.entries(v)
-			.map(([k, val]) => {
-				const formatted = formatValue(val, `${indent}  `);
-				return formatted.includes("\n") ? `${indent}${k}:\n${formatted}` : `${indent}${k}: ${formatted}`;
-			})
-			.join("\n");
-	}
-	return `${indent}${JSON.stringify(v)}`;
-}
-
-// Full parameter dump, not a truncated hint — the point is to see exactly
-// what the agent is about to run, not just enough to guess.
-function _formatArgsFull(args) {
-	if (!args) return "";
-	try {
-		const obj = JSON.parse(args);
-		const entries = Object.entries(obj);
-		if (entries.length === 0) return "";
-		return entries
-			.map(([k, v]) => {
-				const formatted = typeof v === "string" ? v : formatValue(v, "  ");
-				return formatted.includes("\n") ? `${k}:\n${formatted}` : `${k}: ${formatted}`;
-			})
-			.join("\n");
-	} catch {
-		return args;
-	}
-}
-
 const _WEB_TOOLS_OPTIONS = [
 	{ value: "on", label: "Enable" },
 	{ value: "off", label: "Disable" },
@@ -501,45 +460,6 @@ function setUrlSessionId(id, { push } = {}) {
 }
 
 // ── Components ───────────────────────────────────────────────────────
-
-// MCP tools are exposed to the model as "mcp_<server>_<tool>" (see
-// core/mcp.ts's mcpToolName) — sanitized-and-joined with no reversible
-// separator, so the server name can't be split back out exactly. Stripping
-// the "mcp_" prefix and loosening the rest into "word · word" reads far
-// better than the raw underscored blob without needing that split to be
-// exact — this is a label only, the real name stays in `call.name`/data-tool.
-function _isMcpTool(name) {
-	return name.startsWith("mcp_");
-}
-function _mcpToolLabel(name) {
-	return name.slice(4).replace(/_/g, " · ");
-}
-
-// Tool providers often return JSON text rather than a structured object. A
-// parsed value restores Unicode escapes before it reaches Preact's text node;
-// otherwise a Playwright result such as `{"text":"\\u041f"}` shows its
-// transport encoding to the user instead of the actual character.
-function _formatToolResult(name, result) {
-	if (name === "todo_write") {
-		try {
-			return formatValue(JSON.parse(result), "");
-		} catch {
-			return result;
-		}
-	}
-	if (!/\\u[\dA-Fa-f]{4}/.test(result)) return result;
-	let value = result;
-	for (let depth = 0; depth < 2; depth++) {
-		try {
-			const parsed = JSON.parse(value);
-			if (typeof parsed !== "string") return formatValue(parsed, "");
-			value = parsed;
-		} catch {
-			return value;
-		}
-	}
-	return value;
-}
 
 // for why they live in a global, session-scoped directory instead of inside
 // the project's own cwd. No tree/search/rename like FileExplorer below:
