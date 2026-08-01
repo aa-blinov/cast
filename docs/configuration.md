@@ -9,13 +9,16 @@ User settings are persisted to `~/.cast/settings.json`. This file is loaded on s
 | Field | Type | Description |
 |-------|------|-------------|
 | `model` | string | Last used model |
+| `modelProvider` | string | Saved-provider name for `model` (falls back to the active provider) |
 | `subagentModel` | string | Model for sub-agents (falls back to `model`) |
+| `subagentModelProvider` | string | Saved-provider name for `subagentModel` |
 | `planModel` | string | Model used while plan mode is active (falls back to `model`) |
+| `planModelProvider` | string | Saved-provider name for `planModel` |
 | `reasoningLevel` | string | Last used reasoning level |
 | `persona` | string | Last used persona name |
 | `providerUrl` | string | Active provider endpoint URL |
 | `apiKey` | string | Active provider API key |
-| `providers` | Provider[] | Saved providers (name, url, apiKey) — use `/provider` to manage |
+| `providers` | Provider[] | Saved providers (`name`, `url`, `apiKey`, optional `reasoningFormat`) — use `/provider` to manage |
 | `cwd` | string | Last working directory |
 | `permissionMode` | `"default"` \| `"bypass"` | Bash confirmation mode |
 | `projectTrust` | Record<string, boolean> | Per-project trust decisions |
@@ -24,10 +27,14 @@ User settings are persisted to `~/.cast/settings.json`. This file is loaded on s
 | `searchProvider` | `"ddg"` \| `"tavily"` \| `"brave"` | `web_search` backend (default: `"ddg"`) — use `/web-search-provider` to change |
 | `tavilyApiKey` | string | API key for the Tavily backend, from https://app.tavily.com |
 | `braveApiKey` | string | API key for the Brave Search backend, from https://api-dashboard.search.brave.com |
+| `webFetchProvider` | `"jina"` \| `"local"` | `web_fetch` backend (default: `"jina"`) — use `/web-fetch-provider` to change |
 | `disabledMcpServers` | string[] | MCP server names disabled via `/mcp` toggle |
 | `disabledSkills` | string[] | Skill names disabled via `/skills` toggle |
+| `disabledHooks` | string[] | Content-derived hook group ids disabled via `/hooks` |
 | `enabledPlugins` | Record<string, boolean> | Marketplace plugins keyed by `name@marketplace` |
 | `statusBar` | object | Status bar segment config (`visible`, `order`, `sides`) — use `/statusbar` to configure |
+| `webPassword` | string | Password generated for `cast web` on first start |
+| `quickSessionPersona` | string | Persona selected by the web UI's Quick session action |
 | `updatedAt` | string | Auto-updated timestamp |
 
 Settings are written atomically (temp file + rename) to prevent corruption from crashes mid-write.
@@ -49,29 +56,32 @@ Provider URL and API key are configured **only** via `~/.cast/settings.json` (fi
   settings.json         # User settings
   AGENTS.md             # Global context file (optional)
   mcp.json              # Global MCP server config
-  sessions/             # Saved sessions (per-project subdirs)
-  plans/                # Plan files (per-session subdirs)
+  sessions/sessions.db  # SQLite session database (legacy JSON files are imported once)
   skills/               # Global skills
   plugins/              # Marketplace catalogs + installed plugins (see plugins.md)
   rules/                # Global rules
   personas/             # Global personas
 
-~/.config/agents/skills/   # skills.sh universal global (also ~/.agents/skills/)
+~/.agents/skills/          # skills.sh universal global
+~/.config/agents/skills/   # Compatible universal-global location
 
 <project>/.cast/
+  plans/<session-id>/   # Session plan files
   skills/               # Project-local skills
   rules/                # Project-local rules
   personas/             # Project-local personas
   mcp.json              # Project-local MCP config
+  hooks.json            # Project-local hooks
+  ssh.json              # Project-local SSH hosts
 
 <project>/.agents/skills/  # skills.sh universal project (npx skills add -a universal)
 ```
 
 ## Project Trust
 
-A single trust decision gates all project-local resources: skills (`.cast/skills/` and `.agents/skills/`), MCP servers, context files, and personas in `.cast/`. cast asks once per project; the decision is saved in `settings.json` under `projectTrust`.
+A single trust decision gates all project-local resources: skills (`.cast/skills/` and `.agents/skills/`), MCP servers, context files, personas, rules, hooks, and `.cast/ssh.json`. cast asks once per project; the decision is saved in `settings.json` under `projectTrust`.
 
-Global resources (`~/.cast/`, `~/.config/agents/skills/`) always load without a trust check — you put them there yourself.
+Global resources (`~/.cast/`, `~/.agents/skills/`, `~/.config/agents/skills/`) always load without a trust check — you put them there yourself.
 
 ## Permission Modes
 

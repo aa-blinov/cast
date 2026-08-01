@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Sign in · Cast</title>
+<script>
+try {
+	const colors = JSON.parse(localStorage.getItem("cast:themeColors"));
+	if (colors) {
+		const root = document.documentElement.style;
+		root.setProperty("--cyan", colors.accent);
+		root.setProperty("--violet", colors.gradient.to);
+		root.setProperty("--gradient", `linear-gradient(135deg, ${colors.gradient.from}, ${colors.gradient.to})`);
+		root.setProperty("--gradient-from", colors.gradient.from);
+		root.setProperty("--gradient-to", colors.gradient.to);
+		root.setProperty("--text-muted", colors.muted);
+		if (colors.bg) root.setProperty("--bg", colors.bg);
+		if (colors.bgSurface) root.setProperty("--bg-surface", colors.bgSurface);
+		if (colors.bgRaised) root.setProperty("--bg-raised", colors.bgRaised);
+		if (colors.border) root.setProperty("--border", colors.border);
+	}
+} catch {}
+try {
+	const fontId = localStorage.getItem("cast:fontId");
+	const families = {
+		"fira-code": ["'Fira Code', 'JetBrains Mono', monospace", true],
+		"ibm-plex-mono": ["'IBM Plex Mono', monospace", true],
+		"ibm-plex-sans": ["'IBM Plex Sans', sans-serif", false],
+		"inter": ["'Inter', sans-serif", false],
+		"work-sans": ["'Work Sans', sans-serif", false],
+	};
+	const picked = families[fontId];
+	if (picked) {
+		document.documentElement.style.setProperty("--font", picked[0]);
+		if (picked[1]) document.documentElement.style.setProperty("--font-mono", picked[0]);
+	}
+	const fontScale = localStorage.getItem("cast:fontScale");
+	if (fontScale) document.documentElement.style.setProperty("--font-scale", fontScale);
+} catch {}
+</script>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/tokens.css">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/login.css">
+</head>
+<body class="login-page">
+<main class="login-shell">
+	<section class="login-card" aria-label="Sign in to Cast">
+		<div id="login-logo" class="login-logo" role="img" aria-label="cast"></div>
+		<form id="login-form" class="login-form">
+			<label>
+				<span>Username</span>
+				<input id="username" name="username" autocomplete="username" value="cast" required>
+			</label>
+			<label>
+				<span>Password</span>
+				<input id="password" name="password" type="password" autocomplete="current-password" autofocus required>
+			</label>
+			<p id="login-error" class="login-error" role="alert" hidden></p>
+			<button id="login-submit" type="submit">Sign in</button>
+		</form>
+	</section>
+</main>
+<script src="/login.js"></script>
+</body>
+</html>

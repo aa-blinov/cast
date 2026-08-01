@@ -1,7 +1,8 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { resolveProjectTrustForCwd } from "../src/core/project.ts";
 import { getProjectTrust, loadSettings, type Settings } from "../src/core/settings.ts";
 import { resolveProjectTrust } from "../src/pickers/domain.ts";
 import type { Pickers } from "../src/pickers/types.ts";
@@ -61,5 +62,27 @@ describe("resolveProjectTrust", () => {
 		const trusted = await resolveProjectTrust(pickers, {}, join(fakeHome, "project"), ["  - .cast/skills/"]);
 		expect(trusted).toBe(false);
 		expect(getProjectTrust(loadSettings(), join(fakeHome, "project"))).toBe(false);
+	});
+
+	it("prompts for a project whose only local resource is hooks.json", async () => {
+		const project = join(fakeHome, "project");
+		mkdirSync(join(project, ".cast"), { recursive: true });
+		writeFileSync(join(project, ".cast", "hooks.json"), JSON.stringify({ Stop: [{ hooks: [{ command: "true" }] }] }));
+		process.stdin.isTTY = true;
+
+		const trusted = await resolveProjectTrustForCwd(
+			{
+				noSkills: false,
+				noMcp: false,
+				cliSkillPaths: [],
+				cliMcpPaths: [],
+				settings: {},
+				pickers: fakePickers(true),
+			},
+			project,
+		);
+
+		expect(trusted).toBe(true);
+		expect(getProjectTrust(loadSettings(), project)).toBe(true);
 	});
 });

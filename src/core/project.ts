@@ -5,11 +5,13 @@ import { resolveProjectTrust } from "../pickers/domain.ts";
 import type { Pickers } from "../pickers/types.ts";
 import { hasContextFileInDir } from "./context-files.ts";
 import {
+	globalHooksPath,
 	type HookDiagnostic,
 	type HooksFile,
 	hooksFileDiagnostics,
 	listHooksForCwd,
 	loadHooksForCwd,
+	projectHooksPath,
 	type ResolvedHookEntry,
 } from "./hooks.ts";
 import { connectMcpServers, loadMcpConfig, type McpServerConfig, type McpSetupResult, saveMcpConfig } from "./mcp.ts";
@@ -144,6 +146,10 @@ export async function resolveProjectTrustForCwd(deps: ProjectResolverDeps, cwd: 
 	if (hasContextFileInDir(cwd)) lines.push("  - AGENTS.md / CLAUDE.md (project instructions for the system prompt)");
 	if (hasProjectRulesDir(cwd)) lines.push("  - .cast/rules/ (project rules — always-apply, lazy, or manual)");
 	if (hasProjectPersonas(cwd)) lines.push("  - .cast/personas/ (custom personas — system prompts for the agent)");
+	const hooksPath = projectHooksPath(cwd);
+	if (hooksPath !== globalHooksPath() && existsSync(hooksPath)) {
+		lines.push("  - .cast/hooks.json (lifecycle hooks — can run commands or call remote services)");
+	}
 	const sshPath = projectSshPath(cwd);
 	if (existsSync(sshPath)) {
 		const hosts = Object.keys(loadSshConfig(sshPath));

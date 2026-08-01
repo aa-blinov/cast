@@ -79,7 +79,7 @@ When you launch `cast` without a saved configuration, an interactive onboarding 
 
 3. **Model selection** — cast fetches the model list from your provider and lets you pick one. The selection is validated with a test prompt.
 
-4. **Reasoning level** — if the model supports reasoning (detected from OpenRouter metadata), choose a level: `off`, `low`, `medium`, `high`, or `max`. Binary-toggle models offer `on`/`off` instead.
+4. **Reasoning level** — cast combines provider model metadata with the provider's reasoning dialect. Choose the offered effort level, or `on`/`off` for binary providers. If an OpenAI-compatible endpoint needs a specific request shape, select it later with `/reasoning-format`.
 
 5. **Session** — a new session starts automatically. Every conversation auto-saves.
 

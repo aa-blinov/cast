@@ -706,12 +706,6 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			if (submitResult.reason) text = `${text}\n\n<hook-context>${submitResult.reason}</hook-context>`;
 		}
 
-		// Auto-title from the first-ever user message, same idea as a browser
-		// tab title — only if nothing (auto or a manual rename) has set one yet.
-		if (!ws.session.title && !ws.session.messages.some((m) => m.role === "user")) {
-			ws.session.title = deriveTitle(text);
-		}
-
 		if (ws.session.cwd && !existsSync(ws.session.cwd)) {
 			mkdirSync(ws.session.cwd, { recursive: true });
 		}
@@ -1186,13 +1180,6 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		return i === -1 ? [s, ""] : [s.slice(0, i), s.slice(i + 1).trim()];
 	}
 
-	/** Truncated to a single-line preview — same idea as a browser tab title,
-	 * not meant to hold the full first message. */
-	function deriveTitle(text: string): string {
-		const oneLine = text.replace(/\s+/g, " ").trim();
-		return oneLine.length > 60 ? `${oneLine.slice(0, 60)}…` : oneLine;
-	}
-
 	/** Same fallback chain the TUI's /reasoning uses: the meta captured at
 	 * startup only matches the model cast launched with — a session that's
 	 * since switched models (`/model`) falls back to whatever the provider's
@@ -1205,7 +1192,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 	function renameSession(sessionId: string, title: string): boolean {
 		const ws = sessions.get(sessionId);
 		if (!ws) return false;
-		ws.session.title = title.trim().slice(0, 200) || undefined;
+		ws.session.title = title.trim().slice(0, 200);
 		saveSession(ws.session);
 		return true;
 	}

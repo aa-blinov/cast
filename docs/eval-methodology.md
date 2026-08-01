@@ -103,9 +103,10 @@ stable result. A case where attempts split is flagged with `⚠` in the report a
 Concurrency spans the full case×repeat job list (not case-then-repeat sequentially), so N repeats
 of one case don't serialize behind each other while unrelated cases sit idle.
 
-A case's aggregate "pass" under `--repeat` is majority-vote (`passed * 2 > total`) — a case is
-credited if the model gets it right more often than not, while the `consistent` flag keeps the "how
-often" visible instead of collapsing it into a single bit.
+A repeated result always reports its exact `passed/N` count and whether attempts were consistent.
+Certification artifacts deliberately use the stricter all-or-nothing interpretation: a case earns
+scoreboard or baseline credit only when every attempt passes. A split is an instability signal, not
+a partial pass.
 
 Practical rule: before calling a change a regression (or a model gap a real finding), run
 `--repeat 3`. A split result is evidence of instability, not a partial pass — investigate the

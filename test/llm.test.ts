@@ -39,7 +39,7 @@ function fakeClient(chunks: unknown[], onChunk?: () => void): OpenAI {
 // matching how a real `{"error": {"message": ..., "code": ...}}` JSON
 // response actually shapes it.
 function rateLimitError(body: Record<string, unknown>) {
-	return new OpenAI.RateLimitError(429, body, undefined, {} as never);
+	return new OpenAI.RateLimitError(429, body, undefined, new Headers());
 }
 
 describe("parseHermesToolCalls / stripHermesToolCalls", () => {

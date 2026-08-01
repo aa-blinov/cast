@@ -133,6 +133,6 @@ The picker shows all servers from all config sources, regardless of connection s
 
 ## Limitations
 
-- **Transports**: stdio and streamable HTTP only. SSE transport is not supported.
+- **Transports**: stdio and Streamable HTTP are primary. Cast also retries a failed Streamable HTTP initialization once through legacy HTTP+SSE for older servers; new server deployments should use Streamable HTTP.
 - **Auth**: Static header/token authentication only. OAuth (browser redirect, token storage/refresh) is not supported.
 - **Tool output**: Text, images, resource links, and embedded resources are handled. Audio content is noted but omitted.

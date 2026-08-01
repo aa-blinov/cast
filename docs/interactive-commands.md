@@ -23,7 +23,11 @@ All commands are typed at the TUI prompt, prefixed with `/`. Unknown slash comma
 | `/model <name>` | Switch to a specific model (validated) |
 | `/subagent-model` | Open model picker for sub-agents |
 | `/subagent-model <name>` | Switch sub-agent model |
+| `/subagent-model-provider [name\|off]` | Show/change the saved provider used for the sub-agent model |
+| `/plan-model [name\|off]` | Show/change the model used in plan mode |
+| `/plan-model-provider [name\|off]` | Show/change the saved provider used for the plan model |
 | `/reasoning` | Change reasoning level (opens picker if model supports it) |
+| `/reasoning-format` | Select the reasoning request protocol for the active provider |
 | `/provider` | Open provider picker (switch, add, or delete providers) |
 | `/provider add` | Add a new provider (name → URL → key wizard) |
 | `/provider delete` | Delete a provider |
@@ -46,7 +50,8 @@ See [Personas](personas.md) for the full list.
 | `/skill:<name> [args]` | Force-load and run a skill by name |
 | `/plugin` | Toggle installed plugins. Palette also has install / list / enable / uninstall / marketplace / help |
 | `/mcp` | Toggle MCP servers on/off. Also: `list`, `enable`/`disable`, `uninstall`, `help` |
-| `/reload` | Re-scan skills, rules, MCP servers, and personas for cwd |
+| `/hooks` | List lifecycle hooks; also `enable`/`disable <id>` and `help` |
+| `/reload` | Re-scan skills, rules, MCP servers, personas, and context files for cwd |
 
 Bare `/skills` / `/mcp` / `/plugin` = multi-select toggle. `list` is read-only. `uninstall` always confirms (picker or typed). See [Skills](skills.md), [MCP](mcp-servers.md), [Plugins](plugins.md).
 
@@ -122,6 +127,7 @@ Use `/statusbar` to toggle individual segments on/off and reorder them — usefu
 | `/permissions bypass` | Switch to bypass mode (no confirmation) |
 | `/web` | Toggle web tools (web_search, web_fetch) on/off |
 | `/web-search-provider` | Switch the `web_search` backend between DuckDuckGo (free, rate-limited), Tavily (API key, 1000 free/month), and Brave Search (API key) |
+| `/web-fetch-provider` | Switch `web_fetch` between Jina Reader and direct local fetch |
 | `/statusbar` | Toggle and reorder status bar segments (multi-select picker) |
 | `/theme` | Open theme picker |
 | `/theme <id>` | Switch to a specific theme |

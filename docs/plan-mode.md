@@ -18,9 +18,7 @@ flowchart LR
   D --> E{Approval dialog}
   E -->|Implement now| F[Implement plan]
   E -->|Clear context + implement| F
-  E -->|"I'll start myself"| G["/build → your message"]
   E -->|Refine| B
-  G --> F
   F --> H["Update linked tasks"]
 ```
 
@@ -28,7 +26,7 @@ flowchart LR
 2. **Explore** — the agent reads files, runs read-only shell commands, and analyzes the codebase
 3. **Write plan** — the agent produces a structured markdown plan with a checklist
 4. **Review** — the agent signals completion with `plan_done`; the full plan file path is shown (cmd-click to open it in your editor)
-5. **Approve** — when the turn ends, an approval dialog opens: refine (first — it returns you to the regular composer, where multi-line and image paste work, and your next message goes back to planning as feedback), implement now, clear context and implement (the plan survives in the system prompt, the exploration chatter doesn't), or approve and start yourself. `/build` remains as the manual gesture
+5. **Approve** — when the turn ends, an approval dialog opens: refine (it returns you to the regular composer; your next message becomes planning feedback), implement now, or implement in a clean model context. The clean option retains the visible thread but starts implementation without the exploration context. `/build` remains the manual gesture for leaving plan mode.
 6. **Implement** — the agent works through the plan and updates its linked task list after each verified step
 
 ## What's Allowed in Plan Mode
@@ -75,7 +73,7 @@ plan file.
 Plans are stored as markdown files:
 
 ```
-~/.cast/plans/<session-id>/
+<project>/.cast/plans/<session-id>/
   auth-refactor.md
   database-migration.md
 ```

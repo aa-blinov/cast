@@ -96,11 +96,9 @@ async function api(method, path, body) {
 	}
 	const res = await fetch(`${window.location.origin}${path}`, opts);
 	if (res.status === 401) {
-		// The browser normally attaches cached HTTP Basic Auth credentials to
-		// every request automatically — a 401 here means they were rejected
-		// (e.g. the password changed on disk). Reload to re-trigger the
-		// browser's native credential prompt.
-		window.location.reload();
+		// The server owns the HttpOnly session. A missing/expired cookie is a
+		// navigation concern, not an API error the current view can recover from.
+		window.location.assign("/login");
 		return null;
 	}
 	const data = await res.json().catch(() => null);
@@ -2749,6 +2747,7 @@ function SettingsModal({
 	onClose,
 	confirm,
 	onReload,
+	onModelChange,
 }) {
 	const [tab, setTab] = useState(SETTINGS_TABS[0].id);
 	const [data, setData] = useState({});
@@ -2923,6 +2922,9 @@ function SettingsModal({
 				// Same for /plugin install/uninstall/enable/disable — they change
 				// which hooks appear in the Hooks tab.
 				if (res.ok) {
+					if (command.startsWith("/model ") && typeof res.result?.model === "string") {
+						onModelChange?.(res.result.model);
+					}
 					if (command === "/reload" || command.startsWith("/skills ")) onReload?.();
 					if (
 						command === "/reload" ||
@@ -2945,7 +2947,7 @@ function SettingsModal({
 				setBusy(false);
 			}
 		},
-		[run, load, tab, onReload],
+		[run, load, tab, onReload, onModelChange],
 	);
 
 	// theme's data comes from the `themes` prop (fetched once at app boot,
@@ -4138,9 +4140,11 @@ function Sidebar({
 	onRenameSession,
 	onPinSession,
 	onShareSession,
+	onLogout,
 	open,
 	confirm,
 	sessionsLoaded,
+	defaultModel,
 }) {
 	const [personaOpen, setPersonaOpen] = useState(false);
 	const [search, setSearch] = useState("");
@@ -4244,8 +4248,6 @@ function Sidebar({
 	const pinnedGroup = isSearching ? [] : filtered.filter((s) => s.pinned).sort(byRunningThenDate);
 	const otherGroup = isSearching ? filtered : filtered.filter((s) => !s.pinned).sort(byRunningThenDate);
 	const isSandbox = cwd === SANDBOX_CWD;
-
-	const active = sessions.find((s) => s.id === activeId);
 
 	const startEdit = useCallback((s) => {
 		setEditingId(s.id);
@@ -4445,15 +4447,12 @@ function Sidebar({
 					${sessionsLoaded && !searching && pinnedGroup.length === 0 && otherGroup.length === 0 && html`<div class="sidebar-empty">No sessions match "${search}"</div>`}
 				</div>
 			</div>
-			${
-				active &&
-				html`
-				<div class="sidebar-footer" title=${active.cwd}>
-					<span class="sidebar-footer-status ${active.status || "idle"}" />
-					<span class="sidebar-footer-model">${active.model}</span>
-				</div>
-			`
-			}
+			<div class="sidebar-footer" title=${defaultModel || "No model selected"}>
+				<span class="sidebar-footer-model">${defaultModel || "No model selected"}</span>
+				<button class="sidebar-logout" onClick=${onLogout} aria-label="Log out" title="Log out">
+					<${icons.arrowLeftOnRectangle} />
+				</button>
+			</div>
 		</nav>
 	`;
 }
@@ -4549,7 +4548,10 @@ function ShareModal({ session, onClose }) {
 			}
 			setCopied(true);
 			setTimeout(() => setCopied(false), 1500);
-		} catch {}
+		} catch {
+			// The reconnect loop owns retries; this only prevents a stale loading
+			// indicator after the first completed request.
+		}
 	};
 
 	const revoke = async () => {
@@ -4710,6 +4712,7 @@ function QuestionCard({ question, onChoose }) {
 function App() {
 	const [sessions, setSessions] = useState([]);
 	const [sessionsLoaded, setSessionsLoaded] = useState(false);
+	const [defaultModel, setDefaultModel] = useState("");
 	const [activeId, setActiveId] = useState(null);
 	const [session, setSession] = useState(null);
 	const activeSessionIdRef = useRef(null);
@@ -5136,6 +5139,7 @@ function App() {
 							.then((cfg) => {
 								if (!cfg) return;
 								setDefaultCwd(cfg.cwd ?? "");
+								setDefaultModel(cfg.model ?? "");
 								if (cfg.quickSessionPersona) setQuickSessionPersona(cfg.quickSessionPersona);
 								const current = t.find((x) => x.id === cfg.theme) ?? t.find((x) => x.id === "cast");
 								if (current) {
@@ -5152,6 +5156,7 @@ function App() {
 			const s = await api("GET", "/api/sessions");
 			if (!s) return false;
 			setSessions(s);
+			setSessionsLoaded(true);
 			if (urlId && s.find((x) => x.id === urlId)) {
 				// A session is restored only when the URL explicitly names it. The
 				// bare root is a deliberate fresh draft, never an implicit return to
@@ -5469,6 +5474,7 @@ function App() {
 						addNotice(`Persona: ${result.result.label ?? result.result.persona}`);
 					} else if (text.startsWith("/model") && result?.result?.model) {
 						setSession((prev) => (prev ? { ...prev, model: result.result.model } : prev));
+						setDefaultModel(result.result.model);
 						await loadSessions();
 						addNotice(`Model: ${result.result.model}`);
 					} else if (text.startsWith("/theme") && result?.result?.theme) {
@@ -6385,8 +6391,13 @@ function App() {
 				onRenameSession=${renameSession}
 				onPinSession=${pinSession}
 				onShareSession=${setShareModalSession}
+				onLogout=${async () => {
+					await fetch("/api/auth/logout", { method: "POST" });
+					window.location.assign("/login");
+				}}
 				open=${sidebarOpen}
 				sessionsLoaded=${sessionsLoaded}
+				defaultModel=${defaultModel}
 				confirm=${requestConfirm}
 			/>
 
@@ -6439,6 +6450,7 @@ function App() {
 					onClose=${() => setSettingsOpen(false)}
 					confirm=${requestConfirm}
 					onReload=${() => refreshCommands(activeId)}
+					onModelChange=${setDefaultModel}
 				/>
 			`
 			}

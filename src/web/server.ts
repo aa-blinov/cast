@@ -1,12 +1,11 @@
 /**
- * Web server — node:http, static files, REST API, SSE, HTTP Basic Auth.
- * Zero npm dependencies. The browser's own credential prompt (and its
- * password manager) does the work — no bespoke login page or session cookie
- * to build and keep in sync with it.
+ * Web server — node:http, static files, REST API, SSE, and session auth.
+ * Zero npm dependencies. Authentication stays server-side in an HttpOnly
+ * cookie so the browser never replaces Cast's UI with its own prompt.
  */
 
 import { execSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import {
 	createReadStream,
 	existsSync,
@@ -23,6 +22,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { brotliCompressSync, gzipSync } from "node:zlib";
+import { getDb } from "../core/db.ts";
 import { getHistoryPage, getMessageImage } from "../core/session.ts";
 import { toDisplayMessages, type WebBridge, type WebEvent } from "./bridge.ts";
 import { isBlockedAttachmentName, sessionInputsDir } from "./inputs.ts";
@@ -59,32 +59,109 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 
 	console.log(`[cast web] auth enabled (user: ${webUser})`);
 
-	function checkBasicAuth(req: IncomingMessage): boolean {
-		const header = req.headers.authorization ?? "";
-		if (!header.startsWith("Basic ")) return false;
-		let decoded: string;
-		try {
-			decoded = Buffer.from(header.slice(6), "base64").toString("utf-8");
-		} catch {
-			return false;
+	const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
+	const failedLogins = new Map<string, { attempts: number; expiresAt: number }>();
+	const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+	const MAX_FAILED_LOGINS = 5;
+
+	function readCookie(req: IncomingMessage, name: string): string | undefined {
+		const cookies = req.headers.cookie;
+		if (!cookies) return undefined;
+		for (const part of cookies.split(";")) {
+			const [key, ...value] = part.trim().split("=");
+			if (key === name) return value.join("=");
 		}
-		const sep = decoded.indexOf(":");
-		if (sep === -1) return false;
-		return decoded.slice(0, sep) === webUser && decoded.slice(sep + 1) === webPassword;
+		return undefined;
 	}
 
-	function requireAuth(res: ServerResponse): void {
-		res.writeHead(401, {
-			"WWW-Authenticate": 'Basic realm="cast web", charset="UTF-8"',
-			"Content-Type": "text/plain",
-		});
-		res.end("Authentication required");
+	function isAuthenticated(req: IncomingMessage): boolean {
+		const token = readCookie(req, "cast_web_session");
+		if (!token) return false;
+		const db = getDb();
+		const tokenHash = createHash("sha256").update(token).digest("hex");
+		const row = db.prepare("SELECT expires_at FROM web_sessions WHERE token_hash = ?").get(tokenHash) as
+			| { expires_at: number }
+			| undefined;
+		if (!row) return false;
+		if (row.expires_at <= Date.now()) {
+			db.prepare("DELETE FROM web_sessions WHERE token_hash = ?").run(tokenHash);
+			return false;
+		}
+		return true;
+	}
+
+	function passwordsMatch(value: string): boolean {
+		const expected = Buffer.from(webPassword);
+		const candidate = Buffer.from(value);
+		return candidate.length === expected.length && timingSafeEqual(candidate, expected);
+	}
+
+	function sessionCookie(req: IncomingMessage, token: string, maxAge: number): string {
+		const secure = "encrypted" in req.socket || req.headers["x-forwarded-proto"] === "https" ? "; Secure" : "";
+		return `cast_web_session=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure}`;
+	}
+
+	function retryAfterLoginLimit(req: IncomingMessage): number | null {
+		const address = req.socket.remoteAddress ?? "unknown";
+		const record = failedLogins.get(address);
+		if (!record) return null;
+		if (record.expiresAt <= Date.now()) {
+			failedLogins.delete(address);
+			return null;
+		}
+		return record.attempts >= MAX_FAILED_LOGINS ? Math.ceil((record.expiresAt - Date.now()) / 1000) : null;
+	}
+
+	function recordFailedLogin(req: IncomingMessage): void {
+		const address = req.socket.remoteAddress ?? "unknown";
+		const now = Date.now();
+		const previous = failedLogins.get(address);
+		if (!previous || previous.expiresAt <= now) {
+			if (failedLogins.size >= 10_000) failedLogins.clear();
+			failedLogins.set(address, { attempts: 1, expiresAt: now + LOGIN_WINDOW_MS });
+			return;
+		}
+		previous.attempts++;
+	}
+
+	function clearFailedLogins(req: IncomingMessage): void {
+		failedLogins.delete(req.socket.remoteAddress ?? "unknown");
+	}
+
+	function requireAuth(res: ServerResponse, isApi: boolean): void {
+		if (isApi) {
+			json(res, { error: "Authentication required" }, 401);
+			return;
+		}
+		res.writeHead(302, { Location: "/login", "Cache-Control": "no-store" });
+		res.end();
+	}
+
+	function setSecurityHeaders(req: IncomingMessage, res: ServerResponse): void {
+		res.setHeader(
+			"Content-Security-Policy",
+			"default-src 'self'; base-uri 'self'; frame-ancestors 'none'; script-src 'self' 'unsafe-inline' https://esm.sh; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self' https://esm.sh; object-src 'none'",
+		);
+		const forwardedProto = req.headers["x-forwarded-proto"];
+		const isHttps =
+			"encrypted" in req.socket ||
+			(typeof forwardedProto === "string" && forwardedProto.split(",")[0]?.trim() === "https");
+		const host = (req.headers.host ?? "").replace(/:\d+$/, "").toLowerCase();
+		if (isHttps || host === "localhost" || host === "127.0.0.1" || host === "[::1]") {
+			res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+		}
+		res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+		res.setHeader("Permissions-Policy", "camera=(), geolocation=(), microphone=(), payment=(), usb=()");
+		res.setHeader("Referrer-Policy", "no-referrer");
+		res.setHeader("X-Content-Type-Options", "nosniff");
+		res.setHeader("X-Frame-Options", "DENY");
 	}
 
 	// Helpers
 	function json(res: ServerResponse, data: unknown, status = 200): void {
 		const body = JSON.stringify(data);
 		res.writeHead(status, {
+			"Cache-Control": "no-store",
 			"Content-Type": "application/json",
 			"Content-Length": Buffer.byteLength(body),
 		});
@@ -203,13 +280,15 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 			if (ext === ".html") {
 				content = content
 					.toString("utf-8")
+					.replace('href="/login.css"', `href="/login.css?v=${assetVersion("/login.css")}"`)
 					.replace('href="/tokens.css"', `href="/tokens.css?v=${assetVersion("/tokens.css")}"`)
 					.replace('href="/style.css"', `href="/style.css?v=${assetVersion("/style.css")}"`)
 					.replace('href="/chat.css"', `href="/chat.css?v=${assetVersion("/chat.css")}"`)
 					.replace('href="/tools.css"', `href="/tools.css?v=${assetVersion("/tools.css")}"`)
 					.replace('href="/workspace.css"', `href="/workspace.css?v=${assetVersion("/workspace.css")}"`)
 					.replace('href="/settings.css"', `href="/settings.css?v=${assetVersion("/settings.css")}"`)
-					.replace('src="/app.js"', `src="/app.js?v=${assetVersion("/app.js")}"`);
+					.replace('src="/app.js"', `src="/app.js?v=${assetVersion("/app.js")}"`)
+					.replace('src="/login.js"', `src="/login.js?v=${assetVersion("/login.js")}"`);
 			} else if (urlPath === "/app.js") {
 				content = content
 					.toString("utf-8")
@@ -287,6 +366,54 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 	}
 
 	// API routes
+	route("GET", "/api/auth/session", (req, res) => {
+		json(res, { authenticated: isAuthenticated(req) });
+	});
+
+	route("POST", "/api/auth/login", async (req, res) => {
+		const retryAfter = retryAfterLoginLimit(req);
+		if (retryAfter !== null) {
+			res.setHeader("Retry-After", retryAfter);
+			return json(res, { error: "Too many sign-in attempts. Try again later." }, 429);
+		}
+		let username = "";
+		let password = "";
+		try {
+			const parsed = JSON.parse(await readBody(req)) as { username?: string; password?: string };
+			username = parsed.username ?? "";
+			password = parsed.password ?? "";
+		} catch {
+			return json(res, { error: "Invalid JSON" }, 400);
+		}
+		const validPassword = passwordsMatch(password);
+		if (username !== webUser || !validPassword) {
+			recordFailedLogin(req);
+			return json(res, { error: "Invalid username or password" }, 401);
+		}
+		clearFailedLogins(req);
+		const token = randomBytes(32).toString("base64url");
+		const now = Date.now();
+		const db = getDb();
+		db.prepare("DELETE FROM web_sessions WHERE expires_at <= ?").run(now);
+		db.prepare("INSERT INTO web_sessions (token_hash, created_at, expires_at) VALUES (?, ?, ?)").run(
+			createHash("sha256").update(token).digest("hex"),
+			now,
+			now + SESSION_TTL_SECONDS * 1000,
+		);
+		res.setHeader("Set-Cookie", sessionCookie(req, token, SESSION_TTL_SECONDS));
+		json(res, { ok: true });
+	});
+
+	route("POST", "/api/auth/logout", (req, res) => {
+		const token = readCookie(req, "cast_web_session");
+		if (token)
+			getDb()
+				.prepare("DELETE FROM web_sessions WHERE token_hash = ?")
+				.run(createHash("sha256").update(token).digest("hex"));
+		res.setHeader("Set-Cookie", sessionCookie(req, "", 0));
+		json(res, { ok: true });
+	});
+
 	route("GET", "/api/personas", (_req, res) => {
 		json(res, bridge.getPersonas());
 	});
@@ -1259,11 +1386,12 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 
 	// Main request handler
 	const server = createServer(async (req, res) => {
+		setSecurityHeaders(req, res);
 		const urlPath = req.url?.split("?")[0] ?? "/";
 		const method = req.method ?? "GET";
 
 		// /shared/<token> (the page) and /api/shared/<token> (its data) are the
-		// one deliberate hole in auth — everything else still needs Basic Auth.
+		// one deliberate hole in auth — everything else still needs a session.
 		// The static assets the shared page itself loads (app.js, stylesheets,
 		// icons.js) have to be exempt too, or the browser 401s fetching them and
 		// hangs on its native credentials prompt with nothing ever rendering —
@@ -1272,6 +1400,9 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 		// widen what an unauthenticated visitor can actually do.
 		const PUBLIC_STATIC_ASSETS = new Set([
 			"/app.js",
+			"/login.html",
+			"/login.css",
+			"/login.js",
 			"/tokens.css",
 			"/style.css",
 			"/chat.css",
@@ -1284,14 +1415,21 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 			"/cast-banner-grid.json",
 		]);
 		const isPublicShareRoute =
+			urlPath === "/login" ||
+			urlPath === "/login.html" ||
+			urlPath.startsWith("/api/auth/") ||
 			urlPath === "/shared" ||
 			urlPath.startsWith("/shared/") ||
 			urlPath.startsWith("/api/shared/") ||
 			PUBLIC_STATIC_ASSETS.has(urlPath) ||
 			urlPath.startsWith("/fonts/");
-		if (!isPublicShareRoute && !checkBasicAuth(req)) {
-			requireAuth(res);
+		if (!isPublicShareRoute && !isAuthenticated(req)) {
+			requireAuth(res, urlPath.startsWith("/api/"));
 			return;
+		}
+
+		if (method === "GET" && urlPath === "/login") {
+			if (serveStatic({ url: "/login.html", headers: req.headers } as IncomingMessage, res)) return;
 		}
 
 		// The share page is a client-side route with no matching static file

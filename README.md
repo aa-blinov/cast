@@ -13,7 +13,7 @@ A role-based terminal agent harness. 20 built-in personas — senior dev, QA, DB
 **Runs where your code runs.** vLLM, Ollama, your own inference server, or any OpenAI-compatible API. No account, no telemetry, no cloud dependency.
 
 **Ink TUI.** A proper terminal interface with multiline paste, image attachments, smooth animations.
-**Web UI.** `cast web` launches a browser-based control room — background agents, token-by-token streaming, diff viewer, all slash commands. Same sessions as the TUI.
+**Web UI.** `cast web` launches a browser-based control room — background agents, token-by-token streaming, diff viewer, and chat commands with account/project controls in Settings. Same sessions as the TUI.
 
 ## Why personas, not just prompts
 
@@ -81,7 +81,7 @@ Drop an `AGENTS.md` or `CLAUDE.md` in your repo root — cast picks it up automa
 
 ### Skills
 
-Self-contained instruction packages loaded on demand from `~/.cast/skills/` / `.cast/skills/`, plus skills.sh universal paths (`.agents/skills/`, `~/.config/agents/skills/`). Follows the [Agent Skills spec](https://agentskills.io). The agent sees what's available and loads the right one automatically.
+Self-contained instruction packages loaded on demand from `~/.cast/skills/` / `.cast/skills/`, plus skills.sh universal paths (`.agents/skills/`, `~/.agents/skills/`, and the compatible `~/.config/agents/skills/`). Follows the [Agent Skills spec](https://agentskills.io). The agent sees what's available and loads the right one automatically.
 
 ### MCP Servers
 
@@ -114,7 +114,7 @@ Add your own in `~/.cast/personas/` (global) or `.cast/personas/` (project).
 
 ### Plan mode
 
-Think before you build: `/plan` switches the agent to read-only exploration — it studies the codebase (parallel sub-agents, read-only shell) and writes an execution-spec plan with a `- [ ]` checklist to `~/.cast/plans/`. When the plan is ready you get an approval dialog: implement now, implement in a fresh context, approve for later, or keep refining. In build mode the approved plan rides in the system prompt (surviving compaction and restarts) and the agent checks off steps as it lands them. Each phase can run its own model — see `/plan-model`.
+Plan mode is user-owned: `/plan` switches the agent to read-only exploration, and `/build` returns to implementation. The agent writes execution-spec plans with `- [ ]` checklists to `<project>/.cast/plans/<session-id>/`. Once it calls `plan_done`, choose to keep refining, implement in the current context, or implement in a clean model context while retaining the visible thread. An approved plan is re-read into build-mode context across compaction and restarts; its checklist is projected into the task list. Each phase can run its own model — see `/plan-model`.
 
 ### Context compaction
 
@@ -122,7 +122,7 @@ When the conversation gets too long, the agent automatically summarizes older me
 
 ### Reasoning levels
 
-Models that support it (OpenRouter metadata) get reasoning controls: `off` / `low` / `medium` / `high` / `max`. Set via `--reasoning` or change mid-session with `/reasoning`.
+Reasoning controls combine provider model metadata with the configured provider dialect. Supported providers expose either `off`/`on` or effort levels such as `low`/`medium`/`high`; configure them with `--reasoning`, `/reasoning`, and `/reasoning-format` when an endpoint needs an explicit protocol.
 
 ### Sessions
 
@@ -147,9 +147,9 @@ cast web status
 cast web stop
 ```
 
-On first start, cast auto-generates a password and saves it to `webPassword` in `~/.cast/settings.json`. The login is always `cast`. HTTP Basic auth protects every API endpoint — the browser prompts for the password on first load. (Browser's own credential prompt, not a custom form.) The password is shown in the terminal on first run so you can copy it; after that, look it up in `~/.cast/settings.json`.
+On first start, cast auto-generates a password and saves it to `webPassword` in `~/.cast/settings.json`. The login is always `cast`. Cast serves its own themed sign-in screen and keeps the resulting session in an HttpOnly, SameSite cookie; API responses are never cached. The password is shown in the terminal on first run so you can copy it; after that, look it up in `~/.cast/settings.json`.
 
-The `--public` flag prints an explicit warning when binding to `0.0.0.0` — the password is the only thing standing between your machine and the rest of the network. Use it on a trusted LAN (or behind a reverse proxy / tunnel) — not on a public address.
+The `--public` flag exposes plain HTTP. It is suitable only for a trusted LAN; it cannot protect the password or session from a network observer. For remote access without a domain or HTTPS, keep Cast on its default loopback address and use an SSH tunnel: `ssh -L 1337:127.0.0.1:1337 user@host`. Do not expose it directly on a public address.
 
 Env vars: `CAST_WEB_PORT` (default `1337`), `CAST_WEB_HOST` (default `127.0.0.1`).
 
@@ -161,17 +161,22 @@ Env vars: `CAST_WEB_PORT` (default `1337`), `CAST_WEB_HOST` (default `127.0.0.1`
 | `/model [name]` | Show/change model |
 | `/subagent-model [name]` | Show/change sub-agent model |
 | `/plan-model [name\|off]` | Show/change the plan-mode model |
+| `/plan-model-provider [name\|off]` | Set the provider for the plan-mode model |
 | `/plan` | Enter plan mode (explore + plan only) |
 | `/build` | Exit plan mode, restore full toolset |
 | `/reasoning` | Change reasoning level |
+| `/reasoning-format` | Select the provider reasoning protocol |
 | `/persona [name]` | Show/change persona |
 | `/provider` | Change provider endpoint and API key |
 | `/permissions [default\|bypass]` | Show/change bash confirmation mode |
 | `/web` | Toggle web tools (web_search, web_fetch) |
+| `/web-fetch-provider` | Select Jina Reader or direct local fetch |
 | `/sessions` | List/switch/delete saved sessions |
 | `/skills` | List loaded skills |
 | `/skill:name [args]` | Force-load and run a skill |
 | `/mcp` | Toggle MCP servers on/off |
+| `/plugin` | Install, enable, disable, and remove marketplace plugins |
+| `/hooks` | List and enable/disable lifecycle hooks |
 | `/reload` | Re-scan skills, rules, MCP, and personas for cwd |
 | `/rules` | List loaded rules |
 | `/rule:name` | Invoke a rule by name |

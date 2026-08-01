@@ -5,12 +5,13 @@ import OpenAI, {
 	InternalServerError,
 	RateLimitError,
 } from "openai";
-import type { ChatCompletionMessageParam, ChatCompletionTool } from "openai/resources/chat/completions";
+import type { ChatCompletionFunctionTool, ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import { type AppConfig, providerFetch } from "./config.ts";
 import { ThinkBlockParser } from "./vendors.ts";
 
 export type Message = ChatCompletionMessageParam;
-export type Tool = ChatCompletionTool;
+/** Cast sends only OpenAI function tools; custom tools have a different wire shape. */
+export type Tool = ChatCompletionFunctionTool;
 
 export function createClient(config: AppConfig, override?: { baseURL: string; apiKey: string }): OpenAI {
 	// The SDK's bundled node-fetch shim can turn a stream that dies mid-flight
@@ -709,7 +710,7 @@ type ContentPartWithCacheControl = {
 	cache_control?: CacheControlEphemeral;
 };
 
-type ToolWithCacheControl = ChatCompletionTool & {
+type ToolWithCacheControl = ChatCompletionFunctionTool & {
 	cache_control?: CacheControlEphemeral;
 };
 
