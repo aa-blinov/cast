@@ -1,15 +1,54 @@
+import { renderToString } from "ink";
+import { createElement } from "react";
 import { describe, expect, it } from "vitest";
-import { formatToolResultForDisplay, parseToolSummary } from "../src/ui/ChatLog.tsx";
+import { ChatLog, parseToolSummary } from "../src/ui/ChatLog.tsx";
 
-describe("formatToolResultForDisplay", () => {
-	it("renders Unicode escapes from a JSON tool result as readable text", () => {
-		expect(formatToolResultForDisplay('{"text":"\\u041f\\u0440\\u0438\\u0432\\u0435\\u0442"}')).toBe(
-			'{\n  "text": "Привет"\n}',
+describe("ChatLog tool rows", () => {
+	it("renders real bash and MCP events as summaries without either result payload", () => {
+		const output = renderToString(
+			createElement(ChatLog, {
+				messages: [
+					{
+						role: "assistant",
+						content: "",
+						blocks: [
+							{
+								kind: "tool",
+								call: {
+									id: "bash-1",
+									name: "bash",
+									args: JSON.stringify({ command: "git status --short" }),
+									status: "ok",
+									result: "MUTATED_RESULT_MUST_NOT_RENDER",
+								},
+							},
+							{
+								kind: "tool",
+								call: {
+									id: "mcp-1",
+									name: "mcp_workspace_search",
+									args: JSON.stringify({ query: "authentication" }),
+									status: "error",
+									result: "MCP_ERROR_PAYLOAD_MUST_NOT_RENDER",
+								},
+							},
+						],
+					},
+				],
+				streaming: null,
+				error: null,
+				retry: null,
+				columns: 120,
+			}),
+			{ columns: 120 },
 		);
-	});
 
-	it("keeps non-JSON output intact even when it contains a Unicode escape", () => {
-		expect(formatToolResultForDisplay('const escaped = "\\u041f";')).toBe('const escaped = "\\u041f";');
+		expect(output).toContain("[bash] [ok]");
+		expect(output).toContain('command="git status --short"');
+		expect(output).toContain("[workspace · search] [error]");
+		expect(output).toContain('query="authentication"');
+		expect(output).not.toContain("MUTATED_RESULT_MUST_NOT_RENDER");
+		expect(output).not.toContain("MCP_ERROR_PAYLOAD_MUST_NOT_RENDER");
 	});
 });
 

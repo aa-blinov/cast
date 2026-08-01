@@ -5751,7 +5751,7 @@ function App() {
 					case "tool_start":
 						updateStreaming((prev) => {
 							const index = prev.findIndex((block) => block.kind === "tool" && block.call.id === event.id);
-							const call = { id: event.id, name: event.name, args: event.args, status: "running" };
+							const call = { id: event.id, name: event.name, args: event.args, status: event.status };
 							if (index === -1) return [...prev, { kind: "tool", call }];
 							return prev.map((block, i) => (i === index ? { kind: "tool", call } : block));
 						});
@@ -5764,7 +5764,7 @@ function App() {
 											...b,
 											call: {
 												...b.call,
-												status: event.result?.isError ? "error" : "ok",
+												status: event.status,
 												// Full, untruncated — same text the model actually saw.
 												// A page reload already shows this in full (bridge.ts's
 												// toDisplayMessages applies no cap), so a live turn

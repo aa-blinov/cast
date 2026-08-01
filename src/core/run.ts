@@ -462,13 +462,13 @@ function handleEvent(event: AgentEvent, session: SessionState, format: "default"
 			break;
 
 		case "tool_start":
-			if (!emit("tool_start", { id: event.id, name: event.name, args: event.args })) {
+			if (!emit("tool_start", { id: event.id, name: event.name, args: event.args, status: event.status })) {
 				process.stderr.write(`  ${event.name}...${EOL}`);
 			}
 			break;
 
 		case "tool_end":
-			if (!emit("tool_end", { id: event.id, name: event.name, result: event.result })) {
+			if (!emit("tool_end", { id: event.id, name: event.name, result: event.result, status: event.status })) {
 				if (event.result.isError) {
 					process.stderr.write(`  ${event.name} failed: ${event.result.content}${EOL}`);
 				}

@@ -83,6 +83,7 @@ import { saveSshConfig } from "../core/ssh.ts";
 import type { StartupResult } from "../core/startup.ts";
 import { stripAnsi } from "../core/tools/bash.ts";
 import { BackgroundTaskRegistry, type BashBackgroundDeps } from "../core/tools/bash-background.ts";
+import { type CompletedToolCallStatus, completedToolCallStatus } from "../core/tools/shared.ts";
 import { buildReasoningParams, getReasoningOptionsForFormat, resolveReasoningFormat } from "../core/vendors.ts";
 import { ALL_THEMES } from "../ui/themes/index.ts";
 import type { ThemeColors } from "../ui/themes/types.ts";
@@ -161,7 +162,7 @@ export interface DisplayToolCall {
 	id: string;
 	name: string;
 	args: string;
-	status: "ok" | "error";
+	status: CompletedToolCallStatus;
 	result: string;
 	/** Set for a `read` on an image file — the photo it returned, so the UI
 	 * can show it inside this card instead of as an unexplained separate
@@ -271,7 +272,7 @@ export function toDisplayMessages(
 						id: tc.id,
 						name: tc.function.name,
 						args: tc.function.arguments,
-						status: resultMsg && (resultMsg as { castIsError?: boolean }).castIsError ? "error" : "ok",
+						status: completedToolCallStatus((resultMsg as { castIsError?: boolean } | undefined)?.castIsError),
 						result: resultMsg ? String(resultMsg.content ?? "") : "",
 						...(images ? { images } : {}),
 					};

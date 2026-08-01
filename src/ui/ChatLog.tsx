@@ -98,27 +98,6 @@ export function parseToolSummary(name: string, args: string): ToolSummaryModel {
 }
 
 /**
- * Providers and MCP servers sometimes serialize user-facing JSON with Unicode
- * escapes. Keep non-JSON output byte-for-byte intact, but make a complete JSON
- * result readable in the terminal instead of exposing its wire encoding.
- */
-export function formatToolResultForDisplay(result: string): string {
-	if (!/\\u[\dA-Fa-f]{4}/.test(result)) return result;
-	let value = result;
-	for (let depth = 0; depth < 2; depth++) {
-		try {
-			const parsed: unknown = JSON.parse(value);
-			if (typeof parsed !== "string") return JSON.stringify(parsed, null, 2);
-			value = parsed;
-		} catch {
-			if (depth === 0) return result;
-			return value.replace(/\\u([\dA-Fa-f]{4})/g, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)));
-		}
-	}
-	return value.replace(/\\u([\dA-Fa-f]{4})/g, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)));
-}
-
-/**
  * One-line summary for a tool call. Only the parse is memoized — the JSX is
  * rebuilt every render so theme() colors stay live: memoizing the whole
  * element on [name, args] kept the previous theme's colors on still-visible
@@ -169,39 +148,16 @@ function ToolSummary({ name, args, compact }: { name: string; args: string; comp
 function ToolCallView({ call, compact }: { call: ToolCallEntry; compact?: boolean }): JSX.Element {
 	const statusColor =
 		call.status === "running" ? theme().warning : call.status === "error" ? theme().error : theme().success;
-	const resultColor = call.status === "error" ? theme().error : theme().muted;
-	const showResult = Boolean(call.result) && call.name !== "read" && call.name !== "edit" && !isWebTool(call.name);
 	const mcp = isMcpTool(call.name);
-	const rawResult = call.result && mcp ? stripMcpMarkdownDecoration(call.result) : call.result;
-	const displayResult = rawResult ? formatToolResultForDisplay(rawResult) : rawResult;
-	// task: full wrapped report in history so the user can read the child answer;
-	// live/compact stays one truncated line so parallel tasks don't blow the clamp.
-	const taskResultFull = call.name === "task" && !compact && call.result;
 	return (
 		<Box flexDirection="column">
 			<Text>
 				<Text color={theme().tool}>[{mcp ? mcpToolLabel(call.name) : call.name}]</Text>{" "}
 				<Text color={statusColor}>[{call.status}]</Text>{" "}
 				<ToolSummary name={call.name} args={call.args} compact={compact} />
-				{call.result && <WebResultSummary name={call.name} result={call.result} />}
 			</Text>
-			{showResult && taskResultFull && (
-				<Text color={resultColor} wrap="wrap">
-					{displayResult}
-				</Text>
-			)}
-			{showResult && !taskResultFull && (
-				<Text color={resultColor} wrap="truncate">
-					{displayResult!.slice(0, 500)}
-					{displayResult!.length > 500 ? " ..." : ""}
-				</Text>
-			)}
 		</Box>
 	);
-}
-
-function isWebTool(name: string): boolean {
-	return name === "web_search" || name === "web_fetch";
 }
 
 // MCP tools are exposed to the model as "mcp_<server>_<tool>" (see
@@ -214,54 +170,6 @@ function isMcpTool(name: string): boolean {
 }
 function mcpToolLabel(name: string): string {
 	return name.slice(4).replace(/_/g, " · ");
-}
-
-// A terminal can't render actual markdown HTML the way the web UI now does
-// for MCP results (see app.js's ToolCard) — Ink has no inline bold/heading
-// primitives to retrofit onto an already-streamed plain-text Text node. This
-// just strips the decoration MCP servers commonly wrap their output in
-// (fenced code, "#" headers) so it reads as plain text instead of literal
-// "```"/"###" noise; a built-in tool's result keeps its exact original text
-// (e.g. read's hashline anchors must never be touched).
-function stripMcpMarkdownDecoration(text: string): string {
-	return text
-		.replace(/^```\w*\n?/gm, "")
-		.replace(/^```$/gm, "")
-		.replace(/^#{1,6}\s+/gm, "");
-}
-
-function WebResultSummary({ name, result }: { name: string; result: string }): JSX.Element | null {
-	if (name === "web_search") {
-		const meta = /^<!--(\{.*?})-->/.exec(result);
-		if (meta) {
-			try {
-				const { count } = JSON.parse(meta[1]) as { count: number };
-				return (
-					<Text color={theme().muted}>
-						{" · "}
-						{count} result{count !== 1 ? "s" : ""}
-					</Text>
-				);
-			} catch {
-				// malformed — fall through
-			}
-		}
-		return (
-			<Text color={theme().muted}>
-				{" · "}
-				{result.startsWith("No results") ? 0 : result.split("\n\n").length} results
-			</Text>
-		);
-	}
-	if (name === "web_fetch") {
-		return (
-			<Text color={theme().muted}>
-				{" · "}
-				{result.length.toLocaleString()} chars
-			</Text>
-		);
-	}
-	return null;
 }
 
 /**
@@ -352,7 +260,7 @@ export function clampStreamingBlocks(
 			// row (+ optional result). Full wrap is only in committed history.
 			// Charging full wrap height hid sibling parallel tasks (only the
 			// newest long assignment fit the budget).
-			const resultRows = block.call.result && block.call.name !== "read" && !isWebTool(block.call.name) ? 1 : 0;
+			const resultRows = block.call.result && block.call.status === "error" ? 1 : 0;
 			const need = 1 + resultRows;
 			if (used + need > budget) {
 				if (out.length > 0) break;

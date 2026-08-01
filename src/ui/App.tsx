@@ -226,7 +226,6 @@ export function App(props: AppProps): JSX.Element {
 			setThemeVer((v) => v + 1);
 		})();
 	}, [onRepaintBanner]);
-
 	const confirmBash = useMemo(() => makeConfirmBash(pickers, permissionMode), [pickers, permissionMode]);
 
 	// Per-turn system prompt rebuild for sticky rules + @-mention.
