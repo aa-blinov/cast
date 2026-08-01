@@ -29,6 +29,7 @@ import { StatusPopover } from "./status-popover.js";
 import { blocksFromAssistantCompletion } from "./stream-blocks.js";
 import { BlockView as BlockViewModule, LiveStreamingBlocks as LiveStreamingBlocksModule } from "./streaming-blocks.js";
 import { ToolCard as ToolCardModule } from "./tool-card.js";
+import { TurnMetaLine as TurnMetaLineModule } from "./turn-meta.js";
 
 const html = htm.bind(h);
 
@@ -540,15 +541,6 @@ function _formatToolResult(name, result) {
 	return value;
 }
 
-// per-message (persisted server-side, see core/session.ts's SessionState.turnMeta)
-// rather than a single page-level "last turn" value, so every past reply in
-// a thread shows its own footer on reload, not just whichever one happened
-// to be most recent when the page loaded.
-function TurnMetaLine({ turnMeta }) {
-	if (!turnMeta || turnMeta.totalMs == null) return null;
-	return html`<div class="turn-meta">${turnMeta.provider} · ${turnMeta.model} · ${(turnMeta.totalMs / 1000).toFixed(1)}s</div>`;
-}
-
 function Message({ msg }) {
 	const role = msg.role || "assistant";
 	// Only used by the legacy floating image-result branch below (pre
@@ -594,7 +586,7 @@ function Message({ msg }) {
 		return html`
 			<div class="message-group">
 				${collapsed.map((block, i) => html`<${BlockViewModule} key=${block.kind === "tool" ? block.call.id : i} block=${block} renderMarkdown=${renderMarkdown} />`)}
-					<${TurnMetaLine} turnMeta=${msg.turnMeta} />
+					<${TurnMetaLineModule} turnMeta=${msg.turnMeta} />
 			</div>
 		`;
 	}
@@ -638,7 +630,7 @@ function Message({ msg }) {
 				`
 				}
 				${msg.toolCalls?.map((tc) => html`<${ToolCardModule} key=${tc.id} call=${tc} renderMarkdown=${renderMarkdown} />`)}
-					<${TurnMetaLine} turnMeta=${msg.turnMeta} />
+					<${TurnMetaLineModule} turnMeta=${msg.turnMeta} />
 			</div>
 		`;
 	}
