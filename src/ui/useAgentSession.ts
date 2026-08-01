@@ -24,6 +24,12 @@ import { loadSettings, type PermissionMode } from "../core/settings.ts";
 import { setLastTurnAborted, setStreamingActive } from "../core/stdin-manager.ts";
 import type { BackgroundTaskRegistry, BashBackgroundDeps } from "../core/tools/bash-background.ts";
 import { completedToolCallStatus, type ToolCallStatus } from "../core/tools/shared.ts";
+import {
+	appendTextBlock,
+	reduceStreamEvent,
+	type StreamBlock,
+	type StreamingState,
+} from "../web/public/stream-blocks.js";
 import { displayWidthCacheFlush } from "./display-width.ts";
 
 export type AgentStatus = "idle" | "running" | "error";
@@ -45,10 +51,7 @@ export interface ToolCallEntry {
  * (token-by-token text, streamed reasoning) coalesce into one block; a tool
  * call breaks the run so whatever streams after it starts a fresh block.
  */
-export type StreamBlock =
-	| { kind: "thinking"; text: string; continued?: boolean }
-	| { kind: "content"; text: string; continued?: boolean }
-	| { kind: "tool"; call: ToolCallEntry };
+export type { StreamBlock, StreamingState } from "../web/public/stream-blocks.js";
 
 export interface ChatMessage {
 	role: "user" | "assistant" | "system" | "tool" | "warning";
@@ -70,58 +73,8 @@ export interface PendingImage {
 	dataUrl: string;
 }
 
-export interface StreamingState {
-	blocks: StreamBlock[];
-	/** Whitespace content received after reasoning, held until the next visible
-	 * content delta proves it belongs to the answer rather than to a provider's
-	 * SSE framing. */
-	pendingContentWhitespace?: string;
-}
-
-/**
- * Append text, merging into the most recent block of the same kind rather
- * than only the trailing one. Some providers (observed on MiniMax-M2)
- * interleave content/reasoning deltas out of order mid-turn — a token, a
- * thinking chunk, then more tokens — which used to split into alternating
- * blocks with words cut across the seam. A tool call is still a hard
- * boundary: text never merges across one, since that ordering is real.
- */
 /** Exported for unit tests. */
-export function appendText(blocks: StreamBlock[], kind: "thinking" | "content", text: string): StreamBlock[] {
-	for (let j = blocks.length - 1; j >= 0; j--) {
-		const b = blocks[j]!;
-		if (b.kind === "tool") break;
-		if (b.kind === kind) {
-			return [...blocks.slice(0, j), { kind, text: b.text + text, continued: b.continued }, ...blocks.slice(j + 1)];
-		}
-	}
-	// New block of a different kind — the previous trailing block is now settled
-	// (it can't grow any more), so mark continued: false so it gets its label.
-	const last = blocks[blocks.length - 1];
-	const settledLast = last && last.kind !== "tool" && last.kind !== kind ? { ...last, continued: false } : last;
-	return [...blocks.slice(0, -1), ...(settledLast ? [settledLast] : []), { kind, text }];
-}
-
-/**
- * Normalize raw provider text deltas before they become visible blocks.
- * Whitespace after reasoning is ambiguous: it can be the answer's leading
- * formatting or a transport-only split. Buffer it until the following delta
- * resolves that ambiguity, so only visible content ends reasoning.
- */
-export function appendStreamText(state: StreamingState, kind: "thinking" | "content", text: string): StreamingState {
-	if (kind === "content" && text.trim() === "" && state.blocks.at(-1)?.kind === "thinking") {
-		return {
-			...state,
-			pendingContentWhitespace: `${state.pendingContentWhitespace ?? ""}${text}`,
-		};
-	}
-	if (kind === "thinking") {
-		return { blocks: appendText(state.blocks, kind, text) };
-	}
-	return {
-		blocks: appendText(state.blocks, kind, `${state.pendingContentWhitespace ?? ""}${text}`),
-	};
-}
+export const appendText = appendTextBlock;
 
 /**
  * Splits off already-complete answer lines, leaving only the still-growing
@@ -754,7 +707,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 									clearRetryOnNextChunk.current = false;
 									setRetry(null);
 								}
-								updateStreaming((s) => (s ? appendStreamText(s, "thinking", event.text) : s));
+								updateStreaming((s) => (s ? reduceStreamEvent(s, { type: "thinking", text: event.text }) : s));
 								break;
 							case "token": {
 								if (clearRetryOnNextChunk.current) {
@@ -763,7 +716,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 								}
 								updateStreaming((s) => {
 									if (!s) return s;
-									const next = appendStreamText(s, "content", event.text);
+									const next = reduceStreamEvent(s, { type: "content", text: event.text });
 									const appended = next.blocks;
 									// Strip duplicate Hermes XML tool-call blocks as they accumulate.
 									// Only strip if we see <tool_call> to avoid accidentally removing
@@ -786,20 +739,10 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 								updateStreaming(
 									(s) =>
 										s
-											? {
-													blocks: [
-														...s.blocks,
-														{
-															kind: "tool",
-															call: {
-																id: event.id,
-																name: event.name,
-																args: event.args,
-																status: event.status,
-															},
-														},
-													],
-												}
+											? reduceStreamEvent(s, {
+													type: "tool_start",
+													call: { id: event.id, name: event.name, args: event.args, status: event.status },
+												})
 											: s,
 									true,
 								);
@@ -807,20 +750,12 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 							case "tool_end":
 								updateStreaming((s) => {
 									if (!s) return s;
-									return {
-										blocks: s.blocks.map((b) =>
-											b.kind === "tool" && b.call.id === event.id
-												? {
-														kind: "tool",
-														call: {
-															...b.call,
-															status: event.status,
-															result: event.result.content.slice(0, 4000),
-														},
-													}
-												: b,
-										),
-									};
+									return reduceStreamEvent(s, {
+										type: "tool_end",
+										id: event.id,
+										status: event.status,
+										result: event.result.content.slice(0, 4000),
+									});
 								}, true);
 								// Plan signal tools succeeding leave persistent state in the transcript
 								// leave a persistent pointer in the transcript (a timed notice

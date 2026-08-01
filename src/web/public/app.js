@@ -8,6 +8,7 @@ import { h, render } from "preact";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { icons } from "./icons.js";
 import { collapseMidWordBoundaries, mergeMidWordBoundary } from "./reasoning-split.js";
+import { blocksFromAssistantCompletion, reduceStreamEvent } from "./stream-blocks.js";
 
 const html = htm.bind(h);
 
@@ -737,23 +738,7 @@ function Message({ msg }) {
 		// assistant just finished) was the visible one. Now silent.
 		return html`
 			<div class="message-group">
-				${collapsed.map((block, i) => {
-					if (block.kind === "tool") return html`<${ToolCard} key=${block.call.id} call=${block.call} />`;
-					if (block.kind === "thinking") {
-						if (!block.text.trim()) return null;
-						return html`<div key=${i} class="message message-reasoning">
-							<div class="message-label">reasoning</div>
-							<div class="message-content">${block.text}</div>
-						</div>`;
-					}
-					if (!block.text.trim()) return null;
-					return html`
-						<div key=${i} class="message message-assistant">
-							<div class="message-label">agent</div>
-							<div class="message-content" dangerouslySetInnerHTML=${{ __html: renderMarkdown(block.text) }} />
-						</div>
-					`;
-				})}
+				${collapsed.map((block, i) => html`<${BlockView} key=${block.kind === "tool" ? block.call.id : i} block=${block} />`)}
 					<${TurnMetaLine} turnMeta=${msg.turnMeta} />
 			</div>
 		`;
@@ -788,7 +773,6 @@ function Message({ msg }) {
 					</div>
 				`
 				}
-				${msg.toolCalls?.map((tc) => html`<${ToolCard} key=${tc.id} call=${tc} />`)}
 				${
 					content &&
 					html`
@@ -798,6 +782,7 @@ function Message({ msg }) {
 					</div>
 				`
 				}
+				${msg.toolCalls?.map((tc) => html`<${ToolCard} key=${tc.id} call=${tc} />`)}
 					<${TurnMetaLine} turnMeta=${msg.turnMeta} />
 			</div>
 		`;
@@ -858,23 +843,6 @@ function Message({ msg }) {
 `;
 }
 
-// Some providers (observed on MiniMax-M2) interleave content/reasoning deltas
-// out of order mid-turn — a token, a thinking chunk, then more tokens — which
-// used to render as alternating "agent"/"reasoning" blocks with words split
-// across the seam. Merge into the most recent block of the same kind instead
-// of only the immediately-preceding one, so thrashing between the two channels
-// collapses back into one coherent block each. Tool calls remain hard
-// boundaries: text never merges across one, since that ordering is real.
-function appendTextBlock(prev, kind, text) {
-	for (let j = prev.length - 1; j >= 0; j--) {
-		if (prev[j].kind === "tool") break;
-		if (prev[j].kind === kind) {
-			return [...prev.slice(0, j), { kind, text: prev[j].text + text }, ...prev.slice(j + 1)];
-		}
-	}
-	return [...prev, { kind, text }];
-}
-
 // Renders a streaming text block (content or reasoning) into a single,
 // stable text node. The previous implementation used
 // `dangerouslySetInnerHTML` with the full `renderMarkdown(text)` result on
@@ -924,6 +892,25 @@ function StreamingText({ text, className }) {
 	return html`<div ref=${setRef} class=${className ?? "message-content"}></div>`;
 }
 
+function BlockView({ block, streaming = false }) {
+	if (block.kind === "tool") return html`<${ToolCard} call=${block.call} />`;
+	if (!block.text.trim()) return null;
+	const kind = block.kind === "thinking" ? "reasoning" : "assistant";
+	const className = `message message-${kind}${streaming ? " message-entering" : ""}`;
+	return html`
+		<div class=${className}>
+			<div class="message-label">${block.kind === "thinking" ? "reasoning" : "agent"}</div>
+			${
+				streaming
+					? html`<${StreamingText} text=${block.text} />`
+					: block.kind === "thinking"
+						? html`<div class="message-content">${block.text}</div>`
+						: html`<div class="message-content" dangerouslySetInnerHTML=${{ __html: renderMarkdown(block.text) }} />`
+			}
+		</div>
+	`;
+}
+
 function StreamingBlocks({ blocks }) {
 	if (!blocks || blocks.length === 0) return null;
 	// Same mid-word boundary collapse as the settled `Message` path — the
@@ -952,43 +939,24 @@ function StreamingBlocks({ blocks }) {
 	// since raw text during the stream is the `StreamingText` plain-
 	// text node), not a structural change.
 	return html`
-		<div>
-			${collapsed.map((block, i) => {
-				if (block.kind === "content") {
-					if (!block.text.trim()) return null;
-					return html`<div key=${i} class="message message-assistant message-entering">
-						<div class="message-label">agent</div>
-						<${StreamingText} text=${block.text} />
-					</div>`;
-				}
-				if (block.kind === "thinking") {
-					if (!block.text.trim()) return null;
-					return html`<div key=${i} class="message message-reasoning message-entering">
-						<div class="message-label">reasoning</div>
-						<${StreamingText} text=${block.text} className="message-content" />
-					</div>`;
-				}
-				if (block.kind === "tool") {
-					return html`<${ToolCard} key=${block.call.id} call=${block.call} />`;
-				}
-				return null;
-			})}
+		<div class="message-group">
+			${collapsed.map((block, i) => html`<${BlockView} key=${block.kind === "tool" ? block.call.id : i} block=${block} streaming />`)}
 		</div>
 	`;
 }
 
 function LiveStreamingBlocks({ controllerRef, onFrame }) {
-	const [blocks, setBlocks] = useState([]);
-	const blocksRef = useRef([]);
+	const [stream, setStream] = useState({ blocks: [] });
+	const streamRef = useRef({ blocks: [] });
 	const rafRef = useRef(null);
 	const flush = useCallback(() => {
 		rafRef.current = null;
-		setBlocks(blocksRef.current);
+		setStream(streamRef.current);
 		onFrame();
 	}, [onFrame]);
-	const update = useCallback(
-		(updater) => {
-			blocksRef.current = updater(blocksRef.current);
+	const reduce = useCallback(
+		(event) => {
+			streamRef.current = reduceStreamEvent(streamRef.current, event);
 			if (rafRef.current == null) rafRef.current = requestAnimationFrame(flush);
 		},
 		[flush],
@@ -998,20 +966,20 @@ function LiveStreamingBlocks({ controllerRef, onFrame }) {
 			cancelAnimationFrame(rafRef.current);
 			rafRef.current = null;
 		}
-		blocksRef.current = [];
-		setBlocks([]);
+		streamRef.current = { blocks: [] };
+		setStream({ blocks: [] });
 	}, []);
 	const take = useCallback(() => {
 		if (rafRef.current != null) {
 			cancelAnimationFrame(rafRef.current);
 			rafRef.current = null;
 		}
-		const snapshot = blocksRef.current;
-		blocksRef.current = [];
-		setBlocks([]);
+		const snapshot = streamRef.current.blocks;
+		streamRef.current = { blocks: [] };
+		setStream({ blocks: [] });
 		return snapshot;
 	}, []);
-	controllerRef.current = { update, reset, take };
+	controllerRef.current = { reduce, reset, take };
 	useEffect(
 		() => () => {
 			if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
@@ -1019,7 +987,7 @@ function LiveStreamingBlocks({ controllerRef, onFrame }) {
 		},
 		[controllerRef, reset],
 	);
-	return html`<${StreamingBlocks} blocks=${blocks} />`;
+	return html`<${StreamingBlocks} blocks=${stream.blocks} />`;
 }
 // The three pickers below are pure display: Composer owns filtering AND
 // selection so arrow-key nav and mouse click always agree on the same list.
@@ -4648,7 +4616,9 @@ function PlanDecisionCard({ transition, onChoose }) {
 }
 
 function QuestionCard({ question, onChoose }) {
-	const [answers, setAnswers] = useState(() => Array(question.questions.length).fill(null));
+	const items = question?.questions ?? [];
+	const [answers, setAnswers] = useState(() => Array(items.length).fill(null));
+	if (items.length === 0) return null;
 	const complete = answers.every(Boolean);
 	return html`
 		<section class="plan-decision-card" aria-label="Questions from agent">
@@ -4656,7 +4626,7 @@ function QuestionCard({ question, onChoose }) {
 				<span class="plan-decision-name">agent</span>
 				<span class="plan-decision-kind">questions</span>
 			</div>
-			${question.questions.map(
+			${items.map(
 				(item, index) => html`
 					<div class="plan-decision-body">${item.question}</div>
 					<div class="plan-decision-options">
@@ -4721,7 +4691,7 @@ function App() {
 	// Streaming state lives in LiveStreamingBlocks, so token commits never
 	// reconcile the sidebar or full settled transcript.
 	const streamingControllerRef = useRef(null);
-	const updateStreaming = useCallback((updater) => streamingControllerRef.current?.update(updater), []);
+	const updateStreaming = useCallback((event) => streamingControllerRef.current?.reduce(event), []);
 	const resetStreamingNow = useCallback(() => streamingControllerRef.current?.reset(), []);
 	const takeStreamingNow = useCallback(() => streamingControllerRef.current?.take() ?? [], []);
 	const [running, setRunning] = useState(false);
@@ -5743,42 +5713,25 @@ function App() {
 						break;
 					}
 					case "token":
-						updateStreaming((prev) => appendTextBlock(prev, "content", event.text));
+						updateStreaming({ type: "content", text: event.text });
 						break;
 					case "thinking":
-						updateStreaming((prev) => appendTextBlock(prev, "thinking", event.text));
+						updateStreaming({ type: "thinking", text: event.text });
 						break;
 					case "tool_start":
-						updateStreaming((prev) => {
-							const index = prev.findIndex((block) => block.kind === "tool" && block.call.id === event.id);
-							const call = { id: event.id, name: event.name, args: event.args, status: event.status };
-							if (index === -1) return [...prev, { kind: "tool", call }];
-							return prev.map((block, i) => (i === index ? { kind: "tool", call } : block));
+						updateStreaming({
+							type: "tool_start",
+							call: { id: event.id, name: event.name, args: event.args, status: event.status },
 						});
 						break;
 					case "tool_end":
-						updateStreaming((prev) =>
-							prev.map((b) =>
-								b.kind === "tool" && b.call.id === event.id
-									? {
-											...b,
-											call: {
-												...b.call,
-												status: event.status,
-												// Full, untruncated — same text the model actually saw.
-												// A page reload already shows this in full (bridge.ts's
-												// toDisplayMessages applies no cap), so a live turn
-												// truncating it here just meant the same result read
-												// differently depending on when you looked at it.
-												result: event.result?.content ?? "",
-												// A `read` on an image file: inline it live instead of
-												// only after a reload picks it up via toDisplayMessages.
-												...(event.result?.imageDataUrl ? { images: [event.result.imageDataUrl] } : {}),
-											},
-										}
-									: b,
-							),
-						);
+						updateStreaming({
+							type: "tool_end",
+							id: event.id,
+							status: event.status,
+							result: event.result?.content ?? "",
+							...(event.result?.imageDataUrl ? { images: [event.result.imageDataUrl] } : {}),
+						});
 						if (diffOpenRef.current) {
 							queueDiffRefresh();
 						}
@@ -5812,17 +5765,7 @@ function App() {
 							if (prevStreaming.length > 0) {
 								return { ...prev, messages: [...prev.messages, { role: "assistant", blocks: prevStreaming }] };
 							}
-							const blocks = [];
-							if (event.thinking) blocks.push({ kind: "thinking", text: event.thinking });
-							if (event.toolCalls?.length) {
-								for (const tc of event.toolCalls) {
-									blocks.push({
-										kind: "tool",
-										call: { id: tc.id ?? "", name: tc.name, args: tc.arguments, status: "ok" },
-									});
-								}
-							}
-							if (event.content) blocks.push({ kind: "content", text: event.content });
+							const blocks = blocksFromAssistantCompletion(event);
 							if (blocks.length === 0) return prev;
 							return { ...prev, messages: [...prev.messages, { role: "assistant", blocks }] };
 						});
@@ -6474,7 +6417,7 @@ function App() {
 						!running &&
 						html`
 							<${PlanDecisionCard} transition=${session?.planTransition ?? planTransition} onChoose=${handlePlanTransition} />
-							<${QuestionCard} question=${session?.question} onChoose=${answerQuestion} />
+							${session?.question && html`<${QuestionCard} question=${session.question} onChoose=${answerQuestion} />`}
 						`
 					}
 				</div>
