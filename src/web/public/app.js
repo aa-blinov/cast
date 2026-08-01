@@ -18,6 +18,7 @@ import { icons } from "./icons.js";
 import { InputsExplorer as InputsExplorerModule } from "./inputs-explorer.js";
 import { Message as MessageModule } from "./message.js";
 import { submitMessage as submitMessageRequest } from "./message-submit.js";
+import { useModalFocusTrap } from "./modal-focus.js";
 import { PlanDecisionCard, QuestionCard } from "./plan-cards.js";
 import { SettingsAppearance } from "./settings-appearance.js";
 import { SettingsModal as SettingsModalModule } from "./settings-modal.js";
