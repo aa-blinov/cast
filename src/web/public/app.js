@@ -17,6 +17,7 @@ import { useModalFocusTrap } from "./modal-focus.js";
 import { PlanDecisionCard, QuestionCard } from "./plan-cards.js";
 import { collapseMidWordBoundaries, mergeMidWordBoundary } from "./reasoning-split.js";
 import { ShareModal } from "./share-modal.js";
+import { SettingsModel } from "./settings-model.js";
 import { SlotModelPicker } from "./slot-model-picker.js";
 import { StatusPopover } from "./status-popover.js";
 import {
@@ -2337,53 +2338,6 @@ function SettingsModal({
 					</div>
 				</div>
 			</div>
-		</div>
-	`;
-}
-
-/**
- * Cascading provider → model picker.  When the user picks a provider its
- * /v1/models list is fetched and shown in the model dropdown. The "Set"
- * button applies the provider and model. "Reset" is one atomic command that
- * returns a secondary slot to the main model and provider.
- */
-/**
- * Cascading provider → model picker.
- * @param providerCommand  e.g. "/subagent-model-provider" or "/provider"
- * @param modelCommand      e.g. "/subagent-model" or "/model"
- */
-function SettingsModel({ data, busy, act }) {
-	const [reasoningValue, setReasoningValue] = useState("");
-	if (!data) return null;
-	const c = data.current || {};
-	const providers = data.providers || [];
-	const activeProviderName = providers.find((p) => p.active)?.name ?? "";
-	return html`
-		<div class="settings-rows">
-			<div class="settings-section-title">Model</div>
-			<p class="settings-hint">Pick a provider first — its dropdown populates with that provider's models. Pick a model and click Apply.</p>
-			<${SlotModelPicker} busy=${busy} act=${act} providers=${providers} activeProviderName=${activeProviderName} currentProvider=${activeProviderName} currentModel=${c.model} providerCommand="/provider" modelCommand="/model" isMainSlot=${true} initialModels=${data.models} />
-			<div class="settings-section-title">Reasoning — current: ${c.reasoningLevel ?? "off"}</div>
-			${
-				data.reasoningOptions.length === 0
-					? html`<div class="settings-hint">This model exposes no reasoning controls.</div>`
-					: html`
-					<p class="settings-hint">Controls how much internal thinking the model does before answering. Higher levels use more tokens but can improve complex task performance.</p>
-					<div class="settings-form-row">
-						<select onChange=${(e) => setReasoningValue(e.target.value)}>
-							<option value="">Pick a level…</option>
-							${data.reasoningOptions.map((o) => html`<option key=${o.value} value=${o.value}>${o.label}</option>`)}
-						</select>
-						<button class="modal-btn icon-btn" title="Apply reasoning" disabled=${busy || !reasoningValue} onClick=${() => act(`/reasoning ${reasoningValue}`)}><${icons.check} /></button>
-					</div>
-				`
-			}
-			<div class="settings-section-title">Subagent model${c.subagentModelProvider ? ` — @ ${c.subagentModelProvider}` : ""}</div>
-			<p class="settings-hint">Model used for task subagents — inherits the main model unless overridden here. Use ↩ to return to inheritance.</p>
-			<${SlotModelPicker} busy=${busy} act=${act} providers=${providers} activeProviderName=${activeProviderName} currentProvider=${c.subagentModelProvider} currentModel=${c.subagentModel} fallbackModel=${c.model} providerCommand="/subagent-model-provider" modelCommand="/subagent-model" initialModels=${data.models} />
-			<div class="settings-section-title">Plan-mode model${c.planModelProvider ? ` — @ ${c.planModelProvider}` : ""}</div>
-			<p class="settings-hint">Model used when the agent enters plan mode — inherits the main model unless overridden here.</p>
-			<${SlotModelPicker} busy=${busy} act=${act} providers=${providers} activeProviderName=${activeProviderName} currentProvider=${c.planModelProvider} currentModel=${c.planModel} fallbackModel=${c.model} providerCommand="/plan-model-provider" modelCommand="/plan-model" initialModels=${data.models} />
 		</div>
 	`;
 }
