@@ -104,6 +104,7 @@ const webJavaScript = [
 	"streaming-blocks.js",
 	"tool-card.js",
 	"turn-meta.js",
+	"use-workspace-state.js",
 	"tool-card.js",
 	"sidebar-session-item.js",
 	"sidebar.js",
