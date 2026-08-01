@@ -48,6 +48,10 @@ The `/sessions` picker shows each session's project, first message, last-updated
 
 `/continue` is the quick path: it finds the most recently updated session that isn't the current one and switches to it — autosaving the current session first if it has messages. If there's no other session to resume, it shows a notice. This is the in-session equivalent of `cast -c`.
 
+### Web UI Sidebar
+
+The Web UI groups sessions by their working directory. Quick sessions created with the `new` action use a dedicated `Sandbox` group; project sessions are grouped by the final directory name rather than the full path. Groups are ordered by latest activity. Within each group, pinned sessions come first, followed by running sessions and then the remaining sessions ordered by `updatedAt`. Pinning stays local to the current directory group, and hovering a group name reveals the full path. Search results remain a flat relevance-ranked list.
+
 ## Creating New Sessions
 
 ```
