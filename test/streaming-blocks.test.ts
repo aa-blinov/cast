@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-	appendStreamText,
-	appendText,
-	type StreamBlock,
-	settledPrefixLength,
-	splitCompleteLines,
-} from "../src/ui/useAgentSession.ts";
+import { type StreamBlock, settledPrefixLength, splitCompleteLines } from "../src/ui/useAgentSession.ts";
+import { appendTextBlock, blocksFromAssistantCompletion, reduceStreamEvent } from "../src/web/public/stream-blocks.js";
 
 const think = (text: string): StreamBlock => ({ kind: "thinking", text });
 const content = (text: string): StreamBlock => ({ kind: "content", text });
@@ -85,14 +80,14 @@ describe("splitCompleteLines", () => {
 
 describe("appendText", () => {
 	it("merges into the trailing block of the same kind", () => {
-		expect(appendText([content("Hel")], "content", "lo")).toEqual([content("Hello")]);
+		expect(appendTextBlock([content("Hel")], "content", "lo")).toEqual([content("Hello")]);
 	});
 
 	it("starts a new block when the kind switches, marking the previous as settled", () => {
 		// The previous content block gets continued:false so it renders its label,
 		// instead of bleeding into the next block's label line.
 		const prev = { ...content("answering"), continued: false };
-		expect(appendText([content("answering")], "thinking", "hmm")).toEqual([prev, think("hmm")]);
+		expect(appendTextBlock([content("answering")], "thinking", "hmm")).toEqual([prev, think("hmm")]);
 	});
 
 	it("marks a continued (streaming) block as settled when a different kind starts", () => {
@@ -101,32 +96,51 @@ describe("appendText", () => {
 		// last line gets its [reasoning] label back — otherwise that letter
 		// runs straight into [agent] on the next line.
 		const settledTail = { ...think("last word"), continued: false };
-		expect(appendText([think("last word")], "content", "answer")).toEqual([settledTail, content("answer")]);
+		expect(appendTextBlock([think("last word")], "content", "answer")).toEqual([settledTail, content("answer")]);
 	});
 
 	it("merges back into an earlier same-kind block across intervening thinking (MiniMax-M2 interleaving)", () => {
 		const blocks = [content("Привет! Я помогу с пит"), think("...")];
-		expect(appendText(blocks, "content", "чами")).toEqual([content("Привет! Я помогу с питчами"), think("...")]);
+		expect(appendTextBlock(blocks, "content", "чами")).toEqual([content("Привет! Я помогу с питчами"), think("...")]);
 	});
 
 	it("does not merge across a tool call boundary", () => {
 		const blocks = [content("before"), tool("ok")];
-		expect(appendText(blocks, "content", "after")).toEqual([content("before"), tool("ok"), content("after")]);
+		expect(appendTextBlock(blocks, "content", "after")).toEqual([content("before"), tool("ok"), content("after")]);
 	});
 
 	it("keeps a reasoning run intact across an ambiguous whitespace content delta", () => {
-		const initial = appendStreamText({ blocks: [] }, "thinking", "First reasoning chunk.");
-		const buffered = appendStreamText(initial, "content", "\n\n");
-		const combined = appendStreamText(buffered, "thinking", " Second reasoning chunk.");
+		const initial = reduceStreamEvent({ blocks: [] }, { type: "thinking", text: "First reasoning chunk." });
+		const buffered = reduceStreamEvent(initial, { type: "content", text: "\n\n" });
+		const combined = reduceStreamEvent(buffered, { type: "thinking", text: " Second reasoning chunk." });
 		expect(buffered).toEqual({ blocks: [think("First reasoning chunk.")], pendingContentWhitespace: "\n\n" });
 		expect(combined).toEqual({ blocks: [think("First reasoning chunk. Second reasoning chunk.")] });
 	});
 
 	it("keeps buffered whitespace when visible content confirms the answer has started", () => {
-		const initial = appendStreamText({ blocks: [think("Reasoning done.")] }, "content", "\n\n");
-		const answer = appendStreamText(initial, "content", "Answer.");
+		const initial = reduceStreamEvent({ blocks: [think("Reasoning done.")] }, { type: "content", text: "\n\n" });
+		const answer = reduceStreamEvent(initial, { type: "content", text: "Answer." });
 		expect(answer).toEqual({
 			blocks: [{ ...think("Reasoning done."), continued: false }, content("\n\nAnswer.")],
 		});
+	});
+});
+
+describe("blocksFromAssistantCompletion", () => {
+	it("keeps the assistant reply above the tool calls that it initiates", () => {
+		expect(
+			blocksFromAssistantCompletion({
+				thinking: "I should inspect the machine.",
+				content: "Сейчас посмотрю подробности.",
+				toolCalls: [{ id: "call-1", name: "bash", arguments: "uname -a" }],
+			}),
+		).toEqual([
+			think("I should inspect the machine."),
+			content("Сейчас посмотрю подробности."),
+			{
+				kind: "tool",
+				call: { id: "call-1", name: "bash", args: "uname -a", status: "ok" },
+			},
+		]);
 	});
 });

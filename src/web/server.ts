@@ -191,7 +191,7 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 			if (!stat.isFile()) return false;
 			const ext = extname(filePath);
 			const mime = MIME_TYPES[ext] ?? "application/octet-stream";
-			// index.html is never cached (below), but app.js/style.css are — so
+			// index.html is never cached (below), but app.js/stylesheets are — so
 			// stamp their URLs with the running version here. A browser holding
 			// a stale cached index.html still asks for the JS/CSS it originally
 			// linked, which is fine; any fresh load after an upgrade gets new
@@ -202,7 +202,13 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 				content = content
 					.toString("utf-8")
 					.replace('href="/style.css"', `href="/style.css?v=${buildStamp}"`)
+					.replace('href="/chat.css"', `href="/chat.css?v=${buildStamp}"`)
+					.replace('href="/tools.css"', `href="/tools.css?v=${buildStamp}"`)
 					.replace('src="/app.js"', `src="/app.js?v=${buildStamp}"`);
+			} else if (urlPath === "/app.js") {
+				content = content
+					.toString("utf-8")
+					.replace('from "./stream-blocks.js"', `from "./stream-blocks.js?v=${buildStamp}"`);
 			}
 			res.writeHead(200, {
 				"Content-Type": mime,
@@ -1236,7 +1242,7 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 
 		// /shared/<token> (the page) and /api/shared/<token> (its data) are the
 		// one deliberate hole in auth — everything else still needs Basic Auth.
-		// The static assets the shared page itself loads (app.js, style.css,
+		// The static assets the shared page itself loads (app.js, stylesheets,
 		// icons.js) have to be exempt too, or the browser 401s fetching them and
 		// hangs on its native credentials prompt with nothing ever rendering —
 		// they carry no secrets (the actual password check happens server-side
@@ -1245,7 +1251,10 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 		const PUBLIC_STATIC_ASSETS = new Set([
 			"/app.js",
 			"/style.css",
+			"/chat.css",
+			"/tools.css",
 			"/icons.js",
+			"/stream-blocks.js",
 			"/favicon.svg",
 			"/cast-banner-grid.json",
 		]);
