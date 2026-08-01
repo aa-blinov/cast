@@ -14,9 +14,9 @@ import { DirectoryBrowser } from "./directory-browser.js";
 import { ElapsedTimer } from "./elapsed-timer.js";
 import { FileExplorer as FileExplorerModule } from "./file-explorer.js";
 import { FilePreviewModal } from "./file-preview.js";
-import { humanSize } from "./file-size.js";
 import { hotkeysHtml, modKey } from "./hotkeys.js";
 import { icons } from "./icons.js";
+import { InputsExplorer as InputsExplorerModule } from "./inputs-explorer.js";
 import { useModalFocusTrap } from "./modal-focus.js";
 import { PlanDecisionCard, QuestionCard } from "./plan-cards.js";
 import { collapseMidWordBoundaries, mergeMidWordBoundary } from "./reasoning-split.js";
@@ -702,108 +702,6 @@ function Message({ msg }) {
 // the project's own cwd. No tree/search/rename like FileExplorer below:
 // attachments aren't expected to have subdirectories, so there's nothing to
 // expand or navigate, only a list to download/preview/remove from.
-function InputsExplorer({ activeId, confirm, refreshNonce }) {
-	const [entries, setEntries] = useState([]);
-	const [error, setError] = useState(null);
-	const [busyName, setBusyName] = useState(null);
-	const [loading, setLoading] = useState(true);
-
-	const load = useCallback(async () => {
-		if (!activeId) return;
-		setLoading(true);
-		try {
-			const data = await api("GET", `/api/sessions/${activeId}/inputs`);
-			setEntries(data?.entries ?? []);
-			setError(null);
-		} catch (err) {
-			setError(err.message);
-		} finally {
-			setLoading(false);
-		}
-	}, [activeId]);
-
-	// biome-ignore lint/correctness/useExhaustiveDependencies: refreshNonce prop triggers reload when docs uploaded
-	useEffect(() => {
-		setError(null);
-		setLoading(false);
-		load();
-	}, [load, refreshNonce]);
-
-	const downloadHref = (name) => `/api/sessions/${activeId}/inputs/download?path=${encodeURIComponent(name)}`;
-	const previewHref = (name) => `${downloadHref(name)}&inline=1`;
-
-	const doDelete = async (name) => {
-		if (!(await confirm(`Remove attached file "${name}"? This can't be undone.`))) return;
-		setBusyName(name);
-		try {
-			await api("DELETE", `/api/sessions/${activeId}/inputs?path=${encodeURIComponent(name)}`);
-			await load();
-		} catch (err) {
-			setError(err.message);
-		} finally {
-			setBusyName(null);
-		}
-	};
-
-	if (loading) {
-		return html`
-			<div class="fs-explorer">
-				<div class="diff-empty">Loading…</div>
-			</div>
-		`;
-	}
-
-	return html`
-		<div class="fs-explorer">
-			${error && html`<div class="diff-empty diff-empty-error">${error}</div>`}
-			${
-				!error && entries.length === 0
-					? html`
-					<div class="diff-empty diff-empty-hint">
-						<div>
-							<p class="diff-empty-title">No files attached</p>
-							<p>Attach a document from the composer's paperclip button — it'll show up here.</p>
-						</div>
-					</div>
-				`
-					: html`
-					<div class="fs-tree">
-						${entries.map(
-							(e) => html`
-							<div key=${e.name} class="fs-row">
-								<div class="fs-row-main" onClick=${() => window.open(previewHref(e.name), "_blank", "noopener")}>
-									<span class="fs-icon"><${icons.docFile} /></span>
-									<span class="fs-name">${e.name}</span>
-									${e.size != null ? html`<span class="fs-size">${humanSize(e.size)}</span>` : null}
-								</div>
-								<div class="fs-row-actions">
-									<a
-										class="fs-action"
-										href=${downloadHref(e.name)}
-										download
-										title="Download"
-										onClick=${(ev) => ev.stopPropagation()}
-									><${icons.arrowDownTray} /></a>
-									<button
-										class="fs-action"
-										disabled=${busyName === e.name}
-										title="Remove"
-										onClick=${(ev) => {
-											ev.stopPropagation();
-											doDelete(e.name);
-										}}
-									><${icons.trash} /></button>
-								</div>
-							</div>
-						`,
-						)}
-					</div>
-				`
-			}
-		</div>
-	`;
-}
-
 // Read/download/delete view of the session's actual working directory — the
 // Changes tab above only shows uncommitted git diffs, which is empty (or
 // wrong) the moment something's been committed, or the cwd isn't a git repo
@@ -4186,7 +4084,7 @@ function App() {
 			     leave this unmounted entirely while still reserving its grid
 			     column on open, which read as content shifting into an empty
 			     void with no panel there to show for it. -->
-			<${DiffPanelModule} data=${diffData} activeFile=${diffFile} onSelectFile=${setDiffFile} onResizeStart=${startDiffResize} open=${diffOpen} activeId=${activeId} tab=${diffTab} onTabChange=${setDiffTab} confirm=${requestConfirm} fsRefreshNonce=${fsRefreshNonce} inputsRefreshNonce=${inputsRefreshNonce} bootstrapping=${bootstrapping} InputsExplorer=${InputsExplorer} FileExplorer=${FileExplorerModule} />
+			<${DiffPanelModule} data=${diffData} activeFile=${diffFile} onSelectFile=${setDiffFile} onResizeStart=${startDiffResize} open=${diffOpen} activeId=${activeId} tab=${diffTab} onTabChange=${setDiffTab} confirm=${requestConfirm} fsRefreshNonce=${fsRefreshNonce} inputsRefreshNonce=${inputsRefreshNonce} bootstrapping=${bootstrapping} InputsExplorer=${InputsExplorerModule} FileExplorer=${FileExplorerModule} />
 		</div>
 	`;
 }

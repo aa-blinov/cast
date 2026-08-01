@@ -92,6 +92,7 @@ const webJavaScript = [
 	"file-size.js",
 	"file-explorer.js",
 	"hotkeys.js",
+	"inputs-explorer.js",
 	"icons.js",
 	"modal-focus.js",
 	"plan-cards.js",
