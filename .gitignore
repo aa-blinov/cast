@@ -31,4 +31,7 @@ test/__test_tmp__/
 .zed/
 .mimocode/
 .playwright-mcp/
+# Project-local Cast state (plans, skills, and credentials) is runtime data,
+# not repository configuration.
+.cast/
 chapters/
