@@ -7,6 +7,7 @@ import htm from "htm";
 import { h, render } from "preact";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { api } from "./api.js";
+import { CastLogo } from "./cast-logo.js";
 import { ElapsedTimer } from "./elapsed-timer.js";
 import { FilePreviewModal } from "./file-preview.js";
 import { icons } from "./icons.js";
@@ -25,54 +26,6 @@ import { SidebarSessionItem } from "./sidebar-session-item.js";
 import { blocksFromAssistantCompletion, reduceStreamEvent } from "./stream-blocks.js";
 
 const html = htm.bind(h);
-
-// Same mark as the CLI's startup banner (core/help.ts's CAST_BANNER) and the
-// GitHub Pages/README SVG logo (scripts/build-banner-svg.mjs) — all three now
-// read this one grid instead of each keeping its own copy that could drift.
-// Fetched (not statically imported) because this file has no build step —
-// see the header comment above — and a top-level await here blocks the rest
-// of the module (including the initial render() call) until it resolves, so
-// there's no flash of a missing logo while it loads.
-// Absolute, not relative — a relative fetch resolves against the current
-// page URL, which breaks on /shared/<token> (a different path serving this
-// same app.js) since it'd then look for /shared/cast-banner-grid.json.
-const CAST_BANNER_LINES = await fetch("/cast-banner-grid.json").then((r) => r.json());
-
-// Terminal block-drawing chars, darkest→lightest fill (matches the CLI/site
-// banner's own weighting so the shape reads the same everywhere).
-const CAST_LOGO_OPACITY = { "░": 0.35, "▒": 0.6, "▓": 0.85, "█": 1 };
-const CAST_LOGO_CELL = 10;
-
-// Rendered as an inline SVG (not a static file/<img>) specifically so its
-// gradient can be driven by the live theme via plain CSS `stop-color: var(...)`
-// on the two <stop> elements below — an <img src="*.svg"> bakes its colors in
-// at file-save time and can't react to a runtime /theme change the way the
-// old text-clip ASCII version could.
-function CastLogo({ class: className }) {
-	const rects = [];
-	CAST_BANNER_LINES.forEach((line, y) => {
-		for (let x = 0; x < line.length; x++) {
-			const opacity = CAST_LOGO_OPACITY[line[x]];
-			if (!opacity) continue;
-			rects.push(
-				html`<rect key=${`${x}-${y}`} x=${x * CAST_LOGO_CELL} y=${y * CAST_LOGO_CELL} width=${CAST_LOGO_CELL} height=${CAST_LOGO_CELL} fill="url(#cast-logo-grad)" opacity=${opacity} />`,
-			);
-		}
-	});
-	const width = Math.max(...CAST_BANNER_LINES.map((l) => l.length)) * CAST_LOGO_CELL;
-	const height = CAST_BANNER_LINES.length * CAST_LOGO_CELL;
-	return html`
-		<svg class=${className} viewBox="0 0 ${width} ${height}" role="img" aria-label="cast">
-			<defs>
-				<linearGradient id="cast-logo-grad" x1="0%" y1="0%" x2="100%" y2="0%">
-					<stop class="cast-logo-grad-from" offset="0%" />
-					<stop class="cast-logo-grad-to" offset="100%" />
-				</linearGradient>
-			</defs>
-			${rects}
-		</svg>
-	`;
-}
 
 const isMac =
 	typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "");
