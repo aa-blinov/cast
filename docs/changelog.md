@@ -2,6 +2,16 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.12.9
+
+### Fixed
+
+- Fixed Web UI startup after the recent client modularization by restoring the resource-load and modal-focus hooks used by the root application.
+
+### Changed
+
+- Split Web UI settings panels, message submission, panel resizing, and SSE handling into focused modules without changing the TUI or Web UI behavior.
+
 ## 0.12.8
 
 ### Added
