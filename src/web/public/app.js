@@ -28,6 +28,7 @@ import { SANDBOX_CWD, shortPath } from "./sidebar-utils.js";
 import { StatusPopover } from "./status-popover.js";
 import { blocksFromAssistantCompletion } from "./stream-blocks.js";
 import { LiveStreamingBlocks as LiveStreamingBlocksModule } from "./streaming-blocks.js";
+import { useSessionState } from "./use-session-state.js";
 import { useWorkspaceState } from "./use-workspace-state.js";
 
 const html = htm.bind(h);
@@ -1427,24 +1428,45 @@ function mergeHistoryPage(previous, incoming) {
 // shimmer on the whole reply.
 
 function App() {
-	const [sessions, setSessions] = useState([]);
-	const [sessionsLoaded, setSessionsLoaded] = useState(false);
-	const [defaultModel, setDefaultModel] = useState("");
-	const [activeId, setActiveId] = useState(null);
-	const [session, setSession] = useState(null);
-	const activeSessionIdRef = useRef(null);
-	activeSessionIdRef.current = activeId;
-	const [personas, setPersonas] = useState([]);
-	const [commands, setCommands] = useState([]);
+	const {
+		sessions,
+		setSessions,
+		sessionsLoaded,
+		setSessionsLoaded,
+		defaultModel,
+		setDefaultModel,
+		activeId,
+		setActiveId,
+		session,
+		setSession,
+		activeSessionIdRef,
+		personas,
+		setPersonas,
+		commands,
+		setCommands,
+		running,
+		setRunning,
+		pendingSteers,
+		setPendingSteers,
+		pendingQueue,
+		setPendingQueue,
+		planTransition,
+		setPlanTransition,
+		pendingPlanSignalRef,
+		planRefineArmedRef,
+	} = useSessionState();
 	// Re-fetched per active session (not just once at boot) because the list
 	// now includes one live slash-command entry per loaded, enabled skill —
 	// those vary by session cwd and change after /reload, so a stale one-shot
 	// fetch would leave the palette missing/showing skills that no longer
 	// match reality.
-	const refreshCommands = useCallback(async (id) => {
-		const c = await api("GET", `/api/commands${id ? `?session=${encodeURIComponent(id)}` : ""}`).catch(() => null);
-		if (c) setCommands(c);
-	}, []);
+	const refreshCommands = useCallback(
+		async (id) => {
+			const c = await api("GET", `/api/commands${id ? `?session=${encodeURIComponent(id)}` : ""}`).catch(() => null);
+			if (c) setCommands(c);
+		},
+		[setCommands],
+	);
 	useEffect(() => {
 		if (activeId) refreshCommands(activeId);
 	}, [activeId, refreshCommands]);
@@ -1475,12 +1497,6 @@ function App() {
 	const updateStreaming = useCallback((event) => streamingControllerRef.current?.reduce(event), []);
 	const resetStreamingNow = useCallback(() => streamingControllerRef.current?.reset(), []);
 	const takeStreamingNow = useCallback(() => streamingControllerRef.current?.take() ?? [], []);
-	const [running, setRunning] = useState(false);
-	const [pendingSteers, setPendingSteers] = useState([]);
-	const [pendingQueue, setPendingQueue] = useState([]);
-	const [planTransition, setPlanTransition] = useState(null);
-	const pendingPlanSignalRef = useRef(null);
-	const planRefineArmedRef = useRef(false);
 	// Open/closed and which tab, like theme/font below, survive a page
 	// reload via localStorage — losing "I had Files open" on every refresh
 	// (or worse, having to reload while it was mid-task) was just annoying.
@@ -1631,9 +1647,12 @@ function App() {
 	// Command feedback belongs in the permanent transcript, not a 4-second
 	// toast — role "warning" (not "system") since the real system-prompt
 	// message at messages[0] is role:"system" and gets filtered from view.
-	const addNotice = useCallback((text, role = "warning") => {
-		setSession((prev) => (prev ? { ...prev, messages: [...prev.messages, { role, content: text }] } : prev));
-	}, []);
+	const addNotice = useCallback(
+		(text, role = "warning") => {
+			setSession((prev) => (prev ? { ...prev, messages: [...prev.messages, { role, content: text }] } : prev));
+		},
+		[setSession],
+	);
 
 	// Load sessions
 	const loadSessions = useCallback(async () => {
@@ -1643,7 +1662,7 @@ function App() {
 			if (version === sessionsLoadVersionRef.current) setSessions(data);
 		} catch {}
 		if (version === sessionsLoadVersionRef.current) setSessionsLoaded(true);
-	}, []);
+	}, [setSessions, setSessionsLoaded]);
 
 	// Select session — `push` controls whether this lands as a new browser
 	// history entry (a real click) or just replaces the current URL
@@ -1697,7 +1716,7 @@ function App() {
 				if (version === sessionViewVersionRef.current) showToast(err.message, "error");
 			}
 		},
-		[showToast, undismiss, resetStreamingNow, setSidebarOpen],
+		[showToast, undismiss, resetStreamingNow, setSidebarOpen, setActiveId, setRunning, setSession],
 	);
 
 	// Create session — the POST already returns the full new (empty) session,
@@ -1744,7 +1763,7 @@ function App() {
 			void loadSessions();
 			return data.id;
 		},
-		[loadSessions, resetStreamingNow, setSidebarOpen],
+		[loadSessions, resetStreamingNow, setSidebarOpen, setActiveId, setRunning, setSession],
 	);
 
 	// "+ New session" — picking a persona no longer hits the server at all.
@@ -1781,7 +1800,7 @@ function App() {
 			const url = window.location.pathname;
 			window.history.pushState({ sessionId: null }, "", url);
 		},
-		[resetStreamingNow, setSidebarOpen],
+		[resetStreamingNow, setSidebarOpen, setActiveId, setRunning, setSession],
 	);
 
 	// Static, rarely-changing resource lists — personas/commands/themes/config
@@ -1863,7 +1882,18 @@ function App() {
 		} catch {
 			return false;
 		}
-	}, [selectSession, showToast, startDraft, setDefaultCwd, setQuickSessionPersona]);
+	}, [
+		selectSession,
+		showToast,
+		startDraft,
+		setDefaultCwd,
+		setQuickSessionPersona,
+		setCommands,
+		setDefaultModel,
+		setPersonas,
+		setSessions,
+		setSessionsLoaded,
+	]);
 
 	// The browser's own EventSource retry only covers a connection that
 	// dropped after connecting fine (network blip, laptop sleep) — it does
@@ -1932,7 +1962,19 @@ function App() {
 				resetStreamingNow();
 			}
 		},
-		[sessions, activeId, personas, selectSession, startDraft, showToast, dismissedIds, resetStreamingNow],
+		[
+			sessions,
+			activeId,
+			personas,
+			selectSession,
+			startDraft,
+			showToast,
+			dismissedIds,
+			resetStreamingNow,
+			setActiveId,
+			setSession,
+			setSessions,
+		],
 	);
 
 	// Rename — overrides the auto-derived-from-first-message title. Updates
@@ -1947,7 +1989,7 @@ function App() {
 				showToast(err.message, "error");
 			}
 		},
-		[activeId, showToast],
+		[activeId, showToast, setSession, setSessions],
 	);
 
 	const pinSession = useCallback(
@@ -1959,7 +2001,7 @@ function App() {
 				showToast(err.message, "error");
 			}
 		},
-		[showToast],
+		[showToast, setSessions],
 	);
 
 	// Holds the session the Share modal is open for — null when closed.
@@ -2311,8 +2353,17 @@ function App() {
 			selectSession,
 			showToast,
 			toggleDiff,
-			addNotice, // Refresh the Inputs panel now that files are on disk
+			addNotice,
 			setInputsRefreshNonce,
+			planRefineArmedRef,
+			setDefaultModel,
+			setPendingQueue,
+			setPendingSteers, // Show the message immediately — waiting for the POST to resolve before
+			// appending it made every send feel like it had a beat of lag, even
+			// though the round trip to localhost is fast. Rendered the same shape
+			// toDisplayMessages produces (content: text, images: [...]) so a page
+			// reload looks identical to what was just shown live.
+			setSession,
 		],
 	);
 
@@ -2355,7 +2406,17 @@ function App() {
 				showToast(err.message, "error");
 			}
 		},
-		[activeId, planTransition, session?.planTransition, submitMessage, addNotice, showToast],
+		[
+			activeId,
+			planTransition,
+			session?.planTransition,
+			submitMessage,
+			addNotice,
+			showToast,
+			planRefineArmedRef,
+			setPlanTransition,
+			setSession,
+		],
 	);
 
 	const answerQuestion = useCallback(
@@ -2368,7 +2429,7 @@ function App() {
 				showToast(err.message, "error");
 			}
 		},
-		[activeId, session?.question, showToast],
+		[activeId, session?.question, showToast, setSession],
 	);
 
 	// Abort
@@ -2380,7 +2441,7 @@ function App() {
 		setSession((prev) =>
 			prev ? { ...prev, messages: [...prev.messages, { role: "warning", content: "Run aborted" }] } : prev,
 		);
-	}, [activeId]);
+	}, [activeId, setSession]);
 
 	// Load diff — always the full multi-file diff. Selecting a file in the
 	// list (setDiffFile below) just changes which of the already-fetched
@@ -2399,7 +2460,7 @@ function App() {
 			if (version === diffRequestVersionRef.current && activeSessionIdRef.current === sessionId)
 				setDiffData({ files: [] });
 		}
-	}, [activeId, diffRequestVersionRef, setDiffData]);
+	}, [activeId, diffRequestVersionRef, setDiffData, activeSessionIdRef.current]);
 	const queueDiffRefresh = useCallback(() => {
 		if (!diffOpenRef.current || diffRefreshRafRef.current != null) return;
 		diffRefreshRafRef.current = requestAnimationFrame(() => {
@@ -2864,7 +2925,7 @@ function App() {
 		} finally {
 			loadingOlderRef.current = false;
 		}
-	}, [session, activeId]);
+	}, [session, activeId, setSession]);
 
 	// Keeps the visible content stable when older messages get prepended
 	// above it — without this the browser's default "preserve scrollTop"
