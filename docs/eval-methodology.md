@@ -19,6 +19,28 @@ system, not a simulation of it. See `docs/eval-behavior.md` for what's actually 
 (signals, the `core`/`chain` split); this doc covers the runner mechanics: comparison, statistical
 validity, baselines, and trace-based debugging.
 
+## What the scoreboard is for
+
+The Model Scoreboard is a certification artifact for selecting a model **for Cast**, not a general
+leaderboard of model intelligence or coding quality. It answers: with this exact system prompt,
+tool surface, agent loop, and provider protocol, does a model reliably choose grounded tool calls,
+complete stateful workflows, and respect the harness lifecycle?
+
+That distinction changes how to use a low score. It is evidence to inspect the trace, not a verdict
+that a model is "bad": the cause may be a model limitation, an ambiguous behavioral contract, or a
+harness regression. A high, stable score is evidence that the model is suitable for Cast; it does
+not imply it is best for unrelated tasks or under another harness.
+
+The scoreboard is intentionally built from one fixed experimental protocol: every case runs exactly
+three times in fresh sessions. This makes each row comparable without displaying a redundant attempt
+count. A case earns scoreboard credit only when all three attempts pass; a 2/3 result remains visible
+as instability, not a partial success.
+
+This does not make one-attempt runs invalid. The normal CLI defaults to one attempt so a developer
+can quickly validate a new case, inspect a trace, or iterate on a harness change. `--scoreboard`
+automatically runs exactly three attempts (an explicit `--repeat 3` is accepted); quick runs are
+diagnostic evidence, not certification data.
+
 ## Directory layout
 
 ```
@@ -281,7 +303,7 @@ where" for the split.
 ## Practical usage
 
 ```bash
-# The full behavior suite, one model
+# Fast development check: one attempt per case (the default)
 node --import tsx evals/run.ts -m <model> -v
 
 # Narrow to cases matching a prefix
@@ -290,7 +312,13 @@ node --import tsx evals/run.ts -m <model> --cases plan- -v
 # Compare two models, same harness, same suite
 node --import tsx evals/run.ts --compare <model1>,<model2> -v
 
-# The way to get a result you can actually trust, not a single-sample anecdote
+# Diagnose stability without changing the scoreboard
+node --import tsx evals/run.ts --compare <model1>,<model2> --repeat 3 -v
+
+# Publish comparable certification results: --scoreboard automatically uses three attempts.
+node --import tsx evals/run.ts --compare <model1>,<model2> --scoreboard -v
+
+# Equivalent explicit spelling, retained for scripts.
 node --import tsx evals/run.ts --compare <model1>,<model2> --repeat 3 -v
 
 # List benches and the cases the current flag selection would run

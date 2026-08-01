@@ -12,7 +12,7 @@ config:
     nodePlacementStrategy: NETWORK_SIMPLEX
 ---
 flowchart LR
-  A["/plan or plan_enter"] --> B[Explore codebase]
+  A["/plan"] --> B[Explore codebase]
   B --> C[Write plan]
   C --> D["plan_done"]
   D --> E{Approval dialog}
@@ -21,17 +21,15 @@ flowchart LR
   E -->|"I'll start myself"| G["/build → your message"]
   E -->|Refine| B
   G --> F
-  F --> H["plan_check steps"]
+  F --> H["Update linked tasks"]
 ```
 
-1. **Enter plan mode** — type `/plan` or the agent suggests it via `plan_enter`
+1. **Enter plan mode** — type `/plan`
 2. **Explore** — the agent reads files, runs read-only shell commands, and analyzes the codebase
 3. **Write plan** — the agent produces a structured markdown plan with a checklist
 4. **Review** — the agent signals completion with `plan_done`; the full plan file path is shown (cmd-click to open it in your editor)
 5. **Approve** — when the turn ends, an approval dialog opens: refine (first — it returns you to the regular composer, where multi-line and image paste work, and your next message goes back to planning as feedback), implement now, clear context and implement (the plan survives in the system prompt, the exploration chatter doesn't), or approve and start yourself. `/build` remains as the manual gesture
-6. **Implement** — the agent works through the plan, checking off steps with `plan_check`
-
-Declining the agent's own `plan_enter` suggestion is safe: the session auto-continues in build mode.
+6. **Implement** — the agent works through the plan and updates its linked task list after each verified step
 
 ## What's Allowed in Plan Mode
 
@@ -71,9 +69,6 @@ plan file.
 | Tool | Mode | Description |
 |------|------|-------------|
 | `plan_done` | Plan | Signal plan is ready for review |
-| `plan_discard` | Plan | Delete a plan |
-| `plan_enter` | Build | Suggest switching to plan mode |
-| `plan_check` | Build | Mark a checklist item as done |
 
 ## Plan Files
 
@@ -111,7 +106,7 @@ How to confirm the changes work.
 Any assumptions made during planning.
 ```
 
-The checklist (`- [ ]`) format is important — `plan_check` marks items as `- [x]` and tracks progress.
+The checklist (`- [ ]`) format identifies the steps projected into the build-mode task list. The plan stays unchanged after approval; task status tracks execution.
 
 ## Commands
 
@@ -157,18 +152,18 @@ An approved plan exists for this task. It was written in plan mode and reviewed 
 [plan content]
 </plan>
 
-Follow the plan step by step. Right after completing each step, mark it done with plan_check.
+Follow the plan step by step. Its steps are projected into the task list; update the matching task after completing and verifying each step.
 ```
 
 The plan stays in the system prompt across turns and survives compaction — it's re-read from disk on each run.
 
 ### Plan Fully Executed
 
-Once every checklist item is checked, the plan is replaced with a brief reference:
+Once every linked task is complete, the plan is replaced with a brief reference:
 
 ```
-The approved plan "name" for this task has been fully executed — every checklist
-item is checked. It no longer steers the work; treat new requests on their own terms.
+The approved plan "name" for this task has been fully executed — every linked
+task is complete. It no longer steers the work; treat new requests on their own terms.
 ```
 
 ## Per-Phase Model

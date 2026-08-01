@@ -1265,7 +1265,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		// With a plan on disk, /build is the approval gesture: the loop injects
 		// the plan into the build-mode system prompt, so the user's next message
 		// (however phrased) starts implementation guided by it.
-		const hasPlan = readActivePlan(createPlanState(session.id)).exists;
+		const hasPlan = readActivePlan(createPlanState(deps.cwd, session.id)).exists;
 		showNotice(
 			hasPlan
 				? "[Plan mode: OFF — plan approved; your next message starts implementation]"
@@ -1327,7 +1327,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 	if (input === "/compact") {
 		showNotice("[Compacting...]");
 		try {
-			const planState = createPlanState(session.id);
+			const planState = createPlanState(deps.cwd, session.id);
 			planState.enabled = deps.planMode;
 			const result = await compactSessionMessages(
 				session.messages,

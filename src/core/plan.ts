@@ -3,7 +3,7 @@
  *
  * The model can read files and produce a structured plan, but cannot execute code
  * or run shell commands. Plans are persisted as markdown files at
- * ~/.cast/plans/<session-id>/<name>.md — one directory per session, so a session
+ * <project>/.cast/plans/<session-id>/<name>.md — one directory per session, so a session
  * can hold several named plans.
  *
  * Authoring the plan itself goes through the SAME `write`/`edit` tools the model
@@ -20,18 +20,9 @@
  * gives it the same tool (and the same nudge) it already uses correctly.
  */
 
-import {
-	existsSync,
-	mkdirSync,
-	readdirSync,
-	readFileSync,
-	renameSync,
-	statSync,
-	unlinkSync,
-	writeFileSync,
-} from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
+import type { TodoItem } from "./todo.ts";
 import { invalidateCachedFile } from "./tools/hashline-cache.ts";
 import type { ToolResult } from "./tools.ts";
 
@@ -40,9 +31,9 @@ import type { ToolResult } from "./tools.ts";
 // ============================================================================
 
 /** All plan tool names — used to disable them wherever plan mode can't apply
- * (headless runs, subagents). Within the TUI they split by mode: the authoring
- * tools are plan-mode-only, plan_check/plan_enter are build-mode-only (see App.tsx). */
-export const PLAN_TOOL_NAMES = ["plan_done", "plan_check", "plan_enter", "plan_discard"] as const;
+ * (headless runs, subagents). */
+export const PLAN_TOOL_NAMES = ["plan_done"] as const;
+export const QUESTION_TOOL_NAME = "question";
 
 /**
  * Terminal (signal) tools: a successful call ends the turn. Their contract is
@@ -53,7 +44,7 @@ export const PLAN_TOOL_NAMES = ["plan_done", "plan_check", "plan_enter", "plan_d
  * doom-loop detector (keyed on exact args) couldn't catch the varying args.
  * Declared here so a new signal tool can't be added without deciding this.
  */
-export const TERMINAL_TOOL_NAMES: readonly string[] = ["plan_done", "plan_enter"];
+export const TERMINAL_TOOL_NAMES: readonly string[] = ["plan_done", QUESTION_TOOL_NAME];
 
 /**
  * Mode policy as data: which tools the TUI hides for a given mode. Plan mode
@@ -71,23 +62,62 @@ export function modeDisabledTools(planMode: boolean): readonly string[] {
 	// active (maybeActivatePlanOnRead) — no plan_read tool needed. The model
 	// uses the exact same tools it already uses for real code, just pointed
 	// at one file.
-	return planMode ? ["plan_check", "plan_enter"] : ["plan_done", "plan_discard"];
+	return planMode ? ["ssh"] : ["plan_done"];
 }
 
 export interface PlanState {
 	enabled: boolean;
-	/** Directory holding this session's plans: ~/.cast/plans/<session-id>/ */
+	/** Directory holding this session's plans: <project>/.cast/plans/<session-id>/ */
 	plansDir: string;
 	/** Plan most recently written via write/edit (gated to plansDir) in this
 	 * process. When unset (e.g. a resumed session), the newest file in
 	 * plansDir is the active plan. */
 	activePlanPath?: string;
+	/** Pending UI decisions are session metadata, persisted by the caller's
+	 * callback rather than hidden files beside the user-authored plan. */
+	planQuestion?: PlanQuestion;
+	planTransition?: PlanTransition;
+	onPendingStateChange?: (question: PlanQuestion | undefined, transition: PlanTransition | undefined) => void;
 }
 
-export function createPlanState(sessionId: string): PlanState {
+export interface QuestionOption {
+	value: string;
+	label: string;
+	description?: string;
+}
+
+export interface QuestionItem {
+	question: string;
+	options: QuestionOption[];
+	recommended?: string;
+}
+
+export interface PlanQuestion {
+	questions: QuestionItem[];
+}
+
+export interface PlanTransition {
+	kind: "done";
+}
+
+export function createPlanState(
+	cwd: string,
+	sessionId: string,
+	pending?: {
+		question?: PlanQuestion;
+		transition?: PlanTransition;
+		onChange?: (question: PlanQuestion | undefined, transition: PlanTransition | undefined) => void;
+	},
+): PlanState {
 	// Path only — the directory is created lazily on first write, so merely
 	// constructing the state (every App render) touches nothing on disk.
-	return { enabled: false, plansDir: join(homedir(), ".cast", "plans", sessionId) };
+	return {
+		enabled: false,
+		plansDir: join(cwd, ".cast", "plans", sessionId),
+		planQuestion: pending?.question,
+		planTransition: pending?.transition,
+		onPendingStateChange: pending?.onChange,
+	};
 }
 
 /** Reduce a model-supplied plan name to a safe kebab-case filename stem.
@@ -275,8 +305,29 @@ export function readPlanFile(planFilePath: string): {
 	}
 }
 
-function writePlanFile(planFilePath: string, content: string): void {
-	writeFileAtomic(planFilePath, content);
+function persistPendingState(planState: PlanState): void {
+	planState.onPendingStateChange?.(planState.planQuestion, planState.planTransition);
+}
+
+/** Pending mode changes are session state, so they survive client reloads. */
+export function readPlanTransition(planState: PlanState): PlanTransition | undefined {
+	return planState.planTransition;
+}
+
+export function resolvePlanTransition(planState: PlanState): void {
+	planState.planTransition = undefined;
+	persistPendingState(planState);
+}
+
+/** The outstanding question is session state, so restarting the TUI cannot
+ * bypass the plan_done gate before the user makes the decision. */
+export function readPlanQuestion(planState: PlanState): PlanQuestion | undefined {
+	return planState.planQuestion;
+}
+
+export function resolvePlanQuestion(planState: PlanState): void {
+	planState.planQuestion = undefined;
+	persistPendingState(planState);
 }
 
 /** All plan names (filename stems) in a session's plans directory, sorted. */
@@ -291,7 +342,7 @@ export function listPlanNames(plansDir: string): string[] {
 	}
 }
 
-/** The plan write/edit/plan_check/plan_done operate on: the one most
+/** The plan write/edit/plan_done operate on: the one most
  * recently written/edited/read, or — after a resume, when that in-memory
  * marker is gone — the newest .md file in the session's plans directory. */
 export function resolveActivePlanPath(planState: PlanState): string | undefined {
@@ -383,6 +434,19 @@ export function listOpenPlanSteps(content: string): string[] {
 	return listHeadingStepsUnderSteps(content);
 }
 
+/** Projects the approved plan's open checklist into the build phase's live
+ * todo state. The plan remains the specification; todos carry execution status. */
+export function createPlanTodos(planState: PlanState): TodoItem[] {
+	const plan = readActivePlan(planState);
+	if (!plan.exists) return [];
+	return listOpenPlanSteps(plan.content).map((step) => ({
+		content: step,
+		status: "pending",
+		priority: "medium",
+		planStep: step,
+	}));
+}
+
 /** Direct child heading sections (one level below `## Steps`) of the Steps
  * section with the most children. Real plans sometimes emit a duplicate empty
  * `## Steps` above the real one (email-tool.md) — the section that actually
@@ -413,11 +477,9 @@ function listHeadingStepsUnderSteps(content: string): string[] {
  * Auto-normalize Steps written as bare `###` headings by inserting a checkbox
  * line under each one that doesn't already carry one. Without this, a plan
  * authored one-heading-per-step (each step carrying its own spec — common in
- * real plans) is invisible to plan_check, which only recognizes `- [ ]`/`- [x]`,
- * while the open-work gate's heading fallback (listOpenPlanSteps) still flags
- * those headings as outstanding. That mismatch left the model looping on
- * plan_check against a plan it could never satisfy, with no in-mode way to
- * fix the plan's format (edit/plan_discard are build-mode-disabled).
+ * real plans) would otherwise project differently from checklist-based plans.
+ * Normalizing during authoring gives the build-mode todo projection one stable
+ * source shape without changing the approved plan later.
  * Idempotent (skips headings that already have a checkbox) and fence-aware.
  */
 function normalizeStepChecklist(content: string): string {
@@ -537,9 +599,8 @@ export function checkPlanFileGate(
 
 /**
  * Called after a successful write/edit to a plan-mode path: normalizes any
- * bare "###" step headings into "- [ ]" checkboxes (so plan_check and the
- * open-work gate can see them — see normalizeStepChecklist), and makes this
- * the active plan for plan_check/plan_done, same as maybeActivatePlanOnRead
+ * bare "###" step headings into "- [ ]" checkboxes so plan steps have one
+ * consistent shape, and makes this the active plan for plan_done, same as maybeActivatePlanOnRead
  * does for a plain read of the file.
  */
 export function finalizePlanFileWrite(absolutePath: string, planState: PlanState): void {
@@ -603,202 +664,54 @@ export function maybeActivatePlanOnRead(absolutePath: string, planState: PlanSta
 	}
 }
 
-export function execPlanCheck(args: Record<string, unknown>, planState: PlanState): ToolResult {
-	const item = typeof args.item === "string" ? args.item.trim() : "";
-	if (!item) {
-		return { content: "Error: item is required — the text of the checklist entry to mark done.", isError: true };
+export function execQuestion(args: Record<string, unknown>, planState: PlanState): ToolResult {
+	const rawQuestions = Array.isArray(args.questions) ? args.questions : [];
+	const questions = rawQuestions.flatMap((raw): QuestionItem[] => {
+		if (!raw || typeof raw !== "object") return [];
+		const item = raw as Record<string, unknown>;
+		const question = typeof item.question === "string" ? item.question.trim() : "";
+		const rawOptions = Array.isArray(item.options) ? item.options : [];
+		const options = rawOptions.flatMap((option): QuestionOption[] => {
+			if (!option || typeof option !== "object") return [];
+			const record = option as Record<string, unknown>;
+			const value = typeof record.value === "string" ? record.value.trim() : "";
+			const label = typeof record.label === "string" ? record.label.trim() : "";
+			const description = typeof record.description === "string" ? record.description.trim() : "";
+			if (!value || !label) return [];
+			return [{ value, label, ...(description ? { description } : {}) }];
+		});
+		const recommended = typeof item.recommended === "string" ? item.recommended.trim() : undefined;
+		if (
+			!question ||
+			options.length < 2 ||
+			options.length > 4 ||
+			new Set(options.map((option) => option.value)).size !== options.length ||
+			(recommended && !options.some((option) => option.value === recommended))
+		)
+			return [];
+		return [{ question, options, ...(recommended ? { recommended } : {}) }];
+	});
+
+	if (questions.length < 1 || questions.length > 4 || questions.length !== rawQuestions.length) {
+		return { content: "Error: questions must contain 1–4 questions, each with 2–4 unique options.", isError: true };
 	}
 
-	// Optional plan name — a session can hold several plans; default is the active one.
-	const requested = typeof args.plan === "string" && args.plan.trim() ? slugifyPlanName(args.plan) : undefined;
-	let targetPlan: ReturnType<typeof readActivePlan>;
-	if (requested) {
-		const planPath = join(planState.plansDir, `${requested}.md`);
-		if (!existsSync(planPath)) {
-			return {
-				content: JSON.stringify({
-					success: false,
-					error: `No plan named "${requested}" in this session.`,
-					plans: listPlanNames(planState.plansDir),
-				}),
-				isError: true,
-			};
-		}
-		targetPlan = { ...readPlanFile(planPath), path: planPath };
-	} else {
-		targetPlan = readActivePlan(planState);
-	}
-
-	const { exists, content, error, path } = targetPlan;
-	if (error) {
-		return { content: `Error reading plan file: ${error}`, isError: true };
-	}
-	if (!exists || !path) {
-		return { content: "Error: No plan exists for this session.", isError: true };
-	}
-
-	const lines = content.split("\n");
-	const checkboxRe = /^(\s*[-*]\s+)\[ \]\s*(.*)$/;
-	// A wrapped step reads as one paragraph in the file (marker line + indented
-	// prose continuation, no bullet of its own) but is genuinely one list item —
-	// real plans do this constantly (long step descriptions wrap at ~100 chars).
-	// A step can ALSO carry its own nested sub-bullets elaborating on it (e.g.
-	// "- [ ] Parse the path:\n  - Require a leading slash\n  - Reject empty
-	// segments") — a model naturally treats those as part of the step's
-	// identity and includes them verbatim in a plan_check call (confirmed
-	// live: passing only the marker line's text failed to match because the
-	// stored text — captured without the sub-bullets — was a strict prefix of
-	// the model's query). A line only ends the continuation when it's blank,
-	// a heading, or a bullet at the SAME OR SHALLOWER indentation as the
-	// step's own marker (a true sibling item); a more-indented bullet is a
-	// child of this step and stays part of its text.
-	const headingRe = /^\s*#{1,6}\s+/;
-	const bulletIndentRe = /^(\s*)[-*]\s+/;
-	// Fence-aware: a checkbox-like line inside a code example is content, not
-	// a step — matching it would corrupt the example.
-	const fenced = fencedLineMask(lines);
-	const unchecked: Array<{ index: number; prefix: string; text: string }> = [];
-	for (let i = 0; i < lines.length; i++) {
-		if (fenced[i]) continue;
-		const match = lines[i]!.match(checkboxRe);
-		if (!match) continue;
-		const markerIndent = lines[i]!.match(/^\s*/)![0]!.length;
-		let text = match[2]!.trim();
-		for (let j = i + 1; j < lines.length; j++) {
-			if (fenced[j]) break;
-			const cont = lines[j]!;
-			if (cont.trim() === "" || headingRe.test(cont)) break;
-			const bulletIndent = cont.match(bulletIndentRe)?.[1]?.length;
-			if (bulletIndent !== undefined && bulletIndent <= markerIndent) break;
-			text += ` ${cont.trim()}`;
-		}
-		unchecked.push({ index: i, prefix: match[1]!, text });
-	}
-
-	if (unchecked.length === 0) {
-		return { content: "Error: The plan has no unchecked checklist items.", isError: true };
-	}
-
-	// Same matching contract as plan_edit: case-insensitive, exact wins over
-	// substring. Markdown emphasis/code-span punctuation (**bold**, `code`,
-	// _italic_) is stripped from both sides before comparing — a model
-	// recalling "add the deleted set" a turn later has no reason to reproduce
-	// the exact "**Add the `deleted` Set**" decoration the step was written
-	// with, and requiring a byte-exact match on that punctuation made this
-	// tool fail on real plans essentially every time (confirmed against a
-	// live-generated plan: neither the plain-text recall nor a decoration-free
-	// paraphrase matched — only a verbatim copy of the markdown did).
-	const normalize = (s: string) => s.toLowerCase().replace(/[`*_]/g, "").replace(/\s+/g, " ").trim();
-	const target = normalize(item);
-	let matches = unchecked.filter((c) => normalize(c.text) === target);
-	if (matches.length === 0) {
-		matches = unchecked.filter((c) => normalize(c.text).includes(target));
-	}
-	if (matches.length === 0) {
+	const pending = readPlanQuestion(planState);
+	if (pending) {
 		return {
-			content: JSON.stringify({
-				success: false,
-				error: `No unchecked item matches "${item}".`,
-				uncheckedItems: unchecked.map((c) => c.text),
-			}),
-			isError: true,
-		};
-	}
-	// Optional 1-based index resolves ambiguity when several items share the
-	// same text (or a common substring the model can't tighten further).
-	const requestedIndex =
-		typeof args.index === "number" && Number.isInteger(args.index) ? (args.index as number) : undefined;
-	if (matches.length > 1 && requestedIndex === undefined) {
-		return {
-			content: JSON.stringify({
-				success: false,
-				error: `Item "${item}" is ambiguous — matches ${matches.length} entries. Use more specific text, or pass index (1-based) to pick one.`,
-				matchingItems: matches.map((c, n) => `${n + 1}. ${c.text}`),
-			}),
-			isError: true,
-		};
-	}
-	if (requestedIndex !== undefined && (requestedIndex < 1 || requestedIndex > matches.length)) {
-		return {
-			content: JSON.stringify({
-				success: false,
-				error: `index ${requestedIndex} is out of range — ${matches.length} item(s) match "${item}".`,
-				matchingItems: matches.map((c, n) => `${n + 1}. ${c.text}`),
-			}),
+			content:
+				"Error: A question is already awaiting the user's choices. Wait for their answer before asking another.",
 			isError: true,
 		};
 	}
 
-	const checked = matches[requestedIndex !== undefined ? requestedIndex - 1 : 0]!;
-	lines[checked.index] = `${checked.prefix}[x] ${checked.text}`;
-	writePlanFile(path, lines.join("\n"));
-
-	const remaining = unchecked.length - 1;
+	planState.planQuestion = { questions };
+	persistPendingState(planState);
 	return {
 		content: JSON.stringify({
-			success: true,
-			plan: basename(path, ".md"),
-			item: checked.text,
-			remaining,
-			...(remaining === 0 ? { allDone: true } : {}),
-		}),
-	};
-}
-
-export function execPlanDiscard(args: Record<string, unknown>, planState: PlanState): ToolResult {
-	const name = slugifyPlanName(typeof args.name === "string" ? args.name : "");
-	if (!name) {
-		return { content: "Error: name is required — the plan to discard.", isError: true };
-	}
-	const path = join(planState.plansDir, `${name}.md`);
-	if (!existsSync(path)) {
-		return {
-			content: JSON.stringify({
-				success: false,
-				error: `No plan named "${name}" in this session.`,
-				plans: listPlanNames(planState.plansDir),
-			}),
-			isError: true,
-		};
-	}
-	try {
-		unlinkSync(path);
-	} catch (err) {
-		return {
-			content: `Error deleting plan file: ${err instanceof Error ? err.message : String(err)}`,
-			isError: true,
-		};
-	}
-	// If the discarded plan was active, fall back to the newest remaining one.
-	if (planState.activePlanPath === path) planState.activePlanPath = undefined;
-	const remaining = listPlanNames(planState.plansDir);
-	const activePath = resolveActivePlanPath(planState);
-	return {
-		content: JSON.stringify({
-			success: true,
-			discarded: name,
-			plans: remaining,
-			active: activePath ? basename(activePath, ".md") : null,
-		}),
-	};
-}
-
-export function execPlanEnter(args: Record<string, unknown>, _planState: PlanState): ToolResult {
-	const reason = typeof args.reason === "string" ? args.reason.trim() : "";
-	if (!reason) {
-		return {
-			content: "Error: reason is required — one sentence on why this task benefits from planning first.",
-			isError: true,
-		};
-	}
-	// Pure signal: the UI shows a confirmation dialog when the turn ends and
-	// switches the mode itself if the user agrees. The tool can't block on the
-	// user mid-run, so the contract is "call it, then end your turn".
-	return {
-		content: JSON.stringify({
-			planSuggested: true,
-			reason,
-			note: "The user will be asked to confirm. End your turn now and wait for their decision.",
+			question: true,
+			questions,
+			note: "The user will choose in the picker. Your turn ends now; wait for their answer.",
 		}),
 	};
 }
@@ -816,6 +729,8 @@ export function execPlanDone(args: Record<string, unknown>, planState: PlanState
 			isError: true,
 		};
 	}
+	planState.planTransition = { kind: "done" };
+	persistPendingState(planState);
 
 	// Signal that the plan is ready for review. The plan file is already on
 	// disk and the UI reads it itself (readActivePlan) to open the approval

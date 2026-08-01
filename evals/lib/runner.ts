@@ -22,6 +22,7 @@ import { createPlanState, modeDisabledTools } from "../../src/core/plan.ts";
 import { buildSystemPrompt, personaOptionsForCwd, resolvePersonasForCwd } from "../../src/core/project.ts";
 import { loadSubagentPrompts } from "../../src/core/subagents.ts";
 import { builtinSkillsDir, formatSkillsForPrompt, loadSkills } from "../../src/core/skills.ts";
+import type { TodoItem } from "../../src/core/todo.ts";
 import {
 	closeMcpConnections,
 	connectMcpServers,
@@ -88,6 +89,10 @@ export interface EvalCase {
 	mode?: "build" | "plan";
 	/** Prepare a session-local active plan file before running the case. */
 	planFixture?: { name: string; content: string };
+	/** Persisted execution state supplied with an approved plan. This lets a
+	 * case exercise the same fresh-context contract as an approved `/plan`
+	 * transition without relying on a live client picker. */
+	initialTodos?: TodoItem[];
 	/**
 	 * Working directory override — defaults to `RunnerOptions.cwd` (the real
 	 * project repo). Set this to an isolated empty directory (e.g.
@@ -353,7 +358,7 @@ async function runAttempt(evalCase: EvalCase, options: RunnerOptions, config: Ap
 		if (!persona) {
 			throw new Error(`Persona "${personaName}" not found — check prompts/personas/ and ~/.cast/personas/.`);
 		}
-		planState = evalCase.mode ? createPlanState(`eval-${evalCase.id}-${Date.now()}`) : undefined;
+		planState = evalCase.mode ? createPlanState(cwd, `eval-${evalCase.id}-${Date.now()}`) : undefined;
 		if (planState) planState.enabled = evalCase.mode === "plan";
 		if (planState && evalCase.planFixture) {
 			mkdirSync(planState.plansDir, { recursive: true });
@@ -395,6 +400,7 @@ async function runAttempt(evalCase: EvalCase, options: RunnerOptions, config: Ap
 			mcpToolIndex: mcpSetup?.toolIndex,
 			mcpPromptSuffix: mcpSetup ? formatMcpForPrompt(mcpSetup) : undefined,
 			planState,
+			initialTodos: evalCase.initialTodos,
 			followUpQueue: backgroundQueue,
 			backgroundBash: {
 				registry: backgroundRegistry,

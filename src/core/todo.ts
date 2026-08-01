@@ -14,6 +14,8 @@ export interface TodoItem {
 	content: string;
 	status: TodoStatus;
 	priority: TodoPriority;
+	/** Stable plan-step text this operational task was projected from. */
+	planStep?: string;
 }
 
 const STATUSES = new Set<TodoStatus>(["pending", "in_progress", "completed", "cancelled"]);
@@ -39,7 +41,13 @@ export function validateTodos(raw: unknown): ValidateTodosResult {
 		if (typeof rec.priority !== "string" || !PRIORITIES.has(rec.priority as TodoPriority)) {
 			return { ok: false, error: `todos[${i}].priority must be one of high, medium, low` };
 		}
-		todos.push({ content, status: rec.status as TodoStatus, priority: rec.priority as TodoPriority });
+		const planStep = typeof rec.planStep === "string" ? rec.planStep.trim() : "";
+		todos.push({
+			content,
+			status: rec.status as TodoStatus,
+			priority: rec.priority as TodoPriority,
+			...(planStep ? { planStep } : {}),
+		});
 	}
 	const inProgress = todos.filter((t) => t.status === "in_progress").length;
 	if (inProgress > 1) {

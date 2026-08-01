@@ -2,7 +2,6 @@ import type { EvalCase } from "../../../../lib/runner.ts";
 import { searchThenRead } from "./search-then-read.ts";
 import { readBeforeEdit } from "./read-before-edit.ts";
 import { independentReadsShareTurn } from "./independent-reads-share-turn.ts";
-import { complexRequestEntersPlan } from "./complex-request-enters-plan.ts";
 import { writeThenReadBack } from "./write-then-read-back.ts";
 import { readErrorThenRecover } from "./read-error-then-recover.ts";
 import { editTargetsOneDuplicateBlock } from "./edit-targets-one-duplicate-block.ts";
@@ -10,8 +9,6 @@ import { bashFixRerunsCheck } from "./bash-fix-reruns-check.ts";
 import { taskDelegatesScopedInvestigation } from "./task-delegates-scoped-investigation.ts";
 import { skillLoadsMatchingWorkflow } from "./skill-loads-matching-workflow.ts";
 import { planDoneSignal } from "./plan-done-signal.ts";
-import { planCheckUpdatesActivePlan } from "./plan-check-updates-active-plan.ts";
-import { planDiscardRemovesDraft } from "./plan-discard-removes-draft.ts";
 import { backgroundBashOutput } from "./background-bash-output.ts";
 import { backgroundBashKill } from "./background-bash-kill.ts";
 import { mcpReleaseLookupChain } from "./mcp-release-lookup-chain.ts";
@@ -20,19 +17,19 @@ import { backgroundBashExplicitTimeout } from "./background-bash-explicit-timeou
 import { taskParallelDelegation } from "./task-parallel-delegation.ts";
 import { todoWriteMarksStepDone } from "./todo-write-marks-step-done.ts";
 import { mcpLookupReportsNotFound } from "./mcp-lookup-reports-not-found.ts";
-import { planStepImplementsAndChecks } from "./plan-step-implements-and-checks.ts";
 import { planReentryReusesExistingPlan } from "./plan-reentry-reuses-existing-plan.ts";
 import { planOpenQuestionBlocksDone } from "./plan-open-question-blocks-done.ts";
 import { buildModeFlagsPlanDivergence } from "./build-mode-flags-plan-divergence.ts";
 import { taskWorkerDelegatesRealEdit } from "./task-worker-delegates-real-edit.ts";
 import { taskReviewFollowsNontrivialChange } from "./task-review-follows-nontrivial-change.ts";
 import { skillNotLoadedForGenericRequest } from "./skill-not-loaded-for-generic-request.ts";
+import { approvedPlanTodoProgress } from "./approved-plan-todo-progress.ts";
+import { cleanContextPlanTodoState } from "./clean-context-plan-todo-state.ts";
 
 export const chainCases: EvalCase[] = [
 	searchThenRead,
 	readBeforeEdit,
 	independentReadsShareTurn,
-	complexRequestEntersPlan,
 	writeThenReadBack,
 	readErrorThenRecover,
 	editTargetsOneDuplicateBlock,
@@ -40,8 +37,6 @@ export const chainCases: EvalCase[] = [
 	taskDelegatesScopedInvestigation,
 	skillLoadsMatchingWorkflow,
 	planDoneSignal,
-	planCheckUpdatesActivePlan,
-	planDiscardRemovesDraft,
 	backgroundBashOutput,
 	backgroundBashKill,
 	mcpReleaseLookupChain,
@@ -50,11 +45,12 @@ export const chainCases: EvalCase[] = [
 	taskParallelDelegation,
 	todoWriteMarksStepDone,
 	mcpLookupReportsNotFound,
-	planStepImplementsAndChecks,
 	planReentryReusesExistingPlan,
 	planOpenQuestionBlocksDone,
 	buildModeFlagsPlanDivergence,
 	taskWorkerDelegatesRealEdit,
 	taskReviewFollowsNontrivialChange,
 	skillNotLoadedForGenericRequest,
+	approvedPlanTodoProgress,
+	cleanContextPlanTodoState,
 ];

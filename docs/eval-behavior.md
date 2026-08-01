@@ -33,9 +33,9 @@ signals (see `signals` on `EvalCase` in `evals/lib/runner.ts`), and the report p
 - `tool-chain` — dependent work occurred in order, while unrelated extra reads remain valid.
 - `filesystem-safety` — the resulting fixture state is exactly the requested bounded change.
 - `mode-selection` and `plan-safety` — build/plan transition signals and forbidden writes.
-- `plan-lifecycle` and `state-transition` — plan_enter/plan_check/plan_done/plan_discard fire (or
-  don't) at the right point, including re-entry reusing an existing plan file and an unresolved
-  open question blocking `plan_done`.
+- `plan-lifecycle` and `state-transition` — `plan_done` fires (or doesn't) at the right
+  point, including re-entry reusing an existing plan file and an unresolved open question blocking
+  `plan_done`.
 - `state-persistence` — externalized state (todo list, active plan) survives and updates correctly
   across turns.
 - `parallel-tools` — independent calls were issued in the same tool-call turn.
@@ -53,8 +53,10 @@ signals (see `signals` on `EvalCase` in `evals/lib/runner.ts`), and the report p
 - `mcp-discovery` and `mcp-tool-chain` — a connected MCP server's tools are discovered, chained
   correctly, and an error result is treated as an error, not silently papered over.
 
-For stochastic models, run `--repeat 3` before calling a change a regression. A split result is
-evidence of instability, not a partial pass.
+Use a one-attempt run to develop or diagnose a case. Before calling a harness change a regression,
+run `--repeat 3`; a split result is evidence of instability, not a partial pass. To publish a model
+result, use `--scoreboard`, which runs those three attempts automatically and applies the stricter
+consistent-3/3 scoring rule.
 
 ## What belongs where
 

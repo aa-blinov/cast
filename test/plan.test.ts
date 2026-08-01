@@ -5,14 +5,12 @@ import {
 	checkPlanFileGate,
 	checkReadOnlyCommand,
 	createPlanState,
+	createPlanTodos,
 	enforcePlanCapAfterEdit,
-	execPlanCheck,
-	execPlanDiscard,
 	execPlanDone,
-	execPlanEnter,
+	execQuestion,
 	finalizePlanFileWrite,
 	isPlanFilePath,
-	listOpenPlanSteps,
 	MAX_PLAN_CHARS,
 	maybeActivatePlanOnRead,
 	modeDisabledTools,
@@ -21,7 +19,10 @@ import {
 	planChecklistState,
 	readActivePlan,
 	readPlanFile,
+	readPlanQuestion,
+	readPlanTransition,
 	resolveActivePlanPath,
+	resolvePlanQuestion,
 	slugifyPlanName,
 } from "../src/core/plan.ts";
 
@@ -66,18 +67,22 @@ describe("plan", () => {
 			// the model authors the plan file with the same tools it edits code with.
 			expect(gated).not.toContain("write");
 			expect(gated).not.toContain("edit");
-			expect(gated).toContain("plan_check");
-			expect(gated).toContain("plan_enter");
+			expect(gated).not.toContain("plan_done");
 			// bash stays advertised — the executor's read-only gate handles it
 			expect(gated).not.toContain("bash");
+			// SSH is an arbitrary remote-command surface; unlike bash it has no
+			// local read-only command gate, so plan mode removes it entirely.
+			expect(gated).toContain("ssh");
 			// read has no plan-mode-specific gating at all (see
 			// maybeActivatePlanOnRead) — it's simply never in either list.
 			expect(gated).not.toContain("read");
+			expect(gated).not.toContain("question");
 		});
 
 		it("build mode blocks exactly the authoring-signal plan tools", () => {
 			const gated = modeDisabledTools(false);
-			expect([...gated].sort()).toEqual(["plan_discard", "plan_done"]);
+			expect([...gated].sort()).toEqual(["plan_done"]);
+			expect(gated).not.toContain("question");
 		});
 
 		it("every plan tool has an explicit mode decision", () => {
@@ -96,10 +101,21 @@ describe("plan", () => {
 
 	describe("createPlanState", () => {
 		it("derives a per-session plans directory", () => {
-			const state = createPlanState("abc");
-			expect(state.plansDir.endsWith(join(".cast", "plans", "abc"))).toBe(true);
+			const state = createPlanState("/project", "abc");
+			expect(state.plansDir).toBe(join("/project", ".cast", "plans", "abc"));
 			expect(state.enabled).toBe(false);
 			expect(state.activePlanPath).toBeUndefined();
+		});
+	});
+
+	describe("createPlanTodos", () => {
+		it("projects open approved-plan steps into linked build todos", () => {
+			const state = testState("todo-projection");
+			writePlan(state, "main", "# Plan\n\n## Steps\n- [ ] add API\n- [x] old migration\n- [ ] verify UI");
+			expect(createPlanTodos(state)).toEqual([
+				{ content: "add API", status: "pending", priority: "medium", planStep: "add API" },
+				{ content: "verify UI", status: "pending", priority: "medium", planStep: "verify UI" },
+			]);
 		});
 	});
 
@@ -343,17 +359,11 @@ describe("plan", () => {
 			expect(readFileSync(path, "utf-8")).toBe(content);
 		});
 
-		it("plan_check can close a heading-style step end to end after normalization", () => {
+		it("keeps normalized heading-style steps intact for todo projection", () => {
 			const state = testState("finalize-5");
 			writePlan(state, "main", "# Plan\n\n## Steps\n\n### 1. Bridge\n\nWrap the runner.\n\n### 2. Server\n\nHTTP.");
 
-			const parsed = JSON.parse(execPlanCheck({ item: "1. Bridge" }, state).content);
-			expect(parsed.success).toBe(true);
-			expect(parsed.remaining).toBe(1);
-
-			// The open-work gate's own source of open steps agrees: one left.
-			const remaining = listOpenPlanSteps(readActivePlan(state).content);
-			expect(remaining).toEqual(["2. Server"]);
+			expect(createPlanTodos(state).map((todo) => todo.content)).toEqual(["1. Bridge", "2. Server"]);
 		});
 	});
 
@@ -424,7 +434,10 @@ describe("plan", () => {
 		});
 	});
 
-	describe("execPlanCheck", () => {
+	/* Removed with plan_check: plans are immutable specifications and todo_write
+	 * is the sole execution-state surface. Retained test history below is kept
+	 * inert until the next test-file consolidation. */
+	/* describe("execPlanCheck", () => {
 		const CHECKLIST_PLAN =
 			"# Plan\n\n## Steps\n- [ ] add plan_check tool\n- [ ] wire disabledTools\n- [x] already done\n\n## Verification\nnpm test";
 
@@ -668,55 +681,7 @@ describe("plan", () => {
 			expect(result.isError).toBe(true);
 			expect(JSON.parse(result.content).plans).toEqual(["main"]);
 		});
-	});
-
-	describe("execPlanDiscard", () => {
-		it("deletes a named plan; active falls back to the newest remaining", () => {
-			const state = testState("discard-1");
-			writePlan(state, "keep", "# Keep");
-			writePlan(state, "drop", "# Drop");
-			expect(state.activePlanPath).toBe(join(state.plansDir, "drop.md"));
-
-			const parsed = JSON.parse(execPlanDiscard({ name: "drop" }, state).content);
-			expect(parsed.success).toBe(true);
-			expect(parsed.discarded).toBe("drop");
-			expect(parsed.plans).toEqual(["keep"]);
-			expect(parsed.active).toBe("keep");
-			expect(existsSync(join(state.plansDir, "drop.md"))).toBe(false);
-			expect(readActivePlan(state).content).toBe("# Keep");
-		});
-
-		it("errors with the plan list for an unknown name", () => {
-			const state = testState("discard-2");
-			writePlan(state, "main", "# Plan");
-
-			const result = execPlanDiscard({ name: "ghost" }, state);
-			expect(result.isError).toBe(true);
-			expect(JSON.parse(result.content).plans).toEqual(["main"]);
-		});
-
-		it("requires a name and neutralizes traversal", () => {
-			const state = testState("discard-3");
-			expect(execPlanDiscard({}, state).isError).toBe(true);
-			// "../x" slugs to "x" — outside files are unreachable by construction.
-			expect(execPlanDiscard({ name: "../../etc/passwd" }, state).isError).toBe(true);
-		});
-	});
-
-	describe("execPlanEnter", () => {
-		it("returns the plan-suggested signal with the reason", () => {
-			const state = testState("enter-1");
-			const parsed = JSON.parse(execPlanEnter({ reason: "touches auth across 6 files" }, state).content);
-			expect(parsed.planSuggested).toBe(true);
-			expect(parsed.reason).toBe("touches auth across 6 files");
-		});
-
-		it("requires a reason", () => {
-			const state = testState("enter-2");
-			expect(execPlanEnter({}, state).isError).toBe(true);
-			expect(execPlanEnter({ reason: "  " }, state).isError).toBe(true);
-		});
-	});
+	}); */
 
 	describe("execPlanDone", () => {
 		it("returns error when no plan exists", () => {
@@ -742,6 +707,73 @@ describe("plan", () => {
 			expect(parsed.content).toBeUndefined();
 			expect(parsed.path).toBeTruthy();
 			expect(parsed.note).toMatch(/turn ends/i);
+		});
+	});
+
+	describe("execQuestion", () => {
+		it("persists a valid question until the UI resolves it", () => {
+			const state = testState("question-1");
+			const result = execQuestion(
+				{
+					questions: [
+						{
+							question: "Choose a cache backend",
+							options: [
+								{ value: "memory", label: "In-memory", description: "No operational dependency" },
+								{ value: "redis", label: "Redis", description: "Shared cache" },
+							],
+							recommended: "memory",
+						},
+						{
+							question: "Choose deployment target",
+							options: [
+								{ value: "cloud", label: "Cloud" },
+								{ value: "self-hosted", label: "Self-hosted" },
+							],
+						},
+					],
+				},
+				state,
+			);
+
+			expect(result.isError).toBeFalsy();
+			expect(JSON.parse(result.content).question).toBe(true);
+			expect(readPlanQuestion(state)?.questions[0]).toMatchObject({
+				question: "Choose a cache backend",
+				recommended: "memory",
+			});
+			expect(readPlanQuestion(state)?.questions).toHaveLength(2);
+
+			resolvePlanQuestion(state);
+			expect(readPlanQuestion(state)).toBeUndefined();
+		});
+
+		it("requires distinct, bounded choices", () => {
+			const state = testState("question-2");
+			const result = execQuestion(
+				{
+					questions: [
+						{
+							question: "Choose",
+							options: [
+								{ value: "same", label: "One" },
+								{ value: "same", label: "Two" },
+							],
+						},
+					],
+				},
+				state,
+			);
+			expect(result.isError).toBe(true);
+		});
+	});
+
+	describe("plan transitions", () => {
+		it("persists plan approval after the active plan passes validation", () => {
+			const state = testState("transition-done");
+			writePlan(state, "main", "# Plan\n\n## Steps\n- [ ] implement it");
+			expect(execPlanDone({}, state).isError).toBeFalsy();
+			expect(readPlanTransition(state)).toEqual({ kind: "done" });
 		});
 	});
 });

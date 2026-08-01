@@ -23,6 +23,7 @@ import {
 	loadSessionByShareToken,
 	migrateLegacySessionsToDb,
 	recordCompaction,
+	resetSessionContext,
 	saveSession,
 	searchSessionSummaries,
 	shouldCompact,
@@ -568,6 +569,29 @@ describe("session persistence", () => {
 		expect(loaded?.messages).toEqual(session.messages);
 	});
 
+	it("persists pending plan picker state in SQLite", () => {
+		const session = createSession("gpt-4o", projectA);
+		session.planQuestion = {
+			questions: [
+				{
+					question: "Choose a cache backend",
+					options: [
+						{ value: "memory", label: "In-memory" },
+						{ value: "redis", label: "Redis" },
+					],
+					recommended: "memory",
+				},
+			],
+		};
+		session.planTransition = { kind: "done" };
+		saveSession(session);
+
+		expect(loadSession(session.id)).toMatchObject({
+			planQuestion: session.planQuestion,
+			planTransition: { kind: "done" },
+		});
+	});
+
 	it("loadSessionByShareToken finds a session by its share token, not its id", () => {
 		const session = createSession("gpt-4o", projectA);
 		session.shareToken = "tok_abc123";
@@ -1028,6 +1052,27 @@ describe("session persistence", () => {
 			cursor = p.oldestSeq;
 			hasMore = p.hasMore;
 		}
+	});
+});
+
+describe("resetSessionContext", () => {
+	it("keeps the full transcript visible while clearing only the model-facing context", () => {
+		const session = createSession("gpt-4o", join(tmpdir(), "cast-clean-context-test"));
+		session.messages.push(
+			{ role: "user", content: "Build a release dashboard" },
+			{ role: "assistant", content: "I will investigate." },
+		);
+		saveSession(session);
+
+		expect(resetSessionContext(session)).toBe("Build a release dashboard");
+		expect(session.messages).toEqual([]);
+		saveSession(session);
+
+		expect(loadSession(session.id)?.messages).toEqual([]);
+		expect(getFullHistory(session.id)).toEqual([
+			{ role: "user", content: "Build a release dashboard" },
+			{ role: "assistant", content: "I will investigate." },
+		]);
 	});
 });
 

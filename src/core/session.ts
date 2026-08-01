@@ -5,6 +5,7 @@ import type { AppConfig } from "./config.ts";
 import { formatLocalDate } from "./date-rollover-reminder.ts";
 import { getDb } from "./db.ts";
 import type { Message, Usage } from "./llm.ts";
+import type { PlanQuestion, PlanTransition } from "./plan.ts";
 import type { TodoItem } from "./todo.ts";
 
 // ============================================================================
@@ -129,6 +130,10 @@ export interface SessionState {
 	 * That route serves messages with no auth at all, so this must be an
 	 * unguessable random token, not a derived/sequential id. */
 	shareToken?: string;
+	/** Pending plan picker state. The Markdown plan remains a project artifact;
+	 * these transient UI decisions belong to the session record. */
+	planQuestion?: PlanQuestion;
+	planTransition?: PlanTransition;
 }
 
 /** Fold one turn's usage into the session's running totals. When `opts.subagent`
@@ -527,6 +532,8 @@ function sessionMetaRow(session: SessionState) {
 		usage_json: JSON.stringify(session.usage),
 		todos_json: session.todos ? JSON.stringify(session.todos) : null,
 		share_token: session.shareToken ?? null,
+		plan_question_json: session.planQuestion ? JSON.stringify(session.planQuestion) : null,
+		plan_transition_json: session.planTransition ? JSON.stringify(session.planTransition) : null,
 	};
 }
 
@@ -535,14 +542,15 @@ export function saveSession(session: SessionState): void {
 	const db = getDb();
 	const meta = sessionMetaRow(session);
 	db.prepare(
-		`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, usage_json, todos_json, share_token)
-		 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :usage_json, :todos_json, :share_token)
+		`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, usage_json, todos_json, share_token, plan_question_json, plan_transition_json)
+		 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :usage_json, :todos_json, :share_token, :plan_question_json, :plan_transition_json)
 		 ON CONFLICT(id) DO UPDATE SET
 		   cwd = excluded.cwd, model = excluded.model, persona = excluded.persona, mode = excluded.mode,
 		   title = excluded.title, pinned = excluded.pinned, updated_at = excluded.updated_at,
 		   last_prompt_tokens = excluded.last_prompt_tokens, last_announced_local_date = excluded.last_announced_local_date,
 		   provider_url = excluded.provider_url, usage_json = excluded.usage_json, todos_json = excluded.todos_json,
-		   share_token = excluded.share_token`,
+		   share_token = excluded.share_token, plan_question_json = excluded.plan_question_json,
+		   plan_transition_json = excluded.plan_transition_json`,
 	).run(meta);
 
 	const insertRow = db.prepare(
@@ -826,6 +834,22 @@ export function clearSessionMessages(session: SessionState): void {
 	session.messages = [];
 }
 
+/** Starts a new model-facing phase without deleting the transcript the user
+ * sees. Used when an approved plan should be implemented without exploration
+ * noise: old rows remain in history, but none are sent to the next run. */
+export function resetSessionContext(session: SessionState): string | undefined {
+	const originalTask = getFullHistory(session.id).find(
+		(message): message is Message & { role: "user"; content: string } =>
+			message.role === "user" && typeof message.content === "string",
+	)?.content;
+	getDb().prepare("UPDATE messages SET in_context = 0 WHERE session_id = ?").run(session.id);
+	session.messages = [];
+	session.reasoning = undefined;
+	session.turnMeta = undefined;
+	session.lastPromptTokens = undefined;
+	return originalTask;
+}
+
 /** Sessions saved before `usage` existed don't have it on disk — default it in. */
 function withUsageDefault(usage: SessionUsage | undefined): SessionUsage {
 	return {
@@ -888,6 +912,8 @@ interface SessionRow {
 	usage_json: string;
 	todos_json: string | null;
 	share_token: string | null;
+	plan_question_json: string | null;
+	plan_transition_json: string | null;
 }
 
 function rowToMeta(row: SessionRow): Omit<SessionState, "messages"> {
@@ -907,6 +933,11 @@ function rowToMeta(row: SessionRow): Omit<SessionState, "messages"> {
 		usage: withUsageDefault(JSON.parse(row.usage_json)),
 		todos: row.todos_json ? JSON.parse(row.todos_json) : undefined,
 		shareToken: row.share_token ?? undefined,
+		planQuestion: row.plan_question_json ? (JSON.parse(row.plan_question_json) as PlanQuestion) : undefined,
+		planTransition:
+			row.plan_transition_json && (JSON.parse(row.plan_transition_json) as { kind?: unknown }).kind === "done"
+				? { kind: "done" }
+				: undefined,
 	};
 }
 
@@ -1040,8 +1071,8 @@ export function migrateLegacySessionsToDb(): number {
 		const session = readLegacySessionFile(filePath);
 		if (!session || existing.has(session.id)) continue;
 		db.prepare(
-			`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, usage_json, todos_json, share_token)
-			 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :usage_json, :todos_json, :share_token)`,
+			`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, usage_json, todos_json, share_token, plan_question_json, plan_transition_json)
+			 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :usage_json, :todos_json, :share_token, :plan_question_json, :plan_transition_json)`,
 		).run(sessionMetaRow(session));
 		const insertRow = db.prepare(
 			"INSERT INTO messages (session_id, seq, role, content_json, in_context) VALUES (?, ?, ?, ?, 1)",

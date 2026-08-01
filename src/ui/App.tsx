@@ -3,7 +3,16 @@ import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import type { AppConfig } from "../core/config.ts";
 import { formatContextFilesForPrompt, resolveNestedContextFiles } from "../core/context-files.ts";
 import { formatMcpForPrompt } from "../core/mcp.ts";
-import { createPlanState, modeDisabledTools, readActivePlan } from "../core/plan.ts";
+import {
+	createPlanState,
+	createPlanTodos,
+	modeDisabledTools,
+	readActivePlan,
+	readPlanQuestion,
+	readPlanTransition,
+	resolvePlanQuestion,
+	resolvePlanTransition,
+} from "../core/plan.ts";
 import { buildSystemPrompt, makeConfirmBash } from "../core/project.ts";
 import {
 	formatRulesForTurn,
@@ -12,7 +21,7 @@ import {
 	selectMentionedRules,
 	unionStickyRules,
 } from "../core/rules.ts";
-import { countTurnMessages, estimateTokens, saveSession } from "../core/session.ts";
+import { countTurnMessages, estimateTokens, resetSessionContext, saveSession } from "../core/session.ts";
 import { loadSettings, type StatusBarConfig } from "../core/settings.ts";
 import type { StartupResult } from "../core/startup.ts";
 import { setSuspendHook } from "../core/stdin-manager.ts";
@@ -167,23 +176,35 @@ export function App(props: AppProps): JSX.Element {
 	// One object per session, mutated in place: an in-flight run captured this
 	// reference at submit time, so /plan and /build toggles must land on the
 	// same object for the loop's per-request system prompt sync to see them.
-	const planState = useMemo(() => createPlanState(session.id), [session.id]);
+	const planState = useMemo(
+		() =>
+			createPlanState(cwd, session.id, {
+				question: session.planQuestion,
+				transition: session.planTransition,
+				onChange: (question, transition) => {
+					session.planQuestion = question;
+					session.planTransition = transition;
+					saveSession(session);
+				},
+			}),
+		[cwd, session],
+	);
 	planState.enabled = planMode;
 	// Per-phase model: planning can run on a stronger model than building.
 	// session.model stays the main model; the override applies only while plan
 	// mode is on, and everything downstream (run, system prompt Model line,
 	// status bar) reports the model actually in use.
 	const activeModel = planMode && planModel ? planModel : session.model;
-	// Mode-transition signal from the run (plan_done / plan_enter succeeded).
+	// Plan signal from the run (plan_done / question succeeded).
 	// A ref, not state: it must not trigger renders mid-run — the dialog opens
 	// only when the run settles (see the effect below), so the mode always
 	// flips between runs and tool sets stay consistent.
-	const planSignalRef = useRef<"done" | "enter" | null>(null);
+	const planSignalRef = useRef<"done" | "question" | null>(null);
 	// Armed by the "Keep planning" choice in the approval dialog: the next
 	// non-command composer submission is wrapped as refine feedback. Lives in
 	// the composer (not a modal) so multi-line paste and image paste work.
 	const refineArmedRef = useRef(false);
-	const onPlanSignal = useCallback((kind: "done" | "enter") => {
+	const onPlanSignal = useCallback((kind: "done" | "question") => {
 		planSignalRef.current = kind;
 	}, []);
 	// Message to auto-submit once the mode flip has re-rendered. Submitting in
@@ -313,13 +334,15 @@ export function App(props: AppProps): JSX.Element {
 		void submitRef.current(text);
 	}, [pendingAutoSubmit, planMode]);
 
-	// Mode-transition dialogs, opened when the run settles. plan_done → the
-	// approval dialog (the /build gesture, with optional auto-start); plan_enter
-	// → "switch to planning?". Signals that arrive after the user already
-	// toggled the mode manually are dropped.
+	// Decision dialogs open only after a run settles: plan_done → approval;
+	// question → picker.
 	useEffect(() => {
-		if (agent.status === "running" || modalRequest || !planSignalRef.current) return;
-		const kind = planSignalRef.current;
+		if (agent.status === "running" || modalRequest) return;
+		const kind =
+			planSignalRef.current ??
+			readPlanTransition(planState)?.kind ??
+			(readPlanQuestion(planState) ? "question" : null);
+		if (!kind) return;
 		planSignalRef.current = null;
 		if (kind === "done" && planMode) {
 			void (async () => {
@@ -328,30 +351,27 @@ export function App(props: AppProps): JSX.Element {
 				const planPath = readActivePlan(planState).path;
 				const choice = await pickers.pickOption(
 					[
-						// Refine first: iterating on the plan is the common case —
-						// approving the first draft outright is the exception.
-						{ value: "refine", label: "Keep planning — I'll give feedback" },
-						{ value: "implement", label: "Approve — switch to build and implement now" },
-						{
-							value: "fresh",
-							label: "Approve — clear context, then implement",
-							description: "Drops the planning conversation; the plan survives in the system prompt",
-						},
-						{ value: "build", label: "Approve — switch to build, I'll start myself" },
+						{ value: "continue", label: "Continue planning" },
+						{ value: "implement", label: "Approve and implement" },
+						{ value: "clean", label: "Approve and implement in clean context" },
 					],
 					{ title: planPath ? `Plan ready: ${planPath}` : "Plan ready. What next?" },
 				);
-				if (choice === "implement" || choice === "fresh") {
-					// Fresh start is safe BECAUSE of the mirror block: the plan is
-					// re-read from disk into the system prompt, so the exploration
-					// chatter can be dropped without losing the decisions.
-					if (choice === "fresh") agent.clearContext();
+				if (choice === "implement" || choice === "clean") {
+					session.todos = createPlanTodos(planState);
+					resolvePlanTransition(planState);
+					const originalTask = choice === "clean" ? resetSessionContext(session) : undefined;
+					if (choice === "clean") saveSession(session);
 					setPlanMode(false);
-					setPendingAutoSubmit({ text: "The plan is approved. Implement it step by step.", wantPlanMode: false });
-				} else if (choice === "build") {
-					setPlanMode(false);
-					showNotice("[Plan approved — your next message starts implementation]");
-				} else if (choice === "refine") {
+					setPendingAutoSubmit({
+						text:
+							choice === "clean"
+								? `<system-reminder>Clean build context. Original task: ${originalTask ?? "Use the approved plan as the task definition."}</system-reminder>\n\nThe plan is approved. Implement it step by step.`
+								: "The plan is approved. Implement it step by step.",
+						wantPlanMode: false,
+					});
+				} else if (choice === "continue") {
+					resolvePlanTransition(planState);
 					// Feedback goes through the regular composer, not a modal text
 					// box: the composer supports multi-line paste, image paste, and
 					// history. handleSubmit wraps the next non-command message as
@@ -363,51 +383,42 @@ export function App(props: AppProps): JSX.Element {
 					showNotice("[Staying in plan mode — describe what to change]");
 				}
 			})();
-		} else if (kind === "enter" && !planMode) {
+		} else if (kind === "question") {
 			void (async () => {
-				const choice = await pickers.pickOption(
-					[
-						{ value: true, label: "Yes — enter plan mode" },
-						{ value: false, label: "No — continue in build mode" },
-					],
-					{ title: "Agent suggests planning this task first. Enter plan mode?" },
-				);
-				if (choice === true) {
-					setPlanMode(true);
-					// Same MCP caveat as the /plan command: connected MCP servers
-					// keep full capability in plan mode — the user should know.
-					const mcpCount = mcpResult.toolDefinitions.length;
-					if (mcpCount > 0) {
-						showNotice(
-							`[${mcpCount} MCP tool${mcpCount === 1 ? "" : "s"} stay fully enabled — plan mode does not gate them]`,
-						);
-					}
-					setPendingAutoSubmit({
-						text: "Plan mode is on. Explore the material and write the plan.",
-						wantPlanMode: true,
-					});
-				} else {
-					// The model ended its turn waiting for this decision — resume it,
-					// otherwise declining leaves the session hanging in silence.
-					showNotice("[Staying in build mode]");
-					setPendingAutoSubmit({
-						text: "The user has decided to complete this task in build mode. Continue directly with the task; do not suggest or enter plan mode again unless the user materially changes the request.",
-						wantPlanMode: false,
-					});
+				const question = readPlanQuestion(planState);
+				if (!question) {
+					showNotice("[Question is no longer pending]");
+					return;
 				}
+				const answers: string[] = [];
+				for (const item of question.questions) {
+					const choice = await pickers.pickOption(
+						item.options.map((option) => ({
+							value: option.value,
+							label: `${option.label}${option.value === item.recommended ? " (recommended)" : ""}`,
+							...(option.description ? { description: option.description } : {}),
+						})),
+						{ title: item.question },
+					);
+					if (choice === null) {
+						showNotice("[Decision still needed — choose an option when ready]");
+						return;
+					}
+					answers.push(choice);
+				}
+				resolvePlanQuestion(planState);
+				setPendingAutoSubmit({
+					text: question.questions
+						.map((item, index) => {
+							const selected = item.options.find((option) => option.value === answers[index])!;
+							return `The user selected "${selected.label}" for: ${item.question}`;
+						})
+						.join("\n"),
+					wantPlanMode: planMode,
+				});
 			})();
 		}
-	}, [
-		agent.status,
-		agent.clearContext,
-		modalRequest,
-		planMode,
-		pickers,
-		setPlanMode,
-		showNotice,
-		planState,
-		mcpResult,
-	]);
+	}, [agent.status, modalRequest, planMode, pickers, setPlanMode, showNotice, planState, session]);
 
 	useEffect(() => {
 		if (initialPrompt) {

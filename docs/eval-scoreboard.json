@@ -2,8 +2,8 @@
   "deepseek/deepseek-v4-flash-0731": {
     "bench": "behavior",
     "model": "deepseek/deepseek-v4-flash-0731",
-    "timestamp": "2026-07-31T20:47:00.039Z",
-    "commit": "56c09f4",
+    "timestamp": "2026-08-01T12:14:50.105Z",
+    "commit": "080bd54",
     "repeat": 3,
     "results": [
       {
@@ -24,6 +24,11 @@
           117,
           116,
           113
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -44,6 +49,11 @@
           137,
           110,
           97
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -64,6 +74,11 @@
           143,
           148,
           158
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -84,6 +99,11 @@
           162,
           181,
           181
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -104,6 +124,11 @@
           151,
           144,
           149
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -124,6 +149,11 @@
           157,
           182,
           134
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -144,6 +174,11 @@
           106,
           138,
           104
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -164,6 +199,11 @@
           189,
           177,
           160
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -184,6 +224,11 @@
           172,
           100,
           162
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -204,6 +249,11 @@
           133,
           117,
           134
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -224,6 +274,11 @@
           3129,
           3402,
           3152
+        ],
+        "turns": [
+          6,
+          9,
+          8
         ]
       },
       {
@@ -244,6 +299,11 @@
           109,
           100,
           107
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -264,6 +324,11 @@
           186,
           267,
           232
+        ],
+        "turns": [
+          2,
+          3,
+          2
         ]
       },
       {
@@ -284,6 +349,11 @@
           520,
           397,
           825
+        ],
+        "turns": [
+          2,
+          2,
+          3
         ]
       },
       {
@@ -304,6 +374,11 @@
           158,
           211,
           140
+        ],
+        "turns": [
+          2,
+          3,
+          2
         ]
       },
       {
@@ -324,6 +399,11 @@
           251,
           295,
           275
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -344,6 +424,11 @@
           244,
           244,
           245
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -364,26 +449,11 @@
           187,
           224,
           200
-        ]
-      },
-      {
-        "caseId": "complex-request-enters-plan",
-        "passed": false,
-        "consistent": false,
-        "durationsMs": [
-          11672,
-          14784,
-          10200
         ],
-        "promptTokens": [
-          24913,
-          24912,
-          16497
-        ],
-        "completionTokens": [
-          936,
-          1346,
-          1004
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -404,6 +474,11 @@
           219,
           163,
           207
+        ],
+        "turns": [
+          3,
+          2,
+          3
         ]
       },
       {
@@ -424,6 +499,11 @@
           674,
           414,
           302
+        ],
+        "turns": [
+          2,
+          3,
+          2
         ]
       },
       {
@@ -444,6 +524,11 @@
           237,
           249,
           238
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -464,6 +549,11 @@
           599,
           546,
           555
+        ],
+        "turns": [
+          5,
+          5,
+          5
         ]
       },
       {
@@ -484,6 +574,11 @@
           1888,
           1568,
           1639
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -504,6 +599,11 @@
           739,
           761,
           641
+        ],
+        "turns": [
+          4,
+          5,
+          3
         ]
       },
       {
@@ -524,46 +624,11 @@
           1905,
           836,
           1718
-        ]
-      },
-      {
-        "caseId": "plan-check-updates-active-plan",
-        "passed": true,
-        "consistent": true,
-        "durationsMs": [
-          17737,
-          3206,
-          2757
         ],
-        "promptTokens": [
-          16654,
-          16654,
-          16654
-        ],
-        "completionTokens": [
-          138,
-          125,
-          101
-        ]
-      },
-      {
-        "caseId": "plan-discard-removes-draft",
-        "passed": true,
-        "consistent": true,
-        "durationsMs": [
-          30626,
-          9686,
-          54137
-        ],
-        "promptTokens": [
-          45206,
-          45129,
-          45569
-        ],
-        "completionTokens": [
-          394,
-          429,
-          452
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -584,6 +649,11 @@
           294,
           295,
           332
+        ],
+        "turns": [
+          4,
+          4,
+          4
         ]
       },
       {
@@ -604,6 +674,11 @@
           279,
           246,
           218
+        ],
+        "turns": [
+          4,
+          4,
+          4
         ]
       },
       {
@@ -624,6 +699,11 @@
           280,
           216,
           200
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -644,6 +724,11 @@
           342,
           445,
           256
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -664,6 +749,11 @@
           524,
           558,
           650
+        ],
+        "turns": [
+          4,
+          4,
+          4
         ]
       },
       {
@@ -684,6 +774,11 @@
           1742,
           1694,
           1076
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -704,6 +799,11 @@
           502,
           425,
           1153
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -724,26 +824,11 @@
           290,
           350,
           632
-        ]
-      },
-      {
-        "caseId": "plan-step-implements-and-checks",
-        "passed": true,
-        "consistent": true,
-        "durationsMs": [
-          26130,
-          14794,
-          30449
         ],
-        "promptTokens": [
-          82933,
-          61097,
-          110868
-        ],
-        "completionTokens": [
-          1811,
-          998,
-          2121
+        "turns": [
+          2,
+          3,
+          4
         ]
       },
       {
@@ -764,6 +849,11 @@
           618,
           1484,
           681
+        ],
+        "turns": [
+          4,
+          4,
+          4
         ]
       },
       {
@@ -771,19 +861,24 @@
         "passed": false,
         "consistent": true,
         "durationsMs": [
-          120008,
-          120004,
-          120008
+          2386,
+          1064,
+          789
         ],
         "promptTokens": [
-          8945,
-          18209,
-          18130
+          0,
+          0,
+          0
         ],
         "completionTokens": [
-          250,
-          643,
-          3488
+          0,
+          0,
+          0
+        ],
+        "turns": [
+          0,
+          0,
+          0
         ]
       },
       {
@@ -804,6 +899,11 @@
           1245,
           1338,
           1380
+        ],
+        "turns": [
+          9,
+          9,
+          11
         ]
       },
       {
@@ -824,6 +924,11 @@
           1046,
           791,
           751
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -844,6 +949,11 @@
           4976,
           1508,
           4821
+        ],
+        "turns": [
+          5,
+          4,
+          7
         ]
       },
       {
@@ -864,13 +974,68 @@
           108,
           90,
           162
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "approved-plan-todo-progress",
+        "passed": false,
+        "consistent": true,
+        "durationsMs": [
+          2465,
+          817,
+          789
+        ],
+        "promptTokens": [
+          0,
+          0,
+          0
+        ],
+        "completionTokens": [
+          0,
+          0,
+          0
+        ],
+        "turns": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "caseId": "clean-context-plan-todo-state",
+        "passed": false,
+        "consistent": true,
+        "durationsMs": [
+          1641,
+          820,
+          809
+        ],
+        "promptTokens": [
+          0,
+          0,
+          0
+        ],
+        "completionTokens": [
+          0,
+          0,
+          0
+        ],
+        "turns": [
+          0,
+          0,
+          0
         ]
       }
     ],
-    "casesTotal": 43,
-    "casesPassed": 39,
-    "score": 0.9069767441860465,
-    "consistentCases": 41,
+    "casesTotal": 41,
+    "casesPassed": 36,
+    "score": 0.8780487804878049,
+    "consistentCases": 40,
     "bySignal": {
       "required-tool": {
         "passed": 10,
@@ -886,11 +1051,11 @@
       },
       "mode-selection": {
         "passed": 1,
-        "total": 2
+        "total": 1
       },
       "filesystem-safety": {
         "passed": 6,
-        "total": 7
+        "total": 9
       },
       "tool-result-integrity": {
         "passed": 8,
@@ -901,19 +1066,15 @@
         "total": 7
       },
       "state-persistence": {
-        "passed": 5,
+        "passed": 3,
         "total": 5
       },
       "tool-chain": {
-        "passed": 8,
-        "total": 9
+        "passed": 7,
+        "total": 10
       },
       "parallel-tools": {
         "passed": 2,
-        "total": 2
-      },
-      "plan-safety": {
-        "passed": 0,
         "total": 2
       },
       "delegation": {
@@ -925,12 +1086,12 @@
         "total": 2
       },
       "plan-lifecycle": {
-        "passed": 6,
-        "total": 7
+        "passed": 3,
+        "total": 6
       },
       "state-transition": {
-        "passed": 2,
-        "total": 3
+        "passed": 1,
+        "total": 2
       },
       "background-lifecycle": {
         "passed": 3,
@@ -943,6 +1104,10 @@
       "mcp-tool-chain": {
         "passed": 1,
         "total": 1
+      },
+      "plan-safety": {
+        "passed": 0,
+        "total": 1
       }
     },
     "certified": true,
@@ -952,23 +1117,29 @@
       "score": 1
     },
     "chain": {
-      "casesTotal": 28,
-      "casesPassed": 24,
-      "score": 0.8571428571428571
+      "casesTotal": 26,
+      "casesPassed": 21,
+      "score": 0.8076923076923077
     },
-    "avgDurationMs": 20421.612403100775,
-    "medianDurationMs": 13504,
-    "p75DurationMs": 25054,
-    "p95DurationMs": 60010,
-    "p99DurationMs": 120008,
-    "avgPromptTokens": 30910.736434108527,
-    "avgCompletionTokens": 648.8682170542636
+    "avgDurationMs": 16746.09756097561,
+    "medianDurationMs": 10762,
+    "p75DurationMs": 21528,
+    "p95DurationMs": 51988,
+    "p99DurationMs": 65229,
+    "avgPromptTokens": 27927.764227642278,
+    "avgCompletionTokens": 564.780487804878,
+    "providerUrl": "https://token-plan-sgp.xiaomimimo.com/v1",
+    "avgTurns": 2.821138211382114,
+    "medianTurns": 2,
+    "p75Turns": 3,
+    "p95Turns": 6,
+    "p99Turns": 9
   },
   "deepseek/deepseek-v4-pro": {
     "bench": "behavior",
     "model": "deepseek/deepseek-v4-pro",
-    "timestamp": "2026-07-31T21:32:59.328Z",
-    "commit": "56c09f4",
+    "timestamp": "2026-08-01T12:14:50.157Z",
+    "commit": "080bd54",
     "repeat": 3,
     "results": [
       {
@@ -989,6 +1160,11 @@
           124,
           122,
           124
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -1009,6 +1185,11 @@
           124,
           132,
           126
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -1029,6 +1210,11 @@
           186,
           220,
           186
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -1049,6 +1235,11 @@
           192,
           225,
           195
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -1069,6 +1260,11 @@
           235,
           172,
           178
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -1089,6 +1285,11 @@
           138,
           190,
           145
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -1109,6 +1310,11 @@
           122,
           125,
           121
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -1129,6 +1335,11 @@
           229,
           164,
           256
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -1149,6 +1360,11 @@
           146,
           173,
           135
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -1169,6 +1385,11 @@
           149,
           148,
           186
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -1189,6 +1410,11 @@
           3967,
           3829,
           2308
+        ],
+        "turns": [
+          9,
+          6,
+          4
         ]
       },
       {
@@ -1209,6 +1435,11 @@
           121,
           117,
           122
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -1229,6 +1460,11 @@
           190,
           191,
           180
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -1249,6 +1485,11 @@
           154,
           150,
           156
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -1269,6 +1510,11 @@
           188,
           151,
           153
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -1289,6 +1535,11 @@
           364,
           410,
           387
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -1309,6 +1560,11 @@
           276,
           311,
           295
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -1329,26 +1585,11 @@
           215,
           238,
           228
-        ]
-      },
-      {
-        "caseId": "complex-request-enters-plan",
-        "passed": true,
-        "consistent": true,
-        "durationsMs": [
-          8441,
-          8364,
-          6784
         ],
-        "promptTokens": [
-          16367,
-          16327,
-          16337
-        ],
-        "completionTokens": [
-          466,
-          436,
-          351
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -1369,6 +1610,11 @@
           316,
           354,
           283
+        ],
+        "turns": [
+          3,
+          4,
+          2
         ]
       },
       {
@@ -1389,6 +1635,11 @@
           304,
           332,
           379
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -1409,6 +1660,11 @@
           413,
           338,
           312
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -1429,6 +1685,11 @@
           754,
           748,
           737
+        ],
+        "turns": [
+          5,
+          5,
+          5
         ]
       },
       {
@@ -1449,6 +1710,11 @@
           805,
           1716,
           874
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -1469,6 +1735,11 @@
           845,
           794,
           685
+        ],
+        "turns": [
+          4,
+          5,
+          3
         ]
       },
       {
@@ -1489,46 +1760,11 @@
           733,
           375,
           823
-        ]
-      },
-      {
-        "caseId": "plan-check-updates-active-plan",
-        "passed": true,
-        "consistent": true,
-        "durationsMs": [
-          4751,
-          5319,
-          5828
         ],
-        "promptTokens": [
-          16490,
-          16490,
-          16490
-        ],
-        "completionTokens": [
-          126,
-          130,
-          149
-        ]
-      },
-      {
-        "caseId": "plan-discard-removes-draft",
-        "passed": true,
-        "consistent": true,
-        "durationsMs": [
-          7467,
-          6598,
-          7693
-        ],
-        "promptTokens": [
-          26455,
-          26455,
-          26455
-        ],
-        "completionTokens": [
-          235,
-          203,
-          201
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -1549,6 +1785,11 @@
           169,
           180,
           151
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -1569,6 +1810,11 @@
           219,
           244,
           225
+        ],
+        "turns": [
+          4,
+          4,
+          4
         ]
       },
       {
@@ -1589,6 +1835,11 @@
           226,
           265,
           212
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -1609,6 +1860,11 @@
           480,
           532,
           477
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -1629,6 +1885,11 @@
           546,
           498,
           528
+        ],
+        "turns": [
+          4,
+          4,
+          4
         ]
       },
       {
@@ -1649,6 +1910,11 @@
           1195,
           995,
           1070
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -1669,6 +1935,11 @@
           509,
           543,
           452
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -1689,26 +1960,11 @@
           195,
           187,
           200
-        ]
-      },
-      {
-        "caseId": "plan-step-implements-and-checks",
-        "passed": true,
-        "consistent": true,
-        "durationsMs": [
-          17627,
-          20749,
-          19843
         ],
-        "promptTokens": [
-          51585,
-          51623,
-          60642
-        ],
-        "completionTokens": [
-          716,
-          838,
-          737
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -1729,26 +1985,36 @@
           576,
           601,
           510
+        ],
+        "turns": [
+          4,
+          4,
+          4
         ]
       },
       {
         "caseId": "plan-open-question-blocks-done",
-        "passed": false,
+        "passed": true,
         "consistent": true,
         "durationsMs": [
-          42184,
-          48226,
-          37543
+          18664,
+          36506,
+          10060
         ],
         "promptTokens": [
-          58128,
-          37190,
-          46966
+          37394,
+          56844,
+          18432
         ],
         "completionTokens": [
-          2636,
-          3333,
-          2662
+          1023,
+          2458,
+          667
+        ],
+        "turns": [
+          4,
+          6,
+          2
         ]
       },
       {
@@ -1769,6 +2035,11 @@
           1380,
           1191,
           1372
+        ],
+        "turns": [
+          9,
+          10,
+          11
         ]
       },
       {
@@ -1789,6 +2060,11 @@
           833,
           843,
           754
+        ],
+        "turns": [
+          3,
+          4,
+          4
         ]
       },
       {
@@ -1809,6 +2085,11 @@
           10045,
           4276,
           7813
+        ],
+        "turns": [
+          8,
+          6,
+          8
         ]
       },
       {
@@ -1829,13 +2110,68 @@
           124,
           130,
           125
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "approved-plan-todo-progress",
+        "passed": false,
+        "consistent": true,
+        "durationsMs": [
+          13876,
+          15216,
+          14772
+        ],
+        "promptTokens": [
+          43076,
+          43971,
+          44006
+        ],
+        "completionTokens": [
+          548,
+          667,
+          676
+        ],
+        "turns": [
+          5,
+          5,
+          5
+        ]
+      },
+      {
+        "caseId": "clean-context-plan-todo-state",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          13997,
+          25345,
+          9685
+        ],
+        "promptTokens": [
+          43106,
+          72308,
+          25883
+        ],
+        "completionTokens": [
+          563,
+          1197,
+          448
+        ],
+        "turns": [
+          5,
+          8,
+          3
         ]
       }
     ],
-    "casesTotal": 43,
-    "casesPassed": 39,
-    "score": 0.9069767441860465,
-    "consistentCases": 42,
+    "casesTotal": 41,
+    "casesPassed": 37,
+    "score": 0.9024390243902439,
+    "consistentCases": 40,
     "bySignal": {
       "required-tool": {
         "passed": 10,
@@ -1850,12 +2186,12 @@
         "total": 11
       },
       "mode-selection": {
-        "passed": 2,
-        "total": 2
+        "passed": 1,
+        "total": 1
       },
       "filesystem-safety": {
-        "passed": 5,
-        "total": 7
+        "passed": 6,
+        "total": 9
       },
       "tool-result-integrity": {
         "passed": 7,
@@ -1866,19 +2202,15 @@
         "total": 7
       },
       "state-persistence": {
-        "passed": 5,
+        "passed": 4,
         "total": 5
       },
       "tool-chain": {
         "passed": 7,
-        "total": 9
+        "total": 10
       },
       "parallel-tools": {
         "passed": 2,
-        "total": 2
-      },
-      "plan-safety": {
-        "passed": 1,
         "total": 2
       },
       "delegation": {
@@ -1890,12 +2222,12 @@
         "total": 2
       },
       "plan-lifecycle": {
-        "passed": 6,
-        "total": 7
+        "passed": 5,
+        "total": 6
       },
       "state-transition": {
-        "passed": 3,
-        "total": 3
+        "passed": 2,
+        "total": 2
       },
       "background-lifecycle": {
         "passed": 2,
@@ -1908,6 +2240,10 @@
       "mcp-tool-chain": {
         "passed": 1,
         "total": 1
+      },
+      "plan-safety": {
+        "passed": 1,
+        "total": 1
       }
     },
     "certified": true,
@@ -1917,23 +2253,29 @@
       "score": 1
     },
     "chain": {
-      "casesTotal": 28,
-      "casesPassed": 24,
-      "score": 0.8571428571428571
+      "casesTotal": 26,
+      "casesPassed": 22,
+      "score": 0.8461538461538461
     },
-    "avgDurationMs": 14028.75968992248,
-    "medianDurationMs": 7684,
-    "p75DurationMs": 14225,
-    "p95DurationMs": 42184,
+    "avgDurationMs": 13987.105691056911,
+    "medianDurationMs": 8086,
+    "p75DurationMs": 14353,
+    "p95DurationMs": 33679,
     "p99DurationMs": 150005,
-    "avgPromptTokens": 29304.356589147286,
-    "avgCompletionTokens": 671.9302325581396
+    "avgPromptTokens": 29929.121951219513,
+    "avgCompletionTokens": 664.2845528455284,
+    "providerUrl": "https://openrouter.ai/api/v1",
+    "avgTurns": 3.138211382113821,
+    "medianTurns": 2,
+    "p75Turns": 4,
+    "p95Turns": 8,
+    "p99Turns": 10
   },
   "minimax/minimax-m3": {
     "bench": "behavior",
     "model": "minimax/minimax-m3",
-    "timestamp": "2026-07-31T21:16:11.036Z",
-    "commit": "56c09f4",
+    "timestamp": "2026-08-01T12:14:50.139Z",
+    "commit": "080bd54",
     "repeat": 3,
     "results": [
       {
@@ -1954,6 +2296,11 @@
           100,
           92,
           95
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -1974,6 +2321,11 @@
           87,
           89,
           116
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -1994,6 +2346,11 @@
           164,
           157,
           129
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -2014,6 +2371,11 @@
           181,
           183,
           183
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -2034,6 +2396,11 @@
           119,
           153,
           123
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -2054,6 +2421,11 @@
           102,
           96,
           94
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -2074,6 +2446,11 @@
           97,
           109,
           92
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -2094,6 +2471,11 @@
           99,
           102,
           163
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -2114,6 +2496,11 @@
           354,
           849,
           188
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -2134,6 +2521,11 @@
           94,
           97,
           24
+        ],
+        "turns": [
+          2,
+          2,
+          1
         ]
       },
       {
@@ -2154,6 +2546,11 @@
           514,
           945,
           2588
+        ],
+        "turns": [
+          3,
+          5,
+          7
         ]
       },
       {
@@ -2174,6 +2571,11 @@
           119,
           103,
           110
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -2194,6 +2596,11 @@
           143,
           130,
           128
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -2214,6 +2621,11 @@
           132,
           114,
           119
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -2234,6 +2646,11 @@
           401,
           320,
           288
+        ],
+        "turns": [
+          3,
+          4,
+          2
         ]
       },
       {
@@ -2254,6 +2671,11 @@
           239,
           245,
           245
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -2274,6 +2696,11 @@
           221,
           208,
           238
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -2294,26 +2721,11 @@
           236,
           224,
           205
-        ]
-      },
-      {
-        "caseId": "complex-request-enters-plan",
-        "passed": true,
-        "consistent": true,
-        "durationsMs": [
-          3902,
-          4294,
-          3852
         ],
-        "promptTokens": [
-          7000,
-          7000,
-          7000
-        ],
-        "completionTokens": [
-          113,
-          111,
-          116
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -2334,6 +2746,11 @@
           273,
           268,
           182
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -2354,6 +2771,11 @@
           342,
           721,
           877
+        ],
+        "turns": [
+          3,
+          4,
+          7
         ]
       },
       {
@@ -2374,6 +2796,11 @@
           292,
           206,
           282
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -2394,6 +2821,11 @@
           512,
           510,
           463
+        ],
+        "turns": [
+          5,
+          6,
+          6
         ]
       },
       {
@@ -2414,6 +2846,11 @@
           680,
           759,
           634
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -2434,6 +2871,11 @@
           338,
           831,
           817
+        ],
+        "turns": [
+          4,
+          6,
+          5
         ]
       },
       {
@@ -2454,46 +2896,11 @@
           1360,
           1062,
           298
-        ]
-      },
-      {
-        "caseId": "plan-check-updates-active-plan",
-        "passed": true,
-        "consistent": true,
-        "durationsMs": [
-          4505,
-          4209,
-          4258
         ],
-        "promptTokens": [
-          16365,
-          16365,
-          16372
-        ],
-        "completionTokens": [
-          125,
-          77,
-          167
-        ]
-      },
-      {
-        "caseId": "plan-discard-removes-draft",
-        "passed": true,
-        "consistent": true,
-        "durationsMs": [
-          13766,
-          3995,
-          24093
-        ],
-        "promptTokens": [
-          31206,
-          26141,
-          26011
-        ],
-        "completionTokens": [
-          342,
-          145,
-          280
+        "turns": [
+          3,
+          2,
+          3
         ]
       },
       {
@@ -2514,6 +2921,11 @@
           370,
           137,
           222
+        ],
+        "turns": [
+          4,
+          2,
+          4
         ]
       },
       {
@@ -2534,6 +2946,11 @@
           175,
           150,
           157
+        ],
+        "turns": [
+          4,
+          4,
+          4
         ]
       },
       {
@@ -2554,6 +2971,11 @@
           191,
           152,
           140
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -2574,6 +2996,11 @@
           361,
           302,
           412
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -2594,6 +3021,11 @@
           573,
           415,
           633
+        ],
+        "turns": [
+          5,
+          4,
+          4
         ]
       },
       {
@@ -2614,6 +3046,11 @@
           922,
           830,
           773
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -2634,6 +3071,11 @@
           639,
           529,
           493
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -2654,26 +3096,11 @@
           144,
           138,
           152
-        ]
-      },
-      {
-        "caseId": "plan-step-implements-and-checks",
-        "passed": true,
-        "consistent": true,
-        "durationsMs": [
-          18598,
-          18608,
-          18863
         ],
-        "promptTokens": [
-          59764,
-          59989,
-          59923
-        ],
-        "completionTokens": [
-          339,
-          467,
-          469
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -2694,26 +3121,36 @@
           426,
           295,
           579
+        ],
+        "turns": [
+          4,
+          4,
+          4
         ]
       },
       {
         "caseId": "plan-open-question-blocks-done",
         "passed": false,
-        "consistent": false,
+        "consistent": true,
         "durationsMs": [
-          53236,
-          16663,
-          91406
+          37196,
+          23782,
+          97974
         ],
         "promptTokens": [
-          46596,
-          28357,
-          32802
+          28246,
+          47787,
+          106901
         ],
         "completionTokens": [
-          3451,
-          1868,
-          3680
+          2139,
+          1611,
+          5728
+        ],
+        "turns": [
+          3,
+          5,
+          10
         ]
       },
       {
@@ -2734,6 +3171,11 @@
           348,
           2529,
           1662
+        ],
+        "turns": [
+          5,
+          11,
+          10
         ]
       },
       {
@@ -2754,6 +3196,11 @@
           737,
           1089,
           749
+        ],
+        "turns": [
+          2,
+          2,
+          3
         ]
       },
       {
@@ -2774,6 +3221,11 @@
           3106,
           5936,
           6549
+        ],
+        "turns": [
+          6,
+          6,
+          10
         ]
       },
       {
@@ -2794,13 +3246,68 @@
           91,
           106,
           85
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "approved-plan-todo-progress",
+        "passed": false,
+        "consistent": false,
+        "durationsMs": [
+          12638,
+          9957,
+          8398
+        ],
+        "promptTokens": [
+          52367,
+          51422,
+          43253
+        ],
+        "completionTokens": [
+          715,
+          457,
+          454
+        ],
+        "turns": [
+          6,
+          6,
+          5
+        ]
+      },
+      {
+        "caseId": "clean-context-plan-todo-state",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          14641,
+          16495,
+          11269
+        ],
+        "promptTokens": [
+          51702,
+          42291,
+          42542
+        ],
+        "completionTokens": [
+          649,
+          370,
+          402
+        ],
+        "turns": [
+          6,
+          5,
+          5
         ]
       }
     ],
-    "casesTotal": 43,
-    "casesPassed": 30,
-    "score": 0.6976744186046512,
-    "consistentCases": 32,
+    "casesTotal": 41,
+    "casesPassed": 27,
+    "score": 0.6585365853658537,
+    "consistentCases": 30,
     "bySignal": {
       "required-tool": {
         "passed": 6,
@@ -2815,12 +3322,12 @@
         "total": 11
       },
       "mode-selection": {
-        "passed": 2,
-        "total": 2
+        "passed": 1,
+        "total": 1
       },
       "filesystem-safety": {
-        "passed": 5,
-        "total": 7
+        "passed": 6,
+        "total": 9
       },
       "tool-result-integrity": {
         "passed": 6,
@@ -2831,18 +3338,14 @@
         "total": 7
       },
       "state-persistence": {
-        "passed": 4,
+        "passed": 3,
         "total": 5
       },
       "tool-chain": {
         "passed": 6,
-        "total": 9
+        "total": 10
       },
       "parallel-tools": {
-        "passed": 1,
-        "total": 2
-      },
-      "plan-safety": {
         "passed": 1,
         "total": 2
       },
@@ -2855,12 +3358,12 @@
         "total": 2
       },
       "plan-lifecycle": {
-        "passed": 5,
-        "total": 7
+        "passed": 3,
+        "total": 6
       },
       "state-transition": {
-        "passed": 1,
-        "total": 3
+        "passed": 0,
+        "total": 2
       },
       "background-lifecycle": {
         "passed": 2,
@@ -2873,6 +3376,10 @@
       "mcp-tool-chain": {
         "passed": 1,
         "total": 1
+      },
+      "plan-safety": {
+        "passed": 0,
+        "total": 1
       }
     },
     "certified": false,
@@ -2882,23 +3389,29 @@
       "score": 0.6666666666666666
     },
     "chain": {
-      "casesTotal": 28,
-      "casesPassed": 20,
-      "score": 0.7142857142857143
+      "casesTotal": 26,
+      "casesPassed": 17,
+      "score": 0.6538461538461539
     },
-    "avgDurationMs": 16459.82945736434,
-    "medianDurationMs": 10095,
-    "p75DurationMs": 16663,
+    "avgDurationMs": 16840.81300813008,
+    "medianDurationMs": 10221,
+    "p75DurationMs": 16317,
     "p95DurationMs": 60005,
     "p99DurationMs": 117917,
-    "avgPromptTokens": 28915.79069767442,
-    "avgCompletionTokens": 538.7596899224807
+    "avgPromptTokens": 30534.60975609756,
+    "avgCompletionTokens": 571.3414634146342,
+    "providerUrl": "https://openrouter.ai/api/v1",
+    "avgTurns": 3.2845528455284554,
+    "medianTurns": 3,
+    "p75Turns": 4,
+    "p95Turns": 6,
+    "p99Turns": 10
   },
   "openai/gpt-5.6-luna": {
     "bench": "behavior",
     "model": "openai/gpt-5.6-luna",
-    "timestamp": "2026-07-31T21:16:11.043Z",
-    "commit": "56c09f4",
+    "timestamp": "2026-08-01T12:14:50.148Z",
+    "commit": "080bd54",
     "repeat": 3,
     "results": [
       {
@@ -2919,6 +3432,11 @@
           108,
           110,
           87
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -2939,6 +3457,11 @@
           97,
           84,
           91
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -2959,6 +3482,11 @@
           122,
           122,
           100
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -2979,6 +3507,11 @@
           193,
           177,
           186
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -2999,6 +3532,11 @@
           155,
           121,
           132
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -3019,6 +3557,11 @@
           238,
           147,
           156
+        ],
+        "turns": [
+          3,
+          2,
+          2
         ]
       },
       {
@@ -3039,6 +3582,11 @@
           106,
           106,
           106
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -3059,6 +3607,11 @@
           159,
           153,
           127
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -3079,6 +3632,11 @@
           97,
           94,
           94
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -3099,6 +3657,11 @@
           120,
           119,
           117
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -3119,6 +3682,11 @@
           2243,
           1795,
           1731
+        ],
+        "turns": [
+          9,
+          6,
+          7
         ]
       },
       {
@@ -3139,6 +3707,11 @@
           115,
           118,
           117
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -3159,6 +3732,11 @@
           188,
           141,
           191
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -3179,6 +3757,11 @@
           73,
           90,
           96
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -3199,6 +3782,11 @@
           222,
           286,
           156
+        ],
+        "turns": [
+          3,
+          3,
+          2
         ]
       },
       {
@@ -3219,6 +3807,11 @@
           193,
           196,
           195
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -3239,6 +3832,11 @@
           227,
           228,
           224
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -3259,26 +3857,11 @@
           202,
           201,
           204
-        ]
-      },
-      {
-        "caseId": "complex-request-enters-plan",
-        "passed": true,
-        "consistent": true,
-        "durationsMs": [
-          3098,
-          3886,
-          3097
         ],
-        "promptTokens": [
-          7004,
-          7004,
-          7004
-        ],
-        "completionTokens": [
-          118,
-          111,
-          116
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -3299,6 +3882,11 @@
           264,
           211,
           252
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -3319,6 +3907,11 @@
           288,
           243,
           243
+        ],
+        "turns": [
+          2,
+          3,
+          3
         ]
       },
       {
@@ -3339,6 +3932,11 @@
           282,
           320,
           276
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -3359,6 +3957,11 @@
           1433,
           1002,
           689
+        ],
+        "turns": [
+          10,
+          9,
+          6
         ]
       },
       {
@@ -3379,6 +3982,11 @@
           778,
           606,
           806
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -3399,6 +4007,11 @@
           750,
           661,
           591
+        ],
+        "turns": [
+          4,
+          4,
+          3
         ]
       },
       {
@@ -3419,46 +4032,11 @@
           528,
           231,
           510
-        ]
-      },
-      {
-        "caseId": "plan-check-updates-active-plan",
-        "passed": true,
-        "consistent": true,
-        "durationsMs": [
-          3628,
-          2890,
-          3253
         ],
-        "promptTokens": [
-          14260,
-          14283,
-          14281
-        ],
-        "completionTokens": [
-          63,
-          80,
-          76
-        ]
-      },
-      {
-        "caseId": "plan-discard-removes-draft",
-        "passed": true,
-        "consistent": true,
-        "durationsMs": [
-          5677,
-          17156,
-          6109
-        ],
-        "promptTokens": [
-          23336,
-          39426,
-          23328
-        ],
-        "completionTokens": [
-          190,
-          406,
-          181
+        "turns": [
+          3,
+          1,
+          3
         ]
       },
       {
@@ -3479,6 +4057,11 @@
           206,
           192,
           195
+        ],
+        "turns": [
+          4,
+          4,
+          4
         ]
       },
       {
@@ -3499,6 +4082,11 @@
           135,
           135,
           133
+        ],
+        "turns": [
+          4,
+          4,
+          4
         ]
       },
       {
@@ -3519,6 +4107,11 @@
           113,
           124,
           142
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -3539,6 +4132,11 @@
           336,
           331,
           418
+        ],
+        "turns": [
+          3,
+          3,
+          4
         ]
       },
       {
@@ -3559,6 +4157,11 @@
           259,
           241,
           266
+        ],
+        "turns": [
+          4,
+          4,
+          4
         ]
       },
       {
@@ -3579,6 +4182,11 @@
           753,
           726,
           765
+        ],
+        "turns": [
+          2,
+          2,
+          3
         ]
       },
       {
@@ -3599,6 +4207,11 @@
           327,
           301,
           387
+        ],
+        "turns": [
+          4,
+          4,
+          4
         ]
       },
       {
@@ -3619,26 +4232,11 @@
           120,
           94,
           74
-        ]
-      },
-      {
-        "caseId": "plan-step-implements-and-checks",
-        "passed": true,
-        "consistent": true,
-        "durationsMs": [
-          23590,
-          11138,
-          11303
         ],
-        "promptTokens": [
-          69429,
-          52680,
-          52798
-        ],
-        "completionTokens": [
-          1046,
-          478,
-          507
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -3659,26 +4257,36 @@
           634,
           572,
           833
+        ],
+        "turns": [
+          4,
+          4,
+          4
         ]
       },
       {
         "caseId": "plan-open-question-blocks-done",
-        "passed": false,
+        "passed": true,
         "consistent": true,
         "durationsMs": [
-          19635,
-          18762,
-          18623
+          9234,
+          10855,
+          7959
         ],
         "promptTokens": [
-          32625,
-          24695,
-          24771
+          16188,
+          24477,
+          24513
         ],
         "completionTokens": [
-          1593,
-          1623,
-          1592
+          462,
+          609,
+          573
+        ],
+        "turns": [
+          2,
+          3,
+          3
         ]
       },
       {
@@ -3699,6 +4307,11 @@
           1508,
           1204,
           1237
+        ],
+        "turns": [
+          10,
+          8,
+          9
         ]
       },
       {
@@ -3719,6 +4332,11 @@
           783,
           584,
           488
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -3739,6 +4357,11 @@
           3729,
           5559,
           1123
+        ],
+        "turns": [
+          12,
+          9,
+          5
         ]
       },
       {
@@ -3759,13 +4382,68 @@
           118,
           116,
           116
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "approved-plan-todo-progress",
+        "passed": false,
+        "consistent": false,
+        "durationsMs": [
+          10249,
+          14280,
+          19965
+        ],
+        "promptTokens": [
+          45284,
+          53414,
+          53400
+        ],
+        "completionTokens": [
+          509,
+          624,
+          601
+        ],
+        "turns": [
+          6,
+          7,
+          7
+        ]
+      },
+      {
+        "caseId": "clean-context-plan-todo-state",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          17264,
+          11588,
+          11247
+        ],
+        "promptTokens": [
+          45280,
+          45296,
+          45278
+        ],
+        "completionTokens": [
+          478,
+          501,
+          479
+        ],
+        "turns": [
+          6,
+          6,
+          6
         ]
       }
     ],
-    "casesTotal": 43,
-    "casesPassed": 35,
-    "score": 0.813953488372093,
-    "consistentCases": 37,
+    "casesTotal": 41,
+    "casesPassed": 33,
+    "score": 0.8048780487804879,
+    "consistentCases": 34,
     "bySignal": {
       "required-tool": {
         "passed": 10,
@@ -3780,12 +4458,12 @@
         "total": 11
       },
       "mode-selection": {
-        "passed": 2,
-        "total": 2
+        "passed": 1,
+        "total": 1
       },
       "filesystem-safety": {
-        "passed": 5,
-        "total": 7
+        "passed": 6,
+        "total": 9
       },
       "tool-result-integrity": {
         "passed": 8,
@@ -3796,18 +4474,14 @@
         "total": 7
       },
       "state-persistence": {
-        "passed": 5,
+        "passed": 4,
         "total": 5
       },
       "tool-chain": {
         "passed": 7,
-        "total": 9
+        "total": 10
       },
       "parallel-tools": {
-        "passed": 1,
-        "total": 2
-      },
-      "plan-safety": {
         "passed": 1,
         "total": 2
       },
@@ -3820,12 +4494,12 @@
         "total": 2
       },
       "plan-lifecycle": {
-        "passed": 4,
-        "total": 7
+        "passed": 3,
+        "total": 6
       },
       "state-transition": {
-        "passed": 1,
-        "total": 3
+        "passed": 0,
+        "total": 2
       },
       "background-lifecycle": {
         "passed": 3,
@@ -3838,6 +4512,10 @@
       "mcp-tool-chain": {
         "passed": 1,
         "total": 1
+      },
+      "plan-safety": {
+        "passed": 1,
+        "total": 1
       }
     },
     "certified": true,
@@ -3847,23 +4525,29 @@
       "score": 0.9333333333333333
     },
     "chain": {
-      "casesTotal": 28,
-      "casesPassed": 21,
-      "score": 0.75
+      "casesTotal": 26,
+      "casesPassed": 19,
+      "score": 0.7307692307692307
     },
-    "avgDurationMs": 10761.209302325582,
-    "medianDurationMs": 6109,
-    "p75DurationMs": 11231,
+    "avgDurationMs": 10967.414634146342,
+    "medianDurationMs": 6460,
+    "p75DurationMs": 11247,
     "p95DurationMs": 32315,
     "p99DurationMs": 62492,
-    "avgPromptTokens": 30347.038759689924,
-    "avgCompletionTokens": 447.8837209302326
+    "avgPromptTokens": 31390.032520325203,
+    "avgCompletionTokens": 442.5447154471545,
+    "providerUrl": "https://openrouter.ai/api/v1",
+    "avgTurns": 3.317073170731707,
+    "medianTurns": 2,
+    "p75Turns": 4,
+    "p95Turns": 9,
+    "p99Turns": 10
   },
   "poolside/laguna-s-2.1": {
     "bench": "behavior",
     "model": "poolside/laguna-s-2.1",
-    "timestamp": "2026-07-31T21:16:11.012Z",
-    "commit": "56c09f4",
+    "timestamp": "2026-08-01T12:14:50.117Z",
+    "commit": "080bd54",
     "repeat": 3,
     "results": [
       {
@@ -3884,6 +4568,11 @@
           97,
           76,
           88
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -3904,6 +4593,11 @@
           98,
           81,
           91
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -3924,6 +4618,11 @@
           168,
           181,
           137
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -3944,6 +4643,11 @@
           185,
           195,
           120
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -3964,6 +4668,11 @@
           140,
           393,
           324
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -3984,6 +4693,11 @@
           179,
           422,
           232
+        ],
+        "turns": [
+          2,
+          4,
+          2
         ]
       },
       {
@@ -4004,6 +4718,11 @@
           94,
           138,
           153
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -4024,6 +4743,11 @@
           139,
           112,
           92
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -4044,6 +4768,11 @@
           68,
           77,
           174
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -4064,6 +4793,11 @@
           126,
           87,
           162
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -4084,6 +4818,11 @@
           1297,
           3125,
           3936
+        ],
+        "turns": [
+          6,
+          12,
+          9
         ]
       },
       {
@@ -4104,6 +4843,11 @@
           164,
           141,
           115
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -4124,6 +4868,11 @@
           560,
           235,
           138
+        ],
+        "turns": [
+          3,
+          2,
+          2
         ]
       },
       {
@@ -4144,6 +4893,11 @@
           115,
           105,
           378
+        ],
+        "turns": [
+          2,
+          2,
+          5
         ]
       },
       {
@@ -4164,6 +4918,11 @@
           242,
           282,
           429
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -4184,6 +4943,11 @@
           394,
           297,
           228
+        ],
+        "turns": [
+          3,
+          3,
+          2
         ]
       },
       {
@@ -4204,6 +4968,11 @@
           227,
           241,
           198
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -4224,26 +4993,11 @@
           236,
           237,
           232
-        ]
-      },
-      {
-        "caseId": "complex-request-enters-plan",
-        "passed": true,
-        "consistent": true,
-        "durationsMs": [
-          5888,
-          2820,
-          5592
         ],
-        "promptTokens": [
-          7972,
-          7972,
-          7972
-        ],
-        "completionTokens": [
-          514,
-          186,
-          220
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -4264,6 +5018,11 @@
           306,
           314,
           261
+        ],
+        "turns": [
+          3,
+          4,
+          3
         ]
       },
       {
@@ -4284,6 +5043,11 @@
           370,
           384,
           411
+        ],
+        "turns": [
+          3,
+          3,
+          5
         ]
       },
       {
@@ -4304,6 +5068,11 @@
           231,
           238,
           200
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -4324,6 +5093,11 @@
           900,
           603,
           1050
+        ],
+        "turns": [
+          5,
+          6,
+          7
         ]
       },
       {
@@ -4344,6 +5118,11 @@
           2065,
           876,
           831
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -4364,6 +5143,11 @@
           1039,
           480,
           1718
+        ],
+        "turns": [
+          8,
+          6,
+          6
         ]
       },
       {
@@ -4384,46 +5168,11 @@
           403,
           930,
           685
-        ]
-      },
-      {
-        "caseId": "plan-check-updates-active-plan",
-        "passed": true,
-        "consistent": true,
-        "durationsMs": [
-          2625,
-          2613,
-          60021
         ],
-        "promptTokens": [
-          16180,
-          16195,
-          358490
-        ],
-        "completionTokens": [
-          101,
-          132,
-          2652
-        ]
-      },
-      {
-        "caseId": "plan-discard-removes-draft",
-        "passed": false,
-        "consistent": false,
-        "durationsMs": [
-          5210,
-          1029,
-          6742
-        ],
-        "promptTokens": [
-          43734,
-          8575,
-          43828
-        ],
-        "completionTokens": [
-          227,
-          46,
-          289
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -4444,6 +5193,11 @@
           227,
           210,
           240
+        ],
+        "turns": [
+          4,
+          4,
+          4
         ]
       },
       {
@@ -4464,6 +5218,11 @@
           145,
           162,
           152
+        ],
+        "turns": [
+          4,
+          4,
+          4
         ]
       },
       {
@@ -4484,6 +5243,11 @@
           242,
           204,
           189
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -4504,6 +5268,11 @@
           377,
           367,
           313
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -4524,6 +5293,11 @@
           679,
           707,
           600
+        ],
+        "turns": [
+          5,
+          4,
+          4
         ]
       },
       {
@@ -4544,6 +5318,11 @@
           1137,
           918,
           1517
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -4564,6 +5343,11 @@
           1927,
           3057,
           2012
+        ],
+        "turns": [
+          10,
+          14,
+          13
         ]
       },
       {
@@ -4584,26 +5368,11 @@
           215,
           328,
           242
-        ]
-      },
-      {
-        "caseId": "plan-step-implements-and-checks",
-        "passed": true,
-        "consistent": true,
-        "durationsMs": [
-          12830,
-          21375,
-          10960
         ],
-        "promptTokens": [
-          50768,
-          59979,
-          56244
-        ],
-        "completionTokens": [
-          450,
-          1042,
-          582
+        "turns": [
+          2,
+          3,
+          2
         ]
       },
       {
@@ -4624,26 +5393,36 @@
           1022,
           534,
           894
+        ],
+        "turns": [
+          9,
+          4,
+          4
         ]
       },
       {
         "caseId": "plan-open-question-blocks-done",
         "passed": false,
-        "consistent": false,
+        "consistent": true,
         "durationsMs": [
-          24701,
-          108720,
-          18793
+          120004,
+          120003,
+          120005
         ],
         "promptTokens": [
-          28031,
-          57595,
-          46345
+          18071,
+          18241,
+          70685
         ],
         "completionTokens": [
-          1392,
-          8640,
-          1759
+          977,
+          370,
+          3088
+        ],
+        "turns": [
+          2,
+          2,
+          7
         ]
       },
       {
@@ -4664,6 +5443,11 @@
           1055,
           799,
           1366
+        ],
+        "turns": [
+          12,
+          9,
+          8
         ]
       },
       {
@@ -4684,6 +5468,11 @@
           692,
           559,
           1064
+        ],
+        "turns": [
+          2,
+          2,
+          3
         ]
       },
       {
@@ -4704,6 +5493,11 @@
           1629,
           13793,
           3479
+        ],
+        "turns": [
+          6,
+          8,
+          7
         ]
       },
       {
@@ -4724,12 +5518,67 @@
           77,
           130,
           109
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "approved-plan-todo-progress",
+        "passed": false,
+        "consistent": true,
+        "durationsMs": [
+          90023,
+          90003,
+          16972
+        ],
+        "promptTokens": [
+          16809,
+          8231,
+          42362
+        ],
+        "completionTokens": [
+          340,
+          86,
+          392
+        ],
+        "turns": [
+          2,
+          1,
+          5
+        ]
+      },
+      {
+        "caseId": "clean-context-plan-todo-state",
+        "passed": false,
+        "consistent": true,
+        "durationsMs": [
+          60008,
+          60002,
+          60002
+        ],
+        "promptTokens": [
+          16785,
+          8228,
+          8228
+        ],
+        "completionTokens": [
+          319,
+          131,
+          113
+        ],
+        "turns": [
+          2,
+          1,
+          1
         ]
       }
     ],
-    "casesTotal": 43,
-    "casesPassed": 35,
-    "score": 0.813953488372093,
+    "casesTotal": 41,
+    "casesPassed": 32,
+    "score": 0.7804878048780488,
     "consistentCases": 36,
     "bySignal": {
       "required-tool": {
@@ -4745,12 +5594,12 @@
         "total": 11
       },
       "mode-selection": {
-        "passed": 2,
-        "total": 2
+        "passed": 1,
+        "total": 1
       },
       "filesystem-safety": {
         "passed": 5,
-        "total": 7
+        "total": 9
       },
       "tool-result-integrity": {
         "passed": 7,
@@ -4761,19 +5610,15 @@
         "total": 7
       },
       "state-persistence": {
-        "passed": 5,
+        "passed": 3,
         "total": 5
       },
       "tool-chain": {
-        "passed": 7,
-        "total": 9
+        "passed": 6,
+        "total": 10
       },
       "parallel-tools": {
         "passed": 2,
-        "total": 2
-      },
-      "plan-safety": {
-        "passed": 1,
         "total": 2
       },
       "delegation": {
@@ -4785,12 +5630,12 @@
         "total": 2
       },
       "plan-lifecycle": {
-        "passed": 4,
-        "total": 7
+        "passed": 2,
+        "total": 6
       },
       "state-transition": {
         "passed": 1,
-        "total": 3
+        "total": 2
       },
       "background-lifecycle": {
         "passed": 3,
@@ -4803,32 +5648,42 @@
       "mcp-tool-chain": {
         "passed": 1,
         "total": 1
+      },
+      "plan-safety": {
+        "passed": 0,
+        "total": 1
       }
     },
-    "certified": true,
+    "certified": false,
     "core": {
       "casesTotal": 15,
       "casesPassed": 14,
       "score": 0.9333333333333333
     },
     "chain": {
-      "casesTotal": 28,
-      "casesPassed": 21,
-      "score": 0.75
+      "casesTotal": 26,
+      "casesPassed": 18,
+      "score": 0.6923076923076923
     },
-    "avgDurationMs": 14811.829457364342,
-    "medianDurationMs": 6704,
-    "p75DurationMs": 15586,
-    "p95DurationMs": 60003,
-    "p99DurationMs": 108720,
-    "avgPromptTokens": 44601.43410852713,
-    "avgCompletionTokens": 729.2790697674419
+    "avgDurationMs": 19169.341463414636,
+    "medianDurationMs": 7808,
+    "p75DurationMs": 17495,
+    "p95DurationMs": 60044,
+    "p99DurationMs": 120005,
+    "avgPromptTokens": 41880.85365853659,
+    "avgCompletionTokens": 663.910569105691,
+    "providerUrl": "https://openrouter.ai/api/v1",
+    "avgTurns": 3.5284552845528454,
+    "medianTurns": 3,
+    "p75Turns": 4,
+    "p95Turns": 9,
+    "p99Turns": 13
   },
   "stepfun/step-3.7-flash": {
     "bench": "behavior",
     "model": "stepfun/step-3.7-flash",
-    "timestamp": "2026-07-31T21:16:11.027Z",
-    "commit": "56c09f4",
+    "timestamp": "2026-08-01T12:14:50.129Z",
+    "commit": "080bd54",
     "repeat": 3,
     "results": [
       {
@@ -4849,6 +5704,11 @@
           166,
           111,
           122
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -4869,6 +5729,11 @@
           102,
           170,
           104
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -4889,6 +5754,11 @@
           204,
           207,
           195
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -4909,6 +5779,11 @@
           183,
           189,
           186
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -4929,6 +5804,11 @@
           249,
           182,
           227
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -4949,6 +5829,11 @@
           216,
           179,
           274
+        ],
+        "turns": [
+          3,
+          2,
+          3
         ]
       },
       {
@@ -4969,6 +5854,11 @@
           119,
           137,
           116
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -4989,6 +5879,11 @@
           260,
           153,
           131
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -5009,6 +5904,11 @@
           132,
           188,
           181
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -5029,6 +5929,11 @@
           138,
           140,
           158
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -5049,6 +5954,11 @@
           869,
           3041,
           2726
+        ],
+        "turns": [
+          4,
+          10,
+          12
         ]
       },
       {
@@ -5069,6 +5979,11 @@
           100,
           212,
           100
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -5089,6 +6004,11 @@
           170,
           209,
           639
+        ],
+        "turns": [
+          2,
+          2,
+          3
         ]
       },
       {
@@ -5109,6 +6029,11 @@
           211,
           146,
           218
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -5129,6 +6054,11 @@
           433,
           375,
           157
+        ],
+        "turns": [
+          4,
+          3,
+          2
         ]
       },
       {
@@ -5149,6 +6079,11 @@
           191,
           388,
           218
+        ],
+        "turns": [
+          2,
+          3,
+          2
         ]
       },
       {
@@ -5169,6 +6104,11 @@
           220,
           314,
           293
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -5189,26 +6129,11 @@
           376,
           315,
           362
-        ]
-      },
-      {
-        "caseId": "complex-request-enters-plan",
-        "passed": true,
-        "consistent": true,
-        "durationsMs": [
-          4905,
-          4059,
-          4386
         ],
-        "promptTokens": [
-          8181,
-          8181,
-          8181
-        ],
-        "completionTokens": [
-          318,
-          276,
-          268
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -5229,6 +6154,11 @@
           529,
           295,
           335
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -5249,6 +6179,11 @@
           807,
           917,
           271
+        ],
+        "turns": [
+          4,
+          3,
+          2
         ]
       },
       {
@@ -5269,6 +6204,11 @@
           282,
           291,
           343
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -5289,6 +6229,11 @@
           763,
           551,
           602
+        ],
+        "turns": [
+          5,
+          4,
+          5
         ]
       },
       {
@@ -5309,6 +6254,11 @@
           499,
           633,
           766
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -5329,6 +6279,11 @@
           264,
           795,
           533
+        ],
+        "turns": [
+          3,
+          3,
+          4
         ]
       },
       {
@@ -5349,46 +6304,11 @@
           238,
           625,
           1771
-        ]
-      },
-      {
-        "caseId": "plan-check-updates-active-plan",
-        "passed": true,
-        "consistent": true,
-        "durationsMs": [
-          9937,
-          8816,
-          6607
         ],
-        "promptTokens": [
-          16619,
-          16619,
-          16631
-        ],
-        "completionTokens": [
-          138,
-          192,
-          177
-        ]
-      },
-      {
-        "caseId": "plan-discard-removes-draft",
-        "passed": true,
-        "consistent": true,
-        "durationsMs": [
-          9890,
-          7111,
-          23420
-        ],
-        "promptTokens": [
-          26633,
-          17678,
-          35664
-        ],
-        "completionTokens": [
-          281,
-          247,
-          322
+        "turns": [
+          1,
+          3,
+          3
         ]
       },
       {
@@ -5409,6 +6329,11 @@
           637,
           275,
           562
+        ],
+        "turns": [
+          4,
+          4,
+          4
         ]
       },
       {
@@ -5429,6 +6354,11 @@
           225,
           336,
           285
+        ],
+        "turns": [
+          4,
+          4,
+          4
         ]
       },
       {
@@ -5449,6 +6379,11 @@
           233,
           254,
           321
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -5469,6 +6404,11 @@
           418,
           372,
           441
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -5489,6 +6429,11 @@
           663,
           531,
           362
+        ],
+        "turns": [
+          4,
+          4,
+          4
         ]
       },
       {
@@ -5509,6 +6454,11 @@
           1105,
           1686,
           1140
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -5529,6 +6479,11 @@
           478,
           2012,
           1623
+        ],
+        "turns": [
+          3,
+          9,
+          9
         ]
       },
       {
@@ -5549,26 +6504,11 @@
           316,
           458,
           323
-        ]
-      },
-      {
-        "caseId": "plan-step-implements-and-checks",
-        "passed": true,
-        "consistent": true,
-        "durationsMs": [
-          33165,
-          26114,
-          32811
         ],
-        "promptTokens": [
-          70540,
-          43249,
-          61156
-        ],
-        "completionTokens": [
-          1284,
-          985,
-          1387
+        "turns": [
+          2,
+          3,
+          3
         ]
       },
       {
@@ -5589,6 +6529,11 @@
           919,
           914,
           736
+        ],
+        "turns": [
+          5,
+          4,
+          4
         ]
       },
       {
@@ -5596,19 +6541,24 @@
         "passed": false,
         "consistent": false,
         "durationsMs": [
-          32886,
-          12898,
-          13633
+          19844,
+          14226,
+          27429
         ],
         "promptTokens": [
-          55912,
-          27752,
-          27927
+          28426,
+          28731,
+          37579
         ],
         "completionTokens": [
-          2136,
-          985,
-          1372
+          1371,
+          1306,
+          2288
+        ],
+        "turns": [
+          3,
+          3,
+          4
         ]
       },
       {
@@ -5629,6 +6579,11 @@
           1273,
           2598,
           1657
+        ],
+        "turns": [
+          7,
+          9,
+          11
         ]
       },
       {
@@ -5649,6 +6604,11 @@
           885,
           1227,
           833
+        ],
+        "turns": [
+          2,
+          3,
+          4
         ]
       },
       {
@@ -5669,6 +6629,11 @@
           1995,
           1682,
           306
+        ],
+        "turns": [
+          8,
+          7,
+          2
         ]
       },
       {
@@ -5689,13 +6654,68 @@
           160,
           104,
           109
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "approved-plan-todo-progress",
+        "passed": false,
+        "consistent": false,
+        "durationsMs": [
+          15913,
+          58105,
+          18410
+        ],
+        "promptTokens": [
+          43983,
+          121466,
+          52585
+        ],
+        "completionTokens": [
+          658,
+          2126,
+          649
+        ],
+        "turns": [
+          5,
+          13,
+          6
+        ]
+      },
+      {
+        "caseId": "clean-context-plan-todo-state",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          14381,
+          16178,
+          25916
+        ],
+        "promptTokens": [
+          43165,
+          44056,
+          25778
+        ],
+        "completionTokens": [
+          602,
+          625,
+          509
+        ],
+        "turns": [
+          5,
+          5,
+          3
         ]
       }
     ],
-    "casesTotal": 43,
-    "casesPassed": 36,
-    "score": 0.8372093023255814,
-    "consistentCases": 37,
+    "casesTotal": 41,
+    "casesPassed": 33,
+    "score": 0.8048780487804879,
+    "consistentCases": 34,
     "bySignal": {
       "required-tool": {
         "passed": 9,
@@ -5710,12 +6730,12 @@
         "total": 11
       },
       "mode-selection": {
-        "passed": 2,
-        "total": 2
+        "passed": 1,
+        "total": 1
       },
       "filesystem-safety": {
-        "passed": 3,
-        "total": 7
+        "passed": 4,
+        "total": 9
       },
       "tool-result-integrity": {
         "passed": 8,
@@ -5726,19 +6746,15 @@
         "total": 7
       },
       "state-persistence": {
-        "passed": 5,
+        "passed": 4,
         "total": 5
       },
       "tool-chain": {
         "passed": 6,
-        "total": 9
+        "total": 10
       },
       "parallel-tools": {
         "passed": 2,
-        "total": 2
-      },
-      "plan-safety": {
-        "passed": 1,
         "total": 2
       },
       "delegation": {
@@ -5750,12 +6766,12 @@
         "total": 2
       },
       "plan-lifecycle": {
-        "passed": 5,
-        "total": 7
+        "passed": 3,
+        "total": 6
       },
       "state-transition": {
-        "passed": 2,
-        "total": 3
+        "passed": 1,
+        "total": 2
       },
       "background-lifecycle": {
         "passed": 3,
@@ -5768,6 +6784,10 @@
       "mcp-tool-chain": {
         "passed": 1,
         "total": 1
+      },
+      "plan-safety": {
+        "passed": 0,
+        "total": 1
       }
     },
     "certified": true,
@@ -5777,23 +6797,29 @@
       "score": 0.9333333333333333
     },
     "chain": {
-      "casesTotal": 28,
-      "casesPassed": 22,
-      "score": 0.7857142857142857
+      "casesTotal": 26,
+      "casesPassed": 19,
+      "score": 0.7307692307692307
     },
-    "avgDurationMs": 16087.658914728681,
-    "medianDurationMs": 11116,
+    "avgDurationMs": 16707.90243902439,
+    "medianDurationMs": 12660,
     "p75DurationMs": 19869,
-    "p95DurationMs": 44131,
+    "p95DurationMs": 58105,
     "p99DurationMs": 60008,
-    "avgPromptTokens": 33450.26356589147,
-    "avgCompletionTokens": 545.2248062015503
+    "avgPromptTokens": 34958.78048780488,
+    "avgCompletionTokens": 569.9186991869918,
+    "providerUrl": "https://openrouter.ai/api/v1",
+    "avgTurns": 3.3333333333333335,
+    "medianTurns": 3,
+    "p75Turns": 4,
+    "p95Turns": 9,
+    "p99Turns": 12
   },
   "z-ai/glm-5.2": {
     "bench": "behavior",
     "model": "z-ai/glm-5.2",
-    "timestamp": "2026-07-31T21:32:59.341Z",
-    "commit": "56c09f4",
+    "timestamp": "2026-08-01T12:14:50.166Z",
+    "commit": "080bd54",
     "repeat": 3,
     "results": [
       {
@@ -5814,6 +6840,11 @@
           79,
           77,
           78
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -5834,6 +6865,11 @@
           62,
           65,
           62
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -5854,6 +6890,11 @@
           99,
           128,
           120
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -5874,6 +6915,11 @@
           105,
           95,
           137
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -5894,6 +6940,11 @@
           93,
           107,
           104
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -5914,6 +6965,11 @@
           84,
           126,
           79
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -5934,6 +6990,11 @@
           89,
           72,
           95
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -5954,6 +7015,11 @@
           184,
           131,
           128
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -5974,6 +7040,11 @@
           43,
           78,
           62
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -5994,6 +7065,11 @@
           89,
           86,
           92
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -6014,6 +7090,11 @@
           132,
           320,
           1487
+        ],
+        "turns": [
+          1,
+          2,
+          5
         ]
       },
       {
@@ -6034,6 +7115,11 @@
           72,
           64,
           66
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -6054,6 +7140,11 @@
           101,
           93,
           94
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -6074,6 +7165,11 @@
           130,
           538,
           505
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -6094,6 +7190,11 @@
           122,
           102,
           90
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -6114,6 +7215,11 @@
           202,
           178,
           205
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -6134,6 +7240,11 @@
           143,
           157,
           153
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -6154,26 +7265,11 @@
           183,
           166,
           183
-        ]
-      },
-      {
-        "caseId": "complex-request-enters-plan",
-        "passed": true,
-        "consistent": true,
-        "durationsMs": [
-          9864,
-          5306,
-          15586
         ],
-        "promptTokens": [
-          7856,
-          7815,
-          24982
-        ],
-        "completionTokens": [
-          96,
-          197,
-          621
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -6194,6 +7290,11 @@
           132,
           188,
           149
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -6214,6 +7315,11 @@
           478,
           369,
           237
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -6234,6 +7340,11 @@
           186,
           233,
           164
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -6254,6 +7365,11 @@
           353,
           350,
           371
+        ],
+        "turns": [
+          6,
+          5,
+          5
         ]
       },
       {
@@ -6274,6 +7390,11 @@
           906,
           768,
           682
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -6294,6 +7415,11 @@
           584,
           514,
           671
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -6314,46 +7440,11 @@
           175,
           201,
           234
-        ]
-      },
-      {
-        "caseId": "plan-check-updates-active-plan",
-        "passed": true,
-        "consistent": true,
-        "durationsMs": [
-          7206,
-          2692,
-          3990
         ],
-        "promptTokens": [
-          15857,
-          15857,
-          15857
-        ],
-        "completionTokens": [
-          52,
-          36,
-          41
-        ]
-      },
-      {
-        "caseId": "plan-discard-removes-draft",
-        "passed": true,
-        "consistent": true,
-        "durationsMs": [
-          7367,
-          10670,
-          7754
-        ],
-        "promptTokens": [
-          34167,
-          34811,
-          34188
-        ],
-        "completionTokens": [
-          146,
-          286,
-          166
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -6374,6 +7465,11 @@
           149,
           209,
           145
+        ],
+        "turns": [
+          4,
+          4,
+          4
         ]
       },
       {
@@ -6394,6 +7490,11 @@
           138,
           164,
           142
+        ],
+        "turns": [
+          4,
+          4,
+          4
         ]
       },
       {
@@ -6414,6 +7515,11 @@
           154,
           159,
           127
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -6434,6 +7540,11 @@
           227,
           330,
           177
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -6454,6 +7565,11 @@
           323,
           285,
           848
+        ],
+        "turns": [
+          4,
+          4,
+          7
         ]
       },
       {
@@ -6474,6 +7590,11 @@
           869,
           861,
           875
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -6494,6 +7615,11 @@
           328,
           339,
           314
+        ],
+        "turns": [
+          3,
+          3,
+          3
         ]
       },
       {
@@ -6514,26 +7640,11 @@
           194,
           169,
           134
-        ]
-      },
-      {
-        "caseId": "plan-step-implements-and-checks",
-        "passed": true,
-        "consistent": true,
-        "durationsMs": [
-          15596,
-          15383,
-          21052
         ],
-        "promptTokens": [
-          57637,
-          57659,
-          75340
-        ],
-        "completionTokens": [
-          317,
-          377,
-          569
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -6554,26 +7665,36 @@
           491,
           386,
           327
+        ],
+        "turns": [
+          4,
+          4,
+          4
         ]
       },
       {
         "caseId": "plan-open-question-blocks-done",
-        "passed": false,
-        "consistent": false,
+        "passed": true,
+        "consistent": true,
         "durationsMs": [
-          34264,
-          38859,
-          56916
+          4770,
+          11018,
+          4450
         ],
         "promptTokens": [
-          27024,
-          27171,
-          45293
+          17929,
+          37275,
+          17931
         ],
         "completionTokens": [
-          1551,
-          1936,
-          2314
+          683,
+          1467,
+          673
+        ],
+        "turns": [
+          2,
+          4,
+          2
         ]
       },
       {
@@ -6594,6 +7715,11 @@
           720,
           1111,
           1044
+        ],
+        "turns": [
+          9,
+          10,
+          8
         ]
       },
       {
@@ -6614,6 +7740,11 @@
           529,
           432,
           392
+        ],
+        "turns": [
+          2,
+          2,
+          2
         ]
       },
       {
@@ -6634,6 +7765,11 @@
           5009,
           5164,
           3553
+        ],
+        "turns": [
+          7,
+          9,
+          6
         ]
       },
       {
@@ -6654,13 +7790,68 @@
           76,
           84,
           72
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "approved-plan-todo-progress",
+        "passed": false,
+        "consistent": true,
+        "durationsMs": [
+          13088,
+          12366,
+          9423
+        ],
+        "promptTokens": [
+          50376,
+          50464,
+          50363
+        ],
+        "completionTokens": [
+          405,
+          449,
+          398
+        ],
+        "turns": [
+          6,
+          6,
+          6
+        ]
+      },
+      {
+        "caseId": "clean-context-plan-todo-state",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          21282,
+          4597,
+          4620
+        ],
+        "promptTokens": [
+          58922,
+          42218,
+          42230
+        ],
+        "completionTokens": [
+          441,
+          411,
+          417
+        ],
+        "turns": [
+          7,
+          5,
+          5
         ]
       }
     ],
-    "casesTotal": 43,
-    "casesPassed": 39,
-    "score": 0.9069767441860465,
-    "consistentCases": 39,
+    "casesTotal": 41,
+    "casesPassed": 37,
+    "score": 0.9024390243902439,
+    "consistentCases": 38,
     "bySignal": {
       "required-tool": {
         "passed": 9,
@@ -6675,12 +7866,12 @@
         "total": 11
       },
       "mode-selection": {
-        "passed": 2,
-        "total": 2
+        "passed": 1,
+        "total": 1
       },
       "filesystem-safety": {
-        "passed": 7,
-        "total": 7
+        "passed": 8,
+        "total": 9
       },
       "tool-result-integrity": {
         "passed": 8,
@@ -6691,19 +7882,15 @@
         "total": 7
       },
       "state-persistence": {
-        "passed": 4,
+        "passed": 3,
         "total": 5
       },
       "tool-chain": {
         "passed": 8,
-        "total": 9
+        "total": 10
       },
       "parallel-tools": {
         "passed": 2,
-        "total": 2
-      },
-      "plan-safety": {
-        "passed": 1,
         "total": 2
       },
       "delegation": {
@@ -6715,12 +7902,12 @@
         "total": 2
       },
       "plan-lifecycle": {
-        "passed": 6,
-        "total": 7
+        "passed": 5,
+        "total": 6
       },
       "state-transition": {
-        "passed": 3,
-        "total": 3
+        "passed": 2,
+        "total": 2
       },
       "background-lifecycle": {
         "passed": 3,
@@ -6733,6 +7920,10 @@
       "mcp-tool-chain": {
         "passed": 1,
         "total": 1
+      },
+      "plan-safety": {
+        "passed": 1,
+        "total": 1
       }
     },
     "certified": true,
@@ -6742,16 +7933,22 @@
       "score": 0.8666666666666667
     },
     "chain": {
-      "casesTotal": 28,
-      "casesPassed": 26,
-      "score": 0.9285714285714286
+      "casesTotal": 26,
+      "casesPassed": 24,
+      "score": 0.9230769230769231
     },
-    "avgDurationMs": 12454.67441860465,
-    "medianDurationMs": 7092,
-    "p75DurationMs": 13108,
-    "p95DurationMs": 34264,
+    "avgDurationMs": 11705.382113821139,
+    "medianDurationMs": 6967,
+    "p75DurationMs": 12750,
+    "p95DurationMs": 31668,
     "p99DurationMs": 111558,
-    "avgPromptTokens": 27863.22480620155,
-    "avgCompletionTokens": 403.3720930232558
+    "avgPromptTokens": 28297.154471544716,
+    "avgCompletionTokens": 395.7235772357724,
+    "providerUrl": "https://openrouter.ai/api/v1",
+    "avgTurns": 3.089430894308943,
+    "medianTurns": 3,
+    "p75Turns": 3,
+    "p95Turns": 7,
+    "p99Turns": 9
   }
 }

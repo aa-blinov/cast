@@ -248,9 +248,6 @@ plans directory; `read`ing that file makes it the active plan.
 | Tool | Mode | Description |
 |------|------|-------------|
 | `plan_done` | Plan | Signal that the plan is ready for review |
-| `plan_discard` | Plan | Delete a plan from the session |
-| `plan_enter` | Build | Suggest switching to plan mode |
-| `plan_check` | Build | Mark a checklist item as done |
 
 ## Subagent System
 

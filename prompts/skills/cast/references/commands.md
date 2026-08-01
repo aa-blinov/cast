@@ -23,8 +23,8 @@
 | `/statusbar` | Toggle and reorder status bar segments |
 | `/usage` | Show session token/cost usage |
 | `/sessions` | List/switch sessions |
-| `/plan` | Enter plan mode |
-| `/build` | Exit plan mode, restore full toolset |
+| `/plan` | User-initiated task initialization: establish scope and an execution plan before implementation |
+| `/build` | Exit plan mode, approve the plan, and restore the implementation toolset |
 | `/clear` | Clear context |
 | `/compact` | Compact context now |
 | `/abort` | Abort running agent |

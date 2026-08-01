@@ -44,5 +44,26 @@
     "file": "runs/2026-07-31T21-32-59-277Z_compare-x3_openrouter-eora-blinov-deepseek-deepseek-v4-pro_openrouter-eora-blinov-z-ai-glm-.json",
     "repeat": 3,
     "inconsistentCases": 5
+  },
+  {
+    "timestamp": "2026-08-01T12:14:50.078Z",
+    "kind": "compare",
+    "models": [
+      "default:deepseek/deepseek-v4-flash-0731",
+      "openrouter-eora-blinov:poolside/laguna-s-2.1",
+      "openrouter-eora-blinov:stepfun/step-3.7-flash",
+      "openrouter-eora-blinov:minimax/minimax-m3",
+      "openrouter-eora-blinov:openai/gpt-5.6-luna",
+      "openrouter-eora-blinov:deepseek/deepseek-v4-pro",
+      "openrouter-eora-blinov:z-ai/glm-5.2"
+    ],
+    "caseFilter": "plan-open-question-blocks-done,approved-plan-todo-progress,clean-context-plan-todo-state",
+    "total": 21,
+    "passed": 10,
+    "failed": 11,
+    "commit": "080bd54",
+    "file": "runs/2026-08-01T12-14-50-078Z_compare-x3_default-deepseek-deepseek-v4-flash-0731_openrouter-eora-blinov-poolside-laguna-s.json",
+    "repeat": 3,
+    "inconsistentCases": 2
   }
 ]

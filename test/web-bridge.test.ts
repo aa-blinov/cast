@@ -6,7 +6,7 @@ import type { AppConfig } from "../src/core/config.ts";
 import type { McpSetupResult } from "../src/core/mcp.ts";
 import type { Persona } from "../src/core/personas.ts";
 import { createAgentRunner } from "../src/core/runner.ts";
-import { createSession } from "../src/core/session.ts";
+import { createSession, getFullHistory, saveSession } from "../src/core/session.ts";
 import type { StartupResult } from "../src/core/startup.ts";
 
 // submit() fires runAgentLoop in the background (fire-and-forget) — stub it
@@ -405,6 +405,99 @@ describe("web bridge", () => {
 		bridge.submit(ws.id, "second message, from another tab");
 		expect(runAgentLoop).toHaveBeenCalledTimes(1); // still just the one run
 		expect(ws.runner.steeringQueue.hasItems()).toBe(true);
+	});
+
+	it("publishes a backend-owned request start time with running status", () => {
+		const bridge = createWebBridge(makeResult());
+		const ws = bridge.createSession();
+		const events: Array<{ type: string; status?: string; startedAt?: number }> = [];
+		bridge.subscribe(ws.id, (event) => events.push(event));
+
+		bridge.submit(ws.id, "measure this request");
+
+		const status = events.find((event) => event.type === "status" && event.status === "running");
+		expect(status?.startedAt).toEqual(expect.any(Number));
+		expect(ws.turnStartedAt).toBe(status?.startedAt);
+	});
+
+	it("records web answers to multiple questions and resumes the conversation", async () => {
+		const { createPlanState, execQuestion } = await import("../src/core/plan.ts");
+		const bridge = createWebBridge(makeResult());
+		const ws = bridge.createSession();
+		const planState = createPlanState(ws.session.cwd!, ws.id, {
+			onChange: (question, transition) => {
+				ws.session.planQuestion = question;
+				ws.session.planTransition = transition;
+			},
+		});
+		planState.enabled = true;
+		execQuestion(
+			{
+				questions: [
+					{
+						question: "Choose cache backend",
+						options: [
+							{ value: "memory", label: "In-memory" },
+							{ value: "redis", label: "Redis" },
+						],
+					},
+					{
+						question: "Choose storage",
+						options: [
+							{ value: "disk", label: "Disk" },
+							{ value: "memory", label: "Memory" },
+						],
+					},
+				],
+			},
+			planState,
+		);
+		expect(bridge.getQuestion(ws.id)?.questions).toHaveLength(2);
+
+		runAgentLoop.mockImplementationOnce(async (messages) => messages);
+		expect(bridge.answerQuestion(ws.id, ["redis", "disk"])).toEqual({ ok: true });
+		expect(ws.session.planQuestion).toBeUndefined();
+		expect(ws.session.messages.at(-1)?.content).toContain('The user selected "Redis"');
+	});
+
+	it("resets only the model context for clean plan implementation, retaining the visible thread", () => {
+		const bridge = createWebBridge(makeResult());
+		const ws = bridge.createSession();
+		ws.session.messages.push(
+			{ role: "user", content: "Build a release dashboard" },
+			{ role: "assistant", content: "Here is the plan." },
+		);
+		saveSession(ws.session);
+
+		expect(bridge.resetContext(ws.id)).toEqual({ ok: true, originalTask: "Build a release dashboard" });
+		expect(ws.session.messages).toEqual([]);
+		expect(getFullHistory(ws.id)).toEqual([
+			{ role: "user", content: "Build a release dashboard" },
+			{ role: "assistant", content: "Here is the plan." },
+		]);
+	});
+
+	it("keeps a pending plan review available after a page reload", async () => {
+		const { createPlanState, execPlanDone } = await import("../src/core/plan.ts");
+		const bridge = createWebBridge(makeResult());
+		const ws = bridge.createSession();
+		ws.session.mode = "plan";
+		const planState = createPlanState(ws.session.cwd!, ws.id, {
+			onChange: (question, transition) => {
+				ws.session.planQuestion = question;
+				ws.session.planTransition = transition;
+			},
+		});
+		planState.enabled = true;
+		const planPath = join(planState.plansDir, "review.md");
+		mkdirSync(planState.plansDir, { recursive: true });
+		writeFileSync(planPath, "# Review\n\n## Steps\n- [ ] implement", "utf-8");
+		planState.activePlanPath = planPath;
+		expect(execPlanDone({}, planState).isError).toBeFalsy();
+
+		expect(bridge.getPlanTransition(ws.id)).toEqual({ kind: "done" });
+		expect(bridge.resolvePlanTransition(ws.id, "done")).toEqual({ ok: true });
+		expect(bridge.getPlanTransition(ws.id)).toBeUndefined();
 	});
 
 	it("claims the turn before an async UserPromptSubmit hook so concurrent sends cannot start two loops", async () => {

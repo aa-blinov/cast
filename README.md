@@ -114,7 +114,7 @@ Add your own in `~/.cast/personas/` (global) or `.cast/personas/` (project).
 
 ### Plan mode
 
-Think before you build: `/plan` switches the agent to read-only exploration — it studies the codebase (parallel sub-agents, read-only shell) and writes an execution-spec plan with a `- [ ]` checklist to `~/.cast/plans/`. When the plan is ready you get an approval dialog: implement now, implement in a fresh context, approve for later, or keep refining. In build mode the approved plan rides in the system prompt (surviving compaction and restarts) and the agent checks off steps as it lands them. The agent can also propose planning itself (`plan_enter`) when a task looks complex. Each phase can run its own model — see `/plan-model`.
+Think before you build: `/plan` switches the agent to read-only exploration — it studies the codebase (parallel sub-agents, read-only shell) and writes an execution-spec plan with a `- [ ]` checklist to `~/.cast/plans/`. When the plan is ready you get an approval dialog: implement now, implement in a fresh context, approve for later, or keep refining. In build mode the approved plan rides in the system prompt (surviving compaction and restarts) and the agent checks off steps as it lands them. Each phase can run its own model — see `/plan-model`.
 
 ### Context compaction
 
@@ -201,6 +201,7 @@ Env vars: `CAST_WEB_PORT` (default `1337`), `CAST_WEB_HOST` (default `127.0.0.1`
 ```
 cast [options] [prompt]
   cast run [options] <message>   Non-interactive mode (stream to stdout, exit)
+  cast run --interactive         Persistent JSONL session for programmatic clients
   cast upgrade [version] [--force]
                                 Re-run installer to update
 
@@ -222,6 +223,7 @@ Options:
 
 run subcommand:
   --format <default|json>    Output format
+  --interactive              Persistent JSONL session protocol
   (also accepts: -m, -r, -p, -c, -s, --bypass-permissions, --skill, --mcp)
 ```
 

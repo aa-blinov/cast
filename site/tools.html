@@ -597,7 +597,7 @@ index, a more direct DDG replacement.</li>
 tools above — no separate plan-write/plan-edit/plan-read tool. In plan mode
 <code>write</code>/<code>edit</code> are restricted to a <code>.md</code> file directly inside the session&#39;s
 plans directory; <code>read</code>ing that file makes it the active plan.</p>
-<div class="table-wrap"><table><thead><tr><th>Tool</th><th>Mode</th><th>Description</th></tr></thead><tbody><tr><td><code>plan_done</code></td><td>Plan</td><td>Signal that the plan is ready for review</td></tr><tr><td><code>plan_discard</code></td><td>Plan</td><td>Delete a plan from the session</td></tr><tr><td><code>plan_enter</code></td><td>Build</td><td>Suggest switching to plan mode</td></tr><tr><td><code>plan_check</code></td><td>Build</td><td>Mark a checklist item as done</td></tr></tbody></table></div><h2>Subagent System</h2>
+<div class="table-wrap"><table><thead><tr><th>Tool</th><th>Mode</th><th>Description</th></tr></thead><tbody><tr><td><code>plan_done</code></td><td>Plan</td><td>Signal that the plan is ready for review</td></tr></tbody></table></div><h2>Subagent System</h2>
 <p>The <code>task</code> tool delegates work to isolated sub-agents. Each sub-agent has:</p>
 <ul>
 <li><strong>Own system prompt</strong> — loaded from <code>prompts/subagents/</code> (<code>worker</code>, <code>explore</code>, <code>review</code>)</li>

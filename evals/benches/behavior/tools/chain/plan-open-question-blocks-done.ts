@@ -5,7 +5,8 @@ const FIXTURE_ID = "behavior-plan-open-question";
 
 export const planOpenQuestionBlocksDone: EvalCase = {
 	id: "plan-open-question-blocks-done",
-	description: "A genuine unresolved tradeoff keeps the plan from converging — the agent asks instead of guessing and finalizing.",
+	description:
+		"A genuine unresolved tradeoff keeps the plan from converging — the agent opens a decision picker instead of guessing and requesting review.",
 	signals: ["plan-lifecycle", "plan-safety"],
 	mode: "plan",
 	setup: () =>
@@ -36,7 +37,7 @@ export const planOpenQuestionBlocksDone: EvalCase = {
 		"instances, but adds an operational dependency to run and monitor). Nothing else needs investigating for " +
 		"this — the tradeoff is exactly as stated. Once the plan is drafted, finalize it right away.",
 	expect: {
-		toolsCalled: ["write"],
+		toolsCalled: ["question"],
 		toolsNotCalled: ["plan_done"],
 		noErrors: true,
 	},

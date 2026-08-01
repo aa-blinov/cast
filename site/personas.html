@@ -528,7 +528,7 @@ When analyzing code, always consider:
 <h3>Isolating a persona&#39;s zone of responsibility</h3>
 <p><code>tools</code>, <code>skills</code>, <code>mcp</code>, and <code>subagentTypes</code> all follow the same allowlist shape and the same enforcement guarantee: a disallowed call is <strong>rejected at runtime</strong> (not just left out of the system prompt text), so these actually isolate what a persona can reach rather than just asking it nicely.</p>
 <pre><code class="language-yaml">tools: [read, grep, ls]            # readonly builtins
-tools: [read, grep, plan_*, web_*]  # globs expand to plan_check, web_search, …
+tools: [read, grep, plan_*, web_*]  # globs expand to plan_done, web_search, …
 tools: []                           # no builtins at all
 # omit the field entirely          # all builtins
 

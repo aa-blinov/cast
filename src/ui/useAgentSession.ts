@@ -15,6 +15,7 @@ import {
 	clearSessionMessages,
 	getFullHistory,
 	recordCompaction,
+	resetSessionContext,
 	type SessionState,
 	type SessionUsage,
 	saveSession,
@@ -179,6 +180,7 @@ export interface UseAgentSession {
 	followUp: (text: string) => void;
 	abort: () => void;
 	clearContext: () => void;
+	resetContext: () => string | undefined;
 	refresh: () => void;
 	refreshMeta: () => void;
 	resetQueue: () => void;
@@ -230,10 +232,10 @@ interface UseAgentSessionParams {
 	sshHosts?: import("../core/ssh.ts").SshHost[];
 	/** Plan mode state — passed to the agent loop for system prompt injection and tool gating. */
 	planState?: import("../core/plan.ts").PlanState;
-	/** Fires when a mode-transition tool succeeds mid-run: plan_done ("done")
-	 * or plan_enter ("enter"). The App shows the corresponding confirmation
+	/** Fires when a plan signal succeeds mid-run: plan_done ("done") or
+	 * question ("question"). The App shows the corresponding confirmation
 	 * dialog once the run settles — never mid-run, so tool sets stay consistent. */
-	onPlanSignal?: (kind: "done" | "enter") => void;
+	onPlanSignal?: (kind: "done" | "question") => void;
 	/** Runs the loop on this model instead of session.model — the plan-mode
 	 * model override. session.model stays untouched: it is the user's main
 	 * model, this is a per-phase substitution. */
@@ -799,7 +801,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 										),
 									};
 								}, true);
-								// plan_done / plan_enter succeeding are mode-transition signals:
+								// Plan signal tools succeeding leave persistent state in the transcript
 								// leave a persistent pointer in the transcript (a timed notice
 								// would vanish while the user is still reading), and tell the
 								// App so it can show the confirmation dialog once the run ends.
@@ -817,8 +819,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 											},
 										]);
 										onPlanSignal?.("done");
-									} else if (endedTool === "plan_enter") {
-										onPlanSignal?.("enter");
+									} else if (endedTool === "question") {
+										onPlanSignal?.("question");
 									}
 								}
 								break;
@@ -1039,6 +1041,12 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		refresh();
 	}, [session, refresh]);
 
+	const resetContext = useCallback(() => {
+		const originalTask = resetSessionContext(session);
+		saveSession(session);
+		return originalTask;
+	}, [session]);
+
 	const resetQueue = useCallback(() => {
 		runner.followUpQueue.clear();
 		runner.steeringQueue.clear();
@@ -1079,6 +1087,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		followUp,
 		abort,
 		clearContext,
+		resetContext,
 		refresh,
 		refreshMeta,
 		resetQueue,

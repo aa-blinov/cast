@@ -1741,15 +1741,22 @@ describe("plan tools dispatch", () => {
 		const done = JSON.parse((await exec("plan_done", { summary: "s" })).content);
 		expect(done.planReady).toBe(true);
 
-		const check = JSON.parse((await exec("plan_check", { item: "only step" })).content);
-		expect(check.allDone).toBe(true);
-
-		const enter = JSON.parse((await exec("plan_enter", { reason: "complex" })).content);
-		expect(enter.planSuggested).toBe(true);
-
-		const discard = JSON.parse((await exec("plan_discard", { name: "lifecycle" })).content);
-		expect(discard.discarded).toBe("lifecycle");
-		expect(existsSync(planPath)).toBe(false);
+		const question = JSON.parse(
+			(
+				await exec("question", {
+					questions: [
+						{
+							question: "Choose cache backend",
+							options: [
+								{ value: "memory", label: "In-memory" },
+								{ value: "redis", label: "Redis" },
+							],
+						},
+					],
+				})
+			).content,
+		);
+		expect(question.question).toBe(true);
 	});
 
 	it("write/edit reach the real code tree normally when plan mode is off", async () => {

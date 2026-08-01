@@ -284,7 +284,7 @@ describe("tools and agentsMd fields", () => {
 		expect(buildSystemPrompt(withoutAgents, suffix, "", "", "", "", "/tmp")).not.toContain("PROJECT RULES");
 	});
 
-	it("requires plan_enter before planning a complex build-mode request", () => {
+	it("keeps plan mode under the user's control in build mode", () => {
 		writePersona(GLOBAL_DIR, "prompt-check", "Body.");
 		const persona = loadPersonas({ globalDir: GLOBAL_DIR }).find((x) => x.name === "prompt-check")!;
 		const prompt = buildSystemPrompt(persona, "", "", "", "", "", "/tmp", {
@@ -293,11 +293,10 @@ describe("tools and agentsMd fields", () => {
 			mode: "build",
 		});
 
-		expect(prompt).toContain("call plan_enter and end the turn");
-		expect(prompt).toContain("Do not write that plan in build mode");
-		expect(prompt).toContain("migration, authentication/security");
-		expect(prompt).toContain("If the user declines plan mode or says to continue in build mode");
-		expect(prompt).toContain("do not call plan_enter again unless they materially change the request");
+		expect(prompt).toContain("Plan mode is initiated only by the user with /plan");
+		expect(prompt).toContain("or write an implementation plan in build mode");
+		expect(prompt).toContain("Do not switch modes, request a mode transition");
+		expect(prompt).not.toContain("plan_enter");
 	});
 });
 

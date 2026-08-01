@@ -348,10 +348,13 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 			model: ws.session.model,
 			cwd: ws.session.cwd,
 			mode: ws.session.mode ?? "build",
+			question: bridge.getQuestion(ws.id),
+			planTransition: bridge.getPlanTransition(ws.id),
 			title: ws.session.title,
 			pinned: ws.session.pinned,
 			shareToken: ws.session.shareToken ?? null,
 			status: ws.status,
+			turnStartedAt: ws.turnStartedAt ?? null,
 			// turnMeta is per-message now (see toDisplayMessages) — each
 			// assistant reply carries its own "provider · model · Ns" footer,
 			// persisted to disk, instead of a single session-level "last turn"
@@ -497,6 +500,46 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 		json(res, { ok: true }, 202);
 	});
 
+	route("POST", "/api/sessions/:id/question", async (req, res, params) => {
+		const ws = bridge.getSession(params.id);
+		if (!ws) return json(res, { error: "Not found" }, 404);
+		const body = await readBody(req);
+		let values: string[];
+		try {
+			const parsed = JSON.parse(body) as { values?: unknown };
+			values =
+				Array.isArray(parsed.values) && parsed.values.every((value) => typeof value === "string")
+					? parsed.values
+					: [];
+		} catch {
+			return json(res, { error: "Invalid JSON" }, 400);
+		}
+		const result = bridge.answerQuestion(params.id, values);
+		if (!result.ok) return json(res, { error: result.error }, result.error === "Agent running" ? 409 : 400);
+		json(res, { ok: true }, 202);
+	});
+
+	route("POST", "/api/sessions/:id/plan-transition", async (req, res, params) => {
+		const body = await readBody(req);
+		let kind: "done";
+		try {
+			const parsed = JSON.parse(body) as { kind?: string };
+			if (parsed.kind !== "done") return json(res, { error: "Invalid plan transition" }, 400);
+			kind = parsed.kind;
+		} catch {
+			return json(res, { error: "Invalid JSON" }, 400);
+		}
+		const result = bridge.resolvePlanTransition(params.id, kind);
+		if (!result.ok) return json(res, { error: result.error }, result.error === "Agent running" ? 409 : 400);
+		json(res, { ok: true }, 202);
+	});
+
+	route("POST", "/api/sessions/:id/clean-context", (_req, res, params) => {
+		const result = bridge.resetContext(params.id);
+		if (!result.ok) return json(res, { error: result.error }, result.error === "Agent running" ? 409 : 400);
+		json(res, result);
+	});
+
 	route("POST", "/api/sessions/:id/abort", (_req, res, params) => {
 		const ws = bridge.getSession(params.id);
 		if (!ws) return json(res, { error: "Not found" }, 404);
@@ -557,7 +600,7 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 		};
 		const writer = createSseWriter(res, () => bridge.unsubscribe(params.id, listener));
 		// Send current status immediately
-		writer.write(`data: ${JSON.stringify({ type: "status", status: ws.status })}\n\n`);
+		writer.write(`data: ${JSON.stringify({ type: "status", status: ws.status, startedAt: ws.turnStartedAt })}\n\n`);
 		bridge.subscribe(params.id, listener);
 
 		// Heartbeat

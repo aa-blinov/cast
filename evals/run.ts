@@ -85,10 +85,11 @@ function updateScoreboard(
 	benchIds: string[],
 	isFullRun: boolean,
 	targets?: Record<string, { model: string; provider?: string }>,
+	providerUrls?: Record<string, string>,
 ): void {
 	const existingAll = readScoreboard();
 	for (const modelName of compare.models) {
-		const fresh = buildScoreboardEntry(compare, modelName, benchIds);
+		const fresh = buildScoreboardEntry(compare, modelName, benchIds, providerUrls?.[targets?.[modelName]?.provider ?? ""]);
 		// `--compare provider:model` keys `compare.models`/`compare.suites` by the
 		// raw "provider:model" entry (needed to resolve each model's connection
 		// during the run) — but the scoreboard should key by the bare model name
@@ -177,6 +178,7 @@ async function main(): Promise<void> {
 	let concurrency = 10;
 	let rateLimitDelayMs = 0;
 	let repeat = 1;
+	let repeatExplicitlySet = false;
 	let traceFile: string | undefined;
 	let traceCaseId: string | undefined;
 	let saveBaselineFlag = false;
@@ -233,6 +235,7 @@ async function main(): Promise<void> {
 			case "--repeat":
 			case "-r":
 				repeat = parseInt(args[++i] ?? "1", 10);
+				repeatExplicitlySet = true;
 				break;
 			case "--list":
 				listOnly = true;
@@ -367,18 +370,19 @@ async function main(): Promise<void> {
 		process.exit(1);
 	}
 
-	// A single (or barely-repeated) stochastic run can't support a
-	// certification claim — the scoreboard is only ever built from a
-	// --repeat >= 3 result, matching the "run --repeat 3 before calling a
-	// change a regression" convention (docs/eval-methodology.md). A
+	// The ordinary CLI defaults to one attempt for fast case development. A
+	// certification score needs a shared statistical basis, so --scoreboard
+	// switches to three attempts (or accepts an explicit --repeat 3). A
 	// --cases-filtered run is allowed (e.g. rerunning a couple of cases that
 	// flaked on a network error) but merges into an existing entry rather
 	// than standing alone as the model's score — see updateScoreboard.
-	if (scoreboardFlag && repeat < 3) {
-		console.error("--scoreboard requires --repeat >= 3 (fewer attempts can't support a certification score)");
-		process.exit(1);
+	if (scoreboardFlag) {
+		if (repeatExplicitlySet && repeat !== 3) {
+			console.error("--scoreboard always uses 3 attempts per case; remove --repeat or use --repeat 3.");
+			process.exit(1);
+		}
+		repeat = 3;
 	}
-
 	// Further filter by case id, on top of the bench selection. Comma-separated:
 	// each part matches either an exact id (cherry-pick a handful of unrelated
 	// cases, e.g. after a partial network-error rerun) or a prefix (existing
@@ -410,6 +414,7 @@ async function main(): Promise<void> {
 	const providerConnections: Record<string, ProviderConnection> = Object.fromEntries(
 		(settings.providers ?? []).map((entry) => [entry.name, { baseURL: entry.url, apiKey: entry.apiKey }]),
 	);
+	const providerUrls = Object.fromEntries(Object.entries(providerConnections).map(([name, connection]) => [name, connection.baseURL]));
 	const envConnection =
 		process.env.PROVIDER_BASE_URL && process.env.PROVIDER_API_KEY
 			? { baseURL: process.env.PROVIDER_BASE_URL, apiKey: process.env.PROVIDER_API_KEY }
@@ -486,7 +491,7 @@ async function main(): Promise<void> {
 			const recordedPath = recordCompareRepeated(compare, caseFilter);
 			console.log(`Recorded: ${recordedPath}`);
 
-			if (scoreboardFlag) updateScoreboard(compare, benchIds, !caseFilter, targets);
+			if (scoreboardFlag) updateScoreboard(compare, benchIds, !caseFilter, targets, providerUrls);
 
 			if (saveBaselineFlag) {
 				if (models.length !== 1) {
@@ -575,7 +580,7 @@ async function main(): Promise<void> {
 		const recordedPath = recordCompareRepeated(compare, caseFilter);
 		console.log(`Recorded: ${recordedPath}`);
 
-		if (scoreboardFlag) updateScoreboard(compare, benchIds, !caseFilter);
+		if (scoreboardFlag) updateScoreboard(compare, benchIds, !caseFilter, undefined, providerUrls);
 
 		if (saveBaselineFlag) {
 			if (benchIds.length !== 1) {
@@ -742,8 +747,9 @@ Options:
   --list-baselines       List every "latest" baseline (one per bench+model)
   --baseline-history <name>  List the per-save history of a single baseline (newest first)
   --scoreboard           Update docs/eval-scoreboard.json (site: "Model Scoreboard" page) with
-                          this model's certification score. Requires --repeat >= 3 — fewer
-                          attempts can't support a certification claim. Combine with --cases to
+                          this model's certification score. Runs every case exactly three times;
+                          ordinary runs remain single-attempt checks for fast development.
+                          Combine with --cases to
                           rerun just a handful of cases (e.g. after a network-error flake) and
                           merge them into the model's existing entry instead of a full rerun —
                           errors if that model has no existing entry to merge into yet.

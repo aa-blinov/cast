@@ -11,7 +11,7 @@ export const directRequestStaysBuild: EvalCase = {
 	prompt: `What version is recorded in ${fixturePath("behavior-direct-build", "version.txt")}?`,
 	expect: {
 		toolsCalled: ["read"],
-		toolsNotCalled: ["plan_enter", "bash", "write", "edit"],
+		toolsNotCalled: ["bash", "write", "edit"],
 		noErrors: true,
 	},
 };

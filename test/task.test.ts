@@ -113,6 +113,27 @@ describe("execTask — final extract", () => {
 		expect(systemPrompt).toContain("Current working directory:");
 	});
 
+	it("denies project writes to a subagent launched from plan mode", async () => {
+		let disabledTools: Set<string> | undefined;
+		let readOnlyBash = false;
+		await execTask({ assignment: "inspect the code" }, "/tmp", testConfig, {
+			model: "test-model",
+			subagentPrompts: [
+				{ name: "worker", label: "Worker", description: "", systemPrompt: "worker", agentsMd: false },
+			],
+			planState: { enabled: true, plansDir: "/tmp/plans" },
+			runAgentLoop: async (messages, config) => {
+				disabledTools = config.disabledTools;
+				readOnlyBash = config.readOnlyBash === true;
+				config.onEvent({ type: "end", reason: "stop" });
+				return [...messages, { role: "assistant", content: "findings" }];
+			},
+		});
+		expect(disabledTools?.has("write")).toBe(true);
+		expect(disabledTools?.has("edit")).toBe(true);
+		expect(readOnlyBash).toBe(true);
+	});
+
 	it("preserves already-accumulated subagentUsage when runAgentLoop throws mid-run", async () => {
 		// subagentUsage is the only channel loop.ts uses to fold a subagent's
 		// spend into the session total. Letting a genuine runtime failure

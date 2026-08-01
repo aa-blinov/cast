@@ -485,68 +485,47 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 
 <main class="main">
 	<article class="content">
-		<p>A model is <strong>certified</strong> once it clears 80%
-		of the full behavior suite — scored from a <code>--repeat</code> run where every attempt on a case must
+		<p>This scoreboard answers one question: how reliably does a model operate the <em>Cast</em> harness?
+		It is not a general intelligence ranking. A model is <strong>certified</strong> once it clears 80%
+		of the full behavior suite across exactly three fresh attempts per case, where every attempt on a case must
 		agree (a case that only passes sometimes doesn't count). <strong>Core</strong>/<strong>Chain</strong> break
 		the same score down by single-turn tool contracts vs. multi-turn stateful workflows (see
 		<a href="https://github.com/aa-blinov/cast/blob/master/docs/eval-behavior.md">Behavior Evals</a>).
 		"Consistent" is how many cases had every attempt agree, pass or fail — a flakiness signal independent of
-		the score itself. Tokens are per-attempt averages; the time column is avg/median/p75/p95/p99 over every
-		individual attempt's duration — comparable across models regardless of repeat count. See
+		the score itself. Tokens are per-attempt averages; the time and turns columns are avg/median/p75/p95/p99 over every
+		individual attempt. See
 		<a href="https://github.com/aa-blinov/cast/blob/master/docs/eval-methodology.md">Eval Methodology</a>
 		for the full methodology.</p>
 <div class="table-wrap"><table><thead><tr>
-		<th>Model</th><th>Score</th><th>Passed</th><th>Certified</th><th>Core</th><th>Chain</th><th>Consistent</th><th>Time (avg/p50/p75/p95/p99)</th><th>Avg tokens in/out</th><th>Attempts/case</th><th>Last updated</th><th>Commit</th>
+		<th>Model</th><th>Score</th><th>Passed</th><th>Certified</th><th>Core</th><th>Chain</th><th>Consistent</th><th>Time (avg/p50/p75/p95/p99)</th><th>Turns (avg/p50/p75/p95/p99)</th><th>Avg tokens in/out</th><th>Last updated</th><th>Commit / provider URL</th>
 	</tr></thead><tbody>
-<tr><td>deepseek/deepseek-v4-flash-0731</td><td>90.7%</td><td>39/43</td><td><span class="badge-pass">✓ certified</span></td><td>100% (15/15)</td><td>86% (24/28)</td><td>41/43</td><td>20.4s / 13.5s / 25.1s / 60.0s / 120.0s</td><td>30.9k / 649</td><td>×3</td><td>2026-07-31</td><td><code>56c09f4</code></td></tr>
-<tr><td>deepseek/deepseek-v4-pro</td><td>90.7%</td><td>39/43</td><td><span class="badge-pass">✓ certified</span></td><td>100% (15/15)</td><td>86% (24/28)</td><td>42/43</td><td>14.0s / 7.7s / 14.2s / 42.2s / 150.0s</td><td>29.3k / 672</td><td>×3</td><td>2026-07-31</td><td><code>56c09f4</code></td></tr>
-<tr><td>z-ai/glm-5.2</td><td>90.7%</td><td>39/43</td><td><span class="badge-pass">✓ certified</span></td><td>87% (13/15)</td><td>93% (26/28)</td><td>39/43</td><td>12.5s / 7.1s / 13.1s / 34.3s / 111.6s</td><td>27.9k / 403</td><td>×3</td><td>2026-07-31</td><td><code>56c09f4</code></td></tr>
-<tr><td>stepfun/step-3.7-flash</td><td>83.7%</td><td>36/43</td><td><span class="badge-pass">✓ certified</span></td><td>93% (14/15)</td><td>79% (22/28)</td><td>37/43</td><td>16.1s / 11.1s / 19.9s / 44.1s / 60.0s</td><td>33.5k / 545</td><td>×3</td><td>2026-07-31</td><td><code>56c09f4</code></td></tr>
-<tr><td>openai/gpt-5.6-luna</td><td>81.4%</td><td>35/43</td><td><span class="badge-pass">✓ certified</span></td><td>93% (14/15)</td><td>75% (21/28)</td><td>37/43</td><td>10.8s / 6.1s / 11.2s / 32.3s / 62.5s</td><td>30.3k / 448</td><td>×3</td><td>2026-07-31</td><td><code>56c09f4</code></td></tr>
-<tr><td>poolside/laguna-s-2.1</td><td>81.4%</td><td>35/43</td><td><span class="badge-pass">✓ certified</span></td><td>93% (14/15)</td><td>75% (21/28)</td><td>36/43</td><td>14.8s / 6.7s / 15.6s / 60.0s / 108.7s</td><td>44.6k / 729</td><td>×3</td><td>2026-07-31</td><td><code>56c09f4</code></td></tr>
-<tr><td>minimax/minimax-m3</td><td>69.8%</td><td>30/43</td><td><span class="badge-fail">not yet</span></td><td>67% (10/15)</td><td>71% (20/28)</td><td>32/43</td><td>16.5s / 10.1s / 16.7s / 60.0s / 117.9s</td><td>28.9k / 539</td><td>×3</td><td>2026-07-31</td><td><code>56c09f4</code></td></tr>
+<tr><td>deepseek/deepseek-v4-pro</td><td>90.2%</td><td>37/41</td><td><span class="badge-pass">✓ certified</span></td><td>100% (15/15)</td><td>85% (22/26)</td><td>40/41</td><td>14.0s / 8.1s / 14.4s / 33.7s / 150.0s</td><td>3.1 / 2.0 / 4.0 / 8.0 / 10.0</td><td>29.9k / 664</td><td>2026-08-01</td><td><code>080bd54</code><br><code>https://openrouter.ai/api/v1</code></td></tr>
+<tr><td>z-ai/glm-5.2</td><td>90.2%</td><td>37/41</td><td><span class="badge-pass">✓ certified</span></td><td>87% (13/15)</td><td>92% (24/26)</td><td>38/41</td><td>11.7s / 7.0s / 12.8s / 31.7s / 111.6s</td><td>3.1 / 3.0 / 3.0 / 7.0 / 9.0</td><td>28.3k / 396</td><td>2026-08-01</td><td><code>080bd54</code><br><code>https://openrouter.ai/api/v1</code></td></tr>
+<tr><td>deepseek/deepseek-v4-flash-0731</td><td>87.8%</td><td>36/41</td><td><span class="badge-pass">✓ certified</span></td><td>100% (15/15)</td><td>81% (21/26)</td><td>40/41</td><td>16.7s / 10.8s / 21.5s / 52.0s / 65.2s</td><td>2.8 / 2.0 / 3.0 / 6.0 / 9.0</td><td>27.9k / 565</td><td>2026-08-01</td><td><code>080bd54</code><br><code>https://token-plan-sgp.xiaomimimo.com/v1</code></td></tr>
+<tr><td>openai/gpt-5.6-luna</td><td>80.5%</td><td>33/41</td><td><span class="badge-pass">✓ certified</span></td><td>93% (14/15)</td><td>73% (19/26)</td><td>34/41</td><td>11.0s / 6.5s / 11.2s / 32.3s / 62.5s</td><td>3.3 / 2.0 / 4.0 / 9.0 / 10.0</td><td>31.4k / 443</td><td>2026-08-01</td><td><code>080bd54</code><br><code>https://openrouter.ai/api/v1</code></td></tr>
+<tr><td>stepfun/step-3.7-flash</td><td>80.5%</td><td>33/41</td><td><span class="badge-pass">✓ certified</span></td><td>93% (14/15)</td><td>73% (19/26)</td><td>34/41</td><td>16.7s / 12.7s / 19.9s / 58.1s / 60.0s</td><td>3.3 / 3.0 / 4.0 / 9.0 / 12.0</td><td>35.0k / 570</td><td>2026-08-01</td><td><code>080bd54</code><br><code>https://openrouter.ai/api/v1</code></td></tr>
+<tr><td>poolside/laguna-s-2.1</td><td>78.0%</td><td>32/41</td><td><span class="badge-fail">not yet</span></td><td>93% (14/15)</td><td>69% (18/26)</td><td>36/41</td><td>19.2s / 7.8s / 17.5s / 60.0s / 120.0s</td><td>3.5 / 3.0 / 4.0 / 9.0 / 13.0</td><td>41.9k / 664</td><td>2026-08-01</td><td><code>080bd54</code><br><code>https://openrouter.ai/api/v1</code></td></tr>
+<tr><td>minimax/minimax-m3</td><td>65.9%</td><td>27/41</td><td><span class="badge-fail">not yet</span></td><td>67% (10/15)</td><td>65% (17/26)</td><td>30/41</td><td>16.8s / 10.2s / 16.3s / 60.0s / 117.9s</td><td>3.3 / 3.0 / 4.0 / 6.0 / 10.0</td><td>30.5k / 571</td><td>2026-08-01</td><td><code>080bd54</code><br><code>https://openrouter.ai/api/v1</code></td></tr>
 	</tbody></table></div>
 <h2>Per-signal breakdown</h2>
-<details><summary>deepseek/deepseek-v4-flash-0731 — signal breakdown</summary>
-	<div class="table-wrap"><table><thead><tr><th>Signal</th><th>Passed</th></tr></thead><tbody>
-<tr><td>argument-grounding</td><td>12/12</td></tr>
-<tr><td>background-lifecycle</td><td>3/3</td></tr>
-<tr><td>delegation</td><td>3/4</td></tr>
-<tr><td>filesystem-safety</td><td>6/7</td></tr>
-<tr><td>mcp-discovery</td><td>2/2</td></tr>
-<tr><td>mcp-tool-chain</td><td>1/1</td></tr>
-<tr><td>mode-selection</td><td>1/2</td></tr>
-<tr><td>no-unneeded-tools</td><td>11/11</td></tr>
-<tr><td>parallel-tools</td><td>2/2</td></tr>
-<tr><td>plan-lifecycle</td><td>6/7</td></tr>
-<tr><td>plan-safety</td><td>0/2</td></tr>
-<tr><td>required-tool</td><td>10/10</td></tr>
-<tr><td>skill-discovery</td><td>2/2</td></tr>
-<tr><td>state-persistence</td><td>5/5</td></tr>
-<tr><td>state-transition</td><td>2/3</td></tr>
-<tr><td>tool-chain</td><td>8/9</td></tr>
-<tr><td>tool-error-recovery</td><td>7/7</td></tr>
-<tr><td>tool-result-integrity</td><td>8/8</td></tr>
-	</tbody></table></div>
-</details>
 <details><summary>deepseek/deepseek-v4-pro — signal breakdown</summary>
 	<div class="table-wrap"><table><thead><tr><th>Signal</th><th>Passed</th></tr></thead><tbody>
 <tr><td>argument-grounding</td><td>12/12</td></tr>
 <tr><td>background-lifecycle</td><td>2/3</td></tr>
 <tr><td>delegation</td><td>4/4</td></tr>
-<tr><td>filesystem-safety</td><td>5/7</td></tr>
+<tr><td>filesystem-safety</td><td>6/9</td></tr>
 <tr><td>mcp-discovery</td><td>2/2</td></tr>
 <tr><td>mcp-tool-chain</td><td>1/1</td></tr>
-<tr><td>mode-selection</td><td>2/2</td></tr>
+<tr><td>mode-selection</td><td>1/1</td></tr>
 <tr><td>no-unneeded-tools</td><td>11/11</td></tr>
 <tr><td>parallel-tools</td><td>2/2</td></tr>
-<tr><td>plan-lifecycle</td><td>6/7</td></tr>
-<tr><td>plan-safety</td><td>1/2</td></tr>
+<tr><td>plan-lifecycle</td><td>5/6</td></tr>
+<tr><td>plan-safety</td><td>1/1</td></tr>
 <tr><td>required-tool</td><td>10/10</td></tr>
 <tr><td>skill-discovery</td><td>2/2</td></tr>
-<tr><td>state-persistence</td><td>5/5</td></tr>
-<tr><td>state-transition</td><td>3/3</td></tr>
-<tr><td>tool-chain</td><td>7/9</td></tr>
+<tr><td>state-persistence</td><td>4/5</td></tr>
+<tr><td>state-transition</td><td>2/2</td></tr>
+<tr><td>tool-chain</td><td>7/10</td></tr>
 <tr><td>tool-error-recovery</td><td>6/7</td></tr>
 <tr><td>tool-result-integrity</td><td>7/8</td></tr>
 	</tbody></table></div>
@@ -556,19 +535,63 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 <tr><td>argument-grounding</td><td>11/12</td></tr>
 <tr><td>background-lifecycle</td><td>3/3</td></tr>
 <tr><td>delegation</td><td>4/4</td></tr>
-<tr><td>filesystem-safety</td><td>7/7</td></tr>
+<tr><td>filesystem-safety</td><td>8/9</td></tr>
 <tr><td>mcp-discovery</td><td>2/2</td></tr>
 <tr><td>mcp-tool-chain</td><td>1/1</td></tr>
-<tr><td>mode-selection</td><td>2/2</td></tr>
+<tr><td>mode-selection</td><td>1/1</td></tr>
 <tr><td>no-unneeded-tools</td><td>10/11</td></tr>
 <tr><td>parallel-tools</td><td>2/2</td></tr>
-<tr><td>plan-lifecycle</td><td>6/7</td></tr>
-<tr><td>plan-safety</td><td>1/2</td></tr>
+<tr><td>plan-lifecycle</td><td>5/6</td></tr>
+<tr><td>plan-safety</td><td>1/1</td></tr>
 <tr><td>required-tool</td><td>9/10</td></tr>
 <tr><td>skill-discovery</td><td>2/2</td></tr>
+<tr><td>state-persistence</td><td>3/5</td></tr>
+<tr><td>state-transition</td><td>2/2</td></tr>
+<tr><td>tool-chain</td><td>8/10</td></tr>
+<tr><td>tool-error-recovery</td><td>6/7</td></tr>
+<tr><td>tool-result-integrity</td><td>8/8</td></tr>
+	</tbody></table></div>
+</details>
+<details><summary>deepseek/deepseek-v4-flash-0731 — signal breakdown</summary>
+	<div class="table-wrap"><table><thead><tr><th>Signal</th><th>Passed</th></tr></thead><tbody>
+<tr><td>argument-grounding</td><td>12/12</td></tr>
+<tr><td>background-lifecycle</td><td>3/3</td></tr>
+<tr><td>delegation</td><td>3/4</td></tr>
+<tr><td>filesystem-safety</td><td>6/9</td></tr>
+<tr><td>mcp-discovery</td><td>2/2</td></tr>
+<tr><td>mcp-tool-chain</td><td>1/1</td></tr>
+<tr><td>mode-selection</td><td>1/1</td></tr>
+<tr><td>no-unneeded-tools</td><td>11/11</td></tr>
+<tr><td>parallel-tools</td><td>2/2</td></tr>
+<tr><td>plan-lifecycle</td><td>3/6</td></tr>
+<tr><td>plan-safety</td><td>0/1</td></tr>
+<tr><td>required-tool</td><td>10/10</td></tr>
+<tr><td>skill-discovery</td><td>2/2</td></tr>
+<tr><td>state-persistence</td><td>3/5</td></tr>
+<tr><td>state-transition</td><td>1/2</td></tr>
+<tr><td>tool-chain</td><td>7/10</td></tr>
+<tr><td>tool-error-recovery</td><td>7/7</td></tr>
+<tr><td>tool-result-integrity</td><td>8/8</td></tr>
+	</tbody></table></div>
+</details>
+<details><summary>openai/gpt-5.6-luna — signal breakdown</summary>
+	<div class="table-wrap"><table><thead><tr><th>Signal</th><th>Passed</th></tr></thead><tbody>
+<tr><td>argument-grounding</td><td>11/12</td></tr>
+<tr><td>background-lifecycle</td><td>3/3</td></tr>
+<tr><td>delegation</td><td>2/4</td></tr>
+<tr><td>filesystem-safety</td><td>6/9</td></tr>
+<tr><td>mcp-discovery</td><td>2/2</td></tr>
+<tr><td>mcp-tool-chain</td><td>1/1</td></tr>
+<tr><td>mode-selection</td><td>1/1</td></tr>
+<tr><td>no-unneeded-tools</td><td>10/11</td></tr>
+<tr><td>parallel-tools</td><td>1/2</td></tr>
+<tr><td>plan-lifecycle</td><td>3/6</td></tr>
+<tr><td>plan-safety</td><td>1/1</td></tr>
+<tr><td>required-tool</td><td>10/10</td></tr>
+<tr><td>skill-discovery</td><td>2/2</td></tr>
 <tr><td>state-persistence</td><td>4/5</td></tr>
-<tr><td>state-transition</td><td>3/3</td></tr>
-<tr><td>tool-chain</td><td>8/9</td></tr>
+<tr><td>state-transition</td><td>0/2</td></tr>
+<tr><td>tool-chain</td><td>7/10</td></tr>
 <tr><td>tool-error-recovery</td><td>6/7</td></tr>
 <tr><td>tool-result-integrity</td><td>8/8</td></tr>
 	</tbody></table></div>
@@ -578,42 +601,20 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 <tr><td>argument-grounding</td><td>11/12</td></tr>
 <tr><td>background-lifecycle</td><td>3/3</td></tr>
 <tr><td>delegation</td><td>3/4</td></tr>
-<tr><td>filesystem-safety</td><td>3/7</td></tr>
+<tr><td>filesystem-safety</td><td>4/9</td></tr>
 <tr><td>mcp-discovery</td><td>2/2</td></tr>
 <tr><td>mcp-tool-chain</td><td>1/1</td></tr>
-<tr><td>mode-selection</td><td>2/2</td></tr>
+<tr><td>mode-selection</td><td>1/1</td></tr>
 <tr><td>no-unneeded-tools</td><td>11/11</td></tr>
 <tr><td>parallel-tools</td><td>2/2</td></tr>
-<tr><td>plan-lifecycle</td><td>5/7</td></tr>
-<tr><td>plan-safety</td><td>1/2</td></tr>
+<tr><td>plan-lifecycle</td><td>3/6</td></tr>
+<tr><td>plan-safety</td><td>0/1</td></tr>
 <tr><td>required-tool</td><td>9/10</td></tr>
 <tr><td>skill-discovery</td><td>2/2</td></tr>
-<tr><td>state-persistence</td><td>5/5</td></tr>
-<tr><td>state-transition</td><td>2/3</td></tr>
-<tr><td>tool-chain</td><td>6/9</td></tr>
+<tr><td>state-persistence</td><td>4/5</td></tr>
+<tr><td>state-transition</td><td>1/2</td></tr>
+<tr><td>tool-chain</td><td>6/10</td></tr>
 <tr><td>tool-error-recovery</td><td>5/7</td></tr>
-<tr><td>tool-result-integrity</td><td>8/8</td></tr>
-	</tbody></table></div>
-</details>
-<details><summary>openai/gpt-5.6-luna — signal breakdown</summary>
-	<div class="table-wrap"><table><thead><tr><th>Signal</th><th>Passed</th></tr></thead><tbody>
-<tr><td>argument-grounding</td><td>11/12</td></tr>
-<tr><td>background-lifecycle</td><td>3/3</td></tr>
-<tr><td>delegation</td><td>2/4</td></tr>
-<tr><td>filesystem-safety</td><td>5/7</td></tr>
-<tr><td>mcp-discovery</td><td>2/2</td></tr>
-<tr><td>mcp-tool-chain</td><td>1/1</td></tr>
-<tr><td>mode-selection</td><td>2/2</td></tr>
-<tr><td>no-unneeded-tools</td><td>10/11</td></tr>
-<tr><td>parallel-tools</td><td>1/2</td></tr>
-<tr><td>plan-lifecycle</td><td>4/7</td></tr>
-<tr><td>plan-safety</td><td>1/2</td></tr>
-<tr><td>required-tool</td><td>10/10</td></tr>
-<tr><td>skill-discovery</td><td>2/2</td></tr>
-<tr><td>state-persistence</td><td>5/5</td></tr>
-<tr><td>state-transition</td><td>1/3</td></tr>
-<tr><td>tool-chain</td><td>7/9</td></tr>
-<tr><td>tool-error-recovery</td><td>6/7</td></tr>
 <tr><td>tool-result-integrity</td><td>8/8</td></tr>
 	</tbody></table></div>
 </details>
@@ -622,19 +623,19 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 <tr><td>argument-grounding</td><td>11/12</td></tr>
 <tr><td>background-lifecycle</td><td>3/3</td></tr>
 <tr><td>delegation</td><td>3/4</td></tr>
-<tr><td>filesystem-safety</td><td>5/7</td></tr>
+<tr><td>filesystem-safety</td><td>5/9</td></tr>
 <tr><td>mcp-discovery</td><td>1/2</td></tr>
 <tr><td>mcp-tool-chain</td><td>1/1</td></tr>
-<tr><td>mode-selection</td><td>2/2</td></tr>
+<tr><td>mode-selection</td><td>1/1</td></tr>
 <tr><td>no-unneeded-tools</td><td>11/11</td></tr>
 <tr><td>parallel-tools</td><td>2/2</td></tr>
-<tr><td>plan-lifecycle</td><td>4/7</td></tr>
-<tr><td>plan-safety</td><td>1/2</td></tr>
+<tr><td>plan-lifecycle</td><td>2/6</td></tr>
+<tr><td>plan-safety</td><td>0/1</td></tr>
 <tr><td>required-tool</td><td>9/10</td></tr>
 <tr><td>skill-discovery</td><td>2/2</td></tr>
-<tr><td>state-persistence</td><td>5/5</td></tr>
-<tr><td>state-transition</td><td>1/3</td></tr>
-<tr><td>tool-chain</td><td>7/9</td></tr>
+<tr><td>state-persistence</td><td>3/5</td></tr>
+<tr><td>state-transition</td><td>1/2</td></tr>
+<tr><td>tool-chain</td><td>6/10</td></tr>
 <tr><td>tool-error-recovery</td><td>4/7</td></tr>
 <tr><td>tool-result-integrity</td><td>7/8</td></tr>
 	</tbody></table></div>
@@ -644,19 +645,19 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 <tr><td>argument-grounding</td><td>9/12</td></tr>
 <tr><td>background-lifecycle</td><td>2/3</td></tr>
 <tr><td>delegation</td><td>2/4</td></tr>
-<tr><td>filesystem-safety</td><td>5/7</td></tr>
+<tr><td>filesystem-safety</td><td>6/9</td></tr>
 <tr><td>mcp-discovery</td><td>2/2</td></tr>
 <tr><td>mcp-tool-chain</td><td>1/1</td></tr>
-<tr><td>mode-selection</td><td>2/2</td></tr>
+<tr><td>mode-selection</td><td>1/1</td></tr>
 <tr><td>no-unneeded-tools</td><td>9/11</td></tr>
 <tr><td>parallel-tools</td><td>1/2</td></tr>
-<tr><td>plan-lifecycle</td><td>5/7</td></tr>
-<tr><td>plan-safety</td><td>1/2</td></tr>
+<tr><td>plan-lifecycle</td><td>3/6</td></tr>
+<tr><td>plan-safety</td><td>0/1</td></tr>
 <tr><td>required-tool</td><td>6/10</td></tr>
 <tr><td>skill-discovery</td><td>2/2</td></tr>
-<tr><td>state-persistence</td><td>4/5</td></tr>
-<tr><td>state-transition</td><td>1/3</td></tr>
-<tr><td>tool-chain</td><td>6/9</td></tr>
+<tr><td>state-persistence</td><td>3/5</td></tr>
+<tr><td>state-transition</td><td>0/2</td></tr>
+<tr><td>tool-chain</td><td>6/10</td></tr>
 <tr><td>tool-error-recovery</td><td>4/7</td></tr>
 <tr><td>tool-result-integrity</td><td>6/8</td></tr>
 	</tbody></table></div>

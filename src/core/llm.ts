@@ -321,6 +321,10 @@ export async function* streamChat(
 
 			const toolCallAccumulator = new Map<number, { id: string; name: string; arguments: string }>();
 			const thinkParser = new ThinkBlockParser();
+			// MiniMax's `reasoning_details` stream is cumulative rather than a
+			// token delta. Keep its previous full value so callers receive only
+			// the suffix once, like every other reasoning transport.
+			let previousReasoningDetails = "";
 
 			for await (const chunk of stream) {
 				const result: StreamChunk = {};
@@ -391,6 +395,24 @@ export async function* streamChat(
 				} else if (typeof deltaAny.reasoning_content === "string" && deltaAny.reasoning_content) {
 					result.thinking = deltaAny.reasoning_content;
 					result.reasoningContent = deltaAny.reasoning_content;
+				} else if (Array.isArray(deltaAny.reasoning_details)) {
+					const fullReasoning = deltaAny.reasoning_details
+						.flatMap((detail): string[] => {
+							if (!detail || typeof detail !== "object") return [];
+							const text = (detail as Record<string, unknown>).text;
+							return typeof text === "string" ? [text] : [];
+						})
+						.join("");
+					if (fullReasoning) {
+						const next = fullReasoning.startsWith(previousReasoningDetails)
+							? fullReasoning.slice(previousReasoningDetails.length)
+							: fullReasoning;
+						previousReasoningDetails = fullReasoning;
+						if (next) {
+							result.thinking = next;
+							result.reasoningContent = next;
+						}
+					}
 				}
 
 				// 2. Parse content for <think>...</think> blocks (Qwen/DeepSeek raw).
