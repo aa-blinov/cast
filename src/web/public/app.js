@@ -719,6 +719,7 @@ function App() {
 	const autoScrollRef = useRef(true);
 	const selfClosingRef = useRef(null);
 	const reconnectTimerRef = useRef(null);
+	const staticResourcesLoadedRef = useRef(false);
 	const wasRunningRef = useRef(false);
 	const sessionViewVersionRef = useRef(0);
 	const draftVersionRef = useRef(0);
