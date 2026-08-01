@@ -188,6 +188,26 @@ describe("web bridge", () => {
 		});
 	});
 
+	it("resets each secondary model slot atomically", async () => {
+		const bridge = createWebBridge(
+			makeResult({
+				subagentModel: "worker-model",
+				subagentModelProvider: "worker-provider",
+				planModel: "planner-model",
+				planModelProvider: "planner-provider",
+			}),
+		);
+
+		expect(await bridge.executeSettingsCommand("/subagent-model reset")).toMatchObject({
+			ok: true,
+			result: { subagentModel: null, subagentModelProvider: null },
+		});
+		expect(await bridge.executeSettingsCommand("/plan-model reset")).toMatchObject({
+			ok: true,
+			result: { planModel: null, planModelProvider: null },
+		});
+	});
+
 	it("marks an agent skill as Skills.sh only when its lockfile records it", async () => {
 		const skillsShDir = join(fakeHome, ".agents", "skills", "from-skills-sh");
 		const ampSkillDir = join(fakeHome, ".config", "agents", "skills", "from-amp");

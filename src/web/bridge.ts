@@ -1647,6 +1647,21 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		}
 		if (name === "/subagent-model") {
 			if (!arg) return { ok: true, result: { subagentModel: subagentModel ?? null } };
+			if (arg === "off" || arg === "reset") {
+				subagentModel = undefined;
+				if (arg === "reset") subagentModelProvider = undefined;
+				updateSettings({
+					subagentModel: undefined,
+					...(arg === "reset" ? { subagentModelProvider: undefined } : {}),
+				});
+				return {
+					ok: true,
+					result: {
+						subagentModel: null,
+						...(arg === "reset" ? { subagentModelProvider: null } : {}),
+					},
+				};
+			}
 			subagentModel = arg;
 			updateSettings({ subagentModel: arg });
 			return { ok: true, result: { subagentModel: arg } };
@@ -1666,8 +1681,15 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			if (!arg) return { ok: true, result: { planModel: planModel ?? null } };
 			if (arg === "off" || arg === "reset") {
 				planModel = undefined;
-				updateSettings({ planModel: undefined });
-				return { ok: true, result: { planModel: null } };
+				if (arg === "reset") planModelProvider = undefined;
+				updateSettings({
+					planModel: undefined,
+					...(arg === "reset" ? { planModelProvider: undefined } : {}),
+				});
+				return {
+					ok: true,
+					result: { planModel: null, ...(arg === "reset" ? { planModelProvider: null } : {}) },
+				};
 			}
 			planModel = arg;
 			updateSettings({ planModel: arg });

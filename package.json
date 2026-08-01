@@ -10,7 +10,7 @@
 		"cast": "./cast.sh"
 	},
 	"scripts": {
-		"start": "node --import tsx ./src/index.ts",
+		"start": "node --disable-warning=DEP0040 --disable-warning=ExperimentalWarning --import tsx ./src/index.ts",
 		"build": "node ./scripts/build.mjs",
 		"check": "tsc --noEmit && biome check src/ test/",
 		"lint": "biome check src/ test/",
@@ -20,7 +20,7 @@
 		"e2e:plan": "bash scripts/e2e-plan-mode.sh",
 		"e2e:compaction": "node --import tsx scripts/e2e-compaction.mjs",
 		"build-site": "node scripts/build-site.mjs",
-		"web": "node --import tsx ./src/web/index.ts"
+		"web": "node --disable-warning=DEP0040 --disable-warning=ExperimentalWarning --import tsx ./src/web/index.ts"
 	},
 	"dependencies": {
 		"@jsquash/jpeg": "^1.6.0",

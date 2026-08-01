@@ -10,10 +10,10 @@ import { DatabaseSync } from "node:sqlite";
 // session.ts, which imports it) never touches disk until a session is
 // actually read or written — matters for tests that redirect HOME per-case.
 // node:sqlite is still flagged experimental by Node (confirmed on 22.x —
-// works, just emits an ExperimentalWarning on first use); package.json
-// already requires node >=22, and avoiding a compiled native dependency
-// (e.g. better-sqlite3) matters more for a curl-installed CLI than dodging
-// that warning does.
+// works, just emits an ExperimentalWarning on first use). package.json
+// already requires Node 22; the launchers suppress that known runtime notice
+// while keeping application warnings visible, avoiding a compiled native
+// dependency such as better-sqlite3 for a curl-installed CLI.
 // ============================================================================
 
 const SCHEMA = `

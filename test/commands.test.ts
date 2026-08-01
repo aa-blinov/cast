@@ -160,12 +160,16 @@ function createFakeDeps(overrides?: Partial<CommandDeps> & { running?: boolean }
 		reasoningMeta: undefined,
 		subagentModel: undefined,
 		setSubagentModel: track("setSubagentModel"),
+		subagentModelProvider: undefined,
+		setSubagentModelProvider: track("setSubagentModelProvider"),
 		webToolsEnabled: true,
 		setWebToolsEnabled: track("setWebToolsEnabled"),
 		planMode: false,
 		setPlanMode: track("setPlanMode"),
 		planModel: undefined,
 		setPlanModel: track("setPlanModel"),
+		planModelProvider: undefined,
+		setPlanModelProvider: track("setPlanModelProvider"),
 		setReasoningMeta: track("setReasoningMeta"),
 		personaOptions: {},
 		setPersonaOptions: track("setPersonaOptions"),
@@ -745,6 +749,20 @@ describe("plan mode commands", () => {
 		await handleInput("/plan-model off", undefined, deps);
 		expect(calls.setPlanModel?.[0]).toEqual([undefined]);
 		expect(noticeText(calls)).toContain("plan mode uses the main model");
+	});
+
+	it("/plan-model reset clears the model and provider overrides together", async () => {
+		const { deps, calls } = createFakeDeps({ planModel: "expensive-model", planModelProvider: "remote" });
+		await handleInput("/plan-model reset", undefined, deps);
+		expect(calls.setPlanModel?.[0]).toEqual([undefined]);
+		expect(calls.setPlanModelProvider?.[0]).toEqual([undefined]);
+	});
+
+	it("/subagent-model reset clears the model and provider overrides together", async () => {
+		const { deps, calls } = createFakeDeps({ subagentModel: "worker-model", subagentModelProvider: "remote" });
+		await handleInput("/subagent-model reset", undefined, deps);
+		expect(calls.setSubagentModel?.[0]).toEqual([undefined]);
+		expect(calls.setSubagentModelProvider?.[0]).toEqual([undefined]);
 	});
 
 	it("/plan-model typed validation uses the configured plan provider", async () => {

@@ -25,4 +25,7 @@ cd "$SCRIPT_DIR"
 set -a
 source .env 2>/dev/null
 set +a
-exec env CAST_CWD="$ORIGINAL_CWD" node --import tsx ./src/index.ts "$@"
+# DEP0040 comes from an unused bundled dependency fallback; node:sqlite is
+# intentionally used by cast but remains experimental in Node 22. Suppress
+# only those known Node-runtime notices, not application warnings or errors.
+exec env CAST_CWD="$ORIGINAL_CWD" node --disable-warning=DEP0040 --disable-warning=ExperimentalWarning --import tsx ./src/index.ts "$@"

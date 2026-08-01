@@ -1,7 +1,7 @@
 @echo off
 rem Release launcher (Windows) - runs the pre-built dist/index.js bundle.
-rem See bin/cast (the macOS/Linux equivalent) for why --no-deprecation
-rem and CAST_CWD are both here.
+rem See bin/cast (the macOS/Linux equivalent) for why the two targeted
+rem warning suppressions and CAST_CWD are both here.
 setlocal
 set "CAST_CWD=%CD%"
-node --no-deprecation "%~dp0..\dist\index.js" %*
+node --disable-warning=DEP0040 --disable-warning=ExperimentalWarning "%~dp0..\dist\index.js" %*

@@ -18,11 +18,7 @@ while [ -h "$SOURCE" ]; do
 done
 SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
 
-# --no-deprecation: openai's bundled node-fetch fallback pulls in
-# whatwg-url@5, which calls Node's built-in (deprecated) punycode module at
-# import time. We always pass our own `fetch` to the OpenAI client (see
-# llm.ts/config.ts) so that fallback path never actually runs — but esbuild
-# bundles it eagerly regardless, so it still logs the warning. Harmless,
-# but there's no reason an end user should see noise from a dependency's
-# unused fallback path on every single run.
-exec env CAST_CWD="$ORIGINAL_CWD" node --no-deprecation "$SCRIPT_DIR/../dist/index.js" "$@"
+# DEP0040 comes from OpenAI's unused bundled node-fetch fallback. node:sqlite
+# is intentionally used by cast but remains experimental in Node 22. Keep
+# other warnings visible instead of suppressing the process-wide warning stream.
+exec env CAST_CWD="$ORIGINAL_CWD" node --disable-warning=DEP0040 --disable-warning=ExperimentalWarning "$SCRIPT_DIR/../dist/index.js" "$@"
