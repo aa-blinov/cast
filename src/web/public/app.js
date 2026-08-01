@@ -2309,7 +2309,7 @@ function FilePreviewModal({ path, onClose, downloadHref, previewHref }) {
 	// instead of a blank pane while the (vendored, but still ~1MB for hljs)
 	// module loads. { kind: "markdown" | "code", html }
 	const [enhanced, setEnhanced] = useState(null);
-	const modalRef = useModalFocusTrap(!!path);
+	const modalRef = useModalFocusTrap(!!path, ".modal-close");
 	const ext = path ? fileExtOf(path) : "";
 	const isImage = FS_IMAGE_EXTENSIONS.has(ext);
 	const isPdf = !isImage && ext === "pdf";
@@ -2372,10 +2372,13 @@ function FilePreviewModal({ path, onClose, downloadHref, previewHref }) {
 			loadHljs()
 				.then(({ default: hljs }) => {
 					if (cancelled) return;
-					const result = hljs.getLanguage(hljsLang)
-						? hljs.highlight(content, { language: hljsLang })
-						: hljs.highlightAuto(content);
-					setEnhanced({ kind: "code", html: result.value });
+					const lines = content.split("\n").map((line) => {
+						const result = hljs.getLanguage(hljsLang)
+							? hljs.highlight(line || " ", { language: hljsLang })
+							: hljs.highlightAuto(line || " ");
+						return result.value;
+					});
+					setEnhanced({ kind: "code", lines });
 				})
 				.catch(() => {
 					if (!cancelled) setEnhanced({ kind: "error" });
@@ -2434,9 +2437,28 @@ function FilePreviewModal({ path, onClose, downloadHref, previewHref }) {
 	} else if (isMarkdown && enhanced?.kind === "markdown") {
 		body = html`<div class="fs-preview-markdown message-content" dangerouslySetInnerHTML=${{ __html: enhanced.html }} />`;
 	} else if (hljsLang && enhanced?.kind === "code") {
-		body = html`<pre class="fs-preview-text fs-preview-code hljs"><code dangerouslySetInnerHTML=${{ __html: enhanced.html }} /></pre>`;
+		body = html`
+			<div class="fs-preview-code-wrap">
+				<div class="fs-preview-gutter" aria-hidden="true">
+					${enhanced.lines.map((_, i) => html`<span key=${i}>${i + 1}</span>`)}
+				</div>
+				<pre class="fs-preview-text fs-preview-code hljs"><code>${enhanced.lines.map(
+					(line, i) => html`<span key=${i} class="fs-preview-line" dangerouslySetInnerHTML=${{ __html: line }} />`,
+				)}</code></pre>
+			</div>
+		`;
 	} else {
-		body = html`<pre class="fs-preview-text">${content}</pre>`;
+		const lines = content.split("\n");
+		body = html`
+			<div class="fs-preview-code-wrap">
+				<div class="fs-preview-gutter" aria-hidden="true">
+					${lines.map((_, i) => html`<span key=${i}>${i + 1}</span>`)}
+				</div>
+				<pre class="fs-preview-text fs-preview-code"><code>${lines.map(
+					(line, i) => html`<span key=${i} class="fs-preview-line">${line || " "}</span>`,
+				)}</code></pre>
+			</div>
+		`;
 	}
 
 	return html`
@@ -2461,13 +2483,17 @@ const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), textarea, input, se
 // into the dialog on open, keeps Tab from leaking to the page behind the
 // backdrop, and hands focus back to whatever triggered it on close — none of
 // that happens for free just from the backdrop/click-outside handling.
-function useModalFocusTrap(active) {
+function useModalFocusTrap(active, initialFocusSelector) {
 	const ref = useRef(null);
 	useEffect(() => {
 		if (!active) return;
 		const container = ref.current;
 		const previouslyFocused = document.activeElement;
-		(container?.querySelector(FOCUSABLE_SELECTOR) || container)?.focus();
+		(
+			(initialFocusSelector && container?.querySelector(initialFocusSelector)) ||
+			container?.querySelector(FOCUSABLE_SELECTOR) ||
+			container
+		)?.focus();
 
 		const onKeyDown = (e) => {
 			if (e.key !== "Tab" || !container) return;
@@ -2488,7 +2514,7 @@ function useModalFocusTrap(active) {
 			document.removeEventListener("keydown", onKeyDown, true);
 			previouslyFocused?.focus?.();
 		};
-	}, [active]);
+	}, [active, initialFocusSelector]);
 	return ref;
 }
 
@@ -4125,6 +4151,17 @@ function SettingsSsh({ data, busy, act, confirm }) {
 // doesn't exist yet.
 const SANDBOX_CWD = "sandbox";
 
+function isSandboxSessionCwd(cwd) {
+	return cwd === SANDBOX_CWD || /(?:^|[\\/])\.cast[\\/]sandbox(?:[\\/]|$)/.test(cwd ?? "");
+}
+
+function sessionDirectoryName(cwd) {
+	if (isSandboxSessionCwd(cwd)) return "Sandbox";
+	const normalized = (cwd ?? "").replace(/[\\/]+$/, "");
+	const name = normalized.split(/[\\/]/).filter(Boolean).at(-1);
+	return name || normalized || "Unknown directory";
+}
+
 function Sidebar({
 	sessions,
 	activeId,
@@ -4145,6 +4182,7 @@ function Sidebar({
 	confirm,
 	sessionsLoaded,
 	defaultModel,
+	onResizeStart,
 }) {
 	const [personaOpen, setPersonaOpen] = useState(false);
 	const [search, setSearch] = useState("");
@@ -4245,8 +4283,26 @@ function Sidebar({
 	const isSearching = search.trim().length > 0;
 	const searching = isSearching && searchResults === null;
 	const filtered = isSearching ? (searchResults ?? []) : sessions;
-	const pinnedGroup = isSearching ? [] : filtered.filter((s) => s.pinned).sort(byRunningThenDate);
-	const otherGroup = isSearching ? filtered : filtered.filter((s) => !s.pinned).sort(byRunningThenDate);
+	const sessionGroups = isSearching
+		? []
+		: [
+				...filtered.reduce((groups, session) => {
+					const key = isSandboxSessionCwd(session.cwd) ? "__sandbox__" : sessionDirectoryName(session.cwd);
+					const group = groups.get(key) ?? {
+						label: sessionDirectoryName(session.cwd),
+						paths: new Set(),
+						sessions: [],
+					};
+					group.paths.add(session.cwd);
+					group.sessions.push(session);
+					groups.set(key, group);
+					return groups;
+				}, new Map()),
+			].sort(([, a], [, b]) => {
+				const aLatest = [...a.sessions].sort(byRunningThenDate)[0];
+				const bLatest = [...b.sessions].sort(byRunningThenDate)[0];
+				return byRunningThenDate(aLatest, bLatest);
+			});
 	const isSandbox = cwd === SANDBOX_CWD;
 
 	const startEdit = useCallback((s) => {
@@ -4326,7 +4382,6 @@ function Sidebar({
 							startEdit(s);
 						}}>${s.title || s.persona || "unknown"}</span>`
 			}
-			<span class="sidebar-item-meta">${s.messageCount} msg</span>
 			<div class="sidebar-item-menu-anchor">
 				<button
 					class="sidebar-item-more"
@@ -4368,6 +4423,19 @@ function Sidebar({
 			</div>
 		</div>
 	`;
+	const renderGroup = ([key, group]) => {
+		const groupSessions = [...group.sessions].sort((a, b) => {
+			if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+			return byRunningThenDate(a, b);
+		});
+		const fullPaths = [...group.paths].filter(Boolean);
+		return html`
+			<div key=${key} class="sidebar-session-group">
+				<div class="sidebar-group-label" title=${fullPaths.join("\n")}>${group.label}</div>
+				${groupSessions.map(renderItem)}
+			</div>
+		`;
+	};
 
 	return html`
 		<nav class="sidebar${open ? " open" : ""}">
@@ -4433,18 +4501,10 @@ function Sidebar({
 						/>
 					`
 					}
-					${
-						pinnedGroup.length > 0 &&
-						html`
-						<div class="sidebar-group-label">Pinned</div>
-						${pinnedGroup.map(renderItem)}
-						<div class="sidebar-group-divider" />
-					`
-					}
-					${otherGroup.map(renderItem)}
+					${isSearching ? filtered.map(renderItem) : sessionGroups.map(renderGroup)}
 					${!sessionsLoaded && html`<div class="sidebar-empty">Loading sessions…</div>`}
 					${sessionsLoaded && searching && html`<div class="sidebar-empty">Searching…</div>`}
-					${sessionsLoaded && !searching && pinnedGroup.length === 0 && otherGroup.length === 0 && html`<div class="sidebar-empty">No sessions match "${search}"</div>`}
+					${sessionsLoaded && !searching && sessionGroups.length === 0 && html`<div class="sidebar-empty">No sessions match "${search}"</div>`}
 				</div>
 			</div>
 			<div class="sidebar-footer" title=${defaultModel || "No model selected"}>
@@ -4453,6 +4513,7 @@ function Sidebar({
 					<${icons.arrowLeftOnRectangle} />
 				</button>
 			</div>
+			<div class="sidebar-resize-handle" onPointerDown=${onResizeStart} aria-hidden="true" />
 		</nav>
 	`;
 }
@@ -4804,6 +4865,20 @@ function App() {
 	}, [diffTab]);
 	const [sidebarOpen, setSidebarOpen] = useState(false);
 	const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+	const [sidebarWidth, setSidebarWidth] = useState(() => {
+		try {
+			const saved = Number(localStorage.getItem("cast:sidebarWidth"));
+			return saved >= 272 && saved <= 420 ? saved : null;
+		} catch {
+			return null;
+		}
+	});
+	useEffect(() => {
+		if (!sidebarWidth) return;
+		try {
+			localStorage.setItem("cast:sidebarWidth", String(sidebarWidth));
+		} catch {}
+	}, [sidebarWidth]);
 	// Dragged width, same persistence as diffOpen/diffTab above — otherwise
 	// every reload snaps a manually-widened panel back to the CSS default.
 	const [diffWidth, setDiffWidth] = useState(() => {
@@ -5131,23 +5206,22 @@ function App() {
 				api("GET", "/api/commands")
 					.then((c) => c && setCommands(c))
 					.catch(() => {});
-				api("GET", "/api/themes")
-					.then((t) => {
+				Promise.all([api("GET", "/api/themes"), api("GET", "/api/config")])
+					.then(([t, cfg]) => {
+						// The model belongs to app config, not the theme request. Keep
+						// it available for the new-session footer independently.
+						if (cfg) {
+							setDefaultCwd(cfg.cwd ?? "");
+							setDefaultModel(cfg.model ?? "");
+							if (cfg.quickSessionPersona) setQuickSessionPersona(cfg.quickSessionPersona);
+						}
 						if (!t) return;
 						setThemes(t);
-						api("GET", "/api/config")
-							.then((cfg) => {
-								if (!cfg) return;
-								setDefaultCwd(cfg.cwd ?? "");
-								setDefaultModel(cfg.model ?? "");
-								if (cfg.quickSessionPersona) setQuickSessionPersona(cfg.quickSessionPersona);
-								const current = t.find((x) => x.id === cfg.theme) ?? t.find((x) => x.id === "cast");
-								if (current) {
-									applyTheme(current.colors);
-									setCurrentThemeId(current.id);
-								}
-							})
-							.catch(() => {});
+						const current = t.find((x) => x.id === cfg?.theme) ?? t.find((x) => x.id === "cast");
+						if (current) {
+							applyTheme(current.colors);
+							setCurrentThemeId(current.id);
+						}
 					})
 					.catch(() => {});
 				staticResourcesLoadedRef.current = true;
@@ -5310,7 +5384,13 @@ function App() {
 		const st = dragStateRef.current;
 		if (!st) return;
 		const delta = st.startX - e.clientX;
-		const next = Math.min(Math.max(st.startWidth + delta, 320), Math.round(window.innerWidth * 0.85));
+		const sidebarWidthNow = document.querySelector(".sidebar")?.getBoundingClientRect().width ?? 0;
+		const minChatWidth = window.innerWidth <= 1100 ? 280 : 320;
+		const maxWidth = Math.max(
+			320,
+			Math.min(Math.round(window.innerWidth * 0.85), window.innerWidth - sidebarWidthNow - minChatWidth),
+		);
+		const next = Math.min(Math.max(st.startWidth + delta, 320), maxWidth);
 		setDiffWidth(next);
 	}, []);
 	const onDiffResizeEnd = useCallback(() => {
@@ -5331,6 +5411,47 @@ function App() {
 			window.addEventListener("pointerup", onDiffResizeEnd, { once: true });
 		},
 		[diffWidth, onDiffResizeMove, onDiffResizeEnd],
+	);
+
+	// Sidebar drag-to-resize mirrors the diff panel: desktop-only, bounded so
+	// the chat remains usable, and persisted independently of the collapsed
+	// state so reopening restores the user's chosen width.
+	const sidebarDragStateRef = useRef(null);
+	const onSidebarResizeMove = useCallback(
+		(e) => {
+			const st = sidebarDragStateRef.current;
+			if (!st) return;
+			const diffWidthNow = diffOpen
+				? (document.querySelector(".diff-panel")?.getBoundingClientRect().width ?? 0)
+				: 0;
+			const minChatWidth = window.innerWidth <= 1100 ? 280 : 320;
+			const maxWidth = Math.max(
+				272,
+				Math.min(420, Math.round(window.innerWidth * 0.45), window.innerWidth - diffWidthNow - minChatWidth),
+			);
+			setSidebarWidth(Math.min(Math.max(st.startWidth + e.clientX - st.startX, 272), maxWidth));
+		},
+		[diffOpen],
+	);
+	const onSidebarResizeEnd = useCallback(() => {
+		sidebarDragStateRef.current = null;
+		document.body.classList.remove("resizing-sidebar");
+		window.removeEventListener("pointermove", onSidebarResizeMove);
+	}, [onSidebarResizeMove]);
+	const startSidebarResize = useCallback(
+		(e) => {
+			if (window.innerWidth <= 768) return;
+			e.preventDefault();
+			const sidebar = document.querySelector(".sidebar");
+			sidebarDragStateRef.current = {
+				startX: e.clientX,
+				startWidth: sidebar?.getBoundingClientRect().width ?? sidebarWidth ?? 272,
+			};
+			document.body.classList.add("resizing-sidebar");
+			window.addEventListener("pointermove", onSidebarResizeMove);
+			window.addEventListener("pointerup", onSidebarResizeEnd, { once: true });
+		},
+		[sidebarWidth, onSidebarResizeMove, onSidebarResizeEnd],
 	);
 
 	// Submit message
@@ -6302,8 +6423,32 @@ function App() {
 	const sidebarVisible = typeof window !== "undefined" && window.innerWidth <= 768 ? sidebarOpen : !sidebarCollapsed;
 
 	const appStyle = {};
+	const minChatWidth = typeof window !== "undefined" && window.innerWidth <= 1100 ? 280 : 320;
+	const diffMaxWidth =
+		typeof window === "undefined"
+			? null
+			: Math.max(
+					320,
+					Math.min(
+						Math.round(window.innerWidth * 0.85),
+						window.innerWidth - (sidebarCollapsed ? 0 : (sidebarWidth ?? 272)) - minChatWidth,
+					),
+				);
+	const boundedDiffWidth = diffWidth && diffMaxWidth ? Math.min(diffWidth, diffMaxWidth) : diffWidth;
+	const sidebarMaxWidth =
+		typeof window === "undefined"
+			? 420
+			: Math.max(
+					272,
+					Math.min(
+						420,
+						Math.round(window.innerWidth * 0.45),
+						window.innerWidth - (diffOpen ? (boundedDiffWidth ?? 0) : 0) - minChatWidth,
+					),
+				);
 	if (sidebarCollapsed) appStyle["--sidebar-col"] = "0px";
-	if (diffOpen && diffWidth) appStyle["--diff-w"] = `${diffWidth}px`;
+	else if (sidebarWidth) appStyle["--sidebar-col"] = `${Math.min(sidebarWidth, sidebarMaxWidth)}px`;
+	if (diffOpen && boundedDiffWidth) appStyle["--diff-w"] = `${boundedDiffWidth}px`;
 
 	// Hotkeys modal — rendered via dangerouslySetInnerHTML to avoid htm/h() issues.
 	const hotkeysModalRef = useModalFocusTrap(hotkeysOpen);
@@ -6398,6 +6543,7 @@ function App() {
 				open=${sidebarOpen}
 				sessionsLoaded=${sessionsLoaded}
 				defaultModel=${defaultModel}
+				onResizeStart=${startSidebarResize}
 				confirm=${requestConfirm}
 			/>
 

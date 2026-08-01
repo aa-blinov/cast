@@ -72,9 +72,11 @@ Starting when another instance is already running prints an error and exits. `st
 
 Features:
 - Create/switch/close sessions with different personas, running independently in parallel
+- Session sidebar groups threads by working directory: Quick sessions use a `Sandbox` group, while project sessions use the directory name rather than the full path. Groups are ordered by latest activity; pinned and running threads stay at the top of their own group. Hover a group name to see its full path.
 - Token-by-token streaming, with reasoning and tool calls shown inline as they happen
 - Tool call cards showing arguments and status
 - Git diff viewer (file tree + unified diff) as a resizable side panel, auto-refreshing after each tool call
+- File reader popup with wrapped text/code and source-line numbers; Markdown, CSV/TSV, images, and PDFs use their dedicated previews
 - Settings modal (gear icon) — model & reasoning, color theme, web tools toggle, bash confirmation mode, Quick session persona, and management for MCP servers, skills, plugins, hooks, providers, and SSH hosts; shared with the TUI's `~/.cast/settings.json`
 - Status popover (info icon) — persona, model, mode, token usage, and git branch for the active session
 - Keyboard shortcuts — `Ctrl+B` (`⌘B` on Mac) toggles the sidebar, `Ctrl+Shift+D` / `N` / `L` toggle the diff panel / start a new session / clear context, `Ctrl+/` shows the full reference

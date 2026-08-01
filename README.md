@@ -130,7 +130,7 @@ Every conversation auto-saves. Resume with `--continue`, pick from a list with `
 
 ### Web UI
 
-`cast web` launches a browser-based control room — same sessions as the TUI, with a diff viewer, background agents, and token-by-token streaming. The TUI is still the default for local interactive use; the Web UI is the answer when you want to share a session, keep one running in the background, or drive cast from a browser/phone.
+`cast web` launches a browser-based control room — same sessions as the TUI, with a diff viewer, background agents, and token-by-token streaming. The file reader previews text and code with wrapped lines and source-line numbers; Markdown, tables, images, and PDFs keep their document-specific previews. The TUI is still the default for local interactive use; the Web UI is the answer when you want to share a session, keep one running in the background, or drive cast from a browser/phone.
 
 ```bash
 # Start (default 127.0.0.1:1337)

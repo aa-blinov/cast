@@ -359,9 +359,38 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	color: var(--text);
 	width: 100%;
 }
+.fs-preview-code-wrap {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr);
+	width: 100%;
+	min-width: 0;
+	align-items: stretch;
+}
+.fs-preview-gutter {
+	display: flex;
+	flex-direction: column;
+	padding: 14px 10px 14px 14px;
+	border-right: 1px solid var(--border);
+	background: var(--bg-raised);
+	color: var(--text-muted);
+	font-family: var(--font-mono);
+	font-size: .8rem;
+	line-height: 1.6;
+	text-align: right;
+	user-select: none;
+}
+.fs-preview-gutter span,
+.fs-preview-line {
+	display: block;
+	min-height: 1.6em;
+}
+.fs-preview-line {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
 .fs-preview-code {
-	white-space: pre;
-	overflow-x: auto;
+	white-space: normal;
+	min-width: 0;
 }
 .fs-preview-markdown {
 	padding: 14px 18px;

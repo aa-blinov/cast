@@ -50,6 +50,9 @@ button, input, textarea { font: inherit; }
 body.resizing-diff .app { transition: none; }
 body.resizing-diff { cursor: col-resize; }
 body.resizing-diff * { user-select: none; }
+body.resizing-sidebar .app { transition: none; }
+body.resizing-sidebar { cursor: col-resize; }
+body.resizing-sidebar * { user-select: none; }
 
 /* ── Header ───────────────────────────────────────────────────────── */
 .header {
@@ -240,13 +243,33 @@ body.resizing-diff * { user-select: none; }
 
 /* ── Sidebar ──────────────────────────────────────────────────────── */
 .sidebar {
+	position: relative;
 	background: var(--bg-surface);
 	border-right: 1px solid var(--border);
 	display: flex; flex-direction: column;
 	min-width: 0;
+	min-height: 0;
 	overflow: hidden;
 }
 .app.sidebar-collapsed .sidebar { border-right-color: transparent; }
+.sidebar-resize-handle {
+	position: absolute;
+	top: 0; bottom: 0; right: 0;
+	width: 8px;
+	cursor: col-resize;
+	z-index: 6;
+	touch-action: none;
+}
+.sidebar-resize-handle::after {
+	content: '';
+	position: absolute;
+	top: 0; bottom: 0; left: 3px;
+	width: 2px;
+	background: transparent;
+	transition: background .12s;
+}
+.sidebar-resize-handle:hover::after,
+body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 .sidebar-scroll {
 	flex: 1;
 	overflow-y: auto;
@@ -289,17 +312,19 @@ body.resizing-diff * { user-select: none; }
 .sidebar-logout {
 	display: grid;
 	place-items: center;
-	width: 26px;
-	height: 26px;
+	width: 32px;
+	height: 32px;
 	margin-left: auto;
 	border: 0;
 	border-radius: var(--radius-sm);
 	background: transparent;
-	color: var(--text-muted);
+	color: var(--text);
 	cursor: pointer;
 	transition: color var(--transition-fast), background var(--transition-fast);
 }
-.sidebar-logout:hover { color: var(--cyan); background: var(--accent-subtle); }
+.sidebar-logout svg { width: 20px; height: 20px; }
+.sidebar-logout:hover,
+.sidebar-logout:focus-visible { color: var(--cyan); background: var(--accent-subtle); }
 /* Always out-of-flow, even on desktop where it's never shown — otherwise
  * this unconditionally-rendered div is a plain static block and grid
  * auto-placement slots it into .app's first content cell, pushing .sidebar
@@ -324,6 +349,11 @@ body.resizing-diff * { user-select: none; }
 	letter-spacing: .06em;
 	color: var(--cyan);
 	padding: 2px 4px 6px;
+}
+.sidebar-session-group + .sidebar-session-group {
+	margin-top: 8px;
+	padding-top: 8px;
+	border-top: 1px solid var(--border);
 }
 /* Unlike .sidebar-divider (used between top-level chrome blocks, outside any
  * padded section), this one lives inside .sidebar-section's own 12px
@@ -371,9 +401,6 @@ body.resizing-diff * { user-select: none; }
 .sidebar-item-status.idle { background: var(--text-muted); }
 .sidebar-item-status.running { background: var(--amber); }
 .sidebar-item-status.error { background: var(--rose); }
-.sidebar-item-meta {
-	font-size: .7rem; color: var(--text-muted);
-}
 .sidebar-item-more, .sidebar-item-pin {
 	flex-shrink: 0;
 	width: 22px; height: 22px;
@@ -777,7 +804,9 @@ body.resizing-diff * { user-select: none; }
 		transform: translateX(-100%);
 		transition: transform .2s ease;
 		z-index: 15;
+		overflow: hidden;
 	}
+	.sidebar-resize-handle { display: none; }
 	.sidebar.open { transform: translateX(0); }
 	/* No hover on touch — the menu/pin buttons must be reachable without it. */
 	.sidebar-item-more, .sidebar-item-pin { opacity: 1; }
