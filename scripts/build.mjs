@@ -105,6 +105,7 @@ const webJavaScript = [
 	"tool-card.js",
 	"turn-meta.js",
 	"use-workspace-state.js",
+	"use-session-state.js",
 	"tool-card.js",
 	"sidebar-session-item.js",
 	"sidebar.js",
