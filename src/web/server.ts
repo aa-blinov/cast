@@ -6,6 +6,7 @@
  */
 
 import { execSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
 	createReadStream,
 	existsSync,
@@ -21,6 +22,7 @@ import {
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
+import { brotliCompressSync, gzipSync } from "node:zlib";
 import { getHistoryPage, getMessageImage } from "../core/session.ts";
 import { toDisplayMessages, type WebBridge, type WebEvent } from "./bridge.ts";
 import { isBlockedAttachmentName, sessionInputsDir } from "./inputs.ts";
@@ -191,33 +193,50 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 			if (!stat.isFile()) return false;
 			const ext = extname(filePath);
 			const mime = MIME_TYPES[ext] ?? "application/octet-stream";
-			// index.html is never cached (below), but app.js/stylesheets are — so
-			// stamp their URLs with the running version here. A browser holding
-			// a stale cached index.html still asks for the JS/CSS it originally
-			// linked, which is fine; any fresh load after an upgrade gets new
-			// URLs and bypasses the old cache entry instead of racing it.
-			const buildStamp = Date.now().toString(36);
+			const assetVersion = (path: string): string => {
+				const source = readFileSync(join(publicDir, path));
+				const hash = createHash("sha256").update(source);
+				if (path === "/app.js") hash.update(assetVersion("/stream-blocks.js"));
+				return hash.digest("hex").slice(0, 12);
+			};
 			let content: Buffer | string = readFileSync(filePath);
 			if (ext === ".html") {
 				content = content
 					.toString("utf-8")
-					.replace('href="/style.css"', `href="/style.css?v=${buildStamp}"`)
-					.replace('href="/chat.css"', `href="/chat.css?v=${buildStamp}"`)
-					.replace('href="/tools.css"', `href="/tools.css?v=${buildStamp}"`)
-					.replace('href="/workspace.css"', `href="/workspace.css?v=${buildStamp}"`)
-					.replace('href="/settings.css"', `href="/settings.css?v=${buildStamp}"`)
-					.replace('src="/app.js"', `src="/app.js?v=${buildStamp}"`);
+					.replace('href="/style.css"', `href="/style.css?v=${assetVersion("/style.css")}"`)
+					.replace('href="/chat.css"', `href="/chat.css?v=${assetVersion("/chat.css")}"`)
+					.replace('href="/tools.css"', `href="/tools.css?v=${assetVersion("/tools.css")}"`)
+					.replace('href="/workspace.css"', `href="/workspace.css?v=${assetVersion("/workspace.css")}"`)
+					.replace('href="/settings.css"', `href="/settings.css?v=${assetVersion("/settings.css")}"`)
+					.replace('src="/app.js"', `src="/app.js?v=${assetVersion("/app.js")}"`);
 			} else if (urlPath === "/app.js") {
 				content = content
 					.toString("utf-8")
-					.replace('from "./stream-blocks.js"', `from "./stream-blocks.js?v=${buildStamp}"`);
+					.replace(
+						'from "./stream-blocks.js"',
+						`from "./stream-blocks.js?v=${assetVersion("/stream-blocks.js")}"`,
+					);
 			}
+			const accepts = req.headers["accept-encoding"] ?? "";
+			const textAsset = [".html", ".css", ".js", ".mjs", ".json", ".svg"].includes(ext);
+			const raw = Buffer.isBuffer(content) ? content : Buffer.from(content);
+			const encoding =
+				textAsset && accepts.includes("br") ? "br" : textAsset && accepts.includes("gzip") ? "gzip" : undefined;
+			const body = encoding === "br" ? brotliCompressSync(raw) : encoding === "gzip" ? gzipSync(raw) : raw;
+			const requestedVersion = new URL(req.url ?? "/", `http://localhost:${port}`).searchParams.get("v");
+			const immutable = ext !== ".html" && requestedVersion === assetVersion(urlPath);
 			res.writeHead(200, {
 				"Content-Type": mime,
-				"Content-Length": Buffer.byteLength(content),
-				"Cache-Control": ext === ".html" ? "no-cache" : "public, max-age=3600",
+				"Content-Length": body.length,
+				"Cache-Control":
+					ext === ".html"
+						? "no-cache"
+						: immutable
+							? "public, max-age=31536000, immutable"
+							: "public, max-age=3600",
+				...(encoding ? { "Content-Encoding": encoding, Vary: "Accept-Encoding" } : {}),
 			});
-			res.end(content);
+			res.end(body);
 			return true;
 		} catch {
 			return false;
