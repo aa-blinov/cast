@@ -17,7 +17,7 @@
  * stays a sibling of prompts/ and package.json, which is how the release
  * archive is laid out (see .github/workflows/release.yml).
  */
-import { build } from "esbuild";
+import { build, transform } from "esbuild";
 
 	await build({
 		entryPoints: ["src/index.ts"],
@@ -72,8 +72,30 @@ import { build } from "esbuild";
 // Copy static web assets into dist/ so the bundled server can serve them.
 // In the bundle, import.meta.dirname resolves to dist/ — the server looks
 // for public/ as a sibling of dist/index.js.
-import { cpSync } from "node:fs";
+import { cpSync, readFileSync, writeFileSync } from "node:fs";
 cpSync("src/web/public", "dist/public", { recursive: true });
+
+// Keep the source web assets readable for the dev server, but ship compact
+// browser assets in release builds. Each module is transformed independently
+// so the importmap and the browser's native ES-module graph remain intact.
+const webJavaScript = ["app.js", "icons.js", "reasoning-split.js", "stream-blocks.js", "login.js"];
+for (const file of webJavaScript) {
+	const source = readFileSync(`dist/public/${file}`, "utf8");
+	const result = await transform(source, {
+		loader: "js",
+		format: "esm",
+		minify: true,
+		legalComments: "none",
+	});
+	writeFileSync(`dist/public/${file}`, result.code);
+}
+
+const webStylesheets = ["tokens.css", "chat.css", "tools.css", "workspace.css", "settings.css", "style.css", "login.css"];
+for (const file of webStylesheets) {
+	const source = readFileSync(`dist/public/${file}`, "utf8");
+	const result = await transform(source, { loader: "css", minify: true, legalComments: "none" });
+	writeFileSync(`dist/public/${file}`, result.code);
+}
 
 // Same idea for the vendored image-codec WASM binaries (image-resize.ts) —
 // esbuild only bundles the @jsquash/* JS glue, not these; they're read from
