@@ -82,6 +82,7 @@ const webJavaScript = [
 	"app.js",
 	"api.js",
 	"cast-logo.js",
+	"directory-browser.js",
 	"elapsed-timer.js",
 	"file-preview.js",
 	"hotkeys.js",
