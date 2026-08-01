@@ -1,0 +1,459 @@
+/* ── Diff panel ───────────────────────────────────────────────────── */
+.diff-panel {
+	position: relative;
+	/* Always in flow (never display:none) — same reasoning as the sidebar:
+	 * a mount with no "from" state can't animate, and here specifically the
+	 * grid track above needs the panel present to size against. Closed state
+	 * is 0 width from the grid track, clipped by overflow:hidden below. */
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+	border-left: 1px solid var(--border);
+	background: var(--bg);
+	width: 100%;
+	transition: border-color .16s ease;
+}
+.app:not(.with-diff) .diff-panel { border-left-color: transparent; }
+.diff-resize-handle {
+	position: absolute;
+	top: 0; bottom: 0; left: -4px;
+	width: 8px;
+	cursor: col-resize;
+	z-index: 6;
+	touch-action: none;
+}
+/* The panel is always in the DOM now (see .diff-panel above), so its resize
+ * handle must be hidden explicitly while closed instead of disappearing for
+ * free with display:none — otherwise an 8px draggable strip sits on the
+ * chat/sidebar boundary at all times, diff open or not. */
+.app:not(.with-diff) .diff-resize-handle { display: none; }
+.diff-resize-handle::after {
+	content: '';
+	position: absolute;
+	top: 0; bottom: 0; left: 3px;
+	width: 2px;
+	background: transparent;
+	transition: background .12s;
+}
+.diff-resize-handle:hover::after,
+body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
+.diff-header {
+	display: flex; align-items: center;
+	padding: 8px 12px;
+	border-bottom: 1px solid var(--border);
+	background: var(--bg-surface);
+	gap: 8px;
+}
+.diff-tabs {
+	display: flex;
+	gap: 2px;
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	padding: 2px;
+}
+.diff-tab {
+	background: none;
+	border: none;
+	color: var(--text-muted);
+	font-family: var(--font);
+	font-size: .72rem;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: .03em;
+	padding: 4px 10px;
+	border-radius: 4px;
+	cursor: pointer;
+	transition: background .12s, color .12s;
+}
+.diff-tab:hover { color: var(--text); }
+.diff-tab.active { background: var(--bg-raised); color: var(--text); }
+.diff-file-list {
+	overflow-y: auto;
+	border-bottom: 1px solid var(--border);
+	/* Viewport-relative, not a stingy fixed cap — with more than a handful of
+	 * changed files a fixed 200px left most of them a few pixels of scroll
+	 * away from feeling unreachable. Still scrolls internally past this. */
+	max-height: min(45vh, 320px);
+	flex-shrink: 0;
+}
+.diff-file-item {
+	display: flex; align-items: center; gap: 6px;
+	padding: 6px 12px;
+	cursor: pointer;
+	font-size: .8rem;
+	font-family: var(--font-mono);
+	color: var(--text-dim);
+	transition: background .1s;
+}
+.diff-file-item:hover { background: var(--bg-hover); }
+.diff-file-item.active { background: var(--bg-raised); color: var(--text); }
+/* Full relative path (like GitLab's diff file list), not just the basename —
+ * two files named the same in different directories were indistinguishable
+ * (and looked like only one was clickable) when this only showed the tail.
+ * Split into a shrinkable/ellipsized directory prefix + an always-fully-
+ * visible filename, rather than one text-overflow:ellipsis run — truncating
+ * the whole path as a unit either hides the actual filename (default,
+ * ellipsis-at-end) or (an earlier `direction:rtl` trick) visually reorders
+ * leading punctuation, e.g. rendering ".gitignore" as "gitignore.". */
+.diff-file-path {
+	display: flex;
+	overflow: hidden;
+	min-width: 0;
+	flex: 1;
+}
+.diff-file-dir {
+	overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+	min-width: 0;
+	color: var(--text-muted);
+}
+.diff-file-base { flex-shrink: 0; white-space: nowrap; }
+.diff-file-stats { margin-left: auto; flex-shrink: 0; font-size: .7rem; }
+.diff-file-stats .add { color: var(--green); }
+.diff-file-stats .del { color: var(--rose); }
+.diff-group-header {
+	display: flex; align-items: center; justify-content: space-between;
+	padding: 6px 12px 2px;
+	font-size: .7rem;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: .04em;
+	color: var(--text-muted);
+	border-top: 1px solid var(--border);
+}
+.diff-group-header:first-child { border-top: none; }
+.diff-group-count {
+	background: var(--bg-raised);
+	border-radius: 8px;
+	padding: 0 6px;
+	font-size: .65rem;
+	font-weight: 500;
+}
+.diff-file-badge {
+	width: 6px; height: 6px;
+	border-radius: 50%;
+	flex-shrink: 0;
+}
+.badge-new { background: var(--green); }
+.badge-added { background: var(--blue); }
+.badge-modified { background: var(--amber); }
+.badge-deleted { background: var(--rose); }
+.badge-renamed { background: var(--purple); }
+.diff-view {
+	flex: 1;
+	overflow: auto;
+	display: flex;
+	flex-direction: column;
+	font-family: var(--font-mono);
+	font-size: .78rem;
+	line-height: 1.6;
+}
+.diff-hunk-header {
+	color: var(--text-muted);
+	padding: 4px 12px;
+	background: var(--bg-surface);
+	font-style: italic;
+}
+.diff-line {
+	display: flex;
+	align-items: flex-start;
+	padding: 0 12px;
+}
+.diff-line-num {
+	flex-shrink: 0;
+	width: 40px;
+	text-align: right;
+	padding-right: 8px;
+	color: var(--text-muted);
+	user-select: none;
+}
+.diff-line-content {
+	flex: 1;
+	min-width: 0;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+.diff-line-add { background: rgba(34,197,94,.08); }
+.diff-line-add .diff-line-content { color: var(--text); }
+.diff-line-del { background: rgba(239,68,68,.08); }
+.diff-line-del .diff-line-content { color: var(--text-dim); }
+.diff-empty {
+	display: flex; align-items: center; justify-content: center;
+	flex: 1;
+	color: var(--text-muted);
+	font-size: .85rem;
+	text-align: center;
+	line-height: 1.6;
+}
+/* Title + hint as separate stacked lines (like the chat's own empty state)
+   instead of one centered sentence split by a <br/> — that read as an
+   uneven, floating one-liner rather than a clear two-part message. */
+.diff-empty-title { color: var(--text); font-size: .9rem; font-weight: 600; margin-bottom: 4px; }
+.diff-empty-hint p { margin: 0; }
+.diff-empty-hint code {
+	font-family: var(--font-mono);
+	background: var(--bg-raised);
+	border: 1px solid var(--border);
+	border-radius: 4px;
+	padding: 1px 5px;
+	font-size: .8rem;
+}
+.diff-empty-error {
+	color: #fca5a5;
+	font-family: var(--font-mono);
+	font-size: .78rem;
+	white-space: pre-wrap;
+	text-align: left;
+	max-height: 100%;
+	overflow-y: auto;
+}
+
+/* ── File explorer (diff panel's "Files" tab) ────────────────────── */
+.fs-explorer {
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	min-height: 0;
+}
+.fs-toolbar {
+	display: flex;
+	gap: 6px;
+	padding: 8px;
+	border-bottom: 1px solid var(--border);
+	flex-shrink: 0;
+}
+.fs-search {
+	flex: 1;
+	min-width: 0;
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	padding: 5px 9px;
+	color: var(--text);
+	font-family: var(--font);
+	font-size: .78rem;
+}
+.fs-search:focus { border-color: var(--cyan); outline: none; }
+.fs-collapse-btn {
+	flex-shrink: 0;
+	width: 28px; height: 28px;
+	display: flex; align-items: center; justify-content: center;
+	background: none;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	color: var(--text-muted);
+	cursor: pointer;
+}
+.fs-collapse-btn:hover { color: var(--cyan); border-color: var(--border-active); }
+.fs-tree {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	overflow-y: auto;
+	padding: 4px 0;
+}
+.fs-row {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	min-height: 30px;
+	padding-right: 8px;
+	font-size: .8rem;
+	color: var(--text-dim);
+}
+.fs-row:hover { background: var(--bg-hover); }
+.fs-row-main {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex: 1;
+	min-width: 0;
+	padding: 5px 4px;
+	cursor: pointer;
+}
+.fs-chevron {
+	display: flex; align-items: center; justify-content: center;
+	width: 14px; height: 14px;
+	flex-shrink: 0;
+	color: var(--text-muted);
+	transition: transform .1s;
+}
+.fs-chevron.open { transform: rotate(90deg); }
+.fs-chevron-spacer { width: 14px; flex-shrink: 0; }
+.fs-icon {
+	display: flex; align-items: center; justify-content: center;
+	flex-shrink: 0;
+	color: var(--text-muted);
+}
+.fs-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--text-dim);
+}
+.fs-row:hover .fs-name { color: var(--text); }
+.fs-size {
+	flex-shrink: 0;
+	font-size: .68rem;
+	color: var(--text-muted);
+	margin-left: auto;
+	padding-left: 8px;
+}
+.fs-row-actions {
+	display: flex;
+	gap: 2px;
+	flex-shrink: 0;
+	/* Desktop: hidden until the row is hovered — a touch device (no hover)
+	   makes them permanently visible, same fix already used for the
+	   directory-picker's delete button and code-copy buttons. */
+	opacity: 0;
+	transition: opacity .1s;
+}
+.fs-row:hover .fs-row-actions,
+.fs-row:focus-within .fs-row-actions { opacity: 1; }
+.fs-action {
+	width: 26px; height: 26px;
+	display: flex; align-items: center; justify-content: center;
+	background: none;
+	border: none;
+	color: var(--text-muted);
+	border-radius: 4px;
+	cursor: pointer;
+	text-decoration: none;
+}
+.fs-action:hover { color: var(--cyan); background: rgba(0,200,255,.08); }
+.fs-action:disabled { opacity: .4; cursor: default; }
+.fs-loading {
+	padding: 6px 8px;
+	font-size: .75rem;
+	color: var(--text-muted);
+}
+.fs-rename-input {
+	flex: 1;
+	min-width: 0;
+	background: var(--bg);
+	border: 1px solid var(--cyan);
+	border-radius: 4px;
+	padding: 1px 5px;
+	color: var(--text);
+	font-family: var(--font);
+	font-size: .8rem;
+}
+
+/* ── File preview modal ──────────────────────────────────────────── */
+/* max-width/height live with .modal's other overrides, further down. */
+.fs-preview-body {
+	flex: 1;
+	min-height: 0;
+	overflow: auto;
+	display: flex;
+}
+.fs-preview-text {
+	margin: 0;
+	padding: 14px 16px;
+	font-family: var(--font-mono);
+	font-size: .8rem;
+	line-height: 1.6;
+	white-space: pre-wrap;
+	word-break: break-word;
+	color: var(--text);
+	width: 100%;
+}
+.fs-preview-code {
+	white-space: pre;
+	overflow-x: auto;
+}
+.fs-preview-markdown {
+	padding: 14px 18px;
+	width: 100%;
+	overflow: auto;
+	font-size: .88rem;
+	/* .message-content (reused for its link/code/table rules) sets
+	 * white-space: pre-wrap for its own hand-rolled renderer, which has no
+	 * real block elements and relies on literal newlines for paragraph
+	 * breaks. marked's output is real <p>/<li>/<h*> markup — under pre-wrap,
+	 * the newlines marked's own output has *between* those tags render as
+	 * extra visible blank space on top of each element's normal margin,
+	 * which is what produced the huge/doubled line gaps. */
+	white-space: normal;
+}
+.fs-preview-markdown > :first-child { margin-top: 0; }
+.fs-preview-markdown > :last-child { margin-bottom: 0; }
+.fs-preview-markdown p { margin: .5em 0; }
+/* highlight.js's own class names (see vendor/highlight.min.mjs) restyled to
+ * pull from the active theme's vars instead of importing one of hljs's fixed
+ * theme stylesheets — this way code coloring tracks whichever theme (dark or
+ * light) the user picked in Settings, not a hardcoded palette. */
+.hljs { background: none; color: var(--text); }
+.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-type, .hljs-meta .hljs-keyword { color: var(--purple); }
+.hljs-string, .hljs-attr, .hljs-symbol, .hljs-bullet, .hljs-addition { color: var(--green); }
+.hljs-number { color: var(--amber); }
+.hljs-comment, .hljs-quote, .hljs-deletion { color: var(--text-muted); font-style: italic; }
+.hljs-title, .hljs-title.function_, .hljs-section, .hljs-name, .hljs-selector-id, .hljs-selector-class { color: var(--blue); }
+.hljs-built_in, .hljs-tag, .hljs-variable, .hljs-template-variable { color: var(--teal); }
+.hljs-doctag, .hljs-strong { font-weight: 600; }
+.hljs-emphasis { font-style: italic; }
+/* Markdown preview's rendered HTML (marked's output — see vendor/marked.min.mjs)
+ * needs its own code-block styling since it's not routed through
+ * renderMarkdown's fence handling (.message-content pre already covers
+ * chat), but reuses .message-content's link/inline-code/table rules as-is. */
+.fs-preview-markdown pre {
+	background: var(--bg-raised);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	padding: 10px 12px;
+	overflow-x: auto;
+	margin: 8px 0;
+}
+.fs-preview-markdown h1, .fs-preview-markdown h2, .fs-preview-markdown h3,
+.fs-preview-markdown h4, .fs-preview-markdown h5, .fs-preview-markdown h6 {
+	margin: 1em 0 .4em;
+	line-height: 1.3;
+}
+.fs-preview-markdown ul, .fs-preview-markdown ol { margin: .5em 0; padding-left: 1.4em; }
+.fs-preview-markdown li { margin: 2px 0; }
+.fs-preview-markdown li > p { margin: 0; }
+.fs-preview-markdown blockquote {
+	border-left: 3px solid var(--border);
+	margin: 8px 0;
+	padding: 2px 12px;
+	color: var(--text-dim);
+}
+.fs-preview-image {
+	margin: auto;
+	max-width: 100%;
+	max-height: 100%;
+	object-fit: contain;
+}
+.fs-preview-pdf {
+	width: 100%;
+	height: 100%;
+	border: none;
+}
+.fs-preview-table-wrap {
+	width: 100%;
+	overflow: auto;
+}
+.fs-preview-table {
+	border-collapse: collapse;
+	font-family: var(--font-mono);
+	font-size: .78rem;
+	white-space: nowrap;
+}
+.fs-preview-table th, .fs-preview-table td {
+	border: 1px solid var(--border);
+	padding: 5px 10px;
+	text-align: left;
+}
+.fs-preview-table th {
+	background: var(--bg-raised);
+	color: var(--text);
+	position: sticky;
+	top: 0;
+}
+.fs-preview-table td { color: var(--text-dim); }
+.fs-preview-table-note {
+	padding: 10px 16px;
+	font-size: .75rem;
+	color: var(--text-muted);
+}

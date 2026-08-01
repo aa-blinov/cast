@@ -204,6 +204,8 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 					.replace('href="/style.css"', `href="/style.css?v=${buildStamp}"`)
 					.replace('href="/chat.css"', `href="/chat.css?v=${buildStamp}"`)
 					.replace('href="/tools.css"', `href="/tools.css?v=${buildStamp}"`)
+					.replace('href="/workspace.css"', `href="/workspace.css?v=${buildStamp}"`)
+					.replace('href="/settings.css"', `href="/settings.css?v=${buildStamp}"`)
 					.replace('src="/app.js"', `src="/app.js?v=${buildStamp}"`);
 			} else if (urlPath === "/app.js") {
 				content = content
@@ -1253,6 +1255,8 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 			"/style.css",
 			"/chat.css",
 			"/tools.css",
+			"/workspace.css",
+			"/settings.css",
 			"/icons.js",
 			"/stream-blocks.js",
 			"/favicon.svg",
