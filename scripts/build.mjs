@@ -88,6 +88,8 @@ const webJavaScript = [
 	"directory-browser.js",
 	"elapsed-timer.js",
 	"file-preview.js",
+	"file-size.js",
+	"file-explorer.js",
 	"hotkeys.js",
 	"icons.js",
 	"modal-focus.js",
