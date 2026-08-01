@@ -99,6 +99,7 @@ const webJavaScript = [
 	"reasoning-split.js",
 	"sidebar-utils.js",
 	"status-popover.js",
+	"settings-modal.js",
 	"streaming-blocks.js",
 	"tool-card.js",
 	"turn-meta.js",
