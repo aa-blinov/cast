@@ -8,6 +8,7 @@ import { h, render } from "preact";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { api } from "./api.js";
 import { CastLogo } from "./cast-logo.js";
+import { CommandPalette, ValueSuggest } from "./composer-pickers.js";
 import { DirectoryBrowser } from "./directory-browser.js";
 import { ElapsedTimer } from "./elapsed-timer.js";
 import { FilePreviewModal } from "./file-preview.js";
@@ -907,49 +908,6 @@ function LiveStreamingBlocks({ controllerRef, onFrame }) {
 	);
 	return html`<${StreamingBlocks} blocks=${stream.blocks} />`;
 }
-// The three pickers below are pure display: Composer owns filtering AND
-// selection so arrow-key nav and mouse click always agree on the same list.
-function CommandPalette({ items, selectedIndex, running, onHover, onSelect, visible }) {
-	if (!visible || items.length === 0) return null;
-
-	return html`
-		<div class="cmd-palette open">
-			${items.map((c, i) => {
-				const disabled = c.blocking && running;
-				const cls = `cmd-item${disabled ? " disabled" : ""}${i === selectedIndex ? " selected" : ""}`;
-				return html`
-					<div key=${c.name} class=${cls} onMouseEnter=${() => onHover(i)} onClick=${() => !disabled && onSelect(c.name)}>
-						<span class="cmd-name">${c.name}</span>
-						<span class="cmd-desc">${c.description}</span>
-						${disabled && html`<span class="cmd-blocked-hint">idle only</span>`}
-					</div>
-				`;
-			})}
-		</div>
-	`;
-}
-
-// Shared by every "/command <value>" suggestion list — persona, theme,
-// model, reasoning level, web-tools on/off — once normalized to a plain
-// {value, label} shape (see Composer's pickerItems). One less near-duplicate
-// component per new argument-taking command.
-function ValueSuggest({ items, selectedIndex, onHover, onSelect }) {
-	if (items.length === 0) return null;
-
-	return html`
-		<div class="cmd-palette open">
-			${items.map(
-				(it, i) => html`
-				<div key=${it.value} class="cmd-item${i === selectedIndex ? " selected" : ""}" onMouseEnter=${() => onHover(i)} onClick=${() => onSelect(it.value)}>
-					<span class="cmd-name">${it.value}</span>
-					<span class="cmd-desc">${it.label}</span>
-				</div>
-			`,
-			)}
-		</div>
-	`;
-}
-
 // Downscales+re-encodes a pasted/dropped/picked image before it ever leaves
 // the browser — a real incident (see docs/changelog.md) had 8 unresized
 // photos in one turn's history get a bare, undebuggable 400 from the
