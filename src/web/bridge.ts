@@ -36,7 +36,6 @@ import {
 	uninstallPlugin,
 	updateMarketplace,
 } from "../core/plugins.ts";
-
 import {
 	buildSystemPrompt,
 	discoverSkillsForCwd,
@@ -51,7 +50,6 @@ import {
 	resolveSkillsForCwd,
 } from "../core/project.ts";
 import { getModelsCache, setModelsCache } from "../core/readline.ts";
-
 import { formatRuleInvocation } from "../core/rules.ts";
 import { type AgentRunner, createAgentRunner } from "../core/runner.ts";
 import {
@@ -84,6 +82,7 @@ import type { StartupResult } from "../core/startup.ts";
 import { stripAnsi } from "../core/tools/bash.ts";
 import { BackgroundTaskRegistry, type BashBackgroundDeps } from "../core/tools/bash-background.ts";
 import { type CompletedToolCallStatus, completedToolCallStatus } from "../core/tools/shared.ts";
+import { effectiveStatusFromFile } from "../core/turn-runner-state.ts";
 import { buildReasoningParams, getReasoningOptionsForFormat, resolveReasoningFormat } from "../core/vendors.ts";
 import { ALL_THEMES } from "../ui/themes/index.ts";
 import type { ThemeColors } from "../ui/themes/types.ts";
@@ -1257,7 +1256,12 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			cwd: cold.cwd ?? cwd,
 			title: cold.title,
 			pinned: cold.pinned,
-			status: "idle",
+			// For a session not in our in-memory `sessions` map — i.e. driven by
+			// another process (the TUI) — we rely on the per-session sentinel file
+			// written by the loop's try/finally. Filtered by pid-alive + TTL in
+			// turn-runner-state.ts, so a crashed runner self-heals even without
+			// the unlink ever running.
+			status: effectiveStatusFromFile(cold.id),
 			messageCount: cold.msgCount,
 			createdAt: cold.createdAt ?? cold.updatedAt,
 			updatedAt: cold.updatedAt,

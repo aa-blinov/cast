@@ -1175,4 +1175,22 @@ describe("migrateLegacySessionsToDb", () => {
 		const count = migrateLegacySessionsToDb();
 		expect(count).toBe(0);
 	});
+
+	it("skips stray files without an id (config exports, partial saves) instead of crashing the whole migration", () => {
+		// Stray file at the sessions root — picked up by legacySessionFilePaths
+		// but lacks a real session id. Must not crash the import, must not insert.
+		const strayPath = join(fakeHome, ".cast", "sessions", "stray-config.json");
+		writeFileSync(strayPath, JSON.stringify({ model: "gpt-4o", cwd: "/somewhere", no_id_here: true }), "utf-8");
+
+		// And a sibling with a non-string id (older schema quirk).
+		const brokenPath = join(fakeHome, ".cast", "sessions", "broken.json");
+		writeFileSync(brokenPath, JSON.stringify({ id: 42, model: "gpt-4o" }), "utf-8");
+
+		const count = migrateLegacySessionsToDb();
+		expect(count).toBe(0);
+
+		// Both files still on disk (migration is additive, never destructive).
+		expect(existsSync(strayPath)).toBe(true);
+		expect(existsSync(brokenPath)).toBe(true);
+	});
 });

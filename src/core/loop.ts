@@ -44,6 +44,7 @@ import {
 	getToolDefinitions,
 	type ToolResult,
 } from "./tools.ts";
+import { clearTurnRunner, markTurnRunner } from "./turn-runner-state.ts";
 
 // How many identical consecutive tool calls (same name + same args) before
 // we treat it as a doom loop and block execution — the model gets an error
@@ -625,8 +626,24 @@ export async function runAgentLoop(initialMessages: Message[], loopConfig: LoopC
 // ============================================================================
 
 async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<void> {
-	const { config, model: initialModel, cwd, systemPrompt, onEvent, onWarning, signal, mcpToolIndex } = loopConfig;
+	// Mark this session as actively running so cross-process readers (the web
+	// UI's sidebar) see a green dot while we're driving the turn. The marker is
+	// removed in the finally below — including the crash path (kill -9, OOM, lost
+	// terminal), because the file's pid becomes dead and readers filter it out.
+	const runnerSessionId = loopConfig.sessionId;
+	if (runnerSessionId) markTurnRunner(runnerSessionId, process.pid);
+	try {
+		await runLoopInner(messages, loopConfig);
+	} finally {
+		// clearTurnRunner checks the pid inside the file matches our own before
+		// unlinking, so a second TUI racing on the same session won't have its
+		// marker clobbered by us.
+		if (runnerSessionId) clearTurnRunner(runnerSessionId, process.pid);
+	}
+}
 
+async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promise<void> {
+	const { config, model: initialModel, cwd, systemPrompt, onEvent, onWarning, signal, mcpToolIndex } = loopConfig;
 	// The same signal is reused across every LLM request, compaction call,
 	// and tool execution in the loop. Each call may attach an abort listener
 	// (OpenAI SDK, child-process kill handlers, etc.). Raise the cap once so
