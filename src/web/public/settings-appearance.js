@@ -4,7 +4,7 @@ import { h } from "preact";
 const html = htm.bind(h);
 
 function SettingsTheme({ themes, currentThemeId, onPick }) {
-	return html`<div class="settings-theme-grid">${[...(themes || [])].sort((a, b) => a.label.localeCompare(b.label)).map((theme) => html`<button key=${theme.id} class="settings-theme-swatch${theme.id === currentThemeId ? " active" : ""}" style=${{ "--swatch-accent": theme.colors?.accent }} onClick=${() => onPick(theme.id)} title=${theme.description}><span class="settings-theme-dot" />${theme.label}</button>`)}</div>`;
+	return html`<div class="settings-theme-grid">${[...(themes || [])].sort((a, b) => a.label.localeCompare(b.label)).map((theme) => html`<button key=${theme.id} class="settings-theme-swatch${theme.id === currentThemeId ? " active" : ""}" style=${{ "--swatch-accent": theme.colors?.accent }} onClick=${() => onPick(theme.id)} title=${theme.description}><span class="settings-theme-dot" /><span class="settings-theme-label">${theme.label}</span></button>`)}</div>`;
 }
 
 function SettingsFont({ options, scales, currentFontId, currentFontScale, onPickFont, onPickScale }) {
