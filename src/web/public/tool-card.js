@@ -3,6 +3,7 @@ import { h } from "preact";
 import { useState } from "preact/hooks";
 import { FilePreviewModal } from "./file-preview.js";
 import { icons } from "./icons.js";
+import { getToolCardOpen, getToolCardPreviewSrc, setToolCardOpen, setToolCardPreviewSrc } from "./tool-card-state.js";
 
 const html = htm.bind(h);
 
@@ -69,8 +70,30 @@ function formatToolResult(name, result) {
 }
 
 export function ToolCard({ call, renderMarkdown }) {
-	const [open, setOpen] = useState(false);
-	const [previewSrc, setPreviewSrc] = useState(null);
+	// Local useState wraps reads from the shared map: the initializer pulls
+	// the saved value on mount (so a ToolCard that re-mounts inside a
+	// settled Message after `assistant_message` resumes the user's
+	// expanded/preview state), and the setter mirrors each change back
+	// into the map so a later remount sees it too. Map keyed by
+	// call.id — same key on the JSX (see BlockView in streaming-blocks.js
+	// and message.js) so streaming and settled instances read/write the
+	// same entry.
+	const [open, _setOpen] = useState(() => getToolCardOpen(call.id));
+	const [previewSrc, _setPreviewSrc] = useState(() => getToolCardPreviewSrc(call.id));
+	const setOpen = (updater) => {
+		_setOpen((prev) => {
+			const next = typeof updater === "function" ? updater(prev) : updater;
+			setToolCardOpen(call.id, next);
+			return next;
+		});
+	};
+	const setPreviewSrc = (value) => {
+		_setPreviewSrc((prev) => {
+			const next = typeof value === "function" ? value(prev) : value;
+			setToolCardPreviewSrc(call.id, next);
+			return next;
+		});
+	};
 	const statusClass = call.status || "running";
 	const args = formatArgsFull(call.args);
 	const mcp = isMcpTool(call.name);
