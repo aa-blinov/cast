@@ -129,4 +129,26 @@ describe("web session authentication", () => {
 		expect(app.status).toBe(200);
 		expect(await app.text()).toContain("cast web");
 	});
+
+	it("redirects an already-signed-in visitor from /login to /", async () => {
+		const authenticated = await fetch(`${origin}/api/auth/login`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ username: "cast", password: "test-password" }),
+		});
+		const cookie = authenticated.headers.get("set-cookie")!;
+
+		const login = await fetch(`${origin}/login`, { headers: { Cookie: cookie }, redirect: "manual" });
+		expect(login.status).toBe(302);
+		expect(login.headers.get("location")).toBe("/");
+		expect(login.headers.get("cache-control")).toBe("no-store");
+		expect(await login.text()).not.toContain("Sign in");
+
+		const loginHtml = await fetch(`${origin}/login.html`, {
+			headers: { Cookie: cookie },
+			redirect: "manual",
+		});
+		expect(loginHtml.status).toBe(302);
+		expect(loginHtml.headers.get("location")).toBe("/");
+	});
 });
