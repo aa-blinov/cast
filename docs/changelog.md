@@ -2,6 +2,13 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.12.13
+
+### Fixed
+
+- TUI question picker now forwards the user's free-form answer to the model instead of a literal `(custom — see above)` placeholder, and the web bridge accepts any value (not just model-supplied options), so a custom answer typed in the composer no longer gets dropped.
+- Web question card now shows an inline textarea under each option group so the user can type a custom answer alongside the model-supplied options; the textarea is styled to match the option buttons.
+
 ## 0.12.12
 
 ### Fixed
