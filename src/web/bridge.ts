@@ -1099,18 +1099,20 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		if (!question) return { ok: false, error: "No question is awaiting an answer" };
 		if (values.length !== question.questions.length)
 			return { ok: false, error: "An answer is required for every question" };
-		const selected = question.questions.map((item, index) =>
-			item.options.find((option) => option.value === values[index]),
-		);
-		if (selected.some((option) => !option)) return { ok: false, error: "Unknown question option" };
+		// Each value is either the `value` of one of the model's options (picked
+		// from the picker) or an arbitrary string the user typed into the composer.
+		// The latter is a legitimate "free-form" answer — the user explicitly chose
+		// not to pick any of the options offered. We accept the raw value either
+		// way and use the option's `label` for display when it matches, falling
+		// back to the raw value when it doesn't.
+		const rendered = question.questions.map((item, index) => {
+			const match = item.options.find((option) => option.value === values[index]);
+			const display = match?.label ?? values[index];
+			return `Question: ${item.question} Answer: ${display}`;
+		});
 
 		resolvePlanQuestion(planState);
-		void submit(
-			sessionId,
-			question.questions
-				.map((item, index) => `Question: ${item.question} Answer: ${selected[index]!.label}`)
-				.join("\n"),
-		);
+		void submit(sessionId, rendered.join("\n"));
 		return { ok: true };
 	}
 

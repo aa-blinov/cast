@@ -31,6 +31,7 @@ import { ChatLog } from "./ChatLog.tsx";
 import { Composer } from "./Composer.tsx";
 import { canSubmitDuringRun, handleInput } from "./commands.ts";
 import { useModalBridge } from "./pickerBridge.ts";
+import { resolvePlanQuestionWithPicker } from "./plan-question.ts";
 import { Spinner } from "./Spinner.tsx";
 import {
 	defaultStatusBarConfig,
@@ -399,28 +400,21 @@ export function App(props: AppProps): JSX.Element {
 						showNotice("[Question is no longer pending]");
 						return;
 					}
-					const answers: string[] = [];
-					for (const item of question.questions) {
-						const choice = await pickers.pickOption(
-							item.options.map((option) => ({
-								value: option.value,
-								label: `${option.label}${option.value === item.recommended ? " (recommended)" : ""}`,
-								...(option.description ? { description: option.description } : {}),
-							})),
-							{ title: item.question },
-						);
-						if (choice === null) {
-							showNotice("[Decision still needed — choose an option when ready]");
-							return;
-						}
-						answers.push(choice);
+					const result = await resolvePlanQuestionWithPicker(question, pickers);
+					if (!result) {
+						showNotice("[Decision still needed — choose an option when ready]");
+						return;
 					}
+					const { answers, sources } = result;
 					resolvePlanQuestion(planState);
 					setPendingAutoSubmit({
 						text: question.questions
 							.map((item, index) => {
-								const selected = item.options.find((option) => option.value === answers[index])!;
-								return `Question: ${item.question} Answer: ${selected.label}`;
+								if (sources[index] === "free-form") {
+									return `Question: ${item.question} Answer: ${answers[index]}`;
+								}
+								const selected = item.options.find((option) => option.value === answers[index]);
+								return `Question: ${item.question} Answer: ${selected?.label ?? answers[index]}`;
 							})
 							.join("\n"),
 						wantPlanMode: planMode,

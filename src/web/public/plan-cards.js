@@ -34,9 +34,14 @@ export function PlanDecisionCard({ transition, onChoose }) {
 
 export function QuestionCard({ question, onChoose }) {
 	const items = question?.questions ?? [];
-	const [answers, setAnswers] = useState(() => Array(items.length).fill(null));
+	// `answers[i]` is the canonical value for question i. The model-supplied
+	// options and the per-question "Or your own answer…" textarea both write
+	// to the same field — whichever the user touched last wins. The textareas
+	// are always visible (no expand-on-click), so for multiple questions the
+	// user can fill all of them in a single pass instead of opening each one.
+	const [answers, setAnswers] = useState(() => Array(items.length).fill(""));
 	if (items.length === 0) return null;
-	const complete = answers.every(Boolean);
+	const complete = answers.every((value) => value && value.trim() !== "");
 	return html`
 		<section class="plan-decision-card question-card" aria-label="Questions from agent">
 			<div class="plan-decision-header"><span class="plan-decision-name">agent</span><span class="plan-decision-kind">questions</span></div>
@@ -52,6 +57,13 @@ export function QuestionCard({ question, onChoose }) {
 								${option.description && html`<span class="plan-decision-option-description">${option.description}</span>`}
 							</button>`,
 						)}
+						<textarea
+							class="plan-decision-option plan-decision-textarea"
+							value=${answers[index]}
+							placeholder="Or your own answer…"
+							rows="2"
+							onInput=${(e) => setAnswers((prev) => prev.map((value, i) => (i === index ? e.currentTarget.value : value)))}
+						></textarea>
 					</div>
 				`,
 			)}

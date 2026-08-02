@@ -1061,6 +1061,20 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 .question-card .plan-decision-option.selected .plan-decision-option-label { color: var(--cyan); }
 .plan-decision-option-label { display: block; font-size: .8rem; font-weight: 600; }
 .plan-decision-option-description { display: block; margin-top: 4px; color: var(--text-dim); font-size: .74rem; line-height: 1.35; }
+.plan-decision-textarea {
+	grid-column: 1 / -1;
+	cursor: text;
+	resize: vertical;
+	line-height: 1.4;
+	font-size: .8rem;
+}
+.plan-decision-textarea::placeholder {
+	color: var(--text-dim);
+}
+.plan-decision-textarea:focus {
+	border-color: var(--cyan);
+	background: color-mix(in srgb, var(--cyan) 14%, var(--bg-surface));
+}
 .icon-btn { padding: 4px 6px; border: none; background: none; color: var(--text-dim); cursor: pointer; border-radius: var(--radius-sm); display: inline-flex; align-items: center; outline: none; }
 .icon-btn:focus { outline: none; box-shadow: none; }
 .icon-btn:hover { color: var(--cyan); background: var(--accent-subtle); }

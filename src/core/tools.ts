@@ -459,7 +459,7 @@ export function getToolDefinitions(
 					properties: {
 						questions: {
 							type: "array",
-							description: "One to four questions for the user",
+							description: "One to five questions for the user",
 							items: {
 								type: "object",
 								properties: {

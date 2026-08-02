@@ -13,7 +13,7 @@ import { icons } from "./icons.js";
 
 const html = htm.bind(h);
 
-export function Composer({ running, ready, activeId, commands, personas, onSubmit, onAbort, onDocUploaded }) {
+export function Composer({ running, ready, activeId, commands, personas, question, onSubmit, onAbort, onDocUploaded }) {
 	const [value, setValue] = useState("");
 	const [cmdVisible, setCmdVisible] = useState(false);
 	const [selectedIndex, setSelectedIndex] = useState(0);
@@ -359,7 +359,15 @@ export function Composer({ running, ready, activeId, commands, personas, onSubmi
 				<textarea
 					ref=${textareaRef}
 					class="composer-input"
-					placeholder=${!ready ? "Connecting…" : pickerItems.length > 0 ? "↑↓ to navigate, Enter to pick" : "Type a message or / for commands..."}
+					placeholder=${
+						!ready
+							? "Connecting…"
+							: pickerItems.length > 0
+								? "↑↓ to navigate, Enter to pick"
+								: question
+									? "Type your answer and press Enter…"
+									: "Type a message or / for commands..."
+					}
 					rows="1"
 					disabled=${!ready}
 					value=${value}
