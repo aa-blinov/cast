@@ -613,9 +613,14 @@ function App() {
 	// Streaming state lives in LiveStreamingBlocks, so token commits never
 	// reconcile the sidebar or full settled transcript.
 	const streamingControllerRef = useRef(null);
-	const updateStreaming = useCallback((event) => streamingControllerRef.current?.reduce(event), []);
+	const streamingEventVersionRef = useRef(0);
+	const updateStreaming = useCallback((event) => {
+		streamingEventVersionRef.current += 1;
+		streamingControllerRef.current?.reduce(event);
+	}, []);
 	const resetStreamingNow = useCallback(() => streamingControllerRef.current?.reset(), []);
 	const takeStreamingNow = useCallback(() => streamingControllerRef.current?.take() ?? [], []);
+	const hydrateStreamingNow = useCallback((blocks) => streamingControllerRef.current?.hydrate(blocks), []);
 	// Open/closed and which tab, like theme/font below, survive a page
 	// reload via localStorage — losing "I had Files open" on every refresh
 	// (or worse, having to reload while it was mid-task) was just annoying.
@@ -787,6 +792,7 @@ function App() {
 			draftCommitsRef,
 			olderPagesCacheRef,
 			resetStreamingNow,
+			hydrateStreamingNow,
 			wasRunningRef,
 			undismiss,
 			showToast,
@@ -1082,6 +1088,8 @@ function App() {
 		es.onopen = () => {
 			if (!isCurrent()) return;
 			setConnected(true);
+			resetStreamingNow();
+			const hydrationVersion = streamingEventVersionRef.current;
 			// Refetch session state on reconnect — the server may have
 			// advanced while we were disconnected (e.g. mobile tab was
 			// backgrounded). This catches messages missed between the last
@@ -1114,7 +1122,7 @@ function App() {
 					// before the disconnect would conflict with new SSE events.
 					// If the agent is still running, new streaming events will
 					// arrive immediately via SSE and rebuild the live region.
-					resetStreamingNow();
+					if (hydrationVersion === streamingEventVersionRef.current) hydrateStreamingNow(data.streaming);
 					setPendingSteers([]);
 					setPendingQueue([]);
 					// Scroll to bottom after reconnect — user wants to see
@@ -1141,6 +1149,7 @@ function App() {
 					wasRunningRef,
 					updateStreaming,
 					resetStreamingNow,
+					hydrateStreamingNow,
 					takeStreamingNow,
 					diffOpenRef,
 					queueDiffRefresh,

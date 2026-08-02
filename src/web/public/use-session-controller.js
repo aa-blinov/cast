@@ -23,6 +23,7 @@ export function useSessionController({
 	draftCommitsRef,
 	olderPagesCacheRef,
 	resetStreamingNow,
+	hydrateStreamingNow,
 	wasRunningRef,
 	undismiss,
 	showToast,
@@ -90,7 +91,7 @@ export function useSessionController({
 				}
 				setSession(data);
 				setActiveId(id);
-				resetStreamingNow();
+				hydrateStreamingNow(data.streaming);
 				setRunning(data.status === "running");
 				wasRunningRef.current = data.status === "running";
 				setSidebarOpen(false);
@@ -106,7 +107,7 @@ export function useSessionController({
 		[
 			showToast,
 			undismiss,
-			resetStreamingNow,
+			hydrateStreamingNow,
 			setSidebarOpen,
 			setActiveId,
 			setRunning,

@@ -129,6 +129,9 @@ export interface WebAgentSession {
 	/** Epoch milliseconds, owned by the backend so a page reload can resume the
 	 * live request timer instead of starting it from zero. */
 	turnStartedAt?: number;
+	/** Current in-flight assistant blocks. Ephemeral: returned on reload, but
+	 * never persisted as transcript history and cleared when the turn settles. */
+	activeStream?: DisplayStreamBlock[];
 	listeners: Set<(event: WebEvent) => void>;
 	/** Rebuilt whenever persona or model changes — see `computeSystemPrompt`. */
 	systemPrompt: string;
@@ -170,6 +173,31 @@ export interface DisplayToolCall {
 	images?: string[];
 }
 
+export type DisplayStreamBlock =
+	| { order: number; kind: "thinking" | "content"; text: string }
+	| {
+			order: number;
+			kind: "tool";
+			call: Omit<DisplayToolCall, "status"> & { status: "running" | CompletedToolCallStatus };
+	  };
+
+function appendActiveText(
+	blocks: DisplayStreamBlock[] | undefined,
+	kind: "thinking" | "content",
+	text: string,
+	order: number,
+): DisplayStreamBlock[] {
+	const current = blocks ?? [];
+	for (let i = current.length - 1; i >= 0; i--) {
+		const block = current[i];
+		if (block.kind === "tool") break;
+		if (block.kind === kind) {
+			return [...current.slice(0, i), { ...block, text: block.text + text }, ...current.slice(i + 1)];
+		}
+	}
+	return [...current, { order, kind, text }];
+}
+
 /** UI-friendly shape — matches what the client already builds live from SSE
  * events (see app.js's "assistant_message" handler), so a history reload
  * (GET /api/sessions/:id) renders identically to a freshly-streamed turn. */
@@ -187,6 +215,53 @@ export interface DisplayMessage {
 	 * pushes after such a tool result, since a plain string `content` can't
 	 * hold both text and inline images. */
 	images?: string[];
+}
+
+export function reconcileActiveStream(
+	messages: DisplayMessage[],
+	stream: DisplayStreamBlock[] | null | undefined,
+): { messages: DisplayMessage[]; streaming: DisplayStreamBlock[] | null } {
+	if (!stream || stream.length === 0) return { messages, streaming: null };
+	const activeContentBlock = stream.find((block) => block.kind === "content");
+	const activeContent = activeContentBlock && "text" in activeContentBlock ? activeContentBlock.text : undefined;
+	const activeThinking = stream
+		.filter((block) => block.kind === "thinking" && "text" in block)
+		.map((block) => ("text" in block ? block.text : ""))
+		.join("");
+	const activeTools = stream.filter(
+		(block): block is Extract<DisplayStreamBlock, { kind: "tool" }> => block.kind === "tool",
+	);
+	const activeToolIds = new Set(activeTools.map((block) => block.call.id));
+	let targetIndex = -1;
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const message = messages[i]!;
+		if (
+			message.role === "assistant" &&
+			((activeContent !== undefined && message.content === activeContent) ||
+				message.toolCalls?.some((call) => activeToolIds.has(call.id)))
+		) {
+			targetIndex = i;
+			break;
+		}
+	}
+	if (targetIndex < 0) return { messages, streaming: stream };
+	const nextMessages = messages.slice();
+	const target = { ...nextMessages[targetIndex]! };
+	if (activeThinking && !target.thinking) target.thinking = activeThinking;
+	if (target.content == null && activeContent !== undefined) target.content = activeContent;
+	if (target.toolCalls) {
+		target.toolCalls = target.toolCalls.map((call) => {
+			const activeTool = activeTools.find((block) => block.call.id === call.id);
+			return activeTool ? { ...call, result: activeTool.call.result, images: activeTool.call.images } : call;
+		});
+	}
+	nextMessages[targetIndex] = target;
+	const remaining = stream.filter((block) => {
+		if (block.kind === "thinking") return false;
+		if (block.kind === "content") return target.content !== block.text;
+		return block.kind !== "tool" || !activeToolIds.has(block.call.id);
+	});
+	return { messages: nextMessages, streaming: remaining.length > 0 ? remaining : null };
 }
 
 /**
@@ -724,6 +799,9 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		// final array (with real indices) comes back.
 		const startCount = ws.session.messages.length;
 		const thinkingByCompletion: string[] = [];
+		ws.activeStream = [];
+		let activeStreamCompletion = false;
+		let activeStreamOrder = 0;
 		// Save the session NOW — before the run starts — so the user's message
 		// is persisted even if the process is killed mid-run (SIGTERM timeout,
 		// OOM, crash). runAgentLoop works on a private copy of the array (see
@@ -812,7 +890,56 @@ export function createWebBridge(result: StartupResult): WebBridge {
 				}
 			},
 			onEvent: (event: AgentEvent) => {
-				if (event.type === "assistant_message") thinkingByCompletion.push(event.thinking ?? "");
+				if (event.type === "token" || event.type === "thinking") {
+					if (activeStreamCompletion) {
+						ws.activeStream = [];
+						activeStreamCompletion = false;
+					}
+					ws.activeStream = appendActiveText(
+						ws.activeStream,
+						event.type === "token" ? "content" : "thinking",
+						event.text,
+						activeStreamOrder++,
+					);
+				}
+				if (event.type === "tool_start") {
+					activeStreamCompletion = false;
+					ws.activeStream = [
+						...(ws.activeStream ?? []),
+						{
+							order: activeStreamOrder++,
+							kind: "tool",
+							call: { id: event.id, name: event.name, args: event.args, status: event.status, result: "" },
+						},
+					];
+				}
+				if (event.type === "tool_end") {
+					ws.activeStream = (ws.activeStream ?? []).map((block) =>
+						block.kind === "tool" && block.call.id === event.id
+							? {
+									...block,
+									call: {
+										...block.call,
+										status: event.status,
+										result: event.result.content,
+										...(event.result.imageDataUrl ? { images: [event.result.imageDataUrl] } : {}),
+									},
+								}
+							: block,
+					);
+				}
+				if (event.type === "assistant_message") {
+					thinkingByCompletion.push(event.thinking ?? "");
+					ws.activeStream = [
+						...(event.thinking
+							? [{ order: activeStreamOrder++, kind: "thinking" as const, text: event.thinking }]
+							: []),
+						...(event.content
+							? [{ order: activeStreamOrder++, kind: "content" as const, text: event.content }]
+							: []),
+					];
+					activeStreamCompletion = true;
+				}
 				if (event.type === "todos_updated") ws.session.todos = event.todos;
 				if (event.type === "usage") {
 					addUsage(ws.session, event.usage, { subagent: event.subagent });
@@ -854,6 +981,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 				}
 
 				ws.status = "idle";
+				ws.activeStream = undefined;
 				ws.runner.endRun();
 				if (ws.lastTurn) ws.lastTurn.totalMs = Date.now() - turnStart;
 				// Persisted per-turn (unlike ws.lastTurn above, which is the same
@@ -902,6 +1030,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 				ws.status = "error";
 				ws.error = err instanceof Error ? err.message : String(err);
 				ws.runner.endRun();
+				ws.activeStream = undefined;
 				saveSession(ws.session);
 				ws.turnStartedAt = undefined;
 				broadcast(ws, { type: "error", message: ws.error });

@@ -24,7 +24,7 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 
 import { brotliCompressSync, gzipSync } from "node:zlib";
 import { getDb } from "../core/db.ts";
 import { getHistoryPage, getMessageImage } from "../core/session.ts";
-import { toDisplayMessages, type WebBridge, type WebEvent } from "./bridge.ts";
+import { reconcileActiveStream, toDisplayMessages, type WebBridge, type WebEvent } from "./bridge.ts";
 import { isBlockedAttachmentName, sessionInputsDir } from "./inputs.ts";
 
 const MIME_TYPES: Record<string, string> = {
@@ -497,6 +497,10 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
 		const turns = Number(url.searchParams.get("turns")) || undefined;
 		const page = getHistoryPage(params.id, undefined, turns);
+		const reconciled = reconcileActiveStream(
+			toDisplayMessages(page.messages, page.reasoning, page.turnMeta, ws.id, page.seqs),
+			ws.activeStream,
+		);
 		json(res, {
 			id: ws.id,
 			persona: ws.session.persona,
@@ -510,11 +514,12 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 			shareToken: ws.session.shareToken ?? null,
 			status: ws.status,
 			turnStartedAt: ws.turnStartedAt ?? null,
+			streaming: reconciled.streaming,
 			// turnMeta is per-message now (see toDisplayMessages) — each
 			// assistant reply carries its own "provider · model · Ns" footer,
 			// persisted to disk, instead of a single session-level "last turn"
 			// value that only ever covered the most recent one.
-			messages: toDisplayMessages(page.messages, page.reasoning, page.turnMeta, ws.id, page.seqs),
+			messages: reconciled.messages,
 			oldestSeq: page.oldestSeq ?? null,
 			hasMoreHistory: page.hasMore,
 			usage: ws.session.usage,
