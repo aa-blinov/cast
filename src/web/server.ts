@@ -1468,6 +1468,18 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 			return;
 		}
 
+		// An already-authenticated visitor landing on /login (after `api.js`
+		// bounces them here on a 401, after a manual paste of /login, after a
+		// bfcache restore of the page they had open while still signed in) gets
+		// redirected straight to the SPA. Otherwise we'd serve login.html and
+		// the user would see the auth form flash on screen until login.js's
+		// own redirectIfAuthenticated finished its round-trip back to /.
+		if (method === "GET" && (urlPath === "/login" || urlPath === "/login.html") && isAuthenticated(req)) {
+			res.writeHead(302, { Location: "/", "Cache-Control": "no-store" });
+			res.end();
+			return;
+		}
+
 		if (method === "GET" && urlPath === "/login") {
 			if (serveStatic({ url: "/login.html", headers: req.headers } as IncomingMessage, res)) return;
 		}
