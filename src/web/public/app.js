@@ -84,8 +84,7 @@ function applyTheme(colors) {
 	// colors synchronously on the very first paint — without it, every reload
 	// briefly shows the CSS file's hardcoded default accent instead of the
 	// theme actually saved on the server, most noticeable on a slow
-	// connection or a non-default theme (see loading-spinner, which is
-	// themed via --cyan same as everything else).
+	// connection or a non-default theme.
 	try {
 		localStorage.setItem("cast:themeColors", JSON.stringify(colors));
 	} catch {}
@@ -716,7 +715,7 @@ function App() {
 
 	const esRef = useRef(null);
 	const messagesRef = useRef(null);
-	const scrollStreamingFrame = useCallback(() => {
+	const _scrollStreamingFrame = useCallback(() => {
 		requestAnimationFrame(() => {
 			if (autoScrollRef.current && messagesRef.current)
 				messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
@@ -778,7 +777,7 @@ function App() {
 		},
 		[setSession],
 	);
-	const { loadSessions, selectSession, commitSession, startDraft, initClientState, startReconnectLoop } =
+	const { loadSessions, selectSession, selectingId, commitSession, startDraft, initClientState, startReconnectLoop } =
 		useSessionController({
 			setSessions,
 			setSessionsLoaded,
@@ -1564,6 +1563,7 @@ function App() {
 			<${SidebarModule}
 				sessions=${visibleSessions}
 				activeId=${activeId}
+				selectingId=${selectingId}
 				personas=${personas}
 				cwd=${cwd}
 				defaultCwd=${defaultCwd}
@@ -1658,12 +1658,40 @@ function App() {
 						!session &&
 						html`
 						<div class="empty-state">
-							<div class="loading-spinner" />
+							<p class="settings-loading">Loading…</p>
+						</div>
+					`
+					}
+					${
+						// Switching to a different thread while a /api/sessions/:id
+						// fetch is still in flight. Clicking the *currently
+						// active* thread doesn't trigger this (the fetch is
+						// there to refresh data, not to switch — the messages
+						// are still accurate, so showing a loader would just
+						// be visual noise). The user gets a static "Loading…"
+						// centered in the same .empty-state slot the initial
+						// bootstrap uses for its spinner, same visual language
+						// as .settings-loading — "we got it, working on it".
+						// Replaces the previous thread's messages rather than
+						// overlaying them: the user just said "I want to look
+						// at something else", keeping the old scroll position
+						// and its plan/question cards under the loader would
+						// both look broken ("why is the loading spinner for
+						// thread B sitting on top of thread A's plan card?")
+						// and feel laggy (you'd watch thread A's content
+						// slowly shrink as the loader pushes it down).
+						!bootstrapping &&
+						selectingId &&
+						selectingId !== activeId &&
+						html`
+						<div class="empty-state">
+							<p class="settings-loading">Loading…</p>
 						</div>
 					`
 					}
 					${
 						!bootstrapping &&
+						!selectingId &&
 						messages.length === 0 &&
 						html`
 						<div class="empty-state">
@@ -1673,13 +1701,21 @@ function App() {
 						</div>
 					`
 					}
-					${messages.map((msg) => html`<${MessageModule} key=${keyForMessage(msg)} msg=${msg} renderMarkdown=${renderMarkdown} escapeHtml=${escapeHtml} />`)}
-					<${LiveStreamingBlocksModule} controllerRef=${streamingControllerRef} onFrame=${scrollStreamingFrame} renderMarkdown=${renderMarkdown} />
 					${
-						!running &&
+						// Everything below here is the previous thread's state —
+						// don't render any of it while we're switching (see the
+						// comment on the loader block above).
+						!(selectingId && selectingId !== activeId) &&
 						html`
-							<${PlanDecisionCard} transition=${session?.planTransition ?? planTransition} onChoose=${handlePlanTransition} />
-							${session?.question && html`<${QuestionCard} question=${session.question} onChoose=${answerQuestion} />`}
+							${messages.map((msg) => html`<${MessageModule} key=${keyForMessage(msg)} msg=${msg} renderMarkdown=${renderMarkdown} escapeHtml=${escapeHtml} />`)}
+							<${LiveStreamingBlocksModule} controllerRef=${streamingControllerRef} onFrame=${_scrollStreamingFrame} renderMarkdown=${renderMarkdown} />
+							${
+								!running &&
+								html`
+									<${PlanDecisionCard} transition=${session?.planTransition ?? planTransition} onChoose=${handlePlanTransition} />
+									${session?.question && html`<${QuestionCard} question=${session.question} onChoose=${answerQuestion} />`}
+								`
+							}
 						`
 					}
 				</div>
@@ -1807,7 +1843,7 @@ function SharedThreadView({ token }) {
 		return html`
 			<div class="shared-view">
 				<div class="shared-view-loading">
-					<div class="loading-spinner" />
+					<p class="settings-loading">Loading…</p>
 				</div>
 			</div>
 		`;

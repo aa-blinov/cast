@@ -1,4 +1,4 @@
-import { useCallback } from "preact/hooks";
+import { useCallback, useState } from "preact/hooks";
 import { api } from "./api.js";
 
 function setUrlSessionId(id, { push } = {}) {
@@ -55,10 +55,16 @@ export function useSessionController({
 	// Select session — `push` controls whether this lands as a new browser
 	// history entry (a real click) or just replaces the current URL
 	// (programmatic: initial bootstrap, reconnect recovery, popstate).
+	// `selectingId` is the id currently being fetched, surfaced to the
+	// Sidebar so the row can show a spinner — a 1-2s thread-open round trip
+	// with no visible feedback made clicks look dead, which got mistaken for
+	// the click not registering.
+	const [selectingId, setSelectingId] = useState(null);
 	const selectSession = useCallback(
 		async (id, { push = true, prefetch = null } = {}) => {
 			const version = ++sessionViewVersionRef.current;
 			++draftVersionRef.current;
+			setSelectingId(id);
 			try {
 				// initClientState may already have this in flight — kicked off
 				// alongside (not after) the personas/session-list calls when the
@@ -100,8 +106,16 @@ export function useSessionController({
 				} catch {}
 				setUrlSessionId(id, { push });
 				undismiss(id);
+				// Clear only if no newer selectSession has overwritten selectingId.
+				// A newer call (rapid click on a different row) already set its
+				// own id — clearing unconditionally here would wipe that one
+				// out and the new row's spinner would never appear.
+				if (version === sessionViewVersionRef.current) setSelectingId(null);
 			} catch (err) {
-				if (version === sessionViewVersionRef.current) showToast(err.message, "error");
+				if (version === sessionViewVersionRef.current) {
+					setSelectingId(null);
+					showToast(err.message, "error");
+				}
 			}
 		},
 		[
@@ -361,5 +375,13 @@ export function useSessionController({
 		setReconnectNonce,
 	]);
 
-	return { loadSessions, selectSession, commitSession, startDraft, initClientState, startReconnectLoop };
+	return {
+		loadSessions,
+		selectSession,
+		selectingId,
+		commitSession,
+		startDraft,
+		initClientState,
+		startReconnectLoop,
+	};
 }

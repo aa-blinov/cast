@@ -49,6 +49,13 @@ CREATE TABLE IF NOT EXISTS messages (
 ) WITHOUT ROWID;
 
 CREATE INDEX IF NOT EXISTS idx_messages_context ON messages(session_id, in_context, seq);
+-- Backs getHistoryPage's "30th most recent user message" boundary lookup and
+-- the "is there a previous turn?" existence check (see core/session.ts). Both
+-- filter on (session_id, role) and order by seq; without this index SQLite
+-- has to walk the whole session in seq order, reading every full row
+-- (content_json included) just to find user rows. For a long agentic session
+-- that is a multi-MB scan per thread-open.
+CREATE INDEX IF NOT EXISTS idx_messages_role ON messages(session_id, role, seq);
 CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS web_sessions (

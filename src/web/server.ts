@@ -159,13 +159,48 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 
 	// Helpers
 	function json(res: ServerResponse, data: unknown, status = 200): void {
-		const body = JSON.stringify(data);
-		res.writeHead(status, {
+		// The /api/sessions/:id payload alone runs 0.5-1.5MB on a normal
+		// agentic thread (every tool result is inlined) and multi-MB on a long
+		// one — without compression, that's a full second of dead air on any
+		// network below ~10MB/s, which is exactly what the "thread opens slowly
+		// from the sidebar" symptom looks like to the user. The endpoint
+		// always returns `Cache-Control: no-store` so the savings don't get
+		// hidden behind a cached response. textAsset's compression path above
+		// already does this for static assets; this is the same idea for API
+		// JSON. Compressing in-process keeps the zero-npm-deps rule.
+		//
+		// gzip-only on purpose: brotliSync at default level can take 500ms+
+		// on a 1MB payload, which is exactly the latency we're trying to
+		// claw back. gzip at the default level is ~10ms on the same input and
+		// still gets 2-3x compression on the kind of repetitive tool output
+		// these payloads contain. If a future use-case needs the extra 5-10%
+		// brotli saves, gate it on a `quality: number` option.
+		const raw = JSON.stringify(data);
+		const body = Buffer.from(raw);
+		// Below this size, the compression CPU cost on the server exceeds the
+		// transfer saving on any plausible link — only /api/sessions/:id
+		// (and a few SSE-adjacent ones) actually need it, and those are all
+		// well above the threshold. Skip and ship uncompressed for the rest.
+		const COMPRESS_THRESHOLD = 8 * 1024;
+		const accepts = (res.req as IncomingMessage & { headers: NodeJS.Dict<string | string[]> }).headers[
+			"accept-encoding"
+		] as string | undefined;
+		let out: Buffer = body;
+		const useGzip = body.length >= COMPRESS_THRESHOLD && accepts?.includes("gzip");
+		if (useGzip) out = gzipSync(body);
+		const headers: Record<string, string | number> = {
 			"Cache-Control": "no-store",
 			"Content-Type": "application/json",
-			"Content-Length": Buffer.byteLength(body),
-		});
-		res.end(body);
+			"Content-Length": out.length,
+		};
+		if (useGzip) {
+			headers["Content-Encoding"] = "gzip";
+			// Don't let a downstream cache key on the encoded body — accept-
+			// encoding varies per request, so the cache key must too.
+			headers.Vary = "Accept-Encoding";
+		}
+		res.writeHead(status, headers);
+		res.end(out);
 	}
 
 	function readBody(req: IncomingMessage): Promise<string> {
