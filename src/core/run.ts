@@ -239,7 +239,7 @@ export async function runInteractive(args: ParsedArgs): Promise<void> {
 			resolvePlanQuestion(planState);
 			await runPrompt(
 				question.questions
-					.map((item, index) => `The user selected "${selected[index]!.label}" for: ${item.question}`)
+					.map((item, index) => `Question: ${item.question} Answer: ${selected[index]!.label}`)
 					.join("\n"),
 			);
 			return true;

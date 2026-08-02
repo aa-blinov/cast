@@ -57,6 +57,20 @@ export function providerFetch(url: Parameters<typeof fetch>[0], init?: RequestIn
 	return fetch(url, init);
 }
 
+// Settings and onboarding probes must fail promptly when a provider is down.
+// The normal chat client has a separate, longer-lived streaming policy.
+export const PROVIDER_REQUEST_TIMEOUT_MS = 15_000;
+
+function createProviderProbeClient(config: AppConfig): OpenAI {
+	return new OpenAI({
+		baseURL: config.baseURL,
+		apiKey: config.apiKey,
+		fetch: providerFetch,
+		timeout: PROVIDER_REQUEST_TIMEOUT_MS,
+		maxRetries: 0,
+	});
+}
+
 /**
  * Build the app config. The interactive CLI resolves a connection via saved
  * settings or an interactive prompt and always passes it explicitly; see
@@ -128,7 +142,7 @@ export interface FetchModelsResult {
 export async function fetchModels(config: AppConfig): Promise<FetchModelsResult> {
 	// See llm.ts createClient: the SDK's bundled node-fetch shim mishandles a
 	// connection dying mid-response; native fetch doesn't have that failure mode.
-	const client = new OpenAI({ baseURL: config.baseURL, apiKey: config.apiKey, fetch: providerFetch });
+	const client = createProviderProbeClient(config);
 
 	try {
 		const list = await client.models.list();
@@ -232,7 +246,7 @@ export interface ValidationResult {
 export async function validateModel(config: AppConfig, model: string): Promise<ValidationResult> {
 	// See llm.ts createClient: the SDK's bundled node-fetch shim mishandles a
 	// connection dying mid-response; native fetch doesn't have that failure mode.
-	const client = new OpenAI({ baseURL: config.baseURL, apiKey: config.apiKey, fetch: providerFetch });
+	const client = createProviderProbeClient(config);
 
 	try {
 		const response = await client.chat.completions.create({
@@ -312,7 +326,7 @@ export async function runOnboardingCheck(
 ): Promise<boolean> {
 	// See llm.ts createClient: the SDK's bundled node-fetch shim mishandles a
 	// connection dying mid-response; native fetch doesn't have that failure mode.
-	const client = new OpenAI({ baseURL: config.baseURL, apiKey: config.apiKey, fetch: providerFetch });
+	const client = createProviderProbeClient(config);
 
 	// Step 1: Check endpoint + key
 	try {
@@ -384,7 +398,7 @@ export function classifyProviderError(error: unknown): Exclude<ProviderProbe, "o
  */
 export async function probeProvider(config: AppConfig): Promise<ProviderProbe> {
 	// See llm.ts createClient: native fetch avoids the SDK shim's mid-response bug.
-	const client = new OpenAI({ baseURL: config.baseURL, apiKey: config.apiKey, fetch: providerFetch });
+	const client = createProviderProbeClient(config);
 	try {
 		const list = await client.models.list();
 		await list[Symbol.asyncIterator]().next();

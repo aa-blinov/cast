@@ -93,7 +93,15 @@ export interface ScoreboardEntry {
 	/** Per-attempt average, not a run total — comparable across models
 	 *  regardless of how many cases or repeats went into this entry. */
 	avgPromptTokens: number;
+	medianPromptTokens: number;
+	p75PromptTokens: number;
+	p95PromptTokens: number;
+	p99PromptTokens: number;
 	avgCompletionTokens: number;
+	medianCompletionTokens: number;
+	p75CompletionTokens: number;
+	p95CompletionTokens: number;
+	p99CompletionTokens: number;
 	avgTurns: number;
 	medianTurns: number;
 	p75Turns: number;
@@ -188,6 +196,8 @@ function computeAggregates(results: ScoreboardCaseResult[]): Aggregates {
 	const score = casesTotal > 0 ? casesPassed / casesTotal : 0;
 	const sorted = [...durations].sort((a, b) => a - b);
 	const sortedTurns = [...turns].sort((a, b) => a - b);
+	const promptTokens = results.flatMap((r) => r.promptTokens).sort((a, b) => a - b);
+	const completionTokens = results.flatMap((r) => r.completionTokens).sort((a, b) => a - b);
 
 	return {
 		casesTotal,
@@ -204,7 +214,15 @@ function computeAggregates(results: ScoreboardCaseResult[]): Aggregates {
 		p95DurationMs: percentile(sorted, 95),
 		p99DurationMs: percentile(sorted, 99),
 		avgPromptTokens: attemptCount > 0 ? promptSum / attemptCount : 0,
+		medianPromptTokens: median(promptTokens),
+		p75PromptTokens: percentile(promptTokens, 75),
+		p95PromptTokens: percentile(promptTokens, 95),
+		p99PromptTokens: percentile(promptTokens, 99),
 		avgCompletionTokens: attemptCount > 0 ? completionSum / attemptCount : 0,
+		medianCompletionTokens: median(completionTokens),
+		p75CompletionTokens: percentile(completionTokens, 75),
+		p95CompletionTokens: percentile(completionTokens, 95),
+		p99CompletionTokens: percentile(completionTokens, 99),
 		avgTurns: turns.length > 0 ? turns.reduce((a, b) => a + b, 0) / turns.length : 0,
 		medianTurns: median(sortedTurns),
 		p75Turns: percentile(sortedTurns, 75),

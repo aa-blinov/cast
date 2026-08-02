@@ -2371,6 +2371,27 @@ describe("runAgentLoop — doom loop detection", () => {
 type ToolDef = { type: "function"; function: { name: string } };
 
 describe("runAgentLoop — disabledTools filtering", () => {
+	it("keeps plan_done available in plan mode despite stale denylist or persona allowlist", async () => {
+		let capturedTools: ToolDef[] = [];
+		vi.mocked(streamAndCollect).mockImplementationOnce(async (_c, _m, _msgs, tools) => {
+			capturedTools = tools as ToolDef[];
+			return { content: "ok", thinking: "", finishReason: "stop" };
+		});
+
+		await runAgentLoop([{ role: "user", content: "finish the plan" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			disabledTools: new Set(["plan_done"]),
+			allowedTools: ["read"],
+			planState: { enabled: true, plansDir: "/tmp/never-existing-plans-dir" },
+			onEvent: () => {},
+		});
+
+		expect(capturedTools.map((t) => t.function.name)).toContain("plan_done");
+	});
+
 	it("excludes web_search and web_fetch when disabledTools contains them", async () => {
 		let capturedTools: ToolDef[] = [];
 		vi.mocked(streamAndCollect).mockImplementationOnce(async (_c, _m, _msgs, tools) => {

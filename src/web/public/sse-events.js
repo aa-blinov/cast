@@ -106,7 +106,9 @@ export function handleSseEvent(event, context) {
 			if (!event.result?.isError && event.name === "question") {
 				try {
 					const question = JSON.parse(event.result.content);
-					if (question.question) setSession((prev) => (prev ? { ...prev, question } : prev));
+					if (Array.isArray(question.questions) && question.questions.length > 0) {
+						setSession((prev) => (prev ? { ...prev, question } : prev));
+					}
 				} catch {
 					// Keep malformed tool output in the transcript without opening a picker.
 				}

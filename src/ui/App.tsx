@@ -200,6 +200,9 @@ export function App(props: AppProps): JSX.Element {
 	// only when the run settles (see the effect below), so the mode always
 	// flips between runs and tool sets stay consistent.
 	const planSignalRef = useRef<"done" | "question" | null>(null);
+	// A decision flow clears one picker before its callback clears the pending
+	// plan state. Keep that transient state from opening the same picker again.
+	const decisionFlowActiveRef = useRef(false);
 	// Armed by the "Keep planning" choice in the approval dialog: the next
 	// non-command composer submission is wrapped as refine feedback. Lives in
 	// the composer (not a modal) so multi-line paste and image paste work.
@@ -336,7 +339,7 @@ export function App(props: AppProps): JSX.Element {
 	// Decision dialogs open only after a run settles: plan_done → approval;
 	// question → picker.
 	useEffect(() => {
-		if (agent.status === "running" || modalRequest) return;
+		if (agent.status === "running" || modalRequest || decisionFlowActiveRef.current) return;
 		const kind =
 			planSignalRef.current ??
 			readPlanTransition(planState)?.kind ??
@@ -344,77 +347,87 @@ export function App(props: AppProps): JSX.Element {
 		if (!kind) return;
 		planSignalRef.current = null;
 		if (kind === "done" && planMode) {
+			decisionFlowActiveRef.current = true;
 			void (async () => {
-				// Full path in the title: terminals make it clickable, so the user
-				// can open the plan in their editor straight from the dialog.
-				const planPath = readActivePlan(planState).path;
-				const choice = await pickers.pickOption(
-					[
-						{ value: "continue", label: "Continue planning" },
-						{ value: "implement", label: "Approve and implement" },
-						{ value: "clean", label: "Approve and implement in clean context" },
-					],
-					{ title: planPath ? `Plan ready: ${planPath}` : "Plan ready. What next?" },
-				);
-				if (choice === "implement" || choice === "clean") {
-					session.todos = createPlanTodos(planState);
-					resolvePlanTransition(planState);
-					const originalTask = choice === "clean" ? resetSessionContext(session) : undefined;
-					if (choice === "clean") saveSession(session);
-					setPlanMode(false);
-					setPendingAutoSubmit({
-						text:
-							choice === "clean"
-								? `<system-reminder>Clean build context. Original task: ${originalTask ?? "Use the approved plan as the task definition."}</system-reminder>\n\nThe plan is approved. Implement it step by step.`
-								: "The plan is approved. Implement it step by step.",
-						wantPlanMode: false,
-					});
-				} else if (choice === "continue") {
-					resolvePlanTransition(planState);
-					// Feedback goes through the regular composer, not a modal text
-					// box: the composer supports multi-line paste, image paste, and
-					// history. handleSubmit wraps the next non-command message as
-					// the refine turn so the model knows to update the plan.
-					refineArmedRef.current = true;
-					showNotice("[Refining — type your feedback below; it goes back to the planner]");
-				} else {
-					// Esc on the dialog: stay in plan mode, nothing submitted.
-					showNotice("[Staying in plan mode — describe what to change]");
+				try {
+					// Full path in the title: terminals make it clickable, so the user
+					// can open the plan in their editor straight from the dialog.
+					const planPath = readActivePlan(planState).path;
+					const choice = await pickers.pickOption(
+						[
+							{ value: "continue", label: "Continue planning" },
+							{ value: "implement", label: "Approve and implement" },
+							{ value: "clean", label: "Approve and implement in clean context" },
+						],
+						{ title: planPath ? `Plan ready: ${planPath}` : "Plan ready. What next?" },
+					);
+					if (choice === "implement" || choice === "clean") {
+						session.todos = createPlanTodos(planState);
+						resolvePlanTransition(planState);
+						const originalTask = choice === "clean" ? resetSessionContext(session) : undefined;
+						if (choice === "clean") saveSession(session);
+						setPlanMode(false);
+						setPendingAutoSubmit({
+							text:
+								choice === "clean"
+									? `<system-reminder>Clean build context. Original task: ${originalTask ?? "Use the approved plan as the task definition."}</system-reminder>\n\nThe plan is approved. Implement it step by step.`
+									: "The plan is approved. Implement it step by step.",
+							wantPlanMode: false,
+						});
+					} else if (choice === "continue") {
+						resolvePlanTransition(planState);
+						// Feedback goes through the regular composer, not a modal text
+						// box: the composer supports multi-line paste, image paste, and
+						// history. handleSubmit wraps the next non-command message as
+						// the refine turn so the model knows to update the plan.
+						refineArmedRef.current = true;
+						showNotice("[Refining — type your feedback below; it goes back to the planner]");
+					} else {
+						// Esc on the dialog: stay in plan mode, nothing submitted.
+						showNotice("[Staying in plan mode — describe what to change]");
+					}
+				} finally {
+					decisionFlowActiveRef.current = false;
 				}
 			})();
 		} else if (kind === "question") {
+			decisionFlowActiveRef.current = true;
 			void (async () => {
-				const question = readPlanQuestion(planState);
-				if (!question) {
-					showNotice("[Question is no longer pending]");
-					return;
-				}
-				const answers: string[] = [];
-				for (const item of question.questions) {
-					const choice = await pickers.pickOption(
-						item.options.map((option) => ({
-							value: option.value,
-							label: `${option.label}${option.value === item.recommended ? " (recommended)" : ""}`,
-							...(option.description ? { description: option.description } : {}),
-						})),
-						{ title: item.question },
-					);
-					if (choice === null) {
-						showNotice("[Decision still needed — choose an option when ready]");
+				try {
+					const question = readPlanQuestion(planState);
+					if (!question) {
+						showNotice("[Question is no longer pending]");
 						return;
 					}
-					answers.push(choice);
+					const answers: string[] = [];
+					for (const item of question.questions) {
+						const choice = await pickers.pickOption(
+							item.options.map((option) => ({
+								value: option.value,
+								label: `${option.label}${option.value === item.recommended ? " (recommended)" : ""}`,
+								...(option.description ? { description: option.description } : {}),
+							})),
+							{ title: item.question },
+						);
+						if (choice === null) {
+							showNotice("[Decision still needed — choose an option when ready]");
+							return;
+						}
+						answers.push(choice);
+					}
+					resolvePlanQuestion(planState);
+					setPendingAutoSubmit({
+						text: question.questions
+							.map((item, index) => {
+								const selected = item.options.find((option) => option.value === answers[index])!;
+								return `Question: ${item.question} Answer: ${selected.label}`;
+							})
+							.join("\n"),
+						wantPlanMode: planMode,
+					});
+				} finally {
+					decisionFlowActiveRef.current = false;
 				}
-				resolvePlanQuestion(planState);
-				setPendingAutoSubmit({
-					text: question.questions
-						.map((item, index) => {
-							const selected = item.options.find((option) => option.value === answers[index])!;
-							return `The user selected "${selected.label}" for: ${item.question}`;
-						})
-						.join("\n"),
-					wantPlanMode: planMode,
-				});
 			})();
 		}
 	}, [agent.status, modalRequest, planMode, pickers, setPlanMode, showNotice, planState, session]);

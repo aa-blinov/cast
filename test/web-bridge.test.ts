@@ -477,7 +477,7 @@ describe("web bridge", () => {
 		runAgentLoop.mockImplementationOnce(async (messages) => messages);
 		expect(bridge.answerQuestion(ws.id, ["redis", "disk"])).toEqual({ ok: true });
 		expect(ws.session.planQuestion).toBeUndefined();
-		expect(ws.session.messages.at(-1)?.content).toContain('The user selected "Redis"');
+		expect(ws.session.messages.at(-1)?.content).toContain("Question: Choose cache backend Answer: Redis");
 	});
 
 	it("resets only the model context for clean plan implementation, retaining the visible thread", () => {

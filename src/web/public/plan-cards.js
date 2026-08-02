@@ -17,13 +17,13 @@ export const PLAN_DECISION_OPTIONS = [
 export function PlanDecisionCard({ transition, onChoose }) {
 	if (!transition) return null;
 	return html`
-		<section class="plan-decision-card" aria-label="Plan review">
+		<section class="plan-decision-card plan-review-card" aria-label="Plan review">
 			<div class="plan-decision-header"><span class="plan-decision-name">plan</span><span class="plan-decision-kind">review</span></div>
 			<div class="plan-decision-body">Plan ready. What next?</div>
 			<div class="plan-decision-options">
 				${PLAN_DECISION_OPTIONS.map(
 					(option) => html`<button class="plan-decision-option" onClick=${() => onChoose(option.value)}>
-						<span class="plan-decision-option-label">${option.label}${option.recommended ? " · recommended" : ""}</span>
+						<span class="plan-decision-option-label">${option.label}${option.recommended ? " (recommended)" : ""}</span>
 						${option.description && html`<span class="plan-decision-option-description">${option.description}</span>`}
 					</button>`,
 				)}
@@ -38,7 +38,7 @@ export function QuestionCard({ question, onChoose }) {
 	if (items.length === 0) return null;
 	const complete = answers.every(Boolean);
 	return html`
-		<section class="plan-decision-card" aria-label="Questions from agent">
+		<section class="plan-decision-card question-card" aria-label="Questions from agent">
 			<div class="plan-decision-header"><span class="plan-decision-name">agent</span><span class="plan-decision-kind">questions</span></div>
 			${items.map(
 				(item, index) => html`
@@ -48,7 +48,7 @@ export function QuestionCard({ question, onChoose }) {
 							(
 								option,
 							) => html`<button class="plan-decision-option ${answers[index] === option.value ? "selected" : ""}" onClick=${() => setAnswers((prev) => prev.map((value, i) => (i === index ? option.value : value)))}>
-								<span class="plan-decision-option-label">${option.label}${option.value === item.recommended ? " · recommended" : ""}</span>
+								<span class="plan-decision-option-label">${option.label}${option.value === item.recommended ? " (recommended)" : ""}</span>
 								${option.description && html`<span class="plan-decision-option-description">${option.description}</span>`}
 							</button>`,
 						)}

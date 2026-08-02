@@ -982,9 +982,8 @@ function App() {
 				setPlanTransition(null);
 				setSession((prev) => (prev ? { ...prev, planTransition: undefined } : prev));
 				if (choice === "continue") {
-					await recordChoice("Plan: continue planning");
+					await recordChoice("Plan: continue planning — add feedback below");
 					planRefineArmedRef.current = true;
-					addNotice("Plan: keep planning — add feedback below");
 					return;
 				}
 				let originalTask;
@@ -1054,9 +1053,9 @@ function App() {
 		try {
 			const data = await api("GET", `/api/sessions/${sessionId}/diff`);
 			if (version === diffRequestVersionRef.current && activeSessionIdRef.current === sessionId) setDiffData(data);
-		} catch {
+		} catch (error) {
 			if (version === diffRequestVersionRef.current && activeSessionIdRef.current === sessionId)
-				setDiffData({ files: [] });
+				setDiffData({ files: [], error: error instanceof Error ? error.message : "Unable to load diff" });
 		}
 	}, [activeId, diffRequestVersionRef, setDiffData, activeSessionIdRef.current]);
 	const queueDiffRefresh = useCallback(() => {
@@ -1203,6 +1202,16 @@ function App() {
 			});
 		}
 	}, [session?.messages]);
+	// A pending question is rendered outside the settled message list, so the
+	// message-based auto-scroll above does not run when its picker appears.
+	// Keep the newly opened decision card in view; the user must be able to see
+	// every option and the Continue button without discovering a hidden scroll.
+	useEffect(() => {
+		if (!session?.question || !messagesRef.current) return;
+		requestAnimationFrame(() => {
+			if (messagesRef.current) messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
+		});
+	}, [session?.question]);
 
 	const scrollToBottom = useCallback(() => {
 		autoScrollRef.current = true;

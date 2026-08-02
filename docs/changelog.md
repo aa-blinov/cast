@@ -2,6 +2,20 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.12.10
+
+### Fixed
+
+- Fixed TUI and Web UI question pickers so multi-question flows do not reopen duplicate pickers or remain visible after answering.
+- Fixed plan approval options to render vertically and removed duplicate plan decision notices.
+- Fixed TUI plan mode so `plan_done` remains available after switching from Build mode, including providers that require explicit tool parameters.
+- Added provider request timeouts and a bounded LLM retry deadline so Settings and stalled provider calls no longer remain in loading indefinitely.
+- Updated question answer summaries to use the compact `Question: … Answer: …` format.
+
+### Changed
+
+- Split token scoreboard metrics into input/output percentile columns and removed obsolete Commit and Consistent columns.
+
 ## 0.12.9
 
 ### Fixed

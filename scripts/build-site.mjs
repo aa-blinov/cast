@@ -884,6 +884,19 @@ function formatTokens(n) {
 	return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${Math.round(n)}`;
 }
 
+function percentile(sorted, p) {
+	if (sorted.length === 0) return 0;
+	return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1))];
+}
+
+function tokenStats(entry, key) {
+	const values = entry.results.flatMap((result) => result[key] ?? []).sort((a, b) => a - b);
+	const avg = values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+	return [avg, percentile(values, 50), percentile(values, 75), percentile(values, 95), percentile(values, 99)]
+		.map(formatTokens)
+		.join(" / ");
+}
+
 function formatGroupScore(group) {
 	if (!group || group.casesTotal === 0) return "—";
 	return `${(group.score * 100).toFixed(0)}% (${group.casesPassed}/${group.casesTotal})`;
@@ -911,21 +924,21 @@ function scoreboardToHtml(scoreboard) {
 				? '<span class="badge-pass">✓ certified</span>'
 				: '<span class="badge-fail">not yet</span>';
 			const date = e.timestamp.slice(0, 10);
-			const commit = e.commit ? `<code>${e.commit}</code>` : "—";
-			const tokens = `${formatTokens(e.avgPromptTokens ?? 0)} / ${formatTokens(e.avgCompletionTokens ?? 0)}`;
+			const inputTokens = tokenStats(e, "promptTokens");
+			const outputTokens = tokenStats(e, "completionTokens");
 			const timing = [e.avgDurationMs, e.medianDurationMs, e.p75DurationMs, e.p95DurationMs, e.p99DurationMs]
 				.map((ms) => formatDuration(ms ?? 0))
 				.join(" / ");
 			const turns = [e.avgTurns, e.medianTurns, e.p75Turns, e.p95Turns, e.p99Turns]
 				.map((value) => Number(value ?? 0).toFixed(1))
 				.join(" / ");
-			const source = e.providerUrl ? `${commit}<br><code>${e.providerUrl}</code>` : commit;
-			return `<tr><td>${e.model}</td><td>${pct}%</td><td>${e.casesPassed}/${e.casesTotal}</td><td>${badge}</td><td>${formatGroupScore(e.core)}</td><td>${formatGroupScore(e.chain)}</td><td>${e.consistentCases}/${e.casesTotal}</td><td>${timing}</td><td>${turns}</td><td>${tokens}</td><td>${date}</td><td>${source}</td></tr>`;
+			const providerUrl = e.providerUrl ? `<code>${e.providerUrl}</code>` : "—";
+			return `<tr><td>${e.model}</td><td>${pct}%</td><td>${e.casesPassed}/${e.casesTotal}</td><td>${badge}</td><td>${formatGroupScore(e.core)}</td><td>${formatGroupScore(e.chain)}</td><td>${timing}</td><td>${turns}</td><td>${inputTokens}</td><td>${outputTokens}</td><td>${providerUrl}</td><td>${date}</td></tr>`;
 		})
 		.join("\n");
 
 	const mainTable = `<div class="table-wrap"><table><thead><tr>
-		<th>Model</th><th>Score</th><th>Passed</th><th>Certified</th><th>Core</th><th>Chain</th><th>Consistent</th><th>Time (avg/p50/p75/p95/p99)</th><th>Turns (avg/p50/p75/p95/p99)</th><th>Avg tokens in/out</th><th>Last updated</th><th>Commit / provider URL</th>
+		<th>Model</th><th>Score</th><th>Passed</th><th>Certified</th><th>Core</th><th>Chain</th><th>Time (avg/p50/p75/p95/p99)</th><th>Turns (avg/p50/p75/p95/p99)</th><th>Input tokens (avg/p50/p75/p95/p99)</th><th>Output tokens (avg/p50/p75/p95/p99)</th><th>Provider URL</th><th>Last updated</th>
 	</tr></thead><tbody>
 ${rows}
 	</tbody></table></div>`;
@@ -950,8 +963,7 @@ ${signalRows}
 		agree (a case that only passes sometimes doesn't count). <strong>Core</strong>/<strong>Chain</strong> break
 		the same score down by single-turn tool contracts vs. multi-turn stateful workflows (see
 		<a href="https://github.com/aa-blinov/cast/blob/master/docs/eval-behavior.md">Behavior Evals</a>).
-		"Consistent" is how many cases had every attempt agree, pass or fail — a flakiness signal independent of
-		the score itself. Tokens are per-attempt averages; the time and turns columns are avg/median/p75/p95/p99 over every
+		Tokens are per-attempt averages; the time and turns columns are avg/median/p75/p95/p99 over every
 		individual attempt. See
 		<a href="https://github.com/aa-blinov/cast/blob/master/docs/eval-methodology.md">Eval Methodology</a>
 		for the full methodology.</p>
