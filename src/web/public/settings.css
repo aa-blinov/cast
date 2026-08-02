@@ -366,9 +366,13 @@
 .settings-theme-swatch.active, .settings-font-swatch.active, .settings-scale-btn.active { border-color: var(--swatch-accent, var(--cyan)); background: var(--bg-raised); color: var(--text); }
 .settings-theme-swatch {
 	display: grid;
-	grid-template-columns: 12px 1fr;
+	grid-template-columns: 12px minmax(0, 1fr);
 	align-items: center;
 	gap: 7px;
+}
+.settings-theme-label {
+	white-space: normal;
+	overflow-wrap: anywhere;
 }
 .settings-theme-dot {
 	width: 12px; height: 12px;

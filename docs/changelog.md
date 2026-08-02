@@ -2,6 +2,13 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.12.14
+
+### Fixed
+
+- Web UI theme picker now wraps long theme names inside the swatch button so the full label is visible instead of overflowing the card.
+- Open-work gate no longer leaks the user-facing "falling through to the user" notice into the model transcript: it is delivered only through the `open_work_gate_exhausted` event, so a resumed session does not re-read the orphan reminder.
+
 ## 0.12.13
 
 ### Fixed

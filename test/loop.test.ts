@@ -1618,6 +1618,58 @@ describe("runAgentLoop — open-work gate", () => {
 		}
 	});
 
+	it("does not leak the exhausted notice into the transcript the model will see on resume", async () => {
+		// The exhausted branch is user-facing ("Falling through to the user…") —
+		// it must not land in `messages`, because on session resume the model
+		// would re-read that orphan <system-reminder> and get confused about
+		// whose message it was. The only signal to the user is the
+		// open_work_gate_exhausted event.
+		const dir = mkdtempSync(join(tmpdir(), "cast-owg-exhaust-no-leak-"));
+		writeFileSync(join(dir, "feature.md"), openPlan, "utf-8");
+		try {
+			const callsToModel: Message[][] = [];
+			vi.mocked(streamAndCollect).mockImplementation(async (_c, _m, msgs) => {
+				callsToModel.push(msgs as Message[]);
+				return { content: "still going", thinking: "", finishReason: "stop" };
+			});
+
+			await runAgentLoop([{ role: "user", content: "implement" }], {
+				config: testConfig,
+				model: "test-model",
+				cwd: dir,
+				systemPrompt: "BASE",
+				planState: { enabled: false, plansDir: dir },
+				initialTodos: [
+					{ content: "do the work", status: "pending", priority: "medium", planStep: "do the work" },
+					{ content: "verify", status: "pending", priority: "medium", planStep: "verify" },
+				],
+				onEvent: () => {},
+			});
+
+			expect(callsToModel).toHaveLength(3);
+			// The exhausted reminder text must not appear in any call the model
+			// received, and must not be left lingering in the transcript.
+			const exhaustedSnippet = "Falling through to the user";
+			for (const callMsgs of callsToModel) {
+				const allText = callMsgs
+					.filter((m) => m.role === "user")
+					.map((m) => contentToText(m.content))
+					.join("\n");
+				expect(allText).not.toContain(exhaustedSnippet);
+			}
+			// After the run, the model never sees the exhausted string at all —
+			// it's purely an event payload.
+			const lastCallTexts = callsToModel
+				.at(-1)!
+				.map((m) => contentToText(m.content))
+				.join("\n");
+			expect(lastCallTexts).not.toContain(exhaustedSnippet);
+		} finally {
+			vi.mocked(streamAndCollect).mockReset();
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	it("does not fire when all checklist items are done", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "cast-owg-empty-"));
 		writeFileSync(join(dir, "feature.md"), "# Plan\n\n## Steps\n- [x] done already\n", "utf-8");

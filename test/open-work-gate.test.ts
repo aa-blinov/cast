@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-	buildOpenWorkGateExhaustedReminder,
 	buildOpenWorkGateReminder,
 	collectOpenWorkSteps,
 	DEFAULT_OPEN_WORK_GATE_MAX_FIRES,
@@ -38,15 +37,6 @@ describe("buildOpenWorkGateReminder", () => {
 	it("directs the model to update todo state after verification", () => {
 		const reminder = buildOpenWorkGateReminder(["only"]);
 		expect(reminder).toContain("Update its todo status only after the work is finished and verified");
-	});
-});
-
-describe("buildOpenWorkGateExhaustedReminder", () => {
-	it("includes the max-fires cap number", () => {
-		const reminder = buildOpenWorkGateExhaustedReminder(2);
-		expect(reminder).toContain("<system-reminder>");
-		expect(reminder).toContain("2 times");
-		expect(reminder).toContain("Falling through to the user");
 	});
 });
 

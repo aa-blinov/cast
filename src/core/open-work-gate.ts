@@ -53,13 +53,6 @@ export function buildOpenWorkGateReminder(openSteps: string[]): string {
 	return wrapSystemReminder(body);
 }
 
-export function buildOpenWorkGateExhaustedReminder(maxFires: number): string {
-	const body =
-		`The agent attempted to end this turn ${maxFires} times with approved-plan tasks still open. ` +
-		`Falling through to the user. Prompt the agent to continue explicitly, or update the task list.`;
-	return wrapSystemReminder(body);
-}
-
 function wrapSystemReminder(body: string): string {
 	return `<system-reminder>\n${body}\n</system-reminder>`;
 }

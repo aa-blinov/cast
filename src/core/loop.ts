@@ -22,7 +22,6 @@ import {
 } from "./llm.ts";
 import { type McpToolHandle, mcpServerNameFromDescription } from "./mcp.ts";
 import {
-	buildOpenWorkGateExhaustedReminder,
 	collectOpenWorkSteps,
 	defaultOpenWorkGateConfig,
 	evaluateOpenWorkGate,
@@ -1443,10 +1442,12 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 							messages.push({ role: "user", content: decision.reminder });
 							hasMoreToolCalls = true;
 						} else {
-							messages.push({
-								role: "user",
-								content: buildOpenWorkGateExhaustedReminder(openWorkGateConfig.maxFiresPerPrompt),
-							});
+							// Exhausted: emit the user-facing notice and let the turn
+							// end. We deliberately do NOT push anything into `messages`
+							// here — the exhausted text is addressed to the user ("Falling
+							// through to the user. Prompt the agent to continue
+							// explicitly…"), so it would be misleading to leave it in the
+							// transcript where the model would see it on resume.
 							onEvent({
 								type: "open_work_gate_exhausted",
 								openSteps: openSteps.length,
