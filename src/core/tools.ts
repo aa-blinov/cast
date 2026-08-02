@@ -59,7 +59,8 @@ export function getToolDefinitions(
 				description:
 					"Execute a bash command in the current working directory. Returns stdout and stderr. " +
 					"Output is truncated to last 2000 lines or 128KB (whichever is hit first). " +
-					"Default timeout 180s. For long-running commands (docker build, npm install, large test suites), " +
+					"Default timeout 180 seconds (the `timeout` field is in seconds). " +
+					"For long-running commands (docker build, npm install, large test suites), " +
 					"pass a higher timeout value. " +
 					"Do NOT re-run an identical command to 'double-check' a result you already have — the previous " +
 					"output still holds unless something changed. Running the same command repeatedly is treated as a " +
