@@ -67,22 +67,8 @@
 	padding: 1px 5px;
 	font-family: var(--font-mono);
 }
-/* Shown instead of .empty-state's "Ready when you are" while the very first
- * page load is still resolving which thread to land on (e.g. a reload on
- * ?session=<id>) — a spinner reads as "loading", the empty-thread banner
- * would falsely read as "this thread has nothing in it". */
-.loading-spinner {
-	width: 22px;
-	height: 22px;
-	margin: 0 auto;
-	border: 2px solid var(--border);
-	border-top-color: var(--cyan);
-	border-radius: 50%;
-	animation: spin .7s linear infinite;
-}
-@keyframes spin {
-	to { transform: rotate(360deg); }
-}
+/* Shared with @keyframes spin in settings.css (used by .settings-inline-loader
+ * inside buttons); kept there to avoid duplicating. */
 
 /* ── Scroll-to-bottom ─────────────────────────────────────────────── */
 .scroll-bottom-btn {

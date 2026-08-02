@@ -11,6 +11,7 @@ const html = htm.bind(h);
 export function Sidebar({
 	sessions,
 	activeId,
+	selectingId,
 	personas,
 	cwd,
 	defaultCwd,
@@ -156,6 +157,7 @@ export function Sidebar({
 	const renderItem = (s) => html`<${SidebarSessionItem}
 		session=${s}
 		activeId=${activeId}
+		selecting=${selectingId === s.id}
 		onSelect=${onSelectSession}
 		onPin=${onPinSession}
 		onDelete=${doDelete}

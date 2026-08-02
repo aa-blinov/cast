@@ -7,6 +7,7 @@ const html = htm.bind(h);
 export function SidebarSessionItem({
 	session,
 	activeId,
+	selecting,
 	onSelect,
 	onPin,
 	editingId,
@@ -25,10 +26,17 @@ export function SidebarSessionItem({
 }) {
 	const s = session;
 	const doDelete = () => onDelete(s);
+	// `selecting` is true while the click's /api/sessions/:id fetch is still
+	// in flight (activeId only flips when the response lands). The row gets
+	// the same "active" highlight up front so the click reads as registered
+	// immediately; the actual loader is shown in the chat area — that
+	// matches the existing empty-state spinner style and keeps the sidebar
+	// visual language simple (just selected / not selected).
+	const isActive = s.id === activeId || selecting;
 	return html`
 		<div
 			key=${s.id}
-			class="sidebar-item${s.id === activeId ? " active" : ""}"
+			class="sidebar-item${isActive ? " active" : ""}"
 			title=${s.cwd}
 			onClick=${() => onSelect(s.id)}
 			onContextMenu=${(e) => {
