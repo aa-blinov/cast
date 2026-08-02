@@ -980,7 +980,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		void submit(
 			sessionId,
 			question.questions
-				.map((item, index) => `The user selected "${selected[index]!.label}" for: ${item.question}`)
+				.map((item, index) => `Question: ${item.question} Answer: ${selected[index]!.label}`)
 				.join("\n"),
 		);
 		return { ok: true };

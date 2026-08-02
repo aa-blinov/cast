@@ -1018,6 +1018,7 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 .modal-btn:hover { border-color: var(--border-active); color: var(--text); background: var(--bg-hover); }
 .modal-choice-description { display: block; margin-top: 4px; color: var(--text-dim); font-size: 11px; line-height: 1.35; text-align: left; }
 .plan-decision-card {
+	flex-shrink: 0;
 	font-family: var(--font-mono);
 	font-size: .8rem;
 	border-radius: var(--radius-sm);
@@ -1039,6 +1040,8 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 .plan-decision-kind { color: var(--text-muted); font-size: .72rem; }
 .plan-decision-body { padding: 8px 10px; border-top: 1px solid var(--border); color: var(--text-dim); line-height: 1.45; }
 .plan-decision-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 6px; padding: 8px 10px; border-top: 1px dashed var(--border); background: var(--bg); }
+.plan-review-card .plan-decision-options { grid-template-columns: 1fr; }
+.question-card .plan-decision-options { grid-template-columns: 1fr; }
 .plan-decision-option {
 	padding: 8px 9px;
 	border: 1px solid var(--border);
@@ -1051,6 +1054,11 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	transition: border-color .15s, background .15s;
 }
 .plan-decision-option:hover { border-color: var(--border-active); background: var(--bg-raised); }
+.question-card .plan-decision-option.selected {
+	border-color: var(--cyan);
+	background: color-mix(in srgb, var(--cyan) 14%, var(--bg-surface));
+}
+.question-card .plan-decision-option.selected .plan-decision-option-label { color: var(--cyan); }
 .plan-decision-option-label { display: block; font-size: .8rem; font-weight: 600; }
 .plan-decision-option-description { display: block; margin-top: 4px; color: var(--text-dim); font-size: .74rem; line-height: 1.35; }
 .icon-btn { padding: 4px 6px; border: none; background: none; color: var(--text-dim); cursor: pointer; border-radius: var(--radius-sm); display: inline-flex; align-items: center; outline: none; }

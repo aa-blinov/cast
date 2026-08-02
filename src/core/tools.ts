@@ -443,6 +443,7 @@ export function getToolDefinitions(
 							description: "One-line summary of what the plan covers",
 						},
 					},
+					required: ["summary"],
 				},
 			},
 		},

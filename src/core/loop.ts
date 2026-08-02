@@ -660,14 +660,24 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 	);
 	const mcpTools = loopConfig.mcpTools ?? [];
 	const allTools = [...builtinTools, ...mcpTools];
-	const disabledTools = loopConfig.disabledTools;
+	// The plan state is authoritative for its terminal control tool. A UI mode
+	// toggle can rerender between turns while a caller still holds an older
+	// denylist, and a persona allowlist must not make plan mode impossible to
+	// finish.
+	const disabledTools = new Set(loopConfig.disabledTools);
+	if (loopConfig.planState?.enabled) disabledTools.delete("plan_done");
+	else if (loopConfig.planState) disabledTools.add("plan_done");
 	// Persona/subagent frontmatter `tools:` allowlists builtins only.
 	// LoopConfig wins when set (subagent spawn); otherwise the active persona.
 	const allowedTools = loopConfig.allowedTools ?? currentPersonaObj?.tools;
 	let builtins = disabledTools?.size ? builtinTools.filter((t) => !disabledTools.has(t.function.name)) : builtinTools;
 	let mcps = disabledTools?.size ? mcpTools.filter((t) => !disabledTools.has(t.function.name)) : mcpTools;
 	if (allowedTools !== undefined) {
-		builtins = builtins.filter((t) => matchesToolsAllowlist(t.function.name, allowedTools));
+		builtins = builtins.filter(
+			(t) =>
+				(loopConfig.planState?.enabled && t.function.name === "plan_done") ||
+				matchesToolsAllowlist(t.function.name, allowedTools),
+		);
 	}
 	// Persona `mcp:` allowlists by *server* name (matched against the
 	// `[serverName] ...` prefix cast stamps on every MCP tool's description —

@@ -84,6 +84,10 @@ const RETRY_BASE_DELAY_MS = 500;
 // *count* is uncapped. Without this ceiling, 2^(attempt-1)*500ms blows past
 // any reasonable wait within a dozen attempts.
 const RETRY_MAX_DELAY_MS = 30_000;
+// A transient provider failure may be retried, but it must not leave a turn
+// pending forever. This deadline covers the retry/backoff phase only; a stream
+// that is already producing tokens is allowed to finish normally.
+const RETRY_DEADLINE_MS = 120_000;
 
 // Quota/billing exhaustion surfaces as the exact same 429 RateLimitError as a
 // transient "too many requests" — the SDK doesn't distinguish them by class,
@@ -315,6 +319,7 @@ export async function* streamChat(
 
 	let attempt = 0;
 	let yieldedAny = false;
+	let retryStartedAt: number | undefined;
 
 	while (true) {
 		try {
@@ -465,10 +470,15 @@ export async function* streamChat(
 			if (yieldedAny || signal?.aborted || !isRetryableStreamError(error)) {
 				throw error;
 			}
+			retryStartedAt ??= Date.now();
 			attempt++;
+			if (Date.now() - retryStartedAt >= RETRY_DEADLINE_MS) {
+				throw new Error(`Provider retry deadline exceeded (${RETRY_DEADLINE_MS / 1000}s)`);
+			}
 			const reason = error instanceof Error ? error.message : String(error);
 			yield { retrying: { attempt, reason } };
-			await sleep(retryDelayMs(attempt, error));
+			const remaining = RETRY_DEADLINE_MS - (Date.now() - retryStartedAt);
+			await sleep(Math.min(retryDelayMs(attempt, error), Math.max(0, remaining)));
 		}
 	}
 }
