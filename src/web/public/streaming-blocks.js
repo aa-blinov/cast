@@ -22,7 +22,14 @@ function StreamingText({ text, className }) {
 }
 
 export function BlockView({ block, streaming = false, renderMarkdown }) {
-	if (block.kind === "tool") return html`<${ToolCard} call=${block.call} renderMarkdown=${renderMarkdown} />`;
+	if (block.kind === "tool") {
+		// Key on the tool-call id (not position): when a second tool call
+		// streams in, Preact must NOT reuse this ToolCard's DOM node for
+		// the new one and must NOT remount this one when its own block is
+		// updated in place by tool_end — both would clobber the local
+		// `open`/`previewSrc` state the user is currently looking at.
+		return html`<${ToolCard} key=${block.call.id} call=${block.call} renderMarkdown=${renderMarkdown} />`;
+	}
 	if (!block.text.trim()) return null;
 	const kind = block.kind === "thinking" ? "reasoning" : "assistant";
 	const className = `message message-${kind}${streaming ? " message-entering" : ""}`;
