@@ -49,7 +49,15 @@ export function reduceStreamEvent(state, event) {
 		blocks: state.blocks.map((block) =>
 			block.kind === "tool" && block.call.id === event.id
 				? {
-						kind: "tool",
+						// Spread `block` first to preserve fields the reducer
+						// doesn't explicitly set — `order` is the streaming
+						// block's identity for the React key (see
+						// streaming-blocks.js's `block.order ?? ${kind}-${idx}`).
+						// Dropping it would change the key on every tool_end
+						// and remount the BlockView (and the ToolCard inside
+						// it), clobbering the user's open/preview state mid-
+						// read.
+						...block,
 						call: {
 							...block.call,
 							status: event.status,
