@@ -2,6 +2,14 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.12.12
+
+### Fixed
+
+- Preserved Web UI tool card state (expanded result, open image preview) across the rest of the turn: a tool the user opened no longer collapses when another tool's `tool_start` / `tool_end` event arrives, and stays open through the final `assistant_message` swap from the live stream into the settled message.
+- Added `Content-Encoding: gzip` for `/api/sessions/:id` and other JSON responses above 8KB; large agentic threads open noticeably faster on slow links (the `/api/sessions/:id` payload typically drops 5-10x with the repetitive tool output these threads contain).
+- Added a `(session_id, role, seq)` index on the `messages` table to back `getHistoryPage`'s boundary lookup and existence check.
+
 ## 0.12.11
 
 ### Fixed
