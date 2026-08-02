@@ -1070,20 +1070,32 @@ export function migrateLegacySessionsToDb(): number {
 	let migrated = 0;
 	for (const filePath of legacySessionFilePaths()) {
 		const session = readLegacySessionFile(filePath);
-		if (!session || existing.has(session.id)) continue;
-		if (!session.title) session.title = deriveSessionTitle(getFirstUserMessage(session));
-		db.prepare(
-			`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, usage_json, todos_json, share_token, plan_question_json, plan_transition_json)
-			 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :usage_json, :todos_json, :share_token, :plan_question_json, :plan_transition_json)`,
-		).run(sessionMetaRow(session));
-		const insertRow = db.prepare(
-			"INSERT INTO messages (session_id, seq, role, content_json, in_context) VALUES (?, ?, ?, ?, 1)",
-		);
-		session.messages.forEach((m, seq) => {
-			insertRow.run(session.id, seq, m.role, JSON.stringify(m));
-		});
+		// A few defenses against files that aren't actually sessions (e.g. stray
+		// config or partial exports from an older schema): a missing/non-string id
+		// is unrecoverable for the INSERT below, and a single bad file shouldn't
+		// abort the whole migration. Skip and move on.
+		if (!session || !session.id || typeof session.id !== "string" || existing.has(session.id)) continue;
+		try {
+			if (!session.title) session.title = deriveSessionTitle(getFirstUserMessage(session));
+			db.prepare(
+				`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, usage_json, todos_json, share_token, plan_question_json, plan_transition_json)
+				 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :usage_json, :todos_json, :share_token, :plan_question_json, :plan_transition_json)`,
+			).run(sessionMetaRow(session));
+			const insertRow = db.prepare(
+				"INSERT INTO messages (session_id, seq, role, content_json, in_context) VALUES (?, ?, ?, ?, 1)",
+			);
+			session.messages.forEach((m, seq) => {
+				insertRow.run(session.id, seq, m.role, JSON.stringify(m));
+			});
+		} catch (err) {
+			// Log and continue — one malformed file shouldn't poison the rest.
+			console.warn(
+				`[cast] skipping legacy session ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
+			);
+			continue;
+		}
 		existing.add(session.id);
-		migrated++;
+		migrated += 1;
 	}
 	// Titles became a shared session concern after earlier TUI/run sessions
 	// had already been persisted. An explicit clear now stores an empty string,
