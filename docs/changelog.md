@@ -2,6 +2,13 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.12.11
+
+### Fixed
+
+- Preserved in-progress Web UI reasoning and tool blocks across page reloads, including deterministic ordering while a tool is running.
+- Reconciled active streaming snapshots with persisted assistant messages to prevent duplicated or reordered reasoning and tool cards after reconnects.
+
 ## 0.12.10
 
 ### Fixed

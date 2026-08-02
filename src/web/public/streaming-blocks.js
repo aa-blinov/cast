@@ -48,10 +48,10 @@ export function StreamingBlocks({ blocks, renderMarkdown }) {
 			${collapsed.map(
 				(block, index) =>
 					html`<${BlockView}
-						key=${block.kind === "tool" ? block.call.id : index}
 						block=${block}
-						streaming
-						renderMarkdown=${renderMarkdown}
+					streaming
+					key=${block.order ?? `${block.kind}-${index}`}
+					renderMarkdown=${renderMarkdown}
 					/>`,
 			)}
 		</div>
@@ -88,7 +88,14 @@ export function LiveStreamingBlocks({ controllerRef, onFrame, renderMarkdown }) 
 		setStream({ blocks: [] });
 		return snapshot;
 	}, []);
-	controllerRef.current = { reduce, reset, take };
+	const hydrate = useCallback((blocks) => {
+		if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+		rafRef.current = null;
+		const snapshot = Array.isArray(blocks) ? [...blocks].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)) : [];
+		streamRef.current = { blocks: snapshot };
+		setStream({ blocks: snapshot });
+	}, []);
+	controllerRef.current = { reduce, reset, take, hydrate };
 	useEffect(
 		() => () => {
 			if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
