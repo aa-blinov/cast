@@ -253,7 +253,7 @@ export function Sidebar({
 					`
 					}
 					${isSearching ? filtered.map(renderItem) : sessionGroups.map(renderGroup)}
-					${!sessionsLoaded && html`<div class="sidebar-empty">Loading sessions…</div>`}
+					${!sessionsLoaded && html`<div class="sidebar-empty">Loading...</div>`}
 					${sessionsLoaded && searching && html`<div class="sidebar-empty">Searching…</div>`}
 					${sessionsLoaded && !searching && sessionGroups.length === 0 && html`<div class="sidebar-empty">No sessions match "${search}"</div>`}
 				</div>
