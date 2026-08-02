@@ -21,6 +21,28 @@ export async function submitMessage(text, images, pendingDocs, context) {
 		setPendingQueue,
 		setInputsRefreshNonce,
 	} = context;
+	// If a question is pending, treat the composer text as a free-form answer
+	// applied to all questions (one value, repeated). Skips the option picker
+	// entirely — the user types in the composer and hits Enter, same as
+	// the option buttons in QuestionCard. Skip also when the text is empty
+	// or starts with a slash (command — /clear etc. takes priority).
+	if (
+		!images?.length &&
+		!pendingDocs?.length &&
+		session?.question?.questions?.length &&
+		text?.trim() &&
+		!text.trim().startsWith("/")
+	) {
+		try {
+			const values = session.question.questions.map(() => text.trim());
+			await api("POST", `/api/sessions/${activeId}/question`, { values });
+			setSession((prev) => (prev ? { ...prev, question: undefined } : prev));
+			return;
+		} catch (err) {
+			showToast?.(err.message, "error");
+			return;
+		}
+	}
 
 	if (planRefineArmedRef.current && !text.trim().startsWith("/")) {
 		planRefineArmedRef.current = false;

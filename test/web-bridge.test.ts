@@ -480,6 +480,43 @@ describe("web bridge", () => {
 		expect(ws.session.messages.at(-1)?.content).toContain("Question: Choose cache backend Answer: Redis");
 	});
 
+	it("accepts a free-form answer not matching any model-supplied option", async () => {
+		const { createPlanState, execQuestion } = await import("../src/core/plan.ts");
+		const bridge = createWebBridge(makeResult());
+		const ws = bridge.createSession();
+		const planState = createPlanState(ws.session.cwd!, ws.id, {
+			onChange: (question, transition) => {
+				ws.session.planQuestion = question;
+				ws.session.planTransition = transition;
+			},
+		});
+		planState.enabled = true;
+		execQuestion(
+			{
+				questions: [
+					{
+						question: "Which color do you like best?",
+						options: [
+							{ value: "red", label: "Red" },
+							{ value: "blue", label: "Blue" },
+							{ value: "green", label: "Green" },
+						],
+						recommended: "blue",
+					},
+				],
+			},
+			planState,
+		);
+
+		// The user typed a custom color in the composer — not one of the
+		// model-supplied values. The bridge must accept it (instead of 400-ing
+		// with "Unknown question option") and pass the raw text to the model.
+		runAgentLoop.mockImplementationOnce(async (messages) => messages);
+		expect(bridge.answerQuestion(ws.id, ["orange"])).toEqual({ ok: true });
+		expect(ws.session.planQuestion).toBeUndefined();
+		expect(ws.session.messages.at(-1)?.content).toContain("Question: Which color do you like best? Answer: orange");
+	});
+
 	it("resets only the model context for clean plan implementation, retaining the visible thread", () => {
 		const bridge = createWebBridge(makeResult());
 		const ws = bridge.createSession();

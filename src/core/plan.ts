@@ -731,8 +731,8 @@ export function execQuestion(args: Record<string, unknown>, planState: PlanState
 		return [{ question, options, ...(recommended ? { recommended } : {}) }];
 	});
 
-	if (questions.length < 1 || questions.length > 4 || questions.length !== rawQuestions.length) {
-		return { content: "Error: questions must contain 1–4 questions, each with 2–4 unique options.", isError: true };
+	if (questions.length < 1 || questions.length > 5 || questions.length !== rawQuestions.length) {
+		return { content: "Error: questions must contain 1–5 questions, each with 2–4 unique options.", isError: true };
 	}
 
 	const pending = readPlanQuestion(planState);

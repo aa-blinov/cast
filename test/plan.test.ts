@@ -776,6 +776,49 @@ describe("plan", () => {
 			);
 			expect(result.isError).toBe(true);
 		});
+
+		it("accepts up to five questions in a single batch", () => {
+			const state = testState("question-5");
+			const twoChoices = (suffix: string) => ({
+				question: `Q${suffix}`,
+				options: [
+					{ value: `a${suffix}`, label: "A" },
+					{ value: `b${suffix}`, label: "B" },
+				],
+			});
+			const result = execQuestion(
+				{ questions: [twoChoices("1"), twoChoices("2"), twoChoices("3"), twoChoices("4"), twoChoices("5")] },
+				state,
+			);
+			expect(result.isError).toBeFalsy();
+			expect(state.planQuestion?.questions).toHaveLength(5);
+		});
+
+		it("rejects six questions in a single batch", () => {
+			const state = testState("question-6");
+			const twoChoices = (suffix: string) => ({
+				question: `Q${suffix}`,
+				options: [
+					{ value: `a${suffix}`, label: "A" },
+					{ value: `b${suffix}`, label: "B" },
+				],
+			});
+			const result = execQuestion(
+				{
+					questions: [
+						twoChoices("1"),
+						twoChoices("2"),
+						twoChoices("3"),
+						twoChoices("4"),
+						twoChoices("5"),
+						twoChoices("6"),
+					],
+				},
+				state,
+			);
+			expect(result.isError).toBe(true);
+			expect(result.content).toContain("1–5 questions");
+		});
 	});
 
 	describe("plan transitions", () => {
