@@ -27,6 +27,7 @@ function SettingsStatus({ data }) {
 		${current.lastTurn?.tokensPerSecond ? html`<div class="settings-row"><span>Last turn</span><span>${current.lastTurn.tokensPerSecond} tok/s (${(current.lastTurn.generationMs / 1000).toFixed(1)}s)</span></div>` : null}
 		<div class="settings-row"><span>Directory</span><span title=${repo.cwd}>${shortPath(repo.cwd)}</span></div>
 		${repo.isGit && html`<div class="settings-row"><span>Git branch</span><span>${repo.branch}${repo.dirty ? " (dirty)" : ""}</span></div>`}
+		<div class="settings-row"><span>Worktree</span><span title=${repo.worktree ?? ""}>${repo.worktree ? shortPath(repo.worktree) : "—"}</span></div>
 		${repo.isGit === false && html`<div class="settings-row"><span>Git</span><span>not a repository</span></div>`}
 	</div>`;
 }
