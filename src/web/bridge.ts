@@ -1437,6 +1437,10 @@ export function createWebBridge(result: StartupResult): WebBridge {
 				result: {
 					persona: ws.session.persona,
 					model: ws.session.model,
+					// Reasoning level is stored on the global `config` object, not the
+					// session — the Settings → Model tab header reads this so the
+					// user can see what level is currently in effect.
+					reasoningLevel: config.reasoningLevel,
 					mode: ws.session.mode ?? "build",
 					status: ws.status,
 					messageCount: countTurnMessages(ws.session.messages),
