@@ -229,9 +229,9 @@ export function getReasoningOptionsForFormat(
 		// M3 supports a 3-state `thinking` parameter (enabled/adaptive/disabled)
 		// per huggingface.co/MiniMaxAI/MiniMax-M3 — not a binary on/off.
 		return [
-			{ value: "enabled", label: "Enabled (always reasoning)" },
-			{ value: "adaptive", label: "Adaptive (model decides)" },
-			{ value: "disabled", label: "Disabled (lowest latency)" },
+			{ value: "enabled", label: "Enabled" },
+			{ value: "adaptive", label: "Adaptive" },
+			{ value: "disabled", label: "Disabled" },
 		];
 	}
 	if (!meta && ["deepseek", "kimi", "qianfan", "qwen", "together", "zai", "huawei"].includes(format)) {
