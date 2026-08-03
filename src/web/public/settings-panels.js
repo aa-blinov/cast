@@ -1,6 +1,6 @@
 import htm from "htm";
 import { h } from "preact";
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { api } from "./api.js";
 import { icons } from "./icons.js";
 import { useModalFocusTrap } from "./modal-focus.js";
