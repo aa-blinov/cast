@@ -60,6 +60,7 @@ async function main(): Promise<void> {
 	const cliSkillPaths: string[] = [];
 	let noMcp = false;
 	const cliMcpPaths: string[] = [];
+	let worktree: string | undefined;
 
 	for (let i = 0; i < args.length; i++) {
 		if (args[i] === "--model" || args[i] === "-m") {
@@ -97,6 +98,21 @@ async function main(): Promise<void> {
 			i++;
 		} else if (args[i] === "--no-mcp") {
 			noMcp = true;
+		} else if (args[i] === "--worktree" || args[i] === "-w") {
+			// Optional value: the next arg is the name if it doesn't look
+			// like a flag. Matches the convention used by `claude -w foo`
+			// and `cast run` subcommand. If omitted, runStartup will throw
+			// a useful error explaining the name is required.
+			const next = args[i + 1];
+			if (next && !next.startsWith("-")) {
+				worktree = next;
+				i++;
+			} else {
+				console.error("--worktree requires a name: cast --worktree <name>");
+				process.exit(2);
+			}
+		} else if (args[i]?.startsWith("--worktree=")) {
+			worktree = args[i]!.slice("--worktree=".length);
 		} else if (args[i] === "--help" || args[i] === "-h") {
 			printHelp();
 			return;
@@ -126,6 +142,7 @@ async function main(): Promise<void> {
 		cliSkillPaths,
 		noMcp,
 		cliMcpPaths,
+		worktree,
 		version: VERSION,
 	};
 
@@ -147,6 +164,7 @@ async function handleRunCommand(args: string[], version: string): Promise<void> 
 	const cliSkillPaths: string[] = [];
 	let noMcp = false;
 	const cliMcpPaths: string[] = [];
+	let worktree: string | undefined;
 	const messageParts: string[] = [];
 
 	for (let i = 0; i < args.length; i++) {
@@ -185,6 +203,17 @@ async function handleRunCommand(args: string[], version: string): Promise<void> 
 			i++;
 		} else if (args[i] === "--no-mcp") {
 			noMcp = true;
+		} else if (args[i] === "--worktree" || args[i] === "-w") {
+			const next = args[i + 1];
+			if (next && !next.startsWith("-")) {
+				worktree = next;
+				i++;
+			} else {
+				console.error('--worktree requires a name: cast run --worktree <name> "..."');
+				process.exit(2);
+			}
+		} else if (args[i]?.startsWith("--worktree=")) {
+			worktree = args[i]!.slice("--worktree=".length);
 		} else if (args[i] === "--help" || args[i] === "-h") {
 			console.log(`Usage: cast run [options] <message>
        cast run --interactive [options]
@@ -195,6 +224,7 @@ Options:
   -m, --model <model>    Model to use (provider/model)
   -r, --reasoning <lvl>  Reasoning level
   -p, --persona <name>   Persona to use
+  -w, --worktree <name>  Run in an isolated git worktree (cast/.cast/worktrees/<name>)
   --format <default|json>  Output format
   --interactive          Persistent JSONL session protocol on stdin/stdout
   --bypass-permissions   Skip bash confirmation prompts`);
@@ -229,6 +259,7 @@ Options:
 		cliSkillPaths,
 		noMcp,
 		cliMcpPaths,
+		worktree,
 		version,
 	};
 

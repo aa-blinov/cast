@@ -52,6 +52,7 @@ import { loadSubagentPrompts, type SubagentPrompt } from "./subagents.ts";
 import { getBashResolution } from "./tools/bash.ts";
 import { BackgroundTaskRegistry } from "./tools/bash-background.ts";
 import { buildReasoningParams, type ModelReasoningMeta, resolveReasoningFormat } from "./vendors.ts";
+import { ensureSessionWorktree } from "./worktree.ts";
 
 export interface ParsedArgs {
 	cwd: string;
@@ -68,6 +69,14 @@ export interface ParsedArgs {
 	cliSkillPaths: string[];
 	noMcp: boolean;
 	cliMcpPaths: string[];
+	/**
+	 * Optional worktree name from `--worktree <name>`. When set, runStartup
+	 * creates (or reuses) `<repoRoot>/.cast/worktrees/<name>` and replaces
+	 * `cwd` with its path before any other work happens. Throw on failure —
+	 * opt-in means a silent fallback would leave the user in the wrong cwd
+	 * with the wrong mental model.
+	 */
+	worktree?: string;
 	version: string;
 	/**
 	 * Skip actually connecting to MCP servers during this call — still
@@ -214,6 +223,17 @@ export async function runStartup(
 	const { settings } = args;
 	let cwd = args.cwd;
 	const permissionMode: PermissionMode = args.cliBypassPermissions ? "bypass" : (settings.permissionMode ?? "default");
+
+	// Resolve --worktree before any project work — the rest of startup (project
+	// trust, skill/MCP discovery, prompt assembly) must see the worktree path
+	// as the working directory, not the main checkout. Resume later in this
+	// function will *not* override `cwd` when `--worktree` is set, because
+	// saved session.cwd is the worktree path and matching it is the whole
+	// point of this flag (see found.cwd handling below).
+	if (args.worktree) {
+		const wt = await ensureSessionWorktree(args.worktree, cwd);
+		cwd = wt.path;
+	}
 
 	const projectDeps: ProjectResolverDeps = {
 		noSkills: args.noSkills,
@@ -428,7 +448,12 @@ export async function runStartup(
 					pickers.log(`Session was using "${found.model}" on a different provider — continuing with "${model}".`);
 				}
 			}
-			if (found.cwd && found.cwd !== cwd && existsSync(found.cwd)) {
+			if (found.cwd && found.cwd !== cwd && existsSync(found.cwd) && !args.worktree) {
+				// Skip the saved cwd override when --worktree is in effect: the
+				// user has explicitly chosen a worktree for this run, and
+				// following a saved cwd from a previous worktree session would
+				// silently send them somewhere they didn't ask to be. The
+				// ensure call above already pinned cwd to the worktree path.
 				cwd = found.cwd;
 			}
 		} else if (args.resumeId) {
