@@ -26,8 +26,13 @@ const html = htm.bind(h);
 /** Suggested slug derived from a persona's label — stable enough for
  * "reopen my last worktree" without making the user retype the name. */
 function slugFromLabel(label) {
+	// Defensive: callers occasionally pass the full persona object instead
+	// of the label string (state-races between a click and a re-render,
+	// future API changes, etc.). Coerce to a string before the regex pass
+	// so the modal doesn't crash mid-typing.
+	const text = typeof label === "string" ? label : (label?.label ?? "");
 	return (
-		label
+		text
 			.toLowerCase()
 			.replace(/[^a-z0-9._-]+/g, "-")
 			.replace(/^-+|-+$/g, "")

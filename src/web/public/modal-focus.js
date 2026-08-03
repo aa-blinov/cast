@@ -13,9 +13,8 @@ const escStack = [];
 // `document` is undefined under Node (jsdom-less unit tests import this
 // module). Register the keydown listener lazily on first use, which in
 // production always happens inside a useEffect that already has DOM.
-let escListenerRegistered = false;
 function registerEscListener() {
-	if (escListenerRegistered || typeof document === "undefined") return;
+	if (typeof document === "undefined") return;
 	escListenerRegistered = true;
 	document.addEventListener(
 		"keydown",
