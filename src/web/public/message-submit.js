@@ -104,7 +104,11 @@ export async function submitMessage(text, images, pendingDocs, context) {
 		if (!id) {
 			if (session?.isDraft) {
 				try {
-					id = await commitSession(session.persona, session.cwd, { push: true, draftVersion });
+					id = await commitSession(session.persona, session.cwd, {
+						push: true,
+						draftVersion,
+						worktree: session.worktree,
+					});
 				} catch (err) {
 					showToast(err.message, "error");
 					return;
@@ -149,7 +153,11 @@ export async function submitMessage(text, images, pendingDocs, context) {
 	if (!id) {
 		if (session?.isDraft) {
 			try {
-				id = await commitSession(session.persona, session.cwd, { push: true, draftVersion });
+				id = await commitSession(session.persona, session.cwd, {
+					push: true,
+					draftVersion,
+					worktree: session.worktree,
+				});
 			} catch (err) {
 				showToast(err.message, "error");
 				return;

@@ -7,6 +7,7 @@ All notable user-facing changes to cast, newest first.
 ### Added
 
 - `--worktree <name>` / `-w <name>` (also on `cast run`) runs the session inside an isolated git worktree. The worktree is created (or reused) at `<repo>/.cast/worktrees/<name>` on a fresh `cast-<name>` branch off `HEAD`; bash, read, write, and edit all see the worktree path, and the main checkout is left untouched. Two `--worktree` runs in parallel never collide. Add `.cast/` to your `.gitignore`. The worktree and branch are left on disk on exit — remove them with `git worktree remove .cast/worktrees/<name>` and `git branch -D cast-<name>` when done. Requires being inside a git checkout with at least one commit; both `--worktree foo` and `--worktree=foo` are accepted.
+- Web: the sidebar's "New session" button now opens a dedicated modal with persona chips, working-directory controls (existing dir or scratch sandbox), and an optional git-worktree toggle. The worktree name pre-fills from the persona label and the worktree section hides itself automatically when the chosen directory is not a git checkout. Worktree and sandbox are mutually exclusive in both the modal and the server.
 
 ## 0.12.15
 

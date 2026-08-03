@@ -19,6 +19,7 @@ import { InputsExplorer as InputsExplorerModule } from "./inputs-explorer.js";
 import { Message as MessageModule } from "./message.js";
 import { submitMessage as submitMessageRequest } from "./message-submit.js";
 import { useModalFocusTrap } from "./modal-focus.js";
+import { NewSessionModal } from "./new-session-modal.js";
 import { PlanDecisionCard, QuestionCard } from "./plan-cards.js";
 import { SettingsAppearance } from "./settings-appearance.js";
 import { SettingsModal as SettingsModalModule } from "./settings-modal.js";
@@ -891,6 +892,20 @@ function App() {
 	// Holds the session the Share modal is open for — null when closed.
 	const [shareModalSession, setShareModalSession] = useState(null);
 
+	// "New session" modal — the sidebar's main `+ New session` button opens
+	// this instead of the old inline persona+dir picker, so the worktree
+	// toggle has a real home next to the directory controls. The quick-session
+	// bolt button still bypasses the modal (one click → fresh sandbox session)
+	// because asking for a worktree on a throwaway would be noise. On submit
+	// the modal hands persona+cwd+worktree back to startDraft; the worktree
+	// actually gets created on the server at first message via commitSession
+	// (see use-session-controller.js).
+	const [newSessionOpen, setNewSessionOpen] = useState(false);
+	const onCreateNewSession = (payload) => {
+		setNewSessionOpen(false);
+		startDraft(payload.persona, payload.cwd, { worktree: payload.worktree });
+	};
+
 	// Sidebar toggle — a drawer on mobile (existing transform-based behavior),
 	// a collapsible grid column on desktop (same button, different meaning).
 	// On mobile both drawers are full-screen, so opening this one closes the
@@ -1454,6 +1469,11 @@ function App() {
 	// closed one should stay out of view in this browser until re-opened by
 	// URL/history — see dismiss()/undismiss() above.
 	const visibleSessions = sessions.filter((s) => !dismissedIds.has(s.id));
+	// Default persona for a fresh draft — "senior" if installed, else whatever
+	// the server sent first. Same picker the delete-last-session path uses
+	// below (see deleteSessionPermanently); one shared source of truth so the
+	// modal and the auto-fallback can't disagree on what "default" means.
+	const defaultP = personas.find((x) => x.name === "senior") ?? personas[0];
 
 	// Which meaning of the toggle applies depends on viewport (drawer on
 	// mobile, collapsible column on desktop) — read at render time, same as
@@ -1570,6 +1590,7 @@ function App() {
 				quickSessionPersona=${quickSessionPersona}
 				onSelectSession=${selectSession}
 				onCreateSession=${startDraft}
+				onOpenNewSession=${() => setNewSessionOpen(true)}
 				onDeleteSession=${deleteSessionPermanently}
 				onOpenDirPicker=${() => setDirPickerOpen(true)}
 				onSetCwd=${setSelectedCwd}
@@ -1588,6 +1609,16 @@ function App() {
 			/>
 
 			<${ShareModal} session=${shareModalSession} onClose=${() => setShareModalSession(null)} />
+
+			<${NewSessionModal}
+				open=${newSessionOpen}
+				personas=${personas}
+				defaultPersona=${defaultP}
+				defaultCwd=${cwd}
+				defaultModel=${defaultModel}
+				onCreate=${onCreateNewSession}
+				onClose=${() => setNewSessionOpen(false)}
+			/>
 
 			<!-- Directory picker — rendered here (not inside Sidebar) because
 			     .sidebar gets a CSS transform for its mobile drawer slide, and a

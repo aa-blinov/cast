@@ -18,6 +18,7 @@ export function Sidebar({
 	quickSessionPersona,
 	onSelectSession,
 	onCreateSession,
+	onOpenNewSession,
 	onDeleteSession,
 	onOpenDirPicker,
 	onSetCwd,
@@ -195,7 +196,7 @@ export function Sidebar({
 					<button
 						class="new-session-btn"
 						title="Pick a persona and directory for a new session"
-						onClick=${() => setPersonaOpen(!personaOpen)}
+						onClick=${onOpenNewSession}
 					><${icons.plus} /> New session</button>
 					<button
 						class="new-session-btn-quick"
