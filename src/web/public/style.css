@@ -1195,7 +1195,7 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 .new-session-body { padding: 14px; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
 .new-session-personas {
 	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+	grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
 	gap: 6px;
 }
 .new-session-persona {
@@ -1219,14 +1219,16 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 .new-session-persona-label { font-weight: 600; }
 .new-session-persona-source { font-size: .7rem; color: var(--text-muted); }
 .new-session-cwd { display: flex; gap: 6px; flex-wrap: wrap; }
-.new-session-toggle {
-	flex: 1; min-width: 0;
-	overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-	/* `active` (set by the caller) is the canonical "selected" hook used
-	   by the surrounding app — keep its visual weight matching other
-	   primary-state borders. */
+/* Symmetric pair: Select dir + Sandbox. The "active" class is set by the
+   caller (whichever mode is selected), and the corresponding row hint below
+   shows the current cwd / sandbox-path so neither button has to carry the
+   full path in its label. */
+.new-session-cwd-toggle {
+	flex: 1 1 0;
+	min-width: 0;
+	text-align: center;
 }
-.new-session-toggle.active {
+.new-session-cwd-toggle.active {
 	border-color: var(--cyan);
 	color: var(--cyan);
 	background: color-mix(in srgb, var(--cyan) 12%, var(--bg-surface));

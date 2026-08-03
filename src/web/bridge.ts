@@ -84,7 +84,7 @@ import { BackgroundTaskRegistry, type BashBackgroundDeps } from "../core/tools/b
 import { type CompletedToolCallStatus, completedToolCallStatus } from "../core/tools/shared.ts";
 import { effectiveStatusFromFile } from "../core/turn-runner-state.ts";
 import { buildReasoningParams, getReasoningOptionsForFormat, resolveReasoningFormat } from "../core/vendors.ts";
-import { ensureSessionWorktree } from "../core/worktree.ts";
+import type { SessionWorktree } from "../core/worktree.ts";
 import { ALL_THEMES } from "../ui/themes/index.ts";
 import type { ThemeColors } from "../ui/themes/types.ts";
 import { isCommandBlocking, SLASH_COMMANDS } from "./commands.ts";
@@ -444,8 +444,8 @@ export interface WebBridge {
 		modelOverride?: string,
 		cwdOverride?: string,
 		runSessionStartHook?: boolean,
-		worktreeName?: string,
-	): Promise<WebAgentSession>;
+		worktree?: SessionWorktree,
+	): WebAgentSession;
 	getSession(id: string): WebAgentSession | undefined;
 	listSessions(): SessionSummary[];
 	/** Same shape as listSessions, filtered and ranked by relevance against
@@ -633,13 +633,13 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		return { registry, followUpQueue: runner.followUpQueue, isRunning: () => runner.isRunning };
 	}
 
-	async function createSessionInstance(
+	function createSessionInstance(
 		personaName?: string,
 		modelOverride?: string,
 		cwdOverride?: string,
 		runSessionStartHook = true,
-		worktreeName?: string,
-	): Promise<WebAgentSession> {
+		worktree?: SessionWorktree,
+	): WebAgentSession {
 		const persona = personaName ? (resolvePersona(personaName) ?? currentPersona) : currentPersona;
 		const model = modelOverride ?? defaultModel;
 
@@ -648,14 +648,10 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		// arrive. Sandbox is "throwaway scratch dir", worktree is "real
 		// isolated working copy"; combining them would leave the sandbox
 		// inside a worktree (or vice versa), which neither feature is
-		// designed for. Server validates this at the HTTP layer too; the
-		// defense here is just for callers that go through the bridge
-		// directly (e.g. /new slash command).
-		if (worktreeName) {
-			const sourceCwd = cwdOverride && cwdOverride !== SANDBOX_CWD ? cwdOverride : cwd;
-			const wt = await ensureSessionWorktree(worktreeName, sourceCwd);
-			sessionCwd = wt.path;
-		}
+		// designed for. The HTTP layer rejects this combo up front so callers
+		// see a clean 400; the defence here covers direct bridge callers
+		// (e.g. /new slash command) that bypass validation.
+		if (worktree) sessionCwd = worktree.path;
 		const session = createSession(model, sessionCwd);
 		session.persona = persona.name;
 
@@ -664,7 +660,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		// code until their first real message, so this still avoids abandoned dirs.
 		// Skipped when a worktree already pinned sessionCwd — the worktree is
 		// git-managed and exists by the time we get here.
-		if (cwdOverride === SANDBOX_CWD && !worktreeName) {
+		if (cwdOverride === SANDBOX_CWD && !worktree) {
 			sessionCwd = join(homedir(), ".cast", "sandbox", `cast-${session.id}`);
 			session.cwd = sessionCwd;
 			mkdirSync(sessionCwd, { recursive: true });
@@ -2375,7 +2371,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		// The command implementation is shared with the TUI and normally needs a
 		// session for its current model/cwd. Keep this context private: it never
 		// reaches the sidebar, disk, or user hooks, and is removed synchronously.
-		const ws = await createSessionInstance(undefined, undefined, undefined, false);
+		const ws = createSessionInstance(undefined, undefined, undefined, false);
 		try {
 			return await executeCommand(ws.id, command);
 		} finally {

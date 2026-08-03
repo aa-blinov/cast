@@ -130,6 +130,23 @@ describe("web session authentication", () => {
 		expect(await app.text()).toContain("cast web");
 	});
 
+	it("rejects the worktree+sandbox combo up front so the modal surfaces a clean 400", async () => {
+		const authenticated = await fetch(`${origin}/api/auth/login`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ username: "cast", password: "test-password" }),
+		});
+		const cookie = authenticated.headers.get("set-cookie")!;
+		const res = await fetch(`${origin}/api/sessions`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Cookie: cookie },
+			body: JSON.stringify({ cwd: "sandbox", worktree: "feature-x" }),
+		});
+		expect(res.status).toBe(400);
+		const body = (await res.json()) as { error?: string };
+		expect(body.error).toMatch(/worktree/i);
+	});
+
 	it("redirects an already-signed-in visitor from /login to /", async () => {
 		const authenticated = await fetch(`${origin}/api/auth/login`, {
 			method: "POST",

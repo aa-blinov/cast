@@ -262,6 +262,27 @@ describe("web bridge", () => {
 		expect(ws.session.cwd).toBe(fakeHome);
 	});
 
+	it("createSession returns a session synchronously, even when a worktree is provided (defence against the async-ification regression)", () => {
+		const bridge = createWebBridge(makeResult());
+		// `createSession` must stay sync — tests and `/new` slash command both
+		// read fields off the returned value without awaiting. If this ever
+		// flips back to a Promise, the field reads below turn into runtime
+		// `Cannot read properties of undefined` noise.
+		const ws = bridge.createSession(undefined, undefined, fakeHome, false, {
+			path: fakeHome,
+			branch: "cast-test",
+			name: "test",
+			repoRoot: fakeHome,
+			headCommit: "deadbeef",
+			createdAt: new Date().toISOString(),
+		});
+		expect(ws.session.cwd).toBe(fakeHome);
+		// Sandbox sentinel + worktree combo is meaningless and rejected by the
+		// HTTP layer; the bridge still picks one cwd (worktree wins) when both
+		// are passed, so just assert it didn't crash.
+		expect(typeof ws.id).toBe("string");
+	});
+
 	it("/persona with no arg reports the current persona without changing anything", async () => {
 		const bridge = createWebBridge(makeResult());
 		const ws = bridge.createSession();

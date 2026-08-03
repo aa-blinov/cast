@@ -19,7 +19,7 @@ import { useEffect, useMemo, useState } from "preact/hooks";
 import { api } from "./api.js";
 import { icons } from "./icons.js";
 import { useModalFocusTrap } from "./modal-focus.js";
-import { SANDBOX_CWD } from "./sidebar-utils.js";
+import { SANDBOX_CWD, shortPath } from "./sidebar-utils.js";
 
 const html = htm.bind(h);
 
@@ -35,9 +35,19 @@ function slugFromLabel(label) {
 	);
 }
 
-export function NewSessionModal({ open, personas, defaultPersona, defaultCwd, defaultModel, onCreate, onClose }) {
+export function NewSessionModal({
+	open,
+	personas,
+	defaultPersona,
+	cwd,
+	defaultCwd,
+	defaultModel,
+	onSetCwd,
+	onOpenDirPicker,
+	onCreate,
+	onClose,
+}) {
 	const [persona, setPersona] = useState(defaultPersona ?? personas[0]?.name ?? "");
-	const [cwd, setCwd] = useState(defaultCwd);
 	const [sandbox, setSandbox] = useState(false);
 	const [worktreeEnabled, setWorktreeEnabled] = useState(false);
 	const [worktreeName, setWorktreeName] = useState(() =>
@@ -54,13 +64,39 @@ export function NewSessionModal({ open, personas, defaultPersona, defaultCwd, de
 	useEffect(() => {
 		if (!open) return;
 		setPersona(defaultPersona ?? personas[0]?.name ?? "");
-		setCwd(defaultCwd);
 		setSandbox(false);
 		setWorktreeEnabled(false);
 		setWorktreeName(slugFromLabel((defaultPersona ?? personas[0])?.label ?? ""));
 		setError(null);
 		setBusy(false);
-	}, [open, defaultPersona, defaultCwd, personas]);
+	}, [open, defaultPersona, personas]);
+
+	// cwd is the controlled value from App (sidebar lives off the same
+	// state); when the user clicks "Select dir" the parent opens the
+	// DirectoryBrowser and writes its pick back through onSetCwd. The
+	// modal needs to seed that with the parent's current cwd on open so
+	// the picker starts in the right place.
+	useEffect(() => {
+		if (!open) return;
+		if (cwd) return;
+		// App-level defaultCwd may still be empty during the first ms of
+		// initClientState — fetch it ourselves as a fallback so the picker
+		// and the eventual createSession both start from $HOME, not from
+		// the sandbox sentinel.
+		if (defaultCwd) {
+			onSetCwd?.(defaultCwd);
+			return;
+		}
+		let cancelled = false;
+		api("GET", "/api/config")
+			.then((data) => {
+				if (!cancelled && data?.cwd && !cwd) onSetCwd?.(data.cwd);
+			})
+			.catch(() => {});
+		return () => {
+			cancelled = true;
+		};
+	}, [open, cwd, defaultCwd, onSetCwd]);
 
 	// A saved model override in settings (defaultModel) sticks to the current
 	// session on first submit; no UI override here yet because the web has
@@ -120,7 +156,6 @@ export function NewSessionModal({ open, personas, defaultPersona, defaultCwd, de
 	}, [busy, persona, cwd, sandbox, worktreeEnabled, worktreeName, worktreeOk]);
 
 	const onSubmit = async () => {
-		setError(null);
 		setBusy(true);
 		try {
 			await onCreate({
@@ -128,14 +163,23 @@ export function NewSessionModal({ open, personas, defaultPersona, defaultCwd, de
 				cwd: sandbox ? SANDBOX_CWD : cwd,
 				worktree: worktreeEnabled && worktreeName.trim() ? worktreeName.trim() : undefined,
 			});
-		} catch (err) {
-			setError(err?.message ?? String(err));
+			// success is signalled by the parent unmounting the modal — don't
+			// clear `busy` here so the button stays disabled until then.
+		} catch (_err) {
 			setBusy(false);
 		}
 	};
 
 	if (!open) return null;
 	const personaLabel = personas.find((p) => p.name === persona)?.label ?? persona;
+	// Show "~" when cwd looks like the user's home (`/home/<user>` or
+	// `/Users/<user>`), so the modal's default reads naturally as "the
+	// home directory, not a project path". Anything else goes through
+	// shortPath's ellipsis form. Empty cwd falls back to a literal "~"
+	// too — the server resolves an empty cwd to homedir() at session-
+	// create time, so the resulting session lives in the same place.
+	const homeMatch = /^\/(?:home|Users)\/[^/]+$/.test(cwd);
+	const cwdLabel = sandbox ? "Sandbox" : !cwd ? "~" : homeMatch ? "~" : shortPath(cwd);
 
 	return html`
 		<div class="modal-backdrop" onClick=${onClose}>
@@ -174,22 +218,23 @@ export function NewSessionModal({ open, personas, defaultPersona, defaultCwd, de
 					<div class="new-session-cwd">
 						<button
 							type="button"
-							class=${`modal-btn new-session-toggle${!sandbox ? " active" : ""}`}
-							onClick=${() => onSandboxChange(false)}
-						>${cwd || "Pick a directory…"}</button>
+							class=${`modal-btn new-session-cwd-toggle${!sandbox ? " active" : ""}`}
+							title=${cwd ? `Selected: ${cwd}` : "Pick a directory…"}
+							onClick=${() => onOpenDirPicker?.()}
+						>Select dir</button>
 						<button
 							type="button"
-							class=${`modal-btn new-session-toggle${sandbox ? " active" : ""}`}
-							title="Create a fresh sandbox directory for a throwaway session"
-							onClick=${() => onSandboxChange(true)}
-						>Scratch</button>
+							class=${`modal-btn new-session-cwd-toggle${sandbox ? " active" : ""}`}
+							title=${cwd && !sandbox ? `Selected: ${cwd}` : "Create a fresh sandbox directory for a throwaway session"}
+							onClick=${() => onSandboxChange(!sandbox)}
+						>Sandbox</button>
 					</div>
-					${sandbox && html`<p class="modal-hint">A fresh <code>~/.cast/sandbox/cast-<id></code> directory will be created.</p>`}
+					${!sandbox && cwd && html`<div class="modal-hint">Working in <code>${cwdLabel}</code>.</div>`}
+					${sandbox && html`<div class="modal-hint">A fresh <code>~/.cast/sandbox/cast-[id]</code> directory will be created.</div>`}
 
 					${
-						!sandbox &&
-						(gitInfo === null || gitInfo?.isGit) &&
-						html`
+						!sandbox && (gitInfo === null || gitInfo?.isGit)
+							? html`
 						<div class="new-session-worktree">
 							<label class="new-session-checkbox">
 								<input
@@ -200,8 +245,8 @@ export function NewSessionModal({ open, personas, defaultPersona, defaultCwd, de
 								<span>Run in an isolated git worktree</span>
 							</label>
 							${
-								worktreeEnabled &&
-								html`
+								worktreeEnabled
+									? html`
 								<div class="new-session-form-row">
 									<input
 										class="new-session-input"
@@ -212,32 +257,30 @@ export function NewSessionModal({ open, personas, defaultPersona, defaultCwd, de
 									/>
 								</div>
 								<p class="modal-hint">
-									Creates <code>${worktreeName || "<name>"}.cast/worktrees/</code> on branch
-									<code>cast-${worktreeName || "<name>"}</code> off HEAD. The main checkout
+									Creates <code>${worktreeName || "[name]"}.cast/worktrees/</code> on branch
+									<code>cast-${worktreeName || "[name]"}</code> off HEAD. The main checkout
 									is left untouched. The worktree and branch stay on disk after the
 									session ends.
 								</p>
 								${
-									gitInfo?.isGit &&
-									gitInfo?.hasCommits === false &&
-									html`
-									<p class="new-session-error">This repository has no commits yet — make an initial commit before using worktree mode.</p>
-								`
+									gitInfo?.isGit && gitInfo?.hasCommits === false
+										? html`<p class="new-session-error">This repository has no commits yet — make an initial commit before using worktree mode.</p>`
+										: null
 								}
 								${
-									gitInfo &&
-									!gitInfo.isGit &&
-									html`
-									<p class="new-session-error">Not a git repository. Worktree mode requires being inside a git checkout.</p>
-								`
+									gitInfo && !gitInfo.isGit
+										? html`<p class="new-session-error">Not a git repository. Worktree mode requires being inside a git checkout.</p>`
+										: null
 								}
 							`
+									: null
 							}
 						</div>
 					`
+							: null
 					}
 
-					${error && html`<p class="new-session-error">${error}</p>`}
+					${error ? html`<div class="new-session-error">${error}</div>` : null}
 				</div>
 				<div class="modal-footer">
 					<button class="modal-btn" onClick=${onClose} disabled=${busy}>Cancel</button>

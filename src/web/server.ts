@@ -24,6 +24,7 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 
 import { brotliCompressSync, gzipSync } from "node:zlib";
 import { getDb } from "../core/db.ts";
 import { getHistoryPage, getMessageImage } from "../core/session.ts";
+import { ensureSessionWorktree } from "../core/worktree.ts";
 import { reconcileActiveStream, SANDBOX_CWD, toDisplayMessages, type WebBridge, type WebEvent } from "./bridge.ts";
 import { isBlockedAttachmentName, sessionInputsDir } from "./inputs.ts";
 
@@ -535,16 +536,22 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 				mkdirSync(cwd, { recursive: true });
 			} catch {}
 		}
-		try {
-			const ws = await bridge.createSession(persona, model, cwd, true, worktree);
-			json(res, { id: ws.id, session: ws.session }, 201);
-		} catch (err) {
-			// ensureSessionWorktree throws a user-readable message on every
-			// failure mode (not a git repo, no commits, invalid slug, etc.) —
-			// surface it as-is so the client can show the right hint.
-			const message = err instanceof Error ? err.message : String(err);
-			return json(res, { error: message }, 400);
+		let wtPath: string | undefined;
+		if (worktree) {
+			const sourceCwd = cwd && cwd !== SANDBOX_CWD ? cwd : bridge.getConfig().cwd;
+			try {
+				const wt = await ensureSessionWorktree(worktree, sourceCwd);
+				wtPath = wt.path;
+			} catch (err) {
+				// ensureSessionWorktree throws a user-readable message on every
+				// failure mode (not a git repo, no commits, invalid slug, etc.) —
+				// surface it as-is so the client can show the right hint.
+				const message = err instanceof Error ? err.message : String(err);
+				return json(res, { error: message }, 400);
+			}
 		}
+		const ws = bridge.createSession(persona, model, wtPath ?? cwd, true);
+		json(res, { id: ws.id, session: ws.session }, 201);
 	});
 
 	// One stream per browser tab, independent of which session (if any) is
@@ -1503,6 +1510,7 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 		// widen what an unauthenticated visitor can actually do.
 		const PUBLIC_STATIC_ASSETS = new Set([
 			"/app.js",
+			"/new-session-modal.js",
 			"/login.html",
 			"/login.css",
 			"/login.js",
