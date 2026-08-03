@@ -2,6 +2,17 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.12.15
+
+### Added
+
+- Web Settings → Model tab now exposes a 3-state `thinking` control for MiniMax-M3 (Enabled / Adaptive / Disabled) instead of a single always-on toggle. The wire format matches the live OpenAI-compatible API: Enabled is the default (no field), Adaptive sends `thinking: { type: "adaptive" }`, Disabled sends `thinking: { type: "disabled" }`. The Web UI now surfaces the saved level in the section header (previously hard-coded to "off" because the web `/current` endpoint was not returning the field).
+
+### Fixed
+
+- Web Settings → Provider tab no longer freezes the modal: `SettingsProvider` was calling `useRef` without importing it, so the click on the tab threw `ReferenceError` during render and Preact dropped the pane subtree. The picker now renders the saved providers, edit/delete buttons, and the add form.
+- Web Settings → Model tab reasoning picker mirrors the saved level after apply. The dropdown previously snapped back to "Pick a level…" after a successful apply, which made the selection look lost; it now stays on the just-applied value and the ✓ button returns to its gray state when the picked value matches the current one.
+
 ## 0.12.14
 
 ### Fixed
