@@ -19,6 +19,7 @@ import { InputsExplorer as InputsExplorerModule } from "./inputs-explorer.js";
 import { Message as MessageModule } from "./message.js";
 import { submitMessage as submitMessageRequest } from "./message-submit.js";
 import { useModalFocusTrap } from "./modal-focus.js";
+import { NewSessionModal } from "./new-session-modal.js?v=__NSM_HASH__";
 import { PlanDecisionCard, QuestionCard } from "./plan-cards.js";
 import { SettingsAppearance } from "./settings-appearance.js";
 import { SettingsModal as SettingsModalModule } from "./settings-modal.js";
@@ -38,7 +39,6 @@ import {
 } from "./settings-panels.js";
 import { ShareModal } from "./share-modal.js";
 import { Sidebar as SidebarModule } from "./sidebar.js";
-import { SANDBOX_CWD } from "./sidebar-utils.js";
 import { closeSseConnection, openSseConnection } from "./sse-connection.js";
 import { handleSseEvent } from "./sse-events.js";
 import { StatusPopover } from "./status-popover.js";
@@ -670,7 +670,7 @@ function App() {
 		setSettingsOpen,
 		confirmState,
 		setConfirmState,
-	} = useWorkspaceState({ initialCwd: SANDBOX_CWD });
+	} = useWorkspaceState();
 	const requestConfirm = useCallback(
 		(message) => new Promise((resolve) => setConfirmState({ message, resolve })),
 		[setConfirmState],
@@ -890,6 +890,36 @@ function App() {
 
 	// Holds the session the Share modal is open for — null when closed.
 	const [shareModalSession, setShareModalSession] = useState(null);
+
+	// "New session" modal — the sidebar's main `+ New session` button opens
+	// this instead of the old inline persona+dir picker, so the worktree
+	// toggle has a real home next to the directory controls. The quick-session
+	// bolt button still bypasses the modal (one click → fresh sandbox session)
+	// because asking for a worktree on a throwaway would be noise. On submit
+	// the modal hands persona+cwd+worktree back to startDraft; the worktree
+	// actually gets created on the server at first message via commitSession
+	// (see use-session-controller.js).
+	const [newSessionOpen, setNewSessionOpen] = useState(false);
+	// Forwarded into NewSessionModal so the modal can show server-side
+	// errors (notably worktree-creation failures) without having to close
+	// itself preemptively.
+	const [newSessionError, setNewSessionError] = useState(null);
+	void newSessionError;
+	const onCreateNewSession = async (payload) => {
+		// Stage the draft first so the user sees the new session immediately,
+		// but keep the modal open until commitSession actually succeeds —
+		// worktree creation happens server-side at POST /api/sessions, so a
+		// failure here is invisible to startDraft and must surface in the
+		// modal's error slot.
+		startDraft(payload.persona, payload.cwd, { worktree: payload.worktree });
+		try {
+			await commitSession(payload.persona, payload.cwd, { push: false, worktree: payload.worktree });
+			setNewSessionError(null);
+			setNewSessionOpen(false);
+		} catch (err) {
+			setNewSessionError(err?.message ?? String(err));
+		}
+	};
 
 	// Sidebar toggle — a drawer on mobile (existing transform-based behavior),
 	// a collapsible grid column on desktop (same button, different meaning).
@@ -1454,6 +1484,11 @@ function App() {
 	// closed one should stay out of view in this browser until re-opened by
 	// URL/history — see dismiss()/undismiss() above.
 	const visibleSessions = sessions.filter((s) => !dismissedIds.has(s.id));
+	// Default persona for a fresh draft — "senior" if installed, else whatever
+	// the server sent first. Same picker the delete-last-session path uses
+	// below (see deleteSessionPermanently); one shared source of truth so the
+	// modal and the auto-fallback can't disagree on what "default" means.
+	const defaultP = personas.find((x) => x.name === "senior") ?? personas[0];
 
 	// Which meaning of the toggle applies depends on viewport (drawer on
 	// mobile, collapsible column on desktop) — read at render time, same as
@@ -1570,6 +1605,7 @@ function App() {
 				quickSessionPersona=${quickSessionPersona}
 				onSelectSession=${selectSession}
 				onCreateSession=${startDraft}
+				onOpenNewSession=${() => setNewSessionOpen(true)}
 				onDeleteSession=${deleteSessionPermanently}
 				onOpenDirPicker=${() => setDirPickerOpen(true)}
 				onSetCwd=${setSelectedCwd}
@@ -1588,6 +1624,19 @@ function App() {
 			/>
 
 			<${ShareModal} session=${shareModalSession} onClose=${() => setShareModalSession(null)} />
+
+			<${NewSessionModal}
+				open=${newSessionOpen}
+				personas=${personas}
+				defaultPersona=${defaultP}
+				cwd=${cwd}
+				defaultCwd=${defaultCwd}
+				defaultModel=${defaultModel}
+				onSetCwd=${setSelectedCwd}
+				onOpenDirPicker=${() => setDirPickerOpen(true)}
+				onCreate=${onCreateNewSession}
+				onClose=${() => setNewSessionOpen(false)}
+			/>
 
 			<!-- Directory picker — rendered here (not inside Sidebar) because
 			     .sidebar gets a CSS transform for its mobile drawer slide, and a

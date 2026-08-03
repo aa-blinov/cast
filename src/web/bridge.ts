@@ -84,6 +84,7 @@ import { BackgroundTaskRegistry, type BashBackgroundDeps } from "../core/tools/b
 import { type CompletedToolCallStatus, completedToolCallStatus } from "../core/tools/shared.ts";
 import { effectiveStatusFromFile } from "../core/turn-runner-state.ts";
 import { buildReasoningParams, getReasoningOptionsForFormat, resolveReasoningFormat } from "../core/vendors.ts";
+import type { SessionWorktree } from "../core/worktree.ts";
 import { ALL_THEMES } from "../ui/themes/index.ts";
 import type { ThemeColors } from "../ui/themes/types.ts";
 import { isCommandBlocking, SLASH_COMMANDS } from "./commands.ts";
@@ -92,7 +93,15 @@ import { sessionInputsDir } from "./inputs.ts";
 const execFileAsync = promisify(execFile);
 
 async function runSkillsSh(args: string[], timeout: number): Promise<string> {
-	const { stdout } = await execFileAsync("npx", ["--yes", "skills", ...args], {
+	// `npx skills add` is a TTY-bound CLI — it walks the user through a
+	// scope prompt before installing. Cast already passes a specific skill
+	// name (and optionally a repo), so the only remaining prompt is the
+	// project-vs-global question. `-y` short-circuits it (auto-detect:
+	// `global` when the CLI is invoked from a non-project cwd, which is
+	// `homedir()` for us). Any caller already passing `-y` (rare) is
+	// left alone.
+	const fullArgs = args.includes("-y") || args.includes("--yes") ? args : [...args, "-y"];
+	const { stdout } = await execFileAsync("npx", ["--yes", "skills", ...fullArgs], {
 		cwd: homedir(),
 		encoding: "utf-8",
 		timeout,
@@ -438,7 +447,13 @@ export function toDisplayMessages(
 export const SANDBOX_CWD = "sandbox";
 
 export interface WebBridge {
-	createSession(personaName?: string, modelOverride?: string, cwdOverride?: string): WebAgentSession;
+	createSession(
+		personaName?: string,
+		modelOverride?: string,
+		cwdOverride?: string,
+		runSessionStartHook?: boolean,
+		worktree?: SessionWorktree,
+	): WebAgentSession;
 	getSession(id: string): WebAgentSession | undefined;
 	listSessions(): SessionSummary[];
 	/** Same shape as listSessions, filtered and ranked by relevance against
@@ -631,18 +646,29 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		modelOverride?: string,
 		cwdOverride?: string,
 		runSessionStartHook = true,
+		worktree?: SessionWorktree,
 	): WebAgentSession {
 		const persona = personaName ? (resolvePersona(personaName) ?? currentPersona) : currentPersona;
 		const model = modelOverride ?? defaultModel;
 
 		let sessionCwd = cwdOverride && cwdOverride !== SANDBOX_CWD ? cwdOverride : cwd;
+		// Worktree and sandbox are mutually exclusive — worktree wins if both
+		// arrive. Sandbox is "throwaway scratch dir", worktree is "real
+		// isolated working copy"; combining them would leave the sandbox
+		// inside a worktree (or vice versa), which neither feature is
+		// designed for. The HTTP layer rejects this combo up front so callers
+		// see a clean 400; the defence here covers direct bridge callers
+		// (e.g. /new slash command) that bypass validation.
+		if (worktree) sessionCwd = worktree.path;
 		const session = createSession(model, sessionCwd);
 		session.persona = persona.name;
 
 		// Scratch dirs must exist before SessionStart hooks run: hooks receive this
 		// cwd and are allowed to prepare the workspace. Web drafts don't reach this
 		// code until their first real message, so this still avoids abandoned dirs.
-		if (cwdOverride === SANDBOX_CWD) {
+		// Skipped when a worktree already pinned sessionCwd — the worktree is
+		// git-managed and exists by the time we get here.
+		if (cwdOverride === SANDBOX_CWD && !worktree) {
 			sessionCwd = join(homedir(), ".cast", "sandbox", `cast-${session.id}`);
 			session.cwd = sessionCwd;
 			mkdirSync(sessionCwd, { recursive: true });
@@ -1479,7 +1505,47 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			try {
 				dirty = git(["status", "--porcelain"]).length > 0;
 			} catch {}
-			return { ok: true, result: { cwd: sessionCwd, isGit: true, branch, dirty } };
+			// 'git worktree list --porcelain' prints the worktree's absolute
+			// path on the first line of each block, followed by 'HEAD <sha>'
+			// and 'branch <name>'. We use it to detect whether the session
+			// is running inside a worktree (rather than the main checkout)
+			// so the StatusPopover can label it explicitly. Runs against the
+			// main repo because 'git worktree list' is only valid there; we
+			// resolve the main repo from the current cwd via --git-common-dir.
+			let worktree: string | null = null;
+			try {
+				const commonDir = git(["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+				const mainRepoRoot = join(commonDir, "..");
+				const list = execFileSync("git", ["worktree", "list", "--porcelain"], {
+					cwd: mainRepoRoot,
+					encoding: "utf-8",
+					timeout: 3000,
+					stdio: ["pipe", "pipe", "pipe"],
+				}).trim();
+				// `git worktree list` shows the main checkout as the first
+				// entry. We only call out a worktree path when the session's
+				// cwd is in a separate entry — running inside the main
+				// checkout itself is the common case and just shows "—".
+				const blocks = list.split("\n\n");
+				for (const block of blocks) {
+					const pathLine = block.split("\n").find((l) => l.startsWith("worktree "));
+					if (!pathLine) continue;
+					const path = pathLine.substring("worktree ".length);
+					if (path === sessionCwd && path !== mainRepoRoot) {
+						worktree = path;
+						break;
+					}
+				}
+			} catch {
+				// git worktree list is best-effort; if it fails (e.g. the
+				// session lives in a standalone clone without worktrees
+				// registered) we just leave worktree = null and the UI
+				// shows the em-dash placeholder.
+			}
+			return {
+				ok: true,
+				result: { cwd: sessionCwd, isGit: true, branch, dirty, worktree },
+			};
 		}
 		if (name === "/rules") {
 			return {
@@ -1689,7 +1755,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			return { ok: true, result: "Compacting…" };
 		}
 		if (name === "/new") {
-			const newWs = createSessionInstance(ws.session.persona ?? undefined, undefined, ws.session.cwd);
+			const newWs = await createSessionInstance(ws.session.persona ?? undefined, undefined, ws.session.cwd);
 			return { ok: true, result: { sessionId: newWs.id } };
 		}
 		if (name === "/model") {
@@ -2039,6 +2105,18 @@ export function createWebBridge(result: StartupResult): WebBridge {
 					// tolerate that being pasted in whole by dropping a leading
 					// `npx [--yes|-y] skills [add|a]` prefix before parsing.
 					const rawArgs = rest.split(/\s+/);
+					// `npx skills add` accepts `https://github.com/<owner>/<repo>`
+					// as the package argument, but our UI / `runSkillsSh` wrapper
+					// hands the string off to the underlying CLI verbatim, which
+					// expects `owner/repo` (or `owner/repo.git`). Strip a leading
+					// github.com/ so the same paste "works" no matter where the
+					// user copied the URL from — the original skills.sh site
+					// copy-button uses the long form, which currently surfaces
+					// as a confusing usage error.
+					if (rawArgs[0] && /^https?:\/\/(?:www\.)?github\.com\//i.test(rawArgs[0])) {
+						rawArgs[0] = rawArgs[0].replace(/^https?:\/\/(?:www\.)?github\.com\//i, "");
+						rawArgs[0] = rawArgs[0].replace(/\.git$/, "");
+					}
 					if (rawArgs[0] === "npx") rawArgs.shift();
 					if (rawArgs[0] === "--yes" || rawArgs[0] === "-y") rawArgs.shift();
 					if (rawArgs[0] === "skills") rawArgs.shift();

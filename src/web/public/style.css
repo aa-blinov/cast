@@ -1189,3 +1189,180 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 }
 
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); border: 0; }
+
+/* ── New session modal ───────────────────────────────────────────── */
+.modal-new-session { max-width: 520px; }
+.new-session-body { padding: 14px; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
+.new-session-personas {
+	display: grid;
+	/* Always exactly two columns: consistent layout on mobile, tablet,
+	   and desktop. Cards are tall enough for two lines of text (label +
+	   source), so 2-up reads cleanly without leaving the right column
+	   empty. */
+	grid-template-columns: 1fr 1fr;
+	gap: 6px;
+}
+.new-session-persona {
+	display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+	padding: 8px 10px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg);
+	color: var(--text-dim);
+	font-family: var(--font);
+	/* Fixed font size for the label so the cards line up no matter how
+	   long the persona name is — a long "Coder with subagents" no
+	   longer wraps to two lines while a short "Architect" stays on one. */
+	font-size: .8rem;
+	cursor: pointer;
+	transition: border-color .15s, background .15s, color .15s;
+}
+.new-session-persona:hover { border-color: var(--border-active); color: var(--text); }
+.new-session-persona.selected {
+	border-color: var(--cyan);
+	background: color-mix(in srgb, var(--cyan) 14%, var(--bg-surface));
+	color: var(--cyan);
+}
+.new-session-persona-label {
+	font-weight: 600;
+	text-align: left;
+	width: 100%;
+	/* Truncate rather than wrap so the right column doesn't drift down
+	   when one card has a longer label than the next. */
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.new-session-persona-source {
+	font-size: .8rem;
+	color: var(--text-muted);
+	text-align: left;
+	width: 100%;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.new-session-cwd { display: flex; gap: 6px; flex-wrap: wrap; }
+/* Symmetric pair: Select dir + Sandbox. The "active" class is set by the
+   caller (whichever mode is selected), and the corresponding row hint below
+   shows the current cwd / sandbox-path so neither button has to carry the
+   full path in its label. */
+.new-session-cwd-toggle {
+	flex: 1 1 0;
+	min-width: 0;
+	text-align: center;
+}
+.new-session-cwd-toggle.active {
+	border-color: var(--cyan);
+	color: var(--cyan);
+	background: color-mix(in srgb, var(--cyan) 12%, var(--bg-surface));
+}
+.new-session-worktree {
+	margin-top: 12px;
+	padding: 10px 12px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg);
+	display: flex; flex-direction: column; gap: 6px;
+}
+.new-session-checkbox {
+	display: flex; align-items: center; gap: 6px;
+	color: var(--text);
+	font-size: .8rem;
+	cursor: pointer;
+}
+.new-session-checkbox input { margin: 0; accent-color: var(--cyan); }
+.new-session-form-row { display: flex; gap: 6px; }
+.new-session-input {
+	flex: 1; min-width: 0;
+	background: var(--bg-inset);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	padding: 6px 10px;
+	color: var(--text);
+	font-family: var(--font-mono);
+	font-size: .8rem;
+	outline: none;
+}
+.new-session-input:focus { border-color: var(--cyan); }
+.new-session-error {
+	margin: 0;
+	color: #fca5a5;
+	font-size: .76rem;
+}
+.new-session-body code {
+	font-family: var(--font-mono);
+	font-size: .74rem;
+	background: var(--bg-inset);
+	padding: 1px 4px;
+	border-radius: 3px;
+}
+/* Section title inside the modal — sits above a control block. Kept local to
+ * the new-session modal so it doesn't drag in the settings-panel typography
+ * (settings-row-label from settings.css), which renders narrower/wider than
+ * this layout wants. */
+.new-session-section-title {
+	color: var(--text-muted);
+	font-size: .68rem;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: .06em;
+	margin: 14px 0 6px;
+}
+/* Shared explanatory paragraph used by both .modal-new-session (worktree
+ * details, scratch-dir explanation) and .modal-share (link scope). Without
+ * this, <p class="modal-hint"> rendered as a bare default <p> and visually
+ * disappeared against .modal's background — the worktree hint in particular
+ * was unreadable until added here. */
+.modal-hint {
+	margin: 0;
+	color: var(--text-dim);
+	font-size: .78rem;
+	line-height: 1.45;
+}
+.modal-hint code {
+	font-family: var(--font-mono);
+	font-size: .74rem;
+	background: var(--bg-inset);
+	padding: 1px 4px;
+	border-radius: 3px;
+	color: var(--text);
+}
+/* Containerised cwd preview shown under the Select dir / Sandbox pair.
+ * Sits in its own bordered box so the long path doesn't bleed into the
+ * "Run in an isolated git worktree" row that may follow; a folder icon
+ * on the left makes it clear at a glance that this is a filesystem
+ * path rather than a hint string. */
+.new-session-cwd-preview {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-top: 8px;
+	padding: 8px 10px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg-inset);
+}
+.new-session-cwd-preview svg {
+	flex-shrink: 0;
+	width: 14px;
+	height: 14px;
+	color: var(--text-muted);
+}
+.new-session-cwd-preview-label {
+	color: var(--text-muted);
+	font-size: .72rem;
+	white-space: nowrap;
+}
+.new-session-cwd-preview-path {
+	font-family: var(--font-mono);
+	font-size: .78rem;
+	color: var(--text);
+	background: transparent;
+	padding: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	flex: 1;
+	min-width: 0;
+}
