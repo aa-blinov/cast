@@ -1328,3 +1328,41 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	border-radius: 3px;
 	color: var(--text);
 }
+/* Containerised cwd preview shown under the Select dir / Sandbox pair.
+ * Sits in its own bordered box so the long path doesn't bleed into the
+ * "Run in an isolated git worktree" row that may follow; a folder icon
+ * on the left makes it clear at a glance that this is a filesystem
+ * path rather than a hint string. */
+.new-session-cwd-preview {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-top: 8px;
+	padding: 8px 10px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg-inset);
+}
+.new-session-cwd-preview svg {
+	flex-shrink: 0;
+	width: 14px;
+	height: 14px;
+	color: var(--text-muted);
+}
+.new-session-cwd-preview-label {
+	color: var(--text-muted);
+	font-size: .72rem;
+	white-space: nowrap;
+}
+.new-session-cwd-preview-path {
+	font-family: var(--font-mono);
+	font-size: .78rem;
+	color: var(--text);
+	background: transparent;
+	padding: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	flex: 1;
+	min-width: 0;
+}
