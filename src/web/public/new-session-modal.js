@@ -23,21 +23,20 @@ import { SANDBOX_CWD, shortPath } from "./sidebar-utils.js";
 
 const html = htm.bind(h);
 
-/** Suggested slug derived from a persona's label — stable enough for
- * "reopen my last worktree" without making the user retype the name. */
-function slugFromLabel(label) {
-	// Defensive: callers occasionally pass the full persona object instead
-	// of the label string (state-races between a click and a re-render,
-	// future API changes, etc.). Coerce to a string before the regex pass
-	// so the modal doesn't crash mid-typing.
-	const text = typeof label === "string" ? label : (label?.label ?? "");
-	return (
-		text
-			.toLowerCase()
-			.replace(/[^a-z0-9._-]+/g, "-")
-			.replace(/^-+|-+$/g, "")
-			.slice(0, 40) || "worktree"
-	);
+/** Default worktree name. Mirrors the `cast-<id>` shape that the
+ * bridge uses for sandbox sessions: `tree-` + 8 random hex chars. Stays
+ * under the 64-char server-side limit and avoids any path-traversal
+ * sequences the slug validator would reject. */
+function defaultWorktreeName() {
+	// 8 chars of entropy is enough to avoid collisions across the few
+	// open sessions a single user is likely to spin up concurrently.
+	// crypto.getRandomValues is available in every modern browser and
+	// jsdom, so this works in both production and the unit-test runtime.
+	const bytes = new Uint8Array(4);
+	(globalThis.crypto ?? globalThis.crypto).getRandomValues(bytes);
+	let hex = "";
+	for (const b of bytes) hex += b.toString(16).padStart(2, "0");
+	return `tree-${hex}`;
 }
 
 export function NewSessionModal({
@@ -55,9 +54,7 @@ export function NewSessionModal({
 	const [persona, setPersona] = useState(defaultPersona ?? personas[0]?.name ?? "");
 	const [sandbox, setSandbox] = useState(false);
 	const [worktreeEnabled, setWorktreeEnabled] = useState(false);
-	const [worktreeName, setWorktreeName] = useState(() =>
-		slugFromLabel(defaultPersona?.label ?? personas[0]?.label ?? ""),
-	);
+	const [worktreeName, setWorktreeName] = useState(() => defaultWorktreeName());
 	const [gitInfo, setGitInfo] = useState(null); // null = loading, {isGit:false} = no, {isGit:true, hasCommits, branch}
 	const [error, setError] = useState(null);
 	const [busy, setBusy] = useState(false);
@@ -71,7 +68,8 @@ export function NewSessionModal({
 		setPersona(defaultPersona ?? personas[0]?.name ?? "");
 		setSandbox(false);
 		setWorktreeEnabled(false);
-		setWorktreeName(slugFromLabel((defaultPersona ?? personas[0])?.label ?? ""));
+		// Fresh tree-XXXX each open so parallel worktrees never collide.
+		setWorktreeName(defaultWorktreeName());
 		setError(null);
 		setBusy(false);
 	}, [open, defaultPersona, personas]);
@@ -234,8 +232,27 @@ export function NewSessionModal({
 							onClick=${() => onSandboxChange(!sandbox)}
 						>Sandbox</button>
 					</div>
-					${!sandbox && cwd && html`<div class="modal-hint">Working in <code>${cwdLabel}</code>.</div>`}
-					${sandbox && html`<div class="modal-hint">A fresh <code>~/.cast/sandbox/cast-[id]</code> directory will be created.</div>`}
+					${
+						!sandbox &&
+						cwd &&
+						html`
+						<div class="new-session-cwd-preview">
+							<${icons.folder} />
+							<span class="new-session-cwd-preview-label">Working directory</span>
+							<code class="new-session-cwd-preview-path">${cwdLabel}</code>
+						</div>
+					`
+					}
+					${
+						sandbox &&
+						html`
+						<div class="new-session-cwd-preview">
+							<${icons.folder} />
+							<span class="new-session-cwd-preview-label">Sandbox session</span>
+							<code class="new-session-cwd-preview-path">~/.cast/sandbox/cast-[id]</code>
+						</div>
+					`
+					}
 
 					${
 						!sandbox && (gitInfo === null || gitInfo?.isGit)
@@ -256,7 +273,7 @@ export function NewSessionModal({
 									<input
 										class="new-session-input"
 										type="text"
-										placeholder=${slugFromLabel(personaLabel)}
+										placeholder=${worktreeName}
 										value=${worktreeName}
 										onInput=${(e) => setWorktreeName(e.target.value)}
 									/>
