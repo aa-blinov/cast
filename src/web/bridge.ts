@@ -93,7 +93,15 @@ import { sessionInputsDir } from "./inputs.ts";
 const execFileAsync = promisify(execFile);
 
 async function runSkillsSh(args: string[], timeout: number): Promise<string> {
-	const { stdout } = await execFileAsync("npx", ["--yes", "skills", ...args], {
+	// `npx skills add` is a TTY-bound CLI — it walks the user through a
+	// scope prompt before installing. Cast already passes a specific skill
+	// name (and optionally a repo), so the only remaining prompt is the
+	// project-vs-global question. `-y` short-circuits it (auto-detect:
+	// `global` when the CLI is invoked from a non-project cwd, which is
+	// `homedir()` for us). Any caller already passing `-y` (rare) is
+	// left alone.
+	const fullArgs = args.includes("-y") || args.includes("--yes") ? args : [...args, "-y"];
+	const { stdout } = await execFileAsync("npx", ["--yes", "skills", ...fullArgs], {
 		cwd: homedir(),
 		encoding: "utf-8",
 		timeout,
@@ -2097,6 +2105,18 @@ export function createWebBridge(result: StartupResult): WebBridge {
 					// tolerate that being pasted in whole by dropping a leading
 					// `npx [--yes|-y] skills [add|a]` prefix before parsing.
 					const rawArgs = rest.split(/\s+/);
+					// `npx skills add` accepts `https://github.com/<owner>/<repo>`
+					// as the package argument, but our UI / `runSkillsSh` wrapper
+					// hands the string off to the underlying CLI verbatim, which
+					// expects `owner/repo` (or `owner/repo.git`). Strip a leading
+					// github.com/ so the same paste "works" no matter where the
+					// user copied the URL from — the original skills.sh site
+					// copy-button uses the long form, which currently surfaces
+					// as a confusing usage error.
+					if (rawArgs[0] && /^https?:\/\/(?:www\.)?github\.com\//i.test(rawArgs[0])) {
+						rawArgs[0] = rawArgs[0].replace(/^https?:\/\/(?:www\.)?github\.com\//i, "");
+						rawArgs[0] = rawArgs[0].replace(/\.git$/, "");
+					}
 					if (rawArgs[0] === "npx") rawArgs.shift();
 					if (rawArgs[0] === "--yes" || rawArgs[0] === "-y") rawArgs.shift();
 					if (rawArgs[0] === "skills") rawArgs.shift();
