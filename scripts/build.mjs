@@ -73,6 +73,7 @@ import { build, transform } from "esbuild";
 // In the bundle, import.meta.dirname resolves to dist/ — the server looks
 // for public/ as a sibling of dist/index.js.
 import { cpSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 cpSync("src/web/public", "dist/public", { recursive: true });
 
 // Keep the source web assets readable for the dev server, but ship compact
@@ -122,8 +123,21 @@ const webJavaScript = [
 	"stream-blocks.js",
 	"login.js",
 ];
+// Compute a cache-bust hash for new-session-modal.js and patch the
+// __NSM_HASH__ placeholder in app.js (and any future module that wants
+// the same treatment). esbuild otherwise inlines the import as-is with
+// no `?v=…`, so the browser's ESM module cache would hold on to a stale
+// new-session-modal.js after a release even though app.js's `?v=…`
+// would have changed. The placeholder approach keeps the source readable
+// and makes the cache-bust a single sed-style substitution before the
+// minify pass runs.
+const nsmHash = createHash("sha256")
+	.update(readFileSync("dist/public/new-session-modal.js"))
+	.digest("hex")
+	.slice(0, 12);
 for (const file of webJavaScript) {
-	const source = readFileSync(`dist/public/${file}`, "utf8");
+	let source = readFileSync(`dist/public/${file}`, "utf8");
+	source = source.replaceAll("__NSM_HASH__", nsmHash);
 	const result = await transform(source, {
 		loader: "js",
 		format: "esm",
@@ -144,3 +158,4 @@ for (const file of webStylesheets) {
 // esbuild only bundles the @jsquash/* JS glue, not these; they're read from
 // disk at runtime via a path resolved relative to dist/index.js.
 cpSync("wasm", "dist/wasm", { recursive: true });
+

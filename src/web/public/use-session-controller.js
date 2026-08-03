@@ -142,8 +142,8 @@ export function useSessionController({
 	// (nothing left after this change — kept as the one place that actually
 	// talks to POST /api/sessions).
 	const commitSession = useCallback(
-		async (persona, cwd, { push = true, draftVersion } = {}) => {
-			const create = async () => api("POST", "/api/sessions", { persona, cwd });
+		async (persona, cwd, { push = true, draftVersion, worktree } = {}) => {
+			const create = async () => api("POST", "/api/sessions", { persona, cwd, worktree });
 			const pending = draftVersion == null ? create() : (draftCommitsRef.current.get(draftVersion) ?? create());
 			if (draftVersion != null) draftCommitsRef.current.set(draftVersion, pending);
 			let data;
@@ -200,7 +200,7 @@ export function useSessionController({
 	// this draft actually gets a message (see there). Same idea as ChatGPT's
 	// "New chat": the conversation doesn't exist until you say something.
 	const startDraft = useCallback(
-		(persona, draftCwd) => {
+		(persona, draftCwd, opts = {}) => {
 			++sessionViewVersionRef.current;
 			const draftVersion = ++draftVersionRef.current;
 			if (esRef.current) {
@@ -220,6 +220,11 @@ export function useSessionController({
 				updatedAt: new Date().toISOString(),
 				isDraft: true,
 				draftVersion,
+				// Stashed on the draft so message-submit can pass it through to
+				// commitSession when the first message turns the draft into a
+				// real session. Optional — only set when the new-session modal
+				// asked for worktree isolation.
+				worktree: opts.worktree,
 			});
 			resetStreamingNow();
 			setRunning(false);

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 
-export function useWorkspaceState({ initialCwd }) {
+export function useWorkspaceState() {
 	const [diffOpen, setDiffOpen] = useState(() => {
 		try {
 			return localStorage.getItem("cast:diffOpen") === "1";
@@ -83,9 +83,13 @@ export function useWorkspaceState({ initialCwd }) {
 	// Persona the sidebar's "Quick session" button uses — configurable in
 	// Settings > Tools, defaults to "senior" server-side when never set.
 	const [quickSessionPersona, setQuickSessionPersona] = useState("senior");
-	// "new" (a fresh sandbox dir) is the default for a new session, not the
-	// project root — picking the root path is the deliberate action here.
-	const [selectedCwd, setSelectedCwd] = useState(initialCwd);
+	// Default cwd: empty until initClientState pulls a real one from
+	// /api/config. A blank value here means "show the home dir shortPath
+	// (`~`) in the new-session modal until the user picks a real path" —
+	// the server's /api/browse and /api/sessions both fall back to $HOME
+	// when cwd is unset, so an unsubmitted selection still creates a
+	// session in a sensible place.
+	const [selectedCwd, setSelectedCwd] = useState("");
 	const [dirPickerOpen, setDirPickerOpen] = useState(false);
 	const [hotkeysOpen, setHotkeysOpen] = useState(false);
 	const [settingsOpen, setSettingsOpen] = useState(false);

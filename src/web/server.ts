@@ -4,7 +4,7 @@
  * cookie so the browser never replaces Cast's UI with its own prompt.
  */
 
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import {
 	createReadStream,
@@ -24,7 +24,8 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 
 import { brotliCompressSync, gzipSync } from "node:zlib";
 import { getDb } from "../core/db.ts";
 import { getHistoryPage, getMessageImage } from "../core/session.ts";
-import { reconcileActiveStream, toDisplayMessages, type WebBridge, type WebEvent } from "./bridge.ts";
+import { ensureSessionWorktree } from "../core/worktree.ts";
+import { reconcileActiveStream, SANDBOX_CWD, toDisplayMessages, type WebBridge, type WebEvent } from "./bridge.ts";
 import { isBlockedAttachmentName, sessionInputsDir } from "./inputs.ts";
 
 const MIME_TYPES: Record<string, string> = {
@@ -453,6 +454,45 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 		json(res, bridge.getPersonas());
 	});
 
+	// Lightweight git probe for the new-session modal: lets the UI show or
+	// hide the worktree section based on whether `cwd` is inside a git
+	// checkout with at least one commit. Cheap (one git rev-parse per
+	// request, with a hard 2s timeout) so the modal can call it on every
+	// cwd change without blocking the user.
+	route("GET", "/api/git-info", (req, res) => {
+		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+		const cwd = url.searchParams.get("cwd") ?? "";
+		if (!cwd || cwd === SANDBOX_CWD) {
+			// Sandbox sessions have no git context — the modal hides the
+			// worktree section whenever sandbox is picked, so an empty
+			// response is exactly what the client wants.
+			return json(res, { isGit: false });
+		}
+		const run = (args: string[]) => {
+			try {
+				return execFileSync("git", args, {
+					cwd,
+					encoding: "utf-8",
+					timeout: 2000,
+					stdio: ["pipe", "pipe", "pipe"],
+				}).trim();
+			} catch {
+				return null;
+			}
+		};
+		const inside = run(["rev-parse", "--is-inside-work-tree"]);
+		if (inside !== "true") {
+			return json(res, { isGit: false, cwd });
+		}
+		const head = run(["rev-parse", "HEAD"]);
+		json(res, {
+			isGit: true,
+			hasCommits: !!head,
+			branch: run(["rev-parse", "--abbrev-ref", "HEAD"]) ?? "—",
+			cwd,
+		});
+	});
+
 	route("GET", "/api/sessions", (req, res) => {
 		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
 		const q = url.searchParams.get("q");
@@ -464,13 +504,29 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 		let persona: string | undefined;
 		let model: string | undefined;
 		let cwd: string | undefined;
+		let worktree: string | undefined;
 		try {
-			const parsed = JSON.parse(body) as { persona?: string; model?: string; cwd?: string };
+			const parsed = JSON.parse(body) as {
+				persona?: string;
+				model?: string;
+				cwd?: string;
+				worktree?: string;
+			};
 			persona = parsed.persona;
 			model = parsed.model;
 			cwd = parsed.cwd;
+			worktree = parsed.worktree;
 		} catch {
 			// empty body is fine
+		}
+		// Worktree and sandbox are mutually exclusive: a sandbox is a throwaway
+		// scratch dir under ~/.cast/sandbox/, a worktree is a real checkout of
+		// the repo's working tree. Picking both would nest one inside the
+		// other in undefined ways. The bridge also enforces this defensively;
+		// the check here just gives the client a clean 400 instead of a
+		// silent preference.
+		if (worktree && cwd === SANDBOX_CWD) {
+			return json(res, { error: "Worktree mode is incompatible with sandbox mode" }, 400);
 		}
 		// Clients passing an explicit sandbox path (pre-SANDBOX_CWD-sentinel) still
 		// get it created for them; the current "new" button sends the sentinel and
@@ -480,7 +536,21 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 				mkdirSync(cwd, { recursive: true });
 			} catch {}
 		}
-		const ws = bridge.createSession(persona, model, cwd);
+		let wtPath: string | undefined;
+		if (worktree) {
+			const sourceCwd = cwd && cwd !== SANDBOX_CWD ? cwd : bridge.getConfig().cwd;
+			try {
+				const wt = await ensureSessionWorktree(worktree, sourceCwd);
+				wtPath = wt.path;
+			} catch (err) {
+				// ensureSessionWorktree throws a user-readable message on every
+				// failure mode (not a git repo, no commits, invalid slug, etc.) —
+				// surface it as-is so the client can show the right hint.
+				const message = err instanceof Error ? err.message : String(err);
+				return json(res, { error: message }, 400);
+			}
+		}
+		const ws = bridge.createSession(persona, model, wtPath ?? cwd, true);
 		json(res, { id: ws.id, session: ws.session }, 201);
 	});
 
@@ -1440,6 +1510,7 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 		// widen what an unauthenticated visitor can actually do.
 		const PUBLIC_STATIC_ASSETS = new Set([
 			"/app.js",
+			"/new-session-modal.js",
 			"/login.html",
 			"/login.css",
 			"/login.js",
