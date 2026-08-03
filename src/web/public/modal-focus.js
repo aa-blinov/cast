@@ -3,8 +3,44 @@ import { useEffect, useRef } from "preact/hooks";
 export const FOCUSABLE_SELECTOR =
 	'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])';
 
-// Shared by every modal: move focus into the dialog, keep Tab inside it, and
-// restore the triggering element when the dialog closes.
+// Stack of modals currently listening for Escape. Last-in/first-out: when
+// two modals are open at once (e.g. NewSessionModal with a DirectoryBrowser
+// on top), the topmost one closes first; a second Esc closes the one below.
+// Each `useModalFocusTrap` push/pops its own entry, so order matches the
+// Preact render order without any explicit z-index bookkeeping.
+const escStack = [];
+
+// `document` is undefined under Node (jsdom-less unit tests import this
+// module). Register the keydown listener lazily on first use, which in
+// production always happens inside a useEffect that already has DOM.
+let escListenerRegistered = false;
+function registerEscListener() {
+	if (escListenerRegistered || typeof document === "undefined") return;
+	escListenerRegistered = true;
+	document.addEventListener(
+		"keydown",
+		(e) => {
+			if (e.key !== "Escape" || escStack.length === 0) return;
+			// Pop the topmost handler (last entry) and run it. The modal's
+			// effect cleanup removes its own entry on unmount, so the pop
+			// here is the only mid-callback mutation.
+			const handler = escStack.pop();
+			try {
+				handler?.();
+			} catch (err) {
+				// Don't let a broken close handler swallow the Esc —
+				// re-push it so the user can still get out of the next
+				// modal.
+				if (handler) escStack.push(handler);
+				throw err;
+			}
+		},
+		true,
+	);
+}
+
+// Shared by every modal: move focus into the dialog, keep Tab inside it,
+// handle Escape, and restore the triggering element when the dialog closes.
 export function useModalFocusTrap(active, initialFocusSelector) {
 	const ref = useRef(null);
 	useEffect(() => {
@@ -32,8 +68,25 @@ export function useModalFocusTrap(active, initialFocusSelector) {
 			}
 		};
 		document.addEventListener("keydown", onKeyDown, true);
+		// Register an Esc handler that closes this specific modal. The
+		// shared document-level handler walks the stack in reverse, so
+		// the topmost modal always closes first; the rest stays in the
+		// stack until their own Esc arrives.
+		const onEsc = () => {
+			// Best-effort: each modal ships a `.modal-close` button in its
+			// header (cast convention; see directory-browser.js, share-modal.js,
+			// settings-modal.js, new-session-modal.js). Synthesising a click
+			// here means we don't have to thread an `onClose` ref through
+			// the focus-trap hook — every modal that opts into the trap gets
+			// Escape handling for free.
+			const closeBtn = container?.querySelector(".modal-close");
+			if (closeBtn instanceof HTMLElement) closeBtn.click();
+		};
+		escStack.push(onEsc);
 		return () => {
 			document.removeEventListener("keydown", onKeyDown, true);
+			const idx = escStack.indexOf(onEsc);
+			if (idx !== -1) escStack.splice(idx, 1);
 			previouslyFocused?.focus?.();
 		};
 	}, [active, initialFocusSelector]);
