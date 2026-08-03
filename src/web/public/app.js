@@ -19,7 +19,7 @@ import { InputsExplorer as InputsExplorerModule } from "./inputs-explorer.js";
 import { Message as MessageModule } from "./message.js";
 import { submitMessage as submitMessageRequest } from "./message-submit.js";
 import { useModalFocusTrap } from "./modal-focus.js";
-import { NewSessionModal } from "./new-session-modal.js";
+import { NewSessionModal } from "./new-session-modal.js?v=__NSM_HASH__";
 import { PlanDecisionCard, QuestionCard } from "./plan-cards.js";
 import { SettingsAppearance } from "./settings-appearance.js";
 import { SettingsModal as SettingsModalModule } from "./settings-modal.js";
@@ -39,7 +39,6 @@ import {
 } from "./settings-panels.js";
 import { ShareModal } from "./share-modal.js";
 import { Sidebar as SidebarModule } from "./sidebar.js";
-import { SANDBOX_CWD } from "./sidebar-utils.js";
 import { closeSseConnection, openSseConnection } from "./sse-connection.js";
 import { handleSseEvent } from "./sse-events.js";
 import { StatusPopover } from "./status-popover.js";
@@ -671,7 +670,7 @@ function App() {
 		setSettingsOpen,
 		confirmState,
 		setConfirmState,
-	} = useWorkspaceState({ initialCwd: SANDBOX_CWD });
+	} = useWorkspaceState();
 	const requestConfirm = useCallback(
 		(message) => new Promise((resolve) => setConfirmState({ message, resolve })),
 		[setConfirmState],
@@ -901,9 +900,25 @@ function App() {
 	// actually gets created on the server at first message via commitSession
 	// (see use-session-controller.js).
 	const [newSessionOpen, setNewSessionOpen] = useState(false);
-	const onCreateNewSession = (payload) => {
-		setNewSessionOpen(false);
+	// Forwarded into NewSessionModal so the modal can show server-side
+	// errors (notably worktree-creation failures) without having to close
+	// itself preemptively.
+	const [newSessionError, setNewSessionError] = useState(null);
+	void newSessionError;
+	const onCreateNewSession = async (payload) => {
+		// Stage the draft first so the user sees the new session immediately,
+		// but keep the modal open until commitSession actually succeeds —
+		// worktree creation happens server-side at POST /api/sessions, so a
+		// failure here is invisible to startDraft and must surface in the
+		// modal's error slot.
 		startDraft(payload.persona, payload.cwd, { worktree: payload.worktree });
+		try {
+			await commitSession(payload.persona, payload.cwd, { push: false, worktree: payload.worktree });
+			setNewSessionError(null);
+			setNewSessionOpen(false);
+		} catch (err) {
+			setNewSessionError(err?.message ?? String(err));
+		}
 	};
 
 	// Sidebar toggle — a drawer on mobile (existing transform-based behavior),
@@ -1614,8 +1629,11 @@ function App() {
 				open=${newSessionOpen}
 				personas=${personas}
 				defaultPersona=${defaultP}
-				defaultCwd=${cwd}
+				cwd=${cwd}
+				defaultCwd=${defaultCwd}
 				defaultModel=${defaultModel}
+				onSetCwd=${setSelectedCwd}
+				onOpenDirPicker=${() => setDirPickerOpen(true)}
 				onCreate=${onCreateNewSession}
 				onClose=${() => setNewSessionOpen(false)}
 			/>
