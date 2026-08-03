@@ -1497,7 +1497,47 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			try {
 				dirty = git(["status", "--porcelain"]).length > 0;
 			} catch {}
-			return { ok: true, result: { cwd: sessionCwd, isGit: true, branch, dirty } };
+			// 'git worktree list --porcelain' prints the worktree's absolute
+			// path on the first line of each block, followed by 'HEAD <sha>'
+			// and 'branch <name>'. We use it to detect whether the session
+			// is running inside a worktree (rather than the main checkout)
+			// so the StatusPopover can label it explicitly. Runs against the
+			// main repo because 'git worktree list' is only valid there; we
+			// resolve the main repo from the current cwd via --git-common-dir.
+			let worktree: string | null = null;
+			try {
+				const commonDir = git(["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+				const mainRepoRoot = join(commonDir, "..");
+				const list = execFileSync("git", ["worktree", "list", "--porcelain"], {
+					cwd: mainRepoRoot,
+					encoding: "utf-8",
+					timeout: 3000,
+					stdio: ["pipe", "pipe", "pipe"],
+				}).trim();
+				// `git worktree list` shows the main checkout as the first
+				// entry. We only call out a worktree path when the session's
+				// cwd is in a separate entry — running inside the main
+				// checkout itself is the common case and just shows "—".
+				const blocks = list.split("\n\n");
+				for (const block of blocks) {
+					const pathLine = block.split("\n").find((l) => l.startsWith("worktree "));
+					if (!pathLine) continue;
+					const path = pathLine.substring("worktree ".length);
+					if (path === sessionCwd && path !== mainRepoRoot) {
+						worktree = path;
+						break;
+					}
+				}
+			} catch {
+				// git worktree list is best-effort; if it fails (e.g. the
+				// session lives in a standalone clone without worktrees
+				// registered) we just leave worktree = null and the UI
+				// shows the em-dash placeholder.
+			}
+			return {
+				ok: true,
+				result: { cwd: sessionCwd, isGit: true, branch, dirty, worktree },
+			};
 		}
 		if (name === "/rules") {
 			return {
