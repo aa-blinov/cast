@@ -145,11 +145,31 @@ export function buildReasoningParams(effort: string, format: ReasoningFormat = "
 			};
 		case "huawei":
 			return { body: { chat_template_kwargs: { enable_thinking: enabled } }, enabled };
-		case "minimax":
-			// MiniMax otherwise puts <think> and the answer into content. Its
-			// OpenAI-compatible streaming API can also interleave those chunks;
-			// requesting the split format makes the channels unambiguous.
+		case "minimax": {
+			// M3's `thinking` controls have a 3-state surface in the UI, but
+			// the live API is more nuanced: when present, the server only
+			// accepts `thinking: { type: "adaptive" }` or `thinking: { type:
+			// "disabled" }` — `type: "enabled"` is rejected (400 with
+			// "allowed: adaptive, disabled"). The "always-on" mode is the
+			// default: omit the field entirely and the model runs in its
+			// built-in reasoning-on behavior. `reasoning_split` stays on so
+			// 思考 stays in its own stream channel regardless of mode.
+			// Verified live against api.minimax.io.
+			if (effort === "adaptive") {
+				return {
+					body: { reasoning_split: true, thinking: { type: "adaptive" } },
+					enabled: true,
+				};
+			}
+			if (effort === "disabled") {
+				return {
+					body: { reasoning_split: true, thinking: { type: "disabled" } },
+					enabled: false,
+				};
+			}
+			// "enabled" (default) — let the server run in its built-in always-on mode.
 			return { body: { reasoning_split: true }, enabled: true };
+		}
 		case "generic":
 			return enabled
 				? { body: { reasoning_effort: normalized ?? "medium" }, enabled: true }
@@ -205,7 +225,15 @@ export function getReasoningOptionsForFormat(
 	meta: ModelReasoningMeta | null,
 	format: ReasoningFormat,
 ): Array<{ value: string; label: string }> {
-	if (!meta && format === "minimax") return [{ value: "on", label: "On (always enabled by MiniMax)" }];
+	if (!meta && format === "minimax") {
+		// M3 supports a 3-state `thinking` parameter (enabled/adaptive/disabled)
+		// per huggingface.co/MiniMaxAI/MiniMax-M3 — not a binary on/off.
+		return [
+			{ value: "enabled", label: "Enabled (always reasoning)" },
+			{ value: "adaptive", label: "Adaptive (model decides)" },
+			{ value: "disabled", label: "Disabled (lowest latency)" },
+		];
+	}
 	if (!meta && ["deepseek", "kimi", "qianfan", "qwen", "together", "zai", "huawei"].includes(format)) {
 		return [
 			{ value: "off", label: "Off (no reasoning)" },

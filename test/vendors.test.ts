@@ -406,10 +406,32 @@ describe("buildReasoningParams", () => {
 		expect(resolveReasoningFormat("https://api.modelarts.huaweicloud.com/v1")).toBe("huawei");
 	});
 
-	it("does not send undocumented reasoning controls to MiniMax", () => {
+	it("Minimax reasoning advertises the 3-state `thinking` mode from the model card", () => {
 		expect(resolveReasoningFormat("https://api.minimax.io/v1")).toBe("minimax");
+		// 3 UI options (no meta) match the card's enabled/adaptive/disabled.
+		expect(getReasoningOptionsForFormat(null, "minimax").map((option) => option.value)).toEqual([
+			"enabled",
+			"adaptive",
+			"disabled",
+		]);
+		// The live API rejects `thinking: { type: "enabled" }` with 400
+		// ("allowed: adaptive, disabled"), so the "always-on" mode is the
+		// default — omit the field. Only `adaptive`/`disabled` are explicit.
+		expect(buildReasoningParams("enabled", "minimax")).toEqual({
+			body: { reasoning_split: true },
+			enabled: true,
+		});
+		expect(buildReasoningParams("adaptive", "minimax")).toEqual({
+			body: { reasoning_split: true, thinking: { type: "adaptive" } },
+			enabled: true,
+		});
+		expect(buildReasoningParams("disabled", "minimax")).toEqual({
+			body: { reasoning_split: true, thinking: { type: "disabled" } },
+			enabled: false,
+		});
+		// Stale level strings (off/on) fall back to the always-on default.
 		expect(buildReasoningParams("on", "minimax").body).toEqual({ reasoning_split: true });
-		expect(getReasoningOptionsForFormat(null, "minimax").map((option) => option.value)).toEqual(["on"]);
+		expect(buildReasoningParams("off", "minimax").body).toEqual({ reasoning_split: true });
 	});
 
 	it("off returns explicit enabled: false", () => {
