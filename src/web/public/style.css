@@ -1195,7 +1195,11 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 .new-session-body { padding: 14px; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
 .new-session-personas {
 	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+	/* Always exactly two columns: consistent layout on mobile, tablet,
+	   and desktop. Cards are tall enough for two lines of text (label +
+	   source), so 2-up reads cleanly without leaving the right column
+	   empty. */
+	grid-template-columns: 1fr 1fr;
 	gap: 6px;
 }
 .new-session-persona {
@@ -1206,6 +1210,9 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	background: var(--bg);
 	color: var(--text-dim);
 	font-family: var(--font);
+	/* Fixed font size for the label so the cards line up no matter how
+	   long the persona name is — a long "Coder with subagents" no
+	   longer wraps to two lines while a short "Architect" stays on one. */
 	font-size: .8rem;
 	cursor: pointer;
 	transition: border-color .15s, background .15s, color .15s;
@@ -1216,8 +1223,25 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	background: color-mix(in srgb, var(--cyan) 14%, var(--bg-surface));
 	color: var(--cyan);
 }
-.new-session-persona-label { font-weight: 600; }
-.new-session-persona-source { font-size: .7rem; color: var(--text-muted); }
+.new-session-persona-label {
+	font-weight: 600;
+	text-align: left;
+	width: 100%;
+	/* Truncate rather than wrap so the right column doesn't drift down
+	   when one card has a longer label than the next. */
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.new-session-persona-source {
+	font-size: .8rem;
+	color: var(--text-muted);
+	text-align: left;
+	width: 100%;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
 .new-session-cwd { display: flex; gap: 6px; flex-wrap: wrap; }
 /* Symmetric pair: Select dir + Sandbox. The "active" class is set by the
    caller (whichever mode is selected), and the corresponding row hint below
