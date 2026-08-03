@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Added
+
+- `--worktree <name>` / `-w <name>` (also on `cast run`) runs the session inside an isolated git worktree. The worktree is created (or reused) at `<repo>/.cast/worktrees/<name>` on a fresh `cast-<name>` branch off `HEAD`; bash, read, write, and edit all see the worktree path, and the main checkout is left untouched. Two `--worktree` runs in parallel never collide. Add `.cast/` to your `.gitignore`. The worktree and branch are left on disk on exit — remove them with `git worktree remove .cast/worktrees/<name>` and `git branch -D cast-<name>` when done. Requires being inside a git checkout with at least one commit; both `--worktree foo` and `--worktree=foo` are accepted.
+
 ## 0.12.15
 
 ### Added

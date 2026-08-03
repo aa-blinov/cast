@@ -39,6 +39,16 @@ Options:
   --session, -s <id>         Resume a specific session by id (alias for --resume=<id>)
   --persona, -p <name>       Persona to use (see /personas for the list)
                              Skips interactive selection.
+  -w, --worktree <name>      Run in an isolated git worktree. The worktree is
+                             created (or reused) at <repo>/.cast/worktrees/<name>
+                             on a fresh branch cast-<name> off HEAD. Bash, read,
+                             write, and edit all see the worktree path; the
+                             main checkout is left untouched. Two --worktree
+                             runs in parallel never collide. Add .cast/ to
+                             your .gitignore to keep it out of version control.
+                             Worktree and branch are left on disk on exit —
+                             remove with "git worktree remove" and
+                             "git branch -D cast-<name>" when done.
   --bypass-permissions       Skip confirmation for dangerous bash commands
                              this run only — see /permissions to persist it
   --skill <path>             Load an extra skill file or directory
