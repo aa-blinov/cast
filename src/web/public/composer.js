@@ -362,15 +362,7 @@ export function Composer({ running, ready, activeId, commands, personas, questio
 				<textarea
 					ref=${textareaRef}
 					class="composer-input"
-					placeholder=${
-						!ready
-							? "Connecting…"
-							: pickerItems.length > 0
-								? "↑↓ choose, ↵ pick"
-								: question
-									? "Type your answer and press Enter…"
-									: "Type a message or / for commands..."
-					}
+					placeholder=${!ready ? "Connecting…" : "Type a message…"}
 					rows="1"
 					disabled=${!ready}
 					value=${value}
