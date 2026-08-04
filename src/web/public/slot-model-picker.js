@@ -26,7 +26,7 @@ export function SlotModelPicker({
 	const [models, setModels] = useState(initialModels || []);
 	const [loading, setLoading] = useState(false);
 	const modelRequestVersion = useRef(0);
-	const defaultLabel = activeProviderName || "Select…";
+	const defaultLabel = isMainSlot ? "Select…" : "Default (from main)";
 
 	useEffect(() => {
 		let cancelled = false;

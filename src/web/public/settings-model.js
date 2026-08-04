@@ -28,7 +28,7 @@ export function SettingsModel({ data, busy, act }) {
 		<div class="settings-section-title">Model</div>
 		<p class="settings-hint">Pick a provider first — its dropdown populates with that provider's models. Pick a model and click Apply.</p>
 		<${SlotModelPicker} busy=${busy} act=${act} providers=${providers} activeProviderName=${activeProviderName} currentProvider=${activeProviderName} currentModel=${current.model} providerCommand="/provider" modelCommand="/model" isMainSlot=${true} initialModels=${data.models} />
-		<div class="settings-section-title">Reasoning — current: ${currentLevel || "off"}</div>
+		<div class="settings-section-title">Reasoning</div>
 		${data.reasoningOptions.length === 0 ? html`<div class="settings-hint">This model exposes no reasoning controls.</div>` : html`<p class="settings-hint">Controls how much internal thinking the model does before answering. Higher levels use more tokens but can improve complex task performance.</p><div class="settings-form-row"><select value=${pendingValue || currentLevel} onChange=${(event) => setPendingValue(event.target.value)}><option value="">Pick a level…</option>${data.reasoningOptions.map((option) => html`<option key=${option.value} value=${option.value}>${option.label}</option>`)}</select><button class="modal-btn icon-btn" title="Apply reasoning" disabled=${busy || !isPending} onClick=${applyReasoning}><${icons.check} /></button></div>`}
 		<div class="settings-section-title">Subagent model</div>
 		<p class="settings-hint">Model used for task subagents — inherits the main model unless overridden here. Use ↩ to return to inheritance.</p>
