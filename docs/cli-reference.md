@@ -72,6 +72,7 @@ Starting when another instance is already running prints an error and exits. `st
 
 Features:
 - Create/switch/close sessions with different personas, running independently in parallel
+- Modal for new sessions supports working directory selection, optional git-worktree isolation (`.cast/worktrees/<name>`), persona selection, and per-session model overrides
 - Session sidebar groups threads by working directory: Quick sessions use a `Sandbox` group, while project sessions use the directory name rather than the full path. Groups are ordered by latest activity; pinned and running threads stay at the top of their own group. Hover a group name to see its full path.
 - Token-by-token streaming, with reasoning and tool calls shown inline as they happen
 - Tool call cards showing arguments and status
