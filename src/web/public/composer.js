@@ -15,7 +15,7 @@ const PERSONA_CMD_RE = /^\/persona\s+(\S*)$/i;
 
 const html = htm.bind(h);
 
-export function Composer({ running, ready, activeId, commands, personas, question, onSubmit, onAbort, onDocUploaded }) {
+export function Composer({ running, ready, activeId, commands, personas, onSubmit, onAbort, onDocUploaded }) {
 	const [value, setValue] = useState("");
 	const [cmdVisible, setCmdVisible] = useState(false);
 	const [selectedIndex, setSelectedIndex] = useState(0);
