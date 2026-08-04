@@ -5,6 +5,8 @@ import { FilePreviewModal } from "./file-preview.js";
 import { icons } from "./icons.js";
 import { getToolCardOpen, getToolCardPreviewSrc, setToolCardOpen, setToolCardPreviewSrc } from "./tool-card-state.js";
 
+const UNICODE_ESCAPE_RE = /\\u[\dA-Fa-f]{4}/;
+
 const html = htm.bind(h);
 
 function formatValue(value, indent) {
@@ -55,7 +57,7 @@ function formatToolResult(name, result) {
 			return result;
 		}
 	}
-	if (!/\\u[\dA-Fa-f]{4}/.test(result)) return result;
+	if (!UNICODE_ESCAPE_RE.test(result)) return result;
 	let value = result;
 	for (let depth = 0; depth < 2; depth++) {
 		try {

@@ -11,6 +11,8 @@ import {
 import { CommandPalette, ValueSuggest } from "./composer-pickers.js";
 import { icons } from "./icons.js";
 
+const PERSONA_CMD_RE = /^\/persona\s+(\S*)$/i;
+
 const html = htm.bind(h);
 
 export function Composer({ running, ready, activeId, commands, personas, question, onSubmit, onAbort, onDocUploaded }) {
@@ -46,6 +48,7 @@ export function Composer({ running, ready, activeId, commands, personas, questio
 	const addDocFiles = useCallback(
 		async (files) => {
 			if (files.length === 0) return;
+			// biome-ignore lint/performance/noAwaitInLoops: sequential upload for per-file error feedback
 			for (const file of files) {
 				const id = `${file.name}-${Date.now()}-${Math.random()}`;
 				if (isBlockedAttachmentName(file.name)) {
@@ -137,7 +140,7 @@ export function Composer({ running, ready, activeId, commands, personas, questio
 	// web-tools, MCP/skills/plugins/provider/SSH, and the rest of the former
 	// sub-arg pickers moved to the Settings modal (see SettingsModal) so
 	// typing "/" only ever surfaces conversation-flow commands.
-	const personaMatch = /^\/persona\s+(\S*)$/i.exec(value);
+	const personaMatch = PERSONA_CMD_RE.exec(value);
 
 	const resize = useCallback(() => {
 		const el = textareaRef.current;
