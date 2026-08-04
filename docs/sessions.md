@@ -42,6 +42,7 @@ Sessions remember which provider their model belongs to. If you've switched prov
 You can run or switch a session inside an isolated git worktree:
 - **CLI**: `cast -w <name>` / `--worktree <name>`
 - **TUI**: `/worktree <name>`
+- **Web UI**: In the New Session modal, check **Run in an isolated git worktree** and specify a name (defaults to `tree-XXXX`).
 
 When enabled, cast creates (or reuses) a git worktree at `.cast/worktrees/<name>` on a branch named `cast-<name>`. The session's `cwd` switches to the worktree path, so all tools (`bash`, `read`, `write`, `edit`) operate inside the worktree while leaving your main checkout untouched. The worktree path is saved in the session state (`SessionState.cwd`), so resuming the session with `-c` or `--resume` automatically keeps working inside that worktree.
 
