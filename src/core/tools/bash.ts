@@ -14,6 +14,11 @@ import { checkDangerousBash } from "../permissions.ts";
 import type { BashBackgroundDeps } from "./bash-background.ts";
 import type { ConfirmBash, ToolResult } from "./shared.ts";
 
+const INSTALL_PATH_RE = /InstallPath\s+REG_SZ\s+(.+)/;
+const CRLF_RE = /\r\n/g;
+const CR_RE = /\r/g;
+const NEWLINE_SPLIT_RE = /\r?\n/;
+
 /** Strip ANSI escape sequences from output. */
 export function stripAnsi(s: string): string {
 	const ESC = String.fromCharCode(0x1b);
@@ -48,7 +53,7 @@ export type RunCommand = (file: string, args: string[]) => string | null;
 function gitBashFromRegistry(run: RunCommand, exists: (p: string) => boolean): string | null {
 	for (const hive of ["HKCU", "HKLM"]) {
 		const out = run("reg.exe", ["query", `${hive}\\Software\\GitForWindows`, "/v", "InstallPath"]);
-		const match = out?.match(/InstallPath\s+REG_SZ\s+(.+)/);
+		const match = out?.match(INSTALL_PATH_RE);
 		const installPath = match?.[1]?.trim();
 		if (!installPath) continue;
 		for (const rel of [join("bin", "bash.exe"), join("usr", "bin", "bash.exe")]) {
@@ -68,7 +73,7 @@ function gitBashFromRegistry(run: RunCommand, exists: (p: string) => boolean): s
 function gitBashFromPath(run: RunCommand, exists: (p: string) => boolean): string | null {
 	const out = run("where.exe", ["git.exe"]);
 	if (!out) return null;
-	for (const line of out.split(/\r?\n/)) {
+	for (const line of out.split(NEWLINE_SPLIT_RE)) {
 		const gitExe = line.trim();
 		if (!gitExe) continue;
 		const root = join(gitExe, "..", "..");
@@ -183,7 +188,7 @@ export interface FormatBashResultOptions {
  */
 export function formatBashResult(rawOutput: string, config: AppConfig, opts: FormatBashResultOptions): ToolResult {
 	const { exitCode, aborted = false, timedOut = false, timeoutSeconds, warnPrefix = "" } = opts;
-	let output = stripAnsi(rawOutput).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+	let output = stripAnsi(rawOutput).replace(CRLF_RE, "\n").replace(CR_RE, "\n");
 	const prefix = aborted
 		? "[ABORTED] Command was interrupted by user.\n\n"
 		: timedOut

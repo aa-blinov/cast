@@ -44,6 +44,8 @@ import { theme } from "./themes/index.ts";
 import { useAgentSession } from "./useAgentSession.ts";
 import { useTerminalResync } from "./useTerminalResync.ts";
 
+const TRAILING_ZERO_RE = /\.0$/;
+
 interface AppProps {
 	result: StartupResult;
 	version: string;
@@ -786,8 +788,8 @@ export function abbreviateTokens(n: number): string {
 	if (n < 1000) return String(n);
 	// 999,950+ would round to "1000.0k" — hand those to the M branch so it reads
 	// "1M" instead.
-	if (n < 999_950) return `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k`;
-	return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+	if (n < 999_950) return `${(n / 1000).toFixed(1).replace(TRAILING_ZERO_RE, "")}k`;
+	return `${(n / 1_000_000).toFixed(1).replace(TRAILING_ZERO_RE, "")}M`;
 }
 
 export function formatContextPct(messages: import("../core/llm.ts").Message[], config: AppConfig): string {

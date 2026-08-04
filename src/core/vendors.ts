@@ -16,6 +16,8 @@
 // Model reasoning metadata (from OpenRouter /v1/models)
 // ============================================================================
 
+const LEADING_NL_RE = /^\n+/;
+
 export interface ModelReasoningMeta {
 	mandatory: boolean;
 	defaultEnabled: boolean;
@@ -297,7 +299,7 @@ export class ThinkBlockParser {
 	private takeThinking(text: string): string | undefined {
 		if (!text) return undefined;
 		if (!this.thinkAtBlockStart) return text;
-		const stripped = text.replace(/^\n+/, "");
+		const stripped = text.replace(LEADING_NL_RE, "");
 		if (stripped) this.thinkAtBlockStart = false;
 		return stripped || undefined;
 	}
@@ -305,7 +307,7 @@ export class ThinkBlockParser {
 	private takeContent(text: string): string | undefined {
 		if (!text) return undefined;
 		if (!this.contentAtBlockStart) return text;
-		const stripped = text.replace(/^\n+/, "");
+		const stripped = text.replace(LEADING_NL_RE, "");
 		if (stripped) this.contentAtBlockStart = false;
 		return stripped || undefined;
 	}
