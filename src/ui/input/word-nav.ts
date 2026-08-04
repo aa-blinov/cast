@@ -5,12 +5,14 @@
  * detection. ASCII punctuation is handled as atomic segments.
  */
 
+const SINGLE_WHITESPACE_RE = /^\s$/;
+
 const wordSegmenter = new Intl.Segmenter(undefined, { granularity: "word" });
 
 const PUNCTUATION_REGEX = /[(){}[\]<>.,;:'"!?+\-=*/\\|&%^$#@~`]/;
 
 function isWhitespaceChar(char: string): boolean {
-	return /^\s$/.test(char);
+	return SINGLE_WHITESPACE_RE.test(char);
 }
 
 /**

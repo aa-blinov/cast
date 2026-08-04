@@ -80,7 +80,6 @@ function isCompleteApcSequence(data: string): "complete" | "incomplete" {
 }
 
 function parseUnmodifiedKittyPrintableCodepoint(sequence: string): number | undefined {
-	// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequences
 	const match = sequence.match(CSIU_RE);
 	if (!match) return undefined;
 	const codepoint = parseInt(match[1]!, 10);

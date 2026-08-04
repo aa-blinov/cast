@@ -37,6 +37,7 @@ export async function resolvePlanQuestionWithPicker(
 ): Promise<ResolveResult | null> {
 	const answers: string[] = [];
 	const sources: Array<"option" | "free-form"> = [];
+		// biome-ignore lint/performance/noAwaitInLoops: each question requires user interaction — sequential is correct
 	for (const item of question.questions) {
 		const choice = await pickers.pickOption(
 			[

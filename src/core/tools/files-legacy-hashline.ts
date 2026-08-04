@@ -38,6 +38,8 @@ import { getCachedFile, invalidateCachedFile } from "./hashline-cache.ts";
 import { findFilesByBasename } from "./search.ts";
 import { formatSize, resolvePath, type ToolResult } from "./shared.ts";
 
+const HUNK_HEAD_RE = /^[a-z]+:[a-z]+$/;
+
 function isEnoent(err: unknown): boolean {
 	return (err as { code?: string })?.code === "ENOENT";
 }
@@ -727,7 +729,7 @@ function resolveOpAnchor(
 	const head = stripAnchorGutter(anchorStr);
 	// Hash-only form that matched zero or several lines — tell the model
 	// explicitly instead of a generic "malformed".
-	if (/^[a-z]+:[a-z]+$/.test(head) && !recoverAnchorBySuffix(anchorStr, hashes)) {
+	if (HUNK_HEAD_RE.test(head) && !recoverAnchorBySuffix(anchorStr, hashes)) {
 		const [local, chunk] = head.split(":");
 		const hits: number[] = [];
 		for (let i = 0; i < hashes.length; i++) {

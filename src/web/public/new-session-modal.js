@@ -21,6 +21,8 @@ import { icons } from "./icons.js";
 import { useModalFocusTrap } from "./modal-focus.js";
 import { SANDBOX_CWD, shortPath } from "./sidebar-utils.js";
 
+const HOME_DIR_RE = /^\/(?:home|Users)\/[^/]+$/;
+
 const html = htm.bind(h);
 
 /** Default worktree name. Mirrors the `cast-<id>` shape that the
@@ -180,7 +182,7 @@ export function NewSessionModal({
 	// shortPath's ellipsis form. Empty cwd falls back to a literal "~"
 	// too — the server resolves an empty cwd to homedir() at session-
 	// create time, so the resulting session lives in the same place.
-	const homeMatch = /^\/(?:home|Users)\/[^/]+$/.test(cwd);
+	const homeMatch = HOME_DIR_RE.test(cwd);
 	const cwdLabel = sandbox ? "Sandbox" : !cwd ? "~" : homeMatch ? "~" : shortPath(cwd);
 
 	return html`

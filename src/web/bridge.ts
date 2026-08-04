@@ -105,8 +105,6 @@ const WHITESPACE_SPLIT = /\s+/;
 // string to `npx` verbatim and `npx` expects `owner/repo`. Strip a leading
 // `https?://(www.)?github.com/` so a paste from the skills.sh site
 // "just works" no matter how the user copied the URL. Used twice in the
-// `/skills-sh install` branch — once to test, once to strip.
-const GITHUB_URL_PREFIX = /^https?:\/\/(?:www\.)?github\.com\//i;
 const GITHUB_GIT_SUFFIX = /\.git$/;
 
 async function runSkillsSh(args: string[], timeout: number): Promise<string> {

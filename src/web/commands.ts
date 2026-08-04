@@ -7,6 +7,8 @@
  * handler in bridge.ts's executeCommand).
  */
 
+const WHITESPACE_RE = /\s+/;
+
 /** Commands that work while the agent is running. */
 export const NON_BLOCKING_COMMANDS = new Set([
 	"/abort",
@@ -157,7 +159,7 @@ export const SLASH_COMMANDS: Array<{
 export function isCommandBlocking(input: string): boolean {
 	const trimmed = input.trim();
 	if (!trimmed.startsWith("/")) return false;
-	const [name, ...rest] = trimmed.split(/\s+/);
+	const [name, ...rest] = trimmed.split(WHITESPACE_RE);
 	if (NON_BLOCKING_COMMANDS.has(name!)) return false;
 	// "/provider" (bare, or explicit "list") only reads the configured
 	// providers — it's just "/provider <name>"/"add"/"delete" that mutate the

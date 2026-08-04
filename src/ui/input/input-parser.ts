@@ -11,6 +11,9 @@ import { getKeybindings, type Keybinding } from "./keybindings.ts";
 import { decodePrintableKey, setKittyProtocolActive } from "./keys.ts";
 import { StdinBuffer } from "./stdin-buffer.ts";
 
+// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence
+const CURSOR_POS_RE = /^\x1b\[\d+;\d+R$/;
+
 export type InputEvent = { type: "binding"; binding: Keybinding; raw: string } | { type: "char"; text: string };
 
 const BINDING_ORDER: Keybinding[] = [
@@ -74,7 +77,7 @@ export class InputParser {
 		// explicit drop makes the intent clear and prevents a future keybinding
 		// from accidentally matching it.
 		// biome-ignore lint/suspicious/noControlCharactersInRegex: DECXCPR response
-		if (/^\x1b\[\d+;\d+R$/.test(sequence)) {
+		if (CURSOR_POS_RE.test(sequence)) {
 			return;
 		}
 
