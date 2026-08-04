@@ -28,12 +28,6 @@ export type Replacer = (content: string, find: string) => Generator<string, void
 const SINGLE_CANDIDATE_SIMILARITY_THRESHOLD = 0.65;
 const MULTIPLE_CANDIDATES_SIMILARITY_THRESHOLD = 0.65;
 
-const WHITESPACE_RE_G = /\s+/g;
-const LEADING_SPACE_RE = /^\s*/;
-const REGEX_SPECIAL_RE2 = /[.*+?^${}()|[\]\\]/g;
-const ESCAPE_SEQUENCE_RE = /\\(n|t|r|'|"|`|\\|\n|\$)/g;
-
-
 /** Levenshtein distance algorithm implementation */
 function levenshtein(a: string, b: string): number {
 	if (a === "" || b === "") {
@@ -236,7 +230,7 @@ export const BlockAnchorReplacer: Replacer = function* (content, find) {
 };
 
 export const WhitespaceNormalizedReplacer: Replacer = function* (content, find) {
-	const normalizeWhitespace = (text: string) => text.replace(WHITESPACE_RE_G, " ").trim();
+	const normalizeWhitespace = (text: string) => text.replace(/\s+/g, " ").trim();
 	const normalizedFind = normalizeWhitespace(find);
 
 	// Handle single line matches
@@ -250,9 +244,9 @@ export const WhitespaceNormalizedReplacer: Replacer = function* (content, find) 
 			const normalizedLine = normalizeWhitespace(line);
 			if (normalizedLine.includes(normalizedFind)) {
 				// Find the actual substring in the original line that matches
-				const words = find.trim().split(WHITESPACE_RE_G);
+				const words = find.trim().split(/\s+/);
 				if (words.length > 0) {
-					const pattern = words.map((word) => word.replace(REGEX_SPECIAL_RE2, "\\$&")).join("\\s+");
+					const pattern = words.map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+");
 					try {
 						const regex = new RegExp(pattern);
 						const match = line.match(regex);
@@ -287,7 +281,7 @@ export const IndentationFlexibleReplacer: Replacer = function* (content, find) {
 
 		const minIndent = Math.min(
 			...nonEmptyLines.map((line) => {
-				const match = line.match(LEADING_SPACE_RE);
+				const match = line.match(/^(\s*)/);
 				return match ? match[1]!.length : 0;
 			}),
 		);
@@ -309,7 +303,7 @@ export const IndentationFlexibleReplacer: Replacer = function* (content, find) {
 
 export const EscapeNormalizedReplacer: Replacer = function* (content, find) {
 	const unescapeString = (str: string): string => {
-		return str.replace(ESCAPE_SEQUENCE_RE, (match, capturedChar) => {
+		return str.replace(/\\(n|t|r|'|"|`|\\|\n|\$)/g, (match, capturedChar) => {
 			switch (capturedChar) {
 				case "n":
 					return "\n";
@@ -469,7 +463,7 @@ export function trimDiff(diff: string): string {
 	for (const line of contentLines) {
 		const content = line.slice(1);
 		if (content.trim().length > 0) {
-			const match = content.match(LEADING_SPACE_RE);
+			const match = content.match(/^(\s*)/);
 			if (match) min = Math.min(min, match[1]!.length);
 		}
 	}
