@@ -320,7 +320,6 @@ interface ParsedKittySequence {
 }
 
 function parseKittySequence(data: string): ParsedKittySequence | null {
-	// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequences
 	const csiUMatch = data.match(CSI_U_RE);
 	if (csiUMatch) {
 		const codepoint = parseInt(csiUMatch[1]!, 10);
@@ -330,7 +329,6 @@ function parseKittySequence(data: string): ParsedKittySequence | null {
 		return { codepoint, shiftedKey, baseLayoutKey, modifier: modValue - 1 };
 	}
 
-	// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequences
 	const arrowMatch = data.match(CSI_ARROW_RE);
 	if (arrowMatch) {
 		const modValue = parseInt(arrowMatch[1]!, 10);
@@ -338,7 +336,6 @@ function parseKittySequence(data: string): ParsedKittySequence | null {
 		return { codepoint: arrowCodes[arrowMatch[3]!]!, modifier: modValue - 1 };
 	}
 
-	// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequences
 	const funcMatch = data.match(CSI_FUNC_RE);
 	if (funcMatch) {
 		const keyNum = parseInt(funcMatch[1]!, 10);
@@ -355,7 +352,6 @@ function parseKittySequence(data: string): ParsedKittySequence | null {
 		if (codepoint !== undefined) return { codepoint, modifier: modValue - 1 };
 	}
 
-	// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequences
 	const homeEndMatch = data.match(CSI_HOME_END_RE);
 	if (homeEndMatch) {
 		const modValue = parseInt(homeEndMatch[1]!, 10);
@@ -367,7 +363,6 @@ function parseKittySequence(data: string): ParsedKittySequence | null {
 }
 
 function parseModifyOtherKeysSequence(data: string): { codepoint: number; modifier: number } | null {
-	// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequences
 	const match = data.match(CSI_MOD_KEY_RE);
 	if (!match) return null;
 	return { codepoint: parseInt(match[2]!, 10), modifier: parseInt(match[1]!, 10) - 1 };
