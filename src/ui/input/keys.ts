@@ -7,6 +7,17 @@
  * See: https://sw.kovidgoyal.net/kitty/keyboard-protocol/
  */
 
+// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequences
+const CSI_U_RE = /^\x1b\[(\d+)(?::(\d*))?(?::(\d+))?(?:;(\d+))?(?::\d+)?u$/;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequences
+const CSI_ARROW_RE = /^\x1b\[1;(\d+)(?::\d+)?([ABCD])$/;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequences
+const CSI_FUNC_RE = /^\x1b\[(\d+)(?:;(\d+))?(?::\d+)?~$/;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequences
+const CSI_HOME_END_RE = /^\x1b\[1;(\d+)(?::\d+)?([HF])$/;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequences
+const CSI_MOD_KEY_RE = /^\x1b\[27;(\d+);(\d+)~$/;
+
 let _kittyProtocolActive = false;
 
 export function setKittyProtocolActive(active: boolean): void {
@@ -310,7 +321,7 @@ interface ParsedKittySequence {
 
 function parseKittySequence(data: string): ParsedKittySequence | null {
 	// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequences
-	const csiUMatch = data.match(/^\x1b\[(\d+)(?::(\d*))?(?::(\d+))?(?:;(\d+))?(?::\d+)?u$/);
+	const csiUMatch = data.match(CSI_U_RE);
 	if (csiUMatch) {
 		const codepoint = parseInt(csiUMatch[1]!, 10);
 		const shiftedKey = csiUMatch[2] && csiUMatch[2].length > 0 ? parseInt(csiUMatch[2], 10) : undefined;
@@ -320,7 +331,7 @@ function parseKittySequence(data: string): ParsedKittySequence | null {
 	}
 
 	// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequences
-	const arrowMatch = data.match(/^\x1b\[1;(\d+)(?::\d+)?([ABCD])$/);
+	const arrowMatch = data.match(CSI_ARROW_RE);
 	if (arrowMatch) {
 		const modValue = parseInt(arrowMatch[1]!, 10);
 		const arrowCodes: Record<string, number> = { A: -1, B: -2, C: -3, D: -4 };
@@ -328,7 +339,7 @@ function parseKittySequence(data: string): ParsedKittySequence | null {
 	}
 
 	// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequences
-	const funcMatch = data.match(/^\x1b\[(\d+)(?:;(\d+))?(?::\d+)?~$/);
+	const funcMatch = data.match(CSI_FUNC_RE);
 	if (funcMatch) {
 		const keyNum = parseInt(funcMatch[1]!, 10);
 		const modValue = funcMatch[2] ? parseInt(funcMatch[2], 10) : 1;
@@ -345,7 +356,7 @@ function parseKittySequence(data: string): ParsedKittySequence | null {
 	}
 
 	// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequences
-	const homeEndMatch = data.match(/^\x1b\[1;(\d+)(?::\d+)?([HF])$/);
+	const homeEndMatch = data.match(CSI_HOME_END_RE);
 	if (homeEndMatch) {
 		const modValue = parseInt(homeEndMatch[1]!, 10);
 		const codepoint = homeEndMatch[3] === "H" ? FUNCTIONAL_CODEPOINTS.home : FUNCTIONAL_CODEPOINTS.end;
@@ -357,7 +368,7 @@ function parseKittySequence(data: string): ParsedKittySequence | null {
 
 function parseModifyOtherKeysSequence(data: string): { codepoint: number; modifier: number } | null {
 	// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequences
-	const match = data.match(/^\x1b\[27;(\d+);(\d+)~$/);
+	const match = data.match(CSI_MOD_KEY_RE);
 	if (!match) return null;
 	return { codepoint: parseInt(match[2]!, 10), modifier: parseInt(match[1]!, 10) - 1 };
 }
