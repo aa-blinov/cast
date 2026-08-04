@@ -492,11 +492,12 @@
 	.settings-pane { min-height: 0; }
 	.settings-compact-row { grid-template-columns: 1fr; gap: 8px; }
 	.settings-compact-row > :last-child { justify-self: start; }
-	/* Stack provider/add-host forms vertically on narrow screens */
-	.settings-form-row { flex-direction: column; align-items: stretch; }
-	.settings-form-row input,
-	.settings-form-row button { min-width: 0; width: 100%; box-sizing: border-box; }
+	/* Stack SSH multi-field rows vertically on narrow screens */
+	.settings-ssh-form .settings-form-row { flex-direction: column; align-items: stretch; }
+	.settings-ssh-form .settings-form-row input { min-width: 0; width: 100%; box-sizing: border-box; }
 	.settings-ssh-form { gap: 10px; }
+	/* Other form rows: keep default flex-wrap, let icon buttons stay inline */
+	.settings-form-row .icon-btn { width: auto; flex-shrink: 0; }
 	/* Marketplace plugin items need wrapping header */
 	.plugin-catalog-header { flex-wrap: wrap; gap: 4px; }
 	.plugin-catalog-header .settings-item-meta { max-width: 100%; }
