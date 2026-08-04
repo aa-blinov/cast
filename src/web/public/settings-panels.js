@@ -699,7 +699,7 @@ function SettingsSsh({ data, busy, act, confirm }) {
 				</div>
 				<div class="settings-form-row">
 					<input type="text" autocomplete="username" placeholder="Username (optional)" value=${username} disabled=${saving} onInput=${(e) => setUsername(e.target.value)} />
-					<input type="text" inputMode="numeric" placeholder="Port (22)" value=${port} disabled=${saving} style=${{ maxWidth: "100px" }} onInput=${(e) => setPort(e.target.value)} />
+					<input type="text" inputMode="numeric" placeholder="Port (22)" value=${port} disabled=${saving} onInput=${(e) => setPort(e.target.value)} />
 				</div>
 				<div class="settings-row-label">Sign in with</div>
 				<div class="settings-form-row">
