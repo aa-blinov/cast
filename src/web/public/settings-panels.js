@@ -591,7 +591,7 @@ function SettingsProvider({ data, busy, act, confirm }) {
 					verifyVersion.current++;
 					setVerifyState(null);
 				}} />
-				<input type="password" placeholder="API key" value=${apiKey} onInput=${(e) => {
+				<input type="password" autocomplete="off" placeholder="API key" value=${apiKey} onInput=${(e) => {
 					setApiKey(e.target.value);
 					verifyVersion.current++;
 					setVerifyState(null);
