@@ -492,6 +492,7 @@
 	.settings-pane { min-height: 0; }
 	.settings-compact-row { grid-template-columns: 1fr; gap: 8px; }
 	.settings-compact-row > :last-child { justify-self: start; }
+	.settings-compact-row select { max-width: none; width: 100%; box-sizing: border-box; }
 	/* Stack SSH multi-field rows vertically on narrow screens */
 	.settings-ssh-form .settings-form-row { flex-direction: column; align-items: stretch; }
 	.settings-ssh-form .settings-form-row input { min-width: 0; width: 100%; box-sizing: border-box; }
