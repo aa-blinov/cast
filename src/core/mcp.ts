@@ -287,7 +287,8 @@ export async function connectMcpServers(servers: Record<string, McpServerConfig>
 				const tools: Awaited<ReturnType<typeof client.listTools>>["tools"] = [];
 				let cursor: string | undefined;
 				do {
-					const page = await client.listTools(cursor ? { cursor } : undefined);
+							// biome-ignore lint/performance/noAwaitInLoops: pagination — each page's cursor depends on previous response
+				const page = await client.listTools(cursor ? { cursor } : undefined);
 					tools.push(...page.tools);
 					cursor = page.nextCursor;
 				} while (cursor);
