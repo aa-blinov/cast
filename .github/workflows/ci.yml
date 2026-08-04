@@ -28,5 +28,13 @@ jobs:
       - name: Type check + lint
         run: npm run check
 
+      - name: Build
+        # Tests in test/run-interactive-command.test.ts and
+        # test/worktree-from-worktree.test.ts spawn the bundled
+        # `dist/index.js` to exercise `cast run --interactive` end-to-end.
+        # Without this step CI's `npm ci` leaves dist/ empty and those
+        # tests fail with `Cannot find module 'dist/index.js'`.
+        run: npm run build
+
       - name: Run tests
         run: npm test
