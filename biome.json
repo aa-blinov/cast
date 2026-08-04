@@ -6,10 +6,18 @@
       "recommended": true,
       "style": {
         "noNonNullAssertion": "off",
-        "useConst": "error"
+        "useConst": "error",
+        "noDefaultExport": "off"
       },
       "suspicious": {
         "noExplicitAny": "off"
+      },
+      "complexity": {
+        "useSimplifiedLogicExpression": "off"
+      },
+      "performance": {
+        "noAwaitInLoops": "warn",
+        "useTopLevelRegex": "warn"
       }
     }
   },
