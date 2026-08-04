@@ -65,7 +65,7 @@ function SettingsWeb({ data, busy, act }) {
 			</div>
 			${
 				selectedSearchProvider !== "ddg"
-					? html`<div class="settings-compact-detail"><input type="password" autocomplete="off" placeholder=${selectedSearchProvider === "tavily" ? "Tavily API key (tvly-...)" : "Brave Search API key (BSA...)"} value=${selectedSearchProvider === "tavily" ? tKey : bKey} onInput=${(e) => (selectedSearchProvider === "tavily" ? setTavilyKey(e.target.value) : setBraveKey(e.target.value))} /><button class="modal-btn" disabled=${busy || !(selectedSearchProvider === "tavily" ? tKey : bKey)} onClick=${saveSearchProvider}>Save</button></div>`
+					? html`<div class="settings-compact-detail"><form style="display:contents" onSubmit=${(e) => e.preventDefault()}><input type="password" autocomplete="off" placeholder=${selectedSearchProvider === "tavily" ? "Tavily API key (tvly-...)" : "Brave Search API key (BSA...)"} value=${selectedSearchProvider === "tavily" ? tKey : bKey} onInput=${(e) => (selectedSearchProvider === "tavily" ? setTavilyKey(e.target.value) : setBraveKey(e.target.value))} /><button class="modal-btn" disabled=${busy || !(selectedSearchProvider === "tavily" ? tKey : bKey)} onClick=${saveSearchProvider}>Save</button></form></div>`
 					: null
 			}
 			<div class="settings-compact-row">
@@ -580,6 +580,7 @@ function SettingsProvider({ data, busy, act, confirm }) {
 			${data && data.length > 0 ? html`<div class="settings-hint">Providers here are just a saved list. In the Model tab, pick which provider each model slot uses (main / subagent / plan) — they can be on different providers.</div>` : null}
 			<div class="settings-section-title">${editing ? `Edit provider: ${editing}` : "Add provider"}</div>
 			<div class="settings-form-row">
+				<form style="display:contents" onSubmit=${(e) => e.preventDefault()}>
 				<input type="text" placeholder="name" value=${name} disabled=${!!editing} onInput=${(e) => {
 					setName(e.target.value);
 					verifyVersion.current++;
@@ -598,6 +599,7 @@ function SettingsProvider({ data, busy, act, confirm }) {
 				<button class="modal-btn icon-btn" title="Verify credentials" disabled=${busy || saving || verifying || !url || !apiKey} onClick=${doVerify}><${icons.arrowPath} /></button>
 				<button class="modal-btn icon-btn" title=${editing ? "Save changes" : "Add provider"} disabled=${busy || saving || verifying || !name || !url || !apiKey} onClick=${saveProvider}><${icons.check} /></button>
 				${editing ? html`<button class="modal-btn icon-btn" title="Cancel" disabled=${busy || saving} onClick=${cancelEdit}><${icons.xCircle} /></button>` : null}
+				</form>
 			</div>
 			${verifyState ? html`<div class="settings-hint ${verifyState.ok === false ? "settings-error" : verifyState.ok === true ? "settings-ok" : ""}">${verifyState.ok === false ? "✕ " : verifyState.ok === true ? "✓ " : ""}${verifyState.msg}</div>` : null}
 			<div class="settings-hint">Credentials are verified before saving — the provider must be reachable.</div>
@@ -709,7 +711,7 @@ function SettingsSsh({ data, busy, act, confirm }) {
 				${authMode === "key" ? html`<textarea class="settings-textarea" autocomplete="off" placeholder="Paste private key" value=${keyContent} disabled=${saving} onInput=${(e) => setKeyContent(e.target.value)} rows="4" />` : null}
 				${
 					authMode === "password"
-						? html`<div class="settings-form-row"><input type="password" autocomplete="off" placeholder="Password (requires sshpass on this machine)" value=${password} disabled=${saving} onInput=${(e) => setPassword(e.target.value)} /></div>`
+						? html`<div class="settings-form-row"><form style="display:contents" onSubmit=${(e) => e.preventDefault()}><input type="password" autocomplete="off" placeholder="Password (requires sshpass on this machine)" value=${password} disabled=${saving} onInput=${(e) => setPassword(e.target.value)} /></form></div>`
 						: null
 				}
 				${formStatus ? html`<div class="settings-hint ${formStatus.ok ? "settings-ok" : "settings-error"}" role="status">${formStatus.message}</div>` : null}
