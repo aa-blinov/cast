@@ -75,8 +75,6 @@ export class InputParser {
 		// chunk reaches the Composer's StdinBuffer too. StdinBuffer correctly
 		// parses it as a complete CSI sequence (R is in 0x40..0x7e); this
 		// explicit drop makes the intent clear and prevents a future keybinding
-		// from accidentally matching it.
-		// biome-ignore lint/suspicious/noControlCharactersInRegex: DECXCPR response
 		if (CURSOR_POS_RE.test(sequence)) {
 			return;
 		}
