@@ -29,7 +29,7 @@ const SINGLE_CANDIDATE_SIMILARITY_THRESHOLD = 0.65;
 const MULTIPLE_CANDIDATES_SIMILARITY_THRESHOLD = 0.65;
 
 const WHITESPACE_RE_G = /\s+/g;
-const LEADING_SPACE_RE = /^\s*/;
+const LEADING_SPACE_RE = /^(\s*)/;
 const REGEX_SPECIAL_RE2 = /[.*+?^${}()|[\]\\]/g;
 const ESCAPE_SEQUENCE_RE = /\\(n|t|r|'|"|`|\\|\n|\$)/g;
 
