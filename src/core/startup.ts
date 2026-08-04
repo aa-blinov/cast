@@ -235,6 +235,23 @@ export async function runStartup(
 		cwd = wt.path;
 	}
 
+	// Fast-fail `cast -c` from a fresh cwd. Doing this *before* the heavy
+	// work (provider model fetch, MCP connections, project file reads) means
+	// the common "no previous session here" case exits in milliseconds with a
+	// clear error, instead of after ~20s of model loading and HTTP probes.
+	// The full resume still happens below once skills/persona/MCP are wired
+	// up — this is just a guard against the "the user's mental model of
+	// `continue` is wrong" case eating their time.
+	if (args.resumeRequested && !args.resumeId && !args.resumePicker) {
+		const peek = getMostRecentSession(cwd);
+		if (!peek) {
+			console.error(
+				`No previous session found in ${cwd}. Use \`cast\` to start a new one, or \`cast --resume=<id>\` to pick a specific session.`,
+			);
+			process.exit(1);
+		}
+	}
+
 	const projectDeps: ProjectResolverDeps = {
 		noSkills: args.noSkills,
 		noMcp: args.noMcp,
@@ -421,17 +438,12 @@ export async function runStartup(
 			// Scoping the lookup to cwd matches Claude Code's `claude -c`
 			// (issue anthropics/claude-code#35226 in the upstream tracker)
 			// and avoids silently resuming an unrelated project's session
-			// when the user runs `cast -c` from a fresh checkout. If there
-			// is no saved session for this cwd, fail loudly with the path
-			// — silently creating a fresh session would erase the user's
-			// mental model of "continue" and lose any prior context.
+			// when the user runs `cast -c` from a fresh checkout.
+			//
+			// The fast-fail guard at the top of runStartup already handled
+			// the "no session" case, so reaching this branch means the DB
+			// has a row to resume.
 			found = getMostRecentSession(cwd);
-			if (!found) {
-				console.error(
-					`No previous session found in ${cwd}. Use \`cast\` to start a new one, or \`cast --resume=<id>\` to pick a specific session.`,
-				);
-				process.exit(1);
-			}
 		}
 		if (found) {
 			resumedSession = found;
