@@ -325,8 +325,10 @@ export async function* streamChat(
 	let yieldedAny = false;
 	let retryStartedAt: number | undefined;
 
+	// Stream reads are inherently sequential — the next chunk depends on server push.
 	while (true) {
 		try {
+			// biome-ignore lint/performance/noAwaitInLoops: streaming requires sequential read
 			const stream = await client.chat.completions.create(params, { signal });
 
 			const toolCallAccumulator = new Map<number, { id: string; name: string; arguments: string }>();
