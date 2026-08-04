@@ -90,6 +90,10 @@ import type { ThemeColors } from "../ui/themes/types.ts";
 import { isCommandBlocking, SLASH_COMMANDS } from "./commands.ts";
 import { sessionInputsDir } from "./inputs.ts";
 
+const SYSTEM_REMINDER_RE = /<system-reminder>([\s\S]*?)<\/system-reminder>/g;
+const GITHUB_URL_RE = /^https?:\/\/(?:www\.)?github\.com\//i;
+const FRONTMATTER_STRIP_RE = /^---\n[\s\S]*?\n---\n?/;
+
 const execFileAsync = promisify(execFile);
 
 // Slash-command argument parsing pulls the same one-or-more-whitespace
@@ -308,7 +312,7 @@ export function reconcileActiveStream(
 function extractSystemReminders(text: string): { cleaned: string; reminders: string[] } {
 	const reminders: string[] = [];
 	const cleaned = text
-		.replace(/<system-reminder>([\s\S]*?)<\/system-reminder>/g, (_, body: string) => {
+		.replace(SYSTEM_REMINDER_RE, (_, body: string) => {
 			reminders.push(body.trim());
 			return "";
 		})
@@ -2126,8 +2130,8 @@ export function createWebBridge(result: StartupResult): WebBridge {
 					// user copied the URL from — the original skills.sh site
 					// copy-button uses the long form, which currently surfaces
 					// as a confusing usage error.
-					if (rawArgs[0] && /^https?:\/\/(?:www\.)?github\.com\//i.test(rawArgs[0])) {
-						rawArgs[0] = rawArgs[0].replace(/^https?:\/\/(?:www\.)?github\.com\//i, "");
+					if (rawArgs[0] && GITHUB_URL_RE.test(rawArgs[0])) {
+						rawArgs[0] = rawArgs[0].replace(GITHUB_URL_RE, "");
 						rawArgs[0] = rawArgs[0].replace(GITHUB_GIT_SUFFIX, "");
 					}
 					if (rawArgs[0] === "npx") rawArgs.shift();
@@ -2549,7 +2553,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			if (!skill) return { ok: false, error: `Skill "${name}" not found` };
 			const raw = readFileSync(skill.filePath, "utf-8");
 			// Strip frontmatter
-			const content = raw.replace(/^---\n[\s\S]*?\n---\n?/, "");
+			const content = raw.replace(FRONTMATTER_STRIP_RE, "");
 			return { ok: true, content };
 		} catch (err) {
 			return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -2587,7 +2591,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			const content = candidates
 				.map((p) => {
 					const raw = readFileSync(p, "utf-8");
-					return raw.replace(/^---\n[\s\S]*?\n---\n?/, "");
+					return raw.replace(FRONTMATTER_STRIP_RE, "");
 				})
 				.join("\n\n---\n\n");
 			return { ok: true, content };
