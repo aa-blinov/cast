@@ -501,12 +501,9 @@
 	.settings-form-row .icon-btn { width: auto; flex-shrink: 0; }
 	/* Marketplace plugin items need wrapping header */
 	.plugin-catalog-header { flex-wrap: wrap; gap: 4px; }
-	.plugin-catalog-header .settings-item-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.plugin-catalog-header .settings-item-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.plugin-catalog-header .settings-item-meta { max-width: 100%; }
-	.plugin-catalog-header > *:last-child { margin-left: 0; }
-	.plugin-catalog-item { overflow: hidden; }
-	.plugin-catalog-list { overflow-x: hidden; }
-	.plugin-catalog-desc { overflow-wrap: break-word; word-break: break-word; }
+	.plugin-catalog-desc { overflow-wrap: break-word; }
 	/* Compact-detail (API key + Save button) stacks on mobile */
 	.settings-compact-detail { flex-wrap: wrap; }
 	.settings-compact-detail input { width: 100%; box-sizing: border-box; }
