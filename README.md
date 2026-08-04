@@ -17,18 +17,11 @@ A role-based terminal agent harness. 20 built-in personas — senior dev, QA, DB
 
 ## Why personas, not just prompts
 
-Point a generic coding agent and a role-specific one at the same file, and they don't just answer differently — they look for different things. Give an appsec persona a schema and it flags the injection surface; give a DBA persona the same schema and it flags missing indexes and normalization. A QA persona treats an untested edge case as unfinished work; a PM persona treats an unwritten spec as unfinished work — same repo, same tools, different definition of "done."
+Point a generic coding agent and a role-specific one at the same file, and they don't just answer differently — they look for different things. Give an `appsec` persona a schema and it flags injection risks; give a `dba` persona the same schema and it flags missing indexes and normalization. A `qa` persona treats an untested edge case as unfinished work, while a `pm` persona treats an unwritten spec as unfinished work — same repo, same tools, different definition of "done."
 
-This isn't a skin. Research on role/persona prompting backs the shift on both sides of that gap:
+Personas in cast are not cosmetic text skins. Each persona is defined by markdown frontmatter (`~/.cast/personas/*.md` or `.cast/personas/*.md`) that can restrict available built-in tools (`tools`), skills (`skills`), MCP servers (`mcp`), and sub-agent delegation (`subagents`, `subagentTypes`). Swapping `/persona` changes both system prompt framing and runtime capabilities.
 
-- Assigning an LLM an expert role measurably changes the *shape* of its output — deeper domain framing at the cost of some plain-language clarity, a real trade-off rather than a free upgrade ([Xiao et al., 2026](https://arxiv.org/abs/2605.29420)).
-- The effect isn't free-floating flavor text: matching the persona to the task helps, mismatching it hurts, and a mismatched persona measurably breaks more answers than a matched one fixes ([Kim et al., 2024](https://arxiv.org/abs/2408.08631)).
-- For tool-using agents specifically, explicit role/behavior rules — not just a persona label — are what fixes "under-acting" (skipping a tool the role should obviously use) and "over-speaking" (chatting instead of calling) ([Ruangtanusak et al., 2025](https://arxiv.org/abs/2509.00482)).
-- The effect isn't universal — persona framing helps most on open-ended, advisory, judgment-heavy tasks, and least on narrow factual lookups, so a persona only pays for itself when it actually matches the task.
-
-cast leans into that instead of working around it: swap `/persona` and the same tools, the same repo, and the same model produce a different investigation — different priorities, different tool sequencing, different conclusions, different follow-up questions. A security review that reasons like a senior dev misses different things than one that reasons like an appsec engineer, even reading identical code.
-
-Full writeup, with direct quotes and sources: [docs/persona-research.md](docs/persona-research.md).
+For a deep dive into empirical research on role prompting and tool-agent behavior, see [docs/persona-research.md](docs/persona-research.md).
 
 ## Install
 
