@@ -17,6 +17,8 @@ import { EventEmitter } from "node:events";
 const CSIU_RE = /^\x1b\[(\d+)(?::\d*)?(?::\d+)?u$/;
 const CR_RE = /\r/g;
 const CRLF_RE2 = /\r\n?/g;
+const PASTE_END_RE = /^<\d+;\d+;\d+[Mm]$/;
+const DIGITS_RE = /^\d+$/;
 
 const ESC = "\x1b";
 const BRACKETED_PASTE_START = "\x1b[200~";
@@ -47,10 +49,10 @@ function isCompleteCsiSequence(data: string): "complete" | "incomplete" {
 	const lastCharCode = lastChar.charCodeAt(0);
 	if (lastCharCode >= 0x40 && lastCharCode <= 0x7e) {
 		if (payload.startsWith("<")) {
-			if (/^<\d+;\d+;\d+[Mm]$/.test(payload)) return "complete";
+			if (PASTE_END_RE.test(payload)) return "complete";
 			if (lastChar === "M" || lastChar === "m") {
 				const parts = payload.slice(1, -1).split(";");
-				if (parts.length === 3 && parts.every((p) => /^\d+$/.test(p))) return "complete";
+				if (parts.length === 3 && parts.every((p) => DIGITS_RE.test(p))) return "complete";
 			}
 			return "incomplete";
 		}

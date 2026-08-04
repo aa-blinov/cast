@@ -26,12 +26,14 @@
  *   condition holds.
  */
 const TRAILING_WORD_RE = /(\S+)$/;
+const NONSPACE_RE = /\S/;
+const SENTENCE_END_RE = /[.!?…]$/;
 
 export function mergeMidWordBoundary(thinkingText, contentText) {
 	if (!thinkingText || !contentText) return { thinkingText, contentText };
 	const lastChar = thinkingText[thinkingText.length - 1];
 	const firstChar = contentText[0];
-	if (!/\S/.test(lastChar) || !/\S/.test(firstChar)) {
+	if (!NONSPACE_RE.test(lastChar) || !NONSPACE_RE.test(firstChar)) {
 		return { thinkingText, contentText };
 	}
 	// Same-script guard — without this an "API" reasoning tail glued onto
@@ -52,7 +54,7 @@ export function mergeMidWordBoundary(thinkingText, contentText) {
 	// (period included) in thinking, do not merge. Catches the clean
 	// "...weather." | "Now I will search" case where merging would
 	// strip the period off thinking and paste it onto content.
-	if (/[.!?…]$/.test(fragment)) {
+	if (SENTENCE_END_RE.test(fragment)) {
 		return { thinkingText, contentText };
 	}
 	// No trailing punct — look for the last sentence-ending punctuation
