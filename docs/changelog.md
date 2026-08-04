@@ -2,6 +2,19 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.12.18
+
+### Fixed
+
+- Web UI settings modal layout on mobile: form fields stack vertically instead of cramming 3 inputs into one narrow row; select dropdowns (Web tab search/fetch) are full-width instead of clipped at 180px; marketplace plugin names truncate with ellipsis instead of overflowing the card with horizontal scroll.
+- Web UI settings dom warnings: password inputs wrapped in `<form>` elements; API key field given `autocomplete="off"`.
+- Web UI model pickers streamlined: removed "(reasoning)" suffix from model names, removed "— @ provider" tags from section titles, sub-agent and plan-mode provider pickers now show "openrouter (default)" instead of duplicating the active provider in the dropdown list.
+- Web UI composer: placeholder simplified to "Type a message…", max-height raised to 150px to prevent scrollbar on mobile.
+
+### Changed
+
+- Web UI settings reasoning section: "Reasoning — current: off" simplified to just "Reasoning".
+
 ## 0.12.17
 
 ### Fixed
