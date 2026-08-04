@@ -92,6 +92,19 @@ import { sessionInputsDir } from "./inputs.ts";
 
 const execFileAsync = promisify(execFile);
 
+// Slash-command argument parsing pulls the same one-or-more-whitespace
+// regex into every branch (every command dispatches via `arg.split(WHITESPACE_SPLIT)`).
+// Hoisting to module scope avoids re-parsing the pattern on every
+// keystroke-level command.
+const WHITESPACE_SPLIT = /\s+/;
+// `skills.sh install <URL>` accepts a github URL but our CLI hands the
+// string to `npx` verbatim and `npx` expects `owner/repo`. Strip a leading
+// `https?://(www.)?github.com/` so a paste from the skills.sh site
+// "just works" no matter how the user copied the URL. Used twice in the
+// `/skills-sh install` branch — once to test, once to strip.
+const GITHUB_URL_PREFIX = /^https?:\/\/(?:www\.)?github\.com\//i;
+const GITHUB_GIT_SUFFIX = /\.git$/;
+
 async function runSkillsSh(args: string[], timeout: number): Promise<string> {
 	// `npx skills add` is a TTY-bound CLI — it walks the user through a
 	// scope prompt before installing. Cast already passes a specific skill
@@ -1686,7 +1699,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 
 		if (name === "/hooks") {
 			const sessionCwd = ws.session.cwd ?? cwd;
-			const [verb, ...rest] = arg.split(/\s+/).filter(Boolean);
+			const [verb, ...rest] = arg.split(WHITESPACE_SPLIT).filter(Boolean);
 			if (verb === "help") {
 				return {
 					ok: true,
@@ -2095,7 +2108,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		}
 		if (name === "/skills-sh") {
 			const sessionCwd = ws.session.cwd ?? cwd;
-			const [sub, ...restParts] = arg ? arg.split(/\s+/) : [""];
+			const [sub, ...restParts] = arg ? arg.split(WHITESPACE_SPLIT) : [""];
 			const rest = restParts.join(" ");
 			try {
 				if (sub === "install") {
@@ -2104,7 +2117,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 					// `npx skills add <pkg> --skill <name>` line, not just the tail —
 					// tolerate that being pasted in whole by dropping a leading
 					// `npx [--yes|-y] skills [add|a]` prefix before parsing.
-					const rawArgs = rest.split(/\s+/);
+					const rawArgs = rest.split(WHITESPACE_SPLIT);
 					// `npx skills add` accepts `https://github.com/<owner>/<repo>`
 					// as the package argument, but our UI / `runSkillsSh` wrapper
 					// hands the string off to the underlying CLI verbatim, which
@@ -2115,7 +2128,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 					// as a confusing usage error.
 					if (rawArgs[0] && /^https?:\/\/(?:www\.)?github\.com\//i.test(rawArgs[0])) {
 						rawArgs[0] = rawArgs[0].replace(/^https?:\/\/(?:www\.)?github\.com\//i, "");
-						rawArgs[0] = rawArgs[0].replace(/\.git$/, "");
+						rawArgs[0] = rawArgs[0].replace(GITHUB_GIT_SUFFIX, "");
 					}
 					if (rawArgs[0] === "npx") rawArgs.shift();
 					if (rawArgs[0] === "--yes" || rawArgs[0] === "-y") rawArgs.shift();
@@ -2152,14 +2165,14 @@ export function createWebBridge(result: StartupResult): WebBridge {
 				}
 				if (sub === "search") {
 					if (!rest) return { ok: false, error: "Usage: /skills-sh search <query>" };
-					return { ok: true, result: await runSkillsSh(["find", ...rest.split(/\s+/)], 60_000) };
+					return { ok: true, result: await runSkillsSh(["find", ...rest.split(WHITESPACE_SPLIT)], 60_000) };
 				}
 				if (sub === "uninstall") {
 					if (!rest) return { ok: false, error: "Usage: /skills-sh uninstall <name>" };
 					// Cast installs Skills.sh entries into the universal scope. Without
 					// --global, the CLI only searches the current project and reports a
 					// successful no-op for skills such as ~/.config/agents/skills/pr-review.
-					const out = await runSkillsSh(["remove", "--global", "--yes", ...rest.split(/\s+/)], 30_000);
+					const out = await runSkillsSh(["remove", "--global", "--yes", ...rest.split(WHITESPACE_SPLIT)], 30_000);
 					const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
 					skills = skillsResult.skills;
 					recomputeAllSystemPrompts();
@@ -2289,7 +2302,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			}
 			if (sub === "add") {
 				// Flat form since there's no wizard on the web: /provider add <name> <url> <apiKey>
-				const parts = rest.split(/\s+/);
+				const parts = rest.split(WHITESPACE_SPLIT);
 				const [pname, url, apiKey] = parts;
 				if (!pname || !url || !apiKey) return { ok: false, error: "Usage: /provider add <name> <url> <apiKey>" };
 				const next = [
@@ -2364,7 +2377,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 				// "-" is an explicit placeholder for a skipped optional field (so a
 				// later positional arg, e.g. port, can be given without the earlier
 				// one) — it never means a literal username/key path of "-".
-				const parts = rest.split(/\s+/).map((p) => (p === "-" ? undefined : p));
+				const parts = rest.split(WHITESPACE_SPLIT).map((p) => (p === "-" ? undefined : p));
 				const [hname, host, username, portStr, keyPath, password] = parts;
 				if (!hname || !host)
 					return { ok: false, error: "Usage: /ssh add <name> <host> [username] [port] [keyPath] [password]" };
@@ -2402,7 +2415,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 	}
 
 	async function executeSettingsCommand(command: string): Promise<{ ok: boolean; result?: unknown; error?: string }> {
-		const name = command.trim().split(/\s+/, 1)[0];
+		const name = command.trim().split(WHITESPACE_SPLIT, 1)[0];
 		const allowed = new Set([
 			"/current",
 			"/permissions",
@@ -2599,7 +2612,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 
 		if (cmd === "/mcp") {
 			if (!arg) return ["list", "enable", "disable", "uninstall", "help"].map((v) => ({ value: v, label: v }));
-			const [sub] = arg.split(/\s+/);
+			const [sub] = arg.split(WHITESPACE_SPLIT);
 			if (sub === "enable") {
 				const disabled = new Set(settings.disabledMcpServers ?? []);
 				return mcpResult.allServerNames.filter((n) => disabled.has(n)).map((v) => ({ value: v, label: v }));
@@ -2614,7 +2627,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 
 		if (cmd === "/skills") {
 			if (!arg) return ["list", "enable", "disable", "uninstall", "help"].map((v) => ({ value: v, label: v }));
-			const [sub] = arg.split(/\s+/);
+			const [sub] = arg.split(WHITESPACE_SPLIT);
 			const sessionCwd = sessions.get(sessionId)?.session.cwd ?? cwd;
 			const discovered = discoverSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
 			if (sub === "enable") {
@@ -2638,7 +2651,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 					value: v,
 					label: v,
 				}));
-			const [sub] = arg.split(/\s+/);
+			const [sub] = arg.split(WHITESPACE_SPLIT);
 			if (sub === "marketplace" && !arg.slice(sub.length).trim())
 				return ["list", "add", "remove", "update"].map((v) => ({ value: v, label: v }));
 			if (sub === "enable" || sub === "disable" || sub === "uninstall") {
@@ -2664,14 +2677,14 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			const providers = settings.providers ?? [];
 			if (!arg)
 				return ["list", "add", "delete", ...providers.map((p) => p.name)].map((v) => ({ value: v, label: v }));
-			const [sub] = arg.split(/\s+/);
+			const [sub] = arg.split(WHITESPACE_SPLIT);
 			if (sub === "delete") return providers.map((p) => ({ value: p.name, label: p.name }));
 			return [];
 		}
 
 		if (cmd === "/ssh") {
 			if (!arg) return ["list", "add", "remove"].map((v) => ({ value: v, label: v }));
-			const [sub] = arg.split(/\s+/);
+			const [sub] = arg.split(WHITESPACE_SPLIT);
 			if (sub === "remove") return sshHosts.map((h) => ({ value: h.name, label: h.name }));
 			return [];
 		}
