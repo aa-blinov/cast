@@ -1,6 +1,14 @@
 import { EOL } from "node:os";
 import { createInterface } from "node:readline";
 import { noPickers } from "../pickers/no-pickers.ts";
+// `handleInput` lives in `ui/commands.ts` because it owns the full TUI
+// command palette. `core/run.ts` is allowed to import from `ui/` only
+// because the file has no React/Ink side effects at import time — both
+// `SLASH_COMMANDS` and `handleInput` are pure — so the JSONL runner can
+// dispatch slash commands without dragging the Ink renderer into headless
+// mode. If `ui/commands.ts` ever starts importing Ink, this bridge has to
+// move to a `core/commands.ts` instead.
+import { type CommandDeps, handleInput } from "../ui/commands.ts";
 import { resolveProvider } from "./config.ts";
 import { initialAnnouncedLocalDate } from "./date-rollover-reminder.ts";
 import { runHooksForEvent } from "./hooks.ts";
@@ -44,6 +52,7 @@ type InteractiveAction =
 	| { type: "set_mode"; mode: "plan" | "build" }
 	| { type: "answer_question"; values: string[] }
 	| { type: "plan_review"; choice: "continue" | "implement" | "clean" }
+	| { type: "command"; name: string; args: string }
 	| { type: "state" }
 	| { type: "exit" };
 
@@ -73,6 +82,17 @@ export function parseInteractiveAction(line: string): InteractiveAction {
 		}
 		return { type: "plan_review", choice: action.choice };
 	}
+	if (action.type === "command") {
+		// `name` is the slash command without the leading "/" (e.g. "worktree",
+		// "skills", "persona"). `args` is the rest of the line, verbatim —
+		// including the leading space when present, which `handleInput` expects
+		// to slice off when picking the verb. Empty string for commandlets.
+		if (typeof action.name !== "string" || !action.name) {
+			throw new Error("command.name must be a non-empty string");
+		}
+		if (typeof action.args !== "string") throw new Error("command.args must be a string");
+		return { type: "command", name: action.name, args: action.args };
+	}
 	if (action.type === "state" || action.type === "exit") return { type: action.type };
 	throw new Error(`unknown action type: ${action.type}`);
 }
@@ -99,6 +119,180 @@ export async function runInteractive(args: ParsedArgs): Promise<void> {
 		planModel,
 		planModelProvider,
 	} = result;
+	const loadedSettings = loadSettings();
+	// Headless CommandDeps — every field is a closure over a `let`, so
+	// `setX` mutates the slot synchronously and the next `getX` reads the
+	// updated value. Mirrors React's setState contract for `X | (prev => X)`
+	// because `handleInput` calls it both ways (e.g. `setSkills([...])` for
+	// fresh values, but rebuildSystemPrompt can use functional updates too).
+	type HeadlessCtx = {
+		cwd: string;
+		skills: typeof skills;
+		skillsPromptSuffix: string;
+		contextFilesSuffix: string;
+		rulesSuffix: string;
+		rulesLazySuffix: string;
+		directoryRules: import("../core/rules.ts").Rule[];
+		activeAutoRules: import("../core/rules.ts").Rule[];
+		systemPrompt: string;
+		mcpResult: typeof mcpResult;
+		projectTrusted: boolean;
+		persona: typeof persona;
+		personaOptions: typeof result.personaOptions;
+		sshHosts: typeof result.sshHosts;
+		permissionMode: typeof permissionMode;
+		webToolsEnabled: boolean;
+		planMode: boolean;
+		planModel: typeof planModel;
+		planModelProvider: typeof planModelProvider;
+		subagentModel: typeof subagentModel;
+		subagentModelProvider: string | undefined;
+		reasoningMeta: typeof result.reasoningMeta;
+		statusBar: import("../core/settings.ts").StatusBarConfig;
+	};
+	const ctx: HeadlessCtx = {
+		cwd: session.cwd ?? result.cwd,
+		skills,
+		skillsPromptSuffix: "",
+		contextFilesSuffix: "",
+		rulesSuffix: "",
+		rulesLazySuffix: "",
+		directoryRules: [],
+		activeAutoRules: [],
+		systemPrompt,
+		mcpResult,
+		projectTrusted: result.projectTrusted,
+		persona: persona,
+		personaOptions: result.personaOptions,
+		sshHosts: result.sshHosts,
+		permissionMode,
+		webToolsEnabled: loadedSettings.webTools === true,
+		planMode: session.mode === "plan",
+		planModel,
+		planModelProvider,
+		subagentModel,
+		subagentModelProvider: loadedSettings.subagentModelProvider,
+		reasoningMeta: result.reasoningMeta,
+		statusBar: loadedSettings.statusBar ?? { visible: [], order: [], sides: {} },
+	};
+	const makeSetter =
+		<K extends keyof HeadlessCtx>(key: K) =>
+		(action: HeadlessCtx[K] | ((prev: HeadlessCtx[K]) => HeadlessCtx[K])) => {
+			if (typeof action === "function") {
+				ctx[key] = (action as (prev: HeadlessCtx[K]) => HeadlessCtx[K])(ctx[key]);
+			} else {
+				ctx[key] = action;
+			}
+		};
+	// Stubs for the agent surface — only `refresh()` is needed by the
+	// command handlers we test. The other methods are wired for completeness
+	// so any future command doesn't crash on a missing implementation.
+	const headlessAgent = {
+		submit: async () => {
+			throw new Error("agent.submit is not supported in --interactive JSONL mode; send a prompt action instead");
+		},
+		steer: () => {
+			throw new Error("agent.steer is not supported in --interactive JSONL mode");
+		},
+		followUp: () => {
+			throw new Error("agent.followUp is not supported in --interactive JSONL mode");
+		},
+		abort: () => {
+			runner.abort();
+		},
+		resetContext: () => undefined as string | undefined,
+		refresh: () => {
+			// In TUI, refresh re-runs `buildDisplayMessages(getFullHistory(...))`
+			// from session state. Headless has no display, but the JSONL
+			// consumer can re-request `state` to pick up changes — so refresh
+			// is a no-op here.
+		},
+		refreshMeta: () => {},
+		resetQueue: () => {},
+		clearContext: () => {
+			// TUI calls this from /clear; headless has no agent messages to
+			// wipe, the session.messages reset happens via session APIs.
+		},
+		addDisplayMessage: () => {
+			// Display-only messages are not surfaced through JSONL — they're
+			// a TUI affordance. Sliently drop them in headless.
+		},
+		turnStartedAt: null,
+		getElapsedMs: () => 0,
+		pendingSteers: [],
+		pendingQueue: [],
+		messages: [],
+		streaming: null,
+		status: "idle" as "idle" | "running",
+		error: null,
+		retry: null,
+		usage: null,
+		lastTurnUsage: null,
+	} as unknown as Parameters<typeof handleInput>[2]["agent"];
+	const commandDeps: CommandDeps = {
+		agent: headlessAgent,
+		session,
+		config,
+		running: runner.isRunning,
+		onQuit: () => {
+			throw new Error("onQuit is not supported in --interactive JSONL mode; send an exit action instead");
+		},
+		// Notice channel: in TUI, showNotice paints a transient toast. Here
+		// we forward the text to stdout as a `notice` event so the JSONL
+		// consumer (test, agent, evaluator) can observe it like any other
+		// protocol event. Drops the optional duration arg silently.
+		showNotice: (text: string) => emit("notice", { text }),
+		cwd: ctx.cwd,
+		setCwd: makeSetter("cwd"),
+		currentPersona: ctx.persona,
+		setCurrentPersona: (next) => {
+			ctx.persona = next;
+		},
+		personaOptions: ctx.personaOptions,
+		setPersonaOptions: makeSetter("personaOptions"),
+		skills: ctx.skills,
+		setSkills: makeSetter("skills"),
+		skillsPromptSuffix: ctx.skillsPromptSuffix,
+		setSkillsPromptSuffix: makeSetter("skillsPromptSuffix"),
+		contextFilesSuffix: ctx.contextFilesSuffix,
+		setContextFilesSuffix: makeSetter("contextFilesSuffix"),
+		rulesSuffix: ctx.rulesSuffix,
+		setRulesSuffix: makeSetter("rulesSuffix"),
+		rulesLazySuffix: ctx.rulesLazySuffix,
+		setRulesLazySuffix: makeSetter("rulesLazySuffix"),
+		directoryRules: ctx.directoryRules,
+		setDirectoryRules: makeSetter("directoryRules"),
+		activeAutoRules: ctx.activeAutoRules,
+		setActiveAutoRules: makeSetter("activeAutoRules"),
+		systemPrompt: ctx.systemPrompt,
+		setSystemPrompt: makeSetter("systemPrompt"),
+		mcpResult: ctx.mcpResult,
+		setMcpResult: makeSetter("mcpResult"),
+		permissionMode: ctx.permissionMode,
+		setPermissionMode: makeSetter("permissionMode"),
+		projectTrusted: ctx.projectTrusted,
+		setProjectTrusted: makeSetter("projectTrusted"),
+		projectDeps: result.projectDeps,
+		pickers: noPickers,
+		sshHosts: ctx.sshHosts,
+		setSshHosts: makeSetter("sshHosts"),
+		reasoningMeta: ctx.reasoningMeta,
+		setReasoningMeta: makeSetter("reasoningMeta"),
+		subagentModel: ctx.subagentModel,
+		setSubagentModel: makeSetter("subagentModel"),
+		subagentModelProvider: ctx.subagentModelProvider,
+		setSubagentModelProvider: makeSetter("subagentModelProvider"),
+		webToolsEnabled: ctx.webToolsEnabled,
+		setWebToolsEnabled: makeSetter("webToolsEnabled"),
+		planMode: ctx.planMode,
+		setPlanMode: makeSetter("planMode"),
+		planModel: ctx.planModel,
+		setPlanModel: makeSetter("planModel"),
+		planModelProvider: ctx.planModelProvider,
+		setPlanModelProvider: makeSetter("planModelProvider"),
+		statusBar: ctx.statusBar,
+		setStatusBar: makeSetter("statusBar"),
+	};
 	const planState = createPlanState(result.cwd, session.id, {
 		question: session.planQuestion,
 		transition: session.planTransition,
@@ -122,6 +316,11 @@ export async function runInteractive(args: ParsedArgs): Promise<void> {
 			question: session.planQuestion ?? null,
 			planReview: session.planTransition ?? null,
 			activePlan: activePlan.exists ? { path: activePlan.path, content: activePlan.content } : null,
+			// `cwd` is the live source of truth after /worktree or /continue
+			// run mid-session, while `result.cwd` is the startup-time snapshot.
+			// Tests and tooling consume `state` to observe cwd changes without
+			// having to inspect the session DB.
+			cwd: session.cwd ?? result.cwd,
 		});
 	};
 
@@ -168,11 +367,17 @@ export async function runInteractive(args: ParsedArgs): Promise<void> {
 		runner.startRun(ac);
 		try {
 			if (!session.lastAnnouncedLocalDate) session.lastAnnouncedLocalDate = initialAnnouncedLocalDate(session);
+			// `session.cwd` is the source of truth once the session exists —
+			// /worktree (and /continue when restoring a session from another
+			// checkout) mutate it directly, and subsequent runs must follow.
+			// `result.cwd` is just the startup-time fallback for brand-new
+			// sessions that haven't picked a cwd yet.
+			const cwd = session.cwd ?? result.cwd;
 			const finalMessages = await runAgentLoop(session.messages, {
 				config,
 				model: planState.enabled && planModel ? planModel : session.model,
 				modelProvider,
-				cwd: result.cwd,
+				cwd,
 				systemPrompt,
 				signal: ac.signal,
 				steeringQueue: runner.steeringQueue,
@@ -219,6 +424,15 @@ export async function runInteractive(args: ParsedArgs): Promise<void> {
 		if (action.type === "exit") return false;
 		if (action.type === "state") return true;
 		if (runner.isRunning) throw new Error("agent is running");
+		if (action.type === "command") {
+			// Reconstruct the line shape `handleInput` expects. The parser
+			// hands us `name` and `args` separately so the JSON wire format
+			// stays clean; commands.ts's handleInput slices `args` off the
+			// "/<name> " prefix to recover the verb + payload.
+			const line = `/${action.name}${action.args}`;
+			await handleInput(line, undefined, commandDeps);
+			return true;
+		}
 		if (action.type === "set_mode") {
 			if (session.planQuestion || session.planTransition)
 				throw new Error("resolve the pending picker before changing mode");
@@ -388,7 +602,7 @@ export async function runNonInteractive(args: ParsedArgs, options: RunOptions): 
 		const finalMessages = await runAgentLoop(session.messages, {
 			config,
 			model: session.model,
-			cwd: result.cwd,
+			cwd: session.cwd ?? result.cwd,
 			systemPrompt,
 			signal: ac.signal,
 			confirmBash: permissionMode === "bypass" ? undefined : confirmBash,

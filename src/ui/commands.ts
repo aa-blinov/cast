@@ -63,6 +63,7 @@ import {
 } from "../core/skills.ts";
 import { resolveSshHosts, type SshHost, saveSshConfig, scanSshKeys, validateKeyPermissions } from "../core/ssh.ts";
 import { buildReasoningParams, type ModelReasoningMeta, resolveReasoningFormat } from "../core/vendors.ts";
+import { ensureSessionWorktree } from "../core/worktree.ts";
 import {
 	formatSkillPickLabel,
 	selectMcpServers,
@@ -184,6 +185,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/web", description: "Toggle web tools (web_search, web_fetch)" },
 	{ name: "/web-fetch-provider", description: "Switch web_fetch backend (Jina Reader / local)" },
 	{ name: "/web-search-provider", description: "Switch web_search backend (DuckDuckGo / Tavily / Brave)" },
+	{ name: "/worktree", description: "Switch session into an isolated git worktree — name", takesArgs: true },
 ];
 
 export interface CommandDeps {
@@ -1751,6 +1753,62 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		return;
 	}
 
+	if (input === "/worktree" || input.startsWith("/worktree ")) {
+		const name = input === "/worktree" ? "" : input.slice("/worktree ".length).trim();
+		if (!name) {
+			showNotice(
+				"[Usage: /worktree <name> — slug, letters/digits/dots/underscores/dashes, e.g. /worktree fix-auth]",
+			);
+			return;
+		}
+		if (deps.running) {
+			showNotice("[Agent running — finish the run or /abort before switching worktrees]");
+			return;
+		}
+		showNotice(`[Creating worktree "${name}"…]`);
+		try {
+			const wt = await ensureSessionWorktree(name, deps.cwd);
+			// Persist the new cwd before anything that might re-read state.
+			// run.ts uses session.cwd (not result.cwd) for subsequent tool
+			// calls so the worktree path actually takes effect.
+			session.cwd = wt.path;
+			saveSession(session);
+			deps.setCwd(wt.path);
+			// Re-resolve everything that's keyed off cwd so the model sees the
+			// worktree's skills, rules, MCP servers, and trust on the next turn.
+			const trusted = await resolveProjectTrustForCwd(deps.projectDeps, wt.path);
+			deps.setProjectTrusted(trusted);
+			const { skills: newSkills, skillsPromptSuffix } = await resolveSkillsForCwd(
+				deps.projectDeps,
+				wt.path,
+				trusted,
+			);
+			deps.setSkills(newSkills);
+			deps.setSkillsPromptSuffix(skillsPromptSuffix);
+			const contextFilesSuffix = formatContextFilesForPrompt(loadProjectContextFiles(wt.path, trusted));
+			deps.setContextFilesSuffix(contextFilesSuffix);
+			const resolvedRules = resolveRulesForCwd(wt.path, trusted);
+			deps.setRulesSuffix(resolvedRules.alwaysApplySuffix);
+			deps.setRulesLazySuffix(resolvedRules.lazySuffix);
+			deps.setDirectoryRules(resolvedRules.directoryRules);
+			await closeMcpConnections(deps.mcpResult.connections);
+			deps.setMcpResult(
+				await resolveMcpForCwd(deps.projectDeps, wt.path, trusted, loadSettings().disabledMcpServers ?? []),
+			);
+			rebuildSystemPrompt(deps, wt.path, {
+				contextFilesSuffix,
+				rulesSuffix: resolvedRules.alwaysApplySuffix,
+				rulesLazySuffix: resolvedRules.lazySuffix,
+				skillsPromptSuffix,
+			});
+			agent.refresh();
+			showNotice(`[Worktree: ${wt.path} (branch ${wt.branch}) — your next message runs in the isolated checkout]`);
+		} catch (err) {
+			showNotice(`[Worktree failed: ${err instanceof Error ? err.message : String(err)}]`);
+		}
+		return;
+	}
+
 	if (input.startsWith("/skill:")) {
 		const rest = input.slice("/skill:".length);
 		const spaceIdx = rest.indexOf(" ");
@@ -2614,6 +2672,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 				"  /web-fetch-provider     Switch web_fetch backend (Jina Reader / local)\n" +
 				"  /ssh                Manage SSH hosts (list, add, remove)\n" +
 				"  /statusbar          Toggle and reorder status bar segments\n" +
+				"  /worktree <name>    Switch session into a git worktree (creates it on first use, reuses on resume)\n" +
 				"  /theme              Change color theme\n" +
 				"  /usage              Show session token/cost usage\n" +
 				"  /sessions           List/switch sessions\n" +
