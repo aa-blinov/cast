@@ -492,4 +492,15 @@
 	.settings-pane { min-height: 0; }
 	.settings-compact-row { grid-template-columns: 1fr; gap: 8px; }
 	.settings-compact-row > :last-child { justify-self: start; }
+	/* Stack provider/add-host forms vertically on narrow screens */
+	.settings-form-row { flex-direction: column; align-items: stretch; }
+	.settings-form-row input { min-width: 0; width: 100%; box-sizing: border-box; }
+	/* Marketplace plugin items need wrapping header */
+	.plugin-catalog-header { flex-wrap: wrap; gap: 4px; }
+	.plugin-catalog-header .settings-item-meta { max-width: 100%; }
+	/* Compact-detail (API key + Save button) stacks on mobile */
+	.settings-compact-detail { flex-wrap: wrap; }
+	.settings-compact-detail input { width: 100%; box-sizing: border-box; }
+	/* Info popovers take full width */
+	.info-popover { width: 92vw; }
 }
