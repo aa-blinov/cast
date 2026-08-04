@@ -33,7 +33,7 @@ Options:
   --reasoning, -r <level>    Reasoning level (off/low/medium/high/max)
                              Skips interactive selection. For local models
                              without /v1/models reasoning metadata.
-  --continue, -c             Resume the most recently updated session
+  --continue, -c             Resume the most recent session in the current cwd
   --resume                   Pick which saved session to resume (numbered list)
   --resume=<id>              Resume a specific session by id (see /sessions)
   --session, -s <id>         Resume a specific session by id (alias for --resume=<id>)

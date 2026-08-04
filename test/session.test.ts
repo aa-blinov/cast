@@ -729,16 +729,28 @@ describe("session persistence", () => {
 		expect(remaining).not.toContain(toDelete.id);
 	});
 
-	it("getMostRecentSession finds the latest across every project", async () => {
+	it("getMostRecentSession is cwd-scoped when given a path", async () => {
+		// Two projects, each with its own latest session. The default
+		// (no-cwd) lookup used to fall through to a global "most recent
+		// across every project" — that was the bug cast -c inherited from
+		// when sessions were the only resume handle, but it's not what
+		// users expect: a session in project A should not auto-resume when
+		// the user is in project B's cwd. `cast -c` passes cwd; this test
+		// pins the per-cwd contract.
 		const older = createSession("gpt-4o", projectA);
 		saveSession(older);
-		// saveSession stamps updatedAt to Date.now() (ms precision) — without a
-		// real gap the two saves could land in the same millisecond and tie.
 		await new Promise((r) => setTimeout(r, 5));
 		const newer = createSession("gpt-4o", projectB);
 		saveSession(newer);
 
-		expect(getMostRecentSession()?.id).toBe(newer.id);
+		// Scoped to projectA — finds the only session in that cwd.
+		expect(getMostRecentSession(projectA)?.id).toBe(older.id);
+		// Scoped to projectB — finds the newer one.
+		expect(getMostRecentSession(projectB)?.id).toBe(newer.id);
+		// A cwd with no saved session returns null (not "the most recent
+		// from somewhere else") — that's the behaviour cast -c relies on
+		// to refuse silently resuming an unrelated project.
+		expect(getMostRecentSession("/nonexistent/cwd")).toBeNull();
 	});
 
 	it("listSessionSummaries builds the index and serves summaries from it", () => {

@@ -1304,12 +1304,25 @@ export function searchSessionSummaries(query: string): SessionSummary[] {
 	return summaries;
 }
 
-/** Most recently updated session, or null if none are saved yet. */
-export function getMostRecentSession(): SessionState | null {
+/**
+ * Most recently updated session, or null if none are saved yet.
+ *
+ * When `cwd` is provided, the lookup is scoped to that directory — `cast -c`
+ * uses this to make "continue" mean "the most recent session in *this*
+ * project", not "the most recent session in any project on this machine".
+ * `session.cwd` is stored as an absolute path (see `createSession`), so
+ * the caller must pass the same absolute form they used at start time;
+ * raw `process.cwd()` is fine because `startup.ts` resolves it. Passing
+ * `cwd = undefined` keeps the legacy global behavior for callers that
+ * explicitly want it (the `/sessions` picker, for one).
+ */
+export function getMostRecentSession(cwd?: string): SessionState | null {
 	const db = getDb();
-	const row = db.prepare("SELECT id FROM sessions ORDER BY updated_at DESC LIMIT 1").get() as
-		| { id: string }
-		| undefined;
+	const sql = cwd
+		? "SELECT id FROM sessions WHERE cwd = ? ORDER BY updated_at DESC LIMIT 1"
+		: "SELECT id FROM sessions ORDER BY updated_at DESC LIMIT 1";
+	const stmt = db.prepare(sql);
+	const row = (cwd ? stmt.get(cwd) : stmt.get()) as { id: string } | undefined;
 	return row ? loadSession(row.id) : null;
 }
 
