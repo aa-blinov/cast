@@ -912,7 +912,7 @@ function scoreboardToHtml(scoreboard) {
 		return `<p>No scoreboard data yet. Populate it by running the full behavior suite with
 			<code>--scoreboard</code> (it runs three attempts per case):</p>
 			<pre><code>node --import tsx evals/run.ts -m &lt;model&gt; --scoreboard</code></pre>
-			<p>See <a href="https://github.com/aa-blinov/cast/blob/master/docs/eval-methodology.md">Eval Methodology</a> for what the score means.</p>`;
+			<p>See <a href="eval-methodology.html">Eval Methodology</a> for what the score means.</p>`;
 	}
 
 	entries.sort((a, b) => b.score - a.score);
@@ -962,10 +962,10 @@ ${signalRows}
 		of the full behavior suite across exactly three fresh attempts per case, where every attempt on a case must
 		agree (a case that only passes sometimes doesn't count). <strong>Core</strong>/<strong>Chain</strong> break
 		the same score down by single-turn tool contracts vs. multi-turn stateful workflows (see
-		<a href="https://github.com/aa-blinov/cast/blob/master/docs/eval-behavior.md">Behavior Evals</a>).
+		<a href="eval-behavior.html">Behavior Evals</a>).
 		Tokens are per-attempt averages; the time and turns columns are avg/median/p75/p95/p99 over every
 		individual attempt. See
-		<a href="https://github.com/aa-blinov/cast/blob/master/docs/eval-methodology.md">Eval Methodology</a>
+		<a href="eval-methodology.html">Eval Methodology</a>
 		for the full methodology.</p>
 ${mainTable}
 <h2>Per-signal breakdown</h2>

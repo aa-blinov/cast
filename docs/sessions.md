@@ -37,11 +37,20 @@ When resuming a session from a different project directory, cast automatically s
 
 Sessions remember which provider their model belongs to. If you've switched providers since, resume falls back to your currently configured model (with a notice) instead of sending requests to a model the new provider doesn't have.
 
+### Git Worktrees
+
+You can run or switch a session inside an isolated git worktree:
+- **CLI**: `cast -w <name>` / `--worktree <name>`
+- **TUI**: `/worktree <name>`
+
+When enabled, cast creates (or reuses) a git worktree at `.cast/worktrees/<name>` on a branch named `cast-<name>`. The session's `cwd` switches to the worktree path, so all tools (`bash`, `read`, `write`, `edit`) operate inside the worktree while leaving your main checkout untouched. The worktree path is saved in the session state (`SessionState.cwd`), so resuming the session with `-c` or `--resume` automatically keeps working inside that worktree.
+
 ### Interactive
 
 ```
 /sessions                  # Opens session picker
 /continue                  # Resume the most recent session
+/worktree <name>           # Switch current session to a git worktree
 ```
 
 The `/sessions` picker shows each session's project, first message, last-updated time, and message count — and filters as you type. The search matches the project path, session id, and **every user/assistant message in the thread**: substring matches rank first (earlier = higher), then in-order subsequence matches (so minor typos still hit). `Backspace` edits the query, `Esc` closes, `Enter` resumes the highlighted session. Deleting goes through the `Delete a session` row at the bottom (find it by typing its name).

@@ -109,12 +109,14 @@ cast -p senior "review this PR"
 | `--resume` | | Pick which session to resume (numbered list) |
 | `--resume=<id>` | | Resume a specific session by id |
 | `--session <id>` | `-s` | Resume a specific session (alias for `--resume=<id>`) |
+| `--worktree <name>` | `-w` | Run in an isolated git worktree created at `.cast/worktrees/<name>` |
 
 ```bash
 cast -c                           # Resume last session
 cast --resume                     # Pick from a list
 cast --resume=nd4k8f2x            # Resume by id
 cast -s nd4k8f2x "keep working"   # Resume + initial prompt
+cast -w feature-x                 # Run in an isolated git worktree
 ```
 
 ### Permissions
@@ -157,6 +159,7 @@ The `run` subcommand accepts a subset of the main flags:
 |------|-------|-------------|
 | `--continue` | `-c` | Continue the most recent session |
 | `--session <id>` | `-s` | Continue a specific session |
+| `--worktree <name>` | `-w` | Run in an isolated git worktree |
 | `--model <model>` | `-m` | Model to use |
 | `--reasoning <level>` | `-r` | Reasoning level |
 | `--persona <name>` | `-p` | Persona to use |
