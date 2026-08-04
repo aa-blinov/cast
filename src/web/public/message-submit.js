@@ -267,9 +267,14 @@ export async function submitMessage(text, images, pendingDocs, context) {
 	);
 	try {
 		await api("POST", `/api/sessions/${id}/chat`, images?.length ? { text: finalText, images } : { text: finalText });
-		// Picks up the auto-derived title after a session's first message
-		// (and keeps the sidebar's message counts from drifting stale).
-		loadSessions();
+		// No `loadSessions()` here on purpose. The sidebar's per-session
+		// summary (count, title, etc.) is pushed server-side as a
+		// `session_update` SSE event after the first user message sets
+		// the auto-derived title and after every turn changes the count.
+		// Re-fetching the whole list was firing a redundant `/api/sessions`
+		// on every single submit and stalled the optimistic feedback loop:
+		// the user posted a message, saw nothing in the sidebar change,
+		// then everything moved after the round trip landed.
 	} catch (err) {
 		if (isCurrentDraft()) showToast(err.message, "error");
 	}

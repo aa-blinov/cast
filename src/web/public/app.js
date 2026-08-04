@@ -777,7 +777,7 @@ function App() {
 		},
 		[setSession],
 	);
-	const { loadSessions, selectSession, selectingId, commitSession, startDraft, initClientState, startReconnectLoop } =
+	const { selectSession, selectingId, commitSession, startDraft, initClientState, startReconnectLoop } =
 		useSessionController({
 			setSessions,
 			setSessionsLoaded,
@@ -991,7 +991,6 @@ function App() {
 			addNotice,
 			toggleDiff,
 			setSession,
-			loadSessions,
 			selectSession,
 			setDefaultModel,
 			setPendingSteers,
