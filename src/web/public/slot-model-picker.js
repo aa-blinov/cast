@@ -26,11 +26,7 @@ export function SlotModelPicker({
 	const [models, setModels] = useState(initialModels || []);
 	const [loading, setLoading] = useState(false);
 	const modelRequestVersion = useRef(0);
-	const defaultLabel = isMainSlot
-		? activeProviderName || "Select…"
-		: activeProviderName
-			? `${activeProviderName} (same as main)`
-			: "Same as main";
+	const defaultLabel = activeProviderName || "Select…";
 
 	useEffect(() => {
 		let cancelled = false;
@@ -81,7 +77,7 @@ export function SlotModelPicker({
 		<select disabled=${busy} value=${providerValue} onChange=${(event) => onProviderChange(event.target.value)}><option value="">${defaultLabel}</option>${providers.map((provider) => html`<option key=${provider.name} value=${provider.name}>${provider.name}</option>`)}</select>
 		<select disabled=${busy || (loading && models.length === 0)} onChange=${(event) => setModelValue(event.target.value)} value=${modelValue && models.some((model) => model.id === modelValue) ? modelValue : ""}>
 			<option value="">${loading && models.length === 0 ? "Loading…" : `Pick a model…${fallbackModel && models.some((model) => model.id === fallbackModel) ? ` (inherits ${fallbackModel})` : ""}`}</option>
-			${[...models].sort((a, b) => a.id.localeCompare(b.id)).map((model) => html`<option key=${model.id} value=${model.id}>${model.id}${model.reasoning ? " (reasoning)" : ""}</option>`)}
+			${[...models].sort((a, b) => a.id.localeCompare(b.id)).map((model) => html`<option key=${model.id} value=${model.id}>${model.id}</option>`)}
 		</select>
 		<button class="modal-btn icon-btn" title="Apply" disabled=${busy || !modelValue || !models.some((model) => model.id === modelValue) || (providerValue === initialProvider && modelValue === effectiveModel)} onClick=${doSet}><${icons.check} /></button>
 		${!isMainSlot && hasOverride ? html`<button class="modal-btn icon-btn" title="Use the main model and provider" disabled=${busy} onClick=${doReset}><${icons.arrowUturnLeft} /></button>` : null}
