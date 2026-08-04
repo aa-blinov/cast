@@ -141,7 +141,7 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 	function setSecurityHeaders(req: IncomingMessage, res: ServerResponse): void {
 		res.setHeader(
 			"Content-Security-Policy",
-			"default-src 'self'; base-uri 'self'; frame-ancestors 'none'; script-src 'self' 'unsafe-inline' https://esm.sh; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self' https://esm.sh; object-src 'none'",
+			"default-src 'self'; base-uri 'self'; frame-ancestors 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'",
 		);
 		const forwardedProto = req.headers["x-forwarded-proto"];
 		const isHttps =
@@ -354,7 +354,7 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 			});
 			res.end(body);
 			return true;
-		} catch {
+		} catch (_) {
 			return false;
 		}
 	}
@@ -1524,6 +1524,14 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 			"/stream-blocks.js",
 			"/favicon.svg",
 			"/cast-banner-grid.json",
+			// Vendored framework bits — they're imported by app.js before any
+			// auth check fires, so they have to be reachable without a session,
+			// same reason /app.js itself is. Lazy-only modules (highlight.js,
+			// marked) stay auth-gated because they only load from inside
+			// file-preview.js, which runs after sign-in.
+			"/vendor/preact.mjs",
+			"/vendor/preact-hooks.mjs",
+			"/vendor/htm.mjs",
 		]);
 		const isPublicShareRoute =
 			urlPath === "/login" ||
