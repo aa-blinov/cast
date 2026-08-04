@@ -174,7 +174,6 @@ export function NewSessionModal({
 	};
 
 	if (!open) return null;
-	const personaLabel = personas.find((p) => p.name === persona)?.label ?? persona;
 	// Show "~" when cwd looks like the user's home (`/home/<user>` or
 	// `/Users/<user>`), so the modal's default reads naturally as "the
 	// home directory, not a project path". Anything else goes through
