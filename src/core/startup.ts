@@ -417,7 +417,21 @@ export async function runStartup(
 		} else if (args.resumePicker && process.stdin.isTTY) {
 			found = await selectSession(pickers);
 		} else {
-			found = getMostRecentSession();
+			// `cast -c` — continue the most recent session in *this* cwd.
+			// Scoping the lookup to cwd matches Claude Code's `claude -c`
+			// (issue anthropics/claude-code#35226 in the upstream tracker)
+			// and avoids silently resuming an unrelated project's session
+			// when the user runs `cast -c` from a fresh checkout. If there
+			// is no saved session for this cwd, fail loudly with the path
+			// — silently creating a fresh session would erase the user's
+			// mental model of "continue" and lose any prior context.
+			found = getMostRecentSession(cwd);
+			if (!found) {
+				console.error(
+					`No previous session found in ${cwd}. Use \`cast\` to start a new one, or \`cast --resume=<id>\` to pick a specific session.`,
+				);
+				process.exit(1);
+			}
 		}
 		if (found) {
 			resumedSession = found;
