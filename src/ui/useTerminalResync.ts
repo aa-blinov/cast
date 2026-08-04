@@ -7,6 +7,13 @@ import {
 	setLastFrameOverflow,
 } from "../core/stdin-manager.ts";
 
+// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences
+const CUU_RE = /\x1b\[(\d*)A/;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences
+const CURSOR_OR_ERASE_RE = /\x1b\[(?:\d+)*[A-HJKSTf]/;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences
+const DECXCPR_RE = /\x1b\[(\d+);(\d+)R/;
+
 // Ink's log-update erases a taller-than-one-line frame via ansi-escapes'
 // eraseLines() (node_modules/ansi-escapes/base.js), which emits one
 // *separate* `\x1b[1A` per line (`\x1b[2K\x1b[1A` repeated) rather than a
@@ -278,10 +285,6 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 		};
 		const rawModeCheck = setInterval(checkDeferredResync, 200);
 
-		// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI CSI parsing
-		const CUU_RE = /\x1b\[(\d*)A/;
-		// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI CSI detection
-		const CURSOR_OR_ERASE_RE = /\x1b\[(?:\d+)*[A-HJKSTf]/;
 
 		// --- layer (a): height heuristic per frame ---
 		out.write = function scrollGuardWrite(
@@ -342,9 +345,6 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 			return coalesced ? origWrite(s, ...args) : origWrite(chunk, ...args);
 		} as typeof out.write;
 
-		// --- layer (b): DECXCPR cursor-position polling ---
-		// biome-ignore lint/suspicious/noControlCharactersInRegex: DECXCPR response format
-		const DECXCPR_RE = /\x1b\[(\d+);(\d+)R/;
 		const QUERY = "\x1b[6n";
 		// "Terminal didn't answer" fallback. startQuery's `decxprActive` guard
 		// skips a tick outright while a query is still in flight, so a slow

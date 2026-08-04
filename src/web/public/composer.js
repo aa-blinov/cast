@@ -48,7 +48,6 @@ export function Composer({ running, ready, activeId, commands, personas, questio
 	const addDocFiles = useCallback(
 		async (files) => {
 			if (files.length === 0) return;
-			// biome-ignore lint/performance/noAwaitInLoops: sequential upload for per-file error feedback
 			for (const file of files) {
 				const id = `${file.name}-${Date.now()}-${Math.random()}`;
 				if (isBlockedAttachmentName(file.name)) {
@@ -64,6 +63,7 @@ export function Composer({ running, ready, activeId, commands, personas, questio
 				// dataUrl so the composer can show the file is ready.
 				if (!activeId) {
 					try {
+					// biome-ignore lint/performance/noAwaitInLoops: sequential upload for per-file feedback
 						const dataUrl = await readFileAsDataUrl(file);
 						setDocs((prev) => [...prev, { id, name: file.name, dataUrl, pending: true }]);
 					} catch (err) {

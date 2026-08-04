@@ -45,6 +45,8 @@ import {
 } from "./tools.ts";
 import { clearTurnRunner, markTurnRunner } from "./turn-runner-state.ts";
 
+const IMAGE_VISION_RE = /image|vision/i;
+
 // How many identical consecutive tool calls (same name + same args) before
 // we treat it as a doom loop and block execution — the model gets an error
 // result and must try something different.
@@ -1057,7 +1059,6 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		// The main agent turn loop is inherently sequential: each iteration
 		// depends on the previous model response and tool results. Promise.all
 		// would break causality (the model hasn't produced the next step yet).
-		// biome-ignore lint/performance/noAwaitInLoops: sequential agent turn loop
 		outer: while (true) {
 			if (signal?.aborted) {
 				endAborted();
@@ -1074,7 +1075,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 
 			// Compaction
 			if (shouldCompact(messages, config, loopConfig.lastPromptTokens)) {
-				// biome-ignore lint/performance/noAwaitInLoops: sequential agent turn — compilation depends on model response
+				// biome-ignore lint/performance/noAwaitInLoops: sequential agent turn loop
 				const result = await performCompaction(messages, config, currentModel, signal, loopConfig, onEvent);
 				if (!result.compacted && result.error) {
 					onEvent({ type: "compaction_failed", reason: result.error });
@@ -1123,8 +1124,8 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				// Accumulate partial content so aborted/disconnected turns can be
 				// persisted into session history (the catch block can't read
 				// streamAndCollect's locals after it throws).
-					// biome-ignore lint/performance/noAwaitInLoops: streaming depends on previous chunks
 				try {
+				// biome-ignore lint/performance/noAwaitInLoops: streaming requires sequential processing
 					completion = await streamAndCollect(
 						client,
 						currentModel,
@@ -1146,7 +1147,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
 					const isVisionError =
-						/image|vision/i.test(msg) ||
+						IMAGE_VISION_RE.test(msg) ||
 						(err instanceof Error &&
 							"status" in err &&
 							([404, 400] as number[]).includes((err as { status: number }).status));

@@ -16,6 +16,7 @@ import { formatSize, resolvePath, type ToolResult } from "./shared.ts";
 
 const REGEX_ESCAPE_RE = /[.*+?^${}()|[\]\\]/g;
 const SEARCH_PATH_PREFIX_RE = /^\.\//gm;
+const PERMISSION_DENIED_RE = /operation not permitted|permission denied/i;
 
 // execFile (not execFileSync) — the sync variant blocks the whole Node event
 // loop for as long as fd/rg run. Under concurrent tool execution (several
@@ -177,6 +178,7 @@ async function walkFiles(cwd: string, searchPath: string, maxFiles: number = MAX
 		const { dir, rules } = stack.pop()!;
 		let entries: Dirent[];
 		try {
+   // biome-ignore lint/performance/noAwaitInLoops: sequential — each step depends on the previous
 			entries = await readdir(dir, { withFileTypes: true });
 		} catch {
 			continue;
@@ -194,6 +196,7 @@ async function walkFiles(cwd: string, searchPath: string, maxFiles: number = MAX
 			// ancestor directory would loop forever without this.
 			if (entry.isSymbolicLink()) {
 				try {
+     // biome-ignore lint/performance/noAwaitInLoops: sequential — each step depends on the previous
 					const real = await realpath(absPath);
 					if (visited.has(real)) continue;
 					visited.add(real);
@@ -337,7 +340,7 @@ export function isPermissionError(err: unknown): boolean {
  * stderr reported it. Without this the tool silently under-matches: the model
  * (and the user) never learn that files were skipped, not simply absent. */
 export function withAccessNote(output: string, rgStderr: string, permissionSkips: number): string {
-	const rgDenied = /operation not permitted|permission denied/i.test(rgStderr);
+	const rgDenied = PERMISSION_DENIED_RE.test(rgStderr);
 	if (permissionSkips === 0 && !rgDenied) return output;
 	const skipped = permissionSkips > 0 ? `${permissionSkips} path(s)` : "some paths";
 	const note = `[note: ${skipped} skipped — permission denied. On macOS, grant your terminal app Full Disk Access in System Settings → Privacy & Security, then restart it.]`;
@@ -461,6 +464,7 @@ export async function execGrep(args: Record<string, unknown>, cwd: string, confi
 		outer: for (const absPath of candidates) {
 			let stats: Awaited<ReturnType<typeof stat>>;
 			try {
+    // biome-ignore lint/performance/noAwaitInLoops: sequential — each step depends on the previous
 				stats = await stat(absPath);
 			} catch (statErr) {
 				if (isPermissionError(statErr)) permissionSkips++;
@@ -542,6 +546,7 @@ export async function execLs(args: Record<string, unknown>, cwd: string, _config
 		const statTarget = join(dirPath, entry.name);
 		if (entry.isSymbolicLink()) {
 			try {
+    // biome-ignore lint/performance/noAwaitInLoops: sequential — each step depends on the previous
 				const target = await stat(statTarget);
 				isDir = target.isDirectory();
 			} catch {

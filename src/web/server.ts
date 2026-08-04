@@ -32,6 +32,8 @@ const PORT_RE = /:\d+$/;
 const ROUTE_PARAM_RE = /:(\w+)/g;
 const FILENAME_QUOTE_RE = /"/g;
 const STREAM_BLOCKS_IMPORT_RE = /from\s+"\.\/stream-blocks\.js"/;
+const DIFF_FILE_RE = /b\/(.+)$/;
+const HUNK_HEADER_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 
 const MIME_TYPES: Record<string, string> = {
 	".html": "text/html; charset=utf-8",
@@ -1653,7 +1655,7 @@ function parseDiff(raw: string): { files: DiffFile[] } {
 
 	for (const line of raw.split("\n")) {
 		if (line.startsWith("diff --git")) {
-			const match = /b\/(.+)$/.exec(line);
+			const match = DIFF_FILE_RE.exec(line);
 			currentFile = {
 				path: match?.[1] ?? "unknown",
 				hunks: [],
@@ -1677,7 +1679,7 @@ function parseDiff(raw: string): { files: DiffFile[] } {
 		}
 		if (line.startsWith("+++") || line.startsWith("---")) continue;
 
-		const hunkMatch = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
+		const hunkMatch = HUNK_HEADER_RE.exec(line);
 		if (hunkMatch) {
 			currentHunk = {
 				oldStart: parseInt(hunkMatch[1]!, 10),
