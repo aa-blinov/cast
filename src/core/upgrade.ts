@@ -9,6 +9,8 @@ import { spawnSync } from "node:child_process";
 import { sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+const V_PREFIX_RE = /^v/;
+
 const REPO = process.env.CAST_REPO ?? "aa-blinov/cast";
 const PAGES_BASE = process.env.CAST_PAGES_BASE ?? "https://aa-blinov.github.io/cast";
 // Matches install.sh/install.ps1's CAST_API_BASE override — same
@@ -35,7 +37,7 @@ export function isReleaseInstall(): boolean {
 
 /** Strips a leading "v" — GitHub tags are "v0.2.0", package.json says "0.2.0". */
 function normalizeVersion(v: string): string {
-	return v.replace(/^v/, "");
+	return v.replace(V_PREFIX_RE, "");
 }
 
 /**
