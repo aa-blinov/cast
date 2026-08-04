@@ -71,6 +71,7 @@ import { mcpToolName } from "./mcp.ts";
 import { getBashResolution } from "./tools/bash.ts";
 
 const PIPE_MATCHER_RE = /^[a-zA-Z0-9_|]+$/;
+const IF_CONDITION_RE = /^(\w+)(?:\((.*)\))?$/;
 
 export type HookEvent =
 	| "SessionStart"
@@ -487,7 +488,7 @@ function matchesMatcher(matchTarget: string | undefined, matcher: string): boole
 
 function matchesIfCondition(ifCondition: string, payload: Record<string, unknown>): boolean {
 	const toolName = typeof payload.tool_name === "string" ? payload.tool_name : "";
-	const m = ifCondition.match(/^(\w+)(?:\((.*)\))?$/);
+	const m = ifCondition.match(IF_CONDITION_RE);
 	if (!m) return false;
 	if (m[1].toLowerCase() !== toolName.toLowerCase()) return false;
 	if (!m[2]) return true;

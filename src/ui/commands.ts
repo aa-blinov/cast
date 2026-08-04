@@ -83,6 +83,8 @@ import { getStatusBarSegments, SEGMENT_MAX_WIDTH, type SegmentContext, type Stat
 import { ALL_THEMES, getActiveTheme, setActiveTheme } from "./themes/index.ts";
 import type { PendingImage, UseAgentSession } from "./useAgentSession.ts";
 
+const WHITESPACE_SPLIT_RE = /\s+/;
+
 /**
  * Slash commands shown in the Composer's autocomplete palette.
  *
@@ -627,7 +629,7 @@ async function handleSkillsCommand(input: string, deps: CommandDeps): Promise<vo
 		return;
 	}
 
-	const [verb, ...rest] = args.split(/\s+/);
+	const [verb, ...rest] = args.split(WHITESPACE_SPLIT_RE);
 	const name = rest.join(" ").trim();
 	if (verb === "list") {
 		deps.agent.addDisplayMessage({ role: "warning", content: formatSkillsList(deps) });
@@ -816,7 +818,7 @@ async function handleMcpCommand(input: string, deps: CommandDeps): Promise<void>
 		return;
 	}
 
-	const [verb, ...rest] = args.split(/\s+/);
+	const [verb, ...rest] = args.split(WHITESPACE_SPLIT_RE);
 	const name = rest.join(" ").trim();
 	if (verb === "list") {
 		deps.agent.addDisplayMessage({ role: "warning", content: formatMcpList(deps) });
@@ -860,7 +862,7 @@ async function handlePluginCommand(input: string, deps: CommandDeps): Promise<vo
 		return;
 	}
 
-	const [verb, ...rest] = args.split(/\s+/);
+	const [verb, ...rest] = args.split(WHITESPACE_SPLIT_RE);
 	const restJoined = rest.join(" ").trim();
 
 	// Any marketplace/install/list command should see the defaults.
@@ -1023,7 +1025,7 @@ const RUNNING_COMMANDS = new Set(["/queue", "/q", "/queue-reset", "/qr", "/steer
 export function canSubmitDuringRun(text: string): boolean {
 	const input = text.trim();
 	if (!input.startsWith("/")) return false;
-	const cmd = input.split(/\s+/)[0]!;
+	const cmd = input.split(WHITESPACE_SPLIT_RE)[0]!;
 	return RUNNING_COMMANDS.has(cmd);
 }
 
@@ -1278,7 +1280,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 
 	if (input === "/hooks" || input.startsWith("/hooks ")) {
 		const args = input === "/hooks" ? "" : input.slice("/hooks ".length).trim();
-		const [verb, ...rest] = args.split(/\s+/).filter(Boolean);
+		const [verb, ...rest] = args.split(WHITESPACE_SPLIT_RE).filter(Boolean);
 		if (verb === "help") {
 			deps.agent.addDisplayMessage({ role: "warning", content: HOOKS_HELP });
 			return;
@@ -2264,12 +2266,13 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 					keyPath = custom;
 				}
 				// Validate key with retry loop
-				while (true) {
-					const err = keyPath
-						? validateKeyPermissions(keyPath.startsWith("~/") ? keyPath.replace("~", homedir()) : keyPath)
-						: undefined;
-					if (!err) break;
-					const retry = await deps.pickers.promptText(err, keyPath, "~/.ssh/id_ed25519");
+			while (true) {
+				const err = keyPath
+					? validateKeyPermissions(keyPath.startsWith("~/") ? keyPath.replace("~", homedir()) : keyPath)
+					: undefined;
+				if (!err) break;
+				// biome-ignore lint/performance/noAwaitInLoops: SSH key retry requires user interaction
+				const retry = await deps.pickers.promptText(err, keyPath, "~/.ssh/id_ed25519");
 					if (!retry) {
 						showNotice("[Cancelled]");
 						return;
