@@ -13,6 +13,11 @@
 
 import { EventEmitter } from "node:events";
 
+// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence
+const CSIU_RE = /^\x1b\[(\d+)(?::\d*)?(?::\d+)?u$/;
+const CR_RE = /\r/g;
+const CRLF_RE2 = /\r\n?/g;
+
 const ESC = "\x1b";
 const BRACKETED_PASTE_START = "\x1b[200~";
 const BRACKETED_PASTE_END = "\x1b[201~";
@@ -74,7 +79,7 @@ function isCompleteApcSequence(data: string): "complete" | "incomplete" {
 
 function parseUnmodifiedKittyPrintableCodepoint(sequence: string): number | undefined {
 	// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequences
-	const match = sequence.match(/^\x1b\[(\d+)(?::\d*)?(?::\d+)?u$/);
+	const match = sequence.match(CSIU_RE);
 	if (!match) return undefined;
 	const codepoint = parseInt(match[1]!, 10);
 	return codepoint >= 32 ? codepoint : undefined;
@@ -271,7 +276,7 @@ export class StdinBuffer extends EventEmitter<StdinBufferEventMap> {
 		// emit bracketed-paste markers. A bare Enter ("\r") has no interior
 		// newline and is excluded by the same rule.
 		const joined = result.sequences.join("");
-		const norm = joined.replace(/\r/g, "\n");
+		const norm = joined.replace(CR_RE, "\n");
 		const nlIndex = norm.indexOf("\n");
 		const hasInteriorNewline = nlIndex >= 0 && nlIndex < norm.length - 1;
 		const startsNewBurst =
@@ -333,7 +338,7 @@ export class StdinBuffer extends EventEmitter<StdinBufferEventMap> {
 			this.plainPasteTimeout = null;
 		}
 		if (this.pendingPlainPaste === null) return;
-		const text = this.pendingPlainPaste.replace(/\r\n?/g, "\n");
+		const text = this.pendingPlainPaste.replace(CRLF_RE2, "\n");
 		this.pendingPlainPaste = null;
 		this.pendingKittyPrintableCodepoint = undefined;
 		this.emit("paste", text);

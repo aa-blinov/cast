@@ -14,6 +14,9 @@ import { promisify } from "node:util";
 import type { AppConfig } from "../config.ts";
 import { formatSize, resolvePath, type ToolResult } from "./shared.ts";
 
+const REGEX_ESCAPE_RE = /[.*+?^${}()|[\]\\]/g;
+const SEARCH_PATH_PREFIX_RE = /^\.\//gm;
+
 // execFile (not execFileSync) — the sync variant blocks the whole Node event
 // loop for as long as fd/rg run. Under concurrent tool execution (several
 // eval cases, or several agent turns, spawning searches around the same
@@ -57,7 +60,7 @@ interface GitignoreRule {
 }
 
 function escapeRegExp(text: string): string {
-	return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	return text.replace(REGEX_ESCAPE_RE, "\\$&");
 }
 
 /**
@@ -388,7 +391,7 @@ export async function execGrep(args: Record<string, unknown>, cwd: string, confi
 		// Match globs relative to the requested directory, rather than an
 		// absolute command argument whose parent names could accidentally match
 		// a directory component. The fallback uses the same root-relative form.
-		output = searchPathIsDirectory ? stdout.replace(/^\.\//gm, "") : stdout;
+		output = searchPathIsDirectory ? stdout.replace(SEARCH_PATH_PREFIX_RE, "") : stdout;
 	} catch (err) {
 		// rg's exit codes: 0 = matches found, 1 = ran cleanly but nothing
 		// matched, 2 = a real error (bad regex, unreadable root, …). The
