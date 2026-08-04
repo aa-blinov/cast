@@ -25,6 +25,8 @@
  *   merged versions of the two, or the originals unchanged if no merge
  *   condition holds.
  */
+const TRAILING_WORD_RE = /(\S+)$/;
+
 export function mergeMidWordBoundary(thinkingText, contentText) {
 	if (!thinkingText || !contentText) return { thinkingText, contentText };
 	const lastChar = thinkingText[thinkingText.length - 1];
@@ -42,7 +44,7 @@ export function mergeMidWordBoundary(thinkingText, contentText) {
 	const isCyrillic = (c) => c >= 0x0400 && c <= 0x04ff;
 	const scriptMatch = (isLatin(lastCode) && isLatin(firstCode)) || (isCyrillic(lastCode) && isCyrillic(firstCode));
 	if (!scriptMatch) return { thinkingText, contentText };
-	const fragmentMatch = thinkingText.match(/(\S+)$/);
+	const fragmentMatch = thinkingText.match(TRAILING_WORD_RE);
 	if (!fragmentMatch) return { thinkingText, contentText };
 	const fragment = fragmentMatch[1];
 	// Trailing sentence-ending punctuation in the fragment means the
