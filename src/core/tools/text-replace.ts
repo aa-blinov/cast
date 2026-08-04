@@ -28,6 +28,12 @@ export type Replacer = (content: string, find: string) => Generator<string, void
 const SINGLE_CANDIDATE_SIMILARITY_THRESHOLD = 0.65;
 const MULTIPLE_CANDIDATES_SIMILARITY_THRESHOLD = 0.65;
 
+const WHITESPACE_RE_G = WHITESPACE_RE_G;
+const LEADING_SPACE_RE = /^\s*/;
+const REGEX_SPECIAL_RE2 = /[.*+?^${}()|[\]\\]/g;
+const ESCAPE_SEQUENCE_RE = /\\(n|t|r|'|"|`|\\|\n|\$)/g;
+
+
 /** Levenshtein distance algorithm implementation */
 function levenshtein(a: string, b: string): number {
 	if (a === "" || b === "") {
@@ -230,7 +236,7 @@ export const BlockAnchorReplacer: Replacer = function* (content, find) {
 };
 
 export const WhitespaceNormalizedReplacer: Replacer = function* (content, find) {
-	const normalizeWhitespace = (text: string) => text.replace(/\s+/g, " ").trim();
+	const normalizeWhitespace = (text: string) => text.replace(WHITESPACE_RE_G, " ").trim();
 	const normalizedFind = normalizeWhitespace(find);
 
 	// Handle single line matches
