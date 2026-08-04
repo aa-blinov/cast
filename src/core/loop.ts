@@ -1054,6 +1054,10 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 	try {
 		// Outer loop: continues when follow-up messages arrive after agent would stop
 		let overflowCompacted = false;
+		// The main agent turn loop is inherently sequential: each iteration
+		// depends on the previous model response and tool results. Promise.all
+		// would break causality (the model hasn't produced the next step yet).
+		// biome-ignore lint/performance/noAwaitInLoops: sequential agent turn loop
 		outer: while (true) {
 			if (signal?.aborted) {
 				endAborted();
