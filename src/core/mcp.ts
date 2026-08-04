@@ -29,6 +29,14 @@ import { matchesToolsAllowlist } from "./frontmatter.ts";
 import type { Tool } from "./llm.ts";
 import type { ToolResult } from "./tools.ts";
 
+const MCP_SANITIZE_NAME_RE = /[^a-zA-Z0-9_-]/g;
+const MCP_BRACKET_NAME_RE = /^\[([^\]]+)\]/;
+const MCP_AMP_RE = /&/g;
+const MCP_LT_RE = /</g;
+const MCP_GT_RE = />/g;
+const MCP_QUOTE_RE = /"/g;
+const MCP_DIDNT_RESPOND_RE = /didn't respond within/;
+
 export interface McpServerConfig {
 	// stdio (local process)
 	command?: string;
@@ -65,7 +73,7 @@ export function saveMcpConfig(path: string, servers: Record<string, McpServerCon
 
 /** OpenAI function-calling tool names are restricted to [a-zA-Z0-9_-]; server/tool names aren't guaranteed to be. */
 export function sanitizeToolNamePart(name: string): string {
-	return name.replace(/[^a-zA-Z0-9_-]/g, "_");
+	return name.replace(MCP_SANITIZE_NAME_RE, "_");
 }
 
 export function mcpToolName(serverName: string, toolName: string): string {
@@ -81,7 +89,7 @@ export function mcpToolName(serverName: string, toolName: string): string {
  * reliable). Used for persona-level `mcp:` allowlists (loop.ts).
  */
 export function mcpServerNameFromDescription(description: string | undefined): string | undefined {
-	return description?.match(/^\[([^\]]+)\]/)?.[1];
+	return description?.match(MCP_BRACKET_NAME_RE)?.[1];
 }
 
 export interface McpToolHandle {
@@ -252,7 +260,7 @@ export async function connectMcpServers(servers: Record<string, McpServerConfig>
 					// over SSEClientTransport. Only for url servers, and not for
 					// timeouts — a hung endpoint is hung either way.
 					const msg = error instanceof Error ? error.message : String(error);
-					if (!cfg.url || /didn't respond within/.test(msg)) throw error;
+					if (!cfg.url || MCP_DIDNT_RESPOND_RE.test(msg)) throw error;
 					transport = new SSEClientTransport(new URL(cfg.url), {
 						requestInit: cfg.headers ? { headers: cfg.headers } : undefined,
 						// POSTs go through the dedicated agent; the long-lived GET
@@ -361,7 +369,7 @@ export async function connectMcpServers(servers: Record<string, McpServerConfig>
 }
 
 function escapeXml(s: string): string {
-	return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+	return s.replace(MCP_AMP_RE, "&amp;").replace(MCP_LT_RE, "&lt;").replace(MCP_GT_RE, "&gt;").replace(MCP_QUOTE_RE, "&quot;");
 }
 
 /** Tool-name blurbs for the `/mcp` picker description line (connected servers only). */

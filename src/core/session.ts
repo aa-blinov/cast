@@ -9,6 +9,15 @@ import type { PlanQuestion, PlanTransition } from "./plan.ts";
 import { deriveSessionTitle } from "./session-title.ts";
 import type { TodoItem } from "./todo.ts";
 
+const READ_FILES_RE = /<read-files>\n([\s\S]*?)\n<\/read-files>/;
+const MODIFIED_FILES_RE = /<modified-files>\n([\s\S]*?)\n<\/modified-files>/;
+const JSON_EXT_RE = /\.json$/;
+const NEWLINE_RE_G = /\n/g;
+const DOUBLE_QUOTE_RE = /"/g;
+const WHITESPACE_RE = /\s+/;
+const SQL_LIKE_SPECIAL_RE = /[\\%_]/g;
+const DATAURL_RE = /^data:([^;]+);base64,(.*)$/s;
+
 // ============================================================================
 // Session state
 // ============================================================================
@@ -334,8 +343,8 @@ function formatFileOps(readFiles: string[], modifiedFiles: string[]): string {
 
 /** Pull the `<read-files>`/`<modified-files>` tags back out of a previous summary. */
 function parseFileTagsFromSummary(text: string): { readFiles: string[]; modifiedFiles: string[] } {
-	const readMatch = text.match(/<read-files>\n([\s\S]*?)\n<\/read-files>/);
-	const modifiedMatch = text.match(/<modified-files>\n([\s\S]*?)\n<\/modified-files>/);
+	const readMatch = text.match(READ_FILES_RE);
+	const modifiedMatch = text.match(MODIFIED_FILES_RE);
 	return {
 		readFiles: readMatch ? readMatch[1]!.split("\n").filter(Boolean) : [],
 		modifiedFiles: modifiedMatch ? modifiedMatch[1]!.split("\n").filter(Boolean) : [],
@@ -738,7 +747,7 @@ export function getMessageImage(
 	const imageParts = parts.filter((p) => p.type === "image_url" && p.image_url?.url);
 	const url = imageParts[imageIndex]?.image_url?.url;
 	if (!url) return undefined;
-	const match = /^data:([^;]+);base64,(.*)$/s.exec(url);
+	const match = DATAURL_RE.exec(url);
 	if (!match) return undefined;
 	return { mimeType: match[1], buffer: Buffer.from(match[2], "base64") };
 }
@@ -1041,7 +1050,7 @@ function legacySessionFilePaths(): string[] {
 function readLegacySessionFile(filePath: string): SessionState | null {
 	try {
 		const raw = JSON.parse(readFileSync(filePath, "utf-8")) as SessionState & { messages?: unknown };
-		const jsonlPath = filePath.replace(/\.json$/, JSONL_EXT);
+		const jsonlPath = filePath.replace(JSON_EXT_RE, JSONL_EXT);
 		if (existsSync(jsonlPath)) {
 			const text = readFileSync(jsonlPath, "utf-8");
 			raw.messages = text
@@ -1180,7 +1189,7 @@ function messageText(m: { content?: unknown }): string {
 /** First user message, newline-flattened — the picker row's description. */
 export function getFirstUserMessage(subject: { messages: Message[] }): string {
 	const msg = subject.messages.find((m) => m.role === "user");
-	return msg ? messageText(msg).replace(/\n/g, " ").trim() : "";
+	return msg ? messageText(msg).replace(NEWLINE_RE_G, " ").trim() : "";
 }
 
 /** Shared row → summary mapping for both listSessionSummaries and
@@ -1228,7 +1237,7 @@ export function listSessionSummaries(): SessionSummary[] {
  *  operator) and given a trailing "*" for prefix matching, so a still-being-
  *  typed word ("auth") reaches its finished form ("authentication"). */
 function toFtsTerm(token: string): string {
-	return `"${token.replace(/"/g, '""')}"*`;
+	return `"${token.replace(DOUBLE_QUOTE_RE, '""')}"*`;
 }
 
 /**
@@ -1248,7 +1257,7 @@ export function searchSessionSummaries(query: string): SessionSummary[] {
 	if (!q) return listSessionSummaries();
 	const db = getDb();
 
-	const tokens = q.split(/\s+/).filter(Boolean);
+	const tokens = q.split(WHITESPACE_RE).filter(Boolean);
 	// messages_fts has one row per message, not one per session — a combined
 	// multi-word MATCH (`"a"* "b"*`) requires every word in the SAME message
 	// row, so "привет" and "настроение" typed in different turns of one
@@ -1281,7 +1290,7 @@ export function searchSessionSummaries(query: string): SessionSummary[] {
 
 	// Escape LIKE's own wildcards so a literal "%" or "_" in the typed query
 	// matches itself instead of acting as a pattern character.
-	const like = `%${q.replace(/[\\%_]/g, "\\$&")}%`;
+	const like = `%${q.replace(SQL_LIKE_SPECIAL_RE, "\\$&")}%`;
 	const metaMatches = db
 		.prepare(
 			"SELECT id FROM sessions WHERE cwd LIKE ? ESCAPE '\\' OR id LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\' OR persona LIKE ? ESCAPE '\\' OR model LIKE ? ESCAPE '\\'",

@@ -28,6 +28,18 @@ import type { TodoItem } from "./todo.ts";
 import { invalidateCachedFile } from "./tools/hashline-cache.ts";
 import type { ToolResult } from "./tools.ts";
 
+const SLUG_SANITIZE_RE = /[^a-z0-9]+/g;
+const STRIP_HYPHENS_RE = /^-+|-+$/g;
+const FD_REDIRECT_RE = /^\d*>&\d+$/;
+const DEVNULL_REDIRECT_RE = /^&?\d*>\s*\/dev\/null$/;
+const PATH_BEFORE_SLASH_RE = /^.*\//;
+const FENCE_START_RE = /^\s*(```|~~~)/;
+const UNCHECKED_BOX_RE = /^\s*[-*]\s+\[ \]/;
+const CHECKED_BOX_RE = /^\s*[-*]\s+\[x\]/i;
+const UNCHECKED_TODO_RE = /^\s*[-*]\s+\[ \]\s+(.*)$/;
+const HEADING_RE = /^(#{1,6})\s+(.+)$/;
+const ANY_BOX_RE = /^\s*[-*]\s+\[[ xX]\]/;
+
 // ============================================================================
 // State
 // ============================================================================
@@ -126,11 +138,7 @@ export function createPlanState(
  * Everything outside [a-z0-9] collapses to "-", which also neutralizes path
  * traversal attempts ("../evil" → "evil"). */
 export function slugifyPlanName(name: string): string {
-	return name
-		.toLowerCase()
-		.replace(/[^a-z0-9]+/g, "-")
-		.replace(/^-+|-+$/g, "")
-		.slice(0, 64);
+	return name.toLowerCase().replace(SLUG_SANITIZE_RE, "-").replace(STRIP_HYPHENS_RE, "").slice(0, 64);
 }
 
 // ============================================================================
@@ -259,7 +267,7 @@ export async function checkReadOnlyCommand(command: string): Promise<{ ok: boole
 		const unsupported = unsupportedSyntax(tree.rootNode);
 		if (unsupported) return { ok: false, reason: `${unsupported} can run arbitrary commands` };
 		for (const redirect of tree.rootNode.descendantsOfType("file_redirect")) {
-			if (!/^\d*>&\d+$/.test(redirect.text) && !/^&?\d*>\s*\/dev\/null$/.test(redirect.text)) {
+			if (!FD_REDIRECT_RE.test(redirect.text) && !DEVNULL_REDIRECT_RE.test(redirect.text)) {
 				return { ok: false, reason: "redirection can write files or change command input" };
 			}
 		}
@@ -267,7 +275,7 @@ export async function checkReadOnlyCommand(command: string): Promise<{ ok: boole
 		if (commands.length === 0) return { ok: false, reason: "no executable command" };
 		for (const stage of commands) {
 			const name = stage.childForFieldName("name");
-			const binary = name?.text.replace(/^.*\//, "");
+			const binary = name?.text.replace(PATH_BEFORE_SLASH_RE, "");
 			if (!binary) return { ok: false, reason: "empty command stage" };
 			const args = Array.from({ length: stage.childCount }, (_, index) => stage.child(index))
 				.filter(
@@ -422,7 +430,7 @@ function fencedLineMask(lines: string[]): boolean[] {
 	const mask: boolean[] = new Array(lines.length);
 	let inFence = false;
 	for (let i = 0; i < lines.length; i++) {
-		if (/^\s*(```|~~~)/.test(lines[i]!)) {
+		if (FENCE_START_RE.test(lines[i]!)) {
 			inFence = !inFence;
 			mask[i] = true;
 			continue;
@@ -441,8 +449,8 @@ export function planChecklistState(content: string): { unchecked: number; checke
 	let checked = 0;
 	for (let i = 0; i < lines.length; i++) {
 		if (fenced[i]) continue;
-		if (/^\s*[-*]\s+\[ \]/.test(lines[i]!)) unchecked++;
-		else if (/^\s*[-*]\s+\[x\]/i.test(lines[i]!)) checked++;
+		if (UNCHECKED_BOX_RE.test(lines[i]!)) unchecked++;
+		else if (CHECKED_BOX_RE.test(lines[i]!)) checked++;
 	}
 	return { unchecked, checked };
 }
@@ -454,7 +462,7 @@ export function listUncheckedPlanSteps(content: string): string[] {
 	const steps: string[] = [];
 	for (let i = 0; i < lines.length; i++) {
 		if (fenced[i]) continue;
-		const match = lines[i]!.match(/^\s*[-*]\s+\[ \]\s+(.*)$/);
+		const match = lines[i]!.match(UNCHECKED_TODO_RE);
 		if (match) steps.push(match[1]!.trim());
 	}
 	return steps;
@@ -531,7 +539,7 @@ function normalizeStepChecklist(content: string): string {
 	for (const step of steps) {
 		let hasCheckbox = false;
 		for (let i = step.bodyStartLine; i < step.bodyEndLine; i++) {
-			if (!fenced[i] && /^\s*[-*]\s+\[[ xX]\]/.test(lines[i]!)) {
+			if (!fenced[i] && ANY_BOX_RE.test(lines[i]!)) {
 				hasCheckbox = true;
 				break;
 			}
@@ -568,7 +576,7 @@ function parseSections(content: string): Section[] {
 	const fenced = fencedLineMask(lines);
 	for (let i = 0; i < lines.length; i++) {
 		if (fenced[i]) continue;
-		const match = lines[i]!.match(/^(#{1,6})\s+(.+)$/);
+		const match = lines[i]!.match(HEADING_RE);
 		if (match) {
 			const level = match[1]!.length;
 			const heading = match[2]!.trim();

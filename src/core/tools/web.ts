@@ -24,6 +24,12 @@ import TurndownService from "turndown";
 import { loadSettings } from "../settings.ts";
 import type { ToolResult } from "./shared.ts";
 
+const UDDG_RE = /uddg=([^&"]+)/;
+const DDG_RESULT_RE = /<div[^>]+class="result\s/;
+const DDG_LINK_RE = /<a[^>]+class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/;
+const DDG_SNIPPET_RE = /<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/;
+const JINA_TITLE_RE = /^Title: (.+)$/m;
+
 // ============================================================================
 // Constants
 // ============================================================================
@@ -98,7 +104,7 @@ function cacheSet(key: string, results: SearchResults): void {
 /** Decode DDG redirect URL: `//duckduckgo.com/l/?uddg=https%3A%2F%2F...` → `https://...` */
 function decodeDdgUrl(href: string): string {
 	try {
-		const uddg = /uddg=([^&"]+)/.exec(href);
+		const uddg = UDDG_RE.exec(href);
 		if (uddg) return decodeURIComponent(uddg[1]);
 		if (href.startsWith("http")) return href;
 		return "";
@@ -180,13 +186,13 @@ export async function searchDuckDuckGo(
 	}
 
 	// Parse results
-	const blocks = html.split(/<div[^>]+class="result\s/);
+	const blocks = html.split(DDG_RESULT_RE);
 	const results: SearchResult[] = [];
 
 	for (let i = 1; i < blocks.length && results.length < PARSE_RESULTS_LIMIT; i++) {
 		const block = blocks[i];
 
-		const titleMatch = /<a[^>]+class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/.exec(block);
+		const titleMatch = DDG_LINK_RE.exec(block);
 		if (!titleMatch) continue;
 
 		const resultUrl = decodeDdgUrl(titleMatch[1]);
@@ -194,7 +200,7 @@ export async function searchDuckDuckGo(
 		const title = stripTags(titleMatch[2]);
 		if (!title) continue;
 
-		const snippetMatch = /<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/.exec(block);
+		const snippetMatch = DDG_SNIPPET_RE.exec(block);
 		const snippet = snippetMatch ? stripTags(snippetMatch[1]) : "";
 
 		results.push({ title, url: resultUrl, snippet });
@@ -438,6 +444,7 @@ export async function fetchUrl(
 			// anyway just because it's also an Error.
 			let resp: Response;
 			try {
+				// biome-ignore lint/performance/noAwaitInLoops: retry loop requires sequential attempts
 				resp = await fetch(`https://r.jina.ai/${url}`, {
 					headers: {
 						Accept: "text/markdown",
@@ -468,7 +475,7 @@ export async function fetchUrl(
 			// content, not a bare markdown document:
 			//   Title: ...\n\nURL Source: ...\n\n[Warning: ...\n\n]Markdown Content:\n\n<content>
 			let title = "";
-			const titleMatch = /^Title: (.+)$/m.exec(text);
+			const titleMatch = JINA_TITLE_RE.exec(text);
 			if (titleMatch) title = titleMatch[1].trim();
 
 			let content = text;

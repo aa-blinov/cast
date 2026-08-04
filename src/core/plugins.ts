@@ -16,6 +16,13 @@ import { homedir } from "node:os";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import type { Settings } from "./settings.ts";
 
+const DOTGIT_RE = /\.git$/i;
+const GITHUB_HTTPS_RE = /^https?:\/\/github\.com\//i;
+const GITHUB_SSH_RE = /^git@github\.com:/i;
+const REPO_SLUG_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+const PATH_SEP_RE = /[/\\]/;
+const SANITIZE_RE = /[^a-zA-Z0-9._-]/g;
+
 const MARKETPLACE_MANIFESTS = [
 	".cast-plugin/marketplace.json",
 	".grok-plugin/marketplace.json",
@@ -167,12 +174,7 @@ export function ensureDefaultMarketplaces(
 }
 
 function normalizeSourceKey(source: string): string {
-	return source
-		.trim()
-		.replace(/\.git$/i, "")
-		.replace(/^https?:\/\/github\.com\//i, "")
-		.replace(/^git@github\.com:/i, "")
-		.toLowerCase();
+	return source.trim().replace(DOTGIT_RE, "").replace(GITHUB_HTTPS_RE, "").replace(GITHUB_SSH_RE, "").toLowerCase();
 }
 
 // ---------------------------------------------------------------------------
@@ -215,7 +217,7 @@ function githubUrl(repo: string): string {
 
 function resolveGitUrl(source: string): string {
 	if (source.startsWith("git@") || source.startsWith("http://") || source.startsWith("https://")) return source;
-	if (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(source)) return githubUrl(source);
+	if (REPO_SLUG_RE.test(source)) return githubUrl(source);
 	return source;
 }
 
@@ -314,8 +316,8 @@ function rawPluginSource(
  * separators and strip anything else unsafe.
  */
 export function stagingNameFor(source: string): string {
-	const last = source.split(/[/\\]/).filter(Boolean).pop() ?? "";
-	const cleaned = last.replace(/\.git$/, "").replace(/[^a-zA-Z0-9._-]/g, "-");
+	const last = source.split(PATH_SEP_RE).filter(Boolean).pop() ?? "";
+	const cleaned = last.replace(DOTGIT_RE, "").replace(SANITIZE_RE, "-");
 	return cleaned || "marketplace";
 }
 

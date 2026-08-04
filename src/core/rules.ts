@@ -23,6 +23,13 @@ import { dirname, join } from "node:path";
 import { parseFrontmatter } from "./frontmatter.ts";
 import { promptsDir, readRequiredPrompt } from "./prompts.ts";
 
+const MD_EXT_RE = /\.md$/;
+const REGEX_SPECIAL_CHARS_RE = /[.*+?^${}()|[\]\\]/g;
+const AMP_RE = /&/g;
+const LT_RE = /</g;
+const GT_RE = />/g;
+const QUOTE_RE = /"/g;
+
 // ============================================================================
 // Constants
 // ============================================================================
@@ -129,7 +136,7 @@ function loadRuleFromFile(filePath: string, source: RuleSource, scope: string): 
 	const name =
 		frontmatter.name && typeof frontmatter.name === "string"
 			? frontmatter.name
-			: filePath.replace(/\.md$/, "").split("/").pop()!;
+			: filePath.replace(MD_EXT_RE, "").split("/").pop()!;
 	const description = typeof frontmatter.description === "string" ? frontmatter.description : "";
 	const alwaysApply = frontmatter["always-apply"] === true || frontmatter.alwaysApply === true;
 
@@ -303,7 +310,7 @@ function globToRegExpSource(glob: string): string {
 		} else if (ch === "?") {
 			out += "[^/]";
 		} else {
-			out += ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+			out += ch.replace(REGEX_SPECIAL_CHARS_RE, "\\$&");
 		}
 	}
 	return out;
@@ -445,10 +452,10 @@ export function selectMentionedRules(catalog: Rule[], userText: string): Rule[] 
 
 function escapeXml(str: string): string {
 	return str
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;")
-		.replace(/"/g, "&quot;")
+		.replace(AMP_RE, "&amp;")
+		.replace(LT_RE, "&lt;")
+		.replace(GT_RE, "&gt;")
+		.replace(QUOTE_RE, "&quot;")
 		.replace(/'/g, "&apos;");
 }
 
