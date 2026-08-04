@@ -60,6 +60,9 @@ Supported environment variables (provider credentials are **not** read from env 
 | `CAST_CWD` | Override working directory |
 | `CAST_BASH` | Path to the bash executable for the `bash` tool (Windows: non-standard Git Bash / msys2) |
 | `CAST_VERSION` | Pin install version (installer only) |
+| `CAST_WEB_PORT` | Override Web UI port (default: `1337`) |
+| `CAST_WEB_HOST` | Override Web UI host bind address (default: `127.0.0.1`) |
+| `CAST_SESSIONS_DB` | Override SQLite session database path |
 
 Works with anything that speaks the OpenAI API:
 
