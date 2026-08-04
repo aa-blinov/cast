@@ -28,6 +28,11 @@ import { ensureSessionWorktree } from "../core/worktree.ts";
 import { reconcileActiveStream, SANDBOX_CWD, toDisplayMessages, type WebBridge, type WebEvent } from "./bridge.ts";
 import { isBlockedAttachmentName, sessionInputsDir } from "./inputs.ts";
 
+const PORT_RE = /:\d+$/;
+const ROUTE_PARAM_RE = /:(\w+)/g;
+const FILENAME_QUOTE_RE = /"/g;
+const STREAM_BLOCKS_IMPORT_RE = /from\s+"\.\/stream-blocks\.js"/;
+
 const MIME_TYPES: Record<string, string> = {
 	".html": "text/html; charset=utf-8",
 	".css": "text/css; charset=utf-8",
@@ -147,7 +152,7 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 		const isHttps =
 			"encrypted" in req.socket ||
 			(typeof forwardedProto === "string" && forwardedProto.split(",")[0]?.trim() === "https");
-		const host = (req.headers.host ?? "").replace(/:\d+$/, "").toLowerCase();
+		const host = (req.headers.host ?? "").replace(PORT_RE, "").toLowerCase();
 		if (isHttps || host === "localhost" || host === "127.0.0.1" || host === "[::1]") {
 			res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
 		}
@@ -328,8 +333,8 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 			} else if (urlPath === "/app.js") {
 				content = content
 					.toString("utf-8")
-					.replace(
-						/from\s+"\.\/stream-blocks\.js"/,
+.replace(
+STREAM_BLOCKS_IMPORT_RE,
 						`from"./stream-blocks.js?v=${assetVersion("/stream-blocks.js")}"`,
 					);
 			}
@@ -377,7 +382,7 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 
 	function route(method: string, path: string, handler: RouteHandler): void {
 		const paramNames: string[] = [];
-		const pattern = path.replace(/:(\w+)/g, (_match, name) => {
+		const pattern = path.replace(ROUTE_PARAM_RE, (_match, name) => {
 			paramNames.push(name);
 			return "([^/]+)";
 		});
@@ -1147,7 +1152,7 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 			res.writeHead(200, {
 				"Content-Type": inline ? (PREVIEW_MIME[ext] ?? "application/octet-stream") : "application/octet-stream",
 				"Content-Length": st.size,
-				"Content-Disposition": `${inline ? "inline" : "attachment"}; filename="${name.replace(/"/g, "")}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+				"Content-Disposition": `${inline ? "inline" : "attachment"}; filename="${name.replace(FILENAME_QUOTE_RE, "")}"; filename*=UTF-8''${encodeURIComponent(name)}`,
 			});
 			createReadStream(target).pipe(res);
 		} catch (err) {
@@ -1310,7 +1315,7 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 			res.writeHead(200, {
 				"Content-Type": inline ? (PREVIEW_MIME[ext] ?? "application/octet-stream") : "application/octet-stream",
 				"Content-Length": st.size,
-				"Content-Disposition": `${inline ? "inline" : "attachment"}; filename="${name.replace(/"/g, "")}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+				"Content-Disposition": `${inline ? "inline" : "attachment"}; filename="${name.replace(FILENAME_QUOTE_RE, "")}"; filename*=UTF-8''${encodeURIComponent(name)}`,
 			});
 			createReadStream(target).pipe(res);
 		} catch (err) {

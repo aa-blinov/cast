@@ -119,7 +119,8 @@ export async function submitMessage(text, images, pendingDocs, context) {
 			}
 		}
 		const paths = [];
-		for (const doc of pendingDocs) {
+		// biome-ignore lint/performance/noAwaitInLoops: sequential upload required — each doc depends on session commit
+	for (const doc of pendingDocs) {
 			try {
 				const result = await api("POST", `/api/sessions/${id}/inputs/upload`, {
 					name: doc.name,

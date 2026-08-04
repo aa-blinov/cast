@@ -48,6 +48,14 @@ import { useSessionController } from "./use-session-controller.js";
 import { useSessionState } from "./use-session-state.js";
 import { useWorkspaceState } from "./use-workspace-state.js";
 
+const TRAILING_NL_RE = /\n$/;
+const TRAILING_PUNCTUATION_RE = /[.,!?;:]$/;
+const NEWLINE_RUN_RE = /\n+/;
+const MARKDOWN_LIST_MARKER_RE = /^[ \t]*[-*] /;
+const NUMBERED_LIST_MARKER_RE = /^[ \t]*\d+\. /;
+const TABLE_SEPARATOR_RE = /^\|\s*[-:]+[-| :]*$/;
+const FRONTMATTER_LINE_RE = /^- (.+?): (.+)$/;
+
 const html = htm.bind(h);
 
 // ── Theme ────────────────────────────────────────────────────────────
@@ -353,7 +361,7 @@ function renderMarkdown(text) {
 		// attribute — simpler, and avoids double-escaping a large code block
 		// into an HTML attribute.
 		const copyBtn = `<button type="button" class="code-copy-btn" title="Copy" aria-label="Copy code">${CODE_COPY_ICON_SVG}</button>`;
-		fences.push(`<pre>${copyBtn}${label}<code>${escapeHtml(code.replace(/\n$/, ""))}</code></pre>`);
+		fences.push(`<pre>${copyBtn}${label}<code>${escapeHtml(code.replace(TRAILING_NL_RE, ""))}</code></pre>`);
 		return ` FENCE${i} `;
 	});
 
@@ -384,7 +392,7 @@ function renderMarkdown(text) {
 		// usually isn't part of the URL — trim it off before linking.
 		let url = m;
 		let trail = "";
-		while (/[.,!?;:]$/.test(url)) {
+		while (TRAILING_PUNCTUATION_RE.test(url)) {
 			trail = url.slice(-1) + trail;
 			url = url.slice(0, -1);
 		}
@@ -408,16 +416,16 @@ function renderMarkdown(text) {
 	out = out.replace(/(?:^[ \t]*[-*] .+$\n?(?:\n(?=[ \t]*[-*] ))?)+/gm, (block) => {
 		const items = block
 			.trim()
-			.split(/\n+/)
-			.map((l) => `<li>${l.replace(/^[ \t]*[-*] /, "")}</li>`)
+			.split(NEWLINE_RUN_RE)
+			.map((l) => `<li>${l.replace(MARKDOWN_LIST_MARKER_RE, "")}</li>`)
 			.join("");
 		return `<ul>${items}</ul>\n`;
 	});
 	out = out.replace(/(?:^[ \t]*\d+\. .+$\n?(?:\n(?=[ \t]*\d+\. ))?)+/gm, (block) => {
 		const items = block
 			.trim()
-			.split(/\n+/)
-			.map((l) => `<li>${l.replace(/^[ \t]*\d+\. /, "")}</li>`)
+			.split(NEWLINE_RUN_RE)
+			.map((l) => `<li>${l.replace(NUMBERED_LIST_MARKER_RE, "")}</li>`)
 			.join("");
 		return `<ol>${items}</ol>\n`;
 	});
@@ -430,7 +438,7 @@ function renderMarkdown(text) {
 			.filter((r) => r.trim());
 		if (rows.length < 2) return block;
 		// Check for separator row (| --- | --- |)
-		const sepIdx = rows.findIndex((r) => /^\|\s*[-:]+[-| :]*$/.test(r));
+		const sepIdx = rows.findIndex((r) => TABLE_SEPARATOR_RE.test(r));
 		if (sepIdx < 1) return block;
 		const parseCells = (row) =>
 			row
@@ -1437,7 +1445,7 @@ function App() {
 				let match = reminderRe.exec(content);
 				while (match !== null) {
 					for (const line of match[1].split("\n")) {
-						const fileMatch = line.match(/^- (.+?): (.+)$/);
+						const fileMatch = line.match(FRONTMATTER_LINE_RE);
 						if (fileMatch) attachments.push({ name: fileMatch[1], path: fileMatch[2] });
 					}
 					cleaned = cleaned.replace(match[0], "");
@@ -1462,7 +1470,7 @@ function App() {
 				const lines = m.content.split("\n");
 				const files = [];
 				for (const line of lines) {
-					const fm = line.match(/^- (.+?): (.+)$/);
+					const fm = line.match(FRONTMATTER_LINE_RE);
 					if (fm) files.push({ name: fm[1], path: fm[2] });
 				}
 				if (files.length > 0) pendingAttachments = files;
