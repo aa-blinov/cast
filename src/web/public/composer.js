@@ -146,7 +146,7 @@ export function Composer({ running, ready, activeId, commands, personas, questio
 		const el = textareaRef.current;
 		if (el) {
 			el.style.height = "auto";
-			el.style.height = `${Math.min(el.scrollHeight, 100)}px`;
+			el.style.height = `${Math.min(el.scrollHeight, 150)}px`;
 		}
 	}, []);
 
@@ -366,7 +366,7 @@ export function Composer({ running, ready, activeId, commands, personas, questio
 						!ready
 							? "Connecting…"
 							: pickerItems.length > 0
-								? "↑↓ to navigate, Enter to pick"
+								? "↑↓ choose, ↵ pick"
 								: question
 									? "Type your answer and press Enter…"
 									: "Type a message or / for commands..."
