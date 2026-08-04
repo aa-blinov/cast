@@ -5,6 +5,12 @@
  * in practice, so pulling in a YAML dependency isn't worth it.
  */
 
+const REGEX_SPECIAL_CHAR_RE = /[.+?^${}()|[\]\\]/;
+const BOM_LEADING_RE = /^\uFEFF/;
+const CRLF_RE = /\r\n/g;
+const LEADING_NEWLINE_RE = /^\n/;
+const YAML_LINE_RE = /^([a-zA-Z0-9_-]+):\s*(.*)$/;
+
 export type FrontmatterValue = string | boolean | string[];
 
 export interface ParsedFrontmatter {
@@ -56,7 +62,7 @@ export function matchesToolsAllowlist(name: string, patterns: string[]): boolean
 		let body = "";
 		for (const ch of pattern) {
 			if (ch === "*") body += ".*";
-			else if (/[.+?^${}()|[\]\\]/.test(ch)) body += `\\${ch}`;
+			else if (REGEX_SPECIAL_CHAR_RE.test(ch)) body += `\\${ch}`;
 			else body += ch;
 		}
 		if (new RegExp(`^${body}$`).test(name)) return true;
@@ -90,18 +96,18 @@ export function parseFrontmatter(content: string): ParsedFrontmatter {
 	// Strip a UTF-8 BOM: Windows editors (Notepad, PowerShell Out-File) prepend
 	// one, and `﻿---` failing the startsWith check silently discarded the
 	// whole frontmatter — a skill would load with no name or description.
-	const normalized = content.replace(/^﻿/, "").replace(/\r\n/g, "\n");
+	const normalized = content.replace(BOM_LEADING_RE, "").replace(CRLF_RE, "\n");
 	if (!normalized.startsWith("---")) return { frontmatter: {}, body: normalized };
 
 	const end = normalized.indexOf("\n---", 3);
 	if (end === -1) return { frontmatter: {}, body: normalized };
 
 	const yamlBlock = normalized.slice(3, end).trim();
-	const body = normalized.slice(end + 4).replace(/^\n/, "");
+	const body = normalized.slice(end + 4).replace(LEADING_NEWLINE_RE, "");
 
 	const frontmatter: Record<string, FrontmatterValue> = {};
 	for (const line of yamlBlock.split("\n")) {
-		const match = line.match(/^([a-zA-Z0-9_-]+):\s*(.*)$/);
+		const match = line.match(YAML_LINE_RE);
 		if (!match) continue;
 		const key = match[1]!;
 		let value = match[2]!.trim();

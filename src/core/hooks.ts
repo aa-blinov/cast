@@ -70,6 +70,8 @@ import type { McpToolHandle } from "./mcp.ts";
 import { mcpToolName } from "./mcp.ts";
 import { getBashResolution } from "./tools/bash.ts";
 
+const PIPE_MATCHER_RE = /^[a-zA-Z0-9_|]+$/;
+
 export type HookEvent =
 	| "SessionStart"
 	| "SessionEnd"
@@ -471,7 +473,7 @@ function pickMatchTarget(event: HookEvent, payload: Record<string, unknown>): st
 function matchesMatcher(matchTarget: string | undefined, matcher: string): boolean {
 	if (!matcher || matcher === "*") return true;
 	if (matchTarget === undefined) return true;
-	if (/^[a-zA-Z0-9_|]+$/.test(matcher)) {
+	if (PIPE_MATCHER_RE.test(matcher)) {
 		const lower = matchTarget.toLowerCase();
 		if (matcher.includes("|")) return matcher.split("|").some((p) => p.trim().toLowerCase() === lower);
 		return matcher.toLowerCase() === lower;

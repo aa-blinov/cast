@@ -16,6 +16,8 @@ import { basename, dirname, join } from "node:path";
 import { matchesToolsAllowlist, parseFrontmatter } from "./frontmatter.ts";
 import { promptsDir, readRequiredPrompt } from "./prompts.ts";
 
+const SLUG_RE = /^[a-z0-9-]+$/;
+
 const MAX_NAME_LENGTH = 64;
 const MAX_DESCRIPTION_LENGTH = 1024;
 
@@ -103,7 +105,7 @@ export function uninstallUserSkill(skill: Skill): void {
 function validateSkillName(name: string): string[] {
 	const errors: string[] = [];
 	if (name.length > MAX_NAME_LENGTH) errors.push(`name exceeds ${MAX_NAME_LENGTH} characters (${name.length})`);
-	if (!/^[a-z0-9-]+$/.test(name)) errors.push("name must be lowercase a-z, 0-9, hyphens only");
+	if (!SLUG_RE.test(name)) errors.push("name must be lowercase a-z, 0-9, hyphens only");
 	if (name.startsWith("-") || name.endsWith("-")) errors.push("name must not start or end with a hyphen");
 	if (name.includes("--")) errors.push("name must not contain consecutive hyphens");
 	return errors;
