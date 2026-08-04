@@ -11,7 +11,7 @@ export function isSandboxSessionCwd(cwd) {
 export function sessionDirectoryName(cwd) {
 	if (isSandboxSessionCwd(cwd)) return "Sandbox";
 	const normalized = (cwd ?? "").replace(TRAILING_SLASH_RE, "");
-const name = normalized.split(PATH_SEP_RE2).filter(Boolean).at(-1);
+	const name = normalized.split(PATH_SEP_RE2).filter(Boolean).at(-1);
 	return name || normalized || "Unknown directory";
 }
 

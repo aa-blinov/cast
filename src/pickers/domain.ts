@@ -37,13 +37,13 @@ export async function resolveConnection(
 	}
 
 	while (!baseURL) {
-  // biome-ignore lint/performance/noAwaitInLoops: sequential — each step depends on the previous
+		// biome-ignore lint/performance/noAwaitInLoops: sequential — each step depends on the previous
 		const v = await pickers.promptText("Provider base URL", undefined, "https://api.openai.com/v1");
 		if (v === null) process.exit(0);
 		baseURL = v.trim() || undefined;
 	}
 	while (!apiKey) {
-  // biome-ignore lint/performance/noAwaitInLoops: sequential — each step depends on the previous
+		// biome-ignore lint/performance/noAwaitInLoops: sequential — each step depends on the previous
 		const v = await pickers.promptText("Provider API key", undefined, "sk-...");
 		if (v === null) process.exit(0);
 		apiKey = v.trim() || undefined;
@@ -208,7 +208,7 @@ export async function selectSession(pickers: Pickers): Promise<SessionState | nu
 		// picker-open time. "Start fresh"/"Delete a session" aren't sessions
 		// the index knows about, so they're appended unconditionally, matching
 		// their fixed position in the unfiltered list above.
-  // biome-ignore lint/performance/noAwaitInLoops: sequential — each step depends on the previous
+		// biome-ignore lint/performance/noAwaitInLoops: sequential — each step depends on the previous
 		const picked = await pickers.pickOption(options, {
 			title: "Sessions (most recent first)",
 			search: {

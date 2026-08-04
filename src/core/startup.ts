@@ -177,7 +177,7 @@ function probeReason(probe: Exclude<ProviderProbe, "ok" | "unknown">, baseURL: s
 export async function ensureConnectionAlive(config: AppConfig, pickers: Pickers): Promise<boolean> {
 	let changed = false;
 	while (true) {
-			// biome-ignore lint/performance/noAwaitInLoops: provider probe retry depends on user re-entry
+		// biome-ignore lint/performance/noAwaitInLoops: provider probe retry depends on user re-entry
 		const probe = await probeProvider(config);
 		if (probe === "ok" || probe === "unknown") return changed;
 		const creds = await reconfigureConnection(

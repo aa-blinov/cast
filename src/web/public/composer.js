@@ -63,7 +63,7 @@ export function Composer({ running, ready, activeId, commands, personas, onSubmi
 				// dataUrl so the composer can show the file is ready.
 				if (!activeId) {
 					try {
-					// biome-ignore lint/performance/noAwaitInLoops: sequential upload for per-file feedback
+						// biome-ignore lint/performance/noAwaitInLoops: sequential upload for per-file feedback
 						const dataUrl = await readFileAsDataUrl(file);
 						setDocs((prev) => [...prev, { id, name: file.name, dataUrl, pending: true }]);
 					} catch (err) {
