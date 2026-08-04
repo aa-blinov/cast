@@ -1074,6 +1074,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 
 			// Compaction
 			if (shouldCompact(messages, config, loopConfig.lastPromptTokens)) {
+				// biome-ignore lint/performance/noAwaitInLoops: sequential agent turn — compilation depends on model response
 				const result = await performCompaction(messages, config, currentModel, signal, loopConfig, onEvent);
 				if (!result.compacted && result.error) {
 					onEvent({ type: "compaction_failed", reason: result.error });
@@ -1122,6 +1123,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				// Accumulate partial content so aborted/disconnected turns can be
 				// persisted into session history (the catch block can't read
 				// streamAndCollect's locals after it throws).
+					// biome-ignore lint/performance/noAwaitInLoops: streaming depends on previous chunks
 				try {
 					completion = await streamAndCollect(
 						client,
