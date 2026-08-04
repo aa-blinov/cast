@@ -165,7 +165,7 @@ export async function fetchModels(config: AppConfig): Promise<FetchModelsResult>
 	} catch (error) {
 		const message = providerErrorText(error);
 
-		if (message.includes("ETIMEDOUT") || /Request timed out/i.test(message)) {
+		if (message.includes("ETIMEDOUT") || REQUEST_TIMED_OUT_PATTERN.test(message)) {
 			return { ok: false, error: `Connection to ${config.baseURL} timed out` };
 		}
 
@@ -221,6 +221,20 @@ export function providerErrorText(error: unknown): string {
 // unreachable even when the cause chain got severed somewhere.
 const UNREACHABLE_PATTERN =
 	/ECONNREFUSED|ENOTFOUND|EHOSTUNREACH|ETIMEDOUT|fetch failed|Connection error|Request timed out/i;
+// Inline `Request timed out` checks at the two call sites below re-test a
+// subset of UNREACHABLE_PATTERN; the standalone constant avoids recompiling
+// the literal on every probe.
+const REQUEST_TIMED_OUT_PATTERN = /Request timed out/i;
+// SSL/TLS hint detection — pulls the most specific fragment of an error
+// chain for display ("CERT_/certificate" → interception, "SSL/TLS" →
+// handshake, etc). Called once per flattened chain in `flattenErrorChain`.
+const TLS_ERROR_PATTERN = /E[A-Z]{3,}|CERT_|certificate|SSL|TLS/i;
+// Auth/error class detection — used by `classifyProviderError` to bucket
+// 401/403 responses for the Settings > Provider UI. Both branches are
+// short-circuited by the `status` numeric check, so these regex tests
+// only fire on raw error message fallbacks.
+const AUTH_MESSAGE_PATTERN = /\b401\b|unauthorized|invalid api key/i;
+const FORBIDDEN_MESSAGE_PATTERN = /\b403\b|forbidden/i;
 
 /**
  * The most specific fragment of a flattened error chain, for display. "Cannot
@@ -232,7 +246,7 @@ const UNREACHABLE_PATTERN =
 export function unreachableDetail(flattened: string): string {
 	const parts = flattened.split(" | ");
 	for (let i = parts.length - 1; i >= 0; i--) {
-		if (/E[A-Z]{3,}|CERT_|certificate|SSL|TLS/i.test(parts[i]!)) return parts[i]!.slice(0, 120);
+		if (TLS_ERROR_PATTERN.test(parts[i]!)) return parts[i]!.slice(0, 120);
 	}
 	return (parts[parts.length - 1] ?? "").slice(0, 120);
 }
@@ -275,7 +289,7 @@ export async function validateModel(config: AppConfig, model: string): Promise<V
 	} catch (error) {
 		const message = providerErrorText(error);
 
-		if (message.includes("ETIMEDOUT") || /Request timed out/i.test(message)) {
+		if (message.includes("ETIMEDOUT") || REQUEST_TIMED_OUT_PATTERN.test(message)) {
 			return { ok: false, error: `Connection to ${config.baseURL} timed out` };
 		}
 
@@ -383,8 +397,8 @@ export type ProviderProbe = "ok" | "auth" | "permission" | "unreachable" | "unkn
 export function classifyProviderError(error: unknown): Exclude<ProviderProbe, "ok"> {
 	const status = (error as { status?: number } | undefined)?.status;
 	const message = providerErrorText(error);
-	if (status === 401 || /\b401\b|unauthorized|invalid api key/i.test(message)) return "auth";
-	if (status === 403 || /\b403\b|forbidden/i.test(message)) return "permission";
+	if (status === 401 || AUTH_MESSAGE_PATTERN.test(message)) return "auth";
+	if (status === 403 || FORBIDDEN_MESSAGE_PATTERN.test(message)) return "permission";
 	if (UNREACHABLE_PATTERN.test(message)) return "unreachable";
 	return "unknown";
 }
