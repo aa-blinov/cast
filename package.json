@@ -12,7 +12,7 @@
 	"scripts": {
 		"start": "node --disable-warning=DEP0040 --disable-warning=ExperimentalWarning --import tsx ./src/index.ts",
 		"build": "node ./scripts/build.mjs",
-		"check": "tsc --noEmit && biome check --error-on-warnings=false src/ test/",
+		"check": "tsc --noEmit && biome check src/ test/",
 		"lint": "biome check src/ test/",
 		"format": "biome format --write src/ test/",
 		"test": "vitest run",
