@@ -1,13 +1,17 @@
 export const SANDBOX_CWD = "sandbox";
 
+const SANDBOX_PATH_RE = /(?:^|[\\/])\.cast[\\/]sandbox(?:[\\/]|$)/;
+const TRAILING_SLASH_RE = /[\\/]+$/;
+const PATH_SEP_RE2 = /[\\/]/;
+
 export function isSandboxSessionCwd(cwd) {
-	return cwd === SANDBOX_CWD || /(?:^|[\\/])\.cast[\\/]sandbox(?:[\\/]|$)/.test(cwd ?? "");
+	return cwd === SANDBOX_CWD || SANDBOX_PATH_RE.test(cwd ?? "");
 }
 
 export function sessionDirectoryName(cwd) {
 	if (isSandboxSessionCwd(cwd)) return "Sandbox";
-	const normalized = (cwd ?? "").replace(/[\\/]+$/, "");
-	const name = normalized.split(/[\\/]/).filter(Boolean).at(-1);
+	const normalized = (cwd ?? "").replace(TRAILING_SLASH_RE, "");
+const name = normalized.split(PATH_SEP_RE2).filter(Boolean).at(-1);
 	return name || normalized || "Unknown directory";
 }
 

@@ -1,5 +1,9 @@
 import { api } from "./api.js";
 
+const SYSTEM_REMINDER_STRIP_RE = /\n\n<system-reminder>[\s\S]*<\/system-reminder>/;
+const STEER_CMD_RE = /^\/(steer|s)\s*/;
+const QUEUE_CMD_RE = /^\/(queue|q)\s*/;
+
 export async function submitMessage(text, images, pendingDocs, context) {
 	const {
 		planRefineArmedRef,
@@ -119,9 +123,9 @@ export async function submitMessage(text, images, pendingDocs, context) {
 			}
 		}
 		const paths = [];
-		// biome-ignore lint/performance/noAwaitInLoops: sequential upload required — each doc depends on session commit
-	for (const doc of pendingDocs) {
+		for (const doc of pendingDocs) {
 			try {
+				// biome-ignore lint/performance/noAwaitInLoops: sequential upload required — each doc depends on session commit
 				const result = await api("POST", `/api/sessions/${id}/inputs/upload`, {
 					name: doc.name,
 					dataUrl: doc.dataUrl,
@@ -135,7 +139,7 @@ export async function submitMessage(text, images, pendingDocs, context) {
 		// Rebuild the system-reminder with real server-side paths —
 		// replaces the placeholder text the composer stashed.
 		if (paths.length > 0) {
-			const userText = text.replace(/\n\n<system-reminder>[\s\S]*<\/system-reminder>/, "").trim();
+			const userText = text.replace(SYSTEM_REMINDER_STRIP_RE, "").trim();
 			finalText =
 				userText +
 				`\n\n<system-reminder>\nThe user attached the following file(s) to this message:\n` +
@@ -223,11 +227,11 @@ export async function submitMessage(text, images, pendingDocs, context) {
 			} else if (text.startsWith("/web") && result?.result && "webTools" in result.result) {
 				addNotice(`Web tools: ${result.result.webTools ? "enabled" : "disabled"}`);
 			} else if ((text.startsWith("/steer") || text.startsWith("/s ")) && result?.ok) {
-				const msg = text.replace(/^\/(steer|s)\s*/, "");
+				const msg = text.replace(STEER_CMD_RE, "");
 				if (msg) setPendingSteers((prev) => [...prev, msg]);
 				addNotice(result.result);
 			} else if ((text.startsWith("/queue") || text.startsWith("/q ")) && result?.ok) {
-				const msg = text.replace(/^\/(queue|q)\s*/, "");
+				const msg = text.replace(QUEUE_CMD_RE, "");
 				if (msg) setPendingQueue((prev) => [...prev, msg]);
 				addNotice(result.result);
 			} else if ((text === "/queue-reset" || text === "/qr") && result?.ok) {
