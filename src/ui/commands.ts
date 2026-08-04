@@ -2266,13 +2266,13 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 					keyPath = custom;
 				}
 				// Validate key with retry loop
-			while (true) {
-				const err = keyPath
-					? validateKeyPermissions(keyPath.startsWith("~/") ? keyPath.replace("~", homedir()) : keyPath)
-					: undefined;
-				if (!err) break;
-				// biome-ignore lint/performance/noAwaitInLoops: SSH key retry requires user interaction
-				const retry = await deps.pickers.promptText(err, keyPath, "~/.ssh/id_ed25519");
+				while (true) {
+					const err = keyPath
+						? validateKeyPermissions(keyPath.startsWith("~/") ? keyPath.replace("~", homedir()) : keyPath)
+						: undefined;
+					if (!err) break;
+					// biome-ignore lint/performance/noAwaitInLoops: SSH key retry requires user interaction
+					const retry = await deps.pickers.promptText(err, keyPath, "~/.ssh/id_ed25519");
 					if (!retry) {
 						showNotice("[Cancelled]");
 						return;

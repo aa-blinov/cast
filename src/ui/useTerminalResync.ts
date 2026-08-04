@@ -285,7 +285,6 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 		};
 		const rawModeCheck = setInterval(checkDeferredResync, 200);
 
-
 		// --- layer (a): height heuristic per frame ---
 		out.write = function scrollGuardWrite(
 			chunk: string | Uint8Array,

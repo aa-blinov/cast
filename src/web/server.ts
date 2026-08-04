@@ -335,10 +335,7 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 			} else if (urlPath === "/app.js") {
 				content = content
 					.toString("utf-8")
-.replace(
-STREAM_BLOCKS_IMPORT_RE,
-						`from"./stream-blocks.js?v=${assetVersion("/stream-blocks.js")}"`,
-					);
+					.replace(STREAM_BLOCKS_IMPORT_RE, `from"./stream-blocks.js?v=${assetVersion("/stream-blocks.js")}"`);
 			}
 			const accepts = req.headers["accept-encoding"] ?? "";
 			const textAsset = [".html", ".css", ".js", ".mjs", ".json", ".svg"].includes(ext);

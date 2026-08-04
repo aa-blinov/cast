@@ -287,8 +287,8 @@ export async function connectMcpServers(servers: Record<string, McpServerConfig>
 				const tools: Awaited<ReturnType<typeof client.listTools>>["tools"] = [];
 				let cursor: string | undefined;
 				do {
-							// biome-ignore lint/performance/noAwaitInLoops: pagination — each page's cursor depends on previous response
-				const page = await client.listTools(cursor ? { cursor } : undefined);
+					// biome-ignore lint/performance/noAwaitInLoops: pagination — each page's cursor depends on previous response
+					const page = await client.listTools(cursor ? { cursor } : undefined);
 					tools.push(...page.tools);
 					cursor = page.nextCursor;
 				} while (cursor);
@@ -370,7 +370,11 @@ export async function connectMcpServers(servers: Record<string, McpServerConfig>
 }
 
 function escapeXml(s: string): string {
-	return s.replace(MCP_AMP_RE, "&amp;").replace(MCP_LT_RE, "&lt;").replace(MCP_GT_RE, "&gt;").replace(MCP_QUOTE_RE, "&quot;");
+	return s
+		.replace(MCP_AMP_RE, "&amp;")
+		.replace(MCP_LT_RE, "&lt;")
+		.replace(MCP_GT_RE, "&gt;")
+		.replace(MCP_QUOTE_RE, "&quot;");
 }
 
 /** Tool-name blurbs for the `/mcp` picker description line (connected servers only). */

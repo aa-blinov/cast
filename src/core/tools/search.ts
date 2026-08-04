@@ -178,7 +178,7 @@ async function walkFiles(cwd: string, searchPath: string, maxFiles: number = MAX
 		const { dir, rules } = stack.pop()!;
 		let entries: Dirent[];
 		try {
-   // biome-ignore lint/performance/noAwaitInLoops: sequential — each step depends on the previous
+			// biome-ignore lint/performance/noAwaitInLoops: sequential — each step depends on the previous
 			entries = await readdir(dir, { withFileTypes: true });
 		} catch {
 			continue;
@@ -196,7 +196,7 @@ async function walkFiles(cwd: string, searchPath: string, maxFiles: number = MAX
 			// ancestor directory would loop forever without this.
 			if (entry.isSymbolicLink()) {
 				try {
-     // biome-ignore lint/performance/noAwaitInLoops: sequential — each step depends on the previous
+					// biome-ignore lint/performance/noAwaitInLoops: sequential — each step depends on the previous
 					const real = await realpath(absPath);
 					if (visited.has(real)) continue;
 					visited.add(real);
@@ -464,7 +464,7 @@ export async function execGrep(args: Record<string, unknown>, cwd: string, confi
 		outer: for (const absPath of candidates) {
 			let stats: Awaited<ReturnType<typeof stat>>;
 			try {
-    // biome-ignore lint/performance/noAwaitInLoops: sequential — each step depends on the previous
+				// biome-ignore lint/performance/noAwaitInLoops: sequential — each step depends on the previous
 				stats = await stat(absPath);
 			} catch (statErr) {
 				if (isPermissionError(statErr)) permissionSkips++;
@@ -546,7 +546,7 @@ export async function execLs(args: Record<string, unknown>, cwd: string, _config
 		const statTarget = join(dirPath, entry.name);
 		if (entry.isSymbolicLink()) {
 			try {
-    // biome-ignore lint/performance/noAwaitInLoops: sequential — each step depends on the previous
+				// biome-ignore lint/performance/noAwaitInLoops: sequential — each step depends on the previous
 				const target = await stat(statTarget);
 				isDir = target.isDirectory();
 			} catch {

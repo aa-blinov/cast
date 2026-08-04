@@ -1125,7 +1125,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				// persisted into session history (the catch block can't read
 				// streamAndCollect's locals after it throws).
 				try {
-				// biome-ignore lint/performance/noAwaitInLoops: streaming requires sequential processing
+					// biome-ignore lint/performance/noAwaitInLoops: streaming requires sequential processing
 					completion = await streamAndCollect(
 						client,
 						currentModel,
