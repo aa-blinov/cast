@@ -122,6 +122,10 @@ const CONTEXT_OVERFLOW_PATTERNS: RegExp[] = [
 	/too large for model with \d+ maximum context length/i,
 	/model_context_window_exceeded/i,
 ];
+const CONTEXT_OVERFLOW_NO_BODY_PATTERN = /^4(00|13)\s*(status code)?\s*\(no body\)/i;
+const RETRYABLE_NETWORK_PATTERN = /terminated|socket hang up|other side closed|fetch failed/i;
+const UNAUTHORIZED_MESSAGE_PATTERN = /\b401\b|unauthorized|invalid api key|incorrect api key/i;
+const FORBIDDEN_MESSAGE_PATTERN = /\b403\b|forbidden/i;
 
 export function isContextOverflow(error: unknown): boolean {
 	const code = (error as { code?: string } | undefined)?.code;
@@ -130,7 +134,7 @@ export function isContextOverflow(error: unknown): boolean {
 	if (status === 413) return true;
 	const message = error instanceof Error ? error.message : String(error);
 	if (CONTEXT_OVERFLOW_PATTERNS.some((p) => p.test(message))) return true;
-	if (/^4(00|13)\s*(status code)?\s*\(no body\)/i.test(message)) return true;
+	if (CONTEXT_OVERFLOW_NO_BODY_PATTERN.test(message)) return true;
 	return false;
 }
 
@@ -159,7 +163,7 @@ export function isRetryableStreamError(error: unknown): boolean {
 
 	if (code === "ECONNRESET" || code === "ETIMEDOUT" || code === "EPIPE" || code === "UND_ERR_SOCKET") return true;
 
-	return /terminated|socket hang up|other side closed|fetch failed/i.test(message);
+	return RETRYABLE_NETWORK_PATTERN.test(message);
 }
 
 /**
@@ -211,12 +215,12 @@ export function describeTurnError(error: unknown): string {
 	}
 
 	// 401 — key rejected: revoked, expired, or wrong.
-	if (status === 401 || /\b401\b|unauthorized|invalid api key|incorrect api key/i.test(message)) {
+	if (status === 401 || UNAUTHORIZED_MESSAGE_PATTERN.test(message)) {
 		return "API key rejected (401) — it may be revoked, expired, or incorrect. Run /provider to update it.";
 	}
 
 	// 403 — authenticated but not permitted for this model/endpoint.
-	if (status === 403 || /\b403\b|forbidden/i.test(message)) {
+	if (status === 403 || FORBIDDEN_MESSAGE_PATTERN.test(message)) {
 		return "Access denied (403) — the API key lacks permission for this model or endpoint. Try /provider or pick another model with /model.";
 	}
 
@@ -517,13 +521,16 @@ export interface CompletionResult {
 /** Coerce a Hermes-XML parameter value (always captured as text) to a JSON
  * scalar: Python-ish None → null, booleans, integers, and floats; everything
  * else stays a string (so "in_progress", ISO dates, free text pass through). */
+const INTEGER_LITERAL_PATTERN = /^-?\d+$/;
+const DECIMAL_LITERAL_PATTERN = /^-?\d*\.\d+$/;
+
 function coerceHermesValue(raw: string): unknown {
 	const v = raw.trim();
 	if (v === "None" || v === "null") return null;
 	if (v === "true") return true;
 	if (v === "false") return false;
-	if (/^-?\d+$/.test(v)) return Number(v);
-	if (/^-?\d*\.\d+$/.test(v)) return Number(v);
+	if (INTEGER_LITERAL_PATTERN.test(v)) return Number(v);
+	if (DECIMAL_LITERAL_PATTERN.test(v)) return Number(v);
 	return v;
 }
 
