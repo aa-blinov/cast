@@ -1817,7 +1817,7 @@ function App() {
 					</div>
 				`
 				}
-				<${ComposerModule} running=${running} ready=${!!session} activeId=${activeId} commands=${commands} personas=${personas} question=${session?.question} onSubmit=${submitMessage} onAbort=${abortRun} onDocUploaded=${() => setInputsRefreshNonce((n) => n + 1)} />
+				<${ComposerModule} running=${running} ready=${!!session} activeId=${activeId} commands=${commands} personas=${personas} onSubmit=${submitMessage} onAbort=${abortRun} onDocUploaded=${() => setInputsRefreshNonce((n) => n + 1)} />
 			</main>
 
 			<!-- Diff — a wide right sidebar alongside the chat on desktop, a

@@ -2,6 +2,20 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.12.17
+
+### Fixed
+
+- Web UI composer placeholder simplified to just "Type a message…" — the previous context-sensitive hints ("↑↓ to navigate, Enter to pick" / "Type your answer…") were truncated on narrow mobile screens and added no value since the picker UI is self-explanatory.
+- Web UI composer textarea no longer shows a scrollbar on mobile when the text wraps past two lines. `max-height` raised from 100px to 150px, and `overflow: hidden` removed (it was blocking the JS auto-resize on iOS).
+
+### Internal
+
+- 69 inline regex literals hoisted to module-level `const` declarations across `src/` (biome `performance/useTopLevelRegex`), including all core modules (`frontmatter`, `hooks`, `mcp`, `plan`, `plugins`, `rules`, `session`, `skills`, `tools/`, `llm`, `vendors`, `startup`, `upgrade`), all UI modules (`commands`, `keys`, `stdin-buffer`, `input-parser`, `word-nav`, `useTerminalResync`, `App`), and all web modules (`app`, `composer`, `message-submit`, `reasoning-split`, `sidebar-utils`, `tool-card`, `new-session-modal`, `server`, `bridge`, `commands`).
+- 16 `noAwaitInLoops` warnings suppressed with explicit engineering justification — all are genuinely sequential operations where `Promise.all` is semantically wrong or unsafe: the main agent turn loop, SSE streaming, MCP cursor pagination, provider probe retry, filesystem traversal (EMFILE risk), sequential file upload, and interactive SSH key/picker prompts.
+- Removed one unused `GITHUB_URL_PREFIX` const in `bridge.ts`.
+- `text-replace.ts` regex consts repaired after a broken `replaceAll` in an intermediate commit self-referenced one const and left three others unused. Tests back to 1508/1508.
+
 ## 0.12.16
 
 ### Added
