@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.12.26
+
+### Fixed
+
+- Sidebar / picker row listing was slow on big DBs — `listSessionSummaries` and `searchSessionSummaries` previously built each session's summary by SELECTing every user/assistant `content_json` row, JSON.parsing the whole conversation, and counting turns in JS. On a 218-session DB that meant 9 MB of allocations and 9000+ JSON.parse calls per listing. The new path aggregates in SQL via covering indexes: user count and assistant count via `idx_messages_role`, the with-tool-calls slice via PRIMARY KEY + JSON filter then subtracted to preserve the old "exclude intermediate tool-call-only steps" semantic, and the first user message via a `MIN(seq)` JOIN on the primary key. Field-level semantics of the row's `msgCount` and `firstUserMessage` are unchanged. Measured on 57.131.129.41 with 218 sessions: TTFB on `GET /api/sessions` dropped from 448 ms to 138-163 ms (3x faster).
+
 ## 0.12.25
 
 ### Fixed
