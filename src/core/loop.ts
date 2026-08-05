@@ -76,6 +76,51 @@ function formatMB(bytes: number): string {
 	return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
 
+/**
+ * When the previous LLM call overflowed the context window, the cause is
+ * almost always one oversized tool result (a `read`/`grep`/`web_fetch` that
+ * returned hundreds of KB and is now anchored in history, repeated on every
+ * retry). Replace the largest such in-place with a short placeholder so the
+ * next retry has room to breathe, and tell the model via a `<system-reminder>`
+ * so it knows to re-fetch with a narrower scope instead of asking for the
+ * same content again.
+ *
+ * The `tool_call_id` is preserved: the original assistant message's
+ * `tool_calls[].id` is still pointing at this message, and rewiring the
+ * conversation would 400 the provider outright. We only swap the `content`
+ * of the existing `role: "tool"` row — which is exactly what `sanitizeMessages`
+ * already does for other shortenings (see llm.ts), so the wire shape stays
+ * valid.
+ *
+ * Returns the number of bytes removed, or `0` when nothing was oversized.
+ */
+function replaceLargestToolResult(messages: Message[]): { bytesRemoved: number; toolCallId: string } | undefined {
+	let targetIdx = -1;
+	let targetLen = 0;
+	for (let i = 0; i < messages.length; i++) {
+		const m = messages[i];
+		if (!m || m.role !== "tool") continue;
+		const content = m.content;
+		if (typeof content !== "string") continue;
+		if (content.length > targetLen) {
+			targetLen = content.length;
+			targetIdx = i;
+		}
+	}
+	if (targetIdx === -1 || targetLen < 16 * 1024) return undefined;
+	const m = messages[targetIdx]!;
+	if (m.role !== "tool") return undefined;
+	const original = m.content;
+	if (typeof original !== "string") return undefined;
+	const toolCallId = m.tool_call_id;
+	const replacement =
+		`(previous tool result omitted: ${formatMB(original.length)} did not fit in the model's context window. ` +
+		`Re-fetch with a narrower scope — read with offset/limit, grep with a more specific path/glob/pattern, ` +
+		`or split the request into smaller calls.)`;
+	messages[targetIdx] = { ...m, content: replacement, castIsError: true } as Message;
+	return { bytesRemoved: original.length - replacement.length, toolCallId };
+}
+
 // bash_output is a pure-read poll — repeated identical polls on the same
 // task_id are the expected usage pattern while waiting on a background task,
 // not a stuck model. bash_kill is deliberately NOT exempt: repeated identical
@@ -421,6 +466,11 @@ export type AgentEvent =
 	| { type: "followup_injected"; messages: Message[] }
 	| { type: "compaction"; messagesCompacted: number; tokensBefore: number }
 	| { type: "compaction_failed"; reason: string }
+	/** Largest tool result in history was yoked to fit a context-overflow turn;
+	 * a `<system-reminder>` was appended telling the model to re-fetch with a
+	 * narrower scope. `bytesRemoved` is the size of the original content that
+	 * was replaced with a placeholder. */
+	| { type: "tool_result_truncated"; toolCallId: string; bytesRemoved: number }
 	| { type: "doom_loop"; tool: string; attempts: number }
 	/** Turn-end gate forced another sampling round because plan steps remain open. */
 	| { type: "open_work_gate"; fires: number; openSteps: number }
@@ -1056,6 +1106,11 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 	try {
 		// Outer loop: continues when follow-up messages arrive after agent would stop
 		let overflowCompacted = false;
+		// Tracks whether we've already yanked the largest tool result out of
+		// history on this turn as an in-place context-overflow fallback. Distinct
+		// from `overflowCompacted` so we still try LLM-based compaction if the
+		// in-place shrink wasn't enough.
+		let toolResultTrimmed = false;
 		// The main agent turn loop is inherently sequential: each iteration
 		// depends on the previous model response and tool results. Promise.all
 		// would break causality (the model hasn't produced the next step yet).
@@ -1188,7 +1243,32 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 							config.reasoningParams.body,
 							(attempt, reason) => onEvent({ type: "retry", attempt, reason }),
 						);
-					} else if (isContextOverflow(err) && !overflowCompacted) {
+					} else if (isContextOverflow(err) && !toolResultTrimmed) {
+						// Cheap first attempt: shrink the largest tool result in
+						// place. The shrink is in-memory (no LLM call), so it can't
+						// itself overflow, and the placeholder tells the model
+						// what happened so it re-fetches with a narrower scope
+						// instead of asking for the same content again. If even
+						// this isn't enough, the next iteration trips
+						// `overflowCompacted` and tries LLM-based compaction.
+						const trimmed = replaceLargestToolResult(messages);
+						if (trimmed) {
+							toolResultTrimmed = true;
+							const reminder =
+								`<system-reminder>\n` +
+								`Your previous turn was rejected with a context-window overflow. The largest tool result in history (tool_call_id ${trimmed.toolCallId}, ${formatMB(trimmed.bytesRemoved)} of content) was omitted to make room. ` +
+								`Re-fetch the same information with a narrower scope — read with offset/limit, grep with a tighter path/glob/pattern, or split the request into smaller calls.\n` +
+								`</system-reminder>`;
+							messages.push({ role: "user", content: reminder });
+							onEvent({ type: "tool_result_truncated", toolCallId: trimmed.toolCallId, bytesRemoved: trimmed.bytesRemoved });
+							continue outer;
+						}
+						// No oversized tool result to drop — flag so we don't keep
+						// retrying the same in-place shrink forever, and let the
+						// `overflowCompacted` branch below try LLM-based compaction.
+						toolResultTrimmed = true;
+					}
+					if (isContextOverflow(err) && !overflowCompacted) {
 						// Context overflow — compact and retry the turn instead of
 						// surfacing a raw error. Only once per turn to prevent infinite
 						// loops when even compacted context is too large.
@@ -1202,9 +1282,8 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 						// Compaction itself failed — surface the original error.
 						onEvent({ type: "compaction_failed", reason: msg });
 						throw err;
-					} else {
-						throw err;
 					}
+					throw err;
 				}
 
 				// A mid-stream abort doesn't always reject: undici can end the async
@@ -1476,6 +1555,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				}
 				onEvent({ type: "followup_injected", messages: [...followUpMsgs] });
 				overflowCompacted = false;
+				toolResultTrimmed = false;
 				// Same as steering: a new user message resets the doom-loop window.
 				recentToolCalls.length = 0;
 				openWorkGateFires = 0;

@@ -3229,6 +3229,62 @@ describe("runAgentLoop — compaction", () => {
 		expect(events.some((e) => e.type === "compaction_failed")).toBe(false);
 		expect(result.at(-1)?.content).toBe("done");
 	});
+
+	it("context-overflow yanks the largest tool result inline before falling back to compaction", async () => {
+		// The in-place shrink is cheaper than LLM-based compaction and doesn't
+		// itself risk an overflow — it'd be wasted budget to compact first
+		// when a simple relabel of one tool result lets the next retry through.
+		// Reproduces the real incident seen in the field: a grep tool result
+		// of ~1.2MB on a model with a 200k-token window pushed the next LLM
+		// call over the limit, and the old behavior compacted the entire
+		// session (losing context) just to fit the next request.
+		const events: AgentEvent[] = [];
+		const bigToolResult = "x".repeat(1_200_000);
+		let firstAttempt = true;
+		vi.mocked(streamAndCollect).mockImplementation(async (_client, _model, messages) => {
+			if (firstAttempt) {
+				firstAttempt = false;
+				const err = new Error("400 context_length_exceeded") as Error & { code: string };
+				err.code = "context_length_exceeded";
+				throw err;
+			}
+			// The retried call should see the placeholder, not the giant blob.
+			const lastTool = [...messages].reverse().find((m) => m.role === "tool");
+			expect(lastTool?.content).toContain("previous tool result omitted");
+			expect(lastTool?.content).not.toContain(bigToolResult);
+			return { content: "done", thinking: "", finishReason: "stop" };
+		});
+
+		const history: Message[] = [
+			{ role: "user", content: "readme" },
+			{
+				role: "assistant",
+				content: "",
+				tool_calls: [{ id: "call_big", type: "function", function: { name: "read", arguments: "{}" } }],
+			},
+			{ role: "tool", tool_call_id: "call_big", content: bigToolResult },
+			{ role: "user", content: "continue" },
+		];
+
+		const result = await runAgentLoop(history, {
+			config: tinyBudgetConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "test",
+			onEvent: (e) => events.push(e),
+		});
+
+		const trimEvent = events.find((e) => e.type === "tool_result_truncated");
+		expect(trimEvent).toBeDefined();
+		if (trimEvent?.type === "tool_result_truncated") {
+			expect(trimEvent.toolCallId).toBe("call_big");
+			expect(trimEvent.bytesRemoved).toBeGreaterThan(1_000_000);
+		}
+		// Concise fix-path: no compaction event needed when the in-place
+		// shrink left enough room for the retried turn.
+		expect(events.some((e) => e.type === "compaction")).toBe(false);
+		expect(result.at(-1)?.content).toBe("done");
+	});
 });
 
 // ============================================================================
