@@ -32,7 +32,14 @@ export function SidebarSessionItem({
 	// immediately; the actual loader is shown in the chat area — that
 	// matches the existing empty-state spinner style and keeps the sidebar
 	// visual language simple (just selected / not selected).
-	const isActive = s.id === activeId || selecting;
+	//
+	// Mutual exclusion: when transitioning from active session A to selecting
+	// session B, both `s.id === activeId` (row A) and `selecting` (row B)
+	// would resolve true under the old `||` — the user would see two rows
+	// highlighted at once. Sidebar passes `selecting=true` only on the row
+	// matching `selectingId`, so the same prop is enough: when this row IS
+	// the one being selected, light it; otherwise fall back to activeId.
+	const isActive = selecting ? true : s.id === activeId;
 	return html`
 		<div
 			key=${s.id}
