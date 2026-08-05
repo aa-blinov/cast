@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.12.21
+
+### Fixed
+
+- TUI: long reasoning streams could trigger a rare scroll jump when the user scrolled up mid-stream. A single still-streaming `thinking` block grew unbounded and pushed the live region past the viewport, which disabled `useTerminalResync`'s DECXCPR cursor poll (the natural cursor-below-viewport position looks identical to a user scroll). With the poll off, Ink's `CUU + erase` redraws landed at the wrong rows on user-initiated scroll and the visible content jumped. `appendTextBlock` now caps the active reasoning block at 1200 chars (`SPLIT_REASONING_CHARS`) — the older portion moves into a settled (continued: false) sibling that drains to `<Static>`, the active block keeps the tail. The live region stays within the viewport, the poll keeps running, and the scroll guard works as intended. Content and tool blocks are unaffected (content already drains via `splitCompleteLines`, tools stay compact).
+
 ## 0.12.20
 
 ### Fixed
