@@ -315,7 +315,7 @@ export function SettingsModal({
 																: tab === "plugins"
 																	? html`<${panels.SettingsPlugins} data=${data.plugins} busy=${busy} act=${act} confirm=${confirm} />`
 																	: tab === "marketplace"
-																		? html`<${panels.SettingsMarketplace} data=${data.marketplace} busy=${busy} act=${act} confirm=${confirm} />`
+																		? html`<${panels.SettingsMarketplace} data=${data.marketplace} installed=${data.plugins?.plugins ?? []} busy=${busy} act=${act} confirm=${confirm} />`
 																		: tab === "skillssh"
 																			? html`<${panels.SettingsSkillssh} data=${data.skills} busy=${busy} act=${act} confirm=${confirm} />`
 																			: tab === "provider"

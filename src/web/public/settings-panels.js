@@ -365,7 +365,7 @@ function SettingsPlugins({ data, busy, act, confirm }) {
 	`;
 }
 
-function SettingsMarketplace({ data, busy, act, confirm }) {
+function SettingsMarketplace({ data, installed, busy, act, confirm }) {
 	const [mpSource, setMpSource] = useState("");
 	const [mpQuery, setMpQuery] = useState("");
 	const [addStatus, setAddStatus] = useState("");
@@ -400,8 +400,12 @@ function SettingsMarketplace({ data, busy, act, confirm }) {
 	if (!data) return null;
 	const catalog = data.catalog || [];
 	const sortedCatalog = [...catalog].sort((a, b) => a.name.localeCompare(b.name));
-	const installedNames = new Set(data.plugins?.map?.((p) => p.plugin || p.id) ?? []);
-	const installedIds = new Set(data.plugins?.map?.((p) => p.id) ?? []);
+	// `installed` is passed in from the modal's `data.plugins` (separate slice —
+	// the Marketplace tab's own `data` only carries catalog + marketplaces). The
+	// modal refreshes it after every /plugin command, so a freshly-installed
+	// plugin lands in these sets and the row flips from "Install" to "installed".
+	const installedNames = new Set((installed || []).map((p) => p.plugin || p.id));
+	const installedIds = new Set((installed || []).map((p) => p.id));
 	const renderInstallable = (mp, p) => {
 		const pkg = p.package || p.name;
 		const name = p.name || pkg;
