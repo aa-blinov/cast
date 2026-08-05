@@ -31,6 +31,7 @@ All commands are typed at the TUI prompt, prefixed with `/`. Unknown slash comma
 | `/plan-model [name\|off]` | Show/change the model used in plan mode |
 | `/plan-model-provider [name\|off]` | Show/change the saved provider used for the plan model |
 | `/reasoning` | Change reasoning level (opens picker if model supports it) |
+| `/reasoning-display` (`/rd`) | Toggle reasoning blocks in the transcript — off by default since reasoning models stream a lot of auxiliary thinking that clutters the chat |
 | `/reasoning-format` | Select the reasoning request protocol for the active provider |
 | `/provider` | Open provider picker (switch, add, or delete providers) |
 | `/provider add` | Add a new provider (name → URL → key wizard) |
