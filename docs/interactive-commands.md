@@ -8,7 +8,7 @@ All commands are typed at the TUI prompt, prefixed with `/`. Unknown slash comma
 |---------|-------------|
 | `/new` | Start a new session (autosaves current if non-empty) |
 | `/continue` | Resume the most recent session (like `cast -c`, but mid-session) |
-| `/worktree <name>` | Switch current session into an isolated git worktree at `.cast/worktrees/<name>` |
+| `/worktree <name>` | Switch current session into an isolated git worktree (`list`, `remove <name>`) |
 | `/sessions` | Session picker with type-to-filter search (by message text, project path, or id); switch or delete |
 | `/clear` | Clear conversation context (and save the cleared state) |
 | `/compact` | Force context compaction now (auto-triggers near the limit) |

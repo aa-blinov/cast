@@ -63,7 +63,7 @@ import {
 } from "../core/skills.ts";
 import { resolveSshHosts, type SshHost, saveSshConfig, scanSshKeys, validateKeyPermissions } from "../core/ssh.ts";
 import { buildReasoningParams, type ModelReasoningMeta, resolveReasoningFormat } from "../core/vendors.ts";
-import { ensureSessionWorktree } from "../core/worktree.ts";
+import { ensureSessionWorktree, listWorktrees, removeWorktreeBySlug } from "../core/worktree.ts";
 import {
 	formatSkillPickLabel,
 	selectMcpServers,
@@ -184,10 +184,12 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/subagent-model-provider", description: "Set provider for subagent model", takesArgs: true },
 	{ name: "/theme", description: "Change color theme" },
 	{ name: "/usage", description: "Show session token and cost usage" },
-	{ name: "/web", description: "Toggle web tools (web_search, web_fetch)" },
+	{ name: "/web", description: "Toggle web search & fetch tools" },
 	{ name: "/web-fetch-provider", description: "Switch web_fetch backend (Jina Reader / local)" },
 	{ name: "/web-search-provider", description: "Switch web_search backend (DuckDuckGo / Tavily / Brave)" },
-	{ name: "/worktree", description: "Switch session into an isolated git worktree — name", takesArgs: true },
+	{ name: "/worktree", description: "Switch into a git worktree — name", takesArgs: true },
+	{ name: "/worktree list", description: "List all active worktrees" },
+	{ name: "/worktree remove", description: "Remove a worktree — name", takesArgs: true },
 ];
 
 export interface CommandDeps {
@@ -1756,13 +1758,32 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 	}
 
 	if (input === "/worktree" || input.startsWith("/worktree ")) {
-		const name = input === "/worktree" ? "" : input.slice("/worktree ".length).trim();
-		if (!name) {
-			showNotice(
-				"[Usage: /worktree <name> — slug, letters/digits/dots/underscores/dashes, e.g. /worktree fix-auth]",
-			);
+		const rawArg = input === "/worktree" ? "" : input.slice("/worktree ".length).trim();
+		if (!rawArg) {
+			showNotice("[Usage: /worktree <name> | /worktree list | /worktree remove <name> — e.g. /worktree fix-auth]");
 			return;
 		}
+		if (rawArg === "list") {
+			const wts = listWorktrees(deps.cwd);
+			if (wts.length === 0) {
+				showNotice("[No active git worktrees found for this repository]");
+			} else {
+				const formatted = wts.map((w) => `${w.name} (${w.branch})`).join(", ");
+				showNotice(`[Active worktrees: ${formatted}]`);
+			}
+			return;
+		}
+		if (rawArg.startsWith("remove ") || rawArg.startsWith("rm ") || rawArg === "remove" || rawArg === "rm") {
+			const targetName = rawArg.replace(/^(remove|rm)\s*/, "").trim();
+			if (!targetName) {
+				showNotice("[Usage: /worktree remove <name>]");
+				return;
+			}
+			const res = removeWorktreeBySlug(targetName, deps.cwd);
+			showNotice(`[${res.message}]`);
+			return;
+		}
+		const name = rawArg;
 		if (deps.running) {
 			showNotice("[Agent running — finish the run or /abort before switching worktrees]");
 			return;

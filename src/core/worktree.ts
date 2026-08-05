@@ -25,7 +25,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, realpathSync } from "node:fs";
+import { copyFileSync, existsSync, realpathSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 
 const VALID_SEGMENT = /^[a-zA-Z0-9._-]+$/;
@@ -241,14 +241,11 @@ export async function ensureSessionWorktree(name: string, startCwd: string): Pro
 		throw new Error(`Failed to create worktree at ${worktreePath}: ${result.stderr}`);
 	}
 
-	// Re-read the canonical path git stored for this worktree. The path we
-	// asked git to create may have been canonicalized (Windows 8.3 → long
-	// form, junction resolution) — the canonical form is what callers will
-	// see in `git worktree list`, what they'd type to `cd` into it, and
-	// what they should hand back to us on the next resume. Returning our
-	// pre-create path would silently drift from these conventions.
+	// Re-read the canonical path git stored for this worktree.
 	const afterCreate = findExistingWorktree(repoRoot, worktreePath);
 	const finalPath = afterCreate?.path ?? worktreePath;
+
+	copyIgnoredConfigFiles(repoRoot, finalPath);
 
 	return {
 		path: finalPath,
@@ -383,16 +380,85 @@ function runGitWithStatus(cwd: string, args: string[]): GitResult {
  * symlink escapes. Used by the startup path before `process.chdir`-equivalent
  * operations hand the worktree path off to the loop.
  */
+/**
+ * Copy common uncommitted configuration files (.env, .env.local, .env.development)
+ * from main repo root to newly created worktree so local dev environment works out-of-the-box.
+ */
+function copyIgnoredConfigFiles(repoRoot: string, worktreePath: string): void {
+	const envFiles = [".env", ".env.local", ".env.development", ".env.test"];
+	for (const file of envFiles) {
+		const src = join(repoRoot, file);
+		const dest = join(worktreePath, file);
+		if (existsSync(src) && !existsSync(dest)) {
+			try {
+				copyFileSync(src, dest);
+			} catch {
+				// Best effort — ignore copy errors
+			}
+		}
+	}
+}
+
+/**
+ * Remove a worktree and its branch given a slug/name or path.
+ */
+export function removeWorktreeBySlug(name: string, startCwd: string): { ok: boolean; message: string } {
+	validateWorktreeSlug(name);
+	const repoRoot = findCanonicalGitRoot(startCwd);
+	if (!repoRoot) {
+		return { ok: false, message: "Not in a git repository" };
+	}
+	const wtPath = worktreePathFor(repoRoot, name);
+	const branch = worktreeBranchName(name);
+
+	const existing = findExistingWorktree(repoRoot, wtPath);
+	if (!existing && !existsSync(wtPath)) {
+		return { ok: false, message: `Worktree "${name}" does not exist` };
+	}
+
+	const removeRes = runGitWithStatus(repoRoot, ["worktree", "remove", "--force", wtPath]);
+	runGitWithStatus(repoRoot, ["branch", "-D", branch]);
+
+	if (!removeRes.ok && existsSync(wtPath)) {
+		return { ok: false, message: `Failed to remove worktree: ${removeRes.stderr}` };
+	}
+	return { ok: true, message: `Worktree "${name}" and branch "${branch}" removed` };
+}
+
+/**
+ * List all cast worktrees for the current git repo.
+ */
+export function listWorktrees(startCwd: string): Array<{ name: string; path: string; branch: string }> {
+	const repoRoot = findCanonicalGitRoot(startCwd);
+	if (!repoRoot) return [];
+	const porcelain = runGit(repoRoot, ["worktree", "list", "--porcelain"]);
+	if (!porcelain) return [];
+
+	const results: Array<{ name: string; path: string; branch: string }> = [];
+	const prefix = join(repoRoot, ".cast", "worktrees");
+	const blocks = porcelain.split("\n\n");
+
+	for (const block of blocks) {
+		let path = "";
+		let branch = "";
+		for (const line of block.split("\n")) {
+			if (line.startsWith("worktree ")) path = line.slice("worktree ".length);
+			if (line.startsWith("branch ")) branch = line.slice("branch refs/heads/".length);
+		}
+		if (path && samePath(resolve(path, ".."), prefix)) {
+			const name = relative(prefix, path).replaceAll("+", "/");
+			results.push({ name, path, branch });
+		}
+	}
+	return results;
+}
+
 export function isWorktreeInsideRepo(wtPath: string, repoRoot: string): boolean {
 	if (!wtPath || !repoRoot) return false;
 	const absWt = resolve(wtPath);
 	const absRoot = resolve(repoRoot);
-	// `relative` returns "" only when the paths are equal; we want wtPath to
-	// be a strict descendant (a worktree named exactly repoRoot is bogus).
 	const rel = relative(absRoot, absWt);
 	if (rel === "" || rel.startsWith("..")) return false;
-	// On Windows, `relative("C:\\", "C:\\foo")` can return a leading-separator
-	// value. Anchor the prefix check with an explicit separator to be safe.
 	const withSep = absRoot.endsWith(sep) ? absRoot : absRoot + sep;
 	return absWt.startsWith(withSep);
 }
