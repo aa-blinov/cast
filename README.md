@@ -17,11 +17,13 @@ A role-based terminal agent harness. 18 built-in personas — senior dev, QA, DB
 
 ## Why personas, not just prompts
 
-Point a generic coding agent and a role-specific one at the same file, and they don't just answer differently — they look for different things. Give an `appsec` persona a schema and it flags injection risks; give a `dba` persona the same schema and it flags missing indexes and normalization. A `qa` persona treats an untested edge case as unfinished work, while a `pm` persona treats an unwritten spec as unfinished work — same repo, same tools, different definition of "done."
+Point a generic coding agent and a role-specific one at the same file, and they look for different things. An `appsec` persona flags injection risks; a `dba` persona flags missing indexes and normalization. A `qa` persona treats an untested edge case as unfinished work, while a `pm` persona treats an unwritten spec as unfinished work.
 
-Personas in cast are not cosmetic text skins. Each persona is defined by markdown frontmatter (`~/.cast/personas/*.md` or `.cast/personas/*.md`) that can restrict available built-in tools (`tools`), skills (`skills`), MCP servers (`mcp`), and sub-agent delegation (`subagents`, `subagentTypes`). Swapping `/persona` changes both system prompt framing and runtime capabilities.
+Personas in cast are not cosmetic text skins. Each persona is defined by markdown frontmatter (`~/.cast/personas/*.md` or `.cast/personas/*.md`) that can restrict available built-in tools (`tools`), skills (`skills`), MCP servers (`mcp`), and sub-agent delegation (`subagents`, `subagentTypes`).
 
-For a deep dive into empirical research on role prompting and tool-agent behavior, see [docs/persona-research.md](docs/persona-research.md).
+Scoping the toolset per role prevents context bloat during routine harness tasks. An assistant or tech-writer persona does not need DB migration tools or raw shell mutation primitives cluttering its system prompt and tool definitions. Narrowing tool access keeps the context window focused on the active role, reducing attention decay and accidental tool invocation.
+
+For empirical research on role prompting and tool-agent behavior, see [docs/persona-research.md](docs/persona-research.md).
 
 ## Install
 
