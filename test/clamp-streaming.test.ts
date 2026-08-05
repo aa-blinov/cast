@@ -86,6 +86,17 @@ describe("clampStreamingBlocks", () => {
 		expect(out[0]!.truncated).toBe(true);
 	});
 
+	it("skips thinking blocks from budget when showReasoning=false", () => {
+		// A large thinking block that would crowd out the content block if counted.
+		const tall = Array.from({ length: 50 }, (_, i) => `t${i}`).join("\n");
+		const blocks = [text("thinking", tall), text("content", "answer")];
+		const out = clampStreamingBlocks(blocks, 24, 80, 0, false);
+		// Thinking block must not appear in output.
+		expect(out.every((e) => e.block.kind !== "thinking")).toBe(true);
+		// Content block must survive despite the thinking block's text size.
+		expect(out.some((e) => e.block.kind === "content")).toBe(true);
+	});
+
 	it("keeps multiple parallel long task tools visible (1 row each while live)", () => {
 		const long = "Explore the module tree in great detail and report structure. ".repeat(12);
 		const task = (id: string): StreamBlock =>

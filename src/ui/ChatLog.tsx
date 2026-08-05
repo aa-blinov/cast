@@ -193,10 +193,14 @@ function BlockView({
 }): JSX.Element | null {
 	if (block.kind === "thinking") {
 		if (showReasoning === false) return null;
+		// In the live streaming region (compact) the model's \n breaks produce
+		// orphaned lines with no [reasoning] prefix — visually confusing. Flatten
+		// to spaces for the live preview; settled history keeps the raw text.
+		const text = compact ? block.text.replace(/\n/g, " ") : block.text;
 		return (
-			<Text color={theme().muted} dimColor>
+			<Text color={theme().muted} dimColor wrap="wrap">
 				{!block.continued && `[reasoning] ${truncated ? "… " : ""}`}
-				{block.text}
+				{text}
 			</Text>
 		);
 	}
@@ -239,6 +243,7 @@ export function clampStreamingBlocks(
 	rows: number,
 	columns: number,
 	extraReserve = 0,
+	showReasoning = true,
 ): Array<{ block: StreamBlock; truncated: boolean; index: number }> {
 	// Rows reserved for everything below the streaming area: composer frame
 	// (3), status bar (1), notices/steer/queue lines and a safety margin.
@@ -259,6 +264,10 @@ export function clampStreamingBlocks(
 	let used = 0;
 	for (let i = blocks.length - 1; i >= 0; i--) {
 		const block = blocks[i]!;
+		// When reasoning is hidden, thinking blocks render as null — don't charge
+		// them against the viewport budget or the clamp oscillates (over-shrinks
+		// the budget → tiny frame → overflow resets → widens again → flicker).
+		if (block.kind === "thinking" && !showReasoning) continue;
 		if (used >= budget) break;
 		if (block.kind === "tool") {
 			// Live ToolCallView uses compact truncate for task — charge 1 status
@@ -404,7 +413,13 @@ export function ChatLog({
 		if (streaming.blocks.length === 0) {
 			streamingParts.push(<Spinner key="wait" />);
 		}
-		const clamped = clampStreamingBlocks(streaming.blocks, availableRows, cols, stickyOverflowRef.current);
+		const clamped = clampStreamingBlocks(
+			streaming.blocks,
+			availableRows,
+			cols,
+			stickyOverflowRef.current,
+			showReasoning,
+		);
 		for (const { block, truncated, index } of clamped) {
 			streamingParts.push(
 				<BlockView
