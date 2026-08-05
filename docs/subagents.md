@@ -1,14 +1,14 @@
 # Sub-agents & Delegation
 
-`cast` supports delegating complex, multi-turn, or parallel tasks to isolated **sub-agents** via the `task` tool.
+`cast` supports delegating complex, multi-turn, or parallel tasks to isolated sub-agents via the `task` tool.
 
 ## Overview
 
-A sub-agent is a lightweight, background instance of the agent loop that runs in an isolated context:
-- **Isolated Context**: The main conversation context doesn't get flooded with the sub-agent's intermediate tool calls, raw logs, or exploratory search results. Only the final summary/answer is returned.
-- **Parallel Execution**: The main agent can spawn multiple sub-agents in a single turn (`Promise.all`) to explore different parts of a codebase or investigate multiple issues simultaneously.
-- **Dedicated System Prompts**: Sub-agents load their own prompts from `prompts/subagents/` (`worker`, `explore`, `review`).
-- **Model Overrides**: Sub-agents can be configured to run on a different (e.g. faster or cheaper) model via `/subagent-model` or `/subagent-model-provider`.
+A sub-agent is a background instance of the agent loop running in an isolated context:
+- **Isolated Context**: The main conversation context avoids clutter from intermediate tool calls, raw logs, or exploratory search results. Only the final summary or answer returns.
+- **Parallel Execution**: The main agent can spawn multiple sub-agents in a single turn (`Promise.all`) to explore different parts of a codebase simultaneously.
+- **Dedicated System Prompts**: Sub-agents load specialized prompts from `prompts/subagents/` (`worker`, `explore`, `review`).
+- **Model Overrides**: Sub-agents can use a different model via `/subagent-model` or `/subagent-model-provider`.
 
 ## Enabling Delegation (`subagents` field)
 
@@ -43,7 +43,7 @@ If `subagentTypes` is omitted, the persona can spawn any configured sub-agent ro
 | `explore` | Read-only codebase exploration | `read`, `grep`, `glob`, `ls`, `bash` | Structural research, finding symbols/files |
 | `review` | Independent code validation | `read`, `grep`, `glob`, `ls`, `bash` | Verification of changes before reporting done |
 
-> **Note:** Sub-agents cannot delegate further — the `task` tool is stripped from all sub-agents to prevent infinite recursive spawning.
+Sub-agents cannot delegate further: the `task` tool is stripped from all sub-agents to prevent infinite recursive spawning.
 
 ## Frontmatter Configuration
 
