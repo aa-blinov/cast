@@ -8,6 +8,51 @@ import { shortPath } from "./sidebar-utils.js";
 
 const html = htm.bind(h);
 
+function SettingsServer({ data }) {
+	if (!data || !data.running) {
+		return html`
+			<div class="settings-rows">
+				<div class="settings-section-title">Server status</div>
+				<p class="settings-hint">No cast web daemon found. Start one with <code>cast web --public</code> in a terminal.</p>
+			</div>
+		`;
+	}
+	const startedAt = data.startedAt ? new Date(data.startedAt) : null;
+	const uptimeMs = startedAt ? Date.now() - startedAt.getTime() : 0;
+	const formatUptime = (ms) => {
+		if (ms <= 0) return "—";
+		const sec = Math.floor(ms / 1000);
+		const days = Math.floor(sec / 86400);
+		const hours = Math.floor((sec % 86400) / 3600);
+		const mins = Math.floor((sec % 3600) / 60);
+		const parts = [];
+		if (days) parts.push(`${days}d`);
+		if (hours || days) parts.push(`${hours}h`);
+		parts.push(`${mins}m`);
+		return parts.join(" ");
+	};
+	return html`
+		<div class="settings-rows">
+			<div class="settings-section-title">Server status</div>
+			<p class="settings-hint">The cast web process serving this UI. Same info as <code>cast web status</code> on the command line.</p>
+			<div class="settings-compact-list">
+				<div class="settings-compact-row">
+					<div class="settings-compact-copy"><span class="settings-compact-title">Status</span><span>Running</span></div>
+				</div>
+				<div class="settings-compact-row">
+					<div class="settings-compact-copy"><span class="settings-compact-title">URL</span><span><code>http://${data.host}:${data.port}</code>${data.host === "0.0.0.0" ? " (reachable from other machines)" : ""}</span></div>
+				</div>
+				<div class="settings-compact-row">
+					<div class="settings-compact-copy"><span class="settings-compact-title">PID</span><span>${data.pid}${data.foreground ? " (foreground)" : ""}</span></div>
+				</div>
+				<div class="settings-compact-row">
+					<div class="settings-compact-copy"><span class="settings-compact-title">Started</span><span>${startedAt ? startedAt.toLocaleString() : "—"} (uptime: ${formatUptime(uptimeMs)})</span></div>
+				</div>
+			</div>
+		</div>
+	`;
+}
+
 function SettingsBash({ data, busy, act }) {
 	if (!data) return null;
 	const perm = data.permissions || {};
@@ -875,6 +920,7 @@ export {
 	SettingsPlugins,
 	SettingsProvider,
 	SettingsQuickMode,
+	SettingsServer,
 	SettingsSkills,
 	SettingsSkillssh,
 	SettingsSsh,

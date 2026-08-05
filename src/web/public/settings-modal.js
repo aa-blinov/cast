@@ -18,6 +18,7 @@ const SETTINGS_TABS = [
 	{ id: "provider", label: "Provider" },
 	{ id: "skillssh", label: "Skills.sh" },
 	{ id: "quick-mode", label: "Quick Mode" },
+	{ id: "server", label: "Server" },
 	{ id: "skills", label: "Skills" },
 	{ id: "ssh", label: "SSH" },
 	{ id: "web", label: "Web" },
@@ -127,6 +128,9 @@ export function SettingsModal({
 			} else if (t === "quick-mode") {
 				const quickSessionPersona = await run("/quick-session-persona");
 				commit((d) => ({ ...d, "quick-mode": { quickSessionPersona: quickSessionPersona?.result } }));
+			} else if (t === "server") {
+				const res = await api("GET", "/api/web/status").catch(() => null);
+				commit((d) => ({ ...d, server: res ?? { running: false } }));
 			} else if (t === "hooks") {
 				const res = await run("/hooks");
 				if (!res.ok) {
@@ -306,23 +310,25 @@ export function SettingsModal({
 												? html`<${panels.SettingsWeb} data=${data.web} busy=${busy} act=${act} />`
 												: tab === "quick-mode"
 													? html`<${panels.SettingsQuickMode} data=${data["quick-mode"]} busy=${busy} act=${act} personas=${personas} onQuickSessionPersonaChange=${onQuickSessionPersonaChange} />`
-													: tab === "hooks"
-														? html`<${panels.SettingsHooks} data=${data.hooks} busy=${busy} act=${act} />`
-														: tab === "mcp"
-															? html`<${panels.SettingsMcp} data=${data.mcp} busy=${busy} act=${act} confirm=${confirm} />`
-															: tab === "skills"
-																? html`<${panels.SettingsSkills} data=${data.skills} busy=${busy} act=${act} confirm=${confirm} />`
-																: tab === "plugins"
-																	? html`<${panels.SettingsPlugins} data=${data.plugins} busy=${busy} act=${act} confirm=${confirm} />`
-																	: tab === "marketplace"
-																		? html`<${panels.SettingsMarketplace} data=${data.marketplace} installed=${data.plugins?.plugins ?? []} busy=${busy} act=${act} confirm=${confirm} />`
-																		: tab === "skillssh"
-																			? html`<${panels.SettingsSkillssh} data=${data.skills} busy=${busy} act=${act} confirm=${confirm} />`
-																			: tab === "provider"
-																				? html`<${panels.SettingsProvider} data=${data.provider} busy=${busy} act=${act} confirm=${confirm} />`
-																				: tab === "ssh"
-																					? html`<${panels.SettingsSsh} data=${data.ssh} busy=${busy} act=${act} confirm=${confirm} />`
-																					: null
+													: tab === "server"
+														? html`<${panels.SettingsServer} data=${data.server} />`
+														: tab === "hooks"
+															? html`<${panels.SettingsHooks} data=${data.hooks} busy=${busy} act=${act} />`
+															: tab === "mcp"
+																? html`<${panels.SettingsMcp} data=${data.mcp} busy=${busy} act=${act} confirm=${confirm} />`
+																: tab === "skills"
+																	? html`<${panels.SettingsSkills} data=${data.skills} busy=${busy} act=${act} confirm=${confirm} />`
+																	: tab === "plugins"
+																		? html`<${panels.SettingsPlugins} data=${data.plugins} busy=${busy} act=${act} confirm=${confirm} />`
+																		: tab === "marketplace"
+																			? html`<${panels.SettingsMarketplace} data=${data.marketplace} installed=${data.plugins?.plugins ?? []} busy=${busy} act=${act} confirm=${confirm} />`
+																			: tab === "skillssh"
+																				? html`<${panels.SettingsSkillssh} data=${data.skills} busy=${busy} act=${act} confirm=${confirm} />`
+																				: tab === "provider"
+																					? html`<${panels.SettingsProvider} data=${data.provider} busy=${busy} act=${act} confirm=${confirm} />`
+																					: tab === "ssh"
+																						? html`<${panels.SettingsSsh} data=${data.ssh} busy=${busy} act=${act} confirm=${confirm} />`
+																						: null
 						}
 					</div>
 				</div>

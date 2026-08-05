@@ -26,6 +26,7 @@ import { getDb } from "../core/db.ts";
 import { getHistoryPage, getMessageImage } from "../core/session.ts";
 import { ensureSessionWorktree } from "../core/worktree.ts";
 import { reconcileActiveStream, SANDBOX_CWD, toDisplayMessages, type WebBridge, type WebEvent } from "./bridge.ts";
+import { readLiveWebState } from "./daemon-state.ts";
 import { isBlockedAttachmentName, sessionInputsDir } from "./inputs.ts";
 
 const PORT_RE = /:\d+$/;
@@ -456,6 +457,23 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 
 	route("GET", "/api/personas", (_req, res) => {
 		json(res, bridge.getPersonas());
+	});
+
+	// Cast web daemon state — the same file the CLI's `cast web status`
+	// prints. Self-heals stale entries (process gone → file cleaned up by
+	// readLiveWebState), so the answer is always "what's actually running
+	// right now" rather than "what's on disk from the last start".
+	route("GET", "/api/web/status", (_req, res) => {
+		const state = readLiveWebState();
+		if (!state) return json(res, { running: false });
+		json(res, {
+			running: true,
+			pid: state.pid,
+			host: state.host,
+			port: state.port,
+			startedAt: state.startedAt,
+			foreground: state.foreground,
+		});
 	});
 
 	// Lightweight git probe for the new-session modal: lets the UI show or

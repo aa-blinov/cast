@@ -169,3 +169,96 @@ describe("web session authentication", () => {
 		expect(loginHtml.headers.get("location")).toBe("/");
 	});
 });
+
+describe("/api/web/status", () => {
+	beforeEach(async () => {
+		// The status endpoint reads the real ~/.cast/web.json. Tests run in
+		// parallel with everything else in the world; point HOME at the per-
+		// test tmp dir so a stray daemon state file from a real run can't
+		// leak into the response, and so writing a state file below doesn't
+		// pollute the user's real config.
+		process.env.HOME = testDbDir;
+		process.env.USERPROFILE = testDbDir;
+	});
+
+	it("reports running=false when no daemon state file exists", async () => {
+		const authenticated = await fetch(`${origin}/api/auth/login`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ username: "cast", password: "test-password" }),
+		});
+		const cookie = authenticated.headers.get("set-cookie")!;
+		const res = await fetch(`${origin}/api/web/status`, { headers: { Cookie: cookie } });
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({ running: false });
+	});
+
+	it("reports running=true with the daemon's pid/host/port when its state file points at a live process", async () => {
+		const authenticated = await fetch(`${origin}/api/auth/login`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ username: "cast", password: "test-password" }),
+		});
+		const cookie = authenticated.headers.get("set-cookie")!;
+
+		const { mkdirSync, writeFileSync } = await import("node:fs");
+		const { join } = await import("node:path");
+		mkdirSync(join(testDbDir, ".cast"), { recursive: true });
+		writeFileSync(
+			join(testDbDir, ".cast", "web.json"),
+			JSON.stringify({
+				pid: process.pid, // self — guaranteed live for the duration of the test
+				port: 9999,
+				host: "127.0.0.1",
+				startedAt: new Date().toISOString(),
+				foreground: true,
+			}),
+		);
+
+		const res = await fetch(`${origin}/api/web/status`, { headers: { Cookie: cookie } });
+		const body = (await res.json()) as {
+			running: boolean;
+			pid?: number;
+			host?: string;
+			port?: number;
+			startedAt?: string;
+			foreground?: boolean;
+		};
+		expect(res.status).toBe(200);
+		expect(body.running).toBe(true);
+		expect(body.pid).toBe(process.pid);
+		expect(body.host).toBe("127.0.0.1");
+		expect(body.port).toBe(9999);
+		expect(body.foreground).toBe(true);
+		expect(typeof body.startedAt).toBe("string");
+	});
+
+	it("self-heals a state file that points at a dead pid (cleans it up, reports running=false)", async () => {
+		const authenticated = await fetch(`${origin}/api/auth/login`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ username: "cast", password: "test-password" }),
+		});
+		const cookie = authenticated.headers.get("set-cookie")!;
+
+		const { existsSync, mkdirSync, writeFileSync } = await import("node:fs");
+		const { join } = await import("node:path");
+		const stateFile = join(testDbDir, ".cast", "web.json");
+		mkdirSync(join(testDbDir, ".cast"), { recursive: true });
+		// A pid we can be confident isn't alive — extremely high number that's
+		// far past any real pid on a Linux box, and well above any pid that
+		// could be recycled to a live one inside the test process.
+		writeFileSync(
+			stateFile,
+			JSON.stringify({ pid: 4_000_000_000, port: 1337, host: "127.0.0.1", startedAt: "x", foreground: false }),
+		);
+		expect(existsSync(stateFile)).toBe(true);
+
+		const res = await fetch(`${origin}/api/web/status`, { headers: { Cookie: cookie } });
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({ running: false });
+		// The endpoint should also have cleaned up the stale file, so the
+		// next request sees the same answer instead of "still stale".
+		expect(existsSync(stateFile)).toBe(false);
+	});
+});
