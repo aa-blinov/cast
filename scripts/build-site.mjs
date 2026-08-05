@@ -144,9 +144,8 @@ a:hover { color: #c084fc; text-decoration: none; }
 	font-family: var(--font-mono); font-size: 1rem; font-weight: 700;
 	color: var(--text);
 }
-.header-logo .logo-mark {
-	width: 18px; height: 18px; border-radius: 4px;
-	background: var(--gradient); display: inline-block;
+.header-logo img {
+	width: 20px; height: 20px; border-radius: 4px; display: inline-block;
 }
 .header-badge {
 	font-family: var(--font-mono); font-size: .7rem; font-weight: 500;
@@ -536,11 +535,12 @@ const LANDING_HTML = `<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
 <title>cast — One agent, many roles</title>
 <meta name="description" content="A role-based terminal agent harness. 18 built-in personas, same tools, different judgment. Runs on any OpenAI-compatible model — including the one on your own hardware.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
 <style>${CSS}</style>
 </head>
 <body>
 <header class="header">
-	<a href="index.html" class="header-logo"><span class="logo-mark"></span>cast</a>
+	<a href="index.html" class="header-logo"><img src="assets/favicon.svg" alt="cast logo">cast</a>
 	<span class="header-badge">v0.12.18</span>
 	<div class="header-links">
 		<a href="getting-started.html">Docs</a>
@@ -681,12 +681,13 @@ function docPage(title, bodyHtml, activeFile) {
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
 <title>${title} — cast</title>
 <meta name="description" content="${title} documentation for cast, a role-based terminal agent harness.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
 <style>${CSS}</style>
 </head>
 <body>
 <header class="header">
 	<button class="menu-toggle" aria-label="Menu">&#9776;</button>
-	<a href="index.html" class="header-logo"><span class="logo-mark"></span>cast</a>
+	<a href="index.html" class="header-logo"><img src="assets/favicon.svg" alt="cast logo">cast</a>
 	<span class="header-badge">v0.12.18</span>
 	<div class="header-links">
 		<a href="index.html">Home</a>
@@ -998,6 +999,7 @@ writeFileSync(join(SITE, ".nojekyll"), "");
 // to avoid overflowing on narrow phones and still had its own timing bugs.
 mkdirSync(join(SITE, "assets"), { recursive: true });
 cpSync(join(ROOT, "assets", "cast-banner.svg"), join(SITE, "assets", "cast-banner.svg"));
+cpSync(join(ROOT, "src", "web", "public", "favicon.svg"), join(SITE, "assets", "favicon.svg"));
 
 // Landing page
 writeFileSync(join(SITE, "index.html"), LANDING_HTML);
