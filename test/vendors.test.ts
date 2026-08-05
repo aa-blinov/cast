@@ -338,6 +338,33 @@ describe("ThinkBlockParser", () => {
 			expect(r2.content).toBe("Real content");
 		});
 	});
+	describe("delta semantics", () => {
+		it("returns only the new text since the last yield, not the running buffer", () => {
+			// Regression: the parser used to emit the entire accumulated buffer
+			// on every chunk. Downstream `content += chunk.content` then
+			// duplicated each line and the UI's per-token redraw flickered —
+			// visible as the assistant appearing to type "line by line" with
+			// each prior line reprinted before the next arrived.
+			const parser = new ThinkBlockParser();
+			const r1 = parser.parseContent("first\n");
+			const r2 = parser.parseContent("second\n");
+			const r3 = parser.parseContent("third\n");
+			expect(r1.content).toBe("first\n");
+			expect(r2.content).toBe("second\n");
+			expect(r3.content).toBe("third\n");
+		});
+		it("returns empty deltas once everything that arrived before a holdback has been emitted", () => {
+			const parser = new ThinkBlockParser();
+			expect(parser.parseContent("hello world").content).toBe("hello world");
+			expect(parser.parseContent("").content).toBeUndefined();
+		});
+		it("flush emits only the unconsumed tail, not anything already returned", () => {
+			const parser = new ThinkBlockParser();
+			expect(parser.parseContent("already out\n").content).toBe("already out\n");
+			const flushed = parser.flush();
+			expect(flushed).toEqual({});
+		});
+	});
 });
 
 // ============================================================================

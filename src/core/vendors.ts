@@ -293,7 +293,23 @@ export class ThinkBlockParser {
 	// actual reasoning both leak into the visible reply. `buffer` holds back
 	// only the minimal trailing slice that could still be a tag prefix, so a
 	// split tag resolves correctly once its other half arrives.
+	// Holdback buffer for tag-boundary alignment — see the field doc above.
+	// We keep the entire input stream in here (no slicing) so that a single
+	// `emittedBufferLen` offset can track how much has already been
+	// delivered across calls — the alternative (slicing the buffer to the
+	// holdback tail each yield) made `emittedBufferLen` lose its meaning
+	// because the slice shifted the indices. The buffer is compacted only
+	// when the already-emitted prefix grows to a meaningful fraction of the
+	// total length, to keep amortised cost flat on long streams.
 	private buffer = "";
+	// Number of leading characters in `buffer` already returned to the
+	// caller across all previous parseContent() / flush() calls. Every
+	// yield must contain only the *new* text since the last yield — the
+	// downstream stream collector concatenates (`content += chunk.content`)
+	// and the UI's per-token redraw assumed that contract. Returning the
+	// full running buffer each chunk made each redraw re-show every prior
+	// line, producing the visible "streaming line by line" flicker.
+	private emittedBufferLen = 0;
 	// Set right after consuming a tag, cleared the moment real (non-newline)
 	// text of that kind has been emitted. Models routinely emit a tag
 	// immediately followed by "\n\n" as pure visual separation (confirmed
@@ -319,46 +335,57 @@ export class ThinkBlockParser {
 		if (stripped) this.contentAtBlockStart = false;
 		return stripped || undefined;
 	}
-
 	parseContent(text: string): { thinking?: string; content?: string } {
 		this.buffer += text;
 		let thinking: string | undefined;
 		let content: string | undefined;
 
+		// Compact the prefix we've already emitted so the buffer can't grow
+		// without bound on long runs. The offset stays valid because we only
+		// drop characters strictly before `emittedBufferLen`.
+		if (this.emittedBufferLen > 1024 && this.emittedBufferLen * 2 >= this.buffer.length) {
+			this.buffer = this.buffer.slice(this.emittedBufferLen);
+			this.emittedBufferLen = 0;
+		}
+
 		// Bounded by construction: each iteration either finds a tag (consumes
 		// past it) or hits the holdback branch and returns — never spins.
 		for (;;) {
 			if (this.inThinkBlock) {
-				const endIdx = this.buffer.indexOf(THINK_CLOSE);
+				const endIdx = this.buffer.indexOf(THINK_CLOSE, this.emittedBufferLen);
 				if (endIdx !== -1) {
-					const piece = this.takeThinking(this.buffer.slice(0, endIdx));
+					const piece = this.takeThinking(this.buffer.slice(this.emittedBufferLen, endIdx));
 					if (piece) thinking = (thinking ?? "") + piece;
-					this.buffer = this.buffer.slice(endIdx + THINK_CLOSE.length);
+					this.emittedBufferLen = endIdx + THINK_CLOSE.length;
 					this.inThinkBlock = false;
 					this.contentAtBlockStart = true;
 					continue;
 				}
 				const holdback = partialTagSuffixLength(this.buffer, THINK_CLOSE);
 				const emitEnd = this.buffer.length - holdback;
-				const piece = this.takeThinking(this.buffer.slice(0, emitEnd));
-				if (piece) thinking = (thinking ?? "") + piece;
-				this.buffer = this.buffer.slice(emitEnd);
+				if (emitEnd > this.emittedBufferLen) {
+					const piece = this.takeThinking(this.buffer.slice(this.emittedBufferLen, emitEnd));
+					if (piece) thinking = (thinking ?? "") + piece;
+					this.emittedBufferLen = emitEnd;
+				}
 				return { thinking, content };
 			}
-			const startIdx = this.buffer.indexOf(THINK_OPEN);
+			const startIdx = this.buffer.indexOf(THINK_OPEN, this.emittedBufferLen);
 			if (startIdx !== -1) {
-				const piece = this.takeContent(this.buffer.slice(0, startIdx));
+				const piece = this.takeContent(this.buffer.slice(this.emittedBufferLen, startIdx));
 				if (piece) content = (content ?? "") + piece;
-				this.buffer = this.buffer.slice(startIdx + THINK_OPEN.length);
+				this.emittedBufferLen = startIdx + THINK_OPEN.length;
 				this.inThinkBlock = true;
 				this.thinkAtBlockStart = true;
 				continue;
 			}
 			const holdback = partialTagSuffixLength(this.buffer, THINK_OPEN);
 			const emitEnd = this.buffer.length - holdback;
-			const piece = this.takeContent(this.buffer.slice(0, emitEnd));
-			if (piece) content = (content ?? "") + piece;
-			this.buffer = this.buffer.slice(emitEnd);
+			if (emitEnd > this.emittedBufferLen) {
+				const piece = this.takeContent(this.buffer.slice(this.emittedBufferLen, emitEnd));
+				if (piece) content = (content ?? "") + piece;
+				this.emittedBufferLen = emitEnd;
+			}
 			return { thinking, content };
 		}
 	}
@@ -367,8 +394,9 @@ export class ThinkBlockParser {
 	 * tag (nothing more is coming to complete it) — flush it as whichever
 	 * kind is currently open, instead of silently dropping trailing text. */
 	flush(): { thinking?: string; content?: string } {
-		const leftover = this.buffer;
+		const leftover = this.buffer.slice(this.emittedBufferLen);
 		this.buffer = "";
+		this.emittedBufferLen = 0;
 		const wasInThinkBlock = this.inThinkBlock;
 		this.inThinkBlock = false;
 		if (!leftover) return {};

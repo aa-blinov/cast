@@ -176,6 +176,7 @@ export function FilePreviewModal({ path, onClose, downloadHref, previewHref }) {
 	const [error, setError] = useState(null);
 	const [enhanced, setEnhanced] = useState(null);
 	const modalRef = useModalFocusTrap(!!path, ".modal-close");
+	const [copied, setCopied] = useState(false);
 	const ext = path ? fileExtOf(path) : "";
 	const isImage = FS_IMAGE_EXTENSIONS.has(ext);
 	const isPdf = !isImage && ext === "pdf";
@@ -198,6 +199,7 @@ export function FilePreviewModal({ path, onClose, downloadHref, previewHref }) {
 		setContent(null);
 		setTooLarge(false);
 		setError(null);
+		setCopied(false);
 		if (!path || !fetchesContent) return;
 		let cancelled = false;
 		(async () => {
@@ -286,9 +288,33 @@ export function FilePreviewModal({ path, onClose, downloadHref, previewHref }) {
 		<pre class="fs-preview-text fs-preview-code"><code>${lines.map((line, i) => html`<span key=${i} class="fs-preview-line">${line || " "}</span>`)}</code></pre></div>`;
 	}
 
+	const copyTarget = isImage || isPdf ? previewHref : content;
+	const copyDisabled = isImage || isPdf ? false : copyTarget == null;
+	const handleCopy = async () => {
+		if (copyTarget == null) return;
+		try {
+			if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+				await navigator.clipboard.writeText(copyTarget);
+			} else {
+				const ta = document.createElement("textarea");
+				ta.value = copyTarget;
+				ta.style.position = "fixed";
+				ta.style.opacity = "0";
+				document.body.appendChild(ta);
+				ta.select();
+				document.execCommand("copy");
+				document.body.removeChild(ta);
+			}
+			setCopied(true);
+			setTimeout(() => setCopied(false), 1500);
+		} catch {
+			/* copy denied — leave UI unchanged */
+		}
+	};
+
 	return html`<div class="modal-backdrop" onClick=${onClose}><div class="modal modal-preview" role="dialog" aria-modal="true" aria-label="File preview" tabIndex="-1" ref=${modalRef} onClick=${(e) => e.stopPropagation()}>
 		<div class="modal-header"><span title=${path}>${name}</span><div style=${{ display: "flex", gap: "6px", alignItems: "center" }}>
-			<a class="modal-btn icon-btn" href=${downloadHref} download title="Download"><${icons.arrowDownTray} /></a><button class="modal-close" onClick=${onClose} aria-label="Close"><${icons.xMark} /></button>
+			<button class="modal-btn icon-btn" onClick=${handleCopy} disabled=${copyDisabled} title=${copied ? "Copied" : "Copy"} aria-label="Copy file contents"><${copied ? icons.check : icons.clipboard} /></button><a class="modal-btn icon-btn" href=${downloadHref} download title="Download"><${icons.arrowDownTray} /></a><button class="modal-close" onClick=${onClose} aria-label="Close"><${icons.xMark} /></button>
 		</div></div><div class="fs-preview-body">${body}</div>
 	</div></div>`;
 }
