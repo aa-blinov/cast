@@ -251,6 +251,19 @@ plans directory; `read`ing that file makes it the active plan.
 | `question` | Plan or build | Ask one to four multiple-choice questions and end the turn until the user answers |
 | `todo_write` | Build | Maintain the task list; approved plan checkboxes are projected into it |
 
+### `todo_write`
+
+In Build mode, the agent uses `todo_write` to track multi-step execution as an externalized checklist:
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `todos` | Yes | Array of todo items: `{ content: string, status: "pending"|"in_progress"|"completed"|"cancelled", priority: "high"|"medium"|"low", planStep?: string }` |
+
+Key mechanics:
+- **State isolation**: The todo list is stored in a dedicated `todos` field on `SessionState` (outside the `messages` array). It is never lost during context compaction.
+- **System prompt injection**: The task list is automatically re-injected into the system prompt on every turn so the model maintains focus across long tool sequences.
+- **Open work gate**: Only one task can be `in_progress` at a time. The harness prevents turn completion if tasks remain `in_progress` without being marked `completed` or `cancelled`.
+
 ## Subagent System
 
 The `task` tool delegates work to isolated sub-agents. Each sub-agent has:

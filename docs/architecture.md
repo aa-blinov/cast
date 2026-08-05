@@ -84,6 +84,17 @@ A single trust decision per project gates local skills, MCP, context files, pers
 
 Plan mode is a restricted agent state: read-only bash (a curated allowlist of inspection binaries), unrestricted read, and write/edit narrowed to the session's plans directory — the model authors the plan with the same tools it edits real code with, no dedicated plan-write/plan-edit/plan-read tool (see [Plan Mode](plan-mode.md)). Plan files persist as markdown with checkbox tracking.
 
+### System Reminders & Open Work Gate
+
+To prevent models from losing context during long turns or date rollovers, cast injects system reminders into the context:
+- **Date Rollover**: Injects an updated system date reminder when a session crosses a calendar boundary.
+- **Compaction Reminder**: Refreshes context guidance after recent compactions.
+- **Open Work Gate**: In Build mode, `open-work-gate.ts` monitors active `todo_write` items. If open work remains (`in_progress` or `pending`), the harness prevents the turn from finishing without updating task statuses.
+
+### Session-Scoped Git Worktrees
+
+The worktree module (`worktree.ts`) isolates session execution in `.cast/worktrees/<slug>` on a dedicated `cast-<slug>` branch. `session.cwd` points directly to the worktree root, isolating file tools and bash commands from the user's main checkout while sharing the git object DB. Worktree paths persist in SQLite session state (`SessionState.cwd`), ensuring resumes automatically stay in the worktree.
+
 ## Development
 
 ```bash
