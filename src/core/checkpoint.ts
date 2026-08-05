@@ -46,7 +46,8 @@ export function createCheckpoint(cwd: string, forceShadow = false): TurnCheckpoi
 	const id = `chk-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 	const repoRoot = findCanonicalGitRoot(cwd);
 	const topLevel = repoRoot ? runGit(cwd, ["rev-parse", "--show-toplevel"]) : null;
-	const isGitRepo = !forceShadow && Boolean(topLevel && runGit(cwd, ["rev-parse", "--is-inside-work-tree"]) === "true");
+	const isGitRepo =
+		!forceShadow && Boolean(topLevel && runGit(cwd, ["rev-parse", "--is-inside-work-tree"]) === "true");
 
 	if (isGitRepo && repoRoot) {
 		// Stage all changes (including untracked files) to index temporarily for write-tree
