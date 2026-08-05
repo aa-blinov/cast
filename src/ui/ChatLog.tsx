@@ -193,12 +193,22 @@ function BlockView({
 }): JSX.Element | null {
 	if (block.kind === "thinking") {
 		if (showReasoning === false) return null;
-		// Model \n breaks inside a single <Text> make Ink emit real line-breaks.
-		// Each continuation line starts at column 0, so the terminal wraps it
-		// independently — producing mid-word splits unrelated to the actual text.
-		// Reasoning is a stream of consciousness; its newlines carry no structure
-		// worth preserving in the terminal, so flatten them everywhere.
+		// Model \n breaks inside a single <Text> make Ink emit real line-breaks;
+		// each continuation starts at column 0 and wraps independently, producing
+		// mid-word splits. Flatten everywhere — reasoning has no paragraph structure
+		// that's worth preserving in the terminal.
 		const text = block.text.replace(/\n/g, " ");
+		if (compact) {
+			// Live region: single truncated line, same as tool blocks. Shows the
+			// most-recent reasoning token as a progress indicator, not for reading.
+			return (
+				<Text color={theme().muted} dimColor wrap="truncate">
+					{!block.continued && "[reasoning] … "}
+					{text}
+				</Text>
+			);
+		}
+		// Settled history: paragraph wrapped so long text doesn't overflow.
 		return (
 			<Text color={theme().muted} dimColor wrap="wrap">
 				{!block.continued && `[reasoning] ${truncated ? "… " : ""}`}
@@ -288,7 +298,22 @@ export function clampStreamingBlocks(
 			used += need;
 			continue;
 		}
-		const prefixLen = block.continued ? 0 : block.kind === "thinking" ? "[reasoning] ".length : "[agent] ".length;
+		// When reasoning is visible in the live region it renders as one truncated
+		// line (same as tool blocks). Charge 1 row, not wrappedRows — the old
+		// full-height charge pushed content/tool blocks out of the viewport budget
+		// even though only one line actually appeared on screen.
+		if (block.kind === "thinking") {
+			if (used + 1 > budget) {
+				if (out.length > 0) break;
+				out.unshift({ block, truncated: true, index: i });
+				used = budget;
+				break;
+			}
+			out.unshift({ block, truncated: false, index: i });
+			used += 1;
+			continue;
+		}
+		const prefixLen = block.continued ? 0 : "[agent] ".length;
 		const need = wrappedRows(block.text, prefixLen);
 		if (used + need <= budget) {
 			out.unshift({ block, truncated: false, index: i });
