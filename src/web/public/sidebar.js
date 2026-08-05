@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { api } from "./api.js";
 import { icons } from "./icons.js";
 import { SidebarSessionItem } from "./sidebar-session-item.js";
-import { groupSessionsByDirectory, SANDBOX_CWD, shortPath, sortSessionsByActivity } from "./sidebar-utils.js";
+import { groupSessionsByDate, SANDBOX_CWD, shortPath, sortSessionsByActivity } from "./sidebar-utils.js";
 
 const html = htm.bind(h);
 
@@ -114,10 +114,10 @@ export function Sidebar({
 		};
 	}, [menuFor]);
 
-	// Pinned is its own group above a divider (a deliberate, manual choice —
-	// it shouldn't just be one more sort key mixed into the rest). Within
-	// each group, running floats to the top (that's the "control room" — see
-	// what's actually working), then most-recently-active.
+	// Primary grouping is by recency (Today / Yesterday / Previous 7 days /
+	// Previous 30 days / Older) — cwd is still discoverable on hover via the
+	// row's title. Within each date bucket, pinned floats to the top (manual
+	// anchor for ongoing work), then running, then most-recently-active.
 	// Search results already come back relevance-ranked from the server —
 	// respect that order (don't re-sort into the pinned/running/date groups
 	// below, which only make sense for "here's everything" browsing, not "did
@@ -125,7 +125,7 @@ export function Sidebar({
 	const isSearching = search.trim().length > 0;
 	const searching = isSearching && searchResults === null;
 	const filtered = isSearching ? (searchResults ?? []) : sessions;
-	const sessionGroups = isSearching ? [] : groupSessionsByDirectory(filtered);
+	const sessionGroups = isSearching ? [] : groupSessionsByDate(filtered);
 	const isSandbox = cwd === SANDBOX_CWD;
 
 	const startEdit = useCallback((s) => {
@@ -180,10 +180,9 @@ export function Sidebar({
 			if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
 			return sortSessionsByActivity(a, b);
 		});
-		const fullPaths = [...group.paths].filter(Boolean);
 		return html`
 			<div key=${key} class="sidebar-session-group">
-				<div class="sidebar-group-label" title=${fullPaths.join("\n")}>${group.label}</div>
+				<div class="sidebar-group-label">${group.label}</div>
 				${groupSessions.map(renderItem)}
 			</div>
 		`;
