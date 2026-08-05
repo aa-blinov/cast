@@ -1,5 +1,6 @@
 import { execFileSync, execSync } from "node:child_process";
 import { homedir } from "node:os";
+import { createCheckpoint, restoreCheckpoint } from "../core/checkpoint.ts";
 import { reminderStateFromPlan } from "../core/compaction-reminder.ts";
 import { type AppConfig, probeProvider, resolveProvider, runOnboardingCheck } from "../core/config.ts";
 import { formatContextFilesForPrompt, loadProjectContextFiles } from "../core/context-files.ts";
@@ -63,7 +64,6 @@ import {
 } from "../core/skills.ts";
 import { resolveSshHosts, type SshHost, saveSshConfig, scanSshKeys, validateKeyPermissions } from "../core/ssh.ts";
 import { buildReasoningParams, type ModelReasoningMeta, resolveReasoningFormat } from "../core/vendors.ts";
-import { createCheckpoint, restoreCheckpoint } from "../core/checkpoint.ts";
 import { ensureSessionWorktree, listWorktrees, removeWorktreeBySlug } from "../core/worktree.ts";
 import {
 	formatSkillPickLabel,
