@@ -63,6 +63,7 @@ import {
 } from "../core/skills.ts";
 import { resolveSshHosts, type SshHost, saveSshConfig, scanSshKeys, validateKeyPermissions } from "../core/ssh.ts";
 import { buildReasoningParams, type ModelReasoningMeta, resolveReasoningFormat } from "../core/vendors.ts";
+import { createCheckpoint, restoreCheckpoint } from "../core/checkpoint.ts";
 import { ensureSessionWorktree, listWorktrees, removeWorktreeBySlug } from "../core/worktree.ts";
 import {
 	formatSkillPickLabel,
@@ -183,6 +184,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/subagent-model", description: "Show or change subagent model" },
 	{ name: "/subagent-model-provider", description: "Set provider for subagent model", takesArgs: true },
 	{ name: "/theme", description: "Change color theme" },
+	{ name: "/undo", description: "Undo last turn (restore files and context)" },
 	{ name: "/usage", description: "Show session token and cost usage" },
 	{ name: "/web", description: "Toggle web search & fetch tools" },
 	{ name: "/web-fetch-provider", description: "Switch web_fetch backend (Jina Reader / local)" },
@@ -1829,6 +1831,41 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		} catch (err) {
 			showNotice(`[Worktree failed: ${err instanceof Error ? err.message : String(err)}]`);
 		}
+		return;
+	}
+
+	if (input === "/undo") {
+		if (deps.running) {
+			showNotice("[Agent running — finish the run or /abort before /undo]");
+			return;
+		}
+		const checkpoints = session.checkpoints || [];
+		if (checkpoints.length === 0) {
+			showNotice("[No checkpoint available to undo]");
+			return;
+		}
+		const lastCheckpoint = checkpoints.pop()!;
+		const res = restoreCheckpoint(lastCheckpoint);
+		if (!res.ok) {
+			showNotice(`[Undo failed: ${res.message}]`);
+			return;
+		}
+
+		const msgs = session.messages;
+		let lastUserIdx = -1;
+		for (let i = msgs.length - 1; i >= 0; i--) {
+			if (msgs[i]?.role === "user") {
+				lastUserIdx = i;
+				break;
+			}
+		}
+		if (lastUserIdx !== -1) {
+			session.messages = msgs.slice(0, lastUserIdx);
+		}
+		session.checkpoints = checkpoints;
+		saveSession(session);
+		deps.agent.refresh();
+		showNotice(`[Undone: ${res.message}]`);
 		return;
 	}
 

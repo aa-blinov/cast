@@ -10,6 +10,8 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, wr
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { createCheckpoint, restoreCheckpoint } from "../core/checkpoint.ts";
+import type { AppConfig } from "../core/config.ts";
 import { fetchModels, type ModelInfo, probeProvider, resolveProvider } from "../core/config.ts";
 import { hasHooks, runHooksForEvent } from "../core/hooks.ts";
 import type { Message } from "../core/llm.ts";
@@ -824,6 +826,10 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		if (ws.session.cwd && !existsSync(ws.session.cwd)) {
 			mkdirSync(ws.session.cwd, { recursive: true });
 		}
+
+		const chk = createCheckpoint(sessionCwd);
+		if (!ws.session.checkpoints) ws.session.checkpoints = [];
+		ws.session.checkpoints.push(chk);
 
 		const userMsg = { role: "user" as const, content: buildUserContent(text, images) } as Message & {
 			role: "user";
@@ -2392,6 +2398,31 @@ export function createWebBridge(result: StartupResult): WebBridge {
 				return { ok: true, result: `Added host "${hname}"` };
 			}
 			return { ok: false, error: `Unknown /ssh subcommand: ${sub}` };
+		}
+
+		if (name === "/undo") {
+			if (running) return { ok: false, error: "Agent running — finish the run or /abort before /undo" };
+			const checkpoints = ws.session.checkpoints || [];
+			if (checkpoints.length === 0) return { ok: false, error: "No checkpoint available to undo" };
+			const lastCheckpoint = checkpoints.pop()!;
+			const res = restoreCheckpoint(lastCheckpoint);
+			if (!res.ok) return { ok: false, error: `Undo failed: ${res.message}` };
+
+			const msgs = ws.session.messages;
+			let lastUserIdx = -1;
+			for (let i = msgs.length - 1; i >= 0; i--) {
+				if (msgs[i]?.role === "user") {
+					lastUserIdx = i;
+					break;
+				}
+			}
+			if (lastUserIdx !== -1) {
+				ws.session.messages = msgs.slice(0, lastUserIdx);
+			}
+			ws.session.checkpoints = checkpoints;
+			saveSession(ws.session);
+			broadcastSessionUpdate(ws);
+			return { ok: true, result: `Undone: ${res.message}` };
 		}
 
 		// Native `/<skill-id>` invocation — falls through here only once every
