@@ -21,7 +21,7 @@ function StreamingText({ text, className }) {
 	return html`<div ref=${setRef} class=${className ?? "message-content"}></div>`;
 }
 
-export function BlockView({ block, streaming = false, renderMarkdown }) {
+export function BlockView({ block, streaming = false, renderMarkdown, showReasoning = true }) {
 	if (block.kind === "tool") {
 		// Key on the tool-call id (not position): when a second tool call
 		// streams in, Preact must NOT reuse this ToolCard's DOM node for
@@ -31,6 +31,14 @@ export function BlockView({ block, streaming = false, renderMarkdown }) {
 		return html`<${ToolCard} key=${block.call.id} call=${block.call} renderMarkdown=${renderMarkdown} />`;
 	}
 	if (!block.text.trim()) return null;
+	// Reasoning models (MiniMax-M3, etc.) stream a lot of auxiliary
+	// thinking that just clutters the transcript. The /reasoning-display
+	// toggle (and the Appearance panel checkbox) flips this flag for the
+	// current session — when off, drop thinking blocks entirely. The
+	// default stays true so existing callers and the initial render match
+	// the prior behavior (reasoning visible by default) unless the user
+	// opts in to the toggle.
+	if (block.kind === "thinking" && !showReasoning) return null;
 	const kind = block.kind === "thinking" ? "reasoning" : "assistant";
 	const className = `message message-${kind}${streaming ? " message-entering" : ""}`;
 	return html`
@@ -47,7 +55,7 @@ export function BlockView({ block, streaming = false, renderMarkdown }) {
 	`;
 }
 
-export function StreamingBlocks({ blocks, renderMarkdown }) {
+export function StreamingBlocks({ blocks, renderMarkdown, showReasoning = true }) {
 	if (!blocks || blocks.length === 0) return null;
 	const collapsed = collapseMidWordBoundaries(blocks);
 	return html`
@@ -55,17 +63,18 @@ export function StreamingBlocks({ blocks, renderMarkdown }) {
 			${collapsed.map(
 				(block, index) =>
 					html`<${BlockView}
+						key=${block.order ?? `${block.kind}-${index}-${showReasoning ? "on" : "off"}`}
 						block=${block}
-					streaming
-					key=${block.order ?? `${block.kind}-${index}`}
-					renderMarkdown=${renderMarkdown}
+						streaming
+						renderMarkdown=${renderMarkdown}
+						showReasoning=${showReasoning}
 					/>`,
 			)}
 		</div>
 	`;
 }
 
-export function LiveStreamingBlocks({ controllerRef, onFrame, renderMarkdown }) {
+export function LiveStreamingBlocks({ controllerRef, onFrame, renderMarkdown, showReasoning = true }) {
 	const [stream, setStream] = useState({ blocks: [] });
 	const streamRef = useRef({ blocks: [] });
 	const rafRef = useRef(null);
@@ -110,5 +119,5 @@ export function LiveStreamingBlocks({ controllerRef, onFrame, renderMarkdown }) 
 		},
 		[controllerRef, reset],
 	);
-	return html`<${StreamingBlocks} blocks=${stream.blocks} renderMarkdown=${renderMarkdown} />`;
+	return html`<${StreamingBlocks} blocks=${stream.blocks} renderMarkdown=${renderMarkdown} showReasoning=${showReasoning} />`;
 }

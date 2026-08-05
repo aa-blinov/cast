@@ -10,7 +10,7 @@ import { TurnMetaLine } from "./turn-meta.js";
 
 const html = htm.bind(h);
 
-export function Message({ msg, renderMarkdown, escapeHtml }) {
+export function Message({ msg, renderMarkdown, escapeHtml, showReasoning = true }) {
 	const role = msg.role || "assistant";
 	// Only used by the legacy floating image-result branch below (pre
 	// castToolCallId sessions) — declared unconditionally so hook order stays
@@ -54,8 +54,8 @@ export function Message({ msg, renderMarkdown, escapeHtml }) {
 		// assistant just finished) was the visible one. Now silent.
 		return html`
 			<div class="message-group">
-				${collapsed.map((block, i) => html`<${BlockView} key=${block.kind === "tool" ? block.call.id : i} block=${block} renderMarkdown=${renderMarkdown} />`)}
-					<${TurnMetaLine} turnMeta=${msg.turnMeta} />
+				${collapsed.map((block, i) => html`<${BlockView} key=${block.kind === "tool" ? block.call.id : `${block.kind}-${i}-${showReasoning ? "on" : "off"}`} block=${block} renderMarkdown=${renderMarkdown} showReasoning=${showReasoning} />`)}
+				<${TurnMetaLine} turnMeta=${msg.turnMeta} />
 			</div>
 		`;
 	}
@@ -82,6 +82,7 @@ export function Message({ msg, renderMarkdown, escapeHtml }) {
 			<div class="message-group">
 				${
 					visibleThinking &&
+					showReasoning &&
 					html`
 					<div class="message message-reasoning">
 						<div class="message-label">reasoning</div>
@@ -99,7 +100,7 @@ export function Message({ msg, renderMarkdown, escapeHtml }) {
 				`
 				}
 				${msg.toolCalls?.map((tc) => html`<${ToolCard} key=${tc.id} call=${tc} renderMarkdown=${renderMarkdown} />`)}
-					<${TurnMetaLine} turnMeta=${msg.turnMeta} />
+				<${TurnMetaLine} turnMeta=${msg.turnMeta} />
 			</div>
 		`;
 	}
