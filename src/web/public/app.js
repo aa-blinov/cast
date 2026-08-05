@@ -1777,14 +1777,6 @@ function App() {
 					}
 				</div>
 				${
-					!atBottom &&
-					html`
-					<button class="scroll-bottom-btn" onClick=${scrollToBottom} aria-label="Scroll to latest">
-						<${icons.chevronDown} />
-					</button>
-				`
-				}
-				${
 					activePersonaLabel &&
 					html`
 					<div class="composer-role">
@@ -1817,7 +1809,17 @@ function App() {
 					</div>
 				`
 				}
-				<${ComposerModule} running=${running} ready=${!!session} activeId=${activeId} commands=${commands} personas=${personas} onSubmit=${submitMessage} onAbort=${abortRun} onDocUploaded=${() => setInputsRefreshNonce((n) => n + 1)} />
+				<div class="composer-container">
+					${
+						!atBottom &&
+						html`
+						<button class="scroll-bottom-btn" onClick=${scrollToBottom} aria-label="Scroll to latest">
+							<${icons.chevronDown} />
+						</button>
+					`
+					}
+					<${ComposerModule} running=${running} ready=${!!session} activeId=${activeId} commands=${commands} personas=${personas} onSubmit=${submitMessage} onAbort=${abortRun} onDocUploaded=${() => setInputsRefreshNonce((n) => n + 1)} />
+				</div>
 			</main>
 
 			<!-- Diff — a wide right sidebar alongside the chat on desktop, a
