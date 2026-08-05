@@ -452,6 +452,11 @@
 .settings-toggle-thumb { width: 9px; height: 9px; border-radius: 50%; background: var(--text-muted); }
 .settings-toggle[aria-checked="true"] .settings-toggle-thumb { background: var(--cyan); }
 .settings-toggle:disabled { opacity: .5; cursor: default; }
+/* Reasoning row sits inside the Appearance panel next to the Font/Theme rows,
+   which use `.settings-row` (padding 5px). The compact row's 12px padding
+   would push the toggle 7px lower than the Font/Theme controls, breaking the
+   vertical rhythm. Match the .settings-row padding here. */
+.settings-rows .settings-compact-list .settings-compact-row { padding: 5px 0; }
 .settings-segmented { display: flex; gap: 4px; }
 .settings-segmented .modal-btn { min-width: 54px; }
 .settings-compact-detail {

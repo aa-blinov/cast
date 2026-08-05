@@ -3,6 +3,21 @@ import { h } from "preact";
 
 const html = htm.bind(h);
 
+function SettingsReasoning({ showReasoning, onToggle }) {
+	return html`<div class="settings-compact-list">
+		<div class="settings-compact-row">
+			<div class="settings-compact-copy"><span class="settings-compact-title">Show reasoning blocks</span><span>Reveals the chain-of-thought the model streams before each reply.</span></div>
+			<button
+				type="button"
+				class="settings-toggle"
+				role="switch"
+				aria-checked=${showReasoning ? "true" : "false"}
+				onClick=${onToggle}
+			><span class="settings-toggle-thumb" />${showReasoning ? "Enabled" : "Disabled"}</button>
+		</div>
+	</div>`;
+}
+
 function SettingsTheme({ themes, currentThemeId, onPick }) {
 	return html`<div class="settings-theme-grid">${[...(themes || [])].sort((a, b) => a.label.localeCompare(b.label)).map((theme) => html`<button key=${theme.id} class="settings-theme-swatch${theme.id === currentThemeId ? " active" : ""}" style=${{ "--swatch-accent": theme.colors?.accent }} onClick=${() => onPick(theme.id)} title=${theme.description}><span class="settings-theme-dot" /><span class="settings-theme-label">${theme.label}</span></button>`)}</div>`;
 }
@@ -28,6 +43,8 @@ export function SettingsAppearance({
 	currentFontScale,
 	onPickFont,
 	onPickScale,
+	showReasoning,
+	onToggleShowReasoning,
 }) {
-	return html`<div class="settings-rows"><div class="settings-section-title">Theme</div><${SettingsTheme} themes=${themes} currentThemeId=${currentThemeId} onPick=${onPickTheme} /><div class="settings-section-title">Font</div><${SettingsFont} options=${fontOptions} scales=${fontScales} currentFontId=${currentFontId} currentFontScale=${currentFontScale} onPickFont=${onPickFont} onPickScale=${onPickScale} /></div>`;
+	return html`<div class="settings-rows"><div class="settings-section-title">Theme</div><${SettingsTheme} themes=${themes} currentThemeId=${currentThemeId} onPick=${onPickTheme} /><div class="settings-section-title">Font</div><${SettingsFont} options=${fontOptions} scales=${fontScales} currentFontId=${currentFontId} currentFontScale=${currentFontScale} onPickFont=${onPickFont} onPickScale=${onPickScale} /><div class="settings-section-title">Reasoning</div><${SettingsReasoning} showReasoning=${showReasoning} onToggle=${onToggleShowReasoning} /></div>`;
 }

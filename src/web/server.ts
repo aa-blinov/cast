@@ -33,6 +33,48 @@ const PORT_RE = /:\d+$/;
 const ROUTE_PARAM_RE = /:(\w+)/g;
 const FILENAME_QUOTE_RE = /"/g;
 const STREAM_BLOCKS_IMPORT_RE = /from\s+"\.\/stream-blocks\.js"/;
+// Matches bare `./<name>.js` imports inside the top-level modules whose content
+// changes during dev (app.js, settings-modal.js) — the negative lookahead
+// skips any already-versioned `?v=…` so we don't double-stamp after the first
+// pass. Without this, an edit to e.g. settings-appearance.js leaves the browser
+// pinned to the stale module: dynamic imports inside app.js resolve by URL,
+// and `max-age=3600` on the asset means `location.reload()` won't re-fetch
+// even though the file content on disk is different.
+const VERSIONED_LOCAL_IMPORT_RE = /from\s+"\.\/(?!\.)([\w-]+)\.js(?!\?v=)"/g;
+// Local modules whose `./<name>.js` imports are rewritten with `?v=` inside
+// app.js / settings-modal.js. assetVersion mixes these into the app.js hash so
+// any change to one of them invalidates the cached app.js too.
+const IMPORT_REWRITE_TARGETS = [
+	"api",
+	"cast-logo",
+	"composer",
+	"diff-panel",
+	"directory-browser",
+	"elapsed-timer",
+	"file-explorer",
+	"hotkeys",
+	"icons",
+	"inputs-explorer",
+	"message",
+	"message-submit",
+	"modal-focus",
+	"new-session-modal",
+	"plan-cards",
+	"settings-appearance",
+	"settings-modal",
+	"settings-model",
+	"settings-panels",
+	"share-modal",
+	"sidebar",
+	"sse-connection",
+	"sse-events",
+	"status-popover",
+	"streaming-blocks",
+	"use-panel-resize",
+	"use-session-controller",
+	"use-session-state",
+	"use-workspace-state",
+] as const;
 const DIFF_FILE_RE = /b\/(.+)$/;
 const HUNK_HEADER_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 
@@ -317,7 +359,16 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 			const assetVersion = (path: string): string => {
 				const source = readFileSync(join(publicDir, path));
 				const hash = createHash("sha256").update(source);
-				if (path === "/app.js") hash.update(assetVersion("/stream-blocks.js"));
+				if (path === "/app.js") {
+					// app.js's served bytes are not just the file — the server also
+					// stamps every `./<name>.js` import with a content hash. Mix the
+					// transitive version map into the hash so the HTML picks up a new
+					// URL whenever any of those import targets change (otherwise the
+					// browser's `immutable` cache keeps the pre-rewrite body).
+					for (const child of IMPORT_REWRITE_TARGETS) {
+						hash.update(`${child}=${assetVersion(`/${child}.js`)};`);
+					}
+				}
 				return hash.digest("hex").slice(0, 12);
 			};
 			let content: Buffer | string = readFileSync(filePath);
@@ -333,9 +384,15 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 					.replace('href="/settings.css"', `href="/settings.css?v=${assetVersion("/settings.css")}"`)
 					.replace('src="/app.js"', `src="/app.js?v=${assetVersion("/app.js")}"`)
 					.replace('src="/login.js"', `src="/login.js?v=${assetVersion("/login.js")}"`);
-			} else if (urlPath === "/app.js") {
+			} else if (urlPath === "/app.js" || urlPath === "/settings-modal.js") {
+				// Stamp every bare `./<local>.js` import with a content-hash
+				// version query so the browser refetches them when the file
+				// changes (see VERSIONED_LOCAL_IMPORT_RE comment). The
+				// stream-blocks.js regex is now redundant — the generic one
+				// covers it — but kept for clarity / narrower match.
 				content = content
 					.toString("utf-8")
+					.replace(VERSIONED_LOCAL_IMPORT_RE, (_, name) => `from"./${name}.js?v=${assetVersion(`/${name}.js`)}"`)
 					.replace(STREAM_BLOCKS_IMPORT_RE, `from"./stream-blocks.js?v=${assetVersion("/stream-blocks.js")}"`);
 			}
 			const accepts = req.headers["accept-encoding"] ?? "";

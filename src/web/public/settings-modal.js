@@ -56,6 +56,8 @@ export function SettingsModal({
 	confirm,
 	onReload,
 	onModelChange,
+	showReasoning,
+	onToggleShowReasoning,
 }) {
 	const [tab, setTab] = useState(SETTINGS_TABS[0].id);
 	const [data, setData] = useState({});
@@ -301,7 +303,7 @@ export function SettingsModal({
 											const res = await act(`/theme ${id}`);
 											if (res.ok && res.result?.colors) onApplyTheme(res.result.colors);
 											if (res.ok && res.result?.theme) onThemeChange(res.result.theme);
-										}} currentFontId=${currentFontId} currentFontScale=${currentFontScale} onPickFont=${onPickFont} onPickScale=${onPickScale} />`
+										}} currentFontId=${currentFontId} currentFontScale=${currentFontScale} onPickFont=${onPickFont} onPickScale=${onPickScale} showReasoning=${showReasoning} onToggleShowReasoning=${onToggleShowReasoning} />`
 									: tab === "model"
 										? html`<${panels.SettingsModel} data=${data.model} busy=${busy} act=${act} />`
 										: tab === "bash"

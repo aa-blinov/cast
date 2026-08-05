@@ -618,6 +618,31 @@ function App() {
 			return DEFAULT_FONT_SCALE;
 		}
 	});
+	// /reasoning-display toggle — reasoning models (MiniMax-M3, etc.) stream a
+	// lot of auxiliary thinking that just clutters the chat. Persisted to
+	// localStorage so the choice survives reloads; the web UI opens a single
+	// chat at a time, so this toggle spans whichever session is active. The
+	// default is off — explicit opt-in via the toggle (or the Appearance
+	// panel's Reasoning section).
+	const [showReasoning, setShowReasoning] = useState(() => {
+		try {
+			return localStorage.getItem("cast:showReasoning") === "1";
+		} catch {
+			return false;
+		}
+	});
+	const toggleShowReasoning = useCallback(() => {
+		setShowReasoning((prev) => {
+			const next = !prev;
+			try {
+				localStorage.setItem("cast:showReasoning", next ? "1" : "0");
+			} catch {
+				// localStorage may be unavailable (private mode, quota); the
+				// toggle still applies in-memory, just won't persist.
+			}
+			return next;
+		});
+	}, []);
 	// Streaming state lives in LiveStreamingBlocks, so token commits never
 	// reconcile the sidebar or full settled transcript.
 	const streamingControllerRef = useRef(null);
@@ -1698,6 +1723,8 @@ function App() {
 					confirm=${requestConfirm}
 					onReload=${() => refreshCommands(activeId)}
 					onModelChange=${setDefaultModel}
+					showReasoning=${showReasoning}
+					onToggleShowReasoning=${toggleShowReasoning}
 				/>
 			`
 			}
@@ -1765,8 +1792,8 @@ function App() {
 						// comment on the loader block above).
 						!(selectingId && selectingId !== activeId) &&
 						html`
-							${messages.map((msg) => html`<${MessageModule} key=${keyForMessage(msg)} msg=${msg} renderMarkdown=${renderMarkdown} escapeHtml=${escapeHtml} />`)}
-							<${LiveStreamingBlocksModule} controllerRef=${streamingControllerRef} onFrame=${_scrollStreamingFrame} renderMarkdown=${renderMarkdown} />
+							${messages.map((msg) => html`<${MessageModule} key=${keyForMessage(msg)} msg=${msg} renderMarkdown=${renderMarkdown} escapeHtml=${escapeHtml} showReasoning=${showReasoning} />`)}
+							<${LiveStreamingBlocksModule} controllerRef=${streamingControllerRef} onFrame=${_scrollStreamingFrame} renderMarkdown=${renderMarkdown} showReasoning=${showReasoning} />
 							${
 								!running &&
 								html`
