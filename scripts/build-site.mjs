@@ -540,7 +540,7 @@ const LANDING_HTML = `<!DOCTYPE html>
 </head>
 <body>
 <header class="header">
-	<a href="index.html" class="header-logo"><img src="assets/favicon.svg" alt="cast logo">cast</a>
+	<a href="index.html" class="header-logo" aria-label="cast home"><img src="assets/favicon.svg" alt="cast logo"></a>
 	<span class="header-badge">v0.12.18</span>
 	<div class="header-links">
 		<a href="getting-started.html">Docs</a>
@@ -687,7 +687,7 @@ function docPage(title, bodyHtml, activeFile) {
 <body>
 <header class="header">
 	<button class="menu-toggle" aria-label="Menu">&#9776;</button>
-	<a href="index.html" class="header-logo"><img src="assets/favicon.svg" alt="cast logo">cast</a>
+	<a href="index.html" class="header-logo" aria-label="cast home"><img src="assets/favicon.svg" alt="cast logo"></a>
 	<span class="header-badge">v0.12.18</span>
 	<div class="header-links">
 		<a href="index.html">Home</a>
