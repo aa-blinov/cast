@@ -25,6 +25,8 @@ const NAV_ORDER = [
 	{ file: "configuration.md", label: "Configuration" },
 	{ file: "themes.md", label: "Themes" },
 	{ file: "non-interactive-mode.md", label: "Non-Interactive Mode" },
+	{ file: "eval-behavior.md", label: "Behavior Evals" },
+	{ file: "eval-methodology.md", label: "Eval Methodology" },
 	{ file: "architecture.md", label: "Architecture" },
 	// Not a real markdown file — rendered from docs/eval-scoreboard.json by the
 	// special case in the build loop below. The ".md" suffix is kept purely so
@@ -858,6 +860,8 @@ function getDescription(file) {
 		"configuration.md": "Settings, env vars, .cast/ layout",
 		"themes.md": "Color themes for the TUI",
 		"non-interactive-mode.md": "cast run and JSON output",
+		"eval-behavior.md": "Real-model behavioral contracts and signals",
+		"eval-methodology.md": "Scoreboard methodology, repeats, traces, and regressions",
 		"architecture.md": "Source layout and design decisions",
 		"eval-scoreboard.md": "Per-model certification scores against the behavior eval suite",
 		"changelog.md": "Version history and feature highlights",
