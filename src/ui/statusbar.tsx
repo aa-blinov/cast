@@ -30,6 +30,7 @@ export interface SegmentContext {
 	maxResponseTokens: number;
 	messages: import("../core/llm.ts").Message[];
 	sessionId: string;
+	worktree?: string;
 }
 
 // ============================================================================
@@ -76,6 +77,7 @@ export const SEGMENT_MAX_WIDTH: Record<string, number> = {
 	persona: 20,
 	mode: 8,
 	model: 30,
+	worktree: 16,
 	session: 16,
 	context: 22,
 	usage: 35,
@@ -122,6 +124,15 @@ registerStatusBarSegment({
 		}
 		return ctx.activeModel;
 	},
+});
+
+registerStatusBarSegment({
+	id: "worktree",
+	label: "Git Worktree",
+	defaultOn: true,
+	side: "left",
+	render: (ctx) => (ctx.worktree ? <Text color={theme().warning}>wt:{ctx.worktree}</Text> : null),
+	formatValue: (ctx) => (ctx.worktree ? `wt:${ctx.worktree}` : null),
 });
 
 registerStatusBarSegment({

@@ -227,7 +227,10 @@ export function SettingsModal({
 				// loaded/enabled — those show up as native /<skill-id> slash commands,
 				// so the composer's palette needs to catch up too.
 				// Same for /plugin install/uninstall/enable/disable — they change
-				// which hooks appear in the Hooks tab.
+				// which hooks appear in the Hooks tab AND which plugins the
+				// Marketplace tab lists as installed (the Marketplace tab derives
+				// its "installed" label from data.plugins, so without a reload the
+				// just-installed plugin would still show the Install button).
 				if (res.ok) {
 					if (command.startsWith("/model ") && typeof res.result?.model === "string") {
 						onModelChange?.(res.result.model);
@@ -239,7 +242,7 @@ export function SettingsModal({
 						command.startsWith("/mcp ") ||
 						command.startsWith("/skills-sh ")
 					) {
-						await Promise.all([load("hooks"), load("mcp"), load("skills")]);
+						await Promise.all([load("hooks"), load("mcp"), load("skills"), load("plugins")]);
 					}
 				}
 				return res;

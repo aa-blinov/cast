@@ -369,6 +369,34 @@ function SettingsMarketplace({ data, busy, act, confirm }) {
 	const [mpSource, setMpSource] = useState("");
 	const [mpQuery, setMpQuery] = useState("");
 	const [addStatus, setAddStatus] = useState("");
+	// Per-row pending state. The modal's global `busy` flashes for ~100ms then
+	// re-enables, leaving no visible feedback that the install actually fired —
+	// worse, /plugin install is server-side sync but the reload of `data.plugins`
+	// (which gates the "installed" label) used to be skipped, so the button
+	// reappeared in its pre-click state and the install looked like a no-op.
+	// Tracking pending per id lets us swap the icon for a spinner mid-flight and
+	// show a brief "installed ✓" so the action reads as done, not dropped.
+	const [pending, setPending] = useState(() => new Set());
+	const [justInstalled, setJustInstalled] = useState(null);
+	const addPending = (id) =>
+		setPending((s) => {
+			if (s.has(id)) return s;
+			const n = new Set(s);
+			n.add(id);
+			return n;
+		});
+	const removePending = (id) =>
+		setPending((s) => {
+			if (!s.has(id)) return s;
+			const n = new Set(s);
+			n.delete(id);
+			return n;
+		});
+	useEffect(() => {
+		if (!justInstalled) return;
+		const t = setTimeout(() => setJustInstalled(null), 2500);
+		return () => clearTimeout(t);
+	}, [justInstalled]);
 	if (!data) return null;
 	const catalog = data.catalog || [];
 	const sortedCatalog = [...catalog].sort((a, b) => a.name.localeCompare(b.name));
@@ -379,15 +407,27 @@ function SettingsMarketplace({ data, busy, act, confirm }) {
 		const name = p.name || pkg;
 		const id = `${name}@${mp.name}`;
 		const installed = installedNames.has(name) || installedIds.has(id);
+		const isPending = pending.has(id);
+		const showInstalled = installed || justInstalled === id;
 		return html`
 			<div key=${`${mp.name}:${name}`} class="plugin-catalog-item">
 				<div class="plugin-catalog-header">
 					<span class="settings-item-name">${name}</span>
 					<span class="settings-item-meta">${mp.name}</span>
 					${
-						installed
-							? html`<span class="plugin-installed-label">installed</span>`
-							: html`<button class="modal-btn icon-btn" title="Install" disabled=${busy} onClick=${() => act(`/plugin install ${id}`)}><${icons.arrowDownTray} /></button>`
+						isPending
+							? html`<span class="settings-inline-loader" role="status" aria-label="Installing ${name}"></span>`
+							: showInstalled
+								? html`<span class="plugin-installed-label">${justInstalled === id ? "installed ✓" : "installed"}</span>`
+								: html`<button class="modal-btn icon-btn" title="Install ${name}" onClick=${async () => {
+										addPending(id);
+										try {
+											const res = await act(`/plugin install ${id}`);
+											if (res?.ok) setJustInstalled(id);
+										} finally {
+											removePending(id);
+										}
+									}}><${icons.arrowDownTray} /></button>`
 					}
 				</div>
 				${p.description && html`<div class="plugin-catalog-desc">${p.description}</div>`}

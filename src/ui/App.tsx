@@ -687,6 +687,7 @@ export function App(props: AppProps): JSX.Element {
 				maxResponseTokens={config.maxResponseTokens}
 				messages={session.messages}
 				sessionId={session.id}
+				worktree={cwd.includes("/.cast/worktrees/") ? cwd.split("/.cast/worktrees/")[1]?.split("/")[0] : undefined}
 				repaintKey={repaintKey}
 			/>
 		</Box>
