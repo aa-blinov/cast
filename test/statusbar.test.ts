@@ -111,9 +111,9 @@ describe("segment renderers", () => {
 		const ctx = emptyCtx({ sessionId: "abc123" });
 		expect(seg.render(ctx)).not.toBeNull();
 		expect(seg.formatValue(ctx)).toBe("abc123");
-		// Registered after `model`, before `context` — keeps the default order "model | session | …".
+		// Registered after `worktree`, before `context` — keeps default left side segment order.
 		const ids = getStatusBarSegments().map((s) => s.id);
-		expect(ids.indexOf("session")).toBe(ids.indexOf("model") + 1);
+		expect(ids.indexOf("session")).toBe(ids.indexOf("worktree") + 1);
 		expect(ids.indexOf("session")).toBeLessThan(ids.indexOf("context"));
 	});
 });
