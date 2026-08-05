@@ -91,9 +91,14 @@
 	z-index: 10;
 	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
 	transition: background-color .15s ease, border-color .15s ease, color .15s ease;
-	animation: rise .15s ease;
+	animation: btn-fade-in .15s ease;
 }
 .scroll-bottom-btn:hover { color: var(--text); border-color: var(--cyan); }
+
+@keyframes btn-fade-in {
+	from { opacity: 0; transform: translate(-50%, 3px); }
+	to { opacity: 1; transform: translate(-50%, 0); }
+}
 
 /* ── Toasts ───────────────────────────────────────────────────────── */
 .toast-stack {
