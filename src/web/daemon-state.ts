@@ -17,7 +17,12 @@ import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-const STATE_FILE = join(homedir(), ".cast", "web.json");
+// Resolved at call time (not module load) so tests can point HOME at a
+// per-test tmp dir before the first read; a top-level const would freeze
+// on whatever homedir() returned when the module was first imported.
+function stateFile(): string {
+	return join(homedir(), ".cast", "web.json");
+}
 
 export interface WebDaemonState {
 	pid: number;
@@ -40,21 +45,22 @@ export function isProcessAlive(pid: number): boolean {
 
 /** Reads the state file, self-healing a corrupt/unparseable one by treating it as absent rather than throwing. */
 export function readWebState(): WebDaemonState | undefined {
-	if (!existsSync(STATE_FILE)) return undefined;
+	const path = stateFile();
+	if (!existsSync(path)) return undefined;
 	try {
-		return JSON.parse(readFileSync(STATE_FILE, "utf-8")) as WebDaemonState;
+		return JSON.parse(readFileSync(path, "utf-8")) as WebDaemonState;
 	} catch {
 		return undefined;
 	}
 }
 
 export function writeWebState(state: WebDaemonState): void {
-	writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), "utf-8");
+	writeFileSync(stateFile(), JSON.stringify(state, null, 2), "utf-8");
 }
 
 export function clearWebState(): void {
 	try {
-		unlinkSync(STATE_FILE);
+		unlinkSync(stateFile());
 	} catch {
 		/* already gone — fine */
 	}

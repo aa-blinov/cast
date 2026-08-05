@@ -30,7 +30,13 @@ export function appendTextBlock(blocks, kind, text) {
 				const oldText = merged.slice(0, -SPLIT_REASONING_CHARS);
 				return [
 					...blocks.slice(0, i),
-					{ kind, text: oldText, continued: false },
+					// Inherit the source block's continued flag. The first chunk
+					// of a reasoning run (continued: undefined) keeps it → its
+					// [reasoning] prefix shows once; chunks split off a mid-run
+					// tail (continued: true) stay silent. Setting false here was
+					// the bug that made long reasoning show N "[reasoning]"
+					// sections instead of one.
+					{ kind, text: oldText, continued: block.continued ?? false },
 					{ kind, text: newText, continued: true },
 					...blocks.slice(i + 1),
 				];
@@ -39,7 +45,12 @@ export function appendTextBlock(blocks, kind, text) {
 		}
 	}
 	const last = blocks.at(-1);
-	const settledLast = last && last.kind !== "tool" && last.kind !== kind ? { ...last, continued: false } : last;
+	// When the new event is a different kind, mark the previous block as the
+	// end of its section. Preserve the first-chunk marker: a thinking tail that
+	// was already mid-run (continued: true from a prior split) stays silent;
+	// only the actual first chunk of the run gets the [reasoning] prefix.
+	const settledLast =
+		last && last.kind !== "tool" && last.kind !== kind ? { ...last, continued: last.continued ?? false } : last;
 	const newBlock = { kind, text };
 	// Same cap as the merge path: the very first event of a thinking stream
 	// can already be >1200 chars (a single big delta), and there's no existing
@@ -49,6 +60,8 @@ export function appendTextBlock(blocks, kind, text) {
 		return [
 			...blocks.slice(0, -1),
 			...(settledLast ? [settledLast] : []),
+			// First chunk of an oversized initial delta shows the prefix; the
+			// tail is a continuation. Same one-prefix rule as the merge path.
 			{ kind, text: text.slice(0, -SPLIT_REASONING_CHARS), continued: false },
 			{ kind, text: text.slice(-SPLIT_REASONING_CHARS), continued: true },
 		];

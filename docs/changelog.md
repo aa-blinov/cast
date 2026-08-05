@@ -2,6 +2,16 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.12.23
+
+### Added
+
+- Web UI: `cast web status` is now reachable from inside the running browser session — new "Server" tab in Settings shows whether the daemon is running, its pid, host:port (with a "reachable from other machines" note when bound to `0.0.0.0`), start time and uptime. Same info as the CLI command; the panel calls the new `GET /api/web/status` endpoint, which reads the daemon state file via `readLiveWebState` so a stale entry (process gone) is auto-cleaned on read.
+
+### Fixed
+
+- TUI: a long reasoning stream (`SPLIT_REASONING_CHARS = 1200`) could render as N `[reasoning]` sections instead of one. `appendTextBlock` forced `continued: false` on the split-off chunk and on the previous block when a different kind took over, so the `[reasoning]` prefix in ChatLog rendered again on every mid-run chunk and on the tail at the kind boundary. The split-off chunk now inherits the source block's `continued` flag (`block.continued ?? false`) and the kind-boundary settle now preserves `last.continued ?? false` instead of forcing `false` — so only the very first chunk of the run carries the prefix, every later chunk is a silent continuation. Data is unchanged (still no loss across splits); the active tail stays bounded by the scroll-guard cap. `stream-blocks.js` is browser-neutral, so the same fix tightens the web UI's collapsed reasoning output for free.
+
 ## 0.12.22
 
 ### Fixed

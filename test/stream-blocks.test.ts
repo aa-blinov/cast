@@ -24,14 +24,18 @@ describe("appendTextBlock — reasoning live-region height", () => {
 
 	it("splits a thinking block when the new text exceeds the cap", () => {
 		// Seed a small thinking block, then a large delta that pushes the
-		// active block past SPLIT_REASONING_CHARS. Expect: 1 settled
-		// (continued: false) + 1 active (continued: true) thinking block.
+		// active block past SPLIT_REASONING_CHARS. Expect: 1 first-chunk
+		// (continued: undefined → renders the [reasoning] prefix once) +
+		// 1 active (continued: true) thinking block.
 		let blocks = appendTextBlock([], "thinking", "head ");
 		blocks = appendTextBlock(blocks, "thinking", BIG_CHUNK);
 		const thinkingBlocks = blocks.filter((b) => b.kind === "thinking");
 		expect(thinkingBlocks.length).toBeGreaterThanOrEqual(2);
-		// At least one settled (continued: false) — the old head drained.
-		expect(thinkingBlocks.some((b) => b.continued === false)).toBe(true);
+		// Exactly one first-chunk — the only block that renders the
+		// [reasoning] prefix. All other chunks are silent continuations so
+		// long reasoning shows the label once, not N times.
+		const firstChunks = thinkingBlocks.filter((b) => !b.continued);
+		expect(firstChunks).toHaveLength(1);
 		// The active (last) block is continued: true, signalling the stream
 		// is still open and a tail merge is in progress.
 		const last = thinkingBlocks.at(-1)!;
@@ -47,25 +51,34 @@ describe("appendTextBlock — reasoning live-region height", () => {
 		const blocks = appendTextBlock([], "thinking", BIG_CHUNK);
 		const thinkingBlocks = blocks.filter((b) => b.kind === "thinking");
 		expect(thinkingBlocks).toHaveLength(2);
-		expect(thinkingBlocks[0]!.continued).toBe(false);
+		// First chunk keeps the [reasoning] prefix marker; tail is a
+		// continuation. Together: one label for the whole oversized delta.
+		expect(thinkingBlocks[0]!.continued).toBeFalsy();
 		expect(thinkingBlocks[1]!.continued).toBe(true);
 		expect(thinkingBlocks[1]!.text.length).toBeLessThanOrEqual(1500);
 		expect(thinkingBlocks[0]!.text.length).toBe(BIG_CHUNK.length - thinkingBlocks[1]!.text.length);
 	});
 
 	it("caps the active thinking block so the live region stays bounded", () => {
-		// A burst of 5x BIG_CHUNK should produce at most 5 active splits
-		// (1 settled per split) — and the active block must be ≤ the cap.
+		// A burst of 5x BIG_CHUNK should produce exactly one first-chunk
+		// (the [reasoning] prefix carrier) plus a chain of continuations
+		// — and the active tail (last block) must be ≤ the cap. Settled
+		// continuation chunks can exceed the cap (they're already frozen
+		// for <Static>), only the live tail is the scroll-guard concern.
 		let blocks = appendTextBlock([], "thinking", "head ");
 		for (let i = 0; i < 5; i++) {
 			blocks = appendTextBlock(blocks, "thinking", BIG_CHUNK);
 		}
-		const settledCount = blocks.filter((b) => b.kind === "thinking" && b.continued === false).length;
-		const active = blocks.filter((b) => b.kind === "thinking" && b.continued === true);
-		expect(active).toHaveLength(1);
-		// Every active-text length stays bounded; settled text absorbs the rest.
-		expect(active[0]!.text.length).toBeLessThanOrEqual(1500);
-		expect(settledCount).toBeGreaterThanOrEqual(3);
+		const firstChunks = blocks.filter((b) => b.kind === "thinking" && !b.continued);
+		const thinkingBlocks = blocks.filter((b) => b.kind === "thinking");
+		// One first-chunk = one [reasoning] prefix for the whole run.
+		expect(firstChunks).toHaveLength(1);
+		// The active tail is bounded; prior continuation chunks drain into
+		// <Static> via settledPrefixLength's !isLast check and can be larger.
+		const activeTail = thinkingBlocks.at(-1)!;
+		expect(activeTail.continued).toBe(true);
+		expect(activeTail.text.length).toBeLessThanOrEqual(1500);
+		expect(thinkingBlocks.length).toBeGreaterThanOrEqual(4);
 	});
 
 	it("preserves the full text across splits (no data loss)", () => {
