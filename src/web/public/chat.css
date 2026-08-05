@@ -75,7 +75,7 @@
 .scroll-bottom-btn {
 	position: absolute;
 	bottom: 84px;
-	left: calc(50% + var(--sidebar-w, 0px) / 2);
+	left: 50%;
 	transform: translateX(-50%);
 	width: 32px; height: 32px;
 	border-radius: 50%;
