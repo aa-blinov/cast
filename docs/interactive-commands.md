@@ -12,9 +12,12 @@ All commands are typed at the TUI prompt, prefixed with `/`. Unknown slash comma
 | `/sessions` | Session picker with type-to-filter search (by message text, project path, or id); switch or delete |
 | `/clear` | Clear conversation context (and save the cleared state) |
 | `/compact` | Force context compaction now (auto-triggers near the limit) |
+| `/undo` | Undo the last turn: restore files from the most recent checkpoint and drop the last user message (and everything after it) |
 | `/copy` | Copy last assistant response to clipboard |
 | `/current` | Show all status bar data (even disabled segments) |
 | `/quit`, `/exit` | Save and exit |
+
+`/undo` requires a checkpoint from the previous turn — every turn captures one (shadow copies of files the agent touched, plus a marker on the parent commit for any new files). Files are restored from the shadow copies; new untracked files added during the turn are removed. Refused while the agent is running (use `/abort` first). No-op if there's nothing to undo (very first turn, or `/clear` already rolled the session back).
 
 ## Model and Provider
 

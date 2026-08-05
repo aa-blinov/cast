@@ -4,6 +4,11 @@ All notable user-facing changes to cast, newest first.
 
 ## 0.12.19
 
+### Added
+
+- `/undo` command: rolls back the last turn — restores files from the turn's checkpoint (shadow copies of files the agent touched) and drops the last user message and everything after it. Refused while the agent is running (use `/abort` first). No-op when there's no checkpoint (very first turn, or `/clear` already rolled the session back). Web UI shows a `[Undone: ...]` notice when triggered from the client.
+- `/undo` requires `src/core/checkpoint.ts` — shadow file storage + a marker on the parent commit for any new files added during the turn, restored on demand.
+
 ### Fixed
 
 - Web UI marketplace install: button no longer reappears after a successful install. The panel was reading `data.plugins` from its own props (always undefined — parent passed only `data.marketplace`), so the installed-plugin check silently failed and the row kept showing "Install" after install. Now the parent passes the installed list as a separate prop and refreshes it after every `/plugin` command.
