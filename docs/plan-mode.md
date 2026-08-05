@@ -1,6 +1,6 @@
 # Plan Mode
 
-Plan mode restricts the agent to exploration and planning — it can read files and produce a structured plan, but cannot execute code, touch real files, or run arbitrary shell commands. The one exception is the plan file itself: `write`/`edit` still work, just scoped to a `.md` file inside the session's plans directory (see [Plan Tools](#plan-tools) below).
+Plan mode restricts the agent to exploration and planning. It reads files and produces a structured plan without executing code, modifying project files, or running arbitrary shell commands. The plan file itself is the sole exception: `write` and `edit` remain active when scoped to a `.md` file inside the session plans directory.
 
 ## Workflow
 
@@ -22,12 +22,12 @@ flowchart LR
   F --> H["Update linked tasks"]
 ```
 
-1. **Enter plan mode** — type `/plan`
-2. **Explore** — the agent reads files, runs read-only shell commands, and analyzes the codebase
-3. **Write plan** — the agent produces a structured markdown plan with a checklist
-4. **Review** — the agent signals completion with `plan_done`; the full plan file path is shown (cmd-click to open it in your editor)
-5. **Approve** — when the turn ends, an approval dialog opens: refine (it returns you to the regular composer; your next message becomes planning feedback), implement now, or implement in a clean model context. The clean option retains the visible thread but starts implementation without the exploration context. `/build` remains the manual gesture for leaving plan mode.
-6. **Implement** — the agent works through the plan and updates its linked task list after each verified step
+1. **Enter plan mode**: Type `/plan`
+2. **Explore**: The agent reads files, executes read-only shell commands, and analyzes the codebase
+3. **Write plan**: The agent produces a structured markdown plan with a checklist
+4. **Review**: The agent signals completion with `plan_done`, displaying the full plan file path
+5. **Approve**: An approval dialog opens at the end of the turn with options: refine (returns to composer where your next message becomes planning feedback), implement now, or implement in a clean context. `/build` exits plan mode manually.
+6. **Implement**: The agent executes the plan and updates its linked task list after each verified step
 
 ## What's Allowed in Plan Mode
 
@@ -43,21 +43,19 @@ Git read-only subcommands: `log`, `show`, `diff`, `status`, `blame`, `rev-parse`
 
 - Output redirection (`>`)
 - Command and process substitution (`$()`, backticks, `<()`)
-- Any binary not on the allowlist (`env` included — it launches arbitrary binaries; same for test runners and package managers)
+- Binaries outside the allowlist (`env`, test runners, and package managers)
 - Argument-level writers on allowlisted binaries: `find -delete`/`-exec`, `fd -x`, `sort -o`, `tree -o`, `--output`, `uniq in out`
-- `write`/`edit` outside the plan file — they stay available (same tools used for real code) but only reach a `.md` file directly inside the session's plans directory; anything else is refused
+- `write` and `edit` outside the plan directory
 
-`web_search`/`web_fetch` follow the `/web` toggle in both modes — plan mode doesn't change them.
+`web_search` and `web_fetch` follow the `/web` toggle in both modes.
 
-### MCP Tools: A Deliberate Exception
+### MCP Tools
 
-MCP tools stay **fully enabled** in plan mode — they are not hard-gated the way bash/write/edit are. Many MCP servers are read-only research tools (docs lookup, code search) and exactly what planning needs, and cast can't know which of an arbitrary server's tools mutate state. The model is instructed to use MCP for inspection and retrieval only, and you get a warning on plan-mode entry when MCP tools are connected — but if your MCP server can write to a database or trigger a deploy, plan mode does not physically prevent that. Keep that in mind when planning with mutating MCP servers connected.
+MCP tools remain enabled in plan mode because many servers provide read-only research capabilities (documentation lookup, code search). Because cast cannot automatically infer whether a server tool mutates state, the system prompt instructs the model to perform inspection only. Users receive a warning on plan mode entry when active MCP servers are connected.
 
 ## Plan Tools
 
-The plan file itself is authored and read with the ordinary `write`/`edit`/
-`read` tools — the same ones used for real code. `write`/`edit` are gated to
-a `.md` file directly inside the session's plans directory while plan mode is
+The plan file is authored and read using standard `write`, `edit`, and `read` tools. `write` and `edit` are restricted to a `.md` file inside the session plans directory during plan mode.
 active; reading that same file makes it the active plan (no `name` argument
 needed). Other plans in the session are discoverable with `ls`/`glob` on the
 plans directory. There is no separate plan-write/plan-edit/plan-read tool: no dedicated
