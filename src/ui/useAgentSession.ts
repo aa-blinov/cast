@@ -167,8 +167,9 @@ export interface UseAgentSession {
 	 * ever arrive to filter.
 	 */
 	showReasoning: boolean;
-	/** Flip the showReasoning flag — used by /reasoning-display. */
-	toggleReasoning: () => void;
+	/** Flip the showReasoning flag and return the new value so callers can
+	 * render an accurate notice without chasing the next React batch. */
+	toggleReasoning: () => boolean;
 	/** Timestamp the current turn started, or null when idle. Changes only at
 	 * start/stop — consumers that need a live-ticking display (the status
 	 * bar) should tick locally off this instead of re-rendering on it. */
@@ -383,20 +384,27 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	// Frozen elapsed time of the last completed turn, for synchronous reads
 	// (e.g. /current) once the turn has ended.
 	const frozenElapsedRef = useRef(0);
-	// Mirrors runner.steeringQueue/followUpQueue's actual contents so the UI
-	// can show what's pending — the queues themselves are plain mutable
 	// classes with no reactivity of their own.
+	// Hide reasoning blocks by default — reasoning models (MiniMax-M3, etc.)
+	// stream a lot of auxiliary thinking that just clutters the transcript.
+	// The /reasoning-display command toggles this for the current session
+	// only (no persistent setting); when the model is not configured for
+	// reasoning the toggle is a no-op since no thinking blocks ever arrive
+	// to filter.
 	const [pendingSteers, setPendingSteers] = useState<string[]>([]);
 	const [pendingQueue, setPendingQueue] = useState<string[]>([]);
-	// Hide reasoning blocks by default — even with reasoning models the
-	// auxiliary thinking stream is noisy, and MiniMax-M3 in particular
-	// streams a lot of it. The /reasoning-display command toggles this for
-	// the current session only (no persistent setting); when the model is
-	// not configured for reasoning the toggle is a no-op since no
-	// thinking blocks ever arrive to filter.
 	const [showReasoning, setShowReasoning] = useState(false);
-	const toggleReasoning = useCallback(() => {
-		setShowReasoning((prev) => !prev);
+	const showReasoningRef = useRef(false);
+	const toggleReasoning = useCallback((): boolean => {
+		setShowReasoning((prev) => {
+			const next = !prev;
+			// Stash on a ref so the synchronous caller can read it back
+			// without waiting for React's batch — the same value we just
+			// committed to the next render.
+			showReasoningRef.current = next;
+			return next;
+		});
+		return showReasoningRef.current;
 	}, []);
 	const acRef = useRef<AbortController | null>(null);
 	// Set when a retry event arrives; cleared on the first streaming event

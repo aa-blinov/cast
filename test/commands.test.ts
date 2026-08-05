@@ -61,14 +61,15 @@ function createFakeDeps(overrides?: Partial<CommandDeps> & { running?: boolean }
 		resetQueue: track("agent.resetQueue"),
 		refresh: track("agent.refresh"),
 		refreshMeta: track("agent.refreshMeta"),
-		// showReasoning flips on `/reasoning-display` calls. We model it as a
-		// stateful boolean the command handler reads after toggling — the value
-		// the test sees is the post-toggle one, which is what the notice text
-		// conveys to the user.
+		// toggleReasoning now returns the post-toggle value so callers can
+		// render a notice without waiting for the next React render. This
+		// mock mirrors the new contract: flipping the bit is in-band with
+		// the call, and the returned value is what the caller sees.
 		showReasoning: false,
 		toggleReasoning: () => {
 			agent.showReasoning = !agent.showReasoning;
 			track("agent.toggleReasoning")();
+			return agent.showReasoning;
 		},
 		addDisplayMessage: track("agent.addDisplayMessage"),
 		messages: [],

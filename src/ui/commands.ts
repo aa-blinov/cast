@@ -1089,8 +1089,12 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		return;
 	}
 	if (input === "/reasoning-display" || input === "/rd") {
-		agent.toggleReasoning();
-		showNotice(`[Reasoning display: ${agent.showReasoning ? "on" : "off"}]`);
+		// toggleReasoning returns the post-toggle value (see useAgentSession)
+		// so we can render an accurate notice without firing another React
+		// read after setState. The next render fixes the underlying state
+		// to the same value.
+		const next = agent.toggleReasoning();
+		showNotice(`[Reasoning display: ${next ? "on" : "off"}]`);
 		return;
 	}
 	if (input === "/queue-reset" || input === "/qr") {

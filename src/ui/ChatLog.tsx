@@ -426,7 +426,9 @@ export function ChatLog({
 	return (
 		<>
 			<Static key={repaintKey} items={messages}>
-				{(m, i) => <MessageView key={`m-${i}`} message={m} showReasoning={showReasoning} />}
+				{(m, i) => (
+					<MessageView key={`m-${i}-${showReasoning ? "on" : "off"}`} message={m} showReasoning={showReasoning} />
+				)}
 			</Static>
 			<Box flexDirection="column">{liveParts}</Box>
 		</>
