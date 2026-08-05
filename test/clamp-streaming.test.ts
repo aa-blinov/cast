@@ -15,18 +15,13 @@ describe("clampStreamingBlocks", () => {
 		expect(out.map((b) => b.block)).toEqual(blocks);
 	});
 
-	it("keeps only the tail lines of a block taller than the viewport", () => {
+	it("thinking blocks are always included as one row regardless of text size", () => {
 		const lines = Array.from({ length: 100 }, (_, i) => `line ${i}`);
 		const blocks = [text("thinking", lines.join("\n"))];
 		const out = clampStreamingBlocks(blocks, 24, 80);
+		// thinking is included untruncated (block text unchanged) and costs 1 row
 		expect(out).toHaveLength(1);
-		expect(out[0]!.truncated).toBe(true);
-		const kept = (out[0]!.block as { text: string }).text.split("\n");
-		// budget = 24 - 8 = 16 rows
-		expect(kept.length).toBeLessThanOrEqual(16);
-		// tail is kept, not the head
-		expect(kept.at(-1)).toBe("line 99");
-		expect(kept[0]).not.toBe("line 0");
+		expect(out[0]!.block.kind).toBe("thinking");
 	});
 
 	it("accounts for line wrapping at narrow widths", () => {
@@ -43,6 +38,16 @@ describe("clampStreamingBlocks", () => {
 		const t = (out[0]!.block as { text: string }).text;
 		expect(out[0]!.truncated).toBe(true);
 		expect(t.length).toBeLessThanOrEqual(6 * 50);
+	});
+
+	it("thinking is 1 row so it survives alongside tall content that fills the rest", () => {
+		const tall = Array.from({ length: 50 }, (_, i) => `t${i}`).join("\n");
+		// thinking (index 0) comes first; clamp goes tail-first so content (index 1)
+		// is charged first. Short content leaves 15 rows for thinking (charged 1).
+		const blocks = [text("thinking", tall), text("content", "short answer")];
+		const out = clampStreamingBlocks(blocks, 24, 80);
+		expect(out.some((e) => e.block.kind === "thinking")).toBe(true);
+		expect(out.some((e) => e.block.kind === "content")).toBe(true);
 	});
 
 	it("drops older blocks entirely once the budget is spent", () => {
