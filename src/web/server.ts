@@ -930,6 +930,7 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 				if (line.length < 4) continue;
 				const xy = line.slice(0, 2);
 				const path = line.slice(3).split(" -> ").pop()!;
+				if (path.startsWith(".cast/") || path.includes("/.cast/")) continue;
 
 				if (xy === "??") {
 					groups.untracked.push(path);
