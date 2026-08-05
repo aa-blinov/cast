@@ -157,19 +157,27 @@ export function buildReasoningParams(effort: string, format: ReasoningFormat = "
 			// built-in reasoning-on behavior. `reasoning_split` stays on so
 			// 思考 stays in its own stream channel regardless of mode.
 			// Verified live against api.minimax.io.
+			//
+			// All "on / enable" levels (enabled, low, medium, high, max, on)
+			// map to the same always-on body — the picker shows the 3-state
+			// [enabled, adaptive, disabled] set when /v1/models doesn't expose
+			// supportedEfforts, but a saved reasoningLevel from another path
+			// (e.g. a model that previously returned [low, medium, high]) can
+			// still arrive here. Funnel them all to adaptive so the body is
+			// always valid for the API.
+			if (effort === "off" || effort === "disabled") {
+				return {
+					body: { reasoning_split: true, thinking: { type: "disabled" } },
+					enabled: false,
+				};
+			}
 			if (effort === "adaptive") {
 				return {
 					body: { reasoning_split: true, thinking: { type: "adaptive" } },
 					enabled: true,
 				};
 			}
-			if (effort === "disabled") {
-				return {
-					body: { reasoning_split: true, thinking: { type: "disabled" } },
-					enabled: false,
-				};
-			}
-			// "enabled" (default) — let the server run in its built-in always-on mode.
+			// enabled / on / low / medium / high / max / unknown — always-on.
 			return { body: { reasoning_split: true }, enabled: true };
 		}
 		case "generic":
