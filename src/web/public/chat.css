@@ -72,9 +72,13 @@
  * inside buttons); kept there to avoid duplicating. */
 
 /* ── Scroll-to-bottom ─────────────────────────────────────────────── */
+.composer-container {
+	position: relative;
+	width: 100%;
+}
 .scroll-bottom-btn {
 	position: absolute;
-	bottom: 84px;
+	top: -44px;
 	left: 50%;
 	transform: translateX(-50%);
 	width: 32px; height: 32px;
