@@ -193,10 +193,12 @@ function BlockView({
 }): JSX.Element | null {
 	if (block.kind === "thinking") {
 		if (showReasoning === false) return null;
-		// In the live streaming region (compact) the model's \n breaks produce
-		// orphaned lines with no [reasoning] prefix — visually confusing. Flatten
-		// to spaces for the live preview; settled history keeps the raw text.
-		const text = compact ? block.text.replace(/\n/g, " ") : block.text;
+		// Model \n breaks inside a single <Text> make Ink emit real line-breaks.
+		// Each continuation line starts at column 0, so the terminal wraps it
+		// independently — producing mid-word splits unrelated to the actual text.
+		// Reasoning is a stream of consciousness; its newlines carry no structure
+		// worth preserving in the terminal, so flatten them everywhere.
+		const text = block.text.replace(/\n/g, " ");
 		return (
 			<Text color={theme().muted} dimColor wrap="wrap">
 				{!block.continued && `[reasoning] ${truncated ? "… " : ""}`}
