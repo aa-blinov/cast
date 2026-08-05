@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.12.25
+
+### Fixed
+
+- 400 context window exceeded now auto-recovers from the agent loop instead of killing the turn. When the LLM rejects a turn with a context-overflow, the loop now drops the largest tool result in history (any `read`/`grep`/`web_fetch` whose output is already anchored in the conversation and was being re-sent on every retry), replaces it with a short placeholder that names the `tool_call_id`, the size that was dropped, and how to re-fetch with a narrower scope, and appends a `<system-reminder>` so the model re-issues the call with `offset/limit` instead of asking for the same content again. The new path runs once per turn; if the in-place shrink wasn't enough the existing LLM-based compaction path tries next, so the user only sees a raw error after both options have failed. `tool_call_id` is preserved across the swap so the conversation stays wire-valid for the next retry.
+
 ## 0.12.24
 
 ### Fixed

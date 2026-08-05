@@ -1260,7 +1260,11 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 								`Re-fetch the same information with a narrower scope — read with offset/limit, grep with a tighter path/glob/pattern, or split the request into smaller calls.\n` +
 								`</system-reminder>`;
 							messages.push({ role: "user", content: reminder });
-							onEvent({ type: "tool_result_truncated", toolCallId: trimmed.toolCallId, bytesRemoved: trimmed.bytesRemoved });
+							onEvent({
+								type: "tool_result_truncated",
+								toolCallId: trimmed.toolCallId,
+								bytesRemoved: trimmed.bytesRemoved,
+							});
 							continue outer;
 						}
 						// No oversized tool result to drop — flag so we don't keep
