@@ -80,88 +80,123 @@ renderer.link = function (token) {
 marked.use({ renderer });
 
 // ── CSS ─────────────────────────────────────────────────────────────────────
-// Font/palette here are the same ones cast web (src/web/public/style.css)
-// ships to the browser — this site is the front door to that product, so it
-// should look like it, not like a generic docs template.
+// Font/palette here match cast web (src/web/public/tokens.css & style.css) —
+// dark zinc surfaces (#08080a / #131317 / #1e1e24), sharp contrast, and a
+// purple/violet accent gradient with clean mono typography.
 const CSS = `
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Inter:wght@400;500;600;700&display=swap');
+
 :root {
-	/* cast palette — cyan→violet gradient */
-	--bg: #0a0e14;
-	--bg-secondary: #0f1520;
-	--bg-tertiary: #151c28;
-	--border: #1e2a3a;
-	--text: #e2e8f0;
-	--text-secondary: #64748b;
-	--text-muted: #475569;
-	--accent: #38e0ff;
-	--accent-hover: #5eead4;
-	--accent-subtle: rgba(56,224,255,.1);
-	--green: #34d399;
-	--green-subtle: rgba(52,211,153,.1);
-	--orange: #fbbf24;
-	--red: #fb7185;
-	--code-bg: #0f1520;
-	--sidebar-w: 280px;
-	--header-h: 64px;
-	--font: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+	--bg: #08080a;
+	--bg-surface: #131317;
+	--bg-raised: #1e1e24;
+	--bg-hover: #28282e;
+	--border: #35353d;
+	--border-active: #4a4a55;
+	--border-subtle: rgba(53, 53, 61, 0.55);
+	--text: #fafafa;
+	--text-dim: #a1a1aa;
+	--text-muted: #71717a;
+	--cyan: #8b5cf6;
+	--violet: #8b5cf6;
+	--teal: #2dd4bf;
+	--purple: #a78bfa;
+	--blue: #60a5fa;
+	--green: #22c55e;
+	--amber: #eab308;
+	--rose: #ef4444;
+	--persona: #c084fc;
+	--accent: #8b5cf6;
+	--accent-subtle: rgba(139, 92, 246, 0.12);
+	--accent-muted: rgba(139, 92, 246, 0.2);
+	--gradient: linear-gradient(135deg, #a855f7, #8b5cf6);
+	--code-bg: #111116;
+	--sidebar-w: 272px;
+	--header-h: 48px;
+	--font: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
 	--font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+	--radius: 8px;
+	--radius-sm: 6px;
 }
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html { font-size: 16px; scroll-behavior: smooth; }
+html { font-size: 15px; scroll-behavior: smooth; }
 body {
 	font-family: var(--font);
 	background: var(--bg);
 	color: var(--text);
-	line-height: 1.6;
+	line-height: 1.55;
 	-webkit-font-smoothing: antialiased;
 }
-a { color: var(--accent); text-decoration: none; }
-a:hover { color: var(--accent-hover); text-decoration: underline; }
+a { color: var(--purple); text-decoration: none; transition: color .15s ease; }
+a:hover { color: #c084fc; text-decoration: none; }
 
-/* ── Header ─────────────────────────────────────────────────────────── */
+/* ── Header (Cast Web UI Bar) ─────────────────────────────────────── */
 .header {
 	position: fixed; top: 0; left: 0; right: 0; z-index: 100;
 	height: var(--header-h);
-	background: var(--bg-secondary);
+	background: var(--bg-surface);
 	border-bottom: 1px solid var(--border);
-	display: flex; align-items: center; padding: 0 24px;
+	display: flex; align-items: center; padding: 0 16px; gap: 12px;
 }
 .header-logo {
-	font-size: 1.25rem; font-weight: 700; color: var(--text);
-	display: flex; align-items: center; gap: 10px;
+	display: inline-flex; align-items: center; gap: 8px;
+	font-family: var(--font-mono); font-size: 1rem; font-weight: 700;
+	color: var(--text);
 }
-.header-links { margin-left: auto; display: flex; gap: 20px; align-items: center; }
-.header-links a { color: var(--text-secondary); font-size: .875rem; font-weight: 500; }
-.header-links a:hover { color: var(--text); text-decoration: none; }
+.header-logo .logo-mark {
+	width: 18px; height: 18px; border-radius: 4px;
+	background: var(--gradient); display: inline-block;
+}
+.header-badge {
+	font-family: var(--font-mono); font-size: .7rem; font-weight: 500;
+	color: var(--teal); background: rgba(45, 212, 191, 0.12);
+	border: 1px solid rgba(45, 212, 191, 0.25);
+	padding: 1px 7px; border-radius: 12px;
+}
+.header-links { margin-left: auto; display: flex; gap: 14px; align-items: center; }
+.header-links a {
+	color: var(--text-dim); font-size: .8rem; font-weight: 500;
+	font-family: var(--font-mono); padding: 4px 8px; border-radius: var(--radius-sm);
+	transition: color .15s, background .15s;
+}
+.header-links a:hover { color: var(--text); background: var(--bg-raised); }
 
-/* ── Sidebar ────────────────────────────────────────────────────────── */
+/* ── Sidebar (Cast Web Navigation) ───────────────────────────────── */
 .sidebar {
 	position: fixed; top: var(--header-h); left: 0; bottom: 0;
-	width: var(--sidebar-w); background: var(--bg-secondary);
+	width: var(--sidebar-w); background: var(--bg-surface);
 	border-right: 1px solid var(--border);
-	overflow-y: auto; padding: 16px 0;
+	overflow-y: auto; padding: 12px 0 24px;
 }
-.sidebar-section { padding: 0 12px; margin-bottom: 8px; }
+.sidebar-section { padding: 0 10px; margin-bottom: 12px; }
 .sidebar-section-title {
-	font-size: .75rem; font-weight: 600; text-transform: uppercase;
-	letter-spacing: .05em; color: var(--text-muted);
-	padding: 8px 12px 4px;
+	font-family: var(--font-mono); font-size: .68rem; font-weight: 600;
+	text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted);
+	padding: 6px 10px 4px;
 }
 .sidebar a {
-	display: block; padding: 6px 12px; border-radius: 6px;
-	font-size: .875rem; color: var(--text-secondary); line-height: 1.4;
+	display: flex; align-items: center; justify-content: space-between;
+	padding: 6px 10px; border-radius: var(--radius-sm);
+	font-size: .82rem; color: var(--text-dim); line-height: 1.4;
+	font-family: var(--font); transition: background .15s, color .15s;
 }
-.sidebar a:hover { background: var(--bg-tertiary); color: var(--text); text-decoration: none; }
+.sidebar a:hover { background: var(--bg-raised); color: var(--text); }
 .sidebar a.active {
-	background: var(--accent-subtle); color: var(--accent); font-weight: 500;
+	background: var(--accent-subtle); color: var(--purple); font-weight: 500;
+	border: 1px solid var(--accent-muted);
+}
+.sidebar a .badge {
+	font-family: var(--font-mono); font-size: .65rem; color: var(--text-muted);
 }
 
-/* ── Mobile menu ────────────────────────────────────────────────────── */
+/* ── Mobile Menu ─────────────────────────────────────────────────── */
 .menu-toggle {
-	display: none; background: none; border: none; color: var(--text);
-	font-size: 1.5rem; cursor: pointer; padding: 4px 8px;
+	display: none; background: none; border: 1px solid var(--border);
+	color: var(--text-dim); font-size: 1.1rem; cursor: pointer;
+	padding: 4px 8px; border-radius: var(--radius-sm);
 }
+.menu-toggle:hover { color: var(--text); border-color: var(--border-active); }
 @media (max-width: 768px) {
 	.sidebar {
 		transform: translateX(-100%); transition: transform .2s ease;
@@ -170,77 +205,46 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 	.sidebar.open { transform: translateX(0); }
 	.sidebar-backdrop {
 		position: fixed; inset: 0; z-index: 98;
-		background: rgba(0,0,0,.5); backdrop-filter: blur(2px);
+		background: rgba(0,0,0,.6); backdrop-filter: blur(4px);
 		display: none;
 	}
 	.sidebar-backdrop.visible { display: block; }
-	.menu-toggle { display: block; margin-right: 8px; }
+	.menu-toggle { display: block; }
 	.main { margin-left: 0 !important; padding: 20px 16px 60px !important; }
 	.header { padding: 0 12px; }
-	.header-links { gap: 14px; }
-
-	/* Hero */
-	.hero { padding: 56px 16px 40px; }
-	.hero h1 { font-size: 2rem; }
-	.hero p { font-size: 1rem; margin-bottom: 24px; }
-	.hero-buttons a { padding: 10px 22px; font-size: .9rem; }
-	.install-block { margin-top: 24px; padding: 12px 14px; }
-	.install-block code { font-size: .75rem; word-break: break-all; }
-
-	/* Features */
-	.features { grid-template-columns: 1fr; padding: 24px 16px 40px; gap: 12px; }
-	.feature { padding: 16px; }
-
-	/* Providers */
-	.providers { padding: 24px 16px; }
-	.providers h2 { font-size: 1.25rem; }
-
-	/* Docs grid */
-	.landing-docs { padding: 24px 16px 60px; }
-	.landing-docs h2 { font-size: 1.25rem; }
-	.docs-grid { grid-template-columns: 1fr; }
-
-	/* Content */
-	.content h1 { font-size: 1.5rem; }
-	.content h2 { font-size: 1.25rem; margin: 28px 0 10px; }
-	.content h3 { font-size: 1.1rem; }
-	.content table { font-size: .8rem; }
-	.content th, .content td { padding: 6px 8px; }
-	.content pre:not(.mermaid-code) { padding: 12px; font-size: .8rem; }
-
-	/* Mermaid */
-	.mermaid-diagram { padding: 12px; max-height: 45vh; }
-	.mermaid-code { max-height: 45vh; }
-	.mermaid-toolbar { padding: 6px 8px; }
-	.mermaid-toolbar button { padding: 3px 8px; font-size: .75rem; }
+	.header-links { gap: 8px; }
 }
 
-/* ── Main content ───────────────────────────────────────────────────── */
+/* ── Main Workspace ──────────────────────────────────────────────── */
 .main {
 	margin-left: var(--sidebar-w);
 	margin-top: var(--header-h);
 	padding: 32px 48px 80px;
-	max-width: 900px;
+	max-width: 960px;
 }
 .main-landing {
 	margin-left: 0; max-width: none; padding: 0;
 }
 
-/* ── Typography ─────────────────────────────────────────────────────── */
-.content h1 { font-size: 2rem; font-weight: 700; margin: 0 0 16px; line-height: 1.3; }
-.content h2 {
-	font-size: 1.5rem; font-weight: 600; margin: 40px 0 12px;
-	padding-bottom: 8px; border-bottom: 1px solid var(--border);
+/* ── Typography & Content ────────────────────────────────────────── */
+.content h1 {
+	font-family: var(--font); font-size: 1.8rem; font-weight: 700;
+	margin: 0 0 16px; line-height: 1.25; color: var(--text);
+	letter-spacing: -0.02em;
 }
-.content h3 { font-size: 1.2rem; font-weight: 600; margin: 28px 0 8px; }
-.content h4 { font-size: 1rem; font-weight: 600; margin: 20px 0 6px; }
-.content p { margin: 0 0 16px; }
-.content ul, .content ol { margin: 0 0 16px; padding-left: 24px; }
+.content h2 {
+	font-family: var(--font); font-size: 1.35rem; font-weight: 600;
+	margin: 36px 0 12px; padding-bottom: 6px;
+	border-bottom: 1px solid var(--border); color: var(--text);
+}
+.content h3 { font-size: 1.1rem; font-weight: 600; margin: 24px 0 8px; color: var(--text); }
+.content h4 { font-size: .95rem; font-weight: 600; margin: 18px 0 6px; color: var(--text-dim); }
+.content p { margin: 0 0 14px; color: var(--text-dim); font-size: .92rem; }
+.content ul, .content ol { margin: 0 0 14px; padding-left: 20px; color: var(--text-dim); font-size: .92rem; }
 .content li { margin: 4px 0; }
-.content strong { font-weight: 600; }
-.content hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+.content strong { color: var(--text); font-weight: 600; }
+.content hr { border: none; border-top: 1px solid var(--border); margin: 28px 0; }
 .content blockquote {
-	border-left: 3px solid var(--accent); padding: 8px 16px;
 	margin: 0 0 16px; background: var(--accent-subtle); border-radius: 0 6px 6px 0;
 }
 .content blockquote p:last-child { margin-bottom: 0; }
@@ -536,7 +540,8 @@ const LANDING_HTML = `<!DOCTYPE html>
 </head>
 <body>
 <header class="header">
-	<a href="index.html" class="header-logo">cast</a>
+	<a href="index.html" class="header-logo"><span class="logo-mark"></span>cast</a>
+	<span class="header-badge">v0.12.18</span>
 	<div class="header-links">
 		<a href="getting-started.html">Docs</a>
 		<a href="https://github.com/aa-blinov/cast">GitHub</a>
@@ -681,7 +686,8 @@ function docPage(title, bodyHtml, activeFile) {
 <body>
 <header class="header">
 	<button class="menu-toggle" aria-label="Menu">&#9776;</button>
-	<a href="index.html" class="header-logo">cast</a>
+	<a href="index.html" class="header-logo"><span class="logo-mark"></span>cast</a>
+	<span class="header-badge">v0.12.18</span>
 	<div class="header-links">
 		<a href="index.html">Home</a>
 		<a href="https://github.com/aa-blinov/cast">GitHub</a>
