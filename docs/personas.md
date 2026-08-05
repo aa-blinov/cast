@@ -1,8 +1,8 @@
 # Personas
 
-A coding agent optimized for implementation isn't the best reviewer. A QA mindset doesn't write good specs. Personas let you swap the judgment — the lens through which the agent approaches your code — and optionally constrain which built-in tools that role may use. Different priorities, different questions, different output.
+A coding agent optimized for implementation is not the best reviewer. A QA mindset does not write good specs. Personas let you swap the judgment and tool access of the agent without changing your codebase.
 
-See [Persona Research](persona-research.md) for the science behind why role framing changes agent behavior — and where it doesn't.
+See [Persona Research](persona-research.md) for empirical studies on role framing and agent behavior.
 
 ## Built-in Personas
 
@@ -35,9 +35,9 @@ The `senior` persona is the default. `coder-with-subagents` is the persona that 
 - **Interactively**: `/persona` (opens picker) or `/persona <name>`
 - **First run**: persona is selected during onboarding
 
-The persona travels with the thread: each session remembers the persona that drove it, and resuming (`-c`, `--resume`, `/sessions`, `/continue`) restores that persona — same rule as plan/build mode. The global choice in `~/.cast/settings.json` is the default for *new* sessions only. If a session's persona was deleted, resume keeps the current one with a notice.
+The persona travels with the thread: each session remembers its driving persona, and resuming (`-c`, `--resume`, `/sessions`, `/continue`) restores it. The global choice in `~/.cast/settings.json` serves as the default for new sessions only. If a session's persona was deleted, resume keeps the current active persona with a notice.
 
-Switching mid-conversation leaves the previous persona's reasoning in the context, so after switching to a *different* persona in a non-empty thread, cast offers to start a new session (the `/new` flow) — pick "Continue here" (or press Esc) to keep the current thread; the thread is then re-stamped with the new persona.
+Switching mid-conversation leaves previous reasoning in context. When changing personas in a non-empty thread, cast prompts to start a new session (`/new`). Select "Continue here" (or press Esc) to keep the current thread re-stamped under the new persona.
 
 ## Custom Personas
 
@@ -88,11 +88,11 @@ When analyzing code, always consider:
 | `mcp` | No | Allowlist of MCP **server** names (not individual tool names) whose tools stay available. Omit = every connected server. Exact names or `*`-globs |
 | `agentsMd` | No | Inject `AGENTS.md` / `CLAUDE.md` into the system prompt (default: `true`) |
 
-The body (after frontmatter) becomes the system prompt. A shared error-handling section is appended automatically from `prompts/error-handling.md` — you don't need to include tool-failure mechanics in your persona.
+The body after frontmatter becomes the system prompt. A shared error-handling section is appended automatically from `prompts/error-handling.md` without needing tool-failure mechanics in persona files.
 
 ### Isolating a persona's zone of responsibility
 
-`tools`, `skills`, `mcp`, and `subagentTypes` all follow the same allowlist shape and the same enforcement guarantee: a disallowed call is **rejected at runtime** (not just left out of the system prompt text), so these actually isolate what a persona can reach rather than just asking it nicely.
+`tools`, `skills`, `mcp`, and `subagentTypes` follow the same allowlist shape and enforcement guarantee: disallowed calls are rejected at runtime rather than relying solely on prompt instructions.
 
 ```yaml
 tools: [read, grep, ls]            # readonly builtins
