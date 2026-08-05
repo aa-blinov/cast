@@ -45,20 +45,19 @@ export function createCheckpoint(cwd: string): TurnCheckpoint {
 	const timestamp = new Date().toISOString();
 	const id = `chk-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 	const repoRoot = findCanonicalGitRoot(cwd);
-	const isGitRepo =
-		repoRoot && samePath(repoRoot, cwd) && runGit(cwd, ["rev-parse", "--is-inside-work-tree"]) === "true";
+	const isGitRepo = Boolean(repoRoot && runGit(cwd, ["rev-parse", "--is-inside-work-tree"]) === "true");
 
 	if (isGitRepo && repoRoot) {
 		// Stage all changes (including untracked files) to index temporarily for write-tree
-		runGit(repoRoot, ["add", "-A"]);
-		const treeSha = runGit(repoRoot, ["write-tree"]);
+		runGit(cwd, ["add", "-A"]);
+		const treeSha = runGit(cwd, ["write-tree"]);
 		if (treeSha) {
-			const headSha = runGit(repoRoot, ["rev-parse", "HEAD"]) ?? "";
+			const headSha = runGit(cwd, ["rev-parse", "HEAD"]) ?? "";
 			const commitArgs = ["commit-tree", treeSha, "-m", `cast-checkpoint-${id}`];
 			if (headSha) {
 				commitArgs.push("-p", headSha);
 			}
-			const commitSha = runGit(repoRoot, commitArgs);
+			const commitSha = runGit(cwd, commitArgs);
 			if (commitSha) {
 				return {
 					id,
@@ -110,12 +109,12 @@ export function restoreCheckpoint(checkpoint: TurnCheckpoint): { ok: boolean; me
 	if (checkpoint.gitCommitSha && repoRoot) {
 		try {
 			execFileSync("git", ["checkout", checkpoint.gitCommitSha, "--", "."], {
-				cwd: repoRoot,
+				cwd: checkpoint.cwd,
 				env: { ...process.env, ...GIT_NO_PROMPT_ENV },
 				stdio: ["ignore", "pipe", "pipe"],
 			});
 			execFileSync("git", ["clean", "-fd"], {
-				cwd: repoRoot,
+				cwd: checkpoint.cwd,
 				env: { ...process.env, ...GIT_NO_PROMPT_ENV },
 				stdio: ["ignore", "pipe", "pipe"],
 			});
