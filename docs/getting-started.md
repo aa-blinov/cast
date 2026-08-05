@@ -19,7 +19,7 @@ Windows (PowerShell):
 irm https://aa-blinov.github.io/cast/install.ps1 | iex
 ```
 
-Self-contained bundle — no npm packages needed at runtime.
+Self-contained bundle with no npm packages needed at runtime.
 
 Pin a version:
 
@@ -36,13 +36,13 @@ cast upgrade
 ## Quick Start
 
 ```bash
-# Launch — prompts for provider URL + API key on first run, remembers after
+# Launch (prompts for provider URL and API key on first run)
 cast
 
 # One-shot prompt
 cast "explain what this project does"
 
-# Specific model + reasoning
+# Specific model and reasoning
 cast -m qwen/qwen3-235b-a22b -r high "refactor this function"
 
 # Resume last session
@@ -53,7 +53,7 @@ cast -c
 
 On first run, cast asks for your provider URL and API key, then saves both to `~/.cast/settings.json`. No `.env` file needed.
 
-Supported environment variables (provider credentials are **not** read from env — use the settings file or `/provider`):
+Supported environment variables (provider credentials are read from `settings.json` or `/provider`, not env):
 
 | Variable | Description |
 |----------|-------------|
@@ -74,23 +74,17 @@ Works with anything that speaks the OpenAI API:
 
 ## What Happens on First Run
 
-When you launch `cast` without a saved configuration, an interactive onboarding flow walks you through setup:
+When launched without a saved configuration, an interactive setup flow configures the harness:
 
-1. **Persona selection** — choose the agent's role (senior dev, QA, etc.). This sets the system prompt but not the tools. Defaults to `senior`.
+1. **Persona selection**: Select the agent role (defaults to `senior`).
+2. **Provider connection**: Enter API endpoint URL and key, validated via `/v1/models`.
+3. **Model selection**: Select a model fetched from the provider list.
+4. **Reasoning level**: Configure reasoning effort or request shape (`/reasoning-format`).
+5. **Session**: A new session starts automatically.
 
-2. **Provider connection** — enter your API endpoint URL and API key. cast validates both by hitting `/v1/models`. Saved to `~/.cast/settings.json`.
-
-3. **Model selection** — cast fetches the model list from your provider and lets you pick one. The selection is validated with a test prompt.
-
-4. **Reasoning level** — cast combines provider model metadata with the provider's reasoning dialect. Choose the offered effort level, or `on`/`off` for binary providers. If an OpenAI-compatible endpoint needs a specific request shape, select it later with `/reasoning-format`.
-
-5. **Session** — a new session starts automatically. Every conversation auto-saves.
-
-After the first run, all choices are remembered. Subsequent launches go straight to the TUI.
+Subsequent launches remember choices and enter the TUI directly.
 
 ## Default Configuration
-
-These defaults apply unless overridden:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
@@ -98,11 +92,11 @@ These defaults apply unless overridden:
 | Max response tokens | 8,192 | Maximum tokens per assistant response |
 | Compaction threshold | 75% | Triggers context compaction when usage exceeds this |
 | Bash timeout | 180 seconds | Default timeout for shell commands |
-| Reasoning level | `off` | Unless the model's metadata suggests otherwise |
+| Reasoning level | `off` | Unless model metadata suggests otherwise |
 | Web tools | Disabled | Enable with `/web` (persists to settings) |
 
 ## Next Steps
 
-- [CLI Reference](cli-reference.md) — all flags and subcommands
-- [Interactive Commands](interactive-commands.md) — what you can type in the TUI
-- [Configuration](configuration.md) — settings.json, env vars, .cast/ layout
+- [CLI Reference](cli-reference.md) for flags and subcommands
+- [Interactive Commands](interactive-commands.md) for TUI commands
+- [Configuration](configuration.md) for settings and layout options
