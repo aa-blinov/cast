@@ -58,7 +58,7 @@ src/
 
 ### Single OpenAI-Compatible Provider
 
-cast speaks the OpenAI chat completions format. Any provider that implements it works — OpenRouter, OpenAI, Ollama, vLLM, LiteLLM, Azure OpenAI. A small provider-dialect layer only normalizes reasoning controls and native reasoning streams; it does not fork the agent loop.
+cast speaks the OpenAI chat completions format. Supported providers include OpenRouter, OpenAI, Ollama, vLLM, LiteLLM, and Azure OpenAI. A small provider-dialect layer normalizes reasoning controls and native reasoning streams without forking the agent loop.
 
 ### Parallel Tool Execution
 
@@ -66,23 +66,23 @@ Tool calls within one assistant message run concurrently via `Promise.all`. If t
 
 ### Hashline LRU Cache
 
-`read`, `edit`, and `grep` share a process-local LRU (20 entries, ~4 MB worst case) keyed by absolute path. On hit, the file's mtime is re-stated and a mismatch drops the entry; on miss the file is read once and per-line sha1s are computed in a single pass. `write` and `edit` invalidate the entry on success, so a follow-up read never sees a stale snapshot. This is invisible to the model — it just means a `read → edit` round trip (and a re-`grep` over the same files) skips both the file I/O and the per-line hashing.
+`read`, `edit`, and `grep` share a process-local LRU (20 entries, ~4 MB worst case) keyed by absolute path. On hit, mtime validation occurs; on miss, the file is read once and per-line sha1 hashes are computed in a single pass. `write` and `edit` invalidate the entry on success so follow-up reads skip redundant file I/O and line hashing.
 
 ### Context Compaction
 
-When the conversation exceeds ~75% of the context window, older messages are summarized by the LLM. The split is ~60/40 (old/recent), snapped to turn boundaries so tool calls and results stay together. File paths are extracted deterministically from tool calls and appended to the summary.
+When conversation history exceeds ~75% of the context window, older messages are summarized by the LLM. The split snaps to turn boundaries so tool calls and results stay paired. File paths are extracted deterministically from tool calls and appended to the summary.
 
 ### MCP Integration
 
-MCP tools are namespaced as `mcp_<server>_<tool>` and converted to the same `Tool`/`ToolResult` shapes the built-in tools use. The rest of the codebase doesn't need to know MCP tools are different.
+MCP tools are namespaced as `mcp_<server>_<tool>` and converted to built-in `Tool`/`ToolResult` shapes.
 
 ### Trust Gating
 
-A single trust decision per project gates local skills, MCP, context files, personas, rules, hooks, and SSH configuration. Global resources (`~/.cast/`) always load. Asked once, remembered in settings.json.
+A single trust decision per project gates local skills, MCP, context files, personas, rules, hooks, and SSH configuration. Global resources in `~/.cast/` load automatically.
 
 ### Plan Mode
 
-Plan mode is a restricted agent state: read-only bash (a curated allowlist of inspection binaries), unrestricted read, and write/edit narrowed to the session's plans directory — the model authors the plan with the same tools it edits real code with, no dedicated plan-write/plan-edit/plan-read tool (see [Plan Mode](plan-mode.md)). Plan files persist as markdown with checkbox tracking.
+Plan mode is a restricted agent state: read-only bash (a curated allowlist of inspection binaries), unrestricted read, and `write`/`edit` narrowed to the session plans directory. Plan files persist as markdown with checkbox tracking.
 
 ### System Reminders & Open Work Gate
 
@@ -110,10 +110,10 @@ npm run format          # Auto-format (biome)
 
 - Framework: vitest
 - One `test/<module>.test.ts` per `src/<module>.ts`
-- No real LLM/API calls — mock configs with fake `baseURL`/`apiKey`
-- MCP tests are the exception: they spawn a real local test-fixture server
-- Tool tests use `test/__test_tmp__/`, created in `beforeEach`, removed in `afterEach`
+- Mock configs with fake `baseURL`/`apiKey` (no real LLM API calls)
+- MCP tests spawn a local test-fixture server
+- Tool tests use temporary directories in `test/__test_tmp__/`
 
 ### Build
 
-The bundle step (esbuild) produces a single `dist/index.js` file — self-contained, no `node_modules` needed at runtime.
+The bundle step (esbuild) produces a single self-contained `dist/index.js` file requiring no runtime `node_modules`.
