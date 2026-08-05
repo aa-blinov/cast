@@ -8,6 +8,7 @@
 	flex: 1;
 	min-height: 0;
 	overflow-y: auto;
+	scrollbar-gutter: stable;
 	padding: 20px;
 	padding-left: max(20px, env(safe-area-inset-left));
 	padding-right: max(20px, env(safe-area-inset-right));
@@ -73,7 +74,8 @@
 /* ── Scroll-to-bottom ─────────────────────────────────────────────── */
 .scroll-bottom-btn {
 	position: absolute;
-	bottom: 84px; left: 50%;
+	bottom: 84px;
+	left: calc(50% + var(--sidebar-w, 0px) / 2);
 	transform: translateX(-50%);
 	width: 32px; height: 32px;
 	border-radius: 50%;
@@ -82,7 +84,9 @@
 	color: var(--text-dim);
 	display: flex; align-items: center; justify-content: center;
 	cursor: pointer;
-	z-index: 5;
+	z-index: 10;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+	transition: background-color .15s ease, border-color .15s ease, color .15s ease;
 	animation: rise .15s ease;
 }
 .scroll-bottom-btn:hover { color: var(--text); border-color: var(--cyan); }
