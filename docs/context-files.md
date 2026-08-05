@@ -26,16 +26,16 @@ Given this structure:
   AGENTS.md                         # "This project uses React 19"
 ```
 
-The agent sees both files in its system prompt, with `/org-guidelines/AGENTS.md` first (broad guidelines) and `my-app/AGENTS.md` second (project-specific).
+The agent sees both files in its system prompt: `/org-guidelines/AGENTS.md` first (broad guidelines) followed by `my-app/AGENTS.md` (project-specific).
 
 ## Trust Model
 
-- **Global** (`~/.cast/`) and **ancestor** files (above `cwd`): always loaded — you placed those yourself
-- **Project** (`cwd`): trust-gated. cast asks once per project whether to trust its local resources (skills, MCP, context files). The decision is saved in `~/.cast/settings.json`.
+- **Global** (`~/.cast/`) and **ancestor** files above `cwd`: loaded automatically without prompting.
+- **Project** (`cwd`): trust-gated. cast asks once per project whether to trust local resources (skills, MCP, context files), saving the decision in `~/.cast/settings.json`.
 
 ## Nested Context Files
 
-When the agent reads or writes files in subdirectories, cast discovers `AGENTS.md`/`CLAUDE.md` files in those subdirectories too. These "nested" context files activate when the agent touches files in their subtree.
+When reading or writing files in subdirectories, cast discovers `AGENTS.md`/`CLAUDE.md` files in those subdirectories. Nested context files activate when the agent touches files in their subtree.
 
 Example:
 
@@ -49,16 +49,16 @@ my-app/
       AGENTS.md                # "This service uses Express + Prisma"
 ```
 
-If the agent edits `apps/web/pages/index.tsx`, it also sees `apps/web/AGENTS.md`. If it later edits `apps/api/routes/users.ts`, it sees `apps/api/AGENTS.md`.
+Editing `apps/web/pages/index.tsx` attaches `apps/web/AGENTS.md`. Editing `apps/api/routes/users.ts` attaches `apps/api/AGENTS.md`.
 
-Nested context files are ordered shallow-to-deep (broad → specific), so the nearest-to-the-file instructions read last.
+Nested context files use shallow-to-deep ordering so narrow instructions take precedence over broad guidelines.
 
-## What to Put in Context Files
+## Content Guidelines
 
+Context files hold:
 - Coding conventions and style guides
 - Architecture decisions
-- Build/test/lint commands
+- Build, test, and lint commands
 - Deployment notes
-- Anything the agent should know about the project
 
-No special syntax — just markdown. The agent reads it as part of its instructions.
+Plain markdown with no custom syntax is expected.

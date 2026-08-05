@@ -2,13 +2,11 @@
 
 `cast` supports running sessions inside isolated git worktrees. This allows the agent to inspect files, edit code, and run shell commands on a dedicated branch without modifying your main working directory or interfering with other active sessions.
 
-## Overview
+## Mechanics
 
-When worktree mode is enabled:
-1. `cast` creates (or reuses) a git worktree at `.cast/worktrees/<name>` off the canonical git repository root.
-2. A branch named `cast-<slug>` is checked out in that worktree directory (slashes in nested names like `feature/auth` are flattened to `+`, e.g. `cast-feature+auth`).
-3. The session's working directory (`session.cwd`) switches to the worktree path. All built-in tools (`read`, `write`, `edit`, `bash`, `grep`, `glob`, `ls`) operate inside the isolated worktree.
-4. The worktree path is saved directly in the session database (`SessionState.cwd`), so resuming the session with `cast -c` or `cast --resume` automatically resumes execution inside the same worktree.
+Worktree mode creates or reuses a git worktree at `.cast/worktrees/<name>` off the canonical repository root. A branch named `cast-<slug>` is checked out in that directory, flattening slashes in nested names like `feature/auth` to `cast-feature+auth`.
+
+The session working directory (`session.cwd`) switches to the worktree path so tools (`read`, `write`, `edit`, `bash`, `grep`, `glob`, `ls`) execute within the isolated directory. The path persists in SQLite session state (`SessionState.cwd`), ensuring resumes automatically maintain worktree isolation.
 
 ## Usage
 
