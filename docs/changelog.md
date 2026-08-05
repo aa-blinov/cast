@@ -2,6 +2,18 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.12.19
+
+### Fixed
+
+- Web UI marketplace install: button no longer reappears after a successful install. The panel was reading `data.plugins` from its own props (always undefined — parent passed only `data.marketplace`), so the installed-plugin check silently failed and the row kept showing "Install" after install. Now the parent passes the installed list as a separate prop and refreshes it after every `/plugin` command.
+- Web UI marketplace install feedback: per-row pending state with a spinner mid-flight plus a brief `installed ✓` label on success. The modal's global `busy` flag only flashed for ~100ms, which read as a no-op click.
+- Web UI marketplace block: stray horizontal scrollbar suppressed. `.plugin-catalog-list` had `overflow-y: auto`, which implicitly makes the x-axis `auto` too; long descriptions triggered a horizontal scroll where only vertical should exist. Explicit `overflow-x: hidden` keeps vertical scroll, kills horizontal.
+
+### Internal
+
+- Biome warnings on new `/undo` and worktree code: removed unused imports (`copyFileSync`, `realpathSync`, `sep`, `samePath` in `checkpoint.ts`; `createCheckpoint` in `commands.ts`; `AppConfig` type in `bridge.ts`); hoisted a hot-path regex literal in `commands.ts` to a module-level constant.
+
 ## 0.12.18
 
 ### Fixed

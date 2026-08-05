@@ -1,6 +1,6 @@
 import { execFileSync, execSync } from "node:child_process";
 import { homedir } from "node:os";
-import { createCheckpoint, restoreCheckpoint } from "../core/checkpoint.ts";
+import { restoreCheckpoint } from "../core/checkpoint.ts";
 import { reminderStateFromPlan } from "../core/compaction-reminder.ts";
 import { type AppConfig, probeProvider, resolveProvider, runOnboardingCheck } from "../core/config.ts";
 import { formatContextFilesForPrompt, loadProjectContextFiles } from "../core/context-files.ts";
@@ -85,6 +85,7 @@ import { ALL_THEMES, getActiveTheme, setActiveTheme } from "./themes/index.ts";
 import type { PendingImage, UseAgentSession } from "./useAgentSession.ts";
 
 const WHITESPACE_SPLIT_RE = /\s+/;
+const WORKTREE_REMOVE_PREFIX_RE = /^(?:remove|rm)\s*/;
 
 /**
  * Slash commands shown in the Composer's autocomplete palette.
@@ -1776,7 +1777,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			return;
 		}
 		if (rawArg.startsWith("remove ") || rawArg.startsWith("rm ") || rawArg === "remove" || rawArg === "rm") {
-			const targetName = rawArg.replace(/^(remove|rm)\s*/, "").trim();
+			const targetName = rawArg.replace(WORKTREE_REMOVE_PREFIX_RE, "").trim();
 			if (!targetName) {
 				showNotice("[Usage: /worktree remove <name>]");
 				return;

@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
-import { findCanonicalGitRoot, samePath } from "./worktree.ts";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
+import { findCanonicalGitRoot } from "./worktree.ts";
 
 export interface CheckpointFileBackup {
 	relPath: string;
