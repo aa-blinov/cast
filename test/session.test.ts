@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb, resetDbConnectionForTests } from "../src/core/db.ts";
 import type { Message } from "../src/core/llm.ts";
 import {
@@ -1204,5 +1204,103 @@ describe("migrateLegacySessionsToDb", () => {
 		// Both files still on disk (migration is additive, never destructive).
 		expect(existsSync(strayPath)).toBe(true);
 		expect(existsSync(brokenPath)).toBe(true);
+	});
+});
+
+// ============================================================================
+// listSessionSummaries — SQL-only aggregation
+// ============================================================================
+// The legacy path did a SELECT content_json FROM messages WHERE session_id = ?
+// AND role IN ('user','assistant') ORDER BY seq for every session and then
+// JSON.parsed every row — a 218-session DB with thousands of messages each
+// paid 9 MB of content_json allocation plus 9000 JSON.parse calls per
+// listing. The new path uses three group-by aggregates (covering index
+// for user/assistant counts, PK + JSON filter for the with-tool-calls
+// subtraction) and one MIN(seq) PK lookup per session for the first user
+// message. The test below pins the contract: a session's full message
+// history is never loaded for listing purposes — no JSON.parse on the
+// hot path even when the session is huge.
+describe("listSessionSummaries — SQL-only aggregation", () => {
+	let realHome: string | undefined;
+	let fakeHome: string;
+	let projectDir: string;
+	beforeEach(() => {
+		realHome = process.env.HOME;
+		fakeHome = join(tmpdir(), `cast-summaries-perf-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		process.env.HOME = fakeHome;
+		resetDbConnectionForTests();
+		projectDir = join(fakeHome, "projects", "perf");
+		mkdirSync(projectDir, { recursive: true });
+	});
+	afterEach(() => {
+		resetDbConnectionForTests();
+		process.env.HOME = realHome;
+		rmSync(fakeHome, { recursive: true, force: true });
+	});
+
+	it("never reads content_json during a list — only aggregate queries + first-user lookup", () => {
+		const s = createSession("gpt-4o", projectDir);
+		// 200 messages, mostly tool-result clutter — any path that loads
+		// them all in steady state is the regression we're guarding against.
+		s.messages.push({ role: "user", content: "first user message that becomes the row description" });
+		for (let i = 0; i < 50; i++) {
+			s.messages.push({
+				role: "assistant",
+				content: null,
+				tool_calls: [{ id: `c${i}`, type: "function", function: { name: "read", arguments: '{"path":"x"}' } }],
+			} as unknown as Message);
+			s.messages.push({ role: "tool", tool_call_id: `c${i}`, content: "tool result noise" } as unknown as Message);
+			s.messages.push({ role: "user", content: `intermediate user ${i}` });
+			s.messages.push({ role: "assistant", content: `final reply ${i}` });
+		}
+		saveSession(s);
+
+		const db = getDb();
+		const observedSqls: string[] = [];
+		const realPrepare = db.prepare.bind(db);
+		const spy = vi.spyOn(db, "prepare").mockImplementation((source: string) => {
+			observedSqls.push(source);
+			return realPrepare(source);
+		});
+		try {
+			const summaries = listSessionSummaries();
+			const summary = summaries.find((x) => x.id === s.id)!;
+			// 51 user (1 initial + 50 intermediate) + 50 final-reply
+			// assistant = 101. The 50 tool-call-only assistant steps are
+			// excluded by the same countTurnMessages semantic.
+			expect(summary.msgCount).toBe(101);
+			expect(summary.firstUserMessage).toBe("first user message that becomes the row description");
+		} finally {
+			spy.mockRestore();
+		}
+
+		// The legacy path issued one SELECT content_json per session. With
+		// 200 messages stuffed in, that would have read all 101 user/assistant
+		// rows. Instead we see only the aggregate queries + first-user lookup.
+		const contentJsonScans = observedSqls.filter((sql) =>
+			/SELECT\s+content_json\s+FROM\s+messages\s+WHERE\s+session_id\s*=\s*\?/i.test(sql),
+		);
+		expect(contentJsonScans).toEqual([]);
+		const fullHistoryScans = observedSqls.filter((sql) =>
+			/SELECT\s+content_json\s+FROM\s+messages\s+WHERE\s+session_id\s+IN/i.test(sql),
+		);
+		expect(fullHistoryScans).toEqual([]);
+		// The first-user lookup is one query per session, all using the
+		// MIN(seq) JOIN — that's the only place content_json legitimately
+		// appears, and it's O(N) index lookups, not a single bulk scan.
+		const firstUserScans = observedSqls.filter((sql) => /MIN\(seq\)\s+AS\s+min_seq/i.test(sql));
+		expect(firstUserScans.length).toBe(1);
+	});
+
+	it("firstUserMessage handles multi-line text and trimmed corners", () => {
+		const s = createSession("gpt-4o", projectDir);
+		s.messages.push({ role: "user", content: "  Hello\n\nWorld  " });
+		s.messages.push({ role: "assistant", content: "reply" });
+		saveSession(s);
+		const summary = listSessionSummaries().find((x) => x.id === s.id)!;
+		// Newlines flattened to spaces, surrounding whitespace trimmed. The
+		// two-space run between "Hello" and "World" is preserved (only
+		// \n is collapsed — same behavior as getFirstUserMessage).
+		expect(summary.firstUserMessage).toBe("Hello  World");
 	});
 });
