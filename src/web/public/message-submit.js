@@ -202,6 +202,10 @@ export async function submitMessage(text, images, pendingDocs, context) {
 				if (result.result.colors) applyTheme(result.result.colors);
 				setCurrentThemeId(result.result.theme);
 				addNotice(`Theme: ${result.result.label ?? result.result.theme}`);
+			} else if (text.startsWith("/undo")) {
+				if (result?.result) addNotice(result.result);
+				// Refetch history and status to sync UI after undo
+				await selectSession(id, { push: false });
 			} else if (text.startsWith("/current") && result?.result) {
 				const r = result.result;
 				addNotice(`${r.persona} · ${r.model} · ${r.status} · ${r.messageCount} msg`);
