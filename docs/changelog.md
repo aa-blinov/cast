@@ -2,6 +2,16 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.12.24
+
+### Fixed
+
+- TUI streaming flicker on every token: `ThinkBlockParser.parseContent` / `flush` returned the entire accumulated buffer on each chunk, but the `StreamChunk` contract is delta-only — downstream does `content += chunk.content`. The cumulative return made each per-token redraw re-render every prior line, so the assistant visibly typed "line by line" with each previous line reprinted before the next arrived. The parser now tracks an `emittedBufferLen` offset and returns only what's new since the last yield, slicing the underlying buffer with `[emittedBufferLen, …]`. The buffer is compacted only when the already-emitted prefix grows to a meaningful fraction of the total length (keeps amortised cost flat on long streams without shifting the offset). Covers both the think-block and content branches and the trailing-tail `flush`. Web UI streams ride the same parser, so the web client picks up the fix for free. Regression test added in `test/vendors.test.ts`.
+
+### Added
+
+- Web UI file preview: copy-to-clipboard button next to the existing download icon. For text/table previews it copies the rendered content once it has loaded (disabled until then); for image/PDF it copies the preview URL. Brief check-mark confirmation via the existing `icons.check` for ~1.5s. Falls back to a hidden `textarea` + `document.execCommand("copy")` if the modern Clipboard API isn't available, and swallows denied-permission errors silently so the modal stays usable.
+
 ## 0.12.23
 
 ### Added
