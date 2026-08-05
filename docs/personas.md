@@ -55,7 +55,7 @@ Create a `.md` file in one of these locations:
 name: my-persona
 label: My Custom Persona
 description: What this persona does
-subagents: false
+subagents: true
 subagentTypes: [explore, review]
 tools: [read, grep, ls, plan_*, web_*]
 skills: [research, deep-research]
