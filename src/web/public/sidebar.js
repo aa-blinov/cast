@@ -158,6 +158,7 @@ export function Sidebar({
 	const renderItem = (s) => html`<${SidebarSessionItem}
 		session=${s}
 		activeId=${activeId}
+		selectingId=${selectingId}
 		selecting=${selectingId === s.id}
 		onSelect=${onSelectSession}
 		onPin=${onPinSession}

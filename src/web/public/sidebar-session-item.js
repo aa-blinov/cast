@@ -7,6 +7,7 @@ const html = htm.bind(h);
 export function SidebarSessionItem({
 	session,
 	activeId,
+	selectingId,
 	selecting,
 	onSelect,
 	onPin,
@@ -36,10 +37,12 @@ export function SidebarSessionItem({
 	// Mutual exclusion: when transitioning from active session A to selecting
 	// session B, both `s.id === activeId` (row A) and `selecting` (row B)
 	// would resolve true under the old `||` — the user would see two rows
-	// highlighted at once. Sidebar passes `selecting=true` only on the row
-	// matching `selectingId`, so the same prop is enough: when this row IS
-	// the one being selected, light it; otherwise fall back to activeId.
-	const isActive = selecting ? true : s.id === activeId;
+	// highlighted at once. While ANY selecting is in flight, only the
+	// selecting row lights up; the activeId row goes dark (it'll re-light
+	// the moment selectingId clears). Pass selectingId (not just the
+	// selecting boolean) so we can tell "is this row the picker target?"
+	// from "is some other row the picker target?".
+	const isActive = selecting || (s.id === activeId && !selectingId);
 	return html`
 		<div
 			key=${s.id}
