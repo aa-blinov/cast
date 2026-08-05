@@ -5,85 +5,120 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
 <title>Interactive Commands — cast</title>
 <meta name="description" content="Interactive Commands documentation for cast, a role-based terminal agent harness.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
 <style>
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Inter:wght@400;500;600;700&display=swap');
+
 :root {
-	/* cast palette — cyan→violet gradient */
-	--bg: #0a0e14;
-	--bg-secondary: #0f1520;
-	--bg-tertiary: #151c28;
-	--border: #1e2a3a;
-	--text: #e2e8f0;
-	--text-secondary: #64748b;
-	--text-muted: #475569;
-	--accent: #38e0ff;
-	--accent-hover: #5eead4;
-	--accent-subtle: rgba(56,224,255,.1);
-	--green: #34d399;
-	--green-subtle: rgba(52,211,153,.1);
-	--orange: #fbbf24;
-	--red: #fb7185;
-	--code-bg: #0f1520;
-	--sidebar-w: 280px;
-	--header-h: 64px;
-	--font: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+	--bg: #08080a;
+	--bg-surface: #131317;
+	--bg-raised: #1e1e24;
+	--bg-hover: #28282e;
+	--border: #35353d;
+	--border-active: #4a4a55;
+	--border-subtle: rgba(53, 53, 61, 0.55);
+	--text: #fafafa;
+	--text-dim: #a1a1aa;
+	--text-muted: #71717a;
+	--cyan: #8b5cf6;
+	--violet: #8b5cf6;
+	--teal: #2dd4bf;
+	--purple: #a78bfa;
+	--blue: #60a5fa;
+	--green: #22c55e;
+	--amber: #eab308;
+	--rose: #ef4444;
+	--persona: #c084fc;
+	--accent: #8b5cf6;
+	--accent-subtle: rgba(139, 92, 246, 0.12);
+	--accent-muted: rgba(139, 92, 246, 0.2);
+	--gradient: linear-gradient(135deg, #a855f7, #8b5cf6);
+	--code-bg: #111116;
+	--sidebar-w: 272px;
+	--header-h: 48px;
+	--font: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
 	--font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+	--radius: 8px;
+	--radius-sm: 6px;
 }
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html { font-size: 16px; scroll-behavior: smooth; }
+html { font-size: 15px; scroll-behavior: smooth; }
 body {
 	font-family: var(--font);
 	background: var(--bg);
 	color: var(--text);
-	line-height: 1.6;
+	line-height: 1.55;
 	-webkit-font-smoothing: antialiased;
 }
-a { color: var(--accent); text-decoration: none; }
-a:hover { color: var(--accent-hover); text-decoration: underline; }
+a { color: var(--purple); text-decoration: none; transition: color .15s ease; }
+a:hover { color: #c084fc; text-decoration: none; }
 
-/* ── Header ─────────────────────────────────────────────────────────── */
+/* ── Header (Cast Web UI Bar) ─────────────────────────────────────── */
 .header {
 	position: fixed; top: 0; left: 0; right: 0; z-index: 100;
 	height: var(--header-h);
-	background: var(--bg-secondary);
+	background: var(--bg-surface);
 	border-bottom: 1px solid var(--border);
-	display: flex; align-items: center; padding: 0 24px;
+	display: flex; align-items: center; padding: 0 16px; gap: 12px;
 }
 .header-logo {
-	font-size: 1.25rem; font-weight: 700; color: var(--text);
-	display: flex; align-items: center; gap: 10px;
+	display: inline-flex; align-items: center; gap: 8px;
+	font-family: var(--font-mono); font-size: 1rem; font-weight: 700;
+	color: var(--text);
 }
-.header-links { margin-left: auto; display: flex; gap: 20px; align-items: center; }
-.header-links a { color: var(--text-secondary); font-size: .875rem; font-weight: 500; }
-.header-links a:hover { color: var(--text); text-decoration: none; }
+.header-logo img {
+	width: 20px; height: 20px; border-radius: 4px; display: inline-block;
+}
+.header-badge {
+	font-family: var(--font-mono); font-size: .7rem; font-weight: 500;
+	color: var(--teal); background: rgba(45, 212, 191, 0.12);
+	border: 1px solid rgba(45, 212, 191, 0.25);
+	padding: 1px 7px; border-radius: 12px;
+}
+.header-links { margin-left: auto; display: flex; gap: 14px; align-items: center; }
+.header-links a {
+	color: var(--text-dim); font-size: .8rem; font-weight: 500;
+	font-family: var(--font-mono); padding: 4px 8px; border-radius: var(--radius-sm);
+	transition: color .15s, background .15s;
+}
+.header-links a:hover { color: var(--text); background: var(--bg-raised); }
 
-/* ── Sidebar ────────────────────────────────────────────────────────── */
+/* ── Sidebar (Cast Web Navigation) ───────────────────────────────── */
 .sidebar {
 	position: fixed; top: var(--header-h); left: 0; bottom: 0;
-	width: var(--sidebar-w); background: var(--bg-secondary);
+	width: var(--sidebar-w); background: var(--bg-surface);
 	border-right: 1px solid var(--border);
-	overflow-y: auto; padding: 16px 0;
+	overflow-y: auto; padding: 12px 0 24px;
 }
-.sidebar-section { padding: 0 12px; margin-bottom: 8px; }
+.sidebar-section { padding: 0 10px; margin-bottom: 12px; }
 .sidebar-section-title {
-	font-size: .75rem; font-weight: 600; text-transform: uppercase;
-	letter-spacing: .05em; color: var(--text-muted);
-	padding: 8px 12px 4px;
+	font-family: var(--font-mono); font-size: .68rem; font-weight: 600;
+	text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted);
+	padding: 6px 10px 4px;
 }
 .sidebar a {
-	display: block; padding: 6px 12px; border-radius: 6px;
-	font-size: .875rem; color: var(--text-secondary); line-height: 1.4;
+	display: flex; align-items: center; justify-content: space-between;
+	padding: 6px 10px; border-radius: var(--radius-sm);
+	font-size: .82rem; color: var(--text-dim); line-height: 1.4;
+	font-family: var(--font); transition: background .15s, color .15s;
 }
-.sidebar a:hover { background: var(--bg-tertiary); color: var(--text); text-decoration: none; }
+.sidebar a:hover { background: var(--bg-raised); color: var(--text); }
 .sidebar a.active {
-	background: var(--accent-subtle); color: var(--accent); font-weight: 500;
+	background: var(--accent-subtle); color: var(--purple); font-weight: 500;
+	border: 1px solid var(--accent-muted);
+}
+.sidebar a .badge {
+	font-family: var(--font-mono); font-size: .65rem; color: var(--text-muted);
 }
 
-/* ── Mobile menu ────────────────────────────────────────────────────── */
+/* ── Mobile Menu & Responsiveness ────────────────────────────────── */
 .menu-toggle {
-	display: none; background: none; border: none; color: var(--text);
-	font-size: 1.5rem; cursor: pointer; padding: 4px 8px;
+	display: none; background: none; border: 1px solid var(--border);
+	color: var(--text-dim); font-size: 1.1rem; cursor: pointer;
+	padding: 4px 8px; border-radius: var(--radius-sm);
 }
+.menu-toggle:hover { color: var(--text); border-color: var(--border-active); }
 @media (max-width: 768px) {
 	.sidebar {
 		transform: translateX(-100%); transition: transform .2s ease;
@@ -92,77 +127,56 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 	.sidebar.open { transform: translateX(0); }
 	.sidebar-backdrop {
 		position: fixed; inset: 0; z-index: 98;
-		background: rgba(0,0,0,.5); backdrop-filter: blur(2px);
+		background: rgba(0,0,0,.6); backdrop-filter: blur(4px);
 		display: none;
 	}
 	.sidebar-backdrop.visible { display: block; }
-	.menu-toggle { display: block; margin-right: 8px; }
-	.main { margin-left: 0 !important; padding: 20px 16px 60px !important; }
+	.menu-toggle { display: block; }
+	.main { margin-left: 0 !important; padding: 20px 14px 60px !important; }
 	.header { padding: 0 12px; }
-	.header-links { gap: 14px; }
-
-	/* Hero */
-	.hero { padding: 56px 16px 40px; }
-	.hero h1 { font-size: 2rem; }
-	.hero p { font-size: 1rem; margin-bottom: 24px; }
-	.hero-buttons a { padding: 10px 22px; font-size: .9rem; }
-	.install-block { margin-top: 24px; padding: 12px 14px; }
+	.header-links { gap: 8px; }
+	.hero { padding: 40px 16px 32px; }
+	.hero h1 { font-size: 1.6rem; }
+	.hero p { font-size: .92rem; margin-bottom: 20px; }
+	.install-block { padding: 12px 14px; }
 	.install-block code { font-size: .75rem; word-break: break-all; }
-
-	/* Features */
-	.features { grid-template-columns: 1fr; padding: 24px 16px 40px; gap: 12px; }
-	.feature { padding: 16px; }
-
-	/* Providers */
-	.providers { padding: 24px 16px; }
-	.providers h2 { font-size: 1.25rem; }
-
-	/* Docs grid */
-	.landing-docs { padding: 24px 16px 60px; }
-	.landing-docs h2 { font-size: 1.25rem; }
-	.docs-grid { grid-template-columns: 1fr; }
-
-	/* Content */
 	.content h1 { font-size: 1.5rem; }
-	.content h2 { font-size: 1.25rem; margin: 28px 0 10px; }
-	.content h3 { font-size: 1.1rem; }
-	.content table { font-size: .8rem; }
+	.content h2 { font-size: 1.2rem; margin: 24px 0 10px; }
+	.content table { font-size: .78rem; }
 	.content th, .content td { padding: 6px 8px; }
-	.content pre:not(.mermaid-code) { padding: 12px; font-size: .8rem; }
-
-	/* Mermaid */
-	.mermaid-diagram { padding: 12px; max-height: 45vh; }
-	.mermaid-code { max-height: 45vh; }
-	.mermaid-toolbar { padding: 6px 8px; }
-	.mermaid-toolbar button { padding: 3px 8px; font-size: .75rem; }
+	.content pre:not(.mermaid-code) { padding: 12px; font-size: .78rem; border-radius: 6px; }
 }
 
-/* ── Main content ───────────────────────────────────────────────────── */
+/* ── Main Workspace ──────────────────────────────────────────────── */
 .main {
 	margin-left: var(--sidebar-w);
 	margin-top: var(--header-h);
 	padding: 32px 48px 80px;
-	max-width: 900px;
+	max-width: 960px;
 }
 .main-landing {
 	margin-left: 0; max-width: none; padding: 0;
 }
 
-/* ── Typography ─────────────────────────────────────────────────────── */
-.content h1 { font-size: 2rem; font-weight: 700; margin: 0 0 16px; line-height: 1.3; }
-.content h2 {
-	font-size: 1.5rem; font-weight: 600; margin: 40px 0 12px;
-	padding-bottom: 8px; border-bottom: 1px solid var(--border);
+/* ── Typography & Content ────────────────────────────────────────── */
+.content h1 {
+	font-family: var(--font); font-size: 1.8rem; font-weight: 700;
+	margin: 0 0 16px; line-height: 1.25; color: var(--text);
+	letter-spacing: -0.02em;
 }
-.content h3 { font-size: 1.2rem; font-weight: 600; margin: 28px 0 8px; }
-.content h4 { font-size: 1rem; font-weight: 600; margin: 20px 0 6px; }
-.content p { margin: 0 0 16px; }
-.content ul, .content ol { margin: 0 0 16px; padding-left: 24px; }
+.content h2 {
+	font-family: var(--font); font-size: 1.35rem; font-weight: 600;
+	margin: 36px 0 12px; padding-bottom: 6px;
+	border-bottom: 1px solid var(--border); color: var(--text);
+}
+.content h3 { font-size: 1.1rem; font-weight: 600; margin: 24px 0 8px; color: var(--text); }
+.content h4 { font-size: .95rem; font-weight: 600; margin: 18px 0 6px; color: var(--text-dim); }
+.content p { margin: 0 0 14px; color: var(--text-dim); font-size: .92rem; }
+.content ul, .content ol { margin: 0 0 14px; padding-left: 20px; color: var(--text-dim); font-size: .92rem; }
 .content li { margin: 4px 0; }
-.content strong { font-weight: 600; }
-.content hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+.content strong { color: var(--text); font-weight: 600; }
+.content hr { border: none; border-top: 1px solid var(--border); margin: 28px 0; }
 .content blockquote {
-	border-left: 3px solid var(--accent); padding: 8px 16px;
 	margin: 0 0 16px; background: var(--accent-subtle); border-radius: 0 6px 6px 0;
 }
 .content blockquote p:last-child { margin-bottom: 0; }
@@ -449,7 +463,8 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 <body>
 <header class="header">
 	<button class="menu-toggle" aria-label="Menu">&#9776;</button>
-	<a href="index.html" class="header-logo">cast</a>
+	<a href="index.html" class="header-logo" aria-label="cast home"><img src="assets/favicon.svg" alt="cast logo"></a>
+	<span class="header-badge">v0.12.18</span>
 	<div class="header-links">
 		<a href="index.html">Home</a>
 		<a href="https://github.com/aa-blinov/cast">GitHub</a>
@@ -466,17 +481,21 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 			<a href="tools.html">Tools</a>
 			<a href="personas.html">Personas</a>
 			<a href="persona-research.html">Persona Research</a>
+			<a href="subagents.html">Sub-agents & Delegation</a>
 			<a href="skills.html">Skills</a>
 			<a href="plugins.html">Plugins</a>
 			<a href="rules.html">Rules</a>
 			<a href="mcp-servers.html">MCP Servers</a>
 			<a href="context-files.html">Context Files</a>
 			<a href="sessions.html">Sessions</a>
+			<a href="worktrees.html">Git Worktrees</a>
 			<a href="plan-mode.html">Plan Mode</a>
 			<a href="reasoning.html">Reasoning</a>
 			<a href="configuration.html">Configuration</a>
 			<a href="themes.html">Themes</a>
 			<a href="non-interactive-mode.html">Non-Interactive Mode</a>
+			<a href="eval-behavior.html">Behavior Evals</a>
+			<a href="eval-methodology.html">Eval Methodology</a>
 			<a href="architecture.html">Architecture</a>
 			<a href="eval-scoreboard.html">Model Scoreboard</a>
 			<a href="changelog.html">Changelog</a>
@@ -488,11 +507,11 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 		<h1>Interactive Commands</h1>
 <p>All commands are typed at the TUI prompt, prefixed with <code>/</code>. Unknown slash commands are submitted to the agent as regular text (useful for paths starting with <code>/</code>).</p>
 <h2>Session Management</h2>
-<div class="table-wrap"><table><thead><tr><th>Command</th><th>Description</th></tr></thead><tbody><tr><td><code>/new</code></td><td>Start a new session (autosaves current if non-empty)</td></tr><tr><td><code>/continue</code></td><td>Resume the most recent session (like <code>cast -c</code>, but mid-session)</td></tr><tr><td><code>/sessions</code></td><td>Session picker with type-to-filter search (by message text, project path, or id); switch or delete</td></tr><tr><td><code>/clear</code></td><td>Clear conversation context (and save the cleared state)</td></tr><tr><td><code>/compact</code></td><td>Force context compaction now (auto-triggers near the limit)</td></tr><tr><td><code>/copy</code></td><td>Copy last assistant response to clipboard</td></tr><tr><td><code>/current</code></td><td>Show all status bar data (even disabled segments)</td></tr><tr><td><code>/quit</code>, <code>/exit</code></td><td>Save and exit</td></tr></tbody></table></div><h2>Model and Provider</h2>
-<div class="table-wrap"><table><thead><tr><th>Command</th><th>Description</th></tr></thead><tbody><tr><td><code>/model</code></td><td>Open model picker (shows current model)</td></tr><tr><td><code>/model &lt;name&gt;</code></td><td>Switch to a specific model (validated)</td></tr><tr><td><code>/subagent-model</code></td><td>Open model picker for sub-agents</td></tr><tr><td><code>/subagent-model &lt;name&gt;</code></td><td>Switch sub-agent model</td></tr><tr><td><code>/reasoning</code></td><td>Change reasoning level (opens picker if model supports it)</td></tr><tr><td><code>/provider</code></td><td>Open provider picker (switch, add, or delete providers)</td></tr><tr><td><code>/provider add</code></td><td>Add a new provider (name → URL → key wizard)</td></tr><tr><td><code>/provider delete</code></td><td>Delete a provider</td></tr><tr><td><code>/provider &lt;name&gt;</code></td><td>Switch to a named provider</td></tr></tbody></table></div><h2>Persona</h2>
+<div class="table-wrap"><table><thead><tr><th>Command</th><th>Description</th></tr></thead><tbody><tr><td><code>/new</code></td><td>Start a new session (autosaves current if non-empty)</td></tr><tr><td><code>/continue</code></td><td>Resume the most recent session (like <code>cast -c</code>, but mid-session)</td></tr><tr><td><code>/worktree &lt;name&gt;</code></td><td>Switch current session into an isolated git worktree (<code>list</code>, <code>remove &lt;name&gt;</code>)</td></tr><tr><td><code>/sessions</code></td><td>Session picker with type-to-filter search (by message text, project path, or id); switch or delete</td></tr><tr><td><code>/clear</code></td><td>Clear conversation context (and save the cleared state)</td></tr><tr><td><code>/compact</code></td><td>Force context compaction now (auto-triggers near the limit)</td></tr><tr><td><code>/copy</code></td><td>Copy last assistant response to clipboard</td></tr><tr><td><code>/current</code></td><td>Show all status bar data (even disabled segments)</td></tr><tr><td><code>/quit</code>, <code>/exit</code></td><td>Save and exit</td></tr></tbody></table></div><h2>Model and Provider</h2>
+<div class="table-wrap"><table><thead><tr><th>Command</th><th>Description</th></tr></thead><tbody><tr><td><code>/model</code></td><td>Open model picker (shows current model)</td></tr><tr><td><code>/model &lt;name&gt;</code></td><td>Switch to a specific model (validated)</td></tr><tr><td><code>/subagent-model</code></td><td>Open model picker for sub-agents</td></tr><tr><td><code>/subagent-model &lt;name&gt;</code></td><td>Switch sub-agent model</td></tr><tr><td><code>/subagent-model-provider [name|off]</code></td><td>Show/change the saved provider used for the sub-agent model</td></tr><tr><td><code>/plan-model [name|off]</code></td><td>Show/change the model used in plan mode</td></tr><tr><td><code>/plan-model-provider [name|off]</code></td><td>Show/change the saved provider used for the plan model</td></tr><tr><td><code>/reasoning</code></td><td>Change reasoning level (opens picker if model supports it)</td></tr><tr><td><code>/reasoning-format</code></td><td>Select the reasoning request protocol for the active provider</td></tr><tr><td><code>/provider</code></td><td>Open provider picker (switch, add, or delete providers)</td></tr><tr><td><code>/provider add</code></td><td>Add a new provider (name → URL → key wizard)</td></tr><tr><td><code>/provider delete</code></td><td>Delete a provider</td></tr><tr><td><code>/provider &lt;name&gt;</code></td><td>Switch to a named provider</td></tr></tbody></table></div><h2>Persona</h2>
 <div class="table-wrap"><table><thead><tr><th>Command</th><th>Description</th></tr></thead><tbody><tr><td><code>/persona</code></td><td>Open persona picker</td></tr><tr><td><code>/persona &lt;name&gt;</code></td><td>Switch to a specific persona</td></tr></tbody></table></div><p>See <a href="personas.html">Personas</a> for the full list.</p>
 <h2>Skills and MCP</h2>
-<div class="table-wrap"><table><thead><tr><th>Command</th><th>Description</th></tr></thead><tbody><tr><td><code>/skills</code></td><td>Toggle skills on/off (multi-select). Also: <code>list</code>, <code>enable</code>/<code>disable</code>, <code>uninstall</code>, <code>help</code></td></tr><tr><td><code>/skill:&lt;name&gt; [args]</code></td><td>Force-load and run a skill by name</td></tr><tr><td><code>/plugin</code></td><td>Toggle installed plugins. Palette also has install / list / enable / uninstall / marketplace / help</td></tr><tr><td><code>/mcp</code></td><td>Toggle MCP servers on/off. Also: <code>list</code>, <code>enable</code>/<code>disable</code>, <code>uninstall</code>, <code>help</code></td></tr><tr><td><code>/reload</code></td><td>Re-scan skills, rules, MCP servers, and personas for cwd</td></tr></tbody></table></div><p>Bare <code>/skills</code> / <code>/mcp</code> / <code>/plugin</code> = multi-select toggle. <code>list</code> is read-only. <code>uninstall</code> always confirms (picker or typed). See <a href="skills.html">Skills</a>, <a href="mcp-servers.html">MCP</a>, <a href="plugins.html">Plugins</a>.</p>
+<div class="table-wrap"><table><thead><tr><th>Command</th><th>Description</th></tr></thead><tbody><tr><td><code>/skills</code></td><td>Toggle skills on/off (multi-select). Also: <code>list</code>, <code>enable</code>/<code>disable</code>, <code>uninstall</code>, <code>help</code></td></tr><tr><td><code>/skill:&lt;name&gt; [args]</code></td><td>Force-load and run a skill by name</td></tr><tr><td><code>/plugin</code></td><td>Toggle installed plugins. Palette also has install / list / enable / uninstall / marketplace / help</td></tr><tr><td><code>/mcp</code></td><td>Toggle MCP servers on/off. Also: <code>list</code>, <code>enable</code>/<code>disable</code>, <code>uninstall</code>, <code>help</code></td></tr><tr><td><code>/hooks</code></td><td>List lifecycle hooks; also <code>enable</code>/<code>disable &lt;id&gt;</code> and <code>help</code></td></tr><tr><td><code>/reload</code></td><td>Re-scan skills, rules, MCP servers, personas, and context files for cwd</td></tr></tbody></table></div><p>Bare <code>/skills</code> / <code>/mcp</code> / <code>/plugin</code> = multi-select toggle. <code>list</code> is read-only. <code>uninstall</code> always confirms (picker or typed). See <a href="skills.html">Skills</a>, <a href="mcp-servers.html">MCP</a>, <a href="plugins.html">Plugins</a>.</p>
 <h3>Hot-reload vs <code>/reload</code></h3>
 <p>You never need to quit cast or start a new session for these changes. The current chat continues.</p>
 <div class="table-wrap"><table><thead><tr><th>Change</th><th>Apply how</th></tr></thead><tbody><tr><td><code>/skills</code> / <code>/mcp</code> / <code>/plugin</code> toggle, <code>enable</code> / <code>disable</code></td><td>Automatic (hot-reload)</td></tr><tr><td><code>/plugin install</code> / <code>uninstall</code>, <code>/skills uninstall</code>, <code>/mcp uninstall</code></td><td>Automatic</td></tr><tr><td><code>/plugin marketplace remove</code> (drops installed packs)</td><td>Automatic (skills reload)</td></tr><tr><td>New/edited files on disk: skills, <code>mcp.json</code>, rules, personas, context files (including <code>npx skills add</code>)</td><td><code>/reload</code> in the same session</td></tr></tbody></table></div><p><code>/reload</code> only re-scans cwd resources — it does <strong>not</strong> reset the conversation.</p>
@@ -511,7 +530,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 <p>Token usage and context size are shown automatically in the TUI status bar (prompt tokens in, completion tokens out, context percentage, tokens/second, and sub-agent tokens).</p>
 <p>Use <code>/statusbar</code> to toggle individual segments on/off and reorder them — useful on narrow terminals where the full bar overflows. Segments can be moved between the left and right sides of the bar with ←/→, and reordered within each side with j/k. Default: persona, mode, model (left) and elapsed (right); enable others via <code>/statusbar</code>.</p>
 <div class="table-wrap"><table><thead><tr><th>Command</th><th>Description</th></tr></thead><tbody><tr><td><code>/usage</code></td><td>Show cumulative session token/cost usage (prompt, completion, cache hits, sub-agent tokens)</td></tr></tbody></table></div><h2>Configuration</h2>
-<div class="table-wrap"><table><thead><tr><th>Command</th><th>Description</th></tr></thead><tbody><tr><td><code>/permissions</code></td><td>Open permission mode picker</td></tr><tr><td><code>/permissions default</code></td><td>Switch to gated mode (confirm dangerous commands)</td></tr><tr><td><code>/permissions bypass</code></td><td>Switch to bypass mode (no confirmation)</td></tr><tr><td><code>/web</code></td><td>Toggle web tools (web_search, web_fetch) on/off</td></tr><tr><td><code>/web-search-provider</code></td><td>Switch the <code>web_search</code> backend between DuckDuckGo (free, rate-limited), Tavily (API key, 1000 free/month), and Brave Search (API key)</td></tr><tr><td><code>/statusbar</code></td><td>Toggle and reorder status bar segments (multi-select picker)</td></tr><tr><td><code>/theme</code></td><td>Open theme picker</td></tr><tr><td><code>/theme &lt;id&gt;</code></td><td>Switch to a specific theme</td></tr></tbody></table></div><h2>Utility</h2>
+<div class="table-wrap"><table><thead><tr><th>Command</th><th>Description</th></tr></thead><tbody><tr><td><code>/permissions</code></td><td>Open permission mode picker</td></tr><tr><td><code>/permissions default</code></td><td>Switch to gated mode (confirm dangerous commands)</td></tr><tr><td><code>/permissions bypass</code></td><td>Switch to bypass mode (no confirmation)</td></tr><tr><td><code>/web</code></td><td>Toggle web tools (web_search, web_fetch) on/off</td></tr><tr><td><code>/web-search-provider</code></td><td>Switch the <code>web_search</code> backend between DuckDuckGo (free, rate-limited), Tavily (API key, 1000 free/month), and Brave Search (API key)</td></tr><tr><td><code>/web-fetch-provider</code></td><td>Switch <code>web_fetch</code> between Jina Reader and direct local fetch</td></tr><tr><td><code>/statusbar</code></td><td>Toggle and reorder status bar segments (multi-select picker)</td></tr><tr><td><code>/theme</code></td><td>Open theme picker</td></tr><tr><td><code>/theme &lt;id&gt;</code></td><td>Switch to a specific theme</td></tr></tbody></table></div><h2>Utility</h2>
 <div class="table-wrap"><table><thead><tr><th>Command</th><th>Description</th></tr></thead><tbody><tr><td><code>/repo</code></td><td>Show cwd, git branch, dirty state, remote, and HEAD</td></tr><tr><td><code>/keys</code></td><td>List all keybindings</td></tr><tr><td><code>/help</code></td><td>Show the command list</td></tr><tr><td><code>/ssh</code></td><td>Manage SSH hosts — list, add, remove (persists to <code>~/.cast/ssh.json</code>)</td></tr></tbody></table></div><h2>Keybindings</h2>
 <div class="table-wrap"><table><thead><tr><th>Action</th><th>Keys</th></tr></thead><tbody><tr><td>Cursor up/down/left/right</td><td>↑ / ↓ / ← / →</td></tr><tr><td>Word left/right</td><td>Alt+← / Alt+→ (or Ctrl+← / Ctrl+→)</td></tr><tr><td>Line start/end</td><td>Home / End (or Ctrl+A / Ctrl+E)</td></tr><tr><td>Delete char</td><td>Backspace / Delete</td></tr><tr><td>Delete word</td><td>Ctrl+W / Alt+Backspace</td></tr><tr><td>Delete to line start</td><td>Ctrl+U</td></tr><tr><td>Delete to line end</td><td>Ctrl+K</td></tr><tr><td>Submit</td><td>Enter</td></tr><tr><td>Stop turn / clear input</td><td>Esc</td></tr><tr><td>Exit (2× to confirm)</td><td>Ctrl+C</td></tr><tr><td>Attach image</td><td>Ctrl+G</td></tr><tr><td>Autocomplete</td><td>Tab</td></tr></tbody></table></div><p><strong>Esc</strong> stops the current turn while generating; clears the input otherwise.</p>
 <p><strong>Ctrl+C</strong> — press twice within 2s to exit. Does not stop a turn — use Esc for that.</p>

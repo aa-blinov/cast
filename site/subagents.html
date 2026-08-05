@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-<title>cast — One agent, many roles</title>
-<meta name="description" content="A role-based terminal agent harness. 18 built-in personas, same tools, different judgment. Runs on any OpenAI-compatible model — including the one on your own hardware.">
+<title>Sub-agents & Delegation — cast</title>
+<meta name="description" content="Sub-agents & Delegation documentation for cast, a role-based terminal agent harness.">
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Inter:wght@400;500;600;700&display=swap');
@@ -462,143 +462,250 @@ a:hover { color: #c084fc; text-decoration: none; }
 </head>
 <body>
 <header class="header">
+	<button class="menu-toggle" aria-label="Menu">&#9776;</button>
 	<a href="index.html" class="header-logo" aria-label="cast home"><img src="assets/favicon.svg" alt="cast logo"></a>
 	<span class="header-badge">v0.12.18</span>
 	<div class="header-links">
-		<a href="getting-started.html">Docs</a>
+		<a href="index.html">Home</a>
 		<a href="https://github.com/aa-blinov/cast">GitHub</a>
 	</div>
 </header>
 
-<div class="main main-landing">
-	<section class="hero">
-		<div class="hero-ascii-wrap"><img class="hero-ascii" src="assets/cast-banner.svg" alt="cast" width="440"></div>
-		<h1>One agent, <span class="accent">many roles</span></h1>
-		<p>cast brings a full cast to your terminal: senior dev, QA, DBA, security reviewer, PM, tech writer. Swap the role, not the tool. Runs on any OpenAI-compatible model, including the one on your own hardware.</p>
-		<div class="hero-buttons">
-			<a href="getting-started.html" class="btn-primary">Get Started</a>
-			<a href="https://github.com/aa-blinov/cast" class="btn-secondary">GitHub</a>
-		</div>
-		<div class="install-block">
-			<div class="label">macOS / Linux</div>
-			<code>curl -fsSL https://aa-blinov.github.io/cast/install | bash</code>
-			<div class="label" style="margin-top:12px">Windows (PowerShell)</div>
-			<code>irm https://aa-blinov.github.io/cast/install.ps1 | iex</code>
-			<div class="note">Requires Node.js 22+. Self-contained bundle — no npm packages needed at runtime.</div>
-		</div>
-	</section>
+<div class="sidebar-backdrop"></div>
+<nav class="sidebar">
+	<div class="sidebar-section">
+		<div class="sidebar-section-title">Documentation</div>
+			<a href="getting-started.html">Getting Started</a>
+			<a href="cli-reference.html">CLI Reference</a>
+			<a href="interactive-commands.html">Interactive Commands</a>
+			<a href="tools.html">Tools</a>
+			<a href="personas.html">Personas</a>
+			<a href="persona-research.html">Persona Research</a>
+			<a href="subagents.html" class="active">Sub-agents & Delegation</a>
+			<a href="skills.html">Skills</a>
+			<a href="plugins.html">Plugins</a>
+			<a href="rules.html">Rules</a>
+			<a href="mcp-servers.html">MCP Servers</a>
+			<a href="context-files.html">Context Files</a>
+			<a href="sessions.html">Sessions</a>
+			<a href="worktrees.html">Git Worktrees</a>
+			<a href="plan-mode.html">Plan Mode</a>
+			<a href="reasoning.html">Reasoning</a>
+			<a href="configuration.html">Configuration</a>
+			<a href="themes.html">Themes</a>
+			<a href="non-interactive-mode.html">Non-Interactive Mode</a>
+			<a href="eval-behavior.html">Behavior Evals</a>
+			<a href="eval-methodology.html">Eval Methodology</a>
+			<a href="architecture.html">Architecture</a>
+			<a href="eval-scoreboard.html">Model Scoreboard</a>
+			<a href="changelog.html">Changelog</a>
+	</div>
+</nav>
 
-	<section class="roles-showcase">
-		<h2>One session, one repo, four roles</h2>
-		<p>Same codebase, different lens. Swap personas mid-session — the tools don't change, the judgment does.</p>
-		<div class="roles-terminal">
-			<div class="roles-terminal-bar"><span></span><span></span><span></span></div>
-			<div class="roles-terminal-body">
-				<div><span class="prompt">&gt;</span> <span class="cmd">/persona pm</span></div>
-				<div class="out">Write a spec for the new auth flow</div>
-				<div><span class="prompt">&gt;</span> <span class="cmd">/persona senior</span></div>
-				<div class="out">Implement the spec — file by file, tested</div>
-				<div><span class="prompt">&gt;</span> <span class="cmd">/persona qa</span></div>
-				<div class="out">Review the implementation for edge cases</div>
-				<div><span class="prompt">&gt;</span> <span class="cmd">/persona tech-writer</span></div>
-				<div class="out">Document the new auth flow in the README</div>
-			</div>
-		</div>
-	</section>
+<main class="main">
+	<article class="content">
+		<h1>Sub-agents &amp; Delegation</h1>
+<p><code>cast</code> supports delegating complex, multi-turn, or parallel tasks to isolated sub-agents via the <code>task</code> tool.</p>
+<h2>Overview</h2>
+<p>A sub-agent is a background instance of the agent loop running in an isolated context:</p>
+<ul>
+<li><strong>Isolated Context</strong>: The main conversation context avoids clutter from intermediate tool calls, raw logs, or exploratory search results. Only the final summary or answer returns.</li>
+<li><strong>Parallel Execution</strong>: The main agent can spawn multiple sub-agents in a single turn (<code>Promise.all</code>) to explore different parts of a codebase simultaneously.</li>
+<li><strong>Dedicated System Prompts</strong>: Sub-agents load specialized prompts from <code>prompts/subagents/</code> (<code>worker</code>, <code>explore</code>, <code>review</code>).</li>
+<li><strong>Model Overrides</strong>: Sub-agents can use a different model via <code>/subagent-model</code> or <code>/subagent-model-provider</code>.</li>
+</ul>
+<h2>Enabling Delegation (<code>subagents</code> field)</h2>
+<p>The <code>task</code> tool is <strong>persona-gated</strong>. By default, built-in personas like <code>senior</code> or <code>qa</code> do <strong>not</strong> have access to <code>task</code>.</p>
+<p>To enable delegation, a persona&#39;s frontmatter must specify:</p>
+<pre><code class="language-yaml">subagents: true
+</code></pre>
+<p>The built-in <code>coder-with-subagents</code> persona has <code>subagents: true</code> set by default.</p>
+<h3>Restricting Subagent Roles (<code>subagentTypes</code>)</h3>
+<p>You can restrict which specific sub-agent roles a persona is allowed to spawn:</p>
+<pre><code class="language-yaml">subagents: true
+subagentTypes: [explore, review]   # Can spawn &#39;explore&#39; and &#39;review&#39;, but not &#39;worker&#39;
+</code></pre>
+<p>If <code>subagentTypes</code> is omitted, the persona can spawn any configured sub-agent role.</p>
+<h2>Built-in Sub-agent Roles</h2>
+<p><code>cast</code> includes three standard sub-agent roles:</p>
+<div class="table-wrap"><table><thead><tr><th>Role</th><th>Description</th><th>Allowed Built-in Tools</th><th>Usage</th></tr></thead><tbody><tr><td><code>worker</code></td><td>Default catch-all role</td><td>All built-in tools (except <code>task</code>)</td><td>Edits, refactoring, mixed tasks</td></tr><tr><td><code>explore</code></td><td>Read-only codebase exploration</td><td><code>read</code>, <code>grep</code>, <code>glob</code>, <code>ls</code>, <code>bash</code></td><td>Structural research, finding symbols/files</td></tr><tr><td><code>review</code></td><td>Independent code validation</td><td><code>read</code>, <code>grep</code>, <code>glob</code>, <code>ls</code>, <code>bash</code></td><td>Verification of changes before reporting done</td></tr></tbody></table></div><p>Sub-agents cannot delegate further: the <code>task</code> tool is stripped from all sub-agents to prevent infinite recursive spawning.</p>
+<h2>Frontmatter Configuration</h2>
+<p>Custom sub-agent prompts live in <code>prompts/subagents/&lt;name&gt;.md</code> or can be loaded dynamically. Frontmatter supports tool allowlists and context rules:</p>
+<pre><code class="language-markdown">---
+name: explore
+label: Explore
+description: Read-only codebase exploration
+tools: [read, grep, glob, ls, bash]
+agentsMd: true
+---
 
-	<section class="motivation">
-		<h2>Why personas, not just prompts</h2>
-		<p class="lede">Point a generic coding agent and a role-specific one at the same file, and they don't just answer differently — they look for different things. An appsec persona reading a schema flags the injection surface; a DBA persona reading the same schema flags missing indexes. Same repo, same tools, different definition of "done."</p>
-		<ul>
-			<li>Assigning an LLM an expert role measurably changes the <em>shape</em> of its output — deeper domain framing at the cost of some plain-language clarity, a real trade-off rather than a free upgrade. <a href="https://arxiv.org/abs/2605.29420" target="_blank" rel="noopener">Xiao et al., 2026 ↗</a></li>
-			<li>The effect isn't free-floating flavor text: matching the persona to the task helps, mismatching it hurts, and a mismatched persona measurably breaks more answers than a matched one fixes. <a href="https://arxiv.org/abs/2408.08631" target="_blank" rel="noopener">Kim et al., 2024 ↗</a></li>
-			<li>For tool-using agents specifically, explicit role/behavior rules — not just a persona label — are what fixes "under-acting" (skipping a tool the role should obviously use) and "over-speaking" (chatting instead of calling). <a href="https://arxiv.org/abs/2509.00482" target="_blank" rel="noopener">Ruangtanusak et al., 2025 ↗</a></li>
-			<li>The effect isn't universal — persona framing helps most on open-ended, advisory, judgment-heavy tasks, and least on narrow factual lookups. A persona only pays for itself when it actually matches the task.</li>
-		</ul>
-		<p class="closing">cast leans into that instead of working around it: swap <code>/persona</code> and the same tools, the same repo, and the same model produce a different investigation — different priorities, different tool sequencing, different conclusions, different follow-up questions. A security review that reasons like a senior dev misses different things than one that reasons like an appsec engineer, even reading identical code.</p>
-		<p class="closing"><a href="persona-research.html">Read the full research writeup →</a></p>
-	</section>
+You explore the codebase and report findings. You cannot edit files.
+</code></pre>
+<ul>
+<li><strong><code>tools</code></strong>: Allowlist of built-in tools. (MCP tools are not restricted by this list).</li>
+<li><strong><code>agentsMd</code></strong>: <code>true</code> (default) injects project <code>AGENTS.md</code> / <code>CLAUDE.md</code> context files into the sub-agent prompt.</li>
+</ul>
+<h2>Inherited Restrictions &amp; Security</h2>
+<p>Sub-agents inherit security and discovery constraints from the parent session:</p>
+<ul>
+<li><strong>Skills and MCP Inheritance</strong>: Parent restrictions on <code>skills</code> and <code>mcp</code> automatically cascade down to sub-agents. A persona restricted from an MCP server cannot bypass the restriction by delegating to a sub-agent.</li>
+<li><strong>Trust Gating</strong>: Sub-agents operate under the parent session&#39;s project trust decision.</li>
+<li><strong>CLI Overrides</strong>: Flags like <code>--no-skills</code> or <code>--skill &lt;path&gt;</code> are honored by sub-agents.</li>
+</ul>
+<h2>Model &amp; Provider Selection</h2>
+<p>You can run sub-agents on a separate model to save costs or speed up parallel searches:</p>
+<ul>
+<li><strong>TUI Commands</strong>:<ul>
+<li><code>/subagent-model &lt;model&gt;</code> — set model for sub-agents (e.g. <code>/subagent-model gpt-4o-mini</code>)</li>
+<li><code>/subagent-model-provider &lt;provider&gt;</code> — set provider for sub-agents</li>
+</ul>
+</li>
+<li><strong>Web UI</strong>: Managed under Settings → Model tab (<code>Subagent Model</code> slot).</li>
+<li><strong>Configuration</strong>: Persisted in <code>~/.cast/settings.json</code> under <code>subagentModel</code> and <code>subagentModelProvider</code>.</li>
+</ul>
 
-	<section class="features">
-		<div class="feature">
-			<span class="icon"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
-			<h3>A cast, not a coder</h3>
-			<p>18 built-in personas: senior dev, QA, DBA, security reviewer, PM, tech writer, sysadmin, devops, marketer, and more. Same tools, different judgment. Add your own with a single markdown file.</p>
-		</div>
-		<div class="feature">
-			<span class="icon"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg></span>
-			<h3>Runs where your code runs</h3>
-			<p>vLLM, Ollama, your own inference server, or any OpenAI-compatible API. No account, no telemetry, no cloud dependency. Your tokens stay on your hardware.</p>
-		</div>
-		<div class="feature">
-			<span class="icon"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span>
-			<h3>Real Tools, Real Work</h3>
-			<p>Reads files, writes code, runs shell commands, searches codebases — all in parallel. Delegates sub-tasks to isolated sub-agents. Rules, skills, and MCP servers extend capabilities.</p>
-		</div>
-		<div class="feature">
-			<span class="icon"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/><path d="M17.599 6.5a3 3 0 0 0 .399-1.375"/><path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"/><path d="M3.477 10.896a4 4 0 0 1 .585-.396"/><path d="M19.938 10.5a4 4 0 0 1 .585.396"/><path d="M6 18a4 4 0 0 1-1.967-.516"/><path d="M19.967 17.484A4 4 0 0 1 18 18"/></svg></span>
-			<h3>Reasoning Control</h3>
-			<p>Adjust reasoning effort per model: off, low, medium, high, max. Think blocks parsed automatically.</p>
-		</div>
-		<div class="feature">
-			<span class="icon"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/></svg></span>
-			<h3>Plan Mode</h3>
-			<p>Explore the codebase and write execution plans before implementing. Think before you build.</p>
-		</div>
-		<div class="feature">
-			<span class="icon"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 12h12"/><path d="m12 6 6 6-6 6"/></svg></span>
-			<h3>Ink TUI</h3>
-			<p>A proper terminal interface with multiline paste, image attachments, smooth animations, and 16 color themes.</p>
-		</div>
-	</section>
+	</article>
+		<nav class="doc-nav">
+			<a href="persona-research.html" class="doc-nav-prev">← Persona Research</a>
+			<a href="skills.html" class="doc-nav-next">Skills →</a>
+		</nav>
+</main>
 
-	<section class="comparison">
-		<h2>Why not opencode?</h2>
-		<p>Both are terminal agents with tools. Different philosophy.</p>
-		<div class="comparison-table-wrap">
-		<table>
-			<tr><th></th><th>opencode</th><th>cast</th></tr>
-			<tr><td>Approach</td><td>Universal agent</td><td>Role-based harness</td></tr>
-			<tr><td>Personas</td><td>Single agent, single lens</td><td>18 built-in + custom</td></tr>
-			<tr><td>Self-hosted focus</td><td>Works with any provider</td><td>Designed for local inference</td></tr>
-			<tr><td>Telemetry</td><td>Varies</td><td>None. Ever.</td></tr>
-		</table>
-		</div>
-	</section>
+<script>
+// Mobile sidebar toggle with backdrop
+(function() {
+	const sidebar = document.querySelector('.sidebar');
+	const backdrop = document.querySelector('.sidebar-backdrop');
+	const toggle = document.querySelector('.menu-toggle');
+	if (!toggle) return;
+	function close() { sidebar.classList.remove('open'); backdrop.classList.remove('visible'); }
+	function open() { sidebar.classList.add('open'); backdrop.classList.add('visible'); }
+	toggle.addEventListener('click', () => {
+		if (sidebar.classList.contains('open')) close(); else open();
+	});
+	backdrop.addEventListener('click', close);
+	document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+})();
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+// ── Mermaid viewer with zoom + diagram/code toggle ──
+document.addEventListener('DOMContentLoaded', () => {
+	const blocks = document.querySelectorAll('pre.mermaid');
+	if (!blocks.length) return;
 
-	<section class="landing-docs">
-		<h2>Documentation</h2>
-		<div class="docs-grid">
-			<a href="getting-started.html" class="doc-card"><h3>Getting Started</h3><p>Install, first run, provider setup</p></a>
-			<a href="cli-reference.html" class="doc-card"><h3>CLI Reference</h3><p>All flags and subcommands</p></a>
-			<a href="interactive-commands.html" class="doc-card"><h3>Interactive Commands</h3><p>All slash commands in the TUI</p></a>
-			<a href="tools.html" class="doc-card"><h3>Tools</h3><p>Built-in tools the agent uses</p></a>
-			<a href="personas.html" class="doc-card"><h3>Personas</h3><p>Built-in personas, custom frontmatter, and tool/skill allowlists</p></a>
-			<a href="persona-research.html" class="doc-card"><h3>Persona Research</h3><p>Research on role prompting and agent behavior</p></a>
-			<a href="subagents.html" class="doc-card"><h3>Sub-agents & Delegation</h3><p>Sub-agent delegation, parallel execution, task tool, and roles</p></a>
-			<a href="skills.html" class="doc-card"><h3>Skills</h3><p>Agent Skills spec, loading, creating</p></a>
-			<a href="plugins.html" class="doc-card"><h3>Plugins</h3><p></p></a>
-			<a href="rules.html" class="doc-card"><h3>Rules</h3><p>Cursor-compatible rule system</p></a>
-			<a href="mcp-servers.html" class="doc-card"><h3>MCP Servers</h3><p>MCP configuration</p></a>
-			<a href="context-files.html" class="doc-card"><h3>Context Files</h3><p>AGENTS.md / CLAUDE.md hierarchy</p></a>
-			<a href="sessions.html" class="doc-card"><h3>Sessions</h3><p>Persistence, resume, compaction</p></a>
-			<a href="worktrees.html" class="doc-card"><h3>Git Worktrees</h3><p>Isolated git worktree sessions</p></a>
-			<a href="plan-mode.html" class="doc-card"><h3>Plan Mode</h3><p>Explore and plan before implementing</p></a>
-			<a href="reasoning.html" class="doc-card"><h3>Reasoning</h3><p>Reasoning levels and provider support</p></a>
-			<a href="configuration.html" class="doc-card"><h3>Configuration</h3><p>Settings, env vars, .cast/ layout</p></a>
-			<a href="themes.html" class="doc-card"><h3>Themes</h3><p>Color themes for the TUI</p></a>
-			<a href="non-interactive-mode.html" class="doc-card"><h3>Non-Interactive Mode</h3><p>cast run and JSON output</p></a>
-			<a href="eval-behavior.html" class="doc-card"><h3>Behavior Evals</h3><p>Real-model behavioral contracts and signals</p></a>
-			<a href="eval-methodology.html" class="doc-card"><h3>Eval Methodology</h3><p>Scoreboard methodology, repeats, traces, and regressions</p></a>
-			<a href="architecture.html" class="doc-card"><h3>Architecture</h3><p>Source layout and design decisions</p></a>
-			<a href="eval-scoreboard.html" class="doc-card"><h3>Model Scoreboard</h3><p>Per-model certification scores against the behavior eval suite</p></a>
-			<a href="changelog.html" class="doc-card"><h3>Changelog</h3><p>Version history and feature highlights</p></a>
-		</div>
-	</section>
+	mermaid.initialize({ startOnLoad: false, theme: 'dark' });
 
-	<footer class="footer">
-		cast is open source under the MIT License. Works with OpenRouter, OpenAI, Ollama, vLLM, LiteLLM, Azure OpenAI, and any OpenAI-compatible API.
-	</footer>
-</div>
+	blocks.forEach((pre, i) => {
+		const raw = atob(pre.dataset.raw || '') || pre.textContent;
+
+		// Build viewer shell
+		const viewer = document.createElement('div');
+		viewer.className = 'mermaid-viewer';
+
+		const toolbar = document.createElement('div');
+		toolbar.className = 'mermaid-toolbar';
+		toolbar.innerHTML =
+			'<button class="active" data-view="diagram">Diagram</button>' +
+			'<button data-view="code">Code</button>' +
+			'<span class="zoom-label">Zoom:</span>' +
+			'<button data-zoom="out">−</button>' +
+			'<button data-zoom="reset">100%</button>' +
+			'<button data-zoom="in">+</button>';
+
+		const diagram = document.createElement('div');
+		diagram.className = 'mermaid-diagram';
+
+		const code = document.createElement('pre');
+		code.className = 'mermaid-code';
+		code.textContent = raw;
+
+		viewer.append(toolbar, diagram, code);
+		pre.replaceWith(viewer);
+
+		// Render mermaid
+		const id = 'mermaid-' + i;
+		mermaid.render(id, raw).then(({ svg }) => {
+			diagram.innerHTML = svg;
+		}).catch(err => {
+			diagram.innerHTML = '<pre style="color:#fb7185">' + err.message + '</pre>';
+		});
+
+		// Zoom + pan state
+		let zoom = 1, panX = 0, panY = 0, dragging = false, startX, startY;
+		const zoomLabel = toolbar.querySelector('[data-zoom="reset"]');
+		const applyTransform = () => {
+			const svg = diagram.querySelector('svg');
+			if (svg) svg.style.transform = 'translate(' + panX + 'px,' + panY + 'px) scale(' + zoom + ')';
+			zoomLabel.textContent = Math.round(zoom * 100) + '%';
+		};
+
+		// Drag to pan (mouse + touch)
+		const getPos = e => e.touches ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : { x: e.clientX, y: e.clientY };
+		const onStart = e => {
+			const p = getPos(e); dragging = true;
+			startX = p.x - panX; startY = p.y - panY;
+			diagram.classList.add('dragging');
+		};
+		const onMove = e => {
+			if (!dragging) return;
+			const p = getPos(e);
+			panX = p.x - startX; panY = p.y - startY;
+			applyTransform();
+		};
+		const onEnd = () => { dragging = false; diagram.classList.remove('dragging'); };
+	
+diagram.addEventListener('mousedown', e => { onStart(e); e.preventDefault(); });
+		document.addEventListener('mousemove', onMove);
+		document.addEventListener('mouseup', onEnd);
+		diagram.addEventListener('touchstart', e => { if (e.touches.length === 1) onStart(e); }, { passive: true });
+		document.addEventListener('touchmove', e => { if (e.touches.length === 1 && dragging) onMove(e); }, { passive: true });
+		document.addEventListener('touchend', onEnd);
+
+		// Pinch to zoom (touch)
+		let lastPinchDist = 0;
+		diagram.addEventListener('touchstart', e => {
+			if (e.touches.length === 2) {
+				const dx = e.touches[0].clientX - e.touches[1].clientX;
+				const dy = e.touches[0].clientY - e.touches[1].clientY;
+				lastPinchDist = Math.hypot(dx, dy);
+			}
+		}, { passive: true });
+		diagram.addEventListener('touchmove', e => {
+			if (e.touches.length === 2) {
+				e.preventDefault();
+				const dx = e.touches[0].clientX - e.touches[1].clientX;
+				const dy = e.touches[0].clientY - e.touches[1].clientY;
+				const dist = Math.hypot(dx, dy);
+				if (lastPinchDist > 0) {
+					zoom = Math.min(3, Math.max(0.25, zoom * (dist / lastPinchDist)));
+					applyTransform();
+				}
+				lastPinchDist = dist;
+			}
+		});
+		diagram.addEventListener('touchend', e => { if (e.touches.length < 2) lastPinchDist = 0; });
+
+		// Zoom + view toggle buttons
+		toolbar.addEventListener('click', e => {
+			const btn = e.target.closest('button');
+			if (!btn) return;
+
+			if (btn.dataset.view) {
+				toolbar.querySelectorAll('[data-view]').forEach(b => b.classList.remove('active'));
+				btn.classList.add('active');
+				diagram.style.display = btn.dataset.view === 'diagram' ? '' : 'none';
+				code.classList.toggle('visible', btn.dataset.view === 'code');
+				return;
+			}
+
+			if (btn.dataset.zoom === 'in') zoom = Math.min(3, zoom + 0.25);
+			else if (btn.dataset.zoom === 'out') zoom = Math.max(0.25, zoom - 0.25);
+			else if (btn.dataset.zoom === 'reset') { zoom = 1; panX = 0; panY = 0; }
+			applyTransform();
+		});
+	});
+});
+</script>
 </body>
 </html>

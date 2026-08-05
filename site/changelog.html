@@ -5,85 +5,120 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
 <title>Changelog — cast</title>
 <meta name="description" content="Changelog documentation for cast, a role-based terminal agent harness.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
 <style>
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Inter:wght@400;500;600;700&display=swap');
+
 :root {
-	/* cast palette — cyan→violet gradient */
-	--bg: #0a0e14;
-	--bg-secondary: #0f1520;
-	--bg-tertiary: #151c28;
-	--border: #1e2a3a;
-	--text: #e2e8f0;
-	--text-secondary: #64748b;
-	--text-muted: #475569;
-	--accent: #38e0ff;
-	--accent-hover: #5eead4;
-	--accent-subtle: rgba(56,224,255,.1);
-	--green: #34d399;
-	--green-subtle: rgba(52,211,153,.1);
-	--orange: #fbbf24;
-	--red: #fb7185;
-	--code-bg: #0f1520;
-	--sidebar-w: 280px;
-	--header-h: 64px;
-	--font: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+	--bg: #08080a;
+	--bg-surface: #131317;
+	--bg-raised: #1e1e24;
+	--bg-hover: #28282e;
+	--border: #35353d;
+	--border-active: #4a4a55;
+	--border-subtle: rgba(53, 53, 61, 0.55);
+	--text: #fafafa;
+	--text-dim: #a1a1aa;
+	--text-muted: #71717a;
+	--cyan: #8b5cf6;
+	--violet: #8b5cf6;
+	--teal: #2dd4bf;
+	--purple: #a78bfa;
+	--blue: #60a5fa;
+	--green: #22c55e;
+	--amber: #eab308;
+	--rose: #ef4444;
+	--persona: #c084fc;
+	--accent: #8b5cf6;
+	--accent-subtle: rgba(139, 92, 246, 0.12);
+	--accent-muted: rgba(139, 92, 246, 0.2);
+	--gradient: linear-gradient(135deg, #a855f7, #8b5cf6);
+	--code-bg: #111116;
+	--sidebar-w: 272px;
+	--header-h: 48px;
+	--font: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
 	--font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+	--radius: 8px;
+	--radius-sm: 6px;
 }
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html { font-size: 16px; scroll-behavior: smooth; }
+html { font-size: 15px; scroll-behavior: smooth; }
 body {
 	font-family: var(--font);
 	background: var(--bg);
 	color: var(--text);
-	line-height: 1.6;
+	line-height: 1.55;
 	-webkit-font-smoothing: antialiased;
 }
-a { color: var(--accent); text-decoration: none; }
-a:hover { color: var(--accent-hover); text-decoration: underline; }
+a { color: var(--purple); text-decoration: none; transition: color .15s ease; }
+a:hover { color: #c084fc; text-decoration: none; }
 
-/* ── Header ─────────────────────────────────────────────────────────── */
+/* ── Header (Cast Web UI Bar) ─────────────────────────────────────── */
 .header {
 	position: fixed; top: 0; left: 0; right: 0; z-index: 100;
 	height: var(--header-h);
-	background: var(--bg-secondary);
+	background: var(--bg-surface);
 	border-bottom: 1px solid var(--border);
-	display: flex; align-items: center; padding: 0 24px;
+	display: flex; align-items: center; padding: 0 16px; gap: 12px;
 }
 .header-logo {
-	font-size: 1.25rem; font-weight: 700; color: var(--text);
-	display: flex; align-items: center; gap: 10px;
+	display: inline-flex; align-items: center; gap: 8px;
+	font-family: var(--font-mono); font-size: 1rem; font-weight: 700;
+	color: var(--text);
 }
-.header-links { margin-left: auto; display: flex; gap: 20px; align-items: center; }
-.header-links a { color: var(--text-secondary); font-size: .875rem; font-weight: 500; }
-.header-links a:hover { color: var(--text); text-decoration: none; }
+.header-logo img {
+	width: 20px; height: 20px; border-radius: 4px; display: inline-block;
+}
+.header-badge {
+	font-family: var(--font-mono); font-size: .7rem; font-weight: 500;
+	color: var(--teal); background: rgba(45, 212, 191, 0.12);
+	border: 1px solid rgba(45, 212, 191, 0.25);
+	padding: 1px 7px; border-radius: 12px;
+}
+.header-links { margin-left: auto; display: flex; gap: 14px; align-items: center; }
+.header-links a {
+	color: var(--text-dim); font-size: .8rem; font-weight: 500;
+	font-family: var(--font-mono); padding: 4px 8px; border-radius: var(--radius-sm);
+	transition: color .15s, background .15s;
+}
+.header-links a:hover { color: var(--text); background: var(--bg-raised); }
 
-/* ── Sidebar ────────────────────────────────────────────────────────── */
+/* ── Sidebar (Cast Web Navigation) ───────────────────────────────── */
 .sidebar {
 	position: fixed; top: var(--header-h); left: 0; bottom: 0;
-	width: var(--sidebar-w); background: var(--bg-secondary);
+	width: var(--sidebar-w); background: var(--bg-surface);
 	border-right: 1px solid var(--border);
-	overflow-y: auto; padding: 16px 0;
+	overflow-y: auto; padding: 12px 0 24px;
 }
-.sidebar-section { padding: 0 12px; margin-bottom: 8px; }
+.sidebar-section { padding: 0 10px; margin-bottom: 12px; }
 .sidebar-section-title {
-	font-size: .75rem; font-weight: 600; text-transform: uppercase;
-	letter-spacing: .05em; color: var(--text-muted);
-	padding: 8px 12px 4px;
+	font-family: var(--font-mono); font-size: .68rem; font-weight: 600;
+	text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted);
+	padding: 6px 10px 4px;
 }
 .sidebar a {
-	display: block; padding: 6px 12px; border-radius: 6px;
-	font-size: .875rem; color: var(--text-secondary); line-height: 1.4;
+	display: flex; align-items: center; justify-content: space-between;
+	padding: 6px 10px; border-radius: var(--radius-sm);
+	font-size: .82rem; color: var(--text-dim); line-height: 1.4;
+	font-family: var(--font); transition: background .15s, color .15s;
 }
-.sidebar a:hover { background: var(--bg-tertiary); color: var(--text); text-decoration: none; }
+.sidebar a:hover { background: var(--bg-raised); color: var(--text); }
 .sidebar a.active {
-	background: var(--accent-subtle); color: var(--accent); font-weight: 500;
+	background: var(--accent-subtle); color: var(--purple); font-weight: 500;
+	border: 1px solid var(--accent-muted);
+}
+.sidebar a .badge {
+	font-family: var(--font-mono); font-size: .65rem; color: var(--text-muted);
 }
 
-/* ── Mobile menu ────────────────────────────────────────────────────── */
+/* ── Mobile Menu & Responsiveness ────────────────────────────────── */
 .menu-toggle {
-	display: none; background: none; border: none; color: var(--text);
-	font-size: 1.5rem; cursor: pointer; padding: 4px 8px;
+	display: none; background: none; border: 1px solid var(--border);
+	color: var(--text-dim); font-size: 1.1rem; cursor: pointer;
+	padding: 4px 8px; border-radius: var(--radius-sm);
 }
+.menu-toggle:hover { color: var(--text); border-color: var(--border-active); }
 @media (max-width: 768px) {
 	.sidebar {
 		transform: translateX(-100%); transition: transform .2s ease;
@@ -92,77 +127,56 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 	.sidebar.open { transform: translateX(0); }
 	.sidebar-backdrop {
 		position: fixed; inset: 0; z-index: 98;
-		background: rgba(0,0,0,.5); backdrop-filter: blur(2px);
+		background: rgba(0,0,0,.6); backdrop-filter: blur(4px);
 		display: none;
 	}
 	.sidebar-backdrop.visible { display: block; }
-	.menu-toggle { display: block; margin-right: 8px; }
-	.main { margin-left: 0 !important; padding: 20px 16px 60px !important; }
+	.menu-toggle { display: block; }
+	.main { margin-left: 0 !important; padding: 20px 14px 60px !important; }
 	.header { padding: 0 12px; }
-	.header-links { gap: 14px; }
-
-	/* Hero */
-	.hero { padding: 56px 16px 40px; }
-	.hero h1 { font-size: 2rem; }
-	.hero p { font-size: 1rem; margin-bottom: 24px; }
-	.hero-buttons a { padding: 10px 22px; font-size: .9rem; }
-	.install-block { margin-top: 24px; padding: 12px 14px; }
+	.header-links { gap: 8px; }
+	.hero { padding: 40px 16px 32px; }
+	.hero h1 { font-size: 1.6rem; }
+	.hero p { font-size: .92rem; margin-bottom: 20px; }
+	.install-block { padding: 12px 14px; }
 	.install-block code { font-size: .75rem; word-break: break-all; }
-
-	/* Features */
-	.features { grid-template-columns: 1fr; padding: 24px 16px 40px; gap: 12px; }
-	.feature { padding: 16px; }
-
-	/* Providers */
-	.providers { padding: 24px 16px; }
-	.providers h2 { font-size: 1.25rem; }
-
-	/* Docs grid */
-	.landing-docs { padding: 24px 16px 60px; }
-	.landing-docs h2 { font-size: 1.25rem; }
-	.docs-grid { grid-template-columns: 1fr; }
-
-	/* Content */
 	.content h1 { font-size: 1.5rem; }
-	.content h2 { font-size: 1.25rem; margin: 28px 0 10px; }
-	.content h3 { font-size: 1.1rem; }
-	.content table { font-size: .8rem; }
+	.content h2 { font-size: 1.2rem; margin: 24px 0 10px; }
+	.content table { font-size: .78rem; }
 	.content th, .content td { padding: 6px 8px; }
-	.content pre:not(.mermaid-code) { padding: 12px; font-size: .8rem; }
-
-	/* Mermaid */
-	.mermaid-diagram { padding: 12px; max-height: 45vh; }
-	.mermaid-code { max-height: 45vh; }
-	.mermaid-toolbar { padding: 6px 8px; }
-	.mermaid-toolbar button { padding: 3px 8px; font-size: .75rem; }
+	.content pre:not(.mermaid-code) { padding: 12px; font-size: .78rem; border-radius: 6px; }
 }
 
-/* ── Main content ───────────────────────────────────────────────────── */
+/* ── Main Workspace ──────────────────────────────────────────────── */
 .main {
 	margin-left: var(--sidebar-w);
 	margin-top: var(--header-h);
 	padding: 32px 48px 80px;
-	max-width: 900px;
+	max-width: 960px;
 }
 .main-landing {
 	margin-left: 0; max-width: none; padding: 0;
 }
 
-/* ── Typography ─────────────────────────────────────────────────────── */
-.content h1 { font-size: 2rem; font-weight: 700; margin: 0 0 16px; line-height: 1.3; }
-.content h2 {
-	font-size: 1.5rem; font-weight: 600; margin: 40px 0 12px;
-	padding-bottom: 8px; border-bottom: 1px solid var(--border);
+/* ── Typography & Content ────────────────────────────────────────── */
+.content h1 {
+	font-family: var(--font); font-size: 1.8rem; font-weight: 700;
+	margin: 0 0 16px; line-height: 1.25; color: var(--text);
+	letter-spacing: -0.02em;
 }
-.content h3 { font-size: 1.2rem; font-weight: 600; margin: 28px 0 8px; }
-.content h4 { font-size: 1rem; font-weight: 600; margin: 20px 0 6px; }
-.content p { margin: 0 0 16px; }
-.content ul, .content ol { margin: 0 0 16px; padding-left: 24px; }
+.content h2 {
+	font-family: var(--font); font-size: 1.35rem; font-weight: 600;
+	margin: 36px 0 12px; padding-bottom: 6px;
+	border-bottom: 1px solid var(--border); color: var(--text);
+}
+.content h3 { font-size: 1.1rem; font-weight: 600; margin: 24px 0 8px; color: var(--text); }
+.content h4 { font-size: .95rem; font-weight: 600; margin: 18px 0 6px; color: var(--text-dim); }
+.content p { margin: 0 0 14px; color: var(--text-dim); font-size: .92rem; }
+.content ul, .content ol { margin: 0 0 14px; padding-left: 20px; color: var(--text-dim); font-size: .92rem; }
 .content li { margin: 4px 0; }
-.content strong { font-weight: 600; }
-.content hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+.content strong { color: var(--text); font-weight: 600; }
+.content hr { border: none; border-top: 1px solid var(--border); margin: 28px 0; }
 .content blockquote {
-	border-left: 3px solid var(--accent); padding: 8px 16px;
 	margin: 0 0 16px; background: var(--accent-subtle); border-radius: 0 6px 6px 0;
 }
 .content blockquote p:last-child { margin-bottom: 0; }
@@ -449,7 +463,8 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 <body>
 <header class="header">
 	<button class="menu-toggle" aria-label="Menu">&#9776;</button>
-	<a href="index.html" class="header-logo">cast</a>
+	<a href="index.html" class="header-logo" aria-label="cast home"><img src="assets/favicon.svg" alt="cast logo"></a>
+	<span class="header-badge">v0.12.18</span>
 	<div class="header-links">
 		<a href="index.html">Home</a>
 		<a href="https://github.com/aa-blinov/cast">GitHub</a>
@@ -466,17 +481,21 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 			<a href="tools.html">Tools</a>
 			<a href="personas.html">Personas</a>
 			<a href="persona-research.html">Persona Research</a>
+			<a href="subagents.html">Sub-agents & Delegation</a>
 			<a href="skills.html">Skills</a>
 			<a href="plugins.html">Plugins</a>
 			<a href="rules.html">Rules</a>
 			<a href="mcp-servers.html">MCP Servers</a>
 			<a href="context-files.html">Context Files</a>
 			<a href="sessions.html">Sessions</a>
+			<a href="worktrees.html">Git Worktrees</a>
 			<a href="plan-mode.html">Plan Mode</a>
 			<a href="reasoning.html">Reasoning</a>
 			<a href="configuration.html">Configuration</a>
 			<a href="themes.html">Themes</a>
 			<a href="non-interactive-mode.html">Non-Interactive Mode</a>
+			<a href="eval-behavior.html">Behavior Evals</a>
+			<a href="eval-methodology.html">Eval Methodology</a>
 			<a href="architecture.html">Architecture</a>
 			<a href="eval-scoreboard.html">Model Scoreboard</a>
 			<a href="changelog.html" class="active">Changelog</a>
@@ -487,6 +506,118 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 	<article class="content">
 		<h1>Changelog</h1>
 <p>All notable user-facing changes to cast, newest first.</p>
+<h2>0.12.18</h2>
+<h3>Fixed</h3>
+<ul>
+<li>Web UI settings modal layout on mobile: form fields stack vertically instead of cramming 3 inputs into one narrow row; select dropdowns (Web tab search/fetch) are full-width instead of clipped at 180px; marketplace plugin names truncate with ellipsis instead of overflowing the card with horizontal scroll.</li>
+<li>Web UI settings dom warnings: password inputs wrapped in <code>&lt;form&gt;</code> elements; API key field given <code>autocomplete=&quot;off&quot;</code>.</li>
+<li>Web UI model pickers streamlined: removed &quot;(reasoning)&quot; suffix from model names, removed &quot;— @ provider&quot; tags from section titles, sub-agent and plan-mode provider pickers now show &quot;openrouter (default)&quot; instead of duplicating the active provider in the dropdown list.</li>
+<li>Web UI composer: placeholder simplified to &quot;Type a message…&quot;, max-height raised to 150px to prevent scrollbar on mobile.</li>
+</ul>
+<h3>Changed</h3>
+<ul>
+<li>Web UI settings reasoning section: &quot;Reasoning — current: off&quot; simplified to just &quot;Reasoning&quot;.</li>
+</ul>
+<h2>0.12.17</h2>
+<h3>Fixed</h3>
+<ul>
+<li>Web UI composer placeholder simplified to just &quot;Type a message…&quot; — the previous context-sensitive hints (&quot;↑↓ to navigate, Enter to pick&quot; / &quot;Type your answer…&quot;) were truncated on narrow mobile screens and added no value since the picker UI is self-explanatory.</li>
+<li>Web UI composer textarea no longer shows a scrollbar on mobile when the text wraps past two lines. <code>max-height</code> raised from 100px to 150px, and <code>overflow: hidden</code> removed (it was blocking the JS auto-resize on iOS).</li>
+</ul>
+<h3>Internal</h3>
+<ul>
+<li>69 inline regex literals hoisted to module-level <code>const</code> declarations across <code>src/</code> (biome <code>performance/useTopLevelRegex</code>), including all core modules (<code>frontmatter</code>, <code>hooks</code>, <code>mcp</code>, <code>plan</code>, <code>plugins</code>, <code>rules</code>, <code>session</code>, <code>skills</code>, <code>tools/</code>, <code>llm</code>, <code>vendors</code>, <code>startup</code>, <code>upgrade</code>), all UI modules (<code>commands</code>, <code>keys</code>, <code>stdin-buffer</code>, <code>input-parser</code>, <code>word-nav</code>, <code>useTerminalResync</code>, <code>App</code>), and all web modules (<code>app</code>, <code>composer</code>, <code>message-submit</code>, <code>reasoning-split</code>, <code>sidebar-utils</code>, <code>tool-card</code>, <code>new-session-modal</code>, <code>server</code>, <code>bridge</code>, <code>commands</code>).</li>
+<li>16 <code>noAwaitInLoops</code> warnings suppressed with explicit engineering justification — all are genuinely sequential operations where <code>Promise.all</code> is semantically wrong or unsafe: the main agent turn loop, SSE streaming, MCP cursor pagination, provider probe retry, filesystem traversal (EMFILE risk), sequential file upload, and interactive SSH key/picker prompts.</li>
+<li>Removed one unused <code>GITHUB_URL_PREFIX</code> const in <code>bridge.ts</code>.</li>
+<li><code>text-replace.ts</code> regex consts repaired after a broken <code>replaceAll</code> in an intermediate commit self-referenced one const and left three others unused. Tests back to 1508/1508.</li>
+</ul>
+<h2>0.12.16</h2>
+<h3>Added</h3>
+<ul>
+<li><code>/worktree &lt;name&gt;</code> slash command — switch the running session into an isolated git worktree from inside the TUI. Behaves identically to the existing <code>--worktree &lt;name&gt;</code> CLI flag: creates the worktree at <code>&lt;repo&gt;/.cast/worktrees/&lt;name&gt;</code> on a fresh <code>cast-&lt;name&gt;</code> branch off <code>HEAD</code> (or reuses an existing one), switches <code>session.cwd</code> so subsequent bash/read/write/edit see the worktree path, and leaves the main checkout untouched. A new <code>state</code> event&#39;s <code>cwd</code> field reflects the change so headless consumers can observe it. Branches off <code>findCanonicalGitRoot</code>, so <code>/worktree nested</code> invoked from inside a worktree still anchors the new one at the main repo&#39;s <code>.cast/worktrees/</code> dir — no linked-worktree-of-a-worktree.</li>
+<li><code>cast run --interactive</code> (JSONL protocol) now accepts a <code>command</code> action that pipes a slash command through the same <code>handleInput</code> the TUI uses, so evaluators and headless agents can drive <code>/worktree</code> (and any other slash command) end-to-end without a real TTY. <code>{type:&quot;command&quot;,name:&quot;worktree&quot;,args:&quot; foo&quot;}</code> is the canonical shape. <code>notice</code> events forward transient toasts; <code>state</code> events carry <code>cwd = session.cwd ?? result.cwd</code> so cwd changes are observable.</li>
+<li><code>--worktree &lt;name&gt;</code> / <code>-w &lt;name&gt;</code> (also on <code>cast run</code>) runs the session inside an isolated git worktree. The worktree is created (or reused) at <code>&lt;repo&gt;/.cast/worktrees/&lt;name&gt;</code> on a fresh <code>cast-&lt;name&gt;</code> branch off <code>HEAD</code>; bash, read, write, and edit all see the worktree path, and the main checkout is left untouched. Two <code>--worktree</code> runs in parallel never collide. Add <code>.cast/</code> to your <code>.gitignore</code>. The worktree and branch are left on disk on exit — remove them with <code>git worktree remove .cast/worktrees/&lt;name&gt;</code> and <code>git branch -D cast-&lt;name&gt;</code> when done. Requires being inside a git checkout with at least one commit; both <code>--worktree foo</code> and <code>--worktree=foo</code> are accepted.</li>
+</ul>
+<h3>Changed</h3>
+<ul>
+<li><code>cast -c</code> / <code>cast --continue</code> is now scoped to the current working directory. Previously it resumed the most recent session <em>globally</em> (whatever project was last touched on the machine), which silently dragged the agent into an unrelated project when the user <code>cd</code>&#39;d somewhere fresh. It now resumes the most recent session in the <em>current cwd</em> and exits 1 with a clear error if no session exists there. The &quot;no session&quot; check runs <em>before</em> provider-model fetch and MCP setup, so the failure path is fast (milliseconds) instead of waiting on a 15-second model probe first. <code>--resume=&lt;id&gt;</code> still works globally — the lookup by explicit id is not cwd-bound, since the user already knows which session they want. Mirrors <code>claude -c</code>&#39;s behaviour (an upstream tracker for the same bug is anthropics/claude-code#35226).</li>
+<li>Web UI: <code>preact</code>, <code>preact/hooks</code>, and <code>htm</code> are now served from <code>/vendor/*.mjs</code> instead of <code>https://esm.sh/...</code>. On a remote network with non-trivial RTT to esm.sh this removes 3 round-trips from the critical render path (~900ms saved on a 100ms-RTT connection, where each preact fetch takes ~400ms); on localhost the improvement is invisible because the round-trips are sub-10ms. CSP also drops <code>https://esm.sh</code> from <code>script-src</code> and <code>connect-src</code> since no code path needs it anymore. The google-fonts preconnect hints are downgraded to <code>dns-prefetch</code> since the only font load is user-initiated (Settings &gt; Font) and the DNS resolution cost on every page load was wasted for the 99% of loads that never switch.</li>
+<li>Web UI composer submit no longer refetches the whole session list after sending a message. The previous <code>loadSessions()</code> round trip was redundant — the server pushes <code>session_update</code> SSE events with the new message count and auto-derived title after every turn — and it stalled the optimistic feedback loop so the user saw nothing change in the sidebar until the round trip landed.</li>
+</ul>
+<h2>0.12.15</h2>
+<h3>Added</h3>
+<ul>
+<li>Web Settings → Model tab now exposes a 3-state <code>thinking</code> control for MiniMax-M3 (Enabled / Adaptive / Disabled) instead of a single always-on toggle. The wire format matches the live OpenAI-compatible API: Enabled is the default (no field), Adaptive sends <code>thinking: { type: &quot;adaptive&quot; }</code>, Disabled sends <code>thinking: { type: &quot;disabled&quot; }</code>. The Web UI now surfaces the saved level in the section header (previously hard-coded to &quot;off&quot; because the web <code>/current</code> endpoint was not returning the field).</li>
+</ul>
+<h3>Fixed</h3>
+<ul>
+<li>Web Settings → Provider tab no longer freezes the modal: <code>SettingsProvider</code> was calling <code>useRef</code> without importing it, so the click on the tab threw <code>ReferenceError</code> during render and Preact dropped the pane subtree. The picker now renders the saved providers, edit/delete buttons, and the add form.</li>
+<li>Web Settings → Model tab reasoning picker mirrors the saved level after apply. The dropdown previously snapped back to &quot;Pick a level…&quot; after a successful apply, which made the selection look lost; it now stays on the just-applied value and the ✓ button returns to its gray state when the picked value matches the current one.</li>
+</ul>
+<h2>0.12.14</h2>
+<h3>Fixed</h3>
+<ul>
+<li>Web UI theme picker now wraps long theme names inside the swatch button so the full label is visible instead of overflowing the card.</li>
+<li>Open-work gate no longer leaks the user-facing &quot;falling through to the user&quot; notice into the model transcript: it is delivered only through the <code>open_work_gate_exhausted</code> event, so a resumed session does not re-read the orphan reminder.</li>
+</ul>
+<h2>0.12.13</h2>
+<h3>Fixed</h3>
+<ul>
+<li>TUI question picker now forwards the user&#39;s free-form answer to the model instead of a literal <code>(custom — see above)</code> placeholder, and the web bridge accepts any value (not just model-supplied options), so a custom answer typed in the composer no longer gets dropped.</li>
+<li>Web question card now shows an inline textarea under each option group so the user can type a custom answer alongside the model-supplied options; the textarea is styled to match the option buttons.</li>
+</ul>
+<h2>0.12.12</h2>
+<h3>Fixed</h3>
+<ul>
+<li>Preserved Web UI tool card state (expanded result, open image preview) across the rest of the turn: a tool the user opened no longer collapses when another tool&#39;s <code>tool_start</code> / <code>tool_end</code> event arrives, and stays open through the final <code>assistant_message</code> swap from the live stream into the settled message.</li>
+<li>Added <code>Content-Encoding: gzip</code> for <code>/api/sessions/:id</code> and other JSON responses above 8KB; large agentic threads open noticeably faster on slow links (the <code>/api/sessions/:id</code> payload typically drops 5-10x with the repetitive tool output these threads contain).</li>
+<li>Added a <code>(session_id, role, seq)</code> index on the <code>messages</code> table to back <code>getHistoryPage</code>&#39;s boundary lookup and existence check.</li>
+</ul>
+<h2>0.12.11</h2>
+<h3>Fixed</h3>
+<ul>
+<li>Preserved in-progress Web UI reasoning and tool blocks across page reloads, including deterministic ordering while a tool is running.</li>
+<li>Reconciled active streaming snapshots with persisted assistant messages to prevent duplicated or reordered reasoning and tool cards after reconnects.</li>
+</ul>
+<h2>0.12.10</h2>
+<h3>Fixed</h3>
+<ul>
+<li>Fixed TUI and Web UI question pickers so multi-question flows do not reopen duplicate pickers or remain visible after answering.</li>
+<li>Fixed plan approval options to render vertically and removed duplicate plan decision notices.</li>
+<li>Fixed TUI plan mode so <code>plan_done</code> remains available after switching from Build mode, including providers that require explicit tool parameters.</li>
+<li>Added provider request timeouts and a bounded LLM retry deadline so Settings and stalled provider calls no longer remain in loading indefinitely.</li>
+<li>Updated question answer summaries to use the compact <code>Question: … Answer: …</code> format.</li>
+</ul>
+<h3>Changed</h3>
+<ul>
+<li>Split token scoreboard metrics into input/output percentile columns and removed obsolete Commit and Consistent columns.</li>
+</ul>
+<h2>0.12.9</h2>
+<h3>Fixed</h3>
+<ul>
+<li>Fixed Web UI startup after the recent client modularization by restoring the resource-load and modal-focus hooks used by the root application.</li>
+</ul>
+<h3>Changed</h3>
+<ul>
+<li>Split Web UI settings panels, message submission, panel resizing, and SSE handling into focused modules without changing the TUI or Web UI behavior.</li>
+</ul>
+<h2>0.12.8</h2>
+<h3>Added</h3>
+<ul>
+<li>Added a themed web sign-in page with HttpOnly, SameSite session cookies, SQLite-backed web sessions, disabled API caching, and failed-login rate limiting.</li>
+<li>Added provider-aware reasoning configuration documentation and built-in references for providers, web access, and project configuration.</li>
+</ul>
+<h3>Fixed</h3>
+<ul>
+<li>Project-local hooks now participate in the project trust prompt even when <code>.cast/hooks.json</code> is the only local resource.</li>
+<li>Existing sessions now derive missing sidebar titles from their first user message, while explicit blank titles remain unchanged.</li>
+<li>Updated plan, MCP, hooks, skills.sh, tool, and eval documentation to match the current runtime and CLI behavior.</li>
+</ul>
+<h3>Changed</h3>
+<ul>
+<li>Simplified the shared Cast prompt so configuration guidance has one source of truth in the built-in <code>cast</code> skill.</li>
+<li>Removed the obsolete prompt-secrecy rule from the open-project harness discipline.</li>
+</ul>
 <h2>0.12.7</h2>
 <h3>Added</h3>
 <ul>

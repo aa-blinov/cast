@@ -5,85 +5,120 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
 <title>Plan Mode — cast</title>
 <meta name="description" content="Plan Mode documentation for cast, a role-based terminal agent harness.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
 <style>
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Inter:wght@400;500;600;700&display=swap');
+
 :root {
-	/* cast palette — cyan→violet gradient */
-	--bg: #0a0e14;
-	--bg-secondary: #0f1520;
-	--bg-tertiary: #151c28;
-	--border: #1e2a3a;
-	--text: #e2e8f0;
-	--text-secondary: #64748b;
-	--text-muted: #475569;
-	--accent: #38e0ff;
-	--accent-hover: #5eead4;
-	--accent-subtle: rgba(56,224,255,.1);
-	--green: #34d399;
-	--green-subtle: rgba(52,211,153,.1);
-	--orange: #fbbf24;
-	--red: #fb7185;
-	--code-bg: #0f1520;
-	--sidebar-w: 280px;
-	--header-h: 64px;
-	--font: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+	--bg: #08080a;
+	--bg-surface: #131317;
+	--bg-raised: #1e1e24;
+	--bg-hover: #28282e;
+	--border: #35353d;
+	--border-active: #4a4a55;
+	--border-subtle: rgba(53, 53, 61, 0.55);
+	--text: #fafafa;
+	--text-dim: #a1a1aa;
+	--text-muted: #71717a;
+	--cyan: #8b5cf6;
+	--violet: #8b5cf6;
+	--teal: #2dd4bf;
+	--purple: #a78bfa;
+	--blue: #60a5fa;
+	--green: #22c55e;
+	--amber: #eab308;
+	--rose: #ef4444;
+	--persona: #c084fc;
+	--accent: #8b5cf6;
+	--accent-subtle: rgba(139, 92, 246, 0.12);
+	--accent-muted: rgba(139, 92, 246, 0.2);
+	--gradient: linear-gradient(135deg, #a855f7, #8b5cf6);
+	--code-bg: #111116;
+	--sidebar-w: 272px;
+	--header-h: 48px;
+	--font: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
 	--font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+	--radius: 8px;
+	--radius-sm: 6px;
 }
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html { font-size: 16px; scroll-behavior: smooth; }
+html { font-size: 15px; scroll-behavior: smooth; }
 body {
 	font-family: var(--font);
 	background: var(--bg);
 	color: var(--text);
-	line-height: 1.6;
+	line-height: 1.55;
 	-webkit-font-smoothing: antialiased;
 }
-a { color: var(--accent); text-decoration: none; }
-a:hover { color: var(--accent-hover); text-decoration: underline; }
+a { color: var(--purple); text-decoration: none; transition: color .15s ease; }
+a:hover { color: #c084fc; text-decoration: none; }
 
-/* ── Header ─────────────────────────────────────────────────────────── */
+/* ── Header (Cast Web UI Bar) ─────────────────────────────────────── */
 .header {
 	position: fixed; top: 0; left: 0; right: 0; z-index: 100;
 	height: var(--header-h);
-	background: var(--bg-secondary);
+	background: var(--bg-surface);
 	border-bottom: 1px solid var(--border);
-	display: flex; align-items: center; padding: 0 24px;
+	display: flex; align-items: center; padding: 0 16px; gap: 12px;
 }
 .header-logo {
-	font-size: 1.25rem; font-weight: 700; color: var(--text);
-	display: flex; align-items: center; gap: 10px;
+	display: inline-flex; align-items: center; gap: 8px;
+	font-family: var(--font-mono); font-size: 1rem; font-weight: 700;
+	color: var(--text);
 }
-.header-links { margin-left: auto; display: flex; gap: 20px; align-items: center; }
-.header-links a { color: var(--text-secondary); font-size: .875rem; font-weight: 500; }
-.header-links a:hover { color: var(--text); text-decoration: none; }
+.header-logo img {
+	width: 20px; height: 20px; border-radius: 4px; display: inline-block;
+}
+.header-badge {
+	font-family: var(--font-mono); font-size: .7rem; font-weight: 500;
+	color: var(--teal); background: rgba(45, 212, 191, 0.12);
+	border: 1px solid rgba(45, 212, 191, 0.25);
+	padding: 1px 7px; border-radius: 12px;
+}
+.header-links { margin-left: auto; display: flex; gap: 14px; align-items: center; }
+.header-links a {
+	color: var(--text-dim); font-size: .8rem; font-weight: 500;
+	font-family: var(--font-mono); padding: 4px 8px; border-radius: var(--radius-sm);
+	transition: color .15s, background .15s;
+}
+.header-links a:hover { color: var(--text); background: var(--bg-raised); }
 
-/* ── Sidebar ────────────────────────────────────────────────────────── */
+/* ── Sidebar (Cast Web Navigation) ───────────────────────────────── */
 .sidebar {
 	position: fixed; top: var(--header-h); left: 0; bottom: 0;
-	width: var(--sidebar-w); background: var(--bg-secondary);
+	width: var(--sidebar-w); background: var(--bg-surface);
 	border-right: 1px solid var(--border);
-	overflow-y: auto; padding: 16px 0;
+	overflow-y: auto; padding: 12px 0 24px;
 }
-.sidebar-section { padding: 0 12px; margin-bottom: 8px; }
+.sidebar-section { padding: 0 10px; margin-bottom: 12px; }
 .sidebar-section-title {
-	font-size: .75rem; font-weight: 600; text-transform: uppercase;
-	letter-spacing: .05em; color: var(--text-muted);
-	padding: 8px 12px 4px;
+	font-family: var(--font-mono); font-size: .68rem; font-weight: 600;
+	text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted);
+	padding: 6px 10px 4px;
 }
 .sidebar a {
-	display: block; padding: 6px 12px; border-radius: 6px;
-	font-size: .875rem; color: var(--text-secondary); line-height: 1.4;
+	display: flex; align-items: center; justify-content: space-between;
+	padding: 6px 10px; border-radius: var(--radius-sm);
+	font-size: .82rem; color: var(--text-dim); line-height: 1.4;
+	font-family: var(--font); transition: background .15s, color .15s;
 }
-.sidebar a:hover { background: var(--bg-tertiary); color: var(--text); text-decoration: none; }
+.sidebar a:hover { background: var(--bg-raised); color: var(--text); }
 .sidebar a.active {
-	background: var(--accent-subtle); color: var(--accent); font-weight: 500;
+	background: var(--accent-subtle); color: var(--purple); font-weight: 500;
+	border: 1px solid var(--accent-muted);
+}
+.sidebar a .badge {
+	font-family: var(--font-mono); font-size: .65rem; color: var(--text-muted);
 }
 
-/* ── Mobile menu ────────────────────────────────────────────────────── */
+/* ── Mobile Menu & Responsiveness ────────────────────────────────── */
 .menu-toggle {
-	display: none; background: none; border: none; color: var(--text);
-	font-size: 1.5rem; cursor: pointer; padding: 4px 8px;
+	display: none; background: none; border: 1px solid var(--border);
+	color: var(--text-dim); font-size: 1.1rem; cursor: pointer;
+	padding: 4px 8px; border-radius: var(--radius-sm);
 }
+.menu-toggle:hover { color: var(--text); border-color: var(--border-active); }
 @media (max-width: 768px) {
 	.sidebar {
 		transform: translateX(-100%); transition: transform .2s ease;
@@ -92,77 +127,56 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 	.sidebar.open { transform: translateX(0); }
 	.sidebar-backdrop {
 		position: fixed; inset: 0; z-index: 98;
-		background: rgba(0,0,0,.5); backdrop-filter: blur(2px);
+		background: rgba(0,0,0,.6); backdrop-filter: blur(4px);
 		display: none;
 	}
 	.sidebar-backdrop.visible { display: block; }
-	.menu-toggle { display: block; margin-right: 8px; }
-	.main { margin-left: 0 !important; padding: 20px 16px 60px !important; }
+	.menu-toggle { display: block; }
+	.main { margin-left: 0 !important; padding: 20px 14px 60px !important; }
 	.header { padding: 0 12px; }
-	.header-links { gap: 14px; }
-
-	/* Hero */
-	.hero { padding: 56px 16px 40px; }
-	.hero h1 { font-size: 2rem; }
-	.hero p { font-size: 1rem; margin-bottom: 24px; }
-	.hero-buttons a { padding: 10px 22px; font-size: .9rem; }
-	.install-block { margin-top: 24px; padding: 12px 14px; }
+	.header-links { gap: 8px; }
+	.hero { padding: 40px 16px 32px; }
+	.hero h1 { font-size: 1.6rem; }
+	.hero p { font-size: .92rem; margin-bottom: 20px; }
+	.install-block { padding: 12px 14px; }
 	.install-block code { font-size: .75rem; word-break: break-all; }
-
-	/* Features */
-	.features { grid-template-columns: 1fr; padding: 24px 16px 40px; gap: 12px; }
-	.feature { padding: 16px; }
-
-	/* Providers */
-	.providers { padding: 24px 16px; }
-	.providers h2 { font-size: 1.25rem; }
-
-	/* Docs grid */
-	.landing-docs { padding: 24px 16px 60px; }
-	.landing-docs h2 { font-size: 1.25rem; }
-	.docs-grid { grid-template-columns: 1fr; }
-
-	/* Content */
 	.content h1 { font-size: 1.5rem; }
-	.content h2 { font-size: 1.25rem; margin: 28px 0 10px; }
-	.content h3 { font-size: 1.1rem; }
-	.content table { font-size: .8rem; }
+	.content h2 { font-size: 1.2rem; margin: 24px 0 10px; }
+	.content table { font-size: .78rem; }
 	.content th, .content td { padding: 6px 8px; }
-	.content pre:not(.mermaid-code) { padding: 12px; font-size: .8rem; }
-
-	/* Mermaid */
-	.mermaid-diagram { padding: 12px; max-height: 45vh; }
-	.mermaid-code { max-height: 45vh; }
-	.mermaid-toolbar { padding: 6px 8px; }
-	.mermaid-toolbar button { padding: 3px 8px; font-size: .75rem; }
+	.content pre:not(.mermaid-code) { padding: 12px; font-size: .78rem; border-radius: 6px; }
 }
 
-/* ── Main content ───────────────────────────────────────────────────── */
+/* ── Main Workspace ──────────────────────────────────────────────── */
 .main {
 	margin-left: var(--sidebar-w);
 	margin-top: var(--header-h);
 	padding: 32px 48px 80px;
-	max-width: 900px;
+	max-width: 960px;
 }
 .main-landing {
 	margin-left: 0; max-width: none; padding: 0;
 }
 
-/* ── Typography ─────────────────────────────────────────────────────── */
-.content h1 { font-size: 2rem; font-weight: 700; margin: 0 0 16px; line-height: 1.3; }
-.content h2 {
-	font-size: 1.5rem; font-weight: 600; margin: 40px 0 12px;
-	padding-bottom: 8px; border-bottom: 1px solid var(--border);
+/* ── Typography & Content ────────────────────────────────────────── */
+.content h1 {
+	font-family: var(--font); font-size: 1.8rem; font-weight: 700;
+	margin: 0 0 16px; line-height: 1.25; color: var(--text);
+	letter-spacing: -0.02em;
 }
-.content h3 { font-size: 1.2rem; font-weight: 600; margin: 28px 0 8px; }
-.content h4 { font-size: 1rem; font-weight: 600; margin: 20px 0 6px; }
-.content p { margin: 0 0 16px; }
-.content ul, .content ol { margin: 0 0 16px; padding-left: 24px; }
+.content h2 {
+	font-family: var(--font); font-size: 1.35rem; font-weight: 600;
+	margin: 36px 0 12px; padding-bottom: 6px;
+	border-bottom: 1px solid var(--border); color: var(--text);
+}
+.content h3 { font-size: 1.1rem; font-weight: 600; margin: 24px 0 8px; color: var(--text); }
+.content h4 { font-size: .95rem; font-weight: 600; margin: 18px 0 6px; color: var(--text-dim); }
+.content p { margin: 0 0 14px; color: var(--text-dim); font-size: .92rem; }
+.content ul, .content ol { margin: 0 0 14px; padding-left: 20px; color: var(--text-dim); font-size: .92rem; }
 .content li { margin: 4px 0; }
-.content strong { font-weight: 600; }
-.content hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+.content strong { color: var(--text); font-weight: 600; }
+.content hr { border: none; border-top: 1px solid var(--border); margin: 28px 0; }
 .content blockquote {
-	border-left: 3px solid var(--accent); padding: 8px 16px;
 	margin: 0 0 16px; background: var(--accent-subtle); border-radius: 0 6px 6px 0;
 }
 .content blockquote p:last-child { margin-bottom: 0; }
@@ -449,7 +463,8 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 <body>
 <header class="header">
 	<button class="menu-toggle" aria-label="Menu">&#9776;</button>
-	<a href="index.html" class="header-logo">cast</a>
+	<a href="index.html" class="header-logo" aria-label="cast home"><img src="assets/favicon.svg" alt="cast logo"></a>
+	<span class="header-badge">v0.12.18</span>
 	<div class="header-links">
 		<a href="index.html">Home</a>
 		<a href="https://github.com/aa-blinov/cast">GitHub</a>
@@ -466,17 +481,21 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 			<a href="tools.html">Tools</a>
 			<a href="personas.html">Personas</a>
 			<a href="persona-research.html">Persona Research</a>
+			<a href="subagents.html">Sub-agents & Delegation</a>
 			<a href="skills.html">Skills</a>
 			<a href="plugins.html">Plugins</a>
 			<a href="rules.html">Rules</a>
 			<a href="mcp-servers.html">MCP Servers</a>
 			<a href="context-files.html">Context Files</a>
 			<a href="sessions.html">Sessions</a>
+			<a href="worktrees.html">Git Worktrees</a>
 			<a href="plan-mode.html" class="active">Plan Mode</a>
 			<a href="reasoning.html">Reasoning</a>
 			<a href="configuration.html">Configuration</a>
 			<a href="themes.html">Themes</a>
 			<a href="non-interactive-mode.html">Non-Interactive Mode</a>
+			<a href="eval-behavior.html">Behavior Evals</a>
+			<a href="eval-methodology.html">Eval Methodology</a>
 			<a href="architecture.html">Architecture</a>
 			<a href="eval-scoreboard.html">Model Scoreboard</a>
 			<a href="changelog.html">Changelog</a>
@@ -486,9 +505,9 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 <main class="main">
 	<article class="content">
 		<h1>Plan Mode</h1>
-<p>Plan mode restricts the agent to exploration and planning — it can read files and produce a structured plan, but cannot execute code, touch real files, or run arbitrary shell commands. The one exception is the plan file itself: <code>write</code>/<code>edit</code> still work, just scoped to a <code>.md</code> file inside the session&#39;s plans directory (see <a href="#plan-tools">Plan Tools</a> below).</p>
+<p>Plan mode restricts the agent to exploration and planning. It reads files and produces a structured plan without executing code, modifying project files, or running arbitrary shell commands. The plan file itself is the sole exception: <code>write</code> and <code>edit</code> remain active when scoped to a <code>.md</code> file inside the session plans directory.</p>
 <h2>Workflow</h2>
-<pre class="mermaid" data-raw="LS0tCmNvbmZpZzoKICBsYXlvdXQ6IGVsawogIGVsazoKICAgIG5vZGVQbGFjZW1lbnRTdHJhdGVneTogTkVUV09SS19TSU1QTEVYCi0tLQpmbG93Y2hhcnQgTFIKICBBWyIvcGxhbiJdIC0tPiBCW0V4cGxvcmUgY29kZWJhc2VdCiAgQiAtLT4gQ1tXcml0ZSBwbGFuXQogIEMgLS0+IERbInBsYW5fZG9uZSJdCiAgRCAtLT4gRXtBcHByb3ZhbCBkaWFsb2d9CiAgRSAtLT58SW1wbGVtZW50IG5vd3wgRltJbXBsZW1lbnQgcGxhbl0KICBFIC0tPnxDbGVhciBjb250ZXh0ICsgaW1wbGVtZW50fCBGCiAgRSAtLT58IkknbGwgc3RhcnQgbXlzZWxmInwgR1siL2J1aWxkIOKGkiB5b3VyIG1lc3NhZ2UiXQogIEUgLS0+fFJlZmluZXwgQgogIEcgLS0+IEYKICBGIC0tPiBIWyJVcGRhdGUgbGlua2VkIHRhc2tzIl0=">---
+<pre class="mermaid" data-raw="LS0tCmNvbmZpZzoKICBsYXlvdXQ6IGVsawogIGVsazoKICAgIG5vZGVQbGFjZW1lbnRTdHJhdGVneTogTkVUV09SS19TSU1QTEVYCi0tLQpmbG93Y2hhcnQgTFIKICBBWyIvcGxhbiJdIC0tPiBCW0V4cGxvcmUgY29kZWJhc2VdCiAgQiAtLT4gQ1tXcml0ZSBwbGFuXQogIEMgLS0+IERbInBsYW5fZG9uZSJdCiAgRCAtLT4gRXtBcHByb3ZhbCBkaWFsb2d9CiAgRSAtLT58SW1wbGVtZW50IG5vd3wgRltJbXBsZW1lbnQgcGxhbl0KICBFIC0tPnxDbGVhciBjb250ZXh0ICsgaW1wbGVtZW50fCBGCiAgRSAtLT58UmVmaW5lfCBCCiAgRiAtLT4gSFsiVXBkYXRlIGxpbmtlZCB0YXNrcyJd">---
 config:
   layout: elk
   elk:
@@ -501,16 +520,14 @@ flowchart LR
   D --> E{Approval dialog}
   E -->|Implement now| F[Implement plan]
   E -->|Clear context + implement| F
-  E -->|"I'll start myself"| G["/build → your message"]
   E -->|Refine| B
-  G --> F
   F --> H["Update linked tasks"]</pre><ol>
-<li><strong>Enter plan mode</strong> — type <code>/plan</code></li>
-<li><strong>Explore</strong> — the agent reads files, runs read-only shell commands, and analyzes the codebase</li>
-<li><strong>Write plan</strong> — the agent produces a structured markdown plan with a checklist</li>
-<li><strong>Review</strong> — the agent signals completion with <code>plan_done</code>; the full plan file path is shown (cmd-click to open it in your editor)</li>
-<li><strong>Approve</strong> — when the turn ends, an approval dialog opens: refine (first — it returns you to the regular composer, where multi-line and image paste work, and your next message goes back to planning as feedback), implement now, clear context and implement (the plan survives in the system prompt, the exploration chatter doesn&#39;t), or approve and start yourself. <code>/build</code> remains as the manual gesture</li>
-<li><strong>Implement</strong> — the agent works through the plan and updates its linked task list after each verified step</li>
+<li><strong>Enter plan mode</strong>: Type <code>/plan</code></li>
+<li><strong>Explore</strong>: The agent reads files, executes read-only shell commands, and analyzes the codebase</li>
+<li><strong>Write plan</strong>: The agent produces a structured markdown plan with a checklist</li>
+<li><strong>Review</strong>: The agent signals completion with <code>plan_done</code>, displaying the full plan file path</li>
+<li><strong>Approve</strong>: An approval dialog opens at the end of the turn with options: refine (returns to composer where your next message becomes planning feedback), implement now, or implement in a clean context. <code>/build</code> exits plan mode manually.</li>
+<li><strong>Implement</strong>: The agent executes the plan and updates its linked task list after each verified step</li>
 </ol>
 <h2>What&#39;s Allowed in Plan Mode</h2>
 <h3>Read-Only Bash</h3>
@@ -521,17 +538,15 @@ flowchart LR
 <ul>
 <li>Output redirection (<code>&gt;</code>)</li>
 <li>Command and process substitution (<code>$()</code>, backticks, <code>&lt;()</code>)</li>
-<li>Any binary not on the allowlist (<code>env</code> included — it launches arbitrary binaries; same for test runners and package managers)</li>
+<li>Binaries outside the allowlist (<code>env</code>, test runners, and package managers)</li>
 <li>Argument-level writers on allowlisted binaries: <code>find -delete</code>/<code>-exec</code>, <code>fd -x</code>, <code>sort -o</code>, <code>tree -o</code>, <code>--output</code>, <code>uniq in out</code></li>
-<li><code>write</code>/<code>edit</code> outside the plan file — they stay available (same tools used for real code) but only reach a <code>.md</code> file directly inside the session&#39;s plans directory; anything else is refused</li>
+<li><code>write</code> and <code>edit</code> outside the plan directory</li>
 </ul>
-<p><code>web_search</code>/<code>web_fetch</code> follow the <code>/web</code> toggle in both modes — plan mode doesn&#39;t change them.</p>
-<h3>MCP Tools: A Deliberate Exception</h3>
-<p>MCP tools stay <strong>fully enabled</strong> in plan mode — they are not hard-gated the way bash/write/edit are. Many MCP servers are read-only research tools (docs lookup, code search) and exactly what planning needs, and cast can&#39;t know which of an arbitrary server&#39;s tools mutate state. The model is instructed to use MCP for inspection and retrieval only, and you get a warning on plan-mode entry when MCP tools are connected — but if your MCP server can write to a database or trigger a deploy, plan mode does not physically prevent that. Keep that in mind when planning with mutating MCP servers connected.</p>
+<p><code>web_search</code> and <code>web_fetch</code> follow the <code>/web</code> toggle in both modes.</p>
+<h3>MCP Tools</h3>
+<p>MCP tools remain enabled in plan mode because many servers provide read-only research capabilities (documentation lookup, code search). Because cast cannot automatically infer whether a server tool mutates state, the system prompt instructs the model to perform inspection only. Users receive a warning on plan mode entry when active MCP servers are connected.</p>
 <h2>Plan Tools</h2>
-<p>The plan file itself is authored and read with the ordinary <code>write</code>/<code>edit</code>/
-<code>read</code> tools — the same ones used for real code. <code>write</code>/<code>edit</code> are gated to
-a <code>.md</code> file directly inside the session&#39;s plans directory while plan mode is
+<p>The plan file is authored and read using standard <code>write</code>, <code>edit</code>, and <code>read</code> tools. <code>write</code> and <code>edit</code> are restricted to a <code>.md</code> file inside the session plans directory during plan mode.
 active; reading that same file makes it the active plan (no <code>name</code> argument
 needed). Other plans in the session are discoverable with <code>ls</code>/<code>glob</code> on the
 plans directory. There is no separate plan-write/plan-edit/plan-read tool: no dedicated
@@ -539,7 +554,7 @@ authoring or reading tool, just a permission-level path exception for the
 plan file.</p>
 <div class="table-wrap"><table><thead><tr><th>Tool</th><th>Mode</th><th>Description</th></tr></thead><tbody><tr><td><code>plan_done</code></td><td>Plan</td><td>Signal plan is ready for review</td></tr></tbody></table></div><h2>Plan Files</h2>
 <p>Plans are stored as markdown files:</p>
-<pre><code>~/.cast/plans/&lt;session-id&gt;/
+<pre><code>&lt;project&gt;/.cast/plans/&lt;session-id&gt;/
   auth-refactor.md
   database-migration.md
 </code></pre>
@@ -606,7 +621,7 @@ task is complete. It no longer steers the work; treat new requests on their own 
 
 	</article>
 		<nav class="doc-nav">
-			<a href="sessions.html" class="doc-nav-prev">← Sessions</a>
+			<a href="worktrees.html" class="doc-nav-prev">← Git Worktrees</a>
 			<a href="reasoning.html" class="doc-nav-next">Reasoning →</a>
 		</nav>
 </main>

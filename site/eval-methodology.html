@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-<title>Configuration — cast</title>
-<meta name="description" content="Configuration documentation for cast, a role-based terminal agent harness.">
+<title>Eval Methodology — cast</title>
+<meta name="description" content="Eval Methodology documentation for cast, a role-based terminal agent harness.">
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Inter:wght@400;500;600;700&display=swap');
@@ -491,11 +491,11 @@ a:hover { color: #c084fc; text-decoration: none; }
 			<a href="worktrees.html">Git Worktrees</a>
 			<a href="plan-mode.html">Plan Mode</a>
 			<a href="reasoning.html">Reasoning</a>
-			<a href="configuration.html" class="active">Configuration</a>
+			<a href="configuration.html">Configuration</a>
 			<a href="themes.html">Themes</a>
 			<a href="non-interactive-mode.html">Non-Interactive Mode</a>
 			<a href="eval-behavior.html">Behavior Evals</a>
-			<a href="eval-methodology.html">Eval Methodology</a>
+			<a href="eval-methodology.html" class="active">Eval Methodology</a>
 			<a href="architecture.html">Architecture</a>
 			<a href="eval-scoreboard.html">Model Scoreboard</a>
 			<a href="changelog.html">Changelog</a>
@@ -504,59 +504,287 @@ a:hover { color: #c084fc; text-decoration: none; }
 
 <main class="main">
 	<article class="content">
-		<h1>Configuration</h1>
-<h2>Settings File</h2>
-<p>User settings are persisted to <code>~/.cast/settings.json</code>. This file is loaded on startup and saved after changes (model switch, reasoning change, persona change, etc.).</p>
-<h3>Settings Schema</h3>
-<div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead><tbody><tr><td><code>model</code></td><td>string</td><td>Last used model</td></tr><tr><td><code>modelProvider</code></td><td>string</td><td>Saved-provider name for <code>model</code> (falls back to the active provider)</td></tr><tr><td><code>subagentModel</code></td><td>string</td><td>Model for sub-agents (falls back to <code>model</code>)</td></tr><tr><td><code>subagentModelProvider</code></td><td>string</td><td>Saved-provider name for <code>subagentModel</code></td></tr><tr><td><code>planModel</code></td><td>string</td><td>Model used while plan mode is active (falls back to <code>model</code>)</td></tr><tr><td><code>planModelProvider</code></td><td>string</td><td>Saved-provider name for <code>planModel</code></td></tr><tr><td><code>reasoningLevel</code></td><td>string</td><td>Last used reasoning level</td></tr><tr><td><code>persona</code></td><td>string</td><td>Last used persona name</td></tr><tr><td><code>providerUrl</code></td><td>string</td><td>Active provider endpoint URL</td></tr><tr><td><code>apiKey</code></td><td>string</td><td>Active provider API key</td></tr><tr><td><code>providers</code></td><td>Provider[]</td><td>Saved providers (<code>name</code>, <code>url</code>, <code>apiKey</code>, optional <code>reasoningFormat</code>) — use <code>/provider</code> to manage</td></tr><tr><td><code>cwd</code></td><td>string</td><td>Last working directory</td></tr><tr><td><code>permissionMode</code></td><td><code>&quot;default&quot;</code> | <code>&quot;bypass&quot;</code></td><td>Bash confirmation mode</td></tr><tr><td><code>projectTrust</code></td><td>Record&lt;string, boolean&gt;</td><td>Per-project trust decisions</td></tr><tr><td><code>theme</code></td><td>string</td><td>Active color theme id</td></tr><tr><td><code>webTools</code></td><td>boolean</td><td>Whether web tools are enabled (default: <code>false</code> — use <code>/web</code> to enable)</td></tr><tr><td><code>searchProvider</code></td><td><code>&quot;ddg&quot;</code> | <code>&quot;tavily&quot;</code> | <code>&quot;brave&quot;</code></td><td><code>web_search</code> backend (default: <code>&quot;ddg&quot;</code>) — use <code>/web-search-provider</code> to change</td></tr><tr><td><code>tavilyApiKey</code></td><td>string</td><td>API key for the Tavily backend, from <a href="https://app.tavily.com">https://app.tavily.com</a></td></tr><tr><td><code>braveApiKey</code></td><td>string</td><td>API key for the Brave Search backend, from <a href="https://api-dashboard.search.brave.com">https://api-dashboard.search.brave.com</a></td></tr><tr><td><code>webFetchProvider</code></td><td><code>&quot;jina&quot;</code> | <code>&quot;local&quot;</code></td><td><code>web_fetch</code> backend (default: <code>&quot;jina&quot;</code>) — use <code>/web-fetch-provider</code> to change</td></tr><tr><td><code>disabledMcpServers</code></td><td>string[]</td><td>MCP server names disabled via <code>/mcp</code> toggle</td></tr><tr><td><code>disabledSkills</code></td><td>string[]</td><td>Skill names disabled via <code>/skills</code> toggle</td></tr><tr><td><code>disabledHooks</code></td><td>string[]</td><td>Content-derived hook group ids disabled via <code>/hooks</code></td></tr><tr><td><code>enabledPlugins</code></td><td>Record&lt;string, boolean&gt;</td><td>Marketplace plugins keyed by <code>name@marketplace</code></td></tr><tr><td><code>statusBar</code></td><td>object</td><td>Status bar segment config (<code>visible</code>, <code>order</code>, <code>sides</code>) — use <code>/statusbar</code> to configure</td></tr><tr><td><code>webPassword</code></td><td>string</td><td>Password generated for <code>cast web</code> on first start</td></tr><tr><td><code>quickSessionPersona</code></td><td>string</td><td>Persona selected by the web UI&#39;s Quick session action</td></tr><tr><td><code>updatedAt</code></td><td>string</td><td>Auto-updated timestamp</td></tr></tbody></table></div><p>Settings are written atomically (temp file + rename) to prevent corruption from crashes mid-write.</p>
-<h2>Environment Variables</h2>
-<div class="table-wrap"><table><thead><tr><th>Variable</th><th>Description</th></tr></thead><tbody><tr><td><code>CAST_CWD</code></td><td>Override working directory</td></tr><tr><td><code>CAST_BASH</code></td><td>Path to the bash executable the <code>bash</code> tool spawns (overrides auto-detection; useful for msys2 or non-standard Git Bash installs on Windows)</td></tr><tr><td><code>CAST_VERSION</code></td><td>Pin install version (installer only)</td></tr></tbody></table></div><p>Provider URL and API key are configured <strong>only</strong> via <code>~/.cast/settings.json</code> (first-run prompt, or <code>/provider</code> in-session). cast does not read <code>PROVIDER_BASE_URL</code> / <code>PROVIDER_API_KEY</code> environment variables or a project <code>.env</code> — editing those changes nothing.</p>
-<h2>.cast/ Directory Structure</h2>
-<pre><code>~/.cast/
-  settings.json         # User settings
-  AGENTS.md             # Global context file (optional)
-  mcp.json              # Global MCP server config
-  sessions/sessions.db  # SQLite session database (legacy JSON files are imported once)
-  skills/               # Global skills
-  plugins/              # Marketplace catalogs + installed plugins (see plugins.md)
-  rules/                # Global rules
-  personas/             # Global personas
-
-~/.agents/skills/          # skills.sh universal global
-~/.config/agents/skills/   # Compatible universal-global location
-
-&lt;project&gt;/.cast/
-  plans/&lt;session-id&gt;/   # Session plan files
-  skills/               # Project-local skills
-  rules/                # Project-local rules
-  personas/             # Project-local personas
-  mcp.json              # Project-local MCP config
-  hooks.json            # Project-local hooks
-  ssh.json              # Project-local SSH hosts
-
-&lt;project&gt;/.agents/skills/  # skills.sh universal project (npx skills add -a universal)
+		<h1>Eval Methodology</h1>
+<p>How <code>evals/</code> debugs and benchmarks <code>cast</code>&#39;s own harness — what it measures, why it&#39;s built this
+way, and how to read the output. This is an internal/development doc (see <code>AGENTS.md</code>&#39;s project
+layout: <code>evals/</code> is not part of the shipped package), not end-user documentation.</p>
+<h2>Why this exists</h2>
+<p>A coding agent&#39;s behavior is a product of two things that are easy to conflate: the <strong>model</strong>
+(does it understand the task, can it reason about the diff it needs to make) and the <strong>harness</strong>
+(does the tool schema communicate the constraint clearly, does the system prompt bias it toward
+the right tool, does a documented protocol like plan-mode&#39;s RE-ENTRY step actually get followed).
+When a case fails, &quot;the model is dumb&quot; and &quot;the harness set the model up to fail&quot; produce the same
+visible symptom — a wrong tool call, a skipped step — but call for opposite fixes.</p>
+<p><code>evals/</code> exists to pull those two apart. Every case runs the real agent loop (<code>runAgentLoop</code>, not a
+mock) against a real model through a real provider, so a passing case is evidence about the actual
+system, not a simulation of it. See <code>docs/eval-behavior.md</code> for what&#39;s actually being measured
+(signals, the <code>core</code>/<code>chain</code> split); this doc covers the runner mechanics: comparison, statistical
+validity, baselines, and trace-based debugging.</p>
+<h2>What the scoreboard is for</h2>
+<p>The Model Scoreboard is a certification artifact for selecting a model <strong>for Cast</strong>, not a general
+leaderboard of model intelligence or coding quality. It answers: with this exact system prompt,
+tool surface, agent loop, and provider protocol, does a model reliably choose grounded tool calls,
+complete stateful workflows, and respect the harness lifecycle?</p>
+<p>That distinction changes how to use a low score. It is evidence to inspect the trace, not a verdict
+that a model is &quot;bad&quot;: the cause may be a model limitation, an ambiguous behavioral contract, or a
+harness regression. A high, stable score is evidence that the model is suitable for Cast; it does
+not imply it is best for unrelated tasks or under another harness.</p>
+<p>The scoreboard is intentionally built from one fixed experimental protocol: every case runs exactly
+three times in fresh sessions. This makes each row comparable without displaying a redundant attempt
+count. A case earns scoreboard credit only when all three attempts pass; a 2/3 result remains visible
+as instability, not a partial success.</p>
+<p>This does not make one-attempt runs invalid. The normal CLI defaults to one attempt so a developer
+can quickly validate a new case, inspect a trace, or iterate on a harness change. <code>--scoreboard</code>
+automatically runs exactly three attempts (an explicit <code>--repeat 3</code> is accepted); quick runs are
+diagnostic evidence, not certification data.</p>
+<h2>Directory layout</h2>
+<pre><code>evals/
+  lib/                       shared engine — not a bench itself
+    runner.ts                 EvalCase, runCase/runSuite, compareModels(Repeated), report printers
+    baseline.ts                saved-snapshot regression detection (statistical significance)
+    results.ts                 evals/results/ recording + history (index.json, runs/*.json)
+    fixtures.ts                 per-process /tmp fixture roots for grounded verify() checks
+    trace-view.ts               --trace/--case: reads a recorded run back out turn-by-turn
+  benches/
+    index.ts                  the bench registry — single source of truth for --bench/--list
+    behavior/tools/
+      core/                    single-turn tool contracts, one file per case + index.ts
+      chain/                   multi-turn stateful workflows, one file per case + index.ts
+  fixtures/                  committed fixtures cases need on disk (e.g. an MCP test server, an image)
+  results/                   output — timestamped run files + index.json (see &quot;Recording results&quot;)
+  baselines/                 saved regression-detection snapshots (see below)
+  run.ts                     CLI entrypoint
 </code></pre>
-<h2>Project Trust</h2>
-<p>A single trust decision gates all project-local resources: skills (<code>.cast/skills/</code> and <code>.agents/skills/</code>), MCP servers, context files, personas, rules, hooks, and <code>.cast/ssh.json</code>. cast asks once per project; the decision is saved in <code>settings.json</code> under <code>projectTrust</code>.</p>
-<p>Global resources (<code>~/.cast/</code>, <code>~/.agents/skills/</code>, <code>~/.config/agents/skills/</code>) always load without a trust check — you put them there yourself.</p>
-<h2>Permission Modes</h2>
-<div class="table-wrap"><table><thead><tr><th>Mode</th><th>Behavior</th></tr></thead><tbody><tr><td><code>default</code></td><td>Dangerous bash commands require confirmation</td></tr><tr><td><code>bypass</code></td><td>All bash commands run without confirmation</td></tr></tbody></table></div><p>Change with:</p>
+<p><code>evals/benches/index.ts</code> is what wires a bench into the CLI — currently a single <code>behavior</code> bench
+combining <code>core</code> and <code>chain</code> cases, since <code>DEFAULT_BENCH_IDS</code> includes every bench with a static
+<code>cases</code> list and there&#39;s only the one. Adding a second bench means adding a subdirectory under
+<code>evals/benches/</code> and one entry in that registry&#39;s <code>BENCHES</code> array — nothing in <code>run.ts</code> itself
+needs to change.</p>
+<h2>The independence thesis</h2>
+<p>The reason model-vs-harness separation is achievable at all: <strong>hold the harness fixed, vary the
+model</strong> (<code>--compare model1,model2</code>), and any behavior difference that shows up is attributable to
+the model, because every other variable — tool schemas, system prompt, loop, grading logic — is
+byte-for-byte identical between the two runs. Conversely, <strong>hold the model fixed, vary the
+harness</strong> (a change to <code>tools.ts</code>&#39;s schema wording, a prompt edit) and re-run the same case set: any
+behavior difference is now attributable to the harness.</p>
+<p><code>compareModels</code>/<code>compareModelsRepeated</code> flatten model×case (×repeat) into a single job list and run
+it through one <code>--concurrency</code>-limited pool, not one model&#39;s full suite followed by the next —
+every request across every model is independent, so there was never a reason to serialize models
+behind each other. A 2-model compare over N cases takes roughly as long as running N cases against
+one model, not 2N; the <code>[k/total]</code> progress lines are labeled <code>&lt;model&gt; :: &lt;case id&gt;</code> since jobs from
+both models interleave in the log instead of appearing as two back-to-back blocks.</p>
+<h2>Statistical validity: why <code>--repeat</code> exists</h2>
+<p>A single run of a stochastic model against a case set produces a pass/fail — but a model that
+&quot;passes&quot; a case 2 times out of 3 will, on any single run, produce either a pass or a fail with no
+way to tell which one you got. Treating a single-run result as a stable signal silently assumes
+attempts are deterministic, which they aren&#39;t — this session&#39;s own work on <code>plan-done-signal</code> and
+<code>plan-open-question-blocks-done</code> hit exactly this: the same model, same case, disagreeing with
+itself across consecutive runs on a genuine judgment call.</p>
+<p><code>--repeat N</code> (<code>evals/run.ts</code>, backed by <code>runSuiteRepeated</code>/<code>compareModelsRepeated</code> in
+<code>evals/lib/runner.ts</code>) runs every case N times, each attempt a <strong>fresh agent session</strong> (no shared
+state between attempts, so an attempt&#39;s outcome can&#39;t be contaminated by conversation history from
+a prior one), and reports <code>passed/N</code> per case plus a consistency flag:
+<code>consistent: passed === 0 || passed === attempts.length</code>. A case where every attempt agreed is a
+stable result. A case where attempts split is flagged with <code>⚠</code> in the report and counted into
+<code>inconsistentCases</code> in the recorded JSON — visible at a glance instead of silently averaged away.
+Concurrency spans the full case×repeat job list (not case-then-repeat sequentially), so N repeats
+of one case don&#39;t serialize behind each other while unrelated cases sit idle.</p>
+<p>A repeated result always reports its exact <code>passed/N</code> count and whether attempts were consistent.
+Certification artifacts deliberately use the stricter all-or-nothing interpretation: a case earns
+scoreboard or baseline credit only when every attempt passes. A split is an instability signal, not
+a partial pass.</p>
+<p>Practical rule: before calling a change a regression (or a model gap a real finding), run
+<code>--repeat 3</code>. A split result is evidence of instability, not a partial pass — investigate the
+disagreeing attempts with <code>--trace</code> (see below) before concluding anything.</p>
+<h2>Recording results</h2>
+<p>Every run — <code>-m</code>, <code>--compare</code>, with or without <code>--repeat</code> — is auto-recorded to
+<code>evals/results/runs/&lt;timestamp&gt;_&lt;kind&gt;_&lt;models&gt;.json</code> (full per-case detail, including every
+attempt&#39;s individual pass/fail under <code>--repeat</code>) with a one-line summary appended to
+<code>evals/results/index.json</code> (<code>evals/lib/results.ts</code>). <code>evals/run.ts --history</code> prints the index as a
+compact log, newest last, including the <code>⚠N inconsistent</code> marker for repeated runs and the short
+commit hash the run was recorded at (<code>git rev-parse --short HEAD</code>) — enough to correlate a
+regression with a specific harness change.</p>
+<h2>Cost &amp; token tracking</h2>
+<p>Every run reports token usage and (when the provider reports it) USD cost alongside the pass/fail
+table, so a model&#39;s win doesn&#39;t hide behind a much larger token spend.</p>
+<p>For a single-model run the summary prints per-case <code>(tokens, cost)</code> and the suite ends with a
+<code>Usage:</code> block (total / prompt / completion / cache-hit / uncached / cost):</p>
+<pre><code>EVAL RESULTS: 1/1 passed (1796ms)
+Summary:
+  ✓ background-bash-output (8125ms, 4 turns, 32442 tokens, $0.0009)
+Usage:
+  Total tokens: 32,442
+    Prompt: 32,196
+    Completion: 246
+    Cache read: 28,448
+    Uncached: 3,748
+  Total cost: $0.0009
+</code></pre>
+<p><code>--compare</code> collapses these into a side-by-side row per model (<code>passed/total, duration, tokens, cost</code>), and <code>--repeat</code> aggregates across all attempts. Recorded JSON carries the same numbers at
+both the suite level (<code>usage</code>) and per case (<code>cases[i].usage</code>) so downstream tooling (dashboards,
+regression detectors) can read them without re-parsing the report.</p>
+<p>Token buckets: <code>promptTokens</code> (input), <code>completionTokens</code> (output), <code>totalTokens</code>, <code>cacheReadTokens</code>
+(provider prompt-cache hit), <code>cacheWriteTokens</code> (cache miss / new entry), <code>uncachedTokens</code> (full-
+price input). <code>cost</code> is USD from the provider when it reports one — <code>n/a</code> otherwise (not every
+provider returns it).</p>
+<h2>Regression detection: <code>--save-baseline</code> / <code>--baseline</code></h2>
+<p>A baseline is a saved snapshot of a suite result keyed by bench+model. Subsequent runs can compare
+against it to catch <em>gradual</em> drift that no single run can see: a series of PRs each shave 1–2pp off
+the pass rate, and no individual commit looks like it broke anything when reviewed in isolation.
+Baselines are the mechanism that flips &quot;did this PR regress?&quot; from an inline review judgement call
+into a number.</p>
+<p>The regression flag is driven by a <strong>two-proportion z-test</strong> (one-sided: &quot;current is worse than
+baseline&quot;). Reject H0 only when the observed pass-rate drop is unlikely under the assumption that
+the true rates are equal, calibrated by <code>--significance-alpha</code> (default 0.05 = 95%). Below ~10
+common cases the test isn&#39;t reliable, so the run falls back to the simpler
+<code>--regression-threshold</code> percentage-point rule (default 5pp) — the same intuition, scoped to small
+samples where the z-test can&#39;t say anything informative.</p>
+<p>Baselines live under <code>evals/baselines/</code> in two layers — one tier for the &quot;latest&quot; pointer that
+<code>compareToBaseline</code> actually reads, and a <code>history/</code> subdir for the full timeline of every
+<code>--save-baseline</code>:</p>
+<pre><code>evals/baselines/
+  behavior-poolside-laguna-s-2.1.json                 ← latest pointer (what --baseline reads)
+  history/
+    2026-07-25T19-28-39-590Z_behavior-poolside-laguna-s-2.1.json  ← every save is timed-stamped
+    2026-07-26T10-15-22-107Z_behavior-poolside-laguna-s-2.1.json  ← sorted chronologically by name
+</code></pre>
+<p>Every <code>--save-baseline</code> writes a new dated copy to <code>history/</code> <em>and</em> refreshes the top-level
+&quot;latest&quot; file in one shot — so the latest pointer is always the most recent snapshot, and
+<code>history/</code> is a complete audit log of what the benchmark looked like at every commit. Both tiers
+are tracked in git so baselines move with the codebase they correspond to (the <code>commit</code> recorded
+inside each baseline lets <code>--history</code> correlate snapshots to commits).</p>
+<p><code>--baseline &lt;name&gt;</code> reads only the latest pointer. To see the full timeline of one baseline (e.g.,
+to diff &quot;two weeks ago vs today&quot;), use <code>--baseline-history &lt;name&gt;</code>. <code>--list-baselines</code> lists the
+latest pointers (one per bench+model); <code>--baseline-history</code> lists snapshots of one.</p>
+<pre><code class="language-bash"># Save the current run&#39;s result as the baseline for bench=behavior, model=m
+node --import tsx evals/run.ts -m &lt;model&gt; --save-baseline
+
+# Save to a custom name (otherwise name is auto-generated as &lt;bench&gt;-&lt;model&gt;)
+node --import tsx evals/run.ts -m &lt;model&gt; --save-baseline --baseline &quot;release-2026-07&quot;
+
+# Compare the next run against the saved baseline; non-zero exit on regression
+node --import tsx evals/run.ts -m &lt;model&gt; --baseline behavior-&lt;model&gt;
+
+# Tighten / loosen the significance test (default α=0.05)
+node --import tsx evals/run.ts -m &lt;model&gt; --baseline behavior-&lt;model&gt; --significance-alpha 0.01
+
+# Tighten / loosen the small-sample fallback (default 5pp)
+node --import tsx evals/run.ts -m &lt;model&gt; --baseline behavior-&lt;model&gt; --regression-threshold 3
+
+# List every &quot;latest&quot; baseline (one per bench+model)
+node --import tsx evals/run.ts --list-baselines
+
+# Full per-save history for one baseline, newest first
+node --import tsx evals/run.ts --baseline-history behavior-&lt;model&gt;
+</code></pre>
+<p>A regression report prints the statistical evidence first, then aggregate deltas, then the per-case
+moves that explain the drop. Illustrative shape (numbers made up, not a real recorded run):</p>
+<pre><code>==================================================================
+REGRESSION CHECK
+==================================================================
+Comparing against baseline &quot;behavior-poolside-laguna-s-2.1&quot; (..., @9fdac84 31/33 passing, 93.9%):
+  Pass rate: 29/33 (-6.1pp) (baseline: 31/33 (+0.0pp), -2/33 (-6.1pp))
+  Significance: p=0.1421 (α=0.05), effect size h=0.184, LOW N — see threshold fallback
+  Confidence intervals (95%): baseline 79.8%–98.3%, current 71.3%–95.3%
+  Total tokens: 965,877 (baseline: 940,332, +25,545)
+  Duration: 118,605ms (baseline: 73,758ms, +44,847ms)
+</code></pre>
+<p>The &quot;significance block&quot; tells you <em>why</em> the run did or didn&#39;t trip the regression flag:</p>
 <ul>
-<li><code>--bypass-permissions</code> flag (this run only)</li>
-<li><code>/permissions</code> command (persists to settings)</li>
-<li><code>/permissions default</code> or <code>/permissions bypass</code> (direct set)</li>
+<li><code>p &lt; α</code> (e.g. p=0.0031 &lt; 0.05) → <code>*</code> marker, IS a statistically significant regression.</li>
+<li><code>p ≥ α</code> but sample is too small for the z-test to be reliable (n &lt; 10) →
+&quot;LOW N — see threshold fallback&quot; — and the flag follows <code>--regression-threshold</code> percentage points.</li>
+<li>Effect size is Cohen&#39;s h, computed as <code>|2·asin(√p1) − 2·asin(√p2)|</code>; convention 0.2 small, 0.5 medium,
+0.8 large. Reported alongside p so you can tell &quot;significant but trivial&quot; from &quot;significant and
+meaningful&quot;.</li>
+<li>CIs are Wilson-score 95% intervals per run — the wider the overlap of the two, the less likely
+the current drop is real rather than sampling noise.</li>
 </ul>
-<p>See <a href="tools.html#dangerous-command-gating">Tools</a> for the list of dangerous patterns.</p>
-<h2>Provider Configuration</h2>
-<p>On first run, cast asks for your provider URL and API key. Both are saved to <code>~/.cast/settings.json</code>.</p>
-<p>You can save multiple providers and switch between them:</p>
-<div class="table-wrap"><table><thead><tr><th>Command</th><th>Action</th></tr></thead><tbody><tr><td><code>/provider</code></td><td>Open picker — switch between saved providers</td></tr><tr><td><code>/provider add</code></td><td>Add a new provider (name → URL → key wizard)</td></tr><tr><td><code>/provider delete</code></td><td>Remove a saved provider</td></tr><tr><td><code>/provider &lt;name&gt;</code></td><td>Switch to a named provider directly</td></tr></tbody></table></div><p>Providers are stored in the <code>providers</code> array in settings.json. The active provider&#39;s URL and key are also saved in the top-level <code>providerUrl</code> / <code>apiKey</code> fields for startup.</p>
-<p>Supported providers: anything that speaks the OpenAI API. Common URLs:</p>
-<div class="table-wrap"><table><thead><tr><th>Provider</th><th>URL</th></tr></thead><tbody><tr><td>OpenRouter</td><td><code>https://openrouter.ai/api/v1</code></td></tr><tr><td>OpenAI</td><td><code>https://api.openai.com/v1</code></td></tr><tr><td>Ollama</td><td><code>http://localhost:11434/v1</code></td></tr></tbody></table></div>
+<p>Per-case regression / improvement detection is structural (case-id matching): cases passing in
+baseline but failing now go in <code>Regressions</code>, the symmetric move in <code>Improvements</code>. These are
+always computed on the <em>common</em> case subset — cases added since the baseline are silently ignored
+(no comparison possible — not a regression). The significance test uses the same subset, so a new
+or removed case can&#39;t tilt the z-test by inflating the denominator.</p>
+<p>When cases don&#39;t match 1:1 (e.g. baseline had 20 cases, current run covers 33 after new cases were
+added) the report falls back to: pass rate reported as aggregate, significance computed on the
+common subset. Running the full current suite and saving a new baseline is how you re-establish
+broader coverage.</p>
+<h2>Troubleshooting a failure: <code>--trace</code></h2>
+<p>The pass/fail table (and even a failed-checks message) tells you <em>that</em> a case failed, not <em>why</em> —
+and &quot;why&quot; is the only thing that turns a benchmark number into a harness fix or a real model-gap
+finding. Every recorded case carries a full turn-by-turn <code>trace</code>: for each turn, the model&#39;s
+reasoning (<code>thinking</code>), any user-visible commentary it produced, and — for every tool call it
+made — the exact args passed and what the tool actually returned. Not just &quot;it called <code>edit</code>,&quot; but
+what the <code>read</code> right before it actually showed the model, and whether the tool&#39;s own result
+confirms what the model claimed happened.</p>
+<pre><code class="language-bash"># List the case ids in the most recent recorded run
+node --import tsx evals/run.ts --trace latest
+
+# Full turn-by-turn trace for one case
+node --import tsx evals/run.ts --trace latest --case plan-done-signal
+
+# From a --compare file, narrow to one model&#39;s attempt(s)
+node --import tsx evals/run.ts --trace latest --case plan-done-signal -m gpt-5.6-luna
+</code></pre>
+<p><code>&lt;file&gt;</code> can be <code>latest</code>, a path, or a bare filename under <code>evals/results/runs/</code>; <code>--case</code> selects
+which case to expand (omit it to just list what&#39;s in the file). For a <code>--repeat</code> file, every
+attempt is printed as its own block, in order — reading them side by side is often the fastest way
+to see <em>what specifically</em> differed between an attempt that passed and one that didn&#39;t, rather than
+just knowing they disagreed.</p>
+<p>This is genuinely how a harness bug gets found, not a hypothetical. Reading a case&#39;s trace is how
+this project&#39;s own eval work told apart, on separate occasions: a genuinely wrong <code>expect</code> contract
+(<code>maxTurns: 1</code> on a plan-mode case whose own system prompt mandates a preliminary <code>ls</code>+<code>read</code>), a
+wrong argument name in a <code>verify</code> function (<code>args.path</code> vs. <code>edit</code>&#39;s actual <code>args.filePath</code>), a real
+product bug two layers down (the <code>grep</code> fallback silently returning zero matches when <code>path</code> named
+a single file, not a directory) — and a genuine, reproducible model weakness (hedging a plan with
+both options instead of converging, then calling <code>plan_done</code> anyway). Four different failure
+classes that would otherwise look identical from the pass/fail table alone: a red row saying the
+same thing regardless of which of those it actually was.</p>
+<p>Implementation: <code>evals/lib/runner.ts</code>&#39;s <code>runCase</code> builds <code>trace</code> from the same <code>AgentEvent</code> stream
+the TUI and web UI render live (<code>assistant_message</code> for thinking/commentary/requested tool calls,
+<code>turn_end.toolResults</code> for what each tool actually returned) — nothing synthetic, no re-derivation,
+same events the shipping UI is built on. <code>evals/lib/trace-view.ts</code> reads it back out of a recorded
+JSON file and pretty-prints it (truncating only the terminal display, never the stored JSON).</p>
+<h2>What isn&#39;t built yet</h2>
+<p>Harness-level guardrails (doom-loop detection, dangerous-command confirmation, the automatic
+background-task completion reminder) are deliberately covered by <code>test/</code> unit tests, not behavior
+cases here — they&#39;re enforced by code regardless of what the model does, so a behavior case would
+just be re-testing the guardrail rather than the model. See <code>docs/eval-behavior.md</code>&#39;s &quot;What belongs
+where&quot; for the split.</p>
+<h2>Practical usage</h2>
+<pre><code class="language-bash"># Fast development check: one attempt per case (the default)
+node --import tsx evals/run.ts -m &lt;model&gt; -v
+
+# Narrow to cases matching a prefix
+node --import tsx evals/run.ts -m &lt;model&gt; --cases plan- -v
+
+# Compare two models, same harness, same suite
+node --import tsx evals/run.ts --compare &lt;model1&gt;,&lt;model2&gt; -v
+
+# Diagnose stability without changing the scoreboard
+node --import tsx evals/run.ts --compare &lt;model1&gt;,&lt;model2&gt; --repeat 3 -v
+
+# Publish comparable certification results: --scoreboard automatically uses three attempts.
+node --import tsx evals/run.ts --compare &lt;model1&gt;,&lt;model2&gt; --scoreboard -v
+
+# Equivalent explicit spelling, retained for scripts.
+node --import tsx evals/run.ts --compare &lt;model1&gt;,&lt;model2&gt; --repeat 3 -v
+
+# List benches and the cases the current flag selection would run
+node --import tsx evals/run.ts --list
+
+# What&#39;s been run before
+node --import tsx evals/run.ts --history
+
+# Troubleshoot a failure — full turn-by-turn trace for one case
+node --import tsx evals/run.ts --trace latest --case &lt;case-id&gt;
+</code></pre>
+<p>See <code>evals/run.ts --help</code> for the full flag reference.</p>
+
 	</article>
 		<nav class="doc-nav">
-			<a href="reasoning.html" class="doc-nav-prev">← Reasoning</a>
-			<a href="themes.html" class="doc-nav-next">Themes →</a>
+			<a href="eval-behavior.html" class="doc-nav-prev">← Behavior Evals</a>
+			<a href="architecture.html" class="doc-nav-next">Architecture →</a>
 		</nav>
 </main>
 
