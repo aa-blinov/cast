@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.12.20
+
+### Fixed
+
+- First-run reasoning picker for MiniMax: `buildReasoningParams` for format `"minimax"` funneled every non-`adaptive`, non-`disabled` value (including `"off"` and stale levels like `"low"`/`"medium"`/`"high"`/`"max"` that can land here from a saved `reasoningLevel` set against a different provider) into `{ reasoning_split: true }` with `enabled: true`. For `"off"` that meant picking "off" was a no-op — the server's always-on default still ran reasoning. Reorder the switch so `off` / `disabled` map to `thinking: { type: "disabled" }` with `enabled: false` (verified live against api.minimax.io), `adaptive` stays its own branch, and the always-on fallback serves only true "on" levels. Hotfix on the reasoning dialect ladder that landed in 0.9.10.
+
 ## 0.12.19
 
 ### Added
