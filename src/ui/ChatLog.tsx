@@ -12,8 +12,8 @@ interface ChatLogProps {
 	streaming: StreamingState | null;
 	error: string | null;
 	retry: RetryInfo | null;
-	/** Terminal columns for wrapping calculations. */
 	columns: number;
+	showReasoning: boolean;
 	/**
 	 * Bumped by App after a terminal resize settles. Used as the <Static> key so
 	 * the whole history is replayed from a clean top — Ink otherwise only prints
@@ -181,13 +181,18 @@ function BlockView({
 	block,
 	truncated,
 	compact,
+	showReasoning,
 }: {
 	block: StreamBlock;
 	truncated?: boolean;
 	/** Live streaming region — keep tool rows short for the viewport clamp. */
 	compact?: boolean;
-}): JSX.Element {
+	/** When false, drop `thinking` blocks entirely. Defaults to true so the
+	 *  pure-BlockView test surface and any external callers stay unchanged. */
+	showReasoning?: boolean;
+}): JSX.Element | null {
 	if (block.kind === "thinking") {
+		if (showReasoning === false) return null;
 		return (
 			<Text color={theme().muted} dimColor>
 				{!block.continued && `[reasoning] ${truncated ? "… " : ""}`}
@@ -310,7 +315,7 @@ function blockKey(block: StreamBlock, index: number): string {
 	return block.kind === "tool" ? `tool-${block.call.id}` : `${block.kind}-${index}`;
 }
 
-function MessageView({ message }: { message: ChatMessage }): JSX.Element {
+function MessageView({ message, showReasoning }: { message: ChatMessage; showReasoning: boolean }): JSX.Element {
 	if (message.role === "user") {
 		return (
 			<Box flexDirection="column">
@@ -325,7 +330,7 @@ function MessageView({ message }: { message: ChatMessage }): JSX.Element {
 		return (
 			<Box flexDirection="column">
 				{message.blocks?.map((b, i) => (
-					<BlockView key={blockKey(b, i)} block={b} />
+					<BlockView key={blockKey(b, i)} block={b} showReasoning={showReasoning} />
 				))}
 			</Box>
 		);
@@ -344,7 +349,15 @@ function MessageView({ message }: { message: ChatMessage }): JSX.Element {
 	);
 }
 
-export function ChatLog({ messages, streaming, error, retry, columns, repaintKey }: ChatLogProps): JSX.Element {
+export function ChatLog({
+	messages,
+	streaming,
+	error,
+	retry,
+	columns,
+	repaintKey,
+	showReasoning,
+}: ChatLogProps): JSX.Element {
 	const liveParts: JSX.Element[] = [];
 
 	const cols = Math.max(20, columns);
@@ -393,7 +406,15 @@ export function ChatLog({ messages, streaming, error, retry, columns, repaintKey
 		}
 		const clamped = clampStreamingBlocks(streaming.blocks, availableRows, cols, stickyOverflowRef.current);
 		for (const { block, truncated, index } of clamped) {
-			streamingParts.push(<BlockView key={blockKey(block, index)} block={block} truncated={truncated} compact />);
+			streamingParts.push(
+				<BlockView
+					key={blockKey(block, index)}
+					block={block}
+					truncated={truncated}
+					compact
+					showReasoning={showReasoning}
+				/>,
+			);
 		}
 		liveParts.push(
 			<Box key="streaming" flexDirection="column">
@@ -405,7 +426,7 @@ export function ChatLog({ messages, streaming, error, retry, columns, repaintKey
 	return (
 		<>
 			<Static key={repaintKey} items={messages}>
-				{(m, i) => <MessageView key={`m-${i}`} message={m} />}
+				{(m, i) => <MessageView key={`m-${i}`} message={m} showReasoning={showReasoning} />}
 			</Static>
 			<Box flexDirection="column">{liveParts}</Box>
 		</>

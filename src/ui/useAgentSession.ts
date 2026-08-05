@@ -155,11 +155,20 @@ export interface UseAgentSession {
 	abort: () => void;
 	clearContext: () => void;
 	resetContext: () => string | undefined;
+	/** Re-reads the on-disk session messages into the in-memory list. */
 	refresh: () => void;
 	refreshMeta: () => void;
 	resetQueue: () => void;
-	/** Append a display-only message (not persisted to session). */
 	addDisplayMessage: (message: ChatMessage) => void;
+	/**
+	 * Whether to render reasoning blocks in the chat. Off by default — the
+	 * user can /reasoning-display to toggle for the current session. For
+	 * non-reasoning models the toggle is a no-op since no thinking blocks
+	 * ever arrive to filter.
+	 */
+	showReasoning: boolean;
+	/** Flip the showReasoning flag — used by /reasoning-display. */
+	toggleReasoning: () => void;
 	/** Timestamp the current turn started, or null when idle. Changes only at
 	 * start/stop — consumers that need a live-ticking display (the status
 	 * bar) should tick locally off this instead of re-rendering on it. */
@@ -379,7 +388,16 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	// classes with no reactivity of their own.
 	const [pendingSteers, setPendingSteers] = useState<string[]>([]);
 	const [pendingQueue, setPendingQueue] = useState<string[]>([]);
-
+	// Hide reasoning blocks by default — even with reasoning models the
+	// auxiliary thinking stream is noisy, and MiniMax-M3 in particular
+	// streams a lot of it. The /reasoning-display command toggles this for
+	// the current session only (no persistent setting); when the model is
+	// not configured for reasoning the toggle is a no-op since no
+	// thinking blocks ever arrive to filter.
+	const [showReasoning, setShowReasoning] = useState(false);
+	const toggleReasoning = useCallback(() => {
+		setShowReasoning((prev) => !prev);
+	}, []);
 	const acRef = useRef<AbortController | null>(null);
 	// Set when a retry event arrives; cleared on the first streaming event
 	// (token/thinking) so the retry banner disappears once new content flows.
@@ -1053,6 +1071,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		refreshMeta,
 		resetQueue,
 		addDisplayMessage,
+		showReasoning,
+		toggleReasoning,
 		turnStartedAt,
 		getElapsedMs,
 	};

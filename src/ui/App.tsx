@@ -597,6 +597,7 @@ export function App(props: AppProps): JSX.Element {
 				streaming={agent.streaming}
 				error={agent.error}
 				retry={agent.retry}
+				showReasoning={agent.showReasoning}
 				repaintKey={repaintKey + _themeVer}
 			/>
 			{notice && <Text color={theme().warning}>{notice}</Text>}

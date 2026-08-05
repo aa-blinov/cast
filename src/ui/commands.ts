@@ -162,6 +162,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/queue-reset", description: "Clear the message queue" },
 	{ name: "/quit", description: "Save and exit" },
 	{ name: "/reasoning", description: "Change reasoning level" },
+	{ name: "/reasoning-display", description: "Toggle reasoning blocks in the transcript" },
 	{ name: "/reasoning-format", description: "Set provider reasoning protocol" },
 	{ name: "/reload", description: "Reload skills, rules, MCP, and personas for cwd" },
 	{ name: "/repo", description: "Show cwd and git branch" },
@@ -1025,7 +1026,18 @@ async function handlePluginCommand(input: string, deps: CommandDeps): Promise<vo
 }
 
 /** Commands allowed while the agent is running — plain text is rejected. */
-const RUNNING_COMMANDS = new Set(["/queue", "/q", "/queue-reset", "/qr", "/steer", "/s", "/abort", "/stop"]);
+const RUNNING_COMMANDS = new Set([
+	"/queue",
+	"/q",
+	"/queue-reset",
+	"/qr",
+	"/steer",
+	"/s",
+	"/abort",
+	"/stop",
+	"/reasoning-display",
+	"/rd",
+]);
 
 export function canSubmitDuringRun(text: string): boolean {
 	const input = text.trim();
@@ -1074,6 +1086,11 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		// App.tsx), not on a fixed timer that could clear it long before a
 		// tool-heavy turn gets around to draining the queue.
 		agent.steer(msg);
+		return;
+	}
+	if (input === "/reasoning-display" || input === "/rd") {
+		agent.toggleReasoning();
+		showNotice(`[Reasoning display: ${agent.showReasoning ? "on" : "off"}]`);
 		return;
 	}
 	if (input === "/queue-reset" || input === "/qr") {

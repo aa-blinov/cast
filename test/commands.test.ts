@@ -61,6 +61,15 @@ function createFakeDeps(overrides?: Partial<CommandDeps> & { running?: boolean }
 		resetQueue: track("agent.resetQueue"),
 		refresh: track("agent.refresh"),
 		refreshMeta: track("agent.refreshMeta"),
+		// showReasoning flips on `/reasoning-display` calls. We model it as a
+		// stateful boolean the command handler reads after toggling — the value
+		// the test sees is the post-toggle one, which is what the notice text
+		// conveys to the user.
+		showReasoning: false,
+		toggleReasoning: () => {
+			agent.showReasoning = !agent.showReasoning;
+			track("agent.toggleReasoning")();
+		},
 		addDisplayMessage: track("agent.addDisplayMessage"),
 		messages: [],
 		streaming: null,
@@ -537,6 +546,41 @@ describe("handleInput", () => {
 		await handleInput("/qr", undefined, deps);
 		expect(calls["agent.resetQueue"]).toHaveLength(1);
 		expect(noticeText(calls)).toContain("Queue cleared");
+	});
+
+	// Rendering reasoning blocks in the chat transcript is opt-in: MiniMax-M3
+	// and other reasoning models stream a lot of auxiliary thinking that just
+	// clutters the screen. /reasoning-display flips the flag so the user can
+	// surface it when they want to debug the model's reasoning.
+	it("/reasoning-display toggles the showReasoning flag", async () => {
+		const { deps, calls } = createFakeDeps({ running: false });
+		expect(deps.agent.showReasoning).toBe(false);
+		await handleInput("/reasoning-display", undefined, deps);
+		expect(deps.agent.showReasoning).toBe(true);
+		expect(calls["agent.toggleReasoning"]).toHaveLength(1);
+		const notices = (calls.showNotice as unknown[][] | undefined)?.map((n) => String(n[0] ?? "")) ?? [];
+		expect(notices[0]).toContain("on");
+		await handleInput("/reasoning-display", undefined, deps);
+		expect(deps.agent.showReasoning).toBe(false);
+		const notices2 = (calls.showNotice as unknown[][] | undefined)?.map((n) => String(n[0] ?? "")) ?? [];
+		expect(notices2[1]).toContain("off");
+	});
+
+	it("/rd is an alias for /reasoning-display", async () => {
+		const { deps, calls } = createFakeDeps({ running: false });
+		await handleInput("/rd", undefined, deps);
+		expect(deps.agent.showReasoning).toBe(true);
+		expect(calls["agent.toggleReasoning"]).toHaveLength(1);
+	});
+
+	it("/reasoning-display is allowed while the agent is running", async () => {
+		// The toggle is a UI-only switch — it doesn't touch the running turn,
+		// so the running guard must not block it. Otherwise users would have to
+		// wait for a long tool call to finish to clean up the transcript.
+		const { deps, calls } = createFakeDeps({ running: true });
+		await handleInput("/reasoning-display", undefined, deps);
+		expect(calls["agent.toggleReasoning"]).toHaveLength(1);
+		expect(calls["agent.abort"]).toBeUndefined();
 	});
 
 	it("empty input does nothing (no submit)", async () => {
