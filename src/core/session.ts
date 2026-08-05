@@ -55,6 +55,7 @@ export interface SessionState {
 	model: string;
 	createdAt: string;
 	updatedAt: string;
+	checkpoints?: import("./checkpoint.ts").TurnCheckpoint[];
 	/** Cumulative token/cost usage across every turn in this session. */
 	usage: SessionUsage;
 	/** promptTokens from the most recent API response — the authoritative
