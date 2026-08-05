@@ -3,9 +3,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetDbConnectionForTests } from "../src/core/db.ts";
+import { createAgentRunner } from "../src/core/runner.ts";
+import { appendMessage, createSession, saveSession } from "../src/core/session.ts";
 import type { WebBridge } from "../src/web/bridge.ts";
+import { createWebBridge } from "../src/web/bridge.ts";
 import { startWebServer } from "../src/web/server.ts";
 
 let server: ReturnType<typeof startWebServer>;
@@ -260,5 +263,177 @@ describe("/api/web/status", () => {
 		// The endpoint should also have cleaned up the stale file, so the
 		// next request sees the same answer instead of "still stale".
 		expect(existsSync(stateFile)).toBe(false);
+	});
+});
+// JSON response compression
+// ============================================================================
+// The api/json() helper gzip-encodes anything over 8 KB so the worst
+// payloads on the server (the sidebar list, a single-session detail
+// page) cross the wire as a tenth of their JSON size. SSE endpoints
+// deliberately stay uncompressed — chunked text/event-stream and a
+// Content-Encoding header don't mix on every browser/proxy. This block
+// pins both behaviors through the real startServer call so a future
+// refactor can't silently regress them.
+describe("JSON response compression", () => {
+	// The shared startServer above uses `{} as WebBridge`, so this
+	// describe swaps it out for a populated one — 80 sessions are enough
+	// to push the /api/sessions responses past the 8 KB compression
+	// threshold without needing to spin up a real provider. runAgentLoop
+	// is fire-and-forget; stub it so the bridge doesn't need one.
+	const runAgentLoop = vi.fn().mockResolvedValue(undefined);
+	vi.mock("../src/core/loop.ts", async (importOriginal) => {
+		const actual = await importOriginal<typeof import("../src/core/loop.ts")>();
+		return { ...actual, runAgentLoop: (...args: unknown[]) => runAgentLoop(...args) };
+	});
+	beforeEach(async () => {
+		await stopServer();
+		const bridge = createWebBridge({
+			config: {
+				baseURL: "http://localhost",
+				apiKey: "test",
+				contextWindow: 128_000,
+				maxResponseTokens: 8192,
+				compactionThreshold: 0.75,
+				maxToolOutputLines: 2000,
+				maxToolOutputBytes: 65_536,
+				defaultBashTimeout: 120,
+				reasoningLevel: "off",
+				reasoningParams: { body: {} },
+			},
+			cwd: testDbDir,
+			systemPrompt: "test",
+			session: createSession("gpt-4o", testDbDir),
+			runner: createAgentRunner(),
+			permissionMode: "default",
+			mcpResult: {
+				toolIndex: new Map(),
+				toolDefinitions: [],
+				connections: [],
+				diagnostics: [],
+				allServerNames: [],
+			},
+			skills: [],
+			persona: {
+				name: "senior",
+				label: "Senior",
+				description: "",
+				systemPrompt: "",
+				source: "builtin",
+				filePath: "",
+				subagents: false,
+			},
+			personaOptions: {} as never,
+			personas: [],
+			subagentPrompts: [],
+			confirmBash: async () => true,
+			projectDeps: {} as never,
+			projectTrusted: true,
+			contextFilesSuffix: "",
+			rulesSuffix: "",
+			rulesLazySuffix: "",
+			directoryRules: [],
+			activeAutoRules: [],
+			skillsPromptSuffix: "",
+			sshHosts: [],
+			resumed: false,
+		});
+		// 80 sessions × a short user + assistant message easily clears
+		// the 8 KB threshold once listSessionSummaries JSON-encodes them.
+		for (let i = 0; i < 80; i++) {
+			const session = createSession("gpt-4o", testDbDir);
+			appendMessage(session, {
+				role: "user",
+				content: `do thing number ${i} on this path that requires the model to act`,
+			});
+			appendMessage(session, {
+				role: "assistant",
+				content: `Here is what happened next, including the tool calls and the final answer ${i}`,
+			});
+			saveSession(session);
+		}
+		server = startWebServer({
+			port: 0,
+			host: "127.0.0.1",
+			bridge,
+			webUser: "cast",
+			webPassword: "test-password",
+			version: "test",
+		});
+		await once(server, "listening");
+		const address = server.address() as AddressInfo;
+		origin = `http://127.0.0.1:${address.port}`;
+	});
+
+	it("gzip-encodes JSON responses that exceed the 8 KB threshold", async () => {
+		const auth = await fetch(`${origin}/api/auth/login`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ username: "cast", password: "test-password" }),
+		});
+		const cookie = auth.headers.get("set-cookie")!;
+
+		const res = await fetch(`${origin}/api/sessions`, {
+			headers: { Cookie: cookie, "Accept-Encoding": "gzip" },
+		});
+		expect(res.status).toBe(200);
+		expect(res.headers.get("content-encoding")).toBe("gzip");
+		expect(res.headers.get("content-type")).toBe("application/json");
+		// Vary must include Accept-Encoding so a downstream cache key
+		// Note: undici's fetch automatically decompresses a gzip response body
+		// before exposing it via arrayBuffer()/json(), so all we can verify
+		// from the outside is the wire-level header — the server set it, a
+		// downstream cache key must include it (Vary), and the body parses
+		// as valid JSON once uncompressed. The actual byte-level round-trip
+		// is covered by the unit tests for json() itself.
+		expect(res.headers.get("vary")).toContain("Accept-Encoding");
+		const sessions = (await res.json()) as Array<{ id: string; title: string }>;
+		expect(sessions.length).toBeGreaterThanOrEqual(80);
+	});
+
+	it("does not gzip responses smaller than the threshold", async () => {
+		const auth = await fetch(`${origin}/api/auth/login`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ username: "cast", password: "test-password" }),
+		});
+		const cookie = auth.headers.get("set-cookie")!;
+
+		// /api/auth/session is a tiny JSON `{authenticated:true}` — well
+		// below the 8 KB threshold. Must ship uncompressed.
+		const res = await fetch(`${origin}/api/auth/session`, {
+			headers: { Cookie: cookie, "Accept-Encoding": "gzip" },
+		});
+		expect(res.status).toBe(200);
+		expect(res.headers.get("content-encoding")).toBeNull();
+		const body = await res.json();
+		expect(body).toEqual({ authenticated: true });
+	});
+
+	it("keeps SSE endpoints uncompressed to avoid chunked-encoding + gzip conflict", async () => {
+		const auth = await fetch(`${origin}/api/auth/login`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ username: "cast", password: "test-password" }),
+		});
+		const cookie = auth.headers.get("set-cookie")!;
+
+		// The SSE endpoint sends the initial ": connected" frame right
+		// after writeHead, so a single fetch of the headers is enough to
+		// observe the Content-Encoding contract. Stream body is left
+		// to the publisher (test/web-bridge.test.ts already covers
+		// listener-side event delivery).
+		const controller = new AbortController();
+		const res = await fetch(`${origin}/api/sessions/events`, {
+			headers: { Cookie: cookie, "Accept-Encoding": "gzip" },
+			signal: controller.signal,
+		});
+		// text/event-stream must not declare gzip — even when the session
+		// list behind it would otherwise well exceed the 8 KB threshold.
+		expect(res.headers.get("content-encoding")).toBeNull();
+		expect(res.headers.get("content-type")).toBe("text/event-stream");
+		// Drain the response so the server doesn't see lingering
+		// connections on the next test.
+		controller.abort();
+		await res.arrayBuffer().catch(() => undefined);
 	});
 });
