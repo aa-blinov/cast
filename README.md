@@ -19,9 +19,9 @@ A role-based terminal agent harness. 18 built-in personas — senior dev, QA, DB
 
 Point a generic coding agent and a role-specific one at the same file, and they look for different things. An `appsec` persona flags injection risks; a `dba` persona flags missing indexes and normalization. A `qa` persona treats an untested edge case as unfinished work, while a `pm` persona treats an unwritten spec as unfinished work.
 
-Personas in cast are not cosmetic text skins. Each persona is defined by markdown frontmatter (`~/.cast/personas/*.md` or `.cast/personas/*.md`) that can restrict available built-in tools (`tools`), skills (`skills`), MCP servers (`mcp`), and sub-agent delegation (`subagents`, `subagentTypes`).
+Personas in cast are not cosmetic text skins. Each persona is defined by markdown frontmatter (`~/.cast/personas/*.md` or `.cast/personas/*.md`) that can constrain available built-in tools (`tools`), skills (`skills`), MCP servers (`mcp`), and sub-agent delegation (`subagents`, `subagentTypes`).
 
-Scoping the toolset per role prevents context bloat during routine harness tasks. An assistant or tech-writer persona does not need DB migration tools or raw shell mutation primitives cluttering its system prompt and tool definitions. Narrowing tool access keeps the context window focused on the active role, reducing attention decay and accidental tool invocation.
+Scoping capabilities per role prevents context bloat and instruction clutter during routine tasks. A technical writer or assistant persona does not need database tools, heavy shell mutation primitives, specialized skills, or external MCP server definitions flooding its system prompt. Narrowing the tool, skill, MCP, and subagent surface keeps the context window focused on the active role, reducing attention decay and preventing accidental or misrouted invocations.
 
 For empirical research on role prompting and tool-agent behavior, see [docs/persona-research.md](docs/persona-research.md).
 
