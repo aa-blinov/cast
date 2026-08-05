@@ -189,7 +189,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 	font-family: var(--font-mono); font-size: .65rem; color: var(--text-muted);
 }
 
-/* ── Mobile Menu ─────────────────────────────────────────────────── */
+/* ── Mobile Menu & Responsiveness ────────────────────────────────── */
 .menu-toggle {
 	display: none; background: none; border: 1px solid var(--border);
 	color: var(--text-dim); font-size: 1.1rem; cursor: pointer;
@@ -209,9 +209,19 @@ a:hover { color: #c084fc; text-decoration: none; }
 	}
 	.sidebar-backdrop.visible { display: block; }
 	.menu-toggle { display: block; }
-	.main { margin-left: 0 !important; padding: 20px 16px 60px !important; }
+	.main { margin-left: 0 !important; padding: 20px 14px 60px !important; }
 	.header { padding: 0 12px; }
 	.header-links { gap: 8px; }
+	.hero { padding: 40px 16px 32px; }
+	.hero h1 { font-size: 1.6rem; }
+	.hero p { font-size: .92rem; margin-bottom: 20px; }
+	.install-block { padding: 12px 14px; }
+	.install-block code { font-size: .75rem; word-break: break-all; }
+	.content h1 { font-size: 1.5rem; }
+	.content h2 { font-size: 1.2rem; margin: 24px 0 10px; }
+	.content table { font-size: .78rem; }
+	.content th, .content td { padding: 6px 8px; }
+	.content pre:not(.mermaid-code) { padding: 12px; font-size: .78rem; border-radius: 6px; }
 }
 
 /* ── Main Workspace ──────────────────────────────────────────────── */
