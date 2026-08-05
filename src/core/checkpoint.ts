@@ -41,11 +41,12 @@ function runGit(cwd: string, args: string[]): string | null {
  * If inside a Git repository, creates a lightweight git commit object via write-tree/commit-tree.
  * If not in a Git repo, returns an empty non-git checkpoint initialized for shadow file backups.
  */
-export function createCheckpoint(cwd: string): TurnCheckpoint {
+export function createCheckpoint(cwd: string, forceShadow = false): TurnCheckpoint {
 	const timestamp = new Date().toISOString();
 	const id = `chk-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 	const repoRoot = findCanonicalGitRoot(cwd);
-	const isGitRepo = Boolean(repoRoot && runGit(cwd, ["rev-parse", "--is-inside-work-tree"]) === "true");
+	const topLevel = repoRoot ? runGit(cwd, ["rev-parse", "--show-toplevel"]) : null;
+	const isGitRepo = !forceShadow && Boolean(topLevel && runGit(cwd, ["rev-parse", "--is-inside-work-tree"]) === "true");
 
 	if (isGitRepo && repoRoot) {
 		// Stage all changes (including untracked files) to index temporarily for write-tree

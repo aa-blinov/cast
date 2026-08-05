@@ -20,7 +20,7 @@ describe("checkpoint module", () => {
 		const targetFile = join(TEST_DIR, "original.txt");
 		writeFileSync(targetFile, "initial content", "utf8");
 
-		const chk = createCheckpoint(TEST_DIR);
+		const chk = createCheckpoint(TEST_DIR, true);
 		expect(chk.gitCommitSha).toBeUndefined();
 
 		backupFileForCheckpoint(chk, targetFile);
