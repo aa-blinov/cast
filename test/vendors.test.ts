@@ -429,9 +429,14 @@ describe("buildReasoningParams", () => {
 			body: { reasoning_split: true, thinking: { type: "disabled" } },
 			enabled: false,
 		});
-		// Stale level strings (off/on) fall back to the always-on default.
+		// "on" → always-on default (no `thinking` field, server uses built-in mode).
 		expect(buildReasoningParams("on", "minimax").body).toEqual({ reasoning_split: true });
-		expect(buildReasoningParams("off", "minimax").body).toEqual({ reasoning_split: true });
+		// "off" → explicitly request disabled thinking so the server actually turns reasoning off.
+		expect(buildReasoningParams("off", "minimax").body).toEqual({
+			reasoning_split: true,
+			thinking: { type: "disabled" },
+		});
+		expect(buildReasoningParams("off", "minimax").enabled).toBe(false);
 	});
 
 	it("off returns explicit enabled: false", () => {
