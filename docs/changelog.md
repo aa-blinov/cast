@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.12.22
+
+### Fixed
+
+- Web UI: clicking a thread closed the sidebar immediately and highlighted only the newly-selected row, instead of waiting for the `/api/sessions/:id` fetch to land and glowing both old and new at once. `setSidebarOpen(false)` now runs at the start of `selectSession` (right after `setSelectingId`) so the drawer collapses instantly on big-thread clicks that take a second or two to load. The chat area's "Loading…" empty-state already takes over during the same window, so the user sees a clear "switching" state instead of a stale list with a mute click. The dual-highlight bug — `isActive = s.id === activeId || selecting` matched both the previous active row AND the new selecting one during the transition — fixed by switching to `isActive = selecting || (s.id === activeId && !selectingId)` (added `selectingId` as a prop so the formula can tell "this row is the picker target" from "some other row is the picker target"). Bootstrap / popstate paths don't go through `selectSession`, so their old "wait for response" timing is preserved.
+
 ## 0.12.21
 
 ### Fixed
