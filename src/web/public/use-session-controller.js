@@ -65,6 +65,17 @@ export function useSessionController({
 			const version = ++sessionViewVersionRef.current;
 			++draftVersionRef.current;
 			setSelectingId(id);
+			// Close the sidebar immediately on click. Big threads can take a
+			// second or two to load (the GET blocks until the backend's local
+			// store resolves), so waiting for the response before closing
+			// left the user staring at a stale list with the click visibly
+			// registered only as a row highlight. The chat area already shows
+			// a "Loading…" empty-state during the same window — together
+			// they read as "we got it, switching" instead of "did the click
+			// land?". Bootstrap / popstate paths don't pass through here, so
+			// programmatic selections (no real click, no closed drawer) keep
+			// their old "wait for response" timing.
+			setSidebarOpen(false);
 			try {
 				// initClientState may already have this in flight — kicked off
 				// alongside (not after) the personas/session-list calls when the
@@ -100,7 +111,6 @@ export function useSessionController({
 				hydrateStreamingNow(data.streaming);
 				setRunning(data.status === "running");
 				wasRunningRef.current = data.status === "running";
-				setSidebarOpen(false);
 				try {
 					localStorage.setItem("cast:lastSessionId", id);
 				} catch {}
