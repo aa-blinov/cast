@@ -8,6 +8,7 @@ import { type ParsedArgs, runStartup } from "../core/startup.ts";
 import { suspendAndRun } from "../core/stdin-manager.ts";
 import { inkPickers } from "../pickers/ink.tsx";
 import type { Pickers } from "../pickers/types.ts";
+import { readLiveWebState } from "../web/daemon-state.ts";
 import { App } from "./App.tsx";
 import { gradientBanner } from "./gradient.ts";
 import { saveClipboardImageToTempFile } from "./readClipboardImage.ts";
@@ -34,7 +35,25 @@ function StartupLoader({ text }: { text: string }): JSX.Element {
  * instance first, feed it runStartup's progress text via rerender(), then
  * swap to the real App once it resolves.
  */
-export async function runTui(args: ParsedArgs): Promise<void> {
+export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<void> {
+	// Node 22 has no global EventSource; the TUI pulls undici's experimental
+	// build to receive the daemon's SSE stream. undici emits a one-time
+	// "EventSource is experimental" (code UNDICI-ES) warning on first use —
+	// it's noisy and meaningless for us, so suppress just that code. Other
+	// warnings are replayed to the original listener so nothing else is lost.
+	const warningListeners = process.listeners("warning");
+	process.removeAllListeners("warning");
+	process.on("warning", (w) => {
+		if ((w as Error & { code?: string })?.code === "UNDICI-ES") return;
+		for (const l of warningListeners) l(w);
+	});
+	// Single-writer daemon: the `cast web` daemon owns runAgentLoop and streams
+	// events to every surface. When a daemon is live, point the TUI at it as a
+	// thin client (HTTP + SSE) instead of running the loop locally. daemonToken
+	// is only set when a loopback daemon exists (see index.ts ensureDaemon);
+	// read its port/host from the same state file the token came from.
+	const daemonState = daemonToken ? readLiveWebState() : undefined;
+	const daemonUrl = daemonState ? `http://${daemonState.host}:${daemonState.port}` : undefined;
 	let loader: ReturnType<typeof render> | null = null;
 	const showLoader = (text: string) => {
 		if (loader) loader.rerender(<StartupLoader text={text} />);
@@ -138,6 +157,8 @@ export async function runTui(args: ParsedArgs): Promise<void> {
 			onPasteImage={onPasteImage}
 			onQuit={onQuit}
 			onRepaintBanner={onRepaintBanner}
+			daemonUrl={daemonUrl}
+			daemonToken={daemonToken}
 		/>,
 		{
 			// Ctrl+C is handled by the Composer (double-press confirmation, see

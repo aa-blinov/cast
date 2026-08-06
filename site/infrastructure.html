@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-<title>Configuration — cast</title>
-<meta name="description" content="Configuration documentation for cast, a role-based terminal agent harness.">
+<title>Infrastructure — cast</title>
+<meta name="description" content="Infrastructure documentation for cast, a role-based terminal agent harness.">
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Inter:wght@400;500;600;700&display=swap');
@@ -491,13 +491,13 @@ a:hover { color: #c084fc; text-decoration: none; }
 			<a href="worktrees.html">Git Worktrees</a>
 			<a href="plan-mode.html">Plan Mode</a>
 			<a href="reasoning.html">Reasoning</a>
-			<a href="configuration.html" class="active">Configuration</a>
+			<a href="configuration.html">Configuration</a>
 			<a href="themes.html">Themes</a>
 			<a href="non-interactive-mode.html">Non-Interactive Mode</a>
 			<a href="eval-behavior.html">Behavior Evals</a>
 			<a href="eval-methodology.html">Eval Methodology</a>
 			<a href="architecture.html">Architecture</a>
-			<a href="infrastructure.html">Infrastructure</a>
+			<a href="infrastructure.html" class="active">Infrastructure</a>
 			<a href="eval-scoreboard.html">Model Scoreboard</a>
 			<a href="changelog.html">Changelog</a>
 	</div>
@@ -505,59 +505,63 @@ a:hover { color: #c084fc; text-decoration: none; }
 
 <main class="main">
 	<article class="content">
-		<h1>Configuration</h1>
-<h2>Settings File</h2>
-<p>User settings are persisted to <code>~/.cast/settings.json</code>. This file is loaded on startup and saved after changes (model switch, reasoning change, persona change, etc.).</p>
-<h3>Settings Schema</h3>
-<div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead><tbody><tr><td><code>model</code></td><td>string</td><td>Last used model</td></tr><tr><td><code>modelProvider</code></td><td>string</td><td>Saved-provider name for <code>model</code> (falls back to the active provider)</td></tr><tr><td><code>subagentModel</code></td><td>string</td><td>Model for sub-agents (falls back to <code>model</code>)</td></tr><tr><td><code>subagentModelProvider</code></td><td>string</td><td>Saved-provider name for <code>subagentModel</code></td></tr><tr><td><code>planModel</code></td><td>string</td><td>Model used while plan mode is active (falls back to <code>model</code>)</td></tr><tr><td><code>planModelProvider</code></td><td>string</td><td>Saved-provider name for <code>planModel</code></td></tr><tr><td><code>reasoningLevel</code></td><td>string</td><td>Last used reasoning level</td></tr><tr><td><code>persona</code></td><td>string</td><td>Last used persona name</td></tr><tr><td><code>providerUrl</code></td><td>string</td><td>Active provider endpoint URL</td></tr><tr><td><code>apiKey</code></td><td>string</td><td>Active provider API key</td></tr><tr><td><code>providers</code></td><td>Provider[]</td><td>Saved providers (<code>name</code>, <code>url</code>, <code>apiKey</code>, optional <code>reasoningFormat</code>) — use <code>/provider</code> to manage</td></tr><tr><td><code>cwd</code></td><td>string</td><td>Last working directory</td></tr><tr><td><code>permissionMode</code></td><td><code>&quot;default&quot;</code> | <code>&quot;bypass&quot;</code></td><td>Bash confirmation mode</td></tr><tr><td><code>projectTrust</code></td><td>Record&lt;string, boolean&gt;</td><td>Per-project trust decisions</td></tr><tr><td><code>theme</code></td><td>string</td><td>Active color theme id</td></tr><tr><td><code>webTools</code></td><td>boolean</td><td>Whether web tools are enabled (default: <code>false</code> — use <code>/web</code> to enable)</td></tr><tr><td><code>searchProvider</code></td><td><code>&quot;ddg&quot;</code> | <code>&quot;tavily&quot;</code> | <code>&quot;brave&quot;</code></td><td><code>web_search</code> backend (default: <code>&quot;ddg&quot;</code>) — use <code>/web-search-provider</code> to change</td></tr><tr><td><code>tavilyApiKey</code></td><td>string</td><td>API key for the Tavily backend, from <a href="https://app.tavily.com">https://app.tavily.com</a></td></tr><tr><td><code>braveApiKey</code></td><td>string</td><td>API key for the Brave Search backend, from <a href="https://api-dashboard.search.brave.com">https://api-dashboard.search.brave.com</a></td></tr><tr><td><code>webFetchProvider</code></td><td><code>&quot;jina&quot;</code> | <code>&quot;local&quot;</code></td><td><code>web_fetch</code> backend (default: <code>&quot;jina&quot;</code>) — use <code>/web-fetch-provider</code> to change</td></tr><tr><td><code>disabledMcpServers</code></td><td>string[]</td><td>MCP server names disabled via <code>/mcp</code> toggle</td></tr><tr><td><code>disabledSkills</code></td><td>string[]</td><td>Skill names disabled via <code>/skills</code> toggle</td></tr><tr><td><code>disabledHooks</code></td><td>string[]</td><td>Content-derived hook group ids disabled via <code>/hooks</code></td></tr><tr><td><code>enabledPlugins</code></td><td>Record&lt;string, boolean&gt;</td><td>Marketplace plugins keyed by <code>name@marketplace</code></td></tr><tr><td><code>statusBar</code></td><td>object</td><td>Status bar segment config (<code>visible</code>, <code>order</code>, <code>sides</code>) — use <code>/statusbar</code> to configure</td></tr><tr><td><code>webPassword</code></td><td>string</td><td>Password generated for <code>cast web</code> on first start</td></tr><tr><td><code>quickSessionPersona</code></td><td>string</td><td>Persona selected by the web UI&#39;s Quick session action</td></tr><tr><td><code>updatedAt</code></td><td>string</td><td>Auto-updated timestamp</td></tr></tbody></table></div><p>Settings are written atomically (temp file + rename) to prevent corruption from crashes mid-write.</p>
-<h2>Environment Variables</h2>
-<div class="table-wrap"><table><thead><tr><th>Variable</th><th>Description</th></tr></thead><tbody><tr><td><code>CAST_CWD</code></td><td>Override working directory</td></tr><tr><td><code>CAST_BASH</code></td><td>Path to the bash executable the <code>bash</code> tool spawns (overrides auto-detection; useful for msys2 or non-standard Git Bash installs on Windows)</td></tr><tr><td><code>CAST_VERSION</code></td><td>Pin install version (installer only)</td></tr></tbody></table></div><p>Provider URL and API key are configured <strong>only</strong> via <code>~/.cast/settings.json</code> (first-run prompt, or <code>/provider</code> in-session). cast does not read <code>PROVIDER_BASE_URL</code> / <code>PROVIDER_API_KEY</code> environment variables or a project <code>.env</code> — editing those changes nothing.</p>
-<h2>.cast/ Directory Structure</h2>
-<pre><code>~/.cast/
-  settings.json         # User settings
-  AGENTS.md             # Global context file (optional)
-  mcp.json              # Global MCP server config
-  sessions/sessions.db  # SQLite session database (legacy JSON files are imported once)
-  skills/               # Global skills
-  plugins/              # Marketplace catalogs + installed plugins (see plugins.md)
-  rules/                # Global rules
-  personas/             # Global personas
-
-~/.agents/skills/          # skills.sh universal global
-~/.config/agents/skills/   # Compatible universal-global location
-
-&lt;project&gt;/.cast/
-  plans/&lt;session-id&gt;/   # Session plan files
-  skills/               # Project-local skills
-  rules/                # Project-local rules
-  personas/             # Project-local personas
-  mcp.json              # Project-local MCP config
-  hooks.json            # Project-local hooks
-  ssh.json              # Project-local SSH hosts
-
-&lt;project&gt;/.agents/skills/  # skills.sh universal project (npx skills add -a universal)
+		<h1>Infrastructure</h1>
+<p>How cast&#39;s processes and surfaces fit together: the single-writer daemon, the TUI and web clients, lifecycles, and auth.</p>
+<p>For the agent engine itself (how <code>runAgentLoop</code> streams, parallel tools, compaction), see <a href="architecture.html">Architecture</a>.</p>
+<h2>Overview</h2>
+<p>cast has two interactive surfaces and one engine. The engine (<code>runAgentLoop</code>, in <code>src/core/loop.ts</code>) is owned by exactly one process — the <strong><code>cast web</code> daemon</strong> — which is the single writer to the SQLite session store. Both surfaces are thin clients of it over HTTP + SSE:</p>
+<pre><code>┌─────────────┐   HTTP + SSE    ┌──────────────────────────┐   runAgentLoop   ┌──────────┐
+│   TUI       │ ───────────────▶│                          │ ────────────────▶│  LLM /   │
+│ (thin       │                 │   cast web daemon        │                  │  tools   │
+│  client)    │                 │  ─ owns runAgentLoop     │                  │  (MCP,   │
+└─────────────┘                 │  ─ only writer to SQLite │                  │  bash…)  │
+┌─────────────┐   HTTP + SSE    │  ─ streams WebEvent via  │                  └──────────┘
+│   Web UI    │ ───────────────▶│    SSE to every client   │
+│ (browser)   │                 └──────────────────────────┘
+└─────────────┘
 </code></pre>
-<h2>Project Trust</h2>
-<p>A single trust decision gates all project-local resources: skills (<code>.cast/skills/</code> and <code>.agents/skills/</code>), MCP servers, context files, personas, rules, hooks, and <code>.cast/ssh.json</code>. cast asks once per project; the decision is saved in <code>settings.json</code> under <code>projectTrust</code>.</p>
-<p>Global resources (<code>~/.cast/</code>, <code>~/.agents/skills/</code>, <code>~/.config/agents/skills/</code>) always load without a trust check — you put them there yourself.</p>
-<h2>Permission Modes</h2>
-<div class="table-wrap"><table><thead><tr><th>Mode</th><th>Behavior</th></tr></thead><tbody><tr><td><code>default</code></td><td>Dangerous bash commands require confirmation</td></tr><tr><td><code>bypass</code></td><td>All bash commands run without confirmation</td></tr></tbody></table></div><p>Change with:</p>
+<p>Before this model (pre-0.12.29) the TUI ran <code>runAgentLoop</code> <strong>locally</strong> and the web daemon re-implemented it. Two writers racing on the same session store meant a session opened in both surfaces only shared a periodic DB snapshot — no live cross-surface streaming, no shared abort. The single-writer daemon removes that split.</p>
+<h2>The daemon is the engine</h2>
+<p><code>cast web</code> is not a second implementation of the loop — it <em>is</em> the loop. One long-lived daemon process:</p>
 <ul>
-<li><code>--bypass-permissions</code> flag (this run only)</li>
-<li><code>/permissions</code> command (persists to settings)</li>
-<li><code>/permissions default</code> or <code>/permissions bypass</code> (direct set)</li>
+<li>owns <code>runAgentLoop</code> for every session;</li>
+<li>is the <strong>only</strong> process that writes to <code>~/.cast/sessions.db</code>;</li>
+<li>turns each <code>AgentEvent</code> into a <code>WebEvent</code> and broadcasts it over SSE to every subscribed client (the per-session <code>GET /api/sessions/:id/events</code> stream, plus the sidebar-wide <code>GET /api/sessions/events</code>).</li>
 </ul>
-<p>See <a href="tools.html#dangerous-command-gating">Tools</a> for the list of dangerous patterns.</p>
-<h2>Provider Configuration</h2>
-<p>On first run, cast asks for your provider URL and API key. Both are saved to <code>~/.cast/settings.json</code>.</p>
-<p>You can save multiple providers and switch between them:</p>
-<div class="table-wrap"><table><thead><tr><th>Command</th><th>Action</th></tr></thead><tbody><tr><td><code>/provider</code></td><td>Open picker — switch between saved providers</td></tr><tr><td><code>/provider add</code></td><td>Add a new provider (name → URL → key wizard)</td></tr><tr><td><code>/provider delete</code></td><td>Remove a saved provider</td></tr><tr><td><code>/provider &lt;name&gt;</code></td><td>Switch to a named provider directly</td></tr></tbody></table></div><p>Providers are stored in the <code>providers</code> array in settings.json. The active provider&#39;s URL and key are also saved in the top-level <code>providerUrl</code> / <code>apiKey</code> fields for startup.</p>
-<p>Supported providers: anything that speaks the OpenAI API. Common URLs:</p>
-<div class="table-wrap"><table><thead><tr><th>Provider</th><th>URL</th></tr></thead><tbody><tr><td>OpenRouter</td><td><code>https://openrouter.ai/api/v1</code></td></tr><tr><td>OpenAI</td><td><code>https://api.openai.com/v1</code></td></tr><tr><td>Ollama</td><td><code>http://localhost:11434/v1</code></td></tr></tbody></table></div>
+<h2>TUI as a thin client</h2>
+<p>The TUI (<code>cast</code>, no subcommand) no longer runs the loop locally. On launch, <code>src/index.ts</code> calls <code>ensureDaemon()</code>:</p>
+<ul>
+<li>if a live daemon already exists (<code>~/.cast/web.json</code> describes an alive PID), it reuses it and reads the port + token from that state file;</li>
+<li>otherwise it spawns <code>cast web --port 0 --host 127.0.0.1</code> detached, waits for the child to actually bind (the state file is written only once the server is listening), then reads the port + token.</li>
+</ul>
+<p>The TUI then:</p>
+<ul>
+<li><code>submit(text)</code> → <code>POST /api/sessions/:id/chat</code>;</li>
+<li>renders tokens / tool calls / status from the <code>/api/sessions/:id/events</code> SSE stream — the exact same stream the browser consumes;</li>
+<li><code>abort</code> / <code>steer</code> / <code>followUp</code> → <code>POST /api/sessions/:id/{abort,steer,followup}</code>.</li>
+</ul>
+<p>Local <code>runner.runAgentLoop</code> is retained only for <code>cast run --interactive</code> and the <code>CAST_NO_DAEMON=1</code> escape hatch (see below).</p>
+<h2>Web UI (browser)</h2>
+<p>The original client. Connects over HTTP + SSE, logs in with the auto-generated password (<code>cast</code> / printed on first <code>cast web</code> start, saved in <code>settings.json</code>), and renders the same <code>WebEvent</code> stream the TUI does. Because both surfaces read the <em>same</em> SSE stream from the <em>same</em> daemon, opening one session in both shows live tokens, tool calls, and status in both, and an <code>abort</code> from either stops the turn for both.</p>
+<h2>Lifecycle</h2>
+<ul>
+<li><strong>Start:</strong> <code>cast</code> (TUI) auto-spawns the daemon if none is live; <code>cast web start</code> (or just <code>cast web</code>) starts it explicitly. A detached daemon keeps running after the TUI exits, so the browser can still connect.</li>
+<li><strong>Stop:</strong> <code>cast web stop</code> sends SIGTERM (escalating to SIGKILL after 3s), drains active turns, and clears the state file. Stopping the daemon also disconnects the TUI&#39;s SSE stream — the TUI sees <code>[terminated]</code> and can reconnect on next submit.</li>
+<li><strong>Stale state:</strong> every reader (<code>status</code>, the TUI&#39;s <code>ensureDaemon</code>, the server&#39;s auth check) treats a PID whose process is no longer alive as stale and self-heals by clearing <code>~/.cast/web.json</code>.</li>
+<li><strong><code>CAST_NO_DAEMON=1</code>:</strong> the TUI skips <code>ensureDaemon()</code> and runs <code>runAgentLoop</code> locally — the pre-0.12.29 path, used for CI and <code>cast run --interactive</code>.</li>
+</ul>
+<h2>Auth</h2>
+<ul>
+<li><strong>Loopback bind</strong> (<code>127.0.0.1</code> / <code>localhost</code>): the daemon writes a local-only <code>token</code> into <code>~/.cast/web.json</code>. The TUI reads it from there and skips the browser&#39;s interactive login (trust-localhost). The token is never sent over the network by the daemon.</li>
+<li><strong>Non-loopback bind</strong> (<code>--host 0.0.0.0</code> / <code>--public</code>): the token is omitted, and the TUI must authenticate like any other client (the browser&#39;s password login). Plain HTTP over a non-loopback bind is unencrypted — use it only on a trusted LAN, or keep loopback and tunnel with <code>ssh -L</code>.</li>
+</ul>
+<h2>Why single-writer</h2>
+<p>A single writer removes dual-writer races on the session store and makes one session observable from both surfaces at once. The cost is a daemon process that now also appears when you only wanted the TUI — that is the deliberate trade for live cross-surface streaming.</p>
+
 	</article>
 		<nav class="doc-nav">
-			<a href="reasoning.html" class="doc-nav-prev">← Reasoning</a>
-			<a href="themes.html" class="doc-nav-next">Themes →</a>
+			<a href="architecture.html" class="doc-nav-prev">← Architecture</a>
+			<a href="eval-scoreboard.html" class="doc-nav-next">Model Scoreboard →</a>
 		</nav>
 </main>
 

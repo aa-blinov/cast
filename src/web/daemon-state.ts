@@ -31,6 +31,14 @@ export interface WebDaemonState {
 	startedAt: string;
 	/** True for `cast web --foreground` — status/stop can say so, even though the mechanics are identical. */
 	foreground: boolean;
+	/**
+	 * Local-only auth token for TUI clients connecting to a loopback daemon.
+	 * Never sent over the network by the daemon; the TUI reads it from this
+	 * state file (same machine, same user) so it can POST/GET without the
+	 * interactive login flow the browser gets. Absent when the daemon binds a
+	 * non-loopback host (then the TUI must auth like any other client).
+	 */
+	token?: string;
 }
 
 /** True if a process with this PID exists — not necessarily one this harness started (PID reuse is possible but rare). */

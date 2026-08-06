@@ -51,7 +51,7 @@ cast upgrade --force      # Reinstall even if same version
 
 ### `cast web`
 
-Web UI mode: launches a browser-based control room for managing background agents. Runs alongside the TUI — same sessions, same core engine.
+Web UI mode: launches a browser-based control room for managing background agents. The `cast web` daemon is the single writer for every session — both the browser and the TUI are thin clients of it over HTTP + SSE, so a session opened in either surface streams live (tokens, tool calls, status) to both. The TUI auto-spawns this daemon on launch unless one is already running or `CAST_NO_DAEMON=1` is set.
 
 ```bash
 cast web                 # Start in background (daemon)

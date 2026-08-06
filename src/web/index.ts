@@ -142,6 +142,14 @@ export async function runWebServerMain(
 		);
 	}
 
+	// Local-only token for TUI clients on loopback — lets `cast` (the TUI)
+	// talk to the daemon over HTTP+SSE without the browser's interactive
+	// login. The browser still logs in with cast_web_session; this is a
+	// separate, file-only credential the TUI reads from web.json. Skipped
+	// for non-loopback binds (a remote daemon must be treated like any
+	// other client and auth through the normal login flow).
+	const localToken = LOOPBACK_HOSTS.has(host) ? randomBytes(24).toString("base64url") : undefined;
+
 	// Set before the server is even created so the background MCP connect
 	// below (which can finish after a shutdown was already requested) has
 	// something to check — declared here, read (never reassigned) by that
@@ -155,10 +163,19 @@ export async function runWebServerMain(
 		webUser: "cast",
 		webPassword,
 		version: ver,
-		onListening: () => {
-			writeWebState({ pid: process.pid, port, host, startedAt: new Date().toISOString(), foreground });
+		onListening: (boundPort: number) => {
+			// Write the state file now that we have the real bound port (may differ
+			// from `port` when 0 was passed for OS assignment). The TUI reads this
+			// for both the port and the loopback token.
+			writeWebState({
+				pid: process.pid,
+				port: boundPort,
+				host,
+				startedAt: new Date().toISOString(),
+				foreground,
+				...(localToken ? { token: localToken } : {}),
+			});
 			console.log(`[cast web] stop: cast web stop`);
-
 			// The deferred half of ParsedArgs.deferMcp above: now that the HTTP
 			// server is actually accepting connections, do the real connect
 			// (npx resolution, browser launches, remote handshakes — whatever

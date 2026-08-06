@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.12.29
+
+### Added
+
+- Single-writer daemon architecture: `cast web` is now the one process that owns `runAgentLoop` and is the only writer to the SQLite session store. The TUI (`cast`, no subcommand) is a thin client of it over HTTP + SSE instead of running the loop locally — on launch it auto-spawns the daemon on loopback (reusing one if already running) and renders from the same `/api/sessions/:id/events` stream the browser uses. A session opened in both the TUI and the browser now streams live (tokens, tool calls, status) to both surfaces, and `abort`/`steer` from either stops or redirects the turn for both. `cast web stop` now also disconnects the TUI's SSE stream. Set `CAST_NO_DAEMON=1` to keep the TUI on the previous local-loop path (CI/headless).
+
 ## 0.12.28
 
 ### Fixed

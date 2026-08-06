@@ -146,7 +146,38 @@ async function main(): Promise<void> {
 		version: VERSION,
 	};
 
-	await runTui(parsedArgs);
+	await runTui(parsedArgs, await ensureDaemon());
+}
+
+/**
+ * Ensures a `cast web` daemon is running so the TUI can be a thin client of
+ * it (single-writer daemon model: the daemon owns runAgentLoop and streams
+ * events over SSE to every surface). If a live daemon already exists, reuse
+ * it; otherwise spawn one and wait for it to become reachable. On anything
+ * other than a clean start (already running, spawn failed, or --no-daemon),
+ * returns undefined so the caller can fall back to running locally.
+ *
+ * Trust-localhost: the daemon writes a loopback-only token into web.json, which
+ * the TUI reads to skip the browser's interactive login.
+ */
+async function ensureDaemon(): Promise<string | undefined> {
+	if (process.env.CAST_NO_DAEMON === "1") return undefined;
+	try {
+		const existing = readLiveWebState();
+		if (existing) return existing.token;
+		// Spawn a detached daemon (no --foreground — that would run inline and
+		// never return). Pass --port 0 so the OS picks a free port; the daemon
+		// records the real port in web.json, which the TUI reads for both the
+		// port and the loopback token. handleWebCommand's "already running" guard
+		// is harmless here because we just confirmed the state file is empty; it
+		// spawns the child, waits for it to actually listen, then returns while
+		// the daemon keeps running detached (so the TUI is a client, and the web
+		// UI can still connect after the TUI exits).
+		await handleWebCommand(["start", "--port", "0"]);
+		return readLiveWebState()?.token;
+	} catch {
+		return undefined;
+	}
 }
 
 async function handleRunCommand(args: string[], version: string): Promise<void> {

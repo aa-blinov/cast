@@ -497,6 +497,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 			<a href="eval-behavior.html">Behavior Evals</a>
 			<a href="eval-methodology.html">Eval Methodology</a>
 			<a href="architecture.html" class="active">Architecture</a>
+			<a href="infrastructure.html">Infrastructure</a>
 			<a href="eval-scoreboard.html">Model Scoreboard</a>
 			<a href="changelog.html">Changelog</a>
 	</div>
@@ -566,6 +567,56 @@ a:hover { color: #c084fc; text-decoration: none; }
 <p>When conversation history exceeds ~75% of the context window, older messages are summarized by the LLM. The split snaps to turn boundaries so tool calls and results stay paired. File paths are extracted deterministically from tool calls and appended to the summary.</p>
 <h3>MCP Integration</h3>
 <p>MCP tools are namespaced as <code>mcp_&lt;server&gt;_&lt;tool&gt;</code> and converted to built-in <code>Tool</code>/<code>ToolResult</code> shapes.</p>
+<h3>The Agent Loop (<code>runAgentLoop</code>)</h3>
+<p><code>src/core/loop.ts</code> is the single engine both surfaces drive. One invocation is one <strong>turn</strong>; a session is a sequence of turns. The loop is streaming-by-construction: it never waits to collect a full response before emitting.</p>
+<pre class="mermaid" data-raw="Zmxvd2NoYXJ0IFRECiAgICBTdGFydChbc3VibWl0IC8gc3RlZXIgLyBmb2xsb3ctdXBdKSAtLT4gQXNzZW1ibGVbQXNzZW1ibGUgcHJvbXB0OiBhcHBlbmQgdXNlciBtc2csPGJyLz5yZWJ1aWxkIHN5c3RlbSBwcm9tcHRdCiAgICBBc3NlbWJsZSAtLT4gU3RyZWFtW1N0cmVhbSBMTE0gY29tcGxldGlvbjxici8+ZW1pdCB0b2tlbiAvIHRoaW5raW5nXQogICAgU3RyZWFtIC0tPiBTdG9wQ2hlY2t7U3RvcCByZWFzb24/fQogICAgU3RvcENoZWNrIC0tPnxhYm9ydCBzaWduYWx8IEFib3J0W1Byb21vdGUgcGFydGlhbCBibG9ja3MsPGJyLz5lbWl0IGVuZCBhYm9ydGVkXQogICAgU3RvcENoZWNrIC0tPnxlbXB0eSAvIG5vIHRvb2xfY2FsbHN8IENsb3NlW2VtaXQgdHVybl9lbmQgKyBlbmQgc3RvcF0KICAgIFN0b3BDaGVjayAtLT58dG9vbF9jYWxscyBwcmVzZW50fCBEaXNwYXRjaFtEaXNwYXRjaCB0b29sIGNhbGxzPGJyLz5Qcm9taXNlLmFsbCDigJQgcnVuIGluIHBhcmFsbGVsXQogICAgRGlzcGF0Y2ggLS0+IFRvb2xFdmVudHNbZW1pdCB0b29sX3N0YXJ0IOKApiB0b29sX2VuZDxici8+cmVjdXJzZSB0YXNrIOKGkiBzdWIgcnVuQWdlbnRMb29wXQogICAgVG9vbEV2ZW50cyAtLT4gQXBwZW5kUmVzdWx0W0FwcGVuZCByZXN1bHRzIHRvIG1lc3NhZ2VzXQogICAgQXBwZW5kRXZlbnRzW0NoZWNrIHN0ZWVyaW5nIC8gZm9sbG93VXAgcXVldWVzPGJyLz5hdCB0dXJuIGJvdW5kYXJ5XSAtLT4gU3RyZWFtCiAgICBBcHBlbmRSZXN1bHQgLS0+IENvbXBhY3R7c2hvdWxkQ29tcGFjdD99CiAgICBDb21wYWN0IC0tPnx5ZXN8IENvbXBhY3RQYXNzW1N1bW1hcml6ZSBvbGRlciB0dXJucyw8YnIvPmVtaXQgY29tcGFjdGlvbl0KICAgIENvbXBhY3RQYXNzIC0tPiBBcHBlbmRFdmVudHMKICAgIENvbXBhY3QgLS0+fG5vfCBBcHBlbmRFdmVudHMKICAgIEFib3J0IC0tPiBFbmQoW3R1cm4gY2xvc2VkXSkKICAgIENsb3NlIC0tPiBFbmQ=">flowchart TD
+    Start([submit / steer / follow-up]) --> Assemble[Assemble prompt: append user msg,<br/>rebuild system prompt]
+    Assemble --> Stream[Stream LLM completion<br/>emit token / thinking]
+    Stream --> StopCheck{Stop reason?}
+    StopCheck -->|abort signal| Abort[Promote partial blocks,<br/>emit end aborted]
+    StopCheck -->|empty / no tool_calls| Close[emit turn_end + end stop]
+    StopCheck -->|tool_calls present| Dispatch[Dispatch tool calls<br/>Promise.all — run in parallel]
+    Dispatch --> ToolEvents[emit tool_start … tool_end<br/>recurse task → sub runAgentLoop]
+    ToolEvents --> AppendResult[Append results to messages]
+    AppendEvents[Check steering / followUp queues<br/>at turn boundary] --> Stream
+    AppendResult --> Compact{shouldCompact?}
+    Compact -->|yes| CompactPass[Summarize older turns,<br/>emit compaction]
+    CompactPass --> AppendEvents
+    Compact -->|no| AppendEvents
+    Abort --> End([turn closed])
+    Close --> End</pre><p>A turn runs as a bounded outer iteration:</p>
+<ol>
+<li><strong>Prompt assembly.</strong> The user message (or a steered/follow-up message injected mid-turn) is appended to <code>session.messages</code>. The system prompt is rebuilt per turn via <code>rebuildSystemPrompt</code> (sticky rules + <code>@</code>-mention context files).</li>
+<li><strong>LLM streaming.</strong> The provider is called in streaming mode. Deltas arrive as <code>token</code> (content) and <code>thinking</code> (reasoning) events and are folded into the live transcript as they land.</li>
+<li><strong>Tool dispatch.</strong> When the model returns <code>tool_calls</code>, each call is dispatched. <strong>Tool calls within one assistant message run concurrently</strong> via <code>Promise.all</code> — <code>bash</code>, <code>read</code>, and <code>grep</code> requested together execute simultaneously, not in sequence. Each tool emits <code>tool_start</code> / <code>tool_end</code>; sub-agents (<code>task</code> tool) recurse into their own <code>runAgentLoop</code> invocation.</li>
+<li><strong>Tool results → next iteration.</strong> Results are appended and the loop streams another model call. The iteration continues until the model returns no tool calls (a final answer), hits a stop reason, or is aborted.</li>
+<li><strong>Turn close.</strong> <code>turn_end</code> promotes the live streaming blocks into permanent history; <code>end</code> carries the stop reason (<code>stop</code> / <code>aborted</code> / <code>error</code> / <code>disconnected</code>). The session is persisted to SQLite incrementally as messages and tool results accumulate — not just at turn end.</li>
+</ol>
+<p><strong>Queues.</strong> While a turn runs, a <code>steeringQueue</code> (injected mid-turn, before the next model call) and a <code>followUpQueue</code> (appended after the turn ends) let the user influence or extend the run without starting a parallel writer. The loop checks these at turn boundaries, so a steer typed during a long tool phase lands at the next model call rather than spawning a competing turn.</p>
+<p><strong>Events.</strong> Every state change is emitted as an <code>AgentEvent</code> (<code>token</code>, <code>thinking</code>, <code>tool_start</code>, <code>tool_end</code>, <code>usage</code>, <code>turn_end</code>, <code>end</code>, <code>error</code>, <code>compaction</code>, …). The web daemon maps these to <code>WebEvent</code> and broadcasts over SSE; the local <code>cast run --interactive</code> path consumes them directly. Surfaces never re-derive loop state — they render from the event stream.</p>
+<pre class="mermaid" data-raw="c2VxdWVuY2VEaWFncmFtCiAgICBwYXJ0aWNpcGFudCBVIGFzIFVzZXIgKFRVSSBvciBicm93c2VyKQogICAgcGFydGljaXBhbnQgRCBhcyBjYXN0IHdlYiBkYWVtb24KICAgIHBhcnRpY2lwYW50IEwgYXMgcnVuQWdlbnRMb29wCiAgICBwYXJ0aWNpcGFudCBTIGFzIFNRTGl0ZQoKICAgIFUtPj5EOiBQT1NUIC9jaGF0ICJ3cml0ZSBhIGZuIgogICAgRC0+Pkw6IHJ1bkFnZW50TG9vcChzdWJtaXQpCiAgICBMLT4+UzogYXBwZW5kIHVzZXIgbWVzc2FnZQogICAgTC0tPj5EOiB0b2tlbiAiZGVmICIgKHN0cmVhbWluZykKICAgIEQtLT4+VTogU1NFOiB0b2tlbgogICAgTC0tPj5EOiB0b29sX3N0YXJ0IHJlYWQKICAgIEwtPj5TOiB3cml0ZSB0b29sIGNhbGwKICAgIEwtLT4+RDogdG9vbF9lbmQgcmVhZAogICAgRC0tPj5VOiBTU0U6IHRvb2xfc3RhcnQgLyB0b29sX2VuZAogICAgTC0tPj5EOiB0dXJuX2VuZCArIGVuZCBzdG9wCiAgICBELS0+PlU6IFNTRTogZW5kCiAgICBVLT4+RDogUE9TVCAvYWJvcnQgKGFueSBzdXJmYWNlKQogICAgRC0+Pkw6IEFib3J0Q29udHJvbGxlci5zaWduYWwKICAgIEwtLT4+RDogZW5kIGFib3J0ZWQgKHBhcnRpYWwgYmxvY2tzIGtlcHQpCiAgICBELS0+PlU6IFNTRTogZW5kIGFib3J0ZWQ=">sequenceDiagram
+    participant U as User (TUI or browser)
+    participant D as cast web daemon
+    participant L as runAgentLoop
+    participant S as SQLite
+
+    U->>D: POST /chat "write a fn"
+    D->>L: runAgentLoop(submit)
+    L->>S: append user message
+    L-->>D: token "def " (streaming)
+    D-->>U: SSE: token
+    L-->>D: tool_start read
+    L->>S: write tool call
+    L-->>D: tool_end read
+    D-->>U: SSE: tool_start / tool_end
+    L-->>D: turn_end + end stop
+    D-->>U: SSE: end
+    U->>D: POST /abort (any surface)
+    D->>L: AbortController.signal
+    L-->>D: end aborted (partial blocks kept)
+    D-->>U: SSE: end aborted</pre><p><strong>Abort.</strong> An <code>AbortController</code> signal threads through the active LLM stream and tool calls; <code>abort</code> (from either surface) flips it, the in-flight stream is cancelled, and the turn closes with <code>end { reason: &quot;aborted&quot; }</code>. No partial turn is silently dropped — the already-streamed blocks are promoted to history before close.</p>
+<p><strong>Compaction.</strong> When history exceeds ~75% of the context window, older messages are summarized by the LLM (see Context Compaction below). The split snaps to turn boundaries so tool calls and results stay paired.</p>
+<p>For how the TUI, web UI, and the <code>cast web</code> daemon are wired around this loop — processes, lifecycles, auth, and the <code>CAST_NO_DAEMON=1</code> escape hatch — see <a href="infrastructure.html">Infrastructure</a>.</p>
 <h3>Trust Gating</h3>
 <p>A single trust decision per project gates local skills, MCP, context files, personas, rules, hooks, and SSH configuration. Global resources in <code>~/.cast/</code> load automatically.</p>
 <h3>Plan Mode</h3>
@@ -601,7 +652,7 @@ npm run format          # Auto-format (biome)
 	</article>
 		<nav class="doc-nav">
 			<a href="eval-methodology.html" class="doc-nav-prev">← Eval Methodology</a>
-			<a href="eval-scoreboard.html" class="doc-nav-next">Model Scoreboard →</a>
+			<a href="infrastructure.html" class="doc-nav-next">Infrastructure →</a>
 		</nav>
 </main>
 

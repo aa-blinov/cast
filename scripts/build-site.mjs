@@ -30,6 +30,7 @@ const NAV_ORDER = [
 	{ file: "eval-behavior.md", label: "Behavior Evals" },
 	{ file: "eval-methodology.md", label: "Eval Methodology" },
 	{ file: "architecture.md", label: "Architecture" },
+	{ file: "infrastructure.md", label: "Infrastructure" },
 	// Not a real markdown file — rendered from docs/eval-scoreboard.json by the
 	// special case in the build loop below. The ".md" suffix is kept purely so
 	// the existing `.replace(".md", ".html")` calls (sidebar, prev/next, landing
@@ -884,6 +885,7 @@ function getDescription(file) {
 		"eval-behavior.md": "Real-model behavioral contracts and signals",
 		"eval-methodology.md": "Scoreboard methodology, repeats, traces, and regressions",
 		"architecture.md": "Source layout and design decisions",
+		"infrastructure.md": "Daemon, TUI/web clients, lifecycle, and auth",
 		"eval-scoreboard.md": "Per-model certification scores against the behavior eval suite",
 		"changelog.md": "Version history and feature highlights",
 	};
