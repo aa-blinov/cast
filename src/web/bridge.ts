@@ -13,10 +13,9 @@ import {
 	readdirSync,
 	readFileSync,
 	rmSync,
-	watch,
 	writeFileSync,
-	type FSWatcher,
 } from "node:fs";
+import chokidar from "chokidar";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -766,7 +765,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 	 *  Changes tab and Files tree pick up edits that happened outside of an
 	 *  agent turn (manual editor, CI hook, etc). Suspended while a turn runs so
 	 *  it never races `tool_end`. */
-	const fsWatchers = new Map<string, FSWatcher[]>();
+	const fsWatchers = new Map<string, { close: () => unknown; on: (...args: unknown[]) => unknown }[]>();
 	const fsDebounceTimers = new Map<string, NodeJS.Timeout>();
 	const FS_DEBOUNCE_MS = 500;
 	/** Debounce + broadcast handler shared by every recursive watcher. Looks
@@ -794,23 +793,39 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		const sessionCwd = ws.session.cwd;
 		if (!sessionCwd || !existsSync(sessionCwd)) return;
 		try {
-			// Non-recursive watch on cwd. Picks up adds/removes/renames of
-			// top-level files (the most common case for `git status`-style
-			// dirty files — `touch src/foo.ts` doesn't fire, but `git switch`
-			// which checks out a new top-level `.gitignore` does). Deeper
-			// edits rely on the next tool_end to refresh. `recursive: true`
-			// hits the inotify max_user_watches ceiling on real-world cwds
-			// (.git/objects alone is thousands of dirs) and silently stops
-			// emitting — not worth the tradeoff.
-			const watcher = watch(
-				sessionCwd,
-				{ recursive: false },
-				makeFsCallback(ws.id),
-			);
+			// chokidar wraps native fs.watch with cross-platform polling and
+			// a sane ignore matcher — no more inotify max_user_watches limit
+			// on real cwds, no more top-level-only coverage. We exclude the
+			// usual noise (.git, node_modules, build outputs) so an `npm i`
+			// or git gc doesn't fire 100k events.
+			//
+			// chokidar v5's `string` matcher is a literal-equality check (it
+			// does not expand globs), so we use a function predicate against
+			// the absolute path of every event.
+			const ignoreSegments = new Set([
+				"node_modules",
+				".git",
+				"dist",
+				"build",
+				".next",
+				".cache",
+				"__pycache__",
+				".venv",
+				"venv",
+				".tox",
+				".mypy_cache",
+			]);
+			const watcher = chokidar.watch(sessionCwd, {
+				ignored: (path) => path.split("/").some((p) => ignoreSegments.has(p)),
+				ignoreInitial: true,
+				persistent: true,
+				awaitWriteFinish: false,
+			});
+			watcher.on("all", makeFsCallback(ws.id));
 			watcher.on("error", () => {
 				stopFsWatcher(ws.id);
 			});
-			fsWatchers.set(ws.id, [watcher]);
+			fsWatchers.set(ws.id, [watcher as unknown as { close: () => unknown; on: (...args: unknown[]) => unknown }]);
 		} catch {
 			// cwd may not exist (e.g. sandbox removed); ignore silently.
 		}
@@ -820,7 +835,12 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		if (list) {
 			for (const w of list) {
 				try {
-					w.close();
+					// chokidar's close() returns a Promise — fire-and-forget is
+					// fine here, the inotify wd releases on process exit anyway.
+					const result = (w as unknown as { close: () => unknown }).close();
+					if (result && typeof (result as Promise<unknown>).catch === "function") {
+						(result as Promise<unknown>).catch(() => {});
+					}
 				} catch {
 					// already closed by error handler
 				}
