@@ -1,4 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+// Node 22 has no global EventSource; undici ships one (experimental) that we
+// use to receive the daemon's SSE stream. The browser build (esbuild bundle)
+// provides a real global EventSource, so this import is Node-only and safe in
+// both runtimes.
+import { EventSource } from "undici";
 import { createCheckpoint } from "../core/checkpoint.ts";
 import type { AppConfig } from "../core/config.ts";
 import { resolveProvider } from "../core/config.ts";
@@ -185,6 +190,16 @@ interface UseAgentSessionParams {
 	cwd: string;
 	systemPrompt: string;
 	runner: AgentRunner;
+	/**
+	 * When set, the hook runs as a thin client of the `cast web` daemon instead
+	 * of owning the agent loop locally: `submit`/`abort`/`steer`/`followUp` go
+	 * over HTTP and events arrive via SSE. This is the single-writer daemon model
+	 * — the daemon owns runAgentLoop and streams to every surface (TUI + web).
+	 * Absent for `cast run --interactive` and headless paths, which keep the
+	 * local loop (and for tests, which assert against it).
+	 */
+	daemonUrl?: string;
+	daemonToken?: string;
 	/** Background bash task registry for this session — see LoopConfig.backgroundBash's doc comment. */
 	backgroundTasks: BackgroundTaskRegistry;
 	permissionMode: PermissionMode;
@@ -367,7 +382,13 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		onPlanSignal,
 		modelOverride,
 		planModelProvider,
+		daemonUrl,
+		daemonToken,
 	} = params;
+	// Thin-client mode: this hook does not own the agent loop; the `cast web`
+	// daemon does, and events arrive over SSE. Local path (runner, runAgentLoop)
+	// is fully preserved when daemonUrl is unset.
+	const isClient = !!daemonUrl;
 	const [messages, setMessages] = useState<ChatMessage[]>(() => buildDisplayMessages(getFullHistory(session.id)));
 	const [streaming, setStreaming] = useState<StreamingState | null>(null);
 	const [status, setStatus] = useState<AgentStatus>("idle");
@@ -579,7 +600,32 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 
 	const submit = useCallback(
 		async (text: string, images?: PendingImage[]) => {
-			if (runner.isRunning) {
+			if (isClient && daemonUrl) {
+				// Thin-client submit: the daemon owns the loop. Enqueue locally if a
+				// turn is already running (the daemon serializes concurrent submits),
+				// else POST the prompt and let the SSE stream render the turn. We
+				// await the POST so a network/daemon error surfaces as `setError`
+				// rather than silently dropping the message; the stream carries all
+				// token/tool/status updates. Use a long timeout — the daemon may run
+				// a long turn, but the HTTP response returns once the turn queue is
+				// accepted, not when the turn finishes.
+				const running = await fetch(`${daemonUrl}/api/sessions/${session.id}/chat`, {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+						...(daemonToken ? { Authorization: `Bearer ${daemonToken}` } : {}),
+					},
+					body: JSON.stringify({
+						text,
+						images: images?.map((img) => img.dataUrl),
+					}),
+				}).catch(() => null);
+				if (!running || running.status >= 400) {
+					setError("Daemon unreachable — is 'cast web' running?");
+				}
+				return;
+			}
+			if (!isClient && runner.isRunning) {
 				runner.steeringQueue.enqueue({ role: "user", content: text });
 				return;
 			}
@@ -974,6 +1020,9 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			planModelProvider,
 			subagentModelProvider,
 			params.sshHosts,
+			isClient,
+			daemonUrl,
+			daemonToken,
 		],
 	);
 
@@ -987,30 +1036,161 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		});
 	}, [submit, backgroundTasks]);
 
+	// Thin-client SSE: subscribe to the daemon's per-session event stream and
+	// drive the same React state the local loop would. The daemon is the single
+	// writer, so this is the only place events arrive in client mode. Mirrors
+	// the WebEvent handling in src/web/public/sse-events.js (the browser path)
+	// and the local onEvent below — all three must stay in lockstep on event
+	// semantics. An SSE disconnect (daemon stopped via `cast web stop`, or a
+	// crash) leaves the session idle; the TUI sees no live turn and can offer
+	// reconnect on next submit.
+	useEffect(() => {
+		if (!isClient || !daemonUrl) return;
+		const url = daemonToken
+			? `${daemonUrl}/api/sessions/${session.id}/events?token=${encodeURIComponent(daemonToken)}`
+			: `${daemonUrl}/api/sessions/${session.id}/events`;
+		const source = new EventSource(url);
+		source.onmessage = (ev) => {
+			let event: import("../web/bridge.ts").WebEvent;
+			try {
+				event = JSON.parse(ev.data) as import("../web/bridge.ts").WebEvent;
+			} catch {
+				return;
+			}
+			switch (event.type) {
+				case "user_message":
+					setMessages((msgs) => [...msgs, { role: "user", content: messageContentToText(event.message.content) }]);
+					break;
+				case "status":
+					setStatus(event.status);
+					if (event.status === "running") {
+						setStreamingActive(true);
+						setLastTurnAborted(false);
+						updateStreaming(() => ({ blocks: [] }), true);
+					} else {
+						setStreamingActive(false);
+					}
+					break;
+				case "thinking":
+					updateStreaming((s) => (s ? reduceStreamEvent(s, { type: "thinking", text: event.text }) : s));
+					break;
+				case "token":
+					updateStreaming((s) => (s ? reduceStreamEvent(s, { type: "content", text: event.text }) : s));
+					break;
+				case "tool_start":
+					updateStreaming(
+						(s) =>
+							s
+								? reduceStreamEvent(s, {
+										type: "tool_start",
+										call: { id: event.id, name: event.name, args: event.args, status: event.status },
+									})
+								: s,
+						true,
+					);
+					break;
+				case "tool_end":
+					updateStreaming((s) => {
+						if (!s) return s;
+						return reduceStreamEvent(s, {
+							type: "tool_end",
+							id: event.id,
+							status: event.status,
+							result: event.result.content.slice(0, 4000),
+						});
+					}, true);
+					break;
+				case "assistant_message":
+					promoteStreamingToHistory();
+					break;
+				case "turn_meta":
+					break;
+				case "session_end":
+					promoteStreamingToHistory();
+					updateStreaming(() => null, true);
+					setStreamingActive(false);
+					setStatus("idle");
+					break;
+				case "end":
+					if (event.reason === "aborted") {
+						setLastTurnAborted(true);
+						setMessages((msgs) => [...msgs, { role: "warning", content: "[aborted]" }]);
+					} else if (event.reason !== "stop" && event.reason !== "error") {
+						setError(event.reason);
+					}
+					break;
+				case "error":
+					setError(event.message);
+					break;
+				case "compaction":
+					refresh();
+					break;
+				default:
+					break;
+			}
+		};
+		return () => source.close();
+	}, [isClient, daemonUrl, daemonToken, session.id, promoteStreamingToHistory, updateStreaming, refresh]);
+
 	const steer = useCallback(
 		(text: string) => {
+			if (isClient && daemonUrl) {
+				void fetch(`${daemonUrl}/api/sessions/${session.id}/steer`, {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+						...(daemonToken ? { Authorization: `Bearer ${daemonToken}` } : {}),
+					},
+					body: JSON.stringify({ message: text }),
+				}).catch(() => {});
+				setPendingSteers((p) => [...p, text]);
+				return;
+			}
 			runner.steeringQueue.enqueue({ role: "user", content: text });
 			setPendingSteers((p) => [...p, text]);
 		},
-		[runner],
+		[runner, isClient, daemonUrl, daemonToken, session.id],
 	);
 
 	const followUp = useCallback(
 		(text: string) => {
+			if (isClient && daemonUrl) {
+				void fetch(`${daemonUrl}/api/sessions/${session.id}/followup`, {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+						...(daemonToken ? { Authorization: `Bearer ${daemonToken}` } : {}),
+					},
+					body: JSON.stringify({ message: text }),
+				}).catch(() => {});
+				setPendingQueue((p) => [...p, text]);
+				return;
+			}
 			runner.followUpQueue.enqueue({ role: "user", content: text });
 			setPendingQueue((p) => [...p, text]);
 		},
-		[runner],
+		[runner, isClient, daemonUrl, daemonToken, session.id],
 	);
 
 	const abort = useCallback(() => {
+		if (isClient && daemonUrl) {
+			void fetch(`${daemonUrl}/api/sessions/${session.id}/abort`, {
+				method: "POST",
+				headers: {
+					...(daemonToken ? { Authorization: `Bearer ${daemonToken}` } : {}),
+				},
+			}).catch(() => {});
+			setPendingSteers([]);
+			setPendingQueue([]);
+			return;
+		}
 		runner.abort();
 		// runner.abort() clears both queues (anything queued for this run is
 		// moot once it's cancelled) — mirror that here so the UI doesn't keep
 		// showing pending steer/follow-up entries that were just wiped.
 		setPendingSteers([]);
 		setPendingQueue([]);
-	}, [runner]);
+	}, [runner, isClient, daemonUrl, daemonToken, session.id]);
 
 	const clearContext = useCallback(() => {
 		clearSessionMessages(session);

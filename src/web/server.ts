@@ -99,8 +99,8 @@ export interface WebServerOptions {
 	webUser: string;
 	webPassword: string;
 	version: string;
-	/** Fires once the server is actually bound and accepting connections. */
-	onListening?: () => void;
+	/** Fires once the server is actually bound and accepting connections. Receives the real bound port (not the requested one — may differ when 0 was passed for OS assignment). */
+	onListening?: (port: number) => void;
 	/** Fires on a listen failure (e.g. EADDRINUSE) instead of the process crashing on an unhandled error event. */
 	onError?: (err: NodeJS.ErrnoException) => void;
 }
@@ -128,18 +128,44 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 
 	function isAuthenticated(req: IncomingMessage): boolean {
 		const token = readCookie(req, "cast_web_session");
-		if (!token) return false;
-		const db = getDb();
-		const tokenHash = createHash("sha256").update(token).digest("hex");
-		const row = db.prepare("SELECT expires_at FROM web_sessions WHERE token_hash = ?").get(tokenHash) as
-			| { expires_at: number }
-			| undefined;
-		if (!row) return false;
-		if (row.expires_at <= Date.now()) {
-			db.prepare("DELETE FROM web_sessions WHERE token_hash = ?").run(tokenHash);
-			return false;
+		if (token) {
+			const db = getDb();
+			const tokenHash = createHash("sha256").update(token).digest("hex");
+			const row = db.prepare("SELECT expires_at FROM web_sessions WHERE token_hash = ?").get(tokenHash) as
+				| { expires_at: number }
+				| undefined;
+			if (!row) return false;
+			if (row.expires_at <= Date.now()) {
+				db.prepare("DELETE FROM web_sessions WHERE token_hash = ?").run(tokenHash);
+				return false;
+			}
+			return true;
 		}
-		return true;
+		// Local daemon token: the TUI (same machine, same user) connects over
+		// loopback with the Bearer token written into web.json at startup. Skips
+		// the browser's interactive login. Only honored for loopback clients so a
+		// remote daemon still requires the normal session cookie.
+		const isLoopback =
+			req.socket.remoteAddress === "127.0.0.1" ||
+			req.socket.remoteAddress === "::1" ||
+			req.socket.remoteAddress === "::ffff:127.0.0.1";
+		if (isLoopback) {
+			const auth = req.headers.authorization;
+			if (auth?.startsWith("Bearer ")) {
+				const candidate = auth.slice("Bearer ".length);
+				const state = readLiveWebState();
+				if (state?.token && candidate === state.token) return true;
+			}
+			// EventSource (browser + Node) can't set custom headers, so the loopback
+			// TUI client passes its token as a `?token=` query param instead.
+			const url = new URL(req.url ?? "", "http://localhost");
+			const candidate = url.searchParams.get("token");
+			if (candidate) {
+				const state = readLiveWebState();
+				if (state?.token && candidate === state.token) return true;
+			}
+		}
+		return false;
 	}
 
 	function passwordsMatch(value: string): boolean {
@@ -1698,8 +1724,10 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 	});
 
 	server.listen(port, host, () => {
-		console.log(`[cast web] listening on http://${host}:${port}`);
-		options.onListening?.();
+		const addr = server.address();
+		const boundPort = addr && typeof addr === "object" ? addr.port : port;
+		console.log(`[cast web] listening on http://${host}:${boundPort}`);
+		options.onListening?.(boundPort);
 	});
 
 	return server;

@@ -53,10 +53,14 @@ interface AppProps {
 	onPasteImage?: () => Promise<string | null>;
 	onQuit: () => void;
 	onRepaintBanner?: () => Promise<void>;
+	/** When set, the TUI runs as a thin client of the `cast web` daemon
+	 *  (single-writer model) instead of owning runAgentLoop locally. */
+	daemonUrl?: string;
+	daemonToken?: string;
 }
 
 export function App(props: AppProps): JSX.Element {
-	const { result, version, initialPrompt, onQuit, onPasteImage, onRepaintBanner } = props;
+	const { result, version, initialPrompt, onQuit, onPasteImage, onRepaintBanner, daemonUrl, daemonToken } = props;
 	const { config, runner, backgroundTasks } = result;
 
 	// Wire Ink's suspendTerminal so execBash can hand the terminal to child
@@ -315,6 +319,8 @@ export function App(props: AppProps): JSX.Element {
 		onPlanSignal,
 		modelOverride: planMode && planModel ? planModel : undefined,
 		planModelProvider,
+		daemonUrl,
+		daemonToken,
 	});
 	const running = agent.status === "running";
 	const canSubmit = useCallback(

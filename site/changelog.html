@@ -497,6 +497,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 			<a href="eval-behavior.html">Behavior Evals</a>
 			<a href="eval-methodology.html">Eval Methodology</a>
 			<a href="architecture.html">Architecture</a>
+			<a href="infrastructure.html">Infrastructure</a>
 			<a href="eval-scoreboard.html">Model Scoreboard</a>
 			<a href="changelog.html" class="active">Changelog</a>
 	</div>
@@ -506,6 +507,91 @@ a:hover { color: #c084fc; text-decoration: none; }
 	<article class="content">
 		<h1>Changelog</h1>
 <p>All notable user-facing changes to cast, newest first.</p>
+<h2>0.12.29</h2>
+<h3>Added</h3>
+<ul>
+<li>Single-writer daemon architecture: <code>cast web</code> is now the one process that owns <code>runAgentLoop</code> and is the only writer to the SQLite session store. The TUI (<code>cast</code>, no subcommand) is a thin client of it over HTTP + SSE instead of running the loop locally — on launch it auto-spawns the daemon on loopback (reusing one if already running) and renders from the same <code>/api/sessions/:id/events</code> stream the browser uses. A session opened in both the TUI and the browser now streams live (tokens, tool calls, status) to both surfaces, and <code>abort</code>/<code>steer</code> from either stops or redirects the turn for both. <code>cast web stop</code> now also disconnects the TUI&#39;s SSE stream. Set <code>CAST_NO_DAEMON=1</code> to keep the TUI on the previous local-loop path (CI/headless).</li>
+</ul>
+<h2>0.12.28</h2>
+<h3>Fixed</h3>
+<ul>
+<li>Web sidebar: search showed &quot;No sessions match <query>&quot; on every non-empty search, hiding the matches above it. The empty-state check compared the wrong list (the full session list, which is empty when a search is active) instead of the filtered list. Now the banner only appears when the filter actually returns nothing.</li>
+<li>Web Changes tab / Files tree: external file edits in the session cwd (IDE save, CI hook, <code>touch</code>, etc) now refresh the diff and the file tree in real-time. Previously the only source of refresh was the next agent tool_end. A non-recursive <code>chokidar</code> watcher on the cwd root fires an <code>fs_change</code> SSE event after a 500ms debounce while the session is idle, gated so it never races a running turn. Top-level and subdir paths both work; <code>.git</code>, <code>node_modules</code>, <code>dist</code>, <code>build</code>, and other noise directories are ignored. The native <code>fs.watch</code> path had an inotify <code>max_user_watches</code> ceiling that silently killed the watcher on real-world cwds — chokidar&#39;s pooling avoids it.</li>
+<li>Web sidebar footer: showed &quot;No model selected&quot; for a frame between mount and the <code>/api/config</code> response arriving. The sidebar now renders &quot;Loading…&quot; until the model has actually been fetched.</li>
+</ul>
+<h2>0.12.27</h2>
+<h3>Added</h3>
+<ul>
+<li>TUI: <code>/reasoning-display</code> command to hide reasoning blocks by default. The setting is persisted to <code>settings.json</code> and survives restarts.</li>
+<li>Web: reasoning-display toggle in Settings &gt; Appearance, synced with <code>settings.json</code>.</li>
+</ul>
+<h3>Fixed</h3>
+<ul>
+<li>Web streaming reasoning block: the 1200-character cap from v0.12.21–v0.12.25 is restored. An earlier v0.12.26 commit had removed it, which let long reasoning streams disable the TUI scroll guard and produce occasional &quot;jumps&quot; in the visible content. The cap keeps the cursor-below-viewport invariant that <code>useTerminalResync</code> depends on.</li>
+</ul>
+<h3>Internal</h3>
+<ul>
+<li>Several experimental TUI reasoning-display tweaks that landed on <code>master</code> after v0.12.26 (1-row live preview redesign, <code>\n</code> flattening in live/settled history, hidden-think-block clamp accounting) have been reverted. They never shipped in a release.</li>
+</ul>
+<h2>0.12.26</h2>
+<h3>Fixed</h3>
+<ul>
+<li>Sidebar / picker row listing was slow on big DBs — <code>listSessionSummaries</code> and <code>searchSessionSummaries</code> previously built each session&#39;s summary by SELECTing every user/assistant <code>content_json</code> row, JSON.parsing the whole conversation, and counting turns in JS. On a 218-session DB that meant 9 MB of allocations and 9000+ JSON.parse calls per listing. The new path aggregates in SQL via covering indexes: user count and assistant count via <code>idx_messages_role</code>, the with-tool-calls slice via PRIMARY KEY + JSON filter then subtracted to preserve the old &quot;exclude intermediate tool-call-only steps&quot; semantic, and the first user message via a <code>MIN(seq)</code> JOIN on the primary key. Field-level semantics of the row&#39;s <code>msgCount</code> and <code>firstUserMessage</code> are unchanged. Measured on 57.131.129.41 with 218 sessions: TTFB on <code>GET /api/sessions</code> dropped from 448 ms to 138-163 ms (3x faster).</li>
+</ul>
+<h2>0.12.25</h2>
+<h3>Fixed</h3>
+<ul>
+<li>400 context window exceeded now auto-recovers from the agent loop instead of killing the turn. When the LLM rejects a turn with a context-overflow, the loop now drops the largest tool result in history (any <code>read</code>/<code>grep</code>/<code>web_fetch</code> whose output is already anchored in the conversation and was being re-sent on every retry), replaces it with a short placeholder that names the <code>tool_call_id</code>, the size that was dropped, and how to re-fetch with a narrower scope, and appends a <code>&lt;system-reminder&gt;</code> so the model re-issues the call with <code>offset/limit</code> instead of asking for the same content again. The new path runs once per turn; if the in-place shrink wasn&#39;t enough the existing LLM-based compaction path tries next, so the user only sees a raw error after both options have failed. <code>tool_call_id</code> is preserved across the swap so the conversation stays wire-valid for the next retry.</li>
+</ul>
+<h2>0.12.24</h2>
+<h3>Fixed</h3>
+<ul>
+<li>TUI streaming flicker on every token: <code>ThinkBlockParser.parseContent</code> / <code>flush</code> returned the entire accumulated buffer on each chunk, but the <code>StreamChunk</code> contract is delta-only — downstream does <code>content += chunk.content</code>. The cumulative return made each per-token redraw re-render every prior line, so the assistant visibly typed &quot;line by line&quot; with each previous line reprinted before the next arrived. The parser now tracks an <code>emittedBufferLen</code> offset and returns only what&#39;s new since the last yield, slicing the underlying buffer with <code>[emittedBufferLen, …]</code>. The buffer is compacted only when the already-emitted prefix grows to a meaningful fraction of the total length (keeps amortised cost flat on long streams without shifting the offset). Covers both the think-block and content branches and the trailing-tail <code>flush</code>. Web UI streams ride the same parser, so the web client picks up the fix for free. Regression test added in <code>test/vendors.test.ts</code>.</li>
+</ul>
+<h3>Added</h3>
+<ul>
+<li>Web UI file preview: copy-to-clipboard button next to the existing download icon. For text/table previews it copies the rendered content once it has loaded (disabled until then); for image/PDF it copies the preview URL. Brief check-mark confirmation via the existing <code>icons.check</code> for ~1.5s. Falls back to a hidden <code>textarea</code> + <code>document.execCommand(&quot;copy&quot;)</code> if the modern Clipboard API isn&#39;t available, and swallows denied-permission errors silently so the modal stays usable.</li>
+</ul>
+<h2>0.12.23</h2>
+<h3>Added</h3>
+<ul>
+<li>Web UI: <code>cast web status</code> is now reachable from inside the running browser session — new &quot;Server&quot; tab in Settings shows whether the daemon is running, its pid, host:port (with a &quot;reachable from other machines&quot; note when bound to <code>0.0.0.0</code>), start time and uptime. Same info as the CLI command; the panel calls the new <code>GET /api/web/status</code> endpoint, which reads the daemon state file via <code>readLiveWebState</code> so a stale entry (process gone) is auto-cleaned on read.</li>
+</ul>
+<h3>Fixed</h3>
+<ul>
+<li>TUI: a long reasoning stream (<code>SPLIT_REASONING_CHARS = 1200</code>) could render as N <code>[reasoning]</code> sections instead of one. <code>appendTextBlock</code> forced <code>continued: false</code> on the split-off chunk and on the previous block when a different kind took over, so the <code>[reasoning]</code> prefix in ChatLog rendered again on every mid-run chunk and on the tail at the kind boundary. The split-off chunk now inherits the source block&#39;s <code>continued</code> flag (<code>block.continued ?? false</code>) and the kind-boundary settle now preserves <code>last.continued ?? false</code> instead of forcing <code>false</code> — so only the very first chunk of the run carries the prefix, every later chunk is a silent continuation. Data is unchanged (still no loss across splits); the active tail stays bounded by the scroll-guard cap. <code>stream-blocks.js</code> is browser-neutral, so the same fix tightens the web UI&#39;s collapsed reasoning output for free.</li>
+</ul>
+<h2>0.12.22</h2>
+<h3>Fixed</h3>
+<ul>
+<li>Web UI: clicking a thread closed the sidebar immediately and highlighted only the newly-selected row, instead of waiting for the <code>/api/sessions/:id</code> fetch to land and glowing both old and new at once. <code>setSidebarOpen(false)</code> now runs at the start of <code>selectSession</code> (right after <code>setSelectingId</code>) so the drawer collapses instantly on big-thread clicks that take a second or two to load. The chat area&#39;s &quot;Loading…&quot; empty-state already takes over during the same window, so the user sees a clear &quot;switching&quot; state instead of a stale list with a mute click. The dual-highlight bug — <code>isActive = s.id === activeId || selecting</code> matched both the previous active row AND the new selecting one during the transition — fixed by switching to <code>isActive = selecting || (s.id === activeId &amp;&amp; !selectingId)</code> (added <code>selectingId</code> as a prop so the formula can tell &quot;this row is the picker target&quot; from &quot;some other row is the picker target&quot;). Bootstrap / popstate paths don&#39;t go through <code>selectSession</code>, so their old &quot;wait for response&quot; timing is preserved.</li>
+</ul>
+<h2>0.12.21</h2>
+<h3>Fixed</h3>
+<ul>
+<li>TUI: long reasoning streams could trigger a rare scroll jump when the user scrolled up mid-stream. A single still-streaming <code>thinking</code> block grew unbounded and pushed the live region past the viewport, which disabled <code>useTerminalResync</code>&#39;s DECXCPR cursor poll (the natural cursor-below-viewport position looks identical to a user scroll). With the poll off, Ink&#39;s <code>CUU + erase</code> redraws landed at the wrong rows on user-initiated scroll and the visible content jumped. <code>appendTextBlock</code> now caps the active reasoning block at 1200 chars (<code>SPLIT_REASONING_CHARS</code>) — the older portion moves into a settled (continued: false) sibling that drains to <code>&lt;Static&gt;</code>, the active block keeps the tail. The live region stays within the viewport, the poll keeps running, and the scroll guard works as intended. Content and tool blocks are unaffected (content already drains via <code>splitCompleteLines</code>, tools stay compact).</li>
+</ul>
+<h2>0.12.20</h2>
+<h3>Fixed</h3>
+<ul>
+<li>First-run reasoning picker for MiniMax: <code>buildReasoningParams</code> for format <code>&quot;minimax&quot;</code> funneled every non-<code>adaptive</code>, non-<code>disabled</code> value (including <code>&quot;off&quot;</code> and stale levels like <code>&quot;low&quot;</code>/<code>&quot;medium&quot;</code>/<code>&quot;high&quot;</code>/<code>&quot;max&quot;</code> that can land here from a saved <code>reasoningLevel</code> set against a different provider) into <code>{ reasoning_split: true }</code> with <code>enabled: true</code>. For <code>&quot;off&quot;</code> that meant picking &quot;off&quot; was a no-op — the server&#39;s always-on default still ran reasoning. Reorder the switch so <code>off</code> / <code>disabled</code> map to <code>thinking: { type: &quot;disabled&quot; }</code> with <code>enabled: false</code> (verified live against api.minimax.io), <code>adaptive</code> stays its own branch, and the always-on fallback serves only true &quot;on&quot; levels. Hotfix on the reasoning dialect ladder that landed in 0.9.10.</li>
+</ul>
+<h2>0.12.19</h2>
+<h3>Added</h3>
+<ul>
+<li><code>/undo</code> command: rolls back the last turn — restores files from the turn&#39;s checkpoint (shadow copies of files the agent touched) and drops the last user message and everything after it. Refused while the agent is running (use <code>/abort</code> first). No-op when there&#39;s no checkpoint (very first turn, or <code>/clear</code> already rolled the session back). Web UI shows a <code>[Undone: ...]</code> notice when triggered from the client.</li>
+<li><code>/undo</code> requires <code>src/core/checkpoint.ts</code> — shadow file storage + a marker on the parent commit for any new files added during the turn, restored on demand.</li>
+</ul>
+<h3>Fixed</h3>
+<ul>
+<li>Web UI marketplace install: button no longer reappears after a successful install. The panel was reading <code>data.plugins</code> from its own props (always undefined — parent passed only <code>data.marketplace</code>), so the installed-plugin check silently failed and the row kept showing &quot;Install&quot; after install. Now the parent passes the installed list as a separate prop and refreshes it after every <code>/plugin</code> command.</li>
+<li>Web UI marketplace install feedback: per-row pending state with a spinner mid-flight plus a brief <code>installed ✓</code> label on success. The modal&#39;s global <code>busy</code> flag only flashed for ~100ms, which read as a no-op click.</li>
+<li>Web UI marketplace block: stray horizontal scrollbar suppressed. <code>.plugin-catalog-list</code> had <code>overflow-y: auto</code>, which implicitly makes the x-axis <code>auto</code> too; long descriptions triggered a horizontal scroll where only vertical should exist. Explicit <code>overflow-x: hidden</code> keeps vertical scroll, kills horizontal.</li>
+</ul>
+<h3>Internal</h3>
+<ul>
+<li>Biome warnings on new <code>/undo</code> and worktree code: removed unused imports (<code>copyFileSync</code>, <code>realpathSync</code>, <code>sep</code>, <code>samePath</code> in <code>checkpoint.ts</code>; <code>createCheckpoint</code> in <code>commands.ts</code>; <code>AppConfig</code> type in <code>bridge.ts</code>); hoisted a hot-path regex literal in <code>commands.ts</code> to a module-level constant.</li>
+</ul>
 <h2>0.12.18</h2>
 <h3>Fixed</h3>
 <ul>

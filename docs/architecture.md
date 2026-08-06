@@ -76,6 +76,71 @@ When conversation history exceeds ~75% of the context window, older messages are
 
 MCP tools are namespaced as `mcp_<server>_<tool>` and converted to built-in `Tool`/`ToolResult` shapes.
 
+### The Agent Loop (`runAgentLoop`)
+
+`src/core/loop.ts` is the single engine both surfaces drive. One invocation is one **turn**; a session is a sequence of turns. The loop is streaming-by-construction: it never waits to collect a full response before emitting.
+
+```mermaid
+flowchart TD
+    Start([submit / steer / follow-up]) --> Assemble[Assemble prompt: append user msg,<br/>rebuild system prompt]
+    Assemble --> Stream[Stream LLM completion<br/>emit token / thinking]
+    Stream --> StopCheck{Stop reason?}
+    StopCheck -->|abort signal| Abort[Promote partial blocks,<br/>emit end aborted]
+    StopCheck -->|empty / no tool_calls| Close[emit turn_end + end stop]
+    StopCheck -->|tool_calls present| Dispatch[Dispatch tool calls<br/>Promise.all — run in parallel]
+    Dispatch --> ToolEvents[emit tool_start … tool_end<br/>recurse task → sub runAgentLoop]
+    ToolEvents --> AppendResult[Append results to messages]
+    AppendEvents[Check steering / followUp queues<br/>at turn boundary] --> Stream
+    AppendResult --> Compact{shouldCompact?}
+    Compact -->|yes| CompactPass[Summarize older turns,<br/>emit compaction]
+    CompactPass --> AppendEvents
+    Compact -->|no| AppendEvents
+    Abort --> End([turn closed])
+    Close --> End
+```
+
+A turn runs as a bounded outer iteration:
+
+1. **Prompt assembly.** The user message (or a steered/follow-up message injected mid-turn) is appended to `session.messages`. The system prompt is rebuilt per turn via `rebuildSystemPrompt` (sticky rules + `@`-mention context files).
+2. **LLM streaming.** The provider is called in streaming mode. Deltas arrive as `token` (content) and `thinking` (reasoning) events and are folded into the live transcript as they land.
+3. **Tool dispatch.** When the model returns `tool_calls`, each call is dispatched. **Tool calls within one assistant message run concurrently** via `Promise.all` — `bash`, `read`, and `grep` requested together execute simultaneously, not in sequence. Each tool emits `tool_start` / `tool_end`; sub-agents (`task` tool) recurse into their own `runAgentLoop` invocation.
+4. **Tool results → next iteration.** Results are appended and the loop streams another model call. The iteration continues until the model returns no tool calls (a final answer), hits a stop reason, or is aborted.
+5. **Turn close.** `turn_end` promotes the live streaming blocks into permanent history; `end` carries the stop reason (`stop` / `aborted` / `error` / `disconnected`). The session is persisted to SQLite incrementally as messages and tool results accumulate — not just at turn end.
+
+**Queues.** While a turn runs, a `steeringQueue` (injected mid-turn, before the next model call) and a `followUpQueue` (appended after the turn ends) let the user influence or extend the run without starting a parallel writer. The loop checks these at turn boundaries, so a steer typed during a long tool phase lands at the next model call rather than spawning a competing turn.
+
+**Events.** Every state change is emitted as an `AgentEvent` (`token`, `thinking`, `tool_start`, `tool_end`, `usage`, `turn_end`, `end`, `error`, `compaction`, …). The web daemon maps these to `WebEvent` and broadcasts over SSE; the local `cast run --interactive` path consumes them directly. Surfaces never re-derive loop state — they render from the event stream.
+
+```mermaid
+sequenceDiagram
+    participant U as User (TUI or browser)
+    participant D as cast web daemon
+    participant L as runAgentLoop
+    participant S as SQLite
+
+    U->>D: POST /chat "write a fn"
+    D->>L: runAgentLoop(submit)
+    L->>S: append user message
+    L-->>D: token "def " (streaming)
+    D-->>U: SSE: token
+    L-->>D: tool_start read
+    L->>S: write tool call
+    L-->>D: tool_end read
+    D-->>U: SSE: tool_start / tool_end
+    L-->>D: turn_end + end stop
+    D-->>U: SSE: end
+    U->>D: POST /abort (any surface)
+    D->>L: AbortController.signal
+    L-->>D: end aborted (partial blocks kept)
+    D-->>U: SSE: end aborted
+```
+
+**Abort.** An `AbortController` signal threads through the active LLM stream and tool calls; `abort` (from either surface) flips it, the in-flight stream is cancelled, and the turn closes with `end { reason: "aborted" }`. No partial turn is silently dropped — the already-streamed blocks are promoted to history before close.
+
+**Compaction.** When history exceeds ~75% of the context window, older messages are summarized by the LLM (see Context Compaction below). The split snaps to turn boundaries so tool calls and results stay paired.
+
+For how the TUI, web UI, and the `cast web` daemon are wired around this loop — processes, lifecycles, auth, and the `CAST_NO_DAEMON=1` escape hatch — see [Infrastructure](infrastructure.md).
+
 ### Trust Gating
 
 A single trust decision per project gates local skills, MCP, context files, personas, rules, hooks, and SSH configuration. Global resources in `~/.cast/` load automatically.
