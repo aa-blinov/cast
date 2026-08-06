@@ -30,6 +30,7 @@ export function Sidebar({
 	confirm,
 	sessionsLoaded,
 	defaultModel,
+	defaultModelLoaded,
 	onResizeStart,
 }) {
 	const [personaOpen, setPersonaOpen] = useState(false);
@@ -259,8 +260,8 @@ export function Sidebar({
 					${sessionsLoaded && !searching && sessionGroups.length === 0 && html`<div class="sidebar-empty">No sessions match "${search}"</div>`}
 				</div>
 			</div>
-			<div class="sidebar-footer" title=${defaultModel || "No model selected"}>
-				<span class="sidebar-footer-model">${defaultModel || "No model selected"}</span>
+			<div class="sidebar-footer" title=${defaultModel || (defaultModelLoaded ? "No model selected" : "Loading…")}>
+				<span class="sidebar-footer-model">${defaultModel || (defaultModelLoaded ? "No model selected" : "Loading…")}</span>
 				<button class="sidebar-logout" onClick=${onLogout} aria-label="Log out" title="Log out">
 					<${icons.arrowLeftOnRectangle} />
 				</button>

@@ -1679,6 +1679,7 @@ function App() {
 				open=${sidebarOpen}
 				sessionsLoaded=${sessionsLoaded}
 				defaultModel=${defaultModel}
+				defaultModelLoaded=${staticResourcesLoadedRef.current}
 				onResizeStart=${startSidebarResize}
 				confirm=${requestConfirm}
 			/>
