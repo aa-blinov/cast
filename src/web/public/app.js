@@ -636,14 +636,18 @@ function App() {
 	// it if TUI and web diverged. Empty-dep effect — runs once on mount.
 	useEffect(() => {
 		fetch("/api/settings/appearance")
-			.then((r) => r.ok ? r.json() : null)
+			.then((r) => (r.ok ? r.json() : null))
 			.then((data) => {
 				if (data && typeof data.showReasoning === "boolean") {
 					setShowReasoning(data.showReasoning);
-					try { localStorage.setItem("cast:showReasoning", data.showReasoning ? "1" : "0"); } catch { }
+					try {
+						localStorage.setItem("cast:showReasoning", data.showReasoning ? "1" : "0");
+					} catch {}
 				}
 			})
-			.catch(() => { /* offline / no-server — keep localStorage value */ });
+			.catch(() => {
+				/* offline / no-server — keep localStorage value */
+			});
 	}, []);
 	const toggleShowReasoning = useCallback(() => {
 		setShowReasoning((prev) => {
@@ -659,7 +663,9 @@ function App() {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ showReasoning: next }),
-			}).catch(() => { /* fire-and-forget, toggle still applies */ });
+			}).catch(() => {
+				/* fire-and-forget, toggle still applies */
+			});
 			return next;
 		});
 	}, []);
