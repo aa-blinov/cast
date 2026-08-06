@@ -16,12 +16,13 @@ permissions:
   pages: write
   id-token: write
 
-# Only one Pages deployment at a time — a second push while one's still
-# running should wait, not race it (cancel-in-progress: false), since a
-# half-replaced deploy mid-deploy is worse than a queued deploy.
+# Only one Pages deployment at a time. A newer push cancels any in-flight or
+# queued deploy (cancel-in-progress: true) so a stuck/queued run can't block
+# the latest docs forever — we always want only the most recent commit live,
+# and a half-replaced deploy is self-healing on the next push.
 concurrency:
   group: pages
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   deploy:
