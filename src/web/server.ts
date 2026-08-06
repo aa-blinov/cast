@@ -24,6 +24,7 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 
 import { brotliCompressSync, gzipSync } from "node:zlib";
 import { getDb } from "../core/db.ts";
 import { getHistoryPage, getMessageImage } from "../core/session.ts";
+import { loadSettings, updateSettings } from "../core/settings.ts";
 import { ensureSessionWorktree } from "../core/worktree.ts";
 import { reconcileActiveStream, SANDBOX_CWD, toDisplayMessages, type WebBridge, type WebEvent } from "./bridge.ts";
 import { readLiveWebState } from "./daemon-state.ts";
@@ -1497,6 +1498,19 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 
 	route("GET", "/api/themes", (_req, res) => {
 		json(res, bridge.getThemes());
+	});
+
+	route("GET", "/api/settings/appearance", (_req, res) => {
+		const { showReasoning } = loadSettings();
+		json(res, { showReasoning: showReasoning ?? false });
+	});
+	route("POST", "/api/settings/appearance", async (req, res) => {
+		const body = await readBody(req);
+		const parsed = JSON.parse(body) as { showReasoning?: boolean };
+		if (typeof parsed.showReasoning === "boolean") {
+			updateSettings({ showReasoning: parsed.showReasoning });
+		}
+		json(res, { ok: true });
 	});
 
 	route("GET", "/api/models", async (req, res) => {

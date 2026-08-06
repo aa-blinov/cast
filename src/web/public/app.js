@@ -631,6 +631,20 @@ function App() {
 			return false;
 		}
 	});
+	// Sync the initial value from settings.json (written by /rd in TUI). The
+	// localStorage above gives a synchronous first render; the fetch corrects
+	// it if TUI and web diverged. Empty-dep effect — runs once on mount.
+	useEffect(() => {
+		fetch("/api/settings/appearance")
+			.then((r) => r.ok ? r.json() : null)
+			.then((data) => {
+				if (data && typeof data.showReasoning === "boolean") {
+					setShowReasoning(data.showReasoning);
+					try { localStorage.setItem("cast:showReasoning", data.showReasoning ? "1" : "0"); } catch { }
+				}
+			})
+			.catch(() => { /* offline / no-server — keep localStorage value */ });
+	}, []);
 	const toggleShowReasoning = useCallback(() => {
 		setShowReasoning((prev) => {
 			const next = !prev;
@@ -640,6 +654,12 @@ function App() {
 				// localStorage may be unavailable (private mode, quota); the
 				// toggle still applies in-memory, just won't persist.
 			}
+			// Persist to settings.json so TUI picks it up on next launch.
+			fetch("/api/settings/appearance", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ showReasoning: next }),
+			}).catch(() => { /* fire-and-forget, toggle still applies */ });
 			return next;
 		});
 	}, []);
