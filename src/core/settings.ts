@@ -131,6 +131,13 @@ export interface Settings {
 	 * Defaults to DEFAULT_PERSONA (core/personas.ts) when unset.
 	 */
 	quickSessionPersona?: string;
+	/**
+	 * Whether to show reasoning blocks in the transcript. Defaults to false
+	 * (reasoning models stream a lot of auxiliary thinking that clutters the
+	 * view). Toggled via /reasoning-display (/rd) and persisted so the
+	 * preference survives restarts.
+	 */
+	showReasoning?: boolean;
 }
 
 // ============================================================================

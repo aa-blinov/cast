@@ -21,7 +21,7 @@ import {
 	type SessionUsage,
 	saveSession,
 } from "../core/session.ts";
-import { loadSettings, type PermissionMode } from "../core/settings.ts";
+import { loadSettings, type PermissionMode, updateSettings } from "../core/settings.ts";
 import { setLastTurnAborted, setStreamingActive } from "../core/stdin-manager.ts";
 import type { BackgroundTaskRegistry, BashBackgroundDeps } from "../core/tools/bash-background.ts";
 import { completedToolCallStatus, type ToolCallStatus } from "../core/tools/shared.ts";
@@ -393,8 +393,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	// to filter.
 	const [pendingSteers, setPendingSteers] = useState<string[]>([]);
 	const [pendingQueue, setPendingQueue] = useState<string[]>([]);
-	const [showReasoning, setShowReasoning] = useState(false);
-	const showReasoningRef = useRef(false);
+	const [showReasoning, setShowReasoning] = useState(() => loadSettings().showReasoning ?? false);
+	const showReasoningRef = useRef(loadSettings().showReasoning ?? false);
 	const toggleReasoning = useCallback((): boolean => {
 		setShowReasoning((prev) => {
 			const next = !prev;
@@ -402,6 +402,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			// without waiting for React's batch — the same value we just
 			// committed to the next render.
 			showReasoningRef.current = next;
+			// Persist across restarts.
+			updateSettings({ showReasoning: next });
 			return next;
 		});
 		return showReasoningRef.current;
