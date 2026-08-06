@@ -2,6 +2,21 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.12.27
+
+### Added
+
+- TUI: `/reasoning-display` command to hide reasoning blocks by default. The setting is persisted to `settings.json` and survives restarts.
+- Web: reasoning-display toggle in Settings > Appearance, synced with `settings.json`.
+
+### Fixed
+
+- Web streaming reasoning block: the 1200-character cap from v0.12.21–v0.12.25 is restored. An earlier v0.12.26 commit had removed it, which let long reasoning streams disable the TUI scroll guard and produce occasional "jumps" in the visible content. The cap keeps the cursor-below-viewport invariant that `useTerminalResync` depends on.
+
+### Internal
+
+- Several experimental TUI reasoning-display tweaks that landed on `master` after v0.12.26 (1-row live preview redesign, `\n` flattening in live/settled history, hidden-think-block clamp accounting) have been reverted. They never shipped in a release.
+
 ## 0.12.26
 
 ### Fixed
