@@ -193,26 +193,10 @@ function BlockView({
 }): JSX.Element | null {
 	if (block.kind === "thinking") {
 		if (showReasoning === false) return null;
-		// Model \n breaks inside a single <Text> make Ink emit real line-breaks;
-		// each continuation starts at column 0 and wraps independently, producing
-		// mid-word splits. Flatten everywhere — reasoning has no paragraph structure
-		// that's worth preserving in the terminal.
-		const text = block.text.replace(/\n/g, " ");
-		if (compact) {
-			// Live region: single truncated line, same as tool blocks. Shows the
-			// most-recent reasoning token as a progress indicator, not for reading.
-			return (
-				<Text color={theme().muted} dimColor wrap="truncate">
-					{!block.continued && "[reasoning] … "}
-					{text}
-				</Text>
-			);
-		}
-		// Settled history: paragraph wrapped so long text doesn't overflow.
 		return (
-			<Text color={theme().muted} dimColor wrap="wrap">
+			<Text color={theme().muted} dimColor>
 				{!block.continued && `[reasoning] ${truncated ? "… " : ""}`}
-				{text}
+				{block.text}
 			</Text>
 		);
 	}
@@ -255,7 +239,6 @@ export function clampStreamingBlocks(
 	rows: number,
 	columns: number,
 	extraReserve = 0,
-	showReasoning = true,
 ): Array<{ block: StreamBlock; truncated: boolean; index: number }> {
 	// Rows reserved for everything below the streaming area: composer frame
 	// (3), status bar (1), notices/steer/queue lines and a safety margin.
@@ -276,10 +259,6 @@ export function clampStreamingBlocks(
 	let used = 0;
 	for (let i = blocks.length - 1; i >= 0; i--) {
 		const block = blocks[i]!;
-		// When reasoning is hidden, thinking blocks render as null — don't charge
-		// them against the viewport budget or the clamp oscillates (over-shrinks
-		// the budget → tiny frame → overflow resets → widens again → flicker).
-		if (block.kind === "thinking" && !showReasoning) continue;
 		if (used >= budget) break;
 		if (block.kind === "tool") {
 			// Live ToolCallView uses compact truncate for task — charge 1 status
@@ -298,22 +277,7 @@ export function clampStreamingBlocks(
 			used += need;
 			continue;
 		}
-		// When reasoning is visible in the live region it renders as one truncated
-		// line (same as tool blocks). Charge 1 row, not wrappedRows — the old
-		// full-height charge pushed content/tool blocks out of the viewport budget
-		// even though only one line actually appeared on screen.
-		if (block.kind === "thinking") {
-			if (used + 1 > budget) {
-				if (out.length > 0) break;
-				out.unshift({ block, truncated: true, index: i });
-				used = budget;
-				break;
-			}
-			out.unshift({ block, truncated: false, index: i });
-			used += 1;
-			continue;
-		}
-		const prefixLen = block.continued ? 0 : "[agent] ".length;
+		const prefixLen = block.continued ? 0 : block.kind === "thinking" ? "[reasoning] ".length : "[agent] ".length;
 		const need = wrappedRows(block.text, prefixLen);
 		if (used + need <= budget) {
 			out.unshift({ block, truncated: false, index: i });
@@ -440,13 +404,7 @@ export function ChatLog({
 		if (streaming.blocks.length === 0) {
 			streamingParts.push(<Spinner key="wait" />);
 		}
-		const clamped = clampStreamingBlocks(
-			streaming.blocks,
-			availableRows,
-			cols,
-			stickyOverflowRef.current,
-			showReasoning,
-		);
+		const clamped = clampStreamingBlocks(streaming.blocks, availableRows, cols, stickyOverflowRef.current);
 		for (const { block, truncated, index } of clamped) {
 			streamingParts.push(
 				<BlockView
