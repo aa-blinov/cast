@@ -6,7 +6,17 @@
 
 import { execFile, execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	watch,
+	writeFileSync,
+	type FSWatcher,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -141,7 +151,11 @@ export type WebEvent =
 	| { type: "session_end"; usage: SessionState["usage"]; messageCount: number }
 	| { type: "session_closed" }
 	| { type: "turn_meta"; model: string; provider: string; totalMs: number }
-	| { type: "plan_decision"; content: string };
+	| { type: "plan_decision"; content: string }
+	/** Watcher in `ws.cwd` saw changes while the session was idle. Only fired
+	 * when nothing else is broadcasting — tool_end already covers active turns.
+	 * Client should re-fetch the diff (and re-read the file tree). */
+	| { type: "fs_change" };
 
 export interface WebAgentSession {
 	id: string;
@@ -713,6 +727,8 @@ export function createWebBridge(result: StartupResult): WebBridge {
 				payload: { source: "startup" },
 			});
 		}
+		// Start the idle cwd watcher — agent isn't running yet so it's safe.
+		syncFsWatcher(ws);
 		return ws;
 	}
 
@@ -744,6 +760,83 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			// Defensive: summaryFor reads session.messages.length — if the run
 			// left messages in an unexpected state, don't crash the broadcast.
 		}
+	}
+
+	/** Idle-period cwd watcher. Fires `fs_change` SSE events so the UI's
+	 *  Changes tab and Files tree pick up edits that happened outside of an
+	 *  agent turn (manual editor, CI hook, etc). Suspended while a turn runs so
+	 *  it never races `tool_end`. */
+	const fsWatchers = new Map<string, FSWatcher[]>();
+	const fsDebounceTimers = new Map<string, NodeJS.Timeout>();
+	const FS_DEBOUNCE_MS = 500;
+	/** Debounce + broadcast handler shared by every recursive watcher. Looks
+	 * the session up on every event so we always operate on the live ws — the
+	 * Map entry is replaced by re-hydration under the same id (see the race in
+	 * `hydrateSession`), and a captured `ws` reference would point at a stale
+	 * object whose listeners set is empty. */
+	function makeFsCallback(sessionId: string): () => void {
+		return () => {
+			const existing = fsDebounceTimers.get(sessionId);
+			if (existing) clearTimeout(existing);
+			fsDebounceTimers.set(
+				sessionId,
+				setTimeout(() => {
+					fsDebounceTimers.delete(sessionId);
+					const ws = sessions.get(sessionId);
+					if (!ws || ws.status !== "idle") return;
+					broadcast(ws, { type: "fs_change" });
+				}, FS_DEBOUNCE_MS),
+			);
+		};
+	}
+	function startFsWatcher(ws: WebAgentSession): void {
+		if (fsWatchers.has(ws.id)) return;
+		const sessionCwd = ws.session.cwd;
+		if (!sessionCwd || !existsSync(sessionCwd)) return;
+		try {
+			// Non-recursive watch on cwd. Picks up adds/removes/renames of
+			// top-level files (the most common case for `git status`-style
+			// dirty files — `touch src/foo.ts` doesn't fire, but `git switch`
+			// which checks out a new top-level `.gitignore` does). Deeper
+			// edits rely on the next tool_end to refresh. `recursive: true`
+			// hits the inotify max_user_watches ceiling on real-world cwds
+			// (.git/objects alone is thousands of dirs) and silently stops
+			// emitting — not worth the tradeoff.
+			const watcher = watch(
+				sessionCwd,
+				{ recursive: false },
+				makeFsCallback(ws.id),
+			);
+			watcher.on("error", () => {
+				stopFsWatcher(ws.id);
+			});
+			fsWatchers.set(ws.id, [watcher]);
+		} catch {
+			// cwd may not exist (e.g. sandbox removed); ignore silently.
+		}
+	}
+	function stopFsWatcher(sessionId: string): void {
+		const list = fsWatchers.get(sessionId);
+		if (list) {
+			for (const w of list) {
+				try {
+					w.close();
+				} catch {
+					// already closed by error handler
+				}
+			}
+			fsWatchers.delete(sessionId);
+		}
+		const t = fsDebounceTimers.get(sessionId);
+		if (t) {
+			clearTimeout(t);
+			fsDebounceTimers.delete(sessionId);
+		}
+	}
+	/** Toggles the idle watcher as the session enters/leaves a turn. */
+	function syncFsWatcher(ws: WebAgentSession): void {
+		if (ws.status === "idle") startFsWatcher(ws);
+		else stopFsWatcher(ws.id);
 	}
 
 	/** Builds a real user turn's `content` — plain text when there are no
@@ -796,6 +889,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		ws.error = null;
 		ws.turnStartedAt = Date.now();
 		ws.runner.startRun(ac);
+		syncFsWatcher(ws);
 		broadcast(ws, { type: "status", status: "running", startedAt: ws.turnStartedAt });
 		broadcastSessionUpdate(ws);
 		const submitHooks = resolveHooksForCwd(sessionCwd, projectTrusted);
@@ -811,6 +905,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 				ws.turnStartedAt = undefined;
 				ws.runner.abort();
 				ws.runner.endRun();
+				syncFsWatcher(ws);
 				broadcast(ws, { type: "status", status: "idle" });
 				broadcastSessionUpdate(ws);
 				broadcast(ws, {
@@ -1028,6 +1123,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 				ws.status = "idle";
 				ws.activeStream = undefined;
 				ws.runner.endRun();
+				syncFsWatcher(ws);
 				if (ws.lastTurn) ws.lastTurn.totalMs = Date.now() - turnStart;
 				// Persisted per-turn (unlike ws.lastTurn above, which is the same
 				// data but ephemeral/in-memory-only) so every past reply in this
@@ -1204,6 +1300,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		if (ws) {
 			if (ws.status === "running") ws.runner.abort();
 			ws.backgroundBash.registry.killAll();
+			stopFsWatcher(sessionId);
 			// No saveSession here — it's about to be deleted from disk anyway.
 			broadcast(ws, { type: "session_closed" });
 			ws.listeners.clear();
@@ -1255,6 +1352,14 @@ export function createWebBridge(result: StartupResult): WebBridge {
 	function hydrateSession(id: string): WebAgentSession | undefined {
 		const session = loadSession(id);
 		if (!session) return undefined;
+		// Two concurrent GETs for the same session id would otherwise race past
+		// the existence check, each create a fresh `ws`, and the later .set
+		// would clobber the earlier one — leaving the first request's listeners
+		// and the second's listeners both stranded. Return the live entry on a
+		// race so the caller (and its SSE listener registration) hits the same
+		// object the next call will return.
+		const existing = sessions.get(session.id);
+		if (existing) return existing;
 		const persona = resolvePersona(session.persona ?? "") ?? currentPersona;
 		const runner = createAgentRunner();
 		const ws: WebAgentSession = {
@@ -1274,6 +1379,9 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			sessionId: session.id,
 			payload: { source: "resume" },
 		});
+		// Resumed sessions skip createSessionInstance — start the idle watcher
+		// here too so the diff refreshes on external edits, not just on tool_end.
+		syncFsWatcher(ws);
 		return ws;
 	}
 
@@ -1746,12 +1854,14 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			// system-message row (see runAgentLoop's own auto-compaction, which
 			// broadcasts the identical event shape).
 			ws.status = "running";
+			syncFsWatcher(ws);
 			broadcast(ws, { type: "status", status: "running" });
 			compactSessionMessages(ws.session.messages, config, ws.session.model, undefined, undefined, (usage) =>
 				addUsage(ws.session, usage),
 			)
 				.then((result) => {
 					ws.status = "idle";
+					syncFsWatcher(ws);
 					if (result.compacted) {
 						recordCompaction(ws.session, ws.session.messages, result.messages);
 						ws.session.messages = result.messages;

@@ -29,6 +29,7 @@ export function handleSseEvent(event, context) {
 		takeStreamingNow,
 		diffOpenRef,
 		queueDiffRefresh,
+		setFsRefreshNonce,
 		addNotice,
 		showToast,
 		api,
@@ -195,6 +196,13 @@ export function handleSseEvent(event, context) {
 			setSessions((prev) =>
 				prev.map((session) => (session.id === event.session.id ? { ...session, ...event.session } : session)),
 			);
+			break;
+		case "fs_change":
+			// External edit (IDE, CI hook, etc.) on the session cwd while it
+			// was idle. Pick it up in Changes + Files tree; the panel's own
+			// open-on-open effect already handles the diff tab if it's mounted.
+			queueDiffRefresh();
+			setFsRefreshNonce((n) => n + 1);
 			break;
 		case "compaction":
 			setSession((prev) =>
