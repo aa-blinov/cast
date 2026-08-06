@@ -350,7 +350,9 @@ export async function runInteractive(args: ParsedArgs): Promise<void> {
 		}
 
 		appendMessage(session, { role: "user", content: promptText });
+		// runStartup already persisted the session; re-save with the prompt appended.
 		saveSession(session);
+
 		planState.enabled = session.mode === "plan";
 		const disabledTools = new Set(modeDisabledTools(planState.enabled));
 		if (loadSettings().webTools !== true) {
@@ -565,6 +567,9 @@ export async function runNonInteractive(args: ParsedArgs, options: RunOptions): 
 		if (submitResult.reason) promptText = `${promptText}\n\n<hook-context>${submitResult.reason}</hook-context>`;
 	}
 	appendMessage(session, { role: "user", content: promptText });
+	// runStartup already persisted the session to the DB (so the web UI can
+	// see it during startup). Re-save after the user prompt is appended.
+	saveSession(session);
 
 	const settings = loadSettings();
 	const disabledTools = new Set<string>();

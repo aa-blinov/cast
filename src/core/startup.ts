@@ -43,6 +43,7 @@ import {
 	loadSession,
 	migrateLegacySessionsToDb,
 	type SessionState,
+	saveSession,
 } from "./session.ts";
 import { loadSettings, type PermissionMode, type Settings, updateSettings } from "./settings.ts";
 import { formatSkillsForPrompt, type Skill } from "./skills.ts";
@@ -491,6 +492,12 @@ export async function runStartup(
 	const session = resumedSession
 		? { ...resumedSession, model, providerUrl: config.baseURL, persona: persona.name }
 		: { ...createSession(model, cwd), providerUrl: config.baseURL, persona: persona.name };
+	// Persist the new session immediately so cross-process readers (the web UI
+	// sidebar) can see it before the rest of startup finishes — runStartup does
+	// a model onboarding check and connects MCP servers (several seconds of
+	// network work) before runNonInteractive/runInteractive ever call saveSession.
+	// Without this the session is invisible in the web UI for the whole startup window.
+	saveSession(session);
 	const runner = createAgentRunner();
 	const backgroundTasks = new BackgroundTaskRegistry();
 	const systemPrompt = buildSystemPrompt(
