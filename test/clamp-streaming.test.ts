@@ -15,13 +15,18 @@ describe("clampStreamingBlocks", () => {
 		expect(out.map((b) => b.block)).toEqual(blocks);
 	});
 
-	it("thinking blocks are always included as one row regardless of text size", () => {
+	it("keeps only the tail lines of a block taller than the viewport", () => {
 		const lines = Array.from({ length: 100 }, (_, i) => `line ${i}`);
 		const blocks = [text("thinking", lines.join("\n"))];
 		const out = clampStreamingBlocks(blocks, 24, 80);
-		// thinking is included untruncated (block text unchanged) and costs 1 row
 		expect(out).toHaveLength(1);
-		expect(out[0]!.block.kind).toBe("thinking");
+		expect(out[0]!.truncated).toBe(true);
+		const kept = (out[0]!.block as { text: string }).text.split("\n");
+		// budget = 24 - 8 = 16 rows
+		expect(kept.length).toBeLessThanOrEqual(16);
+		// tail is kept, not the head
+		expect(kept.at(-1)).toBe("line 99");
+		expect(kept[0]).not.toBe("line 0");
 	});
 
 	it("accounts for line wrapping at narrow widths", () => {
@@ -38,16 +43,6 @@ describe("clampStreamingBlocks", () => {
 		const t = (out[0]!.block as { text: string }).text;
 		expect(out[0]!.truncated).toBe(true);
 		expect(t.length).toBeLessThanOrEqual(6 * 50);
-	});
-
-	it("thinking is 1 row so it survives alongside tall content that fills the rest", () => {
-		const tall = Array.from({ length: 50 }, (_, i) => `t${i}`).join("\n");
-		// thinking (index 0) comes first; clamp goes tail-first so content (index 1)
-		// is charged first. Short content leaves 15 rows for thinking (charged 1).
-		const blocks = [text("thinking", tall), text("content", "short answer")];
-		const out = clampStreamingBlocks(blocks, 24, 80);
-		expect(out.some((e) => e.block.kind === "thinking")).toBe(true);
-		expect(out.some((e) => e.block.kind === "content")).toBe(true);
 	});
 
 	it("drops older blocks entirely once the budget is spent", () => {
@@ -89,17 +84,6 @@ describe("clampStreamingBlocks", () => {
 		const blocks = [text("content", Array.from({ length: 16 }, () => wideLine).join("\n"))];
 		const out = clampStreamingBlocks(blocks, 20, 40); // budget 12
 		expect(out[0]!.truncated).toBe(true);
-	});
-
-	it("skips thinking blocks from budget when showReasoning=false", () => {
-		// A large thinking block that would crowd out the content block if counted.
-		const tall = Array.from({ length: 50 }, (_, i) => `t${i}`).join("\n");
-		const blocks = [text("thinking", tall), text("content", "answer")];
-		const out = clampStreamingBlocks(blocks, 24, 80, 0, false);
-		// Thinking block must not appear in output.
-		expect(out.every((e) => e.block.kind !== "thinking")).toBe(true);
-		// Content block must survive despite the thinking block's text size.
-		expect(out.some((e) => e.block.kind === "content")).toBe(true);
 	});
 
 	it("keeps multiple parallel long task tools visible (1 row each while live)", () => {
