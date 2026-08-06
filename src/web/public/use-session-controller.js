@@ -307,9 +307,13 @@ export function useSessionController({
 							applyTheme(current.colors);
 							setCurrentThemeId(current.id);
 						}
+						// Mark loaded only after both cfg.model and themes have been
+						// pushed into React state — otherwise the sidebar footer
+						// renders "No model selected" for one frame between the ref
+						// flip and the setDefaultModel setState landing.
+						staticResourcesLoadedRef.current = true;
 					})
 					.catch(() => {});
-				staticResourcesLoadedRef.current = true;
 			}
 
 			const s = await api("GET", "/api/sessions");
