@@ -2,7 +2,7 @@
 
 All notable user-facing changes to cast, newest first.
 
-## 0.12.29
+## 0.13.0
 
 ### Added
 
