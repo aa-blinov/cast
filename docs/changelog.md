@@ -2,6 +2,14 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.12.28
+
+### Fixed
+
+- Web sidebar: search showed "No sessions match <query>" on every non-empty search, hiding the matches above it. The empty-state check compared the wrong list (the full session list, which is empty when a search is active) instead of the filtered list. Now the banner only appears when the filter actually returns nothing.
+- Web Changes tab / Files tree: external file edits in the session cwd (IDE save, CI hook, `touch`, etc) now refresh the diff and the file tree in real-time. Previously the only source of refresh was the next agent tool_end. A non-recursive `chokidar` watcher on the cwd root fires an `fs_change` SSE event after a 500ms debounce while the session is idle, gated so it never races a running turn. Top-level and subdir paths both work; `.git`, `node_modules`, `dist`, `build`, and other noise directories are ignored. The native `fs.watch` path had an inotify `max_user_watches` ceiling that silently killed the watcher on real-world cwds — chokidar's pooling avoids it.
+- Web sidebar footer: showed "No model selected" for a frame between mount and the `/api/config` response arriving. The sidebar now renders "Loading…" until the model has actually been fetched.
+
 ## 0.12.27
 
 ### Added
