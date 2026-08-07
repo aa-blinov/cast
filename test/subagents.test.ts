@@ -1,11 +1,30 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
+import { resetDbConnectionForTests } from "../src/core/db.ts";
 import type { Message } from "../src/core/llm.ts";
 import type { LoopConfig } from "../src/core/loop.ts";
 import { findSubagentPrompt, loadSubagentPrompts, type SubagentPrompt } from "../src/core/subagents.ts";
 import { execTask } from "../src/core/tools/task.ts";
+
+// execTask can persist subagent runs (saveSubagentRun) — keep that on a
+// throwaway DB so a real sessions.db is never written during tests.
+let fakeDb: string;
+let realDb: string | undefined;
+beforeEach(() => {
+	realDb = process.env.CAST_SESSIONS_DB;
+	fakeDb = join(mkdtempSync(join(tmpdir(), "cast-subagents-test-")), "sessions.db");
+	process.env.CAST_SESSIONS_DB = fakeDb;
+	resetDbConnectionForTests();
+});
+afterEach(() => {
+	if (realDb === undefined) delete process.env.CAST_SESSIONS_DB;
+	else process.env.CAST_SESSIONS_DB = realDb;
+	resetDbConnectionForTests();
+	rmSync(join(fakeDb, ".."), { recursive: true, force: true });
+});
 
 const HARNESS_DISCIPLINE_FILE = join(import.meta.dirname, "..", "prompts", "harness-discipline.md");
 const VERIFICATION_DISCIPLINE_FILE = join(import.meta.dirname, "..", "prompts", "verification-discipline.md");

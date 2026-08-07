@@ -1,10 +1,11 @@
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
 import { formatContextFilesForPrompt, resolveNestedContextFiles } from "../src/core/context-files.ts";
 import { formatLocalDate } from "../src/core/date-rollover-reminder.ts";
+import { resetDbConnectionForTests } from "../src/core/db.ts";
 import type { Message } from "../src/core/llm.ts";
 import { formatRulesForTurn, loadDirectoryRules, matchAutoRules, unionStickyRules } from "../src/core/rules.ts";
 
@@ -46,6 +47,23 @@ beforeEach(() => {
 	// leftover one-shot implementations from an earlier test bleed into the
 	// next one.
 	vi.mocked(streamAndCollect).mockClear();
+});
+
+// The loop can persist sessions/checkpoints/subagent runs via the DB — point
+// every write at a throwaway DB (not the real ~/.cast/sessions/sessions.db).
+let fakeDb: string;
+let realDb: string | undefined;
+beforeEach(() => {
+	realDb = process.env.CAST_SESSIONS_DB;
+	fakeDb = join(mkdtempSync(join(tmpdir(), "cast-loop-test-")), "sessions.db");
+	process.env.CAST_SESSIONS_DB = fakeDb;
+	resetDbConnectionForTests();
+});
+afterEach(() => {
+	if (realDb === undefined) delete process.env.CAST_SESSIONS_DB;
+	else process.env.CAST_SESSIONS_DB = realDb;
+	resetDbConnectionForTests();
+	rmSync(join(fakeDb, ".."), { recursive: true, force: true });
 });
 
 // ============================================================================
