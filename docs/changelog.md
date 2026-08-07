@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.3
+
+### Fixed
+
+- **Composer input no longer goes dead on terminals that answer the DECXCPR scroll-poll slowly.** The poll attached a temporary stdin listener per query, which swallowed keystrokes for up to 400 ms a time; the response is now detected through the composer's own input pipeline, and the poll skips terminals that aren't actually in raw mode.
+
 ## 0.13.2
 
 ### Fixed
