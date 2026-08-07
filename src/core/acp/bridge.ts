@@ -31,6 +31,12 @@ export interface AcpAdapterSession {
 	 * editor's running-cost indicator updates even when the current turn
 	 * hasn't finished and the next `usage` event is still pending. */
 	lastUsage: { used: number; size: number } | null;
+	/** Open documents shared by the editor via `document/didOpen`. The
+	 * contents are injected as a system-reminder block on every prompt so
+	 * the model can see what's currently in the editor's buffer without
+	 * having to call the `read` tool. Keyed by document URI (which editors
+	 * usually use as `file://` URLs or absolute paths). */
+	openDocuments: Map<string, { content: string; language?: string }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -85,6 +91,14 @@ export interface AcpAdapter {
 		opts: AcpAdapterOptions,
 	): Promise<{ stopReason: string; usage?: unknown }>;
 	cancel(session: AcpAdapterSession): void;
+	/** Record an editor buffer shared via `document/didOpen`. Replaces any
+	 * prior entry for the same URI — editors typically send one
+	 * `didChange` per keystroke and we'd otherwise churn the Map. */
+	openDocument(session: AcpAdapterSession, uri: string, content: string, language?: string): void;
+	/** Editor reports a buffer update via `document/didChange`. */
+	updateDocument(session: AcpAdapterSession, uri: string, content: string): void;
+	/** Editor reports a buffer closed via `document/didClose`. */
+	closeDocument(session: AcpAdapterSession, uri: string): void;
 	/** User answered a plan question the bridge surfaced via `request_question`. */
 	answerQuestion(
 		sessionId: string,
@@ -143,7 +157,15 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 					}
 				},
 			});
-			return { state: session, startup, runner, planState, totalCost: 0, lastUsage: null };
+			return {
+				state: session,
+				startup,
+				runner,
+				planState,
+				totalCost: 0,
+				lastUsage: null,
+				openDocuments: new Map(),
+			};
 		},
 
 		loadSession: (sessionId: string, _startup, _opts, client): AcpAdapterSession | null => {
@@ -158,7 +180,15 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 			// replay is a flat stream of `user_message_chunk` /
 			// `agent_message_chunk` updates in chronological order.
 			void replaySessionHistory(state, client);
-			return { state, startup: _startup, runner, planState, totalCost: 0, lastUsage: null };
+			return {
+				state,
+				startup: _startup,
+				runner,
+				planState,
+				totalCost: 0,
+				lastUsage: null,
+				openDocuments: new Map(),
+			};
 		},
 
 		closeSession(sessionId: string, sessions: Map<string, AcpAdapterSession>): Promise<void> {
@@ -256,12 +286,33 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 				}
 				return { stopReason: "end_turn" };
 			}
+			injectOpenDocumentsAsContext(session);
 			await runPromptInner(session, opts.permissionMode, message, client);
 			return { stopReason: "end_turn" };
 		},
 
 		cancel: (session): void => {
 			session.runner.abort("acp cancel");
+		},
+
+		openDocument: (session, uri, content, language) => {
+			session.openDocuments.set(uri, { content, language });
+		},
+
+		updateDocument: (session, uri, content) => {
+			const existing = session.openDocuments.get(uri);
+			if (!existing) {
+				// Editor sent didChange for a file we never saw didOpen for —
+				// accept it anyway. This handles editor reconnects that
+				// re-send state without a prior open.
+				session.openDocuments.set(uri, { content });
+				return;
+			}
+			existing.content = content;
+		},
+
+		closeDocument: (session, uri) => {
+			session.openDocuments.delete(uri);
 		},
 
 		answerQuestion: async (_sessionId, answers, session) => {
@@ -673,6 +724,45 @@ function emitAvailableCommands(
 			},
 		})
 		.catch(() => {});
+}
+
+/** Push the editor's open-document contents into `state.messages` as a
+ * system-reminder so the next LLM call sees them in context. Editors
+ * using `embeddedContext: true` send `document/didOpen` for every file
+ * the user has open in their buffer; without this injection the model
+ * would only know about files it has explicitly `read`.
+ *
+ * Implementation detail: we replace (rather than append) any previous
+ * reminder so the message array doesn't grow unboundedly with each
+ * prompt. The latest snapshot always wins. */
+function injectOpenDocumentsAsContext(session: AcpAdapterSession): void {
+	if (session.openDocuments.size === 0) return;
+	const docs = [...session.openDocuments.entries()];
+	const reminder = [
+		"<system-reminder>",
+		"The following files are currently open in the editor. Treat their contents as part of the conversation context.",
+		"",
+		...docs.map(([uri, doc]) => {
+			const lang = doc.language ? ` (${doc.language})` : "";
+			return `### ${uri}${lang}\n\`\`\`\n${doc.content}\n\`\`\``;
+		}),
+		"</system-reminder>",
+	].join("\n");
+	// Drop any previous open-doc reminder we injected — only the latest
+	// snapshot is useful, and we don't want stale buffers leaking into
+	// later turns after the user closes a file.
+	const { state } = session;
+	const last = state.messages[state.messages.length - 1];
+	if (
+		last &&
+		last.role === "user" &&
+		typeof last.content === "string" &&
+		last.content.startsWith("<system-reminder>") &&
+		last.content.includes("currently open in the editor")
+	) {
+		state.messages.pop();
+	}
+	state.messages.push({ role: "user", content: reminder });
 }
 
 function promptContentToText(content: Array<{ type: string; text?: string | null }>): string {

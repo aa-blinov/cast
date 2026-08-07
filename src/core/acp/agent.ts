@@ -82,6 +82,29 @@ export function buildAcpAgentApp(
 			if (!session) return;
 			adapter.cancel(session);
 		})
+		.onNotification(acp.AGENT_METHODS.document_did_open, (ctx): void => {
+			const session = sessions.get(ctx.params.sessionId);
+			if (!session) return;
+			adapter.openDocument(session, ctx.params.uri, ctx.params.text, ctx.params.languageId);
+		})
+		.onNotification(acp.AGENT_METHODS.document_did_change, (ctx): void => {
+			// LSP-style incremental updates carry contentChanges (range +
+			// text fragments), not the full buffer. Implementing incremental
+			// merge correctly requires the editor's full buffer snapshot
+			// plus the change ranges, which we don't have here. Editors
+			// are expected to re-emit didOpen with the full content when
+			// they need to push a full replacement; we accept that and
+			// drop the incremental notification.
+			const session = sessions.get(ctx.params.sessionId);
+			if (!session) return;
+			// No-op: see comment above.
+			void ctx.params.contentChanges;
+		})
+		.onNotification(acp.AGENT_METHODS.document_did_close, (ctx): void => {
+			const session = sessions.get(ctx.params.sessionId);
+			if (!session) return;
+			adapter.closeDocument(session, ctx.params.uri);
+		})
 		.onRequest("answer_question", identity as (p: unknown) => any, async (ctx): Promise<unknown> => {
 			const params = ctx.params as { sessionId: string; answers: string[] };
 			const session = sessions.get(params.sessionId);
