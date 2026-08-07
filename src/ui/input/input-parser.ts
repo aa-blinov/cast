@@ -13,6 +13,11 @@ import { StdinBuffer } from "./stdin-buffer.ts";
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence
 const CURSOR_POS_RE = /^\x1b\[\d+;\d+R$/;
+// A DECXCPR response that lost its \x1b[ prefix — the tty echoes the response
+// as raw bytes while stdin isn't in raw mode, and a split read can hand the
+// buffer just the `<row>;<col>R` tail (possibly several concatenated). Never
+// meaningful input; drop it so it can't surface in the composer.
+const CURSOR_POS_REMNANT_RE = /^\d+(?:;\d+)+R$/;
 
 export type InputEvent = { type: "binding"; binding: Keybinding; raw: string } | { type: "char"; text: string };
 
@@ -76,6 +81,12 @@ export class InputParser {
 		// parses it as a complete CSI sequence (R is in 0x40..0x7e); this
 		// explicit drop makes the intent clear and prevents a future keybinding
 		if (CURSOR_POS_RE.test(sequence)) {
+			return;
+		}
+
+		// DECXCPR response whose ESC+[ was consumed/echoed away — drop the bare
+		// `<row>;<col>R` tail too (see CURSOR_POS_REMNANT_RE).
+		if (CURSOR_POS_REMNANT_RE.test(sequence)) {
 			return;
 		}
 

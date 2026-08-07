@@ -53,6 +53,14 @@ describe("InputParser — sequence classification", () => {
 		expect(events).toEqual([]);
 	});
 
+	it("drops DECXCPR response remnants that lost their ESC prefix (echo path)", () => {
+		const { events, feed } = makeParser();
+		feed("12;40R");
+		feed("68;68;68;1R");
+		feed("67;1R");
+		expect(events).toEqual([]);
+	});
+
 	it("ignores an unrecognized control byte (< 32, no binding)", () => {
 		const { events, feed } = makeParser();
 		feed("\x00");
