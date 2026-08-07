@@ -62,3 +62,19 @@ export function expandPastes(value: string, pastes: readonly PendingPaste[]): st
 	}
 	return out;
 }
+
+// Absolute paths ending in a common image extension. Matched conservatively
+// (no spaces, boundary-anchored) so prose that merely mentions a path isn't
+// mistaken for an attachment — cast-clipboard paths and file-manager copies
+// are space-free. Existence/readability is checked by the caller.
+const IMAGE_PATH_RE = /(?:^|[\s"'`(])(\/\S+\.(?:png|jpe?g|gif|webp|bmp))(?=$|[\s"'`)])/gi;
+
+/** Absolute image-file paths mentioned in `text` (e.g. a Ctrl+G clipboard
+ *  save, or a file copied in the file manager and pasted via Ctrl+V). */
+export function imageFilePathsInText(text: string): string[] {
+	const out: string[] = [];
+	for (const m of text.matchAll(IMAGE_PATH_RE)) {
+		out.push(m[1]!);
+	}
+	return out;
+}
