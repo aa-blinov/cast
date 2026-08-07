@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { describe, expect, it, vi } from "vitest";
 import {
+	createClient,
 	describeTurnError,
 	EMPTY_ASSISTANT_PLACEHOLDER,
 	isRetryableStreamError,
@@ -222,6 +223,28 @@ describe("retryDelayMs", () => {
 		// Uncapped attempt count (see llm.ts's streamChat) — must still not
 		// blow past the 30s ceiling however high the attempt count climbs.
 		expect(retryDelayMs(10, err)).toBe(30_000);
+	});
+
+	describe("createClient", () => {
+		it("disables SDK-level retries so every retry goes through the abortable loop", () => {
+			const client = createClient({
+				baseURL: "http://localhost",
+				apiKey: "test",
+				contextWindow: 128_000,
+				maxResponseTokens: 8192,
+				compactionThreshold: 0.75,
+				maxToolOutputLines: 2000,
+				maxToolOutputBytes: 64 * 1024,
+				defaultBashTimeout: 120,
+				reasoningLevel: "off",
+				reasoningParams: { body: {} },
+				reasoningFormat: "none",
+			} as never);
+			// openai's own retry sleeps on a plain setTimeout the abort signal
+			// can't interrupt (v7 client.mjs retryRequest) — with it disabled, a
+			// 429's backoff can never hold the turn hostage from Esc.
+			expect(client.maxRetries).toBe(0);
+		});
 	});
 
 	describe("retry backoff is abortable", () => {

@@ -23,6 +23,13 @@ export function createClient(config: AppConfig, override?: { baseURL: string; ap
 		baseURL: override?.baseURL ?? config.baseURL,
 		apiKey: override?.apiKey ?? config.apiKey,
 		fetch: providerFetch,
+		// No SDK-level retries: its internal retry sleeps on a plain
+		// setTimeout that the abort signal can't interrupt (openai v7
+		// client.mjs retryRequest), so a 429 with a long retry-after would sit
+		// uninterruptible before streamChat's own abortable loop ever saw it.
+		// streamAndCollect/streamChat own all retrying — abortable, and shared
+		// by the main loop, compaction, and hooks.
+		maxRetries: 0,
 	});
 }
 
@@ -62,13 +69,14 @@ export interface StreamChunk {
 }
 
 // ============================================================================
-// Retry — the OpenAI SDK already retries 429/5xx/connection failures at the
-// initial-request level (before any bytes of the stream are read). What it
-// doesn't cover is a stream dying mid-flight (the provider or a proxy just
-// cuts the connection after some chunks already arrived). We only retry that
-// case if nothing has been yielded yet in the *current* attempt — once real
-// tokens have reached the caller (and likely been printed), restarting from
-// scratch would duplicate output, so a later failure is surfaced as-is.
+// Retry — all retrying lives here, in streamChat's own loop (the client is
+// created with maxRetries: 0 so the SDK's uninterruptible internal retry never
+// runs — see createClient). What the loop covers: 429/5xx/connection failures
+// at the initial-request level (before any bytes are read) AND a stream dying
+// mid-flight. We only retry the latter if nothing has been yielded yet in the
+// *current* attempt — once real tokens have reached the caller (and likely
+// been printed), restarting from scratch would duplicate output, so a later
+// failure is surfaced as-is.
 // ============================================================================
 
 // No cap on retry *count* for a genuinely transient error (rate limit, 5xx,
