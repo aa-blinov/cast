@@ -527,6 +527,10 @@ export interface WebBridge {
 	answerQuestion(sessionId: string, values: string[]): { ok: true } | { ok: false; error: string };
 	getPlanTransition(sessionId: string): { kind: "done" } | undefined;
 	resolvePlanTransition(sessionId: string, kind: "done"): { ok: true } | { ok: false; error: string };
+	/** Flip a session between plan/build mode. The TUI in daemon mode owns its
+	 * mode locally but the daemon caches the session it hydrates — without an
+	 * explicit sync the daemon would keep running the old mode. */
+	setSessionMode(sessionId: string, mode: "plan" | "build"): { ok: true } | { ok: false; error: string };
 	resetContext(sessionId: string): { ok: true; originalTask?: string } | { ok: false; error: string };
 	abort(sessionId: string): void;
 	subscribe(sessionId: string, callback: (event: WebEvent) => void): void;
@@ -1371,6 +1375,25 @@ export function createWebBridge(result: StartupResult): WebBridge {
 
 		resolvePlanQuestion(planState);
 		void submit(sessionId, rendered.join("\n"));
+		return { ok: true };
+	}
+
+	function setSessionMode(sessionId: string, mode: "plan" | "build"): { ok: true } | { ok: false; error: string } {
+		const ws = getSession(sessionId);
+		if (!ws) return { ok: false, error: "Session not found" };
+		if (ws.status === "running") return { ok: false, error: "Agent running" };
+		if (ws.session.mode === mode) return { ok: true };
+		ws.session.mode = mode;
+		// Mode is baked into the per-session system prompt (the plan-mode tool
+		// block) — rebuild it so the next turn advertises the right surface.
+		ws.systemPrompt = computeSystemPrompt(
+			resolvePersona(ws.session.persona ?? "") ?? currentPersona,
+			ws.session.model,
+			ws.session.cwd ?? cwd,
+			mode,
+		);
+		saveSession(ws.session);
+		broadcastSessionUpdate(ws);
 		return { ok: true };
 	}
 
@@ -3018,6 +3041,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		answerQuestion,
 		getPlanTransition,
 		resolvePlanTransition: resolvePersistedPlanTransition,
+		setSessionMode,
 		resetContext,
 		abort,
 		subscribe,

@@ -905,6 +905,23 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 		json(res, { ok: true }, 202);
 	});
 
+	route("POST", "/api/sessions/:id/mode", async (req, res, params) => {
+		const body = await readBody(req);
+		let mode: "plan" | "build";
+		try {
+			const parsed = JSON.parse(body) as { mode?: string };
+			if (parsed.mode !== "plan" && parsed.mode !== "build") {
+				return json(res, { error: 'Mode must be "plan" or "build"' }, 400);
+			}
+			mode = parsed.mode;
+		} catch {
+			return json(res, { error: "Invalid JSON" }, 400);
+		}
+		const result = bridge.setSessionMode(params.id, mode);
+		if (!result.ok) return json(res, { error: result.error }, result.error === "Agent running" ? 409 : 400);
+		json(res, { ok: true });
+	});
+
 	route("POST", "/api/sessions/:id/clean-context", (_req, res, params) => {
 		const result = bridge.resetContext(params.id);
 		if (!result.ok) return json(res, { error: result.error }, result.error === "Agent running" ? 409 : 400);

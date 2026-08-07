@@ -158,13 +158,18 @@ export function App(props: AppProps): JSX.Element {
 	// "build", the default. setPlanMode is the only setter handed out
 	// (commands, /new, /sessions), so persistence can't be bypassed.
 	const [planMode, setPlanModeState] = useState(() => session.mode === "plan");
+	// In daemon mode the daemon caches the hydrated session, so a mode flip
+	// saved locally would leave the daemon running the old mode. The ref is
+	// populated once `agent` (and its setMode) exists below.
+	const daemonModeSyncRef = useRef<(mode: "plan" | "build") => void>(() => {});
 	const setPlanMode = useCallback(
 		(v: boolean) => {
 			setPlanModeState(v);
 			session.mode = v ? "plan" : "build";
 			saveSession(session);
+			if (daemonUrl) daemonModeSyncRef.current(v ? "plan" : "build");
 		},
-		[session],
+		[session, daemonUrl],
 	);
 	const disabledTools = useMemo(() => {
 		const s = new Set<string>();
@@ -322,6 +327,9 @@ export function App(props: AppProps): JSX.Element {
 		daemonUrl,
 		daemonToken,
 	});
+	// Mode flips in daemon mode go over HTTP (setSessionMode on the daemon) —
+	// populate the ref setPlanMode reads after the agent hook exists.
+	daemonModeSyncRef.current = agent.setMode;
 	const running = agent.status === "running";
 	const canSubmit = useCallback(
 		(text: string) => {
