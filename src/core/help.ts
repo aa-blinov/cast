@@ -49,8 +49,10 @@ Options:
                              Worktree and branch are left on disk on exit —
                              remove with "git worktree remove" and
                              "git branch -D cast-<name>" when done.
-  --bypass-permissions       Skip confirmation for dangerous bash commands
-                             this run only — see /permissions to persist it
+  --bypass-permissions       Skip confirmation for destructive actions
+                             (dangerous bash commands and write/edit/patch
+                             tool calls) this run only — see /permissions
+                             to persist it
   --skill <path>             Load an extra skill file or directory
                              (repeatable, works even with --no-skills)
   --no-skills                Skip project/agents/global/plugin/builtin skill discovery
