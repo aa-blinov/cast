@@ -142,6 +142,25 @@ export function parseQuestionToolResult(content: string): PlanQuestion | undefin
 	return undefined;
 }
 
+/**
+ * Commit a turn-ending error to the transcript and clear the live sticky error.
+ * The loop fires `error` (which stashes the message) then `end` reason "error";
+ * the latter calls this. Without it a 4xx stayed in ChatLog's live region above
+ * the composer forever — it never entered the chronological history and never
+ * cleared (the local path only cleared on turn_end, which an error turn never
+ * reaches; the daemon SSE path never cleared at all).
+ */
+export function commitTurnError(
+	errorRef: { current: string | null },
+	setError: (value: string | null) => void,
+	setMessages: (updater: (msgs: ChatMessage[]) => ChatMessage[]) => void,
+): void {
+	const message = errorRef.current;
+	errorRef.current = null;
+	setError(null);
+	if (message) setMessages((msgs) => [...msgs, { role: "warning", content: `[${message}]` }]);
+}
+
 export interface UseAgentSession {
 	messages: ChatMessage[];
 	streaming: StreamingState | null;
@@ -428,6 +447,10 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	const [streaming, setStreaming] = useState<StreamingState | null>(null);
 	const [status, setStatus] = useState<AgentStatus>("idle");
 	const [error, setError] = useState<string | null>(null);
+	// Latest error message, held outside React state so the "end" event handler
+	// (a stale closure over `error`) can commit it to the transcript and clear
+	// the live sticky error — see commitTurnError.
+	const errorRef = useRef<string | null>(null);
 	const [retry, setRetry] = useState<RetryInfo | null>(null);
 	const [usage, setUsage] = useState<UseAgentSession["usage"]>(() => ({ ...session.usage }));
 	const [lastTurnUsage, setLastTurnUsage] = useState<UseAgentSession["lastTurnUsage"]>(null);
@@ -990,7 +1013,13 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 									setMessages((msgs) => [...msgs, { role: "warning", content: "[aborted]" }]);
 								} else if (event.reason === "disconnected") {
 									setMessages((msgs) => [...msgs, { role: "warning", content: "[terminated]" }]);
-								} else if (event.reason !== "stop" && event.reason !== "error") {
+								} else if (event.reason === "error") {
+									// Turn-level error: commit to the transcript (it belongs
+									// in the chronology, like [aborted]/[terminated]) and drop
+									// the live sticky error that would otherwise sit above the
+									// composer until the next successful turn_end.
+									commitTurnError(errorRef, setError, setMessages);
+								} else if (event.reason !== "stop") {
 									// "error" reason's own detailed message was already set by
 									// the "error" event that fires right before this one —
 									// setting it again here would clobber that with just the
@@ -1000,6 +1029,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 								}
 								break;
 							case "error":
+								errorRef.current = event.message;
 								setError(event.message);
 								break;
 						}
@@ -1007,7 +1037,10 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				});
 				session.messages = result;
 			} catch (err) {
-				setError(describeTurnError(err));
+				// No "end" event follows an unexpected throw from runAgentLoop — commit
+				// the error to the transcript directly so it doesn't stay stuck live.
+				errorRef.current = describeTurnError(err);
+				commitTurnError(errorRef, setError, setMessages);
 				setStatus("error");
 			} finally {
 				// Flush any trailing streamed content that never got a turn_end (e.g.
@@ -1176,16 +1209,25 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					updateStreaming(() => null, true);
 					setStreamingActive(false);
 					setStatus("idle");
+					// Daemon path never clears the live error on its own — a normal
+					// completion must drop any stale one (compaction-failed, etc.).
+					errorRef.current = null;
+					setError(null);
 					break;
 				case "end":
 					if (event.reason === "aborted") {
 						setLastTurnAborted(true);
 						setMessages((msgs) => [...msgs, { role: "warning", content: "[aborted]" }]);
-					} else if (event.reason !== "stop" && event.reason !== "error") {
+					} else if (event.reason === "error") {
+						// Turn-level error belongs in the transcript chronology, not as a
+						// live sticky above the composer that never clears.
+						commitTurnError(errorRef, setError, setMessages);
+					} else if (event.reason !== "stop") {
 						setError(event.reason);
 					}
 					break;
 				case "error":
+					errorRef.current = event.message;
 					setError(event.message);
 					break;
 				case "compaction":
