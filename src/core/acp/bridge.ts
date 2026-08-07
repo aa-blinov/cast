@@ -31,6 +31,9 @@ export interface AcpAdapterSession {
 	 * editor's running-cost indicator updates even when the current turn
 	 * hasn't finished and the next `usage` event is still pending. */
 	lastUsage: { used: number; size: number } | null;
+	/** Last `end` reason emitted by the loop (filled by translateEvent so the
+	 * bridge can return the correct ACP stopReason on the PromptResponse). */
+	lastEndReason: "stop" | "aborted" | "error" | "disconnected" | null;
 	/** Open documents shared by the editor via `document/didOpen`. The
 	 * contents are injected as a system-reminder block on every prompt so
 	 * the model can see what's currently in the editor's buffer without
@@ -169,6 +172,7 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 				planState,
 				totalCost: 0,
 				lastUsage: null,
+				lastEndReason: null,
 				openDocuments: new Map(),
 			};
 		},
@@ -192,6 +196,7 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 				planState,
 				totalCost: 0,
 				lastUsage: null,
+				lastEndReason: null,
 				openDocuments: new Map(),
 			};
 		},
@@ -292,8 +297,9 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 				return { stopReason: "end_turn" };
 			}
 			injectOpenDocumentsAsContext(session);
+			session.lastEndReason = null;
 			await runPromptInner(session, opts.permissionMode, message, client);
-			return { stopReason: "end_turn" };
+			return { stopReason: loopReasonToStopReason(session.lastEndReason) };
 		},
 
 		cancel: (session): void => {
@@ -599,9 +605,15 @@ export function translateEvent(
 			} as never);
 			return;
 		}
-		case "end":
+		case "end": {
+			// The AgentEvent union declares `reason: string` even though every
+			// site in loop.ts emits one of these four literals; cast through
+			// unknown to preserve the wider upstream type without forcing
+			// loop.ts to tighten its own union.
+			session.lastEndReason = event.reason as "stop" | "aborted" | "error" | "disconnected";
 			notify({ sessionUpdate: "session_end", reason: event.reason } as never);
 			return;
+		}
 		case "error":
 			notify({ sessionUpdate: "session_error", message: event.message } as never);
 			return;
@@ -776,6 +788,26 @@ function promptContentToText(content: Array<{ type: string; text?: string | null
 		if (part.type === "text" && part.text) parts.push(part.text);
 	}
 	return parts.join("\n");
+}
+
+/** Map the loop's internal `end` reason to the ACP `StopReason` union.
+ * `null` (no end event yet — mid-turn enqueue or loop exited cleanly
+ * without emitting `end`) defaults to `end_turn` since the bridge
+ * can't tell otherwise. */
+function loopReasonToStopReason(
+	reason: AcpAdapterSession["lastEndReason"],
+): "end_turn" | "max_tokens" | "max_turn_requests" | "refusal" | "cancelled" {
+	switch (reason) {
+		case "stop":
+			return "end_turn";
+		case "aborted":
+		case "disconnected":
+			return "cancelled";
+		case "error":
+			return "refusal";
+		default:
+			return "end_turn";
+	}
 }
 
 /**

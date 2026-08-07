@@ -89,7 +89,16 @@ function makeSession(opts?: { mode?: "plan" | "build" }) {
 	} as any;
 	const planState = { enabled: false } as any;
 	return {
-		session: { state: session, startup, runner, planState, totalCost: 0, lastUsage: null, openDocuments: new Map() },
+		session: {
+			state: session,
+			startup,
+			runner,
+			planState,
+			totalCost: 0,
+			lastUsage: null,
+			lastEndReason: null,
+			openDocuments: new Map(),
+		},
 		runner,
 	};
 }
@@ -694,6 +703,121 @@ describe("JSON-RPC error surface", () => {
 		(loadSession as any).mockReturnValue(null);
 		const result = localAdapter.loadSession("nonexistent", {} as any, {} as any, localClient as any);
 		expect(result).toBeNull();
+	});
+});
+
+describe("StopReason translation", () => {
+	it("returns end_turn when loop emits `stop`", async () => {
+		const localAdapter = createAcpAdapter({ version: "test", permissionMode: "bypass" });
+		const mockClient = { notify: vi.fn(async () => {}), request: vi.fn(async () => ({})) };
+		const { session } = makeSession();
+		runAgentLoopSpy.mockImplementationOnce(async (msgs: unknown) => {
+			// Simulate the loop emitting an end event before returning.
+			await new Promise<void>((r) => setImmediate(r));
+			const mockEvent = { type: "end", reason: "stop" };
+			translateEvent(mockEvent as never, mockClient as never, session);
+			return msgs;
+		});
+		const result = await localAdapter.submitPrompt(
+			"sid",
+			[{ type: "text", text: "go" }],
+			session,
+			mockClient as any,
+			{ version: "test", permissionMode: "bypass" },
+		);
+		expect(result.stopReason).toBe("end_turn");
+	});
+
+	it("returns cancelled when loop emits `aborted`", async () => {
+		const localAdapter = createAcpAdapter({ version: "test", permissionMode: "bypass" });
+		const mockClient = { notify: vi.fn(async () => {}), request: vi.fn(async () => ({})) };
+		const { session } = makeSession();
+		runAgentLoopSpy.mockImplementationOnce(async (msgs: unknown) => {
+			translateEvent({ type: "end", reason: "aborted" } as never, mockClient as never, session);
+			return msgs;
+		});
+		const result = await localAdapter.submitPrompt(
+			"sid",
+			[{ type: "text", text: "go" }],
+			session,
+			mockClient as any,
+			{ version: "test", permissionMode: "bypass" },
+		);
+		expect(result.stopReason).toBe("cancelled");
+	});
+
+	it("returns cancelled when loop emits `disconnected`", async () => {
+		const localAdapter = createAcpAdapter({ version: "test", permissionMode: "bypass" });
+		const mockClient = { notify: vi.fn(async () => {}), request: vi.fn(async () => ({})) };
+		const { session } = makeSession();
+		runAgentLoopSpy.mockImplementationOnce(async (msgs: unknown) => {
+			translateEvent({ type: "end", reason: "disconnected" } as never, mockClient as never, session);
+			return msgs;
+		});
+		const result = await localAdapter.submitPrompt(
+			"sid",
+			[{ type: "text", text: "go" }],
+			session,
+			mockClient as any,
+			{ version: "test", permissionMode: "bypass" },
+		);
+		expect(result.stopReason).toBe("cancelled");
+	});
+
+	it("returns refusal when loop emits `error`", async () => {
+		const localAdapter = createAcpAdapter({ version: "test", permissionMode: "bypass" });
+		const mockClient = { notify: vi.fn(async () => {}), request: vi.fn(async () => ({})) };
+		const { session } = makeSession();
+		runAgentLoopSpy.mockImplementationOnce(async (msgs: unknown) => {
+			translateEvent({ type: "end", reason: "error" } as never, mockClient as never, session);
+			return msgs;
+		});
+		const result = await localAdapter.submitPrompt(
+			"sid",
+			[{ type: "text", text: "go" }],
+			session,
+			mockClient as any,
+			{ version: "test", permissionMode: "bypass" },
+		);
+		expect(result.stopReason).toBe("refusal");
+	});
+
+	it("returns end_turn when no end event was emitted", async () => {
+		const localAdapter = createAcpAdapter({ version: "test", permissionMode: "bypass" });
+		const mockClient = { notify: vi.fn(async () => {}), request: vi.fn(async () => ({})) };
+		const { session } = makeSession();
+		runAgentLoopSpy.mockResolvedValueOnce([] as never);
+		const result = await localAdapter.submitPrompt(
+			"sid",
+			[{ type: "text", text: "go" }],
+			session,
+			mockClient as any,
+			{ version: "test", permissionMode: "bypass" },
+		);
+		expect(result.stopReason).toBe("end_turn");
+	});
+
+	it("resets lastEndReason at the start of each prompt", async () => {
+		const localAdapter = createAcpAdapter({ version: "test", permissionMode: "bypass" });
+		const mockClient = { notify: vi.fn(async () => {}), request: vi.fn(async () => ({})) };
+		const { session } = makeSession();
+		runAgentLoopSpy.mockImplementationOnce(async (msgs: unknown) => {
+			translateEvent({ type: "end", reason: "error" } as never, mockClient as never, session);
+			return msgs;
+		});
+		// First prompt: ends with error → refusal
+		const r1 = await localAdapter.submitPrompt("sid", [{ type: "text", text: "a" }], session, mockClient as any, {
+			version: "test",
+			permissionMode: "bypass",
+		});
+		expect(r1.stopReason).toBe("refusal");
+		// Second prompt: emits no end event — should reset, not carry over refusal
+		runAgentLoopSpy.mockResolvedValueOnce([] as never);
+		const r2 = await localAdapter.submitPrompt("sid", [{ type: "text", text: "b" }], session, mockClient as any, {
+			version: "test",
+			permissionMode: "bypass",
+		});
+		expect(r2.stopReason).toBe("end_turn");
 	});
 });
 
