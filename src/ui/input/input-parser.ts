@@ -12,7 +12,7 @@ import { decodePrintableKey, setKittyProtocolActive } from "./keys.ts";
 import { StdinBuffer } from "./stdin-buffer.ts";
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence
-const CURSOR_POS_RE = /^\x1b\[\d+;\d+R$/;
+const CURSOR_POS_RE = /^\x1b\[(\d+);(\d+)R$/;
 // A DECXCPR response that lost its \x1b[ prefix — the tty echoes the response
 // as raw bytes while stdin isn't in raw mode, and a split read can hand the
 // buffer just the `<row>;<col>R` tail (possibly several concatenated). Never
@@ -51,12 +51,18 @@ export class InputParser {
 	private externalBuffer: StdinBuffer | undefined;
 	private buffer: StdinBuffer;
 	private emit: (event: InputEvent) => void;
+	private onCursorPosition: ((row: number, col: number) => void) | undefined;
 	private keybindings = getKeybindings();
 
-	constructor(onEvent: (event: InputEvent) => void, buffer?: StdinBuffer) {
+	constructor(
+		onEvent: (event: InputEvent) => void,
+		buffer?: StdinBuffer,
+		onCursorPosition?: (row: number, col: number) => void,
+	) {
 		this.emit = onEvent;
 		this.externalBuffer = buffer;
 		this.buffer = buffer ?? new StdinBuffer();
+		this.onCursorPosition = onCursorPosition;
 
 		this.buffer.on("data", (sequence: string) => {
 			this.handleSequence(sequence);
@@ -75,12 +81,13 @@ export class InputParser {
 		}
 
 		// DECXCPR cursor-position response (\x1b[row;colR), emitted by the
-		// terminal in reply to useTerminalResync's periodic \x1b[6n query. The
-		// poll's own stdin listener processes it independently, but the same
-		// chunk reaches the Composer's StdinBuffer too. StdinBuffer correctly
-		// parses it as a complete CSI sequence (R is in 0x40..0x7e); this
-		// explicit drop makes the intent clear and prevents a future keybinding
-		if (CURSOR_POS_RE.test(sequence)) {
+		// terminal in reply to useTerminalResync's periodic \x1b[6n query. It
+		// reaches this parser through the Composer's StdinBuffer (never a
+		// separate stdin listener — that used to swallow keystrokes). Drop it
+		// from input and report the coordinates to the resync listener.
+		const match = CURSOR_POS_RE.exec(sequence);
+		if (match) {
+			this.onCursorPosition?.(Number(match[1]), Number(match[2]));
 			return;
 		}
 

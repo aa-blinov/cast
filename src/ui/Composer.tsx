@@ -1,7 +1,13 @@
 import { Box, Text, useStdin } from "ink";
 import { type JSX, useEffect, useMemo, useRef, useState } from "react";
 import type { Skill } from "../core/skills.ts";
-import { registerStdinOwner, type StdinOwner, setRawModeActive, unregisterStdinOwner } from "../core/stdin-manager.ts";
+import {
+	registerStdinOwner,
+	reportDecxpr,
+	type StdinOwner,
+	setRawModeActive,
+	unregisterStdinOwner,
+} from "../core/stdin-manager.ts";
 import { SLASH_COMMANDS } from "./commands.ts";
 import { type InputEvent, InputParser } from "./input/input-parser.ts";
 import { StdinBuffer } from "./input/stdin-buffer.ts";
@@ -481,7 +487,11 @@ export function Composer({
 		// sequence buffering. The InputParser receives only "data"
 		// events (individual key sequences); "paste" events bypass it.
 		const stdinBuf = new StdinBuffer();
-		const parser = new InputParser((event: InputEvent) => handleEventRef.current(event), stdinBuf);
+		const parser = new InputParser(
+			(event: InputEvent) => handleEventRef.current(event),
+			stdinBuf,
+			(row, col) => reportDecxpr(row, col),
+		);
 		parserRef.current = parser;
 
 		stdinBuf.on("paste", (text: string) => handlePasteContent(text));
