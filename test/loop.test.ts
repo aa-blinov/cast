@@ -33,7 +33,9 @@ vi.mock("../src/core/llm.ts", async (importOriginal) => {
 	};
 });
 
-const { runAgentLoop, MessageQueue, compactSessionMessages } = await import("../src/core/loop.ts");
+const { runAgentLoop, MessageQueue, compactSessionMessages, waitForToolBatch, TOOL_ABORT_GRACE_MS } = await import(
+	"../src/core/loop.ts"
+);
 const { streamAndCollect } = await import("../src/core/llm.ts");
 type AgentEvent = Parameters<Parameters<typeof runAgentLoop>[1]["onEvent"]>[0];
 
@@ -3582,5 +3584,68 @@ describe("gateDestructiveWrite", () => {
 		const confirm = vi.fn(async () => true);
 		await gateDestructiveWrite("write", {}, confirm);
 		expect(confirm).toHaveBeenCalledWith("write", expect.stringContaining("write"), expect.any(String));
+	});
+});
+
+describe("waitForToolBatch", () => {
+	type R = { id: string; name: string; result: { content: string; isError?: boolean } };
+	function tool(id: string, content: string): Promise<R> {
+		return Promise.resolve({ id, name: id, result: { content } }).then((r) => {
+			settled.set(id, r);
+			return r;
+		});
+	}
+	let settled: Map<string, R>;
+
+	beforeEach(() => {
+		settled = new Map();
+	});
+
+	it("resolves with every real result when all tools settle normally", async () => {
+		const prepared = [
+			{ id: "a", name: "a" },
+			{ id: "b", name: "b" },
+		];
+		const results = await waitForToolBatch([tool("a", "A"), tool("b", "B")], prepared, settled, undefined);
+		expect(results.map((r) => r.result.content)).toEqual(["A", "B"]);
+	});
+
+	it("force-closes the batch after the grace period when a tool ignores the abort signal", async () => {
+		vi.useFakeTimers();
+		try {
+			const ac = new AbortController();
+			const prepared = [
+				{ id: "a", name: "a" },
+				{ id: "b", name: "b" },
+			];
+			// "a" settles normally; "b" hangs forever and ignores the signal.
+			const hung = new Promise<R>(() => {});
+			const batch = waitForToolBatch([tool("a", "A"), hung], prepared, settled, ac.signal);
+
+			ac.abort();
+			await vi.advanceTimersByTimeAsync(TOOL_ABORT_GRACE_MS);
+
+			const results = await batch;
+			expect(results[0]?.result.content).toBe("A");
+			expect(results[1]?.result.isError).toBe(true);
+			expect(results[1]?.result.content).toContain("ABORTED");
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("bails out immediately (no grace) when every tool already settled after the abort", async () => {
+		vi.useFakeTimers();
+		try {
+			const ac = new AbortController();
+			const prepared = [{ id: "a", name: "a" }];
+			ac.abort();
+			const batch = waitForToolBatch([tool("a", "A")], prepared, settled, ac.signal);
+			// No timers to advance — the already-settled promise resolves it.
+			const results = await batch;
+			expect(results[0]?.result.content).toBe("A");
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });
