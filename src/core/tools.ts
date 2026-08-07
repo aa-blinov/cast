@@ -26,7 +26,7 @@ import { execWebFetch, execWebSearch } from "./tools/web.ts";
 export type { BashBackgroundDeps } from "./tools/bash-background.ts";
 // Re-export the public tool types so existing importers of "./tools.ts"
 // (loop.ts, mcp.ts, tests) keep working after the split into tools/*.
-export type { ConfirmBash, ToolExecutor, ToolResult } from "./tools/shared.ts";
+export type { ConfirmBash, ConfirmWrite, ToolExecutor, ToolResult } from "./tools/shared.ts";
 export type { TaskExecutorDeps } from "./tools/task.ts";
 
 // ============================================================================

@@ -36,6 +36,10 @@ export type ToolExecutor = (name: string, args: Record<string, unknown>, signal?
 /** Asked before running a bash command that matches a known-dangerous pattern. Return false to block it. */
 export type ConfirmBash = (command: string, reason: string) => Promise<boolean>;
 
+/** Asked before running a destructive file operation (write/edit/patch, plus MCP
+ * tools whose name starts with `mcp__`). Return false to block it. */
+export type ConfirmWrite = (tool: string, path: string, reason: string) => Promise<boolean>;
+
 /** Resolve a possibly-relative tool path argument against the agent's cwd. */
 export function resolvePath(path: string, cwd: string): string {
 	if (isAbsolute(path)) return path;

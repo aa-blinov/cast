@@ -39,6 +39,7 @@ import { type CompletedToolCallStatus, completedToolCallStatus } from "./tools/s
 import {
 	type BashBackgroundDeps,
 	type ConfirmBash,
+	type ConfirmWrite,
 	createToolExecutor,
 	getToolDefinitions,
 	type ToolResult,
@@ -201,6 +202,46 @@ function unknownToolResult(name: string, available: string[]): ToolResult {
 	const hint = suggestion ? ` Did you mean "${suggestion}"?` : "";
 	return {
 		content: `Unknown tool "${name}".${hint} Available tools: ${available.join(", ")}. Call one of these — do not retry "${name}".`,
+		isError: true,
+	};
+}
+
+/** Tools whose effect is to create, overwrite, or patch a file. MCP tools
+ * follow the same rule — anything starting with `mcp__` is treated as
+ * potentially destructive because we have no signal otherwise. */
+const DESTRUCTIVE_WRITE_TOOLS = new Set(["write", "edit", "patch", "apply_patch", "create_file"]);
+
+/** Pick the path-shaped arg from a tool call. Different tools use different
+ * keys (`path`, `file_path`, `target_path`) — try the obvious ones. */
+function extractWritePath(name: string, args: Record<string, unknown>): string {
+	const a = args as Record<string, unknown>;
+	return (
+		(typeof a.path === "string" && a.path) ||
+		(typeof a.file_path === "string" && a.file_path) ||
+		(typeof a.target_path === "string" && a.target_path) ||
+		(typeof a.filepath === "string" && a.filepath) ||
+		`${name} (no path arg)`
+	);
+}
+
+/** Gate destructive file operations on a `ConfirmWrite` callback. Returns a
+ * denial `ToolResult` when the user says no; `undefined` when the tool is
+ * not destructive or the callback is unset / grants. The callback runs in the
+ * same pass as tool dispatch, so an editor UI sees every write attempt in
+ * real time and can deny/allow per call. */
+export async function gateDestructiveWrite(
+	name: string,
+	args: Record<string, unknown>,
+	confirm: ConfirmWrite | undefined,
+): Promise<ToolResult | undefined> {
+	const isDestructive = DESTRUCTIVE_WRITE_TOOLS.has(name) || name.startsWith("mcp__");
+	if (!isDestructive || !confirm) return undefined;
+	const path = extractWritePath(name, args);
+	const reason = `write to ${path}`;
+	const granted = await confirm(name, path, reason);
+	if (granted) return undefined;
+	return {
+		content: `Permission denied: ${name} ${reason}`,
 		isError: true,
 	};
 }
@@ -506,6 +547,10 @@ export interface LoopConfig {
 	steeringQueue?: MessageQueue;
 	followUpQueue?: MessageQueue;
 	confirmBash?: ConfirmBash;
+	/** Optional permission gate for destructive file tools (write/edit/patch and
+	 * MCP tools prefixed `mcp__`). When unset, no extra confirmation fires —
+	 * matches TUI behavior, where only bash needs confirmation. */
+	confirmWrite?: ConfirmWrite;
 	/** Definitions for connected MCP servers' tools, appended to the built-in ones. */
 	mcpTools?: Tool[];
 	/** Dispatch table for mcpTools — checked before falling back to the built-in executor. */
@@ -985,6 +1030,8 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		}
 		const mcpTool = mcpToolIndex?.get(name);
 		if (mcpTool) return mcpTool.call(args, toolSignal);
+		const writeDenial = await gateDestructiveWrite(name, args, loopConfig.confirmWrite);
+		if (writeDenial) return writeDenial;
 		return builtinExecuteTool(name, args, toolSignal);
 	};
 	const client = createClient(config, loopConfig.modelProvider);
