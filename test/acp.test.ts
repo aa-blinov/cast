@@ -875,6 +875,39 @@ describe("UX polish", () => {
 		expect(update.update.content).toEqual([{ type: "text", text: "hello" }]);
 	});
 
+	it("tool_end success with imageDataUrl emits text + image chunks", () => {
+		const mockClient = { notify: vi.fn(async () => {}) };
+		const s = makeSession().session;
+		const imageDataUrl = "data:image/png;base64,iVBORw0KGgo=";
+		translateEvent(
+			{
+				type: "tool_end",
+				id: "c1",
+				result: { isError: false, content: "PNG image 2x2", imageDataUrl },
+			} as any,
+			mockClient as any,
+			s,
+		);
+		const update = (mockClient.notify.mock.calls[0] as unknown[])[1] as any;
+		expect(update.update.content).toEqual([
+			{ type: "text", text: "PNG image 2x2" },
+			{ type: "image", image_url: { url: imageDataUrl } },
+		]);
+	});
+
+	it("tool_end failure does not emit content chunks", () => {
+		const mockClient = { notify: vi.fn(async () => {}) };
+		const s = makeSession().session;
+		translateEvent(
+			{ type: "tool_end", id: "c1", result: { isError: true, content: "fail" } } as any,
+			mockClient as any,
+			s,
+		);
+		const update = (mockClient.notify.mock.calls[0] as unknown[])[1] as any;
+		expect(update.update.content).toBeUndefined();
+		expect(update.update.error).toBe("fail");
+	});
+
 	it("setSessionMode emits current_mode_update on transition", async () => {
 		const localAdapter = createAcpAdapter({ version: "test", permissionMode: "default" });
 		const mockClient = { notify: vi.fn(async () => {}) };

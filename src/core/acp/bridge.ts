@@ -577,10 +577,17 @@ export function translateEvent(
 				payload.error = event.result.content;
 			} else {
 				// ACP v1 ContentChunk — the editor renders each chunk as a
-				// node in the tool result. Cast's loop returns a single text
-				// blob for now; future tool results with image content
-				// (vision-capable tools) would emit multiple chunks here.
-				payload.content = [{ type: "text", text: event.result.content }];
+				// node in the tool result. Cast's `read` tool returns
+				// `imageDataUrl` for image files; surface that as an image
+				// chunk alongside the text so vision-capable editors (and
+				// future image-aware LLM clients) see the rendered image.
+				const chunks: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
+					{ type: "text", text: event.result.content },
+				];
+				if (event.result.imageDataUrl) {
+					chunks.push({ type: "image", image_url: { url: event.result.imageDataUrl } });
+				}
+				payload.content = chunks;
 			}
 			client.notify("session/update", { sessionId: session.state.id, update: payload }).catch(() => {});
 			return;
