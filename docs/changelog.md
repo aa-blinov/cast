@@ -2,6 +2,16 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.2
+
+### Fixed
+
+- **DECXCPR scroll-poll responses no longer leak into the composer.** The terminal's cursor-position replies (echoed while stdin drops out of raw mode, e.g. during a bash tool) used to land as visible garbage like `^[[67;1R` or `68;1R` in the input buffer. In-flight queries are now cancelled the moment the terminal suspends, and stray response remnants are dropped defensively.
+
+### Internal
+
+- `turn-runner-state` tests now write their sentinel files behind a fake HOME, so a killed test run can never pollute the real `~/.cast/sessions/`.
+
 ## 0.13.1
 
 ### Fixed
