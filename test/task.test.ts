@@ -1,7 +1,28 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
+import { resetDbConnectionForTests } from "../src/core/db.ts";
 import { EMPTY_ASSISTANT_PLACEHOLDER, type Message } from "../src/core/llm.ts";
 import { execTask, extractTaskResult } from "../src/core/tools/task.ts";
+
+// execTask can persist subagent runs (saveSubagentRun) — keep that on a
+// throwaway DB so a real sessions.db is never written during tests.
+let fakeDb: string;
+let realDb: string | undefined;
+beforeEach(() => {
+	realDb = process.env.CAST_SESSIONS_DB;
+	fakeDb = join(mkdtempSync(join(tmpdir(), "cast-task-test-")), "sessions.db");
+	process.env.CAST_SESSIONS_DB = fakeDb;
+	resetDbConnectionForTests();
+});
+afterEach(() => {
+	if (realDb === undefined) delete process.env.CAST_SESSIONS_DB;
+	else process.env.CAST_SESSIONS_DB = realDb;
+	resetDbConnectionForTests();
+	rmSync(join(fakeDb, ".."), { recursive: true, force: true });
+});
 
 const testConfig = {
 	baseURL: "http://localhost",
