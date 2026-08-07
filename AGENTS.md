@@ -22,7 +22,8 @@
 The npm package is `cast`, but source lives directly under `src/` (no wrapping `cast/` dir).
 
 **Source code** — always `src/`:
-- `src/core/` — engine (no UI): loop, tools, LLM, session, config, MCP, skills, personas
+- `src/core/` — engine (no UI): loop, tools, LLM, session, config, MCP, skills, personas, **ACP**
+- `src/core/acp/` — JSON-RPC 2.0 bridge on `@agentclientprotocol/sdk` (typed factory + cast adapter); reuses `runAgentLoop` and `AgentRunner` unchanged — the bridge translates `AgentEvent` into SDK `sessionUpdate` notifications. See `docs/acp.md`.
 - `src/ui/` — Ink TUI: App, ChatLog, Composer, commands, input handling
 - `src/web/` — optional web server, REST/SSE bridge, and browser client
 - `src/pickers/` — onboarding pickers (model/persona/reasoning selection)
