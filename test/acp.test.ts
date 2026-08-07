@@ -603,4 +603,30 @@ describe("Permission flow", () => {
 		const result = await requestPermissionViaBridge(client, "ls", "read");
 		expect(result).toBe(true);
 	});
+
+	it("write permission sends kind: edit and includes rawInput.path", async () => {
+		const { requestWritePermissionViaBridge } = await import("../src/core/acp/bridge.ts");
+		const client = { request: vi.fn(async () => ({ outcome: { outcome: "selected", optionId: "allow_once" } })) };
+		await requestWritePermissionViaBridge(client, "write", "/etc/hosts", "write to /etc/hosts");
+		const call = client.request.mock.calls[0];
+		expect(call[0]).toBe("session/request_permission");
+		const params = call[1] as { toolCall: { kind: string; rawInput: { path: string } } };
+		expect(params.toolCall.kind).toBe("edit");
+		expect(params.toolCall.rawInput.path).toBe("/etc/hosts");
+	});
+
+	it("write permission deny returns false", async () => {
+		const { requestWritePermissionViaBridge } = await import("../src/core/acp/bridge.ts");
+		const client = { request: vi.fn(async () => ({ outcome: { outcome: "selected", optionId: "reject_once" } })) };
+		const result = await requestWritePermissionViaBridge(client, "edit", "/etc/passwd", "write to /etc/passwd");
+		expect(result).toBe(false);
+	});
+
+	it("write permission shares always memo with bash", async () => {
+		const { requestWritePermissionViaBridge } = await import("../src/core/acp/bridge.ts");
+		const client = { request: vi.fn(async () => ({ outcome: { outcome: "selected", optionId: "allow_always" } })) };
+		await requestWritePermissionViaBridge(client, "write", "/tmp/a", "write to /tmp/a");
+		await requestWritePermissionViaBridge(client, "write", "/tmp/a", "write to /tmp/a");
+		expect(client.request).toHaveBeenCalledOnce();
+	});
 });

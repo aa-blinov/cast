@@ -3536,3 +3536,51 @@ describe("runAgentLoop — todo list (build mode only)", () => {
 		expect(sawAnyNudge).toBe(false);
 	});
 });
+
+describe("gateDestructiveWrite", () => {
+	it("returns undefined when no confirm callback is set", async () => {
+		const { gateDestructiveWrite } = await import("../src/core/loop.ts");
+		const result = await gateDestructiveWrite("write", { path: "/tmp/a" }, undefined);
+		expect(result).toBeUndefined();
+	});
+
+	it("returns undefined for read with no gate even when confirm denies", async () => {
+		const { gateDestructiveWrite } = await import("../src/core/loop.ts");
+		const confirm = vi.fn(async () => false);
+		const result = await gateDestructiveWrite("read", { path: "/tmp/a" }, confirm);
+		expect(result).toBeUndefined();
+		expect(confirm).not.toHaveBeenCalled();
+	});
+
+	it("invokes confirm for write and returns undefined on grant", async () => {
+		const { gateDestructiveWrite } = await import("../src/core/loop.ts");
+		const confirm = vi.fn(async () => true);
+		const result = await gateDestructiveWrite("write", { path: "/tmp/a", content: "x" }, confirm);
+		expect(confirm).toHaveBeenCalledWith("write", "/tmp/a", expect.stringContaining("/tmp/a"));
+		expect(result).toBeUndefined();
+	});
+
+	it("invokes confirm for edit and returns denial on reject", async () => {
+		const { gateDestructiveWrite } = await import("../src/core/loop.ts");
+		const confirm = vi.fn(async () => false);
+		const result = await gateDestructiveWrite("edit", { path: "/etc/hosts" }, confirm);
+		expect(result).toBeDefined();
+		expect(result?.isError).toBe(true);
+		expect(result?.content).toContain("Permission denied");
+	});
+
+	it("treats MCP tools as destructive", async () => {
+		const { gateDestructiveWrite } = await import("../src/core/loop.ts");
+		const confirm = vi.fn(async () => false);
+		const result = await gateDestructiveWrite("mcp__fs__write", { path: "/etc/passwd" }, confirm);
+		expect(confirm).toHaveBeenCalled();
+		expect(result?.isError).toBe(true);
+	});
+
+	it("uses fallback path label when no path arg is present", async () => {
+		const { gateDestructiveWrite } = await import("../src/core/loop.ts");
+		const confirm = vi.fn(async () => true);
+		await gateDestructiveWrite("write", {}, confirm);
+		expect(confirm).toHaveBeenCalledWith("write", expect.stringContaining("write"), expect.any(String));
+	});
+});

@@ -283,6 +283,11 @@ async function runPromptInner(
 				permissionMode === "bypass"
 					? undefined
 					: (command: string, reason: string) => requestPermissionViaBridge(client, command, reason),
+			confirmWrite:
+				permissionMode === "bypass"
+					? undefined
+					: (tool: string, path: string, reason: string) =>
+							requestWritePermissionViaBridge(client, tool, path, reason),
 			mcpTools: startup.mcpResult.toolDefinitions,
 			mcpToolIndex: startup.mcpResult.toolIndex,
 			hooks: startup.hooks,
@@ -368,6 +373,59 @@ const alwaysVerdict = new WeakMap<
 	{ request(method: string, params: unknown): Promise<unknown> },
 	Map<string, boolean>
 >();
+
+/** Permission flow for destructive file tools. Same shape as the bash flow:
+ *  emit a typed `session/request_permission` request with four options and a
+ *  60 s timeout, then interpret the verdict. We share the
+ *  `alwaysVerdict` memo across bash and write decisions — anything the user
+ *  said "always" to applies for the rest of the session. */
+export async function requestWritePermissionViaBridge(
+	client: { request(method: string, params: unknown): Promise<unknown> },
+	tool: string,
+	path: string,
+	reason: string,
+): Promise<boolean> {
+	const memo = alwaysVerdict.get(client);
+	if (memo) {
+		const verdict = memo.get(`${tool}\u0000${path}\u0000${reason}`);
+		if (verdict !== undefined) return verdict;
+	}
+	const requestId = `perm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+	const TIMEOUT_MS = 60_000;
+	try {
+		const outcome: unknown = await Promise.race([
+			client.request("session/request_permission", {
+				toolCall: {
+					toolCallId: requestId,
+					title: tool,
+					kind: "edit",
+					status: "pending",
+					rawInput: { path },
+				},
+				options: [
+					{ kind: "allow_once", name: "Allow once", optionId: "allow_once" },
+					{ kind: "allow_always", name: "Allow for this session", optionId: "allow_always" },
+					{ kind: "reject_once", name: "Reject", optionId: "reject_once" },
+					{ kind: "reject_always", name: "Reject for this session", optionId: "reject_always" },
+				],
+			}),
+			new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), TIMEOUT_MS)),
+		]);
+		if (outcome === "timeout") return false;
+		const response = outcome as { outcome: { outcome: string; optionId?: string } };
+		if (response.outcome.outcome !== "selected") return false;
+		const opt = response.outcome.optionId;
+		const granted = opt === "allow_once" || opt === "allow_always";
+		if (opt === "allow_always" || opt === "reject_always") {
+			const store = alwaysVerdict.get(client) ?? new Map<string, boolean>();
+			store.set(`${tool}\u0000${path}\u0000${reason}`, granted);
+			alwaysVerdict.set(client, store);
+		}
+		return granted;
+	} catch {
+		return false;
+	}
+}
 
 // ---------------------------------------------------------------------------
 // Event translation
