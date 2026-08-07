@@ -30,6 +30,20 @@ export async function resolveConnection(
 	let baseURL = settings.providerUrl;
 	let apiKey = settings.apiKey;
 
+	// `modelProvider` (and the matching `subagentModelProvider` /
+	// `planModelProvider`) name a row in `settings.providers[]`. If the
+	// caller has set one of those names, prefer the row's credentials
+	// over the legacy top-level `providerUrl`/`apiKey` — otherwise
+	// `modelProvider: "eora-opencode"` in settings.json looks like it
+	// does something but is silently ignored.
+	const named = settings.modelProvider
+		? settings.providers?.find((p) => p.name === settings.modelProvider)
+		: undefined;
+	if (named) {
+		baseURL = named.url;
+		apiKey = named.apiKey;
+	}
+
 	if (!baseURL || !apiKey) {
 		pickers.log(
 			"No provider configured yet — any OpenAI-compatible endpoint works\n(OpenRouter, OpenAI, Ollama, vLLM, LiteLLM, etc). Saved for next time.",
