@@ -1838,14 +1838,11 @@ async function executeToolCalls(
 	// setMaxListeners(100, signal) is already called once in runLoop — no need
 	// to raise it per-batch (and doing so with a small batch would *lower* it).
 
-	const results = await Promise.all(
-		prepared.map(async (tc): Promise<ToolCallResult> => {
+	const settled = new Map<string, ToolCallResult>();
+	const toolPromises = prepared.map(async (tc): Promise<ToolCallResult> => {
+		const runOne = async (): Promise<ToolCallResult> => {
 			if (signal?.aborted) {
-				return {
-					id: tc.id,
-					name: tc.name,
-					result: { content: "[ABORTED] Tool execution was cancelled.", isError: true },
-				};
+				return abortedToolResult(tc);
 			}
 
 			// Truncated/malformed arguments — return an error so the model can retry.
@@ -1880,14 +1877,81 @@ async function executeToolCalls(
 			}
 
 			return { id: tc.id, name: tc.name, result };
-		}),
-	);
+		};
+
+		const result = await runOne();
+		settled.set(tc.id, result);
+		return result;
+	});
+
+	// Abort must always end the turn: cooperating tools (bash/web/ssh) kill
+	// themselves on the signal and settle within a few hundred ms, but a tool
+	// that ignores it (a hung MCP server, a stalled remote transport) would
+	// otherwise keep Promise.all — and with it the whole turn — open
+	// indefinitely. Bound the wait: grace for the stragglers, then force the
+	// batch closed with ABORTED results for anything still running.
+	const results = await waitForToolBatch(toolPromises, prepared, settled, signal);
 
 	for (const { id, name, result } of results) {
 		onEvent({ type: "tool_end", id, name, result, status: completedToolCallStatus(result.isError) });
 	}
 
 	return results;
+}
+
+function abortedToolResult(tc: { id: string; name: string }): ToolCallResult {
+	return {
+		id: tc.id,
+		name: tc.name,
+		result: { content: "[ABORTED] Tool execution was cancelled.", isError: true },
+	};
+}
+
+/** How long after an abort the tool batch waits for stragglers to settle
+ * before being forced closed (see waitForToolBatch). */
+export const TOOL_ABORT_GRACE_MS = 2000;
+
+/**
+ * Await a parallel tool batch, bounded by the abort signal. Signal-cooperating
+ * tools (bash, web, ssh, task) resolve within a few hundred ms of the signal;
+ * a tool that ignores it (a hung MCP server) would otherwise keep the caller
+ * waiting forever. Once the signal fires, wait GRACE for the stragglers, then
+ * resolve with ABORTED results for anything still in flight — the turn can
+ * always end.
+ */
+export async function waitForToolBatch<T extends { id: string; name: string }>(
+	toolPromises: Promise<ToolCallResult>[],
+	prepared: T[],
+	settled: Map<string, ToolCallResult>,
+	signal: AbortSignal | undefined,
+): Promise<ToolCallResult[]> {
+	if (!signal) return Promise.all(toolPromises);
+
+	return new Promise<ToolCallResult[]>((resolve) => {
+		let done = false;
+		const finish = () => {
+			if (done) return;
+			done = true;
+			// Real results for tools that settled (in prepared order); ABORTED
+			// placeholders for anything the grace caught still running.
+			resolve(prepared.map((tc) => settled.get(tc.id) ?? abortedToolResult(tc)));
+		};
+		// Normal completion — every tool settled, all results already in the map.
+		void Promise.all(toolPromises).then(finish);
+		if (signal.aborted) {
+			// Not unref'd: even with a straggler that holds no I/O, the turn
+			// must resolve so the UI lands on "aborted" and the session saves.
+			setTimeout(finish, TOOL_ABORT_GRACE_MS);
+		} else {
+			signal.addEventListener(
+				"abort",
+				() => {
+					setTimeout(finish, TOOL_ABORT_GRACE_MS);
+				},
+				{ once: true },
+			);
+		}
+	});
 }
 
 // ============================================================================
