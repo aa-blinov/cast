@@ -3,6 +3,7 @@ import { openSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { runAcpAgent } from "./core/acp/agent.ts";
 import { printHelp } from "./core/help.ts";
 import { runInteractive, runNonInteractive } from "./core/run.ts";
 import { loadSettings } from "./core/settings.ts";
@@ -43,6 +44,11 @@ async function main(): Promise<void> {
 
 	if (args[0] === "web") {
 		await handleWebCommand(args.slice(1));
+		return;
+	}
+
+	if (args[0] === "acp") {
+		await handleAcpCommand(args.slice(1), VERSION);
 		return;
 	}
 
@@ -299,6 +305,95 @@ Options:
 		return;
 	}
 	await runNonInteractive(parsedArgs, { message, format });
+}
+
+async function handleAcpCommand(args: string[], version: string): Promise<void> {
+	let cwd: string | undefined;
+	let sessionId: string | undefined;
+	let resume = false;
+	let bypass = false;
+
+	for (let i = 0; i < args.length; i++) {
+		const a = args[i]!;
+		if (a === "--cwd") {
+			const value = args[i + 1];
+			if (!value || value.startsWith("-")) {
+				console.error("Usage: cast acp [--cwd <path>] [--session <id>] [--continue] [--bypass-permissions]");
+				process.exit(2);
+			}
+			cwd = value;
+			i++;
+		} else if (a === "--session" || a === "-s") {
+			const value = args[i + 1];
+			if (!value || value.startsWith("-")) {
+				console.error("Usage: cast acp [--cwd <path>] [--session <id>] [--continue] [--bypass-permissions]");
+				process.exit(2);
+			}
+			sessionId = value;
+			i++;
+		} else if (a === "--continue" || a === "-c") {
+			resume = true;
+		} else if (a === "--bypass-permissions") {
+			bypass = true;
+		} else if (a === "--help" || a === "-h") {
+			console.log(`Usage: cast acp [options]
+
+Options:
+  --cwd <path>        Project root for the new session
+  --session <id>      Resume a specific session by id
+  --continue          Resume the most recent session in --cwd
+  --bypass-permissions  Auto-approve all bash confirmations
+  --help              Show this help
+
+cast speaks the Agent Client Protocol (JSON-RPC 2.0 over stdio) using
+@agentclientprotocol/sdk. Connect any ACP client (e.g. zed, JetBrains,
+Neovim) to wire it as an agent.`);
+			return;
+		} else {
+			console.error(`Unknown option for 'cast acp': ${a}`);
+			console.error("Usage: cast acp [--cwd <path>] [--session <id>] [--continue] [--bypass-permissions]");
+			process.exit(2);
+		}
+	}
+
+	const { runStartup } = await import("./core/startup.ts");
+	const { loadSettings } = await import("./core/settings.ts");
+	const settings = loadSettings();
+	const resolvedCwd = cwd ? resolve(cwd) : (process.env.CAST_CWD ?? process.cwd());
+
+	// ACP has no UI surface for pickers — push a no-op set so startup
+	// doesn't block on interactive prompts.
+	const noopPickers = {
+		pickOption: async <T>() => null as T | null,
+		promptText: async () => null,
+		pickMulti: async <T>() => [] as T[],
+		log: (() => {}) as never,
+	};
+
+	const startup = await runStartup(
+		{
+			cwd: resolvedCwd,
+			settings,
+			resumeRequested: resume,
+			resumeId: sessionId,
+			resumePicker: false,
+			cliBypassPermissions: bypass,
+			noSkills: false,
+			cliSkillPaths: [],
+			noMcp: false,
+			cliMcpPaths: [],
+			version,
+		},
+		noopPickers as {
+			pickOption: typeof noopPickers.pickOption;
+			promptText: typeof noopPickers.promptText;
+			pickMulti: typeof noopPickers.pickMulti;
+			log: typeof noopPickers.log;
+		},
+	);
+
+	const permissionMode = bypass ? "bypass" : (startup.permissionMode as "default");
+	runAcpAgent(startup, { version, permissionMode, sessionId, resume });
 }
 
 async function handleWebCommand(args: string[]): Promise<void> {

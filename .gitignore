@@ -7,6 +7,8 @@ dist/
 qa/
 qa-nfr/
 test/__test_tmp__/
+# vitest TMPDIR override — isolated per-run scratch space; never tracked.
+.tmp/
 # IDE-specific state — not part of the cast codebase.
 # Coding agents (Cursor, Claude, Codex, Aider, Windsurf, Continue, Cline, Roo,
 # Bolt, OpenCode, Kiro, Amazon Q, Qodo, Tabnine, Gemini Code Assist) and IDEs

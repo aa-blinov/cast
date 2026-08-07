@@ -2,6 +2,24 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Added
+
+- **ACP permission flow via the SDK.** `requestPermissionViaBridge` now sends a typed `session/request_permission` request to the client (with `Promise.race` timeout of 60 s), instead of emitting a custom `request_permission` notification that the client couldn't reply to. The reply is the typed `RequestPermissionResponse` — `outcome.outcome === "selected"` with `optionId === "allow_once"` grants, anything else denies.
+- **Plan-mode pickers.** `onPendingStateChange` wired through `createPlanState` — plan questions now surface as `request_question` notifications, plan transitions as `request_plan_approval`. Two custom extension methods (`answer_question`, `plan_review`) accept replies and resolve the pending state.
+- **`tool_call.kind`** mapped to ACP constants: `bash` → `execute`, `read` → `read`, `write`/`edit`/`patch` → `edit`, `grep`/`glob`/`web_fetch`/`web_search` → `search`. Previously every tool reported its own name as the kind.
+- **`available_commands_update`** sent once on session creation with the full slash-command list (`SLASH_COMMANDS` from `src/ui/commands.ts`). Names are stripped of leading `/` to match ACP conventions; `input.hint` is set on commands that take arguments.
+- **`usage_update` with full payload.** Now sends `{ used, size, cost: { amount, currency } }` per ACP spec — `used` is the current turn's token count, `size` is the model's context window, `cost` is the cumulative session cost in USD summed across all `usage` events.
+- **Multi-modal content in `session/prompt`.** ACP v1 `PromptRequest.prompt[]` accepts text, image, audio, and resource blocks. `text` is forwarded as-is, `image` (base64 + mimeType) is converted to an `image_url` data URL and passed through cast's existing vision path (`runAgentLoop` already strips unsupported image_url parts — see `loop.ts:1173`). Audio and resource blocks are dropped with a marker note (cast has no audio/embedded-resource ingestion path through ACP yet).
+- **`session/load` and `session/resume` replay history.** When a client opens an existing session, the bridge re-emits every persisted user/assistant message as `user_message_chunk` / `agent_message_chunk` notifications in chronological order, so the editor sees the conversation history. Replay is fire-and-forget — the `session/load` response is returned immediately.
+
+### Changed
+
+- **ACP bridge migrated to `@agentclientprotocol/sdk`.** The `cast acp` wire transport is now powered by the official SDK (v1.3.0, zero dependencies, Apache-2.0) — all JSON-RPC serialization, schema validation, and protocol negotiations are handled by the library. The hand-rolled `rpc.ts` / `types.ts` / `handler.ts` / `tools.ts` / `index.ts` (≈600 lines) have been replaced by `agent.ts` (the typed `acp.agent({ name: "cast" })` factory + handler registration) and `bridge.ts` (the cast-side adapter that translates `AgentEvent` into SDK `sessionUpdate` notifications and routes SDK requests into `runAgentLoop`). Method names now use the slash-separated protocol convention (`session/new`, `session/load`, `session/prompt`, `session/set_mode`, `session/cancel`, `session/close`, `session/resume`, `session/list`, `authenticate`). The old `tools/list`, `permission/grant`, `permission/deny`, `answer_question`, and `plan_review` methods have been dropped — `tools/list` was never an ACP spec method, and the plan/picker bridge (`request_question`, `request_plan_approval`) is deferred to a future iteration.
+- **Expanded agent capabilities.** `agentCapabilities` now advertises `promptCapabilities: { audio: false, embeddedContext: true, image: true }`, `mcpCapabilities: { http: false, sse: false }`, `sessionCapabilities: { close: {}, fork: {}, list: {}, resume: {} }` — matching the structured shape editors expect instead of the previous flat boolean set.
+- **New ACP methods.** `authenticate` (returns empty `{}`), `session/list`, `session/close`, and `session/resume` are now registered on the SDK agent. `session/list` reads from the SQLite session database and returns `{ sessionId, cwd, title }`. `session/close` deletes the session and aborts its runner.
+
 ## 0.13.0
 
 ### Added
