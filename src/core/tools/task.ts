@@ -13,6 +13,7 @@ import type { LoopConfig } from "../loop.ts";
 import type { McpToolHandle } from "../mcp.ts";
 import { PLAN_TOOL_NAMES, QUESTION_TOOL_NAME } from "../plan.ts";
 import { formatSystemEnvironmentBlock, resolvePromptContextForCwd } from "../project.ts";
+import { saveSubagentRun } from "../session.ts";
 import type { SshHost } from "../ssh.ts";
 import type { SubagentPrompt } from "../subagents.ts";
 import type { ConfirmBash, ToolResult } from "./shared.ts";
@@ -212,6 +213,7 @@ export async function execTask(
 	config: AppConfig,
 	deps: TaskExecutorDeps,
 	signal?: AbortSignal,
+	toolCallId?: string,
 ): Promise<ToolResult & { subagentUsage?: Usage }> {
 	const assignment = typeof args.assignment === "string" ? args.assignment.trim() : "";
 	if (!assignment) return { content: "Missing `assignment`.", isError: true };
@@ -279,6 +281,7 @@ export async function execTask(
 		});
 	}
 	let finalMessages: Message[];
+	const startedAt = new Date().toISOString();
 	try {
 		finalMessages = await deps.runAgentLoop(childMessages, {
 			config,
@@ -342,6 +345,20 @@ export async function execTask(
 			sshHosts: deps.sshHosts,
 			// ponytail: no personas/currentPersona/subagentModel — child can't delegate further
 		});
+		// Persist the subagent's full transcript — it used to be in-memory only
+		// and was lost when the process died. Saved even for aborted/error runs
+		// so nothing the model did is unrecoverable.
+		if (deps.sessionId) {
+			saveSubagentRun({
+				sessionId: deps.sessionId,
+				toolCallId: toolCallId ?? "",
+				persona: subagent?.name ?? "worker",
+				model: deps.model,
+				startedAt,
+				endReason,
+				messages: finalMessages,
+			});
+		}
 	} catch (error) {
 		// A genuine runtime failure (network error, provider outage, …) mid-run
 		// — as opposed to a clean-but-unsuccessful "end" event, handled below.

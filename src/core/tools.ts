@@ -587,7 +587,12 @@ export function createToolExecutor(
 	backgroundBash?: BashBackgroundDeps,
 	skillDeps?: SkillToolDeps,
 ): ToolExecutor {
-	return async (name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> => {
+	return async (
+		name: string,
+		args: Record<string, unknown>,
+		signal?: AbortSignal,
+		toolCallId?: string,
+	): Promise<ToolResult> => {
 		try {
 			switch (name) {
 				case "bash":
@@ -670,7 +675,7 @@ export function createToolExecutor(
 				case "task":
 					if (!taskDeps)
 						return { content: "Task tool not available — no dependencies configured.", isError: true };
-					return await execTask(args, cwd, config, taskDeps, signal);
+					return await execTask(args, cwd, config, taskDeps, signal, toolCallId);
 				case "plan_done":
 					if (!planState) return { content: "Plan tool not available.", isError: true };
 					return execPlanDone(args, planState);

@@ -6,12 +6,14 @@ import { getDb, resetDbConnectionForTests } from "../src/core/db.ts";
 import type { Message } from "../src/core/llm.ts";
 import {
 	addUsage,
+	appendCheckpoint,
 	appendMessage,
 	clearSessionMessages,
 	compactMessages,
 	countTurnMessages,
 	createSession,
 	deleteSession,
+	dropLastCheckpoint,
 	estimateTokens,
 	getFullHistory,
 	getFullHistoryWithReasoning,
@@ -20,12 +22,15 @@ import {
 	getMostRecentSession,
 	listSessionSummaries,
 	listSessions,
+	loadCheckpoints,
 	loadSession,
 	loadSessionByShareToken,
+	loadSubagentRuns,
 	migrateLegacySessionsToDb,
 	recordCompaction,
 	resetSessionContext,
 	saveSession,
+	saveSubagentRun,
 	searchSessionSummaries,
 	shouldCompact,
 } from "../src/core/session.ts";
@@ -568,6 +573,80 @@ describe("session persistence", () => {
 		expect(loaded?.id).toBe(session.id);
 		expect(loaded?.cwd).toBe(projectA);
 		expect(loaded?.messages).toEqual(session.messages);
+	});
+
+	it("persists undo checkpoints across save/load and drops the last on undo", () => {
+		const session = createSession("gpt-4o", projectA);
+		session.messages.push({ role: "user", content: "hello" });
+		saveSession(session);
+
+		const chk1 = { id: "c1", timestamp: new Date().toISOString(), cwd: projectA, gitCommitSha: "abc123" };
+		const chk2 = { id: "c2", timestamp: new Date().toISOString(), cwd: projectA, gitCommitSha: "def456" };
+		appendCheckpoint(session.id, chk1);
+		appendCheckpoint(session.id, chk2);
+
+		const loaded = loadSession(session.id);
+		expect(loaded?.checkpoints?.map((c) => c.id)).toEqual(["c1", "c2"]);
+
+		// /undo pops the most recent checkpoint and drops its row.
+		dropLastCheckpoint(session.id);
+		const afterUndo = loadSession(session.id);
+		expect(afterUndo?.checkpoints?.map((c) => c.id)).toEqual(["c1"]);
+	});
+
+	it("persists subagent transcripts and loads them back in order", () => {
+		const session = createSession("gpt-4o", projectA);
+		saveSession(session);
+
+		saveSubagentRun({
+			sessionId: session.id,
+			toolCallId: "call_1",
+			persona: "worker",
+			model: "gpt-4o",
+			startedAt: "2026-01-01T00:00:00.000Z",
+			endReason: "stop",
+			messages: [
+				{ role: "user", content: "do the thing" },
+				{ role: "assistant", content: "done" },
+			],
+		});
+		saveSubagentRun({
+			sessionId: session.id,
+			toolCallId: "call_2",
+			persona: "explorer",
+			model: "gpt-4o",
+			startedAt: "2026-01-01T00:00:01.000Z",
+			endReason: "stop",
+			messages: [{ role: "user", content: "explore" }],
+		});
+
+		const runs = loadSubagentRuns(session.id);
+		expect(runs).toHaveLength(2);
+		expect(runs[0]?.toolCallId).toBe("call_1");
+		expect(runs[0]?.persona).toBe("worker");
+		expect(runs[0]?.messages).toEqual([
+			{ role: "user", content: "do the thing" },
+			{ role: "assistant", content: "done" },
+		]);
+		expect(runs[1]?.toolCallId).toBe("call_2");
+	});
+
+	it("cascades checkpoints and subagent runs when the session is deleted", () => {
+		const session = createSession("gpt-4o", projectA);
+		saveSession(session);
+		appendCheckpoint(session.id, { id: "c1", timestamp: "t", cwd: projectA });
+		saveSubagentRun({
+			sessionId: session.id,
+			toolCallId: "call_1",
+			startedAt: "t",
+			endReason: "stop",
+			messages: [],
+		});
+
+		deleteSession(session.id);
+
+		expect(loadCheckpoints(session.id)).toEqual([]);
+		expect(loadSubagentRuns(session.id)).toEqual([]);
 	});
 
 	it("derives the title when any caller appends the first user message", () => {

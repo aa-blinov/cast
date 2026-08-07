@@ -42,6 +42,7 @@ import {
 	addUsage,
 	countTurnMessages,
 	createSession,
+	dropLastCheckpoint,
 	listSessionSummaries,
 	loadSession,
 	recordCompaction,
@@ -1872,6 +1873,8 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			showNotice(`[Undo failed: ${res.message}]`);
 			return;
 		}
+		// Drop the matching row so the persisted checkpoint list stays in sync.
+		dropLastCheckpoint(session.id);
 
 		const msgs = session.messages;
 		let lastUserIdx = -1;

@@ -65,6 +65,32 @@ CREATE TABLE IF NOT EXISTS web_sessions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_web_sessions_expires_at ON web_sessions(expires_at);
+
+-- Undo checkpoints: metadata + shadow-file backups for the /undo command.
+-- A separate table (not a sessions column) so a long session's growing
+-- checkpoint list doesn't get rewritten on every saveSession — rows are
+-- appended at turn start and deleted on /undo only.
+CREATE TABLE IF NOT EXISTS session_checkpoints (
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  seq INTEGER NOT NULL,
+  json TEXT NOT NULL,
+  PRIMARY KEY (session_id, seq)
+) WITHOUT ROWID;
+
+-- Subagent (task tool) transcripts. The child run used to be in-memory only —
+-- lost on process death. Each completed task tool call stores its full
+-- message chain here, keyed by the parent session, so the work survives.
+CREATE TABLE IF NOT EXISTS subagent_runs (
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  seq INTEGER NOT NULL,
+  tool_call_id TEXT NOT NULL,
+  persona TEXT,
+  model TEXT,
+  started_at TEXT NOT NULL,
+  end_reason TEXT NOT NULL,
+  messages_json TEXT NOT NULL,
+  PRIMARY KEY (session_id, seq)
+) WITHOUT ROWID;
 `;
 
 /** Same text-extraction rule as session.ts's messageText() — plain string

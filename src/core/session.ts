@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import type { TurnCheckpoint } from "./checkpoint.ts";
 import type { AppConfig } from "./config.ts";
 import { formatLocalDate } from "./date-rollover-reminder.ts";
 import { getDb } from "./db.ts";
@@ -56,7 +57,7 @@ export interface SessionState {
 	model: string;
 	createdAt: string;
 	updatedAt: string;
-	checkpoints?: import("./checkpoint.ts").TurnCheckpoint[];
+	checkpoints?: TurnCheckpoint[];
 	/** Cumulative token/cost usage across every turn in this session. */
 	usage: SessionUsage;
 	/** promptTokens from the most recent API response — the authoritative
@@ -995,7 +996,97 @@ function loadSessionByRow(row: SessionRow | undefined): SessionState | null {
 	const session: SessionState = { ...rowToMeta(row), messages };
 	if (Object.keys(reasoning).length > 0) session.reasoning = reasoning;
 	if (Object.keys(turnMeta).length > 0) session.turnMeta = turnMeta;
+	const checkpoints = loadCheckpoints(row.id);
+	if (checkpoints.length > 0) session.checkpoints = checkpoints;
 	return session;
+}
+
+// ----------------------------------------------------------------------------
+// Undo checkpoints — persisted separately from the session row (see the
+// session_checkpoints table) so a growing checkpoint list isn't rewritten on
+// every saveSession. The in-memory `session.checkpoints` array is the runtime
+// source for /undo; these helpers keep the table in lockstep at the four call
+// sites that mutate it (turn start push, /undo pop, in TUI and daemon).
+// ----------------------------------------------------------------------------
+
+export function appendCheckpoint(sessionId: string, checkpoint: TurnCheckpoint): void {
+	getDb()
+		.prepare(
+			"INSERT INTO session_checkpoints (session_id, seq, json) VALUES (?, (SELECT COALESCE(MAX(seq), -1) + 1 FROM session_checkpoints WHERE session_id = ?), ?)",
+		)
+		.run(sessionId, sessionId, JSON.stringify(checkpoint));
+}
+
+export function dropLastCheckpoint(sessionId: string): void {
+	getDb()
+		.prepare(
+			"DELETE FROM session_checkpoints WHERE session_id = ? AND seq = (SELECT MAX(seq) FROM session_checkpoints WHERE session_id = ?)",
+		)
+		.run(sessionId, sessionId);
+}
+
+export function loadCheckpoints(sessionId: string): TurnCheckpoint[] {
+	const rows = getDb()
+		.prepare("SELECT json FROM session_checkpoints WHERE session_id = ? ORDER BY seq")
+		.all(sessionId) as Array<{ json: string }>;
+	return rows.map((r) => JSON.parse(r.json) as TurnCheckpoint);
+}
+
+// ----------------------------------------------------------------------------
+// Subagent (task tool) transcripts — the child run's full message chain,
+// persisted so a subagent's work survives the process that ran it.
+// ----------------------------------------------------------------------------
+
+export interface SubagentRunRecord {
+	sessionId: string;
+	toolCallId: string;
+	persona: string | undefined;
+	model: string | undefined;
+	startedAt: string;
+	endReason: string;
+	messages: Message[];
+}
+
+export function saveSubagentRun(run: SubagentRunRecord): void {
+	getDb()
+		.prepare(
+			`INSERT INTO subagent_runs (session_id, seq, tool_call_id, persona, model, started_at, end_reason, messages_json)
+			 VALUES (?, (SELECT COALESCE(MAX(seq), -1) + 1 FROM subagent_runs WHERE session_id = ?), ?, ?, ?, ?, ?, ?)`,
+		)
+		.run(
+			run.sessionId,
+			run.sessionId,
+			run.toolCallId,
+			run.persona ?? null,
+			run.model ?? null,
+			run.startedAt,
+			run.endReason,
+			JSON.stringify(run.messages),
+		);
+}
+
+export function loadSubagentRuns(sessionId: string): SubagentRunRecord[] {
+	const rows = getDb()
+		.prepare(
+			"SELECT tool_call_id, persona, model, started_at, end_reason, messages_json FROM subagent_runs WHERE session_id = ? ORDER BY seq",
+		)
+		.all(sessionId) as Array<{
+		tool_call_id: string;
+		persona: string | null;
+		model: string | null;
+		started_at: string;
+		end_reason: string;
+		messages_json: string;
+	}>;
+	return rows.map((r) => ({
+		sessionId,
+		toolCallId: r.tool_call_id,
+		persona: r.persona ?? undefined,
+		model: r.model ?? undefined,
+		startedAt: r.started_at,
+		endReason: r.end_reason,
+		messages: JSON.parse(r.messages_json) as Message[],
+	}));
 }
 
 /** Delete a saved session entirely — cascades to its message rows. Returns
