@@ -65,8 +65,15 @@ export interface AcpAdapter {
 		client: { notify(method: string, params: unknown): Promise<void> },
 	): AcpAdapterSession | null;
 	closeSession(sessionId: string, sessions: Map<string, AcpAdapterSession>): Promise<void>;
-	listSessions(): { sessions: Array<{ sessionId: string; cwd: string; title?: string }> };
-	setSessionMode(modeId: string, session: AcpAdapterSession): Record<string, never>;
+	listSessions(params?: { cursor?: string | null; cwd?: string | null; limit?: number }): {
+		sessions: Array<{ sessionId: string; cwd: string; title?: string }>;
+		nextCursor?: string;
+	};
+	setSessionMode(
+		modeId: string,
+		session: AcpAdapterSession,
+		client?: { notify(method: string, params: unknown): Promise<void> },
+	): Record<string, never>;
 	submitPrompt(
 		sessionId: string,
 		prompt: Array<{ type: string; text?: string | null; data?: string | null; mimeType?: string | null }>,
@@ -170,18 +177,32 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 			return s ? s.runner.waitForIdle() : Promise.resolve();
 		},
 
-		listSessions: () => {
-			const list = listSessions();
+		listSessions: (params?: { cursor?: string | null; cwd?: string | null; limit?: number }) => {
+			const all = listSessions();
+			// Optional cwd filter — a strict prefix match is enough since cast
+			// sessions store the cwd they were created with.
+			const filtered = params?.cwd ? all.filter((s) => (s.cwd ?? "").startsWith(params.cwd!)) : all;
+			// Cursor encodes the next offset as the sessionId at that index.
+			// Using sessionId (not numeric offset) is stable across re-sorts.
+			// Cursor is the sessionId at the start of the next page — the
+			// editor passes back whatever sessionId we gave it as the previous
+			// nextCursor. Stable across re-sorts (we don't re-sort here) and
+			// across listSessions() calls because sessionId is unique.
+			const limit = params?.limit ?? 100;
+			const startIndex = params?.cursor ? filtered.findIndex((s) => s.id === params.cursor) : 0;
+			const page = startIndex >= 0 ? filtered.slice(startIndex, startIndex + limit) : [];
+			const next = filtered.length > startIndex + limit ? filtered[startIndex + limit]?.id : undefined;
 			return {
-				sessions: list.map((s) => ({
+				sessions: page.map((s) => ({
 					sessionId: s.id,
 					cwd: s.cwd ?? "",
 					title: s.cwd ?? s.id.substring(0, 16),
 				})),
+				...(next ? { nextCursor: next } : {}),
 			};
 		},
 
-		setSessionMode: (modeId: string, session) => {
+		setSessionMode: (modeId: string, session, client) => {
 			const { state, planState } = session;
 			if (modeId === "plan" || modeId === "build") {
 				planState.enabled = modeId === "plan";
@@ -190,6 +211,16 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 					state.planTransition = undefined;
 				}
 				state.mode = modeId;
+				// Tell the editor the mode flipped — UI controls (mode picker,
+				// toolset visibility) re-render without waiting for the next
+				// tool call. Best-effort: a notification failure shouldn't
+				// fail the request itself.
+				client
+					?.notify("session/update", {
+						sessionId: session.state.id,
+						update: { sessionUpdate: "current_mode_update", modeId },
+					})
+					.catch(() => {});
 				return {};
 			}
 			return {};
@@ -483,7 +514,11 @@ export function translateEvent(
 			if (event.result.isError) {
 				payload.error = event.result.content;
 			} else {
-				payload.content = [{ type: "content", content: { type: "text", text: event.result.content } }];
+				// ACP v1 ContentChunk — the editor renders each chunk as a
+				// node in the tool result. Cast's loop returns a single text
+				// blob for now; future tool results with image content
+				// (vision-capable tools) would emit multiple chunks here.
+				payload.content = [{ type: "text", text: event.result.content }];
 			}
 			client.notify("session/update", { sessionId: session.state.id, update: payload }).catch(() => {});
 			return;
@@ -578,13 +613,33 @@ function toAcpTool(event: Extract<AgentEvent, { type: "tool_start" }>) {
 		web_search: "search",
 		patch: "edit",
 	};
+	// Title normalizer — editors use the title in the tool-call pill UI.
+	// The raw tool name is a verb (`bash`, `read`) but the title should
+	// read as a noun phrase that describes what the user sees happening.
+	const titleMap: Record<string, string> = {
+		bash: "Run bash command",
+		read: "Read file",
+		write: "Write file",
+		edit: "Edit file",
+		patch: "Apply patch",
+		grep: "Search in files",
+		glob: "Find files",
+		web_fetch: "Fetch URL",
+		web_search: "Web search",
+	};
+	// Path-shaped tools get `locations` so editors can highlight or jump to
+	// the file being touched. Different tools use different key names.
+	const pathKeys = ["path", "file_path", "target_path", "filepath"];
+	const toolPath = input ? pathKeys.map((k) => input[k]).find((v) => typeof v === "string") : undefined;
+	const locations = typeof toolPath === "string" ? [{ path: toolPath }] : undefined;
 	return {
 		toolCallId: event.id,
-		title: event.name,
+		title: titleMap[event.name] ?? event.name,
 		kind: kindMap[event.name] ?? event.name,
 		summary,
 		status: "pending" as const,
 		rawInput: input ?? {},
+		...(locations ? { locations } : {}),
 	};
 }
 

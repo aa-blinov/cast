@@ -56,13 +56,13 @@ export function runAcpAgent(
 			sessions.set(session.state.id, session);
 			return { configOptions: [] };
 		})
-		.onRequest(acp.AGENT_METHODS.session_list, (): acp.ListSessionsResponse => {
-			return adapter.listSessions();
+		.onRequest(acp.AGENT_METHODS.session_list, (ctx): acp.ListSessionsResponse => {
+			return adapter.listSessions(ctx.params) as acp.ListSessionsResponse;
 		})
 		.onRequest(acp.AGENT_METHODS.session_set_mode, (ctx): acp.SetSessionModeResponse => {
 			const session = sessions.get(ctx.params.sessionId);
 			if (!session) return {};
-			return adapter.setSessionMode(ctx.params.modeId, session);
+			return adapter.setSessionMode(ctx.params.modeId, session, ctx.client);
 		})
 		.onRequest(acp.AGENT_METHODS.session_prompt, async (ctx): Promise<acp.PromptResponse> => {
 			const session = sessions.get(ctx.params.sessionId);

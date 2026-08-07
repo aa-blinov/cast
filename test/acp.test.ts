@@ -693,3 +693,106 @@ describe("JSON-RPC error surface", () => {
 		expect(result).toBeNull();
 	});
 });
+
+describe("UX polish", () => {
+	it("tool_start produces a normalized title and kind", () => {
+		const mockClient = { notify: vi.fn(async () => {}) };
+		const s = makeSession().session;
+		translateEvent({ type: "tool_start", id: "c1", name: "bash", args: "{}" } as any, mockClient as any, s);
+		translateEvent({ type: "tool_start", id: "c2", name: "read", args: "{}" } as any, mockClient as any, s);
+		translateEvent({ type: "tool_start", id: "c3", name: "web_search", args: "{}" } as any, mockClient as any, s);
+		const calls = mockClient.notify.mock.calls;
+		const updates = calls.map((c: unknown[]) => (c[1] as any).update);
+		expect(updates[0].title).toBe("Run bash command");
+		expect(updates[0].kind).toBe("execute");
+		expect(updates[1].title).toBe("Read file");
+		expect(updates[1].kind).toBe("read");
+		expect(updates[2].title).toBe("Web search");
+		expect(updates[2].kind).toBe("search");
+	});
+
+	it("tool_start adds locations for path-shaped args", () => {
+		const mockClient = { notify: vi.fn(async () => {}) };
+		const s = makeSession().session;
+		translateEvent(
+			{ type: "tool_start", id: "c1", name: "read", args: JSON.stringify({ path: "/tmp/x" }) } as any,
+			mockClient as any,
+			s,
+		);
+		translateEvent(
+			{ type: "tool_start", id: "c2", name: "edit", args: JSON.stringify({ file_path: "/etc/hosts" }) } as any,
+			mockClient as any,
+			s,
+		);
+		translateEvent(
+			{ type: "tool_start", id: "c3", name: "bash", args: JSON.stringify({ command: "ls" }) } as any,
+			mockClient as any,
+			s,
+		);
+		const updates = mockClient.notify.mock.calls.map((c: unknown[]) => (c[1] as any).update);
+		expect(updates[0].locations).toEqual([{ path: "/tmp/x" }]);
+		expect(updates[1].locations).toEqual([{ path: "/etc/hosts" }]);
+		expect(updates[2].locations).toBeUndefined();
+	});
+
+	it("tool_end success emits content as a flat ContentChunk array", () => {
+		const mockClient = { notify: vi.fn(async () => {}) };
+		const s = makeSession().session;
+		translateEvent(
+			{ type: "tool_end", id: "c1", result: { isError: false, content: "hello" } } as any,
+			mockClient as any,
+			s,
+		);
+		const update = (mockClient.notify.mock.calls[0] as unknown[])[1] as any;
+		expect(update.update.sessionUpdate).toBe("tool_call_update");
+		expect(update.update.content).toEqual([{ type: "text", text: "hello" }]);
+	});
+
+	it("setSessionMode emits current_mode_update on transition", async () => {
+		const localAdapter = createAcpAdapter({ version: "test", permissionMode: "default" });
+		const mockClient = { notify: vi.fn(async () => {}) };
+		const { session } = makeSession();
+		await localAdapter.setSessionMode("plan", session, mockClient as any);
+		const updateCall = mockClient.notify.mock.calls.find(
+			(c: unknown[]) => (c[1] as any).update?.sessionUpdate === "current_mode_update",
+		);
+		expect(updateCall).toBeDefined();
+		expect((updateCall![1] as any).update.modeId).toBe("plan");
+	});
+
+	it("setSessionMode does not emit current_mode_update for invalid mode", async () => {
+		const localAdapter = createAcpAdapter({ version: "test", permissionMode: "default" });
+		const mockClient = { notify: vi.fn(async () => {}) };
+		const { session } = makeSession();
+		await localAdapter.setSessionMode("invalid", session, mockClient as any);
+		expect(mockClient.notify).not.toHaveBeenCalled();
+	});
+
+	it("listSessions returns nextCursor when more pages remain", () => {
+		const localAdapter = createAcpAdapter({ version: "test", permissionMode: "default" });
+		(listSessions as any).mockReturnValue([
+			{ id: "s1", cwd: "/a" },
+			{ id: "s2", cwd: "/a" },
+			{ id: "s3", cwd: "/a" },
+			{ id: "s4", cwd: "/a" },
+		]);
+		const page1 = localAdapter.listSessions({ limit: 2 });
+		expect(page1.sessions.map((s) => s.sessionId)).toEqual(["s1", "s2"]);
+		expect(page1.nextCursor).toBe("s3");
+
+		const page2 = localAdapter.listSessions({ limit: 2, cursor: page1.nextCursor });
+		expect(page2.sessions.map((s) => s.sessionId)).toEqual(["s3", "s4"]);
+		expect(page2.nextCursor).toBeUndefined();
+	});
+
+	it("listSessions filters by cwd prefix", () => {
+		const localAdapter = createAcpAdapter({ version: "test", permissionMode: "default" });
+		(listSessions as any).mockReturnValue([
+			{ id: "s1", cwd: "/projects/a" },
+			{ id: "s2", cwd: "/projects/b" },
+			{ id: "s3", cwd: "/other" },
+		]);
+		const result = localAdapter.listSessions({ cwd: "/projects" });
+		expect(result.sessions.map((s) => s.sessionId)).toEqual(["s1", "s2"]);
+	});
+});
