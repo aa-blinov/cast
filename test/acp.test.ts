@@ -42,6 +42,7 @@ vi.mock("../src/core/plan.ts", () => ({
 vi.mock("../src/core/mcp.ts", () => ({
 	closeMcpConnections: vi.fn(),
 	formatMcpForPrompt: vi.fn(() => ""),
+	connectMcpServers: vi.fn(),
 }));
 
 // ---- Imports after mocks ------------------------------------------------
@@ -126,7 +127,7 @@ describe("ACP adapter", () => {
 		expect(response.agentInfo?.version).toBe("0.99.0");
 	});
 
-	it("newSession returns session with runner", () => {
+	it("newSession returns session with runner", async () => {
 		const runner = {
 			steeringQueue: { enqueue: vi.fn(), drain: () => [] as unknown[], hasItems: () => false },
 			followUpQueue: { enqueue: vi.fn(), drain: () => [] as unknown[], hasItems: () => false },
@@ -152,9 +153,68 @@ describe("ACP adapter", () => {
 			subagentModel: "m",
 			permissionMode: "default" as const,
 		};
-		const session = adapter.newSession(mockStartup as any, {} as any);
+		const session = await adapter.newSession(mockStartup as any, {} as any);
 		expect(session.state.id).toBe("new-sess");
 		expect(session.runner).toBeDefined();
+	});
+
+	it("newSession connects client-provided http MCP servers and stores the result", async () => {
+		const runner = {
+			steeringQueue: { enqueue: vi.fn(), clear: vi.fn() },
+			followUpQueue: { enqueue: vi.fn(), clear: vi.fn() },
+			isRunning: false,
+			abort: vi.fn(),
+			startRun: vi.fn(),
+			endRun: vi.fn(),
+			waitForIdle: vi.fn(async () => {}),
+		};
+		(createAgentRunner as any).mockReturnValue(runner);
+		(createPlanState as any).mockReturnValue({ enabled: false });
+		const localAdapter = createAcpAdapter({ version: "test", permissionMode: "bypass" });
+		// vi.mock stubs connectMcpServers to vi.fn(); .mockResolvedValue
+		// makes it return a fake McpSetupResult for this test.
+		const { connectMcpServers } = await import("../src/core/mcp.ts");
+		vi.mocked(connectMcpServers as never).mockResolvedValue({
+			toolDefinitions: [{ type: "function", function: { name: "client_tool" } } as never],
+			toolIndex: new Map(),
+			connections: [{} as never],
+			diagnostics: [],
+			allServerNames: ["client-srv"],
+			serverSources: { "client-srv": "global" },
+		} as never);
+		const mockStartup = {
+			session: { id: "client-sess", cwd: "/tmp", messages: [], mode: undefined, model: "m" },
+			cwd: "/tmp",
+			config: {},
+			systemPrompt: "",
+			mcpResult: { connections: [], toolDefinitions: [], toolIndex: new Map() },
+			hooks: {},
+			skills: [],
+			personas: [],
+			persona: { name: "s" },
+			subagentPrompts: [],
+			subagentModel: "m",
+			permissionMode: "default" as const,
+		};
+		const session = await localAdapter.newSession(mockStartup as any, {} as any, [
+			{
+				name: "client-srv",
+				type: "http",
+				url: "https://mcp.example.com",
+				headers: [{ name: "X-Auth", value: "secret" }],
+			},
+		]);
+		expect(connectMcpServers).toHaveBeenCalledOnce();
+		// Headers get flattened from [{name, value}] to a plain object.
+		const configArg = (connectMcpServers as never as { mock: { calls: unknown[][] } }).mock.calls[0][0] as Record<
+			string,
+			{ url: string; headers?: Record<string, string> }
+		>;
+		expect(configArg["client-srv"]).toEqual({
+			url: "https://mcp.example.com",
+			headers: { "X-Auth": "secret" },
+		});
+		expect(session.clientMcpResult).not.toBeNull();
 	});
 
 	it("listSessions returns session summaries", () => {
