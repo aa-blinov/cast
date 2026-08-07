@@ -179,6 +179,11 @@ export function handleSseEvent(event, context) {
 				prev ? { ...prev, messages: [...prev.messages, { role: "warning", content: event.content }] } : prev,
 			);
 			break;
+		case "notice":
+			setSession((prev) =>
+				prev ? { ...prev, messages: [...prev.messages, { role: "warning", content: event.message }] } : prev,
+			);
+			break;
 		case "error":
 			resetStreamingNow();
 			setRunning(false);

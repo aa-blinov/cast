@@ -18,6 +18,14 @@ vi.mock("../src/core/loop.ts", async (importOriginal) => {
 	return { ...actual, runAgentLoop: (...args: unknown[]) => runAgentLoop(...args) };
 });
 
+// reconcileSessionModel (provider-change model fallback) hits /v1/models —
+// stub fetchModels so those tests don't need a live provider either.
+const mockFetchModels = vi.fn();
+vi.mock("../src/core/config.ts", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../src/core/config.ts")>();
+	return { ...actual, fetchModels: (...args: unknown[]) => mockFetchModels(...args) };
+});
+
 const { createWebBridge, SANDBOX_CWD, toDisplayMessages } = await import("../src/web/bridge.ts");
 
 const testConfig: AppConfig = {
@@ -61,6 +69,11 @@ describe("web bridge", () => {
 
 	beforeEach(() => {
 		runAgentLoop.mockClear();
+		mockFetchModels.mockReset();
+		mockFetchModels.mockResolvedValue({
+			ok: true,
+			models: [{ id: "gpt-4o" }, { id: "hy3" }],
+		});
 		realHome = process.env.HOME;
 		fakeHome = mkdtempSync(join(tmpdir(), "cast-web-bridge-test-"));
 		process.env.HOME = fakeHome;
@@ -958,6 +971,93 @@ describe("web bridge", () => {
 			expect(ws.runner.followUpQueue.hasItems()).toBe(true);
 			const [queued] = ws.runner.followUpQueue.drain();
 			expect(String(queued?.content)).toContain("bg-followup-marker");
+		});
+	});
+
+	describe("active provider sync from settings.json", () => {
+		// The TUI process (or a manual edit) writes the active provider/model to
+		// settings.json; the web daemon only reconciles those into its startup
+		// `config` when /provider /model run through *this* process. These tests
+		// pin the behavior that makes an external switch stick without a restart.
+
+		async function setActive(providerUrl: string, apiKey: string, model?: string) {
+			const { updateSettings } = await import("../src/core/settings.ts");
+			updateSettings({ providerUrl, apiKey, ...(model ? { model } : {}) });
+		}
+
+		function runArgs() {
+			return runAgentLoop.mock.calls[0]![1] as { config: AppConfig; model: string };
+		}
+
+		// syncActiveProviderFromSettings mutates config in place, and makeResult
+		// shares one module-level testConfig across every test — a provider switch
+		// in one test would leak into the next. Give each bridge its own clone.
+		function freshBridge() {
+			return createWebBridge(makeResult({ config: { ...testConfig } }));
+		}
+
+		it("adopts a provider switched in settings.json on the next turn", async () => {
+			const bridge = freshBridge(); // startup config: http://localhost / "test"
+			const ws = bridge.createSession();
+			await setActive("https://new.provider/v1", "newkey");
+
+			await bridge.submit(ws.id, "hi");
+
+			expect(runArgs().config.baseURL).toBe("https://new.provider/v1");
+			expect(runArgs().config.apiKey).toBe("newkey");
+			// gpt-4o is in the default mocked model list — still valid, kept.
+			expect(runArgs().model).toBe("gpt-4o");
+		});
+
+		it("does not restart-turn when settings.json still matches the daemon config", async () => {
+			const bridge = freshBridge();
+			const ws = bridge.createSession();
+
+			await bridge.submit(ws.id, "hi");
+
+			expect(mockFetchModels).not.toHaveBeenCalled();
+			expect(runArgs().config.baseURL).toBe("http://localhost");
+		});
+
+		it("reconciles a session model that the new provider doesn't serve onto the default model", async () => {
+			// New provider only serves "hy3"; the session was on "gpt-4o" against
+			// the old endpoint — sending gpt-4o to it would 400.
+			mockFetchModels.mockResolvedValue({ ok: true, models: [{ id: "hy3" }] });
+			const bridge = freshBridge();
+			const ws = bridge.createSession();
+			await setActive("https://new.provider/v1", "newkey", "hy3");
+
+			const events: Array<{ type: string; message?: string }> = [];
+			bridge.subscribe(ws.id, (event) => events.push(event));
+			await bridge.submit(ws.id, "hi");
+
+			expect(runArgs().model).toBe("hy3");
+			expect(ws.session.model).toBe("hy3");
+			expect(events.some((e) => e.type === "notice" && e.message?.includes('switched to "hy3"'))).toBe(true);
+		});
+
+		it("keeps a session model that exists on both endpoints", async () => {
+			const bridge = freshBridge();
+			const ws = bridge.createSession();
+			await setActive("https://new.provider/v1", "newkey", "hy3");
+
+			await bridge.submit(ws.id, "hi");
+
+			expect(runArgs().model).toBe("gpt-4o");
+			expect(ws.session.model).toBe("gpt-4o");
+		});
+
+		it("starts brand-new sessions on the model/endpoint currently in settings.json", async () => {
+			const bridge = freshBridge();
+			await setActive("https://new.provider/v1", "newkey", "hy3");
+
+			const ws = bridge.createSession();
+
+			expect(ws.session.model).toBe("hy3");
+			expect(runAgentLoop).not.toHaveBeenCalled(); // createSession doesn't run a turn
+			await bridge.submit(ws.id, "hi");
+			expect(runArgs().model).toBe("hy3");
+			expect(runArgs().config.baseURL).toBe("https://new.provider/v1");
 		});
 	});
 });

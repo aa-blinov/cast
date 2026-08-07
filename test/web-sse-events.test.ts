@@ -52,4 +52,15 @@ describe("web SSE events", () => {
 		expect(state.setPlanTransition).toHaveBeenCalledWith({ kind: "done", sessionId: "session-1" });
 		expect(state.pendingPlanSignalRef.current).toBeNull();
 	});
+
+	it("renders a notice as a warning row instead of failing the turn", () => {
+		const state = createContext();
+		handleSseEvent({ type: "notice", message: "Provider changed — switched to hy3" }, state);
+
+		expect(state.setSession).toHaveBeenCalled();
+		const updater = state.setSession.mock.calls[0]![0] as (prev: unknown) => unknown;
+		expect(updater({ messages: [] })).toEqual({
+			messages: [{ role: "warning", content: "Provider changed — switched to hy3" }],
+		});
+	});
 });
