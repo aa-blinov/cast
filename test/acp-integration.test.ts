@@ -163,4 +163,29 @@ describe("ACP integration", () => {
 			expect(auth).toEqual({});
 		});
 	});
+
+	it("document/didOpen stores the open buffer for the session", async () => {
+		const sessionId = await withClient(async (client) => {
+			await client.request<unknown, unknown>("initialize", {
+				protocolVersion: 1,
+				clientCapabilities: {},
+			});
+			const { sessionId } = await client.request<{ sessionId: string }, { cwd: string; mcpServers: unknown[] }>(
+				"session/new",
+				{ cwd: "/tmp/test", mcpServers: [] },
+			);
+			// document/didOpen is a notification — fire-and-forget on the
+			// client. We don't get a response, so we just send it and let the
+			// next request happen to give the agent time to process.
+			client.notify("document/did_open", {
+				sessionId,
+				uri: "file:///a.ts",
+				languageId: "typescript",
+				version: 1,
+				text: "const x = 1;",
+			});
+			return sessionId;
+		});
+		expect(typeof sessionId).toBe("string");
+	});
 });

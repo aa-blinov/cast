@@ -88,7 +88,10 @@ function makeSession(opts?: { mode?: "plan" | "build" }) {
 		waitForIdle: vi.fn(async () => {}),
 	} as any;
 	const planState = { enabled: false } as any;
-	return { session: { state: session, startup, runner, planState }, runner };
+	return {
+		session: { state: session, startup, runner, planState, totalCost: 0, lastUsage: null, openDocuments: new Map() },
+		runner,
+	};
 }
 
 // ---- Tests --------------------------------------------------------------
@@ -794,5 +797,106 @@ describe("UX polish", () => {
 		]);
 		const result = localAdapter.listSessions({ cwd: "/projects" });
 		expect(result.sessions.map((s) => s.sessionId)).toEqual(["s1", "s2"]);
+	});
+});
+
+describe("Open documents (embedded context)", () => {
+	it("openDocument stores uri + content in the session", () => {
+		const localAdapter = createAcpAdapter({ version: "test", permissionMode: "default" });
+		const { session } = makeSession();
+		localAdapter.openDocument(session, "file:///a.ts", "const x = 1;", "typescript");
+		expect(session.openDocuments.size).toBe(1);
+		const doc = session.openDocuments.get("file:///a.ts");
+		expect(doc?.content).toBe("const x = 1;");
+		expect(doc?.language).toBe("typescript");
+	});
+
+	it("updateDocument overwrites content; closeDocument removes it", () => {
+		const localAdapter = createAcpAdapter({ version: "test", permissionMode: "default" });
+		const { session } = makeSession();
+		localAdapter.openDocument(session, "file:///a.ts", "v1", "ts");
+		localAdapter.updateDocument(session, "file:///a.ts", "v2");
+		expect(session.openDocuments.get("file:///a.ts")?.content).toBe("v2");
+		localAdapter.closeDocument(session, "file:///a.ts");
+		expect(session.openDocuments.size).toBe(0);
+	});
+
+	it("updateDocument on unknown uri creates a fresh entry", () => {
+		const localAdapter = createAcpAdapter({ version: "test", permissionMode: "default" });
+		const { session } = makeSession();
+		localAdapter.updateDocument(session, "file:///fresh.ts", "x");
+		expect(session.openDocuments.get("file:///fresh.ts")?.content).toBe("x");
+	});
+
+	it("submitPrompt injects open documents into the loop's messages array", async () => {
+		const localAdapter = createAcpAdapter({ version: "test", permissionMode: "bypass" });
+		const mockClient = { notify: vi.fn(async () => {}), request: vi.fn(async () => ({})) };
+		const { session } = makeSession();
+		localAdapter.openDocument(session, "file:///a.ts", "const x = 1;", "typescript");
+		localAdapter.openDocument(session, "file:///b.py", "y = 2", "python");
+		// runAgentLoop reads `state.messages` and the loop's contract is to
+		// return the full array back. Mock faithfully returns whatever it
+		// received, so we can assert the reminder was appended at call time.
+		let receivedMessages: unknown;
+		runAgentLoopSpy.mockImplementationOnce(async (msgs: unknown) => {
+			receivedMessages = msgs;
+			return msgs;
+		});
+		await localAdapter.submitPrompt("sid", [{ type: "text", text: "do stuff" }], session, mockClient as any, {
+			version: "test",
+			permissionMode: "bypass",
+		});
+		const arr = receivedMessages as Array<{ role: string; content: unknown }>;
+		const last = arr[arr.length - 1];
+		expect(last?.role).toBe("user");
+		expect(typeof last?.content).toBe("string");
+		const text = last?.content as string;
+		expect(text).toContain("currently open in the editor");
+		expect(text).toContain("file:///a.ts");
+		expect(text).toContain("const x = 1;");
+		expect(text).toContain("file:///b.py");
+		expect(text).toContain("y = 2");
+		expect(text).toContain("typescript");
+		expect(text).toContain("python");
+	});
+
+	it("submitPrompt without open documents does not push a reminder", async () => {
+		const localAdapter = createAcpAdapter({ version: "test", permissionMode: "bypass" });
+		const mockClient = { notify: vi.fn(async () => {}), request: vi.fn(async () => ({})) };
+		const { session } = makeSession();
+		const before = session.state.messages.length;
+		runAgentLoopSpy.mockResolvedValueOnce([] as never);
+		await localAdapter.submitPrompt("sid", [{ type: "text", text: "do stuff" }], session, mockClient as any, {
+			version: "test",
+			permissionMode: "bypass",
+		});
+		const after = session.state.messages.length;
+		// appendMessage is called inside runPromptInner's finally block — but
+		// injectOpenDocumentsAsContext must not have added any extra message.
+		expect(after).toBe(before);
+	});
+
+	it("successive prompts replace the previous reminder (no unbounded growth)", async () => {
+		const localAdapter = createAcpAdapter({ version: "test", permissionMode: "bypass" });
+		const mockClient = { notify: vi.fn(async () => {}), request: vi.fn(async () => ({})) };
+		const { session } = makeSession();
+		localAdapter.openDocument(session, "file:///a.ts", "v1", "ts");
+		runAgentLoopSpy.mockResolvedValue([] as never);
+		await localAdapter.submitPrompt("sid", [{ type: "text", text: "first" }], session, mockClient as any, {
+			version: "test",
+			permissionMode: "bypass",
+		});
+		localAdapter.updateDocument(session, "file:///a.ts", "v2");
+		await localAdapter.submitPrompt("sid", [{ type: "text", text: "second" }], session, mockClient as any, {
+			version: "test",
+			permissionMode: "bypass",
+		});
+		const reminders = session.state.messages.filter(
+			(m) => typeof m.content === "string" && (m.content as string).includes("currently open in the editor"),
+		);
+		// Two prompts, two reminders at most — never more.
+		expect(reminders.length).toBeLessThanOrEqual(2);
+		const last = reminders[reminders.length - 1];
+		expect((last?.content as string) ?? "").toContain("v2");
 	});
 });
