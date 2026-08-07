@@ -1,13 +1,33 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
-import {
-	clearTurnRunner,
-	effectiveStatusFromFile,
-	isProcessAlive,
-	markTurnRunner,
-} from "../src/core/turn-runner-state.ts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// The module writes sentinel files to `${homedir()}/.cast/sessions/` — fake
+// HOME for the whole file so a leaked/aborted test can never pollute the real
+// ~/.cast (a stale .running-*.json landed there once from a killed run).
+let realHome: string | undefined;
+let fakeHome: string;
+let markTurnRunner!: typeof import("../src/core/turn-runner-state.ts").markTurnRunner;
+let clearTurnRunner!: typeof import("../src/core/turn-runner-state.ts").clearTurnRunner;
+let effectiveStatusFromFile!: typeof import("../src/core/turn-runner-state.ts").effectiveStatusFromFile;
+let isProcessAlive!: typeof import("../src/core/turn-runner-state.ts").isProcessAlive;
+
+beforeEach(async () => {
+	realHome = process.env.HOME;
+	fakeHome = mkdtempSync(join(tmpdir(), "cast-turn-runner-test-"));
+	process.env.HOME = fakeHome;
+	mkdirSync(join(fakeHome, ".cast", "sessions"), { recursive: true });
+	// STATE_DIR is captured from homedir() at import time — re-import against
+	// the temp HOME so the module writes where these tests read.
+	vi.resetModules();
+	const mod = await import("../src/core/turn-runner-state.ts");
+	({ markTurnRunner, clearTurnRunner, effectiveStatusFromFile, isProcessAlive } = mod);
+});
+afterEach(() => {
+	process.env.HOME = realHome;
+	rmSync(fakeHome, { recursive: true, force: true });
+});
 
 /** Path helper — the module writes to `${homedir()}/.cast/sessions/.running-${id}.json`. */
 function pathFor(id: string): string {
