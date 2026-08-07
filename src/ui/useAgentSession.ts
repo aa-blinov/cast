@@ -17,6 +17,7 @@ import { resolveHooksForCwd } from "../core/project.ts";
 import type { AgentRunner } from "../core/runner.ts";
 import {
 	addUsage,
+	appendCheckpoint,
 	appendMessage,
 	clearSessionMessages,
 	getFullHistory,
@@ -714,9 +715,16 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				if (submitResult.reason) text = `${text}\n\n<hook-context>${submitResult.reason}</hook-context>`;
 			}
 
+			// Ensure the session row exists before appending its checkpoint
+			// (session_checkpoints has an FK to sessions) — the first turn of a
+			// fresh session has no row yet otherwise.
+			saveSession(session);
 			const chk = createCheckpoint(cwd);
 			if (!session.checkpoints) session.checkpoints = [];
 			session.checkpoints.push(chk);
+			// Persist alongside the in-memory array (session.checkpoints isn't in
+			// the session row — see session.ts) so /undo survives a restart.
+			appendCheckpoint(session.id, chk);
 
 			const userContent =
 				images && images.length > 0

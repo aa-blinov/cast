@@ -56,12 +56,14 @@ import { formatRuleInvocation } from "../core/rules.ts";
 import { type AgentRunner, createAgentRunner } from "../core/runner.ts";
 import {
 	addUsage,
+	appendCheckpoint,
 	appendMessage,
 	type SessionSummary as CoreSessionSummary,
 	clearSessionMessages,
 	countTurnMessages,
 	createSession,
 	deleteSession,
+	dropLastCheckpoint,
 	listSessionSummaries,
 	loadSession,
 	loadSessionByShareToken,
@@ -1041,10 +1043,6 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			mkdirSync(ws.session.cwd, { recursive: true });
 		}
 
-		const chk = createCheckpoint(sessionCwd);
-		if (!ws.session.checkpoints) ws.session.checkpoints = [];
-		ws.session.checkpoints.push(chk);
-
 		const userMsg = { role: "user" as const, content: buildUserContent(text, images) } as Message & {
 			role: "user";
 		};
@@ -1069,6 +1067,15 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		// stays at the pre-run snapshot during the entire run. The `.then()`
 		// below does the final authoritative save with assistant responses.
 		saveSession(ws.session);
+
+		// Workspace checkpoint for /undo — after saveSession above so the
+		// session row already exists (session_checkpoints has an FK to it).
+		const chk = createCheckpoint(sessionCwd);
+		if (!ws.session.checkpoints) ws.session.checkpoints = [];
+		ws.session.checkpoints.push(chk);
+		// Persist alongside the in-memory array (session.checkpoints isn't in
+		// the session row — see session.ts) so /undo survives a daemon restart.
+		appendCheckpoint(ws.session.id, chk);
 
 		// Read fresh each run (not captured once) so a mid-session /web toggle
 		// takes effect on the very next turn — matches core/run.ts's headless
@@ -2655,6 +2662,8 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			const lastCheckpoint = checkpoints.pop()!;
 			const res = restoreCheckpoint(lastCheckpoint);
 			if (!res.ok) return { ok: false, error: `Undo failed: ${res.message}` };
+			// Drop the matching row so the persisted list stays in sync.
+			dropLastCheckpoint(ws.session.id);
 
 			const msgs = ws.session.messages;
 			let lastUserIdx = -1;

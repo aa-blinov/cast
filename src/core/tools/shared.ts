@@ -31,7 +31,12 @@ export function completedToolCallStatus(isError?: boolean): CompletedToolCallSta
 	return isError ? "error" : "ok";
 }
 
-export type ToolExecutor = (name: string, args: Record<string, unknown>, signal?: AbortSignal) => Promise<ToolResult>;
+export type ToolExecutor = (
+	name: string,
+	args: Record<string, unknown>,
+	signal?: AbortSignal,
+	toolCallId?: string,
+) => Promise<ToolResult>;
 
 /** Asked before running a bash command that matches a known-dangerous pattern. Return false to block it. */
 export type ConfirmBash = (command: string, reason: string) => Promise<boolean>;

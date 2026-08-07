@@ -1024,7 +1024,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				async (finalArgs) => {
 					const mcpTool = mcpToolIndex?.get(name);
 					if (mcpTool) return mcpTool.call(finalArgs, toolSignal);
-					return builtinExecuteTool(name, finalArgs, toolSignal);
+					return builtinExecuteTool(name, finalArgs, toolSignal, toolCallId);
 				},
 			);
 		}
@@ -1032,7 +1032,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		if (mcpTool) return mcpTool.call(args, toolSignal);
 		const writeDenial = await gateDestructiveWrite(name, args, loopConfig.confirmWrite);
 		if (writeDenial) return writeDenial;
-		return builtinExecuteTool(name, args, toolSignal);
+		return builtinExecuteTool(name, args, toolSignal, toolCallId);
 	};
 	const client = createClient(config, loopConfig.modelProvider);
 	const steeringQueue = loopConfig.steeringQueue ?? new MessageQueue();
