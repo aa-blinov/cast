@@ -2,7 +2,17 @@
 
 All notable user-facing changes to cast, newest first.
 
-## Unreleased
+## 0.13.1
+
+### Fixed
+
+- **Abort is always responsive.** Esc cancels a provider retry backoff immediately (no more waiting out a 30 s sleep); the OpenAI SDK's own uninterruptible retries are disabled (`maxRetries: 0`); a parallel tool batch closes after a 2 s grace even when a tool (e.g. a hung MCP server) ignores the abort signal — the turn always lands on "aborted".
+- **Turn errors stay in the transcript.** A 4xx failure is committed to the chat history instead of sticking above the composer until the next turn.
+- **Question picker and plan/build mode work in the daemon-mode TUI.** The question picker opens and answers go back over HTTP; `/plan`, `/build`, and the plan-approval dialog sync the mode to the `cast web` daemon so the next turn actually runs in the chosen mode.
+- **Provider/model switches take effect without a restart.** A running `cast web` daemon picks up settings.json changes (made in the TUI or by hand) at the next turn, and reconciles a stale session model against the new provider's model list.
+- **Image files attach inline.** Pasting (Ctrl+V) or attaching (Ctrl+G) an image path sends the image to the model as a real attachment instead of a bare path it must `read`.
+- **Provider retries surface in the web UI** as a `[Retrying (attempt N)…]` row instead of a silent spinner.
+- **Undo checkpoints and subagent transcripts are persisted** to the session database, so `/undo` history and subagent work survive a daemon restart.
 
 ### Added
 
