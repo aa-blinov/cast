@@ -63,4 +63,36 @@ describe("web SSE events", () => {
 			messages: [{ role: "warning", content: "Provider changed — switched to hy3" }],
 		});
 	});
+
+	it("surfaces a retry as a warning row", () => {
+		const state = createContext();
+		handleSseEvent({ type: "retry", attempt: 3, reason: "429 Token Plan usage limit reached" }, state);
+
+		const updater = state.setSession.mock.calls[0]![0] as (prev: unknown) => unknown;
+		expect(updater({ messages: [] })).toEqual({
+			messages: [{ role: "warning", content: "[Retrying (attempt 3): 429 Token Plan usage limit reached]" }],
+		});
+	});
+
+	it("updates the same retry row on subsequent attempts instead of spamming history", () => {
+		const state = createContext();
+		handleSseEvent({ type: "retry", attempt: 1, reason: "429" }, state);
+		handleSseEvent({ type: "retry", attempt: 2, reason: "429" }, state);
+
+		const updater = state.setSession.mock.calls[1]![0] as (prev: unknown) => unknown;
+		expect(updater({ messages: [{ role: "warning", content: "[Retrying (attempt 1): 429]" }] })).toEqual({
+			messages: [{ role: "warning", content: "[Retrying (attempt 2): 429]" }],
+		});
+	});
+
+	it("drops the retry row once real content starts streaming", () => {
+		const state = createContext();
+		handleSseEvent({ type: "retry", attempt: 1, reason: "429" }, state);
+		handleSseEvent({ type: "token", text: "Hello" }, state);
+
+		const updater = state.setSession.mock.calls[1]![0] as (prev: unknown) => unknown;
+		expect(updater({ messages: [{ role: "warning", content: "[Retrying (attempt 1): 429]" }] })).toEqual({
+			messages: [],
+		});
+	});
 });
