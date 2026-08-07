@@ -41,7 +41,11 @@ async function makeSmallPng(width: number, height: number): Promise<Buffer> {
 
 describe("resizeImageForEmbedding", () => {
 	it("downscales a large, noisy jpeg to fit within the max dimension", async () => {
-		const large = await makeLargeJpeg(2400, 1800);
+		// 1800×1350 (not 2400×1800): still well above the 1568 downscale cap
+		// and the 300KB skip threshold, but mozjpeg-encoding noise is the
+		// single most expensive thing in the suite (~12s at 2400×1800) — this
+		// keeps a meaningful downscale at roughly half the encode cost.
+		const large = await makeLargeJpeg(1800, 1350);
 		expect(large.byteLength).toBeGreaterThan(300 * 1024); // must actually cross the skip threshold to be a real test
 
 		const result = await resizeImageForEmbedding(large, "image/jpeg");
@@ -53,8 +57,8 @@ describe("resizeImageForEmbedding", () => {
 			result!.buffer.buffer.slice(result!.buffer.byteOffset, result!.buffer.byteOffset + result!.buffer.byteLength),
 		);
 		expect(Math.max(decoded.width, decoded.height)).toBeLessThanOrEqual(1568);
-		// Aspect ratio preserved (2400:1800 = 4:3).
-		expect(decoded.width / decoded.height).toBeCloseTo(2400 / 1800, 1);
+		// Aspect ratio preserved (1800:1350 = 4:3).
+		expect(decoded.width / decoded.height).toBeCloseTo(1800 / 1350, 1);
 	}, 90_000);
 
 	it("leaves a small image alone (returns undefined — caller keeps the original)", async () => {
