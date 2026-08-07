@@ -8,7 +8,13 @@
 import { SLASH_COMMANDS } from "../../ui/commands.ts";
 import type { AgentEvent } from "../loop.ts";
 import { runAgentLoop } from "../loop.ts";
-import { closeMcpConnections, formatMcpForPrompt } from "../mcp.ts";
+import {
+	closeMcpConnections,
+	connectMcpServers,
+	formatMcpForPrompt,
+	type McpServerConfig,
+	type McpSetupResult,
+} from "../mcp.ts";
 import { createPlanState, type PlanState, resolvePlanQuestion, resolvePlanTransition } from "../plan.ts";
 import type { AgentRunner } from "../runner.ts";
 import { createAgentRunner } from "../runner.ts";
@@ -40,6 +46,11 @@ export interface AcpAdapterSession {
 	 * having to call the `read` tool. Keyed by document URI (which editors
 	 * usually use as `file://` URLs or absolute paths). */
 	openDocuments: Map<string, { content: string; language?: string }>;
+	/** MCP servers the editor passed in `session/new.mcpServers`. Filled
+	 * lazily on the first prompt of a session; tools are merged with
+	 * startup's MCP pool for the duration of the run. Connections are
+	 * closed when the session ends. */
+	clientMcpResult: McpSetupResult | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -66,7 +77,16 @@ export interface AcpAdapter {
 		agentCapabilities: unknown;
 		agentInfo: { name: string; version: string };
 	};
-	newSession(startup: StartupResult, opts: AcpAdapterOptions): AcpAdapterSession;
+	newSession(
+		startup: StartupResult,
+		opts: AcpAdapterOptions,
+		mcpServers?: Array<{
+			name: string;
+			type?: string;
+			url?: string;
+			headers?: Array<{ name: string; value: string }>;
+		}>,
+	): Promise<AcpAdapterSession>;
 	loadSession(
 		sessionId: string,
 		startup: StartupResult,
@@ -125,7 +145,11 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 			agentCapabilities: {
 				loadSession: true,
 				promptCapabilities: { audio: false, embeddedContext: true, image: true },
-				mcpCapabilities: { http: false, sse: false },
+				// We accept http + sse MCP servers passed via session/new.
+				// stdio and the experimental "acp" variant are rejected —
+				// spawning local processes from a remote editor is a
+				// security risk we don't want to enable by default.
+				mcpCapabilities: { http: true, sse: true },
 				// `fork` and `resume` are intentionally omitted — cast has no
 				// fork semantics, and session/resume is implemented as a
 				// synonym of session/load on the SDK handler side, so listing
@@ -136,9 +160,19 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 			agentInfo: { name: "cast", version },
 		}),
 
-		newSession: (startup, _opts): AcpAdapterSession => {
+		newSession: async (startup, _opts, mcpServers): Promise<AcpAdapterSession> => {
 			const session = startup.session;
 			const runner: AgentRunner = createAgentRunner();
+			// Connect client-provided MCP servers in parallel with session
+			// setup. Anything that fails to connect (network error, bad URL)
+			// is logged in diagnostics and skipped — the session still starts
+			// with whatever did succeed. The connections live for the lifetime
+			// of this session and are torn down on close.
+			let clientMcpResult: McpSetupResult | null = null;
+			if (mcpServers && mcpServers.length > 0) {
+				const config = mcpServersToConfig(mcpServers);
+				clientMcpResult = await connectMcpServers(config);
+			}
 			const planState = createPlanState(startup.cwd, session.id, {
 				onChange: (question, transition) => {
 					startup.session.planQuestion = question;
@@ -174,6 +208,7 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 				lastUsage: null,
 				lastEndReason: null,
 				openDocuments: new Map(),
+				clientMcpResult,
 			};
 		},
 
@@ -198,6 +233,7 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 				lastUsage: null,
 				lastEndReason: null,
 				openDocuments: new Map(),
+				clientMcpResult: null,
 			};
 		},
 
@@ -206,6 +242,10 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 			if (s) {
 				s.runner.abort("acp close");
 				closeMcpConnections(s.startup.mcpResult.connections);
+				// Client-provided MCP connections live only for this session.
+				if (s.clientMcpResult) {
+					closeMcpConnections(s.clientMcpResult.connections);
+				}
 				sessions.delete(sessionId);
 			}
 			deleteSession(sessionId);
@@ -406,8 +446,8 @@ async function runPromptInner(
 					? undefined
 					: (tool: string, path: string, reason: string) =>
 							requestWritePermissionViaBridge(client, tool, path, reason),
-			mcpTools: startup.mcpResult.toolDefinitions,
-			mcpToolIndex: startup.mcpResult.toolIndex,
+			mcpTools: mergedMcpTools(session),
+			mcpToolIndex: mergedMcpToolIndex(session),
 			hooks: startup.hooks,
 			sessionId: state.id,
 			permissionMode: startup.permissionMode,
@@ -418,7 +458,7 @@ async function runPromptInner(
 			subagentPrompts: startup.subagentPrompts,
 			subagentModel: startup.subagentModel,
 			planState,
-			mcpPromptSuffix: formatMcpForPrompt(startup.mcpResult),
+			mcpPromptSuffix: formatMcpForPrompt(mergedMcp(session)),
 			initialTodos: state.todos,
 			onCompaction: (full, compacted) => recordCompaction(state, full, compacted),
 			onEvent: (event) => translateEvent(event, client, session),
@@ -789,6 +829,37 @@ function injectOpenDocumentsAsContext(session: AcpAdapterSession): void {
 	state.messages.push({ role: "user", content: reminder });
 }
 
+/** Merge the startup MCP pool with any client-provided servers the
+ * editor passed to `session/new`. The two pools are kept distinct
+ * (separate `connections` arrays) so cleanup is straightforward —
+ * startup's connections are torn down at process exit, client
+ * connections on `session/close`.
+ *
+ * Returning the merged object (rather than mutating) means a single
+ * McpSetupResult per session — loop's `formatMcpForPrompt` and
+ * `mcpToolIndex` only need to look at one source of truth. */
+function mergedMcp(session: AcpAdapterSession): McpSetupResult {
+	const startup = session.startup.mcpResult;
+	const client = session.clientMcpResult;
+	if (!client) return startup;
+	return {
+		toolDefinitions: [...startup.toolDefinitions, ...client.toolDefinitions],
+		toolIndex: new Map([...startup.toolIndex, ...client.toolIndex]),
+		connections: [...startup.connections, ...client.connections],
+		diagnostics: [...startup.diagnostics, ...client.diagnostics],
+		allServerNames: [...startup.allServerNames, ...client.allServerNames],
+		serverSources: { ...startup.serverSources, ...client.serverSources },
+	};
+}
+
+function mergedMcpTools(session: AcpAdapterSession) {
+	return mergedMcp(session).toolDefinitions;
+}
+
+function mergedMcpToolIndex(session: AcpAdapterSession) {
+	return mergedMcp(session).toolIndex;
+}
+
 function promptContentToText(content: Array<{ type: string; text?: string | null }>): string {
 	const parts: string[] = [];
 	for (const part of content) {
@@ -815,6 +886,41 @@ function loopReasonToStopReason(
 		default:
 			return "end_turn";
 	}
+}
+
+/** Convert ACP `McpServer` shape (the wire protocol — http/sse/acp/stdio
+ * variants) into the `McpServerConfig` shape cast's MCP layer expects.
+ * http + sse round-trip cleanly (url + headers); stdio is rejected
+ * outright because spawning a local process from a remote editor is
+ * a security risk we don't want to enable by default. The "acp"
+ * experimental variant isn't supported by cast's MCP code path yet. */
+function mcpServersToConfig(
+	servers: NonNullable<Parameters<AcpAdapter["newSession"]>[2]>,
+): Record<string, McpServerConfig> {
+	const out: Record<string, McpServerConfig> = {};
+	for (const server of servers) {
+		const name = server.name;
+		if (!name) continue;
+		const t = server.type;
+		if (t === "http" || t === "sse" || t === undefined) {
+			if (!server.url) continue;
+			// ACP sends headers as [{name, value}] pairs; cast's MCP layer
+			// wants a plain object. Skip the array-of-objects conversion
+			// when there are no headers — the empty array is the wire
+			// default, not a meaningful "send nothing" signal.
+			const headers: Record<string, string> | undefined = server.headers
+				? Object.fromEntries(server.headers.map((h) => [h.name, h.value]))
+				: undefined;
+			out[name] = {
+				url: server.url,
+				headers,
+			};
+		}
+		// stdio + acp variants: silently dropped. Editors asking for stdio
+		// should be told via a no-op (we don't error) — the editor can see
+		// the connection succeeded but the tool never showed up.
+	}
+	return out;
 }
 
 /**

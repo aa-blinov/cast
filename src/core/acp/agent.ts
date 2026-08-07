@@ -30,8 +30,8 @@ export function buildAcpAgentApp(
 		return adapter.initialize(ctx.params) as acp.InitializeResponse;
 	})
 		.onRequest(acp.AGENT_METHODS.authenticate, (): acp.AuthenticateResponse => ({}))
-		.onRequest(acp.AGENT_METHODS.session_new, (): acp.NewSessionResponse => {
-			const session = adapter.newSession(startup, opts);
+		.onRequest(acp.AGENT_METHODS.session_new, async (ctx): Promise<acp.NewSessionResponse> => {
+			const session = await adapter.newSession(startup, opts, ctx.params.mcpServers);
 			sessions.set(session.state.id, session);
 			return { sessionId: session.state.id };
 		})
