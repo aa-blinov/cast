@@ -12,7 +12,7 @@ import { hasHooks, runHooksForEvent } from "../core/hooks.ts";
 import { describeTurnError, isRetryableStreamError, stripHermesToolCalls } from "../core/llm.ts";
 import { type AgentEvent, runAgentLoop } from "../core/loop.ts";
 import { formatMcpForPrompt, type McpSetupResult } from "../core/mcp.ts";
-import { readActivePlan } from "../core/plan.ts";
+import { type PlanQuestion, readActivePlan } from "../core/plan.ts";
 import { resolveHooksForCwd } from "../core/project.ts";
 import type { AgentRunner } from "../core/runner.ts";
 import {
@@ -124,6 +124,24 @@ export interface RetryInfo {
 	reason: string;
 }
 
+/**
+ * Extract a PlanQuestion from the `question` tool's tool_end result content —
+ * the schema execQuestion JSON-stringifies into its result (`{question: true,
+ * questions: [...]}`). Returns undefined for anything malformed, in which case
+ * the run just continues. Exported for unit tests.
+ */
+export function parseQuestionToolResult(content: string): PlanQuestion | undefined {
+	try {
+		const parsed = JSON.parse(content) as { questions?: PlanQuestion["questions"] };
+		if (Array.isArray(parsed.questions) && parsed.questions.length > 0) {
+			return { questions: parsed.questions };
+		}
+	} catch {
+		// malformed JSON — not a question payload
+	}
+	return undefined;
+}
+
 export interface UseAgentSession {
 	messages: ChatMessage[];
 	streaming: StreamingState | null;
@@ -165,6 +183,21 @@ export interface UseAgentSession {
 	refreshMeta: () => void;
 	resetQueue: () => void;
 	addDisplayMessage: (message: ChatMessage) => void;
+	/**
+	 * Pending question from the daemon (thin-client mode). The daemon owns
+	 * planState in that mode, so the TUI can't read the question locally the
+	 * way the local-loop path does — the schema arrives on the SSE tool_end
+	 * event and is stashed here for the App's question picker.
+	 */
+	pendingQuestion: PlanQuestion | undefined;
+	/** Submit answers to the daemon's pending question (thin-client mode). */
+	answerQuestion: (values: string[]) => void;
+	/** Resolve the daemon's pending plan approval (thin-client mode). */
+	approvePlan: () => void;
+	/** Reset the daemon session's context for "implement in clean context"
+	 * (thin-client mode) — resolves with the original task, if the daemon kept
+	 * one, for the reminder prompt. */
+	cleanDaemonContext: () => Promise<string | undefined>;
 	/**
 	 * Whether to render reasoning blocks in the chat. Off by default — the
 	 * user can /reasoning-display to toggle for the current session. For
@@ -414,6 +447,10 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	// to filter.
 	const [pendingSteers, setPendingSteers] = useState<string[]>([]);
 	const [pendingQueue, setPendingQueue] = useState<string[]>([]);
+	// Thin-client only: the daemon's pending question, stashed from the SSE
+	// tool_end event (see the SSE handler below). The App opens the picker off
+	// this instead of the local planState, which the daemon owns in client mode.
+	const [pendingQuestion, setPendingQuestion] = useState<PlanQuestion | undefined>(undefined);
 	const [showReasoning, setShowReasoning] = useState(() => loadSettings().showReasoning ?? false);
 	const showReasoningRef = useRef(loadSettings().showReasoning ?? false);
 	const toggleReasoning = useCallback((): boolean => {
@@ -1089,7 +1126,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 						true,
 					);
 					break;
-				case "tool_end":
+				case "tool_end": {
 					updateStreaming((s) => {
 						if (!s) return s;
 						return reduceStreamEvent(s, {
@@ -1099,7 +1136,34 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 							result: event.result.content.slice(0, 4000),
 						});
 					}, true);
+					// Mirror the local onEvent path below: plan-signal tools
+					// succeeding leave a pointer in the transcript and tell the App
+					// to open the approval dialog / question picker once the run
+					// settles. The daemon owns planState in client mode, so the
+					// question schema is carried by the tool_end event — stash it
+					// for the App (same mechanism the web client uses in
+					// sse-events.js).
+					if (!event.result.isError) {
+						if (event.name === "plan_done") {
+							const planPath = planState ? readActivePlan(planState).path : undefined;
+							setMessages((msgs) => [
+								...msgs,
+								{
+									role: "warning",
+									content: `[Plan ready${planPath ? `: ${planPath}` : ""} — approval dialog opens when the turn ends]`,
+								},
+							]);
+							onPlanSignal?.("done");
+						} else if (event.name === "question") {
+							const question = parseQuestionToolResult(event.result.content);
+							if (question) {
+								setPendingQuestion(question);
+								onPlanSignal?.("question");
+							}
+						}
+					}
 					break;
+				}
 				case "assistant_message":
 					promoteStreamingToHistory();
 					break;
@@ -1130,7 +1194,17 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			}
 		};
 		return () => source.close();
-	}, [isClient, daemonUrl, daemonToken, session.id, promoteStreamingToHistory, updateStreaming, refresh]);
+	}, [
+		isClient,
+		daemonUrl,
+		daemonToken,
+		session.id,
+		promoteStreamingToHistory,
+		updateStreaming,
+		refresh,
+		planState,
+		onPlanSignal,
+	]);
 
 	const steer = useCallback(
 		(text: string) => {
@@ -1191,6 +1265,57 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		setPendingSteers([]);
 		setPendingQueue([]);
 	}, [runner, isClient, daemonUrl, daemonToken, session.id]);
+
+	// Thin-client plan-decision plumbing: the daemon owns planState, so the
+	// answer to its pending question (and the plan approval) must go back over
+	// HTTP instead of mutating a local planState the way the local-loop path
+	// does. No-ops in local mode — the App branches on daemonUrl and keeps the
+	// planState path there.
+	const answerQuestion = useCallback(
+		(values: string[]) => {
+			if (isClient && daemonUrl) {
+				void fetch(`${daemonUrl}/api/sessions/${session.id}/question`, {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+						...(daemonToken ? { Authorization: `Bearer ${daemonToken}` } : {}),
+					},
+					body: JSON.stringify({ values }),
+				}).catch(() => {});
+				setPendingQuestion(undefined);
+			}
+		},
+		[isClient, daemonUrl, daemonToken, session.id],
+	);
+
+	const approvePlan = useCallback(() => {
+		if (isClient && daemonUrl) {
+			void fetch(`${daemonUrl}/api/sessions/${session.id}/plan-transition`, {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					...(daemonToken ? { Authorization: `Bearer ${daemonToken}` } : {}),
+				},
+				body: JSON.stringify({ kind: "done" }),
+			}).catch(() => {});
+		}
+	}, [isClient, daemonUrl, daemonToken, session.id]);
+
+	const cleanDaemonContext = useCallback(async (): Promise<string | undefined> => {
+		if (!isClient || !daemonUrl) return undefined;
+		try {
+			const res = await fetch(`${daemonUrl}/api/sessions/${session.id}/clean-context`, {
+				method: "POST",
+				headers: {
+					...(daemonToken ? { Authorization: `Bearer ${daemonToken}` } : {}),
+				},
+			});
+			const data = (await res.json()) as { originalTask?: string };
+			return data.originalTask;
+		} catch {
+			return undefined;
+		}
+	}, [isClient, daemonUrl, daemonToken, session.id]);
 
 	const clearContext = useCallback(() => {
 		clearSessionMessages(session);
@@ -1261,6 +1386,10 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		refreshMeta,
 		resetQueue,
 		addDisplayMessage,
+		pendingQuestion,
+		answerQuestion,
+		approvePlan,
+		cleanDaemonContext,
 		showReasoning,
 		toggleReasoning,
 		turnStartedAt,

@@ -372,19 +372,39 @@ export function App(props: AppProps): JSX.Element {
 					);
 					if (choice === "implement" || choice === "clean") {
 						session.todos = createPlanTodos(planState);
-						resolvePlanTransition(planState);
-						const originalTask = choice === "clean" ? resetSessionContext(session) : undefined;
-						if (choice === "clean") saveSession(session);
-						setPlanMode(false);
-						setPendingAutoSubmit({
-							text:
-								choice === "clean"
-									? `<system-reminder>Clean build context. Original task: ${originalTask ?? "Use the approved plan as the task definition."}</system-reminder>\n\nThe plan is approved. Implement it step by step.`
-									: "The plan is approved. Implement it step by step.",
-							wantPlanMode: false,
-						});
+						// Daemon mode owns planState/context on the daemon side — the
+						// approval (which also creates the daemon's todos) and the
+						// clean-context reset go over HTTP, not local planState.
+						if (daemonUrl) {
+							agent.approvePlan();
+							const originalTask = choice === "clean" ? await agent.cleanDaemonContext() : undefined;
+							setPlanMode(false);
+							setPendingAutoSubmit({
+								text:
+									choice === "clean"
+										? `<system-reminder>Clean build context. Original task: ${originalTask ?? "Use the approved plan as the task definition."}</system-reminder>\n\nThe plan is approved. Implement it step by step.`
+										: "The plan is approved. Implement it step by step.",
+								wantPlanMode: false,
+							});
+						} else {
+							resolvePlanTransition(planState);
+							const originalTask = choice === "clean" ? resetSessionContext(session) : undefined;
+							if (choice === "clean") saveSession(session);
+							setPlanMode(false);
+							setPendingAutoSubmit({
+								text:
+									choice === "clean"
+										? `<system-reminder>Clean build context. Original task: ${originalTask ?? "Use the approved plan as the task definition."}</system-reminder>\n\nThe plan is approved. Implement it step by step.`
+										: "The plan is approved. Implement it step by step.",
+								wantPlanMode: false,
+							});
+						}
 					} else if (choice === "continue") {
-						resolvePlanTransition(planState);
+						if (daemonUrl) {
+							agent.approvePlan();
+						} else {
+							resolvePlanTransition(planState);
+						}
 						// Feedback goes through the regular composer, not a modal text
 						// box: the composer supports multi-line paste, image paste, and
 						// history. handleSubmit wraps the next non-command message as
@@ -403,7 +423,10 @@ export function App(props: AppProps): JSX.Element {
 			decisionFlowActiveRef.current = true;
 			void (async () => {
 				try {
-					const question = readPlanQuestion(planState);
+					// Daemon mode stashes the question from the SSE tool_end event
+					// (agent.pendingQuestion); local mode reads it off planState,
+					// which only the local loop populates.
+					const question = daemonUrl ? agent.pendingQuestion : readPlanQuestion(planState);
 					if (!question) {
 						showNotice("[Question is no longer pending]");
 						return;
@@ -414,25 +437,46 @@ export function App(props: AppProps): JSX.Element {
 						return;
 					}
 					const { answers, sources } = result;
-					resolvePlanQuestion(planState);
-					setPendingAutoSubmit({
-						text: question.questions
-							.map((item, index) => {
-								if (sources[index] === "free-form") {
-									return `Question: ${item.question} Answer: ${answers[index]}`;
-								}
-								const selected = item.options.find((option) => option.value === answers[index]);
-								return `Question: ${item.question} Answer: ${selected?.label ?? answers[index]}`;
-							})
-							.join("\n"),
-						wantPlanMode: planMode,
-					});
+					if (daemonUrl) {
+						// The daemon owns the pending question — answering over HTTP
+						// clears ITS state and starts the follow-up turn with the
+						// rendered answers (answerQuestion in web/bridge.ts).
+						agent.answerQuestion(answers);
+					} else {
+						resolvePlanQuestion(planState);
+						setPendingAutoSubmit({
+							text: question.questions
+								.map((item, index) => {
+									if (sources[index] === "free-form") {
+										return `Question: ${item.question} Answer: ${answers[index]}`;
+									}
+									const selected = item.options.find((option) => option.value === answers[index]);
+									return `Question: ${item.question} Answer: ${selected?.label ?? answers[index]}`;
+								})
+								.join("\n"),
+							wantPlanMode: planMode,
+						});
+					}
 				} finally {
 					decisionFlowActiveRef.current = false;
 				}
 			})();
 		}
-	}, [agent.status, modalRequest, planMode, pickers, setPlanMode, showNotice, planState, session]);
+	}, [
+		agent.status,
+		agent.pendingQuestion,
+		agent.answerQuestion,
+		agent.approvePlan,
+		agent.cleanDaemonContext,
+		modalRequest,
+		planMode,
+		pickers,
+		setPlanMode,
+		showNotice,
+		planState,
+		session,
+		daemonUrl,
+	]);
 
 	useEffect(() => {
 		if (initialPrompt) {
