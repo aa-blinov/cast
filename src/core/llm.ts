@@ -227,8 +227,35 @@ export function describeTurnError(error: unknown): string {
 	return message;
 }
 
-function sleep(ms: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * Sleep that resolves early on abort — the retry backoff must not leave a turn
+ * uninterruptible for up to RETRY_MAX_DELAY_MS (30s). Without this, Esc during
+ * a backoff does nothing visible until the timer fires, then the next request
+ * fails on the already-aborted signal; the user perceives "Esc didn't abort".
+ * Rejects with the abort reason so the retry loop's catch rethrows it.
+ */
+function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
+	return new Promise((resolve, reject) => {
+		if (signal?.aborted) {
+			reject(reasonOf(signal));
+			return;
+		}
+		const onAbort = () => {
+			clearTimeout(timer);
+			reject(reasonOf(signal!));
+		};
+		const timer = setTimeout(() => {
+			signal?.removeEventListener("abort", onAbort);
+			resolve();
+		}, ms);
+		signal?.addEventListener("abort", onAbort, { once: true });
+	});
+}
+
+function reasonOf(signal: AbortSignal): Error {
+	const reason = signal.reason;
+	if (reason instanceof Error) return reason;
+	return new Error(typeof reason === "string" ? reason : "Aborted");
 }
 
 /** Placeholder for an assistant turn that produced neither text nor tool calls. */
@@ -484,7 +511,9 @@ export async function* streamChat(
 			const reason = error instanceof Error ? error.message : String(error);
 			yield { retrying: { attempt, reason } };
 			const remaining = RETRY_DEADLINE_MS - (Date.now() - retryStartedAt);
-			await sleep(Math.min(retryDelayMs(attempt, error), Math.max(0, remaining)));
+			// Abortable: Esc during a backoff must cancel the retry immediately,
+			// not wait out the timer (up to 30s) and fail on the next request.
+			await abortableSleep(Math.min(retryDelayMs(attempt, error), Math.max(0, remaining)), signal);
 		}
 	}
 }
