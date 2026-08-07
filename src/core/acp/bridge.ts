@@ -123,7 +123,12 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 				loadSession: true,
 				promptCapabilities: { audio: false, embeddedContext: true, image: true },
 				mcpCapabilities: { http: false, sse: false },
-				sessionCapabilities: { close: {}, fork: {}, list: {}, resume: {} },
+				// `fork` and `resume` are intentionally omitted — cast has no
+				// fork semantics, and session/resume is implemented as a
+				// synonym of session/load on the SDK handler side, so listing
+				// it as a distinct capability would mislead the editor into
+				// showing it as a separate UI affordance.
+				sessionCapabilities: { close: {}, list: {} },
 			},
 			agentInfo: { name: "cast", version },
 		}),
