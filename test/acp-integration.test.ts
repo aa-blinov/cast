@@ -103,6 +103,9 @@ describe("ACP integration", () => {
 			expect(initResult.agentCapabilities.loadSession).toBe(true);
 			expect(initResult.agentCapabilities.promptCapabilities.embeddedContext).toBe(true);
 			expect(initResult.agentCapabilities.sessionCapabilities.close).toEqual({});
+			// fork and resume are intentionally omitted — cast implements neither.
+			expect(initResult.agentCapabilities.sessionCapabilities.fork).toBeUndefined();
+			expect(initResult.agentCapabilities.sessionCapabilities.resume).toBeUndefined();
 
 			const newResult = await client.request<{ sessionId: string }, { cwd: string; mcpServers: unknown[] }>(
 				"session/new",
