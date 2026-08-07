@@ -11,6 +11,36 @@ function normalizeUserContent(content) {
 	return { text: "", images: [] };
 }
 
+/** Replaces the single "[Retrying..." warning row in place, or appends one —
+ *  a retry storm updates one row instead of spamming the transcript. */
+function upsertRetryRow(messages, text) {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const m = messages[i];
+		if (m && m.role === "warning" && typeof m.content === "string" && m.content.startsWith("[Retrying")) {
+			const next = messages.slice();
+			next[i] = { role: "warning", content: text };
+			return next;
+		}
+	}
+	return [...messages, { role: "warning", content: text }];
+}
+
+/** Drops any lingering "[Retrying..." warning row once real content streams —
+ *  the retry belongs to the waiting phase, not the reply. Returns the same
+ *  array reference when there's nothing to strip. */
+function stripRetryRow(messages) {
+	let changed = false;
+	const next = [];
+	for (const m of messages) {
+		if (m && m.role === "warning" && typeof m.content === "string" && m.content.startsWith("[Retrying")) {
+			changed = true;
+			continue;
+		}
+		next.push(m);
+	}
+	return changed ? next : messages;
+}
+
 export function handleSseEvent(event, context) {
 	const {
 		streamSessionId,
@@ -80,14 +110,39 @@ export function handleSseEvent(event, context) {
 		}
 		case "token":
 			updateStreaming({ type: "content", text: event.text });
+			setSession((prev) => {
+				if (!prev) return prev;
+				const messages = stripRetryRow(prev.messages);
+				return messages === prev.messages ? prev : { ...prev, messages };
+			});
 			break;
 		case "thinking":
 			updateStreaming({ type: "thinking", text: event.text });
+			setSession((prev) => {
+				if (!prev) return prev;
+				const messages = stripRetryRow(prev.messages);
+				return messages === prev.messages ? prev : { ...prev, messages };
+			});
+			break;
+		case "retry":
+			setSession((prev) =>
+				prev
+					? {
+							...prev,
+							messages: upsertRetryRow(prev.messages, `[Retrying (attempt ${event.attempt}): ${event.reason}]`),
+						}
+					: prev,
+			);
 			break;
 		case "tool_start":
 			updateStreaming({
 				type: "tool_start",
 				call: { id: event.id, name: event.name, args: event.args, status: event.status },
+			});
+			setSession((prev) => {
+				if (!prev) return prev;
+				const messages = stripRetryRow(prev.messages);
+				return messages === prev.messages ? prev : { ...prev, messages };
 			});
 			break;
 		case "tool_end":
