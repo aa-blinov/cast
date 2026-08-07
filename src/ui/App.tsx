@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { Box, Text, useApp, useWindowSize } from "ink";
 import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AppConfig } from "../core/config.ts";
@@ -30,6 +32,7 @@ import { ModalPicker, MultiSelectPicker, TextInputModal } from "../pickers/ink.t
 import { ChatLog } from "./ChatLog.tsx";
 import { Composer } from "./Composer.tsx";
 import { canSubmitDuringRun, handleInput } from "./commands.ts";
+import { imageFilePathsInText } from "./paste.ts";
 import { useModalBridge } from "./pickerBridge.ts";
 import { resolvePlanQuestionWithPicker } from "./plan-question.ts";
 import { Spinner } from "./Spinner.tsx";
@@ -41,10 +44,41 @@ import {
 } from "./statusbar.tsx";
 import { StatusBarPicker } from "./statusbar-picker.tsx";
 import { theme } from "./themes/index.ts";
-import { useAgentSession } from "./useAgentSession.ts";
+import { type PendingImage, useAgentSession } from "./useAgentSession.ts";
 import { useTerminalResync } from "./useTerminalResync.ts";
 
 const TRAILING_ZERO_RE = /\.0$/;
+
+// Attach the pasted image inline, not as a bare path the model must `read`.
+const IMAGE_MIME_BY_EXT: Record<string, string> = {
+	png: "image/png",
+	jpg: "image/jpeg",
+	jpeg: "image/jpeg",
+	gif: "image/gif",
+	webp: "image/webp",
+	bmp: "image/bmp",
+};
+// Providers reject absurdly large inline images; anything bigger is left as a
+// path the read tool can still handle.
+const MAX_ATTACHED_IMAGE_BYTES = 20 * 1024 * 1024;
+
+async function readImageFilesFromText(text: string): Promise<PendingImage[]> {
+	const images: PendingImage[] = [];
+	for (const path of imageFilePathsInText(text)) {
+		try {
+			const data = readFileSync(path);
+			if (data.byteLength > MAX_ATTACHED_IMAGE_BYTES) continue;
+			const ext = path.split(".").pop()!.toLowerCase();
+			images.push({
+				id: randomUUID(),
+				dataUrl: `data:${IMAGE_MIME_BY_EXT[ext] ?? "image/png"};base64,${data.toString("base64")}`,
+			});
+		} catch {
+			// Not a readable image file — leave the path as plain text.
+		}
+	}
+	return images;
+}
 
 interface AppProps {
 	result: StartupResult;
@@ -645,7 +679,12 @@ export function App(props: AppProps): JSX.Element {
 				input = `Refine the plan based on this feedback, update the plan file with edit/write, then call plan_done again:\n\n${text.trim()}`;
 			}
 		}
-		await handleInput(input, undefined, depsRef.current);
+		// Attach any image file path in the message inline (a Ctrl+G clipboard
+		// save, or a file copied in the file manager and pasted via Ctrl+V) —
+		// the same PendingImage pipeline the web client uses, instead of
+		// leaving the model to guess it should `read` the bare path.
+		const images = await readImageFilesFromText(input);
+		await handleInput(input, images.length > 0 ? images : undefined, depsRef.current);
 	}, []);
 
 	return (

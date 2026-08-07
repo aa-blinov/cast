@@ -3,6 +3,7 @@ import {
 	CHIP_CHAR_START,
 	chipCharFor,
 	expandPastes,
+	imageFilePathsInText,
 	isChipChar,
 	type PendingPaste,
 	pasteLabel,
@@ -85,5 +86,19 @@ describe("paste.ts", () => {
 		text = text.slice(0, cursor) + text.slice(cursor + 1);
 		expect(text).toBe("abcd");
 		expect(isChipChar(text[2])).toBe(false);
+	});
+
+	it("imageFilePathsInText picks absolute image paths out of a message", () => {
+		expect(imageFilePathsInText("/tmp/cast-clipboard-abc.png looks good")).toEqual(["/tmp/cast-clipboard-abc.png"]);
+		expect(imageFilePathsInText("check /Users/me/shot.jpeg and /tmp/x.webp please")).toEqual([
+			"/Users/me/shot.jpeg",
+			"/tmp/x.webp",
+		]);
+	});
+
+	it("imageFilePathsInText ignores relative paths and non-image extensions", () => {
+		expect(imageFilePathsInText("relative/path.png")).toEqual([]);
+		expect(imageFilePathsInText("/tmp/notes.txt")).toEqual([]);
+		expect(imageFilePathsInText("the url is https://example.com/a.png")).toEqual([]);
 	});
 });
