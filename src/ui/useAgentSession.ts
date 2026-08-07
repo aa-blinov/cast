@@ -194,6 +194,8 @@ export interface UseAgentSession {
 	answerQuestion: (values: string[]) => void;
 	/** Resolve the daemon's pending plan approval (thin-client mode). */
 	approvePlan: () => void;
+	/** Sync the session's plan/build mode to the daemon (thin-client mode). */
+	setMode: (mode: "plan" | "build") => void;
 	/** Reset the daemon session's context for "implement in clean context"
 	 * (thin-client mode) — resolves with the original task, if the daemon kept
 	 * one, for the reminder prompt. */
@@ -1301,6 +1303,22 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		}
 	}, [isClient, daemonUrl, daemonToken, session.id]);
 
+	const setMode = useCallback(
+		(mode: "plan" | "build") => {
+			if (isClient && daemonUrl) {
+				void fetch(`${daemonUrl}/api/sessions/${session.id}/mode`, {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+						...(daemonToken ? { Authorization: `Bearer ${daemonToken}` } : {}),
+					},
+					body: JSON.stringify({ mode }),
+				}).catch(() => {});
+			}
+		},
+		[isClient, daemonUrl, daemonToken, session.id],
+	);
+
 	const cleanDaemonContext = useCallback(async (): Promise<string | undefined> => {
 		if (!isClient || !daemonUrl) return undefined;
 		try {
@@ -1390,6 +1408,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		answerQuestion,
 		approvePlan,
 		cleanDaemonContext,
+		setMode,
 		showReasoning,
 		toggleReasoning,
 		turnStartedAt,

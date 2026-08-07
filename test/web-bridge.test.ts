@@ -591,6 +591,42 @@ describe("web bridge", () => {
 		expect(bridge.getPlanTransition(ws.id)).toBeUndefined();
 	});
 
+	it("setSessionMode flips the hydrated session's mode and rebuilds its system prompt", async () => {
+		const bridge = createWebBridge(makeResult());
+		const ws = bridge.createSession();
+		expect(ws.session.mode).toBeUndefined();
+
+		expect(bridge.setSessionMode(ws.id, "plan")).toEqual({ ok: true });
+		expect(ws.session.mode).toBe("plan");
+		expect(ws.systemPrompt).toContain("Mode: plan");
+
+		expect(bridge.setSessionMode(ws.id, "build")).toEqual({ ok: true });
+		expect(ws.session.mode).toBe("build");
+		expect(ws.systemPrompt).toContain("Mode: build");
+	});
+
+	it("setSessionMode is a no-op when the mode is already active", () => {
+		const bridge = createWebBridge(makeResult());
+		const ws = bridge.createSession();
+		ws.session.mode = "plan";
+
+		expect(bridge.setSessionMode(ws.id, "plan")).toEqual({ ok: true });
+	});
+
+	it("setSessionMode rejects while the agent is running", () => {
+		const bridge = createWebBridge(makeResult());
+		const ws = bridge.createSession();
+		ws.status = "running";
+
+		expect(bridge.setSessionMode(ws.id, "plan")).toEqual({ ok: false, error: "Agent running" });
+		expect(ws.session.mode).toBeUndefined();
+	});
+
+	it("setSessionMode reports a session that was never hydrated", () => {
+		const bridge = createWebBridge(makeResult());
+		expect(bridge.setSessionMode("no-such-session", "plan")).toEqual({ ok: false, error: "Session not found" });
+	});
+
 	it("claims the turn before an async UserPromptSubmit hook so concurrent sends cannot start two loops", async () => {
 		const { mkdirSync, writeFileSync } = await import("node:fs");
 		mkdirSync(join(cwd, ".cast"));
