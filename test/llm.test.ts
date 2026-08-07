@@ -223,6 +223,44 @@ describe("retryDelayMs", () => {
 		// blow past the 30s ceiling however high the attempt count climbs.
 		expect(retryDelayMs(10, err)).toBe(30_000);
 	});
+
+	describe("retry backoff is abortable", () => {
+		it("cuts the backoff sleep short when the signal aborts mid-retry", async () => {
+			// create() throws a retryable 429 forever; the signal aborts 80ms in,
+			// during the first 500ms backoff. Without the abortable sleep the
+			// stream would only fail once the timer fired (~500ms); with it the
+			// abort lands immediately — Esc during a retry must not look stuck.
+			const client = {
+				chat: {
+					completions: {
+						create: async (_params: unknown, opts?: { signal?: AbortSignal }) => {
+							if (opts?.signal?.aborted) throw new Error("signal already aborted");
+							throw rateLimitError({ message: "rate limited" });
+						},
+					},
+				},
+			} as unknown as OpenAI;
+
+			const ac = new AbortController();
+			const t0 = Date.now();
+			const timer = setTimeout(() => ac.abort(), 80);
+			let retries = 0;
+
+			await expect(
+				(async () => {
+					for await (const chunk of streamChat(client, "m", [], [], 1000, ac.signal)) {
+						if (chunk.retrying) retries += 1;
+					}
+				})(),
+			).rejects.toThrow();
+			clearTimeout(timer);
+
+			// Backoff for attempt 1 is 500ms — an abort that waits it out lands at
+			// ~500ms+, an abortable sleep lands at ~80ms.
+			expect(Date.now() - t0).toBeLessThan(400);
+			expect(retries).toBe(1);
+		});
+	});
 });
 
 describe("streamAndCollect — usage accounting", () => {
