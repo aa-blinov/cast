@@ -14,19 +14,21 @@ function identity<T>(x: T): T {
 	return x;
 }
 
-export function runAcpAgent(
+/** Build the configured ACP `AgentApp` from cast startup + options. Exposed
+ * for integration tests that wire the same handlers through an in-memory
+ * stream pair instead of `process.stdin` / `process.stdout`. */
+export function buildAcpAgentApp(
 	startup: StartupResult,
 	opts: { version: string; permissionMode: "bypass" | "default"; sessionId?: string; resume?: boolean },
-) {
+): { app: ReturnType<typeof acp.agent>; sessions: Map<string, AcpAdapterSession> } {
 	const adapter = createAcpAdapter(opts);
-	const agentApp = acp.agent({ name: "cast" });
+	const app = acp.agent({ name: "cast" });
 
 	const sessions = new Map<string, AcpAdapterSession>();
 
-	agentApp
-		.onRequest(acp.AGENT_METHODS.initialize, (ctx): acp.InitializeResponse => {
-			return adapter.initialize(ctx.params) as acp.InitializeResponse;
-		})
+	app.onRequest(acp.AGENT_METHODS.initialize, (ctx): acp.InitializeResponse => {
+		return adapter.initialize(ctx.params) as acp.InitializeResponse;
+	})
 		.onRequest(acp.AGENT_METHODS.authenticate, (): acp.AuthenticateResponse => ({}))
 		.onRequest(acp.AGENT_METHODS.session_new, (): acp.NewSessionResponse => {
 			const session = adapter.newSession(startup, opts);
@@ -95,6 +97,15 @@ export function runAcpAgent(
 			return {};
 		});
 
+	return { app, sessions };
+}
+
+export function runAcpAgent(
+	startup: StartupResult,
+	opts: { version: string; permissionMode: "bypass" | "default"; sessionId?: string; resume?: boolean },
+) {
+	const { app } = buildAcpAgentApp(startup, opts);
+
 	const input = new WritableStream<Uint8Array>({
 		write(chunk) {
 			process.stdout.write(chunk);
@@ -110,5 +121,5 @@ export function runAcpAgent(
 		},
 	});
 	const stream = acp.ndJsonStream(input, output);
-	agentApp.connect(stream);
+	app.connect(stream);
 }
