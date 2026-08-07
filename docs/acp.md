@@ -22,7 +22,7 @@ cast acp [--cwd <path>] [--session <id>] [--continue] [--bypass-permissions]
   --cwd <path>        Project root for the new session.
   --session <id>      Resume an existing session by id.
   --continue          Resume the most recent session in --cwd.
-  --bypass-permissions  Auto-approve all bash confirmations.
+  --bypass-permissions  Auto-approve destructive actions (bash + write/edit/patch).
   --help              Show this help.
 ```
 

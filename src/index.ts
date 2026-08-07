@@ -264,7 +264,7 @@ Options:
   -w, --worktree <name>  Run in an isolated git worktree (cast/.cast/worktrees/<name>)
   --format <default|json>  Output format
   --interactive          Persistent JSONL session protocol on stdin/stdout
-  --bypass-permissions   Skip bash confirmation prompts`);
+  --bypass-permissions   Skip destructive-action confirmations (bash + write)`);
 			return;
 		} else {
 			messageParts.push(...args.slice(i));
@@ -342,7 +342,7 @@ Options:
   --cwd <path>        Project root for the new session
   --session <id>      Resume a specific session by id
   --continue          Resume the most recent session in --cwd
-  --bypass-permissions  Auto-approve all bash confirmations
+  --bypass-permissions  Auto-approve destructive actions (bash + write/edit/patch)
   --help              Show this help
 
 cast speaks the Agent Client Protocol (JSON-RPC 2.0 over stdio) using

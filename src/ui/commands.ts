@@ -125,7 +125,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	},
 	{ name: "/model", description: "Show or change model" },
 	{ name: "/new", description: "Start a new session" },
-	{ name: "/permissions", description: "Change bash confirmation mode" },
+	{ name: "/permissions", description: "Change permission mode (bash + write)" },
 	{ name: "/persona", description: "Show or change persona" },
 	{ name: "/plan", description: "Enter plan mode (explore + plan only)" },
 	{ name: "/plan-model", description: "Show or change the plan-mode model" },
