@@ -334,13 +334,13 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 
 		setSessionMode: (modeId: string, session, client) => {
 			const { state, planState } = session;
-			if (modeId !== "plan" && modeId !== "build") {
-				// Surface unknown modes as JSON-RPC -32602 (InvalidParams) so
-				// the editor's UI can show a meaningful error instead of
-				// silently accepting a no-op. The SDK converts this thrown
-				// error into the wire-format `error` response automatically.
-				throw new Error(`Invalid session mode '${modeId}' — expected 'plan' or 'build'`);
-			}
+			// Cast only operates in `plan` and `build` modes. Other modeIds
+			// reach the adapter on the wire from custom editors, but the
+			// loop's planState machinery only understands these two values.
+			// We no-op silently rather than fail the request — the editor's
+			// mode picker has no UI affordance for other modes anyway, and
+			// rejecting would surface as a confusing error to the user.
+			if (modeId !== "plan" && modeId !== "build") return {};
 			planState.enabled = modeId === "plan";
 			if (state.mode && modeId !== state.mode) {
 				state.planQuestion = undefined;

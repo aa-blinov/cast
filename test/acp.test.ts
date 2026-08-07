@@ -1059,14 +1059,16 @@ describe("UX polish", () => {
 		expect((updateCall![1] as any).update.modeId).toBe("plan");
 	});
 
-	it("setSessionMode throws on unknown modeId", () => {
+	it("setSessionMode is a no-op for unknown modeIds", () => {
 		const localAdapter = createAcpAdapter({ version: "test", permissionMode: "default" });
 		const mockClient = { notify: vi.fn(async () => {}) };
 		const { session } = makeSession();
-		expect(() => localAdapter.setSessionMode("invalid", session, mockClient as any)).toThrow(
-			/Invalid session mode 'invalid'/,
-		);
-		// The error fires before any notification is sent.
+		// Cast only understands plan/build; the wire spec accepts any
+		// SessionModeId, so anything else is silently ignored rather
+		// than rejected — the editor's mode picker has no UI for
+		// other modes anyway.
+		const result = localAdapter.setSessionMode("invalid", session, mockClient as any);
+		expect(result).toEqual({});
 		expect(mockClient.notify).not.toHaveBeenCalled();
 	});
 

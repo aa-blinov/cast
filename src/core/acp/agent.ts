@@ -38,9 +38,12 @@ export function buildAcpAgentApp(
 		.onRequest(acp.AGENT_METHODS.session_load, (ctx): acp.LoadSessionResponse => {
 			const session = adapter.loadSession(ctx.params.sessionId, startup, opts, ctx.client);
 			if (!session) {
-				throw new acp.RequestError(-32004, `Session ${ctx.params.sessionId} not found`, {
-					sessionId: ctx.params.sessionId,
-				});
+				// Use the SDK's resourceNotFound helper — it sets the JSON-RPC
+				// code to whatever the SDK owner chose for "session missing"
+				// (likely -32004 or similar). Earlier we hard-coded -32004; the
+				// helper keeps the wire-format claim pointed at the SDK's
+				// supported error vocabulary.
+				throw acp.RequestError.resourceNotFound(`session:${ctx.params.sessionId}`);
 			}
 			sessions.set(session.state.id, session);
 			return { configOptions: [] };
@@ -51,9 +54,7 @@ export function buildAcpAgentApp(
 		.onRequest(acp.AGENT_METHODS.session_resume, (ctx): acp.ResumeSessionResponse => {
 			const session = adapter.loadSession(ctx.params.sessionId, startup, opts, ctx.client);
 			if (!session) {
-				throw new acp.RequestError(-32004, `Session ${ctx.params.sessionId} not found`, {
-					sessionId: ctx.params.sessionId,
-				});
+				throw acp.RequestError.resourceNotFound(`session:${ctx.params.sessionId}`);
 			}
 			sessions.set(session.state.id, session);
 			return { configOptions: [] };
