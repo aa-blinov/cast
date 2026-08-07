@@ -61,6 +61,22 @@ describe("InputParser — sequence classification", () => {
 		expect(events).toEqual([]);
 	});
 
+	it("reports DECXCPR coordinates to the registered cursor-position listener", () => {
+		const positions: Array<[number, number]> = [];
+		const buffer = new StdinBuffer();
+		const parser = new InputParser(
+			() => {},
+			buffer,
+			(row, col) => positions.push([row, col]),
+		);
+		buffer.emit("data", "\x1b[67;1R");
+		buffer.emit("data", "\x1b[12;40R");
+		expect(positions).toEqual([
+			[67, 1],
+			[12, 40],
+		]);
+	});
+
 	it("ignores an unrecognized control byte (< 32, no binding)", () => {
 		const { events, feed } = makeParser();
 		feed("\x00");

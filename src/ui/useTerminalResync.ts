@@ -4,6 +4,7 @@ import {
 	isRawModeActive,
 	isStreamingActive,
 	isTerminalSuspended,
+	setDecxprListener,
 	setLastFrameOverflow,
 } from "../core/stdin-manager.ts";
 
@@ -11,8 +12,6 @@ import {
 const CUU_RE = /\x1b\[(\d*)A/;
 // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences
 const CURSOR_OR_ERASE_RE = /\x1b\[(?:\d+)*[A-HJKSTf]/;
-// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences
-const DECXCPR_RE = /\x1b\[(\d+);(\d+)R/;
 
 // Ink's log-update erases a taller-than-one-line frame via ansi-escapes'
 // eraseLines() (node_modules/ansi-escapes/base.js), which emits one
@@ -367,17 +366,24 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 		const TIMEOUT_MS = 400;
 
 		let decxprActive = false;
-		// Cancels the in-flight query (detaches its stdin listener + timeout);
+		// Cancels the in-flight query (clears its timeout + decxprActive);
 		// null when none is active. Called by the effect cleanup so an unmount
-		// mid-query doesn't leave a dangling listener.
+		// mid-query doesn't leave a dangling timer.
 		let cancelActiveQuery: (() => void) | null = null;
+		// The response arrives through the Composer's own stdin pipeline
+		// (InputParser reports the CSI-R via reportDecxpr) — never a separate
+		// stdin listener here, which used to put the stream in flowing mode
+		// and swallow user keystrokes for the whole query window.
+		let activeDecxprCleanup: ((scrolled: boolean) => void) | null = null;
 
 		function startQuery() {
 			if (!process.stdin.isTTY) return;
-			// When stdin is not in raw mode (e.g. during suspendTerminal, or if
-			// Ink hasn't claimed it yet), the terminal echoes the DECXCPR response
-			// (\x1b[row;colR) back to stdout as visible garbage. Only query when
-			// raw mode is active so the response is captured by the stdin listener.
+			// Only query when stdin is ACTUALLY in raw mode. The app's
+			// isRawModeActive flag can disagree with the tty (raw mode lost
+			// across a suspend/SSH quirk); querying a cooked tty makes the
+			// terminal echo the response as visible garbage AND the response
+			// never reaches the composer pipeline to be reported here.
+			if (process.stdin.isRaw !== true) return;
 			if (!isRawModeActive()) return;
 			if (isTerminalSuspended()) return;
 			// Tall live region while streaming: cursor sits below the viewport by
@@ -386,46 +392,25 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 			// Short live region (fits): poll so trackpad inertia mid-run can latch.
 			if (isStreamingActive() && !liveFits) return;
 			// Previous query still unanswered (its own timeout will clean it
-			// up before the next tick) — don't stack listeners.
+			// up before the next tick) — don't stack queries.
 			if (decxprActive) return;
 			decxprActive = true;
 
-			let buf = "";
-			let active = true;
 			let queryTimeout: ReturnType<typeof setTimeout> | null = null;
-
-			function cleanup(scrolled: boolean) {
-				if (!active) return;
-				active = false;
+			const cleanup = (scrolled: boolean) => {
+				if (!decxprActive) return;
 				decxprActive = false;
 				cancelActiveQuery = null;
+				activeDecxprCleanup = null;
 				if (queryTimeout) clearTimeout(queryTimeout);
-				process.stdin.off("data", onStdin);
 				// Belt-and-suspenders: never latch scrollUp from a poll that raced
 				// into a tall streaming frame after startQuery was allowed.
 				const streamingNow = isStreamingActive();
 				scrollUp = scrolled && streamingNow && !liveFits ? false : scrolled;
 				// Fresh DECXCPR answer — deferred resyncs may trust the flag again.
 				scrollUpStale = false;
-			}
-
-			function onStdin(chunk: Buffer) {
-				if (!active) return;
-				buf += chunk.toString();
-				// The DECXCPR response (\x1b[row;colR) also reaches the Composer's
-				// StdinBuffer via its own stdin listener on the same stream. That's
-				// safe: StdinBuffer parses it as a complete CSI sequence and
-				// InputParser explicitly drops it (see input-parser.ts). We process
-				// it independently here — no coordination needed.
-				const match = DECXCPR_RE.exec(buf);
-				if (match) {
-					const row = Number(match[1]);
-					const rows = out.rows || 24;
-					cleanup(row > rows);
-				}
-			}
-
-			process.stdin.on("data", onStdin);
+			};
+			activeDecxprCleanup = cleanup;
 			cancelActiveQuery = () => cleanup(false);
 			origWrite(QUERY);
 
@@ -434,6 +419,13 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 				cleanup(false);
 			}, TIMEOUT_MS);
 		}
+
+		// The terminal's response is reported through the Composer's input
+		// pipeline (InputParser → reportDecxpr), so no stdin listener here.
+		setDecxprListener((row) => {
+			if (!decxprActive) return;
+			activeDecxprCleanup?.(row > (out.rows || 24));
+		});
 
 		// Adaptive polling: fast (200ms) while streaming or when a resync is
 		// pending (the scroll flag matters most then); slow (1000ms) at idle
@@ -462,6 +454,7 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 
 		return () => {
 			out.off("resize", onResize);
+			setDecxprListener(null);
 			if (resizeTimer) clearTimeout(resizeTimer);
 			clearInterval(pollInterval);
 			clearInterval(rateCheck);

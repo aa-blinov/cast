@@ -114,6 +114,23 @@ export function isRawModeActive(): boolean {
 	return rawModeActive;
 }
 
+/**
+ * DECXCPR cursor-position reports flow through the Composer's own stdin
+ * pipeline (StdinBuffer → InputParser sees the CSI-R). useTerminalResync used
+ * to attach its own temporary `stdin.on("data")` listener per query — which
+ * put the stream in flowing mode and swallowed user keystrokes for the whole
+ * query window (up to the 400ms timeout on a slow terminal), making the
+ * composer feel dead. Instead, the InputParser reports the report here and
+ * the resync listens without touching stdin.
+ */
+let onDecxpr: ((row: number, col: number) => void) | null = null;
+export function setDecxprListener(cb: ((row: number, col: number) => void) | null): void {
+	onDecxpr = cb;
+}
+export function reportDecxpr(row: number, col: number): void {
+	onDecxpr?.(row, col);
+}
+
 /** Mark streaming as active or inactive. Called by useAgentSession. */
 export function setStreamingActive(active: boolean): void {
 	streamingActive = active;
