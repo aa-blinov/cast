@@ -260,6 +260,13 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 		// reprinted after the live region stacked above it.
 		const checkDeferredResync = () => {
 			const streamingNow = isStreamingActive();
+			// A DECXCPR query that's in flight when the terminal drops out of raw
+			// mode (or is handed to a child process for a bash tool) has its
+			// response echoed by the tty as visible garbage — cancel it before the
+			// response lands, so it can't leak into the composer as stray input.
+			if ((isTerminalSuspended() || !isRawModeActive()) && cancelActiveQuery) {
+				cancelActiveQuery();
+			}
 			// Streaming just ended after the live area outgrew the viewport at some
 			// point during it — request one cleanup repaint. It rides the same
 			// deferral/guards below (scroll, suspend, scroll-known), so it never
