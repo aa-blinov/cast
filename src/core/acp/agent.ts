@@ -35,16 +35,24 @@ export function runAcpAgent(
 		})
 		.onRequest(acp.AGENT_METHODS.session_load, (ctx): acp.LoadSessionResponse => {
 			const session = adapter.loadSession(ctx.params.sessionId, startup, opts, ctx.client);
-			if (!session) return { configOptions: [] };
+			if (!session) {
+				throw new acp.RequestError(-32004, `Session ${ctx.params.sessionId} not found`, {
+					sessionId: ctx.params.sessionId,
+				});
+			}
 			sessions.set(session.state.id, session);
 			return { configOptions: [] };
 		})
-		.onRequest(acp.AGENT_METHODS.session_close, (ctx): void => {
-			adapter.closeSession(ctx.params.sessionId, sessions);
+		.onRequest(acp.AGENT_METHODS.session_close, async (ctx): Promise<void> => {
+			await adapter.closeSession(ctx.params.sessionId, sessions);
 		})
 		.onRequest(acp.AGENT_METHODS.session_resume, (ctx): acp.ResumeSessionResponse => {
 			const session = adapter.loadSession(ctx.params.sessionId, startup, opts, ctx.client);
-			if (!session) return { configOptions: [] };
+			if (!session) {
+				throw new acp.RequestError(-32004, `Session ${ctx.params.sessionId} not found`, {
+					sessionId: ctx.params.sessionId,
+				});
+			}
 			sessions.set(session.state.id, session);
 			return { configOptions: [] };
 		})
