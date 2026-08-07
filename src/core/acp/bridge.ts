@@ -5,6 +5,7 @@
  * corresponding `runAgentLoop` / `AgentRunner` operations.
  */
 
+import type * as acpSdk from "@agentclientprotocol/sdk";
 import { SLASH_COMMANDS } from "../../ui/commands.ts";
 import type { AgentEvent } from "../loop.ts";
 import { runAgentLoop } from "../loop.ts";
@@ -51,15 +52,16 @@ export interface AcpAdapterSession {
 	 * startup's MCP pool for the duration of the run. Connections are
 	 * closed when the session ends. */
 	clientMcpResult: McpSetupResult | null;
+	/** Set after the first `available_commands_update` notification has
+	 * been sent for this session. The slash command list is stable across
+	 * prompts within a session, so we only need to ship it once —
+	 * emitting on every prompt would burn a frame every turn. */
+	commandsEmitted: boolean;
 }
 
 // ---------------------------------------------------------------------------
-// Pending permissions
-// ---------------------------------------------------------------------------
-
-const _permissionResolvers = new Map<string, (granted: boolean) => void>();
-
 // Active client connections per session (used for plan-picker notifications).
+// ---------------------------------------------------------------------------
 const sessionClients = new Map<string, { notify(method: string, params: unknown): Promise<void> }>();
 
 // ---------------------------------------------------------------------------
@@ -209,6 +211,7 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 				lastEndReason: null,
 				openDocuments: new Map(),
 				clientMcpResult,
+				commandsEmitted: false,
 			};
 		},
 
@@ -216,7 +219,34 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 			const state = loadSession(sessionId);
 			if (!state) return null;
 			const runner: AgentRunner = createAgentRunner();
-			const planState = createPlanState(state.cwd ?? "", state.id);
+			// Mirror the newSession's planState wiring — without onChange,
+			// plan pickers would silently fail in resumed sessions because
+			// createPlanState can only notify the editor via the callback.
+			const planState = createPlanState(state.cwd ?? "", state.id, {
+				onChange: (question, transition) => {
+					state.planQuestion = question;
+					state.planTransition = transition;
+					if (question) {
+						client
+							?.notify("request_question", {
+								sessionId: state.id,
+								questions: question.questions.map((q) => ({
+									question: q.question,
+									options: q.options,
+								})),
+							})
+							.catch(() => {});
+					}
+					if (transition) {
+						client
+							?.notify("request_plan_approval", {
+								sessionId: state.id,
+								kind: transition.kind,
+							})
+							.catch(() => {});
+					}
+				},
+			});
 			// ACP v1 spec: agents should replay prior history as `session/update`
 			// notifications so the editor sees the conversation when the
 			// session opens. We only have text-only user/assistant messages in
@@ -234,6 +264,7 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 				lastEndReason: null,
 				openDocuments: new Map(),
 				clientMcpResult: null,
+				commandsEmitted: false,
 			};
 		},
 
@@ -241,14 +272,31 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 			const s = sessions.get(sessionId);
 			if (s) {
 				s.runner.abort("acp close");
-				closeMcpConnections(s.startup.mcpResult.connections);
-				// Client-provided MCP connections live only for this session.
-				if (s.clientMcpResult) {
-					closeMcpConnections(s.clientMcpResult.connections);
+				// MCP cleanup runs in try/finally so even if deleteSession below
+				// throws (DB error mid-shutdown), the connections are torn down
+				// — otherwise we'd leak file descriptors / subprocess handles.
+				try {
+					closeMcpConnections(s.startup.mcpResult.connections);
+					if (s.clientMcpResult) {
+						closeMcpConnections(s.clientMcpResult.connections);
+					}
+				} finally {
+					// Drop any open-document buffers. The adapter session is
+					// about to be destroyed; a subsequent session/load with
+					// the same id would otherwise see stale buffers in the
+					// cache (the Map is per-session, but the test setup
+					// reuses `session` objects).
+					s.openDocuments.clear();
+					sessions.delete(sessionId);
 				}
-				sessions.delete(sessionId);
 			}
-			deleteSession(sessionId);
+			try {
+				deleteSession(sessionId);
+			} catch {
+				// Best-effort — DB delete failure shouldn't abort the rest of
+				// teardown. The session row may persist as an orphan on disk
+				// but the MCP connections are already closed.
+			}
 			// Wait for the runner to settle before returning so the editor can
 			// assume the session is fully torn down on close — no straggling
 			// `session/update` events arriving after the response. `waitForIdle`
@@ -259,9 +307,11 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 
 		listSessions: (params?: { cursor?: string | null; cwd?: string | null; limit?: number }) => {
 			const all = listSessions();
-			// Optional cwd filter — a strict prefix match is enough since cast
-			// sessions store the cwd they were created with.
-			const filtered = params?.cwd ? all.filter((s) => (s.cwd ?? "").startsWith(params.cwd!)) : all;
+			// Exact match on cwd — `startsWith` would over-include (e.g. a
+			// filter for /proj would match /projects/a). Editors asking for
+			// "sessions for this exact project" want the sessionId back, not
+			// every session whose cwd happens to share a prefix.
+			const filtered = params?.cwd ? all.filter((s) => s.cwd === params.cwd) : all;
 			// Cursor encodes the next offset as the sessionId at that index.
 			// Using sessionId (not numeric offset) is stable across re-sorts.
 			// Cursor is the sessionId at the start of the next page — the
@@ -284,31 +334,41 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 
 		setSessionMode: (modeId: string, session, client) => {
 			const { state, planState } = session;
-			if (modeId === "plan" || modeId === "build") {
-				planState.enabled = modeId === "plan";
-				if (state.mode && modeId !== state.mode) {
-					state.planQuestion = undefined;
-					state.planTransition = undefined;
-				}
-				state.mode = modeId;
-				// Tell the editor the mode flipped — UI controls (mode picker,
-				// toolset visibility) re-render without waiting for the next
-				// tool call. Best-effort: a notification failure shouldn't
-				// fail the request itself.
-				client
-					?.notify("session/update", {
-						sessionId: session.state.id,
-						update: { sessionUpdate: "current_mode_update", modeId },
-					})
-					.catch(() => {});
-				return {};
+			if (modeId !== "plan" && modeId !== "build") {
+				// Surface unknown modes as JSON-RPC -32602 (InvalidParams) so
+				// the editor's UI can show a meaningful error instead of
+				// silently accepting a no-op. The SDK converts this thrown
+				// error into the wire-format `error` response automatically.
+				throw new Error(`Invalid session mode '${modeId}' — expected 'plan' or 'build'`);
 			}
+			planState.enabled = modeId === "plan";
+			if (state.mode && modeId !== state.mode) {
+				state.planQuestion = undefined;
+				state.planTransition = undefined;
+			}
+			state.mode = modeId;
+			// Tell the editor the mode flipped — UI controls (mode picker,
+			// toolset visibility) re-render without waiting for the next
+			// tool call. Best-effort: a notification failure shouldn't
+			// fail the request itself.
+			client
+				?.notify("session/update", {
+					sessionId: session.state.id,
+					update: { sessionUpdate: "current_mode_update", modeId },
+				})
+				.catch(() => {});
 			return {};
 		},
 
 		submitPrompt: async (sessionId, promptContent, session, client, opts) => {
 			sessionClients.set(session.state.id, client);
-			emitAvailableCommands(session, client);
+			// Slash command list is stable across prompts — only ship it on the
+			// first prompt of each session. Subsequent prompts re-use the
+			// already-emitted list; the editor keeps it in its own UI state.
+			if (!session.commandsEmitted) {
+				emitAvailableCommands(session, client);
+				session.commandsEmitted = true;
+			}
 			const { runner } = session;
 			const text = promptContentToText(promptContent);
 			const message = promptContentToMessage(sessionId, promptContent);
@@ -473,6 +533,28 @@ async function runPromptInner(
 	}
 }
 
+/** Minimal runtime validator for ACP `RequestPermissionResponse` — keeps
+ * the bridge from crashing if the editor sends a malformed payload.
+ * The SDK's zod schema does this for typed requests, but we receive
+ * the response as `unknown` via the generic `request(method, params)`
+ * overload, so we re-validate here. */
+function isPermissionResponse(x: unknown): x is { outcome: { outcome: string; optionId?: string } } {
+	if (typeof x !== "object" || x === null) return false;
+	const o = (x as { outcome?: unknown }).outcome;
+	if (typeof o !== "object" || o === null) return false;
+	const inner = (o as { outcome?: unknown }).outcome;
+	if (typeof inner !== "string") return false;
+	const optId = (o as { optionId?: unknown }).optionId;
+	if (optId !== undefined && typeof optId !== "string") return false;
+	return true;
+}
+
+/** Build a unique request ID for permission round-trips. Shared helper so
+ * bash and write flows format IDs identically (useful for log grep). */
+function makePermissionRequestId(): string {
+	return `perm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 export async function requestPermissionViaBridge(
 	client: {
 		request(method: string, params: unknown): Promise<unknown>;
@@ -488,7 +570,7 @@ export async function requestPermissionViaBridge(
 		const verdict = memo.get(`${command}\u0000${reason}`);
 		if (verdict !== undefined) return verdict;
 	}
-	const requestId = `perm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+	const requestId = makePermissionRequestId();
 	const TIMEOUT_MS = 60_000;
 	try {
 		const outcome: unknown = await Promise.race([
@@ -510,9 +592,9 @@ export async function requestPermissionViaBridge(
 			new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), TIMEOUT_MS)),
 		]);
 		if (outcome === "timeout") return false;
-		const response = outcome as { outcome: { outcome: string; optionId?: string } };
-		if (response.outcome.outcome !== "selected") return false;
-		const opt = response.outcome.optionId;
+		if (!isPermissionResponse(outcome)) return false;
+		if (outcome.outcome.outcome !== "selected") return false;
+		const opt = outcome.outcome.optionId;
 		const granted = opt === "allow_once" || opt === "allow_always";
 		if (opt === "allow_always" || opt === "reject_always") {
 			const store = alwaysVerdict.get(client) ?? new Map<string, boolean>();
@@ -548,7 +630,7 @@ export async function requestWritePermissionViaBridge(
 		const verdict = memo.get(`${tool}\u0000${path}\u0000${reason}`);
 		if (verdict !== undefined) return verdict;
 	}
-	const requestId = `perm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+	const requestId = makePermissionRequestId();
 	const TIMEOUT_MS = 60_000;
 	try {
 		const outcome: unknown = await Promise.race([
@@ -570,9 +652,9 @@ export async function requestWritePermissionViaBridge(
 			new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), TIMEOUT_MS)),
 		]);
 		if (outcome === "timeout") return false;
-		const response = outcome as { outcome: { outcome: string; optionId?: string } };
-		if (response.outcome.outcome !== "selected") return false;
-		const opt = response.outcome.optionId;
+		if (!isPermissionResponse(outcome)) return false;
+		if (outcome.outcome.outcome !== "selected") return false;
+		const opt = outcome.outcome.optionId;
 		const granted = opt === "allow_once" || opt === "allow_always";
 		if (opt === "allow_always" || opt === "reject_always") {
 			const store = alwaysVerdict.get(client) ?? new Map<string, boolean>();
@@ -594,8 +676,17 @@ export function translateEvent(
 	client: { notify(method: string, params: unknown): Promise<void> },
 	session: AcpAdapterSession,
 ): void {
-	const notify = (update: Record<string, unknown>) =>
-		client.notify("session/update", { sessionId: session.state.id, update }).catch(() => {});
+	// Typed update sender — captures the spec's `SessionUpdate` union so
+	// command sites get full type checking instead of having to `as never`
+	// past the SDK's generic notify. The wider `parameters` field at
+	// the call site carries the session-id baggage every update needs.
+	const notify = (update: acpSdk.SessionUpdate) =>
+		client
+			.notify("session/update", { sessionId: session.state.id, update } as unknown as {
+				sessionId: string;
+				update: acpSdk.SessionUpdate;
+			})
+			.catch(() => {});
 
 	switch (event.type) {
 		case "token":
@@ -605,7 +696,7 @@ export function translateEvent(
 			notify({ sessionUpdate: "agent_thought_chunk", content: { type: "text", text: event.text } });
 			return;
 		case "tool_start":
-			notify({ sessionUpdate: "tool_call", ...toAcpTool(event) } as never);
+			notify({ sessionUpdate: "tool_call", ...toAcpTool(event) } as unknown as acpSdk.SessionUpdate);
 			return;
 		case "tool_end": {
 			const payload: Record<string, unknown> = {
@@ -791,14 +882,21 @@ function emitAvailableCommands(
 }
 
 /** Push the editor's open-document contents into `state.messages` as a
- * system-reminder so the next LLM call sees them in context. Editors
+ * tagged user message so the next LLM call sees them in context. Editors
  * using `embeddedContext: true` send `document/didOpen` for every file
  * the user has open in their buffer; without this injection the model
  * would only know about files it has explicitly `read`.
  *
+ * The message carries `_castSkipReplay: true` so `replaySessionHistory`
+ * (called from `session/load`) drops it — the editor should not render
+ * system context as "the user said". Cast's LLM sanitizer
+ * (`llm.ts:sanitizeMessages`) drops the same field before it reaches
+ * the provider, so the wire marker never leaks to the model either.
+ *
  * Implementation detail: we replace (rather than append) any previous
  * reminder so the message array doesn't grow unboundedly with each
  * prompt. The latest snapshot always wins. */
+const OPEN_DOC_REMINDER_MARKER = "_castOpenDocsReminder";
 function injectOpenDocumentsAsContext(session: AcpAdapterSession): void {
 	if (session.openDocuments.size === 0) return;
 	const docs = [...session.openDocuments.entries()];
@@ -816,17 +914,20 @@ function injectOpenDocumentsAsContext(session: AcpAdapterSession): void {
 	// snapshot is useful, and we don't want stale buffers leaking into
 	// later turns after the user closes a file.
 	const { state } = session;
-	const last = state.messages[state.messages.length - 1];
-	if (
-		last &&
-		last.role === "user" &&
-		typeof last.content === "string" &&
-		last.content.startsWith("<system-reminder>") &&
-		last.content.includes("currently open in the editor")
-	) {
-		state.messages.pop();
+	for (let i = state.messages.length - 1; i >= 0; i--) {
+		const m = state.messages[i] as unknown as Record<string, unknown> | undefined;
+		if (m && typeof m === "object" && m[OPEN_DOC_REMINDER_MARKER] === true) {
+			state.messages.splice(i, 1);
+		}
 	}
-	state.messages.push({ role: "user", content: reminder });
+	state.messages.push({
+		role: "user",
+		content: reminder,
+		// Cast-only marker — replay drops it, LLM sanitizer drops it. See
+		// the function comment for why we use `user` role rather than a
+		// dedicated system role.
+		[OPEN_DOC_REMINDER_MARKER]: true,
+	} as unknown as (typeof state.messages)[number]);
 }
 
 /** Merge the startup MCP pool with any client-provided servers the
@@ -933,9 +1034,8 @@ function mcpServersToConfig(
  *
  * - `text` → string content parts (concatenated).
  * - `image` (base64 + mimeType) → `image_url` data URL.
- * - `audio`/`resource_link`/`resource` → currently ignored with a no-op text
- *   marker so the model at least knows something was dropped; cast has no
- *   audio/tool-result ingestion path through ACP yet.
+ * - `audio`/`resource_link`/`resource` → silently dropped (no model
+ *   ingestion path yet).
  */
 type ContentPart = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
 
@@ -948,8 +1048,14 @@ function promptContentToMessage(
 		mimeType?: string | null;
 	}>,
 ): { role: "user"; content: ContentPart[] } {
+	// Audio / resource_link / resource blocks are silently dropped — cast has
+	// no audio or tool-result ingestion path through ACP yet, and there's
+	// no useful signal to leak back to the editor (the alternative — a
+	// "[ACP: dropped audio block]" marker — would just be noise in the
+	// model's context). If the editor needs to know, the absence of audio
+	// in the model's responses is its own feedback.
+	void sessionId;
 	const parts: ContentPart[] = [];
-	const dropped: string[] = [];
 	for (const block of content) {
 		if (block.type === "text") {
 			if (block.text) parts.push({ type: "text", text: block.text });
@@ -960,15 +1066,8 @@ function promptContentToMessage(
 				type: "image_url",
 				image_url: { url: `data:${block.mimeType};base64,${block.data}` },
 			});
-			continue;
 		}
-		dropped.push(block.type);
-	}
-	if (dropped.length > 0) {
-		parts.push({
-			type: "text",
-			text: `[ACP: dropped unsupported content blocks for session ${sessionId}: ${dropped.join(", ")}]`,
-		});
+		// audio / resource_link / resource / unknown: drop silently.
 	}
 	return { role: "user", content: parts };
 }
@@ -978,7 +1077,8 @@ function promptContentToMessage(
  * Cast's `SessionState` only persists user/assistant text messages (not the
  * tool_call events), so the replay is a straight chronological dump:
  * - user message → `user_message_chunk`
- * - assistant message → `agent_message_chunk` (with `isFinal: true`)
+ * - assistant message → `agent_message_chunk` (no `isFinal` — replay is
+ *   atomic, not streaming)
  *
  * Fire-and-forget — the SDK buffers notifications on the duplex stream and
  * the client renders them as they arrive. Errors are swallowed: the
@@ -989,6 +1089,11 @@ async function replaySessionHistory(
 	client: { notify(method: string, params: unknown): Promise<void> },
 ): Promise<void> {
 	for (const message of state.messages) {
+		// Drop cast-only markers (open-document reminders, image-source
+		// tags) — they were injected by the bridge for model-side context
+		// and have no business in the editor's UI.
+		const m = message as unknown as Record<string, unknown> | undefined;
+		if (m && typeof m === "object" && m[OPEN_DOC_REMINDER_MARKER] === true) continue;
 		try {
 			if (message.role === "user") {
 				const content = normalizeMessageContent(message.content);
@@ -1012,7 +1117,10 @@ async function replaySessionHistory(
 					update: {
 						sessionUpdate: "agent_message_chunk",
 						content: { type: "text", text: content },
-						isFinal: true,
+						// No `isFinal` here — replay is historical, not a live
+						// stream. The flag is meaningful only when the agent
+						// is actively streaming chunks and the final one
+						// closes the turn; replay's chunks are atomic.
 					},
 				});
 			}

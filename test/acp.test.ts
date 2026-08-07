@@ -99,6 +99,8 @@ function makeSession(opts?: { mode?: "plan" | "build" }) {
 			lastUsage: null,
 			lastEndReason: null,
 			openDocuments: new Map(),
+			clientMcpResult: null,
+			commandsEmitted: false,
 		},
 		runner,
 	};
@@ -217,6 +219,59 @@ describe("ACP adapter", () => {
 		expect(session.clientMcpResult).not.toBeNull();
 	});
 
+	it("newSession silently drops stdio and acp MCP variants", async () => {
+		// Spawning local processes from a remote editor is a security risk
+		// we don't enable. The "acp" variant isn't supported by cast's MCP
+		// code path. Both should be filtered out — only the http/sse ones
+		// make it to connectMcpServers.
+		const { connectMcpServers } = await import("../src/core/mcp.ts");
+		vi.mocked(connectMcpServers as never).mockResolvedValue({
+			toolDefinitions: [],
+			toolIndex: new Map(),
+			connections: [],
+			diagnostics: [],
+			allServerNames: [],
+			serverSources: {},
+		} as never);
+		const runner = {
+			steeringQueue: { enqueue: vi.fn(), clear: vi.fn() },
+			followUpQueue: { enqueue: vi.fn(), clear: vi.fn() },
+			isRunning: false,
+			abort: vi.fn(),
+			startRun: vi.fn(),
+			endRun: vi.fn(),
+			waitForIdle: vi.fn(async () => {}),
+		};
+		(createAgentRunner as any).mockReturnValue(runner);
+		(createPlanState as any).mockReturnValue({ enabled: false });
+		const localAdapter = createAcpAdapter({ version: "test", permissionMode: "bypass" });
+		const mockStartup = {
+			session: { id: "stdio-sess", cwd: "/tmp", messages: [], mode: undefined, model: "m" },
+			cwd: "/tmp",
+			config: {},
+			systemPrompt: "",
+			mcpResult: { connections: [], toolDefinitions: [], toolIndex: new Map() },
+			hooks: {},
+			skills: [],
+			personas: [],
+			persona: { name: "s" },
+			subagentPrompts: [],
+			subagentModel: "m",
+			permissionMode: "default" as const,
+		};
+		await localAdapter.newSession(mockStartup as any, {} as any, [
+			{ name: "stdio-server", type: "stdio", command: "evil", args: ["--steal-secrets"] },
+			{ name: "acp-server", type: "acp" },
+			{ name: "ok-server", type: "http", url: "https://ok.example.com" },
+		]);
+		// Only ok-server should be passed through.
+		const configArg = (connectMcpServers as never as { mock: { calls: unknown[][] } }).mock.calls[0][0] as Record<
+			string,
+			unknown
+		>;
+		expect(Object.keys(configArg)).toEqual(["ok-server"]);
+	});
+
 	it("listSessions returns session summaries", () => {
 		(listSessions as any).mockReturnValue([
 			{ id: "s1", cwd: "/a", updatedAt: "2024-01-01T00:00:00Z" },
@@ -293,6 +348,30 @@ describe("ACP adapter", () => {
 		expect(commands.find((c) => c.name === "compact")).toBeDefined();
 		// None should start with `/`
 		expect(commands.every((c) => !c.name.startsWith("/"))).toBe(true);
+	});
+
+	it("submitPrompt emits available_commands_update only on the first prompt", async () => {
+		const { session } = makeSession();
+		// Second prompt — the runner is "running" so we hit the mid-turn
+		// enqueue path which short-circuits before the loop; the
+		// available_commands logic runs before that check though.
+		const runner = session.runner;
+		runner.isRunning = false;
+		await adapter.submitPrompt("sid", [{ type: "text", text: "/abort" }], session, mockClient as any, {
+			version: "test",
+			permissionMode: "default",
+		});
+		mockClient.notify.mockClear();
+		// Mid-turn emission: should NOT fire commands again.
+		runner.isRunning = true;
+		await adapter.submitPrompt("sid", [{ type: "text", text: "again" }], session, mockClient as any, {
+			version: "test",
+			permissionMode: "default",
+		});
+		const cmdUpdate = mockClient.notify.mock.calls.find(
+			(c: unknown[]) => (c[1] as any).update?.sessionUpdate === "available_commands_update",
+		);
+		expect(cmdUpdate).toBeUndefined();
 	});
 
 	it("submitPrompt enqueues mid-turn text on followUpQueue", async () => {
@@ -528,7 +607,7 @@ describe("Image/audio content in submitPrompt", () => {
 		]);
 	});
 
-	it("audio block is dropped with a marker note", async () => {
+	it("audio block is silently dropped", async () => {
 		const { session, runner } = makeSession();
 		runner.isRunning = true;
 		await adapter.submitPrompt(
@@ -542,10 +621,9 @@ describe("Image/audio content in submitPrompt", () => {
 			{ version: "test", permissionMode: "default" },
 		);
 		const enqueued = runner.followUpQueue.enqueue.mock.calls[0][0];
-		expect(enqueued.content).toHaveLength(2);
+		// The audio block is dropped silently — only the text block survives.
+		expect(enqueued.content).toHaveLength(1);
 		expect(enqueued.content[0]).toEqual({ type: "text", text: "listen" });
-		expect(enqueued.content[1].type).toBe("text");
-		expect(enqueued.content[1].text).toContain("audio");
 	});
 });
 
@@ -584,7 +662,8 @@ describe("session/load replay", () => {
 		expect((calls[0][1] as any).update.sessionUpdate).toBe("user_message_chunk");
 		expect((calls[0][1] as any).update.content.text).toBe("hi");
 		expect((calls[1][1] as any).update.sessionUpdate).toBe("agent_message_chunk");
-		expect((calls[1][1] as any).update.isFinal).toBe(true);
+		// Replay is atomic — no isFinal flag (streaming-only signal).
+		expect((calls[1][1] as any).update.isFinal).toBeUndefined();
 		expect((calls[2][1] as any).update.sessionUpdate).toBe("user_message_chunk");
 		expect((calls[3][1] as any).update.sessionUpdate).toBe("agent_message_chunk");
 	});
@@ -980,11 +1059,14 @@ describe("UX polish", () => {
 		expect((updateCall![1] as any).update.modeId).toBe("plan");
 	});
 
-	it("setSessionMode does not emit current_mode_update for invalid mode", async () => {
+	it("setSessionMode throws on unknown modeId", () => {
 		const localAdapter = createAcpAdapter({ version: "test", permissionMode: "default" });
 		const mockClient = { notify: vi.fn(async () => {}) };
 		const { session } = makeSession();
-		await localAdapter.setSessionMode("invalid", session, mockClient as any);
+		expect(() => localAdapter.setSessionMode("invalid", session, mockClient as any)).toThrow(
+			/Invalid session mode 'invalid'/,
+		);
+		// The error fires before any notification is sent.
 		expect(mockClient.notify).not.toHaveBeenCalled();
 	});
 
@@ -1005,15 +1087,28 @@ describe("UX polish", () => {
 		expect(page2.nextCursor).toBeUndefined();
 	});
 
-	it("listSessions filters by cwd prefix", () => {
+	it("listSessions filters by cwd exact match", () => {
 		const localAdapter = createAcpAdapter({ version: "test", permissionMode: "default" });
 		(listSessions as any).mockReturnValue([
 			{ id: "s1", cwd: "/projects/a" },
 			{ id: "s2", cwd: "/projects/b" },
-			{ id: "s3", cwd: "/other" },
+			{ id: "s3", cwd: "/projects/a" },
+			{ id: "s4", cwd: "/other" },
 		]);
-		const result = localAdapter.listSessions({ cwd: "/projects" });
-		expect(result.sessions.map((s) => s.sessionId)).toEqual(["s1", "s2"]);
+		const result = localAdapter.listSessions({ cwd: "/projects/a" });
+		expect(result.sessions.map((s) => s.sessionId)).toEqual(["s1", "s3"]);
+	});
+
+	it("listSessions cwd filter rejects prefix matches", () => {
+		const localAdapter = createAcpAdapter({ version: "test", permissionMode: "default" });
+		(listSessions as any).mockReturnValue([
+			{ id: "s1", cwd: "/projects/a" },
+			{ id: "s2", cwd: "/proj" },
+		]);
+		// /proj would have matched /projects/a under the old startsWith
+		// rule — confirm the exact-match filter doesn't over-include.
+		const result = localAdapter.listSessions({ cwd: "/proj" });
+		expect(result.sessions.map((s) => s.sessionId)).toEqual(["s2"]);
 	});
 });
 
