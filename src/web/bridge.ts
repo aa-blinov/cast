@@ -143,6 +143,10 @@ export type WebEvent =
 	| { type: "session_closed" }
 	| { type: "turn_meta"; model: string; provider: string; totalMs: number }
 	| { type: "plan_decision"; content: string }
+	/** Non-error status message (e.g. an automatic model switch) — the client
+	 * renders it as a warning row in the transcript, unlike "error" which
+	 * fails the turn. */
+	| { type: "notice"; message: string }
 	/** Watcher in `ws.cwd` saw changes while the session was idle. Only fired
 	 * when nothing else is broadcasting — tool_end already covers active turns.
 	 * Client should re-fetch the diff (and re-read the file tree). */
@@ -614,6 +618,93 @@ export function createWebBridge(result: StartupResult): WebBridge {
 	let quickSessionPersona = loadSettings().quickSessionPersona ?? DEFAULT_PERSONA;
 
 	/**
+	 * Re-read settings.json and adopt any provider/model/reasoning change made
+	 * from a *different* surface. The `cast web` daemon and the TUI are separate
+	 * processes: a provider/model switch done in the TUI (or a manual settings
+	 * edit) lands in settings.json but never reaches this daemon's shared
+	 * `config`, which is captured once at startup and only updated by /provider
+	 * and /model commands running *through this process*. A stale daemon then
+	 * sends the freshly-picked model id to the old endpoint — 400 for a model
+	 * that endpoint doesn't serve, 429 for one that's out of credits — and only
+	 * a `cast web restart` used to fix it. Returns whether the active endpoint
+	 * changed, so callers can reconcile in-flight session model ids against the
+	 * new provider's model list.
+	 */
+	function syncActiveProviderFromSettings(): { endpointChanged: boolean } {
+		const settings = loadSettings();
+
+		// providerUrl/apiKey are the authoritative active endpoint — every
+		// mutation path (startup, /provider in both TUI and web, the add
+		// wizard) writes them, while /provider never touches modelProvider.
+		const baseURL = settings.providerUrl;
+		const apiKey = settings.apiKey;
+		if (!baseURL || !apiKey) return { endpointChanged: false };
+
+		const endpointChanged = baseURL !== config.baseURL || apiKey !== config.apiKey;
+		if (endpointChanged) {
+			config.baseURL = baseURL;
+			config.apiKey = apiKey;
+			// reasoningFormat/reasoningParams are computed from the endpoint —
+			// carry the named row's override (e.g. "deepseek") when it's set.
+			const named = settings.modelProvider
+				? (settings.providers ?? []).find((p) => p.name === settings.modelProvider)
+				: undefined;
+			config.reasoningFormat = resolveReasoningFormat(baseURL, named?.reasoningFormat);
+			config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat);
+			// The cached /v1/models list came from the old endpoint — clear it so
+			// model pickers/completions can't offer ids the new endpoint lacks.
+			setModelsCache([]);
+		}
+
+		// Reasoning level is a global setting persisted by /reasoning in either
+		// process — follow external edits too, not just local ones.
+		if (settings.reasoningLevel !== undefined && settings.reasoningLevel !== config.reasoningLevel) {
+			config.reasoningLevel = settings.reasoningLevel;
+			config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat);
+		}
+
+		// Default model for brand-new sessions. Per-session models are left
+		// alone here — they get reconciled against the new provider at turn
+		// start instead (see reconcileSessionModel).
+		if (settings.model && settings.model !== defaultModel) {
+			defaultModel = settings.model;
+		}
+
+		return { endpointChanged };
+	}
+
+	/**
+	 * The active endpoint changed between turns (external settings edit) and
+	 * this session's model id was chosen against the old one — if the new
+	 * provider doesn't serve it, the next request would 400. Check the new
+	 * provider's /v1/models and fall back to the configured default model when
+	 * the current id is missing. Models that exist on both endpoints are kept.
+	 */
+	async function reconcileSessionModel(ws: WebAgentSession): Promise<void> {
+		const current = ws.session.model;
+		const result = await fetchModels(config);
+		if (!result.ok || !result.models) return;
+		setModelsCache(result.models);
+		if (result.models.some((m) => m.id === current)) return;
+		if (!defaultModel || defaultModel === current) return;
+		if (!result.models.some((m) => m.id === defaultModel)) return;
+
+		ws.session.model = defaultModel;
+		ws.systemPrompt = computeSystemPrompt(
+			resolvePersona(ws.session.persona ?? "") ?? currentPersona,
+			defaultModel,
+			ws.session.cwd ?? cwd,
+			ws.session.mode,
+		);
+		saveSession(ws.session);
+		broadcast(ws, {
+			type: "notice",
+			message: `Active provider changed — model "${current}" isn't available there, this session switched to "${defaultModel}".`,
+		});
+		broadcastSessionUpdate(ws);
+	}
+
+	/**
 	 * Same `buildSystemPrompt` core call the TUI's /persona and /model handlers
 	 * use (src/ui/commands.ts `rebuildSystemPrompt`) — kept here as a direct
 	 * call rather than a re-wrapped helper so this file doesn't grow its own
@@ -669,6 +760,11 @@ export function createWebBridge(result: StartupResult): WebBridge {
 		runSessionStartHook = true,
 		worktree?: SessionWorktree,
 	): WebAgentSession {
+		// New sessions must start on whatever provider/model settings.json
+		// currently declares — not whatever was active when the daemon booted
+		// (see syncActiveProviderFromSettings). Otherwise /new keeps producing
+		// sessions on the stale startup provider even after an external switch.
+		syncActiveProviderFromSettings();
 		const persona = personaName ? (resolvePersona(personaName) ?? currentPersona) : currentPersona;
 		const model = modelOverride ?? defaultModel;
 
@@ -891,6 +987,14 @@ export function createWebBridge(result: StartupResult): WebBridge {
 			ws.runner.steeringQueue.enqueue({ role: "user", content: buildUserContent(text, images) } as Message);
 			return;
 		}
+
+		// A provider/model switch made outside this daemon (the TUI process, or
+		// a manual settings.json edit) must take effect on this turn — otherwise
+		// the daemon keeps calling the endpoint it started on with the model the
+		// user picked elsewhere (400 / 429 until a restart). Reconcile the
+		// session's model id against the new provider when the endpoint moved.
+		const { endpointChanged } = syncActiveProviderFromSettings();
+		if (endpointChanged) await reconcileSessionModel(ws);
 
 		const sessionCwd = ws.session.cwd ?? cwd;
 		// Claim the turn before awaiting hooks. Otherwise two requests can both
