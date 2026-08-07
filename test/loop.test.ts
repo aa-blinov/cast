@@ -3649,3 +3649,46 @@ describe("waitForToolBatch", () => {
 		}
 	});
 });
+
+describe("runAgentLoop — abort always ends a hung tool batch", () => {
+	it("closes the batch after the grace period when an MCP tool ignores the abort signal", async () => {
+		const events: AgentEvent[] = [];
+		// First completion: a single tool call to a hung MCP server.
+		vi.mocked(streamAndCollect).mockImplementationOnce(async () => ({
+			content: "",
+			thinking: "",
+			finishReason: "tool_calls",
+			toolCalls: [{ id: "1", name: "mcp_hang_test", arguments: "{}" }],
+		}));
+
+		const ac = new AbortController();
+		// The server accepts the call but never responds and never listens to
+		// the abort signal — before waitForToolBatch this kept the whole turn
+		// (and every Esc) open forever.
+		const mcpToolIndex = new Map<string, unknown>([["mcp_hang_test", { call: () => new Promise<never>(() => {}) }]]);
+
+		const startedAt = Date.now();
+		const runPromise = runAgentLoop([{ role: "user", content: "hi" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			signal: ac.signal,
+			mcpTools: [{ type: "function", function: { name: "mcp_hang_test", parameters: {} } }],
+			mcpToolIndex: mcpToolIndex as never,
+			onEvent: (event) => events.push(event),
+		});
+
+		// Let the loop reach the tool round, then abort.
+		await new Promise((resolve) => setTimeout(resolve, 150));
+		ac.abort();
+
+		await runPromise;
+		const elapsed = Date.now() - startedAt;
+
+		const endEvents = events.filter((e) => e.type === "end");
+		expect(endEvents.some((e) => (e as { reason?: string }).reason === "aborted")).toBe(true);
+		// 2s grace + margin — pre-fix this never resolved at all.
+		expect(elapsed).toBeLessThan(5000);
+	});
+});
