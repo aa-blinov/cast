@@ -282,7 +282,7 @@ async function runPromptInner(
 			confirmBash:
 				permissionMode === "bypass"
 					? undefined
-					: (_command: string, _reason: string) => requestPermissionViaBridge(client),
+					: (command: string, reason: string) => requestPermissionViaBridge(client, command, reason),
 			mcpTools: startup.mcpResult.toolDefinitions,
 			mcpToolIndex: startup.mcpResult.toolIndex,
 			hooks: startup.hooks,
@@ -310,9 +310,21 @@ async function runPromptInner(
 	}
 }
 
-async function requestPermissionViaBridge(client: {
-	request(method: string, params: unknown): Promise<unknown>;
-}): Promise<boolean> {
+export async function requestPermissionViaBridge(
+	client: {
+		request(method: string, params: unknown): Promise<unknown>;
+	},
+	command: string,
+	reason: string,
+): Promise<boolean> {
+	// Session-scoped memory: if the user previously said "allow always" or
+	// "reject always" for the same command + reason pair, reuse that verdict
+	// without bothering the editor. Cleared when the session is closed.
+	const memo = alwaysVerdict.get(client);
+	if (memo) {
+		const verdict = memo.get(`${command}\u0000${reason}`);
+		if (verdict !== undefined) return verdict;
+	}
 	const requestId = `perm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 	const TIMEOUT_MS = 60_000;
 	try {
@@ -323,22 +335,39 @@ async function requestPermissionViaBridge(client: {
 					title: "bash",
 					kind: "execute",
 					status: "pending",
-					rawInput: {},
+					rawInput: { command },
 				},
 				options: [
 					{ kind: "allow_once", name: "Allow once", optionId: "allow_once" },
+					{ kind: "allow_always", name: "Allow for this session", optionId: "allow_always" },
 					{ kind: "reject_once", name: "Reject", optionId: "reject_once" },
+					{ kind: "reject_always", name: "Reject for this session", optionId: "reject_always" },
 				],
 			}),
 			new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), TIMEOUT_MS)),
 		]);
 		if (outcome === "timeout") return false;
 		const response = outcome as { outcome: { outcome: string; optionId?: string } };
-		return response.outcome.outcome === "selected" && response.outcome.optionId === "allow_once";
+		if (response.outcome.outcome !== "selected") return false;
+		const opt = response.outcome.optionId;
+		const granted = opt === "allow_once" || opt === "allow_always";
+		if (opt === "allow_always" || opt === "reject_always") {
+			const store = alwaysVerdict.get(client) ?? new Map<string, boolean>();
+			store.set(`${command}\u0000${reason}`, granted);
+			alwaysVerdict.set(client, store);
+		}
+		return granted;
 	} catch {
 		return false;
 	}
 }
+
+// Per-client memoization of "allow always" / "reject always" decisions.
+// Keyed by the client object identity so a fresh connection starts empty.
+const alwaysVerdict = new WeakMap<
+	{ request(method: string, params: unknown): Promise<unknown> },
+	Map<string, boolean>
+>();
 
 // ---------------------------------------------------------------------------
 // Event translation
