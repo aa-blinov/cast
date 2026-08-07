@@ -27,6 +27,10 @@ export interface AcpAdapterSession {
 	planState: PlanState;
 	/** Cumulative session cost in USD, accumulated across `usage` events. */
 	totalCost: number;
+	/** Last seen `usage` event payload. Re-emitted on mid-turn prompts so the
+	 * editor's running-cost indicator updates even when the current turn
+	 * hasn't finished and the next `usage` event is still pending. */
+	lastUsage: { used: number; size: number } | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -132,7 +136,7 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 					}
 				},
 			});
-			return { state: session, startup, runner, planState, totalCost: 0 };
+			return { state: session, startup, runner, planState, totalCost: 0, lastUsage: null };
 		},
 
 		loadSession: (sessionId: string, _startup, _opts, client): AcpAdapterSession | null => {
@@ -147,7 +151,7 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 			// replay is a flat stream of `user_message_chunk` /
 			// `agent_message_chunk` updates in chronological order.
 			void replaySessionHistory(state, client);
-			return { state, startup: _startup, runner, planState, totalCost: 0 };
+			return { state, startup: _startup, runner, planState, totalCost: 0, lastUsage: null };
 		},
 
 		closeSession: (sessionId: string, sessions): void => {
@@ -198,6 +202,21 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 			}
 			if (runner.isRunning) {
 				runner.followUpQueue.enqueue(message);
+				// Re-emit the last usage snapshot so the editor's running-cost
+				// indicator advances even though no new model call has run yet.
+				if (session.lastUsage) {
+					client
+						.notify("session/update", {
+							sessionId: session.state.id,
+							update: {
+								sessionUpdate: "usage_update",
+								used: session.lastUsage.used,
+								size: session.lastUsage.size,
+								cost: { amount: session.totalCost, currency: "USD" },
+							},
+						})
+						.catch(() => {});
+				}
 				return { stopReason: "end_turn" };
 			}
 			await runPromptInner(session, opts.permissionMode, message, client);
@@ -474,6 +493,7 @@ export function translateEvent(
 			const used = event.usage.totalTokens;
 			const size = session.startup.config.contextWindow;
 			session.totalCost += event.usage.cost ?? 0;
+			session.lastUsage = { used, size };
 			notify({
 				sessionUpdate: "usage_update",
 				used,

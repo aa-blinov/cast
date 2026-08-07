@@ -228,6 +228,38 @@ describe("ACP adapter", () => {
 		});
 	});
 
+	it("mid-turn submitPrompt re-emits last usage_update", async () => {
+		const { session, runner } = makeSession();
+		runner.isRunning = true;
+		session.lastUsage = { used: 5_000, size: 200_000 };
+		session.totalCost = 0.42;
+		mockClient.notify.mockClear();
+		await adapter.submitPrompt("sid", [{ type: "text", text: "follow-up" }], session, mockClient as any, {
+			version: "test",
+			permissionMode: "default",
+		});
+		const calls = mockClient.notify.mock.calls;
+		const usageCall = calls.find((c: unknown[]) => (c[1] as any).update?.sessionUpdate === "usage_update");
+		expect(usageCall).toBeDefined();
+		expect((usageCall![1] as any).update.used).toBe(5_000);
+		expect((usageCall![1] as any).update.size).toBe(200_000);
+		expect((usageCall![1] as any).update.cost).toEqual({ amount: 0.42, currency: "USD" });
+	});
+
+	it("mid-turn submitPrompt without prior usage does not emit usage_update", async () => {
+		const { session, runner } = makeSession();
+		runner.isRunning = true;
+		session.lastUsage = null;
+		mockClient.notify.mockClear();
+		await adapter.submitPrompt("sid", [{ type: "text", text: "follow-up" }], session, mockClient as any, {
+			version: "test",
+			permissionMode: "default",
+		});
+		const calls = mockClient.notify.mock.calls;
+		const usageCall = calls.find((c: unknown[]) => (c[1] as any).update?.sessionUpdate === "usage_update");
+		expect(usageCall).toBeUndefined();
+	});
+
 	it("submitPrompt in bypass mode calls runAgentLoop without confirmBash", async () => {
 		const { session } = makeSession();
 		runAgentLoopSpy.mockResolvedValueOnce(undefined);
