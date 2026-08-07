@@ -64,7 +64,7 @@ export interface AcpAdapter {
 		opts: AcpAdapterOptions,
 		client: { notify(method: string, params: unknown): Promise<void> },
 	): AcpAdapterSession | null;
-	closeSession(sessionId: string, sessions: Map<string, AcpAdapterSession>): void;
+	closeSession(sessionId: string, sessions: Map<string, AcpAdapterSession>): Promise<void>;
 	listSessions(): { sessions: Array<{ sessionId: string; cwd: string; title?: string }> };
 	setSessionMode(modeId: string, session: AcpAdapterSession): Record<string, never>;
 	submitPrompt(
@@ -154,7 +154,7 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 			return { state, startup: _startup, runner, planState, totalCost: 0, lastUsage: null };
 		},
 
-		closeSession: (sessionId: string, sessions): void => {
+		closeSession(sessionId: string, sessions: Map<string, AcpAdapterSession>): Promise<void> {
 			const s = sessions.get(sessionId);
 			if (s) {
 				s.runner.abort("acp close");
@@ -162,6 +162,12 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 				sessions.delete(sessionId);
 			}
 			deleteSession(sessionId);
+			// Wait for the runner to settle before returning so the editor can
+			// assume the session is fully torn down on close — no straggling
+			// `session/update` events arriving after the response. `waitForIdle`
+			// resolves immediately when `isRunning` is already false, so the
+			// happy path stays cheap.
+			return s ? s.runner.waitForIdle() : Promise.resolve();
 		},
 
 		listSessions: () => {

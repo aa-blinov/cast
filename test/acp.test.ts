@@ -156,13 +156,25 @@ describe("ACP adapter", () => {
 		expect(result.sessions[1].cwd).toBe("/b");
 	});
 
-	it("closeSession deletes and aborts", () => {
+	it("closeSession deletes and aborts", async () => {
 		const { session, runner } = makeSession();
 		const sessions = new Map([[session.state.id, session]]);
-		adapter.closeSession(session.state.id, sessions);
+		await adapter.closeSession(session.state.id, sessions);
 		expect(sessions.has(session.state.id)).toBe(false);
 		expect(runner.abort).toHaveBeenCalledWith("acp close");
 		expect(deleteSession).toHaveBeenCalledWith(session.state.id);
+	});
+
+	it("closeSession awaits runner.waitForIdle before returning", async () => {
+		const { session } = makeSession();
+		const order: string[] = [];
+		session.runner.abort = vi.fn(() => order.push("abort"));
+		(session.runner as { waitForIdle: ReturnType<typeof vi.fn> }).waitForIdle = vi.fn(async () => {
+			order.push("waitForIdle");
+		});
+		const sessions = new Map([[session.state.id, session]]);
+		await adapter.closeSession(session.state.id, sessions);
+		expect(order).toEqual(["abort", "waitForIdle"]);
 	});
 
 	it("setSessionMode toggles plan state", () => {
@@ -660,5 +672,24 @@ describe("Permission flow", () => {
 		await requestWritePermissionViaBridge(client, "write", "/tmp/a", "write to /tmp/a");
 		await requestWritePermissionViaBridge(client, "write", "/tmp/a", "write to /tmp/a");
 		expect(client.request).toHaveBeenCalledOnce();
+	});
+});
+
+describe("JSON-RPC error surface", () => {
+	it("session/load for unknown session throws -32004 RequestError", async () => {
+		const acp = await import("@agentclientprotocol/sdk");
+		const err = new acp.RequestError(-32004, "Session missing not found", { sessionId: "missing" });
+		expect(err).toBeInstanceOf(Error);
+		expect(err.code).toBe(-32004);
+		expect(err.message).toBe("Session missing not found");
+		expect(err.data).toEqual({ sessionId: "missing" });
+	});
+
+	it("session/load adapter returns null when session does not exist", async () => {
+		const localAdapter = createAcpAdapter({ version: "test", permissionMode: "default" });
+		const localClient = { notify: vi.fn(async () => {}), request: vi.fn(async () => ({})) };
+		(loadSession as any).mockReturnValue(null);
+		const result = localAdapter.loadSession("nonexistent", {} as any, {} as any, localClient as any);
+		expect(result).toBeNull();
 	});
 });
