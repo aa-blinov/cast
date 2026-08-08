@@ -761,7 +761,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 	// Audit trail of live agent events (tool_start, retry, doom_loop, error,
 	// end, …) — see session_events in db.ts. Deliberately not part of the
 	// conversation history: this is execution telemetry.
-	route("GET", "/api/sessions/:id/events/history", (req, res, params) => {
+	route("GET", "/api/sessions/:id/events/history", (_req, res, params) => {
 		if (!bridge.getSession(params.id)) return json(res, { error: "Not found" }, 404);
 		json(res, { events: getSessionEvents(params.id) });
 	});

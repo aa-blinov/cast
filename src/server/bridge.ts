@@ -104,6 +104,7 @@ import { sessionInputsDir } from "./inputs.ts";
 const SYSTEM_REMINDER_RE = /<system-reminder>([\s\S]*?)<\/system-reminder>/g;
 const GITHUB_URL_RE = /^https?:\/\/(?:www\.)?github\.com\//i;
 const FRONTMATTER_STRIP_RE = /^---\n[\s\S]*?\n---\n?/;
+const WORKTREE_REMOVE_PREFIX_RE = /^(?:remove|rm)\s*(.*)$/;
 
 const execFileAsync = promisify(execFile);
 
@@ -2790,7 +2791,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				if (wts.length === 0) return { ok: true, result: "No active git worktrees found for this repository" };
 				return { ok: true, result: wts.map((w) => `${w.name} (${w.branch})`).join(", ") };
 			}
-			const rmMatch = /^(?:remove|rm)\s*(.*)$/.exec(arg);
+			const rmMatch = WORKTREE_REMOVE_PREFIX_RE.exec(arg);
 			if (rmMatch) {
 				const targetName = rmMatch[1]!.trim();
 				if (!targetName) return { ok: false, error: "Usage: /worktree remove <name>" };

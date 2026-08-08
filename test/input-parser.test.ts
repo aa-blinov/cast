@@ -64,7 +64,7 @@ describe("InputParser — sequence classification", () => {
 	it("reports DECXCPR coordinates to the registered cursor-position listener", () => {
 		const positions: Array<[number, number]> = [];
 		const buffer = new StdinBuffer();
-		const parser = new InputParser(
+		new InputParser(
 			() => {},
 			buffer,
 			(row, col) => positions.push([row, col]),
