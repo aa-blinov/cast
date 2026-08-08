@@ -2,6 +2,23 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.10
+
+### Added
+
+- **Older session history is paged instead of dumped.** Resuming a long session no longer floods the terminal scrollback with the whole transcript (which pushed the viewport past the buffer limit and made the start unreachable). Only the most recent turns load; `/older` or `PageUp` loads more on demand.
+- **`Ctrl+L` clears the composer in any state.** Idle `Esc` used to wipe typed text — a stray press deleted your message. Clearing now lives on `Ctrl+L` only, and `Esc` is reserved for stopping a running turn.
+
+### Changed
+
+- **Stopping a turn needs a deliberate double-`Esc`.** The first press shows `[Press Esc again to stop the turn]`; a second within 2 s aborts. A single stray `Esc` no longer kills a long in-flight turn.
+
+### Fixed
+
+- **The banner no longer disappears after startup.** `settleResync` (added in 0.13.7) cleared the screen ~0.5 s after mount, erasing the ASCII banner and composer frame because the banner lives outside Ink's tree. Light resyncs now reprint it.
+- **Clean exit: no terminal garbage after quitting.** A pending cursor-position query (`\x1b[6n`) could have its reply echoed into the shell once raw mode dropped (`^[[15;1R` etc.). Exiting now cancels the query, stops polling, and clears the screen.
+- **The question picker reports exactly what's wrong.** When a model omits an option's required `value` field, the error now names the offending option instead of a generic count message.
+
 ## 0.13.9
 
 ### Fixed
