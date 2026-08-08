@@ -165,7 +165,13 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 
 		// Whether the scroll flag can be trusted right now. Non-TTY stdin never
 		// polls, so staleness can't clear there — don't let it block forever.
-		const scrollKnown = () => !scrollUpStale || !process.stdin.isTTY;
+		// Same when DECXCPR is unavailable (raw mode off, or the poll gave up):
+		// the scroll state is unknowable, so don't gate resyncs on it — a
+		// resync (clear + replay) is what fixes a stacked display, and skipping
+		// it is worse than the rare repaint while the user happens to be
+		// scrolled up.
+		const decxprAvailable = () => !decxprDisabled && process.stdin.isRaw === true && isRawModeActive();
+		const scrollKnown = () => !scrollUpStale || !process.stdin.isTTY || !decxprAvailable();
 
 		// The clear below and the replayed frame it triggers (via onResync's state
 		// update, flushed by Ink on a later tick) are two separate writes with a
@@ -282,6 +288,13 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 			if (streamingNow || isTerminalSuspended()) {
 				scrollUpStale = true;
 				return;
+			}
+			// DECXCPR can't run here — the scroll state is unknowable, so don't
+			// latch scrollUp or block resyncs on a stale flag (that's what let a
+			// stacked display persist instead of being cleared and replayed).
+			if (!decxprAvailable()) {
+				scrollUp = false;
+				scrollUpStale = false;
 			}
 			if (resyncPending && !scrollUp && scrollKnown()) {
 				if (resizeTimer) clearTimeout(resizeTimer);
