@@ -5,6 +5,7 @@ import {
 	answerServerQuestion,
 	createServerSession,
 	ensureServerClient,
+	ensureServerSession,
 	getServerSession,
 	resolveServerPlanTransition,
 	runServerCommand,
@@ -247,13 +248,15 @@ export async function runNonInteractive(args: ParsedArgs, options: RunOptions): 
 	}
 
 	// Resolve model/persona/cwd the same way the TUI launcher does, then let
-	// the daemon create the session (it applies its own provider settings).
+	// the daemon create/resume the session (it applies its own provider settings).
 	const settings = loadSettings();
 	const cwd = process.env.CAST_CWD ? resolve(process.env.CAST_CWD) : resolve(".");
-	const sessionId = await createServerSession(client, {
+	const { id: sessionId } = await ensureServerSession(client, {
 		persona: args.cliPersona ?? settings.persona,
 		model: args.cliModel ?? settings.model,
 		cwd,
+		resumeId: args.resumeId,
+		resumeRequested: args.resumeRequested,
 	});
 
 	let failed = false;

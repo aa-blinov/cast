@@ -127,6 +127,42 @@ export async function createServerSession(
 	return (data as { id: string }).id;
 }
 
+/**
+ * Resolve the session id to use for a run: resume by explicit id, resume the
+ * most recent session in cwd (--continue), or create a fresh one. Returns the
+ * session id and whether it was resumed (affects SessionStart hooks).
+ */
+export async function ensureServerSession(
+	client: ServerClient,
+	options: { persona?: string; model?: string; cwd?: string; resumeId?: string; resumeRequested?: boolean },
+): Promise<{ id: string; resumed: boolean }> {
+	// Explicit id: GET hydrates it on the daemon (bridge.getSession → hydrateSession).
+	if (options.resumeId) {
+		const { status } = await serverFetch(client, `/api/sessions/${options.resumeId}`);
+		if (status === 200) return { id: options.resumeId, resumed: true };
+		throw new Error(`session ${options.resumeId} not found`);
+	}
+	// --continue: the most recent session in the same cwd (mirrors local
+	// startup's mostRecentSessionForProject).
+	if (options.resumeRequested) {
+		const { status, data } = await serverFetch(client, "/api/sessions");
+		if (status === 200) {
+			const list = data as Array<{ id: string; cwd?: string; updatedAt?: string }>;
+			const cwd = options.cwd ?? process.env.CAST_CWD;
+			const match = [...list]
+				.filter((s) => !cwd || s.cwd === cwd)
+				.sort((a, b) => String(b.updatedAt ?? "").localeCompare(String(a.updatedAt ?? "")))[0];
+			if (match) return { id: match.id, resumed: true };
+		}
+	}
+	const id = await createServerSession(client, {
+		persona: options.persona,
+		model: options.model,
+		cwd: options.cwd,
+	});
+	return { id, resumed: false };
+}
+
 /** Submit a prompt to a daemon session (fire-and-forget; events arrive on the SSE stream). */
 export async function submitServerChat(client: ServerClient, sessionId: string, text: string): Promise<void> {
 	const { status, data } = await serverFetch(client, `/api/sessions/${sessionId}/chat`, {
