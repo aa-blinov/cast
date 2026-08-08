@@ -2,6 +2,13 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.14
+
+### Fixed
+
+- **Opening a second `cast` while another was already running no longer strands the first on a dead daemon.** Two concurrent launches used to race on the empty state file and each spawn its own daemon; the one that lost the race was never registered, and a TUI already pointed at it reported "Daemon unreachable" on its next message. Daemon startup is now serialized by an exclusive lock — concurrent launches wait and reuse the winner instead of stacking a second process.
+- **An idle TUI now survives its daemon being replaced.** If the daemon is stopped, crashes, or is restarted by an upgrade, the next message in the open TUI re-reads the daemon state, reconnects to the new daemon, and retries — the session (owned by the central store) continues instead of erroring.
+
 ## 0.13.13
 
 ### Added

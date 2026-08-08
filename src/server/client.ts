@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 // provides a real global EventSource, so this import is Node-only and safe in
 // both runtimes.
 import { EventSource } from "undici";
-import { readLiveServerState, type ServerDaemonState } from "./daemon-state.ts";
+import { acquireStartLock, readLiveServerState, releaseStartLock, type ServerDaemonState } from "./daemon-state.ts";
 
 export interface ServerClient {
 	baseUrl: string;
@@ -33,12 +33,29 @@ export interface ServerClient {
  */
 export async function ensureServerClient(): Promise<ServerClient | undefined> {
 	if (process.env.CAST_NO_DAEMON === "1") return undefined;
-	const existing = readLiveServerState();
-	if (existing) return { baseUrl: `http://${existing.host}:${existing.port}`, token: existing.token };
 	try {
-		const state = await spawnDetachedDaemon();
-		if (!state) return undefined;
-		return { baseUrl: `http://${state.host}:${state.port}`, token: state.token };
+		// Same daemon-start race protection as index.ts's ensureDaemon: an
+		// exclusive lock serializes the spawn so a concurrent TUI launch can't
+		// stack a second daemon while this one's is still recording state.
+		const waitForDaemon = async (attempt: number): Promise<ServerClient | undefined> => {
+			if (attempt >= 100) return undefined;
+			const existing = readLiveServerState();
+			if (existing) return { baseUrl: `http://${existing.host}:${existing.port}`, token: existing.token };
+			if (!acquireStartLock()) {
+				await new Promise((r) => setTimeout(r, 100));
+				return waitForDaemon(attempt + 1);
+			}
+			try {
+				const now = readLiveServerState();
+				if (now) return { baseUrl: `http://${now.host}:${now.port}`, token: now.token };
+				const state = await spawnDetachedDaemon();
+				if (!state) return undefined;
+				return { baseUrl: `http://${state.host}:${state.port}`, token: state.token };
+			} finally {
+				releaseStartLock();
+			}
+		};
+		return await waitForDaemon(0);
 	} catch {
 		return undefined;
 	}

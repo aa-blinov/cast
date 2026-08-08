@@ -13,7 +13,7 @@
  * on the next read, not via a handler in the dying process.
  */
 
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -108,4 +108,59 @@ export function readLiveServerState(): ServerDaemonState | undefined {
 	if (isProcessAlive(state.pid)) return state;
 	clearServerState(); // stale — the recorded process is gone
 	return undefined;
+}
+
+function startLockPath(): string {
+	return join(homedir(), ".cast", "server-start.lock");
+}
+
+// The daemon-start race: two `cast` invocations starting at once both see an
+// empty state file (the first daemon hasn't written it yet — it writes only
+// once actually listening) and each spawns its own daemon. The last writer
+// wins server.json, the other daemon survives as an unregistered orphan that
+// a TUI already pointed at keeps talking to until it dies. An exclusive lock
+// file serializes the spawn: exactly one caller runs `server start` while the
+// others wait and then reuse whatever the winner recorded. The lock records
+// its holder's pid so a crashed holder (who never released) can be detected
+// and taken over instead of wedging every later start forever.
+export function acquireStartLock(): boolean {
+	const path = startLockPath();
+	try {
+		const fd = openSync(path, "wx");
+		try {
+			writeSync(fd, String(process.pid));
+		} finally {
+			closeSync(fd);
+		}
+		return true;
+	} catch {
+		try {
+			const holder = Number(readFileSync(path, "utf-8"));
+			if (!isProcessAlive(holder)) {
+				unlinkSync(path);
+				const fd = openSync(path, "wx");
+				try {
+					writeSync(fd, String(process.pid));
+				} finally {
+					closeSync(fd);
+				}
+				return true;
+			}
+		} catch {
+			// Unreadable/corrupt lock — treat as held rather than risk a
+			// duplicate daemon; the holder (if real) writes state soon and
+			// the caller's readLiveServerState loop picks it up.
+		}
+		return false;
+	}
+}
+
+export function releaseStartLock(): void {
+	const path = startLockPath();
+	try {
+		const holder = Number(readFileSync(path, "utf-8"));
+		if (holder === process.pid) unlinkSync(path);
+	} catch {
+		/* already gone — fine */
+	}
 }
