@@ -54,9 +54,10 @@ async function spawnDetachedDaemon(): Promise<ServerDaemonState | undefined> {
 	const logFile = join(homedir(), ".cast", "server.log");
 	const selfPath = fileURLToPath(import.meta.url);
 	const isRelease = selfPath.includes("/dist/");
-	// index.ts: spawnCwd = dirname(cli entry) + ".."; dev spawns the tsx
-	// source, release spawns dist/index.js server start.
-	const spawnCwd = join(dirname(selfPath), "..");
+	// In dev (tsx) this module is src/server/client.ts → repo root is two
+	// levels up; in release it is inlined into dist/index.js → repo root is
+	// one level up from dist/. Match index.ts's spawnCwd accordingly.
+	const spawnCwd = isRelease ? join(dirname(selfPath), "..") : join(dirname(selfPath), "..", "..");
 	const args = isRelease
 		? [join(spawnCwd, "dist", "index.js"), "server", "start", "--port", "0"]
 		: ["--import", "tsx", "./src/server/index.ts", "--port", "0", "--host", "127.0.0.1"];
@@ -200,7 +201,8 @@ export async function setServerMode(client: ServerClient, sessionId: string, mod
 		method: "POST",
 		body: { mode },
 	});
-	if (status !== 202) throw new Error(`mode change failed (HTTP ${status})`);
+	// /mode replies 200 on success (unlike /chat and /question which use 202).
+	if (status !== 200 && status !== 202) throw new Error(`mode change failed (HTTP ${status})`);
 }
 
 /** Answer a pending question on a daemon session. */

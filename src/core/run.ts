@@ -3,7 +3,6 @@ import { resolve } from "node:path";
 import { createInterface } from "node:readline";
 import {
 	answerServerQuestion,
-	createServerSession,
 	ensureServerClient,
 	ensureServerSession,
 	getServerSession,
@@ -92,10 +91,12 @@ export async function runInteractive(args: ParsedArgs): Promise<void> {
 	}
 	const settings = loadSettings();
 	const cwd = process.env.CAST_CWD ? resolve(process.env.CAST_CWD) : resolve(".");
-	const sessionId = await createServerSession(client, {
+	const { id: sessionId } = await ensureServerSession(client, {
 		persona: args.cliPersona ?? settings.persona,
 		model: args.cliModel ?? settings.model,
 		cwd,
+		resumeId: args.resumeId,
+		resumeRequested: args.resumeRequested,
 	});
 
 	const emit = (type: string, data: Record<string, unknown> = {}) => {
@@ -174,7 +175,9 @@ export async function runInteractive(args: ParsedArgs): Promise<void> {
 		if (action.type === "command") {
 			try {
 				const result = await runServerCommand(client, sessionId, `/${action.name}${action.args}`);
-				emit("notice", { text: String(result ?? "") });
+				emit("notice", {
+					text: result && typeof result === "object" ? JSON.stringify(result) : String(result ?? ""),
+				});
 			} catch (e) {
 				emit("error", { message: e instanceof Error ? e.message : String(e) });
 			}
@@ -187,9 +190,11 @@ export async function runInteractive(args: ParsedArgs): Promise<void> {
 			return true;
 		}
 		if (action.type === "answer_question") {
+			// answerServerQuestion resolves the pending question AND submits the
+			// rendered answer on the server (bridge.answerQuestion → submit) —
+			// don't submit again, just wait for the turn to settle.
 			await answerServerQuestion(client, sessionId, action.values);
 			const idle = waitForIdle();
-			await submitServerChat(client, sessionId, action.values.join(" "));
 			await idle;
 			await emitState();
 			return true;
@@ -200,6 +205,9 @@ export async function runInteractive(args: ParsedArgs): Promise<void> {
 				await emitState();
 				return true;
 			}
+			// Approving switches the session to build mode (the local runner did
+			// the same: session.mode = "build") so the model can edit real files.
+			await setServerMode(client, sessionId, "build");
 			const idle = waitForIdle();
 			await submitServerChat(
 				client,
