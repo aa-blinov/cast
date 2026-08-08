@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.6
+
+### Fixed
+
+- **A stacked display (composer rendered above the input) is now corrected.** When DECXCPR scroll detection was unavailable, the cleanup resync never fired and the mis-rendered layout persisted; the resync now proceeds even without scroll detection, so the display self-heals.
+
 ## 0.13.5
 
 ### Fixed
