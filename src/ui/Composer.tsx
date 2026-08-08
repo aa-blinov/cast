@@ -367,15 +367,11 @@ export function Composer({
 					return;
 				}
 			}
-		} else {
-			if (event.type === "binding" && event.binding === "input.escape") {
-				// Idle Esc clears the composer.
-				b.clear();
-				setPendingPastes([]);
-				chipCounterRef.current = 0;
-				return;
-			}
 		}
+		// Note: idle Esc intentionally does nothing — composer clearing moved to
+		// Ctrl+L (editor.clearBuffer), which works in any state. Esc is only
+		// stop-with-confirmation while running; leaving it idle-no-op keeps a
+		// stray Esc from wiping typed text.
 
 		if (event.type === "binding") {
 			switch (event.binding) {
