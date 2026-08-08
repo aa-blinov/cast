@@ -533,7 +533,25 @@ export function Composer({
 		};
 		registerStdinOwner(owner);
 
+		// Some terminals / SSH wrappers quietly drop raw mode (echo + line
+		// buffering come back), which makes typed text echo below the composer
+		// frame instead of entering it. Re-assert raw mode whenever it's
+		// actually gone — cheap (idempotent) and recovers any such terminal
+		// within a couple of seconds. Uses process.stdin directly (not Ink's
+		// counted setRawMode) so repeated re-asserts can't leak the count.
+		const rawWatchdog = setInterval(() => {
+			if (process.stdin.isTTY && process.stdin.isRaw !== true) {
+				try {
+					process.stdin.setRawMode(true);
+					setRawModeActive(true);
+				} catch {
+					// not a TTY / can't set — nothing more to do
+				}
+			}
+		}, 2000);
+
 		return () => {
+			clearInterval(rawWatchdog);
 			unregisterStdinOwner(owner);
 			stdinBuf.destroy();
 			setRawMode(false);
