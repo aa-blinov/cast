@@ -375,9 +375,16 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 		// stdin listener here, which used to put the stream in flowing mode
 		// and swallow user keystrokes for the whole query window.
 		let activeDecxprCleanup: ((scrolled: boolean) => void) | null = null;
+		// Set once a query times out without a response: the terminal either
+		// never answers \x1b[6n or echoes it (raw mode lost) without ever
+		// delivering it to the input pipeline. Either way, more queries just
+		// re-echo — give up on the DECXCPR layer for the session (the CUU
+		// height heuristic still detects tall frames).
+		let decxprDisabled = false;
 
 		function startQuery() {
 			if (!process.stdin.isTTY) return;
+			if (decxprDisabled) return;
 			// Only query when stdin is ACTUALLY in raw mode. The app's
 			// isRawModeActive flag can disagree with the tty (raw mode lost
 			// across a suspend/SSH quirk); querying a cooked tty makes the
@@ -415,7 +422,10 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 			origWrite(QUERY);
 
 			queryTimeout = setTimeout(() => {
-				// Terminal didn't respond — assume no scroll.
+				// Terminal didn't respond (or echoed it instead of delivering) —
+				// assume no scroll, and stop asking: repeated queries would just
+				// keep echoing the same garbage.
+				decxprDisabled = true;
 				cleanup(false);
 			}, TIMEOUT_MS);
 		}
@@ -424,6 +434,8 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 		// pipeline (InputParser → reportDecxpr), so no stdin listener here.
 		setDecxprListener((row) => {
 			if (!decxprActive) return;
+			// A real answer means DECXCPR works on this terminal — keep polling.
+			decxprDisabled = false;
 			activeDecxprCleanup?.(row > (out.rows || 24));
 		});
 
