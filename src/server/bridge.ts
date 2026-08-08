@@ -64,6 +64,7 @@ import {
 	createSession,
 	deleteSession,
 	dropLastCheckpoint,
+	getHistoryPage,
 	listSessionSummaries,
 	loadSession,
 	loadSessionByShareToken,
@@ -2727,10 +2728,12 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			};
 		}
 		if (name === "/older") {
-			// The web client pages history via GET /api/sessions/:id/history;
-			// expose the same page here. With no explicit page this returns the
-			// most recent slice (same as the TUI's initial window).
-			return { ok: true, result: "use GET /api/sessions/:id/history?turns=N" };
+			// In the TUI /older prepends the previous history page to the
+			// scrollback. Headless has no scrollback; report whether older
+			// turns exist (the web client pages them via GET
+			// /api/sessions/:id/history?before=<seq>).
+			const page = getHistoryPage(ws.session.id, undefined, 1);
+			return { ok: true, result: { hasMoreHistory: page.hasMore, oldestSeq: page.oldestSeq ?? null } };
 		}
 		if (name === "/keys") {
 			return { ok: true, result: "keybindings are a TUI concept; see docs or /help for commands" };
