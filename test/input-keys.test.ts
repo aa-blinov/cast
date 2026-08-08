@@ -186,4 +186,16 @@ describe("keybindings.ts — KeybindingsManager", () => {
 		expect(km.matches("\x13", "input.submit")).toBe(true);
 		expect(km.matches("\r", "input.submit")).toBe(false);
 	});
+
+	it("matches history.older to PageUp", () => {
+		const km = new KeybindingsManager();
+		expect(km.matches("\x1b[5~", "history.older")).toBe(true);
+		expect(km.matches("\r", "history.older")).toBe(false);
+	});
+
+	it("matches editor.clearBuffer to Ctrl-L", () => {
+		const km = new KeybindingsManager();
+		expect(km.matches("\x0c", "editor.clearBuffer")).toBe(true);
+		expect(km.matches("\r", "editor.clearBuffer")).toBe(false);
+	});
 });

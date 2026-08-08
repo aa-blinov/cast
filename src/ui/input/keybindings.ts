@@ -23,11 +23,13 @@ export const TUI_KEYBINDINGS = {
 	"editor.deleteWordForward": { defaultKeys: ["alt+d", "alt+delete"] },
 	"editor.deleteToLineStart": { defaultKeys: "ctrl+u" },
 	"editor.deleteToLineEnd": { defaultKeys: "ctrl+k" },
+	"editor.clearBuffer": { defaultKeys: "ctrl+l", description: "Clear the composer in any state" },
 	"input.submit": { defaultKeys: "enter" },
 	"input.abort": { defaultKeys: "ctrl+c" },
 	"input.escape": { defaultKeys: "escape" },
 	"input.attachImage": { defaultKeys: "ctrl+g" },
 	"input.tab": { defaultKeys: "tab" },
+	"history.older": { defaultKeys: "pageUp", description: "Load older session history" },
 } as const satisfies KeybindingDefinitions;
 
 export type Keybinding = keyof typeof TUI_KEYBINDINGS;

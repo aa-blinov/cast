@@ -30,6 +30,7 @@ const BINDING_ORDER: Keybinding[] = [
 	"editor.deleteWordForward",
 	"editor.deleteToLineStart",
 	"editor.deleteToLineEnd",
+	"editor.clearBuffer",
 	"editor.cursorWordLeft",
 	"editor.cursorWordRight",
 	"editor.cursorLineStart",
@@ -41,6 +42,7 @@ const BINDING_ORDER: Keybinding[] = [
 	"editor.cursorLeft",
 	"editor.cursorRight",
 	"input.tab",
+	"history.older",
 ];
 
 /**

@@ -758,6 +758,27 @@ describe("plan", () => {
 			expect(readPlanQuestion(state)).toBeUndefined();
 		});
 
+		it("names the option missing the required value field", () => {
+			const state = testState("question-missing-value");
+			const result = execQuestion(
+				{
+					questions: [
+						{
+							question: "Pick one",
+							options: [
+								{ label: "First", description: "No value here" },
+								{ value: "second", label: "Second" },
+							],
+						},
+					],
+				},
+				state,
+			);
+			expect(result.isError).toBe(true);
+			expect(result.content).toContain('missing the required "value" field');
+			expect(result.content).toContain('"First"');
+		});
+
 		it("requires distinct, bounded choices", () => {
 			const state = testState("question-2");
 			const result = execQuestion(

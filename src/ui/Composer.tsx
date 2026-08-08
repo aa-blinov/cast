@@ -25,6 +25,8 @@ interface ComposerProps {
 	onAbort: () => void;
 	onExit: () => void;
 	onPasteImage?: () => Promise<string | null>;
+	/** Load older session history (PageUp). */
+	onLoadOlder?: () => void;
 	running: boolean;
 	locked: boolean;
 	/** Loaded, enabled skills — merged into the palette as native `/<skill-id>`
@@ -103,6 +105,7 @@ export function Composer({
 	onAbort,
 	onExit,
 	onPasteImage,
+	onLoadOlder,
 	running,
 	locked,
 	skills,
@@ -136,6 +139,8 @@ export function Composer({
 	onExitRef.current = onExit;
 	const onPasteImageRef = useRef(onPasteImage);
 	onPasteImageRef.current = onPasteImage;
+	const onLoadOlderRef = useRef(onLoadOlder);
+	onLoadOlderRef.current = onLoadOlder;
 	const lastCtrlCRef = useRef(0);
 	const lockedRef = useRef(locked);
 	lockedRef.current = locked;
@@ -145,10 +150,17 @@ export function Composer({
 	// timer calling setState on a dead component.
 	const exitHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const imageNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	// Esc is stop-with-confirmation while running: first press arms the hint,
+	// a second within 2s aborts. One stray Esc (fat-finger, switching windows)
+	// would otherwise kill a long in-flight turn for nothing.
+	const escHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const lastEscRef = useRef(0);
+	const [escHint, setEscHint] = useState(false);
 	useEffect(
 		() => () => {
 			if (exitHintTimerRef.current) clearTimeout(exitHintTimerRef.current);
 			if (imageNoticeTimerRef.current) clearTimeout(imageNoticeTimerRef.current);
+			if (escHintTimerRef.current) clearTimeout(escHintTimerRef.current);
 		},
 		[],
 	);
@@ -300,9 +312,22 @@ export function Composer({
 		// Esc stops a running turn — the headline behavior, checked before
 		// anything else so it wins regardless of what's in the composer (an open
 		// command palette, a half-typed /steer). The buffer is left intact so
-		// that in-progress text isn't lost when the turn is aborted.
+		// that in-progress text isn't lost when the turn is aborted. First press
+		// arms the hint, a second within 2s aborts — one stray Esc (fat-finger,
+		// switching windows) shouldn't kill a long in-flight turn.
 		if (event.type === "binding" && event.binding === "input.escape" && runningRef.current) {
-			onAbortRef.current();
+			const now = Date.now();
+			if (now - lastEscRef.current < 2000) {
+				lastEscRef.current = 0;
+				setEscHint(false);
+				if (escHintTimerRef.current) clearTimeout(escHintTimerRef.current);
+				onAbortRef.current();
+				return;
+			}
+			lastEscRef.current = now;
+			setEscHint(true);
+			if (escHintTimerRef.current) clearTimeout(escHintTimerRef.current);
+			escHintTimerRef.current = setTimeout(() => setEscHint(false), 2000);
 			return;
 		}
 
@@ -365,6 +390,9 @@ export function Composer({
 					break;
 				case "input.tab":
 					break;
+				case "history.older":
+					onLoadOlderRef.current?.();
+					break;
 				case "editor.cursorUp":
 					b.moveUp();
 					break;
@@ -406,6 +434,15 @@ export function Composer({
 					break;
 				case "editor.deleteToLineEnd":
 					b.deleteToLineEnd();
+					break;
+				case "editor.clearBuffer":
+					// Clear the composer in ANY state (idle, running, palette open)
+					// — Esc only clears while idle, and is stop-with-confirmation
+					// while running, so this is the always-available nuke.
+					b.clear();
+					setPendingPastes([]);
+					chipCounterRef.current = 0;
+					setPaletteIdx(0);
 					break;
 				case "input.escape":
 					break;
@@ -606,6 +643,11 @@ export function Composer({
 					<Text color={theme().warning}>[Press Ctrl+C again to exit]</Text>
 				</Box>
 			)}
+			{escHint && (
+				<Box>
+					<Text color={theme().warning}>[Press Esc again to stop the turn]</Text>
+				</Box>
+			)}
 			<Box
 				flexDirection="column"
 				borderStyle="round"
@@ -619,7 +661,7 @@ export function Composer({
 						</Text>
 						<Text color={theme().muted}>
 							{running
-								? "Esc to stop · /queue to queue, /steer to inject..."
+								? "Esc twice to stop · /queue to queue, /steer to inject..."
 								: "type / for commands, Ctrl+G to attach image"}
 						</Text>
 					</Text>

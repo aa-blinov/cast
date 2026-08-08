@@ -20,7 +20,8 @@ import {
 	appendCheckpoint,
 	appendMessage,
 	clearSessionMessages,
-	getFullHistory,
+	getHistoryPage,
+	type HistoryPage,
 	recordCompaction,
 	resetSessionContext,
 	type SessionState,
@@ -40,6 +41,12 @@ import {
 import { displayWidthCacheFlush } from "./display-width.ts";
 
 export type AgentStatus = "idle" | "running" | "error";
+
+// How many turns of history the TUI loads at once. Deliberately small (the
+// web client pages by 30): a single turn can contain dozens of tool messages,
+// and a handful of turns must still fit inside a typical terminal scrollback.
+// Older turns are fetched on demand via loadOlder (/older, PageUp).
+export const TUI_HISTORY_PAGE_TURNS = 5;
 
 export interface ToolCallEntry {
 	id: string;
@@ -201,6 +208,17 @@ export interface UseAgentSession {
 	/** Re-reads the on-disk session messages into the in-memory list. */
 	refresh: () => void;
 	refreshMeta: () => void;
+	/** True when the session has older turns beyond the loaded history page.
+	 *  The TUI only loads the most recent page on resume; loadOlder pages back
+	 *  through the rest on demand. */
+	hasOlder: boolean;
+	/**
+	 * Prepend the previous page of history to the transcript. Returns true when
+	 * a page was loaded. Prepending shifts every index the <Static> already
+	 * committed, so the caller must trigger a full replay (clear + bump the
+	 * <Static> key) right after — same machinery as a theme change.
+	 */
+	loadOlder: () => boolean;
 	resetQueue: () => void;
 	addDisplayMessage: (message: ChatMessage) => void;
 	/**
@@ -444,7 +462,23 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	// daemon does, and events arrive over SSE. Local path (runner, runAgentLoop)
 	// is fully preserved when daemonUrl is unset.
 	const isClient = !!daemonUrl;
-	const [messages, setMessages] = useState<ChatMessage[]>(() => buildDisplayMessages(getFullHistory(session.id)));
+	// Load only the most recent page of history on resume. Loading the full
+	// history (getFullHistory) dumped thousands of lines into the terminal's
+	// scrollback at once, pushing the viewport to the bottom and past the
+	// scrollback buffer limit — the start of a long session became unreachable.
+	// Older turns are fetched on demand via loadOlder (the /older command /
+	// PageUp), one page at a time. The page is deliberately small (a few turns,
+	// not the web client's 30): a turn can carry dozens of tool messages, and
+	// even a handful of turns must fit inside a typical terminal scrollback.
+	const initialPageRef = useRef<HistoryPage | null>(null);
+	if (initialPageRef.current === null) {
+		initialPageRef.current = getHistoryPage(session.id, undefined, TUI_HISTORY_PAGE_TURNS);
+	}
+	const [messages, setMessages] = useState<ChatMessage[]>(() =>
+		buildDisplayMessages(initialPageRef.current!.messages),
+	);
+	const [hasOlder, setHasOlder] = useState(() => initialPageRef.current!.hasMore);
+	const oldestSeqRef = useRef<number | undefined>(initialPageRef.current!.oldestSeq);
 	const [streaming, setStreaming] = useState<StreamingState | null>(null);
 	const [status, setStatus] = useState<AgentStatus>("idle");
 	const [error, setError] = useState<string | null>(null);
@@ -638,9 +672,30 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	// below fires exactly once; every other call site (compaction, /clear,
 	// session switch) invokes refresh() explicitly at a turn boundary.
 	const refresh = useCallback(() => {
-		setMessages(buildDisplayMessages(getFullHistory(session.id)));
+		const page = getHistoryPage(session.id, undefined, TUI_HISTORY_PAGE_TURNS);
+		setMessages(buildDisplayMessages(page.messages));
+		oldestSeqRef.current = page.oldestSeq;
+		setHasOlder(page.hasMore);
 		setUsage({ ...session.usage });
 		setLastTurnUsage(null);
+	}, [session]);
+
+	// Loads the page of history older than the currently-loaded window and
+	// prepends it to the transcript. Returned boolean: true when more history
+	// was loaded (and may still remain), false when there's nothing older.
+	// Prepending to the messages array shifts every index <Static> already
+	// committed (see ChatLog) — callers must follow up with a full replay via
+	// the repaint-key bump that a theme change uses, or the shifted tail would
+	// render as duplicates in the terminal's scrollback.
+	const loadOlder = useCallback((): boolean => {
+		const beforeSeq = oldestSeqRef.current;
+		if (beforeSeq === undefined) return false;
+		const page = getHistoryPage(session.id, beforeSeq, TUI_HISTORY_PAGE_TURNS);
+		if (page.messages.length === 0) return false;
+		setMessages((msgs) => [...buildDisplayMessages(page.messages), ...msgs]);
+		oldestSeqRef.current = page.oldestSeq;
+		setHasOlder(page.hasMore);
+		return true;
 	}, [session]);
 
 	/** Lightweight refresh for metadata-only changes (/model, /persona, /provider).
@@ -1452,6 +1507,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		resetContext,
 		refresh,
 		refreshMeta,
+		hasOlder,
+		loadOlder,
 		resetQueue,
 		addDisplayMessage,
 		pendingQuestion,

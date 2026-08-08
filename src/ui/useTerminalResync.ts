@@ -5,6 +5,7 @@ import {
 	isStreamingActive,
 	isTerminalSuspended,
 	setDecxprListener,
+	setDecxprQueryCanceler,
 	setLastFrameOverflow,
 } from "../core/stdin-manager.ts";
 
@@ -494,6 +495,17 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 		// Check rate every few seconds — cheap, only resets the interval when needed.
 		const rateCheck = setInterval(updatePollRate, 3000);
 
+		// Expose the in-flight-query canceler so an exit that bypasses React
+		// cleanup (onQuit's process.exit) can stop a pending \x1b[6n before its
+		// reply echoes into the shell once raw mode drops. Also stops the poll
+		// intervals — an interval tick racing the exit would otherwise fire a
+		// fresh query into the void.
+		setDecxprQueryCanceler(() => {
+			cancelActiveQuery?.();
+			clearInterval(pollInterval);
+			clearInterval(rateCheck);
+		});
+
 		const restore = () => {
 			out.write = origWrite;
 		};
@@ -502,6 +514,7 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 		return () => {
 			out.off("resize", onResize);
 			setDecxprListener(null);
+			setDecxprQueryCanceler(null);
 			if (resizeTimer) clearTimeout(resizeTimer);
 			if (settleTimer) clearTimeout(settleTimer);
 			clearInterval(pollInterval);

@@ -86,7 +86,7 @@ interface AppProps {
 	initialPrompt?: string;
 	onPasteImage?: () => Promise<string | null>;
 	onQuit: () => void;
-	onRepaintBanner?: () => Promise<void>;
+	onRepaintBanner?: (preserveScrollback?: boolean) => Promise<void>;
 	/** When set, the TUI runs as a thin client of the `cast web` daemon
 	 *  (single-writer model) instead of owning runAgentLoop locally. */
 	daemonUrl?: string;
@@ -128,7 +128,13 @@ export function App(props: AppProps): JSX.Element {
 	useTerminalResync(
 		useCallback(
 			async (preserveScrollback: boolean) => {
-				if (!preserveScrollback) await onRepaintBanner?.();
+				// Always reprint the banner — it lives outside Ink's tree (plain
+				// stdout), so a light clear that skips the scrollback wipe would
+				// leave it erased. Full resync wipes scrollback and prints the
+				// banner from a clean top; light resync keeps scrollback and just
+				// reprints the banner so a settleResync/resize doesn't blank the
+				// top of the screen.
+				await onRepaintBanner?.(preserveScrollback);
 				setRepaintKey((k) => k + 1);
 				// The synchronized-output block useTerminalResync wraps this call
 				// in must stay open until the replayed <Static> content actually
@@ -273,6 +279,15 @@ export function App(props: AppProps): JSX.Element {
 		void (async () => {
 			await onRepaintBanner?.();
 			setThemeVer((v) => v + 1);
+		})();
+	}, [onRepaintBanner]);
+	// History was prepended by /older (loadOlder shifts every <Static> index,
+	// which that component never revisits) — replay the whole transcript from a
+	// clean top, same clear + key-bump contract as a theme change.
+	const onRepaintHistory = useCallback(() => {
+		void (async () => {
+			await onRepaintBanner?.();
+			setRepaintKey((k) => k + 1);
 		})();
 	}, [onRepaintBanner]);
 	const confirmBash = useMemo(() => makeConfirmBash(pickers, permissionMode), [pickers, permissionMode]);
@@ -603,6 +618,7 @@ export function App(props: AppProps): JSX.Element {
 		sshHosts,
 		setSshHosts,
 		onThemeChange,
+		onRepaintHistory,
 		statusBar,
 		setStatusBar,
 	});
@@ -660,9 +676,21 @@ export function App(props: AppProps): JSX.Element {
 		sshHosts,
 		setSshHosts,
 		onThemeChange,
+		onRepaintHistory,
 		statusBar,
 		setStatusBar,
 	};
+
+	// PageUp in the composer routes here (Composer's history.older binding) —
+	// same load + replay flow as the /older command.
+	const onLoadOlder = useCallback(async () => {
+		if (agent.loadOlder()) {
+			await onRepaintHistory();
+			showNotice("[Loaded older history — scroll up to read it]");
+		} else {
+			showNotice("[No older history — this is the start of the session]");
+		}
+	}, [agent, onRepaintHistory, showNotice]);
 
 	const handleSubmit = useCallback(async (text: string) => {
 		let input = text;
@@ -765,6 +793,7 @@ export function App(props: AppProps): JSX.Element {
 				onAbort={agent.abort}
 				onExit={onQuit}
 				onPasteImage={onPasteImage}
+				onLoadOlder={() => void onLoadOlder()}
 				running={running}
 				locked={modalRequest !== null}
 				skills={skills}

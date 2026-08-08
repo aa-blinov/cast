@@ -78,6 +78,11 @@ function createFakeDeps(overrides?: Partial<CommandDeps> & { running?: boolean }
 		error: null,
 		retry: null,
 		usage: null,
+		hasOlder: true,
+		loadOlder: () => {
+			track("agent.loadOlder")();
+			return true;
+		},
 	} as unknown as UseAgentSession;
 
 	const session = {
@@ -261,6 +266,28 @@ describe("handleInput", () => {
 		await handleInput("/clear", undefined, deps);
 		expect(calls["agent.clearContext"]).toHaveLength(1);
 		expect(noticeText(calls)).toContain("cleared");
+	});
+
+	it("/older loads a history page and repaints", async () => {
+		const { deps, calls } = createFakeDeps();
+		const repaint = vi.fn().mockResolvedValue(undefined);
+		deps.onRepaintHistory = repaint;
+		await handleInput("/older", undefined, deps);
+		expect(calls["agent.loadOlder"]).toEqual([[]]);
+		expect(repaint).toHaveBeenCalledTimes(1);
+		expect(noticeText(calls)).toContain("older history");
+	});
+
+	it("/older reports the start of the session when nothing older remains", async () => {
+		const { deps, calls } = createFakeDeps();
+		const loadOlder = deps.agent.loadOlder;
+		deps.agent.loadOlder = () => {
+			loadOlder();
+			return false;
+		};
+		await handleInput("/older", undefined, deps);
+		expect(calls["agent.loadOlder"]).toEqual([[]]);
+		expect(noticeText(calls)).toContain("start of the session");
 	});
 
 	it("/help lists command names", async () => {
