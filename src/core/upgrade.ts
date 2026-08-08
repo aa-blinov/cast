@@ -8,6 +8,7 @@
 import { spawnSync } from "node:child_process";
 import { sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { clearWebState, isProcessAlive, readWebState } from "../web/daemon-state.ts";
 
 const V_PREFIX_RE = /^v/;
 
@@ -134,5 +135,33 @@ export async function runUpgrade(currentVersion: string, pinnedVersion?: string,
 	if (result.status !== 0) {
 		console.error("\nUpgrade failed — see output above.");
 		process.exitCode = 1;
+		return;
+	}
+
+	restartDaemon();
+}
+
+/**
+ * `cast web` daemon still executes the bundle it was started from, so after a
+ * reinstall the running daemon would keep serving the old code until manually
+ * restarted. If a daemon is live, stop it and start a fresh one on the
+ * freshly-installed build (via the `cast` launcher on PATH, which now points
+ * at the new install). No-op when no daemon is running — the upgrade must not
+ * start one that wasn't there.
+ */
+/** @internal exported for unit tests */
+export function restartDaemon(): void {
+	const state = readWebState();
+	if (!state || !isProcessAlive(state.pid)) return;
+	console.log(`\n[cast web] daemon was running (pid ${state.pid}) — restarting it on the new build...`);
+	try {
+		process.kill(state.pid, "SIGTERM");
+	} catch {
+		// already gone
+	}
+	clearWebState();
+	const started = spawnSync("bash", ["-c", "cast web start --port 0"], { stdio: "inherit" });
+	if (started.status !== 0) {
+		console.log("[cast web] note: the new daemon failed to start — run 'cast web start' manually.");
 	}
 }

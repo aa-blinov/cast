@@ -1,5 +1,17 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchLatestVersion, isAlreadyUpToDate, isNewerVersion } from "../src/core/upgrade.ts";
+import { spawnSync } from "node:child_process";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fetchLatestVersion, isAlreadyUpToDate, isNewerVersion, restartDaemon } from "../src/core/upgrade.ts";
+import { clearWebState, isProcessAlive, readWebState } from "../src/web/daemon-state.ts";
+
+vi.mock("node:child_process", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("node:child_process")>();
+	return { ...actual, spawnSync: vi.fn(() => ({ status: 0 })) };
+});
+vi.mock("../src/web/daemon-state.ts", () => ({
+	readWebState: vi.fn(),
+	isProcessAlive: vi.fn(),
+	clearWebState: vi.fn(),
+}));
 
 describe("isNewerVersion", () => {
 	it("detects a newer patch version", () => {
@@ -85,5 +97,36 @@ describe("isAlreadyUpToDate", () => {
 
 	it("never skips when the target is unknown (fetchLatestVersion failed) — let the installer surface its own error", () => {
 		expect(isAlreadyUpToDate("0.2.0", null, false)).toBe(false);
+	});
+});
+
+describe("restartDaemon", () => {
+	beforeEach(() => {
+		vi.mocked(spawnSync).mockClear();
+		vi.mocked(clearWebState).mockClear();
+		vi.mocked(readWebState).mockReset();
+		vi.mocked(isProcessAlive).mockReset();
+	});
+
+	it("does nothing when no daemon is running", () => {
+		vi.mocked(readWebState).mockReturnValue(undefined);
+		restartDaemon();
+		expect(spawnSync).not.toHaveBeenCalled();
+		expect(clearWebState).not.toHaveBeenCalled();
+	});
+
+	it("restarts a live daemon on the new build", () => {
+		vi.mocked(readWebState).mockReturnValue({
+			pid: 424242,
+			host: "127.0.0.1",
+			port: 1337,
+			startedAt: "t",
+			foreground: false,
+		});
+		vi.mocked(isProcessAlive).mockReturnValue(true);
+		vi.spyOn(process, "kill").mockImplementation(() => {});
+		restartDaemon();
+		expect(clearWebState).toHaveBeenCalled();
+		expect(spawnSync).toHaveBeenCalledWith("bash", ["-c", "cast web start --port 0"], { stdio: "inherit" });
 	});
 });
