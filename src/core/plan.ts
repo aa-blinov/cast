@@ -713,34 +713,68 @@ export function maybeActivatePlanOnRead(absolutePath: string, planState: PlanSta
 
 export function execQuestion(args: Record<string, unknown>, planState: PlanState): ToolResult {
 	const rawQuestions = Array.isArray(args.questions) ? args.questions : [];
-	const questions = rawQuestions.flatMap((raw): QuestionItem[] => {
-		if (!raw || typeof raw !== "object") return [];
+	if (rawQuestions.length < 1 || rawQuestions.length > 5) {
+		return {
+			content: `Error: the question tool accepts 1–5 questions, but you passed ${rawQuestions.length}. Retry with fewer questions.`,
+			isError: true,
+		};
+	}
+
+	const problems: string[] = [];
+	const questions = rawQuestions.flatMap((raw, qi): QuestionItem[] => {
+		if (!raw || typeof raw !== "object") {
+			problems.push(`question ${qi + 1} is not an object`);
+			return [];
+		}
 		const item = raw as Record<string, unknown>;
 		const question = typeof item.question === "string" ? item.question.trim() : "";
+		if (!question) {
+			problems.push(`question ${qi + 1} is missing the "question" text`);
+			return [];
+		}
 		const rawOptions = Array.isArray(item.options) ? item.options : [];
-		const options = rawOptions.flatMap((option): QuestionOption[] => {
-			if (!option || typeof option !== "object") return [];
+		if (rawOptions.length < 2 || rawOptions.length > 4) {
+			problems.push(`question ${qi + 1} has ${rawOptions.length} options — expected 2–4`);
+			return [];
+		}
+		const options = rawOptions.flatMap((option, oi): QuestionOption[] => {
+			if (!option || typeof option !== "object") {
+				problems.push(`question ${qi + 1}, option ${oi + 1} is not an object`);
+				return [];
+			}
 			const record = option as Record<string, unknown>;
 			const value = typeof record.value === "string" ? record.value.trim() : "";
 			const label = typeof record.label === "string" ? record.label.trim() : "";
 			const description = typeof record.description === "string" ? record.description.trim() : "";
-			if (!value || !label) return [];
+			if (!value && !label) {
+				problems.push(`question ${qi + 1}, option ${oi + 1} has neither a "value" nor a "label"`);
+				return [];
+			}
+			if (!value) {
+				problems.push(`question ${qi + 1}, option ${oi + 1} "${label}" is missing the required "value" field`);
+				return [];
+			}
+			if (!label) {
+				problems.push(`question ${qi + 1}, option ${oi + 1} "${value}" is missing the required "label" field`);
+				return [];
+			}
 			return [{ value, label, ...(description ? { description } : {}) }];
 		});
+		if (new Set(options.map((option) => option.value)).size !== options.length) {
+			problems.push(`question ${qi + 1} has duplicate option values`);
+		}
 		const recommended = typeof item.recommended === "string" ? item.recommended.trim() : undefined;
-		if (
-			!question ||
-			options.length < 2 ||
-			options.length > 4 ||
-			new Set(options.map((option) => option.value)).size !== options.length ||
-			(recommended && !options.some((option) => option.value === recommended))
-		)
-			return [];
+		if (recommended && !options.some((option) => option.value === recommended)) {
+			problems.push(`question ${qi + 1} "recommended" is "${recommended}" but no option has that value`);
+		}
 		return [{ question, options, ...(recommended ? { recommended } : {}) }];
 	});
 
-	if (questions.length < 1 || questions.length > 5 || questions.length !== rawQuestions.length) {
-		return { content: "Error: questions must contain 1–5 questions, each with 2–4 unique options.", isError: true };
+	if (problems.length > 0) {
+		return {
+			content: `Error: invalid question payload — ${problems[0]}. Retry with the question tool and fix this.`,
+			isError: true,
+		};
 	}
 
 	const pending = readPlanQuestion(planState);

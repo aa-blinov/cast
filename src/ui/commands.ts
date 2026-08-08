@@ -126,6 +126,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	},
 	{ name: "/model", description: "Show or change model" },
 	{ name: "/new", description: "Start a new session" },
+	{ name: "/older", description: "Load older history for this session" },
 	{ name: "/permissions", description: "Change permission mode (bash + write)" },
 	{ name: "/persona", description: "Show or change persona" },
 	{ name: "/plan", description: "Enter plan mode (explore + plan only)" },
@@ -252,6 +253,8 @@ export interface CommandDeps {
 	planModelProvider?: string;
 	setPlanModelProvider: (p: string | undefined) => void;
 	onThemeChange?: () => void;
+	/** Force a full clear + <Static> replay after history was prepended. */
+	onRepaintHistory?: () => void | Promise<void>;
 	statusBar: StatusBarConfig;
 	setStatusBar: (s: StatusBarConfig) => void;
 }
@@ -1122,6 +1125,19 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 
 	if (running) {
 		showNotice("[Agent running — use /queue, /steer, or /abort]");
+		return;
+	}
+
+	if (input === "/older") {
+		if (agent.loadOlder()) {
+			// Prepending shifts every <Static> index — force the full replay so
+			// the freshly-loaded page renders above the existing transcript
+			// instead of duplicating the shifted tail (see useAgentSession.loadOlder).
+			await deps.onRepaintHistory?.();
+			showNotice("[Loaded older history — scroll up to read it]");
+		} else {
+			showNotice("[No older history — this is the start of the session]");
+		}
 		return;
 	}
 

@@ -5,7 +5,7 @@ import { runHooksForEvent } from "../core/hooks.ts";
 import { closeMcpConnections } from "../core/mcp.ts";
 import { saveSession } from "../core/session.ts";
 import { type ParsedArgs, runStartup } from "../core/startup.ts";
-import { suspendAndRun } from "../core/stdin-manager.ts";
+import { cancelActiveDecxprQuery, suspendAndRun } from "../core/stdin-manager.ts";
 import { inkPickers } from "../pickers/ink.tsx";
 import type { Pickers } from "../pickers/types.ts";
 import { readLiveWebState } from "../web/daemon-state.ts";
@@ -126,9 +126,19 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 				payload: { reason: "quit" },
 			});
 		}
-		void closeMcpConnections(result.mcpResult.connections).finally(() => process.exit(0));
+		// Stop a pending \x1b[6n before process.exit tears raw mode down — the
+		// terminal's \x1b[<row>;<col>R reply would otherwise be echoed into the
+		// shell as garbage once the process is gone. Give any already-sent reply
+		// a moment to arrive while raw mode is still on (InputParser drops it),
+		// then exit. Also clear the screen so the last TUI frame (banner,
+		// composer box, status bar) doesn't linger under the shell prompt.
+		cancelActiveDecxprQuery();
+		void closeMcpConnections(result.mcpResult.connections).finally(async () => {
+			process.stdout.write("\x1b[2J\x1b[H");
+			await new Promise((resolve) => setTimeout(resolve, 60));
+			process.exit(0);
+		});
 	};
-
 	const onPasteImage = async (): Promise<string | null> => {
 		const filePath = await saveClipboardImageToTempFile();
 		return filePath;
@@ -142,9 +152,15 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 	// whatever was there instead of the banner. App.onThemeChange replays the
 	// full history below the fresh banner afterwards (see its Static key
 	// bump), so nothing on screen is actually lost.
-	const onRepaintBanner = async () => {
+	//
+	// `preserveScrollback` (light resync — resize, settleResync after a resume,
+	// focus regain): the clear (\x1b[2J) must NOT wipe scrollback so the user's
+	// scroll position survives. But the banner is printed to stdout (outside
+	// Ink's tree), so a bare light clear would leave it erased — reprint it
+	// without the scrollback wipe.
+	const onRepaintBanner = async (preserveScrollback?: boolean) => {
 		await suspendAndRun(async () => {
-			process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
+			if (!preserveScrollback) process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
 			process.stdout.write(`${gradientBanner(CAST_BANNER, args.version)}\n`);
 		});
 	};

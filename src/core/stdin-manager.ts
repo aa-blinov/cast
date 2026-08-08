@@ -131,6 +131,22 @@ export function reportDecxpr(row: number, col: number): void {
 	onDecxpr?.(row, col);
 }
 
+/**
+ * In-flight DECXCPR query cancellation. useTerminalResync registers its own
+ * cancelActiveQuery here so an exit path that bypasses React cleanup (onQuit's
+ * process.exit) can still stop a pending \x1b[6n — otherwise the terminal's
+ * \x1b[<row>;<col>R reply arrives after raw mode is off and gets echoed into
+ * the shell as visible garbage (^[[15;1R, or the ^[[ prefix eaten → 5;1R).
+ */
+let cancelDecxprQuery: (() => void) | null = null;
+export function setDecxprQueryCanceler(cb: (() => void) | null): void {
+	cancelDecxprQuery = cb;
+}
+/** Cancel any in-flight \x1b[6n so its reply can't leak into the shell. */
+export function cancelActiveDecxprQuery(): void {
+	cancelDecxprQuery?.();
+}
+
 /** Mark streaming as active or inactive. Called by useAgentSession. */
 export function setStreamingActive(active: boolean): void {
 	streamingActive = active;

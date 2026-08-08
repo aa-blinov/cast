@@ -576,11 +576,11 @@ export function matchesKey(data: string, keyId: KeyId): boolean {
 				return data === "\x1b[8^" || matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.end, MODIFIERS.ctrl);
 			return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.end, modifier);
 
-		case "pageUp":
+		case "pageup":
 			if (modifier === 0) return data === "\x1b[5~" || matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.pageUp, 0);
 			return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.pageUp, modifier);
 
-		case "pageDown":
+		case "pagedown":
 			if (modifier === 0) return data === "\x1b[6~" || matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.pageDown, 0);
 			return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.pageDown, modifier);
 
