@@ -452,6 +452,28 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 			activeDecxprCleanup?.(row > (out.rows || 24));
 		});
 
+		// Resumed sessions replay a long <Static> history at mount, which can
+		// push the live region (composer + status bar) up while the terminal
+		// scrolls — the composer then renders mid-screen with the user's input
+		// landing below it, and nothing fires a recovery resync because no
+		// streaming turn ever runs. Re-settle once after mount (retrying if a
+		// stream/scroll deferred it) so the composer is repositioned at the
+		// bottom even on a plain resume.
+		let settleTimer: ReturnType<typeof setTimeout> | null = null;
+		const settleResync = () => {
+			if (isStreamingActive() || isTerminalSuspended()) return;
+			if (resyncPending || scrollUp || !scrollKnown()) {
+				// Deferred by an in-flight stream/scroll — the 200ms state check
+				// picks resyncPending up once it clears; retry after the replay
+				// has had a chance to finish.
+				resyncPending = true;
+				settleTimer = setTimeout(settleResync, 400);
+				return;
+			}
+			doLightResync();
+		};
+		settleTimer = setTimeout(settleResync, 500);
+
 		// Adaptive polling: fast (200ms) while streaming or when a resync is
 		// pending (the scroll flag matters most then); slow (1000ms) at idle
 		// to reduce unnecessary terminal traffic on mobile. Computed fresh on
@@ -481,6 +503,7 @@ export function useTerminalResync(onResync: (preserveScrollback: boolean) => voi
 			out.off("resize", onResize);
 			setDecxprListener(null);
 			if (resizeTimer) clearTimeout(resizeTimer);
+			if (settleTimer) clearTimeout(settleTimer);
 			clearInterval(pollInterval);
 			clearInterval(rateCheck);
 			clearInterval(rawModeCheck);
