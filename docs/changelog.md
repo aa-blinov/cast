@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.7
+
+### Fixed
+
+- **Resumed sessions re-settle the layout.** Opening an existing session replays its history, which could scroll the composer up mid-screen (input landing below the frame) with no streaming turn to trigger the usual repair. A light resync now runs shortly after mount to reposition the composer at the bottom.
+
 ## 0.13.6
 
 ### Fixed
