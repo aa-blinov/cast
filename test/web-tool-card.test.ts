@@ -9,10 +9,10 @@ vi.mock(
 );
 vi.mock("htm", () => ({ default: { bind: () => () => null } }), { virtual: true });
 vi.mock("preact", () => ({ h: () => null }), { virtual: true });
-vi.mock("../src/web/public/file-preview.js", () => ({ FilePreviewModal: () => null }));
-vi.mock("../src/web/public/icons.js", () => ({ icons: { chevronUp: "up", chevronDown: "down" } }));
+vi.mock("../src/server/public/file-preview.js", () => ({ FilePreviewModal: () => null }));
+vi.mock("../src/server/public/icons.js", () => ({ icons: { chevronUp: "up", chevronDown: "down" } }));
 
-import { ToolCard } from "../src/web/public/tool-card.js";
+import { ToolCard } from "../src/server/public/tool-card.js";
 
 describe("web tool card", () => {
 	it("exports the isolated tool renderer", () => {

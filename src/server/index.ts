@@ -12,22 +12,19 @@ import { loadSettings, updateSettings } from "../core/settings.ts";
 import type { ParsedArgs } from "../core/startup.ts";
 import { runStartup } from "../core/startup.ts";
 import type { Pickers, PickOption } from "../pickers/types.ts";
-import { createWebBridge } from "./bridge.ts";
-import { clearWebState, writeWebState } from "./daemon-state.ts";
-import { startWebServer } from "./server.ts";
+import { createServerBridge } from "./bridge.ts";
+import { clearServerState, writeServerState } from "./daemon-state.ts";
+import { startServer } from "./server.ts";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 
 const VERSION: string = process.env.CAST_VERSION ?? "0.0.0";
 
-export async function runWebServerMain(
-	args: string[],
-	options: { foreground: boolean; version?: string },
-): Promise<void> {
+export async function runServerMain(args: string[], options: { foreground: boolean; version?: string }): Promise<void> {
 	const ver = options.version ?? VERSION;
 	// Parse --port / --host
-	let port = parseInt(process.env.CAST_WEB_PORT ?? "1337", 10);
-	let host = process.env.CAST_WEB_HOST ?? "127.0.0.1";
+	let port = parseInt(process.env.CAST_SERVER_PORT ?? "1337", 10);
+	let host = process.env.CAST_SERVER_HOST ?? "127.0.0.1";
 	// Set by the CLI launcher (src/index.ts), not passed as a CLI arg — the
 	// launcher already strips --foreground out of the args it forwards, since
 	// that flag only controls *how it spawns*, not anything the server itself
@@ -106,18 +103,18 @@ export async function runWebServerMain(
 
 	// Auth: ensure password exists in settings
 	const currentSettings = loadSettings();
-	let webPassword = currentSettings.webPassword;
-	if (!webPassword) {
-		webPassword = randomBytes(18).toString("base64url");
-		updateSettings({ webPassword });
-		console.log("[cast web] first run — password generated and saved to ~/.cast/settings.json");
+	let serverPassword = currentSettings.serverToken ?? currentSettings.webPassword;
+	if (!serverPassword) {
+		serverPassword = randomBytes(18).toString("base64url");
+		updateSettings({ serverToken: serverPassword });
+		console.log("[cast server] first run — password generated and saved to ~/.cast/settings.json");
 	}
 
-	console.log("[cast web] starting up...");
+	console.log("[cast server] starting up...");
 
 	// Deliberately NOT writing the state file here, before the server actually
 	// binds — daemon-state.ts's whole contract is that the file only exists
-	// once a server is truly listening, which is what lets readLiveWebState
+	// once a server is truly listening, which is what lets readLiveServerState
 	// answer "already running" correctly and lets a status/health check that
 	// sees the file trust it can actually connect. Writing early (as this once
 	// did, to dodge the launcher's old fixed timeout) reintroduces exactly the
@@ -128,17 +125,17 @@ export async function runWebServerMain(
 	// is generous enough to tolerate that same delay instead of needing this
 	// early write as a workaround.
 	const result = await runStartup(parsedArgs, webPickers);
-	console.log(`[cast web] persona: ${result.persona.label}, model: ${result.session.model}`);
-	console.log("[cast web] ────────────────────────────────────");
-	console.log(`[cast web]   login:    cast`);
-	console.log(`[cast web]   password: ${webPassword}`);
-	console.log("[cast web] ────────────────────────────────────");
+	console.log(`[cast server] persona: ${result.persona.label}, model: ${result.session.model}`);
+	console.log("[cast server] ────────────────────────────────────");
+	console.log(`[cast server]   login:    cast`);
+	console.log(`[cast server]   password: ${serverPassword}`);
+	console.log("[cast server] ────────────────────────────────────");
 
-	const bridge = createWebBridge(result);
+	const bridge = createServerBridge(result);
 
 	if (!LOOPBACK_HOSTS.has(host)) {
 		console.log(
-			`[cast web] ⚠ binding ${host} — reachable from other machines on this network, protected only by the password above.`,
+			`[cast server] ⚠ binding ${host} — reachable from other machines on this network, protected only by the password above.`,
 		);
 	}
 
@@ -156,18 +153,18 @@ export async function runWebServerMain(
 	// connect's .then(), and set true by the shutdown handler further down.
 	let shuttingDown = false;
 
-	const server = startWebServer({
+	const server = startServer({
 		port,
 		host,
 		bridge,
 		webUser: "cast",
-		webPassword,
+		serverPassword,
 		version: ver,
 		onListening: (boundPort: number) => {
 			// Write the state file now that we have the real bound port (may differ
 			// from `port` when 0 was passed for OS assignment). The TUI reads this
 			// for both the port and the loopback token.
-			writeWebState({
+			writeServerState({
 				pid: process.pid,
 				port: boundPort,
 				host,
@@ -175,7 +172,7 @@ export async function runWebServerMain(
 				foreground,
 				...(localToken ? { token: localToken } : {}),
 			});
-			console.log(`[cast web] stop: cast web stop`);
+			console.log(`[cast server] stop: cast server stop`);
 			// The deferred half of ParsedArgs.deferMcp above: now that the HTTP
 			// server is actually accepting connections, do the real connect
 			// (npx resolution, browser launches, remote handshakes — whatever
@@ -199,23 +196,23 @@ export async function runWebServerMain(
 						return;
 					}
 					bridge.applyMcpResult(mcpResult);
-					console.log(`[cast web] MCP servers connected in background (${Date.now() - mcpConnectStart}ms)`);
+					console.log(`[cast server] MCP servers connected in background (${Date.now() - mcpConnectStart}ms)`);
 				})
 				.catch((err) => {
 					console.error(
-						"[cast web] background MCP connect failed:",
+						"[cast server] background MCP connect failed:",
 						err instanceof Error ? err.message : String(err),
 					);
 				});
 		},
 		onError: (err) => {
 			if (err.code === "EADDRINUSE") {
-				console.error(`[cast web] port ${port} is already in use on ${host}.`);
+				console.error(`[cast server] port ${port} is already in use on ${host}.`);
 				console.error(
-					`[cast web] run 'cast web status' to check what's running, or pick a different port with --port.`,
+					`[cast server] run 'cast server status' to check what's running, or pick a different port with --port.`,
 				);
 			} else {
-				console.error("[cast web] failed to start:", err.message);
+				console.error("[cast server] failed to start:", err.message);
 			}
 			process.exit(1);
 		},
@@ -232,13 +229,13 @@ export async function runWebServerMain(
 	const shutdown = (signal: string) => {
 		if (shuttingDown) return;
 		shuttingDown = true;
-		console.log(`[cast web] received ${signal}, shutting down...`);
+		console.log(`[cast server] received ${signal}, shutting down...`);
 		for (const s of bridge.listSessions()) bridge.closeSession(s.id, "shutdown");
-		clearWebState();
+		clearServerState();
 		server.close(() => process.exit(0));
 		// server.close() waits for existing connections (including open SSE
 		// streams) to end on their own — force exit if that takes too long
-		// rather than hanging a `cast web stop` caller indefinitely.
+		// rather than hanging a `cast server stop` caller indefinitely.
 		setTimeout(() => process.exit(0), 3000).unref();
 	};
 	process.on("SIGTERM", () => shutdown("SIGTERM"));
@@ -246,15 +243,15 @@ export async function runWebServerMain(
 }
 
 async function main(): Promise<void> {
-	await runWebServerMain(process.argv.slice(2), { foreground: process.env.CAST_WEB_FOREGROUND === "1" });
+	await runServerMain(process.argv.slice(2), { foreground: process.env.CAST_SERVER_FOREGROUND === "1" });
 }
 
 // Auto-run only when this file is the entry point (daemon spawn). The parent
-// sets CAST_WEB_SKIP_AUTORUN=1 before importing for inline foreground mode.
-if (!process.env.CAST_WEB_SKIP_AUTORUN) {
+// sets CAST_SERVER_SKIP_AUTORUN=1 before importing for inline foreground mode.
+if (!process.env.CAST_SERVER_SKIP_AUTORUN) {
 	main().catch((err) => {
-		console.error("[cast web] fatal:", err);
-		clearWebState();
+		console.error("[cast server] fatal:", err);
+		clearServerState();
 		process.exit(1);
 	});
 }

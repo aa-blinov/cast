@@ -6,7 +6,7 @@
 cast [options] [prompt]
 cast run [options] <message>    Non-interactive mode
 cast run --interactive [options] Persistent JSONL session
-    cast web [start|stop|status]    Web UI mode
+    cast server [start|stop|status]    Web UI mode
     cast upgrade [version] [--force]  Self-update
 ```
 
@@ -49,19 +49,19 @@ cast upgrade 0.3.0        # Upgrade to specific version
 cast upgrade --force      # Reinstall even if same version
 ```
 
-### `cast web`
+### `cast server`
 
-Web UI mode: launches a browser-based control room for managing background agents. The `cast web` daemon is the single writer for every session — both the browser and the TUI are thin clients of it over HTTP + SSE, so a session opened in either surface streams live (tokens, tool calls, status) to both. The TUI auto-spawns this daemon on launch unless one is already running or `CAST_NO_DAEMON=1` is set.
+Web UI mode: launches a browser-based control room for managing background agents. The `cast server` daemon is the single writer for every session — both the browser and the TUI are thin clients of it over HTTP + SSE, so a session opened in either surface streams live (tokens, tool calls, status) to both. The TUI auto-spawns this daemon on launch unless one is already running or `CAST_NO_DAEMON=1` is set.
 
 ```bash
-cast web                 # Start in background (daemon)
-cast web start           # Same as above
-cast web stop            # Stop the background server (SIGTERM → SIGKILL after 3s)
-cast web status          # Check if running (auto-heals stale state)
-cast web --foreground    # Run inline (for dev/debug)
-cast web --port 8080     # Custom port (default: 1337, or set CAST_WEB_PORT)
-cast web --host 0.0.0.0  # Bind to all interfaces (reachable from network)
-cast web --public        # Alias for --host 0.0.0.0
+cast server                 # Start in background (daemon)
+cast server start           # Same as above
+cast server stop            # Stop the background server (SIGTERM → SIGKILL after 3s)
+cast server status          # Check if running (auto-heals stale state)
+cast server --foreground    # Run inline (for dev/debug)
+cast server --port 8080     # Custom port (default: 1337, or set CAST_SERVER_PORT)
+cast server --host 0.0.0.0  # Bind to all interfaces (reachable from network)
+cast server --public        # Alias for --host 0.0.0.0
 ```
 
 First run generates a password, printed to the terminal and saved in `~/.cast/settings.json`. Username is always `cast`.

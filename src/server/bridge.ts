@@ -473,7 +473,7 @@ export function toDisplayMessages(
  * hasn't been created yet, so it can't stat/open a missing one. */
 export const SANDBOX_CWD = "sandbox";
 
-export interface WebBridge {
+export interface ServerBridge {
 	createSession(
 		personaName?: string,
 		modelOverride?: string,
@@ -576,7 +576,7 @@ export interface WebBridge {
 	getSlashCommands(sessionId?: string): typeof SLASH_COMMANDS;
 }
 
-export function createWebBridge(result: StartupResult): WebBridge {
+export function createServerBridge(result: StartupResult): ServerBridge {
 	const sessions = new Map<string, WebAgentSession>();
 	// Sidebar listeners, one per connected browser tab, independent of which
 	// session (if any) that tab currently has open — this is what lets the
@@ -625,14 +625,14 @@ export function createWebBridge(result: StartupResult): WebBridge {
 
 	/**
 	 * Re-read settings.json and adopt any provider/model/reasoning change made
-	 * from a *different* surface. The `cast web` daemon and the TUI are separate
+	 * from a *different* surface. The `cast server` daemon and the TUI are separate
 	 * processes: a provider/model switch done in the TUI (or a manual settings
 	 * edit) lands in settings.json but never reaches this daemon's shared
 	 * `config`, which is captured once at startup and only updated by /provider
 	 * and /model commands running *through this process*. A stale daemon then
 	 * sends the freshly-picked model id to the old endpoint — 400 for a model
 	 * that endpoint doesn't serve, 429 for one that's out of credits — and only
-	 * a `cast web restart` used to fix it. Returns whether the active endpoint
+	 * a `cast server restart` used to fix it. Returns whether the active endpoint
 	 * changed, so callers can reconcile in-flight session model ids against the
 	 * new provider's model list.
 	 */
@@ -1488,7 +1488,7 @@ export function createWebBridge(result: StartupResult): WebBridge {
 
 	/**
 	 * Sessions only live in this Map once something in this process instance
-	 * has touched them — a fresh `cast web` restart starts with an empty Map
+	 * has touched them — a fresh `cast server` restart starts with an empty Map
 	 * even though every prior session is still sitting on disk (autosaved,
 	 * same as the TUI). This lazily loads one of those cold sessions into a
 	 * real, fully-interactive WebAgentSession the first time anything asks

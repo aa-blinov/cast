@@ -10,7 +10,7 @@ vi.mock(
 	{ virtual: true },
 );
 
-import { useWorkspaceState } from "../src/web/public/use-workspace-state.js";
+import { useWorkspaceState } from "../src/server/public/use-workspace-state.js";
 
 describe("web workspace state", () => {
 	it("exports the state hook", () => {

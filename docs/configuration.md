@@ -33,7 +33,7 @@ User settings are persisted to `~/.cast/settings.json`. This file is loaded on s
 | `disabledHooks` | string[] | Content-derived hook group ids disabled via `/hooks` |
 | `enabledPlugins` | Record<string, boolean> | Marketplace plugins keyed by `name@marketplace` |
 | `statusBar` | object | Status bar segment config (`visible`, `order`, `sides`) — use `/statusbar` to configure |
-| `webPassword` | string | Password generated for `cast web` on first start |
+| `webPassword` | string | Password generated for `cast server` on first start |
 | `quickSessionPersona` | string | Persona selected by the web UI's Quick session action |
 | `updatedAt` | string | Auto-updated timestamp |
 

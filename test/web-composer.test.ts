@@ -12,9 +12,9 @@ vi.mock(
 	}),
 	{ virtual: true },
 );
-vi.mock("../src/web/public/api.js", () => ({ api: vi.fn() }));
+vi.mock("../src/server/public/api.js", () => ({ api: vi.fn() }));
 
-import { Composer } from "../src/web/public/composer.js";
+import { Composer } from "../src/server/public/composer.js";
 
 describe("Composer", () => {
 	it("is exported as the isolated composer component", () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { handleSseEvent } from "../src/web/public/sse-events.js";
+import { handleSseEvent } from "../src/server/public/sse-events.js";
 
 function createContext() {
 	return {

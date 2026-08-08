@@ -1,5 +1,5 @@
 // Generates assets/cast-banner.svg from the same block-character grid as
-// CAST_BANNER (src/core/help.ts) and cast web's inline logo (app.js) — a
+// CAST_BANNER (src/core/help.ts) and cast server's inline logo (app.js) — a
 // static vector so the banner scales cleanly wherever <img> is honored
 // (README on github.com, npm, forks), unlike a plain-text code fence which
 // GitHub only ever lets scroll horizontally on narrow screens, never shrink.
@@ -9,7 +9,7 @@ import { join } from "node:path";
 const ROOT = new URL("..", import.meta.url).pathname;
 
 // Single source of truth, shared with src/core/help.ts (CLI banner) and
-// src/web/public/app.js (cast web's logo) — see that JSON file's own comment.
+// src/server/public/app.js (cast server's logo) — see that JSON file's own comment.
 const BANNER = JSON.parse(readFileSync(join(ROOT, "src", "web", "public", "cast-banner-grid.json"), "utf-8"));
 
 // Terminal block-drawing chars, darkest→lightest fill.

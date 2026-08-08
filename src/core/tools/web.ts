@@ -683,7 +683,7 @@ function missingApiKeyResult(provider: "Tavily" | "Brave"): ToolResult {
 	return {
 		content:
 			`Error: search provider is set to ${provider} but no API key is configured. ` +
-			"Set one via /web-search-provider (TUI) or the Tools settings tab (cast web), or switch back to /web-search-provider ddg.",
+			"Set one via /web-search-provider (TUI) or the Tools settings tab (cast server), or switch back to /web-search-provider ddg.",
 		isError: true,
 	};
 }

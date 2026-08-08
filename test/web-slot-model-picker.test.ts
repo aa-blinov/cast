@@ -12,9 +12,9 @@ vi.mock(
 	}),
 	{ virtual: true },
 );
-vi.mock("../src/web/public/api.js", () => ({ api: vi.fn() }));
+vi.mock("../src/server/public/api.js", () => ({ api: vi.fn() }));
 
-import { SlotModelPicker } from "../src/web/public/slot-model-picker.js";
+import { SlotModelPicker } from "../src/server/public/slot-model-picker.js";
 
 describe("SlotModelPicker", () => {
 	it("is exported as an isolated provider/model picker", () => {

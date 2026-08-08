@@ -12,10 +12,10 @@ vi.mock(
 	}),
 	{ virtual: true },
 );
-vi.mock("../src/web/public/api.js", () => ({ api: vi.fn() }));
-vi.mock("../src/web/public/file-preview.js", () => ({ FilePreviewModal: () => null }));
+vi.mock("../src/server/public/api.js", () => ({ api: vi.fn() }));
+vi.mock("../src/server/public/file-preview.js", () => ({ FilePreviewModal: () => null }));
 
-import { FileExplorer } from "../src/web/public/file-explorer.js";
+import { FileExplorer } from "../src/server/public/file-explorer.js";
 
 describe("FileExplorer", () => {
 	it("is exported as the filesystem explorer component", () => {

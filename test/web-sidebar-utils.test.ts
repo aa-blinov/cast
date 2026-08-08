@@ -8,7 +8,7 @@ import {
 	SANDBOX_CWD,
 	shortPath,
 	sortSessionsByActivity,
-} from "../src/web/public/sidebar-utils.js";
+} from "../src/server/public/sidebar-utils.js";
 
 describe("web sidebar session helpers", () => {
 	it("recognizes sandbox paths", () => {

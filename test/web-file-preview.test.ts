@@ -11,7 +11,7 @@ vi.mock(
 vi.mock("htm", () => ({ default: { bind: () => () => null } }), { virtual: true });
 vi.mock("preact", () => ({ h: () => null }), { virtual: true });
 
-import { detectDelimiter, fileExtOf, parseDelimited } from "../src/web/public/file-preview.js";
+import { detectDelimiter, fileExtOf, parseDelimited } from "../src/server/public/file-preview.js";
 
 describe("web file preview helpers", () => {
 	it("detects CSV and TSV delimiters", () => {

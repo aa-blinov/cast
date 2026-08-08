@@ -13,7 +13,7 @@ function SettingsServer({ data }) {
 		return html`
 			<div class="settings-rows">
 				<div class="settings-section-title">Server status</div>
-				<p class="settings-hint">No cast web daemon found. Start one with <code>cast web --public</code> in a terminal.</p>
+				<p class="settings-hint">No cast server daemon found. Start one with <code>cast server --public</code> in a terminal.</p>
 			</div>
 		`;
 	}
@@ -34,7 +34,7 @@ function SettingsServer({ data }) {
 	return html`
 		<div class="settings-rows">
 			<div class="settings-section-title">Server status</div>
-			<p class="settings-hint">The cast web process serving this UI. Same info as <code>cast web status</code> on the command line.</p>
+			<p class="settings-hint">The cast server process serving this UI. Same info as <code>cast server status</code> on the command line.</p>
 			<div class="settings-compact-list">
 				<div class="settings-compact-row">
 					<div class="settings-compact-copy"><span class="settings-compact-title">Status</span><span>Running</span></div>

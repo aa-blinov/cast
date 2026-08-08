@@ -12,11 +12,11 @@ vi.mock(
 	}),
 	{ virtual: true },
 );
-vi.mock("../src/web/public/api.js", () => ({ api: vi.fn() }));
-vi.mock("../src/web/public/icons.js", () => ({ icons: {} }));
-vi.mock("../src/web/public/sidebar-session-item.js", () => ({ SidebarSessionItem: () => null }));
+vi.mock("../src/server/public/api.js", () => ({ api: vi.fn() }));
+vi.mock("../src/server/public/icons.js", () => ({ icons: {} }));
+vi.mock("../src/server/public/sidebar-session-item.js", () => ({ SidebarSessionItem: () => null }));
 
-import { Sidebar } from "../src/web/public/sidebar.js";
+import { Sidebar } from "../src/server/public/sidebar.js";
 
 describe("web sidebar", () => {
 	it("exports the isolated session sidebar", () => {

@@ -123,7 +123,10 @@ export interface Settings {
 	 * session state, and storing it globally leaked plan mode across projects.
 	 * Kept only so old settings.json files still parse. */
 	mode?: "plan" | "build";
-	/** Web UI password — auto-generated on first `cast web` run. */
+	/** Web UI password — auto-generated on first `cast server` run. */
+	serverToken?: string;
+	/** @deprecated Server password, renamed to serverToken. Read as a fallback
+	 * so existing settings.json files keep working; migrated on load. */
 	webPassword?: string;
 	/**
 	 * Persona used by the web UI's "Quick session" button — skips the persona
@@ -157,23 +160,32 @@ export function loadSettings(): Settings {
 
 	try {
 		const s = JSON.parse(readFileSync(path, "utf-8")) as Settings;
-		return migrateProviders(s);
+		return migrateSettings(s);
 	} catch {
 		return {};
 	}
 }
 
 /**
- * One-time migration: if `providers` is missing/empty but `providerUrl` +
- * `apiKey` exist (legacy single-provider settings), populate `providers`
- * so `/provider` can list and switch from the start.
+ * One-time migrations applied on every load (idempotent — each only acts on
+ * the legacy shape it targets).
  */
-function migrateProviders(s: Settings): Settings {
-	if (s.providers?.length) return s;
-	if (s.providerUrl && s.apiKey) {
-		return { ...s, providers: [{ name: "default", url: s.providerUrl, apiKey: s.apiKey }] };
+function migrateSettings(s: Settings): Settings {
+	let next = s;
+	// `providers` missing/empty but `providerUrl` + `apiKey` exist (legacy
+	// single-provider settings): populate `providers` so `/provider` can list
+	// and switch from the start.
+	if (!next.providers?.length && next.providerUrl && next.apiKey) {
+		next = { ...next, providers: [{ name: "default", url: next.providerUrl, apiKey: next.apiKey }] };
 	}
-	return s;
+	// `webPassword` → `serverToken` (renamed with the daemon command). Read the
+	// old key so existing settings keep working; promote it to the new name on
+	// load. Returning the migrated object means the in-memory copy (and the
+	// next updateSettings) writes the new key.
+	if (!next.serverToken && next.webPassword) {
+		next = { ...next, serverToken: next.webPassword };
+	}
+	return next;
 }
 
 function saveSettings(settings: Settings): void {

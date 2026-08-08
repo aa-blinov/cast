@@ -4,9 +4,9 @@
 
 // Single source of truth for the block-character "cast" mark, shared with
 // the GitHub Pages/README SVG generator (scripts/build-banner-svg.mjs) and
-// cast web's own inline SVG logo (src/web/public/app.js) — all three used to
+// cast server's own inline SVG logo (src/server/public/app.js) — all three used to
 // carry their own copy of this grid and could silently drift out of sync.
-import castBannerGrid from "../web/public/cast-banner-grid.json" with { type: "json" };
+import castBannerGrid from "../server/public/cast-banner-grid.json" with { type: "json" };
 
 export const CAST_BANNER = (castBannerGrid as string[]).join("\n");
 
@@ -17,7 +17,7 @@ cast - Coding agent harness with swappable personas
 Usage:
   cast [options] [prompt]
   cast run [options] <message>  Non-interactive mode (one prompt, stream to stdout, exit)
-  cast web [start|stop|status]  Web UI mode (browser-based control room)
+  cast server [start|stop|status]  Web UI mode (browser-based control room)
   cast upgrade [version] [--force]
                               Re-run the installer to update (release installs
                               only) — no-op if already on that version, unless

@@ -87,7 +87,7 @@ export interface ParsedArgs {
 	 * instead of blocking on however long every configured MCP server (npx
 	 * package resolution, browser launches, remote handshakes) takes to
 	 * connect — the caller is expected to run the real connect afterward and
-	 * swap the result in once it resolves (see WebBridge.applyMcpResult).
+	 * swap the result in once it resolves (see ServerBridge.applyMcpResult).
 	 */
 	deferMcp?: boolean;
 }

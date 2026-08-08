@@ -1,4 +1,4 @@
-/* cast web — design system.
+/* cast server — design system.
  * Neutral zinc surface + a single accent (mapped from the active TUI theme's
  * `accent` color — see /theme and applyTheme() in app.js). Role/tool colors
  * are used sparingly (a label tint, a status dot) rather than as loud

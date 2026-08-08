@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { collapseMidWordBoundaries, mergeMidWordBoundary } from "../src/web/public/reasoning-split.js";
+import { collapseMidWordBoundaries, mergeMidWordBoundary } from "../src/server/public/reasoning-split.js";
 
 describe("reasoning display boundaries", () => {
 	it("moves only an explicit mid-word fragment from reasoning to content", () => {

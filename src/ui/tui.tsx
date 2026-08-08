@@ -8,7 +8,7 @@ import { type ParsedArgs, runStartup } from "../core/startup.ts";
 import { cancelActiveDecxprQuery, suspendAndRun } from "../core/stdin-manager.ts";
 import { inkPickers } from "../pickers/ink.tsx";
 import type { Pickers } from "../pickers/types.ts";
-import { readLiveWebState } from "../web/daemon-state.ts";
+import { readLiveServerState } from "../server/daemon-state.ts";
 import { App } from "./App.tsx";
 import { gradientBanner } from "./gradient.ts";
 import { saveClipboardImageToTempFile } from "./readClipboardImage.ts";
@@ -47,12 +47,12 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 		if ((w as Error & { code?: string })?.code === "UNDICI-ES") return;
 		for (const l of warningListeners) l(w);
 	});
-	// Single-writer daemon: the `cast web` daemon owns runAgentLoop and streams
+	// Single-writer daemon: the `cast server` daemon owns runAgentLoop and streams
 	// events to every surface. When a daemon is live, point the TUI at it as a
 	// thin client (HTTP + SSE) instead of running the loop locally. daemonToken
 	// is only set when a loopback daemon exists (see index.ts ensureDaemon);
 	// read its port/host from the same state file the token came from.
-	const daemonState = daemonToken ? readLiveWebState() : undefined;
+	const daemonState = daemonToken ? readLiveServerState() : undefined;
 	const daemonUrl = daemonState ? `http://${daemonState.host}:${daemonState.port}` : undefined;
 	let loader: ReturnType<typeof render> | null = null;
 	const showLoader = (text: string) => {

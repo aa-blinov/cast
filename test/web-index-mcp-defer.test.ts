@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// runWebServerMain does a lot of real work (disk, network, a live HTTP
+// runServerMain does a lot of real work (disk, network, a live HTTP
 // server) — every dependency it touches is mocked here so the test can
 // control exactly one thing: the ordering between the deferred MCP
 // connect's promise resolving and the SIGTERM shutdown handler running.
@@ -23,7 +23,7 @@ vi.mock("../src/core/project.ts", () => ({
 }));
 
 vi.mock("../src/core/settings.ts", () => ({
-	loadSettings: vi.fn(() => ({ webPassword: "test-password", disabledMcpServers: [] })),
+	loadSettings: vi.fn(() => ({ serverToken: "test-password", disabledMcpServers: [] })),
 	updateSettings: vi.fn(),
 }));
 
@@ -37,8 +37,8 @@ vi.mock("../src/core/startup.ts", () => ({
 	})),
 }));
 
-vi.mock("../src/web/bridge.ts", () => ({
-	createWebBridge: vi.fn(() => ({
+vi.mock("../src/server/bridge.ts", () => ({
+	createServerBridge: vi.fn(() => ({
 		createSession: vi.fn(),
 		listSessions: vi.fn(() => []),
 		closeSession: vi.fn(),
@@ -46,20 +46,20 @@ vi.mock("../src/web/bridge.ts", () => ({
 	})),
 }));
 
-vi.mock("../src/web/daemon-state.ts", () => ({
-	writeWebState: vi.fn(),
-	clearWebState: vi.fn(),
+vi.mock("../src/server/daemon-state.ts", () => ({
+	writeServerState: vi.fn(),
+	clearServerState: vi.fn(),
 }));
 
 let capturedOnListening: (() => void) | undefined;
-vi.mock("../src/web/server.ts", () => ({
-	startWebServer: vi.fn((opts: { onListening: () => void }) => {
+vi.mock("../src/server/server.ts", () => ({
+	startServer: vi.fn((opts: { onListening: () => void }) => {
 		capturedOnListening = opts.onListening;
 		return { close: (cb: () => void) => cb() };
 	}),
 }));
 
-describe("runWebServerMain — deferred MCP connect vs. shutdown race", () => {
+describe("runServerMain — deferred MCP connect vs. shutdown race", () => {
 	let exitSpy: ReturnType<typeof vi.spyOn>;
 
 	beforeEach(() => {
@@ -82,8 +82,8 @@ describe("runWebServerMain — deferred MCP connect vs. shutdown race", () => {
 				resolveConnect = r;
 			});
 
-		const { runWebServerMain } = await import("../src/web/index.ts");
-		await runWebServerMain(["--port", "0"], { foreground: true });
+		const { runServerMain } = await import("../src/server/index.ts");
+		await runServerMain(["--port", "0"], { foreground: true });
 
 		expect(capturedOnListening).toBeTruthy();
 		capturedOnListening!();
@@ -103,8 +103,8 @@ describe("runWebServerMain — deferred MCP connect vs. shutdown race", () => {
 				resolveConnect = r;
 			});
 
-		const { runWebServerMain } = await import("../src/web/index.ts");
-		await runWebServerMain(["--port", "0"], { foreground: true });
+		const { runServerMain } = await import("../src/server/index.ts");
+		await runServerMain(["--port", "0"], { foreground: true });
 
 		expect(capturedOnListening).toBeTruthy();
 		capturedOnListening!();

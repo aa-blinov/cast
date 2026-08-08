@@ -82,7 +82,7 @@ renderer.link = function (token) {
 marked.use({ renderer });
 
 // ── CSS ─────────────────────────────────────────────────────────────────────
-// Font/palette here match cast web (src/web/public/tokens.css & style.css) —
+// Font/palette here match cast server (src/server/public/tokens.css & style.css) —
 // dark zinc surfaces (#08080a / #131317 / #1e1e24), sharp contrast, and a
 // purple/violet accent gradient with clean mono typography.
 const CSS = `
