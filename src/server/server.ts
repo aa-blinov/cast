@@ -23,7 +23,7 @@ import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { brotliCompressSync, gzipSync } from "node:zlib";
 import { getDb } from "../core/db.ts";
-import { getHistoryPage, getMessageImage } from "../core/session.ts";
+import { getHistoryPage, getMessageImage, getSessionEvents } from "../core/session.ts";
 import { loadSettings, updateSettings } from "../core/settings.ts";
 import { ensureSessionWorktree } from "../core/worktree.ts";
 import { reconcileActiveStream, SANDBOX_CWD, type ServerBridge, toDisplayMessages, type WebEvent } from "./bridge.ts";
@@ -756,6 +756,14 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			oldestSeq: page.oldestSeq ?? null,
 			hasMoreHistory: page.hasMore,
 		});
+	});
+
+	// Audit trail of live agent events (tool_start, retry, doom_loop, error,
+	// end, …) — see session_events in db.ts. Deliberately not part of the
+	// conversation history: this is execution telemetry.
+	route("GET", "/api/sessions/:id/events/history", (req, res, params) => {
+		if (!bridge.getSession(params.id)) return json(res, { error: "Not found" }, 404);
+		json(res, { events: getSessionEvents(params.id) });
 	});
 
 	// Raw bytes for one image embedded in a `read`-on-image-file message (see

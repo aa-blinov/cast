@@ -8,6 +8,7 @@ import {
 	addUsage,
 	appendCheckpoint,
 	appendMessage,
+	appendSessionEvent,
 	clearSessionMessages,
 	compactMessages,
 	countTurnMessages,
@@ -20,6 +21,7 @@ import {
 	getHistoryPage,
 	getMessageImage,
 	getMostRecentSession,
+	getSessionEvents,
 	listSessionSummaries,
 	listSessions,
 	loadCheckpoints,
@@ -593,6 +595,20 @@ describe("session persistence", () => {
 		dropLastCheckpoint(session.id);
 		const afterUndo = loadSession(session.id);
 		expect(afterUndo?.checkpoints?.map((c) => c.id)).toEqual(["c1"]);
+	});
+
+	it("appends and reads back live session events in order", () => {
+		const session = createSession("gpt-4o", projectA);
+		saveSession(session);
+
+		appendSessionEvent(session.id, "tool_start", { id: "call_1", name: "bash" });
+		appendSessionEvent(session.id, "retry", { attempt: 2, reason: "boom" });
+		appendSessionEvent(session.id, "error", { message: "kaput" });
+
+		const events = getSessionEvents(session.id);
+		expect(events.map((e) => e.type)).toEqual(["tool_start", "retry", "error"]);
+		expect(events[1]!.payload).toEqual({ attempt: 2, reason: "boom" });
+		expect(events[0]!.seq).toBeLessThan(events[1]!.seq);
 	});
 
 	it("persists subagent transcripts and loads them back in order", () => {
