@@ -510,7 +510,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 <pre><code>cast [options] [prompt]
 cast run [options] &lt;message&gt;    Non-interactive mode
 cast run --interactive [options] Persistent JSONL session
-    cast web [start|stop|status]    Web UI mode
+    cast server [start|stop|status]    Web UI mode
     cast upgrade [version] [--force]  Self-update
 </code></pre>
 <p>TUI mode (Ink-based, multiline paste, image attachments) is the default. Non-TTY contexts (pipes, CI) are not supported — use <code>cast run</code> for scripting.</p>
@@ -536,16 +536,16 @@ plan-review state between agent turns.</p>
 cast upgrade 0.3.0        # Upgrade to specific version
 cast upgrade --force      # Reinstall even if same version
 </code></pre>
-<h3><code>cast web</code></h3>
-<p>Web UI mode: launches a browser-based control room for managing background agents. The <code>cast web</code> daemon is the single writer for every session — both the browser and the TUI are thin clients of it over HTTP + SSE, so a session opened in either surface streams live (tokens, tool calls, status) to both. The TUI auto-spawns this daemon on launch unless one is already running or <code>CAST_NO_DAEMON=1</code> is set.</p>
-<pre><code class="language-bash">cast web                 # Start in background (daemon)
-cast web start           # Same as above
-cast web stop            # Stop the background server (SIGTERM → SIGKILL after 3s)
-cast web status          # Check if running (auto-heals stale state)
-cast web --foreground    # Run inline (for dev/debug)
-cast web --port 8080     # Custom port (default: 1337, or set CAST_WEB_PORT)
-cast web --host 0.0.0.0  # Bind to all interfaces (reachable from network)
-cast web --public        # Alias for --host 0.0.0.0
+<h3><code>cast server</code></h3>
+<p>Web UI mode: launches a browser-based control room for managing background agents. The <code>cast server</code> daemon is the single writer for every session — both the browser and the TUI are thin clients of it over HTTP + SSE, so a session opened in either surface streams live (tokens, tool calls, status) to both. The TUI auto-spawns this daemon on launch unless one is already running or <code>CAST_NO_DAEMON=1</code> is set.</p>
+<pre><code class="language-bash">cast server                 # Start in background (daemon)
+cast server start           # Same as above
+cast server stop            # Stop the background server (SIGTERM → SIGKILL after 3s)
+cast server status          # Check if running (auto-heals stale state)
+cast server --foreground    # Run inline (for dev/debug)
+cast server --port 8080     # Custom port (default: 1337, or set CAST_SERVER_PORT)
+cast server --host 0.0.0.0  # Bind to all interfaces (reachable from network)
+cast server --public        # Alias for --host 0.0.0.0
 </code></pre>
 <p>First run generates a password, printed to the terminal and saved in <code>~/.cast/settings.json</code>. Username is always <code>cast</code>.</p>
 <p>Binding to a non-loopback address (<code>--host 0.0.0.0</code> or <code>--public</code>) exposes plain HTTP. Use it only on a trusted LAN: without HTTPS, a network observer can read the password and session. For remote access without a domain, keep the default loopback binding and use <code>ssh -L 1337:127.0.0.1:1337 user@host</code>.</p>

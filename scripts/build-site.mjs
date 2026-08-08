@@ -1013,7 +1013,7 @@ writeFileSync(join(SITE, ".nojekyll"), "");
 // to avoid overflowing on narrow phones and still had its own timing bugs.
 mkdirSync(join(SITE, "assets"), { recursive: true });
 cpSync(join(ROOT, "assets", "cast-banner.svg"), join(SITE, "assets", "cast-banner.svg"));
-cpSync(join(ROOT, "src", "web", "public", "favicon.svg"), join(SITE, "assets", "favicon.svg"));
+cpSync(join(ROOT, "src", "server", "public", "favicon.svg"), join(SITE, "assets", "favicon.svg"));
 
 // Landing page
 writeFileSync(join(SITE, "index.html"), LANDING_HTML);

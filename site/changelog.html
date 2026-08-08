@@ -507,7 +507,125 @@ a:hover { color: #c084fc; text-decoration: none; }
 	<article class="content">
 		<h1>Changelog</h1>
 <p>All notable user-facing changes to cast, newest first.</p>
-<h2>0.12.29</h2>
+<h2>0.13.13</h2>
+<h3>Added</h3>
+<ul>
+<li><strong>Live agent events are now persisted for audit/debug.</strong> Tool runs, retries, doom-loop stops, compaction failures, errors, and turn ends land in a new <code>session_events</code> table (readable via <code>GET /api/sessions/:id/events/history</code>). These are execution telemetry, deliberately kept out of the conversation history so the model never sees them as context.</li>
+<li><strong>Versioned database migrations.</strong> Schema changes are now an ordered, tracked migration list (<code>schema_migrations</code> table) applied once each inside a transaction — the standard Flyway-style pattern — replacing the previous ad-hoc column checks. Existing databases migrate in place without losing any sessions or messages.</li>
+</ul>
+<h2>0.13.12</h2>
+<h3>Fixed</h3>
+<ul>
+<li><strong>Stale <code>cast web</code> no longer becomes a phantom message.</strong> Upgrading from a pre-0.13.11 install (<code>cast upgrade</code> from 0.13.9 or older) used to restart the daemon via <code>cast web start --port 0</code>. Since the command was renamed to <code>cast server</code>, the new binary read <code>web start --port 0</code> as a TUI prompt instead of a subcommand — a phantom <code>[user] web start --port 0</code> message landed in a fresh session. <code>cast web</code> now prints a clear &quot;renamed to cast server&quot; error instead of falling through to the prompt.</li>
+</ul>
+<h2>0.13.11</h2>
+<h3>Changed</h3>
+<ul>
+<li><strong><code>cast web</code> is now <code>cast server</code>.</strong> The daemon was the single-writer backend every surface talks to, not just the web UI, so the name was misleading. The command, state file (<code>server.json</code>, auto-migrated from <code>web.json</code>), env vars (<code>CAST_SERVER_*</code>), and the settings key (<code>serverToken</code>, auto-migrated from <code>webPassword</code>) are all <code>server</code> now. The web UI is unchanged — it&#39;s just served by the <code>cast server</code> daemon. <code>cast web</code> is no longer accepted.</li>
+<li><strong>The daemon is persistent and single-instance.</strong> It stays up after the TUI exits so background processes keep running and the web UI stays reachable; repeated <code>cast</code>/<code>npm start</code> reuse the one running instance instead of stacking orphaned processes.</li>
+<li><strong><code>cast run</code> and <code>cast run --interactive</code> now go through the same server daemon</strong> as the TUI and web UI. Sessions land in the shared store, <code>-c</code>/<code>-s</code> resume works, and JSONL commands (including <code>/worktree</code>, plan review, question answers) round-trip through the server&#39;s command surface.</li>
+</ul>
+<h3>Added</h3>
+<ul>
+<li><code>Ctrl+L</code> clears the composer in any state; idle <code>Esc</code> no longer wipes typed text (a stray press used to delete your message).</li>
+<li>E2E harness for the server paths: <code>npm run e2e:jsonl</code> (plan mode through the daemon) and <code>npm run e2e:hooks</code> (hooks firing on the daemon).</li>
+</ul>
+<h3>Fixed</h3>
+<ul>
+<li>Stopping a running turn now needs a deliberate double-<code>Esc</code>; a single stray <code>Esc</code> no longer kills a long in-flight turn.</li>
+<li>The ASCII banner no longer disappears ~0.5 s after startup (a settle resync cleared it).</li>
+<li>Exiting is clean: no <code>^[[15;1R</code>-style cursor-query garbage in the shell, and the last TUI frame is cleared.</li>
+<li>The question picker names exactly which option is missing its required <code>value</code>, so the model knows what to fix.</li>
+<li>Older session history loads a page at a time (<code>/older</code> or <code>PageUp</code>) instead of flooding the terminal scrollback on resume.</li>
+</ul>
+<h2>0.13.10</h2>
+<h3>Added</h3>
+<ul>
+<li><strong>Older session history is paged instead of dumped.</strong> Resuming a long session no longer floods the terminal scrollback with the whole transcript (which pushed the viewport past the buffer limit and made the start unreachable). Only the most recent turns load; <code>/older</code> or <code>PageUp</code> loads more on demand.</li>
+<li><strong><code>Ctrl+L</code> clears the composer in any state.</strong> Idle <code>Esc</code> used to wipe typed text — a stray press deleted your message. Clearing now lives on <code>Ctrl+L</code> only, and <code>Esc</code> is reserved for stopping a running turn.</li>
+</ul>
+<h3>Changed</h3>
+<ul>
+<li><strong>Stopping a turn needs a deliberate double-<code>Esc</code>.</strong> The first press shows <code>[Press Esc again to stop the turn]</code>; a second within 2 s aborts. A single stray <code>Esc</code> no longer kills a long in-flight turn.</li>
+</ul>
+<h3>Fixed</h3>
+<ul>
+<li><strong>The banner no longer disappears after startup.</strong> <code>settleResync</code> (added in 0.13.7) cleared the screen ~0.5 s after mount, erasing the ASCII banner and composer frame because the banner lives outside Ink&#39;s tree. Light resyncs now reprint it.</li>
+<li><strong>Clean exit: no terminal garbage after quitting.</strong> A pending cursor-position query (<code>\x1b[6n</code>) could have its reply echoed into the shell once raw mode dropped (<code>^[[15;1R</code> etc.). Exiting now cancels the query, stops polling, and clears the screen.</li>
+<li><strong>The question picker reports exactly what&#39;s wrong.</strong> When a model omits an option&#39;s required <code>value</code> field, the error now names the offending option instead of a generic count message.</li>
+</ul>
+<h2>0.13.9</h2>
+<h3>Fixed</h3>
+<ul>
+<li><strong>Text-only models stop receiving image attachments.</strong> When a provider rejects <code>image_url</code> message parts (e.g. deepseek-v4-pro on a text-only endpoint), the rejected image messages are now removed from the session — previously they stayed and every turn re-sent them, failing again. Models that don&#39;t support images now just see the file path.</li>
+</ul>
+<h2>0.13.8</h2>
+<h3>Fixed</h3>
+<ul>
+<li><strong>Raw mode is re-asserted if the terminal drops it.</strong> Some terminals / SSH wrappers quietly restore echo and line buffering, which made typed text appear below the composer frame instead of entering it. A 2 s watchdog re-enables raw mode whenever it&#39;s detected as off.</li>
+</ul>
+<h2>0.13.7</h2>
+<h3>Fixed</h3>
+<ul>
+<li><strong>Resumed sessions re-settle the layout.</strong> Opening an existing session replays its history, which could scroll the composer up mid-screen (input landing below the frame) with no streaming turn to trigger the usual repair. A light resync now runs shortly after mount to reposition the composer at the bottom.</li>
+</ul>
+<h2>0.13.6</h2>
+<h3>Fixed</h3>
+<ul>
+<li><strong>A stacked display (composer rendered above the input) is now corrected.</strong> When DECXCPR scroll detection was unavailable, the cleanup resync never fired and the mis-rendered layout persisted; the resync now proceeds even without scroll detection, so the display self-heals.</li>
+</ul>
+<h2>0.13.5</h2>
+<h3>Fixed</h3>
+<ul>
+<li><strong><code>cast upgrade</code> now restarts a running daemon.</strong> Previously it replaced the binary but a live <code>cast web</code> daemon kept executing the old bundle until manually restarted, so fixes never reached the daemon process. If a daemon is running at upgrade time it&#39;s now stopped and restarted on the new build.</li>
+</ul>
+<h2>0.13.4</h2>
+<h3>Fixed</h3>
+<ul>
+<li><strong>DECXCPR scroll-polling stops if the terminal never answers.</strong> A terminal that echoes the query instead of delivering it (raw mode lost, e.g. on resume) used to keep re-echoing garbage on every poll — now the poll gives up after the first unanswered query, so the flood can&#39;t recur even on a hostile terminal.</li>
+</ul>
+<h2>0.13.3</h2>
+<h3>Fixed</h3>
+<ul>
+<li><strong>Composer input no longer goes dead on terminals that answer the DECXCPR scroll-poll slowly.</strong> The poll attached a temporary stdin listener per query, which swallowed keystrokes for up to 400 ms a time; the response is now detected through the composer&#39;s own input pipeline, and the poll skips terminals that aren&#39;t actually in raw mode.</li>
+</ul>
+<h2>0.13.2</h2>
+<h3>Fixed</h3>
+<ul>
+<li><strong>DECXCPR scroll-poll responses no longer leak into the composer.</strong> The terminal&#39;s cursor-position replies (echoed while stdin drops out of raw mode, e.g. during a bash tool) used to land as visible garbage like <code>^[[67;1R</code> or <code>68;1R</code> in the input buffer. In-flight queries are now cancelled the moment the terminal suspends, and stray response remnants are dropped defensively.</li>
+</ul>
+<h3>Internal</h3>
+<ul>
+<li><code>turn-runner-state</code> tests now write their sentinel files behind a fake HOME, so a killed test run can never pollute the real <code>~/.cast/sessions/</code>.</li>
+</ul>
+<h2>0.13.1</h2>
+<h3>Fixed</h3>
+<ul>
+<li><strong>Abort is always responsive.</strong> Esc cancels a provider retry backoff immediately (no more waiting out a 30 s sleep); the OpenAI SDK&#39;s own uninterruptible retries are disabled (<code>maxRetries: 0</code>); a parallel tool batch closes after a 2 s grace even when a tool (e.g. a hung MCP server) ignores the abort signal — the turn always lands on &quot;aborted&quot;.</li>
+<li><strong>Turn errors stay in the transcript.</strong> A 4xx failure is committed to the chat history instead of sticking above the composer until the next turn.</li>
+<li><strong>Question picker and plan/build mode work in the daemon-mode TUI.</strong> The question picker opens and answers go back over HTTP; <code>/plan</code>, <code>/build</code>, and the plan-approval dialog sync the mode to the <code>cast web</code> daemon so the next turn actually runs in the chosen mode.</li>
+<li><strong>Provider/model switches take effect without a restart.</strong> A running <code>cast web</code> daemon picks up settings.json changes (made in the TUI or by hand) at the next turn, and reconciles a stale session model against the new provider&#39;s model list.</li>
+<li><strong>Image files attach inline.</strong> Pasting (Ctrl+V) or attaching (Ctrl+G) an image path sends the image to the model as a real attachment instead of a bare path it must <code>read</code>.</li>
+<li><strong>Provider retries surface in the web UI</strong> as a <code>[Retrying (attempt N)…]</code> row instead of a silent spinner.</li>
+<li><strong>Undo checkpoints and subagent transcripts are persisted</strong> to the session database, so <code>/undo</code> history and subagent work survive a daemon restart.</li>
+</ul>
+<h3>Added</h3>
+<ul>
+<li><strong>ACP permission flow via the SDK.</strong> <code>requestPermissionViaBridge</code> now sends a typed <code>session/request_permission</code> request to the client (with <code>Promise.race</code> timeout of 60 s), instead of emitting a custom <code>request_permission</code> notification that the client couldn&#39;t reply to. The reply is the typed <code>RequestPermissionResponse</code> — <code>outcome.outcome === &quot;selected&quot;</code> with <code>optionId === &quot;allow_once&quot;</code> grants, anything else denies.</li>
+<li><strong>Plan-mode pickers.</strong> <code>onPendingStateChange</code> wired through <code>createPlanState</code> — plan questions now surface as <code>request_question</code> notifications, plan transitions as <code>request_plan_approval</code>. Two custom extension methods (<code>answer_question</code>, <code>plan_review</code>) accept replies and resolve the pending state.</li>
+<li><strong><code>tool_call.kind</code></strong> mapped to ACP constants: <code>bash</code> → <code>execute</code>, <code>read</code> → <code>read</code>, <code>write</code>/<code>edit</code>/<code>patch</code> → <code>edit</code>, <code>grep</code>/<code>glob</code>/<code>web_fetch</code>/<code>web_search</code> → <code>search</code>. Previously every tool reported its own name as the kind.</li>
+<li><strong><code>available_commands_update</code></strong> sent once on session creation with the full slash-command list (<code>SLASH_COMMANDS</code> from <code>src/ui/commands.ts</code>). Names are stripped of leading <code>/</code> to match ACP conventions; <code>input.hint</code> is set on commands that take arguments.</li>
+<li><strong><code>usage_update</code> with full payload.</strong> Now sends <code>{ used, size, cost: { amount, currency } }</code> per ACP spec — <code>used</code> is the current turn&#39;s token count, <code>size</code> is the model&#39;s context window, <code>cost</code> is the cumulative session cost in USD summed across all <code>usage</code> events.</li>
+<li><strong>Multi-modal content in <code>session/prompt</code>.</strong> ACP v1 <code>PromptRequest.prompt[]</code> accepts text, image, audio, and resource blocks. <code>text</code> is forwarded as-is, <code>image</code> (base64 + mimeType) is converted to an <code>image_url</code> data URL and passed through cast&#39;s existing vision path (<code>runAgentLoop</code> already strips unsupported image_url parts — see <code>loop.ts:1173</code>). Audio and resource blocks are dropped with a marker note (cast has no audio/embedded-resource ingestion path through ACP yet).</li>
+<li><strong><code>session/load</code> and <code>session/resume</code> replay history.</strong> When a client opens an existing session, the bridge re-emits every persisted user/assistant message as <code>user_message_chunk</code> / <code>agent_message_chunk</code> notifications in chronological order, so the editor sees the conversation history. Replay is fire-and-forget — the <code>session/load</code> response is returned immediately.</li>
+</ul>
+<h3>Changed</h3>
+<ul>
+<li><strong>ACP bridge migrated to <code>@agentclientprotocol/sdk</code>.</strong> The <code>cast acp</code> wire transport is now powered by the official SDK (v1.3.0, zero dependencies, Apache-2.0) — all JSON-RPC serialization, schema validation, and protocol negotiations are handled by the library. The hand-rolled <code>rpc.ts</code> / <code>types.ts</code> / <code>handler.ts</code> / <code>tools.ts</code> / <code>index.ts</code> (≈600 lines) have been replaced by <code>agent.ts</code> (the typed <code>acp.agent({ name: &quot;cast&quot; })</code> factory + handler registration) and <code>bridge.ts</code> (the cast-side adapter that translates <code>AgentEvent</code> into SDK <code>sessionUpdate</code> notifications and routes SDK requests into <code>runAgentLoop</code>). Method names now use the slash-separated protocol convention (<code>session/new</code>, <code>session/load</code>, <code>session/prompt</code>, <code>session/set_mode</code>, <code>session/cancel</code>, <code>session/close</code>, <code>session/resume</code>, <code>session/list</code>, <code>authenticate</code>). The old <code>tools/list</code>, <code>permission/grant</code>, <code>permission/deny</code>, <code>answer_question</code>, and <code>plan_review</code> methods have been dropped — <code>tools/list</code> was never an ACP spec method, and the plan/picker bridge (<code>request_question</code>, <code>request_plan_approval</code>) is deferred to a future iteration.</li>
+<li><strong>Expanded agent capabilities.</strong> <code>agentCapabilities</code> now advertises <code>promptCapabilities: { audio: false, embeddedContext: true, image: true }</code>, <code>mcpCapabilities: { http: false, sse: false }</code>, <code>sessionCapabilities: { close: {}, fork: {}, list: {}, resume: {} }</code> — matching the structured shape editors expect instead of the previous flat boolean set.</li>
+<li><strong>New ACP methods.</strong> <code>authenticate</code> (returns empty <code>{}</code>), <code>session/list</code>, <code>session/close</code>, and <code>session/resume</code> are now registered on the SDK agent. <code>session/list</code> reads from the SQLite session database and returns <code>{ sessionId, cwd, title }</code>. <code>session/close</code> deletes the session and aborts its runner.</li>
+</ul>
+<h2>0.13.0</h2>
 <h3>Added</h3>
 <ul>
 <li>Single-writer daemon architecture: <code>cast web</code> is now the one process that owns <code>runAgentLoop</code> and is the only writer to the SQLite session store. The TUI (<code>cast</code>, no subcommand) is a thin client of it over HTTP + SSE instead of running the loop locally — on launch it auto-spawns the daemon on loopback (reusing one if already running) and renders from the same <code>/api/sessions/:id/events</code> stream the browser uses. A session opened in both the TUI and the browser now streams live (tokens, tool calls, status) to both surfaces, and <code>abort</code>/<code>steer</code> from either stops or redirects the turn for both. <code>cast web stop</code> now also disconnects the TUI&#39;s SSE stream. Set <code>CAST_NO_DAEMON=1</code> to keep the TUI on the previous local-loop path (CI/headless).</li>
