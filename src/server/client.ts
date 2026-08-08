@@ -77,13 +77,24 @@ async function spawnDetachedDaemon(): Promise<ServerDaemonState | undefined> {
 		},
 	});
 	child.unref();
-	// Wait for the state file to describe a live process with a real port.
-	for (let i = 0; i < 100; i++) {
-		const state = readLiveServerState();
-		if (state) return state;
-		await new Promise((r) => setTimeout(r, 100));
-	}
-	return undefined;
+	// Wait for the state file to describe a live process with a real port
+	// (timeout after ~10s). Interval-poll, not a for+await loop: keep the
+	// pending timer unref'd so it can't hold the process open on a failure.
+	const state = await new Promise<ServerDaemonState | undefined>((resolvePromise) => {
+		let settled = false;
+		const finish = (s: ServerDaemonState | undefined) => {
+			if (settled) return;
+			settled = true;
+			clearInterval(poll);
+			resolvePromise(s);
+		};
+		const poll = setInterval(() => {
+			const s = readLiveServerState();
+			if (s) finish(s);
+		}, 100);
+		setTimeout(() => finish(undefined), 10_000).unref();
+	});
+	return state;
 }
 
 /** POST JSON and return the parsed body. Throws on non-2xx with the server's error text. */

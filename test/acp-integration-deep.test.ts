@@ -85,9 +85,9 @@ describe("ACP integration — wire inspector", () => {
 	const events: { kind: string; payload: unknown }[] = [];
 
 	afterAll(() => {
-		console.log("\n=== captured " + events.length + " notifications ===");
+		console.log(`\n=== captured ${events.length} notifications ===`);
 		for (const e of events) {
-			console.log(e.kind + ":", JSON.stringify(e.payload, null, 2));
+			console.log(`${e.kind}:`, JSON.stringify(e.payload, null, 2));
 		}
 	});
 

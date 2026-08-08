@@ -2,6 +2,13 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.13
+
+### Added
+
+- **Live agent events are now persisted for audit/debug.** Tool runs, retries, doom-loop stops, compaction failures, errors, and turn ends land in a new `session_events` table (readable via `GET /api/sessions/:id/events/history`). These are execution telemetry, deliberately kept out of the conversation history so the model never sees them as context.
+- **Versioned database migrations.** Schema changes are now an ordered, tracked migration list (`schema_migrations` table) applied once each inside a transaction — the standard Flyway-style pattern — replacing the previous ad-hoc column checks. Existing databases migrate in place without losing any sessions or messages.
+
 ## 0.13.12
 
 ### Fixed
