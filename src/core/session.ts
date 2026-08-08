@@ -1064,7 +1064,6 @@ export function saveSubagentRun(run: SubagentRunRecord): void {
 			JSON.stringify(run.messages),
 		);
 }
-
 export function loadSubagentRuns(sessionId: string): SubagentRunRecord[] {
 	const rows = getDb()
 		.prepare(
@@ -1087,6 +1086,22 @@ export function loadSubagentRuns(sessionId: string): SubagentRunRecord[] {
 		endReason: r.end_reason,
 		messages: JSON.parse(r.messages_json) as Message[],
 	}));
+}
+
+/**
+ * Vision fallback cleanup: once a model has rejected image_url message parts
+ * (400/404), those user messages are useless to it. saveSession only upserts
+ * rows present in `session.messages` — it never deletes — so the rejected
+ * image messages stayed in_context and re-triggered the 400 on every later
+ * turn. Mark them out of context so they stop being sent (the caller has
+ * already removed them from the in-memory array for the current request).
+ */
+export function markImageMessagesOutOfContext(sessionId: string): void {
+	getDb()
+		.prepare(
+			"UPDATE messages SET in_context = 0 WHERE session_id = ? AND in_context = 1 AND content_json LIKE '%image_url%'",
+		)
+		.run(sessionId);
 }
 
 /** Delete a saved session entirely — cascades to its message rows. Returns
