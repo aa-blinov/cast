@@ -87,8 +87,13 @@ import { stripAnsi } from "../core/tools/bash.ts";
 import { BackgroundTaskRegistry, type BashBackgroundDeps } from "../core/tools/bash-background.ts";
 import { type CompletedToolCallStatus, completedToolCallStatus } from "../core/tools/shared.ts";
 import { effectiveStatusFromFile } from "../core/turn-runner-state.ts";
-import { buildReasoningParams, getReasoningOptionsForFormat, resolveReasoningFormat } from "../core/vendors.ts";
-import type { SessionWorktree } from "../core/worktree.ts";
+import {
+	buildReasoningParams,
+	getReasoningOptionsForFormat,
+	REASONING_FORMAT_OPTIONS,
+	resolveReasoningFormat,
+} from "../core/vendors.ts";
+import { ensureSessionWorktree, listWorktrees, removeWorktreeBySlug, type SessionWorktree } from "../core/worktree.ts";
 import { ALL_THEMES } from "../ui/themes/index.ts";
 import type { ThemeColors } from "../ui/themes/types.ts";
 import { isCommandBlocking, SLASH_COMMANDS } from "./commands.ts";
@@ -2698,6 +2703,92 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				fireUserPromptExpansion(sessionCwd, skill.name);
 				submit(sessionId, formatSkillInvocation(skill, arg));
 				return { ok: true, result: `Invoked skill: ${skill.name}` };
+			}
+		}
+
+		// Headless/JSONL parity commands — the TUI handles these client-side
+		// (clipboard, display settings, keybindings, worktree switching), but the
+		// daemon returns an equivalent result so a `cast run --interactive`
+		// consumer can round-trip every slash command instead of hitting
+		// "Unknown command".
+		if (name === "/quit" || name === "/exit") {
+			// Alias of /abort for the running case; idle sessions just report ok.
+			if (running) {
+				ws.runner.abort();
+				return { ok: true, result: "quit requested" };
+			}
+			return { ok: true, result: "idle" };
+		}
+		if (name === "/copy") {
+			const last = [...ws.session.messages].reverse().find((m) => m.role === "assistant" && m.content);
+			return {
+				ok: true,
+				result: last ? (typeof last.content === "string" ? last.content : "assistant message") : "",
+			};
+		}
+		if (name === "/older") {
+			// The web client pages history via GET /api/sessions/:id/history;
+			// expose the same page here. With no explicit page this returns the
+			// most recent slice (same as the TUI's initial window).
+			return { ok: true, result: "use GET /api/sessions/:id/history?turns=N" };
+		}
+		if (name === "/keys") {
+			return { ok: true, result: "keybindings are a TUI concept; see docs or /help for commands" };
+		}
+		if (name === "/statusbar") {
+			return { ok: true, result: loadSettings().statusBar ?? { visible: [], order: [], sides: {} } };
+		}
+		if (name === "/reasoning-display") {
+			const next = !(loadSettings().showReasoning ?? false);
+			updateSettings({ showReasoning: next });
+			return { ok: true, result: { showReasoning: next } };
+		}
+		if (name === "/reasoning-format") {
+			const current = config.reasoningFormat;
+			const options = REASONING_FORMAT_OPTIONS.map((o) => o.value);
+			if (!arg) return { ok: true, result: { reasoningFormat: current, options } };
+			if (!options.includes(arg as (typeof options)[number])) {
+				return { ok: false, error: `Unknown reasoning format: ${arg}. Options: ${options.join(", ")}` };
+			}
+			config.reasoningFormat = resolveReasoningFormat(config.baseURL, arg as (typeof options)[number]);
+			config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat);
+			return { ok: true, result: { reasoningFormat: config.reasoningFormat } };
+		}
+		if (name === "/worktree") {
+			const sessionCwd = ws.session.cwd ?? cwd;
+			if (!arg) {
+				return { ok: false, error: "Usage: /worktree <name> | /worktree list | /worktree remove <name>" };
+			}
+			if (arg === "list") {
+				const wts = listWorktrees(sessionCwd);
+				if (wts.length === 0) return { ok: true, result: "No active git worktrees found for this repository" };
+				return { ok: true, result: wts.map((w) => `${w.name} (${w.branch})`).join(", ") };
+			}
+			const rmMatch = /^(?:remove|rm)\s*(.*)$/.exec(arg);
+			if (rmMatch) {
+				const targetName = rmMatch[1]!.trim();
+				if (!targetName) return { ok: false, error: "Usage: /worktree remove <name>" };
+				const res = removeWorktreeBySlug(targetName, sessionCwd);
+				return { ok: true, result: res.message };
+			}
+			if (running)
+				return { ok: false, error: "Agent running — finish the run or /abort before switching worktrees" };
+			try {
+				const wt = await ensureSessionWorktree(arg, sessionCwd);
+				ws.session.cwd = wt.path;
+				saveSession(ws.session);
+				// Rebuild the system prompt against the worktree's context (skills,
+				// rules, MCP, trust) so the next turn sees the worktree's world.
+				ws.systemPrompt = computeSystemPrompt(
+					resolvePersona(ws.session.persona ?? "") ?? currentPersona,
+					ws.session.model,
+					wt.path,
+					ws.session.mode,
+				);
+				broadcastSessionUpdate(ws);
+				return { ok: true, result: `Worktree ready: ${wt.path}` };
+			} catch (err) {
+				return { ok: false, error: err instanceof Error ? err.message : String(err) };
 			}
 		}
 
