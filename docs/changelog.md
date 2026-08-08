@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.8
+
+### Fixed
+
+- **Raw mode is re-asserted if the terminal drops it.** Some terminals / SSH wrappers quietly restore echo and line buffering, which made typed text appear below the composer frame instead of entering it. A 2 s watchdog re-enables raw mode whenever it's detected as off.
+
 ## 0.13.7
 
 ### Fixed
