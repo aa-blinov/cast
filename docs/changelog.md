@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.12
+
+### Fixed
+
+- **Stale `cast web` no longer becomes a phantom message.** Upgrading from a pre-0.13.11 install (`cast upgrade` from 0.13.9 or older) used to restart the daemon via `cast web start --port 0`. Since the command was renamed to `cast server`, the new binary read `web start --port 0` as a TUI prompt instead of a subcommand — a phantom `[user] web start --port 0` message landed in a fresh session. `cast web` now prints a clear "renamed to cast server" error instead of falling through to the prompt.
+
 ## 0.13.11
 
 ### Changed
