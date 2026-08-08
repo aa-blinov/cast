@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.5
+
+### Fixed
+
+- **`cast upgrade` now restarts a running daemon.** Previously it replaced the binary but a live `cast web` daemon kept executing the old bundle until manually restarted, so fixes never reached the daemon process. If a daemon is running at upgrade time it's now stopped and restarted on the new build.
+
 ## 0.13.4
 
 ### Fixed
