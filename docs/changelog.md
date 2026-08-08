@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.4
+
+### Fixed
+
+- **DECXCPR scroll-polling stops if the terminal never answers.** A terminal that echoes the query instead of delivering it (raw mode lost, e.g. on resume) used to keep re-echoing garbage on every poll — now the poll gives up after the first unanswered query, so the flood can't recur even on a hostile terminal.
+
 ## 0.13.3
 
 ### Fixed
