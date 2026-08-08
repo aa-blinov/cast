@@ -196,16 +196,12 @@ describe("JSONL protocol — command action", () => {
 			{ type: "exit" },
 		]);
 
-		// /worktree emits a `notice` with the success message, then a `state`
-		// event we asked for. The cwd in state.cwd must be the worktree path.
+		// /worktree emits a `notice` with the result, then a `state` event we
+		// asked for. The cwd in state.cwd must be the worktree path.
 		const notices = events.filter((e) => e.type === "notice").map((e) => String(e.text ?? ""));
 		expect(
-			notices.some((t) => t.startsWith("[Creating worktree")),
-			`expected a "Creating worktree" notice, got: ${notices.join(" | ")}`,
-		).toBe(true);
-		expect(
-			notices.some((t) => t.startsWith("[Worktree:") && t.includes("cast-feature-1")),
-			`expected a success notice, got: ${notices.join(" | ")}`,
+			notices.some((t) => t.includes("Worktree ready") && t.includes("feature-1")),
+			`expected a worktree-success notice, got: ${notices.join(" | ")}`,
 		).toBe(true);
 
 		// Multiple `state` events are emitted: one at startup, one after
@@ -226,17 +222,17 @@ describe("JSONL protocol — command action", () => {
 		const firstNotice = first
 			.filter((e) => e.type === "notice")
 			.map((e) => String(e.text ?? ""))
-			.find((t) => t.startsWith("[Worktree:"));
+			.find((t) => t.includes("Worktree ready"));
 		const secondNotice = second
 			.filter((e) => e.type === "notice")
 			.map((e) => String(e.text ?? ""))
-			.find((t) => t.startsWith("[Worktree:"));
+			.find((t) => t.includes("Worktree ready"));
 		expect(firstNotice).toBeDefined();
 		expect(secondNotice).toBeDefined();
 		// Same worktree, same path — and `git worktree list` shouldn't show a
 		// duplicate. (Path is reported as the worktree argument's resolved
 		// absolute form, so the equality check is path-level.)
-		const pathMatch = /Worktree: (.+?) \(/;
+		const pathMatch = /Worktree ready: (.+)$/;
 		const firstPath = firstNotice!.match(pathMatch)?.[1] ?? "";
 		const secondPath = secondNotice!.match(pathMatch)?.[1] ?? "";
 		expect(secondPath).toBe(firstPath);

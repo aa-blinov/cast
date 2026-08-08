@@ -1,13 +1,8 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { WebEvent } from "../src/server/bridge.ts";
-import {
-	createServerSession,
-	ensureServerClient,
-	submitServerChat,
-	subscribeServerEvents,
-} from "../src/server/client.ts";
+import { createServerSession, submitServerChat, subscribeServerEvents } from "../src/server/client.ts";
 
 // Real HTTP server standing in for the cast server daemon: exercises the
 // client's fetch calls and SSE subscription against a live socket (URL

@@ -142,6 +142,56 @@ export async function submitServerChat(client: ServerClient, sessionId: string, 
 	}
 }
 
+/** Run a slash command on a daemon session (the same surface the web UI's /command uses). */
+export async function runServerCommand(client: ServerClient, sessionId: string, command: string): Promise<unknown> {
+	const { status, data } = await serverFetch(client, `/api/sessions/${sessionId}/command`, {
+		method: "POST",
+		body: { command },
+	});
+	if (status !== 200) {
+		const msg =
+			data && typeof data === "object" && "error" in data
+				? String((data as { error: string }).error)
+				: "command failed";
+		throw new Error(msg);
+	}
+	return (data as { result?: unknown }).result;
+}
+
+/** Set the session's mode (plan/build) on the daemon. */
+export async function setServerMode(client: ServerClient, sessionId: string, mode: "plan" | "build"): Promise<void> {
+	const { status } = await serverFetch(client, `/api/sessions/${sessionId}/mode`, {
+		method: "POST",
+		body: { mode },
+	});
+	if (status !== 202) throw new Error(`mode change failed (HTTP ${status})`);
+}
+
+/** Answer a pending question on a daemon session. */
+export async function answerServerQuestion(client: ServerClient, sessionId: string, values: string[]): Promise<void> {
+	const { status } = await serverFetch(client, `/api/sessions/${sessionId}/question`, {
+		method: "POST",
+		body: { values },
+	});
+	if (status !== 202) throw new Error(`answer failed (HTTP ${status})`);
+}
+
+/** Resolve a pending plan-done transition on a daemon session. */
+export async function resolveServerPlanTransition(client: ServerClient, sessionId: string): Promise<void> {
+	const { status } = await serverFetch(client, `/api/sessions/${sessionId}/plan-transition`, {
+		method: "POST",
+		body: { kind: "done" },
+	});
+	if (status !== 202) throw new Error(`plan transition failed (HTTP ${status})`);
+}
+
+/** Fetch the daemon's view of a session (mode, question, plan transition, status). */
+export async function getServerSession(client: ServerClient, sessionId: string): Promise<Record<string, unknown>> {
+	const { status, data } = await serverFetch(client, `/api/sessions/${sessionId}`);
+	if (status !== 200) throw new Error(`session fetch failed (HTTP ${status})`);
+	return data as Record<string, unknown>;
+}
+
 /**
  * Subscribe to a session's WebEvent stream until the given predicate resolves
  * (e.g. the turn ended). Calls onEvent for each parsed event. Resolves once
