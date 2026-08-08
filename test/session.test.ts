@@ -26,6 +26,7 @@ import {
 	loadSession,
 	loadSessionByShareToken,
 	loadSubagentRuns,
+	markImageMessagesOutOfContext,
 	migrateLegacySessionsToDb,
 	recordCompaction,
 	resetSessionContext,
@@ -647,6 +648,27 @@ describe("session persistence", () => {
 
 		expect(loadCheckpoints(session.id)).toEqual([]);
 		expect(loadSubagentRuns(session.id)).toEqual([]);
+	});
+
+	it("markImageMessagesOutOfContext drops rejected image_url messages from the session", () => {
+		const session = createSession("gpt-4o", projectA);
+		const img = "data:image/png;base64,iVBORw0KGgo=";
+		session.messages.push(
+			{ role: "user", content: "plain text" },
+			{
+				role: "user",
+				content: [
+					{ type: "text", text: "see" },
+					{ type: "image_url", image_url: { url: img } },
+				],
+			},
+		);
+		saveSession(session);
+
+		markImageMessagesOutOfContext(session.id);
+
+		const loaded = loadSession(session.id);
+		expect(loaded?.messages.map((m) => JSON.stringify(m.content))).toEqual(['"plain text"']);
 	});
 
 	it("derives the title when any caller appends the first user message", () => {

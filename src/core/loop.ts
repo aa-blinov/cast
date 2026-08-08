@@ -31,7 +31,13 @@ import {
 import type { Persona } from "./personas.ts";
 import { checkReadOnlyCommand, listPlanNames, readActivePlan, TERMINAL_TOOL_NAMES } from "./plan.ts";
 import { promptsDir, readRequiredPrompt } from "./prompts.ts";
-import { compactMessages, estimateTokens, fileTagsFromCompactionSummary, shouldCompact } from "./session.ts";
+import {
+	compactMessages,
+	estimateTokens,
+	fileTagsFromCompactionSummary,
+	markImageMessagesOutOfContext,
+	shouldCompact,
+} from "./session.ts";
 import type { SshHost } from "./ssh.ts";
 import type { SubagentPrompt } from "./subagents.ts";
 import { formatTodoList, remainingTodoCount, type TodoItem, validateTodos } from "./todo.ts";
@@ -1260,7 +1266,9 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 							m.content.some((p: { type?: string }) => p.type === "image_url"),
 					);
 					if (isVisionError && hasImages) {
-						// Remove image_url user messages
+						// Remove image_url user messages. Persist the removal (mark
+						// them out of context) so later turns don't re-send the
+						// rejected image parts and pay the 400+retry again.
 						for (let i = messages.length - 1; i >= 0; i--) {
 							const m = messages[i]!;
 							if (
@@ -1271,6 +1279,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 								messages.splice(i, 1);
 							}
 						}
+						if (loopConfig.sessionId) markImageMessagesOutOfContext(loopConfig.sessionId);
 						onWarning?.("Model doesn't support images — sending file path only");
 						completion = await streamAndCollect(
 							client,
