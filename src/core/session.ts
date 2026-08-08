@@ -1033,6 +1033,44 @@ export function loadCheckpoints(sessionId: string): TurnCheckpoint[] {
 }
 
 // ----------------------------------------------------------------------------
+// Live agent events — execution telemetry (tool_start, turn_end, doom_loop,
+// retry, compaction_failed, error, end, …). Append-only, deliberately kept out
+// of `messages` so the model never sees execution noise as conversation
+// context on the next turn. Persisted for audit/debug (see session_events).
+// ----------------------------------------------------------------------------
+
+/** Append one live agent event. Idempotent by (session, seq) — safe to call
+ *  on retry paths. `payload` is anything JSON-serializable (often undefined). */
+export function appendSessionEvent(sessionId: string, type: string, payload?: unknown): void {
+	getDb()
+		.prepare(
+			"INSERT OR IGNORE INTO session_events (session_id, seq, ts, type, payload_json) VALUES (?, (SELECT COALESCE(MAX(seq), -1) + 1 FROM session_events WHERE session_id = ?), ?, ?, ?)",
+		)
+		.run(
+			sessionId,
+			sessionId,
+			new Date().toISOString(),
+			type,
+			payload === undefined ? null : JSON.stringify(payload),
+		);
+}
+
+/** All recorded live events for a session, oldest first. */
+export function getSessionEvents(
+	sessionId: string,
+): Array<{ seq: number; ts: string; type: string; payload: unknown }> {
+	const rows = getDb()
+		.prepare("SELECT seq, ts, type, payload_json FROM session_events WHERE session_id = ? ORDER BY seq")
+		.all(sessionId) as Array<{ seq: number; ts: string; type: string; payload_json: string | null }>;
+	return rows.map((r) => ({
+		seq: r.seq,
+		ts: r.ts,
+		type: r.type,
+		payload: r.payload_json ? (JSON.parse(r.payload_json) as unknown) : undefined,
+	}));
+}
+
+// ----------------------------------------------------------------------------
 // Subagent (task tool) transcripts — the child run's full message chain,
 // persisted so a subagent's work survives the process that ran it.
 // ----------------------------------------------------------------------------

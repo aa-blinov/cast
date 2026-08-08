@@ -58,6 +58,7 @@ import {
 	addUsage,
 	appendCheckpoint,
 	appendMessage,
+	appendSessionEvent,
 	type SessionSummary as CoreSessionSummary,
 	clearSessionMessages,
 	countTurnMessages,
@@ -1163,6 +1164,28 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				}
 			},
 			onEvent: (event: AgentEvent) => {
+				// Persist execution telemetry for audit/debug — events that say
+				// "what the engine did", not "what the user sees". token/thinking
+				// are too fine-grained (thousands per turn) and their final form
+				// already lands in messages; these are the coarse, useful ones.
+				switch (event.type) {
+					case "tool_start":
+					case "tool_end":
+					case "turn_end":
+					case "doom_loop":
+					case "open_work_gate":
+					case "open_work_gate_exhausted":
+					case "retry":
+					case "compaction_failed":
+					case "interrupt_reminder":
+					case "date_rollover":
+					case "end":
+					case "error":
+						appendSessionEvent(sessionId, event.type, event);
+						break;
+					default:
+						break;
+				}
 				if (event.type === "token" || event.type === "thinking") {
 					if (activeStreamCompletion) {
 						ws.activeStream = [];

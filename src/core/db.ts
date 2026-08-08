@@ -58,6 +58,20 @@ CREATE INDEX IF NOT EXISTS idx_messages_context ON messages(session_id, in_conte
 CREATE INDEX IF NOT EXISTS idx_messages_role ON messages(session_id, role, seq);
 CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at DESC);
 
+-- Live agent events (tool_start, turn_end, doom_loop, open_work_gate_exhausted,
+-- retry, compaction_failed, error, end). These are execution telemetry - NOT
+-- conversation, so they deliberately never enter the messages table (which the
+-- model sees as context on the next turn). Kept here for audit/debug; append-only.
+CREATE TABLE IF NOT EXISTS session_events (
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  seq INTEGER NOT NULL,
+  ts TEXT NOT NULL,
+  type TEXT NOT NULL,
+  payload_json TEXT,
+  PRIMARY KEY (session_id, seq)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS idx_session_events_type ON session_events(session_id, type, seq);
+
 CREATE TABLE IF NOT EXISTS web_sessions (
   token_hash TEXT PRIMARY KEY,
   created_at INTEGER NOT NULL,
