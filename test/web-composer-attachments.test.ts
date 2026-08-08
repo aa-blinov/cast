@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isBlockedAttachmentName, partitionFiles } from "../src/web/public/composer-attachments.js";
+import { isBlockedAttachmentName, partitionFiles } from "../src/server/public/composer-attachments.js";
 
 describe("web composer attachments", () => {
 	it("blocks executable attachment names", () => {

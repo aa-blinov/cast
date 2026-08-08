@@ -1,16 +1,16 @@
 import { spawnSync } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchLatestVersion, isAlreadyUpToDate, isNewerVersion, restartDaemon } from "../src/core/upgrade.ts";
-import { clearWebState, isProcessAlive, readWebState } from "../src/web/daemon-state.ts";
+import { clearServerState, isProcessAlive, readServerState } from "../src/server/daemon-state.ts";
 
 vi.mock("node:child_process", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("node:child_process")>();
 	return { ...actual, spawnSync: vi.fn(() => ({ status: 0 })) };
 });
-vi.mock("../src/web/daemon-state.ts", () => ({
-	readWebState: vi.fn(),
+vi.mock("../src/server/daemon-state.ts", () => ({
+	readServerState: vi.fn(),
 	isProcessAlive: vi.fn(),
-	clearWebState: vi.fn(),
+	clearServerState: vi.fn(),
 }));
 
 describe("isNewerVersion", () => {
@@ -103,20 +103,20 @@ describe("isAlreadyUpToDate", () => {
 describe("restartDaemon", () => {
 	beforeEach(() => {
 		vi.mocked(spawnSync).mockClear();
-		vi.mocked(clearWebState).mockClear();
-		vi.mocked(readWebState).mockReset();
+		vi.mocked(clearServerState).mockClear();
+		vi.mocked(readServerState).mockReset();
 		vi.mocked(isProcessAlive).mockReset();
 	});
 
 	it("does nothing when no daemon is running", () => {
-		vi.mocked(readWebState).mockReturnValue(undefined);
+		vi.mocked(readServerState).mockReturnValue(undefined);
 		restartDaemon();
 		expect(spawnSync).not.toHaveBeenCalled();
-		expect(clearWebState).not.toHaveBeenCalled();
+		expect(clearServerState).not.toHaveBeenCalled();
 	});
 
 	it("restarts a live daemon on the new build", () => {
-		vi.mocked(readWebState).mockReturnValue({
+		vi.mocked(readServerState).mockReturnValue({
 			pid: 424242,
 			host: "127.0.0.1",
 			port: 1337,
@@ -126,7 +126,7 @@ describe("restartDaemon", () => {
 		vi.mocked(isProcessAlive).mockReturnValue(true);
 		vi.spyOn(process, "kill").mockImplementation(() => {});
 		restartDaemon();
-		expect(clearWebState).toHaveBeenCalled();
-		expect(spawnSync).toHaveBeenCalledWith("bash", ["-c", "cast web start --port 0"], { stdio: "inherit" });
+		expect(clearServerState).toHaveBeenCalled();
+		expect(spawnSync).toHaveBeenCalledWith("bash", ["-c", "cast server start --port 0"], { stdio: "inherit" });
 	});
 });

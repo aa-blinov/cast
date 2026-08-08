@@ -74,7 +74,7 @@ import { build, transform } from "esbuild";
 // for public/ as a sibling of dist/index.js.
 import { cpSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-cpSync("src/web/public", "dist/public", { recursive: true });
+cpSync("src/server/public", "dist/public", { recursive: true });
 
 // Keep the source web assets readable for the dev server, but ship compact
 // browser assets in release builds. Each module is transformed independently

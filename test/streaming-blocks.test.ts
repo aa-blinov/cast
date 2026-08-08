@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
+import {
+	appendTextBlock,
+	blocksFromAssistantCompletion,
+	reduceStreamEvent,
+} from "../src/server/public/stream-blocks.js";
 import { type StreamBlock, settledPrefixLength, splitCompleteLines } from "../src/ui/useAgentSession.ts";
-import { appendTextBlock, blocksFromAssistantCompletion, reduceStreamEvent } from "../src/web/public/stream-blocks.js";
 
 const think = (text: string): StreamBlock => ({ kind: "thinking", text });
 const content = (text: string): StreamBlock => ({ kind: "content", text });

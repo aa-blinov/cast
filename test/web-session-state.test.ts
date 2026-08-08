@@ -9,7 +9,7 @@ vi.mock(
 	{ virtual: true },
 );
 
-import { useSessionState } from "../src/web/public/use-session-state.js";
+import { useSessionState } from "../src/server/public/use-session-state.js";
 
 describe("web session state", () => {
 	it("exports the session state hook", () => {

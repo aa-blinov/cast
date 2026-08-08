@@ -13,7 +13,7 @@ A role-based terminal agent harness. 18 built-in personas — senior dev, QA, DB
 **Runs where your code runs.** vLLM, Ollama, your own inference server, or any OpenAI-compatible API. No account, no telemetry, no cloud dependency.
 
 **Ink TUI.** A proper terminal interface with multiline paste, image attachments, smooth animations.
-**Web UI.** `cast web` launches a browser-based control room — background agents, token-by-token streaming, diff viewer, and chat commands with account/project controls in Settings. Same sessions as the TUI.
+**Web UI.** `cast server` launches a browser-based control room — background agents, token-by-token streaming, diff viewer, and chat commands with account/project controls in Settings. Same sessions as the TUI.
 
 ## Why personas, not just prompts
 
@@ -125,28 +125,28 @@ Every conversation auto-saves. Resume with `--continue`, pick from a list with `
 
 ### Web UI
 
-`cast web` launches a browser-based control room — same sessions as the TUI, with a diff viewer, background agents, and token-by-token streaming. The file reader previews text and code with wrapped lines and source-line numbers; Markdown, tables, images, and PDFs keep their document-specific previews. The TUI is still the default for local interactive use; the Web UI is the answer when you want to share a session, keep one running in the background, or drive cast from a browser/phone.
+`cast server` launches a browser-based control room — same sessions as the TUI, with a diff viewer, background agents, and token-by-token streaming. The file reader previews text and code with wrapped lines and source-line numbers; Markdown, tables, images, and PDFs keep their document-specific previews. The TUI is still the default for local interactive use; the Web UI is the answer when you want to share a session, keep one running in the background, or drive cast from a browser/phone.
 
 ```bash
 # Start (default 127.0.0.1:1337)
-cast web
+cast server
 
 # Start on a different port
-cast web --port 8080
+cast server --port 8080
 
 # Bind 0.0.0.0 so it's reachable from other machines on the network
-cast web --public
+cast server --public
 
 # Lifecycle
-cast web status
-cast web stop
+cast server status
+cast server stop
 ```
 
 On first start, cast auto-generates a password and saves it to `webPassword` in `~/.cast/settings.json`. The login is always `cast`. Cast serves its own themed sign-in screen and keeps the resulting session in an HttpOnly, SameSite cookie; API responses are never cached. The password is shown in the terminal on first run so you can copy it; after that, look it up in `~/.cast/settings.json`.
 
 The `--public` flag exposes plain HTTP. It is suitable only for a trusted LAN; it cannot protect the password or session from a network observer. For remote access without a domain or HTTPS, keep Cast on its default loopback address and use an SSH tunnel: `ssh -L 1337:127.0.0.1:1337 user@host`. Do not expose it directly on a public address.
 
-Env vars: `CAST_WEB_PORT` (default `1337`), `CAST_WEB_HOST` (default `127.0.0.1`).
+Env vars: `CAST_SERVER_PORT` (default `1337`), `CAST_SERVER_HOST` (default `127.0.0.1`).
 
 ## Interactive Commands
 
@@ -238,8 +238,8 @@ Other environment variables (provider credentials live in the settings file, not
 | `CAST_CWD` | Override working directory |
 | `CAST_BASH` | Bash executable for the `bash` tool (Windows: non-standard Git Bash / msys2) |
 | `CAST_VERSION` | Pin install version (installer) |
-| `CAST_WEB_PORT` | `cast web` port (default `1337`) |
-| `CAST_WEB_HOST` | `cast web` bind address (default `127.0.0.1`; use `0.0.0.0` or `--public` for LAN) |
+| `CAST_SERVER_PORT` | `cast server` port (default `1337`) |
+| `CAST_SERVER_HOST` | `cast server` bind address (default `127.0.0.1`; use `0.0.0.0` or `--public` for LAN) |
 
 Works with anything that speaks the OpenAI API: OpenRouter, OpenAI, Ollama (`http://localhost:11434/v1`), vLLM, LiteLLM, Azure OpenAI, etc.
 

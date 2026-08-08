@@ -9,7 +9,7 @@ vi.mock(
 	{ virtual: true },
 );
 
-import { FOCUSABLE_SELECTOR } from "../src/web/public/modal-focus.js";
+import { FOCUSABLE_SELECTOR } from "../src/server/public/modal-focus.js";
 
 describe("web modal focus module", () => {
 	it("keeps disabled controls out of the focus cycle", () => {

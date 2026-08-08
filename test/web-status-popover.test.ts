@@ -12,10 +12,10 @@ vi.mock(
 	}),
 	{ virtual: true },
 );
-vi.mock("../src/web/public/api.js", () => ({ api: vi.fn() }));
-vi.mock("../src/web/public/modal-focus.js", () => ({ useModalFocusTrap: () => null }));
+vi.mock("../src/server/public/api.js", () => ({ api: vi.fn() }));
+vi.mock("../src/server/public/modal-focus.js", () => ({ useModalFocusTrap: () => null }));
 
-import { StatusPopover } from "../src/web/public/status-popover.js";
+import { StatusPopover } from "../src/server/public/status-popover.js";
 
 describe("StatusPopover", () => {
 	it("is exported as an isolated status component", () => {

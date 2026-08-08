@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { closeSseConnection, openSseConnection } from "../src/web/public/sse-connection.js";
+import { closeSseConnection, openSseConnection } from "../src/server/public/sse-connection.js";
 
 describe("web SSE connection", () => {
 	beforeEach(() => {

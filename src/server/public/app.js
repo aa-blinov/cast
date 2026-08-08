@@ -1,5 +1,5 @@
 /**
- * cast web — Preact + htm client application.
+ * cast server — Preact + htm client application.
  * No build step: importmap loads preact and htm from esm.sh CDN.
  */
 

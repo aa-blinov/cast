@@ -12,10 +12,10 @@ vi.mock(
 	}),
 	{ virtual: true },
 );
-vi.mock("../src/web/public/api.js", () => ({ api: vi.fn() }));
-vi.mock("../src/web/public/modal-focus.js", () => ({ useModalFocusTrap: () => null }));
+vi.mock("../src/server/public/api.js", () => ({ api: vi.fn() }));
+vi.mock("../src/server/public/modal-focus.js", () => ({ useModalFocusTrap: () => null }));
 
-import { DirectoryBrowser } from "../src/web/public/directory-browser.js";
+import { DirectoryBrowser } from "../src/server/public/directory-browser.js";
 
 describe("DirectoryBrowser", () => {
 	it("is exported as an isolated directory picker", () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { hotkeysHtml, modKey } from "../src/web/public/hotkeys.js";
+import { hotkeysHtml, modKey } from "../src/server/public/hotkeys.js";
 
 describe("web hotkeys", () => {
 	it("renders the shortcut reference with the platform modifier", () => {

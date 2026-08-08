@@ -131,7 +131,7 @@ export function SettingsModal({
 				const quickSessionPersona = await run("/quick-session-persona");
 				commit((d) => ({ ...d, "quick-mode": { quickSessionPersona: quickSessionPersona?.result } }));
 			} else if (t === "server") {
-				const res = await api("GET", "/api/web/status").catch(() => null);
+				const res = await api("GET", "/api/server/status").catch(() => null);
 				commit((d) => ({ ...d, server: res ?? { running: false } }));
 			} else if (t === "hooks") {
 				const res = await run("/hooks");

@@ -114,7 +114,7 @@ A turn runs as a bounded outer iteration:
 ```mermaid
 sequenceDiagram
     participant U as User (TUI or browser)
-    participant D as cast web daemon
+    participant D as cast server daemon
     participant L as runAgentLoop
     participant S as SQLite
 
@@ -139,7 +139,7 @@ sequenceDiagram
 
 **Compaction.** When history exceeds ~75% of the context window, older messages are summarized by the LLM (see Context Compaction below). The split snaps to turn boundaries so tool calls and results stay paired.
 
-For how the TUI, web UI, and the `cast web` daemon are wired around this loop — processes, lifecycles, auth, and the `CAST_NO_DAEMON=1` escape hatch — see [Infrastructure](infrastructure.md).
+For how the TUI, web UI, and the `cast server` daemon are wired around this loop — processes, lifecycles, auth, and the `CAST_NO_DAEMON=1` escape hatch — see [Infrastructure](infrastructure.md).
 
 ### Trust Gating
 

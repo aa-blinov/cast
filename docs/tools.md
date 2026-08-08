@@ -195,7 +195,7 @@ Web tools are disabled by default. Enable them with `/web` (persists to settings
 Searches via DuckDuckGo's HTML endpoint by default — no API key required, but DDG
 rate-limits scraping to roughly 4 requests per IP before serving a CAPTCHA. If you hit
 that limit, switch the backend with `/web-search-provider` (TUI) or the **Tools** tab in
-`cast web`'s settings — no restart needed, it takes effect on the next `web_search` call:
+`cast server`'s settings — no restart needed, it takes effect on the next `web_search` call:
 
 - [Tavily](https://app.tavily.com) — an AI-search aggregator with a recurring 1000
   requests/month free tier, no card required.

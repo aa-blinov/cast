@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extensionOf, isBlockedAttachmentName, sessionInputsDir } from "../src/web/inputs.ts";
+import { extensionOf, isBlockedAttachmentName, sessionInputsDir } from "../src/server/inputs.ts";
 
 describe("sessionInputsDir", () => {
 	it("is keyed by session id, not by cwd — a stable location regardless of where the session runs", () => {

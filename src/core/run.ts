@@ -1,6 +1,8 @@
 import { EOL } from "node:os";
+import { resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { noPickers } from "../pickers/no-pickers.ts";
+import { createServerSession, ensureServerClient, submitServerChat, subscribeServerEvents } from "../server/client.ts";
 // `handleInput` lives in `ui/commands.ts` because it owns the full TUI
 // command palette. `core/run.ts` is allowed to import from `ui/` only
 // because the file has no React/Ink side effects at import time — both
@@ -513,145 +515,108 @@ export async function runInteractive(args: ParsedArgs): Promise<void> {
 }
 
 /**
- * Run a single prompt non-interactively: startup → send → stream to stdout →
- * save session → exit. Reuses runStartup for model/persona/session resolution
- * and runAgentLoop for the actual LLM call + tool execution.
+ * Run a single prompt non-interactively: ensure the server daemon is up,
+ * create a session on it, submit the prompt, stream events to stdout, exit.
+ * The daemon owns runAgentLoop (single-writer model); this is a thin client,
+ * exactly like the TUI — so `cast run` sessions live in the same server the
+ * TUI and web UI share, and continue running there after this process exits.
  */
 export async function runNonInteractive(args: ParsedArgs, options: RunOptions): Promise<void> {
-	const result = await runStartup(args, noPickers);
-	const {
-		config,
-		session,
-		systemPrompt,
-		runner,
-		mcpResult,
-		hooks,
-		skills,
-		confirmBash,
-		permissionMode,
-		personas,
-		persona,
-		subagentPrompts,
-		subagentModel,
-	} = result;
-
-	if (hooks) {
-		await runHooksForEvent(hooks, {
-			event: "SessionStart",
-			cwd: result.cwd,
-			sessionId: session.id,
-			payload: { source: session.messages.length > 0 ? "resume" : "startup" },
-		});
+	const client = await ensureServerClient();
+	if (!client) {
+		console.error(
+			"cast run requires the server daemon (set CAST_NO_DAEMON=1 to disable, but then run cannot attach).",
+		);
+		process.exit(1);
 	}
 
-	let promptText = options.message;
-	if (hooks) {
-		const submitResult = await runHooksForEvent(hooks, {
-			event: "UserPromptSubmit",
-			cwd: result.cwd,
-			sessionId: session.id,
-			payload: { prompt: promptText },
-		});
-		if (submitResult.blocked) {
-			console.error(`[Prompt blocked by hook: ${submitResult.reason ?? "no reason given"}]`);
-			await runHooksForEvent(hooks, {
-				event: "SessionEnd",
-				cwd: result.cwd,
-				sessionId: session.id,
-				payload: { reason: "prompt_denied" },
-			});
-			await closeMcpConnections(mcpResult.connections);
-			process.exitCode = 1;
-			process.exit(1);
-		}
-		if (submitResult.reason) promptText = `${promptText}\n\n<hook-context>${submitResult.reason}</hook-context>`;
-	}
-	appendMessage(session, { role: "user", content: promptText });
-	// runStartup already persisted the session to the DB (so the web UI can
-	// see it during startup). Re-save after the user prompt is appended.
-	saveSession(session);
-
+	// Resolve model/persona/cwd the same way the TUI launcher does, then let
+	// the daemon create the session (it applies its own provider settings).
 	const settings = loadSettings();
-	const disabledTools = new Set<string>();
-	if (settings.webTools !== true) {
-		disabledTools.add("web_search");
-		disabledTools.add("web_fetch");
-	}
-	// Headless runs have no plan mode, so the plan tools must be neither
-	// advertised nor executable.
-	for (const name of PLAN_TOOL_NAMES) disabledTools.add(name);
-	disabledTools.add(QUESTION_TOOL_NAME);
-	// But an approved plan still steers: resuming a session that has one
-	// (`cast run -c "..."`) injects the same build-mode mirror block as the TUI
-	// — without this, headless continuation silently ignored the plan.
-	const planState = createPlanState(result.cwd, session.id);
+	const cwd = process.env.CAST_CWD ? resolve(process.env.CAST_CWD) : resolve(".");
+	const sessionId = await createServerSession(client, {
+		persona: args.cliPersona ?? settings.persona,
+		model: args.cliModel ?? settings.model,
+		cwd,
+	});
 
-	const ac = new AbortController();
-	runner.startRun(ac);
-
-	const onSigint = () => runner.abort();
-	process.on("SIGINT", onSigint);
-
-	try {
-		if (!session.lastAnnouncedLocalDate) {
-			session.lastAnnouncedLocalDate = initialAnnouncedLocalDate(session);
+	let failed = false;
+	const format = options.format;
+	const emit = (type: string, data: Record<string, unknown>): boolean => {
+		if (format === "json") {
+			process.stdout.write(JSON.stringify({ type, timestamp: Date.now(), sessionID: sessionId, ...data }) + EOL);
+			return true;
 		}
-		const announcedLocalDate = {
-			get value() {
-				return session.lastAnnouncedLocalDate!;
-			},
-			set value(next: string) {
-				session.lastAnnouncedLocalDate = next;
-			},
-		};
-		const finalMessages = await runAgentLoop(session.messages, {
-			config,
-			model: session.model,
-			cwd: session.cwd ?? result.cwd,
-			systemPrompt,
-			signal: ac.signal,
-			confirmBash: permissionMode === "bypass" ? undefined : confirmBash,
-			mcpTools: mcpResult.toolDefinitions,
-			mcpToolIndex: mcpResult.toolIndex,
-			hooks,
-			sessionId: session.id,
-			permissionMode,
-			skills,
-			lastPromptTokens: session.lastPromptTokens,
-			personas,
-			currentPersona: persona.name,
-			subagentPrompts,
-			subagentModel,
-			disabledTools,
-			projectTrusted: result.projectTrusted,
-			noSkills: result.projectDeps.noSkills,
-			cliSkillPaths: result.projectDeps.cliSkillPaths,
-			sshHosts: result.sshHosts,
-			mcpPromptSuffix: formatMcpForPrompt(mcpResult),
-			planState,
-			initialTodos: session.todos,
-			announcedLocalDate,
-			onCompaction: (full, compacted) => recordCompaction(session, full, compacted),
-			onEvent: (event: AgentEvent) => handleEvent(event, session, options.format),
-		});
+		return false;
+	};
 
-		session.messages = finalMessages;
-	} finally {
-		runner.endRun();
-		saveSession(session);
-		process.off("SIGINT", onSigint);
-		await closeMcpConnections(mcpResult.connections);
-		if (hooks) {
-			await runHooksForEvent(hooks, {
-				event: "SessionEnd",
-				cwd: result.cwd,
-				sessionId: session.id,
-				payload: { reason: "exit" },
-			});
-		}
-	}
+	const { done } = subscribeServerEvents(
+		client,
+		sessionId,
+		(event) => {
+			switch (event.type) {
+				case "token":
+					if (!emit("token", { text: event.text })) process.stdout.write(event.text);
+					break;
+				case "thinking":
+					emit("thinking", { text: event.text });
+					break;
+				case "assistant_message":
+					if (!emit("assistant_message", { content: event.content, toolCalls: event.toolCalls })) {
+						if (event.content) process.stdout.write(EOL);
+					}
+					break;
+				case "tool_start":
+					if (!emit("tool_start", { id: event.id, name: event.name, args: event.args, status: event.status })) {
+						process.stderr.write(`  ${event.name}...${EOL}`);
+					}
+					break;
+				case "tool_end":
+					if (!emit("tool_end", { id: event.id, name: event.name, result: event.result, status: event.status })) {
+						if (event.result.isError) {
+							process.stderr.write(`  ${event.name} failed: ${event.result.content}${EOL}`);
+						}
+					}
+					break;
+				case "doom_loop":
+					if (!emit("doom_loop", { tool: event.tool, attempts: event.attempts })) {
+						process.stderr.write(
+							`  doom loop: ${event.tool} blocked after ${event.attempts} identical calls${EOL}`,
+						);
+					}
+					break;
+				case "usage":
+					emit("usage", { usage: event.usage, subagent: event.subagent });
+					break;
+				case "todos_updated":
+					emit("todos_updated", { todos: event.todos });
+					break;
+				case "end":
+					if (event.reason === "error") failed = true;
+					if (!emit("end", { reason: event.reason })) {
+						if (event.reason === "error") process.exitCode = 1;
+					}
+					break;
+				case "error":
+					failed = true;
+					if (!emit("error", { message: event.message })) {
+						process.stderr.write(`Error: ${event.message}${EOL}`);
+						process.exitCode = 1;
+					}
+					break;
+				default:
+					break;
+			}
+		},
+		(event) =>
+			event.type === "session_end" ||
+			event.type === "session_closed" ||
+			(event.type === "end" && event.reason !== "stop" && event.reason !== "aborted"),
+	);
 
-	process.exit(0);
+	await submitServerChat(client, sessionId, options.message);
+	await done;
+	if (failed) process.exitCode = 1;
 }
 
 function handleEvent(event: AgentEvent, session: SessionState, format: "default" | "json"): void {

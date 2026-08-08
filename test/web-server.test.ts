@@ -7,22 +7,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetDbConnectionForTests } from "../src/core/db.ts";
 import { createAgentRunner } from "../src/core/runner.ts";
 import { appendMessage, createSession, saveSession } from "../src/core/session.ts";
-import type { WebBridge } from "../src/web/bridge.ts";
-import { createWebBridge } from "../src/web/bridge.ts";
-import { startWebServer } from "../src/web/server.ts";
+import type { ServerBridge } from "../src/server/bridge.ts";
+import { createServerBridge } from "../src/server/bridge.ts";
+import { startServer } from "../src/server/server.ts";
 
-let server: ReturnType<typeof startWebServer>;
+let server: ReturnType<typeof startServer>;
 let origin: string;
 let testDbDir: string;
 let previousDbPath: string | undefined;
 
-async function startServer(): Promise<void> {
-	server = startWebServer({
+async function startTestServer(): Promise<void> {
+	server = startServer({
 		port: 0,
 		host: "127.0.0.1",
-		bridge: {} as WebBridge,
+		bridge: {} as ServerBridge,
 		webUser: "cast",
-		webPassword: "test-password",
+		serverPassword: "test-password",
 		version: "test",
 	});
 	await once(server, "listening");
@@ -30,7 +30,7 @@ async function startServer(): Promise<void> {
 	origin = `http://127.0.0.1:${address.port}`;
 }
 
-async function stopServer(): Promise<void> {
+async function stopTestServer(): Promise<void> {
 	server.close();
 	await once(server, "close");
 }
@@ -40,11 +40,11 @@ beforeEach(async () => {
 	testDbDir = mkdtempSync(join(tmpdir(), "cast-web-server-test-"));
 	process.env.CAST_SESSIONS_DB = join(testDbDir, "sessions.db");
 	resetDbConnectionForTests();
-	await startServer();
+	await startTestServer();
 });
 
 afterEach(async () => {
-	await stopServer();
+	await stopTestServer();
 	resetDbConnectionForTests();
 	if (previousDbPath === undefined) delete process.env.CAST_SESSIONS_DB;
 	else process.env.CAST_SESSIONS_DB = previousDbPath;
@@ -120,8 +120,8 @@ describe("web session authentication", () => {
 		const cookie = authenticated.headers.get("set-cookie");
 		expect(cookie).not.toBeNull();
 
-		await stopServer();
-		await startServer();
+		await stopTestServer();
+		await startTestServer();
 
 		const app = await fetch(`${origin}/`, { headers: { Cookie: cookie! } });
 		expect(app.status).toBe(200);
@@ -130,7 +130,7 @@ describe("web session authentication", () => {
 	it("keeps the shared view's static application assets public", async () => {
 		const app = await fetch(`${origin}/app.js`);
 		expect(app.status).toBe(200);
-		expect(await app.text()).toContain("cast web");
+		expect(await app.text()).toContain("cast server");
 	});
 
 	it("rejects the worktree+sandbox combo up front so the modal surfaces a clean 400", async () => {
@@ -173,9 +173,9 @@ describe("web session authentication", () => {
 	});
 });
 
-describe("/api/web/status", () => {
+describe("/api/server/status", () => {
 	beforeEach(async () => {
-		// The status endpoint reads the real ~/.cast/web.json. Tests run in
+		// The status endpoint reads the real ~/.cast/server.json. Tests run in
 		// parallel with everything else in the world; point HOME at the per-
 		// test tmp dir so a stray daemon state file from a real run can't
 		// leak into the response, and so writing a state file below doesn't
@@ -191,7 +191,7 @@ describe("/api/web/status", () => {
 			body: JSON.stringify({ username: "cast", password: "test-password" }),
 		});
 		const cookie = authenticated.headers.get("set-cookie")!;
-		const res = await fetch(`${origin}/api/web/status`, { headers: { Cookie: cookie } });
+		const res = await fetch(`${origin}/api/server/status`, { headers: { Cookie: cookie } });
 		expect(res.status).toBe(200);
 		expect(await res.json()).toEqual({ running: false });
 	});
@@ -208,7 +208,7 @@ describe("/api/web/status", () => {
 		const { join } = await import("node:path");
 		mkdirSync(join(testDbDir, ".cast"), { recursive: true });
 		writeFileSync(
-			join(testDbDir, ".cast", "web.json"),
+			join(testDbDir, ".cast", "server.json"),
 			JSON.stringify({
 				pid: process.pid, // self — guaranteed live for the duration of the test
 				port: 9999,
@@ -218,7 +218,7 @@ describe("/api/web/status", () => {
 			}),
 		);
 
-		const res = await fetch(`${origin}/api/web/status`, { headers: { Cookie: cookie } });
+		const res = await fetch(`${origin}/api/server/status`, { headers: { Cookie: cookie } });
 		const body = (await res.json()) as {
 			running: boolean;
 			pid?: number;
@@ -246,7 +246,7 @@ describe("/api/web/status", () => {
 
 		const { existsSync, mkdirSync, writeFileSync } = await import("node:fs");
 		const { join } = await import("node:path");
-		const stateFile = join(testDbDir, ".cast", "web.json");
+		const stateFile = join(testDbDir, ".cast", "server.json");
 		mkdirSync(join(testDbDir, ".cast"), { recursive: true });
 		// A pid we can be confident isn't alive — extremely high number that's
 		// far past any real pid on a Linux box, and well above any pid that
@@ -257,7 +257,7 @@ describe("/api/web/status", () => {
 		);
 		expect(existsSync(stateFile)).toBe(true);
 
-		const res = await fetch(`${origin}/api/web/status`, { headers: { Cookie: cookie } });
+		const res = await fetch(`${origin}/api/server/status`, { headers: { Cookie: cookie } });
 		expect(res.status).toBe(200);
 		expect(await res.json()).toEqual({ running: false });
 		// The endpoint should also have cleaned up the stale file, so the
@@ -275,7 +275,7 @@ describe("/api/web/status", () => {
 // pins both behaviors through the real startServer call so a future
 // refactor can't silently regress them.
 describe("JSON response compression", () => {
-	// The shared startServer above uses `{} as WebBridge`, so this
+	// The shared startServer above uses `{} as ServerBridge`, so this
 	// describe swaps it out for a populated one — 80 sessions are enough
 	// to push the /api/sessions responses past the 8 KB compression
 	// threshold without needing to spin up a real provider. runAgentLoop
@@ -286,8 +286,8 @@ describe("JSON response compression", () => {
 		return { ...actual, runAgentLoop: (...args: unknown[]) => runAgentLoop(...args) };
 	});
 	beforeEach(async () => {
-		await stopServer();
-		const bridge = createWebBridge({
+		await stopTestServer();
+		const bridge = createServerBridge({
 			config: {
 				baseURL: "http://localhost",
 				apiKey: "test",
@@ -351,12 +351,12 @@ describe("JSON response compression", () => {
 			});
 			saveSession(session);
 		}
-		server = startWebServer({
+		server = startServer({
 			port: 0,
 			host: "127.0.0.1",
 			bridge,
 			webUser: "cast",
-			webPassword: "test-password",
+			serverPassword: "test-password",
 			version: "test",
 		});
 		await once(server, "listening");

@@ -6,12 +6,12 @@ For the agent engine itself (how `runAgentLoop` streams, parallel tools, compact
 
 ## Overview
 
-cast has two interactive surfaces and one engine. The engine (`runAgentLoop`, in `src/core/loop.ts`) is owned by exactly one process — the **`cast web` daemon** — which is the single writer to the SQLite session store. Both surfaces are thin clients of it over HTTP + SSE:
+cast has two interactive surfaces and one engine. The engine (`runAgentLoop`, in `src/core/loop.ts`) is owned by exactly one process — the **`cast server` daemon** — which is the single writer to the SQLite session store. Both surfaces are thin clients of it over HTTP + SSE:
 
 ```
 ┌─────────────┐   HTTP + SSE    ┌──────────────────────────┐   runAgentLoop   ┌──────────┐
 │   TUI       │ ───────────────▶│                          │ ────────────────▶│  LLM /   │
-│ (thin       │                 │   cast web daemon        │                  │  tools   │
+│ (thin       │                 │   cast server daemon        │                  │  tools   │
 │  client)    │                 │  ─ owns runAgentLoop     │                  │  (MCP,   │
 └─────────────┘                 │  ─ only writer to SQLite │                  │  bash…)  │
 ┌─────────────┐   HTTP + SSE    │  ─ streams WebEvent via  │                  └──────────┘
@@ -24,7 +24,7 @@ Before this model (pre-0.12.29) the TUI ran `runAgentLoop` **locally** and the w
 
 ## The daemon is the engine
 
-`cast web` is not a second implementation of the loop — it *is* the loop. One long-lived daemon process:
+`cast server` is not a second implementation of the loop — it *is* the loop. One long-lived daemon process:
 
 - owns `runAgentLoop` for every session;
 - is the **only** process that writes to `~/.cast/sessions.db`;
@@ -34,8 +34,8 @@ Before this model (pre-0.12.29) the TUI ran `runAgentLoop` **locally** and the w
 
 The TUI (`cast`, no subcommand) no longer runs the loop locally. On launch, `src/index.ts` calls `ensureDaemon()`:
 
-- if a live daemon already exists (`~/.cast/web.json` describes an alive PID), it reuses it and reads the port + token from that state file;
-- otherwise it spawns `cast web --port 0 --host 127.0.0.1` detached, waits for the child to actually bind (the state file is written only once the server is listening), then reads the port + token.
+- if a live daemon already exists (`~/.cast/server.json` describes an alive PID), it reuses it and reads the port + token from that state file;
+- otherwise it spawns `cast server --port 0 --host 127.0.0.1` detached, waits for the child to actually bind (the state file is written only once the server is listening), then reads the port + token.
 
 The TUI then:
 
@@ -47,18 +47,18 @@ Local `runner.runAgentLoop` is retained only for `cast run --interactive` and th
 
 ## Web UI (browser)
 
-The original client. Connects over HTTP + SSE, logs in with the auto-generated password (`cast` / printed on first `cast web` start, saved in `settings.json`), and renders the same `WebEvent` stream the TUI does. Because both surfaces read the *same* SSE stream from the *same* daemon, opening one session in both shows live tokens, tool calls, and status in both, and an `abort` from either stops the turn for both.
+The original client. Connects over HTTP + SSE, logs in with the auto-generated password (`cast` / printed on first `cast server` start, saved in `settings.json`), and renders the same `WebEvent` stream the TUI does. Because both surfaces read the *same* SSE stream from the *same* daemon, opening one session in both shows live tokens, tool calls, and status in both, and an `abort` from either stops the turn for both.
 
 ## Lifecycle
 
-- **Start:** `cast` (TUI) auto-spawns the daemon if none is live; `cast web start` (or just `cast web`) starts it explicitly. A detached daemon keeps running after the TUI exits, so the browser can still connect.
-- **Stop:** `cast web stop` sends SIGTERM (escalating to SIGKILL after 3s), drains active turns, and clears the state file. Stopping the daemon also disconnects the TUI's SSE stream — the TUI sees `[terminated]` and can reconnect on next submit.
-- **Stale state:** every reader (`status`, the TUI's `ensureDaemon`, the server's auth check) treats a PID whose process is no longer alive as stale and self-heals by clearing `~/.cast/web.json`.
+- **Start:** `cast` (TUI) auto-spawns the daemon if none is live; `cast server start` (or just `cast server`) starts it explicitly. A detached daemon keeps running after the TUI exits, so the browser can still connect.
+- **Stop:** `cast server stop` sends SIGTERM (escalating to SIGKILL after 3s), drains active turns, and clears the state file. Stopping the daemon also disconnects the TUI's SSE stream — the TUI sees `[terminated]` and can reconnect on next submit.
+- **Stale state:** every reader (`status`, the TUI's `ensureDaemon`, the server's auth check) treats a PID whose process is no longer alive as stale and self-heals by clearing `~/.cast/server.json`.
 - **`CAST_NO_DAEMON=1`:** the TUI skips `ensureDaemon()` and runs `runAgentLoop` locally — the pre-0.12.29 path, used for CI and `cast run --interactive`.
 
 ## Auth
 
-- **Loopback bind** (`127.0.0.1` / `localhost`): the daemon writes a local-only `token` into `~/.cast/web.json`. The TUI reads it from there and skips the browser's interactive login (trust-localhost). The token is never sent over the network by the daemon.
+- **Loopback bind** (`127.0.0.1` / `localhost`): the daemon writes a local-only `token` into `~/.cast/server.json`. The TUI reads it from there and skips the browser's interactive login (trust-localhost). The token is never sent over the network by the daemon.
 - **Non-loopback bind** (`--host 0.0.0.0` / `--public`): the token is omitted, and the TUI must authenticate like any other client (the browser's password login). Plain HTTP over a non-loopback bind is unencrypted — use it only on a trusted LAN, or keep loopback and tunnel with `ssh -L`.
 
 ## Why single-writer

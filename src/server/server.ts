@@ -26,8 +26,8 @@ import { getDb } from "../core/db.ts";
 import { getHistoryPage, getMessageImage } from "../core/session.ts";
 import { loadSettings, updateSettings } from "../core/settings.ts";
 import { ensureSessionWorktree } from "../core/worktree.ts";
-import { reconcileActiveStream, SANDBOX_CWD, toDisplayMessages, type WebBridge, type WebEvent } from "./bridge.ts";
-import { readLiveWebState } from "./daemon-state.ts";
+import { reconcileActiveStream, SANDBOX_CWD, type ServerBridge, toDisplayMessages, type WebEvent } from "./bridge.ts";
+import { readLiveServerState } from "./daemon-state.ts";
 import { isBlockedAttachmentName, sessionInputsDir } from "./inputs.ts";
 
 const PORT_RE = /:\d+$/;
@@ -95,9 +95,9 @@ export interface WebServerOptions {
 	port: number;
 	/** Interface to bind — the caller decides the default (127.0.0.1 vs 0.0.0.0), this just binds what it's given. */
 	host: string;
-	bridge: WebBridge;
+	bridge: ServerBridge;
 	webUser: string;
-	webPassword: string;
+	serverPassword: string;
 	version: string;
 	/** Fires once the server is actually bound and accepting connections. Receives the real bound port (not the requested one — may differ when 0 was passed for OS assignment). */
 	onListening?: (port: number) => void;
@@ -105,11 +105,11 @@ export interface WebServerOptions {
 	onError?: (err: NodeJS.ErrnoException) => void;
 }
 
-export function startWebServer(options: WebServerOptions): ReturnType<typeof createServer> {
-	const { port, host, bridge, webUser, webPassword } = options;
+export function startServer(options: WebServerOptions): ReturnType<typeof createServer> {
+	const { port, host, bridge, webUser, serverPassword } = options;
 	const publicDir = join(import.meta.dirname ?? ".", "public");
 
-	console.log(`[cast web] auth enabled (user: ${webUser})`);
+	console.log(`[cast server] auth enabled (user: ${webUser})`);
 
 	const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 	const failedLogins = new Map<string, { attempts: number; expiresAt: number }>();
@@ -153,7 +153,7 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 			const auth = req.headers.authorization;
 			if (auth?.startsWith("Bearer ")) {
 				const candidate = auth.slice("Bearer ".length);
-				const state = readLiveWebState();
+				const state = readLiveServerState();
 				if (state?.token && candidate === state.token) return true;
 			}
 			// EventSource (browser + Node) can't set custom headers, so the loopback
@@ -161,7 +161,7 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 			const url = new URL(req.url ?? "", "http://localhost");
 			const candidate = url.searchParams.get("token");
 			if (candidate) {
-				const state = readLiveWebState();
+				const state = readLiveServerState();
 				if (state?.token && candidate === state.token) return true;
 			}
 		}
@@ -169,7 +169,7 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 	}
 
 	function passwordsMatch(value: string): boolean {
-		const expected = Buffer.from(webPassword);
+		const expected = Buffer.from(serverPassword);
 		const candidate = Buffer.from(value);
 		return candidate.length === expected.length && timingSafeEqual(candidate, expected);
 	}
@@ -543,12 +543,12 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 		json(res, bridge.getPersonas());
 	});
 
-	// Cast web daemon state — the same file the CLI's `cast web status`
+	// Cast web daemon state — the same file the CLI's `cast server status`
 	// prints. Self-heals stale entries (process gone → file cleaned up by
-	// readLiveWebState), so the answer is always "what's actually running
+	// readLiveServerState), so the answer is always "what's actually running
 	// right now" rather than "what's on disk from the last start".
-	route("GET", "/api/web/status", (_req, res) => {
-		const state = readLiveWebState();
+	route("GET", "/api/server/status", (_req, res) => {
+		const state = readLiveServerState();
 		if (!state) return json(res, { running: false });
 		json(res, {
 			running: true,
@@ -1713,7 +1713,7 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 			try {
 				await matched.handler(req, res, matched.params);
 			} catch (err) {
-				console.error(`[cast web] ${method} ${urlPath}:`, err);
+				console.error(`[cast server] ${method} ${urlPath}:`, err);
 				if (!res.headersSent) {
 					json(res, { error: "Internal server error" }, 500);
 				}
@@ -1743,7 +1743,7 @@ export function startWebServer(options: WebServerOptions): ReturnType<typeof cre
 	server.listen(port, host, () => {
 		const addr = server.address();
 		const boundPort = addr && typeof addr === "object" ? addr.port : port;
-		console.log(`[cast web] listening on http://${host}:${boundPort}`);
+		console.log(`[cast server] listening on http://${host}:${boundPort}`);
 		options.onListening?.(boundPort);
 	});
 

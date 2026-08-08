@@ -37,7 +37,7 @@ import {
 	reduceStreamEvent,
 	type StreamBlock,
 	type StreamingState,
-} from "../web/public/stream-blocks.js";
+} from "../server/public/stream-blocks.js";
 import { displayWidthCacheFlush } from "./display-width.ts";
 
 export type AgentStatus = "idle" | "running" | "error";
@@ -65,7 +65,7 @@ export interface ToolCallEntry {
  * (token-by-token text, streamed reasoning) coalesce into one block; a tool
  * call breaks the run so whatever streams after it starts a fresh block.
  */
-export type { StreamBlock, StreamingState } from "../web/public/stream-blocks.js";
+export type { StreamBlock, StreamingState } from "../server/public/stream-blocks.js";
 
 export interface ChatMessage {
 	role: "user" | "assistant" | "system" | "tool" | "warning";
@@ -264,7 +264,7 @@ interface UseAgentSessionParams {
 	systemPrompt: string;
 	runner: AgentRunner;
 	/**
-	 * When set, the hook runs as a thin client of the `cast web` daemon instead
+	 * When set, the hook runs as a thin client of the `cast server` daemon instead
 	 * of owning the agent loop locally: `submit`/`abort`/`steer`/`followUp` go
 	 * over HTTP and events arrive via SSE. This is the single-writer daemon model
 	 * — the daemon owns runAgentLoop and streams to every surface (TUI + web).
@@ -458,7 +458,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		daemonUrl,
 		daemonToken,
 	} = params;
-	// Thin-client mode: this hook does not own the agent loop; the `cast web`
+	// Thin-client mode: this hook does not own the agent loop; the `cast server`
 	// daemon does, and events arrive over SSE. Local path (runner, runAgentLoop)
 	// is fully preserved when daemonUrl is unset.
 	const isClient = !!daemonUrl;
@@ -739,7 +739,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					}),
 				}).catch(() => null);
 				if (!running || running.status >= 400) {
-					setError("Daemon unreachable — is 'cast web' running?");
+					setError("Daemon unreachable — is 'cast server' running?");
 				}
 				return;
 			}
@@ -1174,9 +1174,9 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	// Thin-client SSE: subscribe to the daemon's per-session event stream and
 	// drive the same React state the local loop would. The daemon is the single
 	// writer, so this is the only place events arrive in client mode. Mirrors
-	// the WebEvent handling in src/web/public/sse-events.js (the browser path)
+	// the WebEvent handling in src/server/public/sse-events.js (the browser path)
 	// and the local onEvent below — all three must stay in lockstep on event
-	// semantics. An SSE disconnect (daemon stopped via `cast web stop`, or a
+	// semantics. An SSE disconnect (daemon stopped via `cast server stop`, or a
 	// crash) leaves the session idle; the TUI sees no live turn and can offer
 	// reconnect on next submit.
 	useEffect(() => {
@@ -1186,9 +1186,9 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			: `${daemonUrl}/api/sessions/${session.id}/events`;
 		const source = new EventSource(url);
 		source.onmessage = (ev) => {
-			let event: import("../web/bridge.ts").WebEvent;
+			let event: import("../server/bridge.ts").WebEvent;
 			try {
-				event = JSON.parse(ev.data) as import("../web/bridge.ts").WebEvent;
+				event = JSON.parse(ev.data) as import("../server/bridge.ts").WebEvent;
 			} catch {
 				return;
 			}

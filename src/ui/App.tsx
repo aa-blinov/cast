@@ -87,7 +87,7 @@ interface AppProps {
 	onPasteImage?: () => Promise<string | null>;
 	onQuit: () => void;
 	onRepaintBanner?: (preserveScrollback?: boolean) => Promise<void>;
-	/** When set, the TUI runs as a thin client of the `cast web` daemon
+	/** When set, the TUI runs as a thin client of the `cast server` daemon
 	 *  (single-writer model) instead of owning runAgentLoop locally. */
 	daemonUrl?: string;
 	daemonToken?: string;

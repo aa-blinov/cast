@@ -6,7 +6,7 @@ vi.mock("preact/hooks", () => ({ useEffect: () => {}, useState: (value: unknown)
 	virtual: true,
 });
 
-import { ElapsedTimer } from "../src/web/public/elapsed-timer.js";
+import { ElapsedTimer } from "../src/server/public/elapsed-timer.js";
 
 describe("ElapsedTimer", () => {
 	it("is exported as an isolated component", () => {

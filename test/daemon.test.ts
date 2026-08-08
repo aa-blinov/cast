@@ -7,9 +7,9 @@ import { EventSource } from "undici";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSession, saveSession } from "../src/core/session.ts";
 import type { StartupResult } from "../src/core/startup.ts";
-import { createWebBridge } from "../src/web/bridge.ts";
-import { writeWebState } from "../src/web/daemon-state.ts";
-import { startWebServer } from "../src/web/server.ts";
+import { createServerBridge } from "../src/server/bridge.ts";
+import { writeServerState } from "../src/server/daemon-state.ts";
+import { startServer } from "../src/server/server.ts";
 
 // The daemon (web server) owns runAgentLoop and streams WebEvents to every
 // surface. This test verifies the single-writer contract: a TUI client
@@ -30,21 +30,21 @@ const { resetDbConnectionForTests } = await import("../src/core/db.ts");
 
 const LOOPBACK_TOKEN = "test-loopback-token";
 
-let server: ReturnType<typeof startWebServer>;
+let server: ReturnType<typeof startServer>;
 let origin: string;
 let cookie = "";
 let testDbDir: string;
 let previousDbPath: string | undefined;
 
-async function startServer(): Promise<void> {
+async function startTestServer(): Promise<void> {
 	// Real bridge (needs getSession/submit) — the daemon owns runAgentLoop.
-	const bridge = createWebBridge(makeResult());
-	server = startWebServer({
+	const bridge = createServerBridge(makeResult());
+	server = startServer({
 		port: 0,
 		host: "127.0.0.1",
 		bridge,
 		webUser: "cast",
-		webPassword: "test-password",
+		serverPassword: "test-password",
 		version: "test",
 	});
 	await once(server, "listening");
@@ -52,7 +52,7 @@ async function startServer(): Promise<void> {
 	origin = `http://127.0.0.1:${address.port}`;
 }
 
-// Minimal StartupResult to construct a WebBridge (tests never run the loop for
+// Minimal StartupResult to construct a ServerBridge (tests never run the loop for
 // real — runAgentLoop is stubbed above).
 function makeResult(overrides: Partial<StartupResult> = {}): StartupResult {
 	return {
@@ -117,7 +117,7 @@ beforeEach(async () => {
 	// Simulate the daemon having written a loopback token into web.json (the
 	// TUI reads this to skip interactive login).
 	mkdirSync(join(process.env.HOME ?? tmpdir(), ".cast"), { recursive: true });
-	writeWebState({
+	writeServerState({
 		pid: process.pid,
 		port: 0,
 		host: "127.0.0.1",
@@ -125,7 +125,7 @@ beforeEach(async () => {
 		foreground: false,
 		token: LOOPBACK_TOKEN,
 	});
-	await startServer();
+	await startTestServer();
 	await login();
 });
 

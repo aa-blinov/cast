@@ -8,7 +8,7 @@ vi.mock(
 	{ virtual: true },
 );
 
-import { PLAN_DECISION_OPTIONS, PlanDecisionCard, QuestionCard } from "../src/web/public/plan-cards.js";
+import { PLAN_DECISION_OPTIONS, PlanDecisionCard, QuestionCard } from "../src/server/public/plan-cards.js";
 
 describe("web plan cards", () => {
 	it("exposes the three plan transition choices", () => {

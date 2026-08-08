@@ -26,7 +26,7 @@ vi.mock("../src/core/config.ts", async (importOriginal) => {
 	return { ...actual, fetchModels: (...args: unknown[]) => mockFetchModels(...args) };
 });
 
-const { createWebBridge, SANDBOX_CWD, toDisplayMessages } = await import("../src/web/bridge.ts");
+const { createServerBridge, SANDBOX_CWD, toDisplayMessages } = await import("../src/server/bridge.ts");
 
 const testConfig: AppConfig = {
 	baseURL: "http://localhost",
@@ -118,13 +118,13 @@ describe("web bridge", () => {
 
 	describe("deleteSessionPermanently", () => {
 		it("returns false for a session that never existed, live or on disk", () => {
-			const bridge = createWebBridge(makeResult());
+			const bridge = createServerBridge(makeResult());
 			expect(bridge.deleteSessionPermanently("no-such-session")).toBe(false);
 		});
 
 		it("removes a live session from the registry, unlike closeSession which just unloads it", async () => {
 			const { appendMessage, loadSession, saveSession } = await import("../src/core/session.ts");
-			const bridge = createWebBridge(makeResult());
+			const bridge = createServerBridge(makeResult());
 			const ws = bridge.createSession();
 			appendMessage(ws.session, { role: "user", content: "hi" });
 			saveSession(ws.session);
@@ -138,7 +138,7 @@ describe("web bridge", () => {
 
 		it("removes a session that's only on disk (not currently live)", async () => {
 			const { createSession, loadSession, saveSession } = await import("../src/core/session.ts");
-			const bridge = createWebBridge(makeResult());
+			const bridge = createServerBridge(makeResult());
 			const orphan = createSession("gpt-4o", cwd);
 			saveSession(orphan);
 			expect(loadSession(orphan.id)).toBeDefined();
@@ -149,7 +149,7 @@ describe("web bridge", () => {
 		});
 
 		it("aborts a running session before deleting it", () => {
-			const bridge = createWebBridge(makeResult());
+			const bridge = createServerBridge(makeResult());
 			const ws = bridge.createSession();
 			ws.status = "running";
 			const abortSpy = vi.spyOn(ws.runner, "abort");
@@ -159,8 +159,8 @@ describe("web bridge", () => {
 
 		it("also removes the session's attached-documents directory (~/.cast/inputs/<id>)", async () => {
 			const { existsSync, mkdirSync, writeFileSync } = await import("node:fs");
-			const { sessionInputsDir } = await import("../src/web/inputs.ts");
-			const bridge = createWebBridge(makeResult());
+			const { sessionInputsDir } = await import("../src/server/inputs.ts");
+			const bridge = createServerBridge(makeResult());
 			const ws = bridge.createSession();
 			const dir = sessionInputsDir(ws.id);
 			mkdirSync(dir, { recursive: true });
@@ -174,8 +174,8 @@ describe("web bridge", () => {
 
 		it("doesn't error when a session with no attachments (the common case) is deleted", async () => {
 			const { existsSync } = await import("node:fs");
-			const { sessionInputsDir } = await import("../src/web/inputs.ts");
-			const bridge = createWebBridge(makeResult());
+			const { sessionInputsDir } = await import("../src/server/inputs.ts");
+			const bridge = createServerBridge(makeResult());
 			const ws = bridge.createSession();
 			expect(existsSync(sessionInputsDir(ws.id))).toBe(false);
 
@@ -184,13 +184,13 @@ describe("web bridge", () => {
 	});
 
 	it("builds a persona-specific system prompt at session creation", () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession("senior");
 		expect(ws.systemPrompt).toContain("You are the senior persona.");
 	});
 
 	it("runs settings commands without creating a visible session", async () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 
 		expect((await bridge.executeSettingsCommand("/permissions")).ok).toBe(true);
 		expect((await bridge.executeSettingsCommand("/model gpt-5")).result).toEqual({ model: "gpt-5" });
@@ -202,7 +202,7 @@ describe("web bridge", () => {
 	});
 
 	it("resets each secondary model slot atomically", async () => {
-		const bridge = createWebBridge(
+		const bridge = createServerBridge(
 			makeResult({
 				subagentModel: "worker-model",
 				subagentModelProvider: "worker-provider",
@@ -235,7 +235,7 @@ describe("web bridge", () => {
 			join(fakeHome, ".agents", ".skill-lock.json"),
 			JSON.stringify({ skills: { "from-skills-sh": { source: "owner/repo" } } }),
 		);
-		const bridge = createWebBridge(
+		const bridge = createServerBridge(
 			makeResult({
 				projectDeps: {
 					noSkills: false,
@@ -257,7 +257,7 @@ describe("web bridge", () => {
 	});
 
 	it("sandbox sentinel creates a scratch dir named after the session id before hooks can use its cwd", () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession(undefined, undefined, SANDBOX_CWD);
 		const expectedDir = join(homedir(), ".cast", "sandbox", `cast-${ws.id}`);
 		try {
@@ -270,13 +270,13 @@ describe("web bridge", () => {
 	});
 
 	it("a real cwd override is used as-is, not mistaken for the sandbox sentinel", () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession(undefined, undefined, fakeHome);
 		expect(ws.session.cwd).toBe(fakeHome);
 	});
 
 	it("createSession returns a session synchronously, even when a worktree is provided (defence against the async-ification regression)", () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		// `createSession` must stay sync — tests and `/new` slash command both
 		// read fields off the returned value without awaiting. If this ever
 		// flips back to a Promise, the field reads below turn into runtime
@@ -297,14 +297,14 @@ describe("web bridge", () => {
 	});
 
 	it("/persona with no arg reports the current persona without changing anything", async () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		const res = await bridge.executeCommand(ws.id, "/persona");
 		expect(res).toEqual({ ok: true, result: { persona: "coding" } });
 	});
 
 	it("/persona <name> switches persona and rebuilds the system prompt", async () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		const res = await bridge.executeCommand(ws.id, "/persona senior");
 		expect(res.ok).toBe(true);
@@ -313,7 +313,7 @@ describe("web bridge", () => {
 	});
 
 	it("/persona <unknown> fails without mutating session state", async () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		const before = ws.systemPrompt;
 		const res = await bridge.executeCommand(ws.id, "/persona ghost");
@@ -323,14 +323,14 @@ describe("web bridge", () => {
 	});
 
 	it("/quick-session-persona with no arg reports the current default ('senior' when never set)", async () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		const res = await bridge.executeCommand(ws.id, "/quick-session-persona");
 		expect(res).toEqual({ ok: true, result: { quickSessionPersona: "senior" } });
 	});
 
 	it("/quick-session-persona <name> persists it and getConfig reflects the change", async () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		const res = await bridge.executeCommand(ws.id, "/quick-session-persona senior");
 		expect(res).toEqual({ ok: true, result: { quickSessionPersona: "senior" } });
@@ -338,7 +338,7 @@ describe("web bridge", () => {
 	});
 
 	it("/quick-session-persona <unknown> fails without changing the current default", async () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		const res = await bridge.executeCommand(ws.id, "/quick-session-persona ghost");
 		expect(res.ok).toBe(false);
@@ -346,7 +346,7 @@ describe("web bridge", () => {
 	});
 
 	it("/model <name> updates the session model", async () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		const res = await bridge.executeCommand(ws.id, "/model gpt-5");
 		expect(res).toEqual({ ok: true, result: { model: "gpt-5" } });
@@ -354,7 +354,7 @@ describe("web bridge", () => {
 	});
 
 	it("/model <name> becomes the default for sessions created afterward", async () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const first = bridge.createSession();
 		expect(first.session.model).toBe("gpt-4o");
 		await bridge.executeCommand(first.session.id, "/model gpt-5");
@@ -363,7 +363,7 @@ describe("web bridge", () => {
 	});
 
 	it("/model <name> broadcasts a session_update so the sidebar reflects it immediately", async () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		const events: Array<{ type: string }> = [];
 		bridge.subscribeAll((e) => events.push(e));
@@ -375,7 +375,7 @@ describe("web bridge", () => {
 	});
 
 	it("shareSession generates a token and getSharedSession returns a read-only projection by that token", () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		ws.session.title = "My thread";
 		ws.session.messages.push(
@@ -397,7 +397,7 @@ describe("web bridge", () => {
 	});
 
 	it("shareSession is idempotent — calling it twice returns the same token", () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		const first = bridge.shareSession(ws.id);
 		const second = bridge.shareSession(ws.id);
@@ -405,7 +405,7 @@ describe("web bridge", () => {
 	});
 
 	it("unshareSession revokes the token — getSharedSession no longer resolves it", () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		const shared = bridge.shareSession(ws.id);
 		expect(bridge.unshareSession(ws.id)).toBe(true);
@@ -413,14 +413,14 @@ describe("web bridge", () => {
 	});
 
 	it("getSharedSession returns null for an unknown token, and shareSession/unshareSession return null/false for an unknown session", () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		expect(bridge.getSharedSession("nonexistent")).toBeNull();
 		expect(bridge.shareSession("nonexistent")).toBeNull();
 		expect(bridge.unshareSession("nonexistent")).toBe(false);
 	});
 
 	it("/model and /persona are rejected while the agent is running", async () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		ws.status = "running";
 		expect((await bridge.executeCommand(ws.id, "/model gpt-5")).ok).toBe(false);
@@ -428,7 +428,7 @@ describe("web bridge", () => {
 	});
 
 	it("/steer while idle just sends the message as a normal turn", async () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		const res = await bridge.executeCommand(ws.id, "/steer hello");
 		expect(res).toEqual({ ok: true, result: "Sent" });
@@ -436,7 +436,7 @@ describe("web bridge", () => {
 	});
 
 	it("/steer while running enqueues into the steering queue instead of starting a new turn", async () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		ws.status = "running";
 		const res = await bridge.executeCommand(ws.id, "/steer hello");
@@ -450,7 +450,7 @@ describe("web bridge", () => {
 		// same code path — without the guard, both would call runAgentLoop
 		// concurrently against the same ws.session, scrambling/interleaving
 		// the persisted message order (see the real repro this fix closes).
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 
 		bridge.submit(ws.id, "first message");
@@ -462,7 +462,7 @@ describe("web bridge", () => {
 	});
 
 	it("publishes a backend-owned request start time with running status", () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		const events: Array<{ type: string; status?: string; startedAt?: number }> = [];
 		bridge.subscribe(ws.id, (event) => events.push(event));
@@ -476,7 +476,7 @@ describe("web bridge", () => {
 
 	it("records web answers to multiple questions and resumes the conversation", async () => {
 		const { createPlanState, execQuestion } = await import("../src/core/plan.ts");
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		const planState = createPlanState(ws.session.cwd!, ws.id, {
 			onChange: (question, transition) => {
@@ -516,7 +516,7 @@ describe("web bridge", () => {
 
 	it("accepts a free-form answer not matching any model-supplied option", async () => {
 		const { createPlanState, execQuestion } = await import("../src/core/plan.ts");
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		const planState = createPlanState(ws.session.cwd!, ws.id, {
 			onChange: (question, transition) => {
@@ -552,7 +552,7 @@ describe("web bridge", () => {
 	});
 
 	it("resets only the model context for clean plan implementation, retaining the visible thread", () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		ws.session.messages.push(
 			{ role: "user", content: "Build a release dashboard" },
@@ -570,7 +570,7 @@ describe("web bridge", () => {
 
 	it("keeps a pending plan review available after a page reload", async () => {
 		const { createPlanState, execPlanDone } = await import("../src/core/plan.ts");
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		ws.session.mode = "plan";
 		const planState = createPlanState(ws.session.cwd!, ws.id, {
@@ -592,7 +592,7 @@ describe("web bridge", () => {
 	});
 
 	it("setSessionMode flips the hydrated session's mode and rebuilds its system prompt", async () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		expect(ws.session.mode).toBeUndefined();
 
@@ -606,7 +606,7 @@ describe("web bridge", () => {
 	});
 
 	it("setSessionMode is a no-op when the mode is already active", () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		ws.session.mode = "plan";
 
@@ -614,7 +614,7 @@ describe("web bridge", () => {
 	});
 
 	it("setSessionMode rejects while the agent is running", () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		ws.status = "running";
 
@@ -623,7 +623,7 @@ describe("web bridge", () => {
 	});
 
 	it("setSessionMode reports a session that was never hydrated", () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		expect(bridge.setSessionMode("no-such-session", "plan")).toEqual({ ok: false, error: "Session not found" });
 	});
 
@@ -634,7 +634,7 @@ describe("web bridge", () => {
 			join(cwd, ".cast", "hooks.json"),
 			JSON.stringify({ UserPromptSubmit: [{ hooks: [{ command: "sleep 0.05" }] }] }),
 		);
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 
 		bridge.submit(ws.id, "first message");
@@ -648,7 +648,7 @@ describe("web bridge", () => {
 	});
 
 	it("submit with images builds a [text, image_url...] content array, always including the text part", () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 
 		bridge.submit(ws.id, "is this a Bengal?", ["data:image/jpeg;base64,ONE", "data:image/jpeg;base64,TWO"]);
@@ -663,7 +663,7 @@ describe("web bridge", () => {
 	});
 
 	it("submit with no images stays a plain string (unchanged behavior)", () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 
 		bridge.submit(ws.id, "hello");
@@ -672,7 +672,7 @@ describe("web bridge", () => {
 	});
 
 	it("submit with images while a turn is running steers with the same array content instead of dropping the images", () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		bridge.submit(ws.id, "first message");
 		expect(runAgentLoop).toHaveBeenCalledTimes(1);
@@ -695,7 +695,7 @@ describe("web bridge", () => {
 		// turn-based (like the sidebar/settings "N msg" counters), it would
 		// permanently mismatch on every tool-using turn and force a needless
 		// refetch every single time.
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 
 		runAgentLoop.mockImplementationOnce(async (messages: unknown[]) => [
@@ -722,7 +722,7 @@ describe("web bridge", () => {
 	});
 
 	it("submit() broadcasts turn_meta with the model that answered, so the client can show it under the reply", async () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession(undefined, "gpt-5");
 
 		runAgentLoop.mockImplementationOnce(async (messages: unknown[]) => [
@@ -743,7 +743,7 @@ describe("web bridge", () => {
 	});
 
 	it("/queue while running enqueues a follow-up; /queue-reset clears it", async () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		ws.status = "running";
 		await bridge.executeCommand(ws.id, "/queue after this turn");
@@ -753,14 +753,14 @@ describe("web bridge", () => {
 	});
 
 	it("/steer and /queue require a message", async () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		expect((await bridge.executeCommand(ws.id, "/steer")).ok).toBe(false);
 		expect((await bridge.executeCommand(ws.id, "/queue")).ok).toBe(false);
 	});
 
 	it("suggestCommand returns subcommands for bare commands", async () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 
 		const mcpSuggestions = bridge.suggestCommand(ws.id, "/mcp");
@@ -788,7 +788,7 @@ describe("web bridge", () => {
 	});
 
 	it("suggestCommand returns empty for unknown commands", async () => {
-		const bridge = createWebBridge(makeResult());
+		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		expect(bridge.suggestCommand(ws.id, "/unknown")).toEqual([]);
 		expect(bridge.suggestCommand(ws.id, "/mcp enable unknown-server")).toEqual([]);
@@ -796,7 +796,7 @@ describe("web bridge", () => {
 
 	describe("SSE broadcast synchronicity", () => {
 		it("delivers events to two listeners in the same synchronous tick", () => {
-			const bridge = createWebBridge(makeResult());
+			const bridge = createServerBridge(makeResult());
 			const ws = bridge.createSession();
 
 			// Track which microtask tick each listener sees per event.
@@ -870,7 +870,7 @@ describe("web bridge", () => {
 		});
 
 		it("a disconnected listener does not block delivery to remaining listeners", () => {
-			const bridge = createWebBridge(makeResult());
+			const bridge = createServerBridge(makeResult());
 			const ws = bridge.createSession();
 
 			const goodEvents: unknown[] = [];
@@ -901,7 +901,7 @@ describe("web bridge", () => {
 
 		it("searchSessions finds a live (hydrated) session by message content via the FTS index", async () => {
 			const { saveSession } = await import("../src/core/session.ts");
-			const bridge = createWebBridge(makeResult());
+			const bridge = createServerBridge(makeResult());
 			const ws = bridge.createSession();
 			ws.session.messages.push(
 				{ role: "user", content: "find the needle here" },
@@ -918,7 +918,7 @@ describe("web bridge", () => {
 
 		it("searchSessions finds a cold session loaded from disk too, and empty query behaves like listSessions", async () => {
 			const { appendMessage, createSession, saveSession } = await import("../src/core/session.ts");
-			const bridge = createWebBridge(makeResult());
+			const bridge = createServerBridge(makeResult());
 			const orphan = createSession("gpt-4o", cwd);
 			appendMessage(orphan, { role: "user", content: "deep unique needle in an unhydrated session" });
 			saveSession(orphan);
@@ -929,7 +929,7 @@ describe("web bridge", () => {
 		});
 
 		it("subscribe receives current status immediately on connection", () => {
-			const bridge = createWebBridge(makeResult());
+			const bridge = createServerBridge(makeResult());
 			const ws = bridge.createSession();
 
 			// Simulate a running session
@@ -946,7 +946,7 @@ describe("web bridge", () => {
 
 	describe("background bash tasks", () => {
 		it("submit() threads backgroundBash into the LoopConfig passed to runAgentLoop", () => {
-			const bridge = createWebBridge(makeResult());
+			const bridge = createServerBridge(makeResult());
 			const ws = bridge.createSession();
 			bridge.submit(ws.id, "hello");
 			expect(runAgentLoop).toHaveBeenCalledTimes(1);
@@ -955,7 +955,7 @@ describe("web bridge", () => {
 		});
 
 		it("closeSession() kills any still-running background tasks", () => {
-			const bridge = createWebBridge(makeResult());
+			const bridge = createServerBridge(makeResult());
 			const ws = bridge.createSession();
 			const killAllSpy = vi.spyOn(ws.backgroundBash.registry, "killAll");
 			bridge.closeSession(ws.id);
@@ -963,7 +963,7 @@ describe("web bridge", () => {
 		});
 
 		it("deleteSessionPermanently() kills any still-running background tasks", () => {
-			const bridge = createWebBridge(makeResult());
+			const bridge = createServerBridge(makeResult());
 			const ws = bridge.createSession();
 			const killAllSpy = vi.spyOn(ws.backgroundBash.registry, "killAll");
 			bridge.deleteSessionPermanently(ws.id);
@@ -975,7 +975,7 @@ describe("web bridge", () => {
 		// attention — via the registry's onIdleWake, wired to submit() at session
 		// construction (bridge.ts's makeBackgroundBash), starting a fresh turn.
 		it("a background task finishing while idle wakes a fresh turn with a <system-reminder>", async () => {
-			const bridge = createWebBridge(makeResult());
+			const bridge = createServerBridge(makeResult());
 			const ws = bridge.createSession();
 
 			runAgentLoop.mockImplementationOnce(async (messages: unknown[]) => messages);
@@ -996,7 +996,7 @@ describe("web bridge", () => {
 		});
 
 		it("a background task finishing while a turn is still running enqueues onto followUpQueue instead", async () => {
-			const bridge = createWebBridge(makeResult());
+			const bridge = createServerBridge(makeResult());
 			const ws = bridge.createSession();
 			ws.runner.startRun(new AbortController());
 
@@ -1029,7 +1029,7 @@ describe("web bridge", () => {
 		// shares one module-level testConfig across every test — a provider switch
 		// in one test would leak into the next. Give each bridge its own clone.
 		function freshBridge() {
-			return createWebBridge(makeResult({ config: { ...testConfig } }));
+			return createServerBridge(makeResult({ config: { ...testConfig } }));
 		}
 
 		it("adopts a provider switched in settings.json on the next turn", async () => {

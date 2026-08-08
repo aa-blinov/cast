@@ -9,8 +9,8 @@ import { runInteractive, runNonInteractive } from "./core/run.ts";
 import { loadSettings } from "./core/settings.ts";
 import type { ParsedArgs } from "./core/startup.ts";
 import { runUpgrade } from "./core/upgrade.ts";
+import { clearServerState, isProcessAlive, readLiveServerState, readServerState } from "./server/daemon-state.ts";
 import { runTui } from "./ui/tui.tsx";
-import { clearWebState, isProcessAlive, readLiveWebState, readWebState } from "./web/daemon-state.ts";
 
 const VERSION: string = JSON.parse(
 	readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf-8"),
@@ -42,8 +42,8 @@ async function main(): Promise<void> {
 		return;
 	}
 
-	if (args[0] === "web") {
-		await handleWebCommand(args.slice(1));
+	if (args[0] === "server") {
+		await handleServerCommand(args.slice(1));
 		return;
 	}
 
@@ -156,7 +156,7 @@ async function main(): Promise<void> {
 }
 
 /**
- * Ensures a `cast web` daemon is running so the TUI can be a thin client of
+ * Ensures a `cast server` daemon is running so the TUI can be a thin client of
  * it (single-writer daemon model: the daemon owns runAgentLoop and streams
  * events over SSE to every surface). If a live daemon already exists, reuse
  * it; otherwise spawn one and wait for it to become reachable. On anything
@@ -169,18 +169,23 @@ async function main(): Promise<void> {
 async function ensureDaemon(): Promise<string | undefined> {
 	if (process.env.CAST_NO_DAEMON === "1") return undefined;
 	try {
-		const existing = readLiveWebState();
+		const existing = readLiveServerState();
 		if (existing) return existing.token;
 		// Spawn a detached daemon (no --foreground — that would run inline and
 		// never return). Pass --port 0 so the OS picks a free port; the daemon
-		// records the real port in web.json, which the TUI reads for both the
-		// port and the loopback token. handleWebCommand's "already running" guard
-		// is harmless here because we just confirmed the state file is empty; it
-		// spawns the child, waits for it to actually listen, then returns while
-		// the daemon keeps running detached (so the TUI is a client, and the web
-		// UI can still connect after the TUI exits).
-		await handleWebCommand(["start", "--port", "0"]);
-		return readLiveWebState()?.token;
+		// records the real port in server.json, which the TUI reads for both the
+		// port and the loopback token. handleServerCommand's "already running"
+		// guard is harmless here because we just confirmed the state file is
+		// empty; it spawns the child, waits for it to actually listen, then
+		// returns while the daemon keeps running detached.
+		//
+		// The daemon is intentionally persistent: it stays up after the TUI
+		// exits so background processes keep running and the web UI stays
+		// reachable. Exactly one daemon exists at a time — the "already
+		// running" guard + readLiveServerState above deduplicate, so repeated
+		// `cast`/`npm start` reuse the same process instead of stacking orphans.
+		await handleServerCommand(["start", "--port", "0"]);
+		return readLiveServerState()?.token;
 	} catch {
 		return undefined;
 	}
@@ -396,16 +401,16 @@ Neovim) to wire it as an agent.`);
 	runAcpAgent(startup, { version, permissionMode, sessionId, resume });
 }
 
-async function handleWebCommand(args: string[]): Promise<void> {
-	const LOG_FILE = join(homedir(), ".cast", "web.log");
+async function handleServerCommand(args: string[]): Promise<void> {
+	const LOG_FILE = join(homedir(), ".cast", "server.log");
 
 	if (args[0] === "stop") {
-		await stopWebDaemon();
+		await stopServerDaemon();
 		return;
 	}
 
 	if (args[0] === "status") {
-		printWebStatus();
+		printServerStatus();
 		return;
 	}
 
@@ -414,9 +419,9 @@ async function handleWebCommand(args: string[]): Promise<void> {
 	// used to silently start a new daemon instead of erroring, which is the
 	// opposite of what stopping/checking status was trying to do.
 	if (args[0] && args[0] !== "start" && !args[0].startsWith("-")) {
-		console.error(`[cast web] unknown subcommand "${args[0]}"`);
+		console.error(`[cast server] unknown subcommand "${args[0]}"`);
 		console.error(
-			"Usage: cast web [start] [--port <n>] [--host <addr>] [--public] [--foreground] | cast web stop | cast web status",
+			"Usage: cast server [start] [--port <n>] [--host <addr>] [--public] [--foreground] | cast server stop | cast server status",
 		);
 		process.exit(1);
 	}
@@ -441,13 +446,13 @@ async function handleWebCommand(args: string[]): Promise<void> {
 		restArgs.push(a);
 	}
 
-	const existing = readLiveWebState();
+	const existing = readLiveServerState();
 	if (existing) {
 		const mode = existing.foreground ? " (foreground)" : "";
 		console.error(
-			`[cast web] already running (pid ${existing.pid})${mode} — http://${existing.host}:${existing.port}`,
+			`[cast server] already running (pid ${existing.pid})${mode} — http://${existing.host}:${existing.port}`,
 		);
-		console.error("[cast web] use 'cast web stop' first, or 'cast web status' to check.");
+		console.error("[cast server] use 'cast server stop' first, or 'cast server status' to check.");
 		process.exit(1);
 	}
 
@@ -457,26 +462,26 @@ async function handleWebCommand(args: string[]): Promise<void> {
 	const isRelease = selfPath.includes("/dist/");
 	const spawnCwd = join(dirname(selfPath), "..");
 	const spawnArgs = isRelease
-		? [join(spawnCwd, "dist", "index.js"), "web", ...restArgs, "--port", String(port), "--host", host]
-		: ["--import", "tsx", "./src/web/index.ts", ...restArgs, "--port", String(port), "--host", host];
+		? [join(spawnCwd, "dist", "index.js"), "server", ...restArgs, "--port", String(port), "--host", host]
+		: ["--import", "tsx", "./src/server/index.ts", ...restArgs, "--port", String(port), "--host", host];
 	const spawnEnv = {
 		...process.env,
 		CAST_CWD: homedir(),
-		CAST_WEB_PORT: String(port),
-		CAST_WEB_HOST: host,
-		CAST_WEB_FOREGROUND: foreground ? "1" : "0",
+		CAST_SERVER_PORT: String(port),
+		CAST_SERVER_HOST: host,
+		CAST_SERVER_FOREGROUND: foreground ? "1" : "0",
 		CAST_VERSION: VERSION,
 	};
 
 	// Foreground: run inline. Daemon: spawn child. Daemon child: run inline.
-	// CAST_WEB_FOREGROUND distinguishes daemon-child from the launcher:
+	// CAST_SERVER_FOREGROUND distinguishes daemon-child from the launcher:
 	// "0" = I am the daemon child, run inline (set by spawnEnv below).
 	// "1" = user asked --foreground, run inline (set by the CLI flag).
 	// unset = I am the launcher, spawn a child.
-	if (foreground || process.env.CAST_WEB_FOREGROUND === "0") {
-		process.env.CAST_WEB_SKIP_AUTORUN = "1";
-		const { runWebServerMain } = await import("./web/index.ts");
-		runWebServerMain(args, { foreground, version: VERSION });
+	if (foreground || process.env.CAST_SERVER_FOREGROUND === "0") {
+		process.env.CAST_SERVER_SKIP_AUTORUN = "1";
+		const { runServerMain } = await import("./server/index.ts");
+		runServerMain(args, { foreground, version: VERSION });
 		return;
 	}
 
@@ -496,12 +501,12 @@ async function handleWebCommand(args: string[]): Promise<void> {
 
 	const started = await waitForStartup(child.pid!);
 	if (!started) {
-		console.error(`[cast web] failed to start — see ${LOG_FILE} for details`);
+		console.error(`[cast server] failed to start — see ${LOG_FILE} for details`);
 		process.exit(1);
 	}
-	console.log(`[cast web] started (pid ${child.pid}) — http://${host}:${port}`);
-	console.log(`[cast web] logs: ${LOG_FILE}`);
-	console.log(`[cast web] stop: cast web stop`);
+	console.log(`[cast server] started (pid ${child.pid}) — http://${host}:${port}`);
+	console.log(`[cast server] logs: ${LOG_FILE}`);
+	console.log(`[cast server] stop: cast server stop`);
 }
 
 /**
@@ -529,7 +534,7 @@ function waitForStartup(pid: number): Promise<boolean> {
 			resolvePromise(ok);
 		};
 		const poll = setInterval(() => {
-			const state = readWebState();
+			const state = readServerState();
 			if (state?.pid === pid) finish(true);
 			else if (!isProcessAlive(pid)) finish(false);
 		}, 150);
@@ -552,18 +557,18 @@ function waitForExit(pid: number, timeoutMs: number): Promise<boolean> {
 	});
 }
 
-async function stopWebDaemon(): Promise<void> {
-	const state = readWebState();
+async function stopServerDaemon(): Promise<void> {
+	const state = readServerState();
 	if (!state) {
-		console.log("[cast web] not running");
+		console.log("[cast server] not running");
 		return;
 	}
 	if (!isProcessAlive(state.pid)) {
 		// Killed out from under us — by the OS, an OOM killer, or the user
 		// directly. Nothing to signal; just say so honestly and clean up
 		// instead of claiming to have "stopped" a process that was already gone.
-		console.log(`[cast web] was not actually running (pid ${state.pid} is gone) — stale state cleaned up`);
-		clearWebState();
+		console.log(`[cast server] was not actually running (pid ${state.pid} is gone) — stale state cleaned up`);
+		clearServerState();
 		return;
 	}
 
@@ -580,38 +585,38 @@ async function stopWebDaemon(): Promise<void> {
 		}
 		died = await waitForExit(state.pid, 1000);
 	}
-	clearWebState();
-	console.log(`[cast web] stopped (pid ${state.pid}) — was on http://${state.host}:${state.port}`);
-	if (!died) console.log("[cast web] warning: process may not have fully exited");
+	clearServerState();
+	console.log(`[cast server] stopped (pid ${state.pid}) — was on http://${state.host}:${state.port}`);
+	if (!died) console.log("[cast server] warning: process may not have fully exited");
 }
 
-function printWebStatus(): void {
-	const state = readWebState();
+function printServerStatus(): void {
+	const state = readServerState();
 	if (!state) {
-		console.log("[cast web] not running");
+		console.log("[cast server] not running");
 		return;
 	}
 	if (!isProcessAlive(state.pid)) {
-		console.log("[cast web] stale state — process not running");
-		clearWebState();
+		console.log("[cast server] stale state — process not running");
+		clearServerState();
 		return;
 	}
 	const mode = state.foreground ? " (foreground)" : "";
-	console.log(`[cast web] running (pid ${state.pid})${mode} — http://${state.host}:${state.port}`);
-	console.log(`[cast web] started: ${state.startedAt}`);
+	console.log(`[cast server] running (pid ${state.pid})${mode} — http://${state.host}:${state.port}`);
+	console.log(`[cast server] started: ${state.startedAt}`);
 }
 
 function getPort(args: string[]): number {
 	const idx = args.indexOf("--port");
 	if (idx >= 0 && args[idx + 1]) return parseInt(args[idx + 1]!, 10);
-	return parseInt(process.env.CAST_WEB_PORT ?? "1337", 10);
+	return parseInt(process.env.CAST_SERVER_PORT ?? "1337", 10);
 }
 
 function getHost(args: string[]): string {
 	const idx = args.indexOf("--host");
 	if (idx >= 0 && args[idx + 1]) return args[idx + 1]!;
 	if (args.includes("--public")) return "0.0.0.0";
-	return process.env.CAST_WEB_HOST ?? "127.0.0.1";
+	return process.env.CAST_SERVER_HOST ?? "127.0.0.1";
 }
 
 main().catch((err) => {
