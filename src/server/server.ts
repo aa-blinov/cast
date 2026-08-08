@@ -943,6 +943,38 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		json(res, { ok: true });
 	});
 
+	route("POST", "/api/sessions/:id/steer", async (req, res, params) => {
+		const ws = bridge.getSession(params.id);
+		if (!ws) return json(res, { error: "Not found" }, 404);
+		const body = await readBody(req);
+		let message: string;
+		try {
+			const parsed = JSON.parse(body) as { message?: string };
+			message = parsed.message ?? "";
+		} catch {
+			return json(res, { error: "Invalid JSON" }, 400);
+		}
+		if (!message.trim()) return json(res, { error: "Empty message" }, 400);
+		bridge.steer(params.id, message);
+		json(res, { ok: true }, 202);
+	});
+
+	route("POST", "/api/sessions/:id/followup", async (req, res, params) => {
+		const ws = bridge.getSession(params.id);
+		if (!ws) return json(res, { error: "Not found" }, 404);
+		const body = await readBody(req);
+		let message: string;
+		try {
+			const parsed = JSON.parse(body) as { message?: string };
+			message = parsed.message ?? "";
+		} catch {
+			return json(res, { error: "Invalid JSON" }, 400);
+		}
+		if (!message.trim()) return json(res, { error: "Empty message" }, 400);
+		bridge.followUp(params.id, message);
+		json(res, { ok: true }, 202);
+	});
+
 	route("POST", "/api/sessions/:id/command", async (req, res, params) => {
 		const ws = bridge.getSession(params.id);
 		if (!ws) return json(res, { error: "Not found" }, 404);
