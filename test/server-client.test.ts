@@ -2,7 +2,12 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { WebEvent } from "../src/server/bridge.ts";
-import { createServerSession, submitServerChat, subscribeServerEvents } from "../src/server/client.ts";
+import {
+	createServerSession,
+	ensureServerSession,
+	submitServerChat,
+	subscribeServerEvents,
+} from "../src/server/client.ts";
 
 // Real HTTP server standing in for the cast server daemon: exercises the
 // client's fetch calls and SSE subscription against a live socket (URL
@@ -19,6 +24,21 @@ describe("server client", () => {
 			if (req.method === "POST" && req.url === "/api/sessions") {
 				res.writeHead(201, { "content-type": "application/json" });
 				res.end(JSON.stringify({ id: "sess-1", session: { id: "sess-1" } }));
+				return;
+			}
+			if (req.method === "GET" && req.url === "/api/sessions") {
+				res.writeHead(200, { "content-type": "application/json" });
+				res.end(
+					JSON.stringify([
+						{ id: "old-1", cwd: "/tmp", updatedAt: "2026-01-01T00:00:00.000Z" },
+						{ id: "sess-1", cwd: "/tmp", updatedAt: "2026-02-01T00:00:00.000Z" },
+					]),
+				);
+				return;
+			}
+			if (req.method === "GET" && req.url === "/api/sessions/sess-1") {
+				res.writeHead(200, { "content-type": "application/json" });
+				res.end(JSON.stringify({ id: "sess-1", cwd: "/tmp", mode: "build", status: "idle", messages: [] }));
 				return;
 			}
 			if (req.method === "POST" && req.url === "/api/sessions/sess-1/chat") {
@@ -72,5 +92,29 @@ describe("server client", () => {
 		);
 		await done;
 		expect(seen).toEqual(["token", "end", "session_end"]);
+	});
+
+	it("ensureServerSession resumes an explicit id via GET", async () => {
+		const client = { baseUrl, token: "tok" };
+		const { id, resumed } = await ensureServerSession(client, { resumeId: "sess-1" });
+		expect(id).toBe("sess-1");
+		expect(resumed).toBe(true);
+		expect(received[0]).toMatchObject({ method: "GET", path: "/api/sessions/sess-1" });
+	});
+
+	it("ensureServerSession picks the most recent session in cwd for --continue", async () => {
+		const client = { baseUrl, token: "tok" };
+		const { id, resumed } = await ensureServerSession(client, { cwd: "/tmp", resumeRequested: true });
+		expect(id).toBe("sess-1"); // newer than old-1
+		expect(resumed).toBe(true);
+		expect(received[0]).toMatchObject({ method: "GET", path: "/api/sessions" });
+	});
+
+	it("ensureServerSession creates a fresh session without resume flags", async () => {
+		const client = { baseUrl, token: "tok" };
+		const { id, resumed } = await ensureServerSession(client, { cwd: "/other" });
+		expect(id).toBe("sess-1");
+		expect(resumed).toBe(false);
+		expect(received[0]).toMatchObject({ method: "POST", path: "/api/sessions" });
 	});
 });
