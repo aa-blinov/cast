@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.9
+
+### Fixed
+
+- **Text-only models stop receiving image attachments.** When a provider rejects `image_url` message parts (e.g. deepseek-v4-pro on a text-only endpoint), the rejected image messages are now removed from the session — previously they stayed and every turn re-sent them, failing again. Models that don't support images now just see the file path.
+
 ## 0.13.8
 
 ### Fixed
