@@ -2,6 +2,27 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.11
+
+### Changed
+
+- **`cast web` is now `cast server`.** The daemon was the single-writer backend every surface talks to, not just the web UI, so the name was misleading. The command, state file (`server.json`, auto-migrated from `web.json`), env vars (`CAST_SERVER_*`), and the settings key (`serverToken`, auto-migrated from `webPassword`) are all `server` now. The web UI is unchanged — it's just served by the `cast server` daemon. `cast web` is no longer accepted.
+- **The daemon is persistent and single-instance.** It stays up after the TUI exits so background processes keep running and the web UI stays reachable; repeated `cast`/`npm start` reuse the one running instance instead of stacking orphaned processes.
+- **`cast run` and `cast run --interactive` now go through the same server daemon** as the TUI and web UI. Sessions land in the shared store, `-c`/`-s` resume works, and JSONL commands (including `/worktree`, plan review, question answers) round-trip through the server's command surface.
+
+### Added
+
+- `Ctrl+L` clears the composer in any state; idle `Esc` no longer wipes typed text (a stray press used to delete your message).
+- E2E harness for the server paths: `npm run e2e:jsonl` (plan mode through the daemon) and `npm run e2e:hooks` (hooks firing on the daemon).
+
+### Fixed
+
+- Stopping a running turn now needs a deliberate double-`Esc`; a single stray `Esc` no longer kills a long in-flight turn.
+- The ASCII banner no longer disappears ~0.5 s after startup (a settle resync cleared it).
+- Exiting is clean: no `^[[15;1R`-style cursor-query garbage in the shell, and the last TUI frame is cleared.
+- The question picker names exactly which option is missing its required `value`, so the model knows what to fix.
+- Older session history loads a page at a time (`/older` or `PageUp`) instead of flooding the terminal scrollback on resume.
+
 ## 0.13.10
 
 ### Added
