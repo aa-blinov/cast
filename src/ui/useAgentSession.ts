@@ -37,11 +37,13 @@ import {
 	answerServerQuestion,
 	followUpServerSession,
 	resolveServerPlanTransition,
+	type ServerClient,
 	serverFetch,
 	setServerMode,
 	steerServerSession,
 	submitServerChat,
 } from "../server/client.ts";
+import { readLiveServerState } from "../server/daemon-state.ts";
 import {
 	appendTextBlock,
 	reduceStreamEvent,
@@ -471,13 +473,23 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	// Thin-client mode: this hook does not own the agent loop; the `cast server`
 	// daemon does, and events arrive over SSE. Local path (runner, runAgentLoop)
 	// is fully preserved when daemonUrl is unset.
-	const isClient = !!daemonUrl;
+	//
+	// The daemon is a live process that can be replaced under this TUI (crash,
+	// `cast server stop`, upgrade restarting it). daemonOverride is set when a
+	// submit discovers the original daemon is gone and a new one has taken over
+	// — it redirects the SSE stream and all server calls to the new URL while
+	// the session id (owned centrally by the daemon's shared store) is unchanged,
+	// so the conversation survives the swap.
+	const [daemonOverride, setDaemonOverride] = useState<{ url: string; token?: string } | undefined>(undefined);
+	const effectiveDaemonUrl = daemonOverride?.url ?? daemonUrl;
+	const effectiveDaemonToken = daemonOverride?.token ?? daemonToken;
+	const isClient = !!effectiveDaemonUrl;
 	// Shared HTTP client for the daemon (thin-client mode). Used by all the
 	// server calls below — same wire layer as `cast run`/JSONL (server/client.ts),
 	// so the TUI and headless paths speak to the daemon identically.
 	const serverClient = useMemo(
-		() => (daemonUrl ? { baseUrl: daemonUrl, token: daemonToken } : undefined),
-		[daemonUrl, daemonToken],
+		() => (effectiveDaemonUrl ? { baseUrl: effectiveDaemonUrl, token: effectiveDaemonToken } : undefined),
+		[effectiveDaemonUrl, effectiveDaemonToken],
 	);
 	// Load only the most recent page of history on resume. Loading the full
 	// history (getFullHistory) dumped thousands of lines into the terminal's
@@ -735,7 +747,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 
 	const submit = useCallback(
 		async (text: string, images?: PendingImage[]) => {
-			if (isClient && daemonUrl) {
+			if (isClient && effectiveDaemonUrl) {
 				// Thin-client submit: the daemon owns the loop. Enqueue locally if a
 				// turn is already running (the daemon serializes concurrent submits),
 				// else POST the prompt and let the SSE stream render the turn. We
@@ -745,22 +757,41 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				// a long turn, but the HTTP response returns once the turn queue is
 				// accepted, not when the turn finishes.
 				if (!serverClient) return;
-				// Thin-client submit: the daemon owns the loop. Enqueue locally if a
-				// turn is already running (the daemon serializes concurrent submits),
-				// else POST the prompt and let the SSE stream render the turn. We
-				// await the POST so a network/daemon error surfaces as `setError`
-				// rather than silently dropping the message; the stream carries all
-				// token/tool/status updates. Use a long timeout — the daemon may run
-				// a long turn, but the HTTP response returns once the turn queue is
-				// accepted, not when the turn finishes.
-				try {
-					await submitServerChat(
-						serverClient,
-						session.id,
-						text,
-						images?.map((img) => img.dataUrl),
-					);
-				} catch {
+				const attempt = async (client: ServerClient, useLive: boolean): Promise<boolean> => {
+					try {
+						await submitServerChat(
+							client,
+							session.id,
+							text,
+							images?.map((img) => img.dataUrl),
+						);
+						return true;
+					} catch {
+						// First failure: the daemon we started with may be gone
+						// (crash, `cast server stop`, upgrade) and a replacement may
+						// have taken over the state file. Re-read it and retry once
+						// against the live daemon — the session is owned by the
+						// central store, so the same session id works on the new one.
+						if (!useLive) return false;
+						const live = readLiveServerState();
+						if (!live) return false;
+						const url = `http://${live.host}:${live.port}`;
+						if (url === effectiveDaemonUrl && live.token === effectiveDaemonToken) return false;
+						setDaemonOverride({ url, token: live.token });
+						try {
+							await submitServerChat(
+								{ baseUrl: url, token: live.token },
+								session.id,
+								text,
+								images?.map((img) => img.dataUrl),
+							);
+							return true;
+						} catch {
+							return false;
+						}
+					}
+				};
+				if (!(await attempt(serverClient, true))) {
 					setError("Daemon unreachable — is 'cast server' running?");
 				}
 				return;
@@ -1178,7 +1209,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			subagentModelProvider,
 			params.sshHosts,
 			isClient,
-			daemonUrl,
+			effectiveDaemonUrl,
+			effectiveDaemonToken,
 			serverClient,
 		],
 	);
@@ -1202,10 +1234,10 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	// crash) leaves the session idle; the TUI sees no live turn and can offer
 	// reconnect on next submit.
 	useEffect(() => {
-		if (!isClient || !daemonUrl) return;
-		const url = daemonToken
-			? `${daemonUrl}/api/sessions/${session.id}/events?token=${encodeURIComponent(daemonToken)}`
-			: `${daemonUrl}/api/sessions/${session.id}/events`;
+		if (!isClient || !effectiveDaemonUrl) return;
+		const url = effectiveDaemonToken
+			? `${effectiveDaemonUrl}/api/sessions/${session.id}/events?token=${encodeURIComponent(effectiveDaemonToken)}`
+			: `${effectiveDaemonUrl}/api/sessions/${session.id}/events`;
 		const source = new EventSource(url);
 		source.onmessage = (ev) => {
 			let event: import("../server/bridge.ts").WebEvent;
@@ -1325,8 +1357,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		return () => source.close();
 	}, [
 		isClient,
-		daemonUrl,
-		daemonToken,
+		effectiveDaemonUrl,
+		effectiveDaemonToken,
 		session.id,
 		promoteStreamingToHistory,
 		updateStreaming,
@@ -1337,7 +1369,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 
 	const steer = useCallback(
 		(text: string) => {
-			if (isClient && daemonUrl) {
+			if (isClient && effectiveDaemonUrl) {
 				if (serverClient) void steerServerSession(serverClient, session.id, text).catch(() => {});
 				setPendingSteers((p) => [...p, text]);
 				return;
@@ -1345,12 +1377,12 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			runner.steeringQueue.enqueue({ role: "user", content: text });
 			setPendingSteers((p) => [...p, text]);
 		},
-		[runner, isClient, daemonUrl, session.id, serverClient],
+		[runner, isClient, effectiveDaemonUrl, session.id, serverClient],
 	);
 
 	const followUp = useCallback(
 		(text: string) => {
-			if (isClient && daemonUrl) {
+			if (isClient && effectiveDaemonUrl) {
 				if (serverClient) void followUpServerSession(serverClient, session.id, text).catch(() => {});
 				setPendingQueue((p) => [...p, text]);
 				return;
@@ -1358,11 +1390,11 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			runner.followUpQueue.enqueue({ role: "user", content: text });
 			setPendingQueue((p) => [...p, text]);
 		},
-		[runner, isClient, daemonUrl, session.id, serverClient],
+		[runner, isClient, effectiveDaemonUrl, session.id, serverClient],
 	);
 
 	const abort = useCallback(() => {
-		if (isClient && daemonUrl) {
+		if (isClient && effectiveDaemonUrl) {
 			if (serverClient) void abortServerSession(serverClient, session.id).catch(() => {});
 			setPendingSteers([]);
 			setPendingQueue([]);
@@ -1374,7 +1406,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		// showing pending steer/follow-up entries that were just wiped.
 		setPendingSteers([]);
 		setPendingQueue([]);
-	}, [runner, isClient, daemonUrl, session.id, serverClient]);
+	}, [runner, isClient, effectiveDaemonUrl, session.id, serverClient]);
 
 	// Thin-client plan-decision plumbing: the daemon owns planState, so the
 	// answer to its pending question (and the plan approval) must go back over
@@ -1383,31 +1415,31 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	// planState path there.
 	const answerQuestion = useCallback(
 		(values: string[]) => {
-			if (isClient && daemonUrl) {
+			if (isClient && effectiveDaemonUrl) {
 				if (serverClient) void answerServerQuestion(serverClient, session.id, values).catch(() => {});
 				setPendingQuestion(undefined);
 			}
 		},
-		[isClient, daemonUrl, session.id, serverClient],
+		[isClient, effectiveDaemonUrl, session.id, serverClient],
 	);
 
 	const approvePlan = useCallback(() => {
-		if (isClient && daemonUrl) {
+		if (isClient && effectiveDaemonUrl) {
 			if (serverClient) void resolveServerPlanTransition(serverClient, session.id).catch(() => {});
 		}
-	}, [isClient, daemonUrl, session.id, serverClient]);
+	}, [isClient, effectiveDaemonUrl, session.id, serverClient]);
 
 	const setMode = useCallback(
 		(mode: "plan" | "build") => {
-			if (isClient && daemonUrl) {
+			if (isClient && effectiveDaemonUrl) {
 				if (serverClient) void setServerMode(serverClient, session.id, mode).catch(() => {});
 			}
 		},
-		[isClient, daemonUrl, session.id, serverClient],
+		[isClient, effectiveDaemonUrl, session.id, serverClient],
 	);
 
 	const cleanDaemonContext = useCallback(async (): Promise<string | undefined> => {
-		if (!isClient || !daemonUrl || !serverClient) return undefined;
+		if (!isClient || !effectiveDaemonUrl || !serverClient) return undefined;
 		try {
 			// clean-context returns the original task for the clean handoff.
 			const { status, data } = await serverFetch(serverClient, `/api/sessions/${session.id}/clean-context`, {
@@ -1418,7 +1450,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		} catch {
 			return undefined;
 		}
-	}, [isClient, daemonUrl, session.id, serverClient]);
+	}, [isClient, effectiveDaemonUrl, session.id, serverClient]);
 
 	const clearContext = useCallback(() => {
 		clearSessionMessages(session);

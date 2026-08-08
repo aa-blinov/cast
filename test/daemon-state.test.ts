@@ -83,4 +83,32 @@ describe("daemon-state", () => {
 		expect(isProcessAlive(process.pid)).toBe(true);
 		expect(isProcessAlive(2_147_483_646)).toBe(false);
 	});
+
+	it("acquireStartLock succeeds alone and serializes concurrent holders", async () => {
+		const { acquireStartLock, releaseStartLock } = await import("../src/server/daemon-state.ts");
+		expect(acquireStartLock()).toBe(true);
+		// A second acquire from the same process writes the same pid — the
+		// lock is single-holder by pid, so a re-entrant call is rejected
+		// (the file is already there and its holder is alive).
+		expect(acquireStartLock()).toBe(false);
+		releaseStartLock();
+		// Released — acquire works again.
+		expect(acquireStartLock()).toBe(true);
+		releaseStartLock();
+	});
+
+	it("releaseStartLock only removes a lock owned by this process", async () => {
+		const { acquireStartLock, releaseStartLock } = await import("../src/server/daemon-state.ts");
+		acquireStartLock();
+		// Overwrite the lock with a different holder's pid (another live
+		// process — the vitest parent) — release must not delete it, and
+		// acquire must not steal it from a live holder.
+		writeFileSync(join(fakeHome, ".cast", "server-start.lock"), String(process.ppid));
+		releaseStartLock();
+		expect(acquireStartLock()).toBe(false);
+		// Cleanup: a dead holder is fair game, so acquire steals the lock.
+		writeFileSync(join(fakeHome, ".cast", "server-start.lock"), "2_147_483_646".replaceAll("_", ""));
+		expect(acquireStartLock()).toBe(true);
+		releaseStartLock();
+	});
 });

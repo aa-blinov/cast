@@ -9,7 +9,14 @@ import { runInteractive, runNonInteractive } from "./core/run.ts";
 import { loadSettings } from "./core/settings.ts";
 import type { ParsedArgs } from "./core/startup.ts";
 import { runUpgrade } from "./core/upgrade.ts";
-import { clearServerState, isProcessAlive, readLiveServerState, readServerState } from "./server/daemon-state.ts";
+import {
+	acquireStartLock,
+	clearServerState,
+	isProcessAlive,
+	readLiveServerState,
+	readServerState,
+	releaseStartLock,
+} from "./server/daemon-state.ts";
 import { runTui } from "./ui/tui.tsx";
 
 const VERSION: string = JSON.parse(
@@ -180,23 +187,32 @@ async function main(): Promise<void> {
 async function ensureDaemon(): Promise<string | undefined> {
 	if (process.env.CAST_NO_DAEMON === "1") return undefined;
 	try {
-		const existing = readLiveServerState();
-		if (existing) return existing.token;
-		// Spawn a detached daemon (no --foreground — that would run inline and
-		// never return). Pass --port 0 so the OS picks a free port; the daemon
-		// records the real port in server.json, which the TUI reads for both the
-		// port and the loopback token. handleServerCommand's "already running"
-		// guard is harmless here because we just confirmed the state file is
-		// empty; it spawns the child, waits for it to actually listen, then
-		// returns while the daemon keeps running detached.
-		//
-		// The daemon is intentionally persistent: it stays up after the TUI
-		// exits so background processes keep running and the web UI stays
-		// reachable. Exactly one daemon exists at a time — the "already
-		// running" guard + readLiveServerState above deduplicate, so repeated
-		// `cast`/`npm start` reuse the same process instead of stacking orphans.
-		await handleServerCommand(["start", "--port", "0"]);
-		return readLiveServerState()?.token;
+		// Concurrent `cast` launches (two terminals opened back-to-back) both
+		// see an empty state file before the first daemon records itself, so a
+		// bare "empty → spawn" race stacks two daemons. Serialize the spawn
+		// with an exclusive lock: only the lock holder runs `server start`,
+		// everyone else waits (bounded) for it to record state and then reuses
+		// the winner instead of spawning a second process.
+		const waitForDaemon = async (attempt: number): Promise<string | undefined> => {
+			if (attempt >= 100) return undefined;
+			const existing = readLiveServerState();
+			if (existing) return existing.token;
+			if (!acquireStartLock()) {
+				await new Promise((r) => setTimeout(r, 100));
+				return waitForDaemon(attempt + 1);
+			}
+			try {
+				// Re-check under the lock: the winner may have recorded state
+				// while we waited for the lock.
+				const now = readLiveServerState();
+				if (now) return now.token;
+				await handleServerCommand(["start", "--port", "0"]);
+				return readLiveServerState()?.token;
+			} finally {
+				releaseStartLock();
+			}
+		};
+		return await waitForDaemon(0);
 	} catch {
 		return undefined;
 	}
