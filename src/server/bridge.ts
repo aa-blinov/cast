@@ -531,6 +531,11 @@ export interface ServerBridge {
 		token: string,
 	): { title?: string; persona: string; model: string; messages: DisplayMessage[] } | null;
 	submit(sessionId: string, text: string, images?: string[]): Promise<void>;
+	/** Inject a message into the running turn (submits; the loop's
+	 *  steeringQueue drains it if a turn is in flight, matching /steer). */
+	steer(sessionId: string, message: string): void;
+	/** Queue a message to run after the current turn (matches /queue). */
+	followUp(sessionId: string, message: string): void;
 	/** Outstanding user questions, if the agent is waiting for choices. */
 	getQuestion(sessionId: string): PlanQuestion | undefined;
 	/** Records choices and resumes the same conversation in either mode. */
@@ -1341,6 +1346,21 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		const ws = sessions.get(sessionId);
 		if (!ws) return;
 		ws.runner.abort();
+	}
+
+	function steer(sessionId: string, message: string): void {
+		const ws = sessions.get(sessionId);
+		if (!ws) return;
+		// submit() itself enqueues into steeringQueue when a turn is running —
+		// this is the /steer path, so it must reach the running loop rather
+		// than start a fresh one.
+		void submit(sessionId, message);
+	}
+
+	function followUp(sessionId: string, message: string): void {
+		const ws = sessions.get(sessionId);
+		if (!ws) return;
+		ws.runner.followUpQueue.enqueue({ role: "user", content: message });
 	}
 
 	function getQuestion(sessionId: string): PlanQuestion | undefined {
@@ -3164,6 +3184,8 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		unshareSession,
 		getSharedSession,
 		submit,
+		steer,
+		followUp,
 		getQuestion,
 		answerQuestion,
 		getPlanTransition,

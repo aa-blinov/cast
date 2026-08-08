@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 // Node 22 has no global EventSource; undici ships one (experimental) that we
 // use to receive the daemon's SSE stream. The browser build (esbuild bundle)
 // provides a real global EventSource, so this import is Node-only and safe in
@@ -32,6 +32,16 @@ import { loadSettings, type PermissionMode, updateSettings } from "../core/setti
 import { setLastTurnAborted, setStreamingActive } from "../core/stdin-manager.ts";
 import type { BackgroundTaskRegistry, BashBackgroundDeps } from "../core/tools/bash-background.ts";
 import { completedToolCallStatus, type ToolCallStatus } from "../core/tools/shared.ts";
+import {
+	abortServerSession,
+	answerServerQuestion,
+	followUpServerSession,
+	resolveServerPlanTransition,
+	serverFetch,
+	setServerMode,
+	steerServerSession,
+	submitServerChat,
+} from "../server/client.ts";
 import {
 	appendTextBlock,
 	reduceStreamEvent,
@@ -462,6 +472,13 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	// daemon does, and events arrive over SSE. Local path (runner, runAgentLoop)
 	// is fully preserved when daemonUrl is unset.
 	const isClient = !!daemonUrl;
+	// Shared HTTP client for the daemon (thin-client mode). Used by all the
+	// server calls below — same wire layer as `cast run`/JSONL (server/client.ts),
+	// so the TUI and headless paths speak to the daemon identically.
+	const serverClient = useMemo(
+		() => (daemonUrl ? { baseUrl: daemonUrl, token: daemonToken } : undefined),
+		[daemonUrl, daemonToken],
+	);
 	// Load only the most recent page of history on resume. Loading the full
 	// history (getFullHistory) dumped thousands of lines into the terminal's
 	// scrollback at once, pushing the viewport to the bottom and past the
@@ -727,18 +744,23 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				// token/tool/status updates. Use a long timeout — the daemon may run
 				// a long turn, but the HTTP response returns once the turn queue is
 				// accepted, not when the turn finishes.
-				const running = await fetch(`${daemonUrl}/api/sessions/${session.id}/chat`, {
-					method: "POST",
-					headers: {
-						"Content-Type": "application/json",
-						...(daemonToken ? { Authorization: `Bearer ${daemonToken}` } : {}),
-					},
-					body: JSON.stringify({
+				if (!serverClient) return;
+				// Thin-client submit: the daemon owns the loop. Enqueue locally if a
+				// turn is already running (the daemon serializes concurrent submits),
+				// else POST the prompt and let the SSE stream render the turn. We
+				// await the POST so a network/daemon error surfaces as `setError`
+				// rather than silently dropping the message; the stream carries all
+				// token/tool/status updates. Use a long timeout — the daemon may run
+				// a long turn, but the HTTP response returns once the turn queue is
+				// accepted, not when the turn finishes.
+				try {
+					await submitServerChat(
+						serverClient,
+						session.id,
 						text,
-						images: images?.map((img) => img.dataUrl),
-					}),
-				}).catch(() => null);
-				if (!running || running.status >= 400) {
+						images?.map((img) => img.dataUrl),
+					);
+				} catch {
 					setError("Daemon unreachable — is 'cast server' running?");
 				}
 				return;
@@ -1157,7 +1179,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			params.sshHosts,
 			isClient,
 			daemonUrl,
-			daemonToken,
+			serverClient,
 		],
 	);
 
@@ -1316,51 +1338,32 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	const steer = useCallback(
 		(text: string) => {
 			if (isClient && daemonUrl) {
-				void fetch(`${daemonUrl}/api/sessions/${session.id}/steer`, {
-					method: "POST",
-					headers: {
-						"Content-Type": "application/json",
-						...(daemonToken ? { Authorization: `Bearer ${daemonToken}` } : {}),
-					},
-					body: JSON.stringify({ message: text }),
-				}).catch(() => {});
+				if (serverClient) void steerServerSession(serverClient, session.id, text).catch(() => {});
 				setPendingSteers((p) => [...p, text]);
 				return;
 			}
 			runner.steeringQueue.enqueue({ role: "user", content: text });
 			setPendingSteers((p) => [...p, text]);
 		},
-		[runner, isClient, daemonUrl, daemonToken, session.id],
+		[runner, isClient, daemonUrl, session.id, serverClient],
 	);
 
 	const followUp = useCallback(
 		(text: string) => {
 			if (isClient && daemonUrl) {
-				void fetch(`${daemonUrl}/api/sessions/${session.id}/followup`, {
-					method: "POST",
-					headers: {
-						"Content-Type": "application/json",
-						...(daemonToken ? { Authorization: `Bearer ${daemonToken}` } : {}),
-					},
-					body: JSON.stringify({ message: text }),
-				}).catch(() => {});
+				if (serverClient) void followUpServerSession(serverClient, session.id, text).catch(() => {});
 				setPendingQueue((p) => [...p, text]);
 				return;
 			}
 			runner.followUpQueue.enqueue({ role: "user", content: text });
 			setPendingQueue((p) => [...p, text]);
 		},
-		[runner, isClient, daemonUrl, daemonToken, session.id],
+		[runner, isClient, daemonUrl, session.id, serverClient],
 	);
 
 	const abort = useCallback(() => {
 		if (isClient && daemonUrl) {
-			void fetch(`${daemonUrl}/api/sessions/${session.id}/abort`, {
-				method: "POST",
-				headers: {
-					...(daemonToken ? { Authorization: `Bearer ${daemonToken}` } : {}),
-				},
-			}).catch(() => {});
+			if (serverClient) void abortServerSession(serverClient, session.id).catch(() => {});
 			setPendingSteers([]);
 			setPendingQueue([]);
 			return;
@@ -1371,7 +1374,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		// showing pending steer/follow-up entries that were just wiped.
 		setPendingSteers([]);
 		setPendingQueue([]);
-	}, [runner, isClient, daemonUrl, daemonToken, session.id]);
+	}, [runner, isClient, daemonUrl, session.id, serverClient]);
 
 	// Thin-client plan-decision plumbing: the daemon owns planState, so the
 	// answer to its pending question (and the plan approval) must go back over
@@ -1381,64 +1384,41 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	const answerQuestion = useCallback(
 		(values: string[]) => {
 			if (isClient && daemonUrl) {
-				void fetch(`${daemonUrl}/api/sessions/${session.id}/question`, {
-					method: "POST",
-					headers: {
-						"Content-Type": "application/json",
-						...(daemonToken ? { Authorization: `Bearer ${daemonToken}` } : {}),
-					},
-					body: JSON.stringify({ values }),
-				}).catch(() => {});
+				if (serverClient) void answerServerQuestion(serverClient, session.id, values).catch(() => {});
 				setPendingQuestion(undefined);
 			}
 		},
-		[isClient, daemonUrl, daemonToken, session.id],
+		[isClient, daemonUrl, session.id, serverClient],
 	);
 
 	const approvePlan = useCallback(() => {
 		if (isClient && daemonUrl) {
-			void fetch(`${daemonUrl}/api/sessions/${session.id}/plan-transition`, {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-					...(daemonToken ? { Authorization: `Bearer ${daemonToken}` } : {}),
-				},
-				body: JSON.stringify({ kind: "done" }),
-			}).catch(() => {});
+			if (serverClient) void resolveServerPlanTransition(serverClient, session.id).catch(() => {});
 		}
-	}, [isClient, daemonUrl, daemonToken, session.id]);
+	}, [isClient, daemonUrl, session.id, serverClient]);
 
 	const setMode = useCallback(
 		(mode: "plan" | "build") => {
 			if (isClient && daemonUrl) {
-				void fetch(`${daemonUrl}/api/sessions/${session.id}/mode`, {
-					method: "POST",
-					headers: {
-						"Content-Type": "application/json",
-						...(daemonToken ? { Authorization: `Bearer ${daemonToken}` } : {}),
-					},
-					body: JSON.stringify({ mode }),
-				}).catch(() => {});
+				if (serverClient) void setServerMode(serverClient, session.id, mode).catch(() => {});
 			}
 		},
-		[isClient, daemonUrl, daemonToken, session.id],
+		[isClient, daemonUrl, session.id, serverClient],
 	);
 
 	const cleanDaemonContext = useCallback(async (): Promise<string | undefined> => {
-		if (!isClient || !daemonUrl) return undefined;
+		if (!isClient || !daemonUrl || !serverClient) return undefined;
 		try {
-			const res = await fetch(`${daemonUrl}/api/sessions/${session.id}/clean-context`, {
+			// clean-context returns the original task for the clean handoff.
+			const { status, data } = await serverFetch(serverClient, `/api/sessions/${session.id}/clean-context`, {
 				method: "POST",
-				headers: {
-					...(daemonToken ? { Authorization: `Bearer ${daemonToken}` } : {}),
-				},
 			});
-			const data = (await res.json()) as { originalTask?: string };
-			return data.originalTask;
+			if (status >= 400) return undefined;
+			return (data as { originalTask?: string })?.originalTask;
 		} catch {
 			return undefined;
 		}
-	}, [isClient, daemonUrl, daemonToken, session.id]);
+	}, [isClient, daemonUrl, session.id, serverClient]);
 
 	const clearContext = useCallback(() => {
 		clearSessionMessages(session);

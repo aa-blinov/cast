@@ -176,10 +176,15 @@ export async function ensureServerSession(
 }
 
 /** Submit a prompt to a daemon session (fire-and-forget; events arrive on the SSE stream). */
-export async function submitServerChat(client: ServerClient, sessionId: string, text: string): Promise<void> {
+export async function submitServerChat(
+	client: ServerClient,
+	sessionId: string,
+	text: string,
+	images?: string[],
+): Promise<void> {
 	const { status, data } = await serverFetch(client, `/api/sessions/${sessionId}/chat`, {
 		method: "POST",
-		body: { text },
+		body: { text, images },
 	});
 	if (status !== 202) {
 		const msg =
@@ -223,6 +228,26 @@ export async function answerServerQuestion(client: ServerClient, sessionId: stri
 		body: { values },
 	});
 	if (status !== 202) throw new Error(`answer failed (HTTP ${status})`);
+}
+
+/** Inject a steering message into a running turn. */
+export async function steerServerSession(client: ServerClient, sessionId: string, message: string): Promise<void> {
+	await serverFetch(client, `/api/sessions/${sessionId}/steer`, { method: "POST", body: { message } });
+}
+
+/** Queue a follow-up message to run after the current turn. */
+export async function followUpServerSession(client: ServerClient, sessionId: string, message: string): Promise<void> {
+	await serverFetch(client, `/api/sessions/${sessionId}/followup`, { method: "POST", body: { message } });
+}
+
+/** Abort the running turn. */
+export async function abortServerSession(client: ServerClient, sessionId: string): Promise<void> {
+	await serverFetch(client, `/api/sessions/${sessionId}/abort`, { method: "POST" });
+}
+
+/** Drop the session's in-context working set (the daemon's /clear). */
+export async function cleanServerContext(client: ServerClient, sessionId: string): Promise<void> {
+	await serverFetch(client, `/api/sessions/${sessionId}/clean-context`, { method: "POST" });
 }
 
 /** Resolve a pending plan-done transition on a daemon session. */
