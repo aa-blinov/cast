@@ -12,6 +12,7 @@ export const readRangeUsesOffsetLimit: EvalCase = {
 		}),
 	prompt: `What are the entries on lines 21 through 23 of ${fixturePath("behavior-read-range", "log.txt")}?`,
 	expect: {
+		containsAll: ["line-21", "line-22", "line-23"],
 		toolsCalled: ["read"],
 		toolsNotCalled: ["bash", "write", "edit"],
 		noErrors: true,
@@ -20,8 +21,8 @@ export const readRangeUsesOffsetLimit: EvalCase = {
 				(call) =>
 					call.name === "read" &&
 					call.args.path === fixturePath("behavior-read-range", "log.txt") &&
-					typeof call.args.offset === "number" &&
-					typeof call.args.limit === "number",
+					call.args.offset === 21 &&
+					call.args.limit === 3,
 			)
 				? undefined
 				: "read did not include offset and limit",

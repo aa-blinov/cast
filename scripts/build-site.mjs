@@ -964,12 +964,13 @@ function scoreboardToHtml(scoreboard) {
 				.map((value) => Number(value ?? 0).toFixed(1))
 				.join(" / ");
 			const providerUrl = e.providerUrl ? `<code>${e.providerUrl}</code>` : "—";
-			return `<tr><td>${e.model}</td><td>${pct}%</td><td>${e.casesPassed}/${e.casesTotal}</td><td>${badge}</td><td>${formatGroupScore(e.core)}</td><td>${formatGroupScore(e.chain)}</td><td>${timing}</td><td>${turns}</td><td>${inputTokens}</td><td>${outputTokens}</td><td>${providerUrl}</td><td>${date}</td></tr>`;
+			const reasoning = e.reasoningLevel ? `<code>${e.reasoningLevel}</code>` : "—";
+			return `<tr><td>${e.model}</td><td>${reasoning}</td><td>${pct}%</td><td>${e.casesPassed}/${e.casesTotal}</td><td>${badge}</td><td>${formatGroupScore(e.core)}</td><td>${formatGroupScore(e.chain)}</td><td>${timing}</td><td>${turns}</td><td>${inputTokens}</td><td>${outputTokens}</td><td>${providerUrl}</td><td>${date}</td></tr>`;
 		})
 		.join("\n");
 
 	const mainTable = `<div class="table-wrap"><table><thead><tr>
-		<th>Model</th><th>Score</th><th>Passed</th><th>Certified</th><th>Core</th><th>Chain</th><th>Time (avg/p50/p75/p95/p99)</th><th>Turns (avg/p50/p75/p95/p99)</th><th>Input tokens (avg/p50/p75/p95/p99)</th><th>Output tokens (avg/p50/p75/p95/p99)</th><th>Provider URL</th><th>Last updated</th>
+		<th>Model</th><th>Reasoning</th><th>Score</th><th>Passed</th><th>Certified</th><th>Core</th><th>Chain</th><th>Time (avg/p50/p75/p95/p99)</th><th>Turns (avg/p50/p75/p95/p99)</th><th>Input tokens (avg/p50/p75/p95/p99)</th><th>Output tokens (avg/p50/p75/p95/p99)</th><th>Provider URL</th><th>Last updated</th>
 	</tr></thead><tbody>
 ${rows}
 	</tbody></table></div>`;

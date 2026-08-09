@@ -8,6 +8,7 @@ export const bashArgumentGrounding: EvalCase = {
 	setup: () => void writeFixture("behavior-bash-args", { "data.txt": "a\nb\nc\nd\ne\n" }),
 	prompt: `How many lines are in ${fixturePath("behavior-bash-args", "data.txt")}? Use a shell command to count them.`,
 	expect: {
+		containsAll: ["5"],
 		toolsCalled: ["bash"],
 		toolsNotCalled: ["read", "grep"],
 		noErrors: true,
@@ -15,10 +16,9 @@ export const bashArgumentGrounding: EvalCase = {
 			const call = toolCalls.find((c) => c.name === "bash");
 			const command = String(call?.args.command ?? "");
 			const targetsFile = command.includes(fixturePath("behavior-bash-args", "data.txt"));
-			const isLineCount = /\bwc\s+-l\b/.test(command);
-			return targetsFile && isLineCount
+			return targetsFile
 				? undefined
-				: "bash command did not target the requested file with a line-counting command";
+				: "bash command did not target the requested file";
 		},
 	},
 };

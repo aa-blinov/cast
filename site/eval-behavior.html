@@ -509,7 +509,8 @@ a:hover { color: #c084fc; text-decoration: none; }
 		<h1>Behavior Evals</h1>
 <p><code>evals/benches/behavior/</code> measures the real agent loop against a real configured model. A case
 passes only from observable evidence: tool trace and arguments, turn grouping, filesystem state,
-or mode signal. The assistant&#39;s final prose is never a behavior oracle.</p>
+or mode signal. When a task asks the agent to report a fact, its final answer is also checked
+against that independently observed state; prose alone never establishes correctness.</p>
 <p>Run the default suite:</p>
 <pre><code class="language-bash">node --import tsx evals/run.ts -m &lt;model&gt; -j 1 -v
 </code></pre>
@@ -559,7 +560,9 @@ result, use <code>--scoreboard</code>, which runs those three attempts automatic
 consistent-3/3 scoring rule.</p>
 <h2>What belongs where</h2>
 <p>Real-agent cases cover a model&#39;s use of the shipping prompt, tools, loop and provider protocol.
-They should be small, sandboxed, and each prove one contract.</p>
+They should be small, sandboxed, and each prove one contract. Every case runs in an isolated
+working directory unless it explicitly supplies a fixture directory, so an agent cannot obtain
+accidental evidence from the Cast checkout running the evaluator.</p>
 <p>Deterministic contracts stay in <code>test/</code>: plan terminal behavior and write gates in
 <code>test/loop.test.ts</code>/<code>test/plan.test.ts</code>, session and compaction persistence in
 <code>test/session.test.ts</code>, sandbox creation in <code>test/web-bridge.test.ts</code>, provider reasoning parsing

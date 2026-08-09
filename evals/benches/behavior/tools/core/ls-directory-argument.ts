@@ -4,13 +4,14 @@ import type { EvalCase } from "../../../../lib/runner.ts";
 
 export const lsDirectoryArgument: EvalCase = {
 	id: "ls-directory-argument",
-	description: "A directory listing targets the requested fixture directory with ls.",
-	signals: ["required-tool", "argument-grounding", "no-unneeded-tools"],
+	description: "A directory listing reports the requested fixture contents without unnecessary mutation.",
+	signals: ["argument-grounding", "no-unneeded-tools", "tool-result-integrity"],
 	setup: () => void writeFixture("behavior-ls-args", { "one.txt": "1\n", "two.txt": "2\n" }),
 	prompt: `What files are present in ${fixtureDir("behavior-ls-args")}?`,
 	expect: {
+		containsAll: ["one.txt", "two.txt"],
 		toolsCalled: ["ls"],
-		toolsNotCalled: ["bash", "glob", "write", "edit"],
+		toolsNotCalled: ["bash", "write", "edit"],
 		noErrors: true,
 		verify: ({ toolCalls }) =>
 			toolCalls.some((call) => call.name === "ls" && call.args.path === fixtureDir("behavior-ls-args"))

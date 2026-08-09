@@ -13,6 +13,7 @@ export const searchThenRead: EvalCase = {
 		}),
 	prompt: `Find rolloutFlag under ${fixturePath("behavior-search-read", "src")} and tell me which file defines it, including the relevant source context.`,
 	expect: {
+		containsAll: ["config.ts", "rolloutFlag"],
 		toolsCalled: ["grep", "read"],
 		toolSubsequence: ["grep", "read"],
 		toolsNotCalled: ["write", "edit"],
@@ -21,9 +22,10 @@ export const searchThenRead: EvalCase = {
 			const grepAt = toolCalls.findIndex((call) => call.name === "grep");
 			const readAt = toolCalls.findIndex((call) => call.name === "read");
 			if (grepAt < 0 || readAt < 0 || grepAt > readAt) return "expected grep before read";
-			return readFileSync(fixturePath("behavior-search-read", "src/config.ts"), "utf-8").includes("rolloutFlag")
+			const read = toolCalls[readAt];
+			return read?.args.path === fixturePath("behavior-search-read", "src/config.ts")
 				? undefined
-				: "fixture was unexpectedly changed";
+				: "agent did not read the file returned by the symbol search";
 		},
 	},
 };

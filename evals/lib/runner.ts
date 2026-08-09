@@ -10,11 +10,12 @@
  * - Timeout
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { AppConfig } from "../../src/core/config.ts";
 import { loadConfig } from "../../src/core/config.ts";
+import { buildReasoningParams } from "../../src/core/vendors.ts";
 import { BackgroundTaskRegistry } from "../../src/core/tools/bash-background.ts";
 import { type AgentEvent, MessageQueue, runAgentLoop } from "../../src/core/loop.ts";
 import { findPersona } from "../../src/core/personas.ts";
@@ -237,6 +238,8 @@ export interface RunnerOptions {
 	provider?: string;
 	/** Persona whose system prompt the agent runs with; defaults to "senior". */
 	persona?: string;
+	/** Explicit reasoning effort used for every model in this run. */
+	reasoningLevel?: string;
 	/**
 	 * Milliseconds to sleep between launching cases — works around token-plan
 	 * rate limits (e.g. xiaomi-mimo's 429 "Token Plan rate limit reached")
@@ -308,7 +311,8 @@ interface AttemptResult {
 const MAX_INFRA_RETRIES = 2;
 
 async function runAttempt(evalCase: EvalCase, options: RunnerOptions, config: AppConfig, model: string): Promise<AttemptResult> {
-	const cwd = evalCase.cwd ?? options.cwd;
+	const temporaryCwd = evalCase.cwd ? undefined : mkdtempSync(join(tmpdir(), `cast-eval-${evalCase.id}-`));
+	const cwd = evalCase.cwd ?? temporaryCwd!;
 	const timeout = evalCase.timeout ?? 60_000;
 	const events: AgentEvent[] = [];
 	const toolsCalled: string[] = [];
@@ -378,14 +382,11 @@ async function runAttempt(evalCase: EvalCase, options: RunnerOptions, config: Ap
 			}
 		}
 		const skillsSuffix = skills ? formatSkillsForPrompt(skills) : "";
-		const systemPrompt =
-			evalCase.mode || evalCase.withSkills
-				? buildSystemPrompt(persona, "", "", "", skillsSuffix, "", cwd, {
-						model,
-						reasoningLevel: config.reasoningLevel,
-						mode: evalCase.mode,
-					})
-				: persona.systemPrompt;
+		const systemPrompt = buildSystemPrompt(persona, "", "", "", skillsSuffix, "", cwd, {
+			model,
+			reasoningLevel: config.reasoningLevel,
+			mode: evalCase.mode,
+		});
 		await runAgentLoop([{ role: "user", content: evalCase.prompt }], {
 			config,
 			model,
@@ -486,6 +487,7 @@ async function runAttempt(evalCase: EvalCase, options: RunnerOptions, config: Ap
 	backgroundRegistry.killAll();
 	if (mcpSetup) await closeMcpConnections(mcpSetup.connections);
 	if (planState) rmSync(planState.plansDir, { recursive: true, force: true });
+	if (temporaryCwd) rmSync(temporaryCwd, { recursive: true, force: true });
 
 	clearTimeout(timer);
 	return { toolsCalled, toolCalls, trace, response, thinking, turns, errors, usage };
@@ -493,6 +495,10 @@ async function runAttempt(evalCase: EvalCase, options: RunnerOptions, config: Ap
 
 export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promise<RunResult> {
 	const config = loadConfig(loadConnection(options.provider, options));
+	if (options.reasoningLevel) {
+		config.reasoningLevel = options.reasoningLevel;
+		config.reasoningParams = buildReasoningParams(options.reasoningLevel, config.reasoningFormat);
+	}
 	const model = evalCase.model ?? options.model;
 	const startTime = Date.now();
 

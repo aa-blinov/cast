@@ -2,7 +2,8 @@
 
 `evals/benches/behavior/` measures the real agent loop against a real configured model. A case
 passes only from observable evidence: tool trace and arguments, turn grouping, filesystem state,
-or mode signal. The assistant's final prose is never a behavior oracle.
+or mode signal. When a task asks the agent to report a fact, its final answer is also checked
+against that independently observed state; prose alone never establishes correctness.
 
 Run the default suite:
 
@@ -61,7 +62,9 @@ consistent-3/3 scoring rule.
 ## What belongs where
 
 Real-agent cases cover a model's use of the shipping prompt, tools, loop and provider protocol.
-They should be small, sandboxed, and each prove one contract.
+They should be small, sandboxed, and each prove one contract. Every case runs in an isolated
+working directory unless it explicitly supplies a fixture directory, so an agent cannot obtain
+accidental evidence from the Cast checkout running the evaluator.
 
 Deterministic contracts stay in `test/`: plan terminal behavior and write gates in
 `test/loop.test.ts`/`test/plan.test.ts`, session and compaction persistence in

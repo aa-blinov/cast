@@ -86,10 +86,17 @@ function updateScoreboard(
 	isFullRun: boolean,
 	targets?: Record<string, { model: string; provider?: string }>,
 	providerUrls?: Record<string, string>,
+	reasoningLevel?: string,
 ): void {
 	const existingAll = readScoreboard();
 	for (const modelName of compare.models) {
-		const fresh = buildScoreboardEntry(compare, modelName, benchIds, providerUrls?.[targets?.[modelName]?.provider ?? ""]);
+		const fresh = buildScoreboardEntry(
+			compare,
+			modelName,
+			benchIds,
+			providerUrls?.[targets?.[modelName]?.provider ?? ""],
+			reasoningLevel,
+		);
 		// `--compare provider:model` keys `compare.models`/`compare.suites` by the
 		// raw "provider:model" entry (needed to resolve each model's connection
 		// during the run) — but the scoreboard should key by the bare model name
@@ -188,6 +195,7 @@ async function main(): Promise<void> {
 	let listBaselinesFlag = false;
 	let listBaselineHistoryName: string | undefined;
 	let scoreboardFlag = false;
+	let reasoningLevel: string | undefined;
 
 	for (let i = 0; i < args.length; i++) {
 		switch (args[i]) {
@@ -201,6 +209,9 @@ async function main(): Promise<void> {
 			case "--provider":
 			case "-p":
 				provider = args[++i];
+				break;
+			case "--reasoning":
+				reasoningLevel = args[++i];
 				break;
 			case "--persona":
 			case "-P":
@@ -426,7 +437,8 @@ async function main(): Promise<void> {
 			? envConnection
 			: settings.providerUrl && settings.apiKey
 				? { baseURL: settings.providerUrl, apiKey: settings.apiKey }
-				: undefined;
+			: undefined;
+	if (defaultConnection) providerUrls[""] = defaultConnection.baseURL;
 	if (!defaultConnection && Object.keys(providerConnections).length === 0) {
 		console.error("Eval settings need providerUrl/apiKey or at least one named provider in ~/.cast/settings.json");
 		process.exit(1);
@@ -466,7 +478,7 @@ async function main(): Promise<void> {
 		}
 
 		console.log(
-			`\nComparing ${filteredCases.length} eval cases across ${models.length} models: ${models.join(", ")}${provider ? ` (provider: ${provider})` : ""}${persona ? ` (persona: ${persona})` : ""}${repeat > 1 ? ` (${repeat} runs/case)` : ""} (concurrency: ${concurrency})\n`,
+			`\nComparing ${filteredCases.length} eval cases across ${models.length} models: ${models.join(", ")}${provider ? ` (provider: ${provider})` : ""}${persona ? ` (persona: ${persona})` : ""}${reasoningLevel ? ` (reasoning: ${reasoningLevel})` : ""}${repeat > 1 ? ` (${repeat} runs/case)` : ""} (concurrency: ${concurrency})\n`,
 		);
 
 		// repeat>1 always routes through the repeated-compare path — a
@@ -483,6 +495,7 @@ async function main(): Promise<void> {
 				provider: selectedProvider,
 				targets,
 				persona,
+				reasoningLevel,
 				repeat,
 				rateLimitDelayMs,
 			});
@@ -491,7 +504,7 @@ async function main(): Promise<void> {
 			const recordedPath = recordCompareRepeated(compare, caseFilter);
 			console.log(`Recorded: ${recordedPath}`);
 
-			if (scoreboardFlag) updateScoreboard(compare, benchIds, !caseFilter, targets, providerUrls);
+			if (scoreboardFlag) updateScoreboard(compare, benchIds, !caseFilter, targets, providerUrls, reasoningLevel);
 
 			if (saveBaselineFlag) {
 				if (models.length !== 1) {
@@ -542,6 +555,7 @@ async function main(): Promise<void> {
 			provider: selectedProvider,
 			targets,
 			persona,
+			reasoningLevel,
 			rateLimitDelayMs,
 		});
 		printCompareReport(compare);
@@ -560,7 +574,7 @@ async function main(): Promise<void> {
 	}
 
 	console.log(
-		`\nRunning ${filteredCases.length} eval cases with model: ${model}${provider ? ` (provider: ${provider})` : ""}${persona ? ` (persona: ${persona})` : ""}${repeat > 1 ? ` (${repeat} runs/case)` : ""} (concurrency: ${concurrency})\n`,
+		`\nRunning ${filteredCases.length} eval cases with model: ${model}${provider ? ` (provider: ${provider})` : ""}${persona ? ` (persona: ${persona})` : ""}${reasoningLevel ? ` (reasoning: ${reasoningLevel})` : ""}${repeat > 1 ? ` (${repeat} runs/case)` : ""} (concurrency: ${concurrency})\n`,
 	);
 
 	if (repeat > 1) {
@@ -572,6 +586,7 @@ async function main(): Promise<void> {
 			concurrency,
 			provider: selectedProvider,
 			persona,
+			reasoningLevel,
 			repeat,
 			rateLimitDelayMs,
 		});
@@ -580,7 +595,7 @@ async function main(): Promise<void> {
 		const recordedPath = recordCompareRepeated(compare, caseFilter);
 		console.log(`Recorded: ${recordedPath}`);
 
-		if (scoreboardFlag) updateScoreboard(compare, benchIds, !caseFilter, undefined, providerUrls);
+		if (scoreboardFlag) updateScoreboard(compare, benchIds, !caseFilter, undefined, providerUrls, reasoningLevel);
 
 		if (saveBaselineFlag) {
 			if (benchIds.length !== 1) {
@@ -623,6 +638,7 @@ async function main(): Promise<void> {
 		concurrency,
 		provider: selectedProvider,
 		persona,
+		reasoningLevel,
 		rateLimitDelayMs,
 	};
 
@@ -713,6 +729,7 @@ Options:
                           pass/fail + turns + duration table instead of one model's summary.
                           Use provider:model for cross-provider comparison.
   --provider, -p <name>  Provider entry from settings providers[] (default: active provider)
+  --reasoning <level>    Explicit reasoning effort for this run (recorded on the scoreboard)
   --persona, -P <name>   Persona system prompt to run with (default: senior)
   --bench, -b <id,...>   Only run these benches (default: behavior — see --list).
                           Benches live under evals/benches/<id>/; see docs/eval-methodology.md.

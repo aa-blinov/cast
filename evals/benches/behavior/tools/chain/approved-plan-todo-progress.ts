@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { fixtureDir, fixturePath, writeFixture } from "../../../../lib/fixtures.ts";
 import type { EvalCase } from "../../../../lib/runner.ts";
 
@@ -17,7 +18,7 @@ export const approvedPlanTodoProgress: EvalCase = {
 	initialTodos: [{ content: STEP, status: "pending", priority: "medium", planStep: STEP }],
 	prompt: "Continue the approved plan. Complete its only step and verify it before reporting completion.",
 	expect: {
-		toolsCalled: ["todo_write", "write", "bash"],
+		toolsCalled: ["todo_write", "write", "read"],
 		noErrors: true,
 		verify: ({ toolCalls }) => {
 			const completion = toolCalls
@@ -26,7 +27,9 @@ export const approvedPlanTodoProgress: EvalCase = {
 			if (!completion?.includes('"status":"completed"') || !completion.includes('"planStep"')) {
 				return "the verified plan step was not retained as a completed linked todo";
 			}
-			return undefined;
+			return readFileSync(NOTE_PATH, "utf-8") === "READY"
+				? undefined
+				: "the approved plan did not write the requested final state";
 		},
 	},
 };

@@ -22,7 +22,7 @@ validity, baselines, and trace-based debugging.
 ## What the scoreboard is for
 
 The Model Scoreboard is a certification artifact for selecting a model **for Cast**, not a general
-leaderboard of model intelligence or coding quality. It answers: with this exact system prompt,
+leaderboard of model intelligence or coding quality. It answers: with this exact production system prompt,
 tool surface, agent loop, and provider protocol, does a model reliably choose grounded tool calls,
 complete stateful workflows, and respect the harness lifecycle?
 

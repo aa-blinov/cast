@@ -21,9 +21,17 @@ export const todoWriteStructuredList: EvalCase = {
 		verify: ({ toolCalls }) => {
 			const call = toolCalls.find((item) => item.name === "todo_write");
 			const todos = call?.args.todos;
-			return Array.isArray(todos) && todos.length >= 3 && todos.every((todo) => typeof todo === "object")
+			return Array.isArray(todos) &&
+				todos.length >= 3 &&
+				todos.every(
+					(todo) =>
+						typeof todo === "object" &&
+						todo !== null &&
+						typeof todo.content === "string" &&
+						["pending", "in_progress", "completed"].includes(String(todo.status)),
+				)
 				? undefined
-				: "todo_write did not receive a complete structured list";
+				: "todo_write did not receive a complete list with valid todo statuses";
 		},
 	},
 };
