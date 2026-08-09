@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { parseQuestionToolResult } from "../src/ui/useAgentSession.ts";
+import { describe, expect, it, vi } from "vitest";
+import { loadDaemonPendingState, parseDaemonPendingState, parseQuestionToolResult } from "../src/ui/useAgentSession.ts";
 
 describe("parseQuestionToolResult", () => {
 	const validContent = JSON.stringify({
@@ -42,5 +42,52 @@ describe("parseQuestionToolResult", () => {
 
 	it("returns undefined for an empty questions array", () => {
 		expect(parseQuestionToolResult(JSON.stringify({ question: true, questions: [] }))).toBeUndefined();
+	});
+});
+
+describe("parseDaemonPendingState", () => {
+	it("restores persisted questions and plan approvals after reconnect", () => {
+		expect(
+			parseDaemonPendingState({
+				question: { questions: [{ question: "Choose database", options: [{ value: "sqlite", label: "SQLite" }] }] },
+				planTransition: { kind: "done" },
+				status: "idle",
+			}),
+		).toEqual({
+			question: { questions: [{ question: "Choose database", options: [{ value: "sqlite", label: "SQLite" }] }] },
+			planTransition: { kind: "done" },
+			status: "idle",
+		});
+	});
+
+	it("fetches persisted decisions from the daemon when no SSE event was observed", async () => {
+		const fetchMock = vi.fn(
+			async () =>
+				new Response(
+					JSON.stringify({
+						question: {
+							questions: [{ question: "Choose database", options: [{ value: "sqlite", label: "SQLite" }] }],
+						},
+						planTransition: { kind: "done" },
+						status: "idle",
+					}),
+				),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+		try {
+			await expect(
+				loadDaemonPendingState({ baseUrl: "http://daemon.test", token: "test-token" }, "session-1"),
+			).resolves.toEqual({
+				question: { questions: [{ question: "Choose database", options: [{ value: "sqlite", label: "SQLite" }] }] },
+				planTransition: { kind: "done" },
+				status: "idle",
+			});
+			expect(fetchMock).toHaveBeenCalledWith(
+				"http://daemon.test/api/sessions/session-1",
+				expect.objectContaining({ headers: expect.objectContaining({ Authorization: "Bearer test-token" }) }),
+			);
+		} finally {
+			vi.unstubAllGlobals();
+		}
 	});
 });

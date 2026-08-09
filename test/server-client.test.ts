@@ -1,6 +1,9 @@
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WebEvent } from "../src/server/bridge.ts";
 import {
 	createServerSession,
@@ -116,5 +119,31 @@ describe("server client", () => {
 		expect(id).toBe("sess-1");
 		expect(resumed).toBe(false);
 		expect(received[0]).toMatchObject({ method: "POST", path: "/api/sessions" });
+	});
+});
+
+describe("ensureServerClient", () => {
+	let realHome: string | undefined;
+	let fakeHome: string;
+
+	beforeEach(() => {
+		realHome = process.env.HOME;
+		fakeHome = mkdtempSync(join(tmpdir(), "cast-server-client-test-"));
+		process.env.HOME = fakeHome;
+		mkdirSync(join(fakeHome, ".cast"), { recursive: true });
+		vi.resetModules();
+	});
+
+	afterEach(() => {
+		process.env.HOME = realHome;
+		rmSync(fakeHome, { recursive: true, force: true });
+	});
+
+	it("refuses a live daemon whose state predates protocol negotiation", async () => {
+		const { writeServerState } = await import("../src/server/daemon-state.ts");
+		writeServerState({ pid: process.pid, port: 1337, host: "127.0.0.1", startedAt: "now", foreground: false });
+
+		const { ensureServerClient } = await import("../src/server/client.ts");
+		await expect(ensureServerClient()).rejects.toThrow("Daemon protocol mismatch");
 	});
 });

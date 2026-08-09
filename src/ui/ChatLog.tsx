@@ -401,11 +401,9 @@ export function ChatLog({
 
 	if (streaming) {
 		const streamingParts: JSX.Element[] = [];
-		if (streaming.blocks.length === 0) {
-			streamingParts.push(<Spinner key="wait" />);
-		}
 		const clamped = clampStreamingBlocks(streaming.blocks, availableRows, cols, stickyOverflowRef.current);
-		for (const { block, truncated, index } of clamped) {
+		const visibleBlocks = showReasoning ? clamped : clamped.filter(({ block }) => block.kind !== "thinking");
+		for (const { block, truncated, index } of visibleBlocks) {
 			streamingParts.push(
 				<BlockView
 					key={blockKey(block, index)}
@@ -416,6 +414,13 @@ export function ChatLog({
 				/>,
 			);
 		}
+		// A completed text block is not the end of a turn: the model may still
+		// be deciding on its next tool call. Keep one activity signal until a
+		// running tool can speak for itself, or the turn actually ends.
+		const hasVisibleRunningTool = visibleBlocks.some(
+			({ block }) => block.kind === "tool" && block.call.status === "running",
+		);
+		if (!hasVisibleRunningTool) streamingParts.push(<Spinner key="wait" />);
 		liveParts.push(
 			<Box key="streaming" flexDirection="column">
 				{streamingParts}

@@ -12,7 +12,7 @@ import { hasHooks, runHooksForEvent } from "../core/hooks.ts";
 import { describeTurnError, isRetryableStreamError, stripHermesToolCalls } from "../core/llm.ts";
 import { type AgentEvent, runAgentLoop } from "../core/loop.ts";
 import { formatMcpForPrompt, type McpSetupResult } from "../core/mcp.ts";
-import { type PlanQuestion, readActivePlan } from "../core/plan.ts";
+import { type PlanQuestion, type PlanTransition, readActivePlan } from "../core/plan.ts";
 import { resolveHooksForCwd } from "../core/project.ts";
 import type { AgentRunner } from "../core/runner.ts";
 import {
@@ -37,6 +37,7 @@ import {
 	abortServerSession,
 	answerServerQuestion,
 	followUpServerSession,
+	getServerSession,
 	resolveServerPlanTransition,
 	type ServerClient,
 	serverFetch,
@@ -163,6 +164,33 @@ export function parseQuestionToolResult(content: string): PlanQuestion | undefin
 	return undefined;
 }
 
+/** Extract persisted decision state from the daemon's session response. */
+export function parseDaemonPendingState(state: Record<string, unknown>): {
+	question: PlanQuestion | undefined;
+	planTransition: PlanTransition | undefined;
+	status: AgentStatus | undefined;
+} {
+	const question = state.question;
+	const planTransition = state.planTransition;
+	const status = state.status;
+	return {
+		question:
+			question && typeof question === "object" && Array.isArray((question as { questions?: unknown }).questions)
+				? (question as PlanQuestion)
+				: undefined,
+		planTransition:
+			planTransition && typeof planTransition === "object" && (planTransition as { kind?: unknown }).kind === "done"
+				? { kind: "done" }
+				: undefined,
+		status: status === "idle" || status === "running" || status === "error" ? status : undefined,
+	};
+}
+
+/** Fetch the daemon-owned decision state that predates this client's SSE stream. */
+export async function loadDaemonPendingState(client: ServerClient, sessionId: string) {
+	return parseDaemonPendingState(await getServerSession(client, sessionId));
+}
+
 /**
  * Commit a turn-ending error to the transcript and clear the live sticky error.
  * The loop fires `error` (which stashes the message) then `end` reason "error";
@@ -241,6 +269,8 @@ export interface UseAgentSession {
 	 * event and is stashed here for the App's question picker.
 	 */
 	pendingQuestion: PlanQuestion | undefined;
+	/** Pending plan approval restored from the daemon on reconnect. */
+	pendingPlanTransition: PlanTransition | undefined;
 	/** Submit answers to the daemon's pending question (thin-client mode). */
 	answerQuestion: (values: string[]) => void;
 	/** Resolve the daemon's pending plan approval (thin-client mode). */
@@ -541,6 +571,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	// tool_end event (see the SSE handler below). The App opens the picker off
 	// this instead of the local planState, which the daemon owns in client mode.
 	const [pendingQuestion, setPendingQuestion] = useState<PlanQuestion | undefined>(undefined);
+	const [pendingPlanTransition, setPendingPlanTransition] = useState<PlanTransition | undefined>(undefined);
 	const [showReasoning, setShowReasoning] = useState(() => loadSettings().showReasoning ?? false);
 	const showReasoningRef = useRef(loadSettings().showReasoning ?? false);
 	const toggleReasoning = useCallback((): boolean => {
@@ -1230,6 +1261,25 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		});
 	}, [submit, backgroundTasks]);
 
+	// SSE only carries events emitted after this client attaches. Rehydrate
+	// decisions already persisted by the daemon so reconnecting does not lose
+	// a question or plan-approval picker that was waiting before the TUI opened.
+	useEffect(() => {
+		if (!isClient || !serverClient) return;
+		let disposed = false;
+		void loadDaemonPendingState(serverClient, session.id)
+			.then((pending) => {
+				if (disposed) return;
+				setPendingQuestion(pending.question);
+				setPendingPlanTransition(pending.planTransition);
+				if (pending.status) setStatus(pending.status);
+			})
+			.catch(() => {});
+		return () => {
+			disposed = true;
+		};
+	}, [isClient, serverClient, session.id]);
+
 	// Thin-client SSE: subscribe to the daemon's per-session event stream and
 	// drive the same React state the local loop would. The daemon is the single
 	// writer, so this is the only place events arrive in client mode. Mirrors
@@ -1264,6 +1314,10 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					} else {
 						setStreamingActive(false);
 					}
+					break;
+				case "decision_state":
+					setPendingQuestion(event.question);
+					setPendingPlanTransition(event.planTransition);
 					break;
 				case "thinking":
 					updateStreaming((s) => (s ? reduceStreamEvent(s, { type: "thinking", text: event.text }) : s));
@@ -1431,6 +1485,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	const approvePlan = useCallback(() => {
 		if (isClient && effectiveDaemonUrl) {
 			if (serverClient) void resolveServerPlanTransition(serverClient, session.id).catch(() => {});
+			setPendingPlanTransition(undefined);
 		}
 	}, [isClient, effectiveDaemonUrl, session.id, serverClient]);
 
@@ -1529,6 +1584,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		resetQueue,
 		addDisplayMessage,
 		pendingQuestion,
+		pendingPlanTransition,
 		answerQuestion,
 		approvePlan,
 		cleanDaemonContext,

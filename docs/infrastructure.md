@@ -34,7 +34,7 @@ Before this model (pre-0.12.29) the TUI ran `runAgentLoop` **locally** and the w
 
 The TUI (`cast`, no subcommand) no longer runs the loop locally. On launch, `src/index.ts` calls `ensureDaemon()`:
 
-- if a live daemon already exists (`~/.cast/server.json` describes an alive PID), it reuses it and reads the port + token from that state file;
+- if a live daemon already exists (`~/.cast/server.json` describes an alive PID) with a compatible daemon protocol, it reuses it and reads the port + token from that state file;
 - otherwise it spawns the internal daemon on loopback, waits for the child to actually bind (the state file is written only once the server is listening), then reads the port + token.
 
 The TUI then:
@@ -54,6 +54,7 @@ The original client. Connects over HTTP + SSE, logs in with the auto-generated p
 - **Start:** `cast` (TUI) auto-spawns the daemon if none is live; `cast web start` (or just `cast web`) starts the browser surface explicitly. A detached daemon keeps running after the TUI exits, so the browser can still connect.
 - **Stop:** `cast web stop` sends SIGTERM (escalating to SIGKILL after 3s), drains active turns, and clears the state file. Stopping the daemon also disconnects the TUI's SSE stream — the TUI sees `[terminated]` and can reconnect on next submit.
 - **Stale state:** every reader (`status`, the TUI's `ensureDaemon`, the server's auth check) treats a PID whose process is no longer alive as stale and self-heals by clearing `~/.cast/server.json`.
+- **Protocol compatibility:** TUI and headless clients compare the daemon protocol recorded in `server.json` before connecting. A mismatch (including a legacy daemon without the field) leaves the daemon untouched and asks the user to run `cast server stop` before starting Cast again.
 - **`CAST_NO_DAEMON=1`:** the TUI skips `ensureDaemon()` and runs `runAgentLoop` locally — the pre-0.12.29 path, used for CI and `cast run --interactive`.
 
 For development, `npm run dev:web` starts the browser surface in the foreground; append server options after `--`.

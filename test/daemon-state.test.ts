@@ -38,8 +38,11 @@ describe("daemon-state", () => {
 	});
 
 	it("round-trips a written state through readServerState", async () => {
-		const { writeServerState, readServerState } = await import("../src/server/daemon-state.ts");
+		const { DAEMON_PROTOCOL_VERSION, writeServerState, readServerState } = await import(
+			"../src/server/daemon-state.ts"
+		);
 		const state = {
+			protocolVersion: DAEMON_PROTOCOL_VERSION,
 			pid: process.pid,
 			port: 1337,
 			host: "127.0.0.1",
@@ -48,6 +51,17 @@ describe("daemon-state", () => {
 		};
 		writeServerState(state);
 		expect(readServerState()).toEqual(state);
+	});
+
+	it("rejects legacy and newer daemon protocols with a restart instruction", async () => {
+		const { DAEMON_PROTOCOL_VERSION, daemonProtocolMismatchMessage, isDaemonProtocolCompatible } = await import(
+			"../src/server/daemon-state.ts"
+		);
+		const base = { pid: 4242, port: 1337, host: "127.0.0.1", startedAt: "now", foreground: false };
+		expect(isDaemonProtocolCompatible({ ...base, protocolVersion: DAEMON_PROTOCOL_VERSION })).toBe(true);
+		expect(isDaemonProtocolCompatible(base)).toBe(false);
+		expect(isDaemonProtocolCompatible({ ...base, protocolVersion: DAEMON_PROTOCOL_VERSION + 1 })).toBe(false);
+		expect(daemonProtocolMismatchMessage(base)).toContain("cast server stop");
 	});
 
 	it("self-heals a corrupt state file by treating it as absent instead of throwing", async () => {

@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const applyMcpResultSpy = vi.fn();
 const closeMcpConnectionsSpy = vi.fn();
+const writeServerStateSpy = vi.fn();
 
 vi.mock("../src/core/mcp.ts", () => ({
 	closeMcpConnections: closeMcpConnectionsSpy,
@@ -47,7 +48,8 @@ vi.mock("../src/server/bridge.ts", () => ({
 }));
 
 vi.mock("../src/server/daemon-state.ts", () => ({
-	writeServerState: vi.fn(),
+	DAEMON_PROTOCOL_VERSION: 1,
+	writeServerState: writeServerStateSpy,
 	clearServerState: vi.fn(),
 }));
 
@@ -87,6 +89,7 @@ describe("runServerMain — deferred MCP connect vs. shutdown race", () => {
 
 		expect(capturedOnListening).toBeTruthy();
 		capturedOnListening!();
+		expect(writeServerStateSpy).toHaveBeenCalledWith(expect.objectContaining({ protocolVersion: 1 }));
 
 		resolveConnect({ connections: ["conn-a"] });
 		await Promise.resolve();

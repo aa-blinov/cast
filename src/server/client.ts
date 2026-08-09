@@ -17,7 +17,14 @@ import { fileURLToPath } from "node:url";
 // provides a real global EventSource, so this import is Node-only and safe in
 // both runtimes.
 import { EventSource } from "undici";
-import { acquireStartLock, readLiveServerState, releaseStartLock, type ServerDaemonState } from "./daemon-state.ts";
+import {
+	acquireStartLock,
+	DaemonProtocolMismatchError,
+	isDaemonProtocolCompatible,
+	readLiveServerState,
+	releaseStartLock,
+	type ServerDaemonState,
+} from "./daemon-state.ts";
 
 export interface ServerClient {
 	baseUrl: string;
@@ -34,29 +41,34 @@ export interface ServerClient {
 export async function ensureServerClient(): Promise<ServerClient | undefined> {
 	if (process.env.CAST_NO_DAEMON === "1") return undefined;
 	try {
+		const clientFor = (state: ServerDaemonState | undefined): ServerClient | undefined => {
+			if (!state) return undefined;
+			if (!isDaemonProtocolCompatible(state)) throw new DaemonProtocolMismatchError(state);
+			return { baseUrl: `http://${state.host}:${state.port}`, token: state.token };
+		};
 		// Same daemon-start race protection as index.ts's ensureDaemon: an
 		// exclusive lock serializes the spawn so a concurrent TUI launch can't
 		// stack a second daemon while this one's is still recording state.
 		const waitForDaemon = async (attempt: number): Promise<ServerClient | undefined> => {
 			if (attempt >= 100) return undefined;
 			const existing = readLiveServerState();
-			if (existing) return { baseUrl: `http://${existing.host}:${existing.port}`, token: existing.token };
+			if (existing) return clientFor(existing);
 			if (!acquireStartLock()) {
 				await new Promise((r) => setTimeout(r, 100));
 				return waitForDaemon(attempt + 1);
 			}
 			try {
 				const now = readLiveServerState();
-				if (now) return { baseUrl: `http://${now.host}:${now.port}`, token: now.token };
+				if (now) return clientFor(now);
 				const state = await spawnDetachedDaemon();
-				if (!state) return undefined;
-				return { baseUrl: `http://${state.host}:${state.port}`, token: state.token };
+				return clientFor(state);
 			} finally {
 				releaseStartLock();
 			}
 		};
 		return await waitForDaemon(0);
-	} catch {
+	} catch (error) {
+		if (error instanceof DaemonProtocolMismatchError) throw error;
 		return undefined;
 	}
 }
