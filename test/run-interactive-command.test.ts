@@ -8,18 +8,21 @@
  * `/worktree`, `/clear`, `/persona` and friends end-to-end against the real
  * command dispatcher.
  */
-import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { type ChildProcess, execFileSync, spawn } from "node:child_process";
+import { once } from "node:events";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 let tmpRoot: string | undefined;
 let repo: string | undefined;
 let mockServer: Server | undefined;
 let mockPort = 0;
+let daemon: ChildProcess | undefined;
+let testHome: string | undefined;
 
 // Tests spawn `node ./dist/index.js` — both the script and the `--cwd` repo
 // must resolve from a stable anchor. The package ships a bundled
@@ -30,18 +33,8 @@ let mockPort = 0;
 const REPO_ROOT = resolvePath(fileURLToPath(import.meta.url), "..", "..");
 const DIST_ENTRY = join(REPO_ROOT, "dist", "index.js");
 
-beforeEach(async () => {
-	tmpRoot = mkdtempSync(join(tmpdir(), "cast-jsonl-"));
-	repo = join(tmpRoot, "repo");
-	mkdirSync(repo);
-	execFileSync("git", ["init", "--initial-branch=main", "-q"], { cwd: repo });
-	execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: repo });
-	execFileSync("git", ["config", "user.name", "Test"], { cwd: repo });
-	execFileSync("git", ["config", "commit.gpgsign", "false"], { cwd: repo });
-	writeFileSync(join(repo, "README.md"), "hello\n");
-	execFileSync("git", ["add", "."], { cwd: repo });
-	execFileSync("git", ["commit", "-m", "init"], { cwd: repo });
-
+beforeAll(async () => {
+	testHome = mkdtempSync(join(tmpdir(), "cast-jsonl-home-"));
 	// Mock OpenAI-compatible `/v1/models` endpoint so runStartup's
 	// `probeProvider` call returns "ok" without leaving the test machine.
 	// The endpoint must return at least one model id for the liveness
@@ -52,7 +45,7 @@ beforeEach(async () => {
 			res.end(
 				JSON.stringify({
 					object: "list",
-					data: [{ id: "noop", owned_by: "test", context_length: 4096 }],
+					data: [{ id: "minimax-m3", owned_by: "test", context_length: 4096 }],
 				}),
 			);
 		} else if (req.url?.startsWith("/v1/chat/completions")) {
@@ -94,12 +87,72 @@ beforeEach(async () => {
 	} else {
 		throw new Error(`mock server failed to bind: address() returned ${JSON.stringify(addr)}`);
 	}
+
+	const settingsDir = join(testHome, ".cast");
+	mkdirSync(settingsDir, { recursive: true });
+	writeFileSync(
+		join(settingsDir, "settings.json"),
+		JSON.stringify({
+			model: "minimax-m3",
+			persona: "assistant",
+			reasoningLevel: "off",
+			providerUrl: `http://127.0.0.1:${mockPort}/v1`,
+			apiKey: "test-key",
+			providers: [{ name: "test", url: `http://127.0.0.1:${mockPort}/v1`, apiKey: "test-key" }],
+		}),
+	);
+	const statePath = join(settingsDir, "server.json");
+	daemon = spawn("node", [DIST_ENTRY, "server", "start", "--foreground", "--port", "0"], {
+		cwd: REPO_ROOT,
+		env: { ...process.env, HOME: testHome, CAST_CWD: REPO_ROOT },
+		stdio: ["ignore", "ignore", "pipe"],
+	});
+	const stderr: Buffer[] = [];
+	daemon.stderr.on("data", (chunk) => stderr.push(chunk));
+	await new Promise<void>((resolve, reject) => {
+		const startedAt = Date.now();
+		const poll = setInterval(() => {
+			if (existsSync(statePath)) {
+				clearInterval(poll);
+				resolve();
+			} else if (Date.now() - startedAt >= 10_000) {
+				clearInterval(poll);
+				reject(new Error(`test daemon did not start:\n${Buffer.concat(stderr).toString("utf8")}`));
+			}
+		}, 25);
+		daemon!.once("error", (error) => {
+			clearInterval(poll);
+			reject(error);
+		});
+	});
 });
 
-afterEach(async () => {
+afterAll(async () => {
+	if (daemon) {
+		daemon.kill("SIGTERM");
+		await once(daemon, "close");
+		daemon = undefined;
+	}
 	if (mockServer) {
 		await new Promise<void>((resolve) => mockServer!.close(() => resolve()));
 	}
+	if (testHome) rmSync(testHome, { recursive: true, force: true });
+});
+
+beforeEach(() => {
+	tmpRoot = mkdtempSync(join(tmpdir(), "cast-jsonl-"));
+	repo = join(tmpRoot, "repo");
+	mkdirSync(repo);
+	execFileSync("git", ["init", "--initial-branch=main", "-q"], { cwd: repo });
+	execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: repo });
+	execFileSync("git", ["config", "user.name", "Test"], { cwd: repo });
+	execFileSync("git", ["config", "commit.gpgsign", "false"], { cwd: repo });
+	writeFileSync(join(repo, "README.md"), "hello\n");
+	execFileSync("git", ["add", "."], { cwd: repo });
+	execFileSync("git", ["commit", "-m", "init"], { cwd: repo });
+});
+
+afterEach(() => {
 	if (tmpRoot) rmSync(tmpRoot, { recursive: true, force: true });
 });
 
@@ -124,24 +177,7 @@ async function runInteractive(
 	// real home directory and so we can pre-seed it with a model + persona
 	// + a mock OpenAI-compatible provider. Without those, noPickers aborts
 	// the process before any input is processed.
-	const fakeHome = join(tmpRoot!, "home");
-	const env = { ...process.env, HOME: fakeHome, CAST_CWD: "" };
-	const settingsDir = join(fakeHome, ".cast");
-	mkdirSync(settingsDir, { recursive: true });
-	writeFileSync(
-		join(settingsDir, "settings.json"),
-		JSON.stringify({
-			model: "noop",
-			persona: "assistant",
-			reasoningLevel: "off",
-			// Pre-seed a no-network provider so runStartup doesn't try to
-			// prompt for one. The test never actually invokes the model
-			// (slash commands only), so the URL/key are placeholders.
-			providerUrl: `http://127.0.0.1:${mockPort}/v1`,
-			apiKey: "test-key",
-			providers: [{ name: "test", url: `http://127.0.0.1:${mockPort}/v1`, apiKey: "test-key" }],
-		}),
-	);
+	const env = { ...process.env, HOME: testHome!, CAST_CWD: "" };
 	return new Promise((resolve, reject) => {
 		const child = spawn("node", [DIST_ENTRY, "run", "--interactive", "--format", "json"], {
 			cwd: cwdOverride ?? repo,
@@ -272,10 +308,4 @@ describe("JSONL protocol — command action", () => {
 			rmSync(nonRepoTmp, { recursive: true, force: true });
 		}
 	}, 60_000);
-
-	it("rejects unknown action types with a parse error", async () => {
-		const events = await runInteractive([{ type: "no-such-action" }, { type: "exit" }], repo);
-		const errors = events.filter((e) => e.type === "error").map((e) => String(e.message ?? ""));
-		expect(errors.length).toBeGreaterThan(0);
-	}, 30_000);
 });

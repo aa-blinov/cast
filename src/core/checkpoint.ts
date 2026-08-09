@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { findCanonicalGitRoot } from "./worktree.ts";
 
@@ -22,11 +23,11 @@ const GIT_NO_PROMPT_ENV = {
 	GIT_ASKPASS: "",
 } as const;
 
-function runGit(cwd: string, args: string[]): string | null {
+function runGit(cwd: string, args: string[], env?: NodeJS.ProcessEnv): string | null {
 	try {
 		const out = execFileSync("git", args, {
 			cwd,
-			env: { ...process.env, ...GIT_NO_PROMPT_ENV },
+			env: { ...process.env, ...GIT_NO_PROMPT_ENV, ...env },
 			encoding: "utf8",
 			stdio: ["ignore", "pipe", "pipe"],
 		});
@@ -50,24 +51,23 @@ export function createCheckpoint(cwd: string, forceShadow = false): TurnCheckpoi
 		!forceShadow && Boolean(topLevel && runGit(cwd, ["rev-parse", "--is-inside-work-tree"]) === "true");
 
 	if (isGitRepo && repoRoot) {
-		// Stage all changes (including untracked files) to index temporarily for write-tree
-		runGit(cwd, ["add", "-A"]);
-		const treeSha = runGit(cwd, ["write-tree"]);
-		if (treeSha) {
-			const headSha = runGit(cwd, ["rev-parse", "HEAD"]) ?? "";
-			const commitArgs = ["commit-tree", treeSha, "-m", `cast-checkpoint-${id}`];
-			if (headSha) {
-				commitArgs.push("-p", headSha);
+		// Build the tree in a disposable index. `git add -A` against the user's
+		// real index would leave every pre-existing change staged just by asking
+		// cast to remember an undo point.
+		const indexDir = mkdtempSync(join(tmpdir(), "cast-checkpoint-"));
+		try {
+			const indexEnv = { GIT_INDEX_FILE: join(indexDir, "index") };
+			runGit(cwd, ["add", "-A"], indexEnv);
+			const treeSha = runGit(cwd, ["write-tree"], indexEnv);
+			if (treeSha) {
+				const headSha = runGit(cwd, ["rev-parse", "HEAD"]) ?? "";
+				const commitArgs = ["commit-tree", treeSha, "-m", `cast-checkpoint-${id}`];
+				if (headSha) commitArgs.push("-p", headSha);
+				const commitSha = runGit(cwd, commitArgs);
+				if (commitSha) return { id, timestamp, cwd, gitCommitSha: commitSha };
 			}
-			const commitSha = runGit(cwd, commitArgs);
-			if (commitSha) {
-				return {
-					id,
-					timestamp,
-					cwd,
-					gitCommitSha: commitSha,
-				};
-			}
+		} finally {
+			rmSync(indexDir, { recursive: true, force: true });
 		}
 	}
 
@@ -110,12 +110,14 @@ export function restoreCheckpoint(checkpoint: TurnCheckpoint): { ok: boolean; me
 
 	if (checkpoint.gitCommitSha && repoRoot) {
 		try {
-			execFileSync("git", ["checkout", checkpoint.gitCommitSha, "--", "."], {
+			// Remove post-checkpoint untracked files before restoring the tree.
+			// The restore then recreates files that were untracked at the checkpoint.
+			execFileSync("git", ["clean", "-fd"], {
 				cwd: checkpoint.cwd,
 				env: { ...process.env, ...GIT_NO_PROMPT_ENV },
 				stdio: ["ignore", "pipe", "pipe"],
 			});
-			execFileSync("git", ["clean", "-fd"], {
+			execFileSync("git", ["restore", `--source=${checkpoint.gitCommitSha}`, "--worktree", "--", "."], {
 				cwd: checkpoint.cwd,
 				env: { ...process.env, ...GIT_NO_PROMPT_ENV },
 				stdio: ["ignore", "pipe", "pipe"],

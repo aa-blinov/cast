@@ -636,6 +636,8 @@ export interface LoopConfig {
 	contextFiles?: string[];
 	/** Configured SSH hosts — when non-empty, the `ssh` tool is registered. */
 	sshHosts?: SshHost[];
+	/** Called immediately before a built-in write/edit mutates a file. */
+	beforeFileWrite?: (path: string) => void;
 	/**
 	 * Background bash task support (`run_in_background` on `bash`, plus
 	 * `bash_output`/`bash_kill`) — web/TUI only. Deliberately omitted for
@@ -927,6 +929,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		loopConfig.sshHosts,
 		loopConfig.backgroundBash,
 		allowedSkills ? { skills: allowedSkills, sessionId: loopConfig.sessionId } : undefined,
+		loopConfig.beforeFileWrite,
 	);
 	const executeTool = async (
 		name: string,

@@ -55,6 +55,7 @@ export const BLOCKING_COMMANDS = new Set([
 	"/skills",
 	"/ssh",
 	"/subagent-model",
+	"/undo",
 ]);
 
 export const SLASH_COMMANDS: Array<{
@@ -132,6 +133,7 @@ export const SLASH_COMMANDS: Array<{
 	},
 	{ name: "/theme", description: "Show or change color theme", takesArgs: true, blocking: false, hidden: true },
 	{ name: "/usage", description: "Show token and cost usage", blocking: false, hidden: true },
+	{ name: "/undo", description: "Undo the last turn and restore its files", blocking: true },
 	{
 		name: "/web",
 		description: "Toggle web tools (web_search, web_fetch)",

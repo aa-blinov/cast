@@ -5,9 +5,10 @@
 ```
 cast [options] [prompt]
 cast run [options] <message>    Non-interactive mode
-cast run --interactive [options] Persistent JSONL session
-    cast server [start|stop|status]    Web UI mode
-    cast upgrade [version] [--force]  Self-update
+cast run --interactive [options]      Persistent JSONL session
+cast web [start|stop|status]          Browser-based control room
+cast server [start|stop|status]       Alias for cast web
+cast upgrade [version] [--force]      Self-update
 ```
 
 TUI mode (Ink-based, multiline paste, image attachments) is the default. Non-TTY contexts (pipes, CI) are not supported — use `cast run` for scripting.
@@ -49,20 +50,22 @@ cast upgrade 0.3.0        # Upgrade to specific version
 cast upgrade --force      # Reinstall even if same version
 ```
 
-### `cast server`
+### `cast web`
 
-Web UI mode: launches a browser-based control room for managing background agents. The `cast server` daemon is the single writer for every session — both the browser and the TUI are thin clients of it over HTTP + SSE, so a session opened in either surface streams live (tokens, tool calls, status) to both. The TUI auto-spawns this daemon on launch unless one is already running or `CAST_NO_DAEMON=1` is set.
+Web UI mode: launches a browser-based control room for managing background agents. The internal `cast server` daemon is the single writer for every session — both the browser and the TUI are thin clients of it over HTTP + SSE, so a session opened in either surface streams live (tokens, tool calls, status) to both. The TUI auto-spawns this daemon on launch unless one is already running or `CAST_NO_DAEMON=1` is set. `cast server` is a supported alias for scripts and integrations.
 
 ```bash
-cast server                 # Start in background (daemon)
-cast server start           # Same as above
-cast server stop            # Stop the background server (SIGTERM → SIGKILL after 3s)
-cast server status          # Check if running (auto-heals stale state)
-cast server --foreground    # Run inline (for dev/debug)
-cast server --port 8080     # Custom port (default: 1337, or set CAST_SERVER_PORT)
-cast server --host 0.0.0.0  # Bind to all interfaces (reachable from network)
-cast server --public        # Alias for --host 0.0.0.0
+cast web                 # Start in background (daemon)
+cast web start           # Same as above
+cast web stop            # Stop the background server (SIGTERM → SIGKILL after 3s)
+cast web status          # Check if running (auto-heals stale state)
+cast web --foreground    # Run inline (for dev/debug)
+cast web --port 8080     # Custom port (default: 1337, or set CAST_SERVER_PORT)
+cast web --host 0.0.0.0  # Bind to all interfaces (reachable from network)
+cast web --public        # Alias for --host 0.0.0.0
 ```
+
+For local development, `npm run dev:web` runs the Web UI in the foreground. Pass server options after `--`, for example `npm run dev:web -- --port 8080`.
 
 First run generates a password, printed to the terminal and saved in `~/.cast/settings.json`. Username is always `cast`.
 
@@ -95,7 +98,7 @@ On Windows, prints the install command to run in a new terminal (can't self-repl
 |------|-------|-------------|
 | `--model <model>` | `-m` | Model name (validated on startup against the provider) |
 | `--reasoning <level>` | `-r` | Reasoning level: `off`, `low`, `medium`, `high`, `max` |
-| `--persona <name>` | `-p` | Persona to use (see `/personas` for the list) |
+| `--persona <name>` | `-p` | Persona to use (use `/persona` to choose) |
 
 ```bash
 cast -m qwen/qwen3-235b-a22b -r high "refactor this function"

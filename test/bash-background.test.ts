@@ -69,7 +69,7 @@ describe("BackgroundTaskRegistry", () => {
 			const { deps } = makeDeps(true);
 			deps.registry = registry;
 			const task = registry.start("echo done", process.cwd(), mockConfig, 10, deps);
-			await new Promise((r) => setTimeout(r, 300));
+			await vi.waitFor(() => expect(task.status).toBe("exited"));
 
 			expect(registry.kill(task.id)).toBe("already-done");
 		});

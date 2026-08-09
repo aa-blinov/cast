@@ -374,6 +374,21 @@ describe("web bridge", () => {
 		expect(update?.session.model).toBe("gpt-5");
 	});
 
+	it("/reasoning-format persists the selected format for the active provider", async () => {
+		const { loadSettings, updateSettings } = await import("../src/core/settings.ts");
+		const config = { ...testConfig, baseURL: "https://provider.example/v1", apiKey: "provider-key" };
+		updateSettings({
+			providers: [{ name: "provider", url: config.baseURL, apiKey: config.apiKey, reasoningFormat: "auto" }],
+		});
+		const bridge = createServerBridge(makeResult({ config }));
+		const ws = bridge.createSession();
+
+		const res = await bridge.executeCommand(ws.id, "/reasoning-format generic");
+
+		expect(res).toEqual({ ok: true, result: { reasoningFormat: "generic" } });
+		expect(loadSettings().providers?.[0]?.reasoningFormat).toBe("generic");
+	});
+
 	it("shareSession generates a token and getSharedSession returns a read-only projection by that token", () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
@@ -643,8 +658,7 @@ describe("web bridge", () => {
 		expect(ws.status).toBe("running");
 		expect(runAgentLoop).not.toHaveBeenCalled();
 		expect(ws.runner.steeringQueue.hasItems()).toBe(true);
-		await new Promise((resolve) => setTimeout(resolve, 100));
-		expect(runAgentLoop).toHaveBeenCalledTimes(1);
+		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalledTimes(1));
 	});
 
 	it("submit with images builds a [text, image_url...] content array, always including the text part", () => {

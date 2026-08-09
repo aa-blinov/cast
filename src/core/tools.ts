@@ -586,6 +586,7 @@ export function createToolExecutor(
 	sshHosts?: SshHost[],
 	backgroundBash?: BashBackgroundDeps,
 	skillDeps?: SkillToolDeps,
+	beforeFileWrite?: (path: string) => void,
 ): ToolExecutor {
 	return async (
 		name: string,
@@ -615,8 +616,8 @@ export function createToolExecutor(
 					return result;
 				}
 				case "write": {
+					const absolutePath = resolvePath(String(args.path ?? ""), cwd);
 					if (planState?.enabled) {
-						const absolutePath = resolvePath(String(args.path ?? ""), cwd);
 						const gate = checkPlanFileGate(absolutePath, planState);
 						if (!gate.ok) return { content: gate.error, isError: true };
 						// write's full content is known up front — enforce the size
@@ -628,15 +629,17 @@ export function createToolExecutor(
 								isError: true,
 							};
 						}
+						beforeFileWrite?.(absolutePath);
 						const result = await execWrite(args, cwd);
 						if (!result.isError) finalizePlanFileWrite(absolutePath, planState);
 						return result;
 					}
+					beforeFileWrite?.(absolutePath);
 					return await execWrite(args, cwd);
 				}
 				case "edit": {
+					const absolutePath = resolvePath(String(args.filePath ?? ""), cwd);
 					if (planState?.enabled) {
-						const absolutePath = resolvePath(String(args.filePath ?? ""), cwd);
 						const gate = checkPlanFileGate(absolutePath, planState);
 						if (!gate.ok) return { content: gate.error, isError: true };
 						// Snapshot before the edit — ops apply as anchored deltas, so
@@ -649,6 +652,7 @@ export function createToolExecutor(
 							// No existing file to snapshot — execEdit itself will
 							// surface the real "file not found" error below.
 						}
+						beforeFileWrite?.(absolutePath);
 						const result = await execEdit(args, cwd, config);
 						if (!result.isError) {
 							const capResult = enforcePlanCapAfterEdit(absolutePath, beforeContent);
@@ -657,6 +661,7 @@ export function createToolExecutor(
 						}
 						return result;
 					}
+					beforeFileWrite?.(absolutePath);
 					return await execEdit(args, cwd, config);
 				}
 				case "glob":

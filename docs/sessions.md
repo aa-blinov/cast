@@ -112,6 +112,7 @@ During plan mode, compaction preserves exploration findings that aren't yet writ
 |---------|-------------|
 | `/compact` | Force compaction now |
 | `/clear` | Clear all context (and save the cleared state) |
+| `/undo` | Restore the latest checkpoint and remove the last turn |
 
 ## Usage Tracking
 
