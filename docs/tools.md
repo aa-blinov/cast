@@ -248,7 +248,7 @@ plans directory; `read`ing that file makes it the active plan.
 | Tool | Mode | Description |
 |------|------|-------------|
 | `plan_done` | Plan | Signal that the plan is ready for review |
-| `question` | Plan or build | Ask one to four multiple-choice questions and end the turn until the user answers |
+| `question` | Plan or build | Ask one to five multiple-choice questions and end the turn until the user answers |
 | `todo_write` | Build | Maintain the task list; approved plan checkboxes are projected into it |
 
 ### `todo_write`

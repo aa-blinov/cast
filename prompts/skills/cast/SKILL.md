@@ -15,7 +15,7 @@ cast stores user config under `~/.cast/` (global) and `<cwd>/.cast/` (project-lo
 
 Plan mode is a user-owned task-initialization phase, not an automatic agent workflow. The user enters it with `/plan` when they want to establish scope, resolve substantive choices, and save an execution plan before product changes. The agent never switches from Build to Plan on its own and continues a Build task directly unless the user explicitly enables Plan mode. `/build` exits planning and restores implementation tools.
 
-The agent can use `question` in either mode when it needs a user decision. One call can contain up to four questions, each with two to four options; the interface collects the choices and resumes the same conversation.
+The agent can use `question` in either mode when it needs a user decision. One call can contain up to five questions, each with two to four options; the interface collects the choices and resumes the same conversation.
 
 This skill ships as an **index + reference files**. Read only what the task needs — the table below tells you which file covers which topic.
 

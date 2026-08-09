@@ -20,7 +20,7 @@ export async function execSsh(
 ): Promise<ToolResult> {
 	const hostName = String(args.host ?? "");
 	const command = String(args.command ?? "");
-	const timeout = typeof args.timeout === "number" ? args.timeout : config.defaultBashTimeout;
+	const timeout = typeof args.timeout === "number" && args.timeout > 0 ? args.timeout : config.defaultBashTimeout;
 
 	// Validate host exists
 	const hostMap = new Map(hosts.map((h) => [h.name, h]));
