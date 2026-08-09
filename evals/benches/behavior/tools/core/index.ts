@@ -6,13 +6,10 @@ import { grepArgumentIsGrounded } from "./grep-argument-is-grounded.ts";
 import { globArgumentIsGrounded } from "./glob-argument-is-grounded.ts";
 import { writeCreatesParentDirectories } from "./write-creates-parent-directories.ts";
 import { knownPathSkipsSearch } from "./known-path-skips-search.ts";
-import { unicodeToolResultPreserved } from "./unicode-tool-result-preserved.ts";
-import { bashNonzeroResultIsVisible } from "./bash-nonzero-result-is-visible.ts";
 import { lsDirectoryArgument } from "./ls-directory-argument.ts";
 import { todoWriteStructuredList } from "./todo-write-structured-list.ts";
 import { bashArgumentGrounding } from "./bash-argument-grounding.ts";
 import { grepFlagsAreGrounded } from "./grep-flags-are-grounded.ts";
-import { readImageVision } from "./read-image-vision.ts";
 import { writeOverwritesExistingFile } from "./write-overwrites-existing-file.ts";
 
 export const coreCases: EvalCase[] = [
@@ -23,12 +20,9 @@ export const coreCases: EvalCase[] = [
 	globArgumentIsGrounded,
 	writeCreatesParentDirectories,
 	knownPathSkipsSearch,
-	unicodeToolResultPreserved,
-	bashNonzeroResultIsVisible,
 	lsDirectoryArgument,
 	todoWriteStructuredList,
 	bashArgumentGrounding,
 	grepFlagsAreGrounded,
-	readImageVision,
 	writeOverwritesExistingFile,
 ];

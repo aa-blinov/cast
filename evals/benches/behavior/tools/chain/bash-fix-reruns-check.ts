@@ -13,12 +13,21 @@ export const bashFixRerunsCheck: EvalCase = {
 		}),
 	prompt: `The check in ${fixtureDir("behavior-bash-fix")} is failing. Diagnose the cause, correct the implementation, and verify that the check passes afterward.`,
 	expect: {
-		toolCallCounts: { bash: 2, edit: 1 },
+		toolsCalled: ["bash", "read"],
 		toolsCalled: ["read"],
 		noErrors: true,
-		verify: () =>
-			readFileSync(fixturePath("behavior-bash-fix", "calc.js"), "utf-8") === "exports.sum = (a, b) => a + b;\n"
+		verify: ({ toolCalls }) => {
+			if (readFileSync(fixturePath("behavior-bash-fix", "calc.js"), "utf-8") !== "exports.sum = (a, b) => a + b;\n") {
+				return "calculation bug was not corrected exactly";
+			}
+			const mutation = toolCalls.findIndex((call) => call.name === "edit" || call.name === "write");
+			const failedCheck = toolCalls.findIndex((call) => call.name === "bash" && call.result?.isError === true);
+			const verifiedCheck = toolCalls.findIndex(
+				(call, index) => index > mutation && call.name === "bash" && call.result?.isError !== true,
+			);
+			return failedCheck >= 0 && failedCheck < mutation && verifiedCheck >= 0
 				? undefined
-				: "calculation bug was not corrected exactly",
+				: "the failing check was not rerun successfully after the implementation changed";
+		},
 	},
 };

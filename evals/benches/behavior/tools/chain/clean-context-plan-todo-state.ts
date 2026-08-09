@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { fixtureDir, fixturePath, writeFixture } from "../../../../lib/fixtures.ts";
 import type { EvalCase } from "../../../../lib/runner.ts";
 
@@ -21,7 +22,9 @@ export const cleanContextPlanTodoState: EvalCase = {
 		verify: ({ toolCalls }) => {
 			const finalTodo = toolCalls.filter((call) => call.name === "todo_write").at(-1)?.result?.content;
 			return finalTodo?.includes('"status":"completed"') && finalTodo.includes('"planStep"')
-				? undefined
+				? readFileSync(STATUS_PATH, "utf-8") === "shipped\n"
+					? undefined
+					: "fresh-context execution did not write the planned status"
 				: "fresh-context execution did not finish the linked todo";
 		},
 	},

@@ -67,6 +67,8 @@ export interface ScoreboardEntry {
 	model: string;
 	provider?: string;
 	providerUrl?: string;
+	/** Reasoning effort explicitly used for this evaluation run. */
+	reasoningLevel: string;
 	timestamp: string;
 	commit?: string;
 	/** Attempts per case this entry is based on. */
@@ -155,7 +157,7 @@ function buildCaseResults(suite: RepeatedSuiteResult): ScoreboardCaseResult[] {
 
 type Aggregates = Omit<
 	ScoreboardEntry,
-	"bench" | "model" | "provider" | "providerUrl" | "timestamp" | "commit" | "repeat" | "results"
+	"bench" | "model" | "provider" | "providerUrl" | "reasoningLevel" | "timestamp" | "commit" | "repeat" | "results"
 >;
 
 /** Recomputes every derived field from `results` — called after a fresh
@@ -237,6 +239,7 @@ export function buildScoreboardEntry(
 	model: string,
 	benchIds: string[],
 	providerUrl?: string,
+	reasoningLevel = "off",
 ): ScoreboardEntry {
 	const suite = compare.suites[model];
 	if (!suite) throw new Error(`No repeated suite result for model "${model}" in this compare.`);
@@ -248,6 +251,7 @@ export function buildScoreboardEntry(
 		timestamp: new Date().toISOString(),
 		commit: currentCommit(),
 		...(providerUrl ? { providerUrl } : {}),
+		reasoningLevel,
 		repeat: compare.repeat,
 		results,
 		...computeAggregates(results),

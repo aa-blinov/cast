@@ -65,5 +65,151 @@
     "file": "runs/2026-08-01T12-14-50-078Z_compare-x3_default-deepseek-deepseek-v4-flash-0731_openrouter-eora-blinov-poolside-laguna-s.json",
     "repeat": 3,
     "inconsistentCases": 2
+  },
+  {
+    "timestamp": "2026-08-09T17:59:57.646Z",
+    "kind": "compare",
+    "models": [
+      "deepseek/deepseek-v4-flash-0731"
+    ],
+    "total": 38,
+    "passed": 37,
+    "failed": 1,
+    "commit": "2972be2",
+    "file": "runs/2026-08-09T17-59-57-646Z_compare-x3_deepseek-deepseek-v4-flash-0731.json",
+    "repeat": 3,
+    "inconsistentCases": 3
+  },
+  {
+    "timestamp": "2026-08-09T18:13:45.358Z",
+    "kind": "compare",
+    "models": [
+      "deepseek/deepseek-v4-pro"
+    ],
+    "total": 38,
+    "passed": 35,
+    "failed": 3,
+    "commit": "2972be2",
+    "file": "runs/2026-08-09T18-13-45-358Z_compare-x3_deepseek-deepseek-v4-pro.json",
+    "repeat": 3,
+    "inconsistentCases": 6
+  },
+  {
+    "timestamp": "2026-08-09T18:14:14.724Z",
+    "kind": "compare",
+    "models": [
+      "deepseek/deepseek-v4-pro"
+    ],
+    "total": 38,
+    "passed": 37,
+    "failed": 1,
+    "commit": "2972be2",
+    "file": "runs/2026-08-09T18-14-14-724Z_compare-x3_deepseek-deepseek-v4-pro.json",
+    "repeat": 3,
+    "inconsistentCases": 5
+  },
+  {
+    "timestamp": "2026-08-09T18:21:12.562Z",
+    "kind": "compare",
+    "models": [
+      "openai/gpt-5.6-luna"
+    ],
+    "total": 38,
+    "passed": 36,
+    "failed": 2,
+    "commit": "2972be2",
+    "file": "runs/2026-08-09T18-21-12-562Z_compare-x3_openai-gpt-5.6-luna.json",
+    "repeat": 3,
+    "inconsistentCases": 2
+  },
+  {
+    "timestamp": "2026-08-09T18:31:07.618Z",
+    "kind": "compare",
+    "models": [
+      "deepseek/deepseek-v4-flash-0731"
+    ],
+    "caseFilter": "grep-flags-are-grounded,bash-fix-reruns-check,task-review-follows-nontrivial-change,task-parallel-delegation",
+    "total": 4,
+    "passed": 2,
+    "failed": 2,
+    "commit": "2972be2",
+    "file": "runs/2026-08-09T18-31-07-618Z_compare-x3_deepseek-deepseek-v4-flash-0731.json",
+    "repeat": 3,
+    "inconsistentCases": 0
+  },
+  {
+    "timestamp": "2026-08-09T18:39:32.581Z",
+    "kind": "compare",
+    "models": [
+      "deepseek/deepseek-v4-pro"
+    ],
+    "caseFilter": "grep-flags-are-grounded,bash-fix-reruns-check,task-review-follows-nontrivial-change,task-parallel-delegation",
+    "total": 4,
+    "passed": 2,
+    "failed": 2,
+    "commit": "2972be2",
+    "file": "runs/2026-08-09T18-39-32-581Z_compare-x3_deepseek-deepseek-v4-pro.json",
+    "repeat": 3,
+    "inconsistentCases": 1
+  },
+  {
+    "timestamp": "2026-08-09T18:44:57.793Z",
+    "kind": "compare",
+    "models": [
+      "openai/gpt-5.6-luna"
+    ],
+    "caseFilter": "grep-flags-are-grounded,bash-fix-reruns-check,task-review-follows-nontrivial-change,task-parallel-delegation",
+    "total": 4,
+    "passed": 2,
+    "failed": 2,
+    "commit": "2972be2",
+    "file": "runs/2026-08-09T18-44-57-793Z_compare-x3_openai-gpt-5.6-luna.json",
+    "repeat": 3,
+    "inconsistentCases": 1
+  },
+  {
+    "timestamp": "2026-08-09T18:49:12.104Z",
+    "kind": "compare",
+    "models": [
+      "deepseek/deepseek-v4-flash-0731"
+    ],
+    "caseFilter": "task-review-follows-nontrivial-change",
+    "total": 1,
+    "passed": 1,
+    "failed": 0,
+    "commit": "2972be2",
+    "file": "runs/2026-08-09T18-49-12-104Z_compare-x3_deepseek-deepseek-v4-flash-0731.json",
+    "repeat": 3,
+    "inconsistentCases": 1
+  },
+  {
+    "timestamp": "2026-08-09T19:01:14.539Z",
+    "kind": "compare",
+    "models": [
+      "deepseek/deepseek-v4-pro"
+    ],
+    "caseFilter": "task-review-follows-nontrivial-change",
+    "total": 1,
+    "passed": 1,
+    "failed": 0,
+    "commit": "2972be2",
+    "file": "runs/2026-08-09T19-01-14-539Z_compare-x3_deepseek-deepseek-v4-pro.json",
+    "repeat": 3,
+    "inconsistentCases": 0
+  },
+  {
+    "timestamp": "2026-08-09T19:04:46.467Z",
+    "kind": "compare",
+    "models": [
+      "openai/gpt-5.6-luna"
+    ],
+    "caseFilter": "task-review-follows-nontrivial-change",
+    "total": 1,
+    "passed": 1,
+    "failed": 0,
+    "commit": "2972be2",
+    "file": "runs/2026-08-09T19-04-46-467Z_compare-x3_openai-gpt-5.6-luna.json",
+    "repeat": 3,
+    "inconsistentCases": 0
   }
 ]

@@ -9,6 +9,7 @@ export const requiredReadTool: EvalCase = {
 	setup: () => void writeFixture("behavior-required-read", { "facts.txt": "release-channel=canary\n" }),
 	prompt: `What release channel is recorded in ${fixturePath("behavior-required-read", "facts.txt")}?`,
 	expect: {
+		containsAll: ["canary"],
 		toolsCalled: ["read"],
 		toolsNotCalled: ["bash", "write", "edit"],
 		noErrors: true,

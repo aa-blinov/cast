@@ -14,6 +14,8 @@ export const globArgumentIsGrounded: EvalCase = {
 		}),
 	prompt: `Which TypeScript spec files are present under ${fixturePath("behavior-glob-args", "tests")}?`,
 	expect: {
+		containsAll: ["alpha.spec.ts", "beta.spec.ts"],
+		containsNone: ["ignored.txt"],
 		toolsCalled: ["glob"],
 		toolsNotCalled: ["bash", "write", "edit"],
 		noErrors: true,

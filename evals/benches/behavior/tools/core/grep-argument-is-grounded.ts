@@ -9,6 +9,7 @@ export const grepArgumentIsGrounded: EvalCase = {
 	setup: () => void writeFixture("behavior-grep-args", { "src/feature.ts": "export const targetFlag = true;\n" }),
 	prompt: `Where is targetFlag defined under ${fixturePath("behavior-grep-args", "src")}?`,
 	expect: {
+		containsAll: ["feature.ts"],
 		toolsCalled: ["grep"],
 		toolsNotCalled: ["bash", "write", "edit"],
 		noErrors: true,
