@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 // both runtimes.
 import { EventSource } from "undici";
 import type { SessionState } from "../core/session.ts";
+import { API_V1_PREFIX } from "./api-v1.ts";
 import {
 	acquireStartLock,
 	clearServerState,
@@ -169,7 +170,7 @@ export async function createServerSession(
 	client: ServerClient,
 	options: { persona?: string; model?: string; cwd?: string } = {},
 ): Promise<string> {
-	const { status, data } = await serverFetch(client, "/api/sessions", {
+	const { status, data } = await serverFetch(client, `${API_V1_PREFIX}/sessions`, {
 		method: "POST",
 		body: options,
 	});
@@ -185,7 +186,9 @@ export async function createServerSession(
 
 /** Fork the daemon session's current safe context into a new idle session. */
 export async function forkServerSession(client: ServerClient, sessionId: string): Promise<SessionState> {
-	const { status, data } = await serverFetch(client, `/api/sessions/${sessionId}/fork`, { method: "POST" });
+	const { status, data } = await serverFetch(client, `${API_V1_PREFIX}/sessions/${sessionId}/fork`, {
+		method: "POST",
+	});
 	if (status !== 201 || !data || typeof data !== "object" || !("session" in data)) {
 		const message = data && typeof data === "object" && "error" in data ? String(data.error) : "fork failed";
 		throw new Error(message);
@@ -204,14 +207,14 @@ export async function ensureServerSession(
 ): Promise<{ id: string; resumed: boolean }> {
 	// Explicit id: GET hydrates it on the daemon (bridge.getSession → hydrateSession).
 	if (options.resumeId) {
-		const { status } = await serverFetch(client, `/api/sessions/${options.resumeId}`);
+		const { status } = await serverFetch(client, `${API_V1_PREFIX}/sessions/${options.resumeId}`);
 		if (status === 200) return { id: options.resumeId, resumed: true };
 		throw new Error(`session ${options.resumeId} not found`);
 	}
 	// --continue: the most recent session in the same cwd (mirrors local
 	// startup's mostRecentSessionForProject).
 	if (options.resumeRequested) {
-		const { status, data } = await serverFetch(client, "/api/sessions");
+		const { status, data } = await serverFetch(client, `${API_V1_PREFIX}/sessions`);
 		if (status === 200) {
 			const list = data as Array<{ id: string; cwd?: string; updatedAt?: string }>;
 			const cwd = options.cwd ?? process.env.CAST_CWD;
@@ -236,7 +239,7 @@ export async function submitServerChat(
 	text: string,
 	images?: string[],
 ): Promise<void> {
-	const { status, data } = await serverFetch(client, `/api/sessions/${sessionId}/chat`, {
+	const { status, data } = await serverFetch(client, `${API_V1_PREFIX}/sessions/${sessionId}/chat`, {
 		method: "POST",
 		body: { text, images },
 	});
@@ -251,7 +254,7 @@ export async function submitServerChat(
 
 /** Run a slash command on a daemon session (the same surface the web UI's /command uses). */
 export async function runServerCommand(client: ServerClient, sessionId: string, command: string): Promise<unknown> {
-	const { status, data } = await serverFetch(client, `/api/sessions/${sessionId}/command`, {
+	const { status, data } = await serverFetch(client, `${API_V1_PREFIX}/sessions/${sessionId}/command`, {
 		method: "POST",
 		body: { command },
 	});
@@ -267,7 +270,7 @@ export async function runServerCommand(client: ServerClient, sessionId: string, 
 
 /** Set the session's mode (plan/build) on the daemon. */
 export async function setServerMode(client: ServerClient, sessionId: string, mode: "plan" | "build"): Promise<void> {
-	const { status } = await serverFetch(client, `/api/sessions/${sessionId}/mode`, {
+	const { status } = await serverFetch(client, `${API_V1_PREFIX}/sessions/${sessionId}/mode`, {
 		method: "POST",
 		body: { mode },
 	});
@@ -277,7 +280,7 @@ export async function setServerMode(client: ServerClient, sessionId: string, mod
 
 /** Answer a pending question on a daemon session. */
 export async function answerServerQuestion(client: ServerClient, sessionId: string, values: string[]): Promise<void> {
-	const { status } = await serverFetch(client, `/api/sessions/${sessionId}/question`, {
+	const { status } = await serverFetch(client, `${API_V1_PREFIX}/sessions/${sessionId}/question`, {
 		method: "POST",
 		body: { values },
 	});
@@ -286,7 +289,7 @@ export async function answerServerQuestion(client: ServerClient, sessionId: stri
 
 /** Inject a steering message into a running turn. */
 export async function steerServerSession(client: ServerClient, sessionId: string, message: string): Promise<void> {
-	const { status, data } = await serverFetch(client, `/api/sessions/${sessionId}/steer`, {
+	const { status, data } = await serverFetch(client, `${API_V1_PREFIX}/sessions/${sessionId}/steer`, {
 		method: "POST",
 		body: { message },
 	});
@@ -295,7 +298,7 @@ export async function steerServerSession(client: ServerClient, sessionId: string
 
 /** Queue a follow-up message to run after the current turn. */
 export async function followUpServerSession(client: ServerClient, sessionId: string, message: string): Promise<void> {
-	const { status, data } = await serverFetch(client, `/api/sessions/${sessionId}/followup`, {
+	const { status, data } = await serverFetch(client, `${API_V1_PREFIX}/sessions/${sessionId}/followup`, {
 		method: "POST",
 		body: { message },
 	});
@@ -304,13 +307,17 @@ export async function followUpServerSession(client: ServerClient, sessionId: str
 
 /** Abort the running turn. */
 export async function abortServerSession(client: ServerClient, sessionId: string): Promise<void> {
-	const { status, data } = await serverFetch(client, `/api/sessions/${sessionId}/abort`, { method: "POST" });
+	const { status, data } = await serverFetch(client, `${API_V1_PREFIX}/sessions/${sessionId}/abort`, {
+		method: "POST",
+	});
 	if (status !== 200) throw new Error(serverErrorMessage(data, "abort failed", status));
 }
 
 /** Drop the session's in-context working set (the daemon's /clear). */
 export async function cleanServerContext(client: ServerClient, sessionId: string): Promise<void> {
-	const { status, data } = await serverFetch(client, `/api/sessions/${sessionId}/clean-context`, { method: "POST" });
+	const { status, data } = await serverFetch(client, `${API_V1_PREFIX}/sessions/${sessionId}/clean-context`, {
+		method: "POST",
+	});
 	if (status !== 200) throw new Error(serverErrorMessage(data, "clean context failed", status));
 }
 
@@ -320,7 +327,7 @@ function serverErrorMessage(data: unknown, fallback: string, status: number): st
 
 /** Resolve a pending plan-done transition on a daemon session. */
 export async function resolveServerPlanTransition(client: ServerClient, sessionId: string): Promise<void> {
-	const { status } = await serverFetch(client, `/api/sessions/${sessionId}/plan-transition`, {
+	const { status } = await serverFetch(client, `${API_V1_PREFIX}/sessions/${sessionId}/plan-transition`, {
 		method: "POST",
 		body: { kind: "done" },
 	});
@@ -329,7 +336,7 @@ export async function resolveServerPlanTransition(client: ServerClient, sessionI
 
 /** Fetch the daemon's view of a session (mode, question, plan transition, status). */
 export async function getServerSession(client: ServerClient, sessionId: string): Promise<Record<string, unknown>> {
-	const { status, data } = await serverFetch(client, `/api/sessions/${sessionId}`);
+	const { status, data } = await serverFetch(client, `${API_V1_PREFIX}/sessions/${sessionId}`);
 	if (status !== 200) throw new Error(`session fetch failed (HTTP ${status})`);
 	return data as Record<string, unknown>;
 }
@@ -346,7 +353,7 @@ export function subscribeServerEvents(
 	until: (event: import("./bridge.ts").WebEvent) => boolean,
 ): { done: Promise<void>; close: () => void } {
 	const params = client.token ? `?token=${encodeURIComponent(client.token)}` : "";
-	const source = new EventSource(`${client.baseUrl}/api/sessions/${sessionId}/events${params}`);
+	const source = new EventSource(`${client.baseUrl}${API_V1_PREFIX}/sessions/${sessionId}/events${params}`);
 	let resolved = false;
 	const done = new Promise<void>((resolve) => {
 		source.onmessage = (ev) => {

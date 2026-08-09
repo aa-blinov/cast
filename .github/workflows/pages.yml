@@ -41,7 +41,7 @@ jobs:
         run: npm install --ignore-scripts marked
 
       - name: Build site
-        run: node scripts/build-site.mjs
+        run: node --import tsx scripts/build-site.mjs
 
       - uses: actions/upload-pages-artifact@v3
         with:

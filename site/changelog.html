@@ -464,7 +464,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 <header class="header">
 	<button class="menu-toggle" aria-label="Menu">&#9776;</button>
 	<a href="index.html" class="header-logo" aria-label="cast home"><img src="assets/favicon.svg" alt="cast logo"></a>
-	<span class="header-badge">v0.13.15</span>
+	<span class="header-badge">v0.13.17</span>
 	<div class="header-links">
 		<a href="index.html">Home</a>
 		<a href="https://github.com/aa-blinov/cast">GitHub</a>
@@ -498,6 +498,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 			<a href="eval-methodology.html">Eval Methodology</a>
 			<a href="architecture.html">Architecture</a>
 			<a href="infrastructure.html">Infrastructure</a>
+			<a href="api.html">API v1</a>
 			<a href="eval-scoreboard.html">Model Scoreboard</a>
 			<a href="changelog.html" class="active">Changelog</a>
 	</div>
@@ -507,6 +508,21 @@ a:hover { color: #c084fc; text-decoration: none; }
 	<article class="content">
 		<h1>Changelog</h1>
 <p>All notable user-facing changes to cast, newest first.</p>
+<h2>0.13.17</h2>
+<h3>Fixed</h3>
+<ul>
+<li><strong>Interrupted file searches stop immediately.</strong> <code>/abort</code> now cancels in-flight <code>glob</code> and <code>grep</code> processes (<code>fd</code>/<code>rg</code>) and their built-in fallback scans instead of allowing a search to continue after the turn was cancelled.</li>
+<li><strong>Tool failures have a stable recovery contract.</strong> Every failed tool result now includes an error code, whether retrying is appropriate, and a suggested fix alongside its readable diagnostic. This is carried through the agent loop, SSE, and JSONL clients.</li>
+<li><strong>Daemon abort recovery is covered end-to-end.</strong> A daemon session that aborts a stalled provider request reliably returns to idle and can start another turn.</li>
+</ul>
+<h2>0.13.16</h2>
+<h3>Fixed</h3>
+<ul>
+<li><strong>Tool failures now tell the agent how to recover.</strong> Invalid arguments for filesystem, shell, SSH, search, and web tools are rejected before execution with the specific field and valid replacement range. Missing search paths are no longer reported as empty results.</li>
+<li><strong>Destructive MCP calls now request write approval.</strong> The confirmation gate now recognizes Cast&#39;s real <code>mcp_&lt;server&gt;_&lt;tool&gt;</code> names, including when hooks are enabled.</li>
+<li><strong>Failed background commands stay failed.</strong> <code>bash_output</code> now preserves timeout and non-zero-exit errors instead of displaying an <code>ok</code> status; bash and SSH also explicitly mark byte-truncated output.</li>
+<li><strong>MCP and cancellation errors have actionable context.</strong> MCP failures identify the server and tool, while interrupted web requests are labelled <code>[ABORTED]</code> rather than as generic network failures.</li>
+</ul>
 <h2>0.13.15</h2>
 <h3>Changed</h3>
 <ul>
@@ -2065,7 +2081,7 @@ document.addEventListener('DOMContentLoaded', () => {
 			applyTransform();
 		};
 		const onEnd = () => { dragging = false; diagram.classList.remove('dragging'); };
-	
+
 diagram.addEventListener('mousedown', e => { onStart(e); e.preventDefault(); });
 		document.addEventListener('mousemove', onMove);
 		document.addEventListener('mouseup', onEnd);

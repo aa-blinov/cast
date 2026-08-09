@@ -35,4 +35,5 @@ A terminal coding agent that works with **any** OpenAI-compatible API. Point it 
 | [Eval Methodology](eval-methodology.md) | Scoreboard, repeats, traces, and regressions |
 | [Architecture](architecture.md) | Source layout and design decisions |
 | [Infrastructure](infrastructure.md) | Daemon, TUI/web clients, lifecycle, and auth |
+| [API v1](api.md) | Stable daemon HTTP/SSE integration contract and OpenAPI document |
 | [Changelog](changelog.md) | Version history and feature highlights |

@@ -25,6 +25,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { API_V1_PREFIX } from "./api-v1.ts";
 
 /** Increment only when a daemon/client wire contract becomes incompatible. */
 export const DAEMON_PROTOCOL_VERSION = 2;
@@ -75,7 +76,7 @@ export function daemonBaseUrl(state: Pick<ServerDaemonState, "host" | "port">): 
 export async function isCurrentDaemonInstance(state: ServerDaemonState): Promise<boolean> {
 	if (!state.instanceId || !state.token) return false;
 	try {
-		const response = await fetch(`${daemonBaseUrl(state)}/api/server/identity`, {
+		const response = await fetch(`${daemonBaseUrl(state)}${API_V1_PREFIX}/server/identity`, {
 			headers: { Authorization: `Bearer ${state.token}` },
 			signal: AbortSignal.timeout(1_500),
 		});

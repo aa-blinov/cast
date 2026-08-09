@@ -464,7 +464,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 <header class="header">
 	<button class="menu-toggle" aria-label="Menu">&#9776;</button>
 	<a href="index.html" class="header-logo" aria-label="cast home"><img src="assets/favicon.svg" alt="cast logo"></a>
-	<span class="header-badge">v0.13.15</span>
+	<span class="header-badge">v0.13.17</span>
 	<div class="header-links">
 		<a href="index.html">Home</a>
 		<a href="https://github.com/aa-blinov/cast">GitHub</a>
@@ -498,6 +498,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 			<a href="eval-methodology.html">Eval Methodology</a>
 			<a href="architecture.html">Architecture</a>
 			<a href="infrastructure.html">Infrastructure</a>
+			<a href="api.html">API v1</a>
 			<a href="eval-scoreboard.html">Model Scoreboard</a>
 			<a href="changelog.html">Changelog</a>
 	</div>
@@ -520,7 +521,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 <li><strong>Global (agents)</strong> — <code>~/.agents/skills/</code> then the compatible <code>~/.config/agents/skills/</code> (skills.sh universal global)</li>
 <li><strong>Plugin</strong> — skills from enabled <code>/plugin install name@marketplace</code> packages</li>
 <li><strong>Builtin</strong> — <code>prompts/skills/</code> (ships with cast)</li>
-<li><strong>Extra paths</strong> — <code>--skill &lt;path&gt;</code> flags (loaded even with <code>--no-skills</code>)</li>
+<li><strong>Extra paths</strong> — <code>--skill &lt;directory&gt;</code> flags (loaded even with <code>--no-skills</code>)</li>
 </ol>
 <p>Use <code>--no-skills</code> to skip auto-discovery (including <code>.agents/skills</code>). Extra paths (<code>--skill</code>) still load.</p>
 <h3>skills.sh / <code>npx skills add</code></h3>
@@ -533,12 +534,9 @@ a:hover { color: #c084fc; text-decoration: none; }
 <pre><code>~/.cast/skills/
   my-skill/
     SKILL.md          # Skill definition
-    templates/        # Any supporting files
-      example.md
-</code></pre>
-<p>Or a standalone <code>.md</code> file at the top level:</p>
-<pre><code>~/.cast/skills/
-  my-skill.md
+    scripts/          # Executable code, run only when the skill instructs it
+    references/       # Documentation, read only when needed
+    assets/           # Templates, images, data and other static resources
 </code></pre>
 <h3>SKILL.md Format</h3>
 <pre><code class="language-markdown">---
@@ -556,7 +554,7 @@ When invoked, follow these steps:
 Always check `templates/` for reference material.
 </code></pre>
 <h3>Frontmatter Fields</h3>
-<div class="table-wrap"><table><thead><tr><th>Field</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>name</code></td><td>No</td><td>Identifier (defaults to parent directory name)</td></tr><tr><td><code>description</code></td><td><strong>Yes</strong></td><td>What the skill does — skills without a description are dropped</td></tr><tr><td><code>disable-model-invocation</code></td><td>No</td><td><code>true</code> to hide from the agent (manual <code>/skill:&lt;name&gt;</code> only)</td></tr><tr><td><code>when_to_use</code></td><td>No</td><td>Extra matching guidance shown to the model as <code>description — whenToUse</code> in the skill listing</td></tr></tbody></table></div><h3>Name Rules</h3>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>name</code></td><td><strong>Yes</strong></td><td>Identifier; for <code>SKILL.md</code>, it must match the containing directory</td></tr><tr><td><code>description</code></td><td><strong>Yes</strong></td><td>What the skill does — invalid skills are not loaded</td></tr><tr><td><code>license</code></td><td>No</td><td>License name or a reference to a bundled license file</td></tr><tr><td><code>compatibility</code></td><td>No</td><td>Environment requirements; 1–500 characters</td></tr><tr><td><code>metadata</code></td><td>No</td><td>Mapping of string keys to string values for client-specific data</td></tr><tr><td><code>allowed-tools</code></td><td>No</td><td>Experimental space-separated list of pre-approved tools; retained and exposed with the skill, with execution semantics depending on the client</td></tr><tr><td><code>disable-model-invocation</code></td><td>No</td><td><code>true</code> to hide from the agent (manual <code>/skill:&lt;name&gt;</code> only)</td></tr><tr><td><code>when_to_use</code></td><td>No</td><td>Extra matching guidance shown to the model as <code>description — whenToUse</code> in the skill listing</td></tr></tbody></table></div><h3>Name Rules</h3>
 <p>Per the Agent Skills spec:</p>
 <ul>
 <li>Lowercase letters, digits, and hyphens only (<code>[a-z0-9-]+</code>)</li>
@@ -564,9 +562,9 @@ Always check `templates/` for reference material.
 <li>Must not contain consecutive hyphens (<code>--</code>)</li>
 <li>Maximum 64 characters</li>
 </ul>
-<p>Names that violate these rules generate a warning but still load.</p>
+<p>Malformed required fields, invalid YAML, and a directory/name mismatch prevent the skill from loading. Cast warns when the body exceeds the spec&#39;s recommended 500 lines but still loads it.</p>
 <h3>Relative Paths</h3>
-<p>When a skill file references relative paths (templates, examples, configs), resolve them against the skill&#39;s directory. The system prompt tells the agent: <em>&quot;When a skill file references a relative path, resolve it against the skill directory.&quot;</em></p>
+<p>When a skill file references relative paths (scripts, references, assets, templates, configs), resolve them against the skill&#39;s directory. The system prompt tells the agent: <em>&quot;When a skill file references a relative path, resolve it against the skill directory.&quot;</em> Resources are never automatically read or executed: the agent loads or runs the referenced file only when the activated instructions require it.</p>
 <h2>Enabling / disabling</h2>
 <div class="table-wrap"><table><thead><tr><th>Command</th><th>Description</th></tr></thead><tbody><tr><td><code>/skills</code></td><td>Toggle on/off (multi-select picker, like <code>/mcp</code>)</td></tr><tr><td><code>/skills list</code></td><td>Read-only catalog (source + on/off)</td></tr><tr><td><code>/skills enable</code> / <code>disable &lt;name&gt;</code></td><td>Toggle one skill without the picker</td></tr><tr><td><code>/skills uninstall</code></td><td>Remove a global/project skill (picker + confirm, or typed name)</td></tr><tr><td><code>/skills help</code></td><td>Cheat sheet</td></tr></tbody></table></div><p>Disabled names are stored in <code>~/.cast/settings.json</code> as <code>disabledSkills</code>. <code>/skill:&lt;name&gt;</code> only works for enabled skills.</p>
 <p>Plugin skills show their pack id in the picker/list (<code>plugin · name@marketplace</code>). If the pack is disabled via <code>/plugin</code>, the skill stays visible but locked (muted, Space ignored) until you re-enable the pack — it is not added to <code>disabledSkills</code>.</p>
@@ -590,15 +588,15 @@ Always check `templates/` for reference material.
 <h3>The <code>skill</code> Tool</h3>
 <p>The agent invokes skills through a dedicated <code>skill</code> tool (<code>name</code>, optional <code>args</code>) rather than reading <code>SKILL.md</code> via the generic <code>read</code> tool. It validates the name, enforces <code>disable-model-invocation</code>, performs the substitution above, and returns the formatted skill content in one call.</p>
 <h2>CLI Flags</h2>
-<div class="table-wrap"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody><tr><td><code>--skill &lt;path&gt;</code></td><td>Load an extra skill file or directory (repeatable)</td></tr><tr><td><code>--no-skills</code></td><td>Skip project/agents/global/plugin/builtin skill discovery</td></tr></tbody></table></div><pre><code class="language-bash">cast --skill ./my-project-skill.md
-cast --no-skills --skill ~/.cast/skills/arxiv/SKILL.md
+<div class="table-wrap"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody><tr><td><code>--skill &lt;directory&gt;</code></td><td>Load an extra skill package directory (repeatable)</td></tr><tr><td><code>--no-skills</code></td><td>Skip project/agents/global/plugin/builtin skill discovery</td></tr></tbody></table></div><pre><code class="language-bash">cast --skill ./my-project-skill
+cast --no-skills --skill ~/.cast/skills/arxiv
 </code></pre>
 <p>Extra paths (<code>--skill</code>) work even with <code>--no-skills</code> — they&#39;re explicit additions, not auto-discovery.</p>
 <h2>Discovery Rules</h2>
 <p>The discovery algorithm for each directory:</p>
 <ol>
 <li>If the directory contains <code>SKILL.md</code>, load it as a single skill and stop recursing.</li>
-<li>Otherwise, load direct <code>.md</code> children as standalone skills, and recurse into subdirectories looking for <code>SKILL.md</code>.</li>
+<li>Otherwise recurse into subdirectories looking for skill directories. Arbitrary <code>.md</code> files are not skills.</li>
 </ol>
 <p>Directories starting with <code>.</code> or named <code>node_modules</code> are always skipped.</p>
 
@@ -692,7 +690,7 @@ document.addEventListener('DOMContentLoaded', () => {
 			applyTransform();
 		};
 		const onEnd = () => { dragging = false; diagram.classList.remove('dragging'); };
-	
+
 diagram.addEventListener('mousedown', e => { onStart(e); e.preventDefault(); });
 		document.addEventListener('mousemove', onMove);
 		document.addEventListener('mouseup', onEnd);

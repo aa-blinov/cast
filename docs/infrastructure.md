@@ -3,6 +3,7 @@
 How cast's processes and surfaces fit together: the single-writer daemon, the TUI and web clients, lifecycles, and auth.
 
 For the agent engine itself (how `runAgentLoop` streams, parallel tools, compaction), see [Architecture](architecture.md).
+For the stable daemon integration contract, see [API v1](api.md).
 
 ## Overview
 
@@ -28,7 +29,7 @@ Before this model (pre-0.12.29) the TUI ran `runAgentLoop` **locally** and the w
 
 - owns `runAgentLoop` for every session;
 - is the **only** process that writes to `~/.cast/sessions/sessions.db` by default;
-- turns each `AgentEvent` into a `WebEvent` and broadcasts it over SSE to every subscribed client (the per-session `GET /api/sessions/:id/events` stream, plus the sidebar-wide `GET /api/sessions/events`).
+- turns each `AgentEvent` into a `WebEvent` and broadcasts it over SSE to every subscribed client (the stable per-session `GET /api/v1/sessions/:id/events` stream, plus the web UI's sidebar-wide `GET /api/sessions/events`).
 
 ## TUI as a thin client
 
@@ -39,9 +40,9 @@ The TUI (`cast`, no subcommand) no longer runs the loop locally. On launch, `src
 
 The TUI then:
 
-- `submit(text)` → `POST /api/sessions/:id/chat`;
-- renders tokens / tool calls / status from the `/api/sessions/:id/events` SSE stream — the exact same stream the browser consumes;
-- `abort` / `steer` / `followUp` → `POST /api/sessions/:id/{abort,steer,followup}`.
+- `submit(text)` → `POST /api/v1/sessions/:id/chat`;
+- renders tokens / tool calls / status from the `/api/v1/sessions/:id/events` SSE stream — the same daemon event stream the browser consumes through its legacy UI route;
+- `abort` / `steer` / `followUp` → `POST /api/v1/sessions/:id/{abort,steer,followup}`.
 
 With `CAST_NO_DAEMON=1`, the TUI uses its local `runAgentLoop` fallback. `cast run` and `cast run --interactive` instead require the daemon so their sessions share the same store and event stream.
 

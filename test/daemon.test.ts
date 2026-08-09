@@ -7,6 +7,7 @@ import { EventSource } from "undici";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSession, saveSession } from "../src/core/session.ts";
 import type { StartupResult } from "../src/core/startup.ts";
+import { apiV1OpenApiDocument } from "../src/server/api-v1.ts";
 import { createServerBridge } from "../src/server/bridge.ts";
 import { writeServerState } from "../src/server/daemon-state.ts";
 import { startServer } from "../src/server/server.ts";
@@ -143,6 +144,136 @@ afterEach(async () => {
 });
 
 describe("daemon single-writer SSE contract", () => {
+	it("requires authentication for every published API v1 operation", async () => {
+		const paths = apiV1OpenApiDocument.paths as Record<string, Record<string, unknown>>;
+		for (const [path, operations] of Object.entries(paths)) {
+			if (path === "/api/v1/openapi.json") continue;
+			for (const method of Object.keys(operations)) {
+				if (!/^(get|post|delete)$/.test(method)) continue;
+				const response = await fetch(`${origin}${path.replace("{id}", "missing-session")}`, {
+					method: method.toUpperCase(),
+				});
+				expect(response.status, `${method.toUpperCase()} ${path}`).toBe(401);
+			}
+		}
+	});
+
+	it("serves a public OpenAPI document and a versioned compatibility route", async () => {
+		const spec = await fetch(`${origin}/api/v1/openapi.json`);
+		expect(spec.status).toBe(200);
+		expect(spec.headers.get("content-type")).toContain("application/json");
+		await expect(spec.json()).resolves.toMatchObject({
+			openapi: "3.1.1",
+			info: { title: "Cast API", version: "1.0.0" },
+			paths: { "/api/v1/sessions": expect.any(Object) },
+		});
+
+		const identity = await fetch(`${origin}/api/v1/server/identity`, {
+			headers: { Authorization: `Bearer ${LOOPBACK_TOKEN}` },
+		});
+		expect(identity.status).toBe(200);
+		expect(identity.headers.get("cast-api-version")).toBe("1");
+		await expect(identity.json()).resolves.toEqual({ instanceId: "daemon-test-instance" });
+
+		const created = await fetch(`${origin}/api/v1/sessions`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Authorization: `Bearer ${LOOPBACK_TOKEN}` },
+			body: JSON.stringify({ persona: "coding", model: "gpt" }),
+		});
+		expect(created.status).toBe(201);
+		expect(created.headers.get("cast-api-version")).toBe("1");
+		await expect(created.json()).resolves.toMatchObject({ id: expect.any(String) });
+
+		const appearance = await fetch(`${origin}/api/v1/settings/appearance`, {
+			headers: { Authorization: `Bearer ${LOOPBACK_TOKEN}` },
+		});
+		expect(appearance.status).toBe(200);
+		expect(appearance.headers.get("cast-api-version")).toBe("1");
+	});
+
+	it("routes every documented API v1 operation to its real daemon handler", async () => {
+		const headers = { "Content-Type": "application/json", Authorization: `Bearer ${LOOPBACK_TOKEN}` };
+		const request = (path: string, init?: RequestInit) => fetch(`${origin}/api/v1${path}`, { headers, ...init });
+
+		await expect(request("/server/status")).resolves.toMatchObject({ status: 200 });
+		await expect(request("/server/identity")).resolves.toMatchObject({ status: 200 });
+		await expect(request("/sessions")).resolves.toMatchObject({ status: 200 });
+
+		const created = await request("/sessions", {
+			method: "POST",
+			body: JSON.stringify({ persona: "coding", model: "gpt" }),
+		});
+		expect(created.status).toBe(201);
+		const { id } = (await created.json()) as { id: string };
+
+		await expect(request(`/sessions/${id}`)).resolves.toMatchObject({ status: 200 });
+		await expect(request(`/sessions/${id}/history?before=0`)).resolves.toMatchObject({ status: 200 });
+
+		const events = await request(`/sessions/${id}/events`);
+		expect(events.status).toBe(200);
+		expect(events.headers.get("content-type")).toContain("text/event-stream");
+		await events.body?.cancel();
+
+		const fork = await request(`/sessions/${id}/fork`, { method: "POST" });
+		expect(fork.status).toBe(201);
+		const { id: forkId } = (await fork.json()) as { id: string };
+
+		await expect(
+			request(`/sessions/${id}/mode`, { method: "POST", body: JSON.stringify({ mode: "plan" }) }),
+		).resolves.toMatchObject({
+			status: 200,
+		});
+		await expect(request(`/sessions/${id}/clean-context`, { method: "POST" })).resolves.toMatchObject({
+			status: 200,
+		});
+		await expect(
+			request(`/sessions/${id}/question`, { method: "POST", body: JSON.stringify({ values: [] }) }),
+		).resolves.toMatchObject({
+			status: 400,
+		});
+		await expect(
+			request(`/sessions/${id}/plan-transition`, { method: "POST", body: JSON.stringify({ kind: "done" }) }),
+		).resolves.toMatchObject({ status: 400 });
+		await expect(
+			request(`/sessions/${id}/command`, { method: "POST", body: JSON.stringify({ command: "/help" }) }),
+		).resolves.toMatchObject({
+			status: 200,
+		});
+		await expect(request(`/sessions/${id}/abort`, { method: "POST" })).resolves.toMatchObject({ status: 200 });
+		await expect(
+			request(`/sessions/${id}/followup`, { method: "POST", body: JSON.stringify({ message: "after this" }) }),
+		).resolves.toMatchObject({
+			status: 202,
+		});
+		await expect(
+			request(`/sessions/${id}/chat`, { method: "POST", body: JSON.stringify({ text: "hello" }) }),
+		).resolves.toMatchObject({
+			status: 202,
+		});
+		await expect(
+			request(`/sessions/${id}/steer`, { method: "POST", body: JSON.stringify({ message: "continue" }) }),
+		).resolves.toMatchObject({
+			status: 202,
+		});
+		await expect(request(`/sessions/${forkId}`, { method: "DELETE" })).resolves.toMatchObject({ status: 200 });
+	});
+
+	it("returns documented client errors for malformed v1 JSON requests", async () => {
+		const headers = { "Content-Type": "application/json", Authorization: `Bearer ${LOOPBACK_TOKEN}` };
+		const request = (path: string, init?: RequestInit) => fetch(`${origin}/api/v1${path}`, { headers, ...init });
+
+		for (const path of ["/settings/appearance", "/ssh/key", "/ssh/add", "/provider/verify"]) {
+			const response = await request(path, { method: "POST", body: "{" });
+			expect(response.status, path).toBe(400);
+			await expect(response.json()).resolves.toEqual({ error: "Invalid JSON" });
+		}
+
+		const config = await request("/config");
+		expect(config.status).toBe(200);
+		const configBody = (await config.json()) as Record<string, unknown>;
+		expect(configBody).not.toHaveProperty("apiKey");
+	});
+
 	it("streams identical events to a TUI client (?token=) and a browser client (cookie)", async () => {
 		// Create a cold session directly in the DB (as runStartup would), so the
 		// daemon must hydrate it — mirrors a TUI session opened before the daemon.

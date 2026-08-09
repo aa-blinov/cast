@@ -26,6 +26,13 @@ import { getDb } from "../core/db.ts";
 import { getHistoryPage, getMessageImage, getSessionEvents } from "../core/session.ts";
 import { loadSettings, updateSettings } from "../core/settings.ts";
 import { ensureSessionWorktree } from "../core/worktree.ts";
+import {
+	API_V1_PREFIX,
+	apiV1OpenApiDocument,
+	isStableApiV1Route,
+	legacyPathForApiV1,
+	OPENAPI_V1_PATH,
+} from "./api-v1.ts";
 import { reconcileActiveStream, SANDBOX_CWD, type ServerBridge, toDisplayMessages, type WebEvent } from "./bridge.ts";
 import { readLiveServerState } from "./daemon-state.ts";
 import { isBlockedAttachmentName, sessionInputsDir } from "./inputs.ts";
@@ -493,6 +500,10 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 	}
 
 	// API routes
+	route("GET", "/api/openapi.json", (_req, res) => {
+		json(res, apiV1OpenApiDocument);
+	});
+
 	route("GET", "/api/auth/session", (req, res) => {
 		json(res, { authenticated: isAuthenticated(req) });
 	});
@@ -726,8 +737,9 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
 		const turns = Number(url.searchParams.get("turns")) || undefined;
 		const page = getHistoryPage(params.id, undefined, turns);
+		const apiPrefix = (req.url ?? "").startsWith(API_V1_PREFIX) ? API_V1_PREFIX : "/api";
 		const reconciled = reconcileActiveStream(
-			toDisplayMessages(page.messages, page.reasoning, page.turnMeta, ws.id, page.seqs),
+			toDisplayMessages(page.messages, page.reasoning, page.turnMeta, ws.id, page.seqs, apiPrefix),
 			ws.activeStream,
 		);
 		json(res, {
@@ -770,7 +782,14 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		const turns = Number(url.searchParams.get("turns")) || undefined;
 		const page = getHistoryPage(params.id, before, turns);
 		json(res, {
-			messages: toDisplayMessages(page.messages, page.reasoning, page.turnMeta, params.id, page.seqs),
+			messages: toDisplayMessages(
+				page.messages,
+				page.reasoning,
+				page.turnMeta,
+				params.id,
+				page.seqs,
+				(req.url ?? "").startsWith(API_V1_PREFIX) ? API_V1_PREFIX : "/api",
+			),
 			oldestSeq: page.oldestSeq ?? null,
 			hasMoreHistory: page.hasMore,
 		});
@@ -1606,10 +1625,16 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		json(res, { showReasoning: showReasoning ?? false });
 	});
 	route("POST", "/api/settings/appearance", async (req, res) => {
-		const body = await readBody(req);
-		const parsed = JSON.parse(body) as { showReasoning?: boolean };
+		let parsed: { showReasoning?: unknown };
+		try {
+			parsed = JSON.parse(await readBody(req)) as { showReasoning?: unknown };
+		} catch {
+			return json(res, { error: "Invalid JSON" }, 400);
+		}
 		if (typeof parsed.showReasoning === "boolean") {
 			updateSettings({ showReasoning: parsed.showReasoning });
+		} else {
+			return json(res, { error: "showReasoning must be a boolean" }, 400);
 		}
 		json(res, { ok: true });
 	});
@@ -1635,31 +1660,71 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		json(res, bridge.readPluginContent(id));
 	});
 	route("POST", "/api/ssh/key", async (req, res) => {
-		const body = await readBody(req);
-		const { name, key } = JSON.parse(body);
+		let name: unknown;
+		let key: unknown;
+		try {
+			({ name, key } = JSON.parse(await readBody(req)) as { name?: unknown; key?: unknown });
+		} catch {
+			return json(res, { error: "Invalid JSON" }, 400);
+		}
 		if (!name || !key) return json(res, { ok: false, error: "name and key required" }, 400);
+		if (typeof name !== "string" || typeof key !== "string") {
+			return json(res, { error: "name and key must be strings" }, 400);
+		}
 		json(res, bridge.saveSshKey(name, key));
 	});
 	route("POST", "/api/ssh/add", async (req, res) => {
-		const body = await readBody(req);
-		const { name, host, username, port, keyPath, password } = JSON.parse(body);
+		let parsed: {
+			name?: unknown;
+			host?: unknown;
+			username?: unknown;
+			port?: unknown;
+			keyPath?: unknown;
+			password?: unknown;
+		};
+		try {
+			parsed = JSON.parse(await readBody(req)) as typeof parsed;
+		} catch {
+			return json(res, { error: "Invalid JSON" }, 400);
+		}
+		const { name, host, username, port, keyPath, password } = parsed;
 		if (!name || !host) return json(res, { ok: false, error: "name and host required" }, 400);
+		const validPort =
+			port === undefined || (typeof port === "number" && Number.isInteger(port) && port >= 1 && port <= 65535);
+		if (
+			typeof name !== "string" ||
+			typeof host !== "string" ||
+			(username !== undefined && typeof username !== "string") ||
+			!validPort ||
+			(keyPath !== undefined && typeof keyPath !== "string") ||
+			(password !== undefined && typeof password !== "string")
+		) {
+			return json(res, { error: "Invalid SSH host fields" }, 400);
+		}
 		json(
 			res,
 			bridge.addSshHost(
 				name,
 				host,
 				username ?? undefined,
-				port ?? undefined,
+				typeof port === "number" ? port : undefined,
 				keyPath ?? undefined,
 				password ?? undefined,
 			),
 		);
 	});
 	route("POST", "/api/provider/verify", async (req, res) => {
-		const body = await readBody(req);
-		const { url, apiKey } = JSON.parse(body);
+		let url: unknown;
+		let apiKey: unknown;
+		try {
+			({ url, apiKey } = JSON.parse(await readBody(req)) as { url?: unknown; apiKey?: unknown });
+		} catch {
+			return json(res, { error: "Invalid JSON" }, 400);
+		}
 		if (!url || !apiKey) return json(res, { ok: false, error: "url and apiKey required" }, 400);
+		if (typeof url !== "string" || typeof apiKey !== "string") {
+			return json(res, { error: "url and apiKey must be strings" }, 400);
+		}
 		json(res, await bridge.verifyProvider(url, apiKey));
 	});
 
@@ -1735,6 +1800,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			urlPath === "/shared" ||
 			urlPath.startsWith("/shared/") ||
 			urlPath.startsWith("/api/shared/") ||
+			urlPath === OPENAPI_V1_PATH ||
 			PUBLIC_STATIC_ASSETS.has(urlPath) ||
 			urlPath.startsWith("/fonts/");
 		if (!isPublicShareRoute && !isAuthenticated(req)) {
@@ -1765,8 +1831,17 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			if (serveStatic({ url: "/" } as IncomingMessage, res)) return;
 		}
 
-		// API routes
-		const matched = matchRoute(method, urlPath);
+		const versionedLegacyPath = legacyPathForApiV1(urlPath);
+		if (versionedLegacyPath) res.setHeader("Cast-API-Version", "1");
+		if (versionedLegacyPath && !isStableApiV1Route(method, versionedLegacyPath) && urlPath !== OPENAPI_V1_PATH) {
+			json(res, { error: "Unknown API v1 route" }, 404);
+			return;
+		}
+
+		// Versioned integration routes reuse the same handlers as the legacy UI
+		// surface, so behavior cannot drift while their URL/schema contract stays
+		// independently stable.
+		const matched = matchRoute(method, versionedLegacyPath ?? urlPath);
 		if (matched) {
 			try {
 				await matched.handler(req, res, matched.params);

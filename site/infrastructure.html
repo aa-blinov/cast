@@ -464,7 +464,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 <header class="header">
 	<button class="menu-toggle" aria-label="Menu">&#9776;</button>
 	<a href="index.html" class="header-logo" aria-label="cast home"><img src="assets/favicon.svg" alt="cast logo"></a>
-	<span class="header-badge">v0.13.15</span>
+	<span class="header-badge">v0.13.17</span>
 	<div class="header-links">
 		<a href="index.html">Home</a>
 		<a href="https://github.com/aa-blinov/cast">GitHub</a>
@@ -498,6 +498,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 			<a href="eval-methodology.html">Eval Methodology</a>
 			<a href="architecture.html">Architecture</a>
 			<a href="infrastructure.html" class="active">Infrastructure</a>
+			<a href="api.html">API v1</a>
 			<a href="eval-scoreboard.html">Model Scoreboard</a>
 			<a href="changelog.html">Changelog</a>
 	</div>
@@ -507,7 +508,8 @@ a:hover { color: #c084fc; text-decoration: none; }
 	<article class="content">
 		<h1>Infrastructure</h1>
 <p>How cast&#39;s processes and surfaces fit together: the single-writer daemon, the TUI and web clients, lifecycles, and auth.</p>
-<p>For the agent engine itself (how <code>runAgentLoop</code> streams, parallel tools, compaction), see <a href="architecture.html">Architecture</a>.</p>
+<p>For the agent engine itself (how <code>runAgentLoop</code> streams, parallel tools, compaction), see <a href="architecture.html">Architecture</a>.
+For the stable daemon integration contract, see <a href="api.html">API v1</a>.</p>
 <h2>Overview</h2>
 <p>cast has two interactive surfaces and one engine. The engine (<code>runAgentLoop</code>, in <code>src/core/loop.ts</code>) is owned by exactly one process — the <strong><code>cast server</code> daemon</strong> — which is the single writer to the SQLite session store. Both surfaces are thin clients of it over HTTP + SSE:</p>
 <pre><code>┌─────────────┐   HTTP + SSE    ┌──────────────────────────┐   runAgentLoop   ┌──────────┐
@@ -526,7 +528,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 <ul>
 <li>owns <code>runAgentLoop</code> for every session;</li>
 <li>is the <strong>only</strong> process that writes to <code>~/.cast/sessions/sessions.db</code> by default;</li>
-<li>turns each <code>AgentEvent</code> into a <code>WebEvent</code> and broadcasts it over SSE to every subscribed client (the per-session <code>GET /api/sessions/:id/events</code> stream, plus the sidebar-wide <code>GET /api/sessions/events</code>).</li>
+<li>turns each <code>AgentEvent</code> into a <code>WebEvent</code> and broadcasts it over SSE to every subscribed client (the stable per-session <code>GET /api/v1/sessions/:id/events</code> stream, plus the web UI&#39;s sidebar-wide <code>GET /api/sessions/events</code>).</li>
 </ul>
 <h2>TUI as a thin client</h2>
 <p>The TUI (<code>cast</code>, no subcommand) no longer runs the loop locally. On launch, <code>src/index.ts</code> calls <code>ensureDaemon()</code>:</p>
@@ -536,9 +538,9 @@ a:hover { color: #c084fc; text-decoration: none; }
 </ul>
 <p>The TUI then:</p>
 <ul>
-<li><code>submit(text)</code> → <code>POST /api/sessions/:id/chat</code>;</li>
-<li>renders tokens / tool calls / status from the <code>/api/sessions/:id/events</code> SSE stream — the exact same stream the browser consumes;</li>
-<li><code>abort</code> / <code>steer</code> / <code>followUp</code> → <code>POST /api/sessions/:id/{abort,steer,followup}</code>.</li>
+<li><code>submit(text)</code> → <code>POST /api/v1/sessions/:id/chat</code>;</li>
+<li>renders tokens / tool calls / status from the <code>/api/v1/sessions/:id/events</code> SSE stream — the same daemon event stream the browser consumes through its legacy UI route;</li>
+<li><code>abort</code> / <code>steer</code> / <code>followUp</code> → <code>POST /api/v1/sessions/:id/{abort,steer,followup}</code>.</li>
 </ul>
 <p>With <code>CAST_NO_DAEMON=1</code>, the TUI uses its local <code>runAgentLoop</code> fallback. <code>cast run</code> and <code>cast run --interactive</code> instead require the daemon so their sessions share the same store and event stream.</p>
 <h2>Web UI (browser)</h2>
@@ -563,7 +565,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 	</article>
 		<nav class="doc-nav">
 			<a href="architecture.html" class="doc-nav-prev">← Architecture</a>
-			<a href="eval-scoreboard.html" class="doc-nav-next">Model Scoreboard →</a>
+			<a href="api.html" class="doc-nav-next">API v1 →</a>
 		</nav>
 </main>
 
@@ -650,7 +652,7 @@ document.addEventListener('DOMContentLoaded', () => {
 			applyTransform();
 		};
 		const onEnd = () => { dragging = false; diagram.classList.remove('dragging'); };
-	
+
 diagram.addEventListener('mousedown', e => { onStart(e); e.preventDefault(); });
 		document.addEventListener('mousemove', onMove);
 		document.addEventListener('mouseup', onEnd);

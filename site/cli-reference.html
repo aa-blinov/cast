@@ -464,7 +464,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 <header class="header">
 	<button class="menu-toggle" aria-label="Menu">&#9776;</button>
 	<a href="index.html" class="header-logo" aria-label="cast home"><img src="assets/favicon.svg" alt="cast logo"></a>
-	<span class="header-badge">v0.13.15</span>
+	<span class="header-badge">v0.13.17</span>
 	<div class="header-links">
 		<a href="index.html">Home</a>
 		<a href="https://github.com/aa-blinov/cast">GitHub</a>
@@ -498,6 +498,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 			<a href="eval-methodology.html">Eval Methodology</a>
 			<a href="architecture.html">Architecture</a>
 			<a href="infrastructure.html">Infrastructure</a>
+			<a href="api.html">API v1</a>
 			<a href="eval-scoreboard.html">Model Scoreboard</a>
 			<a href="changelog.html">Changelog</a>
 	</div>
@@ -584,15 +585,15 @@ cast -w feature-x                 # Run in an isolated git worktree
 <h3>Permissions</h3>
 <div class="table-wrap"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody><tr><td><code>--bypass-permissions</code></td><td>Skip confirmation for dangerous bash commands this run only</td></tr></tbody></table></div><p>See <a href="tools.html#dangerous-command-gating">Tools</a> for the list of patterns that trigger confirmation.</p>
 <h3>Skills and MCP</h3>
-<div class="table-wrap"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody><tr><td><code>--skill &lt;path&gt;</code></td><td>Load an extra skill file or directory (repeatable)</td></tr><tr><td><code>--no-skills</code></td><td>Skip project/agents/global/plugin/builtin skill discovery</td></tr><tr><td><code>--mcp &lt;path&gt;</code></td><td>Load an extra MCP server config file (repeatable)</td></tr><tr><td><code>--no-mcp</code></td><td>Skip global/project MCP server discovery</td></tr></tbody></table></div><p><code>--skill</code> and <code>--mcp</code> paths work even with <code>--no-skills</code> / <code>--no-mcp</code> — they&#39;re explicit additions, not discovery.</p>
-<pre><code class="language-bash">cast --skill ./my-skill.md
-cast --no-skills --skill ~/.cast/skills/arxiv/SKILL.md
+<div class="table-wrap"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody><tr><td><code>--skill &lt;directory&gt;</code></td><td>Load an extra skill package directory (repeatable)</td></tr><tr><td><code>--no-skills</code></td><td>Skip project/agents/global/plugin/builtin skill discovery</td></tr><tr><td><code>--mcp &lt;path&gt;</code></td><td>Load an extra MCP server config file (repeatable)</td></tr><tr><td><code>--no-mcp</code></td><td>Skip global/project MCP server discovery</td></tr></tbody></table></div><p><code>--skill</code> and <code>--mcp</code> paths work even with <code>--no-skills</code> / <code>--no-mcp</code> — they&#39;re explicit additions, not discovery.</p>
+<pre><code class="language-bash">cast --skill ./my-skill
+cast --no-skills --skill ~/.cast/skills/arxiv
 cast --mcp ./custom-mcp.json
 </code></pre>
 <h3>General</h3>
 <div class="table-wrap"><table><thead><tr><th>Flag</th><th>Short</th><th>Description</th></tr></thead><tbody><tr><td><code>--version</code></td><td><code>-v</code></td><td>Show installed version</td></tr><tr><td><code>--help</code></td><td><code>-h</code></td><td>Show help text</td></tr></tbody></table></div><h2><code>cast run</code> Flags</h2>
 <p>The <code>run</code> subcommand accepts a subset of the main flags:</p>
-<div class="table-wrap"><table><thead><tr><th>Flag</th><th>Short</th><th>Description</th></tr></thead><tbody><tr><td><code>--continue</code></td><td><code>-c</code></td><td>Continue the most recent session</td></tr><tr><td><code>--session &lt;id&gt;</code></td><td><code>-s</code></td><td>Continue a specific session</td></tr><tr><td><code>--worktree &lt;name&gt;</code></td><td><code>-w</code></td><td>Run in an isolated git worktree</td></tr><tr><td><code>--model &lt;model&gt;</code></td><td><code>-m</code></td><td>Model to use</td></tr><tr><td><code>--reasoning &lt;level&gt;</code></td><td><code>-r</code></td><td>Reasoning level</td></tr><tr><td><code>--persona &lt;name&gt;</code></td><td><code>-p</code></td><td>Persona to use</td></tr><tr><td><code>--format &lt;default|json&gt;</code></td><td></td><td>Output format</td></tr><tr><td><code>--interactive</code></td><td></td><td>Persistent JSONL session protocol; no positional message</td></tr><tr><td><code>--bypass-permissions</code></td><td></td><td>Skip bash confirmation prompts</td></tr><tr><td><code>--skill &lt;path&gt;</code></td><td></td><td>Load extra skill (repeatable)</td></tr><tr><td><code>--no-skills</code></td><td></td><td>Skip project/agents/global/plugin/builtin skill discovery</td></tr><tr><td><code>--mcp &lt;path&gt;</code></td><td></td><td>Load extra MCP config (repeatable)</td></tr><tr><td><code>--no-mcp</code></td><td></td><td>Skip MCP discovery</td></tr></tbody></table></div><pre><code class="language-bash">cast run --format json &quot;list all test files&quot;
+<div class="table-wrap"><table><thead><tr><th>Flag</th><th>Short</th><th>Description</th></tr></thead><tbody><tr><td><code>--continue</code></td><td><code>-c</code></td><td>Continue the most recent session</td></tr><tr><td><code>--session &lt;id&gt;</code></td><td><code>-s</code></td><td>Continue a specific session</td></tr><tr><td><code>--worktree &lt;name&gt;</code></td><td><code>-w</code></td><td>Run in an isolated git worktree</td></tr><tr><td><code>--model &lt;model&gt;</code></td><td><code>-m</code></td><td>Model to use</td></tr><tr><td><code>--reasoning &lt;level&gt;</code></td><td><code>-r</code></td><td>Reasoning level</td></tr><tr><td><code>--persona &lt;name&gt;</code></td><td><code>-p</code></td><td>Persona to use</td></tr><tr><td><code>--format &lt;default|json&gt;</code></td><td></td><td>Output format</td></tr><tr><td><code>--interactive</code></td><td></td><td>Persistent JSONL session protocol; no positional message</td></tr><tr><td><code>--bypass-permissions</code></td><td></td><td>Skip bash confirmation prompts</td></tr><tr><td><code>--skill &lt;directory&gt;</code></td><td></td><td>Load an extra skill package directory (repeatable)</td></tr><tr><td><code>--no-skills</code></td><td></td><td>Skip project/agents/global/plugin/builtin skill discovery</td></tr><tr><td><code>--mcp &lt;path&gt;</code></td><td></td><td>Load extra MCP config (repeatable)</td></tr><tr><td><code>--no-mcp</code></td><td></td><td>Skip MCP discovery</td></tr></tbody></table></div><pre><code class="language-bash">cast run --format json &quot;list all test files&quot;
 cast run -m gpt-4o -r medium &quot;explain the session module&quot;
 </code></pre>
 
@@ -686,7 +687,7 @@ document.addEventListener('DOMContentLoaded', () => {
 			applyTransform();
 		};
 		const onEnd = () => { dragging = false; diagram.classList.remove('dragging'); };
-	
+
 diagram.addEventListener('mousedown', e => { onStart(e); e.preventDefault(); });
 		document.addEventListener('mousemove', onMove);
 		document.addEventListener('mouseup', onEnd);
