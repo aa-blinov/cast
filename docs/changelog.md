@@ -2,6 +2,15 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.16
+
+### Fixed
+
+- **Tool failures now tell the agent how to recover.** Invalid arguments for filesystem, shell, SSH, search, and web tools are rejected before execution with the specific field and valid replacement range. Missing search paths are no longer reported as empty results.
+- **Destructive MCP calls now request write approval.** The confirmation gate now recognizes Cast's real `mcp_<server>_<tool>` names, including when hooks are enabled.
+- **Failed background commands stay failed.** `bash_output` now preserves timeout and non-zero-exit errors instead of displaying an `ok` status; bash and SSH also explicitly mark byte-truncated output.
+- **MCP and cancellation errors have actionable context.** MCP failures identify the server and tool, while interrupted web requests are labelled `[ABORTED]` rather than as generic network failures.
+
 ## 0.13.15
 
 ### Changed
