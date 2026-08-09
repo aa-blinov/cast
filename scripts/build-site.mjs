@@ -6,6 +6,7 @@ import { marked } from "marked";
 const ROOT = new URL("..", import.meta.url).pathname;
 const DOCS = join(ROOT, "docs");
 const SITE = join(ROOT, "site");
+const PACKAGE_VERSION = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf-8")).version;
 
 const NAV_ORDER = [
 	{ file: "getting-started.md", label: "Getting Started" },
@@ -553,7 +554,7 @@ const LANDING_HTML = `<!DOCTYPE html>
 <body>
 <header class="header">
 	<a href="index.html" class="header-logo" aria-label="cast home"><img src="assets/favicon.svg" alt="cast logo"></a>
-	<span class="header-badge">v0.12.18</span>
+	<span class="header-badge">v${PACKAGE_VERSION}</span>
 	<div class="header-links">
 		<a href="getting-started.html">Docs</a>
 		<a href="https://github.com/aa-blinov/cast">GitHub</a>
@@ -700,7 +701,7 @@ function docPage(title, bodyHtml, activeFile) {
 <header class="header">
 	<button class="menu-toggle" aria-label="Menu">&#9776;</button>
 	<a href="index.html" class="header-logo" aria-label="cast home"><img src="assets/favicon.svg" alt="cast logo"></a>
-	<span class="header-badge">v0.12.18</span>
+	<span class="header-badge">v${PACKAGE_VERSION}</span>
 	<div class="header-links">
 		<a href="index.html">Home</a>
 		<a href="https://github.com/aa-blinov/cast">GitHub</a>
