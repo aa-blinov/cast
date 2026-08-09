@@ -2,6 +2,14 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.15
+
+### Fixed
+
+- **Daemon lifecycle is safe across restarts and upgrades.** Cast now verifies the daemon's per-process identity before attaching to it or signalling its PID, so a stale state file cannot direct a client to — or stop — an unrelated process that reused the PID.
+- **Upgrades preserve a background daemon's address.** `cast upgrade` restarts a verified background daemon on its existing host and port only after it exits cleanly. Foreground daemons are left untouched for their owning terminal to restart manually, preventing an automatic upgrade from cutting off active work.
+- **Long-lived daemons release inactive sessions without losing them.** Idle sessions with no listeners and no active background task are unloaded after five minutes and rehydrated on demand; reconnecting clients recover authoritative pending state and report rejected control commands instead of silently losing them.
+
 ## 0.13.14
 
 ### Fixed
