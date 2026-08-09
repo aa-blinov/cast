@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -50,6 +51,19 @@ describe("builtin skills", () => {
 			expect(d.length, `${entry}: ${d.length} chars`).toBeLessThanOrEqual(1024);
 		}
 	});
+
+	it("every builtin skill is valid Agent Skills YAML and metadata", () => {
+		const expected = readdirSync(builtinSkillsDir).filter((entry) => {
+			try {
+				return statSync(join(builtinSkillsDir, entry, "SKILL.md")).isFile();
+			} catch {
+				return false;
+			}
+		});
+		const { skills, diagnostics } = loadSkills({ builtinDir: builtinSkillsDir, extraPaths: [] });
+		expect(diagnostics).toEqual([]);
+		expect(skills).toHaveLength(expected.length);
+	});
 });
 
 describe("loadSkills discovery", () => {
@@ -59,10 +73,10 @@ describe("loadSkills discovery", () => {
 		expect(skills.map((s) => s.name)).toEqual(["my-skill"]);
 	});
 
-	it("loads a direct root .md file as a standalone skill", () => {
+	it("ignores a direct root .md file that is not an Agent Skills package", () => {
 		writeSkill(GLOBAL_DIR, "standalone.md", { name: "standalone", description: "A loose skill file." });
 		const { skills } = loadSkills({ globalDir: GLOBAL_DIR, extraPaths: [] });
-		expect(skills.map((s) => s.name)).toEqual(["standalone"]);
+		expect(skills).toHaveLength(0);
 	});
 
 	it("ignores .md files in subdirectories that have no SKILL.md", () => {
@@ -85,10 +99,11 @@ describe("loadSkills discovery", () => {
 		expect(skills).toHaveLength(0);
 	});
 
-	it("falls back to the parent directory name when frontmatter has no name", () => {
+	it("drops a skill without the required name, with a diagnostic", () => {
 		writeSkill(GLOBAL_DIR, "fallback-name/SKILL.md", { description: "No name field." });
-		const { skills } = loadSkills({ globalDir: GLOBAL_DIR, extraPaths: [] });
-		expect(skills.map((s) => s.name)).toEqual(["fallback-name"]);
+		const { skills, diagnostics } = loadSkills({ globalDir: GLOBAL_DIR, extraPaths: [] });
+		expect(skills).toHaveLength(0);
+		expect(diagnostics.some((d) => d.message === "name is required")).toBe(true);
 	});
 
 	it("drops a skill with a missing description, with a diagnostic", () => {
@@ -98,11 +113,63 @@ describe("loadSkills discovery", () => {
 		expect(diagnostics.some((d) => d.message.includes("description"))).toBe(true);
 	});
 
-	it("still loads a skill with an invalid name, but warns", () => {
+	it("drops a skill with an invalid name", () => {
 		writeSkill(GLOBAL_DIR, "Invalid-Name/SKILL.md", { name: "Invalid-Name", description: "Uppercase name." });
 		const { skills, diagnostics } = loadSkills({ globalDir: GLOBAL_DIR, extraPaths: [] });
-		expect(skills).toHaveLength(1);
+		expect(skills).toHaveLength(0);
 		expect(diagnostics.some((d) => d.message.includes("lowercase"))).toBe(true);
+	});
+
+	it("drops a directory skill whose name does not match its directory", () => {
+		writeSkill(GLOBAL_DIR, "other-name/SKILL.md", { name: "my-skill", description: "Wrong directory." });
+		const { skills, diagnostics } = loadSkills({ globalDir: GLOBAL_DIR, extraPaths: [] });
+		expect(skills).toHaveLength(0);
+		expect(diagnostics.some((d) => d.message.includes("must match parent directory"))).toBe(true);
+	});
+
+	it("parses and retains standard optional fields from full YAML", () => {
+		const skillDir = join(GLOBAL_DIR, "pdf-processing");
+		mkdirSync(skillDir, { recursive: true });
+		writeFileSync(
+			join(skillDir, "SKILL.md"),
+			`---\nname: pdf-processing\ndescription: Extract and fill PDF documents.\nlicense: Apache-2.0\ncompatibility: Requires Python 3.14 and pdftotext.\nmetadata:\n  author: example-org\n  version: "1.0"\nallowed-tools: Bash(pdftotext:*) Read\n---\n\nUse the reference.\n`,
+			"utf-8",
+		);
+		const { skills } = loadSkills({ globalDir: GLOBAL_DIR, extraPaths: [] });
+		expect(skills).toHaveLength(1);
+		expect(skills[0]).toMatchObject({
+			license: "Apache-2.0",
+			compatibility: "Requires Python 3.14 and pdftotext.",
+			metadata: { author: "example-org", version: "1.0" },
+			allowedTools: "Bash(pdftotext:*) Read",
+		});
+		expect(formatSkillInvocation(skills[0]!)).toContain('allowed-tools="Bash(pdftotext:*) Read"');
+	});
+
+	it("rejects invalid standard optional fields", () => {
+		const skillDir = join(GLOBAL_DIR, "bad-metadata");
+		mkdirSync(skillDir, { recursive: true });
+		writeFileSync(
+			join(skillDir, "SKILL.md"),
+			"---\nname: bad-metadata\ndescription: Invalid metadata.\ncompatibility: \nmetadata:\n  version: 1\n---\n\nBody.\n",
+			"utf-8",
+		);
+		const { skills, diagnostics } = loadSkills({ globalDir: GLOBAL_DIR, extraPaths: [] });
+		expect(skills).toHaveLength(0);
+		expect(diagnostics.map((d) => d.message)).toContain("compatibility must be a non-empty string");
+		expect(diagnostics.map((d) => d.message)).toContain("metadata must be a mapping of string keys to string values");
+	});
+
+	it("warns without dropping a body over the progressive-disclosure recommendation", () => {
+		writeSkill(
+			GLOBAL_DIR,
+			"long-skill/SKILL.md",
+			{ name: "long-skill", description: "A long skill." },
+			Array.from({ length: 501 }, () => "instruction").join("\n"),
+		);
+		const { skills, diagnostics } = loadSkills({ globalDir: GLOBAL_DIR, extraPaths: [] });
+		expect(skills).toHaveLength(1);
+		expect(diagnostics.some((d) => d.message.includes("recommended 500-line"))).toBe(true);
 	});
 
 	it("keeps the project skill on a name collision with a global skill, with a diagnostic", () => {
@@ -214,6 +281,22 @@ describe("loadSkills discovery", () => {
 		expect(skills.map((s) => s.name)).toEqual(["extra"]);
 	});
 
+	it("rejects a standalone file passed through --skill", () => {
+		const standalone = join(TEST_DIR, "standalone.md");
+		writeSkill(TEST_DIR, "standalone.md", { name: "standalone", description: "Not a package." });
+		const { skills, diagnostics } = loadSkills({ extraPaths: [standalone] });
+		expect(skills).toHaveLength(0);
+		expect(diagnostics.map((d) => d.message)).toContain("skill path must be a directory containing SKILL.md");
+	});
+
+	it("rejects a --skill directory that is only a container", () => {
+		const container = join(TEST_DIR, "container");
+		writeSkill(container, "nested/SKILL.md", { name: "nested", description: "Not explicitly selected." });
+		const { skills, diagnostics } = loadSkills({ extraPaths: [container] });
+		expect(skills).toHaveLength(0);
+		expect(diagnostics.map((d) => d.message)).toContain("skill directory must contain SKILL.md");
+	});
+
 	it("omits global/project dirs entirely when not provided (--no-skills)", () => {
 		writeSkill(GLOBAL_DIR, "my-skill/SKILL.md", { name: "my-skill", description: "Does a thing." });
 		const { skills } = loadSkills({ extraPaths: [] });
@@ -299,6 +382,30 @@ describe("formatSkillInvocation", () => {
 		expect(invocation).toContain("Step 1. Step 2.");
 		expect(invocation).toContain("User: extra instructions");
 	});
+
+	it("keeps scripts, references, and assets on disk for on-demand use", () => {
+		const skillDir = join(GLOBAL_DIR, "resource-skill");
+		writeSkill(
+			GLOBAL_DIR,
+			"resource-skill/SKILL.md",
+			{ name: "resource-skill", description: "Uses bundled resources." },
+			"Read references/REFERENCE.md, copy assets/template.txt, then run scripts/render.sh.",
+		);
+		mkdirSync(join(skillDir, "scripts"), { recursive: true });
+		mkdirSync(join(skillDir, "references"), { recursive: true });
+		mkdirSync(join(skillDir, "assets"), { recursive: true });
+		writeFileSync(join(skillDir, "scripts", "render.sh"), "#!/bin/sh\nprintf rendered\n", "utf-8");
+		writeFileSync(join(skillDir, "references", "REFERENCE.md"), "Reference content", "utf-8");
+		writeFileSync(join(skillDir, "assets", "template.txt"), "Template content", "utf-8");
+
+		const { skills } = loadSkills({ globalDir: GLOBAL_DIR, extraPaths: [] });
+		const invocation = formatSkillInvocation(skills[0]!);
+		expect(invocation).toContain(`References are relative to ${skillDir}.`);
+		expect(invocation).toContain("references/REFERENCE.md");
+		expect(readFileSync(join(skillDir, "references", "REFERENCE.md"), "utf-8")).toBe("Reference content");
+		expect(readFileSync(join(skillDir, "assets", "template.txt"), "utf-8")).toBe("Template content");
+		expect(execFileSync("sh", [join(skillDir, "scripts", "render.sh")], { encoding: "utf-8" })).toBe("rendered");
+	});
 });
 
 describe("formatSkillPickLabel", () => {
@@ -357,14 +464,5 @@ describe("uninstallUserSkill", () => {
 
 		const agents = { ...skill, source: "agents" as const };
 		expect(isUninstallableSkill(agents)).toBe(true);
-	});
-
-	it("removes a loose root .md without wiping the skills dir", () => {
-		writeSkill(GLOBAL_DIR, "loose.md", { name: "loose", description: "Loose file." });
-		const { skills } = loadSkills({ globalDir: GLOBAL_DIR, extraPaths: [] });
-		const skill = skills[0]!;
-		uninstallUserSkill(skill);
-		expect(existsSync(join(GLOBAL_DIR, "loose.md"))).toBe(false);
-		expect(existsSync(GLOBAL_DIR)).toBe(true);
 	});
 });

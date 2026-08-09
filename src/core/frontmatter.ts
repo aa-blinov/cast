@@ -1,21 +1,30 @@
 /**
- * Minimal frontmatter parser shared by skills.ts, personas.ts, and rules.ts —
- * scalars, booleans, and inline YAML arrays. Every field either module reads
- * (name, description, label, globs, ...) is a simple scalar or inline array
- * in practice, so pulling in a YAML dependency isn't worth it.
+ * YAML frontmatter parser shared by skills.ts, personas.ts, and rules.ts.
+ * Agent Skills requires nested `metadata` mappings, so a line-oriented parser
+ * would silently lose valid standard fields.
  */
+
+import { parseDocument } from "yaml";
 
 const REGEX_SPECIAL_CHAR_RE = /[.+?^${}()|[\]\\]/;
 const BOM_LEADING_RE = /^\uFEFF/;
 const CRLF_RE = /\r\n/g;
 const LEADING_NEWLINE_RE = /^\n/;
-const YAML_LINE_RE = /^([a-zA-Z0-9_-]+):\s*(.*)$/;
+const CLOSING_FRONTMATTER_RE = /^---[ \t]*$(?:\n|$)/m;
 
-export type FrontmatterValue = string | boolean | string[];
+export interface FrontmatterMap {
+	[key: string]: FrontmatterValue;
+}
+
+export interface FrontmatterList extends Array<FrontmatterValue> {}
+
+export type FrontmatterValue = string | number | boolean | null | FrontmatterList | FrontmatterMap;
 
 export interface ParsedFrontmatter {
-	frontmatter: Record<string, FrontmatterValue>;
+	frontmatter: FrontmatterMap;
 	body: string;
+	/** YAML syntax and shape errors. Callers decide whether an invalid file is fatal. */
+	errors: string[];
 }
 
 /**
@@ -78,50 +87,26 @@ export function parseAgentsMd(frontmatter: Record<string, FrontmatterValue>): bo
 	return frontmatter.agentsMd !== false;
 }
 
-/** Parse a YAML inline array like `["a", "b"]` or `[a, b]`. Returns undefined if not an array. */
-function parseInlineArray(value: string): string[] | undefined {
-	if (!value.startsWith("[") || !value.endsWith("]")) return undefined;
-	const inner = value.slice(1, -1).trim();
-	if (!inner) return [];
-	return inner.split(",").map((s) => {
-		let v = s.trim();
-		if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
-			v = v.slice(1, -1);
-		}
-		return v;
-	});
-}
-
 export function parseFrontmatter(content: string): ParsedFrontmatter {
 	// Strip a UTF-8 BOM: Windows editors (Notepad, PowerShell Out-File) prepend
 	// one, and `﻿---` failing the startsWith check silently discarded the
 	// whole frontmatter — a skill would load with no name or description.
 	const normalized = content.replace(BOM_LEADING_RE, "").replace(CRLF_RE, "\n");
-	if (!normalized.startsWith("---")) return { frontmatter: {}, body: normalized };
+	if (!normalized.startsWith("---\n")) return { frontmatter: {}, body: normalized, errors: [] };
 
-	const end = normalized.indexOf("\n---", 3);
-	if (end === -1) return { frontmatter: {}, body: normalized };
+	const closing = CLOSING_FRONTMATTER_RE.exec(normalized.slice(4));
+	if (!closing || closing.index === undefined) return { frontmatter: {}, body: normalized, errors: [] };
 
-	const yamlBlock = normalized.slice(3, end).trim();
-	const body = normalized.slice(end + 4).replace(LEADING_NEWLINE_RE, "");
+	const yamlBlock = normalized.slice(4, 4 + closing.index);
+	const body = normalized.slice(4 + closing.index + closing[0].length).replace(LEADING_NEWLINE_RE, "");
+	const document = parseDocument(yamlBlock, { prettyErrors: false, uniqueKeys: true });
+	const errors = document.errors.map((error) => error.message);
+	if (errors.length > 0) return { frontmatter: {}, body, errors };
 
-	const frontmatter: Record<string, FrontmatterValue> = {};
-	for (const line of yamlBlock.split("\n")) {
-		const match = line.match(YAML_LINE_RE);
-		if (!match) continue;
-		const key = match[1]!;
-		let value = match[2]!.trim();
-		// Inline YAML array: ["a", "b"] or [a, b]
-		const arr = parseInlineArray(value);
-		if (arr) {
-			frontmatter[key] = arr;
-			continue;
-		}
-		if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-			value = value.slice(1, -1);
-		}
-		frontmatter[key] = value === "true" ? true : value === "false" ? false : value;
+	const value = document.toJS();
+	if (value === null || value === undefined) return { frontmatter: {}, body, errors: [] };
+	if (typeof value !== "object" || Array.isArray(value)) {
+		return { frontmatter: {}, body, errors: ["frontmatter must be a YAML mapping"] };
 	}
-
-	return { frontmatter, body };
+	return { frontmatter: value as Record<string, FrontmatterValue>, body, errors: [] };
 }
