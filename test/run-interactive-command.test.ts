@@ -10,7 +10,7 @@
  */
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
@@ -54,21 +54,33 @@ beforeAll(async () => {
 			// response is enough — the runner never actually invokes the
 			// model because the slash command short-circuits before any
 			// prompt runs.
-			res.writeHead(200, { "content-type": "application/json" });
-			res.end(
-				JSON.stringify({
-					id: "mock",
-					object: "chat.completion",
-					choices: [
-						{
-							index: 0,
-							message: { role: "assistant", content: "ok" },
-							finish_reason: "stop",
-						},
-					],
-					usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-				}),
-			);
+			const chunks: Buffer[] = [];
+			req.on("data", (chunk: Buffer) => chunks.push(chunk));
+			req.on("end", () => {
+				const requestBody = Buffer.concat(chunks).toString("utf8");
+				const send = () => {
+					res.writeHead(200, { "content-type": "application/json" });
+					res.end(
+						JSON.stringify({
+							id: "mock",
+							object: "chat.completion",
+							choices: [
+								{
+									index: 0,
+									message: { role: "assistant", content: "ok" },
+									finish_reason: "stop",
+								},
+							],
+							usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+						}),
+					);
+				};
+				if (requestBody.includes("chaos-hang")) {
+					setTimeout(send, 10_000).unref();
+				} else {
+					send();
+				}
+			});
 		} else {
 			res.writeHead(404);
 			res.end();
@@ -224,7 +236,73 @@ async function runInteractive(
 	});
 }
 
+function daemonClient(): { baseUrl: string; headers: Record<string, string> } {
+	const state = JSON.parse(readFileSync(join(testHome!, ".cast", "server.json"), "utf8")) as {
+		port: number;
+		token?: string;
+	};
+	return {
+		baseUrl: `http://127.0.0.1:${state.port}`,
+		headers: {
+			"Content-Type": "application/json",
+			...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
+		},
+	};
+}
+
+async function waitForSessionStatus(
+	baseUrl: string,
+	headers: Record<string, string>,
+	id: string,
+	status: string,
+): Promise<void> {
+	const deadline = Date.now() + 5000;
+	let lastStatus: string | undefined;
+	while (Date.now() < deadline) {
+		const response = await fetch(`${baseUrl}/api/sessions/${id}`, { headers });
+		const session = (await response.json()) as { status?: string };
+		lastStatus = session.status;
+		if (session.status === status) return;
+		await new Promise((resolve) => setTimeout(resolve, 25));
+	}
+	throw new Error(`session ${id} did not reach ${status} (last status: ${lastStatus ?? "unknown"})`);
+}
+
 describe("JSONL protocol — command action", () => {
+	it("recovers a real daemon session after aborting an in-flight provider call", async () => {
+		const { baseUrl, headers } = daemonClient();
+		const created = await fetch(`${baseUrl}/api/sessions`, {
+			method: "POST",
+			headers,
+			body: JSON.stringify({ persona: "assistant", model: "minimax-m3", cwd: repo }),
+		});
+		expect(created.status).toBe(201);
+		const { id } = (await created.json()) as { id: string };
+
+		const hung = await fetch(`${baseUrl}/api/sessions/${id}/chat`, {
+			method: "POST",
+			headers,
+			body: JSON.stringify({ text: "chaos-hang" }),
+		});
+		expect(hung.status).toBe(202);
+		await waitForSessionStatus(baseUrl, headers, id, "running");
+
+		const aborted = await fetch(`${baseUrl}/api/sessions/${id}/abort`, { method: "POST", headers });
+		expect(aborted.status).toBe(200);
+		await waitForSessionStatus(baseUrl, headers, id, "idle");
+
+		const recovered = await fetch(`${baseUrl}/api/sessions/${id}/chat`, {
+			method: "POST",
+			headers,
+			body: JSON.stringify({ text: "chaos-hang-recovery" }),
+		});
+		expect(recovered.status).toBe(202);
+		await waitForSessionStatus(baseUrl, headers, id, "running");
+		const reaborted = await fetch(`${baseUrl}/api/sessions/${id}/abort`, { method: "POST", headers });
+		expect(reaborted.status).toBe(200);
+		await waitForSessionStatus(baseUrl, headers, id, "idle");
+	}, 30_000);
+
 	it("dispatches /worktree and updates cwd visible via state", async () => {
 		const events = await runInteractive([
 			{ type: "command", name: "worktree", args: " feature-1" },

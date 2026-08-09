@@ -17,7 +17,14 @@ import { execBash } from "./tools/bash.ts";
 import { type BashBackgroundDeps, execBashKill, execBashOutput } from "./tools/bash-background.ts";
 import { execEdit, execRead, execWrite } from "./tools/files.ts";
 import { execGlob, execGrep, execLs } from "./tools/search.ts";
-import { type ConfirmBash, resolvePath, type ToolExecutor, type ToolResult } from "./tools/shared.ts";
+import {
+	type ConfirmBash,
+	normalizeToolResultError,
+	resolvePath,
+	type ToolExecutor,
+	type ToolResult,
+	toolError,
+} from "./tools/shared.ts";
 import { execSkill, type SkillToolDeps } from "./tools/skill.ts";
 import { execSsh } from "./tools/ssh.ts";
 import { execTask, type TaskExecutorDeps } from "./tools/task.ts";
@@ -599,111 +606,118 @@ export function createToolExecutor(
 		signal?: AbortSignal,
 		toolCallId?: string,
 	): Promise<ToolResult> => {
-		try {
-			switch (name) {
-				case "bash":
-					return await execBash(args, cwd, config, confirmBash, signal, backgroundBash);
-				case "bash_output":
-					return await execBashOutput(args, config, backgroundBash, signal);
-				case "bash_kill":
-					return await execBashKill(args, backgroundBash);
-				case "read": {
-					const result = await execRead(args, cwd, config);
-					// A read of the active-or-other plan file while plan mode is
-					// active makes it the active plan — same effect plan_read's
-					// `name` argument used to have, without a dedicated tool. Build
-					// mode intentionally skips this: the approved plan must keep
-					// steering via the mirror block regardless of what gets read.
-					if (planState?.enabled && !result.isError) {
+		const dispatch = async (): Promise<ToolResult> => {
+			try {
+				switch (name) {
+					case "bash":
+						return await execBash(args, cwd, config, confirmBash, signal, backgroundBash);
+					case "bash_output":
+						return await execBashOutput(args, config, backgroundBash, signal);
+					case "bash_kill":
+						return await execBashKill(args, backgroundBash);
+					case "read": {
+						const result = await execRead(args, cwd, config);
+						// A read of the active-or-other plan file while plan mode is
+						// active makes it the active plan — same effect plan_read's
+						// `name` argument used to have, without a dedicated tool. Build
+						// mode intentionally skips this: the approved plan must keep
+						// steering via the mirror block regardless of what gets read.
+						if (planState?.enabled && !result.isError) {
+							const absolutePath = resolvePath(String(args.path ?? ""), cwd);
+							maybeActivatePlanOnRead(absolutePath, planState);
+						}
+						return result;
+					}
+					case "write": {
 						const absolutePath = resolvePath(String(args.path ?? ""), cwd);
-						maybeActivatePlanOnRead(absolutePath, planState);
-					}
-					return result;
-				}
-				case "write": {
-					const absolutePath = resolvePath(String(args.path ?? ""), cwd);
-					if (planState?.enabled) {
-						const gate = checkPlanFileGate(absolutePath, planState);
-						if (!gate.ok) return { content: gate.error, isError: true };
-						// write's full content is known up front — enforce the size
-						// cap before touching disk, same as the old plan_write.
-						const content = typeof args.content === "string" ? args.content : "";
-						if (content.length > MAX_PLAN_CHARS) {
-							return {
-								content: `Error: plan is ${content.length} chars — the limit is ${MAX_PLAN_CHARS}. A plan is an execution spec, not a document dump: cut decision-free prose, keep every step concrete.`,
-								isError: true,
-							};
+						if (planState?.enabled) {
+							const gate = checkPlanFileGate(absolutePath, planState);
+							if (!gate.ok) return { content: gate.error, isError: true };
+							// write's full content is known up front — enforce the size
+							// cap before touching disk, same as the old plan_write.
+							const content = typeof args.content === "string" ? args.content : "";
+							if (content.length > MAX_PLAN_CHARS) {
+								return {
+									content: `Error: plan is ${content.length} chars — the limit is ${MAX_PLAN_CHARS}. A plan is an execution spec, not a document dump: cut decision-free prose, keep every step concrete.`,
+									isError: true,
+								};
+							}
+							beforeFileWrite?.(absolutePath);
+							const result = await execWrite(args, cwd);
+							if (!result.isError) finalizePlanFileWrite(absolutePath, planState);
+							return result;
 						}
 						beforeFileWrite?.(absolutePath);
-						const result = await execWrite(args, cwd);
-						if (!result.isError) finalizePlanFileWrite(absolutePath, planState);
-						return result;
+						return await execWrite(args, cwd);
 					}
-					beforeFileWrite?.(absolutePath);
-					return await execWrite(args, cwd);
-				}
-				case "edit": {
-					const absolutePath = resolvePath(String(args.filePath ?? ""), cwd);
-					if (planState?.enabled) {
-						const gate = checkPlanFileGate(absolutePath, planState);
-						if (!gate.ok) return { content: gate.error, isError: true };
-						// Snapshot before the edit — ops apply as anchored deltas, so
-						// the resulting size isn't known until after. If it lands over
-						// the cap, enforcePlanCapAfterEdit rolls back to this content.
-						let beforeContent = "";
-						try {
-							beforeContent = readFileSync(absolutePath, "utf-8");
-						} catch {
-							// No existing file to snapshot — execEdit itself will
-							// surface the real "file not found" error below.
+					case "edit": {
+						const absolutePath = resolvePath(String(args.filePath ?? ""), cwd);
+						if (planState?.enabled) {
+							const gate = checkPlanFileGate(absolutePath, planState);
+							if (!gate.ok) return { content: gate.error, isError: true };
+							// Snapshot before the edit — ops apply as anchored deltas, so
+							// the resulting size isn't known until after. If it lands over
+							// the cap, enforcePlanCapAfterEdit rolls back to this content.
+							let beforeContent = "";
+							try {
+								beforeContent = readFileSync(absolutePath, "utf-8");
+							} catch {
+								// No existing file to snapshot — execEdit itself will
+								// surface the real "file not found" error below.
+							}
+							beforeFileWrite?.(absolutePath);
+							const result = await execEdit(args, cwd, config);
+							if (!result.isError) {
+								const capResult = enforcePlanCapAfterEdit(absolutePath, beforeContent);
+								if (!capResult.ok) return { content: capResult.error, isError: true };
+								finalizePlanFileWrite(absolutePath, planState);
+							}
+							return result;
 						}
 						beforeFileWrite?.(absolutePath);
-						const result = await execEdit(args, cwd, config);
-						if (!result.isError) {
-							const capResult = enforcePlanCapAfterEdit(absolutePath, beforeContent);
-							if (!capResult.ok) return { content: capResult.error, isError: true };
-							finalizePlanFileWrite(absolutePath, planState);
-						}
-						return result;
+						return await execEdit(args, cwd, config);
 					}
-					beforeFileWrite?.(absolutePath);
-					return await execEdit(args, cwd, config);
+					case "glob":
+					case "find": // legacy alias — same implementation as glob
+						return await execGlob(args, cwd, config, signal);
+					case "grep":
+						return await execGrep(args, cwd, config, signal);
+					case "ls":
+						return await execLs(args, cwd, config);
+					case "web_search":
+						return await execWebSearch(args, signal);
+					case "web_fetch":
+						return await execWebFetch(args, signal);
+					case "ssh":
+						return await execSsh(args, sshHosts ?? [], config, confirmBash, signal);
+					case "task":
+						if (!taskDeps)
+							return { content: "Task tool not available — no dependencies configured.", isError: true };
+						return await execTask(args, cwd, config, taskDeps, signal, toolCallId);
+					case "plan_done":
+						if (!planState) return { content: "Plan tool not available.", isError: true };
+						return execPlanDone(args, planState);
+					case "question":
+						if (!planState) return { content: "Question tool not available.", isError: true };
+						return execQuestion(args, planState);
+					case "skill":
+						if (!skillDeps) return { content: "Skill tool not available.", isError: true };
+						return execSkill(args, skillDeps);
+					default:
+						return { content: `Unknown tool: ${name}`, isError: true };
 				}
-				case "glob":
-				case "find": // legacy alias — same implementation as glob
-					return await execGlob(args, cwd, config);
-				case "grep":
-					return await execGrep(args, cwd, config);
-				case "ls":
-					return await execLs(args, cwd, config);
-				case "web_search":
-					return await execWebSearch(args, signal);
-				case "web_fetch":
-					return await execWebFetch(args, signal);
-				case "ssh":
-					return await execSsh(args, sshHosts ?? [], config, confirmBash, signal);
-				case "task":
-					if (!taskDeps)
-						return { content: "Task tool not available — no dependencies configured.", isError: true };
-					return await execTask(args, cwd, config, taskDeps, signal, toolCallId);
-				case "plan_done":
-					if (!planState) return { content: "Plan tool not available.", isError: true };
-					return execPlanDone(args, planState);
-				case "question":
-					if (!planState) return { content: "Question tool not available.", isError: true };
-					return execQuestion(args, planState);
-				case "skill":
-					if (!skillDeps) return { content: "Skill tool not available.", isError: true };
-					return execSkill(args, skillDeps);
-				default:
-					return { content: `Unknown tool: ${name}`, isError: true };
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				return toolError(
+					`Error: ${name} failed unexpectedly: ${message}. Check the tool arguments, path, and permissions, then retry.`,
+					{
+						code: "INTERNAL_ERROR",
+						retryable: false,
+						suggestedFix: "Check the tool arguments, path, and permissions, then retry.",
+					},
+				);
 			}
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			return {
-				content: `Error: ${name} failed unexpectedly: ${message}. Check the tool arguments, path, and permissions, then retry.`,
-				isError: true,
-			};
-		}
+		};
+		return normalizeToolResultError(await dispatch());
 	};
 }

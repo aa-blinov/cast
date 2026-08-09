@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
@@ -953,6 +953,32 @@ describe("glob", () => {
 		});
 		expect(existsSync(canary)).toBe(false);
 	});
+
+	it("cancels a real in-flight fd process without falling back to a tree walk", async () => {
+		const binDir = join(TEST_DIR, "slow-fd-bin");
+		mkdirSync(binDir, { recursive: true });
+		const fdPath = join(binDir, "fd");
+		writeFileSync(fdPath, "#!/bin/sh\nexec /bin/sleep 30\n");
+		chmodSync(fdPath, 0o755);
+		const originalPath = process.env.PATH;
+		process.env.PATH = `${binDir}:${originalPath ?? ""}`;
+		const controller = new AbortController();
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+
+		try {
+			const start = Date.now();
+			const resultPromise = exec("glob", { pattern: "*.ts", path: TEST_DIR }, controller.signal);
+			await new Promise((resolve) => setTimeout(resolve, 100));
+			controller.abort();
+			const result = await resultPromise;
+
+			expect(Date.now() - start).toBeLessThan(5000);
+			expect(result).toMatchObject({ isError: true, error: { code: "ABORTED", retryable: false } });
+			expect(result.content).toContain("[ABORTED]");
+		} finally {
+			process.env.PATH = originalPath;
+		}
+	});
 });
 
 // ============================================================================
@@ -1142,6 +1168,32 @@ describe("grep", () => {
 		expect(result.content).toContain("hello world");
 		expect(result.content).toContain("hello again");
 		expect(result.content).not.toContain("foo bar");
+	});
+
+	it("cancels a real in-flight rg process without falling back to a content scan", async () => {
+		const binDir = join(TEST_DIR, "slow-rg-bin");
+		mkdirSync(binDir, { recursive: true });
+		const rgPath = join(binDir, "rg");
+		writeFileSync(rgPath, "#!/bin/sh\nexec /bin/sleep 30\n");
+		chmodSync(rgPath, 0o755);
+		const originalPath = process.env.PATH;
+		process.env.PATH = `${binDir}:${originalPath ?? ""}`;
+		const controller = new AbortController();
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+
+		try {
+			const start = Date.now();
+			const resultPromise = exec("grep", { pattern: "needle", path: TEST_DIR }, controller.signal);
+			await new Promise((resolve) => setTimeout(resolve, 100));
+			controller.abort();
+			const result = await resultPromise;
+
+			expect(Date.now() - start).toBeLessThan(5000);
+			expect(result).toMatchObject({ isError: true, error: { code: "ABORTED", retryable: false } });
+			expect(result.content).toContain("[ABORTED]");
+		} finally {
+			process.env.PATH = originalPath;
+		}
 	});
 
 	it("does not let a pattern break out and run injected shell commands", async () => {
