@@ -2,6 +2,14 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.17
+
+### Fixed
+
+- **Interrupted file searches stop immediately.** `/abort` now cancels in-flight `glob` and `grep` processes (`fd`/`rg`) and their built-in fallback scans instead of allowing a search to continue after the turn was cancelled.
+- **Tool failures have a stable recovery contract.** Every failed tool result now includes an error code, whether retrying is appropriate, and a suggested fix alongside its readable diagnostic. This is carried through the agent loop, SSE, and JSONL clients.
+- **Daemon abort recovery is covered end-to-end.** A daemon session that aborts a stalled provider request reliably returns to idle and can start another turn.
+
 ## 0.13.16
 
 ### Fixed
