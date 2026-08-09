@@ -1,10 +1,11 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
 	closeMcpConnections,
 	connectMcpServers,
+	listMcpTools,
 	loadMcpConfig,
 	mcpHttpFetch,
 	mcpToolName,
@@ -210,6 +211,28 @@ describe("connectMcpServers (real spawned MCP server, not mocked)", () => {
 		} finally {
 			await closeMcpConnections(result.connections);
 		}
+	});
+
+	it("reports a repeated tools/list cursor instead of discovering forever", async () => {
+		const listTools = vi
+			.fn()
+			.mockResolvedValueOnce({ tools: [], nextCursor: "again" })
+			.mockResolvedValueOnce({ tools: [], nextCursor: "again" });
+		await expect(listMcpTools({ listTools } as never, 100)).rejects.toThrow(
+			'tools/list returned the cursor "again" more than once',
+		);
+		expect(listTools).toHaveBeenCalledTimes(2);
+	});
+
+	it("times out a hung tools/list request after a successful handshake", async () => {
+		const startedAt = Date.now();
+		const result = await connectMcpServers(
+			{ echo: { command: "node", args: [FIXTURE_SERVER, "--hang-list-tools"] } },
+			100,
+		);
+		expect(Date.now() - startedAt).toBeLessThan(5_000);
+		expect(result.connections).toEqual([]);
+		expect(result.diagnostics.join("\n")).toMatch(/timeout|timed out|respond/i);
 	});
 
 	it("translates every MCP content-block type instead of dropping non-text/first-image parts", async () => {
