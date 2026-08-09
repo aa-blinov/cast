@@ -71,6 +71,22 @@ export function daemonBaseUrl(state: Pick<ServerDaemonState, "host" | "port">): 
 	return `http://${host}:${state.port}`;
 }
 
+/** Confirms that the HTTP daemon is the same process that wrote this state. */
+export async function isCurrentDaemonInstance(state: ServerDaemonState): Promise<boolean> {
+	if (!state.instanceId || !state.token) return false;
+	try {
+		const response = await fetch(`${daemonBaseUrl(state)}/api/server/identity`, {
+			headers: { Authorization: `Bearer ${state.token}` },
+			signal: AbortSignal.timeout(1_500),
+		});
+		if (!response.ok) return false;
+		const identity = (await response.json()) as { instanceId?: string };
+		return identity.instanceId === state.instanceId;
+	} catch {
+		return false;
+	}
+}
+
 /** A missing value is intentionally incompatible: an older daemon cannot prove it speaks this protocol. */
 export function isDaemonProtocolCompatible(state: ServerDaemonState): boolean {
 	return state.protocolVersion === DAEMON_PROTOCOL_VERSION;

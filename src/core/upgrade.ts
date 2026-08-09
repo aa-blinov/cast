@@ -8,7 +8,13 @@
 import { spawnSync } from "node:child_process";
 import { sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { clearServerState, isProcessAlive, readServerState } from "../server/daemon-state.ts";
+import {
+	clearServerState,
+	isCurrentDaemonInstance,
+	isProcessAlive,
+	readServerState,
+	type ServerDaemonState,
+} from "../server/daemon-state.ts";
 
 const V_PREFIX_RE = /^v/;
 
@@ -138,7 +144,7 @@ export async function runUpgrade(currentVersion: string, pinnedVersion?: string,
 		return;
 	}
 
-	restartDaemon();
+	await restartDaemon();
 }
 
 /**
@@ -150,18 +156,49 @@ export async function runUpgrade(currentVersion: string, pinnedVersion?: string,
  * start one that wasn't there.
  */
 /** @internal exported for unit tests */
-export function restartDaemon(): void {
+export async function restartDaemon(): Promise<void> {
 	const state = readServerState();
 	if (!state || !isProcessAlive(state.pid)) return;
+	if (!(await isCurrentDaemonInstance(state))) {
+		console.log("[cast server] could not verify the running daemon after upgrade; leaving its PID untouched.");
+		clearServerState();
+		return;
+	}
+	if (state.foreground) {
+		console.log(
+			"[cast server] foreground daemon left running after upgrade; restart it manually to preserve its terminal ownership.",
+		);
+		return;
+	}
 	console.log(`\n[cast server] daemon was running (pid ${state.pid}) — restarting it on the new build...`);
 	try {
 		process.kill(state.pid, "SIGTERM");
 	} catch {
 		// already gone
 	}
+	if (!(await waitForDaemonExit(state))) {
+		console.log(
+			"[cast server] daemon did not stop cleanly; leaving restart to the user to avoid interrupting active work.",
+		);
+		return;
+	}
 	clearServerState();
-	const started = spawnSync("bash", ["-c", "cast server start --port 0"], { stdio: "inherit" });
+	const started = spawnSync("cast", ["server", "start", "--port", String(state.port), "--host", state.host], {
+		stdio: "inherit",
+	});
 	if (started.status !== 0) {
 		console.log("[cast server] note: the new daemon failed to start — run 'cast server start' manually.");
 	}
+}
+
+async function waitForDaemonExit(state: ServerDaemonState): Promise<boolean> {
+	return new Promise((resolve) => {
+		const deadline = Date.now() + 10_000;
+		const check = () => {
+			if (!isProcessAlive(state.pid)) return resolve(true);
+			if (Date.now() >= deadline) return resolve(false);
+			setTimeout(check, 100);
+		};
+		check();
+	});
 }

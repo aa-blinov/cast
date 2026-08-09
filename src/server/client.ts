@@ -20,9 +20,11 @@ import { EventSource } from "undici";
 import type { SessionState } from "../core/session.ts";
 import {
 	acquireStartLock,
+	clearServerState,
 	DAEMON_STARTUP_TIMEOUT_MS,
 	DaemonProtocolMismatchError,
 	daemonBaseUrl,
+	isCurrentDaemonInstance,
 	isDaemonProtocolCompatible,
 	readLiveServerState,
 	releaseStartLock,
@@ -44,9 +46,13 @@ export interface ServerClient {
 export async function ensureServerClient(): Promise<ServerClient | undefined> {
 	if (process.env.CAST_NO_DAEMON === "1") return undefined;
 	try {
-		const clientFor = (state: ServerDaemonState | undefined): ServerClient | undefined => {
+		const clientFor = async (state: ServerDaemonState | undefined): Promise<ServerClient | undefined> => {
 			if (!state) return undefined;
 			if (!isDaemonProtocolCompatible(state)) throw new DaemonProtocolMismatchError(state);
+			if (!(await isCurrentDaemonInstance(state))) {
+				clearServerState();
+				return undefined;
+			}
 			return { baseUrl: daemonBaseUrl(state), token: state.token };
 		};
 		// Same daemon-start race protection as index.ts's ensureDaemon: an
@@ -55,14 +61,20 @@ export async function ensureServerClient(): Promise<ServerClient | undefined> {
 		const waitForDaemon = async (attempt: number): Promise<ServerClient | undefined> => {
 			if (attempt >= 100) return undefined;
 			const existing = readLiveServerState();
-			if (existing) return clientFor(existing);
+			if (existing) {
+				const client = await clientFor(existing);
+				if (client) return client;
+			}
 			if (!acquireStartLock()) {
 				await new Promise((r) => setTimeout(r, 100));
 				return waitForDaemon(attempt + 1);
 			}
 			try {
 				const now = readLiveServerState();
-				if (now) return clientFor(now);
+				if (now) {
+					const client = await clientFor(now);
+					if (client) return client;
+				}
 				const state = await spawnDetachedDaemon();
 				return clientFor(state);
 			} finally {
