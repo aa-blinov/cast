@@ -464,7 +464,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 <header class="header">
 	<button class="menu-toggle" aria-label="Menu">&#9776;</button>
 	<a href="index.html" class="header-logo" aria-label="cast home"><img src="assets/favicon.svg" alt="cast logo"></a>
-	<span class="header-badge">v0.12.18</span>
+	<span class="header-badge">v0.13.15</span>
 	<div class="header-links">
 		<a href="index.html">Home</a>
 		<a href="https://github.com/aa-blinov/cast">GitHub</a>
@@ -507,6 +507,19 @@ a:hover { color: #c084fc; text-decoration: none; }
 	<article class="content">
 		<h1>Changelog</h1>
 <p>All notable user-facing changes to cast, newest first.</p>
+<h2>0.13.15</h2>
+<h3>Fixed</h3>
+<ul>
+<li><strong>Daemon lifecycle is safe across restarts and upgrades.</strong> Cast now verifies the daemon&#39;s per-process identity before attaching to it or signalling its PID, so a stale state file cannot direct a client to — or stop — an unrelated process that reused the PID.</li>
+<li><strong>Upgrades preserve a background daemon&#39;s address.</strong> <code>cast upgrade</code> restarts a verified background daemon on its existing host and port only after it exits cleanly. Foreground daemons are left untouched for their owning terminal to restart manually, preventing an automatic upgrade from cutting off active work.</li>
+<li><strong>Long-lived daemons release inactive sessions without losing them.</strong> Idle sessions with no listeners and no active background task are unloaded after five minutes and rehydrated on demand; reconnecting clients recover authoritative pending state and report rejected control commands instead of silently losing them.</li>
+</ul>
+<h2>0.13.14</h2>
+<h3>Fixed</h3>
+<ul>
+<li><strong>Opening a second <code>cast</code> while another was already running no longer strands the first on a dead daemon.</strong> Two concurrent launches used to race on the empty state file and each spawn its own daemon; the one that lost the race was never registered, and a TUI already pointed at it reported &quot;Daemon unreachable&quot; on its next message. Daemon startup is now serialized by an exclusive lock — concurrent launches wait and reuse the winner instead of stacking a second process.</li>
+<li><strong>An idle TUI now survives its daemon being replaced.</strong> If the daemon is stopped, crashes, or is restarted by an upgrade, the next message in the open TUI re-reads the daemon state, reconnects to the new daemon, and retries — the session (owned by the central store) continues instead of erroring.</li>
+</ul>
 <h2>0.13.13</h2>
 <h3>Added</h3>
 <ul>

@@ -464,7 +464,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 <header class="header">
 	<button class="menu-toggle" aria-label="Menu">&#9776;</button>
 	<a href="index.html" class="header-logo" aria-label="cast home"><img src="assets/favicon.svg" alt="cast logo"></a>
-	<span class="header-badge">v0.12.18</span>
+	<span class="header-badge">v0.13.15</span>
 	<div class="header-links">
 		<a href="index.html">Home</a>
 		<a href="https://github.com/aa-blinov/cast">GitHub</a>
@@ -509,9 +509,10 @@ a:hover { color: #c084fc; text-decoration: none; }
 <h2>Usage</h2>
 <pre><code>cast [options] [prompt]
 cast run [options] &lt;message&gt;    Non-interactive mode
-cast run --interactive [options] Persistent JSONL session
-    cast server [start|stop|status]    Web UI mode
-    cast upgrade [version] [--force]  Self-update
+cast run --interactive [options]      Persistent JSONL session
+cast web [start|stop|status]          Browser-based control room
+cast server [start|stop|status]       Alias for cast web
+cast upgrade [version] [--force]      Self-update
 </code></pre>
 <p>TUI mode (Ink-based, multiline paste, image attachments) is the default. Non-TTY contexts (pipes, CI) are not supported — use <code>cast run</code> for scripting.</p>
 <h2>Subcommands</h2>
@@ -536,17 +537,18 @@ plan-review state between agent turns.</p>
 cast upgrade 0.3.0        # Upgrade to specific version
 cast upgrade --force      # Reinstall even if same version
 </code></pre>
-<h3><code>cast server</code></h3>
-<p>Web UI mode: launches a browser-based control room for managing background agents. The <code>cast server</code> daemon is the single writer for every session — both the browser and the TUI are thin clients of it over HTTP + SSE, so a session opened in either surface streams live (tokens, tool calls, status) to both. The TUI auto-spawns this daemon on launch unless one is already running or <code>CAST_NO_DAEMON=1</code> is set.</p>
-<pre><code class="language-bash">cast server                 # Start in background (daemon)
-cast server start           # Same as above
-cast server stop            # Stop the background server (SIGTERM → SIGKILL after 3s)
-cast server status          # Check if running (auto-heals stale state)
-cast server --foreground    # Run inline (for dev/debug)
-cast server --port 8080     # Custom port (default: 1337, or set CAST_SERVER_PORT)
-cast server --host 0.0.0.0  # Bind to all interfaces (reachable from network)
-cast server --public        # Alias for --host 0.0.0.0
+<h3><code>cast web</code></h3>
+<p>Web UI mode: launches a browser-based control room for managing background agents. The internal <code>cast server</code> daemon is the single writer for every session — both the browser and the TUI are thin clients of it over HTTP + SSE, so a session opened in either surface streams live (tokens, tool calls, status) to both. The TUI auto-spawns this daemon on launch unless one is already running or <code>CAST_NO_DAEMON=1</code> is set. <code>cast server</code> is a supported alias for scripts and integrations.</p>
+<pre><code class="language-bash">cast web                 # Start in background (daemon)
+cast web start           # Same as above
+cast web stop            # Stop the background server (SIGTERM → SIGKILL after 3s)
+cast web status          # Check if running (auto-heals stale state)
+cast web --foreground    # Run inline (for dev/debug)
+cast web --port 8080     # Custom port (default: 1337, or set CAST_SERVER_PORT)
+cast web --host 0.0.0.0  # Bind to all interfaces (reachable from network)
+cast web --public        # Alias for --host 0.0.0.0
 </code></pre>
+<p>For local development, <code>npm run dev:web</code> runs the Web UI in the foreground. Pass server options after <code>--</code>, for example <code>npm run dev:web -- --port 8080</code>.</p>
 <p>First run generates a password, printed to the terminal and saved in <code>~/.cast/settings.json</code>. Username is always <code>cast</code>.</p>
 <p>Binding to a non-loopback address (<code>--host 0.0.0.0</code> or <code>--public</code>) exposes plain HTTP. Use it only on a trusted LAN: without HTTPS, a network observer can read the password and session. For remote access without a domain, keep the default loopback binding and use <code>ssh -L 1337:127.0.0.1:1337 user@host</code>.</p>
 <p>Starting when another instance is already running prints an error and exits. <code>stop</code> gracefully shuts down open sessions (SIGTERM), escalating to SIGKILL after 3 seconds if the process doesn&#39;t exit. If the recorded process is already gone (crash, OOM, <code>kill -9</code>), <code>status</code> and <code>stop</code> detect the stale state, clean up, and report honestly.</p>
@@ -569,7 +571,7 @@ cast server --public        # Alias for --host 0.0.0.0
 <p>On Windows, prints the install command to run in a new terminal (can&#39;t self-replace running process files).</p>
 <h2>Options</h2>
 <h3>Model Selection</h3>
-<div class="table-wrap"><table><thead><tr><th>Flag</th><th>Short</th><th>Description</th></tr></thead><tbody><tr><td><code>--model &lt;model&gt;</code></td><td><code>-m</code></td><td>Model name (validated on startup against the provider)</td></tr><tr><td><code>--reasoning &lt;level&gt;</code></td><td><code>-r</code></td><td>Reasoning level: <code>off</code>, <code>low</code>, <code>medium</code>, <code>high</code>, <code>max</code></td></tr><tr><td><code>--persona &lt;name&gt;</code></td><td><code>-p</code></td><td>Persona to use (see <code>/personas</code> for the list)</td></tr></tbody></table></div><pre><code class="language-bash">cast -m qwen/qwen3-235b-a22b -r high &quot;refactor this function&quot;
+<div class="table-wrap"><table><thead><tr><th>Flag</th><th>Short</th><th>Description</th></tr></thead><tbody><tr><td><code>--model &lt;model&gt;</code></td><td><code>-m</code></td><td>Model name (validated on startup against the provider)</td></tr><tr><td><code>--reasoning &lt;level&gt;</code></td><td><code>-r</code></td><td>Reasoning level: <code>off</code>, <code>low</code>, <code>medium</code>, <code>high</code>, <code>max</code></td></tr><tr><td><code>--persona &lt;name&gt;</code></td><td><code>-p</code></td><td>Persona to use (use <code>/persona</code> to choose)</td></tr></tbody></table></div><pre><code class="language-bash">cast -m qwen/qwen3-235b-a22b -r high &quot;refactor this function&quot;
 cast -p senior &quot;review this PR&quot;
 </code></pre>
 <h3>Session Management</h3>
