@@ -53,6 +53,19 @@ describe("daemon-state", () => {
 		expect(readServerState()).toEqual(state);
 	});
 
+	it("uses loopback when a public bind is consumed by a local client", async () => {
+		const { daemonBaseUrl } = await import("../src/server/daemon-state.ts");
+		expect(daemonBaseUrl({ host: "0.0.0.0", port: 1337 })).toBe("http://127.0.0.1:1337");
+		expect(daemonBaseUrl({ host: "::", port: 1337 })).toBe("http://[::1]:1337");
+	});
+
+	it("publishes state atomically without leaving a temporary file", async () => {
+		const { readdirSync } = await import("node:fs");
+		const { writeServerState } = await import("../src/server/daemon-state.ts");
+		writeServerState({ pid: process.pid, port: 1337, host: "127.0.0.1", startedAt: "now", foreground: false });
+		expect(readdirSync(join(fakeHome, ".cast")).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+	});
+
 	it("rejects legacy and newer daemon protocols with a restart instruction", async () => {
 		const { DAEMON_PROTOCOL_VERSION, daemonProtocolMismatchMessage, isDaemonProtocolCompatible } = await import(
 			"../src/server/daemon-state.ts"

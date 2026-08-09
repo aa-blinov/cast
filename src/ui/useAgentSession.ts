@@ -47,7 +47,7 @@ import {
 	steerServerSession,
 	submitServerChat,
 } from "../server/client.ts";
-import { readLiveServerState } from "../server/daemon-state.ts";
+import { daemonBaseUrl, readLiveServerState } from "../server/daemon-state.ts";
 import {
 	appendTextBlock,
 	reduceStreamEvent,
@@ -811,7 +811,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 						if (!useLive) return false;
 						const live = readLiveServerState();
 						if (!live) return false;
-						const url = `http://${live.host}:${live.port}`;
+						const url = daemonBaseUrl(live);
 						if (url === effectiveDaemonUrl && live.token === effectiveDaemonToken) return false;
 						setDaemonOverride({ url, token: live.token });
 						try {
@@ -1298,6 +1298,23 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			? `${effectiveDaemonUrl}/api/sessions/${session.id}/events?token=${encodeURIComponent(effectiveDaemonToken)}`
 			: `${effectiveDaemonUrl}/api/sessions/${session.id}/events`;
 		const source = new EventSource(url);
+		let opened = false;
+		source.onopen = () => {
+			if (!opened) {
+				opened = true;
+				return;
+			}
+			void refresh();
+			if (serverClient) {
+				void loadDaemonPendingState(serverClient, session.id)
+					.then((pending) => {
+						setPendingQuestion(pending.question);
+						setPendingPlanTransition(pending.planTransition);
+						if (pending.status) setStatus(pending.status);
+					})
+					.catch(() => {});
+			}
+		};
 		source.onmessage = (ev) => {
 			let event: import("../server/bridge.ts").WebEvent;
 			try {
@@ -1428,13 +1445,16 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		refresh,
 		planState,
 		onPlanSignal,
+		serverClient,
 	]);
 
 	const steer = useCallback(
 		(text: string) => {
 			if (isClient && effectiveDaemonUrl) {
-				if (serverClient) void steerServerSession(serverClient, session.id, text).catch(() => {});
-				setPendingSteers((p) => [...p, text]);
+				if (!serverClient) return;
+				void steerServerSession(serverClient, session.id, text)
+					.then(() => setPendingSteers((p) => [...p, text]))
+					.catch((err) => setError(err instanceof Error ? err.message : "Could not steer the daemon"));
 				return;
 			}
 			runner.steeringQueue.enqueue({ role: "user", content: text });
@@ -1446,8 +1466,10 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	const followUp = useCallback(
 		(text: string) => {
 			if (isClient && effectiveDaemonUrl) {
-				if (serverClient) void followUpServerSession(serverClient, session.id, text).catch(() => {});
-				setPendingQueue((p) => [...p, text]);
+				if (!serverClient) return;
+				void followUpServerSession(serverClient, session.id, text)
+					.then(() => setPendingQueue((p) => [...p, text]))
+					.catch((err) => setError(err instanceof Error ? err.message : "Could not queue follow-up"));
 				return;
 			}
 			runner.followUpQueue.enqueue({ role: "user", content: text });
@@ -1458,9 +1480,13 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 
 	const abort = useCallback(() => {
 		if (isClient && effectiveDaemonUrl) {
-			if (serverClient) void abortServerSession(serverClient, session.id).catch(() => {});
-			setPendingSteers([]);
-			setPendingQueue([]);
+			if (!serverClient) return;
+			void abortServerSession(serverClient, session.id)
+				.then(() => {
+					setPendingSteers([]);
+					setPendingQueue([]);
+				})
+				.catch((err) => setError(err instanceof Error ? err.message : "Could not abort the daemon"));
 			return;
 		}
 		runner.abort();
@@ -1479,8 +1505,10 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	const answerQuestion = useCallback(
 		(values: string[]) => {
 			if (isClient && effectiveDaemonUrl) {
-				if (serverClient) void answerServerQuestion(serverClient, session.id, values).catch(() => {});
-				setPendingQuestion(undefined);
+				if (!serverClient) return;
+				void answerServerQuestion(serverClient, session.id, values)
+					.then(() => setPendingQuestion(undefined))
+					.catch((err) => setError(err instanceof Error ? err.message : "Could not answer the question"));
 			}
 		},
 		[isClient, effectiveDaemonUrl, session.id, serverClient],
@@ -1488,15 +1516,20 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 
 	const approvePlan = useCallback(() => {
 		if (isClient && effectiveDaemonUrl) {
-			if (serverClient) void resolveServerPlanTransition(serverClient, session.id).catch(() => {});
-			setPendingPlanTransition(undefined);
+			if (!serverClient) return;
+			void resolveServerPlanTransition(serverClient, session.id)
+				.then(() => setPendingPlanTransition(undefined))
+				.catch((err) => setError(err instanceof Error ? err.message : "Could not approve the plan"));
 		}
 	}, [isClient, effectiveDaemonUrl, session.id, serverClient]);
 
 	const setMode = useCallback(
 		(mode: "plan" | "build") => {
 			if (isClient && effectiveDaemonUrl) {
-				if (serverClient) void setServerMode(serverClient, session.id, mode).catch(() => {});
+				if (!serverClient) return;
+				void setServerMode(serverClient, session.id, mode).catch((err) =>
+					setError(err instanceof Error ? err.message : "Could not change mode"),
+				);
 			}
 		},
 		[isClient, effectiveDaemonUrl, session.id, serverClient],

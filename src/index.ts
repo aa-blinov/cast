@@ -12,7 +12,9 @@ import { runUpgrade } from "./core/upgrade.ts";
 import {
 	acquireStartLock,
 	clearServerState,
+	DAEMON_STARTUP_TIMEOUT_MS,
 	DaemonProtocolMismatchError,
+	daemonBaseUrl,
 	isDaemonProtocolCompatible,
 	isProcessAlive,
 	readLiveServerState,
@@ -562,7 +564,7 @@ function waitForStartup(pid: number): Promise<boolean> {
 			if (state?.pid === pid) finish(true);
 			else if (!isProcessAlive(pid)) finish(false);
 		}, 150);
-		setTimeout(() => finish(false), 60_000).unref();
+		setTimeout(() => finish(false), DAEMON_STARTUP_TIMEOUT_MS).unref();
 	});
 }
 
@@ -592,6 +594,29 @@ async function stopServerDaemon(): Promise<void> {
 		// directly. Nothing to signal; just say so honestly and clean up
 		// instead of claiming to have "stopped" a process that was already gone.
 		console.log(`[cast server] was not actually running (pid ${state.pid} is gone) — stale state cleaned up`);
+		clearServerState();
+		return;
+	}
+	if (!state.instanceId || !state.token) {
+		console.log("[cast server] legacy state has no verifiable daemon identity; refusing to signal its PID");
+		clearServerState();
+		return;
+	}
+	try {
+		const response = await fetch(`${daemonBaseUrl(state)}/api/server/identity`, {
+			headers: { Authorization: `Bearer ${state.token}` },
+			signal: AbortSignal.timeout(1_500),
+		});
+		const identity = (await response.json()) as { instanceId?: string };
+		if (!response.ok || identity.instanceId !== state.instanceId) {
+			console.log(
+				"[cast server] state does not match the process listening at its recorded address; refusing to signal PID",
+			);
+			clearServerState();
+			return;
+		}
+	} catch {
+		console.log("[cast server] could not verify the recorded daemon instance; refusing to signal PID");
 		clearServerState();
 		return;
 	}

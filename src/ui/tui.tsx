@@ -8,7 +8,7 @@ import { type ParsedArgs, runStartup } from "../core/startup.ts";
 import { cancelActiveDecxprQuery, suspendAndRun } from "../core/stdin-manager.ts";
 import { inkPickers } from "../pickers/ink.tsx";
 import type { Pickers } from "../pickers/types.ts";
-import { readLiveServerState } from "../server/daemon-state.ts";
+import { daemonBaseUrl, readLiveServerState } from "../server/daemon-state.ts";
 import { App } from "./App.tsx";
 import { gradientBanner } from "./gradient.ts";
 import { saveClipboardImageToTempFile } from "./readClipboardImage.ts";
@@ -53,7 +53,7 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 	// is only set when a loopback daemon exists (see index.ts ensureDaemon);
 	// read its port/host from the same state file the token came from.
 	const daemonState = daemonToken ? readLiveServerState() : undefined;
-	const daemonUrl = daemonState ? `http://${daemonState.host}:${daemonState.port}` : undefined;
+	const daemonUrl = daemonState ? daemonBaseUrl(daemonState) : undefined;
 	let loader: ReturnType<typeof render> | null = null;
 	const showLoader = (text: string) => {
 		if (loader) loader.rerender(<StartupLoader text={text} />);

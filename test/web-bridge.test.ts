@@ -81,8 +81,17 @@ describe("web bridge", () => {
 	});
 
 	afterEach(() => {
+		vi.useRealTimers();
 		process.env.HOME = realHome;
 		rmSync(fakeHome, { recursive: true, force: true });
+	});
+
+	it("evicts an idle session with no listeners and hydrates it again on demand", () => {
+		vi.useFakeTimers();
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		vi.advanceTimersByTime(5 * 60_000 + 1);
+		expect(bridge.getSession(ws.id)).not.toBe(ws);
 	});
 
 	function makeResult(overrides: Partial<StartupResult> = {}): StartupResult {

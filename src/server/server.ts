@@ -99,6 +99,8 @@ export interface WebServerOptions {
 	webUser: string;
 	serverPassword: string;
 	version: string;
+	/** Per-process identity used by the CLI to avoid signalling a reused PID. */
+	instanceId?: string;
 	/** Fires once the server is actually bound and accepting connections. Receives the real bound port (not the requested one — may differ when 0 was passed for OS assignment). */
 	onListening?: (port: number) => void;
 	/** Fires on a listen failure (e.g. EADDRINUSE) instead of the process crashing on an unhandled error event. */
@@ -558,6 +560,13 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			startedAt: state.startedAt,
 			foreground: state.foreground,
 		});
+	});
+
+	// Auth is enforced by the common API gate below. The local CLI compares
+	// this with server.json before stopping a PID, so a stale state record can
+	// never terminate an unrelated process that reused the numeric PID.
+	route("GET", "/api/server/identity", (_req, res) => {
+		json(res, { instanceId: options.instanceId });
 	});
 
 	// Lightweight git probe for the new-session modal: lets the UI show or

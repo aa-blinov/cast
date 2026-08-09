@@ -6,8 +6,11 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WebEvent } from "../src/server/bridge.ts";
 import {
+	abortServerSession,
 	createServerSession,
 	ensureServerSession,
+	followUpServerSession,
+	steerServerSession,
 	submitServerChat,
 	subscribeServerEvents,
 } from "../src/server/client.ts";
@@ -82,6 +85,13 @@ describe("server client", () => {
 		const client = { baseUrl, token: undefined };
 		await submitServerChat(client, "sess-1", "hello there");
 		expect(received[0]).toMatchObject({ method: "POST", path: "/api/sessions/sess-1/chat" });
+	});
+
+	it("rejects steering and control commands when the daemon rejects them", async () => {
+		const client = { baseUrl, token: undefined };
+		await expect(steerServerSession(client, "sess-1", "wait")).rejects.toThrow("steer failed");
+		await expect(followUpServerSession(client, "sess-1", "after")).rejects.toThrow("follow-up failed");
+		await expect(abortServerSession(client, "sess-1")).rejects.toThrow("abort failed");
 	});
 
 	it("subscribeServerEvents streams events until the predicate resolves", async () => {

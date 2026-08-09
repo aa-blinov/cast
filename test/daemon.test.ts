@@ -45,6 +45,7 @@ async function startTestServer(): Promise<void> {
 		bridge,
 		webUser: "cast",
 		serverPassword: "test-password",
+		instanceId: "daemon-test-instance",
 		version: "test",
 	});
 	await once(server, "listening");
@@ -199,5 +200,15 @@ describe("daemon single-writer SSE contract", () => {
 			headers: { Host: "127.0.0.1" },
 		});
 		expect(res.status).toBe(200);
+	});
+
+	it("exposes the daemon identity only to an authenticated local client", async () => {
+		const denied = await fetch(`${origin}/api/server/identity`);
+		expect(denied.status).toBe(401);
+		const accepted = await fetch(`${origin}/api/server/identity`, {
+			headers: { Authorization: `Bearer ${LOOPBACK_TOKEN}` },
+		});
+		expect(accepted.status).toBe(200);
+		await expect(accepted.json()).resolves.toEqual({ instanceId: "daemon-test-instance" });
 	});
 });

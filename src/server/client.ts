@@ -20,7 +20,9 @@ import { EventSource } from "undici";
 import type { SessionState } from "../core/session.ts";
 import {
 	acquireStartLock,
+	DAEMON_STARTUP_TIMEOUT_MS,
 	DaemonProtocolMismatchError,
+	daemonBaseUrl,
 	isDaemonProtocolCompatible,
 	readLiveServerState,
 	releaseStartLock,
@@ -45,7 +47,7 @@ export async function ensureServerClient(): Promise<ServerClient | undefined> {
 		const clientFor = (state: ServerDaemonState | undefined): ServerClient | undefined => {
 			if (!state) return undefined;
 			if (!isDaemonProtocolCompatible(state)) throw new DaemonProtocolMismatchError(state);
-			return { baseUrl: `http://${state.host}:${state.port}`, token: state.token };
+			return { baseUrl: daemonBaseUrl(state), token: state.token };
 		};
 		// Same daemon-start race protection as index.ts's ensureDaemon: an
 		// exclusive lock serializes the spawn so a concurrent TUI launch can't
@@ -108,7 +110,7 @@ async function spawnDetachedDaemon(): Promise<ServerDaemonState | undefined> {
 	});
 	child.unref();
 	// Wait for the state file to describe a live process with a real port
-	// (timeout after ~10s). Interval-poll, not a for+await loop: keep the
+	// (timeout after the shared startup budget). Interval-poll, not a for+await loop: keep the
 	// pending timer unref'd so it can't hold the process open on a failure.
 	const state = await new Promise<ServerDaemonState | undefined>((resolvePromise) => {
 		let settled = false;
@@ -122,7 +124,7 @@ async function spawnDetachedDaemon(): Promise<ServerDaemonState | undefined> {
 			const s = readLiveServerState();
 			if (s) finish(s);
 		}, 100);
-		setTimeout(() => finish(undefined), 10_000).unref();
+		setTimeout(() => finish(undefined), DAEMON_STARTUP_TIMEOUT_MS).unref();
 	});
 	return state;
 }
@@ -272,22 +274,36 @@ export async function answerServerQuestion(client: ServerClient, sessionId: stri
 
 /** Inject a steering message into a running turn. */
 export async function steerServerSession(client: ServerClient, sessionId: string, message: string): Promise<void> {
-	await serverFetch(client, `/api/sessions/${sessionId}/steer`, { method: "POST", body: { message } });
+	const { status, data } = await serverFetch(client, `/api/sessions/${sessionId}/steer`, {
+		method: "POST",
+		body: { message },
+	});
+	if (status !== 202) throw new Error(serverErrorMessage(data, "steer failed", status));
 }
 
 /** Queue a follow-up message to run after the current turn. */
 export async function followUpServerSession(client: ServerClient, sessionId: string, message: string): Promise<void> {
-	await serverFetch(client, `/api/sessions/${sessionId}/followup`, { method: "POST", body: { message } });
+	const { status, data } = await serverFetch(client, `/api/sessions/${sessionId}/followup`, {
+		method: "POST",
+		body: { message },
+	});
+	if (status !== 202) throw new Error(serverErrorMessage(data, "follow-up failed", status));
 }
 
 /** Abort the running turn. */
 export async function abortServerSession(client: ServerClient, sessionId: string): Promise<void> {
-	await serverFetch(client, `/api/sessions/${sessionId}/abort`, { method: "POST" });
+	const { status, data } = await serverFetch(client, `/api/sessions/${sessionId}/abort`, { method: "POST" });
+	if (status !== 200) throw new Error(serverErrorMessage(data, "abort failed", status));
 }
 
 /** Drop the session's in-context working set (the daemon's /clear). */
 export async function cleanServerContext(client: ServerClient, sessionId: string): Promise<void> {
-	await serverFetch(client, `/api/sessions/${sessionId}/clean-context`, { method: "POST" });
+	const { status, data } = await serverFetch(client, `/api/sessions/${sessionId}/clean-context`, { method: "POST" });
+	if (status !== 200) throw new Error(serverErrorMessage(data, "clean context failed", status));
+}
+
+function serverErrorMessage(data: unknown, fallback: string, status: number): string {
+	return data && typeof data === "object" && "error" in data ? String(data.error) : `${fallback} (HTTP ${status})`;
 }
 
 /** Resolve a pending plan-done transition on a daemon session. */

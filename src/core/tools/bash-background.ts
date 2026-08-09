@@ -120,6 +120,10 @@ export class BackgroundTaskRegistry {
 		return this.tasks.get(id);
 	}
 
+	hasRunning(): boolean {
+		return [...this.tasks.values()].some((task) => task.status === "running");
+	}
+
 	start(
 		command: string,
 		cwd: string,

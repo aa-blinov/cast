@@ -13,12 +13,23 @@
  * on the next read, not via a handler in the dying process.
  */
 
-import { closeSync, existsSync, openSync, readFileSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
+import {
+	closeSync,
+	existsSync,
+	openSync,
+	readFileSync,
+	renameSync,
+	unlinkSync,
+	writeFileSync,
+	writeSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 /** Increment only when a daemon/client wire contract becomes incompatible. */
-export const DAEMON_PROTOCOL_VERSION = 1;
+export const DAEMON_PROTOCOL_VERSION = 2;
+/** One startup budget shared by every daemon launcher. */
+export const DAEMON_STARTUP_TIMEOUT_MS = 60_000;
 
 // Resolved at call time (not module load) so tests can point HOME at a
 // per-test tmp dir before the first read; a top-level const would freeze
@@ -41,14 +52,23 @@ export interface ServerDaemonState {
 	startedAt: string;
 	/** True for `cast server --foreground` — status/stop can say so, even though the mechanics are identical. */
 	foreground: boolean;
+	/** Random per-process value used before signalling a recorded PID. */
+	instanceId?: string;
 	/**
 	 * Local-only auth token for TUI clients connecting to a loopback daemon.
 	 * Never sent over the network by the daemon; the TUI reads it from this
 	 * state file (same machine, same user) so it can POST/GET without the
 	 * interactive login flow the browser gets. Absent when the daemon binds a
-	 * non-loopback host (then the TUI must auth like any other client).
+	 * non-loopback host. The server only accepts it from a loopback peer, so
+	 * public binds remain protected by the browser login flow.
 	 */
 	token?: string;
+}
+
+/** Turns a recorded bind address into a local client address when needed. */
+export function daemonBaseUrl(state: Pick<ServerDaemonState, "host" | "port">): string {
+	const host = state.host === "0.0.0.0" ? "127.0.0.1" : state.host === "::" ? "[::1]" : state.host;
+	return `http://${host}:${state.port}`;
 }
 
 /** A missing value is intentionally incompatible: an older daemon cannot prove it speaks this protocol. */
@@ -107,7 +127,10 @@ export function readServerState(): ServerDaemonState | undefined {
 }
 
 export function writeServerState(state: ServerDaemonState): void {
-	writeFileSync(stateFile(), JSON.stringify(state, null, 2), "utf-8");
+	const path = stateFile();
+	const temporaryPath = `${path}.${process.pid}.${Date.now()}.tmp`;
+	writeFileSync(temporaryPath, JSON.stringify(state, null, 2), "utf-8");
+	renameSync(temporaryPath, path);
 }
 
 export function clearServerState(): void {
