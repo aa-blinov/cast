@@ -27,7 +27,7 @@ Before this model (pre-0.12.29) the TUI ran `runAgentLoop` **locally** and the w
 `cast server` is not a second implementation of the loop — it *is* the loop. One long-lived daemon process:
 
 - owns `runAgentLoop` for every session;
-- is the **only** process that writes to `~/.cast/sessions.db`;
+- is the **only** process that writes to `~/.cast/sessions/sessions.db` by default;
 - turns each `AgentEvent` into a `WebEvent` and broadcasts it over SSE to every subscribed client (the per-session `GET /api/sessions/:id/events` stream, plus the sidebar-wide `GET /api/sessions/events`).
 
 ## TUI as a thin client
@@ -43,7 +43,7 @@ The TUI then:
 - renders tokens / tool calls / status from the `/api/sessions/:id/events` SSE stream — the exact same stream the browser consumes;
 - `abort` / `steer` / `followUp` → `POST /api/sessions/:id/{abort,steer,followup}`.
 
-Local `runner.runAgentLoop` is retained only for `cast run --interactive` and the `CAST_NO_DAEMON=1` escape hatch (see below).
+With `CAST_NO_DAEMON=1`, the TUI uses its local `runAgentLoop` fallback. `cast run` and `cast run --interactive` instead require the daemon so their sessions share the same store and event stream.
 
 ## Web UI (browser)
 
@@ -55,14 +55,14 @@ The original client. Connects over HTTP + SSE, logs in with the auto-generated p
 - **Stop:** `cast web stop` sends SIGTERM (escalating to SIGKILL after 3s), drains active turns, and clears the state file. Stopping the daemon also disconnects the TUI's SSE stream — the TUI sees `[terminated]` and can reconnect on next submit.
 - **Stale state:** every reader (`status`, the TUI's `ensureDaemon`, the server's auth check) treats a PID whose process is no longer alive as stale and self-heals by clearing `~/.cast/server.json`.
 - **Protocol compatibility:** TUI and headless clients compare the daemon protocol recorded in `server.json` before connecting. A mismatch (including a legacy daemon without the field) leaves the daemon untouched and asks the user to run `cast server stop` before starting Cast again.
-- **`CAST_NO_DAEMON=1`:** the TUI skips `ensureDaemon()` and runs `runAgentLoop` locally — the pre-0.12.29 path, used for CI and `cast run --interactive`.
+- **`CAST_NO_DAEMON=1`:** the TUI skips `ensureDaemon()` and runs `runAgentLoop` locally — the pre-0.12.29 fallback. `cast run` and `cast run --interactive` do not have this fallback and report that the daemon is required.
 
 For development, `npm run dev:web` starts the browser surface in the foreground; append server options after `--`.
 
 ## Auth
 
 - **Loopback bind** (`127.0.0.1` / `localhost`): the daemon writes a local-only `token` into `~/.cast/server.json`. The TUI reads it from there and skips the browser's interactive login (trust-localhost). The token is never sent over the network by the daemon.
-- **Non-loopback bind** (`--host 0.0.0.0` / `--public`): the token is omitted, and the TUI must authenticate like any other client (the browser's password login). Plain HTTP over a non-loopback bind is unencrypted — use it only on a trusted LAN, or keep loopback and tunnel with `ssh -L`.
+- **Non-loopback bind** (`--host 0.0.0.0` / `--public`): the daemon still records the local token, and a TUI on the same machine connects through `127.0.0.1`. The server accepts that token only from a loopback socket; remote browsers always use password login. Plain HTTP over a non-loopback bind is unencrypted — use it only on a trusted LAN, or keep loopback and tunnel with `ssh -L`.
 
 ## Why single-writer
 

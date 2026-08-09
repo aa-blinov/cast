@@ -13,7 +13,7 @@ A role-based terminal agent harness. 18 built-in personas — senior dev, QA, DB
 **Runs where your code runs.** vLLM, Ollama, your own inference server, or any OpenAI-compatible API. No account, no telemetry, no cloud dependency.
 
 **Ink TUI.** A proper terminal interface with multiline paste, image attachments, smooth animations.
-**Web UI.** `cast web` launches a browser-based control room — background agents, token-by-token streaming, diff viewer, and chat commands with account/project controls in Settings. Same sessions as the TUI.
+**Web UI.** `cast web` (also available as `cast server`) launches a browser-based control room — background agents, token-by-token streaming, diff viewer, and chat commands with account/project controls in Settings. Same sessions as the TUI.
 
 ## Why personas, not just prompts
 
@@ -125,7 +125,7 @@ Every conversation auto-saves. Resume with `--continue`, pick from a list with `
 
 ### Web UI
 
-`cast web` launches a browser-based control room — same sessions as the TUI, with a diff viewer, background agents, and token-by-token streaming. The file reader previews text and code with wrapped lines and source-line numbers; Markdown, tables, images, and PDFs keep their document-specific previews. The TUI is still the default for local interactive use; the Web UI is the answer when you want to share a session, keep one running in the background, or drive cast from a browser/phone. `cast server` remains an alias for scripts and integrations.
+`cast web` launches a browser-based control room — same sessions as the TUI, with a diff viewer, background agents, and token-by-token streaming. The file reader previews text and code with wrapped lines and source-line numbers; Markdown, tables, images, and PDFs keep their document-specific previews. The TUI is still the default for local interactive use; the Web UI is the answer when you want to share a session, keep one running in the background, or drive cast from a browser/phone. `cast server` is an equivalent command for daemon-oriented scripts and integrations.
 
 ```bash
 # Start (default 127.0.0.1:1337)
@@ -245,8 +245,9 @@ Other environment variables (provider credentials live in the settings file, not
 | `CAST_CWD` | Override working directory |
 | `CAST_BASH` | Bash executable for the `bash` tool (Windows: non-standard Git Bash / msys2) |
 | `CAST_VERSION` | Pin install version (installer) |
-| `CAST_SERVER_PORT` | `cast web` port (default `1337`) |
-| `CAST_SERVER_HOST` | `cast web` bind address (default `127.0.0.1`; use `0.0.0.0` or `--public` for LAN) |
+| `CAST_SERVER_PORT` | Server daemon port (default `1337`) |
+| `CAST_SERVER_HOST` | Server daemon bind address (default `127.0.0.1`; use `0.0.0.0` or `--public` for LAN) |
+| `CAST_SESSIONS_DB` | Override SQLite session database path |
 
 Works with anything that speaks the OpenAI API: OpenRouter, OpenAI, Ollama (`http://localhost:11434/v1`), vLLM, LiteLLM, Azure OpenAI, etc.
 

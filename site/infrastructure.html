@@ -525,7 +525,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 <p><code>cast server</code> is not a second implementation of the loop — it <em>is</em> the loop. One long-lived daemon process:</p>
 <ul>
 <li>owns <code>runAgentLoop</code> for every session;</li>
-<li>is the <strong>only</strong> process that writes to <code>~/.cast/sessions.db</code>;</li>
+<li>is the <strong>only</strong> process that writes to <code>~/.cast/sessions/sessions.db</code> by default;</li>
 <li>turns each <code>AgentEvent</code> into a <code>WebEvent</code> and broadcasts it over SSE to every subscribed client (the per-session <code>GET /api/sessions/:id/events</code> stream, plus the sidebar-wide <code>GET /api/sessions/events</code>).</li>
 </ul>
 <h2>TUI as a thin client</h2>
@@ -540,7 +540,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 <li>renders tokens / tool calls / status from the <code>/api/sessions/:id/events</code> SSE stream — the exact same stream the browser consumes;</li>
 <li><code>abort</code> / <code>steer</code> / <code>followUp</code> → <code>POST /api/sessions/:id/{abort,steer,followup}</code>.</li>
 </ul>
-<p>Local <code>runner.runAgentLoop</code> is retained only for <code>cast run --interactive</code> and the <code>CAST_NO_DAEMON=1</code> escape hatch (see below).</p>
+<p>With <code>CAST_NO_DAEMON=1</code>, the TUI uses its local <code>runAgentLoop</code> fallback. <code>cast run</code> and <code>cast run --interactive</code> instead require the daemon so their sessions share the same store and event stream.</p>
 <h2>Web UI (browser)</h2>
 <p>The original client. Connects over HTTP + SSE, logs in with the auto-generated password (<code>cast</code> / printed on first <code>cast web</code> start, saved in <code>settings.json</code>), and renders the same <code>WebEvent</code> stream the TUI does. Because both surfaces read the <em>same</em> SSE stream from the <em>same</em> daemon, opening one session in both shows live tokens, tool calls, and status in both, and an <code>abort</code> from either stops the turn for both.</p>
 <h2>Lifecycle</h2>
@@ -549,13 +549,13 @@ a:hover { color: #c084fc; text-decoration: none; }
 <li><strong>Stop:</strong> <code>cast web stop</code> sends SIGTERM (escalating to SIGKILL after 3s), drains active turns, and clears the state file. Stopping the daemon also disconnects the TUI&#39;s SSE stream — the TUI sees <code>[terminated]</code> and can reconnect on next submit.</li>
 <li><strong>Stale state:</strong> every reader (<code>status</code>, the TUI&#39;s <code>ensureDaemon</code>, the server&#39;s auth check) treats a PID whose process is no longer alive as stale and self-heals by clearing <code>~/.cast/server.json</code>.</li>
 <li><strong>Protocol compatibility:</strong> TUI and headless clients compare the daemon protocol recorded in <code>server.json</code> before connecting. A mismatch (including a legacy daemon without the field) leaves the daemon untouched and asks the user to run <code>cast server stop</code> before starting Cast again.</li>
-<li><strong><code>CAST_NO_DAEMON=1</code>:</strong> the TUI skips <code>ensureDaemon()</code> and runs <code>runAgentLoop</code> locally — the pre-0.12.29 path, used for CI and <code>cast run --interactive</code>.</li>
+<li><strong><code>CAST_NO_DAEMON=1</code>:</strong> the TUI skips <code>ensureDaemon()</code> and runs <code>runAgentLoop</code> locally — the pre-0.12.29 fallback. <code>cast run</code> and <code>cast run --interactive</code> do not have this fallback and report that the daemon is required.</li>
 </ul>
 <p>For development, <code>npm run dev:web</code> starts the browser surface in the foreground; append server options after <code>--</code>.</p>
 <h2>Auth</h2>
 <ul>
 <li><strong>Loopback bind</strong> (<code>127.0.0.1</code> / <code>localhost</code>): the daemon writes a local-only <code>token</code> into <code>~/.cast/server.json</code>. The TUI reads it from there and skips the browser&#39;s interactive login (trust-localhost). The token is never sent over the network by the daemon.</li>
-<li><strong>Non-loopback bind</strong> (<code>--host 0.0.0.0</code> / <code>--public</code>): the token is omitted, and the TUI must authenticate like any other client (the browser&#39;s password login). Plain HTTP over a non-loopback bind is unencrypted — use it only on a trusted LAN, or keep loopback and tunnel with <code>ssh -L</code>.</li>
+<li><strong>Non-loopback bind</strong> (<code>--host 0.0.0.0</code> / <code>--public</code>): the daemon still records the local token, and a TUI on the same machine connects through <code>127.0.0.1</code>. The server accepts that token only from a loopback socket; remote browsers always use password login. Plain HTTP over a non-loopback bind is unencrypted — use it only on a trusted LAN, or keep loopback and tunnel with <code>ssh -L</code>.</li>
 </ul>
 <h2>Why single-writer</h2>
 <p>A single writer removes dual-writer races on the session store and makes one session observable from both surfaces at once. The cost is a daemon process that now also appears when you only wanted the TUI — that is the deliberate trade for live cross-surface streaming.</p>
