@@ -70,7 +70,8 @@ import type { McpToolHandle } from "./mcp.ts";
 import { mcpToolName } from "./mcp.ts";
 import { getBashResolution } from "./tools/bash.ts";
 
-const PIPE_MATCHER_RE = /^[a-zA-Z0-9_|]+$/;
+const SIMPLE_MATCHER_RE = /^[a-zA-Z0-9_.:/-]+(?:\s*(?:\||,)\s*[a-zA-Z0-9_.:/-]+)*$/;
+const MATCHER_SEPARATOR_RE = /[|,]/;
 const IF_CONDITION_RE = /^(\w+)(?:\((.*)\))?$/;
 
 export type HookEvent =
@@ -102,7 +103,9 @@ export type HookEvent =
 	| "ConfigChange"
 	| "WorktreeCreate"
 	| "WorktreeRemove"
-	| "FileChanged";
+	| "FileChanged"
+	| "DirectoryAdded"
+	| "MessageDisplay";
 
 export const HOOK_EVENTS: readonly HookEvent[] = [
 	"SessionStart",
@@ -134,6 +137,8 @@ export const HOOK_EVENTS: readonly HookEvent[] = [
 	"WorktreeCreate",
 	"WorktreeRemove",
 	"FileChanged",
+	"DirectoryAdded",
+	"MessageDisplay",
 ];
 
 export interface HookCommand {
@@ -148,7 +153,7 @@ export interface HookCommand {
 	timeout?: number;
 	env?: Record<string, string>;
 	if?: string;
-	/** When true, the hook process is backgrounded — the first stdout line `{"async":true}` triggers an immediate return (non-blocking) while the process keeps running. */
+	/** When true, the command is started and detached; its output cannot affect the event. */
 	async?: boolean;
 	/** Custom HTTP headers for `type: "http"` hooks. Header values support `$VAR_NAME` and `${VAR_NAME}` interpolation from process.env if the variable is listed in `allowedEnvVars`. */
 	headers?: Record<string, string>;
@@ -466,6 +471,9 @@ function pickMatchTarget(event: HookEvent, payload: Record<string, unknown>): st
 			return typeof payload.source === "string" ? payload.source : undefined;
 		case "InstructionsLoaded":
 			return typeof payload.load_reason === "string" ? payload.load_reason : undefined;
+		case "FileChanged":
+		case "DirectoryAdded":
+			return typeof payload.file_name === "string" ? payload.file_name : undefined;
 		default:
 			return undefined;
 	}
@@ -474,9 +482,11 @@ function pickMatchTarget(event: HookEvent, payload: Record<string, unknown>): st
 function matchesMatcher(matchTarget: string | undefined, matcher: string): boolean {
 	if (!matcher || matcher === "*") return true;
 	if (matchTarget === undefined) return true;
-	if (PIPE_MATCHER_RE.test(matcher)) {
+	if (SIMPLE_MATCHER_RE.test(matcher)) {
 		const lower = matchTarget.toLowerCase();
-		if (matcher.includes("|")) return matcher.split("|").some((p) => p.trim().toLowerCase() === lower);
+		if (matcher.includes("|") || matcher.includes(",")) {
+			return matcher.split(MATCHER_SEPARATOR_RE).some((p) => p.trim().toLowerCase() === lower);
+		}
 		return matcher.toLowerCase() === lower;
 	}
 	try {
@@ -512,7 +522,8 @@ function filterByIfCondition(hooks: HookCommand[], event: HookEvent, payload: Re
 		event === "PreToolUse" ||
 		event === "PostToolUse" ||
 		event === "PostToolUseFailure" ||
-		event === "PermissionRequest";
+		event === "PermissionRequest" ||
+		event === "PermissionDenied";
 	return hooks.filter((cmd) => {
 		if (!cmd.if) return true;
 		if (!isToolEvent) return false;
@@ -563,6 +574,7 @@ function substitutePluginVars(command: string, pluginRoot: string | undefined): 
 
 function runCommandHook(
 	command: string,
+	background: boolean,
 	timeoutSeconds: number,
 	cwd: string,
 	env: Record<string, string>,
@@ -574,9 +586,35 @@ function runCommandHook(
 		const proc = spawn(bash.path, ["-c", command], {
 			cwd,
 			env,
-			stdio: ["pipe", "pipe", "pipe"],
+			// Detached hooks must not retain stdout/stderr pipes: even without
+			// listeners those handles keep a CLI/test process alive until the
+			// background command exits.
+			stdio: background ? ["pipe", "ignore", "ignore"] : ["pipe", "pipe", "pipe"],
 			detached: process.platform !== "win32",
 		});
+		const stdin = proc.stdin;
+		if (!stdin) {
+			resolve({ blocked: false, stdout: "", exitCode: null });
+			return;
+		}
+		if (background) {
+			stdin.on("error", () => {});
+			try {
+				stdin.write(JSON.stringify(payload));
+			} catch {
+				// A background hook is observational; a closed stdin is harmless.
+			}
+			stdin.end();
+			proc.unref();
+			resolve({ blocked: false, stdout: "", exitCode: 0 });
+			return;
+		}
+		const stdoutStream = proc.stdout;
+		const stderrStream = proc.stderr;
+		if (!stdoutStream || !stderrStream) {
+			resolve({ blocked: false, stdout: "", exitCode: null });
+			return;
+		}
 		let stdout = "";
 		let stderr = "";
 		let settled = false;
@@ -590,8 +628,8 @@ function runCommandHook(
 		const onAbort = () => killProcessGroup(proc);
 		signal?.addEventListener("abort", onAbort, { once: true });
 
-		const stdoutEndPromise = new Promise<void>((r) => proc.stdout.on("end", r));
-		const stderrEndPromise = new Promise<void>((r) => proc.stderr.on("end", r));
+		const stdoutEndPromise = new Promise<void>((r) => stdoutStream.on("end", r));
+		const stderrEndPromise = new Promise<void>((r) => stderrStream.on("end", r));
 
 		const finish = (exitCode: number | null) => {
 			if (settled) return;
@@ -601,7 +639,7 @@ function runCommandHook(
 			resolve(interpretHookOutput(stdout, stderr, exitCode));
 		};
 
-		proc.stdout.on("data", (d: Buffer) => {
+		stdoutStream.on("data", (d: Buffer) => {
 			stdout += d.toString("utf-8");
 			if (!initialResponseChecked) {
 				const firstLine = stdout.split("\n")[0]?.trim() ?? "";
@@ -612,8 +650,10 @@ function runCommandHook(
 						if (parsed.async === true) {
 							// Background: detach the process and return immediately.
 							// The hook keeps running but we don't wait for it.
-							proc.stdout.removeAllListeners("data");
-							proc.stderr.removeAllListeners("data");
+							stdoutStream.removeAllListeners("data");
+							stderrStream.removeAllListeners("data");
+							stdoutStream.destroy();
+							stderrStream.destroy();
 							proc.removeAllListeners("close");
 							proc.removeAllListeners("error");
 							clearTimeout(timer);
@@ -631,7 +671,7 @@ function runCommandHook(
 				}
 			}
 		});
-		proc.stderr.on("data", (d: Buffer) => {
+		stderrStream.on("data", (d: Buffer) => {
 			stderr += d.toString("utf-8");
 		});
 		proc.on("error", () => finish(null));
@@ -641,14 +681,13 @@ function runCommandHook(
 			await Promise.all([stdoutEndPromise, stderrEndPromise]);
 			finish(code);
 		});
-		proc.stdin.on("error", () => {});
+		stdin.on("error", () => {});
 		try {
-			proc.stdin.write(JSON.stringify(payload));
+			stdin.write(JSON.stringify(payload));
 		} catch {
 			// hook doesn't read stdin — fine, it still runs
 		}
-		proc.stdin.end();
-
+		stdin.end();
 		void Promise.race([asyncPromise]).then((r) => {
 			if (!settled) {
 				settled = true;
@@ -919,6 +958,7 @@ export async function runHooksForEvent(hooks: HooksFile, opts: RunHooksOptions):
 			}
 			return runCommandHook(
 				substitutePluginVars(cmd.command ?? "", group._pluginRoot),
+				cmd.async === true,
 				timeoutSeconds,
 				opts.cwd,
 				buildHookEnv(opts.event, opts.cwd, opts.sessionId, group._pluginRoot, cmd.env),

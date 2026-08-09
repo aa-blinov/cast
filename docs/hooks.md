@@ -19,11 +19,17 @@ Shell commands, HTTP callbacks, MCP tool calls, or one-shot model prompts that f
 | `SubagentStop` | A subagent's turn ends | No (see Scope below) |
 | `TaskCreated` | A new item is added via the `todo_write` tool | No |
 | `TaskCompleted` | A todo item's status becomes `completed` | No |
-| `PreCompact` | Automatic context compaction is about to run | No |
-| `PostCompact` | Automatic context compaction completes | No |
+| `PreCompact` | Automatic or manual (`/compact`) context compaction is about to run | **Yes** — can cancel compaction |
+| `PostCompact` | Automatic or manual context compaction completes | No |
 | `InstructionsLoaded` | AGENTS.md/CLAUDE.md and always-apply rules load for a session | No |
 | `Stop` | The agent would end its turn | **Yes** — can keep it going |
 | `StopFailure` | A turn ends because of an API error | No — observation only |
+| `FileChanged` | A file is added, changed, or removed while the daemon session is idle | No |
+| `DirectoryAdded` | A directory is added while the daemon session is idle | No |
+| `WorktreeCreate` | Before `/worktree <name>` creates a worktree | **Yes** — can cancel creation |
+| `WorktreeRemove` | After `/worktree remove <name>` succeeds | No |
+| `CwdChanged` | `/worktree <name>` switches the live session to its worktree | No |
+| `MessageDisplay` | A completed assistant message is delivered to a daemon client | No |
 
 "Blocking" means the hook can change what happens next. Every other event is passive — its exit code/output never changes the run, only what gets logged, or (for `UserPromptSubmit`) appended to the prompt as extra context when it *doesn't* block.
 
@@ -38,7 +44,7 @@ Each entry in a matcher group's `hooks` array is one of:
 { "type": "prompt", "prompt": "Is this safe? ${tool_input.command}\nRespond yes/no.", "model": "gpt-4.1" }
 ```
 
-- **`command`** (default `type`) — a shell command. Relative paths resolve against the cwd the hook runs for.
+- **`command`** (default `type`) — a shell command. Relative paths resolve against the cwd the hook runs for. Set `"async": true` to detach a non-blocking observer; its output is deliberately ignored.
 - **`http`** — POSTs the event envelope as the JSON body; the response body is read the same way stdout is.
 - **`mcp_tool`** — calls an already-connected MCP server's tool (`server`/`tool` unqualified names) and interprets its result the same way as a command hook's stdout. No-ops (fails open) if that server/tool isn't connected.
 - **`prompt`** — a short, tool-free, capped (500 token) model completion. Cast asks it to return `{"ok":true}` to allow or `{"ok":false,"reason":"…"}` to block. Invalid output and unavailable model/config access fail open (see Scope).
@@ -80,6 +86,7 @@ A bare `{ "PreToolUse": [...] }` (no wrapping `"hooks"` key) works too. Unrecogn
 | `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PermissionRequest`, `PermissionDenied` | Tool name |
 | `SubagentStart`, `SubagentStop` | Subagent persona name |
 | `UserPromptExpansion` | The skill or rule name being invoked |
+| `FileChanged`, `DirectoryAdded` | Basename of the changed path (for example `package.json`) |
 | Everything else | Ignored — matches everything |
 
 ## Writing a hook
@@ -133,11 +140,8 @@ This is a **compatible subset** of Claude Code's protocol, not a byte-for-byte c
 **Events cast has no infrastructure to fire at all** (not missing wiring — the underlying subsystem doesn't exist):
 - `Setup` — no CLI init/maintenance-mode concept.
 - `TeammateIdle` — no persistent "teammate" background agents.
-- `ConfigChange`, `FileChanged` — no filesystem watcher anywhere in cast.
-- `WorktreeCreate`/`WorktreeRemove` — cast doesn't manage git worktrees.
 - `Elicitation`/`ElicitationResult` — cast's MCP client doesn't implement the MCP elicitation capability.
-- `MessageDisplay` — text streams incrementally token-by-token; there's no single "a message displayed" moment to fire on without either firing once per token (useless) or reinventing the turn-boundary logic `Stop` already covers.
-- `CwdChanged` — cast has no "change the cwd of a live session" operation (no `cd` tool, no in-place directory switch); switching to a *different* session entirely is a distinct concept, not a cwd change on the same one, so it isn't a good-faith fit for this event either.
+- `ConfigChange` — settings are not watched as a live config source yet.
 
 **Accepted as input but resolved as a fixed choice, not truly honored**, because cast has no interactive mid-turn escalation path a hook can suspend the run for:
 - `PreToolUse`'s and `PermissionRequest`'s `ask`/`defer` permission decisions both resolve as `allow` (with a warning).
@@ -146,7 +150,9 @@ This is a **compatible subset** of Claude Code's protocol, not a byte-for-byte c
 - The `agent` hook type (spawn a subagent to verify) — `task.ts` (the subagent executor) already imports this module for `HooksFile`; importing it back for the `agent` type would create a real circular module dependency. Use `prompt` (a one-shot completion) or `mcp_tool` instead.
 
 **Scope limitations worth knowing about**:
-- `PreCompact`/`PostCompact` only fire around **automatic** compaction (the threshold/overflow triggers inside the agent loop) — not the manual `/compact` command.
+- `FileChanged`/`DirectoryAdded` are daemon-only. The watcher is active while the session is idle and follows Cast's existing UI ignore rules (`.git`, `node_modules`, build outputs, and virtual environments); it still runs with no browser attached when either hook is configured.
+- `MessageDisplay` is daemon-only and fires once per completed assistant message, not once per streamed token. It is observational: Cast deliberately does not let a hook alter the persisted transcript or the in-flight stream.
+- `WorktreeCreate`, `WorktreeRemove`, and `CwdChanged` fire for the daemon's `/worktree` command. Startup `cast --worktree` is intentionally not hookable yet: project hooks have not been trusted/resolved before that worktree is created.
 - `SubagentStart`/`SubagentStop` are a *separate*, observation-only "a subagent started/finished" signal for logging — a subagent's own turn-ending decision is governed by its own recursive `Stop` handling (hooks are inherited from the parent), not by `SubagentStop`. `SubagentStop` here can't itself block/continue a subagent's turn the way the official `Stop`-style decision control can.
 - `prompt`-type hooks need model/provider config, which not every event has in scope (e.g. `SessionStart`) — they no-op (fail open) rather than error when it's unavailable.
 
