@@ -36,6 +36,7 @@ const MCP_LT_RE = /</g;
 const MCP_GT_RE = />/g;
 const MCP_QUOTE_RE = /"/g;
 const MCP_DIDNT_RESPOND_RE = /didn't respond within/;
+const clientTransports = new WeakMap<Client, Transport>();
 
 export interface McpServerConfig {
 	// stdio (local process)
@@ -115,6 +116,8 @@ export interface McpSetupResult {
 	serverSources: Record<string, "global" | "project">;
 }
 
+type McpListedTool = Awaited<ReturnType<Client["listTools"]>>["tools"][number];
+
 // The common `npx -y <package>` config style has to resolve the package against
 // the npm registry before the server process even starts — confirmed
 // empirically: ~2.6s with a warm npx cache, ~12s with a cold one (fresh $HOME,
@@ -122,6 +125,7 @@ export interface McpSetupResult {
 // mid-resolution; 30s leaves real room without leaving a genuinely hung
 // server unnoticed for too long.
 const CONNECT_TIMEOUT_MS = 30_000;
+const CLOSE_TIMEOUT_MS = 1_000;
 
 /**
  * Full parent environment for stdio MCP servers, with the config's `env`
@@ -147,6 +151,38 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
 	// Clear the timer once the real promise settles so a fast success doesn't
 	// leave a pending timer keeping the event loop (and process exit) alive.
 	return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+async function closeClient(client: Client): Promise<void> {
+	await withTimeout(client.close(), CLOSE_TIMEOUT_MS, "MCP client did not close in time").catch(() => {});
+	const transport = clientTransports.get(client);
+	if (transport) {
+		await withTimeout(transport.close(), CLOSE_TIMEOUT_MS, "MCP transport did not close in time").catch(() => {});
+		clientTransports.delete(client);
+	}
+}
+
+export async function listMcpTools(
+	client: Pick<Client, "listTools">,
+	requestTimeoutMs: number,
+): Promise<McpListedTool[]> {
+	const tools: McpListedTool[] = [];
+	let cursor: string | undefined;
+	const seenCursors = new Set<string>();
+	do {
+		if (cursor && seenCursors.has(cursor)) {
+			throw new Error(`tools/list returned the cursor "${cursor}" more than once`);
+		}
+		if (cursor) seenCursors.add(cursor);
+		// biome-ignore lint/performance/noAwaitInLoops: pagination — each page's cursor depends on previous response
+		const page = await client.listTools(cursor ? { cursor } : undefined, {
+			timeout: requestTimeoutMs,
+			maxTotalTimeout: requestTimeoutMs,
+		});
+		tools.push(...page.tools);
+		cursor = page.nextCursor;
+	} while (cursor);
+	return tools;
 }
 
 interface McpContentPart {
@@ -213,7 +249,10 @@ export function mcpHttpFetch(url: string | URL | Request, init?: RequestInit): P
  * each gets its own connect timeout and a failure here becomes a diagnostic,
  * not a thrown error that takes the rest down with it.
  */
-export async function connectMcpServers(servers: Record<string, McpServerConfig>): Promise<McpSetupResult> {
+export async function connectMcpServers(
+	servers: Record<string, McpServerConfig>,
+	connectTimeoutMs = CONNECT_TIMEOUT_MS,
+): Promise<McpSetupResult> {
 	const toolIndex = new Map<string, McpToolHandle>();
 	const toolDefinitions: Tool[] = [];
 	const connections: McpConnection[] = [];
@@ -246,11 +285,12 @@ export async function connectMcpServers(servers: Record<string, McpServerConfig>
 			}
 
 			try {
+				clientTransports.set(client, transport);
 				try {
 					await withTimeout(
 						client.connect(transport),
-						CONNECT_TIMEOUT_MS,
-						`didn't respond within ${CONNECT_TIMEOUT_MS / 1000}s`,
+						connectTimeoutMs,
+						`didn't respond within ${connectTimeoutMs / 1000}s`,
 					);
 				} catch (error) {
 					// Legacy SSE fallback: a server that only speaks the deprecated
@@ -268,11 +308,12 @@ export async function connectMcpServers(servers: Record<string, McpServerConfig>
 						fetch: sseFetch,
 						eventSourceInit: { fetch: (u, i) => fetch(u as Parameters<typeof fetch>[0], i) },
 					});
+					clientTransports.set(client, transport);
 					try {
 						await withTimeout(
 							client.connect(transport),
-							CONNECT_TIMEOUT_MS,
-							`didn't respond within ${CONNECT_TIMEOUT_MS / 1000}s (SSE fallback)`,
+							connectTimeoutMs,
+							`didn't respond within ${connectTimeoutMs / 1000}s (SSE fallback)`,
 						);
 					} catch (sseError) {
 						// Both transports failed — a genuinely broken endpoint. Show
@@ -284,14 +325,7 @@ export async function connectMcpServers(servers: Record<string, McpServerConfig>
 						throw new Error(`Streamable HTTP: ${trim(msg)}; SSE fallback: ${trim(sseMsg)}`);
 					}
 				}
-				const tools: Awaited<ReturnType<typeof client.listTools>>["tools"] = [];
-				let cursor: string | undefined;
-				do {
-					// biome-ignore lint/performance/noAwaitInLoops: pagination — each page's cursor depends on previous response
-					const page = await client.listTools(cursor ? { cursor } : undefined);
-					tools.push(...page.tools);
-					cursor = page.nextCursor;
-				} while (cursor);
+				const tools = await listMcpTools(client, connectTimeoutMs);
 
 				for (const t of tools) {
 					const name = mcpToolName(serverName, t.name);
@@ -354,7 +388,7 @@ export async function connectMcpServers(servers: Record<string, McpServerConfig>
 				connections.push({ serverName, toolCount: tools.length, client });
 			} catch (error) {
 				diagnostics.push(`mcp server "${serverName}": ${error instanceof Error ? error.message : String(error)}`);
-				await client.close().catch(() => {});
+				await closeClient(client);
 			}
 		}),
 	);
@@ -424,5 +458,5 @@ export function formatMcpForPrompt(result: McpSetupResult, personaMcpAllowlist?:
 }
 
 export async function closeMcpConnections(connections: McpConnection[]): Promise<void> {
-	await Promise.all(connections.map((c) => c.client.close().catch(() => {})));
+	await Promise.all(connections.map((c) => closeClient(c.client)));
 }

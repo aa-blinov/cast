@@ -85,6 +85,10 @@ function buildServer() {
 		}));
 	}
 
+	if (process.argv.includes("--hang-list-tools")) {
+		server.server.setRequestHandler(ListToolsRequestSchema, async () => new Promise(() => {}));
+	}
+
 	return server;
 }
 
