@@ -308,4 +308,23 @@ describe("JSONL protocol — command action", () => {
 			rmSync(nonRepoTmp, { recursive: true, force: true });
 		}
 	}, 60_000);
+
+	it("runs a task, forks its context, and continues on the new session", async () => {
+		const events = await runInteractive([
+			{ type: "state" },
+			{ type: "prompt", text: "Reply with the word forked." },
+			{ type: "command", name: "fork", args: "" },
+			{ type: "state" },
+			{ type: "exit" },
+		]);
+
+		const states = events.filter((event) => event.type === "state");
+		const sourceId = String(states[0]?.sessionID ?? "");
+		const forkedState = states[states.length - 1];
+		expect(String(forkedState?.sessionID ?? "")).not.toBe(sourceId);
+		expect(forkedState?.messages).toEqual(
+			expect.arrayContaining([expect.objectContaining({ role: "user", content: "Reply with the word forked." })]),
+		);
+		expect(events.some((event) => event.type === "error")).toBe(false);
+	}, 60_000);
 });

@@ -660,6 +660,15 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		json(res, { id: ws.id, session: ws.session }, 201);
 	});
 
+	route("POST", "/api/sessions/:id/fork", (_req, res, params) => {
+		const source = bridge.getSession(params.id);
+		if (!source) return json(res, { error: "Not found" }, 404);
+		if (source.status === "running") return json(res, { error: "Agent running — abort before forking" }, 409);
+		const fork = bridge.forkSession(params.id);
+		if (!fork) return json(res, { error: "Could not fork session" }, 400);
+		json(res, { id: fork.id, session: fork.session }, 201);
+	});
+
 	// One stream per browser tab, independent of which session (if any) is
 	// currently open — lets the sidebar's message-count badges update live
 	// for background threads instead of only refreshing on a page reload.

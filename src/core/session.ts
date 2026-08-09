@@ -1592,6 +1592,31 @@ export function createSession(model: string, cwd: string): SessionState {
 	};
 }
 
+/**
+ * Creates an independent branch from the context currently active in a
+ * session. Historical rows omitted by compaction intentionally stay omitted:
+ * restoring only part of an old tool turn can produce an invalid provider
+ * transcript, while the active context is already the safe continuation.
+ */
+export function forkSession(source: SessionState): SessionState {
+	const fork = createSession(source.model, source.cwd ?? process.cwd());
+	fork.messages = JSON.parse(JSON.stringify(source.messages)) as Message[];
+	fork.persona = source.persona;
+	fork.mode = source.mode;
+	fork.providerUrl = source.providerUrl;
+	fork.lastAnnouncedLocalDate = source.lastAnnouncedLocalDate;
+	fork.reasoning = source.reasoning
+		? (JSON.parse(JSON.stringify(source.reasoning)) as Record<number, string>)
+		: undefined;
+	fork.turnMeta = source.turnMeta
+		? (JSON.parse(JSON.stringify(source.turnMeta)) as Record<number, TurnMeta>)
+		: undefined;
+	fork.todos = source.todos ? (JSON.parse(JSON.stringify(source.todos)) as TodoItem[]) : undefined;
+	fork.title = source.title ? `${source.title} (fork)` : undefined;
+	saveSession(fork);
+	return fork;
+}
+
 export function appendMessage(session: SessionState, message: Message): void {
 	if (!session.title && message.role === "user" && !session.messages.some((existing) => existing.role === "user")) {
 		const title = deriveSessionTitle(messageText(message));

@@ -91,7 +91,7 @@ export async function runInteractive(args: ParsedArgs): Promise<void> {
 	}
 	const settings = loadSettings();
 	const cwd = process.env.CAST_CWD ? resolve(process.env.CAST_CWD) : resolve(".");
-	const { id: sessionId } = await ensureServerSession(client, {
+	let { id: sessionId } = await ensureServerSession(client, {
 		persona: args.cliPersona ?? settings.persona,
 		model: args.cliModel ?? settings.model,
 		cwd,
@@ -175,6 +175,10 @@ export async function runInteractive(args: ParsedArgs): Promise<void> {
 		if (action.type === "command") {
 			try {
 				const result = await runServerCommand(client, sessionId, `/${action.name}${action.args}`);
+				if (action.name === "fork" && result && typeof result === "object" && "sessionId" in result) {
+					const forkId = (result as { sessionId?: unknown }).sessionId;
+					if (typeof forkId === "string" && forkId) sessionId = forkId;
+				}
 				emit("notice", {
 					text: result && typeof result === "object" ? JSON.stringify(result) : String(result ?? ""),
 				});

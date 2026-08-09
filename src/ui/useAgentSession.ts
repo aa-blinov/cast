@@ -20,6 +20,7 @@ import {
 	appendCheckpoint,
 	appendMessage,
 	clearSessionMessages,
+	forkSession,
 	getHistoryPage,
 	type HistoryPage,
 	recordCompaction,
@@ -37,6 +38,7 @@ import {
 	abortServerSession,
 	answerServerQuestion,
 	followUpServerSession,
+	forkServerSession,
 	getServerSession,
 	resolveServerPlanTransition,
 	type ServerClient,
@@ -245,6 +247,8 @@ export interface UseAgentSession {
 	followUp: (text: string) => void;
 	abort: () => void;
 	clearContext: () => void;
+	/** Fork the current safe context; daemon mode performs the copy on the daemon. */
+	forkSession: () => Promise<SessionState | undefined>;
 	resetContext: () => string | undefined;
 	/** Re-reads the on-disk session messages into the in-memory list. */
 	refresh: () => void;
@@ -1512,6 +1516,14 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		}
 	}, [isClient, effectiveDaemonUrl, session.id, serverClient]);
 
+	const forkCurrentSession = useCallback(async (): Promise<SessionState | undefined> => {
+		if (isClient && effectiveDaemonUrl) {
+			if (!serverClient) return undefined;
+			return forkServerSession(serverClient, session.id);
+		}
+		return forkSession(session);
+	}, [isClient, effectiveDaemonUrl, serverClient, session]);
+
 	const clearContext = useCallback(() => {
 		clearSessionMessages(session);
 		// The authoritative context-size signal must reset with the context it
@@ -1576,6 +1588,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		followUp,
 		abort,
 		clearContext,
+		forkSession: forkCurrentSession,
 		resetContext,
 		refresh,
 		refreshMeta,
