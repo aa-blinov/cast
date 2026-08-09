@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -255,6 +255,31 @@ describe("SSH tool executor", () => {
 			const result = await exec("ssh", { host: "h", command: "echo hi" });
 			expect(result.isError).toBe(true);
 			expect(result.content).toContain("Failed to start");
+		} finally {
+			process.env.PATH = originalPath;
+		}
+	});
+
+	it("uses the configured default timeout when a non-positive timeout is passed", async () => {
+		const originalPath = process.env.PATH;
+		const binDir = join(TEST_DIR, "fake-bin");
+		mkdirSync(binDir, { recursive: true });
+		const fakeSsh = join(binDir, "ssh");
+		writeFileSync(fakeSsh, "#!/bin/sh\n/bin/sleep 1\n", "utf-8");
+		chmodSync(fakeSsh, 0o755);
+		process.env.PATH = binDir;
+		try {
+			const exec = createToolExecutor(
+				TEST_DIR,
+				{ ...mockConfig, defaultBashTimeout: 0.05 },
+				undefined,
+				undefined,
+				undefined,
+				[{ name: "h", host: "example.test" }],
+			);
+			const result = await exec("ssh", { host: "h", command: "sleep", timeout: 0 });
+			expect(result.isError).toBe(true);
+			expect(result.content).toContain("[TIMED OUT] after 0.05 seconds");
 		} finally {
 			process.env.PATH = originalPath;
 		}

@@ -3343,6 +3343,33 @@ describe("runAgentLoop — todo list (build mode only)", () => {
 		expect(planTools.map((t) => t.function.name)).not.toContain("todo_write");
 	});
 
+	it("omits skill when no model-invokable skills are configured", async () => {
+		let capturedTools: ToolDef[] = [];
+		vi.mocked(streamAndCollect).mockImplementationOnce(async (_c, _m, _msgs, tools) => {
+			capturedTools = tools as ToolDef[];
+			return { content: "ok", thinking: "", finishReason: "stop" };
+		});
+
+		await runAgentLoop([{ role: "user", content: "hi" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "test",
+			skills: [
+				{
+					name: "manual-only",
+					description: "Manual skill.",
+					filePath: "/skills/manual-only/SKILL.md",
+					body: "Manual skill body.",
+					disableModelInvocation: true,
+				},
+			],
+			onEvent: () => {},
+		});
+
+		expect(capturedTools.map((tool) => tool.function.name)).not.toContain("skill");
+	});
+
 	it("a todo_write call updates state, fires todos_updated, and steers the next turn's prompt", async () => {
 		const systemPrompts: string[] = [];
 		const events: AgentEvent[] = [];
@@ -3424,6 +3451,40 @@ describe("runAgentLoop — todo list (build mode only)", () => {
 
 		expect(events.some((e) => e.type === "todos_updated")).toBe(false);
 		expect(events.some((e) => e.type === "tool_end" && e.name === "todo_write" && e.result.isError)).toBe(true);
+	});
+
+	it("runs todo_write through PreToolUse hooks before it updates state", async () => {
+		const events: AgentEvent[] = [];
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [
+					{
+						id: "t1",
+						name: "todo_write",
+						arguments: JSON.stringify({
+							todos: [{ content: "blocked", status: "in_progress", priority: "low" }],
+						}),
+					},
+				],
+			}))
+			.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
+
+		await runAgentLoop([{ role: "user", content: "go" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "test",
+			hooks: { PreToolUse: [{ matcher: "todo_write", hooks: [{ command: "exit 2" }] }] },
+			onEvent: (event) => events.push(event),
+		});
+
+		expect(events.some((event) => event.type === "todos_updated")).toBe(false);
+		expect(
+			events.some((event) => event.type === "tool_end" && event.name === "todo_write" && event.result.isError),
+		).toBe(true);
 	});
 
 	it("multiple successive tool calls without a todo list do not get blocked", async () => {
@@ -3558,6 +3619,82 @@ describe("runAgentLoop — todo list (build mode only)", () => {
 });
 
 describe("gateDestructiveWrite", () => {
+	it("still gates write calls when hooks are configured", async () => {
+		const events: AgentEvent[] = [];
+		const confirmWrite = vi.fn(async () => false);
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [
+					{
+						id: "write-1",
+						name: "write",
+						arguments: JSON.stringify({ path: "blocked.txt", content: "must not be written" }),
+					},
+				],
+			}))
+			.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
+
+		await runAgentLoop([{ role: "user", content: "write" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "test",
+			hooks: {
+				PreToolUse: [
+					{
+						matcher: "write",
+						hooks: [
+							{
+								command:
+									'echo \'{"hookSpecificOutput":{"updatedInput":{"path":"rewritten.txt","content":"changed"}}}\'',
+							},
+						],
+					},
+				],
+			},
+			confirmWrite,
+			onEvent: (event) => events.push(event),
+		});
+
+		expect(confirmWrite).toHaveBeenCalledWith("write", "rewritten.txt", expect.stringContaining("rewritten.txt"));
+		expect(events.some((event) => event.type === "tool_end" && event.result.isError)).toBe(true);
+	});
+
+	it("still gates MCP calls when hooks are configured", async () => {
+		const confirmWrite = vi.fn(async () => false);
+		const mcpCall = vi.fn(async () => ({ content: "MCP_OK", isError: false }));
+		const mcpDef = {
+			type: "function" as const,
+			function: { name: "mcp__demo__mutate", description: "mutate", parameters: { type: "object", properties: {} } },
+		};
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [{ id: "mcp-1", name: "mcp__demo__mutate", arguments: "{}" }],
+			}))
+			.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
+
+		await runAgentLoop([{ role: "user", content: "mutate" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "test",
+			hooks: {},
+			confirmWrite,
+			mcpTools: [mcpDef],
+			mcpToolIndex: new Map([["mcp__demo__mutate", { definition: mcpDef, call: mcpCall }]]),
+			onEvent: () => {},
+		});
+
+		expect(confirmWrite).toHaveBeenCalledOnce();
+		expect(mcpCall).not.toHaveBeenCalled();
+	});
+
 	it("returns undefined when no confirm callback is set", async () => {
 		const { gateDestructiveWrite } = await import("../src/core/loop.ts");
 		const result = await gateDestructiveWrite("write", { path: "/tmp/a" }, undefined);

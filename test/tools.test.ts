@@ -296,6 +296,13 @@ describe("todo_write tool definition — build-mode only", () => {
 	});
 });
 
+describe("skill tool definition", () => {
+	it("is omitted when no model-invokable skills are available", () => {
+		const tools = getToolDefinitions(undefined, undefined, undefined, undefined, undefined, undefined, false);
+		expect(tools.find((t) => t.function.name === "skill")).toBeUndefined();
+	});
+});
+
 describe("web_search tool definition — provider-dependent schema", () => {
 	let realHome: string | undefined;
 	let fakeHome: string;

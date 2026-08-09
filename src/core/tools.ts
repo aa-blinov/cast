@@ -40,6 +40,7 @@ export function getToolDefinitions(
 	sshHostNames?: string[],
 	backgroundBashEnabled?: boolean,
 	includeTodoTool?: boolean,
+	includeSkillTool = true,
 ): Tool[] {
 	const personaList =
 		personaNames && personaNames.length > 0
@@ -453,7 +454,7 @@ export function getToolDefinitions(
 			function: {
 				name: "question",
 				description:
-					"Ask the user one to four concrete questions when their decision is needed. This opens a picker and ends your turn. Each question needs 2–4 options; recommend one when appropriate.",
+					"Ask the user one to five concrete questions when their decision is needed. This opens a picker and ends your turn. Each question needs 2–4 options; recommend one when appropriate.",
 				parameters: {
 					type: "object",
 					properties: {
@@ -548,28 +549,33 @@ export function getToolDefinitions(
 					},
 				]
 			: []),
-		{
-			type: "function",
-			function: {
-				name: "skill",
-				description:
-					"Load a specialized skill by name. Skills contain detailed workflows and instructions for specific tasks. Call this when the user's request matches a skill's description, or when they invoke /skill:name.",
-				parameters: {
-					type: "object",
-					properties: {
-						name: {
-							type: "string",
-							description: "The skill name to load (e.g. 'deep-research', 'arxiv', 'learn-everything')",
-						},
-						args: {
-							type: "string",
-							description: "Optional arguments to pass to the skill (replaces $ARGUMENTS in the skill body)",
+		...(includeSkillTool
+			? [
+					{
+						type: "function" as const,
+						function: {
+							name: "skill",
+							description:
+								"Load a specialized skill by name. Skills contain detailed workflows and instructions for specific tasks. Call this when the user's request matches a skill's description, or when they invoke /skill:name.",
+							parameters: {
+								type: "object",
+								properties: {
+									name: {
+										type: "string",
+										description: "The skill name to load (e.g. 'deep-research', 'arxiv', 'learn-everything')",
+									},
+									args: {
+										type: "string",
+										description:
+											"Optional arguments to pass to the skill (replaces $ARGUMENTS in the skill body)",
+									},
+								},
+								required: ["name"],
+							},
 						},
 					},
-					required: ["name"],
-				},
-			},
-		},
+				]
+			: []),
 	];
 }
 

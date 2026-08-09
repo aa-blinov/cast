@@ -767,6 +767,14 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 			: loopConfig.subagentPrompts;
 	const subagentNames = subagentsEnabled ? allowedSubagentPrompts?.map((p) => p.name) : undefined;
 	const sshHostNames = loopConfig.sshHosts?.map((h) => h.name);
+	// Persona `skills:` allowlists which skill names this persona (and, so a
+	// restriction can't be routed around by delegating, anything it spawns
+	// via `task`) may invoke — same glob semantics as `tools:`. Omitted =
+	// every discovered skill stays available.
+	const allowedSkills =
+		currentPersonaObj?.skills !== undefined
+			? loopConfig.skills?.filter((s) => matchesToolsAllowlist(s.name, currentPersonaObj.skills!))
+			: loopConfig.skills;
 	// A plan is authored before build mode; only build mode exposes its live
 	// todo projection as execution state.
 	const todoModeActive = !loopConfig.planState?.enabled;
@@ -778,6 +786,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		sshHostNames,
 		Boolean(loopConfig.backgroundBash),
 		todoModeActive,
+		allowedSkills?.some((skill) => !skill.disableModelInvocation) ?? false,
 	);
 	const mcpTools = loopConfig.mcpTools ?? [];
 	const allTools = [...builtinTools, ...mcpTools];
@@ -883,15 +892,6 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				}
 			: loopConfig.confirmBash;
 
-	// Persona `skills:` allowlists which skill names this persona (and, so a
-	// restriction can't be routed around by delegating, anything it spawns
-	// via `task`) may invoke — same glob semantics as `tools:`. Omitted =
-	// every discovered skill stays available.
-	const allowedSkills =
-		currentPersonaObj?.skills !== undefined
-			? loopConfig.skills?.filter((s) => matchesToolsAllowlist(s.name, currentPersonaObj.skills!))
-			: loopConfig.skills;
-
 	const builtinExecuteTool = createToolExecutor(
 		cwd,
 		config,
@@ -969,50 +969,57 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				});
 			}
 		}
-		// Handled here (not in tools.ts's dispatcher) because it needs direct
-		// access to this closure's `todos` — the list must be visible to
-		// syncSystemPrompt on the very next request, not round-tripped through
-		// a separate store.
-		if (name === "todo_write") {
-			const result = validateTodos(args.todos);
-			if (!result.ok) return Promise.resolve({ content: `Error: ${result.error}`, isError: true });
-			const previousTodos = todos;
-			const planStepsByContent = new Map(
-				previousTodos.flatMap((todo) => (todo.planStep ? [[todo.content, todo.planStep] as const] : [])),
-			);
-			todos = result.todos.map((todo) => {
-				const planStep = planStepsByContent.get(todo.content);
-				return planStep ? { ...todo, planStep } : todo;
-			});
-			onEvent({ type: "todos_updated", todos });
-			// Observation-only, fire-and-forget — content is the only stable
-			// identity todos have (no id field), so this is a best-effort diff,
-			// not a guaranteed one (renaming a todo reads as create+drop).
-			if (loopConfig.hooks) {
-				const previousByContent = new Map(previousTodos.map((t) => [t.content, t]));
-				for (const t of todos) {
-					const prev = previousByContent.get(t.content);
-					if (!prev) {
-						void runHooksForEvent(loopConfig.hooks, {
-							event: "TaskCreated",
-							cwd,
-							sessionId: loopConfig.sessionId,
-							payload: { content: t.content, priority: t.priority },
-							signal,
-						});
-					} else if (prev.status !== "completed" && t.status === "completed") {
-						void runHooksForEvent(loopConfig.hooks, {
-							event: "TaskCompleted",
-							cwd,
-							sessionId: loopConfig.sessionId,
-							payload: { content: t.content, priority: t.priority },
-							signal,
-						});
+		const dispatch = async (finalArgs: Record<string, unknown>): Promise<ToolResult> => {
+			// Handled here (not in tools.ts's dispatcher) because it needs direct
+			// access to this closure's `todos` — the list must be visible to
+			// syncSystemPrompt on the very next request, not round-tripped through
+			// a separate store.
+			if (name === "todo_write") {
+				const result = validateTodos(finalArgs.todos);
+				if (!result.ok) return { content: `Error: ${result.error}`, isError: true };
+				const previousTodos = todos;
+				const planStepsByContent = new Map(
+					previousTodos.flatMap((todo) => (todo.planStep ? [[todo.content, todo.planStep] as const] : [])),
+				);
+				todos = result.todos.map((todo) => {
+					const planStep = planStepsByContent.get(todo.content);
+					return planStep ? { ...todo, planStep } : todo;
+				});
+				onEvent({ type: "todos_updated", todos });
+				// Observation-only, fire-and-forget — content is the only stable
+				// identity todos have (no id field), so this is a best-effort diff,
+				// not a guaranteed one (renaming a todo reads as create+drop).
+				if (loopConfig.hooks) {
+					const previousByContent = new Map(previousTodos.map((t) => [t.content, t]));
+					for (const t of todos) {
+						const prev = previousByContent.get(t.content);
+						if (!prev) {
+							void runHooksForEvent(loopConfig.hooks, {
+								event: "TaskCreated",
+								cwd,
+								sessionId: loopConfig.sessionId,
+								payload: { content: t.content, priority: t.priority },
+								signal,
+							});
+						} else if (prev.status !== "completed" && t.status === "completed") {
+							void runHooksForEvent(loopConfig.hooks, {
+								event: "TaskCompleted",
+								cwd,
+								sessionId: loopConfig.sessionId,
+								payload: { content: t.content, priority: t.priority },
+								signal,
+							});
+						}
 					}
 				}
+				return { content: JSON.stringify({ todos, remaining: remainingTodoCount(todos) }) };
 			}
-			return Promise.resolve({ content: JSON.stringify({ todos, remaining: remainingTodoCount(todos) }) });
-		}
+			const writeDenial = await gateDestructiveWrite(name, finalArgs, loopConfig.confirmWrite);
+			if (writeDenial) return writeDenial;
+			const mcpTool = mcpToolIndex?.get(name);
+			if (mcpTool) return mcpTool.call(finalArgs, toolSignal);
+			return builtinExecuteTool(name, finalArgs, toolSignal, toolCallId);
+		};
 		const hooks = loopConfig.hooks;
 		if (hooks) {
 			return runToolWithHooks(
@@ -1030,18 +1037,10 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 					toolCallId,
 					permissionMode: loopConfig.permissionMode,
 				},
-				async (finalArgs) => {
-					const mcpTool = mcpToolIndex?.get(name);
-					if (mcpTool) return mcpTool.call(finalArgs, toolSignal);
-					return builtinExecuteTool(name, finalArgs, toolSignal, toolCallId);
-				},
+				dispatch,
 			);
 		}
-		const mcpTool = mcpToolIndex?.get(name);
-		if (mcpTool) return mcpTool.call(args, toolSignal);
-		const writeDenial = await gateDestructiveWrite(name, args, loopConfig.confirmWrite);
-		if (writeDenial) return writeDenial;
-		return builtinExecuteTool(name, args, toolSignal, toolCallId);
+		return dispatch(args);
 	};
 	const client = createClient(config, loopConfig.modelProvider);
 	const steeringQueue = loopConfig.steeringQueue ?? new MessageQueue();
