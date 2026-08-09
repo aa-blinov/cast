@@ -8,7 +8,7 @@ Skills are reusable instruction files the model can read on demand.
 4. `~/.config/agents/skills/` / `~/.agents/skills/` — skills.sh universal global
 5. Enabled marketplace plugins (`/plugin install`) — `source: plugin`
 6. Shipped with cast — builtin
-7. `--skill <path>` — extra CLI paths (still load with `--no-skills`)
+7. `--skill <directory>` — explicit skill package directory (still loads with `--no-skills`)
 
 `--no-skills` skips project, agents, global, plugin, and builtin discovery.
 
@@ -37,7 +37,9 @@ Instructions the model reads when this skill is invoked...
 **Rules:**
 
 - `name` must be lowercase, alphanumeric + hyphens
+- `name` must match the directory containing `SKILL.md`
 - `description` is required (shown to the model)
+- Optional standard fields: `license`, `compatibility` (up to 500 characters), `metadata` (string-to-string map), `allowed-tools` (experimental)
 - `disable-model-invocation: true` — skill is hidden from model, only usable via `/skill:name`
 - `/skills` — multi-select toggle; also `list`, `enable`/`disable <name>`, `uninstall`, `help`
 - `/skills uninstall` — delete cast/agents skill from disk (picker or name + confirm); plugin skills show locked → `/plugin uninstall`

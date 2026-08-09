@@ -16,7 +16,7 @@ useful to someone who reads nothing else.
 ## Background & scope
 2-4 sentences from brief.md: question, boundaries, assumptions made.
 
-## <Body sections — organize by THEME, not by sub-agent/angle>
+## <Body sections — organize by THEME, not by subagent/angle>
 Synthesize across findings files; merge overlapping claims, surface disagreements.
 - inline citations: "... grew 40% in 2025 [3][7]."
 - conflicts: "Source A (2026-03) reports X [2], while B (2025-11) claims Y [5];

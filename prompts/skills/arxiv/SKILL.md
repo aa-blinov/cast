@@ -16,22 +16,21 @@ Prefer `scripts/arxiv.py` over raw `curl` — it handles Atom XML parsing, versi
 
 | Goal | Command |
 |------|---------|
-| Search papers | `python scripts/arxiv.py search "GRPO reinforcement learning" --max 10 --sort date` |
-| Filtered search | `python scripts/arxiv.py search "attention" --author vaswani --category cs.CL` |
-| Full metadata + abstract | `python scripts/arxiv.py get 2601.02780,1706.03762` |
-| BibTeX citation | `python scripts/arxiv.py bibtex 2601.02780` |
-| Download PDF | `python scripts/arxiv.py download 2601.02780 --dest ./papers` |
-| Latest in a category | `python scripts/arxiv.py new cs.CL --max 10` |
-| Who cites this paper | `python scripts/arxiv.py cites 2601.02780 --max 20` |
-| What this paper cites | `python scripts/arxiv.py refs 2601.02780` |
-| Related-paper recommendations | `python scripts/arxiv.py similar 2601.02780` |
+| Search papers | `python ${CAST_SKILL_DIR}/scripts/arxiv.py search "GRPO reinforcement learning" --max 10 --sort date` |
+| Filtered search | `python ${CAST_SKILL_DIR}/scripts/arxiv.py search "attention" --author vaswani --category cs.CL` |
+| Full metadata + abstract | `python ${CAST_SKILL_DIR}/scripts/arxiv.py get 2601.02780,1706.03762` |
+| BibTeX citation | `python ${CAST_SKILL_DIR}/scripts/arxiv.py bibtex 2601.02780` |
+| Download PDF | `python ${CAST_SKILL_DIR}/scripts/arxiv.py download 2601.02780 --dest ./papers` |
+| Latest in a category | `python ${CAST_SKILL_DIR}/scripts/arxiv.py new cs.CL --max 10` |
+| Who cites this paper | `python ${CAST_SKILL_DIR}/scripts/arxiv.py cites 2601.02780 --max 20` |
+| What this paper cites | `python ${CAST_SKILL_DIR}/scripts/arxiv.py similar 2601.02780` |
 | Machine-readable output | append `--json` to any command |
 
 Common flags: `--max N` (result count), `--sort relevance|date|updated`, `--start N` (pagination offset, search only), `--json`.
 
 ## Reading Paper Content
 
-After finding a paper, read it with the `webfetch` tool:
+After finding a paper, read it with the `web_fetch` tool:
 
 - Abstract page (fast, metadata + abstract): `https://arxiv.org/abs/2601.02780`
 - Full paper as HTML (best for reading, when available): `https://arxiv.org/html/2601.02780`
@@ -44,8 +43,8 @@ If HTML is unavailable and the PDF must be processed locally, `download` it firs
 **Literature review on a topic**
 1. `search "topic" --sort date --max 15` — recent work
 2. `search "topic" --max 15` — seminal work (relevance-sorted)
-3. Cross-check impact: `python scripts/arxiv.py get ID` then `cites ID --max 5` for citation counts
-4. Read the top candidates via `webfetch` on the abs/html URLs
+3. Cross-check impact: `python3 ${CAST_SKILL_DIR}/scripts/arxiv.py get ID` then `cites ID --max 5` for citation counts
+4. Read the top candidates via `web_fetch` on the abs/html URLs
 5. `bibtex ID1,ID2,...` for the papers you keep
 
 **Deep-dive a single paper**
@@ -53,7 +52,7 @@ If HTML is unavailable and the PDF must be processed locally, `download` it firs
 2. `refs ID` — what it builds on
 3. `cites ID` — follow-up work (sorted by citation count)
 4. `similar ID` — related papers you might have missed
-5. `webfetch` the HTML/PDF for full text
+5. Use `web_fetch` on the HTML/PDF for full text
 
 **Stay current in a field**
 - `new cs.AI --max 20` — latest submissions in a category

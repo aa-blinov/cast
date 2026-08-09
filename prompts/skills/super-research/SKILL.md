@@ -53,19 +53,19 @@ Four of the eight modes — topic survey, paper reproduction, paper writing, and
 
 ```bash
 # Multi-source paper search — arXiv + S2 + OpenAlex + Crossref, dedup, unified JSON
-python3 scripts/paper_search.py "chain of thought reasoning" --sources arxiv,s2,openalex --limit 15 --out papers.json
+python3 ${CAST_SKILL_DIR}/scripts/paper_search.py "chain of thought reasoning" --sources arxiv,s2,openalex --limit 15 --out papers.json
 
 # Verify ONE citation (waterfall: Crossref → S2 → OpenAlex → arXiv; title-similarity match)
-python3 scripts/verify_citation.py --title "Attention Is All You Need" --author Vaswani --year 2017
+python3 ${CAST_SKILL_DIR}/scripts/verify_citation.py --title "Attention Is All You Need" --author Vaswani --year 2017
 
 # Audit an entire .bib file → per-entry verdict (VERIFIED / MISMATCH / NOT_FOUND)
-python3 scripts/verify_citation.py --bib refs.bib --out audit.json
+python3 ${CAST_SKILL_DIR}/scripts/verify_citation.py --bib refs.bib --out audit.json
 
 # Fetch a paper's full text (arXiv id or abs URL → text via ar5iv HTML, falls back to abstract)
-python3 scripts/fetch_paper.py 2504.17192 --out paper.txt
+python3 ${CAST_SKILL_DIR}/scripts/fetch_paper.py 2504.17192 --out paper.txt
 
 # Fetch original LaTeX source instead (exact equations/tables — prefer for reproduction)
-python3 scripts/fetch_paper.py 2504.17192 --latex --out-dir paper_src/
+python3 ${CAST_SKILL_DIR}/scripts/fetch_paper.py 2504.17192 --latex --out-dir paper_src/
 ```
 
 On HTTP 429/5xx the scripts retry with backoff. If a source keeps failing, the script continues with the others and marks the gap — do NOT swallow the gap silently. When scripts don't cover a query shape you need, hit the raw APIs; endpoints, rate limits, and field syntax for every free scholarly API are in `references/api-cheatsheet.md`.

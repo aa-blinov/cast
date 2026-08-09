@@ -57,8 +57,8 @@ LOOP FOREVER (or until stopping condition):
 **When the well is really dry — mine the literature.** If several consecutive experiments cluster around the same failure mode, treat that as a signal that you're out of local ideas, not that the metric is optimal. Use the shared toolbox to import approaches from published work:
 
 ```bash
-python3 scripts/paper_search.py "<technique> improve <metric>" --sources arxiv,s2 --limit 15 --out papers.json
-python3 scripts/fetch_paper.py <arxiv_id> --out /tmp/paper.txt
+python3 ${CAST_SKILL_DIR}/scripts/paper_search.py "<technique> improve <metric>" --sources arxiv,s2 --limit 15 --out papers.json
+python3 ${CAST_SKILL_DIR}/scripts/fetch_paper.py <arxiv_id> --out /tmp/paper.txt
 ```
 
 Read abstracts (not summaries — the abstracts) and pull the most testable idea into the next hypothesis. Log the paper id in the `description` column so a reviewer can trace an experiment back to its inspiration. Don't let this become a full survey — the loop is the primary work; this is 15 minutes to escape a plateau, not a new mode.

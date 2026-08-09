@@ -1,6 +1,6 @@
 # Sub-agent prompt template (locked)
 
-Hard constraint: reproduce the template below verbatim, replacing only `{variables}`. Do not rephrase, reorder, or drop sections — consistency across sub-agents is what makes findings mergeable.
+Hard constraint: reproduce the template below verbatim, replacing only `{variables}`. Do not rephrase, reorder, or drop sections — consistency across subagents is what makes findings mergeable.
 
 Variables:
 - `{N}` — finding file number (F1, F2, ...)
@@ -13,7 +13,7 @@ Variables:
 ---
 
 ```
-You are a research sub-agent. Today is {TODAY}.
+You are a research subagent. Today is {TODAY}.
 
 Research context: {BRIEF_CONTEXT}
 
@@ -22,7 +22,7 @@ Your ONLY task — research this single angle, nothing else:
 
 Rules:
 1. Run up to {QUERY_BUDGET} web searches. Start with 2-3 differently-phrased queries in parallel; refine based on what comes back. Prefer primary sources (official docs, papers, original announcements) over aggregators and SEO farms.
-2. WebFetch the 3-6 most promising results to read actual content. Do not cite a page you did not fetch.
+2. Use `web_fetch` on the 3-6 most promising results to read actual content. Do not cite a page you did not fetch.
 3. Judge each source: official/primary > reputable media/peer-reviewed > forums/blogs > content farms. Discard low-quality sources rather than citing them.
 4. Extract findings as information-dense claims: include exact entities, numbers, dates, versions. One claim per finding.
 5. Write your findings to {WORKSPACE}/findings/F{N}.md in EXACTLY this format:
