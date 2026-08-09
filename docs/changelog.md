@@ -2,6 +2,17 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.18
+
+### Added
+
+- **Stable API v1 for daemon integrations.** Alternative clients can now use the versioned `/api/v1` REST/SSE contract for session lifecycle, agent control, history, files, settings, and daemon metadata without depending on private web UI routes.
+- **Published OpenAPI specification.** Every daemon serves `/api/v1/openapi.json`; GitHub Pages publishes the matching checked-in snapshot at `openapi/v1.json` for code generation and CI validation.
+
+### Fixed
+
+- **API input failures are explicit.** Malformed JSON and invalid appearance, SSH, or provider-verification fields return actionable `400` responses rather than leaking through as server errors.
+
 ## 0.13.17
 
 ### Fixed
