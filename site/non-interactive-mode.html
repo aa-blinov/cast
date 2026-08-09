@@ -507,10 +507,11 @@ a:hover { color: #c084fc; text-decoration: none; }
 	<article class="content">
 		<h1>Non-Interactive Mode</h1>
 <p><code>cast run</code> sends a single prompt, streams the response to stdout, and exits. Designed for CI/CD, scripting, and piping.</p>
-<p>For a persistent, machine-driven session, use <code>cast run --interactive</code>. It uses
-the same startup and agent loop as the TUI and web UI, but exchanges JSONL
-actions and state snapshots. This is the entry point for multi-step evals and
-agents that need to inspect a pending picker before deciding what to do next.</p>
+<p>For a persistent, machine-driven session, use <code>cast run --interactive</code>. It
+connects to the same server daemon and agent loop as the TUI and web UI, but
+exchanges JSONL actions and state snapshots. This is the entry point for
+multi-step evals and agents that need to inspect a pending picker before
+deciding what to do next.</p>
 <h2>Usage</h2>
 <pre><code class="language-bash">cast run &quot;what changed in the last commit&quot;
 cast run --format json &quot;list all TODO comments&quot;
@@ -548,8 +549,8 @@ cast run -m gpt-4o -r medium &quot;explain the session module&quot;
 </code></pre>
 <p>Send one JSON object per line on stdin. Cast emits the normal streaming JSON
 events plus a <code>state</code> snapshot at startup and after every action. The snapshot
-includes the full visible transcript, model-facing context size, current mode,
-pending question or plan review, and the active plan content.</p>
+includes the visible transcript (<code>messages</code>), current <code>mode</code> and <code>status</code>,
+pending <code>question</code> or <code>planReview</code>, and the session <code>cwd</code>.</p>
 <pre><code class="language-jsonl">{&quot;type&quot;:&quot;set_mode&quot;,&quot;mode&quot;:&quot;plan&quot;}
 {&quot;type&quot;:&quot;prompt&quot;,&quot;text&quot;:&quot;Plan a migration and ask questions first.&quot;}
 {&quot;type&quot;:&quot;answer_question&quot;,&quot;values&quot;:[&quot;postgres&quot;,&quot;online&quot;]}

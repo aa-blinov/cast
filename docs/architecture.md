@@ -50,7 +50,7 @@ src/
     input/            Keybindings, input handling
     ...
   pickers/            Onboarding pickers (model, persona, reasoning)
-  web/                HTTP server, REST/SSE bridge, browser client
+  server/             HTTP server, REST/SSE bridge, browser client
   index.ts            CLI entry point
 ```
 
@@ -109,7 +109,7 @@ A turn runs as a bounded outer iteration:
 
 **Queues.** While a turn runs, a `steeringQueue` (injected mid-turn, before the next model call) and a `followUpQueue` (appended after the turn ends) let the user influence or extend the run without starting a parallel writer. The loop checks these at turn boundaries, so a steer typed during a long tool phase lands at the next model call rather than spawning a competing turn.
 
-**Events.** Every state change is emitted as an `AgentEvent` (`token`, `thinking`, `tool_start`, `tool_end`, `usage`, `turn_end`, `end`, `error`, `compaction`, …). The web daemon maps these to `WebEvent` and broadcasts over SSE; the local `cast run --interactive` path consumes them directly. Surfaces never re-derive loop state — they render from the event stream.
+**Events.** Every state change is emitted as an `AgentEvent` (`token`, `thinking`, `tool_start`, `tool_end`, `usage`, `turn_end`, `end`, `error`, `compaction`, …). The server daemon maps these to `WebEvent` and broadcasts them over SSE. TUI, Web UI, `cast run`, and `cast run --interactive` consume that stream; surfaces never re-derive loop state.
 
 ```mermaid
 sequenceDiagram
@@ -139,7 +139,7 @@ sequenceDiagram
 
 **Compaction.** When history exceeds ~75% of the context window, older messages are summarized by the LLM (see Context Compaction below). The split snaps to turn boundaries so tool calls and results stay paired.
 
-For how the TUI, web UI, and the `cast server` daemon are wired around this loop — processes, lifecycles, auth, and the `CAST_NO_DAEMON=1` escape hatch — see [Infrastructure](infrastructure.md).
+For how the TUI, web UI, and the `cast server` daemon are wired around this loop — processes, lifecycles, auth, and the TUI-only `CAST_NO_DAEMON=1` fallback — see [Infrastructure](infrastructure.md).
 
 ### Trust Gating
 

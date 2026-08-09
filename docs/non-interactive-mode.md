@@ -2,10 +2,11 @@
 
 `cast run` sends a single prompt, streams the response to stdout, and exits. Designed for CI/CD, scripting, and piping.
 
-For a persistent, machine-driven session, use `cast run --interactive`. It uses
-the same startup and agent loop as the TUI and web UI, but exchanges JSONL
-actions and state snapshots. This is the entry point for multi-step evals and
-agents that need to inspect a pending picker before deciding what to do next.
+For a persistent, machine-driven session, use `cast run --interactive`. It
+connects to the same server daemon and agent loop as the TUI and web UI, but
+exchanges JSONL actions and state snapshots. This is the entry point for
+multi-step evals and agents that need to inspect a pending picker before
+deciding what to do next.
 
 ## Usage
 
@@ -91,8 +92,8 @@ cast run --interactive
 
 Send one JSON object per line on stdin. Cast emits the normal streaming JSON
 events plus a `state` snapshot at startup and after every action. The snapshot
-includes the full visible transcript, model-facing context size, current mode,
-pending question or plan review, and the active plan content.
+includes the visible transcript (`messages`), current `mode` and `status`,
+pending `question` or `planReview`, and the session `cwd`.
 
 ```jsonl
 {"type":"set_mode","mode":"plan"}

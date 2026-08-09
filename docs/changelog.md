@@ -4,6 +4,10 @@ All notable user-facing changes to cast, newest first.
 
 ## 0.13.15
 
+### Changed
+
+- **`cast web` is the primary browser entry point again.** `cast server` remains a fully equivalent alias for daemon-oriented scripts and integrations, so either spelling manages the same daemon and sessions.
+
 ### Fixed
 
 - **Daemon lifecycle is safe across restarts and upgrades.** Cast now verifies the daemon's per-process identity before attaching to it or signalling its PID, so a stale state file cannot direct a client to — or stop — an unrelated process that reused the PID.

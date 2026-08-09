@@ -33,7 +33,8 @@ User settings are persisted to `~/.cast/settings.json`. This file is loaded on s
 | `disabledHooks` | string[] | Content-derived hook group ids disabled via `/hooks` |
 | `enabledPlugins` | Record<string, boolean> | Marketplace plugins keyed by `name@marketplace` |
 | `statusBar` | object | Status bar segment config (`visible`, `order`, `sides`) — use `/statusbar` to configure |
-| `webPassword` | string | Password generated for `cast server` on first start |
+| `serverToken` | string | Password generated for the server daemon on first start |
+| `webPassword` | string | Deprecated predecessor of `serverToken`; read and migrated for compatibility |
 | `quickSessionPersona` | string | Persona selected by the web UI's Quick session action |
 | `updatedAt` | string | Auto-updated timestamp |
 
@@ -46,6 +47,9 @@ Settings are written atomically (temp file + rename) to prevent corruption from 
 | `CAST_CWD` | Override working directory |
 | `CAST_BASH` | Path to the bash executable the `bash` tool spawns (overrides auto-detection; useful for msys2 or non-standard Git Bash installs on Windows) |
 | `CAST_VERSION` | Pin install version (installer only) |
+| `CAST_SERVER_PORT` | Override server daemon port (default: `1337`) |
+| `CAST_SERVER_HOST` | Override server daemon bind address (default: `127.0.0.1`) |
+| `CAST_SESSIONS_DB` | Override SQLite session database path |
 
 Provider URL and API key are configured **only** via `~/.cast/settings.json` (first-run prompt, or `/provider` in-session). cast does not read `PROVIDER_BASE_URL` / `PROVIDER_API_KEY` environment variables or a project `.env` — editing those changes nothing.
 
