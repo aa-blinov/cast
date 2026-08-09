@@ -68,25 +68,25 @@ LOOP UNTIL saturation OR the depth minimum is hit AND the last 5 sources added n
 
 ## Scholarly / paper-heavy surveys — use the toolbox
 
-When the sources you care about are peer-reviewed papers or arXiv preprints (not blog posts / tweets / docs), prefer the shared scripts over ad-hoc WebFetch. They query multiple free APIs in one call and dedup for you:
+When the sources you care about are peer-reviewed papers or arXiv preprints (not blog posts / tweets / docs), prefer the shared scripts over ad-hoc `web_fetch`. They query multiple free APIs in one call and dedup for you:
 
 ```bash
 # Multi-source paper search — arXiv + S2 + OpenAlex + Crossref
-python3 scripts/paper_search.py "<query>" --sources arxiv,s2,openalex --limit 20 --year-from 2022 --out papers.json
+python3 ${CAST_SKILL_DIR}/scripts/paper_search.py "<query>" --sources arxiv,s2,openalex --limit 20 --year-from 2022 --out papers.json
 
 # Snowball from a central paper (S2's citation graph)
 # → see references/api-cheatsheet.md § Semantic Scholar for `/paper/<id>/citations` and `/references`
 
 # Fetch a paper's full text or LaTeX for close reading
-python3 scripts/fetch_paper.py <arxiv_id> --out papers/<slug>.txt
-python3 scripts/fetch_paper.py <arxiv_id> --latex --out-dir papers/<slug>/src/
+python3 ${CAST_SKILL_DIR}/scripts/fetch_paper.py <arxiv_id> --out papers/<slug>.txt
+python3 ${CAST_SKILL_DIR}/scripts/fetch_paper.py <arxiv_id> --latex --out-dir papers/<slug>/src/
 ```
 
 Tactics that pay off for paper surveys:
 
 - Run 2–4 query variants (synonyms, subfield terms), then merge — keyword search misses adjacent literatures.
 - Snowball: for the 2–3 most central papers, walk S2's citations/references (see `references/api-cheatsheet.md`). One good snowball beats another keyword sweep.
-- Also WebFetch survey papers' related-work sections and awesome-lists — they surface what keyword search doesn't rank.
+- Also use `web_fetch` on survey papers' related-work sections and awesome-lists — they surface what keyword search doesn't rank.
 - **Every URL in the eventual report must come from a `papers.json` row or a fetch you actually made.** URLs recalled from memory are hallucinations; do not write them.
 - For parallel extraction across 10–25 papers, spawn subagents in batches of 3–5, each with the fetched text file paths (not summaries) and the field schema from `question.md`.
 

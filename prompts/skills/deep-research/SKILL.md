@@ -1,18 +1,18 @@
 ---
 name: deep-research
-description: Deep research on any topic using parallel sub-agents and built-in tools only (WebSearch/WebFetch + free APIs, no keys). Use for a thorough multi-source investigation with a cited report. NOT for simple lookups (a single WebSearch suffices) and NOT for academic literature surveys (use the auto-research skill instead).
+description: Deep research on any topic using parallel subagents and Cast tools only (`web_search`, `web_fetch`, `task`). Use for a thorough multi-source investigation with a cited report. NOT for simple lookups (one `web_search` usually suffices) and NOT for academic literature surveys (use the super-research skill instead).
 ---
 
 # Deep Research
 
-Orchestrate parallel research sub-agents, then write one coherent cited report. Research is parallel; writing is single-point — never let multiple agents write report sections.
+Orchestrate parallel research subagents, then write one coherent cited report. Research is parallel; writing is single-point — never let multiple agents write report sections.
 
 ## Step 0 — Always first
 
-1. Run `date +%Y-%m-%d` via Bash. Never assume the current year from training data.
+1. Run `date +%Y-%m-%d` via `bash`. Never assume the current year from training data.
 2. Triage:
-   - Answerable with 1-2 searches? → STOP, just use WebSearch directly. Do not use this skill.
-   - Enumeration task (N items × M fields, e.g. "compare 20 frameworks")? → still this skill, but use table-oriented decomposition (one sub-agent per item batch).
+   - Answerable with 1-2 searches? → STOP, just use `web_search` directly. Do not use this skill.
+   - Enumeration task (N items × M fields, e.g. "compare 20 frameworks")? → still this skill, but use table-oriented decomposition (one subagent per item batch).
    - Open-ended investigation? → continue below.
 3. Pick depth (default **standard**; user can override with words like "quick"/"exhaustive"):
 
@@ -31,7 +31,7 @@ All state lives on disk at `./research/<slug>/` — never only in context (survi
 ```
 research/<slug>/
 ├── brief.md         # research brief — the single contract for all phases
-├── findings/        # F1.md, F2.md ... one per sub-agent, structured evidence
+├── findings/        # F1.md, F2.md ... one per subagent, structured evidence
 └── REPORT.md        # final deliverable
 ```
 
@@ -39,7 +39,7 @@ On resume: re-read `brief.md` + list `findings/`, skip completed angles, continu
 
 ## Phase 1 — Scope
 
-Ask at most one round of clarifying questions (AskUserQuestion), only if genuinely ambiguous: audience, time frame, region, decision at stake. If the user said "just run it" or intent is clear, skip asking and write assumptions into the brief instead.
+Ask at most one round of clarifying questions with `question`, only if genuinely ambiguous: audience, time frame, region, decision at stake. If the user said "just run it" or intent is clear, skip asking and write assumptions into the brief instead.
 
 Then write `brief.md`: refined question, scope boundaries (in/out), assumptions, depth mode, today's date. This brief — not the raw conversation — is what every later phase measures against.
 
@@ -51,19 +51,19 @@ List angles in `brief.md` under `## Angles`. For deep mode or contested topics, 
 
 ## Phase 3 — Parallel research
 
-Spawn one sub-agent per angle **in a single message** (parallel). Build each prompt from the locked template in [reference/subagent-prompt.md](reference/subagent-prompt.md) — reproduce it verbatim, replacing only the `{variables}`. Each sub-agent:
+Spawn one subagent per angle **in a single message** with `task` (parallel). Build each prompt from the locked template in [reference/subagent-prompt.md](reference/subagent-prompt.md) — reproduce it verbatim, replacing only the `{variables}`. Each subagent:
 
-- researches ONE angle only, using WebSearch/WebFetch and the free endpoints in [reference/sources.md](reference/sources.md)
+- researches ONE angle only, using `web_search`/`web_fetch` and the free endpoints in [reference/sources.md](reference/sources.md)
 - writes structured findings to `findings/F<n>.md` (claim / quote / URL / date / confidence per item)
 - returns only a 3-5 line summary to you — raw page content must never enter your context
 
-If a sub-agent fails or returns thin results, note it and move on; do not block other angles.
+If a subagent fails or returns thin results, note it and move on; do not block other angles. If `task` is unavailable for the active persona, research the angles sequentially instead of inventing an unavailable tool.
 
 ## Phase 4 — Reflect (gap check)
 
 Read all `findings/*.md`. Against `brief.md`, ask: which parts of the brief have no evidence? Which major claims rest on a single source? Where do sources conflict?
 
-- Gaps found AND follow-up budget remains → spawn targeted sub-agents with delta-queries (same template, narrower angle). Repeat once per remaining round.
+- Gaps found AND follow-up budget remains → spawn targeted subagents with delta-queries (same template, narrower angle). Repeat once per remaining round.
 - No budget left or coverage sufficient → proceed. Record unresolved gaps; they go in the report's "Open questions".
 
 ## Phase 5 — Write (single-point)
@@ -78,29 +78,3 @@ You alone write `REPORT.md` in one pass, following [reference/report.md](referen
 For deep mode, before finalizing do one critique pass: reread the report as a skeptical reviewer (unsupported claims? stale data? missing counter-view?) and fix in place.
 
 Finally, give the user a 5-10 line summary of key conclusions and the report path.
-
-## Alternative: scripted workflow (unattended runs)
-
-The same pipeline exists as a deterministic workflow script at `/Users/mi/claude-workspace/.mimocode/workflows/deep-research-pro.js` — use it instead of the manual phases above when the run should be fully autonomous, resumable, or batch-invoked. It is convergent: re-running with the same `dir` skips completed phases (brief.md / plan.json / findings/F*.md / reflect.json / REPORT.md act as checkpoints).
-
-Invocation (workflow tool; custom scripts must be passed inline via `script`, not `name`):
-
-```
-workflow({
-  operation: "run",
-  script: <full text of deep-research-pro.js, Read it first>,
-  workspace: "<ABS_DIR>",            # same value as args.dir
-  args: {
-    dir: "<ABS_DIR>",                # e.g. /path/to/research/<slug> — mkdir -p <ABS_DIR>/findings first
-    question: "<refined research question>",
-    today: "<YYYY-MM-DD>",           # REQUIRED — run `date +%Y-%m-%d` first; sandbox has no Date
-    depth: "standard",               # quick | standard | deep
-    context: "<audience/language notes, optional>"
-  }
-})
-```
-
-Notes:
-- Do HITL clarification BEFORE invoking (the script never asks the user); fold answers into `question`/`context`.
-- Interrupted or failed run? Re-invoke with identical args — it resumes from the last checkpoint. `workflow({operation:"resume", run_id})` also works.
-- Returns `{ angles, deltaAngles, findingsFiles, reviewCritical, report }`.

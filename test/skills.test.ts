@@ -36,6 +36,16 @@ afterEach(() => {
 });
 
 describe("builtin skills", () => {
+	function listMarkdownFiles(dir: string): string[] {
+		const files: string[] = [];
+		for (const entry of readdirSync(dir, { withFileTypes: true })) {
+			const path = join(dir, entry.name);
+			if (entry.isDirectory()) files.push(...listMarkdownFiles(path));
+			else if (entry.isFile() && entry.name.endsWith(".md")) files.push(path);
+		}
+		return files;
+	}
+
 	// Shipped once already: an over-long description warns on every startup.
 	// Guard all builtin SKILL.md files against the spec limit directly.
 	it("every builtin SKILL.md description fits the 1024-char limit", () => {
@@ -63,6 +73,15 @@ describe("builtin skills", () => {
 		const { skills, diagnostics } = loadSkills({ builtinDir: builtinSkillsDir, extraPaths: [] });
 		expect(diagnostics).toEqual([]);
 		expect(skills).toHaveLength(expected.length);
+	});
+
+	it("does not advertise tools or script paths unavailable in Cast", () => {
+		const text = listMarkdownFiles(builtinSkillsDir)
+			.map((path) => readFileSync(path, "utf-8"))
+			.join("\n");
+		expect(text).not.toMatch(/\b(?:WebSearch|WebFetch|AskUserQuestion)\b/);
+		expect(text).not.toContain("/Users/");
+		expect(text).not.toMatch(/python3? scripts\//);
 	});
 });
 

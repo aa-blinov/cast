@@ -6,7 +6,7 @@ The failure mode this mode is designed against: producing a repo that *looks* li
 
 ## Contract fields
 
-1. **Paper**: arXiv id / DOI / URL. Also: does an official reference implementation exist? (Search GitHub via WebFetch before committing to reproduction-from-scratch — the user may only want you to run their code.)
+1. **Paper**: arXiv id / DOI / URL. Also: does an official reference implementation exist? (Search GitHub via `web_fetch` before committing to reproduction-from-scratch — the user may only want you to run their code.)
 2. **Scope**: Which experiments to reproduce. Almost never "all of them". Usually the main result table + one or two ablations the user cares about. A scoped reproduction that hits the numbers is worth ten started-but-abandoned full reproductions.
 3. **Compute realism**: If the paper's full training run is infeasible in this environment (multi-node, weeks of TPU, etc.), agree up front on a **scaled-down verification path**: smaller model, data subset, fewer steps. The final report will say what was full vs scaled — never silently pretend.
 4. **Deliverables**: A `paper/<tag>/` directory containing `plan.md`, `analysis.md`, the code repo, `config.yaml`, `results.tsv`, and `REPORT.md`.
@@ -19,9 +19,9 @@ Before writing a single line of implementation code, produce these artifacts. Th
 
 ```bash
 # LaTeX source — preferred: exact equations, tables, hyperparameters
-python3 scripts/fetch_paper.py <arxiv_id_or_url> --latex --out-dir paper/<tag>/src/
+python3 ${CAST_SKILL_DIR}/scripts/fetch_paper.py <arxiv_id_or_url> --latex --out-dir paper/<tag>/src/
 # Fallback (some e-prints are PDF-only): readable text via ar5iv
-python3 scripts/fetch_paper.py <arxiv_id_or_url> --out paper/<tag>/paper.txt
+python3 ${CAST_SKILL_DIR}/scripts/fetch_paper.py <arxiv_id_or_url> --out paper/<tag>/paper.txt
 ```
 
 Then write:

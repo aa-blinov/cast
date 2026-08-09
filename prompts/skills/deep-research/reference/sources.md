@@ -1,18 +1,18 @@
 # Free source endpoints (no API key)
 
-Default tools are WebSearch + WebFetch. For specific angle types, these free endpoints give better structured results. All are keyless; on 429/5xx back off once, then continue without that source.
+Default tools are `web_search` + `web_fetch`. For specific angle types, these free endpoints give better structured results. All are keyless; on 429/5xx back off once, then continue without that source.
 
-## General web search (fallback when WebSearch tool is unavailable)
+## General web search (fallback when `web_search` is unavailable)
 
-If the WebSearch tool is missing or errors, use DuckDuckGo HTML via WebFetch — verified to return full SERP results:
+If `web_search` is missing or errors, use DuckDuckGo HTML via `web_fetch` — verified to return full SERP results:
 
 ```
-WebFetch https://html.duckduckgo.com/html/?q=<url-encoded query>
+web_fetch https://html.duckduckgo.com/html/?q=<url-encoded query>
 ```
 
 - Result links are wrapped as `//duckduckgo.com/l/?uddg=<url-encoded real URL>` — decode `uddg` to get the actual URL before fetching it.
 - Supports operators: `site:github.com`, `"exact phrase"`, and `df=y` (past year) / `df=m` (past month) as query params.
-- For Chinese-language topics, also try Bing: `WebFetch https://www.bing.com/search?q=<query>&setlang=zh` (works without key, quality varies).
+- For Chinese-language topics, also try Bing with `web_fetch https://www.bing.com/search?q=<query>&setlang=zh` (works without key, quality varies).
 
 
 ## Academic / papers
@@ -28,7 +28,7 @@ curl -s "https://api.semanticscholar.org/graph/v1/paper/search?query=deep+resear
 curl -s "https://api.openalex.org/works?search=deep%20research%20agent&per-page=10&mailto=research@example.com"
 ```
 
-Full text of an arXiv paper: WebFetch `https://arxiv.org/abs/<id>` for abstract, or `https://ar5iv.org/abs/<id>` for HTML full text.
+Full text of an arXiv paper: use `web_fetch` for `https://arxiv.org/abs/<id>` (abstract), or `https://ar5iv.org/abs/<id>` (HTML full text).
 
 ## Code / GitHub
 
@@ -43,7 +43,7 @@ curl -s "https://raw.githubusercontent.com/<owner>/<repo>/HEAD/README.md"
 ## Community / discussion
 
 - Hacker News: `https://hn.algolia.com/api/v1/search?query=<q>&tags=story` (JSON, keyless)
-- Reddit: WebFetch `https://www.reddit.com/search/?q=<q>` or append `.json` to any thread URL
+- Reddit: use `web_fetch` for `https://www.reddit.com/search/?q=<q>` or append `.json` to any thread URL
 - Stack Overflow: `https://api.stackexchange.com/2.3/search/advanced?q=<q>&site=stackoverflow` (JSON)
 
 ## Data / facts
@@ -55,8 +55,8 @@ curl -s "https://raw.githubusercontent.com/<owner>/<repo>/HEAD/README.md"
 
 If the environment has these MCP servers/tools available, prefer them for their niche; otherwise ignore silently:
 
-- Firecrawl MCP → JS-heavy pages that WebFetch renders poorly
+- Firecrawl MCP → JS-heavy pages that `web_fetch` renders poorly
 - arxiv / paper-search MCP → paper download + PDF text extraction
-- Any search MCP (Tavily/Exa/...) → higher-quality SERP than WebSearch
+- Any search MCP (Tavily/Exa/...) → higher-quality SERP than `web_search`
 
 Never ask the user to install or configure anything mid-research.

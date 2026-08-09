@@ -170,7 +170,7 @@ The `run` subcommand accepts a subset of the main flags:
 | `--format <default\|json>` | | Output format |
 | `--interactive` | | Persistent JSONL session protocol; no positional message |
 | `--bypass-permissions` | | Skip bash confirmation prompts |
-| `--skill <path>` | | Load extra skill (repeatable) |
+| `--skill <directory>` | | Load an extra skill package directory (repeatable) |
 | `--no-skills` | | Skip project/agents/global/plugin/builtin skill discovery |
 | `--mcp <path>` | | Load extra MCP config (repeatable) |
 | `--no-mcp` | | Skip MCP discovery |

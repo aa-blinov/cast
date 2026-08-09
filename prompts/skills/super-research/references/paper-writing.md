@@ -68,7 +68,7 @@ Run on any paper/draft with a bibliography. Standalone-usable ("查引用" on an
 Before any context analysis, run the metadata check on the full bib:
 
 ```bash
-python3 scripts/verify_citation.py --bib refs.bib --out citation_audit.json
+python3 ${CAST_SKILL_DIR}/scripts/verify_citation.py --bib refs.bib --out citation_audit.json
 ```
 
 Per-entry mechanical verdicts:
