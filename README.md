@@ -1,12 +1,12 @@
 # cast
 
-A role-based terminal agent harness. 18 built-in personas — senior dev, QA, DBA, security reviewer, PM, tech writer, and more — same tools, different judgment. Runs on any OpenAI-compatible model, including the one on your own hardware.
+A role-based terminal agent harness. 18 built-in personas — senior dev, QA, DBA, security reviewer, PM, tech writer, and more — shared core tools, different judgment. Runs on any OpenAI-compatible model, including the one on your own hardware.
 
 <p align="center"><img src="assets/cast-banner.svg" alt="cast" width="440"></p>
 
 ## Why cast?
 
-**A cast, not a coder.** 18 built-in personas swap the agent's role without changing its tools. Senior dev for root-cause fixes, QA for edge cases, DBA for schema design, PM for specs, appsec for threat modeling — same tools, different judgment. Add your own with a single markdown file.
+**A cast, not a coder.** 18 built-in personas change the agent's role while keeping the normal tool surface familiar. Senior dev for root-cause fixes, QA for edge cases, DBA for schema design, PM for specs, appsec for threat modeling — same core tools, different judgment. `coder-with-subagents` additionally enables delegation; custom personas can narrow capabilities. Add your own with a single markdown file.
 
 **Real tools, real work.** It reads files, writes code, runs shell commands, searches your codebase — and does it all in parallel. Delegates sub-tasks to isolated sub-agents. Rules, skills, and MCP servers extend capabilities without touching the codebase.
 
@@ -19,9 +19,9 @@ A role-based terminal agent harness. 18 built-in personas — senior dev, QA, DB
 
 Point a generic coding agent and a role-specific one at the same file, and they look for different things. An `appsec` persona flags injection risks; a `dba` persona flags missing indexes and normalization. A `qa` persona treats an untested edge case as unfinished work, while a `pm` persona treats an unwritten spec as unfinished work.
 
-Personas in cast are not cosmetic text skins. Each persona is defined by markdown frontmatter (`~/.cast/personas/*.md` or `.cast/personas/*.md`) that can constrain available built-in tools (`tools`), skills (`skills`), MCP servers (`mcp`), and sub-agent delegation (`subagents`, `subagentTypes`).
+Personas are role prompts first: they steer what the agent investigates, prioritizes, and treats as done. Each persona is defined by markdown frontmatter (`~/.cast/personas/*.md` or `.cast/personas/*.md`) that can also constrain available built-in tools (`tools`), skills (`skills`), MCP servers (`mcp`), and sub-agent delegation (`subagents`, `subagentTypes`). Those capability limits are enforced at runtime, not merely described in the prompt.
 
-Scoping capabilities per role prevents context bloat and instruction clutter during routine tasks. A technical writer or assistant persona does not need database tools, heavy shell mutation primitives, specialized skills, or external MCP server definitions flooding its system prompt. Narrowing the tool, skill, MCP, and subagent surface keeps the context window focused on the active role, reducing attention decay and preventing accidental or misrouted invocations.
+Capability scoping is opt-in. The shipped personas deliberately retain the common tool, skill, and MCP surface so changing a role does not unexpectedly remove a workflow; only `coder-with-subagents` exposes delegation. Define allowlists on a custom persona when least privilege or a smaller prompt surface matters — for example, a documentation-only role that cannot call shell or database tools. This reduces instruction clutter and prevents accidental or misrouted invocations; it is not an automatic property of every role.
 
 For empirical research on role prompting and tool-agent behavior, see [docs/persona-research.md](docs/persona-research.md).
 
