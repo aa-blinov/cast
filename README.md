@@ -169,6 +169,7 @@ Env vars: `CAST_SERVER_PORT` (default `1337`), `CAST_SERVER_HOST` (default `127.
 | `/web` | Toggle web tools (web_search, web_fetch) |
 | `/web-fetch-provider` | Select Jina Reader or direct local fetch |
 | `/sessions` | List/switch/delete saved sessions |
+| `/fork` | Branch the current safe context into a new session |
 | `/skills` | List loaded skills |
 | `/skill:name [args]` | Force-load and run a skill |
 | `/mcp` | Toggle MCP servers on/off |

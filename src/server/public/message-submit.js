@@ -179,7 +179,7 @@ export async function submitMessage(text, images, pendingDocs, context) {
 		try {
 			const result = await api("POST", `/api/sessions/${id}/command`, { command: text });
 			if (text === "/sessions") await loadSessions();
-			if (text.startsWith("/new") && result?.result?.sessionId) {
+			if ((text.startsWith("/new") || text === "/fork") && result?.result?.sessionId) {
 				await loadSessions();
 				await selectSession(result.result.sessionId);
 				return; // now viewing the fresh session — nothing to append a notice to

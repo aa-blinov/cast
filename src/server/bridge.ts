@@ -65,6 +65,7 @@ import {
 	createSession,
 	deleteSession,
 	dropLastCheckpoint,
+	forkSession,
 	getHistoryPage,
 	listSessionSummaries,
 	loadSession,
@@ -503,6 +504,8 @@ export interface ServerBridge {
 		runSessionStartHook?: boolean,
 		worktree?: SessionWorktree,
 	): WebAgentSession;
+	/** Creates an idle copy of the current safe context and registers it as a new session. */
+	forkSession(sessionId: string): WebAgentSession | undefined;
 	getSession(id: string): WebAgentSession | undefined;
 	listSessions(): SessionSummary[];
 	/** Same shape as listSessions, filtered and ranked by relevance against
@@ -852,6 +855,28 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		return ws;
 	}
 
+	function forkSessionInstance(sessionId: string): WebAgentSession | undefined {
+		const source = getSession(sessionId);
+		if (!source || source.status === "running") return undefined;
+		const session = forkSession(source.session);
+		const persona = resolvePersona(session.persona ?? "") ?? currentPersona;
+		const runner = createAgentRunner();
+		const ws: WebAgentSession = {
+			id: session.id,
+			session,
+			runner,
+			backgroundBash: makeBackgroundBash(runner, session.id),
+			status: "idle",
+			error: null,
+			listeners: new Set(),
+			systemPrompt: computeSystemPrompt(persona, session.model, session.cwd ?? cwd, session.mode),
+		};
+		sessions.set(session.id, ws);
+		syncFsWatcher(ws);
+		broadcastSessionUpdate(ws);
+		return ws;
+	}
+
 	function broadcast(ws: WebAgentSession, event: WebEvent): void {
 		for (const listener of ws.listeners) {
 			try {
@@ -987,7 +1012,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	}
 	/** Toggles the idle watcher as the session enters/leaves a turn. */
 	function syncFsWatcher(ws: WebAgentSession): void {
-		if (ws.status === "idle") startFsWatcher(ws);
+		if (ws.status === "idle" && ws.listeners.size > 0) startFsWatcher(ws);
 		else stopFsWatcher(ws.id);
 	}
 
@@ -1543,12 +1568,14 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		const ws = sessions.get(sessionId);
 		if (!ws) return;
 		ws.listeners.add(callback);
+		syncFsWatcher(ws);
 	}
 
 	function unsubscribe(sessionId: string, callback: (event: WebEvent) => void): void {
 		const ws = sessions.get(sessionId);
 		if (!ws) return;
 		ws.listeners.delete(callback);
+		syncFsWatcher(ws);
 	}
 
 	function subscribeAll(callback: (event: WebEvent) => void): void {
@@ -1794,6 +1821,11 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// nothing running, both just submit the message as a normal turn.
 		if (name === "/help") {
 			return { ok: true, result: getHelpText() };
+		}
+		if (name === "/fork") {
+			const fork = forkSessionInstance(sessionId);
+			if (!fork) return { ok: false, error: "Could not fork session" };
+			return { ok: true, result: { sessionId: fork.id } };
 		}
 		if (name === "/plan-note") {
 			if (!arg) return { ok: false, error: "Usage: /plan-note <decision>" };
@@ -3203,6 +3235,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 
 	return {
 		createSession: createSessionInstance,
+		forkSession: forkSessionInstance,
 		getSession,
 		listSessions,
 		searchSessions,

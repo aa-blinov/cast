@@ -23,10 +23,12 @@ export function SidebarSessionItem({
 	openMenu,
 	setMenuFor,
 	onShare,
+	onFork,
 	onDelete,
 }) {
 	const s = session;
 	const doDelete = () => onDelete(s);
+	const doFork = () => onFork(s.id);
 	// `selecting` is true while the click's /api/sessions/:id fetch is still
 	// in flight (activeId only flips when the response lands). The row gets
 	// the same "active" highlight up front so the click reads as registered
@@ -100,6 +102,10 @@ export function SidebarSessionItem({
 							setMenuFor(null);
 							onShare(s);
 						}}><${icons.link} /> Share</button>
+						<button class="sidebar-item-menu-item" disabled=${s.status === "running"} title=${s.status === "running" ? "Wait for the agent to finish" : "Create a new session from this context"} onClick=${() => {
+							setMenuFor(null);
+							doFork();
+						}}><${icons.fork} /> Fork</button>
 						<button class="sidebar-item-menu-item danger" onClick=${() => {
 							setMenuFor(null);
 							doDelete();

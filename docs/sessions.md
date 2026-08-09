@@ -51,6 +51,7 @@ When enabled, cast creates (or reuses) a git worktree at `.cast/worktrees/<name>
 ```
 /sessions                  # Opens session picker
 /continue                  # Resume the most recent session
+/fork                      # Branch the current safe context into a new session
 /worktree <name>           # Switch current session to a git worktree
 ```
 
@@ -58,9 +59,11 @@ The `/sessions` picker shows each session's project, first message, last-updated
 
 `/continue` is the quick path: it finds the most recently updated session that isn't the current one and switches to it — autosaving the current session first if it has messages. If there's no other session to resume, it shows a notice. This is the in-session equivalent of `cast -c`.
 
+`/fork` creates a new session and switches to it, preserving only the context that is currently safe to send to the model. The source session is not changed. Compacted-out history, pending questions and plan approvals, undo checkpoints, and usage counters are not copied. A fork shares the same working directory; use `/worktree` afterwards when file isolation is needed.
+
 ### Web UI Sidebar
 
-The Web UI groups sessions by their working directory. Quick sessions created with the `new` action use a dedicated `Sandbox` group; project sessions are grouped by the final directory name rather than the full path. Groups are ordered by latest activity. Within each group, pinned sessions come first, followed by running sessions and then the remaining sessions ordered by `updatedAt`. Pinning stays local to the current directory group, and hovering a group name reveals the full path. Search results remain a flat relevance-ranked list.
+The Web UI groups sessions by their working directory. Quick sessions created with the `new` action use a dedicated `Sandbox` group; project sessions are grouped by the final directory name rather than the full path. Groups are ordered by latest activity. Within each group, pinned sessions come first, followed by running sessions and then the remaining sessions ordered by `updatedAt`. Pinning stays local to the current directory group, and hovering a group name reveals the full path. Search results remain a flat relevance-ranked list. Use the `…` menu on an idle session and choose **Fork** to branch it; running sessions cannot be forked.
 
 ## Creating New Sessions
 

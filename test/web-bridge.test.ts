@@ -584,6 +584,40 @@ describe("web bridge", () => {
 		expect(secondClientEvents).toContainEqual(expected);
 	});
 
+	it("forks an idle session into an independent registered session", () => {
+		const bridge = createServerBridge(makeResult());
+		const source = bridge.createSession();
+		source.session.messages = [
+			{ role: "user", content: "Original request" },
+			{ role: "assistant", content: "Original answer" },
+		];
+		source.session.mode = "plan";
+
+		const fork = bridge.forkSession(source.id);
+
+		expect(fork?.id).not.toBe(source.id);
+		expect(fork?.session.messages).toEqual(source.session.messages);
+		expect(fork?.session.mode).toBe("plan");
+		expect(bridge.getSession(fork!.id)).toBe(fork);
+		fork!.session.messages[0] = { role: "user", content: "Fork-only request" };
+		expect(source.session.messages[0]).toEqual({ role: "user", content: "Original request" });
+	});
+
+	it("/fork creates and returns a new session id, and refuses a running session", async () => {
+		const bridge = createServerBridge(makeResult());
+		const source = bridge.createSession();
+		source.session.messages.push({ role: "user", content: "Keep this context" });
+
+		const result = await bridge.executeCommand(source.id, "/fork");
+		expect(result).toMatchObject({ ok: true, result: { sessionId: expect.any(String) } });
+		const forkId = (result.result as { sessionId: string }).sessionId;
+		expect(forkId).not.toBe(source.id);
+		expect(bridge.getSession(forkId)?.session.messages).toEqual(source.session.messages);
+
+		source.status = "running";
+		expect((await bridge.executeCommand(source.id, "/fork")).ok).toBe(false);
+	});
+
 	it("resets only the model context for clean plan implementation, retaining the visible thread", () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();

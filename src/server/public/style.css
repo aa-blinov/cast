@@ -445,6 +445,8 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	cursor: pointer;
 }
 .sidebar-item-menu-item:hover { background: var(--bg-hover); }
+.sidebar-item-menu-item:disabled { color: var(--text-muted); cursor: not-allowed; }
+.sidebar-item-menu-item:disabled:hover { background: none; }
 .sidebar-item-menu-item.danger { color: var(--rose); }
 .sidebar-item-menu-item.danger:hover { background: var(--danger-muted); }
 .sidebar-divider {

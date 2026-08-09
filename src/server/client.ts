@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 // provides a real global EventSource, so this import is Node-only and safe in
 // both runtimes.
 import { EventSource } from "undici";
+import type { SessionState } from "../core/session.ts";
 import {
 	acquireStartLock,
 	DaemonProtocolMismatchError,
@@ -166,6 +167,16 @@ export async function createServerSession(
 		throw new Error(msg);
 	}
 	return (data as { id: string }).id;
+}
+
+/** Fork the daemon session's current safe context into a new idle session. */
+export async function forkServerSession(client: ServerClient, sessionId: string): Promise<SessionState> {
+	const { status, data } = await serverFetch(client, `/api/sessions/${sessionId}/fork`, { method: "POST" });
+	if (status !== 201 || !data || typeof data !== "object" || !("session" in data)) {
+		const message = data && typeof data === "object" && "error" in data ? String(data.error) : "fork failed";
+		throw new Error(message);
+	}
+	return (data as { session: SessionState }).session;
 }
 
 /**

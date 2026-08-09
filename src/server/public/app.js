@@ -837,7 +837,7 @@ function App() {
 		},
 		[setSession],
 	);
-	const { loadSessions, selectSession, selectingId, commitSession, startDraft, initClientState, startReconnectLoop } =
+	const { loadSessions, selectSession, selectingId, commitSession, startDraft, forkSession, initClientState, startReconnectLoop } =
 		useSessionController({
 			setSessions,
 			setSessionsLoaded,
@@ -1673,6 +1673,7 @@ function App() {
 				onRenameSession=${renameSession}
 				onPinSession=${pinSession}
 				onShareSession=${setShareModalSession}
+				onForkSession=${forkSession}
 				onLogout=${async () => {
 					await fetch("/api/auth/logout", { method: "POST" });
 					window.location.assign("/login");

@@ -253,6 +253,20 @@ export function useSessionController({
 			sessionViewVersionRef,
 		],
 	);
+
+	const forkSession = useCallback(
+		async (id) => {
+			try {
+				const data = await api("POST", `/api/sessions/${id}/fork`);
+				if (!data?.id) throw new Error("Could not fork session");
+				await loadSessions();
+				await selectSession(data.id);
+			} catch (err) {
+				showToast(err.message, "error");
+			}
+		},
+		[loadSessions, selectSession, showToast],
+	);
 	// Static, rarely-changing resource lists — personas/commands/themes/config
 	// — only ever need fetching once per tab. Theme changes made mid-session
 	// (Settings modal, /theme) already call applyTheme()/setCurrentThemeId
@@ -400,6 +414,7 @@ export function useSessionController({
 		selectingId,
 		commitSession,
 		startDraft,
+		forkSession,
 		initClientState,
 		startReconnectLoop,
 	};

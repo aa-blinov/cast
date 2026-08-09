@@ -25,6 +25,7 @@ export function Sidebar({
 	onRenameSession,
 	onPinSession,
 	onShareSession,
+	onForkSession,
 	onLogout,
 	open,
 	confirm,
@@ -88,7 +89,7 @@ export function Sidebar({
 	const openMenu = useCallback((id, rowEl) => {
 		if (rowEl) {
 			const rect = rowEl.getBoundingClientRect();
-			const ESTIMATED_MENU_HEIGHT = 150; // 3 items + padding, roomy on purpose
+			const ESTIMATED_MENU_HEIGHT = 190; // 4 items + padding, roomy on purpose
 			setMenuUpward(rect.bottom + ESTIMATED_MENU_HEIGHT > window.innerHeight);
 		}
 		setMenuFor(id);
@@ -165,6 +166,7 @@ export function Sidebar({
 		onPin=${onPinSession}
 		onDelete=${doDelete}
 		onShare=${onShareSession}
+		onFork=${onForkSession}
 		editingId=${editingId}
 		editInputRef=${editInputRef}
 		editValue=${editValue}

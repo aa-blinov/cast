@@ -8,6 +8,7 @@ All commands are typed at the TUI prompt, prefixed with `/`. Unknown slash comma
 |---------|-------------|
 | `/new` | Start a new session (autosaves current if non-empty) |
 | `/continue` | Resume the most recent session (like `cast -c`, but mid-session) |
+| `/fork` | Create a new session from the current safe context and switch to it |
 | `/worktree <name>` | Switch current session into an isolated git worktree (`list`, `remove <name>`) |
 | `/sessions` | Session picker with type-to-filter search (by message text, project path, or id); switch or delete |
 | `/clear` | Clear conversation context (and save the cleared state) |
@@ -18,6 +19,8 @@ All commands are typed at the TUI prompt, prefixed with `/`. Unknown slash comma
 | `/quit`, `/exit` | Save and exit |
 
 `/undo` requires a checkpoint from the previous turn. In a Git workspace, every file is restored to its pre-turn tree without changing the user's Git index; files created during the turn are removed, while files that were untracked before the turn are restored. Outside Git, Cast restores files changed through its `write` and `edit` tools from shadow backups. Arbitrary changes made through `bash` or an MCP tool in a non-Git workspace cannot be reversed. `/undo` is refused while the agent is running (use `/abort` first) and is a no-op if there is nothing to undo.
+
+`/fork` leaves the original session unchanged and starts an independent new session with the context currently sent to the model. It deliberately does not restore compacted-out history, copy checkpoints or pending pickers, or create a Git worktree: both sessions use the same working directory unless you switch one with `/worktree`.
 
 ## Model and Provider
 

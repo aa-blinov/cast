@@ -108,6 +108,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/copy", description: "Copy last assistant response" },
 	{ name: "/current", description: "Show all status bar data" },
 	{ name: "/exit", description: "Save and exit (alias for /quit)" },
+	{ name: "/fork", description: "Fork the current conversation into a new session" },
 	{ name: "/help", description: "Show this command list" },
 	{ name: "/hooks", description: "List configured hooks" },
 	{ name: "/hooks disable", description: "Disable a hook — id", takesArgs: true },
@@ -1245,6 +1246,25 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		agent.refresh();
 		const personaNote = restoredPersona ? ` · persona: ${restoredPersona.label}` : "";
 		showNotice(`[Continued session: ${session.id} (${session.messages.length} messages)${personaNote}]`);
+		return;
+	}
+
+	if (input === "/fork") {
+		let forked: SessionState | undefined;
+		try {
+			forked = await agent.forkSession();
+		} catch (err) {
+			showNotice(`[Could not fork this session: ${err instanceof Error ? err.message : String(err)}]`);
+			return;
+		}
+		if (!forked) {
+			showNotice("[Could not fork this session]");
+			return;
+		}
+		restoreSessionState(forked);
+		agent.refresh();
+		deps.setPlanMode(forked.mode === "plan");
+		showNotice(`[Forked session: ${forked.id}]`);
 		return;
 	}
 
@@ -2749,6 +2769,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 				"  /clear              Clear context\n" +
 				"  /compact            Compact context now\n" +
 				"  /continue           Resume the most recent session\n" +
+				"  /fork               Fork current safe context into a new session\n" +
 				"  /new                Start new session\n" +
 				"  /plan               Enter plan mode (explore + plan only)\n" +
 				"  /plan-model [m|off] Show or change the plan-mode model\n" +

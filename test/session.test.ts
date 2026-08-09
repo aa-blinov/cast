@@ -17,6 +17,7 @@ import {
 	deleteSession,
 	dropLastCheckpoint,
 	estimateTokens,
+	forkSession,
 	getFullHistory,
 	getFullHistoryWithReasoning,
 	getHistoryPage,
@@ -578,6 +579,36 @@ describe("session persistence", () => {
 		expect(loaded?.id).toBe(session.id);
 		expect(loaded?.cwd).toBe(projectA);
 		expect(loaded?.messages).toEqual(session.messages);
+	});
+
+	it("forkSession copies the active context into an independent new session", () => {
+		const source = createSession("gpt-4o", projectA);
+		source.persona = "coding";
+		source.mode = "plan";
+		source.messages = [
+			{ role: "system", content: "system prompt" },
+			{ role: "user", content: "original request" },
+			{ role: "assistant", content: "original answer" },
+		];
+		source.reasoning = { 2: "reasoning" };
+		source.turnMeta = { 2: { model: "gpt-4o", completedAt: "2026-08-09T00:00:00.000Z" } };
+		source.usage.totalTokens = 99;
+		saveSession(source);
+
+		const fork = forkSession(source);
+		expect(fork.id).not.toBe(source.id);
+		expect(fork.messages).toEqual(source.messages);
+		expect(fork.messages).not.toBe(source.messages);
+		expect(fork.usage.totalTokens).toBe(0);
+		expect(fork.mode).toBe("plan");
+		expect(fork.reasoning).toEqual(source.reasoning);
+		fork.messages[1] = { role: "user", content: "branch-only change" };
+		expect(source.messages[1]).toEqual({ role: "user", content: "original request" });
+		expect(loadSession(fork.id)?.messages).toEqual([
+			{ role: "system", content: "system prompt" },
+			{ role: "user", content: "original request" },
+			{ role: "assistant", content: "original answer" },
+		]);
 	});
 
 	it("persists undo checkpoints across save/load and drops the last on undo", () => {

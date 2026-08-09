@@ -58,6 +58,10 @@ function createFakeDeps(overrides?: Partial<CommandDeps> & { running?: boolean }
 		followUp: track("agent.followUp"),
 		abort: track("agent.abort"),
 		clearContext: track("agent.clearContext"),
+		forkSession: async () => {
+			track("agent.forkSession")();
+			return undefined;
+		},
 		resetQueue: track("agent.resetQueue"),
 		refresh: track("agent.refresh"),
 		refreshMeta: track("agent.refreshMeta"),
@@ -702,6 +706,20 @@ describe("handleInput", () => {
 		expect(deps.session.todos).toEqual(other.todos);
 		expect(noticeText(calls)).toContain("Continued session");
 		expect(noticeText(calls)).toContain(other.id);
+	});
+
+	it("/fork switches to the independent fork returned by the agent", async () => {
+		const { deps, calls } = createFakeDeps();
+		const fork = createSession("test-model", "/tmp");
+		fork.messages = [{ role: "user", content: "forked context" }];
+		(deps.agent.forkSession as () => Promise<SessionState | undefined>) = async () => fork;
+
+		await handleInput("/fork", undefined, deps);
+
+		expect(deps.session.id).toBe(fork.id);
+		expect(deps.session.messages).toEqual(fork.messages);
+		expect(calls["agent.refresh"]).toHaveLength(1);
+		expect(noticeText(calls)).toContain(`Forked session: ${fork.id}`);
 	});
 
 	it("/continue refreshes SSH hosts for the resumed project", async () => {
