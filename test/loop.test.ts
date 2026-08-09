@@ -3668,14 +3668,14 @@ describe("gateDestructiveWrite", () => {
 		const mcpCall = vi.fn(async () => ({ content: "MCP_OK", isError: false }));
 		const mcpDef = {
 			type: "function" as const,
-			function: { name: "mcp__demo__mutate", description: "mutate", parameters: { type: "object", properties: {} } },
+			function: { name: "mcp_demo_mutate", description: "mutate", parameters: { type: "object", properties: {} } },
 		};
 		vi.mocked(streamAndCollect)
 			.mockImplementationOnce(async () => ({
 				content: "",
 				thinking: "",
 				finishReason: "stop",
-				toolCalls: [{ id: "mcp-1", name: "mcp__demo__mutate", arguments: "{}" }],
+				toolCalls: [{ id: "mcp-1", name: "mcp_demo_mutate", arguments: "{}" }],
 			}))
 			.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
 
@@ -3687,7 +3687,7 @@ describe("gateDestructiveWrite", () => {
 			hooks: {},
 			confirmWrite,
 			mcpTools: [mcpDef],
-			mcpToolIndex: new Map([["mcp__demo__mutate", { definition: mcpDef, call: mcpCall }]]),
+			mcpToolIndex: new Map([["mcp_demo_mutate", { definition: mcpDef, call: mcpCall }]]),
 			onEvent: () => {},
 		});
 
@@ -3726,10 +3726,10 @@ describe("gateDestructiveWrite", () => {
 		expect(result?.content).toContain("Permission denied");
 	});
 
-	it("treats MCP tools as destructive", async () => {
+	it("treats real MCP tool names as destructive", async () => {
 		const { gateDestructiveWrite } = await import("../src/core/loop.ts");
 		const confirm = vi.fn(async () => false);
-		const result = await gateDestructiveWrite("mcp__fs__write", { path: "/etc/passwd" }, confirm);
+		const result = await gateDestructiveWrite("mcp_fs_write", { path: "/etc/passwd" }, confirm);
 		expect(confirm).toHaveBeenCalled();
 		expect(result?.isError).toBe(true);
 	});

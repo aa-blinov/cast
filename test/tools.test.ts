@@ -34,6 +34,13 @@ afterEach(() => {
 // ============================================================================
 
 describe("bash", () => {
+	it("rejects a missing command instead of reporting a no-op as success", async () => {
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const result = await exec("bash", {});
+		expect(result.isError).toBe(true);
+		expect(result.content).toContain('"command" is required');
+	});
+
 	it("executes a command and returns output", async () => {
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
 		const result = await exec("bash", { command: "echo hello" });
@@ -45,6 +52,12 @@ describe("bash", () => {
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
 		const result = await exec("bash", { command: "ls /nonexistent_path_12345" });
 		expect(result.isError).toBe(true);
+	});
+
+	it("marks byte-limited output so the agent does not mistake it for complete output", async () => {
+		const exec = createToolExecutor(TEST_DIR, { ...mockConfig, maxToolOutputBytes: 10 });
+		const result = await exec("bash", { command: "printf 123456789012345" });
+		expect(result.content).toContain("Output truncated at 10B");
 	});
 
 	// Live-echo gating: only a command that looks like it's waiting for input
@@ -347,6 +360,16 @@ describe("web_search tool definition — provider-dependent schema", () => {
 });
 
 describe("bash_output", () => {
+	it("keeps a failed background task marked as an error", async () => {
+		const { deps } = makeBackgroundDeps();
+		const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, undefined, undefined, undefined, deps);
+		const started = await exec("bash", { command: "exit 7", run_in_background: true });
+		const taskId = started.content.match(/bg-\d+/)?.[0];
+		const result = await exec("bash_output", { task_id: taskId, wait: 5 });
+		expect(result.isError).toBe(true);
+		expect(result.content).toContain("Process exited with code 7");
+	});
+
 	it("errors on an unknown task_id", async () => {
 		const { deps } = makeBackgroundDeps();
 		const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, undefined, undefined, undefined, deps);
@@ -571,6 +594,16 @@ describe("read — images", () => {
 // ============================================================================
 
 describe("write", () => {
+	it("rejects a missing or non-string content before touching the file", async () => {
+		writeFileSync(join(TEST_DIR, "existing.txt"), "keep");
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const missing = await exec("write", { path: "existing.txt" });
+		const invalid = await exec("write", { path: "existing.txt", content: { text: "replace" } });
+		expect(missing.isError).toBe(true);
+		expect(invalid.isError).toBe(true);
+		expect(readFileSync(join(TEST_DIR, "existing.txt"), "utf-8")).toBe("keep");
+	});
+
 	it("creates a file", async () => {
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
 		const result = await exec("write", { path: "new.txt", content: "hello world" });
@@ -878,6 +911,15 @@ describe("edit: CRLF line-ending preservation", () => {
 // ============================================================================
 
 describe("glob", () => {
+	it("rejects a missing pattern and a nonexistent directory", async () => {
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const missingPattern = await exec("glob", {});
+		const missingPath = await exec("glob", { pattern: "*.ts", path: "not-here" });
+		expect(missingPattern.isError).toBe(true);
+		expect(missingPath.isError).toBe(true);
+		expect(missingPath.content).toContain("directory not found");
+	});
+
 	it("finds files by pattern", async () => {
 		writeFileSync(join(TEST_DIR, "a.ts"), "");
 		writeFileSync(join(TEST_DIR, "b.ts"), "");
@@ -1084,6 +1126,15 @@ describe("glob: no-fd fallback parity", () => {
 // ============================================================================
 
 describe("grep", () => {
+	it("rejects a missing pattern and a nonexistent search path", async () => {
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const missingPattern = await exec("grep", {});
+		const missingPath = await exec("grep", { pattern: "needle", path: "not-here" });
+		expect(missingPattern.isError).toBe(true);
+		expect(missingPath.isError).toBe(true);
+		expect(missingPath.content).toContain("path not found");
+	});
+
 	it("finds matching lines", async () => {
 		writeFileSync(join(TEST_DIR, "grep.txt"), "hello world\nfoo bar\nhello again\n");
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
@@ -1387,6 +1438,13 @@ describe("nested .gitignore", () => {
 // ============================================================================
 
 describe("ls", () => {
+	it("rejects an invalid limit instead of silently slicing entries", async () => {
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const result = await exec("ls", { limit: -1 });
+		expect(result.isError).toBe(true);
+		expect(result.content).toContain('"limit" must be a positive integer');
+	});
+
 	it("lists directory contents", async () => {
 		writeFileSync(join(TEST_DIR, "file1.txt"), "");
 		writeFileSync(join(TEST_DIR, "file2.txt"), "");

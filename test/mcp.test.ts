@@ -161,6 +161,7 @@ describe("connectMcpServers (real spawned MCP server, not mocked)", () => {
 			const handle = result.toolIndex.get("mcp_echo_fails")!;
 			const callResult = await handle.call({});
 			expect(callResult.isError).toBe(true);
+			expect(callResult.content).toContain('MCP server "echo", tool "fails" reported an error');
 			expect(callResult.content).toContain("deliberate failure");
 		} finally {
 			await closeMcpConnections(result.connections);

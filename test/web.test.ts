@@ -64,6 +64,12 @@ describe("execWebSearch", () => {
 		expect(result.content).toContain("query");
 	});
 
+	it("rejects an invalid maxResults before making a request", async () => {
+		const result = await execWebSearch({ query: "test", maxResults: 0 });
+		expect(result.isError).toBe(true);
+		expect(result.content).toContain("maxResults");
+	});
+
 	it("uses DDG by default when no searchProvider is configured", async () => {
 		const html = ddgHtml([{ title: "Default", href: "https://default.example/", snippet: "s" }]);
 		mockFetchOnce({ ok: true, status: 200, text: html });

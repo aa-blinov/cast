@@ -12,7 +12,7 @@ import { join } from "node:path";
 import type { AppConfig } from "../config.ts";
 import { checkDangerousBash } from "../permissions.ts";
 import type { BashBackgroundDeps } from "./bash-background.ts";
-import type { ConfirmBash, ToolResult } from "./shared.ts";
+import { appendBoundedOutput, type ConfirmBash, formatSize, type ToolResult } from "./shared.ts";
 
 const INSTALL_PATH_RE = /InstallPath\s+REG_SZ\s+(.+)/;
 const CRLF_RE = /\r\n/g;
@@ -176,6 +176,7 @@ export interface FormatBashResultOptions {
 	exitCode: number | null;
 	aborted?: boolean;
 	timedOut?: boolean;
+	outputTruncated?: boolean;
 	timeoutSeconds?: number;
 	warnPrefix?: string;
 }
@@ -187,7 +188,14 @@ export interface FormatBashResultOptions {
  * from different call sites (a `Promise` resolve vs. a completion callback).
  */
 export function formatBashResult(rawOutput: string, config: AppConfig, opts: FormatBashResultOptions): ToolResult {
-	const { exitCode, aborted = false, timedOut = false, timeoutSeconds, warnPrefix = "" } = opts;
+	const {
+		exitCode,
+		aborted = false,
+		timedOut = false,
+		outputTruncated = false,
+		timeoutSeconds,
+		warnPrefix = "",
+	} = opts;
 	let output = stripAnsi(rawOutput).replace(CRLF_RE, "\n").replace(CR_RE, "\n");
 	const prefix = aborted
 		? "[ABORTED] Command was interrupted by user.\n\n"
@@ -201,6 +209,9 @@ export function formatBashResult(rawOutput: string, config: AppConfig, opts: For
 	if (lines.length > config.maxToolOutputLines) {
 		const kept = lines.slice(-config.maxToolOutputLines);
 		output = `[Showing last ${config.maxToolOutputLines} of ${lines.length} lines]\n${kept.join("\n")}`;
+	}
+	if (outputTruncated) {
+		output += `\n\n[Output truncated at ${formatSize(config.maxToolOutputBytes)}. Narrow the command or redirect output to a file and read it in chunks.]`;
 	}
 	return {
 		content: warnPrefix + prefix + (output || "(no output)"),
@@ -216,7 +227,13 @@ export async function execBash(
 	signal?: AbortSignal,
 	background?: BashBackgroundDeps,
 ): Promise<ToolResult> {
-	const command = String(args.command ?? "");
+	const command = typeof args.command === "string" ? args.command : "";
+	if (!command.trim()) {
+		return {
+			content: 'Error: "command" is required and must not be empty. Retry with a non-interactive bash command.',
+			isError: true,
+		};
+	}
 	// 0 (or negative) is treated as "no explicit timeout" rather than taken
 	// literally — a bare `setTimeout(fn, 0)` fires almost immediately, and
 	// callers reasonably expect 0 to mean unlimited (curl's --max-time 0, etc.)
@@ -273,15 +290,20 @@ export async function execBash(
 		});
 
 		let rawOutput = "";
+		let outputTruncated = false;
 		let timedOut = false;
 		let aborted = false;
 		const maxBytes = config.maxToolOutputBytes;
 
 		proc.stdout.on("data", (d: Buffer) => {
-			if (Buffer.byteLength(rawOutput, "utf-8") < maxBytes) rawOutput += d.toString("utf-8");
+			const appended = appendBoundedOutput(rawOutput, d, maxBytes);
+			rawOutput = appended.output;
+			outputTruncated ||= appended.truncated;
 		});
 		proc.stderr.on("data", (d: Buffer) => {
-			if (Buffer.byteLength(rawOutput, "utf-8") < maxBytes) rawOutput += d.toString("utf-8");
+			const appended = appendBoundedOutput(rawOutput, d, maxBytes);
+			rawOutput = appended.output;
+			outputTruncated ||= appended.truncated;
 		});
 
 		const timer = setTimeout(() => {
@@ -336,6 +358,7 @@ export async function execBash(
 				exitCode,
 				aborted,
 				timedOut,
+				outputTruncated,
 				timeoutSeconds: timeout,
 				warnPrefix,
 			});

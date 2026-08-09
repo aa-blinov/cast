@@ -712,10 +712,19 @@ export function maybeActivatePlanOnRead(absolutePath: string, planState: PlanSta
 }
 
 export function execQuestion(args: Record<string, unknown>, planState: PlanState): ToolResult {
-	const rawQuestions = Array.isArray(args.questions) ? args.questions : [];
+	if (!Array.isArray(args.questions)) {
+		return {
+			content: 'Error: "questions" must be an array containing 1–5 questions. Retry with the required array.',
+			isError: true,
+		};
+	}
+	const rawQuestions = args.questions;
 	if (rawQuestions.length < 1 || rawQuestions.length > 5) {
 		return {
-			content: `Error: the question tool accepts 1–5 questions, but you passed ${rawQuestions.length}. Retry with fewer questions.`,
+			content:
+				rawQuestions.length === 0
+					? "Error: the question tool requires 1–5 questions, but none were provided. Retry with at least one question."
+					: `Error: the question tool accepts at most 5 questions, but you passed ${rawQuestions.length}. Retry with 1–5 questions.`,
 			isError: true,
 		};
 	}

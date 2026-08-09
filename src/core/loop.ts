@@ -213,7 +213,7 @@ function unknownToolResult(name: string, available: string[]): ToolResult {
 }
 
 /** Tools whose effect is to create, overwrite, or patch a file. MCP tools
- * follow the same rule — anything starting with `mcp__` is treated as
+ * follow the same rule — anything starting with `mcp_` is treated as
  * potentially destructive because we have no signal otherwise. */
 const DESTRUCTIVE_WRITE_TOOLS = new Set(["write", "edit", "patch", "apply_patch", "create_file"]);
 
@@ -240,7 +240,7 @@ export async function gateDestructiveWrite(
 	args: Record<string, unknown>,
 	confirm: ConfirmWrite | undefined,
 ): Promise<ToolResult | undefined> {
-	const isDestructive = DESTRUCTIVE_WRITE_TOOLS.has(name) || name.startsWith("mcp__");
+	const isDestructive = DESTRUCTIVE_WRITE_TOOLS.has(name) || name.startsWith("mcp_");
 	if (!isDestructive || !confirm) return undefined;
 	const path = extractWritePath(name, args);
 	const reason = `write to ${path}`;
@@ -554,7 +554,7 @@ export interface LoopConfig {
 	followUpQueue?: MessageQueue;
 	confirmBash?: ConfirmBash;
 	/** Optional permission gate for destructive file tools (write/edit/patch and
-	 * MCP tools prefixed `mcp__`). When unset, no extra confirmation fires —
+	 * MCP tools prefixed `mcp_`). When unset, no extra confirmation fires —
 	 * matches TUI behavior, where only bash needs confirmation. */
 	confirmWrite?: ConfirmWrite;
 	/** Definitions for connected MCP servers' tools, appended to the built-in ones. */

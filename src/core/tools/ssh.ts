@@ -9,7 +9,7 @@ import {
 	validateKeyPermissions,
 } from "../ssh.ts";
 import { stripAnsi } from "./bash.ts";
-import type { ConfirmBash, ToolResult } from "./shared.ts";
+import { appendBoundedOutput, type ConfirmBash, formatSize, type ToolResult } from "./shared.ts";
 
 export async function execSsh(
 	args: Record<string, unknown>,
@@ -18,8 +18,16 @@ export async function execSsh(
 	confirmBash?: ConfirmBash,
 	signal?: AbortSignal,
 ): Promise<ToolResult> {
-	const hostName = String(args.host ?? "");
-	const command = String(args.command ?? "");
+	const hostName = typeof args.host === "string" ? args.host.trim() : "";
+	const command = typeof args.command === "string" ? args.command : "";
+	if (!hostName)
+		return { content: 'Error: "host" is required. Retry with a configured SSH host name.', isError: true };
+	if (!command.trim()) {
+		return {
+			content: 'Error: "command" is required and must not be empty. Retry with the remote command to run.',
+			isError: true,
+		};
+	}
 	const timeout = typeof args.timeout === "number" && args.timeout > 0 ? args.timeout : config.defaultBashTimeout;
 
 	// Validate host exists
@@ -100,15 +108,20 @@ export async function execSsh(
 		});
 
 		let rawOutput = "";
+		let outputTruncated = false;
 		let timedOut = false;
 		let aborted = false;
 		const maxBytes = config.maxToolOutputBytes;
 
 		proc.stdout.on("data", (d: Buffer) => {
-			if (Buffer.byteLength(rawOutput, "utf-8") < maxBytes) rawOutput += d.toString("utf-8");
+			const appended = appendBoundedOutput(rawOutput, d, maxBytes);
+			rawOutput = appended.output;
+			outputTruncated ||= appended.truncated;
 		});
 		proc.stderr.on("data", (d: Buffer) => {
-			if (Buffer.byteLength(rawOutput, "utf-8") < maxBytes) rawOutput += d.toString("utf-8");
+			const appended = appendBoundedOutput(rawOutput, d, maxBytes);
+			rawOutput = appended.output;
+			outputTruncated ||= appended.truncated;
 		});
 
 		const timer = setTimeout(() => {
@@ -173,6 +186,9 @@ export async function execSsh(
 			if (lines.length > config.maxToolOutputLines) {
 				const kept = lines.slice(-config.maxToolOutputLines);
 				output = `[Showing last ${config.maxToolOutputLines} of ${lines.length} lines]\n${kept.join("\n")}`;
+			}
+			if (outputTruncated) {
+				output += `\n\n[Output truncated at ${formatSize(config.maxToolOutputBytes)}. Narrow the command or redirect output to a file and read it in chunks.]`;
 			}
 			const result: ToolResult = {
 				content: prefix + (output || "(no output)"),
