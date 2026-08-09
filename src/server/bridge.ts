@@ -608,6 +608,8 @@ export interface ServerBridge {
 
 export function createServerBridge(result: StartupResult): ServerBridge {
 	const sessions = new Map<string, WebAgentSession>();
+	const idleSessionEvictions = new Map<string, ReturnType<typeof setTimeout>>();
+	const IDLE_SESSION_EVICTION_MS = 5 * 60_000;
 	// Sidebar listeners, one per connected browser tab, independent of which
 	// session (if any) that tab currently has open — this is what lets the
 	// message-count badges for background/other threads update live instead
@@ -1010,10 +1012,40 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			fsDebounceTimers.delete(sessionId);
 		}
 	}
+
+	function syncIdleSessionEviction(ws: WebAgentSession): void {
+		const existing = idleSessionEvictions.get(ws.id);
+		const canEvict = ws.status === "idle" && ws.listeners.size === 0 && !ws.backgroundBash.registry.hasRunning();
+		if (!canEvict) {
+			if (existing) clearTimeout(existing);
+			idleSessionEvictions.delete(ws.id);
+			return;
+		}
+		if (existing) return;
+		const timer = setTimeout(() => {
+			idleSessionEvictions.delete(ws.id);
+			const live = sessions.get(ws.id);
+			if (
+				!live ||
+				live !== ws ||
+				live.status !== "idle" ||
+				live.listeners.size > 0 ||
+				live.backgroundBash.registry.hasRunning()
+			) {
+				return;
+			}
+			if (countTurnMessages(live.session.messages) > 0) saveSession(live.session);
+			stopFsWatcher(live.id);
+			sessions.delete(live.id);
+		}, IDLE_SESSION_EVICTION_MS);
+		timer.unref();
+		idleSessionEvictions.set(ws.id, timer);
+	}
 	/** Toggles the idle watcher as the session enters/leaves a turn. */
 	function syncFsWatcher(ws: WebAgentSession): void {
 		if (ws.status === "idle" && ws.listeners.size > 0) startFsWatcher(ws);
 		else stopFsWatcher(ws.id);
+		syncIdleSessionEviction(ws);
 	}
 
 	/** Builds a real user turn's `content` — plain text when there are no
@@ -1535,6 +1567,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// connection gets one last frame to close itself on (see server.ts).
 		broadcast(ws, { type: "session_closed" });
 		ws.listeners.clear();
+		const eviction = idleSessionEvictions.get(sessionId);
+		if (eviction) clearTimeout(eviction);
+		idleSessionEvictions.delete(sessionId);
 		sessions.delete(sessionId);
 		return true;
 	}
@@ -1550,6 +1585,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			ws.listeners.clear();
 			sessions.delete(sessionId);
 		}
+		const eviction = idleSessionEvictions.get(sessionId);
+		if (eviction) clearTimeout(eviction);
+		idleSessionEvictions.delete(sessionId);
 		// Also remove from disk regardless of whether it was live — a session
 		// closed earlier in this process (or one from a previous run) only
 		// exists on disk, and deleteSession() is what actually makes "Delete"

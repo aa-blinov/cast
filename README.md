@@ -148,6 +148,8 @@ On first start, cast auto-generates a password and saves it to `serverToken` in 
 
 The `--public` flag exposes plain HTTP. It is suitable only for a trusted LAN; it cannot protect the password or session from a network observer. For remote access without a domain or HTTPS, keep Cast on its default loopback address and use an SSH tunnel: `ssh -L 1337:127.0.0.1:1337 user@host`. Do not expose it directly on a public address.
 
+The daemon records its bound address, a local-only TUI token, and a per-process identity in `~/.cast/server.json`. A TUI on the same machine connects to `127.0.0.1` even when the daemon uses `--public`; the token is accepted only from a loopback socket. Idle sessions without an attached client are released from daemon memory after five minutes and are lazily reloaded from the session store when opened again.
+
 Env vars: `CAST_SERVER_PORT` (default `1337`), `CAST_SERVER_HOST` (default `127.0.0.1`).
 
 ## Interactive Commands
