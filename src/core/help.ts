@@ -54,7 +54,7 @@ Options:
                              (dangerous bash commands and write/edit/patch
                              tool calls) this run only — see /permissions
                              to persist it
-  --skill <path>             Load an extra skill file or directory
+  --skill <directory>        Load an extra skill package directory
                              (repeatable, works even with --no-skills)
   --no-skills                Skip project/agents/global/plugin/builtin skill discovery
   --mcp <path>               Load an extra MCP server config file

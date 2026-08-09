@@ -42,15 +42,9 @@ A skill is a directory containing a `SKILL.md` file:
 ~/.cast/skills/
   my-skill/
     SKILL.md          # Skill definition
-    templates/        # Any supporting files
-      example.md
-```
-
-Or a standalone `.md` file at the top level:
-
-```
-~/.cast/skills/
-  my-skill.md
+    scripts/          # Executable code, run only when the skill instructs it
+    references/       # Documentation, read only when needed
+    assets/           # Templates, images, data and other static resources
 ```
 
 ### SKILL.md Format
@@ -75,8 +69,12 @@ Always check `templates/` for reference material.
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `name` | No | Identifier (defaults to parent directory name) |
-| `description` | **Yes** | What the skill does — skills without a description are dropped |
+| `name` | **Yes** | Identifier; for `SKILL.md`, it must match the containing directory |
+| `description` | **Yes** | What the skill does — invalid skills are not loaded |
+| `license` | No | License name or a reference to a bundled license file |
+| `compatibility` | No | Environment requirements; 1–500 characters |
+| `metadata` | No | Mapping of string keys to string values for client-specific data |
+| `allowed-tools` | No | Experimental space-separated list of pre-approved tools; retained and exposed with the skill, with execution semantics depending on the client |
 | `disable-model-invocation` | No | `true` to hide from the agent (manual `/skill:<name>` only) |
 | `when_to_use` | No | Extra matching guidance shown to the model as `description — whenToUse` in the skill listing |
 
@@ -89,11 +87,11 @@ Per the Agent Skills spec:
 - Must not contain consecutive hyphens (`--`)
 - Maximum 64 characters
 
-Names that violate these rules generate a warning but still load.
+Malformed required fields, invalid YAML, and a directory/name mismatch prevent the skill from loading. Cast warns when the body exceeds the spec's recommended 500 lines but still loads it.
 
 ### Relative Paths
 
-When a skill file references relative paths (templates, examples, configs), resolve them against the skill's directory. The system prompt tells the agent: *"When a skill file references a relative path, resolve it against the skill directory."*
+When a skill file references relative paths (scripts, references, assets, templates, configs), resolve them against the skill's directory. The system prompt tells the agent: *"When a skill file references a relative path, resolve it against the skill directory."* Resources are never automatically read or executed: the agent loads or runs the referenced file only when the activated instructions require it.
 
 ## Enabling / disabling
 
@@ -156,12 +154,12 @@ The agent invokes skills through a dedicated `skill` tool (`name`, optional `arg
 
 | Flag | Description |
 |------|-------------|
-| `--skill <path>` | Load an extra skill file or directory (repeatable) |
+| `--skill <directory>` | Load an extra skill package directory (repeatable) |
 | `--no-skills` | Skip project/agents/global/plugin/builtin skill discovery |
 
 ```bash
-cast --skill ./my-project-skill.md
-cast --no-skills --skill ~/.cast/skills/arxiv/SKILL.md
+cast --skill ./my-project-skill
+cast --no-skills --skill ~/.cast/skills/arxiv
 ```
 
 Extra paths (`--skill`) work even with `--no-skills` — they're explicit additions, not auto-discovery.
@@ -171,6 +169,6 @@ Extra paths (`--skill`) work even with `--no-skills` — they're explicit additi
 The discovery algorithm for each directory:
 
 1. If the directory contains `SKILL.md`, load it as a single skill and stop recursing.
-2. Otherwise, load direct `.md` children as standalone skills, and recurse into subdirectories looking for `SKILL.md`.
+2. Otherwise recurse into subdirectories looking for skill directories. Arbitrary `.md` files are not skills.
 
 Directories starting with `.` or named `node_modules` are always skipped.

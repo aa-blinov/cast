@@ -135,7 +135,7 @@ See [Tools](tools.md#dangerous-command-gating) for the list of patterns that tri
 
 | Flag | Description |
 |------|-------------|
-| `--skill <path>` | Load an extra skill file or directory (repeatable) |
+| `--skill <directory>` | Load an extra skill package directory (repeatable) |
 | `--no-skills` | Skip project/agents/global/plugin/builtin skill discovery |
 | `--mcp <path>` | Load an extra MCP server config file (repeatable) |
 | `--no-mcp` | Skip global/project MCP server discovery |
@@ -143,8 +143,8 @@ See [Tools](tools.md#dangerous-command-gating) for the list of patterns that tri
 `--skill` and `--mcp` paths work even with `--no-skills` / `--no-mcp` — they're explicit additions, not discovery.
 
 ```bash
-cast --skill ./my-skill.md
-cast --no-skills --skill ~/.cast/skills/arxiv/SKILL.md
+cast --skill ./my-skill
+cast --no-skills --skill ~/.cast/skills/arxiv
 cast --mcp ./custom-mcp.json
 ```
 

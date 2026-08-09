@@ -44,15 +44,16 @@ describe("parseFrontmatter", () => {
 		expect(frontmatter).toEqual({ a: "quoted", b: "single" });
 	});
 
-	it("keeps everything after the first colon as the value (URLs, colons in text)", () => {
-		const { frontmatter } = parseFrontmatter("---\nurl: https://example.com/v1\nnote: a: b\n---\n");
+	it("parses quoted values containing YAML-significant colons", () => {
+		const { frontmatter } = parseFrontmatter('---\nurl: "https://example.com/v1"\nnote: "a: b"\n---\n');
 		expect(frontmatter.url).toBe("https://example.com/v1");
 		expect(frontmatter.note).toBe("a: b");
 	});
 
-	it("skips lines that aren't key: value", () => {
-		const { frontmatter } = parseFrontmatter("---\nname: ok\nthis is not a field\n# comment-ish\n---\n");
-		expect(frontmatter).toEqual({ name: "ok" });
+	it("reports malformed YAML instead of silently dropping invalid lines", () => {
+		const { frontmatter, errors } = parseFrontmatter("---\nname: ok\nthis is not a field\n# comment-ish\n---\n");
+		expect(frontmatter).toEqual({});
+		expect(errors).not.toHaveLength(0);
 	});
 
 	it("normalizes CRLF and drops the leading newline of the body", () => {
@@ -63,7 +64,7 @@ describe("parseFrontmatter", () => {
 
 	it("accepts hyphens, underscores and digits in keys", () => {
 		const { frontmatter } = parseFrontmatter("---\nmax-tokens: 5\nsome_key: v\nkey2: w\n---\n");
-		expect(frontmatter).toEqual({ "max-tokens": "5", some_key: "v", key2: "w" });
+		expect(frontmatter).toEqual({ "max-tokens": 5, some_key: "v", key2: "w" });
 	});
 });
 

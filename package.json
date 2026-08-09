@@ -40,7 +40,8 @@
 		"tsx": "^4.19.0",
 		"turndown": "^7.2.4",
 		"undici": "^8.7.0",
-		"web-tree-sitter": "^0.26.11"
+		"web-tree-sitter": "^0.26.11",
+		"yaml": "^2.9.0"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.3.5",

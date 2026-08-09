@@ -7,8 +7,7 @@
  * into the system prompt so the model knows what's available without paying
  * for the full content until it actually reads one.
  *
- * Frontmatter is parsed by the shared minimal parser in frontmatter.ts (see
- * that module for why it's not full YAML).
+ * Frontmatter is parsed by the shared YAML parser in frontmatter.ts.
  */
 
 import { type Dirent, existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
@@ -20,6 +19,8 @@ const SLUG_RE = /^[a-z0-9-]+$/;
 
 const MAX_NAME_LENGTH = 64;
 const MAX_DESCRIPTION_LENGTH = 1024;
+const MAX_COMPATIBILITY_LENGTH = 500;
+const RECOMMENDED_MAX_BODY_LINES = 500;
 
 // Instructions injected into the system prompt alongside the discovered
 // skill list — content, not code, so it lives in prompts/ with the other
@@ -35,6 +36,12 @@ export interface Skill {
 	description: string;
 	/** Extended description for model matching — shown alongside description in the skill listing. */
 	whenToUse?: string;
+	/** Optional Agent Skills metadata retained for clients and skill UIs. */
+	license?: string;
+	compatibility?: string;
+	metadata?: Record<string, string>;
+	/** Experimental Agent Skills field; its permission semantics are client-specific. */
+	allowedTools?: string;
 	filePath: string;
 	/** Directory containing the skill file — relative paths inside it resolve against this. */
 	baseDir: string;
@@ -80,8 +87,7 @@ export function isUninstallableSkill(skill: Skill): boolean {
 }
 
 /**
- * Delete a global/project skill from disk. Directory skills (`SKILL.md`) remove
- * the whole skill folder; loose root `.md` files remove only that file.
+ * Delete a global/project Agent Skills package from disk.
  */
 export function uninstallUserSkill(skill: Skill): void {
 	if (!isUninstallableSkill(skill)) {
@@ -90,16 +96,13 @@ export function uninstallUserSkill(skill: Skill): void {
 	if (!existsSync(skill.filePath)) {
 		throw new Error(`Skill file missing: ${skill.filePath}`);
 	}
-	if (basename(skill.filePath) === "SKILL.md") {
-		rmSync(skill.baseDir, { recursive: true, force: true });
-		return;
-	}
-	rmSync(skill.filePath, { force: true });
+	rmSync(skill.baseDir, { recursive: true, force: true });
 }
 
 // ============================================================================
-// Validation — per the Agent Skills spec; violations warn but still load,
-// except a missing description, which drops the skill entirely (pi's rule).
+// Validation — required Agent Skills fields must be valid before the package
+// reaches the model. A malformed skill is unsafe to guess at because its
+// name is part of the dispatch protocol.
 // ============================================================================
 
 function validateSkillName(name: string): string[] {
@@ -115,6 +118,36 @@ function validateSkillDescription(description: string | undefined): string[] {
 	if (!description || description.trim() === "") return ["description is required"];
 	if (description.length > MAX_DESCRIPTION_LENGTH) return [`description exceeds ${MAX_DESCRIPTION_LENGTH} characters`];
 	return [];
+}
+
+function validateOptionalString(
+	frontmatter: Record<string, unknown>,
+	field: string,
+	maxLength?: number,
+): { value: string | undefined; errors: string[] } {
+	const raw = frontmatter[field];
+	if (raw === undefined) return { value: undefined, errors: [] };
+	if (typeof raw !== "string" || raw.trim() === "")
+		return { value: undefined, errors: [`${field} must be a non-empty string`] };
+	if (maxLength !== undefined && raw.length > maxLength) {
+		return { value: undefined, errors: [`${field} exceeds ${maxLength} characters (${raw.length})`] };
+	}
+	return { value: raw, errors: [] };
+}
+
+function validateMetadata(value: unknown): { value: Record<string, string> | undefined; errors: string[] } {
+	if (value === undefined) return { value: undefined, errors: [] };
+	if (!value || typeof value !== "object" || Array.isArray(value)) {
+		return { value: undefined, errors: ["metadata must be a mapping of string keys to string values"] };
+	}
+	const metadata: Record<string, string> = {};
+	for (const [key, entry] of Object.entries(value)) {
+		if (typeof entry !== "string") {
+			return { value: undefined, errors: ["metadata must be a mapping of string keys to string values"] };
+		}
+		metadata[key] = entry;
+	}
+	return { value: metadata, errors: [] };
 }
 
 // ============================================================================
@@ -135,21 +168,47 @@ function loadSkillFromFile(
 		return { skill: null, diagnostics };
 	}
 
-	const { frontmatter, body } = parseFrontmatter(raw);
+	const { frontmatter, body, errors: yamlErrors } = parseFrontmatter(raw);
+	for (const message of yamlErrors)
+		diagnostics.push({ message: `invalid YAML frontmatter: ${message}`, path: filePath });
+	if (yamlErrors.length > 0) return { skill: null, diagnostics };
 	const parentDirName = basename(dirname(filePath));
-	const name = typeof frontmatter.name === "string" && frontmatter.name ? frontmatter.name : parentDirName;
+	const name = typeof frontmatter.name === "string" ? frontmatter.name : undefined;
 	const description = typeof frontmatter.description === "string" ? frontmatter.description : undefined;
 
 	for (const error of validateSkillDescription(description)) diagnostics.push({ message: error, path: filePath });
-	for (const error of validateSkillName(name)) diagnostics.push({ message: error, path: filePath });
+	if (!name) diagnostics.push({ message: "name is required", path: filePath });
+	else for (const error of validateSkillName(name)) diagnostics.push({ message: error, path: filePath });
+	if (basename(filePath) === "SKILL.md" && name && name !== parentDirName) {
+		diagnostics.push({ message: `name must match parent directory "${parentDirName}"`, path: filePath });
+	}
+	const license = validateOptionalString(frontmatter, "license");
+	const compatibility = validateOptionalString(frontmatter, "compatibility", MAX_COMPATIBILITY_LENGTH);
+	const allowedTools = validateOptionalString(frontmatter, "allowed-tools");
+	const metadata = validateMetadata(frontmatter.metadata);
+	for (const result of [license, compatibility, allowedTools, metadata]) {
+		for (const message of result.errors) diagnostics.push({ message, path: filePath });
+	}
+	const hasValidationErrors = diagnostics.length > 0;
 
-	if (!description || description.trim() === "") return { skill: null, diagnostics };
+	if (body.split("\n").length > RECOMMENDED_MAX_BODY_LINES) {
+		diagnostics.push({
+			message: `body exceeds the recommended ${RECOMMENDED_MAX_BODY_LINES}-line progressive-disclosure limit`,
+			path: filePath,
+		});
+	}
+
+	if (hasValidationErrors) return { skill: null, diagnostics };
 
 	return {
 		skill: {
-			name,
-			description,
+			name: name!,
+			description: description!,
 			whenToUse: typeof frontmatter.when_to_use === "string" ? frontmatter.when_to_use : undefined,
+			license: license.value,
+			compatibility: compatibility.value,
+			metadata: metadata.value,
+			allowedTools: allowedTools.value,
 			filePath,
 			baseDir: dirname(filePath),
 			source,
@@ -161,16 +220,13 @@ function loadSkillFromFile(
 }
 
 /**
- * Discovery rule (matches pi): if a directory contains SKILL.md, it's a skill
- * root and recursion stops there. Otherwise, direct .md children at this
- * level are loaded as standalone skills, and subdirectories recurse looking
- * for SKILL.md (but their own root .md files are ignored, only SKILL.md
- * counts below the top level).
+ * Discovery rule: a directory containing SKILL.md is a skill root and
+ * recursion stops there. Other directories are containers only: recurse into
+ * them to find skill roots, never treating arbitrary Markdown as a package.
  */
 function loadSkillsFromDirInternal(
 	dir: string,
 	source: SkillSource,
-	includeRootFiles: boolean,
 ): { skills: Skill[]; diagnostics: SkillDiagnostic[] } {
 	const skills: Skill[] = [];
 	const diagnostics: SkillDiagnostic[] = [];
@@ -196,16 +252,10 @@ function loadSkillsFromDirInternal(
 		const fullPath = join(dir, entry.name);
 
 		if (entry.isDirectory()) {
-			const result = loadSkillsFromDirInternal(fullPath, source, false);
+			const result = loadSkillsFromDirInternal(fullPath, source);
 			skills.push(...result.skills);
 			diagnostics.push(...result.diagnostics);
-			continue;
 		}
-
-		if (!entry.isFile() || !includeRootFiles || !entry.name.endsWith(".md")) continue;
-		const result = loadSkillFromFile(fullPath, source);
-		if (result.skill) skills.push(result.skill);
-		diagnostics.push(...result.diagnostics);
 	}
 
 	return { skills, diagnostics };
@@ -235,7 +285,7 @@ export interface LoadSkillsOptions {
 	pluginContributions?: PluginSkillContribution[];
 	/** @deprecated Prefer `pluginContributions` — string dirs load as enabled plugin skills. */
 	pluginDirs?: string[];
-	/** Explicit `--skill <path>` files or directories — load even with `--no-skills`. */
+	/** Explicit `--skill <directory>` packages — load even with `--no-skills`. */
 	extraPaths: string[];
 }
 
@@ -264,28 +314,25 @@ export function loadSkills(options: LoadSkillsOptions): { skills: Skill[]; diagn
 	}
 
 	// Highest priority first (see JSDoc).
-	if (options.projectDir) addAll(loadSkillsFromDirInternal(options.projectDir, "project", true));
-	if (options.agentsProjectDir) addAll(loadSkillsFromDirInternal(options.agentsProjectDir, "agents", true));
-	if (options.globalDir) addAll(loadSkillsFromDirInternal(options.globalDir, "global", true));
+	if (options.projectDir) addAll(loadSkillsFromDirInternal(options.projectDir, "project"));
+	if (options.agentsProjectDir) addAll(loadSkillsFromDirInternal(options.agentsProjectDir, "agents"));
+	if (options.globalDir) addAll(loadSkillsFromDirInternal(options.globalDir, "global"));
 	for (const dir of options.agentsGlobalDirs ?? []) {
-		addAll(loadSkillsFromDirInternal(dir, "agents", true));
+		addAll(loadSkillsFromDirInternal(dir, "agents"));
 	}
 	const pluginContributions: PluginSkillContribution[] = [
 		...(options.pluginContributions ?? []),
 		...(options.pluginDirs ?? []).map((dir) => ({ dir, pluginId: "", enabled: true })),
 	];
 	for (const contrib of pluginContributions) {
-		// Plugins follow Claude Code's directory convention (skill-name/SKILL.md) —
-		// loose .md files at the plugin root are docs (README.md, etc.), not skills.
-		// Passing false for includeRootFiles matches claude-code's loader.
-		const loaded = loadSkillsFromDirInternal(contrib.dir, "plugin", false);
+		const loaded = loadSkillsFromDirInternal(contrib.dir, "plugin");
 		for (const skill of loaded.skills) {
 			if (contrib.pluginId) skill.pluginId = contrib.pluginId;
 			skill.pluginEnabled = contrib.enabled;
 		}
 		addAll(loaded);
 	}
-	if (options.builtinDir) addAll(loadSkillsFromDirInternal(options.builtinDir, "builtin", true));
+	if (options.builtinDir) addAll(loadSkillsFromDirInternal(options.builtinDir, "builtin"));
 
 	for (const rawPath of options.extraPaths) {
 		if (!existsSync(rawPath)) {
@@ -294,13 +341,16 @@ export function loadSkills(options: LoadSkillsOptions): { skills: Skill[]; diagn
 		}
 		const stats = statSync(rawPath);
 		if (stats.isDirectory()) {
-			addAll(loadSkillsFromDirInternal(rawPath, "path", true));
-		} else if (stats.isFile() && rawPath.endsWith(".md")) {
-			const result = loadSkillFromFile(rawPath, "path");
+			const skillPath = join(rawPath, "SKILL.md");
+			if (!existsSync(skillPath)) {
+				diagnostics.push({ message: "skill directory must contain SKILL.md", path: rawPath });
+				continue;
+			}
+			const result = loadSkillFromFile(skillPath, "path");
 			if (result.skill) addAll({ skills: [result.skill], diagnostics: result.diagnostics });
 			else diagnostics.push(...result.diagnostics);
 		} else {
-			diagnostics.push({ message: "skill path is not a markdown file", path: rawPath });
+			diagnostics.push({ message: "skill path must be a directory containing SKILL.md", path: rawPath });
 		}
 	}
 
@@ -426,7 +476,8 @@ export function formatSkillInvocation(skill: Skill, additionalArgs?: string, ses
 		content.includes("${CLAUDE_SKILL_DIR}") ||
 		// biome-ignore lint/suspicious/noTemplateCurlyInString: checking for literal placeholder in content
 		content.includes("${CAST_SESSION_ID}");
-	const block = `<skill name="${escapeXml(skill.name)}" location="${escapeXml(skill.filePath)}">\nReferences are relative to ${skill.baseDir}.\n\n${substituted}\n</skill>`;
+	const allowedTools = skill.allowedTools ? ` allowed-tools="${escapeXml(skill.allowedTools)}"` : "";
+	const block = `<skill name="${escapeXml(skill.name)}" location="${escapeXml(skill.filePath)}"${allowedTools}>\nReferences are relative to ${skill.baseDir}.\n\n${substituted}\n</skill>`;
 	// If args were provided but no $ARGUMENTS placeholder consumed them, append as User: line
 	if (additionalArgs && !hadPlaceholders) {
 		return `${block}\n\nUser: ${additionalArgs}`;

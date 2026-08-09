@@ -14,7 +14,7 @@
  * `<cwd>/.cast/rules/`. Both gated behind the unified project trust
  * decision (global always trusted, project needs trust prompt).
  *
- * Frontmatter is parsed by the shared minimal parser in frontmatter.ts.
+ * Frontmatter is parsed by the shared YAML parser in frontmatter.ts.
  */
 
 import { type Dirent, existsSync, readdirSync, readFileSync } from "node:fs";
@@ -144,7 +144,7 @@ function loadRuleFromFile(filePath: string, source: RuleSource, scope: string): 
 	let globs: string[] = [];
 	const globsVal = frontmatter.globs ?? frontmatter.paths;
 	if (Array.isArray(globsVal)) {
-		globs = globsVal;
+		globs = globsVal.filter((glob): glob is string => typeof glob === "string");
 	} else if (typeof globsVal === "string" && globsVal) {
 		globs = [globsVal];
 	}
