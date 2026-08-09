@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.19
+
+### Fixed
+
+- **Daemon restarts no longer create empty sessions.** The startup-only session used to select defaults is no longer persisted, preventing one empty SQLite record from accumulating for every daemon restart.
+
 ## 0.13.18
 
 ### Added

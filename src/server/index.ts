@@ -8,6 +8,7 @@ import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { closeMcpConnections } from "../core/mcp.ts";
 import { resolveMcpForCwd } from "../core/project.ts";
+import { deleteSession } from "../core/session.ts";
 import { loadSettings, updateSettings } from "../core/settings.ts";
 import type { ParsedArgs } from "../core/startup.ts";
 import { runStartup } from "../core/startup.ts";
@@ -125,6 +126,10 @@ export async function runServerMain(args: string[], options: { foreground: boole
 	// is generous enough to tolerate that same delay instead of needing this
 	// early write as a workaround.
 	const result = await runStartup(parsedArgs, webPickers);
+	// The daemon uses this startup-only session solely to establish its default
+	// model and persona. Unlike an interactive client, it never exposes it to a
+	// user; retaining it creates one empty durable row per daemon restart.
+	if (!result.resumed && result.session.id) deleteSession(result.session.id);
 	console.log(`[cast server] persona: ${result.persona.label}, model: ${result.session.model}`);
 	console.log("[cast server] ────────────────────────────────────");
 	console.log(`[cast server]   login:    cast`);
