@@ -1,6 +1,6 @@
 # Personas
 
-A coding agent optimized for implementation is not the best reviewer. A QA mindset does not write good specs. Personas let you swap the judgment and tool access of the agent without changing your codebase.
+A coding agent optimized for implementation is not the best reviewer. A QA mindset does not write good specs. Personas let you swap the agent's judgment without changing your codebase, and optionally narrow its tool access.
 
 See [Persona Research](persona-research.md) for empirical studies on role framing and agent behavior.
 
@@ -27,7 +27,7 @@ See [Persona Research](persona-research.md) for empirical studies on role framin
 | `sysadmin` | System Administrator | Operations and infrastructure — diagnoses systems, manages services |
 | `tech-writer` | Technical Writer | Documentation — READMEs, guides, API references, changelogs, diagrams |
 
-The `senior` persona is the default. `coder-with-subagents` is the persona that enables the `task` tool for delegating work to sub-agents.
+The `senior` persona is the default. Built-in personas deliberately share the normal built-in, skill, and MCP tool surface, so changing role does not unexpectedly break a workflow. `coder-with-subagents` is the exception: it additionally enables the `task` tool for delegating work to sub-agents. Use a custom persona's allowlists when a role needs least privilege or a smaller tool prompt.
 
 ## Switching Personas
 
@@ -106,7 +106,7 @@ mcp: [staging-*]                    # glob over server names
 subagentTypes: [explore]            # `task` can only spawn the "explore" role
 ```
 
-`skills`/`mcp` restrictions also apply to anything the persona delegates to via `task` — a restriction can't be routed around by spawning a subagent to do the disallowed thing instead.
+`skills`/`mcp` restrictions also apply to anything the persona delegates to via `task` — a restriction can't be routed around by spawning a subagent to do the disallowed thing instead. These restrictions are optional: they are not inferred from a persona's label or description, and a persona without an allowlist keeps the normal available surface.
 
 Session policy still applies on top of every allowlist: plan/build mode, the web-tools toggle, and headless `cast run` can disable tools via their own denylist even if the persona listed them. `subagentTypes` has no effect unless `subagents: true`.
 
