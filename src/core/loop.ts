@@ -41,7 +41,7 @@ import {
 import type { SshHost } from "./ssh.ts";
 import type { SubagentPrompt } from "./subagents.ts";
 import { formatTodoList, remainingTodoCount, type TodoItem, validateTodos } from "./todo.ts";
-import { type CompletedToolCallStatus, completedToolCallStatus } from "./tools/shared.ts";
+import { type CompletedToolCallStatus, completedToolCallStatus, normalizeToolResultError } from "./tools/shared.ts";
 import {
 	type BashBackgroundDeps,
 	type ConfirmBash,
@@ -1891,8 +1891,9 @@ async function executeToolCalls(
 		};
 
 		const result = await runOne();
-		settled.set(tc.id, result);
-		return result;
+		const normalized = { ...result, result: normalizeToolResultError(result.result) };
+		settled.set(tc.id, normalized);
+		return normalized;
 	});
 
 	// Abort must always end the turn: cooperating tools (bash/web/ssh) kill

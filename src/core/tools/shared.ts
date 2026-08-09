@@ -11,6 +11,8 @@ import type { Usage } from "../llm.ts";
 export interface ToolResult {
 	content: string;
 	isError?: boolean;
+	/** Stable error details for UIs, protocol clients, and retry policy. */
+	error?: ToolError;
 	/**
 	 * Set by `read` when the file is an image. A `role: "tool"` message can't
 	 * carry image content per the OpenAI-compatible chat API, so the loop
@@ -19,6 +21,108 @@ export interface ToolResult {
 	imageDataUrl?: string;
 	/** Usage from subagent execution (task tool only). */
 	subagentUsage?: Usage;
+}
+
+export type ToolErrorCode =
+	| "ABORTED"
+	| "CONFLICT"
+	| "INVALID_ARGUMENT"
+	| "NOT_FOUND"
+	| "PERMISSION_DENIED"
+	| "TIMEOUT"
+	| "UNAVAILABLE"
+	| "EXTERNAL_ERROR"
+	| "INTERNAL_ERROR";
+
+export interface ToolError {
+	code: ToolErrorCode;
+	retryable: boolean;
+	suggestedFix: string;
+}
+
+/** Create an error result without making callers duplicate its protocol fields. */
+export function toolError(content: string, error: ToolError): ToolResult {
+	return { content, isError: true, error };
+}
+
+function enrichToolResultError(result: ToolResult, error: ToolError): ToolResult {
+	return { ...result, error };
+}
+
+/**
+ * Backward-compatible error enrichment at the tool boundary. Existing tools
+ * retain their useful textual diagnostics while every error becomes safe for
+ * clients to classify without parsing a provider- or tool-specific message.
+ */
+export function normalizeToolResultError(result: ToolResult): ToolResult {
+	if (!result.isError || result.error) return result;
+	const content = result.content.toLowerCase();
+	if (content.includes("[aborted]") || content.includes("cancelled") || content.includes("interrupted")) {
+		return enrichToolResultError(result, {
+			code: "ABORTED",
+			retryable: false,
+			suggestedFix: "Only restart the operation if the user still wants it to run.",
+		});
+	}
+	if (content.includes("timeout") || content.includes("timed out")) {
+		return enrichToolResultError(result, {
+			code: "TIMEOUT",
+			retryable: true,
+			suggestedFix: "Narrow the request or increase the operation timeout before retrying.",
+		});
+	}
+	if (content.includes("permission denied") || content.includes("not permitted") || content.includes("blocked by")) {
+		return enrichToolResultError(result, {
+			code: "PERMISSION_DENIED",
+			retryable: false,
+			suggestedFix: "Request the required permission or choose an allowed operation.",
+		});
+	}
+	if (content.includes("not found") || content.includes("no background task")) {
+		return enrichToolResultError(result, {
+			code: "NOT_FOUND",
+			retryable: false,
+			suggestedFix: "Check the referenced name or path, then retry with an existing target.",
+		});
+	}
+	if (
+		content.includes("required") ||
+		content.includes("invalid") ||
+		content.includes("must be") ||
+		content.includes("unknown tool")
+	) {
+		return enrichToolResultError(result, {
+			code: "INVALID_ARGUMENT",
+			retryable: false,
+			suggestedFix: "Correct the tool name or arguments using the error details, then retry.",
+		});
+	}
+	if (content.includes("not available") || content.includes("not configured")) {
+		return enrichToolResultError(result, {
+			code: "UNAVAILABLE",
+			retryable: false,
+			suggestedFix: "Enable or configure the required tool or integration before retrying.",
+		});
+	}
+	if (content.includes("conflict") || content.includes("already exists")) {
+		return enrichToolResultError(result, {
+			code: "CONFLICT",
+			retryable: false,
+			suggestedFix: "Refresh the target state and choose a non-conflicting operation.",
+		});
+	}
+	if (content.includes("fetch error") || content.includes("search error") || content.includes("mcp")) {
+		return enrichToolResultError(result, {
+			code: "EXTERNAL_ERROR",
+			retryable: true,
+			suggestedFix: "Retry once; if it persists, verify the external service and its configuration.",
+		});
+	}
+	return enrichToolResultError(result, {
+		code: "INTERNAL_ERROR",
+		retryable: false,
+		suggestedFix: "Inspect the error details and report it if the same call keeps failing.",
+	});
 }
 
 /** One lifecycle vocabulary shared by the loop, TUI, SSE bridge, and history

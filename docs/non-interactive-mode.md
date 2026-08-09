@@ -59,6 +59,11 @@ Structured JSON events, one per line (JSONL). Each event has:
 | `end` | `reason` | Run completed (`stop`, `error`, etc.) |
 | `error` | `message` | Error occurred |
 
+For an unsuccessful `tool_end`, `result.error` is a stable object for clients:
+`code`, `retryable`, and `suggestedFix`. The human-readable `result.content`
+remains available for the precise diagnostic; clients should use the structured
+fields instead of parsing that text.
+
 ## Flags
 
 `cast run` accepts a subset of the main CLI flags:

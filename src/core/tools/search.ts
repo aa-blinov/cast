@@ -12,7 +12,7 @@ import { access, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { basename, join, relative } from "node:path";
 import { promisify } from "node:util";
 import type { AppConfig } from "../config.ts";
-import { formatSize, resolvePath, type ToolResult } from "./shared.ts";
+import { formatSize, resolvePath, type ToolResult, toolError } from "./shared.ts";
 
 const REGEX_ESCAPE_RE = /[.*+?^${}()|[\]\\]/g;
 const SEARCH_PATH_PREFIX_RE = /^\.\//gm;
@@ -24,6 +24,20 @@ const PERMISSION_DENIED_RE = /operation not permitted|permission denied/i;
 // time) that stalls every other in-flight call, not just this one — a
 // correctness-neutral but real efficiency cost the async variant avoids.
 const execFileAsync = promisify(execFile);
+
+class SearchAbortedError extends Error {}
+
+function abortedSearchResult(): ToolResult {
+	return toolError("[ABORTED] Search was interrupted by the user.", {
+		code: "ABORTED",
+		retryable: false,
+		suggestedFix: "Only restart the search if the user still wants it to run.",
+	});
+}
+
+function throwIfSearchAborted(signal: AbortSignal | undefined): void {
+	if (signal?.aborted) throw new SearchAbortedError();
+}
 
 // ============================================================================
 // Fallback file walking — used when fd/rg aren't installed. fd/rg both skip
@@ -168,13 +182,20 @@ function globToFileRegExp(glob: string): RegExp {
 }
 
 /** Collect file paths under searchPath, skipping default-ignored dirs and .gitignore matches. */
-async function walkFiles(cwd: string, searchPath: string, maxFiles: number = MAX_WALK_FILES): Promise<string[]> {
+async function walkFiles(
+	cwd: string,
+	searchPath: string,
+	maxFiles: number = MAX_WALK_FILES,
+	signal?: AbortSignal,
+): Promise<string[]> {
+	throwIfSearchAborted(signal);
 	const rootRules = await parseGitignore(cwd);
 	const visited = new Set<string>();
 	const stack: Array<{ dir: string; rules: GitignoreRule[] }> = [{ dir: searchPath, rules: rootRules }];
 	const results: string[] = [];
 
 	while (stack.length > 0 && results.length < maxFiles) {
+		throwIfSearchAborted(signal);
 		const { dir, rules } = stack.pop()!;
 		let entries: Dirent[];
 		try {
@@ -185,6 +206,7 @@ async function walkFiles(cwd: string, searchPath: string, maxFiles: number = MAX
 		}
 
 		for (const entry of entries) {
+			throwIfSearchAborted(signal);
 			if (results.length >= maxFiles) break;
 			const absPath = join(dir, entry.name);
 			const relPath = relative(cwd, absPath);
@@ -226,7 +248,13 @@ async function walkFiles(cwd: string, searchPath: string, maxFiles: number = MAX
 	return results;
 }
 
-export async function execGlob(args: Record<string, unknown>, cwd: string, _config: AppConfig): Promise<ToolResult> {
+export async function execGlob(
+	args: Record<string, unknown>,
+	cwd: string,
+	_config: AppConfig,
+	signal?: AbortSignal,
+): Promise<ToolResult> {
+	if (signal?.aborted) return abortedSearchResult();
 	const pattern = typeof args.pattern === "string" ? args.pattern : "";
 	if (!pattern.trim())
 		return { content: 'Error: "pattern" is required. Retry with a glob such as "**/*.ts".', isError: true };
@@ -307,22 +335,29 @@ export async function execGlob(args: Record<string, unknown>, cwd: string, _conf
 			encoding: "utf-8",
 			timeout: 10_000,
 			cwd: searchPath,
+			signal,
 		});
 		absolutePaths = stdout.trim().split("\n").filter(Boolean);
 	} catch {
+		if (signal?.aborted) return abortedSearchResult();
 		// fd isn't installed or returned an error (e.g. invalid glob
 		// pattern) — walk the tree ourselves. Patterns with a directory
 		// component match against the path relative to searchPath (mirrors
 		// the --full-path handling above); plain patterns match the basename,
 		// same as `find -name`.
-		const allFiles = await walkFiles(cwd, searchPath);
-		if (pattern.includes("/")) {
-			const anchoredPattern = pattern.startsWith("**/") ? pattern : `**/${pattern}`;
-			const pathRe = globToFileRegExp(anchoredPattern);
-			absolutePaths = allFiles.filter((p) => pathRe.test(relative(searchPath, p))).slice(0, limit);
-		} else {
-			const nameRe = globToFileRegExp(pattern);
-			absolutePaths = allFiles.filter((p) => nameRe.test(basename(p))).slice(0, limit);
+		try {
+			const allFiles = await walkFiles(cwd, searchPath, MAX_WALK_FILES, signal);
+			if (pattern.includes("/")) {
+				const anchoredPattern = pattern.startsWith("**/") ? pattern : `**/${pattern}`;
+				const pathRe = globToFileRegExp(anchoredPattern);
+				absolutePaths = allFiles.filter((p) => pathRe.test(relative(searchPath, p))).slice(0, limit);
+			} else {
+				const nameRe = globToFileRegExp(pattern);
+				absolutePaths = allFiles.filter((p) => nameRe.test(basename(p))).slice(0, limit);
+			}
+		} catch (error) {
+			if (error instanceof SearchAbortedError) return abortedSearchResult();
+			throw error;
 		}
 	}
 
@@ -382,7 +417,13 @@ export function withAccessNote(output: string, rgStderr: string, permissionSkips
 	return output ? `${output}\n${note}` : note;
 }
 
-export async function execGrep(args: Record<string, unknown>, cwd: string, config: AppConfig): Promise<ToolResult> {
+export async function execGrep(
+	args: Record<string, unknown>,
+	cwd: string,
+	config: AppConfig,
+	signal?: AbortSignal,
+): Promise<ToolResult> {
+	if (signal?.aborted) return abortedSearchResult();
 	const pattern = typeof args.pattern === "string" ? args.pattern : "";
 	if (!pattern)
 		return {
@@ -457,6 +498,7 @@ export async function execGrep(args: Record<string, unknown>, cwd: string, confi
 				encoding: "utf-8",
 				timeout: 10_000,
 				maxBuffer: config.maxToolOutputBytes,
+				signal,
 				...(searchPathIsDirectory ? { cwd: searchPath } : {}),
 			},
 		);
@@ -465,6 +507,7 @@ export async function execGrep(args: Record<string, unknown>, cwd: string, confi
 		// a directory component. The fallback uses the same root-relative form.
 		output = searchPathIsDirectory ? stdout.replace(SEARCH_PATH_PREFIX_RE, "") : stdout;
 	} catch (err) {
+		if (signal?.aborted) return abortedSearchResult();
 		// rg's exit codes: 0 = matches found, 1 = ran cleanly but nothing
 		// matched, 2 = a real error (bad regex, unreadable root, …). The
 		// promisified execFile rejects on any non-zero exit, with the exit
@@ -512,7 +555,13 @@ export async function execGrep(args: Record<string, unknown>, cwd: string, confi
 		const searchPathIsFile = await stat(searchPath)
 			.then((stats) => stats.isFile())
 			.catch(() => false);
-		const allFiles = searchPathIsFile ? [searchPath] : await walkFiles(cwd, searchPath);
+		let allFiles: string[];
+		try {
+			allFiles = searchPathIsFile ? [searchPath] : await walkFiles(cwd, searchPath, MAX_WALK_FILES, signal);
+		} catch (error) {
+			if (error instanceof SearchAbortedError) return abortedSearchResult();
+			throw error;
+		}
 		const candidates = globRe
 			? allFiles.filter((p) => globRe.test(globHasDir ? relative(searchPath, p) : basename(p)))
 			: allFiles;
@@ -531,6 +580,7 @@ export async function execGrep(args: Record<string, unknown>, cwd: string, confi
 		const blocks: string[] = [];
 		let safetyValveHit = false;
 		outer: for (const absPath of candidates) {
+			if (signal?.aborted) return abortedSearchResult();
 			let stats: Awaited<ReturnType<typeof stat>>;
 			try {
 				// biome-ignore lint/performance/noAwaitInLoops: sequential — each step depends on the previous
@@ -554,6 +604,7 @@ export async function execGrep(args: Record<string, unknown>, cwd: string, confi
 
 			let fileMatches = 0;
 			for (let i = 0; i < fileLines.length; i++) {
+				if (signal?.aborted) return abortedSearchResult();
 				if (!patternRe.test(fileLines[i]!)) continue;
 				const start = Math.max(0, i - context);
 				const end = Math.min(fileLines.length, i + context + 1);
