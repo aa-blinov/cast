@@ -811,4 +811,42 @@ describe("runHooksForEvent", () => {
 			server.close();
 		}
 	});
+
+	it("matches comma-separated names and file events by their basename", async () => {
+		const hooks: HooksFile = {
+			FileChanged: [{ matcher: "package.json, README.md", hooks: [{ command: "echo matched" }] }],
+		};
+		const result = await runHooksForEvent(hooks, {
+			event: "FileChanged",
+			cwd: "/tmp",
+			payload: { file_name: "package.json" },
+		});
+		expect(result.stdout).toContain("matched");
+	});
+
+	it("runs PermissionDenied hooks with a matching if condition", async () => {
+		const hooks: HooksFile = {
+			PermissionDenied: [{ hooks: [{ if: "bash(git *)", command: "echo retry" }] }],
+		};
+		const result = await runHooksForEvent(hooks, {
+			event: "PermissionDenied",
+			cwd: "/tmp",
+			payload: { tool_name: "bash", tool_input: { command: "git status" } },
+		});
+		expect(result.stdout).toContain("retry");
+	});
+
+	it("detaches a command explicitly marked async", async () => {
+		const hooks: HooksFile = {
+			PreToolUse: [{ hooks: [{ command: "sleep 0.2", async: true, timeout: 2 }] }],
+		};
+		const start = Date.now();
+		const result = await runHooksForEvent(hooks, {
+			event: "PreToolUse",
+			cwd: "/tmp",
+			payload: {},
+		});
+		expect(Date.now() - start).toBeLessThan(1_000);
+		expect(result.blocked).toBe(false);
+	});
 });

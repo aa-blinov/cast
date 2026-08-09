@@ -8,7 +8,7 @@ import { execFile, execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import chokidar from "chokidar";
 import { backupFileForCheckpoint, createCheckpoint, restoreCheckpoint } from "../core/checkpoint.ts";
@@ -932,8 +932,8 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	 * Map entry is replaced by re-hydration under the same id (see the race in
 	 * `hydrateSession`), and a captured `ws` reference would point at a stale
 	 * object whose listeners set is empty. */
-	function makeFsCallback(sessionId: string): () => void {
-		return () => {
+	function makeFsCallback(sessionId: string): (eventName: string, filePath: string) => void {
+		return (eventName, filePath) => {
 			const existing = fsDebounceTimers.get(sessionId);
 			if (existing) clearTimeout(existing);
 			fsDebounceTimers.set(
@@ -943,6 +943,15 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					const ws = sessions.get(sessionId);
 					if (!ws || ws.status !== "idle") return;
 					broadcast(ws, { type: "fs_change" });
+					const hookEvent = eventName === "addDir" ? "DirectoryAdded" : "FileChanged";
+					const hooks = resolveHooksForCwd(ws.session.cwd ?? cwd, projectTrusted);
+					void runHooksForEvent(hooks, {
+						event: hookEvent,
+						cwd: ws.session.cwd ?? cwd,
+						sessionId: ws.id,
+						matchTarget: basename(filePath),
+						payload: { file_path: filePath, file_name: basename(filePath), change_type: eventName },
+					});
 				}, FS_DEBOUNCE_MS),
 			);
 		};
@@ -1043,7 +1052,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	}
 	/** Toggles the idle watcher as the session enters/leaves a turn. */
 	function syncFsWatcher(ws: WebAgentSession): void {
-		if (ws.status === "idle" && ws.listeners.size > 0) startFsWatcher(ws);
+		const hooks = resolveHooksForCwd(ws.session.cwd ?? cwd, projectTrusted);
+		const needsFileHooks = Boolean(hooks.FileChanged?.length || hooks.DirectoryAdded?.length);
+		if (ws.status === "idle" && (ws.listeners.size > 0 || needsFileHooks)) startFsWatcher(ws);
 		else stopFsWatcher(ws.id);
 		syncIdleSessionEviction(ws);
 	}
@@ -1315,6 +1326,12 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					);
 				}
 				if (event.type === "assistant_message") {
+					void runHooksForEvent(resolveHooksForCwd(ws.session.cwd ?? cwd, projectTrusted), {
+						event: "MessageDisplay",
+						cwd: ws.session.cwd ?? cwd,
+						sessionId: ws.id,
+						payload: { message: event.content, tool_calls: event.toolCalls },
+					});
 					thinkingByCompletion.push(event.thinking ?? "");
 					ws.activeStream = [
 						...(event.thinking
@@ -2136,6 +2153,14 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		}
 		if (name === "/compact") {
 			if (ws.session.messages.length === 0) return { ok: true, result: "Nothing to compact yet" };
+			const compactHooks = resolveHooksForCwd(ws.session.cwd ?? cwd, projectTrusted);
+			const preCompact = await runHooksForEvent(compactHooks, {
+				event: "PreCompact",
+				cwd: ws.session.cwd ?? cwd,
+				sessionId: ws.id,
+				payload: { trigger: "manual" },
+			});
+			if (preCompact.blocked) return { ok: false, error: preCompact.reason ?? "Compaction blocked by hook" };
 			// Runs the same async summarization call `submit()` uses for the agent
 			// loop itself — returns immediately (matching submit()'s own
 			// fire-and-forget shape) and reports the outcome over SSE via the
@@ -2158,6 +2183,12 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 							type: "compaction",
 							messagesCompacted: result.messagesCompacted,
 							tokensBefore: result.tokensBefore,
+						});
+						void runHooksForEvent(compactHooks, {
+							event: "PostCompact",
+							cwd: ws.session.cwd ?? cwd,
+							sessionId: ws.id,
+							payload: { trigger: "manual", messagesCompacted: result.messagesCompacted },
 						});
 					} else if (result.error) {
 						broadcast(ws, { type: "error", message: `Compaction failed: ${result.error}` });
@@ -2916,13 +2947,31 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			if (rmMatch) {
 				const targetName = rmMatch[1]!.trim();
 				if (!targetName) return { ok: false, error: "Usage: /worktree remove <name>" };
+				const target = listWorktrees(sessionCwd).find((worktree) => worktree.name === targetName);
 				const res = removeWorktreeBySlug(targetName, sessionCwd);
+				if (res.ok) {
+					void runHooksForEvent(resolveHooksForCwd(sessionCwd, projectTrusted), {
+						event: "WorktreeRemove",
+						cwd: sessionCwd,
+						sessionId: ws.id,
+						payload: { worktree_name: targetName, worktree_path: target?.path },
+					});
+				}
 				return { ok: true, result: res.message };
 			}
 			if (running)
 				return { ok: false, error: "Agent running — finish the run or /abort before switching worktrees" };
 			try {
+				const beforeCreate = await runHooksForEvent(resolveHooksForCwd(sessionCwd, projectTrusted), {
+					event: "WorktreeCreate",
+					cwd: sessionCwd,
+					sessionId: ws.id,
+					payload: { worktree_name: arg },
+				});
+				if (beforeCreate.blocked)
+					return { ok: false, error: beforeCreate.reason ?? "Worktree creation blocked by hook" };
 				const wt = await ensureSessionWorktree(arg, sessionCwd);
+				const previousCwd = ws.session.cwd;
 				ws.session.cwd = wt.path;
 				saveSession(ws.session);
 				// Rebuild the system prompt against the worktree's context (skills,
@@ -2933,6 +2982,12 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					wt.path,
 					ws.session.mode,
 				);
+				void runHooksForEvent(resolveHooksForCwd(wt.path, projectTrusted), {
+					event: "CwdChanged",
+					cwd: wt.path,
+					sessionId: ws.id,
+					payload: { old_cwd: previousCwd, cwd: wt.path },
+				});
 				broadcastSessionUpdate(ws);
 				return { ok: true, result: `Worktree ready: ${wt.path}` };
 			} catch (err) {
