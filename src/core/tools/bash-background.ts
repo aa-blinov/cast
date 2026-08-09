@@ -21,7 +21,7 @@ import type { AppConfig } from "../config.ts";
 import type { Message } from "../llm.ts";
 import type { MessageQueue } from "../loop.ts";
 import { formatBashResult, getBashResolution, stripAnsi } from "./bash.ts";
-import type { ToolResult } from "./shared.ts";
+import { appendBoundedOutput, formatSize, type ToolResult } from "./shared.ts";
 
 export interface BackgroundTask {
 	id: string;
@@ -34,6 +34,7 @@ export interface BackgroundTask {
 	endedAt?: number;
 	/** Accumulated stdout+stderr, capped at config.maxToolOutputBytes — mirrors bash.ts's sync path. */
 	rawOutput: string;
+	outputTruncated: boolean;
 	timedOut: boolean;
 	/** The kill-timer duration, when one was set — only meaningful once `timedOut` is true. */
 	timeoutSeconds?: number;
@@ -92,6 +93,7 @@ function buildCompletionReminder(task: BackgroundTask, config: AppConfig): strin
 			: formatBashResult(task.rawOutput, config, {
 					exitCode: task.exitCode,
 					timedOut: task.timedOut,
+					outputTruncated: task.outputTruncated,
 					timeoutSeconds: task.timeoutSeconds,
 				}).content;
 	return (
@@ -156,6 +158,7 @@ export class BackgroundTaskRegistry {
 			exitCode: null,
 			startedAt: Date.now(),
 			rawOutput: "",
+			outputTruncated: false,
 			timedOut: false,
 			timeoutSeconds,
 		};
@@ -163,10 +166,14 @@ export class BackgroundTaskRegistry {
 
 		const maxBytes = config.maxToolOutputBytes;
 		proc.stdout?.on("data", (d: Buffer) => {
-			if (Buffer.byteLength(task.rawOutput, "utf-8") < maxBytes) task.rawOutput += d.toString("utf-8");
+			const appended = appendBoundedOutput(task.rawOutput, d, maxBytes);
+			task.rawOutput = appended.output;
+			task.outputTruncated ||= appended.truncated;
 		});
 		proc.stderr?.on("data", (d: Buffer) => {
-			if (Buffer.byteLength(task.rawOutput, "utf-8") < maxBytes) task.rawOutput += d.toString("utf-8");
+			const appended = appendBoundedOutput(task.rawOutput, d, maxBytes);
+			task.rawOutput = appended.output;
+			task.outputTruncated ||= appended.truncated;
 		});
 
 		const timer =
@@ -282,7 +289,10 @@ export async function execBashOutput(
 	const header = `Task ${task.id} (\`${task.command}\`): ${statusLine(task)}`;
 	if (task.status === "running") {
 		const output = truncateOutput(task.rawOutput, config.maxToolOutputLines);
-		return { content: `${header}\n\n${output || "(no output yet)"}` };
+		const truncationNote = task.outputTruncated
+			? `\n\n[Output truncated at ${formatSize(config.maxToolOutputBytes)}. Narrow the command or redirect output to a file and read it in chunks.]`
+			: "";
+		return { content: `${header}\n\n${output || "(no output yet)"}${truncationNote}` };
 	}
 	if (task.status === "error") {
 		return { content: `${header}\n\n${task.errorMessage ?? ""}`, isError: true };
@@ -290,9 +300,10 @@ export async function execBashOutput(
 	const formatted = formatBashResult(task.rawOutput, config, {
 		exitCode: task.exitCode,
 		timedOut: task.timedOut,
+		outputTruncated: task.outputTruncated,
 		timeoutSeconds: task.timeoutSeconds,
 	});
-	return { content: `${header}\n\n${formatted.content}` };
+	return { content: `${header}\n\n${formatted.content}`, isError: formatted.isError };
 }
 
 export async function execBashKill(

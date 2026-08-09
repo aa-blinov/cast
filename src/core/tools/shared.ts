@@ -42,7 +42,7 @@ export type ToolExecutor = (
 export type ConfirmBash = (command: string, reason: string) => Promise<boolean>;
 
 /** Asked before running a destructive file operation (write/edit/patch, plus MCP
- * tools whose name starts with `mcp__`). Return false to block it. */
+ * tools whose name starts with `mcp_`). Return false to block it. */
 export type ConfirmWrite = (tool: string, path: string, reason: string) => Promise<boolean>;
 
 /** Resolve a possibly-relative tool path argument against the agent's cwd. */
@@ -56,4 +56,16 @@ export function formatSize(bytes: number): string {
 	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
 	if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 	return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)}GB`;
+}
+
+/** Append child-process output without exceeding the tool-result byte budget. */
+export function appendBoundedOutput(
+	current: string,
+	chunk: Buffer,
+	maxBytes: number,
+): { output: string; truncated: boolean } {
+	const remaining = maxBytes - Buffer.byteLength(current, "utf-8");
+	if (remaining <= 0) return { output: current, truncated: true };
+	if (chunk.byteLength <= remaining) return { output: current + chunk.toString("utf-8"), truncated: false };
+	return { output: current + chunk.subarray(0, remaining).toString("utf-8"), truncated: true };
 }

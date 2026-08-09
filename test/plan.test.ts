@@ -815,6 +815,12 @@ describe("plan", () => {
 			expect(state.planQuestion?.questions).toHaveLength(5);
 		});
 
+		it("tells the agent to add a question when the payload is empty", () => {
+			const result = execQuestion({ questions: [] }, testState("question-empty"));
+			expect(result.isError).toBe(true);
+			expect(result.content).toContain("at least one question");
+		});
+
 		it("rejects six questions in a single batch", () => {
 			const state = testState("question-6");
 			const twoChoices = (suffix: string) => ({

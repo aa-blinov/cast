@@ -107,8 +107,23 @@ function isBinaryFile(filePath: string, sample: Buffer): boolean {
 const SAMPLE_BYTES = 4096;
 
 export async function execRead(args: Record<string, unknown>, cwd: string, config: AppConfig): Promise<ToolResult> {
-	const filePath = String(args.path ?? "");
-	if (!filePath) return { content: "path is required", isError: true };
+	const filePath = typeof args.path === "string" ? args.path : "";
+	if (!filePath.trim()) return { content: 'Error: "path" is required and must be a non-empty string.', isError: true };
+	if (
+		args.offset !== undefined &&
+		(typeof args.offset !== "number" || !Number.isInteger(args.offset) || args.offset < 1)
+	) {
+		return { content: 'Error: "offset" must be a positive integer. Retry with offset: 1 or greater.', isError: true };
+	}
+	if (
+		args.limit !== undefined &&
+		(typeof args.limit !== "number" || !Number.isInteger(args.limit) || args.limit < 0)
+	) {
+		return {
+			content: 'Error: "limit" must be a non-negative integer. Retry with limit: 0 or greater.',
+			isError: true,
+		};
+	}
 	const offset = typeof args.offset === "number" ? args.offset : undefined;
 	const limit = typeof args.limit === "number" ? args.limit : undefined;
 	const absolutePath = resolvePath(filePath, cwd);
@@ -237,9 +252,15 @@ export async function execRead(args: Record<string, unknown>, cwd: string, confi
 }
 
 export async function execWrite(args: Record<string, unknown>, cwd: string): Promise<ToolResult> {
-	const filePath = String(args.path ?? "");
-	if (!filePath) return { content: "path is required", isError: true };
-	const content = String(args.content ?? "");
+	const filePath = typeof args.path === "string" ? args.path : "";
+	if (!filePath.trim()) return { content: 'Error: "path" is required and must be a non-empty string.', isError: true };
+	if (typeof args.content !== "string") {
+		return {
+			content: 'Error: "content" is required and must be a string. Retry write with the complete file content.',
+			isError: true,
+		};
+	}
+	const content = args.content;
 	const absolutePath = resolvePath(filePath, cwd);
 
 	let oldContent: string | null = null;
@@ -358,8 +379,9 @@ function duplicateRunWarning(lines: string[]): string | null {
  * every call, matched, and rewritten.
  */
 export async function execEdit(args: Record<string, unknown>, cwd: string, config: AppConfig): Promise<ToolResult> {
-	const filePath = String(args.filePath ?? "");
-	if (!filePath) return { content: "filePath is required", isError: true };
+	const filePath = typeof args.filePath === "string" ? args.filePath : "";
+	if (!filePath.trim())
+		return { content: 'Error: "filePath" is required and must be a non-empty string.', isError: true };
 	const oldString = typeof args.oldString === "string" ? args.oldString : undefined;
 	const newString = typeof args.newString === "string" ? args.newString : undefined;
 	if (oldString === undefined || newString === undefined) {

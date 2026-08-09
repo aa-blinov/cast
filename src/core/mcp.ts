@@ -374,12 +374,18 @@ export async function connectMcpServers(
 								if (extraImages > 0) fragments.push(`[${extraImages} additional image(s) omitted]`);
 
 								return {
-									content: fragments.join("\n") || "(no output)",
+									content: result.isError
+										? `MCP server "${serverName}", tool "${t.name}" reported an error:\n${fragments.join("\n") || "(no details provided)"}`
+										: fragments.join("\n") || "(no output)",
 									isError: Boolean(result.isError),
 									imageDataUrl: image ? `data:${image.mimeType};base64,${image.data}` : undefined,
 								};
 							} catch (error) {
-								return { content: error instanceof Error ? error.message : String(error), isError: true };
+								const message = error instanceof Error ? error.message : String(error);
+								return {
+									content: `MCP server "${serverName}", tool "${t.name}" failed: ${message}. Check the server connection and tool arguments, then retry.`,
+									isError: true,
+								};
 							}
 						},
 					});

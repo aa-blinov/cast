@@ -227,9 +227,44 @@ async function walkFiles(cwd: string, searchPath: string, maxFiles: number = MAX
 }
 
 export async function execGlob(args: Record<string, unknown>, cwd: string, _config: AppConfig): Promise<ToolResult> {
-	const pattern = String(args.pattern ?? "");
-	const searchPath = args.path ? resolvePath(String(args.path), cwd) : cwd;
+	const pattern = typeof args.pattern === "string" ? args.pattern : "";
+	if (!pattern.trim())
+		return { content: 'Error: "pattern" is required. Retry with a glob such as "**/*.ts".', isError: true };
+	if (args.path !== undefined && (typeof args.path !== "string" || !args.path.trim())) {
+		return {
+			content: 'Error: "path" must be a non-empty directory path when provided. Retry with a valid directory.',
+			isError: true,
+		};
+	}
+	if (
+		args.limit !== undefined &&
+		(typeof args.limit !== "number" || !Number.isInteger(args.limit) || args.limit < 1)
+	) {
+		return { content: 'Error: "limit" must be a positive integer. Retry with limit: 1 or greater.', isError: true };
+	}
+	const searchPath = typeof args.path === "string" ? resolvePath(args.path, cwd) : cwd;
 	const limit = typeof args.limit === "number" ? args.limit : 1000;
+	let searchStats: Awaited<ReturnType<typeof stat>>;
+	try {
+		searchStats = await stat(searchPath);
+	} catch (error) {
+		const code = (error as { code?: string })?.code;
+		if (code === "ENOENT")
+			return {
+				content: `Error: search directory not found: ${searchPath}. Check the path and retry.`,
+				isError: true,
+			};
+		return {
+			content: `Error: cannot access search directory ${searchPath}. Check permissions and retry.`,
+			isError: true,
+		};
+	}
+	if (!searchStats.isDirectory()) {
+		return {
+			content: `Error: glob path must be a directory, but ${searchPath} is not. Retry with a directory path.`,
+			isError: true,
+		};
+	}
 
 	const gitignorePath = join(searchPath, ".gitignore");
 	const hasGitignore = await access(gitignorePath, constants.R_OK)
@@ -348,8 +383,42 @@ export function withAccessNote(output: string, rgStderr: string, permissionSkips
 }
 
 export async function execGrep(args: Record<string, unknown>, cwd: string, config: AppConfig): Promise<ToolResult> {
-	const pattern = String(args.pattern ?? "");
-	const searchPath = args.path ? resolvePath(String(args.path), cwd) : cwd;
+	const pattern = typeof args.pattern === "string" ? args.pattern : "";
+	if (!pattern)
+		return {
+			content: 'Error: "pattern" is required. Retry with the text or regular expression to search for.',
+			isError: true,
+		};
+	if (args.path !== undefined && (typeof args.path !== "string" || !args.path.trim())) {
+		return {
+			content: 'Error: "path" must be a non-empty file or directory path when provided. Retry with a valid path.',
+			isError: true,
+		};
+	}
+	if (
+		args.limit !== undefined &&
+		(typeof args.limit !== "number" || !Number.isInteger(args.limit) || args.limit < 1)
+	) {
+		return { content: 'Error: "limit" must be a positive integer. Retry with limit: 1 or greater.', isError: true };
+	}
+	if (
+		args.context !== undefined &&
+		(typeof args.context !== "number" || !Number.isInteger(args.context) || args.context < 0)
+	) {
+		return {
+			content: 'Error: "context" must be a non-negative integer. Retry with context: 0 or greater.',
+			isError: true,
+		};
+	}
+	const searchPath = typeof args.path === "string" ? resolvePath(args.path, cwd) : cwd;
+	try {
+		await stat(searchPath);
+	} catch (error) {
+		const code = (error as { code?: string })?.code;
+		if (code === "ENOENT")
+			return { content: `Error: search path not found: ${searchPath}. Check the path and retry.`, isError: true };
+		return { content: `Error: cannot access search path ${searchPath}. Check permissions and retry.`, isError: true };
+	}
 	const glob = args.glob ? String(args.glob) : undefined;
 	const ignoreCase = args.ignoreCase === true;
 	const literal = args.literal === true;
@@ -521,7 +590,19 @@ export async function execGrep(args: Record<string, unknown>, cwd: string, confi
 }
 
 export async function execLs(args: Record<string, unknown>, cwd: string, _config: AppConfig): Promise<ToolResult> {
-	const dirPath = args.path ? resolvePath(String(args.path), cwd) : cwd;
+	if (args.path !== undefined && (typeof args.path !== "string" || !args.path.trim())) {
+		return {
+			content: 'Error: "path" must be a non-empty directory path when provided. Retry with a valid directory.',
+			isError: true,
+		};
+	}
+	if (
+		args.limit !== undefined &&
+		(typeof args.limit !== "number" || !Number.isInteger(args.limit) || args.limit < 1)
+	) {
+		return { content: 'Error: "limit" must be a positive integer. Retry with limit: 1 or greater.', isError: true };
+	}
+	const dirPath = typeof args.path === "string" ? resolvePath(args.path, cwd) : cwd;
 	const limit = typeof args.limit === "number" ? args.limit : 500;
 
 	let entries: Dirent[];

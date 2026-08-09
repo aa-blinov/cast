@@ -445,7 +445,6 @@ export function getToolDefinitions(
 							description: "One-line summary of what the plan covers",
 						},
 					},
-					required: ["summary"],
 				},
 			},
 		},
@@ -701,7 +700,10 @@ export function createToolExecutor(
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			return { content: message, isError: true };
+			return {
+				content: `Error: ${name} failed unexpectedly: ${message}. Check the tool arguments, path, and permissions, then retry.`,
+				isError: true,
+			};
 		}
 	};
 }

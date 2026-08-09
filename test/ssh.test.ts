@@ -219,6 +219,18 @@ describe("SSH tool definitions", () => {
 // ============================================================================
 
 describe("SSH tool executor", () => {
+	it("rejects missing host or command before starting SSH", async () => {
+		const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, undefined, undefined, [
+			{ name: "h", host: "127.0.0.1" },
+		]);
+		const missingHost = await exec("ssh", { command: "echo ok" });
+		const missingCommand = await exec("ssh", { host: "h" });
+		expect(missingHost.isError).toBe(true);
+		expect(missingCommand.isError).toBe(true);
+		expect(missingHost.content).toContain('"host" is required');
+		expect(missingCommand.content).toContain('"command" is required');
+	});
+
 	it("returns error for unknown host", async () => {
 		const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, undefined, undefined, [
 			{ name: "known", host: "1.2.3.4" },

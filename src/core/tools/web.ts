@@ -689,8 +689,17 @@ function missingApiKeyResult(provider: "Tavily" | "Brave"): ToolResult {
 }
 
 export async function execWebSearch(args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> {
-	const query = String(args.query ?? "").trim();
+	const query = typeof args.query === "string" ? args.query.trim() : "";
 	if (!query) return { content: "Error: 'query' is required.", isError: true };
+	if (
+		args.maxResults !== undefined &&
+		(typeof args.maxResults !== "number" || !Number.isInteger(args.maxResults) || args.maxResults < 1)
+	) {
+		return {
+			content: "Error: 'maxResults' must be a positive integer. Retry with maxResults: 1 or greater.",
+			isError: true,
+		};
+	}
 
 	const maxResults = typeof args.maxResults === "number" ? args.maxResults : MAX_SEARCH_RESULTS;
 	const region = typeof args.region === "string" ? args.region : undefined;
@@ -716,13 +725,14 @@ export async function execWebSearch(args: Record<string, unknown>, signal?: Abor
 		const { results } = await searchDuckDuckGo(query, { maxResults, region, time, signal });
 		return formatSearchResult(query, results);
 	} catch (error) {
+		if (signal?.aborted) return { content: "[ABORTED] Web search was interrupted by the user.", isError: true };
 		const msg = error instanceof Error ? error.message : String(error);
 		return { content: `Search error: ${msg}`, isError: true };
 	}
 }
 
 export async function execWebFetch(args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> {
-	const url = String(args.url ?? "").trim();
+	const url = typeof args.url === "string" ? args.url.trim() : "";
 	if (!url) return { content: "Error: 'url' is required.", isError: true };
 
 	let parsed: URL;
@@ -742,6 +752,15 @@ export async function execWebFetch(args: Record<string, unknown>, signal?: Abort
 		};
 	}
 
+	if (
+		args.maxChars !== undefined &&
+		(typeof args.maxChars !== "number" || !Number.isInteger(args.maxChars) || args.maxChars < 1)
+	) {
+		return {
+			content: "Error: 'maxChars' must be a positive integer. Retry with maxChars: 1 or greater.",
+			isError: true,
+		};
+	}
 	const maxChars = typeof args.maxChars === "number" ? args.maxChars : MAX_CONTENT_CHARS;
 	// "format" only has an effect on the "local" backend below — Jina Reader
 	// is always asked for markdown (X-Return-Format), matching this tool's
@@ -766,6 +785,7 @@ export async function execWebFetch(args: Record<string, unknown>, signal?: Abort
 
 		return { content: parts.join("\n\n") };
 	} catch (error) {
+		if (signal?.aborted) return { content: "[ABORTED] Web fetch was interrupted by the user.", isError: true };
 		const msg = error instanceof Error ? error.message : String(error);
 		return { content: `Fetch error: ${msg}`, isError: true };
 	}
