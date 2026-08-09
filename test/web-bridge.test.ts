@@ -566,6 +566,24 @@ describe("web bridge", () => {
 		expect(ws.session.messages.at(-1)?.content).toContain("Question: Which color do you like best? Answer: orange");
 	});
 
+	it("broadcasts decision state when another client resolves a pending question", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		ws.session.planQuestion = {
+			questions: [{ question: "Choose cache", options: [{ value: "memory", label: "In-memory" }] }],
+		};
+		const firstClientEvents: Array<{ type: string; question?: unknown; planTransition?: unknown }> = [];
+		const secondClientEvents: Array<{ type: string; question?: unknown; planTransition?: unknown }> = [];
+		bridge.subscribe(ws.id, (event) => firstClientEvents.push(event));
+		bridge.subscribe(ws.id, (event) => secondClientEvents.push(event));
+
+		runAgentLoop.mockImplementationOnce(async (messages) => messages);
+		expect(bridge.answerQuestion(ws.id, ["memory"])).toEqual({ ok: true });
+		const expected = { type: "decision_state", question: undefined, planTransition: undefined };
+		expect(firstClientEvents).toContainEqual(expected);
+		expect(secondClientEvents).toContainEqual(expected);
+	});
+
 	it("resets only the model context for clean plan implementation, retaining the visible thread", () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();

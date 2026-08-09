@@ -13,7 +13,7 @@ import type { ParsedArgs } from "../core/startup.ts";
 import { runStartup } from "../core/startup.ts";
 import type { Pickers, PickOption } from "../pickers/types.ts";
 import { createServerBridge } from "./bridge.ts";
-import { clearServerState, writeServerState } from "./daemon-state.ts";
+import { clearServerState, DAEMON_PROTOCOL_VERSION, writeServerState } from "./daemon-state.ts";
 import { startServer } from "./server.ts";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
@@ -165,6 +165,7 @@ export async function runServerMain(args: string[], options: { foreground: boole
 			// from `port` when 0 was passed for OS assignment). The TUI reads this
 			// for both the port and the loopback token.
 			writeServerState({
+				protocolVersion: DAEMON_PROTOCOL_VERSION,
 				pid: process.pid,
 				port: boundPort,
 				host,

@@ -17,6 +17,9 @@ import { closeSync, existsSync, openSync, readFileSync, unlinkSync, writeFileSyn
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+/** Increment only when a daemon/client wire contract becomes incompatible. */
+export const DAEMON_PROTOCOL_VERSION = 1;
+
 // Resolved at call time (not module load) so tests can point HOME at a
 // per-test tmp dir before the first read; a top-level const would freeze
 // on whatever homedir() returned when the module was first imported.
@@ -30,6 +33,8 @@ function legacyStateFile(): string {
 }
 
 export interface ServerDaemonState {
+	/** Absent in state files written before protocol compatibility checks existed. */
+	protocolVersion?: number;
 	pid: number;
 	port: number;
 	host: string;
@@ -44,6 +49,24 @@ export interface ServerDaemonState {
 	 * non-loopback host (then the TUI must auth like any other client).
 	 */
 	token?: string;
+}
+
+/** A missing value is intentionally incompatible: an older daemon cannot prove it speaks this protocol. */
+export function isDaemonProtocolCompatible(state: ServerDaemonState): boolean {
+	return state.protocolVersion === DAEMON_PROTOCOL_VERSION;
+}
+
+/** Actionable error shared by every thin-client launcher. */
+export function daemonProtocolMismatchMessage(state: ServerDaemonState): string {
+	const actual = state.protocolVersion === undefined ? "legacy" : String(state.protocolVersion);
+	return `Daemon protocol mismatch: client requires ${DAEMON_PROTOCOL_VERSION}, daemon (pid ${state.pid}) uses ${actual}. Run 'cast server stop' and start Cast again.`;
+}
+
+export class DaemonProtocolMismatchError extends Error {
+	constructor(state: ServerDaemonState) {
+		super(daemonProtocolMismatchMessage(state));
+		this.name = "DaemonProtocolMismatchError";
+	}
 }
 
 /** True if a process with this PID exists — not necessarily one this harness started (PID reuse is possible but rare). */

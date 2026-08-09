@@ -408,6 +408,7 @@ export function App(props: AppProps): JSX.Element {
 		if (agent.status === "running" || modalRequest || decisionFlowActiveRef.current) return;
 		const kind =
 			planSignalRef.current ??
+			agent.pendingPlanTransition?.kind ??
 			readPlanTransition(planState)?.kind ??
 			(readPlanQuestion(planState) ? "question" : null);
 		if (!kind) return;
@@ -485,7 +486,6 @@ export function App(props: AppProps): JSX.Element {
 					// which only the local loop populates.
 					const question = daemonUrl ? agent.pendingQuestion : readPlanQuestion(planState);
 					if (!question) {
-						showNotice("[Question is no longer pending]");
 						return;
 					}
 					const result = await resolvePlanQuestionWithPicker(question, pickers);
@@ -522,6 +522,7 @@ export function App(props: AppProps): JSX.Element {
 	}, [
 		agent.status,
 		agent.pendingQuestion,
+		agent.pendingPlanTransition?.kind,
 		agent.answerQuestion,
 		agent.approvePlan,
 		agent.cleanDaemonContext,
@@ -534,6 +535,23 @@ export function App(props: AppProps): JSX.Element {
 		session,
 		daemonUrl,
 	]);
+
+	// Another TUI can answer the daemon-owned decision while this client has
+	// its picker open. Resolve that picker quietly so it cannot submit a stale
+	// choice after the daemon has already advanced the session.
+	useEffect(() => {
+		if (
+			!daemonUrl ||
+			!decisionFlowActiveRef.current ||
+			!modalRequest ||
+			agent.pendingQuestion ||
+			agent.pendingPlanTransition
+		) {
+			return;
+		}
+		if (modalRequest.kind === "status") return;
+		modalRequest.resolve(null);
+	}, [agent.pendingPlanTransition, agent.pendingQuestion, daemonUrl, modalRequest]);
 
 	useEffect(() => {
 		if (initialPrompt) {

@@ -50,6 +50,59 @@ describe("ChatLog tool rows", () => {
 		expect(output).not.toContain("MUTATED_RESULT_MUST_NOT_RENDER");
 		expect(output).not.toContain("MCP_ERROR_PAYLOAD_MUST_NOT_RENDER");
 	});
+
+	it("keeps the loader visible while hidden reasoning is the only live output", () => {
+		const output = renderToString(
+			createElement(ChatLog, {
+				messages: [],
+				streaming: { blocks: [{ kind: "thinking", text: "private reasoning" }] },
+				error: null,
+				retry: null,
+				columns: 120,
+				showReasoning: false,
+			}),
+			{ columns: 120 },
+		);
+
+		expect(output).toContain("⠋");
+		expect(output).not.toContain("private reasoning");
+	});
+
+	it("keeps the loader after visible text until a tool starts or the turn ends", () => {
+		const output = renderToString(
+			createElement(ChatLog, {
+				messages: [],
+				streaming: { blocks: [{ kind: "content", text: "I will check that now." }] },
+				error: null,
+				retry: null,
+				columns: 120,
+				showReasoning: false,
+			}),
+			{ columns: 120 },
+		);
+
+		expect(output).toContain("I will check that now.");
+		expect(output).toContain("⠋");
+	});
+
+	it("uses a running tool row instead of an extra loader", () => {
+		const output = renderToString(
+			createElement(ChatLog, {
+				messages: [],
+				streaming: {
+					blocks: [{ kind: "tool", call: { id: "bash-1", name: "bash", args: "{}", status: "running" } }],
+				},
+				error: null,
+				retry: null,
+				columns: 120,
+				showReasoning: false,
+			}),
+			{ columns: 120 },
+		);
+
+		expect(output).toContain("[bash] [running]");
+		expect(output).not.toContain("⠋");
+	});
 });
 
 describe("parseToolSummary — edit +added/-removed", () => {

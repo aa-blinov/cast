@@ -12,6 +12,8 @@ import { runUpgrade } from "./core/upgrade.ts";
 import {
 	acquireStartLock,
 	clearServerState,
+	DaemonProtocolMismatchError,
+	isDaemonProtocolCompatible,
 	isProcessAlive,
 	readLiveServerState,
 	readServerState,
@@ -176,6 +178,11 @@ async function main(): Promise<void> {
 async function ensureDaemon(): Promise<string | undefined> {
 	if (process.env.CAST_NO_DAEMON === "1") return undefined;
 	try {
+		const tokenFor = (state: ReturnType<typeof readLiveServerState>): string | undefined => {
+			if (!state) return undefined;
+			if (!isDaemonProtocolCompatible(state)) throw new DaemonProtocolMismatchError(state);
+			return state.token;
+		};
 		// Concurrent `cast` launches (two terminals opened back-to-back) both
 		// see an empty state file before the first daemon records itself, so a
 		// bare "empty → spawn" race stacks two daemons. Serialize the spawn
@@ -185,7 +192,7 @@ async function ensureDaemon(): Promise<string | undefined> {
 		const waitForDaemon = async (attempt: number): Promise<string | undefined> => {
 			if (attempt >= 100) return undefined;
 			const existing = readLiveServerState();
-			if (existing) return existing.token;
+			if (existing) return tokenFor(existing);
 			if (!acquireStartLock()) {
 				await new Promise((r) => setTimeout(r, 100));
 				return waitForDaemon(attempt + 1);
@@ -194,15 +201,16 @@ async function ensureDaemon(): Promise<string | undefined> {
 				// Re-check under the lock: the winner may have recorded state
 				// while we waited for the lock.
 				const now = readLiveServerState();
-				if (now) return now.token;
+				if (now) return tokenFor(now);
 				await handleServerCommand(["start", "--port", "0"]);
-				return readLiveServerState()?.token;
+				return tokenFor(readLiveServerState());
 			} finally {
 				releaseStartLock();
 			}
 		};
 		return await waitForDaemon(0);
-	} catch {
+	} catch (error) {
+		if (error instanceof DaemonProtocolMismatchError) throw error;
 		return undefined;
 	}
 }
@@ -636,6 +644,10 @@ function getHost(args: string[]): string {
 }
 
 main().catch((err) => {
+	if (err instanceof DaemonProtocolMismatchError) {
+		console.error(err.message);
+		process.exit(1);
+	}
 	console.error(err);
 	process.exit(1);
 });

@@ -162,6 +162,7 @@ export type WebEvent =
 			};
 	  }
 	| { type: "session_update"; session: SessionSummary }
+	| { type: "decision_state"; question: PlanQuestion | undefined; planTransition: { kind: "done" } | undefined }
 	| { type: "session_end"; usage: SessionState["usage"]; messageCount: number }
 	| { type: "session_closed" }
 	| { type: "turn_meta"; model: string; provider: string; totalMs: number }
@@ -861,6 +862,17 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		}
 	}
 
+	function persistDecisionState(
+		ws: WebAgentSession,
+		question: PlanQuestion | undefined,
+		planTransition: { kind: "done" } | undefined,
+	): void {
+		ws.session.planQuestion = question;
+		ws.session.planTransition = planTransition;
+		saveSession(ws.session);
+		broadcast(ws, { type: "decision_state", question, planTransition });
+	}
+
 	/** Pushes a sidebar-friendly snapshot so every connected client (including
 	 *  tabs that didn't initiate the turn) can update their session list
 	 *  without a full refetch. */
@@ -1117,9 +1129,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			question: ws.session.planQuestion,
 			transition: ws.session.planTransition,
 			onChange: (question, transition) => {
-				ws.session.planQuestion = question;
-				ws.session.planTransition = transition;
-				saveSession(ws.session);
+				persistDecisionState(ws, question, transition);
 			},
 		});
 		planState.enabled = planMode;
@@ -1403,9 +1413,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			question: ws.session.planQuestion,
 			transition: ws.session.planTransition,
 			onChange: (question, nextTransition) => {
-				ws.session.planQuestion = question;
-				ws.session.planTransition = nextTransition;
-				saveSession(ws.session);
+				persistDecisionState(ws, question, nextTransition);
 			},
 		});
 		const transition = ws.session.planTransition;
@@ -1426,9 +1434,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			question: ws.session.planQuestion,
 			transition: ws.session.planTransition,
 			onChange: (nextQuestion, transition) => {
-				ws.session.planQuestion = nextQuestion;
-				ws.session.planTransition = transition;
-				saveSession(ws.session);
+				persistDecisionState(ws, nextQuestion, transition);
 			},
 		});
 		const question = ws.session.planQuestion;
