@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -720,6 +721,82 @@ describe("web bridge", () => {
 		expect(runAgentLoop).not.toHaveBeenCalled();
 		expect(ws.runner.steeringQueue.hasItems()).toBe(true);
 		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalledTimes(1));
+	});
+
+	it("runs MessageDisplay hooks for a completed daemon response", async () => {
+		mkdirSync(join(cwd, ".cast"));
+		writeFileSync(
+			join(cwd, ".cast", "hooks.json"),
+			JSON.stringify({ MessageDisplay: [{ hooks: [{ command: "printf displayed > .cast/message-display" }] }] }),
+		);
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		runAgentLoop.mockImplementationOnce(
+			async (messages: unknown[], loopConfig: { onEvent: (event: unknown) => void }) => {
+				loopConfig.onEvent({ type: "assistant_message", content: "completed response", thinking: "" });
+				return [...messages, { role: "assistant", content: "completed response" }];
+			},
+		);
+
+		bridge.submit(ws.id, "hello");
+		await vi.waitFor(() => expect(readFileSync(join(cwd, ".cast", "message-display"), "utf8")).toBe("displayed"));
+	});
+
+	it("runs FileChanged hooks from the daemon watcher while idle", async () => {
+		const marker = join(tmpdir(), `cast-file-hook-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		try {
+			mkdirSync(join(cwd, ".cast"));
+			writeFileSync(
+				join(cwd, ".cast", "hooks.json"),
+				JSON.stringify({
+					FileChanged: [
+						{ matcher: "watched.txt", hooks: [{ command: `printf changed > ${JSON.stringify(marker)}` }] },
+					],
+				}),
+			);
+			const bridge = createServerBridge(makeResult());
+			const ws = bridge.createSession();
+			bridge.subscribe(ws.id, () => {});
+			await new Promise((resolve) => setTimeout(resolve, 100));
+			writeFileSync(join(cwd, "watched.txt"), "changed");
+
+			await vi.waitFor(() => expect(readFileSync(marker, "utf8")).toBe("changed"), { timeout: 3_000 });
+		} finally {
+			rmSync(marker, { force: true });
+		}
+	});
+
+	it("blocks /worktree before it creates a git worktree", async () => {
+		execFileSync("git", ["init", "-b", "main"], { cwd, stdio: "ignore" });
+		execFileSync("git", ["config", "user.email", "test@example.com"], { cwd });
+		execFileSync("git", ["config", "user.name", "Cast Test"], { cwd });
+		writeFileSync(join(cwd, "README.md"), "test\n");
+		execFileSync("git", ["add", "README.md"], { cwd });
+		execFileSync("git", ["commit", "-m", "initial"], { cwd, stdio: "ignore" });
+		mkdirSync(join(cwd, ".cast"));
+		writeFileSync(
+			join(cwd, ".cast", "hooks.json"),
+			JSON.stringify({ WorktreeCreate: [{ hooks: [{ command: "exit 2" }] }] }),
+		);
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+
+		await expect(bridge.executeCommand(ws.id, "/worktree blocked")).resolves.toMatchObject({ ok: false });
+		expect(existsSync(join(cwd, ".cast", "worktrees", "blocked"))).toBe(false);
+	});
+
+	it("blocks manual compaction before starting a model request", async () => {
+		mkdirSync(join(cwd, ".cast"));
+		writeFileSync(
+			join(cwd, ".cast", "hooks.json"),
+			JSON.stringify({ PreCompact: [{ hooks: [{ command: "exit 2" }] }] }),
+		);
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		ws.session.messages.push({ role: "user", content: "keep this context" });
+
+		await expect(bridge.executeCommand(ws.id, "/compact")).resolves.toMatchObject({ ok: false });
+		expect(runAgentLoop).not.toHaveBeenCalled();
 	});
 
 	it("submit with images builds a [text, image_url...] content array, always including the text part", () => {
