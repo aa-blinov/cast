@@ -83,7 +83,7 @@ describe("parseDaemonPendingState", () => {
 				status: "idle",
 			});
 			expect(fetchMock).toHaveBeenCalledWith(
-				"http://daemon.test/api/sessions/session-1",
+				"http://daemon.test/api/v1/sessions/session-1",
 				expect.objectContaining({ headers: expect.objectContaining({ Authorization: "Bearer test-token" }) }),
 			);
 		} finally {

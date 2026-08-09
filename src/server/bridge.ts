@@ -364,6 +364,7 @@ export function toDisplayMessages(
 	// persisted, so it has no seq — happens during a live-streaming turn).
 	sessionId?: string,
 	seqs?: number[],
+	imageApiPrefix = "/api",
 ): DisplayMessage[] {
 	// Pre-index tool results by call_id — turns O(N*M) lookups into O(M).
 	const toolResults = new Map<string, Message>();
@@ -388,7 +389,7 @@ export function toDisplayMessages(
 		imagesByToolCallId.set(
 			toolCallId,
 			sessionId && seq !== undefined
-				? dataUrls.map((_, idx) => `/api/sessions/${sessionId}/image?seq=${seq}&idx=${idx}`)
+				? dataUrls.map((_, idx) => `${imageApiPrefix}/sessions/${sessionId}/image?seq=${seq}&idx=${idx}`)
 				: dataUrls,
 		);
 	});
@@ -453,7 +454,7 @@ export function toDisplayMessages(
 				const seq = seqs?.[i];
 				const images =
 					sessionId && seq !== undefined
-						? dataUrls.map((_, idx) => `/api/sessions/${sessionId}/image?seq=${seq}&idx=${idx}`)
+						? dataUrls.map((_, idx) => `${imageApiPrefix}/sessions/${sessionId}/image?seq=${seq}&idx=${idx}`)
 						: dataUrls;
 				out.push({ role: m.role, content: textPart, seq: seqs?.[i], images });
 				return;

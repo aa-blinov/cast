@@ -21,7 +21,7 @@
 		"e2e:jsonl": "bash scripts/e2e-server-jsonl.sh",
 		"e2e:hooks": "bash scripts/e2e-server-hooks.sh",
 		"e2e:compaction": "node --import tsx scripts/e2e-compaction.mjs",
-		"build-site": "node scripts/build-site.mjs",
+		"build-site": "node --import tsx scripts/build-site.mjs",
 		"dev:web": "node --disable-warning=DEP0040 --disable-warning=ExperimentalWarning --import tsx ./src/server/index.ts"
 	},
 	"dependencies": {
@@ -44,8 +44,10 @@
 		"yaml": "^2.9.0"
 	},
 	"devDependencies": {
+		"@apidevtools/swagger-parser": "^10.1.1",
 		"@biomejs/biome": "2.3.5",
 		"@types/turndown": "^5.0.6",
+		"ajv": "^8.20.0",
 		"esbuild": "^0.28.1",
 		"marked": "^18.0.6",
 		"typescript": "^5.6.0",

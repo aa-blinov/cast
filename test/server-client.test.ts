@@ -27,12 +27,12 @@ describe("server client", () => {
 	beforeEach(async () => {
 		server = createServer((req, res) => {
 			received.push({ method: req.method ?? "", path: req.url ?? "", auth: req.headers.authorization });
-			if (req.method === "POST" && req.url === "/api/sessions") {
+			if (req.method === "POST" && req.url === "/api/v1/sessions") {
 				res.writeHead(201, { "content-type": "application/json" });
 				res.end(JSON.stringify({ id: "sess-1", session: { id: "sess-1" } }));
 				return;
 			}
-			if (req.method === "GET" && req.url === "/api/sessions") {
+			if (req.method === "GET" && req.url === "/api/v1/sessions") {
 				res.writeHead(200, { "content-type": "application/json" });
 				res.end(
 					JSON.stringify([
@@ -42,17 +42,17 @@ describe("server client", () => {
 				);
 				return;
 			}
-			if (req.method === "GET" && req.url === "/api/sessions/sess-1") {
+			if (req.method === "GET" && req.url === "/api/v1/sessions/sess-1") {
 				res.writeHead(200, { "content-type": "application/json" });
 				res.end(JSON.stringify({ id: "sess-1", cwd: "/tmp", mode: "build", status: "idle", messages: [] }));
 				return;
 			}
-			if (req.method === "POST" && req.url === "/api/sessions/sess-1/chat") {
+			if (req.method === "POST" && req.url === "/api/v1/sessions/sess-1/chat") {
 				res.writeHead(202, { "content-type": "application/json" });
 				res.end(JSON.stringify({ ok: true }));
 				return;
 			}
-			if (req.method === "GET" && req.url?.startsWith("/api/sessions/sess-1/events")) {
+			if (req.method === "GET" && req.url?.startsWith("/api/v1/sessions/sess-1/events")) {
 				res.writeHead(200, { "content-type": "text/event-stream", "Cache-Control": "no-cache" });
 				res.write(": connected\n\n");
 				const writeEvent = (e: WebEvent) => res.write(`data: ${JSON.stringify(e)}\n\n`);
@@ -78,13 +78,13 @@ describe("server client", () => {
 		const client = { baseUrl, token: "tok-123" };
 		const id = await createServerSession(client, { persona: "senior", model: "hy3", cwd: "/tmp" });
 		expect(id).toBe("sess-1");
-		expect(received[0]).toMatchObject({ method: "POST", path: "/api/sessions", auth: "Bearer tok-123" });
+		expect(received[0]).toMatchObject({ method: "POST", path: "/api/v1/sessions", auth: "Bearer tok-123" });
 	});
 
 	it("submitServerChat posts the text", async () => {
 		const client = { baseUrl, token: undefined };
 		await submitServerChat(client, "sess-1", "hello there");
-		expect(received[0]).toMatchObject({ method: "POST", path: "/api/sessions/sess-1/chat" });
+		expect(received[0]).toMatchObject({ method: "POST", path: "/api/v1/sessions/sess-1/chat" });
 	});
 
 	it("rejects steering and control commands when the daemon rejects them", async () => {
@@ -112,7 +112,7 @@ describe("server client", () => {
 		const { id, resumed } = await ensureServerSession(client, { resumeId: "sess-1" });
 		expect(id).toBe("sess-1");
 		expect(resumed).toBe(true);
-		expect(received[0]).toMatchObject({ method: "GET", path: "/api/sessions/sess-1" });
+		expect(received[0]).toMatchObject({ method: "GET", path: "/api/v1/sessions/sess-1" });
 	});
 
 	it("ensureServerSession picks the most recent session in cwd for --continue", async () => {
@@ -120,7 +120,7 @@ describe("server client", () => {
 		const { id, resumed } = await ensureServerSession(client, { cwd: "/tmp", resumeRequested: true });
 		expect(id).toBe("sess-1"); // newer than old-1
 		expect(resumed).toBe(true);
-		expect(received[0]).toMatchObject({ method: "GET", path: "/api/sessions" });
+		expect(received[0]).toMatchObject({ method: "GET", path: "/api/v1/sessions" });
 	});
 
 	it("ensureServerSession creates a fresh session without resume flags", async () => {
@@ -128,7 +128,7 @@ describe("server client", () => {
 		const { id, resumed } = await ensureServerSession(client, { cwd: "/other" });
 		expect(id).toBe("sess-1");
 		expect(resumed).toBe(false);
-		expect(received[0]).toMatchObject({ method: "POST", path: "/api/sessions" });
+		expect(received[0]).toMatchObject({ method: "POST", path: "/api/v1/sessions" });
 	});
 });
 

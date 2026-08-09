@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync, cpSync, existsSync } from "node:fs";
 import { join, basename } from "node:path";
 import { marked } from "marked";
+import { apiV1OpenApiDocument } from "../src/server/api-v1.ts";
 
 // ── Config ──────────────────────────────────────────────────────────────────
 const ROOT = new URL("..", import.meta.url).pathname;
@@ -32,6 +33,7 @@ const NAV_ORDER = [
 	{ file: "eval-methodology.md", label: "Eval Methodology" },
 	{ file: "architecture.md", label: "Architecture" },
 	{ file: "infrastructure.md", label: "Infrastructure" },
+	{ file: "api.md", label: "API v1" },
 	// Not a real markdown file — rendered from docs/eval-scoreboard.json by the
 	// special case in the build loop below. The ".md" suffix is kept purely so
 	// the existing `.replace(".md", ".html")` calls (sidebar, prev/next, landing
@@ -805,7 +807,7 @@ document.addEventListener('DOMContentLoaded', () => {
 			applyTransform();
 		};
 		const onEnd = () => { dragging = false; diagram.classList.remove('dragging'); };
-	
+
 diagram.addEventListener('mousedown', e => { onStart(e); e.preventDefault(); });
 		document.addEventListener('mousemove', onMove);
 		document.addEventListener('mouseup', onEnd);
@@ -887,6 +889,7 @@ function getDescription(file) {
 		"eval-methodology.md": "Scoreboard methodology, repeats, traces, and regressions",
 		"architecture.md": "Source layout and design decisions",
 		"infrastructure.md": "Daemon, TUI/web clients, lifecycle, and auth",
+		"api.md": "Stable daemon integration API and OpenAPI specification",
 		"eval-scoreboard.md": "Per-model certification scores against the behavior eval suite",
 		"changelog.md": "Version history and feature highlights",
 	};
@@ -1002,6 +1005,12 @@ ${signalSections}`;
 
 // ── Build ───────────────────────────────────────────────────────────────────
 mkdirSync(SITE, { recursive: true });
+
+// The Pages copy is generated from the exact object the daemon serves, so the
+// static link is a reviewable snapshot rather than a hand-maintained duplicate.
+mkdirSync(join(SITE, "openapi"), { recursive: true });
+writeFileSync(join(SITE, "openapi", "v1.json"), `${JSON.stringify(apiV1OpenApiDocument, null, 2)}\n`);
+console.log("  openapi/v1.json");
 
 // Copy install scripts for backward compatibility
 cpSync(join(ROOT, "install.sh"), join(SITE, "install"));
