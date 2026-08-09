@@ -17,7 +17,7 @@ All commands are typed at the TUI prompt, prefixed with `/`. Unknown slash comma
 | `/current` | Show all status bar data (even disabled segments) |
 | `/quit`, `/exit` | Save and exit |
 
-`/undo` requires a checkpoint from the previous turn — every turn captures one (shadow copies of files the agent touched, plus a marker on the parent commit for any new files). Files are restored from the shadow copies; new untracked files added during the turn are removed. Refused while the agent is running (use `/abort` first). No-op if there's nothing to undo (very first turn, or `/clear` already rolled the session back).
+`/undo` requires a checkpoint from the previous turn. In a Git workspace, every file is restored to its pre-turn tree without changing the user's Git index; files created during the turn are removed, while files that were untracked before the turn are restored. Outside Git, Cast restores files changed through its `write` and `edit` tools from shadow backups. Arbitrary changes made through `bash` or an MCP tool in a non-Git workspace cannot be reversed. `/undo` is refused while the agent is running (use `/abort` first) and is a no-op if there is nothing to undo.
 
 ## Model and Provider
 

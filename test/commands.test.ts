@@ -278,6 +278,28 @@ describe("handleInput", () => {
 		expect(noticeText(calls)).toContain("older history");
 	});
 
+	it("/statusbar saves the configuration selected in the TUI picker", async () => {
+		const initial = { visible: ["persona"], order: ["persona"], sides: { persona: "left" as const } };
+		const selected = {
+			visible: ["persona", "elapsed"],
+			order: ["persona", "elapsed"],
+			sides: { persona: "left" as const, elapsed: "right" as const },
+		};
+		const { deps, calls } = createFakeDeps({ statusBar: initial });
+		deps.setStatusBar = (...args) => {
+			if (!calls.setStatusBar) calls.setStatusBar = [];
+			calls.setStatusBar.push(args);
+		};
+		const pickStatusBar = vi.fn().mockResolvedValue(selected);
+		deps.pickers = { ...deps.pickers, pickStatusBar };
+
+		await handleInput("/statusbar", undefined, deps);
+
+		expect(pickStatusBar).toHaveBeenCalledOnce();
+		expect(calls.setStatusBar).toEqual([[selected]]);
+		expect(noticeText(calls)).toContain("2 segments");
+	});
+
 	it("/older reports the start of the session when nothing older remains", async () => {
 		const { deps, calls } = createFakeDeps();
 		const loadOlder = deps.agent.loadOlder;

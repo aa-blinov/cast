@@ -17,7 +17,8 @@ cast - Coding agent harness with swappable personas
 Usage:
   cast [options] [prompt]
   cast run [options] <message>  Non-interactive mode (one prompt, stream to stdout, exit)
-  cast server [start|stop|status]  Web UI mode (browser-based control room)
+  cast web [start|stop|status]     Browser-based control room
+  cast server [start|stop|status]  Alias for cast web
   cast upgrade [version] [--force]
                               Re-run the installer to update (release installs
                               only) — no-op if already on that version, unless
@@ -37,7 +38,7 @@ Options:
   --resume                   Pick which saved session to resume (numbered list)
   --resume=<id>              Resume a specific session by id (see /sessions)
   --session, -s <id>         Resume a specific session by id (alias for --resume=<id>)
-  --persona, -p <name>       Persona to use (see /personas for the list)
+  --persona, -p <name>       Persona to use (use /persona to choose)
                              Skips interactive selection.
   -w, --worktree <name>      Run in an isolated git worktree. The worktree is
                              created (or reused) at <repo>/.cast/worktrees/<name>
@@ -97,7 +98,6 @@ Interactive commands:
   /reasoning             Change reasoning level
   /provider [name]       Switch / add / delete providers (validated)
   /persona [name]        Show/change persona
-  /personas              List available personas
   /sessions              List saved sessions, switch to one, or "d<N>" to delete
   /permissions           Show/change bash confirmation mode (default/bypass)
   /web                   Toggle web tools (web_search, web_fetch)
@@ -110,7 +110,6 @@ Interactive commands:
                          adding a skill, persona, or mcp.json entry)
   /skill:name [args]     Force-load and run a skill
   /usage                 Show cumulative token/cost usage for this session
-  /context               Show current context size vs. the model's window
   /steer <message>       Inject message while agent is running
   /queue <message>       Queue message for after agent stops
   /queue-reset (/qr)     Clear the message queue

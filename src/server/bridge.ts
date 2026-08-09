@@ -11,7 +11,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import chokidar from "chokidar";
-import { createCheckpoint, restoreCheckpoint } from "../core/checkpoint.ts";
+import { backupFileForCheckpoint, createCheckpoint, restoreCheckpoint } from "../core/checkpoint.ts";
 import { fetchModels, type ModelInfo, probeProvider, resolveProvider } from "../core/config.ts";
 import { hasHooks, runHooksForEvent } from "../core/hooks.ts";
 import type { Message } from "../core/llm.ts";
@@ -75,6 +75,7 @@ import {
 	saveSession,
 	searchSessionSummaries,
 	type TurnMeta,
+	updateLastCheckpoint,
 } from "../core/session.ts";
 import { loadSettings, updateSettings } from "../core/settings.ts";
 import {
@@ -105,6 +106,18 @@ const SYSTEM_REMINDER_RE = /<system-reminder>([\s\S]*?)<\/system-reminder>/g;
 const GITHUB_URL_RE = /^https?:\/\/(?:www\.)?github\.com\//i;
 const FRONTMATTER_STRIP_RE = /^---\n[\s\S]*?\n---\n?/;
 const WORKTREE_REMOVE_PREFIX_RE = /^(?:remove|rm)\s*(.*)$/;
+const CLIENT_PARITY_COMMANDS = new Set([
+	"/quit",
+	"/exit",
+	"/copy",
+	"/older",
+	"/keys",
+	"/statusbar",
+	"/reasoning-display",
+	"/rd",
+	"/reasoning-format",
+	"/worktree",
+]);
 
 const execFileAsync = promisify(execFile);
 
@@ -1160,6 +1173,10 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			sshHosts,
 			backgroundBash: ws.backgroundBash,
 			mcpPromptSuffix: formatMcpForPrompt(mcpResult, persona.mcp),
+			beforeFileWrite: (path) => {
+				backupFileForCheckpoint(chk, path);
+				updateLastCheckpoint(ws.session.id, chk);
+			},
 			onCompaction: (full, compacted) => recordCompaction(ws.session, full, compacted),
 			onMessagesChanged: (messages) => {
 				ws.session.messages = messages;
@@ -2738,7 +2755,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// including the manual idle gate (skill commands aren't blocking, so they
 		// don't hit the isCommandBlocking gate above, same as /rule:).
 		const skillId = name.slice(1);
-		if (skillId) {
+		if (skillId && !CLIENT_PARITY_COMMANDS.has(name)) {
 			const sessionCwd = ws.session.cwd ?? cwd;
 			const discovered = discoverSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
 			const disabled = new Set(loadSettings().disabledSkills ?? []);
@@ -2785,7 +2802,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		if (name === "/statusbar") {
 			return { ok: true, result: loadSettings().statusBar ?? { visible: [], order: [], sides: {} } };
 		}
-		if (name === "/reasoning-display") {
+		if (name === "/reasoning-display" || name === "/rd") {
 			const next = !(loadSettings().showReasoning ?? false);
 			updateSettings({ showReasoning: next });
 			return { ok: true, result: { showReasoning: next } };
@@ -2799,6 +2816,14 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			}
 			config.reasoningFormat = resolveReasoningFormat(config.baseURL, arg as (typeof options)[number]);
 			config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat);
+			const selected = arg as (typeof options)[number];
+			const settings = loadSettings();
+			const providers = settings.providers?.map((provider) =>
+				provider.url === config.baseURL && provider.apiKey === config.apiKey
+					? { ...provider, reasoningFormat: selected }
+					: provider,
+			);
+			updateSettings({ providers });
 			return { ok: true, result: { reasoningFormat: config.reasoningFormat } };
 		}
 		if (name === "/worktree") {

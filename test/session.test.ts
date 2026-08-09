@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { TurnCheckpoint } from "../src/core/checkpoint.ts";
 import { getDb, resetDbConnectionForTests } from "../src/core/db.ts";
 import type { Message } from "../src/core/llm.ts";
 import {
@@ -36,6 +37,7 @@ import {
 	saveSubagentRun,
 	searchSessionSummaries,
 	shouldCompact,
+	updateLastCheckpoint,
 } from "../src/core/session.ts";
 
 describe("addUsage subagent attribution", () => {
@@ -595,6 +597,17 @@ describe("session persistence", () => {
 		dropLastCheckpoint(session.id);
 		const afterUndo = loadSession(session.id);
 		expect(afterUndo?.checkpoints?.map((c) => c.id)).toEqual(["c1"]);
+	});
+
+	it("persists shadow backups added after a checkpoint is created", () => {
+		const session = createSession("gpt-4o", projectA);
+		saveSession(session);
+		const checkpoint: TurnCheckpoint = { id: "c1", timestamp: new Date().toISOString(), cwd: projectA, backups: [] };
+		appendCheckpoint(session.id, checkpoint);
+		checkpoint.backups.push({ relPath: "created.txt", existedBefore: false });
+		updateLastCheckpoint(session.id, checkpoint);
+
+		expect(loadCheckpoints(session.id)[0]?.backups).toEqual([{ relPath: "created.txt", existedBefore: false }]);
 	});
 
 	it("appends and reads back live session events in order", () => {

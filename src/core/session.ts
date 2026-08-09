@@ -1025,6 +1025,15 @@ export function dropLastCheckpoint(sessionId: string): void {
 		.run(sessionId, sessionId);
 }
 
+/** Persist shadow backups added to the checkpoint while a turn is running. */
+export function updateLastCheckpoint(sessionId: string, checkpoint: TurnCheckpoint): void {
+	getDb()
+		.prepare(
+			"UPDATE session_checkpoints SET json = ? WHERE session_id = ? AND seq = (SELECT MAX(seq) FROM session_checkpoints WHERE session_id = ?)",
+		)
+		.run(JSON.stringify(checkpoint), sessionId, sessionId);
+}
+
 export function loadCheckpoints(sessionId: string): TurnCheckpoint[] {
 	const rows = getDb()
 		.prepare("SELECT json FROM session_checkpoints WHERE session_id = ? ORDER BY seq")

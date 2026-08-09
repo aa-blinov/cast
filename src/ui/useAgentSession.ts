@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 // provides a real global EventSource, so this import is Node-only and safe in
 // both runtimes.
 import { EventSource } from "undici";
-import { createCheckpoint } from "../core/checkpoint.ts";
+import { backupFileForCheckpoint, createCheckpoint } from "../core/checkpoint.ts";
 import type { AppConfig } from "../core/config.ts";
 import { resolveProvider } from "../core/config.ts";
 import { initialAnnouncedLocalDate } from "../core/date-rollover-reminder.ts";
@@ -27,6 +27,7 @@ import {
 	type SessionState,
 	type SessionUsage,
 	saveSession,
+	updateLastCheckpoint,
 } from "../core/session.ts";
 import { loadSettings, type PermissionMode, updateSettings } from "../core/settings.ts";
 import { setLastTurnAborted, setStreamingActive } from "../core/stdin-manager.ts";
@@ -945,6 +946,10 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					sshHosts: params.sshHosts,
 					backgroundBash: backgroundBashDeps.current,
 					mcpPromptSuffix: formatMcpForPrompt(mcpResult, activePersonaObj?.mcp),
+					beforeFileWrite: (path) => {
+						backupFileForCheckpoint(chk, path);
+						updateLastCheckpoint(session.id, chk);
+					},
 					planState,
 					initialTodos: session.todos,
 					announcedLocalDate,

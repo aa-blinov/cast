@@ -49,7 +49,7 @@ async function main(): Promise<void> {
 		return;
 	}
 
-	if (args[0] === "server") {
+	if (args[0] === "web" || args[0] === "server") {
 		await handleServerCommand(args.slice(1));
 		return;
 	}
@@ -57,17 +57,6 @@ async function main(): Promise<void> {
 	if (args[0] === "acp") {
 		await handleAcpCommand(args.slice(1), VERSION);
 		return;
-	}
-
-	// The daemon was renamed from `cast web` to `cast server` in 0.13.11. An
-	// old `cast upgrade` (pre-rename) restarts the daemon via `cast web start
-	// --port 0`; since `web` is no longer a subcommand, those args would fall
-	// through to the TUI as an initial prompt ("web start --port 0"). Catch
-	// the stale name explicitly so the failure is a clear message instead of a
-	// phantom user message in a fresh session.
-	if (args[0] === "web") {
-		console.error("`cast web` was renamed to `cast server` in 0.13.11. Use: cast server [start|stop|status]");
-		process.exit(1);
 	}
 
 	const cwd = process.env.CAST_CWD ? resolve(process.env.CAST_CWD) : resolve(".");
