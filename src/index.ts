@@ -14,7 +14,7 @@ import {
 	clearServerState,
 	DAEMON_STARTUP_TIMEOUT_MS,
 	DaemonProtocolMismatchError,
-	daemonBaseUrl,
+	isCurrentDaemonInstance,
 	isDaemonProtocolCompatible,
 	isProcessAlive,
 	readLiveServerState,
@@ -180,9 +180,13 @@ async function main(): Promise<void> {
 async function ensureDaemon(): Promise<string | undefined> {
 	if (process.env.CAST_NO_DAEMON === "1") return undefined;
 	try {
-		const tokenFor = (state: ReturnType<typeof readLiveServerState>): string | undefined => {
+		const tokenFor = async (state: ReturnType<typeof readLiveServerState>): Promise<string | undefined> => {
 			if (!state) return undefined;
 			if (!isDaemonProtocolCompatible(state)) throw new DaemonProtocolMismatchError(state);
+			if (!(await isCurrentDaemonInstance(state))) {
+				clearServerState();
+				return undefined;
+			}
 			return state.token;
 		};
 		// Concurrent `cast` launches (two terminals opened back-to-back) both
@@ -194,7 +198,10 @@ async function ensureDaemon(): Promise<string | undefined> {
 		const waitForDaemon = async (attempt: number): Promise<string | undefined> => {
 			if (attempt >= 100) return undefined;
 			const existing = readLiveServerState();
-			if (existing) return tokenFor(existing);
+			if (existing) {
+				const token = await tokenFor(existing);
+				if (token) return token;
+			}
 			if (!acquireStartLock()) {
 				await new Promise((r) => setTimeout(r, 100));
 				return waitForDaemon(attempt + 1);
@@ -203,7 +210,10 @@ async function ensureDaemon(): Promise<string | undefined> {
 				// Re-check under the lock: the winner may have recorded state
 				// while we waited for the lock.
 				const now = readLiveServerState();
-				if (now) return tokenFor(now);
+				if (now) {
+					const token = await tokenFor(now);
+					if (token) return token;
+				}
 				await handleServerCommand(["start", "--port", "0"]);
 				return tokenFor(readLiveServerState());
 			} finally {
@@ -597,26 +607,8 @@ async function stopServerDaemon(): Promise<void> {
 		clearServerState();
 		return;
 	}
-	if (!state.instanceId || !state.token) {
-		console.log("[cast server] legacy state has no verifiable daemon identity; refusing to signal its PID");
-		clearServerState();
-		return;
-	}
-	try {
-		const response = await fetch(`${daemonBaseUrl(state)}/api/server/identity`, {
-			headers: { Authorization: `Bearer ${state.token}` },
-			signal: AbortSignal.timeout(1_500),
-		});
-		const identity = (await response.json()) as { instanceId?: string };
-		if (!response.ok || identity.instanceId !== state.instanceId) {
-			console.log(
-				"[cast server] state does not match the process listening at its recorded address; refusing to signal PID",
-			);
-			clearServerState();
-			return;
-		}
-	} catch {
-		console.log("[cast server] could not verify the recorded daemon instance; refusing to signal PID");
+	if (!(await isCurrentDaemonInstance(state))) {
+		console.log("[cast server] state does not identify the daemon at its recorded address; refusing to signal PID");
 		clearServerState();
 		return;
 	}
