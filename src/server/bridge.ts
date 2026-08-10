@@ -1462,6 +1462,13 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	function followUp(sessionId: string, message: string): void {
 		const ws = sessions.get(sessionId);
 		if (!ws) return;
+		if (ws.status !== "running") {
+			// The TUI decides whether to call /followup from its last SSE status.
+			// A queued request can arrive after the daemon has already gone idle;
+			// leaving it on an idle queue would strand it forever.
+			void submit(sessionId, message);
+			return;
+		}
 		ws.runner.followUpQueue.enqueue({ role: "user", content: message });
 	}
 
