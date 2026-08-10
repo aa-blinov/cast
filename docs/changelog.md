@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.20
+
+### Fixed
+
+- **First-run daemon startup no longer fails without provider credentials.** The daemon starts in setup mode and clearly directs users to configure a provider in the Web UI or use the terminal onboarding through `cast`.
+
 ## 0.13.19
 
 ### Fixed

@@ -541,6 +541,17 @@ async function handleServerCommand(args: string[]): Promise<void> {
 		process.exit(1);
 	}
 	console.log(`[cast server] started (pid ${child.pid}) — http://${host}:${port}`);
+	const settingsForMessage = loadSettings();
+	const activeProvider = settingsForMessage.providers?.find(
+		(provider) => provider.name === settingsForMessage.modelProvider,
+	);
+	const hasProvider = Boolean(
+		(activeProvider?.url && activeProvider.apiKey) || (settingsForMessage.providerUrl && settingsForMessage.apiKey),
+	);
+	if (!hasProvider) {
+		console.log("[cast server] no provider configured yet");
+		console.log("[cast server] configure one in the web UI, or run 'cast' again for terminal onboarding");
+	}
 	console.log(`[cast server] logs: ${LOG_FILE}`);
 	console.log(`[cast server] stop: cast server stop`);
 }
