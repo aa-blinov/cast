@@ -123,17 +123,24 @@ describe("restartDaemon", () => {
 	});
 
 	it("restarts a verified daemon on the same host and port", async () => {
-		vi.mocked(readServerState).mockReturnValue({
+		vi.mocked(readServerState).mockReturnValueOnce({
 			pid: 424242,
 			host: "127.0.0.1",
 			port: 1337,
 			startedAt: "t",
 			foreground: false,
 		});
-		vi.mocked(isProcessAlive).mockReturnValueOnce(true).mockReturnValue(false);
+		vi.mocked(readServerState).mockReturnValue({
+			pid: 424243,
+			host: "127.0.0.1",
+			port: 1337,
+			startedAt: "new",
+			foreground: false,
+		});
+		vi.mocked(isProcessAlive).mockReturnValueOnce(true).mockReturnValueOnce(false).mockReturnValue(true);
 		vi.mocked(isCurrentDaemonInstance).mockResolvedValue(true);
 		vi.spyOn(process, "kill").mockImplementation(() => {});
-		await restartDaemon();
+		expect(await restartDaemon()).toBe(true);
 		expect(clearServerState).toHaveBeenCalled();
 		expect(spawnSync).toHaveBeenCalledWith("cast", ["server", "start", "--port", "1337", "--host", "127.0.0.1"], {
 			stdio: "inherit",
@@ -151,7 +158,7 @@ describe("restartDaemon", () => {
 		vi.mocked(isProcessAlive).mockReturnValue(true);
 		vi.mocked(isCurrentDaemonInstance).mockResolvedValue(false);
 		const kill = vi.spyOn(process, "kill").mockImplementation(() => {});
-		await restartDaemon();
+		expect(await restartDaemon()).toBe(false);
 		expect(kill).not.toHaveBeenCalled();
 		expect(spawnSync).not.toHaveBeenCalled();
 	});
@@ -167,7 +174,7 @@ describe("restartDaemon", () => {
 		vi.mocked(isProcessAlive).mockReturnValue(true);
 		vi.mocked(isCurrentDaemonInstance).mockResolvedValue(true);
 		const kill = vi.spyOn(process, "kill").mockImplementation(() => {});
-		await restartDaemon();
+		expect(await restartDaemon()).toBe(true);
 		expect(kill).not.toHaveBeenCalled();
 		expect(spawnSync).not.toHaveBeenCalled();
 	});

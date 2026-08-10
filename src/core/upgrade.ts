@@ -144,7 +144,7 @@ export async function runUpgrade(currentVersion: string, pinnedVersion?: string,
 		return;
 	}
 
-	await restartDaemon();
+	if (!(await restartDaemon())) process.exitCode = 1;
 }
 
 /**
@@ -156,19 +156,19 @@ export async function runUpgrade(currentVersion: string, pinnedVersion?: string,
  * start one that wasn't there.
  */
 /** @internal exported for unit tests */
-export async function restartDaemon(): Promise<void> {
+export async function restartDaemon(): Promise<boolean> {
 	const state = readServerState();
-	if (!state || !isProcessAlive(state.pid)) return;
+	if (!state || !isProcessAlive(state.pid)) return true;
 	if (!(await isCurrentDaemonInstance(state))) {
 		console.log("[cast server] could not verify the running daemon after upgrade; leaving its PID untouched.");
 		clearServerState();
-		return;
+		return false;
 	}
 	if (state.foreground) {
 		console.log(
 			"[cast server] foreground daemon left running after upgrade; restart it manually to preserve its terminal ownership.",
 		);
-		return;
+		return true;
 	}
 	console.log(`\n[cast server] daemon was running (pid ${state.pid}) — restarting it on the new build...`);
 	try {
@@ -180,7 +180,7 @@ export async function restartDaemon(): Promise<void> {
 		console.log(
 			"[cast server] daemon did not stop cleanly; leaving restart to the user to avoid interrupting active work.",
 		);
-		return;
+		return false;
 	}
 	clearServerState();
 	const started = spawnSync("cast", ["server", "start", "--port", String(state.port), "--host", state.host], {
@@ -188,7 +188,20 @@ export async function restartDaemon(): Promise<void> {
 	});
 	if (started.status !== 0) {
 		console.log("[cast server] note: the new daemon failed to start — run 'cast server start' manually.");
+		return false;
 	}
+	const restarted = readServerState();
+	if (
+		!restarted ||
+		restarted.pid === state.pid ||
+		!isProcessAlive(restarted.pid) ||
+		!(await isCurrentDaemonInstance(restarted))
+	) {
+		console.log("[cast server] upgrade completed, but the new daemon could not be verified.");
+		return false;
+	}
+	console.log(`[cast server] running (pid ${restarted.pid}) — http://${restarted.host}:${restarted.port}`);
+	return true;
 }
 
 async function waitForDaemonExit(state: ServerDaemonState): Promise<boolean> {

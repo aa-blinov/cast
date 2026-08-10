@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.24
+
+### Fixed
+
+- **`cast upgrade` now reports the final daemon state.** After restarting a background daemon, the command verifies its new PID and identity, prints the running URL, and exits unsuccessfully if the replacement could not be confirmed.
+
 ## 0.13.23
 
 ### Fixed
