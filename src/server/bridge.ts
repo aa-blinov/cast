@@ -1084,7 +1084,12 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		});
 	}
 
-	async function submit(sessionId: string, text: string, images?: string[]): Promise<void> {
+	async function submit(
+		sessionId: string,
+		text: string,
+		images?: string[],
+		queuedMessages?: Message[],
+	): Promise<void> {
 		const ws = sessions.get(sessionId);
 		if (!ws) return;
 
@@ -1150,11 +1155,15 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			mkdirSync(ws.session.cwd, { recursive: true });
 		}
 
-		const userMsg = { role: "user" as const, content: buildUserContent(text, images) } as Message & {
-			role: "user";
-		};
-		appendMessage(ws.session, userMsg);
-		broadcast(ws, { type: "user_message", message: userMsg });
+		if (queuedMessages) {
+			for (const message of queuedMessages) appendMessage(ws.session, message);
+		} else {
+			const userMsg = { role: "user" as const, content: buildUserContent(text, images) } as Message & {
+				role: "user";
+			};
+			appendMessage(ws.session, userMsg);
+			broadcast(ws, { type: "user_message", message: userMsg });
+		}
 		const persona = personas.find((p) => p.name === ws.session.persona) ?? currentPersona;
 
 		// One `assistant_message` event fires per assistant completion this
@@ -1430,6 +1439,20 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					messageCount: ws.session.messages.filter((m) => m.role === "user" || m.role === "assistant").length,
 				});
 				broadcastSessionUpdate(ws);
+
+				// A follow-up can arrive after runAgentLoop resolves but before this
+				// completion handler marks the session idle. The loop cannot drain that
+				// late item anymore, so hand the whole batch to a fresh turn instead of
+				// leaving it visible as Queued forever.
+				const lateFollowUps = ws.runner.followUpQueue.drain();
+				if (lateFollowUps.length > 0) {
+					const followUpText = lateFollowUps
+						.map((message) => (typeof message.content === "string" ? message.content : ""))
+						.filter(Boolean)
+						.join("\n\n");
+					broadcast(ws, { type: "followup_injected", messages: lateFollowUps });
+					void submit(sessionId, followUpText, undefined, lateFollowUps);
+				}
 			})
 			.catch((err: unknown) => {
 				ws.status = "error";

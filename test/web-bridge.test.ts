@@ -913,6 +913,26 @@ describe("web bridge", () => {
 		expect(ws.runner.followUpQueue.hasItems()).toBe(false);
 	});
 
+	it("restarts a turn when follow-up arrives as the previous loop resolves", async () => {
+		let resolveFirstRun!: (messages: unknown[]) => void;
+		const firstRun = new Promise<unknown[]>((resolve) => {
+			resolveFirstRun = resolve;
+		});
+		runAgentLoop.mockImplementationOnce(async () => firstRun);
+		runAgentLoop.mockImplementation(async (messages: unknown[]) => [...messages, { role: "assistant", content: "next" }]);
+
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		bridge.submit(ws.id, "first");
+		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalledTimes(1));
+
+		bridge.followUp(ws.id, "after the turn");
+		resolveFirstRun([...ws.session.messages, { role: "assistant", content: "first" }]);
+
+		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalledTimes(2));
+		expect(ws.runner.followUpQueue.hasItems()).toBe(false);
+	});
+
 	it("/steer and /queue require a message", async () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();

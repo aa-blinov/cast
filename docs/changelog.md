@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.23
+
+### Fixed
+
+- **Late daemon follow-ups now start reliably.** A `/queue` or Web UI follow-up that arrives while the previous turn is settling is handed to a new turn instead of remaining stuck as `Queued`.
+
 ## 0.13.22
 
 ### Fixed
