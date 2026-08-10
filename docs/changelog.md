@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.22
+
+### Fixed
+
+- **Resource commands now use subcommand-aware daemon gating.** Read-only `/mcp`, `/skills`, and `/ssh` inspection remains available during a turn, while operations that change tools, skills, or SSH configuration wait until the turn is idle.
+
 ## 0.13.21
 
 ### Fixed

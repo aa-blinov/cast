@@ -10,4 +10,35 @@ describe("web slash commands", () => {
 		});
 		expect(isCommandBlocking("/undo")).toBe(true);
 	});
+
+	it("allows read-only resource inspection during a turn", () => {
+		for (const command of [
+			"/mcp",
+			"/mcp list",
+			"/mcp help",
+			"/skills",
+			"/skills list",
+			"/skills help",
+			"/ssh",
+			"/ssh list",
+		]) {
+			expect(isCommandBlocking(command), command).toBe(false);
+		}
+	});
+
+	it("blocks resource mutations during a turn", () => {
+		for (const command of [
+			"/mcp enable server",
+			"/mcp disable server",
+			"/mcp reconnect server",
+			"/mcp uninstall server",
+			"/skills enable skill",
+			"/skills disable skill",
+			"/skills uninstall skill",
+			"/ssh add host example.com",
+			"/ssh remove host",
+		]) {
+			expect(isCommandBlocking(command), command).toBe(true);
+		}
+	});
 });
