@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.26
+
+### Fixed
+
+- **Follow-up handoff now waits for the runner's idle signal.** TUI and daemon clients no longer depend on the timing of status or SSE events to start a queued request.
+
 ## 0.13.25
 
 ### Fixed
