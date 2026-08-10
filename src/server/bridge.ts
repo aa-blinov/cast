@@ -1084,6 +1084,17 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		});
 	}
 
+	function startQueuedFollowUps(sessionId: string, ws: WebAgentSession): void {
+		const queued = ws.runner.followUpQueue.drain();
+		if (queued.length === 0) return;
+		const text = queued
+			.map((message) => (typeof message.content === "string" ? message.content : ""))
+			.filter(Boolean)
+			.join("\n\n");
+		broadcast(ws, { type: "followup_injected", messages: queued });
+		void submit(sessionId, text, undefined, queued);
+	}
+
 	async function submit(
 		sessionId: string,
 		text: string,
@@ -1439,20 +1450,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					messageCount: ws.session.messages.filter((m) => m.role === "user" || m.role === "assistant").length,
 				});
 				broadcastSessionUpdate(ws);
-
-				// A follow-up can arrive after runAgentLoop resolves but before this
-				// completion handler marks the session idle. The loop cannot drain that
-				// late item anymore, so hand the whole batch to a fresh turn instead of
-				// leaving it visible as Queued forever.
-				const lateFollowUps = ws.runner.followUpQueue.drain();
-				if (lateFollowUps.length > 0) {
-					const followUpText = lateFollowUps
-						.map((message) => (typeof message.content === "string" ? message.content : ""))
-						.filter(Boolean)
-						.join("\n\n");
-					broadcast(ws, { type: "followup_injected", messages: lateFollowUps });
-					void submit(sessionId, followUpText, undefined, lateFollowUps);
-				}
+				startQueuedFollowUps(sessionId, ws);
 			})
 			.catch((err: unknown) => {
 				ws.status = "error";
@@ -1493,6 +1491,12 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			return;
 		}
 		ws.runner.followUpQueue.enqueue({ role: "user", content: message });
+		// The request can arrive after the loop's final queue drain but before
+		// its completion handler observes the settled state. Waiting on the
+		// runner makes the handoff independent of SSE/status timing.
+		void ws.runner.waitForIdle().then(() => {
+			if (ws.status !== "running") startQueuedFollowUps(sessionId, ws);
+		});
 	}
 
 	function getQuestion(sessionId: string): PlanQuestion | undefined {

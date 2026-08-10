@@ -1489,8 +1489,21 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			}
 			runner.followUpQueue.enqueue({ role: "user", content: text });
 			setPendingQueue((p) => [...p, text]);
+			// Do not rely only on the loop's final drain: a follow-up can arrive
+			// between that drain and cleanup. The runner's idle promise is the
+			// authoritative handoff point for the local TUI.
+			void runner.waitForIdle().then(() => {
+				if (runner.isRunning || !runner.followUpQueue.hasItems()) return;
+				const queued = runner.followUpQueue.drain();
+				const queuedText = queued
+					.map((message) => messageContentToText(message.content))
+					.filter(Boolean)
+					.join("\n\n");
+				setPendingQueue((pending) => pending.slice(queued.length));
+				void submit(queuedText);
+			});
 		},
-		[runner, isClient, effectiveDaemonUrl, session.id, serverClient],
+		[runner, isClient, effectiveDaemonUrl, session.id, serverClient, submit],
 	);
 
 	const abort = useCallback(() => {
