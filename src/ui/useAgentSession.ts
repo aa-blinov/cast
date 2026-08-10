@@ -916,6 +916,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				process.exit(1);
 			};
 			process.on("uncaughtException", onUncaught);
+			let completed = false;
 
 			setStatus("running");
 			// A turn aborted before its turn_end would otherwise leak queued
@@ -1192,6 +1193,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					},
 				});
 				session.messages = result;
+				completed = true;
 			} catch (err) {
 				// No "end" event follows an unexpected throw from runAgentLoop — commit
 				// the error to the transcript directly so it doesn't stay stuck live.
@@ -1218,6 +1220,19 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				runner.endRun();
 				acRef.current = null;
 				saveSession(session);
+
+				// A follow-up can arrive after the loop's final queue drain but before
+				// this cleanup runs. Re-submit that late batch now that the runner is
+				// idle, otherwise the local TUI would leave it displayed as Queued.
+				const lateFollowUps = completed ? runner.followUpQueue.drain() : [];
+				if (lateFollowUps.length > 0) {
+					const followUpText = lateFollowUps
+						.map((message) => messageContentToText(message.content))
+						.filter(Boolean)
+						.join("\n\n");
+					setPendingQueue((pending) => pending.slice(lateFollowUps.length));
+					void submit(followUpText);
+				}
 			}
 		},
 		[
