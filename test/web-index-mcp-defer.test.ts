@@ -13,6 +13,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const applyMcpResultSpy = vi.fn();
 const closeMcpConnectionsSpy = vi.fn();
 const writeServerStateSpy = vi.fn();
+const runStartupSpy = vi.fn(async () => ({
+	projectDeps: {},
+	cwd: "/tmp/fake-cwd",
+	projectTrusted: true,
+	persona: { label: "Test Persona" },
+	session: { model: "test-model" },
+}));
 
 vi.mock("../src/core/mcp.ts", () => ({
 	closeMcpConnections: closeMcpConnectionsSpy,
@@ -29,13 +36,7 @@ vi.mock("../src/core/settings.ts", () => ({
 }));
 
 vi.mock("../src/core/startup.ts", () => ({
-	runStartup: vi.fn(async () => ({
-		projectDeps: {},
-		cwd: "/tmp/fake-cwd",
-		projectTrusted: true,
-		persona: { label: "Test Persona" },
-		session: { model: "test-model" },
-	})),
+	runStartup: runStartupSpy,
 }));
 
 vi.mock("../src/server/bridge.ts", () => ({
@@ -87,6 +88,10 @@ describe("runServerMain — deferred MCP connect vs. shutdown race", () => {
 		const { runServerMain } = await import("../src/server/index.ts");
 		await runServerMain(["--port", "0"], { foreground: true });
 
+		expect(runStartupSpy).toHaveBeenCalledWith(
+			expect.objectContaining({ allowUnconfigured: true }),
+			expect.anything(),
+		);
 		expect(capturedOnListening).toBeTruthy();
 		capturedOnListening!();
 		expect(writeServerStateSpy).toHaveBeenCalledWith(expect.objectContaining({ protocolVersion: 1 }));

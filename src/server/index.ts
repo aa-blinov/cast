@@ -100,6 +100,7 @@ export async function runServerMain(args: string[], options: { foreground: boole
 		// no reason the HTTP server should sit unreachable for that whole
 		// window. Connect for real in the background, after listen(), instead.
 		deferMcp: true,
+		allowUnconfigured: true,
 	};
 
 	// Auth: ensure password exists in settings

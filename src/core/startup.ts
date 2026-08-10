@@ -90,6 +90,8 @@ export interface ParsedArgs {
 	 * swap the result in once it resolves (see ServerBridge.applyMcpResult).
 	 */
 	deferMcp?: boolean;
+	/** Start the web daemon in setup mode when no provider has been configured. */
+	allowUnconfigured?: boolean;
 }
 
 export interface StartupResult {
@@ -309,7 +311,14 @@ export async function runStartup(
 	}
 	updateSettings({ persona: persona.name });
 
-	const { baseURL, apiKey } = await resolveConnection(pickers, settings);
+	const namedProvider = settings.modelProvider
+		? settings.providers?.find((provider) => provider.name === settings.modelProvider)
+		: undefined;
+	const hasConnection = Boolean(
+		(namedProvider?.url && namedProvider.apiKey) || (settings.providerUrl && settings.apiKey),
+	);
+	const unconfigured = args.allowUnconfigured && !hasConnection;
+	const { baseURL, apiKey } = unconfigured ? { baseURL: "", apiKey: "" } : await resolveConnection(pickers, settings);
 	const config = loadConfig({ baseURL, apiKey });
 	const activeProvider = settings.providers?.find(
 		(provider) => provider.url === baseURL && provider.apiKey === apiKey,
@@ -321,7 +330,9 @@ export async function runStartup(
 	let reasoningMeta: ModelReasoningMeta | undefined;
 	let contextWindow: number | undefined;
 
-	if (args.cliModel) {
+	if (unconfigured) {
+		model = settings.model ?? "unconfigured";
+	} else if (args.cliModel) {
 		onProgress?.("Connecting to model...");
 		const selection = await tryCliModel(config, args.cliModel);
 		if (selection) {
@@ -389,7 +400,7 @@ export async function runStartup(
 	//    models-dev.ts's doc comment on how it resolves reseller conflicts).
 	// Runs regardless of network reachability (fetchModelsDevCatalog never
 	// throws) so a flaky models.dev doesn't block startup.
-	if (!contextWindow || contextWindow <= 0) {
+	if (!unconfigured && (!contextWindow || contextWindow <= 0)) {
 		const known = lookupContextWindow(model);
 		if (known) {
 			config.contextWindow = known;
@@ -401,7 +412,9 @@ export async function runStartup(
 	}
 
 	// Reasoning: CLI > saved (same model) > interactive.
-	if (args.cliReasoning) {
+	if (unconfigured) {
+		config.reasoningLevel = "off";
+	} else if (args.cliReasoning) {
 		config.reasoningLevel = args.cliReasoning;
 		config.reasoningParams = buildReasoningParams(args.cliReasoning, config.reasoningFormat);
 	} else if (settings.reasoningLevel && settings.model === model) {
@@ -411,17 +424,19 @@ export async function runStartup(
 		await selectReasoningLevel(config, model, pickers, reasoningMeta);
 	}
 
-	updateSettings({
-		model,
-		reasoningLevel: config.reasoningLevel,
-		// Persist the *current* connection, not the resolveConnection consts —
-		// ensureConnectionAlive may have replaced a revoked key mid-startup, and
-		// writing the stale consts here would clobber it, forcing a re-prompt on
-		// every launch.
-		providerUrl: config.baseURL,
-		apiKey: config.apiKey,
-		cwd,
-	});
+	if (!unconfigured) {
+		updateSettings({
+			model,
+			reasoningLevel: config.reasoningLevel,
+			// Persist the *current* connection, not the resolveConnection consts —
+			// ensureConnectionAlive may have replaced a revoked key mid-startup, and
+			// writing the stale consts here would clobber it, forcing a re-prompt on
+			// every launch.
+			providerUrl: config.baseURL,
+			apiKey: config.apiKey,
+			cwd,
+		});
+	}
 
 	// Import legacy file-store sessions into the DB (one-time per session, no-op once done).
 	const migrated = migrateLegacySessionsToDb();
