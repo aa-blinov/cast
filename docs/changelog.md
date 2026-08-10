@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.27
+
+### Fixed
+
+- **Daemon TUI now handles injected queue events.** Follow-up and steer messages are added to the transcript and removed from the pending list when the daemon injects them, instead of remaining stuck as `Queued`.
+
 ## 0.13.26
 
 ### Fixed

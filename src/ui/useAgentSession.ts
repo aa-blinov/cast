@@ -1414,6 +1414,25 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				case "assistant_message":
 					promoteStreamingToHistory();
 					break;
+				case "steering_injected":
+				case "followup_injected": {
+					// The daemon owns the queue in thin-client mode. Mirror the local
+					// loop's injection handling so the queued prompt appears in history
+					// and its pending UI entry is removed when the daemon accepts it.
+					promoteStreamingToHistory();
+					const injected = event.messages.map((message) => ({
+						role: "user" as const,
+						content: messageContentToText(message.content),
+					}));
+					setMessages((msgs) => [...msgs, ...injected]);
+					setError(null);
+					if (event.type === "steering_injected") {
+						setPendingSteers((pending) => pending.slice(event.messages.length));
+					} else {
+						setPendingQueue((pending) => pending.slice(event.messages.length));
+					}
+					break;
+				}
 				case "turn_meta":
 					break;
 				case "session_end":
