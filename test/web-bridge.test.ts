@@ -904,6 +904,15 @@ describe("web bridge", () => {
 		expect(ws.runner.followUpQueue.hasItems()).toBe(false);
 	});
 
+	it("follow-up sent after the daemon turns idle starts a new turn", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+
+		bridge.followUp(ws.id, "after the turn");
+		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalledTimes(1));
+		expect(ws.runner.followUpQueue.hasItems()).toBe(false);
+	});
+
 	it("/steer and /queue require a message", async () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();

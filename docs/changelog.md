@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.21
+
+### Fixed
+
+- **Daemon follow-up messages no longer get stranded.** Queue requests that arrive just after a turn finishes now start a new turn, so `/queue` and the Web UI follow-up action remain reliable across the daemon API.
+
 ## 0.13.20
 
 ### Fixed
