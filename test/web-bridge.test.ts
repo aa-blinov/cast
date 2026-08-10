@@ -919,7 +919,10 @@ describe("web bridge", () => {
 			resolveFirstRun = resolve;
 		});
 		runAgentLoop.mockImplementationOnce(async () => firstRun);
-		runAgentLoop.mockImplementation(async (messages: unknown[]) => [...messages, { role: "assistant", content: "next" }]);
+		runAgentLoop.mockImplementation(async (messages: unknown[]) => [
+			...messages,
+			{ role: "assistant", content: "next" },
+		]);
 
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
