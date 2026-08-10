@@ -47,14 +47,11 @@ export const BLOCKING_COMMANDS = new Set([
 	"/build",
 	"/continue",
 	"/fork",
-	"/mcp",
 	"/plan",
 	"/plan-model",
 	"/plugin",
 	"/provider",
 	"/reload",
-	"/skills",
-	"/ssh",
 	"/subagent-model",
 	"/undo",
 ]);
@@ -171,6 +168,13 @@ export function isCommandBlocking(input: string): boolean {
 	// every open (including mid-run), so it can't sit behind the same gate as
 	// an actual switch.
 	if (name === "/provider" && (rest.length === 0 || rest[0] === "list")) return false;
+	// Resource-management commands are safe to inspect while a turn runs, but
+	// their mutating subcommands can change the tools or environment underneath
+	// the active loop. Keep the palette available and gate the actual mutation.
+	if (name === "/mcp" || name === "/skills" || name === "/ssh") {
+		const readOnly = name === "/ssh" ? [undefined, "list"] : [undefined, "list", "help"];
+		return !readOnly.includes(rest[0]);
+	}
 	// /rule:NAME is one token (no space before the rule id) — the bridge
 	// handles it before this gate and checks `running` internally.
 	if (BLOCKING_COMMANDS.has(name!)) return true;
