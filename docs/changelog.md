@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.25
+
+### Fixed
+
+- **Local TUI follow-ups no longer remain stuck as `Queued`.** Messages that arrive while a turn is settling are picked up and run after the current response completes.
+
 ## 0.13.24
 
 ### Fixed
