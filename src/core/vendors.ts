@@ -17,6 +17,7 @@
 // ============================================================================
 
 const LEADING_NL_RE = /^\n+/;
+const QIANFAN_THINKING_MODEL_RE = /deepseek-v4|deepseek-v3\.2|kimi-k2\.5|glm-5/i;
 
 export interface ModelReasoningMeta {
 	mandatory: boolean;
@@ -26,11 +27,13 @@ export interface ModelReasoningMeta {
 }
 
 /** Request dialect for reasoning controls on OpenAI-compatible APIs.
- * `auto` follows the common OpenAI `reasoning_effort` convention and recognizes
- * the few endpoints whose public compatibility contract differs. */
+ * `auto` recognizes endpoints whose public compatibility contract is known;
+ * `openai-compatible` is the explicit OpenCode-style adapter for gateways
+ * that expose model-specific variants through the OpenAI chat schema. */
 export type ReasoningFormat =
 	| "auto"
 	| "generic"
+	| "openai-compatible"
 	| "openai"
 	| "openrouter"
 	| "deepseek"
@@ -46,6 +49,7 @@ export type ReasoningFormat =
 export const REASONING_FORMAT_OPTIONS: Array<{ value: ReasoningFormat; label: string }> = [
 	{ value: "auto", label: "Auto (OpenAI-compatible; detects known endpoints)" },
 	{ value: "generic", label: "Generic OpenAI-compatible (omit controls when off)" },
+	{ value: "openai-compatible", label: "OpenAI-compatible chat (reasoning_effort)" },
 	{ value: "openai", label: "OpenAI (reasoning_effort)" },
 	{ value: "openrouter", label: "OpenRouter (reasoning.effort)" },
 	{ value: "deepseek", label: "DeepSeek / Xiaomi MiMo (thinking.type)" },
@@ -56,7 +60,7 @@ export const REASONING_FORMAT_OPTIONS: Array<{ value: ReasoningFormat; label: st
 	{ value: "xai", label: "xAI / Grok (reasoning_effort)" },
 	{ value: "zai", label: "Z.ai / GLM (thinking.type)" },
 	{ value: "huawei", label: "Huawei ModelArts (chat_template_kwargs.enable_thinking)" },
-	{ value: "minimax", label: "MiniMax (always-on reasoning)" },
+	{ value: "minimax", label: "MiniMax (always-on / adaptive / off)" },
 ];
 
 export function resolveReasoningFormat(
@@ -77,6 +81,9 @@ export function resolveReasoningFormat(
 	if (host.includes("z.ai") || host.includes("bigmodel")) return "zai";
 	if (host.includes("volces") || host.includes("volcengine")) return "deepseek";
 	if (host.includes("huaweicloud")) return "huawei";
+	// OpenCode's Zen Go endpoint uses the OpenAI-compatible AI SDK adapter;
+	// model.dev supplies the per-model variant list separately.
+	if (host.includes("opencode.ai/zen")) return "openai-compatible";
 	return "generic";
 }
 
@@ -105,8 +112,11 @@ export interface ReasoningParams {
 	enabled: boolean;
 }
 
-export function buildReasoningParams(effort: string, format: ReasoningFormat = "auto"): ReasoningParams {
+export function buildReasoningParams(effort: string, format: ReasoningFormat = "auto", model = ""): ReasoningParams {
 	if (effort === "unknown") return { body: {}, enabled: false };
+	if (format !== "minimax" && model.toLowerCase().includes("minimax")) {
+		return buildReasoningParams(effort, "minimax", model);
+	}
 	const enabled = effort !== "off";
 	const normalized = effort === "off" || effort === "on" ? undefined : effort;
 	switch (format) {
@@ -119,18 +129,36 @@ export function buildReasoningParams(effort: string, format: ReasoningFormat = "
 			};
 		case "deepseek":
 			return {
-				body: { thinking: { type: enabled ? "enabled" : "disabled" } },
+				body: {
+					thinking: { type: enabled ? "enabled" : "disabled" },
+					...(enabled && normalized ? { reasoning_effort: normalized } : {}),
+				},
 				enabled,
 			};
 		case "kimi":
 			return {
 				// Kimi requires reasoning_content from tool-call turns to be replayed.
 				// `keep: all` additionally preserves it across ordinary turns.
-				body: { thinking: { type: enabled ? "enabled" : "disabled", ...(enabled ? { keep: "all" } : {}) } },
+				body: {
+					thinking: { type: enabled ? "enabled" : "disabled", ...(enabled ? { keep: "all" } : {}) },
+					...(enabled && normalized ? { reasoning_effort: normalized } : {}),
+				},
 				enabled,
 			};
 		case "qianfan":
-			return { body: { enable_thinking: enabled }, enabled };
+			if (QIANFAN_THINKING_MODEL_RE.test(model)) {
+				return {
+					body: {
+						thinking: { type: enabled ? "enabled" : "disabled" },
+						...(enabled && normalized ? { reasoning_effort: normalized } : {}),
+					},
+					enabled,
+				};
+			}
+			return {
+				body: { enable_thinking: enabled, ...(normalized ? { reasoning_effort: normalized } : {}) },
+				enabled,
+			};
 		case "qwen":
 			return {
 				body: { enable_thinking: enabled, ...(normalized ? { reasoning_effort: normalized } : {}) },
@@ -184,6 +212,7 @@ export function buildReasoningParams(effort: string, format: ReasoningFormat = "
 			return enabled
 				? { body: { reasoning_effort: normalized ?? "medium" }, enabled: true }
 				: { body: {}, enabled: false };
+		case "openai-compatible":
 		case "auto":
 		case "openai":
 			return { body: { reasoning_effort: enabled ? (normalized ?? "medium") : "none" }, enabled };
@@ -234,14 +263,43 @@ export function getReasoningOptions(meta: ModelReasoningMeta | null): Array<{ va
 export function getReasoningOptionsForFormat(
 	meta: ModelReasoningMeta | null,
 	format: ReasoningFormat,
+	model = "",
+	reasoningSupported = false,
 ): Array<{ value: string; label: string }> {
-	if (!meta && format === "minimax") {
-		// M3 supports a 3-state `thinking` parameter (enabled/adaptive/disabled)
-		// per huggingface.co/MiniMaxAI/MiniMax-M3 — not a binary on/off.
+	const modelId = model.toLowerCase();
+	if (format === "minimax" || modelId.includes("minimax")) {
+		// MiniMax's current API exposes a default always-on mode plus explicit
+		// adaptive and disabled modes. `reasoning_split` controls where the
+		// reasoning is returned, not how deeply the model reasons.
 		return [
-			{ value: "enabled", label: "Enabled" },
+			{ value: "enabled", label: "Always on (provider default)" },
 			{ value: "adaptive", label: "Adaptive" },
-			{ value: "disabled", label: "Disabled" },
+			{ value: "disabled", label: "Off" },
+		];
+	}
+	if (!meta && format === "deepseek" && modelId.includes("deepseek-v4")) {
+		return [
+			{ value: "off", label: "Off" },
+			{ value: "high", label: "High (provider default)" },
+			{ value: "max", label: "Max (agent mode)" },
+		];
+	}
+	if (
+		!meta &&
+		(format === "qianfan" || format === "qwen") &&
+		(modelId.includes("deepseek-v4") || modelId.includes("glm-"))
+	) {
+		return [
+			{ value: "off", label: "Off" },
+			{ value: "high", label: "High (provider default)" },
+			{ value: "max", label: "Max (agent mode)" },
+		];
+	}
+	if (!meta && format === "kimi" && modelId.includes("kimi-k3")) {
+		return [
+			{ value: "low", label: "Low" },
+			{ value: "high", label: "High" },
+			{ value: "max", label: "Max (provider default)" },
 		];
 	}
 	if (!meta && ["deepseek", "kimi", "qianfan", "qwen", "together", "zai", "huawei"].includes(format)) {
@@ -256,7 +314,85 @@ export function getReasoningOptionsForFormat(
 			label: `${value.charAt(0).toUpperCase()}${value.slice(1)}${value === "high" ? " (default)" : ""}`,
 		}));
 	}
+	if (!meta && reasoningSupported) {
+		return [
+			{ value: "off", label: "Off (no reasoning)" },
+			{ value: "on", label: "On (supported)" },
+		];
+	}
 	return getReasoningOptions(meta);
+}
+
+/**
+ * Returns the vendor/model default, not cast's preferred effort. Providers
+ * disagree on this: some default to enabled reasoning, some to disabled, and
+ * some use a model-specific effort. The picker uses this only as its initial
+ * cursor; the user still confirms the value explicitly.
+ */
+export function getDefaultReasoningLevel(
+	meta: ModelReasoningMeta | null,
+	format: ReasoningFormat,
+	model: string,
+	reasoningSupported = false,
+): string {
+	const options = getReasoningOptionsForFormat(meta, format, model, reasoningSupported);
+	const modelId = model.toLowerCase();
+	let preferred: string;
+
+	if (meta) {
+		if (!meta.defaultEnabled && options.some((option) => option.value === "off")) preferred = "off";
+		else if (meta.defaultEffort && options.some((option) => option.value === meta.defaultEffort)) {
+			preferred = meta.defaultEffort;
+		} else {
+			preferred = options.some((option) => option.value === "on")
+				? "on"
+				: (options.find((option) => option.value !== "off")?.value ?? options[0]?.value ?? "unknown");
+		}
+	} else if (reasoningSupported) {
+		preferred = options.some((option) => option.value === "on") ? "on" : (options[0]?.value ?? "off");
+	} else {
+		switch (format) {
+			case "minimax":
+				preferred = "enabled";
+				break;
+			case "openai-compatible":
+			case "openai":
+			case "auto":
+				preferred = modelId.includes("gpt-5.1") ? "off" : modelId.includes("gpt-5-pro") ? "high" : "medium";
+				break;
+			case "deepseek":
+				preferred = modelId.includes("deepseek-v4") ? "high" : modelId.includes("v3.1") ? "off" : "on";
+				break;
+			case "kimi":
+				preferred = modelId.includes("kimi-k3") ? "max" : "on";
+				break;
+			case "qianfan":
+				preferred = modelId.includes("ernie-5.0-thinking") ? "on" : "off";
+				break;
+			case "qwen":
+				preferred = modelId.includes("deepseek-v4") || modelId.includes("glm-") ? "high" : "off";
+				break;
+			case "together":
+				preferred = modelId.includes("gpt-oss") ? "medium" : modelId.includes("deepseek-v4") ? "high" : "on";
+				break;
+			case "xai":
+				preferred = "high";
+				break;
+			case "zai":
+				preferred = "on";
+				break;
+			case "huawei":
+				preferred = modelId.includes("deepseek-v3.1") || modelId.includes("deepseek-v3.2") ? "off" : "on";
+				break;
+			case "generic":
+			case "openrouter":
+				preferred = "off";
+				break;
+		}
+		if (modelId.includes("minimax")) preferred = "enabled";
+	}
+
+	return options.some((option) => option.value === preferred) ? preferred : (options[0]?.value ?? "unknown");
 }
 
 // ============================================================================

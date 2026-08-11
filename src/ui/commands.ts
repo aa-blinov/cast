@@ -64,7 +64,12 @@ import {
 	uninstallUserSkill,
 } from "../core/skills.ts";
 import { resolveSshHosts, type SshHost, saveSshConfig, scanSshKeys, validateKeyPermissions } from "../core/ssh.ts";
-import { buildReasoningParams, type ModelReasoningMeta, resolveReasoningFormat } from "../core/vendors.ts";
+import {
+	buildReasoningParams,
+	type ModelReasoningMeta,
+	type ReasoningParams,
+	resolveReasoningFormat,
+} from "../core/vendors.ts";
 import { ensureSessionWorktree, listWorktrees, removeWorktreeBySlug } from "../core/worktree.ts";
 import {
 	formatSkillPickLabel,
@@ -84,6 +89,45 @@ import { TUI_KEYBINDINGS } from "./input/keybindings.ts";
 import { getStatusBarSegments, SEGMENT_MAX_WIDTH, type SegmentContext, type StatusBarSegment } from "./statusbar.tsx";
 import { ALL_THEMES, getActiveTheme, setActiveTheme } from "./themes/index.ts";
 import type { PendingImage, UseAgentSession } from "./useAgentSession.ts";
+
+interface ModelWithReasoningSelection {
+	model: string;
+	reasoningMeta?: ModelReasoningMeta;
+	reasoningSupported?: boolean;
+	contextWindow?: number;
+	reasoningLevel: string;
+	reasoningParams: ReasoningParams;
+}
+
+async function selectModelWithReasoning(
+	config: AppConfig,
+	pickers: Pickers,
+	current?: string,
+	providerOverride?: { baseURL: string; apiKey: string },
+): Promise<ModelWithReasoningSelection | null> {
+	// Reasoning selection is part of model selection. Keep it on a temporary
+	// config so Escape can cancel the whole transition without leaving a new
+	// model, provider, or reasoning payload partially applied.
+	const candidate = { ...config };
+	const selection = await selectModel(candidate, pickers, current, undefined, providerOverride);
+	if (!selection) return null;
+	const selected = await selectReasoningLevel(
+		candidate,
+		selection.model,
+		pickers,
+		selection.reasoningMeta,
+		selection.reasoningSupported,
+	);
+	if (!selected) return null;
+	return {
+		model: selection.model,
+		reasoningMeta: selection.reasoningMeta,
+		reasoningSupported: selection.reasoningSupported,
+		contextWindow: selection.contextWindow,
+		reasoningLevel: candidate.reasoningLevel,
+		reasoningParams: candidate.reasoningParams,
+	};
+}
 
 const WHITESPACE_SPLIT_RE = /\s+/;
 const WORKTREE_REMOVE_PREFIX_RE = /^(?:remove|rm)\s*/;
@@ -1493,19 +1537,21 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		// Pass the current model so the picker opens highlighting it and marks it
 		// "(current)" — that's the "show" half of /model, which otherwise just
 		// dropped you straight into a selection list with no sign of where you were.
-		const selection = await selectModel(config, deps.pickers, session.model);
+		const selection = await selectModelWithReasoning(config, deps.pickers, session.model);
 		// selectModel returns null on cancel (Escape) rather than exiting the
 		// process — it used to call process.exit(0) internally, which meant
 		// cancelling this picker mid-session killed the whole running app
 		// instead of just leaving the current model in place.
 		if (!selection) {
-			showNotice("[Cancelled — model unchanged]");
+			showNotice("[Cancelled — model and reasoning unchanged]");
 			return;
 		}
 		session.model = selection.model;
+		session.providerUrl = config.baseURL;
 		deps.setReasoningMeta(selection.reasoningMeta);
 		if (selection.contextWindow && selection.contextWindow > 0) config.contextWindow = selection.contextWindow;
-		await selectReasoningLevel(config, session.model, deps.pickers, selection.reasoningMeta);
+		config.reasoningLevel = selection.reasoningLevel;
+		config.reasoningParams = selection.reasoningParams;
 		updateSettings({ model: session.model, reasoningLevel: config.reasoningLevel });
 		agent.refreshMeta();
 		showNotice(`[Model: ${session.model} (reasoning: ${config.reasoningLevel})]`);
@@ -1519,11 +1565,25 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			showNotice(`[Model ${newModel} failed validation]`);
 			return;
 		}
-		session.model = newModel;
 		const found = getModelsCache().find((m) => m.id === newModel);
+		const candidate = { ...config };
+		const reasoningSelected = await selectReasoningLevel(
+			candidate,
+			newModel,
+			deps.pickers,
+			found?.reasoning,
+			found?.reasoningSupported,
+		);
+		if (!reasoningSelected) {
+			showNotice("[Cancelled — model and reasoning unchanged]");
+			return;
+		}
+		session.model = newModel;
+		session.providerUrl = config.baseURL;
 		deps.setReasoningMeta(found?.reasoning);
 		if (found?.contextWindow && found.contextWindow > 0) config.contextWindow = found.contextWindow;
-		await selectReasoningLevel(config, newModel, deps.pickers, found?.reasoning);
+		config.reasoningLevel = candidate.reasoningLevel;
+		config.reasoningParams = candidate.reasoningParams;
 		updateSettings({ model: newModel, reasoningLevel: config.reasoningLevel });
 		agent.refreshMeta();
 		showNotice(`[Model: ${newModel} (reasoning: ${config.reasoningLevel})]`);
@@ -1704,8 +1764,9 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 	}
 
 	if (input === "/reasoning") {
-		const meta = deps.reasoningMeta ?? getModelsCache().find((m) => m.id === session.model)?.reasoning;
-		const changed = await selectReasoningLevel(config, session.model, deps.pickers, meta);
+		const cached = getModelsCache().find((m) => m.id === session.model);
+		const meta = deps.reasoningMeta ?? cached?.reasoning;
+		const changed = await selectReasoningLevel(config, session.model, deps.pickers, meta, cached?.reasoningSupported);
 		if (!changed) {
 			showNotice("[Cancelled — reasoning unchanged]");
 			return;
@@ -1728,7 +1789,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 				: provider,
 		);
 		config.reasoningFormat = resolveReasoningFormat(config.baseURL, selected);
-		config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat);
+		config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat, session.model);
 		updateSettings({ providers });
 		showNotice(`[Reasoning protocol: ${selected}]`);
 		return;
@@ -1950,40 +2011,43 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		return;
 	}
 
-	// --- /provider helper: shared post-save flow ---
-	// Both activateProvider (existing saved provider) and addProviderWizard
-	// (newly added) probe + persist credentials before getting here; the rest
-	// (pick a model, sync reasoning meta + level, persist, refresh the agent)
-	// is identical. Both call sites also use the same notice text shape so
-	// the user gets a consistent "select a model / model set" pair.
-	async function applyProviderSelection(p: { name: string; url: string; apiKey: string }): Promise<void> {
-		showNotice(`[Provider: ${p.name}. Select a model.]`);
-		const selection = await selectModel(config, deps.pickers);
-		if (!selection) {
-			showNotice("[Cancelled — provider updated, but model unchanged]");
-			return;
-		}
-		session.model = selection.model;
-		deps.setReasoningMeta(selection.reasoningMeta);
-		if (selection.contextWindow && selection.contextWindow > 0) config.contextWindow = selection.contextWindow;
-		await selectReasoningLevel(config, session.model, deps.pickers, selection.reasoningMeta);
-		updateSettings({ model: session.model, reasoningLevel: config.reasoningLevel });
-		agent.refreshMeta();
-		showNotice(`[Provider: ${p.name}. Model: ${session.model}]`);
-	}
-
-	// --- /provider helper: activate a provider + pick model ---
+	// --- /provider helper: activate a provider + pick model + reasoning ---
 	async function activateProvider(p: Provider): Promise<void> {
 		const probe = await probeProvider({ ...config, baseURL: p.url, apiKey: p.apiKey });
 		if (probe !== "ok" && probe !== "unknown") {
 			showNotice(`[Cannot reach provider "${p.name}": ${probe}]`);
 			return;
 		}
+		showNotice(`[Provider: ${p.name}. Select a model and reasoning mode.]`);
+		const candidate = {
+			...config,
+			baseURL: p.url,
+			apiKey: p.apiKey,
+			reasoningFormat: resolveReasoningFormat(p.url, p.reasoningFormat),
+		};
+		const selection = await selectModelWithReasoning(candidate, deps.pickers);
+		if (!selection) {
+			showNotice("[Cancelled — provider, model, and reasoning unchanged]");
+			return;
+		}
 		config.baseURL = p.url;
 		config.apiKey = p.apiKey;
-		config.reasoningFormat = resolveReasoningFormat(p.url, p.reasoningFormat);
-		updateSettings({ providerUrl: p.url, apiKey: p.apiKey, modelProvider: p.name });
-		await applyProviderSelection(p);
+		config.reasoningFormat = candidate.reasoningFormat;
+		session.providerUrl = p.url;
+		session.model = selection.model;
+		deps.setReasoningMeta(selection.reasoningMeta);
+		if (selection.contextWindow && selection.contextWindow > 0) config.contextWindow = selection.contextWindow;
+		config.reasoningLevel = selection.reasoningLevel;
+		config.reasoningParams = selection.reasoningParams;
+		updateSettings({
+			providerUrl: p.url,
+			apiKey: p.apiKey,
+			modelProvider: p.name,
+			model: session.model,
+			reasoningLevel: config.reasoningLevel,
+		});
+		agent.refreshMeta();
+		showNotice(`[Provider: ${p.name}. Model: ${session.model}. Reasoning: ${config.reasoningLevel}]`);
 	}
 
 	// --- /provider helper: add wizard (mirrors /ssh add shape) ---
@@ -2020,27 +2084,39 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			return;
 		}
 		const newProvider: Provider = { name, url, apiKey: key, reasoningFormat };
-		// Single atomic write: providers array + active URL/key in one go.
+		const candidate = {
+			...config,
+			baseURL: url,
+			apiKey: key,
+			reasoningFormat: resolveReasoningFormat(url, reasoningFormat),
+		};
+		showNotice(`[Provider "${name}" verified. Select a model and reasoning mode.]`);
+		const selection = await selectModelWithReasoning(candidate, deps.pickers);
+		if (!selection) {
+			showNotice(`[Cancelled — provider "${name}" was not saved]`);
+			return;
+		}
+		// Persist the provider and active model together only after the complete
+		// provider/model/reasoning flow has succeeded.
 		updateSettings({
 			providers: [...existing, newProvider],
 			providerUrl: url,
 			apiKey: key,
 			modelProvider: name,
+			model: selection.model,
+			reasoningLevel: selection.reasoningLevel,
 		});
 		config.baseURL = url;
 		config.apiKey = key;
-		config.reasoningFormat = resolveReasoningFormat(url, reasoningFormat);
-		showNotice(`[Provider "${name}" added and selected. Select a model.]`);
-		const selection = await selectModel(config, deps.pickers);
-		if (selection) {
-			session.model = selection.model;
-			deps.setReasoningMeta(selection.reasoningMeta);
-			if (selection.contextWindow && selection.contextWindow > 0) config.contextWindow = selection.contextWindow;
-			await selectReasoningLevel(config, session.model, deps.pickers, selection.reasoningMeta);
-			updateSettings({ model: session.model, reasoningLevel: config.reasoningLevel });
-			agent.refreshMeta();
-		}
-		showNotice(`[Provider "${name}" added. Model: ${session.model}]`);
+		config.reasoningFormat = candidate.reasoningFormat;
+		session.providerUrl = url;
+		session.model = selection.model;
+		deps.setReasoningMeta(selection.reasoningMeta);
+		if (selection.contextWindow && selection.contextWindow > 0) config.contextWindow = selection.contextWindow;
+		config.reasoningLevel = selection.reasoningLevel;
+		config.reasoningParams = selection.reasoningParams;
+		agent.refreshMeta();
+		showNotice(`[Provider "${name}" added. Model: ${session.model}. Reasoning: ${config.reasoningLevel}]`);
 	}
 
 	// --- /provider helper: delete picker ---
@@ -2102,6 +2178,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			});
 			config.baseURL = fallback.url;
 			config.apiKey = fallback.apiKey;
+			session.providerUrl = fallback.url;
 			showNotice(`[Provider "${picked}" removed. Switched to "${fallback.name}".]`);
 		} else if (isActive && updated.length === 0) {
 			// Clear the legacy providerUrl/apiKey so migrateProviders doesn't
@@ -2111,6 +2188,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			updateSettings({ providers: updated, providerUrl: "", apiKey: "", modelProvider: undefined });
 			config.baseURL = "";
 			config.apiKey = "";
+			session.providerUrl = undefined;
 			showNotice(`[Provider "${picked}" removed. No providers left — use /provider add to add one.]`);
 		} else {
 			updateSettings({ providers: updated });

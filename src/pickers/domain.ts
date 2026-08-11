@@ -12,6 +12,7 @@ import {
 import { getProjectTrust, type PermissionMode, type Settings, setProjectTrust } from "../core/settings.ts";
 import {
 	buildReasoningParams,
+	getDefaultReasoningLevel,
 	getReasoningOptionsForFormat,
 	type ModelReasoningMeta,
 	REASONING_FORMAT_OPTIONS,
@@ -317,15 +318,22 @@ export async function selectModel(
 
 	// A real model pick carries its metadata; the sentinel row routes to
 	// free-text entry instead.
-	type ModelChoice = { model: string; reasoningMeta?: ModelReasoningMeta; contextWindow?: number } | { custom: true };
+	type ModelChoice =
+		| { model: string; reasoningMeta?: ModelReasoningMeta; reasoningSupported?: boolean; contextWindow?: number }
+		| { custom: true };
 	const options: PickOption<ModelChoice>[] = [];
 
 	if (result.ok && result.models && result.models.length > 0) {
 		setModelsCache(result.models);
 		for (const m of result.models) {
 			options.push({
-				value: { model: m.id, reasoningMeta: m.reasoning, contextWindow: m.contextWindow },
-				label: `${m.id}${m.reasoning ? " [reasoning]" : ""}${m.id === current ? " (current)" : ""}`,
+				value: {
+					model: m.id,
+					reasoningMeta: m.reasoning,
+					reasoningSupported: m.reasoningSupported,
+					contextWindow: m.contextWindow,
+				},
+				label: `${m.id}${m.reasoning || m.reasoningSupported ? " [reasoning]" : ""}${m.id === current ? " (current)" : ""}`,
 			});
 		}
 	}
@@ -364,7 +372,12 @@ export async function selectModel(
 
 	const { ok, reason } = await validateModelForSelection(effectiveConfig, pickers, picked.model);
 	if (ok) {
-		return { model: picked.model, reasoningMeta: picked.reasoningMeta, contextWindow: picked.contextWindow };
+		return {
+			model: picked.model,
+			reasoningMeta: picked.reasoningMeta,
+			reasoningSupported: picked.reasoningSupported,
+			contextWindow: picked.contextWindow,
+		};
 	}
 	return selectModel(config, pickers, current, reason, providerOverride);
 }
@@ -416,8 +429,14 @@ export async function selectReasoningLevel(
 	_model: string,
 	pickers: Pickers,
 	reasoningMeta?: ModelReasoningMeta,
+	reasoningSupported = false,
 ): Promise<boolean> {
-	const options = getReasoningOptionsForFormat(reasoningMeta ?? null, config.reasoningFormat);
+	const options = getReasoningOptionsForFormat(
+		reasoningMeta ?? null,
+		config.reasoningFormat,
+		_model,
+		reasoningSupported,
+	);
 	if (options.length === 0) {
 		config.reasoningLevel = "unknown";
 		config.reasoningParams = { body: {}, enabled: false };
@@ -426,7 +445,17 @@ export async function selectReasoningLevel(
 
 	const picked = await pickers.pickOption(
 		options.map((o) => ({ value: o.value, label: o.label })),
-		{ title: "Reasoning levels", defaultIndex: 0 },
+		{
+			title: "Reasoning levels",
+			defaultIndex: Math.max(
+				0,
+				options.findIndex(
+					(option) =>
+						option.value ===
+						getDefaultReasoningLevel(reasoningMeta ?? null, config.reasoningFormat, _model, reasoningSupported),
+				),
+			),
+		},
 	);
 	// Cancelling (Escape) leaves config untouched rather than exiting — this
 	// runs mid-session too (TUI's /model, /reasoning, /provider), where
@@ -434,7 +463,7 @@ export async function selectReasoningLevel(
 	// config already holds whatever reasoning level was in effect before.
 	if (!picked) return false;
 	config.reasoningLevel = picked;
-	config.reasoningParams = buildReasoningParams(picked, config.reasoningFormat);
+	config.reasoningParams = buildReasoningParams(picked, config.reasoningFormat, _model);
 	return true;
 }
 

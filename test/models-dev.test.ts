@@ -13,7 +13,9 @@ afterEach(() => {
 	globalThis.fetch = realFetch;
 });
 
-const { fetchModelsDevCatalog, lookupContextWindowFromCatalog } = await import("../src/core/models-dev.ts");
+const { fetchModelsDevCatalog, lookupContextWindowFromCatalog, lookupModelMetadataFromCatalog } = await import(
+	"../src/core/models-dev.ts"
+);
 
 const CATALOG_FIXTURE = {
 	fireworks: { models: { "minimax-m3": { limit: { context: 512_000 } } } },
@@ -46,6 +48,27 @@ describe("lookupContextWindowFromCatalog", () => {
 	it("ignores entries with no limit.context", () => {
 		const catalog = { p: { models: { m: {} } } };
 		expect(lookupContextWindowFromCatalog("m", catalog)).toBeUndefined();
+	});
+
+	it("returns reasoning capability and interleaved response field", () => {
+		const catalog = {
+			deepseek: {
+				models: {
+					"deepseek-v4-flash": {
+						reasoning: true,
+						reasoning_options: [{ type: "toggle" }, { type: "effort", values: ["low", "high", "max"] }],
+						interleaved: { field: "reasoning_content" },
+						limit: { context: 1_000_000 },
+					},
+				},
+			},
+		};
+		expect(lookupModelMetadataFromCatalog("deepseek-v4-flash", catalog)).toEqual({
+			reasoning: true,
+			reasoningOptions: [{ type: "toggle" }, { type: "effort", values: ["low", "high", "max"] }],
+			interleavedField: "reasoning_content",
+			contextWindow: 1_000_000,
+		});
 	});
 });
 

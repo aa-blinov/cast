@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyProviderError, loadConfig, lookupContextWindow } from "../src/core/config.ts";
+import { classifyProviderError, enrichModelsWithCatalog, loadConfig, lookupContextWindow } from "../src/core/config.ts";
 
 // ============================================================================
 // loadConfig
@@ -87,5 +87,51 @@ describe("lookupContextWindow", () => {
 	it("returns undefined for an unknown model — callers fall back to the generic default", () => {
 		expect(lookupContextWindow("gpt-4o")).toBeUndefined();
 		expect(lookupContextWindow("MiniMax-M2")).toBeUndefined();
+	});
+});
+
+describe("enrichModelsWithCatalog", () => {
+	it("uses models.dev as a fallback without replacing live provider metadata", () => {
+		const models = enrichModelsWithCatalog(
+			[
+				{ id: "deepseek-v4-flash" },
+				{
+					id: "gpt-5",
+					reasoning: {
+						mandatory: false,
+						defaultEnabled: false,
+						supportedEfforts: ["low", "high"],
+						defaultEffort: "low",
+					},
+					contextWindow: 200_000,
+				},
+			],
+			{
+				deepseek: {
+					models: {
+						"deepseek-v4-flash": {
+							reasoning: true,
+							interleaved: { field: "reasoning_content" },
+							limit: { context: 1_000_000 },
+						},
+					},
+				},
+				openai: { models: { "gpt-5": { reasoning: true, limit: { context: 400_000 } } } },
+			},
+		);
+
+		expect(models[0]).toMatchObject({
+			reasoning: {
+				supportedEfforts: [],
+			},
+			reasoningSupported: true,
+			reasoningField: "reasoning_content",
+			contextWindow: 1_000_000,
+		});
+		expect(models[1]).toMatchObject({
+			reasoning: { defaultEffort: "low" },
+			reasoningSupported: true,
+			contextWindow: 200_000,
+		});
 	});
 });

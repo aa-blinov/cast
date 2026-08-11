@@ -64,9 +64,13 @@ export function SlotModelPicker({
 		if (version === modelRequestVersion.current) setLoading(false);
 	}, []);
 	const doSet = useCallback(async () => {
+		if (isMainSlot && providerValue && modelValue && models.some((model) => model.id === modelValue)) {
+			await act(`/model-selection ${providerValue} ${modelValue}`);
+			return;
+		}
 		if (providerValue) await act(`${providerCommand} ${providerValue}`);
 		if (modelValue && models.some((model) => model.id === modelValue)) await act(`${modelCommand} ${modelValue}`);
-	}, [providerValue, modelValue, models, act, providerCommand, modelCommand]);
+	}, [providerValue, modelValue, models, act, providerCommand, modelCommand, isMainSlot]);
 	const doReset = useCallback(async () => {
 		await act(`${modelCommand} reset`);
 		setProviderValue("");
