@@ -75,6 +75,19 @@ describe("builtin skills", () => {
 		expect(skills).toHaveLength(expected.length);
 	});
 
+	it("cast skill keeps persona creation in its lazy reference", () => {
+		const castSkill = readFileSync(join(builtinSkillsDir, "cast", "SKILL.md"), "utf-8");
+		const personasReference = readFileSync(join(builtinSkillsDir, "cast", "references", "personas.md"), "utf-8");
+		expect(castSkill).toContain("create a persona through chat");
+		expect(castSkill).not.toContain("## Create a persona from chat");
+		expect(castSkill).toContain("Personas — locations, frontmatter, isolation knobs, example");
+		expect(personasReference).toContain("## Create a persona from chat");
+		expect(personasReference).toContain("Default to a global persona");
+		expect(personasReference).toContain("Never write a user-created persona under `prompts/personas/`");
+		expect(personasReference).toContain("never guess or substitute it");
+		expect(personasReference).toContain("run `/reload`");
+	});
+
 	it("does not advertise tools or script paths unavailable in Cast", () => {
 		const text = listMarkdownFiles(builtinSkillsDir)
 			.map((path) => readFileSync(path, "utf-8"))

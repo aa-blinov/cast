@@ -1,7 +1,7 @@
 ---
 name: qa
-label: QA Engineer
-description: Functional testing — verifies features work as specified, builds test plans, catches regressions.
+label: Reviewer
+description: Functional review — checks behavior against requirements, finds regressions, and produces actionable findings.
 subagents: false
 ---
 

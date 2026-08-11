@@ -12,10 +12,17 @@ const HARNESS_DISCIPLINE_FILE = join(import.meta.dirname, "..", "prompts", "harn
 const VERIFICATION_DISCIPLINE_FILE = join(import.meta.dirname, "..", "prompts", "verification-discipline.md");
 
 describe("listPersonas", () => {
-	it("finds the shipped senior and fiction-writer personas", () => {
+	it("ships the curated personas plus the benchmark coder", () => {
 		const names = listPersonas().map((p) => p.name);
-		expect(names).toContain("senior");
-		expect(names).toContain("fiction-writer");
+		expect(names.sort()).toEqual([
+			"analyst",
+			"assistant",
+			"coder-with-subagents",
+			"pm",
+			"qa",
+			"researcher",
+			"senior",
+		]);
 	});
 
 	it("sorts the default persona first", () => {
@@ -27,6 +34,9 @@ describe("listPersonas", () => {
 		const senior = listPersonas().find((p) => p.name === "senior")!;
 		expect(senior.label).toBe("Senior Developer");
 		expect(senior.description.length).toBeGreaterThan(0);
+		expect(findPersona("analyst")?.label).toBe("Product & Project Analyst");
+		expect(findPersona("pm")?.label).toBe("Planner");
+		expect(findPersona("qa")?.label).toBe("Reviewer");
 	});
 
 	it("strips frontmatter from the system prompt body", () => {
@@ -41,9 +51,9 @@ describe("listPersonas", () => {
 
 	it("gives each persona a distinct system prompt", () => {
 		const senior = findPersona("senior")!;
-		const writer = findPersona("fiction-writer")!;
-		expect(senior.systemPrompt).not.toBe(writer.systemPrompt);
-		expect(writer.systemPrompt.toLowerCase()).toContain("fiction");
+		const analyst = findPersona("analyst")!;
+		expect(senior.systemPrompt).not.toBe(analyst.systemPrompt);
+		expect(analyst.systemPrompt.toLowerCase()).toContain("product");
 	});
 
 	it("appends an identical Error Handling block to every persona, sourced from prompts/error-handling.md", () => {
@@ -101,7 +111,7 @@ describe("findPersona", () => {
 	});
 
 	it("finds a known persona by exact name", () => {
-		expect(findPersona("fiction-writer")?.name).toBe("fiction-writer");
+		expect(findPersona("researcher")?.name).toBe("researcher");
 	});
 });
 
