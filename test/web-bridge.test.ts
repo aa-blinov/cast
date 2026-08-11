@@ -521,6 +521,37 @@ describe("web bridge", () => {
 		expect(ws.runner.steeringQueue.hasItems()).toBe(true);
 	});
 
+	it("applies a same-name persona override on the next turn", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		runAgentLoop.mockImplementation(async (messages: unknown) => messages);
+
+		bridge.submit(ws.id, "first turn");
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		mkdirSync(join(fakeHome, ".cast", "personas"), { recursive: true });
+		writeFileSync(
+			join(fakeHome, ".cast", "personas", "coding.md"),
+			`---\nname: coding\nlabel: Customized Coding\ntools: [read]\nskills: [research]\nmcp: []\n---\n\nYou are the customized coding persona.\n`,
+			"utf-8",
+		);
+
+		bridge.submit(ws.id, "second turn");
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		const secondRun = runAgentLoop.mock.calls[1]?.[1] as {
+			systemPrompt: string;
+			personas: Persona[];
+			currentPersona: string;
+		};
+		expect(secondRun.currentPersona).toBe("coding");
+		expect(secondRun.systemPrompt).toContain("You are the customized coding persona.");
+		expect(secondRun.personas.find((persona) => persona.name === "coding")).toMatchObject({
+			source: "project",
+			tools: ["read"],
+			skills: ["research"],
+			mcp: [],
+		});
+	});
+
 	it("publishes a backend-owned request start time with running status", () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();

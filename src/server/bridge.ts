@@ -1126,6 +1126,11 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		if (endpointChanged) await reconcileSessionModel(ws);
 
 		const sessionCwd = ws.session.cwd ?? cwd;
+		// Persona files can be created or edited by the agent itself. Re-scan this
+		// session's persona sources before every new turn so an override written in
+		// the previous turn is effective without reconnecting MCP or restarting the
+		// daemon. The active turn keeps the old tool set; only this next turn changes.
+		const turnPersonas = resolvePersonasForCwd(sessionCwd, projectTrusted).personas;
 		// Claim the turn before awaiting hooks. Otherwise two requests can both
 		// observe "idle" while the first UserPromptSubmit hook is pending and
 		// start concurrent loops against the same mutable session history.
@@ -1175,7 +1180,8 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			appendMessage(ws.session, userMsg);
 			broadcast(ws, { type: "user_message", message: userMsg });
 		}
-		const persona = personas.find((p) => p.name === ws.session.persona) ?? currentPersona;
+		const persona = turnPersonas.find((p) => p.name === ws.session.persona) ?? currentPersona;
+		ws.systemPrompt = computeSystemPrompt(persona, ws.session.model, sessionCwd, ws.session.mode);
 
 		// One `assistant_message` event fires per assistant completion this
 		// turn, in the same order those completions get pushed onto `messages`
@@ -1264,7 +1270,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			sessionId: ws.session.id,
 			permissionMode,
 			skills,
-			personas,
+			personas: turnPersonas,
 			currentPersona: persona.name,
 			subagentPrompts: subPrompts,
 			subagentModel,

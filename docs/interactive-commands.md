@@ -72,7 +72,7 @@ You never need to quit cast or start a new session for these changes. The curren
 | `/skills` / `/mcp` / `/plugin` toggle, `enable` / `disable` | Automatic (hot-reload) |
 | `/plugin install` / `uninstall`, `/skills uninstall`, `/mcp uninstall` | Automatic |
 | `/plugin marketplace remove` (drops installed packs) | Automatic (skills reload) |
-| New/edited files on disk: skills, `mcp.json`, rules, personas, context files (including `npx skills add`) | `/reload` in the same session |
+| New/edited files on disk: skills, `mcp.json`, rules, personas, context files (including `npx skills add`) | `/reload` refreshes the current resource catalog; persona overrides created in chat are picked up automatically on the next user message |
 
 `/reload` only re-scans cwd resources — it does **not** reset the conversation.
 

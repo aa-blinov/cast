@@ -1,12 +1,12 @@
 # cast
 
-A role-based terminal agent harness. 18 built-in personas — senior dev, QA, DBA, security reviewer, PM, tech writer, and more — shared core tools, different judgment. Runs on any OpenAI-compatible model, including the one on your own hardware.
+A role-based terminal agent harness. Seven built-in personas — senior developer, analyst, reviewer, planner, researcher, assistant, and a coding agent with sub-agents — shared core tools, different judgment. Runs on any OpenAI-compatible model, including the one on your own hardware.
 
 <p align="center"><img src="assets/cast-banner.svg" alt="cast" width="440"></p>
 
 ## Why cast?
 
-**A cast, not a coder.** 18 built-in personas change the agent's role while keeping the normal tool surface familiar. Senior dev for root-cause fixes, QA for edge cases, DBA for schema design, PM for specs, appsec for threat modeling — same core tools, different judgment. `coder-with-subagents` additionally enables delegation; custom personas can narrow capabilities. Add your own with a single markdown file.
+**A cast, not a coder.** Seven built-in personas change the agent's role while keeping the normal tool surface familiar. Senior developer for root-cause fixes, reviewer for functional checks, analyst for product and project decisions, planner for execution plans, and researcher for source-backed investigations — same core tools, different judgment. `coder-with-subagents` additionally enables delegation; custom personas can narrow capabilities. Add your own with a markdown file or build one through chat.
 
 **Real tools, real work.** It reads files, writes code, runs shell commands, searches your codebase — and does it all in parallel. Delegates sub-tasks to isolated sub-agents. Rules, skills, and MCP servers extend capabilities without touching the codebase.
 
@@ -17,7 +17,7 @@ A role-based terminal agent harness. 18 built-in personas — senior dev, QA, DB
 
 ## Why personas, not just prompts
 
-Point a generic coding agent and a role-specific one at the same file, and they look for different things. An `appsec` persona flags injection risks; a `dba` persona flags missing indexes and normalization. A `qa` persona treats an untested edge case as unfinished work, while a `pm` persona treats an unwritten spec as unfinished work.
+Point a generic coding agent and a role-specific one at the same file, and they look for different things. An `analyst` persona surfaces gaps and acceptance criteria; a `qa` persona treats an untested edge case as unfinished work. A `pm` persona turns settled decisions into milestones and tasks, while a `researcher` checks claims against sources.
 
 Personas are role prompts first: they steer what the agent investigates, prioritizes, and treats as done. Each persona is defined by markdown frontmatter (`~/.cast/personas/*.md` or `.cast/personas/*.md`) that can also constrain available built-in tools (`tools`), skills (`skills`), MCP servers (`mcp`), and sub-agent delegation (`subagents`, `subagentTypes`). Those capability limits are enforced at runtime, not merely described in the prompt.
 
@@ -90,22 +90,13 @@ Swap the agent's role — and optionally which built-in tools that role may use:
 |---------|-------------|
 | `senior` (default) | Lazy senior dev — root-cause fixes, deletion over addition |
 | `coder-with-subagents` | Delegates work to sub-agents via the `task` tool for parallel exploration |
-| `analyst` | Stakeholder interviews, requirements synthesis, gap analysis |
-| `architect` | System design — trade-off analysis, ADR drafts, dependency choice |
-| `pm` | Product strategy, specs, prioritization |
-| `product` | Product ops — release notes, feature flags, rollout strategy |
-| `qa` | Functional testing — features, edge cases, regressions |
-| `qa-nfr` | Non-functional — performance, security, reliability |
-| `dba` | Database — schema design, migrations, query optimization |
-| `devops` | CI/CD, IaC, containers, Kubernetes, deployments |
-| `sre` | Site reliability — on-call, SLOs, incident response, capacity |
-| `sysadmin` | Operations — diagnoses systems, manages services |
-| `appsec` | Application security — threat modeling, secure code review |
-| `tech-writer` | Documentation — READMEs, guides, API references, changelogs |
-| `marketer` | Positioning, copy, go-to-market |
-| `fiction-writer` | Creative fiction, prose, literary craft |
+| `analyst` | Product, analytical, and project work — hypotheses, decisions, requirements, priorities, and plans |
+| `pm` | Turns settled decisions into clear project plans, milestones, dependencies, and actionable tasks |
+| `qa` | Functional review — requirements, regressions, scenarios, and actionable findings |
+| `researcher` | Source-backed investigations with searches, cross-checks, and citations |
+| `assistant` | Everyday help, planning, writing, and quick lookups; uses tools when needed |
 
-Add your own in `~/.cast/personas/` (global) or `.cast/personas/` (project).
+Add your own in `~/.cast/personas/` (global) or `.cast/personas/` (project), or ask the agent in chat to create/customize one. The constructor can configure behavior, built-in tools, skills, MCP servers, sub-agents, and `agentsMd`. It shows the proposed change before writing. If you customize the active persona, the current turn stays unchanged and the override applies automatically on the next message; `/reload` is not required.
 
 ### Plan mode
 

@@ -549,7 +549,7 @@ const LANDING_HTML = `<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
 <title>cast — One agent, many roles</title>
-<meta name="description" content="A role-based terminal agent harness. 18 built-in personas, same tools, different judgment. Runs on any OpenAI-compatible model — including the one on your own hardware.">
+<meta name="description" content="A role-based terminal agent harness. Seven built-in personas, same tools, different judgment. Runs on any OpenAI-compatible model — including the one on your own hardware.">
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
 <style>${CSS}</style>
 </head>
@@ -567,7 +567,7 @@ const LANDING_HTML = `<!DOCTYPE html>
 	<section class="hero">
 		<div class="hero-ascii-wrap"><img class="hero-ascii" src="assets/cast-banner.svg" alt="cast" width="440"></div>
 		<h1>One agent, <span class="accent">many roles</span></h1>
-		<p>cast brings a full cast to your terminal: senior dev, QA, DBA, security reviewer, PM, tech writer. Swap the role, not the tool. Runs on any OpenAI-compatible model, including the one on your own hardware.</p>
+		<p>cast brings a full cast to your terminal: senior developer, analyst, reviewer, planner, researcher, assistant, and coder with sub-agents. Swap the role, not the tool. Runs on any OpenAI-compatible model, including the one on your own hardware.</p>
 		<div class="hero-buttons">
 			<a href="getting-started.html" class="btn-primary">Get Started</a>
 			<a href="https://github.com/aa-blinov/cast" class="btn-secondary">GitHub</a>
@@ -601,14 +601,14 @@ const LANDING_HTML = `<!DOCTYPE html>
 
 	<section class="motivation">
 		<h2>Why personas, not just prompts</h2>
-		<p class="lede">Point a generic coding agent and a role-specific one at the same file, and they don't just answer differently — they look for different things. An appsec persona reading a schema flags the injection surface; a DBA persona reading the same schema flags missing indexes. Same repo, same tools, different definition of "done."</p>
+		<p class="lede">Point a generic coding agent and a role-specific one at the same file, and they don't just answer differently — they look for different things. An analyst surfaces gaps and acceptance criteria; a reviewer looks for regressions and unhappy paths. Same repo, same tools, different definition of "done."</p>
 		<ul>
 			<li>Assigning an LLM an expert role measurably changes the <em>shape</em> of its output — deeper domain framing at the cost of some plain-language clarity, a real trade-off rather than a free upgrade. <a href="https://arxiv.org/abs/2605.29420" target="_blank" rel="noopener">Xiao et al., 2026 ↗</a></li>
 			<li>The effect isn't free-floating flavor text: matching the persona to the task helps, mismatching it hurts, and a mismatched persona measurably breaks more answers than a matched one fixes. <a href="https://arxiv.org/abs/2408.08631" target="_blank" rel="noopener">Kim et al., 2024 ↗</a></li>
 			<li>For tool-using agents specifically, explicit role/behavior rules — not just a persona label — are what fixes "under-acting" (skipping a tool the role should obviously use) and "over-speaking" (chatting instead of calling). <a href="https://arxiv.org/abs/2509.00482" target="_blank" rel="noopener">Ruangtanusak et al., 2025 ↗</a></li>
 			<li>The effect isn't universal — persona framing helps most on open-ended, advisory, judgment-heavy tasks, and least on narrow factual lookups. A persona only pays for itself when it actually matches the task.</li>
 		</ul>
-		<p class="closing">cast leans into that instead of working around it: swap <code>/persona</code> and the same tools, the same repo, and the same model produce a different investigation — different priorities, different tool sequencing, different conclusions, different follow-up questions. A security review that reasons like a senior dev misses different things than one that reasons like an appsec engineer, even reading identical code.</p>
+		<p class="closing">cast leans into that instead of working around it: swap <code>/persona</code> and the same tools, the same repo, and the same model produce a different investigation — different priorities, different tool sequencing, different conclusions, different follow-up questions. A review that reasons like a senior developer misses different things than one that reasons like an analyst or QA reviewer, even reading identical code.</p>
 		<p class="closing"><a href="persona-research.html">Read the full research writeup →</a></p>
 	</section>
 
@@ -616,7 +616,7 @@ const LANDING_HTML = `<!DOCTYPE html>
 		<div class="feature">
 			<span class="icon"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
 			<h3>A cast, not a coder</h3>
-			<p>18 built-in personas: senior dev, QA, DBA, security reviewer, PM, tech writer, sysadmin, devops, marketer, and more. Same tools, different judgment. Add your own with a single markdown file.</p>
+			<p>Seven built-in personas: senior developer, analyst, reviewer, planner, researcher, assistant, and coder with sub-agents. Same tools, different judgment. Add your own with a markdown file or build one through chat.</p>
 		</div>
 		<div class="feature">
 			<span class="icon"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg></span>
@@ -652,7 +652,7 @@ const LANDING_HTML = `<!DOCTYPE html>
 		<table>
 			<tr><th></th><th>opencode</th><th>cast</th></tr>
 			<tr><td>Approach</td><td>Universal agent</td><td>Role-based harness</td></tr>
-			<tr><td>Personas</td><td>Single agent, single lens</td><td>18 built-in + custom</td></tr>
+			<tr><td>Personas</td><td>Single agent, single lens</td><td>7 built-in + custom</td></tr>
 			<tr><td>Self-hosted focus</td><td>Works with any provider</td><td>Designed for local inference</td></tr>
 			<tr><td>Telemetry</td><td>Varies</td><td>None. Ever.</td></tr>
 		</table>
