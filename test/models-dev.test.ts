@@ -50,14 +50,13 @@ describe("lookupContextWindowFromCatalog", () => {
 		expect(lookupContextWindowFromCatalog("m", catalog)).toBeUndefined();
 	});
 
-	it("returns reasoning capability and interleaved response field", () => {
+	it("returns reasoning capability and effort options", () => {
 		const catalog = {
 			deepseek: {
 				models: {
 					"deepseek-v4-flash": {
 						reasoning: true,
 						reasoning_options: [{ type: "toggle" }, { type: "effort", values: ["low", "high", "max"] }],
-						interleaved: { field: "reasoning_content" },
 						limit: { context: 1_000_000 },
 					},
 				},
@@ -66,7 +65,6 @@ describe("lookupContextWindowFromCatalog", () => {
 		expect(lookupModelMetadataFromCatalog("deepseek-v4-flash", catalog)).toEqual({
 			reasoning: true,
 			reasoningOptions: [{ type: "toggle" }, { type: "effort", values: ["low", "high", "max"] }],
-			interleavedField: "reasoning_content",
 			contextWindow: 1_000_000,
 		});
 	});

@@ -94,6 +94,7 @@ import { type CompletedToolCallStatus, completedToolCallStatus } from "../core/t
 import { effectiveStatusFromFile } from "../core/turn-runner-state.ts";
 import {
 	buildReasoningParams,
+	getDefaultReasoningLevel,
 	getReasoningOptionsForFormat,
 	REASONING_FORMAT_OPTIONS,
 	resolveReasoningFormat,
@@ -618,7 +619,8 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	// of only refreshing on a full page reload.
 	const sessionListListeners = new Set<(event: WebEvent) => void>();
 
-	const { config, cwd, persona: currentPersona, reasoningMeta, projectDeps } = result;
+	const { config, cwd, persona: currentPersona, reasoningMeta: initialReasoningMeta, projectDeps } = result;
+	let reasoningMeta = initialReasoningMeta;
 
 	// Everything below is captured once at startup by the TUI's own
 	// per-process App component, but the web bridge outlives many
@@ -688,35 +690,36 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		const apiKey = settings.apiKey;
 		if (!baseURL || !apiKey) return { endpointChanged: false };
 
+		const named = settings.modelProvider
+			? (settings.providers ?? []).find((p) => p.name === settings.modelProvider)
+			: undefined;
+		const nextReasoningFormat = resolveReasoningFormat(baseURL, named?.reasoningFormat);
 		const endpointChanged = baseURL !== config.baseURL || apiKey !== config.apiKey;
+		const reasoningFormatChanged = nextReasoningFormat !== config.reasoningFormat;
 		if (endpointChanged) {
 			config.baseURL = baseURL;
 			config.apiKey = apiKey;
-			// reasoningFormat/reasoningParams are computed from the endpoint —
-			// carry the named row's override (e.g. "deepseek") when it's set.
-			const named = settings.modelProvider
-				? (settings.providers ?? []).find((p) => p.name === settings.modelProvider)
-				: undefined;
-			config.reasoningFormat = resolveReasoningFormat(baseURL, named?.reasoningFormat);
-			config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat, defaultModel);
 			// The cached /v1/models list came from the old endpoint — clear it so
 			// model pickers/completions can't offer ids the new endpoint lacks.
 			setModelsCache([]);
 		}
+		if (reasoningFormatChanged) config.reasoningFormat = nextReasoningFormat;
 
 		// Reasoning level is a global setting persisted by /reasoning in either
 		// process — follow external edits too, not just local ones.
 		if (settings.reasoningLevel !== undefined && settings.reasoningLevel !== config.reasoningLevel) {
 			config.reasoningLevel = settings.reasoningLevel;
+		}
+		if (endpointChanged || reasoningFormatChanged || settings.reasoningLevel !== undefined) {
 			config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat, defaultModel);
 		}
 
 		return { endpointChanged };
 	}
 
-	function syncExternalSessionModel(ws: WebAgentSession): void {
+	function syncExternalSessionModel(ws: WebAgentSession): boolean {
 		const stored = loadSessionMeta(ws.id);
-		if (!stored || (stored.model === ws.session.model && stored.providerUrl === ws.session.providerUrl)) return;
+		if (!stored || (stored.model === ws.session.model && stored.providerUrl === ws.session.providerUrl)) return false;
 
 		ws.session.model = stored.model;
 		ws.session.providerUrl = stored.providerUrl;
@@ -727,6 +730,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			ws.session.mode,
 		);
 		broadcastSessionUpdate(ws);
+		return true;
 	}
 
 	/**
@@ -1141,7 +1145,12 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// user picked elsewhere (400 / 429 until a restart). Reconcile the
 		// session's model id against the new provider when the endpoint moved.
 		const { endpointChanged } = syncActiveProviderFromSettings();
-		syncExternalSessionModel(ws);
+		const sessionModelChanged = syncExternalSessionModel(ws);
+		if (sessionModelChanged && !endpointChanged) {
+			const refreshed = await fetchModels(config);
+			if (refreshed.ok && refreshed.models) setModelsCache(refreshed.models);
+		}
+		if (sessionModelChanged) reasoningMeta = modelInfoFor(ws.session.model)?.reasoning;
 		if (endpointChanged) await reconcileSessionModel(ws);
 
 		const sessionCwd = ws.session.cwd ?? cwd;
@@ -1267,10 +1276,25 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// provider and a saved provider entry share.
 		const turnStart = ws.turnStartedAt ?? Date.now();
 		const effectiveBaseURL = resolvedModelProvider?.baseURL ?? config.baseURL;
+		const effectiveProvider = providers.find((p) => p.url === effectiveBaseURL);
+		const runReasoningFormat = resolveReasoningFormat(effectiveBaseURL, effectiveProvider?.reasoningFormat);
+		const runReasoningLevel = reasoningLevelForModel(runModel, runReasoningFormat);
+		const runConfig = {
+			...config,
+			reasoningFormat: runReasoningFormat,
+			reasoningLevel: runReasoningLevel,
+			reasoningParams: buildReasoningParams(runReasoningLevel, runReasoningFormat, runModel),
+		};
+		if (runModel === ws.session.model && runReasoningLevel !== config.reasoningLevel) {
+			config.reasoningLevel = runReasoningLevel;
+			config.reasoningFormat = runReasoningFormat;
+			config.reasoningParams = runConfig.reasoningParams;
+			updateSettings({ reasoningLevel: runReasoningLevel });
+		}
 		const runProviderName = providers.find((p) => p.url === effectiveBaseURL)?.name ?? "default";
 
 		runAgentLoop(ws.session.messages, {
-			config,
+			config: runConfig,
 			model: runModel,
 			modelProvider: resolvedModelProvider,
 			subagentModelProvider: resolvedSubagentProvider,
@@ -1836,8 +1860,24 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	 * model list cache says about the model it's actually running now. */
 	function reasoningOptionsFor(model: string): Array<{ value: string; label: string }> {
 		const cached = getModelsCache().find((m) => m.id === model);
-		const meta = reasoningMeta ?? cached?.reasoning;
+		const meta = cached?.reasoning ?? (model === result.session.model ? reasoningMeta : undefined);
 		return getReasoningOptionsForFormat(meta ?? null, config.reasoningFormat, model, cached?.reasoningSupported);
+	}
+
+	function modelInfoFor(model: string): ModelInfo | undefined {
+		const cached = getModelsCache().find((entry) => entry.id === model);
+		if (cached) return cached;
+		if (model === result.session.model && reasoningMeta) return { id: model, reasoning: reasoningMeta };
+		return undefined;
+	}
+
+	function reasoningLevelForModel(model: string, format = config.reasoningFormat): string {
+		const info = modelInfoFor(model);
+		const options = getReasoningOptionsForFormat(info?.reasoning ?? null, format, model, info?.reasoningSupported);
+		if (options.length === 0 || options.some((option) => option.value === config.reasoningLevel)) {
+			return config.reasoningLevel;
+		}
+		return getDefaultReasoningLevel(info?.reasoning ?? null, format, model, info?.reasoningSupported);
 	}
 
 	function renameSession(sessionId: string, title: string): boolean {
@@ -2292,8 +2332,11 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			config.baseURL = provider.url;
 			config.apiKey = provider.apiKey;
 			config.reasoningFormat = resolveReasoningFormat(provider.url, provider.reasoningFormat);
-			config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat, model);
 			setModelsCache(models.models);
+			const selected = models.models.find((entry) => entry.id === model);
+			reasoningMeta = selected?.reasoning;
+			config.reasoningLevel = reasoningLevelForModel(model, config.reasoningFormat);
+			config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat, model);
 			ws.session.model = model;
 			ws.session.providerUrl = provider.url;
 			ws.systemPrompt = computeSystemPrompt(
@@ -2310,6 +2353,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				apiKey: provider.apiKey,
 				modelProvider: provider.name,
 				model,
+				reasoningLevel: config.reasoningLevel,
 				...(providerChanged && !subagentModelProvider ? { subagentModel: undefined } : {}),
 				...(providerChanged && !planModelProvider ? { planModel: undefined } : {}),
 			});
@@ -2321,6 +2365,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			if (!arg) return { ok: true, result: { model: ws.session.model } };
 			ws.session.model = arg;
 			ws.session.providerUrl = config.baseURL;
+			reasoningMeta = modelInfoFor(arg)?.reasoning;
+			config.reasoningLevel = reasoningLevelForModel(arg, config.reasoningFormat);
+			config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat, arg);
 			ws.systemPrompt = computeSystemPrompt(
 				resolvePersona(ws.session.persona ?? "") ?? currentPersona,
 				arg,
@@ -2333,7 +2380,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			// new session kept starting on whatever was active when the server
 			// started (confirmed: switching M2 -> M3 then /new still opened M2).
 			defaultModel = arg;
-			updateSettings({ model: arg });
+			updateSettings({ model: arg, reasoningLevel: config.reasoningLevel });
 			// Sidebar footer reads the model off the session-list summary, not the
 			// open session's live state — without this it kept showing the old
 			// model until the turn ended (which resends it) or the page reloaded.
@@ -3071,15 +3118,16 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				return { ok: false, error: `Unknown reasoning format: ${arg}. Options: ${options.join(", ")}` };
 			}
 			config.reasoningFormat = resolveReasoningFormat(config.baseURL, arg as (typeof options)[number]);
-			config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat, ws.session.model);
 			const selected = arg as (typeof options)[number];
+			config.reasoningLevel = reasoningLevelForModel(ws.session.model, config.reasoningFormat);
+			config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat, ws.session.model);
 			const settings = loadSettings();
 			const providers = settings.providers?.map((provider) =>
 				provider.url === config.baseURL && provider.apiKey === config.apiKey
 					? { ...provider, reasoningFormat: selected }
 					: provider,
 			);
-			updateSettings({ providers });
+			updateSettings({ providers, reasoningLevel: config.reasoningLevel });
 			return { ok: true, result: { reasoningFormat: config.reasoningFormat } };
 		}
 		if (name === "/worktree") {

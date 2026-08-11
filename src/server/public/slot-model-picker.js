@@ -18,6 +18,7 @@ export function SlotModelPicker({
 	modelCommand,
 	isMainSlot,
 	initialModels,
+	onModelApplied,
 }) {
 	const initialProvider = currentProvider || "";
 	const effectiveModel = currentModel || "";
@@ -65,12 +66,13 @@ export function SlotModelPicker({
 	}, []);
 	const doSet = useCallback(async () => {
 		if (isMainSlot && providerValue && modelValue && models.some((model) => model.id === modelValue)) {
-			await act(`/model-selection ${providerValue} ${modelValue}`);
+			const result = await act(`/model-selection ${providerValue} ${modelValue}`);
+			if (result?.ok) onModelApplied?.();
 			return;
 		}
 		if (providerValue) await act(`${providerCommand} ${providerValue}`);
 		if (modelValue && models.some((model) => model.id === modelValue)) await act(`${modelCommand} ${modelValue}`);
-	}, [providerValue, modelValue, models, act, providerCommand, modelCommand, isMainSlot]);
+	}, [providerValue, modelValue, models, act, providerCommand, modelCommand, isMainSlot, onModelApplied]);
 	const doReset = useCallback(async () => {
 		await act(`${modelCommand} reset`);
 		setProviderValue("");

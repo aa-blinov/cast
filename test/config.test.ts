@@ -111,7 +111,6 @@ describe("enrichModelsWithCatalog", () => {
 					models: {
 						"deepseek-v4-flash": {
 							reasoning: true,
-							interleaved: { field: "reasoning_content" },
 							limit: { context: 1_000_000 },
 						},
 					},
@@ -125,7 +124,6 @@ describe("enrichModelsWithCatalog", () => {
 				supportedEfforts: [],
 			},
 			reasoningSupported: true,
-			reasoningField: "reasoning_content",
 			contextWindow: 1_000_000,
 		});
 		expect(models[1]).toMatchObject({

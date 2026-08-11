@@ -48,6 +48,7 @@ import {
 	recordCompaction,
 	type SessionState,
 	saveSession,
+	updateSessionIdentity,
 } from "../core/session.ts";
 import {
 	loadSettings,
@@ -66,6 +67,8 @@ import {
 import { resolveSshHosts, type SshHost, saveSshConfig, scanSshKeys, validateKeyPermissions } from "../core/ssh.ts";
 import {
 	buildReasoningParams,
+	getDefaultReasoningLevel,
+	getReasoningOptionsForFormat,
 	type ModelReasoningMeta,
 	type ReasoningParams,
 	resolveReasoningFormat,
@@ -1553,6 +1556,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		config.reasoningLevel = selection.reasoningLevel;
 		config.reasoningParams = selection.reasoningParams;
 		updateSettings({ model: session.model, reasoningLevel: config.reasoningLevel });
+		updateSessionIdentity(session);
 		agent.refreshMeta();
 		showNotice(`[Model: ${session.model} (reasoning: ${config.reasoningLevel})]`);
 		return;
@@ -1585,6 +1589,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		config.reasoningLevel = candidate.reasoningLevel;
 		config.reasoningParams = candidate.reasoningParams;
 		updateSettings({ model: newModel, reasoningLevel: config.reasoningLevel });
+		updateSessionIdentity(session);
 		agent.refreshMeta();
 		showNotice(`[Model: ${newModel} (reasoning: ${config.reasoningLevel})]`);
 		return;
@@ -1789,8 +1794,23 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 				: provider,
 		);
 		config.reasoningFormat = resolveReasoningFormat(config.baseURL, selected);
+		const cached = getModelsCache().find((model) => model.id === session.model);
+		const reasoningOptions = getReasoningOptionsForFormat(
+			deps.reasoningMeta ?? cached?.reasoning ?? null,
+			config.reasoningFormat,
+			session.model,
+			cached?.reasoningSupported,
+		);
+		if (reasoningOptions.length > 0 && !reasoningOptions.some((option) => option.value === config.reasoningLevel)) {
+			config.reasoningLevel = getDefaultReasoningLevel(
+				deps.reasoningMeta ?? cached?.reasoning ?? null,
+				config.reasoningFormat,
+				session.model,
+				cached?.reasoningSupported,
+			);
+		}
 		config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat, session.model);
-		updateSettings({ providers });
+		updateSettings({ providers, reasoningLevel: config.reasoningLevel });
 		showNotice(`[Reasoning protocol: ${selected}]`);
 		return;
 	}
@@ -2046,6 +2066,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			model: session.model,
 			reasoningLevel: config.reasoningLevel,
 		});
+		updateSessionIdentity(session);
 		agent.refreshMeta();
 		showNotice(`[Provider: ${p.name}. Model: ${session.model}. Reasoning: ${config.reasoningLevel}]`);
 	}
@@ -2115,6 +2136,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		if (selection.contextWindow && selection.contextWindow > 0) config.contextWindow = selection.contextWindow;
 		config.reasoningLevel = selection.reasoningLevel;
 		config.reasoningParams = selection.reasoningParams;
+		updateSessionIdentity(session);
 		agent.refreshMeta();
 		showNotice(`[Provider "${name}" added. Model: ${session.model}. Reasoning: ${config.reasoningLevel}]`);
 	}

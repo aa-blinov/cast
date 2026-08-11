@@ -21,6 +21,7 @@
 		"e2e:jsonl": "bash scripts/e2e-server-jsonl.sh",
 		"e2e:hooks": "bash scripts/e2e-server-hooks.sh",
 		"e2e:compaction": "node --import tsx scripts/e2e-compaction.mjs",
+		"e2e:web-model": "node scripts/e2e-web-model-flow.mjs",
 		"build-site": "node --import tsx scripts/build-site.mjs",
 		"dev:web": "node --disable-warning=DEP0040 --disable-warning=ExperimentalWarning --import tsx ./src/server/index.ts"
 	},
@@ -50,6 +51,7 @@
 		"ajv": "^8.20.0",
 		"esbuild": "^0.28.1",
 		"marked": "^18.0.6",
+		"playwright": "^1.62.1",
 		"typescript": "^5.6.0",
 		"vitest": "^3.2.0"
 	}

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
 import type { McpSetupResult } from "../src/core/mcp.ts";
 import type { Persona } from "../src/core/personas.ts";
-import { createSession, type SessionState, saveSession } from "../src/core/session.ts";
+import { createSession, loadSession, type SessionState, saveSession } from "../src/core/session.ts";
 import type { PermissionMode } from "../src/core/settings.ts";
 import type { Pickers } from "../src/pickers/types.ts";
 import type { CommandDeps } from "../src/ui/commands.ts";
@@ -391,6 +391,21 @@ describe("handleInput", () => {
 		} finally {
 			fetchSpy.mockRestore();
 		}
+	});
+
+	it("/model persists the session identity before the next turn", async () => {
+		const { deps } = createFakeDeps({
+			pickers: {
+				promptText: async () => null,
+				pickOption: async (options) => options[0]!.value,
+				pickMulti: async () => null,
+				log: () => {},
+			},
+		});
+
+		await handleInput("/model next-model", undefined, deps);
+
+		expect(loadSession("test-session")?.model).toBe("next-model");
 	});
 
 	it("/skills reports none loaded when empty", async () => {
