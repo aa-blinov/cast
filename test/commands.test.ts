@@ -363,6 +363,36 @@ describe("handleInput", () => {
 		}
 	});
 
+	it("/model requires reasoning selection before applying the new model", async () => {
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			new Response(JSON.stringify({ data: [{ id: "next-model" }] }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			}),
+		);
+		try {
+			let pickStep = 0;
+			const pickers: Pickers = {
+				promptText: async () => null,
+				pickOption: async (options) => {
+					pickStep++;
+					if (pickStep === 1) return options[0]!.value;
+					return null;
+				},
+				pickMulti: async () => null,
+				log: () => {},
+			};
+			const { deps, calls } = createFakeDeps({ pickers });
+			await handleInput("/model", undefined, deps);
+			expect(deps.session.model).toBe("test-model");
+			expect(deps.config.reasoningLevel).toBe("off");
+			expect(calls["agent.refreshMeta"]).toBeUndefined();
+			expect(noticeText(calls)).toContain("model and reasoning unchanged");
+		} finally {
+			fetchSpy.mockRestore();
+		}
+	});
+
 	it("/skills reports none loaded when empty", async () => {
 		const { deps, calls } = createFakeDeps();
 		// Skip auto-discovery so the catalog is empty (builtins would otherwise load).
@@ -1044,6 +1074,45 @@ describe("/provider", () => {
 		expect(noticeText(calls)).toContain("Unknown provider");
 	});
 
+	it("/provider keeps the active provider unchanged when reasoning is cancelled", async () => {
+		writeSettings({
+			providers: [
+				{ name: "current", url: "https://current.example/v1", apiKey: "current-key" },
+				{ name: "remote", url: "https://remote.example/v1", apiKey: "remote-key" },
+			],
+			providerUrl: "https://current.example/v1",
+			apiKey: "current-key",
+			modelProvider: "current",
+		});
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			new Response(JSON.stringify({ data: [{ id: "remote-model" }] }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			}),
+		);
+		try {
+			let pickStep = 0;
+			const pickers: Pickers = {
+				promptText: async () => null,
+				pickOption: async (options) => {
+					pickStep++;
+					if (pickStep === 1) return options[0]!.value;
+					return null;
+				},
+				pickMulti: async () => null,
+				log: () => {},
+			};
+			const { deps, calls } = createFakeDeps({ pickers });
+			await handleInput("/provider remote", undefined, deps);
+			const { loadSettings } = await import("../src/core/settings.ts");
+			expect(deps.config.baseURL).toBe("https://test.example/v1");
+			expect(loadSettings().modelProvider).toBe("current");
+			expect(String(calls.showNotice?.at(-1)?.[0] ?? "")).toContain("unchanged");
+		} finally {
+			fetchSpy.mockRestore();
+		}
+	});
+
 	it("/provider with no providers → triggers add wizard", async () => {
 		writeSettings({});
 		// pickers return null → cancelled at first prompt
@@ -1121,7 +1190,14 @@ describe("/provider", () => {
 		// then a reasoning level. The helper extracted in 0.6.6+ should reuse
 		// the same selectModel + selectReasoningLevel flow /activate uses.
 		writeSettings({});
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			new Response(JSON.stringify({ data: [{ id: "gpt-test" }] }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			}),
+		);
 		let textStep = 0;
+		let pickStep = 0;
 		const pickers: import("../src/pickers/types.ts").Pickers = {
 			promptText: async () => {
 				textStep++;
@@ -1131,21 +1207,27 @@ describe("/provider", () => {
 				if (textStep === 3) return "sk-or-test";
 				return null;
 			},
-			pickOption: async () => ({
-				model: "gpt-test",
-				contextWindow: 64_000,
-			}),
+			pickOption: async (options) => {
+				pickStep++;
+				if (pickStep === 1) return "auto";
+				if (pickStep === 2) return options[0]!.value;
+				return "off";
+			},
 			pickMulti: async () => null,
 			log: () => {},
 		};
 		const { deps, calls } = createFakeDeps({ pickers } as never);
-		await handleInput("/provider add", undefined, deps);
-		const { loadSettings } = await import("../src/core/settings.ts");
-		expect(loadSettings().modelProvider).toBe("openrouter");
-		// Wizard produces an "added and selected" notice (distinct from /activate's
-		// "Provider: ... . Select a model." wording). If the helper extract is
-		// wrong, this check goes red because the notice shape changes.
-		const notice = String(calls.showNotice?.at(-1)?.[0] ?? "");
-		expect(notice).toMatch(/added|Model:/);
+		try {
+			await handleInput("/provider add", undefined, deps);
+			const { loadSettings } = await import("../src/core/settings.ts");
+			expect(loadSettings().modelProvider).toBe("openrouter");
+			// Wizard produces an "added and selected" notice (distinct from /activate's
+			// "Provider: ... . Select a model." wording). If the helper extract is
+			// wrong, this check goes red because the notice shape changes.
+			const notice = String(calls.showNotice?.at(-1)?.[0] ?? "");
+			expect(notice).toMatch(/added|Model:/);
+		} finally {
+			fetchSpy.mockRestore();
+		}
 	});
 });

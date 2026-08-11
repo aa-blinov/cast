@@ -1,8 +1,6 @@
 import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { providerFetch } from "./config.ts";
-
 /**
  * Third-party, community-curated catalog of model metadata (pricing,
  * context/output limits, reasoning params) across many providers —
@@ -14,13 +12,30 @@ import { providerFetch } from "./config.ts";
  * official api.minimax.io provider itself isn't listed, only Fireworks/W&B/
  * CrossModel reselling the same model with three different context values).
  */
+export type ModelsDevReasoningField = "reasoning_content" | "reasoning_details";
+
+export interface ModelsDevReasoningOption {
+	type: "toggle" | "effort";
+	values?: string[];
+}
+
 interface ModelsDevModel {
+	reasoning?: boolean;
+	reasoning_options?: ModelsDevReasoningOption[];
+	interleaved?: { field?: string };
 	limit?: { context?: number; output?: number };
 }
 interface ModelsDevProvider {
 	models?: Record<string, ModelsDevModel>;
 }
 export type ModelsDevCatalog = Record<string, ModelsDevProvider>;
+
+export interface ModelsDevModelMetadata {
+	reasoning?: boolean;
+	reasoningOptions?: ModelsDevReasoningOption[];
+	interleavedField?: ModelsDevReasoningField;
+	contextWindow?: number;
+}
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const MODELS_DEV_URL = "https://models.dev/api.json";
@@ -60,7 +75,7 @@ export async function fetchModelsDevCatalog(): Promise<ModelsDevCatalog | undefi
 	}
 
 	try {
-		const res = await providerFetch(MODELS_DEV_URL, { signal: AbortSignal.timeout(10_000) });
+		const res = await fetch(MODELS_DEV_URL, { signal: AbortSignal.timeout(10_000) });
 		if (!res.ok) throw new Error(`HTTP ${res.status}`);
 		const text = await res.text();
 		const catalog = JSON.parse(text) as ModelsDevCatalog;
@@ -95,4 +110,52 @@ export function lookupContextWindowFromCatalog(modelId: string, catalog: ModelsD
 		}
 	}
 	return min;
+}
+
+/**
+ * Looks up capability metadata independently from the provider endpoint. The
+ * catalog can contain the same model under several resellers, so a positive
+ * reasoning capability wins if any matching entry advertises it; interleaved
+ * output uses the first known response field.
+ */
+export function lookupModelMetadataFromCatalog(
+	modelId: string,
+	catalog: ModelsDevCatalog,
+): ModelsDevModelMetadata | undefined {
+	const needle = modelId.toLowerCase();
+	const exact: ModelsDevModel[] = [];
+	const fuzzy: ModelsDevModel[] = [];
+
+	for (const provider of Object.values(catalog)) {
+		for (const [key, model] of Object.entries(provider.models ?? {})) {
+			const normalizedKey = key.toLowerCase();
+			if (normalizedKey === needle) exact.push(model);
+			else if (normalizedKey.includes(needle) || needle.includes(normalizedKey)) fuzzy.push(model);
+		}
+	}
+
+	const matches = exact.length > 0 ? exact : fuzzy;
+	if (matches.length === 0) return undefined;
+
+	const reasoning = matches.some((model) => model.reasoning === true)
+		? true
+		: matches.some((model) => model.reasoning === false)
+			? false
+			: undefined;
+	const interleavedField = matches
+		.map((model) => model.interleaved?.field)
+		.find(
+			(field): field is ModelsDevReasoningField => field === "reasoning_content" || field === "reasoning_details",
+		);
+	const contextWindow = lookupContextWindowFromCatalog(modelId, catalog);
+	const reasoningOptions = matches.find((model) => model.reasoning_options?.length)?.reasoning_options;
+
+	if (
+		reasoning === undefined &&
+		reasoningOptions === undefined &&
+		interleavedField === undefined &&
+		contextWindow === undefined
+	)
+		return undefined;
+	return { reasoning, reasoningOptions, interleavedField, contextWindow };
 }

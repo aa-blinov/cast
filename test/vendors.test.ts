@@ -3,6 +3,7 @@ import { applyCacheControl, isContextOverflow, type Message, type Tool } from ".
 import {
 	buildReasoningParams,
 	extractReasoningMeta,
+	getDefaultReasoningLevel,
 	getReasoningOptions,
 	getReasoningOptionsForFormat,
 	resolveReasoningFormat,
@@ -433,6 +434,12 @@ describe("buildReasoningParams", () => {
 		expect(resolveReasoningFormat("https://api.modelarts.huaweicloud.com/v1")).toBe("huawei");
 	});
 
+	it("uses the OpenAI-compatible adapter for OpenCode Go", () => {
+		expect(resolveReasoningFormat("https://opencode.ai/zen/go/v1")).toBe("openai-compatible");
+		expect(buildReasoningParams("off", "openai-compatible").body).toEqual({ reasoning_effort: "none" });
+		expect(buildReasoningParams("high", "openai-compatible").body).toEqual({ reasoning_effort: "high" });
+	});
+
 	it("Minimax reasoning advertises the 3-state `thinking` mode from the model card", () => {
 		expect(resolveReasoningFormat("https://api.minimax.io/v1")).toBe("minimax");
 		// 3 UI options (no meta) match the card's enabled/adaptive/disabled.
@@ -464,6 +471,15 @@ describe("buildReasoningParams", () => {
 			thinking: { type: "disabled" },
 		});
 		expect(buildReasoningParams("off", "minimax").enabled).toBe(false);
+		expect(buildReasoningParams("enabled", "deepseek", "minimax-m3")).toEqual({
+			body: { reasoning_split: true },
+			enabled: true,
+		});
+		expect(getReasoningOptionsForFormat(null, "deepseek", "minimax-m3", true).map((option) => option.value)).toEqual([
+			"enabled",
+			"adaptive",
+			"disabled",
+		]);
 	});
 
 	it("off returns explicit enabled: false", () => {
@@ -498,16 +514,28 @@ describe("buildReasoningParams", () => {
 
 	it("uses binary controls for DeepSeek and Qwen-compatible providers", () => {
 		expect(buildReasoningParams("on", "deepseek").body).toEqual({ thinking: { type: "enabled" } });
+		expect(buildReasoningParams("high", "deepseek").body).toEqual({
+			thinking: { type: "enabled" },
+			reasoning_effort: "high",
+		});
 		expect(buildReasoningParams("off", "qwen").body).toEqual({ enable_thinking: false });
 	});
 
 	it("uses Kimi preserved thinking and xAI's supported effort field", () => {
 		expect(buildReasoningParams("on", "kimi").body).toEqual({ thinking: { type: "enabled", keep: "all" } });
+		expect(buildReasoningParams("max", "kimi").body).toEqual({
+			thinking: { type: "enabled", keep: "all" },
+			reasoning_effort: "max",
+		});
 		expect(buildReasoningParams("medium", "xai").body).toEqual({ reasoning_effort: "medium" });
 	});
 
 	it("uses Qianfan and Huawei's documented thinking fields", () => {
 		expect(buildReasoningParams("on", "qianfan").body).toEqual({ enable_thinking: true });
+		expect(buildReasoningParams("high", "qianfan", "deepseek-v4-flash").body).toEqual({
+			thinking: { type: "enabled" },
+			reasoning_effort: "high",
+		});
 		expect(buildReasoningParams("off", "huawei").body).toEqual({
 			chat_template_kwargs: { enable_thinking: false },
 		});
@@ -519,6 +547,12 @@ describe("buildReasoningParams", () => {
 // ============================================================================
 
 describe("getReasoningOptions", () => {
+	it("uses a safe binary choice when models.dev only confirms reasoning support", () => {
+		const options = getReasoningOptionsForFormat(null, "generic", "custom-model", true);
+		expect(options.map((option) => option.value)).toEqual(["off", "on"]);
+		expect(getDefaultReasoningLevel(null, "generic", "custom-model", true)).toBe("on");
+	});
+
 	it("returns generic choices when metadata is absent", () => {
 		expect(getReasoningOptions(null).map((option) => option.value)).toEqual(["off", "low", "medium", "high", "max"]);
 	});
@@ -569,5 +603,39 @@ describe("getReasoningOptions", () => {
 			"medium",
 			"high",
 		]);
+	});
+
+	it("uses documented vendor/model defaults as the initial choice", () => {
+		expect(getDefaultReasoningLevel(null, "openai", "gpt-5.1")).toBe("off");
+		expect(getDefaultReasoningLevel(null, "openai", "gpt-4.1")).toBe("medium");
+		expect(getDefaultReasoningLevel(null, "deepseek", "deepseek-v4-flash")).toBe("high");
+		expect(getDefaultReasoningLevel(null, "deepseek", "deepseek-v3.1")).toBe("off");
+		expect(getDefaultReasoningLevel(null, "kimi", "kimi-k3")).toBe("max");
+		expect(getDefaultReasoningLevel(null, "qianfan", "qwen3-235b-a22b")).toBe("off");
+		expect(getDefaultReasoningLevel(null, "xai", "grok-4.5")).toBe("high");
+		expect(
+			getDefaultReasoningLevel(
+				{
+					mandatory: false,
+					defaultEnabled: true,
+					supportedEfforts: ["low", "medium", "high"],
+					defaultEffort: "medium",
+				},
+				"openrouter",
+				"any-model",
+			),
+		).toBe("medium");
+		expect(
+			getDefaultReasoningLevel(
+				{
+					mandatory: false,
+					defaultEnabled: true,
+					supportedEfforts: ["low", "high", "max"],
+					defaultEffort: "",
+				},
+				"openai-compatible",
+				"deepseek-v4-flash",
+			),
+		).toBe("low");
 	});
 });

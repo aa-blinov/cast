@@ -238,7 +238,7 @@ export function SettingsModal({
 				// its "installed" label from data.plugins, so without a reload the
 				// just-installed plugin would still show the Install button).
 				if (res.ok) {
-					if (command.startsWith("/model ") && typeof res.result?.model === "string") {
+					if ((command.startsWith("/model ") || command.startsWith("/model-selection ")) && typeof res.result?.model === "string") {
 						onModelChange?.(res.result.model);
 					}
 					if (command === "/reload" || command.startsWith("/skills ")) onReload?.();

@@ -962,6 +962,22 @@ export function loadSession(id: string): SessionState | null {
 	return loadSessionByRow(getDb().prepare("SELECT * FROM sessions WHERE id = ?").get(id) as SessionRow | undefined);
 }
 
+/** Read the mutable session identity without loading its messages. The daemon
+ * uses this at turn boundaries to notice model/provider changes made by TUI
+ * or another web surface while it was idle. */
+export function loadSessionMeta(id: string): Pick<SessionState, "id" | "model" | "providerUrl" | "updatedAt"> | null {
+	const row = getDb().prepare("SELECT id, model, updated_at, provider_url FROM sessions WHERE id = ?").get(id) as
+		| Pick<SessionRow, "id" | "model" | "updated_at" | "provider_url">
+		| undefined;
+	if (!row) return null;
+	return {
+		id: row.id,
+		model: row.model ?? "",
+		updatedAt: row.updated_at,
+		providerUrl: row.provider_url ?? undefined,
+	};
+}
+
 /** Same lookup as `loadSession`, keyed by the public share link's token
  *  instead of the session id — used by the unauthenticated `/shared/:token`
  *  route, so it never has to expose real session ids to a logged-out

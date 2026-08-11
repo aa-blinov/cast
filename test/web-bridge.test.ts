@@ -7,7 +7,7 @@ import type { AppConfig } from "../src/core/config.ts";
 import type { McpSetupResult } from "../src/core/mcp.ts";
 import type { Persona } from "../src/core/personas.ts";
 import { createAgentRunner } from "../src/core/runner.ts";
-import { createSession, getFullHistory, saveSession } from "../src/core/session.ts";
+import { createSession, getFullHistory, loadSession, saveSession } from "../src/core/session.ts";
 import type { StartupResult } from "../src/core/startup.ts";
 
 // submit() fires runAgentLoop in the background (fire-and-forget) — stub it
@@ -367,6 +367,40 @@ describe("web bridge", () => {
 		const res = await bridge.executeCommand(ws.id, "/model gpt-5");
 		expect(res).toEqual({ ok: true, result: { model: "gpt-5" } });
 		expect(ws.session.model).toBe("gpt-5");
+		expect(ws.session.providerUrl).toBe(testConfig.baseURL);
+	});
+
+	it("applies the main provider and model as one validated selection", async () => {
+		const { loadSettings, updateSettings } = await import("../src/core/settings.ts");
+		updateSettings({
+			providers: [
+				{ name: "local", url: testConfig.baseURL, apiKey: testConfig.apiKey },
+				{ name: "remote", url: "https://remote.example/v1", apiKey: "remote-key" },
+			],
+			providerUrl: testConfig.baseURL,
+			apiKey: testConfig.apiKey,
+			modelProvider: "local",
+		});
+		const bridge = createServerBridge(makeResult({ config: { ...testConfig } }));
+		const ws = bridge.createSession();
+
+		const result = await bridge.executeCommand(ws.id, "/model-selection remote hy3");
+
+		expect(result).toEqual({ ok: true, result: { model: "hy3", provider: "remote" } });
+		expect(ws.session.model).toBe("hy3");
+		expect(ws.session.providerUrl).toBe("https://remote.example/v1");
+		expect(loadSettings()).toMatchObject({
+			model: "hy3",
+			modelProvider: "remote",
+			providerUrl: "https://remote.example/v1",
+		});
+	});
+
+	it("records the provider on a web-created session", () => {
+		const bridge = createServerBridge(makeResult({ config: { ...testConfig } }));
+		const ws = bridge.createSession();
+
+		expect(ws.session.providerUrl).toBe(testConfig.baseURL);
 	});
 
 	it("/provider <name> persists the active provider for the next startup", async () => {
@@ -1293,6 +1327,37 @@ describe("web bridge", () => {
 			expect(runArgs().config.apiKey).toBe("newkey");
 			// gpt-4o is in the default mocked model list — still valid, kept.
 			expect(runArgs().model).toBe("gpt-4o");
+		});
+
+		it("adopts a model changed by another surface on the next turn", async () => {
+			const bridge = freshBridge();
+			const ws = bridge.createSession();
+			saveSession(ws.session);
+			const persisted = loadSession(ws.id)!;
+			persisted.model = "hy3";
+			persisted.providerUrl = testConfig.baseURL;
+			saveSession(persisted);
+
+			await bridge.submit(ws.id, "hi");
+
+			expect(runArgs().model).toBe("hy3");
+			expect(ws.session.model).toBe("hy3");
+		});
+
+		it("adopts secondary model slots changed by another surface", async () => {
+			const { updateSettings } = await import("../src/core/settings.ts");
+			const bridge = freshBridge();
+			const ws = bridge.createSession();
+			updateSettings({ subagentModel: "hy3", subagentModelProvider: "remote" });
+
+			await bridge.submit(ws.id, "hi");
+
+			const args = runAgentLoop.mock.calls[0]![1] as {
+				subagentModel?: string;
+				subagentModelProvider?: { baseURL: string; apiKey: string };
+			};
+			expect(args.subagentModel).toBe("hy3");
+			expect(args.subagentModelProvider).toEqual({ baseURL: "http://localhost", apiKey: "test" });
 		});
 
 		it("does not restart-turn when settings.json still matches the daemon config", async () => {

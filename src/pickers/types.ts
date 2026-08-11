@@ -80,6 +80,7 @@ export interface Pickers {
 export interface ModelSelection {
 	model: string;
 	reasoningMeta?: ModelReasoningMeta;
+	reasoningSupported?: boolean;
 	contextWindow?: number;
 }
 

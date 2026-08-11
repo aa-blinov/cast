@@ -1,4 +1,11 @@
 import OpenAI from "openai";
+import {
+	fetchModelsDevCatalog,
+	lookupModelMetadataFromCatalog,
+	type ModelsDevCatalog,
+	type ModelsDevReasoningField,
+	type ModelsDevReasoningOption,
+} from "./models-dev.ts";
 import type { Provider } from "./settings.ts";
 import type { ModelReasoningMeta, ReasoningFormat, ReasoningParams } from "./vendors.ts";
 import { extractReasoningMeta, resolveReasoningFormat } from "./vendors.ts";
@@ -125,6 +132,10 @@ export interface ModelInfo {
 	id: string;
 	ownedBy?: string;
 	reasoning?: ModelReasoningMeta;
+	/** Capability fallback from models.dev when /v1/models omits reasoning metadata. */
+	reasoningSupported?: boolean;
+	/** Response field advertised by models.dev for interleaved reasoning. */
+	reasoningField?: ModelsDevReasoningField;
 	/** Context window size in tokens (from /v1/models) */
 	contextWindow?: number;
 }
@@ -133,6 +144,39 @@ export interface FetchModelsResult {
 	ok: boolean;
 	models?: ModelInfo[];
 	error?: string;
+}
+
+/** Merge third-party capabilities without overriding provider metadata. */
+export function enrichModelsWithCatalog(models: ModelInfo[], catalog: ModelsDevCatalog): ModelInfo[] {
+	return models.map((model) => {
+		const fallback = lookupModelMetadataFromCatalog(model.id, catalog);
+		if (!fallback) return model;
+		const catalogReasoning = fallback.reasoning ? reasoningMetaFromModelsDev(fallback.reasoningOptions) : undefined;
+		return {
+			...model,
+			reasoning: model.reasoning ?? catalogReasoning,
+			reasoningSupported: model.reasoning ? true : fallback.reasoning,
+			reasoningField: model.reasoningField ?? fallback.interleavedField,
+			contextWindow: model.contextWindow ?? fallback.contextWindow,
+		};
+	});
+}
+
+function reasoningMetaFromModelsDev(options: ModelsDevReasoningOption[] | undefined): ModelReasoningMeta {
+	const supportedEfforts = [
+		...new Set(
+			(options ?? [])
+				.filter((option) => option.type === "effort")
+				.flatMap((option) => option.values ?? [])
+				.filter((value) => value !== "none"),
+		),
+	];
+	return {
+		mandatory: false,
+		defaultEnabled: true,
+		supportedEfforts,
+		defaultEffort: "",
+	};
 }
 
 /**
@@ -146,14 +190,17 @@ export async function fetchModels(config: AppConfig): Promise<FetchModelsResult>
 
 	try {
 		const list = await client.models.list();
+		const catalog = await fetchModelsDevCatalog();
 		const models: ModelInfo[] = [];
 
 		for await (const model of list) {
 			const raw = model as unknown as Record<string, unknown>;
+			const reasoning = extractReasoningMeta(raw) ?? undefined;
 			models.push({
 				id: model.id,
 				ownedBy: model.owned_by,
-				reasoning: extractReasoningMeta(raw) ?? undefined,
+				reasoning,
+				reasoningSupported: reasoning ? true : undefined,
 				contextWindow:
 					(typeof raw.context_length === "number" ? raw.context_length : undefined) ??
 					lookupContextWindow(model.id),
@@ -161,7 +208,7 @@ export async function fetchModels(config: AppConfig): Promise<FetchModelsResult>
 		}
 
 		models.sort((a, b) => a.id.localeCompare(b.id));
-		return { ok: true, models };
+		return { ok: true, models: catalog ? enrichModelsWithCatalog(models, catalog) : models };
 	} catch (error) {
 		const message = providerErrorText(error);
 

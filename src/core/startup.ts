@@ -14,6 +14,7 @@ import {
 	fetchModels,
 	loadConfig,
 	lookupContextWindow,
+	type ModelInfo,
 	type ProviderProbe,
 	probeProvider,
 	runOnboardingCheck,
@@ -145,15 +146,19 @@ export interface StartupResult {
  * hand — this keeps the fast path fast while still fixing shouldCompact using
  * a hardcoded 128k default.
  */
-function warmModelMetadataInBackground(config: AppConfig, forModel: string): Promise<void> | undefined {
+function warmModelMetadataInBackground(
+	config: AppConfig,
+	forModel: string,
+): Promise<ModelInfo | undefined> | undefined {
 	return fetchModels(config)
 		.then((r) => {
-			if (!r.ok || !r.models) return;
+			if (!r.ok || !r.models) return undefined;
 			setModelsCache(r.models);
 			const found = r.models.find((m) => m.id === forModel);
 			if (found?.contextWindow && found.contextWindow > 0) config.contextWindow = found.contextWindow;
+			return found;
 		})
-		.catch(() => {});
+		.catch(() => undefined);
 }
 
 function probeReason(probe: Exclude<ProviderProbe, "ok" | "unknown">, baseURL: string): string {
@@ -328,7 +333,9 @@ export async function runStartup(
 	// Model: CLI > saved > interactive.
 	let model: string;
 	let reasoningMeta: ModelReasoningMeta | undefined;
+	let reasoningSupported: boolean | undefined;
 	let contextWindow: number | undefined;
+	let modelWasPicked = false;
 
 	if (unconfigured) {
 		model = settings.model ?? "unconfigured";
@@ -338,9 +345,15 @@ export async function runStartup(
 		if (selection) {
 			model = selection.model;
 			reasoningMeta = selection.reasoningMeta;
+			reasoningSupported = selection.reasoningSupported;
 			contextWindow = selection.contextWindow;
 			const p = warmModelMetadataInBackground(config, model);
-			if (p) await p;
+			if (p) {
+				const metadata = await p;
+				reasoningMeta = metadata?.reasoning;
+				reasoningSupported = metadata?.reasoningSupported;
+				contextWindow = metadata?.contextWindow ?? contextWindow;
+			}
 		} else {
 			// --model failed to validate — same fork as the saved-model path: make
 			// sure the connection is actually alive before routing to a model
@@ -348,8 +361,10 @@ export async function runStartup(
 			await ensureConnectionAlive(config, pickers);
 			const sel = await selectModel(config, pickers);
 			if (!sel) process.exit(0);
+			modelWasPicked = true;
 			model = sel.model;
 			reasoningMeta = sel.reasoningMeta;
+			reasoningSupported = sel.reasoningSupported;
 			contextWindow = sel.contextWindow;
 		}
 	} else if (settings.model) {
@@ -368,20 +383,29 @@ export async function runStartup(
 		if (ok) {
 			model = settings.model;
 			const p = warmModelMetadataInBackground(config, model);
-			if (p) await p;
+			if (p) {
+				const metadata = await p;
+				reasoningMeta = metadata?.reasoning;
+				reasoningSupported = metadata?.reasoningSupported;
+				contextWindow = metadata?.contextWindow ?? contextWindow;
+			}
 		} else {
 			console.log("Saved model unavailable — selecting a new one.");
 			const sel = await selectModel(config, pickers);
 			if (!sel) process.exit(0);
+			modelWasPicked = true;
 			model = sel.model;
 			reasoningMeta = sel.reasoningMeta;
+			reasoningSupported = sel.reasoningSupported;
 			contextWindow = sel.contextWindow;
 		}
 	} else {
 		const sel = await selectModel(config, pickers);
 		if (!sel) process.exit(0);
+		modelWasPicked = true;
 		model = sel.model;
 		reasoningMeta = sel.reasoningMeta;
+		reasoningSupported = sel.reasoningSupported;
 		contextWindow = sel.contextWindow;
 	}
 
@@ -416,12 +440,13 @@ export async function runStartup(
 		config.reasoningLevel = "off";
 	} else if (args.cliReasoning) {
 		config.reasoningLevel = args.cliReasoning;
-		config.reasoningParams = buildReasoningParams(args.cliReasoning, config.reasoningFormat);
-	} else if (settings.reasoningLevel && settings.model === model) {
+		config.reasoningParams = buildReasoningParams(args.cliReasoning, config.reasoningFormat, model);
+	} else if (!modelWasPicked && settings.reasoningLevel && settings.model === model) {
 		config.reasoningLevel = settings.reasoningLevel;
-		config.reasoningParams = buildReasoningParams(settings.reasoningLevel, config.reasoningFormat);
+		config.reasoningParams = buildReasoningParams(settings.reasoningLevel, config.reasoningFormat, model);
 	} else {
-		await selectReasoningLevel(config, model, pickers, reasoningMeta);
+		const selected = await selectReasoningLevel(config, model, pickers, reasoningMeta, reasoningSupported);
+		if (!selected) process.exit(0);
 	}
 
 	if (!unconfigured) {

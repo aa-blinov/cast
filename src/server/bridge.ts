@@ -70,6 +70,7 @@ import {
 	listSessionSummaries,
 	loadSession,
 	loadSessionByShareToken,
+	loadSessionMeta,
 	recordCompaction,
 	resetSessionContext,
 	type SessionState,
@@ -671,6 +672,14 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	 */
 	function syncActiveProviderFromSettings(): { endpointChanged: boolean } {
 		const settings = loadSettings();
+		// Follow every persisted slot, not only the active endpoint. TUI can run
+		// with CAST_NO_DAEMON=1 while the web daemon stays alive, so cached slot
+		// values must not be the authority across turns.
+		if (settings.model !== undefined) defaultModel = settings.model;
+		subagentModel = settings.subagentModel;
+		subagentModelProvider = settings.subagentModelProvider;
+		planModel = settings.planModel;
+		planModelProvider = settings.planModelProvider;
 
 		// providerUrl/apiKey are the active endpoint, and modelProvider names the
 		// saved provider row that owns it. Both are persisted by every provider
@@ -689,7 +698,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				? (settings.providers ?? []).find((p) => p.name === settings.modelProvider)
 				: undefined;
 			config.reasoningFormat = resolveReasoningFormat(baseURL, named?.reasoningFormat);
-			config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat);
+			config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat, defaultModel);
 			// The cached /v1/models list came from the old endpoint — clear it so
 			// model pickers/completions can't offer ids the new endpoint lacks.
 			setModelsCache([]);
@@ -699,17 +708,25 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// process — follow external edits too, not just local ones.
 		if (settings.reasoningLevel !== undefined && settings.reasoningLevel !== config.reasoningLevel) {
 			config.reasoningLevel = settings.reasoningLevel;
-			config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat);
-		}
-
-		// Default model for brand-new sessions. Per-session models are left
-		// alone here — they get reconciled against the new provider at turn
-		// start instead (see reconcileSessionModel).
-		if (settings.model && settings.model !== defaultModel) {
-			defaultModel = settings.model;
+			config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat, defaultModel);
 		}
 
 		return { endpointChanged };
+	}
+
+	function syncExternalSessionModel(ws: WebAgentSession): void {
+		const stored = loadSessionMeta(ws.id);
+		if (!stored || (stored.model === ws.session.model && stored.providerUrl === ws.session.providerUrl)) return;
+
+		ws.session.model = stored.model;
+		ws.session.providerUrl = stored.providerUrl;
+		ws.systemPrompt = computeSystemPrompt(
+			resolvePersona(ws.session.persona ?? "") ?? currentPersona,
+			ws.session.model,
+			ws.session.cwd ?? cwd,
+			ws.session.mode,
+		);
+		broadcastSessionUpdate(ws);
 	}
 
 	/**
@@ -818,6 +835,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		if (worktree) sessionCwd = worktree.path;
 		const session = createSession(model, sessionCwd);
 		session.persona = persona.name;
+		session.providerUrl = config.baseURL;
 
 		// Scratch dirs must exist before SessionStart hooks run: hooks receive this
 		// cwd and are allowed to prepare the workspace. Web drafts don't reach this
@@ -1123,6 +1141,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// user picked elsewhere (400 / 429 until a restart). Reconcile the
 		// session's model id against the new provider when the endpoint moved.
 		const { endpointChanged } = syncActiveProviderFromSettings();
+		syncExternalSessionModel(ws);
 		if (endpointChanged) await reconcileSessionModel(ws);
 
 		const sessionCwd = ws.session.cwd ?? cwd;
@@ -1816,8 +1835,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	 * since switched models (`/model`) falls back to whatever the provider's
 	 * model list cache says about the model it's actually running now. */
 	function reasoningOptionsFor(model: string): Array<{ value: string; label: string }> {
-		const meta = reasoningMeta ?? getModelsCache().find((m) => m.id === model)?.reasoning;
-		return getReasoningOptionsForFormat(meta ?? null, config.reasoningFormat);
+		const cached = getModelsCache().find((m) => m.id === model);
+		const meta = reasoningMeta ?? cached?.reasoning;
+		return getReasoningOptionsForFormat(meta ?? null, config.reasoningFormat, model, cached?.reasoningSupported);
 	}
 
 	function renameSession(sessionId: string, title: string): boolean {
@@ -1938,6 +1958,11 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				result: {
 					persona: ws.session.persona,
 					model: ws.session.model,
+					providerUrl: ws.session.providerUrl ?? config.baseURL,
+					providerName:
+						(loadSettings().providers ?? []).find(
+							(provider) => provider.url === config.baseURL && provider.apiKey === config.apiKey,
+						)?.name ?? null,
 					// Reasoning level is stored on the global `config` object, not the
 					// session — the Settings → Model tab header reads this so the
 					// user can see what level is currently in effect.
@@ -2249,9 +2274,53 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			const newWs = await createSessionInstance(ws.session.persona ?? undefined, undefined, ws.session.cwd);
 			return { ok: true, result: { sessionId: newWs.id } };
 		}
+		if (name === "/model-selection") {
+			const [providerName, model] = arg.split(WHITESPACE_SPLIT).filter(Boolean);
+			if (!providerName || !model) return { ok: false, error: "Usage: /model-selection <provider> <model>" };
+			const provider = (loadSettings().providers ?? []).find((p) => p.name === providerName);
+			if (!provider) return { ok: false, error: `Unknown provider: ${providerName}` };
+			const target = { ...config, baseURL: provider.url, apiKey: provider.apiKey };
+			const models = await fetchModels(target);
+			if (!models.ok || !models.models?.some((entry) => entry.id === model)) {
+				return {
+					ok: false,
+					error: models.error ?? `Model "${model}" is not available from provider "${providerName}"`,
+				};
+			}
+
+			const providerChanged = config.baseURL !== provider.url || config.apiKey !== provider.apiKey;
+			config.baseURL = provider.url;
+			config.apiKey = provider.apiKey;
+			config.reasoningFormat = resolveReasoningFormat(provider.url, provider.reasoningFormat);
+			config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat, model);
+			setModelsCache(models.models);
+			ws.session.model = model;
+			ws.session.providerUrl = provider.url;
+			ws.systemPrompt = computeSystemPrompt(
+				resolvePersona(ws.session.persona ?? "") ?? currentPersona,
+				model,
+				ws.session.cwd ?? cwd,
+				ws.session.mode,
+			);
+			defaultModel = model;
+			if (providerChanged && !subagentModelProvider) subagentModel = undefined;
+			if (providerChanged && !planModelProvider) planModel = undefined;
+			updateSettings({
+				providerUrl: provider.url,
+				apiKey: provider.apiKey,
+				modelProvider: provider.name,
+				model,
+				...(providerChanged && !subagentModelProvider ? { subagentModel: undefined } : {}),
+				...(providerChanged && !planModelProvider ? { planModel: undefined } : {}),
+			});
+			saveSession(ws.session);
+			broadcastSessionUpdate(ws);
+			return { ok: true, result: { model, provider: provider.name } };
+		}
 		if (name === "/model") {
 			if (!arg) return { ok: true, result: { model: ws.session.model } };
 			ws.session.model = arg;
+			ws.session.providerUrl = config.baseURL;
 			ws.systemPrompt = computeSystemPrompt(
 				resolvePersona(ws.session.persona ?? "") ?? currentPersona,
 				arg,
@@ -2297,7 +2366,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			// Global, same as the TUI — `config` is a shared mutable object, so this
 			// takes effect on the next turn in every session, not just this one.
 			config.reasoningLevel = arg;
-			config.reasoningParams = buildReasoningParams(arg, config.reasoningFormat);
+			config.reasoningParams = buildReasoningParams(arg, config.reasoningFormat, ws.session.model);
 			updateSettings({ reasoningLevel: arg });
 			return { ok: true, result: { reasoningLevel: arg } };
 		}
@@ -2782,8 +2851,13 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					const fallback = remaining[0]!;
 					config.baseURL = fallback.url;
 					config.apiKey = fallback.apiKey;
+					ws.session.providerUrl = fallback.url;
 					config.reasoningFormat = resolveReasoningFormat(fallback.url, fallback.reasoningFormat);
-					config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat);
+					config.reasoningParams = buildReasoningParams(
+						config.reasoningLevel,
+						config.reasoningFormat,
+						ws.session.model,
+					);
 					ws.session.model = "";
 					updateSettings({
 						providers: remaining,
@@ -2803,6 +2877,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				if (deletingActive) {
 					config.baseURL = "";
 					config.apiKey = "";
+					ws.session.providerUrl = undefined;
 					ws.session.model = "";
 					saveSession(ws.session);
 				}
@@ -2823,6 +2898,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				if (!config.baseURL) {
 					config.baseURL = url;
 					config.apiKey = apiKey;
+					ws.session.providerUrl = url;
 					updateSettings({ providers: next, providerUrl: url, apiKey, modelProvider: pname });
 					return { ok: true, result: `Added provider "${pname}" and set it active (default)` };
 				}
@@ -2838,8 +2914,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			}
 			config.baseURL = target.url;
 			config.apiKey = target.apiKey;
+			ws.session.providerUrl = target.url;
 			config.reasoningFormat = resolveReasoningFormat(target.url, target.reasoningFormat);
-			config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat);
+			config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat, ws.session.model);
 			// Switching the active provider invalidates every model id that was
 			// chosen against the old endpoint, so reset them — the user re-picks on
 			// the new provider. Slots with their own provider override keep their
@@ -2994,7 +3071,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				return { ok: false, error: `Unknown reasoning format: ${arg}. Options: ${options.join(", ")}` };
 			}
 			config.reasoningFormat = resolveReasoningFormat(config.baseURL, arg as (typeof options)[number]);
-			config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat);
+			config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat, ws.session.model);
 			const selected = arg as (typeof options)[number];
 			const settings = loadSettings();
 			const providers = settings.providers?.map((provider) =>
@@ -3080,6 +3157,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			"/web-fetch-provider",
 			"/theme",
 			"/hooks",
+			"/model-selection",
 			"/model",
 			"/reasoning",
 			"/quick-session-persona",
