@@ -2,6 +2,13 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.30
+
+### Fixed
+
+- **TUI recovers across daemon upgrades and restarts.** Stale daemon connections now time out, reconnect to the current daemon, retry the message, and restore the session state over SSE.
+- **Web chat no longer loses the first message during SSE startup.** A draft waits briefly for its active session stream, with bounded recovery when the daemon is temporarily unavailable.
+
 ## 0.13.29
 
 ### Fixed
