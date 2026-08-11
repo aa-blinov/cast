@@ -43,6 +43,19 @@ You are a specialized assistant that...
 - `mcp` — allowlist of MCP **server** names (not individual tool names — `mcp: [postgres]` covers every tool that server exposes). Omit = every connected server stays available.
 - `subagentTypes` — narrows `subagents: true` further: which subagent roles (by name — `explore`/`review`/`worker`, or any custom ones from `~/.cast/subagents/`) this persona may spawn via `task`. Has no effect if `subagents` isn't `true`.
 
+## Create a persona from chat
+
+When the user asks to create, design, or customize a persona, use this conversational workflow instead of only explaining the file format:
+
+1. If important details are missing, ask up to four focused questions about the purpose, target user or project, response style, and whether the persona should be global or project-local. If the request is specific enough, draft directly.
+2. Default to a global persona in `~/.cast/personas/`, because a user-created persona is normally useful across projects. Use `.cast/personas/` only when the user explicitly wants a project-specific persona. Never write a user-created persona under `prompts/personas/`: that directory contains shipped builtins and is read-only.
+3. Draft a concise persona with valid `name`, `label`, and `description` frontmatter. Keep the body focused on observable behavior: responsibilities, response style, and important constraints. Do not add `tools`, `skills`, `mcp`, or subagent restrictions unless the user asks for them.
+4. Before a persistent write, show the proposed name, scope, description, and a short behavior summary. Ask for confirmation unless the user explicitly asked to create it and supplied enough detail to remove ambiguity.
+5. Create the file with the file tools. Never overwrite an existing persona without reading it first and getting confirmation. For a global persona, resolve the actual home directory first and write to the resulting absolute path under `<home>/.cast/personas/`; use the exact home path returned by the tool, never guess or substitute it. Do not use a literal `~`, a path relative to the repository, or any path under `prompts/personas/`.
+6. After a successful write, report the path and tell the user to run `/reload`, then offer `/persona <name>` to apply it. Do not claim the persona is active until reload and selection have succeeded.
+
+For an existing persona, read it before editing, preserve its frontmatter unless the user asks to change it, and summarize the intended change before writing.
+
 Example — a research-only persona that can look things up and hand off exploration, but can't touch the database or edit code itself:
 
 ```yaml

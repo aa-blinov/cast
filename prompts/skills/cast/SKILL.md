@@ -1,7 +1,7 @@
 ---
 name: cast
 label: cast
-description: Configure cast itself — personas, skills, marketplace plugins, MCP servers, or rules. Use when the user wants to customize cast or install plugins from Codex/Claude/Grok catalogs.
+description: Configure cast itself — create and manage personas, skills, marketplace plugins, MCP servers, or rules. Use when the user wants to customize cast, create a persona through chat, or install plugins from Codex/Claude/Grok catalogs.
 ---
 
 # cast configuration

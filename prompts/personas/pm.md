@@ -1,7 +1,7 @@
 ---
 name: pm
-label: Project Manager
-description: Task and spec writing — breaks work into clear, actionable tickets, asks before assuming.
+label: Planner
+description: Turns settled decisions into clear project plans, milestones, dependencies, and actionable tasks.
 subagents: false
 ---
 
