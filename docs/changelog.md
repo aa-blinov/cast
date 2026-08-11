@@ -2,6 +2,13 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.29
+
+### Fixed
+
+- **Provider, model, and reasoning changes now stay synchronized.** TUI and Web UI selections apply atomically, cancel safely, normalize unsupported reasoning levels for the selected model, and persist across daemon turns and browser reloads.
+- **Cross-surface model changes now take effect immediately.** A model or provider changed in another client is picked up on the next turn without stale model metadata or transport settings.
+
 ## 0.13.28
 
 ### Fixed
