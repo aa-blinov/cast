@@ -8,24 +8,13 @@ See [Persona Research](persona-research.md) for empirical studies on role framin
 
 | Persona | Label | Description |
 |---------|-------|-------------|
-| `analyst` | Business Analyst | Requirements out of vague asks — contradictions, gaps, scenarios, acceptance criteria, API contracts |
-| `appsec` | Security Engineer | Application security — threat modeling, secure code review, vulnerability analysis |
-| `architect` | Architect | System design — trade-off analysis, ADRs, module boundaries; the deliverable is a decision, not a diff |
-| `assistant` | Assistant | General-purpose everyday help — questions, planning, writing, quick lookups; uses tools only when a task needs them |
+| `analyst` | Product & Project Analyst | Product, analytical, and project work — turns vague goals into hypotheses, decisions, requirements, priorities, and actionable plans |
+| `assistant` | Assistant | General-purpose everyday help — questions, planning, writing, quick lookups; uses tools when a task actually needs them |
 | `coder-with-subagents` | Coder with subagents | Delegates parallel and isolated work to sub-agents via the task tool |
-| `dba` | Database Engineer | Schema design, migrations, query optimization, indexing |
-| `devops` | DevOps Engineer | CI/CD, IaC, containers, Kubernetes, deployments, observability |
-| `fiction-writer` | Fiction Writer | Creative fiction and literary prose |
-| `marketer` | Marketer | Positioning, messaging, and go-to-market |
-| `pm` | Project Manager | Task and spec writing — breaks work into clear, actionable tickets |
-| `product` | Product Manager | Product thinking — hypotheses, success metrics, prioritization, user stories from raw feedback |
-| `qa` | QA Engineer | Functional testing — verifies features, builds test plans, catches regressions |
-| `qa-nfr` | QA Non-Functional | Non-functional testing — performance, security, reliability, scalability |
-| `researcher` | Researcher | Open-ended questions and investigations — searches, reads sources, cross-checks claims, answers with citations |
-| `senior` (default) | Senior Developer | Lazy senior dev — the ladder, root-cause fixes, deletion over addition |
-| `sre` | SRE / Incident Responder | Incident-mode thinking — logs first, hypothesis→check loops, blameless postmortems, SLOs |
-| `sysadmin` | System Administrator | Operations and infrastructure — diagnoses systems, manages services |
-| `tech-writer` | Technical Writer | Documentation — READMEs, guides, API references, changelogs, diagrams |
+| `pm` | Planner | Turns settled decisions into clear project plans, milestones, dependencies, and actionable tasks |
+| `qa` | Reviewer | Functional review — checks behavior against requirements, finds regressions, and produces actionable findings |
+| `researcher` | Researcher | Open-ended questions and investigations — searches, reads sources, cross-checks claims, answers with citations instead of recall |
+| `senior` (default) | Senior Developer | Lazy senior dev — the ladder, root-cause fixes, deletion over addition, verify-then-commit |
 
 The `senior` persona is the default. Built-in personas deliberately share the normal built-in, skill, and MCP tool surface, so changing role does not unexpectedly break a workflow. `coder-with-subagents` is the exception: it additionally enables the `task` tool for delegating work to sub-agents. Use a custom persona's allowlists when a role needs least privilege or a smaller tool prompt.
 
@@ -38,6 +27,21 @@ The `senior` persona is the default. Built-in personas deliberately share the no
 The persona travels with the thread: each session remembers its driving persona, and resuming (`-c`, `--resume`, `/sessions`, `/continue`) restores it. The global choice in `~/.cast/settings.json` serves as the default for new sessions only. If a session's persona was deleted, resume keeps the current active persona with a notice.
 
 Switching mid-conversation leaves previous reasoning in context. When changing personas in a non-empty thread, cast prompts to start a new session (`/new`). Select "Continue here" (or press Esc) to keep the current thread re-stamped under the new persona.
+
+## Create or Customize from Chat
+
+You can ask the agent to create a persona or customize the currently effective one directly in chat. The constructor can change six areas:
+
+- behavior and system-prompt instructions;
+- built-in tools;
+- skills;
+- MCP servers;
+- sub-agent delegation and allowed sub-agent roles;
+- project instructions from `AGENTS.md` / `CLAUDE.md` via `agentsMd`.
+
+For a new persona, cast normally defaults to the global scope (`~/.cast/personas/`). Use the project scope (`.cast/personas/`) only when the persona is explicitly intended for one project. A built-in persona is never edited in place: a same-name global or project persona overrides it according to the priority rules below.
+
+Before writing, cast shows the proposed name, scope, description, and behavior summary. If the active persona is customized, the current turn keeps its original prompt and tool set; the override is loaded automatically for the next user message. `/reload` is not required for that chat flow.
 
 ## Custom Personas
 

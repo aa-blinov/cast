@@ -181,6 +181,23 @@ describe("loadPersonas multi-source", () => {
 		expect(seniors[0].label).toBe("My Senior");
 	});
 
+	it("same-name overrides replace the builtin and preserve requested restrictions", () => {
+		writeFileSync(
+			join(GLOBAL_DIR, "senior.md"),
+			`---\nname: senior\nlabel: Customized Senior\ntools: [read, grep]\nskills: [research]\nmcp: [postgres]\n---\n\nCustomized body.\n`,
+			"utf-8",
+		);
+		const senior = findPersona("senior", { globalDir: GLOBAL_DIR });
+		expect(senior).toMatchObject({
+			source: "global",
+			label: "Customized Senior",
+			tools: ["read", "grep"],
+			skills: ["research"],
+			mcp: ["postgres"],
+		});
+		expect(senior?.systemPrompt).toContain("Customized body.");
+	});
+
 	it("findPersona respects multi-source options", () => {
 		writePersona(GLOBAL_DIR, "special", "Special assistant.", "Special");
 		const found = findPersona("special", { globalDir: GLOBAL_DIR });

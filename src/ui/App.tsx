@@ -5,6 +5,7 @@ import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import type { AppConfig } from "../core/config.ts";
 import { formatContextFilesForPrompt, resolveNestedContextFiles } from "../core/context-files.ts";
 import { formatMcpForPrompt } from "../core/mcp.ts";
+import { findPersona, listPersonas, type Persona } from "../core/personas.ts";
 import {
 	createPlanState,
 	createPlanTodos,
@@ -15,7 +16,7 @@ import {
 	resolvePlanQuestion,
 	resolvePlanTransition,
 } from "../core/plan.ts";
-import { buildSystemPrompt, makeConfirmBash } from "../core/project.ts";
+import { buildSystemPrompt, makeConfirmBash, personaOptionsForCwd } from "../core/project.ts";
 import {
 	formatRulesForTurn,
 	matchAutoRules,
@@ -25,6 +26,7 @@ import {
 } from "../core/rules.ts";
 import { countTurnMessages, estimateTokens, resetSessionContext, saveSession } from "../core/session.ts";
 import { loadSettings, type StatusBarConfig } from "../core/settings.ts";
+import { formatSkillsForPrompt } from "../core/skills.ts";
 import type { StartupResult } from "../core/startup.ts";
 import { setSuspendHook } from "../core/stdin-manager.ts";
 import { fetchLatestVersion, isNewerVersion, isReleaseInstall } from "../core/upgrade.ts";
@@ -163,7 +165,6 @@ export function App(props: AppProps): JSX.Element {
 
 	const [session] = useState(result.session);
 	const [mcpResult, setMcpResult] = useState(result.mcpResult);
-	const mcpPromptSuffix = useMemo(() => formatMcpForPrompt(mcpResult), [mcpResult]);
 	const [currentPersona, setCurrentPersona] = useState(result.persona);
 	const [systemPrompt, setSystemPrompt] = useState(result.systemPrompt);
 	const [skills, setSkills] = useState(result.skills);
@@ -179,7 +180,9 @@ export function App(props: AppProps): JSX.Element {
 	const [cwd, setCwd] = useState(result.cwd);
 	const [reasoningMeta, setReasoningMeta] = useState(result.reasoningMeta);
 	const [personaOptions, setPersonaOptions] = useState(result.personaOptions);
-	const [personas] = useState(result.personas);
+	const [personas, setPersonas] = useState(result.personas);
+	const currentPersonaRef = useRef(currentPersona);
+	currentPersonaRef.current = currentPersona;
 	const [subagentPrompts] = useState(result.subagentPrompts);
 	const [subagentModel, setSubagentModel] = useState(result.subagentModel);
 	const [subagentModelProvider, setSubagentModelProvider] = useState(result.subagentModelProvider);
@@ -320,13 +323,16 @@ export function App(props: AppProps): JSX.Element {
 				: "";
 
 			// 5. Build the full system prompt.
+			const activePersona = currentPersonaRef.current;
 			return buildSystemPrompt(
-				currentPersona,
+				activePersona,
 				contextFilesSuffix + nestedContext,
 				rulesBlock,
 				rulesLazySuffix,
-				skillsPromptSuffix,
-				mcpPromptSuffix,
+				activePersona.skills !== undefined
+					? formatSkillsForPrompt(skills, activePersona.skills)
+					: skillsPromptSuffix,
+				formatMcpForPrompt(mcpResult, activePersona.mcp),
 				cwd,
 				{ model: activeModel, reasoningLevel: config.reasoningLevel, mode: planMode ? "plan" : "build" },
 			);
@@ -334,11 +340,11 @@ export function App(props: AppProps): JSX.Element {
 		[
 			directoryRules,
 			activeAutoRules,
-			currentPersona,
+			skills,
+			mcpResult,
 			contextFilesSuffix,
 			rulesLazySuffix,
 			skillsPromptSuffix,
-			mcpPromptSuffix,
 			cwd,
 			projectTrusted,
 			activeModel,
@@ -346,6 +352,44 @@ export function App(props: AppProps): JSX.Element {
 			planMode,
 		],
 	);
+
+	const refreshPersonasForTurn = useCallback(async (): Promise<{
+		persona: Persona;
+		personas: Persona[];
+		systemPrompt: string;
+	}> => {
+		const options = personaOptionsForCwd(cwd, projectTrusted);
+		const nextPersonas = listPersonas(options);
+		const nextPersona = findPersona(currentPersonaRef.current.name, options) ?? currentPersonaRef.current;
+		currentPersonaRef.current = nextPersona;
+		setPersonaOptions(options);
+		setPersonas(nextPersonas);
+		setCurrentPersona(nextPersona);
+		const nextSystemPrompt = buildSystemPrompt(
+			nextPersona,
+			contextFilesSuffix,
+			rulesSuffix,
+			rulesLazySuffix,
+			nextPersona.skills !== undefined ? formatSkillsForPrompt(skills, nextPersona.skills) : skillsPromptSuffix,
+			formatMcpForPrompt(mcpResult, nextPersona.mcp),
+			cwd,
+			{ model: activeModel, reasoningLevel: config.reasoningLevel, mode: planMode ? "plan" : "build" },
+		);
+		setSystemPrompt(nextSystemPrompt);
+		return { persona: nextPersona, personas: nextPersonas, systemPrompt: nextSystemPrompt };
+	}, [
+		cwd,
+		projectTrusted,
+		contextFilesSuffix,
+		rulesSuffix,
+		rulesLazySuffix,
+		skills,
+		skillsPromptSuffix,
+		mcpResult,
+		activeModel,
+		config.reasoningLevel,
+		planMode,
+	]);
 
 	const agent = useAgentSession({
 		session,
@@ -358,6 +402,7 @@ export function App(props: AppProps): JSX.Element {
 		mcpResult,
 		confirmBash,
 		rebuildSystemPrompt,
+		refreshPersonasForTurn,
 		personas,
 		currentPersona: currentPersona.name,
 		subagentPrompts,

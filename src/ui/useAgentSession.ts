@@ -12,6 +12,7 @@ import { hasHooks, runHooksForEvent } from "../core/hooks.ts";
 import { describeTurnError, isRetryableStreamError, stripHermesToolCalls } from "../core/llm.ts";
 import { type AgentEvent, runAgentLoop } from "../core/loop.ts";
 import { formatMcpForPrompt, type McpSetupResult } from "../core/mcp.ts";
+import type { Persona } from "../core/personas.ts";
 import { type PlanQuestion, type PlanTransition, readActivePlan } from "../core/plan.ts";
 import { resolveHooksForCwd } from "../core/project.ts";
 import type { AgentRunner } from "../core/runner.ts";
@@ -327,6 +328,8 @@ interface UseAgentSessionParams {
 	confirmBash: (command: string, reason: string) => Promise<boolean>;
 	/** Per-turn system prompt rebuild for sticky rules + @-mention. */
 	rebuildSystemPrompt?: (context: { userText: string; contextFiles: string[] }) => string;
+	/** Re-read persona overrides before a new turn so chat-created changes apply immediately. */
+	refreshPersonasForTurn?: () => Promise<{ persona: Persona; personas: Persona[]; systemPrompt: string }>;
 	/** Available personas for the task tool. */
 	personas?: import("../core/personas.ts").Persona[];
 	/** Current persona name. */
@@ -488,6 +491,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		mcpResult,
 		confirmBash,
 		rebuildSystemPrompt,
+		refreshPersonasForTurn,
 		personas,
 		currentPersona,
 		subagentPrompts,
@@ -837,6 +841,15 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				return;
 			}
 			setError(null);
+			let activeSystemPrompt = systemPrompt;
+			let activePersonas = personas;
+			let activePersonaName = currentPersona;
+			if (refreshPersonasForTurn) {
+				const refreshed = await refreshPersonasForTurn();
+				activeSystemPrompt = refreshed.systemPrompt;
+				activePersonas = refreshed.personas;
+				activePersonaName = refreshed.persona.name;
+			}
 			setRetry(null);
 			setLastTurnUsage(null);
 			frozenElapsedRef.current = 0;
@@ -950,14 +963,14 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				// Keeps the MCP catalog text in sync with what loop.ts's own
 				// persona.mcp filtering actually lets this persona call — same
 				// lookup bridge.ts's computeSystemPrompt does.
-				const activePersonaObj = personas?.find((p) => p.name === currentPersona);
+				const activePersonaObj = activePersonas?.find((p) => p.name === activePersonaName);
 				const result = await runAgentLoop(session.messages, {
 					config,
 					model: modelOverride ?? session.model,
 					modelProvider: resolvedModelProvider,
 					subagentModelProvider: resolvedSubagentProvider,
 					cwd,
-					systemPrompt,
+					systemPrompt: activeSystemPrompt,
 					signal: ac.signal,
 					steeringQueue: runner.steeringQueue,
 					followUpQueue: runner.followUpQueue,
@@ -971,8 +984,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					lastPromptTokens: session.lastPromptTokens,
 					rebuildSystemPrompt,
 					contextFiles: contextFilesRef.current,
-					personas,
-					currentPersona,
+					personas: activePersonas,
+					currentPersona: activePersonaName,
 					subagentPrompts,
 					subagentModel,
 					disabledTools,
@@ -1248,6 +1261,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			promoteStreamingToHistory,
 			updateStreaming,
 			rebuildSystemPrompt,
+			refreshPersonasForTurn,
 			personas,
 			currentPersona,
 			subagentPrompts,
