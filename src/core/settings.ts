@@ -178,6 +178,15 @@ function migrateSettings(s: Settings): Settings {
 	if (!next.providers?.length && next.providerUrl && next.apiKey) {
 		next = { ...next, providers: [{ name: "default", url: next.providerUrl, apiKey: next.apiKey }] };
 	}
+	// Older provider switching wrote the active URL/key without updating the
+	// main model's provider name. Prefer the matching saved row so startup does
+	// not route a model through a stale provider after that upgrade.
+	if (next.providerUrl && next.apiKey && next.providers?.length) {
+		const active = next.providers.find((p) => p.url === next.providerUrl && p.apiKey === next.apiKey);
+		if (active && next.modelProvider && next.modelProvider !== active.name) {
+			next = { ...next, modelProvider: active.name };
+		}
+	}
 	// `webPassword` → `serverToken` (renamed with the daemon command). Read the
 	// old key so existing settings keep working; promote it to the new name on
 	// load. Returning the migrated object means the in-memory copy (and the

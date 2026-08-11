@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.28
+
+### Fixed
+
+- **Provider and model selections now persist together.** TUI and Web UI provider switches update the main model provider, repair stale provider settings, and safely fall back when an active provider is removed.
+
 ## 0.13.27
 
 ### Fixed
