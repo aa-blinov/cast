@@ -3,7 +3,6 @@ import {
 	fetchModelsDevCatalog,
 	lookupModelMetadataFromCatalog,
 	type ModelsDevCatalog,
-	type ModelsDevReasoningField,
 	type ModelsDevReasoningOption,
 } from "./models-dev.ts";
 import type { Provider } from "./settings.ts";
@@ -134,8 +133,6 @@ export interface ModelInfo {
 	reasoning?: ModelReasoningMeta;
 	/** Capability fallback from models.dev when /v1/models omits reasoning metadata. */
 	reasoningSupported?: boolean;
-	/** Response field advertised by models.dev for interleaved reasoning. */
-	reasoningField?: ModelsDevReasoningField;
 	/** Context window size in tokens (from /v1/models) */
 	contextWindow?: number;
 }
@@ -156,7 +153,6 @@ export function enrichModelsWithCatalog(models: ModelInfo[], catalog: ModelsDevC
 			...model,
 			reasoning: model.reasoning ?? catalogReasoning,
 			reasoningSupported: model.reasoning ? true : fallback.reasoning,
-			reasoningField: model.reasoningField ?? fallback.interleavedField,
 			contextWindow: model.contextWindow ?? fallback.contextWindow,
 		};
 	});

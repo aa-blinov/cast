@@ -396,6 +396,93 @@ describe("web bridge", () => {
 		});
 	});
 
+	it("chooses a valid model default when the current reasoning level is unsupported", async () => {
+		const { loadSettings, updateSettings } = await import("../src/core/settings.ts");
+		updateSettings({
+			providers: [{ name: "local", url: testConfig.baseURL, apiKey: testConfig.apiKey }],
+			providerUrl: testConfig.baseURL,
+			apiKey: testConfig.apiKey,
+			modelProvider: "local",
+			reasoningLevel: "max",
+		});
+		mockFetchModels.mockResolvedValue({
+			ok: true,
+			models: [
+				{
+					id: "hy3",
+					reasoning: {
+						mandatory: false,
+						defaultEnabled: true,
+						supportedEfforts: ["low", "high"],
+						defaultEffort: "low",
+					},
+				},
+			],
+		});
+		const config = { ...testConfig, reasoningLevel: "max", reasoningFormat: "openai-compatible" } as AppConfig;
+		const bridge = createServerBridge(makeResult({ config }));
+		const ws = bridge.createSession();
+
+		await bridge.executeCommand(ws.id, "/model-selection local hy3");
+
+		expect(loadSettings()).toMatchObject({ model: "hy3", reasoningLevel: "low" });
+		expect(bridge.getReasoningOptionsForSession(ws.id).options.map((option) => option.value)).toEqual([
+			"off",
+			"low",
+			"high",
+		]);
+	});
+
+	it("rebuilds reasoning transport when another surface changes the session model", async () => {
+		const { loadSession, saveSession } = await import("../src/core/session.ts");
+		const config = { ...testConfig, reasoningLevel: "high", reasoningFormat: "openai-compatible" } as AppConfig;
+		mockFetchModels.mockResolvedValue({
+			ok: true,
+			models: [
+				{
+					id: "hy3",
+					reasoning: {
+						mandatory: false,
+						defaultEnabled: true,
+						supportedEfforts: ["high"],
+						defaultEffort: "high",
+					},
+				},
+			],
+		});
+		const bridge = createServerBridge(makeResult({ config }));
+		const ws = bridge.createSession();
+		saveSession(ws.session);
+		const persisted = loadSession(ws.id)!;
+		persisted.model = "hy3";
+		persisted.providerUrl = config.baseURL;
+		saveSession(persisted);
+
+		await bridge.submit(ws.id, "hello");
+
+		const runConfig = runAgentLoop.mock.calls[0]![1] as { config: AppConfig };
+		expect(runConfig.config.reasoningParams.body).toEqual({ reasoning_effort: "high" });
+	});
+
+	it("adopts an externally changed reasoning format on the next turn", async () => {
+		const { updateSettings } = await import("../src/core/settings.ts");
+		const config = { ...testConfig, reasoningLevel: "off", reasoningFormat: "openai-compatible" } as AppConfig;
+		updateSettings({
+			providers: [{ name: "local", url: config.baseURL, apiKey: config.apiKey, reasoningFormat: "generic" }],
+			providerUrl: config.baseURL,
+			apiKey: config.apiKey,
+			modelProvider: "local",
+		});
+		const bridge = createServerBridge(makeResult({ config }));
+		const ws = bridge.createSession();
+
+		await bridge.submit(ws.id, "hello");
+
+		const runConfig = runAgentLoop.mock.calls[0]![1] as { config: AppConfig };
+		expect(runConfig.config.reasoningFormat).toBe("generic");
+		expect(runConfig.config.reasoningParams.body).toEqual({});
+	});
+
 	it("records the provider on a web-created session", () => {
 		const bridge = createServerBridge(makeResult({ config: { ...testConfig } }));
 		const ws = bridge.createSession();

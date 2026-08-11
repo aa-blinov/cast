@@ -624,6 +624,17 @@ export function saveSession(session: SessionState): void {
 	});
 }
 
+/** Persist only the session routing identity. TUI model/provider switches can
+ * happen while the daemon owns a newer message history; upserting the whole
+ * local SessionState there would overwrite that history with a stale mirror. */
+export function updateSessionIdentity(session: Pick<SessionState, "id" | "model" | "providerUrl">): void {
+	const updatedAt = new Date().toISOString();
+	const result = getDb()
+		.prepare("UPDATE sessions SET model = ?, provider_url = ?, updated_at = ? WHERE id = ?")
+		.run(session.model, session.providerUrl ?? null, updatedAt, session.id);
+	if (result.changes === 0) saveSession(session as SessionState);
+}
+
 /**
  * Called from the compaction callback with the full pre-cut message array
  * and the marker-bearing replacement compactMessages() built. Nothing is

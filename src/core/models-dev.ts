@@ -12,8 +12,6 @@ import { join } from "node:path";
  * official api.minimax.io provider itself isn't listed, only Fireworks/W&B/
  * CrossModel reselling the same model with three different context values).
  */
-export type ModelsDevReasoningField = "reasoning_content" | "reasoning_details";
-
 export interface ModelsDevReasoningOption {
 	type: "toggle" | "effort";
 	values?: string[];
@@ -22,7 +20,6 @@ export interface ModelsDevReasoningOption {
 interface ModelsDevModel {
 	reasoning?: boolean;
 	reasoning_options?: ModelsDevReasoningOption[];
-	interleaved?: { field?: string };
 	limit?: { context?: number; output?: number };
 }
 interface ModelsDevProvider {
@@ -33,7 +30,6 @@ export type ModelsDevCatalog = Record<string, ModelsDevProvider>;
 export interface ModelsDevModelMetadata {
 	reasoning?: boolean;
 	reasoningOptions?: ModelsDevReasoningOption[];
-	interleavedField?: ModelsDevReasoningField;
 	contextWindow?: number;
 }
 
@@ -115,8 +111,7 @@ export function lookupContextWindowFromCatalog(modelId: string, catalog: ModelsD
 /**
  * Looks up capability metadata independently from the provider endpoint. The
  * catalog can contain the same model under several resellers, so a positive
- * reasoning capability wins if any matching entry advertises it; interleaved
- * output uses the first known response field.
+ * reasoning capability wins if any matching entry advertises it.
  */
 export function lookupModelMetadataFromCatalog(
 	modelId: string,
@@ -142,20 +137,9 @@ export function lookupModelMetadataFromCatalog(
 		: matches.some((model) => model.reasoning === false)
 			? false
 			: undefined;
-	const interleavedField = matches
-		.map((model) => model.interleaved?.field)
-		.find(
-			(field): field is ModelsDevReasoningField => field === "reasoning_content" || field === "reasoning_details",
-		);
 	const contextWindow = lookupContextWindowFromCatalog(modelId, catalog);
 	const reasoningOptions = matches.find((model) => model.reasoning_options?.length)?.reasoning_options;
 
-	if (
-		reasoning === undefined &&
-		reasoningOptions === undefined &&
-		interleavedField === undefined &&
-		contextWindow === undefined
-	)
-		return undefined;
-	return { reasoning, reasoningOptions, interleavedField, contextWindow };
+	if (reasoning === undefined && reasoningOptions === undefined && contextWindow === undefined) return undefined;
+	return { reasoning, reasoningOptions, contextWindow };
 }
