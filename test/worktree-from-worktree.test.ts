@@ -8,7 +8,7 @@
  * so the new worktree lands there.
  */
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
@@ -84,8 +84,37 @@ afterEach(async () => {
 	if (mockServer) {
 		await new Promise<void>((resolve) => mockServer!.close(() => resolve()));
 	}
+	await stopTestDaemon();
 	if (tmpRoot) rmSync(tmpRoot, { recursive: true, force: true });
 });
+
+/** The runner attaches to a detached daemon; stop it before deleting its fake HOME. */
+async function stopTestDaemon(): Promise<void> {
+	if (!tmpRoot) return;
+	const statePath = join(tmpRoot, "home", ".cast", "server.json");
+	if (!existsSync(statePath)) return;
+	let pid: number;
+	try {
+		pid = (JSON.parse(readFileSync(statePath, "utf8")) as { pid?: number }).pid ?? 0;
+	} catch {
+		return;
+	}
+	if (!pid || pid === process.pid) return;
+	try {
+		process.kill(pid, "SIGTERM");
+	} catch {
+		return;
+	}
+	const deadline = Date.now() + 5_000;
+	while (Date.now() < deadline) {
+		try {
+			process.kill(pid, 0);
+		} catch {
+			return;
+		}
+		await new Promise((resolve) => setTimeout(resolve, 25));
+	}
+}
 
 async function runInteractive(
 	commands: Array<Record<string, unknown>>,
