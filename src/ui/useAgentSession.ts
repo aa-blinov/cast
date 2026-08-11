@@ -38,6 +38,7 @@ import { completedToolCallStatus, type ToolCallStatus } from "../core/tools/shar
 import {
 	abortServerSession,
 	answerServerQuestion,
+	ensureServerClient,
 	followUpServerSession,
 	forkServerSession,
 	getServerSession,
@@ -48,7 +49,6 @@ import {
 	steerServerSession,
 	submitServerChat,
 } from "../server/client.ts";
-import { daemonBaseUrl, readLiveServerState } from "../server/daemon-state.ts";
 import {
 	appendTextBlock,
 	reduceStreamEvent,
@@ -793,11 +793,10 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				// else POST the prompt and let the SSE stream render the turn. We
 				// await the POST so a network/daemon error surfaces as `setError`
 				// rather than silently dropping the message; the stream carries all
-				// token/tool/status updates. Use a long timeout — the daemon may run
-				// a long turn, but the HTTP response returns once the turn queue is
-				// accepted, not when the turn finishes.
+				// token/tool/status updates. The request is acknowledged when the turn
+				// enters the daemon queue, not when the turn finishes.
 				if (!serverClient) return;
-				const attempt = async (client: ServerClient, useLive: boolean): Promise<boolean> => {
+				const attempt = async (client: ServerClient): Promise<boolean> => {
 					try {
 						await submitServerChat(
 							client,
@@ -807,32 +806,32 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 						);
 						return true;
 					} catch {
-						// First failure: the daemon we started with may be gone
-						// (crash, `cast server stop`, upgrade) and a replacement may
-						// have taken over the state file. Re-read it and retry once
-						// against the live daemon — the session is owned by the
-						// central store, so the same session id works on the new one.
-						if (!useLive) return false;
-						const live = readLiveServerState();
-						if (!live) return false;
-						const url = daemonBaseUrl(live);
-						if (url === effectiveDaemonUrl && live.token === effectiveDaemonToken) return false;
-						setDaemonOverride({ url, token: live.token });
-						try {
-							await submitServerChat(
-								{ baseUrl: url, token: live.token },
-								session.id,
-								text,
-								images?.map((img) => img.dataUrl),
-							);
-							return true;
-						} catch {
-							return false;
-						}
+						return false;
 					}
 				};
-				if (!(await attempt(serverClient, true))) {
-					setError("Daemon unreachable — is 'cast server' running?");
+				const reconnectAndSubmit = async (): Promise<boolean> => {
+					setError("Reconnecting to daemon…");
+					try {
+						const live = await ensureServerClient();
+						if (!live) return false;
+						if (live.baseUrl !== effectiveDaemonUrl || live.token !== effectiveDaemonToken) {
+							setDaemonOverride({ url: live.baseUrl, token: live.token });
+						}
+						await submitServerChat(
+							live,
+							session.id,
+							text,
+							images?.map((img) => img.dataUrl),
+						);
+						return true;
+					} catch {
+						return false;
+					}
+				};
+				if (!(await attempt(serverClient)) && !(await reconnectAndSubmit())) {
+					setError("Daemon unavailable — retry the message or run 'cast server start'.");
+				} else {
+					setError(null);
 				}
 				return;
 			}
@@ -1319,8 +1318,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	// the WebEvent handling in src/server/public/sse-events.js (the browser path)
 	// and the local onEvent below — all three must stay in lockstep on event
 	// semantics. An SSE disconnect (daemon stopped via `cast server stop`, or a
-	// crash) leaves the session idle; the TUI sees no live turn and can offer
-	// reconnect on next submit.
+	// crash) is surfaced immediately and triggers daemon re-selection; the stream
+	// hydrates persisted session state after it reconnects.
 	useEffect(() => {
 		if (!isClient || !effectiveDaemonUrl) return;
 		const url = effectiveDaemonToken
@@ -1328,21 +1327,43 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			: `${effectiveDaemonUrl}/api/sessions/${session.id}/events`;
 		const source = new EventSource(url);
 		let opened = false;
-		source.onopen = () => {
-			if (!opened) {
-				opened = true;
-				return;
-			}
+		let recoveryStarted = false;
+		let disposed = false;
+		const hydrate = () => {
 			void refresh();
 			if (serverClient) {
 				void loadDaemonPendingState(serverClient, session.id)
 					.then((pending) => {
+						if (disposed) return;
 						setPendingQuestion(pending.question);
 						setPendingPlanTransition(pending.planTransition);
 						if (pending.status) setStatus(pending.status);
 					})
 					.catch(() => {});
 			}
+		};
+		source.onopen = () => {
+			setError(null);
+			if (!opened) {
+				opened = true;
+				if (daemonOverride) hydrate();
+				return;
+			}
+			hydrate();
+		};
+		source.onerror = () => {
+			if (disposed) return;
+			setError("Daemon connection lost — reconnecting…");
+			if (recoveryStarted) return;
+			recoveryStarted = true;
+			void ensureServerClient()
+				.then((live) => {
+					if (disposed || !live) return;
+					if (live.baseUrl !== effectiveDaemonUrl || live.token !== effectiveDaemonToken) {
+						setDaemonOverride({ url: live.baseUrl, token: live.token });
+					}
+				})
+				.catch(() => {});
 		};
 		source.onmessage = (ev) => {
 			let event: import("../server/bridge.ts").WebEvent;
@@ -1482,11 +1503,15 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					break;
 			}
 		};
-		return () => source.close();
+		return () => {
+			disposed = true;
+			source.close();
+		};
 	}, [
 		isClient,
 		effectiveDaemonUrl,
 		effectiveDaemonToken,
+		daemonOverride,
 		session.id,
 		promoteStreamingToHistory,
 		updateStreaming,

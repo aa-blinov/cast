@@ -37,6 +37,8 @@ export interface ServerClient {
 	token?: string;
 }
 
+const DAEMON_REQUEST_TIMEOUT_MS = 5_000;
+
 /**
  * Returns the running daemon's base URL + loopback token, starting one if
  * nothing is alive. Mirrors index.ts's ensureDaemon so headless surfaces
@@ -153,6 +155,7 @@ export async function serverFetch(
 	const res = await fetch(`${client.baseUrl}${path}`, {
 		method: init?.method ?? "GET",
 		headers,
+		signal: AbortSignal.timeout(DAEMON_REQUEST_TIMEOUT_MS),
 		...(init?.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
 	});
 	const text = await res.text();

@@ -100,7 +100,7 @@ function playwrightExecutable() {
 	return chromium.executablePath();
 }
 
-const provider = createServer((req, res) => {
+const provider = createServer(async (req, res) => {
 	const key = (req.headers.authorization ?? "").replace(/^Bearer\s+/i, "");
 	if (key !== "primary-key" && key !== "secondary-key") {
 		json(res, 401, { error: { message: "invalid test key" } });
@@ -111,12 +111,35 @@ const provider = createServer((req, res) => {
 		return;
 	}
 	if (req.method === "POST" && req.url === "/v1/chat/completions") {
-		json(res, 200, {
-			id: "e2e-completion",
-			object: "chat.completion",
-			choices: [{ index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop" }],
-			usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-		});
+		let requestBody = "";
+		for await (const chunk of req) requestBody += chunk;
+		const request = JSON.parse(requestBody);
+		if (request.stream) {
+			res.writeHead(200, { "content-type": "text/event-stream", connection: "keep-alive" });
+			res.write(
+				`data: ${JSON.stringify({
+					id: "e2e-completion",
+					object: "chat.completion.chunk",
+					choices: [{ index: 0, delta: { role: "assistant", content: "ok" }, finish_reason: null }],
+				})}\n\n`,
+			);
+			res.write(
+				`data: ${JSON.stringify({
+					id: "e2e-completion",
+					object: "chat.completion.chunk",
+					choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+					usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+				})}\n\n`,
+			);
+			res.end("data: [DONE]\n\n");
+		} else {
+			json(res, 200, {
+				id: "e2e-completion",
+				object: "chat.completion",
+				choices: [{ index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop" }],
+				usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+			});
+		}
 		return;
 	}
 	json(res, 404, { error: { message: "not found" } });
@@ -173,6 +196,7 @@ try {
 	await page.getByLabel("Password").fill("e2e-password");
 	await page.getByRole("button", { name: "Sign in" }).click();
 	await page.waitForURL(`http://127.0.0.1:${port}/`);
+
 	await page.getByRole("button", { name: "Settings" }).click();
 	await page.getByRole("button", { name: "Model", exact: true }).click();
 
@@ -183,9 +207,9 @@ try {
 	const reasoning = selects.nth(2);
 	const mainApply = modal.locator('button[title="Apply"]').nth(0);
 
-	await expectValue(mainProvider, "primary", "initial provider");
-	await expectValue(mainModel, "alpha-model", "initial model");
-	await expectValue(reasoning, "high", "initial reasoning");
+	await waitForValue(mainProvider, "primary", "initial provider");
+	await waitForValue(mainModel, "alpha-model", "initial model");
+	await waitForValue(reasoning, "high", "initial reasoning");
 
 	// A provider change is a draft until the user picks a model and applies it.
 	await mainProvider.selectOption("secondary");
@@ -200,6 +224,7 @@ try {
 	// Applying provider + model is one transition; the unsupported old level is
 	// replaced by the selected model's independent default.
 	await modal.locator("select").nth(0).selectOption("secondary");
+	await expectOption(modal.locator("select").nth(1), "beta-model", "secondary models after reopen");
 	await modal.locator("select").nth(1).selectOption("beta-model");
 	await mainApply.click();
 	await waitForValue(modal.locator("select").nth(0), "secondary", "applied provider");
@@ -234,6 +259,48 @@ try {
 	await waitForValue(reloadedSelects.nth(0), "primary", "reloaded provider");
 	await waitForValue(reloadedSelects.nth(1), "alpha-model", "reloaded model");
 	await waitForValue(reloadedSelects.nth(2), "off", "reloaded reasoning");
+	await page.close();
+
+	// The first message in a local draft must wait for the active SSE stream.
+	// This used to race the stream and could leave the reply visible only after
+	// a manual reload; the fake provider responds immediately to make that
+	// window deterministic. Use a fresh page so this scenario cannot inherit
+	// the already-open session stream from the model-settings flow above.
+	const chatPage = await browser.newPage();
+	chatPage.setDefaultTimeout(60_000);
+	let activeSseReleasedAt = 0;
+	let chatSentAt = 0;
+	await chatPage.route("**/api/sessions/*/events", async (route) => {
+		const pathname = new URL(route.request().url()).pathname;
+		if (/^\/api\/sessions\/[^/]+\/events$/.test(pathname) && activeSseReleasedAt === 0) {
+			// Reproduce the real-world window where the browser has created the
+			// session but the active EventSource is still negotiating.
+			await new Promise((resolvePromise) => setTimeout(resolvePromise, 400));
+			activeSseReleasedAt = Date.now();
+		}
+		await route.continue();
+	});
+	chatPage.on("request", (request) => {
+		if (new URL(request.url()).pathname.endsWith("/chat")) chatSentAt = Date.now();
+	});
+	await chatPage.goto(`http://127.0.0.1:${port}/login`);
+	if (new URL(chatPage.url()).pathname === "/login") {
+		await chatPage.getByLabel("Username").fill("cast");
+		await chatPage.getByLabel("Password").fill("e2e-password");
+		await chatPage.getByRole("button", { name: "Sign in" }).click();
+	}
+	await chatPage.waitForURL(`http://127.0.0.1:${port}/`);
+	const composer = chatPage.locator("textarea");
+	await composer.waitFor({ state: "visible" });
+	await chatPage.waitForFunction(() => {
+		const textarea = document.querySelector("textarea");
+		return textarea instanceof HTMLTextAreaElement && !textarea.disabled;
+	});
+	await composer.fill("first message");
+	await composer.press("Enter");
+	await chatPage.getByText("ok", { exact: true }).waitFor({ state: "visible" });
+	assert(activeSseReleasedAt > 0, "active session SSE was never opened");
+	assert(chatSentAt >= activeSseReleasedAt, "chat POST raced ahead of the active SSE connection");
 
 	console.log("PASS: browser provider/model/reasoning flow");
 } finally {

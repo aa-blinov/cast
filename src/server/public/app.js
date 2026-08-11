@@ -774,6 +774,11 @@ function App() {
 	}, []);
 
 	const esRef = useRef(null);
+	// A draft becomes a real session and can submit its first message before
+	// the active-session effect has opened EventSource. Keep a small waiter so
+	// message-submit can close that gap without blocking forever if the backend
+	// is temporarily unavailable.
+	const sessionStreamWaitersRef = useRef(new Map());
 	const messagesRef = useRef(null);
 	const _scrollStreamingFrame = useCallback(() => {
 		requestAnimationFrame(() => {
@@ -837,6 +842,28 @@ function App() {
 		},
 		[setSession],
 	);
+	const settleSessionStreamWaiter = useCallback((id, ready) => {
+		const waiter = sessionStreamWaitersRef.current.get(id);
+		if (!waiter) return;
+		clearTimeout(waiter.timer);
+		sessionStreamWaitersRef.current.delete(id);
+		waiter.resolve(ready);
+	}, []);
+	const waitForSessionStream = useCallback((id) => {
+		if (activeSessionIdRef.current === id && esRef.current?.readyState === EventSource.OPEN) return Promise.resolve(true);
+		const existing = sessionStreamWaitersRef.current.get(id);
+		if (existing) return existing.promise;
+		let resolveWaiter;
+		const promise = new Promise((resolve) => {
+			resolveWaiter = resolve;
+		});
+		const timer = setTimeout(() => {
+			sessionStreamWaitersRef.current.delete(id);
+			resolveWaiter(false);
+		}, 1500);
+		sessionStreamWaitersRef.current.set(id, { promise, resolve: resolveWaiter, timer });
+		return promise;
+	}, [activeSessionIdRef]);
 	const { loadSessions, selectSession, selectingId, commitSession, startDraft, forkSession, initClientState, startReconnectLoop } =
 		useSessionController({
 			setSessions,
@@ -1041,6 +1068,7 @@ function App() {
 				setPendingSteers,
 				setPendingQueue,
 				setInputsRefreshNonce,
+				waitForSessionStream,
 			}),
 		[
 			planRefineArmedRef,
@@ -1057,6 +1085,7 @@ function App() {
 			setPendingSteers,
 			setPendingQueue,
 			setInputsRefreshNonce,
+			waitForSessionStream,
 		],
 	);
 
@@ -1171,7 +1200,7 @@ function App() {
 		const streamSessionId = activeId;
 		const es = openSseConnection(`${window.location.origin}/api/sessions/${streamSessionId}/events`);
 		esRef.current = es;
-		setConnected(true);
+		setConnected(false);
 		const isCurrent = () => esRef.current === es && activeSessionIdRef.current === streamSessionId;
 
 		es.onopen = () => {
@@ -1218,8 +1247,9 @@ function App() {
 					// the latest messages, not where they were before disconnect.
 					autoScrollRef.current = true;
 					setAtBottom(true);
-				})
-				.catch(() => {});
+			})
+			.catch(() => {})
+			.finally(() => settleSessionStreamWaiter(streamSessionId, true));
 		};
 
 		es.onmessage = (e) => {
@@ -1249,7 +1279,9 @@ function App() {
 					isCurrent,
 					mergeHistoryPage,
 				});
-			} catch {}
+			} catch (error) {
+				console.error("[cast] SSE event handling failed", error);
+			}
 		};
 
 		// The browser's native EventSource retries on its own for a connection
@@ -1262,6 +1294,7 @@ function App() {
 			if (!isCurrent()) return;
 			setConnected(false);
 			if (es.readyState === EventSource.CLOSED) {
+				settleSessionStreamWaiter(streamSessionId, false);
 				setSession((prev) =>
 					prev
 						? { ...prev, messages: [...prev.messages, { role: "warning", content: "Connection terminated" }] }
@@ -1272,9 +1305,10 @@ function App() {
 		};
 
 		return () => {
+			settleSessionStreamWaiter(streamSessionId, false);
 			closeSseConnection(es);
 		};
-	}, [activeId, reconnectNonce, startReconnectLoop, addNotice, queueDiffRefresh, showToast]);
+	}, [activeId, reconnectNonce, startReconnectLoop, addNotice, queueDiffRefresh, showToast, settleSessionStreamWaiter]);
 
 	// Sidebar-wide SSE — independent of activeId, so message-count badges for
 	// other/background threads update live instead of only on page reload.
