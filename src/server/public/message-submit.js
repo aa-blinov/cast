@@ -24,6 +24,7 @@ export async function submitMessage(text, images, pendingDocs, context) {
 		setPendingSteers,
 		setPendingQueue,
 		setInputsRefreshNonce,
+		waitForSessionStream,
 	} = context;
 	// If a question is pending, treat the composer text as a free-form answer
 	// applied to all questions (one value, repeated). Skips the option picker
@@ -175,6 +176,12 @@ export async function submitMessage(text, images, pendingDocs, context) {
 			return;
 		}
 	}
+	// commitSession updates activeId asynchronously, so the EventSource effect
+	// may still be connecting when the new session is ready to accept chat.
+	// Wait briefly for the live stream; if it cannot open, the reconnect
+	// hydration path will still recover the persisted turn without trapping the
+	// user's message behind a permanently unavailable backend.
+	if (session?.isDraft === true || activeId == null) await waitForSessionStream?.(id);
 	if (finalText.startsWith("/")) {
 		try {
 			const result = await api("POST", `/api/sessions/${id}/command`, { command: text });
