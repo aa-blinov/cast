@@ -672,9 +672,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	function syncActiveProviderFromSettings(): { endpointChanged: boolean } {
 		const settings = loadSettings();
 
-		// providerUrl/apiKey are the authoritative active endpoint — every
-		// mutation path (startup, /provider in both TUI and web, the add
-		// wizard) writes them, while /provider never touches modelProvider.
+		// providerUrl/apiKey are the active endpoint, and modelProvider names the
+		// saved provider row that owns it. Both are persisted by every provider
+		// switch so a daemon and the next startup resolve the same connection.
 		const baseURL = settings.providerUrl;
 		const apiKey = settings.apiKey;
 		if (!baseURL || !apiKey) return { endpointChanged: false };
@@ -2767,9 +2767,39 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			}
 			if (sub === "delete") {
 				if (!rest) return { ok: false, error: "Usage: /provider delete <name>" };
+				const removed = providers.find((p) => p.name === rest);
 				const remaining = providers.filter((p) => p.name !== rest);
 				if (remaining.length === providers.length) return { ok: false, error: `Unknown provider: ${rest}` };
-				updateSettings({ providers: remaining });
+				const deletingActive = removed?.url === config.baseURL && removed?.apiKey === config.apiKey;
+				const deletingMain = settings.modelProvider === rest;
+				if (deletingActive && remaining.length > 0) {
+					const fallback = remaining[0]!;
+					config.baseURL = fallback.url;
+					config.apiKey = fallback.apiKey;
+					config.reasoningFormat = resolveReasoningFormat(fallback.url, fallback.reasoningFormat);
+					config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat);
+					ws.session.model = "";
+					updateSettings({
+						providers: remaining,
+						providerUrl: fallback.url,
+						apiKey: fallback.apiKey,
+						modelProvider: fallback.name,
+						model: "",
+					});
+					saveSession(ws.session);
+					return { ok: true, result: `Deleted provider "${rest}" — switched to "${fallback.name}"` };
+				}
+				updateSettings({
+					providers: remaining,
+					...(deletingMain ? { modelProvider: undefined } : {}),
+					...(deletingActive ? { providerUrl: "", apiKey: "", modelProvider: undefined, model: "" } : {}),
+				});
+				if (deletingActive) {
+					config.baseURL = "";
+					config.apiKey = "";
+					ws.session.model = "";
+					saveSession(ws.session);
+				}
 				return { ok: true, result: `Deleted provider "${rest}"` };
 			}
 			if (sub === "add") {
@@ -2787,7 +2817,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				if (!config.baseURL) {
 					config.baseURL = url;
 					config.apiKey = apiKey;
-					updateSettings({ providers: next, providerUrl: url, apiKey });
+					updateSettings({ providers: next, providerUrl: url, apiKey, modelProvider: pname });
 					return { ok: true, result: `Added provider "${pname}" and set it active (default)` };
 				}
 				updateSettings({ providers: next });
@@ -2814,6 +2844,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			updateSettings({
 				providerUrl: target.url,
 				apiKey: target.apiKey,
+				modelProvider: target.name,
 				model: "",
 				...(subagentModelProvider ? {} : { subagentModel: undefined }),
 				...(planModelProvider ? {} : { planModel: undefined }),

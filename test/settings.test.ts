@@ -66,6 +66,21 @@ describe("settings", () => {
 			expect(s.providers).toEqual(existing);
 		});
 
+		it("repairs a stale main provider name when the active credentials identify another row", () => {
+			const providers: Provider[] = [
+				{ name: "old", url: "https://old.example/v1", apiKey: "old-key" },
+				{ name: "minimax", url: "https://api.minimax.io/v1", apiKey: "minimax-key" },
+			];
+			writeSettings({
+				providerUrl: "https://api.minimax.io/v1",
+				apiKey: "minimax-key",
+				modelProvider: "old",
+				providers,
+			});
+
+			expect(loadSettings().modelProvider).toBe("minimax");
+		});
+
 		it("does nothing when neither providerUrl nor providers exist", () => {
 			writeSettings({});
 			const s = loadSettings();

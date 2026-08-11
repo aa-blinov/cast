@@ -1982,7 +1982,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		config.baseURL = p.url;
 		config.apiKey = p.apiKey;
 		config.reasoningFormat = resolveReasoningFormat(p.url, p.reasoningFormat);
-		updateSettings({ providerUrl: p.url, apiKey: p.apiKey });
+		updateSettings({ providerUrl: p.url, apiKey: p.apiKey, modelProvider: p.name });
 		await applyProviderSelection(p);
 	}
 
@@ -2025,6 +2025,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			providers: [...existing, newProvider],
 			providerUrl: url,
 			apiKey: key,
+			modelProvider: name,
 		});
 		config.baseURL = url;
 		config.apiKey = key;
@@ -2097,6 +2098,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 				providers: updated,
 				providerUrl: fallback.url,
 				apiKey: fallback.apiKey,
+				modelProvider: fallback.name,
 			});
 			config.baseURL = fallback.url;
 			config.apiKey = fallback.apiKey;
@@ -2106,7 +2108,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			// resurrect the deleted provider as a "default" entry next startup.
 			// Empty strings (not undefined — spread drops undefined keys, which
 			// breaks the migration guard on next loadSettings).
-			updateSettings({ providers: updated, providerUrl: "", apiKey: "" });
+			updateSettings({ providers: updated, providerUrl: "", apiKey: "", modelProvider: undefined });
 			config.baseURL = "";
 			config.apiKey = "";
 			showNotice(`[Provider "${picked}" removed. No providers left — use /provider add to add one.]`);

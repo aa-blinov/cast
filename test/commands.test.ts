@@ -1140,6 +1140,8 @@ describe("/provider", () => {
 		};
 		const { deps, calls } = createFakeDeps({ pickers } as never);
 		await handleInput("/provider add", undefined, deps);
+		const { loadSettings } = await import("../src/core/settings.ts");
+		expect(loadSettings().modelProvider).toBe("openrouter");
 		// Wizard produces an "added and selected" notice (distinct from /activate's
 		// "Provider: ... . Select a model." wording). If the helper extract is
 		// wrong, this check goes red because the notice shape changes.

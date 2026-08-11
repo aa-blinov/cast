@@ -22,9 +22,14 @@ vi.mock("../src/core/loop.ts", async (importOriginal) => {
 // reconcileSessionModel (provider-change model fallback) hits /v1/models —
 // stub fetchModels so those tests don't need a live provider either.
 const mockFetchModels = vi.fn();
+const mockProbeProvider = vi.fn().mockResolvedValue("ok");
 vi.mock("../src/core/config.ts", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../src/core/config.ts")>();
-	return { ...actual, fetchModels: (...args: unknown[]) => mockFetchModels(...args) };
+	return {
+		...actual,
+		fetchModels: (...args: unknown[]) => mockFetchModels(...args),
+		probeProvider: (...args: unknown[]) => mockProbeProvider(...args),
+	};
 });
 
 const { createServerBridge, SANDBOX_CWD, toDisplayMessages } = await import("../src/server/bridge.ts");
@@ -71,6 +76,7 @@ describe("web bridge", () => {
 	beforeEach(() => {
 		runAgentLoop.mockClear();
 		mockFetchModels.mockReset();
+		mockProbeProvider.mockClear();
 		mockFetchModels.mockResolvedValue({
 			ok: true,
 			models: [{ id: "gpt-4o" }, { id: "hy3" }],
@@ -89,7 +95,7 @@ describe("web bridge", () => {
 
 	it("evicts an idle session with no listeners and hydrates it again on demand", () => {
 		vi.useFakeTimers();
-		const bridge = createServerBridge(makeResult());
+		const bridge = createServerBridge(makeResult({ config: { ...testConfig } }));
 		const ws = bridge.createSession();
 		vi.advanceTimersByTime(5 * 60_000 + 1);
 		expect(bridge.getSession(ws.id)).not.toBe(ws);
@@ -361,6 +367,35 @@ describe("web bridge", () => {
 		const res = await bridge.executeCommand(ws.id, "/model gpt-5");
 		expect(res).toEqual({ ok: true, result: { model: "gpt-5" } });
 		expect(ws.session.model).toBe("gpt-5");
+	});
+
+	it("/provider <name> persists the active provider for the next startup", async () => {
+		const { loadSettings, updateSettings } = await import("../src/core/settings.ts");
+		updateSettings({
+			providerUrl: "http://localhost",
+			apiKey: "test",
+			modelProvider: "old",
+			providers: [
+				{ name: "old", url: "http://localhost", apiKey: "test" },
+				{ name: "minimax", url: "https://api.minimax.io/v1", apiKey: "minimax-key" },
+			],
+		});
+		const bridge = createServerBridge(makeResult({ config: { ...testConfig } }));
+		const ws = bridge.createSession();
+		const res = await bridge.executeCommand(ws.id, "/provider minimax");
+
+		expect(res).toEqual({ ok: true, result: 'Switched to provider "minimax" — pick a model with /model' });
+		expect(loadSettings()).toMatchObject({
+			modelProvider: "minimax",
+			providerUrl: "https://api.minimax.io/v1",
+			apiKey: "minimax-key",
+		});
+		updateSettings({
+			modelProvider: undefined,
+			providerUrl: "http://localhost",
+			apiKey: "test",
+			providers: [],
+		});
 	});
 
 	it("/model <name> becomes the default for sessions created afterward", async () => {
