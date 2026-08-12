@@ -2,6 +2,13 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.34
+
+### Fixed
+
+- **Web messages no longer disappear during session startup or reconnects.** Chat waits for the active SSE stream before dispatching, keeps unacknowledged messages visible for retry, and rehydrates accepted messages when the stream is delayed.
+- **Message retries are idempotent.** A client message id prevents a lost HTTP response or reconnect from creating a duplicate turn.
+
 ## 0.13.33
 
 ### Fixed
