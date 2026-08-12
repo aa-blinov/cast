@@ -72,6 +72,15 @@ export function handleSseEvent(event, context) {
 			setSession((prev) => {
 				if (!prev) return prev;
 				const messages = prev.messages;
+				const clientMessageId = event.message.clientMessageId;
+				if (clientMessageId) {
+					const existingIndex = messages.findIndex((message) => message.clientMessageId === clientMessageId);
+					if (existingIndex >= 0) {
+						const next = messages.slice();
+						next[existingIndex] = { ...next[existingIndex], pending: false };
+						return { ...prev, messages: next };
+					}
+				}
 				const last = messages[messages.length - 1];
 				if (last && last.role === "user") {
 					const a = { text: last.content, images: last.images ?? [] };
@@ -87,6 +96,7 @@ export function handleSseEvent(event, context) {
 							role: "user",
 							content: normalized.text,
 							...(normalized.images.length ? { images: normalized.images } : {}),
+							...(clientMessageId ? { clientMessageId } : {}),
 						},
 					],
 				};
@@ -299,10 +309,23 @@ export function handleSseEvent(event, context) {
 					previousStreaming.length > 0
 						? [...prev.messages, { role: "assistant", blocks: previousStreaming }]
 						: prev.messages;
-				const injected = event.messages.map((message) => ({
-					role: "user",
-					content: typeof message.content === "string" ? message.content : JSON.stringify(message.content),
-				}));
+				const injected = event.messages
+					.filter(
+						(message) =>
+							!message.castClientMessageId ||
+								!messages.some(
+									(existing) =>
+										existing.clientMessageId ===
+											message.castClientMessageId,
+								),
+					)
+					.map((message) => ({
+						role: "user",
+						content: typeof message.content === "string" ? message.content : JSON.stringify(message.content),
+						...(message.castClientMessageId
+							? { clientMessageId: message.castClientMessageId }
+							: {}),
+					}));
 				return { ...prev, messages: [...messages, ...injected] };
 			});
 			if (event.type === "steering_injected") setPendingSteers((previous) => previous.slice(event.messages.length));

@@ -25,6 +25,7 @@ export async function submitMessage(text, images, pendingDocs, context) {
 		setPendingQueue,
 		setInputsRefreshNonce,
 		waitForSessionStream,
+		pendingOutgoingRef,
 	} = context;
 	// If a question is pending, treat the composer text as a free-form answer
 	// applied to all questions (one value, repeated). Skips the option picker
@@ -176,13 +177,12 @@ export async function submitMessage(text, images, pendingDocs, context) {
 			return;
 		}
 	}
-	// commitSession updates activeId asynchronously, so the EventSource effect
+	// The EventSource effect may still be connecting after commitSession or
 	// may still be connecting when the new session is ready to accept chat.
-	// Wait briefly for the live stream; if it cannot open, the reconnect
-	// hydration path will still recover the persisted turn without trapping the
-	// user's message behind a permanently unavailable backend.
-	if (session?.isDraft === true || activeId == null) await waitForSessionStream?.(id);
+	// Commands wait before dispatch; normal chat waits after its optimistic row
+	// is visible below.
 	if (finalText.startsWith("/")) {
+		await waitForSessionStream?.(id);
 		try {
 			const result = await api("POST", `/api/sessions/${id}/command`, { command: text });
 			if (text === "/sessions") await loadSessions();
@@ -270,19 +270,65 @@ export async function submitMessage(text, images, pendingDocs, context) {
 	// though the round trip to localhost is fast. Rendered the same shape
 	// toDisplayMessages produces (content: text, images: [...]) so a page
 	// reload looks identical to what was just shown live.
+	const clientMessageId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+	const outgoing = {
+		sessionId: id,
+		text: finalText,
+		...(images?.length ? { images } : {}),
+		clientMessageId,
+		sending: true,
+	};
+	pendingOutgoingRef.current.set(clientMessageId, outgoing);
 	setSession((prev) =>
 		prev?.id === id && isCurrentDraft()
 			? {
 					...prev,
 					messages: [
 						...prev.messages,
-						{ role: "user", content: finalText, ...(images?.length ? { images } : {}) },
+						{
+							role: "user",
+							content: finalText,
+							...(images?.length ? { images } : {}),
+							clientMessageId,
+							pending: true,
+						},
 					],
 				}
 			: prev,
 	);
+	// The session-selection effect can render the composer before EventSource has
+	// reached OPEN. Keep the prompt visible while waiting, then send only after
+	// the live stream is ready so user_message/status/token events cannot race
+	// past an unsubscribed browser tab.
+	const streamReady = (await waitForSessionStream?.(id)) !== false;
 	try {
-		await api("POST", `/api/sessions/${id}/chat`, images?.length ? { text: finalText, images } : { text: finalText });
+		await api("POST", `/api/sessions/${id}/chat`, {
+			text: finalText,
+			...(images?.length ? { images } : {}),
+			clientMessageId,
+		});
+		pendingOutgoingRef.current.delete(clientMessageId);
+		setSession((prev) =>
+			prev?.id === id
+				? {
+						...prev,
+						messages: prev.messages.map((message) =>
+							message.clientMessageId === clientMessageId ? { ...message, pending: false } : message,
+						),
+					}
+				: prev,
+		);
+		if (!streamReady) {
+			// The daemon accepted the prompt even though the stream timed out. A
+			// history hydration closes that remaining gap; a later SSE open will
+			// reconcile active streaming or the completed turn.
+			try {
+				await selectSession?.(id, { push: false });
+			} catch {
+				// The pending row is already durable on the daemon; reconnect will
+				// hydrate it when the backend becomes reachable again.
+			}
+		}
 		// No `loadSessions()` here on purpose. The sidebar's per-session
 		// summary (count, title, etc.) is pushed server-side as a
 		// `session_update` SSE event after the first user message sets
@@ -292,6 +338,7 @@ export async function submitMessage(text, images, pendingDocs, context) {
 		// the user posted a message, saw nothing in the sidebar change,
 		// then everything moved after the round trip landed.
 	} catch (err) {
-		if (isCurrentDraft()) showToast(err.message, "error");
+		outgoing.sending = false;
+		if (isCurrentDraft()) showToast(`Message kept locally; retrying when the daemon reconnects: ${err.message}`, "error");
 	}
 }

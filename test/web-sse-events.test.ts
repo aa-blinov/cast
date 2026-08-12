@@ -95,4 +95,20 @@ describe("web SSE events", () => {
 			messages: [],
 		});
 	});
+
+	it("acknowledges an optimistic user message by client id without appending a duplicate", () => {
+		const state = createContext();
+		handleSseEvent(
+			{
+				type: "user_message",
+				message: { role: "user", content: "hello", clientMessageId: "msg-1" },
+			},
+			state,
+		);
+
+		const updater = state.setSession.mock.calls[0]![0] as (prev: unknown) => unknown;
+		expect(
+			updater({ messages: [{ role: "user", content: "hello", clientMessageId: "msg-1", pending: true }] }),
+		).toEqual({ messages: [{ role: "user", content: "hello", clientMessageId: "msg-1", pending: false }] });
+	});
 });

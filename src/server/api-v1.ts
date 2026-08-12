@@ -678,6 +678,7 @@ export const apiV1OpenApiDocument: OpenApiObject = {
 				properties: {
 					text: { type: "string" },
 					images: { type: "array", maxItems: 6, items: { type: "string", contentEncoding: "base64" } },
+					clientMessageId: { type: "string", maxLength: 200 },
 				},
 				anyOf: [{ required: ["text"] }, { required: ["images"] }],
 			},

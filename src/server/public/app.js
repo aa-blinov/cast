@@ -528,7 +528,11 @@ function keyForMessage(msg) {
 
 function mergeHistoryPage(previous, incoming) {
 	if (!Array.isArray(incoming)) return previous;
-	if (incoming.length === 0) return [];
+	const incomingClientIds = new Set(incoming.map((message) => message.clientMessageId).filter(Boolean));
+	const pending = previous.filter(
+		(message) => message.pending === true && !incomingClientIds.has(message.clientMessageId),
+	);
+	if (incoming.length === 0) return pending;
 	const firstSeq = incoming.find((message) => typeof message.seq === "number")?.seq;
 	const before =
 		typeof firstSeq === "number"
@@ -537,7 +541,7 @@ function mergeHistoryPage(previous, incoming) {
 	const existing = new Map(
 		previous.filter((message) => typeof message.seq === "number").map((message) => [message.seq, message]),
 	);
-	return [...before, ...incoming.map((message) => existing.get(message.seq) ?? message)];
+	return [...before, ...incoming.map((message) => existing.get(message.seq) ?? message), ...pending];
 }
 
 // The "first-paint" animation for messages is handled entirely in CSS
@@ -816,6 +820,9 @@ function App() {
 	// fetched (compaction can't retroactively edit history, see recordCompaction),
 	// so there's no staleness to invalidate against.
 	const olderPagesCacheRef = useRef(new Map());
+	// Outgoing chat is kept here until the daemon acknowledges the request. A
+	// ref avoids making reconnect bookkeeping itself re-render the whole app.
+	const pendingOutgoingRef = useRef(new Map());
 	const loadingOlderRef = useRef(false);
 	// Set right before prepending older messages, to the scroll container's
 	// current scrollHeight — the restore effect below uses it to keep the
@@ -864,11 +871,22 @@ function App() {
 		sessionStreamWaitersRef.current.set(id, { promise, resolve: resolveWaiter, timer });
 		return promise;
 	}, [activeSessionIdRef]);
-	const { loadSessions, selectSession, selectingId, commitSession, startDraft, forkSession, initClientState, startReconnectLoop } =
+	const {
+		loadSessions,
+		selectSession,
+		selectingId,
+		commitSession,
+		startDraft,
+		forkSession,
+		initClientState,
+		startReconnectLoop,
+		retryPendingOutgoing,
+	} =
 		useSessionController({
 			setSessions,
 			setSessionsLoaded,
 			setSession,
+			pendingOutgoingRef,
 			setActiveId,
 			setRunning,
 			setSidebarOpen,
@@ -1068,8 +1086,9 @@ function App() {
 				setPendingSteers,
 				setPendingQueue,
 				setInputsRefreshNonce,
-				waitForSessionStream,
-			}),
+			waitForSessionStream,
+			pendingOutgoingRef,
+		}),
 		[
 			planRefineArmedRef,
 			session,
@@ -1086,6 +1105,7 @@ function App() {
 			setPendingQueue,
 			setInputsRefreshNonce,
 			waitForSessionStream,
+			pendingOutgoingRef,
 		],
 	);
 
@@ -1247,6 +1267,7 @@ function App() {
 					// the latest messages, not where they were before disconnect.
 					autoScrollRef.current = true;
 					setAtBottom(true);
+					void retryPendingOutgoing(streamSessionId);
 			})
 			.catch(() => {})
 			.finally(() => settleSessionStreamWaiter(streamSessionId, true));
@@ -1308,7 +1329,7 @@ function App() {
 			settleSessionStreamWaiter(streamSessionId, false);
 			closeSseConnection(es);
 		};
-	}, [activeId, reconnectNonce, startReconnectLoop, addNotice, queueDiffRefresh, showToast, settleSessionStreamWaiter]);
+	}, [activeId, reconnectNonce, startReconnectLoop, addNotice, queueDiffRefresh, showToast, settleSessionStreamWaiter, retryPendingOutgoing]);
 
 	// Sidebar-wide SSE — independent of activeId, so message-count badges for
 	// other/background threads update live instead of only on page reload.
