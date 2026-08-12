@@ -651,9 +651,10 @@ function SettingsProvider({ data, busy, act, confirm }) {
 				.sort((a, b) => a.name.localeCompare(b.name))
 				.map(
 					(p) => html`
-				<div key=${p.name} class="settings-item-row">
+				<div key=${p.name} class="settings-item-row${p.active ? " active" : ""}">
 					<div class="settings-item-info">
-						<span class="settings-item-name">${p.name}</span>
+						<span class="settings-item-status${p.active ? " ok" : ""}" title=${p.active ? "Active provider" : "Not active"}></span>
+						<span class="settings-item-name">${p.name}${p.active ? html` <span class="settings-item-tag">active</span>` : null}</span>
 						<span class="settings-item-meta" title=${p.url}>${shortPath(p.url)}</span>
 					</div>
 					<div class="settings-item-actions">
