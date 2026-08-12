@@ -50,6 +50,8 @@ jobs:
           cp -r dist "$STAGE/"
           cp -r prompts "$STAGE/"
           cp -r bin "$STAGE/"
+          mkdir -p "$STAGE/node_modules"
+          cp -r node_modules/node-pty node_modules/node-addon-api "$STAGE/node_modules/"
           cp package.json README.md "$STAGE/"
           chmod +x "$STAGE/bin/cast"
 
