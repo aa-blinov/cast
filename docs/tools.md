@@ -97,11 +97,11 @@ Execute a bash command in the current working directory.
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `command` | Yes | Bash command to execute |
-| `timeout` | No | Timeout in seconds (default: 180) |
+| `timeout` | No | Foreground grace/timeout in seconds (default: 180); an explicit background task uses it as its kill timeout |
 
 Output is truncated to the last 2000 lines or 128KB (whichever is hit first).
 
-For long-running commands (docker build, npm install, large test suites), increase the timeout:
+For finite long-running commands (docker build, npm install, large test suites), increase the timeout:
 
 ```
 bash(command="npm run build", timeout=600)
@@ -109,21 +109,25 @@ bash(command="npm run build", timeout=600)
 
 ### Background execution
 
-Only available in the TUI and web UI (not `cast run` or subagents — the tool falls through to the normal blocking path there). Pass `run_in_background: true` on the same `bash` call to start a command without blocking the turn:
+Managed background execution is available in the TUI and web UI. It is not available in `cast run` or subagents, where `bash` keeps the normal blocking path.
+
+Pass `run_in_background: true` on the same `bash` call to get a task id immediately:
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `run_in_background` | No | Start the command in the background and return immediately with a task id instead of waiting for it to finish |
 
-The call returns immediately with a task id (`bg-N`). Unlike a normal blocking `bash` call, a background task has **no default timeout** — it's meant for open-ended work (dev servers, long builds) and keeps running until it exits on its own or is stopped. Pass `timeout` on the same call if the task itself should be force-killed after N seconds.
+The call returns immediately with a task id (`bg-N`). Unlike a normal foreground `bash` call, an explicit background task has **no default kill timeout** — it is meant for open-ended work (dev servers, watchers, long builds) and keeps running until it exits on its own or is stopped. Pass `timeout` on the same call if the task itself should be force-killed after N seconds.
+
+Foreground calls are also protected from commands that never finish. Known server/watcher patterns are promoted to the managed background registry immediately. Any other foreground command that is still running after its automatic grace period (at most 60 seconds, adjusted to the requested timeout) is promoted to the same registry instead of being killed or restarted. The command keeps its existing PTY/process, and the response then contains its `bg-N` task id. Commands that finish before promotion return their normal stdout/stderr.
 
 Completion is delivered automatically as a system reminder once the process exits, even if the agent has moved on to something else in the meantime. Two more tools manage a task while it's running:
 
 | Tool | Parameter | Required | Description |
 |------|-----------|----------|-------------|
-| `bash_output` | `task_id` | Yes | Task id returned by `run_in_background` |
+| `bash_output` | `task_id` | Yes | Task id returned by `bash`, either explicitly or after automatic promotion |
 | | `wait` | No | Seconds to block waiting for the task to finish before returning (0–60, default: 0) |
-| `bash_kill` | `task_id` | Yes | Task id to terminate early |
+| `bash_kill` | `task_id` | Yes | Task id returned by `bash` to terminate early |
 
 Background tasks are session-scoped: they stay pollable and killable across every later turn until the session itself closes, at which point anything still running is killed.
 

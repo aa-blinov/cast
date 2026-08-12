@@ -1,6 +1,6 @@
 {
 	"name": "cast",
-	"version": "0.13.31",
+	"version": "0.13.32",
 	"description": "Role-based terminal agent harness with 20 built-in personas",
 	"type": "module",
 	"engines": {
@@ -35,6 +35,7 @@
 		"chokidar": "^5.0.0",
 		"htmlparser2": "^12.0.0",
 		"ink": "^7.1.0",
+		"node-pty": "^1.1.0",
 		"openai": "^7.3.0",
 		"react": "^19.2.7",
 		"tree-sitter-bash": "^0.25.1",

@@ -1,7 +1,7 @@
 /**
- * Background bash tasks — `run_in_background:true` on the `bash` tool spawns
- * a command without blocking the tool call, tracked here for the lifetime of
- * a session. Completion is delivered as a `<system-reminder>` (same
+ * Background bash tasks — explicit `run_in_background:true` or automatic promotion on the
+ * `bash` tool — run in a managed PTY and are tracked here for the lifetime of a session.
+ * Completion is delivered as a `<system-reminder>` (same
  * convention as ../interrupt-reminder.ts): if the agent loop is still
  * running when the process exits, the reminder is enqueued onto the same
  * `followUpQueue` the loop already drains between turns (loop.ts:1043); if
@@ -16,18 +16,21 @@
  * must not kill a task the user explicitly asked to survive past it.
  */
 
-import { type ChildProcess, spawn } from "node:child_process";
+import { type IPty, spawn as spawnPty } from "node-pty";
 import type { AppConfig } from "../config.ts";
 import type { Message } from "../llm.ts";
 import type { MessageQueue } from "../loop.ts";
 import { formatBashResult, getBashResolution, stripAnsi } from "./bash.ts";
 import { appendBoundedOutput, formatSize, type ToolResult } from "./shared.ts";
 
+const PTY_SPAWN_FAILURE_RE = /execvp\(3\) failed|no such file or directory/i;
+
 export interface BackgroundTask {
 	id: string;
 	command: string;
 	cwd: string;
-	proc: ChildProcess;
+	pty?: IPty;
+	exitPromise: Promise<void>;
 	status: "running" | "exited" | "killed" | "error";
 	exitCode: number | null;
 	startedAt: number;
@@ -40,6 +43,8 @@ export interface BackgroundTask {
 	timeoutSeconds?: number;
 	/** Set only when status is "error" (the process failed to even start). */
 	errorMessage?: string;
+	/** False while a task is being observed as a foreground call; true after explicit or automatic promotion. */
+	notifyOnCompletion: boolean;
 }
 
 /**
@@ -55,6 +60,10 @@ export interface BashBackgroundDeps {
 	registry: BackgroundTaskRegistry;
 	followUpQueue: MessageQueue;
 	isRunning: () => boolean;
+}
+
+export interface BackgroundTaskStartOptions {
+	notifyOnCompletion?: boolean;
 }
 
 function elapsedSeconds(task: BackgroundTask): number {
@@ -135,25 +144,21 @@ export class BackgroundTaskRegistry {
 		 *  only applies here if the model explicitly passed one. */
 		timeoutSeconds: number | undefined,
 		deps: BashBackgroundDeps,
+		options: BackgroundTaskStartOptions = {},
 	): BackgroundTask {
 		const bash = getBashResolution();
 		const id = `bg-${++this.counter}`;
 
-		// Same spawn shape as execBash's synchronous path (bash.ts) — stdin
-		// ignored (EOF, no PTY/prompt handling), detached so the whole process
-		// group can be SIGKILLed on timeout/kill/session-close.
-		const proc = spawn(bash.path, ["-c", command], {
-			cwd,
-			env: { ...process.env, PAGER: "cat", GIT_PAGER: "cat" },
-			stdio: ["ignore", "pipe", "pipe"],
-			detached: true,
+		let resolveExit: () => void = () => {};
+		const exitPromise = new Promise<void>((resolve) => {
+			resolveExit = resolve;
 		});
 
 		const task: BackgroundTask = {
 			id,
 			command,
 			cwd,
-			proc,
+			exitPromise,
 			status: "running",
 			exitCode: null,
 			startedAt: Date.now(),
@@ -161,58 +166,57 @@ export class BackgroundTaskRegistry {
 			outputTruncated: false,
 			timedOut: false,
 			timeoutSeconds,
+			notifyOnCompletion: options.notifyOnCompletion ?? true,
 		};
 		this.tasks.set(id, task);
 
 		const maxBytes = config.maxToolOutputBytes;
-		proc.stdout?.on("data", (d: Buffer) => {
-			const appended = appendBoundedOutput(task.rawOutput, d, maxBytes);
-			task.rawOutput = appended.output;
-			task.outputTruncated ||= appended.truncated;
-		});
-		proc.stderr?.on("data", (d: Buffer) => {
-			const appended = appendBoundedOutput(task.rawOutput, d, maxBytes);
-			task.rawOutput = appended.output;
-			task.outputTruncated ||= appended.truncated;
-		});
+		try {
+			const pty = spawnPty(bash.path, ["-c", command], {
+				name: "xterm-256color",
+				cols: 120,
+				rows: 40,
+				cwd,
+				env: { ...process.env, PAGER: "cat", GIT_PAGER: "cat", TERM: "xterm-256color" },
+			});
+			task.pty = pty;
 
-		const timer =
-			timeoutSeconds === undefined
-				? undefined
-				: setTimeout(() => {
-						task.timedOut = true;
-						try {
-							process.kill(-proc.pid!, "SIGKILL");
-						} catch {
-							// already dead
-						}
-					}, timeoutSeconds * 1000);
+			pty.onData((data) => {
+				const appended = appendBoundedOutput(task.rawOutput, Buffer.from(data), maxBytes);
+				task.rawOutput = appended.output;
+				task.outputTruncated ||= appended.truncated;
+			});
 
-		proc.on("error", (err) => {
-			clearTimeout(timer);
+			const timer =
+				timeoutSeconds === undefined
+					? undefined
+					: setTimeout(() => {
+							task.timedOut = true;
+							this.killPty(pty);
+						}, timeoutSeconds * 1000);
+
+			pty.onExit(({ exitCode }) => {
+				clearTimeout(timer);
+				task.exitCode = exitCode;
+				task.endedAt = Date.now();
+				if (task.status === "killed") {
+					// kill() already set "killed" — a later PTY exit mustn't downgrade it.
+				} else if (exitCode !== 0 && PTY_SPAWN_FAILURE_RE.test(task.rawOutput)) {
+					task.status = "error";
+					task.errorMessage = `Failed to start bash ("${bash.path}"): ${task.rawOutput.trim()}`;
+				} else {
+					task.status = "exited";
+				}
+				resolveExit();
+				this.settle(task, config, deps);
+			});
+		} catch (err) {
 			task.status = "error";
 			task.endedAt = Date.now();
-			task.errorMessage = `Failed to start bash ("${bash.path}"): ${err.message}`;
+			task.errorMessage = `Failed to start bash ("${bash.path}"): ${err instanceof Error ? err.message : String(err)}`;
+			resolveExit();
 			this.settle(task, config, deps);
-		});
-
-		proc.on("close", (exitCode) => {
-			clearTimeout(timer);
-			// Node fires 'close' after a failed spawn too (ENOENT, EACCES, …),
-			// right behind 'error' — which already recorded the real failure
-			// reason and settled the task once. Without this guard, close
-			// downgraded "error" back to "exited" with a meaningless exit code
-			// (confirmed: -2, "Process exited with code -2"), discarding the
-			// actual error message, and settle() ran a second time — duplicating
-			// the completion reminder for a single spawn failure.
-			if (task.status === "error") return;
-			task.exitCode = exitCode;
-			task.endedAt = Date.now();
-			// kill() already set "killed" — a later close mustn't downgrade it
-			// back to "exited".
-			if (task.status !== "killed") task.status = "exited";
-			this.settle(task, config, deps);
-		});
+		}
 
 		return task;
 	}
@@ -222,12 +226,31 @@ export class BackgroundTaskRegistry {
 		if (!task) return "not-found";
 		if (task.status !== "running") return "already-done";
 		task.status = "killed";
+		if (task.pty) this.killPty(task.pty);
+		return "killed";
+	}
+
+	/** Promote a foreground-observed task so its eventual result is delivered to the agent. */
+	promote(id: string): "promoted" | "not-found" | "already-done" {
+		const task = this.tasks.get(id);
+		if (!task) return "not-found";
+		if (task.status !== "running") return "already-done";
+		task.notifyOnCompletion = true;
+		return "promoted";
+	}
+
+	/** Kill the PTY's process group so children such as dev servers are reaped too. */
+	private killPty(pty: IPty): void {
 		try {
-			process.kill(-task.proc.pid!, "SIGKILL");
+			process.kill(-pty.pid, "SIGKILL");
+		} catch {
+			// The process group may already have exited or not exist on this platform.
+		}
+		try {
+			pty.kill();
 		} catch {
 			// already dead
 		}
-		return "killed";
 	}
 
 	/** Session-close teardown — reap every still-running task's process. */
@@ -238,6 +261,7 @@ export class BackgroundTaskRegistry {
 	}
 
 	private settle(task: BackgroundTask, config: AppConfig, deps: BashBackgroundDeps): void {
+		if (!task.notifyOnCompletion) return;
 		const reminderText = buildCompletionReminder(task, config);
 		const message: Message = { role: "user", content: reminderText };
 		if (deps.isRunning()) {
@@ -273,12 +297,11 @@ export async function execBashOutput(
 				if (settled) return;
 				settled = true;
 				clearTimeout(timer);
-				task.proc.off("close", done);
 				signal?.removeEventListener("abort", done);
 				resolve();
 			};
 			const timer = setTimeout(done, wait * 1000);
-			task.proc.once("close", done);
+			task.exitPromise.then(done);
 			// Waiting is purely observational — an abort here must not kill the
 			// task, only stop waiting on it (matches the "never tied to a
 			// turn's AbortSignal" rule).

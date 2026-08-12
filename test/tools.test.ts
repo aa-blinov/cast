@@ -199,6 +199,41 @@ function makeBackgroundDeps(running = false) {
 }
 
 describe("bash — run_in_background", () => {
+	it("automatically backgrounds an obvious server command", async () => {
+		const { deps } = makeBackgroundDeps();
+		const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, undefined, undefined, undefined, deps);
+		try {
+			const start = Date.now();
+			const result = await exec("bash", { command: "python3 -m http.server 8000" });
+			expect(Date.now() - start).toBeLessThan(500);
+			expect(result.isError).toBeFalsy();
+			expect(result.content).toMatch(/Automatically moved to background as bg-\d+/);
+		} finally {
+			deps.registry.killAll();
+		}
+	});
+
+	it("promotes a generic command after the foreground grace period", async () => {
+		const { deps } = makeBackgroundDeps();
+		const exec = createToolExecutor(
+			TEST_DIR,
+			{ ...mockConfig, defaultBashTimeout: 0.1 },
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			deps,
+		);
+		try {
+			const result = await exec("bash", { command: "sleep 5" });
+			expect(result.isError).toBeFalsy();
+			expect(result.content).toMatch(/Automatically moved to background as bg-\d+/);
+			expect(deps.registry.hasRunning()).toBe(true);
+		} finally {
+			deps.registry.killAll();
+		}
+	});
+
 	it("returns immediately with a task id instead of waiting for the command", async () => {
 		const { deps } = makeBackgroundDeps();
 		const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, undefined, undefined, undefined, deps);
@@ -292,6 +327,8 @@ describe("background bash tool definitions", () => {
 		expect(tools.find((t) => t.function.name === "bash_kill")).toBeDefined();
 		const bash = tools.find((t) => t.function.name === "bash");
 		expect(bash?.function.parameters.properties).toHaveProperty("run_in_background");
+		expect(bash?.function.description).toContain("automatically promoted");
+		expect(bash?.function.parameters.properties.timeout.description).toContain("promoted to background");
 	});
 });
 

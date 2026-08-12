@@ -26,6 +26,9 @@ import { build, transform } from "esbuild";
 		format: "esm",
 		target: "node22", // matches the oldest Node version CI actually tests (see .github/workflows/ci.yml)
 		outfile: "dist/index.js",
+		// node-pty contains a native addon and must remain a runtime dependency;
+		// bundling JavaScript around it cannot embed the platform-specific binary.
+		external: ["node-pty"],
 		// ink optionally imports react-devtools-core for its DevTools integration,
 		// gated behind `if (process.env.DEV === 'true')` — but that file (devtools.js)
 		// is a *local* ink module, so esbuild inlines it into this single outfile
@@ -158,4 +161,3 @@ for (const file of webStylesheets) {
 // esbuild only bundles the @jsquash/* JS glue, not these; they're read from
 // disk at runtime via a path resolved relative to dist/index.js.
 cpSync("wasm", "dist/wasm", { recursive: true });
-

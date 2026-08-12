@@ -67,9 +67,9 @@ export function getToolDefinitions(
 				description:
 					"Execute a bash command in the current working directory. Returns stdout and stderr. " +
 					"Output is truncated to last 2000 lines or 128KB (whichever is hit first). " +
-					"Default timeout 180 seconds (the `timeout` field is in seconds). " +
-					"For long-running commands (docker build, npm install, large test suites), " +
-					"pass a higher timeout value. " +
+					"Short commands return normally. Long-running commands are automatically promoted to a managed background task " +
+					"instead of blocking indefinitely; use run_in_background:true to start one immediately. " +
+					"Background results arrive automatically, and bash_output/bash_kill can inspect or stop them. " +
 					"Do NOT re-run an identical command to 'double-check' a result you already have — the previous " +
 					"output still holds unless something changed. Running the same command repeatedly is treated as a " +
 					"doom loop and blocked.",
@@ -80,9 +80,8 @@ export function getToolDefinitions(
 						timeout: {
 							type: "number",
 							description: backgroundBashEnabled
-								? "Timeout in seconds. Default 180 for a normal (blocking) call. With run_in_background:true " +
-									"there is no default timeout — the task runs until it exits or you call bash_kill — so only " +
-									"set this if the task itself should be force-killed after a fixed time."
+								? "Timeout in seconds. A foreground command that outlives its grace period is promoted to background rather than killed. " +
+									"With run_in_background:true, this is the task's kill timeout; omit it for an open-ended server or watcher."
 								: "Timeout in seconds. Default 180. Increase for long-running commands (e.g. 600 for docker build)",
 						},
 						...(backgroundBashEnabled
@@ -90,12 +89,10 @@ export function getToolDefinitions(
 									run_in_background: {
 										type: "boolean",
 										description:
-											"Run this command in the background and return immediately with a task id, instead of " +
-											"waiting for it to finish. Use for commands you don't need to block on: dev servers, " +
-											"long builds/tests you'll check on later, anything open-ended. Runs with no timeout by " +
-											"default — it keeps going until it exits on its own or you call bash_kill. You don't need " +
-											"to poll — a <system-reminder> arrives automatically with the output when it finishes, even " +
-											"if you've moved on to something else. Check bash_output only if you want progress sooner.",
+											"Start a managed background task and return its task id immediately. Use for dev servers, watchers, " +
+											"or long work whose result is not needed before the next action. " +
+											"The result is delivered automatically when it finishes; use bash_output({task_id,wait}) for progress " +
+											"or bash_kill({task_id}) to stop it. If omitted, long-running commands may be promoted automatically.",
 									},
 								}
 							: {}),
@@ -390,7 +387,8 @@ export function getToolDefinitions(
 						function: {
 							name: "bash_output",
 							description:
-								"Check on a background bash task started with bash's run_in_background:true. Returns its " +
+								"Check on a managed background bash task returned by bash, either through run_in_background:true " +
+								"or automatic promotion. Returns its " +
 								"current status (running/exited/killed) and captured output so far. You don't need this to " +
 								"find out when a task finishes — a <system-reminder> arrives automatically — only call it if " +
 								"you want progress sooner. Repeated identical calls on the same task_id are expected while " +
@@ -400,7 +398,7 @@ export function getToolDefinitions(
 								properties: {
 									task_id: {
 										type: "string",
-										description: "Task id returned by bash's run_in_background:true",
+										description: "Task id returned by bash for an explicit or automatically promoted task",
 									},
 									wait: {
 										type: "number",
@@ -418,13 +416,13 @@ export function getToolDefinitions(
 						function: {
 							name: "bash_kill",
 							description:
-								"Terminate a running background bash task started with bash's run_in_background:true.",
+								"Terminate a running managed background bash task returned by bash, either explicitly or through automatic promotion.",
 							parameters: {
 								type: "object",
 								properties: {
 									task_id: {
 										type: "string",
-										description: "Task id returned by bash's run_in_background:true",
+										description: "Task id returned by bash for an explicit or automatically promoted task",
 									},
 								},
 								required: ["task_id"],
