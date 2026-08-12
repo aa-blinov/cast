@@ -1,9 +1,10 @@
 /**
  * The `bash` tool — runs a shell command and returns its output.
  *
- * stdin is always "ignore" (EOF) — any command waiting for input exits
- * immediately instead of hanging: no PTY, no prompt detection, no
- * interactive command blocking at runtime.
+ * In headless contexts stdin is always "ignore" (EOF). In the interactive
+ * TUI/web surfaces, foreground calls use the same managed PTY registry as
+ * background calls so a long-running process can be promoted without an OS
+ * process handoff.
  */
 
 import { execFileSync, spawn } from "node:child_process";
@@ -11,13 +12,15 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { AppConfig } from "../config.ts";
 import { checkDangerousBash } from "../permissions.ts";
-import type { BashBackgroundDeps } from "./bash-background.ts";
+import type { BackgroundTask, BashBackgroundDeps } from "./bash-background.ts";
+import { looksLongRunningCommand } from "./long-running.ts";
 import { appendBoundedOutput, type ConfirmBash, formatSize, type ToolResult } from "./shared.ts";
 
 const INSTALL_PATH_RE = /InstallPath\s+REG_SZ\s+(.+)/;
 const CRLF_RE = /\r\n/g;
 const CR_RE = /\r/g;
 const NEWLINE_SPLIT_RE = /\r?\n/;
+const AUTO_BACKGROUND_THRESHOLD_MS = 60_000;
 
 /** Strip ANSI escape sequences from output. */
 export function stripAnsi(s: string): string {
@@ -219,6 +222,53 @@ export function formatBashResult(rawOutput: string, config: AppConfig, opts: For
 	};
 }
 
+function formatManagedTaskResult(
+	task: BackgroundTask,
+	config: AppConfig,
+	warnPrefix: string,
+	timeoutSeconds: number,
+): ToolResult {
+	if (task.status === "error") {
+		return { content: `${warnPrefix}${task.errorMessage ?? "Failed to start bash."}`, isError: true };
+	}
+	return formatBashResult(task.rawOutput, config, {
+		exitCode: task.exitCode,
+		outputTruncated: task.outputTruncated,
+		timeoutSeconds,
+		warnPrefix,
+	});
+}
+
+function formatBackgroundStart(task: BackgroundTask, warnPrefix: string, automatic: boolean): ToolResult {
+	const prefix = automatic ? "Automatically moved to background" : "Started in background";
+	return {
+		content:
+			`${warnPrefix}${prefix} as ${task.id}. The result will be delivered automatically when it finishes. ` +
+			`Call bash_output({task_id:"${task.id}",wait:5}) for progress or bash_kill({task_id:"${task.id}"}) to stop it.`,
+	};
+}
+
+async function waitForManagedTask(
+	task: BackgroundTask,
+	waitMs: number,
+	signal: AbortSignal | undefined,
+): Promise<"exited" | "promote" | "aborted"> {
+	return new Promise((resolve) => {
+		let settled = false;
+		const finish = (outcome: "exited" | "promote" | "aborted") => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			signal?.removeEventListener("abort", onAbort);
+			resolve(outcome);
+		};
+		const onAbort = () => finish("aborted");
+		const timer = setTimeout(() => finish("promote"), waitMs);
+		task.exitPromise.then(() => finish("exited"));
+		signal?.addEventListener("abort", onAbort, { once: true });
+	});
+}
+
 export async function execBash(
 	args: Record<string, unknown>,
 	cwd: string,
@@ -271,12 +321,37 @@ export async function execBash(
 		// Background tasks are open-ended by default (dev servers, long builds)
 		// — only apply a kill timer when the model explicitly asked for one.
 		const task = background.registry.start(command, cwd, config, explicitTimeout, background);
-		return {
-			content:
-				`${warnPrefix}Started in background as ${task.id}. You don't need to poll — a <system-reminder> ` +
-				`will arrive automatically when it finishes. Call bash_output({task_id:"${task.id}"}) only if you ` +
-				`need progress sooner, or bash_kill({task_id:"${task.id}"}) to stop it early.`,
-		};
+		return formatBackgroundStart(task, warnPrefix, false);
+	}
+
+	if (background) {
+		// Start every interactive-surface command in the managed PTY so a still-
+		// running process can be promoted without trying to hand an OS process
+		// from pipe-based foreground execution to a new terminal later.
+		const task = background.registry.start(command, cwd, config, undefined, background, {
+			notifyOnCompletion: false,
+		});
+		if (task.status !== "running") return formatManagedTaskResult(task, config, warnPrefix, timeout);
+
+		// Known servers/watchers should never consume a full model turn just to
+		// discover that they are open-ended. Other commands get OMP-style grace
+		// time to finish normally before being promoted.
+		if (looksLongRunningCommand(command)) {
+			background.registry.promote(task.id);
+			return formatBackgroundStart(task, warnPrefix, true);
+		}
+
+		const waitMs = Math.min(AUTO_BACKGROUND_THRESHOLD_MS, Math.max(1000, timeout * 1000 - 1000));
+		const outcome = await waitForManagedTask(task, waitMs, signal);
+		if (outcome === "aborted") {
+			background.registry.kill(task.id);
+			return { content: "[ABORTED] Command was interrupted by user.", isError: true };
+		}
+		if (outcome === "exited" || task.status !== "running") {
+			return formatManagedTaskResult(task, config, warnPrefix, timeout);
+		}
+		background.registry.promote(task.id);
+		return formatBackgroundStart(task, warnPrefix, true);
 	}
 
 	return new Promise<ToolResult>((resolve) => {

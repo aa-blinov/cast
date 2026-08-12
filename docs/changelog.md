@@ -2,6 +2,16 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.32
+
+### Added
+
+- **Long-running Bash commands can move to the background without a handoff.** Interactive TUI and web sessions now run managed Bash tasks through PTY, automatically promote known server/watcher commands or foreground commands that exceed their grace period, and report the task id for progress and control.
+
+### Changed
+
+- Updated Bash tool documentation and shared persona guidance for automatic background promotion, completion reminders, `bash_output`, and `bash_kill`.
+
 ## 0.13.31
 
 ### Fixed

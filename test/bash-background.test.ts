@@ -39,6 +39,7 @@ describe("BackgroundTaskRegistry", () => {
 
 		const task = registry.start("echo hi", process.cwd(), mockConfig, 10, deps);
 		expect(task.status).toBe("running");
+		expect(task.pty).toBeDefined();
 		expect(registry.get(task.id)).toBe(task);
 
 		await new Promise((r) => setTimeout(r, 300));

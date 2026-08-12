@@ -639,8 +639,8 @@ export interface LoopConfig {
 	/** Called immediately before a built-in write/edit mutates a file. */
 	beforeFileWrite?: (path: string) => void;
 	/**
-	 * Background bash task support (`run_in_background` on `bash`, plus
-	 * `bash_output`/`bash_kill`) — web/TUI only. Deliberately omitted for
+	 * Background bash task support (`run_in_background` or automatic promotion on
+	 * `bash`, plus `bash_output`/`bash_kill`) — web/TUI only. Deliberately omitted for
 	 * `cast run` (process exits after one turn, nothing left to notify) and
 	 * `task` subagent child configs (ephemeral, no later turn either).
 	 */
