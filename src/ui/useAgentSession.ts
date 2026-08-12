@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 // Node 22 has no global EventSource; undici ships one (experimental) that we
 // use to receive the daemon's SSE stream. The browser build (esbuild bundle)
@@ -9,7 +10,7 @@ import type { AppConfig } from "../core/config.ts";
 import { resolveProvider } from "../core/config.ts";
 import { initialAnnouncedLocalDate } from "../core/date-rollover-reminder.ts";
 import { hasHooks, runHooksForEvent } from "../core/hooks.ts";
-import { describeTurnError, isRetryableStreamError, stripHermesToolCalls } from "../core/llm.ts";
+import { describeTurnError, isRetryableStreamError, type Message, stripHermesToolCalls } from "../core/llm.ts";
 import { type AgentEvent, runAgentLoop } from "../core/loop.ts";
 import { formatMcpForPrompt, type McpSetupResult } from "../core/mcp.ts";
 import type { Persona } from "../core/personas.ts";
@@ -88,6 +89,8 @@ export interface ChatMessage {
 	role: "user" | "assistant" | "system" | "tool" | "warning";
 	/** Plain text for user/warning/system/tool rows. Assistant rows use `blocks`. */
 	content: string;
+	clientMessageId?: string;
+	pending?: boolean;
 	/**
 	 * Assistant turn rendered as ordered reasoning/text/tool blocks. Carries the
 	 * turn's reasoning too, so it stays visible in history instead of vanishing
@@ -429,8 +432,10 @@ export function buildDisplayMessages(sessionMessages: SessionState["messages"]):
 			for (const body of reminders) {
 				if (body) out.push({ role: "warning", content: `[system] ${body}` });
 			}
-			if (cleaned) out.push({ role: "user", content: cleaned });
-			if (!cleaned && reminders.length === 0) out.push({ role: "user", content: text });
+			const clientMessageId = (m as Message & { castClientMessageId?: string }).castClientMessageId;
+			if (cleaned) out.push({ role: "user", content: cleaned, ...(clientMessageId ? { clientMessageId } : {}) });
+			if (!cleaned && reminders.length === 0)
+				out.push({ role: "user", content: text, ...(clientMessageId ? { clientMessageId } : {}) });
 			continue;
 		}
 
@@ -529,6 +534,9 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	const serverClient = useMemo(
 		() => (effectiveDaemonUrl ? { baseUrl: effectiveDaemonUrl, token: effectiveDaemonToken } : undefined),
 		[effectiveDaemonUrl, effectiveDaemonToken],
+	);
+	const pendingServerMessagesRef = useRef(
+		new Map<string, { text: string; images?: string[]; clientMessageId: string; sending: boolean }>(),
 	);
 	// Load only the most recent page of history on resume. Loading the full
 	// history (getFullHistory) dumped thousands of lines into the terminal's
@@ -742,7 +750,19 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	// session switch) invokes refresh() explicitly at a turn boundary.
 	const refresh = useCallback(() => {
 		const page = getHistoryPage(session.id, undefined, TUI_HISTORY_PAGE_TURNS);
-		setMessages(buildDisplayMessages(page.messages));
+		const rebuilt = buildDisplayMessages(page.messages);
+		const known = new Set(rebuilt.map((message) => message.clientMessageId).filter(Boolean));
+		for (const pending of pendingServerMessagesRef.current.values()) {
+			if (!known.has(pending.clientMessageId)) {
+				rebuilt.push({
+					role: "user",
+					content: pending.text,
+					clientMessageId: pending.clientMessageId,
+					pending: true,
+				});
+			}
+		}
+		setMessages(rebuilt);
 		oldestSeqRef.current = page.oldestSeq;
 		setHasOlder(page.hasMore);
 		setUsage({ ...session.usage });
@@ -796,6 +816,14 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				// token/tool/status updates. The request is acknowledged when the turn
 				// enters the daemon queue, not when the turn finishes.
 				if (!serverClient) return;
+				const clientMessageId = randomUUID();
+				pendingServerMessagesRef.current.set(clientMessageId, {
+					text,
+					images: images?.map((img) => img.dataUrl),
+					clientMessageId,
+					sending: true,
+				});
+				setMessages((msgs) => [...msgs, { role: "user", content: text, clientMessageId, pending: true }]);
 				const attempt = async (client: ServerClient): Promise<boolean> => {
 					try {
 						await submitServerChat(
@@ -803,9 +831,18 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 							session.id,
 							text,
 							images?.map((img) => img.dataUrl),
+							clientMessageId,
+						);
+						pendingServerMessagesRef.current.delete(clientMessageId);
+						setMessages((msgs) =>
+							msgs.map((message) =>
+								message.clientMessageId === clientMessageId ? { ...message, pending: false } : message,
+							),
 						);
 						return true;
 					} catch {
+						const pending = pendingServerMessagesRef.current.get(clientMessageId);
+						if (pending) pending.sending = false;
 						return false;
 					}
 				};
@@ -822,9 +859,18 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 							session.id,
 							text,
 							images?.map((img) => img.dataUrl),
+							clientMessageId,
+						);
+						pendingServerMessagesRef.current.delete(clientMessageId);
+						setMessages((msgs) =>
+							msgs.map((message) =>
+								message.clientMessageId === clientMessageId ? { ...message, pending: false } : message,
+							),
 						);
 						return true;
 					} catch {
+						const pending = pendingServerMessagesRef.current.get(clientMessageId);
+						if (pending) pending.sending = false;
 						return false;
 					}
 				};
@@ -1329,6 +1375,27 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		let opened = false;
 		let recoveryStarted = false;
 		let disposed = false;
+		const retryPending = async () => {
+			const client = serverClient ?? { baseUrl: effectiveDaemonUrl, token: effectiveDaemonToken };
+			for (const pending of pendingServerMessagesRef.current.values()) {
+				if (pending.sending) continue;
+				pending.sending = true;
+				try {
+					// Preserve send order: a retried older prompt must reach the daemon
+					// before a later one from the same session.
+					// biome-ignore lint/performance/noAwaitInLoops: outgoing messages are ordered
+					await submitServerChat(client, session.id, pending.text, pending.images, pending.clientMessageId);
+					pendingServerMessagesRef.current.delete(pending.clientMessageId);
+					setMessages((msgs) =>
+						msgs.map((message) =>
+							message.clientMessageId === pending.clientMessageId ? { ...message, pending: false } : message,
+						),
+					);
+				} catch {
+					pending.sending = false;
+				}
+			}
+		};
 		const hydrate = () => {
 			void refresh();
 			if (serverClient) {
@@ -1344,6 +1411,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		};
 		source.onopen = () => {
 			setError(null);
+			void retryPending();
 			if (!opened) {
 				opened = true;
 				if (daemonOverride) hydrate();
@@ -1374,7 +1442,26 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			}
 			switch (event.type) {
 				case "user_message":
-					setMessages((msgs) => [...msgs, { role: "user", content: messageContentToText(event.message.content) }]);
+					setMessages((msgs) => {
+						const clientMessageId = event.message.clientMessageId;
+						if (clientMessageId) {
+							pendingServerMessagesRef.current.delete(clientMessageId);
+							const existing = msgs.findIndex((message) => message.clientMessageId === clientMessageId);
+							if (existing >= 0) {
+								const next = msgs.slice();
+								next[existing] = { ...next[existing], pending: false };
+								return next;
+							}
+						}
+						return [
+							...msgs,
+							{
+								role: "user",
+								content: messageContentToText(event.message.content),
+								...(clientMessageId ? { clientMessageId } : {}),
+							},
+						];
+					});
 					break;
 				case "status":
 					setStatus(event.status);
@@ -1455,11 +1542,22 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					// loop's injection handling so the queued prompt appears in history
 					// and its pending UI entry is removed when the daemon accepts it.
 					promoteStreamingToHistory();
-					const injected = event.messages.map((message) => ({
-						role: "user" as const,
-						content: messageContentToText(message.content),
-					}));
-					setMessages((msgs) => [...msgs, ...injected]);
+					setMessages((msgs) => {
+						const injected = event.messages
+							.filter((message) => {
+								const clientMessageId = (message as Message & { castClientMessageId?: string })
+									.castClientMessageId;
+								if (!clientMessageId) return true;
+								pendingServerMessagesRef.current.delete(clientMessageId);
+								return !msgs.some((existing) => existing.clientMessageId === clientMessageId);
+							})
+							.map((message) => ({
+								role: "user" as const,
+								content: messageContentToText(message.content),
+								clientMessageId: (message as Message & { castClientMessageId?: string }).castClientMessageId,
+							}));
+						return [...msgs, ...injected];
+					});
 					setError(null);
 					if (event.type === "steering_injected") {
 						setPendingSteers((pending) => pending.slice(event.messages.length));

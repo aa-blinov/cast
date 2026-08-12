@@ -10,10 +10,33 @@ function sessionIdFromUrl() {
 	return new URLSearchParams(window.location.search).get("session");
 }
 
+function mergePendingOutgoing(data, sessionId, pendingOutgoingRef) {
+	const pending = [...pendingOutgoingRef.current.values()].filter((item) => item.sessionId === sessionId);
+	if (pending.length === 0) return;
+	const known = new Set(data.messages.map((message) => message.clientMessageId).filter(Boolean));
+	for (const item of pending) {
+		if (known.has(item.clientMessageId)) {
+			pendingOutgoingRef.current.delete(item.clientMessageId);
+			continue;
+		}
+		data.messages = [
+			...data.messages,
+			{
+				role: "user",
+				content: item.text,
+				...(item.images?.length ? { images: item.images } : {}),
+				clientMessageId: item.clientMessageId,
+				pending: true,
+			},
+		];
+	}
+}
+
 export function useSessionController({
 	setSessions,
 	setSessionsLoaded,
 	setSession,
+	pendingOutgoingRef,
 	setActiveId,
 	setRunning,
 	setSidebarOpen,
@@ -42,6 +65,40 @@ export function useSessionController({
 	setBackendUp,
 	applyTheme,
 }) {
+	const markOutgoingDelivered = useCallback(
+		(clientMessageId) => {
+			pendingOutgoingRef.current.delete(clientMessageId);
+			setSession((prev) => {
+				if (!prev) return prev;
+				const messages = prev.messages.map((message) =>
+					message.clientMessageId === clientMessageId ? { ...message, pending: false } : message,
+				);
+				return messages.some((message, index) => message !== prev.messages[index]) ? { ...prev, messages } : prev;
+			});
+		},
+		[pendingOutgoingRef, setSession],
+	);
+	const retryPendingOutgoing = useCallback(
+		async (sessionId) => {
+			const pending = [...pendingOutgoingRef.current.values()].filter(
+				(item) => item.sessionId === sessionId && !item.sending,
+			);
+			for (const item of pending) {
+				item.sending = true;
+				try {
+					await api("POST", `/api/sessions/${item.sessionId}/chat`, {
+						text: item.text,
+						...(item.images?.length ? { images: item.images } : {}),
+						clientMessageId: item.clientMessageId,
+					});
+					markOutgoingDelivered(item.clientMessageId);
+				} catch {
+					item.sending = false;
+				}
+			}
+		},
+		[markOutgoingDelivered, pendingOutgoingRef],
+	);
 	// Load sessions
 	const loadSessions = useCallback(async () => {
 		const version = ++sessionsLoadVersionRef.current;
@@ -85,6 +142,7 @@ export function useSessionController({
 				const data = prefetch ? await prefetch : await api("GET", `/api/sessions/${id}`);
 				if (!data) throw new Error("Not found");
 				if (version !== sessionViewVersionRef.current) return;
+				mergePendingOutgoing(data, id, pendingOutgoingRef);
 				// Splice in older pages already loaded via scroll-up earlier this
 				// tab session — only if nothing changed underneath: the cache's
 				// anchorSeq is the oldestSeq the *latest* page had when caching
@@ -121,6 +179,7 @@ export function useSessionController({
 				// own id — clearing unconditionally here would wipe that one
 				// out and the new row's spinner would never appear.
 				if (version === sessionViewVersionRef.current) setSelectingId(null);
+				void retryPendingOutgoing(id);
 			} catch (err) {
 				if (version === sessionViewVersionRef.current) {
 					setSelectingId(null);
@@ -141,6 +200,8 @@ export function useSessionController({
 			olderPagesCacheRef.current.set,
 			sessionViewVersionRef,
 			wasRunningRef,
+			pendingOutgoingRef,
+			retryPendingOutgoing,
 		],
 	);
 
@@ -387,6 +448,8 @@ export function useSessionController({
 		const tryOnce = async () => {
 			const ok = await initClientState();
 			if (ok) {
+				const pendingSessionIds = new Set([...pendingOutgoingRef.current.values()].map((item) => item.sessionId));
+				await Promise.all([...pendingSessionIds].map((id) => retryPendingOutgoing(id)));
 				reconnectTimerRef.current = null;
 				setBackendUp(true);
 				setReconnectNonce((n) => n + 1);
@@ -406,6 +469,8 @@ export function useSessionController({
 		// default session (a real duplicate-session race, caught in testing).
 		reconnectTimerRef,
 		setReconnectNonce,
+		pendingOutgoingRef,
+		retryPendingOutgoing,
 	]);
 
 	return {
@@ -417,5 +482,6 @@ export function useSessionController({
 		forkSession,
 		initClientState,
 		startReconnectLoop,
+		retryPendingOutgoing,
 	};
 }

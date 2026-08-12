@@ -46,6 +46,12 @@ describe("buildDisplayMessages", () => {
 		expect(out).toEqual([{ role: "user", content: "hi" }]);
 	});
 
+	it("keeps the client message id through a history rebuild", () => {
+		expect(build([{ role: "user", content: "hello", castClientMessageId: "msg-1" }])).toEqual([
+			{ role: "user", content: "hello", clientMessageId: "msg-1" },
+		]);
+	});
+
 	it("extracts text from a structured user message (image attachment)", () => {
 		const out = build([
 			{

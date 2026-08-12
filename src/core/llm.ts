@@ -298,6 +298,12 @@ function sanitizeMessages(messages: Message[]): Message[] {
 			const withTag = m as { role: "user"; content: unknown; castToolCallId?: string };
 			return { role: "user", content: withTag.content } as Message;
 		}
+		// Client message IDs are persisted for idempotent daemon retries, but are
+		// transport metadata rather than model context.
+		if (m.role === "user" && m && typeof m === "object" && "castClientMessageId" in m) {
+			const withId = m as { role: "user"; content: unknown; castClientMessageId?: string };
+			return { role: "user", content: withId.content } as Message;
+		}
 		if (m.role !== "assistant") return m;
 		const hasToolCalls = "tool_calls" in m && Array.isArray(m.tool_calls) && m.tool_calls.length > 0;
 		const hasContent = typeof m.content === "string" ? m.content.length > 0 : Boolean(m.content);

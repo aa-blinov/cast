@@ -66,6 +66,7 @@ import {
 	deleteSession,
 	dropLastCheckpoint,
 	forkSession,
+	getFullHistory,
 	getHistoryPage,
 	listSessionSummaries,
 	loadSession,
@@ -162,6 +163,7 @@ export type WebEvent =
 			message: {
 				role: "user";
 				content: string | Array<{ type: string; text?: string; image_url?: { url: string } }>;
+				clientMessageId?: string;
 			};
 	  }
 	| { type: "session_update"; session: SessionSummary }
@@ -193,6 +195,10 @@ export interface WebAgentSession {
 	 * never persisted as transcript history and cleared when the turn settles. */
 	activeStream?: DisplayStreamBlock[];
 	listeners: Set<(event: WebEvent) => void>;
+	/** IDs accepted while this live session has queued work. Persisted user
+	 * messages are checked as well, so a lost HTTP response can be retried
+	 * without creating a duplicate turn. */
+	acceptedClientMessageIds: Set<string>;
 	/** Rebuilt whenever persona or model changes — see `computeSystemPrompt`. */
 	systemPrompt: string;
 	/** Ephemeral, like the TUI's `lastTurnUsage` (useAgentSession.ts) — not
@@ -264,6 +270,7 @@ function appendActiveText(
 export interface DisplayMessage {
 	role: string;
 	content: string | null;
+	clientMessageId?: string;
 	/** Persistent row sequence, used by the web client to retain DOM identity
 	 * when an SSE reconnect refreshes the latest history page. */
 	seq?: number;
@@ -458,7 +465,15 @@ export function toDisplayMessages(
 					sessionId && seq !== undefined
 						? dataUrls.map((_, idx) => `${imageApiPrefix}/sessions/${sessionId}/image?seq=${seq}&idx=${idx}`)
 						: dataUrls;
-				out.push({ role: m.role, content: textPart, seq: seqs?.[i], images });
+				out.push({
+					role: m.role,
+					content: textPart,
+					seq: seqs?.[i],
+					images,
+					...((m as Message & { castClientMessageId?: string }).castClientMessageId
+						? { clientMessageId: (m as Message & { castClientMessageId?: string }).castClientMessageId }
+						: {}),
+				});
 				return;
 			}
 		}
@@ -486,6 +501,9 @@ export function toDisplayMessages(
 			role: m.role,
 			content,
 			seq: seqs?.[i],
+			...((m as Message & { castClientMessageId?: string }).castClientMessageId
+				? { clientMessageId: (m as Message & { castClientMessageId?: string }).castClientMessageId }
+				: {}),
 			thinking: m.role === "assistant" ? reasoning?.[i] : undefined,
 			turnMeta: m.role === "assistant" ? turnMeta?.[i] : undefined,
 		});
@@ -550,7 +568,7 @@ export interface ServerBridge {
 	getSharedSession(
 		token: string,
 	): { title?: string; persona: string; model: string; messages: DisplayMessage[] } | null;
-	submit(sessionId: string, text: string, images?: string[]): Promise<void>;
+	submit(sessionId: string, text: string, images?: string[], clientMessageId?: string): Promise<void>;
 	/** Inject a message into the running turn (submits; the loop's
 	 *  steeringQueue drains it if a turn is in flight, matching /steer). */
 	steer(sessionId: string, message: string): void;
@@ -861,6 +879,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			status: "idle",
 			error: null,
 			listeners: new Set(),
+			acceptedClientMessageIds: new Set(),
 			systemPrompt: computeSystemPrompt(persona, model, sessionCwd),
 		};
 
@@ -894,6 +913,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			status: "idle",
 			error: null,
 			listeners: new Set(),
+			acceptedClientMessageIds: new Set(),
 			systemPrompt: computeSystemPrompt(persona, session.model, session.cwd ?? cwd, session.mode),
 		};
 		sessions.set(session.id, ws);
@@ -1114,17 +1134,29 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			.filter(Boolean)
 			.join("\n\n");
 		broadcast(ws, { type: "followup_injected", messages: queued });
-		void submit(sessionId, text, undefined, queued);
+		void submit(sessionId, text, undefined, undefined, queued);
 	}
 
 	async function submit(
 		sessionId: string,
 		text: string,
 		images?: string[],
+		clientMessageId?: string,
 		queuedMessages?: Message[],
 	): Promise<void> {
 		const ws = sessions.get(sessionId);
-		if (!ws) return;
+		if (!ws) throw new Error("Session not found");
+		if (clientMessageId) {
+			if (ws.acceptedClientMessageIds.has(clientMessageId)) return;
+			const alreadyPersisted = getFullHistory(ws.id).some(
+				(message) =>
+					(message as Message & { castClientMessageId?: string }).castClientMessageId === clientMessageId,
+			);
+			if (alreadyPersisted) {
+				ws.acceptedClientMessageIds.add(clientMessageId);
+				return;
+			}
+		}
 
 		// A turn already running (e.g. the same session open in a second
 		// browser tab that also just hit send) must not start a second,
@@ -1135,7 +1167,12 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// instead. The loop drains steeringQueue and broadcasts
 		// "steering_injected" itself, so every connected tab sees it land.
 		if (ws.status === "running") {
-			ws.runner.steeringQueue.enqueue({ role: "user", content: buildUserContent(text, images) } as Message);
+			ws.runner.steeringQueue.enqueue({
+				role: "user",
+				content: buildUserContent(text, images),
+				...(clientMessageId ? { castClientMessageId: clientMessageId } : {}),
+			} as Message);
+			if (clientMessageId) ws.acceptedClientMessageIds.add(clientMessageId);
 			return;
 		}
 
@@ -1204,9 +1241,10 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		} else {
 			const userMsg = { role: "user" as const, content: buildUserContent(text, images) } as Message & {
 				role: "user";
+				castClientMessageId?: string;
 			};
+			if (clientMessageId) userMsg.castClientMessageId = clientMessageId;
 			appendMessage(ws.session, userMsg);
-			broadcast(ws, { type: "user_message", message: userMsg });
 		}
 		const persona = turnPersonas.find((p) => p.name === ws.session.persona) ?? currentPersona;
 		ws.systemPrompt = computeSystemPrompt(persona, ws.session.model, sessionCwd, ws.session.mode);
@@ -1228,6 +1266,20 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// stays at the pre-run snapshot during the entire run. The `.then()`
 		// below does the final authoritative save with assistant responses.
 		saveSession(ws.session);
+		if (clientMessageId) ws.acceptedClientMessageIds.add(clientMessageId);
+		if (!queuedMessages) {
+			const userMsg = ws.session.messages[ws.session.messages.length - 1] as Message & {
+				castClientMessageId?: string;
+			};
+			broadcast(ws, {
+				type: "user_message",
+				message: {
+					role: "user",
+					content: userMsg.content as string | Array<{ type: string; text?: string; image_url?: { url: string } }>,
+					...(userMsg.castClientMessageId ? { clientMessageId: userMsg.castClientMessageId } : {}),
+				},
+			});
+		}
 
 		// Workspace checkpoint for /undo — after saveSession above so the
 		// session row already exists (session_checkpoints has an FK to it).
@@ -1763,6 +1815,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			status: "idle",
 			error: null,
 			listeners: new Set(),
+			acceptedClientMessageIds: new Set(),
 			systemPrompt: computeSystemPrompt(persona, session.model, session.cwd ?? cwd, session.mode),
 		};
 		sessions.set(session.id, ws);

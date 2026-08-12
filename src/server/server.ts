@@ -897,10 +897,12 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		const body = await readBody(req);
 		let text: string;
 		let images: string[] | undefined;
+		let clientMessageId: string | undefined;
 		try {
-			const parsed = JSON.parse(body) as { text?: string; images?: string[] };
+			const parsed = JSON.parse(body) as { text?: string; images?: string[]; clientMessageId?: unknown };
 			text = parsed.text ?? "";
 			images = Array.isArray(parsed.images) && parsed.images.length > 0 ? parsed.images : undefined;
+			clientMessageId = typeof parsed.clientMessageId === "string" ? parsed.clientMessageId.trim() : undefined;
 		} catch {
 			return json(res, { error: "Invalid JSON" }, 400);
 		}
@@ -912,7 +914,11 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			const tooBig = images.find((url) => url.length > MAX_IMAGE_DATA_URL_BYTES);
 			if (tooBig) return json(res, { error: "One of the images is too large" }, 400);
 		}
-		bridge.submit(params.id, text, images);
+		try {
+			await bridge.submit(params.id, text, images, clientMessageId);
+		} catch (error) {
+			return json(res, { error: error instanceof Error ? error.message : "Could not accept message" }, 500);
+		}
 		json(res, { ok: true }, 202);
 	});
 
