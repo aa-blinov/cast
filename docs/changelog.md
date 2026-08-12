@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.31
+
+### Fixed
+
+- **Provider list now disambiguates entries that share a base URL.** When two saved providers pointed at the same host with different API keys, the web UI silently treated the first one as active (the save ✓ never disabled, the chat footer showed the wrong name, and `/provider list` marked both as active). Lookup now matches by name (falling back to URL + key), and the provider row in Settings shows a green "active" badge for the one in use.
+
 ## 0.13.30
 
 ### Fixed
