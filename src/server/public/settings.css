@@ -245,6 +245,7 @@
 	transition: border-color .15s, background .15s;
 }
 .settings-item-row:hover { border-color: var(--border-active); background: var(--bg-hover); }
+.settings-item-row.active { border-color: var(--border-active); background: var(--bg-raised); }
 .settings-item-row .settings-item-info {
 	display: flex; align-items: center; gap: 8px;
 	flex: 1; min-width: 0;
@@ -252,6 +253,18 @@
 .settings-item-row .settings-item-actions {
 	display: flex; gap: 4px; align-items: center;
 	flex-shrink: 0;
+}
+.settings-item-tag {
+	display: inline-block;
+	margin-left: 6px;
+	padding: 1px 6px;
+	border-radius: 999px;
+	background: var(--green);
+	color: var(--bg);
+	font-size: .65rem;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: .03em;
 }
 .settings-item-row-stack {
 	display: block;

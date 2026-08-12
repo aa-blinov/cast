@@ -1276,7 +1276,10 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// provider and a saved provider entry share.
 		const turnStart = ws.turnStartedAt ?? Date.now();
 		const effectiveBaseURL = resolvedModelProvider?.baseURL ?? config.baseURL;
-		const effectiveProvider = providers.find((p) => p.url === effectiveBaseURL);
+		// Match by url+key, not just url — two saved providers can legitimately
+		// share a base URL (e.g. two keys against the same OpenAI-compatible
+		// host), and URL-only matching would silently pick the first one.
+		const effectiveProvider = providers.find((p) => p.url === effectiveBaseURL && p.apiKey === config.apiKey);
 		const runReasoningFormat = resolveReasoningFormat(effectiveBaseURL, effectiveProvider?.reasoningFormat);
 		const runReasoningLevel = reasoningLevelForModel(runModel, runReasoningFormat);
 		const runConfig = {
@@ -1291,7 +1294,12 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			config.reasoningParams = runConfig.reasoningParams;
 			updateSettings({ reasoningLevel: runReasoningLevel });
 		}
-		const runProviderName = providers.find((p) => p.url === effectiveBaseURL)?.name ?? "default";
+		// Look the provider up by name (falls back to url+key for legacy state
+		// where modelProvider wasn't saved). URL alone is ambiguous when two
+		// providers share a base URL — would always pick the first one and
+		// mislabel the chat footer.
+		const runProviderName =
+			providers.find((p) => p.url === effectiveBaseURL && p.apiKey === config.apiKey)?.name ?? "default";
 
 		runAgentLoop(ws.session.messages, {
 			config: runConfig,
@@ -2882,9 +2890,18 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			const settings = loadSettings();
 			const providers = settings.providers ?? [];
 			if (!sub || sub === "list") {
+				// Active = the saved provider (matched by name, falling back to url+key
+				// for legacy settings that pre-date modelProvider). Two providers can
+				// share a URL, so URL-only matching silently mislabels the second one
+				// as "active" and the chat footer / model picker then show the wrong name.
+				const savedSettings = loadSettings();
+				const savedName = savedSettings.modelProvider;
+				const activeByName = savedName ? providers.find((p) => p.name === savedName) : undefined;
+				const activeByCreds = providers.find((p) => p.url === config.baseURL && p.apiKey === config.apiKey);
+				const active = activeByName ?? activeByCreds;
 				return {
 					ok: true,
-					result: providers.map((p) => ({ name: p.name, url: p.url, active: p.url === config.baseURL })),
+					result: providers.map((p) => ({ name: p.name, url: p.url, active: p === active })),
 				};
 			}
 			if (sub === "delete") {
