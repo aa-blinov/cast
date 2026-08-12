@@ -1,9 +1,9 @@
 #!/bin/bash
 # Release launcher (macOS/Linux) — runs the pre-built dist/index.js bundle.
-# Unlike cast.sh (repo root, dev mode), this needs nothing from
-# node_modules — openai and every other dependency are bundled into
-# dist/index.js at release-build time (see scripts/build.mjs). Only Node.js
-# itself is required.
+# Unlike cast.sh (repo root, dev mode), the JavaScript dependencies are
+# bundled into dist/index.js at release-build time (see scripts/build.mjs).
+# The release archive also carries node-pty because its native addon cannot
+# be embedded in the bundle.
 ORIGINAL_CWD="$(pwd)"
 
 # Resolve the real script location through any number of symlinks —

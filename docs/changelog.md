@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.33
+
+### Fixed
+
+- **Release archives include the native PTY runtime.** `cast upgrade` now installs `node-pty` and its native dependency alongside the bundle, so managed Bash background tasks work after a clean upgrade.
+
 ## 0.13.32
 
 ### Added
