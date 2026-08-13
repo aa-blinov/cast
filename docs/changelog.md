@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.36
+
+### Fixed
+
+- **Release archives now contain only the native PTY runtime for the detected platform and architecture.** Installers select Linux, macOS, and Windows x64/arm64 assets, while old releases remain installable through a safe legacy fallback.
+
 ## 0.13.35
 
 ### Fixed
