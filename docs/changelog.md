@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.15.1
+
+### Fixed
+
+- **GitHub Pages workspace preview now matches the actual Web UI structure.** Removed the misleading local-first badge, fabricated capability metrics, and empty composer; the preview now shows the real header, sessions sidebar, chat state, and interactive persona switching.
+
 ## 0.15.0
 
 ### Added
