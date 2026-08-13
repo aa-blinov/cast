@@ -621,6 +621,7 @@ export interface ServerBridge {
 		password: string | undefined,
 	): { ok: boolean; error?: string };
 	readSkillContent(name: string): { ok: boolean; content?: string; error?: string };
+	readPersonaContent(name: string): { ok: boolean; content?: string; error?: string };
 	readPluginContent(pluginId: string): { ok: boolean; content?: string; error?: string };
 	getReasoningOptionsForSession(sessionId: string): { options: Array<{ value: string; label: string }> };
 	suggestCommand(sessionId: string, input: string): Array<{ value: string; label: string }>;
@@ -3408,6 +3409,19 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		}
 	}
 
+	function readPersonaContent(name: string): { ok: boolean; content?: string; error?: string } {
+		try {
+			const persona = personas.find((candidate) => candidate.name === name);
+			if (!persona) return { ok: false, error: `Persona "${name}" not found` };
+			if (!persona.filePath) return { ok: false, error: `Persona "${name}" has no source file` };
+			const raw = readFileSync(persona.filePath, "utf-8");
+			const content = raw.replace(FRONTMATTER_STRIP_RE, "");
+			return { ok: true, content };
+		} catch (err) {
+			return { ok: false, error: err instanceof Error ? err.message : String(err) };
+		}
+	}
+
 	function readPluginContent(pluginId: string): { ok: boolean; content?: string; error?: string } {
 		try {
 			const pluginDir = join(homedir(), ".cast", "plugins", "installs");
@@ -3633,6 +3647,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		saveSshKey,
 		addSshHost,
 		readSkillContent,
+		readPersonaContent,
 		readPluginContent,
 		getReasoningOptionsForSession,
 		suggestCommand,

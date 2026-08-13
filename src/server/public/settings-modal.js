@@ -14,6 +14,7 @@ const SETTINGS_TABS = [
 	{ id: "marketplace", label: "Marketplace" },
 	{ id: "mcp", label: "MCP" },
 	{ id: "model", label: "Model" },
+	{ id: "personas", label: "Personas" },
 	{ id: "plugins", label: "Plugins" },
 	{ id: "provider", label: "Provider" },
 	{ id: "skillssh", label: "Skills.sh" },
@@ -271,7 +272,7 @@ export function SettingsModal({
 	// theme and font both come from props/local state (fetched once at app
 	// boot, or never fetched at all for font — see applyFont) rather than the
 	// per-tab preload above.
-	const hasData = tab === "appearance" || data[tab] !== undefined;
+	const hasData = tab === "appearance" || tab === "personas" || data[tab] !== undefined;
 
 	return html`
 		<div class="modal-backdrop" onClick=${onClose}>
@@ -303,10 +304,12 @@ export function SettingsModal({
 											const res = await act(`/theme ${id}`);
 											if (res.ok && res.result?.colors) onApplyTheme(res.result.colors);
 											if (res.ok && res.result?.theme) onThemeChange(res.result.theme);
-										}} currentFontId=${currentFontId} currentFontScale=${currentFontScale} onPickFont=${onPickFont} onPickScale=${onPickScale} showReasoning=${showReasoning} onToggleShowReasoning=${onToggleShowReasoning} />`
+																	}} currentFontId=${currentFontId} currentFontScale=${currentFontScale} onPickFont=${onPickFont} onPickScale=${onPickScale} showReasoning=${showReasoning} onToggleShowReasoning=${onToggleShowReasoning} />`
 									: tab === "model"
 										? html`<${panels.SettingsModel} data=${data.model} busy=${busy} act=${act} />`
-										: tab === "bash"
+										: tab === "personas"
+											? html`<${panels.SettingsPersonas} personas=${personas} />`
+											: tab === "bash"
 											? html`<${panels.SettingsBash} data=${data.bash} busy=${busy} act=${act} />`
 											: tab === "web"
 												? html`<${panels.SettingsWeb} data=${data.web} busy=${busy} act=${act} />`

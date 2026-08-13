@@ -154,6 +154,45 @@ function SettingsQuickMode({ data, busy, act, personas, onQuickSessionPersonaCha
 	`;
 }
 
+function SettingsPersonas({ personas = [] }) {
+	const groups = [
+		{ key: "builtin", label: "Built-in", items: personas.filter((persona) => persona.source === "builtin") },
+		{ key: "global", label: "Global", items: personas.filter((persona) => persona.source === "global") },
+		{ key: "project", label: "Project", items: personas.filter((persona) => persona.source === "project") },
+	];
+	const renderPersona = (persona) => html`
+		<div key=${persona.name} class="settings-item-row">
+			<div class="settings-item-info">
+				<span class="settings-item-status ok" />
+				<span class="settings-item-name">${persona.label}</span>
+				<span class="settings-item-meta">${persona.name}</span>
+				<${InfoPopover}
+					text=${persona.description || "No description provided."}
+					readUrl=${`/api/persona-content?name=${encodeURIComponent(persona.name)}`}
+					contentLabel="Persona content"
+				/>
+			</div>
+		</div>
+	`;
+
+	return html`
+		<div class="settings-rows">
+			<p class="settings-intro"><span>Agent working styles. Click ℹ for a short description or the book to read the full persona prompt.</span></p>
+			${groups
+				.filter((group) => group.items.length > 0)
+				.map(
+					(group) => html`
+						<div key=${group.key} class="settings-group">
+							<div class="settings-section-title">${group.label}</div>
+							${[...group.items].sort((a, b) => a.label.localeCompare(b.label)).map(renderPersona)}
+						</div>
+					`,
+				)}
+			${personas.length === 0 && html`<div class="settings-hint">No personas available.</div>`}
+		</div>
+	`;
+}
+
 function SettingsMcp({ data, busy, act, confirm }) {
 	const servers = data || [];
 	const groups = [
@@ -813,7 +852,7 @@ function SettingsSsh({ data, busy, act, confirm }) {
 	`;
 }
 
-function InfoPopover({ text, readUrl }) {
+function InfoPopover({ text, readUrl, contentLabel = "Skill content" }) {
 	const [infoOpen, setInfoOpen] = useState(false);
 	const [bookOpen, setBookOpen] = useState(false);
 	const [fullContent, setFullContent] = useState(null);
@@ -893,9 +932,9 @@ function InfoPopover({ text, readUrl }) {
 		</div>`,
 		bookOpen &&
 			html`<div class="modal-backdrop" onClick=${() => setBookOpen(false)}>
-			<div class="modal modal-preview" role="dialog" aria-modal="true" aria-label="Skill content" tabIndex="-1" ref=${modalRef} onClick=${(e) => e.stopPropagation()}>
+			<div class="modal modal-preview" role="dialog" aria-modal="true" aria-label=${contentLabel} tabIndex="-1" ref=${modalRef} onClick=${(e) => e.stopPropagation()}>
 				<div class="modal-header">
-					<span>Skill content</span>
+					<span>${contentLabel}</span>
 					<button class="modal-close" onClick=${() => setBookOpen(false)} aria-label="Close"><${icons.xMark} /></button>
 				</div>
 				<div class="fs-preview-body">
@@ -920,6 +959,7 @@ export {
 	SettingsMarketplace,
 	SettingsPlugins,
 	SettingsProvider,
+	SettingsPersonas,
 	SettingsQuickMode,
 	SettingsServer,
 	SettingsSkills,
