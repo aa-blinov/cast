@@ -2,6 +2,13 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.15.6
+
+### Fixed
+
+- **The Files pane stays current after agent writes.** Directory refreshes now invalidate even while the panel is closed, bypass browser caches, and ignore out-of-order responses so a late stale response cannot replace a newer file tree.
+- **Large attachments cannot race message submission.** Send stays disabled until every document upload finishes, and deferred upload failures cancel the message instead of sending a prompt the agent cannot access.
+
 ## 0.15.5
 
 ### Fixed

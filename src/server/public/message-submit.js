@@ -135,7 +135,10 @@ export async function submitMessage(text, images, pendingDocs, context) {
 				paths.push({ name: result.name, path: result.path });
 			} catch (err) {
 				showToast(`Failed to upload ${doc.name}: ${err.message}`, "error");
-				// Still send the message without the failed file
+				// Sending without the attachment would make the transcript claim
+				// success while the agent can never access the user's file.
+				setInputsRefreshNonce?.((n) => n + 1);
+				return;
 			}
 		}
 		// Rebuild the system-reminder with real server-side paths —

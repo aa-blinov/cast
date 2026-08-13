@@ -8,6 +8,16 @@ import { icons } from "./icons.js";
 
 const html = htm.bind(h);
 
+export function nextDirectoryRequestVersion(requests, relPath) {
+	const next = (requests.get(relPath) ?? 0) + 1;
+	requests.set(relPath, next);
+	return next;
+}
+
+export function isCurrentDirectoryRequest(requests, relPath, version) {
+	return requests.get(relPath) === version;
+}
+
 export function FileExplorer({ activeId, confirm, refreshNonce }) {
 	const [tree, setTree] = useState({});
 	const [expanded, setExpanded] = useState(new Set());
@@ -22,12 +32,27 @@ export function FileExplorer({ activeId, confirm, refreshNonce }) {
 	const [previewPath, setPreviewPath] = useState(null);
 	const renameInputRef = useRef(null);
 	const searchTimerRef = useRef(null);
+	const directoryRequestVersionsRef = useRef(new Map());
+	const activeIdRef = useRef(activeId);
+	const treeRef = useRef(tree);
+	const queryRef = useRef(query);
+	const lastRefreshNonceRef = useRef(refreshNonce);
+	activeIdRef.current = activeId;
+	treeRef.current = tree;
+	queryRef.current = query;
 
 	const loadDir = useCallback(
 		async (relPath) => {
+			const requestActiveId = activeId;
+			const requestKey = `${requestActiveId}\u0000${relPath}`;
+			const requestVersion = nextDirectoryRequestVersion(directoryRequestVersionsRef.current, requestKey);
 			setLoadingDirs((prev) => new Set(prev).add(relPath));
 			try {
-				const data = await api("GET", `/api/sessions/${activeId}/fs?path=${encodeURIComponent(relPath || ".")}`);
+				const data = await api("GET", `/api/sessions/${requestActiveId}/fs?path=${encodeURIComponent(relPath || ".")}`);
+				const isCurrent =
+					activeIdRef.current === requestActiveId &&
+					isCurrentDirectoryRequest(directoryRequestVersionsRef.current, requestKey, requestVersion);
+				if (!isCurrent) return;
 				if (data?.entries) {
 					setTree((prev) => ({ ...prev, [relPath]: data.entries }));
 					setError(null);
@@ -35,9 +60,18 @@ export function FileExplorer({ activeId, confirm, refreshNonce }) {
 					setError(data.error);
 				}
 			} catch (err) {
-				setError(err.message);
+				if (
+					activeIdRef.current === requestActiveId &&
+					isCurrentDirectoryRequest(directoryRequestVersionsRef.current, requestKey, requestVersion)
+				)
+					setError(err.message);
 			} finally {
 				setLoadingDirs((prev) => {
+					if (
+						activeIdRef.current !== requestActiveId ||
+						!isCurrentDirectoryRequest(directoryRequestVersionsRef.current, requestKey, requestVersion)
+					)
+						return prev;
 					const next = new Set(prev);
 					next.delete(relPath);
 					return next;
@@ -48,12 +82,14 @@ export function FileExplorer({ activeId, confirm, refreshNonce }) {
 	);
 
 	useEffect(() => {
+		directoryRequestVersionsRef.current.clear();
+		lastRefreshNonceRef.current = refreshNonce;
 		setTree({});
 		setExpanded(new Set());
 		setSearchResults(null);
 		setQuery("");
 		setError(null);
-		if (activeId) loadDir("");
+		if (activeId) void loadDir("");
 	}, [activeId, loadDir]);
 
 	const toggleDir = (relPath) => {
@@ -101,17 +137,18 @@ export function FileExplorer({ activeId, confirm, refreshNonce }) {
 	// every directory that's currently loaded (not just expanded ones still
 	// visible) and re-run an active search, so new/changed/deleted files
 	// surface on their own.
-	const isFirstRunRef = useRef(true);
-	// biome-ignore lint/correctness/useExhaustiveDependencies: only refreshNonce should trigger this — loadDir/runSearch/tree/query are read fresh via closures but must not themselves cause a re-run (tree changes every time loadDir resolves, which would otherwise loop).
-	useEffect(() => {
-		if (isFirstRunRef.current) {
-			isFirstRunRef.current = false;
-			return;
-		}
+	const refreshLoaded = useCallback(() => {
 		if (!activeId) return;
-		for (const relPath of Object.keys(tree)) loadDir(relPath);
-		if (query.trim()) runSearch(query.trim());
-	}, [refreshNonce]);
+		for (const relPath of Object.keys(treeRef.current)) void loadDir(relPath);
+		const currentQuery = queryRef.current.trim();
+		if (currentQuery) void runSearch(currentQuery);
+	}, [activeId, loadDir, runSearch]);
+
+	useEffect(() => {
+		if (lastRefreshNonceRef.current === refreshNonce) return;
+		lastRefreshNonceRef.current = refreshNonce;
+		refreshLoaded();
+	}, [refreshLoaded, refreshNonce]);
 
 	const doDelete = async (relPath, type) => {
 		const message =

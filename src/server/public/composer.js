@@ -15,6 +15,10 @@ const PERSONA_CMD_RE = /^\/persona\s+(\S*)$/i;
 
 const html = htm.bind(h);
 
+export function canSubmitAttachments(docs) {
+	return docs.every((doc) => !doc.uploading && !doc.error);
+}
+
 export function Composer({ running, ready, activeId, commands, personas, onSubmit, onAbort, onDocUploaded }) {
 	const [value, setValue] = useState("");
 	const [cmdVisible, setCmdVisible] = useState(false);
@@ -151,6 +155,7 @@ export function Composer({ running, ready, activeId, commands, personas, onSubmi
 	}, []);
 
 	const handleSubmit = useCallback(() => {
+		if (!canSubmitAttachments(docs)) return;
 		const trimmed = value.trim();
 		const readyDocs = docs.filter((d) => (d.path || d.pending) && !d.uploading && !d.error);
 		const pendingDocs = docs.filter((d) => d.pending && d.dataUrl);
@@ -231,6 +236,8 @@ export function Composer({ running, ready, activeId, commands, personas, onSubmi
 		pickerSelect = handleCmdSelect;
 	}
 	const clampedIndex = pickerItems.length > 0 ? Math.min(selectedIndex, pickerItems.length - 1) : 0;
+	const attachmentsBlocked = !canSubmitAttachments(docs);
+	const hasReadyDocs = docs.some((d) => (d.path || d.pending) && !d.uploading && !d.error);
 
 	// Arrow-key nav must scroll the picker, not just select past the visible
 	// edge — mouse/scroll-wheel already worked, but the highlighted row could
@@ -371,9 +378,9 @@ export function Composer({ running, ready, activeId, commands, personas, onSubmi
 					onPaste=${handlePaste}
 				/>
 				${
-					running
+						running
 						? html`<button class="composer-abort" onClick=${onAbort} aria-label="Abort"><${icons.stop} /></button>`
-						: html`<button class="composer-send" onClick=${handleSubmit} disabled=${!ready || (!value.trim() && images.length === 0)} aria-label="Send"><${icons.send} /></button>`
+						: html`<button class="composer-send" onClick=${handleSubmit} disabled=${!ready || attachmentsBlocked || (!value.trim() && images.length === 0 && !hasReadyDocs)} aria-label="Send" title=${attachmentsBlocked ? "Wait for attachments to finish uploading" : "Send"}><${icons.send} /></button>`
 				}
 			</div>
 		</div>
