@@ -632,53 +632,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 .workspace-actions .btn-secondary { padding: 11px 17px; }
 .workspace-note { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font: .75rem var(--font-mono); }
 .workspace-note .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 12px rgba(45, 212, 191, .8); }
-.workspace-panel {
-	position: relative; background: rgba(19, 19, 23, .92); border: 1px solid var(--border-active);
-	border-radius: 14px; box-shadow: 0 28px 80px rgba(0, 0, 0, .38), 0 0 0 1px rgba(139, 92, 246, .08);
-	overflow: hidden;
-}
-.workspace-panel::before {
-	content: ""; position: absolute; inset: -1px; pointer-events: none; border-radius: inherit;
-	background: linear-gradient(135deg, rgba(192, 132, 252, .24), transparent 32%, transparent 68%, rgba(45, 212, 191, .16));
-	mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite: exclude; padding: 1px;
-}
-.workspace-panel-header {
-	display: flex; align-items: center; justify-content: space-between; gap: 12px;
-	padding: 14px 16px; border-bottom: 1px solid var(--border); background: var(--bg-raised);
-}
-.workspace-window-controls { display: flex; gap: 6px; }
-.workspace-window-controls span { width: 9px; height: 9px; border-radius: 50%; background: #52525b; }
-.workspace-window-controls span:first-child { background: #fb7185; }
-.workspace-window-controls span:nth-child(2) { background: #fbbf24; }
-.workspace-window-controls span:nth-child(3) { background: #34d399; }
-.workspace-panel-title { color: var(--text-dim); font: .72rem var(--font-mono); }
 .workspace-connected { color: var(--teal); font: 600 .65rem var(--font-mono); }
-.workspace-panel-body { padding: 20px; }
-.workspace-context { display: flex; align-items: center; gap: 8px; margin-bottom: 20px; color: var(--text-muted); font: .7rem var(--font-mono); }
-.workspace-context strong { color: var(--text-dim); font-weight: 500; }
-.workspace-context .slash { color: var(--accent); }
-.workspace-personas { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 24px; }
-.workspace-persona {
-	padding: 6px 9px; border: 1px solid var(--border); border-radius: 6px; color: var(--text-muted);
-	font: .7rem var(--font-mono); background: var(--bg);
-}
-.workspace-persona.active { color: var(--purple); border-color: rgba(167, 139, 250, .5); background: var(--accent-subtle); }
-.workspace-message { display: flex; gap: 11px; margin: 15px 0; }
-.workspace-avatar {
-	display: grid; place-items: center; flex: 0 0 27px; height: 27px; border-radius: 7px;
-	font: 700 .68rem var(--font-mono); color: var(--bg); background: var(--purple);
-}
-.workspace-avatar.user { background: var(--teal); }
-.workspace-message-body { min-width: 0; padding-top: 2px; }
-.workspace-message-meta { color: var(--text-muted); font: .64rem var(--font-mono); margin-bottom: 5px; }
-.workspace-message-text { color: var(--text-dim); font-size: .82rem; line-height: 1.55; }
-.workspace-message-text strong { color: var(--text); font-weight: 600; }
-.workspace-tool-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 20px 38px; }
-.workspace-tool { padding: 4px 7px; border-radius: 4px; color: var(--text-muted); background: var(--bg); border: 1px solid var(--border); font: .62rem var(--font-mono); }
-.workspace-tool::before { content: "✓"; color: var(--teal); margin-right: 5px; }
-.workspace-composer { display: flex; align-items: center; gap: 10px; margin-top: 22px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text-muted); font: .72rem var(--font-mono); }
-.workspace-composer .cursor { width: 2px; height: 14px; background: var(--purple); animation: workspace-blink 1.1s steps(2, start) infinite; }
-@keyframes workspace-blink { 50% { opacity: 0; } }
 .workspace-section { border-top: 1px solid var(--border); padding: 62px 0; }
 .workspace-section-heading { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
 .workspace-section-heading h2 { margin: 0; font-size: 1.55rem; letter-spacing: -.025em; }
@@ -697,11 +651,6 @@ a:hover { color: #c084fc; text-decoration: none; }
 .workspace-role-mark { width: 7px; height: 7px; border-radius: 2px; background: var(--purple); }
 .workspace-role:nth-child(2n) .workspace-role-mark { background: var(--teal); }
 .workspace-role:nth-child(3n) .workspace-role-mark { background: var(--amber); }
-.workspace-metrics { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
-.workspace-metric { padding: 18px 20px; background: var(--bg-surface); border-right: 1px solid var(--border); }
-.workspace-metric:last-child { border-right: 0; }
-.workspace-metric strong { display: block; color: var(--text); font: 600 1.25rem var(--font-mono); margin-bottom: 5px; }
-.workspace-metric span { color: var(--text-muted); font-size: .7rem; }
 .workspace-install { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; min-width: 0; }
 .workspace-install .install-block { max-width: none; min-width: 0; margin: 0; padding: 16px; overflow: hidden; }
 .workspace-install .install-block code { display: block; min-width: 0; overflow-x: auto; white-space: nowrap; }
@@ -723,10 +672,65 @@ a:hover { color: #c084fc; text-decoration: none; }
 	.workspace-section-heading { display: block; }
 	.workspace-section-heading h2 { margin-bottom: 8px; }
 	.workspace-grid, .workspace-install { grid-template-columns: 1fr; }
-	.workspace-metrics { grid-template-columns: repeat(2, 1fr); }
-	.workspace-metric:nth-child(2) { border-right: 0; }
-	.workspace-metric:nth-child(-n+2) { border-bottom: 1px solid var(--border); }
 	.workspace-docs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* The landing preview mirrors the actual Web UI: shared header, sessions
+ * sidebar, chat header, persona status, and transcript. It is deliberately
+ * static in structure but persona switching is live so the preview explains
+ * the product instead of pretending to be a screenshot. */
+.workspace-ui {
+	background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+	overflow: hidden; box-shadow: 0 24px 70px rgba(0, 0, 0, .32);
+}
+.workspace-ui-header {
+	display: flex; align-items: center; gap: 14px; height: 48px; padding: 0 14px;
+	background: var(--bg-surface); border-bottom: 1px solid var(--border); color: var(--text-dim);
+	font: .7rem var(--font-mono);
+}
+.workspace-ui-brand { display: flex; align-items: center; gap: 8px; color: var(--text); font-weight: 600; }
+.workspace-ui-status { width: 7px; height: 7px; border-radius: 50%; background: var(--teal); }
+.workspace-ui-context { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
+.workspace-ui-actions { display: flex; gap: 7px; margin-left: auto; }
+.workspace-ui-actions span { width: 24px; height: 24px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 5px; color: var(--text-muted); }
+.workspace-ui-body { display: grid; grid-template-columns: 190px minmax(0, 1fr); min-height: 390px; }
+.workspace-ui-sidebar { display: flex; flex-direction: column; min-width: 0; padding: 12px; background: var(--bg-surface); border-right: 1px solid var(--border); }
+.workspace-ui-new { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text-dim); font: .68rem var(--font-mono); }
+.workspace-ui-directory { padding: 16px 3px 12px; border-bottom: 1px solid var(--border); color: var(--text-muted); font: .6rem var(--font-mono); }
+.workspace-ui-directory strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); font-weight: 500; margin-top: 5px; }
+.workspace-ui-sidebar-title { padding: 16px 3px 7px; color: var(--text-muted); font: 600 .6rem var(--font-mono); text-transform: uppercase; letter-spacing: .08em; }
+.workspace-ui-session { display: block; width: 100%; padding: 8px 9px; margin-bottom: 3px; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-muted); font: .65rem var(--font-mono); }
+.workspace-ui-session.active { border-color: var(--accent-muted); background: var(--accent-subtle); color: var(--text); }
+.workspace-ui-sidebar-model { margin-top: auto; padding: 12px 3px 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-top: 1px solid var(--border); color: var(--text-muted); font: .58rem var(--font-mono); }
+.workspace-ui-chat { display: flex; flex-direction: column; min-width: 0; background: var(--bg); }
+.workspace-ui-chat-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 17px; border-bottom: 1px solid var(--border); }
+.workspace-ui-chat-title { color: var(--text); font-size: .76rem; font-weight: 600; }
+.workspace-ui-chat-title small { display: block; margin-top: 3px; color: var(--text-muted); font: .59rem var(--font-mono); font-weight: 400; }
+.workspace-ui-chat-state { color: var(--text-muted); font: .58rem var(--font-mono); }
+.workspace-ui-personas { display: flex; gap: 5px; padding: 12px 17px 0; overflow-x: auto; }
+.workspace-ui-persona { flex: 0 0 auto; padding: 5px 8px; border: 1px solid var(--border); border-radius: 5px; background: transparent; color: var(--text-muted); cursor: pointer; font: .61rem var(--font-mono); transition: color .15s, border-color .15s, background .15s; }
+.workspace-ui-persona:hover { color: var(--text); border-color: var(--border-active); }
+.workspace-ui-persona.active { color: var(--purple); border-color: color-mix(in srgb, var(--purple) 55%, var(--border)); background: var(--accent-subtle); }
+.workspace-ui-messages { flex: 1; padding: 18px 17px 14px; }
+.workspace-ui-message { display: flex; gap: 9px; margin-bottom: 17px; }
+.workspace-ui-avatar { display: grid; place-items: center; flex: 0 0 24px; height: 24px; border-radius: 5px; background: var(--teal); color: var(--bg); font: 700 .58rem var(--font-mono); }
+.workspace-ui-avatar.agent { background: var(--purple); }
+.workspace-ui-message-content { min-width: 0; }
+.workspace-ui-message-label { margin-bottom: 4px; color: var(--text-muted); font: .57rem var(--font-mono); text-transform: uppercase; }
+.workspace-ui-message-text { color: var(--text-dim); font-size: .7rem; line-height: 1.55; }
+.workspace-ui-message-text strong { color: var(--text); font-weight: 600; }
+.workspace-ui-tool { margin: -2px 0 15px 33px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 5px; color: var(--text-muted); font: .58rem var(--font-mono); }
+.workspace-ui-tool::before { content: "✓"; margin-right: 6px; color: var(--teal); }
+.workspace-ui-panel[hidden] { display: none; }
+.workspace-ui-role { display: flex; align-items: center; gap: 7px; margin: auto 17px 14px; padding-top: 10px; border-top: 1px solid var(--border); color: var(--text-muted); font: .6rem var(--font-mono); }
+.workspace-ui-role-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--purple); }
+.workspace-ui-role-mode { margin-left: auto; color: var(--amber); text-transform: uppercase; }
+@media (max-width: 640px) {
+	.workspace-ui-body { grid-template-columns: 1fr; min-height: 350px; }
+	.workspace-ui-sidebar { display: none; }
+	.workspace-ui-header { gap: 9px; }
+	.workspace-ui-context { max-width: 130px; }
+	.workspace-ui-actions span:nth-child(2) { display: none; }
 }
 `;
 
@@ -870,7 +874,7 @@ const LANDING_HTML = `<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
 <title>cast — Agent workspace</title>
-<meta name="description" content="cast is a role-based agent workspace for your terminal, repository, and local model.">
+<meta name="description" content="cast is a role-based agent workspace for your repository and OpenAI-compatible model.">
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
 <style>${CSS}</style>
 </head>
@@ -879,7 +883,6 @@ const LANDING_HTML = `<!DOCTYPE html>
 	<a href="index.html" class="header-logo" aria-label="cast home"><img src="assets/favicon.svg" alt="cast logo"></a>
 	<span class="header-badge">v${PACKAGE_VERSION}</span>
 	<div class="header-links">
-		<span class="workspace-connected">● local-first</span>
 		<a href="getting-started.html">Docs</a>
 		<a href="https://github.com/aa-blinov/cast">GitHub</a>
 	</div>
@@ -891,46 +894,48 @@ const LANDING_HTML = `<!DOCTYPE html>
 			<div>
 				<div class="workspace-kicker">cast / agent workspace</div>
 				<h1 id="workspace-title" class="workspace-title">Work with a <span class="accent">different lens.</span></h1>
-				<p class="workspace-copy">A focused agent harness for real repositories. Choose the role, keep the same tools, and let the work happen where your code already lives.</p>
+				<p class="workspace-copy">A focused agent harness for real repositories. Choose the role, keep the same tool surface, and let the work follow the shape of the task.</p>
 				<div class="workspace-actions">
 					<a href="getting-started.html" class="btn-primary">Open the workspace <span aria-hidden="true">→</span></a>
 					<a href="personas.html" class="btn-secondary">Browse personas</a>
 				</div>
-				<div class="workspace-note"><span class="dot" aria-hidden="true"></span> Runs locally with any OpenAI-compatible model</div>
+				<div class="workspace-note"><span class="dot" aria-hidden="true"></span> Same repository. Same tools. Different judgment.</div>
 			</div>
 
-			<div class="workspace-panel" aria-label="Cast workspace preview">
-				<div class="workspace-panel-header">
-					<div class="workspace-window-controls" aria-hidden="true"><span></span><span></span><span></span></div>
-					<div class="workspace-panel-title">cast / auth-service</div>
-					<div class="workspace-connected">CONNECTED</div>
+			<div class="workspace-ui" aria-label="Cast Web UI preview">
+				<div class="workspace-ui-header">
+					<div class="workspace-ui-brand"><span class="workspace-ui-status" aria-hidden="true"></span>cast</div>
+					<div class="workspace-ui-context">~/projects/auth-service</div>
+					<div class="workspace-ui-actions" aria-hidden="true"><span>◌</span><span>⌘</span><span>⚙</span></div>
 				</div>
-				<div class="workspace-panel-body">
-					<div class="workspace-context"><strong>~/projects/auth-service</strong><span class="slash">/</span><span>session: review-42</span></div>
-					<div class="workspace-personas" aria-label="Available personas">
-						<span class="workspace-persona active">senior</span><span class="workspace-persona">analyst</span><span class="workspace-persona">reviewer</span><span class="workspace-persona">planner</span>
-					</div>
-					<div class="workspace-message">
-						<div class="workspace-avatar user">U</div>
-						<div class="workspace-message-body"><div class="workspace-message-meta">YOU · 09:41</div><div class="workspace-message-text">Audit the auth flow and identify the highest-risk edge cases.</div></div>
-					</div>
-					<div class="workspace-message">
-						<div class="workspace-avatar">C</div>
-						<div class="workspace-message-body"><div class="workspace-message-meta">CAST / SENIOR · 09:42</div><div class="workspace-message-text">I traced the request path and found <strong>3 places where session state can drift.</strong></div></div>
-					</div>
-					<div class="workspace-tool-row"><span class="workspace-tool">read auth.ts</span><span class="workspace-tool">search session</span><span class="workspace-tool">run tests</span></div>
-					<div class="workspace-composer"><span class="cursor" aria-hidden="true"></span><span>Ask Cast to continue...</span></div>
+				<div class="workspace-ui-body">
+					<aside class="workspace-ui-sidebar" aria-label="Sessions preview">
+						<button class="workspace-ui-new" type="button">＋ New session</button>
+						<div class="workspace-ui-directory">Directory<strong>~/projects/auth-service</strong></div>
+						<div class="workspace-ui-sidebar-title">Sessions</div>
+						<button class="workspace-ui-session active" type="button">Review auth flow</button>
+						<button class="workspace-ui-session" type="button">Plan release notes</button>
+						<button class="workspace-ui-session" type="button">Investigate flaky test</button>
+						<div class="workspace-ui-sidebar-model">openai-compatible · ready</div>
+					</aside>
+					<section class="workspace-ui-chat" aria-label="Active Cast session">
+						<div class="workspace-ui-chat-head"><div class="workspace-ui-chat-title">Review auth flow<small>session · auth-service</small></div><div class="workspace-ui-chat-state">idle</div></div>
+						<div class="workspace-ui-personas" role="tablist" aria-label="Switch persona">
+							<button class="workspace-ui-persona active" type="button" role="tab" aria-selected="true" data-persona-switch="senior">Senior</button>
+							<button class="workspace-ui-persona" type="button" role="tab" aria-selected="false" data-persona-switch="analyst">Analyst</button>
+							<button class="workspace-ui-persona" type="button" role="tab" aria-selected="false" data-persona-switch="reviewer">Reviewer</button>
+							<button class="workspace-ui-persona" type="button" role="tab" aria-selected="false" data-persona-switch="planner">Planner</button>
+						</div>
+						<div class="workspace-ui-messages">
+							<div class="workspace-ui-message"><div class="workspace-ui-avatar">U</div><div class="workspace-ui-message-content"><div class="workspace-ui-message-label">you</div><div class="workspace-ui-message-text">Audit the auth flow and identify the highest-risk edge cases.</div></div></div>
+							<div class="workspace-ui-panel" role="tabpanel" data-persona-panel="senior"><div class="workspace-ui-message"><div class="workspace-ui-avatar agent">C</div><div class="workspace-ui-message-content"><div class="workspace-ui-message-label">cast · <span data-persona-label>Senior</span></div><div class="workspace-ui-message-text">I traced the request path and found <strong>3 places where session state can drift.</strong></div></div></div><div class="workspace-ui-tool">read auth.ts · search session · run tests</div></div>
+							<div class="workspace-ui-panel" role="tabpanel" data-persona-panel="analyst" hidden><div class="workspace-ui-message"><div class="workspace-ui-avatar agent">C</div><div class="workspace-ui-message-content"><div class="workspace-ui-message-label">cast · Analyst</div><div class="workspace-ui-message-text">The biggest uncertainty is the session boundary. I mapped <strong>four assumptions</strong> that need evidence before changing code.</div></div></div><div class="workspace-ui-tool">search auth · inspect config · map assumptions</div></div>
+							<div class="workspace-ui-panel" role="tabpanel" data-persona-panel="reviewer" hidden><div class="workspace-ui-message"><div class="workspace-ui-avatar agent">C</div><div class="workspace-ui-message-content"><div class="workspace-ui-message-label">cast · Reviewer</div><div class="workspace-ui-message-text">The risky paths are the unhappy ones: expired sessions, retries, and <strong>missing coverage around logout.</strong></div></div></div><div class="workspace-ui-tool">inspect tests · check regressions · report gaps</div></div>
+							<div class="workspace-ui-panel" role="tabpanel" data-persona-panel="planner" hidden><div class="workspace-ui-message"><div class="workspace-ui-avatar agent">C</div><div class="workspace-ui-message-content"><div class="workspace-ui-message-label">cast · Planner</div><div class="workspace-ui-message-text">I split the work into <strong>three verifiable steps</strong>, starting with a trace of the request lifecycle.</div></div></div><div class="workspace-ui-tool">write plan · define checks · sequence work</div></div>
+						</div>
+						<div class="workspace-ui-role"><span class="workspace-ui-role-dot" aria-hidden="true"></span><span data-active-persona>Senior</span><span class="workspace-ui-role-mode">build</span></div>
+					</section>
 				</div>
-			</div>
-		</section>
-
-		<section class="workspace-section" aria-labelledby="workspace-metrics-title">
-			<h2 id="workspace-metrics-title" class="visually-hidden">Workspace capabilities</h2>
-			<div class="workspace-metrics">
-				<div class="workspace-metric"><strong>20</strong><span>built-in personas</span></div>
-				<div class="workspace-metric"><strong>6+</strong><span>core tools</span></div>
-				<div class="workspace-metric"><strong>16</strong><span>TUI themes</span></div>
-				<div class="workspace-metric"><strong>0</strong><span>telemetry</span></div>
 			</div>
 		</section>
 
@@ -945,7 +950,7 @@ const LANDING_HTML = `<!DOCTYPE html>
 		</section>
 
 		<section class="workspace-section" aria-labelledby="install-title">
-			<div class="workspace-section-heading"><h2 id="install-title">Bring it to your machine</h2><p>Self-contained bundle. Node.js 22+. No npm packages at runtime.</p></div>
+			<div class="workspace-section-heading"><h2 id="install-title">Install Cast</h2><p>Self-contained bundle for macOS, Linux, and Windows. Works with OpenAI-compatible APIs.</p></div>
 			<div class="workspace-install">
 				<div class="install-block"><div class="label">macOS / Linux</div><code>curl -fsSL https://aa-blinov.github.io/cast/install | bash</code></div>
 				<div class="install-block"><div class="label">Windows / PowerShell</div><code>irm https://aa-blinov.github.io/cast/install.ps1 | iex</code></div>
@@ -957,10 +962,27 @@ const LANDING_HTML = `<!DOCTYPE html>
 			<nav class="workspace-docs" aria-label="Documentation">
 				${NAV_ORDER.slice(0, 12).map((item) => `<a href="${item.file.replace(".md", ".html")}">${item.label}</a>`).join("\n\t\t\t\t")}
 			</nav>
-			<div class="workspace-footer">cast is open source under the MIT License · designed for local inference</div>
+			<div class="workspace-footer">cast is open source under the MIT License</div>
 		</section>
 	</main>
 </div>
+<script>
+document.querySelectorAll('[data-persona-switch]').forEach((button) => {
+	button.addEventListener('click', () => {
+		const persona = button.dataset.personaSwitch;
+		document.querySelectorAll('[data-persona-switch]').forEach((item) => {
+			const active = item === button;
+			item.classList.toggle('active', active);
+			item.setAttribute('aria-selected', String(active));
+		});
+		document.querySelectorAll('[data-persona-panel]').forEach((panel) => {
+			panel.hidden = panel.dataset.personaPanel !== persona;
+		});
+		const label = button.textContent.trim();
+		document.querySelector('[data-active-persona]').textContent = label;
+	});
+});
+</script>
 </body>
 </html>`;
 

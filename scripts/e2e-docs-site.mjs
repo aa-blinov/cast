@@ -88,15 +88,23 @@ try {
 
 	await desktop.goto(`http://127.0.0.1:${port}/index.html`, { waitUntil: "networkidle" });
 	await desktop.screenshot({ path: "/tmp/cast-workspace-desktop.png", fullPage: false });
-	assert.equal(await desktop.locator(".workspace-panel").count(), 1, "workspace preview must be present");
-	assert.equal(await desktop.locator(".workspace-metric").count(), 4, "workspace metrics must be present");
+	assert.equal(await desktop.locator(".workspace-ui").count(), 1, "actual Web UI preview must be present");
+	assert.equal(await desktop.locator(".workspace-ui-sidebar").count(), 1, "preview must include the sessions sidebar");
+	assert.equal(await desktop.locator(".workspace-ui-new").count(), 1, "preview must include New session");
+	assert.equal(await desktop.locator(".workspace-ui-persona").count(), 4, "preview must include switchable personas");
+	assert.equal(await desktop.locator(".workspace-ui-metrics").count(), 0, "landing must not show fabricated metrics");
+	assert.equal(await desktop.locator(".workspace-ui input, .workspace-ui textarea").count(), 0, "preview must not show an empty input");
+	await desktop.getByRole("tab", { name: "Reviewer" }).click();
+	assert.equal(await desktop.locator('[data-active-persona]').textContent(), "Reviewer", "persona status must update after switching");
+	assert.equal(await desktop.locator('[data-persona-panel="reviewer"]').isHidden(), false, "selected persona panel must be visible");
+	assert.equal(await desktop.locator('[data-persona-panel="senior"]').isHidden(), true, "previous persona panel must be hidden");
 
 	const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
 	await mobile.goto(`http://127.0.0.1:${port}/index.html`, { waitUntil: "networkidle" });
 	const mobileCheck = await mobile.evaluate(() => ({
 		viewport: window.innerWidth,
 		documentWidth: document.documentElement.scrollWidth,
-		panelWidth: document.querySelector(".workspace-panel")?.getBoundingClientRect().width ?? 0,
+	panelWidth: document.querySelector(".workspace-ui")?.getBoundingClientRect().width ?? 0,
 		titleSize: getComputedStyle(document.querySelector(".workspace-title")).fontSize,
 	}));
 	assert.equal(mobileCheck.documentWidth, mobileCheck.viewport, "mobile landing page must not overflow horizontally");
