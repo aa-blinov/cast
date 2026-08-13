@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.15.2
+
+### Fixed
+
+- **Landing and documentation chrome is cleaner and consistent on mobile.** Removed redundant workspace labels, session/model status noise, and repeated persona cards; themed scrollbars now apply to the Pages document and its scrollable content areas.
+
 ## 0.15.1
 
 ### Fixed
