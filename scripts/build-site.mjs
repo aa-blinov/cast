@@ -699,9 +699,11 @@ a:hover { color: #c084fc; text-decoration: none; }
 	background: var(--bg-surface); border-bottom: 1px solid var(--border); color: var(--text-dim);
 	font: .7rem var(--font-mono);
 }
-.workspace-ui-brand { display: flex; align-items: center; gap: 8px; color: var(--text); font-weight: 600; }
-.workspace-ui-status { width: 7px; height: 7px; border-radius: 50%; background: var(--teal); }
-.workspace-ui-context { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
+.workspace-ui-brand { display: flex; align-items: center; color: var(--text); font-weight: 600; }
+.workspace-ui-status {
+	width: 10px; height: 10px; border-radius: 50%; background: var(--green);
+	box-shadow: 0 0 6px color-mix(in srgb, var(--green) 50%, transparent);
+}
 .workspace-ui-actions { display: flex; gap: 7px; margin-left: auto; }
 .workspace-ui-actions span { width: 24px; height: 24px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 5px; color: var(--text-muted); }
 .workspace-ui-body { display: grid; grid-template-columns: 190px minmax(0, 1fr); min-height: 390px; }
@@ -732,14 +734,10 @@ a:hover { color: #c084fc; text-decoration: none; }
 .workspace-ui-tool { margin: -2px 0 15px 33px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 5px; color: var(--text-muted); font: .58rem var(--font-mono); }
 .workspace-ui-tool::before { content: "✓"; margin-right: 6px; color: var(--teal); }
 .workspace-ui-panel[hidden] { display: none; }
-.workspace-ui-role { display: flex; align-items: center; gap: 7px; margin: auto 17px 14px; padding-top: 10px; border-top: 1px solid var(--border); color: var(--text-muted); font: .6rem var(--font-mono); }
-.workspace-ui-role-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--purple); }
-.workspace-ui-role-mode { margin-left: auto; color: var(--amber); text-transform: uppercase; }
 @media (max-width: 640px) {
 	.workspace-ui-body { grid-template-columns: 1fr; min-height: 350px; }
 	.workspace-ui-sidebar { display: none; }
 	.workspace-ui-header { gap: 9px; }
-	.workspace-ui-context { max-width: 130px; }
 	.workspace-ui-actions span:nth-child(2) { display: none; }
 }
 `;
@@ -913,8 +911,7 @@ const LANDING_HTML = `<!DOCTYPE html>
 
 			<div class="workspace-ui" aria-label="Cast Web UI preview">
 				<div class="workspace-ui-header">
-					<div class="workspace-ui-brand"><span class="workspace-ui-status" aria-hidden="true"></span>cast</div>
-					<div class="workspace-ui-context">~/projects/auth-service</div>
+					<div class="workspace-ui-brand"><span class="workspace-ui-status" role="status" aria-label="Backend connected" title="Backend connected"></span></div>
 					<div class="workspace-ui-actions" aria-hidden="true"><span>◌</span><span>⌘</span><span>⚙</span></div>
 				</div>
 				<div class="workspace-ui-body">
@@ -942,7 +939,6 @@ const LANDING_HTML = `<!DOCTYPE html>
 							<div class="workspace-ui-panel" role="tabpanel" data-persona-panel="reviewer" hidden><div class="workspace-ui-message"><div class="workspace-ui-avatar agent">C</div><div class="workspace-ui-message-content"><div class="workspace-ui-message-label">Reviewer</div><div class="workspace-ui-message-text">The risky paths are the unhappy ones: expired sessions, retries, and <strong>missing coverage around logout.</strong></div></div></div><div class="workspace-ui-tool">inspect tests · check regressions · report gaps</div></div>
 							<div class="workspace-ui-panel" role="tabpanel" data-persona-panel="planner" hidden><div class="workspace-ui-message"><div class="workspace-ui-avatar agent">C</div><div class="workspace-ui-message-content"><div class="workspace-ui-message-label">Planner</div><div class="workspace-ui-message-text">I split the work into <strong>three verifiable steps</strong>, starting with a trace of the request lifecycle.</div></div></div><div class="workspace-ui-tool">write plan · define checks · sequence work</div></div>
 						</div>
-						<div class="workspace-ui-role"><span class="workspace-ui-role-dot" aria-hidden="true"></span><span data-active-persona>Senior</span><span class="workspace-ui-role-mode">build</span></div>
 					</section>
 				</div>
 			</div>
@@ -987,8 +983,6 @@ document.querySelectorAll('[data-persona-switch]').forEach((button) => {
 		document.querySelectorAll('[data-persona-panel]').forEach((panel) => {
 			panel.hidden = panel.dataset.personaPanel !== persona;
 		});
-		const label = button.textContent.trim();
-		document.querySelector('[data-active-persona]').textContent = label;
 	});
 });
 </script>
