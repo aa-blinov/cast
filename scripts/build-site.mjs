@@ -148,7 +148,10 @@ const CSS = `
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html { font-size: 15px; scroll-behavior: smooth; }
+html {
+	font-size: 15px; scroll-behavior: smooth;
+	scrollbar-width: thin; scrollbar-color: var(--accent) var(--bg-surface);
+}
 body {
 	font-family: var(--font);
 	background: var(--bg);
@@ -156,6 +159,23 @@ body {
 	line-height: 1.55;
 	-webkit-font-smoothing: antialiased;
 }
+body, .sidebar, .content, .table-wrap, .workspace-ui-personas, .workspace-install .install-block code {
+	scrollbar-width: thin; scrollbar-color: var(--accent) var(--bg-surface);
+}
+html::-webkit-scrollbar, body::-webkit-scrollbar, .sidebar::-webkit-scrollbar,
+.content::-webkit-scrollbar, .table-wrap::-webkit-scrollbar,
+.workspace-ui-personas::-webkit-scrollbar, .workspace-install .install-block code::-webkit-scrollbar { width: 8px; height: 8px; }
+html::-webkit-scrollbar-track, body::-webkit-scrollbar-track, .sidebar::-webkit-scrollbar-track,
+.content::-webkit-scrollbar-track, .table-wrap::-webkit-scrollbar-track,
+.workspace-ui-personas::-webkit-scrollbar-track, .workspace-install .install-block code::-webkit-scrollbar-track { background: var(--bg-surface); }
+html::-webkit-scrollbar-thumb, body::-webkit-scrollbar-thumb, .sidebar::-webkit-scrollbar-thumb,
+.content::-webkit-scrollbar-thumb, .table-wrap::-webkit-scrollbar-thumb,
+.workspace-ui-personas::-webkit-scrollbar-thumb, .workspace-install .install-block code::-webkit-scrollbar-thumb {
+	background: var(--accent); border: 2px solid var(--bg-surface); border-radius: 999px;
+}
+html::-webkit-scrollbar-thumb:hover, body::-webkit-scrollbar-thumb:hover, .sidebar::-webkit-scrollbar-thumb:hover,
+.content::-webkit-scrollbar-thumb:hover, .table-wrap::-webkit-scrollbar-thumb:hover,
+.workspace-ui-personas::-webkit-scrollbar-thumb:hover, .workspace-install .install-block code::-webkit-scrollbar-thumb:hover { background: var(--purple); }
 a { color: var(--purple); text-decoration: none; transition: color .15s ease; }
 a:hover { color: #c084fc; text-decoration: none; }
 
@@ -614,10 +634,6 @@ a:hover { color: #c084fc; text-decoration: none; }
 	display: grid; grid-template-columns: minmax(0, .92fr) minmax(460px, 1.08fr);
 	gap: clamp(40px, 7vw, 96px); align-items: center; min-height: 590px;
 }
-.workspace-kicker, .workspace-panel-kicker {
-	font: 600 .7rem/1 var(--font-mono); letter-spacing: .16em; text-transform: uppercase;
-	color: var(--teal); margin-bottom: 20px;
-}
 .workspace-title {
 	max-width: 620px; font-size: clamp(2.7rem, 6vw, 5rem); line-height: 1.02;
 	letter-spacing: -.055em; font-weight: 700; margin-bottom: 22px;
@@ -646,11 +662,6 @@ a:hover { color: #c084fc; text-decoration: none; }
 .workspace-card-link:hover { color: inherit; }
 .workspace-card-tag { display: inline-block; margin-bottom: 16px; color: var(--accent); font: 600 .65rem var(--font-mono); text-transform: uppercase; letter-spacing: .1em; }
 .workspace-card-arrow { display: block; margin-top: 16px; color: var(--purple); font: .72rem var(--font-mono); }
-.workspace-card-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.workspace-role { display: flex; align-items: center; gap: 9px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 7px; color: var(--text-dim); font-size: .78rem; }
-.workspace-role-mark { width: 7px; height: 7px; border-radius: 2px; background: var(--purple); }
-.workspace-role:nth-child(2n) .workspace-role-mark { background: var(--teal); }
-.workspace-role:nth-child(3n) .workspace-role-mark { background: var(--amber); }
 .workspace-install { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; min-width: 0; }
 .workspace-install .install-block { max-width: none; min-width: 0; margin: 0; padding: 16px; overflow: hidden; }
 .workspace-install .install-block code { display: block; min-width: 0; overflow-x: auto; white-space: nowrap; }
@@ -705,7 +716,6 @@ a:hover { color: #c084fc; text-decoration: none; }
 .workspace-ui-chat { display: flex; flex-direction: column; min-width: 0; background: var(--bg); }
 .workspace-ui-chat-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 17px; border-bottom: 1px solid var(--border); }
 .workspace-ui-chat-title { color: var(--text); font-size: .76rem; font-weight: 600; }
-.workspace-ui-chat-title small { display: block; margin-top: 3px; color: var(--text-muted); font: .59rem var(--font-mono); font-weight: 400; }
 .workspace-ui-chat-state { color: var(--text-muted); font: .58rem var(--font-mono); }
 .workspace-ui-personas { display: flex; gap: 5px; padding: 12px 17px 0; overflow-x: auto; }
 .workspace-ui-persona { flex: 0 0 auto; padding: 5px 8px; border: 1px solid var(--border); border-radius: 5px; background: transparent; color: var(--text-muted); cursor: pointer; font: .61rem var(--font-mono); transition: color .15s, border-color .15s, background .15s; }
@@ -892,7 +902,6 @@ const LANDING_HTML = `<!DOCTYPE html>
 	<main class="workspace-shell">
 		<section class="workspace-hero" aria-labelledby="workspace-title">
 			<div>
-				<div class="workspace-kicker">cast / agent workspace</div>
 				<h1 id="workspace-title" class="workspace-title">Work with a <span class="accent">different lens.</span></h1>
 				<p class="workspace-copy">A focused agent harness for real repositories. Choose the role, keep the same tool surface, and let the work follow the shape of the task.</p>
 				<div class="workspace-actions">
@@ -916,10 +925,10 @@ const LANDING_HTML = `<!DOCTYPE html>
 						<button class="workspace-ui-session active" type="button">Review auth flow</button>
 						<button class="workspace-ui-session" type="button">Plan release notes</button>
 						<button class="workspace-ui-session" type="button">Investigate flaky test</button>
-						<div class="workspace-ui-sidebar-model">openai-compatible · ready</div>
+						<div class="workspace-ui-sidebar-model">openai-compatible</div>
 					</aside>
 					<section class="workspace-ui-chat" aria-label="Active Cast session">
-						<div class="workspace-ui-chat-head"><div class="workspace-ui-chat-title">Review auth flow<small>session · auth-service</small></div><div class="workspace-ui-chat-state">idle</div></div>
+						<div class="workspace-ui-chat-head"><div class="workspace-ui-chat-title">Review auth flow</div><div class="workspace-ui-chat-state">idle</div></div>
 						<div class="workspace-ui-personas" role="tablist" aria-label="Switch persona">
 							<button class="workspace-ui-persona active" type="button" role="tab" aria-selected="true" data-persona-switch="senior">Senior</button>
 							<button class="workspace-ui-persona" type="button" role="tab" aria-selected="false" data-persona-switch="analyst">Analyst</button>
@@ -928,10 +937,10 @@ const LANDING_HTML = `<!DOCTYPE html>
 						</div>
 						<div class="workspace-ui-messages">
 							<div class="workspace-ui-message"><div class="workspace-ui-avatar">U</div><div class="workspace-ui-message-content"><div class="workspace-ui-message-label">you</div><div class="workspace-ui-message-text">Audit the auth flow and identify the highest-risk edge cases.</div></div></div>
-							<div class="workspace-ui-panel" role="tabpanel" data-persona-panel="senior"><div class="workspace-ui-message"><div class="workspace-ui-avatar agent">C</div><div class="workspace-ui-message-content"><div class="workspace-ui-message-label">cast · <span data-persona-label>Senior</span></div><div class="workspace-ui-message-text">I traced the request path and found <strong>3 places where session state can drift.</strong></div></div></div><div class="workspace-ui-tool">read auth.ts · search session · run tests</div></div>
-							<div class="workspace-ui-panel" role="tabpanel" data-persona-panel="analyst" hidden><div class="workspace-ui-message"><div class="workspace-ui-avatar agent">C</div><div class="workspace-ui-message-content"><div class="workspace-ui-message-label">cast · Analyst</div><div class="workspace-ui-message-text">The biggest uncertainty is the session boundary. I mapped <strong>four assumptions</strong> that need evidence before changing code.</div></div></div><div class="workspace-ui-tool">search auth · inspect config · map assumptions</div></div>
-							<div class="workspace-ui-panel" role="tabpanel" data-persona-panel="reviewer" hidden><div class="workspace-ui-message"><div class="workspace-ui-avatar agent">C</div><div class="workspace-ui-message-content"><div class="workspace-ui-message-label">cast · Reviewer</div><div class="workspace-ui-message-text">The risky paths are the unhappy ones: expired sessions, retries, and <strong>missing coverage around logout.</strong></div></div></div><div class="workspace-ui-tool">inspect tests · check regressions · report gaps</div></div>
-							<div class="workspace-ui-panel" role="tabpanel" data-persona-panel="planner" hidden><div class="workspace-ui-message"><div class="workspace-ui-avatar agent">C</div><div class="workspace-ui-message-content"><div class="workspace-ui-message-label">cast · Planner</div><div class="workspace-ui-message-text">I split the work into <strong>three verifiable steps</strong>, starting with a trace of the request lifecycle.</div></div></div><div class="workspace-ui-tool">write plan · define checks · sequence work</div></div>
+							<div class="workspace-ui-panel" role="tabpanel" data-persona-panel="senior"><div class="workspace-ui-message"><div class="workspace-ui-avatar agent">C</div><div class="workspace-ui-message-content"><div class="workspace-ui-message-label">Senior</div><div class="workspace-ui-message-text">I traced the request path and found <strong>3 places where session state can drift.</strong></div></div></div><div class="workspace-ui-tool">read auth.ts · search session · run tests</div></div>
+							<div class="workspace-ui-panel" role="tabpanel" data-persona-panel="analyst" hidden><div class="workspace-ui-message"><div class="workspace-ui-avatar agent">C</div><div class="workspace-ui-message-content"><div class="workspace-ui-message-label">Analyst</div><div class="workspace-ui-message-text">The biggest uncertainty is the session boundary. I mapped <strong>four assumptions</strong> that need evidence before changing code.</div></div></div><div class="workspace-ui-tool">search auth · inspect config · map assumptions</div></div>
+							<div class="workspace-ui-panel" role="tabpanel" data-persona-panel="reviewer" hidden><div class="workspace-ui-message"><div class="workspace-ui-avatar agent">C</div><div class="workspace-ui-message-content"><div class="workspace-ui-message-label">Reviewer</div><div class="workspace-ui-message-text">The risky paths are the unhappy ones: expired sessions, retries, and <strong>missing coverage around logout.</strong></div></div></div><div class="workspace-ui-tool">inspect tests · check regressions · report gaps</div></div>
+							<div class="workspace-ui-panel" role="tabpanel" data-persona-panel="planner" hidden><div class="workspace-ui-message"><div class="workspace-ui-avatar agent">C</div><div class="workspace-ui-message-content"><div class="workspace-ui-message-label">Planner</div><div class="workspace-ui-message-text">I split the work into <strong>three verifiable steps</strong>, starting with a trace of the request lifecycle.</div></div></div><div class="workspace-ui-tool">write plan · define checks · sequence work</div></div>
 						</div>
 						<div class="workspace-ui-role"><span class="workspace-ui-role-dot" aria-hidden="true"></span><span data-active-persona>Senior</span><span class="workspace-ui-role-mode">build</span></div>
 					</section>
@@ -945,7 +954,7 @@ const LANDING_HTML = `<!DOCTYPE html>
 				<a class="workspace-card workspace-card-link" href="getting-started.html">
 					<span class="workspace-card-tag">01 / setup</span><h3>Connect your model</h3><p>Install Cast, point it at OpenRouter, Ollama, vLLM, or any OpenAI-compatible endpoint, and start in your repository.</p><span class="workspace-card-arrow">Read the quick start →</span>
 				</a>
-				<div class="workspace-card"><span class="workspace-card-tag">02 / choose a lens</span><h3>Personas for the moment</h3><p>Switch perspective without changing your tools or context.</p><div class="workspace-card-list" style="margin-top:16px"><div class="workspace-role"><span class="workspace-role-mark"></span>Senior</div><div class="workspace-role"><span class="workspace-role-mark"></span>Reviewer</div><div class="workspace-role"><span class="workspace-role-mark"></span>Analyst</div><div class="workspace-role"><span class="workspace-role-mark"></span>Planner</div></div></div>
+				<div class="workspace-card"><span class="workspace-card-tag">02 / choose a lens</span><h3>Personas for the moment</h3><p>Switch perspective without changing your tools or context. Use the persona tabs in the workspace preview to see how the investigation changes.</p></div>
 			</div>
 		</section>
 
