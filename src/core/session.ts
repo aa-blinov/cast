@@ -567,7 +567,7 @@ export function saveSession(session: SessionState): void {
 	).run(meta);
 
 	const insertRow = db.prepare(
-		"INSERT INTO messages (session_id, seq, role, content_json, in_context, reasoning, turn_meta) VALUES (?, ?, ?, ?, 1, ?, ?)",
+		"INSERT INTO messages (session_id, seq, role, content_json, in_context, has_tool_calls, reasoning, turn_meta) VALUES (?, ?, ?, ?, 1, ?, ?, ?)",
 	);
 	const updateReasoning = db.prepare("UPDATE messages SET reasoning = ? WHERE session_id = ? AND seq = ?");
 	const updateTurnMeta = db.prepare("UPDATE messages SET turn_meta = ? WHERE session_id = ? AND seq = ?");
@@ -618,7 +618,7 @@ export function saveSession(session: SessionState): void {
 			}
 			deactivateOldSystemRows.run(session.id, `%${COMPACTION_MARKER_PREFIX}%`);
 		}
-		insertRow.run(session.id, seq, m.role, JSON.stringify(m), reasoning, turnMetaJson);
+		insertRow.run(session.id, seq, m.role, JSON.stringify(m), isToolCallOnly(m) ? 1 : 0, reasoning, turnMetaJson);
 		messageSeq.set(m, seq);
 		seq++;
 	});
@@ -653,7 +653,7 @@ export function recordCompaction(
 	const db = getDb();
 	const kept = new Set(compacted);
 	const insertRow = db.prepare(
-		"INSERT INTO messages (session_id, seq, role, content_json, in_context) VALUES (?, ?, ?, ?, ?)",
+		"INSERT INTO messages (session_id, seq, role, content_json, in_context, has_tool_calls) VALUES (?, ?, ?, ?, ?, ?)",
 	);
 	const flipOut = db.prepare("UPDATE messages SET in_context = 0 WHERE session_id = ? AND seq = ?");
 
@@ -664,7 +664,7 @@ export function recordCompaction(
 			if (!kept.has(m)) flipOut.run(session.id, existing);
 			continue;
 		}
-		insertRow.run(session.id, seq, m.role, JSON.stringify(m), kept.has(m) ? 1 : 0);
+		insertRow.run(session.id, seq, m.role, JSON.stringify(m), kept.has(m) ? 1 : 0, isToolCallOnly(m) ? 1 : 0);
 		messageSeq.set(m, seq);
 		seq++;
 	}
@@ -695,7 +695,7 @@ export function recordCompaction(
 				if (s !== undefined && s >= insertAt) messageSeq.set(m, s + 1);
 			}
 		}
-		insertRow.run(session.id, insertAt, marker.role, JSON.stringify(marker), 1);
+		insertRow.run(session.id, insertAt, marker.role, JSON.stringify(marker), 1, isToolCallOnly(marker) ? 1 : 0);
 		messageSeq.set(marker, insertAt);
 	}
 }
@@ -1273,10 +1273,10 @@ export function migrateLegacySessionsToDb(): number {
 				 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :usage_json, :todos_json, :share_token, :plan_question_json, :plan_transition_json)`,
 			).run(sessionMetaRow(session));
 			const insertRow = db.prepare(
-				"INSERT INTO messages (session_id, seq, role, content_json, in_context) VALUES (?, ?, ?, ?, 1)",
+				"INSERT INTO messages (session_id, seq, role, content_json, in_context, has_tool_calls) VALUES (?, ?, ?, ?, 1, ?)",
 			);
 			session.messages.forEach((m, seq) => {
-				insertRow.run(session.id, seq, m.role, JSON.stringify(m));
+				insertRow.run(session.id, seq, m.role, JSON.stringify(m), isToolCallOnly(m) ? 1 : 0);
 			});
 		} catch (err) {
 			// Log and continue — one malformed file shouldn't poison the rest.
@@ -1388,7 +1388,7 @@ function buildSummaries(db: DatabaseSync, rows: SessionRow[]): SessionSummary[] 
 	const placeholders = ids.map(() => "?").join(",");
 	// (user_count, assistant_count) per session — both covered by
 	// idx_messages_role (session_id, role, seq). The non-tool-call-only slice
-	// is computed in JS below by subtracting the with-tool-calls count.
+	// is computed in JS below by subtracting the indexed tool-call count.
 	const userCountById = new Map<string, number>();
 	const asstCountById = new Map<string, number>();
 	const userCountStmt = db.prepare(
@@ -1408,16 +1408,15 @@ function buildSummaries(db: DatabaseSync, rows: SessionRow[]): SessionSummary[] 
 		asstCountById.set(r.session_id, r.c);
 	}
 	// Assistant messages whose content_json.tool_calls is a non-empty array
-	// — counted via PRIMARY KEY (json_extract forces a row read) so we keep
-	// the surrounding counts on the covering index. Subtracting from
-	// asstCountById gives the same "exclude intermediate tool-call-only
-	// steps" semantics the old JS counter had (see countTurnMessages).
+	// — maintained as a denormalized flag and served by a partial index, so
+	// listing never parses message JSON. Subtracting from asstCountById gives
+	// the same "exclude intermediate tool-call-only" semantics as
+	// countTurnMessages.
 	const asstWithToolById = new Map<string, number>();
 	const asstWithToolStmt = db.prepare(
 		`SELECT session_id, COUNT(*) AS c FROM messages
 		 WHERE session_id IN (${placeholders}) AND role = 'assistant'
-		   AND json_extract(content_json, '$.tool_calls') IS NOT NULL
-		   AND json_array_length(json_extract(content_json, '$.tool_calls')) > 0
+		   AND has_tool_calls = 1
 		 GROUP BY session_id`,
 	);
 	for (const r of asstWithToolStmt.all(...ids) as Array<{ session_id: string; c: number }>) {

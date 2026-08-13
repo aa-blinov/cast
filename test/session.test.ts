@@ -1376,11 +1376,11 @@ describe("migrateLegacySessionsToDb", () => {
 // JSON.parsed every row — a 218-session DB with thousands of messages each
 // paid 9 MB of content_json allocation plus 9000 JSON.parse calls per
 // listing. The new path uses three group-by aggregates (covering index
-// for user/assistant counts, PK + JSON filter for the with-tool-calls
+// for user/assistant counts, a partial index for the with-tool-calls
 // subtraction) and one MIN(seq) PK lookup per session for the first user
 // message. The test below pins the contract: a session's full message
-// history is never loaded for listing purposes — no JSON.parse on the
-// hot path even when the session is huge.
+// history is never loaded for listing purposes — no message JSON.parse on
+// the hot path even when the session is huge.
 describe("listSessionSummaries — SQL-only aggregation", () => {
 	let realHome: string | undefined;
 	let fakeHome: string;

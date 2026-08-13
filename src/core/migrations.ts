@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS messages (
   role TEXT NOT NULL,
   content_json TEXT NOT NULL,
   in_context INTEGER NOT NULL DEFAULT 1,
+  has_tool_calls INTEGER NOT NULL DEFAULT 0,
   reasoning TEXT,
   turn_meta TEXT,
   PRIMARY KEY (session_id, seq)
@@ -172,6 +173,31 @@ CREATE TABLE IF NOT EXISTS session_events (
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS idx_session_events_type ON session_events(session_id, type, seq);
 `);
+		},
+	},
+	{
+		version: 5,
+		name: "messages-tool-call-index",
+		up: (db) => {
+			if (!columnExists(db, "messages", "has_tool_calls")) {
+				db.exec("ALTER TABLE messages ADD COLUMN has_tool_calls INTEGER NOT NULL DEFAULT 0");
+			}
+			// Older rows predate the denormalized flag. Backfill once so the
+			// partial index has the same semantics for old and new sessions.
+			db.exec(`
+				UPDATE messages
+				SET has_tool_calls = CASE
+					WHEN role = 'assistant'
+					 AND json_valid(content_json) = 1
+					 AND json_type(content_json, '$.tool_calls') = 'array'
+					 AND json_array_length(content_json, '$.tool_calls') > 0
+					THEN 1
+					ELSE 0
+				END
+			`);
+			db.exec(
+				"CREATE INDEX IF NOT EXISTS idx_messages_tool_calls ON messages(session_id) WHERE role = 'assistant' AND has_tool_calls = 1",
+			);
 		},
 	},
 ];

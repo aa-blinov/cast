@@ -62,6 +62,13 @@ describe("schema migrations", () => {
 			const row = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
 			expect(row, `table ${table} exists`).toBeTruthy();
 		}
+		const messageColumns = (db.prepare("PRAGMA table_info(messages)").all() as Array<{ name: string }>).map(
+			(c) => c.name,
+		);
+		expect(messageColumns).toContain("has_tool_calls");
+		expect(
+			db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_messages_tool_calls'").get(),
+		).toBeTruthy();
 		db.close();
 	});
 
@@ -97,15 +104,20 @@ describe("schema migrations", () => {
 			) WITHOUT ROWID;
 			INSERT INTO sessions (id, created_at, updated_at, usage_json) VALUES ('s1', 't', 't', '{}');
 			INSERT INTO messages (session_id, seq, role, content_json) VALUES ('s1', 0, 'user', '{"role":"user","content":"hi"}');
+			INSERT INTO messages (session_id, seq, role, content_json) VALUES ('s1', 1, 'assistant', '{"role":"assistant","content":null,"tool_calls":[{"id":"call-1"}]}');
 		`);
 		runMigrations(db);
 		// Baseline: all migrations recorded, existing data untouched.
 		expect(appliedVersions(db)).toEqual(MIGRATIONS.map((m) => m.version));
 		const data = db.prepare("SELECT count(*) AS c FROM messages").get() as { c: number };
-		expect(data.c).toBe(1);
+		expect(data.c).toBe(2);
 		// Later migrations (columns added on top of the legacy base) still apply.
 		const cols = (db.prepare("PRAGMA table_info(sessions)").all() as Array<{ name: string }>).map((c) => c.name);
 		expect(cols).toContain("todos_json");
+		const toolFlag = db.prepare("SELECT has_tool_calls FROM messages WHERE session_id = 's1' AND seq = 1").get() as {
+			has_tool_calls: number;
+		};
+		expect(toolFlag.has_tool_calls).toBe(1);
 		db.close();
 	});
 
