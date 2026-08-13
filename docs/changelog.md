@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.35
+
+### Fixed
+
+- **Session lists no longer parse every assistant message to count tool calls.** Tool-call metadata is stored in an indexed SQLite flag, including a migration for existing databases, reducing list queries as history grows.
+
 ## 0.13.34
 
 ### Fixed
