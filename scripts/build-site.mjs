@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync, cpSync, existsSync } from "node:fs";
 import { join, basename } from "node:path";
 import { marked } from "marked";
+import hljs from "highlight.js/lib/common";
 import { apiV1OpenApiDocument } from "../src/server/api-v1.ts";
 
 // ── Config ──────────────────────────────────────────────────────────────────
@@ -51,13 +52,28 @@ marked.setOptions({
 // Custom renderer: mermaid blocks get <pre class="mermaid"> with raw code stored as base64
 // Tables get wrapped in a scrollable div for mobile overflow
 const renderer = new marked.Renderer();
-const originalCode = renderer.code;
+const languageAliases = {
+	jsonl: "json",
+	sh: "bash",
+	shell: "bash",
+	console: "plaintext",
+	text: "plaintext",
+};
+function escapeHtml(value) {
+	return value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
+}
 renderer.code = function ({ text, lang }) {
 	if (lang === "mermaid") {
 		const b64 = Buffer.from(text).toString("base64");
 		return `<pre class="mermaid" data-raw="${b64}">${text}</pre>`;
 	}
-	return originalCode.call(this, { text, lang });
+
+	const sourceLanguage = lang?.trim().toLowerCase() || "";
+	const language = languageAliases[sourceLanguage] || sourceLanguage;
+	const hasLanguage = Boolean(language && hljs.getLanguage(language));
+	const highlighted = hasLanguage ? hljs.highlight(text, { language }).value : escapeHtml(text);
+	const className = sourceLanguage ? ` class="language-${escapeHtml(sourceLanguage)} hljs"` : ' class="hljs"';
+	return `<pre class="code-block"${sourceLanguage ? ` data-language="${escapeHtml(sourceLanguage)}"` : ""}><code${className}>${highlighted}</code></pre>`;
 };
 const originalTable = renderer.table;
 renderer.table = function (token) {
@@ -96,11 +112,14 @@ const CSS = `
 	--bg-surface: #131317;
 	--bg-raised: #1e1e24;
 	--bg-hover: #28282e;
+	--bg-secondary: #131317;
+	--bg-tertiary: #1e1e24;
 	--border: #35353d;
 	--border-active: #4a4a55;
 	--border-subtle: rgba(53, 53, 61, 0.55);
 	--text: #fafafa;
 	--text-dim: #a1a1aa;
+	--text-secondary: #a1a1aa;
 	--text-muted: #71717a;
 	--cyan: #8b5cf6;
 	--violet: #8b5cf6;
@@ -108,6 +127,7 @@ const CSS = `
 	--purple: #a78bfa;
 	--blue: #60a5fa;
 	--green: #22c55e;
+	--green-subtle: rgba(34, 197, 94, .12);
 	--amber: #eab308;
 	--rose: #ef4444;
 	--persona: #c084fc;
@@ -116,6 +136,9 @@ const CSS = `
 	--accent-muted: rgba(139, 92, 246, 0.2);
 	--gradient: linear-gradient(135deg, #a855f7, #8b5cf6);
 	--code-bg: #111116;
+	--code-bg-raised: #17171e;
+	--code-border: #3b3b48;
+	--code-text: #e4e4e7;
 	--sidebar-w: 272px;
 	--header-h: 48px;
 	--font: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -268,14 +291,52 @@ a:hover { color: #c084fc; text-decoration: none; }
 	font-family: var(--font-mono); font-size: .875em;
 	background: var(--code-bg); padding: 2px 6px; border-radius: 4px;
 	border: 1px solid var(--border);
+	color: var(--code-text);
 }
-.content pre:not(.mermaid-code) {
-	background: var(--code-bg); border: 1px solid var(--border);
-	border-radius: 8px; padding: 16px; margin: 0 0 16px;
-	overflow-x: auto; line-height: 1.5;
+.content pre.code-block,
+.content pre:not(.mermaid):not(.mermaid-code) {
+	position: relative;
+	background: linear-gradient(180deg, var(--code-bg-raised), var(--code-bg));
+	border: 1px solid var(--code-border);
+	border-radius: 10px; padding: 18px 20px; margin: 0 0 18px;
+	overflow-x: auto; line-height: 1.6; box-shadow: 0 8px 24px rgba(0, 0, 0, .14);
+	-webkit-overflow-scrolling: touch;
 }
-.content pre:not(.mermaid-code) code {
-	background: none; border: none; padding: 0; font-size: .875rem;
+.content pre.code-block::before {
+	content: attr(data-language);
+	position: absolute; top: 9px; right: 14px;
+	font: 600 .62rem/1 var(--font-mono); letter-spacing: .08em;
+	text-transform: uppercase; color: var(--text-muted); opacity: .9;
+}
+.content pre.code-block code,
+.content pre:not(.mermaid):not(.mermaid-code) code {
+	display: block; min-width: max-content; background: none; border: none;
+	padding: 0; color: var(--code-text); font-size: .875rem; white-space: pre;
+}
+.content :not(pre) > code {
+	white-space: break-spaces; overflow-wrap: anywhere;
+}
+.content .hljs-comment, .content .hljs-quote { color: #7f8494; font-style: italic; }
+.content .hljs-keyword, .content .hljs-selector-tag, .content .hljs-literal,
+.content .hljs-type, .content .hljs-addition { color: #c084fc; }
+.content .hljs-string, .content .hljs-regexp, .content .hljs-attr,
+.content .hljs-template-tag, .content .hljs-template-variable { color: #86efac; }
+.content .hljs-number, .content .hljs-symbol, .content .hljs-bullet,
+.content .hljs-variable, .content .hljs-variable.language_ { color: #67e8f9; }
+.content .hljs-title, .content .hljs-title.class_, .content .hljs-title.function_,
+.content .hljs-section, .content .hljs-name { color: #93c5fd; }
+.content .hljs-built_in, .content .hljs-selector-attr, .content .hljs-selector-pseudo,
+.content .hljs-meta, .content .hljs-link { color: #fcd34d; }
+.content .hljs-operator, .content .hljs-punctuation { color: #d4d4d8; }
+.content .hljs-deletion { color: #fda4af; }
+.content .hljs-emphasis { font-style: italic; }
+.content .hljs-strong { font-weight: 700; }
+.content .hljs { color: var(--code-text); background: transparent; }
+@media (max-width: 768px) {
+	.content pre.code-block,
+	.content pre:not(.mermaid):not(.mermaid-code) { padding: 16px 14px; border-radius: 8px; }
+	.content pre.code-block code,
+	.content pre:not(.mermaid):not(.mermaid-code) code { font-size: .78rem; }
 }
 
 /* ── Mermaid ────────────────────────────────────────────────────────── */
@@ -334,6 +395,10 @@ a:hover { color: #c084fc; text-decoration: none; }
 .badge-fail { background: var(--bg-tertiary); color: var(--text-secondary); }
 .content details { margin: 0 0 8px; }
 .content details summary { cursor: pointer; font-weight: 500; padding: 4px 0; }
+.visually-hidden {
+	position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+	overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
 
 /* ── Doc page navigation ─────────────────────────────────────────────── */
 .doc-nav {
@@ -540,10 +605,133 @@ a:hover { color: #c084fc; text-decoration: none; }
 	.motivation { padding: 32px 16px 24px; }
 	.comparison { padding: 32px 16px 48px; }
 }
+
+/* ── Workspace landing ─────────────────────────────────────────────── */
+.workspace-shell {
+	max-width: 1240px; margin: 0 auto; padding: 88px 32px 72px;
+}
+.workspace-hero {
+	display: grid; grid-template-columns: minmax(0, .92fr) minmax(460px, 1.08fr);
+	gap: clamp(40px, 7vw, 96px); align-items: center; min-height: 590px;
+}
+.workspace-kicker, .workspace-panel-kicker {
+	font: 600 .7rem/1 var(--font-mono); letter-spacing: .16em; text-transform: uppercase;
+	color: var(--teal); margin-bottom: 20px;
+}
+.workspace-title {
+	max-width: 620px; font-size: clamp(2.7rem, 6vw, 5rem); line-height: 1.02;
+	letter-spacing: -.055em; font-weight: 700; margin-bottom: 22px;
+}
+.workspace-title .accent { color: #c084fc; }
+.workspace-copy {
+	max-width: 560px; font-size: 1.05rem; line-height: 1.7; color: var(--text-dim); margin-bottom: 30px;
+}
+.workspace-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 32px; }
+.workspace-actions a { display: inline-flex; align-items: center; gap: 8px; }
+.workspace-actions .btn-primary { padding: 12px 18px; }
+.workspace-actions .btn-secondary { padding: 11px 17px; }
+.workspace-note { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font: .75rem var(--font-mono); }
+.workspace-note .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 12px rgba(45, 212, 191, .8); }
+.workspace-panel {
+	position: relative; background: rgba(19, 19, 23, .92); border: 1px solid var(--border-active);
+	border-radius: 14px; box-shadow: 0 28px 80px rgba(0, 0, 0, .38), 0 0 0 1px rgba(139, 92, 246, .08);
+	overflow: hidden;
+}
+.workspace-panel::before {
+	content: ""; position: absolute; inset: -1px; pointer-events: none; border-radius: inherit;
+	background: linear-gradient(135deg, rgba(192, 132, 252, .24), transparent 32%, transparent 68%, rgba(45, 212, 191, .16));
+	mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite: exclude; padding: 1px;
+}
+.workspace-panel-header {
+	display: flex; align-items: center; justify-content: space-between; gap: 12px;
+	padding: 14px 16px; border-bottom: 1px solid var(--border); background: var(--bg-raised);
+}
+.workspace-window-controls { display: flex; gap: 6px; }
+.workspace-window-controls span { width: 9px; height: 9px; border-radius: 50%; background: #52525b; }
+.workspace-window-controls span:first-child { background: #fb7185; }
+.workspace-window-controls span:nth-child(2) { background: #fbbf24; }
+.workspace-window-controls span:nth-child(3) { background: #34d399; }
+.workspace-panel-title { color: var(--text-dim); font: .72rem var(--font-mono); }
+.workspace-connected { color: var(--teal); font: 600 .65rem var(--font-mono); }
+.workspace-panel-body { padding: 20px; }
+.workspace-context { display: flex; align-items: center; gap: 8px; margin-bottom: 20px; color: var(--text-muted); font: .7rem var(--font-mono); }
+.workspace-context strong { color: var(--text-dim); font-weight: 500; }
+.workspace-context .slash { color: var(--accent); }
+.workspace-personas { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 24px; }
+.workspace-persona {
+	padding: 6px 9px; border: 1px solid var(--border); border-radius: 6px; color: var(--text-muted);
+	font: .7rem var(--font-mono); background: var(--bg);
+}
+.workspace-persona.active { color: var(--purple); border-color: rgba(167, 139, 250, .5); background: var(--accent-subtle); }
+.workspace-message { display: flex; gap: 11px; margin: 15px 0; }
+.workspace-avatar {
+	display: grid; place-items: center; flex: 0 0 27px; height: 27px; border-radius: 7px;
+	font: 700 .68rem var(--font-mono); color: var(--bg); background: var(--purple);
+}
+.workspace-avatar.user { background: var(--teal); }
+.workspace-message-body { min-width: 0; padding-top: 2px; }
+.workspace-message-meta { color: var(--text-muted); font: .64rem var(--font-mono); margin-bottom: 5px; }
+.workspace-message-text { color: var(--text-dim); font-size: .82rem; line-height: 1.55; }
+.workspace-message-text strong { color: var(--text); font-weight: 600; }
+.workspace-tool-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 20px 38px; }
+.workspace-tool { padding: 4px 7px; border-radius: 4px; color: var(--text-muted); background: var(--bg); border: 1px solid var(--border); font: .62rem var(--font-mono); }
+.workspace-tool::before { content: "✓"; color: var(--teal); margin-right: 5px; }
+.workspace-composer { display: flex; align-items: center; gap: 10px; margin-top: 22px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text-muted); font: .72rem var(--font-mono); }
+.workspace-composer .cursor { width: 2px; height: 14px; background: var(--purple); animation: workspace-blink 1.1s steps(2, start) infinite; }
+@keyframes workspace-blink { 50% { opacity: 0; } }
+.workspace-section { border-top: 1px solid var(--border); padding: 62px 0; }
+.workspace-section-heading { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
+.workspace-section-heading h2 { margin: 0; font-size: 1.55rem; letter-spacing: -.025em; }
+.workspace-section-heading p { max-width: 450px; margin: 0; color: var(--text-muted); font-size: .86rem; }
+.workspace-grid { display: grid; grid-template-columns: 1.25fr .75fr; gap: 16px; }
+.workspace-card { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px; transition: border-color .15s, transform .15s, background .15s; }
+.workspace-card:hover { border-color: var(--border-active); background: var(--bg-raised); transform: translateY(-2px); }
+.workspace-card h3 { margin: 0 0 7px; font-size: .98rem; }
+.workspace-card p { margin: 0; color: var(--text-muted); font-size: .82rem; line-height: 1.55; }
+.workspace-card-link { display: block; color: inherit; }
+.workspace-card-link:hover { color: inherit; }
+.workspace-card-tag { display: inline-block; margin-bottom: 16px; color: var(--accent); font: 600 .65rem var(--font-mono); text-transform: uppercase; letter-spacing: .1em; }
+.workspace-card-arrow { display: block; margin-top: 16px; color: var(--purple); font: .72rem var(--font-mono); }
+.workspace-card-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.workspace-role { display: flex; align-items: center; gap: 9px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 7px; color: var(--text-dim); font-size: .78rem; }
+.workspace-role-mark { width: 7px; height: 7px; border-radius: 2px; background: var(--purple); }
+.workspace-role:nth-child(2n) .workspace-role-mark { background: var(--teal); }
+.workspace-role:nth-child(3n) .workspace-role-mark { background: var(--amber); }
+.workspace-metrics { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.workspace-metric { padding: 18px 20px; background: var(--bg-surface); border-right: 1px solid var(--border); }
+.workspace-metric:last-child { border-right: 0; }
+.workspace-metric strong { display: block; color: var(--text); font: 600 1.25rem var(--font-mono); margin-bottom: 5px; }
+.workspace-metric span { color: var(--text-muted); font-size: .7rem; }
+.workspace-install { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; min-width: 0; }
+.workspace-install .install-block { max-width: none; min-width: 0; margin: 0; padding: 16px; overflow: hidden; }
+.workspace-install .install-block code { display: block; min-width: 0; overflow-x: auto; white-space: nowrap; }
+.workspace-docs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.workspace-docs a { color: var(--text-dim); background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; padding: 13px 14px; font-size: .8rem; transition: border-color .15s, color .15s; }
+.workspace-docs a:hover { color: var(--purple); border-color: var(--border-active); }
+.workspace-footer { padding-top: 20px; color: var(--text-muted); font: .7rem var(--font-mono); text-align: center; }
+@media (max-width: 900px) {
+	.workspace-hero { grid-template-columns: 1fr; gap: 34px; min-height: 0; padding: 24px 0 52px; }
+	.workspace-title { max-width: 680px; }
+	.workspace-panel { max-width: 680px; }
+}
+@media (max-width: 640px) {
+	.workspace-shell { padding: 62px 16px 42px; }
+	.workspace-title { font-size: clamp(2.55rem, 15vw, 4rem); }
+	.workspace-copy { font-size: .94rem; }
+	.workspace-panel-body { padding: 15px; }
+	.workspace-section { padding: 42px 0; }
+	.workspace-section-heading { display: block; }
+	.workspace-section-heading h2 { margin-bottom: 8px; }
+	.workspace-grid, .workspace-install { grid-template-columns: 1fr; }
+	.workspace-metrics { grid-template-columns: repeat(2, 1fr); }
+	.workspace-metric:nth-child(2) { border-right: 0; }
+	.workspace-metric:nth-child(-n+2) { border-bottom: 1px solid var(--border); }
+	.workspace-docs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 `;
 
 // ── Landing page HTML ───────────────────────────────────────────────────────
-const LANDING_HTML = `<!DOCTYPE html>
+const LEGACY_LANDING_HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -672,6 +860,106 @@ const LANDING_HTML = `<!DOCTYPE html>
 	<footer class="footer">
 		cast is open source under the MIT License. Works with OpenRouter, OpenAI, Ollama, vLLM, LiteLLM, Azure OpenAI, and any OpenAI-compatible API.
 	</footer>
+</div>
+</body>
+</html>`;
+
+const LANDING_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+<title>cast — Agent workspace</title>
+<meta name="description" content="cast is a role-based agent workspace for your terminal, repository, and local model.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<style>${CSS}</style>
+</head>
+<body>
+<header class="header">
+	<a href="index.html" class="header-logo" aria-label="cast home"><img src="assets/favicon.svg" alt="cast logo"></a>
+	<span class="header-badge">v${PACKAGE_VERSION}</span>
+	<div class="header-links">
+		<span class="workspace-connected">● local-first</span>
+		<a href="getting-started.html">Docs</a>
+		<a href="https://github.com/aa-blinov/cast">GitHub</a>
+	</div>
+</header>
+
+<div class="main main-landing">
+	<main class="workspace-shell">
+		<section class="workspace-hero" aria-labelledby="workspace-title">
+			<div>
+				<div class="workspace-kicker">cast / agent workspace</div>
+				<h1 id="workspace-title" class="workspace-title">Work with a <span class="accent">different lens.</span></h1>
+				<p class="workspace-copy">A focused agent harness for real repositories. Choose the role, keep the same tools, and let the work happen where your code already lives.</p>
+				<div class="workspace-actions">
+					<a href="getting-started.html" class="btn-primary">Open the workspace <span aria-hidden="true">→</span></a>
+					<a href="personas.html" class="btn-secondary">Browse personas</a>
+				</div>
+				<div class="workspace-note"><span class="dot" aria-hidden="true"></span> Runs locally with any OpenAI-compatible model</div>
+			</div>
+
+			<div class="workspace-panel" aria-label="Cast workspace preview">
+				<div class="workspace-panel-header">
+					<div class="workspace-window-controls" aria-hidden="true"><span></span><span></span><span></span></div>
+					<div class="workspace-panel-title">cast / auth-service</div>
+					<div class="workspace-connected">CONNECTED</div>
+				</div>
+				<div class="workspace-panel-body">
+					<div class="workspace-context"><strong>~/projects/auth-service</strong><span class="slash">/</span><span>session: review-42</span></div>
+					<div class="workspace-personas" aria-label="Available personas">
+						<span class="workspace-persona active">senior</span><span class="workspace-persona">analyst</span><span class="workspace-persona">reviewer</span><span class="workspace-persona">planner</span>
+					</div>
+					<div class="workspace-message">
+						<div class="workspace-avatar user">U</div>
+						<div class="workspace-message-body"><div class="workspace-message-meta">YOU · 09:41</div><div class="workspace-message-text">Audit the auth flow and identify the highest-risk edge cases.</div></div>
+					</div>
+					<div class="workspace-message">
+						<div class="workspace-avatar">C</div>
+						<div class="workspace-message-body"><div class="workspace-message-meta">CAST / SENIOR · 09:42</div><div class="workspace-message-text">I traced the request path and found <strong>3 places where session state can drift.</strong></div></div>
+					</div>
+					<div class="workspace-tool-row"><span class="workspace-tool">read auth.ts</span><span class="workspace-tool">search session</span><span class="workspace-tool">run tests</span></div>
+					<div class="workspace-composer"><span class="cursor" aria-hidden="true"></span><span>Ask Cast to continue...</span></div>
+				</div>
+			</div>
+		</section>
+
+		<section class="workspace-section" aria-labelledby="workspace-metrics-title">
+			<h2 id="workspace-metrics-title" class="visually-hidden">Workspace capabilities</h2>
+			<div class="workspace-metrics">
+				<div class="workspace-metric"><strong>20</strong><span>built-in personas</span></div>
+				<div class="workspace-metric"><strong>6+</strong><span>core tools</span></div>
+				<div class="workspace-metric"><strong>16</strong><span>TUI themes</span></div>
+				<div class="workspace-metric"><strong>0</strong><span>telemetry</span></div>
+			</div>
+		</section>
+
+		<section class="workspace-section" aria-labelledby="start-title">
+			<div class="workspace-section-heading"><h2 id="start-title">Start where the work is</h2><p>One repo, one session, a role that matches the job in front of you.</p></div>
+			<div class="workspace-grid">
+				<a class="workspace-card workspace-card-link" href="getting-started.html">
+					<span class="workspace-card-tag">01 / setup</span><h3>Connect your model</h3><p>Install Cast, point it at OpenRouter, Ollama, vLLM, or any OpenAI-compatible endpoint, and start in your repository.</p><span class="workspace-card-arrow">Read the quick start →</span>
+				</a>
+				<div class="workspace-card"><span class="workspace-card-tag">02 / choose a lens</span><h3>Personas for the moment</h3><p>Switch perspective without changing your tools or context.</p><div class="workspace-card-list" style="margin-top:16px"><div class="workspace-role"><span class="workspace-role-mark"></span>Senior</div><div class="workspace-role"><span class="workspace-role-mark"></span>Reviewer</div><div class="workspace-role"><span class="workspace-role-mark"></span>Analyst</div><div class="workspace-role"><span class="workspace-role-mark"></span>Planner</div></div></div>
+			</div>
+		</section>
+
+		<section class="workspace-section" aria-labelledby="install-title">
+			<div class="workspace-section-heading"><h2 id="install-title">Bring it to your machine</h2><p>Self-contained bundle. Node.js 22+. No npm packages at runtime.</p></div>
+			<div class="workspace-install">
+				<div class="install-block"><div class="label">macOS / Linux</div><code>curl -fsSL https://aa-blinov.github.io/cast/install | bash</code></div>
+				<div class="install-block"><div class="label">Windows / PowerShell</div><code>irm https://aa-blinov.github.io/cast/install.ps1 | iex</code></div>
+			</div>
+		</section>
+
+		<section class="workspace-section" aria-labelledby="docs-title">
+			<div class="workspace-section-heading"><h2 id="docs-title">Documentation</h2><p>The whole surface area, organized for quick lookup.</p></div>
+			<nav class="workspace-docs" aria-label="Documentation">
+				${NAV_ORDER.slice(0, 12).map((item) => `<a href="${item.file.replace(".md", ".html")}">${item.label}</a>`).join("\n\t\t\t\t")}
+			</nav>
+			<div class="workspace-footer">cast is open source under the MIT License · designed for local inference</div>
+		</section>
+	</main>
 </div>
 </body>
 </html>`;
