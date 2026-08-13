@@ -544,6 +544,28 @@ function mergeHistoryPage(previous, incoming) {
 	return [...before, ...incoming.map((message) => existing.get(message.seq) ?? message), ...pending];
 }
 
+function HistoryBoundary({ status, atEnd, onRetry }) {
+	if (status === "loading") {
+		return h(
+			"div",
+			{ class: "history-boundary history-boundary-loading", role: "status", "aria-live": "polite" },
+			h("span", { class: "history-boundary-spinner", "aria-hidden": "true" }),
+			h("span", null, "Loading older messages…"),
+		);
+	}
+	if (status === "error") {
+		return h(
+			"div",
+			{ class: "history-boundary history-boundary-loading", role: "status", "aria-live": "polite" },
+			h("button", { class: "history-boundary-retry", onClick: onRetry }, "Retry loading older messages"),
+		);
+	}
+	if (atEnd) {
+		return h("div", { class: "history-boundary", role: "status", "aria-live": "polite" }, "Beginning of thread");
+	}
+	return null;
+}
+
 // The "first-paint" animation for messages is handled entirely in CSS
 // via the `.message-entering` class — the entrance `rise` keyframe
 // fires on initial DOM mount and never again. Correct because every
@@ -824,6 +846,15 @@ function App() {
 	// ref avoids making reconnect bookkeeping itself re-render the whole app.
 	const pendingOutgoingRef = useRef(new Map());
 	const loadingOlderRef = useRef(false);
+	const [olderHistoryStatus, setOlderHistoryStatus] = useState(null);
+	const olderHistoryStatusForSession =
+		olderHistoryStatus?.sessionId === activeId ? olderHistoryStatus.status : null;
+	useEffect(() => {
+		setOlderHistoryStatus(null);
+	}, [activeId]);
+	useEffect(() => {
+		if (olderHistoryStatusForSession === "end" && session?.hasMoreHistory) setOlderHistoryStatus(null);
+	}, [olderHistoryStatusForSession, session?.hasMoreHistory]);
 	// Set right before prepending older messages, to the scroll container's
 	// current scrollHeight — the restore effect below uses it to keep the
 	// same content visually in place instead of the view jumping as new
@@ -1383,6 +1414,7 @@ function App() {
 		if (loadingOlderRef.current || !session?.hasMoreHistory || session.oldestSeq == null) return;
 		const forId = activeId;
 		loadingOlderRef.current = true;
+		setOlderHistoryStatus({ sessionId: forId, status: "loading" });
 		try {
 			const res = await api("GET", `/api/sessions/${forId}/history?before=${session.oldestSeq}`);
 			const cached = olderPagesCacheRef.current.get(forId);
@@ -1402,12 +1434,13 @@ function App() {
 						}
 					: prev,
 			);
+			setOlderHistoryStatus({ sessionId: forId, status: res.hasMoreHistory ? null : "end" });
 		} catch {
-			// Best-effort — hasMoreHistory stays as-is, the next scroll-up retries.
+			setOlderHistoryStatus({ sessionId: forId, status: "error" });
 		} finally {
 			loadingOlderRef.current = false;
 		}
-	}, [session, activeId, setSession]);
+	}, [session, activeId, setSession, setOlderHistoryStatus]);
 
 	// Keeps the visible content stable when older messages get prepended
 	// above it — without this the browser's default "preserve scrollTop"
@@ -1876,6 +1909,17 @@ function App() {
 						// comment on the loader block above).
 						!(selectingId && selectingId !== activeId) &&
 						html`
+							${
+								activeId &&
+								messages.length > 0 &&
+								h(HistoryBoundary, {
+									status: olderHistoryStatusForSession,
+									atEnd:
+										olderHistoryStatusForSession === "end" ||
+										(olderHistoryStatusForSession == null && session?.hasMoreHistory === false),
+									onRetry: loadOlderMessages,
+								})
+							}
 							${messages.map((msg) => html`<${MessageModule} key=${keyForMessage(msg)} msg=${msg} renderMarkdown=${renderMarkdown} escapeHtml=${escapeHtml} showReasoning=${showReasoning} />`)}
 							<${LiveStreamingBlocksModule} controllerRef=${streamingControllerRef} onFrame=${_scrollStreamingFrame} renderMarkdown=${renderMarkdown} showReasoning=${showReasoning} />
 							${

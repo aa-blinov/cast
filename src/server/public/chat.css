@@ -27,6 +27,39 @@
  * growing reply stays still while tokens arrive. */
 .message-entering { animation: rise .15s ease; }
 .messages > * + * { padding-top: 6px; }
+.history-boundary {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	min-height: 28px;
+	padding: 4px 0 10px;
+	color: var(--text-muted);
+	font-size: .72rem;
+	letter-spacing: .01em;
+}
+.history-boundary-loading {
+	position: sticky;
+	top: -20px;
+	z-index: 2;
+	background: var(--bg);
+}
+.history-boundary-spinner {
+	width: 12px;
+	height: 12px;
+	border: 2px solid var(--border);
+	border-top-color: var(--cyan);
+	border-radius: 50%;
+	animation: spin .8s linear infinite;
+}
+.history-boundary-retry {
+	border: 0;
+	background: transparent;
+	color: var(--cyan);
+	font: inherit;
+	cursor: pointer;
+}
+.history-boundary-retry:hover { color: var(--text); text-decoration: underline; }
 @keyframes rise {
 	from { opacity: 0; transform: translateY(3px); }
 	to { opacity: 1; transform: translateY(0); }

@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.13.37
+
+### Fixed
+
+- **Web thread pagination now explains its state at the top of the transcript.** Older-message loads show a visible loader, failures offer retry, and reaching the beginning is labeled explicitly.
+
 ## 0.13.36
 
 ### Fixed
