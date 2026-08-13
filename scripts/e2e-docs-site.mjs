@@ -99,13 +99,18 @@ try {
 	assert.equal(await desktop.locator(".workspace-ui-metrics").count(), 0, "landing must not show fabricated metrics");
 	assert.equal(await desktop.locator(".workspace-ui input, .workspace-ui textarea").count(), 0, "preview must not show an empty input");
 	assert.equal(await desktop.locator(".workspace-role").count(), 0, "landing must not repeat personas in a lower card");
+	assert.equal(await desktop.locator(".workspace-ui-role").count(), 0, "preview must not repeat the active persona near build");
 	const previewText = await desktop.locator(".workspace-ui").innerText();
 	assert(!previewText.includes("ready"), "preview must not show the ready label");
 	assert(!previewText.includes("session · auth-service"), "preview must not show the session subtitle");
 	assert(!previewText.includes("cast ·"), "preview must not prefix persona labels with cast");
 	assert(!previewText.includes("cast / agent workspace"), "landing must not show the workspace kicker");
+	const previewHeaderText = await desktop.locator(".workspace-ui-header").innerText();
+	assert(!previewHeaderText.includes("~/projects/auth-service"), "preview top bar must not show the repository path");
+	assert(!previewHeaderText.includes("cast"), "preview top bar must not show the product name");
+	assert.equal(await desktop.locator(".workspace-ui-status").evaluate((dot) => getComputedStyle(dot).backgroundColor), "rgb(34, 197, 94)", "connected status must be green");
 	await desktop.getByRole("tab", { name: "Reviewer" }).click();
-	assert.equal(await desktop.locator('[data-active-persona]').textContent(), "Reviewer", "persona status must update after switching");
+	assert.equal(await desktop.getByRole("tab", { name: "Reviewer" }).getAttribute("aria-selected"), "true", "selected persona tab must update after switching");
 	assert.equal(await desktop.locator('[data-persona-panel="reviewer"]').isHidden(), false, "selected persona panel must be visible");
 	assert.equal(await desktop.locator('[data-persona-panel="senior"]').isHidden(), true, "previous persona panel must be hidden");
 

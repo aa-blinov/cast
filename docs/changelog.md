@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.15.3
+
+### Fixed
+
+- **The landing workspace preview now keeps its top bar focused on connection state.** Removed the repeated product and repository labels, matched the connected status dot to the Web UI, and removed the duplicate persona/build footer.
+
 ## 0.15.2
 
 ### Fixed
