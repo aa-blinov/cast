@@ -9,11 +9,8 @@
 # interpreter ignores the #!/bin/bash shebang above, so the pipe itself has
 # to name the right one.)
 #
-# Downloads the latest (or CAST_VERSION-pinned) release tarball, unpacks
-# it to ~/.cast/install, and symlinks bin/cast onto PATH. The
-# release is a pure JS bundle (see scripts/build.mjs) — architecture-
-# independent, so there's no per-arch asset to pick, only Node.js itself is
-# required on the machine already.
+# Downloads the latest (or CAST_VERSION-pinned) platform-specific release
+# tarball, unpacks it to ~/.cast/install, and symlinks bin/cast onto PATH.
 set -euo pipefail
 
 REPO="${CAST_REPO:-aa-blinov/cast}"
@@ -22,6 +19,17 @@ DOWNLOAD_BASE_OVERRIDE="${CAST_DOWNLOAD_BASE:-}"
 INSTALL_DIR="${CAST_INSTALL_DIR:-$HOME/.cast/install}"
 BIN_DIR="${CAST_BIN_DIR:-$HOME/.local/bin}"
 MIN_NODE_MAJOR=22
+
+case "$(uname -s):$(uname -m)" in
+	Linux:x86_64|Linux:amd64) TARGET="linux-x64" ;;
+	Linux:aarch64|Linux:arm64) TARGET="linux-arm64" ;;
+	Darwin:x86_64|Darwin:amd64) TARGET="darwin-x64" ;;
+	Darwin:arm64) TARGET="darwin-arm64" ;;
+	*)
+		printf '\033[31mUnsupported platform: %s %s. Supported targets: Linux x64/arm64 and macOS x64/arm64.\033[0m\n' "$(uname -s)" "$(uname -m)" >&2
+		exit 1
+		;;
+esac
 
 info() { printf '\033[36m%s\033[0m\n' "$1"; }
 warn() { printf '\033[33m%s\033[0m\n' "$1"; }
@@ -47,22 +55,24 @@ if [ -n "${CAST_VERSION:-}" ]; then
 	TAG="v${CAST_VERSION#v}"
 	info "Installing cast ${TAG} (pinned via CAST_VERSION)..."
 	if [ -n "$DOWNLOAD_BASE_OVERRIDE" ]; then
-		ASSET_URL="${DOWNLOAD_BASE_OVERRIDE%/}/cast-${TAG#v}.tar.gz"
+		ASSET_URL="${DOWNLOAD_BASE_OVERRIDE%/}/cast-${TAG#v}-${TARGET}.tar.gz"
+		LEGACY_ASSET_URL="${DOWNLOAD_BASE_OVERRIDE%/}/cast-${TAG#v}.tar.gz"
 	else
-		ASSET_URL="https://github.com/${REPO}/releases/download/${TAG}/cast-${TAG#v}.tar.gz"
+		ASSET_URL="https://github.com/${REPO}/releases/download/${TAG}/cast-${TAG#v}-${TARGET}.tar.gz"
+		LEGACY_ASSET_URL="https://github.com/${REPO}/releases/download/${TAG}/cast-${TAG#v}.tar.gz"
 	fi
 else
 	info "Looking up the latest cast release..."
 	RELEASE_JSON="$(curl -fsSL "${API_BASE}/repos/${REPO}/releases/latest")"
-	# Avoids a jq dependency — GitHub's release JSON is predictable enough
-	# for a plain grep/sed extraction, same approach most curl|sh installers
-	# use to stay dependency-free.
-	ASSET_URL="$(printf '%s' "$RELEASE_JSON" | grep -o '"browser_download_url": *"[^"]*\.tar\.gz"' | head -n1 | sed -E 's/.*"(https?:[^"]+)"/\1/')"
 	TAG="$(printf '%s' "$RELEASE_JSON" | grep -o '"tag_name": *"[^"]*"' | head -n1 | sed -E 's/.*"([^"]+)"$/\1/')"
 	if [ -n "$DOWNLOAD_BASE_OVERRIDE" ]; then
-		ASSET_URL="${DOWNLOAD_BASE_OVERRIDE%/}/cast-${TAG#v}.tar.gz"
+		ASSET_URL="${DOWNLOAD_BASE_OVERRIDE%/}/cast-${TAG#v}-${TARGET}.tar.gz"
+		LEGACY_ASSET_URL="${DOWNLOAD_BASE_OVERRIDE%/}/cast-${TAG#v}.tar.gz"
+	else
+		ASSET_URL="https://github.com/${REPO}/releases/download/${TAG}/cast-${TAG#v}-${TARGET}.tar.gz"
+		LEGACY_ASSET_URL="https://github.com/${REPO}/releases/download/${TAG}/cast-${TAG#v}.tar.gz"
 	fi
-	if [ -z "$ASSET_URL" ]; then
+	if [ -z "$TAG" ]; then
 		err "Couldn't find a release asset. Is https://github.com/${REPO}/releases populated yet?"
 		exit 1
 	fi
@@ -73,7 +83,15 @@ WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
 info "Downloading ${ASSET_URL}..."
-curl -fsSL "$ASSET_URL" -o "$WORK_DIR/cast.tar.gz"
+if ! curl -fsSL "$ASSET_URL" -o "$WORK_DIR/cast.tar.gz"; then
+	if [ "$TARGET" = "linux-arm64" ]; then
+		err "This release has no Linux ARM64 archive. A legacy Linux archive contains an x64 native PTY and cannot be used safely."
+		exit 1
+	fi
+	warn "Platform-specific asset is unavailable; trying the legacy architecture-independent archive."
+	ASSET_URL="$LEGACY_ASSET_URL"
+	curl -fsSL "$ASSET_URL" -o "$WORK_DIR/cast.tar.gz"
+fi
 
 info "Installing to ${INSTALL_DIR}..."
 rm -rf "$INSTALL_DIR"

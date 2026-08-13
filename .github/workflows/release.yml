@@ -10,8 +10,8 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
+  verify:
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -23,48 +23,98 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Same gate as CI (see ci.yml) — a broken tag shouldn't ship. Tags
-      # aren't guaranteed to have already gone through CI (e.g. tagging an
-      # older commit), so this can't be skipped.
       - name: Type check + lint
         run: npm run check
 
-      # Build must run *before* tests because test/run-interactive-command.test.ts
-      # and test/worktree-from-worktree.test.ts spawn the bundled
-      # `dist/index.js` to exercise `cast run --interactive` end-to-end.
-      # Without this step the spawn fails with `MODULE_NOT_FOUND` and
-      # the release job aborts before the bundle can be packaged.
+      # Build must run before tests because the interactive end-to-end tests
+      # spawn the bundled dist/index.js.
       - name: Build
         run: npm run build
 
       - name: Run tests
         run: npm test
 
-      - name: Package release archives
-        id: package
+  package:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ubuntu-24.04
+            format: tar.gz
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+            format: tar.gz
+          - target: darwin-x64
+            runner: macos-15-intel
+            format: tar.gz
+          - target: darwin-arm64
+            runner: macos-14
+            format: tar.gz
+          - target: win32-x64
+            runner: windows-2022
+            format: zip
+          - target: win32-arm64
+            runner: windows-11-arm
+            format: zip
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Stage release
+        shell: bash
+        if: matrix.format == 'tar.gz'
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
-          STAGE="$(mktemp -d)/cast"
-          mkdir -p "$STAGE"
-          cp -r dist "$STAGE/"
-          cp -r prompts "$STAGE/"
-          cp -r bin "$STAGE/"
-          mkdir -p "$STAGE/node_modules"
-          cp -r node_modules/node-pty node_modules/node-addon-api "$STAGE/node_modules/"
-          cp package.json README.md "$STAGE/"
-          chmod +x "$STAGE/bin/cast"
-
+          version="$(node -p "require('./package.json').version")"
+          stage="$RUNNER_TEMP/cast"
+          node scripts/package-release.mjs --target "${{ matrix.target }}" --stage "$stage"
           mkdir -p out
-          tar -C "$(dirname "$STAGE")" -czf "out/cast-${VERSION}.tar.gz" cast
-          (cd "$(dirname "$STAGE")" && zip -rq "$OLDPWD/out/cast-${VERSION}.zip" cast)
+          tar -C "$RUNNER_TEMP" -czf "out/cast-${version}-${{ matrix.target }}.tar.gz" cast
 
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Stage release (Windows)
+        if: matrix.format == 'zip'
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          $stage = Join-Path $env:RUNNER_TEMP "cast"
+          node scripts/package-release.mjs --target "${{ matrix.target }}" --stage $stage
+          New-Item -ItemType Directory -Path out -Force | Out-Null
+          Push-Location $env:RUNNER_TEMP
+          Compress-Archive -Path cast -DestinationPath (Join-Path $env:GITHUB_WORKSPACE "out/cast-$version-${{ matrix.target }}.zip") -Force
+          Pop-Location
+
+      - name: Upload archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: cast-${{ matrix.target }}
+          path: out/*
+          if-no-files-found: error
+
+  publish:
+    needs: package
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cast-*
+          merge-multiple: true
+          path: out
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: |
-            out/cast-${{ steps.package.outputs.version }}.tar.gz
-            out/cast-${{ steps.package.outputs.version }}.zip
+          files: out/*
