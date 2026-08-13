@@ -77,6 +77,8 @@ try {
 			overflowX: style.overflowX,
 			language: pre.getAttribute("data-language"),
 			codeClass: code?.className ?? "",
+			scrollbarWidth: getComputedStyle(document.documentElement).scrollbarWidth,
+			scrollbarColor: getComputedStyle(document.documentElement).scrollbarColor,
 		};
 	});
 	assert.notEqual(codeCheck.backgroundImage, "none", "code block must have a visible background");
@@ -84,6 +86,8 @@ try {
 	assert.equal(codeCheck.overflowX, "auto", "long code must scroll inside its block");
 	assert.equal(codeCheck.language, "bash", "language label must be preserved");
 	assert.match(codeCheck.codeClass, /hljs/, "code must use the syntax-highlighting class");
+	assert.equal(codeCheck.scrollbarWidth, "thin", "documentation page must use a themed thin scrollbar");
+	assert.notEqual(codeCheck.scrollbarColor, "auto", "documentation page must define scrollbar colors");
 	assert((await desktop.locator('.content pre.code-block span[class^="hljs-"]').count()) > 0, "highlighted code must contain syntax spans");
 
 	await desktop.goto(`http://127.0.0.1:${port}/index.html`, { waitUntil: "networkidle" });
@@ -94,6 +98,12 @@ try {
 	assert.equal(await desktop.locator(".workspace-ui-persona").count(), 4, "preview must include switchable personas");
 	assert.equal(await desktop.locator(".workspace-ui-metrics").count(), 0, "landing must not show fabricated metrics");
 	assert.equal(await desktop.locator(".workspace-ui input, .workspace-ui textarea").count(), 0, "preview must not show an empty input");
+	assert.equal(await desktop.locator(".workspace-role").count(), 0, "landing must not repeat personas in a lower card");
+	const previewText = await desktop.locator(".workspace-ui").innerText();
+	assert(!previewText.includes("ready"), "preview must not show the ready label");
+	assert(!previewText.includes("session · auth-service"), "preview must not show the session subtitle");
+	assert(!previewText.includes("cast ·"), "preview must not prefix persona labels with cast");
+	assert(!previewText.includes("cast / agent workspace"), "landing must not show the workspace kicker");
 	await desktop.getByRole("tab", { name: "Reviewer" }).click();
 	assert.equal(await desktop.locator('[data-active-persona]').textContent(), "Reviewer", "persona status must update after switching");
 	assert.equal(await desktop.locator('[data-persona-panel="reviewer"]').isHidden(), false, "selected persona panel must be visible");
@@ -104,11 +114,13 @@ try {
 	const mobileCheck = await mobile.evaluate(() => ({
 		viewport: window.innerWidth,
 		documentWidth: document.documentElement.scrollWidth,
-	panelWidth: document.querySelector(".workspace-ui")?.getBoundingClientRect().width ?? 0,
+		panelWidth: document.querySelector(".workspace-ui")?.getBoundingClientRect().width ?? 0,
 		titleSize: getComputedStyle(document.querySelector(".workspace-title")).fontSize,
+		scrollbarWidth: getComputedStyle(document.documentElement).scrollbarWidth,
 	}));
 	assert.equal(mobileCheck.documentWidth, mobileCheck.viewport, "mobile landing page must not overflow horizontally");
 	assert(mobileCheck.panelWidth <= mobileCheck.viewport - 32, "workspace preview must fit the mobile gutter");
+	assert.equal(mobileCheck.scrollbarWidth, "thin", "mobile landing page must use a themed thin scrollbar");
 	await mobile.screenshot({ path: "/tmp/cast-workspace-mobile.png", fullPage: false });
 
 	console.log(JSON.stringify({ codeCheck, mobileCheck }, null, 2));
