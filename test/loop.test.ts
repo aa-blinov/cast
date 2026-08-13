@@ -3619,6 +3619,50 @@ describe("runAgentLoop — todo list (build mode only)", () => {
 });
 
 describe("gateDestructiveWrite", () => {
+	it("serializes potentially mutating sibling tools while preserving call order", async () => {
+		let active = 0;
+		let maxActive = 0;
+		const order: string[] = [];
+		const mcpDef = {
+			type: "function" as const,
+			function: { name: "mcp_demo_mutate", description: "mutate", parameters: { type: "object", properties: {} } },
+		};
+		const mcpCall = vi.fn(async (args: Record<string, unknown>) => {
+			const label = String(args.label);
+			active++;
+			maxActive = Math.max(maxActive, active);
+			order.push(`start:${label}`);
+			await new Promise((resolve) => setTimeout(resolve, label === "first" ? 20 : 0));
+			order.push(`end:${label}`);
+			active--;
+			return { content: label };
+		});
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [
+					{ id: "mcp-1", name: "mcp_demo_mutate", arguments: JSON.stringify({ label: "first" }) },
+					{ id: "mcp-2", name: "mcp_demo_mutate", arguments: JSON.stringify({ label: "second" }) },
+				],
+			}))
+			.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
+
+		await runAgentLoop([{ role: "user", content: "mutate twice" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "test",
+			mcpTools: [mcpDef],
+			mcpToolIndex: new Map([["mcp_demo_mutate", { definition: mcpDef, call: mcpCall }]]),
+			onEvent: () => {},
+		});
+
+		expect(maxActive).toBe(1);
+		expect(order).toEqual(["start:first", "end:first", "start:second", "end:second"]);
+	});
+
 	it("still gates write calls when hooks are configured", async () => {
 		const events: AgentEvent[] = [];
 		const confirmWrite = vi.fn(async () => false);

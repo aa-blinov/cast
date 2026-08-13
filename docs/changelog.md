@@ -2,6 +2,17 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.15.5
+
+### Fixed
+
+- **Concurrent turns are serialized reliably.** TUI, Web UI, and separate Cast processes now claim a session before starting work, preventing duplicate agent loops, interleaved history, and stale cleanup from releasing a newer turn.
+- **Web message retries are idempotent across reconnects.** Client message identifiers, pending-message recovery, and ordered SSE updates keep prompts visible without creating duplicate turns.
+
+### Internal
+
+- **Tests now run inside per-test environments.** Each test gets an isolated home, cwd, settings file, SQLite database, and daemon state; custom database paths create their parent directories automatically.
+
 ## 0.15.4
 
 ### Fixed

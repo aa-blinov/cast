@@ -84,7 +84,8 @@ describe("web bridge", () => {
 		realHome = process.env.HOME;
 		fakeHome = mkdtempSync(join(tmpdir(), "cast-web-bridge-test-"));
 		process.env.HOME = fakeHome;
-		cwd = fakeHome;
+		cwd = join(fakeHome, "project");
+		mkdirSync(cwd, { recursive: true });
 	});
 
 	afterEach(() => {
@@ -649,9 +650,9 @@ describe("web bridge", () => {
 
 		bridge.submit(ws.id, "first turn");
 		await new Promise<void>((resolve) => setImmediate(resolve));
-		mkdirSync(join(fakeHome, ".cast", "personas"), { recursive: true });
+		mkdirSync(join(cwd, ".cast", "personas"), { recursive: true });
 		writeFileSync(
-			join(fakeHome, ".cast", "personas", "coding.md"),
+			join(cwd, ".cast", "personas", "coding.md"),
 			`---\nname: coding\nlabel: Customized Coding\ntools: [read]\nskills: [research]\nmcp: []\n---\n\nYou are the customized coding persona.\n`,
 			"utf-8",
 		);
@@ -907,6 +908,31 @@ describe("web bridge", () => {
 		expect(ws.status).toBe("running");
 		expect(runAgentLoop).not.toHaveBeenCalled();
 		expect(ws.runner.steeringQueue.hasItems()).toBe(true);
+		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalledTimes(1));
+	});
+
+	it("claims the turn before async provider reconciliation so concurrent sends cannot start two loops", async () => {
+		let releaseModels!: (value: { ok: boolean; models: Array<{ id: string }> }) => void;
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		saveSession(ws.session);
+		const persisted = loadSession(ws.id)!;
+		persisted.model = "hy3";
+		persisted.providerUrl = testConfig.baseURL;
+		saveSession(persisted);
+		mockFetchModels.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					releaseModels = resolve;
+				}),
+		);
+
+		bridge.submit(ws.id, "first message");
+		bridge.submit(ws.id, "second message");
+
+		expect(runAgentLoop).not.toHaveBeenCalled();
+		expect(ws.runner.steeringQueue.hasItems()).toBe(true);
+		releaseModels({ ok: true, models: [{ id: "gpt-4o" }] });
 		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalledTimes(1));
 	});
 

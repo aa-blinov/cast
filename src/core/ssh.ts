@@ -30,7 +30,9 @@ interface SshConfigFile {
 	hosts?: Record<string, SshHostConfig>;
 }
 
-export const globalSshPath = join(homedir(), ".cast", "ssh.json");
+export function globalSshPath(): string {
+	return join(homedir(), ".cast", "ssh.json");
+}
 export function projectSshPath(cwd: string): string {
 	return join(cwd, ".cast", "ssh.json");
 }
@@ -56,7 +58,7 @@ function expandKeyPath(keyPath: string): string {
 
 /** Merge global + project hosts. Project overrides global on same name. Global always loads; project only when trusted. */
 export function resolveSshHosts(cwd: string, trusted: boolean): SshHost[] {
-	const globalHosts = loadSshConfig(globalSshPath);
+	const globalHosts = loadSshConfig(globalSshPath());
 	const projectPath = projectSshPath(cwd);
 	const projectHosts = trusted && existsSync(projectPath) ? loadSshConfig(projectPath) : {};
 
@@ -130,7 +132,7 @@ export function hasSshpass(): boolean {
 }
 
 /** Write hosts to `~/.cast/ssh.json` (or custom path). Atomic write (tmp + rename). */
-export function saveSshConfig(hosts: SshHost[], path: string = globalSshPath): void {
+export function saveSshConfig(hosts: SshHost[], path: string = globalSshPath()): void {
 	const dir = path.slice(0, path.lastIndexOf("/"));
 	mkdirSync(dir, { recursive: true });
 	const record: Record<string, SshHostConfig> = {};

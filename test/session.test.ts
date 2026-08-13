@@ -544,14 +544,18 @@ describe("compaction cut points never split a tool_calls/tool pair", () => {
 
 describe("session persistence", () => {
 	let realHome: string | undefined;
+	let realDb: string | undefined;
 	let fakeHome: string;
 	let projectA: string;
 	let projectB: string;
 
 	beforeEach(() => {
 		realHome = process.env.HOME;
+		realDb = process.env.CAST_SESSIONS_DB;
 		fakeHome = mkdtempSync(join(tmpdir(), "cast-session-test-"));
 		process.env.HOME = fakeHome;
+		process.env.CAST_SESSIONS_DB = join(fakeHome, ".cast", "sessions", "sessions.db");
+		mkdirSync(join(fakeHome, ".cast", "sessions"), { recursive: true });
 		resetDbConnectionForTests();
 		projectA = join(fakeHome, "projects", "a");
 		projectB = join(fakeHome, "projects", "b");
@@ -563,6 +567,8 @@ describe("session persistence", () => {
 		resetDbConnectionForTests();
 		process.env.HOME = realHome;
 		rmSync(fakeHome, { recursive: true, force: true });
+		if (realDb === undefined) delete process.env.CAST_SESSIONS_DB;
+		else process.env.CAST_SESSIONS_DB = realDb;
 	});
 
 	it("createSession records the cwd it was created in", () => {

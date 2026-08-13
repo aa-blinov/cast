@@ -50,7 +50,7 @@ import {
 	getToolDefinitions,
 	type ToolResult,
 } from "./tools.ts";
-import { clearTurnRunner, markTurnRunner } from "./turn-runner-state.ts";
+import { acquireTurnRunner, clearTurnRunner, markTurnRunner, releaseTurnRunner } from "./turn-runner-state.ts";
 
 const IMAGE_VISION_RE = /image|vision/i;
 
@@ -216,6 +216,12 @@ function unknownToolResult(name: string, available: string[]): ToolResult {
  * follow the same rule — anything starting with `mcp_` is treated as
  * potentially destructive because we have no signal otherwise. */
 const DESTRUCTIVE_WRITE_TOOLS = new Set(["write", "edit", "patch", "apply_patch", "create_file"]);
+
+// Only tools with an explicit read-only contract may share a Promise.all
+// group. Unknown/MCP tools, shells, subagents, and stateful plan tools stay
+// ordered so a sibling mutation cannot race another tool in the same model
+// response. Read-only calls remain parallel when they are adjacent.
+const PARALLEL_SAFE_TOOL_NAMES = new Set(["glob", "grep", "ls", "web_search", "web_fetch", "bash_output"]);
 
 /** Pick the path-shaped arg from a tool call. Different tools use different
  * keys (`path`, `file_path`, `target_path`) — try the obvious ones. */
@@ -735,6 +741,8 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 	// removed in the finally below — including the crash path (kill -9, OOM, lost
 	// terminal), because the file's pid becomes dead and readers filter it out.
 	const runnerSessionId = loopConfig.sessionId;
+	const lockAcquired = !runnerSessionId || acquireTurnRunner(runnerSessionId, process.pid);
+	if (!lockAcquired) throw new Error(`Session "${runnerSessionId}" is already running in another process`);
 	if (runnerSessionId) markTurnRunner(runnerSessionId, process.pid);
 	try {
 		await runLoopInner(messages, loopConfig);
@@ -743,6 +751,7 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 		// unlinking, so a second TUI racing on the same session won't have its
 		// marker clobbered by us.
 		if (runnerSessionId) clearTurnRunner(runnerSessionId, process.pid);
+		if (runnerSessionId) releaseTurnRunner(runnerSessionId, process.pid);
 	}
 }
 
@@ -1849,60 +1858,72 @@ async function executeToolCalls(
 	// setMaxListeners(100, signal) is already called once in runLoop — no need
 	// to raise it per-batch (and doing so with a small batch would *lower* it).
 
-	const settled = new Map<string, ToolCallResult>();
-	const toolPromises = prepared.map(async (tc): Promise<ToolCallResult> => {
-		const runOne = async (): Promise<ToolCallResult> => {
-			if (signal?.aborted) {
-				return abortedToolResult(tc);
+	const runOne = async (tc: (typeof prepared)[number]): Promise<ToolCallResult> => {
+		if (signal?.aborted) return abortedToolResult(tc);
+
+		// Truncated/malformed arguments — return an error so the model can retry.
+		if (tc.args === null) {
+			return {
+				id: tc.id,
+				name: tc.name,
+				result: {
+					content: "Tool call arguments were truncated or malformed (invalid JSON). Retry the tool call.",
+					isError: true,
+				},
+			};
+		}
+
+		if (doomBlocked.has(tc.id)) {
+			return {
+				id: tc.id,
+				name: tc.name,
+				result: {
+					content: `Doom loop detected: tool "${tc.name}" was called ${doomLoopThreshold} times consecutively with the same arguments. You MUST try a completely different approach. Do NOT call this tool with the same arguments again.`,
+					isError: true,
+				},
+			};
+		}
+
+		let result: ToolResult;
+		try {
+			result = await executeTool(tc.name, tc.args, signal, tc.id);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			result = { content: message, isError: true };
+		}
+
+		return { id: tc.id, name: tc.name, result };
+	};
+
+	const results: ToolCallResult[] = [];
+	let cursor = 0;
+	while (cursor < prepared.length) {
+		if (signal?.aborted) {
+			results.push(...prepared.slice(cursor).map(abortedToolResult));
+			break;
+		}
+		const group: typeof prepared = [prepared[cursor]!];
+		if (PARALLEL_SAFE_TOOL_NAMES.has(prepared[cursor]!.name)) {
+			while (
+				cursor + group.length < prepared.length &&
+				PARALLEL_SAFE_TOOL_NAMES.has(prepared[cursor + group.length]!.name)
+			) {
+				group.push(prepared[cursor + group.length]!);
 			}
-
-			// Truncated/malformed arguments — return an error so the model can retry.
-			if (tc.args === null) {
-				return {
-					id: tc.id,
-					name: tc.name,
-					result: {
-						content: "Tool call arguments were truncated or malformed (invalid JSON). Retry the tool call.",
-						isError: true,
-					},
-				};
-			}
-
-			if (doomBlocked.has(tc.id)) {
-				return {
-					id: tc.id,
-					name: tc.name,
-					result: {
-						content: `Doom loop detected: tool "${tc.name}" was called ${doomLoopThreshold} times consecutively with the same arguments. You MUST try a completely different approach. Do NOT call this tool with the same arguments again.`,
-						isError: true,
-					},
-				};
-			}
-
-			let result: ToolResult;
-			try {
-				result = await executeTool(tc.name, tc.args, signal, tc.id);
-			} catch (error) {
-				const message = error instanceof Error ? error.message : String(error);
-				result = { content: message, isError: true };
-			}
-
-			return { id: tc.id, name: tc.name, result };
-		};
-
-		const result = await runOne();
-		const normalized = { ...result, result: normalizeToolResultError(result.result) };
-		settled.set(tc.id, normalized);
-		return normalized;
-	});
-
-	// Abort must always end the turn: cooperating tools (bash/web/ssh) kill
-	// themselves on the signal and settle within a few hundred ms, but a tool
-	// that ignores it (a hung MCP server, a stalled remote transport) would
-	// otherwise keep Promise.all — and with it the whole turn — open
-	// indefinitely. Bound the wait: grace for the stragglers, then force the
-	// batch closed with ABORTED results for anything still running.
-	const results = await waitForToolBatch(toolPromises, prepared, settled, signal);
+		}
+		const groupSettled = new Map<string, ToolCallResult>();
+		const toolPromises = group.map(async (tc): Promise<ToolCallResult> => {
+			const result = await runOne(tc);
+			const normalized = { ...result, result: normalizeToolResultError(result.result) };
+			groupSettled.set(tc.id, normalized);
+			return normalized;
+		});
+		// Abort must always end the turn: cooperating tools settle quickly, while
+		// an uncooperative tool gets the same bounded grace period per group.
+		// biome-ignore lint/performance/noAwaitInLoops: mutation groups must remain ordered
+		results.push(...(await waitForToolBatch(toolPromises, group, groupSettled, signal)));
+		cursor += group.length;
+	}
 
 	for (const { id, name, result } of results) {
 		onEvent({ type: "tool_end", id, name, result, status: completedToolCallStatus(result.isError) });

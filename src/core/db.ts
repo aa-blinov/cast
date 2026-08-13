@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { runMigrations } from "./migrations.ts";
 
@@ -50,7 +50,11 @@ let instancePath: string | null = null;
  *  tests (and, in principle, a user) point at an isolated database instead
  *  of the real one, mirroring how the old file-based store used HOME. */
 function dbPath(): string {
-	if (process.env.CAST_SESSIONS_DB) return process.env.CAST_SESSIONS_DB;
+	const configuredPath = process.env.CAST_SESSIONS_DB;
+	if (configuredPath) {
+		if (configuredPath !== ":memory:") mkdirSync(dirname(configuredPath), { recursive: true });
+		return configuredPath;
+	}
 	const dir = join(homedir(), ".cast", "sessions");
 	if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 	return join(dir, "sessions.db");

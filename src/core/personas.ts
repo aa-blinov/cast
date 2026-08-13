@@ -76,7 +76,9 @@ export interface Persona {
 
 export const DEFAULT_PERSONA = "senior";
 
-export const globalPersonasDir = join(homedir(), ".cast", "personas");
+export function globalPersonasDir(): string {
+	return join(homedir(), ".cast", "personas");
+}
 
 const PROMPTS_DIR = promptsDir;
 

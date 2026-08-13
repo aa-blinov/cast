@@ -27,18 +27,21 @@
  *     read path — a missing or malformed file is the same as "no runner".
  */
 
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-const STATE_DIR = join(homedir(), ".cast", "sessions");
+function stateDir(): string {
+	return join(homedir(), ".cast", "sessions");
+}
 
 /** Ensure the parent directory exists before any write. Mirrors the pattern
  *  in core/db.ts's dbPath() — on a fresh machine the .cast/sessions directory
  *  may not exist yet, and a silent writeFileSync ENOENT here would mean the
  *  sentinel is never created, leaving the web UI stuck on "idle" forever. */
 function ensureDir(): void {
-	if (!existsSync(STATE_DIR)) mkdirSync(STATE_DIR, { recursive: true });
+	const dir = stateDir();
+	if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 }
 
 /** Past this age, even a live PID is treated as stale — protects against
@@ -66,7 +69,51 @@ export function isProcessAlive(pid: number): boolean {
 
 /** Path to the per-session sentinel file. Kept private to this module. */
 function statePath(sessionId: string): string {
-	return join(STATE_DIR, `.running-${sessionId}.json`);
+	return join(stateDir(), `.running-${sessionId}.json`);
+}
+
+function lockPath(sessionId: string): string {
+	return join(stateDir(), `.lock-${sessionId}.json`);
+}
+
+/** Atomically claims the right to start a session turn across processes. */
+export function acquireTurnRunner(sessionId: string, pid: number): boolean {
+	ensureDir();
+	const path = lockPath(sessionId);
+	for (let attempt = 0; attempt < 2; attempt++) {
+		try {
+			writeFileSync(path, JSON.stringify({ pid, startedAt: Date.now() }), { encoding: "utf-8", flag: "wx" });
+			return true;
+		} catch {
+			try {
+				const state = JSON.parse(readFileSync(path, "utf-8")) as TurnRunnerState;
+				const stale = !isProcessAlive(state.pid) || Date.now() - state.startedAt > STALE_THRESHOLD_MS;
+				if (!stale) return false;
+			} catch {
+				try {
+					if (Date.now() - statSync(path).mtimeMs <= STALE_THRESHOLD_MS) return false;
+				} catch {
+					continue;
+				}
+			}
+			try {
+				unlinkSync(path);
+			} catch {
+				return false;
+			}
+		}
+	}
+	return false;
+}
+
+/** Releases only the lock owned by this pid. */
+export function releaseTurnRunner(sessionId: string, pid: number): void {
+	try {
+		const state = JSON.parse(readFileSync(lockPath(sessionId), "utf-8")) as TurnRunnerState;
+		if (state.pid === pid) unlinkSync(lockPath(sessionId));
+	} catch {
+		/* ENOENT, EACCES, or malformed JSON — nothing to clean up */
+	}
 }
 
 /** Writes (or overwrites) the sentinel. Called by TUI at turn start.

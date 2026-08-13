@@ -1167,7 +1167,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// and this bridge's /steer command: steer into the running turn
 		// instead. The loop drains steeringQueue and broadcasts
 		// "steering_injected" itself, so every connected tab sees it land.
-		if (ws.status === "running") {
+		if (ws.status === "running" || ws.runner.isRunning) {
 			ws.runner.steeringQueue.enqueue({
 				role: "user",
 				content: buildUserContent(text, images),
@@ -1176,20 +1176,49 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			if (clientMessageId) ws.acceptedClientMessageIds.add(clientMessageId);
 			return;
 		}
-
+		// Claim synchronously before provider/session reconciliation can yield.
+		// A second browser tab must steer immediately instead of starting a
+		// second loop after the first async setup step completes.
+		const ac = new AbortController();
+		const lease = ws.runner.startRun(ac);
+		ws.status = "running";
+		ws.error = null;
+		ws.turnStartedAt = Date.now();
+		syncFsWatcher(ws);
+		broadcast(ws, { type: "status", status: "running", startedAt: ws.turnStartedAt });
+		broadcastSessionUpdate(ws);
+		let chk: ReturnType<typeof createCheckpoint>;
+		const failSetup = (error: unknown): void => {
+			ws.status = "error";
+			ws.error = error instanceof Error ? error.message : String(error);
+			ws.runner.abort();
+			ws.runner.endRun(lease);
+			ws.activeStream = undefined;
+			ws.turnStartedAt = undefined;
+			syncFsWatcher(ws);
+			broadcast(ws, { type: "error", message: ws.error });
+			broadcast(ws, { type: "status", status: "error" });
+			broadcastSessionUpdate(ws);
+		};
 		// A provider/model switch made outside this daemon (the TUI process, or
 		// a manual settings.json edit) must take effect on this turn — otherwise
 		// the daemon keeps calling the endpoint it started on with the model the
 		// user picked elsewhere (400 / 429 until a restart). Reconcile the
 		// session's model id against the new provider when the endpoint moved.
-		const { endpointChanged } = syncActiveProviderFromSettings();
-		const sessionModelChanged = syncExternalSessionModel(ws);
-		if (sessionModelChanged && !endpointChanged) {
-			const refreshed = await fetchModels(config);
-			if (refreshed.ok && refreshed.models) setModelsCache(refreshed.models);
+		let endpointChanged: boolean;
+		try {
+			({ endpointChanged } = syncActiveProviderFromSettings());
+			const sessionModelChanged = syncExternalSessionModel(ws);
+			if (sessionModelChanged && !endpointChanged) {
+				const refreshed = await fetchModels(config);
+				if (refreshed.ok && refreshed.models) setModelsCache(refreshed.models);
+			}
+			if (sessionModelChanged) reasoningMeta = modelInfoFor(ws.session.model)?.reasoning;
+			if (endpointChanged) await reconcileSessionModel(ws);
+		} catch (error) {
+			failSetup(error);
+			return;
 		}
-		if (sessionModelChanged) reasoningMeta = modelInfoFor(ws.session.model)?.reasoning;
-		if (endpointChanged) await reconcileSessionModel(ws);
 
 		const sessionCwd = ws.session.cwd ?? cwd;
 		// Persona files can be created or edited by the agent itself. Re-scan this
@@ -1197,30 +1226,25 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// the previous turn is effective without reconnecting MCP or restarting the
 		// daemon. The active turn keeps the old tool set; only this next turn changes.
 		const turnPersonas = resolvePersonasForCwd(sessionCwd, projectTrusted).personas;
-		// Claim the turn before awaiting hooks. Otherwise two requests can both
-		// observe "idle" while the first UserPromptSubmit hook is pending and
-		// start concurrent loops against the same mutable session history.
-		const ac = new AbortController();
-		ws.status = "running";
-		ws.error = null;
-		ws.turnStartedAt = Date.now();
-		ws.runner.startRun(ac);
-		syncFsWatcher(ws);
-		broadcast(ws, { type: "status", status: "running", startedAt: ws.turnStartedAt });
-		broadcastSessionUpdate(ws);
 		const submitHooks = resolveHooksForCwd(sessionCwd, projectTrusted);
 		if (hasHooks(submitHooks)) {
-			const submitResult = await runHooksForEvent(submitHooks, {
-				event: "UserPromptSubmit",
-				cwd: sessionCwd,
-				sessionId: ws.session.id,
-				payload: { prompt: text },
-			});
+			let submitResult: Awaited<ReturnType<typeof runHooksForEvent>>;
+			try {
+				submitResult = await runHooksForEvent(submitHooks, {
+					event: "UserPromptSubmit",
+					cwd: sessionCwd,
+					sessionId: ws.session.id,
+					payload: { prompt: text },
+				});
+			} catch (error) {
+				failSetup(error);
+				return;
+			}
 			if (submitResult.blocked) {
 				ws.status = "idle";
 				ws.turnStartedAt = undefined;
 				ws.runner.abort();
-				ws.runner.endRun();
+				ws.runner.endRun(lease);
 				syncFsWatcher(ws);
 				broadcast(ws, { type: "status", status: "idle" });
 				broadcastSessionUpdate(ws);
@@ -1284,7 +1308,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 
 		// Workspace checkpoint for /undo — after saveSession above so the
 		// session row already exists (session_checkpoints has an FK to it).
-		const chk = createCheckpoint(sessionCwd);
+		chk = createCheckpoint(sessionCwd);
 		if (!ws.session.checkpoints) ws.session.checkpoints = [];
 		ws.session.checkpoints.push(chk);
 		// Persist alongside the in-memory array (session.checkpoints isn't in
@@ -1516,7 +1540,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 
 				ws.status = "idle";
 				ws.activeStream = undefined;
-				ws.runner.endRun();
+				ws.runner.endRun(lease);
 				syncFsWatcher(ws);
 				if (ws.lastTurn) ws.lastTurn.totalMs = Date.now() - turnStart;
 				// Persisted per-turn (unlike ws.lastTurn above, which is the same
@@ -1565,7 +1589,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			.catch((err: unknown) => {
 				ws.status = "error";
 				ws.error = err instanceof Error ? err.message : String(err);
-				ws.runner.endRun();
+				ws.runner.endRun(lease);
 				ws.activeStream = undefined;
 				saveSession(ws.session);
 				ws.turnStartedAt = undefined;

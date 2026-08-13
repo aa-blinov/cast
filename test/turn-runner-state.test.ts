@@ -12,6 +12,8 @@ let markTurnRunner!: typeof import("../src/core/turn-runner-state.ts").markTurnR
 let clearTurnRunner!: typeof import("../src/core/turn-runner-state.ts").clearTurnRunner;
 let effectiveStatusFromFile!: typeof import("../src/core/turn-runner-state.ts").effectiveStatusFromFile;
 let isProcessAlive!: typeof import("../src/core/turn-runner-state.ts").isProcessAlive;
+let acquireTurnRunner!: typeof import("../src/core/turn-runner-state.ts").acquireTurnRunner;
+let releaseTurnRunner!: typeof import("../src/core/turn-runner-state.ts").releaseTurnRunner;
 
 beforeEach(async () => {
 	realHome = process.env.HOME;
@@ -22,7 +24,8 @@ beforeEach(async () => {
 	// the temp HOME so the module writes where these tests read.
 	vi.resetModules();
 	const mod = await import("../src/core/turn-runner-state.ts");
-	({ markTurnRunner, clearTurnRunner, effectiveStatusFromFile, isProcessAlive } = mod);
+	({ markTurnRunner, clearTurnRunner, effectiveStatusFromFile, isProcessAlive, acquireTurnRunner, releaseTurnRunner } =
+		mod);
 });
 afterEach(() => {
 	process.env.HOME = realHome;
@@ -113,6 +116,17 @@ describe("turn-runner-state", () => {
 		} finally {
 			clearTurnRunner(TEST_ID, process.pid);
 		}
+	});
+
+	it("allows only one process to acquire a session turn lock", () => {
+		expect(acquireTurnRunner(TEST_ID, process.pid)).toBe(true);
+		try {
+			expect(acquireTurnRunner(TEST_ID, process.pid)).toBe(false);
+		} finally {
+			releaseTurnRunner(TEST_ID, process.pid);
+		}
+		expect(acquireTurnRunner(TEST_ID, process.pid)).toBe(true);
+		releaseTurnRunner(TEST_ID, process.pid);
 	});
 });
 
