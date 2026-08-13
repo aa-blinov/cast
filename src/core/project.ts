@@ -107,7 +107,7 @@ function projectMcpPath(targetCwd: string): string | undefined {
 
 function projectPersonasDir(targetCwd: string): string | undefined {
 	const dir = join(targetCwd, ".cast", "personas");
-	return dir !== globalPersonasDir ? dir : undefined;
+	return dir !== globalPersonasDir() ? dir : undefined;
 }
 
 /** True if `<cwd>/.cast/personas/` exists and contains at least one .md file. */
@@ -315,7 +315,7 @@ export async function resolveMcpForCwd(
 /** Assemble the full system prompt from persona + project suffixes + cwd/date. */
 export function personaOptionsForCwd(cwd: string, trusted: boolean, includeGlobal = true): LoadPersonasOptions {
 	return {
-		globalDir: includeGlobal ? globalPersonasDir : undefined,
+		globalDir: includeGlobal ? globalPersonasDir() : undefined,
 		projectDir: trusted ? projectPersonasDir(cwd) : undefined,
 	};
 }

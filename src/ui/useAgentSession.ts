@@ -885,12 +885,31 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				runner.steeringQueue.enqueue({ role: "user", content: text });
 				return;
 			}
-			setError(null);
+			const ac = new AbortController();
+			acRef.current = ac;
+			const lease = runner.startRun(ac);
+			let chk: ReturnType<typeof createCheckpoint>;
 			let activeSystemPrompt = systemPrompt;
 			let activePersonas = personas;
 			let activePersonaName = currentPersona;
+			let turnHooks: ReturnType<typeof resolveHooksForCwd>;
+			const failSetup = (error: unknown): void => {
+				ac.abort(error instanceof Error ? error.message : String(error));
+				runner.endRun(lease);
+				setError(error instanceof Error ? error.message : String(error));
+				const queued = runner.steeringQueue.drain();
+				if (queued.length > 0)
+					void submit(queued.map((message) => messageContentToText(message.content)).join("\n\n"));
+			};
+			setError(null);
 			if (refreshPersonasForTurn) {
-				const refreshed = await refreshPersonasForTurn();
+				let refreshed: Awaited<ReturnType<NonNullable<typeof refreshPersonasForTurn>>>;
+				try {
+					refreshed = await refreshPersonasForTurn();
+				} catch (error) {
+					failSetup(error);
+					return;
+				}
 				activeSystemPrompt = refreshed.systemPrompt;
 				activePersonas = refreshed.personas;
 				activePersonaName = refreshed.persona.name;
@@ -902,16 +921,24 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			// Re-resolved fresh (not the `hooks` prop captured at startup) so a
 			// /hooks enable|disable or an edited hooks.json takes effect on the
 			// very next message, matching the web bridge's per-turn resolve.
-			const turnHooks = resolveHooksForCwd(cwd, projectTrusted === true);
+			turnHooks = resolveHooksForCwd(cwd, projectTrusted === true);
 			if (hasHooks(turnHooks)) {
-				const submitResult = await runHooksForEvent(turnHooks, {
-					event: "UserPromptSubmit",
-					cwd,
-					sessionId: session.id,
-					payload: { prompt: text },
-				});
+				let submitResult: Awaited<ReturnType<typeof runHooksForEvent>>;
+				try {
+					submitResult = await runHooksForEvent(turnHooks, {
+						event: "UserPromptSubmit",
+						cwd,
+						sessionId: session.id,
+						payload: { prompt: text },
+					});
+				} catch (error) {
+					failSetup(error);
+					return;
+				}
 				if (submitResult.blocked) {
 					setError(`Prompt blocked by hook: ${submitResult.reason ?? "no reason given"}`);
+					ac.abort("Prompt blocked by hook");
+					runner.endRun(lease);
 					return;
 				}
 				if (submitResult.reason) text = `${text}\n\n<hook-context>${submitResult.reason}</hook-context>`;
@@ -921,7 +948,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			// (session_checkpoints has an FK to sessions) — the first turn of a
 			// fresh session has no row yet otherwise.
 			saveSession(session);
-			const chk = createCheckpoint(cwd);
+			chk = createCheckpoint(cwd);
 			if (!session.checkpoints) session.checkpoints = [];
 			session.checkpoints.push(chk);
 			// Persist alongside the in-memory array (session.checkpoints isn't in
@@ -951,11 +978,6 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			// higher index, which is exactly the "my message vanished but the
 			// reply appeared" bug this fixes.
 			setMessages((msgs) => [...msgs, { role: "user", content: messageContentToText(userContent) }]);
-
-			const ac = new AbortController();
-			acRef.current = ac;
-			runner.startRun(ac);
-
 			const onSigint = () => {
 				runner.abort();
 			};
@@ -1275,7 +1297,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				setStatus("idle");
 				process.off("SIGINT", onSigint);
 				process.off("uncaughtException", onUncaught);
-				runner.endRun();
+				runner.endRun(lease);
 				acRef.current = null;
 				saveSession(session);
 

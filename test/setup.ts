@@ -1,15 +1,31 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterAll } from "vitest";
+import { afterEach, beforeEach } from "vitest";
+import { resetDbConnectionForTests } from "../src/core/db.ts";
+import {
+	applyTestEnvironment,
+	createTestEnvironment,
+	destroyTestEnvironment,
+	type TestEnvironment,
+} from "./helpers/test-environment.ts";
 
-// Keep tests from reading or mutating the developer's real ~/.cast. Individual
-// tests may temporarily point HOME at a narrower fixture and restore this one.
-const originalHome = process.env.HOME;
-const testHome = mkdtempSync(join(tmpdir(), "cast-vitest-home-"));
-process.env.HOME = testHome;
+const originalEnvironment = {
+	HOME: process.env.HOME,
+	CAST_CWD: process.env.CAST_CWD,
+	CAST_SESSIONS_DB: process.env.CAST_SESSIONS_DB,
+};
+let testEnvironment: TestEnvironment | undefined;
 
-afterAll(() => {
-	process.env.HOME = originalHome;
-	rmSync(testHome, { recursive: true, force: true });
+beforeEach(() => {
+	testEnvironment = createTestEnvironment();
+	applyTestEnvironment(testEnvironment);
+	resetDbConnectionForTests();
+});
+
+afterEach(() => {
+	resetDbConnectionForTests();
+	if (testEnvironment) destroyTestEnvironment(testEnvironment);
+	testEnvironment = undefined;
+	for (const [key, value] of Object.entries(originalEnvironment)) {
+		if (value === undefined) delete process.env[key];
+		else process.env[key] = value;
+	}
 });

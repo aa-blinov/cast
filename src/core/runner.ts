@@ -15,15 +15,21 @@ export interface AgentRunner {
 	abort: (reason?: string) => void;
 	/** Promise that resolves when the current run finishes. */
 	waitForIdle: () => Promise<void>;
-	/** Mark a run as started; called by runPrompt. */
-	startRun: (ac: AbortController) => void;
-	/** Mark a run as finished; called by runPrompt. */
-	endRun: () => void;
+	/** Opaque ownership token returned for the active run. */
+	startRun: (ac: AbortController) => AgentRunLease;
+	/** Mark a run as finished. A stale run cannot finish a newer run. */
+	endRun: (lease: AgentRunLease) => void;
+}
+
+export interface AgentRunLease {
+	readonly id: number;
 }
 
 export function createAgentRunner(): AgentRunner {
 	let currentAbort: AbortController | null = null;
-	let idleResolve: (() => void) | null = null;
+	let currentLease: AgentRunLease | null = null;
+	let nextRunId = 0;
+	const idleWaiters = new Set<() => void>();
 
 	const runner: AgentRunner = {
 		steeringQueue: new MessageQueue(),
@@ -42,21 +48,25 @@ export function createAgentRunner(): AgentRunner {
 		waitForIdle() {
 			if (!runner.isRunning) return Promise.resolve();
 			return new Promise<void>((resolve) => {
-				idleResolve = resolve;
+				idleWaiters.add(resolve);
 			});
 		},
 
 		startRun(ac: AbortController) {
+			if (runner.isRunning) throw new Error("Agent run already active");
+			const lease = Object.freeze({ id: ++nextRunId });
 			currentAbort = ac;
+			currentLease = lease;
 			runner.isRunning = true;
+			return lease;
 		},
-		endRun() {
+		endRun(lease) {
+			if (currentLease?.id !== lease.id) return;
 			runner.isRunning = false;
 			currentAbort = null;
-			if (idleResolve) {
-				idleResolve();
-				idleResolve = null;
-			}
+			currentLease = null;
+			for (const resolve of idleWaiters) resolve();
+			idleWaiters.clear();
 		},
 	};
 

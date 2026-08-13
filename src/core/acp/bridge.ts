@@ -487,7 +487,7 @@ async function runPromptInner(
 	appendMessage(state, promptMessage as Parameters<typeof appendMessage>[1]);
 	saveSession(state);
 	const ac = new AbortController();
-	runner.startRun(ac);
+	const lease = runner.startRun(ac);
 	try {
 		const finalMessages = await runAgentLoop(state.messages, {
 			config: startup.config,
@@ -529,7 +529,7 @@ async function runPromptInner(
 		state.messages = finalMessages;
 		saveSession(state);
 	} finally {
-		runner.endRun();
+		runner.endRun(lease);
 	}
 }
 
