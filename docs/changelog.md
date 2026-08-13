@@ -2,6 +2,13 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.15.0
+
+### Added
+
+- **The GitHub Pages landing page is now a Cast workspace overview.** It presents the session flow, personas, capabilities, installation commands, and documentation in a responsive desktop/mobile layout.
+- **Documentation code blocks now have build-time syntax highlighting.** Language labels, readable dark-theme tokens, and horizontal scrolling make shell, JSON, Markdown, and other examples easier to scan on any screen.
+
 ## 0.14.0
 
 ### Added

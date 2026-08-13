@@ -38,7 +38,7 @@ jobs:
           node-version: "20"
 
       - name: Install marked
-        run: npm install --ignore-scripts marked
+        run: npm install --ignore-scripts marked highlight.js
 
       - name: Build site
         run: node --import tsx scripts/build-site.mjs
