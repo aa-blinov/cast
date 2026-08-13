@@ -18,7 +18,7 @@ const STABLE_API_V1_ROUTES: StableRoute[] = [
 	{
 		method: "GET",
 		legacyPath:
-			/^\/api\/(personas|git-info|config|commands|themes|models|models\/cached|skill-content|plugin-content|suggest)$/,
+			/^\/api\/(personas|persona-content|git-info|config|commands|themes|models|models\/cached|skill-content|plugin-content|suggest)$/,
 	},
 	{ method: "POST", legacyPath: /^\/api\/(settings\/command|ssh\/key|ssh\/add|provider\/verify)$/ },
 	{ method: "GET", legacyPath: /^\/api\/settings\/(appearance|reasoning-options)$/ },
@@ -112,6 +112,12 @@ const additionalApiV1Paths: OpenApiObject = {
 		get: {
 			summary: "Read a skill's content",
 			responses: { "200": jsonResponse("Skill content", { type: "object" }) },
+		},
+	},
+	"/api/v1/persona-content": {
+		get: {
+			summary: "Read a persona's content",
+			responses: { "200": jsonResponse("Persona content", { type: "object" }) },
 		},
 	},
 	"/api/v1/plugin-content": {
