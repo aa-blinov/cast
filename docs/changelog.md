@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.14.0
+
+### Added
+
+- **Settings now has a Personas browser.** Personas are grouped by source, with the existing info popover for short descriptions and the book action for reading the full persona prompt.
+
 ## 0.13.37
 
 ### Fixed
