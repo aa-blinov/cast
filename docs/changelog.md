@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.15.4
+
+### Fixed
+
+- **The landing page removes redundant explanatory chrome.** Install commands now have accessible copy buttons with the Web UI's project icon style, and the footer is reduced to quiet GitHub and MIT License links.
+
 ## 0.15.3
 
 ### Fixed

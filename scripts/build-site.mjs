@@ -646,9 +646,6 @@ a:hover { color: #c084fc; text-decoration: none; }
 .workspace-actions a { display: inline-flex; align-items: center; gap: 8px; }
 .workspace-actions .btn-primary { padding: 12px 18px; }
 .workspace-actions .btn-secondary { padding: 11px 17px; }
-.workspace-note { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font: .75rem var(--font-mono); }
-.workspace-note .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 12px rgba(45, 212, 191, .8); }
-.workspace-connected { color: var(--teal); font: 600 .65rem var(--font-mono); }
 .workspace-section { border-top: 1px solid var(--border); padding: 62px 0; }
 .workspace-section-heading { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
 .workspace-section-heading h2 { margin: 0; font-size: 1.55rem; letter-spacing: -.025em; }
@@ -664,11 +661,23 @@ a:hover { color: #c084fc; text-decoration: none; }
 .workspace-card-arrow { display: block; margin-top: 16px; color: var(--purple); font: .72rem var(--font-mono); }
 .workspace-install { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; min-width: 0; }
 .workspace-install .install-block { max-width: none; min-width: 0; margin: 0; padding: 16px; overflow: hidden; }
+.workspace-code { position: relative; min-width: 0; padding-right: 34px; }
 .workspace-install .install-block code { display: block; min-width: 0; overflow-x: auto; white-space: nowrap; }
+.workspace-copy-btn {
+	position: absolute; top: -4px; right: 0; display: flex; align-items: center; justify-content: center;
+	width: 26px; height: 26px; padding: 0; background: var(--bg-hover); border: 1px solid var(--border);
+	border-radius: var(--radius-sm); color: var(--text-muted); cursor: pointer;
+	transition: color .1s ease, border-color .1s ease, background .1s ease;
+}
+.workspace-copy-btn svg { width: 14px; height: 14px; }
+.workspace-copy-btn:hover, .workspace-copy-btn:focus-visible { color: var(--text); border-color: var(--text-muted); outline: none; }
+.workspace-copy-btn.copied { color: var(--teal); border-color: var(--teal); }
 .workspace-docs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .workspace-docs a { color: var(--text-dim); background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; padding: 13px 14px; font-size: .8rem; transition: border-color .15s, color .15s; }
 .workspace-docs a:hover { color: var(--purple); border-color: var(--border-active); }
-.workspace-footer { padding-top: 20px; color: var(--text-muted); font: .7rem var(--font-mono); text-align: center; }
+.workspace-footer { display: flex; align-items: center; justify-content: center; gap: 10px; padding-top: 20px; color: var(--text-muted); font: .7rem var(--font-mono); text-align: center; }
+.workspace-footer a { color: var(--text-muted); transition: color .15s ease; }
+.workspace-footer a:hover { color: var(--purple); }
 @media (max-width: 900px) {
 	.workspace-hero { grid-template-columns: 1fr; gap: 34px; min-height: 0; padding: 24px 0 52px; }
 	.workspace-title { max-width: 680px; }
@@ -876,6 +885,9 @@ const LEGACY_LANDING_HTML = `<!DOCTYPE html>
 </body>
 </html>`;
 
+const LANDING_COPY_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75"/></svg>';
+const LANDING_CHECK_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4.5 12.75 6 6 9-13.5"/></svg>';
+
 const LANDING_HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -906,7 +918,6 @@ const LANDING_HTML = `<!DOCTYPE html>
 					<a href="getting-started.html" class="btn-primary">Open the workspace <span aria-hidden="true">→</span></a>
 					<a href="personas.html" class="btn-secondary">Browse personas</a>
 				</div>
-				<div class="workspace-note"><span class="dot" aria-hidden="true"></span> Same repository. Same tools. Different judgment.</div>
 			</div>
 
 			<div class="workspace-ui" aria-label="Cast Web UI preview">
@@ -945,7 +956,7 @@ const LANDING_HTML = `<!DOCTYPE html>
 		</section>
 
 		<section class="workspace-section" aria-labelledby="start-title">
-			<div class="workspace-section-heading"><h2 id="start-title">Start where the work is</h2><p>One repo, one session, a role that matches the job in front of you.</p></div>
+			<div class="workspace-section-heading"><h2 id="start-title">Start where the work is</h2></div>
 			<div class="workspace-grid">
 				<a class="workspace-card workspace-card-link" href="getting-started.html">
 					<span class="workspace-card-tag">01 / setup</span><h3>Connect your model</h3><p>Install Cast, point it at OpenRouter, Ollama, vLLM, or any OpenAI-compatible endpoint, and start in your repository.</p><span class="workspace-card-arrow">Read the quick start →</span>
@@ -955,19 +966,19 @@ const LANDING_HTML = `<!DOCTYPE html>
 		</section>
 
 		<section class="workspace-section" aria-labelledby="install-title">
-			<div class="workspace-section-heading"><h2 id="install-title">Install Cast</h2><p>Self-contained bundle for macOS, Linux, and Windows. Works with OpenAI-compatible APIs.</p></div>
+			<div class="workspace-section-heading"><h2 id="install-title">Install Cast</h2></div>
 			<div class="workspace-install">
-				<div class="install-block"><div class="label">macOS / Linux</div><code>curl -fsSL https://aa-blinov.github.io/cast/install | bash</code></div>
-				<div class="install-block"><div class="label">Windows / PowerShell</div><code>irm https://aa-blinov.github.io/cast/install.ps1 | iex</code></div>
+				<div class="install-block"><div class="label">macOS / Linux</div><div class="workspace-code"><code>curl -fsSL https://aa-blinov.github.io/cast/install | bash</code><button class="workspace-copy-btn" type="button" aria-label="Copy macOS and Linux install command" title="Copy command">${LANDING_COPY_ICON_SVG}</button></div></div>
+				<div class="install-block"><div class="label">Windows / PowerShell</div><div class="workspace-code"><code>irm https://aa-blinov.github.io/cast/install.ps1 | iex</code><button class="workspace-copy-btn" type="button" aria-label="Copy Windows install command" title="Copy command">${LANDING_COPY_ICON_SVG}</button></div></div>
 			</div>
 		</section>
 
 		<section class="workspace-section" aria-labelledby="docs-title">
-			<div class="workspace-section-heading"><h2 id="docs-title">Documentation</h2><p>The whole surface area, organized for quick lookup.</p></div>
+			<div class="workspace-section-heading"><h2 id="docs-title">Documentation</h2></div>
 			<nav class="workspace-docs" aria-label="Documentation">
 				${NAV_ORDER.slice(0, 12).map((item) => `<a href="${item.file.replace(".md", ".html")}">${item.label}</a>`).join("\n\t\t\t\t")}
 			</nav>
-			<div class="workspace-footer">cast is open source under the MIT License</div>
+			<div class="workspace-footer"><a href="https://github.com/aa-blinov/cast">GitHub</a><span aria-hidden="true">·</span><a href="https://github.com/aa-blinov/cast/blob/master/LICENSE">MIT License</a></div>
 		</section>
 	</main>
 </div>
@@ -983,6 +994,35 @@ document.querySelectorAll('[data-persona-switch]').forEach((button) => {
 		document.querySelectorAll('[data-persona-panel]').forEach((panel) => {
 			panel.hidden = panel.dataset.personaPanel !== persona;
 		});
+	});
+});
+
+document.querySelectorAll('.workspace-copy-btn').forEach((button) => {
+	const label = button.getAttribute('aria-label') || 'Copy command';
+	button.addEventListener('click', async () => {
+		const code = button.closest('.install-block')?.querySelector('code')?.textContent ?? '';
+		try {
+			if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(code);
+			else {
+				const textarea = document.createElement('textarea');
+				textarea.value = code;
+				textarea.style.cssText = 'position:fixed;opacity:0';
+				document.body.appendChild(textarea);
+				textarea.select();
+				document.execCommand('copy');
+				textarea.remove();
+			}
+			button.classList.add('copied');
+			button.innerHTML = '${LANDING_CHECK_ICON_SVG}';
+			button.title = 'Copied';
+			button.setAttribute('aria-label', 'Copied');
+			window.setTimeout(() => {
+				button.classList.remove('copied');
+				button.innerHTML = '${LANDING_COPY_ICON_SVG}';
+				button.title = 'Copy command';
+				button.setAttribute('aria-label', label);
+			}, 1200);
+		} catch {}
 	});
 });
 </script>

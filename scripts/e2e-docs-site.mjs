@@ -66,6 +66,7 @@ try {
 
 	const desktop = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
 	desktop.setDefaultTimeout(15_000);
+	await desktop.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: "http://127.0.0.1:" + port });
 	await desktop.goto(`http://127.0.0.1:${port}/getting-started.html`, { waitUntil: "networkidle" });
 	const codeCheck = await desktop.locator(".content pre.code-block").first().evaluate((pre) => {
 		const code = pre.querySelector("code");
@@ -100,11 +101,22 @@ try {
 	assert.equal(await desktop.locator(".workspace-ui input, .workspace-ui textarea").count(), 0, "preview must not show an empty input");
 	assert.equal(await desktop.locator(".workspace-role").count(), 0, "landing must not repeat personas in a lower card");
 	assert.equal(await desktop.locator(".workspace-ui-role").count(), 0, "preview must not repeat the active persona near build");
+	assert.equal(await desktop.locator(".workspace-copy-btn").count(), 2, "install commands must have copy buttons");
+	assert.equal(await desktop.locator(".workspace-copy-btn svg").count(), 2, "copy buttons must use project-style SVG icons");
+	await desktop.getByRole("button", { name: "Copy macOS and Linux install command" }).click();
+	assert.equal(await desktop.getByRole("button", { name: "Copied" }).count(), 1, "copy button must acknowledge a successful copy");
 	const previewText = await desktop.locator(".workspace-ui").innerText();
 	assert(!previewText.includes("ready"), "preview must not show the ready label");
 	assert(!previewText.includes("session · auth-service"), "preview must not show the session subtitle");
 	assert(!previewText.includes("cast ·"), "preview must not prefix persona labels with cast");
 	assert(!previewText.includes("cast / agent workspace"), "landing must not show the workspace kicker");
+	const landingText = await desktop.locator(".workspace-shell").innerText();
+	assert(!landingText.includes("Same repository. Same tools. Different judgment."), "landing must not show the redundant status line");
+	assert(!landingText.includes("One repo, one session, a role that matches the job in front of you."), "landing must not show the redundant section subtitle");
+	assert(!landingText.includes("Self-contained bundle for macOS, Linux, and Windows. Works with OpenAI-compatible APIs."), "landing must not show the redundant install subtitle");
+	assert(!landingText.includes("The whole surface area, organized for quick lookup."), "landing must not show the redundant docs subtitle");
+	assert(!landingText.includes("cast is open source under the MIT License"), "landing must not show the old footer sentence");
+	assert(landingText.includes("MIT License"), "landing footer must retain a quiet MIT License link");
 	const previewHeaderText = await desktop.locator(".workspace-ui-header").innerText();
 	assert(!previewHeaderText.includes("~/projects/auth-service"), "preview top bar must not show the repository path");
 	assert(!previewHeaderText.includes("cast"), "preview top bar must not show the product name");
