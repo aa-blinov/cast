@@ -53,4 +53,31 @@ describe("web message submission", () => {
 
 		expect(selectSession).toHaveBeenCalledWith("session-1", { push: false });
 	});
+
+	it("does not send a draft message when its deferred attachment upload fails", async () => {
+		vi.mocked(api).mockClear();
+		vi.mocked(api).mockRejectedValueOnce(new Error("upload failed"));
+		const showToast = vi.fn();
+		const context = {
+			planRefineArmedRef: { current: false },
+			session: { id: "session-1", messages: [] },
+			draftVersionRef: { current: 0 },
+			activeId: "session-1",
+			setSession: vi.fn(),
+			pendingOutgoingRef: { current: new Map() },
+			setInputsRefreshNonce: vi.fn(),
+			showToast,
+		};
+
+		await submitMessage(
+			"attach this\n\n<system-reminder>\nThe user attached the following file(s) to this message:\n- big.zip: (pending — will be uploaded on send)\n</system-reminder>",
+			undefined,
+			[{ name: "big.zip", dataUrl: "data:application/zip;base64,AAAA" }],
+			context,
+		);
+
+		expect(showToast).toHaveBeenCalledWith("Failed to upload big.zip: upload failed", "error");
+		expect(vi.mocked(api)).toHaveBeenCalledTimes(1);
+		expect(vi.mocked(api)).not.toHaveBeenCalledWith("POST", "/api/sessions/session-1/chat", expect.anything());
+	});
 });

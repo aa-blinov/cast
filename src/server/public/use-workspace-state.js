@@ -19,11 +19,10 @@ export function useWorkspaceState() {
 			return "changes";
 		}
 	});
-	// Bumped on every tool_end while the diff panel is open, same trigger as
-	// loadDiff() below — the Files tab's tree is fetched once per expanded
-	// folder and otherwise never refetched on its own, so a write/edit that
-	// landed while you had it open wouldn't show up until you manually
-	// collapsed and reopened that folder.
+	// Bumped on every tool_end — the Files tab's tree is fetched once per
+	// expanded folder and otherwise never refetched on its own, so a write/edit
+	// that landed while the panel was closed must still invalidate its mounted
+	// tree before the user opens it again.
 	const [fsRefreshNonce, setFsRefreshNonce] = useState(0);
 	const [inputsRefreshNonce, setInputsRefreshNonce] = useState(0);
 	useEffect(() => {

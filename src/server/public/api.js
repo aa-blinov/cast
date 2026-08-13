@@ -4,7 +4,7 @@
  * inventing slightly different fetch behavior.
  */
 export async function api(method, path, body) {
-	const opts = { method, headers: {} };
+	const opts = { method, headers: {}, cache: "no-store" };
 	if (body !== undefined) {
 		opts.headers["Content-Type"] = "application/json";
 		opts.body = JSON.stringify(body);

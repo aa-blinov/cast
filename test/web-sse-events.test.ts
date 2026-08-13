@@ -20,6 +20,7 @@ function createContext() {
 		takeStreamingNow: vi.fn(() => []),
 		diffOpenRef: { current: false },
 		queueDiffRefresh: vi.fn(),
+		setFsRefreshNonce: vi.fn(),
 		addNotice: vi.fn(),
 		showToast: vi.fn(),
 		api: vi.fn(),
@@ -62,6 +63,23 @@ describe("web SSE events", () => {
 		expect(updater({ messages: [] })).toEqual({
 			messages: [{ role: "warning", content: "Provider changed — switched to hy3" }],
 		});
+	});
+
+	it("invalidates the Files tree even when the diff panel is closed", () => {
+		const state = createContext();
+		handleSseEvent(
+			{
+				type: "tool_end",
+				id: "tool-1",
+				name: "write",
+				status: "completed",
+				result: { content: "created file", isError: false },
+			},
+			state,
+		);
+
+		expect(state.setFsRefreshNonce).toHaveBeenCalledOnce();
+		expect(state.queueDiffRefresh).not.toHaveBeenCalled();
 	});
 
 	it("surfaces a retry as a warning row", () => {

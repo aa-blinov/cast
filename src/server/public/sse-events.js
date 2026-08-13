@@ -163,7 +163,11 @@ export function handleSseEvent(event, context) {
 				result: event.result?.content ?? "",
 				...(event.result?.imageDataUrl ? { images: [event.result.imageDataUrl] } : {}),
 			});
+			// The Files component stays mounted when the panel is visually closed.
+			// Keep its cached directories invalidated in that state too; otherwise
+			// opening the panel later reveals the pre-turn snapshot.
 			if (diffOpenRef.current) queueDiffRefresh();
+			else setFsRefreshNonce((n) => n + 1);
 			if (!event.result?.isError && event.name === "plan_done") {
 				const transition = { kind: "done", sessionId: streamSessionId };
 				pendingPlanSignalRef.current = transition;
