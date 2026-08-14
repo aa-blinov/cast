@@ -60,6 +60,15 @@ describe("addUsage subagent attribution", () => {
 		expect(s.usage.subagentTokens).toBe(200); // and tracked separately
 		expect(s.lastPromptTokens).toBe(100); // subagent prompt did NOT change context size
 	});
+
+	it("folds background usage into totals without changing the active context size", () => {
+		const s = createSession("gpt-4o", tmpdir());
+		s.lastPromptTokens = 100;
+		addUsage(s, mkUsage({ promptTokens: 999 }), { background: true });
+		expect(s.usage.totalTokens).toBe(150);
+		expect(s.usage.subagentTokens).toBe(0);
+		expect(s.lastPromptTokens).toBe(100);
+	});
 });
 
 // ============================================================================

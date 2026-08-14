@@ -141,6 +141,8 @@ export interface Settings {
 	 * preference survives restarts.
 	 */
 	showReasoning?: boolean;
+	/** Whether durable project memory is active across TUI and Web UI. */
+	memoryEnabled?: boolean;
 }
 
 // ============================================================================
@@ -214,6 +216,11 @@ function saveSettings(settings: Settings): void {
 export function updateSettings(partial: Partial<Settings>): void {
 	const current = loadSettings();
 	saveSettings({ ...current, ...partial });
+}
+
+/** Existing settings remain enabled; only an explicit false disables memory. */
+export function isMemoryEnabled(settings: Settings = loadSettings()): boolean {
+	return settings.memoryEnabled !== false;
 }
 
 /** true/false if this project's trust decision was already made, undefined if never asked. */

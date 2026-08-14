@@ -61,6 +61,7 @@ export function useSessionController({
 	setDefaultCwd,
 	setDefaultModel,
 	setQuickSessionPersona,
+	setMemoryEnabled,
 	setReconnectNonce,
 	setBackendUp,
 	applyTheme,
@@ -374,6 +375,7 @@ export function useSessionController({
 							setDefaultCwd(cfg.cwd ?? "");
 							setDefaultModel(cfg.model ?? "");
 							if (cfg.quickSessionPersona) setQuickSessionPersona(cfg.quickSessionPersona);
+							if (typeof cfg.memoryEnabled === "boolean") setMemoryEnabled(cfg.memoryEnabled);
 						}
 						if (!t) return;
 						setThemes(t);
@@ -416,6 +418,7 @@ export function useSessionController({
 		startDraft,
 		setDefaultCwd,
 		setQuickSessionPersona,
+		setMemoryEnabled,
 		setCommands,
 		setDefaultModel,
 		setPersonas,

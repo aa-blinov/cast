@@ -6,6 +6,7 @@ const html = htm.bind(h);
 export function DiffPanel({
 	InputsExplorer,
 	FileExplorer: FileExplorerModule,
+	MemoryExplorer: MemoryExplorerModule,
 	data,
 	activeFile,
 	onSelectFile,
@@ -14,6 +15,7 @@ export function DiffPanel({
 	activeId,
 	tab,
 	onTabChange,
+	memoryEnabled = true,
 	confirm,
 	fsRefreshNonce,
 	inputsRefreshNonce,
@@ -26,6 +28,7 @@ export function DiffPanel({
 			<div class="diff-tabs">
 				<button class="diff-tab${tab === "inputs" ? " active" : ""}" onClick=${() => onTabChange("inputs")}>Inputs</button>
 				<button class="diff-tab${tab === "fs" ? " active" : ""}" onClick=${() => onTabChange("fs")}>Files</button>
+				${memoryEnabled && html`<button class="diff-tab${tab === "memory" ? " active" : ""}" onClick=${() => onTabChange("memory")}>Memory</button>`}
 				<button class="diff-tab${tab === "changes" ? " active" : ""}" onClick=${() => onTabChange("changes")}>Changes</button>
 			</div>
 		</div>
@@ -75,6 +78,16 @@ export function DiffPanel({
 				<div class="diff-resize-handle" onPointerDown=${onResizeStart} />
 				${header}
 				<${FileExplorerModule} activeId=${activeId} confirm=${confirm} refreshNonce=${fsRefreshNonce} />
+			</aside>
+		`;
+	}
+
+	if (tab === "memory" && memoryEnabled) {
+		return html`
+			<aside class="diff-panel${openClass}">
+				<div class="diff-resize-handle" onPointerDown=${onResizeStart} />
+				${header}
+				<${MemoryExplorerModule} activeId=${activeId} />
 			</aside>
 		`;
 	}

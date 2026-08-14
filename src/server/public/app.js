@@ -16,6 +16,7 @@ import { FileExplorer as FileExplorerModule } from "./file-explorer.js";
 import { hotkeysHtml, modKey } from "./hotkeys.js";
 import { icons } from "./icons.js";
 import { InputsExplorer as InputsExplorerModule } from "./inputs-explorer.js";
+import { MemoryExplorer as MemoryExplorerModule } from "./memory-explorer.js";
 import { Message as MessageModule } from "./message.js";
 import { submitMessage as submitMessageRequest } from "./message-submit.js";
 import { useModalFocusTrap } from "./modal-focus.js";
@@ -28,6 +29,7 @@ import {
 	SettingsBash,
 	SettingsHooks,
 	SettingsMarketplace,
+	SettingsMemory,
 	SettingsMcp,
 	SettingsPlugins,
 	SettingsPersonas,
@@ -747,6 +749,8 @@ function App() {
 		setDefaultCwd,
 		quickSessionPersona,
 		setQuickSessionPersona,
+		memoryEnabled,
+		setMemoryEnabled,
 		selectedCwd,
 		setSelectedCwd,
 		dirPickerOpen,
@@ -763,6 +767,9 @@ function App() {
 		[setConfirmState],
 	);
 	const cwd = selectedCwd ?? defaultCwd ?? "";
+	useEffect(() => {
+		if (!memoryEnabled && diffTab === "memory") setDiffTab("changes");
+	}, [memoryEnabled, diffTab, setDiffTab]);
 
 	// Legacy per-browser "declutter" set from the old soft-close action (now
 	// replaced by the sidebar menu's real Delete) — kept so anyone with
@@ -943,6 +950,7 @@ function App() {
 			setDefaultCwd,
 			setDefaultModel,
 			setQuickSessionPersona,
+			setMemoryEnabled,
 			setReconnectNonce,
 			setBackendUp,
 			applyTheme,
@@ -1821,7 +1829,7 @@ function App() {
 				settingsOpen &&
 				html`
 				<${SettingsModalModule}
-					panels=${{ SettingsAppearance, SettingsModel, SettingsBash, SettingsWeb, SettingsPersonas, SettingsQuickMode, SettingsServer, SettingsHooks, SettingsMcp, SettingsSkills, SettingsPlugins, SettingsMarketplace, SettingsSkillssh, SettingsProvider, SettingsSsh }}
+					panels=${{ SettingsAppearance, SettingsModel, SettingsBash, SettingsWeb, SettingsMemory, SettingsPersonas, SettingsQuickMode, SettingsServer, SettingsHooks, SettingsMcp, SettingsSkills, SettingsPlugins, SettingsMarketplace, SettingsSkillssh, SettingsProvider, SettingsSsh }}
 					fontOptions=${FONT_OPTIONS}
 					fontScales=${FONT_SCALE_OPTIONS}
 					activeId=${activeId}
@@ -1845,6 +1853,7 @@ function App() {
 					confirm=${requestConfirm}
 					onReload=${() => refreshCommands(activeId)}
 					onModelChange=${setDefaultModel}
+					onMemoryChange=${setMemoryEnabled}
 					showReasoning=${showReasoning}
 					onToggleShowReasoning=${toggleShowReasoning}
 				/>
@@ -1992,7 +2001,7 @@ function App() {
 			     leave this unmounted entirely while still reserving its grid
 			     column on open, which read as content shifting into an empty
 			     void with no panel there to show for it. -->
-			<${DiffPanelModule} data=${diffData} activeFile=${diffFile} onSelectFile=${setDiffFile} onResizeStart=${startDiffResize} open=${diffOpen} activeId=${activeId} tab=${diffTab} onTabChange=${setDiffTab} confirm=${requestConfirm} fsRefreshNonce=${fsRefreshNonce} inputsRefreshNonce=${inputsRefreshNonce} bootstrapping=${bootstrapping} InputsExplorer=${InputsExplorerModule} FileExplorer=${FileExplorerModule} />
+			<${DiffPanelModule} data=${diffData} activeFile=${diffFile} onSelectFile=${setDiffFile} onResizeStart=${startDiffResize} open=${diffOpen} activeId=${activeId} tab=${diffTab} onTabChange=${setDiffTab} memoryEnabled=${memoryEnabled} confirm=${requestConfirm} fsRefreshNonce=${fsRefreshNonce} inputsRefreshNonce=${inputsRefreshNonce} bootstrapping=${bootstrapping} InputsExplorer=${InputsExplorerModule} FileExplorer=${FileExplorerModule} MemoryExplorer=${MemoryExplorerModule} />
 		</div>
 	`;
 }

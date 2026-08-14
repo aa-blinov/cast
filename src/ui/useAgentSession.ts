@@ -1040,6 +1040,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					subagentModelProvider: resolvedSubagentProvider,
 					cwd,
 					systemPrompt: activeSystemPrompt,
+					memory: { sessionId: session.id },
 					signal: ac.signal,
 					steeringQueue: runner.steeringQueue,
 					followUpQueue: runner.followUpQueue,
@@ -1223,11 +1224,11 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 								clearRetryOnNextChunk.current = true;
 								break;
 							case "usage": {
-								addUsage(session, event.usage, { subagent: event.subagent });
+								addUsage(session, event.usage, { subagent: event.subagent, background: event.background });
 								setUsage({ ...session.usage });
 								// A subagent's usage isn't a user-facing turn — don't let it
 								// overwrite the main agent's last-turn / tok-s readout.
-								if (event.subagent) break;
+								if (event.subagent || event.background) break;
 								const tokensPerSecond =
 									event.generationMs && event.generationMs > 0 && event.usage.completionTokens > 0
 										? event.usage.completionTokens / (event.generationMs / 1000)

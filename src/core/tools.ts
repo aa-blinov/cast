@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import type { AppConfig } from "./config.ts";
 import type { Tool } from "./llm.ts";
+import { execMemorySearch, MEMORY_TOOL_DESCRIPTION } from "./memory.ts";
 import type { PlanState } from "./plan.ts";
 import {
 	checkPlanFileGate,
@@ -11,6 +12,8 @@ import {
 	MAX_PLAN_CHARS,
 	maybeActivatePlanOnRead,
 } from "./plan.ts";
+import { promptsDir, readRequiredPrompt } from "./prompts.ts";
+import { execSessionHistorySearch, SESSION_HISTORY_TOOL_DESCRIPTION } from "./session-query.ts";
 import { loadSettings } from "./settings.ts";
 import type { SshHost } from "./ssh.ts";
 import { execBash } from "./tools/bash.ts";
@@ -36,6 +39,9 @@ export type { BashBackgroundDeps } from "./tools/bash-background.ts";
 export type { ConfirmBash, ConfirmWrite, ToolExecutor, ToolResult } from "./tools/shared.ts";
 export type { TaskExecutorDeps } from "./tools/task.ts";
 
+const MEMORY_DESCRIPTION = `${readRequiredPrompt(promptsDir, "memory-tool.md").trim()}\n\n${MEMORY_TOOL_DESCRIPTION}`;
+const SESSION_HISTORY_DESCRIPTION = `${readRequiredPrompt(promptsDir, "session-history-tool.md").trim()}\n\n${SESSION_HISTORY_TOOL_DESCRIPTION}`;
+
 // ============================================================================
 // Tool definitions (OpenAI function calling format)
 // ============================================================================
@@ -48,6 +54,7 @@ export function getToolDefinitions(
 	backgroundBashEnabled?: boolean,
 	includeTodoTool?: boolean,
 	includeSkillTool = true,
+	memoryEnabled = true,
 ): Tool[] {
 	const personaList =
 		personaNames && personaNames.length > 0
@@ -58,6 +65,22 @@ export function getToolDefinitions(
 	// /web-search-provider switch changes what's advertised on the very next
 	// turn, same as execWebSearch's own fresh read of the same setting.
 	const searchProviderName = loadSettings().searchProvider ?? "ddg";
+	const memoryTool: Tool = {
+		type: "function",
+		function: {
+			name: "memory",
+			description: MEMORY_DESCRIPTION,
+			parameters: {
+				type: "object",
+				properties: {
+					operation: { type: "string", enum: ["search"], description: "Memory operation" },
+					query: { type: "string", description: "One to three distinctive search terms" },
+					limit: { type: "number", description: "Maximum results, default 8" },
+				},
+				required: ["query"],
+			},
+		},
+	};
 
 	return [
 		{
@@ -98,6 +121,21 @@ export function getToolDefinitions(
 							: {}),
 					},
 					required: ["command"],
+				},
+			},
+		},
+		{
+			type: "function",
+			function: {
+				name: "session_history",
+				description: SESSION_HISTORY_DESCRIPTION,
+				parameters: {
+					type: "object",
+					properties: {
+						query: { type: "string", description: "One to three distinctive search terms" },
+						limit: { type: "number", description: "Maximum results, default 8" },
+					},
+					required: ["query"],
 				},
 			},
 		},
@@ -238,6 +276,7 @@ export function getToolDefinitions(
 				},
 			},
 		},
+		...(memoryEnabled ? [memoryTool] : []),
 		{
 			type: "function",
 			function: {
@@ -680,6 +719,10 @@ export function createToolExecutor(
 						return await execGlob(args, cwd, config, signal);
 					case "grep":
 						return await execGrep(args, cwd, config, signal);
+					case "memory":
+						return execMemorySearch(args, cwd);
+					case "session_history":
+						return execSessionHistorySearch(args, cwd);
 					case "ls":
 						return await execLs(args, cwd, config);
 					case "web_search":

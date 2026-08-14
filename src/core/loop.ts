@@ -21,6 +21,7 @@ import {
 	streamAndCollect,
 } from "./llm.ts";
 import { type McpToolHandle, mcpServerNameFromDescription } from "./mcp.ts";
+import { createProjectMemoryService, type MemoryService, scheduleProjectMemoryExtraction } from "./memory.ts";
 import {
 	collectOpenWorkSteps,
 	defaultOpenWorkGateConfig,
@@ -38,6 +39,7 @@ import {
 	markImageMessagesOutOfContext,
 	shouldCompact,
 } from "./session.ts";
+import { isMemoryEnabled } from "./settings.ts";
 import type { SshHost } from "./ssh.ts";
 import type { SubagentPrompt } from "./subagents.ts";
 import { formatTodoList, remainingTodoCount, type TodoItem, validateTodos } from "./todo.ts";
@@ -53,6 +55,7 @@ import {
 import { acquireTurnRunner, clearTurnRunner, markTurnRunner, releaseTurnRunner } from "./turn-runner-state.ts";
 
 const IMAGE_VISION_RE = /image|vision/i;
+const DEFAULT_MEMORY_SERVICE = createProjectMemoryService();
 
 // How many identical consecutive tool calls (same name + same args) before
 // we treat it as a doom loop and block execution — the model gets an error
@@ -221,7 +224,16 @@ const DESTRUCTIVE_WRITE_TOOLS = new Set(["write", "edit", "patch", "apply_patch"
 // group. Unknown/MCP tools, shells, subagents, and stateful plan tools stay
 // ordered so a sibling mutation cannot race another tool in the same model
 // response. Read-only calls remain parallel when they are adjacent.
-const PARALLEL_SAFE_TOOL_NAMES = new Set(["glob", "grep", "ls", "web_search", "web_fetch", "bash_output"]);
+const PARALLEL_SAFE_TOOL_NAMES = new Set([
+	"glob",
+	"grep",
+	"ls",
+	"memory",
+	"session_history",
+	"web_search",
+	"web_fetch",
+	"bash_output",
+]);
 
 /** Pick the path-shaped arg from a tool call. Different tools use different
  * keys (`path`, `file_path`, `target_path`) — try the obvious ones. */
@@ -539,7 +551,7 @@ export type AgentEvent =
 	// generationMs is only set for the main completion's usage — compaction's
 	// own summarization call reports usage too (for cumulative cost tracking)
 	// but isn't a user-facing turn, so there's no "last request" TPS to show for it.
-	| { type: "usage"; usage: Usage; generationMs?: number; subagent?: boolean }
+	| { type: "usage"; usage: Usage; generationMs?: number; subagent?: boolean; background?: boolean }
 	| { type: "end"; reason: string }
 	| { type: "error"; message: string };
 
@@ -552,6 +564,9 @@ export interface LoopConfig {
 	model: string;
 	cwd: string;
 	systemPrompt: string;
+	/** Enables durable project memory after a completed turn. A service override
+	 * keeps the loop independent from the SQLite implementation in tests/plugins. */
+	memory?: { sessionId: string; service?: MemoryService };
 	onEvent: (event: AgentEvent) => void;
 	/** Non-fatal warning shown to the user (e.g. vision fallback). */
 	onWarning?: (message: string) => void;
@@ -728,6 +743,21 @@ export async function runAgentLoop(initialMessages: Message[], loopConfig: LoopC
 	const messages = [...initialMessages];
 	const tracked = loopConfig.onMessagesChanged ? makeObservable(messages, loopConfig.onMessagesChanged) : messages;
 	await runLoop(tracked, loopConfig);
+	if (loopConfig.memory && isMemoryEnabled() && !loopConfig.signal?.aborted) {
+		void scheduleProjectMemoryExtraction(
+			{
+				cwd: loopConfig.cwd,
+				sessionId: loopConfig.memory.sessionId,
+				model: loopConfig.model,
+				config: loopConfig.config,
+				messages: tracked,
+				providerOverride: loopConfig.modelProvider,
+				onUsage: (usage) => loopConfig.onEvent({ type: "usage", usage, background: true }),
+			},
+			loopConfig.memory.service ?? DEFAULT_MEMORY_SERVICE,
+			loopConfig.onWarning,
+		);
+	}
 	return tracked;
 }
 
@@ -757,6 +787,8 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 
 async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promise<void> {
 	const { config, model: initialModel, cwd, systemPrompt, onEvent, onWarning, signal, mcpToolIndex } = loopConfig;
+	const memoryEnabled = loopConfig.memory !== undefined && isMemoryEnabled();
+	const memoryService = memoryEnabled ? (loopConfig.memory?.service ?? DEFAULT_MEMORY_SERVICE) : undefined;
 	// The same signal is reused across every LLM request, compaction call,
 	// and tool execution in the loop. Each call may attach an abort listener
 	// (OpenAI SDK, child-process kill handlers, etc.). Raise the cap once so
@@ -796,6 +828,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		Boolean(loopConfig.backgroundBash),
 		todoModeActive,
 		allowedSkills?.some((skill) => !skill.disableModelInvocation) ?? false,
+		memoryEnabled,
 	);
 	const mcpTools = loopConfig.mcpTools ?? [];
 	const allTools = [...builtinTools, ...mcpTools];
@@ -1083,24 +1116,25 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 	// match a file read mid-turn attach on the next request, not only next turn.
 	const syncSystemPrompt = (): void => {
 		let prompt = systemPrompt;
-		if (loopConfig.rebuildSystemPrompt) {
-			let userText = "";
-			for (let i = messages.length - 1; i >= 0; i--) {
-				const m = messages[i]!;
-				if (m.role === "user") {
-					if (typeof m.content === "string") {
-						userText = m.content;
-					} else if (Array.isArray(m.content)) {
-						const textPart = m.content.find((p: { type?: string }) => p.type === "text") as
-							| { type: "text"; text: string }
-							| undefined;
-						if (textPart) userText = textPart.text;
-					}
-					break;
-				}
+		let userText = "";
+		for (let i = messages.length - 1; i >= 0; i--) {
+			const m = messages[i]!;
+			if (m.role !== "user") continue;
+			if (typeof m.content === "string") {
+				userText = m.content;
+			} else if (Array.isArray(m.content)) {
+				const textPart = m.content.find((p: { type?: string }) => p.type === "text") as
+					| { type: "text"; text: string }
+					| undefined;
+				if (textPart) userText = textPart.text;
 			}
+			break;
+		}
+		if (loopConfig.rebuildSystemPrompt) {
 			prompt = loopConfig.rebuildSystemPrompt({ userText, contextFiles });
 		}
+		const memoryPrompt = memoryService?.buildPrompt(cwd, userText, loopConfig.memory?.sessionId);
+		if (memoryPrompt) prompt = `${prompt}\n\n${memoryPrompt}`;
 		// Plan mode: prepended AFTER any rebuild — the per-turn rebuild path
 		// (always active in the TUI) replaces `prompt` wholesale and would
 		// silently drop a block added earlier. The restriction must be the

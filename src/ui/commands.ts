@@ -172,6 +172,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 		description: "Uninstall — picker, or server name",
 		takesArgs: true,
 	},
+	{ name: "/memory", description: "Toggle durable project memory" },
 	{ name: "/model", description: "Show or change model" },
 	{ name: "/new", description: "Start a new session" },
 	{ name: "/older", description: "Load older history for this session" },
@@ -2300,6 +2301,30 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		return;
 	}
 
+	if (input === "/memory" || input === "/memory on" || input === "/memory off") {
+		const current = loadSettings().memoryEnabled !== false;
+		let next: boolean;
+		if (input === "/memory on") next = true;
+		else if (input === "/memory off") next = false;
+		else {
+			const picked = await deps.pickers.pickOption(
+				[
+					{ value: true, label: `Enable project memory (currently ${current ? "on" : "off"})` },
+					{ value: false, label: `Disable project memory (currently ${current ? "on" : "off"})` },
+				],
+				{ title: "Durable project memory" },
+			);
+			if (picked === null) {
+				showNotice("[Cancelled — project memory unchanged]");
+				return;
+			}
+			next = picked;
+		}
+		updateSettings({ memoryEnabled: next });
+		showNotice(`[Project memory: ${next ? "enabled" : "disabled"}]`);
+		return;
+	}
+
 	if (input === "/web-search-provider") {
 		const settings = loadSettings();
 		const current = settings.searchProvider ?? "ddg";
@@ -2893,6 +2918,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 				"  /provider [name]    Switch / add / delete providers\n" +
 				"  /permissions        Change bash confirmation mode\n" +
 				"  /web                Toggle web tools (web_search, web_fetch)\n" +
+				"  /memory             Toggle durable project memory\n" +
 				"  /web-search-provider    Switch web_search backend (DuckDuckGo / Tavily / Brave)\n" +
 				"  /web-fetch-provider     Switch web_fetch backend (Jina Reader / local)\n" +
 				"  /ssh                Manage SSH hosts (list, add, remove)\n" +

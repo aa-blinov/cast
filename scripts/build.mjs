@@ -100,6 +100,7 @@ const webJavaScript = [
 	"icons.js",
 	"modal-focus.js",
 	"message.js",
+	"memory-explorer.js",
 	"plan-cards.js",
 	"reasoning-split.js",
 	"sidebar-utils.js",

@@ -367,6 +367,29 @@ describe("skill tool definition", () => {
 	});
 });
 
+describe("memory tool definition", () => {
+	it("advertises project-scoped BM25 search with a focused query contract", () => {
+		const def = getToolDefinitions().find((t) => t.function.name === "memory")?.function;
+		expect(def).toBeDefined();
+		expect(def?.description).toContain("durable project memory");
+		expect(def?.parameters.required).toEqual(["query"]);
+		expect(def?.parameters.properties.query.description).toContain("distinctive");
+	});
+
+	it("does not advertise memory when the global feature is disabled", () => {
+		const tools = getToolDefinitions(undefined, undefined, undefined, undefined, undefined, undefined, true, false);
+		expect(tools.find((t) => t.function.name === "memory")).toBeUndefined();
+	});
+});
+
+describe("session history tool definition", () => {
+	it("advertises raw conversation search separately from durable memory", () => {
+		const def = getToolDefinitions().find((t) => t.function.name === "session_history")?.function;
+		expect(def?.description).toContain("conversation history");
+		expect(def?.description).toContain("raw conversation evidence");
+	});
+});
+
 describe("web_search tool definition — provider-dependent schema", () => {
 	let realHome: string | undefined;
 	let fakeHome: string;

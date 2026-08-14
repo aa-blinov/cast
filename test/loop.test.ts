@@ -8,6 +8,7 @@ import { formatLocalDate } from "../src/core/date-rollover-reminder.ts";
 import { resetDbConnectionForTests } from "../src/core/db.ts";
 import type { Message } from "../src/core/llm.ts";
 import { formatRulesForTurn, loadDirectoryRules, matchAutoRules, unionStickyRules } from "../src/core/rules.ts";
+import { updateSettings } from "../src/core/settings.ts";
 
 vi.mock("../src/core/llm.ts", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../src/core/llm.ts")>();
@@ -140,6 +141,37 @@ const testConfig: AppConfig = {
 };
 
 describe("runAgentLoop — abort vs. error", () => {
+	it("does not retrieve or write memory when the global memory setting is disabled", async () => {
+		const realHome = process.env.HOME;
+		const fakeHome = mkdtempSync(join(tmpdir(), "cast-memory-disabled-test-"));
+		process.env.HOME = fakeHome;
+		updateSettings({ memoryEnabled: false });
+		const memoryService = {
+			search: vi.fn(),
+			buildPrompt: vi.fn(() => "<project-memory>must not be sent</project-memory>"),
+			extractAndStoreProjectMemory: vi.fn(),
+		};
+		vi.mocked(streamAndCollect).mockResolvedValueOnce({ content: "done", finishReason: "stop" });
+
+		try {
+			await runAgentLoop([{ role: "user", content: "hi" }], {
+				config: testConfig,
+				model: "test-model",
+				cwd: process.cwd(),
+				systemPrompt: "test",
+				memory: { sessionId: "memory-disabled", service: memoryService },
+				onEvent: () => {},
+			});
+			await new Promise((resolve) => setImmediate(resolve));
+			expect(memoryService.buildPrompt).not.toHaveBeenCalled();
+			expect(memoryService.extractAndStoreProjectMemory).not.toHaveBeenCalled();
+		} finally {
+			if (realHome === undefined) delete process.env.HOME;
+			else process.env.HOME = realHome;
+			rmSync(fakeHome, { recursive: true, force: true });
+		}
+	});
+
 	it("reports reason 'aborted' (not 'error') when the request was aborted mid-stream", async () => {
 		const controller = new AbortController();
 		const events: AgentEvent[] = [];

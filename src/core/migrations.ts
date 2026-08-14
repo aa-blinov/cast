@@ -200,6 +200,109 @@ CREATE INDEX IF NOT EXISTS idx_session_events_type ON session_events(session_id,
 			);
 		},
 	},
+	{
+		version: 6,
+		name: "project-memory-fts",
+		up: (db) => {
+			db.exec(`
+CREATE TABLE IF NOT EXISTS project_memory (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id TEXT NOT NULL,
+  cwd TEXT NOT NULL,
+  type TEXT NOT NULL,
+  content TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  source_session_id TEXT,
+  source_turn_key TEXT,
+  importance INTEGER NOT NULL DEFAULT 50,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(project_id, fingerprint)
+);
+CREATE INDEX IF NOT EXISTS idx_project_memory_project ON project_memory(project_id, importance DESC, updated_at DESC);
+CREATE VIRTUAL TABLE IF NOT EXISTS project_memory_fts USING fts5(
+  content,
+  content='project_memory',
+  content_rowid='id',
+  tokenize='unicode61 remove_diacritics 1'
+);
+CREATE TRIGGER IF NOT EXISTS project_memory_fts_ai AFTER INSERT ON project_memory BEGIN
+  INSERT INTO project_memory_fts(rowid, content) VALUES (NEW.id, NEW.content);
+END;
+CREATE TRIGGER IF NOT EXISTS project_memory_fts_ad AFTER DELETE ON project_memory BEGIN
+  INSERT INTO project_memory_fts(project_memory_fts, rowid, content) VALUES ('delete', OLD.id, OLD.content);
+END;
+CREATE TRIGGER IF NOT EXISTS project_memory_fts_au AFTER UPDATE ON project_memory BEGIN
+  INSERT INTO project_memory_fts(project_memory_fts, rowid, content) VALUES ('delete', OLD.id, OLD.content);
+  INSERT INTO project_memory_fts(rowid, content) VALUES (NEW.id, NEW.content);
+END;
+`);
+		},
+	},
+	{
+		version: 7,
+		name: "project-memory-extraction-claims",
+		up: (db) => {
+			db.exec(`
+CREATE TABLE IF NOT EXISTS project_memory_extractions (
+  project_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  turn_key TEXT NOT NULL,
+  claim_token TEXT NOT NULL,
+  status TEXT NOT NULL,
+  lease_until TEXT NOT NULL,
+  completed_at TEXT,
+  entries_count INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (project_id, session_id, turn_key)
+);
+CREATE INDEX IF NOT EXISTS idx_project_memory_extractions_lease
+  ON project_memory_extractions(status, lease_until);
+`);
+		},
+	},
+	{
+		version: 8,
+		name: "session-history-fts",
+		up: (db) => {
+			db.exec(`
+CREATE VIRTUAL TABLE IF NOT EXISTS session_history_fts USING fts5(
+  session_id UNINDEXED,
+  seq UNINDEXED,
+  role UNINDEXED,
+  body,
+  tokenize = 'unicode61'
+);
+CREATE TRIGGER IF NOT EXISTS session_history_fts_ai AFTER INSERT ON messages
+WHEN NEW.role IN ('user', 'assistant', 'tool')
+BEGIN
+  INSERT INTO session_history_fts(session_id, seq, role, body) VALUES (NEW.session_id, NEW.seq, NEW.role, cast_message_text(NEW.content_json));
+END;
+CREATE TRIGGER IF NOT EXISTS session_history_fts_ad AFTER DELETE ON messages
+BEGIN
+  DELETE FROM session_history_fts WHERE session_id = OLD.session_id AND seq = OLD.seq;
+END;
+INSERT INTO session_history_fts(session_id, seq, role, body)
+SELECT m.session_id, m.seq, m.role, cast_message_text(m.content_json)
+FROM messages AS m
+WHERE m.role IN ('user', 'assistant', 'tool')
+  AND NOT EXISTS (
+    SELECT 1 FROM session_history_fts AS f WHERE f.session_id = m.session_id AND f.seq = m.seq
+  );
+`);
+		},
+	},
+	{
+		version: 9,
+		name: "project-memory-claim-token",
+		up: (db) => {
+			if (!columnExists(db, "project_memory_extractions", "claim_token")) {
+				db.exec("ALTER TABLE project_memory_extractions ADD COLUMN claim_token TEXT");
+				db.exec(
+					"UPDATE project_memory_extractions SET claim_token = hex(randomblob(32)) WHERE claim_token IS NULL",
+				);
+			}
+		},
+	},
 ];
 
 const MIGRATION_TABLE_SCHEMA = `

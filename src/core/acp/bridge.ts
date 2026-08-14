@@ -494,6 +494,7 @@ async function runPromptInner(
 			model: state.model,
 			cwd: state.cwd ?? startup.cwd,
 			systemPrompt: startup.systemPrompt,
+			memory: { sessionId: state.id },
 			signal: ac.signal,
 			steeringQueue: runner.steeringQueue,
 			followUpQueue: runner.followUpQueue,
@@ -734,6 +735,7 @@ export function translateEvent(
 			const used = event.usage.totalTokens;
 			const size = session.startup.config.contextWindow;
 			session.totalCost += event.usage.cost ?? 0;
+			if (event.background) return;
 			session.lastUsage = { used, size };
 			notify({
 				sessionUpdate: "usage_update",

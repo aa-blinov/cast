@@ -120,6 +120,7 @@ const CLIENT_PARITY_COMMANDS = new Set([
 	"/reasoning-display",
 	"/rd",
 	"/reasoning-format",
+	"/memory",
 	"/worktree",
 ]);
 
@@ -1385,6 +1386,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			subagentModelProvider: resolvedSubagentProvider,
 			cwd: ws.session.cwd ?? cwd,
 			systemPrompt: ws.systemPrompt,
+			memory: { sessionId: ws.session.id },
 			signal: ac.signal,
 			steeringQueue: ws.runner.steeringQueue,
 			followUpQueue: ws.runner.followUpQueue,
@@ -1500,8 +1502,12 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				}
 				if (event.type === "todos_updated") ws.session.todos = event.todos;
 				if (event.type === "usage") {
-					addUsage(ws.session, event.usage, { subagent: event.subagent });
-					if (!event.subagent) {
+					addUsage(ws.session, event.usage, { subagent: event.subagent, background: event.background });
+					if (event.background) {
+						saveSession(ws.session);
+						broadcastSessionUpdate(ws);
+					}
+					if (!event.subagent && !event.background) {
 						ws.lastTurn = {
 							generationMs: event.generationMs,
 							tokensPerSecond:
@@ -2216,6 +2222,13 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			if (arg !== "on" && arg !== "off") return { ok: false, error: "Usage: /web on|off" };
 			updateSettings({ webTools: arg === "on" });
 			return { ok: true, result: { webTools: arg === "on" } };
+		}
+		if (name === "/memory") {
+			if (!arg) return { ok: true, result: { memoryEnabled: loadSettings().memoryEnabled !== false } };
+			if (arg !== "on" && arg !== "off") return { ok: false, error: "Usage: /memory on|off" };
+			const memoryEnabled = arg === "on";
+			updateSettings({ memoryEnabled });
+			return { ok: true, result: { memoryEnabled } };
 		}
 		if (name === "/web-search-provider") {
 			// Same fresh-read pattern as /web — the next web_search call picks
@@ -3296,6 +3309,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			"/current",
 			"/permissions",
 			"/web",
+			"/memory",
 			"/web-search-provider",
 			"/web-fetch-provider",
 			"/theme",
@@ -3339,6 +3353,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			theme: loadSettings().theme ?? "cast",
 			cwd,
 			quickSessionPersona,
+			memoryEnabled: loadSettings().memoryEnabled !== false,
 		};
 	}
 

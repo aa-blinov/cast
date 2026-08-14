@@ -362,6 +362,15 @@ describe("web bridge", () => {
 		expect(bridge.getConfig().quickSessionPersona).toBe("senior");
 	});
 
+	it("/memory toggles the global setting and exposes it through config", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		expect((await bridge.executeCommand(ws.id, "/memory")).result).toEqual({ memoryEnabled: true });
+		expect((await bridge.executeCommand(ws.id, "/memory off")).result).toEqual({ memoryEnabled: false });
+		expect(bridge.getConfig().memoryEnabled).toBe(false);
+		expect((await bridge.executeCommand(ws.id, "/memory on")).result).toEqual({ memoryEnabled: true });
+	});
+
 	it("/model <name> updates the session model", async () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();

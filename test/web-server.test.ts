@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetDbConnectionForTests } from "../src/core/db.ts";
+import { storeProjectMemory } from "../src/core/memory.ts";
 import { createAgentRunner } from "../src/core/runner.ts";
 import { appendMessage, createSession, saveSession } from "../src/core/session.ts";
 import type { ServerBridge } from "../src/server/bridge.ts";
@@ -275,6 +276,7 @@ describe("/api/server/status", () => {
 // pins both behaviors through the real startServer call so a future
 // refactor can't silently regress them.
 describe("JSON response compression", () => {
+	let memorySessionId = "";
 	// The shared startServer above uses `{} as ServerBridge`, so this
 	// describe swaps it out for a populated one — 80 sessions are enough
 	// to push the /api/sessions responses past the 8 KB compression
@@ -337,6 +339,15 @@ describe("JSON response compression", () => {
 			sshHosts: [],
 			resumed: false,
 		});
+		const memorySession = bridge.createSession("senior", "gpt-4o", testDbDir, false);
+		memorySessionId = memorySession.id;
+		storeProjectMemory(testDbDir, memorySessionId, "demo-turn", [
+			{
+				type: "architecture",
+				content: "The project memory panel is scoped to the current working directory.",
+				importance: 92,
+			},
+		]);
 		// 80 sessions × a short user + assistant message easily clears
 		// the 8 KB threshold once listSessionSummaries JSON-encodes them.
 		for (let i = 0; i < 80; i++) {
@@ -407,6 +418,24 @@ describe("JSON response compression", () => {
 		expect(res.headers.get("content-encoding")).toBeNull();
 		const body = await res.json();
 		expect(body).toEqual({ authenticated: true });
+	});
+
+	it("serves project memory for the selected session", async () => {
+		const auth = await fetch(`${origin}/api/auth/login`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ username: "cast", password: "test-password" }),
+		});
+		const cookie = auth.headers.get("set-cookie")!;
+
+		const res = await fetch(`${origin}/api/sessions/${memorySessionId}/memory?q=memory%20panel`, {
+			headers: { Cookie: cookie },
+		});
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { items: Array<{ content: string; sourceSessionId: string }> };
+		expect(body.items).toHaveLength(1);
+		expect(body.items[0]?.content).toContain("memory panel");
+		expect(body.items[0]?.sourceSessionId).toBe(memorySessionId);
 	});
 
 	it("keeps SSE endpoints uncompressed to avoid chunked-encoding + gzip conflict", async () => {
