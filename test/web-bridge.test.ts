@@ -365,10 +365,31 @@ describe("web bridge", () => {
 	it("/memory toggles the global setting and exposes it through config", async () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
-		expect((await bridge.executeCommand(ws.id, "/memory")).result).toEqual({ memoryEnabled: true });
+		expect((await bridge.executeCommand(ws.id, "/memory")).result).toEqual(
+			expect.objectContaining({
+				memoryEnabled: true,
+				memoryWriteEnabled: true,
+				memoryPromptBudget: 4096,
+				memorySearchScoreFloor: 0.15,
+				memoryReconcileOnSearch: true,
+			}),
+		);
 		expect((await bridge.executeCommand(ws.id, "/memory off")).result).toEqual({ memoryEnabled: false });
 		expect(bridge.getConfig().memoryEnabled).toBe(false);
 		expect((await bridge.executeCommand(ws.id, "/memory on")).result).toEqual({ memoryEnabled: true });
+	});
+
+	it("keeps memory readable while allowing background writes to be disabled", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		expect(await bridge.executeCommand(ws.id, "/memory write off")).toEqual({
+			ok: true,
+			result: { memoryWriteEnabled: false },
+		});
+		expect(await bridge.executeCommand(ws.id, "/memory write on")).toEqual({
+			ok: true,
+			result: { memoryWriteEnabled: true },
+		});
 	});
 
 	it("does not run memory maintenance while the global memory switch is off", async () => {

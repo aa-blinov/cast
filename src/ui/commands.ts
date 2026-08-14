@@ -135,6 +135,9 @@ async function selectModelWithReasoning(
 
 const WHITESPACE_SPLIT_RE = /\s+/;
 const WORKTREE_REMOVE_PREFIX_RE = /^(?:remove|rm)\s*/;
+const MEMORY_BUDGET_COMMAND_RE = /^\/memory budget (\d+)$/;
+const MEMORY_FLOOR_COMMAND_RE = /^\/memory floor (0(?:\.\d+)?|1(?:\.0)?)$/;
+const MEMORY_RECONCILE_COMMAND_RE = /^\/memory reconcile (on|off)$/;
 
 /**
  * Slash commands shown in the Composer's autocomplete palette.
@@ -176,6 +179,10 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 		takesArgs: true,
 	},
 	{ name: "/memory", description: "Toggle durable project memory" },
+	{ name: "/memory budget", description: "Set automatic memory prompt token budget", takesArgs: true },
+	{ name: "/memory floor", description: "Set memory search score floor", takesArgs: true },
+	{ name: "/memory reconcile", description: "Toggle file reconciliation before memory search", takesArgs: true },
+	{ name: "/memory write", description: "Toggle background memory writing", takesArgs: true },
 	{ name: "/model", description: "Show or change model" },
 	{ name: "/new", description: "Start a new session" },
 	{ name: "/older", description: "Load older history for this session" },
@@ -2351,18 +2358,33 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		return;
 	}
 
-	if (input === "/memory" || input === "/memory on" || input === "/memory off") {
-		const current = loadSettings().memoryEnabled !== false;
+	if (
+		input === "/memory" ||
+		input === "/memory on" ||
+		input === "/memory off" ||
+		input === "/memory write" ||
+		input === "/memory write on" ||
+		input === "/memory write off"
+	) {
+		const settings = loadSettings();
+		const writeMode = input === "/memory write" || input.startsWith("/memory write ");
+		const current = writeMode ? settings.memoryWriteEnabled !== false : settings.memoryEnabled !== false;
 		let next: boolean;
-		if (input === "/memory on") next = true;
-		else if (input === "/memory off") next = false;
+		if (input === "/memory on" || input === "/memory write on") next = true;
+		else if (input === "/memory off" || input === "/memory write off") next = false;
 		else {
 			const picked = await deps.pickers.pickOption(
 				[
-					{ value: true, label: `Enable project memory (currently ${current ? "on" : "off"})` },
-					{ value: false, label: `Disable project memory (currently ${current ? "on" : "off"})` },
+					{
+						value: true,
+						label: `${writeMode ? "Enable background memory writing" : "Enable project memory"} (currently ${current ? "on" : "off"})`,
+					},
+					{
+						value: false,
+						label: `${writeMode ? "Disable background memory writing" : "Disable project memory"} (currently ${current ? "on" : "off"})`,
+					},
 				],
-				{ title: "Durable project memory" },
+				{ title: writeMode ? "Background memory writing" : "Durable project memory" },
 			);
 			if (picked === null) {
 				showNotice("[Cancelled — project memory unchanged]");
@@ -2370,8 +2392,37 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			}
 			next = picked;
 		}
-		updateSettings({ memoryEnabled: next });
-		showNotice(`[Project memory: ${next ? "enabled" : "disabled"}]`);
+		if (writeMode) updateSettings({ memoryWriteEnabled: next });
+		else updateSettings({ memoryEnabled: next });
+		showNotice(`[${writeMode ? "Background memory writing" : "Project memory"}: ${next ? "enabled" : "disabled"}]`);
+		return;
+	}
+
+	const memoryBudgetMatch = input.match(MEMORY_BUDGET_COMMAND_RE);
+	if (memoryBudgetMatch) {
+		const value = Number(memoryBudgetMatch[1]);
+		if (!Number.isInteger(value) || value < 256 || value > 16_384) {
+			showNotice("[Memory prompt budget must be an integer from 256 to 16384]");
+			return;
+		}
+		updateSettings({ memoryPromptBudget: value });
+		showNotice(`[Memory prompt budget: ${value} tokens]`);
+		return;
+	}
+
+	const memoryFloorMatch = input.match(MEMORY_FLOOR_COMMAND_RE);
+	if (memoryFloorMatch) {
+		const value = Number(memoryFloorMatch[1]);
+		updateSettings({ memorySearchScoreFloor: value });
+		showNotice(`[Memory search score floor: ${value}]`);
+		return;
+	}
+
+	const memoryReconcileMatch = input.match(MEMORY_RECONCILE_COMMAND_RE);
+	if (memoryReconcileMatch) {
+		const enabled = memoryReconcileMatch[1] === "on";
+		updateSettings({ memoryReconcileOnSearch: enabled });
+		showNotice(`[Memory reconcile before search: ${enabled ? "enabled" : "disabled"}]`);
 		return;
 	}
 

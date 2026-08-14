@@ -614,6 +614,28 @@ describe("project memory", () => {
 		expect(checkpointPath(session.id)).toContain(join("memory", "sessions", session.id));
 	});
 
+	it("reconciles an externally edited project memory file before search", () => {
+		const realHome = process.env.HOME;
+		process.env.HOME = join(root, "home");
+		const projectCwd = join(root, "reconciled-project");
+		const projectId = projectIdForCwd(projectCwd);
+		writeMemoryFile(projectMemoryPath(projectId), "# Project memory\n\n## Rules\n- The first rule is obsolete.\n");
+		reconcileProjectMemoryFiles(projectCwd);
+
+		writeMemoryFile(
+			projectMemoryPath(projectId),
+			"# Project memory\n\n## Rules\n- The second rule is authoritative.\n",
+		);
+		expect(searchProjectMemory(projectCwd, "second rule")).toEqual([
+			expect.objectContaining({ content: "The second rule is authoritative." }),
+		]);
+
+		writeMemoryFile(projectMemoryPath(projectId), "# Project memory\n");
+		expect(searchProjectMemory(projectCwd, "second rule")).toEqual([]);
+		if (realHome === undefined) delete process.env.HOME;
+		else process.env.HOME = realHome;
+	});
+
 	it("runs dream through a maintenance agent and reconciles its file edits", async () => {
 		vi.mocked(streamAndCollect).mockClear();
 		const projectCwd = join(root, "dream-agent-project");

@@ -113,6 +113,10 @@ const SYSTEM_REMINDER_RE = /<system-reminder>([\s\S]*?)<\/system-reminder>/g;
 const GITHUB_URL_RE = /^https?:\/\/(?:www\.)?github\.com\//i;
 const FRONTMATTER_STRIP_RE = /^---\n[\s\S]*?\n---\n?/;
 const WORKTREE_REMOVE_PREFIX_RE = /^(?:remove|rm)\s*(.*)$/;
+const MEMORY_WRITE_COMMAND_RE = /^write(?:\s+(on|off))?$/;
+const MEMORY_BUDGET_COMMAND_RE = /^budget\s+(\d+)$/;
+const MEMORY_FLOOR_COMMAND_RE = /^floor\s+(0(?:\.\d+)?|1(?:\.0)?)$/;
+const MEMORY_RECONCILE_COMMAND_RE = /^reconcile\s+(on|off)$/;
 const CLIENT_PARITY_COMMANDS = new Set([
 	"/quit",
 	"/exit",
@@ -2238,14 +2242,58 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			return { ok: true, result: { webTools: arg === "on" } };
 		}
 		if (name === "/memory") {
-			if (!arg) return { ok: true, result: { memoryEnabled: loadSettings().memoryEnabled !== false } };
-			if (arg !== "on" && arg !== "off") return { ok: false, error: "Usage: /memory on|off" };
-			const memoryEnabled = arg === "on";
-			updateSettings({ memoryEnabled });
-			return { ok: true, result: { memoryEnabled } };
+			const settings = loadSettings();
+			if (!arg)
+				return {
+					ok: true,
+					result: {
+						memoryEnabled: settings.memoryEnabled !== false,
+						memoryWriteEnabled: settings.memoryWriteEnabled !== false,
+						memoryPromptBudget: settings.memoryPromptBudget ?? 4096,
+						memorySearchScoreFloor: settings.memorySearchScoreFloor ?? 0.15,
+						memoryReconcileOnSearch: settings.memoryReconcileOnSearch !== false,
+					},
+				};
+			if (arg === "on" || arg === "off") {
+				const memoryEnabled = arg === "on";
+				updateSettings({ memoryEnabled });
+				return { ok: true, result: { memoryEnabled } };
+			}
+			const writeMatch = arg.match(MEMORY_WRITE_COMMAND_RE);
+			if (writeMatch) {
+				const memoryWriteEnabled = writeMatch[1]
+					? writeMatch[1] === "on"
+					: !(settings.memoryWriteEnabled !== false);
+				updateSettings({ memoryWriteEnabled });
+				return { ok: true, result: { memoryWriteEnabled } };
+			}
+			const budgetMatch = arg.match(MEMORY_BUDGET_COMMAND_RE);
+			if (budgetMatch) {
+				const memoryPromptBudget = Math.max(256, Math.min(Number(budgetMatch[1]), 16_384));
+				updateSettings({ memoryPromptBudget });
+				return { ok: true, result: { memoryPromptBudget } };
+			}
+			const floorMatch = arg.match(MEMORY_FLOOR_COMMAND_RE);
+			if (floorMatch) {
+				const memorySearchScoreFloor = Number(floorMatch[1]);
+				updateSettings({ memorySearchScoreFloor });
+				return { ok: true, result: { memorySearchScoreFloor } };
+			}
+			const reconcileMatch = arg.match(MEMORY_RECONCILE_COMMAND_RE);
+			if (reconcileMatch) {
+				const memoryReconcileOnSearch = reconcileMatch[1] === "on";
+				updateSettings({ memoryReconcileOnSearch });
+				return { ok: true, result: { memoryReconcileOnSearch } };
+			}
+			return {
+				ok: false,
+				error: "Usage: /memory on|off|write on|write off|budget <tokens>|floor <0..1>|reconcile on|off",
+			};
 		}
 		if (name === "/dream" || name === "/distill") {
 			if (loadSettings().memoryEnabled === false) return { ok: false, error: "Project memory is disabled" };
+			if (loadSettings().memoryWriteEnabled === false)
+				return { ok: false, error: "Project memory writing is disabled" };
 			try {
 				const input = {
 					cwd: ws.session.cwd ?? cwd,
