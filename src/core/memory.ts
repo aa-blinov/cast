@@ -922,13 +922,13 @@ export async function extractAndStoreProjectMemory(input: {
 	const prompt = MEMORY_WRITER_PROMPT.replace("{{TRANSCRIPT}}", transcript)
 		.replace("{{CHECKPOINT}}", checkpointPromptText(latestProjectMemoryCheckpoint(input.cwd)))
 		.replace("{{MEMORY}}", `${memoryPromptText(input.cwd)}\n\n${fileMemoryContext(input.cwd, input.sessionId)}`);
-	try {
-		const response = await streamAndCollect(
+	const runWriter = (writerPrompt: string) =>
+		streamAndCollect(
 			createClient(input.config, input.providerOverride),
 			input.model,
 			[
 				{ role: "system", content: MEMORY_WRITER_SYSTEM_PROMPT },
-				{ role: "user", content: prompt },
+				{ role: "user", content: writerPrompt },
 			],
 			[],
 			2000,
@@ -937,8 +937,17 @@ export async function extractAndStoreProjectMemory(input: {
 			undefined,
 			{},
 		);
+	try {
+		let response = await runWriter(prompt);
 		if (response.usage) input.onUsage?.(response.usage);
-		const parsed = parseMemoryWriterResult(response.content);
+		let parsed = parseMemoryWriterResult(response.content);
+		if (transcript.length >= 180 && parsed.entries.length === 0 && !parsed.checkpoint && !input.signal?.aborted) {
+			response = await runWriter(
+				`${prompt}\n\nThe previous extraction was empty. Re-check the completed turn and preserve at least one supported durable fact when one is present; otherwise return empty JSON.`,
+			);
+			if (response.usage) input.onUsage?.(response.usage);
+			parsed = parseMemoryWriterResult(response.content);
+		}
 		const { entries, checkpoint } = parsed;
 		const db = getDb();
 		const persisted = withImmediateTransaction(db, () => {
