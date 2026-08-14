@@ -7,6 +7,7 @@
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { closeMcpConnections } from "../core/mcp.ts";
+import { drainProjectCheckpointWriters } from "../core/memory.ts";
 import { resolveMcpForCwd } from "../core/project.ts";
 import { deleteSession } from "../core/session.ts";
 import { loadSettings, updateSettings } from "../core/settings.ts";
@@ -236,11 +237,12 @@ export async function runServerMain(args: string[], options: { foreground: boole
 	// stale and self-heal, rather than assuming this handler always runs.
 	// (shuttingDown itself is declared above, before onListening — the
 	// background MCP connect's .then() needs to read it too.)
-	const shutdown = (signal: string) => {
+	const shutdown = async (signal: string) => {
 		if (shuttingDown) return;
 		shuttingDown = true;
 		console.log(`[cast server] received ${signal}, shutting down...`);
 		for (const s of bridge.listSessions()) bridge.closeSession(s.id, "shutdown");
+		await drainProjectCheckpointWriters(2_500);
 		clearServerState();
 		server.close(() => process.exit(0));
 		// server.close() waits for existing connections (including open SSE
@@ -248,8 +250,8 @@ export async function runServerMain(args: string[], options: { foreground: boole
 		// rather than hanging a `cast server stop` caller indefinitely.
 		setTimeout(() => process.exit(0), 3000).unref();
 	};
-	process.on("SIGTERM", () => shutdown("SIGTERM"));
-	process.on("SIGINT", () => shutdown("SIGINT"));
+	process.on("SIGTERM", () => void shutdown("SIGTERM"));
+	process.on("SIGINT", () => void shutdown("SIGINT"));
 }
 
 async function main(): Promise<void> {
