@@ -242,6 +242,7 @@ export async function runServerMain(args: string[], options: { foreground: boole
 		shuttingDown = true;
 		console.log(`[cast server] received ${signal}, shutting down...`);
 		for (const s of bridge.listSessions()) bridge.closeSession(s.id, "shutdown");
+		bridge.dispose?.();
 		await drainProjectCheckpointWriters(2_500);
 		clearServerState();
 		server.close(() => process.exit(0));

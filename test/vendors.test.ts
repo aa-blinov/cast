@@ -194,6 +194,19 @@ describe("applyCacheControl", () => {
 		// Should not throw; system message still gets marker in the copy
 		expect(Array.isArray(out.messages[0]!.content)).toBe(true);
 	});
+
+	it("leaves automatic-prefix providers in their native plain-message shape", () => {
+		const messages: Message[] = [
+			{ role: "system", content: "stable system" },
+			{ role: "user", content: "stable history" },
+		];
+
+		const out = applyCacheControl(messages, [], undefined, "automatic");
+
+		expect(out.messages).toEqual(messages);
+		expect(out.messages[0]!.content).toBe("stable system");
+		expect(out.messages[1]!.content).toBe("stable history");
+	});
 });
 
 // ============================================================================
