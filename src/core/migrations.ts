@@ -337,6 +337,33 @@ CREATE TABLE IF NOT EXISTS project_memory_artifacts (
 );
 CREATE INDEX IF NOT EXISTS idx_project_memory_artifacts_project
   ON project_memory_artifacts(project_id, updated_at DESC);
+			`);
+		},
+	},
+	{
+		version: 11,
+		name: "agent-actor-lifecycle",
+		up: (db) => {
+			db.exec(`
+CREATE TABLE IF NOT EXISTS agent_actors (
+  id TEXT PRIMARY KEY,
+  parent_session_id TEXT,
+  parent_actor_id TEXT,
+  session_id TEXT,
+  agent TEXT NOT NULL,
+  mode TEXT NOT NULL,
+  background INTEGER NOT NULL,
+  lifecycle TEXT NOT NULL,
+  status TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  completed_at TEXT,
+  fork_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_agent_actors_parent
+  ON agent_actors(parent_session_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_actors_status
+  ON agent_actors(status, updated_at DESC);
 `);
 		},
 	},
