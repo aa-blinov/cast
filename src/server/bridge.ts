@@ -89,11 +89,13 @@ import {
 	updateLastCheckpoint,
 } from "../core/session.ts";
 import {
+	checkpointFork,
 	loadSettings,
 	memoryDistillAuto,
 	memoryDistillIntervalDays,
 	memoryDreamAuto,
 	memoryDreamIntervalDays,
+	memoryExtractionAuto,
 	updateSettings,
 } from "../core/settings.ts";
 import {
@@ -129,6 +131,8 @@ const MEMORY_WRITE_COMMAND_RE = /^write(?:\s+(on|off))?$/;
 const MEMORY_BUDGET_COMMAND_RE = /^budget\s+(\d+)$/;
 const MEMORY_FLOOR_COMMAND_RE = /^floor\s+(0(?:\.\d+)?|1(?:\.0)?)$/;
 const MEMORY_RECONCILE_COMMAND_RE = /^reconcile\s+(on|off)$/;
+const MEMORY_EXTRACTION_COMMAND_RE = /^extraction\s+(on|off)$/;
+const MEMORY_CHECKPOINT_FORK_COMMAND_RE = /^checkpoint\s+fork\s+(on|off)$/;
 const MEMORY_AUTO_TOGGLE_COMMAND_RE = /^(dream|distill)\s+(on|off)$/;
 const MEMORY_AUTO_INTERVAL_COMMAND_RE = /^(dream|distill)\s+interval\s+(\d+)$/;
 const MEMORY_CANCEL_RUN_COMMAND_RE = /^cancel\s+([a-f0-9-]+)$/;
@@ -2268,6 +2272,8 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					result: {
 						memoryEnabled: settings.memoryEnabled !== false,
 						memoryWriteEnabled: settings.memoryWriteEnabled !== false,
+						memoryExtractionAuto: memoryExtractionAuto(settings),
+						checkpointFork: checkpointFork(settings),
 						memoryPromptBudget: settings.memoryPromptBudget ?? 4096,
 						memorySearchScoreFloor: settings.memorySearchScoreFloor ?? 0.15,
 						memoryReconcileOnSearch: settings.memoryReconcileOnSearch !== false,
@@ -2308,6 +2314,18 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				updateSettings({ memoryReconcileOnSearch });
 				return { ok: true, result: { memoryReconcileOnSearch } };
 			}
+			const extractionMatch = arg.match(MEMORY_EXTRACTION_COMMAND_RE);
+			if (extractionMatch) {
+				const memoryExtractionAuto = extractionMatch[1] === "on";
+				updateSettings({ memoryExtractionAuto });
+				return { ok: true, result: { memoryExtractionAuto } };
+			}
+			const checkpointForkMatch = arg.match(MEMORY_CHECKPOINT_FORK_COMMAND_RE);
+			if (checkpointForkMatch) {
+				const checkpointFork = checkpointForkMatch[1] === "on";
+				updateSettings({ checkpointFork });
+				return { ok: true, result: { checkpointFork } };
+			}
 			const autoToggleMatch = arg.match(MEMORY_AUTO_TOGGLE_COMMAND_RE);
 			if (autoToggleMatch) {
 				const enabled = autoToggleMatch[2] === "on";
@@ -2333,7 +2351,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			}
 			return {
 				ok: false,
-				error: "Usage: /memory on|off|write on|write off|budget <tokens>|dream on|off|dream interval <days>|distill on|off|distill interval <days>|runs|cancel <run-id>|floor <0..1>|reconcile on|off",
+				error: "Usage: /memory on|off|write on|write off|extraction on|off|checkpoint fork on|off|budget <tokens>|dream on|off|dream interval <days>|distill on|off|distill interval <days>|runs|cancel <run-id>|floor <0..1>|reconcile on|off",
 			};
 		}
 		if (name === "/dream" || name === "/distill") {

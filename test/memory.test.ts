@@ -27,6 +27,7 @@ import {
 	parseMemoryWriterOutput,
 	parseMemoryWriterResult,
 	projectIdForCwd,
+	readMemorySectionsWithinBudget,
 	reconcileProjectMemoryFiles,
 	scheduleProjectCheckpointWriter,
 	scheduleProjectMemoryExtraction,
@@ -38,6 +39,7 @@ import {
 import {
 	checkpointPath,
 	ensureMemoryFiles,
+	globalMemoryPath,
 	projectMemoryManifestPath,
 	projectMemoryPath,
 	readMemoryFile,
@@ -147,6 +149,36 @@ describe("project memory", () => {
 		expect(rankRows.map((row) => row.score)).toEqual(bm25Rows.map((row) => row.score));
 	});
 
+	it("supports Mimo-compatible project and session memory scopes", () => {
+		const projectCwd = join(root, "scoped-memory-project");
+		storeProjectMemory(projectCwd, "session-a", "turn-a", [
+			{ content: "The project uses a single durable writer.", type: "architecture" },
+		]);
+		storeProjectMemory(projectCwd, "session-b", "turn-b", [
+			{ content: "Session b resolved a retry bug.", type: "fix" },
+		]);
+
+		const projectResults = searchProjectMemory(projectCwd, "durable writer", 8, { scope: "projects" });
+		expect(projectResults).toHaveLength(1);
+		expect(projectResults[0]).toMatchObject({ scope: "projects", scopeId: projectIdForCwd(projectCwd) });
+
+		const sessionResults = searchProjectMemory(projectCwd, "retry bug", 8, {
+			scope: "sessions",
+			scopeId: "session-b",
+		});
+		expect(sessionResults).toHaveLength(1);
+		expect(sessionResults[0]).toMatchObject({ scope: "sessions", scopeId: "session-b", type: "fix" });
+		expect(searchProjectMemory(projectCwd, "durable writer", 8, { scope: "sessions", scopeId: "session-b" })).toEqual(
+			[],
+		);
+		expect(searchProjectMemory(projectCwd, "durable writer", 8, { scope: "global" })).toEqual([]);
+		writeMemoryFile(globalMemoryPath(), "# Global memory\n\n## Rules\n- Always preserve user preferences.\n");
+		const globalResults = searchProjectMemory(projectCwd, "user preferences", 8, { scope: "global" });
+		expect(globalResults).toMatchObject([
+			{ scope: "global", scopeId: "global", content: "Always preserve user preferences." },
+		]);
+	});
+
 	it("renders only relevant memory into the next session prompt", () => {
 		const projectCwd = join(root, "project");
 		storeProjectMemory(projectCwd, "session-a", "turn-a", [
@@ -195,6 +227,23 @@ describe("project memory", () => {
 		const prompt = buildMemoryPrompt(projectCwd, "", undefined, { tokenBudget: 120 });
 
 		expect(prompt).toContain("The bridge owns one writer per session.");
+	});
+
+	it("keeps rebuild file context section-aware under a token budget", () => {
+		const content = [
+			"# Project memory",
+			"## Rules",
+			"- rule one",
+			"- rule two",
+			"## Architecture decisions",
+			"- decision one",
+			"## Discovered durable knowledge",
+			"- durable fact",
+		].join("\n");
+		const result = readMemorySectionsWithinBudget(content, 40);
+		expect(result).toContain("## Rules");
+		expect(result).toContain("## Architecture decisions");
+		expect(result).toContain("## Discovered durable knowledge");
 	});
 
 	it("does not retrieve expired memory and keeps confidence metadata", () => {
@@ -902,6 +951,37 @@ describe("project memory", () => {
 		}
 	});
 
+	it("keeps the automatic scheduler claim durable before an actor is spawned", async () => {
+		const realHome = process.env.HOME;
+		process.env.HOME = join(root, "home-durable-scheduler-claim");
+		const projectCwd = join(root, "durable-scheduler-project");
+		const session = createSession("test-model", projectCwd);
+		saveSession(session);
+		getDb()
+			.prepare("UPDATE sessions SET created_at = ? WHERE id = ?")
+			.run(new Date(Date.now() - 3 * 86_400_000).toISOString(), session.id);
+		const runAgent = vi.fn(async () => ({ messages: [{ role: "assistant" as const, content: "unexpected" }] }));
+		try {
+			updateSettings({ memoryDreamAuto: true, memoryDreamIntervalDays: 1 });
+			getDb()
+				.prepare("INSERT INTO memory_maintenance_schedule (project_id, kind, last_claimed_at) VALUES (?, ?, ?)")
+				.run(projectIdForCwd(projectCwd), "dream", new Date().toISOString());
+			const result = await maybeRunAutomaticMemoryMaintenance({
+				cwd: projectCwd,
+				sessionId: session.id,
+				model: session.model,
+				config: testConfig,
+				messages: [],
+				runAgent,
+			});
+			expect(result).toEqual([]);
+			expect(runAgent).not.toHaveBeenCalled();
+		} finally {
+			if (realHome === undefined) delete process.env.HOME;
+			else process.env.HOME = realHome;
+		}
+	});
+
 	it("isolates automatic maintenance in its own background session", async () => {
 		const realHome = process.env.HOME;
 		process.env.HOME = join(root, "home-isolated-background-session");
@@ -930,10 +1010,11 @@ describe("project memory", () => {
 			const background = loadSession(run!.sessionId);
 			expect(background).toMatchObject({
 				id: run!.sessionId,
-				parentSessionId: session.id,
+				title: "Auto Dream",
 				sessionKind: "background",
 				backgroundKind: "memory-dream",
 			});
+			expect(background?.parentSessionId).toBe(session.id);
 			expect(getFullHistory(background!.id)).toEqual(
 				expect.arrayContaining([
 					expect.objectContaining({ content: expect.stringContaining("maintenance result") }),
@@ -1113,6 +1194,7 @@ describe("project memory", () => {
 
 		await new Promise((resolve) => setImmediate(resolve));
 		expect(await drainProjectCheckpointWriters(1)).toEqual({ drained: 0, timedOut: 1 });
+		expect(await waitForProjectCheckpointWriter(projectCwd, "session-writer-drain", 1)).toBe("timed-out");
 		expect(handle.status()).toBe("running");
 		release();
 		expect(await handle.wait()).toBe("success");

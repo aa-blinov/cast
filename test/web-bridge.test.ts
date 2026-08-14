@@ -412,6 +412,22 @@ describe("web bridge", () => {
 		);
 	});
 
+	it("exposes MiMo-compatible extraction and checkpoint fork controls", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		expect(await bridge.executeCommand(ws.id, "/memory extraction on")).toEqual({
+			ok: true,
+			result: { memoryExtractionAuto: true },
+		});
+		expect(await bridge.executeCommand(ws.id, "/memory checkpoint fork on")).toEqual({
+			ok: true,
+			result: { checkpointFork: true },
+		});
+		expect((await bridge.executeCommand(ws.id, "/memory")).result).toEqual(
+			expect.objectContaining({ memoryExtractionAuto: true, checkpointFork: true }),
+		);
+	});
+
 	it("lists automatic memory runs as independent background records", async () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();

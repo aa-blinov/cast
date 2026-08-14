@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,7 +7,10 @@ import { formatContextFilesForPrompt, resolveNestedContextFiles } from "../src/c
 import { formatLocalDate } from "../src/core/date-rollover-reminder.ts";
 import { resetDbConnectionForTests } from "../src/core/db.ts";
 import type { Message } from "../src/core/llm.ts";
+import { projectIdForCwd } from "../src/core/memory.ts";
+import { CHECKPOINT_TEMPLATE, checkpointPath, notesPath, projectMemoryPath } from "../src/core/memory-files.ts";
 import { formatRulesForTurn, loadDirectoryRules, matchAutoRules, unionStickyRules } from "../src/core/rules.ts";
+import { createSession, listBackgroundSessions, saveSession } from "../src/core/session.ts";
 import { updateSettings } from "../src/core/settings.ts";
 
 vi.mock("../src/core/llm.ts", async (importOriginal) => {
@@ -43,6 +46,7 @@ const {
 	TOOL_ABORT_GRACE_MS,
 	createAgentContextFork,
 	createAgentForkContext,
+	createAgentForkRuntimeSnapshot,
 } = await import("../src/core/loop.ts");
 const { streamAndCollect } = await import("../src/core/llm.ts");
 type AgentEvent = Parameters<Parameters<typeof runAgentLoop>[1]["onEvent"]>[0];
@@ -103,6 +107,58 @@ describe("createAgentContextFork", () => {
 		expect(fork.cachePrefixBoundary).toBeUndefined();
 		expect(fork.prefix).toEqual([]);
 		expect(fork.tail).toEqual(fork.inheritedMessages);
+	});
+
+	it("freezes the prompt, tool registry, and permission metadata with the fork", () => {
+		const tools = [{ type: "function" as const, function: { name: "read", parameters: {} } }];
+		const fork = createAgentForkContext([{ role: "user", content: "request" }], 0, {
+			systemPrompt: "parent system",
+			toolNames: ["read"],
+			toolDefinitions: tools,
+			allowedTools: ["read"],
+			disabledTools: ["bash"],
+			readOnlyBash: true,
+			permissionMode: "default",
+			model: "parent-model",
+			runtime: { projectTrusted: true, mcpServerNames: ["demo"] },
+		});
+
+		expect(fork).toMatchObject({
+			systemPrompt: "parent system",
+			toolNames: ["read"],
+			toolDefinitions: tools,
+			allowedTools: ["read"],
+			disabledTools: ["bash"],
+			readOnlyBash: true,
+			permissionMode: "default",
+			model: "parent-model",
+			runtime: { projectTrusted: true, mcpServerNames: ["demo"] },
+		});
+	});
+
+	it("persists only rehydratable runtime identities, never provider or SSH secrets", () => {
+		const snapshot = createAgentForkRuntimeSnapshot({
+			config: testConfig,
+			model: "parent-model",
+			cwd: "/tmp/project",
+			systemPrompt: "system",
+			onEvent: () => {},
+			subagentModelProvider: { baseURL: "https://subagent.invalid", apiKey: "sub-secret" },
+			sshHosts: [{ name: "prod", host: "prod.example", password: "ssh-secret" }],
+			mcpTools: [
+				{
+					type: "function",
+					function: { name: "mcp_demo_lookup", description: "[demo] lookup", parameters: {} },
+				},
+			],
+		});
+
+		expect(snapshot.subagentModelProvider).toEqual({ baseURL: "https://subagent.invalid" });
+		expect(snapshot.sshHostNames).toEqual(["prod"]);
+		expect(snapshot.mcpServerNames).toEqual(["demo"]);
+		expect(snapshot.mcpToolNames).toEqual(["mcp_demo_lookup"]);
+		expect(JSON.stringify(snapshot)).not.toContain("sub-secret");
+		expect(JSON.stringify(snapshot)).not.toContain("ssh-secret");
 	});
 });
 
@@ -183,16 +239,23 @@ describe("runAgentLoop — abort vs. error", () => {
 		const projectCwd = mkdtempSync(join(tmpdir(), "cast-checkpoint-fork-project-"));
 		process.env.HOME = fakeHome;
 		process.env.CAST_MEMORY_DIR = join(fakeHome, "memory");
+		updateSettings({ checkpointFork: true });
+		saveSession(createSession("test-model", projectCwd, { id: "fork-session" }));
 
 		const requests: Message[][] = [];
+		const toolNames: string[][] = [];
 		vi.mocked(streamAndCollect)
-			.mockImplementationOnce(async () => ({
-				content: "main answer",
-				thinking: "",
-				finishReason: "stop",
-				usage: { promptTokens: 1000, completionTokens: 2, totalTokens: 1002 },
-			}))
-			.mockImplementationOnce(async (_client, _model, messages) => {
+			.mockImplementationOnce(async (_client, _model, _messages, tools) => {
+				toolNames.push(tools.map((tool) => tool.function.name));
+				return {
+					content: "main answer",
+					thinking: "",
+					finishReason: "stop",
+					usage: { promptTokens: 1000, completionTokens: 2, totalTokens: 1002 },
+				};
+			})
+			.mockImplementationOnce(async (_client, _model, messages, tools) => {
+				toolNames.push(tools.map((tool) => tool.function.name));
 				requests.push(messages.slice());
 				messages[1] = { role: "user", content: "writer-only mutation" };
 				return { content: "checkpoint saved", thinking: "", finishReason: "stop" };
@@ -228,9 +291,12 @@ describe("runAgentLoop — abort vs. error", () => {
 
 			expect(requests).toHaveLength(1);
 			const writerMessages = requests[0]!;
+			expect(toolNames[1]).toEqual(toolNames[0]);
 			expect(writerMessages.some((message) => message.content === "before checkpoint")).toBe(true);
 			expect(writerMessages.some((message) => message.content === "after checkpoint")).toBe(false);
 			expect(writerMessages.at(-1)?.content).toContain("Fork boundary message index: 2");
+			expect(writerMessages.at(-1)?.content).toContain("complete tool registry is available and executable");
+			expect(writerMessages.at(-1)?.content).not.toContain("Use only read, write, edit, glob, and grep");
 			const boundary = writerMessages[2]!.content as Array<{ cache_control?: { type: string } }>;
 			expect(boundary[0]!.cache_control).toEqual({ type: "ephemeral" });
 			expect(typeof writerMessages[3]!.content).toBe("string");
@@ -240,6 +306,253 @@ describe("runAgentLoop — abort vs. error", () => {
 			else process.env.HOME = realHome;
 			if (realMemoryDir === undefined) delete process.env.CAST_MEMORY_DIR;
 			else process.env.CAST_MEMORY_DIR = realMemoryDir;
+			rmSync(fakeHome, { recursive: true, force: true });
+			rmSync(projectCwd, { recursive: true, force: true });
+		}
+	});
+
+	it("executes every advertised parent tool from a checkpoint fork", async () => {
+		const realHome = process.env.HOME;
+		const realMemoryDir = process.env.CAST_MEMORY_DIR;
+		const fakeHome = mkdtempSync(join(tmpdir(), "cast-checkpoint-parent-tools-home-"));
+		const projectCwd = mkdtempSync(join(tmpdir(), "cast-checkpoint-parent-tools-project-"));
+		process.env.HOME = fakeHome;
+		process.env.CAST_MEMORY_DIR = join(fakeHome, "memory");
+		updateSettings({ checkpointFork: true });
+		const sessionId = "parent-tools-session";
+		saveSession(createSession("test-model", projectCwd, { id: sessionId }));
+		const mcpDefinition = {
+			type: "function" as const,
+			function: { name: "mcp_echo", description: "Echo through the parent MCP runtime", parameters: {} },
+		};
+		let mcpCalls = 0;
+		const writerRequests: Message[][] = [];
+		let invocation = 0;
+		vi.mocked(streamAndCollect).mockImplementation(async (_client, _model, messages, tools) => {
+			invocation += 1;
+			if (invocation === 1) {
+				expect(tools.some((tool) => tool.function.name === "mcp_echo")).toBe(true);
+				return { content: "main answer", finishReason: "stop" };
+			}
+			writerRequests.push(messages.slice());
+			if (invocation === 2) {
+				expect(tools.some((tool) => tool.function.name === "mcp_echo")).toBe(true);
+				return {
+					content: "",
+					finishReason: "tool_calls",
+					toolCalls: [{ id: "mcp-1", name: "mcp_echo", arguments: "{}" }],
+				};
+			}
+			return { content: "checkpoint saved", finishReason: "stop" };
+		});
+
+		try {
+			await runAgentLoop([{ role: "user", content: "checkpoint this" }], {
+				config: { ...testConfig, contextWindow: 1000, maxResponseTokens: 100 },
+				model: "test-model",
+				modelProvider: { baseURL: "https://openrouter.ai/api/v1", apiKey: "test" },
+				cwd: projectCwd,
+				systemPrompt: "test",
+				memory: { sessionId },
+				lastPromptTokens: 1_000,
+				mcpTools: [mcpDefinition],
+				mcpToolIndex: new Map([
+					[
+						"mcp_echo",
+						{
+							definition: mcpDefinition,
+							call: async () => {
+								mcpCalls += 1;
+								return { content: "parent tool executed" };
+							},
+						},
+					],
+				]) as never,
+				onEvent: () => {},
+			});
+
+			const deadline = Date.now() + 2_000;
+			while (writerRequests.length < 2 && Date.now() < deadline)
+				await new Promise((resolve) => setTimeout(resolve, 10));
+			expect(mcpCalls).toBe(1);
+			expect(writerRequests.some((request) => JSON.stringify(request).includes("parent tool executed"))).toBe(true);
+		} finally {
+			if (realHome === undefined) delete process.env.HOME;
+			else process.env.HOME = realHome;
+			if (realMemoryDir === undefined) delete process.env.CAST_MEMORY_DIR;
+			else process.env.CAST_MEMORY_DIR = realMemoryDir;
+			rmSync(fakeHome, { recursive: true, force: true });
+			rmSync(projectCwd, { recursive: true, force: true });
+		}
+	});
+
+	it("repairs an invalid checkpoint and preserves the prior artifact after retry exhaustion", async () => {
+		const realHome = process.env.HOME;
+		const fakeHome = mkdtempSync(join(tmpdir(), "cast-checkpoint-validation-home-"));
+		const projectCwd = mkdtempSync(join(tmpdir(), "cast-checkpoint-validation-project-"));
+		process.env.HOME = fakeHome;
+		process.env.CAST_MEMORY_DIR = join(fakeHome, "memory");
+		updateSettings({ checkpointFork: true });
+		const sessionId = "validation-session";
+		const checkpointFile = checkpointPath(sessionId);
+		const writerRequests: Message[][] = [];
+		let invocation = 0;
+		vi.mocked(streamAndCollect).mockImplementation(async (_client, _model, messages) => {
+			invocation += 1;
+			if (invocation === 1) return { content: "main answer", finishReason: "stop" };
+			writerRequests.push(messages.slice());
+			if (invocation === 2) writeFileSync(checkpointFile, "# malformed checkpoint\n");
+			else writeFileSync(checkpointFile, CHECKPOINT_TEMPLATE);
+			return { content: "checkpoint saved", finishReason: "stop" };
+		});
+
+		try {
+			saveSession(createSession("test-model", projectCwd, { id: sessionId }));
+			await runAgentLoop(
+				[
+					{ role: "system", content: "system" },
+					{ role: "user", content: "checkpoint this" },
+				],
+				{
+					config: { ...testConfig, contextWindow: 1000, maxResponseTokens: 100 },
+					model: "test-model",
+					modelProvider: { baseURL: "https://openrouter.ai/api/v1", apiKey: "test" },
+					cwd: projectCwd,
+					systemPrompt: "test",
+					memory: { sessionId },
+					checkpointBoundary: -1,
+					lastPromptTokens: 1_000,
+					onEvent: () => {},
+				},
+			);
+			const deadline = Date.now() + 2_000;
+			while (writerRequests.length < 2 && Date.now() < deadline)
+				await new Promise((resolve) => setTimeout(resolve, 10));
+			expect(writerRequests).toHaveLength(2);
+			expect(JSON.stringify(writerRequests[1]?.at(-1)?.content)).toContain("failed validation");
+			expect(readFileSync(checkpointFile, "utf8")).toBe(CHECKPOINT_TEMPLATE);
+			expect(readFileSync(projectMemoryPath(projectIdForCwd(projectCwd)), "utf8")).toContain("# Project memory");
+			expect(readFileSync(notesPath(sessionId), "utf8")).toContain("# Session notes");
+		} finally {
+			if (realHome === undefined) delete process.env.HOME;
+			else process.env.HOME = realHome;
+			rmSync(fakeHome, { recursive: true, force: true });
+			rmSync(projectCwd, { recursive: true, force: true });
+		}
+	});
+
+	it("uses only the post-checkpoint delta when prefix fork is disabled", async () => {
+		const realHome = process.env.HOME;
+		const fakeHome = mkdtempSync(join(tmpdir(), "cast-checkpoint-delta-home-"));
+		const projectCwd = mkdtempSync(join(tmpdir(), "cast-checkpoint-delta-project-"));
+		process.env.HOME = fakeHome;
+		process.env.CAST_MEMORY_DIR = join(fakeHome, "memory");
+		updateSettings({ checkpointFork: false });
+		const requests: Message[][] = [];
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({
+				content: "main answer",
+				thinking: "",
+				finishReason: "stop",
+				usage: { promptTokens: 1000, completionTokens: 2, totalTokens: 1002 },
+			}))
+			.mockImplementationOnce(async (_client, _model, messages) => {
+				requests.push(messages.slice());
+				return { content: "checkpoint saved", thinking: "", finishReason: "stop" };
+			});
+
+		try {
+			saveSession(createSession("test-model", projectCwd, { id: "delta-session" }));
+			await runAgentLoop(
+				[
+					{ role: "system", content: "system" },
+					{ role: "user", content: "before checkpoint" },
+					{ role: "assistant", content: "checkpoint boundary" },
+					{ role: "user", content: "after checkpoint" },
+				],
+				{
+					config: { ...testConfig, contextWindow: 1000, maxResponseTokens: 100 },
+					model: "test-model",
+					modelProvider: { baseURL: "https://openrouter.ai/api/v1", apiKey: "test" },
+					cwd: projectCwd,
+					systemPrompt: "test",
+					memory: { sessionId: "delta-session" },
+					checkpointBoundary: 2,
+					onEvent: () => {},
+				},
+			);
+
+			const deadline = Date.now() + 2_000;
+			while (
+				!requests.some((request) => JSON.stringify(request).includes("Fork boundary message index")) &&
+				Date.now() < deadline
+			) {
+				await new Promise((resolve) => setTimeout(resolve, 10));
+			}
+			const writerMessages = requests.find((request) =>
+				JSON.stringify(request).includes("Fork boundary message index"),
+			);
+			if (!writerMessages)
+				throw new Error(
+					`checkpoint writer request was not captured: ${JSON.stringify(requests.map((request) => request.map((message) => [message.role, typeof message.content === "string" ? message.content.slice(0, 80) : message.content])))}`,
+				);
+			expect(writerMessages.some((message) => message.content === "before checkpoint")).toBe(false);
+			expect(writerMessages.some((message) => message.content === "after checkpoint")).toBe(true);
+			expect(JSON.stringify(writerMessages)).toContain("Fork boundary message index: 2");
+			expect(JSON.stringify(writerMessages)).toContain("dedicated checkpoint-writer tool registry");
+			expect(JSON.stringify(writerMessages)).not.toContain("complete tool registry is available and executable");
+			const children = listBackgroundSessions("delta-session");
+			expect(children).toHaveLength(1);
+			expect(children[0]).toMatchObject({
+				sessionKind: "background",
+				parentSessionId: "delta-session",
+				backgroundKind: "checkpoint-writer",
+			});
+			expect(children[0]?.messages.length).toBeGreaterThan(0);
+		} finally {
+			if (realHome === undefined) delete process.env.HOME;
+			else process.env.HOME = realHome;
+			rmSync(fakeHome, { recursive: true, force: true });
+			rmSync(projectCwd, { recursive: true, force: true });
+		}
+	});
+
+	it("does not spawn a writer for an empty post-checkpoint delta", async () => {
+		const realHome = process.env.HOME;
+		const fakeHome = mkdtempSync(join(tmpdir(), "cast-checkpoint-empty-home-"));
+		const projectCwd = mkdtempSync(join(tmpdir(), "cast-checkpoint-empty-project-"));
+		process.env.HOME = fakeHome;
+		process.env.CAST_MEMORY_DIR = join(fakeHome, "memory");
+		updateSettings({ checkpointFork: false });
+		vi.mocked(streamAndCollect).mockImplementationOnce(async () => ({
+			content: "main answer",
+			thinking: "",
+			finishReason: "stop",
+			usage: { promptTokens: 1000, completionTokens: 2, totalTokens: 1002 },
+		}));
+		try {
+			saveSession(createSession("test-model", projectCwd, { id: "empty-delta-session" }));
+			await runAgentLoop(
+				[
+					{ role: "system", content: "system" },
+					{ role: "user", content: "already checkpointed" },
+				],
+				{
+					config: { ...testConfig, contextWindow: 1000, maxResponseTokens: 100 },
+					model: "test-model",
+					modelProvider: { baseURL: "https://openrouter.ai/api/v1", apiKey: "test" },
+					cwd: projectCwd,
+					systemPrompt: "test",
+					memory: { sessionId: "empty-delta-session" },
+					checkpointBoundary: 100,
+					onEvent: () => {},
+				},
+			);
+			await new Promise((resolve) => setTimeout(resolve, 20));
+			expect(listBackgroundSessions("empty-delta-session")).toEqual([]);
+		} finally {
+			if (realHome === undefined) delete process.env.HOME;
+			else process.env.HOME = realHome;
 			rmSync(fakeHome, { recursive: true, force: true });
 			rmSync(projectCwd, { recursive: true, force: true });
 		}
@@ -310,7 +623,7 @@ describe("runAgentLoop — abort vs. error", () => {
 		});
 
 		expect(buildPrompt).not.toHaveBeenCalled();
-		expect(requests[0]?.[0]?.content).toContain("search it with the memory tool");
+		expect(requests[0]?.[0]?.content).not.toContain("search it with the memory tool");
 		expect(requests[0]?.[0]?.content).not.toContain("<project-memory>");
 	});
 
@@ -342,6 +655,7 @@ describe("runAgentLoop — abort vs. error", () => {
 			});
 			expect(buildPrompt).not.toHaveBeenCalled();
 			expect(requests[0]?.[0]?.content).not.toContain("search it with the memory tool");
+			expect(requests[0]?.[0]?.content).not.toContain("# Memory system");
 		} finally {
 			if (realHome === undefined) delete process.env.HOME;
 			else process.env.HOME = realHome;
@@ -362,6 +676,7 @@ describe("runAgentLoop — abort vs. error", () => {
 				sessionId: "memory-auto-extraction",
 				service: { search: () => [], buildPrompt: () => "", extractAndStoreProjectMemory: extraction },
 			},
+			memoryExtractionAuto: true,
 			onEvent: () => {},
 		});
 
@@ -369,7 +684,7 @@ describe("runAgentLoop — abort vs. error", () => {
 		await new Promise((resolve) => setImmediate(resolve));
 		expect(extraction).toHaveBeenCalledOnce();
 		const extractedMessages = extraction.mock.calls[0]?.[0].messages ?? [];
-		expect(extractedMessages[0]?.content).toContain("search it with the memory tool");
+		expect(extractedMessages[0]?.content).not.toContain("search it with the memory tool");
 		expect(extractedMessages.slice(1)).toEqual([
 			{ role: "user", content: "remember this turn" },
 			{ role: "assistant", content: "done" },
