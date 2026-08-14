@@ -116,6 +116,39 @@ describe("project memory", () => {
 		expect(prompt).not.toContain("Vitest for isolated");
 	});
 
+	it("fits retrieved memory to a token budget and prefers higher-importance facts", () => {
+		const projectCwd = join(root, "budgeted-project");
+		storeProjectMemory(projectCwd, "session-a", "turn-a", [
+			{
+				content:
+					"prefix cache architecture fact: the provider must keep the system instructions byte stable across turns.",
+				type: "architecture",
+				importance: 95,
+			},
+			{
+				content: "prefix cache incidental fact: a one-off diagnostic request once used a temporary model name.",
+				type: "general",
+				importance: 10,
+			},
+		]);
+
+		const prompt = buildMemoryPrompt(projectCwd, "prefix cache", undefined, { tokenBudget: 100 });
+
+		expect(prompt).toContain("provider must keep the system instructions byte stable");
+		expect(prompt).not.toContain("one-off diagnostic request");
+	});
+
+	it("reconstructs the durable project index when no retrieval query is available", () => {
+		const projectCwd = join(root, "reconstruction-project");
+		storeProjectMemory(projectCwd, "session-a", "turn-a", [
+			{ content: "The bridge owns one writer per session.", type: "architecture", importance: 90 },
+		]);
+
+		const prompt = buildMemoryPrompt(projectCwd, "", undefined, { tokenBudget: 120 });
+
+		expect(prompt).toContain("The bridge owns one writer per session.");
+	});
+
 	it("records retrieval and writes as durable session events", () => {
 		const projectCwd = join(root, "project");
 		const session = createSession("test-model", projectCwd);
@@ -359,7 +392,47 @@ describe("project memory", () => {
 		expect(events).toEqual(["start:first", "end:first", "start:second", "end:second"]);
 	});
 
-	it("uses isolated MiMo memory files and reconciles them into the FTS index", () => {
+	it("serializes checkpoint writes with background extraction for one project", async () => {
+		const events: string[] = [];
+		let releaseExtraction!: () => void;
+		const extractionBlocked = new Promise<void>((resolve) => {
+			releaseExtraction = resolve;
+		});
+		const service = {
+			search: () => [],
+			buildPrompt: () => "",
+			extractAndStoreProjectMemory: async () => {
+				events.push("extraction:start");
+				await extractionBlocked;
+				events.push("extraction:end");
+				return { entries: [], transcript: "" };
+			},
+		};
+		const projectCwd = join(root, "shared-writer-project");
+		const input = {
+			cwd: projectCwd,
+			sessionId: "session-shared-writer",
+			model: "test-model",
+			config: {} as AppConfig,
+			messages: [{ role: "user" as const, content: "checkpoint" }],
+		};
+
+		const extraction = scheduleProjectMemoryExtraction(input, service);
+		await new Promise((resolve) => setImmediate(resolve));
+		const writer = scheduleProjectCheckpointWriter(input, async () => {
+			events.push("checkpoint");
+		});
+
+		await new Promise((resolve) => setImmediate(resolve));
+		expect(events).toEqual(["extraction:start"]);
+		releaseExtraction();
+		await extraction;
+		await writer.wait();
+
+		expect(events).toEqual(["extraction:start", "extraction:end", "checkpoint"]);
+	});
+
+	it("uses isolated project memory files and reconciles them into the FTS index", () => {
 		const projectCwd = join(root, "project");
 		const session = createSession("test-model", projectCwd);
 		saveSession(session);
