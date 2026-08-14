@@ -2,6 +2,16 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.15.7
+
+### Fixed
+
+- **Disconnected clients no longer submit prompts.** Web UI and TUI now gate sends on a live daemon/SSE connection, keep messages pending during outages, and retry with the same client id after reconnecting without creating duplicate turns.
+
+### Internal
+
+- **Tool tests use unique per-test workspaces.** Parallel Vitest workers no longer remove one another's fixtures under `test/__test_tmp__/`.
+
 ## 0.15.6
 
 ### Fixed
