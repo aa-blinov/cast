@@ -144,6 +144,8 @@ const WORKTREE_REMOVE_PREFIX_RE = /^(?:remove|rm)\s*/;
 const MEMORY_BUDGET_COMMAND_RE = /^\/memory budget (\d+)$/;
 const MEMORY_FLOOR_COMMAND_RE = /^\/memory floor (0(?:\.\d+)?|1(?:\.0)?)$/;
 const MEMORY_RECONCILE_COMMAND_RE = /^\/memory reconcile (on|off)$/;
+const MEMORY_EXTRACTION_COMMAND_RE = /^\/memory extraction (on|off)$/;
+const MEMORY_CHECKPOINT_FORK_COMMAND_RE = /^\/memory checkpoint fork (on|off)$/;
 const MEMORY_AUTO_TOGGLE_COMMAND_RE = /^\/memory (dream|distill) (on|off)$/;
 const MEMORY_AUTO_INTERVAL_COMMAND_RE = /^\/memory (dream|distill) interval (\d+)$/;
 const MEMORY_CANCEL_RUN_COMMAND_RE = /^\/memory cancel ([a-f0-9-]+)$/;
@@ -2382,6 +2384,20 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		const enabled = memoryAutoToggleMatch[2] === "on";
 		updateSettings(kind === "dream" ? { memoryDreamAuto: enabled } : { memoryDistillAuto: enabled });
 		showNotice(`[Automatic ${kind}: ${enabled ? "enabled" : "disabled"}]`);
+		return;
+	}
+
+	const memoryExtractionMatch = input.match(MEMORY_EXTRACTION_COMMAND_RE);
+	if (memoryExtractionMatch) {
+		updateSettings({ memoryExtractionAuto: memoryExtractionMatch[1] === "on" });
+		showNotice(`[Per-turn memory extraction: ${memoryExtractionMatch[1] === "on" ? "enabled" : "disabled"}]`);
+		return;
+	}
+
+	const memoryCheckpointForkMatch = input.match(MEMORY_CHECKPOINT_FORK_COMMAND_RE);
+	if (memoryCheckpointForkMatch) {
+		updateSettings({ checkpointFork: memoryCheckpointForkMatch[1] === "on" });
+		showNotice(`[Checkpoint prefix fork: ${memoryCheckpointForkMatch[1] === "on" ? "enabled" : "disabled"}]`);
 		return;
 	}
 

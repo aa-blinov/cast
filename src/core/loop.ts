@@ -4,8 +4,16 @@ import {
 	type AgentForkContext as ActorForkContext,
 	type AgentActorRecoverySpec,
 	type AgentActorSnapshot,
+	type AgentForkRuntimeSnapshot,
 	agentActorRegistry,
 } from "./actors.ts";
+import {
+	buildCheckpointRepairPrompt,
+	type CheckpointValidationIssue,
+	extractDiscoveredTitles,
+	hasBlockingCheckpointIssues,
+	validateCheckpointArtifacts,
+} from "./checkpoint-validation.ts";
 import {
 	formatPostCompactReminder,
 	injectPostCompactReminder,
@@ -28,9 +36,10 @@ import {
 	resolvePromptCacheStrategy,
 	streamAndCollect,
 } from "./llm.ts";
-import { type McpToolHandle, mcpServerNameFromDescription } from "./mcp.ts";
+import { closeMcpConnections, type McpToolHandle, mcpServerNameFromDescription } from "./mcp.ts";
 import {
 	type CheckpointWriterHandle,
+	type CheckpointWriterToolRuntime,
 	createProjectMemoryService,
 	type MemoryCheckpointWriterInput,
 	type MemoryMaintenanceAgentInput,
@@ -42,8 +51,20 @@ import {
 	scheduleAutomaticMemoryMaintenance,
 	scheduleProjectCheckpointWriter,
 	scheduleProjectMemoryExtraction,
+	waitForProjectCheckpointWriter,
 } from "./memory.ts";
-import { checkpointPath, ensureMemoryFiles, notesPath, projectMemoryPath, tasksDir } from "./memory-files.ts";
+import {
+	checkpointPath,
+	ensureMemoryFiles,
+	globalMemoryPath,
+	notesPath,
+	projectMemoryPath,
+	readMemoryFile,
+	readProjectMemory,
+	readSessionMemory,
+	tasksDir,
+	writeMemoryFile,
+} from "./memory-files.ts";
 import {
 	collectOpenWorkSteps,
 	defaultOpenWorkGateConfig,
@@ -53,18 +74,34 @@ import {
 } from "./open-work-gate.ts";
 import type { Persona } from "./personas.ts";
 import { checkReadOnlyCommand, listPlanNames, readActivePlan, TERMINAL_TOOL_NAMES } from "./plan.ts";
+import { type ProjectResolverDeps, resolveMcpForCwd } from "./project.ts";
 import { promptsDir, readRequiredPrompt } from "./prompts.ts";
 import {
+	commitCheckpointWatermark,
 	compactMessages,
+	createSession,
 	estimateTokens,
 	fileTagsFromCompactionSummary,
+	findCheckpointBoundaryForMessages,
+	getCheckpointWatermark,
+	getMessagesAfterCheckpoint,
+	loadSession,
 	markImageMessagesOutOfContext,
+	saveSession,
 	shouldCompact,
 } from "./session.ts";
-import { isMemoryEnabled, isMemoryWriteEnabled, loadSettings, memoryPromptBudget } from "./settings.ts";
-import type { SshHost } from "./ssh.ts";
+import {
+	checkpointFork as checkpointForkSetting,
+	isMemoryEnabled,
+	isMemoryWriteEnabled,
+	loadSettings,
+	memoryExtractionAuto,
+	memoryPromptBudget,
+} from "./settings.ts";
+import { resolveSshHosts, type SshHost } from "./ssh.ts";
 import type { SubagentPrompt } from "./subagents.ts";
 import { formatTodoList, remainingTodoCount, type TodoItem, validateTodos } from "./todo.ts";
+import { BackgroundTaskRegistry } from "./tools/bash-background.ts";
 import { type CompletedToolCallStatus, completedToolCallStatus, normalizeToolResultError } from "./tools/shared.ts";
 import {
 	type BashBackgroundDeps,
@@ -77,6 +114,7 @@ import {
 import { acquireTurnRunner, clearTurnRunner, markTurnRunner, releaseTurnRunner } from "./turn-runner-state.ts";
 
 const IMAGE_VISION_RE = /image|vision/i;
+const MEMORY_EMPTY_LINE_RE = /^\(none/;
 const DEFAULT_MEMORY_SERVICE = createProjectMemoryService();
 
 // How many identical consecutive tool calls (same name + same args) before
@@ -89,6 +127,11 @@ const MEMORY_RECALL_HINT = [
 	"When relevant, search it with the memory tool using 1–3 distinctive terms before asking the user.",
 	"</system-reminder>",
 ].join("\n");
+const MEMORY_SYSTEM_PROMPT = readRequiredPrompt(promptsDir, "memory-system.md");
+const CHECKPOINT_REPAIR_ATTEMPTS = 2;
+const CHECKPOINT_WRITER_TIMEOUT_MS = 5 * 60_000;
+const CHECKPOINT_REBUILD_WAIT_MS = 30_000;
+const CHECKPOINT_FIRST_REBUILD_WAIT_MS = 5 * 60_000;
 
 function memoryPromptBudgetTokens(config: AppConfig): number {
 	const inputBudget = Math.max(0, config.contextWindow - config.maxResponseTokens);
@@ -98,6 +141,32 @@ function memoryPromptBudgetTokens(config: AppConfig): number {
 			? memoryPromptBudget(settings)
 			: Math.min(4_096, Math.max(256, Math.floor(inputBudget * 0.05)));
 	return Math.min(configuredBudget, Math.max(256, inputBudget));
+}
+
+function hasMemoryOrTasks(cwd: string, sessionId: string): boolean {
+	const projectText = readProjectMemory(projectIdForCwd(cwd));
+	const sessionMemory = readSessionMemory(sessionId);
+	const meaningful = (text: string): boolean =>
+		text.split("\n").some((line) => {
+			const value = line.trim();
+			return (
+				value.length > 0 && !value.startsWith("#") && !value.startsWith("_") && !MEMORY_EMPTY_LINE_RE.test(value)
+			);
+		});
+	return (
+		meaningful(projectText) ||
+		meaningful(sessionMemory.checkpoint) ||
+		meaningful(sessionMemory.notes) ||
+		Boolean(sessionMemory.taskProgress.trim())
+	);
+}
+
+function memorySystemPrompt(cwd: string, sessionId: string): string {
+	const projectId = projectIdForCwd(cwd);
+	return MEMORY_SYSTEM_PROMPT.replace("{{MEMORY_PATH}}", projectMemoryPath(projectId))
+		.replace("{{GLOBAL_MEMORY_PATH}}", globalMemoryPath())
+		.replace("{{CHECKPOINT_PATH}}", checkpointPath(sessionId))
+		.replace("{{NOTES_PATH}}", notesPath(sessionId));
 }
 
 // Running cap on embedded image_url data across the whole live context (see
@@ -471,6 +540,21 @@ async function performCompaction(
 	loopConfig: LoopConfig,
 	onEvent: (event: AgentEvent) => void,
 ): Promise<CompactSessionResult> {
+	if (loopConfig.memory?.sessionId) {
+		const waitMs =
+			getCheckpointWatermark(loopConfig.memory.sessionId) === undefined
+				? CHECKPOINT_FIRST_REBUILD_WAIT_MS
+				: CHECKPOINT_REBUILD_WAIT_MS;
+		const writerState = await waitForProjectCheckpointWriter(
+			loopConfig.cwd,
+			loopConfig.memory.sessionId,
+			waitMs,
+			signal,
+		);
+		if (writerState === "timed-out") {
+			loopConfig.onWarning?.("Checkpoint writer did not settle before rebuild; using the last durable files");
+		}
+	}
 	if (loopConfig.hooks) {
 		await runHooksForEvent(loopConfig.hooks, {
 			event: "PreCompact",
@@ -635,6 +719,10 @@ export interface LoopConfig {
 	subagentModelProvider?: { baseURL: string; apiKey: string };
 	/** Tool names to exclude from the definitions sent to the model. */
 	disabledTools?: Set<string>;
+	/** Use an immutable parent tool registry for a cache-preserving fork. */
+	toolDefinitionsOverride?: Tool[];
+	/** Tools that may actually execute when the advertised fork registry is broader. */
+	executionAllowedTools?: Set<string>;
 	/**
 	 * Optional allowlist for *built-in* tools only. Entries are exact names
 	 * or `*`-globs (`plan_*`, `web_*`). When set, only matching builtin names
@@ -679,6 +767,10 @@ export interface LoopConfig {
 	lastPromptTokens?: number;
 	/** Last durable checkpoint boundary in the current message snapshot. */
 	checkpointBoundary?: number;
+	/** MiMo-compatible checkpoint writer mode; false uses only the post-checkpoint delta. */
+	checkpointFork?: boolean;
+	/** Opt-in compatibility path for Cast's legacy per-turn memory extraction. */
+	memoryExtractionAuto?: boolean;
 	/** Request-only cache marker for the fork prefix. */
 	cachePrefixBoundary?: number;
 	/** Run configured dream/distill maintenance when this is a fresh top-level session. */
@@ -687,6 +779,8 @@ export interface LoopConfig {
 	automaticMemoryMessages?: Message[];
 	/** Receives the background checkpoint writer handle after it is scheduled. */
 	onCheckpointWriter?: (handle: CheckpointWriterHandle) => void;
+	/** Parent fork captured after the final prompt/tool assembly for checkpoint writers. */
+	checkpointForkContext?: AgentForkContext;
 	/**
 	 * Optional per-turn system prompt rebuild. Called before every model
 	 * request (each inner tool-call iteration, not just once per turn) with
@@ -785,6 +879,11 @@ function checkpointWriterPrompt(input: MemoryCheckpointWriterInput): string {
 	const projectMemory = projectMemoryPath(projectId);
 	ensureMemoryFiles(input.sessionId, projectId);
 	return [
+		"You are operating in checkpoint-writer mode for this request. Ignore the general coding-agent task framing and perform only checkpoint and project-memory maintenance.",
+		input.checkpointFork === true
+			? "The parent fork's complete tool registry is available and executable. Use the exact parent tool contract when the checkpoint work requires it; do not assume that only file tools are available."
+			: "This is a dedicated checkpoint-writer tool registry. Use the tools advertised for this writer and do not assume that parent-only tools are available.",
+		"",
 		"Checkpoint paths — use these absolute paths verbatim:",
 		`CHECKPOINT_PATH = ${checkpointPath(input.sessionId)}`,
 		`MEMORY_PATH = ${projectMemory}`,
@@ -792,10 +891,75 @@ function checkpointWriterPrompt(input: MemoryCheckpointWriterInput): string {
 		`NOTES_PATH = ${notesPath(input.sessionId)}`,
 		"",
 		"Read the existing checkpoint, MEMORY.md, and notes.md first. Update the files in place using the file tools. Keep all required checkpoint sections. Do not edit source code.",
+		"For every discovered knowledge entry, include a concise Why: and How to apply: line. Keep Next concrete; do not write filler such as continue or resume.",
+		"If a section exceeds its budget, move the least important material into a topic-named checkpoint-<topic>.md or MEMORY-<topic>.md spillover and leave a short index line.",
 		"",
 		`Fork boundary message index: ${input.checkpointBoundary ?? -1}`,
 		"The forked conversation before this instruction is the source of truth. Read the existing files, then update them in place.",
 	].join("\n");
+}
+
+export function createAgentForkRuntimeSnapshot(loopConfig: LoopConfig): AgentForkRuntimeSnapshot {
+	return {
+		personas: loopConfig.personas ? structuredClone(loopConfig.personas) : undefined,
+		currentPersona: loopConfig.currentPersona,
+		subagentPrompts: loopConfig.subagentPrompts ? structuredClone(loopConfig.subagentPrompts) : undefined,
+		subagentModel: loopConfig.subagentModel,
+		subagentModelProvider: loopConfig.subagentModelProvider
+			? { baseURL: loopConfig.subagentModelProvider.baseURL }
+			: undefined,
+		disabledTools: loopConfig.disabledTools ? [...loopConfig.disabledTools] : undefined,
+		allowedTools: loopConfig.allowedTools,
+		projectTrusted: loopConfig.projectTrusted,
+		permissionMode: loopConfig.permissionMode,
+		noSkills: loopConfig.noSkills,
+		cliSkillPaths: loopConfig.cliSkillPaths,
+		planState: loopConfig.planState
+			? {
+					enabled: loopConfig.planState.enabled,
+					plansDir: loopConfig.planState.plansDir,
+					activePlanPath: loopConfig.planState.activePlanPath,
+					planQuestion: loopConfig.planState.planQuestion,
+					planTransition: loopConfig.planState.planTransition,
+				}
+			: undefined,
+		hooks: loopConfig.hooks ? structuredClone(loopConfig.hooks) : undefined,
+		skills: loopConfig.skills ? structuredClone(loopConfig.skills) : undefined,
+		sshHostNames: loopConfig.sshHosts?.map((host) => host.name),
+		mcpServerNames: loopConfig.mcpTools
+			?.map((tool) => mcpServerNameFromDescription(tool.function.description))
+			.filter((name): name is string => name !== undefined),
+		mcpToolNames: loopConfig.mcpTools?.map((tool) => tool.function.name),
+		mcpPromptSuffix: loopConfig.mcpPromptSuffix,
+	};
+}
+
+function checkpointWriterRuntime(loopConfig: LoopConfig): CheckpointWriterToolRuntime {
+	const runtimeSnapshot = createAgentForkRuntimeSnapshot(loopConfig);
+	return {
+		confirmBash: loopConfig.confirmBash,
+		confirmWrite: loopConfig.confirmWrite,
+		mcpTools: loopConfig.mcpTools,
+		mcpToolIndex: loopConfig.mcpToolIndex,
+		personas: loopConfig.personas,
+		currentPersona: loopConfig.currentPersona,
+		subagentPrompts: loopConfig.subagentPrompts,
+		subagentModel: loopConfig.subagentModel,
+		subagentModelProvider: loopConfig.subagentModelProvider,
+		disabledTools: loopConfig.disabledTools,
+		allowedTools: loopConfig.allowedTools,
+		projectTrusted: loopConfig.projectTrusted,
+		noSkills: loopConfig.noSkills,
+		cliSkillPaths: loopConfig.cliSkillPaths,
+		planState: loopConfig.planState,
+		hooks: loopConfig.hooks,
+		skills: loopConfig.skills,
+		sshHosts: loopConfig.sshHosts,
+		backgroundBash: loopConfig.backgroundBash,
+		mcpPromptSuffix: loopConfig.mcpPromptSuffix,
+		beforeFileWrite: loopConfig.beforeFileWrite,
+		snapshot: runtimeSnapshot,
+	};
 }
 
 function checkpointWriterRecoverySpec(input: MemoryCheckpointWriterInput): AgentActorRecoverySpec {
@@ -803,9 +967,12 @@ function checkpointWriterRecoverySpec(input: MemoryCheckpointWriterInput): Agent
 		kind: "checkpoint-writer",
 		cwd: input.cwd,
 		sessionId: input.sessionId,
+		writerSessionId: input.writerSessionId,
+		parentSystemPrompt: input.parentSystemPrompt,
 		model: input.model,
 		providerBaseURL: input.providerOverride?.baseURL ?? input.config.baseURL,
 		checkpointBoundary: input.checkpointBoundary ?? -1,
+		checkpointFork: input.checkpointFork === true,
 		config: {
 			baseURL: input.config.baseURL,
 			contextWindow: input.config.contextWindow,
@@ -829,9 +996,20 @@ export type AgentContextFork = AgentForkContext;
 export function createAgentForkContext(
 	messages: Message[],
 	boundaryIndex: number,
-	metadata?: Pick<AgentForkContext, "systemPrompt" | "toolNames" | "model">,
+	metadata?: Pick<
+		AgentForkContext,
+		| "systemPrompt"
+		| "toolNames"
+		| "toolDefinitions"
+		| "allowedTools"
+		| "disabledTools"
+		| "readOnlyBash"
+		| "permissionMode"
+		| "model"
+		| "runtime"
+	>,
 ): AgentForkContext {
-	const snapshot = structuredClone(messages);
+	const snapshot = structuredClone([...messages]);
 	const boundary = Math.max(-1, Math.min(boundaryIndex, snapshot.length - 1));
 	return {
 		messages: snapshot,
@@ -848,11 +1026,13 @@ export function createAgentContextFork(messages: Message[], boundaryIndex: numbe
 	return createAgentForkContext(messages, boundaryIndex);
 }
 
-function checkpointWriterMessages(fork: AgentForkContext): Message[] {
-	// A real checkpoint boundary is a hard causal boundary for the writer. The
-	// first checkpoint has no boundary yet, so it necessarily uses the complete
-	// inherited transcript; later writers only receive the durable prefix.
-	return fork.boundaryIndex >= 0 ? fork.prefix : fork.inheritedMessages;
+function checkpointWriterMessages(fork: AgentForkContext, forkMode: boolean): Message[] {
+	// A first checkpoint has no prior durable boundary, so both modes receive the
+	// complete transcript. Later no-fork writers only receive the new delta.
+	if (fork.boundaryIndex < 0) return fork.inheritedMessages;
+	if (forkMode) return fork.prefix;
+	const firstUser = fork.tail.findIndex((message) => message.role === "user");
+	return firstUser < 0 ? [] : fork.tail.slice(firstUser);
 }
 
 export async function runMemoryMaintenanceAgent(
@@ -898,50 +1078,143 @@ export async function runMemoryMaintenanceAgent(
 
 async function runCheckpointWriter(input: MemoryCheckpointWriterInput): Promise<void> {
 	if (!isMemoryWriteEnabled()) return;
-	const fork = createAgentForkContext(input.messages, input.checkpointBoundary ?? -1);
-	const actor = agentActorRegistry.spawn(
-		{
-			parentSessionId: input.sessionId,
-			sessionId: input.sessionId,
-			agent: "checkpoint-writer",
-			mode: "subagent",
-			background: true,
-			lifecycle: "persistent",
-			forkContext: fork,
-			recovery: checkpointWriterRecoverySpec(input),
-		},
-		input.signal,
-	);
+	const forkMode = input.checkpointFork === true;
+	const fork = input.parentForkContext
+		? structuredClone(input.parentForkContext)
+		: createAgentForkContext(input.messages, input.checkpointBoundary ?? -1, {
+				systemPrompt: input.parentSystemPrompt,
+				model: input.model,
+			});
+	if (!forkMode) fork.cachePrefixBoundary = undefined;
+	if (!forkMode && fork.boundaryIndex >= 0 && checkpointWriterMessages(fork, false).length === 0) return;
+	const writerSession = input.writerSessionId
+		? loadSession(input.writerSessionId)
+		: createSession(input.model, input.cwd, {
+				title: `checkpoint-writer: ${input.sessionId}`,
+				parentSessionId: input.sessionId,
+				sessionKind: "background",
+				backgroundKind: "checkpoint-writer",
+			});
+	if (!writerSession) throw new Error(`Checkpoint writer session ${input.writerSessionId} was not found`);
+	const projectId = projectIdForCwd(input.cwd);
+	const artifactPaths = {
+		checkpoint: checkpointPath(input.sessionId),
+		memory: projectMemoryPath(projectId),
+		notes: notesPath(input.sessionId),
+	};
+	const previousArtifacts = {
+		checkpoint: readMemoryFile(artifactPaths.checkpoint),
+		memory: readMemoryFile(artifactPaths.memory),
+		notes: readMemoryFile(artifactPaths.notes),
+	};
+	let writerMessages = [
+		...checkpointWriterMessages(fork, forkMode),
+		{ role: "user" as const, content: checkpointWriterPrompt(input) },
+	];
+	writerSession.messages = structuredClone(writerMessages);
+	saveSession(writerSession);
+	const actorSpec = {
+		parentSessionId: input.sessionId,
+		sessionId: writerSession.id,
+		agent: "checkpoint-writer",
+		mode: "subagent" as const,
+		background: true,
+		lifecycle: "persistent" as const,
+		forkContext: fork,
+		recovery: checkpointWriterRecoverySpec({ ...input, writerSessionId: writerSession.id }),
+	};
+	const actor = input.writerActorId
+		? agentActorRegistry.resume(input.writerActorId, input.signal, actorSpec)
+		: agentActorRegistry.spawn(actorSpec, input.signal);
+	if (!actor) throw new Error(`Checkpoint writer actor ${input.writerActorId} is no longer recoverable`);
 	await actor.run(async (actorSignal) => {
-		const timeout = setTimeout(() => actor.cancel(), 120_000);
+		const timeout = setTimeout(() => actor.cancel(), CHECKPOINT_WRITER_TIMEOUT_MS);
 		timeout.unref();
 		try {
 			const actorFork = actor.snapshot().forkContext;
 			if (!actorFork) throw new Error("Checkpoint writer actor was created without a fork context");
-			await runAgentLoop(
-				[...checkpointWriterMessages(actorFork), { role: "user", content: checkpointWriterPrompt(input) }],
-				{
+			let validationIssues: CheckpointValidationIssue[] = [];
+			for (let attempt = 0; attempt < CHECKPOINT_REPAIR_ATTEMPTS; attempt++) {
+				// Repair attempts must be sequential: each pass validates the files produced by the previous pass.
+				// biome-ignore lint/performance/noAwaitInLoops: checkpoint repair is intentionally sequential
+				writerMessages = await runAgentLoop(writerMessages, {
 					config: input.config,
 					model: input.model,
 					modelProvider: input.providerOverride,
 					cwd: input.cwd,
-					systemPrompt: CHECKPOINT_WRITER_SYSTEM_PROMPT,
+					systemPrompt: forkMode
+						? (actorFork.systemPrompt ?? CHECKPOINT_WRITER_SYSTEM_PROMPT)
+						: CHECKPOINT_WRITER_SYSTEM_PROMPT,
 					signal: actorSignal,
 					onEvent: () => {},
 					onWarning: () => {},
-					allowedTools: ["read", "write", "edit", "glob", "grep"],
-					disabledTools: new Set(["bash", "task", "memory", "web_search", "web_fetch", "ssh", "skill"]),
-					personas: [],
-					subagentPrompts: [],
-					mcpTools: [],
-					skills: [],
-					noSkills: true,
-					projectTrusted: false,
+					...(forkMode && actorFork.toolDefinitions
+						? {
+								toolDefinitionsOverride: actorFork.toolDefinitions,
+								...(input.parentToolRuntime ?? {}),
+							}
+						: {
+								allowedTools: ["read", "write", "edit", "glob", "grep"],
+								disabledTools: new Set(["bash", "task", "memory", "web_search", "web_fetch", "ssh", "skill"]),
+								personas: [],
+								subagentPrompts: [],
+								mcpTools: [],
+								skills: [],
+								noSkills: true,
+								projectTrusted: false,
+							}),
+					sessionId: writerSession.id,
 					checkpointBoundary: actorFork.boundaryIndex,
 					cachePrefixBoundary: actorFork.cachePrefixBoundary,
-				},
+				});
+				writerSession.messages = structuredClone(writerMessages);
+				saveSession(writerSession);
+				validationIssues = validateCheckpointArtifacts({
+					checkpoint: readMemoryFile(artifactPaths.checkpoint),
+					memory: readMemoryFile(artifactPaths.memory),
+					notes: readMemoryFile(artifactPaths.notes),
+					taskProgress: { [`tasks/${input.sessionId}`]: readSessionMemory(input.sessionId).taskProgress },
+					priorDiscoveredTitles: new Set(extractDiscoveredTitles(previousArtifacts.checkpoint)),
+					priorCheckpoint: previousArtifacts.checkpoint,
+				});
+				if (!hasBlockingCheckpointIssues(validationIssues)) {
+					reconcileProjectMemoryFiles(input.cwd, input.sessionId);
+					const watermarkTarget = checkpointCommitTarget(input, forkMode);
+					if (!watermarkTarget || !commitCheckpointWatermark(input.sessionId, watermarkTarget)) {
+						const invalidSuffix = `.invalid.watermark.${Date.now()}`;
+						for (const [name, path] of Object.entries(artifactPaths)) {
+							const current = readMemoryFile(path);
+							if (current !== previousArtifacts[name as keyof typeof previousArtifacts]) {
+								writeMemoryFile(`${path}${invalidSuffix}`, current);
+							}
+							writeMemoryFile(path, previousArtifacts[name as keyof typeof previousArtifacts]);
+						}
+						throw new Error("Checkpoint writer produced valid files but no persisted message could be committed");
+					}
+					return;
+				}
+				if (attempt + 1 < CHECKPOINT_REPAIR_ATTEMPTS) {
+					writerMessages = [
+						...writerMessages,
+						{
+							role: "user",
+							content: buildCheckpointRepairPrompt(validationIssues, artifactPaths),
+						},
+					];
+				}
+			}
+			const invalidSuffix = `.invalid.${Date.now()}`;
+			for (const [name, path] of Object.entries(artifactPaths)) {
+				const current = readMemoryFile(path);
+				if (current !== previousArtifacts[name as keyof typeof previousArtifacts])
+					writeMemoryFile(`${path}${invalidSuffix}`, current);
+				writeMemoryFile(path, previousArtifacts[name as keyof typeof previousArtifacts]);
+			}
+			throw new Error(
+				`Checkpoint writer output failed validation after ${CHECKPOINT_REPAIR_ATTEMPTS} attempts: ${validationIssues
+					.map((issue) => `${issue.file}: ${issue.detail}`)
+					.join("; ")}`,
 			);
-			reconcileProjectMemoryFiles(input.cwd, input.sessionId);
 		} finally {
 			clearTimeout(timeout);
 		}
@@ -960,15 +1233,89 @@ async function recoverCheckpointWriter(snapshot: AgentActorSnapshot): Promise<vo
 			: undefined;
 	if (!credentials) throw new Error(`No credentials available for checkpoint provider ${recovery.providerBaseURL}`);
 	const config = { ...recovery.config, apiKey: credentials.apiKey };
-	await runCheckpointWriter({
-		cwd: recovery.cwd,
-		sessionId: recovery.sessionId,
-		model: recovery.model,
-		config,
-		messages: snapshot.forkContext?.inheritedMessages ?? [],
-		providerOverride: recovery.providerBaseURL === config.baseURL ? undefined : credentials,
-		checkpointBoundary: recovery.checkpointBoundary,
-	});
+	const runtimeSnapshot = snapshot.forkContext?.runtime;
+	const subagentProvider = runtimeSnapshot?.subagentModelProvider
+		? ((): { baseURL: string; apiKey: string } | undefined => {
+				const provider = (settings.providers ?? []).find(
+					(candidate) => candidate.url === runtimeSnapshot.subagentModelProvider?.baseURL,
+				);
+				if (provider?.apiKey) return { baseURL: provider.url, apiKey: provider.apiKey };
+				if (settings.providerUrl === runtimeSnapshot.subagentModelProvider?.baseURL && settings.apiKey) {
+					return { baseURL: settings.providerUrl, apiKey: settings.apiKey };
+				}
+				return undefined;
+			})()
+		: undefined;
+	const recoveredSshHosts = runtimeSnapshot?.sshHostNames
+		? resolveSshHosts(recovery.cwd, runtimeSnapshot.projectTrusted === true).filter((host) =>
+				runtimeSnapshot.sshHostNames?.includes(host.name),
+			)
+		: undefined;
+	let mcpConnections: Awaited<ReturnType<typeof resolveMcpForCwd>>["connections"] = [];
+	let parentToolRuntime: CheckpointWriterToolRuntime | undefined = runtimeSnapshot
+		? {
+				...runtimeSnapshot,
+				// Interactive confirmation callbacks cannot survive a process restart.
+				// Preserve bypass semantics, but fail closed for dangerous commands in
+				// default mode instead of silently disabling the permission gate.
+				confirmBash: runtimeSnapshot.permissionMode === "bypass" ? undefined : async () => false,
+				disabledTools: runtimeSnapshot.disabledTools ? new Set(runtimeSnapshot.disabledTools) : undefined,
+				subagentModelProvider: subagentProvider,
+				sshHosts: recoveredSshHosts,
+				backgroundBash: {
+					registry: new BackgroundTaskRegistry(),
+					followUpQueue: new MessageQueue(),
+					isRunning: () => true,
+				},
+			}
+		: undefined;
+	if (runtimeSnapshot?.mcpServerNames?.length || runtimeSnapshot?.mcpToolNames?.length) {
+		const mcp = await resolveMcpForCwd(
+			{
+				noSkills: true,
+				noMcp: false,
+				cliSkillPaths: [],
+				cliMcpPaths: [],
+				settings,
+				pickers: {} as ProjectResolverDeps["pickers"],
+			},
+			recovery.cwd,
+			runtimeSnapshot.projectTrusted === true,
+			settings.disabledMcpServers ?? [],
+		);
+		const parentMcpServers = new Set(runtimeSnapshot.mcpServerNames ?? []);
+		const parentMcpNames = new Set(runtimeSnapshot.mcpToolNames ?? []);
+		const parentMcpTools = mcp.toolDefinitions.filter((tool) => {
+			const server = mcpServerNameFromDescription(tool.function.description);
+			return parentMcpNames.has(tool.function.name) || (server !== undefined && parentMcpServers.has(server));
+		});
+		const recoveredMcpNames = new Set(parentMcpTools.map((tool) => tool.function.name));
+		mcpConnections = mcp.connections;
+		parentToolRuntime = {
+			...(parentToolRuntime ?? {}),
+			mcpTools: parentMcpTools,
+			mcpToolIndex: new Map([...mcp.toolIndex.entries()].filter(([name]) => recoveredMcpNames.has(name))),
+		};
+	}
+	try {
+		await runCheckpointWriter({
+			cwd: recovery.cwd,
+			sessionId: recovery.sessionId,
+			writerSessionId: recovery.writerSessionId ?? snapshot.sessionId,
+			writerActorId: snapshot.id,
+			parentSystemPrompt: recovery.parentSystemPrompt,
+			parentForkContext: snapshot.forkContext,
+			parentToolRuntime,
+			model: recovery.model,
+			config,
+			messages: snapshot.forkContext?.inheritedMessages ?? [],
+			providerOverride: recovery.providerBaseURL === config.baseURL ? undefined : credentials,
+			checkpointBoundary: recovery.checkpointBoundary,
+			checkpointFork: recovery.checkpointFork,
+		});
+	} finally {
+		if (mcpConnections.length > 0) await closeMcpConnections(mcpConnections);
+	}
 }
 
 async function recoverMemoryMaintenance(snapshot: AgentActorSnapshot): Promise<void> {
@@ -1026,6 +1373,27 @@ function findCheckpointBoundary(messages: Message[]): number {
 	return -1;
 }
 
+function checkpointCommitTarget(input: MemoryCheckpointWriterInput, forkMode: boolean): Message | undefined {
+	if (forkMode && (input.checkpointBoundary ?? -1) >= 0) {
+		return input.messages[input.checkpointBoundary!];
+	}
+	for (let i = input.messages.length - 1; i >= 0; i--) {
+		if (input.messages[i]?.role !== "system") return input.messages[i];
+	}
+	return undefined;
+}
+
+function persistCheckpointSource(sessionId: string, messages: Message[]): void {
+	const session = loadSession(sessionId);
+	if (!session) return;
+	// The writer runs after the loop returns and may outlive the UI's final
+	// onMessagesChanged callback. Persist this exact source snapshot before
+	// handing it to the background actor, so a successful file write always
+	// has a message row to watermark atomically.
+	session.messages = messages.slice();
+	saveSession(session);
+}
+
 // ============================================================================
 // Entry point
 // ============================================================================
@@ -1062,22 +1430,38 @@ export async function runAgentLoop(initialMessages: Message[], loopConfig: LoopC
 		loopConfig.onEvent = originalOnEvent;
 	}
 	if (shouldStartCheckpointWriter(loopConfig, tracked)) {
+		persistCheckpointSource(loopConfig.memory!.sessionId, tracked);
+		const checkpointFork = loopConfig.checkpointFork ?? checkpointForkSetting();
+		const checkpointBoundary = loopConfig.checkpointBoundary ?? findCheckpointBoundary(tracked);
+		const durableDelta =
+			!checkpointFork && checkpointBoundary < 0 && getCheckpointWatermark(loopConfig.memory!.sessionId) !== undefined
+				? getMessagesAfterCheckpoint(loopConfig.memory!.sessionId)
+				: [];
 		const writerHandle = scheduleProjectCheckpointWriter(
 			{
 				cwd: loopConfig.cwd,
 				sessionId: loopConfig.memory!.sessionId,
 				model: loopConfig.model,
 				config: loopConfig.config,
-				messages: tracked,
+				messages: durableDelta.length > 0 ? durableDelta : tracked,
 				providerOverride: loopConfig.modelProvider,
-				checkpointBoundary: loopConfig.checkpointBoundary ?? findCheckpointBoundary(tracked),
+				checkpointBoundary: durableDelta.length > 0 ? -1 : checkpointBoundary,
+				checkpointFork,
+				parentSystemPrompt: loopConfig.checkpointForkContext?.systemPrompt,
+				parentForkContext: loopConfig.checkpointForkContext,
+				parentToolRuntime: checkpointWriterRuntime(loopConfig),
 			},
 			runCheckpointWriter,
 			loopConfig.onWarning,
 		);
 		loopConfig.onCheckpointWriter?.(writerHandle);
 	}
-	if (terminalReason === "stop" && loopConfig.memory && isMemoryWriteEnabled()) {
+	if (
+		terminalReason === "stop" &&
+		loopConfig.memory &&
+		isMemoryWriteEnabled() &&
+		(loopConfig.memoryExtractionAuto ?? memoryExtractionAuto())
+	) {
 		const memoryService = loopConfig.memory.service ?? DEFAULT_MEMORY_SERVICE;
 		scheduleProjectMemoryExtraction(
 			{
@@ -1128,6 +1512,9 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 	const promptCacheBody = promptCacheRequestBody(promptCacheStrategy);
 	const memoryBudgetTokens = memoryPromptBudgetTokens(config);
 	let checkpointBoundary = loopConfig.checkpointBoundary ?? findCheckpointBoundary(messages);
+	if (checkpointBoundary < 0 && loopConfig.sessionId) {
+		checkpointBoundary = findCheckpointBoundaryForMessages(loopConfig.sessionId, messages);
+	}
 	loopConfig.checkpointBoundary = checkpointBoundary;
 	const memoryEnabled = loopConfig.memory !== undefined && isMemoryEnabled();
 	const memoryService = memoryEnabled ? (loopConfig.memory?.service ?? DEFAULT_MEMORY_SERVICE) : undefined;
@@ -1206,7 +1593,9 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 			return server !== undefined && matchesToolsAllowlist(server, mcpAllowlist);
 		});
 	}
-	const tools = [...builtins, ...mcps];
+	const tools = loopConfig.toolDefinitionsOverride
+		? structuredClone(loopConfig.toolDefinitionsOverride)
+		: [...builtins, ...mcps];
 	// Names registered before allowlist/denylist filters — so a call to a
 	// real-but-filtered builtin gets "not available", not an unknown-tool hint.
 	const knownToolNames = new Set(allTools.map((t) => t.function.name));
@@ -1309,6 +1698,11 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 						createAgentForkContext(messages, checkpointBoundary, {
 							systemPrompt: loopConfig.systemPrompt,
 							toolNames: tools.map((tool) => tool.function.name),
+							toolDefinitions: structuredClone(tools),
+							allowedTools,
+							disabledTools: [...disabledTools],
+							readOnlyBash: loopConfig.readOnlyBash,
+							permissionMode: loopConfig.permissionMode,
 							model: initialModel,
 						}),
 					skills: allowedSkills,
@@ -1330,6 +1724,9 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		// Legacy aliases (e.g. find → glob) before the allowlist / unknown check
 		// so old model habits and allowlists keep working against one tool.
 		name = normalizeToolName(name);
+		if (loopConfig.executionAllowedTools && !loopConfig.executionAllowedTools.has(name)) {
+			return { content: `Tool "${name}" is not available in this fork's execution policy.`, isError: true };
+		}
 		// Advertised set is the single source of truth for both definitions and
 		// real calls: disabledTools denylist, the persona/subagent builtin
 		// `tools:` allowlist, and the persona `mcp:` allowlist (server-scoped
@@ -1481,7 +1878,17 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		if (loopConfig.rebuildSystemPrompt) {
 			prompt = loopConfig.rebuildSystemPrompt({ userText, contextFiles });
 		}
-		if (memoryService && isMemoryWriteEnabled()) prompt = `${prompt}\n\n${MEMORY_RECALL_HINT}`;
+		if (memoryService && isMemoryWriteEnabled() && loopConfig.memory?.sessionId) {
+			prompt = `${prompt}\n\n${memorySystemPrompt(cwd, loopConfig.memory.sessionId)}`;
+		}
+		if (
+			memoryService &&
+			isMemoryWriteEnabled() &&
+			loopConfig.memory?.sessionId &&
+			hasMemoryOrTasks(cwd, loopConfig.memory.sessionId)
+		) {
+			prompt = `${prompt}\n\n${MEMORY_RECALL_HINT}`;
+		}
 		// Plan mode: prepended AFTER any rebuild — the per-turn rebuild path
 		// (always active in the TUI) replaces `prompt` wholesale and would
 		// silently drop a block added earlier. The restriction must be the
@@ -1525,6 +1932,8 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		if (!memoryService || !isMemoryWriteEnabled() || !loopConfig.memory?.sessionId) return;
 		const context = memoryService.buildPrompt(cwd, "", loopConfig.memory.sessionId, {
 			tokenBudget: memoryBudgetTokens,
+			rebuildContext: true,
+			recentMessages: messages,
 		});
 		if (!context) return;
 		const boundaryIndex = messages.length;
@@ -2090,6 +2499,20 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		onEvent({ type: "error", message });
 		onEvent({ type: "end", reason: "error" });
 	}
+	loopConfig.checkpointForkContext = createAgentForkContext(messages, checkpointBoundary, {
+		systemPrompt:
+			typeof messages.find((message) => message.role === "system")?.content === "string"
+				? (messages.find((message) => message.role === "system")?.content as string)
+				: systemPrompt,
+		toolNames: tools.map((tool) => tool.function.name),
+		toolDefinitions: structuredClone(tools),
+		allowedTools,
+		disabledTools: [...disabledTools],
+		readOnlyBash: loopConfig.readOnlyBash,
+		permissionMode: loopConfig.permissionMode,
+		model: currentModel,
+		runtime: checkpointWriterRuntime(loopConfig).snapshot,
+	});
 }
 
 /**
