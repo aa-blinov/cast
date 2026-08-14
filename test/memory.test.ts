@@ -376,6 +376,72 @@ describe("project memory", () => {
 		expect(checkpointPath(session.id)).toContain(join("memory", "sessions", session.id));
 	});
 
+	it("runs dream through a maintenance agent and reconciles its file edits", async () => {
+		vi.mocked(streamAndCollect).mockClear();
+		const projectCwd = join(root, "dream-agent-project");
+		const session = createSession("test-model", projectCwd);
+		saveSession(session);
+		const projectId = projectIdForCwd(projectCwd);
+		const runAgent = async (input: { prompt: string; systemPrompt: string }) => {
+			expect(input.systemPrompt).toContain("maintenance agent");
+			expect(input.prompt).toContain("PROJECT_MEMORY_PATH");
+			writeMemoryFile(
+				projectMemoryPath(projectId),
+				"# Project memory\n\n## Rules\n- Dream edits are authoritative.\n",
+			);
+			return { messages: [{ role: "assistant" as const, content: "Consolidated the project memory." }] };
+		};
+
+		const result = await dreamProjectMemory({
+			cwd: projectCwd,
+			sessionId: session.id,
+			model: "test-model",
+			config: testConfig,
+			messages: [{ role: "user", content: "consolidate memory" }],
+			runAgent,
+		});
+
+		expect(result.stored).toBe(1);
+		expect(searchProjectMemory(projectCwd, "Dream edits authoritative")).toEqual([
+			expect.objectContaining({ content: "Dream edits are authoritative." }),
+		]);
+		expect(streamAndCollect).not.toHaveBeenCalled();
+	});
+
+	it("runs distill through a maintenance agent and indexes its project asset", async () => {
+		vi.mocked(streamAndCollect).mockClear();
+		const projectCwd = join(root, "distill-agent-project");
+		const session = createSession("test-model", projectCwd);
+		saveSession(session);
+		const runAgent = async (input: { prompt: string; systemPrompt: string }) => {
+			expect(input.systemPrompt).toContain("workflow distillation agent");
+			expect(input.prompt).toContain("PROJECT_ASSETS_ROOT");
+			writeMemoryFile(
+				join(projectCwd, ".cast", "skills", "release-check", "SKILL.md"),
+				"---\nname: release-check\ndescription: Verify a release before publishing.\n---\n\nRun the release checks and inspect the result.",
+			);
+			return { messages: [{ role: "assistant" as const, content: "Created one skill." }] };
+		};
+
+		const result = await distillProjectMemory({
+			cwd: projectCwd,
+			sessionId: session.id,
+			model: "test-model",
+			config: testConfig,
+			messages: [{ role: "user", content: "distill the repeated release workflow" }],
+			runAgent,
+		});
+
+		expect(result.artifacts).toEqual([
+			expect.objectContaining({
+				kind: "skill",
+				name: "release-check",
+				description: "Verify a release before publishing.",
+			}),
+		]);
+		expect(streamAndCollect).not.toHaveBeenCalled();
+	});
+
 	it("keeps one checkpoint writer active and lets the newest pending request win", async () => {
 		const projectCwd = join(root, "writer-project");
 		const seen: string[] = [];

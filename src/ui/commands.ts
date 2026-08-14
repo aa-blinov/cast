@@ -5,7 +5,7 @@ import { reminderStateFromPlan } from "../core/compaction-reminder.ts";
 import { type AppConfig, probeProvider, resolveProvider, runOnboardingCheck } from "../core/config.ts";
 import { formatContextFilesForPrompt, loadProjectContextFiles } from "../core/context-files.ts";
 import { runHooksForEvent } from "../core/hooks.ts";
-import { compactSessionMessages, PLAN_COMPACTION_PROMPT } from "../core/loop.ts";
+import { compactSessionMessages, PLAN_COMPACTION_PROMPT, runMemoryMaintenanceAgent } from "../core/loop.ts";
 import { closeMcpConnections, formatMcpForPrompt, type McpSetupResult, mcpServerToolBlurbs } from "../core/mcp.ts";
 import { distillProjectMemory, dreamProjectMemory } from "../core/memory.ts";
 import { findPersona, type LoadPersonasOptions, type Persona } from "../core/personas.ts";
@@ -1187,6 +1187,17 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		}
 		showNotice(`[${input === "/dream" ? "Consolidating project memory" : "Distilling reusable workflows"}…]`);
 		try {
+			if (agent.daemonMode) {
+				const result = (await agent.runCommand(input)) as
+					| { removed?: number; stored?: number; artifacts?: unknown[] }
+					| undefined;
+				showNotice(
+					input === "/dream"
+						? `[Memory consolidated: ${result?.stored ?? 0} notes stored, ${result?.removed ?? 0} removed]`
+						: `[Workflows distilled: ${result?.artifacts?.length ?? 0} artifact${result?.artifacts?.length === 1 ? "" : "s"}]`,
+				);
+				return;
+			}
 			if (input === "/dream") {
 				const result = await dreamProjectMemory({
 					cwd: deps.cwd,
@@ -1194,6 +1205,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 					model: session.model,
 					config,
 					messages: session.messages,
+					runAgent: runMemoryMaintenanceAgent,
 				});
 				showNotice(`[Memory consolidated: ${result.stored} notes stored, ${result.removed} removed]`);
 			} else {
@@ -1203,6 +1215,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 					model: session.model,
 					config,
 					messages: session.messages,
+					runAgent: runMemoryMaintenanceAgent,
 				});
 				showNotice(
 					`[Workflows distilled: ${result.artifacts.length} artifact${result.artifacts.length === 1 ? "" : "s"}]`,

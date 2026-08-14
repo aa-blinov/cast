@@ -1,9 +1,12 @@
-Consolidate durable project memory from the last seven days of work. Use the raw trajectory to verify candidates before promoting them. This command is for durable knowledge only; workflow packaging belongs to distill.
+# Dream: Memory Consolidation
 
-Return exactly:
-{"removeIds":[0],"entries":[{"type":"architecture|rule|gotcha|fix|progress|provider|testing|general","content":"one concise durable fact","importance":0}],"checkpoint":{"activeIntent":"...","nextAction":"...","directives":[],"taskTree":[],"currentWork":[],"files":[],"discoveredKnowledge":[],"errorsFixes":[],"liveResources":[],"designDecisions":[],"openNotes":[]}}
+Consolidate durable project memory from the supplied project trajectory and memory files.
 
-`removeIds` may contain only IDs from the project memory list below. Keep it empty unless removal is justified by the turn. Keep at most 8 entries, each under 500 characters, and each checkpoint string under 300 characters.
+Review the last seven days, or all available history if shorter. The raw trajectory is authoritative; MEMORY.md, checkpoint.md, notes.md, and task progress are structured indexes. Read the existing project MEMORY.md and recent session memory before editing. Verify candidate facts against the trajectory. Promote only explicit user rules, clear design decisions, repeated evidence, stable gotchas, and fixes whose cause is known.
+
+Use the file tools to update the project MEMORY.md in place. Keep it compact and high-signal. Merge duplicates, remove stale entries only when the evidence supports it, preserve useful section structure, and keep entries to one or three lines. Do not create skills, personas, commands, or other workflow artifacts; that belongs to /distill.
+
+Do not modify SQLite session history, source files, or files outside the resolved memory/project paths. Return a short maintenance summary after the file edits.
 
 <completed-turn>
 {{TRANSCRIPT}}
