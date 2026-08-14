@@ -10,11 +10,13 @@ import {
 	buildMemorySearchQuery,
 	createProjectMemoryService,
 	distillProjectMemory,
+	drainProjectCheckpointWriters,
 	dreamProjectMemory,
 	extractAndStoreProjectMemory,
 	formatMemoryHistory,
 	formatMemoryToolResult,
 	formatMemoryTranscript,
+	getProjectCheckpointWriterSnapshot,
 	listProjectMemory,
 	listProjectMemoryArtifacts,
 	listProjectMemoryCheckpoints,
@@ -27,6 +29,7 @@ import {
 	scheduleProjectMemoryExtraction,
 	searchProjectMemory,
 	storeProjectMemory,
+	waitForProjectCheckpointWriter,
 } from "../src/core/memory.ts";
 import {
 	checkpointPath,
@@ -505,5 +508,66 @@ describe("project memory", () => {
 		await new Promise((resolve) => setTimeout(resolve, 20));
 
 		expect(seen).toEqual(["first", "second before mutation"]);
+	});
+
+	it("exposes writer lifecycle and resolves superseded pending work", async () => {
+		const projectCwd = join(root, "writer-lifecycle-project");
+		let releaseFirst!: () => void;
+		const firstDone = new Promise<void>((resolve) => {
+			releaseFirst = resolve;
+		});
+		const writer = async (input: { messages: Array<{ content?: unknown }> }): Promise<void> => {
+			if (input.messages[0]?.content === "first") await firstDone;
+		};
+		const input = (label: string) => ({
+			cwd: projectCwd,
+			sessionId: "session-writer-lifecycle",
+			model: "test-model",
+			config: testConfig,
+			messages: [{ role: "user" as const, content: label }],
+		});
+
+		const first = scheduleProjectCheckpointWriter(input("first"), writer);
+		await new Promise((resolve) => setImmediate(resolve));
+		const second = scheduleProjectCheckpointWriter(input("second"), writer);
+		const third = scheduleProjectCheckpointWriter(input("third"), writer);
+
+		expect(getProjectCheckpointWriterSnapshot(projectCwd, "session-writer-lifecycle")).toEqual({
+			key: expect.stringContaining("session-writer-lifecycle"),
+			running: true,
+			activeId: first.id,
+			pendingId: third.id,
+		});
+		expect(second.status()).toBe("superseded");
+		expect(await second.wait()).toBe("superseded");
+
+		releaseFirst();
+		expect(await first.wait()).toBe("success");
+		expect(await third.wait()).toBe("success");
+		expect(await waitForProjectCheckpointWriter(projectCwd, "session-writer-lifecycle")).toBe("no-writer");
+	});
+
+	it("reports a bounded drain when a writer is still running", async () => {
+		const projectCwd = join(root, "writer-drain-project");
+		let release!: () => void;
+		const blocked = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const handle = scheduleProjectCheckpointWriter(
+			{
+				cwd: projectCwd,
+				sessionId: "session-writer-drain",
+				model: "test-model",
+				config: testConfig,
+				messages: [{ role: "user", content: "blocked" }],
+			},
+			async () => blocked,
+		);
+
+		await new Promise((resolve) => setImmediate(resolve));
+		expect(await drainProjectCheckpointWriters(1)).toEqual({ drained: 0, timedOut: 1 });
+		expect(handle.status()).toBe("running");
+		release();
+		expect(await handle.wait()).toBe("success");
 	});
 });

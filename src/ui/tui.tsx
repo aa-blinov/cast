@@ -3,6 +3,7 @@ import type { JSX } from "react";
 import { CAST_BANNER } from "../core/help.ts";
 import { runHooksForEvent } from "../core/hooks.ts";
 import { closeMcpConnections } from "../core/mcp.ts";
+import { drainProjectCheckpointWriters } from "../core/memory.ts";
 import { saveSession } from "../core/session.ts";
 import { type ParsedArgs, runStartup } from "../core/startup.ts";
 import { cancelActiveDecxprQuery, suspendAndRun } from "../core/stdin-manager.ts";
@@ -133,11 +134,13 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 		// then exit. Also clear the screen so the last TUI frame (banner,
 		// composer box, status bar) doesn't linger under the shell prompt.
 		cancelActiveDecxprQuery();
-		void closeMcpConnections(result.mcpResult.connections).finally(async () => {
-			process.stdout.write("\x1b[2J\x1b[H");
-			await new Promise((resolve) => setTimeout(resolve, 60));
-			process.exit(0);
-		});
+		void drainProjectCheckpointWriters(2_500)
+			.finally(() => closeMcpConnections(result.mcpResult.connections))
+			.then(async () => {
+				process.stdout.write("\x1b[2J\x1b[H");
+				await new Promise((resolve) => setTimeout(resolve, 60));
+				process.exit(0);
+			});
 	};
 	const onPasteImage = async (): Promise<string | null> => {
 		const filePath = await saveClipboardImageToTempFile();

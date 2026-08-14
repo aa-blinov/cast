@@ -183,18 +183,76 @@ export interface MemoryCheckpointWriterInput {
 
 export type MemoryCheckpointWriter = (input: MemoryCheckpointWriterInput) => Promise<void>;
 
+export type CheckpointWriterStatus = "queued" | "running" | "success" | "failed" | "superseded" | "skipped";
+
+export interface CheckpointWriterHandle {
+	readonly id: number;
+	readonly key: string;
+	status(): CheckpointWriterStatus;
+	wait(): Promise<CheckpointWriterStatus>;
+}
+
+export interface CheckpointWriterSnapshot {
+	readonly key: string;
+	readonly running: boolean;
+	readonly activeId?: number;
+	readonly pendingId?: number;
+}
+
+interface CheckpointWriterRequest {
+	id: number;
+	input: MemoryCheckpointWriterInput;
+	writer: MemoryCheckpointWriter;
+	onWarning?: (message: string) => void;
+	status: CheckpointWriterStatus;
+	resolve: (status: CheckpointWriterStatus) => void;
+	result: Promise<CheckpointWriterStatus>;
+}
+
+interface CheckpointWriterState {
+	running: boolean;
+	active?: CheckpointWriterRequest;
+	pending?: CheckpointWriterRequest;
+	idle: Promise<void>;
+	resolveIdle: () => void;
+}
+
 const memoryOperationQueues = new Map<string, Promise<unknown>>();
-const checkpointWriterStates = new Map<
-	string,
-	{
-		running: boolean;
-		pending?: {
-			input: MemoryCheckpointWriterInput;
-			writer: MemoryCheckpointWriter;
-			onWarning?: (message: string) => void;
-		};
-	}
->();
+const checkpointWriterStates = new Map<string, CheckpointWriterState>();
+let nextCheckpointWriterId = 0;
+
+function checkpointWriterKey(cwd: string, sessionId: string): string {
+	return `${projectIdForCwd(cwd)}:${sessionId}`;
+}
+
+function createCheckpointWriterRequest(
+	id: number,
+	input: MemoryCheckpointWriterInput,
+	writer: MemoryCheckpointWriter,
+	onWarning: ((message: string) => void) | undefined,
+	status: CheckpointWriterStatus,
+): CheckpointWriterRequest {
+	let resolve!: (result: CheckpointWriterStatus) => void;
+	const result = new Promise<CheckpointWriterStatus>((nextResolve) => {
+		resolve = nextResolve;
+	});
+	return { id, input, writer, onWarning, status, resolve, result };
+}
+
+function handleForCheckpointWriter(request: CheckpointWriterRequest, key: string): CheckpointWriterHandle {
+	return {
+		id: request.id,
+		key,
+		status: () => request.status,
+		wait: () => request.result,
+	};
+}
+
+function skippedCheckpointWriterHandle(key: string, input: MemoryCheckpointWriterInput): CheckpointWriterHandle {
+	const request = createCheckpointWriterRequest(++nextCheckpointWriterId, input, async () => {}, undefined, "skipped");
+	request.resolve("skipped");
+	return handleForCheckpointWriter(request, key);
+}
 
 function queueMemoryOperation<T>(cwd: string, operation: () => Promise<T>): Promise<T> {
 	const queueKey = projectIdForCwd(cwd);
@@ -213,40 +271,105 @@ export function scheduleProjectCheckpointWriter(
 	input: MemoryCheckpointWriterInput,
 	writer: MemoryCheckpointWriter,
 	onWarning?: (message: string) => void,
-): void {
-	if (!isMemoryEnabled() || input.signal?.aborted) return;
-	const key = `${projectIdForCwd(input.cwd)}:${input.sessionId}`;
-	const request = { input: { ...input, messages: structuredClone(input.messages) }, writer, onWarning };
+): CheckpointWriterHandle {
+	const key = checkpointWriterKey(input.cwd, input.sessionId);
+	if (!isMemoryEnabled() || input.signal?.aborted) return skippedCheckpointWriterHandle(key, input);
+	const request = createCheckpointWriterRequest(
+		++nextCheckpointWriterId,
+		{ ...input, messages: structuredClone(input.messages.slice()) },
+		writer,
+		onWarning,
+		"queued",
+	);
+	const handle = handleForCheckpointWriter(request, key);
 	const state = checkpointWriterStates.get(key);
 	if (state?.running) {
+		if (state.pending) {
+			state.pending.status = "superseded";
+			state.pending.resolve("superseded");
+		}
 		state.pending = request;
-		return;
+		return handle;
 	}
-	const next = state ?? { running: false };
+	let resolveIdle!: () => void;
+	const idle = new Promise<void>((resolve) => {
+		resolveIdle = resolve;
+	});
+	const next = { running: true, active: request, idle, resolveIdle };
 	checkpointWriterStates.set(key, next);
-	const run = async (): Promise<void> => {
-		next.running = true;
+	void runCheckpointWriterQueue(key, next);
+	return handle;
+}
+
+async function runCheckpointWriterQueue(key: string, state: CheckpointWriterState): Promise<void> {
+	while (state.active) {
+		const request = state.active;
+		request.status = "running";
 		try {
+			// One writer per session is intentional: each pending snapshot supersedes the previous one.
+			// biome-ignore lint/performance/noAwaitInLoops: checkpoint writers for one session must be sequential
 			await request.writer(request.input);
+			request.status = "success";
 		} catch (error) {
-			request.onWarning?.(
-				`Checkpoint writer did not finish: ${error instanceof Error ? error.message : String(error)}`,
-			);
-		} finally {
-			next.running = false;
-			const pending = next.pending;
-			next.pending = undefined;
-			if (pending) {
-				request.input = pending.input;
-				request.writer = pending.writer;
-				request.onWarning = pending.onWarning;
-				void run();
-			} else {
-				checkpointWriterStates.delete(key);
+			request.status = "failed";
+			try {
+				request.onWarning?.(
+					`Checkpoint writer did not finish: ${error instanceof Error ? error.message : String(error)}`,
+				);
+			} catch {
+				// Warning handlers are observational and must not strand the queue.
 			}
 		}
+		request.resolve(request.status);
+		if (state.pending) {
+			state.active = state.pending;
+			state.pending = undefined;
+			continue;
+		}
+		state.active = undefined;
+		state.running = false;
+		checkpointWriterStates.delete(key);
+		state.resolveIdle();
+	}
+}
+
+export function getProjectCheckpointWriterSnapshot(
+	cwd: string,
+	sessionId: string,
+): CheckpointWriterSnapshot | undefined {
+	const key = checkpointWriterKey(cwd, sessionId);
+	const state = checkpointWriterStates.get(key);
+	if (!state) return undefined;
+	return {
+		key,
+		running: state.running,
+		activeId: state.active?.id,
+		pendingId: state.pending?.id,
 	};
-	void run();
+}
+
+export async function waitForProjectCheckpointWriter(cwd: string, sessionId: string): Promise<"settled" | "no-writer"> {
+	const state = checkpointWriterStates.get(checkpointWriterKey(cwd, sessionId));
+	if (!state) return "no-writer";
+	await state.idle;
+	return "settled";
+}
+
+export async function drainProjectCheckpointWriters(
+	timeoutMs = 30_000,
+): Promise<{ drained: number; timedOut: number }> {
+	const entries = [...checkpointWriterStates.entries()];
+	if (entries.length === 0) return { drained: 0, timedOut: 0 };
+	let resolveTimeout!: () => void;
+	const timeout = new Promise<void>((resolve) => {
+		resolveTimeout = resolve;
+	});
+	const timer = setTimeout(resolveTimeout, timeoutMs);
+	timer.unref();
+	await Promise.race([Promise.all(entries.map(([, state]) => state.idle)), timeout]);
+	clearTimeout(timer);
+	const pending = entries.filter(([key, state]) => checkpointWriterStates.get(key) === state).length;
+	return { drained: entries.length - pending, timedOut: pending };
 }
 
 function normalizeCwd(cwd: string): string {

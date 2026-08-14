@@ -22,6 +22,7 @@ import {
 } from "./llm.ts";
 import { type McpToolHandle, mcpServerNameFromDescription } from "./mcp.ts";
 import {
+	type CheckpointWriterHandle,
 	createProjectMemoryService,
 	type MemoryCheckpointWriterInput,
 	type MemoryMaintenanceAgentInput,
@@ -653,6 +654,8 @@ export interface LoopConfig {
 	checkpointBoundary?: number;
 	/** Request-only cache marker for the fork prefix. */
 	cachePrefixBoundary?: number;
+	/** Receives the background checkpoint writer handle after it is scheduled. */
+	onCheckpointWriter?: (handle: CheckpointWriterHandle) => void;
 	/**
 	 * Optional per-turn system prompt rebuild. Called before every model
 	 * request (each inner tool-call iteration, not just once per turn) with
@@ -764,22 +767,39 @@ function checkpointWriterPrompt(input: MemoryCheckpointWriterInput): string {
 	].join("\n");
 }
 
-export interface AgentContextFork {
-	messages: Message[];
+/** Immutable parent-side context captured for a background agent fork. */
+export interface AgentForkContext {
+	/** Complete message snapshot inherited by the child agent. */
+	inheritedMessages: Message[];
+	/** Messages at or before the durable watermark. */
 	prefix: Message[];
+	/** Messages after the durable watermark. */
 	tail: Message[];
+	/** Inclusive message index of the durable watermark, or -1 for none. */
 	boundaryIndex: number;
+	/** Provider request marker for the reusable prefix, when a watermark exists. */
+	cachePrefixBoundary?: number;
+	/** Compatibility alias for callers that used the original fork seam. */
+	messages: Message[];
 }
 
-export function createAgentContextFork(messages: Message[], boundaryIndex: number): AgentContextFork {
+export type AgentContextFork = AgentForkContext;
+
+export function createAgentForkContext(messages: Message[], boundaryIndex: number): AgentForkContext {
 	const snapshot = structuredClone(messages);
 	const boundary = Math.max(-1, Math.min(boundaryIndex, snapshot.length - 1));
 	return {
 		messages: snapshot,
+		inheritedMessages: snapshot,
 		prefix: snapshot.slice(0, boundary + 1),
 		tail: snapshot.slice(boundary + 1),
 		boundaryIndex: boundary,
+		cachePrefixBoundary: boundary >= 0 ? boundary : undefined,
 	};
+}
+
+export function createAgentContextFork(messages: Message[], boundaryIndex: number): AgentForkContext {
+	return createAgentForkContext(messages, boundaryIndex);
 }
 
 export async function runMemoryMaintenanceAgent(
@@ -828,8 +848,8 @@ async function runCheckpointWriter(input: MemoryCheckpointWriterInput): Promise<
 	const timeout = setTimeout(() => controller.abort(), 120_000);
 	timeout.unref();
 	try {
-		const fork = createAgentContextFork(input.messages, input.checkpointBoundary ?? -1);
-		await runAgentLoop([...fork.messages, { role: "user", content: checkpointWriterPrompt(input) }], {
+		const fork = createAgentForkContext(input.messages, input.checkpointBoundary ?? -1);
+		await runAgentLoop([...fork.inheritedMessages, { role: "user", content: checkpointWriterPrompt(input) }], {
 			config: input.config,
 			model: input.model,
 			modelProvider: input.providerOverride,
@@ -847,7 +867,7 @@ async function runCheckpointWriter(input: MemoryCheckpointWriterInput): Promise<
 			noSkills: true,
 			projectTrusted: false,
 			checkpointBoundary: fork.boundaryIndex,
-			cachePrefixBoundary: fork.boundaryIndex >= 0 ? fork.boundaryIndex : undefined,
+			cachePrefixBoundary: fork.cachePrefixBoundary,
 		});
 		reconcileProjectMemoryFiles(input.cwd, input.sessionId);
 	} finally {
@@ -889,7 +909,7 @@ export async function runAgentLoop(initialMessages: Message[], loopConfig: LoopC
 	const tracked = loopConfig.onMessagesChanged ? makeObservable(messages, loopConfig.onMessagesChanged) : messages;
 	await runLoop(tracked, loopConfig);
 	if (shouldStartCheckpointWriter(loopConfig, tracked)) {
-		scheduleProjectCheckpointWriter(
+		const writerHandle = scheduleProjectCheckpointWriter(
 			{
 				cwd: loopConfig.cwd,
 				sessionId: loopConfig.memory!.sessionId,
@@ -902,6 +922,7 @@ export async function runAgentLoop(initialMessages: Message[], loopConfig: LoopC
 			runCheckpointWriter,
 			loopConfig.onWarning,
 		);
+		loopConfig.onCheckpointWriter?.(writerHandle);
 	}
 	return tracked;
 }

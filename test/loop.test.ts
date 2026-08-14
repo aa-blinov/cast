@@ -42,6 +42,7 @@ const {
 	waitForToolBatch,
 	TOOL_ABORT_GRACE_MS,
 	createAgentContextFork,
+	createAgentForkContext,
 } = await import("../src/core/loop.ts");
 const { streamAndCollect } = await import("../src/core/llm.ts");
 type AgentEvent = Parameters<Parameters<typeof runAgentLoop>[1]["onEvent"]>[0];
@@ -87,10 +88,21 @@ describe("createAgentContextFork", () => {
 		const fork = createAgentContextFork(parent, 2);
 
 		expect(fork.boundaryIndex).toBe(2);
+		expect(fork.cachePrefixBoundary).toBe(2);
+		expect(fork.inheritedMessages).toBe(fork.messages);
 		expect(fork.prefix).toEqual(parent.slice(0, 3));
 		expect(fork.tail).toEqual(parent.slice(3));
 		fork.messages[1] = { role: "user", content: "writer mutation" };
 		expect(parent[1]).toEqual({ role: "user", content: "before" });
+	});
+
+	it("keeps the compatibility factory on the same explicit fork contract", () => {
+		const fork = createAgentForkContext([{ role: "user", content: "only message" }], -1);
+
+		expect(fork.boundaryIndex).toBe(-1);
+		expect(fork.cachePrefixBoundary).toBeUndefined();
+		expect(fork.prefix).toEqual([]);
+		expect(fork.tail).toEqual(fork.inheritedMessages);
 	});
 });
 
