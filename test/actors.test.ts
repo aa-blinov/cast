@@ -8,6 +8,7 @@ import {
 	type AgentActorSpec,
 	SqliteAgentActorStore,
 } from "../src/core/actors.ts";
+import { loadConfig } from "../src/core/config.ts";
 import { resetDbConnectionForTests } from "../src/core/db.ts";
 
 const spec: AgentActorSpec = {
@@ -100,7 +101,7 @@ describe("AgentActorRegistry", () => {
 
 	it("persists fork context and restores unfinished actors as stalled", async () => {
 		const store = new SqliteAgentActorStore();
-		const first = new AgentActorRegistry({ store, watchdogIntervalMs: 0 });
+		const first = new AgentActorRegistry({ store, watchdogIntervalMs: 0, leaseMs: -1 });
 		const actor = first.spawn({ ...spec, lifecycle: "persistent" });
 		await actor.run(async () => "done");
 
@@ -142,5 +143,57 @@ describe("AgentActorRegistry", () => {
 		expect(actor.snapshot().status).toBe("stalled");
 		expect(await actor.wait()).toBe("stalled");
 		await expect(runPromise).rejects.toThrow("aborted");
+	});
+
+	it("fences an expired actor lease and invokes its recovery handler once", async () => {
+		const store = new SqliteAgentActorStore();
+		const config = loadConfig({ baseURL: "http://provider.invalid/v1", apiKey: "test-key" });
+		const { apiKey: ignoredApiKey, ...safeConfig } = config;
+		void ignoredApiKey;
+		let recovered: string | undefined;
+		const first = new AgentActorRegistry({ store, watchdogIntervalMs: 0, leaseMs: -1 });
+		const actor = first.spawn({
+			...spec,
+			lifecycle: "persistent",
+			recovery: {
+				kind: "checkpoint-writer",
+				cwd: dbDir,
+				sessionId: "parent-session",
+				model: "test-model",
+				providerBaseURL: config.baseURL,
+				checkpointBoundary: 0,
+				config: safeConfig,
+			},
+		});
+
+		const second = new AgentActorRegistry({
+			store,
+			watchdogIntervalMs: 0,
+			recoveryHandlers: {
+				"checkpoint-writer": async (snapshot) => {
+					recovered = snapshot.id;
+				},
+			},
+		});
+		const restored = second.list().find((item) => item.id === actor.id);
+		expect(restored?.status).toBe("stalled");
+		expect(restored?.recovery?.kind).toBe("checkpoint-writer");
+		await Promise.resolve();
+		expect(recovered).toBe(actor.id);
+
+		const third = new AgentActorRegistry({ store, watchdogIntervalMs: 0 });
+		expect(third.list().find((item) => item.id === actor.id)?.status).toBe("stalled");
+	});
+
+	it("bounds terminal lifecycle rows in SQLite", async () => {
+		const store = new SqliteAgentActorStore();
+		const registry = new AgentActorRegistry({ store, watchdogIntervalMs: 0, terminalLimit: 1 });
+		const first = registry.spawn({ ...spec, lifecycle: "persistent" });
+		await first.run(async () => "first");
+		const second = registry.spawn({ ...spec, lifecycle: "persistent" });
+		await second.run(async () => "second");
+
+		expect(store.load()).toHaveLength(1);
+		expect(store.load()[0]?.snapshot.id).toBe(second.id);
 	});
 });

@@ -68,6 +68,48 @@ export interface StreamChunk {
 	usage?: Usage;
 }
 
+export type PromptCacheMode = "automatic" | "explicit";
+
+export interface PromptCacheStrategy {
+	mode: PromptCacheMode;
+	promptCacheKey?: string;
+	stickySessionId?: string;
+}
+
+/**
+ * Select only cache controls documented by the endpoint family. Automatic
+ * prefix caches need no wire marker, so unknown gateways receive the exact
+ * same request shape they received before this feature.
+ */
+export function resolvePromptCacheStrategy(baseURL: string, sessionId?: string): PromptCacheStrategy {
+	const host = baseURL.toLowerCase();
+	const stableSessionId = sessionId?.trim();
+
+	if (host.includes("openrouter")) {
+		return {
+			mode: "explicit",
+			...(stableSessionId ? { stickySessionId: stableSessionId } : {}),
+		};
+	}
+
+	if (host.includes("api.openai.com")) {
+		return {
+			mode: "automatic",
+			...(stableSessionId ? { promptCacheKey: `cast:${stableSessionId}` } : {}),
+		};
+	}
+
+	return { mode: "automatic" };
+}
+
+/** Build provider-specific top-level fields without mutating reasoning config. */
+export function promptCacheRequestBody(strategy: PromptCacheStrategy): Record<string, unknown> {
+	const body: Record<string, unknown> = {};
+	if (strategy.promptCacheKey) body.prompt_cache_key = strategy.promptCacheKey;
+	if (strategy.stickySessionId) body.session_id = strategy.stickySessionId;
+	return body;
+}
+
 // ============================================================================
 // Retry — all retrying lives here, in streamChat's own loop (the client is
 // created with maxRetries: 0 so the SDK's uninterruptible internal retry never
@@ -344,6 +386,7 @@ export async function* streamChat(
 	maxTokens: number,
 	signal?: AbortSignal,
 	reasoningBody: Record<string, unknown> = {},
+	promptCacheBody: Record<string, unknown> = {},
 ): AsyncGenerator<StreamChunk> {
 	const params: OpenAI.ChatCompletionCreateParamsStreaming = {
 		model,
@@ -360,6 +403,9 @@ export async function* streamChat(
 	// Merge vendor-specific reasoning parameters
 	if (Object.keys(reasoningBody).length > 0) {
 		Object.assign(params, reasoningBody);
+	}
+	if (Object.keys(promptCacheBody).length > 0) {
+		Object.assign(params, promptCacheBody);
 	}
 
 	let attempt = 0;
@@ -643,6 +689,7 @@ export async function streamAndCollect(
 	onThinking?: (token: string) => void,
 	reasoningBody: Record<string, unknown> = {},
 	onRetry?: (attempt: number, reason: string) => void,
+	promptCacheBody: Record<string, unknown> = {},
 ): Promise<CompletionResult> {
 	let content = "";
 	let thinking = "";
@@ -657,7 +704,16 @@ export async function streamAndCollect(
 	// isn't mislabeled aborted.
 	let sawFinish = false;
 
-	for await (const chunk of streamChat(client, model, messages, tools, maxTokens, signal, reasoningBody)) {
+	for await (const chunk of streamChat(
+		client,
+		model,
+		messages,
+		tools,
+		maxTokens,
+		signal,
+		reasoningBody,
+		promptCacheBody,
+	)) {
 		if (chunk.retrying) {
 			onRetry?.(chunk.retrying.attempt, chunk.retrying.reason);
 			continue;
@@ -750,10 +806,9 @@ export async function streamAndCollect(
 }
 
 // ============================================================================
-// Prompt caching — Anthropic-style cache_control markers on OpenAI-compatible
-// API. Supported by OpenRouter (anthropic/*), native Anthropic via LiteLLM,
-// and any provider that honors the cache_control extension field. Providers
-// that don't understand it silently ignore the extra property.
+// Prompt caching — explicit cache_control markers are reserved for the
+// OpenRouter/Anthropic-compatible path. Providers such as MiniMax and OpenAI
+// use automatic prefix matching, so their request shape must stay native.
 //
 // Three breakpoints, matching pi's openai-completions.ts strategy:
 //   1. System prompt — caches persona + instructions + context files
@@ -815,17 +870,20 @@ function withCacheControlOnText(
 }
 
 /**
- * Apply Anthropic-style cache_control markers to messages and tools, returning
- * request-ready copies. Call right before sending each LLM request and send
- * the returned arrays — the inputs are left untouched, so session state never
- * absorbs the provider-specific structured-content shape.
+ * Apply explicit cache_control markers to messages and tools when the selected
+ * provider supports them, returning request-ready copies. Automatic-prefix
+ * providers get the original plain-message shape. Call right before sending
+ * each LLM request; inputs stay untouched so session state never absorbs the
+ * provider-specific structured-content shape.
  */
 export function applyCacheControl(
 	messages: Message[],
 	tools: Tool[],
 	cacheMessageIndex?: number,
+	mode: PromptCacheMode = "explicit",
 ): { messages: Message[]; tools: Tool[] } {
 	const outMessages = messages.slice();
+	if (mode !== "explicit") return { messages: outMessages, tools };
 
 	// 1. System prompt — first system/developer message
 	for (let i = 0; i < outMessages.length; i++) {

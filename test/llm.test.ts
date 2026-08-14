@@ -6,6 +6,8 @@ import {
 	EMPTY_ASSISTANT_PLACEHOLDER,
 	isRetryableStreamError,
 	parseHermesToolCalls,
+	promptCacheRequestBody,
+	resolvePromptCacheStrategy,
 	retryDelayMs,
 	streamAndCollect,
 	streamChat,
@@ -33,6 +35,70 @@ function fakeClient(chunks: unknown[], onChunk?: () => void): OpenAI {
 		},
 	} as unknown as OpenAI;
 }
+
+describe("provider prefix-cache strategy", () => {
+	it("uses MiniMax automatic prefix matching without Anthropic markers", () => {
+		const strategy = resolvePromptCacheStrategy("https://api.minimax.io/v1", "session-1");
+
+		expect(strategy).toEqual({ mode: "automatic" });
+		expect(promptCacheRequestBody(strategy)).toEqual({});
+	});
+
+	it("pins OpenAI prompt-cache requests to a stable session key", () => {
+		const strategy = resolvePromptCacheStrategy("https://api.openai.com/v1", "session-1");
+
+		expect(strategy).toEqual({ mode: "automatic", promptCacheKey: "cast:session-1" });
+		expect(promptCacheRequestBody(strategy)).toEqual({ prompt_cache_key: "cast:session-1" });
+	});
+
+	it("uses explicit breakpoints and sticky routing on OpenRouter", () => {
+		const strategy = resolvePromptCacheStrategy("https://openrouter.ai/api/v1", "session-1");
+
+		expect(strategy).toEqual({ mode: "explicit", stickySessionId: "session-1" });
+		expect(promptCacheRequestBody(strategy)).toEqual({ session_id: "session-1" });
+	});
+
+	it("does not send provider-specific cache fields to unknown gateways", () => {
+		const strategy = resolvePromptCacheStrategy("https://gateway.example/v1", "session-1");
+
+		expect(strategy).toEqual({ mode: "automatic" });
+		expect(promptCacheRequestBody(strategy)).toEqual({});
+	});
+
+	it("adds the selected top-level fields to the actual Chat Completions request", async () => {
+		const requests: Array<Record<string, unknown>> = [];
+		const client = {
+			chat: {
+				completions: {
+					create: async (params: Record<string, unknown>) => {
+						requests.push(params);
+						return {
+							async *[Symbol.asyncIterator]() {
+								yield { choices: [{ delta: {}, finish_reason: "stop" }] };
+							},
+						};
+					},
+				},
+			},
+		} as unknown as OpenAI;
+
+		await streamAndCollect(
+			client,
+			"test-model",
+			[{ role: "system", content: "stable" }],
+			[],
+			100,
+			undefined,
+			undefined,
+			undefined,
+			{},
+			undefined,
+			{ prompt_cache_key: "cast:session-1" },
+		);
+
+		expect(requests[0]?.prompt_cache_key).toBe("cast:session-1");
+	});
+});
 
 // APIError.makeMessage only falls back to the 3rd constructor arg when
 // `error` itself is falsy — an empty-but-truthy `{}` body wins instead and

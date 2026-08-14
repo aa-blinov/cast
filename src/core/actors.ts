@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { publishAgentActorNotification } from "./actor-events.ts";
+import type { AppConfig } from "./config.ts";
 import { getDb } from "./db.ts";
 import type { Message } from "./llm.ts";
 import { appendSessionEvent } from "./session.ts";
@@ -6,6 +8,16 @@ import { appendSessionEvent } from "./session.ts";
 export type AgentActorStatus = "pending" | "running" | "success" | "failure" | "cancelled" | "stalled";
 export type AgentActorMode = "main" | "subagent";
 export type AgentActorLifecycle = "ephemeral" | "persistent";
+
+export interface AgentActorRecoverySpec {
+	kind: "checkpoint-writer";
+	cwd: string;
+	sessionId: string;
+	model: string;
+	providerBaseURL: string;
+	checkpointBoundary: number;
+	config: Omit<AppConfig, "apiKey">;
+}
 
 /** Immutable context captured at the actor boundary, including the exact durable fork split. */
 export interface AgentForkContext {
@@ -30,6 +42,7 @@ export interface AgentActorSpec {
 	background: boolean;
 	lifecycle: AgentActorLifecycle;
 	forkContext?: AgentForkContext;
+	recovery?: AgentActorRecoverySpec;
 }
 
 export interface AgentActorSnapshot extends AgentActorSpec {
@@ -38,6 +51,17 @@ export interface AgentActorSnapshot extends AgentActorSpec {
 	createdAt: string;
 	updatedAt: string;
 	completedAt?: string;
+}
+
+export interface AgentActorOwnership {
+	token: string;
+	pid: number;
+	leaseUntil: string;
+}
+
+export interface AgentActorPersistedState {
+	snapshot: AgentActorSnapshot;
+	ownership: AgentActorOwnership;
 }
 
 export type AgentActorTerminalStatus = Extract<AgentActorStatus, "success" | "failure" | "cancelled" | "stalled">;
@@ -54,10 +78,13 @@ export interface AgentActorNotification {
 }
 
 export type AgentActorNotificationListener = (notification: AgentActorNotification) => void;
+export type AgentActorRecoveryHandler = (snapshot: AgentActorSnapshot) => Promise<void>;
 
 export interface AgentActorStore {
-	load(): AgentActorSnapshot[];
-	save(snapshot: AgentActorSnapshot): void;
+	load(): AgentActorPersistedState[];
+	save(snapshot: AgentActorSnapshot, ownership: AgentActorOwnership): boolean;
+	claimRecovery(actorId: string, previousToken: string | undefined, ownership: AgentActorOwnership): boolean;
+	prune(limit: number): void;
 }
 
 export interface AgentActorRegistryOptions {
@@ -65,8 +92,10 @@ export interface AgentActorRegistryOptions {
 	stallAfterMs?: number;
 	watchdogIntervalMs?: number;
 	heartbeatIntervalMs?: number;
+	leaseMs?: number;
 	store?: AgentActorStore;
 	onNotification?: AgentActorNotificationListener;
+	recoveryHandlers?: Partial<Record<AgentActorRecoverySpec["kind"], AgentActorRecoveryHandler>>;
 }
 
 export interface AgentActorHandle {
@@ -96,6 +125,7 @@ interface AgentActorRecord extends AgentActorSpec {
 	resolveWait: (status: AgentActorStatus) => void;
 	wait: Promise<AgentActorStatus>;
 	parentCleanup?: () => void;
+	ownership: AgentActorOwnership;
 }
 
 interface SqliteActorRow {
@@ -112,6 +142,10 @@ interface SqliteActorRow {
 	updated_at: string;
 	completed_at: string | null;
 	fork_json: string | null;
+	recovery_json: string | null;
+	owner_token: string | null;
+	owner_pid: number | null;
+	lease_until: string | null;
 }
 
 function now(): string {
@@ -149,6 +183,7 @@ function snapshotOf(record: AgentActorRecord): AgentActorSnapshot {
 		background: record.background,
 		lifecycle: record.lifecycle,
 		forkContext: cloneForkContext(record.forkContext),
+		recovery: record.recovery ? structuredClone(record.recovery) : undefined,
 		status: record.status,
 		createdAt: record.createdAt,
 		updatedAt: record.updatedAt,
@@ -159,6 +194,7 @@ function snapshotOf(record: AgentActorRecord): AgentActorSnapshot {
 function snapshotFromRow(row: SqliteActorRow): AgentActorSnapshot | undefined {
 	if (!isMode(row.mode) || !isLifecycle(row.lifecycle) || !isStatus(row.status)) return undefined;
 	let forkContext: AgentForkContext | undefined;
+	let recovery: AgentActorRecoverySpec | undefined;
 	if (row.fork_json) {
 		try {
 			const parsed = JSON.parse(row.fork_json) as Partial<AgentForkContext>;
@@ -167,6 +203,24 @@ function snapshotFromRow(row: SqliteActorRow): AgentActorSnapshot | undefined {
 			}
 		} catch {
 			// A corrupt optional fork snapshot must not hide the actor lifecycle row.
+		}
+	}
+	if (row.recovery_json) {
+		try {
+			const parsed = JSON.parse(row.recovery_json) as Partial<AgentActorRecoverySpec>;
+			if (
+				parsed.kind === "checkpoint-writer" &&
+				typeof parsed.cwd === "string" &&
+				typeof parsed.sessionId === "string" &&
+				typeof parsed.model === "string" &&
+				typeof parsed.providerBaseURL === "string" &&
+				typeof parsed.checkpointBoundary === "number" &&
+				parsed.config !== undefined
+			) {
+				recovery = parsed as AgentActorRecoverySpec;
+			}
+		} catch {
+			// A corrupt optional recovery descriptor must not hide the actor row.
 		}
 	}
 	return {
@@ -179,6 +233,7 @@ function snapshotFromRow(row: SqliteActorRow): AgentActorSnapshot | undefined {
 		background: Boolean(row.background),
 		lifecycle: row.lifecycle,
 		forkContext,
+		recovery,
 		status: row.status,
 		createdAt: row.created_at,
 		updatedAt: row.updated_at,
@@ -186,21 +241,34 @@ function snapshotFromRow(row: SqliteActorRow): AgentActorSnapshot | undefined {
 	};
 }
 
-/** Durable actor metadata. Work is not resumed automatically; an interrupted run is restored as stalled. */
+function ownershipFromRow(row: SqliteActorRow): AgentActorOwnership {
+	return {
+		token: row.owner_token ?? "",
+		pid: row.owner_pid ?? 0,
+		leaseUntil: row.lease_until ?? "",
+	};
+}
+
+/** Durable actor metadata with a lease so two daemon processes cannot mutate one actor row. */
 export class SqliteAgentActorStore implements AgentActorStore {
-	load(): AgentActorSnapshot[] {
+	load(): AgentActorPersistedState[] {
 		const rows = getDb()
 			.prepare("SELECT * FROM agent_actors ORDER BY updated_at DESC")
 			.all() as unknown as SqliteActorRow[];
-		return rows.map(snapshotFromRow).filter((snapshot): snapshot is AgentActorSnapshot => snapshot !== undefined);
+		return rows
+			.map((row) => {
+				const snapshot = snapshotFromRow(row);
+				return snapshot ? { snapshot, ownership: ownershipFromRow(row) } : undefined;
+			})
+			.filter((state): state is AgentActorPersistedState => state !== undefined);
 	}
 
-	save(snapshot: AgentActorSnapshot): void {
-		getDb()
+	save(snapshot: AgentActorSnapshot, ownership: AgentActorOwnership): boolean {
+		const result = getDb()
 			.prepare(
 				`INSERT INTO agent_actors
-          (id, parent_session_id, parent_actor_id, session_id, agent, mode, background, lifecycle, status, created_at, updated_at, completed_at, fork_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          (id, parent_session_id, parent_actor_id, session_id, agent, mode, background, lifecycle, status, created_at, updated_at, completed_at, fork_json, recovery_json, owner_token, owner_pid, lease_until, revision)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
          ON CONFLICT(id) DO UPDATE SET
           parent_session_id = excluded.parent_session_id,
           parent_actor_id = excluded.parent_actor_id,
@@ -213,7 +281,13 @@ export class SqliteAgentActorStore implements AgentActorStore {
           created_at = excluded.created_at,
           updated_at = excluded.updated_at,
           completed_at = excluded.completed_at,
-          fork_json = excluded.fork_json`,
+          fork_json = excluded.fork_json,
+          recovery_json = excluded.recovery_json,
+          owner_token = excluded.owner_token,
+          owner_pid = excluded.owner_pid,
+          lease_until = excluded.lease_until,
+          revision = agent_actors.revision + 1
+         WHERE agent_actors.owner_token IS excluded.owner_token OR agent_actors.owner_token = excluded.owner_token`,
 			)
 			.run(
 				snapshot.id,
@@ -232,7 +306,46 @@ export class SqliteAgentActorStore implements AgentActorStore {
 				// duplicating a whole transcript into SQLite on every heartbeat would
 				// make actor telemetry compete with the session history itself.
 				snapshot.lifecycle === "persistent" && snapshot.forkContext ? JSON.stringify(snapshot.forkContext) : null,
+				snapshot.recovery ? JSON.stringify(snapshot.recovery) : null,
+				ownership.token,
+				ownership.pid,
+				ownership.leaseUntil,
 			);
+		return result.changes > 0;
+	}
+
+	claimRecovery(actorId: string, previousToken: string | undefined, ownership: AgentActorOwnership): boolean {
+		const result = getDb()
+			.prepare(
+				`UPDATE agent_actors
+         SET owner_token = ?, owner_pid = ?, lease_until = ?, revision = revision + 1
+         WHERE id = ? AND (lease_until IS NULL OR lease_until <= ?)
+           AND (owner_token IS ? OR owner_token = ?)`,
+			)
+			.run(
+				ownership.token,
+				ownership.pid,
+				ownership.leaseUntil,
+				actorId,
+				now(),
+				previousToken ?? null,
+				previousToken ?? "",
+			);
+		return result.changes > 0;
+	}
+
+	prune(limit: number): void {
+		getDb()
+			.prepare(
+				`DELETE FROM agent_actors
+         WHERE id IN (
+           SELECT id FROM agent_actors
+           WHERE status IN ('success', 'failure', 'cancelled', 'stalled')
+           ORDER BY updated_at DESC
+           LIMIT -1 OFFSET ?
+         )`,
+			)
+			.run(limit);
 	}
 }
 
@@ -242,8 +355,10 @@ export class AgentActorRegistry {
 	private readonly stallAfterMs: number;
 	private readonly heartbeatIntervalMs: number;
 	private readonly watchdogIntervalMs: number;
+	private readonly leaseMs: number;
 	private readonly store?: AgentActorStore;
 	private readonly onNotification?: AgentActorNotificationListener;
+	private readonly recoveryHandlers = new Map<string, AgentActorRecoveryHandler>();
 	private watchdog?: NodeJS.Timeout;
 	private restored = false;
 
@@ -253,8 +368,16 @@ export class AgentActorRegistry {
 		this.stallAfterMs = normalized.stallAfterMs ?? 6 * 60 * 1000;
 		this.heartbeatIntervalMs = normalized.heartbeatIntervalMs ?? 15_000;
 		this.watchdogIntervalMs = normalized.watchdogIntervalMs ?? 45_000;
+		this.leaseMs = normalized.leaseMs ?? Math.max(45_000, this.heartbeatIntervalMs * 3);
 		this.store = normalized.store;
 		this.onNotification = normalized.onNotification;
+		for (const [kind, handler] of Object.entries(normalized.recoveryHandlers ?? {})) {
+			if (handler) this.recoveryHandlers.set(kind, handler);
+		}
+	}
+
+	registerRecoveryHandler(kind: AgentActorRecoverySpec["kind"], handler: AgentActorRecoveryHandler): void {
+		this.recoveryHandlers.set(kind, handler);
 	}
 
 	spawn(spec: AgentActorSpec, parentSignal?: AbortSignal): AgentActorHandle {
@@ -275,6 +398,7 @@ export class AgentActorRegistry {
 			started: false,
 			resolveWait,
 			wait,
+			ownership: this.newOwnership(),
 		};
 		this.records.set(record.id, record);
 		this.persist(record);
@@ -346,6 +470,7 @@ export class AgentActorRegistry {
 
 	scanStalled(at = Date.now()): AgentActorSnapshot[] {
 		this.ensureRestored();
+		this.restorePersistentActors();
 		const stalled: AgentActorSnapshot[] = [];
 		for (const record of this.records.values()) {
 			if (record.status !== "running") continue;
@@ -373,9 +498,20 @@ export class AgentActorRegistry {
 	}
 
 	private restorePersistentActors(): void {
-		for (const snapshot of this.store?.load() ?? []) {
+		for (const state of this.store?.load() ?? []) {
+			const { snapshot, ownership } = state;
 			if (snapshot.lifecycle !== "persistent") continue;
+			if (this.records.has(snapshot.id)) continue;
+			const leaseActive = ownership.leaseUntil.length > 0 && Date.parse(ownership.leaseUntil) > Date.now();
+			if ((snapshot.status === "pending" || snapshot.status === "running") && leaseActive) continue;
 			const status = snapshot.status === "pending" || snapshot.status === "running" ? "stalled" : snapshot.status;
+			const recoveredOwnership = this.newOwnership();
+			if (
+				(snapshot.status === "pending" || snapshot.status === "running") &&
+				!this.store?.claimRecovery(snapshot.id, ownership.token || undefined, recoveredOwnership)
+			) {
+				continue;
+			}
 			const restored: AgentActorRecord = {
 				...snapshot,
 				status,
@@ -384,11 +520,19 @@ export class AgentActorRegistry {
 				started: true,
 				resolveWait: () => {},
 				wait: Promise.resolve(status),
+				ownership: snapshot.status === "pending" || snapshot.status === "running" ? recoveredOwnership : ownership,
 			};
 			this.records.set(restored.id, restored);
 			if (status === "stalled" && snapshot.status !== "stalled") {
 				this.persist(restored);
 				this.notify(restored, "stalled");
+				const handler = restored.recovery ? this.recoveryHandlers.get(restored.recovery.kind) : undefined;
+				if (handler) {
+					void handler(snapshot).catch(() => {
+						// Recovery is isolated from the restored lifecycle row; a failed
+						// restart remains visible as stalled and can be retried explicitly.
+					});
+				}
 			}
 		}
 		this.pruneTerminalRecords();
@@ -417,7 +561,7 @@ export class AgentActorRegistry {
 
 	private persist(record: AgentActorRecord): void {
 		try {
-			this.store?.save(snapshotOf(record));
+			this.store?.save(snapshotOf(record), record.ownership);
 		} catch {
 			// Actor durability must not turn a successful model/tool run into a failure.
 		}
@@ -436,6 +580,7 @@ export class AgentActorRegistry {
 		};
 		try {
 			this.onNotification?.(notification);
+			publishAgentActorNotification(notification);
 		} catch {
 			// Parent notification is best effort and cannot change actor outcome.
 		}
@@ -448,6 +593,19 @@ export class AgentActorRegistry {
 		for (const record of terminal.slice(0, Math.max(0, terminal.length - this.terminalLimit))) {
 			this.records.delete(record.id);
 		}
+		try {
+			this.store?.prune(this.terminalLimit);
+		} catch {
+			// Cleanup is best effort and must not affect an active actor.
+		}
+	}
+
+	private newOwnership(): AgentActorOwnership {
+		return {
+			token: randomUUID(),
+			pid: process.pid,
+			leaseUntil: new Date(Date.now() + this.leaseMs).toISOString(),
+		};
 	}
 }
 

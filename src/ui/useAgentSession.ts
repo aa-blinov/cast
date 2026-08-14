@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 // provides a real global EventSource, so this import is Node-only and safe in
 // both runtimes.
 import { EventSource } from "undici";
+import { subscribeAgentActorNotifications } from "../core/actor-events.ts";
 import { backupFileForCheckpoint, createCheckpoint } from "../core/checkpoint.ts";
 import type { AppConfig } from "../core/config.ts";
 import { resolveProvider } from "../core/config.ts";
@@ -568,6 +569,14 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	const [messages, setMessages] = useState<ChatMessage[]>(() =>
 		buildDisplayMessages(initialPageRef.current!.messages),
 	);
+	useEffect(() => {
+		if (isClient) return;
+		return subscribeAgentActorNotifications((actor) => {
+			if (actor.parentSessionId !== session.id) return;
+			const status = actor.status === "success" ? "completed" : actor.status;
+			setMessages((msgs) => [...msgs, { role: "warning", content: `${actor.agent} ${status}` }]);
+		});
+	}, [isClient, session.id]);
 	const [hasOlder, setHasOlder] = useState(() => initialPageRef.current!.hasMore);
 	const oldestSeqRef = useRef<number | undefined>(initialPageRef.current!.oldestSeq);
 	const [streaming, setStreaming] = useState<StreamingState | null>(null);
@@ -1568,6 +1577,11 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 							}
 						}
 					}
+					break;
+				}
+				case "agent_actor": {
+					const status = event.actor.status === "success" ? "completed" : event.actor.status;
+					setMessages((msgs) => [...msgs, { role: "warning", content: `${event.actor.agent} ${status}` }]);
 					break;
 				}
 				case "assistant_message":

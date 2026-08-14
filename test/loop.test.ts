@@ -209,6 +209,7 @@ describe("runAgentLoop — abort vs. error", () => {
 				{
 					config: { ...testConfig, contextWindow: 1000, maxResponseTokens: 100 },
 					model: "test-model",
+					modelProvider: { baseURL: "https://openrouter.ai/api/v1", apiKey: "test" },
 					cwd: projectCwd,
 					systemPrompt: "test",
 					memory: { sessionId: "fork-session" },
@@ -228,6 +229,7 @@ describe("runAgentLoop — abort vs. error", () => {
 			expect(requests).toHaveLength(1);
 			const writerMessages = requests[0]!;
 			expect(writerMessages.some((message) => message.content === "before checkpoint")).toBe(true);
+			expect(writerMessages.some((message) => message.content === "after checkpoint")).toBe(false);
 			expect(writerMessages.at(-1)?.content).toContain("Fork boundary message index: 2");
 			const boundary = writerMessages[2]!.content as Array<{ cache_control?: { type: string } }>;
 			expect(boundary[0]!.cache_control).toEqual({ type: "ephemeral" });

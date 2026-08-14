@@ -367,6 +367,31 @@ CREATE INDEX IF NOT EXISTS idx_agent_actors_status
 `);
 		},
 	},
+	{
+		version: 12,
+		name: "agent-actor-fencing",
+		up: (db) => {
+			if (!columnExists(db, "agent_actors", "owner_token")) {
+				db.exec("ALTER TABLE agent_actors ADD COLUMN owner_token TEXT");
+			}
+			if (!columnExists(db, "agent_actors", "owner_pid")) {
+				db.exec("ALTER TABLE agent_actors ADD COLUMN owner_pid INTEGER");
+			}
+			if (!columnExists(db, "agent_actors", "lease_until")) {
+				db.exec("ALTER TABLE agent_actors ADD COLUMN lease_until TEXT");
+			}
+			if (!columnExists(db, "agent_actors", "revision")) {
+				db.exec("ALTER TABLE agent_actors ADD COLUMN revision INTEGER NOT NULL DEFAULT 0");
+			}
+			if (!columnExists(db, "agent_actors", "recovery_json")) {
+				db.exec("ALTER TABLE agent_actors ADD COLUMN recovery_json TEXT");
+			}
+			db.exec(`
+CREATE INDEX IF NOT EXISTS idx_agent_actors_lease
+  ON agent_actors(status, lease_until);
+`);
+		},
+	},
 ];
 
 const MIGRATION_TABLE_SCHEMA = `
