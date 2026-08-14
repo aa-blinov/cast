@@ -1079,14 +1079,38 @@ export async function runMemoryMaintenanceAgent(
 async function runCheckpointWriter(input: MemoryCheckpointWriterInput): Promise<void> {
 	if (!isMemoryWriteEnabled()) return;
 	const forkMode = input.checkpointFork === true;
-	const fork = input.parentForkContext
-		? structuredClone(input.parentForkContext)
-		: createAgentForkContext(input.messages, input.checkpointBoundary ?? -1, {
-				systemPrompt: input.parentSystemPrompt,
-				model: input.model,
-			});
-	if (!forkMode) fork.cachePrefixBoundary = undefined;
-	if (!forkMode && fork.boundaryIndex >= 0 && checkpointWriterMessages(fork, false).length === 0) return;
+	// Fork mode re-anchors the parent fork at the CURRENT transcript end: the
+	// forked prefix must cover the latest turn (the whole point of the
+	// cache-preserving fork) and the watermark commit must advance past the
+	// previous durable boundary. Anchoring at the last durable boundary would
+	// stall the checkpoint: the writer would never see new messages and the
+	// watermark could never move past them.
+	const forkBoundary = forkMode ? lastNonSystemIndex(input.messages) : (input.checkpointBoundary ?? -1);
+	const fork =
+		forkMode && input.parentForkContext
+			? createAgentForkContext(input.messages, forkBoundary, {
+					systemPrompt: input.parentForkContext.systemPrompt,
+					toolNames: input.parentForkContext.toolNames,
+					toolDefinitions: input.parentForkContext.toolDefinitions,
+					allowedTools: input.parentForkContext.allowedTools,
+					disabledTools: input.parentForkContext.disabledTools,
+					readOnlyBash: input.parentForkContext.readOnlyBash,
+					permissionMode: input.parentForkContext.permissionMode,
+					model: input.parentForkContext.model,
+					runtime: input.parentForkContext.runtime,
+				})
+			: input.parentForkContext
+				? structuredClone(input.parentForkContext)
+				: createAgentForkContext(input.messages, forkBoundary, {
+						systemPrompt: input.parentSystemPrompt,
+						model: input.model,
+					});
+	if (forkMode) {
+		if (forkBoundary < 0) return;
+	} else {
+		fork.cachePrefixBoundary = undefined;
+		if (fork.boundaryIndex >= 0 && checkpointWriterMessages(fork, false).length === 0) return;
+	}
 	const writerSession = input.writerSessionId
 		? loadSession(input.writerSessionId)
 		: createSession(input.model, input.cwd, {
@@ -1373,6 +1397,14 @@ function findCheckpointBoundary(messages: Message[]): number {
 	return -1;
 }
 
+/** Index of the newest non-system message — the durable commit point for a full-prefix fork. */
+function lastNonSystemIndex(messages: Message[]): number {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		if (messages[i]?.role !== "system") return i;
+	}
+	return -1;
+}
+
 function checkpointCommitTarget(input: MemoryCheckpointWriterInput, forkMode: boolean): Message | undefined {
 	if (forkMode && (input.checkpointBoundary ?? -1) >= 0) {
 		return input.messages[input.checkpointBoundary!];
@@ -1437,24 +1469,36 @@ export async function runAgentLoop(initialMessages: Message[], loopConfig: LoopC
 			!checkpointFork && checkpointBoundary < 0 && getCheckpointWatermark(loopConfig.memory!.sessionId) !== undefined
 				? getMessagesAfterCheckpoint(loopConfig.memory!.sessionId)
 				: [];
-		const writerHandle = scheduleProjectCheckpointWriter(
-			{
-				cwd: loopConfig.cwd,
-				sessionId: loopConfig.memory!.sessionId,
-				model: loopConfig.model,
-				config: loopConfig.config,
-				messages: durableDelta.length > 0 ? durableDelta : tracked,
-				providerOverride: loopConfig.modelProvider,
-				checkpointBoundary: durableDelta.length > 0 ? -1 : checkpointBoundary,
-				checkpointFork,
-				parentSystemPrompt: loopConfig.checkpointForkContext?.systemPrompt,
-				parentForkContext: loopConfig.checkpointForkContext,
-				parentToolRuntime: checkpointWriterRuntime(loopConfig),
-			},
-			runCheckpointWriter,
-			loopConfig.onWarning,
-		);
-		loopConfig.onCheckpointWriter?.(writerHandle);
+		const writerMessages = durableDelta.length > 0 ? durableDelta : tracked;
+		// Fork mode anchors the writer at the CURRENT transcript end, not the last
+		// durable boundary: the forked prefix then covers the latest turn (the whole
+		// point of the cache-preserving fork) and the watermark commit advances past
+		// it. The durable watermark only feeds the delta-only no-fork path.
+		const writerBoundary = checkpointFork
+			? lastNonSystemIndex(tracked)
+			: durableDelta.length > 0
+				? -1
+				: checkpointBoundary;
+		if (!checkpointFork || writerBoundary >= 0) {
+			const writerHandle = scheduleProjectCheckpointWriter(
+				{
+					cwd: loopConfig.cwd,
+					sessionId: loopConfig.memory!.sessionId,
+					model: loopConfig.model,
+					config: loopConfig.config,
+					messages: writerMessages,
+					providerOverride: loopConfig.modelProvider,
+					checkpointBoundary: writerBoundary,
+					checkpointFork,
+					parentSystemPrompt: loopConfig.checkpointForkContext?.systemPrompt,
+					parentForkContext: loopConfig.checkpointForkContext,
+					parentToolRuntime: checkpointWriterRuntime(loopConfig),
+				},
+				runCheckpointWriter,
+				loopConfig.onWarning,
+			);
+			loopConfig.onCheckpointWriter?.(writerHandle);
+		}
 	}
 	if (
 		terminalReason === "stop" &&
