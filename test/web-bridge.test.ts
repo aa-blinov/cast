@@ -371,6 +371,21 @@ describe("web bridge", () => {
 		expect((await bridge.executeCommand(ws.id, "/memory on")).result).toEqual({ memoryEnabled: true });
 	});
 
+	it("does not run memory maintenance while the global memory switch is off", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		await bridge.executeCommand(ws.id, "/memory off");
+		expect(await bridge.executeCommand(ws.id, "/dream")).toEqual({
+			ok: false,
+			error: "Project memory is disabled",
+		});
+		expect(await bridge.executeCommand(ws.id, "/distill")).toEqual({
+			ok: false,
+			error: "Project memory is disabled",
+		});
+		await bridge.executeCommand(ws.id, "/memory on");
+	});
+
 	it("/model <name> updates the session model", async () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();

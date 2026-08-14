@@ -13,6 +13,8 @@ All commands are typed at the TUI prompt, prefixed with `/`. Unknown slash comma
 | `/sessions` | Session picker with type-to-filter search (by message text, project path, or id); switch or delete |
 | `/clear` | Clear conversation context (and save the cleared state) |
 | `/compact` | Force context compaction now (auto-triggers near the limit) |
+| `/dream` | Verify the recent project trajectory and consolidate durable project memory |
+| `/distill` | Verify repeated work and package high-confidence workflows as a skill, persona, or command |
 | `/undo` | Undo the last turn: restore files from the most recent checkpoint and drop the last user message (and everything after it) |
 | `/copy` | Copy last assistant response to clipboard |
 | `/current` | Show all status bar data (even disabled segments) |

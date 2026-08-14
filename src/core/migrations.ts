@@ -303,6 +303,43 @@ WHERE m.role IN ('user', 'assistant', 'tool')
 			}
 		},
 	},
+	{
+		version: 10,
+		name: "project-memory-lifecycle",
+		up: (db) => {
+			db.exec(`
+CREATE TABLE IF NOT EXISTS project_memory_checkpoints (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id TEXT NOT NULL,
+  cwd TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  turn_key TEXT NOT NULL,
+  content_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(project_id, session_id, turn_key)
+);
+CREATE INDEX IF NOT EXISTS idx_project_memory_checkpoints_project
+  ON project_memory_checkpoints(project_id, updated_at DESC);
+CREATE TABLE IF NOT EXISTS project_memory_artifacts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id TEXT NOT NULL,
+  cwd TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL,
+  content TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  source_session_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(project_id, fingerprint)
+);
+CREATE INDEX IF NOT EXISTS idx_project_memory_artifacts_project
+  ON project_memory_artifacts(project_id, updated_at DESC);
+`);
+		},
+	},
 ];
 
 const MIGRATION_TABLE_SCHEMA = `

@@ -1,4 +1,5 @@
 import { loadConfig, resolveProvider } from "../src/core/config.ts";
+import { dirname, join } from "node:path";
 import { resetDbConnectionForTests } from "../src/core/db.ts";
 import {
 	buildMemoryPrompt,
@@ -13,6 +14,7 @@ import { loadSettings } from "../src/core/settings.ts";
 
 const database = process.env.CAST_SESSIONS_DB;
 if (!database || database === ":memory:") throw new Error("CAST_SESSIONS_DB must point to an isolated file database");
+process.env.CAST_MEMORY_DIR ??= join(dirname(database), "memory");
 
 const settings = loadSettings();
 const providerName = process.env.CAST_E2E_PROVIDER ?? "minimax";
@@ -116,13 +118,14 @@ for (const [caseIndex, testCase] of cases.entries()) {
 		const session = createSession(model, cwd);
 		session.id = sessionId;
 		saveSession(session);
-		await runAgentLoop(
-			[
-				{
-					role: "user",
-					content: `Remember this durable project fact exactly. Keep the marker unchanged: ${marker}. Fact: ${testCase.fact} Confirm briefly and do not call tools.`,
-				},
-			],
+		const memoryMessages = [
+			{
+				role: "user",
+				content: `Remember this durable project fact exactly. Keep the marker unchanged: ${marker}. Fact: ${testCase.fact} Confirm briefly and do not call tools.`,
+			},
+			{ role: "assistant", content: "Acknowledged." },
+		];
+		await runAgentLoop(memoryMessages,
 			{
 				config,
 				model,
@@ -132,6 +135,7 @@ for (const [caseIndex, testCase] of cases.entries()) {
 				onEvent: () => {},
 			},
 		);
+		await extractAndStoreProjectMemory({ cwd, sessionId, model, config, messages: memoryMessages, signal: AbortSignal.timeout(60_000) });
 		matches = await waitForMemory(marker, (match) => match.content.includes(marker));
 		if (matches.some((match) => match.content.includes(marker))) break;
 	}

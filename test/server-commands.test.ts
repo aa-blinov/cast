@@ -11,6 +11,13 @@ describe("web slash commands", () => {
 		expect(isCommandBlocking("/undo")).toBe(true);
 	});
 
+	it("advertises memory maintenance commands and blocks them during a turn", () => {
+		for (const command of ["/dream", "/distill"]) {
+			expect(SLASH_COMMANDS).toContainEqual(expect.objectContaining({ name: command, blocking: true }));
+			expect(isCommandBlocking(command), command).toBe(true);
+		}
+	});
+
 	it("allows read-only resource inspection during a turn", () => {
 		for (const command of [
 			"/mcp",

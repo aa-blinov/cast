@@ -23,7 +23,12 @@ import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { brotliCompressSync, gzipSync } from "node:zlib";
 import { getDb } from "../core/db.ts";
-import { listProjectMemory, searchProjectMemory } from "../core/memory.ts";
+import {
+	listProjectMemory,
+	listProjectMemoryArtifacts,
+	listProjectMemoryCheckpoints,
+	searchProjectMemory,
+} from "../core/memory.ts";
 import { getHistoryPage, getMessageImage, getSessionEvents } from "../core/session.ts";
 import { loadSettings, updateSettings } from "../core/settings.ts";
 import { ensureSessionWorktree } from "../core/worktree.ts";
@@ -806,7 +811,15 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
 		const query = (url.searchParams.get("q") ?? "").trim();
 		const items = query ? searchProjectMemory(cwd, query, 100) : listProjectMemory(cwd, 100);
-		json(res, { cwd, projectId: items[0]?.projectId ?? null, query, items, hasMore: items.length >= 100 });
+		json(res, {
+			cwd,
+			projectId: items[0]?.projectId ?? null,
+			query,
+			items,
+			checkpoint: query ? null : (listProjectMemoryCheckpoints(cwd, 1)[0] ?? null),
+			artifacts: query ? [] : listProjectMemoryArtifacts(cwd, 20),
+			hasMore: items.length >= 100,
+		});
 	});
 
 	// Audit trail of live agent events (tool_start, retry, doom_loop, error,

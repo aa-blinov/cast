@@ -134,6 +134,15 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 .memory-content { margin: 8px 0 9px; color: var(--text); font-size: .8rem; line-height: 1.45; overflow-wrap: anywhere; }
 .memory-meta { display: flex; gap: 9px; color: var(--text-muted); font-size: .66rem; }
 .memory-meta span + span::before { content: '·'; margin-right: 9px; color: var(--border-active); }
+.memory-checkpoint, .memory-artifacts { margin: 9px 10px 0; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-surface); }
+.memory-section-label { color: var(--text-muted); font-size: .64rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.memory-checkpoint-row { display: grid; grid-template-columns: 42px 1fr; gap: 8px; margin-top: 7px; font-size: .75rem; line-height: 1.35; }
+.memory-checkpoint-row span { color: var(--text-muted); }
+.memory-checkpoint-row strong { color: var(--text); font-weight: 500; overflow-wrap: anywhere; }
+.memory-artifacts { padding-bottom: 4px; }
+.memory-artifact { padding: 8px 0; border-top: 1px solid var(--border); }
+.memory-artifact:first-of-type { margin-top: 8px; }
+.memory-artifact-name { color: var(--text); font-size: .75rem; overflow-wrap: anywhere; }
 .diff-file-list {
 	overflow-y: auto;
 	border-bottom: 1px solid var(--border);
