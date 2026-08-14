@@ -467,6 +467,32 @@ CREATE TABLE IF NOT EXISTS memory_maintenance_schedule (
 `);
 		},
 	},
+	{
+		version: 17,
+		name: "session-history-fts-seq-sync",
+		up: (db) => {
+			// Compaction shifts messages.seq (recordCompactionInTransaction) but the
+			// FTS index keyed by seq only had INSERT/DELETE triggers, so shifted rows
+			// kept stale seqs and session-history search JOINed to the wrong message.
+			// Sync seq on UPDATE and rebuild once to repair any historical staleness.
+			db.exec(`
+CREATE TRIGGER IF NOT EXISTS session_history_fts_au AFTER UPDATE OF seq ON messages
+WHEN OLD.seq != NEW.seq
+BEGIN
+  DELETE FROM session_history_fts WHERE session_id = OLD.session_id AND seq = OLD.seq;
+  INSERT INTO session_history_fts(session_id, seq, role, body)
+    VALUES (NEW.session_id, NEW.seq, NEW.role, cast_message_text(NEW.content_json));
+END;
+`);
+			db.exec(`
+DELETE FROM session_history_fts;
+INSERT INTO session_history_fts(session_id, seq, role, body)
+SELECT m.session_id, m.seq, m.role, cast_message_text(m.content_json)
+FROM messages AS m
+WHERE m.role IN ('user', 'assistant', 'tool');
+`);
+		},
+	},
 ];
 
 const MIGRATION_TABLE_SCHEMA = `

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resetDbConnectionForTests } from "../src/core/db.ts";
-import { createSession, saveSession } from "../src/core/session.ts";
+import { appendMessage, compactMessages, createSession, recordCompaction, saveSession } from "../src/core/session.ts";
 import { formatSessionHistoryToolResult, searchSessionHistory } from "../src/core/session-query.ts";
 
 describe("session history search", () => {
@@ -45,5 +45,39 @@ describe("session history search", () => {
 		const project = join(root, "project");
 		expect(searchSessionHistory(project, "")).toEqual([]);
 		expect(searchSessionHistory(project, "no-such-history-term")).toEqual([]);
+	});
+
+	it("keeps search results attached to the right message after compaction shifts seq", async () => {
+		const project = join(root, "project");
+		const session = createSession("test-model", project, { id: "fts-seq-sync-session" });
+		const messages = [
+			{ role: "user", content: "question zero about the project" },
+			{ role: "assistant", content: "answer zero with some detail" },
+			{ role: "user", content: "question one about the project" },
+			{ role: "assistant", content: "answer one with some detail" },
+			{ role: "user", content: "question two about the project" },
+			{ role: "assistant", content: "answer two with some detail" },
+			{ role: "user", content: "question three about the project" },
+			{ role: "assistant", content: "answer three with some detail" },
+			{ role: "user", content: "question four about the project" },
+			{ role: "assistant", content: "answer four with some detail" },
+			{ role: "user", content: "next question about zebras" },
+			{ role: "assistant", content: "zebra answer" },
+		];
+		for (const message of messages) appendMessage(session, message);
+		saveSession(session);
+
+		const compacted = await compactMessages(messages, async () => "summary marker", {
+			baseURL: "https://example.invalid",
+			contextWindow: 1000,
+			apiKey: "test",
+		});
+		expect(compacted.summary.messagesCompacted).toBeGreaterThan(0);
+		recordCompaction(session, messages, compacted.messages);
+
+		const results = searchSessionHistory(project, "zebra");
+		expect(results).toHaveLength(1);
+		expect(results[0]!.snippet).toContain("zebra answer");
+		expect(results[0]!.role).toBe("assistant");
 	});
 });
