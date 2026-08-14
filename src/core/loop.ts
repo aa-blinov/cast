@@ -994,6 +994,11 @@ async function recoverMemoryMaintenance(snapshot: AgentActorSnapshot): Promise<v
 			runAgent: runMemoryMaintenanceAgent,
 		},
 		recovery.maintenanceKind,
+		{
+			parentSessionId: snapshot.parentSessionId,
+			backgroundSessionId: recovery.sessionId,
+			runId: snapshot.id,
+		},
 	);
 }
 

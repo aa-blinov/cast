@@ -45,7 +45,14 @@ import {
 	readSessionMemory,
 	writeMemoryFile,
 } from "../src/core/memory-files.ts";
-import { appendMessage, createSession, getSessionEvents, saveSession } from "../src/core/session.ts";
+import {
+	appendMessage,
+	createSession,
+	getFullHistory,
+	getSessionEvents,
+	loadSession,
+	saveSession,
+} from "../src/core/session.ts";
 import { updateSettings } from "../src/core/settings.ts";
 
 vi.mock("../src/core/llm.ts", async (importOriginal) => {
@@ -853,9 +860,12 @@ describe("project memory", () => {
 			await maybeRunAutomaticMemoryMaintenance(input);
 			await maybeRunAutomaticMemoryMaintenance(input);
 			expect(runAgent).toHaveBeenCalledTimes(2);
-			expect(getSessionEvents(session.id).map((event) => event.type)).toEqual(
+			const runs = listAutomaticMemoryRuns(session.id);
+			expect(runs.map((run) => run.kind)).toEqual(expect.arrayContaining(["dream", "distill"]));
+			expect(runs.flatMap((run) => getSessionEvents(run.sessionId).map((event) => event.type))).toEqual(
 				expect.arrayContaining(["memory_auto_dream_started", "memory_auto_distill_started"]),
 			);
+			expect(getSessionEvents(session.id).map((event) => event.type)).not.toContain("memory_auto_dream_started");
 		} finally {
 			if (realHome === undefined) delete process.env.HOME;
 			else process.env.HOME = realHome;
@@ -879,7 +889,6 @@ describe("project memory", () => {
 				messages: [],
 				runAgent,
 			});
-
 			expect(listAutomaticMemoryRuns(session.id)).toEqual([
 				expect.objectContaining({
 					parentSessionId: session.id,
@@ -887,6 +896,53 @@ describe("project memory", () => {
 					status: "success",
 				}),
 			]);
+		} finally {
+			if (realHome === undefined) delete process.env.HOME;
+			else process.env.HOME = realHome;
+		}
+	});
+
+	it("isolates automatic maintenance in its own background session", async () => {
+		const realHome = process.env.HOME;
+		process.env.HOME = join(root, "home-isolated-background-session");
+		const projectCwd = join(root, "isolated-background-session-project");
+		const session = createSession("test-model", projectCwd);
+		appendMessage(session, { role: "user", content: "parent conversation" });
+		saveSession(session);
+		const runAgent = vi.fn(async () => ({
+			messages: [{ role: "assistant" as const, content: "maintenance result" }],
+		}));
+		try {
+			updateSettings({ memoryDreamAuto: true, memoryDreamIntervalDays: 0 });
+			await maybeRunAutomaticMemoryMaintenance({
+				cwd: projectCwd,
+				sessionId: session.id,
+				model: session.model,
+				config: testConfig,
+				messages: session.messages,
+				runAgent,
+			});
+
+			const [run] = listAutomaticMemoryRuns(session.id);
+			expect(run).toBeDefined();
+			expect(run?.sessionId).toBe(run?.id);
+			expect(run?.sessionId).not.toBe(session.id);
+			const background = loadSession(run!.sessionId);
+			expect(background).toMatchObject({
+				id: run!.sessionId,
+				parentSessionId: session.id,
+				sessionKind: "background",
+				backgroundKind: "memory-dream",
+			});
+			expect(getFullHistory(background!.id)).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({ content: expect.stringContaining("maintenance result") }),
+				]),
+			);
+			expect(getSessionEvents(background!.id).map((event) => event.type)).toEqual(
+				expect.arrayContaining(["memory_auto_dream_started", "memory_dream_completed"]),
+			);
+			expect(getSessionEvents(session.id).map((event) => event.type)).not.toContain("memory_dream_completed");
 		} finally {
 			if (realHome === undefined) delete process.env.HOME;
 			else process.env.HOME = realHome;

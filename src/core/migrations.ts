@@ -38,6 +38,9 @@ CREATE TABLE IF NOT EXISTS sessions (
   last_prompt_tokens INTEGER,
   last_announced_local_date TEXT,
   provider_url TEXT,
+  session_kind TEXT NOT NULL DEFAULT 'conversation',
+  parent_session_id TEXT,
+  background_kind TEXT,
   usage_json TEXT NOT NULL,
   todos_json TEXT,
   share_token TEXT,
@@ -422,6 +425,22 @@ CREATE TABLE IF NOT EXISTS project_memory_revisions (
   updated_at TEXT NOT NULL
 );
 `);
+		},
+	},
+	{
+		version: 14,
+		name: "background-session-metadata",
+		up: (db) => {
+			if (!columnExists(db, "sessions", "session_kind")) {
+				db.exec("ALTER TABLE sessions ADD COLUMN session_kind TEXT NOT NULL DEFAULT 'conversation'");
+			}
+			if (!columnExists(db, "sessions", "parent_session_id")) {
+				db.exec("ALTER TABLE sessions ADD COLUMN parent_session_id TEXT");
+			}
+			if (!columnExists(db, "sessions", "background_kind")) {
+				db.exec("ALTER TABLE sessions ADD COLUMN background_kind TEXT");
+			}
+			db.exec("CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id, updated_at DESC)");
 		},
 	},
 ];
