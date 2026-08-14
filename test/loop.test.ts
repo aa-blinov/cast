@@ -10,7 +10,7 @@ import type { Message } from "../src/core/llm.ts";
 import { projectIdForCwd } from "../src/core/memory.ts";
 import { CHECKPOINT_TEMPLATE, checkpointPath, notesPath, projectMemoryPath } from "../src/core/memory-files.ts";
 import { formatRulesForTurn, loadDirectoryRules, matchAutoRules, unionStickyRules } from "../src/core/rules.ts";
-import { createSession, listBackgroundSessions, saveSession } from "../src/core/session.ts";
+import { commitCheckpointWatermark, createSession, listBackgroundSessions, saveSession } from "../src/core/session.ts";
 import { updateSettings } from "../src/core/settings.ts";
 
 vi.mock("../src/core/llm.ts", async (importOriginal) => {
@@ -232,7 +232,7 @@ const testConfig: AppConfig = {
 };
 
 describe("runAgentLoop — abort vs. error", () => {
-	it("runs checkpoint maintenance from an isolated fork at the durable boundary", async () => {
+	it("runs checkpoint maintenance from a full-transcript fork anchored at the current end", async () => {
 		const realHome = process.env.HOME;
 		const realMemoryDir = process.env.CAST_MEMORY_DIR;
 		const fakeHome = mkdtempSync(join(tmpdir(), "cast-checkpoint-fork-home-"));
@@ -240,7 +240,17 @@ describe("runAgentLoop — abort vs. error", () => {
 		process.env.HOME = fakeHome;
 		process.env.CAST_MEMORY_DIR = join(fakeHome, "memory");
 		updateSettings({ checkpointFork: true });
-		saveSession(createSession("test-model", projectCwd, { id: "fork-session" }));
+		const session = createSession("test-model", projectCwd, { id: "fork-session" });
+		session.messages = [
+			{ role: "system", content: "system" },
+			{ role: "user", content: "before checkpoint" },
+			{ role: "assistant", content: "checkpoint boundary" },
+		];
+		saveSession(session);
+		// A prior checkpoint already covers everything up to "checkpoint boundary":
+		// the fork must still anchor at the CURRENT transcript end so new turns are
+		// covered and the watermark can advance past this durable boundary.
+		expect(commitCheckpointWatermark(session.id, session.messages[2]!)).toBe(true);
 
 		const requests: Message[][] = [];
 		const toolNames: string[][] = [];
@@ -276,7 +286,7 @@ describe("runAgentLoop — abort vs. error", () => {
 					cwd: projectCwd,
 					systemPrompt: "test",
 					memory: { sessionId: "fork-session" },
-					checkpointBoundary: 2,
+					sessionId: "fork-session",
 					onEvent: () => {},
 					onWarning: (message) => {
 						throw new Error(message);
@@ -292,14 +302,16 @@ describe("runAgentLoop — abort vs. error", () => {
 			expect(requests).toHaveLength(1);
 			const writerMessages = requests[0]!;
 			expect(toolNames[1]).toEqual(toolNames[0]);
-			expect(writerMessages.some((message) => message.content === "before checkpoint")).toBe(true);
-			expect(writerMessages.some((message) => message.content === "after checkpoint")).toBe(false);
-			expect(writerMessages.at(-1)?.content).toContain("Fork boundary message index: 2");
+			expect(JSON.stringify(writerMessages)).toContain("before checkpoint");
+			expect(JSON.stringify(writerMessages)).toContain("after checkpoint");
+			expect(JSON.stringify(writerMessages)).toContain("main answer");
+			expect(writerMessages.at(-1)?.content).toContain("Fork boundary message index: 4");
 			expect(writerMessages.at(-1)?.content).toContain("complete tool registry is available and executable");
 			expect(writerMessages.at(-1)?.content).not.toContain("Use only read, write, edit, glob, and grep");
-			const boundary = writerMessages[2]!.content as Array<{ cache_control?: { type: string } }>;
-			expect(boundary[0]!.cache_control).toEqual({ type: "ephemeral" });
+			expect(typeof writerMessages[2]!.content).toBe("string");
 			expect(typeof writerMessages[3]!.content).toBe("string");
+			const boundary = writerMessages[4]!.content as Array<{ cache_control?: { type: string } }>;
+			expect(boundary[0]!.cache_control).toEqual({ type: "ephemeral" });
 			expect(result[1]!.content).toBe("before checkpoint");
 		} finally {
 			if (realHome === undefined) delete process.env.HOME;

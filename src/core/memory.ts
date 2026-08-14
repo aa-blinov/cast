@@ -18,6 +18,7 @@ import {
 	checkpointPath,
 	ensureMemoryFiles,
 	globalMemoryPath,
+	MEMORY_TEMPLATE,
 	notesPath,
 	projectMemoryPath,
 	readMemoryFile,
@@ -601,7 +602,12 @@ export async function waitForProjectCheckpointWriter(
 	await Promise.race([state.idle, timeout, cancelled].filter((value): value is Promise<void> => value !== undefined));
 	clearTimeout(timer);
 	if (abort) signal?.removeEventListener("abort", abort);
-	return checkpointWriterStates.get(checkpointWriterKey(cwd, sessionId)) === state ? "timed-out" : "settled";
+	// "Settled" only when no writer state remains for the session. The old
+	// identity check reported "settled" if a NEW writer had replaced this state
+	// during the wait — but that new writer is still running, so the checkpoint
+	// is NOT settled. Any live state (this one still draining, or a fresh one)
+	// means a writer is still in flight.
+	return checkpointWriterStates.get(checkpointWriterKey(cwd, sessionId)) !== undefined ? "timed-out" : "settled";
 }
 
 export async function drainProjectCheckpointWriters(
@@ -681,7 +687,7 @@ export function projectIdForCwd(cwd: string): string {
 
 export function buildMemorySearchQuery(raw: string): string {
 	const tokens = raw.match(/[\p{L}\p{N}_]+/gu) ?? [];
-	return [...new Set(tokens)].map((token) => `"${token.replaceAll('"', "")}"`).join(" OR ");
+	return [...new Set(tokens)].map((token) => `"${token.replaceAll('"', '""')}"`).join(" OR ");
 }
 
 function fingerprintFor(content: string, type: string): string {
@@ -1001,28 +1007,121 @@ function fileMemoryContext(
 		.join("\n\n");
 }
 
-function renderProjectMemoryFile(cwd: string): string {
-	const entries = listProjectMemory(cwd, 100);
-	const byType = new Map<string, string[]>();
-	for (const entry of entries) {
-		const bucket = byType.get(entry.type) ?? [];
-		bucket.push(`- ${entry.content}`);
-		byType.set(entry.type, bucket);
+function projectMemorySectionForType(type: string): string {
+	if (type === "context") return "Project context";
+	if (type === "rule" || type === "directive") return "Rules";
+	if (type === "decision" || type === "architecture") return "Architecture decisions";
+	return "Discovered durable knowledge";
+}
+
+function appendBulletToSection(content: string, section: string, bulletContent: string): string {
+	const lines = content.split("\n");
+	const heading = `## ${section}`;
+	let sectionIndex = -1;
+	for (let i = 0; i < lines.length; i++) {
+		if (lines[i]?.trim() === heading) {
+			sectionIndex = i;
+			break;
+		}
 	}
-	const sections = [
-		["Project context", byType.get("context") ?? []],
-		["Rules", byType.get("rule") ?? byType.get("directive") ?? []],
-		["Architecture decisions", byType.get("decision") ?? []],
-		[
-			"Discovered durable knowledge",
-			entries
-				.filter((entry) => !["context", "rule", "directive", "decision"].includes(entry.type))
-				.map((entry) => `- ${entry.content}`),
-		],
-	] as Array<[string, string[]]>;
-	return `# Project memory\n\n_Durable project-level knowledge. This file is shared by all sessions._\n\n${sections
-		.map(([title, lines]) => `## ${title}\n${lines.join("\n") || "(none yet)"}`)
-		.join("\n\n")}\n`;
+	const normalized = bulletContent.toLowerCase();
+	const bullet = `- ${bulletContent}`;
+	if (sectionIndex < 0) return `${content.trimEnd()}\n\n${heading}\n${bullet}\n`;
+	let end = lines.length;
+	for (let i = sectionIndex + 1; i < lines.length; i++) {
+		if (lines[i]?.startsWith("## ")) {
+			end = i;
+			break;
+		}
+	}
+	const body = lines.slice(sectionIndex + 1, end);
+	const existing = body.map((line) => line.match(MARKDOWN_BULLET_RE)?.[1]?.trim().toLowerCase()).filter(Boolean);
+	if (existing.includes(normalized)) return content;
+	const placeholder = body.findIndex((line) => MARKDOWN_EMPTY_RE.test(line.trim()));
+	if (placeholder >= 0) {
+		const next = [
+			...lines.slice(0, sectionIndex + 1),
+			...body.slice(0, placeholder),
+			bullet,
+			...body.slice(placeholder + 1),
+			...lines.slice(end),
+		];
+		return next.join("\n");
+	}
+	const next = [...lines.slice(0, end), bullet, ...lines.slice(end)];
+	return next.join("\n");
+}
+
+function removeBullets(content: string, contents: ReadonlySet<string>): string {
+	const lower = new Set([...contents].map((value) => value.toLowerCase()));
+	const lines = content.split("\n");
+	const out: string[] = [];
+	let skipping = false;
+	for (const line of lines) {
+		const bullet = line.match(MARKDOWN_BULLET_RE)?.[1]?.trim();
+		if (bullet !== undefined && lower.has(bullet.toLowerCase())) {
+			skipping = true;
+			continue;
+		}
+		if (skipping) {
+			if (!line.trim() || line.startsWith("- ") || line.startsWith("* ") || line.startsWith("## ")) {
+				skipping = false;
+			} else {
+				continue;
+			}
+		}
+		out.push(line);
+	}
+	return out.join("\n");
+}
+
+function removeEntriesFromProjectMemoryFile(cwd: string, contents: ReadonlySet<string>): number {
+	if (contents.size === 0) return 0;
+	const path = projectMemoryPath(projectIdForCwd(cwd));
+	const checked = readMemoryFileChecked(path);
+	if (!checked.readable) return 0;
+	const next = removeBullets(checked.content, contents);
+	if (next === checked.content) return 0;
+	writeMemoryFile(path, next);
+	return contents.size;
+}
+
+/**
+ * Append dream entries into the canonical project MEMORY.md as new bullets
+ * without rewriting the rest of the file. This is what keeps the checkpoint
+ * writer's curated markdown (Why:/How to apply: blocks, spillover files) and
+ * hand edits intact: the file is never regenerated from the database.
+ * Returns the number of bullets actually added.
+ */
+function mergeEntriesIntoProjectMemoryFile(cwd: string, entries: MemoryEntry[]): number {
+	if (entries.length === 0) return 0;
+	const path = projectMemoryPath(projectIdForCwd(cwd));
+	if (!readMemoryFileChecked(path).readable) writeMemoryFile(path, MEMORY_TEMPLATE);
+	let content = readMemoryFile(path);
+	let changed = false;
+	const byId = new Map(listProjectMemory(cwd, 100).map((entry) => [entry.id, entry.content]));
+	for (const entry of entries) {
+		for (const id of entry.supersedes ?? []) {
+			const superseded = byId.get(id);
+			if (!superseded) continue;
+			const next = removeBullets(content, new Set([superseded]));
+			if (next !== content) {
+				content = next;
+				changed = true;
+			}
+		}
+	}
+	let added = 0;
+	for (const entry of entries) {
+		const next = appendBulletToSection(content, projectMemorySectionForType(entry.type), entry.content.trim());
+		if (next !== content) {
+			content = next;
+			added++;
+			changed = true;
+		}
+	}
+	if (changed) writeMemoryFile(path, content);
+	return added;
 }
 
 function memoryFileHash(content: string): string {
@@ -1073,9 +1172,16 @@ function persistMemoryFiles(cwd: string, sessionId: string, checkpoint?: MemoryC
 	const projectId = projectIdForCwd(cwd);
 	ensureMemoryFiles(sessionId, projectId);
 	if (checkpoint) writeMemoryFile(checkpointPath(sessionId), renderCheckpoint(checkpoint));
-	const projectContent = renderProjectMemoryFile(cwd);
-	writeMemoryFile(projectMemoryPath(projectId), projectContent);
-	recordMemoryFileRevision(cwd, sessionId, projectContent, readMemoryFile(checkpointPath(sessionId)));
+	// MEMORY.md is owned by the checkpoint writer, dream/distill agents, and hand
+	// edits. Never regenerate it from the database here — dream merges entries
+	// in as new bullets (mergeEntriesIntoProjectMemoryFile), so the curated
+	// markdown (Why:/How to apply:, spillover files) survives intact.
+	recordMemoryFileRevision(
+		cwd,
+		sessionId,
+		readMemoryFile(projectMemoryPath(projectId)),
+		readMemoryFile(checkpointPath(sessionId)),
+	);
 }
 
 function memoryPromptText(cwd: string): string {
@@ -1229,7 +1335,13 @@ export async function extractAndStoreProjectMemory(input: {
 			});
 			return true;
 		});
-		if (persisted) persistMemoryFiles(input.cwd, input.sessionId, checkpoint);
+		if (persisted) {
+			// Extraction writes facts to the derived index only — it never rewrites
+			// MEMORY.md, so the checkpoint writer's curated markdown and hand edits
+			// survive intact. Dream (the consolidation pass) is what promotes these
+			// rows into the canonical file over time.
+			persistMemoryFiles(input.cwd, input.sessionId, checkpoint);
+		}
 		return {
 			entries: persisted ? entries : [],
 			checkpoint: persisted ? checkpoint : undefined,
@@ -1741,33 +1853,36 @@ async function runDreamProjectMemory(input: MemoryMaintenanceInput): Promise<Mem
 	const projectId = projectIdForCwd(input.cwd);
 	const turnKey = `dream:${new Date().toISOString()}`;
 	const db = getDb();
-	const result = withImmediateTransaction(db, () => {
-		const validIds = new Set<number>();
-		if (parsed.removeIds.length > 0) {
-			const rows = db
-				.prepare(
-					`SELECT id FROM project_memory WHERE project_id = ? AND id IN (${parsed.removeIds.map(() => "?").join(",")})`,
-				)
-				.all(projectId, ...parsed.removeIds) as Array<{ id: number }>;
-			for (const row of rows) validIds.add(row.id);
-		}
-		let removed = 0;
-		if (validIds.size > 0) {
-			const placeholders = [...validIds].map(() => "?").join(",");
-			removed = Number(
-				db
-					.prepare(`DELETE FROM project_memory WHERE project_id = ? AND id IN (${placeholders})`)
-					.run(projectId, ...validIds).changes,
+	const before = listProjectMemory(input.cwd, 100);
+	const byId = new Map(before.map((entry) => [entry.id, entry.content]));
+	const removeIds = parsed.removeIds.filter((id) => byId.has(id));
+	const removeContents = new Set(
+		removeIds.map((id) => byId.get(id)).filter((content): content is string => content !== undefined),
+	);
+	// Mirror removals and additions in the canonical file, then re-derive the DB
+	// from it. Direct DB deletes cover rows that exist only in the index (e.g.
+	// storeProjectMemory writes); the file edits keep curated bullets from being
+	// re-added by the reconcile.
+	if (removeIds.length > 0) {
+		withImmediateTransaction(db, () => {
+			const placeholders = removeIds.map(() => "?").join(",");
+			db.prepare(`DELETE FROM project_memory WHERE project_id = ? AND id IN (${placeholders})`).run(
+				projectId,
+				...removeIds,
 			);
-		}
-		const stored = storeProjectMemoryRows(db, input.cwd, input.sessionId, turnKey, parsed.entries);
-		if (parsed.checkpoint)
-			storeProjectMemoryCheckpointRow(db, input.cwd, input.sessionId, turnKey, parsed.checkpoint);
-		appendMemorySessionEvent(db, input.sessionId, "memory_dream_completed", { removed, entries: stored });
-		return { removed, stored };
-	});
-	if (result.stored > 0 || parsed.checkpoint) persistMemoryFiles(input.cwd, input.sessionId, parsed.checkpoint);
-	return { ...result, checkpoint: parsed.checkpoint, usage: response.usage };
+		});
+	}
+	if (removeContents.size > 0) removeEntriesFromProjectMemoryFile(input.cwd, removeContents);
+	const stored = mergeEntriesIntoProjectMemoryFile(input.cwd, parsed.entries);
+	if (parsed.checkpoint) {
+		storeProjectMemoryCheckpointRow(db, input.cwd, input.sessionId, turnKey, parsed.checkpoint);
+		persistMemoryFiles(input.cwd, input.sessionId, parsed.checkpoint);
+	}
+	reconcileProjectMemoryFilesLocked(input.cwd, input.sessionId, true);
+	const after = listProjectMemory(input.cwd, 100);
+	const removed = [...removeContents].filter((content) => !after.some((entry) => entry.content === content)).length;
+	appendMemorySessionEvent(db, input.sessionId, "memory_dream_completed", { removed, entries: stored });
+	return { removed, stored, checkpoint: parsed.checkpoint, usage: response.usage };
 }
 
 export function dreamProjectMemory(input: MemoryMaintenanceInput): Promise<MemoryDreamResult> {
@@ -2158,14 +2273,34 @@ function reconcileProjectMemoryFilesLocked(cwd: string, sessionId?: string, forc
 	if (!checked.readable) return;
 	const projectContent = checked.content;
 	const entries = parseMarkdownMemoryEntries(projectContent);
-	if (entries.length === 0 && !force) return;
+	// The file is canonical for the curated layer; a routine reconcile only syncs
+	// when the file actually changed since the last recorded revision.
+	if (!force && !projectMemoryFileNeedsReconcile(cwd)) return;
 	const session = sessionId ? readSessionMemory(sessionId) : undefined;
 	const checkpoint = session ? parseCheckpointMarkdown(session.checkpoint) : undefined;
 	const turnKey = `file:${createHash("sha256").update(projectContent).digest("hex").slice(0, 24)}`;
 	const db = getDb();
 	withImmediateTransaction(db, () => {
-		db.prepare("DELETE FROM project_memory WHERE project_id = ?").run(projectId);
+		const fingerprints = entries.map((entry) => fingerprintFor(entry.content, entry.type));
+		// Drop file-derived rows whose bullet is no longer in the file.
+		if (fingerprints.length === 0) {
+			db.prepare("DELETE FROM project_memory WHERE project_id = ? AND source_turn_key LIKE 'file:%'").run(projectId);
+		} else {
+			db.prepare(
+				`DELETE FROM project_memory WHERE project_id = ? AND source_turn_key LIKE 'file:%' AND fingerprint NOT IN (${fingerprints.map(() => "?").join(",")})`,
+			).run(projectId, ...fingerprints);
+		}
+		// Upsert the file's entries as file-derived rows. The fingerprint conflict
+		// merges any matching extraction row and re-tags it file-derived.
 		if (entries.length > 0) storeProjectMemoryRows(db, cwd, sessionId ?? "memory-file-reconcile", turnKey, entries);
+		// Extraction rows keep their metadata until their content is curated into
+		// the file; once it is, drop the provisional copy so search never returns
+		// the same fact twice.
+		db.prepare(`
+			DELETE FROM project_memory
+			WHERE project_id = ? AND source_turn_key NOT LIKE 'file:%'
+			  AND content IN (SELECT content FROM project_memory WHERE project_id = ? AND source_turn_key LIKE 'file:%')
+		`).run(projectId, projectId);
 		if (checkpoint && sessionId) storeProjectMemoryCheckpointRow(db, cwd, sessionId, turnKey, checkpoint);
 		if (sessionId) {
 			appendMemorySessionEvent(db, sessionId, "memory_files_reconciled", {
