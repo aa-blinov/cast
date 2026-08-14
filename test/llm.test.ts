@@ -142,7 +142,7 @@ describe("parseHermesToolCalls / stripHermesToolCalls", () => {
 
 describe("streamAndCollect — Hermes tool-call recovery", () => {
 	it("recovers a valid tool call when the provider emits XML content + truncated arguments", async () => {
-		// The exact failure shape from xiaomi mimo: the call leaks into content as
+		// The exact failure shape from a provider that leaks the call into content as
 		// Hermes XML while tool_calls.arguments arrives as truncated, invalid JSON.
 		const client = fakeClient([
 			{
@@ -421,7 +421,7 @@ describe("streamAndCollect — usage accounting", () => {
 		expect(result.generationMs).toBeUndefined();
 	});
 
-	it("captures delta.reasoning_content (DeepSeek/Qwen/MiMo) into thinking", async () => {
+	it("captures delta.reasoning_content from compatible reasoners into thinking", async () => {
 		// These providers expose no reasoning metadata via /v1/models and stream
 		// their reasoning in reasoning_content, not `reasoning` or <think> tags —
 		// so this is the only signal we get that they reasoned at all.
@@ -658,7 +658,7 @@ describe("streamChat — message sanitization", () => {
 });
 
 describe("describeTurnError", () => {
-	// A body-less gateway 401 (the mimo case): status set, message terse.
+	// A body-less gateway 401: status set, message terse.
 	it("maps a 401 (by status) to a revoked-key message pointing at /provider", () => {
 		const err = Object.assign(new Error("401 status code (no body)"), { status: 401 });
 		const out = describeTurnError(err);

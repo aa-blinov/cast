@@ -451,7 +451,7 @@ describe("extractReasoningMeta", () => {
 // ============================================================================
 
 describe("buildReasoningParams", () => {
-	it("detects Xiaomi MiMo Token Plan as DeepSeek-compatible", () => {
+	it("detects Token Plan as DeepSeek-compatible", () => {
 		expect(resolveReasoningFormat("https://token-plan-sgp.xiaomimimo.com/v1")).toBe("deepseek");
 	});
 

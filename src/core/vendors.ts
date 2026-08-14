@@ -52,7 +52,7 @@ export const REASONING_FORMAT_OPTIONS: Array<{ value: ReasoningFormat; label: st
 	{ value: "openai-compatible", label: "OpenAI-compatible chat (reasoning_effort)" },
 	{ value: "openai", label: "OpenAI (reasoning_effort)" },
 	{ value: "openrouter", label: "OpenRouter (reasoning.effort)" },
-	{ value: "deepseek", label: "DeepSeek / Xiaomi MiMo (thinking.type)" },
+	{ value: "deepseek", label: "DeepSeek-compatible (thinking.type)" },
 	{ value: "kimi", label: "Kimi / Moonshot (thinking.type, preserved thinking)" },
 	{ value: "qianfan", label: "Baidu Qianfan / ERNIE (enable_thinking)" },
 	{ value: "qwen", label: "Qwen / DashScope (enable_thinking)" },

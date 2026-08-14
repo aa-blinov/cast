@@ -10,7 +10,7 @@ Sessions saved by older versions of cast (individual `.json`/`.jsonl` files unde
 
 ## Project Memory
 
-Cast follows MiMo's two-layer memory layout. The authoritative artifacts are files under `~/.cast/memory/`: project knowledge in `projects/<project-id>/MEMORY.md`, session handoffs in `sessions/<session-id>/checkpoint.md`, scratch notes in `notes.md`, and delegated task progress under `tasks/<task-id>/progress.md`. SQLite keeps a scoped FTS5 mirror for fast retrieval and the raw session trajectory remains the evidence source.
+Cast uses a two-layer memory layout. The authoritative artifacts are files under `~/.cast/memory/`: project knowledge in `projects/<project-id>/MEMORY.md`, session handoffs in `sessions/<session-id>/checkpoint.md`, scratch notes in `notes.md`, and delegated task progress under `tasks/<task-id>/progress.md`. SQLite keeps a scoped FTS5 mirror for fast retrieval and the raw session trajectory remains the evidence source.
 
 When a session approaches the context threshold, a separate hidden checkpoint-writer agent is queued in the background. It can only read and update the memory files, uses absolute paths, and is isolated from the user-facing turn. One writer runs per session and at most one newer pending request is retained. The writer is bounded and best-effort; the main turn never waits for it.
 

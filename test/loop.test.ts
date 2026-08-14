@@ -245,6 +245,27 @@ describe("runAgentLoop — abort vs. error", () => {
 		}
 	});
 
+	it("passes a context-sized token budget to automatic memory reconstruction", async () => {
+		const buildPrompt = vi.fn(() => "");
+		const memoryService = {
+			search: vi.fn(() => []),
+			buildPrompt,
+			extractAndStoreProjectMemory: vi.fn(),
+		};
+		vi.mocked(streamAndCollect).mockResolvedValueOnce({ content: "done", finishReason: "stop" });
+
+		await runAgentLoop([{ role: "user", content: "hi" }], {
+			config: { ...testConfig, contextWindow: 10_000, maxResponseTokens: 1_000 },
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			memory: { sessionId: "memory-budget", service: memoryService },
+			onEvent: () => {},
+		});
+
+		expect(buildPrompt.mock.calls[0]?.[3]).toEqual({ tokenBudget: 450 });
+	});
+
 	it("does not retrieve or write memory when the global memory setting is disabled", async () => {
 		const realHome = process.env.HOME;
 		const fakeHome = mkdtempSync(join(tmpdir(), "cast-memory-disabled-test-"));
