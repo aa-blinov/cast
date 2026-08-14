@@ -106,6 +106,24 @@ export function projectMemoryPath(projectId: string): string {
 	return join(memoryRoot(), "projects", projectId, "MEMORY.md");
 }
 
+export function projectMemoryManifestPath(projectId: string): string {
+	return join(memoryRoot(), "projects", projectId, "manifest.json");
+}
+
+export interface ProjectMemoryManifest {
+	version: 1;
+	revision: number;
+	projectId: string;
+	sessionId: string;
+	projectHash: string;
+	checkpointHash: string;
+	updatedAt: string;
+}
+
+export function writeProjectMemoryManifest(projectId: string, manifest: ProjectMemoryManifest): void {
+	writeMemoryFile(projectMemoryManifestPath(projectId), `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
 export function ensureMemoryFiles(sessionId: string, projectId: string): void {
 	const files: Array<[string, string]> = [
 		[checkpointPath(sessionId), CHECKPOINT_TEMPLATE],

@@ -30,11 +30,14 @@ import {
 	searchProjectMemory,
 	storeProjectMemory,
 	waitForProjectCheckpointWriter,
+	withProjectMemoryLease,
 } from "../src/core/memory.ts";
 import {
 	checkpointPath,
 	ensureMemoryFiles,
+	projectMemoryManifestPath,
 	projectMemoryPath,
+	readMemoryFile,
 	readProjectMemory,
 	readSessionMemory,
 	writeMemoryFile,
@@ -149,6 +152,93 @@ describe("project memory", () => {
 		expect(prompt).toContain("The bridge owns one writer per session.");
 	});
 
+	it("does not retrieve expired memory and keeps confidence metadata", () => {
+		const projectCwd = join(root, "expiry-project");
+		storeProjectMemory(projectCwd, "session-a", "turn-a", [
+			{
+				content: "This decision is still active.",
+				type: "decision",
+				importance: 91,
+				confidence: 88,
+				expiresAt: new Date(Date.now() + 60_000).toISOString(),
+			},
+			{
+				content: "This temporary decision has expired.",
+				type: "decision",
+				importance: 99,
+				confidence: 40,
+				expiresAt: new Date(Date.now() - 60_000).toISOString(),
+			},
+		]);
+
+		expect(listProjectMemory(projectCwd)).toEqual([
+			expect.objectContaining({ content: "This decision is still active.", confidence: 88 }),
+		]);
+	});
+
+	it("serializes memory operations through a durable SQLite lease", async () => {
+		const projectCwd = join(root, "lease-project");
+		const events: string[] = [];
+		let release!: () => void;
+		const blocked = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+
+		const first = withProjectMemoryLease(projectCwd, "test", async () => {
+			events.push("first:start");
+			await blocked;
+			events.push("first:end");
+		});
+		await new Promise((resolve) => setImmediate(resolve));
+		const second = withProjectMemoryLease(projectCwd, "test", async () => {
+			events.push("second");
+		});
+
+		await new Promise((resolve) => setImmediate(resolve));
+		expect(events).toEqual(["first:start"]);
+		release();
+		await Promise.all([first, second]);
+		expect(events).toEqual(["first:start", "first:end", "second"]);
+	});
+
+	it("lets a new extraction explicitly supersede a contradictory fact", async () => {
+		const projectCwd = join(root, "supersession-project");
+		const session = createSession("test-model", projectCwd);
+		saveSession(session);
+		storeProjectMemory(projectCwd, session.id, "old-turn", [
+			{ content: "The daemon uses port 1337.", type: "architecture", importance: 80 },
+		]);
+		const oldId = listProjectMemory(projectCwd)[0]!.id;
+		vi.mocked(streamAndCollect).mockResolvedValueOnce({
+			content: JSON.stringify({
+				entries: [
+					{
+						type: "architecture",
+						content: "The daemon uses port 1444.",
+						importance: 90,
+						confidence: 95,
+						supersedes: [oldId],
+					},
+				],
+			}),
+		});
+
+		await extractAndStoreProjectMemory({
+			cwd: projectCwd,
+			sessionId: session.id,
+			model: session.model,
+			config: testConfig,
+			messages: [
+				{ role: "user", content: "The port changed." },
+				{ role: "assistant", content: "The daemon now uses port 1444." },
+			],
+		});
+
+		expect(listProjectMemory(projectCwd)).toEqual([
+			expect.objectContaining({ content: "The daemon uses port 1444.", confidence: 95 }),
+		]);
+	});
+
 	it("records retrieval and writes as durable session events", () => {
 		const projectCwd = join(root, "project");
 		const session = createSession("test-model", projectCwd);
@@ -257,6 +347,9 @@ describe("project memory", () => {
 		expect(listProjectMemory(projectCwd)).toEqual([
 			expect.objectContaining({ content: "Memory is globally switchable." }),
 		]);
+		expect(JSON.parse(readMemoryFile(projectMemoryManifestPath(projectIdForCwd(projectCwd))))).toEqual(
+			expect.objectContaining({ version: 1, revision: 1, projectId: projectIdForCwd(projectCwd) }),
+		);
 	});
 
 	it("dreams over project memory and removes only rows belonging to the project", async () => {

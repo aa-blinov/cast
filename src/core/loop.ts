@@ -39,6 +39,7 @@ import {
 	projectIdForCwd,
 	reconcileProjectMemoryFiles,
 	scheduleProjectCheckpointWriter,
+	scheduleProjectMemoryExtraction,
 } from "./memory.ts";
 import { checkpointPath, ensureMemoryFiles, notesPath, projectMemoryPath, tasksDir } from "./memory-files.ts";
 import {
@@ -988,7 +989,17 @@ function findCheckpointBoundary(messages: Message[]): number {
 export async function runAgentLoop(initialMessages: Message[], loopConfig: LoopConfig): Promise<Message[]> {
 	const messages = [...initialMessages];
 	const tracked = loopConfig.onMessagesChanged ? makeObservable(messages, loopConfig.onMessagesChanged) : messages;
-	await runLoop(tracked, loopConfig);
+	let terminalReason: Extract<AgentEvent, { type: "end" }>["reason"] | undefined;
+	const originalOnEvent = loopConfig.onEvent;
+	loopConfig.onEvent = (event) => {
+		if (event.type === "end") terminalReason = event.reason;
+		originalOnEvent(event);
+	};
+	try {
+		await runLoop(tracked, loopConfig);
+	} finally {
+		loopConfig.onEvent = originalOnEvent;
+	}
 	if (shouldStartCheckpointWriter(loopConfig, tracked)) {
 		const writerHandle = scheduleProjectCheckpointWriter(
 			{
@@ -1004,6 +1015,21 @@ export async function runAgentLoop(initialMessages: Message[], loopConfig: LoopC
 			loopConfig.onWarning,
 		);
 		loopConfig.onCheckpointWriter?.(writerHandle);
+	}
+	if (terminalReason === "stop" && loopConfig.memory && isMemoryEnabled()) {
+		const memoryService = loopConfig.memory.service ?? DEFAULT_MEMORY_SERVICE;
+		scheduleProjectMemoryExtraction(
+			{
+				cwd: loopConfig.cwd,
+				model: loopConfig.model,
+				sessionId: loopConfig.memory.sessionId,
+				config: loopConfig.config,
+				messages: tracked,
+				providerOverride: loopConfig.modelProvider,
+			},
+			memoryService,
+			loopConfig.onWarning,
+		);
 	}
 	return tracked;
 }
