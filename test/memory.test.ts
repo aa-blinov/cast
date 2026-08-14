@@ -352,6 +352,41 @@ describe("project memory", () => {
 		);
 	});
 
+	it("retries an empty extraction when a completed turn contains enough durable context", async () => {
+		const projectCwd = join(root, "retry-project");
+		const session = createSession("test-model", projectCwd);
+		saveSession(session);
+		vi.mocked(streamAndCollect).mockClear();
+		vi.mocked(streamAndCollect)
+			.mockResolvedValueOnce({ content: JSON.stringify({ entries: [] }) })
+			.mockResolvedValueOnce({
+				content: JSON.stringify({
+					entries: [{ type: "architecture", content: "The durable writer uses a SQLite lease.", importance: 90 }],
+				}),
+			});
+
+		const result = await extractAndStoreProjectMemory({
+			cwd: projectCwd,
+			sessionId: session.id,
+			model: session.model,
+			config: testConfig,
+			messages: [
+				{
+					role: "user",
+					content:
+						"We need to preserve this architecture decision across future sessions: every durable memory write must use the SQLite lease and the file manifest so another process cannot overwrite an active writer.",
+				},
+				{
+					role: "assistant",
+					content: "Implemented the lease and manifest and verified them with concurrent processes.",
+				},
+			],
+		});
+
+		expect(streamAndCollect).toHaveBeenCalledTimes(2);
+		expect(result.entries).toEqual([expect.objectContaining({ content: "The durable writer uses a SQLite lease." })]);
+	});
+
 	it("dreams over project memory and removes only rows belonging to the project", async () => {
 		const projectCwd = join(root, "project");
 		const otherCwd = join(root, "other");
