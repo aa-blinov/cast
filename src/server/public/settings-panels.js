@@ -69,16 +69,38 @@ function SettingsBash({ data, busy, act }) {
 }
 
 function SettingsMemory({ data, busy, act }) {
+	const [budgetDraft, setBudgetDraft] = useState("");
+	const [floorDraft, setFloorDraft] = useState("");
 	if (!data) return null;
 	const enabled = data.memoryEnabled !== false;
+	const writeEnabled = data.memoryWriteEnabled !== false;
+	const budget = data.memoryPromptBudget ?? 4096;
+	const floor = data.memorySearchScoreFloor ?? 0.15;
+	const reconcile = data.memoryReconcileOnSearch !== false;
 	return html`
 		<div class="settings-rows">
 			<div class="settings-section-title">Durable project memory</div>
-			<p class="settings-hint">The agent can retain verified project facts across sessions. This is a global setting shared with the TUI and saved in <code>~/.cast/settings.json</code>.</p>
+			<p class="settings-hint">Project memory is shared with the TUI and saved in <code>~/.cast/settings.json</code>. Reading and background writing can be controlled independently.</p>
 			<div class="settings-compact-list">
 				<div class="settings-compact-row">
 					<div class="settings-compact-copy"><span class="settings-compact-title">Memory</span><span>${enabled ? "Extraction, retrieval, and the Memory sidebar are active." : "Memory extraction, retrieval, and the Memory sidebar are disabled."}</span></div>
 					<button class="settings-toggle" role="switch" aria-checked=${enabled ? "true" : "false"} disabled=${busy} onClick=${() => act(`/memory ${enabled ? "off" : "on"}`)}><span class="settings-toggle-thumb" />${enabled ? "Enabled" : "Disabled"}</button>
+				</div>
+				<div class="settings-compact-row">
+					<div class="settings-compact-copy"><span class="settings-compact-title">Background writing</span><span>${writeEnabled ? "The writer and checkpoint agent may update memory." : "Existing memory remains readable; no new memory is written."}</span></div>
+					<button class="settings-toggle" role="switch" aria-checked=${writeEnabled ? "true" : "false"} disabled=${busy || !enabled} onClick=${() => act(`/memory write ${writeEnabled ? "off" : "on"}`)}><span class="settings-toggle-thumb" />${writeEnabled ? "Enabled" : "Disabled"}</button>
+				</div>
+				<div class="settings-compact-row">
+					<div class="settings-compact-copy"><span class="settings-compact-title">Prompt budget</span><span>Maximum estimated memory tokens added to a model context.</span></div>
+					<form style="display:contents" onSubmit=${(event) => { event.preventDefault(); const value = Number(budgetDraft || budget); if (Number.isInteger(value) && value >= 256) act(`/memory budget ${value}`); }}><input aria-label="Memory prompt token budget" type="number" min="256" max="16384" step="256" value=${budgetDraft || budget} disabled=${busy} onInput=${(event) => setBudgetDraft(event.target.value)} /><button class="modal-btn" disabled=${busy || !budgetDraft || Number(budgetDraft) === budget} onClick=${() => act(`/memory budget ${Number(budgetDraft)}`)}>Save</button></form>
+				</div>
+				<div class="settings-compact-row">
+					<div class="settings-compact-copy"><span class="settings-compact-title">Search score floor</span><span>Drop weak common-word matches below this fraction of the best result.</span></div>
+					<form style="display:contents" onSubmit=${(event) => { event.preventDefault(); const value = Number(floorDraft || floor); if (value >= 0 && value <= 1) act(`/memory floor ${value}`); }}><input aria-label="Memory search score floor" type="number" min="0" max="1" step="0.05" value=${floorDraft || floor} disabled=${busy} onInput=${(event) => setFloorDraft(event.target.value)} /><button class="modal-btn" disabled=${busy || !floorDraft || Number(floorDraft) === floor} onClick=${() => act(`/memory floor ${Number(floorDraft)}`)}>Save</button></form>
+				</div>
+				<div class="settings-compact-row">
+					<div class="settings-compact-copy"><span class="settings-compact-title">Reconcile before search</span><span>${reconcile ? "File changes are checked before memory search." : "Search uses the existing SQLite index until the next writer sync."}</span></div>
+					<button class="settings-toggle" role="switch" aria-checked=${reconcile ? "true" : "false"} disabled=${busy} onClick=${() => act(`/memory reconcile ${reconcile ? "off" : "on"}`)}><span class="settings-toggle-thumb" />${reconcile ? "Enabled" : "Disabled"}</button>
 				</div>
 			</div>
 		</div>
