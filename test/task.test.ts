@@ -2,9 +2,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { AgentActorRegistry } from "../src/core/actors.ts";
 import type { AppConfig } from "../src/core/config.ts";
 import { resetDbConnectionForTests } from "../src/core/db.ts";
 import { EMPTY_ASSISTANT_PLACEHOLDER, type Message } from "../src/core/llm.ts";
+import { createSession, saveSession } from "../src/core/session.ts";
 import { execTask, extractTaskResult } from "../src/core/tools/task.ts";
 
 // execTask can persist subagent runs (saveSubagentRun) — keep that on a
@@ -67,6 +69,34 @@ describe("extractTaskResult", () => {
 });
 
 describe("execTask — final extract", () => {
+	it("registers a child actor and settles it after the delegated loop", async () => {
+		const actorRegistry = new AgentActorRegistry();
+		const parentSession = createSession("test-model", "/tmp");
+		saveSession(parentSession);
+		const result = await execTask({ assignment: "inspect the code" }, "/tmp", testConfig, {
+			model: "test-model",
+			sessionId: parentSession.id,
+			actorRegistry,
+			subagentPrompts: [
+				{ name: "worker", label: "Worker", description: "", systemPrompt: "worker", agentsMd: false },
+			],
+			runAgentLoop: async (messages, config) => {
+				config.onEvent({ type: "end", reason: "stop" });
+				return [...messages, { role: "assistant", content: "done" }];
+			},
+		});
+
+		expect(result.isError).toBeFalsy();
+		expect(actorRegistry.list()).toEqual([
+			expect.objectContaining({
+				parentSessionId: parentSession.id,
+				sessionId: parentSession.id,
+				agent: "worker",
+				status: "success",
+			}),
+		]);
+	});
+
 	it("returns the report when the last assistant turn is the placeholder", async () => {
 		const result = await execTask({ assignment: "review mod-a" }, "/tmp", testConfig, {
 			model: "test-model",
@@ -209,6 +239,7 @@ describe("execTask — final extract", () => {
 
 	it("cancels while queued on the semaphore without starting the loop", async () => {
 		const ac = new AbortController();
+		const actorRegistry = new AgentActorRegistry();
 		let started = 0;
 		let release!: () => void;
 		const gate = new Promise<void>((r) => {
@@ -219,6 +250,7 @@ describe("execTask — final extract", () => {
 			subagentPrompts: [
 				{ name: "worker", label: "Worker", description: "", systemPrompt: "worker", agentsMd: false },
 			],
+			actorRegistry,
 			runAgentLoop: async (messages: Message[]) => {
 				started++;
 				await gate;
@@ -241,5 +273,7 @@ describe("execTask — final extract", () => {
 
 		release();
 		await Promise.all(runs.slice(0, 10));
+		expect(actorRegistry.list()).toHaveLength(13);
+		expect(actorRegistry.list().every((actor) => actor.status === "cancelled")).toBe(true);
 	});
 });
