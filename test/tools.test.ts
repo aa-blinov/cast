@@ -1,4 +1,14 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
@@ -8,7 +18,9 @@ import { BackgroundTaskRegistry, type BashBackgroundDeps } from "../src/core/too
 import { isPermissionError, withAccessNote } from "../src/core/tools/search.ts";
 import { createToolExecutor, getToolDefinitions } from "../src/core/tools.ts";
 
-const TEST_DIR = join(import.meta.dirname, "__test_tmp__", "tools");
+const TEST_ROOT = join(import.meta.dirname, "__test_tmp__");
+let TEST_DIR = "";
+let NESTED_ROOT = "";
 
 const mockConfig: AppConfig = {
 	baseURL: "http://localhost",
@@ -22,7 +34,9 @@ const mockConfig: AppConfig = {
 };
 
 beforeEach(() => {
-	mkdirSync(TEST_DIR, { recursive: true });
+	mkdirSync(TEST_ROOT, { recursive: true });
+	TEST_DIR = mkdtempSync(join(TEST_ROOT, `tools-${process.pid}-`));
+	NESTED_ROOT = join(TEST_DIR, "proj");
 });
 
 afterEach(() => {
@@ -1048,12 +1062,9 @@ async function withoutFdOnPath<T>(fn: () => Promise<T>): Promise<T> {
 // separately at grep call sites purely for readability.
 const withoutRgOnPath = withoutFdOnPath;
 
-// Nested tree lives under NESTED_ROOT rather than directly in TEST_DIR:
-// TEST_DIR's own basename is "tools" (see TEST_DIR above), which would make
-// a `**/tools/*.ts` pattern match the search root itself, not just the
-// nested src/core/tools/ directory the test is trying to isolate.
-const NESTED_ROOT = join(TEST_DIR, "proj");
-
+// Nested tree lives under NESTED_ROOT rather than directly in TEST_DIR so the
+// glob assertions exercise a project-shaped tree without coupling them to the
+// unique per-test workspace name.
 function buildNestedTree() {
 	mkdirSync(join(NESTED_ROOT, "src", "core", "tools"), { recursive: true });
 	mkdirSync(join(NESTED_ROOT, "src", "ui"), { recursive: true });

@@ -26,7 +26,9 @@ export async function submitMessage(text, images, pendingDocs, context) {
 		setInputsRefreshNonce,
 		waitForSessionStream,
 		pendingOutgoingRef,
+		canSend,
 	} = context;
+	const connectionReady = canSend?.() ?? true;
 	// If a question is pending, treat the composer text as a free-form answer
 	// applied to all questions (one value, repeated). Skips the option picker
 	// entirely — the user types in the composer and hits Enter, same as
@@ -39,6 +41,10 @@ export async function submitMessage(text, images, pendingDocs, context) {
 		text?.trim() &&
 		!text.trim().startsWith("/")
 	) {
+		if (!connectionReady) {
+			showToast?.("Connection lost — answer kept in the composer until the daemon reconnects", "error");
+			return;
+		}
 		try {
 			const values = session.question.questions.map(() => text.trim());
 			await api("POST", `/api/sessions/${activeId}/question`, { values });
@@ -97,6 +103,10 @@ export async function submitMessage(text, images, pendingDocs, context) {
 		} catch {
 			addNotice("Copy failed", "error");
 		}
+		return;
+	}
+	if (!connectionReady) {
+		showToast?.("Connection lost — message kept in the composer until the daemon reconnects", "error");
 		return;
 	}
 
@@ -185,7 +195,10 @@ export async function submitMessage(text, images, pendingDocs, context) {
 	// Commands wait before dispatch; normal chat waits after its optimistic row
 	// is visible below.
 	if (finalText.startsWith("/")) {
-		await waitForSessionStream?.(id);
+		if ((await waitForSessionStream?.(id)) === false) {
+			showToast?.("Connection lost — command kept in the composer until the daemon reconnects", "error");
+			return;
+		}
 		try {
 			const result = await api("POST", `/api/sessions/${id}/command`, { command: text });
 			if (text === "/sessions") await loadSessions();
@@ -304,6 +317,11 @@ export async function submitMessage(text, images, pendingDocs, context) {
 	// the live stream is ready so user_message/status/token events cannot race
 	// past an unsubscribed browser tab.
 	const streamReady = (await waitForSessionStream?.(id)) !== false;
+	if (!streamReady) {
+		outgoing.sending = false;
+		if (isCurrentDraft()) showToast?.("Connection lost — message kept locally until the daemon reconnects", "error");
+		return;
+	}
 	try {
 		await api("POST", `/api/sessions/${id}/chat`, {
 			text: finalText,
@@ -321,17 +339,6 @@ export async function submitMessage(text, images, pendingDocs, context) {
 					}
 				: prev,
 		);
-		if (!streamReady) {
-			// The daemon accepted the prompt even though the stream timed out. A
-			// history hydration closes that remaining gap; a later SSE open will
-			// reconcile active streaming or the completed turn.
-			try {
-				await selectSession?.(id, { push: false });
-			} catch {
-				// The pending row is already durable on the daemon; reconnect will
-				// hydrate it when the backend becomes reachable again.
-			}
-		}
 		// No `loadSessions()` here on purpose. The sidebar's per-session
 		// summary (count, title, etc.) is pushed server-side as a
 		// `session_update` SSE event after the first user message sets

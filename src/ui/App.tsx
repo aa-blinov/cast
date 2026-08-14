@@ -427,12 +427,16 @@ export function App(props: AppProps): JSX.Element {
 	const running = agent.status === "running";
 	const canSubmit = useCallback(
 		(text: string) => {
+			if (!agent.daemonConnected) {
+				showNotice("[Daemon disconnected — message kept in the composer until it reconnects]");
+				return false;
+			}
 			if (agent.status !== "running") return true;
 			if (canSubmitDuringRun(text)) return true;
 			showNotice("[Agent running — use /queue, /steer, or /abort]");
 			return false;
 		},
-		[agent.status, showNotice],
+		[agent.daemonConnected, agent.status, showNotice],
 	);
 	const submitRef = useRef(agent.submit);
 	submitRef.current = agent.submit;
@@ -849,9 +853,7 @@ export function App(props: AppProps): JSX.Element {
 				</Text>
 			))}
 			<Composer
-				onSubmit={(text) => {
-					void handleSubmit(text);
-				}}
+				onSubmit={(text) => handleSubmit(text)}
 				canSubmit={canSubmit}
 				onAbort={agent.abort}
 				onExit={onQuit}

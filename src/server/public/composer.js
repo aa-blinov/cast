@@ -19,7 +19,17 @@ export function canSubmitAttachments(docs) {
 	return docs.every((doc) => !doc.uploading && !doc.error);
 }
 
-export function Composer({ running, ready, activeId, commands, personas, onSubmit, onAbort, onDocUploaded }) {
+export function Composer({
+	running,
+	ready,
+	sendReady = true,
+	activeId,
+	commands,
+	personas,
+	onSubmit,
+	onAbort,
+	onDocUploaded,
+}) {
 	const [value, setValue] = useState("");
 	const [cmdVisible, setCmdVisible] = useState(false);
 	const [selectedIndex, setSelectedIndex] = useState(0);
@@ -155,6 +165,7 @@ export function Composer({ running, ready, activeId, commands, personas, onSubmi
 	}, []);
 
 	const handleSubmit = useCallback(() => {
+		if (!ready || !sendReady) return;
 		if (!canSubmitAttachments(docs)) return;
 		const trimmed = value.trim();
 		const readyDocs = docs.filter((d) => (d.path || d.pending) && !d.uploading && !d.error);
@@ -177,10 +188,11 @@ export function Composer({ running, ready, activeId, commands, personas, onSubmi
 		setDocs([]);
 		setCmdVisible(false);
 		if (textareaRef.current) textareaRef.current.style.height = "auto";
-	}, [value, images, docs, onSubmit]);
+	}, [value, images, docs, onSubmit, ready, sendReady]);
 
 	const handleCmdSelect = useCallback(
 		(name) => {
+			if (!ready || !sendReady) return;
 			// Argument-less commands (help, current, usage, ...) should just run —
 			// filling the box with "/current " and waiting for a second Enter is
 			// exactly the "picker doesn't work" feeling this is meant to fix.
@@ -197,16 +209,17 @@ export function Composer({ running, ready, activeId, commands, personas, onSubmi
 			textareaRef.current?.focus();
 			requestAnimationFrame(resize);
 		},
-		[commands, onSubmit, resize],
+		[commands, onSubmit, resize, ready, sendReady],
 	);
 
 	const handlePersonaSelect = useCallback(
 		(name) => {
+			if (!ready || !sendReady) return;
 			onSubmit(`/persona ${name}`);
 			setValue("");
 			if (textareaRef.current) textareaRef.current.style.height = "auto";
 		},
-		[onSubmit],
+		[onSubmit, ready, sendReady],
 	);
 
 	const handleInput = useCallback(
@@ -238,6 +251,7 @@ export function Composer({ running, ready, activeId, commands, personas, onSubmi
 	const clampedIndex = pickerItems.length > 0 ? Math.min(selectedIndex, pickerItems.length - 1) : 0;
 	const attachmentsBlocked = !canSubmitAttachments(docs);
 	const hasReadyDocs = docs.some((d) => (d.path || d.pending) && !d.uploading && !d.error);
+	const sendBlocked = !ready || !sendReady;
 
 	// Arrow-key nav must scroll the picker, not just select past the visible
 	// edge — mouse/scroll-wheel already worked, but the highlighted row could
@@ -369,7 +383,7 @@ export function Composer({ running, ready, activeId, commands, personas, onSubmi
 				<textarea
 					ref=${textareaRef}
 					class="composer-input"
-					placeholder=${!ready ? "Connecting…" : "Type a message…"}
+					placeholder=${!ready ? "Connecting…" : !sendReady ? "Reconnecting…" : "Type a message…"}
 					rows="1"
 					disabled=${!ready}
 					value=${value}
@@ -380,7 +394,7 @@ export function Composer({ running, ready, activeId, commands, personas, onSubmi
 				${
 						running
 						? html`<button class="composer-abort" onClick=${onAbort} aria-label="Abort"><${icons.stop} /></button>`
-						: html`<button class="composer-send" onClick=${handleSubmit} disabled=${!ready || attachmentsBlocked || (!value.trim() && images.length === 0 && !hasReadyDocs)} aria-label="Send" title=${attachmentsBlocked ? "Wait for attachments to finish uploading" : "Send"}><${icons.send} /></button>`
+						: html`<button class="composer-send" onClick=${handleSubmit} disabled=${sendBlocked || attachmentsBlocked || (!value.trim() && images.length === 0 && !hasReadyDocs)} aria-label="Send" title=${attachmentsBlocked ? "Wait for attachments to finish uploading" : !sendReady ? "Waiting for the daemon connection" : "Send"}><${icons.send} /></button>`
 				}
 			</div>
 		</div>
