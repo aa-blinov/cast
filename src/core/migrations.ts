@@ -392,6 +392,38 @@ CREATE INDEX IF NOT EXISTS idx_agent_actors_lease
 `);
 		},
 	},
+	{
+		version: 13,
+		name: "project-memory-operations-and-metadata",
+		up: (db) => {
+			if (!columnExists(db, "project_memory", "confidence")) {
+				db.exec("ALTER TABLE project_memory ADD COLUMN confidence INTEGER NOT NULL DEFAULT 50");
+			}
+			if (!columnExists(db, "project_memory", "expires_at")) {
+				db.exec("ALTER TABLE project_memory ADD COLUMN expires_at TEXT");
+			}
+			db.exec(`
+CREATE TABLE IF NOT EXISTS project_memory_operations (
+  project_id TEXT PRIMARY KEY,
+  operation TEXT NOT NULL,
+  owner_token TEXT NOT NULL,
+  owner_pid INTEGER NOT NULL,
+  lease_until TEXT NOT NULL,
+  acquired_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_project_memory_operations_lease
+  ON project_memory_operations(lease_until);
+CREATE TABLE IF NOT EXISTS project_memory_revisions (
+  project_id TEXT PRIMARY KEY,
+  revision INTEGER NOT NULL DEFAULT 0,
+  session_id TEXT NOT NULL,
+  project_hash TEXT NOT NULL,
+  checkpoint_hash TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+`);
+		},
+	},
 ];
 
 const MIGRATION_TABLE_SCHEMA = `
