@@ -246,6 +246,9 @@ describe("runAgentLoop — abort vs. error", () => {
 	});
 
 	it("passes a context-sized token budget to automatic memory reconstruction", async () => {
+		const realHome = process.env.HOME;
+		const fakeHome = mkdtempSync(join(tmpdir(), "cast-memory-budget-home-"));
+		process.env.HOME = fakeHome;
 		const buildPrompt = vi.fn(() => "");
 		const memoryService = {
 			search: vi.fn(() => []),
@@ -254,16 +257,51 @@ describe("runAgentLoop — abort vs. error", () => {
 		};
 		vi.mocked(streamAndCollect).mockResolvedValueOnce({ content: "done", finishReason: "stop" });
 
+		try {
+			await runAgentLoop([{ role: "user", content: "hi" }], {
+				config: { ...testConfig, contextWindow: 10_000, maxResponseTokens: 1_000 },
+				model: "test-model",
+				cwd: process.cwd(),
+				systemPrompt: "test",
+				memory: { sessionId: "memory-budget", service: memoryService },
+				onEvent: () => {},
+			});
+
+			expect(buildPrompt.mock.calls[0]?.[3]).toEqual({ tokenBudget: 450 });
+		} finally {
+			if (realHome === undefined) delete process.env.HOME;
+			else process.env.HOME = realHome;
+			rmSync(fakeHome, { recursive: true, force: true });
+		}
+	});
+
+	it("does not rebuild the same memory prompt for every tool-loop request", async () => {
+		const buildPrompt = vi.fn(() => "<project-memory>cached</project-memory>");
+		const memoryService = {
+			search: vi.fn(() => []),
+			buildPrompt,
+			extractAndStoreProjectMemory: vi.fn(async () => ({ entries: [], transcript: "" })),
+		};
+		vi.mocked(streamAndCollect)
+			.mockResolvedValueOnce({
+				content: "",
+				finishReason: "tool_calls",
+				toolCalls: [{ id: "1", name: "mcp_echo", arguments: "{}" }],
+			})
+			.mockResolvedValueOnce({ content: "done", finishReason: "stop" });
+
 		await runAgentLoop([{ role: "user", content: "hi" }], {
-			config: { ...testConfig, contextWindow: 10_000, maxResponseTokens: 1_000 },
+			config: testConfig,
 			model: "test-model",
 			cwd: process.cwd(),
 			systemPrompt: "test",
-			memory: { sessionId: "memory-budget", service: memoryService },
+			memory: { sessionId: "memory-cache", service: memoryService },
+			mcpTools: [{ type: "function", function: { name: "mcp_echo", parameters: {} } }],
+			mcpToolIndex: new Map([["mcp_echo", { call: async () => ({ content: "ok" }) }]]) as never,
 			onEvent: () => {},
 		});
 
-		expect(buildPrompt.mock.calls[0]?.[3]).toEqual({ tokenBudget: 450 });
+		expect(buildPrompt).toHaveBeenCalledOnce();
 	});
 
 	it("extracts the completed turn in the background without delaying the response", async () => {

@@ -19,11 +19,16 @@ import {
 	writeProjectMemoryManifest,
 } from "./memory-files.ts";
 import { promptsDir, readRequiredPrompt } from "./prompts.ts";
-import { isMemoryEnabled } from "./settings.ts";
+import {
+	isMemoryWriteEnabled,
+	memoryPromptBudget,
+	memoryReconcileOnSearch,
+	memorySearchScoreFloor,
+} from "./settings.ts";
 import type { ToolResult } from "./tools/shared.ts";
 
 const MAX_SEARCH_RESULTS = 8;
-const DEFAULT_MEMORY_PROMPT_TOKENS = 3_000;
+const MEMORY_SEARCH_FETCH_MAX = 50;
 const MEMORY_WRITE_LEASE_MS = 10 * 60 * 1000;
 const MEMORY_BACKGROUND_TIMEOUT_MS = 30_000;
 const MEMORY_OPERATION_LEASE_MS = 300_000;
@@ -387,7 +392,7 @@ export function scheduleProjectCheckpointWriter(
 	onWarning?: (message: string) => void,
 ): CheckpointWriterHandle {
 	const key = checkpointWriterKey(input.cwd, input.sessionId);
-	if (!isMemoryEnabled() || input.signal?.aborted) return skippedCheckpointWriterHandle(key, input);
+	if (!isMemoryWriteEnabled() || input.signal?.aborted) return skippedCheckpointWriterHandle(key, input);
 	const request = createCheckpointWriterRequest(
 		++nextCheckpointWriterId,
 		{ ...input, messages: structuredClone(input.messages.slice()) },
@@ -915,7 +920,8 @@ export async function extractAndStoreProjectMemory(input: {
 	onUsage?: (usage: Usage) => void;
 }): Promise<MemoryExtractionResult> {
 	const transcript = formatMemoryTranscript(input.messages);
-	if (!transcript || input.signal?.aborted) return { entries: [], transcript };
+	if (!transcript || !isMemoryWriteEnabled() || input.signal?.aborted)
+		return { entries: [], transcript, skipped: true };
 	const turnKey = turnKeyForTranscript(transcript);
 	const claimToken = claimMemoryExtraction(input.cwd, input.sessionId, turnKey);
 	if (!claimToken) return { entries: [], transcript, turnKey, skipped: true };
@@ -1220,7 +1226,7 @@ function parseMemoryDreamOutput(raw: string): {
 }
 
 async function runDreamProjectMemory(input: MemoryMaintenanceInput): Promise<MemoryDreamResult> {
-	if (!isMemoryEnabled() || input.signal?.aborted) return { removed: 0, stored: 0, skipped: true };
+	if (!isMemoryWriteEnabled() || input.signal?.aborted) return { removed: 0, stored: 0, skipped: true };
 	if (input.runAgent) {
 		const before = listProjectMemory(input.cwd, 100);
 		const response = await input.runAgent({
@@ -1510,7 +1516,7 @@ export function listProjectMemoryArtifacts(cwd: string, limit = 100): MemoryArti
 }
 
 async function runDistillProjectMemory(input: MemoryMaintenanceInput): Promise<MemoryDistillResult> {
-	if (!isMemoryEnabled() || input.signal?.aborted) return { artifacts: [], skipped: true };
+	if (!isMemoryWriteEnabled() || input.signal?.aborted) return { artifacts: [], skipped: true };
 	if (input.runAgent) {
 		const response = await input.runAgent({
 			prompt: maintenanceAgentPrompt(input, "distill"),
@@ -1646,32 +1652,49 @@ function parseCheckpointMarkdown(content: string): MemoryCheckpoint | undefined 
 	return parseCheckpoint(result);
 }
 
-export function reconcileProjectMemoryFiles(cwd: string, sessionId: string, force = false): void {
+function projectMemoryFileNeedsReconcile(cwd: string): boolean {
+	const projectPath = projectMemoryPath(projectIdForCwd(cwd));
+	if (!existsSync(projectPath)) return false;
+	const projectHash = memoryFileHash(readProjectMemory(projectIdForCwd(cwd)));
+	const revision = getDb()
+		.prepare("SELECT project_hash FROM project_memory_revisions WHERE project_id = ?")
+		.get(projectIdForCwd(cwd)) as { project_hash?: string } | undefined;
+	return revision?.project_hash !== projectHash;
+}
+
+export function reconcileProjectMemoryFiles(cwd: string, sessionId?: string, force = false): void {
 	const projectId = projectIdForCwd(cwd);
-	ensureMemoryFiles(sessionId, projectId);
+	if (sessionId) ensureMemoryFiles(sessionId, projectId);
 	const projectContent = readProjectMemory(projectId);
 	const entries = parseMarkdownMemoryEntries(projectContent);
 	if (entries.length === 0 && !force) return;
-	const session = readSessionMemory(sessionId);
-	const checkpoint = parseCheckpointMarkdown(session.checkpoint);
+	const session = sessionId ? readSessionMemory(sessionId) : undefined;
+	const checkpoint = session ? parseCheckpointMarkdown(session.checkpoint) : undefined;
 	const turnKey = `file:${createHash("sha256").update(projectContent).digest("hex").slice(0, 24)}`;
 	const db = getDb();
 	withImmediateTransaction(db, () => {
 		db.prepare("DELETE FROM project_memory WHERE project_id = ?").run(projectId);
-		if (entries.length > 0) storeProjectMemoryRows(db, cwd, sessionId, turnKey, entries);
-		if (checkpoint) storeProjectMemoryCheckpointRow(db, cwd, sessionId, turnKey, checkpoint);
-		appendMemorySessionEvent(db, sessionId, "memory_files_reconciled", {
-			entries: entries.length,
-			checkpoint: Boolean(checkpoint),
-		});
+		if (entries.length > 0) storeProjectMemoryRows(db, cwd, sessionId ?? "memory-file-reconcile", turnKey, entries);
+		if (checkpoint && sessionId) storeProjectMemoryCheckpointRow(db, cwd, sessionId, turnKey, checkpoint);
+		if (sessionId) {
+			appendMemorySessionEvent(db, sessionId, "memory_files_reconciled", {
+				entries: entries.length,
+				checkpoint: Boolean(checkpoint),
+			});
+		}
 	});
-	recordMemoryFileRevision(cwd, sessionId, projectContent, session.checkpoint);
+	recordMemoryFileRevision(cwd, sessionId ?? "memory-file-reconcile", projectContent, session?.checkpoint ?? "");
 }
 
 export function searchProjectMemory(cwd: string, query: string, limit = MAX_SEARCH_RESULTS): MemorySearchResult[] {
+	if (memoryReconcileOnSearch() && projectMemoryFileNeedsReconcile(cwd)) {
+		reconcileProjectMemoryFiles(cwd, undefined, true);
+	}
 	const ftsQuery = buildMemorySearchQuery(query);
 	if (!ftsQuery) return [];
 	const projectId = projectIdForCwd(cwd);
+	const resultLimit = Math.max(1, Math.min(limit, MAX_SEARCH_RESULTS));
+	const fetchLimit = Math.min(resultLimit * 3, MEMORY_SEARCH_FETCH_MAX);
 	const rows = getDb()
 		.prepare(`
 			SELECT m.id, m.project_id, m.type, m.content, m.importance, m.confidence, m.expires_at, m.source_session_id,
@@ -1684,7 +1707,7 @@ export function searchProjectMemory(cwd: string, query: string, limit = MAX_SEAR
 			ORDER BY project_memory_fts.rank ASC, m.importance DESC, m.updated_at DESC
 			LIMIT ?
 		`)
-		.all(ftsQuery, projectId, new Date().toISOString(), Math.max(1, Math.min(limit, MAX_SEARCH_RESULTS))) as Array<{
+		.all(ftsQuery, projectId, new Date().toISOString(), fetchLimit) as Array<{
 		id: number;
 		project_id: string;
 		type: string;
@@ -1698,7 +1721,7 @@ export function searchProjectMemory(cwd: string, query: string, limit = MAX_SEAR
 		score: number;
 	}>;
 
-	return rows.map((row) => ({
+	const mapped = rows.map((row) => ({
 		id: row.id,
 		projectId: row.project_id,
 		type: row.type,
@@ -1711,6 +1734,11 @@ export function searchProjectMemory(cwd: string, query: string, limit = MAX_SEAR
 		createdAt: row.created_at,
 		updatedAt: row.updated_at,
 	}));
+	if (mapped.length === 0) return [];
+	const floorRatio = memorySearchScoreFloor();
+	const topScore = mapped[0]!.score;
+	const cutoff = floorRatio > 0 ? topScore * floorRatio : Number.NEGATIVE_INFINITY;
+	return mapped.filter((row, index) => index === 0 || row.score >= cutoff).slice(0, resultLimit);
 }
 
 export function listProjectMemory(cwd: string, limit = 100): MemorySearchResult[] {
@@ -1760,7 +1788,7 @@ function renderMemoryPrompt(
 	options: MemoryPromptOptions = {},
 ): string {
 	if (matches.length === 0 && !checkpoint && !fileContext) return "";
-	const tokenBudget = Math.max(64, Math.floor(options.tokenBudget ?? DEFAULT_MEMORY_PROMPT_TOKENS));
+	const tokenBudget = Math.max(64, Math.floor(options.tokenBudget ?? memoryPromptBudget()));
 	const closing = "</project-memory>";
 	let prompt = [
 		"<project-memory>",

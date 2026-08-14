@@ -5,7 +5,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	getProjectTrust,
 	isMemoryEnabled,
+	isMemoryWriteEnabled,
 	loadSettings,
+	memoryPromptBudget,
+	memoryReconcileOnSearch,
+	memorySearchScoreFloor,
 	type Provider,
 	setProjectTrust,
 	updateSettings,
@@ -129,6 +133,20 @@ describe("settings", () => {
 		it("persists a global disabled state", () => {
 			updateSettings({ memoryEnabled: false });
 			expect(isMemoryEnabled(loadSettings())).toBe(false);
+		});
+
+		it("keeps memory readable when background writing is disabled", () => {
+			expect(isMemoryWriteEnabled({ memoryEnabled: true, memoryWriteEnabled: false })).toBe(false);
+			expect(isMemoryEnabled({ memoryEnabled: true, memoryWriteEnabled: false })).toBe(true);
+		});
+
+		it("normalizes memory controls to safe bounds and defaults", () => {
+			expect(memoryPromptBudget({})).toBe(4096);
+			expect(memoryPromptBudget({ memoryPromptBudget: 99 })).toBe(256);
+			expect(memoryPromptBudget({ memoryPromptBudget: 99_999 })).toBe(16_384);
+			expect(memorySearchScoreFloor({ memorySearchScoreFloor: -1 })).toBe(0);
+			expect(memorySearchScoreFloor({ memorySearchScoreFloor: 2 })).toBe(1);
+			expect(memoryReconcileOnSearch({ memoryReconcileOnSearch: false })).toBe(false);
 		});
 	});
 });

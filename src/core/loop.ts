@@ -59,7 +59,7 @@ import {
 	markImageMessagesOutOfContext,
 	shouldCompact,
 } from "./session.ts";
-import { isMemoryEnabled, loadSettings } from "./settings.ts";
+import { isMemoryEnabled, isMemoryWriteEnabled, loadSettings, memoryPromptBudget } from "./settings.ts";
 import type { SshHost } from "./ssh.ts";
 import type { SubagentPrompt } from "./subagents.ts";
 import { formatTodoList, remainingTodoCount, type TodoItem, validateTodos } from "./todo.ts";
@@ -81,12 +81,14 @@ const DEFAULT_MEMORY_SERVICE = createProjectMemoryService();
 // we treat it as a doom loop and block execution — the model gets an error
 // result and must try something different.
 const DOOM_LOOP_THRESHOLD = 3;
-const MEMORY_PROMPT_MIN_TOKENS = 256;
-const MEMORY_PROMPT_MAX_TOKENS = 4096;
-
 function memoryPromptBudgetTokens(config: AppConfig): number {
 	const inputBudget = Math.max(0, config.contextWindow - config.maxResponseTokens);
-	return Math.min(MEMORY_PROMPT_MAX_TOKENS, Math.max(MEMORY_PROMPT_MIN_TOKENS, Math.floor(inputBudget * 0.05)));
+	const settings = loadSettings();
+	const configuredBudget =
+		typeof settings.memoryPromptBudget === "number"
+			? memoryPromptBudget(settings)
+			: Math.min(4_096, Math.max(256, Math.floor(inputBudget * 0.05)));
+	return Math.min(configuredBudget, Math.max(256, inputBudget));
 }
 
 // Running cap on embedded image_url data across the whole live context (see
@@ -882,6 +884,7 @@ export async function runMemoryMaintenanceAgent(
 }
 
 async function runCheckpointWriter(input: MemoryCheckpointWriterInput): Promise<void> {
+	if (!isMemoryWriteEnabled()) return;
 	const fork = createAgentForkContext(input.messages, input.checkpointBoundary ?? -1);
 	const actor = agentActorRegistry.spawn(
 		{
@@ -958,7 +961,7 @@ async function recoverCheckpointWriter(snapshot: AgentActorSnapshot): Promise<vo
 agentActorRegistry.registerRecoveryHandler("checkpoint-writer", recoverCheckpointWriter);
 
 function shouldStartCheckpointWriter(loopConfig: LoopConfig, messages: Message[]): boolean {
-	if (!loopConfig.memory || !isMemoryEnabled() || loopConfig.signal?.aborted) return false;
+	if (!loopConfig.memory || !isMemoryWriteEnabled() || loopConfig.signal?.aborted) return false;
 	const observedTokens = loopConfig.lastPromptTokens ?? estimateTokens(messages);
 	const threshold = loopConfig.config.contextWindow * Math.min(loopConfig.config.compactionThreshold, 0.6);
 	return observedTokens >= threshold;
@@ -1016,7 +1019,7 @@ export async function runAgentLoop(initialMessages: Message[], loopConfig: LoopC
 		);
 		loopConfig.onCheckpointWriter?.(writerHandle);
 	}
-	if (terminalReason === "stop" && loopConfig.memory && isMemoryEnabled()) {
+	if (terminalReason === "stop" && loopConfig.memory && isMemoryWriteEnabled()) {
 		const memoryService = loopConfig.memory.service ?? DEFAULT_MEMORY_SERVICE;
 		scheduleProjectMemoryExtraction(
 			{
@@ -1397,10 +1400,15 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		otherPlanNames.length > 0 && loopConfig.planState
 			? `\n\nOther plans in this session: ${otherPlanNames.join(", ")} — read \`${loopConfig.planState.plansDir}/<name>.md\` to view one; none of them steers the work unless approved.`
 			: "";
+	let memoryPromptCacheKey: string | undefined;
+	let memoryPromptCache = "";
 
 	// Recompute the system prompt from the latest contextFiles/@-mentions and
-	// write it into messages[0]. Called before every request so rules that
-	// match a file read mid-turn attach on the next request, not only next turn.
+	// write it into messages[0]. Memory retrieval is cached for the current user
+	// message so repeated tool-loop requests do not re-run FTS or reconstruct
+	// the same durable context. A rebuild boundary already contains that context
+	// as a user message, so injecting it into the system prompt again would double
+	// the memory payload.
 	const syncSystemPrompt = (): void => {
 		let prompt = systemPrompt;
 		let userText = "";
@@ -1420,9 +1428,20 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		if (loopConfig.rebuildSystemPrompt) {
 			prompt = loopConfig.rebuildSystemPrompt({ userText, contextFiles });
 		}
-		const memoryPrompt = memoryService?.buildPrompt(cwd, userText, loopConfig.memory?.sessionId, {
-			tokenBudget: memoryBudgetTokens,
-		});
+		const isMemoryBoundary = userText.trimStart().startsWith("<checkpoint-boundary>");
+		if (memoryService && !isMemoryBoundary) {
+			const cacheKey = `${checkpointBoundary}\u0000${userText}`;
+			if (cacheKey !== memoryPromptCacheKey) {
+				memoryPromptCacheKey = cacheKey;
+				memoryPromptCache = memoryService.buildPrompt(cwd, userText, loopConfig.memory?.sessionId, {
+					tokenBudget: memoryBudgetTokens,
+				});
+			}
+		} else if (isMemoryBoundary) {
+			memoryPromptCache = "";
+			memoryPromptCacheKey = undefined;
+		}
+		const memoryPrompt = memoryPromptCache;
 		if (memoryPrompt) prompt = `${prompt}\n\n${memoryPrompt}`;
 		// Plan mode: prepended AFTER any rebuild — the per-turn rebuild path
 		// (always active in the TUI) replaces `prompt` wholesale and would

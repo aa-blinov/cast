@@ -143,6 +143,14 @@ export interface Settings {
 	showReasoning?: boolean;
 	/** Whether durable project memory is active across TUI and Web UI. */
 	memoryEnabled?: boolean;
+	/** Whether background memory extraction, checkpoint writing, and maintenance may write. */
+	memoryWriteEnabled?: boolean;
+	/** Maximum estimated tokens reserved for automatically injected memory context. */
+	memoryPromptBudget?: number;
+	/** Relative BM25 score floor for dropping weak common-word matches. */
+	memorySearchScoreFloor?: number;
+	/** Reconcile project memory files before search operations. */
+	memoryReconcileOnSearch?: boolean;
 }
 
 // ============================================================================
@@ -221,6 +229,26 @@ export function updateSettings(partial: Partial<Settings>): void {
 /** Existing settings remain enabled; only an explicit false disables memory. */
 export function isMemoryEnabled(settings: Settings = loadSettings()): boolean {
 	return settings.memoryEnabled !== false;
+}
+
+export function isMemoryWriteEnabled(settings: Settings = loadSettings()): boolean {
+	return isMemoryEnabled(settings) && settings.memoryWriteEnabled !== false;
+}
+
+export function memoryPromptBudget(settings: Settings = loadSettings()): number {
+	const value = settings.memoryPromptBudget;
+	return typeof value === "number" && Number.isFinite(value)
+		? Math.max(256, Math.min(Math.round(value), 16_384))
+		: 4_096;
+}
+
+export function memorySearchScoreFloor(settings: Settings = loadSettings()): number {
+	const value = settings.memorySearchScoreFloor;
+	return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.min(value, 1)) : 0.15;
+}
+
+export function memoryReconcileOnSearch(settings: Settings = loadSettings()): boolean {
+	return settings.memoryReconcileOnSearch !== false;
 }
 
 /** true/false if this project's trust decision was already made, undefined if never asked. */
