@@ -27,6 +27,8 @@ export function memoryImportanceLabel(value) {
 
 export function MemoryExplorer({ activeId }) {
 	const [items, setItems] = useState([]);
+	const [checkpoint, setCheckpoint] = useState(null);
+	const [artifacts, setArtifacts] = useState([]);
 	const [query, setQuery] = useState("");
 	const [loading, setLoading] = useState(true);
 	const [searching, setSearching] = useState(false);
@@ -48,6 +50,8 @@ export function MemoryExplorer({ activeId }) {
 				const data = await api("GET", `/api/sessions/${activeId}/memory${suffix}`);
 				if (activeIdRef.current !== activeId || requestVersionRef.current !== version) return;
 				setItems(data?.items ?? []);
+				setCheckpoint(data?.checkpoint ?? null);
+				setArtifacts(data?.artifacts ?? []);
 				setError(null);
 			} catch (err) {
 				if (activeIdRef.current === activeId && requestVersionRef.current === version) setError(err.message);
@@ -65,6 +69,8 @@ export function MemoryExplorer({ activeId }) {
 		clearTimeout(searchTimerRef.current);
 		requestVersionRef.current++;
 		setItems([]);
+		setCheckpoint(null);
+		setArtifacts([]);
 		setQuery("");
 		setError(null);
 		if (activeId) void load("");
@@ -95,6 +101,18 @@ export function MemoryExplorer({ activeId }) {
 				<div class="memory-summary">${query.trim() ? `${items.length} matches` : `${items.length} notes`}</div>
 			</div>
 			${error && html`<div class="diff-empty diff-empty-error">${error}</div>`}
+			${!error && !query.trim() && checkpoint && html`<section class="memory-checkpoint">
+				<div class="memory-section-label">Current checkpoint</div>
+				${checkpoint.activeIntent && html`<div class="memory-checkpoint-row"><span>Intent</span><strong>${checkpoint.activeIntent}</strong></div>`}
+				${checkpoint.nextAction && html`<div class="memory-checkpoint-row"><span>Next</span><strong>${checkpoint.nextAction}</strong></div>`}
+			</section>`}
+			${!error && !query.trim() && artifacts.length > 0 && html`<section class="memory-artifacts">
+				<div class="memory-section-label">Reusable workflows</div>
+				${artifacts.map((artifact) => html`<article key=${artifact.id} class="memory-artifact">
+					<div class="memory-card-topline"><span class="memory-type">${artifact.kind}</span><span class="memory-artifact-name">${artifact.name}</span></div>
+					<p class="memory-content">${artifact.description}</p>
+				</article>`)}
+			</section>`}
 			${!error && items.length === 0
 				? html`<div class="diff-empty diff-empty-hint"><div><p class="diff-empty-title">${query.trim() ? "No matching memory" : "No project memory yet"}</p><p>${query.trim() ? "Try fewer or more distinctive terms." : "Durable notes created by the agent will appear here across sessions."}</p></div></div>`
 				: html`<div class="memory-list">${items.map(

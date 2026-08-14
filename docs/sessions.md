@@ -10,7 +10,9 @@ Sessions saved by older versions of cast (individual `.json`/`.jsonl` files unde
 
 ## Project Memory
 
-Cast also keeps durable project memory in the same SQLite database. Memory is scoped by the normalized project `cwd`, indexed with SQLite FTS5, and shared by all sessions for that project. After a completed turn, a separate memory-writer prompt is queued in the background and asks the configured model to extract only durable architecture decisions, rules, fixes, provider gotchas, and progress; secrets and generic conversation are excluded. The user-facing turn does not wait for this extra model call. Writers for one project/session are serialized, have a bounded lifetime, and duplicate facts are fingerprinted so they do not accumulate.
+Cast follows MiMo's two-layer memory layout. The authoritative artifacts are files under `~/.cast/memory/`: project knowledge in `projects/<project-id>/MEMORY.md`, session handoffs in `sessions/<session-id>/checkpoint.md`, scratch notes in `notes.md`, and delegated task progress under `tasks/<task-id>/progress.md`. SQLite keeps a scoped FTS5 mirror for fast retrieval and the raw session trajectory remains the evidence source.
+
+When a session approaches the context threshold, a separate hidden checkpoint-writer agent is queued in the background. It can only read and update the memory files, uses absolute paths, and is isolated from the user-facing turn. One writer runs per session and at most one newer pending request is retained. The writer is bounded and best-effort; the main turn never waits for it.
 
 Relevant entries are automatically retrieved from the current user request and added to the next model context. The `memory` tool can search the same project scope explicitly:
 
@@ -18,15 +20,17 @@ Relevant entries are automatically retrieved from the current user request and a
 {"query":"native reasoning tool-call"}
 ```
 
-Memory writing is best-effort: if the writer provider call fails or times out, the conversation remains successful and Cast reports a non-fatal warning. Existing memory stays available through retrieval. The writer uses the active model/provider, so no separate memory model configuration is required.
+Memory writing is best-effort: if the writer provider call fails or times out, the conversation remains successful and Cast reports a non-fatal warning. Existing memory stays available through retrieval. The writer uses the active model/provider, so no separate memory model configuration is required. After a successful write, the file layer is reconciled into the SQLite FTS mirror.
 
 Memory can be disabled globally with `/memory off` in the TUI or Settings → Memory in the Web UI. The setting is stored in `~/.cast/settings.json` and is shared by both clients. Disabling it stops retrieval, extraction, and the `memory` tool; it does not delete existing project-memory rows.
+
+When the project needs maintenance, `/dream` verifies the last seven days of raw project trajectory against the memory files and consolidates only durable knowledge. `/distill` inspects the last thirty days and existing assets, requires repeated evidence, and materializes high-confidence skills, personas, or commands under the project `.cast` directory; low-confidence candidates remain reviewable in SQLite. Both commands require an idle agent, use the same global memory switch, and leave the conversation intact if the provider call fails.
 
 ## Session History Search
 
 `session_history` is deliberately separate from `memory`. It searches raw user, assistant, and tool messages from earlier sessions in the current project through the SQLite full-text index. Use it when the exact earlier discussion is needed; use `memory` for distilled durable facts. Search results include the source session and message sequence so the agent can distinguish evidence from a reusable project rule.
 
-Memory retrieval and extraction are recorded as durable session events. Extraction claims are leased and keyed by `(project, session, turn)`, so retries or reconnects cannot run the same writer twice, while an expired claim can safely be retried after a crashed process.
+Memory retrieval, file reconciliation, and maintenance are recorded as durable session events. SQLite extraction claims remain leased and keyed by `(project, session, turn)` for compatibility with older databases, while the active checkpoint writer uses the per-session newest-wins queue.
 
 ## Session State
 
