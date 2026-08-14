@@ -2403,7 +2403,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		showNotice(
 			runs.length === 0
 				? "[No automatic memory runs]"
-				: runs.map((run) => `[${run.id} ${run.kind} ${run.status}]`).join("\n"),
+				: runs.map((run) => `[${run.id} ${run.kind} ${run.status} session=${run.sessionId}]`).join("\n"),
 		);
 		return;
 	}

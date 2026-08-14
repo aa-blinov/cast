@@ -100,6 +100,12 @@ export interface SessionState {
 	 * sessions saved before this field existed (treated as "unknown provider").
 	 */
 	providerUrl?: string;
+	/** Conversation sessions are user-facing; background sessions are maintenance runs. */
+	sessionKind?: "conversation" | "background";
+	/** Parent conversation for a background session. */
+	parentSessionId?: string;
+	/** Maintenance kind for a background session. */
+	backgroundKind?: "memory-dream" | "memory-distill";
 	/**
 	 * Reasoning ("thinking") text for assistant messages, keyed by that
 	 * message's index in `messages`. The OpenAI wire format (`Message` in
@@ -547,6 +553,9 @@ function sessionMetaRow(session: SessionState) {
 		last_prompt_tokens: session.lastPromptTokens ?? null,
 		last_announced_local_date: session.lastAnnouncedLocalDate ?? null,
 		provider_url: session.providerUrl ?? null,
+		session_kind: session.sessionKind ?? "conversation",
+		parent_session_id: session.parentSessionId ?? null,
+		background_kind: session.backgroundKind ?? null,
 		usage_json: JSON.stringify(session.usage),
 		todos_json: session.todos ? JSON.stringify(session.todos) : null,
 		share_token: session.shareToken ?? null,
@@ -560,13 +569,15 @@ export function saveSession(session: SessionState): void {
 	const db = getDb();
 	const meta = sessionMetaRow(session);
 	db.prepare(
-		`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, usage_json, todos_json, share_token, plan_question_json, plan_transition_json)
-		 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :usage_json, :todos_json, :share_token, :plan_question_json, :plan_transition_json)
+		`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, session_kind, parent_session_id, background_kind, usage_json, todos_json, share_token, plan_question_json, plan_transition_json)
+			 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :session_kind, :parent_session_id, :background_kind, :usage_json, :todos_json, :share_token, :plan_question_json, :plan_transition_json)
 		 ON CONFLICT(id) DO UPDATE SET
 		   cwd = excluded.cwd, model = excluded.model, persona = excluded.persona, mode = excluded.mode,
 		   title = excluded.title, pinned = excluded.pinned, updated_at = excluded.updated_at,
 		   last_prompt_tokens = excluded.last_prompt_tokens, last_announced_local_date = excluded.last_announced_local_date,
-		   provider_url = excluded.provider_url, usage_json = excluded.usage_json, todos_json = excluded.todos_json,
+		   provider_url = excluded.provider_url, session_kind = excluded.session_kind,
+		   parent_session_id = excluded.parent_session_id, background_kind = excluded.background_kind,
+		   usage_json = excluded.usage_json, todos_json = excluded.todos_json,
 		   share_token = excluded.share_token, plan_question_json = excluded.plan_question_json,
 		   plan_transition_json = excluded.plan_transition_json`,
 	).run(meta);
@@ -938,6 +949,9 @@ interface SessionRow {
 	last_prompt_tokens: number | null;
 	last_announced_local_date: string | null;
 	provider_url: string | null;
+	session_kind: "conversation" | "background" | null;
+	parent_session_id: string | null;
+	background_kind: "memory-dream" | "memory-distill" | null;
 	usage_json: string;
 	todos_json: string | null;
 	share_token: string | null;
@@ -959,6 +973,9 @@ function rowToMeta(row: SessionRow): Omit<SessionState, "messages"> {
 		lastPromptTokens: row.last_prompt_tokens ?? undefined,
 		lastAnnouncedLocalDate: row.last_announced_local_date ?? undefined,
 		providerUrl: row.provider_url ?? undefined,
+		sessionKind: row.session_kind ?? "conversation",
+		parentSessionId: row.parent_session_id ?? undefined,
+		backgroundKind: row.background_kind ?? undefined,
 		usage: withUsageDefault(JSON.parse(row.usage_json)),
 		todos: row.todos_json ? JSON.parse(row.todos_json) : undefined,
 		shareToken: row.share_token ?? undefined,
@@ -1205,7 +1222,9 @@ export function deleteSession(id: string): boolean {
 
 export function listSessions(): SessionState[] {
 	const db = getDb();
-	const rows = db.prepare("SELECT id FROM sessions").all() as Array<{ id: string }>;
+	const rows = db
+		.prepare("SELECT id FROM sessions WHERE session_kind = 'conversation' OR session_kind IS NULL")
+		.all() as Array<{ id: string }>;
 	const sessions: SessionState[] = [];
 	for (const { id } of rows) {
 		const s = loadSession(id);
@@ -1287,8 +1306,8 @@ export function migrateLegacySessionsToDb(): number {
 		try {
 			if (!session.title) session.title = deriveSessionTitle(getFirstUserMessage(session));
 			db.prepare(
-				`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, usage_json, todos_json, share_token, plan_question_json, plan_transition_json)
-				 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :usage_json, :todos_json, :share_token, :plan_question_json, :plan_transition_json)`,
+				`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, session_kind, parent_session_id, background_kind, usage_json, todos_json, share_token, plan_question_json, plan_transition_json)
+					 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :session_kind, :parent_session_id, :background_kind, :usage_json, :todos_json, :share_token, :plan_question_json, :plan_transition_json)`,
 			).run(sessionMetaRow(session));
 			const insertRow = db.prepare(
 				"INSERT INTO messages (session_id, seq, role, content_json, in_context, has_tool_calls) VALUES (?, ?, ?, ?, 1, ?)",
@@ -1492,7 +1511,11 @@ function firstUserTextFromMessage(msg: Message): string {
  *  reflects everything that was ever said in it. */
 export function listSessionSummaries(): SessionSummary[] {
 	const db = getDb();
-	const rows = db.prepare("SELECT * FROM sessions ORDER BY updated_at DESC").all() as unknown as SessionRow[];
+	const rows = db
+		.prepare(
+			"SELECT * FROM sessions WHERE session_kind = 'conversation' OR session_kind IS NULL ORDER BY updated_at DESC",
+		)
+		.all() as unknown as SessionRow[];
 	return buildSummaries(db, rows);
 }
 
@@ -1558,7 +1581,7 @@ export function searchSessionSummaries(query: string): SessionSummary[] {
 	const like = `%${q.replace(SQL_LIKE_SPECIAL_RE, "\\$&")}%`;
 	const metaMatches = db
 		.prepare(
-			"SELECT id FROM sessions WHERE cwd LIKE ? ESCAPE '\\' OR id LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\' OR persona LIKE ? ESCAPE '\\' OR model LIKE ? ESCAPE '\\'",
+			"SELECT id FROM sessions WHERE (session_kind = 'conversation' OR session_kind IS NULL) AND (cwd LIKE ? ESCAPE '\\' OR id LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\' OR persona LIKE ? ESCAPE '\\' OR model LIKE ? ESCAPE '\\')",
 		)
 		.all(like, like, like, like, like) as Array<{ id: string }>;
 
@@ -1571,7 +1594,9 @@ export function searchSessionSummaries(query: string): SessionSummary[] {
 	const ids = [...rankById.keys()];
 	const placeholders = ids.map(() => "?").join(",");
 	const rows = db
-		.prepare(`SELECT * FROM sessions WHERE id IN (${placeholders})`)
+		.prepare(
+			`SELECT * FROM sessions WHERE id IN (${placeholders}) AND (session_kind = 'conversation' OR session_kind IS NULL)`,
+		)
 		.all(...ids) as unknown as SessionRow[];
 	const summaries = buildSummaries(db, rows);
 	summaries.sort((a, b) => (rankById.get(a.id) ?? 0) - (rankById.get(b.id) ?? 0));
@@ -1593,8 +1618,8 @@ export function searchSessionSummaries(query: string): SessionSummary[] {
 export function getMostRecentSession(cwd?: string): SessionState | null {
 	const db = getDb();
 	const sql = cwd
-		? "SELECT id FROM sessions WHERE cwd = ? ORDER BY updated_at DESC LIMIT 1"
-		: "SELECT id FROM sessions ORDER BY updated_at DESC LIMIT 1";
+		? "SELECT id FROM sessions WHERE cwd = ? AND (session_kind = 'conversation' OR session_kind IS NULL) ORDER BY updated_at DESC LIMIT 1"
+		: "SELECT id FROM sessions WHERE session_kind = 'conversation' OR session_kind IS NULL ORDER BY updated_at DESC LIMIT 1";
 	const stmt = db.prepare(sql);
 	const row = (cwd ? stmt.get(cwd) : stmt.get()) as { id: string } | undefined;
 	return row ? loadSession(row.id) : null;
@@ -1604,15 +1629,23 @@ function generateSessionId(): string {
 	return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
-export function createSession(model: string, cwd: string): SessionState {
+export interface SessionCreationOptions {
+	id?: string;
+	sessionKind?: "conversation" | "background";
+	parentSessionId?: string;
+	backgroundKind?: "memory-dream" | "memory-distill";
+}
+
+export function createSession(model: string, cwd: string, options: SessionCreationOptions = {}): SessionState {
 	const now = new Date().toISOString();
 	const db = getDb();
 	// The timestamp+random scheme is astronomically unlikely to collide, but
 	// "unlikely" isn't "impossible" and saveSession() would silently merge
 	// into an existing session's row with no warning. Regenerating on a hit
 	// is nearly free — this loop virtually never runs more than once.
-	let id = generateSessionId();
+	let id = options.id ?? generateSessionId();
 	while (db.prepare("SELECT 1 FROM sessions WHERE id = ?").get(id)) {
+		if (options.id) throw new Error(`Session ${options.id} already exists`);
 		id = generateSessionId();
 	}
 	return {
@@ -1633,7 +1666,24 @@ export function createSession(model: string, cwd: string): SessionState {
 		},
 		cwd: resolve(cwd),
 		lastAnnouncedLocalDate: formatLocalDate(),
+		sessionKind: options.sessionKind ?? "conversation",
+		parentSessionId: options.parentSessionId,
+		backgroundKind: options.backgroundKind,
 	};
+}
+
+export function listBackgroundSessions(parentSessionId?: string): SessionState[] {
+	const db = getDb();
+	const rows = parentSessionId
+		? (db
+				.prepare(
+					"SELECT id FROM sessions WHERE session_kind = 'background' AND parent_session_id = ? ORDER BY updated_at DESC",
+				)
+				.all(parentSessionId) as Array<{ id: string }>)
+		: (db
+				.prepare("SELECT id FROM sessions WHERE session_kind = 'background' ORDER BY updated_at DESC")
+				.all() as Array<{ id: string }>);
+	return rows.map(({ id }) => loadSession(id)).filter((session): session is SessionState => session !== null);
 }
 
 /**

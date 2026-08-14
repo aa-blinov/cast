@@ -21,6 +21,7 @@ import {
 	writeProjectMemoryManifest,
 } from "./memory-files.ts";
 import { promptsDir, readRequiredPrompt } from "./prompts.ts";
+import { appendMessage, appendSessionEvent, createSession, loadSession, saveSession } from "./session.ts";
 import {
 	isMemoryWriteEnabled,
 	loadSettings,
@@ -185,6 +186,7 @@ export interface AutomaticMemoryMaintenanceResult {
 
 export interface AutomaticMemoryRun {
 	id: string;
+	sessionId: string;
 	parentSessionId: string;
 	kind: AutomaticMemoryMaintenanceKind;
 	status: AgentActorSnapshot["status"];
@@ -538,6 +540,7 @@ export function listAutomaticMemoryRuns(parentSessionId?: string): AutomaticMemo
 		)
 		.map((snapshot) => ({
 			id: snapshot.id,
+			sessionId: snapshot.sessionId ?? snapshot.id,
 			parentSessionId: snapshot.parentSessionId!,
 			kind: snapshot.agent.slice("memory-".length) as AutomaticMemoryMaintenanceKind,
 			status: snapshot.status,
@@ -1333,7 +1336,6 @@ async function claimAutomaticMemoryMaintenance(
 			if (!earliest?.ts || now - Date.parse(earliest.ts) < intervalMs) return false;
 		}
 		memoryAutoSpawnTimes.set(spawnKey, now);
-		appendMemorySessionEvent(db, input.sessionId, startedEvent, { intervalDays });
 		return true;
 	});
 }
@@ -1353,39 +1355,106 @@ function memoryMaintenanceRecoveryConfig(config: AppConfig): Omit<AppConfig, "ap
 	};
 }
 
+interface AutomaticMemoryMaintenanceRunOptions {
+	parentSessionId?: string;
+	backgroundSessionId?: string;
+	runId?: string;
+}
+
+function memoryMaintenanceEventType(kind: AutomaticMemoryMaintenanceKind, state: "failed" | "cancelled"): string {
+	return `memory_${kind}_${state}`;
+}
+
+function createAutomaticMemorySession(
+	input: MemoryMaintenanceInput,
+	kind: AutomaticMemoryMaintenanceKind,
+	sessionId: string,
+	parentSessionId: string,
+): ReturnType<typeof createSession> {
+	const existing = loadSession(sessionId);
+	if (existing) return existing;
+	const session = createSession(input.model, input.cwd, {
+		id: sessionId,
+		sessionKind: "background",
+		parentSessionId,
+		backgroundKind: `memory-${kind}`,
+	});
+	appendMessage(session, { role: "user", content: `Automatic ${kind} maintenance` });
+	saveSession(session);
+	return session;
+}
+
 export async function runAutomaticMemoryMaintenanceRun(
 	input: MemoryMaintenanceInput,
 	kind: AutomaticMemoryMaintenanceKind,
+	options: AutomaticMemoryMaintenanceRunOptions = {},
 ): Promise<AutomaticMemoryMaintenanceResult> {
-	const actor = agentActorRegistry.spawn(
-		{
-			parentSessionId: input.sessionId,
-			sessionId: input.sessionId,
-			agent: `memory-${kind}`,
-			mode: "subagent",
-			background: true,
-			lifecycle: "persistent",
-			recovery: {
-				kind: "memory-maintenance",
-				maintenanceKind: kind,
-				cwd: input.cwd,
-				sessionId: input.sessionId,
-				model: input.model,
-				providerBaseURL: input.providerOverride?.baseURL ?? input.config.baseURL,
-				config: memoryMaintenanceRecoveryConfig(input.config),
-				messages: structuredClone(input.messages),
-			},
+	const parentSessionId = options.parentSessionId ?? input.sessionId;
+	const runId = options.runId ?? randomUUID();
+	const requestedBackgroundSessionId = options.backgroundSessionId ?? runId;
+	const requestedBackgroundSession = loadSession(requestedBackgroundSessionId);
+	const backgroundSessionId =
+		requestedBackgroundSession && requestedBackgroundSession.sessionKind !== "background"
+			? runId
+			: requestedBackgroundSessionId;
+	const backgroundSession = createAutomaticMemorySession(input, kind, backgroundSessionId, parentSessionId);
+	const startedEvent = automaticMemoryEventTypes(kind)[0];
+	appendSessionEvent(backgroundSession.id, startedEvent, { parentSessionId });
+	const actorSpec = {
+		parentSessionId,
+		sessionId: backgroundSession.id,
+		agent: `memory-${kind}`,
+		mode: "subagent" as const,
+		background: true,
+		lifecycle: "persistent" as const,
+		recovery: {
+			kind: "memory-maintenance" as const,
+			maintenanceKind: kind,
+			cwd: input.cwd,
+			sessionId: backgroundSession.id,
+			model: input.model,
+			providerBaseURL: input.providerOverride?.baseURL ?? input.config.baseURL,
+			config: memoryMaintenanceRecoveryConfig(input.config),
+			messages: structuredClone(input.messages),
 		},
-		input.signal,
-	);
+	};
+	const actor = options.runId
+		? agentActorRegistry.resume(options.runId, input.signal, actorSpec)
+		: agentActorRegistry.spawn(actorSpec, input.signal, runId);
+	if (!actor) throw new Error(`Automatic ${kind} run ${options.runId} is no longer recoverable`);
+	let maintenanceMessages: Message[] | undefined;
 	try {
 		await actor.run(async (signal) => {
-			const maintenanceInput = { ...input, signal, messages: structuredClone(input.messages) };
+			const maintenanceInput: MemoryMaintenanceInput = {
+				...input,
+				sessionId: backgroundSession.id,
+				signal,
+				messages: structuredClone(input.messages),
+				runAgent: input.runAgent
+					? async (agentInput) => {
+							const result = await input.runAgent!(agentInput);
+							maintenanceMessages = result.messages;
+							return result;
+						}
+					: undefined,
+			};
 			if (kind === "dream") await dreamProjectMemory(maintenanceInput);
 			else await distillProjectMemory(maintenanceInput);
 		});
+		if (maintenanceMessages) backgroundSession.messages = structuredClone(maintenanceMessages);
+		else appendMessage(backgroundSession, { role: "assistant", content: `Automatic ${kind} maintenance completed.` });
+		saveSession(backgroundSession);
 		return { kind, status: "completed" };
 	} catch (error) {
+		const cancelled = input.signal?.aborted || actor.snapshot().status === "cancelled";
+		appendMessage(backgroundSession, {
+			role: "assistant",
+			content: `Automatic ${kind} ${cancelled ? "cancelled" : "failed"}: ${error instanceof Error ? error.message : String(error)}`,
+		});
+		saveSession(backgroundSession);
+		appendSessionEvent(backgroundSession.id, memoryMaintenanceEventType(kind, cancelled ? "cancelled" : "failed"), {
+			parentSessionId,
+		});
 		input.onWarning?.(`Automatic ${kind} failed: ${error instanceof Error ? error.message : String(error)}`);
 		return { kind, status: "failed" };
 	}

@@ -365,7 +365,7 @@ export class SqliteAgentActorStore implements AgentActorStore {
          WHERE id IN (
            SELECT id FROM agent_actors
            WHERE status IN ('success', 'failure', 'cancelled', 'stalled')
-           ORDER BY updated_at DESC
+           ORDER BY updated_at DESC, rowid DESC
            LIMIT -1 OFFSET ?
          )`,
 			)
@@ -404,8 +404,28 @@ export class AgentActorRegistry {
 		this.recoveryHandlers.set(kind, handler);
 	}
 
-	spawn(spec: AgentActorSpec, parentSignal?: AbortSignal): AgentActorHandle {
+	spawn(spec: AgentActorSpec, parentSignal?: AbortSignal, actorId: string = randomUUID()): AgentActorHandle {
 		this.ensureRestored();
+		const record = this.newRecord(spec, actorId);
+		this.records.set(record.id, record);
+		this.persist(record);
+		return this.createHandle(record, parentSignal);
+	}
+
+	/** Reopens a stalled persistent actor without changing its durable identity. */
+	resume(id: string, parentSignal?: AbortSignal, spec?: AgentActorSpec): AgentActorHandle | undefined {
+		this.ensureRestored();
+		const previous = this.records.get(id);
+		if (!previous || previous.status !== "stalled") return undefined;
+		const record = this.newRecord(spec ?? previous, id);
+		record.createdAt = previous.createdAt;
+		record.ownership = previous.ownership;
+		this.records.set(id, record);
+		this.persist(record);
+		return this.createHandle(record, parentSignal);
+	}
+
+	private newRecord(spec: AgentActorSpec, id: string): AgentActorRecord {
 		const controller = new AbortController();
 		let resolveWait!: (status: AgentActorStatus) => void;
 		const wait = new Promise<AgentActorStatus>((resolve) => {
@@ -414,19 +434,23 @@ export class AgentActorRegistry {
 		const record: AgentActorRecord = {
 			...spec,
 			forkContext: cloneForkContext(spec.forkContext),
-			id: randomUUID(),
+			id,
 			status: "pending",
 			createdAt: now(),
 			updatedAt: now(),
+			completedAt: undefined,
 			controller,
 			started: false,
 			resolveWait,
 			wait,
+			parentCleanup: undefined,
 			ownership: this.newOwnership(),
 		};
-		this.records.set(record.id, record);
-		this.persist(record);
+		return record;
+	}
 
+	private createHandle(record: AgentActorRecord, parentSignal?: AbortSignal): AgentActorHandle {
+		const controller = record.controller;
 		const finish = (status: AgentActorTerminalStatus): void => {
 			if (isTerminal(record.status)) return;
 			record.status = status;
@@ -652,9 +676,12 @@ export class AgentActorRegistry {
 export const agentActorRegistry = new AgentActorRegistry({
 	store: new SqliteAgentActorStore(),
 	onNotification: (notification) => {
-		if (!notification.parentSessionId) return;
+		const sessionId = notification.agent.startsWith("memory-")
+			? notification.sessionId
+			: notification.parentSessionId;
+		if (!sessionId) return;
 		try {
-			appendSessionEvent(notification.parentSessionId, notification.type, notification);
+			appendSessionEvent(sessionId, notification.type, notification);
 		} catch {
 			// A stale/deleted parent session must not break actor teardown.
 		}

@@ -185,6 +185,19 @@ describe("AgentActorRegistry", () => {
 		expect(third.list().find((item) => item.id === actor.id)?.status).toBe("stalled");
 	});
 
+	it("resumes a stalled actor without changing its durable identity", async () => {
+		const store = new SqliteAgentActorStore();
+		const first = new AgentActorRegistry({ store, watchdogIntervalMs: 0, leaseMs: -1 });
+		const actor = first.spawn({ ...spec, lifecycle: "persistent" });
+		const restarted = new AgentActorRegistry({ store, watchdogIntervalMs: 0 });
+		expect(restarted.list().find((item) => item.id === actor.id)?.status).toBe("stalled");
+
+		const resumed = restarted.resume(actor.id);
+		expect(resumed?.id).toBe(actor.id);
+		await resumed?.run(async () => "recovered");
+		expect(restarted.list().find((item) => item.id === actor.id)?.status).toBe("success");
+	});
+
 	it("bounds terminal lifecycle rows in SQLite", async () => {
 		const store = new SqliteAgentActorStore();
 		const registry = new AgentActorRegistry({ store, watchdogIntervalMs: 0, terminalLimit: 1 });

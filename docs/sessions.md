@@ -26,7 +26,7 @@ Memory can be disabled globally with `/memory off` in the TUI or Settings → Me
 
 When the project needs maintenance, `/dream` verifies the last seven days of raw project trajectory against the memory files and consolidates only durable knowledge. `/distill` inspects the last thirty days and existing assets, requires repeated evidence, and materializes high-confidence skills, personas, or commands under the project `.cast` directory; low-confidence candidates remain reviewable in SQLite. Both commands require an idle agent, use the same global memory switch, and leave the conversation intact if the provider call fails.
 
-Automatic dream and distill runs are persistent background-run records linked to their parent session. They have their own status, cancellation, terminal event, and recovery descriptor without adding maintenance messages to the conversation transcript. Use `/memory runs` to inspect them and `/memory cancel <run-id>` to cancel an active run; the Web UI exposes the same operations through its `/memory` command bridge.
+Automatic dream and distill runs are separate persistent background sessions linked to their parent conversation. They have their own messages, events, status, cancellation, terminal event, and recovery descriptor without adding maintenance traffic to the conversation transcript. Use `/memory runs` to inspect them and `/memory cancel <run-id>` to cancel an active run; the Web UI exposes the same operations through its `/memory` command bridge.
 
 ## Session History Search
 
