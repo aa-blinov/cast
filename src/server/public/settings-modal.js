@@ -12,6 +12,7 @@ const SETTINGS_TABS = [
 	{ id: "bash", label: "Bash" },
 	{ id: "hooks", label: "Hooks" },
 	{ id: "marketplace", label: "Marketplace" },
+	{ id: "memory", label: "Memory" },
 	{ id: "mcp", label: "MCP" },
 	{ id: "model", label: "Model" },
 	{ id: "personas", label: "Personas" },
@@ -59,6 +60,7 @@ export function SettingsModal({
 	onModelChange,
 	showReasoning,
 	onToggleShowReasoning,
+	onMemoryChange,
 }) {
 	const [tab, setTab] = useState(SETTINGS_TABS[0].id);
 	const [data, setData] = useState({});
@@ -128,6 +130,9 @@ export function SettingsModal({
 						fetchProvider: fetchProvider?.result,
 					},
 				}));
+			} else if (t === "memory") {
+				const res = await run("/memory");
+				commit((d) => ({ ...d, memory: res?.result }));
 			} else if (t === "quick-mode") {
 				const quickSessionPersona = await run("/quick-session-persona");
 				commit((d) => ({ ...d, "quick-mode": { quickSessionPersona: quickSessionPersona?.result } }));
@@ -242,6 +247,9 @@ export function SettingsModal({
 					if ((command.startsWith("/model ") || command.startsWith("/model-selection ")) && typeof res.result?.model === "string") {
 						onModelChange?.(res.result.model);
 					}
+					if (command.startsWith("/memory ") && typeof res.result?.memoryEnabled === "boolean") {
+						onMemoryChange?.(res.result.memoryEnabled);
+					}
 					if (command === "/reload" || command.startsWith("/skills ")) onReload?.();
 					if (
 						command === "/reload" ||
@@ -311,9 +319,11 @@ export function SettingsModal({
 											? html`<${panels.SettingsPersonas} personas=${personas} />`
 											: tab === "bash"
 											? html`<${panels.SettingsBash} data=${data.bash} busy=${busy} act=${act} />`
-											: tab === "web"
-												? html`<${panels.SettingsWeb} data=${data.web} busy=${busy} act=${act} />`
-												: tab === "quick-mode"
+									: tab === "web"
+										? html`<${panels.SettingsWeb} data=${data.web} busy=${busy} act=${act} />`
+										: tab === "memory"
+											? html`<${panels.SettingsMemory} data=${data.memory} busy=${busy} act=${act} />`
+											: tab === "quick-mode"
 													? html`<${panels.SettingsQuickMode} data=${data["quick-mode"]} busy=${busy} act=${act} personas=${personas} onQuickSessionPersonaChange=${onQuickSessionPersonaChange} />`
 													: tab === "server"
 														? html`<${panels.SettingsServer} data=${data.server} />`

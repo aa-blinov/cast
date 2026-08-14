@@ -23,6 +23,7 @@ import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { brotliCompressSync, gzipSync } from "node:zlib";
 import { getDb } from "../core/db.ts";
+import { listProjectMemory, searchProjectMemory } from "../core/memory.ts";
 import { getHistoryPage, getMessageImage, getSessionEvents } from "../core/session.ts";
 import { loadSettings, updateSettings } from "../core/settings.ts";
 import { ensureSessionWorktree } from "../core/worktree.ts";
@@ -63,6 +64,7 @@ const IMPORT_REWRITE_TARGETS = [
 	"hotkeys",
 	"icons",
 	"inputs-explorer",
+	"memory-explorer",
 	"message",
 	"message-submit",
 	"modal-focus",
@@ -793,6 +795,18 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			oldestSeq: page.oldestSeq ?? null,
 			hasMoreHistory: page.hasMore,
 		});
+	});
+
+	// Project memory is durable across sessions, but the cwd is always resolved
+	// through the requested session so a browser cannot browse another project
+	// by supplying an arbitrary filesystem path.
+	route("GET", "/api/sessions/:id/memory", (req, res, params) => {
+		const cwd = sessionCwd(params.id);
+		if (!cwd) return json(res, { error: "Not found" }, 404);
+		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+		const query = (url.searchParams.get("q") ?? "").trim();
+		const items = query ? searchProjectMemory(cwd, query, 100) : listProjectMemory(cwd, 100);
+		json(res, { cwd, projectId: items[0]?.projectId ?? null, query, items, hasMore: items.length >= 100 });
 	});
 
 	// Audit trail of live agent events (tool_start, retry, doom_loop, error,

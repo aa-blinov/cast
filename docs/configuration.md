@@ -24,6 +24,7 @@ User settings are persisted to `~/.cast/settings.json`. This file is loaded on s
 | `projectTrust` | Record<string, boolean> | Per-project trust decisions |
 | `theme` | string | Active color theme id |
 | `webTools` | boolean | Whether web tools are enabled (default: `false` — use `/web` to enable) |
+| `memoryEnabled` | boolean | Whether durable project memory, retrieval, extraction, and the Web UI Memory tab are enabled (default: `true`) |
 | `searchProvider` | `"ddg"` \| `"tavily"` \| `"brave"` | `web_search` backend (default: `"ddg"`) — use `/web-search-provider` to change |
 | `tavilyApiKey` | string | API key for the Tavily backend, from https://app.tavily.com |
 | `braveApiKey` | string | API key for the Brave Search backend, from https://api-dashboard.search.brave.com |
@@ -39,6 +40,15 @@ User settings are persisted to `~/.cast/settings.json`. This file is loaded on s
 | `updatedAt` | string | Auto-updated timestamp |
 
 Settings are written atomically (temp file + rename) to prevent corruption from crashes mid-write.
+
+## Project Memory
+
+Durable project memory is enabled by default. It is one global setting shared by the TUI and Web UI:
+
+- TUI: use `/memory`, or `/memory on` / `/memory off`.
+- Web UI: open Settings → Memory and switch the toggle.
+
+When disabled, Cast does not advertise the `memory` tool, retrieve memory into prompts, or run the background memory writer. The Web UI also removes Memory from the right sidebar. Existing records remain in SQLite and become available again if memory is re-enabled.
 
 ## Environment Variables
 

@@ -82,6 +82,7 @@ export function useWorkspaceState() {
 	// Persona the sidebar's "Quick session" button uses — configurable in
 	// Settings > Tools, defaults to "senior" server-side when never set.
 	const [quickSessionPersona, setQuickSessionPersona] = useState("senior");
+	const [memoryEnabled, setMemoryEnabled] = useState(true);
 	// Default cwd: empty until initClientState pulls a real one from
 	// /api/config. A blank value here means "show the home dir shortPath
 	// (`~`) in the new-session modal until the user picks a real path" —
@@ -134,6 +135,8 @@ export function useWorkspaceState() {
 		setDefaultCwd,
 		quickSessionPersona,
 		setQuickSessionPersona,
+		memoryEnabled,
+		setMemoryEnabled,
 		selectedCwd,
 		setSelectedCwd,
 		dirPickerOpen,

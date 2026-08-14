@@ -8,6 +8,26 @@ Sessions are stored in a single SQLite database at `~/.cast/sessions/sessions.db
 
 Sessions saved by older versions of cast (individual `.json`/`.jsonl` files under `~/.cast/sessions/<encoded-cwd>/`) are imported into the database automatically on first run after upgrading — the original files are left on disk untouched.
 
+## Project Memory
+
+Cast also keeps durable project memory in the same SQLite database. Memory is scoped by the normalized project `cwd`, indexed with SQLite FTS5, and shared by all sessions for that project. After a completed turn, a separate memory-writer prompt is queued in the background and asks the configured model to extract only durable architecture decisions, rules, fixes, provider gotchas, and progress; secrets and generic conversation are excluded. The user-facing turn does not wait for this extra model call. Writers for one project/session are serialized, have a bounded lifetime, and duplicate facts are fingerprinted so they do not accumulate.
+
+Relevant entries are automatically retrieved from the current user request and added to the next model context. The `memory` tool can search the same project scope explicitly:
+
+```json
+{"query":"native reasoning tool-call"}
+```
+
+Memory writing is best-effort: if the writer provider call fails or times out, the conversation remains successful and Cast reports a non-fatal warning. Existing memory stays available through retrieval. The writer uses the active model/provider, so no separate memory model configuration is required.
+
+Memory can be disabled globally with `/memory off` in the TUI or Settings → Memory in the Web UI. The setting is stored in `~/.cast/settings.json` and is shared by both clients. Disabling it stops retrieval, extraction, and the `memory` tool; it does not delete existing project-memory rows.
+
+## Session History Search
+
+`session_history` is deliberately separate from `memory`. It searches raw user, assistant, and tool messages from earlier sessions in the current project through the SQLite full-text index. Use it when the exact earlier discussion is needed; use `memory` for distilled durable facts. Search results include the source session and message sequence so the agent can distinguish evidence from a reusable project rule.
+
+Memory retrieval and extraction are recorded as durable session events. Extraction claims are leased and keyed by `(project, session, turn)`, so retries or reconnects cannot run the same writer twice, while an expired claim can safely be retried after a crashed process.
+
 ## Session State
 
 Each session tracks:
