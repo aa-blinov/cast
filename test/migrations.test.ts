@@ -57,6 +57,7 @@ describe("schema migrations", () => {
 			"web_sessions",
 			"session_checkpoints",
 			"subagent_runs",
+			"agent_actors",
 			"messages_fts",
 		]) {
 			const row = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);

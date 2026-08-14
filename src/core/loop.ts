@@ -1,6 +1,6 @@
 import { setMaxListeners } from "node:events";
 import { basename, join } from "node:path";
-import { agentActorRegistry } from "./actors.ts";
+import { type AgentForkContext as ActorForkContext, agentActorRegistry } from "./actors.ts";
 import {
 	formatPostCompactReminder,
 	injectPostCompactReminder,
@@ -769,24 +769,15 @@ function checkpointWriterPrompt(input: MemoryCheckpointWriterInput): string {
 }
 
 /** Immutable parent-side context captured for a background agent fork. */
-export interface AgentForkContext {
-	/** Complete message snapshot inherited by the child agent. */
-	inheritedMessages: Message[];
-	/** Messages at or before the durable watermark. */
-	prefix: Message[];
-	/** Messages after the durable watermark. */
-	tail: Message[];
-	/** Inclusive message index of the durable watermark, or -1 for none. */
-	boundaryIndex: number;
-	/** Provider request marker for the reusable prefix, when a watermark exists. */
-	cachePrefixBoundary?: number;
-	/** Compatibility alias for callers that used the original fork seam. */
-	messages: Message[];
-}
+export type AgentForkContext = ActorForkContext;
 
 export type AgentContextFork = AgentForkContext;
 
-export function createAgentForkContext(messages: Message[], boundaryIndex: number): AgentForkContext {
+export function createAgentForkContext(
+	messages: Message[],
+	boundaryIndex: number,
+	metadata?: Pick<AgentForkContext, "systemPrompt" | "toolNames" | "model">,
+): AgentForkContext {
 	const snapshot = structuredClone(messages);
 	const boundary = Math.max(-1, Math.min(boundaryIndex, snapshot.length - 1));
 	return {
@@ -796,6 +787,7 @@ export function createAgentForkContext(messages: Message[], boundaryIndex: numbe
 		tail: snapshot.slice(boundary + 1),
 		boundaryIndex: boundary,
 		cachePrefixBoundary: boundary >= 0 ? boundary : undefined,
+		...metadata,
 	};
 }
 
@@ -845,6 +837,7 @@ export async function runMemoryMaintenanceAgent(
 }
 
 async function runCheckpointWriter(input: MemoryCheckpointWriterInput): Promise<void> {
+	const fork = createAgentForkContext(input.messages, input.checkpointBoundary ?? -1);
 	const actor = agentActorRegistry.spawn(
 		{
 			parentSessionId: input.sessionId,
@@ -852,7 +845,8 @@ async function runCheckpointWriter(input: MemoryCheckpointWriterInput): Promise<
 			agent: "checkpoint-writer",
 			mode: "subagent",
 			background: true,
-			lifecycle: "ephemeral",
+			lifecycle: "persistent",
+			forkContext: fork,
 		},
 		input.signal,
 	);
@@ -860,27 +854,31 @@ async function runCheckpointWriter(input: MemoryCheckpointWriterInput): Promise<
 		const timeout = setTimeout(() => actor.cancel(), 120_000);
 		timeout.unref();
 		try {
-			const fork = createAgentForkContext(input.messages, input.checkpointBoundary ?? -1);
-			await runAgentLoop([...fork.inheritedMessages, { role: "user", content: checkpointWriterPrompt(input) }], {
-				config: input.config,
-				model: input.model,
-				modelProvider: input.providerOverride,
-				cwd: input.cwd,
-				systemPrompt: CHECKPOINT_WRITER_SYSTEM_PROMPT,
-				signal: actorSignal,
-				onEvent: () => {},
-				onWarning: () => {},
-				allowedTools: ["read", "write", "edit", "glob", "grep"],
-				disabledTools: new Set(["bash", "task", "memory", "web_search", "web_fetch", "ssh", "skill"]),
-				personas: [],
-				subagentPrompts: [],
-				mcpTools: [],
-				skills: [],
-				noSkills: true,
-				projectTrusted: false,
-				checkpointBoundary: fork.boundaryIndex,
-				cachePrefixBoundary: fork.cachePrefixBoundary,
-			});
+			const actorFork = actor.snapshot().forkContext;
+			if (!actorFork) throw new Error("Checkpoint writer actor was created without a fork context");
+			await runAgentLoop(
+				[...actorFork.inheritedMessages, { role: "user", content: checkpointWriterPrompt(input) }],
+				{
+					config: input.config,
+					model: input.model,
+					modelProvider: input.providerOverride,
+					cwd: input.cwd,
+					systemPrompt: CHECKPOINT_WRITER_SYSTEM_PROMPT,
+					signal: actorSignal,
+					onEvent: () => {},
+					onWarning: () => {},
+					allowedTools: ["read", "write", "edit", "glob", "grep"],
+					disabledTools: new Set(["bash", "task", "memory", "web_search", "web_fetch", "ssh", "skill"]),
+					personas: [],
+					subagentPrompts: [],
+					mcpTools: [],
+					skills: [],
+					noSkills: true,
+					projectTrusted: false,
+					checkpointBoundary: actorFork.boundaryIndex,
+					cachePrefixBoundary: actorFork.cachePrefixBoundary,
+				},
+			);
 			reconcileProjectMemoryFiles(input.cwd, input.sessionId);
 		} finally {
 			clearTimeout(timeout);
@@ -1144,6 +1142,12 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 					sshHosts: loopConfig.sshHosts,
 					hooks: loopConfig.hooks,
 					sessionId: loopConfig.sessionId,
+					forkContext: () =>
+						createAgentForkContext(messages, checkpointBoundary, {
+							systemPrompt: loopConfig.systemPrompt,
+							toolNames: tools.map((tool) => tool.function.name),
+							model: initialModel,
+						}),
 					skills: allowedSkills,
 					runAgentLoop,
 				}

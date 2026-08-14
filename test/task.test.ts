@@ -77,6 +77,17 @@ describe("execTask — final extract", () => {
 			model: "test-model",
 			sessionId: parentSession.id,
 			actorRegistry,
+			forkContext: () => ({
+				messages: [{ role: "user", content: "parent" }],
+				inheritedMessages: [{ role: "user", content: "parent" }],
+				prefix: [{ role: "user", content: "parent" }],
+				tail: [],
+				boundaryIndex: 0,
+				cachePrefixBoundary: 0,
+				systemPrompt: "parent system",
+				toolNames: ["task"],
+				model: "test-model",
+			}),
 			subagentPrompts: [
 				{ name: "worker", label: "Worker", description: "", systemPrompt: "worker", agentsMd: false },
 			],
@@ -93,6 +104,7 @@ describe("execTask — final extract", () => {
 				sessionId: parentSession.id,
 				agent: "worker",
 				status: "success",
+				forkContext: expect.objectContaining({ systemPrompt: "parent system", toolNames: ["task"] }),
 			}),
 		]);
 	});
