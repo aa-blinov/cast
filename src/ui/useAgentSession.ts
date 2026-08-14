@@ -44,6 +44,7 @@ import {
 	forkServerSession,
 	getServerSession,
 	resolveServerPlanTransition,
+	runServerCommand,
 	type ServerClient,
 	serverFetch,
 	setServerMode,
@@ -292,6 +293,10 @@ export interface UseAgentSession {
 	setMode: (mode: "plan" | "build") => void;
 	/** True only while the thin-client daemon's SSE stream is open. */
 	daemonConnected: boolean;
+	/** True when commands must be executed by the shared daemon rather than locally. */
+	daemonMode: boolean;
+	/** Execute a daemon-owned slash command; throws when running locally. */
+	runCommand: (command: string) => Promise<unknown>;
 	/** Reset the daemon session's context for "implement in clean context"
 	 * (thin-client mode) — resolves with the original task, if the daemon kept
 	 * one, for the reminder prompt. */
@@ -1765,6 +1770,14 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		}
 	}, [isClient, effectiveDaemonUrl, session.id, serverClient]);
 
+	const runCommand = useCallback(
+		async (command: string): Promise<unknown> => {
+			if (!isClient || !serverClient) throw new Error("No daemon is attached");
+			return runServerCommand(serverClient, session.id, command);
+		},
+		[isClient, serverClient, session.id],
+	);
+
 	const forkCurrentSession = useCallback(async (): Promise<SessionState | undefined> => {
 		if (isClient && effectiveDaemonUrl) {
 			if (!serverClient) return undefined;
@@ -1852,6 +1865,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		cleanDaemonContext,
 		setMode,
 		daemonConnected,
+		daemonMode: isClient,
+		runCommand,
 		showReasoning,
 		toggleReasoning,
 		turnStartedAt,
