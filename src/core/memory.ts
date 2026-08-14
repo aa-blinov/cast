@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -16,6 +16,7 @@ import {
 	readSessionMemory,
 	renderCheckpoint,
 	writeMemoryFile,
+	writeProjectMemoryManifest,
 } from "./memory-files.ts";
 import { promptsDir, readRequiredPrompt } from "./prompts.ts";
 import { isMemoryEnabled } from "./settings.ts";
@@ -23,9 +24,11 @@ import type { ToolResult } from "./tools/shared.ts";
 
 const MAX_SEARCH_RESULTS = 8;
 const DEFAULT_MEMORY_PROMPT_TOKENS = 3_000;
-const MEMORY_TOKEN_TO_CHAR_RATIO = 4;
 const MEMORY_WRITE_LEASE_MS = 10 * 60 * 1000;
 const MEMORY_BACKGROUND_TIMEOUT_MS = 30_000;
+const MEMORY_OPERATION_LEASE_MS = 300_000;
+const MEMORY_OPERATION_WAIT_MS = 30_000;
+const MEMORY_OPERATION_POLL_MS = 50;
 const TRAILING_SEPARATORS_RE = /[\\/]+$/;
 const MARKDOWN_BULLET_RE = /^[-*]\s+(.+)$/;
 const MARKDOWN_EMPTY_RE = /^(\(none|#)/;
@@ -49,6 +52,9 @@ export interface MemoryEntry {
 	content: string;
 	type: string;
 	importance?: number;
+	confidence?: number;
+	expiresAt?: string;
+	supersedes?: number[];
 }
 
 export interface MemorySearchResult {
@@ -57,6 +63,8 @@ export interface MemorySearchResult {
 	type: string;
 	content: string;
 	importance: number;
+	confidence: number;
+	expiresAt?: string;
 	score: number;
 	sourceSessionId: string;
 	createdAt: string;
@@ -171,8 +179,14 @@ export interface MemoryService {
 }
 
 export interface MemoryPromptOptions {
-	/** Maximum approximate input tokens reserved for injected memory context. */
+	/** Maximum input tokens reserved for injected memory context. */
 	tokenBudget?: number;
+}
+
+export interface ProjectMemoryLeaseOptions {
+	waitMs?: number;
+	leaseMs?: number;
+	signal?: AbortSignal;
 }
 
 export interface MemoryCheckpointWriterInput {
@@ -260,10 +274,12 @@ function skippedCheckpointWriterHandle(key: string, input: MemoryCheckpointWrite
 	return handleForCheckpointWriter(request, key);
 }
 
-function queueMemoryOperation<T>(cwd: string, operation: () => Promise<T>): Promise<T> {
+function queueMemoryOperation<T>(cwd: string, operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
 	const queueKey = projectIdForCwd(cwd);
 	const previous = memoryOperationQueues.get(queueKey) ?? Promise.resolve();
-	const next = previous.catch(() => undefined).then(operation);
+	const next = previous
+		.catch(() => undefined)
+		.then(() => withProjectMemoryLease(cwd, "memory", operation, { signal }));
 	memoryOperationQueues.set(queueKey, next);
 	void next
 		.finally(() => {
@@ -271,6 +287,98 @@ function queueMemoryOperation<T>(cwd: string, operation: () => Promise<T>): Prom
 		})
 		.catch(() => {});
 	return next;
+}
+
+function sleepWithAbort(delayMs: number, signal?: AbortSignal): Promise<void> {
+	if (signal?.aborted) return Promise.reject(signal.reason ?? new Error("Memory operation was aborted"));
+	return new Promise((resolve, reject) => {
+		let timer: NodeJS.Timeout;
+		const abort = () => {
+			clearTimeout(timer);
+			signal?.removeEventListener("abort", abort);
+			reject(signal?.reason ?? new Error("Memory operation was aborted"));
+		};
+		timer = setTimeout(() => {
+			signal?.removeEventListener("abort", abort);
+			resolve();
+		}, delayMs);
+		signal?.addEventListener("abort", abort, { once: true });
+	});
+}
+
+function tryAcquireProjectMemoryLease(cwd: string, operation: string, leaseMs: number): string | undefined {
+	const projectId = projectIdForCwd(cwd);
+	const token = randomUUID();
+	const now = new Date();
+	const nowText = now.toISOString();
+	const leaseUntil = new Date(now.getTime() + leaseMs).toISOString();
+	const result = withImmediateTransaction(getDb(), () =>
+		getDb()
+			.prepare(`
+				INSERT INTO project_memory_operations
+					(project_id, operation, owner_token, owner_pid, lease_until, acquired_at)
+				VALUES (?, ?, ?, ?, ?, ?)
+				ON CONFLICT(project_id) DO UPDATE SET
+					operation = excluded.operation,
+					owner_token = excluded.owner_token,
+					owner_pid = excluded.owner_pid,
+					lease_until = excluded.lease_until,
+					acquired_at = excluded.acquired_at
+				WHERE project_memory_operations.lease_until <= ?
+			`)
+			.run(projectId, operation, token, process.pid, leaseUntil, nowText, nowText),
+	);
+	return result.changes > 0 ? token : undefined;
+}
+
+function releaseProjectMemoryLease(cwd: string, token: string): void {
+	getDb()
+		.prepare("DELETE FROM project_memory_operations WHERE project_id = ? AND owner_token = ?")
+		.run(projectIdForCwd(cwd), token);
+}
+
+function renewProjectMemoryLease(cwd: string, token: string, leaseMs: number): boolean {
+	const leaseUntil = new Date(Date.now() + leaseMs).toISOString();
+	return (
+		Number(
+			getDb()
+				.prepare("UPDATE project_memory_operations SET lease_until = ? WHERE project_id = ? AND owner_token = ?")
+				.run(leaseUntil, projectIdForCwd(cwd), token).changes,
+		) > 0
+	);
+}
+
+export async function withProjectMemoryLease<T>(
+	cwd: string,
+	operation: string,
+	work: () => Promise<T>,
+	options: ProjectMemoryLeaseOptions = {},
+): Promise<T> {
+	const waitMs = options.waitMs ?? MEMORY_OPERATION_WAIT_MS;
+	const leaseMs = options.leaseMs ?? MEMORY_OPERATION_LEASE_MS;
+	const deadline = Date.now() + waitMs;
+	let token: string | undefined;
+	while (!token) {
+		token = tryAcquireProjectMemoryLease(cwd, operation, leaseMs);
+		if (token) break;
+		if (Date.now() >= deadline)
+			throw new Error(`Timed out waiting for project memory lease: ${projectIdForCwd(cwd)}`);
+		// biome-ignore lint/performance/noAwaitInLoops: lease polling must remain sequential
+		await sleepWithAbort(Math.min(MEMORY_OPERATION_POLL_MS, Math.max(1, deadline - Date.now())), options.signal);
+	}
+	const renewal = setInterval(
+		() => {
+			renewProjectMemoryLease(cwd, token!, leaseMs);
+		},
+		Math.max(1_000, Math.floor(leaseMs / 3)),
+	);
+	renewal.unref();
+	try {
+		return await work();
+	} finally {
+		clearInterval(renewal);
+		releaseProjectMemoryLease(cwd, token);
+	}
 }
 
 export function scheduleProjectCheckpointWriter(
@@ -314,7 +422,7 @@ async function runCheckpointWriterQueue(key: string, state: CheckpointWriterStat
 		try {
 			// One writer per session is intentional: each pending snapshot supersedes the previous one.
 			// biome-ignore lint/performance/noAwaitInLoops: checkpoint writers for one session must be sequential
-			await queueMemoryOperation(request.input.cwd, () => request.writer(request.input));
+			await queueMemoryOperation(request.input.cwd, () => request.writer(request.input), request.input.signal);
 			request.status = "success";
 		} catch (error) {
 			request.status = "failed";
@@ -580,10 +688,20 @@ function parseMemoryEntries(value: unknown): MemoryEntry[] {
 		const key = `${type}\n${content}`.toLowerCase();
 		if (!content || seen.has(key)) continue;
 		seen.add(key);
+		const confidence =
+			typeof item.confidence === "number" ? Math.max(0, Math.min(100, Math.round(item.confidence))) : undefined;
+		const expiresAt =
+			typeof item.expiresAt === "string" && !Number.isNaN(Date.parse(item.expiresAt)) ? item.expiresAt : undefined;
+		const supersedes = Array.isArray(item.supersedes)
+			? [...new Set(item.supersedes.filter((id): id is number => Number.isInteger(id) && id > 0))].slice(0, 8)
+			: undefined;
 		entries.push({
 			content,
 			type,
 			importance: typeof item.importance === "number" ? Math.max(0, Math.min(100, Math.round(item.importance))) : 50,
+			...(confidence === undefined ? {} : { confidence }),
+			...(expiresAt === undefined ? {} : { expiresAt }),
+			...(supersedes === undefined ? {} : { supersedes }),
 		});
 		if (entries.length === 8) break;
 	}
@@ -654,11 +772,57 @@ function renderProjectMemoryFile(cwd: string): string {
 		.join("\n\n")}\n`;
 }
 
+function memoryFileHash(content: string): string {
+	return createHash("sha256").update(content).digest("hex");
+}
+
+function recordMemoryFileRevision(
+	cwd: string,
+	sessionId: string,
+	projectContent: string,
+	checkpointContent: string,
+): void {
+	const projectId = projectIdForCwd(cwd);
+	const now = new Date().toISOString();
+	const projectHash = memoryFileHash(projectContent);
+	const checkpointHash = memoryFileHash(checkpointContent);
+	const db = getDb();
+	const revision = withImmediateTransaction(db, () => {
+		const previous = db
+			.prepare("SELECT revision FROM project_memory_revisions WHERE project_id = ?")
+			.get(projectId) as { revision?: number } | undefined;
+		const nextRevision = (previous?.revision ?? 0) + 1;
+		db.prepare(`
+			INSERT INTO project_memory_revisions
+				(project_id, revision, session_id, project_hash, checkpoint_hash, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?)
+			ON CONFLICT(project_id) DO UPDATE SET
+				revision = excluded.revision,
+				session_id = excluded.session_id,
+				project_hash = excluded.project_hash,
+				checkpoint_hash = excluded.checkpoint_hash,
+				updated_at = excluded.updated_at
+		`).run(projectId, nextRevision, sessionId, projectHash, checkpointHash, now);
+		return nextRevision;
+	});
+	writeProjectMemoryManifest(projectId, {
+		version: 1,
+		revision,
+		projectId,
+		sessionId,
+		projectHash,
+		checkpointHash,
+		updatedAt: now,
+	});
+}
+
 function persistMemoryFiles(cwd: string, sessionId: string, checkpoint?: MemoryCheckpoint): void {
 	const projectId = projectIdForCwd(cwd);
 	ensureMemoryFiles(sessionId, projectId);
 	if (checkpoint) writeMemoryFile(checkpointPath(sessionId), renderCheckpoint(checkpoint));
-	writeMemoryFile(projectMemoryPath(projectId), renderProjectMemoryFile(cwd));
+	const projectContent = renderProjectMemoryFile(cwd);
+	writeMemoryFile(projectMemoryPath(projectId), projectContent);
+	recordMemoryFileRevision(cwd, sessionId, projectContent, readMemoryFile(checkpointPath(sessionId)));
 }
 
 function memoryPromptText(cwd: string): string {
@@ -828,22 +992,26 @@ export function scheduleProjectMemoryExtraction(
 	service: Pick<MemoryService, "extractAndStoreProjectMemory">,
 	onWarning?: (message: string) => void,
 ): Promise<void> {
-	const next = queueMemoryOperation(input.cwd, async () => {
-		const controller = new AbortController();
-		const timeout = setTimeout(() => controller.abort(), MEMORY_BACKGROUND_TIMEOUT_MS);
-		timeout.unref();
-		try {
-			await service.extractAndStoreProjectMemory({
-				...input,
-				messages: input.messages.slice(),
-				signal: controller.signal,
-			});
-		} catch (error) {
-			onWarning?.(`Project memory was not updated: ${error instanceof Error ? error.message : String(error)}`);
-		} finally {
-			clearTimeout(timeout);
-		}
-	});
+	const next = queueMemoryOperation(
+		input.cwd,
+		async () => {
+			const controller = new AbortController();
+			const timeout = setTimeout(() => controller.abort(), MEMORY_BACKGROUND_TIMEOUT_MS);
+			timeout.unref();
+			try {
+				await service.extractAndStoreProjectMemory({
+					...input,
+					messages: input.messages.slice(),
+					signal: controller.signal,
+				});
+			} catch (error) {
+				onWarning?.(`Project memory was not updated: ${error instanceof Error ? error.message : String(error)}`);
+			} finally {
+				clearTimeout(timeout);
+			}
+		},
+		input.signal,
+	);
 	void next.catch(() => {});
 	return next;
 }
@@ -859,19 +1027,33 @@ function storeProjectMemoryRows(
 	const now = new Date().toISOString();
 	const insert = db.prepare(`
 		INSERT INTO project_memory
-			(project_id, cwd, type, content, fingerprint, source_session_id, source_turn_key, importance, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			(project_id, cwd, type, content, fingerprint, source_session_id, source_turn_key, importance, confidence, expires_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(project_id, fingerprint) DO UPDATE SET
 			cwd = excluded.cwd,
 			source_session_id = excluded.source_session_id,
 			source_turn_key = excluded.source_turn_key,
 			importance = MAX(project_memory.importance, excluded.importance),
+			confidence = MAX(project_memory.confidence, excluded.confidence),
+			expires_at = CASE
+				WHEN excluded.expires_at IS NULL THEN project_memory.expires_at
+				WHEN project_memory.expires_at IS NULL THEN excluded.expires_at
+				WHEN excluded.expires_at > project_memory.expires_at THEN excluded.expires_at
+				ELSE project_memory.expires_at
+			END,
 			updated_at = excluded.updated_at
 	`);
 	let stored = 0;
 	for (const entry of entries) {
 		const content = entry.content.trim();
 		if (!content) continue;
+		if (entry.supersedes && entry.supersedes.length > 0) {
+			const placeholders = entry.supersedes.map(() => "?").join(",");
+			db.prepare(`DELETE FROM project_memory WHERE project_id = ? AND id IN (${placeholders})`).run(
+				projectId,
+				...entry.supersedes,
+			);
+		}
 		insert.run(
 			projectId,
 			normalizeCwd(cwd),
@@ -881,6 +1063,8 @@ function storeProjectMemoryRows(
 			sourceSessionId,
 			sourceTurnKey,
 			Math.max(0, Math.min(100, Math.round(entry.importance ?? 50))),
+			Math.max(0, Math.min(100, Math.round(entry.confidence ?? 50))),
+			entry.expiresAt ?? null,
 			now,
 			now,
 		);
@@ -1113,7 +1297,7 @@ async function runDreamProjectMemory(input: MemoryMaintenanceInput): Promise<Mem
 }
 
 export function dreamProjectMemory(input: MemoryMaintenanceInput): Promise<MemoryDreamResult> {
-	return queueMemoryOperation(input.cwd, () => runDreamProjectMemory(input));
+	return queueMemoryOperation(input.cwd, () => runDreamProjectMemory(input), input.signal);
 }
 
 function parseMemoryDistillOutput(raw: string): Array<{
@@ -1399,7 +1583,7 @@ async function runDistillProjectMemory(input: MemoryMaintenanceInput): Promise<M
 }
 
 export function distillProjectMemory(input: MemoryMaintenanceInput): Promise<MemoryDistillResult> {
-	return queueMemoryOperation(input.cwd, () => runDistillProjectMemory(input));
+	return queueMemoryOperation(input.cwd, () => runDistillProjectMemory(input), input.signal);
 }
 
 function parseMarkdownMemoryEntries(content: string): MemoryEntry[] {
@@ -1472,6 +1656,7 @@ export function reconcileProjectMemoryFiles(cwd: string, sessionId: string, forc
 			checkpoint: Boolean(checkpoint),
 		});
 	});
+	recordMemoryFileRevision(cwd, sessionId, projectContent, session.checkpoint);
 }
 
 export function searchProjectMemory(cwd: string, query: string, limit = MAX_SEARCH_RESULTS): MemorySearchResult[] {
@@ -1480,21 +1665,24 @@ export function searchProjectMemory(cwd: string, query: string, limit = MAX_SEAR
 	const projectId = projectIdForCwd(cwd);
 	const rows = getDb()
 		.prepare(`
-			SELECT m.id, m.project_id, m.type, m.content, m.importance, m.source_session_id,
+			SELECT m.id, m.project_id, m.type, m.content, m.importance, m.confidence, m.expires_at, m.source_session_id,
 					m.created_at, m.updated_at,
 					-bm25(project_memory_fts) AS score
 			FROM project_memory_fts
 			JOIN project_memory AS m ON m.id = project_memory_fts.rowid
 			WHERE project_memory_fts MATCH ? AND m.project_id = ?
+				AND (m.expires_at IS NULL OR m.expires_at > ?)
 			ORDER BY score DESC, m.importance DESC, m.updated_at DESC
 			LIMIT ?
 		`)
-		.all(ftsQuery, projectId, Math.max(1, Math.min(limit, MAX_SEARCH_RESULTS))) as Array<{
+		.all(ftsQuery, projectId, new Date().toISOString(), Math.max(1, Math.min(limit, MAX_SEARCH_RESULTS))) as Array<{
 		id: number;
 		project_id: string;
 		type: string;
 		content: string;
 		importance: number;
+		confidence: number;
+		expires_at: string | null;
 		source_session_id: string;
 		created_at: string;
 		updated_at: string;
@@ -1507,6 +1695,8 @@ export function searchProjectMemory(cwd: string, query: string, limit = MAX_SEAR
 		type: row.type,
 		content: row.content,
 		importance: row.importance,
+		confidence: row.confidence,
+		expiresAt: row.expires_at ?? undefined,
 		score: row.score,
 		sourceSessionId: row.source_session_id,
 		createdAt: row.created_at,
@@ -1518,19 +1708,22 @@ export function listProjectMemory(cwd: string, limit = 100): MemorySearchResult[
 	const projectId = projectIdForCwd(cwd);
 	const rows = getDb()
 		.prepare(`
-			SELECT id, project_id, type, content, importance, source_session_id,
+			SELECT id, project_id, type, content, importance, confidence, expires_at, source_session_id,
 					created_at, updated_at
 			FROM project_memory
 			WHERE project_id = ?
+				AND (expires_at IS NULL OR expires_at > ?)
 			ORDER BY importance DESC, updated_at DESC
 			LIMIT ?
 		`)
-		.all(projectId, Math.max(1, Math.min(limit, 100))) as Array<{
+		.all(projectId, new Date().toISOString(), Math.max(1, Math.min(limit, 100))) as Array<{
 		id: number;
 		project_id: string;
 		type: string;
 		content: string;
 		importance: number;
+		confidence: number;
+		expires_at: string | null;
 		source_session_id: string;
 		created_at: string;
 		updated_at: string;
@@ -1542,6 +1735,8 @@ export function listProjectMemory(cwd: string, limit = 100): MemorySearchResult[
 		type: row.type,
 		content: row.content,
 		importance: row.importance,
+		confidence: row.confidence,
+		expiresAt: row.expires_at ?? undefined,
 		score: 0,
 		sourceSessionId: row.source_session_id,
 		createdAt: row.created_at,
@@ -1557,7 +1752,6 @@ function renderMemoryPrompt(
 ): string {
 	if (matches.length === 0 && !checkpoint && !fileContext) return "";
 	const tokenBudget = Math.max(64, Math.floor(options.tokenBudget ?? DEFAULT_MEMORY_PROMPT_TOKENS));
-	const charBudget = tokenBudget * MEMORY_TOKEN_TO_CHAR_RATIO;
 	const closing = "</project-memory>";
 	let prompt = [
 		"<project-memory>",
@@ -1565,7 +1759,7 @@ function renderMemoryPrompt(
 	].join("\n");
 	const appendIfFits = (text: string): boolean => {
 		const candidate = `${prompt}\n${text}\n${closing}`;
-		if (candidate.length > charBudget) return false;
+		if (estimateMemoryPromptTokens(candidate) > tokenBudget) return false;
 		prompt = `${prompt}\n${text}`;
 		return true;
 	};
@@ -1573,14 +1767,34 @@ function renderMemoryPrompt(
 		appendIfFits(`<project-checkpoint>\n${checkpointPromptText(checkpoint)}\n</project-checkpoint>`);
 	}
 	if (fileContext) {
-		const fileBudget = Math.floor(charBudget * 0.45);
+		const fileBudget = Math.floor(tokenBudget * 3 * 0.45);
 		appendIfFits(`<project-memory-files>\n${fileContext.slice(0, fileBudget)}\n</project-memory-files>`);
 	}
-	for (const match of matches.slice().sort((a, b) => b.importance - a.importance || b.score - a.score)) {
-		const line = `- [${match.type}; importance ${match.importance}] ${match.content}`;
+	for (const match of matches.slice().sort(memoryPriorityComparator)) {
+		const line = `- [${match.type}; importance ${match.importance}; confidence ${match.confidence}] ${match.content}`;
 		if (!appendIfFits(line)) break;
 	}
 	return `${prompt}\n${closing}`;
+}
+
+const MEMORY_CJK_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu;
+const MEMORY_PUNCTUATION_RE = /[^\p{L}\p{N}\s]/gu;
+
+export function estimateMemoryPromptTokens(text: string): number {
+	const cjkCharacters = text.match(MEMORY_CJK_RE)?.length ?? 0;
+	const punctuation = text.match(MEMORY_PUNCTUATION_RE)?.length ?? 0;
+	const otherCharacters = Math.max(0, [...text].length - cjkCharacters);
+	return Math.max(1, Math.ceil(cjkCharacters * 1.2 + otherCharacters / 4 + punctuation * 0.15));
+}
+
+function memoryPriorityComparator(a: MemorySearchResult, b: MemorySearchResult): number {
+	const aAgeDays = Math.max(0, (Date.now() - Date.parse(a.updatedAt)) / (24 * 60 * 60 * 1000));
+	const bAgeDays = Math.max(0, (Date.now() - Date.parse(b.updatedAt)) / (24 * 60 * 60 * 1000));
+	const aFreshness = Math.exp(-aAgeDays / 30);
+	const bFreshness = Math.exp(-bAgeDays / 30);
+	const aPriority = a.importance * 0.65 + a.confidence * 0.2 + aFreshness * 100 * 0.15;
+	const bPriority = b.importance * 0.65 + b.confidence * 0.2 + bFreshness * 100 * 0.15;
+	return bPriority - aPriority || b.score - a.score || b.updatedAt.localeCompare(a.updatedAt);
 }
 
 export function buildMemoryPrompt(
@@ -1610,7 +1824,10 @@ export function formatMemoryToolResult(query: string, matches: MemorySearchResul
 	}
 	return [
 		`Found ${matches.length} project memory entr${matches.length === 1 ? "y" : "ies"}, ranked by relevance:`,
-		...matches.map((match) => `### ${match.type} (importance ${match.importance})\n${match.content}`),
+		...matches.map(
+			(match) =>
+				`### ${match.type} (importance ${match.importance}, confidence ${match.confidence})\n${match.content}`,
+		),
 	].join("\n\n");
 }
 

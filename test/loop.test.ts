@@ -266,6 +266,32 @@ describe("runAgentLoop — abort vs. error", () => {
 		expect(buildPrompt.mock.calls[0]?.[3]).toEqual({ tokenBudget: 450 });
 	});
 
+	it("extracts the completed turn in the background without delaying the response", async () => {
+		const extraction = vi.fn(async () => ({ entries: [], transcript: "" }));
+		vi.mocked(streamAndCollect).mockResolvedValueOnce({ content: "done", finishReason: "stop" });
+
+		const result = await runAgentLoop([{ role: "user", content: "remember this turn" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			memory: {
+				sessionId: "memory-auto-extraction",
+				service: { search: () => [], buildPrompt: () => "", extractAndStoreProjectMemory: extraction },
+			},
+			onEvent: () => {},
+		});
+
+		expect(result.at(-1)?.content).toBe("done");
+		await new Promise((resolve) => setImmediate(resolve));
+		expect(extraction).toHaveBeenCalledOnce();
+		expect(extraction.mock.calls[0]?.[0].messages).toEqual([
+			{ role: "system", content: "test" },
+			{ role: "user", content: "remember this turn" },
+			{ role: "assistant", content: "done" },
+		]);
+	});
+
 	it("does not retrieve or write memory when the global memory setting is disabled", async () => {
 		const realHome = process.env.HOME;
 		const fakeHome = mkdtempSync(join(tmpdir(), "cast-memory-disabled-test-"));
