@@ -11,9 +11,11 @@ import { type HooksFile, runHooksForEvent } from "../hooks.ts";
 import { EMPTY_ASSISTANT_PLACEHOLDER, type Message, type Tool, type Usage } from "../llm.ts";
 import type { LoopConfig } from "../loop.ts";
 import type { McpToolHandle } from "../mcp.ts";
+import { writeTaskProgress } from "../memory-files.ts";
 import { PLAN_TOOL_NAMES, QUESTION_TOOL_NAME } from "../plan.ts";
 import { formatSystemEnvironmentBlock, resolvePromptContextForCwd } from "../project.ts";
 import { saveSubagentRun } from "../session.ts";
+import { isMemoryEnabled } from "../settings.ts";
 import type { SshHost } from "../ssh.ts";
 import type { SubagentPrompt } from "../subagents.ts";
 import type { ConfirmBash, ToolResult } from "./shared.ts";
@@ -358,6 +360,14 @@ export async function execTask(
 				endReason,
 				messages: finalMessages,
 			});
+			if (isMemoryEnabled()) {
+				const taskId = (toolCallId || `task-${Date.now()}`).replace(/[^a-zA-Z0-9._-]+/g, "-");
+				writeTaskProgress(
+					deps.sessionId,
+					taskId,
+					`# Task progress\n\n- Assignment: ${assignment}\n- Persona: ${subagent?.name ?? "worker"}\n- End reason: ${endReason}\n\n## Result\n${extractTaskResult(finalMessages) || "(no output)"}`,
+				);
+			}
 		}
 	} catch (error) {
 		// A genuine runtime failure (network error, provider outage, …) mid-run

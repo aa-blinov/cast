@@ -17,6 +17,7 @@ import { hasHooks, runHooksForEvent } from "../core/hooks.ts";
 import type { Message } from "../core/llm.ts";
 import { type AgentEvent, compactSessionMessages, runAgentLoop } from "../core/loop.ts";
 import { closeMcpConnections, formatMcpForPrompt, type McpSetupResult } from "../core/mcp.ts";
+import { distillProjectMemory, dreamProjectMemory } from "../core/memory.ts";
 import { DEFAULT_PERSONA, type Persona } from "../core/personas.ts";
 import {
 	createPlanState,
@@ -121,6 +122,8 @@ const CLIENT_PARITY_COMMANDS = new Set([
 	"/rd",
 	"/reasoning-format",
 	"/memory",
+	"/dream",
+	"/distill",
 	"/worktree",
 ]);
 
@@ -2229,6 +2232,26 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			const memoryEnabled = arg === "on";
 			updateSettings({ memoryEnabled });
 			return { ok: true, result: { memoryEnabled } };
+		}
+		if (name === "/dream" || name === "/distill") {
+			if (loadSettings().memoryEnabled === false) return { ok: false, error: "Project memory is disabled" };
+			try {
+				const input = {
+					cwd: ws.session.cwd ?? cwd,
+					sessionId: ws.session.id,
+					model: ws.session.model,
+					config,
+					messages: ws.session.messages,
+				};
+				if (name === "/dream") {
+					const result = await dreamProjectMemory(input);
+					return { ok: true, result: { removed: result.removed, stored: result.stored } };
+				}
+				const result = await distillProjectMemory(input);
+				return { ok: true, result: { artifacts: result.artifacts } };
+			} catch (error) {
+				return { ok: false, error: error instanceof Error ? error.message : String(error) };
+			}
 		}
 		if (name === "/web-search-provider") {
 			// Same fresh-read pattern as /web — the next web_search call picks

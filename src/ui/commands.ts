@@ -7,6 +7,7 @@ import { formatContextFilesForPrompt, loadProjectContextFiles } from "../core/co
 import { runHooksForEvent } from "../core/hooks.ts";
 import { compactSessionMessages, PLAN_COMPACTION_PROMPT } from "../core/loop.ts";
 import { closeMcpConnections, formatMcpForPrompt, type McpSetupResult, mcpServerToolBlurbs } from "../core/mcp.ts";
+import { distillProjectMemory, dreamProjectMemory } from "../core/memory.ts";
 import { findPersona, type LoadPersonasOptions, type Persona } from "../core/personas.ts";
 import { createPlanState, readActivePlan } from "../core/plan.ts";
 import {
@@ -154,6 +155,8 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/continue", description: "Resume the most recent session" },
 	{ name: "/copy", description: "Copy last assistant response" },
 	{ name: "/current", description: "Show all status bar data" },
+	{ name: "/distill", description: "Package a repeated workflow as a reusable project artifact" },
+	{ name: "/dream", description: "Consolidate durable project memory" },
 	{ name: "/exit", description: "Save and exit (alias for /quit)" },
 	{ name: "/fork", description: "Fork the current conversation into a new session" },
 	{ name: "/help", description: "Show this command list" },
@@ -1174,6 +1177,40 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 
 	if (running) {
 		showNotice("[Agent running — use /queue, /steer, or /abort]");
+		return;
+	}
+
+	if (input === "/dream" || input === "/distill") {
+		if (loadSettings().memoryEnabled === false) {
+			showNotice("[Project memory is disabled — use /memory on first]");
+			return;
+		}
+		showNotice(`[${input === "/dream" ? "Consolidating project memory" : "Distilling reusable workflows"}…]`);
+		try {
+			if (input === "/dream") {
+				const result = await dreamProjectMemory({
+					cwd: deps.cwd,
+					sessionId: session.id,
+					model: session.model,
+					config,
+					messages: session.messages,
+				});
+				showNotice(`[Memory consolidated: ${result.stored} notes stored, ${result.removed} removed]`);
+			} else {
+				const result = await distillProjectMemory({
+					cwd: deps.cwd,
+					sessionId: session.id,
+					model: session.model,
+					config,
+					messages: session.messages,
+				});
+				showNotice(
+					`[Workflows distilled: ${result.artifacts.length} artifact${result.artifacts.length === 1 ? "" : "s"}]`,
+				);
+			}
+		} catch (error) {
+			showNotice(`[Memory maintenance failed: ${error instanceof Error ? error.message : String(error)}]`);
+		}
 		return;
 	}
 

@@ -21,7 +21,16 @@ import {
 	streamAndCollect,
 } from "./llm.ts";
 import { type McpToolHandle, mcpServerNameFromDescription } from "./mcp.ts";
-import { createProjectMemoryService, type MemoryService, scheduleProjectMemoryExtraction } from "./memory.ts";
+import {
+	createProjectMemoryService,
+	formatMemoryHistory,
+	type MemoryCheckpointWriterInput,
+	type MemoryService,
+	projectIdForCwd,
+	reconcileProjectMemoryFiles,
+	scheduleProjectCheckpointWriter,
+} from "./memory.ts";
+import { checkpointPath, ensureMemoryFiles, notesPath, projectMemoryPath, tasksDir } from "./memory-files.ts";
 import {
 	collectOpenWorkSteps,
 	defaultOpenWorkGateConfig,
@@ -301,6 +310,7 @@ export const PLAN_COMPACTION_PROMPT = readRequiredPrompt(promptsDir, join("modes
 // silently drift out of view" rationale as BUILD_MODE_PROMPT above, just for
 // ad-hoc task tracking instead of an approved plan file. {{TODOS}} replaced.
 const TODO_LIST_PROMPT = readRequiredPrompt(promptsDir, join("modes", "todo-list.md"));
+const CHECKPOINT_WRITER_SYSTEM_PROMPT = readRequiredPrompt(promptsDir, "checkpoint-writer-system.md");
 
 // One-liner for subagents running under readOnlyBash (plan-mode parent): they
 // don't get the full plan-mode block (it references authoring tools they lack),
@@ -731,6 +741,61 @@ function makeObservable<T>(arr: T[], onChange: (arr: T[]) => void): T[] {
 	});
 }
 
+function checkpointWriterPrompt(input: MemoryCheckpointWriterInput): string {
+	const projectId = projectIdForCwd(input.cwd);
+	const projectMemory = projectMemoryPath(projectId);
+	ensureMemoryFiles(input.sessionId, projectId);
+	const transcript = formatMemoryHistory(input.messages);
+	return [
+		"Checkpoint paths — use these absolute paths verbatim:",
+		`CHECKPOINT_PATH = ${checkpointPath(input.sessionId)}`,
+		`MEMORY_PATH = ${projectMemory}`,
+		`TASK_MEM_DIR = ${tasksDir(input.sessionId)}`,
+		`NOTES_PATH = ${notesPath(input.sessionId)}`,
+		"",
+		"Read the existing checkpoint, MEMORY.md, and notes.md first. Update the files in place using the file tools. Keep all required checkpoint sections. Do not edit source code.",
+		"",
+		"Recent conversation and tool history:",
+		transcript || "(no completed user turn)",
+	].join("\n");
+}
+
+async function runCheckpointWriter(input: MemoryCheckpointWriterInput): Promise<void> {
+	const controller = new AbortController();
+	const timeout = setTimeout(() => controller.abort(), 120_000);
+	timeout.unref();
+	try {
+		await runAgentLoop([{ role: "user", content: checkpointWriterPrompt(input) }], {
+			config: input.config,
+			model: input.model,
+			modelProvider: input.providerOverride,
+			cwd: input.cwd,
+			systemPrompt: CHECKPOINT_WRITER_SYSTEM_PROMPT,
+			signal: controller.signal,
+			onEvent: () => {},
+			onWarning: () => {},
+			allowedTools: ["read", "write", "edit", "glob", "grep"],
+			disabledTools: new Set(["bash", "task", "memory", "web_search", "web_fetch", "ssh", "skill"]),
+			personas: [],
+			subagentPrompts: [],
+			mcpTools: [],
+			skills: [],
+			noSkills: true,
+			projectTrusted: false,
+		});
+		reconcileProjectMemoryFiles(input.cwd, input.sessionId);
+	} finally {
+		clearTimeout(timeout);
+	}
+}
+
+function shouldStartCheckpointWriter(loopConfig: LoopConfig, messages: Message[]): boolean {
+	if (!loopConfig.memory || !isMemoryEnabled() || loopConfig.signal?.aborted) return false;
+	const observedTokens = loopConfig.lastPromptTokens ?? estimateTokens(messages);
+	const threshold = loopConfig.config.contextWindow * Math.min(loopConfig.config.compactionThreshold, 0.6);
+	return observedTokens >= threshold;
+}
+
 // ============================================================================
 // Entry point
 // ============================================================================
@@ -743,18 +808,17 @@ export async function runAgentLoop(initialMessages: Message[], loopConfig: LoopC
 	const messages = [...initialMessages];
 	const tracked = loopConfig.onMessagesChanged ? makeObservable(messages, loopConfig.onMessagesChanged) : messages;
 	await runLoop(tracked, loopConfig);
-	if (loopConfig.memory && isMemoryEnabled() && !loopConfig.signal?.aborted) {
-		void scheduleProjectMemoryExtraction(
+	if (shouldStartCheckpointWriter(loopConfig, tracked)) {
+		scheduleProjectCheckpointWriter(
 			{
 				cwd: loopConfig.cwd,
-				sessionId: loopConfig.memory.sessionId,
+				sessionId: loopConfig.memory!.sessionId,
 				model: loopConfig.model,
 				config: loopConfig.config,
 				messages: tracked,
 				providerOverride: loopConfig.modelProvider,
-				onUsage: (usage) => loopConfig.onEvent({ type: "usage", usage, background: true }),
 			},
-			loopConfig.memory.service ?? DEFAULT_MEMORY_SERVICE,
+			runCheckpointWriter,
 			loopConfig.onWarning,
 		);
 	}
@@ -1174,6 +1238,19 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		}
 	};
 
+	const appendMemoryRebuildBoundary = (): void => {
+		if (!memoryService || !loopConfig.memory?.sessionId) return;
+		const context = memoryService.buildPrompt(cwd, "", loopConfig.memory.sessionId);
+		if (!context) return;
+		messages.push({
+			role: "user",
+			content:
+				"<checkpoint-boundary>\nThis conversation continues after a context checkpoint. The following memory is durable context, not a new user request. Resume from the preserved recent history without recapping.\n\n" +
+				context +
+				"\n</checkpoint-boundary>",
+		});
+	};
+
 	// Build an assistant message from partial content and persist it into
 	// `messages` so aborted/disconnected turns survive in session history.
 	const persistPartialAssistant = (content: string, thinking: string) => {
@@ -1230,6 +1307,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 			if (shouldCompact(messages, config, loopConfig.lastPromptTokens)) {
 				// biome-ignore lint/performance/noAwaitInLoops: sequential agent turn loop
 				const result = await performCompaction(messages, config, currentModel, signal, loopConfig, onEvent);
+				if (result.compacted) appendMemoryRebuildBoundary();
 				if (!result.compacted && result.error) {
 					onEvent({ type: "compaction_failed", reason: result.error });
 				}
@@ -1378,6 +1456,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 						// surfacing a raw error. Only once per turn to prevent infinite
 						// loops when even compacted context is too large.
 						const result = await performCompaction(messages, config, currentModel, signal, loopConfig, onEvent);
+						if (result.compacted) appendMemoryRebuildBoundary();
 						if (result.compacted) {
 							overflowCompacted = true;
 							// Restart the outer loop — system prompt, compaction
@@ -1428,6 +1507,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				}
 
 				if (completion.usage) {
+					loopConfig.lastPromptTokens = completion.usage.promptTokens;
 					onEvent({ type: "usage", usage: completion.usage, generationMs: completion.generationMs });
 				}
 
@@ -1596,6 +1676,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				// fed an estimate instead of a measured value.
 				if (toolCalls && toolCalls.length > 0 && shouldCompact(messages, config, estimateTokens(messages))) {
 					const result = await performCompaction(messages, config, currentModel, signal, loopConfig, onEvent);
+					if (result.compacted) appendMemoryRebuildBoundary();
 					if (!result.compacted && result.error) {
 						onEvent({ type: "compaction_failed", reason: result.error });
 					}
