@@ -11,17 +11,21 @@ import {
 	appendMessage,
 	appendSessionEvent,
 	clearSessionMessages,
+	commitCheckpointWatermark,
 	compactMessages,
 	countTurnMessages,
 	createSession,
 	deleteSession,
 	dropLastCheckpoint,
 	estimateTokens,
+	findCheckpointBoundaryForMessages,
 	forkSession,
+	getCheckpointWatermark,
 	getFullHistory,
 	getFullHistoryWithReasoning,
 	getHistoryPage,
 	getMessageImage,
+	getMessagesAfterCheckpoint,
 	getMostRecentSession,
 	getSessionEvents,
 	listSessionSummaries,
@@ -596,6 +600,46 @@ describe("session persistence", () => {
 		expect(loaded?.messages).toEqual(session.messages);
 	});
 
+	it("commits a durable checkpoint watermark monotonically and survives reload", () => {
+		const session = createSession("gpt-4o", projectA);
+		const first: Message = { role: "user", content: "first" };
+		const second: Message = { role: "assistant", content: "second" };
+		session.messages.push(first, second);
+		saveSession(session);
+
+		expect(getCheckpointWatermark(session.id)).toBeUndefined();
+		expect(commitCheckpointWatermark(session.id, structuredClone(second))).toBe(true);
+		const committed = getCheckpointWatermark(session.id);
+		expect(committed).toBeGreaterThan(0);
+
+		// A delayed writer may finish with an older snapshot, but it must never
+		// move the durable boundary backwards.
+		expect(commitCheckpointWatermark(session.id, structuredClone(first))).toBe(true);
+		expect(getCheckpointWatermark(session.id)).toBe(committed);
+		expect(loadSession(session.id)?.checkpointWatermarkSeq).toBe(committed);
+	});
+
+	it("does not advance the watermark when the target message was never persisted", () => {
+		const session = createSession("gpt-4o", projectA);
+		saveSession(session);
+
+		expect(commitCheckpointWatermark(session.id, { role: "user", content: "not persisted" })).toBe(false);
+		expect(getCheckpointWatermark(session.id)).toBeUndefined();
+	});
+
+	it("uses the watermark to recover a durable delta after the active context was compacted", () => {
+		const session = createSession("gpt-4o", projectA);
+		const covered: Message = { role: "assistant", content: "covered" };
+		const pending: Message = { role: "user", content: "pending" };
+		session.messages.push(covered, pending);
+		saveSession(session);
+		commitCheckpointWatermark(session.id, covered);
+
+		const active = [covered, pending];
+		expect(findCheckpointBoundaryForMessages(session.id, active)).toBe(0);
+		expect(getMessagesAfterCheckpoint(session.id)).toEqual([pending]);
+	});
+
 	it("forkSession copies the active context into an independent new session", () => {
 		const source = createSession("gpt-4o", projectA);
 		source.persona = "coding";
@@ -1042,6 +1086,23 @@ describe("session persistence", () => {
 		// (m3 kept going, m1/m2 folded into it), not strictly by insertion time.
 		const full = getFullHistory(s.id);
 		expect(full).toEqual([m1, m2, marker, m3]);
+	});
+
+	it("shifts the durable checkpoint watermark with compaction rows", () => {
+		const s = createSession("gpt-4o", projectA);
+		const m1: Message = { role: "user", content: "first" };
+		const m2: Message = { role: "assistant", content: "second" };
+		const m3: Message = { role: "user", content: "third" };
+		s.messages.push(m1, m2, m3);
+		saveSession(s);
+		commitCheckpointWatermark(s.id, m3);
+
+		recordCompaction(s, s.messages, [
+			{ role: "system", content: "[Compacted context — 2 messages summarized]\nsummary" },
+			m3,
+		]);
+
+		expect(getCheckpointWatermark(s.id)).toBe(3);
 	});
 
 	it("clearSessionMessages deletes all message rows but keeps the session row", () => {

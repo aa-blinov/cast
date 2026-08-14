@@ -2,8 +2,13 @@ import { randomUUID } from "node:crypto";
 import { publishAgentActorNotification } from "./actor-events.ts";
 import type { AppConfig } from "./config.ts";
 import { getDb } from "./db.ts";
-import type { Message } from "./llm.ts";
+import type { HooksFile } from "./hooks.ts";
+import type { Message, Tool } from "./llm.ts";
+import type { Persona } from "./personas.ts";
+import type { PlanState } from "./plan.ts";
 import { appendSessionEvent } from "./session.ts";
+import type { Skill } from "./skills.ts";
+import type { SubagentPrompt } from "./subagents.ts";
 
 export type AgentActorStatus = "pending" | "running" | "success" | "failure" | "cancelled" | "stalled";
 export type AgentActorMode = "main" | "subagent";
@@ -15,9 +20,12 @@ export interface CheckpointWriterRecoverySpec {
 	kind: "checkpoint-writer";
 	cwd: string;
 	sessionId: string;
+	writerSessionId?: string;
+	parentSystemPrompt?: string;
 	model: string;
 	providerBaseURL: string;
 	checkpointBoundary: number;
+	checkpointFork: boolean;
 	config: Omit<AppConfig, "apiKey">;
 }
 
@@ -32,6 +40,30 @@ export interface MemoryMaintenanceRecoverySpec {
 	messages: Message[];
 }
 
+/** Serializable parent capabilities used to rehydrate a persistent fork after restart. */
+export interface AgentForkRuntimeSnapshot {
+	personas?: Persona[];
+	currentPersona?: string;
+	subagentPrompts?: SubagentPrompt[];
+	subagentModel?: string;
+	/** Provider identity only; credentials are resolved again from settings after restart. */
+	subagentModelProvider?: { baseURL: string };
+	disabledTools?: string[];
+	allowedTools?: string[];
+	projectTrusted?: boolean;
+	permissionMode?: string;
+	noSkills?: boolean;
+	cliSkillPaths?: string[];
+	planState?: Omit<PlanState, "onPendingStateChange">;
+	hooks?: HooksFile;
+	skills?: Skill[];
+	/** SSH identities only; passwords and key material are never persisted in actor state. */
+	sshHostNames?: string[];
+	mcpServerNames?: string[];
+	mcpToolNames?: string[];
+	mcpPromptSuffix?: string;
+}
+
 /** Immutable context captured at the actor boundary, including the exact durable fork split. */
 export interface AgentForkContext {
 	inheritedMessages: Message[];
@@ -43,7 +75,13 @@ export interface AgentForkContext {
 	messages: Message[];
 	systemPrompt?: string;
 	toolNames?: string[];
+	toolDefinitions?: Tool[];
+	allowedTools?: string[];
+	disabledTools?: string[];
+	readOnlyBash?: boolean;
+	permissionMode?: string;
 	model?: string;
+	runtime?: AgentForkRuntimeSnapshot;
 }
 
 export interface AgentActorSpec {

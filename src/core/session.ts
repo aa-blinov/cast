@@ -64,6 +64,8 @@ export interface SessionState {
 	 * measure of current context size. undefined before the first call or
 	 * when a session is loaded from disk with no prior API data. */
 	lastPromptTokens?: number;
+	/** Highest persisted message sequence fully covered by a successful checkpoint. */
+	checkpointWatermarkSeq?: number;
 	/**
 	 * Absolute path cast was launched from when this session was created —
 	 * lets --resume/--continue/`/sessions` switch back into the right project
@@ -105,7 +107,7 @@ export interface SessionState {
 	/** Parent conversation for a background session. */
 	parentSessionId?: string;
 	/** Maintenance kind for a background session. */
-	backgroundKind?: "memory-dream" | "memory-distill";
+	backgroundKind?: "memory-dream" | "memory-distill" | "checkpoint-writer";
 	/**
 	 * Reasoning ("thinking") text for assistant messages, keyed by that
 	 * message's index in `messages`. The OpenAI wire format (`Message` in
@@ -400,6 +402,9 @@ function extractPreviousCompaction(systemMessages: Message[]): {
 }
 
 const TOOL_RESULT_MAX_CHARS = 500;
+const TAIL_MIN_TOKENS = 10_000;
+const TAIL_MAX_TOKENS = 20_000;
+const TAIL_MIN_TEXT_BLOCK_MESSAGES = 5;
 
 /** One tool call as `name(arg=val, ...)`, truncating long argument values. */
 function formatToolCall(name: string, argsJson: string): string {
@@ -457,13 +462,31 @@ export async function compactMessages(
 ): Promise<{ messages: Message[]; summary: CompactionSummary }> {
 	const tokensBefore = estimateTokens(messages);
 
-	// Split: 60% old, 40% recent, snapped back to a safe boundary (see
-	// safeCutIndex) so "recent" never opens on an orphaned tool result.
+	// Preserve a token-budgeted tail, snapped to a real user-turn boundary so
+	// tool_use/tool_result pairs and the current task stay together. Small
+	// histories retain the old proportional behavior; large histories use the
+	// same 10k–20k tail envelope as the checkpoint rebuild path.
 	const { personaMessages: system, previousSummary } = extractPreviousCompaction(
 		messages.filter((m) => m.role === "system"),
 	);
 	const nonSystem = messages.filter((m) => m.role !== "system");
-	const splitIdx = safeCutIndex(nonSystem, Math.floor(nonSystem.length * 0.6));
+	const nonSystemTokens = estimateTokens(nonSystem);
+	const targetTailTokens =
+		nonSystemTokens < TAIL_MIN_TOKENS * 1.5
+			? Math.max(1, Math.floor(nonSystemTokens * 0.4))
+			: Math.min(TAIL_MAX_TOKENS, Math.max(TAIL_MIN_TOKENS, Math.floor(nonSystemTokens * 0.4)));
+	let tailStart = nonSystem.length;
+	let tailTokens = 0;
+	let textBlocks = 0;
+	const requiredTextBlocks = nonSystemTokens < TAIL_MIN_TOKENS * 1.5 ? 0 : TAIL_MIN_TEXT_BLOCK_MESSAGES;
+	for (let i = nonSystem.length - 1; i >= 0; i--) {
+		const message = nonSystem[i]!;
+		tailTokens += estimateTokens([message]);
+		if (typeof message.content === "string" && message.content.trim()) textBlocks += 1;
+		tailStart = i;
+		if (tailTokens >= targetTailTokens && textBlocks >= requiredTextBlocks) break;
+	}
+	const splitIdx = safeCutIndex(nonSystem, tailStart);
 	const old = nonSystem.slice(0, splitIdx);
 	const recent = nonSystem.slice(splitIdx);
 
@@ -551,6 +574,7 @@ function sessionMetaRow(session: SessionState) {
 		created_at: session.createdAt,
 		updated_at: session.updatedAt,
 		last_prompt_tokens: session.lastPromptTokens ?? null,
+		checkpoint_watermark_seq: session.checkpointWatermarkSeq ?? null,
 		last_announced_local_date: session.lastAnnouncedLocalDate ?? null,
 		provider_url: session.providerUrl ?? null,
 		session_kind: session.sessionKind ?? "conversation",
@@ -569,8 +593,8 @@ export function saveSession(session: SessionState): void {
 	const db = getDb();
 	const meta = sessionMetaRow(session);
 	db.prepare(
-		`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, session_kind, parent_session_id, background_kind, usage_json, todos_json, share_token, plan_question_json, plan_transition_json)
-			 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :session_kind, :parent_session_id, :background_kind, :usage_json, :todos_json, :share_token, :plan_question_json, :plan_transition_json)
+		`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, session_kind, parent_session_id, background_kind, usage_json, todos_json, share_token, plan_question_json, plan_transition_json, checkpoint_watermark_seq)
+			 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :session_kind, :parent_session_id, :background_kind, :usage_json, :todos_json, :share_token, :plan_question_json, :plan_transition_json, :checkpoint_watermark_seq)
 		 ON CONFLICT(id) DO UPDATE SET
 		   cwd = excluded.cwd, model = excluded.model, persona = excluded.persona, mode = excluded.mode,
 		   title = excluded.title, pinned = excluded.pinned, updated_at = excluded.updated_at,
@@ -579,7 +603,12 @@ export function saveSession(session: SessionState): void {
 		   parent_session_id = excluded.parent_session_id, background_kind = excluded.background_kind,
 		   usage_json = excluded.usage_json, todos_json = excluded.todos_json,
 		   share_token = excluded.share_token, plan_question_json = excluded.plan_question_json,
-		   plan_transition_json = excluded.plan_transition_json`,
+		   plan_transition_json = excluded.plan_transition_json,
+		   checkpoint_watermark_seq = CASE
+		     WHEN sessions.checkpoint_watermark_seq IS NULL THEN excluded.checkpoint_watermark_seq
+		     WHEN excluded.checkpoint_watermark_seq IS NULL THEN sessions.checkpoint_watermark_seq
+		     ELSE MAX(sessions.checkpoint_watermark_seq, excluded.checkpoint_watermark_seq)
+		   END`,
 	).run(meta);
 
 	const insertRow = db.prepare(
@@ -640,6 +669,88 @@ export function saveSession(session: SessionState): void {
 	});
 }
 
+/** Return the last message sequence covered by a successful checkpoint. */
+export function getCheckpointWatermark(sessionId: string): number | undefined {
+	const row = getDb().prepare("SELECT checkpoint_watermark_seq FROM sessions WHERE id = ?").get(sessionId) as
+		| { checkpoint_watermark_seq: number | null }
+		| undefined;
+	return row?.checkpoint_watermark_seq ?? undefined;
+}
+
+function persistedMessageSeq(sessionId: string, message: Message): number | undefined {
+	const serialized = JSON.stringify(message);
+	const known = messageSeq.get(message);
+	if (known !== undefined) {
+		const row = getDb()
+			.prepare("SELECT content_json FROM messages WHERE session_id = ? AND seq = ?")
+			.get(sessionId, known) as { content_json: string } | undefined;
+		if (row?.content_json === serialized) return known;
+	}
+	const row = getDb()
+		.prepare("SELECT seq FROM messages WHERE session_id = ? AND content_json = ? ORDER BY seq DESC LIMIT 1")
+		.get(sessionId, serialized) as { seq: number } | undefined;
+	return row?.seq;
+}
+
+/**
+ * Commit the message covered by a completed writer. The row lookup and
+ * monotonic update share one immediate transaction so a stale writer cannot
+ * move the boundary backwards or claim success for an unpersisted snapshot.
+ */
+export function commitCheckpointWatermark(sessionId: string, message: Message): boolean {
+	const db = getDb();
+	const commit = (): boolean => {
+		const seq = persistedMessageSeq(sessionId, message);
+		if (seq === undefined) return false;
+		const result = db
+			.prepare(
+				`UPDATE sessions
+				 SET checkpoint_watermark_seq = CASE
+				   WHEN checkpoint_watermark_seq IS NULL OR checkpoint_watermark_seq < ? THEN ?
+				   ELSE checkpoint_watermark_seq
+				 END
+				 WHERE id = ?`,
+			)
+			.run(seq, seq, sessionId);
+		return result.changes > 0;
+	};
+	if (db.isTransaction) return commit();
+	db.exec("BEGIN IMMEDIATE");
+	try {
+		const committed = commit();
+		db.exec("COMMIT");
+		return committed;
+	} catch (error) {
+		db.exec("ROLLBACK");
+		throw error;
+	}
+}
+
+/** Return the in-memory index of the newest active message covered by the watermark. */
+export function findCheckpointBoundaryForMessages(sessionId: string, messages: Message[]): number {
+	const watermark = getCheckpointWatermark(sessionId);
+	if (watermark === undefined) return -1;
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const message = messages[i];
+		if (!message || message.role === "system") continue;
+		const seq = persistedMessageSeq(sessionId, message);
+		if (seq !== undefined && seq <= watermark) return i;
+	}
+	return -1;
+}
+
+/** Load the durable transcript delta after the last successful checkpoint. */
+export function getMessagesAfterCheckpoint(sessionId: string): Message[] {
+	const watermark = getCheckpointWatermark(sessionId);
+	if (watermark === undefined) return [];
+	const rows = getDb()
+		.prepare("SELECT content_json FROM messages WHERE session_id = ? AND seq > ? ORDER BY seq")
+		.all(sessionId, watermark) as Array<{ content_json: string }>;
+	const messages = rows.map((row) => JSON.parse(row.content_json) as Message);
+	normalizeStoredMessages(messages);
+	return messages.filter((message) => message.role !== "system");
+}
+
 /** Persist only the session routing identity. TUI model/provider switches can
  * happen while the daemon owns a newer message history; upserting the whole
  * local SessionState there would overwrite that history with a stale mirror. */
@@ -661,7 +772,7 @@ export function updateSessionIdentity(session: Pick<SessionState, "id" | "model"
  * folded into the summary before ever hitting disk on its own. The one new
  * object in `compacted` (the summary marker) is inserted last.
  */
-export function recordCompaction(
+function recordCompactionInTransaction(
 	session: SessionState,
 	fullHistoryBeforeCompaction: Message[],
 	compacted: Message[],
@@ -705,6 +816,9 @@ export function recordCompaction(
 				.all(session.id, insertAt) as Array<{ seq: number }>;
 			const shiftOne = db.prepare("UPDATE messages SET seq = seq + 1 WHERE session_id = ? AND seq = ?");
 			for (const row of shiftRows) shiftOne.run(session.id, row.seq);
+			db.prepare(
+				"UPDATE sessions SET checkpoint_watermark_seq = checkpoint_watermark_seq + 1 WHERE id = ? AND checkpoint_watermark_seq >= ?",
+			).run(session.id, insertAt);
 			for (const m of compacted) {
 				if (m === marker) continue;
 				const s = messageSeq.get(m);
@@ -713,6 +827,27 @@ export function recordCompaction(
 		}
 		insertRow.run(session.id, insertAt, marker.role, JSON.stringify(marker), 1, isToolCallOnly(marker) ? 1 : 0);
 		messageSeq.set(marker, insertAt);
+	}
+}
+
+/** Persist compaction rows, context flags, and watermark shifts atomically. */
+export function recordCompaction(
+	session: SessionState,
+	fullHistoryBeforeCompaction: Message[],
+	compacted: Message[],
+): void {
+	const db = getDb();
+	if (db.isTransaction) {
+		recordCompactionInTransaction(session, fullHistoryBeforeCompaction, compacted);
+		return;
+	}
+	db.exec("BEGIN IMMEDIATE");
+	try {
+		recordCompactionInTransaction(session, fullHistoryBeforeCompaction, compacted);
+		db.exec("COMMIT");
+	} catch (error) {
+		db.exec("ROLLBACK");
+		throw error;
 	}
 }
 
@@ -947,6 +1082,7 @@ interface SessionRow {
 	created_at: string;
 	updated_at: string;
 	last_prompt_tokens: number | null;
+	checkpoint_watermark_seq: number | null;
 	last_announced_local_date: string | null;
 	provider_url: string | null;
 	session_kind: "conversation" | "background" | null;
@@ -971,6 +1107,7 @@ function rowToMeta(row: SessionRow): Omit<SessionState, "messages"> {
 		createdAt: row.created_at,
 		updatedAt: row.updated_at,
 		lastPromptTokens: row.last_prompt_tokens ?? undefined,
+		checkpointWatermarkSeq: row.checkpoint_watermark_seq ?? undefined,
 		lastAnnouncedLocalDate: row.last_announced_local_date ?? undefined,
 		providerUrl: row.provider_url ?? undefined,
 		sessionKind: row.session_kind ?? "conversation",
@@ -1306,8 +1443,8 @@ export function migrateLegacySessionsToDb(): number {
 		try {
 			if (!session.title) session.title = deriveSessionTitle(getFirstUserMessage(session));
 			db.prepare(
-				`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, session_kind, parent_session_id, background_kind, usage_json, todos_json, share_token, plan_question_json, plan_transition_json)
-					 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :session_kind, :parent_session_id, :background_kind, :usage_json, :todos_json, :share_token, :plan_question_json, :plan_transition_json)`,
+				`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, session_kind, parent_session_id, background_kind, usage_json, todos_json, share_token, plan_question_json, plan_transition_json, checkpoint_watermark_seq)
+					 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :session_kind, :parent_session_id, :background_kind, :usage_json, :todos_json, :share_token, :plan_question_json, :plan_transition_json, :checkpoint_watermark_seq)`,
 			).run(sessionMetaRow(session));
 			const insertRow = db.prepare(
 				"INSERT INTO messages (session_id, seq, role, content_json, in_context, has_tool_calls) VALUES (?, ?, ?, ?, 1, ?)",
@@ -1631,9 +1768,10 @@ function generateSessionId(): string {
 
 export interface SessionCreationOptions {
 	id?: string;
+	title?: string;
 	sessionKind?: "conversation" | "background";
 	parentSessionId?: string;
-	backgroundKind?: "memory-dream" | "memory-distill";
+	backgroundKind?: "memory-dream" | "memory-distill" | "checkpoint-writer";
 }
 
 export function createSession(model: string, cwd: string, options: SessionCreationOptions = {}): SessionState {
@@ -1666,6 +1804,7 @@ export function createSession(model: string, cwd: string, options: SessionCreati
 		},
 		cwd: resolve(cwd),
 		lastAnnouncedLocalDate: formatLocalDate(),
+		title: options.title,
 		sessionKind: options.sessionKind ?? "conversation",
 		parentSessionId: options.parentSessionId,
 		backgroundKind: options.backgroundKind,

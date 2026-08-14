@@ -76,6 +76,8 @@ function SettingsMemory({ data, busy, act }) {
 	if (!data) return null;
 	const enabled = data.memoryEnabled !== false;
 	const writeEnabled = data.memoryWriteEnabled !== false;
+	const extractionAuto = data.memoryExtractionAuto === true;
+	const checkpointFork = data.checkpointFork === true;
 	const budget = data.memoryPromptBudget ?? 4096;
 	const floor = data.memorySearchScoreFloor ?? 0.15;
 	const reconcile = data.memoryReconcileOnSearch !== false;
@@ -95,6 +97,14 @@ function SettingsMemory({ data, busy, act }) {
 				<div class="settings-compact-row">
 					<div class="settings-compact-copy"><span class="settings-compact-title">Background writing</span><span>${writeEnabled ? "The writer and checkpoint agent may update memory." : "Existing memory remains readable; no new memory is written."}</span></div>
 					<button class="settings-toggle" role="switch" aria-checked=${writeEnabled ? "true" : "false"} disabled=${busy || !enabled} onClick=${() => act(`/memory write ${writeEnabled ? "off" : "on"}`)}><span class="settings-toggle-thumb" />${writeEnabled ? "Enabled" : "Disabled"}</button>
+				</div>
+				<div class="settings-compact-row">
+					<div class="settings-compact-copy"><span class="settings-compact-title">Per-turn extraction</span><span>${extractionAuto ? "Runs the legacy extraction writer after each completed turn." : "MiMo mode: memory is written by checkpoint and maintenance runs."}</span></div>
+					<button class="settings-toggle" role="switch" aria-checked=${extractionAuto ? "true" : "false"} disabled=${busy || !enabled || !writeEnabled} onClick=${() => act(`/memory extraction ${extractionAuto ? "off" : "on"}`)}><span class="settings-toggle-thumb" />${extractionAuto ? "Enabled" : "Disabled"}</button>
+				</div>
+				<div class="settings-compact-row">
+					<div class="settings-compact-copy"><span class="settings-compact-title">Checkpoint prefix fork</span><span>${checkpointFork ? "Checkpoint writers retain the parent prefix for prompt-cache reuse." : "Checkpoint writers receive only the post-checkpoint delta."}</span></div>
+					<button class="settings-toggle" role="switch" aria-checked=${checkpointFork ? "true" : "false"} disabled=${busy || !enabled || !writeEnabled} onClick=${() => act(`/memory checkpoint fork ${checkpointFork ? "off" : "on"}`)}><span class="settings-toggle-thumb" />${checkpointFork ? "Enabled" : "Disabled"}</button>
 				</div>
 				<div class="settings-compact-row">
 					<div class="settings-compact-copy"><span class="settings-compact-title">Automatic dream</span><span>${dreamAuto ? `Consolidates project memory on a new session, at most every ${dreamInterval} day${dreamInterval === 1 ? "" : "s"}.` : "Manual only. Enable to consolidate durable project memory on new sessions."}</span></div>

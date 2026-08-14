@@ -155,6 +155,8 @@ export interface Settings {
 	memoryEnabled?: boolean;
 	/** Whether background memory extraction, checkpoint writing, and maintenance may write. */
 	memoryWriteEnabled?: boolean;
+	/** Run the legacy per-turn extraction writer; MiMo-compatible default is checkpoint-only. */
+	memoryExtractionAuto?: boolean;
 	/** Maximum estimated tokens reserved for automatically injected memory context. */
 	memoryPromptBudget?: number;
 	/** Relative BM25 score floor for dropping weak common-word matches. */
@@ -169,6 +171,8 @@ export interface Settings {
 	memoryDistillAuto?: boolean;
 	/** Minimum days between automatic distill runs (default: 30; 0 runs every new session). */
 	memoryDistillIntervalDays?: number;
+	/** Use the parent's full prompt prefix for checkpoint writers; false uses only the post-checkpoint delta. */
+	checkpointFork?: boolean;
 }
 
 // ============================================================================
@@ -292,6 +296,10 @@ export function isMemoryWriteEnabled(settings: Settings = loadSettings()): boole
 	return isMemoryEnabled(settings) && settings.memoryWriteEnabled !== false;
 }
 
+export function memoryExtractionAuto(settings: Settings = loadSettings()): boolean {
+	return settings.memoryExtractionAuto === true;
+}
+
 export function memoryPromptBudget(settings: Settings = loadSettings()): number {
 	const value = settings.memoryPromptBudget;
 	return typeof value === "number" && Number.isFinite(value)
@@ -324,6 +332,10 @@ export function memoryDistillAuto(settings: Settings = loadSettings()): boolean 
 export function memoryDistillIntervalDays(settings: Settings = loadSettings()): number {
 	const value = settings.memoryDistillIntervalDays;
 	return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.min(Math.floor(value), 3_650)) : 30;
+}
+
+export function checkpointFork(settings: Settings = loadSettings()): boolean {
+	return settings.checkpointFork === true;
 }
 
 /** true/false if this project's trust decision was already made, undefined if never asked. */

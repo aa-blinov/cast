@@ -76,6 +76,14 @@ export function getToolDefinitions(
 					operation: { type: "string", enum: ["search"], description: "Memory operation" },
 					query: { type: "string", description: "One to three distinctive search terms" },
 					limit: { type: "number", description: "Maximum results, default 8" },
+					scope: {
+						type: "string",
+						enum: ["global", "projects", "sessions", "cc"],
+						description:
+							"Optional memory scope; projects is the current project, sessions narrows to one session.",
+					},
+					scope_id: { type: "string", description: "Optional project id or session id for the selected scope." },
+					type: { type: "string", description: "Optional memory entry type such as rule, fix, or architecture." },
 				},
 				required: ["query"],
 			},

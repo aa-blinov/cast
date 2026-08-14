@@ -45,7 +45,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   todos_json TEXT,
   share_token TEXT,
   plan_question_json TEXT,
-  plan_transition_json TEXT
+  plan_transition_json TEXT,
+  checkpoint_watermark_seq INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -441,6 +442,29 @@ CREATE TABLE IF NOT EXISTS project_memory_revisions (
 				db.exec("ALTER TABLE sessions ADD COLUMN background_kind TEXT");
 			}
 			db.exec("CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id, updated_at DESC)");
+		},
+	},
+	{
+		version: 15,
+		name: "checkpoint-watermark",
+		up: (db) => {
+			if (!columnExists(db, "sessions", "checkpoint_watermark_seq")) {
+				db.exec("ALTER TABLE sessions ADD COLUMN checkpoint_watermark_seq INTEGER");
+			}
+		},
+	},
+	{
+		version: 16,
+		name: "memory-maintenance-scheduler",
+		up: (db) => {
+			db.exec(`
+CREATE TABLE IF NOT EXISTS memory_maintenance_schedule (
+  project_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  last_claimed_at TEXT NOT NULL,
+  PRIMARY KEY (project_id, kind)
+) WITHOUT ROWID;
+`);
 		},
 	},
 ];
