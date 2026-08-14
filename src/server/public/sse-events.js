@@ -253,6 +253,16 @@ export function handleSseEvent(event, context) {
 				prev ? { ...prev, messages: [...prev.messages, { role: "warning", content: event.message }] } : prev,
 			);
 			break;
+		case "agent_actor": {
+			const actor = event.actor;
+			const status = actor.status === "success" ? "completed" : actor.status;
+			setSession((prev) =>
+				prev
+					? { ...prev, messages: [...prev.messages, { role: "warning", content: `${actor.agent} ${status}` }] }
+					: prev,
+			);
+			break;
+		}
 		case "error":
 			resetStreamingNow();
 			setRunning(false);

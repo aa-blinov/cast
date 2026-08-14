@@ -1,6 +1,11 @@
 import { setMaxListeners } from "node:events";
 import { basename, join } from "node:path";
-import { type AgentForkContext as ActorForkContext, agentActorRegistry } from "./actors.ts";
+import {
+	type AgentForkContext as ActorForkContext,
+	type AgentActorRecoverySpec,
+	type AgentActorSnapshot,
+	agentActorRegistry,
+} from "./actors.ts";
 import {
 	formatPostCompactReminder,
 	injectPostCompactReminder,
@@ -19,6 +24,8 @@ import {
 	describeTurnError,
 	EMPTY_ASSISTANT_PLACEHOLDER,
 	isContextOverflow,
+	promptCacheRequestBody,
+	resolvePromptCacheStrategy,
 	streamAndCollect,
 } from "./llm.ts";
 import { type McpToolHandle, mcpServerNameFromDescription } from "./mcp.ts";
@@ -51,7 +58,7 @@ import {
 	markImageMessagesOutOfContext,
 	shouldCompact,
 } from "./session.ts";
-import { isMemoryEnabled } from "./settings.ts";
+import { isMemoryEnabled, loadSettings } from "./settings.ts";
 import type { SshHost } from "./ssh.ts";
 import type { SubagentPrompt } from "./subagents.ts";
 import { formatTodoList, remainingTodoCount, type TodoItem, validateTodos } from "./todo.ts";
@@ -768,6 +775,29 @@ function checkpointWriterPrompt(input: MemoryCheckpointWriterInput): string {
 	].join("\n");
 }
 
+function checkpointWriterRecoverySpec(input: MemoryCheckpointWriterInput): AgentActorRecoverySpec {
+	return {
+		kind: "checkpoint-writer",
+		cwd: input.cwd,
+		sessionId: input.sessionId,
+		model: input.model,
+		providerBaseURL: input.providerOverride?.baseURL ?? input.config.baseURL,
+		checkpointBoundary: input.checkpointBoundary ?? -1,
+		config: {
+			baseURL: input.config.baseURL,
+			contextWindow: input.config.contextWindow,
+			maxResponseTokens: input.config.maxResponseTokens,
+			compactionThreshold: input.config.compactionThreshold,
+			maxToolOutputLines: input.config.maxToolOutputLines,
+			maxToolOutputBytes: input.config.maxToolOutputBytes,
+			defaultBashTimeout: input.config.defaultBashTimeout,
+			reasoningLevel: input.config.reasoningLevel,
+			reasoningParams: input.config.reasoningParams,
+			reasoningFormat: input.config.reasoningFormat,
+		},
+	};
+}
+
 /** Immutable parent-side context captured for a background agent fork. */
 export type AgentForkContext = ActorForkContext;
 
@@ -793,6 +823,13 @@ export function createAgentForkContext(
 
 export function createAgentContextFork(messages: Message[], boundaryIndex: number): AgentForkContext {
 	return createAgentForkContext(messages, boundaryIndex);
+}
+
+function checkpointWriterMessages(fork: AgentForkContext): Message[] {
+	// A real checkpoint boundary is a hard causal boundary for the writer. The
+	// first checkpoint has no boundary yet, so it necessarily uses the complete
+	// inherited transcript; later writers only receive the durable prefix.
+	return fork.boundaryIndex >= 0 ? fork.prefix : fork.inheritedMessages;
 }
 
 export async function runMemoryMaintenanceAgent(
@@ -847,6 +884,7 @@ async function runCheckpointWriter(input: MemoryCheckpointWriterInput): Promise<
 			background: true,
 			lifecycle: "persistent",
 			forkContext: fork,
+			recovery: checkpointWriterRecoverySpec(input),
 		},
 		input.signal,
 	);
@@ -857,7 +895,7 @@ async function runCheckpointWriter(input: MemoryCheckpointWriterInput): Promise<
 			const actorFork = actor.snapshot().forkContext;
 			if (!actorFork) throw new Error("Checkpoint writer actor was created without a fork context");
 			await runAgentLoop(
-				[...actorFork.inheritedMessages, { role: "user", content: checkpointWriterPrompt(input) }],
+				[...checkpointWriterMessages(actorFork), { role: "user", content: checkpointWriterPrompt(input) }],
 				{
 					config: input.config,
 					model: input.model,
@@ -885,6 +923,31 @@ async function runCheckpointWriter(input: MemoryCheckpointWriterInput): Promise<
 		}
 	});
 }
+
+async function recoverCheckpointWriter(snapshot: AgentActorSnapshot): Promise<void> {
+	const recovery = snapshot.recovery;
+	if (!recovery || recovery.kind !== "checkpoint-writer") return;
+	const settings = loadSettings();
+	const savedProvider = (settings.providers ?? []).find((provider) => provider.url === recovery.providerBaseURL);
+	const credentials = savedProvider?.apiKey
+		? { baseURL: savedProvider.url, apiKey: savedProvider.apiKey }
+		: settings.providerUrl === recovery.providerBaseURL && settings.apiKey
+			? { baseURL: settings.providerUrl, apiKey: settings.apiKey }
+			: undefined;
+	if (!credentials) throw new Error(`No credentials available for checkpoint provider ${recovery.providerBaseURL}`);
+	const config = { ...recovery.config, apiKey: credentials.apiKey };
+	await runCheckpointWriter({
+		cwd: recovery.cwd,
+		sessionId: recovery.sessionId,
+		model: recovery.model,
+		config,
+		messages: snapshot.forkContext?.inheritedMessages ?? [],
+		providerOverride: recovery.providerBaseURL === config.baseURL ? undefined : credentials,
+		checkpointBoundary: recovery.checkpointBoundary,
+	});
+}
+
+agentActorRegistry.registerRecoveryHandler("checkpoint-writer", recoverCheckpointWriter);
 
 function shouldStartCheckpointWriter(loopConfig: LoopConfig, messages: Message[]): boolean {
 	if (!loopConfig.memory || !isMemoryEnabled() || loopConfig.signal?.aborted) return false;
@@ -964,6 +1027,11 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 
 async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promise<void> {
 	const { config, model: initialModel, cwd, systemPrompt, onEvent, onWarning, signal, mcpToolIndex } = loopConfig;
+	const promptCacheStrategy = resolvePromptCacheStrategy(
+		loopConfig.modelProvider?.baseURL ?? config.baseURL,
+		loopConfig.sessionId,
+	);
+	const promptCacheBody = promptCacheRequestBody(promptCacheStrategy);
 	let checkpointBoundary = loopConfig.checkpointBoundary ?? findCheckpointBoundary(messages);
 	loopConfig.checkpointBoundary = checkpointBoundary;
 	const memoryEnabled = loopConfig.memory !== undefined && isMemoryEnabled();
@@ -1464,11 +1532,11 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				// makes a glob rule attach immediately after its file is read.
 				syncSystemPrompt();
 
-				// Stream assistant response
-				// Apply prompt caching markers to request-ready copies; the live
-				// messages/tools arrays stay clean so saveSession never persists
-				// the provider-specific structured-content shape.
-				const cached = applyCacheControl(messages, tools, loopConfig.cachePrefixBoundary);
+				// Stream assistant response. Explicit providers get request-only
+				// markers; automatic-prefix providers keep the native message shape.
+				// The live messages/tools arrays stay clean so saveSession never
+				// persists provider-specific structured content.
+				const cached = applyCacheControl(messages, tools, loopConfig.cachePrefixBoundary, promptCacheStrategy.mode);
 
 				// Vision fallback: if the model doesn't support images (404 from
 				// OpenRouter or similar), strip any image_url messages we added
@@ -1498,6 +1566,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 						},
 						config.reasoningParams.body,
 						(attempt, reason) => onEvent({ type: "retry", attempt, reason }),
+						promptCacheBody,
 					);
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
@@ -1545,6 +1614,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 							},
 							config.reasoningParams.body,
 							(attempt, reason) => onEvent({ type: "retry", attempt, reason }),
+							promptCacheBody,
 						);
 					} else if (isContextOverflow(err) && !toolResultTrimmed) {
 						// Cheap first attempt: shrink the largest tool result in

@@ -11,6 +11,8 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import chokidar from "chokidar";
+import { subscribeAgentActorNotifications } from "../core/actor-events.ts";
+import type { AgentActorNotification } from "../core/actors.ts";
 import { backupFileForCheckpoint, createCheckpoint, restoreCheckpoint } from "../core/checkpoint.ts";
 import { fetchModels, type ModelInfo, probeProvider, resolveProvider } from "../core/config.ts";
 import { hasHooks, runHooksForEvent } from "../core/hooks.ts";
@@ -183,7 +185,8 @@ export type WebEvent =
 	/** Watcher in `ws.cwd` saw changes while the session was idle. Only fired
 	 * when nothing else is broadcasting — tool_end already covers active turns.
 	 * Client should re-fetch the diff (and re-read the file tree). */
-	| { type: "fs_change" };
+	| { type: "fs_change" }
+	| { type: "agent_actor"; actor: AgentActorNotification };
 
 export interface WebAgentSession {
 	id: string;
@@ -596,6 +599,8 @@ export interface ServerBridge {
 	 * not just the one this listener is scoped to. */
 	subscribeAll(callback: (event: WebEvent) => void): void;
 	unsubscribeAll(callback: (event: WebEvent) => void): void;
+	/** Releases process-wide live-event subscriptions when the daemon shuts down. */
+	dispose?(): void;
 	executeCommand(sessionId: string, command: string): Promise<{ ok: boolean; result?: unknown; error?: string }>;
 	/** Runs a settings-only command without requiring a visible chat session.
 	 * This is intentionally separate from executeCommand so the TUI keeps its
@@ -641,6 +646,12 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	// message-count badges for background/other threads update live instead
 	// of only refreshing on a full page reload.
 	const sessionListListeners = new Set<(event: WebEvent) => void>();
+	const unsubscribeActorNotifications = subscribeAgentActorNotifications((actor) => {
+		if (!actor.parentSessionId) return;
+		const ws = sessions.get(actor.parentSessionId);
+		if (!ws) return;
+		broadcast(ws, { type: "agent_actor", actor });
+	});
 
 	const { config, cwd, persona: currentPersona, reasoningMeta: initialReasoningMeta, projectDeps } = result;
 	let reasoningMeta = initialReasoningMeta;
@@ -3699,6 +3710,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		unsubscribe,
 		subscribeAll,
 		unsubscribeAll,
+		dispose: unsubscribeActorNotifications,
 		executeCommand,
 		executeSettingsCommand,
 		getConfig,
