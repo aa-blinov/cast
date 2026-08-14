@@ -1676,12 +1676,12 @@ export function searchProjectMemory(cwd: string, query: string, limit = MAX_SEAR
 		.prepare(`
 			SELECT m.id, m.project_id, m.type, m.content, m.importance, m.confidence, m.expires_at, m.source_session_id,
 					m.created_at, m.updated_at,
-					-bm25(project_memory_fts) AS score
+					-project_memory_fts.rank AS score
 			FROM project_memory_fts
 			JOIN project_memory AS m ON m.id = project_memory_fts.rowid
 			WHERE project_memory_fts MATCH ? AND m.project_id = ?
 				AND (m.expires_at IS NULL OR m.expires_at > ?)
-			ORDER BY score DESC, m.importance DESC, m.updated_at DESC
+			ORDER BY project_memory_fts.rank ASC, m.importance DESC, m.updated_at DESC
 			LIMIT ?
 		`)
 		.all(ftsQuery, projectId, new Date().toISOString(), Math.max(1, Math.min(limit, MAX_SEARCH_RESULTS))) as Array<{
