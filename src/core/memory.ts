@@ -177,6 +177,8 @@ export interface MemoryCheckpointWriterInput {
 	messages: Message[];
 	signal?: AbortSignal;
 	providerOverride?: ProviderCredentials;
+	/** Last message included in the durable checkpoint prefix; -1 means no prior boundary. */
+	checkpointBoundary?: number;
 }
 
 export type MemoryCheckpointWriter = (input: MemoryCheckpointWriterInput) => Promise<void>;
@@ -214,7 +216,7 @@ export function scheduleProjectCheckpointWriter(
 ): void {
 	if (!isMemoryEnabled() || input.signal?.aborted) return;
 	const key = `${projectIdForCwd(input.cwd)}:${input.sessionId}`;
-	const request = { input: { ...input, messages: input.messages.slice() }, writer, onWarning };
+	const request = { input: { ...input, messages: structuredClone(input.messages) }, writer, onWarning };
 	const state = checkpointWriterStates.get(key);
 	if (state?.running) {
 		state.pending = request;

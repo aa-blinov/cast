@@ -35,9 +35,14 @@ vi.mock("../src/core/llm.ts", async (importOriginal) => {
 	};
 });
 
-const { runAgentLoop, MessageQueue, compactSessionMessages, waitForToolBatch, TOOL_ABORT_GRACE_MS } = await import(
-	"../src/core/loop.ts"
-);
+const {
+	runAgentLoop,
+	MessageQueue,
+	compactSessionMessages,
+	waitForToolBatch,
+	TOOL_ABORT_GRACE_MS,
+	createAgentContextFork,
+} = await import("../src/core/loop.ts");
 const { streamAndCollect } = await import("../src/core/llm.ts");
 type AgentEvent = Parameters<Parameters<typeof runAgentLoop>[1]["onEvent"]>[0];
 
@@ -70,6 +75,24 @@ afterEach(() => {
 // ============================================================================
 // MessageQueue
 // ============================================================================
+
+describe("createAgentContextFork", () => {
+	it("freezes the parent snapshot and preserves the exact boundary split", () => {
+		const parent: Message[] = [
+			{ role: "system", content: "system" },
+			{ role: "user", content: "before" },
+			{ role: "assistant", content: "checkpoint" },
+			{ role: "user", content: "after" },
+		];
+		const fork = createAgentContextFork(parent, 2);
+
+		expect(fork.boundaryIndex).toBe(2);
+		expect(fork.prefix).toEqual(parent.slice(0, 3));
+		expect(fork.tail).toEqual(parent.slice(3));
+		fork.messages[1] = { role: "user", content: "writer mutation" };
+		expect(parent[1]).toEqual({ role: "user", content: "before" });
+	});
+});
 
 describe("MessageQueue", () => {
 	it("starts empty", () => {
@@ -141,6 +164,73 @@ const testConfig: AppConfig = {
 };
 
 describe("runAgentLoop — abort vs. error", () => {
+	it("runs checkpoint maintenance from an isolated fork at the durable boundary", async () => {
+		const realHome = process.env.HOME;
+		const realMemoryDir = process.env.CAST_MEMORY_DIR;
+		const fakeHome = mkdtempSync(join(tmpdir(), "cast-checkpoint-fork-home-"));
+		const projectCwd = mkdtempSync(join(tmpdir(), "cast-checkpoint-fork-project-"));
+		process.env.HOME = fakeHome;
+		process.env.CAST_MEMORY_DIR = join(fakeHome, "memory");
+
+		const requests: Message[][] = [];
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({
+				content: "main answer",
+				thinking: "",
+				finishReason: "stop",
+				usage: { promptTokens: 1000, completionTokens: 2, totalTokens: 1002 },
+			}))
+			.mockImplementationOnce(async (_client, _model, messages) => {
+				requests.push(messages.slice());
+				messages[1] = { role: "user", content: "writer-only mutation" };
+				return { content: "checkpoint saved", thinking: "", finishReason: "stop" };
+			});
+
+		try {
+			const result = await runAgentLoop(
+				[
+					{ role: "system", content: "system" },
+					{ role: "user", content: "before checkpoint" },
+					{ role: "assistant", content: "checkpoint boundary" },
+					{ role: "user", content: "after checkpoint" },
+				],
+				{
+					config: { ...testConfig, contextWindow: 1000, maxResponseTokens: 100 },
+					model: "test-model",
+					cwd: projectCwd,
+					systemPrompt: "test",
+					memory: { sessionId: "fork-session" },
+					checkpointBoundary: 2,
+					onEvent: () => {},
+					onWarning: (message) => {
+						throw new Error(message);
+					},
+				},
+			);
+
+			const deadline = Date.now() + 2_000;
+			while (requests.length < 1 && Date.now() < deadline) {
+				await new Promise((resolve) => setTimeout(resolve, 10));
+			}
+
+			expect(requests).toHaveLength(1);
+			const writerMessages = requests[0]!;
+			expect(writerMessages.some((message) => message.content === "before checkpoint")).toBe(true);
+			expect(writerMessages.at(-1)?.content).toContain("Fork boundary message index: 2");
+			const boundary = writerMessages[2]!.content as Array<{ cache_control?: { type: string } }>;
+			expect(boundary[0]!.cache_control).toEqual({ type: "ephemeral" });
+			expect(typeof writerMessages[3]!.content).toBe("string");
+			expect(result[1]!.content).toBe("before checkpoint");
+		} finally {
+			if (realHome === undefined) delete process.env.HOME;
+			else process.env.HOME = realHome;
+			if (realMemoryDir === undefined) delete process.env.CAST_MEMORY_DIR;
+			else process.env.CAST_MEMORY_DIR = realMemoryDir;
+			rmSync(fakeHome, { recursive: true, force: true });
+			rmSync(projectCwd, { recursive: true, force: true });
+		}
+	});
+
 	it("does not retrieve or write memory when the global memory setting is disabled", async () => {
 		const realHome = process.env.HOME;
 		const fakeHome = mkdtempSync(join(tmpdir(), "cast-memory-disabled-test-"));
