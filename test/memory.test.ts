@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
-import { resetDbConnectionForTests } from "../src/core/db.ts";
+import { getDb, resetDbConnectionForTests } from "../src/core/db.ts";
 import { streamAndCollect } from "../src/core/llm.ts";
 import {
 	buildMemoryPrompt,
@@ -100,6 +100,40 @@ describe("project memory", () => {
 
 		storeProjectMemory(projectCwd, "session-a", "turn-a", [entry]);
 		expect(searchProjectMemory(projectCwd, "single writer")).toHaveLength(1);
+	});
+
+	it("keeps FTS5 rank ordering equivalent to direct BM25", () => {
+		const projectCwd = join(root, "rank-project");
+		storeProjectMemory(projectCwd, "session-a", "turn-a", [
+			{ content: "The daemon uses a single writer for the SSE bridge.", type: "architecture", importance: 90 },
+			{ content: "The daemon reconnects the SSE client after a timeout.", type: "reliability", importance: 80 },
+			{ content: "The daemon keeps the bridge state in SQLite.", type: "storage", importance: 70 },
+		]);
+		const projectId = projectIdForCwd(projectCwd);
+		const db = getDb();
+		const query = '"daemon" OR "SSE"';
+		const params = [query, projectId] as const;
+		const bm25Rows = db
+			.prepare(`
+				SELECT m.id, -bm25(project_memory_fts) AS score
+				FROM project_memory_fts
+				JOIN project_memory AS m ON m.id = project_memory_fts.rowid
+				WHERE project_memory_fts MATCH ? AND m.project_id = ?
+				ORDER BY score DESC, m.importance DESC, m.updated_at DESC
+			`)
+			.all(...params) as Array<{ id: number; score: number }>;
+		const rankRows = db
+			.prepare(`
+				SELECT m.id, -project_memory_fts.rank AS score
+				FROM project_memory_fts
+				JOIN project_memory AS m ON m.id = project_memory_fts.rowid
+				WHERE project_memory_fts MATCH ? AND m.project_id = ?
+				ORDER BY project_memory_fts.rank ASC, m.importance DESC, m.updated_at DESC
+			`)
+			.all(...params) as Array<{ id: number; score: number }>;
+
+		expect(rankRows.map((row) => row.id)).toEqual(bm25Rows.map((row) => row.id));
+		expect(rankRows.map((row) => row.score)).toEqual(bm25Rows.map((row) => row.score));
 	});
 
 	it("renders only relevant memory into the next session prompt", () => {
