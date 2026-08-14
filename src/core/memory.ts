@@ -3,6 +3,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import { type AgentActorSnapshot, agentActorRegistry } from "./actors.ts";
 import type { AppConfig, ProviderCredentials } from "./config.ts";
 import { getDb } from "./db.ts";
 import { createClient, type Message, streamAndCollect, type Usage } from "./llm.ts";
@@ -12,6 +13,7 @@ import {
 	notesPath,
 	projectMemoryPath,
 	readMemoryFile,
+	readMemoryFileChecked,
 	readProjectMemory,
 	readSessionMemory,
 	renderCheckpoint,
@@ -21,6 +23,11 @@ import {
 import { promptsDir, readRequiredPrompt } from "./prompts.ts";
 import {
 	isMemoryWriteEnabled,
+	loadSettings,
+	memoryDistillAuto,
+	memoryDistillIntervalDays,
+	memoryDreamAuto,
+	memoryDreamIntervalDays,
 	memoryPromptBudget,
 	memoryReconcileOnSearch,
 	memorySearchScoreFloor,
@@ -34,6 +41,8 @@ const MEMORY_BACKGROUND_TIMEOUT_MS = 30_000;
 const MEMORY_OPERATION_LEASE_MS = 300_000;
 const MEMORY_OPERATION_WAIT_MS = 30_000;
 const MEMORY_OPERATION_POLL_MS = 50;
+const MEMORY_AUTO_MIN_SPAWN_GAP_MS = 10_000;
+const MEMORY_DAY_MS = 24 * 60 * 60 * 1000;
 const TRAILING_SEPARATORS_RE = /[\\/]+$/;
 const MARKDOWN_BULLET_RE = /^[-*]\s+(.+)$/;
 const MARKDOWN_EMPTY_RE = /^(\(none|#)/;
@@ -131,6 +140,7 @@ export interface MemoryMaintenanceInput {
 	signal?: AbortSignal;
 	providerOverride?: ProviderCredentials;
 	onUsage?: (usage: Usage) => void;
+	onWarning?: (message: string) => void;
 	runAgent?: MemoryMaintenanceAgent;
 }
 
@@ -164,6 +174,23 @@ export interface MemoryDistillResult {
 	artifacts: MemoryArtifact[];
 	usage?: Usage;
 	skipped?: boolean;
+}
+
+export type AutomaticMemoryMaintenanceKind = "dream" | "distill";
+
+export interface AutomaticMemoryMaintenanceResult {
+	kind: AutomaticMemoryMaintenanceKind;
+	status: "completed" | "failed";
+}
+
+export interface AutomaticMemoryRun {
+	id: string;
+	parentSessionId: string;
+	kind: AutomaticMemoryMaintenanceKind;
+	status: AgentActorSnapshot["status"];
+	createdAt: string;
+	updatedAt: string;
+	completedAt?: string;
 }
 
 export interface MemoryExtractionInput {
@@ -244,6 +271,8 @@ interface CheckpointWriterState {
 
 const memoryOperationQueues = new Map<string, Promise<unknown>>();
 const checkpointWriterStates = new Map<string, CheckpointWriterState>();
+const memoryAutoSpawnTimes = new Map<string, number>();
+const automaticMemoryMaintenanceTasks = new Set<Promise<AutomaticMemoryMaintenanceResult[]>>();
 let nextCheckpointWriterId = 0;
 
 function checkpointWriterKey(cwd: string, sessionId: string): string {
@@ -491,6 +520,55 @@ export async function drainProjectCheckpointWriters(
 	return { drained: entries.length - pending, timedOut: pending };
 }
 
+export function scheduleAutomaticMemoryMaintenance(input: MemoryMaintenanceInput): void {
+	const task = maybeRunAutomaticMemoryMaintenance(input);
+	automaticMemoryMaintenanceTasks.add(task);
+	void task.finally(() => automaticMemoryMaintenanceTasks.delete(task)).catch(() => undefined);
+}
+
+export function listAutomaticMemoryRuns(parentSessionId?: string): AutomaticMemoryRun[] {
+	return agentActorRegistry
+		.list()
+		.filter(
+			(snapshot) =>
+				snapshot.background &&
+				snapshot.agent.startsWith("memory-") &&
+				snapshot.parentSessionId !== undefined &&
+				(parentSessionId === undefined || snapshot.parentSessionId === parentSessionId),
+		)
+		.map((snapshot) => ({
+			id: snapshot.id,
+			parentSessionId: snapshot.parentSessionId!,
+			kind: snapshot.agent.slice("memory-".length) as AutomaticMemoryMaintenanceKind,
+			status: snapshot.status,
+			createdAt: snapshot.createdAt,
+			updatedAt: snapshot.updatedAt,
+			...(snapshot.completedAt ? { completedAt: snapshot.completedAt } : {}),
+		}));
+}
+
+export function cancelAutomaticMemoryRun(id: string): boolean {
+	const run = agentActorRegistry.list().find((snapshot) => snapshot.id === id && snapshot.agent.startsWith("memory-"));
+	return run ? agentActorRegistry.cancel(id) : false;
+}
+
+export async function drainAutomaticMemoryMaintenance(
+	timeoutMs = 30_000,
+): Promise<{ drained: number; timedOut: number }> {
+	const tasks = [...automaticMemoryMaintenanceTasks];
+	if (tasks.length === 0) return { drained: 0, timedOut: 0 };
+	let resolveTimeout!: () => void;
+	const timeout = new Promise<void>((resolve) => {
+		resolveTimeout = resolve;
+	});
+	const timer = setTimeout(resolveTimeout, timeoutMs);
+	timer.unref();
+	await Promise.race([Promise.allSettled(tasks), timeout]);
+	clearTimeout(timer);
+	const pending = tasks.filter((task) => automaticMemoryMaintenanceTasks.has(task)).length;
+	return { drained: tasks.length - pending, timedOut: pending };
+}
+
 function normalizeCwd(cwd: string): string {
 	return cwd.replace(TRAILING_SEPARATORS_RE, "") || cwd;
 }
@@ -524,9 +602,13 @@ function withImmediateTransaction<T>(db: DatabaseSync, operation: () => T): T {
 
 function appendMemorySessionEvent(db: DatabaseSync, sessionId: string, type: string, payload: unknown): void {
 	if (!db.prepare("SELECT 1 FROM sessions WHERE id = ?").get(sessionId)) return;
-	db.prepare(
-		"INSERT INTO session_events (session_id, seq, ts, type, payload_json) VALUES (?, (SELECT COALESCE(MAX(seq), -1) + 1 FROM session_events WHERE session_id = ?), ?, ?, ?)",
-	).run(sessionId, sessionId, new Date().toISOString(), type, JSON.stringify(payload));
+	const insert = (): void => {
+		db.prepare(
+			"INSERT OR IGNORE INTO session_events (session_id, seq, ts, type, payload_json) VALUES (?, (SELECT COALESCE(MAX(seq), -1) + 1 FROM session_events WHERE session_id = ?), ?, ?, ?)",
+		).run(sessionId, sessionId, new Date().toISOString(), type, JSON.stringify(payload));
+	};
+	if (db.isTransaction) insert();
+	else withImmediateTransaction(db, insert);
 }
 
 function turnKeyForTranscript(transcript: string): string {
@@ -1205,6 +1287,137 @@ function maintenanceAgentPrompt(input: MemoryMaintenanceInput, kind: "dream" | "
 		);
 }
 
+function automaticMemoryEventTypes(kind: AutomaticMemoryMaintenanceKind): [string, string] {
+	return kind === "dream"
+		? ["memory_auto_dream_started", "memory_dream_completed"]
+		: ["memory_auto_distill_started", "memory_distill_completed"];
+}
+
+function automaticMemorySettings(kind: AutomaticMemoryMaintenanceKind): { enabled: boolean; intervalDays: number } {
+	const settings = loadSettings();
+	return kind === "dream"
+		? { enabled: memoryDreamAuto(settings), intervalDays: memoryDreamIntervalDays(settings) }
+		: { enabled: memoryDistillAuto(settings), intervalDays: memoryDistillIntervalDays(settings) };
+}
+
+async function claimAutomaticMemoryMaintenance(
+	input: MemoryMaintenanceInput,
+	kind: AutomaticMemoryMaintenanceKind,
+): Promise<boolean> {
+	if (!isMemoryWriteEnabled() || input.signal?.aborted) return false;
+	const { enabled, intervalDays } = automaticMemorySettings(kind);
+	if (!enabled) return false;
+	const spawnKey = `${projectIdForCwd(input.cwd)}:${kind}`;
+	const lastSpawn = memoryAutoSpawnTimes.get(spawnKey) ?? 0;
+	if (Date.now() - lastSpawn < MEMORY_AUTO_MIN_SPAWN_GAP_MS) return false;
+	const [startedEvent, completedEvent] = automaticMemoryEventTypes(kind);
+	return withProjectMemoryLease(input.cwd, `auto-${kind}-schedule`, async () => {
+		if (Date.now() - (memoryAutoSpawnTimes.get(spawnKey) ?? 0) < MEMORY_AUTO_MIN_SPAWN_GAP_MS) return false;
+		const db = getDb();
+		const projectCwd = normalizeCwd(input.cwd);
+		const last = db
+			.prepare(
+				`SELECT MAX(e.ts) AS ts
+				 FROM session_events AS e
+				 JOIN sessions AS s ON s.id = e.session_id
+				 WHERE s.cwd = ? AND e.type IN (?, ?)`,
+			)
+			.get(projectCwd, startedEvent, completedEvent) as { ts?: string } | undefined;
+		const now = Date.now();
+		const intervalMs = intervalDays * MEMORY_DAY_MS;
+		if (last?.ts && now - Date.parse(last.ts) < intervalMs) return false;
+		if (!last?.ts) {
+			const earliest = db.prepare("SELECT MIN(created_at) AS ts FROM sessions WHERE cwd = ?").get(projectCwd) as
+				| { ts?: string }
+				| undefined;
+			if (!earliest?.ts || now - Date.parse(earliest.ts) < intervalMs) return false;
+		}
+		memoryAutoSpawnTimes.set(spawnKey, now);
+		appendMemorySessionEvent(db, input.sessionId, startedEvent, { intervalDays });
+		return true;
+	});
+}
+
+function memoryMaintenanceRecoveryConfig(config: AppConfig): Omit<AppConfig, "apiKey"> {
+	return {
+		baseURL: config.baseURL,
+		contextWindow: config.contextWindow,
+		maxResponseTokens: config.maxResponseTokens,
+		compactionThreshold: config.compactionThreshold,
+		maxToolOutputLines: config.maxToolOutputLines,
+		maxToolOutputBytes: config.maxToolOutputBytes,
+		defaultBashTimeout: config.defaultBashTimeout,
+		reasoningLevel: config.reasoningLevel,
+		reasoningParams: config.reasoningParams,
+		reasoningFormat: config.reasoningFormat,
+	};
+}
+
+export async function runAutomaticMemoryMaintenanceRun(
+	input: MemoryMaintenanceInput,
+	kind: AutomaticMemoryMaintenanceKind,
+): Promise<AutomaticMemoryMaintenanceResult> {
+	const actor = agentActorRegistry.spawn(
+		{
+			parentSessionId: input.sessionId,
+			sessionId: input.sessionId,
+			agent: `memory-${kind}`,
+			mode: "subagent",
+			background: true,
+			lifecycle: "persistent",
+			recovery: {
+				kind: "memory-maintenance",
+				maintenanceKind: kind,
+				cwd: input.cwd,
+				sessionId: input.sessionId,
+				model: input.model,
+				providerBaseURL: input.providerOverride?.baseURL ?? input.config.baseURL,
+				config: memoryMaintenanceRecoveryConfig(input.config),
+				messages: structuredClone(input.messages),
+			},
+		},
+		input.signal,
+	);
+	try {
+		await actor.run(async (signal) => {
+			const maintenanceInput = { ...input, signal, messages: structuredClone(input.messages) };
+			if (kind === "dream") await dreamProjectMemory(maintenanceInput);
+			else await distillProjectMemory(maintenanceInput);
+		});
+		return { kind, status: "completed" };
+	} catch (error) {
+		input.onWarning?.(`Automatic ${kind} failed: ${error instanceof Error ? error.message : String(error)}`);
+		return { kind, status: "failed" };
+	}
+}
+
+/**
+ * Starts Mimo-style maintenance on a new top-level session without delaying
+ * the user's turn. The caller should invoke this with `void`; awaiting it is
+ * useful in tests and for graceful shutdown orchestration.
+ */
+export async function maybeRunAutomaticMemoryMaintenance(
+	input: MemoryMaintenanceInput,
+): Promise<AutomaticMemoryMaintenanceResult[]> {
+	if (!isMemoryWriteEnabled() || input.signal?.aborted) return [];
+	const kinds = (["dream", "distill"] as const).filter((kind) => automaticMemorySettings(kind).enabled);
+	const claimed = await Promise.all(
+		kinds.map(async (kind) => {
+			try {
+				return (await claimAutomaticMemoryMaintenance(input, kind)) ? kind : undefined;
+			} catch (error) {
+				input.onWarning?.(
+					`Automatic ${kind} scheduling failed: ${error instanceof Error ? error.message : String(error)}`,
+				);
+				return undefined;
+			}
+		}),
+	);
+	const active = claimed.filter((kind): kind is AutomaticMemoryMaintenanceKind => kind !== undefined);
+	const results = await Promise.all(active.map((kind) => runAutomaticMemoryMaintenanceRun(input, kind)));
+	return results;
+}
+
 function parseMemoryDreamOutput(raw: string): {
 	removeIds: number[];
 	entries: MemoryEntry[];
@@ -1240,7 +1453,7 @@ async function runDreamProjectMemory(input: MemoryMaintenanceInput): Promise<Mem
 			onUsage: input.onUsage,
 		});
 		if (response.usage) input.onUsage?.(response.usage);
-		reconcileProjectMemoryFiles(input.cwd, input.sessionId, true);
+		reconcileProjectMemoryFilesLocked(input.cwd, input.sessionId, true);
 		const after = listProjectMemory(input.cwd, 100);
 		const afterContents = new Set(after.map((entry) => `${entry.type}\n${entry.content}`));
 		const removed = before.filter((entry) => !afterContents.has(`${entry.type}\n${entry.content}`)).length;
@@ -1426,13 +1639,29 @@ function parseProjectArtifactFile(file: { kind: MemoryArtifactKind; name: string
 }
 
 function reconcileProjectMemoryArtifacts(cwd: string, sessionId: string): MemoryArtifact[] {
-	const artifacts = projectArtifactFiles(cwd)
+	const files = projectArtifactFiles(cwd);
+	if (files.some((file) => !readMemoryFileChecked(file.path).readable)) return listProjectMemoryArtifacts(cwd, 4);
+	const artifacts = files
 		.map(parseProjectArtifactFile)
 		.filter((artifact): artifact is NonNullable<typeof artifact> => artifact !== undefined);
-	if (artifacts.length === 0) return listProjectMemoryArtifacts(cwd, 4);
 	const now = new Date().toISOString();
 	const db = getDb();
 	return withImmediateTransaction(db, () => {
+		const projectId = projectIdForCwd(cwd);
+		const fingerprints = artifacts.map((artifact) =>
+			fingerprintFor(artifact.content, `${artifact.kind}:${artifact.name}`),
+		);
+		if (fingerprints.length === 0) {
+			db.prepare("DELETE FROM project_memory_artifacts WHERE project_id = ?").run(projectId);
+		} else {
+			db.prepare(
+				`DELETE FROM project_memory_artifacts WHERE project_id = ? AND fingerprint NOT IN (${fingerprints.map(() => "?").join(",")})`,
+			).run(projectId, ...fingerprints);
+		}
+		if (artifacts.length === 0) {
+			appendMemorySessionEvent(db, sessionId, "memory_distill_completed", { mode: "agent", artifacts: 0 });
+			return [];
+		}
 		const insert = db.prepare(`
 			INSERT INTO project_memory_artifacts
 				(project_id, cwd, kind, name, description, content, fingerprint, source_session_id, created_at, updated_at)
@@ -1447,7 +1676,7 @@ function reconcileProjectMemoryArtifacts(cwd: string, sessionId: string): Memory
 		`);
 		for (const artifact of artifacts) {
 			insert.run(
-				projectIdForCwd(cwd),
+				projectId,
 				normalizeCwd(cwd),
 				artifact.kind,
 				artifact.name,
@@ -1592,7 +1821,19 @@ async function runDistillProjectMemory(input: MemoryMaintenanceInput): Promise<M
 		return listProjectMemoryArtifacts(input.cwd, 4);
 	});
 	for (const candidate of candidates) {
-		if (hasRepeatedWorkflowEvidence(candidate, trajectory)) materializeDistilledArtifact(input.cwd, candidate);
+		if (!hasRepeatedWorkflowEvidence(candidate, trajectory)) continue;
+		try {
+			materializeDistilledArtifact(input.cwd, candidate);
+		} catch (error) {
+			const fingerprint = fingerprintFor(candidate.content, `${candidate.kind}:${candidate.name}`);
+			withImmediateTransaction(db, () => {
+				db.prepare("DELETE FROM project_memory_artifacts WHERE project_id = ? AND fingerprint = ?").run(
+					projectIdForCwd(input.cwd),
+					fingerprint,
+				);
+			});
+			throw error;
+		}
 	}
 	return { artifacts, usage: response.usage };
 }
@@ -1655,17 +1896,21 @@ function parseCheckpointMarkdown(content: string): MemoryCheckpoint | undefined 
 function projectMemoryFileNeedsReconcile(cwd: string): boolean {
 	const projectPath = projectMemoryPath(projectIdForCwd(cwd));
 	if (!existsSync(projectPath)) return false;
-	const projectHash = memoryFileHash(readProjectMemory(projectIdForCwd(cwd)));
+	const checked = readMemoryFileChecked(projectPath);
+	if (!checked.readable) return false;
+	const projectHash = memoryFileHash(checked.content);
 	const revision = getDb()
 		.prepare("SELECT project_hash FROM project_memory_revisions WHERE project_id = ?")
 		.get(projectIdForCwd(cwd)) as { project_hash?: string } | undefined;
 	return revision?.project_hash !== projectHash;
 }
 
-export function reconcileProjectMemoryFiles(cwd: string, sessionId?: string, force = false): void {
+function reconcileProjectMemoryFilesLocked(cwd: string, sessionId?: string, force = false): void {
 	const projectId = projectIdForCwd(cwd);
 	if (sessionId) ensureMemoryFiles(sessionId, projectId);
-	const projectContent = readProjectMemory(projectId);
+	const checked = readMemoryFileChecked(projectMemoryPath(projectId));
+	if (!checked.readable) return;
+	const projectContent = checked.content;
 	const entries = parseMarkdownMemoryEntries(projectContent);
 	if (entries.length === 0 && !force) return;
 	const session = sessionId ? readSessionMemory(sessionId) : undefined;
@@ -1684,6 +1929,16 @@ export function reconcileProjectMemoryFiles(cwd: string, sessionId?: string, for
 		}
 	});
 	recordMemoryFileRevision(cwd, sessionId ?? "memory-file-reconcile", projectContent, session?.checkpoint ?? "");
+}
+
+export function reconcileProjectMemoryFiles(cwd: string, sessionId?: string, force = false): void {
+	const token = tryAcquireProjectMemoryLease(cwd, "memory-file-reconcile", MEMORY_OPERATION_LEASE_MS);
+	if (!token) return;
+	try {
+		reconcileProjectMemoryFilesLocked(cwd, sessionId, force);
+	} finally {
+		releaseProjectMemoryLease(cwd, token);
+	}
 }
 
 export function searchProjectMemory(cwd: string, query: string, limit = MAX_SEARCH_RESULTS): MemorySearchResult[] {

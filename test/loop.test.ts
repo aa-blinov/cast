@@ -245,7 +245,7 @@ describe("runAgentLoop — abort vs. error", () => {
 		}
 	});
 
-	it("passes a context-sized token budget to automatic memory reconstruction", async () => {
+	it("does not reconstruct memory while preparing an ordinary turn", async () => {
 		const realHome = process.env.HOME;
 		const fakeHome = mkdtempSync(join(tmpdir(), "cast-memory-budget-home-"));
 		process.env.HOME = fakeHome;
@@ -255,7 +255,11 @@ describe("runAgentLoop — abort vs. error", () => {
 			buildPrompt,
 			extractAndStoreProjectMemory: vi.fn(),
 		};
-		vi.mocked(streamAndCollect).mockResolvedValueOnce({ content: "done", finishReason: "stop" });
+		const requests: Message[][] = [];
+		vi.mocked(streamAndCollect).mockImplementationOnce(async (_client, _model, messages) => {
+			requests.push(messages.slice());
+			return { content: "done", finishReason: "stop" };
+		});
 
 		try {
 			await runAgentLoop([{ role: "user", content: "hi" }], {
@@ -267,7 +271,7 @@ describe("runAgentLoop — abort vs. error", () => {
 				onEvent: () => {},
 			});
 
-			expect(buildPrompt.mock.calls[0]?.[3]).toEqual({ tokenBudget: 450 });
+			expect(buildPrompt).not.toHaveBeenCalled();
 		} finally {
 			if (realHome === undefined) delete process.env.HOME;
 			else process.env.HOME = realHome;
@@ -275,7 +279,8 @@ describe("runAgentLoop — abort vs. error", () => {
 		}
 	});
 
-	it("does not rebuild the same memory prompt for every tool-loop request", async () => {
+	it("does not inject the full memory prompt during an ordinary tool loop", async () => {
+		const requests: Message[][] = [];
 		const buildPrompt = vi.fn(() => "<project-memory>cached</project-memory>");
 		const memoryService = {
 			search: vi.fn(() => []),
@@ -283,10 +288,13 @@ describe("runAgentLoop — abort vs. error", () => {
 			extractAndStoreProjectMemory: vi.fn(async () => ({ entries: [], transcript: "" })),
 		};
 		vi.mocked(streamAndCollect)
-			.mockResolvedValueOnce({
-				content: "",
-				finishReason: "tool_calls",
-				toolCalls: [{ id: "1", name: "mcp_echo", arguments: "{}" }],
+			.mockImplementationOnce(async (_client, _model, messages) => {
+				requests.push(messages.slice());
+				return {
+					content: "",
+					finishReason: "tool_calls",
+					toolCalls: [{ id: "1", name: "mcp_echo", arguments: "{}" }],
+				};
 			})
 			.mockResolvedValueOnce({ content: "done", finishReason: "stop" });
 
@@ -301,7 +309,44 @@ describe("runAgentLoop — abort vs. error", () => {
 			onEvent: () => {},
 		});
 
-		expect(buildPrompt).toHaveBeenCalledOnce();
+		expect(buildPrompt).not.toHaveBeenCalled();
+		expect(requests[0]?.[0]?.content).toContain("search it with the memory tool");
+		expect(requests[0]?.[0]?.content).not.toContain("<project-memory>");
+	});
+
+	it("does not inject automatic memory when background memory writing is disabled", async () => {
+		const realHome = process.env.HOME;
+		const fakeHome = mkdtempSync(join(tmpdir(), "cast-memory-write-off-home-"));
+		process.env.HOME = fakeHome;
+		updateSettings({ memoryWriteEnabled: false });
+		const buildPrompt = vi.fn(() => "<project-memory>must be on demand</project-memory>");
+		const memoryService = {
+			search: vi.fn(() => []),
+			buildPrompt,
+			extractAndStoreProjectMemory: vi.fn(),
+		};
+		const requests: Message[][] = [];
+		vi.mocked(streamAndCollect).mockImplementationOnce(async (_client, _model, messages) => {
+			requests.push(messages.slice());
+			return { content: "done", finishReason: "stop" };
+		});
+
+		try {
+			await runAgentLoop([{ role: "user", content: "hi" }], {
+				config: testConfig,
+				model: "test-model",
+				cwd: process.cwd(),
+				systemPrompt: "test",
+				memory: { sessionId: "memory-write-off", service: memoryService },
+				onEvent: () => {},
+			});
+			expect(buildPrompt).not.toHaveBeenCalled();
+			expect(requests[0]?.[0]?.content).not.toContain("search it with the memory tool");
+		} finally {
+			if (realHome === undefined) delete process.env.HOME;
+			else process.env.HOME = realHome;
+			rmSync(fakeHome, { recursive: true, force: true });
+		}
 	});
 
 	it("extracts the completed turn in the background without delaying the response", async () => {
@@ -323,8 +368,9 @@ describe("runAgentLoop — abort vs. error", () => {
 		expect(result.at(-1)?.content).toBe("done");
 		await new Promise((resolve) => setImmediate(resolve));
 		expect(extraction).toHaveBeenCalledOnce();
-		expect(extraction.mock.calls[0]?.[0].messages).toEqual([
-			{ role: "system", content: "test" },
+		const extractedMessages = extraction.mock.calls[0]?.[0].messages ?? [];
+		expect(extractedMessages[0]?.content).toContain("search it with the memory tool");
+		expect(extractedMessages.slice(1)).toEqual([
 			{ role: "user", content: "remember this turn" },
 			{ role: "assistant", content: "done" },
 		]);
@@ -3346,6 +3392,54 @@ describe("runAgentLoop — compaction", () => {
 		// The seeded filler turns are gone from the final history — only the
 		// compaction summary/reminder plus the two real turns remain.
 		expect(result.length).toBeLessThan(seedHistory(6).length + 4);
+	});
+
+	it("injects the full memory prompt only at a checkpoint rebuild", async () => {
+		const realHome = process.env.HOME;
+		const fakeHome = mkdtempSync(join(tmpdir(), "cast-memory-rebuild-home-"));
+		process.env.HOME = fakeHome;
+		updateSettings({ memoryWriteEnabled: true });
+		const buildPrompt = vi.fn(() => "<project-memory>rebuild-only</project-memory>");
+		const memoryService = {
+			search: vi.fn(() => []),
+			buildPrompt,
+			extractAndStoreProjectMemory: vi.fn(),
+		};
+		const followUpQueue = new MessageQueue();
+		followUpQueue.enqueue({ role: "user", content: "keep going" });
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({ content: "turn 1 done", finishReason: "stop" }))
+			.mockImplementationOnce(async () => ({ content: "SUMMARY", finishReason: "stop" }))
+			.mockImplementationOnce(async () => ({ content: "turn 2 done", finishReason: "stop" }));
+
+		try {
+			await runAgentLoop(
+				[
+					...Array.from({ length: 6 }, (_, index) => [
+						{ role: "user" as const, content: `filler question ${index}` },
+						{ role: "assistant" as const, content: `filler answer ${index} `.repeat(20) },
+					]).flat(),
+					{ role: "user", content: "start" },
+				],
+				{
+					config: tinyBudgetConfig,
+					model: "test-model",
+					cwd: "/tmp",
+					systemPrompt: "test",
+					lastPromptTokens: 5000,
+					followUpQueue,
+					memory: { sessionId: "memory-rebuild", service: memoryService },
+					onEvent: () => {},
+				},
+			);
+			expect(buildPrompt).toHaveBeenCalled();
+			expect(buildPrompt.mock.calls.every((call) => call[1] === "")).toBe(true);
+			expect(buildPrompt.mock.calls.every((call) => call[3]?.tokenBudget === 256)).toBe(true);
+		} finally {
+			if (realHome === undefined) delete process.env.HOME;
+			else process.env.HOME = realHome;
+			rmSync(fakeHome, { recursive: true, force: true });
+		}
 	});
 
 	it("mid-turn context guard compacts after a large tool result, before the next model call", async () => {

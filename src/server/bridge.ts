@@ -19,7 +19,12 @@ import { hasHooks, runHooksForEvent } from "../core/hooks.ts";
 import type { Message } from "../core/llm.ts";
 import { type AgentEvent, compactSessionMessages, runAgentLoop, runMemoryMaintenanceAgent } from "../core/loop.ts";
 import { closeMcpConnections, formatMcpForPrompt, type McpSetupResult } from "../core/mcp.ts";
-import { distillProjectMemory, dreamProjectMemory } from "../core/memory.ts";
+import {
+	cancelAutomaticMemoryRun,
+	distillProjectMemory,
+	dreamProjectMemory,
+	listAutomaticMemoryRuns,
+} from "../core/memory.ts";
 import { DEFAULT_PERSONA, type Persona } from "../core/personas.ts";
 import {
 	createPlanState,
@@ -83,7 +88,14 @@ import {
 	type TurnMeta,
 	updateLastCheckpoint,
 } from "../core/session.ts";
-import { loadSettings, updateSettings } from "../core/settings.ts";
+import {
+	loadSettings,
+	memoryDistillAuto,
+	memoryDistillIntervalDays,
+	memoryDreamAuto,
+	memoryDreamIntervalDays,
+	updateSettings,
+} from "../core/settings.ts";
 import {
 	formatSkillInvocation,
 	formatSkillsForPrompt,
@@ -117,6 +129,9 @@ const MEMORY_WRITE_COMMAND_RE = /^write(?:\s+(on|off))?$/;
 const MEMORY_BUDGET_COMMAND_RE = /^budget\s+(\d+)$/;
 const MEMORY_FLOOR_COMMAND_RE = /^floor\s+(0(?:\.\d+)?|1(?:\.0)?)$/;
 const MEMORY_RECONCILE_COMMAND_RE = /^reconcile\s+(on|off)$/;
+const MEMORY_AUTO_TOGGLE_COMMAND_RE = /^(dream|distill)\s+(on|off)$/;
+const MEMORY_AUTO_INTERVAL_COMMAND_RE = /^(dream|distill)\s+interval\s+(\d+)$/;
+const MEMORY_CANCEL_RUN_COMMAND_RE = /^cancel\s+([a-f0-9-]+)$/;
 const CLIENT_PARITY_COMMANDS = new Set([
 	"/quit",
 	"/exit",
@@ -1200,6 +1215,8 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// second loop after the first async setup step completes.
 		const ac = new AbortController();
 		const lease = ws.runner.startRun(ac);
+		const automaticMemoryMaintenance = ws.session.messages.length === 0;
+		const automaticMemoryMessages = ws.session.messages.slice();
 		ws.status = "running";
 		ws.error = null;
 		ws.turnStartedAt = Date.now();
@@ -1405,6 +1422,8 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			cwd: ws.session.cwd ?? cwd,
 			systemPrompt: ws.systemPrompt,
 			memory: { sessionId: ws.session.id },
+			automaticMemoryMaintenance,
+			automaticMemoryMessages,
 			signal: ac.signal,
 			steeringQueue: ws.runner.steeringQueue,
 			followUpQueue: ws.runner.followUpQueue,
@@ -2252,6 +2271,10 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 						memoryPromptBudget: settings.memoryPromptBudget ?? 4096,
 						memorySearchScoreFloor: settings.memorySearchScoreFloor ?? 0.15,
 						memoryReconcileOnSearch: settings.memoryReconcileOnSearch !== false,
+						memoryDreamAuto: memoryDreamAuto(settings),
+						memoryDreamIntervalDays: memoryDreamIntervalDays(settings),
+						memoryDistillAuto: memoryDistillAuto(settings),
+						memoryDistillIntervalDays: memoryDistillIntervalDays(settings),
 					},
 				};
 			if (arg === "on" || arg === "off") {
@@ -2285,9 +2308,32 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				updateSettings({ memoryReconcileOnSearch });
 				return { ok: true, result: { memoryReconcileOnSearch } };
 			}
+			const autoToggleMatch = arg.match(MEMORY_AUTO_TOGGLE_COMMAND_RE);
+			if (autoToggleMatch) {
+				const enabled = autoToggleMatch[2] === "on";
+				const update =
+					autoToggleMatch[1] === "dream" ? { memoryDreamAuto: enabled } : { memoryDistillAuto: enabled };
+				updateSettings(update);
+				return { ok: true, result: update };
+			}
+			const autoIntervalMatch = arg.match(MEMORY_AUTO_INTERVAL_COMMAND_RE);
+			if (autoIntervalMatch) {
+				const days = Math.max(0, Math.min(Number(autoIntervalMatch[2]), 3_650));
+				const update =
+					autoIntervalMatch[1] === "dream"
+						? { memoryDreamIntervalDays: days }
+						: { memoryDistillIntervalDays: days };
+				updateSettings(update);
+				return { ok: true, result: update };
+			}
+			if (arg === "runs") return { ok: true, result: { runs: listAutomaticMemoryRuns(ws.session.id) } };
+			const cancelRunMatch = arg.match(MEMORY_CANCEL_RUN_COMMAND_RE);
+			if (cancelRunMatch) {
+				return { ok: true, result: { cancelled: cancelAutomaticMemoryRun(cancelRunMatch[1]!) } };
+			}
 			return {
 				ok: false,
-				error: "Usage: /memory on|off|write on|write off|budget <tokens>|floor <0..1>|reconcile on|off",
+				error: "Usage: /memory on|off|write on|write off|budget <tokens>|dream on|off|dream interval <days>|distill on|off|distill interval <days>|runs|cancel <run-id>|floor <0..1>|reconcile on|off",
 			};
 		}
 		if (name === "/dream" || name === "/distill") {

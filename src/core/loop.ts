@@ -38,6 +38,8 @@ import {
 	type MemoryService,
 	projectIdForCwd,
 	reconcileProjectMemoryFiles,
+	runAutomaticMemoryMaintenanceRun,
+	scheduleAutomaticMemoryMaintenance,
 	scheduleProjectCheckpointWriter,
 	scheduleProjectMemoryExtraction,
 } from "./memory.ts";
@@ -81,6 +83,13 @@ const DEFAULT_MEMORY_SERVICE = createProjectMemoryService();
 // we treat it as a doom loop and block execution — the model gets an error
 // result and must try something different.
 const DOOM_LOOP_THRESHOLD = 3;
+const MEMORY_RECALL_HINT = [
+	"<system-reminder>",
+	"Durable project memory may contain prior decisions and facts.",
+	"When relevant, search it with the memory tool using 1–3 distinctive terms before asking the user.",
+	"</system-reminder>",
+].join("\n");
+
 function memoryPromptBudgetTokens(config: AppConfig): number {
 	const inputBudget = Math.max(0, config.contextWindow - config.maxResponseTokens);
 	const settings = loadSettings();
@@ -672,6 +681,10 @@ export interface LoopConfig {
 	checkpointBoundary?: number;
 	/** Request-only cache marker for the fork prefix. */
 	cachePrefixBoundary?: number;
+	/** Run configured dream/distill maintenance when this is a fresh top-level session. */
+	automaticMemoryMaintenance?: boolean;
+	/** Completed session snapshot used by automatic maintenance; excludes the new user turn. */
+	automaticMemoryMessages?: Message[];
 	/** Receives the background checkpoint writer handle after it is scheduled. */
 	onCheckpointWriter?: (handle: CheckpointWriterHandle) => void;
 	/**
@@ -958,7 +971,34 @@ async function recoverCheckpointWriter(snapshot: AgentActorSnapshot): Promise<vo
 	});
 }
 
+async function recoverMemoryMaintenance(snapshot: AgentActorSnapshot): Promise<void> {
+	const recovery = snapshot.recovery;
+	if (!recovery || recovery.kind !== "memory-maintenance") return;
+	const settings = loadSettings();
+	const savedProvider = (settings.providers ?? []).find((provider) => provider.url === recovery.providerBaseURL);
+	const provider = savedProvider?.apiKey
+		? { baseURL: savedProvider.url, apiKey: savedProvider.apiKey }
+		: settings.providerUrl === recovery.providerBaseURL && settings.apiKey
+			? { baseURL: settings.providerUrl, apiKey: settings.apiKey }
+			: undefined;
+	if (!provider) throw new Error(`No credentials available for memory ${recovery.maintenanceKind} recovery`);
+	const config = { ...recovery.config, apiKey: provider.apiKey };
+	await runAutomaticMemoryMaintenanceRun(
+		{
+			cwd: recovery.cwd,
+			sessionId: recovery.sessionId,
+			model: recovery.model,
+			config,
+			messages: recovery.messages,
+			providerOverride: recovery.providerBaseURL === config.baseURL ? undefined : provider,
+			runAgent: runMemoryMaintenanceAgent,
+		},
+		recovery.maintenanceKind,
+	);
+}
+
 agentActorRegistry.registerRecoveryHandler("checkpoint-writer", recoverCheckpointWriter);
+agentActorRegistry.registerRecoveryHandler("memory-maintenance", recoverMemoryMaintenance);
 
 function shouldStartCheckpointWriter(loopConfig: LoopConfig, messages: Message[]): boolean {
 	if (!loopConfig.memory || !isMemoryWriteEnabled() || loopConfig.signal?.aborted) return false;
@@ -992,6 +1032,19 @@ function findCheckpointBoundary(messages: Message[]): number {
 export async function runAgentLoop(initialMessages: Message[], loopConfig: LoopConfig): Promise<Message[]> {
 	const messages = [...initialMessages];
 	const tracked = loopConfig.onMessagesChanged ? makeObservable(messages, loopConfig.onMessagesChanged) : messages;
+	if (loopConfig.automaticMemoryMaintenance && loopConfig.memory && loopConfig.sessionId) {
+		scheduleAutomaticMemoryMaintenance({
+			cwd: loopConfig.cwd,
+			sessionId: loopConfig.memory.sessionId,
+			model: loopConfig.model,
+			config: loopConfig.config,
+			messages: loopConfig.automaticMemoryMessages ?? initialMessages,
+			providerOverride: loopConfig.modelProvider,
+			signal: loopConfig.signal,
+			onWarning: loopConfig.onWarning,
+			runAgent: runMemoryMaintenanceAgent,
+		});
+	}
 	let terminalReason: Extract<AgentEvent, { type: "end" }>["reason"] | undefined;
 	const originalOnEvent = loopConfig.onEvent;
 	loopConfig.onEvent = (event) => {
@@ -1400,15 +1453,10 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		otherPlanNames.length > 0 && loopConfig.planState
 			? `\n\nOther plans in this session: ${otherPlanNames.join(", ")} — read \`${loopConfig.planState.plansDir}/<name>.md\` to view one; none of them steers the work unless approved.`
 			: "";
-	let memoryPromptCacheKey: string | undefined;
-	let memoryPromptCache = "";
-
 	// Recompute the system prompt from the latest contextFiles/@-mentions and
-	// write it into messages[0]. Memory retrieval is cached for the current user
-	// message so repeated tool-loop requests do not re-run FTS or reconstruct
-	// the same durable context. A rebuild boundary already contains that context
-	// as a user message, so injecting it into the system prompt again would double
-	// the memory payload.
+	// write it into messages[0]. Memory is deliberately not reconstructed here:
+	// ordinary turns get only a small recall hint, while the full durable context
+	// is inserted at a checkpoint boundary after compaction.
 	const syncSystemPrompt = (): void => {
 		let prompt = systemPrompt;
 		let userText = "";
@@ -1428,21 +1476,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		if (loopConfig.rebuildSystemPrompt) {
 			prompt = loopConfig.rebuildSystemPrompt({ userText, contextFiles });
 		}
-		const isMemoryBoundary = userText.trimStart().startsWith("<checkpoint-boundary>");
-		if (memoryService && !isMemoryBoundary) {
-			const cacheKey = `${checkpointBoundary}\u0000${userText}`;
-			if (cacheKey !== memoryPromptCacheKey) {
-				memoryPromptCacheKey = cacheKey;
-				memoryPromptCache = memoryService.buildPrompt(cwd, userText, loopConfig.memory?.sessionId, {
-					tokenBudget: memoryBudgetTokens,
-				});
-			}
-		} else if (isMemoryBoundary) {
-			memoryPromptCache = "";
-			memoryPromptCacheKey = undefined;
-		}
-		const memoryPrompt = memoryPromptCache;
-		if (memoryPrompt) prompt = `${prompt}\n\n${memoryPrompt}`;
+		if (memoryService && isMemoryWriteEnabled()) prompt = `${prompt}\n\n${MEMORY_RECALL_HINT}`;
 		// Plan mode: prepended AFTER any rebuild — the per-turn rebuild path
 		// (always active in the TUI) replaces `prompt` wholesale and would
 		// silently drop a block added earlier. The restriction must be the
@@ -1483,7 +1517,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 	};
 
 	const appendMemoryRebuildBoundary = (): void => {
-		if (!memoryService || !loopConfig.memory?.sessionId) return;
+		if (!memoryService || !isMemoryWriteEnabled() || !loopConfig.memory?.sessionId) return;
 		const context = memoryService.buildPrompt(cwd, "", loopConfig.memory.sessionId, {
 			tokenBudget: memoryBudgetTokens,
 		});

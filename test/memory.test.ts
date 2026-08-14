@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,6 +8,7 @@ import { streamAndCollect } from "../src/core/llm.ts";
 import {
 	buildMemoryPrompt,
 	buildMemorySearchQuery,
+	cancelAutomaticMemoryRun,
 	createProjectMemoryService,
 	distillProjectMemory,
 	drainProjectCheckpointWriters,
@@ -17,10 +18,12 @@ import {
 	formatMemoryToolResult,
 	formatMemoryTranscript,
 	getProjectCheckpointWriterSnapshot,
+	listAutomaticMemoryRuns,
 	listProjectMemory,
 	listProjectMemoryArtifacts,
 	listProjectMemoryCheckpoints,
 	type MemoryEntry,
+	maybeRunAutomaticMemoryMaintenance,
 	parseMemoryWriterOutput,
 	parseMemoryWriterResult,
 	projectIdForCwd,
@@ -42,7 +45,8 @@ import {
 	readSessionMemory,
 	writeMemoryFile,
 } from "../src/core/memory-files.ts";
-import { createSession, getSessionEvents, saveSession } from "../src/core/session.ts";
+import { appendMessage, createSession, getSessionEvents, saveSession } from "../src/core/session.ts";
+import { updateSettings } from "../src/core/settings.ts";
 
 vi.mock("../src/core/llm.ts", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../src/core/llm.ts")>();
@@ -636,6 +640,33 @@ describe("project memory", () => {
 		else process.env.HOME = realHome;
 	});
 
+	it("does not reconcile from an unreadable project memory path", () => {
+		const projectCwd = join(root, "unreadable-project");
+		const projectId = projectIdForCwd(projectCwd);
+		writeMemoryFile(projectMemoryPath(projectId), "# Project memory\n\n## Rules\n- Keep the durable database row.\n");
+		reconcileProjectMemoryFiles(projectCwd);
+		rmSync(projectMemoryPath(projectId), { force: true });
+		mkdirSync(projectMemoryPath(projectId), { recursive: true });
+
+		expect(searchProjectMemory(projectCwd, "durable database row")).toEqual([
+			expect.objectContaining({ content: "Keep the durable database row." }),
+		]);
+	});
+
+	it("does not reconcile while another process owns the project memory lease", async () => {
+		const projectCwd = join(root, "leased-project");
+		const projectId = projectIdForCwd(projectCwd);
+		writeMemoryFile(projectMemoryPath(projectId), "# Project memory\n\n## Rules\n- Keep the indexed rule.\n");
+		reconcileProjectMemoryFiles(projectCwd);
+		writeMemoryFile(projectMemoryPath(projectId), "# Project memory\n\n## Rules\n- Replace the indexed rule.\n");
+
+		await withProjectMemoryLease(projectCwd, "test-holder", async () => {
+			expect(searchProjectMemory(projectCwd, "indexed rule")).toEqual([
+				expect.objectContaining({ content: "Keep the indexed rule." }),
+			]);
+		});
+	});
+
 	it("runs dream through a maintenance agent and reconciles its file edits", async () => {
 		vi.mocked(streamAndCollect).mockClear();
 		const projectCwd = join(root, "dream-agent-project");
@@ -702,6 +733,77 @@ describe("project memory", () => {
 		expect(streamAndCollect).not.toHaveBeenCalled();
 	});
 
+	it("removes stale distilled artifacts when their project files are deleted", async () => {
+		const projectCwd = join(root, "stale-artifact-project");
+		const session = createSession("test-model", projectCwd);
+		saveSession(session);
+		const runAgent = vi.fn();
+		runAgent.mockImplementationOnce(async () => {
+			writeMemoryFile(
+				join(projectCwd, ".cast", "skills", "release-check", "SKILL.md"),
+				"---\nname: release-check\ndescription: Verify releases.\n---\n\nRun the release checks.",
+			);
+			return { messages: [{ role: "assistant" as const, content: "Created one skill." }] };
+		});
+		runAgent.mockResolvedValueOnce({ messages: [{ role: "assistant" as const, content: "No files remain." }] });
+
+		await distillProjectMemory({
+			cwd: projectCwd,
+			sessionId: session.id,
+			model: session.model,
+			config: testConfig,
+			messages: [{ role: "user", content: "distill release workflow" }],
+			runAgent,
+		});
+		rmSync(join(projectCwd, ".cast", "skills"), { recursive: true, force: true });
+
+		const result = await distillProjectMemory({
+			cwd: projectCwd,
+			sessionId: session.id,
+			model: session.model,
+			config: testConfig,
+			messages: [{ role: "user", content: "reconcile deleted release workflow" }],
+			runAgent,
+		});
+
+		expect(result.artifacts).toEqual([]);
+		expect(listProjectMemoryArtifacts(projectCwd)).toEqual([]);
+	});
+
+	it("does not leave artifact metadata when materialization fails", async () => {
+		const projectCwd = join(root, "failed-artifact-project");
+		const session = createSession("test-model", projectCwd);
+		saveSession(session);
+		appendMessage(session, { role: "user", content: "release-check release-check" });
+		appendMessage(session, { role: "assistant", content: "release-check release-check" });
+		saveSession(session);
+		mkdirSync(join(projectCwd, ".cast", "skills"), { recursive: true });
+		writeFileSync(join(projectCwd, ".cast", "skills", "release-check"), "blocking file", "utf8");
+		vi.mocked(streamAndCollect).mockResolvedValueOnce({
+			content: JSON.stringify({
+				artifacts: [
+					{
+						kind: "skill",
+						name: "release-check",
+						description: "release-check workflow",
+						content: "Run the release checks.",
+					},
+				],
+			}),
+		});
+
+		await expect(
+			distillProjectMemory({
+				cwd: projectCwd,
+				sessionId: session.id,
+				model: session.model,
+				config: testConfig,
+				messages: [{ role: "user", content: "distill this workflow" }],
+			}),
+		).rejects.toThrow();
+		expect(listProjectMemoryArtifacts(projectCwd)).toEqual([]);
+	});
+
 	it("keeps one checkpoint writer active and lets the newest pending request win", async () => {
 		const projectCwd = join(root, "writer-project");
 		const seen: string[] = [];
@@ -723,6 +825,138 @@ describe("project memory", () => {
 		await new Promise((resolve) => setTimeout(resolve, 35));
 
 		expect(seen).toEqual(["first", "third"]);
+	});
+
+	it("runs enabled automatic dream and distill passes once per interval", async () => {
+		const realHome = process.env.HOME;
+		const fakeHome = join(root, "home");
+		process.env.HOME = fakeHome;
+		const projectCwd = join(root, "auto-maintenance-project");
+		const session = createSession("test-model", projectCwd);
+		saveSession(session);
+		const runAgent = vi.fn(async () => ({ messages: [{ role: "assistant" as const, content: "done" }] }));
+		const input = {
+			cwd: projectCwd,
+			sessionId: session.id,
+			model: session.model,
+			config: testConfig,
+			messages: [{ role: "user" as const, content: "current work" }],
+			runAgent,
+		};
+		try {
+			updateSettings({
+				memoryDreamAuto: true,
+				memoryDreamIntervalDays: 0,
+				memoryDistillAuto: true,
+				memoryDistillIntervalDays: 0,
+			});
+			await maybeRunAutomaticMemoryMaintenance(input);
+			await maybeRunAutomaticMemoryMaintenance(input);
+			expect(runAgent).toHaveBeenCalledTimes(2);
+			expect(getSessionEvents(session.id).map((event) => event.type)).toEqual(
+				expect.arrayContaining(["memory_auto_dream_started", "memory_auto_distill_started"]),
+			);
+		} finally {
+			if (realHome === undefined) delete process.env.HOME;
+			else process.env.HOME = realHome;
+		}
+	});
+
+	it("persists automatic maintenance as an independently inspectable background run", async () => {
+		const realHome = process.env.HOME;
+		process.env.HOME = join(root, "home-background-run");
+		const projectCwd = join(root, "background-run-project");
+		const session = createSession("test-model", projectCwd);
+		saveSession(session);
+		const runAgent = vi.fn(async () => ({ messages: [{ role: "assistant" as const, content: "done" }] }));
+		try {
+			updateSettings({ memoryDreamAuto: true, memoryDreamIntervalDays: 0 });
+			await maybeRunAutomaticMemoryMaintenance({
+				cwd: projectCwd,
+				sessionId: session.id,
+				model: session.model,
+				config: testConfig,
+				messages: [],
+				runAgent,
+			});
+
+			expect(listAutomaticMemoryRuns(session.id)).toEqual([
+				expect.objectContaining({
+					parentSessionId: session.id,
+					kind: "dream",
+					status: "success",
+				}),
+			]);
+		} finally {
+			if (realHome === undefined) delete process.env.HOME;
+			else process.env.HOME = realHome;
+		}
+	});
+
+	it("cancels an automatic maintenance background run by id", async () => {
+		const realHome = process.env.HOME;
+		process.env.HOME = join(root, "home-cancel-background-run");
+		const projectCwd = join(root, "cancel-background-run-project");
+		const session = createSession("test-model", projectCwd);
+		saveSession(session);
+		let started!: () => void;
+		const runStarted = new Promise<void>((resolve) => {
+			started = resolve;
+		});
+		const runAgent = vi.fn(async (input: { signal?: AbortSignal }) => {
+			started();
+			await new Promise<void>((_resolve, reject) => {
+				if (input.signal?.aborted) return reject(new Error("aborted"));
+				input.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+			});
+			return { messages: [{ role: "assistant" as const, content: "unreachable" }] };
+		});
+		try {
+			updateSettings({ memoryDreamAuto: true, memoryDreamIntervalDays: 0 });
+			const pending = maybeRunAutomaticMemoryMaintenance({
+				cwd: projectCwd,
+				sessionId: session.id,
+				model: session.model,
+				config: testConfig,
+				messages: [],
+				runAgent,
+			});
+			await runStarted;
+			const run = listAutomaticMemoryRuns(session.id).find((item) => item.status === "running");
+			expect(run).toBeDefined();
+			expect(cancelAutomaticMemoryRun(run!.id)).toBe(true);
+			await pending;
+			expect(listAutomaticMemoryRuns(session.id)).toEqual([
+				expect.objectContaining({ id: run!.id, status: "cancelled" }),
+			]);
+		} finally {
+			if (realHome === undefined) delete process.env.HOME;
+			else process.env.HOME = realHome;
+		}
+	});
+
+	it("does not schedule automatic maintenance when memory writing is disabled", async () => {
+		const realHome = process.env.HOME;
+		process.env.HOME = join(root, "home-write-off");
+		const projectCwd = join(root, "auto-write-off-project");
+		const session = createSession("test-model", projectCwd);
+		saveSession(session);
+		const runAgent = vi.fn(async () => ({ messages: [{ role: "assistant" as const, content: "done" }] }));
+		try {
+			updateSettings({ memoryWriteEnabled: false, memoryDreamAuto: true, memoryDreamIntervalDays: 0 });
+			await maybeRunAutomaticMemoryMaintenance({
+				cwd: projectCwd,
+				sessionId: session.id,
+				model: session.model,
+				config: testConfig,
+				messages: [],
+				runAgent,
+			});
+			expect(runAgent).not.toHaveBeenCalled();
+		} finally {
+			if (realHome === undefined) delete process.env.HOME;
+			else process.env.HOME = realHome;
+		}
 	});
 
 	it("freezes pending checkpoint messages at enqueue time", async () => {
