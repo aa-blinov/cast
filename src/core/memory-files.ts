@@ -145,6 +145,20 @@ export function readMemoryFile(path: string, fallback = ""): string {
 	}
 }
 
+export interface CheckedMemoryFile {
+	readable: boolean;
+	content: string;
+}
+
+/** Distinguishes an intentionally empty file from an I/O failure. */
+export function readMemoryFileChecked(path: string): CheckedMemoryFile {
+	try {
+		return { readable: true, content: readFileSync(path, "utf8").slice(0, MAX_FILE_CHARS) };
+	} catch {
+		return { readable: false, content: "" };
+	}
+}
+
 export function readSessionMemory(sessionId: string): { checkpoint: string; notes: string; taskProgress: string } {
 	const progress: string[] = [];
 	try {

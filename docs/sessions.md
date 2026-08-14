@@ -14,7 +14,7 @@ Cast uses a two-layer memory layout. The authoritative artifacts are files under
 
 After every successful turn, a bounded hidden memory writer extracts high-signal durable facts in the background. When a session approaches the context threshold, a separate checkpoint-writer fork also updates the handoff files. These agents use absolute paths, are isolated from the user-facing turn, and share a per-project SQLite lease; one writer runs per session and at most one newer pending checkpoint request is retained. Memory work is bounded and best-effort; the main turn never waits for it.
 
-Relevant entries are automatically retrieved from the current user request and added to the next model context. The `memory` tool can search the same project scope explicitly:
+Ordinary turns receive only a short reminder that durable memory is available; the full memory context is loaded after a checkpoint rebuild, where it becomes part of the durable continuation. The `memory` tool can search the same project scope explicitly on demand:
 
 ```json
 {"query":"native reasoning tool-call"}
@@ -25,6 +25,8 @@ Memory writing is best-effort: if the writer provider call fails or times out, t
 Memory can be disabled globally with `/memory off` in the TUI or Settings → Memory in the Web UI. Background writing can be disabled independently with `/memory write off`; existing memory remains readable and searchable. The prompt budget, relative BM25 score floor, and reconcile-before-search behavior are configurable with `/memory budget`, `/memory floor`, and `/memory reconcile`. All settings are stored in `~/.cast/settings.json` and shared by both clients. Disabling memory does not delete existing project-memory rows.
 
 When the project needs maintenance, `/dream` verifies the last seven days of raw project trajectory against the memory files and consolidates only durable knowledge. `/distill` inspects the last thirty days and existing assets, requires repeated evidence, and materializes high-confidence skills, personas, or commands under the project `.cast` directory; low-confidence candidates remain reviewable in SQLite. Both commands require an idle agent, use the same global memory switch, and leave the conversation intact if the provider call fails.
+
+Automatic dream and distill runs are persistent background-run records linked to their parent session. They have their own status, cancellation, terminal event, and recovery descriptor without adding maintenance messages to the conversation transcript. Use `/memory runs` to inspect them and `/memory cancel <run-id>` to cancel an active run; the Web UI exposes the same operations through its `/memory` command bridge.
 
 ## Session History Search
 

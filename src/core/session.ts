@@ -1083,17 +1083,30 @@ export function loadCheckpoints(sessionId: string): TurnCheckpoint[] {
 /** Append one live agent event. Idempotent by (session, seq) — safe to call
  *  on retry paths. `payload` is anything JSON-serializable (often undefined). */
 export function appendSessionEvent(sessionId: string, type: string, payload?: unknown): void {
-	getDb()
-		.prepare(
+	const db = getDb();
+	const insert = (): void => {
+		db.prepare(
 			"INSERT OR IGNORE INTO session_events (session_id, seq, ts, type, payload_json) VALUES (?, (SELECT COALESCE(MAX(seq), -1) + 1 FROM session_events WHERE session_id = ?), ?, ?, ?)",
-		)
-		.run(
+		).run(
 			sessionId,
 			sessionId,
 			new Date().toISOString(),
 			type,
 			payload === undefined ? null : JSON.stringify(payload),
 		);
+	};
+	if (db.isTransaction) {
+		insert();
+		return;
+	}
+	db.exec("BEGIN IMMEDIATE");
+	try {
+		insert();
+		db.exec("COMMIT");
+	} catch (error) {
+		db.exec("ROLLBACK");
+		throw error;
+	}
 }
 
 /** All recorded live events for a session, oldest first. */

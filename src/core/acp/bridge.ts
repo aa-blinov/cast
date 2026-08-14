@@ -479,6 +479,8 @@ async function runPromptInner(
 ): Promise<void> {
 	const { startup, runner, state, planState } = session;
 	const { appendMessage, saveSession } = await import("../session.ts");
+	const automaticMemoryMaintenance = state.messages.length === 0;
+	const automaticMemoryMessages = state.messages.slice();
 	// Pre-loop: append the user prompt and persist before runAgentLoop — the
 	// loop reads `state.messages` directly and pushes the assistant/tool
 	// messages into the same array, so the user's turn must be present
@@ -495,6 +497,8 @@ async function runPromptInner(
 			cwd: state.cwd ?? startup.cwd,
 			systemPrompt: startup.systemPrompt,
 			memory: { sessionId: state.id },
+			automaticMemoryMaintenance,
+			automaticMemoryMessages,
 			signal: ac.signal,
 			steeringQueue: runner.steeringQueue,
 			followUpQueue: runner.followUpQueue,

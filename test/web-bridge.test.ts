@@ -372,6 +372,10 @@ describe("web bridge", () => {
 				memoryPromptBudget: 4096,
 				memorySearchScoreFloor: 0.15,
 				memoryReconcileOnSearch: true,
+				memoryDreamAuto: false,
+				memoryDreamIntervalDays: 7,
+				memoryDistillAuto: false,
+				memoryDistillIntervalDays: 30,
 			}),
 		);
 		expect((await bridge.executeCommand(ws.id, "/memory off")).result).toEqual({ memoryEnabled: false });
@@ -389,6 +393,31 @@ describe("web bridge", () => {
 		expect(await bridge.executeCommand(ws.id, "/memory write on")).toEqual({
 			ok: true,
 			result: { memoryWriteEnabled: true },
+		});
+	});
+
+	it("configures automatic dream and distill intervals through the shared memory command", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		expect(await bridge.executeCommand(ws.id, "/memory dream on")).toEqual({
+			ok: true,
+			result: { memoryDreamAuto: true },
+		});
+		expect(await bridge.executeCommand(ws.id, "/memory distill interval 12")).toEqual({
+			ok: true,
+			result: { memoryDistillIntervalDays: 12 },
+		});
+		expect((await bridge.executeCommand(ws.id, "/memory")).result).toEqual(
+			expect.objectContaining({ memoryDreamAuto: true, memoryDistillIntervalDays: 12 }),
+		);
+	});
+
+	it("lists automatic memory runs as independent background records", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		expect(await bridge.executeCommand(ws.id, "/memory runs")).toEqual({
+			ok: true,
+			result: { runs: [] },
 		});
 	});
 
