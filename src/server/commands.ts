@@ -15,6 +15,7 @@ export const NON_BLOCKING_COMMANDS = new Set([
 	"/stop",
 	"/current",
 	"/help",
+	"/memory",
 	"/usage",
 	"/sessions",
 	"/queue",
@@ -85,6 +86,13 @@ export const SLASH_COMMANDS: Array<{
 	{ name: "/help", description: "Show this command list", blocking: false },
 	{ name: "/hooks", description: "List/enable/disable hooks", takesArgs: true, blocking: false, hidden: true },
 	{ name: "/mcp", description: "Manage MCP servers", takesArgs: true, blocking: false, hidden: true },
+	{
+		name: "/memory",
+		description: "Inspect and control project memory",
+		takesArgs: true,
+		blocking: false,
+		hidden: true,
+	},
 	{ name: "/model", description: "Show or change model", takesArgs: true, blocking: true, hidden: true },
 	{ name: "/new", description: "Start a new session", blocking: true },
 	{

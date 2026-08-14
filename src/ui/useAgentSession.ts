@@ -904,6 +904,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			const ac = new AbortController();
 			acRef.current = ac;
 			const lease = runner.startRun(ac);
+			const automaticMemoryMaintenance = session.messages.length === 0;
+			const automaticMemoryMessages = session.messages.slice();
 			let chk: ReturnType<typeof createCheckpoint>;
 			let activeSystemPrompt = systemPrompt;
 			let activePersonas = personas;
@@ -1055,6 +1057,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					cwd,
 					systemPrompt: activeSystemPrompt,
 					memory: { sessionId: session.id },
+					automaticMemoryMaintenance,
+					automaticMemoryMessages,
 					signal: ac.signal,
 					steeringQueue: runner.steeringQueue,
 					followUpQueue: runner.followUpQueue,

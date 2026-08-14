@@ -4,7 +4,17 @@
  * Loaded on startup, saved after model/reasoning changes.
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import {
+	closeSync,
+	existsSync,
+	mkdirSync,
+	openSync,
+	readFileSync,
+	renameSync,
+	statSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ReasoningFormat } from "./vendors.ts";
@@ -151,6 +161,14 @@ export interface Settings {
 	memorySearchScoreFloor?: number;
 	/** Reconcile project memory files before search operations. */
 	memoryReconcileOnSearch?: boolean;
+	/** Automatically consolidate project memory when a new top-level session starts. */
+	memoryDreamAuto?: boolean;
+	/** Minimum days between automatic dream runs (default: 7; 0 runs every new session). */
+	memoryDreamIntervalDays?: number;
+	/** Automatically package repeated workflows when a new top-level session starts. */
+	memoryDistillAuto?: boolean;
+	/** Minimum days between automatic distill runs (default: 30; 0 runs every new session). */
+	memoryDistillIntervalDays?: number;
 }
 
 // ============================================================================
@@ -159,9 +177,45 @@ export interface Settings {
 
 const SETTINGS_DIR = ".cast";
 const SETTINGS_FILE = "settings.json";
+const SETTINGS_LOCK_WAIT_MS = 5_000;
+const SETTINGS_LOCK_STALE_MS = 30_000;
 
 function getSettingsPath(): string {
 	return join(homedir(), SETTINGS_DIR, SETTINGS_FILE);
+}
+
+function withSettingsLock<T>(work: () => T): T {
+	const lockPath = `${getSettingsPath()}.lock`;
+	mkdirSync(join(homedir(), SETTINGS_DIR), { recursive: true });
+	const wait = new Int32Array(new SharedArrayBuffer(4));
+	const deadline = Date.now() + SETTINGS_LOCK_WAIT_MS;
+	let acquired = false;
+	while (!acquired) {
+		try {
+			const fd = openSync(lockPath, "wx");
+			closeSync(fd);
+			acquired = true;
+		} catch (error) {
+			const code = (error as NodeJS.ErrnoException).code;
+			if (code !== "EEXIST") throw error;
+			try {
+				if (Date.now() - statSync(lockPath).mtimeMs > SETTINGS_LOCK_STALE_MS) unlinkSync(lockPath);
+			} catch {
+				// Another process may have released or replaced the lock between stat and unlink.
+			}
+			if (Date.now() >= deadline) throw new Error("Timed out waiting for settings lock");
+			Atomics.wait(wait, 0, 0, 10);
+		}
+	}
+	try {
+		return work();
+	} finally {
+		try {
+			unlinkSync(lockPath);
+		} catch {
+			// The stale-lock recovery path may already have removed this lock.
+		}
+	}
 }
 
 export function loadSettings(): Settings {
@@ -221,9 +275,12 @@ function saveSettings(settings: Settings): void {
 	renameSync(tmpPath, path);
 }
 
-export function updateSettings(partial: Partial<Settings>): void {
-	const current = loadSettings();
-	saveSettings({ ...current, ...partial });
+export function updateSettings(partial: Partial<Settings> | ((current: Settings) => Partial<Settings>)): void {
+	withSettingsLock(() => {
+		const current = loadSettings();
+		const update = typeof partial === "function" ? partial(current) : partial;
+		saveSettings({ ...current, ...update });
+	});
 }
 
 /** Existing settings remain enabled; only an explicit false disables memory. */
@@ -249,6 +306,24 @@ export function memorySearchScoreFloor(settings: Settings = loadSettings()): num
 
 export function memoryReconcileOnSearch(settings: Settings = loadSettings()): boolean {
 	return settings.memoryReconcileOnSearch !== false;
+}
+
+export function memoryDreamAuto(settings: Settings = loadSettings()): boolean {
+	return settings.memoryDreamAuto === true;
+}
+
+export function memoryDreamIntervalDays(settings: Settings = loadSettings()): number {
+	const value = settings.memoryDreamIntervalDays;
+	return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.min(Math.floor(value), 3_650)) : 7;
+}
+
+export function memoryDistillAuto(settings: Settings = loadSettings()): boolean {
+	return settings.memoryDistillAuto === true;
+}
+
+export function memoryDistillIntervalDays(settings: Settings = loadSettings()): number {
+	const value = settings.memoryDistillIntervalDays;
+	return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.min(Math.floor(value), 3_650)) : 30;
 }
 
 /** true/false if this project's trust decision was already made, undefined if never asked. */

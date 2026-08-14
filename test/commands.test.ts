@@ -6,7 +6,7 @@ import type { AppConfig } from "../src/core/config.ts";
 import type { McpSetupResult } from "../src/core/mcp.ts";
 import type { Persona } from "../src/core/personas.ts";
 import { createSession, loadSession, type SessionState, saveSession } from "../src/core/session.ts";
-import type { PermissionMode } from "../src/core/settings.ts";
+import { type PermissionMode, updateSettings } from "../src/core/settings.ts";
 import type { Pickers } from "../src/pickers/types.ts";
 import type { CommandDeps } from "../src/ui/commands.ts";
 import type { UseAgentSession } from "../src/ui/useAgentSession.ts";
@@ -263,6 +263,13 @@ describe("handleInput", () => {
 		await handleInput("/clear", undefined, deps);
 		expect(calls["agent.clearContext"]).toBeUndefined();
 		expect(noticeText(calls)).toContain("running");
+	});
+
+	it("allows automatic memory run inspection while running", async () => {
+		const { deps, calls } = createFakeDeps({ running: true });
+		await handleInput("/memory runs", undefined, deps);
+		expect(noticeText(calls)).toContain("No automatic memory runs");
+		expect(calls["agent.abort"]).toBeUndefined();
 	});
 
 	it("/clear calls agent.clearContext when idle", async () => {
@@ -678,6 +685,14 @@ describe("handleInput", () => {
 		const { loadSettings } = await import("../src/core/settings.ts");
 		expect(loadSettings().memoryEnabled).toBe(false);
 		expect(noticeText(calls)).toContain("disabled");
+	});
+
+	it("blocks manual memory maintenance when background memory writing is disabled", async () => {
+		const { deps, calls } = createFakeDeps({ running: false });
+		updateSettings({ memoryWriteEnabled: false });
+		await handleInput("/dream", undefined, deps);
+		expect(noticeText(calls)).toContain("writing is disabled");
+		expect(calls["agent.submit"]).toBeUndefined();
 	});
 
 	it("/reasoning-display is allowed while the agent is running", async () => {

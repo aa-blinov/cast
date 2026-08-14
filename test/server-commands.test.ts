@@ -33,6 +33,12 @@ describe("web slash commands", () => {
 		}
 	});
 
+	it("allows automatic memory run inspection and cancellation during a turn", () => {
+		for (const command of ["/memory runs", "/memory cancel 01234567-89ab-cdef-0123-456789abcdef"]) {
+			expect(isCommandBlocking(command), command).toBe(false);
+		}
+	});
+
 	it("blocks resource mutations during a turn", () => {
 		for (const command of [
 			"/mcp enable server",

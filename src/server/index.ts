@@ -7,7 +7,7 @@
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { closeMcpConnections } from "../core/mcp.ts";
-import { drainProjectCheckpointWriters } from "../core/memory.ts";
+import { drainAutomaticMemoryMaintenance, drainProjectCheckpointWriters } from "../core/memory.ts";
 import { resolveMcpForCwd } from "../core/project.ts";
 import { deleteSession } from "../core/session.ts";
 import { loadSettings, updateSettings } from "../core/settings.ts";
@@ -244,6 +244,7 @@ export async function runServerMain(args: string[], options: { foreground: boole
 		for (const s of bridge.listSessions()) bridge.closeSession(s.id, "shutdown");
 		bridge.dispose?.();
 		await drainProjectCheckpointWriters(2_500);
+		await drainAutomaticMemoryMaintenance(2_500);
 		clearServerState();
 		server.close(() => process.exit(0));
 		// server.close() waits for existing connections (including open SSE

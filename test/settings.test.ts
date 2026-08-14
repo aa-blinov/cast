@@ -7,6 +7,10 @@ import {
 	isMemoryEnabled,
 	isMemoryWriteEnabled,
 	loadSettings,
+	memoryDistillAuto,
+	memoryDistillIntervalDays,
+	memoryDreamAuto,
+	memoryDreamIntervalDays,
 	memoryPromptBudget,
 	memoryReconcileOnSearch,
 	memorySearchScoreFloor,
@@ -147,6 +151,15 @@ describe("settings", () => {
 			expect(memorySearchScoreFloor({ memorySearchScoreFloor: -1 })).toBe(0);
 			expect(memorySearchScoreFloor({ memorySearchScoreFloor: 2 })).toBe(1);
 			expect(memoryReconcileOnSearch({ memoryReconcileOnSearch: false })).toBe(false);
+		});
+
+		it("keeps automatic dream and distill opt-in with Mimo-compatible intervals", () => {
+			expect(memoryDreamAuto({})).toBe(false);
+			expect(memoryDistillAuto({})).toBe(false);
+			expect(memoryDreamIntervalDays({})).toBe(7);
+			expect(memoryDistillIntervalDays({})).toBe(30);
+			expect(memoryDreamIntervalDays({ memoryDreamIntervalDays: -1 })).toBe(0);
+			expect(memoryDistillIntervalDays({ memoryDistillIntervalDays: 3.7 })).toBe(3);
 		});
 	});
 });

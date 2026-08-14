@@ -7,7 +7,12 @@ import { formatContextFilesForPrompt, loadProjectContextFiles } from "../core/co
 import { runHooksForEvent } from "../core/hooks.ts";
 import { compactSessionMessages, PLAN_COMPACTION_PROMPT, runMemoryMaintenanceAgent } from "../core/loop.ts";
 import { closeMcpConnections, formatMcpForPrompt, type McpSetupResult, mcpServerToolBlurbs } from "../core/mcp.ts";
-import { distillProjectMemory, dreamProjectMemory } from "../core/memory.ts";
+import {
+	cancelAutomaticMemoryRun,
+	distillProjectMemory,
+	dreamProjectMemory,
+	listAutomaticMemoryRuns,
+} from "../core/memory.ts";
 import { findPersona, type LoadPersonasOptions, type Persona } from "../core/personas.ts";
 import { createPlanState, readActivePlan } from "../core/plan.ts";
 import {
@@ -52,6 +57,7 @@ import {
 	updateSessionIdentity,
 } from "../core/session.ts";
 import {
+	isMemoryWriteEnabled,
 	loadSettings,
 	type PermissionMode,
 	type Provider,
@@ -138,6 +144,9 @@ const WORKTREE_REMOVE_PREFIX_RE = /^(?:remove|rm)\s*/;
 const MEMORY_BUDGET_COMMAND_RE = /^\/memory budget (\d+)$/;
 const MEMORY_FLOOR_COMMAND_RE = /^\/memory floor (0(?:\.\d+)?|1(?:\.0)?)$/;
 const MEMORY_RECONCILE_COMMAND_RE = /^\/memory reconcile (on|off)$/;
+const MEMORY_AUTO_TOGGLE_COMMAND_RE = /^\/memory (dream|distill) (on|off)$/;
+const MEMORY_AUTO_INTERVAL_COMMAND_RE = /^\/memory (dream|distill) interval (\d+)$/;
+const MEMORY_CANCEL_RUN_COMMAND_RE = /^\/memory cancel ([a-f0-9-]+)$/;
 
 /**
  * Slash commands shown in the Composer's autocomplete palette.
@@ -180,8 +189,11 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	},
 	{ name: "/memory", description: "Toggle durable project memory" },
 	{ name: "/memory budget", description: "Set automatic memory prompt token budget", takesArgs: true },
+	{ name: "/memory distill", description: "Toggle automatic workflow distillation", takesArgs: true },
+	{ name: "/memory dream", description: "Toggle automatic memory consolidation", takesArgs: true },
 	{ name: "/memory floor", description: "Set memory search score floor", takesArgs: true },
 	{ name: "/memory reconcile", description: "Toggle file reconciliation before memory search", takesArgs: true },
+	{ name: "/memory runs", description: "List automatic memory background runs" },
 	{ name: "/memory write", description: "Toggle background memory writing", takesArgs: true },
 	{ name: "/model", description: "Show or change model" },
 	{ name: "/new", description: "Start a new session" },
@@ -1182,14 +1194,20 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		return;
 	}
 
-	if (running) {
+	const isMemoryRunControlCommand = input === "/memory runs" || MEMORY_CANCEL_RUN_COMMAND_RE.test(input);
+	if (running && !isMemoryRunControlCommand) {
 		showNotice("[Agent running — use /queue, /steer, or /abort]");
 		return;
 	}
 
 	if (input === "/dream" || input === "/distill") {
-		if (loadSettings().memoryEnabled === false) {
+		const memorySettings = loadSettings();
+		if (memorySettings.memoryEnabled === false) {
 			showNotice("[Project memory is disabled — use /memory on first]");
+			return;
+		}
+		if (!isMemoryWriteEnabled(memorySettings)) {
+			showNotice("[Project memory writing is disabled — use /memory write on first]");
 			return;
 		}
 		showNotice(`[${input === "/dream" ? "Consolidating project memory" : "Distilling reusable workflows"}…]`);
@@ -2355,6 +2373,65 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		deps.setWebToolsEnabled(picked);
 		updateSettings({ webTools: picked });
 		showNotice(`[Web tools: ${picked ? "enabled" : "disabled"}]`);
+		return;
+	}
+
+	const memoryAutoToggleMatch = input.match(MEMORY_AUTO_TOGGLE_COMMAND_RE);
+	if (memoryAutoToggleMatch) {
+		const kind = memoryAutoToggleMatch[1];
+		const enabled = memoryAutoToggleMatch[2] === "on";
+		updateSettings(kind === "dream" ? { memoryDreamAuto: enabled } : { memoryDistillAuto: enabled });
+		showNotice(`[Automatic ${kind}: ${enabled ? "enabled" : "disabled"}]`);
+		return;
+	}
+
+	const memoryAutoIntervalMatch = input.match(MEMORY_AUTO_INTERVAL_COMMAND_RE);
+	if (memoryAutoIntervalMatch) {
+		const kind = memoryAutoIntervalMatch[1];
+		const days = Number(memoryAutoIntervalMatch[2]);
+		if (!Number.isInteger(days) || days < 0 || days > 3_650) {
+			showNotice("[Automatic memory interval must be an integer from 0 to 3650 days]");
+			return;
+		}
+		updateSettings(kind === "dream" ? { memoryDreamIntervalDays: days } : { memoryDistillIntervalDays: days });
+		showNotice(`[Automatic ${kind} interval: ${days} day${days === 1 ? "" : "s"}]`);
+		return;
+	}
+
+	if (input === "/memory runs") {
+		const runs = listAutomaticMemoryRuns(session.id);
+		showNotice(
+			runs.length === 0
+				? "[No automatic memory runs]"
+				: runs.map((run) => `[${run.id} ${run.kind} ${run.status}]`).join("\n"),
+		);
+		return;
+	}
+
+	const memoryCancelRunMatch = input.match(MEMORY_CANCEL_RUN_COMMAND_RE);
+	if (memoryCancelRunMatch) {
+		showNotice(
+			cancelAutomaticMemoryRun(memoryCancelRunMatch[1]!)
+				? `[Cancelled automatic memory run ${memoryCancelRunMatch[1]}]`
+				: `[Automatic memory run not found or already finished: ${memoryCancelRunMatch[1]}]`,
+		);
+		return;
+	}
+
+	if (input === "/memory dream" || input === "/memory distill") {
+		const kind = input.endsWith("dream") ? "dream" : "distill";
+		const settings = loadSettings();
+		const current = kind === "dream" ? settings.memoryDreamAuto === true : settings.memoryDistillAuto === true;
+		const picked = await deps.pickers.pickOption(
+			[
+				{ value: true, label: `Enable automatic ${kind} (currently ${current ? "on" : "off"})` },
+				{ value: false, label: `Disable automatic ${kind} (currently ${current ? "on" : "off"})` },
+			],
+			{ title: `Automatic ${kind}` },
+		);
+		if (picked === null) return;
+		updateSettings(kind === "dream" ? { memoryDreamAuto: picked } : { memoryDistillAuto: picked });
+		showNotice(`[Automatic ${kind}: ${picked ? "enabled" : "disabled"}]`);
 		return;
 	}
 

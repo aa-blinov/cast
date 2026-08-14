@@ -71,12 +71,18 @@ function SettingsBash({ data, busy, act }) {
 function SettingsMemory({ data, busy, act }) {
 	const [budgetDraft, setBudgetDraft] = useState("");
 	const [floorDraft, setFloorDraft] = useState("");
+	const [dreamIntervalDraft, setDreamIntervalDraft] = useState("");
+	const [distillIntervalDraft, setDistillIntervalDraft] = useState("");
 	if (!data) return null;
 	const enabled = data.memoryEnabled !== false;
 	const writeEnabled = data.memoryWriteEnabled !== false;
 	const budget = data.memoryPromptBudget ?? 4096;
 	const floor = data.memorySearchScoreFloor ?? 0.15;
 	const reconcile = data.memoryReconcileOnSearch !== false;
+	const dreamAuto = data.memoryDreamAuto === true;
+	const dreamInterval = data.memoryDreamIntervalDays ?? 7;
+	const distillAuto = data.memoryDistillAuto === true;
+	const distillInterval = data.memoryDistillIntervalDays ?? 30;
 	return html`
 		<div class="settings-rows">
 			<div class="settings-section-title">Durable project memory</div>
@@ -89,6 +95,22 @@ function SettingsMemory({ data, busy, act }) {
 				<div class="settings-compact-row">
 					<div class="settings-compact-copy"><span class="settings-compact-title">Background writing</span><span>${writeEnabled ? "The writer and checkpoint agent may update memory." : "Existing memory remains readable; no new memory is written."}</span></div>
 					<button class="settings-toggle" role="switch" aria-checked=${writeEnabled ? "true" : "false"} disabled=${busy || !enabled} onClick=${() => act(`/memory write ${writeEnabled ? "off" : "on"}`)}><span class="settings-toggle-thumb" />${writeEnabled ? "Enabled" : "Disabled"}</button>
+				</div>
+				<div class="settings-compact-row">
+					<div class="settings-compact-copy"><span class="settings-compact-title">Automatic dream</span><span>${dreamAuto ? `Consolidates project memory on a new session, at most every ${dreamInterval} day${dreamInterval === 1 ? "" : "s"}.` : "Manual only. Enable to consolidate durable project memory on new sessions."}</span></div>
+					<button class="settings-toggle" role="switch" aria-checked=${dreamAuto ? "true" : "false"} disabled=${busy || !enabled || !writeEnabled} onClick=${() => act(`/memory dream ${dreamAuto ? "off" : "on"}`)}><span class="settings-toggle-thumb" />${dreamAuto ? "Enabled" : "Disabled"}</button>
+				</div>
+				<div class="settings-compact-row">
+					<div class="settings-compact-copy"><span class="settings-compact-title">Dream interval</span><span>Minimum days between automatic consolidation runs; 0 runs on every new session.</span></div>
+					<form style="display:contents" onSubmit=${(event) => { event.preventDefault(); const value = Number(dreamIntervalDraft || dreamInterval); if (Number.isInteger(value) && value >= 0 && value <= 3650) act(`/memory dream interval ${value}`); }}><input aria-label="Automatic dream interval days" type="number" min="0" max="3650" step="1" value=${dreamIntervalDraft || dreamInterval} disabled=${busy || !enabled || !writeEnabled} onInput=${(event) => setDreamIntervalDraft(event.target.value)} /><button class="modal-btn" disabled=${busy || !dreamIntervalDraft || Number(dreamIntervalDraft) === dreamInterval} onClick=${() => act(`/memory dream interval ${Number(dreamIntervalDraft)}`)}>Save</button></form>
+				</div>
+				<div class="settings-compact-row">
+					<div class="settings-compact-copy"><span class="settings-compact-title">Automatic distill</span><span>${distillAuto ? `Packages repeated workflows on a new session, at most every ${distillInterval} day${distillInterval === 1 ? "" : "s"}.` : "Manual only. Enable to package repeated workflows into reusable assets."}</span></div>
+					<button class="settings-toggle" role="switch" aria-checked=${distillAuto ? "true" : "false"} disabled=${busy || !enabled || !writeEnabled} onClick=${() => act(`/memory distill ${distillAuto ? "off" : "on"}`)}><span class="settings-toggle-thumb" />${distillAuto ? "Enabled" : "Disabled"}</button>
+				</div>
+				<div class="settings-compact-row">
+					<div class="settings-compact-copy"><span class="settings-compact-title">Distill interval</span><span>Minimum days between automatic workflow packaging runs.</span></div>
+					<form style="display:contents" onSubmit=${(event) => { event.preventDefault(); const value = Number(distillIntervalDraft || distillInterval); if (Number.isInteger(value) && value >= 0 && value <= 3650) act(`/memory distill interval ${value}`); }}><input aria-label="Automatic distill interval days" type="number" min="0" max="3650" step="1" value=${distillIntervalDraft || distillInterval} disabled=${busy || !enabled || !writeEnabled} onInput=${(event) => setDistillIntervalDraft(event.target.value)} /><button class="modal-btn" disabled=${busy || !distillIntervalDraft || Number(distillIntervalDraft) === distillInterval} onClick=${() => act(`/memory distill interval ${Number(distillIntervalDraft)}`)}>Save</button></form>
 				</div>
 				<div class="settings-compact-row">
 					<div class="settings-compact-copy"><span class="settings-compact-title">Prompt budget</span><span>Maximum estimated memory tokens added to a model context.</span></div>

@@ -9,7 +9,9 @@ export type AgentActorStatus = "pending" | "running" | "success" | "failure" | "
 export type AgentActorMode = "main" | "subagent";
 export type AgentActorLifecycle = "ephemeral" | "persistent";
 
-export interface AgentActorRecoverySpec {
+export type AgentActorRecoverySpec = CheckpointWriterRecoverySpec | MemoryMaintenanceRecoverySpec;
+
+export interface CheckpointWriterRecoverySpec {
 	kind: "checkpoint-writer";
 	cwd: string;
 	sessionId: string;
@@ -17,6 +19,17 @@ export interface AgentActorRecoverySpec {
 	providerBaseURL: string;
 	checkpointBoundary: number;
 	config: Omit<AppConfig, "apiKey">;
+}
+
+export interface MemoryMaintenanceRecoverySpec {
+	kind: "memory-maintenance";
+	maintenanceKind: "dream" | "distill";
+	cwd: string;
+	sessionId: string;
+	model: string;
+	providerBaseURL: string;
+	config: Omit<AppConfig, "apiKey">;
+	messages: Message[];
 }
 
 /** Immutable context captured at the actor boundary, including the exact durable fork split. */
@@ -216,6 +229,17 @@ function snapshotFromRow(row: SqliteActorRow): AgentActorSnapshot | undefined {
 				typeof parsed.providerBaseURL === "string" &&
 				typeof parsed.checkpointBoundary === "number" &&
 				parsed.config !== undefined
+			) {
+				recovery = parsed as AgentActorRecoverySpec;
+			} else if (
+				parsed.kind === "memory-maintenance" &&
+				(parsed.maintenanceKind === "dream" || parsed.maintenanceKind === "distill") &&
+				typeof parsed.cwd === "string" &&
+				typeof parsed.sessionId === "string" &&
+				typeof parsed.model === "string" &&
+				typeof parsed.providerBaseURL === "string" &&
+				parsed.config !== undefined &&
+				Array.isArray(parsed.messages)
 			) {
 				recovery = parsed as AgentActorRecoverySpec;
 			}
@@ -466,6 +490,22 @@ export class AgentActorRegistry {
 	list(): AgentActorSnapshot[] {
 		this.ensureRestored();
 		return [...this.records.values()].map(snapshotOf);
+	}
+
+	cancel(id: string): boolean {
+		this.ensureRestored();
+		const record = this.records.get(id);
+		if (!record || isTerminal(record.status)) return false;
+		record.controller.abort();
+		record.status = "cancelled";
+		record.updatedAt = now();
+		record.completedAt = record.updatedAt;
+		record.parentCleanup?.();
+		this.persist(record);
+		record.resolveWait("cancelled");
+		this.notify(record, "cancelled");
+		this.pruneTerminalRecords();
+		return true;
 	}
 
 	scanStalled(at = Date.now()): AgentActorSnapshot[] {
