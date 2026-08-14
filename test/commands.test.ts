@@ -672,6 +672,14 @@ describe("handleInput", () => {
 		expect(calls["agent.toggleReasoning"]).toHaveLength(1);
 	});
 
+	it("/memory off persists the global memory setting", async () => {
+		const { deps, calls } = createFakeDeps({ running: false });
+		await handleInput("/memory off", undefined, deps);
+		const { loadSettings } = await import("../src/core/settings.ts");
+		expect(loadSettings().memoryEnabled).toBe(false);
+		expect(noticeText(calls)).toContain("disabled");
+	});
+
 	it("/reasoning-display is allowed while the agent is running", async () => {
 		// The toggle is a UI-only switch — it doesn't touch the running turn,
 		// so the running guard must not block it. Otherwise users would have to

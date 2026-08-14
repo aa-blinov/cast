@@ -2,7 +2,14 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { getProjectTrust, loadSettings, type Provider, setProjectTrust, updateSettings } from "../src/core/settings.ts";
+import {
+	getProjectTrust,
+	isMemoryEnabled,
+	loadSettings,
+	type Provider,
+	setProjectTrust,
+	updateSettings,
+} from "../src/core/settings.ts";
 
 describe("settings", () => {
 	let realHome: string | undefined;
@@ -111,6 +118,17 @@ describe("settings", () => {
 			const raw = JSON.parse(readFileSync(join(dir, "settings.json"), "utf-8")) as Record<string, unknown>;
 			expect(raw.providerUrl).toBeUndefined();
 			expect(raw.apiKey).toBe("k-a");
+		});
+	});
+
+	describe("memory", () => {
+		it("is enabled for existing settings that have no memory flag", () => {
+			expect(isMemoryEnabled(loadSettings())).toBe(true);
+		});
+
+		it("persists a global disabled state", () => {
+			updateSettings({ memoryEnabled: false });
+			expect(isMemoryEnabled(loadSettings())).toBe(false);
 		});
 	});
 });

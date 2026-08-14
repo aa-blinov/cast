@@ -155,7 +155,11 @@ export interface SessionState {
  * prompt size says nothing about the main session's context. */
 const safe = (v: number | undefined) => Math.max(0, v ?? 0);
 
-export function addUsage(session: SessionState, usage: Usage, opts?: { subagent?: boolean }): void {
+export function addUsage(
+	session: SessionState,
+	usage: Usage,
+	opts?: { subagent?: boolean; background?: boolean },
+): void {
 	session.usage.promptTokens += safe(usage.promptTokens);
 	session.usage.completionTokens += safe(usage.completionTokens);
 	session.usage.totalTokens += safe(usage.totalTokens);
@@ -167,6 +171,7 @@ export function addUsage(session: SessionState, usage: Usage, opts?: { subagent?
 		session.usage.subagentTokens += usage.totalTokens;
 		return;
 	}
+	if (opts?.background) return;
 	// Track the latest promptTokens as the authoritative context size.
 	session.lastPromptTokens = usage.promptTokens;
 }

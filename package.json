@@ -21,6 +21,7 @@
 		"e2e:jsonl": "bash scripts/e2e-server-jsonl.sh",
 		"e2e:hooks": "bash scripts/e2e-server-hooks.sh",
 		"e2e:compaction": "node --import tsx scripts/e2e-compaction.mjs",
+		"e2e:memory": "node --import tsx scripts/e2e-memory.mjs",
 		"e2e:web-model": "node scripts/e2e-web-model-flow.mjs",
 		"e2e:docs": "node scripts/e2e-docs-site.mjs",
 		"build-site": "node --import tsx scripts/build-site.mjs",

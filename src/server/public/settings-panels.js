@@ -68,6 +68,23 @@ function SettingsBash({ data, busy, act }) {
 	`;
 }
 
+function SettingsMemory({ data, busy, act }) {
+	if (!data) return null;
+	const enabled = data.memoryEnabled !== false;
+	return html`
+		<div class="settings-rows">
+			<div class="settings-section-title">Durable project memory</div>
+			<p class="settings-hint">The agent can retain verified project facts across sessions. This is a global setting shared with the TUI and saved in <code>~/.cast/settings.json</code>.</p>
+			<div class="settings-compact-list">
+				<div class="settings-compact-row">
+					<div class="settings-compact-copy"><span class="settings-compact-title">Memory</span><span>${enabled ? "Extraction, retrieval, and the Memory sidebar are active." : "Memory extraction, retrieval, and the Memory sidebar are disabled."}</span></div>
+					<button class="settings-toggle" role="switch" aria-checked=${enabled ? "true" : "false"} disabled=${busy} onClick=${() => act(`/memory ${enabled ? "off" : "on"}`)}><span class="settings-toggle-thumb" />${enabled ? "Enabled" : "Disabled"}</button>
+				</div>
+			</div>
+		</div>
+	`;
+}
+
 function SettingsWeb({ data, busy, act }) {
 	const [tavilyKey, setTavilyKey] = useState("");
 	const [braveKey, setBraveKey] = useState("");
@@ -955,6 +972,7 @@ export {
 	InfoPopover,
 	SettingsBash,
 	SettingsHooks,
+	SettingsMemory,
 	SettingsMcp,
 	SettingsMarketplace,
 	SettingsPlugins,
