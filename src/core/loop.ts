@@ -25,6 +25,8 @@ import {
 	createProjectMemoryService,
 	formatMemoryHistory,
 	type MemoryCheckpointWriterInput,
+	type MemoryMaintenanceAgentInput,
+	type MemoryMaintenanceAgentResult,
 	type MemoryService,
 	projectIdForCwd,
 	reconcileProjectMemoryFiles,
@@ -758,6 +760,47 @@ function checkpointWriterPrompt(input: MemoryCheckpointWriterInput): string {
 		"Recent conversation and tool history:",
 		transcript || "(no completed user turn)",
 	].join("\n");
+}
+
+export async function runMemoryMaintenanceAgent(
+	input: MemoryMaintenanceAgentInput,
+): Promise<MemoryMaintenanceAgentResult> {
+	const controller = new AbortController();
+	const timeout = setTimeout(() => controller.abort(), 120_000);
+	timeout.unref();
+	const abortFromParent = () => controller.abort();
+	input.signal?.addEventListener("abort", abortFromParent, { once: true });
+	let usage: Usage | undefined;
+	try {
+		const messages = await runAgentLoop([{ role: "user", content: input.prompt }], {
+			config: input.config,
+			model: input.model,
+			modelProvider: input.providerOverride,
+			cwd: input.cwd,
+			systemPrompt: input.systemPrompt,
+			signal: controller.signal,
+			onEvent: (event) => {
+				if (event.type === "usage") {
+					usage = event.usage;
+					input.onUsage?.(event.usage);
+				}
+			},
+			onWarning: () => {},
+			allowedTools: ["bash", "read", "write", "edit", "glob", "grep"],
+			readOnlyBash: true,
+			disabledTools: new Set(["task", "memory", "web_search", "web_fetch", "ssh", "skill"]),
+			personas: [],
+			subagentPrompts: [],
+			mcpTools: [],
+			skills: [],
+			noSkills: true,
+			projectTrusted: false,
+		});
+		return { messages, usage };
+	} finally {
+		input.signal?.removeEventListener("abort", abortFromParent);
+		clearTimeout(timeout);
+	}
 }
 
 async function runCheckpointWriter(input: MemoryCheckpointWriterInput): Promise<void> {

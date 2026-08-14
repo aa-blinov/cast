@@ -15,7 +15,7 @@ import { backupFileForCheckpoint, createCheckpoint, restoreCheckpoint } from "..
 import { fetchModels, type ModelInfo, probeProvider, resolveProvider } from "../core/config.ts";
 import { hasHooks, runHooksForEvent } from "../core/hooks.ts";
 import type { Message } from "../core/llm.ts";
-import { type AgentEvent, compactSessionMessages, runAgentLoop } from "../core/loop.ts";
+import { type AgentEvent, compactSessionMessages, runAgentLoop, runMemoryMaintenanceAgent } from "../core/loop.ts";
 import { closeMcpConnections, formatMcpForPrompt, type McpSetupResult } from "../core/mcp.ts";
 import { distillProjectMemory, dreamProjectMemory } from "../core/memory.ts";
 import { DEFAULT_PERSONA, type Persona } from "../core/personas.ts";
@@ -2242,6 +2242,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					model: ws.session.model,
 					config,
 					messages: ws.session.messages,
+					runAgent: runMemoryMaintenanceAgent,
 				};
 				if (name === "/dream") {
 					const result = await dreamProjectMemory(input);

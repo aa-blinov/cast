@@ -9,7 +9,9 @@ import { createClient, type Message, streamAndCollect, type Usage } from "./llm.
 import {
 	checkpointPath,
 	ensureMemoryFiles,
+	notesPath,
 	projectMemoryPath,
+	readMemoryFile,
 	readProjectMemory,
 	readSessionMemory,
 	renderCheckpoint,
@@ -27,12 +29,16 @@ const TRAILING_SEPARATORS_RE = /[\\/]+$/;
 const MARKDOWN_BULLET_RE = /^[-*]\s+(.+)$/;
 const MARKDOWN_EMPTY_RE = /^(\(none|#)/;
 const MARKDOWN_BULLET_STRIP_RE = /^[-*]\s+/;
+const ARTIFACT_FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?/;
+const ARTIFACT_DESCRIPTION_RE = /^description:\s*(.+)$/m;
 const MEMORY_WRITER_SYSTEM_PROMPT = readRequiredPrompt(promptsDir, "memory-writer-system.md");
 const MEMORY_WRITER_PROMPT = readRequiredPrompt(promptsDir, "memory-writer.md");
 const MEMORY_DREAM_SYSTEM_PROMPT = readRequiredPrompt(promptsDir, "memory-dream-system.md");
 const MEMORY_DREAM_PROMPT = readRequiredPrompt(promptsDir, "memory-dream.md");
+const MEMORY_DREAM_AGENT_SYSTEM_PROMPT = readRequiredPrompt(promptsDir, "memory-dream-agent-system.md");
 const MEMORY_DISTILL_SYSTEM_PROMPT = readRequiredPrompt(promptsDir, "memory-distill-system.md");
 const MEMORY_DISTILL_PROMPT = readRequiredPrompt(promptsDir, "memory-distill.md");
+const MEMORY_DISTILL_AGENT_SYSTEM_PROMPT = readRequiredPrompt(promptsDir, "memory-distill-agent-system.md");
 
 export const MEMORY_TOOL_DESCRIPTION = `Search durable project memory across previous Cast sessions using BM25 full-text search.
 
@@ -111,7 +117,26 @@ export interface MemoryMaintenanceInput {
 	signal?: AbortSignal;
 	providerOverride?: ProviderCredentials;
 	onUsage?: (usage: Usage) => void;
+	runAgent?: MemoryMaintenanceAgent;
 }
+
+export interface MemoryMaintenanceAgentInput {
+	prompt: string;
+	systemPrompt: string;
+	cwd: string;
+	config: AppConfig;
+	model: string;
+	providerOverride?: ProviderCredentials;
+	signal?: AbortSignal;
+	onUsage?: (usage: Usage) => void;
+}
+
+export interface MemoryMaintenanceAgentResult {
+	messages: Message[];
+	usage?: Usage;
+}
+
+export type MemoryMaintenanceAgent = (input: MemoryMaintenanceAgentInput) => Promise<MemoryMaintenanceAgentResult>;
 
 export interface MemoryDreamResult {
 	removed: number;
@@ -823,6 +848,33 @@ function formatExistingAssets(cwd: string): string {
 	return lines.join("\n").slice(0, 12_000) || "(no existing project assets found)";
 }
 
+function maintenanceAgentPrompt(input: MemoryMaintenanceInput, kind: "dream" | "distill"): string {
+	const projectId = projectIdForCwd(input.cwd);
+	ensureMemoryFiles(input.sessionId, projectId);
+	const projectMemory = projectMemoryPath(projectId);
+	const checkpoint = checkpointPath(input.sessionId);
+	const notes = notesPath(input.sessionId);
+	const trajectory = formatProjectTrajectory(input.cwd, kind === "dream" ? 7 : 30);
+	const prompt = kind === "dream" ? MEMORY_DREAM_PROMPT : MEMORY_DISTILL_PROMPT;
+	return prompt
+		.replace("{{TRANSCRIPT}}", formatMemoryTranscript(input.messages) || "(no completed turn supplied)")
+		.replace("{{CHECKPOINT}}", checkpointPromptText(latestProjectMemoryCheckpoint(input.cwd)))
+		.replace("{{TRAJECTORY}}", trajectory)
+		.replace("{{ASSETS}}", formatExistingAssets(input.cwd))
+		.replace(
+			"{{MEMORY}}",
+			`${formatProjectMemoryForMaintenance(input.cwd)}\n\n${fileMemoryContext(input.cwd, input.sessionId)}`,
+		)
+		.concat(
+			"\n\nResolved writable paths (use file tools, not JSON output):\n",
+			`PROJECT_MEMORY_PATH = ${projectMemory}\n`,
+			`CHECKPOINT_PATH = ${checkpoint}\n`,
+			`NOTES_PATH = ${notes}\n`,
+			`PROJECT_ASSETS_ROOT = ${join(input.cwd, ".cast")}\n`,
+			"The raw trajectory above is authoritative context. The database itself is read-only and must not be edited.",
+		);
+}
+
 function parseMemoryDreamOutput(raw: string): {
 	removeIds: number[];
 	entries: MemoryEntry[];
@@ -845,6 +897,33 @@ function parseMemoryDreamOutput(raw: string): {
 
 async function runDreamProjectMemory(input: MemoryMaintenanceInput): Promise<MemoryDreamResult> {
 	if (!isMemoryEnabled() || input.signal?.aborted) return { removed: 0, stored: 0, skipped: true };
+	if (input.runAgent) {
+		const before = listProjectMemory(input.cwd, 100);
+		const response = await input.runAgent({
+			prompt: maintenanceAgentPrompt(input, "dream"),
+			systemPrompt: MEMORY_DREAM_AGENT_SYSTEM_PROMPT,
+			cwd: input.cwd,
+			config: input.config,
+			model: input.model,
+			providerOverride: input.providerOverride,
+			signal: input.signal,
+			onUsage: input.onUsage,
+		});
+		if (response.usage) input.onUsage?.(response.usage);
+		reconcileProjectMemoryFiles(input.cwd, input.sessionId, true);
+		const after = listProjectMemory(input.cwd, 100);
+		const afterContents = new Set(after.map((entry) => `${entry.type}\n${entry.content}`));
+		const removed = before.filter((entry) => !afterContents.has(`${entry.type}\n${entry.content}`)).length;
+		const db = getDb();
+		withImmediateTransaction(db, () => {
+			appendMemorySessionEvent(db, input.sessionId, "memory_dream_completed", {
+				mode: "agent",
+				removed,
+				entries: after.length,
+			});
+		});
+		return { removed, stored: after.length, usage: response.usage };
+	}
 	const transcript = formatMemoryTranscript(input.messages);
 	const checkpoint = latestProjectMemoryCheckpoint(input.cwd);
 	const prompt = MEMORY_DREAM_PROMPT.replace("{{TRANSCRIPT}}", transcript || "(no completed turn supplied)")
@@ -969,6 +1048,95 @@ function materializeDistilledArtifact(
 	}
 }
 
+function projectArtifactFiles(cwd: string): Array<{ kind: MemoryArtifactKind; name: string; path: string }> {
+	const root = join(cwd, ".cast");
+	const result: Array<{ kind: MemoryArtifactKind; name: string; path: string }> = [];
+	const skillRoot = join(root, "skills");
+	if (existsSync(skillRoot)) {
+		for (const entry of readdirSync(skillRoot, { withFileTypes: true })) {
+			if (!entry.isDirectory()) continue;
+			const path = join(skillRoot, entry.name, "SKILL.md");
+			if (existsSync(path)) result.push({ kind: "skill", name: entry.name, path });
+		}
+	}
+	for (const [kind, directory] of [
+		["subagent", "personas"],
+		["command", "commands"],
+	] as const) {
+		const dir = join(root, directory);
+		if (!existsSync(dir)) continue;
+		for (const entry of readdirSync(dir, { withFileTypes: true })) {
+			if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+			result.push({ kind, name: entry.name.slice(0, -3), path: join(dir, entry.name) });
+		}
+	}
+	return result;
+}
+
+function parseProjectArtifactFile(file: { kind: MemoryArtifactKind; name: string; path: string }):
+	| {
+			kind: MemoryArtifactKind;
+			name: string;
+			description: string;
+			content: string;
+	  }
+	| undefined {
+	const raw = readMemoryFile(file.path);
+	if (!raw.trim()) return undefined;
+	const frontmatter = raw.match(ARTIFACT_FRONTMATTER_RE);
+	const description = frontmatter?.[1]?.match(ARTIFACT_DESCRIPTION_RE)?.[1]?.trim() ?? "Generated project workflow";
+	const content = (frontmatter ? raw.slice(frontmatter[0].length) : raw).trim();
+	if (!content) return undefined;
+	return {
+		kind: file.kind,
+		name: file.name,
+		description: description.slice(0, 240),
+		content: content.slice(0, 4000),
+	};
+}
+
+function reconcileProjectMemoryArtifacts(cwd: string, sessionId: string): MemoryArtifact[] {
+	const artifacts = projectArtifactFiles(cwd)
+		.map(parseProjectArtifactFile)
+		.filter((artifact): artifact is NonNullable<typeof artifact> => artifact !== undefined);
+	if (artifacts.length === 0) return listProjectMemoryArtifacts(cwd, 4);
+	const now = new Date().toISOString();
+	const db = getDb();
+	return withImmediateTransaction(db, () => {
+		const insert = db.prepare(`
+			INSERT INTO project_memory_artifacts
+				(project_id, cwd, kind, name, description, content, fingerprint, source_session_id, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(project_id, fingerprint) DO UPDATE SET
+				cwd = excluded.cwd,
+				name = excluded.name,
+				description = excluded.description,
+				content = excluded.content,
+				source_session_id = excluded.source_session_id,
+				updated_at = excluded.updated_at
+		`);
+		for (const artifact of artifacts) {
+			insert.run(
+				projectIdForCwd(cwd),
+				normalizeCwd(cwd),
+				artifact.kind,
+				artifact.name,
+				artifact.description,
+				artifact.content,
+				fingerprintFor(artifact.content, `${artifact.kind}:${artifact.name}`),
+				sessionId,
+				now,
+				now,
+			);
+		}
+		appendMemorySessionEvent(db, sessionId, "memory_distill_completed", {
+			mode: "agent",
+			artifacts: artifacts.length,
+		});
+		return listProjectMemoryArtifacts(cwd, 4);
+	});
+}
+
 function artifactFromRow(row: {
 	id: number;
 	project_id: string;
@@ -1019,6 +1187,20 @@ export function listProjectMemoryArtifacts(cwd: string, limit = 100): MemoryArti
 
 async function runDistillProjectMemory(input: MemoryMaintenanceInput): Promise<MemoryDistillResult> {
 	if (!isMemoryEnabled() || input.signal?.aborted) return { artifacts: [], skipped: true };
+	if (input.runAgent) {
+		const response = await input.runAgent({
+			prompt: maintenanceAgentPrompt(input, "distill"),
+			systemPrompt: MEMORY_DISTILL_AGENT_SYSTEM_PROMPT,
+			cwd: input.cwd,
+			config: input.config,
+			model: input.model,
+			providerOverride: input.providerOverride,
+			signal: input.signal,
+			onUsage: input.onUsage,
+		});
+		if (response.usage) input.onUsage?.(response.usage);
+		return { artifacts: reconcileProjectMemoryArtifacts(input.cwd, input.sessionId), usage: response.usage };
+	}
 	const transcript = formatMemoryTranscript(input.messages);
 	if (!transcript) return { artifacts: [], skipped: true };
 	const checkpoint = latestProjectMemoryCheckpoint(input.cwd);
@@ -1140,19 +1322,19 @@ function parseCheckpointMarkdown(content: string): MemoryCheckpoint | undefined 
 	return parseCheckpoint(result);
 }
 
-export function reconcileProjectMemoryFiles(cwd: string, sessionId: string): void {
+export function reconcileProjectMemoryFiles(cwd: string, sessionId: string, force = false): void {
 	const projectId = projectIdForCwd(cwd);
 	ensureMemoryFiles(sessionId, projectId);
 	const projectContent = readProjectMemory(projectId);
 	const entries = parseMarkdownMemoryEntries(projectContent);
-	if (entries.length === 0) return;
+	if (entries.length === 0 && !force) return;
 	const session = readSessionMemory(sessionId);
 	const checkpoint = parseCheckpointMarkdown(session.checkpoint);
 	const turnKey = `file:${createHash("sha256").update(projectContent).digest("hex").slice(0, 24)}`;
 	const db = getDb();
 	withImmediateTransaction(db, () => {
 		db.prepare("DELETE FROM project_memory WHERE project_id = ?").run(projectId);
-		storeProjectMemoryRows(db, cwd, sessionId, turnKey, entries);
+		if (entries.length > 0) storeProjectMemoryRows(db, cwd, sessionId, turnKey, entries);
 		if (checkpoint) storeProjectMemoryCheckpointRow(db, cwd, sessionId, turnKey, checkpoint);
 		appendMemorySessionEvent(db, sessionId, "memory_files_reconciled", {
 			entries: entries.length,

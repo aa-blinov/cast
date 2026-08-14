@@ -1,9 +1,12 @@
-Distill reusable workflows from the verified project trajectory. Use the thirty-day trajectory, checkpoint, project memory, and completed turn below. Do not package a one-off action. Do not duplicate an existing skill, subagent, or command.
+# Distill: Workflow Packaging
 
-Return exactly:
-{"artifacts":[{"kind":"skill|subagent|command","name":"short-name","description":"what it does","content":"complete reusable instructions"}]}
+Look back over the supplied thirty-day project trajectory and identify only high-confidence repeated workflows worth packaging.
 
-Return at most 4 artifacts. Each name must be short and stable, each description under 240 characters, and each content under 4000 characters. Only include a workflow supported by the turn and project context.
+Use evidence in this order: raw trajectory, session memory files, then existing skills, personas, commands, and plugins. A candidate must normally occur at least twice, or be clearly recurring and costly to repeat. Prefer creating nothing over speculation. Reuse or extend an existing asset instead of duplicating it.
+
+Inventory existing project assets before proposing a new one. For a confirmed candidate, choose the smallest useful form and write it under the project .cast directory: a skill in .cast/skills/<name>/SKILL.md, a persona in .cast/personas/<name>.md, or a command in .cast/commands/<name>.md. Match the existing frontmatter and conventions. Keep each asset focused, bounded, and easy to validate.
+
+Do not modify SQLite session history, source files, or files outside the project .cast and memory paths. Return a short shortlist with evidence, created assets, skipped candidates, and needs-more-evidence after the file edits.
 
 <completed-turn>
 {{TRANSCRIPT}}
