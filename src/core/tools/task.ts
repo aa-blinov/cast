@@ -5,7 +5,7 @@
  * terminal. runAgentLoop is injected to avoid a circular import with loop.ts.
  */
 
-import { type AgentActorRegistry, agentActorRegistry } from "../actors.ts";
+import { type AgentActorRegistry, type AgentForkContext, agentActorRegistry } from "../actors.ts";
 import type { AppConfig } from "../config.ts";
 import { formatContextFilesForPrompt, loadProjectContextFiles } from "../context-files.ts";
 import { type HooksFile, runHooksForEvent } from "../hooks.ts";
@@ -161,6 +161,8 @@ export interface TaskExecutorDeps {
 	sessionId?: string;
 	/** Actor registry used to track this child independently from the parent turn. */
 	actorRegistry?: AgentActorRegistry;
+	/** Captures the parent's fork at the exact task spawn boundary. */
+	forkContext?: () => AgentForkContext;
 	/** Loaded skills — for the skill tool. */
 	skills?: import("../skills.ts").Skill[];
 	/** Injected to avoid circular dependency with loop.ts. */
@@ -271,6 +273,7 @@ export async function execTask(
 			mode: "subagent",
 			background: false,
 			lifecycle: "ephemeral",
+			forkContext: deps.forkContext?.(),
 		},
 		signal,
 	);
