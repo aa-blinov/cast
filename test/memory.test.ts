@@ -464,4 +464,46 @@ describe("project memory", () => {
 
 		expect(seen).toEqual(["first", "third"]);
 	});
+
+	it("freezes pending checkpoint messages at enqueue time", async () => {
+		const projectCwd = join(root, "writer-snapshot-project");
+		const seen: string[] = [];
+		let releaseFirst!: () => void;
+		const firstDone = new Promise<void>((resolve) => {
+			releaseFirst = resolve;
+		});
+		const writer = async (input: { messages: Array<{ content?: unknown }> }): Promise<void> => {
+			seen.push(String(input.messages[0]?.content));
+			if (seen.length === 1) await firstDone;
+		};
+
+		const firstMessages = [{ role: "user" as const, content: "first" }];
+		const secondMessages = [{ role: "user" as const, content: "second before mutation" }];
+		scheduleProjectCheckpointWriter(
+			{
+				cwd: projectCwd,
+				sessionId: "session-writer-snapshot",
+				model: "test-model",
+				config: testConfig,
+				messages: firstMessages,
+			},
+			writer,
+		);
+		await new Promise((resolve) => setImmediate(resolve));
+		scheduleProjectCheckpointWriter(
+			{
+				cwd: projectCwd,
+				sessionId: "session-writer-snapshot",
+				model: "test-model",
+				config: testConfig,
+				messages: secondMessages,
+			},
+			writer,
+		);
+		secondMessages[0]!.content = "second after mutation";
+		releaseFirst();
+		await new Promise((resolve) => setTimeout(resolve, 20));
+
+		expect(seen).toEqual(["first", "second before mutation"]);
+	});
 });

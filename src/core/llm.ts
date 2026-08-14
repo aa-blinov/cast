@@ -820,7 +820,11 @@ function withCacheControlOnText(
  * the returned arrays — the inputs are left untouched, so session state never
  * absorbs the provider-specific structured-content shape.
  */
-export function applyCacheControl(messages: Message[], tools: Tool[]): { messages: Message[]; tools: Tool[] } {
+export function applyCacheControl(
+	messages: Message[],
+	tools: Tool[],
+	cacheMessageIndex?: number,
+): { messages: Message[]; tools: Tool[] } {
 	const outMessages = messages.slice();
 
 	// 1. System prompt — first system/developer message
@@ -843,8 +847,12 @@ export function applyCacheControl(messages: Message[], tools: Tool[]): { message
 		} as ToolWithCacheControl;
 	}
 
-	// 3. Last user or assistant message (walking backward)
-	for (let i = outMessages.length - 1; i >= 0; i--) {
+	// 3. The fork boundary, when supplied, otherwise the last user or assistant
+	// message. Marking the boundary lets a maintenance fork reuse the immutable
+	// parent prefix while its maintenance instruction remains uncached tail.
+	const start =
+		cacheMessageIndex === undefined ? outMessages.length - 1 : Math.min(cacheMessageIndex, outMessages.length - 1);
+	for (let i = start; i >= 0; i--) {
 		const message = outMessages[i]!;
 		if (message.role === "user" || message.role === "assistant") {
 			const marked = withCacheControlOnText(message);
