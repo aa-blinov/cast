@@ -23,7 +23,6 @@ import {
 import { type McpToolHandle, mcpServerNameFromDescription } from "./mcp.ts";
 import {
 	createProjectMemoryService,
-	formatMemoryHistory,
 	type MemoryCheckpointWriterInput,
 	type MemoryMaintenanceAgentInput,
 	type MemoryMaintenanceAgentResult,
@@ -650,6 +649,10 @@ export interface LoopConfig {
 	/** promptTokens from the most recent API response — used by shouldCompact
 	 * as the authoritative context size instead of character-based estimation. */
 	lastPromptTokens?: number;
+	/** Last durable checkpoint boundary in the current message snapshot. */
+	checkpointBoundary?: number;
+	/** Request-only cache marker for the fork prefix. */
+	cachePrefixBoundary?: number;
 	/**
 	 * Optional per-turn system prompt rebuild. Called before every model
 	 * request (each inner tool-call iteration, not just once per turn) with
@@ -747,7 +750,6 @@ function checkpointWriterPrompt(input: MemoryCheckpointWriterInput): string {
 	const projectId = projectIdForCwd(input.cwd);
 	const projectMemory = projectMemoryPath(projectId);
 	ensureMemoryFiles(input.sessionId, projectId);
-	const transcript = formatMemoryHistory(input.messages);
 	return [
 		"Checkpoint paths — use these absolute paths verbatim:",
 		`CHECKPOINT_PATH = ${checkpointPath(input.sessionId)}`,
@@ -757,9 +759,27 @@ function checkpointWriterPrompt(input: MemoryCheckpointWriterInput): string {
 		"",
 		"Read the existing checkpoint, MEMORY.md, and notes.md first. Update the files in place using the file tools. Keep all required checkpoint sections. Do not edit source code.",
 		"",
-		"Recent conversation and tool history:",
-		transcript || "(no completed user turn)",
+		`Fork boundary message index: ${input.checkpointBoundary ?? -1}`,
+		"The forked conversation before this instruction is the source of truth. Read the existing files, then update them in place.",
 	].join("\n");
+}
+
+export interface AgentContextFork {
+	messages: Message[];
+	prefix: Message[];
+	tail: Message[];
+	boundaryIndex: number;
+}
+
+export function createAgentContextFork(messages: Message[], boundaryIndex: number): AgentContextFork {
+	const snapshot = structuredClone(messages);
+	const boundary = Math.max(-1, Math.min(boundaryIndex, snapshot.length - 1));
+	return {
+		messages: snapshot,
+		prefix: snapshot.slice(0, boundary + 1),
+		tail: snapshot.slice(boundary + 1),
+		boundaryIndex: boundary,
+	};
 }
 
 export async function runMemoryMaintenanceAgent(
@@ -808,7 +828,8 @@ async function runCheckpointWriter(input: MemoryCheckpointWriterInput): Promise<
 	const timeout = setTimeout(() => controller.abort(), 120_000);
 	timeout.unref();
 	try {
-		await runAgentLoop([{ role: "user", content: checkpointWriterPrompt(input) }], {
+		const fork = createAgentContextFork(input.messages, input.checkpointBoundary ?? -1);
+		await runAgentLoop([...fork.messages, { role: "user", content: checkpointWriterPrompt(input) }], {
 			config: input.config,
 			model: input.model,
 			modelProvider: input.providerOverride,
@@ -825,6 +846,8 @@ async function runCheckpointWriter(input: MemoryCheckpointWriterInput): Promise<
 			skills: [],
 			noSkills: true,
 			projectTrusted: false,
+			checkpointBoundary: fork.boundaryIndex,
+			cachePrefixBoundary: fork.boundaryIndex >= 0 ? fork.boundaryIndex : undefined,
 		});
 		reconcileProjectMemoryFiles(input.cwd, input.sessionId);
 	} finally {
@@ -837,6 +860,20 @@ function shouldStartCheckpointWriter(loopConfig: LoopConfig, messages: Message[]
 	const observedTokens = loopConfig.lastPromptTokens ?? estimateTokens(messages);
 	const threshold = loopConfig.config.contextWindow * Math.min(loopConfig.config.compactionThreshold, 0.6);
 	return observedTokens >= threshold;
+}
+
+function findCheckpointBoundary(messages: Message[]): number {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const message = messages[i];
+		if (
+			message?.role === "user" &&
+			typeof message.content === "string" &&
+			message.content.includes("<checkpoint-boundary>")
+		) {
+			return i;
+		}
+	}
+	return -1;
 }
 
 // ============================================================================
@@ -860,6 +897,7 @@ export async function runAgentLoop(initialMessages: Message[], loopConfig: LoopC
 				config: loopConfig.config,
 				messages: tracked,
 				providerOverride: loopConfig.modelProvider,
+				checkpointBoundary: loopConfig.checkpointBoundary ?? findCheckpointBoundary(tracked),
 			},
 			runCheckpointWriter,
 			loopConfig.onWarning,
@@ -894,6 +932,8 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 
 async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promise<void> {
 	const { config, model: initialModel, cwd, systemPrompt, onEvent, onWarning, signal, mcpToolIndex } = loopConfig;
+	let checkpointBoundary = loopConfig.checkpointBoundary ?? findCheckpointBoundary(messages);
+	loopConfig.checkpointBoundary = checkpointBoundary;
 	const memoryEnabled = loopConfig.memory !== undefined && isMemoryEnabled();
 	const memoryService = memoryEnabled ? (loopConfig.memory?.service ?? DEFAULT_MEMORY_SERVICE) : undefined;
 	// The same signal is reused across every LLM request, compaction call,
@@ -1285,6 +1325,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		if (!memoryService || !loopConfig.memory?.sessionId) return;
 		const context = memoryService.buildPrompt(cwd, "", loopConfig.memory.sessionId);
 		if (!context) return;
+		const boundaryIndex = messages.length;
 		messages.push({
 			role: "user",
 			content:
@@ -1292,6 +1333,8 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				context +
 				"\n</checkpoint-boundary>",
 		});
+		checkpointBoundary = boundaryIndex;
+		loopConfig.checkpointBoundary = checkpointBoundary;
 	};
 
 	// Build an assistant message from partial content and persist it into
@@ -1387,7 +1430,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				// Apply prompt caching markers to request-ready copies; the live
 				// messages/tools arrays stay clean so saveSession never persists
 				// the provider-specific structured-content shape.
-				const cached = applyCacheControl(messages, tools);
+				const cached = applyCacheControl(messages, tools, loopConfig.cachePrefixBoundary);
 
 				// Vision fallback: if the model doesn't support images (404 from
 				// OpenRouter or similar), strip any image_url messages we added

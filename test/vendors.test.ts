@@ -137,6 +137,23 @@ describe("applyCacheControl", () => {
 		expect(typeof firstUser).toBe("string");
 	});
 
+	it("marks the requested fork boundary instead of the newest message", () => {
+		const messages: Message[] = [
+			{ role: "system", content: "sys" },
+			{ role: "user", content: "checkpoint prefix" },
+			{ role: "assistant", content: "maintenance tail" },
+			{ role: "user", content: "writer instruction" },
+		];
+
+		const out = applyCacheControl(messages, [], 1);
+		const boundary = out.messages[1]!.content as Array<{ cache_control?: { type: string } }>;
+
+		expect(boundary[0]!.cache_control).toEqual({ type: "ephemeral" });
+		expect(typeof out.messages[2]!.content).toBe("string");
+		expect(typeof out.messages[3]!.content).toBe("string");
+		expect(messages[1]!.content).toBe("checkpoint prefix");
+	});
+
 	it("skips empty system messages", () => {
 		const messages: Message[] = [
 			{ role: "system", content: "" },
