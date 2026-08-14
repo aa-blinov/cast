@@ -446,6 +446,119 @@ describe("project memory", () => {
 		);
 	});
 
+	it("leaves the curated project memory file untouched by extraction", async () => {
+		const projectCwd = join(root, "curated-untouched-project");
+		const session = createSession("test-model", projectCwd);
+		saveSession(session);
+		const projectId = projectIdForCwd(projectCwd);
+		ensureMemoryFiles(session.id, projectId);
+		const curated =
+			"# Project memory\n\n## Rules\n- Keep the daemon single-writer.\n  Why: a second writer races the lease\n  How to apply: reuse the SQLite lease\n";
+		writeMemoryFile(projectMemoryPath(projectId), curated);
+		vi.mocked(streamAndCollect).mockResolvedValueOnce({
+			content: JSON.stringify({
+				entries: [{ type: "rule", content: "Memory writing is globally switchable.", importance: 90 }],
+			}),
+		});
+
+		await extractAndStoreProjectMemory({
+			cwd: projectCwd,
+			sessionId: session.id,
+			model: session.model,
+			config: testConfig,
+			messages: [
+				{ role: "user", content: "Add the memory switch" },
+				{ role: "assistant", content: "Added the global memory switch." },
+			],
+		});
+
+		// The curated markdown is byte-identical — extraction never regenerates it.
+		expect(readMemoryFile(projectMemoryPath(projectId))).toBe(curated);
+		// The extracted fact is searchable through the derived index with metadata.
+		expect(listProjectMemory(projectCwd)).toEqual([
+			expect.objectContaining({ content: "Memory writing is globally switchable.", type: "rule", importance: 90 }),
+		]);
+	});
+
+	it("keeps extraction rows searchable when the file reconciles an unrelated change", async () => {
+		const projectCwd = join(root, "reconcile-preserve-project");
+		const session = createSession("test-model", projectCwd);
+		saveSession(session);
+		vi.mocked(streamAndCollect).mockResolvedValueOnce({
+			content: JSON.stringify({
+				entries: [
+					{
+						type: "architecture",
+						content: "The daemon owns one writer per session.",
+						importance: 80,
+						confidence: 70,
+					},
+				],
+			}),
+		});
+		await extractAndStoreProjectMemory({
+			cwd: projectCwd,
+			sessionId: session.id,
+			model: session.model,
+			config: testConfig,
+			messages: [
+				{ role: "user", content: "Design the bridge" },
+				{ role: "assistant", content: "The bridge owns one writer per session." },
+			],
+		});
+		expect(searchProjectMemory(projectCwd, "daemon owns one writer")).toHaveLength(1);
+
+		// A hand edit reconciles without wiping the extraction row: its content is
+		// not curated into the file yet, so it keeps its metadata.
+		const projectId = projectIdForCwd(projectCwd);
+		writeMemoryFile(projectMemoryPath(projectId), "# Project memory\n\n## Rules\n- Hand-added rule.\n");
+		reconcileProjectMemoryFiles(projectCwd, session.id);
+
+		const rows = listProjectMemory(projectCwd);
+		expect(
+			rows.some((row) => row.content === "The daemon owns one writer per session." && row.confidence === 70),
+		).toBe(true);
+		expect(rows.some((row) => row.content === "Hand-added rule.")).toBe(true);
+	});
+
+	it("dream edits the canonical file so removals stick and additions are searchable", async () => {
+		const projectCwd = join(root, "dream-file-project");
+		const session = createSession("test-model", projectCwd);
+		saveSession(session);
+		const projectId = projectIdForCwd(projectCwd);
+		ensureMemoryFiles(session.id, projectId);
+		writeMemoryFile(
+			projectMemoryPath(projectId),
+			"# Project memory\n\n## Rules\n- Keep the stale rule.\n- Keep the good rule.\n",
+		);
+		reconcileProjectMemoryFiles(projectCwd, session.id);
+		const stale = listProjectMemory(projectCwd).find((entry) => entry.content === "Keep the stale rule.");
+		expect(stale).toBeTypeOf("object");
+
+		vi.mocked(streamAndCollect).mockResolvedValueOnce({
+			content: JSON.stringify({
+				removeIds: [stale!.id],
+				entries: [{ type: "decision", content: "The daemon remains single-writer.", importance: 85 }],
+			}),
+		});
+
+		await dreamProjectMemory({
+			cwd: projectCwd,
+			sessionId: session.id,
+			model: session.model,
+			config: testConfig,
+			messages: [{ role: "user", content: "Consolidate the project memory" }],
+		});
+
+		const file = readMemoryFile(projectMemoryPath(projectId));
+		expect(file).not.toContain("Keep the stale rule.");
+		expect(file).toContain("Keep the good rule.");
+		expect(file).toContain("The daemon remains single-writer.");
+		const rows = listProjectMemory(projectCwd);
+		expect(rows.some((entry) => entry.content === "Keep the stale rule.")).toBe(false);
+		expect(rows.some((entry) => entry.content === "The daemon remains single-writer.")).toBe(true);
+	});
+
 	it("retries an empty extraction when a completed turn contains enough durable context", async () => {
 		const projectCwd = join(root, "retry-project");
 		const session = createSession("test-model", projectCwd);
