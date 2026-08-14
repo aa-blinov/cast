@@ -5,6 +5,7 @@
  * terminal. runAgentLoop is injected to avoid a circular import with loop.ts.
  */
 
+import { type AgentActorRegistry, agentActorRegistry } from "../actors.ts";
 import type { AppConfig } from "../config.ts";
 import { formatContextFilesForPrompt, loadProjectContextFiles } from "../context-files.ts";
 import { type HooksFile, runHooksForEvent } from "../hooks.ts";
@@ -158,6 +159,8 @@ export interface TaskExecutorDeps {
 	hooks?: HooksFile;
 	/** Current session id, for hook payloads/env. */
 	sessionId?: string;
+	/** Actor registry used to track this child independently from the parent turn. */
+	actorRegistry?: AgentActorRegistry;
 	/** Loaded skills — for the skill tool. */
 	skills?: import("../skills.ts").Skill[];
 	/** Injected to avoid circular dependency with loop.ts. */
@@ -260,12 +263,24 @@ export async function execTask(
 	// (aborted, disconnected, error) means the run did not complete cleanly and
 	// must be surfaced as an error rather than passed off as a valid result.
 	let endReason = "stop";
+	const actor = (deps.actorRegistry ?? agentActorRegistry).spawn(
+		{
+			parentSessionId: deps.sessionId,
+			sessionId: deps.sessionId,
+			agent: subagent?.name ?? "worker",
+			mode: "subagent",
+			background: false,
+			lifecycle: "ephemeral",
+		},
+		signal,
+	);
 
 	// Bound concurrency: excess subagents queue here until a slot frees up.
 	// Abort-aware — if cancelled while queued, bail out before holding a slot.
 	try {
-		await subagentSemaphore.acquire(signal);
+		await subagentSemaphore.acquire(actor.signal);
 	} catch {
+		actor.cancel();
 		return {
 			content: "Subagent did not complete successfully (aborted):\n\n(cancelled before start)",
 			isError: true,
@@ -273,80 +288,95 @@ export async function execTask(
 		};
 	}
 	if (deps.hooks) {
-		await runHooksForEvent(deps.hooks, {
-			event: "SubagentStart",
-			matchTarget: subagent?.name ?? "worker",
-			cwd,
-			sessionId: deps.sessionId,
-			payload: { agent_type: subagent?.name ?? "worker", assignment },
-			signal,
-		});
+		try {
+			await runHooksForEvent(deps.hooks, {
+				event: "SubagentStart",
+				matchTarget: subagent?.name ?? "worker",
+				cwd,
+				sessionId: deps.sessionId,
+				payload: { agent_type: subagent?.name ?? "worker", actor_id: actor.id, assignment },
+				signal: actor.signal,
+			});
+		} catch (error) {
+			actor.cancel();
+			subagentSemaphore.release();
+			return {
+				content: `Subagent failed to start: ${error instanceof Error ? error.message : String(error)}`,
+				isError: true,
+			};
+		}
 	}
 	let finalMessages: Message[];
 	const startedAt = new Date().toISOString();
 	try {
-		finalMessages = await deps.runAgentLoop(childMessages, {
-			config,
-			model: deps.model,
-			modelProvider: deps.subagentModelProvider,
-			cwd,
-			systemPrompt: childSystemPrompt,
-			onEvent: (event) => {
-				if (event.type === "usage") {
-					subagentUsage.promptTokens += event.usage.promptTokens;
-					subagentUsage.completionTokens += event.usage.completionTokens;
-					subagentUsage.totalTokens += event.usage.totalTokens;
-					if (event.usage.cacheReadTokens) {
-						subagentUsage.cacheReadTokens = (subagentUsage.cacheReadTokens ?? 0) + event.usage.cacheReadTokens;
-					}
-					if (event.usage.cacheWriteTokens) {
-						subagentUsage.cacheWriteTokens = (subagentUsage.cacheWriteTokens ?? 0) + event.usage.cacheWriteTokens;
-					}
-					if (event.usage.uncachedTokens) {
-						subagentUsage.uncachedTokens = (subagentUsage.uncachedTokens ?? 0) + event.usage.uncachedTokens;
-					}
-					// Provider-reported cost (e.g. OpenRouter) must be folded in too,
-					// otherwise the subagent's spend silently vanishes from the
-					// session's cost total — tokens were propagated but dollars weren't.
-					if (event.usage.cost) {
-						subagentUsage.cost = (subagentUsage.cost ?? 0) + event.usage.cost;
-					}
-				} else if (event.type === "end") {
-					endReason = event.reason;
-				}
-			},
-			signal,
-			// Serialize confirmations so parallel subagents don't race the terminal.
-			confirmBash: serializeConfirm(deps.confirmBash),
-			mcpTools: deps.mcpTools,
-			mcpToolIndex: deps.mcpToolIndex,
-			hooks: deps.hooks,
-			sessionId: deps.sessionId,
-			// The parent alone owns the plan artifact. Passing enabled=false below
-			// avoids giving the child plan-authoring tools, so write/edit must be
-			// denied explicitly or a plan-mode child could edit the project.
-			disabledTools: new Set([
-				...(deps.disabledTools ?? []),
-				...PLAN_TOOL_NAMES,
-				QUESTION_TOOL_NAME,
-				...(deps.planState?.enabled ? ["write", "edit"] : []),
-			]),
-			// Frontmatter `tools:` on the subagent — undefined means all (minus
-			// disabledTools above); when set, only listed names are advertised
-			// and executable.
-			allowedTools: subagent?.tools,
-			projectTrusted: deps.projectTrusted,
-			// Handoff, not authority: the child sees the plan (mirror block in
-			// build mode, or the current draft during planning) but always runs
-			// with enabled=false — the plan-mode restriction block references
-			// authoring tools the child doesn't have. The parent's inspection-only
-			// bash gate is inherited explicitly instead: explorers can run git
-			// log/grep pipelines but still can't write.
-			planState: deps.planState ? { ...deps.planState, enabled: false } : undefined,
-			readOnlyBash: deps.planState?.enabled === true,
-			sshHosts: deps.sshHosts,
-			// ponytail: no personas/currentPersona/subagentModel — child can't delegate further
-		});
+		finalMessages = await actor.run(
+			(actorSignal) =>
+				deps.runAgentLoop(childMessages, {
+					config,
+					model: deps.model,
+					modelProvider: deps.subagentModelProvider,
+					cwd,
+					systemPrompt: childSystemPrompt,
+					onEvent: (event) => {
+						if (event.type === "usage") {
+							subagentUsage.promptTokens += event.usage.promptTokens;
+							subagentUsage.completionTokens += event.usage.completionTokens;
+							subagentUsage.totalTokens += event.usage.totalTokens;
+							if (event.usage.cacheReadTokens) {
+								subagentUsage.cacheReadTokens =
+									(subagentUsage.cacheReadTokens ?? 0) + event.usage.cacheReadTokens;
+							}
+							if (event.usage.cacheWriteTokens) {
+								subagentUsage.cacheWriteTokens =
+									(subagentUsage.cacheWriteTokens ?? 0) + event.usage.cacheWriteTokens;
+							}
+							if (event.usage.uncachedTokens) {
+								subagentUsage.uncachedTokens = (subagentUsage.uncachedTokens ?? 0) + event.usage.uncachedTokens;
+							}
+							// Provider-reported cost (e.g. OpenRouter) must be folded in too,
+							// otherwise the subagent's spend silently vanishes from the
+							// session's cost total — tokens were propagated but dollars weren't.
+							if (event.usage.cost) {
+								subagentUsage.cost = (subagentUsage.cost ?? 0) + event.usage.cost;
+							}
+						} else if (event.type === "end") {
+							endReason = event.reason;
+						}
+					},
+					signal: actorSignal,
+					// Serialize confirmations so parallel subagents don't race the terminal.
+					confirmBash: serializeConfirm(deps.confirmBash),
+					mcpTools: deps.mcpTools,
+					mcpToolIndex: deps.mcpToolIndex,
+					hooks: deps.hooks,
+					sessionId: deps.sessionId,
+					// The parent alone owns the plan artifact. Passing enabled=false below
+					// avoids giving the child plan-authoring tools, so write/edit must be
+					// denied explicitly or a plan-mode child could edit the project.
+					disabledTools: new Set([
+						...(deps.disabledTools ?? []),
+						...PLAN_TOOL_NAMES,
+						QUESTION_TOOL_NAME,
+						...(deps.planState?.enabled ? ["write", "edit"] : []),
+					]),
+					// Frontmatter `tools:` on the subagent — undefined means all (minus
+					// disabledTools above); when set, only listed names are advertised
+					// and executable.
+					allowedTools: subagent?.tools,
+					projectTrusted: deps.projectTrusted,
+					// Handoff, not authority: the child sees the plan (mirror block in
+					// build mode, or the current draft during planning) but always runs
+					// with enabled=false — the plan-mode restriction block references
+					// authoring tools the child doesn't have. The parent's inspection-only
+					// bash gate is inherited explicitly instead: explorers can run git
+					// log/grep pipelines but still can't write.
+					planState: deps.planState ? { ...deps.planState, enabled: false } : undefined,
+					readOnlyBash: deps.planState?.enabled === true,
+					sshHosts: deps.sshHosts,
+					// ponytail: no personas/currentPersona/subagentModel — child can't delegate further
+				}),
+			() => (endReason === "stop" ? "success" : "failure"),
+		);
 		// Persist the subagent's full transcript — it used to be in-memory only
 		// and was lost when the process died. Saved even for aborted/error runs
 		// so nothing the model did is unrecoverable.
@@ -391,8 +421,8 @@ export async function execTask(
 				matchTarget: subagent?.name ?? "worker",
 				cwd,
 				sessionId: deps.sessionId,
-				payload: { agent_type: subagent?.name ?? "worker", end_reason: endReason },
-				signal,
+				payload: { agent_type: subagent?.name ?? "worker", actor_id: actor.id, end_reason: endReason },
+				signal: actor.signal,
 			});
 		}
 	}

@@ -1,5 +1,6 @@
 import { setMaxListeners } from "node:events";
 import { basename, join } from "node:path";
+import { agentActorRegistry } from "./actors.ts";
 import {
 	formatPostCompactReminder,
 	injectPostCompactReminder,
@@ -844,35 +845,47 @@ export async function runMemoryMaintenanceAgent(
 }
 
 async function runCheckpointWriter(input: MemoryCheckpointWriterInput): Promise<void> {
-	const controller = new AbortController();
-	const timeout = setTimeout(() => controller.abort(), 120_000);
-	timeout.unref();
-	try {
-		const fork = createAgentForkContext(input.messages, input.checkpointBoundary ?? -1);
-		await runAgentLoop([...fork.inheritedMessages, { role: "user", content: checkpointWriterPrompt(input) }], {
-			config: input.config,
-			model: input.model,
-			modelProvider: input.providerOverride,
-			cwd: input.cwd,
-			systemPrompt: CHECKPOINT_WRITER_SYSTEM_PROMPT,
-			signal: controller.signal,
-			onEvent: () => {},
-			onWarning: () => {},
-			allowedTools: ["read", "write", "edit", "glob", "grep"],
-			disabledTools: new Set(["bash", "task", "memory", "web_search", "web_fetch", "ssh", "skill"]),
-			personas: [],
-			subagentPrompts: [],
-			mcpTools: [],
-			skills: [],
-			noSkills: true,
-			projectTrusted: false,
-			checkpointBoundary: fork.boundaryIndex,
-			cachePrefixBoundary: fork.cachePrefixBoundary,
-		});
-		reconcileProjectMemoryFiles(input.cwd, input.sessionId);
-	} finally {
-		clearTimeout(timeout);
-	}
+	const actor = agentActorRegistry.spawn(
+		{
+			parentSessionId: input.sessionId,
+			sessionId: input.sessionId,
+			agent: "checkpoint-writer",
+			mode: "subagent",
+			background: true,
+			lifecycle: "ephemeral",
+		},
+		input.signal,
+	);
+	await actor.run(async (actorSignal) => {
+		const timeout = setTimeout(() => actor.cancel(), 120_000);
+		timeout.unref();
+		try {
+			const fork = createAgentForkContext(input.messages, input.checkpointBoundary ?? -1);
+			await runAgentLoop([...fork.inheritedMessages, { role: "user", content: checkpointWriterPrompt(input) }], {
+				config: input.config,
+				model: input.model,
+				modelProvider: input.providerOverride,
+				cwd: input.cwd,
+				systemPrompt: CHECKPOINT_WRITER_SYSTEM_PROMPT,
+				signal: actorSignal,
+				onEvent: () => {},
+				onWarning: () => {},
+				allowedTools: ["read", "write", "edit", "glob", "grep"],
+				disabledTools: new Set(["bash", "task", "memory", "web_search", "web_fetch", "ssh", "skill"]),
+				personas: [],
+				subagentPrompts: [],
+				mcpTools: [],
+				skills: [],
+				noSkills: true,
+				projectTrusted: false,
+				checkpointBoundary: fork.boundaryIndex,
+				cachePrefixBoundary: fork.cachePrefixBoundary,
+			});
+			reconcileProjectMemoryFiles(input.cwd, input.sessionId);
+		} finally {
+			clearTimeout(timeout);
+		}
+	});
 }
 
 function shouldStartCheckpointWriter(loopConfig: LoopConfig, messages: Message[]): boolean {
