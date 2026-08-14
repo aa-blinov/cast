@@ -889,6 +889,7 @@ function App() {
 		waiter.resolve(ready);
 	}, []);
 	const waitForSessionStream = useCallback((id) => {
+		if (!connected || !backendUp) return Promise.resolve(false);
 		if (activeSessionIdRef.current === id && esRef.current?.readyState === EventSource.OPEN) return Promise.resolve(true);
 		const existing = sessionStreamWaitersRef.current.get(id);
 		if (existing) return existing.promise;
@@ -902,7 +903,7 @@ function App() {
 		}, 1500);
 		sessionStreamWaitersRef.current.set(id, { promise, resolve: resolveWaiter, timer });
 		return promise;
-	}, [activeSessionIdRef]);
+	}, [activeSessionIdRef, connected, backendUp]);
 	const {
 		loadSessions,
 		selectSession,
@@ -1118,8 +1119,9 @@ function App() {
 				setPendingSteers,
 				setPendingQueue,
 				setInputsRefreshNonce,
-			waitForSessionStream,
-			pendingOutgoingRef,
+				waitForSessionStream,
+				pendingOutgoingRef,
+				canSend: () => Boolean(session && connected && backendUp),
 		}),
 		[
 			planRefineArmedRef,
@@ -1138,6 +1140,8 @@ function App() {
 			setInputsRefreshNonce,
 			waitForSessionStream,
 			pendingOutgoingRef,
+			connected,
+			backendUp,
 		],
 	);
 
@@ -1975,7 +1979,7 @@ function App() {
 						</button>
 					`
 					}
-					<${ComposerModule} running=${running} ready=${!!session} activeId=${activeId} commands=${commands} personas=${personas} onSubmit=${submitMessage} onAbort=${abortRun} onDocUploaded=${() => setInputsRefreshNonce((n) => n + 1)} />
+					<${ComposerModule} running=${running} ready=${!!session} sendReady=${Boolean(session && connected && backendUp)} activeId=${activeId} commands=${commands} personas=${personas} onSubmit=${submitMessage} onAbort=${abortRun} onDocUploaded=${() => setInputsRefreshNonce((n) => n + 1)} />
 				</div>
 			</main>
 

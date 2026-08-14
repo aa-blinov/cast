@@ -192,6 +192,11 @@ export function parseDaemonPendingState(state: Record<string, unknown>): {
 	};
 }
 
+/** A local loop has no daemon transport to gate; thin-client sends require its SSE proof. */
+export function canSendToDaemon(isClient: boolean, connected: boolean): boolean {
+	return !isClient || connected;
+}
+
 /** Fetch the daemon-owned decision state that predates this client's SSE stream. */
 export async function loadDaemonPendingState(client: ServerClient, sessionId: string) {
 	return parseDaemonPendingState(await getServerSession(client, sessionId));
@@ -285,6 +290,8 @@ export interface UseAgentSession {
 	approvePlan: () => void;
 	/** Sync the session's plan/build mode to the daemon (thin-client mode). */
 	setMode: (mode: "plan" | "build") => void;
+	/** True only while the thin-client daemon's SSE stream is open. */
+	daemonConnected: boolean;
 	/** Reset the daemon session's context for "implement in clean context"
 	 * (thin-client mode) — resolves with the original task, if the daemon kept
 	 * one, for the reminder prompt. */
@@ -528,6 +535,9 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	const effectiveDaemonUrl = daemonOverride?.url ?? daemonUrl;
 	const effectiveDaemonToken = daemonOverride?.token ?? daemonToken;
 	const isClient = !!effectiveDaemonUrl;
+	const [daemonConnected, setDaemonConnected] = useState(!isClient);
+	const daemonConnectedRef = useRef(daemonConnected);
+	daemonConnectedRef.current = daemonConnected;
 	// Shared HTTP client for the daemon (thin-client mode). Used by all the
 	// server calls below — same wire layer as `cast run`/JSONL (server/client.ts),
 	// so the TUI and headless paths speak to the daemon identically.
@@ -815,7 +825,10 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				// rather than silently dropping the message; the stream carries all
 				// token/tool/status updates. The request is acknowledged when the turn
 				// enters the daemon queue, not when the turn finishes.
-				if (!serverClient) return;
+				if (!serverClient || !canSendToDaemon(isClient, daemonConnectedRef.current)) {
+					setError("Daemon disconnected — message kept in the composer until it reconnects.");
+					return;
+				}
 				const clientMessageId = randomUUID();
 				pendingServerMessagesRef.current.set(clientMessageId, {
 					text,
@@ -846,7 +859,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 						return false;
 					}
 				};
-				const reconnectAndSubmit = async (): Promise<boolean> => {
+				const reconnectAndWait = async (): Promise<boolean> => {
 					setError("Reconnecting to daemon…");
 					try {
 						const live = await ensureServerClient();
@@ -854,28 +867,17 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 						if (live.baseUrl !== effectiveDaemonUrl || live.token !== effectiveDaemonToken) {
 							setDaemonOverride({ url: live.baseUrl, token: live.token });
 						}
-						await submitServerChat(
-							live,
-							session.id,
-							text,
-							images?.map((img) => img.dataUrl),
-							clientMessageId,
-						);
-						pendingServerMessagesRef.current.delete(clientMessageId);
-						setMessages((msgs) =>
-							msgs.map((message) =>
-								message.clientMessageId === clientMessageId ? { ...message, pending: false } : message,
-							),
-						);
-						return true;
+						// Do not POST from the recovery path. The SSE `onopen` handler is
+						// the commit point: it proves the stream is live and retries the
+						// pending request with the same clientMessageId exactly once.
+						return false;
 					} catch {
-						const pending = pendingServerMessagesRef.current.get(clientMessageId);
-						if (pending) pending.sending = false;
 						return false;
 					}
 				};
-				if (!(await attempt(serverClient)) && !(await reconnectAndSubmit())) {
-					setError("Daemon unavailable — retry the message or run 'cast server start'.");
+				if (!(await attempt(serverClient))) {
+					await reconnectAndWait();
+					setError("Daemon unavailable — message kept until the daemon reconnects.");
 				} else {
 					setError(null);
 				}
@@ -1389,7 +1391,11 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	// crash) is surfaced immediately and triggers daemon re-selection; the stream
 	// hydrates persisted session state after it reconnects.
 	useEffect(() => {
-		if (!isClient || !effectiveDaemonUrl) return;
+		if (!isClient || !effectiveDaemonUrl) {
+			setDaemonConnected(true);
+			return;
+		}
+		setDaemonConnected(false);
 		const url = effectiveDaemonToken
 			? `${effectiveDaemonUrl}/api/sessions/${session.id}/events?token=${encodeURIComponent(effectiveDaemonToken)}`
 			: `${effectiveDaemonUrl}/api/sessions/${session.id}/events`;
@@ -1432,6 +1438,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			}
 		};
 		source.onopen = () => {
+			setDaemonConnected(true);
 			setError(null);
 			void retryPending();
 			if (!opened) {
@@ -1443,15 +1450,17 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		};
 		source.onerror = () => {
 			if (disposed) return;
+			setDaemonConnected(false);
 			setError("Daemon connection lost — reconnecting…");
 			if (recoveryStarted) return;
 			recoveryStarted = true;
 			void ensureServerClient()
 				.then((live) => {
 					if (disposed || !live) return;
-					if (live.baseUrl !== effectiveDaemonUrl || live.token !== effectiveDaemonToken) {
-						setDaemonOverride({ url: live.baseUrl, token: live.token });
-					}
+					// Replace the EventSource even when the daemon came back on the
+					// same URL. A CLOSED source is not guaranteed to retry after a
+					// restart; the new open is also the commit point for pending sends.
+					setDaemonOverride({ url: live.baseUrl, token: live.token });
 				})
 				.catch(() => {});
 		};
@@ -1841,6 +1850,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		approvePlan,
 		cleanDaemonContext,
 		setMode,
+		daemonConnected,
 		showReasoning,
 		toggleReasoning,
 		turnStartedAt,

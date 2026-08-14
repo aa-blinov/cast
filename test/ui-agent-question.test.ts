@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { loadDaemonPendingState, parseDaemonPendingState, parseQuestionToolResult } from "../src/ui/useAgentSession.ts";
+import {
+	canSendToDaemon,
+	loadDaemonPendingState,
+	parseDaemonPendingState,
+	parseQuestionToolResult,
+} from "../src/ui/useAgentSession.ts";
 
 describe("parseQuestionToolResult", () => {
 	const validContent = JSON.stringify({
@@ -46,6 +51,12 @@ describe("parseQuestionToolResult", () => {
 });
 
 describe("parseDaemonPendingState", () => {
+	it("gates only thin-client sends on the daemon SSE connection", () => {
+		expect(canSendToDaemon(false, false)).toBe(true);
+		expect(canSendToDaemon(true, false)).toBe(false);
+		expect(canSendToDaemon(true, true)).toBe(true);
+	});
+
 	it("restores persisted questions and plan approvals after reconnect", () => {
 		expect(
 			parseDaemonPendingState({
