@@ -14,7 +14,7 @@ Commands:
     similar ID              Recommended related papers   (Semantic Scholar)
 
 Examples:
-    python arxiv.py search "MiMo Technical Report" --max 10 --sort date
+    python arxiv.py search "AI Technical Report" --max 10 --sort date
     python arxiv.py search "attention" --author vaswani --category cs.CL
     python arxiv.py get 2601.02780,1706.03762
     python arxiv.py bibtex 2601.02780
@@ -50,7 +50,7 @@ NS = {
     "arxiv": "http://arxiv.org/schemas/atom",
     "os": "http://a9.com/-/spec/opensearch/1.1/",
 }
-UA = "MiMoCode-arxiv-skill/2.0"
+UA = "cast-arxiv-skill/2.0"
 
 
 def http_get(url, timeout=30):

@@ -51,7 +51,7 @@ export interface StreamChunk {
 	content?: string;
 	thinking?: string;
 	/** Native DeepSeek-compatible reasoning trace that must be replayed on a
-	 * tool-call assistant message by providers such as Xiaomi MiMo. */
+	 * tool-call assistant message by providers that require native reasoning traces. */
 	reasoningContent?: string;
 	toolCalls?: Array<{
 		id: string;
@@ -483,7 +483,7 @@ export async function* streamChat(
 				}
 
 				// 1. Reasoning in delta fields. OpenRouter streams it as
-				//    `delta.reasoning`; DeepSeek/Qwen/GLM/Xiaomi-MiMo and most other
+				//    `delta.reasoning`; DeepSeek/Qwen/GLM and most other
 				//    OpenAI-compatible reasoners use `delta.reasoning_content` (the
 				//    de-facto standard R1 popularized) — without this branch their
 				//    thinking is silently dropped, since /v1/models exposes no
@@ -628,7 +628,7 @@ function coerceHermesValue(raw: string): unknown {
 /**
  * Recover tool calls a model emitted as Hermes-style XML in its text content —
  * `<function=NAME><parameter=KEY>VALUE</parameter>…</function>`, optionally
- * wrapped in `<tool_call>`. Some models (e.g. xiaomi mimo) produce calls this
+ * wrapped in `<tool_call>`. Some providers produce calls this
  * way and the provider's OpenAI-compat layer then returns truncated/invalid
  * JSON in tool_calls.arguments; cast would reject that and the model would retry
  * the same broken shape indefinitely. Returns [] when there is no such block.
@@ -761,7 +761,7 @@ export async function streamAndCollect(
 	// or carry malformed JSON (truncated `arguments`), but the content holds an
 	// XML call NAMING A REAL TOOL, parse it into a proper tool call and drop the
 	// markup from the visible content. Without this, providers that mis-serialize
-	// such calls (xiaomi mimo) trap the model in a retry loop on "arguments were
+	// such calls can trap the model in a retry loop on "arguments were
 	// malformed". Gating on the real tool names is what stops prose that merely
 	// mentions `<function=…>` (e.g. the assistant describing this feature) from
 	// being turned into a bogus tool call the provider then 400s on.
@@ -781,7 +781,7 @@ export async function streamAndCollect(
 	}
 
 	// When valid structured tool_calls are present but content also contains the
-	// duplicate Hermes XML markup (some providers like xiaomi mimo emit both), strip
+	// duplicate Hermes XML markup (some providers emit both), strip
 	// the XML so it doesn't leak into the transcript. Only strip real tool-call
 	// blocks — a `<function=NAME>` naming an actual tool — so prose that mentions
 	// the tag survives untouched. Skip when we already stripped during recovery.

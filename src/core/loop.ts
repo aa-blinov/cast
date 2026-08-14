@@ -80,6 +80,13 @@ const DEFAULT_MEMORY_SERVICE = createProjectMemoryService();
 // we treat it as a doom loop and block execution — the model gets an error
 // result and must try something different.
 const DOOM_LOOP_THRESHOLD = 3;
+const MEMORY_PROMPT_MIN_TOKENS = 256;
+const MEMORY_PROMPT_MAX_TOKENS = 4096;
+
+function memoryPromptBudgetTokens(config: AppConfig): number {
+	const inputBudget = Math.max(0, config.contextWindow - config.maxResponseTokens);
+	return Math.min(MEMORY_PROMPT_MAX_TOKENS, Math.max(MEMORY_PROMPT_MIN_TOKENS, Math.floor(inputBudget * 0.05)));
+}
 
 // Running cap on embedded image_url data across the whole live context (see
 // the `read`-on-image-file handling below) — a per-file cap already exists
@@ -1032,6 +1039,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		loopConfig.sessionId,
 	);
 	const promptCacheBody = promptCacheRequestBody(promptCacheStrategy);
+	const memoryBudgetTokens = memoryPromptBudgetTokens(config);
 	let checkpointBoundary = loopConfig.checkpointBoundary ?? findCheckpointBoundary(messages);
 	loopConfig.checkpointBoundary = checkpointBoundary;
 	const memoryEnabled = loopConfig.memory !== undefined && isMemoryEnabled();
@@ -1386,7 +1394,9 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		if (loopConfig.rebuildSystemPrompt) {
 			prompt = loopConfig.rebuildSystemPrompt({ userText, contextFiles });
 		}
-		const memoryPrompt = memoryService?.buildPrompt(cwd, userText, loopConfig.memory?.sessionId);
+		const memoryPrompt = memoryService?.buildPrompt(cwd, userText, loopConfig.memory?.sessionId, {
+			tokenBudget: memoryBudgetTokens,
+		});
 		if (memoryPrompt) prompt = `${prompt}\n\n${memoryPrompt}`;
 		// Plan mode: prepended AFTER any rebuild — the per-turn rebuild path
 		// (always active in the TUI) replaces `prompt` wholesale and would
@@ -1429,7 +1439,9 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 
 	const appendMemoryRebuildBoundary = (): void => {
 		if (!memoryService || !loopConfig.memory?.sessionId) return;
-		const context = memoryService.buildPrompt(cwd, "", loopConfig.memory.sessionId);
+		const context = memoryService.buildPrompt(cwd, "", loopConfig.memory.sessionId, {
+			tokenBudget: memoryBudgetTokens,
+		});
 		if (!context) return;
 		const boundaryIndex = messages.length;
 		messages.push({
