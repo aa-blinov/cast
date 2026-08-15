@@ -233,6 +233,10 @@ export function isRetryableStreamError(error: unknown): boolean {
 		code === "PROVIDER_ERROR" ||
 		code === "upstream_error" ||
 		code === "upstream_overloaded" ||
+		// OpenAI/MiMo gateway server-side failures signaled by code rather than
+		// status (e.g. a 200-wrapped stream error event).
+		code === "server_error" ||
+		code === "server_is_overloaded" ||
 		RETRYABLE_UPSTREAM_PATTERN.test(message)
 	) {
 		return true;
@@ -301,6 +305,18 @@ export function describeTurnError(error: unknown): string {
 		return "Access denied (403) — the API key lacks permission for this model or endpoint. Try /provider or pick another model with /model.";
 	}
 
+	// MiMo/MiniMax gateway: content-moderation (421) and risk-control (441)
+	// blocks arrive under a generic HTTP 400, with the real reason in
+	// error.param (often Chinese). Checked before the generic moderation
+	// wording so the param detail isn't lost.
+	const gatewayError = (error as { error?: { code?: unknown; param?: unknown } }).error;
+	const gatewayCode = typeof gatewayError?.code === "string" && gatewayError.code ? gatewayError.code : (code ?? "");
+	if (gatewayCode === "421" || gatewayCode === "441") {
+		const label = gatewayCode === "421" ? "Request blocked by content moderation" : "Request blocked by risk control";
+		const param = typeof gatewayError?.param === "string" && gatewayError.param ? gatewayError.param : "";
+		return param ? `${label}: ${param}` : label;
+	}
+
 	// Provider content-policy block — the request was refused, not misconfigured.
 	// Some gateways (Anthropic content_policy_violation, OpenRouter MODERATION)
 	// report it as a 400 whose status alone reads like a client error.
@@ -314,7 +330,7 @@ export function describeTurnError(error: unknown): string {
 		return "The model was not found or is unavailable on this provider. Pick another with /model.";
 	}
 
-	return message;
+	return message || "Unknown error";
 }
 
 /**
