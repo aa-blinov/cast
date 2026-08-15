@@ -48,6 +48,7 @@ import {
 	saveSession,
 } from "./session.ts";
 import {
+	checkpointPushCapsSetting,
 	isMemoryWriteEnabled,
 	loadSettings,
 	memoryCcIndex,
@@ -2297,14 +2298,15 @@ function memoryPriorityComparator(a: MemorySearchResult, b: MemorySearchResult):
 	return bPriority - aPriority || b.score - a.score || b.updatedAt.localeCompare(a.updatedAt);
 }
 
-// Per-section token caps for the rebuild context. Each block is bounded
-// independently so a huge notes file cannot starve the checkpoint or project
-// memory.
-const REBUILD_CHECKPOINT_CAP = 11_000;
-const REBUILD_MEMORY_CAP = 10_000;
-const REBUILD_NOTES_CAP = 6_000;
-const REBUILD_GLOBAL_CAP = 6_000;
-const REBUILD_TASKS_CAP = 2_000;
+// Per-section token caps for the rebuild context (configurable via the
+// checkpointPushCaps setting; missing sections fall back to these defaults).
+// Each block is bounded independently so a huge notes file cannot starve the
+// checkpoint or project memory.
+const DEFAULT_REBUILD_CHECKPOINT_CAP = 11_000;
+const DEFAULT_REBUILD_MEMORY_CAP = 10_000;
+const DEFAULT_REBUILD_NOTES_CAP = 6_000;
+const DEFAULT_REBUILD_GLOBAL_CAP = 6_000;
+const DEFAULT_REBUILD_TASKS_CAP = 2_000;
 const REBUILD_RECENT_USER_MAX = 6;
 
 function activeBackgroundActors(sessionId: string): string {
@@ -2384,22 +2386,34 @@ function buildMemoryRebuildContext(cwd: string, sessionId: string, options: Memo
 	const actors = activeBackgroundActors(sessionId);
 	const keys = memoryKeysIndex(sessionId, projectId);
 
+	const caps = checkpointPushCapsSetting() ?? {};
+
 	const lines: string[] = [
 		"The following blocks are auto-loaded from your session memory. They are already in your context — do not Read them as whole files. Use Grep for specific facts instead.",
 		"",
 		"## Tasks ledger",
-		readMemorySectionsWithinBudget(session.taskProgress, REBUILD_TASKS_CAP).text.trim() || "(none)",
+		readMemorySectionsWithinBudget(session.taskProgress, caps.tasks ?? DEFAULT_REBUILD_TASKS_CAP).text.trim() ||
+			"(none)",
 	];
 	const pushSection = (heading: string, body: string): void => {
 		if (!body.trim()) return;
 		lines.push("", `## ${heading}`, body.trim());
 	};
-	pushSection("Session checkpoint", readMemorySectionsWithinBudget(session.checkpoint, REBUILD_CHECKPOINT_CAP).text);
+	pushSection(
+		"Session checkpoint",
+		readMemorySectionsWithinBudget(session.checkpoint, caps.checkpoint ?? DEFAULT_REBUILD_CHECKPOINT_CAP).text,
+	);
 	pushSection("Active actors", actors);
 	pushSection("Recent user input (verbatim)", recentUser);
-	pushSection("Project memory", readMemorySectionsWithinBudget(project, REBUILD_MEMORY_CAP).text);
-	pushSection("Global memory", readMemorySectionsWithinBudget(global, REBUILD_GLOBAL_CAP).text);
-	pushSection("Session notes", readMemorySectionsWithinBudget(session.notes, REBUILD_NOTES_CAP).text);
+	pushSection(
+		"Project memory",
+		readMemorySectionsWithinBudget(project, caps.memory ?? DEFAULT_REBUILD_MEMORY_CAP).text,
+	);
+	pushSection("Global memory", readMemorySectionsWithinBudget(global, caps.global ?? DEFAULT_REBUILD_GLOBAL_CAP).text);
+	pushSection(
+		"Session notes",
+		readMemorySectionsWithinBudget(session.notes, caps.notes ?? DEFAULT_REBUILD_NOTES_CAP).text,
+	);
 	if (keys.length > 0) lines.push("", "## Memory keys index", ...keys);
 	lines.push(
 		"",

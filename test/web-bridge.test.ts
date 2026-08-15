@@ -424,6 +424,42 @@ describe("web bridge", () => {
 		);
 	});
 
+	it("exposes checkpoint thresholds, reserved, and push caps controls", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		expect(await bridge.executeCommand(ws.id, "/memory checkpoint thresholds 20,40,60,80")).toEqual({
+			ok: true,
+			result: { checkpointThresholds: [20, 40, 60, 80] },
+		});
+		expect(await bridge.executeCommand(ws.id, "/memory checkpoint thresholds bad")).toEqual({
+			ok: false,
+			error: "Checkpoint thresholds must be percentages like 20,40,60,80 or 'default'",
+		});
+		expect(await bridge.executeCommand(ws.id, "/memory checkpoint reserved 20000")).toEqual({
+			ok: true,
+			result: { checkpointReserved: 20000 },
+		});
+		expect(await bridge.executeCommand(ws.id, "/memory checkpoint caps checkpoint=11000,memory=9000")).toEqual({
+			ok: true,
+			result: { checkpointPushCaps: { checkpoint: 11000, memory: 9000 } },
+		});
+		expect((await bridge.executeCommand(ws.id, "/memory")).result).toEqual(
+			expect.objectContaining({
+				checkpointThresholds: [20, 40, 60, 80],
+				checkpointReserved: 20000,
+				checkpointPushCaps: { checkpoint: 11000, memory: 9000 },
+			}),
+		);
+		expect(await bridge.executeCommand(ws.id, "/memory checkpoint thresholds default")).toEqual({
+			ok: true,
+			result: { checkpointThresholds: undefined },
+		});
+		expect(await bridge.executeCommand(ws.id, "/memory checkpoint caps default")).toEqual({
+			ok: true,
+			result: { checkpointPushCaps: undefined },
+		});
+	});
+
 	it("lists automatic memory runs as independent background records", async () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();

@@ -145,6 +145,9 @@ const MEMORY_BUDGET_COMMAND_RE = /^\/memory budget (\d+)$/;
 const MEMORY_FLOOR_COMMAND_RE = /^\/memory floor (0(?:\.\d+)?|1(?:\.0)?)$/;
 const MEMORY_RECONCILE_COMMAND_RE = /^\/memory reconcile (on|off)$/;
 const MEMORY_CHECKPOINT_FORK_COMMAND_RE = /^\/memory checkpoint fork (on|off)$/;
+const MEMORY_CHECKPOINT_THRESHOLDS_COMMAND_RE = /^\/memory checkpoint thresholds (.+)$/;
+const MEMORY_CHECKPOINT_RESERVED_COMMAND_RE = /^\/memory checkpoint reserved (\d+)$/;
+const MEMORY_CHECKPOINT_CAPS_COMMAND_RE = /^\/memory checkpoint caps (.+)$/;
 const MEMORY_AUTO_TOGGLE_COMMAND_RE = /^\/memory (dream|distill) (on|off)$/;
 const MEMORY_AUTO_INTERVAL_COMMAND_RE = /^\/memory (dream|distill) interval (\d+)$/;
 const MEMORY_CANCEL_RUN_COMMAND_RE = /^\/memory cancel ([a-f0-9-]+)$/;
@@ -190,6 +193,9 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	},
 	{ name: "/memory", description: "Toggle durable project memory" },
 	{ name: "/memory budget", description: "Set automatic memory prompt token budget", takesArgs: true },
+	{ name: "/memory checkpoint caps", description: "Set per-section rebuild context token caps", takesArgs: true },
+	{ name: "/memory checkpoint reserved", description: "Set checkpoint reserved token buffer", takesArgs: true },
+	{ name: "/memory checkpoint thresholds", description: "Set checkpoint trigger percentages", takesArgs: true },
 	{ name: "/memory distill", description: "Toggle automatic workflow distillation", takesArgs: true },
 	{ name: "/memory dream", description: "Toggle automatic memory consolidation", takesArgs: true },
 	{ name: "/memory floor", description: "Set memory search score floor", takesArgs: true },
@@ -2390,6 +2396,74 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 	if (memoryCheckpointForkMatch) {
 		updateSettings({ checkpointFork: memoryCheckpointForkMatch[1] === "on" });
 		showNotice(`[Checkpoint prefix fork: ${memoryCheckpointForkMatch[1] === "on" ? "enabled" : "disabled"}]`);
+		return;
+	}
+
+	const checkpointThresholdsMatch = input.match(MEMORY_CHECKPOINT_THRESHOLDS_COMMAND_RE);
+	if (checkpointThresholdsMatch) {
+		const raw = checkpointThresholdsMatch[1]!;
+		if (raw.trim() === "default") {
+			updateSettings({ checkpointThresholds: undefined });
+			showNotice("[Checkpoint thresholds: window defaults]");
+			return;
+		}
+		const values = raw
+			.split(",")
+			.map((part) => Number(part.trim()))
+			.filter((value) => Number.isFinite(value));
+		if (values.length === 0 || values.some((value) => value <= 0 || value > 100)) {
+			showNotice("[Checkpoint thresholds must be percentages like 20,40,60,80 or 'default']");
+			return;
+		}
+		updateSettings({ checkpointThresholds: values });
+		showNotice(`[Checkpoint thresholds: ${values.join("%,")}%]`);
+		return;
+	}
+
+	const checkpointReservedMatch = input.match(MEMORY_CHECKPOINT_RESERVED_COMMAND_RE);
+	if (checkpointReservedMatch) {
+		const value = Number(checkpointReservedMatch[1]);
+		if (!Number.isInteger(value) || value < 0) {
+			showNotice("[Checkpoint reserved must be a non-negative token count]");
+			return;
+		}
+		updateSettings({ checkpointReserved: value });
+		showNotice(`[Checkpoint reserved: ${value} tokens]`);
+		return;
+	}
+
+	const checkpointCapsMatch = input.match(MEMORY_CHECKPOINT_CAPS_COMMAND_RE);
+	if (checkpointCapsMatch) {
+		const raw = checkpointCapsMatch[1]!;
+		if (raw.trim() === "default") {
+			updateSettings({ checkpointPushCaps: undefined });
+			showNotice("[Checkpoint section caps: defaults]");
+			return;
+		}
+		const caps: Record<string, number> = {};
+		let invalid = false;
+		for (const pair of raw.split(",")) {
+			const [key, valueText] = pair.split("=");
+			const keyTrimmed = key?.trim() ?? "";
+			const value = Number(valueText?.trim());
+			if (
+				!["checkpoint", "memory", "notes", "global", "tasks"].includes(keyTrimmed) ||
+				!Number.isFinite(value) ||
+				value <= 0
+			) {
+				invalid = true;
+				break;
+			}
+			caps[keyTrimmed] = Math.floor(value);
+		}
+		if (invalid || Object.keys(caps).length === 0) {
+			showNotice(
+				"[Checkpoint caps must be like checkpoint=11000,memory=10000,notes=6000,global=6000,tasks=2000 or 'default']",
+			);
+			return;
+		}
+		updateSettings({ checkpointPushCaps: caps });
+		showNotice("[Checkpoint section caps updated]");
 		return;
 	}
 

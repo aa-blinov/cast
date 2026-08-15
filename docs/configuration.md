@@ -37,6 +37,7 @@ User settings are persisted to `~/.cast/settings.json`. This file is loaded on s
 | `checkpointFork` | boolean | Preserve the parent prompt prefix for checkpoint writers to reuse provider prefix cache (default: `false`; disabled uses only the post-checkpoint delta) |
 | `checkpointThresholds` | number[] | Checkpoint writer trigger points as percentages of the context window (default depends on the window: 4 × 20% up to 200K, 9 × 10% up to 500K, 18 × 5% above; a writer fires once per crossed threshold) |
 | `checkpointReserved` | integer | Token safety buffer kept at the end of the window; thresholds are clamped to `window - reserved` (default: `13000`) |
+| `checkpointPushCaps` | object | Per-section token caps for the rebuild context: `{ checkpoint?, memory?, notes?, global?, tasks? }` (defaults: 11000/10000/6000/6000/2000) |
 | `searchProvider` | `"ddg"` \| `"tavily"` \| `"brave"` | `web_search` backend (default: `"ddg"`) — use `/web-search-provider` to change |
 | `tavilyApiKey` | string | API key for the Tavily backend, from https://app.tavily.com |
 | `braveApiKey` | string | API key for the Brave Search backend, from https://api-dashboard.search.brave.com |

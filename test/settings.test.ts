@@ -4,6 +4,9 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	checkpointFork,
+	checkpointPushCapsSetting,
+	checkpointReservedSetting,
+	checkpointThresholdsSetting,
 	getProjectTrust,
 	isMemoryEnabled,
 	isMemoryWriteEnabled,
@@ -166,6 +169,19 @@ describe("settings", () => {
 		it("defaults to no prefix fork", () => {
 			expect(checkpointFork({})).toBe(false);
 			expect(checkpointFork({ checkpointFork: true })).toBe(true);
+		});
+
+		it("parses checkpoint thresholds, reserved, and push caps from settings", () => {
+			expect(checkpointThresholdsSetting({})).toBeUndefined();
+			expect(checkpointThresholdsSetting({ checkpointThresholds: [40, 20, 40, 101, -5] })).toEqual([20, 40]);
+			expect(checkpointReservedSetting({})).toBeUndefined();
+			expect(checkpointReservedSetting({ checkpointReserved: 20_000.7 })).toBe(20_000);
+			expect(checkpointPushCapsSetting({})).toBeUndefined();
+			expect(
+				checkpointPushCapsSetting({
+					checkpointPushCaps: { checkpoint: 11_000, memory: 0, notes: 6_000.9, unknown: 99 },
+				}),
+			).toEqual({ checkpoint: 11_000, notes: 6_000 });
 		});
 	});
 });
