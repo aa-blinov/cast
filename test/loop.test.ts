@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
 import { formatContextFilesForPrompt, resolveNestedContextFiles } from "../src/core/context-files.ts";
@@ -315,6 +316,88 @@ describe("runAgentLoop — abort vs. error", () => {
 			const boundary = writerMessages[4]!.content as Array<{ cache_control?: { type: string } }>;
 			expect(boundary[0]!.cache_control).toEqual({ type: "ephemeral" });
 			expect(result[1]!.content).toBe("before checkpoint");
+		} finally {
+			if (realHome === undefined) delete process.env.HOME;
+			else process.env.HOME = realHome;
+			if (realMemoryDir === undefined) delete process.env.CAST_MEMORY_DIR;
+			else process.env.CAST_MEMORY_DIR = realMemoryDir;
+			rmSync(fakeHome, { recursive: true, force: true });
+			rmSync(projectCwd, { recursive: true, force: true });
+		}
+	});
+
+	it("records checkpoint-writer usage as kind=background telemetry", async () => {
+		const realHome = process.env.HOME;
+		const realMemoryDir = process.env.CAST_MEMORY_DIR;
+		const fakeHome = mkdtempSync(join(tmpdir(), "cast-checkpoint-telemetry-home-"));
+		const projectCwd = mkdtempSync(join(tmpdir(), "cast-checkpoint-telemetry-project-"));
+		process.env.HOME = fakeHome;
+		process.env.CAST_MEMORY_DIR = join(fakeHome, "memory");
+		updateSettings({ checkpointFork: true });
+		const session = createSession("test-model", projectCwd, { id: "telemetry-session" });
+		session.messages = [
+			{ role: "system", content: "system" },
+			{ role: "user", content: "before checkpoint" },
+			{ role: "assistant", content: "checkpoint boundary" },
+		];
+		saveSession(session);
+		expect(commitCheckpointWatermark(session.id, session.messages[2]!)).toBe(true);
+
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({
+				content: "main answer",
+				thinking: "",
+				finishReason: "stop",
+				usage: { promptTokens: 1000, completionTokens: 2, totalTokens: 1002 },
+			}))
+			.mockImplementationOnce(async () => ({
+				content: "checkpoint saved",
+				thinking: "",
+				finishReason: "stop",
+				usage: { promptTokens: 500, completionTokens: 50, totalTokens: 550 },
+			}));
+
+		try {
+			await runAgentLoop(
+				[
+					{ role: "system", content: "system" },
+					{ role: "user", content: "before checkpoint" },
+					{ role: "assistant", content: "checkpoint boundary" },
+					{ role: "user", content: "after checkpoint" },
+				],
+				{
+					config: { ...testConfig, contextWindow: 1000, maxResponseTokens: 100 },
+					checkpointThresholds: [1],
+					model: "test-model",
+					modelProvider: { baseURL: "https://openrouter.ai/api/v1", apiKey: "test" },
+					cwd: projectCwd,
+					systemPrompt: "test",
+					memory: { sessionId: "telemetry-session" },
+					sessionId: "telemetry-session",
+					onEvent: () => {},
+					onWarning: () => {},
+				},
+			);
+
+			// The writer's usage is written by the loop (not the bridge), so it
+			// shows up in the DB directly. Poll briefly — the writer runs async.
+			const deadline = Date.now() + 2_000;
+			let rows: Array<{ kind: string; prompt_tokens: number; completion_tokens: number }> = [];
+			while (Date.now() < deadline) {
+				const db = new DatabaseSync(fakeDb, { readOnly: true });
+				rows = db.prepare("SELECT kind, prompt_tokens, completion_tokens FROM llm_requests").all() as Array<{
+					kind: string;
+					prompt_tokens: number;
+					completion_tokens: number;
+				}>;
+				db.close();
+				if (rows.length > 0) break;
+				await new Promise((resolve) => setTimeout(resolve, 10));
+			}
+			// Exactly the writer's completion — the main loop's usage is only
+			// recorded by the bridge, which isn't involved in this test.
+			expect(rows).toHaveLength(1);
+			expect(rows[0]!).toMatchObject({ kind: "background", prompt_tokens: 500, completion_tokens: 50 });
 		} finally {
 			if (realHome === undefined) delete process.env.HOME;
 			else process.env.HOME = realHome;

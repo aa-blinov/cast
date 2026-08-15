@@ -20,7 +20,7 @@ import {
 	type PostCompactReminderState,
 	reminderStateFromPlan,
 } from "./compaction-reminder.ts";
-import type { AppConfig } from "./config.ts";
+import type { AppConfig, ProviderCredentials } from "./config.ts";
 import { type AnnouncedLocalDate, appendDateRolloverReminder } from "./date-rollover-reminder.ts";
 import { matchesToolsAllowlist } from "./frontmatter.ts";
 import { type HooksFile, runHooksForEvent } from "./hooks.ts";
@@ -98,6 +98,7 @@ import {
 	loadSettings,
 	memoryPromptBudget,
 } from "./settings.ts";
+import { recordLlmRequest } from "./telemetry.ts";
 import { resolveSshHosts, type SshHost } from "./ssh.ts";
 import type { SubagentPrompt } from "./subagents.ts";
 import { formatTodoList, remainingTodoCount, type TodoItem, validateTodos } from "./todo.ts";
@@ -1043,6 +1044,36 @@ function checkpointWriterMessages(fork: AgentForkContext, forkMode: boolean): Me
 	return firstUser < 0 ? [] : fork.tail.slice(firstUser);
 }
 
+interface BackgroundAgentContext {
+	config: AppConfig;
+	model: string;
+	providerOverride?: ProviderCredentials;
+}
+
+// Background sessions (memory maintenance, checkpoint writer) run outside the
+// bridge's onEvent, so their usage never reached telemetry — memory
+// maintenance in particular is a steady, non-trivial share of total tokens.
+// Same provider-name resolution the bridge uses for the chat footer.
+function recordBackgroundUsage(context: BackgroundAgentContext, event: { usage: Usage; generationMs?: number; ttftMs?: number }): void {
+	const settings = loadSettings();
+	const baseURL = context.providerOverride?.baseURL ?? context.config.baseURL;
+	const apiKey = context.providerOverride?.apiKey ?? context.config.apiKey;
+	const provider = (settings.providers ?? []).find((p) => p.url === baseURL && p.apiKey === apiKey);
+	recordLlmRequest({
+		provider: provider?.name ?? "default",
+		model: context.model,
+		kind: "background",
+		promptTokens: event.usage.promptTokens,
+		completionTokens: event.usage.completionTokens,
+		cacheReadTokens: event.usage.cacheReadTokens,
+		cacheWriteTokens: event.usage.cacheWriteTokens,
+		cost: event.usage.cost,
+		latencyMs: event.generationMs,
+		ttftMs: event.ttftMs,
+		contextWindow: context.config.contextWindow,
+	});
+}
+
 export async function runMemoryMaintenanceAgent(
 	input: MemoryMaintenanceAgentInput,
 ): Promise<MemoryMaintenanceAgentResult> {
@@ -1064,6 +1095,7 @@ export async function runMemoryMaintenanceAgent(
 				if (event.type === "usage") {
 					usage = event.usage;
 					input.onUsage?.(event.usage);
+					recordBackgroundUsage(input, event);
 				}
 			},
 			onWarning: () => {},
@@ -1181,7 +1213,11 @@ async function runCheckpointWriter(input: MemoryCheckpointWriterInput): Promise<
 						? (actorFork.systemPrompt ?? CHECKPOINT_WRITER_SYSTEM_PROMPT)
 						: CHECKPOINT_WRITER_SYSTEM_PROMPT,
 					signal: actorSignal,
-					onEvent: () => {},
+					onEvent: (event) => {
+						// The checkpoint writer is a background session; capture its
+						// usage so it lands in telemetry as kind=background.
+						if (event.type === "usage") recordBackgroundUsage(input, event);
+					},
 					onWarning: () => {},
 					...(forkMode && actorFork.toolDefinitions
 						? {
