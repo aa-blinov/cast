@@ -1096,6 +1096,25 @@ describe("runAgentLoop — retries a length-truncated response with no tool call
 		expect(messages.some((m) => m.role === "assistant" && m.content === "stub two")).toBe(true);
 	});
 
+	it("warns when the retried turn is still empty, so '(no response)' is never unexplained", async () => {
+		const warnings: string[] = [];
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({ content: "", thinking: "reasoning...", finishReason: "stop" }))
+			.mockImplementationOnce(async () => ({ content: "", thinking: "reasoning again...", finishReason: "stop" }));
+
+		await runAgentLoop([{ role: "user", content: "hi" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			onEvent: () => {},
+			onWarning: (message) => warnings.push(message),
+		});
+
+		expect(vi.mocked(streamAndCollect)).toHaveBeenCalledTimes(2);
+		expect(warnings.some((w) => w.includes("empty response again"))).toBe(true);
+	});
+
 	it("retries an empty 'stop' completion with a nudge, so the model actually answers", async () => {
 		// A reasoning model burns the whole output budget on reasoning_content
 		// and stops with no final text — the "(no response)" case. Mirroring
