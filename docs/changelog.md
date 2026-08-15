@@ -2,6 +2,30 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.16.0
+
+### Added
+
+- **Durable project memory** now survives across sessions: project rules, architecture decisions, and cross-session facts live in plain markdown files under `~/.cast/memory/` (`MEMORY.md`, session `checkpoint.md`/`notes.md`/task progress, and a global `MEMORY.md`), with a SQLite full-text index derived from them for fast search.
+- **Checkpoint writers fire on context-window thresholds** (default 4 × 20% up to 200K, 9 × 10% up to 500K, 18 × 5% above), clamped to the window minus a reserved safety buffer, so a fresh checkpoint exists when compaction needs to rebuild. `checkpointThresholds`, `checkpointReserved`, and per-section `checkpointPushCaps` are configurable and exposed in the TUI and web settings.
+- **Memory search covers the whole memory tree** — session checkpoints, notes, task progress, spillover files, and (with `memoryCcIndex`) Claude Code memory under `scope=cc`. File-backed hits return a path plus snippet; a no-result search gives escalation guidance.
+- **Rebuild context after compaction** is injected as bounded sections (tasks ledger, session checkpoint, project/global memory, session notes) with explicit "resume directly" framing and a tail-aware reminder.
+- **Claude Code memory indexing** (`memoryCcIndex`) with frontmatter type parsing.
+- A complete beginner-friendly **Memory guide** in `docs/memory.md`.
+
+### Fixed
+
+- **Checkpoint watermark is now an immutable message id**, so compaction seq shifts can no longer invalidate it; a stale writer can't move the boundary backwards.
+- **Manual `/dream` and `/distill`** now use JSON-only prompts matching what the caller applies — the real-model consolidation actually removes stale facts and packages repeated workflows instead of silently doing nothing.
+- **Checkpoint-writer sessions never self-compact**, so a small-window run fails explicitly rather than derailing and advancing the watermark on empty state.
+- **Session-history search stays aligned after compaction** (FTS rows now track seq shifts).
+- **Fork-mode checkpoint writers cover the latest turn** and advance the watermark instead of stalling at the previous boundary.
+
+### Internal
+
+- Memory is file-canonical: the SQLite index is a projection of the files, reconciled on search.
+- Split dream/distill prompts into agent (file-tools) and JSON (non-agent) variants.
+
 ## 0.15.7
 
 ### Fixed
