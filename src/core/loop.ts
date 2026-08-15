@@ -2288,17 +2288,44 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 					return;
 				}
 
-				// Truncated with no tool call: the model spent all max_tokens without
-				// reaching a tool call — whether it burned the budget on hidden
-				// reasoning_content, a verbose preamble/plan, or anything else, the
-				// result is the same: no usable turn to commit yet. Retry once with
-				// 2x the token budget instead of accepting a stub reply (e.g. "I'll
-				// rewrite the file now" with no actual write) as the model's answer.
-				const truncatedNoToolCall = !completion.toolCalls?.length && completion.finishReason === "length";
-				if (truncatedNoToolCall && !reasoningRetryDone) {
+				// The model produced no usable turn: no text, no tool calls. On
+				// "length" the budget ran out mid-answer; on "stop" a reasoning
+				// model often burned the whole output budget on hidden
+				// reasoning_content and stopped before writing the actual answer.
+				// Either way it's not a real answer yet — retry once with 2x the
+				// budget instead of committing "(no response)". Terminal failure
+				// reasons (error/aborted) and moderation blocks are handled below
+				// and must not be retried here.
+				const terminalFinish =
+					completion.finishReason === "error" ||
+					completion.finishReason === "aborted" ||
+					completion.finishReason === "content_filter";
+				const emptyTurn =
+					!completion.toolCalls?.length &&
+					!completion.refusal &&
+					!terminalFinish &&
+					(completion.finishReason === "length" || !completion.content);
+				if (emptyTurn && !reasoningRetryDone) {
 					reasoningRetryDone = true;
 					effectiveMaxTokens *= 2;
-					onWarning?.("Response truncated before a tool call — retrying with doubled budget");
+					// Mirrors MiMo Code's think-only recovery: tell the MODEL why it's
+					// being asked to continue (just doubling the budget alone lets a
+					// reasoning model repeat the same reasoning-only output), then
+					// re-loop with the nudge + room to actually answer.
+					messages.push({
+						role: "user",
+						content:
+							"<system-reminder>\n" +
+							"The model's previous response contained no usable answer (it had only reasoning, or was empty). " +
+							"Provide a final answer now or call a tool to make progress on the task. " +
+							"Do not respond with only reasoning/thinking.\n" +
+							"</system-reminder>",
+					});
+					onWarning?.(
+						completion.finishReason === "length"
+							? "Response truncated before a tool call — retrying with doubled budget"
+							: "The model returned an empty response — retrying with doubled budget",
+					);
 					continue;
 				}
 
