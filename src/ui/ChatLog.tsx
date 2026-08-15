@@ -320,7 +320,7 @@ function MessageView({ message, showReasoning }: { message: ChatMessage; showRea
 		return (
 			<Box flexDirection="column">
 				<Text color={theme().user}>
-					<Text bold>{message.pending ? "[user · sending…] " : "[user] "}</Text>
+					<Text bold>[user] </Text>
 					{message.content}
 				</Text>
 			</Box>

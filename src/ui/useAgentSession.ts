@@ -92,7 +92,6 @@ export interface ChatMessage {
 	/** Plain text for user/warning/system/tool rows. Assistant rows use `blocks`. */
 	content: string;
 	clientMessageId?: string;
-	pending?: boolean;
 	/**
 	 * Assistant turn rendered as ordered reasoning/text/tool blocks. Carries the
 	 * turn's reasoning too, so it stays visible in history instead of vanishing
@@ -782,7 +781,6 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					role: "user",
 					content: pending.text,
 					clientMessageId: pending.clientMessageId,
-					pending: true,
 				});
 			}
 		}
@@ -850,7 +848,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					clientMessageId,
 					sending: true,
 				});
-				setMessages((msgs) => [...msgs, { role: "user", content: text, clientMessageId, pending: true }]);
+				setMessages((msgs) => [...msgs, { role: "user", content: text, clientMessageId }]);
 				const attempt = async (client: ServerClient): Promise<boolean> => {
 					try {
 						await submitServerChat(
@@ -861,11 +859,6 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 							clientMessageId,
 						);
 						pendingServerMessagesRef.current.delete(clientMessageId);
-						setMessages((msgs) =>
-							msgs.map((message) =>
-								message.clientMessageId === clientMessageId ? { ...message, pending: false } : message,
-							),
-						);
 						return true;
 					} catch {
 						const pending = pendingServerMessagesRef.current.get(clientMessageId);
@@ -1433,11 +1426,6 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					// biome-ignore lint/performance/noAwaitInLoops: outgoing messages are ordered
 					await submitServerChat(client, session.id, pending.text, pending.images, pending.clientMessageId);
 					pendingServerMessagesRef.current.delete(pending.clientMessageId);
-					setMessages((msgs) =>
-						msgs.map((message) =>
-							message.clientMessageId === pending.clientMessageId ? { ...message, pending: false } : message,
-						),
-					);
 				} catch {
 					pending.sending = false;
 				}
@@ -1496,12 +1484,12 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 						const clientMessageId = event.message.clientMessageId;
 						if (clientMessageId) {
 							pendingServerMessagesRef.current.delete(clientMessageId);
+							// The message is already in the transcript (appended on
+							// submit); just drop the pending-server entry. If it's not
+							// there (e.g. history reload raced the append), fall
+							// through and add it.
 							const existing = msgs.findIndex((message) => message.clientMessageId === clientMessageId);
-							if (existing >= 0) {
-								const next = msgs.slice();
-								next[existing] = { ...next[existing], pending: false };
-								return next;
-							}
+							if (existing >= 0) return msgs;
 						}
 						return [
 							...msgs,
