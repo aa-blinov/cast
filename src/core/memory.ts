@@ -81,9 +81,11 @@ const MARKDOWN_BULLET_STRIP_RE = /^[-*]\s+/;
 const ARTIFACT_FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?/;
 const ARTIFACT_DESCRIPTION_RE = /^description:\s*(.+)$/m;
 const MEMORY_DREAM_SYSTEM_PROMPT = readRequiredPrompt(promptsDir, "memory-dream-system.md");
+const MEMORY_DREAM_JSON_PROMPT = readRequiredPrompt(promptsDir, "memory-dream-json.md");
 const MEMORY_DREAM_PROMPT = readRequiredPrompt(promptsDir, "memory-dream.md");
 const MEMORY_DREAM_AGENT_SYSTEM_PROMPT = readRequiredPrompt(promptsDir, "memory-dream-agent-system.md");
 const MEMORY_DISTILL_SYSTEM_PROMPT = readRequiredPrompt(promptsDir, "memory-distill-system.md");
+const MEMORY_DISTILL_JSON_PROMPT = readRequiredPrompt(promptsDir, "memory-distill-json.md");
 const MEMORY_DISTILL_PROMPT = readRequiredPrompt(promptsDir, "memory-distill.md");
 const MEMORY_DISTILL_AGENT_SYSTEM_PROMPT = readRequiredPrompt(promptsDir, "memory-distill-agent-system.md");
 
@@ -1625,7 +1627,9 @@ async function runDreamProjectMemory(input: MemoryMaintenanceInput): Promise<Mem
 	}
 	const transcript = formatMemoryTranscript(input.messages);
 	const checkpoint = latestProjectMemoryCheckpoint(input.cwd);
-	const prompt = MEMORY_DREAM_PROMPT.replace("{{TRANSCRIPT}}", transcript || "(no completed turn supplied)")
+	// The non-agent path has no file tools: it produces JSON for the caller to
+	// apply (a dedicated JSON prompt, not the agent-oriented file-tools prompt).
+	const prompt = MEMORY_DREAM_JSON_PROMPT.replace("{{TRANSCRIPT}}", transcript || "(no completed turn supplied)")
 		.replace("{{CHECKPOINT}}", checkpointPromptText(checkpoint))
 		.replace("{{TRAJECTORY}}", formatProjectTrajectory(input.cwd, 7))
 		.replace(
@@ -1922,7 +1926,9 @@ async function runDistillProjectMemory(input: MemoryMaintenanceInput): Promise<M
 	const transcript = formatMemoryTranscript(input.messages);
 	if (!transcript) return { artifacts: [], skipped: true };
 	const checkpoint = latestProjectMemoryCheckpoint(input.cwd);
-	const prompt = MEMORY_DISTILL_PROMPT.replace("{{TRANSCRIPT}}", transcript)
+	// The non-agent path has no file tools: it produces JSON for the caller to
+	// materialize (a dedicated JSON prompt, not the agent-oriented file-tools prompt).
+	const prompt = MEMORY_DISTILL_JSON_PROMPT.replace("{{TRANSCRIPT}}", transcript)
 		.replace("{{CHECKPOINT}}", checkpointPromptText(checkpoint))
 		.replace("{{TRAJECTORY}}", formatProjectTrajectory(input.cwd, 30))
 		.replace("{{ASSETS}}", formatExistingAssets(input.cwd))
