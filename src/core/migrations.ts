@@ -627,6 +627,27 @@ CREATE INDEX IF NOT EXISTS idx_compactions_ts ON compactions(ts);
 			}
 		},
 	},
+	{
+		version: 25,
+		name: "memory-maintenance",
+		up: (db) => {
+			// Per automatic memory run (dream/distill) — how often maintenance
+			// runs, whether it completed, and how much it wrote.
+			db.exec(`
+CREATE TABLE IF NOT EXISTS memory_maintenance (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts INTEGER NOT NULL,
+  session_id TEXT,
+  kind TEXT NOT NULL,
+  status TEXT NOT NULL,
+  entries_stored INTEGER,
+  entries_removed INTEGER,
+  usage_tokens INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_memory_maintenance_ts ON memory_maintenance(ts);
+`);
+		},
+	},
 ];
 
 const MIGRATION_TABLE_SCHEMA = `

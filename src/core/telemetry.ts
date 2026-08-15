@@ -661,6 +661,89 @@ export function queryTokensPerSecond(sinceMs: number): number | null {
 	return v != null ? Math.round(v) : null;
 }
 
+// ── Memory maintenance ──────────────────────────────────────────────────
+
+export interface MemoryMaintenanceRecord {
+	sessionId?: string;
+	kind: "dream" | "distill";
+	status: "completed" | "failed";
+	entriesStored?: number;
+	entriesRemoved?: number;
+	usageTokens?: number;
+}
+
+let memoryInsertStmt: StatementSync | null = null;
+let memoryPreparedDb: DatabaseSync | null = null;
+
+function getMemoryInsertStmt(): StatementSync {
+	const db = getDb();
+	if (!memoryInsertStmt || memoryPreparedDb !== db) {
+		memoryInsertStmt = db.prepare(
+			"INSERT INTO memory_maintenance (ts, session_id, kind, status, entries_stored, entries_removed, usage_tokens) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		);
+		memoryPreparedDb = db;
+	}
+	return memoryInsertStmt;
+}
+
+export function recordMemoryMaintenance(record: MemoryMaintenanceRecord): void {
+	getMemoryInsertStmt().run(
+		Date.now(),
+		record.sessionId ?? null,
+		record.kind,
+		record.status,
+		record.entriesStored ?? null,
+		record.entriesRemoved ?? null,
+		record.usageTokens ?? null,
+	);
+}
+
+export interface MemoryMaintenanceRow {
+	kind: string;
+	status: string;
+	count: number;
+}
+
+export interface MemoryMaintenanceOverview {
+	runs: MemoryMaintenanceRow[];
+	entriesStored: number;
+	usageTokens: number;
+}
+
+/** Per-kind/status maintenance runs, total entries written, and LLM tokens
+ * spent on maintenance since `sinceMs`. */
+export function queryMemoryMaintenance(sinceMs: number): MemoryMaintenanceOverview {
+	const db = getDb();
+	const runs = db
+		.prepare("SELECT kind, status, COUNT(*) AS count FROM memory_maintenance WHERE ts >= ? GROUP BY kind, status ORDER BY kind")
+		.all(sinceMs);
+	const totals = db
+		.prepare(
+			"SELECT SUM(entries_stored) AS stored, SUM(usage_tokens) AS tokens FROM memory_maintenance WHERE ts >= ? AND status = 'completed'",
+		)
+		.get(sinceMs);
+	return {
+		runs: (runs as Array<{ kind: string; status: string; count: number }>).map((r) => ({
+			kind: r.kind,
+			status: r.status,
+			count: r.count,
+		})),
+		entriesStored: Number((totals as { stored: number | null }).stored ?? 0),
+		usageTokens: Number((totals as { tokens: number | null }).tokens ?? 0),
+	};
+}
+
+/** Memory tool (search) usage from the tool_calls table. */
+export function queryMemoryToolUsage(sinceMs: number): { count: number; errors: number; avgLatencyMs: number | null } {
+	const row = getDb()
+		.prepare(
+			"SELECT COUNT(*) AS count, SUM(is_error) AS errors, AVG(latency_ms) AS avg_latency FROM tool_calls WHERE ts >= ? AND tool_name = 'memory'",
+		)
+		.get(sinceMs);
+	const r = row as { count: number; errors: number; avg_latency: number | null };
+	return { count: r.count, errors: r.errors, avgLatencyMs: r.avg_latency != null ? Math.round(r.avg_latency) : null };
+}
+
 // ── Session analytics ───────────────────────────────────────────────────
 
 export interface SessionAnalytics {

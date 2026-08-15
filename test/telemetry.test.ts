@@ -9,6 +9,8 @@ import {
 	queryEndpointSeries,
 	queryFileEdits,
 	queryLlmLatencyPercentiles,
+	queryMemoryMaintenance,
+	queryMemoryToolUsage,
 	queryRecentLlmRequests,
 	queryReliabilityOverview,
 	queryTelemetryOverview,
@@ -18,6 +20,7 @@ import {
 	queryTurnMetrics,
 	recordApiRequest,
 	recordLlmRequest,
+	recordMemoryMaintenance,
 	recordToolCall,
 } from "../src/core/telemetry.ts";
 
@@ -192,6 +195,24 @@ describe("llm telemetry", () => {
 		const reliability = queryReliabilityOverview(0);
 		expect(reliability.errorTypes.some((t) => t.errorType === "doom-loop" && t.count === 1)).toBe(true);
 		expect(reliability.errorTypes.some((t) => t.errorType === "empty-response" && t.count === 1)).toBe(true);
+	});
+
+	it("records memory maintenance runs and aggregates stored entries and tokens", () => {
+		recordMemoryMaintenance({ sessionId: "s1", kind: "dream", status: "completed", entriesStored: 5, entriesRemoved: 2, usageTokens: 1200 });
+		recordMemoryMaintenance({ sessionId: "s1", kind: "distill", status: "completed", entriesStored: 3, usageTokens: 800 });
+		recordMemoryMaintenance({ sessionId: "s1", kind: "dream", status: "failed" });
+		recordToolCall("s1", "memory", false, 7);
+
+		const m = queryMemoryMaintenance(0);
+		expect(m.runs).toHaveLength(3);
+		expect(m.runs.find((r) => r.kind === "dream" && r.status === "completed")).toMatchObject({ count: 1 });
+		expect(m.runs.find((r) => r.kind === "dream" && r.status === "failed")).toMatchObject({ count: 1 });
+		expect(m.runs.find((r) => r.kind === "distill" && r.status === "completed")).toMatchObject({ count: 1 });
+		expect(m.entriesStored).toBe(8);
+		expect(m.usageTokens).toBe(2000);
+
+		// The memory tool (search) is a regular tool_call row.
+		expect(queryMemoryToolUsage(0)).toMatchObject({ count: 1, errors: 0, avgLatencyMs: 7 });
 	});
 
 	it("groups completions and tool calls into per-turn aggregates", () => {
