@@ -317,7 +317,8 @@ describe("project memory", () => {
 	it("builds safe OR search queries and formats a tool result", () => {
 		expect(buildMemorySearchQuery("SSE reconnect: client-id")).toBe('"SSE" OR "reconnect" OR "client" OR "id"');
 		expect(buildMemorySearchQuery("---")).toBe("");
-		expect(formatMemoryToolResult("connection", [])).toContain("No project memory matched");
+		expect(formatMemoryToolResult("connection", [])).toContain('No matches for "connection"');
+		expect(formatMemoryToolResult("connection", [])).toContain("Escalate before giving up");
 	});
 
 	it("scopes the maintenance transcript to the latest turn", () => {
