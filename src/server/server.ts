@@ -33,11 +33,16 @@ import { getHistoryPage, getMessageImage, getSessionEvents } from "../core/sessi
 import { loadSettings, updateSettings } from "../core/settings.ts";
 import {
 	countRecentLlmRequests,
+	queryCompactionOverview,
+	queryContextUtilization,
 	queryEndpointOverview,
 	queryEndpointSeries,
 	queryRecentLlmRequests,
+	queryReliabilityOverview,
+	querySessionAnalytics,
 	queryTelemetryOverview,
 	queryTelemetrySeries,
+	queryToolUsage,
 	recordApiRequest,
 } from "../core/telemetry.ts";
 import { ensureSessionWorktree } from "../core/worktree.ts";
@@ -643,6 +648,26 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			sinceMs,
 			resolutionMs: resolutionMin * 60 * 1000,
 			buckets: queryEndpointSeries(sinceMs, resolutionMin * 60 * 1000),
+		});
+	});
+
+	route("GET", "/api/telemetry/reliability", (req, res) => {
+		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+		const hours = Number(url.searchParams.get("since")) || 24;
+		const sinceMs = Date.now() - hours * 60 * 60 * 1000;
+		json(res, { sinceMs, ...queryReliabilityOverview(sinceMs) });
+	});
+
+	route("GET", "/api/telemetry/system", (req, res) => {
+		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+		const hours = Number(url.searchParams.get("since")) || 24;
+		const sinceMs = Date.now() - hours * 60 * 60 * 1000;
+		json(res, {
+			sinceMs,
+			compactions: queryCompactionOverview(sinceMs),
+			context: queryContextUtilization(sinceMs),
+			tools: queryToolUsage(sinceMs),
+			sessions: querySessionAnalytics(sinceMs),
 		});
 	});
 

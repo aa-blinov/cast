@@ -105,7 +105,7 @@ import {
 } from "../core/skills.ts";
 import { saveSshConfig } from "../core/ssh.ts";
 import type { StartupResult } from "../core/startup.ts";
-import { recordLlmRequest } from "../core/telemetry.ts";
+import { classifyLlmError, recordLlmCompaction, recordLlmRequest, recordToolCall } from "../core/telemetry.ts";
 import { stripAnsi } from "../core/tools/bash.ts";
 import { BackgroundTaskRegistry, type BashBackgroundDeps } from "../core/tools/bash-background.ts";
 import { type CompletedToolCallStatus, completedToolCallStatus } from "../core/tools/shared.ts";
@@ -1483,8 +1483,22 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				// are too fine-grained (thousands per turn) and their final form
 				// already lands in messages; these are the coarse, useful ones.
 				switch (event.type) {
+					case "tool_end": {
+						// One row per completed tool call (not per start+end) — the
+						// end event carries the error flag, so recording only here
+						// avoids double-counting usage.
+						const t = event as { name: string; result: { isError?: boolean } };
+						recordToolCall(ws.id, t.name, t.result?.isError === true);
+						appendSessionEvent(sessionId, event.type, event);
+						break;
+					}
+					case "compaction": {
+						const c = event as { messagesCompacted: number; tokensBefore: number };
+						recordLlmCompaction(ws.id, c.messagesCompacted, c.tokensBefore);
+						appendSessionEvent(sessionId, event.type, event);
+						break;
+					}
 					case "tool_start":
-					case "tool_end":
 					case "turn_end":
 					case "doom_loop":
 					case "open_work_gate":
@@ -1504,6 +1518,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 								kind: "retry",
 								retries: event.attempt,
 								error: event.reason,
+								errorType: classifyLlmError(event.reason),
 							});
 						} else if (event.type === "error") {
 							recordLlmRequest({
@@ -1512,6 +1527,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 								model: runModel,
 								kind: "error",
 								error: event.message,
+								errorType: classifyLlmError(event.message),
 							});
 						}
 						break;
@@ -1592,6 +1608,8 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 						cacheWriteTokens: event.usage.cacheWriteTokens,
 						cost: event.usage.cost,
 						latencyMs: event.generationMs,
+						ttftMs: event.ttftMs,
+						contextWindow: config.contextWindow,
 					});
 					if (event.background) {
 						saveSession(ws.session);

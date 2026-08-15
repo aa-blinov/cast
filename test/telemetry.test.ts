@@ -8,6 +8,7 @@ import {
 	queryEndpointOverview,
 	queryEndpointSeries,
 	queryRecentLlmRequests,
+	queryReliabilityOverview,
 	queryTelemetryOverview,
 	queryTelemetrySeries,
 	recordApiRequest,
@@ -81,8 +82,13 @@ describe("llm telemetry", () => {
 		const minimax = rows.find((r) => r.provider === "minimax");
 		const eora = rows.find((r) => r.provider === "eora");
 		expect(minimax).toMatchObject({ requests: 2, promptTokens: 300, completionTokens: 30, cost: 0.003, errors: 0 });
-		// The retry/error rows count as requests but carry no tokens.
-		expect(eora).toMatchObject({ requests: 2, errors: 1 });
+		// retry/error rows are NOT requests (no double count) — the eora group
+		// has zero usage rows, so requests is 0 and only errors/retries show up.
+		expect(eora).toBeUndefined();
+		const reliability = queryReliabilityOverview(0);
+		expect(reliability.requests).toBe(2);
+		expect(reliability.retries).toBe(1);
+		expect(reliability.errorTypes.some((t) => t.errorType === "other" && t.count >= 1)).toBe(true);
 	});
 
 	it("series buckets by resolution and fills empty buckets", () => {

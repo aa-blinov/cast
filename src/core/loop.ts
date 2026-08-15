@@ -674,7 +674,7 @@ export type AgentEvent =
 	// generationMs is only set for the main completion's usage — compaction's
 	// own summarization call reports usage too (for cumulative cost tracking)
 	// but isn't a user-facing turn, so there's no "last request" TPS to show for it.
-	| { type: "usage"; usage: Usage; generationMs?: number; subagent?: boolean; background?: boolean }
+	| { type: "usage"; usage: Usage; generationMs?: number; ttftMs?: number; subagent?: boolean; background?: boolean }
 	| { type: "end"; reason: string }
 	| { type: "error"; message: string };
 
@@ -2338,7 +2338,12 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 
 				if (completion.usage) {
 					loopConfig.lastPromptTokens = completion.usage.promptTokens;
-					onEvent({ type: "usage", usage: completion.usage, generationMs: completion.generationMs });
+					onEvent({
+						type: "usage",
+						usage: completion.usage,
+						generationMs: completion.generationMs,
+						ttftMs: completion.ttftMs,
+					});
 				}
 
 				// Check for streaming errors (pi pattern: stopReason check)
