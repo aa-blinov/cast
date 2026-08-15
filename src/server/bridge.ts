@@ -105,6 +105,7 @@ import {
 } from "../core/skills.ts";
 import { saveSshConfig } from "../core/ssh.ts";
 import type { StartupResult } from "../core/startup.ts";
+import { recordLlmRequest } from "../core/telemetry.ts";
 import { stripAnsi } from "../core/tools/bash.ts";
 import { BackgroundTaskRegistry, type BashBackgroundDeps } from "../core/tools/bash-background.ts";
 import { type CompletedToolCallStatus, completedToolCallStatus } from "../core/tools/shared.ts";
@@ -1495,6 +1496,24 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					case "end":
 					case "error":
 						appendSessionEvent(sessionId, event.type, event);
+						if (event.type === "retry") {
+							recordLlmRequest({
+								sessionId: ws.id,
+								provider: runProviderName,
+								model: runModel,
+								kind: "retry",
+								retries: event.attempt,
+								error: event.reason,
+							});
+						} else if (event.type === "error") {
+							recordLlmRequest({
+								sessionId: ws.id,
+								provider: runProviderName,
+								model: runModel,
+								kind: "error",
+								error: event.message,
+							});
+						}
 						break;
 					default:
 						break;
@@ -1558,6 +1577,22 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				if (event.type === "todos_updated") ws.session.todos = event.todos;
 				if (event.type === "usage") {
 					addUsage(ws.session, event.usage, { subagent: event.subagent, background: event.background });
+					// One row per LLM request — the loop emits this event exactly
+					// once per completion (main / subagent aggregate / background /
+					// compaction), so telemetry can't double-count. Cheap single
+					// prepared INSERT on the event path.
+					recordLlmRequest({
+						sessionId: ws.id,
+						provider: runProviderName,
+						model: runModel,
+						kind: event.background ? "background" : event.subagent ? "subagent" : "main",
+						promptTokens: event.usage.promptTokens,
+						completionTokens: event.usage.completionTokens,
+						cacheReadTokens: event.usage.cacheReadTokens,
+						cacheWriteTokens: event.usage.cacheWriteTokens,
+						cost: event.usage.cost,
+						latencyMs: event.generationMs,
+					});
 					if (event.background) {
 						saveSession(ws.session);
 						broadcastSessionUpdate(ws);
