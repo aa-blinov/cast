@@ -227,7 +227,14 @@ export function Dashboard({ onClose }) {
 								{ label: "errors & retries", data: reliability.errorTypes.map((t) => t.count), backgroundColor: colors.rose },
 							],
 						},
-						options: makeBaseOptions(colors),
+						options: {
+							...makeBaseOptions(colors),
+							indexAxis: "y",
+							scales: {
+								x: { ...makeBaseOptions(colors).scales.x, beginAtZero: true },
+								y: { ...makeBaseOptions(colors).scales.y, ticks: { color: colors.textMuted, font: { size: 11 } } },
+							},
+						},
 					});
 				} else if (tab === "system") {
 					chartsRef.current["tools"] = new Chart(document.getElementById("dash-chart-tools"), {
@@ -239,7 +246,14 @@ export function Dashboard({ onClose }) {
 								{ label: "errors", data: system.tools.map((t) => t.errors), backgroundColor: colors.rose },
 							],
 						},
-						options: makeBaseOptions(colors),
+						options: {
+							...makeBaseOptions(colors),
+							indexAxis: "y",
+							scales: {
+								x: { ...makeBaseOptions(colors).scales.x, beginAtZero: true },
+								y: { ...makeBaseOptions(colors).scales.y, ticks: { color: colors.textMuted, font: { size: 11 } } },
+							},
+						},
 					});
 				} else if (tab === "llm") {
 					const data = llm;
