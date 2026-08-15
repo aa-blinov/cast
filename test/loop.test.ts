@@ -626,6 +626,46 @@ describe("runAgentLoop — abort vs. error", () => {
 		expect(defaultCheckpointThresholds(1_000_000)).toHaveLength(18);
 	});
 
+	it("clamps checkpoint thresholds to the reserved window tail", async () => {
+		const sessionId = "reserved-session";
+		const writers: number[] = [];
+		const usages = [85_000, 88_000]; // 100K window reserves 13K → maxAllowed 87K
+		let mainCall = 0;
+		const originalImpl = vi.mocked(streamAndCollect).getMockImplementation();
+		vi.mocked(streamAndCollect).mockImplementation(async (_client, _model, _messages, _tools, _maxTokens) => {
+			if (mainCall < usages.length) {
+				const promptTokens = usages[mainCall++]!;
+				return {
+					content: `turn ${mainCall}`,
+					thinking: "",
+					finishReason: "stop",
+					usage: { promptTokens, completionTokens: 1, totalTokens: promptTokens + 1 },
+				};
+			}
+			return { content: "checkpoint saved", thinking: "", finishReason: "stop" };
+		});
+		const base = {
+			config: { ...testConfig, contextWindow: 100_000, maxResponseTokens: 100 },
+			checkpointThresholds: [90],
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "test",
+			memory: { sessionId },
+			sessionId,
+			onEvent: () => {},
+			onCheckpointWriter: () => writers.push(mainCall),
+		};
+		try {
+			// 90% of 100K = 90K, clamped to 100K - 13K = 87K. 85K stays under,
+			// 88K crosses it — so exactly one writer fires.
+			await runAgentLoop([{ role: "user", content: "first" }], base);
+			await runAgentLoop([{ role: "user", content: "second" }], base);
+			expect(writers).toHaveLength(1);
+		} finally {
+			vi.mocked(streamAndCollect).mockImplementation(originalImpl as never);
+		}
+	});
+
 	it("does not reconstruct memory while preparing an ordinary turn", async () => {
 		const realHome = process.env.HOME;
 		const fakeHome = mkdtempSync(join(tmpdir(), "cast-memory-budget-home-"));
