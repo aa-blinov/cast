@@ -460,6 +460,44 @@ WHERE m.role IN ('user', 'assistant', 'tool');
 `);
 		},
 	},
+	{
+		version: 18,
+		name: "memory-file-index",
+		up: (db) => {
+			// Full-tree memory file index (MiMo-style): every `.md` under the memory
+			// root and, when enabled, Claude Code memory, mirrored into FTS5 so the
+			// search tool covers checkpoint/notes/task/spillover files, not just the
+			// parsed MEMORY.md bullets in project_memory.
+			db.exec(`
+CREATE TABLE IF NOT EXISTS memory_files (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  path TEXT NOT NULL UNIQUE,
+  scope TEXT NOT NULL,
+  scope_id TEXT NOT NULL DEFAULT '',
+  type TEXT NOT NULL,
+  body TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  last_indexed_at INTEGER NOT NULL
+);
+CREATE VIRTUAL TABLE IF NOT EXISTS memory_files_fts USING fts5(
+  body,
+  content='memory_files',
+  content_rowid='id',
+  tokenize='unicode61 remove_diacritics 1'
+);
+CREATE TRIGGER IF NOT EXISTS memory_files_fts_ai AFTER INSERT ON memory_files BEGIN
+  INSERT INTO memory_files_fts(rowid, body) VALUES (NEW.id, NEW.body);
+END;
+CREATE TRIGGER IF NOT EXISTS memory_files_fts_ad AFTER DELETE ON memory_files BEGIN
+  INSERT INTO memory_files_fts(memory_files_fts, rowid, body) VALUES ('delete', OLD.id, OLD.body);
+END;
+CREATE TRIGGER IF NOT EXISTS memory_files_fts_au AFTER UPDATE ON memory_files BEGIN
+  INSERT INTO memory_files_fts(memory_files_fts, rowid, body) VALUES ('delete', OLD.id, OLD.body);
+  INSERT INTO memory_files_fts(rowid, body) VALUES (NEW.id, NEW.body);
+END;
+`);
+		},
+	},
 ];
 
 const MIGRATION_TABLE_SCHEMA = `
