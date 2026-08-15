@@ -244,27 +244,6 @@ END;
 		},
 	},
 	{
-		version: 7,
-		name: "project-memory-extraction-claims",
-		up: (db) => {
-			db.exec(`
-CREATE TABLE IF NOT EXISTS project_memory_extractions (
-  project_id TEXT NOT NULL,
-  session_id TEXT NOT NULL,
-  turn_key TEXT NOT NULL,
-  claim_token TEXT NOT NULL,
-  status TEXT NOT NULL,
-  lease_until TEXT NOT NULL,
-  completed_at TEXT,
-  entries_count INTEGER NOT NULL DEFAULT 0,
-  PRIMARY KEY (project_id, session_id, turn_key)
-);
-CREATE INDEX IF NOT EXISTS idx_project_memory_extractions_lease
-  ON project_memory_extractions(status, lease_until);
-`);
-		},
-	},
-	{
 		version: 8,
 		name: "session-history-fts",
 		up: (db) => {
@@ -293,18 +272,6 @@ WHERE m.role IN ('user', 'assistant', 'tool')
     SELECT 1 FROM session_history_fts AS f WHERE f.session_id = m.session_id AND f.seq = m.seq
   );
 `);
-		},
-	},
-	{
-		version: 9,
-		name: "project-memory-claim-token",
-		up: (db) => {
-			if (!columnExists(db, "project_memory_extractions", "claim_token")) {
-				db.exec("ALTER TABLE project_memory_extractions ADD COLUMN claim_token TEXT");
-				db.exec(
-					"UPDATE project_memory_extractions SET claim_token = hex(randomblob(32)) WHERE claim_token IS NULL",
-				);
-			}
 		},
 	},
 	{

@@ -155,8 +155,6 @@ export interface Settings {
 	memoryEnabled?: boolean;
 	/** Whether background memory extraction, checkpoint writing, and maintenance may write. */
 	memoryWriteEnabled?: boolean;
-	/** Run the legacy per-turn extraction writer; MiMo-compatible default is checkpoint-only. */
-	memoryExtractionAuto?: boolean;
 	/** Maximum estimated tokens reserved for automatically injected memory context. */
 	memoryPromptBudget?: number;
 	/** Relative BM25 score floor for dropping weak common-word matches. */
@@ -294,10 +292,6 @@ export function isMemoryEnabled(settings: Settings = loadSettings()): boolean {
 
 export function isMemoryWriteEnabled(settings: Settings = loadSettings()): boolean {
 	return isMemoryEnabled(settings) && settings.memoryWriteEnabled !== false;
-}
-
-export function memoryExtractionAuto(settings: Settings = loadSettings()): boolean {
-	return settings.memoryExtractionAuto === true;
 }
 
 export function memoryPromptBudget(settings: Settings = loadSettings()): number {

@@ -50,7 +50,6 @@ import {
 	runAutomaticMemoryMaintenanceRun,
 	scheduleAutomaticMemoryMaintenance,
 	scheduleProjectCheckpointWriter,
-	scheduleProjectMemoryExtraction,
 	waitForProjectCheckpointWriter,
 } from "./memory.ts";
 import {
@@ -95,7 +94,6 @@ import {
 	isMemoryEnabled,
 	isMemoryWriteEnabled,
 	loadSettings,
-	memoryExtractionAuto,
 	memoryPromptBudget,
 } from "./settings.ts";
 import { resolveSshHosts, type SshHost } from "./ssh.ts";
@@ -769,8 +767,6 @@ export interface LoopConfig {
 	checkpointBoundary?: number;
 	/** MiMo-compatible checkpoint writer mode; false uses only the post-checkpoint delta. */
 	checkpointFork?: boolean;
-	/** Opt-in compatibility path for Cast's legacy per-turn memory extraction. */
-	memoryExtractionAuto?: boolean;
 	/** Request-only cache marker for the fork prefix. */
 	cachePrefixBoundary?: number;
 	/** Run configured dream/distill maintenance when this is a fresh top-level session. */
@@ -1450,17 +1446,7 @@ export async function runAgentLoop(initialMessages: Message[], loopConfig: LoopC
 			runAgent: runMemoryMaintenanceAgent,
 		});
 	}
-	let terminalReason: Extract<AgentEvent, { type: "end" }>["reason"] | undefined;
-	const originalOnEvent = loopConfig.onEvent;
-	loopConfig.onEvent = (event) => {
-		if (event.type === "end") terminalReason = event.reason;
-		originalOnEvent(event);
-	};
-	try {
-		await runLoop(tracked, loopConfig);
-	} finally {
-		loopConfig.onEvent = originalOnEvent;
-	}
+	await runLoop(tracked, loopConfig);
 	if (shouldStartCheckpointWriter(loopConfig, tracked)) {
 		persistCheckpointSource(loopConfig.memory!.sessionId, tracked);
 		const checkpointFork = loopConfig.checkpointFork ?? checkpointForkSetting();
@@ -1499,26 +1485,6 @@ export async function runAgentLoop(initialMessages: Message[], loopConfig: LoopC
 			);
 			loopConfig.onCheckpointWriter?.(writerHandle);
 		}
-	}
-	if (
-		terminalReason === "stop" &&
-		loopConfig.memory &&
-		isMemoryWriteEnabled() &&
-		(loopConfig.memoryExtractionAuto ?? memoryExtractionAuto())
-	) {
-		const memoryService = loopConfig.memory.service ?? DEFAULT_MEMORY_SERVICE;
-		scheduleProjectMemoryExtraction(
-			{
-				cwd: loopConfig.cwd,
-				model: loopConfig.model,
-				sessionId: loopConfig.memory.sessionId,
-				config: loopConfig.config,
-				messages: tracked,
-				providerOverride: loopConfig.modelProvider,
-			},
-			memoryService,
-			loopConfig.onWarning,
-		);
 	}
 	return tracked;
 }
