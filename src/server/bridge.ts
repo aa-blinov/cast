@@ -3086,10 +3086,23 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			const [sub, rest] = splitArg(arg);
 			const sessionCwd = ws.session.cwd ?? cwd;
 			const settings = loadSettings();
-			// Codex/Claude/Grok catalogs are always present — cheap no-op once all
-			// three are known (a single JSON read), so calling it unconditionally
-			// here is fine rather than gating on which subcommand this is.
-			ensureDefaultMarketplaces();
+			// Default Codex/Claude/Grok catalogs are seeded lazily — only for
+			// subcommands that consume a marketplace (install resolves
+			// `name@codex|claude|grok`, marketplace add registers one). The
+			// read-only list/catalog paths must NOT seed: the very first seed
+			// clones three repos through *synchronous* git (runGit uses
+			// execFileSync) and would block the event loop for the whole
+			// clone, stalling every concurrent request — including the Settings
+			// modal's parallel /memory preload, which calls `/plugin marketplace
+			// list` + `/plugin marketplace catalog` on open.
+			const [marketplaceSubsub] = sub === "marketplace" ? splitArg(rest) : [undefined];
+			const shouldSeedDefaults =
+				sub === "install" ||
+				(sub === "marketplace" &&
+					marketplaceSubsub !== undefined &&
+					marketplaceSubsub !== "list" &&
+					marketplaceSubsub !== "catalog");
+			if (shouldSeedDefaults) ensureDefaultMarketplaces();
 			try {
 				if (!sub || sub === "list") {
 					return { ok: true, result: listInstalledPlugins(settings) };

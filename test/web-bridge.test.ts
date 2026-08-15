@@ -34,6 +34,17 @@ vi.mock("../src/core/config.ts", async (importOriginal) => {
 
 const { createServerBridge, SANDBOX_CWD, toDisplayMessages } = await import("../src/server/bridge.ts");
 
+// /plugin must seed the default Codex/Claude/Grok marketplaces only on
+// subcommands that consume them — the read-only list/catalog paths (which the
+// Settings modal preloads in parallel with /memory) would otherwise trigger
+// three synchronous git clones that block the event loop. Stub the seeder to
+// assert it's never reached from those paths.
+const mockEnsureDefaultMarketplaces = vi.fn();
+vi.mock("../src/core/plugins.ts", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../src/core/plugins.ts")>();
+	return { ...actual, ensureDefaultMarketplaces: (...args: unknown[]) => mockEnsureDefaultMarketplaces(...args) };
+});
+
 const testConfig: AppConfig = {
 	baseURL: "http://localhost",
 	apiKey: "test",
@@ -77,6 +88,7 @@ describe("web bridge", () => {
 		runAgentLoop.mockClear();
 		mockFetchModels.mockReset();
 		mockProbeProvider.mockClear();
+		mockEnsureDefaultMarketplaces.mockReset();
 		mockFetchModels.mockResolvedValue({
 			ok: true,
 			models: [{ id: "gpt-4o" }, { id: "hy3" }],
@@ -216,6 +228,20 @@ describe("web bridge", () => {
 			ok: false,
 			error: "Command requires an active session",
 		});
+	});
+
+	it("seeds default marketplaces only from /plugin subcommands that consume them", async () => {
+		const bridge = createServerBridge(makeResult());
+
+		// The Settings modal preloads these two in parallel with /memory on
+		// open — they must never trigger the synchronous git clone of the
+		// default catalogs (which would block the event loop).
+		await bridge.executeSettingsCommand("/plugin marketplace list");
+		await bridge.executeSettingsCommand("/plugin marketplace catalog");
+		expect(mockEnsureDefaultMarketplaces).not.toHaveBeenCalled();
+
+		await bridge.executeSettingsCommand("/plugin install foo@bar");
+		expect(mockEnsureDefaultMarketplaces).toHaveBeenCalledTimes(1);
 	});
 
 	it("resets each secondary model slot atomically", async () => {

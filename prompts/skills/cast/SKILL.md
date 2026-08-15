@@ -1,6 +1,6 @@
 ---
 name: cast
-description: Configure cast itself — create and manage personas, skills, marketplace plugins, MCP servers, or rules. Use when the user wants to customize cast, create a persona through chat, or install plugins from Codex/Claude/Grok catalogs.
+description: Configure cast itself — create and manage personas, skills, marketplace plugins, MCP servers, rules, or durable project memory. Use when the user wants to customize cast, ask about memory (what cast remembers, how memory works, enabling/disabling it), create a persona through chat, or install plugins from Codex/Claude/Grok catalogs.
 ---
 
 # cast configuration
@@ -31,6 +31,7 @@ This skill ships as an **index + reference files**. Read only what the task need
 | Slash commands — full table, hot-reload vs `/reload` | `references/commands.md` |
 | Providers and model slots — OpenAI-compatible endpoint, reasoning, validation | `references/providers.md` |
 | Web access — local/public server, login, SSH tunnel, security boundary | `references/web.md` |
+| Memory — durable project memory, `/memory` commands, files, how to answer user questions | `references/memory.md` |
 | Project configuration — `.cast/` layout, trust, git policy, reload | `references/project-config.md` |
 
 When the user asks for a specific concern ("how do I add an MCP server?", "where do personas live?"), open the matching reference file. For multi-topic requests ("install a plugin from a non-default marketplace that exposes a custom hook"), follow the references in order.
