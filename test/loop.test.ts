@@ -47,6 +47,7 @@ const {
 	createAgentContextFork,
 	createAgentForkContext,
 	createAgentForkRuntimeSnapshot,
+	defaultCheckpointThresholds,
 } = await import("../src/core/loop.ts");
 const { streamAndCollect } = await import("../src/core/llm.ts");
 type AgentEvent = Parameters<Parameters<typeof runAgentLoop>[1]["onEvent"]>[0];
@@ -281,6 +282,7 @@ describe("runAgentLoop — abort vs. error", () => {
 				],
 				{
 					config: { ...testConfig, contextWindow: 1000, maxResponseTokens: 100 },
+					checkpointThresholds: [1],
 					model: "test-model",
 					modelProvider: { baseURL: "https://openrouter.ai/api/v1", apiKey: "test" },
 					cwd: projectCwd,
@@ -361,6 +363,7 @@ describe("runAgentLoop — abort vs. error", () => {
 		try {
 			await runAgentLoop([{ role: "user", content: "checkpoint this" }], {
 				config: { ...testConfig, contextWindow: 1000, maxResponseTokens: 100 },
+				checkpointThresholds: [1],
 				model: "test-model",
 				modelProvider: { baseURL: "https://openrouter.ai/api/v1", apiKey: "test" },
 				cwd: projectCwd,
@@ -427,6 +430,7 @@ describe("runAgentLoop — abort vs. error", () => {
 				],
 				{
 					config: { ...testConfig, contextWindow: 1000, maxResponseTokens: 100 },
+					checkpointThresholds: [1],
 					model: "test-model",
 					modelProvider: { baseURL: "https://openrouter.ai/api/v1", apiKey: "test" },
 					cwd: projectCwd,
@@ -484,6 +488,7 @@ describe("runAgentLoop — abort vs. error", () => {
 				],
 				{
 					config: { ...testConfig, contextWindow: 1000, maxResponseTokens: 100 },
+					checkpointThresholds: [1],
 					model: "test-model",
 					modelProvider: { baseURL: "https://openrouter.ai/api/v1", apiKey: "test" },
 					cwd: projectCwd,
@@ -551,6 +556,7 @@ describe("runAgentLoop — abort vs. error", () => {
 				],
 				{
 					config: { ...testConfig, contextWindow: 1000, maxResponseTokens: 100 },
+					checkpointThresholds: [1],
 					model: "test-model",
 					modelProvider: { baseURL: "https://openrouter.ai/api/v1", apiKey: "test" },
 					cwd: projectCwd,
@@ -568,6 +574,56 @@ describe("runAgentLoop — abort vs. error", () => {
 			rmSync(fakeHome, { recursive: true, force: true });
 			rmSync(projectCwd, { recursive: true, force: true });
 		}
+	});
+
+	it("fires the checkpoint writer once per newly crossed threshold", async () => {
+		const sessionId = "threshold-session";
+		const writers: number[] = [];
+		const usages = [400, 800, 900];
+		let mainCall = 0;
+		const originalImpl = vi.mocked(streamAndCollect).getMockImplementation();
+		vi.mocked(streamAndCollect).mockImplementation(async (_client, _model, _messages, _tools, _maxTokens) => {
+			if (mainCall < usages.length) {
+				const promptTokens = usages[mainCall++]!;
+				return {
+					content: `turn ${mainCall}`,
+					thinking: "",
+					finishReason: "stop",
+					usage: { promptTokens, completionTokens: 1, totalTokens: promptTokens + 1 },
+				};
+			}
+			return { content: "checkpoint saved", thinking: "", finishReason: "stop" };
+		});
+
+		const base = {
+			config: { ...testConfig, contextWindow: 1000, maxResponseTokens: 100 },
+			checkpointThresholds: [30, 70],
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "test",
+			memory: { sessionId },
+			sessionId,
+			onEvent: () => {},
+			onCheckpointWriter: () => writers.push(mainCall),
+		};
+		try {
+			// 400/1000 = 40% → crosses 30%. 800/1000 = 80% → crosses 70%.
+			// 900/1000 = 90% → both thresholds already crossed, no new writer.
+			await runAgentLoop([{ role: "user", content: "first" }], base);
+			await runAgentLoop([{ role: "user", content: "second" }], base);
+			await runAgentLoop([{ role: "user", content: "third" }], base);
+
+			expect(writers).toHaveLength(2);
+		} finally {
+			vi.mocked(streamAndCollect).mockImplementation(originalImpl as never);
+		}
+	});
+
+	it("defaults the checkpoint threshold ladder by window size", () => {
+		expect(defaultCheckpointThresholds(10_000)).toEqual([]);
+		expect(defaultCheckpointThresholds(100_000)).toEqual([20, 40, 60, 80]);
+		expect(defaultCheckpointThresholds(300_000)).toEqual([10, 20, 30, 40, 50, 60, 70, 80, 90]);
+		expect(defaultCheckpointThresholds(1_000_000)).toHaveLength(18);
 	});
 
 	it("does not reconstruct memory while preparing an ordinary turn", async () => {
