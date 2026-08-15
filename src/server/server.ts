@@ -32,6 +32,7 @@ import {
 import { getHistoryPage, getMessageImage, getSessionEvents } from "../core/session.ts";
 import { loadSettings, updateSettings } from "../core/settings.ts";
 import {
+	countRecentLlmRequests,
 	queryEndpointOverview,
 	queryEndpointSeries,
 	queryRecentLlmRequests,
@@ -613,7 +614,15 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 	route("GET", "/api/telemetry/recent", (req, res) => {
 		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
 		const limit = Math.min(200, Number(url.searchParams.get("limit")) || 50);
-		json(res, { rows: queryRecentLlmRequests(limit) });
+		const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0);
+		const hours = Number(url.searchParams.get("since")) || 24;
+		const sinceMs = Date.now() - hours * 60 * 60 * 1000;
+		json(res, {
+			rows: queryRecentLlmRequests(limit, offset, sinceMs),
+			total: countRecentLlmRequests(sinceMs),
+			offset,
+			limit,
+		});
 	});
 
 	route("GET", "/api/telemetry/endpoints", (req, res) => {
@@ -1857,9 +1866,12 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		const method = req.method ?? "GET";
 
 		// Measure every /api/* request for the dashboard's system-performance
-		// tab. The telemetry reads themselves are excluded so they don't
-		// pollute the data. One cheap prepared INSERT on res.finish.
-		if (urlPath.startsWith("/api/") && !urlPath.startsWith("/api/telemetry/")) {
+		// tab. The telemetry reads themselves and SSE event streams are excluded:
+		// telemetry reads would pollute the data, and an SSE connection's
+		// `finish` fires only when the client disconnects — its duration is the
+		// session lifetime, not a request/response latency. One cheap prepared
+		// INSERT on res.finish.
+		if (urlPath.startsWith("/api/") && !urlPath.startsWith("/api/telemetry/") && !urlPath.endsWith("/events")) {
 			const reqStart = Date.now();
 			res.on("finish", () => {
 				recordApiRequest({ method, path: urlPath, status: res.statusCode, latencyMs: Date.now() - reqStart });

@@ -91,23 +91,55 @@ function KpiCard({ label, value, sub, tone }) {
 	</div>`;
 }
 
+// Grafana-style table footer: page-size select, "X–Y of Z", prev/next.
+function DashPager({ total, pageSize, page, onPageSize, onPage }) {
+	const pages = Math.max(1, Math.ceil(total / pageSize));
+	const start = total === 0 ? 0 : page * pageSize + 1;
+	const end = Math.min(total, (page + 1) * pageSize);
+	return html`<div class="dash-pager">
+		<select class="dash-pager-size" value=${pageSize} onChange=${(e) => onPageSize(Number(e.target.value))} aria-label="Rows per page">
+			<option value="10">10</option><option value="25">25</option><option value="50">50</option>
+		</select>
+		<span class="dash-pager-count">${start}–${end} of ${total}</span>
+		<button class="dash-pager-btn" disabled=${page <= 0} onClick=${() => onPage(page - 1)} aria-label="Previous page">‹</button>
+		<button class="dash-pager-btn" disabled=${page >= pages - 1} onClick=${() => onPage(page + 1)} aria-label="Next page">›</button>
+	</div>`;
+}
+
 export function Dashboard({ onClose }) {
 	const [tab, setTab] = useState("llm");
 	const [range, setRange] = useState("24h");
-	const [llm, setLlm] = useState({ overview: [], series: [], recent: [] });
+	const [llm, setLlm] = useState({ overview: [], series: [] });
 	const [perf, setPerf] = useState({ overview: [], series: [] });
+	const [recent, setRecent] = useState({ rows: [], total: 0, page: 0, pageSize: 25 });
+	const [endpointPage, setEndpointPage] = useState({ page: 0, pageSize: 10 });
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState(null);
 	const [themeVersion, setThemeVersion] = useState(0);
 	const chartsRef = useRef({});
-	const requestIdRef = useRef(0);
+	// Separate request counters for the two fetch paths so a stale response
+	// from one never discards a fresh response from the other (they fire
+	// concurrently on mount and on range change).
+	const loadRequestIdRef = useRef(0);
+	const recentRequestIdRef = useRef(0);
 
 	// Watch the root style for theme changes (applyTheme mutates
-	// document.documentElement) and bump themeVersion so charts re-color.
+	// document.documentElement). A single theme change sets many CSS variables,
+	// which fires many mutations — debounce so charts re-color exactly once.
 	useEffect(() => {
-		const observer = new MutationObserver(() => setThemeVersion((v) => v + 1));
+		let timer = null;
+		const observer = new MutationObserver(() => {
+			if (timer) return;
+			timer = setTimeout(() => {
+				timer = null;
+				setThemeVersion((v) => v + 1);
+			}, 50);
+		});
 		observer.observe(document.documentElement, { attributes: true, attributeFilter: ["style", "class"] });
-		return () => observer.disconnect();
+		return () => {
+			observer.disconnect();
+			if (timer) clearTimeout(timer);
+		};
 	}, []);
 
 	const destroyCharts = useCallback(() => {
@@ -118,32 +150,51 @@ export function Dashboard({ onClose }) {
 	}, []);
 
 	const load = useCallback(async () => {
-		const req = ++requestIdRef.current;
+		const req = ++loadRequestIdRef.current;
 		const hours = range === "30d" ? 720 : range === "7d" ? 168 : 24;
 		const resolution = hours === 24 ? 60 : hours === 168 ? 360 : 1440;
 		setLoading(true);
 		setError(null);
 		try {
-			const [ov, se, rec, eo, es] = await Promise.all([
+			const [ov, se, eo, es] = await Promise.all([
 				api("GET", `/api/telemetry/overview?since=${hours}`),
 				api("GET", `/api/telemetry/series?since=${hours}&resolution=${resolution}`),
-				api("GET", `/api/telemetry/recent?limit=50`),
 				api("GET", `/api/telemetry/endpoints?since=${hours}`),
 				api("GET", `/api/telemetry/endpoint-series?since=${hours}&resolution=${resolution}`),
 			]);
-			if (req !== requestIdRef.current) return;
-			setLlm({ overview: ov?.rows ?? [], series: se?.buckets ?? [], recent: rec?.rows ?? [] });
+			if (req !== loadRequestIdRef.current) return;
+			setLlm({ overview: ov?.rows ?? [], series: se?.buckets ?? [] });
 			setPerf({ overview: eo?.rows ?? [], series: es?.buckets ?? [] });
+			setEndpointPage((p) => ({ ...p, page: 0 }));
 		} catch (err) {
-			if (req === requestIdRef.current) setError(err.message);
+			if (req === loadRequestIdRef.current) setError(err.message);
 		} finally {
-			if (req === requestIdRef.current) setLoading(false);
+			if (req === loadRequestIdRef.current) setLoading(false);
 		}
 	}, [range]);
 
+	// Server-side pagination for the recent-requests table (can grow large over
+	// 30d). Fetches only the current page; total drives the page count.
+	const loadRecent = useCallback(
+		async (page, pageSize) => {
+			const hours = range === "30d" ? 720 : range === "7d" ? 168 : 24;
+			const req = ++recentRequestIdRef.current;
+			try {
+				const res = await api("GET", `/api/telemetry/recent?since=${hours}&limit=${pageSize}&offset=${page * pageSize}`);
+				if (req === recentRequestIdRef.current) {
+					setRecent({ rows: res?.rows ?? [], total: res?.total ?? 0, page, pageSize });
+				}
+			} catch (err) {
+				if (req === recentRequestIdRef.current) setError(err.message);
+			}
+		},
+		[range],
+	);
+
 	useEffect(() => {
 		load();
-	}, [load]);
+		loadRecent(0, 25);
+	}, [load, loadRecent]);
 
 	// Create/refresh charts once Chart.js is ready and the active tab's data
 	// is present. Re-reads theme colors every time so a theme change re-colors.
@@ -266,10 +317,10 @@ export function Dashboard({ onClose }) {
 	const perfAvgLatency =
 		perfTotals.latencies.length > 0 ? perfTotals.latencies.reduce((a, b) => a + b, 0) / perfTotals.latencies.length : null;
 
-	const now = Date.now();
-	const rangeMs = range === "30d" ? 720 : range === "7d" ? 168 : 24;
-	const recentView = llm.recent.filter((r) => now - r.ts < rangeMs * 60 * 60 * 1000).slice(0, 30);
 	const rangeLabel = range === "30d" ? "30 days" : range === "7d" ? "7 days" : "24 hours";
+	// Client-side pagination over the already-fetched endpoint overview.
+	const epPage = endpointPage;
+	const epRows = perf.overview.slice(epPage.page * epPage.pageSize, (epPage.page + 1) * epPage.pageSize);
 
 	return html`
 		<div class="modal-backdrop" onClick=${onClose}>
@@ -289,9 +340,9 @@ export function Dashboard({ onClose }) {
 				</div>
 				<div class="dash-body">
 					${error ? html`<div class="dash-error">${error}</div>` : null}
-					${loading ? html`<div class="dash-loading"><span class="dash-spinner" /> Loading…</div>` : null}
-
-			${tab === "llm"
+					${loading
+						? html`<div class="dash-loading"><span class="dash-spinner" /> Loading…</div>`
+						: html`${tab === "llm"
 				? html`
 					<div class="dash-kpis">
 						<${KpiCard} label="Requests" value=${fmtTokens(llmTotals.requests)} sub=${rangeLabel} />
@@ -312,8 +363,8 @@ export function Dashboard({ onClose }) {
 						<table class="dash-table">
 							<thead><tr><th>Time</th><th>Kind</th><th>Provider</th><th>Model</th><th>In</th><th>Out</th><th>Cache</th><th>Latency</th><th>Error</th></tr></thead>
 							<tbody>
-								${recentView.length === 0 ? html`<tr><td colspan="9" class="dash-empty">No requests in this window yet.</td></tr>` : null}
-								${recentView.map((r) => html`<tr>
+								${recent.rows.length === 0 ? html`<tr><td colspan="9" class="dash-empty">No requests in this window yet.</td></tr>` : null}
+								${recent.rows.map((r) => html`<tr>
 									<td title=${new Date(r.ts).toISOString()}>${timeLabel(r.ts, false)}</td>
 									<td>${r.kind}</td>
 									<td>${r.provider ?? "—"}</td>
@@ -326,6 +377,13 @@ export function Dashboard({ onClose }) {
 								</tr>`)}
 							</tbody>
 						</table>
+						<${DashPager}
+							total=${recent.total}
+							pageSize=${recent.pageSize}
+							page=${recent.page}
+							onPageSize=${(s) => loadRecent(0, s)}
+							onPage=${(p) => loadRecent(p, recent.pageSize)}
+						/>
 					</div>
 				`
 				: html`
@@ -343,8 +401,8 @@ export function Dashboard({ onClose }) {
 						<table class="dash-table">
 							<thead><tr><th>Method</th><th>Path</th><th>Requests</th><th>Avg ms</th><th>Worst ms</th><th>5xx</th></tr></thead>
 							<tbody>
-								${perf.overview.length === 0 ? html`<tr><td colspan="6" class="dash-empty">No API requests in this window yet.</td></tr>` : null}
-								${perf.overview.map((r) => html`<tr>
+								${epRows.length === 0 ? html`<tr><td colspan="6" class="dash-empty">No API requests in this window yet.</td></tr>` : null}
+								${epRows.map((r) => html`<tr>
 									<td>${r.method}</td>
 									<td>${r.path}</td>
 									<td>${r.requests}</td>
@@ -354,7 +412,15 @@ export function Dashboard({ onClose }) {
 								</tr>`)}
 							</tbody>
 						</table>
+						<${DashPager}
+							total=${perf.overview.length}
+							pageSize=${epPage.pageSize}
+							page=${epPage.page}
+							onPageSize=${(s) => setEndpointPage({ page: 0, pageSize: s })}
+							onPage=${(p) => setEndpointPage((prev) => ({ ...prev, page: p }))}
+						/>
 					</div>
+				`}
 				`}
 				</div>
 			</div>
