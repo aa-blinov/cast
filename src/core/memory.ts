@@ -19,6 +19,7 @@ import {
 	ensureMemoryFiles,
 	globalMemoryPath,
 	MEMORY_TEMPLATE,
+	memoryRoot,
 	notesPath,
 	projectMemoryPath,
 	readMemoryFile,
@@ -32,6 +33,7 @@ import {
 import {
 	buildMemoryFilesSearchQuery as buildMemorySearchQuery,
 	type MemoryFileMatch,
+	reconcileMemoryFileIndex,
 	searchMemoryFiles,
 } from "./memory-files-index.ts";
 import type { Persona } from "./personas.ts";
@@ -48,6 +50,7 @@ import {
 import {
 	isMemoryWriteEnabled,
 	loadSettings,
+	memoryCcIndex,
 	memoryDistillAuto,
 	memoryDistillIntervalDays,
 	memoryDreamAuto,
@@ -905,17 +908,7 @@ function fileMemoryContext(
 		.slice(-6)
 		.map((message) => `- ${message.content}`)
 		.join("\n");
-	const activeActors =
-		options.rebuildContext && sessionId
-			? agentActorRegistry
-					.list()
-					.filter(
-						(actor) =>
-							actor.parentSessionId === sessionId && !["success", "failure", "cancelled"].includes(actor.status),
-					)
-					.map((actor) => `- ${actor.agent} (${actor.status}) · ${actor.id}`)
-					.join("\n")
-			: "";
+	const activeActors = options.rebuildContext && sessionId ? activeBackgroundActors(sessionId) : "";
 	const sections = [
 		[project ? `Project MEMORY.md:\n${project}` : "", 0.28],
 		[
@@ -2304,12 +2297,148 @@ function memoryPriorityComparator(a: MemorySearchResult, b: MemorySearchResult):
 	return bPriority - aPriority || b.score - a.score || b.updatedAt.localeCompare(a.updatedAt);
 }
 
+// Per-section token caps for the rebuild context, mirroring MiMo's
+// checkpoint.push_caps defaults. Each block is bounded independently so a huge
+// notes file cannot starve the checkpoint or project memory.
+const REBUILD_CHECKPOINT_CAP = 11_000;
+const REBUILD_MEMORY_CAP = 10_000;
+const REBUILD_NOTES_CAP = 6_000;
+const REBUILD_GLOBAL_CAP = 6_000;
+const REBUILD_TASKS_CAP = 2_000;
+const REBUILD_RECENT_USER_MAX = 6;
+
+function activeBackgroundActors(sessionId: string): string {
+	return agentActorRegistry
+		.list()
+		.filter(
+			(actor) => actor.parentSessionId === sessionId && !["success", "failure", "cancelled"].includes(actor.status),
+		)
+		.map((actor) => `- ${actor.agent} (${actor.status}) · ${actor.id}`)
+		.join("\n");
+}
+
+function recentUserTextForRebuild(
+	recentMessages: readonly Message[] | undefined,
+	sessionId: string | undefined,
+): string {
+	const messages = recentMessages ? [...recentMessages] : sessionId ? getFullHistory(sessionId) : [];
+	return messages
+		.filter(
+			(message) =>
+				message.role === "user" &&
+				typeof message.content === "string" &&
+				!message.content.includes("<checkpoint-boundary>") &&
+				!message.content.startsWith("[Compacted context"),
+		)
+		.slice(-REBUILD_RECENT_USER_MAX)
+		.map((message) => `- ${message.content}`)
+		.join("\n");
+}
+
+function memoryKeysIndex(sessionId: string, projectId: string): string[] {
+	reconcileMemoryFileIndex(memoryCcIndex());
+	const rows = getDb()
+		.prepare(`
+			SELECT path FROM memory_files
+			WHERE (scope = 'sessions' AND scope_id = ?)
+			   OR (scope = 'projects' AND scope_id = ?)
+			   OR scope = 'global'
+			ORDER BY path
+		`)
+		.all(sessionId, projectId) as Array<{ path: string }>;
+	const pushed = new Set([projectMemoryPath(projectId), checkpointPath(sessionId), globalMemoryPath()]);
+	const memoryRootPath = memoryRoot();
+	return rows
+		.map((row) => row.path)
+		.filter((path) => !pushed.has(path))
+		.map((path) => (path.startsWith(`${memoryRootPath}/`) ? path.slice(memoryRootPath.length + 1) : path))
+		.slice(0, 20);
+}
+
+/** Pick a resume nudge based on how the preserved tail ends (MiMo parity). */
+function tailAwareReminder(message: Message | undefined): string {
+	if (!message) return "";
+	if (message.role === "assistant") {
+		if ("tool_calls" in message && message.tool_calls && message.tool_calls.length > 0) {
+			return "The last assistant message issued tool calls. Continue the loop: process the results and keep working toward the task.";
+		}
+		return "Check the current task state. If the task is unfinished, continue it; if it is complete, conclude cleanly.";
+	}
+	if (message.role === "tool") return "Process the last tool results and continue the task.";
+	return "";
+}
+
+/**
+ * The context injected at a checkpoint rebuild (MiMo-style): each durable
+ * artifact as its own bounded section, plus an explicit continuation framing
+ * ("resume directly, do not recap") and a tail-aware reminder. This is what
+ * tells the model the preserved messages below are real history, not a new
+ * user request, and to pick the task back up mid-stream.
+ */
+function buildMemoryRebuildContext(cwd: string, sessionId: string, options: MemoryPromptOptions = {}): string {
+	const projectId = projectIdForCwd(cwd);
+	const project = readProjectMemory(projectId);
+	const global = readMemoryFile(globalMemoryPath());
+	const session = readSessionMemory(sessionId);
+	const recentUser = recentUserTextForRebuild(options.recentMessages, sessionId);
+	const actors = activeBackgroundActors(sessionId);
+	const keys = memoryKeysIndex(sessionId, projectId);
+
+	const lines: string[] = [
+		"The following blocks are auto-loaded from your session memory. They are already in your context — do not Read them as whole files. Use Grep for specific facts instead.",
+		"",
+		"## Tasks ledger",
+		readMemorySectionsWithinBudget(session.taskProgress, REBUILD_TASKS_CAP).text.trim() || "(none)",
+	];
+	const pushSection = (heading: string, body: string): void => {
+		if (!body.trim()) return;
+		lines.push("", `## ${heading}`, body.trim());
+	};
+	pushSection("Session checkpoint", readMemorySectionsWithinBudget(session.checkpoint, REBUILD_CHECKPOINT_CAP).text);
+	pushSection("Active actors", actors);
+	pushSection("Recent user input (verbatim)", recentUser);
+	pushSection("Project memory", readMemorySectionsWithinBudget(project, REBUILD_MEMORY_CAP).text);
+	pushSection("Global memory", readMemorySectionsWithinBudget(global, REBUILD_GLOBAL_CAP).text);
+	pushSection("Session notes", readMemorySectionsWithinBudget(session.notes, REBUILD_NOTES_CAP).text);
+	if (keys.length > 0) lines.push("", "## Memory keys index", ...keys);
+	lines.push(
+		"",
+		"This session is being continued from a previous conversation that hit a checkpoint. The session checkpoint and project memory above cover the earlier portion of the conversation.",
+		"",
+		"Recent messages are preserved verbatim below — the assistant turn (and any tool results) you'll see is real history, not pseudo-content. Continue your task by responding to the most recent state.",
+		"",
+		'Resume directly. Do not acknowledge this memory dump, do not recap, do not preface with "I\'ll continue" or similar. Pick up the last task as if the break never happened.',
+	);
+	const reminder = tailAwareReminder(options.recentMessages?.at(-1));
+	if (reminder) lines.push("", reminder);
+
+	const tokenBudget = Math.max(64, Math.floor(options.tokenBudget ?? memoryPromptBudget()));
+	const text = lines.join("\n");
+	return estimateMemoryPromptTokens(text) > tokenBudget
+		? readMemorySectionsWithinBudget(text, tokenBudget).text
+		: text;
+}
+
 export function buildMemoryPrompt(
 	cwd: string,
 	query: string,
 	sessionId?: string,
 	options?: MemoryPromptOptions,
 ): string {
+	if (options?.rebuildContext && sessionId) {
+		if (sessionId) {
+			const db = getDb();
+			withImmediateTransaction(db, () => {
+				appendMemorySessionEvent(db, sessionId, "memory_context_retrieved", {
+					projectId: projectIdForCwd(cwd),
+					queryKey: queryKey(query),
+					memoryIds: [],
+					rebuild: true,
+				});
+			});
+		}
+		return buildMemoryRebuildContext(cwd, sessionId, options);
+	}
 	const matches = query.trim() ? searchProjectMemory(cwd, query) : listProjectMemory(cwd, MAX_SEARCH_RESULTS);
 	const tokenBudget = Math.max(64, Math.floor(options?.tokenBudget ?? memoryPromptBudget()));
 	const fileContext = fileMemoryContext(cwd, sessionId, {

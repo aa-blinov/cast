@@ -188,6 +188,49 @@ describe("project memory", () => {
 		expect(prompt).not.toContain("Vitest for isolated");
 	});
 
+	it("renders a MiMo-style rebuild context with sections, framing, and a tail reminder", () => {
+		const projectCwd = join(root, "rebuild-context-project");
+		const session = createSession("test-model", projectCwd);
+		saveSession(session);
+		const projectId = projectIdForCwd(projectCwd);
+		const memoryDir = process.env.CAST_MEMORY_DIR!;
+		mkdirSync(join(memoryDir, "projects", projectId), { recursive: true });
+		mkdirSync(join(memoryDir, "sessions", session.id), { recursive: true });
+		writeFileSync(
+			join(memoryDir, "projects", projectId, "MEMORY.md"),
+			"# Project memory\n\n## Rules\n- Keep the daemon single-writer.\n",
+		);
+		writeFileSync(
+			join(memoryDir, "sessions", session.id, "checkpoint.md"),
+			"# Session checkpoint\n\n## §1 Active intent\nShip the memory feature.\n",
+		);
+		writeFileSync(
+			join(memoryDir, "sessions", session.id, "notes.md"),
+			"# Session notes\n\n- Try the zebra approach.\n",
+		);
+
+		const prompt = buildMemoryPrompt(projectCwd, "", session.id, {
+			rebuildContext: true,
+			recentMessages: [
+				{ role: "user", content: "start" },
+				{
+					role: "assistant",
+					content: "",
+					tool_calls: [{ id: "1", type: "function", function: { name: "read", arguments: "{}" } }],
+				},
+			],
+		});
+
+		expect(prompt).toContain("## Tasks ledger");
+		expect(prompt).toContain("## Session checkpoint");
+		expect(prompt).toContain("## Project memory");
+		expect(prompt).toContain("## Session notes");
+		expect(prompt).toContain("## Recent user input (verbatim)");
+		expect(prompt).toContain("do not Read them as whole files");
+		expect(prompt).toContain("Resume directly. Do not acknowledge this memory dump, do not recap");
+		expect(prompt).toContain("The last assistant message issued tool calls");
+	});
+
 	it("fits retrieved memory to a token budget and prefers higher-importance facts", () => {
 		const projectCwd = join(root, "budgeted-project");
 		storeProjectMemory(projectCwd, "session-a", "turn-a", [

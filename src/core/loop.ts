@@ -2013,10 +2013,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		const boundaryIndex = messages.length;
 		messages.push({
 			role: "user",
-			content:
-				"<checkpoint-boundary>\nThis conversation continues after a context checkpoint. The following memory is durable context, not a new user request. Resume from the preserved recent history without recapping.\n\n" +
-				context +
-				"\n</checkpoint-boundary>",
+			content: `<checkpoint-boundary>\n${context}\n</checkpoint-boundary>`,
 		});
 		checkpointBoundary = boundaryIndex;
 		loopConfig.checkpointBoundary = checkpointBoundary;
