@@ -498,6 +498,23 @@ END;
 `);
 		},
 	},
+	{
+		version: 19,
+		name: "message-id-watermark",
+		up: (db) => {
+			// Give every message a stable id so the checkpoint watermark can
+			// reference an immutable identity instead of the seq (which compaction
+			// shifts). The session's watermark becomes checkpoint_watermark_message_id.
+			if (!columnExists(db, "messages", "message_id")) {
+				db.exec("ALTER TABLE messages ADD COLUMN message_id TEXT");
+			}
+			db.exec("UPDATE messages SET message_id = hex(randomblob(16)) WHERE message_id IS NULL");
+			db.exec("CREATE INDEX IF NOT EXISTS idx_messages_message_id ON messages(message_id)");
+			if (!columnExists(db, "sessions", "checkpoint_watermark_message_id")) {
+				db.exec("ALTER TABLE sessions ADD COLUMN checkpoint_watermark_message_id TEXT");
+			}
+		},
+	},
 ];
 
 const MIGRATION_TABLE_SCHEMA = `

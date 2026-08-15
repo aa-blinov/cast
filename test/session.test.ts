@@ -610,13 +610,13 @@ describe("session persistence", () => {
 		expect(getCheckpointWatermark(session.id)).toBeUndefined();
 		expect(commitCheckpointWatermark(session.id, structuredClone(second))).toBe(true);
 		const committed = getCheckpointWatermark(session.id);
-		expect(committed).toBeGreaterThan(0);
+		expect(committed).toBeTypeOf("string");
+		expect(committed).not.toBe("");
 
 		// A delayed writer may finish with an older snapshot, but it must never
 		// move the durable boundary backwards.
-		expect(commitCheckpointWatermark(session.id, structuredClone(first))).toBe(true);
+		expect(commitCheckpointWatermark(session.id, structuredClone(first))).toBe(false);
 		expect(getCheckpointWatermark(session.id)).toBe(committed);
-		expect(loadSession(session.id)?.checkpointWatermarkSeq).toBe(committed);
 	});
 
 	it("does not advance the watermark when the target message was never persisted", () => {
@@ -1088,7 +1088,7 @@ describe("session persistence", () => {
 		expect(full).toEqual([m1, m2, marker, m3]);
 	});
 
-	it("shifts the durable checkpoint watermark with compaction rows", () => {
+	it("keeps the durable checkpoint watermark stable across compaction seq shifts", () => {
 		const s = createSession("gpt-4o", projectA);
 		const m1: Message = { role: "user", content: "first" };
 		const m2: Message = { role: "assistant", content: "second" };
@@ -1096,13 +1096,19 @@ describe("session persistence", () => {
 		s.messages.push(m1, m2, m3);
 		saveSession(s);
 		commitCheckpointWatermark(s.id, m3);
+		const watermark = getCheckpointWatermark(s.id);
+		expect(watermark).toBeTypeOf("string");
 
 		recordCompaction(s, s.messages, [
 			{ role: "system", content: "[Compacted context — 2 messages summarized]\nsummary" },
 			m3,
 		]);
 
-		expect(getCheckpointWatermark(s.id)).toBe(3);
+		// The watermark is an immutable message id, so compaction shifts the seq
+		// without moving it; the boundary and delta resolve the id to the live seq.
+		expect(getCheckpointWatermark(s.id)).toBe(watermark);
+		expect(findCheckpointBoundaryForMessages(s.id, [m3])).toBe(0);
+		expect(getMessagesAfterCheckpoint(s.id)).toEqual([]);
 	});
 
 	it("clearSessionMessages deletes all message rows but keeps the session row", () => {

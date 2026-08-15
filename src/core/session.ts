@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -552,6 +553,7 @@ export async function compactMessages(
  *  session swapped into a live SessionState (e.g. /continue) is recognized
  *  as already-persisted instead of being re-inserted as new rows. */
 const messageSeq = new WeakMap<Message, number>();
+const messageMessageId = new WeakMap<Message, string>();
 
 function nextSeqFor(sessionId: string): number {
 	const db = getDb();
@@ -612,7 +614,7 @@ export function saveSession(session: SessionState): void {
 	).run(meta);
 
 	const insertRow = db.prepare(
-		"INSERT INTO messages (session_id, seq, role, content_json, in_context, has_tool_calls, reasoning, turn_meta) VALUES (?, ?, ?, ?, 1, ?, ?, ?)",
+		"INSERT INTO messages (session_id, seq, message_id, role, content_json, in_context, has_tool_calls, reasoning, turn_meta) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)",
 	);
 	const updateReasoning = db.prepare("UPDATE messages SET reasoning = ? WHERE session_id = ? AND seq = ?");
 	const updateTurnMeta = db.prepare("UPDATE messages SET turn_meta = ? WHERE session_id = ? AND seq = ?");
@@ -663,18 +665,29 @@ export function saveSession(session: SessionState): void {
 			}
 			deactivateOldSystemRows.run(session.id, `%${COMPACTION_MARKER_PREFIX}%`);
 		}
-		insertRow.run(session.id, seq, m.role, JSON.stringify(m), isToolCallOnly(m) ? 1 : 0, reasoning, turnMetaJson);
+		const messageId = randomUUID();
+		insertRow.run(
+			session.id,
+			seq,
+			messageId,
+			m.role,
+			JSON.stringify(m),
+			isToolCallOnly(m) ? 1 : 0,
+			reasoning,
+			turnMetaJson,
+		);
 		messageSeq.set(m, seq);
+		messageMessageId.set(m, messageId);
 		seq++;
 	});
 }
 
-/** Return the last message sequence covered by a successful checkpoint. */
-export function getCheckpointWatermark(sessionId: string): number | undefined {
-	const row = getDb().prepare("SELECT checkpoint_watermark_seq FROM sessions WHERE id = ?").get(sessionId) as
-		| { checkpoint_watermark_seq: number | null }
+/** Return the message id covered by the last successful checkpoint (MiMo semantics). */
+export function getCheckpointWatermark(sessionId: string): string | undefined {
+	const row = getDb().prepare("SELECT checkpoint_watermark_message_id FROM sessions WHERE id = ?").get(sessionId) as
+		| { checkpoint_watermark_message_id: string | null }
 		| undefined;
-	return row?.checkpoint_watermark_seq ?? undefined;
+	return row?.checkpoint_watermark_message_id ?? undefined;
 }
 
 function persistedMessageSeq(sessionId: string, message: Message): number | undefined {
@@ -692,27 +705,62 @@ function persistedMessageSeq(sessionId: string, message: Message): number | unde
 	return row?.seq;
 }
 
+function persistedMessageId(sessionId: string, message: Message): string | undefined {
+	const serialized = JSON.stringify(message);
+	const known = messageMessageId.get(message);
+	if (known !== undefined) {
+		const knownSeq = messageSeq.get(message);
+		const row =
+			knownSeq === undefined
+				? undefined
+				: (getDb()
+						.prepare("SELECT message_id, content_json FROM messages WHERE session_id = ? AND seq = ?")
+						.get(sessionId, knownSeq) as { message_id: string; content_json: string } | undefined);
+		if (row && row.message_id === known && row.content_json === serialized) return known;
+	}
+	const row = getDb()
+		.prepare("SELECT message_id FROM messages WHERE session_id = ? AND content_json = ? ORDER BY seq DESC LIMIT 1")
+		.get(sessionId, serialized) as { message_id: string } | undefined;
+	return row?.message_id;
+}
+
+/** The watermark message's current sequence, resolving the stored id against the live table. */
+function watermarkMessageSeq(sessionId: string): number | undefined {
+	const watermark = getCheckpointWatermark(sessionId);
+	if (watermark === undefined) return undefined;
+	const row = getDb()
+		.prepare("SELECT seq FROM messages WHERE session_id = ? AND message_id = ?")
+		.get(sessionId, watermark) as { seq: number } | undefined;
+	return row?.seq;
+}
+
 /**
  * Commit the message covered by a completed writer. The row lookup and
  * monotonic update share one immediate transaction so a stale writer cannot
  * move the boundary backwards or claim success for an unpersisted snapshot.
+ * The watermark is an immutable message id (MiMo semantics), so compaction
+ * seq shifts never invalidate it.
  */
 export function commitCheckpointWatermark(sessionId: string, message: Message): boolean {
 	const db = getDb();
 	const commit = (): boolean => {
-		const seq = persistedMessageSeq(sessionId, message);
-		if (seq === undefined) return false;
-		const result = db
-			.prepare(
-				`UPDATE sessions
-				 SET checkpoint_watermark_seq = CASE
-				   WHEN checkpoint_watermark_seq IS NULL OR checkpoint_watermark_seq < ? THEN ?
-				   ELSE checkpoint_watermark_seq
-				 END
-				 WHERE id = ?`,
-			)
-			.run(seq, seq, sessionId);
-		return result.changes > 0;
+		const messageId = persistedMessageId(sessionId, message);
+		if (messageId === undefined) return false;
+		const targetSeq = db
+			.prepare("SELECT seq FROM messages WHERE session_id = ? AND message_id = ?")
+			.get(sessionId, messageId) as { seq: number } | undefined;
+		if (!targetSeq) return false;
+		const current = getCheckpointWatermark(sessionId);
+		if (current !== undefined) {
+			const currentSeq = db
+				.prepare("SELECT seq FROM messages WHERE session_id = ? AND message_id = ?")
+				.get(sessionId, current) as { seq: number } | undefined;
+			if (currentSeq !== undefined && currentSeq.seq > targetSeq.seq) return false;
+		}
+		return (
+			db.prepare("UPDATE sessions SET checkpoint_watermark_message_id = ? WHERE id = ?").run(messageId, sessionId)
+				.changes > 0
+		);
 	};
 	if (db.isTransaction) return commit();
 	db.exec("BEGIN IMMEDIATE");
@@ -728,24 +776,24 @@ export function commitCheckpointWatermark(sessionId: string, message: Message): 
 
 /** Return the in-memory index of the newest active message covered by the watermark. */
 export function findCheckpointBoundaryForMessages(sessionId: string, messages: Message[]): number {
-	const watermark = getCheckpointWatermark(sessionId);
-	if (watermark === undefined) return -1;
+	const watermarkSeq = watermarkMessageSeq(sessionId);
+	if (watermarkSeq === undefined) return -1;
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const message = messages[i];
 		if (!message || message.role === "system") continue;
 		const seq = persistedMessageSeq(sessionId, message);
-		if (seq !== undefined && seq <= watermark) return i;
+		if (seq !== undefined && seq <= watermarkSeq) return i;
 	}
 	return -1;
 }
 
 /** Load the durable transcript delta after the last successful checkpoint. */
 export function getMessagesAfterCheckpoint(sessionId: string): Message[] {
-	const watermark = getCheckpointWatermark(sessionId);
-	if (watermark === undefined) return [];
+	const watermarkSeq = watermarkMessageSeq(sessionId);
+	if (watermarkSeq === undefined) return [];
 	const rows = getDb()
 		.prepare("SELECT content_json FROM messages WHERE session_id = ? AND seq > ? ORDER BY seq")
-		.all(sessionId, watermark) as Array<{ content_json: string }>;
+		.all(sessionId, watermarkSeq) as Array<{ content_json: string }>;
 	const messages = rows.map((row) => JSON.parse(row.content_json) as Message);
 	normalizeStoredMessages(messages);
 	return messages.filter((message) => message.role !== "system");
@@ -780,7 +828,7 @@ function recordCompactionInTransaction(
 	const db = getDb();
 	const kept = new Set(compacted);
 	const insertRow = db.prepare(
-		"INSERT INTO messages (session_id, seq, role, content_json, in_context, has_tool_calls) VALUES (?, ?, ?, ?, ?, ?)",
+		"INSERT INTO messages (session_id, seq, message_id, role, content_json, in_context, has_tool_calls) VALUES (?, ?, ?, ?, ?, ?, ?)",
 	);
 	const flipOut = db.prepare("UPDATE messages SET in_context = 0 WHERE session_id = ? AND seq = ?");
 
@@ -791,8 +839,18 @@ function recordCompactionInTransaction(
 			if (!kept.has(m)) flipOut.run(session.id, existing);
 			continue;
 		}
-		insertRow.run(session.id, seq, m.role, JSON.stringify(m), kept.has(m) ? 1 : 0, isToolCallOnly(m) ? 1 : 0);
+		const messageId = randomUUID();
+		insertRow.run(
+			session.id,
+			seq,
+			messageId,
+			m.role,
+			JSON.stringify(m),
+			kept.has(m) ? 1 : 0,
+			isToolCallOnly(m) ? 1 : 0,
+		);
 		messageSeq.set(m, seq);
+		messageMessageId.set(m, messageId);
 		seq++;
 	}
 
@@ -816,17 +874,26 @@ function recordCompactionInTransaction(
 				.all(session.id, insertAt) as Array<{ seq: number }>;
 			const shiftOne = db.prepare("UPDATE messages SET seq = seq + 1 WHERE session_id = ? AND seq = ?");
 			for (const row of shiftRows) shiftOne.run(session.id, row.seq);
-			db.prepare(
-				"UPDATE sessions SET checkpoint_watermark_seq = checkpoint_watermark_seq + 1 WHERE id = ? AND checkpoint_watermark_seq >= ?",
-			).run(session.id, insertAt);
+			// The watermark references an immutable message_id, so a seq shift
+			// does not move it — no adjustment needed here (MiMo semantics).
 			for (const m of compacted) {
 				if (m === marker) continue;
 				const s = messageSeq.get(m);
 				if (s !== undefined && s >= insertAt) messageSeq.set(m, s + 1);
 			}
 		}
-		insertRow.run(session.id, insertAt, marker.role, JSON.stringify(marker), 1, isToolCallOnly(marker) ? 1 : 0);
+		const markerId = randomUUID();
+		insertRow.run(
+			session.id,
+			insertAt,
+			markerId,
+			marker.role,
+			JSON.stringify(marker),
+			1,
+			isToolCallOnly(marker) ? 1 : 0,
+		);
 		messageSeq.set(marker, insertAt);
+		messageMessageId.set(marker, markerId);
 	}
 }
 
@@ -1447,10 +1514,10 @@ export function migrateLegacySessionsToDb(): number {
 					 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :session_kind, :parent_session_id, :background_kind, :usage_json, :todos_json, :share_token, :plan_question_json, :plan_transition_json, :checkpoint_watermark_seq)`,
 			).run(sessionMetaRow(session));
 			const insertRow = db.prepare(
-				"INSERT INTO messages (session_id, seq, role, content_json, in_context, has_tool_calls) VALUES (?, ?, ?, ?, 1, ?)",
+				"INSERT INTO messages (session_id, seq, message_id, role, content_json, in_context, has_tool_calls) VALUES (?, ?, ?, ?, ?, 1, ?)",
 			);
 			session.messages.forEach((m, seq) => {
-				insertRow.run(session.id, seq, m.role, JSON.stringify(m), isToolCallOnly(m) ? 1 : 0);
+				insertRow.run(session.id, seq, randomUUID(), m.role, JSON.stringify(m), isToolCallOnly(m) ? 1 : 0);
 			});
 		} catch (err) {
 			// Log and continue — one malformed file shouldn't poison the rest.
