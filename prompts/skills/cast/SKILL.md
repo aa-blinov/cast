@@ -30,7 +30,8 @@ This skill ships as an **index + reference files**. Read only what the task need
 | Hooks — `hooks.json` shape, events, matchers, env vars | `references/hooks.md` |
 | Slash commands — full table, hot-reload vs `/reload` | `references/commands.md` |
 | Providers and model slots — OpenAI-compatible endpoint, reasoning, validation | `references/providers.md` |
-| Web access — local/public server, login, SSH tunnel, security boundary | `references/web.md` |
+| Web access — local/public server, login, SSH tunnel, security boundary, **and what the browser UI looks like** (routes, sidebar, panels, settings/dashboard tabs) | `references/web.md` |
+| TUI interface — layout, transcript formats, composer keys, status bar, slash commands, pickers | `references/tui.md` |
 | Memory — durable project memory, `/memory` commands, files, how to answer user questions | `references/memory.md` |
 | Project configuration — `.cast/` layout, trust, git policy, reload | `references/project-config.md` |
 
