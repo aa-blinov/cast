@@ -94,7 +94,6 @@ import {
 	selectSkills,
 } from "../pickers/domain.ts";
 import type { Pickers, PickOption } from "../pickers/types.ts";
-import { abbreviateTokens } from "./App.tsx";
 import { TUI_KEYBINDINGS } from "./input/keybindings.ts";
 import { getStatusBarSegments, SEGMENT_MAX_WIDTH, type SegmentContext, type StatusBarSegment } from "./statusbar.tsx";
 import { ALL_THEMES, getActiveTheme, setActiveTheme } from "./themes/index.ts";
@@ -267,7 +266,6 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/subagent-model-provider", description: "Set provider for subagent model", takesArgs: true },
 	{ name: "/theme", description: "Change color theme" },
 	{ name: "/undo", description: "Undo last turn (restore files and context)" },
-	{ name: "/usage", description: "Show session token and cost usage" },
 	{ name: "/web", description: "Toggle web search & fetch tools" },
 	{ name: "/web-fetch-provider", description: "Switch web_fetch backend (Jina Reader / local)" },
 	{ name: "/web-search-provider", description: "Switch web_search backend (DuckDuckGo / Tavily / Brave)" },
@@ -2924,24 +2922,6 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		return;
 	}
 
-	if (input === "/usage") {
-		const u = session.usage;
-		if (!u || u.totalTokens === 0) {
-			showNotice("[No usage yet this session]");
-			return;
-		}
-		const costStr = u.cost > 0 ? ` | $${u.cost.toFixed(2)}` : "";
-		const cacheStr =
-			u.cacheReadTokens > 0 && u.promptTokens > 0
-				? ` | ${Math.round((u.cacheReadTokens / u.promptTokens) * 100)}% cache hit`
-				: "";
-		const subStr = u.subagentTokens > 0 ? ` | ${abbreviateTokens(u.subagentTokens)} sub` : "";
-		showNotice(
-			`[Usage: ${abbreviateTokens(u.promptTokens)} in / ${abbreviateTokens(u.completionTokens)} out${costStr}${cacheStr}${subStr}]`,
-		);
-		return;
-	}
-
 	if (input === "/current") {
 		const allSegs = getStatusBarSegments();
 		const cfg = deps.statusBar;
@@ -3185,7 +3165,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 				"  /statusbar          Toggle and reorder status bar segments\n" +
 				"  /worktree <name>    Switch session into a git worktree (creates it on first use, reuses on resume)\n" +
 				"  /theme              Change color theme\n" +
-				"  /usage              Show session token/cost usage\n" +
+				"  /current            Show all status bar data\n" +
 				"  /sessions           List/switch sessions\n" +
 				"  /rules              List loaded rules\n" +
 				"  /repo               Show cwd and git branch\n" +

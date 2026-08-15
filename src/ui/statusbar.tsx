@@ -81,6 +81,7 @@ export const SEGMENT_MAX_WIDTH: Record<string, number> = {
 	session: 16,
 	context: 22,
 	usage: 35,
+	cost: 8,
 	speed: 12,
 	elapsed: 7,
 	subagent: 9,
@@ -171,6 +172,11 @@ registerStatusBarSegment({
 	},
 });
 
+const usageCacheSuffix = (u: SessionUsage): string => {
+	if ((!u.cacheReadTokens && !u.cacheWriteTokens) || u.promptTokens <= 0) return "";
+	return ` (${Math.round((u.cacheReadTokens / u.promptTokens) * 100)}% cached)`;
+};
+
 registerStatusBarSegment({
 	id: "usage",
 	label: "Tokens in/out",
@@ -178,20 +184,32 @@ registerStatusBarSegment({
 	side: "right",
 	render: (ctx) => {
 		if (!ctx.usage || ctx.usage.totalTokens <= 0) return null;
-		const cacheStr =
-			(ctx.usage.cacheReadTokens || ctx.usage.cacheWriteTokens) && ctx.usage.promptTokens > 0
-				? ` (${Math.round((ctx.usage.cacheReadTokens / ctx.usage.promptTokens) * 100)}% cached)`
-				: "";
 		return (
 			<Text color={theme().muted}>
-				{abbreviateTokens(ctx.usage.promptTokens)} in{cacheStr} / {abbreviateTokens(ctx.usage.completionTokens)} out
+				{abbreviateTokens(ctx.usage.promptTokens)} in{usageCacheSuffix(ctx.usage)} /{" "}
+				{abbreviateTokens(ctx.usage.completionTokens)} out
 			</Text>
 		);
 	},
 	formatValue: (ctx) => {
 		const u = ctx.usage;
 		if (!u || u.totalTokens <= 0) return null;
-		return `${abbreviateTokens(u.promptTokens)} in / ${abbreviateTokens(u.completionTokens)} out`;
+		return `${abbreviateTokens(u.promptTokens)} in${usageCacheSuffix(u)} / ${abbreviateTokens(u.completionTokens)} out`;
+	},
+});
+
+registerStatusBarSegment({
+	id: "cost",
+	label: "Cost",
+	defaultOn: false,
+	side: "right",
+	render: (ctx) => {
+		if (!ctx.usage?.cost) return null;
+		return <Text color={theme().muted}>${ctx.usage.cost.toFixed(2)}</Text>;
+	},
+	formatValue: (ctx) => {
+		const cost = ctx.usage?.cost;
+		return cost ? `$${cost.toFixed(2)}` : null;
 	},
 });
 

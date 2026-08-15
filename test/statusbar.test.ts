@@ -151,4 +151,35 @@ describe("segment formatValue (/current)", () => {
 		expect(usage.formatValue(emptyCtx())).toBeNull();
 		expect(subagent.formatValue(emptyCtx())).toBeNull();
 	});
+
+	it("usage formatValue includes the cache % so /current matches the status bar and web popover", () => {
+		const seg = getStatusBarSegments().find((s) => s.id === "usage")!;
+		const usage = {
+			promptTokens: 200_000,
+			completionTokens: 50_000,
+			totalTokens: 250_000,
+			cost: 0,
+			cacheReadTokens: 166_000,
+			cacheWriteTokens: 0,
+			uncachedTokens: 34_000,
+			subagentTokens: 0,
+		};
+		expect(seg.formatValue(emptyCtx({ usage }))).toBe("200k in (83% cached) / 50k out");
+	});
+
+	it("cost formatValue renders dollars when cost is set and null otherwise", () => {
+		const seg = getStatusBarSegments().find((s) => s.id === "cost")!;
+		expect(seg.formatValue(emptyCtx())).toBeNull();
+		const usage = {
+			promptTokens: 100,
+			completionTokens: 50,
+			totalTokens: 150,
+			cost: 0.25,
+			cacheReadTokens: 0,
+			cacheWriteTokens: 0,
+			uncachedTokens: 100,
+			subagentTokens: 0,
+		};
+		expect(seg.formatValue(emptyCtx({ usage }))).toBe("$0.25");
+	});
 });

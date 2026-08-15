@@ -21,7 +21,7 @@
 | `/ssh` | Manage SSH hosts (list, add, remove) |
 | `/theme` | Change color theme |
 | `/statusbar` | Toggle and reorder status bar segments |
-| `/usage` | Show session token/cost usage |
+| `/current` | All status bar data: model, context, tokens in/out with cache %, cost, sub-agent tokens |
 | `/sessions` | List/switch sessions |
 | `/plan` | User-initiated task initialization: establish scope and an execution plan before implementation |
 | `/build` | Exit plan mode, approve the plan, and restore the implementation toolset |

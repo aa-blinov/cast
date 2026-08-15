@@ -6,4 +6,4 @@ Use `/model [name]` to select the main model. New sessions inherit that model; a
 
 The Model settings tab is the web equivalent: save providers first, then select the provider and model for main, subagent, and plan slots. Reasoning controls appear only when the chosen provider/model declares a supported native reasoning option. Do not invent a provider-specific parameter: use the picker or inspect the provider's documentation first.
 
-After changing a provider, make a small real request before treating it as configured. A 401 means the key is invalid; 403 means the key or model lacks access; 404 usually means an incorrect base URL or model id. `/usage` shows the effective provider/model for the current session.
+After changing a provider, make a small real request before treating it as configured. A 401 means the key is invalid; 403 means the key or model lacks access; 404 usually means an incorrect base URL or model id. `/current` shows the effective provider/model for the current session.

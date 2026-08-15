@@ -284,7 +284,7 @@ The `task` tool delegates work to isolated sub-agents. Each sub-agent has:
 | `explore` | Read-oriented mapping/research |
 | `review` | Independent validation; reports findings, does not patch |
 
-Sub-agent tokens are tracked separately in usage reporting (`/usage` status bar shows `sub` count).
+Sub-agent tokens are tracked separately in usage reporting (the status bar `sub` count).
 
 The `task` tool is only available when the current persona has `subagents: true` (e.g. `coder-with-subagents`). Other personas can't see or invoke it.
 

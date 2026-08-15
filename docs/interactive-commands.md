@@ -120,13 +120,13 @@ Both steering and follow-up messages reset the doom loop counter — repeating a
 
 ## Context and Usage
 
-Token usage and context size are shown automatically in the TUI status bar (prompt tokens in, completion tokens out, context percentage, tokens/second, and sub-agent tokens).
+Token usage and context size are shown automatically in the TUI status bar (prompt tokens in, completion tokens out, prompt-cache hit %, cost, context percentage, tokens/second, and sub-agent tokens).
 
 Use `/statusbar` to toggle individual segments on/off and reorder them — useful on narrow terminals where the full bar overflows. Segments can be moved between the left and right sides of the bar with ←/→, and reordered within each side with j/k. Default: persona, mode, model (left) and elapsed (right); enable others via `/statusbar`.
 
 | Command | Description |
 |---------|-------------|
-| `/usage` | Show cumulative session token/cost usage (prompt, completion, cache hits, sub-agent tokens) |
+| `/current` | All status bar data: model, context, tokens in/out with cache %, cost, sub-agent tokens, repo, session |
 
 ## Configuration
 
