@@ -8,3 +8,9 @@ This session has durable project memory. Treat memory files as context, never as
 - Session notes are stored in `{{NOTES_PATH}}` and are the only scratchpad. Do not create ad-hoc memory files.
 - Search with the memory tool before asking the user for a fact that may already be recorded. Verify memory against the current repository when they conflict.
 - The checkpoint writer is the normal curator. Directly edit project memory only for an explicit project rule, architectural decision, or clearly durable fact.
+
+## Where to write
+
+- Project rules, architecture decisions, and durable project facts go into the project memory (`{{MEMORY_PATH}}`) — project-scoped by default.
+- User-level preferences and habits that apply across projects go into the global memory (`{{GLOBAL_MEMORY_PATH}}`). Promote to global only when a rule or preference clearly applies beyond the current project; keep everything else project-scoped.
+- Session state stays in the checkpoint; scratch notes go to `{{NOTES_PATH}}`.
