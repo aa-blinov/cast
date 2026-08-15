@@ -53,6 +53,8 @@ export interface StreamChunk {
 	/** Native DeepSeek-compatible reasoning trace that must be replayed on a
 	 * tool-call assistant message by providers that require native reasoning traces. */
 	reasoningContent?: string;
+	/** OpenAI-style moderation refusal (`delta.refusal`), when the provider streams it. */
+	refusal?: string;
 	toolCalls?: Array<{
 		id: string;
 		name: string;
@@ -174,8 +176,16 @@ const CONTEXT_OVERFLOW_PATTERNS: RegExp[] = [
 ];
 const CONTEXT_OVERFLOW_NO_BODY_PATTERN = /^4(00|13)\s*(status code)?\s*\(no body\)/i;
 const RETRYABLE_NETWORK_PATTERN = /terminated|socket hang up|other side closed|fetch failed/i;
+/** OpenRouter/Anthropic-style upstream wording for a transient provider failure. */
+const RETRYABLE_UPSTREAM_PATTERN =
+	/upstream.*(?:error|timeout|timed out|overload|unavailable)|provider.*(?:timeout|timed out|unavailable)/i;
 const UNAUTHORIZED_MESSAGE_PATTERN = /\b401\b|unauthorized|invalid api key|incorrect api key/i;
 const FORBIDDEN_MESSAGE_PATTERN = /\b403\b|forbidden/i;
+/** Provider content-policy refusal (Anthropic content_policy_violation, OpenRouter MODERATION, generic safety). */
+const MODERATION_PATTERN = /content.?policy|moderation|safety (?:filter|violation)|content.filter|refused.*policy/i;
+/** Model unknown/deleted/deprecated on this endpoint. */
+const MODEL_NOT_FOUND_PATTERN =
+	/model.*not found|model[._]?not[._]?found|no such model|model.*does not exist|model.*unavailable/i;
 
 export function isContextOverflow(error: unknown): boolean {
 	const code = (error as { code?: string } | undefined)?.code;
@@ -207,6 +217,23 @@ export function isRetryableStreamError(error: unknown): boolean {
 		error instanceof InternalServerError ||
 		error instanceof APIConnectionTimeoutError ||
 		error instanceof APIConnectionError
+	) {
+		return true;
+	}
+
+	// OpenRouter signals transient upstream failures through specific 400 codes
+	// even though the HTTP status alone looks like a hard client error — a
+	// provider dying mid-stream (`stream_interrupted`), timing out, or erroring
+	// upstream is exactly as retryable as a 502, and failing the turn on it
+	// wastes a paid request. Match the codes directly since the status won't
+	// help.
+	if (
+		code === "stream_interrupted" ||
+		code === "PROVIDER_TIMEOUT" ||
+		code === "PROVIDER_ERROR" ||
+		code === "upstream_error" ||
+		code === "upstream_overloaded" ||
+		RETRYABLE_UPSTREAM_PATTERN.test(message)
 	) {
 		return true;
 	}
@@ -265,13 +292,26 @@ export function describeTurnError(error: unknown): string {
 	}
 
 	// 401 — key rejected: revoked, expired, or wrong.
-	if (status === 401 || UNAUTHORIZED_MESSAGE_PATTERN.test(message)) {
+	if (status === 401 || code === "invalid_api_key" || UNAUTHORIZED_MESSAGE_PATTERN.test(message)) {
 		return "API key rejected (401) — it may be revoked, expired, or incorrect. Run /provider to update it.";
 	}
 
 	// 403 — authenticated but not permitted for this model/endpoint.
-	if (status === 403 || FORBIDDEN_MESSAGE_PATTERN.test(message)) {
+	if (status === 403 || FORBIDDEN_MESSAGE_PATTERN.test(message) || code === "NO_PERMISSION") {
 		return "Access denied (403) — the API key lacks permission for this model or endpoint. Try /provider or pick another model with /model.";
+	}
+
+	// Provider content-policy block — the request was refused, not misconfigured.
+	// Some gateways (Anthropic content_policy_violation, OpenRouter MODERATION)
+	// report it as a 400 whose status alone reads like a client error.
+	if (MODERATION_PATTERN.test(message) || code === "MODERATION") {
+		return "The request was blocked by the provider's content policy. Reword or change the request.";
+	}
+
+	// Model unknown/deleted/deprecated — usually a 404, but some gateways wrap
+	// it in a 400 or a bare "does not exist".
+	if (MODEL_NOT_FOUND_PATTERN.test(message) || code === "model_not_found") {
+		return "The model was not found or is unavailable on this provider. Pick another with /model.";
 	}
 
 	return message;
@@ -524,6 +564,15 @@ export async function* streamChat(
 					if (parsed.content) result.content = parsed.content;
 				}
 
+				// 2b. Refusal (OpenAI moderation block): the model refuses the
+				//    request but the stream reports it here, not in content. Surface
+				//    it so the loop can tell the user instead of committing an
+				//    empty/placeholder turn as if the answer were "fine".
+				if (deltaAny.refusal) {
+					result.refusal = (result.refusal ?? "") + deltaAny.refusal;
+					yieldedAny = true;
+				}
+
 				// Tool calls
 				if (delta.tool_calls) {
 					for (const tc of delta.tool_calls) {
@@ -584,6 +633,8 @@ export interface CompletionResult {
 	reasoningContent: string;
 	toolCalls?: Array<{ id: string; name: string; arguments: string }>;
 	finishReason: string;
+	/** OpenAI-style moderation refusal (`delta.refusal`), when the provider streams it. */
+	refusal?: string;
 	usage?: Usage;
 	/**
 	 * Wall-clock time from the first streamed chunk to the last, in ms —
@@ -694,6 +745,7 @@ export async function streamAndCollect(
 	let content = "";
 	let thinking = "";
 	let reasoningContent = "";
+	let refusal: string | undefined;
 	let toolCalls: Array<{ id: string; name: string; arguments: string }> | undefined;
 	let finishReason = "stop";
 	let usage: Usage | undefined;
@@ -730,6 +782,7 @@ export async function streamAndCollect(
 			onThinking?.(chunk.thinking);
 		}
 		if (chunk.reasoningContent) reasoningContent += chunk.reasoningContent;
+		if (chunk.refusal) refusal = (refusal ?? "") + chunk.refusal;
 		if (chunk.content) {
 			content += chunk.content;
 			onToken?.(chunk.content);
@@ -796,6 +849,7 @@ export async function streamAndCollect(
 		content,
 		thinking,
 		reasoningContent,
+		...(refusal ? { refusal } : {}),
 		toolCalls,
 		finishReason,
 		usage,

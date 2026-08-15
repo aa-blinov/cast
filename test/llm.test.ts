@@ -260,6 +260,22 @@ describe("isRetryableStreamError", () => {
 	it("does not retry an unrelated error", () => {
 		expect(isRetryableStreamError(new Error("something unrelated"))).toBe(false);
 	});
+
+	it("retries OpenRouter stream_interrupted and PROVIDER_TIMEOUT even on a 400 status", () => {
+		// A provider dying mid-stream / timing out is transient even though the
+		// gateway wraps it in a 400 — failing the turn wastes a paid request.
+		expect(isRetryableStreamError(Object.assign(new Error("upstream failed"), { code: "stream_interrupted" }))).toBe(
+			true,
+		);
+		expect(isRetryableStreamError(Object.assign(new Error("upstream timeout"), { code: "PROVIDER_TIMEOUT" }))).toBe(
+			true,
+		);
+		expect(isRetryableStreamError(Object.assign(new Error("provider error"), { code: "PROVIDER_ERROR" }))).toBe(true);
+	});
+
+	it("retries upstream wording even when the code is missing", () => {
+		expect(isRetryableStreamError(new Error("upstream request timed out"))).toBe(true);
+	});
 });
 
 describe("retryDelayMs", () => {
@@ -497,6 +513,17 @@ describe("streamAndCollect — interrupted / disconnected flags", () => {
 		expect(result.disconnected).toBe(false);
 	});
 
+	it("collects delta.refusal so a moderation block isn't lost", async () => {
+		const client = fakeClient([
+			{ choices: [{ delta: { content: "" } }] },
+			{ choices: [{ delta: { refusal: "I can't help with that request." } }] },
+			{ choices: [{ delta: {}, finish_reason: "stop" }] },
+		]);
+		const result = await streamAndCollect(client, "m", [], [], 100);
+		expect(result.refusal).toBe("I can't help with that request.");
+		expect(result.content).toBe("");
+	});
+
 	it("flags interrupted (not disconnected) when the signal is aborted mid-stream with no finish", async () => {
 		const controller = new AbortController();
 		const client = fakeClient(
@@ -692,5 +719,38 @@ describe("describeTurnError", () => {
 	it("passes an unrecognized error through unchanged", () => {
 		const out = describeTurnError(new Error("some other failure"));
 		expect(out).toBe("some other failure");
+	});
+
+	it("maps a moderation/policy block to a rewording message instead of a raw 400", () => {
+		expect(describeTurnError(new Error("content_policy_violation: the request was refused"))).toContain(
+			"content policy",
+		);
+		expect(describeTurnError(Object.assign(new Error("moderated"), { code: "MODERATION" }))).toContain(
+			"content policy",
+		);
+	});
+
+	it("maps model_not_found to a /model hint", () => {
+		const err = Object.assign(new Error("The model `foo` does not exist or you do not have access."), {
+			code: "model_not_found",
+		});
+		const out = describeTurnError(err);
+		expect(out).toContain("/model");
+		expect(out.toLowerCase()).toContain("not found");
+	});
+
+	it("maps NO_PERMISSION (400) to access-denied even without a 403 status", () => {
+		const err = Object.assign(new Error("Your account does not have access to this model"), {
+			code: "NO_PERMISSION",
+		});
+		const out = describeTurnError(err);
+		expect(out).toContain("403");
+		expect(out).toContain("/model");
+	});
+
+	it("maps invalid_api_key code to the key message even on a 400 status", () => {
+		const err = Object.assign(new Error("invalid_api_key"), { code: "invalid_api_key" });
+		const out = describeTurnError(err);
+		expect(out).toContain("/provider");
 	});
 });

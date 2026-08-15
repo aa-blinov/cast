@@ -1555,9 +1555,69 @@ describe("runAgentLoop — vision fallback", () => {
 });
 
 // ============================================================================
-// runAgentLoop — nested AGENTS.md injection end-to-end
+// runAgentLoop — moderation refusal (finish_reason content_filter / refusal field)
 // ============================================================================
 
+describe("runAgentLoop — moderation refusal", () => {
+	it("surfaces a content_filter refusal instead of committing an empty answer", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "cast-loop-refusal-"));
+		try {
+			const events: string[] = [];
+			const warnings: string[] = [];
+			vi.mocked(streamAndCollect).mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "content_filter",
+				refusal: "I can't help with that request.",
+			}));
+
+			const messages = await runAgentLoop([{ role: "user", content: "please do the bad thing" }], {
+				config: testConfig,
+				model: "test-model",
+				cwd,
+				systemPrompt: "SYS",
+				onEvent: (e) => events.push(e.type),
+				onWarning: (m) => warnings.push(m),
+			});
+
+			expect(warnings.some((w) => w.includes("refused the request"))).toBe(true);
+			expect(events).not.toContain("error");
+			const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant") as Message;
+			expect(String(lastAssistant?.content)).toContain("I can't help with that request.");
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	it("still warns when content_filter arrives without a refusal text", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "cast-loop-refusal2-"));
+		try {
+			const warnings: string[] = [];
+			vi.mocked(streamAndCollect).mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "content_filter",
+			}));
+
+			await runAgentLoop([{ role: "user", content: "hello" }], {
+				config: testConfig,
+				model: "test-model",
+				cwd,
+				systemPrompt: "SYS",
+				onEvent: () => {},
+				onWarning: (m) => warnings.push(m),
+			});
+
+			expect(warnings.some((w) => w.includes("content filter"))).toBe(true);
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+});
+
+// ============================================================================
+// runAgentLoop — nested AGENTS.md injection end-to-end
+// ============================================================================
 describe("runAgentLoop — nested AGENTS.md injection", () => {
 	it("a read in a subdirectory with its own AGENTS.md injects it into the next system prompt", async () => {
 		const cwd = mkdtempSync(join(tmpdir(), "cast-loop-nested-agents-"));
