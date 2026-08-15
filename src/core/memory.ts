@@ -62,7 +62,7 @@ import type { SubagentPrompt } from "./subagents.ts";
 import type { ToolResult } from "./tools/shared.ts";
 import type { BashBackgroundDeps, ConfirmBash, ConfirmWrite } from "./tools.ts";
 
-const MAX_SEARCH_RESULTS = 8;
+const MAX_SEARCH_RESULTS = 10;
 const MEMORY_SEARCH_FETCH_MAX = 50;
 const MEMORY_OPERATION_LEASE_MS = 300_000;
 const MEMORY_OPERATION_WAIT_MS = 30_000;
@@ -848,8 +848,14 @@ function checkpointPromptText(checkpoint: MemoryCheckpoint | undefined): string 
 	return lines.join("\n").slice(0, 6000);
 }
 
-export function readMemorySectionsWithinBudget(content: string, tokenBudget: number): string {
-	if (!content.trim() || tokenBudget <= 0) return "";
+export function readMemorySectionsWithinBudget(
+	content: string,
+	tokenBudget: number,
+): {
+	text: string;
+	truncated: boolean;
+} {
+	if (!content.trim() || tokenBudget <= 0) return { text: "", truncated: false };
 	const heading = /^#{1,3}\s+.+$/gm;
 	const boundaries = [...content.matchAll(heading)].map((match) => match.index ?? 0);
 	const starts = boundaries.length > 0 ? [0, ...boundaries] : [0];
@@ -858,16 +864,20 @@ export function readMemorySectionsWithinBudget(content: string, tokenBudget: num
 		.filter(Boolean);
 	const perBlock = Math.max(1, Math.floor(tokenBudget / Math.max(1, blocks.length)));
 	const selected: string[] = [];
+	let truncated = false;
 	for (const block of blocks) {
 		const kept: string[] = [];
 		for (const line of block.split("\n")) {
 			const candidate = [...kept, line].join("\n");
-			if (estimateMemoryPromptTokens(candidate) > perBlock) break;
+			if (estimateMemoryPromptTokens(candidate) > perBlock) {
+				truncated = true;
+				break;
+			}
 			kept.push(line);
 		}
 		if (kept.length > 0) selected.push(kept.join("\n"));
 	}
-	return selected.join("\n\n");
+	return { text: selected.join("\n\n"), truncated };
 }
 
 function fileMemoryContext(
@@ -921,11 +931,21 @@ function fileMemoryContext(
 		[options.rebuildContext && activeActors ? `Active background actors:\n${activeActors}` : "", 0.03],
 	] as Array<[string, number]>;
 	const budget = options.tokenBudget ?? 6_000;
-	return sections
+	let truncated = false;
+	const parts = sections
 		.filter(([content]) => content)
-		.map(([content, ratio]) => readMemorySectionsWithinBudget(content, Math.max(32, Math.floor(budget * ratio))))
+		.map(([content, ratio]) => {
+			const result = readMemorySectionsWithinBudget(content, Math.max(32, Math.floor(budget * ratio)));
+			if (result.truncated) truncated = true;
+			return result.text;
+		})
 		.filter(Boolean)
 		.join("\n\n");
+	// Mirrors MiMo's readBudgeted truncation hint: the model must know the
+	// injected memory context is partial so it can Read the file for the rest.
+	return truncated && parts
+		? `${parts}\n\n⚠️ Memory file context was truncated to fit the token budget; Read the files for the full content.`
+		: parts;
 }
 
 function projectMemorySectionForType(type: string): string {
