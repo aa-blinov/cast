@@ -10,6 +10,17 @@ import { getDb } from "./db.ts";
 
 export type LlmRequestKind = "main" | "subagent" | "background" | "retry" | "error";
 
+/** Coarse classification of retry/error rows, derived from the message text. */
+export type LlmErrorType =
+	| "vision"
+	| "overflow"
+	| "quota"
+	| "moderation"
+	| "upstream"
+	| "rate-limit"
+	| "auth"
+	| "other";
+
 export interface LlmRequestRecord {
 	sessionId?: string;
 	provider?: string;
@@ -22,8 +33,32 @@ export interface LlmRequestRecord {
 	cost?: number;
 	/** Decode time for a completed completion; undefined for retry/error rows. */
 	latencyMs?: number;
+	/** Time to first streamed token, when the provider streamed. */
+	ttftMs?: number;
 	retries?: number;
 	error?: string;
+	errorType?: LlmErrorType;
+	/** Model context window (tokens) — for context-utilization metrics. */
+	contextWindow?: number;
+}
+
+// Classify error/retry messages into a small taxonomy for the reliability tab.
+const ERROR_TYPE_PATTERNS: Array<[LlmErrorType, RegExp]> = [
+	["vision", /image|vision|image_url/i],
+	["overflow", /context|token.*exceed|too long|context_length/i],
+	["quota", /quota|billing|insufficient_quota|out of budget/i],
+	["moderation", /moderation|content.?policy|content_filter|refus|risk control|安全|敏感/i],
+	["upstream", /upstream|stream_interrupted|provider|server_error|overloaded|timeout/i],
+	["rate-limit", /rate.?limit|429|too many requests/i],
+	["auth", /401|403|api.?key|unauthorized|forbidden|permission/i],
+];
+
+export function classifyLlmError(message: string | undefined): LlmErrorType {
+	if (!message) return "other";
+	for (const [type, pattern] of ERROR_TYPE_PATTERNS) {
+		if (pattern.test(message)) return type;
+	}
+	return "other";
 }
 
 const TELEMETRY_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -42,8 +77,8 @@ function getInsertStmt(): StatementSync {
 		insertStmt = db.prepare(
 			`INSERT INTO llm_requests
 			 (ts, session_id, provider, model, kind, prompt_tokens, completion_tokens,
-			  cache_read_tokens, cache_write_tokens, cost, latency_ms, ttft_ms, retries, error)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			  cache_read_tokens, cache_write_tokens, cost, latency_ms, ttft_ms, retries, error, error_type, context_window)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		);
 		preparedDb = db;
 	}
@@ -74,11 +109,55 @@ export function recordLlmRequest(record: LlmRequestRecord): void {
 		record.cacheWriteTokens ?? 0,
 		record.cost ?? null,
 		record.latencyMs ?? null,
-		null,
+		record.ttftMs ?? null,
 		record.retries ?? 0,
 		record.error ?? null,
+		record.errorType ?? (record.error ? classifyLlmError(record.error) : null),
+		record.contextWindow ?? null,
 	);
 	prune();
+}
+
+// ── Tool calls ──────────────────────────────────────────────────────────
+
+let toolInsertStmt: StatementSync | null = null;
+let toolPreparedDb: DatabaseSync | null = null;
+
+function getToolInsertStmt(): StatementSync {
+	const db = getDb();
+	if (!toolInsertStmt || toolPreparedDb !== db) {
+		toolInsertStmt = db.prepare("INSERT INTO tool_calls (ts, session_id, tool_name, is_error) VALUES (?, ?, ?, ?)");
+		toolPreparedDb = db;
+	}
+	return toolInsertStmt;
+}
+
+export function recordToolCall(sessionId: string | undefined, toolName: string, isError: boolean): void {
+	getToolInsertStmt().run(Date.now(), sessionId ?? null, toolName, isError ? 1 : 0);
+}
+
+// ── Compactions ─────────────────────────────────────────────────────────
+
+let compactionInsertStmt: StatementSync | null = null;
+let compactionPreparedDb: DatabaseSync | null = null;
+
+function getCompactionInsertStmt(): StatementSync {
+	const db = getDb();
+	if (!compactionInsertStmt || compactionPreparedDb !== db) {
+		compactionInsertStmt = db.prepare(
+			"INSERT INTO compactions (ts, session_id, messages_compacted, tokens_before) VALUES (?, ?, ?, ?)",
+		);
+		compactionPreparedDb = db;
+	}
+	return compactionInsertStmt;
+}
+
+export function recordLlmCompaction(
+	sessionId: string | undefined,
+	messagesCompacted: number,
+	tokensBefore: number,
+): void {
+	getCompactionInsertStmt().run(Date.now(), sessionId ?? null, messagesCompacted, tokensBefore);
 }
 
 export interface TelemetryOverviewRow {
@@ -101,7 +180,7 @@ export function queryTelemetryOverview(sinceMs?: number): TelemetryOverviewRow[]
 	const rows = db
 		.prepare(
 			`SELECT provider, model,
-				COUNT(*) AS requests,
+				SUM(CASE WHEN kind IN ('main','subagent','background') THEN 1 ELSE 0 END) AS requests,
 				SUM(CASE WHEN kind = 'error' THEN 1 ELSE 0 END) AS errors,
 				SUM(prompt_tokens) AS prompt_tokens,
 				SUM(completion_tokens) AS completion_tokens,
@@ -112,6 +191,7 @@ export function queryTelemetryOverview(sinceMs?: number): TelemetryOverviewRow[]
 			FROM llm_requests
 			${where}
 			GROUP BY provider, model
+			HAVING requests > 0
 			ORDER BY requests DESC`,
 		)
 		.all(...(sinceMs !== undefined ? [sinceMs] : []));
@@ -147,7 +227,7 @@ export function queryTelemetrySeries(sinceMs: number, resolutionMs: number): Tel
 		.prepare(
 			`SELECT
 				CAST(((ts - ?) / ?) AS INTEGER) AS bucket,
-				COUNT(*) AS requests,
+				SUM(CASE WHEN kind IN ('main','subagent','background') THEN 1 ELSE 0 END) AS requests,
 				SUM(CASE WHEN kind = 'error' THEN 1 ELSE 0 END) AS errors,
 				SUM(prompt_tokens) AS prompt_tokens,
 				SUM(completion_tokens) AS completion_tokens,
@@ -323,14 +403,16 @@ export interface RecentLlmRequest {
 	error: string | null;
 }
 
-export function queryRecentLlmRequests(limit = 50): RecentLlmRequest[] {
+export function queryRecentLlmRequests(limit = 50, offset = 0, sinceMs?: number): RecentLlmRequest[] {
+	const where = sinceMs !== undefined ? "WHERE ts >= ?" : "";
 	const rows = getDb()
 		.prepare(
 			`SELECT ts, session_id, provider, model, kind, prompt_tokens, completion_tokens,
 			        cache_read_tokens, cache_write_tokens, latency_ms, error
-			 FROM llm_requests ORDER BY id DESC LIMIT ?`,
+			 FROM llm_requests ${where}
+			 ORDER BY id DESC LIMIT ? OFFSET ?`,
 		)
-		.all(limit);
+		.all(...(sinceMs !== undefined ? [sinceMs, limit, offset] : [limit, offset]));
 	return rows.map((r) => {
 		const x = r as {
 			ts: number;
@@ -359,4 +441,128 @@ export function queryRecentLlmRequests(limit = 50): RecentLlmRequest[] {
 			error: x.error,
 		};
 	});
+}
+
+/** Total llm_requests rows since `sinceMs` (for pagination page counts). */
+export function countRecentLlmRequests(sinceMs?: number): number {
+	const where = sinceMs !== undefined ? "WHERE ts >= ?" : "";
+	const row = getDb()
+		.prepare(`SELECT COUNT(*) AS n FROM llm_requests ${where}`)
+		.get(...(sinceMs !== undefined ? [sinceMs] : []));
+	return Number((row as { n: number }).n);
+}
+
+// ── Reliability ─────────────────────────────────────────────────────────
+
+export interface ReliabilityOverview {
+	errorTypes: Array<{ errorType: string; count: number }>;
+	retries: number;
+	requests: number;
+	refusals: number;
+}
+
+/** Error-type distribution + retry/refusal counts since `sinceMs`. */
+export function queryReliabilityOverview(sinceMs: number): ReliabilityOverview {
+	const db = getDb();
+	const types = db
+		.prepare(
+			`SELECT COALESCE(error_type, 'other') AS t, COUNT(*) AS n
+			 FROM llm_requests WHERE ts >= ? AND (kind = 'error' OR kind = 'retry')
+			 GROUP BY t ORDER BY n DESC`,
+		)
+		.all(sinceMs);
+	const retries = db.prepare(`SELECT COUNT(*) AS n FROM llm_requests WHERE ts >= ? AND kind = 'retry'`).get(sinceMs);
+	const refusals = db
+		.prepare(`SELECT COUNT(*) AS n FROM llm_requests WHERE ts >= ? AND kind = 'error' AND error_type = 'moderation'`)
+		.get(sinceMs);
+	const requests = db
+		.prepare(`SELECT COUNT(*) AS n FROM llm_requests WHERE ts >= ? AND kind IN ('main','subagent','background')`)
+		.get(sinceMs);
+	return {
+		errorTypes: (types as Array<{ t: string; n: number }>).map((r) => ({ errorType: r.t, count: r.n })),
+		retries: Number((retries as { n: number }).n),
+		requests: Number((requests as { n: number }).n),
+		refusals: Number((refusals as { n: number }).n),
+	};
+}
+
+// ── Context & lifecycle ─────────────────────────────────────────────────
+
+export interface CompactionOverview {
+	count: number;
+	messagesCompacted: number;
+	tokensBefore: number;
+}
+
+export function queryCompactionOverview(sinceMs: number): CompactionOverview {
+	const row = getDb()
+		.prepare(
+			`SELECT COUNT(*) AS count, COALESCE(SUM(messages_compacted),0) AS messages, COALESCE(SUM(tokens_before),0) AS tokens
+			 FROM compactions WHERE ts >= ?`,
+		)
+		.get(sinceMs);
+	const r = row as { count: number; messages: number; tokens: number };
+	return { count: r.count, messagesCompacted: r.messages, tokensBefore: r.tokens };
+}
+
+export interface ContextUtilization {
+	avgPromptTokens: number | null;
+	avgUtilizationPct: number | null;
+}
+
+export function queryContextUtilization(sinceMs: number): ContextUtilization {
+	const row = getDb()
+		.prepare(
+			`SELECT AVG(prompt_tokens) AS avg_prompt, AVG(prompt_tokens * 1.0 / context_window) AS util
+			 FROM llm_requests WHERE ts >= ? AND context_window IS NOT NULL AND context_window > 0`,
+		)
+		.get(sinceMs);
+	const r = row as { avg_prompt: number | null; util: number | null };
+	return {
+		avgPromptTokens: r.avg_prompt,
+		avgUtilizationPct: r.util != null ? Math.round(r.util * 100) : null,
+	};
+}
+
+// ── Tool usage ──────────────────────────────────────────────────────────
+
+export interface ToolUsageRow {
+	toolName: string;
+	count: number;
+	errors: number;
+}
+
+export function queryToolUsage(sinceMs: number, limit = 15): ToolUsageRow[] {
+	const rows = getDb()
+		.prepare(
+			`SELECT tool_name, COUNT(*) AS count, SUM(is_error) AS errors
+			 FROM tool_calls WHERE ts >= ?
+			 GROUP BY tool_name ORDER BY count DESC LIMIT ?`,
+		)
+		.all(sinceMs, limit);
+	return (rows as Array<{ tool_name: string; count: number; errors: number }>).map((r) => ({
+		toolName: r.tool_name,
+		count: r.count,
+		errors: r.errors,
+	}));
+}
+
+// ── Session analytics ───────────────────────────────────────────────────
+
+export interface SessionAnalytics {
+	sessions: number;
+	avgMessagesPerSession: number | null;
+}
+
+export function querySessionAnalytics(sinceMs: number): SessionAnalytics {
+	const sessionsRow = getDb()
+		.prepare("SELECT COUNT(*) AS n FROM sessions WHERE created_at >= ?")
+		.get(new Date(sinceMs).toISOString());
+	const msgsRow = getDb()
+		.prepare("SELECT AVG(c) AS avg_msgs FROM (SELECT COUNT(*) AS c FROM messages GROUP BY session_id)")
+		.get();
+	return {
+		sessions: Number((sessionsRow as { n: number }).n),
+		avgMessagesPerSession: Number((msgsRow as { avg_msgs: number | null }).avg_msgs) || null,
+	};
 }

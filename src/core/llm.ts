@@ -661,6 +661,8 @@ export interface CompletionResult {
 	finishReason: string;
 	/** OpenAI-style moderation refusal (`delta.refusal`), when the provider streams it. */
 	refusal?: string;
+	/** Wall-clock time from the request to the first streamed chunk (ms). */
+	ttftMs?: number;
 	usage?: Usage;
 	/**
 	 * Wall-clock time from the first streamed chunk to the last, in ms —
@@ -776,6 +778,10 @@ export async function streamAndCollect(
 	let finishReason = "stop";
 	let usage: Usage | undefined;
 	let firstChunkAt: number | undefined;
+	// Time-to-first-token: wall-clock from this call's start to the first
+	// streamed chunk (includes any retry backoff). The dashboard's latency tab
+	// distinguishes it from generationMs (pure decode throughput).
+	const callStartedAt = Date.now();
 	// Whether the provider actually sent a terminal finish_reason. A mid-stream
 	// abort can end the async iterator cleanly with none — distinguishing "cut
 	// short" from "finished, then the user hit Esc a beat late" so the latter
@@ -880,6 +886,7 @@ export async function streamAndCollect(
 		finishReason,
 		usage,
 		generationMs,
+		ttftMs: firstChunkAt !== undefined ? firstChunkAt - callStartedAt : undefined,
 		interrupted,
 		disconnected,
 	};

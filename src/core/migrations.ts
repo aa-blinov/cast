@@ -567,6 +567,43 @@ CREATE INDEX IF NOT EXISTS idx_api_requests_path ON api_requests(path);
 `);
 		},
 	},
+	{
+		version: 22,
+		name: "reliability-and-lifecycle-telemetry",
+		up: (db) => {
+			// Classify retry/error rows (vision, overflow, quota, moderation,
+			// upstream, rate-limit) for the reliability tab.
+			if (!columnExists(db, "llm_requests", "error_type")) {
+				db.exec("ALTER TABLE llm_requests ADD COLUMN error_type TEXT");
+			}
+			if (!columnExists(db, "llm_requests", "context_window")) {
+				db.exec("ALTER TABLE llm_requests ADD COLUMN context_window INTEGER");
+			}
+			// Per tool call — pattern insights (which tools the model leans on).
+			db.exec(`
+CREATE TABLE IF NOT EXISTS tool_calls (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts INTEGER NOT NULL,
+  session_id TEXT,
+  tool_name TEXT NOT NULL,
+  is_error INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_tool_calls_ts ON tool_calls(ts);
+CREATE INDEX IF NOT EXISTS idx_tool_calls_name ON tool_calls(tool_name);
+`);
+			// Per compaction — lifecycle/context metrics.
+			db.exec(`
+CREATE TABLE IF NOT EXISTS compactions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts INTEGER NOT NULL,
+  session_id TEXT,
+  messages_compacted INTEGER NOT NULL,
+  tokens_before INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_compactions_ts ON compactions(ts);
+`);
+		},
+	},
 ];
 
 const MIGRATION_TABLE_SCHEMA = `

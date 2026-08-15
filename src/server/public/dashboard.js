@@ -111,6 +111,8 @@ export function Dashboard({ onClose }) {
 	const [range, setRange] = useState("24h");
 	const [llm, setLlm] = useState({ overview: [], series: [] });
 	const [perf, setPerf] = useState({ overview: [], series: [] });
+	const [reliability, setReliability] = useState(null);
+	const [system, setSystem] = useState(null);
 	const [recent, setRecent] = useState({ rows: [], total: 0, page: 0, pageSize: 25 });
 	const [endpointPage, setEndpointPage] = useState({ page: 0, pageSize: 10 });
 	const [loading, setLoading] = useState(true);
@@ -156,15 +158,19 @@ export function Dashboard({ onClose }) {
 		setLoading(true);
 		setError(null);
 		try {
-			const [ov, se, eo, es] = await Promise.all([
+			const [ov, se, eo, es, rel, sys] = await Promise.all([
 				api("GET", `/api/telemetry/overview?since=${hours}`),
 				api("GET", `/api/telemetry/series?since=${hours}&resolution=${resolution}`),
 				api("GET", `/api/telemetry/endpoints?since=${hours}`),
 				api("GET", `/api/telemetry/endpoint-series?since=${hours}&resolution=${resolution}`),
+				api("GET", `/api/telemetry/reliability?since=${hours}`),
+				api("GET", `/api/telemetry/system?since=${hours}`),
 			]);
 			if (req !== loadRequestIdRef.current) return;
 			setLlm({ overview: ov?.rows ?? [], series: se?.buckets ?? [] });
 			setPerf({ overview: eo?.rows ?? [], series: es?.buckets ?? [] });
+			setReliability(rel ?? null);
+			setSystem(sys ?? null);
 			setEndpointPage((p) => ({ ...p, page: 0 }));
 		} catch (err) {
 			if (req === loadRequestIdRef.current) setError(err.message);
@@ -200,17 +206,45 @@ export function Dashboard({ onClose }) {
 	// is present. Re-reads theme colors every time so a theme change re-colors.
 	useEffect(() => {
 		if (loading) return;
-		const data = tab === "llm" ? llm : perf;
-		if (data.series.length === 0) return;
+		if (tab === "llm" || tab === "perf") {
+			const data = tab === "llm" ? llm : perf;
+			if (data.series.length === 0) return;
+		}
+		if (tab === "reliability" && (!reliability || (reliability.errorTypes ?? []).length === 0)) return;
+		if (tab === "system" && (!system || (system.tools ?? []).length === 0)) return;
 		let cancelled = false;
 		loadChart()
 			.then((Chart) => {
 				if (cancelled) return;
 				destroyCharts();
 				const colors = themeColors();
-				const coarse = range !== "24h";
-				const labels = data.series.map((b) => timeLabel(b.ts, coarse));
-				if (tab === "llm") {
+				if (tab === "reliability") {
+					chartsRef.current["errors"] = new Chart(document.getElementById("dash-chart-errors"), {
+						type: "bar",
+						data: {
+							labels: reliability.errorTypes.map((t) => t.errorType),
+							datasets: [
+								{ label: "errors & retries", data: reliability.errorTypes.map((t) => t.count), backgroundColor: colors.rose },
+							],
+						},
+						options: makeBaseOptions(colors),
+					});
+				} else if (tab === "system") {
+					chartsRef.current["tools"] = new Chart(document.getElementById("dash-chart-tools"), {
+						type: "bar",
+						data: {
+							labels: system.tools.map((t) => t.toolName),
+							datasets: [
+								{ label: "calls", data: system.tools.map((t) => t.count), backgroundColor: colors.cyan },
+								{ label: "errors", data: system.tools.map((t) => t.errors), backgroundColor: colors.rose },
+							],
+						},
+						options: makeBaseOptions(colors),
+					});
+				} else if (tab === "llm") {
+					const data = llm;
+					const coarse = range !== "24h";
+					const labels = data.series.map((b) => timeLabel(b.ts, coarse));
 					chartsRef.current["requests"] = new Chart(document.getElementById("dash-chart-requests"), {
 						type: "line",
 						data: {
@@ -259,6 +293,8 @@ export function Dashboard({ onClose }) {
 						},
 					});
 				} else {
+					const coarse = range !== "24h";
+					const labels = perf.series.map((b) => timeLabel(b.ts, coarse));
 					chartsRef.current["endpoints"] = new Chart(document.getElementById("dash-chart-endpoints"), {
 						type: "line",
 						data: {
@@ -283,7 +319,7 @@ export function Dashboard({ onClose }) {
 		return () => {
 			cancelled = true;
 		};
-	}, [loading, tab, llm, perf, range, themeVersion, destroyCharts]);
+	}, [loading, tab, llm, perf, reliability, system, range, themeVersion, destroyCharts]);
 
 	const llmTotals = llm.overview.reduce(
 		(acc, r) => {
@@ -318,6 +354,8 @@ export function Dashboard({ onClose }) {
 		perfTotals.latencies.length > 0 ? perfTotals.latencies.reduce((a, b) => a + b, 0) / perfTotals.latencies.length : null;
 
 	const rangeLabel = range === "30d" ? "30 days" : range === "7d" ? "7 days" : "24 hours";
+	const retryRate =
+		reliability && reliability.requests > 0 ? ((reliability.retries / reliability.requests) * 100).toFixed(1) : null;
 	// Client-side pagination over the already-fetched endpoint overview.
 	const epPage = endpointPage;
 	const epRows = perf.overview.slice(epPage.page * epPage.pageSize, (epPage.page + 1) * epPage.pageSize);
@@ -330,6 +368,8 @@ export function Dashboard({ onClose }) {
 					<div class="dash-tabs">
 						<button class="modal-btn${tab === "llm" ? " modal-btn-primary" : ""}" onClick=${() => setTab("llm")}>LLM</button>
 						<button class="modal-btn${tab === "perf" ? " modal-btn-primary" : ""}" onClick=${() => setTab("perf")}>Performance</button>
+						<button class="modal-btn${tab === "reliability" ? " modal-btn-primary" : ""}" onClick=${() => setTab("reliability")}>Reliability</button>
+						<button class="modal-btn${tab === "system" ? " modal-btn-primary" : ""}" onClick=${() => setTab("system")}>System</button>
 					</div>
 					<div class="dash-range">
 						<button class="modal-btn${range === "24h" ? " modal-btn-primary" : ""}" onClick=${() => setRange("24h")}>24h</button>
@@ -386,7 +426,8 @@ export function Dashboard({ onClose }) {
 						/>
 					</div>
 				`
-				: html`
+				: tab === "perf"
+					? html`
 					<div class="dash-kpis">
 						<${KpiCard} label="Requests" value=${fmtTokens(perfTotals.requests)} sub=${rangeLabel} />
 						<${KpiCard} label="Avg latency" value=${fmtMs(perfAvgLatency)} />
@@ -420,10 +461,53 @@ export function Dashboard({ onClose }) {
 							onPage=${(p) => setEndpointPage((prev) => ({ ...prev, page: p }))}
 						/>
 					</div>
+				`
+					: tab === "reliability"
+						? html`
+					<div class="dash-kpis">
+						<${KpiCard} label="Requests" value=${fmtTokens(reliability?.requests ?? 0)} sub=${rangeLabel} />
+						<${KpiCard} label="Retries" value=${fmtTokens(reliability?.retries ?? 0)} />
+						<${KpiCard} label="Retry rate" value=${retryRate ? `${retryRate}%` : "—"} sub=${retryRate ? `of ${fmtTokens(reliability.requests)} requests` : ""} />
+						<${KpiCard} label="Moderation blocks" value=${fmtTokens(reliability?.refusals ?? 0)} tone=${(reliability?.refusals ?? 0) > 0 ? "err" : ""} />
+					</div>
+					<div class="dash-charts">
+						<div class="dash-chart-box dash-chart-box-wide"><div class="dash-chart-title">Errors & retries by type</div><div class="dash-chart"><canvas id="dash-chart-errors" /></div></div>
+					</div>
+					<div class="dash-section-title">Error & retry breakdown</div>
+					<div class="dash-table-wrap">
+						<table class="dash-table">
+							<thead><tr><th>Type</th><th>Count</th></tr></thead>
+							<tbody>
+								${!reliability || reliability.errorTypes.length === 0 ? html`<tr><td colspan="2" class="dash-empty">No errors or retries in this window.</td></tr>` : null}
+								${(reliability?.errorTypes ?? []).map((t) => html`<tr><td>${t.errorType}</td><td>${t.count}</td></tr>`)}
+							</tbody>
+						</table>
+					</div>
+				`
+						: html`
+					<div class="dash-kpis">
+						<${KpiCard} label="Compactions" value=${fmtTokens(system?.compactions?.count ?? 0)} sub=${system?.compactions?.count ? `compacted ${fmtTokens(system.compactions.messagesCompacted)} msgs` : ""} />
+						<${KpiCard} label="Context saved" value=${fmtTokens(system?.compactions?.tokensBefore ?? 0)} />
+						<${KpiCard} label="Avg context use" value=${system?.context?.avgUtilizationPct != null ? `${system.context.avgUtilizationPct}%` : "—"} sub=${system?.context?.avgPromptTokens != null ? `${fmtTokens(system.context.avgPromptTokens)} prompt tokens` : ""} />
+						<${KpiCard} label="Sessions" value=${fmtTokens(system?.sessions?.sessions ?? 0)} sub=${system?.sessions?.avgMessagesPerSession != null ? `~${Math.round(system.sessions.avgMessagesPerSession)} msgs/session` : ""} />
+					</div>
+					<div class="dash-charts">
+						<div class="dash-chart-box dash-chart-box-wide"><div class="dash-chart-title">Tool calls</div><div class="dash-chart"><canvas id="dash-chart-tools" /></div></div>
+					</div>
+					<div class="dash-section-title">Tool usage</div>
+					<div class="dash-table-wrap">
+						<table class="dash-table">
+							<thead><tr><th>Tool</th><th>Calls</th><th>Errors</th></tr></thead>
+							<tbody>
+								${!system || system.tools.length === 0 ? html`<tr><td colspan="3" class="dash-empty">No tool calls in this window.</td></tr>` : null}
+								${(system?.tools ?? []).map((t) => html`<tr><td>${t.toolName}</td><td>${t.count}</td><td>${t.errors}</td></tr>`)}
+							</tbody>
+						</table>
+					</div>
 				`}
-				`}
-				</div>
+			`}
 			</div>
 		</div>
+	</div>
 	`;
 }
