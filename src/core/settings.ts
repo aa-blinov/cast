@@ -177,6 +177,14 @@ export interface Settings {
 	checkpointThresholds?: number[];
 	/** Token safety buffer reserved at the end of the window; thresholds are clamped to window - this. */
 	checkpointReserved?: number;
+	/** Per-section token caps for the rebuild context; missing sections use their defaults. */
+	checkpointPushCaps?: {
+		checkpoint?: number;
+		memory?: number;
+		notes?: number;
+		global?: number;
+		tasks?: number;
+	};
 }
 
 // ============================================================================
@@ -355,6 +363,27 @@ export function checkpointThresholdsSetting(settings: Settings = loadSettings())
 export function checkpointReservedSetting(settings: Settings = loadSettings()): number | undefined {
 	const value = settings.checkpointReserved;
 	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : undefined;
+}
+
+export interface CheckpointPushCaps {
+	checkpoint?: number;
+	memory?: number;
+	notes?: number;
+	global?: number;
+	tasks?: number;
+}
+
+const PUSH_CAP_KEYS = ["checkpoint", "memory", "notes", "global", "tasks"] as const;
+
+export function checkpointPushCapsSetting(settings: Settings = loadSettings()): CheckpointPushCaps | undefined {
+	const value = settings.checkpointPushCaps;
+	if (!value || typeof value !== "object") return undefined;
+	const out: CheckpointPushCaps = {};
+	for (const key of PUSH_CAP_KEYS) {
+		const entry = value[key];
+		if (typeof entry === "number" && Number.isFinite(entry) && entry > 0) out[key] = Math.floor(entry);
+	}
+	return Object.keys(out).length > 0 ? out : undefined;
 }
 
 /** true/false if this project's trust decision was already made, undefined if never asked. */

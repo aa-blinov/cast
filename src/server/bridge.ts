@@ -131,6 +131,9 @@ const MEMORY_BUDGET_COMMAND_RE = /^budget\s+(\d+)$/;
 const MEMORY_FLOOR_COMMAND_RE = /^floor\s+(0(?:\.\d+)?|1(?:\.0)?)$/;
 const MEMORY_RECONCILE_COMMAND_RE = /^reconcile\s+(on|off)$/;
 const MEMORY_CHECKPOINT_FORK_COMMAND_RE = /^checkpoint\s+fork\s+(on|off)$/;
+const MEMORY_CHECKPOINT_THRESHOLDS_COMMAND_RE = /^checkpoint\s+thresholds\s+(.+)$/;
+const MEMORY_CHECKPOINT_RESERVED_COMMAND_RE = /^checkpoint\s+reserved\s+(\d+)$/;
+const MEMORY_CHECKPOINT_CAPS_COMMAND_RE = /^checkpoint\s+caps\s+(.+)$/;
 const MEMORY_AUTO_TOGGLE_COMMAND_RE = /^(dream|distill)\s+(on|off)$/;
 const MEMORY_AUTO_INTERVAL_COMMAND_RE = /^(dream|distill)\s+interval\s+(\d+)$/;
 const MEMORY_CANCEL_RUN_COMMAND_RE = /^cancel\s+([a-f0-9-]+)$/;
@@ -2278,6 +2281,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 						memoryDreamIntervalDays: memoryDreamIntervalDays(settings),
 						memoryDistillAuto: memoryDistillAuto(settings),
 						memoryDistillIntervalDays: memoryDistillIntervalDays(settings),
+						checkpointThresholds: settings.checkpointThresholds ?? null,
+						checkpointReserved: settings.checkpointReserved ?? null,
+						checkpointPushCaps: settings.checkpointPushCaps ?? null,
 					},
 				};
 			if (arg === "on" || arg === "off") {
@@ -2317,6 +2323,64 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				updateSettings({ checkpointFork });
 				return { ok: true, result: { checkpointFork } };
 			}
+			const checkpointThresholdsMatch = arg.match(MEMORY_CHECKPOINT_THRESHOLDS_COMMAND_RE);
+			if (checkpointThresholdsMatch) {
+				const raw = checkpointThresholdsMatch[1]!;
+				if (raw.trim() === "default") {
+					updateSettings({ checkpointThresholds: undefined });
+					return { ok: true, result: { checkpointThresholds: undefined } };
+				}
+				const values = raw
+					.split(",")
+					.map((part) => Number(part.trim()))
+					.filter((value) => Number.isFinite(value));
+				if (values.length === 0 || values.some((value) => value <= 0 || value > 100)) {
+					return { ok: false, error: "Checkpoint thresholds must be percentages like 20,40,60,80 or 'default'" };
+				}
+				updateSettings({ checkpointThresholds: values });
+				return { ok: true, result: { checkpointThresholds: values } };
+			}
+			const checkpointReservedMatch = arg.match(MEMORY_CHECKPOINT_RESERVED_COMMAND_RE);
+			if (checkpointReservedMatch) {
+				const checkpointReserved = Number(checkpointReservedMatch[1]);
+				if (!Number.isInteger(checkpointReserved) || checkpointReserved < 0) {
+					return { ok: false, error: "Checkpoint reserved must be a non-negative token count" };
+				}
+				updateSettings({ checkpointReserved });
+				return { ok: true, result: { checkpointReserved } };
+			}
+			const checkpointCapsMatch = arg.match(MEMORY_CHECKPOINT_CAPS_COMMAND_RE);
+			if (checkpointCapsMatch) {
+				const raw = checkpointCapsMatch[1]!;
+				if (raw.trim() === "default") {
+					updateSettings({ checkpointPushCaps: undefined });
+					return { ok: true, result: { checkpointPushCaps: undefined } };
+				}
+				const caps: Record<string, number> = {};
+				let invalid = false;
+				for (const pair of raw.split(",")) {
+					const [key, valueText] = pair.split("=");
+					const keyTrimmed = key?.trim() ?? "";
+					const value = Number(valueText?.trim());
+					if (
+						!["checkpoint", "memory", "notes", "global", "tasks"].includes(keyTrimmed) ||
+						!Number.isFinite(value) ||
+						value <= 0
+					) {
+						invalid = true;
+						break;
+					}
+					caps[keyTrimmed] = Math.floor(value);
+				}
+				if (invalid || Object.keys(caps).length === 0) {
+					return {
+						ok: false,
+						error: "Checkpoint caps must be like checkpoint=11000,memory=10000,notes=6000,global=6000,tasks=2000 or 'default'",
+					};
+				}
+				updateSettings({ checkpointPushCaps: caps });
+				return { ok: true, result: { checkpointPushCaps: caps } };
+			}
 			const autoToggleMatch = arg.match(MEMORY_AUTO_TOGGLE_COMMAND_RE);
 			if (autoToggleMatch) {
 				const enabled = autoToggleMatch[2] === "on";
@@ -2342,7 +2406,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			}
 			return {
 				ok: false,
-				error: "Usage: /memory on|off|write on|write off|extraction on|off|checkpoint fork on|off|budget <tokens>|dream on|off|dream interval <days>|distill on|off|distill interval <days>|runs|cancel <run-id>|floor <0..1>|reconcile on|off",
+				error: "Usage: /memory on|off|write on|write off|checkpoint fork on|off|checkpoint thresholds <pct,..|default>|checkpoint reserved <tokens>|checkpoint caps <k=v,..|default>|budget <tokens>|dream on|off|dream interval <days>|distill on|off|distill interval <days>|runs|cancel <run-id>|floor <0..1>|reconcile on|off",
 			};
 		}
 		if (name === "/dream" || name === "/distill") {

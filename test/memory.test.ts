@@ -231,6 +231,26 @@ describe("project memory", () => {
 		expect(prompt).toContain("The last assistant message issued tool calls");
 	});
 
+	it("applies configurable per-section rebuild caps", () => {
+		const projectCwd = join(root, "rebuild-caps-project");
+		const session = createSession("test-model", projectCwd);
+		saveSession(session);
+		const memoryDir = process.env.CAST_MEMORY_DIR!;
+		mkdirSync(join(memoryDir, "sessions", session.id), { recursive: true });
+		const longIntent =
+			"This is a very long active intent that should definitely exceed a tiny per-section token cap.";
+		writeFileSync(
+			join(memoryDir, "sessions", session.id, "checkpoint.md"),
+			`# Session checkpoint\n\n## §1 Active intent\n${longIntent}\n`,
+		);
+		updateSettings({ checkpointPushCaps: { checkpoint: 30 } });
+
+		const prompt = buildMemoryPrompt(projectCwd, "", session.id, { rebuildContext: true });
+		expect(prompt).toContain("## Session checkpoint");
+		expect(prompt).toContain("## §1 Active intent");
+		expect(prompt).not.toContain("should definitely exceed");
+	});
+
 	it("fits retrieved memory to a token budget and prefers higher-importance facts", () => {
 		const projectCwd = join(root, "budgeted-project");
 		storeProjectMemory(projectCwd, "session-a", "turn-a", [
