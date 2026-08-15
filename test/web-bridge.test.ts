@@ -791,6 +791,21 @@ describe("web bridge", () => {
 		expect(ws.runner.steeringQueue.hasItems()).toBe(true);
 	});
 
+	it("dedupes a thin-client retry re-send with the same clientMessageId while the first submit is in flight", async () => {
+		// The id is claimed synchronously at the top of submit, before the
+		// running-check and async setup. A reconnect re-send of the same message
+		// must be dropped — not steered into the running turn as a duplicate.
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+
+		bridge.submit(ws.id, "first message", undefined, "client-id-1");
+		bridge.submit(ws.id, "first message (retried)", undefined, "client-id-1");
+
+		expect(runAgentLoop).toHaveBeenCalledTimes(1);
+		expect(ws.runner.steeringQueue.hasItems()).toBe(false);
+		expect(ws.session.messages.filter((m) => m.role === "user")).toHaveLength(1);
+	});
+
 	it("applies a same-name persona override on the next turn", async () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();

@@ -1196,6 +1196,13 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				ws.acceptedClientMessageIds.add(clientMessageId);
 				return;
 			}
+			// Claim the id NOW, synchronously, before the running-check and async
+			// setup below. A thin-client reconnect re-send of the same message
+			// arriving while this submit is still setting up must be deduped here,
+			// or it falls through to the steering branch and injects a duplicate
+			// user message into the running turn. failSetup removes the claim so
+			// a genuinely failed send can be retried.
+			ws.acceptedClientMessageIds.add(clientMessageId);
 		}
 
 		// A turn already running (e.g. the same session open in a second
@@ -1236,6 +1243,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			ws.runner.endRun(lease);
 			ws.activeStream = undefined;
 			ws.turnStartedAt = undefined;
+			// Undo the early id claim so a retry of the same message can be
+			// delivered on the next attempt (the message was never persisted).
+			if (clientMessageId) ws.acceptedClientMessageIds.delete(clientMessageId);
 			syncFsWatcher(ws);
 			broadcast(ws, { type: "error", message: ws.error });
 			broadcast(ws, { type: "status", status: "error" });
@@ -1332,7 +1342,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// stays at the pre-run snapshot during the entire run. The `.then()`
 		// below does the final authoritative save with assistant responses.
 		saveSession(ws.session);
-		if (clientMessageId) ws.acceptedClientMessageIds.add(clientMessageId);
 		if (!queuedMessages) {
 			const userMsg = ws.session.messages[ws.session.messages.length - 1] as Message & {
 				castClientMessageId?: string;
