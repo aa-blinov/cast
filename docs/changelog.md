@@ -2,6 +2,46 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.18.0
+
+### Added
+
+- **Web telemetry dashboard** with its own dedicated `/dashboard` route (and
+  `/settings` as a route too, so both are navigable/bookmarkable and survive
+  back/forward while the chat session stays mounted). Five tabs with 24h/7d/30d
+  ranges:
+  - **LLM** — requests, tokens, cost, cache rate, latency avg with **p50/p95/p99**,
+    tokens/s throughput, and a paginated recent-requests table.
+  - **Memory** — memory-tool search calls, maintenance runs (dream/distill),
+    entries stored, maintenance tokens.
+  - **Performance** — daemon API requests, latency percentiles, 5xx, per-endpoint table.
+  - **Reliability** — retries, retry rate, moderation blocks, error-type breakdown
+    including harness-specific **doom-loop** and **empty-response** types.
+  - **System** — compactions, context use, file edits, and **per-turn metrics**
+    (turns, tool calls/turn, tokens/turn, time/turn) plus tool usage with latency.
+- **Per-turn aggregation**: every LLM completion and tool call is tagged with
+  the client message id (`turn_id`), so one user request can be grouped into a
+  single turn. Background maintenance (automatic dream/distill, checkpoint
+  writer) is recorded as `kind = background`.
+- **Tool latency** is measured per call (`tool_start`→`tool_end`) and shown in
+  the System tab's tool-usage table.
+- Settings and the dashboard close on **Escape** like every other modal.
+
+### Fixed
+
+- **`/shared/*` deep links were silently broken**: `serveStatic` read
+  `req.headers["accept-encoding"]` unconditionally, so the synthetic
+  `{ url: "/" }` request used by deep-link routes crashed into the catch block
+  and 404'd. Optional-chaining fixes it (and unblocks the new `/settings` and
+  `/dashboard` routes).
+
+### Internal
+
+- Memory-maintenance pass timeout raised from 120s to 180s (matches the bash
+  default) so a big project can consolidate without being cut short.
+- New `docs/dashboard.md`; the builtin `cast` skill now documents its own TUI
+  and web interfaces (`references/tui.md`, expanded `references/web.md`).
+
 ## 0.17.0
 
 ### Added
