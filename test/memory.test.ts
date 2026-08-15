@@ -700,10 +700,10 @@ describe("project memory", () => {
 			messages: [{ role: "user" as const, content: label }],
 		});
 
-		scheduleProjectCheckpointWriter(input("first"), writer);
+		const first = scheduleProjectCheckpointWriter(input("first"), writer);
 		scheduleProjectCheckpointWriter(input("second"), writer);
-		scheduleProjectCheckpointWriter(input("third"), writer);
-		await new Promise((resolve) => setTimeout(resolve, 35));
+		const third = scheduleProjectCheckpointWriter(input("third"), writer);
+		await Promise.all([first.wait(), third.wait()]);
 
 		expect(seen).toEqual(["first", "third"]);
 	});
