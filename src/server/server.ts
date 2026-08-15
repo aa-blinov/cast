@@ -38,9 +38,13 @@ import {
 	queryEndpointAvgLatency,
 	queryEndpointOverview,
 	queryEndpointSeries,
+	queryEndpointLatencyPercentiles,
+	queryFileEdits,
 	queryLlmAvgLatency,
+	queryLlmLatencyPercentiles,
 	queryRecentLlmRequests,
 	queryReliabilityOverview,
+	queryTokensPerSecond,
 	querySessionAnalytics,
 	queryTelemetryOverview,
 	queryTelemetrySeries,
@@ -603,7 +607,13 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
 		const hours = Number(url.searchParams.get("since")) || 24;
 		const sinceMs = Date.now() - hours * 60 * 60 * 1000;
-		json(res, { sinceMs, avgLatencyMs: queryLlmAvgLatency(sinceMs), rows: queryTelemetryOverview(sinceMs) });
+		json(res, {
+			sinceMs,
+			avgLatencyMs: queryLlmAvgLatency(sinceMs),
+			latencyPercentiles: queryLlmLatencyPercentiles(sinceMs),
+			tokensPerSec: queryTokensPerSecond(sinceMs),
+			rows: queryTelemetryOverview(sinceMs),
+		});
 	});
 
 	route("GET", "/api/telemetry/series", (req, res) => {
@@ -639,6 +649,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		json(res, {
 			sinceMs,
 			avgLatencyMs: queryEndpointAvgLatency(sinceMs),
+			latencyPercentiles: queryEndpointLatencyPercentiles(sinceMs),
 			rows: queryEndpointOverview(sinceMs),
 		});
 	});
@@ -672,6 +683,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			context: queryContextUtilization(sinceMs),
 			tools: queryToolUsage(sinceMs),
 			sessions: querySessionAnalytics(sinceMs),
+			fileEdits: queryFileEdits(sinceMs),
 		});
 	});
 

@@ -664,6 +664,9 @@ export interface ServerBridge {
 
 export function createServerBridge(result: StartupResult): ServerBridge {
 	const sessions = new Map<string, WebAgentSession>();
+	// Tool-call start timestamps keyed by call id, so tool_end can record the
+	// per-tool latency (tool_calls.latency_ms).
+	const toolStartTimes = new Map<string, number>();
 	const idleSessionEvictions = new Map<string, ReturnType<typeof setTimeout>>();
 	const IDLE_SESSION_EVICTION_MS = 5 * 60_000;
 	// Sidebar listeners, one per connected browser tab, independent of which
@@ -1483,12 +1486,33 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				// are too fine-grained (thousands per turn) and their final form
 				// already lands in messages; these are the coarse, useful ones.
 				switch (event.type) {
+					case "tool_start": {
+						const ts = event as { id: string };
+						toolStartTimes.set(ts.id, Date.now());
+						appendSessionEvent(sessionId, event.type, event);
+						break;
+					}
 					case "tool_end": {
 						// One row per completed tool call (not per start+end) — the
 						// end event carries the error flag, so recording only here
 						// avoids double-counting usage.
-						const t = event as { name: string; result: { isError?: boolean } };
-						recordToolCall(ws.id, t.name, t.result?.isError === true);
+						const t = event as { id: string; name: string; result: { isError?: boolean } };
+						const started = toolStartTimes.get(t.id);
+						toolStartTimes.delete(t.id);
+						recordToolCall(ws.id, t.name, t.result?.isError === true, started !== undefined ? Date.now() - started : undefined);
+						appendSessionEvent(sessionId, event.type, event);
+						break;
+					}
+					case "doom_loop": {
+						const d = event as { tool: string; attempts: number };
+						recordLlmRequest({
+							sessionId: ws.id,
+							provider: runProviderName,
+							model: runModel,
+							kind: "error",
+							error: `doom loop: ${d.tool} x${d.attempts}`,
+							errorType: "doom-loop",
+						});
 						appendSessionEvent(sessionId, event.type, event);
 						break;
 					}
@@ -1498,9 +1522,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 						appendSessionEvent(sessionId, event.type, event);
 						break;
 					}
-					case "tool_start":
 					case "turn_end":
-					case "doom_loop":
 					case "open_work_gate":
 					case "open_work_gate_exhausted":
 					case "retry":
@@ -1579,6 +1601,18 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 						sessionId: ws.id,
 						payload: { message: event.content, tool_calls: event.toolCalls },
 					});
+					// The loop commits this placeholder when a retried turn is
+					// still empty — a real quality signal for the Reliability tab.
+					if (event.content === "(no response)") {
+						recordLlmRequest({
+							sessionId: ws.id,
+							provider: runProviderName,
+							model: runModel,
+							kind: "error",
+							error: "empty response",
+							errorType: "empty-response",
+						});
+					}
 					thinkingByCompletion.push(event.thinking ?? "");
 					ws.activeStream = [
 						...(event.thinking
