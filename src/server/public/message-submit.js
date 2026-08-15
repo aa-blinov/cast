@@ -292,7 +292,6 @@ export async function submitMessage(text, images, pendingDocs, context) {
 		text: finalText,
 		...(images?.length ? { images } : {}),
 		clientMessageId,
-		sending: true,
 	};
 	pendingOutgoingRef.current.set(clientMessageId, outgoing);
 	setSession((prev) =>
@@ -318,7 +317,6 @@ export async function submitMessage(text, images, pendingDocs, context) {
 	// past an unsubscribed browser tab.
 	const streamReady = (await waitForSessionStream?.(id)) !== false;
 	if (!streamReady) {
-		outgoing.sending = false;
 		if (isCurrentDraft()) showToast?.("Connection lost — message kept locally until the daemon reconnects", "error");
 		return;
 	}
@@ -348,7 +346,6 @@ export async function submitMessage(text, images, pendingDocs, context) {
 		// the user posted a message, saw nothing in the sidebar change,
 		// then everything moved after the round trip landed.
 	} catch (err) {
-		outgoing.sending = false;
 		if (isCurrentDraft()) showToast(`Message kept locally; retrying when the daemon reconnects: ${err.message}`, "error");
 	}
 }

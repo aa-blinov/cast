@@ -56,7 +56,7 @@ describe("web message submission", () => {
 		expect(selectSession).not.toHaveBeenCalled();
 		expect(api).not.toHaveBeenCalled();
 		expect(pendingOutgoingRef.current.size).toBe(1);
-		expect([...pendingOutgoingRef.current.values()][0]).toMatchObject({ text: "hello", sending: false });
+		expect([...pendingOutgoingRef.current.values()][0]).toMatchObject({ text: "hello" });
 	});
 
 	it("does not answer a pending question while the backend is disconnected", async () => {
