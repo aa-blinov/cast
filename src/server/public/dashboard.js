@@ -210,8 +210,11 @@ export function Dashboard({ onClose }) {
 			const data = tab === "llm" ? llm : perf;
 			if (data.series.length === 0) return;
 		}
-		if (tab === "reliability" && (!reliability || (reliability.errorTypes ?? []).length === 0)) return;
-		if (tab === "system" && (!system || (system.tools ?? []).length === 0)) return;
+		// Reliability/System always render their chart (empty data shows axes +
+		// an empty table row) — skipping on empty arrays left those tabs blank
+		// and made them look like they didn't switch.
+		if (tab === "reliability" && !reliability) return;
+		if (tab === "system" && !system) return;
 		let cancelled = false;
 		loadChart()
 			.then((Chart) => {
