@@ -10,9 +10,9 @@ Sessions saved by older versions of cast (individual `.json`/`.jsonl` files unde
 
 ## Project Memory
 
-Cast uses a two-layer memory layout. The authoritative artifacts are files under `~/.cast/memory/`: project knowledge in `projects/<project-id>/MEMORY.md`, session handoffs in `sessions/<session-id>/checkpoint.md`, scratch notes in `notes.md`, and delegated task progress under `tasks/<task-id>/progress.md`. SQLite keeps a scoped FTS5 mirror for fast retrieval and the raw session trajectory remains the evidence source.
+Cast uses a two-layer memory layout. The authoritative artifacts are files under `~/.cast/memory/`: project knowledge in `projects/<project-id>/MEMORY.md`, session handoffs in `sessions/<session-id>/checkpoint.md`, scratch notes in `notes.md`, and delegated task progress under `tasks/<task-id>/progress.md`. SQLite keeps a scoped FTS5 mirror derived from those files for fast retrieval, and the raw session trajectory remains the evidence source.
 
-After every successful turn, a bounded hidden memory writer extracts high-signal durable facts in the background. When a session approaches the context threshold, a separate checkpoint-writer fork also updates the handoff files. These agents use absolute paths, are isolated from the user-facing turn, and share a per-project SQLite lease; one writer runs per session and at most one newer pending checkpoint request is retained. Memory work is bounded and best-effort; the main turn never waits for it.
+When a session approaches the context threshold, a checkpoint-writer fork updates the handoff files with normal file tools. `/dream` periodically consolidates durable knowledge from the trajectory into the project file, and `/distill` packages repeated workflows as reusable assets. These agents use absolute paths, are isolated from the user-facing turn, and share a per-project SQLite lease; one writer runs per session and at most one newer pending checkpoint request is retained. Memory work is bounded and best-effort; the main turn never waits for it.
 
 Ordinary turns receive only a short reminder that durable memory is available; the full memory context is loaded after a checkpoint rebuild, where it becomes part of the durable continuation. The `memory` tool can search the same project scope explicitly on demand:
 
@@ -20,7 +20,7 @@ Ordinary turns receive only a short reminder that durable memory is available; t
 {"query":"native reasoning tool-call"}
 ```
 
-Memory writing is best-effort: if the writer provider call fails or times out, the conversation remains successful and Cast reports a non-fatal warning. Existing memory stays available through retrieval. Entries carry importance, confidence, provenance, and optional expiry; expired entries are excluded automatically. A writer can explicitly supersede a contradictory entry by its durable ID. The writer uses the active model/provider, so no separate memory model configuration is required. After a successful write, the file layer is reconciled into the SQLite FTS mirror and an atomic manifest records the file hashes and revision.
+Memory writing is best-effort: if the writer provider call fails or times out, the conversation remains successful and Cast reports a non-fatal warning. Existing memory stays available through retrieval. After the checkpoint writer or a hand edit changes `MEMORY.md`, the file is reconciled into the SQLite FTS mirror and an atomic manifest records the file hash and revision.
 
 Memory can be disabled globally with `/memory off` in the TUI or Settings → Memory in the Web UI. Background writing can be disabled independently with `/memory write off`; existing memory remains readable and searchable. The prompt budget, relative BM25 score floor, and reconcile-before-search behavior are configurable with `/memory budget`, `/memory floor`, and `/memory reconcile`. All settings are stored in `~/.cast/settings.json` and shared by both clients. Disabling memory does not delete existing project-memory rows.
 
@@ -32,7 +32,7 @@ Automatic dream and distill runs are separate persistent background sessions lin
 
 `session_history` is deliberately separate from `memory`. It searches raw user, assistant, and tool messages from earlier sessions in the current project through the SQLite full-text index. Use it when the exact earlier discussion is needed; use `memory` for distilled durable facts. Search results include the source session and message sequence so the agent can distinguish evidence from a reusable project rule.
 
-Memory retrieval, file reconciliation, and maintenance are recorded as durable session events. SQLite extraction claims remain leased and keyed by `(project, session, turn)` for compatibility with older databases, while all active project-memory operations additionally use a renewable cross-process lease. The in-process checkpoint queue provides newest-wins behavior within a session; the SQLite lease prevents another daemon or TUI process from writing the same project's memory concurrently.
+Memory retrieval, file reconciliation, and maintenance are recorded as durable session events. All active project-memory operations use a renewable cross-process lease in SQLite. The in-process checkpoint queue provides newest-wins behavior within a session; the SQLite lease prevents another daemon or TUI process from writing the same project's memory concurrently.
 
 ## Session State
 

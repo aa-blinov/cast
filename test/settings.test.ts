@@ -12,7 +12,6 @@ import {
 	memoryDistillIntervalDays,
 	memoryDreamAuto,
 	memoryDreamIntervalDays,
-	memoryExtractionAuto,
 	memoryPromptBudget,
 	memoryReconcileOnSearch,
 	memorySearchScoreFloor,
@@ -164,10 +163,8 @@ describe("settings", () => {
 			expect(memoryDistillIntervalDays({ memoryDistillIntervalDays: 3.7 })).toBe(3);
 		});
 
-		it("defaults to checkpoint-only memory writes and no prefix fork", () => {
-			expect(memoryExtractionAuto({})).toBe(false);
+		it("defaults to no prefix fork", () => {
 			expect(checkpointFork({})).toBe(false);
-			expect(memoryExtractionAuto({ memoryExtractionAuto: true })).toBe(true);
 			expect(checkpointFork({ checkpointFork: true })).toBe(true);
 		});
 	});

@@ -24,9 +24,8 @@ User settings are persisted to `~/.cast/settings.json`. This file is loaded on s
 | `projectTrust` | Record<string, boolean> | Per-project trust decisions |
 | `theme` | string | Active color theme id |
 | `webTools` | boolean | Whether web tools are enabled (default: `false` — use `/web` to enable) |
-| `memoryEnabled` | boolean | Whether durable project memory, retrieval, extraction, and the Web UI Memory tab are enabled (default: `true`) |
-| `memoryWriteEnabled` | boolean | Whether background extraction, checkpoint writing, dream, and distill may update memory (default: `true`; reading remains available when this is `false`) |
-| `memoryExtractionAuto` | boolean | Legacy per-turn extraction writer (default: `false`; MiMo-compatible checkpoint-only writing is the default) |
+| `memoryEnabled` | boolean | Whether durable project memory, retrieval, and the Web UI Memory tab are enabled (default: `true`) |
+| `memoryWriteEnabled` | boolean | Whether checkpoint writing, dream, and distill may update memory (default: `true`; reading remains available when this is `false`) |
 | `memoryPromptBudget` | integer | Maximum estimated tokens reserved for memory context inserted during checkpoint rebuild (256–16384, default: `4096`) |
 | `memorySearchScoreFloor` | number | Relative BM25 floor for dropping weak common-word matches (0–1, default: `0.15`; `0` keeps all matches) |
 | `memoryReconcileOnSearch` | boolean | Reconcile changed project `MEMORY.md` files before SQLite search (default: `true`) |

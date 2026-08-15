@@ -4,7 +4,6 @@ import { resetDbConnectionForTests } from "../src/core/db.ts";
 import {
 	buildMemoryPrompt,
 	createProjectMemoryService,
-	extractAndStoreProjectMemory,
 	searchProjectMemory,
 	storeProjectMemory,
 } from "../src/core/memory.ts";
@@ -29,10 +28,6 @@ const config = loadConfig(provider);
 const model = process.env.CAST_E2E_MODEL ?? "MiniMax-M3";
 const cwd = process.cwd();
 const memoryService = createProjectMemoryService();
-const retrievalOnlyService = {
-	...memoryService,
-	extractAndStoreProjectMemory: async () => ({ entries: [], transcript: "", skipped: true }),
-};
 
 async function waitForMemory(query, predicate) {
 	const deadline = Date.now() + 40_000;
@@ -135,7 +130,9 @@ for (const [caseIndex, testCase] of cases.entries()) {
 				onEvent: () => {},
 			},
 		);
-		await extractAndStoreProjectMemory({ cwd, sessionId, model, config, messages: memoryMessages, signal: AbortSignal.timeout(60_000) });
+		storeProjectMemory(cwd, sessionId, `e2e-turn-${attempt}`, [
+			{ content: marker, type: "knowledge", importance: 80 },
+		]);
 		matches = await waitForMemory(marker, (match) => match.content.includes(marker));
 		if (matches.some((match) => match.content.includes(marker))) break;
 	}
@@ -156,7 +153,7 @@ for (const [caseIndex, testCase] of cases.entries()) {
 			model,
 			cwd,
 			systemPrompt: `${prompt}\nAnswer from project memory in one short sentence.`,
-			memory: { sessionId: `${sessionId}-reader`, service: retrievalOnlyService },
+			memory: { sessionId: `${sessionId}-reader`, service: memoryService },
 			onEvent: () => {},
 		},
 	);

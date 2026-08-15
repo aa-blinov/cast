@@ -578,7 +578,6 @@ describe("runAgentLoop — abort vs. error", () => {
 		const memoryService = {
 			search: vi.fn(() => []),
 			buildPrompt,
-			extractAndStoreProjectMemory: vi.fn(),
 		};
 		const requests: Message[][] = [];
 		vi.mocked(streamAndCollect).mockImplementationOnce(async (_client, _model, messages) => {
@@ -610,7 +609,6 @@ describe("runAgentLoop — abort vs. error", () => {
 		const memoryService = {
 			search: vi.fn(() => []),
 			buildPrompt,
-			extractAndStoreProjectMemory: vi.fn(async () => ({ entries: [], transcript: "" })),
 		};
 		vi.mocked(streamAndCollect)
 			.mockImplementationOnce(async (_client, _model, messages) => {
@@ -648,7 +646,6 @@ describe("runAgentLoop — abort vs. error", () => {
 		const memoryService = {
 			search: vi.fn(() => []),
 			buildPrompt,
-			extractAndStoreProjectMemory: vi.fn(),
 		};
 		const requests: Message[][] = [];
 		vi.mocked(streamAndCollect).mockImplementationOnce(async (_client, _model, messages) => {
@@ -675,34 +672,6 @@ describe("runAgentLoop — abort vs. error", () => {
 		}
 	});
 
-	it("extracts the completed turn in the background without delaying the response", async () => {
-		const extraction = vi.fn(async () => ({ entries: [], transcript: "" }));
-		vi.mocked(streamAndCollect).mockResolvedValueOnce({ content: "done", finishReason: "stop" });
-
-		const result = await runAgentLoop([{ role: "user", content: "remember this turn" }], {
-			config: testConfig,
-			model: "test-model",
-			cwd: process.cwd(),
-			systemPrompt: "test",
-			memory: {
-				sessionId: "memory-auto-extraction",
-				service: { search: () => [], buildPrompt: () => "", extractAndStoreProjectMemory: extraction },
-			},
-			memoryExtractionAuto: true,
-			onEvent: () => {},
-		});
-
-		expect(result.at(-1)?.content).toBe("done");
-		await new Promise((resolve) => setImmediate(resolve));
-		expect(extraction).toHaveBeenCalledOnce();
-		const extractedMessages = extraction.mock.calls[0]?.[0].messages ?? [];
-		expect(extractedMessages[0]?.content).not.toContain("search it with the memory tool");
-		expect(extractedMessages.slice(1)).toEqual([
-			{ role: "user", content: "remember this turn" },
-			{ role: "assistant", content: "done" },
-		]);
-	});
-
 	it("does not retrieve or write memory when the global memory setting is disabled", async () => {
 		const realHome = process.env.HOME;
 		const fakeHome = mkdtempSync(join(tmpdir(), "cast-memory-disabled-test-"));
@@ -711,7 +680,6 @@ describe("runAgentLoop — abort vs. error", () => {
 		const memoryService = {
 			search: vi.fn(),
 			buildPrompt: vi.fn(() => "<project-memory>must not be sent</project-memory>"),
-			extractAndStoreProjectMemory: vi.fn(),
 		};
 		vi.mocked(streamAndCollect).mockResolvedValueOnce({ content: "done", finishReason: "stop" });
 
@@ -726,7 +694,6 @@ describe("runAgentLoop — abort vs. error", () => {
 			});
 			await new Promise((resolve) => setImmediate(resolve));
 			expect(memoryService.buildPrompt).not.toHaveBeenCalled();
-			expect(memoryService.extractAndStoreProjectMemory).not.toHaveBeenCalled();
 		} finally {
 			if (realHome === undefined) delete process.env.HOME;
 			else process.env.HOME = realHome;
@@ -3730,7 +3697,6 @@ describe("runAgentLoop — compaction", () => {
 		const memoryService = {
 			search: vi.fn(() => []),
 			buildPrompt,
-			extractAndStoreProjectMemory: vi.fn(),
 		};
 		const followUpQueue = new MessageQueue();
 		followUpQueue.enqueue({ role: "user", content: "keep going" });

@@ -13,24 +13,18 @@ import {
 	distillProjectMemory,
 	drainProjectCheckpointWriters,
 	dreamProjectMemory,
-	extractAndStoreProjectMemory,
-	formatMemoryHistory,
 	formatMemoryToolResult,
 	formatMemoryTranscript,
 	getProjectCheckpointWriterSnapshot,
 	listAutomaticMemoryRuns,
 	listProjectMemory,
 	listProjectMemoryArtifacts,
-	listProjectMemoryCheckpoints,
 	type MemoryEntry,
 	maybeRunAutomaticMemoryMaintenance,
-	parseMemoryWriterOutput,
-	parseMemoryWriterResult,
 	projectIdForCwd,
 	readMemorySectionsWithinBudget,
 	reconcileProjectMemoryFiles,
 	scheduleProjectCheckpointWriter,
-	scheduleProjectMemoryExtraction,
 	searchProjectMemory,
 	storeProjectMemory,
 	waitForProjectCheckpointWriter,
@@ -40,9 +34,7 @@ import {
 	checkpointPath,
 	ensureMemoryFiles,
 	globalMemoryPath,
-	projectMemoryManifestPath,
 	projectMemoryPath,
-	readMemoryFile,
 	readProjectMemory,
 	readSessionMemory,
 	writeMemoryFile,
@@ -295,44 +287,6 @@ describe("project memory", () => {
 		expect(events).toEqual(["first:start", "first:end", "second"]);
 	});
 
-	it("lets a new extraction explicitly supersede a contradictory fact", async () => {
-		const projectCwd = join(root, "supersession-project");
-		const session = createSession("test-model", projectCwd);
-		saveSession(session);
-		storeProjectMemory(projectCwd, session.id, "old-turn", [
-			{ content: "The daemon uses port 1337.", type: "architecture", importance: 80 },
-		]);
-		const oldId = listProjectMemory(projectCwd)[0]!.id;
-		vi.mocked(streamAndCollect).mockResolvedValueOnce({
-			content: JSON.stringify({
-				entries: [
-					{
-						type: "architecture",
-						content: "The daemon uses port 1444.",
-						importance: 90,
-						confidence: 95,
-						supersedes: [oldId],
-					},
-				],
-			}),
-		});
-
-		await extractAndStoreProjectMemory({
-			cwd: projectCwd,
-			sessionId: session.id,
-			model: session.model,
-			config: testConfig,
-			messages: [
-				{ role: "user", content: "The port changed." },
-				{ role: "assistant", content: "The daemon now uses port 1444." },
-			],
-		});
-
-		expect(listProjectMemory(projectCwd)).toEqual([
-			expect.objectContaining({ content: "The daemon uses port 1444.", confidence: 95 }),
-		]);
-	});
-
 	it("records retrieval and writes as durable session events", () => {
 		const projectCwd = join(root, "project");
 		const session = createSession("test-model", projectCwd);
@@ -366,232 +320,15 @@ describe("project memory", () => {
 		expect(formatMemoryToolResult("connection", [])).toContain("No project memory matched");
 	});
 
-	it("parses the writer contract and scopes extraction to the latest turn", () => {
-		const transcript = formatMemoryTranscript([
-			{ role: "user", content: "old request" },
-			{ role: "assistant", content: "old answer" },
-			{ role: "user", content: "new request" },
-			{ role: "assistant", content: "new answer" },
-		]);
-		expect(transcript).toBe("user: new request\nassistant: new answer");
+	it("scopes the maintenance transcript to the latest turn", () => {
 		expect(
-			formatMemoryHistory([
+			formatMemoryTranscript([
 				{ role: "user", content: "old request" },
 				{ role: "assistant", content: "old answer" },
 				{ role: "user", content: "new request" },
 				{ role: "assistant", content: "new answer" },
 			]),
-		).toBe("user: old request\nassistant: old answer\nuser: new request\nassistant: new answer");
-		expect(
-			parseMemoryWriterOutput(
-				'```json\n{"entries":[{"type":"rule","content":"Use isolated SQLite per test.","importance":88},{"type":"rule","content":"Use isolated SQLite per test.","importance":88}]}\n```',
-			),
-		).toEqual([{ type: "rule", content: "Use isolated SQLite per test.", importance: 88 }]);
-	});
-
-	it("parses a structured checkpoint alongside durable entries", () => {
-		const result = parseMemoryWriterResult(
-			JSON.stringify({
-				checkpoint: {
-					activeIntent: "Finish the memory lifecycle",
-					nextAction: "Add maintenance commands",
-					directives: ["Keep memory optional"],
-				},
-				entries: [{ type: "architecture", content: "Checkpoint writes share the extraction transaction." }],
-			}),
-		);
-		expect(result).toEqual({
-			entries: [
-				{ type: "architecture", content: "Checkpoint writes share the extraction transaction.", importance: 50 },
-			],
-			checkpoint: expect.objectContaining({
-				activeIntent: "Finish the memory lifecycle",
-				nextAction: "Add maintenance commands",
-				directives: ["Keep memory optional"],
-			}),
-		});
-	});
-
-	it("stores the checkpoint in the same extraction cycle as durable memory", async () => {
-		const projectCwd = join(root, "project");
-		const session = createSession("test-model", projectCwd);
-		saveSession(session);
-		vi.mocked(streamAndCollect).mockResolvedValueOnce({
-			content: JSON.stringify({
-				checkpoint: { activeIntent: "Ship memory", nextAction: "Run tests" },
-				entries: [{ type: "rule", content: "Memory is globally switchable.", importance: 90 }],
-			}),
-		});
-
-		const result = await extractAndStoreProjectMemory({
-			cwd: projectCwd,
-			sessionId: session.id,
-			model: session.model,
-			config: testConfig,
-			messages: [
-				{ role: "user", content: "Ship memory" },
-				{ role: "assistant", content: "Run tests" },
-			],
-		});
-
-		expect(result.checkpoint).toEqual(
-			expect.objectContaining({ activeIntent: "Ship memory", nextAction: "Run tests" }),
-		);
-		expect(listProjectMemoryCheckpoints(projectCwd)).toHaveLength(1);
-		expect(listProjectMemory(projectCwd)).toEqual([
-			expect.objectContaining({ content: "Memory is globally switchable." }),
-		]);
-		expect(JSON.parse(readMemoryFile(projectMemoryManifestPath(projectIdForCwd(projectCwd))))).toEqual(
-			expect.objectContaining({ version: 1, revision: 1, projectId: projectIdForCwd(projectCwd) }),
-		);
-	});
-
-	it("leaves the curated project memory file untouched by extraction", async () => {
-		const projectCwd = join(root, "curated-untouched-project");
-		const session = createSession("test-model", projectCwd);
-		saveSession(session);
-		const projectId = projectIdForCwd(projectCwd);
-		ensureMemoryFiles(session.id, projectId);
-		const curated =
-			"# Project memory\n\n## Rules\n- Keep the daemon single-writer.\n  Why: a second writer races the lease\n  How to apply: reuse the SQLite lease\n";
-		writeMemoryFile(projectMemoryPath(projectId), curated);
-		vi.mocked(streamAndCollect).mockResolvedValueOnce({
-			content: JSON.stringify({
-				entries: [{ type: "rule", content: "Memory writing is globally switchable.", importance: 90 }],
-			}),
-		});
-
-		await extractAndStoreProjectMemory({
-			cwd: projectCwd,
-			sessionId: session.id,
-			model: session.model,
-			config: testConfig,
-			messages: [
-				{ role: "user", content: "Add the memory switch" },
-				{ role: "assistant", content: "Added the global memory switch." },
-			],
-		});
-
-		// The curated markdown is byte-identical — extraction never regenerates it.
-		expect(readMemoryFile(projectMemoryPath(projectId))).toBe(curated);
-		// The extracted fact is searchable through the derived index with metadata.
-		expect(listProjectMemory(projectCwd)).toEqual([
-			expect.objectContaining({ content: "Memory writing is globally switchable.", type: "rule", importance: 90 }),
-		]);
-	});
-
-	it("keeps extraction rows searchable when the file reconciles an unrelated change", async () => {
-		const projectCwd = join(root, "reconcile-preserve-project");
-		const session = createSession("test-model", projectCwd);
-		saveSession(session);
-		vi.mocked(streamAndCollect).mockResolvedValueOnce({
-			content: JSON.stringify({
-				entries: [
-					{
-						type: "architecture",
-						content: "The daemon owns one writer per session.",
-						importance: 80,
-						confidence: 70,
-					},
-				],
-			}),
-		});
-		await extractAndStoreProjectMemory({
-			cwd: projectCwd,
-			sessionId: session.id,
-			model: session.model,
-			config: testConfig,
-			messages: [
-				{ role: "user", content: "Design the bridge" },
-				{ role: "assistant", content: "The bridge owns one writer per session." },
-			],
-		});
-		expect(searchProjectMemory(projectCwd, "daemon owns one writer")).toHaveLength(1);
-
-		// A hand edit reconciles without wiping the extraction row: its content is
-		// not curated into the file yet, so it keeps its metadata.
-		const projectId = projectIdForCwd(projectCwd);
-		writeMemoryFile(projectMemoryPath(projectId), "# Project memory\n\n## Rules\n- Hand-added rule.\n");
-		reconcileProjectMemoryFiles(projectCwd, session.id);
-
-		const rows = listProjectMemory(projectCwd);
-		expect(
-			rows.some((row) => row.content === "The daemon owns one writer per session." && row.confidence === 70),
-		).toBe(true);
-		expect(rows.some((row) => row.content === "Hand-added rule.")).toBe(true);
-	});
-
-	it("dream edits the canonical file so removals stick and additions are searchable", async () => {
-		const projectCwd = join(root, "dream-file-project");
-		const session = createSession("test-model", projectCwd);
-		saveSession(session);
-		const projectId = projectIdForCwd(projectCwd);
-		ensureMemoryFiles(session.id, projectId);
-		writeMemoryFile(
-			projectMemoryPath(projectId),
-			"# Project memory\n\n## Rules\n- Keep the stale rule.\n- Keep the good rule.\n",
-		);
-		reconcileProjectMemoryFiles(projectCwd, session.id);
-		const stale = listProjectMemory(projectCwd).find((entry) => entry.content === "Keep the stale rule.");
-		expect(stale).toBeTypeOf("object");
-
-		vi.mocked(streamAndCollect).mockResolvedValueOnce({
-			content: JSON.stringify({
-				removeIds: [stale!.id],
-				entries: [{ type: "decision", content: "The daemon remains single-writer.", importance: 85 }],
-			}),
-		});
-
-		await dreamProjectMemory({
-			cwd: projectCwd,
-			sessionId: session.id,
-			model: session.model,
-			config: testConfig,
-			messages: [{ role: "user", content: "Consolidate the project memory" }],
-		});
-
-		const file = readMemoryFile(projectMemoryPath(projectId));
-		expect(file).not.toContain("Keep the stale rule.");
-		expect(file).toContain("Keep the good rule.");
-		expect(file).toContain("The daemon remains single-writer.");
-		const rows = listProjectMemory(projectCwd);
-		expect(rows.some((entry) => entry.content === "Keep the stale rule.")).toBe(false);
-		expect(rows.some((entry) => entry.content === "The daemon remains single-writer.")).toBe(true);
-	});
-
-	it("retries an empty extraction when a completed turn contains enough durable context", async () => {
-		const projectCwd = join(root, "retry-project");
-		const session = createSession("test-model", projectCwd);
-		saveSession(session);
-		vi.mocked(streamAndCollect).mockClear();
-		vi.mocked(streamAndCollect)
-			.mockResolvedValueOnce({ content: JSON.stringify({ entries: [] }) })
-			.mockResolvedValueOnce({
-				content: JSON.stringify({
-					entries: [{ type: "architecture", content: "The durable writer uses a SQLite lease.", importance: 90 }],
-				}),
-			});
-
-		const result = await extractAndStoreProjectMemory({
-			cwd: projectCwd,
-			sessionId: session.id,
-			model: session.model,
-			config: testConfig,
-			messages: [
-				{
-					role: "user",
-					content:
-						"We need to preserve this architecture decision across future sessions: every durable memory write must use the SQLite lease and the file manifest so another process cannot overwrite an active writer.",
-				},
-				{
-					role: "assistant",
-					content: "Implemented the lease and manifest and verified them with concurrent processes.",
-				},
-			],
-		});
-
-		expect(streamAndCollect).toHaveBeenCalledTimes(2);
-		expect(result.entries).toEqual([expect.objectContaining({ content: "The durable writer uses a SQLite lease." })]);
+		).toBe("user: new request\nassistant: new answer");
 	});
 
 	it("dreams over project memory and removes only rows belonging to the project", async () => {
@@ -696,75 +433,6 @@ describe("project memory", () => {
 		]);
 
 		expect(maxActive).toBe(1);
-	});
-
-	it("queues background extraction per session instead of racing writers", async () => {
-		const events: string[] = [];
-		const service = {
-			search: () => [],
-			buildPrompt: () => "",
-			extractAndStoreProjectMemory: async (input: { messages: Array<{ content?: unknown }> }) => {
-				const label = String(input.messages[0]?.content);
-				events.push(`start:${label}`);
-				await new Promise((resolve) => setTimeout(resolve, 5));
-				events.push(`end:${label}`);
-				return { entries: [], transcript: label };
-			},
-		};
-		const input = (label: string) => ({
-			cwd: join(root, "project"),
-			sessionId: "session-a",
-			model: "test-model",
-			config: {} as AppConfig,
-			messages: [{ role: "user" as const, content: label }],
-		});
-
-		await Promise.all([
-			scheduleProjectMemoryExtraction(input("first"), service),
-			scheduleProjectMemoryExtraction(input("second"), service),
-		]);
-
-		expect(events).toEqual(["start:first", "end:first", "start:second", "end:second"]);
-	});
-
-	it("serializes checkpoint writes with background extraction for one project", async () => {
-		const events: string[] = [];
-		let releaseExtraction!: () => void;
-		const extractionBlocked = new Promise<void>((resolve) => {
-			releaseExtraction = resolve;
-		});
-		const service = {
-			search: () => [],
-			buildPrompt: () => "",
-			extractAndStoreProjectMemory: async () => {
-				events.push("extraction:start");
-				await extractionBlocked;
-				events.push("extraction:end");
-				return { entries: [], transcript: "" };
-			},
-		};
-		const projectCwd = join(root, "shared-writer-project");
-		const input = {
-			cwd: projectCwd,
-			sessionId: "session-shared-writer",
-			model: "test-model",
-			config: {} as AppConfig,
-			messages: [{ role: "user" as const, content: "checkpoint" }],
-		};
-
-		const extraction = scheduleProjectMemoryExtraction(input, service);
-		await new Promise((resolve) => setImmediate(resolve));
-		const writer = scheduleProjectCheckpointWriter(input, async () => {
-			events.push("checkpoint");
-		});
-
-		await new Promise((resolve) => setImmediate(resolve));
-		expect(events).toEqual(["extraction:start"]);
-		releaseExtraction();
-		await extraction;
-		await writer.wait();
-
-		expect(events).toEqual(["extraction:start", "extraction:end", "checkpoint"]);
 	});
 
 	it("uses isolated project memory files and reconciles them into the FTS index", () => {

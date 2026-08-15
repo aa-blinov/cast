@@ -95,7 +95,6 @@ import {
 	memoryDistillIntervalDays,
 	memoryDreamAuto,
 	memoryDreamIntervalDays,
-	memoryExtractionAuto,
 	updateSettings,
 } from "../core/settings.ts";
 import {
@@ -131,7 +130,6 @@ const MEMORY_WRITE_COMMAND_RE = /^write(?:\s+(on|off))?$/;
 const MEMORY_BUDGET_COMMAND_RE = /^budget\s+(\d+)$/;
 const MEMORY_FLOOR_COMMAND_RE = /^floor\s+(0(?:\.\d+)?|1(?:\.0)?)$/;
 const MEMORY_RECONCILE_COMMAND_RE = /^reconcile\s+(on|off)$/;
-const MEMORY_EXTRACTION_COMMAND_RE = /^extraction\s+(on|off)$/;
 const MEMORY_CHECKPOINT_FORK_COMMAND_RE = /^checkpoint\s+fork\s+(on|off)$/;
 const MEMORY_AUTO_TOGGLE_COMMAND_RE = /^(dream|distill)\s+(on|off)$/;
 const MEMORY_AUTO_INTERVAL_COMMAND_RE = /^(dream|distill)\s+interval\s+(\d+)$/;
@@ -2272,7 +2270,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					result: {
 						memoryEnabled: settings.memoryEnabled !== false,
 						memoryWriteEnabled: settings.memoryWriteEnabled !== false,
-						memoryExtractionAuto: memoryExtractionAuto(settings),
 						checkpointFork: checkpointFork(settings),
 						memoryPromptBudget: settings.memoryPromptBudget ?? 4096,
 						memorySearchScoreFloor: settings.memorySearchScoreFloor ?? 0.15,
@@ -2313,12 +2310,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				const memoryReconcileOnSearch = reconcileMatch[1] === "on";
 				updateSettings({ memoryReconcileOnSearch });
 				return { ok: true, result: { memoryReconcileOnSearch } };
-			}
-			const extractionMatch = arg.match(MEMORY_EXTRACTION_COMMAND_RE);
-			if (extractionMatch) {
-				const memoryExtractionAuto = extractionMatch[1] === "on";
-				updateSettings({ memoryExtractionAuto });
-				return { ok: true, result: { memoryExtractionAuto } };
 			}
 			const checkpointForkMatch = arg.match(MEMORY_CHECKPOINT_FORK_COMMAND_RE);
 			if (checkpointForkMatch) {
