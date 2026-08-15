@@ -283,6 +283,10 @@ describe("isRetryableStreamError", () => {
 			true,
 		);
 	});
+
+	it("retries a 408 request timeout", () => {
+		expect(isRetryableStreamError(Object.assign(new Error("request timeout"), { status: 408 }))).toBe(true);
+	});
 });
 
 describe("retryDelayMs", () => {
@@ -596,6 +600,31 @@ describe("streamChat — uncapped retry count for genuinely transient errors", (
 			},
 		} as unknown as OpenAI;
 		await expect(streamAndCollect(nonRetryable, "m", [], [], 100)).rejects.toThrow();
+	});
+
+	it("does not retry a context overflow even when wrapped in a retryable 5xx", async () => {
+		// Some gateways return 500 with a context-overflow body. InternalServerError
+		// alone is retryable, so before the fix streamChat retried it until the
+		// deadline and the loop never saw the overflow to auto-compact — it must
+		// throw through immediately instead.
+		let calls = 0;
+		const overflowAs500: OpenAI = {
+			chat: {
+				completions: {
+					create: async () => {
+						calls++;
+						throw new OpenAI.InternalServerError(
+							500,
+							{ message: "context length exceeded" },
+							"context length exceeded",
+							new Headers(),
+						);
+					},
+				},
+			},
+		} as unknown as OpenAI;
+		await expect(streamAndCollect(overflowAs500, "m", [], [], 100)).rejects.toThrow("context length exceeded");
+		expect(calls).toBe(1);
 	});
 });
 
