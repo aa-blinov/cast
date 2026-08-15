@@ -1078,7 +1078,10 @@ export async function runMemoryMaintenanceAgent(
 	input: MemoryMaintenanceAgentInput,
 ): Promise<MemoryMaintenanceAgentResult> {
 	const controller = new AbortController();
-	const timeout = setTimeout(() => controller.abort(), 120_000);
+	// Cap a single maintenance pass at 3 minutes (matches the bash default):
+	// long enough for a big project to consolidate, short enough that a hung
+	// background run can't linger.
+	const timeout = setTimeout(() => controller.abort(), 180_000);
 	timeout.unref();
 	const abortFromParent = () => controller.abort();
 	input.signal?.addEventListener("abort", abortFromParent, { once: true });
