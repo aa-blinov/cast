@@ -3784,6 +3784,29 @@ describe("runAgentLoop — compaction", () => {
 		expect(result.length).toBeLessThan(seedHistory(6).length + 4);
 	});
 
+	it("skips compaction for short-lived system agents when skipCompaction is set", async () => {
+		const events: AgentEvent[] = [];
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({ content: "turn 1 done", thinking: "", finishReason: "stop" }))
+			.mockImplementationOnce(async () => ({ content: "turn 2 done", thinking: "", finishReason: "stop" }));
+
+		const followUpQueue = new MessageQueue();
+		followUpQueue.enqueue({ role: "user", content: "keep going" });
+
+		await runAgentLoop([...seedHistory(6), { role: "user", content: "start" }], {
+			config: tinyBudgetConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "test",
+			followUpQueue,
+			skipCompaction: true,
+			lastPromptTokens: 5000,
+			onEvent: (e) => events.push(e),
+		});
+
+		expect(events.some((e) => e.type === "compaction")).toBe(false);
+	});
+
 	it("injects the full memory prompt only at a checkpoint rebuild", async () => {
 		const realHome = process.env.HOME;
 		const fakeHome = mkdtempSync(join(tmpdir(), "cast-memory-rebuild-home-"));

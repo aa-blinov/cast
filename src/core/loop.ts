@@ -765,6 +765,10 @@ export interface LoopConfig {
 	/** promptTokens from the most recent API response — used by shouldCompact
 	 * as the authoritative context size instead of character-based estimation. */
 	lastPromptTokens?: number;
+	/** Suppress automatic compaction in this loop. Used by short-lived system
+	 * agents (checkpoint writer): a self-compacted maintenance session can lose
+	 * the thread mid-repair, so it should fail explicitly instead. */
+	skipCompaction?: boolean;
 	/** Last durable checkpoint boundary in the current message snapshot. */
 	checkpointBoundary?: number;
 	/** Checkpoint writer prefix-fork mode; false uses only the post-checkpoint delta. */
@@ -1166,6 +1170,9 @@ async function runCheckpointWriter(input: MemoryCheckpointWriterInput): Promise<
 					model: input.model,
 					modelProvider: input.providerOverride,
 					cwd: input.cwd,
+					// A maintenance session must never self-compact: the checkpoint
+					// writer's context is small and a compaction mid-repair derails it.
+					skipCompaction: true,
 					systemPrompt: forkMode
 						? (actorFork.systemPrompt ?? CHECKPOINT_WRITER_SYSTEM_PROMPT)
 						: CHECKPOINT_WRITER_SYSTEM_PROMPT,
@@ -2071,8 +2078,8 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 			// Sync before compaction so it summarizes against the right system prompt.
 			syncSystemPrompt();
 
-			// Compaction
-			if (shouldCompact(messages, config, loopConfig.lastPromptTokens)) {
+			// Compaction (suppressed for short-lived system agents)
+			if (!loopConfig.skipCompaction && shouldCompact(messages, config, loopConfig.lastPromptTokens)) {
 				// biome-ignore lint/performance/noAwaitInLoops: sequential agent turn loop
 				const result = await performCompaction(messages, config, currentModel, signal, loopConfig, onEvent);
 				if (result.compacted) appendMemoryRebuildBoundary();
@@ -2221,7 +2228,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 						// `overflowCompacted` branch below try LLM-based compaction.
 						toolResultTrimmed = true;
 					}
-					if (isContextOverflow(err) && !overflowCompacted) {
+					if (isContextOverflow(err) && !overflowCompacted && !loopConfig.skipCompaction) {
 						// Context overflow — compact and retry the turn instead of
 						// surfacing a raw error. Only once per turn to prevent infinite
 						// loops when even compacted context is too large.
@@ -2444,7 +2451,12 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				// no fresh usage reading yet at this point, so fall back to the
 				// char-based estimate — same threshold math as shouldCompact, just
 				// fed an estimate instead of a measured value.
-				if (toolCalls && toolCalls.length > 0 && shouldCompact(messages, config, estimateTokens(messages))) {
+				if (
+					toolCalls &&
+					toolCalls.length > 0 &&
+					!loopConfig.skipCompaction &&
+					shouldCompact(messages, config, estimateTokens(messages))
+				) {
 					const result = await performCompaction(messages, config, currentModel, signal, loopConfig, onEvent);
 					if (result.compacted) appendMemoryRebuildBoundary();
 					if (!result.compacted && result.error) {
