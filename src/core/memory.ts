@@ -339,8 +339,17 @@ const memoryAutoSpawnTimes = new Map<string, number>();
 const automaticMemoryMaintenanceTasks = new Set<Promise<AutomaticMemoryMaintenanceResult[]>>();
 let nextCheckpointWriterId = 0;
 
-function checkpointWriterKey(cwd: string, sessionId: string): string {
-	return `${projectIdForCwd(cwd)}:${sessionId}`;
+function checkpointWriterKey(cwd: string, _sessionId: string): string {
+	// Serialize writers per PROJECT, not per session. Two concurrent sessions
+	// on the same repo can both cross a checkpoint threshold, and both writers
+	// would otherwise edit the same MEMORY.md with no mutual exclusion — the
+	// writer edits files with the write tool, while the project memory lease
+	// only guards the structured dream/distill/reconcile merges. A project-
+	// scoped key makes the second session's writer queue as `pending` until
+	// the first finishes. The sessionId is deliberately ignored here;
+	// per-session state (the checkpoint watermark, the fork boundary) lives
+	// inside each writer request/run, not in this key.
+	return projectIdForCwd(cwd);
 }
 
 function createCheckpointWriterRequest(
