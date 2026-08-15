@@ -141,7 +141,7 @@ export function getToolDefinitions(
 					type: "object",
 					properties: {
 						query: { type: "string", description: "One to three distinctive search terms" },
-						limit: { type: "number", description: "Maximum results, default 8" },
+						limit: { type: "number", description: "Maximum results, default 10" },
 					},
 					required: ["query"],
 				},

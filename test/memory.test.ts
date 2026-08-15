@@ -233,9 +233,9 @@ describe("project memory", () => {
 			"- durable fact",
 		].join("\n");
 		const result = readMemorySectionsWithinBudget(content, 40);
-		expect(result).toContain("## Rules");
-		expect(result).toContain("## Architecture decisions");
-		expect(result).toContain("## Discovered durable knowledge");
+		expect(result.text).toContain("## Rules");
+		expect(result.text).toContain("## Architecture decisions");
+		expect(result.text).toContain("## Discovered durable knowledge");
 	});
 
 	it("does not retrieve expired memory and keeps confidence metadata", () => {
