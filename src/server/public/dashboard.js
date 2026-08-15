@@ -114,6 +114,7 @@ export function Dashboard({ onClose }) {
 	const [perf, setPerf] = useState({ overview: [], series: [] });
 	const [reliability, setReliability] = useState(null);
 	const [system, setSystem] = useState(null);
+	const [memory, setMemory] = useState(null);
 	const [recent, setRecent] = useState({ rows: [], total: 0, page: 0, pageSize: 10 });
 	const [endpointPage, setEndpointPage] = useState({ page: 0, pageSize: 10 });
 	const [loading, setLoading] = useState(true);
@@ -169,13 +170,14 @@ export function Dashboard({ onClose }) {
 		setLoading(true);
 		setError(null);
 		try {
-			const [ov, se, eo, es, rel, sys] = await Promise.all([
+			const [ov, se, eo, es, rel, sys, mem] = await Promise.all([
 				api("GET", `/api/telemetry/overview?since=${hours}`),
 				api("GET", `/api/telemetry/series?since=${hours}&resolution=${resolution}`),
 				api("GET", `/api/telemetry/endpoints?since=${hours}`),
 				api("GET", `/api/telemetry/endpoint-series?since=${hours}&resolution=${resolution}`),
 				api("GET", `/api/telemetry/reliability?since=${hours}`),
 				api("GET", `/api/telemetry/system?since=${hours}`),
+				api("GET", `/api/telemetry/memory?since=${hours}`),
 			]);
 			if (req !== loadRequestIdRef.current) return;
 			setLlm({
@@ -193,6 +195,7 @@ export function Dashboard({ onClose }) {
 			});
 			setReliability(rel ?? null);
 			setSystem(sys ?? null);
+			setMemory(mem ?? null);
 			setEndpointPage((p) => ({ ...p, page: 0 }));
 		} catch (err) {
 			if (req === loadRequestIdRef.current) setError(err.message);
@@ -237,6 +240,8 @@ export function Dashboard({ onClose }) {
 		// and made them look like they didn't switch.
 		if (tab === "reliability" && !reliability) return;
 		if (tab === "system" && !system) return;
+		// Memory tab is tables only (no chart).
+		if (tab === "memory") return;
 		let cancelled = false;
 		loadChart()
 			.then((Chart) => {
@@ -420,6 +425,7 @@ export function Dashboard({ onClose }) {
 					<span class="dash-title">Dashboard</span>
 					<div class="dash-tabs">
 						<button class="modal-btn${tab === "llm" ? " modal-btn-primary" : ""}" onClick=${() => setTab("llm")}>LLM</button>
+						<button class="modal-btn${tab === "memory" ? " modal-btn-primary" : ""}" onClick=${() => setTab("memory")}>Memory</button>
 						<button class="modal-btn${tab === "perf" ? " modal-btn-primary" : ""}" onClick=${() => setTab("perf")}>Performance</button>
 						<button class="modal-btn${tab === "reliability" ? " modal-btn-primary" : ""}" onClick=${() => setTab("reliability")}>Reliability</button>
 						<button class="modal-btn${tab === "system" ? " modal-btn-primary" : ""}" onClick=${() => setTab("system")}>System</button>
@@ -520,6 +526,27 @@ export function Dashboard({ onClose }) {
 							onPageSize=${(s) => setEndpointPage({ page: 0, pageSize: s })}
 							onPage=${(p) => setEndpointPage((prev) => ({ ...prev, page: p }))}
 						/>
+					</div>
+				`
+					: tab === "memory"
+						? html`
+					<div class="dash-kpis">
+						<${KpiCard} label="Search calls" value=${fmtTokens(memory?.toolCalls?.count ?? 0)} sub=${rangeLabel} tone=${(memory?.toolCalls?.errors ?? 0) > 0 ? "err" : ""} />
+						<${KpiCard} label="Search errors" value=${fmtTokens(memory?.toolCalls?.errors ?? 0)} tone=${(memory?.toolCalls?.errors ?? 0) > 0 ? "err" : ""} />
+						<${KpiCard} label="Avg search latency" value=${fmtMs(memory?.toolCalls?.avgLatencyMs ?? null)} />
+						<${KpiCard} label="Maintenance runs" value=${fmtTokens(memory?.maintenance?.runs?.length ? memory.maintenance.runs.reduce((a, r) => a + r.count, 0) : 0)} />
+						<${KpiCard} label="Entries stored" value=${fmtTokens(memory?.maintenance?.entriesStored ?? 0)} sub="dream + distill writes" />
+						<${KpiCard} label="Maintenance tokens" value=${fmtTokens(memory?.maintenance?.usageTokens ?? 0)} />
+					</div>
+					<div class="dash-section-title">Automatic maintenance runs</div>
+					<div class="dash-table-wrap">
+						<table class="dash-table">
+							<thead><tr><th>Kind</th><th>Status</th><th>Runs</th></tr></thead>
+							<tbody>
+								${!memory || memory.maintenance.runs.length === 0 ? html`<tr><td colspan="3" class="dash-empty">No automatic memory runs in this window. Dream/distill run on a daily interval.</td></tr>` : null}
+								${(memory?.maintenance?.runs ?? []).map((r) => html`<tr><td>${r.kind}</td><td>${r.status}</td><td>${r.count}</td></tr>`)}
+							</tbody>
+						</table>
 					</div>
 				`
 					: tab === "reliability"

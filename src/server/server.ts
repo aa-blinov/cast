@@ -42,6 +42,8 @@ import {
 	queryFileEdits,
 	queryLlmAvgLatency,
 	queryLlmLatencyPercentiles,
+	queryMemoryMaintenance,
+	queryMemoryToolUsage,
 	queryRecentLlmRequests,
 	queryReliabilityOverview,
 	queryTokensPerSecond,
@@ -686,6 +688,17 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			sessions: querySessionAnalytics(sinceMs),
 			turns: queryTurnMetrics(sinceMs),
 			fileEdits: queryFileEdits(sinceMs),
+		});
+	});
+
+	route("GET", "/api/telemetry/memory", (req, res) => {
+		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+		const hours = Number(url.searchParams.get("since")) || 24;
+		const sinceMs = Date.now() - hours * 60 * 60 * 1000;
+		json(res, {
+			sinceMs,
+			toolCalls: queryMemoryToolUsage(sinceMs),
+			maintenance: queryMemoryMaintenance(sinceMs),
 		});
 	});
 

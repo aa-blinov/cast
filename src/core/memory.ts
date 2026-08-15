@@ -63,6 +63,7 @@ import {
 import type { Skill } from "./skills.ts";
 import type { SshHost } from "./ssh.ts";
 import type { SubagentPrompt } from "./subagents.ts";
+import { recordMemoryMaintenance } from "./telemetry.ts";
 import type { ToolResult } from "./tools/shared.ts";
 import type { BashBackgroundDeps, ConfirmBash, ConfirmWrite } from "./tools.ts";
 
@@ -1521,6 +1522,7 @@ export async function runAutomaticMemoryMaintenanceRun(
 		: agentActorRegistry.spawn(actorSpec, input.signal, runId);
 	if (!actor) throw new Error(`Automatic ${kind} run ${options.runId} is no longer recoverable`);
 	let maintenanceMessages: Message[] | undefined;
+	let maintenanceResult: MemoryDreamResult | MemoryDistillResult | undefined;
 	try {
 		await actor.run(async (signal) => {
 			const maintenanceInput: MemoryMaintenanceInput = {
@@ -1536,12 +1538,24 @@ export async function runAutomaticMemoryMaintenanceRun(
 						}
 					: undefined,
 			};
-			if (kind === "dream") await dreamProjectMemory(maintenanceInput);
-			else await distillProjectMemory(maintenanceInput);
+			if (kind === "dream") maintenanceResult = await dreamProjectMemory(maintenanceInput);
+			else maintenanceResult = await distillProjectMemory(maintenanceInput);
 		});
 		if (maintenanceMessages) backgroundSession.messages = structuredClone(maintenanceMessages);
 		else appendMessage(backgroundSession, { role: "assistant", content: `Automatic ${kind} maintenance completed.` });
 		saveSession(backgroundSession);
+		const usage = maintenanceResult?.usage;
+		recordMemoryMaintenance({
+			sessionId: parentSessionId,
+			kind,
+			status: "completed",
+			entriesStored:
+				kind === "dream"
+					? ((maintenanceResult as MemoryDreamResult | undefined)?.stored ?? 0)
+					: ((maintenanceResult as MemoryDistillResult | undefined)?.artifacts.length ?? 0),
+			entriesRemoved: kind === "dream" ? (maintenanceResult as MemoryDreamResult | undefined)?.removed : undefined,
+			usageTokens: usage?.totalTokens,
+		});
 		return { kind, status: "completed" };
 	} catch (error) {
 		const cancelled = input.signal?.aborted || actor.snapshot().status === "cancelled";
@@ -1553,6 +1567,7 @@ export async function runAutomaticMemoryMaintenanceRun(
 		appendSessionEvent(backgroundSession.id, memoryMaintenanceEventType(kind, cancelled ? "cancelled" : "failed"), {
 			parentSessionId,
 		});
+		recordMemoryMaintenance({ sessionId: parentSessionId, kind, status: "failed" });
 		input.onWarning?.(`Automatic ${kind} failed: ${error instanceof Error ? error.message : String(error)}`);
 		return { kind, status: "failed" };
 	}
