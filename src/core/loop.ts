@@ -2374,6 +2374,12 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				// `content: null` with no tool_calls, a shape providers reject
 				// (400) on every following turn once it's in the session.
 				const hasToolCalls = Boolean(completion.toolCalls && completion.toolCalls.length > 0);
+				// Reaching here with nothing to show means the empty-turn retry
+				// above already fired and the model still produced nothing — make
+				// sure "(no response)" is never committed without explanation.
+				if (!completion.content && !hasToolCalls && !completion.refusal) {
+					onWarning?.("The model returned an empty response again — showing the empty turn.");
+				}
 				const assistantMsg: Message & { reasoning_content?: string } = {
 					role: "assistant",
 					content: completion.content || (hasToolCalls ? null : EMPTY_ASSISTANT_PLACEHOLDER),
