@@ -565,7 +565,9 @@
 .dash-title { font-size: 0.9rem; font-weight: 600; color: var(--text); }
 .dash-tabs { display: flex; gap: 4px; margin-left: 16px; }
 .dash-tabs .modal-btn { min-width: 88px; }
-.dash-range { display: flex; gap: 4px; margin-left: auto; }
+/* Date pickers sit with the tabs (left side); the close button stays pinned
+   to the far right via the header's space-between. */
+.dash-range { display: flex; gap: 4px; margin-left: 16px; }
 .dash-range .modal-btn { min-width: 44px; }
 .dash-body {
 	flex: 1;
