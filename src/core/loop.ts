@@ -767,7 +767,7 @@ export interface LoopConfig {
 	lastPromptTokens?: number;
 	/** Last durable checkpoint boundary in the current message snapshot. */
 	checkpointBoundary?: number;
-	/** MiMo-compatible checkpoint writer mode; false uses only the post-checkpoint delta. */
+	/** Checkpoint writer prefix-fork mode; false uses only the post-checkpoint delta. */
 	checkpointFork?: boolean;
 	/** Override the checkpoint writer trigger points (% of window). Falls back to the setting, then the window defaults. */
 	checkpointThresholds?: number[];
@@ -1377,19 +1377,19 @@ agentActorRegistry.registerRecoveryHandler("checkpoint-writer", recoverCheckpoin
 agentActorRegistry.registerRecoveryHandler("memory-maintenance", recoverMemoryMaintenance);
 
 // In-process record of which checkpoint thresholds each session already fired.
-// Mirrors MiMo's per-session crossed-threshold state; a process restart simply
-// re-fires the first uncrossed threshold, which is idempotent for the writer.
+// A process restart simply re-fires the first uncrossed threshold, which is
+// idempotent for the writer.
 const crossedCheckpointThresholds = new Map<string, Set<number>>();
 
-// Token safety buffer reserved at the end of the window (MiMo parity): no
-// checkpoint threshold is allowed to fire past window - reserved, because past
-// that point there is no room left in the window for the writer's own turn.
+// Token safety buffer reserved at the end of the window: no checkpoint
+// threshold is allowed to fire past window - reserved, because past that point
+// there is no room left in the window for the writer's own turn.
 const CHECKPOINT_RESERVED = 13_000;
 
 /**
- * MiMo-style checkpoint trigger ladder: a writer fires each time the used
- * context crosses the next percentage of the model window, so a fresh
- * checkpoint.md almost always exists when compaction needs to rebuild from it.
+ * Checkpoint trigger ladder: a writer fires each time the used context crosses
+ * the next percentage of the model window, so a fresh checkpoint.md almost
+ * always exists when compaction needs to rebuild from it.
  */
 export function defaultCheckpointThresholds(contextWindow: number): number[] {
 	if (contextWindow < 25_000) return [];

@@ -141,7 +141,7 @@ describe("project memory", () => {
 		expect(rankRows.map((row) => row.score)).toEqual(bm25Rows.map((row) => row.score));
 	});
 
-	it("supports Mimo-compatible project and session memory scopes", () => {
+	it("supports project and session memory scopes", () => {
 		const projectCwd = join(root, "scoped-memory-project");
 		storeProjectMemory(projectCwd, "session-a", "turn-a", [
 			{ content: "The project uses a single durable writer.", type: "architecture" },
@@ -188,7 +188,7 @@ describe("project memory", () => {
 		expect(prompt).not.toContain("Vitest for isolated");
 	});
 
-	it("renders a MiMo-style rebuild context with sections, framing, and a tail reminder", () => {
+	it("renders a section-based rebuild context with framing and a tail reminder", () => {
 		const projectCwd = join(root, "rebuild-context-project");
 		const session = createSession("test-model", projectCwd);
 		saveSession(session);

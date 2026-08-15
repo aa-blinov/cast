@@ -98,7 +98,7 @@ describe("checkpoint validation", () => {
 		expect(prompt).toContain("Read the files you just wrote");
 	});
 
-	it("matches MiMo semantic checks without rejecting the empty template", () => {
+	it("matches the reference semantic checks without rejecting the empty template", () => {
 		const filler = validCheckpoint.replace(
 			"## §2 Next concrete action\n(none yet)",
 			"## §2 Next concrete action\ncontinue",

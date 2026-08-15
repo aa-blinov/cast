@@ -1087,7 +1087,7 @@ All notable user-facing changes to cast, newest first.
 
 ### Added
 
-- Shared prompts adapted from MiMoCode: Doing tasks, Executing with care, Tone and style.
+- Shared prompts adapted from an upstream terminal agent: Doing tasks, Executing with care, Tone and style.
 - Cast context prompt — all personas now know about cast-specific commands, rules, skills, and plan mode.
 
 ### Fixed
@@ -1099,7 +1099,7 @@ All notable user-facing changes to cast, newest first.
 
 ### Added
 
-- New builtin skills from MiMo Code:
+- New builtin skills from an upstream terminal agent:
   - `arxiv` — search, read, cite academic papers from arXiv
   - `deep-research` — parallel sub-agent research with cited reports
   - `frontend-design` — UI/UX design guidance

@@ -118,7 +118,7 @@ export interface MemorySearchResult {
 }
 
 export interface MemorySearchOptions {
-	/** Mimo-compatible logical scope. Cast currently indexes project and session memory. */
+	/** Logical search scope. Cast currently indexes project and session memory. */
 	scope?: "global" | "projects" | "sessions" | "cc";
 	scopeId?: string;
 	type?: string;
@@ -290,7 +290,7 @@ export interface MemoryCheckpointWriterInput {
 	providerOverride?: ProviderCredentials;
 	/** Last message included in the durable checkpoint prefix; -1 means no prior boundary. */
 	checkpointBoundary?: number;
-	/** MiMo-compatible mode: true forks the full prefix, false sends only the post-checkpoint delta. */
+	/** Prefix-fork mode: true forks the full prefix, false sends only the post-checkpoint delta. */
 	checkpointFork?: boolean;
 }
 
@@ -934,8 +934,8 @@ function fileMemoryContext(
 		})
 		.filter(Boolean)
 		.join("\n\n");
-	// Mirrors MiMo's readBudgeted truncation hint: the model must know the
-	// injected memory context is partial so it can Read the file for the rest.
+	// The model must know the injected memory context is partial so it can Read
+	// the file for the rest.
 	return truncated && parts
 		? `${parts}\n\n⚠️ Memory file context was truncated to fit the token budget; Read the files for the full content.`
 		: parts;
@@ -1547,7 +1547,7 @@ export async function runAutomaticMemoryMaintenanceRun(
 }
 
 /**
- * Starts Mimo-style maintenance on a new top-level session without delaying
+ * Starts automatic maintenance on a new top-level session without delaying
  * the user's turn. The caller should invoke this with `void`; awaiting it is
  * useful in tests and for graceful shutdown orchestration.
  */
@@ -2297,9 +2297,9 @@ function memoryPriorityComparator(a: MemorySearchResult, b: MemorySearchResult):
 	return bPriority - aPriority || b.score - a.score || b.updatedAt.localeCompare(a.updatedAt);
 }
 
-// Per-section token caps for the rebuild context, mirroring MiMo's
-// checkpoint.push_caps defaults. Each block is bounded independently so a huge
-// notes file cannot starve the checkpoint or project memory.
+// Per-section token caps for the rebuild context. Each block is bounded
+// independently so a huge notes file cannot starve the checkpoint or project
+// memory.
 const REBUILD_CHECKPOINT_CAP = 11_000;
 const REBUILD_MEMORY_CAP = 10_000;
 const REBUILD_NOTES_CAP = 6_000;
@@ -2355,7 +2355,7 @@ function memoryKeysIndex(sessionId: string, projectId: string): string[] {
 		.slice(0, 20);
 }
 
-/** Pick a resume nudge based on how the preserved tail ends (MiMo parity). */
+/** Pick a resume nudge based on how the preserved tail ends. */
 function tailAwareReminder(message: Message | undefined): string {
 	if (!message) return "";
 	if (message.role === "assistant") {
@@ -2369,11 +2369,11 @@ function tailAwareReminder(message: Message | undefined): string {
 }
 
 /**
- * The context injected at a checkpoint rebuild (MiMo-style): each durable
- * artifact as its own bounded section, plus an explicit continuation framing
- * ("resume directly, do not recap") and a tail-aware reminder. This is what
- * tells the model the preserved messages below are real history, not a new
- * user request, and to pick the task back up mid-stream.
+ * The context injected at a checkpoint rebuild: each durable artifact as its
+ * own bounded section, plus an explicit continuation framing ("resume
+ * directly, do not recap") and a tail-aware reminder. This is what tells the
+ * model the preserved messages below are real history, not a new user request,
+ * and to pick the task back up mid-stream.
  */
 function buildMemoryRebuildContext(cwd: string, sessionId: string, options: MemoryPromptOptions = {}): string {
 	const projectId = projectIdForCwd(cwd);

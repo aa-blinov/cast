@@ -173,7 +173,7 @@ export interface Settings {
 	memoryDistillIntervalDays?: number;
 	/** Use the parent's full prompt prefix for checkpoint writers; false uses only the post-checkpoint delta. */
 	checkpointFork?: boolean;
-	/** Checkpoint writer trigger points as percentages of the context window (MiMo-style ladder). */
+	/** Checkpoint writer trigger points as percentages of the context window (window ladder). */
 	checkpointThresholds?: number[];
 	/** Token safety buffer reserved at the end of the window; thresholds are clamped to window - this. */
 	checkpointReserved?: number;

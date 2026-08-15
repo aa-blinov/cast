@@ -682,7 +682,7 @@ export function saveSession(session: SessionState): void {
 	});
 }
 
-/** Return the message id covered by the last successful checkpoint (MiMo semantics). */
+/** Return the message id covered by the last successful checkpoint. */
 export function getCheckpointWatermark(sessionId: string): string | undefined {
 	const row = getDb().prepare("SELECT checkpoint_watermark_message_id FROM sessions WHERE id = ?").get(sessionId) as
 		| { checkpoint_watermark_message_id: string | null }
@@ -738,8 +738,8 @@ function watermarkMessageSeq(sessionId: string): number | undefined {
  * Commit the message covered by a completed writer. The row lookup and
  * monotonic update share one immediate transaction so a stale writer cannot
  * move the boundary backwards or claim success for an unpersisted snapshot.
- * The watermark is an immutable message id (MiMo semantics), so compaction
- * seq shifts never invalidate it.
+ * The watermark is an immutable message id, so compaction seq shifts never
+ * invalidate it.
  */
 export function commitCheckpointWatermark(sessionId: string, message: Message): boolean {
 	const db = getDb();
@@ -875,7 +875,7 @@ function recordCompactionInTransaction(
 			const shiftOne = db.prepare("UPDATE messages SET seq = seq + 1 WHERE session_id = ? AND seq = ?");
 			for (const row of shiftRows) shiftOne.run(session.id, row.seq);
 			// The watermark references an immutable message_id, so a seq shift
-			// does not move it — no adjustment needed here (MiMo semantics).
+			// does not move it — no adjustment needed here.
 			for (const m of compacted) {
 				if (m === marker) continue;
 				const s = messageSeq.get(m);
