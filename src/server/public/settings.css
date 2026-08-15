@@ -649,8 +649,9 @@
 	background: var(--bg-raised);
 	border: 1px solid var(--border);
 	border-radius: var(--radius-sm);
-	overflow: auto;
-	max-height: 300px;
+	/* No nested scroll: the single .dash-body scroll region handles long
+	   tables; the sticky <th> header stays pinned to it while scrolling. */
+	overflow: visible;
 }
 .dash-table {
 	width: 100%;
