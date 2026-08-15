@@ -2126,10 +2126,17 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				// after tool results and retry. The tool result text already
 				// contains "[Image: ...]" so the agent still knows an image was
 				// there — it just can't see it.
-				let completion: Awaited<ReturnType<typeof streamAndCollect>> | null = null;
 				// Accumulate partial content so aborted/disconnected turns can be
 				// persisted into session history (the catch block can't read
-				// streamAndCollect's locals after it throws).
+				// streamAndCollect's locals after it throws). Reset per completion
+				// attempt: a multi-message run (steering/follow-up turns processed
+				// by the same runAgentLoop call) otherwise leaves earlier turns'
+				// already-committed content in the accumulator, and an abort mid-
+				// later-stream would persist the whole concatenation as the
+				// "partial assistant", duplicating earlier turns in history.
+				partialContent = "";
+				partialThinking = "";
+				let completion: Awaited<ReturnType<typeof streamAndCollect>> | null = null;
 				try {
 					// biome-ignore lint/performance/noAwaitInLoops: streaming requires sequential processing
 					completion = await streamAndCollect(
