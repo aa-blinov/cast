@@ -15,6 +15,7 @@ import {
 	queryTelemetrySeries,
 	queryTokensPerSecond,
 	queryToolUsage,
+	queryTurnMetrics,
 	recordApiRequest,
 	recordLlmRequest,
 	recordToolCall,
@@ -191,5 +192,33 @@ describe("llm telemetry", () => {
 		const reliability = queryReliabilityOverview(0);
 		expect(reliability.errorTypes.some((t) => t.errorType === "doom-loop" && t.count === 1)).toBe(true);
 		expect(reliability.errorTypes.some((t) => t.errorType === "empty-response" && t.count === 1)).toBe(true);
+	});
+
+	it("groups completions and tool calls into per-turn aggregates", () => {
+		// Turn A: two completions (spans 4ms), two tool calls. Turn B: two
+		// completions (spans 2ms), no tools. Untagged rows (memory maintenance,
+		// etc.) must not count as turns.
+		const now = Date.now();
+		recordLlmRequest({ provider: "p", model: "m", kind: "main", turnId: "turn-a", promptTokens: 100, completionTokens: 50 });
+		recordToolCall("s1", "bash", false, 10, "turn-a");
+		recordLlmRequest({ provider: "p", model: "m", kind: "main", turnId: "turn-a", promptTokens: 200, completionTokens: 100 });
+		recordToolCall("s1", "write", false, 5, "turn-a");
+		recordLlmRequest({ provider: "p", model: "m", kind: "main", turnId: "turn-b", promptTokens: 50, completionTokens: 20 });
+		recordLlmRequest({ provider: "p", model: "m", kind: "main", turnId: "turn-b", promptTokens: 60, completionTokens: 20 });
+		recordLlmRequest({ provider: "p", model: "m", kind: "main", promptTokens: 10 });
+		getDb().prepare("UPDATE llm_requests SET ts = ? WHERE turn_id='turn-a' AND prompt_tokens = 100").run(now - 10);
+		getDb().prepare("UPDATE llm_requests SET ts = ? WHERE turn_id='turn-a' AND prompt_tokens = 200").run(now - 6);
+		getDb().prepare("UPDATE llm_requests SET ts = ? WHERE turn_id='turn-b' AND prompt_tokens = 50").run(now - 2);
+		getDb().prepare("UPDATE llm_requests SET ts = ? WHERE turn_id='turn-b' AND prompt_tokens = 60").run(now);
+		getDb().prepare("UPDATE llm_requests SET ts = ? WHERE turn_id IS NULL").run(now);
+
+		const t = queryTurnMetrics(now - 60 * 60 * 1000);
+		expect(t.turns).toBe(2);
+		// 2 tools for turn-a, 0 for turn-b → avg 1.0.
+		expect(t.avgToolCallsPerTurn).toBe(1);
+		// turn-a 450 tokens, turn-b 150 → avg 300.
+		expect(t.avgTokensPerTurn).toBe(300);
+		// turn-a spans 4ms, turn-b 2ms → avg 3ms.
+		expect(t.avgDurationMs).toBe(3);
 	});
 });

@@ -231,6 +231,9 @@ export interface WebAgentSession {
 	 * messages are checked as well, so a lost HTTP response can be retried
 	 * without creating a duplicate turn. */
 	acceptedClientMessageIds: Set<string>;
+	/** The clientMessageId of the turn currently being processed — telemetry
+	 * groups llm_requests and tool_calls by it (turn-level aggregates). */
+	currentClientMessageId?: string;
 	/** Rebuilt whenever persona or model changes — see `computeSystemPrompt`. */
 	systemPrompt: string;
 	/** Ephemeral, like the TUI's `lastTurnUsage` (useAgentSession.ts) — not
@@ -1233,6 +1236,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		const lease = ws.runner.startRun(ac);
 		const automaticMemoryMaintenance = ws.session.messages.length === 0;
 		const automaticMemoryMessages = ws.session.messages.slice();
+		ws.currentClientMessageId = clientMessageId;
 		ws.status = "running";
 		ws.error = null;
 		ws.turnStartedAt = Date.now();
@@ -1247,6 +1251,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			ws.runner.endRun(lease);
 			ws.activeStream = undefined;
 			ws.turnStartedAt = undefined;
+			ws.currentClientMessageId = undefined;
 			// Undo the early id claim so a retry of the same message can be
 			// delivered on the next attempt (the message was never persisted).
 			if (clientMessageId) ws.acceptedClientMessageIds.delete(clientMessageId);
@@ -1499,7 +1504,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 						const t = event as { id: string; name: string; result: { isError?: boolean } };
 						const started = toolStartTimes.get(t.id);
 						toolStartTimes.delete(t.id);
-						recordToolCall(ws.id, t.name, t.result?.isError === true, started !== undefined ? Date.now() - started : undefined);
+						recordToolCall(ws.id, t.name, t.result?.isError === true, started !== undefined ? Date.now() - started : undefined, ws.currentClientMessageId);
 						appendSessionEvent(sessionId, event.type, event);
 						break;
 					}
@@ -1512,6 +1517,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 							kind: "error",
 							error: `doom loop: ${d.tool} x${d.attempts}`,
 							errorType: "doom-loop",
+							turnId: ws.currentClientMessageId,
 						});
 						appendSessionEvent(sessionId, event.type, event);
 						break;
@@ -1611,6 +1617,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 							kind: "error",
 							error: "empty response",
 							errorType: "empty-response",
+							turnId: ws.currentClientMessageId,
 						});
 					}
 					thinkingByCompletion.push(event.thinking ?? "");
@@ -1644,6 +1651,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 						latencyMs: event.generationMs,
 						ttftMs: event.ttftMs,
 						contextWindow: config.contextWindow,
+						turnId: ws.currentClientMessageId,
 					});
 					if (event.background) {
 						saveSession(ws.session);

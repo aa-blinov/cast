@@ -613,6 +613,20 @@ CREATE INDEX IF NOT EXISTS idx_compactions_ts ON compactions(ts);
 			}
 		},
 	},
+	{
+		version: 24,
+		name: "turn-id",
+		up: (db) => {
+			// One user request ("turn") spans several LLM completions and tool
+			// calls; clientMessageId groups them for per-turn aggregates.
+			if (!columnExists(db, "llm_requests", "turn_id")) {
+				db.exec("ALTER TABLE llm_requests ADD COLUMN turn_id TEXT");
+			}
+			if (!columnExists(db, "tool_calls", "turn_id")) {
+				db.exec("ALTER TABLE tool_calls ADD COLUMN turn_id TEXT");
+			}
+		},
+	},
 ];
 
 const MIGRATION_TABLE_SCHEMA = `

@@ -49,6 +49,7 @@ import {
 	queryTelemetryOverview,
 	queryTelemetrySeries,
 	queryToolUsage,
+	queryTurnMetrics,
 	recordApiRequest,
 } from "../core/telemetry.ts";
 import { ensureSessionWorktree } from "../core/worktree.ts";
@@ -683,6 +684,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			context: queryContextUtilization(sinceMs),
 			tools: queryToolUsage(sinceMs),
 			sessions: querySessionAnalytics(sinceMs),
+			turns: queryTurnMetrics(sinceMs),
 			fileEdits: queryFileEdits(sinceMs),
 		});
 	});

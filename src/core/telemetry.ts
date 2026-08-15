@@ -42,6 +42,8 @@ export interface LlmRequestRecord {
 	errorType?: LlmErrorType;
 	/** Model context window (tokens) — for context-utilization metrics. */
 	contextWindow?: number;
+	/** One user request spans several completions; clientMessageId groups them. */
+	turnId?: string;
 }
 
 // Classify error/retry messages into a small taxonomy for the reliability tab.
@@ -79,8 +81,8 @@ function getInsertStmt(): StatementSync {
 		insertStmt = db.prepare(
 			`INSERT INTO llm_requests
 			 (ts, session_id, provider, model, kind, prompt_tokens, completion_tokens,
-			  cache_read_tokens, cache_write_tokens, cost, latency_ms, ttft_ms, retries, error, error_type, context_window)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			  cache_read_tokens, cache_write_tokens, cost, latency_ms, ttft_ms, retries, error, error_type, context_window, turn_id)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		);
 		preparedDb = db;
 	}
@@ -116,6 +118,7 @@ export function recordLlmRequest(record: LlmRequestRecord): void {
 		record.error ?? null,
 		record.errorType ?? (record.error ? classifyLlmError(record.error) : null),
 		record.contextWindow ?? null,
+		record.turnId ?? null,
 	);
 	prune();
 }
@@ -128,14 +131,22 @@ let toolPreparedDb: DatabaseSync | null = null;
 function getToolInsertStmt(): StatementSync {
 	const db = getDb();
 	if (!toolInsertStmt || toolPreparedDb !== db) {
-		toolInsertStmt = db.prepare("INSERT INTO tool_calls (ts, session_id, tool_name, is_error, latency_ms) VALUES (?, ?, ?, ?, ?)");
+		toolInsertStmt = db.prepare(
+			"INSERT INTO tool_calls (ts, session_id, tool_name, is_error, latency_ms, turn_id) VALUES (?, ?, ?, ?, ?, ?)",
+		);
 		toolPreparedDb = db;
 	}
 	return toolInsertStmt;
 }
 
-export function recordToolCall(sessionId: string | undefined, toolName: string, isError: boolean, latencyMs?: number): void {
-	getToolInsertStmt().run(Date.now(), sessionId ?? null, toolName, isError ? 1 : 0, latencyMs ?? null);
+export function recordToolCall(
+	sessionId: string | undefined,
+	toolName: string,
+	isError: boolean,
+	latencyMs?: number,
+	turnId?: string,
+): void {
+	getToolInsertStmt().run(Date.now(), sessionId ?? null, toolName, isError ? 1 : 0, latencyMs ?? null, turnId ?? null);
 }
 
 // ── Compactions ─────────────────────────────────────────────────────────
@@ -565,12 +576,14 @@ export function queryToolUsage(sinceMs: number, limit = 15): ToolUsageRow[] {
 			 GROUP BY tool_name ORDER BY count DESC LIMIT ?`,
 		)
 		.all(sinceMs, limit);
-	return (rows as Array<{ tool_name: string; count: number; errors: number; avg_latency: number | null }>).map((r) => ({
-		toolName: r.tool_name,
-		count: r.count,
-		errors: r.errors,
-		avgLatencyMs: r.avg_latency != null ? Math.round(r.avg_latency) : null,
-	}));
+	return (rows as Array<{ tool_name: string; count: number; errors: number; avg_latency: number | null }>).map(
+		(r) => ({
+			toolName: r.tool_name,
+			count: r.count,
+			errors: r.errors,
+			avgLatencyMs: r.avg_latency != null ? Math.round(r.avg_latency) : null,
+		}),
+	);
 }
 
 /** Count of file-modifying tool calls (write/edit) since `sinceMs`. */
@@ -582,7 +595,11 @@ export function queryFileEdits(sinceMs: number): number {
 }
 
 /** p50/p95/p99 over usage-row decode latencies since `sinceMs`. */
-export function queryLlmLatencyPercentiles(sinceMs: number): { p50: number | null; p95: number | null; p99: number | null } {
+export function queryLlmLatencyPercentiles(sinceMs: number): {
+	p50: number | null;
+	p95: number | null;
+	p99: number | null;
+} {
 	const db = getDb();
 	const row = db
 		.prepare(
@@ -598,11 +615,19 @@ export function queryLlmLatencyPercentiles(sinceMs: number): { p50: number | nul
 		)
 		.get(sinceMs);
 	const r = row as { p50: number | null; p95: number | null; p99: number | null };
-	return { p50: r.p50 != null ? Math.round(r.p50) : null, p95: r.p95 != null ? Math.round(r.p95) : null, p99: r.p99 != null ? Math.round(r.p99) : null };
+	return {
+		p50: r.p50 != null ? Math.round(r.p50) : null,
+		p95: r.p95 != null ? Math.round(r.p95) : null,
+		p99: r.p99 != null ? Math.round(r.p99) : null,
+	};
 }
 
 /** p50/p95/p99 over endpoint latencies since `sinceMs`. */
-export function queryEndpointLatencyPercentiles(sinceMs: number): { p50: number | null; p95: number | null; p99: number | null } {
+export function queryEndpointLatencyPercentiles(sinceMs: number): {
+	p50: number | null;
+	p95: number | null;
+	p99: number | null;
+} {
 	const db = getDb();
 	const row = db
 		.prepare(
@@ -616,7 +641,11 @@ export function queryEndpointLatencyPercentiles(sinceMs: number): { p50: number 
 		)
 		.get(sinceMs);
 	const r = row as { p50: number | null; p95: number | null; p99: number | null };
-	return { p50: r.p50 != null ? Math.round(r.p50) : null, p95: r.p95 != null ? Math.round(r.p95) : null, p99: r.p99 != null ? Math.round(r.p99) : null };
+	return {
+		p50: r.p50 != null ? Math.round(r.p50) : null,
+		p95: r.p95 != null ? Math.round(r.p95) : null,
+		p99: r.p99 != null ? Math.round(r.p99) : null,
+	};
 }
 
 /** Average model throughput (completion tokens / decode seconds) since `sinceMs`. */
@@ -649,5 +678,52 @@ export function querySessionAnalytics(sinceMs: number): SessionAnalytics {
 	return {
 		sessions: Number((sessionsRow as { n: number }).n),
 		avgMessagesPerSession: Number((msgsRow as { avg_msgs: number | null }).avg_msgs) || null,
+	};
+}
+
+// ── Turn analytics ───────────────────────────────────────────────────────
+
+export interface TurnMetrics {
+	turns: number;
+	avgToolCallsPerTurn: number | null;
+	avgTokensPerTurn: number | null;
+	avgDurationMs: number | null;
+}
+
+const TURN_KINDS = "('main','subagent','background')";
+
+/** Per-user-request aggregates: one turn spans several LLM completions and
+ * tool calls, grouped by turn_id (the client message id). */
+export function queryTurnMetrics(sinceMs: number): TurnMetrics {
+	const db = getDb();
+	const turnsRow = db
+		.prepare(
+			`SELECT COUNT(*) AS n FROM (SELECT DISTINCT turn_id FROM llm_requests
+			 WHERE ts >= ? AND turn_id IS NOT NULL AND kind IN ${TURN_KINDS})`,
+		)
+		.get(sinceMs);
+	const toolsRow = db
+		.prepare("SELECT COUNT(*) AS n FROM tool_calls WHERE ts >= ? AND turn_id IS NOT NULL")
+		.get(sinceMs);
+	const tokensRow = db
+		.prepare(
+			`SELECT AVG(v) AS a FROM (SELECT SUM(prompt_tokens + completion_tokens) AS v FROM llm_requests
+			 WHERE ts >= ? AND turn_id IS NOT NULL AND kind IN ${TURN_KINDS} GROUP BY turn_id)`,
+		)
+		.get(sinceMs);
+	const durRow = db
+		.prepare(
+			`SELECT AVG(v) AS a FROM (SELECT MAX(ts) - MIN(ts) AS v FROM llm_requests
+			 WHERE ts >= ? AND turn_id IS NOT NULL AND kind IN ${TURN_KINDS} GROUP BY turn_id)`,
+		)
+		.get(sinceMs);
+	const num = (v: unknown): number | null => (v != null ? Math.round(Number(v)) : null);
+	const turns = Number((turnsRow as { n: number }).n);
+	const totalTools = Number((toolsRow as { n: number }).n);
+	return {
+		turns,
+		avgToolCallsPerTurn: turns > 0 ? Math.round(totalTools / turns) : null,
+		avgTokensPerTurn: num((tokensRow as { a: number | null }).a),
+		avgDurationMs: num((durRow as { a: number | null }).a),
 	};
 }
