@@ -1096,6 +1096,41 @@ describe("runAgentLoop — retries a length-truncated response with no tool call
 		expect(messages.some((m) => m.role === "assistant" && m.content === "stub two")).toBe(true);
 	});
 
+	it("retries an empty 'stop' completion with a nudge, so the model actually answers", async () => {
+		// A reasoning model burns the whole output budget on reasoning_content
+		// and stops with no final text — the "(no response)" case. Mirroring
+		// MiMo Code's think-only recovery: retry once, doubling the budget AND
+		// telling the model why, instead of committing the placeholder.
+		const events: AgentEvent[] = [];
+		let retryMessages: Message[] | undefined;
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "deep reasoning...",
+				finishReason: "stop",
+			}))
+			.mockImplementationOnce(async (_client, _model, messages) => {
+				retryMessages = messages as Message[];
+				return { content: "here is the real answer", thinking: "", finishReason: "stop" };
+			});
+
+		const result = await runAgentLoop([{ role: "user", content: "hi" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			onEvent: (event) => events.push(event),
+		});
+
+		expect(vi.mocked(streamAndCollect)).toHaveBeenCalledTimes(2);
+		const nudge = retryMessages?.find(
+			(m) => m.role === "user" && typeof m.content === "string" && m.content.includes("no usable answer"),
+		);
+		expect(nudge).toBeDefined();
+		expect(result.at(-1)?.content).toBe("here is the real answer");
+		expect(events.some((e) => e.type === "end" && (e as { reason: string }).reason === "stop")).toBe(true);
+	});
+
 	it("does not retry when a tool call was reached despite finishReason 'length'", async () => {
 		const events: AgentEvent[] = [];
 
