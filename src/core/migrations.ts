@@ -515,6 +515,58 @@ END;
 			}
 		},
 	},
+	{
+		version: 20,
+		name: "llm-request-telemetry",
+		up: (db) => {
+			// One row per LLM request (and one per retry/error), for the web
+			// dashboard's performance + usage analytics. Append-only; rows are
+			// pruned by age. Kept separate from `messages`/`session_events` so a
+			// session purge can leave telemetry (or not) independently.
+			db.exec(`
+CREATE TABLE IF NOT EXISTS llm_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts INTEGER NOT NULL,
+  session_id TEXT,
+  provider TEXT,
+  model TEXT,
+  kind TEXT NOT NULL,
+  prompt_tokens INTEGER DEFAULT 0,
+  completion_tokens INTEGER DEFAULT 0,
+  cache_read_tokens INTEGER DEFAULT 0,
+  cache_write_tokens INTEGER DEFAULT 0,
+  cost REAL,
+  latency_ms INTEGER,
+  ttft_ms INTEGER,
+  retries INTEGER DEFAULT 0,
+  error TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_llm_requests_ts ON llm_requests(ts);
+CREATE INDEX IF NOT EXISTS idx_llm_requests_provider ON llm_requests(provider);
+`);
+		},
+	},
+	{
+		version: 21,
+		name: "api-request-telemetry",
+		up: (db) => {
+			// One row per /api/* request (server-side latency for the system
+			// performance tab). The dashboard's own telemetry reads are excluded
+			// from recording so they don't pollute the data.
+			db.exec(`
+CREATE TABLE IF NOT EXISTS api_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts INTEGER NOT NULL,
+  method TEXT NOT NULL,
+  path TEXT NOT NULL,
+  status INTEGER NOT NULL,
+  latency_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_api_requests_ts ON api_requests(ts);
+CREATE INDEX IF NOT EXISTS idx_api_requests_path ON api_requests(path);
+`);
+		},
+	},
 ];
 
 const MIGRATION_TABLE_SCHEMA = `

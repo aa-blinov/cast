@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks"
 import { api } from "./api.js";
 import { CastLogo } from "./cast-logo.js";
 import { Composer as ComposerModule } from "./composer.js";
+import { Dashboard as DashboardModule } from "./dashboard.js";
 import { DiffPanel as DiffPanelModule } from "./diff-panel.js";
 import { DirectoryBrowser } from "./directory-browser.js";
 import { ElapsedTimer } from "./elapsed-timer.js";
@@ -762,6 +763,9 @@ function App() {
 		confirmState,
 		setConfirmState,
 	} = useWorkspaceState();
+	// Dashboard is a local toggle (not persisted) — a separate full-screen
+	// analytics view swapped in place of the chat area.
+	const [dashboardOpen, setDashboardOpen] = useState(false);
 	const requestConfirm = useCallback(
 		(message) => new Promise((resolve) => setConfirmState({ message, resolve })),
 		[setConfirmState],
@@ -1742,6 +1746,9 @@ function App() {
 				</span>
 				<div class="header-right">
 					${activeId && html`<${StatusPopover} activeId=${activeId} running=${running} />`}
+					<button class="menu-toggle${dashboardOpen ? " active" : ""}" onClick=${() => setDashboardOpen((v) => !v)} aria-label="Dashboard" title="Dashboard">
+						<${icons.chartBar} />
+					</button>
 					<button class="menu-toggle" onClick=${() => setSettingsOpen(true)} aria-label="Settings" title="Settings">
 						<${icons.settings} />
 					</button>
@@ -1824,6 +1831,13 @@ function App() {
 			}
 
 			${hotkeysModal}
+
+			${
+				dashboardOpen &&
+				html`
+				<${DashboardModule} onClose=${() => setDashboardOpen(false)} />
+			`
+			}
 
 			${
 				settingsOpen &&

@@ -31,6 +31,14 @@ import {
 } from "../core/memory.ts";
 import { getHistoryPage, getMessageImage, getSessionEvents } from "../core/session.ts";
 import { loadSettings, updateSettings } from "../core/settings.ts";
+import {
+	queryEndpointOverview,
+	queryEndpointSeries,
+	queryRecentLlmRequests,
+	queryTelemetryOverview,
+	queryTelemetrySeries,
+	recordApiRequest,
+} from "../core/telemetry.ts";
 import { ensureSessionWorktree } from "../core/worktree.ts";
 import {
 	API_V1_PREFIX,
@@ -577,6 +585,55 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			port: state.port,
 			startedAt: state.startedAt,
 			foreground: state.foreground,
+		});
+	});
+
+	// ── LLM telemetry (dashboard) ──────────────────────────────────────────
+	// Aggregates over the llm_requests table; all read-only. `since` is hours
+	// back (default 24), `resolution` is minutes per bucket (default 60).
+	route("GET", "/api/telemetry/overview", (req, res) => {
+		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+		const hours = Number(url.searchParams.get("since")) || 24;
+		const sinceMs = Date.now() - hours * 60 * 60 * 1000;
+		json(res, { sinceMs, rows: queryTelemetryOverview(sinceMs) });
+	});
+
+	route("GET", "/api/telemetry/series", (req, res) => {
+		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+		const hours = Number(url.searchParams.get("since")) || 24;
+		const resolutionMin = Number(url.searchParams.get("resolution")) || 60;
+		const sinceMs = Date.now() - hours * 60 * 60 * 1000;
+		json(res, {
+			sinceMs,
+			resolutionMs: resolutionMin * 60 * 1000,
+			buckets: queryTelemetrySeries(sinceMs, resolutionMin * 60 * 1000),
+		});
+	});
+
+	route("GET", "/api/telemetry/recent", (req, res) => {
+		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+		const limit = Math.min(200, Number(url.searchParams.get("limit")) || 50);
+		json(res, { rows: queryRecentLlmRequests(limit) });
+	});
+
+	route("GET", "/api/telemetry/endpoints", (req, res) => {
+		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+		const hours = Number(url.searchParams.get("since")) || 24;
+		json(res, {
+			sinceMs: Date.now() - hours * 60 * 60 * 1000,
+			rows: queryEndpointOverview(Date.now() - hours * 60 * 60 * 1000),
+		});
+	});
+
+	route("GET", "/api/telemetry/endpoint-series", (req, res) => {
+		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+		const hours = Number(url.searchParams.get("since")) || 24;
+		const resolutionMin = Number(url.searchParams.get("resolution")) || 60;
+		const sinceMs = Date.now() - hours * 60 * 60 * 1000;
+		json(res, {
+			sinceMs,
+			resolutionMs: resolutionMin * 60 * 1000,
+			buckets: queryEndpointSeries(sinceMs, resolutionMin * 60 * 1000),
 		});
 	});
 
@@ -1798,6 +1855,16 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		setSecurityHeaders(req, res);
 		const urlPath = req.url?.split("?")[0] ?? "/";
 		const method = req.method ?? "GET";
+
+		// Measure every /api/* request for the dashboard's system-performance
+		// tab. The telemetry reads themselves are excluded so they don't
+		// pollute the data. One cheap prepared INSERT on res.finish.
+		if (urlPath.startsWith("/api/") && !urlPath.startsWith("/api/telemetry/")) {
+			const reqStart = Date.now();
+			res.on("finish", () => {
+				recordApiRequest({ method, path: urlPath, status: res.statusCode, latencyMs: Date.now() - reqStart });
+			});
+		}
 
 		// /shared/<token> (the page) and /api/shared/<token> (its data) are the
 		// one deliberate hole in auth — everything else still needs a session.
