@@ -1319,6 +1319,48 @@ describe("runAgentLoop — steering and follow-up injection", () => {
 		expect(vi.mocked(streamAndCollect)).toHaveBeenCalledTimes(2);
 		expect(events.find((e) => e.type === "end")).toEqual({ type: "end", reason: "stop" });
 	});
+
+	it("does not duplicate an earlier turn's committed content in the persisted partial on a later abort", async () => {
+		// A multi-message run (follow-up turn inside the same runAgentLoop call)
+		// used to leave turn 1's already-committed content in the partialContent
+		// accumulator. An abort mid-turn-2 then persisted turn1+turn2-partial as
+		// the "partial assistant" — duplicating turn 1 in history.
+		const followUpQueue = new MessageQueue();
+		followUpQueue.enqueue({ role: "user", content: "follow up" });
+		const controller = new AbortController();
+		let call = 0;
+		vi.mocked(streamAndCollect).mockImplementation(
+			async (_client, _model, _messages, _tools, _maxTokens, signal, onToken) => {
+				call++;
+				if (call === 1) {
+					onToken?.("turn one content");
+					return { content: "turn one content", thinking: "", finishReason: "stop" };
+				}
+				// Turn 2 streams a bit, then the user hits Esc mid-stream.
+				onToken?.("turn two partial");
+				controller.abort();
+				throw new Error("Request was aborted.");
+			},
+		);
+
+		const result = await runAgentLoop([{ role: "user", content: "start" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			followUpQueue,
+			signal: controller.signal,
+			onEvent: () => {},
+		});
+
+		const assistantTexts = result
+			.filter((m) => m.role === "assistant" && typeof m.content === "string")
+			.map((m) => m.content as string);
+		expect(assistantTexts).toContain("turn one content");
+		// The persisted partial is only turn 2's own stream, not turn1+turn2.
+		expect(assistantTexts.at(-1)).toBe("turn two partial");
+		expect(assistantTexts.filter((t) => t.includes("turn one content"))).toHaveLength(1);
+	});
 });
 
 // ============================================================================
