@@ -3,7 +3,8 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { AppConfig } from "../src/core/config.ts";
 import {
 	type HooksFile,
 	hookGroupId,
@@ -12,6 +13,27 @@ import {
 	loadHooksForCwd,
 	runHooksForEvent,
 } from "../src/core/hooks.ts";
+
+// The prompt-hook path evaluates a condition with the LLM. Stub it so a
+// failing model call can be tested as a non-blocking fallback.
+const mockStreamAndCollect = vi.fn();
+vi.mock("../src/core/llm.ts", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../src/core/llm.ts")>();
+	return { ...actual, streamAndCollect: (...args: unknown[]) => mockStreamAndCollect(...args) };
+});
+
+const testConfig: AppConfig = {
+	baseURL: "http://localhost",
+	apiKey: "test",
+	contextWindow: 128_000,
+	maxResponseTokens: 8192,
+	compactionThreshold: 0.75,
+	maxToolOutputLines: 2000,
+	maxToolOutputBytes: 64 * 1024,
+	defaultBashTimeout: 120,
+	reasoningLevel: "off",
+	reasoningParams: { body: {} },
+};
 
 describe("loadHooksForCwd", () => {
 	let dir: string;
@@ -694,6 +716,30 @@ describe("runHooksForEvent", () => {
 			Stop: [{ hooks: [{ type: "prompt", prompt: "Should the agent keep going? Respond yes/no." }] }],
 		};
 		const result = await runHooksForEvent(hooks, { event: "Stop", cwd: "/tmp", payload: {} });
+		expect(result.blocked).toBe(false);
+	});
+
+	it("prompt hook fails open (non-blocking) when the LLM evaluation call errors", async () => {
+		mockStreamAndCollect.mockRejectedValueOnce(new Error("provider outage"));
+		const hooks: HooksFile = {
+			Stop: [
+				{
+					hooks: [
+						{
+							type: "prompt",
+							prompt: "Should the agent keep going? Respond yes/no.",
+							model: "test-model",
+						},
+					],
+				},
+			],
+		};
+		const result = await runHooksForEvent(hooks, {
+			event: "Stop",
+			cwd: "/tmp",
+			payload: {},
+			config: testConfig,
+		});
 		expect(result.blocked).toBe(false);
 	});
 
