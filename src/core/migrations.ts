@@ -464,7 +464,7 @@ WHERE m.role IN ('user', 'assistant', 'tool');
 		version: 18,
 		name: "memory-file-index",
 		up: (db) => {
-			// Full-tree memory file index (MiMo-style): every `.md` under the memory
+			// Full-tree memory file index: every `.md` under the memory
 			// root and, when enabled, Claude Code memory, mirrored into FTS5 so the
 			// search tool covers checkpoint/notes/task/spillover files, not just the
 			// parsed MEMORY.md bullets in project_memory.

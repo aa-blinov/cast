@@ -154,7 +154,7 @@ describe("settings", () => {
 			expect(memoryReconcileOnSearch({ memoryReconcileOnSearch: false })).toBe(false);
 		});
 
-		it("keeps automatic dream and distill opt-in with Mimo-compatible intervals", () => {
+		it("keeps automatic dream and distill opt-in with reference intervals", () => {
 			expect(memoryDreamAuto({})).toBe(false);
 			expect(memoryDistillAuto({})).toBe(false);
 			expect(memoryDreamIntervalDays({})).toBe(7);

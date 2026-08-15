@@ -126,10 +126,10 @@ function walkCcRoot(root: string): string[] {
  * size+mtime so unchanged files are skipped without a content read.
  */
 export function reconcileMemoryFileIndex(includeCc: boolean): { indexed: number; pruned: number } {
-	const mimoRoot = memoryRoot();
+	const memoryTreeRoot = memoryRoot();
 	const ccRoot = ccMemoryRoot();
 	const diskFiles: Array<{ path: string; isCc: boolean }> = [
-		...walkMdFiles(mimoRoot).map((path) => ({ path, isCc: false })),
+		...walkMdFiles(memoryTreeRoot).map((path) => ({ path, isCc: false })),
 		...(includeCc ? walkCcRoot(ccRoot).map((path) => ({ path, isCc: true })) : []),
 	];
 	const diskPaths = new Set(diskFiles.map((file) => file.path));
@@ -177,7 +177,7 @@ export function reconcileMemoryFileIndex(includeCc: boolean): { indexed: number;
 			} catch {
 				continue;
 			}
-			const root = file.isCc ? ccRoot : mimoRoot;
+			const root = file.isCc ? ccRoot : memoryTreeRoot;
 			const locator = locateMemoryFile(relative(root, file.path), file.isCc, body);
 			if (!locator) continue;
 			upsert.run(file.path, locator.scope, locator.scopeId, locator.type, body, fingerprint, Date.now());
