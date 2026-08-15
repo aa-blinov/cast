@@ -3,6 +3,7 @@ import { h } from "preact";
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { api } from "./api.js";
 import { icons } from "./icons.js";
+import { useModalFocusTrap } from "./modal-focus.js";
 
 const html = htm.bind(h);
 
@@ -124,6 +125,16 @@ export function Dashboard({ onClose }) {
 	// concurrently on mount and on range change).
 	const loadRequestIdRef = useRef(0);
 	const recentRequestIdRef = useRef(0);
+
+	const modalRef = useModalFocusTrap(true);
+	// Escape closes the dashboard, same as the settings modal.
+	useEffect(() => {
+		const onKey = (e) => {
+			if (e.key === "Escape") onClose();
+		};
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	}, [onClose]);
 
 	// Watch the root style for theme changes (applyTheme mutates
 	// document.documentElement). A single theme change sets many CSS variables,
@@ -390,7 +401,7 @@ export function Dashboard({ onClose }) {
 
 	return html`
 		<div class="modal-backdrop" onClick=${onClose}>
-			<div class="modal dash-modal" role="dialog" aria-modal="true" aria-label="Dashboard" tabIndex="-1" onClick=${(e) => e.stopPropagation()}>
+			<div class="modal dash-modal" role="dialog" aria-modal="true" aria-label="Dashboard" tabIndex="-1" ref=${modalRef} onClick=${(e) => e.stopPropagation()}>
 				<div class="modal-header">
 					<span class="dash-title">Dashboard</span>
 					<div class="dash-tabs">
