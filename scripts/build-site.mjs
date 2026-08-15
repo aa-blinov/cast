@@ -25,6 +25,7 @@ const NAV_ORDER = [
 	{ file: "context-files.md", label: "Context Files" },
 	{ file: "sessions.md", label: "Sessions" },
 	{ file: "memory.md", label: "Memory" },
+	{ file: "dashboard.md", label: "Dashboard" },
 	{ file: "worktrees.md", label: "Git Worktrees" },
 	{ file: "plan-mode.md", label: "Plan Mode" },
 	{ file: "reasoning.md", label: "Reasoning" },
@@ -74,7 +75,10 @@ renderer.code = function ({ text, lang }) {
 	const hasLanguage = Boolean(language && hljs.getLanguage(language));
 	const highlighted = hasLanguage ? hljs.highlight(text, { language }).value : escapeHtml(text);
 	const className = sourceLanguage ? ` class="language-${escapeHtml(sourceLanguage)} hljs"` : ' class="hljs"';
-	return `<pre class="code-block"${sourceLanguage ? ` data-language="${escapeHtml(sourceLanguage)}"` : ""}><code${className}>${highlighted}</code></pre>`;
+	// The copy button carries the raw source base64-encoded so the exact text
+	// (not the syntax-highlighted HTML) is what lands on the clipboard.
+	const copyData = Buffer.from(text).toString("base64");
+	return `<pre class="code-block"${sourceLanguage ? ` data-language="${escapeHtml(sourceLanguage)}"` : ""}><button class="code-copy" type="button" data-copy="${copyData}" aria-label="Copy code to clipboard">copy</button><code${className}>${highlighted}</code></pre>`;
 };
 const originalTable = renderer.table;
 renderer.table = function (token) {
@@ -329,6 +333,19 @@ a:hover { color: #c084fc; text-decoration: none; }
 	font: 600 .62rem/1 var(--font-mono); letter-spacing: .08em;
 	text-transform: uppercase; color: var(--text-muted); opacity: .9;
 }
+.content pre.code-block .code-copy {
+	position: absolute; top: 8px; right: 16px;
+	font: 600 .62rem/1 var(--font-mono); letter-spacing: .06em; text-transform: uppercase;
+	color: var(--text-muted); background: var(--code-bg-raised);
+	border: 1px solid var(--code-border); border-radius: 6px;
+	padding: 4px 8px; cursor: pointer; opacity: 0;
+	transition: opacity .15s ease, color .15s ease, border-color .15s ease;
+}
+.content pre.code-block:hover .code-copy,
+.content pre.code-block .code-copy:focus-visible { opacity: 1; }
+.content pre.code-block .code-copy:hover { color: var(--text); border-color: var(--border-active); }
+.content pre.code-block .code-copy.copied { color: var(--accent); border-color: var(--accent); }
+.content pre.code-block[data-language] .code-copy { right: 86px; }
 .content pre.code-block code,
 .content pre:not(.mermaid):not(.mermaid-code) code {
 	display: block; min-width: max-content; background: none; border: none;
@@ -1211,6 +1228,26 @@ diagram.addEventListener('mousedown', e => { onStart(e); e.preventDefault(); });
 			else if (btn.dataset.zoom === 'reset') { zoom = 1; panX = 0; panY = 0; }
 			applyTransform();
 		});
+	});
+});
+// ── Copy button for code blocks ──
+document.addEventListener('DOMContentLoaded', () => {
+	document.addEventListener('click', async (e) => {
+		const btn = e.target.closest('.code-copy');
+		if (!btn) return;
+		const raw = atob(btn.dataset.copy || '');
+		try {
+			await navigator.clipboard.writeText(raw);
+			btn.textContent = 'copied';
+			btn.classList.add('copied');
+			setTimeout(() => {
+				btn.textContent = 'copy';
+				btn.classList.remove('copied');
+			}, 1500);
+		} catch {
+			btn.textContent = 'failed';
+			setTimeout(() => (btn.textContent = 'copy'), 1500);
+		}
 	});
 });
 </script>
