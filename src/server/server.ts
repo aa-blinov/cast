@@ -461,7 +461,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 					.replace(VERSIONED_LOCAL_IMPORT_RE, (_, name) => `from"./${name}.js?v=${assetVersion(`/${name}.js`)}"`)
 					.replace(STREAM_BLOCKS_IMPORT_RE, `from"./stream-blocks.js?v=${assetVersion("/stream-blocks.js")}"`);
 			}
-			const accepts = req.headers["accept-encoding"] ?? "";
+			const accepts = req.headers?.["accept-encoding"] ?? "";
 			const textAsset = [".html", ".css", ".js", ".mjs", ".json", ".svg"].includes(ext);
 			const raw = Buffer.isBuffer(content) ? content : Buffer.from(content);
 			const encoding =
@@ -2002,6 +2002,13 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		// (there's no shared.html — it's the same SPA, reading the token off
 		// location.pathname) — serve index.html for it like any other deep link.
 		if (method === "GET" && urlPath.startsWith("/shared/") && !urlPath.startsWith("/api/")) {
+			if (serveStatic({ url: "/" } as IncomingMessage, res)) return;
+		}
+
+		// Settings and the dashboard are SPA routes too — dedicated paths so
+		// each is navigable/bookmarkable and survives back/forward without
+		// tearing down the session view. Same index.html fallback as /shared.
+		if (method === "GET" && (urlPath === "/settings" || urlPath === "/dashboard")) {
 			if (serveStatic({ url: "/" } as IncomingMessage, res)) return;
 		}
 

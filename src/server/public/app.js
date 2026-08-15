@@ -482,6 +482,17 @@ const _WEB_TOOLS_OPTIONS = [
 function sessionIdFromUrl() {
 	return new URLSearchParams(window.location.search).get("session");
 }
+// Dedicated SPA routes: /settings and /dashboard get their own paths (served
+// as index.html server-side) so each is navigable and survives back/forward,
+// while the chat view below them stays mounted — the session's SSE stream and
+// live turn are untouched by navigation. The ?session= query rides along on
+// every route so a dashboard/settings link keeps its session context.
+function viewFromPath() {
+	const p = window.location.pathname;
+	if (p === "/settings") return "settings";
+	if (p === "/dashboard") return "dashboard";
+	return "chat";
+}
 // ── Components ───────────────────────────────────────────────────────
 
 // for why they live in a global, session-scoped directory instead of inside
@@ -764,8 +775,35 @@ function App() {
 		setConfirmState,
 	} = useWorkspaceState();
 	// Dashboard is a local toggle (not persisted) — a separate full-screen
-	// analytics view swapped in place of the chat area.
+	// analytics view swapped in place of the chat area. Settings and the
+	// dashboard are now dedicated routes (/settings, /dashboard); the open
+	// flags are derived from the current path so navigation and browser
+	// back/forward stay in sync with what's shown.
 	const [dashboardOpen, setDashboardOpen] = useState(false);
+	const applyView = useCallback(
+		(next) => {
+			setDashboardOpen(next === "dashboard");
+			setSettingsOpen(next === "settings");
+		},
+		[setDashboardOpen, setSettingsOpen],
+	);
+	const navigate = useCallback(
+		(path) => {
+			if (window.location.pathname + window.location.search === path) return;
+			window.history.pushState(null, "", path);
+			applyView(viewFromPath());
+		},
+		[applyView],
+	);
+	const goHome = useCallback(() => {
+		navigate("/" + (activeId ? `?session=${activeId}` : ""));
+	}, [navigate, activeId]);
+	useEffect(() => {
+		applyView(viewFromPath());
+		const onPop = () => applyView(viewFromPath());
+		window.addEventListener("popstate", onPop);
+		return () => window.removeEventListener("popstate", onPop);
+	}, [applyView]);
 	const requestConfirm = useCallback(
 		(message) => new Promise((resolve) => setConfirmState({ message, resolve })),
 		[setConfirmState],
@@ -1746,10 +1784,10 @@ function App() {
 				</span>
 				<div class="header-right">
 					${activeId && html`<${StatusPopover} activeId=${activeId} running=${running} />`}
-					<button class="menu-toggle${dashboardOpen ? " active" : ""}" onClick=${() => setDashboardOpen((v) => !v)} aria-label="Dashboard" title="Dashboard">
+					<button class="menu-toggle${dashboardOpen ? " active" : ""}" onClick=${() => navigate("/dashboard" + (activeId ? `?session=${activeId}` : ""))} aria-label="Dashboard" title="Dashboard">
 						<${icons.chartBar} />
 					</button>
-					<button class="menu-toggle" onClick=${() => setSettingsOpen(true)} aria-label="Settings" title="Settings">
+					<button class="menu-toggle${settingsOpen ? " active" : ""}" onClick=${() => navigate("/settings" + (activeId ? `?session=${activeId}` : ""))} aria-label="Settings" title="Settings">
 						<${icons.settings} />
 					</button>
 					<button class="menu-toggle hotkeys-toggle" onClick=${() => setHotkeysOpen(true)} aria-label="Keyboard shortcuts" title=${`Shortcuts (${modKey}/)`}>
@@ -1835,7 +1873,7 @@ function App() {
 			${
 				dashboardOpen &&
 				html`
-				<${DashboardModule} onClose=${() => setDashboardOpen(false)} />
+				<${DashboardModule} onClose=${goHome} />
 			`
 			}
 
@@ -1863,7 +1901,7 @@ function App() {
 						applyFontScale(scale);
 						setCurrentFontScale(scale);
 					}}
-					onClose=${() => setSettingsOpen(false)}
+					onClose=${goHome}
 					confirm=${requestConfirm}
 					onReload=${() => refreshCommands(activeId)}
 					onModelChange=${setDefaultModel}
