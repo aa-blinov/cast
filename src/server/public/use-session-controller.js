@@ -81,11 +81,8 @@ export function useSessionController({
 	);
 	const retryPendingOutgoing = useCallback(
 		async (sessionId) => {
-			const pending = [...pendingOutgoingRef.current.values()].filter(
-				(item) => item.sessionId === sessionId && !item.sending,
-			);
+			const pending = [...pendingOutgoingRef.current.values()].filter((item) => item.sessionId === sessionId);
 			for (const item of pending) {
-				item.sending = true;
 				try {
 					await api("POST", `/api/sessions/${item.sessionId}/chat`, {
 						text: item.text,
@@ -94,7 +91,8 @@ export function useSessionController({
 					});
 					markOutgoingDelivered(item.clientMessageId);
 				} catch {
-					item.sending = false;
+					// Keep it pending for the next reconnect; the daemon dedupes by
+					// clientMessageId, so a duplicate re-send is dropped server-side.
 				}
 			}
 		},
