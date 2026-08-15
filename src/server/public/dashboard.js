@@ -113,7 +113,7 @@ export function Dashboard({ onClose }) {
 	const [perf, setPerf] = useState({ overview: [], series: [] });
 	const [reliability, setReliability] = useState(null);
 	const [system, setSystem] = useState(null);
-	const [recent, setRecent] = useState({ rows: [], total: 0, page: 0, pageSize: 25 });
+	const [recent, setRecent] = useState({ rows: [], total: 0, page: 0, pageSize: 10 });
 	const [endpointPage, setEndpointPage] = useState({ page: 0, pageSize: 10 });
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState(null);
@@ -199,7 +199,7 @@ export function Dashboard({ onClose }) {
 
 	useEffect(() => {
 		load();
-		loadRecent(0, 25);
+		loadRecent(0, 10);
 	}, [load, loadRecent]);
 
 	// Create/refresh charts once Chart.js is ready and the active tab's data

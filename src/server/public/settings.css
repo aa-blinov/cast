@@ -662,8 +662,6 @@
 	font-family: var(--font-mono);
 }
 .dash-table th {
-	position: sticky;
-	top: 0;
 	background: var(--bg-raised);
 	color: var(--text-muted);
 	font-weight: 600;
