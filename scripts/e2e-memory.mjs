@@ -195,7 +195,7 @@ if (!fileMatches.some((match) => match.snippet.includes(fileProbe))) {
 }
 
 // The memory tool returns the file-backed hit as path + scope + snippet so the
-// model can Read the file for the full body (MiMo contract).
+// model can Read the file for the full body.
 const toolResult = execMemorySearch({ query: fileProbe, scope: "sessions", scope_id: probeSessionId }, cwd);
 if (
 	!toolResult.content.includes(`Scope: sessions/${probeSessionId}`) ||
