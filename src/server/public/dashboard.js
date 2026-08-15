@@ -300,8 +300,8 @@ export function Dashboard({ onClose }) {
 						data: {
 							labels,
 							datasets: [
-								{ label: "requests", data: data.series.map((b) => b.requests), borderColor: colors.cyan, backgroundColor: colors.cyan, yAxisID: "y", pointRadius: 0, borderWidth: 2 },
-								{ label: "avg latency ms", data: data.series.map((b) => b.avgLatencyMs ?? null), borderColor: colors.amber, backgroundColor: colors.amber, yAxisID: "y1", pointRadius: 0, borderWidth: 1, borderDash: [4, 4] },
+								{ label: "requests", data: perf.series.map((b) => b.requests), borderColor: colors.cyan, backgroundColor: colors.cyan, yAxisID: "y", pointRadius: 0, borderWidth: 2 },
+								{ label: "avg latency ms", data: perf.series.map((b) => b.avgLatencyMs ?? null), borderColor: colors.amber, backgroundColor: colors.amber, yAxisID: "y1", pointRadius: 0, borderWidth: 1, borderDash: [4, 4] },
 							],
 						},
 						options: {
