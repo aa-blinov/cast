@@ -1034,7 +1034,7 @@ describe("project memory", () => {
 		const third = scheduleProjectCheckpointWriter(input("third"), writer);
 
 		expect(getProjectCheckpointWriterSnapshot(projectCwd, "session-writer-lifecycle")).toEqual({
-			key: expect.stringContaining("session-writer-lifecycle"),
+			key: projectIdForCwd(projectCwd),
 			running: true,
 			activeId: first.id,
 			pendingId: third.id,
@@ -1046,6 +1046,43 @@ describe("project memory", () => {
 		expect(await first.wait()).toBe("success");
 		expect(await third.wait()).toBe("success");
 		expect(await waitForProjectCheckpointWriter(projectCwd, "session-writer-lifecycle")).toBe("no-writer");
+	});
+
+	it("serializes checkpoint writers across different sessions on the same project", async () => {
+		// Two concurrent sessions on the same repo can both cross a checkpoint
+		// threshold. Without project-scoped serialization both writers would run
+		// at once and edit the same MEMORY.md with no mutual exclusion; the
+		// second must queue as pending until the first finishes.
+		const projectCwd = join(root, "writer-cross-session-project");
+		let releaseFirst!: () => void;
+		const firstBlocked = new Promise<void>((resolve) => {
+			releaseFirst = resolve;
+		});
+		let started = 0;
+		const writer = async (input: { sessionId: string }): Promise<void> => {
+			started++;
+			if (input.sessionId === "sess-A") await firstBlocked;
+		};
+		const input = (sessionId: string) => ({
+			cwd: projectCwd,
+			sessionId,
+			model: "test-model",
+			config: testConfig,
+			messages: [{ role: "user" as const, content: sessionId }],
+		});
+
+		const first = scheduleProjectCheckpointWriter(input("sess-A"), writer);
+		await new Promise((resolve) => setImmediate(resolve));
+		const second = scheduleProjectCheckpointWriter(input("sess-B"), writer);
+
+		expect(started).toBe(1);
+		// Queued behind the first session's writer, not running concurrently.
+		expect(second.status()).toBe("queued");
+		expect(getProjectCheckpointWriterSnapshot(projectCwd, "sess-A")?.pendingId).toBe(second.id);
+		releaseFirst();
+		expect(await first.wait()).toBe("success");
+		expect(await second.wait()).toBe("success");
+		expect(started).toBe(2);
 	});
 
 	it("reports a bounded drain when a writer is still running", async () => {

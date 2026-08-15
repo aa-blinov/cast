@@ -1330,7 +1330,7 @@ describe("runAgentLoop — steering and follow-up injection", () => {
 		const controller = new AbortController();
 		let call = 0;
 		vi.mocked(streamAndCollect).mockImplementation(
-			async (_client, _model, _messages, _tools, _maxTokens, signal, onToken) => {
+			async (_client, _model, _messages, _tools, _maxTokens, _signal, onToken) => {
 				call++;
 				if (call === 1) {
 					onToken?.("turn one content");
