@@ -10,6 +10,10 @@ Sessions saved by older versions of cast (individual `.json`/`.jsonl` files unde
 
 ## Project Memory
 
+> See [Memory](memory.md) for a complete, beginner-friendly guide — what memory
+> is, where the files live, how it is written and read, and every command and
+> setting. This section covers the implementation details.
+
 Cast uses a two-layer memory layout. The authoritative artifacts are files under `~/.cast/memory/`: project knowledge in `projects/<project-id>/MEMORY.md`, session handoffs in `sessions/<session-id>/checkpoint.md`, scratch notes in `notes.md`, and delegated task progress under `tasks/<task-id>/progress.md`. SQLite keeps a scoped FTS5 mirror derived from those files for fast retrieval, and the raw session trajectory remains the evidence source.
 
 When a session approaches the context threshold, a checkpoint-writer fork updates the handoff files with normal file tools. `/dream` periodically consolidates durable knowledge from the trajectory into the project file, and `/distill` packages repeated workflows as reusable assets. These agents use absolute paths, are isolated from the user-facing turn, and share a per-project SQLite lease; one writer runs per session and at most one newer pending checkpoint request is retained. Memory work is bounded and best-effort; the main turn never waits for it.

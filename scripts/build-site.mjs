@@ -24,6 +24,7 @@ const NAV_ORDER = [
 	{ file: "mcp-servers.md", label: "MCP Servers" },
 	{ file: "context-files.md", label: "Context Files" },
 	{ file: "sessions.md", label: "Sessions" },
+	{ file: "memory.md", label: "Memory" },
 	{ file: "worktrees.md", label: "Git Worktrees" },
 	{ file: "plan-mode.md", label: "Plan Mode" },
 	{ file: "reasoning.md", label: "Reasoning" },

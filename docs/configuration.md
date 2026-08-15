@@ -29,6 +29,7 @@ User settings are persisted to `~/.cast/settings.json`. This file is loaded on s
 | `memoryPromptBudget` | integer | Maximum estimated tokens reserved for memory context inserted during checkpoint rebuild (256–16384, default: `4096`) |
 | `memorySearchScoreFloor` | number | Relative BM25 floor for dropping weak common-word matches (0–1, default: `0.15`; `0` keeps all matches) |
 | `memoryReconcileOnSearch` | boolean | Reconcile changed project `MEMORY.md` files before SQLite search (default: `true`) |
+| `memoryCcIndex` | boolean | Index Claude Code memory files (`~/.claude/projects/*/memory`) into search (default: `false`) |
 | `memoryDreamAuto` | boolean | Run dream automatically on a new top-level session (default: `false`; requires memory writing) |
 | `memoryDreamIntervalDays` | integer | Minimum days between automatic dream runs (default: `7`; `0` runs on every new session) |
 | `memoryDistillAuto` | boolean | Run distill automatically on a new top-level session (default: `false`; requires memory writing) |
@@ -53,6 +54,9 @@ User settings are persisted to `~/.cast/settings.json`. This file is loaded on s
 Settings are written atomically (temp file + rename) to prevent corruption from crashes mid-write.
 
 ## Project Memory
+
+> See [Memory](memory.md) for a complete guide to what memory is, where the
+> files live, and how it is written and read. This section covers the settings.
 
 Durable project memory is enabled by default. It is one global setting shared by the TUI and Web UI:
 
