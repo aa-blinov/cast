@@ -244,6 +244,10 @@ export function isRetryableStreamError(error: unknown): boolean {
 
 	if (code === "ECONNRESET" || code === "ETIMEDOUT" || code === "EPIPE" || code === "UND_ERR_SOCKET") return true;
 
+	// Server-side request timeout (408) — the provider dropped the request, not
+	// the client connection; worth one retry rather than failing the turn.
+	if ((error as { status?: number } | undefined)?.status === 408) return true;
+
 	return RETRYABLE_NETWORK_PATTERN.test(message);
 }
 
@@ -625,7 +629,13 @@ export async function* streamChat(
 			}
 			return;
 		} catch (error) {
-			if (yieldedAny || signal?.aborted || !isRetryableStreamError(error)) {
+			// Never retry a context overflow at the stream level: some gateways
+			// wrap it in a 5xx, which is otherwise classified retryable, and the
+			// fruitless retries would swallow the real error until the deadline —
+			// by then the loop can no longer recognize it as overflow and won't
+			// auto-compact, turning a recoverable situation into a hard failure.
+			// Throw it through so the loop's compaction path sees the original.
+			if (yieldedAny || signal?.aborted || isContextOverflow(error) || !isRetryableStreamError(error)) {
 				throw error;
 			}
 			retryStartedAt ??= Date.now();
