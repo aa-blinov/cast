@@ -26,6 +26,7 @@ A terminal coding agent that works with **any** OpenAI-compatible API. Point it 
 | [Context Files](context-files.md) | AGENTS.md / CLAUDE.md hierarchy |
 | [Sessions](sessions.md) | Persistence, resume, compaction |
 | [Memory](memory.md) | Durable project memory: how it works, files, commands, config |
+| [Dashboard](dashboard.md) | Web analytics: LLM usage, latency, reliability, system metrics |
 | [Git Worktrees](worktrees.md) | Isolated git worktree sessions |
 | [Plan Mode](plan-mode.md) | Explore and plan before implementing |
 | [Reasoning](reasoning.md) | Reasoning levels and provider support |
