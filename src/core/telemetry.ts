@@ -301,6 +301,28 @@ export function recordApiRequest(record: ApiRequestRecord): void {
 	getApiInsertStmt().run(Date.now(), record.method, record.path, record.status, record.latencyMs);
 }
 
+/** Global mean latency over usage rows since `sinceMs` — for KPIs; a mean of
+ * per-group means (as the overview returns) is biased toward small groups. */
+export function queryLlmAvgLatency(sinceMs: number): number | null {
+	const row = getDb()
+		.prepare(
+			`SELECT AVG(latency_ms) AS a FROM llm_requests
+			 WHERE ts >= ? AND kind IN ('main','subagent','background') AND latency_ms IS NOT NULL`,
+		)
+		.get(sinceMs);
+	const v = (row as { a: number | null }).a;
+	return v != null ? Math.round(v) : null;
+}
+
+/** Global mean latency over api_requests since `sinceMs`. */
+export function queryEndpointAvgLatency(sinceMs: number): number | null {
+	const row = getDb()
+		.prepare(`SELECT AVG(latency_ms) AS a FROM api_requests WHERE ts >= ? AND latency_ms IS NOT NULL`)
+		.get(sinceMs);
+	const v = (row as { a: number | null }).a;
+	return v != null ? Math.round(v) : null;
+}
+
 export interface EndpointOverviewRow {
 	path: string;
 	method: string;

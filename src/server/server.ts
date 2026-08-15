@@ -35,8 +35,10 @@ import {
 	countRecentLlmRequests,
 	queryCompactionOverview,
 	queryContextUtilization,
+	queryEndpointAvgLatency,
 	queryEndpointOverview,
 	queryEndpointSeries,
+	queryLlmAvgLatency,
 	queryRecentLlmRequests,
 	queryReliabilityOverview,
 	querySessionAnalytics,
@@ -601,7 +603,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
 		const hours = Number(url.searchParams.get("since")) || 24;
 		const sinceMs = Date.now() - hours * 60 * 60 * 1000;
-		json(res, { sinceMs, rows: queryTelemetryOverview(sinceMs) });
+		json(res, { sinceMs, avgLatencyMs: queryLlmAvgLatency(sinceMs), rows: queryTelemetryOverview(sinceMs) });
 	});
 
 	route("GET", "/api/telemetry/series", (req, res) => {
@@ -633,9 +635,11 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 	route("GET", "/api/telemetry/endpoints", (req, res) => {
 		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
 		const hours = Number(url.searchParams.get("since")) || 24;
+		const sinceMs = Date.now() - hours * 60 * 60 * 1000;
 		json(res, {
-			sinceMs: Date.now() - hours * 60 * 60 * 1000,
-			rows: queryEndpointOverview(Date.now() - hours * 60 * 60 * 1000),
+			sinceMs,
+			avgLatencyMs: queryEndpointAvgLatency(sinceMs),
+			rows: queryEndpointOverview(sinceMs),
 		});
 	});
 

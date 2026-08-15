@@ -167,8 +167,8 @@ export function Dashboard({ onClose }) {
 				api("GET", `/api/telemetry/system?since=${hours}`),
 			]);
 			if (req !== loadRequestIdRef.current) return;
-			setLlm({ overview: ov?.rows ?? [], series: se?.buckets ?? [] });
-			setPerf({ overview: eo?.rows ?? [], series: es?.buckets ?? [] });
+			setLlm({ overview: ov?.rows ?? [], series: se?.buckets ?? [], avgLatencyMs: ov?.avgLatencyMs ?? null });
+			setPerf({ overview: eo?.rows ?? [], series: es?.buckets ?? [], avgLatencyMs: eo?.avgLatencyMs ?? null });
 			setReliability(rel ?? null);
 			setSystem(sys ?? null);
 			setEndpointPage((p) => ({ ...p, page: 0 }));
@@ -329,33 +329,30 @@ export function Dashboard({ onClose }) {
 			acc.cacheRead += r.cacheReadTokens;
 			acc.cost += r.cost;
 			acc.errors += r.errors;
-			if (r.avgLatencyMs != null) acc.latencies.push(r.avgLatencyMs);
 			return acc;
 		},
-		{ requests: 0, prompt: 0, completion: 0, cacheRead: 0, cost: 0, errors: 0, latencies: [] },
+		{ requests: 0, prompt: 0, completion: 0, cacheRead: 0, cost: 0, errors: 0 },
 	);
 	const llmCacheRate = llmTotals.prompt > 0 ? Math.round((llmTotals.cacheRead / llmTotals.prompt) * 100) : null;
-	const llmAvgLatency =
-		llmTotals.latencies.length > 0 ? llmTotals.latencies.reduce((a, b) => a + b, 0) / llmTotals.latencies.length : null;
+	// Global mean latency from the server (not a mean of per-group means).
+	const llmAvgLatency = llm.avgLatencyMs;
+	// Retry rate: retry ATTEMPTS per completed request — can legitimately
+	// exceed 100% when a single request was retried several times.
+	const retryRate =
+		reliability && reliability.requests > 0 ? ((reliability.retries / reliability.requests) * 100).toFixed(1) : null;
 
 	const perfTotals = perf.overview.reduce(
 		(acc, r) => {
 			acc.requests += r.requests;
 			acc.errors += r.errors;
-			if (r.avgLatencyMs != null) {
-				acc.latencies.push(r.avgLatencyMs);
-				if (r.maxLatencyMs != null && r.maxLatencyMs > acc.max) acc.max = r.maxLatencyMs;
-			}
+			if (r.maxLatencyMs != null && r.maxLatencyMs > acc.max) acc.max = r.maxLatencyMs;
 			return acc;
 		},
-		{ requests: 0, errors: 0, latencies: [], max: 0 },
+		{ requests: 0, errors: 0, max: 0 },
 	);
-	const perfAvgLatency =
-		perfTotals.latencies.length > 0 ? perfTotals.latencies.reduce((a, b) => a + b, 0) / perfTotals.latencies.length : null;
+	const perfAvgLatency = perf.avgLatencyMs;
 
 	const rangeLabel = range === "30d" ? "30 days" : range === "7d" ? "7 days" : "24 hours";
-	const retryRate =
-		reliability && reliability.requests > 0 ? ((reliability.retries / reliability.requests) * 100).toFixed(1) : null;
 	// Client-side pagination over the already-fetched endpoint overview.
 	const epPage = endpointPage;
 	const epRows = perf.overview.slice(epPage.page * epPage.pageSize, (epPage.page + 1) * epPage.pageSize);

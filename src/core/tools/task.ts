@@ -353,6 +353,10 @@ export async function execTask(
 					mcpToolIndex: deps.mcpToolIndex,
 					hooks: deps.hooks,
 					sessionId: deps.sessionId,
+					// Same-process nested run: the parent holds the turn-runner lock
+					// for this session, so acquiring it again would throw "Session
+					// already running in another process" and fail every subagent.
+					skipTurnRunnerLock: true,
 					// The parent alone owns the plan artifact. Passing enabled=false below
 					// avoids giving the child plan-authoring tools, so write/edit must be
 					// denied explicitly or a plan-mode child could edit the project.
