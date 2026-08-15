@@ -9,6 +9,7 @@ import { createSession, loadSession, type SessionState, saveSession } from "../s
 import { type PermissionMode, updateSettings } from "../src/core/settings.ts";
 import type { Pickers } from "../src/pickers/types.ts";
 import type { CommandDeps } from "../src/ui/commands.ts";
+import { defaultStatusBarConfig } from "../src/ui/statusbar.tsx";
 import type { UseAgentSession } from "../src/ui/useAgentSession.ts";
 
 vi.mock("../src/core/config.ts", async (importOriginal) => {
@@ -82,6 +83,8 @@ function createFakeDeps(overrides?: Partial<CommandDeps> & { running?: boolean }
 		error: null,
 		retry: null,
 		usage: null,
+		lastTurnUsage: null,
+		getElapsedMs: () => 0,
 		hasOlder: true,
 		loadOlder: () => {
 			track("agent.loadOlder")();
@@ -129,6 +132,7 @@ function createFakeDeps(overrides?: Partial<CommandDeps> & { running?: boolean }
 		running: overrides?.running ?? false,
 		onQuit: track("onQuit"),
 		showNotice: track("showNotice"),
+		statusBar: defaultStatusBarConfig(),
 		cwd: "/tmp",
 		setCwd: track("setCwd"),
 		currentPersona: {
@@ -712,37 +716,16 @@ describe("handleInput", () => {
 		expect(calls.showNotice).toBeUndefined();
 	});
 
-	it("/usage shows token counts and cost", async () => {
-		const { deps, calls } = createFakeDeps();
-		await handleInput("/usage", undefined, deps);
-		const notice = noticeText(calls);
-		expect(notice).toContain("100 in");
-		expect(notice).toContain("50 out");
-		expect(notice).toContain("$0.00");
-	});
-
-	it("/usage shows subagent tokens when present", async () => {
-		const { deps, calls } = createFakeDeps();
-		(deps.session.usage as any).subagentTokens = 3500;
-		await handleInput("/usage", undefined, deps);
-		const notice = noticeText(calls);
-		expect(notice).toContain("3.5k sub");
-	});
-
-	it("/usage shows cache hit percentage", async () => {
+	it("/current surfaces session usage with cost and cache rate via status bar segments", async () => {
 		const { deps, calls } = createFakeDeps();
 		(deps.session.usage as any).cacheReadTokens = 80;
 		(deps.session.usage as any).promptTokens = 100;
-		await handleInput("/usage", undefined, deps);
-		const notice = noticeText(calls);
-		expect(notice).toContain("80% cache hit");
-	});
-
-	it("/usage reports no usage when totalTokens is 0", async () => {
-		const { deps, calls } = createFakeDeps();
-		deps.session.usage.totalTokens = 0;
-		await handleInput("/usage", undefined, deps);
-		expect(noticeText(calls)).toContain("No usage");
+		(deps.session.usage as any).cost = 0.25;
+		await handleInput("/current", undefined, deps);
+		const message = calls["agent.addDisplayMessage"]?.at(-1)?.[0] as { content?: string } | undefined;
+		const content = String(message?.content ?? "");
+		expect(content).toContain("80% cached");
+		expect(content).toContain("$0.25");
 	});
 
 	it("/permissions bypass with default current prompts confirmation (declined)", async () => {
