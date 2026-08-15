@@ -276,6 +276,13 @@ describe("isRetryableStreamError", () => {
 	it("retries upstream wording even when the code is missing", () => {
 		expect(isRetryableStreamError(new Error("upstream request timed out"))).toBe(true);
 	});
+
+	it("retries server_error / server_is_overloaded codes regardless of status", () => {
+		expect(isRetryableStreamError(Object.assign(new Error("server error"), { code: "server_error" }))).toBe(true);
+		expect(isRetryableStreamError(Object.assign(new Error("overloaded"), { code: "server_is_overloaded" }))).toBe(
+			true,
+		);
+	});
 });
 
 describe("retryDelayMs", () => {
@@ -752,5 +759,27 @@ describe("describeTurnError", () => {
 		const err = Object.assign(new Error("invalid_api_key"), { code: "invalid_api_key" });
 		const out = describeTurnError(err);
 		expect(out).toContain("/provider");
+	});
+
+	it("relabels a MiMo gateway 421 moderation block with the param detail", () => {
+		const err = Object.assign(new Error("Moderation Block"), {
+			status: 400,
+			error: { code: "421", message: "Moderation Block", param: "敏感内容", type: "content_filter" },
+		});
+		const out = describeTurnError(err);
+		expect(out).toBe("Request blocked by content moderation: 敏感内容");
+	});
+
+	it("relabels a MiMo gateway 441 risk-control block", () => {
+		const err = Object.assign(new Error("Risk Control"), {
+			status: 400,
+			error: { code: "441", param: "黑产" },
+		});
+		const out = describeTurnError(err);
+		expect(out).toBe("Request blocked by risk control: 黑产");
+	});
+
+	it("falls back to 'Unknown error' for an empty message", () => {
+		expect(describeTurnError(new Error(""))).toBe("Unknown error");
 	});
 });
