@@ -7,12 +7,17 @@ import {
 	countRecentLlmRequests,
 	queryEndpointOverview,
 	queryEndpointSeries,
+	queryFileEdits,
+	queryLlmLatencyPercentiles,
 	queryRecentLlmRequests,
 	queryReliabilityOverview,
 	queryTelemetryOverview,
 	queryTelemetrySeries,
+	queryTokensPerSecond,
+	queryToolUsage,
 	recordApiRequest,
 	recordLlmRequest,
+	recordToolCall,
 } from "../src/core/telemetry.ts";
 
 describe("llm telemetry", () => {
@@ -146,5 +151,45 @@ describe("llm telemetry", () => {
 		expect(last.requests).toBe(1);
 		expect(last.avgLatencyMs).toBe(2);
 		expect(buckets[0]!.requests).toBe(0);
+	});
+
+	it("records tool latency and file-edit counts", () => {
+		recordToolCall("s1", "bash", false, 250);
+		recordToolCall("s1", "bash", true, 900);
+		recordToolCall("s1", "write", false, 15);
+
+		const tools = queryToolUsage(0);
+		const bash = tools.find((t) => t.toolName === "bash");
+		expect(bash).toMatchObject({ count: 2, errors: 1 });
+		expect(bash!.avgLatencyMs).toBe(Math.round((250 + 900) / 2));
+		expect(queryFileEdits(0)).toBe(1);
+	});
+
+	it("computes latency percentiles and tokens/sec", () => {
+		// 10 rows, one per 100ms step from 100ms to 1000ms; tokens scale with
+		// latency so each row decodes at exactly 100 tokens/sec.
+		for (let i = 0; i < 10; i++) {
+			recordLlmRequest({
+				provider: "p",
+				model: "m",
+				kind: "main",
+				latencyMs: (i + 1) * 100,
+				completionTokens: (i + 1) * 10,
+			});
+		}
+		const p = queryLlmLatencyPercentiles(0);
+		expect(p.p50).toBe(600);
+		expect(p.p95).toBe(1000);
+		expect(p.p99).toBe(1000);
+		expect(queryTokensPerSecond(0)).toBe(100);
+	});
+
+	it("counts doom-loop and empty-response error types in reliability", () => {
+		recordLlmRequest({ provider: "p", model: "m", kind: "error", error: "doom loop: bash x3", errorType: "doom-loop" });
+		recordLlmRequest({ provider: "p", model: "m", kind: "error", error: "empty response", errorType: "empty-response" });
+
+		const reliability = queryReliabilityOverview(0);
+		expect(reliability.errorTypes.some((t) => t.errorType === "doom-loop" && t.count === 1)).toBe(true);
+		expect(reliability.errorTypes.some((t) => t.errorType === "empty-response" && t.count === 1)).toBe(true);
 	});
 });

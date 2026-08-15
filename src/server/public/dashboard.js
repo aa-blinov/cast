@@ -178,8 +178,19 @@ export function Dashboard({ onClose }) {
 				api("GET", `/api/telemetry/system?since=${hours}`),
 			]);
 			if (req !== loadRequestIdRef.current) return;
-			setLlm({ overview: ov?.rows ?? [], series: se?.buckets ?? [], avgLatencyMs: ov?.avgLatencyMs ?? null });
-			setPerf({ overview: eo?.rows ?? [], series: es?.buckets ?? [], avgLatencyMs: eo?.avgLatencyMs ?? null });
+			setLlm({
+				overview: ov?.rows ?? [],
+				series: se?.buckets ?? [],
+				avgLatencyMs: ov?.avgLatencyMs ?? null,
+				latencyPercentiles: ov?.latencyPercentiles ?? null,
+				tokensPerSec: ov?.tokensPerSec ?? null,
+			});
+			setPerf({
+				overview: eo?.rows ?? [],
+				series: es?.buckets ?? [],
+				avgLatencyMs: eo?.avgLatencyMs ?? null,
+				latencyPercentiles: eo?.latencyPercentiles ?? null,
+			});
 			setReliability(rel ?? null);
 			setSystem(sys ?? null);
 			setEndpointPage((p) => ({ ...p, page: 0 }));
@@ -378,6 +389,8 @@ export function Dashboard({ onClose }) {
 	const llmCacheRate = llmTotals.prompt > 0 ? Math.round((llmTotals.cacheRead / llmTotals.prompt) * 100) : null;
 	// Global mean latency from the server (not a mean of per-group means).
 	const llmAvgLatency = llm.avgLatencyMs;
+	const llmPercentiles = llm.latencyPercentiles;
+	const llmTps = llm.tokensPerSec;
 	// Retry rate: retry ATTEMPTS per completed request — can legitimately
 	// exceed 100% when a single request was retried several times.
 	const retryRate =
@@ -393,6 +406,7 @@ export function Dashboard({ onClose }) {
 		{ requests: 0, errors: 0, max: 0 },
 	);
 	const perfAvgLatency = perf.avgLatencyMs;
+	const perfPercentiles = perf.latencyPercentiles;
 
 	const rangeLabel = range === "30d" ? "30 days" : range === "7d" ? "7 days" : "24 hours";
 	// Client-side pagination over the already-fetched endpoint overview.
@@ -429,7 +443,11 @@ export function Dashboard({ onClose }) {
 						<${KpiCard} label="Completion tokens" value=${fmtTokens(llmTotals.completion)} />
 						<${KpiCard} label="Cost" value=${fmtCost(llmTotals.cost)} />
 						<${KpiCard} label="Cache rate" value=${llmCacheRate == null ? "—" : `${llmCacheRate}%`} tone=${llmCacheRate != null && llmCacheRate >= 80 ? "ok" : ""} />
-						<${KpiCard} label="Avg latency" value=${fmtMs(llmAvgLatency)} />
+						<${KpiCard} label="Latency avg" value=${fmtMs(llmAvgLatency)} />
+						<${KpiCard} label="p50" value=${fmtMs(llmPercentiles?.p50 ?? null)} />
+						<${KpiCard} label="p95" value=${fmtMs(llmPercentiles?.p95 ?? null)} />
+						<${KpiCard} label="p99" value=${fmtMs(llmPercentiles?.p99 ?? null)} />
+						<${KpiCard} label="Tokens/s" value=${llmTps == null ? "—" : `${llmTps}`} />
 						<${KpiCard} label="Errors" value=${llmTotals.errors} tone=${llmTotals.errors > 0 ? "err" : ""} />
 					</div>
 					<div class="dash-charts">
@@ -470,6 +488,9 @@ export function Dashboard({ onClose }) {
 					<div class="dash-kpis">
 						<${KpiCard} label="Requests" value=${fmtTokens(perfTotals.requests)} sub=${rangeLabel} />
 						<${KpiCard} label="Avg latency" value=${fmtMs(perfAvgLatency)} />
+						<${KpiCard} label="p50" value=${fmtMs(perfPercentiles?.p50 ?? null)} />
+						<${KpiCard} label="p95" value=${fmtMs(perfPercentiles?.p95 ?? null)} />
+						<${KpiCard} label="p99" value=${fmtMs(perfPercentiles?.p99 ?? null)} />
 						<${KpiCard} label="Worst latency" value=${fmtMs(perfTotals.max)} />
 						<${KpiCard} label="5xx errors" value=${perfTotals.errors} tone=${perfTotals.errors > 0 ? "err" : ""} />
 					</div>
@@ -529,6 +550,7 @@ export function Dashboard({ onClose }) {
 						<${KpiCard} label="Context saved" value=${fmtTokens(system?.compactions?.tokensBefore ?? 0)} />
 						<${KpiCard} label="Avg context use" value=${system?.context?.avgUtilizationPct != null ? `${system.context.avgUtilizationPct}%` : "—"} sub=${system?.context?.avgPromptTokens != null ? `${fmtTokens(system.context.avgPromptTokens)} prompt tokens` : ""} />
 						<${KpiCard} label="Sessions" value=${fmtTokens(system?.sessions?.sessions ?? 0)} sub=${system?.sessions?.avgMessagesPerSession != null ? `~${Math.round(system.sessions.avgMessagesPerSession)} msgs/session` : ""} />
+						<${KpiCard} label="File edits" value=${fmtTokens(system?.fileEdits ?? 0)} sub="write + edit calls" />
 					</div>
 					<div class="dash-charts">
 						<div class="dash-chart-box dash-chart-box-wide"><div class="dash-chart-title">Tool calls</div><div class="dash-chart"><canvas id="dash-chart-tools" /></div></div>
@@ -536,10 +558,10 @@ export function Dashboard({ onClose }) {
 					<div class="dash-section-title">Tool usage</div>
 					<div class="dash-table-wrap">
 						<table class="dash-table">
-							<thead><tr><th>Tool</th><th>Calls</th><th>Errors</th></tr></thead>
+							<thead><tr><th>Tool</th><th>Calls</th><th>Errors</th><th>Avg latency</th></tr></thead>
 							<tbody>
-								${!system || system.tools.length === 0 ? html`<tr><td colspan="3" class="dash-empty">No tool calls in this window.</td></tr>` : null}
-								${(system?.tools ?? []).map((t) => html`<tr><td>${t.toolName}</td><td>${t.count}</td><td>${t.errors}</td></tr>`)}
+								${!system || system.tools.length === 0 ? html`<tr><td colspan="4" class="dash-empty">No tool calls in this window.</td></tr>` : null}
+								${(system?.tools ?? []).map((t) => html`<tr><td>${t.toolName}</td><td>${t.count}</td><td>${t.errors}</td><td>${fmtMs(t.avgLatencyMs ?? null)}</td></tr>`)}
 							</tbody>
 						</table>
 					</div>

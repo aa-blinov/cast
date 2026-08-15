@@ -604,6 +604,15 @@ CREATE INDEX IF NOT EXISTS idx_compactions_ts ON compactions(ts);
 `);
 		},
 	},
+	{
+		version: 23,
+		name: "tool-latency",
+		up: (db) => {
+			if (!columnExists(db, "tool_calls", "latency_ms")) {
+				db.exec("ALTER TABLE tool_calls ADD COLUMN latency_ms INTEGER");
+			}
+		},
+	},
 ];
 
 const MIGRATION_TABLE_SCHEMA = `
