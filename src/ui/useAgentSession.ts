@@ -551,7 +551,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		[effectiveDaemonUrl, effectiveDaemonToken],
 	);
 	const pendingServerMessagesRef = useRef(
-		new Map<string, { text: string; images?: string[]; clientMessageId: string; sending: boolean }>(),
+		new Map<string, { text: string; images?: string[]; clientMessageId: string }>(),
 	);
 	// Load only the most recent page of history on resume. Loading the full
 	// history (getFullHistory) dumped thousands of lines into the terminal's
@@ -846,7 +846,6 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					text,
 					images: images?.map((img) => img.dataUrl),
 					clientMessageId,
-					sending: true,
 				});
 				setMessages((msgs) => [...msgs, { role: "user", content: text, clientMessageId }]);
 				const attempt = async (client: ServerClient): Promise<boolean> => {
@@ -861,8 +860,6 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 						pendingServerMessagesRef.current.delete(clientMessageId);
 						return true;
 					} catch {
-						const pending = pendingServerMessagesRef.current.get(clientMessageId);
-						if (pending) pending.sending = false;
 						return false;
 					}
 				};
@@ -1418,8 +1415,6 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		const retryPending = async () => {
 			const client = serverClient ?? { baseUrl: effectiveDaemonUrl, token: effectiveDaemonToken };
 			for (const pending of pendingServerMessagesRef.current.values()) {
-				if (pending.sending) continue;
-				pending.sending = true;
 				try {
 					// Preserve send order: a retried older prompt must reach the daemon
 					// before a later one from the same session.
@@ -1427,7 +1422,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					await submitServerChat(client, session.id, pending.text, pending.images, pending.clientMessageId);
 					pendingServerMessagesRef.current.delete(pending.clientMessageId);
 				} catch {
-					pending.sending = false;
+					// Keep it pending for the next reconnect; the daemon dedupes by
+					// clientMessageId, so a duplicate re-send is dropped server-side.
 				}
 			}
 		};
