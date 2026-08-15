@@ -769,6 +769,10 @@ export interface LoopConfig {
 	 * agents (checkpoint writer): a self-compacted maintenance session can lose
 	 * the thread mid-repair, so it should fail explicitly instead. */
 	skipCompaction?: boolean;
+	/** Nested in-process run (task-tool subagent): skip the cross-process
+	 * turn-runner lock — the parent holds it for the same session, and the
+	 * subagent runs synchronously inside the parent's awaited tool call. */
+	skipTurnRunnerLock?: boolean;
 	/** Last durable checkpoint boundary in the current message snapshot. */
 	checkpointBoundary?: number;
 	/** Checkpoint writer prefix-fork mode; false uses only the post-checkpoint delta. */
@@ -1570,7 +1574,12 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 	// removed in the finally below — including the crash path (kill -9, OOM, lost
 	// terminal), because the file's pid becomes dead and readers filter it out.
 	const runnerSessionId = loopConfig.sessionId;
-	const lockAcquired = !runnerSessionId || acquireTurnRunner(runnerSessionId, process.pid);
+	// Nested in-process runs (the task tool's subagent) must not trip the
+	// cross-process turn-runner lock — the parent already holds it for this
+	// session, and the subagent runs synchronously while the parent awaits it,
+	// so there is no cross-process race to guard against.
+	const lockAcquired =
+		!runnerSessionId || loopConfig.skipTurnRunnerLock || acquireTurnRunner(runnerSessionId, process.pid);
 	if (!lockAcquired) throw new Error(`Session "${runnerSessionId}" is already running in another process`);
 	if (runnerSessionId) markTurnRunner(runnerSessionId, process.pid);
 	try {
