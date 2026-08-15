@@ -551,6 +551,10 @@ export function Dashboard({ onClose }) {
 						<${KpiCard} label="Avg context use" value=${system?.context?.avgUtilizationPct != null ? `${system.context.avgUtilizationPct}%` : "—"} sub=${system?.context?.avgPromptTokens != null ? `${fmtTokens(system.context.avgPromptTokens)} prompt tokens` : ""} />
 						<${KpiCard} label="Sessions" value=${fmtTokens(system?.sessions?.sessions ?? 0)} sub=${system?.sessions?.avgMessagesPerSession != null ? `~${Math.round(system.sessions.avgMessagesPerSession)} msgs/session` : ""} />
 						<${KpiCard} label="File edits" value=${fmtTokens(system?.fileEdits ?? 0)} sub="write + edit calls" />
+						<${KpiCard} label="Turns" value=${fmtTokens(system?.turns?.turns ?? 0)} sub=${rangeLabel} />
+						<${KpiCard} label="Tool calls/turn" value=${system?.turns?.avgToolCallsPerTurn != null ? `${system.turns.avgToolCallsPerTurn}` : "—"} />
+						<${KpiCard} label="Tokens/turn" value=${fmtTokens(system?.turns?.avgTokensPerTurn ?? null)} />
+						<${KpiCard} label="Time/turn" value=${fmtMs(system?.turns?.avgDurationMs ?? null)} />
 					</div>
 					<div class="dash-charts">
 						<div class="dash-chart-box dash-chart-box-wide"><div class="dash-chart-title">Tool calls</div><div class="dash-chart"><canvas id="dash-chart-tools" /></div></div>
