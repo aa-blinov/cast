@@ -91,6 +91,7 @@ import {
 } from "./session.ts";
 import {
 	checkpointFork as checkpointForkSetting,
+	checkpointThresholdsSetting,
 	isMemoryEnabled,
 	isMemoryWriteEnabled,
 	loadSettings,
@@ -767,6 +768,8 @@ export interface LoopConfig {
 	checkpointBoundary?: number;
 	/** MiMo-compatible checkpoint writer mode; false uses only the post-checkpoint delta. */
 	checkpointFork?: boolean;
+	/** Override the checkpoint writer trigger points (% of window). Falls back to the setting, then the window defaults. */
+	checkpointThresholds?: number[];
 	/** Request-only cache marker for the fork prefix. */
 	cachePrefixBoundary?: number;
 	/** Run configured dream/distill maintenance when this is a fresh top-level session. */
@@ -1372,11 +1375,47 @@ async function recoverMemoryMaintenance(snapshot: AgentActorSnapshot): Promise<v
 agentActorRegistry.registerRecoveryHandler("checkpoint-writer", recoverCheckpointWriter);
 agentActorRegistry.registerRecoveryHandler("memory-maintenance", recoverMemoryMaintenance);
 
-function shouldStartCheckpointWriter(loopConfig: LoopConfig, messages: Message[]): boolean {
-	if (!loopConfig.memory || !isMemoryWriteEnabled() || loopConfig.signal?.aborted) return false;
-	const observedTokens = loopConfig.lastPromptTokens ?? estimateTokens(messages);
-	const threshold = loopConfig.config.contextWindow * Math.min(loopConfig.config.compactionThreshold, 0.6);
-	return observedTokens >= threshold;
+// In-process record of which checkpoint thresholds each session already fired.
+// Mirrors MiMo's per-session crossed-threshold state; a process restart simply
+// re-fires the first uncrossed threshold, which is idempotent for the writer.
+const crossedCheckpointThresholds = new Map<string, Set<number>>();
+
+/**
+ * MiMo-style checkpoint trigger ladder: a writer fires each time the used
+ * context crosses the next percentage of the model window, so a fresh
+ * checkpoint.md almost always exists when compaction needs to rebuild from it.
+ */
+export function defaultCheckpointThresholds(contextWindow: number): number[] {
+	if (contextWindow < 25_000) return [];
+	if (contextWindow <= 200_000) return [20, 40, 60, 80];
+	if (contextWindow <= 500_000) return [10, 20, 30, 40, 50, 60, 70, 80, 90];
+	return Array.from({ length: 18 }, (_, index) => (index + 1) * 5);
+}
+
+function resolveCheckpointThresholds(contextWindow: number, override?: number[]): number[] {
+	const configured = override ?? checkpointThresholdsSetting();
+	if (configured && configured.length > 0) return configured;
+	return defaultCheckpointThresholds(contextWindow);
+}
+
+/** True when the observed tokens crossed a not-yet-fired threshold for the session. */
+function crossedCheckpointThreshold(
+	sessionId: string,
+	contextWindow: number,
+	observedTokens: number,
+	override?: number[],
+): boolean {
+	const thresholds = resolveCheckpointThresholds(contextWindow, override);
+	if (thresholds.length === 0) return false;
+	const usage = contextWindow > 0 ? (observedTokens / contextWindow) * 100 : 0;
+	let crossed = crossedCheckpointThresholds.get(sessionId);
+	if (!crossed) {
+		crossed = new Set<number>();
+		crossedCheckpointThresholds.set(sessionId, crossed);
+	}
+	const newly = thresholds.filter((threshold) => usage >= threshold && !crossed.has(threshold));
+	for (const threshold of newly) crossed.add(threshold);
+	return newly.length > 0;
 }
 
 function findCheckpointBoundary(messages: Message[]): number {
@@ -1447,43 +1486,55 @@ export async function runAgentLoop(initialMessages: Message[], loopConfig: LoopC
 		});
 	}
 	await runLoop(tracked, loopConfig);
-	if (shouldStartCheckpointWriter(loopConfig, tracked)) {
-		persistCheckpointSource(loopConfig.memory!.sessionId, tracked);
-		const checkpointFork = loopConfig.checkpointFork ?? checkpointForkSetting();
-		const checkpointBoundary = loopConfig.checkpointBoundary ?? findCheckpointBoundary(tracked);
-		const durableDelta =
-			!checkpointFork && checkpointBoundary < 0 && getCheckpointWatermark(loopConfig.memory!.sessionId) !== undefined
-				? getMessagesAfterCheckpoint(loopConfig.memory!.sessionId)
-				: [];
-		const writerMessages = durableDelta.length > 0 ? durableDelta : tracked;
-		// Fork mode anchors the writer at the CURRENT transcript end, not the last
-		// durable boundary: the forked prefix then covers the latest turn (the whole
-		// point of the cache-preserving fork) and the watermark commit advances past
-		// it. The durable watermark only feeds the delta-only no-fork path.
-		const writerBoundary = checkpointFork
-			? lastNonSystemIndex(tracked)
-			: durableDelta.length > 0
-				? -1
-				: checkpointBoundary;
-		if (!checkpointFork || writerBoundary >= 0) {
-			const writerHandle = scheduleProjectCheckpointWriter(
-				{
-					cwd: loopConfig.cwd,
-					sessionId: loopConfig.memory!.sessionId,
-					model: loopConfig.model,
-					config: loopConfig.config,
-					messages: writerMessages,
-					providerOverride: loopConfig.modelProvider,
-					checkpointBoundary: writerBoundary,
-					checkpointFork,
-					parentSystemPrompt: loopConfig.checkpointForkContext?.systemPrompt,
-					parentForkContext: loopConfig.checkpointForkContext,
-					parentToolRuntime: checkpointWriterRuntime(loopConfig),
-				},
-				runCheckpointWriter,
-				loopConfig.onWarning,
-			);
-			loopConfig.onCheckpointWriter?.(writerHandle);
+	if (loopConfig.memory && isMemoryWriteEnabled() && !loopConfig.signal?.aborted) {
+		const observedTokens = loopConfig.lastPromptTokens ?? estimateTokens(tracked);
+		if (
+			crossedCheckpointThreshold(
+				loopConfig.memory.sessionId,
+				loopConfig.config.contextWindow,
+				observedTokens,
+				loopConfig.checkpointThresholds,
+			)
+		) {
+			persistCheckpointSource(loopConfig.memory.sessionId, tracked);
+			const checkpointFork = loopConfig.checkpointFork ?? checkpointForkSetting();
+			const checkpointBoundary = loopConfig.checkpointBoundary ?? findCheckpointBoundary(tracked);
+			const durableDelta =
+				!checkpointFork &&
+				checkpointBoundary < 0 &&
+				getCheckpointWatermark(loopConfig.memory!.sessionId) !== undefined
+					? getMessagesAfterCheckpoint(loopConfig.memory!.sessionId)
+					: [];
+			const writerMessages = durableDelta.length > 0 ? durableDelta : tracked;
+			// Fork mode anchors the writer at the CURRENT transcript end, not the last
+			// durable boundary: the forked prefix then covers the latest turn (the whole
+			// point of the cache-preserving fork) and the watermark commit advances past
+			// it. The durable watermark only feeds the delta-only no-fork path.
+			const writerBoundary = checkpointFork
+				? lastNonSystemIndex(tracked)
+				: durableDelta.length > 0
+					? -1
+					: checkpointBoundary;
+			if (!checkpointFork || writerBoundary >= 0) {
+				const writerHandle = scheduleProjectCheckpointWriter(
+					{
+						cwd: loopConfig.cwd,
+						sessionId: loopConfig.memory!.sessionId,
+						model: loopConfig.model,
+						config: loopConfig.config,
+						messages: writerMessages,
+						providerOverride: loopConfig.modelProvider,
+						checkpointBoundary: writerBoundary,
+						checkpointFork,
+						parentSystemPrompt: loopConfig.checkpointForkContext?.systemPrompt,
+						parentForkContext: loopConfig.checkpointForkContext,
+						parentToolRuntime: checkpointWriterRuntime(loopConfig),
+					},
+					runCheckpointWriter,
+					loopConfig.onWarning,
+				);
+				loopConfig.onCheckpointWriter?.(writerHandle);
+			}
 		}
 	}
 	return tracked;

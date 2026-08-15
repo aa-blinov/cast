@@ -173,6 +173,8 @@ export interface Settings {
 	memoryDistillIntervalDays?: number;
 	/** Use the parent's full prompt prefix for checkpoint writers; false uses only the post-checkpoint delta. */
 	checkpointFork?: boolean;
+	/** Checkpoint writer trigger points as percentages of the context window (MiMo-style ladder). */
+	checkpointThresholds?: number[];
 }
 
 // ============================================================================
@@ -336,6 +338,16 @@ export function memoryDistillIntervalDays(settings: Settings = loadSettings()): 
 
 export function checkpointFork(settings: Settings = loadSettings()): boolean {
 	return settings.checkpointFork === true;
+}
+
+export function checkpointThresholdsSetting(settings: Settings = loadSettings()): number[] | undefined {
+	const value = settings.checkpointThresholds;
+	if (!Array.isArray(value)) return undefined;
+	const valid = value.filter(
+		(entry) => typeof entry === "number" && Number.isFinite(entry) && entry > 0 && entry <= 100,
+	);
+	if (valid.length === 0) return undefined;
+	return [...new Set(valid)].sort((a, b) => a - b);
 }
 
 /** true/false if this project's trust decision was already made, undefined if never asked. */
