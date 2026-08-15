@@ -76,8 +76,13 @@ export const NOTES_TEMPLATE = `# Session notes
 _Free-form scratchpad. The checkpoint writer reconciles entries at checkpoints._
 `;
 
-function memoryRoot(): string {
+export function memoryRoot(): string {
 	return process.env.CAST_MEMORY_DIR || join(homedir(), ".cast", "memory");
+}
+
+/** Claude Code memory root; CAST_CC_MEMORY_DIR lets tests isolate the walk. */
+export function ccMemoryRoot(): string {
+	return process.env.CAST_CC_MEMORY_DIR || join(homedir(), ".claude", "projects");
 }
 
 export function sessionMemoryDir(sessionId: string): string {

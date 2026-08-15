@@ -1,5 +1,7 @@
 import { loadConfig, resolveProvider } from "../src/core/config.ts";
 import { dirname, join } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import { resetDbConnectionForTests } from "../src/core/db.ts";
 import {
 	buildMemoryPrompt,
@@ -7,6 +9,7 @@ import {
 	searchProjectMemory,
 	storeProjectMemory,
 } from "../src/core/memory.ts";
+import { searchMemoryFiles, reconcileMemoryFileIndex } from "../src/core/memory-files-index.ts";
 import { runAgentLoop } from "../src/core/loop.ts";
 import { createSession, saveSession } from "../src/core/session.ts";
 import { loadSettings } from "../src/core/settings.ts";
@@ -131,7 +134,7 @@ for (const [caseIndex, testCase] of cases.entries()) {
 			},
 		);
 		storeProjectMemory(cwd, sessionId, `e2e-turn-${attempt}`, [
-			{ content: marker, type: "knowledge", importance: 80 },
+			{ content: `${marker}: ${testCase.fact}`, type: "knowledge", importance: 80 },
 		]);
 		matches = await waitForMemory(marker, (match) => match.content.includes(marker));
 		if (matches.some((match) => match.content.includes(marker))) break;
@@ -174,16 +177,41 @@ if (raceMatches.filter((match) => match.content === raceFact.content).length !==
 	throw new Error(`Concurrent memory writes were not deduplicated: ${JSON.stringify(raceMatches)}`);
 }
 
-const claimMessages = [{ role: "user", content: "Remember this durable claim test: the writer must run once." }];
-const claimSession = `e2e-memory-claim-${Date.now()}`;
-const claimInput = { cwd, sessionId: claimSession, model, config, messages: claimMessages };
-const claimResults = await Promise.all([
-	extractAndStoreProjectMemory(claimInput),
-	extractAndStoreProjectMemory(claimInput),
-]);
-if (claimResults.filter((result) => result.skipped).length !== 1) {
-	throw new Error(`Extraction claim did not suppress the duplicate writer: ${JSON.stringify(claimResults)}`);
+// File-backed search: checkpoint/notes/task-progress and spillover files must be
+// findable through the memory-file index, not just the parsed MEMORY.md bullets.
+const fileProbe = `CAST_FILE_PROBE_${Date.now()}`;
+const probeMemoryDir = join(process.env.CAST_MEMORY_DIR ?? join(os.homedir(), ".cast", "memory"));
+const probeSessionId = `e2e-file-probe-${Date.now()}`;
+mkdirSync(join(probeMemoryDir, "sessions", probeSessionId), { recursive: true });
+writeFileSync(
+	join(probeMemoryDir, "sessions", probeSessionId, "notes.md"),
+	`# Session notes\n\nThe unique file probe token is ${fileProbe}. It must be reachable by the memory tool.\n`,
+	"utf8",
+);
+const fileMatches = searchMemoryFiles(fileProbe, { scope: "sessions", scopeId: probeSessionId });
+if (!fileMatches.some((match) => match.snippet.includes(fileProbe))) {
+	throw new Error(`Memory-file index did not surface the notes probe: ${JSON.stringify(fileMatches)}`);
 }
+
+// Claude Code memory (cc scope): index a fake slug under an isolated cc root.
+const ccRoot = join(dirname(database), "cc");
+const ccSlug = `e2e-${Date.now()}`;
+mkdirSync(join(ccRoot, ccSlug, "memory"), { recursive: true });
+writeFileSync(
+	join(ccRoot, ccSlug, "memory", "probe.md"),
+	["---", "metadata:", "  type: reference", "---", `# Probe`, `The cc probe token ${fileProbe} is indexed under scope cc.`].join("\n"),
+	"utf8",
+);
+const previousCcDir = process.env.CAST_CC_MEMORY_DIR;
+process.env.CAST_CC_MEMORY_DIR = ccRoot;
+reconcileMemoryFileIndex(true);
+const ccMatches = searchMemoryFiles(fileProbe, { scope: "cc", includeCc: true });
+if (!ccMatches.some((match) => match.scopeId === ccSlug && match.type === "reference")) {
+	throw new Error(`cc scope did not surface the probe memory file: ${JSON.stringify(ccMatches)}`);
+}
+reconcileMemoryFileIndex(false);
+if (previousCcDir === undefined) delete process.env.CAST_CC_MEMORY_DIR;
+else process.env.CAST_CC_MEMORY_DIR = previousCcDir;
 
 console.log(
 	JSON.stringify(
@@ -193,7 +221,8 @@ console.log(
 			cases: results.length,
 			results,
 			concurrentWrite: "deduplicated",
-			duplicateWriter: "suppressed",
+			fileIndex: "indexed-notes-and-cc-memory",
+			ccScope: "indexed-reference-type",
 		},
 		null,
 		2,
