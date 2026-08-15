@@ -6,6 +6,7 @@ import { resetDbConnectionForTests } from "../src/core/db.ts";
 import {
 	buildMemoryPrompt,
 	createProjectMemoryService,
+	execMemorySearch,
 	searchProjectMemory,
 	storeProjectMemory,
 } from "../src/core/memory.ts";
@@ -191,6 +192,17 @@ writeFileSync(
 const fileMatches = searchMemoryFiles(fileProbe, { scope: "sessions", scopeId: probeSessionId });
 if (!fileMatches.some((match) => match.snippet.includes(fileProbe))) {
 	throw new Error(`Memory-file index did not surface the notes probe: ${JSON.stringify(fileMatches)}`);
+}
+
+// The memory tool returns the file-backed hit as path + scope + snippet so the
+// model can Read the file for the full body (MiMo contract).
+const toolResult = execMemorySearch({ query: fileProbe, scope: "sessions", scope_id: probeSessionId }, cwd);
+if (
+	!toolResult.content.includes(`Scope: sessions/${probeSessionId}`) ||
+	!toolResult.content.includes("Type: notes") ||
+	!toolResult.content.includes(fileProbe)
+) {
+	throw new Error(`Memory tool did not surface the notes probe with a path: ${toolResult.content}`);
 }
 
 // Claude Code memory (cc scope): index a fake slug under an isolated cc root.

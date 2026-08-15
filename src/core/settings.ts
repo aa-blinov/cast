@@ -175,6 +175,8 @@ export interface Settings {
 	checkpointFork?: boolean;
 	/** Checkpoint writer trigger points as percentages of the context window (MiMo-style ladder). */
 	checkpointThresholds?: number[];
+	/** Token safety buffer reserved at the end of the window; thresholds are clamped to window - this. */
+	checkpointReserved?: number;
 }
 
 // ============================================================================
@@ -348,6 +350,11 @@ export function checkpointThresholdsSetting(settings: Settings = loadSettings())
 	);
 	if (valid.length === 0) return undefined;
 	return [...new Set(valid)].sort((a, b) => a - b);
+}
+
+export function checkpointReservedSetting(settings: Settings = loadSettings()): number | undefined {
+	const value = settings.checkpointReserved;
+	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : undefined;
 }
 
 /** true/false if this project's trust decision was already made, undefined if never asked. */

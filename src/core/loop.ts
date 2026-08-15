@@ -91,6 +91,7 @@ import {
 } from "./session.ts";
 import {
 	checkpointFork as checkpointForkSetting,
+	checkpointReservedSetting,
 	checkpointThresholdsSetting,
 	isMemoryEnabled,
 	isMemoryWriteEnabled,
@@ -1380,6 +1381,11 @@ agentActorRegistry.registerRecoveryHandler("memory-maintenance", recoverMemoryMa
 // re-fires the first uncrossed threshold, which is idempotent for the writer.
 const crossedCheckpointThresholds = new Map<string, Set<number>>();
 
+// Token safety buffer reserved at the end of the window (MiMo parity): no
+// checkpoint threshold is allowed to fire past window - reserved, because past
+// that point there is no room left in the window for the writer's own turn.
+const CHECKPOINT_RESERVED = 13_000;
+
 /**
  * MiMo-style checkpoint trigger ladder: a writer fires each time the used
  * context crosses the next percentage of the model window, so a fresh
@@ -1392,10 +1398,18 @@ export function defaultCheckpointThresholds(contextWindow: number): number[] {
 	return Array.from({ length: 18 }, (_, index) => (index + 1) * 5);
 }
 
-function resolveCheckpointThresholds(contextWindow: number, override?: number[]): number[] {
-	const configured = override ?? checkpointThresholdsSetting();
-	if (configured && configured.length > 0) return configured;
-	return defaultCheckpointThresholds(contextWindow);
+/** Resolve the configured/derived percentages into clamped token counts. */
+function resolveCheckpointThresholdTokens(contextWindow: number, override?: number[]): number[] {
+	const percentages = override ?? checkpointThresholdsSetting() ?? defaultCheckpointThresholds(contextWindow);
+	if (percentages.length === 0) return [];
+	const reserved = checkpointReservedSetting() ?? CHECKPOINT_RESERVED;
+	// The reserve only makes sense once the window can actually accommodate it;
+	// tiny (test) windows run without a buffer.
+	const maxAllowed = Math.max(1, contextWindow - (contextWindow > CHECKPOINT_RESERVED ? reserved : 0));
+	const tokens = percentages.map((percentage) =>
+		Math.floor((contextWindow * Math.min(100, Math.max(0, percentage))) / 100),
+	);
+	return [...new Set(tokens.map((count) => Math.min(count, maxAllowed)))].sort((a, b) => a - b);
 }
 
 /** True when the observed tokens crossed a not-yet-fired threshold for the session. */
@@ -1405,15 +1419,14 @@ function crossedCheckpointThreshold(
 	observedTokens: number,
 	override?: number[],
 ): boolean {
-	const thresholds = resolveCheckpointThresholds(contextWindow, override);
+	const thresholds = resolveCheckpointThresholdTokens(contextWindow, override);
 	if (thresholds.length === 0) return false;
-	const usage = contextWindow > 0 ? (observedTokens / contextWindow) * 100 : 0;
 	let crossed = crossedCheckpointThresholds.get(sessionId);
 	if (!crossed) {
 		crossed = new Set<number>();
 		crossedCheckpointThresholds.set(sessionId, crossed);
 	}
-	const newly = thresholds.filter((threshold) => usage >= threshold && !crossed.has(threshold));
+	const newly = thresholds.filter((threshold) => observedTokens >= threshold && !crossed.has(threshold));
 	for (const threshold of newly) crossed.add(threshold);
 	return newly.length > 0;
 }

@@ -97,8 +97,8 @@ describe("memory file index", () => {
 
 		const toolResult = execMemorySearch({ query: "monotonic SSE sequence" }, cwd);
 		expect(toolResult.content).toContain("monotonic SSE sequence");
-		expect(toolResult.content).toContain(`sessions:${session.id}`);
-		expect(toolResult.content).toContain("notes");
+		expect(toolResult.content).toContain(`Scope: sessions/${session.id}`);
+		expect(toolResult.content).toContain("Type: notes");
 
 		const scoped = execMemorySearch(
 			{ query: "monotonic SSE sequence", scope: "sessions", scope_id: session.id },
