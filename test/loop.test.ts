@@ -4094,6 +4094,37 @@ describe("runAgentLoop — compaction", () => {
 		expect(result.at(-1)?.content).toBe("done");
 	});
 
+	it("surfaces compaction_failed plus the original overflow error when the summarization call itself fails", async () => {
+		// compactSessionMessages catches a summarization failure and returns
+		// compacted:false — the loop must then emit compaction_failed and throw
+		// the ORIGINAL overflow (not a swallowed or mislabeled error), so the
+		// transcript is preserved and the user sees why the turn failed.
+		const events: AgentEvent[] = [];
+		let attempts = 0;
+		vi.mocked(streamAndCollect).mockImplementation(async () => {
+			attempts++;
+			if (attempts === 1) {
+				const err = new Error("400 context_length_exceeded") as Error & { code: string };
+				err.code = "context_length_exceeded";
+				throw err;
+			}
+			// The compaction summarization LLM call fails too (non-retryable).
+			throw new Error("provider outage during summarization");
+		});
+
+		await runAgentLoop([...seedHistory(6), { role: "user", content: "go" }], {
+			config: tinyBudgetConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "test",
+			onEvent: (e) => events.push(e),
+		});
+
+		expect(events.some((e) => e.type === "compaction_failed")).toBe(true);
+		const errorEvent = events.find((e) => e.type === "error");
+		expect(String((errorEvent as { message: string } | undefined)?.message)).toContain("context_length_exceeded");
+	});
+
 	it("context-overflow yanks the largest tool result inline before falling back to compaction", async () => {
 		// The in-place shrink is cheaper than LLM-based compaction and doesn't
 		// itself risk an overflow — it'd be wasted budget to compact first

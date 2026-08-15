@@ -430,6 +430,34 @@ describe("project memory", () => {
 		expect(getSessionEvents(session.id).map((event) => event.type)).toContain("memory_dream_completed");
 	});
 
+	it("degrades gracefully when the dream JSON LLM call fails — no partial writes", async () => {
+		const projectCwd = join(root, "project-dream-fail");
+		const session = createSession("test-model", projectCwd);
+		saveSession(session);
+		storeProjectMemory(projectCwd, session.id, "turn-a", [
+			{ type: "rule", content: "Keep the current daemon single-writer.", importance: 90 },
+		]);
+		const before = listProjectMemory(projectCwd).length;
+		expect(before).toBeGreaterThan(0);
+
+		vi.mocked(streamAndCollect).mockRejectedValueOnce(new Error("provider outage during dream"));
+
+		await expect(
+			dreamProjectMemory({
+				cwd: projectCwd,
+				sessionId: session.id,
+				model: session.model,
+				config: testConfig,
+				messages: [{ role: "user", content: "Consolidate the project memory" }],
+			}),
+		).rejects.toThrow("provider outage during dream");
+
+		// The failure happened before any parsing/writes — memory untouched,
+		// no completion event recorded.
+		expect(listProjectMemory(projectCwd)).toHaveLength(before);
+		expect(getSessionEvents(session.id).map((event) => event.type)).not.toContain("memory_dream_completed");
+	});
+
 	it("distills a repeated workflow into a reusable project artifact", async () => {
 		const projectCwd = join(root, "project");
 		const session = createSession("test-model", projectCwd);
