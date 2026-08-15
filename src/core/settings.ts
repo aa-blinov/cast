@@ -161,6 +161,8 @@ export interface Settings {
 	memorySearchScoreFloor?: number;
 	/** Reconcile project memory files before search operations. */
 	memoryReconcileOnSearch?: boolean;
+	/** Index Claude Code memory files (~/.claude/projects/<slug>/memory) into search. */
+	memoryCcIndex?: boolean;
 	/** Automatically consolidate project memory when a new top-level session starts. */
 	memoryDreamAuto?: boolean;
 	/** Minimum days between automatic dream runs (default: 7; 0 runs every new session). */
@@ -308,6 +310,10 @@ export function memorySearchScoreFloor(settings: Settings = loadSettings()): num
 
 export function memoryReconcileOnSearch(settings: Settings = loadSettings()): boolean {
 	return settings.memoryReconcileOnSearch !== false;
+}
+
+export function memoryCcIndex(settings: Settings = loadSettings()): boolean {
+	return settings.memoryCcIndex === true;
 }
 
 export function memoryDreamAuto(settings: Settings = loadSettings()): boolean {
