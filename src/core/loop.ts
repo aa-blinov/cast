@@ -98,9 +98,9 @@ import {
 	loadSettings,
 	memoryPromptBudget,
 } from "./settings.ts";
-import { recordLlmRequest } from "./telemetry.ts";
 import { resolveSshHosts, type SshHost } from "./ssh.ts";
 import type { SubagentPrompt } from "./subagents.ts";
+import { recordLlmRequest } from "./telemetry.ts";
 import { formatTodoList, remainingTodoCount, type TodoItem, validateTodos } from "./todo.ts";
 import { BackgroundTaskRegistry } from "./tools/bash-background.ts";
 import { type CompletedToolCallStatus, completedToolCallStatus, normalizeToolResultError } from "./tools/shared.ts";
@@ -1054,7 +1054,10 @@ interface BackgroundAgentContext {
 // bridge's onEvent, so their usage never reached telemetry — memory
 // maintenance in particular is a steady, non-trivial share of total tokens.
 // Same provider-name resolution the bridge uses for the chat footer.
-function recordBackgroundUsage(context: BackgroundAgentContext, event: { usage: Usage; generationMs?: number; ttftMs?: number }): void {
+function recordBackgroundUsage(
+	context: BackgroundAgentContext,
+	event: { usage: Usage; generationMs?: number; ttftMs?: number },
+): void {
 	const settings = loadSettings();
 	const baseURL = context.providerOverride?.baseURL ?? context.config.baseURL;
 	const apiKey = context.providerOverride?.apiKey ?? context.config.apiKey;

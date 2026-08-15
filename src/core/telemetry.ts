@@ -715,7 +715,9 @@ export interface MemoryMaintenanceOverview {
 export function queryMemoryMaintenance(sinceMs: number): MemoryMaintenanceOverview {
 	const db = getDb();
 	const runs = db
-		.prepare("SELECT kind, status, COUNT(*) AS count FROM memory_maintenance WHERE ts >= ? GROUP BY kind, status ORDER BY kind")
+		.prepare(
+			"SELECT kind, status, COUNT(*) AS count FROM memory_maintenance WHERE ts >= ? GROUP BY kind, status ORDER BY kind",
+		)
 		.all(sinceMs);
 	const totals = db
 		.prepare(
