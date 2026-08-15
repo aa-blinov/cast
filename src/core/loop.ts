@@ -2323,6 +2323,24 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 					return;
 				}
 
+				// Moderation / content-policy block. OpenAI reports it as
+				// finish_reason "content_filter" or a streamed `refusal` field —
+				// neither lands in `content`, so without this branch the refusal
+				// would commit as an empty/placeholder answer and the user would
+				// have no idea the request was blocked. Commit a visible
+				// explanation instead.
+				if (completion.finishReason === "content_filter" || completion.refusal) {
+					const refusalText = (completion.refusal ?? "").trim();
+					const refusalMsg = refusalText
+						? `The model refused the request: ${refusalText}`
+						: "The model refused the request (content filter).";
+					messages.push({ role: "assistant", content: refusalMsg });
+					onEvent({ type: "turn_end", toolResults: [] });
+					onWarning?.(refusalMsg);
+					onEvent({ type: "end", reason: "stop" });
+					return;
+				}
+
 				// Build assistant message. An assistant turn must carry either
 				// content or tool_calls — a turn that produced only reasoning
 				// (all output in reasoning_content) would otherwise persist as
