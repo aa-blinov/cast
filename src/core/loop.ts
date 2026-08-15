@@ -2126,7 +2126,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				// after tool results and retry. The tool result text already
 				// contains "[Image: ...]" so the agent still knows an image was
 				// there — it just can't see it.
-				let completion: Awaited<ReturnType<typeof streamAndCollect>>;
+				let completion: Awaited<ReturnType<typeof streamAndCollect>> | null = null;
 				// Accumulate partial content so aborted/disconnected turns can be
 				// persisted into session history (the catch block can't read
 				// streamAndCollect's locals after it throws).
@@ -2164,10 +2164,16 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 							Array.isArray(m.content) &&
 							m.content.some((p: { type?: string }) => p.type === "image_url"),
 					);
+					// True when a recovery branch below produced a usable completion
+					// (or queued a retry) — the trailing `throw err` must not re-raise
+					// the original failure past a successful vision fallback.
+					let recovered = false;
 					if (isVisionError && hasImages) {
-						// Remove image_url user messages. Persist the removal (mark
-						// them out of context) so later turns don't re-send the
-						// rejected image parts and pay the 400+retry again.
+						// Drop the rejected image_url parts, keeping any text (the
+						// user's actual question) so the retry is still meaningful.
+						// Persist the removal (mark them out of context) so later
+						// turns don't re-send the rejected image parts and pay the
+						// 400+retry again.
 						for (let i = messages.length - 1; i >= 0; i--) {
 							const m = messages[i]!;
 							if (
@@ -2175,7 +2181,15 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 								Array.isArray(m.content) &&
 								m.content.some((p: { type?: string }) => p.type === "image_url")
 							) {
-								messages.splice(i, 1);
+								const textParts = m.content.filter((p: { type?: string }) => p.type !== "image_url");
+								if (textParts.length > 0) {
+									messages[i] = {
+										...m,
+										content: textParts,
+									} as Message;
+								} else {
+									messages.splice(i, 1);
+								}
 							}
 						}
 						if (loopConfig.sessionId) markImageMessagesOutOfContext(loopConfig.sessionId);
@@ -2199,6 +2213,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 							(attempt, reason) => onEvent({ type: "retry", attempt, reason }),
 							promptCacheBody,
 						);
+						recovered = true;
 					} else if (isContextOverflow(err) && !toolResultTrimmed) {
 						// Cheap first attempt: shrink the largest tool result in
 						// place. The shrink is in-memory (no LLM call), so it can't
@@ -2244,7 +2259,11 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 						onEvent({ type: "compaction_failed", reason: msg });
 						throw err;
 					}
-					throw err;
+					if (!recovered) throw err;
+					// Unreachable in practice — the only path that sets `recovered`
+					// also assigns `completion` — but the null guard is what lets
+					// TypeScript know the value is set here at all.
+					if (!completion) throw err;
 				}
 
 				// A mid-stream abort doesn't always reject: undici can end the async
