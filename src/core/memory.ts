@@ -59,8 +59,6 @@ import type { BashBackgroundDeps, ConfirmBash, ConfirmWrite } from "./tools.ts";
 
 const MAX_SEARCH_RESULTS = 8;
 const MEMORY_SEARCH_FETCH_MAX = 50;
-const MEMORY_WRITE_LEASE_MS = 10 * 60 * 1000;
-const MEMORY_BACKGROUND_TIMEOUT_MS = 30_000;
 const MEMORY_OPERATION_LEASE_MS = 300_000;
 const MEMORY_OPERATION_WAIT_MS = 30_000;
 const MEMORY_OPERATION_POLL_MS = 50;
@@ -73,8 +71,6 @@ const MARKDOWN_EMPTY_RE = /^(\(none|#)/;
 const MARKDOWN_BULLET_STRIP_RE = /^[-*]\s+/;
 const ARTIFACT_FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?/;
 const ARTIFACT_DESCRIPTION_RE = /^description:\s*(.+)$/m;
-const MEMORY_WRITER_SYSTEM_PROMPT = readRequiredPrompt(promptsDir, "memory-writer-system.md");
-const MEMORY_WRITER_PROMPT = readRequiredPrompt(promptsDir, "memory-writer.md");
 const MEMORY_DREAM_SYSTEM_PROMPT = readRequiredPrompt(promptsDir, "memory-dream-system.md");
 const MEMORY_DREAM_PROMPT = readRequiredPrompt(promptsDir, "memory-dream.md");
 const MEMORY_DREAM_AGENT_SYSTEM_PROMPT = readRequiredPrompt(promptsDir, "memory-dream-agent-system.md");
@@ -116,15 +112,6 @@ export interface MemorySearchOptions {
 	scope?: "global" | "projects" | "sessions" | "cc";
 	scopeId?: string;
 	type?: string;
-}
-
-export interface MemoryExtractionResult {
-	entries: MemoryEntry[];
-	checkpoint?: MemoryCheckpoint;
-	usage?: Usage;
-	transcript: string;
-	turnKey?: string;
-	skipped?: boolean;
 }
 
 export interface MemoryCheckpoint {
@@ -227,21 +214,9 @@ export interface AutomaticMemoryRun {
 	completedAt?: string;
 }
 
-export interface MemoryExtractionInput {
-	cwd: string;
-	sessionId: string;
-	model: string;
-	config: AppConfig;
-	messages: Message[];
-	signal?: AbortSignal;
-	providerOverride?: ProviderCredentials;
-	onUsage?: (usage: Usage) => void;
-}
-
 export interface MemoryService {
 	search(cwd: string, query: string, limit?: number, options?: MemorySearchOptions): MemorySearchResult[];
 	buildPrompt(cwd: string, query: string, sessionId?: string, options?: MemoryPromptOptions): string;
-	extractAndStoreProjectMemory(input: MemoryExtractionInput): Promise<MemoryExtractionResult>;
 }
 
 export interface MemoryPromptOptions {
@@ -719,50 +694,8 @@ function appendMemorySessionEvent(db: DatabaseSync, sessionId: string, type: str
 	else withImmediateTransaction(db, insert);
 }
 
-function turnKeyForTranscript(transcript: string): string {
-	return createHash("sha256").update(transcript).digest("hex").slice(0, 24);
-}
-
 function queryKey(query: string): string {
 	return createHash("sha256").update(query.trim()).digest("hex").slice(0, 16);
-}
-
-function claimMemoryExtraction(cwd: string, sessionId: string, turnKey: string): string | undefined {
-	const projectId = projectIdForCwd(cwd);
-	const token = createHash("sha256")
-		.update(`${projectId}\n${sessionId}\n${turnKey}\n${Date.now()}\n${Math.random()}`)
-		.digest("hex");
-	const now = new Date().toISOString();
-	const leaseUntil = new Date(Date.now() + MEMORY_WRITE_LEASE_MS).toISOString();
-	const result = withImmediateTransaction(getDb(), () =>
-		getDb()
-			.prepare(`
-				INSERT INTO project_memory_extractions
-					(project_id, session_id, turn_key, claim_token, status, lease_until)
-				VALUES (?, ?, ?, ?, 'running', ?)
-				ON CONFLICT(project_id, session_id, turn_key) DO UPDATE SET
-					claim_token = excluded.claim_token,
-					status = excluded.status,
-					lease_until = excluded.lease_until,
-					completed_at = NULL,
-					entries_count = 0
-				WHERE project_memory_extractions.status != 'completed'
-				  AND project_memory_extractions.lease_until <= ?
-			`)
-			.run(projectId, sessionId, turnKey, token, leaseUntil, now),
-	);
-	return result.changes > 0 ? token : undefined;
-}
-
-function markMemoryExtractionFailed(cwd: string, sessionId: string, turnKey: string, claimToken: string): void {
-	const now = new Date().toISOString();
-	withImmediateTransaction(getDb(), () => {
-		getDb()
-			.prepare(
-				"UPDATE project_memory_extractions SET status = 'failed', lease_until = ?, completed_at = NULL WHERE project_id = ? AND session_id = ? AND turn_key = ? AND claim_token = ?",
-			)
-			.run(now, projectIdForCwd(cwd), sessionId, turnKey, claimToken);
-	});
 }
 
 function messageText(message: Message): string {
@@ -854,10 +787,6 @@ export function formatMemoryTranscript(messages: Message[]): string {
 	return start < 0 ? "" : formatMemoryMessages(messages, start);
 }
 
-export function formatMemoryHistory(messages: Message[]): string {
-	return formatMemoryMessages(messages, 0);
-}
-
 function parseJsonObject(raw: string): Record<string, unknown> | undefined {
 	const first = raw.indexOf("{");
 	const last = raw.lastIndexOf("}");
@@ -901,18 +830,6 @@ function parseMemoryEntries(value: unknown): MemoryEntry[] {
 		if (entries.length === 8) break;
 	}
 	return entries;
-}
-
-export function parseMemoryWriterResult(raw: string): { entries: MemoryEntry[]; checkpoint?: MemoryCheckpoint } {
-	const parsed = parseJsonObject(raw);
-	return {
-		entries: parseMemoryEntries(parsed?.entries),
-		checkpoint: parseCheckpoint(parsed?.checkpoint),
-	};
-}
-
-export function parseMemoryWriterOutput(raw: string): MemoryEntry[] {
-	return parseMemoryWriterResult(raw).entries;
 }
 
 function checkpointPromptText(checkpoint: MemoryCheckpoint | undefined): string {
@@ -1184,15 +1101,6 @@ function persistMemoryFiles(cwd: string, sessionId: string, checkpoint?: MemoryC
 	);
 }
 
-function memoryPromptText(cwd: string): string {
-	const entries = listProjectMemory(cwd, 24);
-	if (entries.length === 0) return "(none)";
-	return entries
-		.map((entry) => `[${entry.id}] ${entry.type}: ${entry.content}`)
-		.join("\n")
-		.slice(0, 9000);
-}
-
 function checkpointFromRow(row: {
 	id: number;
 	project_id: string;
@@ -1261,134 +1169,6 @@ function storeProjectMemoryCheckpointRow(
 			content_json = excluded.content_json,
 			updated_at = excluded.updated_at
 	`).run(projectIdForCwd(cwd), normalizeCwd(cwd), sessionId, turnKey, JSON.stringify(checkpoint), now, now);
-}
-
-export async function extractAndStoreProjectMemory(input: {
-	cwd: string;
-	sessionId: string;
-	model: string;
-	config: AppConfig;
-	messages: Message[];
-	signal?: AbortSignal;
-	providerOverride?: ProviderCredentials;
-	onUsage?: (usage: Usage) => void;
-}): Promise<MemoryExtractionResult> {
-	const transcript = formatMemoryTranscript(input.messages);
-	if (!transcript || !isMemoryWriteEnabled() || input.signal?.aborted)
-		return { entries: [], transcript, skipped: true };
-	const turnKey = turnKeyForTranscript(transcript);
-	const claimToken = claimMemoryExtraction(input.cwd, input.sessionId, turnKey);
-	if (!claimToken) return { entries: [], transcript, turnKey, skipped: true };
-	const prompt = MEMORY_WRITER_PROMPT.replace("{{TRANSCRIPT}}", transcript)
-		.replace("{{CHECKPOINT}}", checkpointPromptText(latestProjectMemoryCheckpoint(input.cwd)))
-		.replace("{{MEMORY}}", `${memoryPromptText(input.cwd)}\n\n${fileMemoryContext(input.cwd, input.sessionId)}`);
-	const runWriter = (writerPrompt: string) =>
-		streamAndCollect(
-			createClient(input.config, input.providerOverride),
-			input.model,
-			[
-				{ role: "system", content: MEMORY_WRITER_SYSTEM_PROMPT },
-				{ role: "user", content: writerPrompt },
-			],
-			[],
-			2000,
-			input.signal,
-			undefined,
-			undefined,
-			{},
-		);
-	try {
-		let response = await runWriter(prompt);
-		if (response.usage) input.onUsage?.(response.usage);
-		let parsed = parseMemoryWriterResult(response.content);
-		if (transcript.length >= 180 && parsed.entries.length === 0 && !parsed.checkpoint && !input.signal?.aborted) {
-			response = await runWriter(
-				`${prompt}\n\nThe previous extraction was empty. Re-check the completed turn and preserve at least one supported durable fact when one is present; otherwise return empty JSON.`,
-			);
-			if (response.usage) input.onUsage?.(response.usage);
-			parsed = parseMemoryWriterResult(response.content);
-		}
-		const { entries, checkpoint } = parsed;
-		const db = getDb();
-		const persisted = withImmediateTransaction(db, () => {
-			const claim = db
-				.prepare(
-					"UPDATE project_memory_extractions SET status = 'completed', lease_until = ?, completed_at = ?, entries_count = ? WHERE project_id = ? AND session_id = ? AND turn_key = ? AND claim_token = ? AND status = 'running'",
-				)
-				.run(
-					new Date().toISOString(),
-					new Date().toISOString(),
-					entries.length,
-					projectIdForCwd(input.cwd),
-					input.sessionId,
-					turnKey,
-					claimToken,
-				);
-			if (claim.changes === 0) return false;
-			const stored = storeProjectMemoryRows(db, input.cwd, input.sessionId, turnKey, entries);
-			if (checkpoint) storeProjectMemoryCheckpointRow(db, input.cwd, input.sessionId, turnKey, checkpoint);
-			appendMemorySessionEvent(db, input.sessionId, "memory_extraction_completed", {
-				projectId: projectIdForCwd(input.cwd),
-				turnKey,
-				entries: stored,
-				checkpoint: Boolean(checkpoint),
-			});
-			return true;
-		});
-		if (persisted) {
-			// Extraction writes facts to the derived index only — it never rewrites
-			// MEMORY.md, so the checkpoint writer's curated markdown and hand edits
-			// survive intact. Dream (the consolidation pass) is what promotes these
-			// rows into the canonical file over time.
-			persistMemoryFiles(input.cwd, input.sessionId, checkpoint);
-		}
-		return {
-			entries: persisted ? entries : [],
-			checkpoint: persisted ? checkpoint : undefined,
-			usage: response.usage,
-			transcript,
-			turnKey,
-			skipped: !persisted,
-		};
-	} catch (error) {
-		markMemoryExtractionFailed(input.cwd, input.sessionId, turnKey, claimToken);
-		throw error;
-	}
-}
-
-/**
- * Schedule durable-memory extraction outside the user-facing turn. A process
- * can receive another turn before the previous writer finishes, so the queue
- * serializes all memory operations per project while SQLite claims remain the
- * cross-process safety net.
- */
-export function scheduleProjectMemoryExtraction(
-	input: MemoryExtractionInput,
-	service: Pick<MemoryService, "extractAndStoreProjectMemory">,
-	onWarning?: (message: string) => void,
-): Promise<void> {
-	const next = queueMemoryOperation(
-		input.cwd,
-		async () => {
-			const controller = new AbortController();
-			const timeout = setTimeout(() => controller.abort(), MEMORY_BACKGROUND_TIMEOUT_MS);
-			timeout.unref();
-			try {
-				await service.extractAndStoreProjectMemory({
-					...input,
-					messages: input.messages.slice(),
-					signal: controller.signal,
-				});
-			} catch (error) {
-				onWarning?.(`Project memory was not updated: ${error instanceof Error ? error.message : String(error)}`);
-			} finally {
-				clearTimeout(timeout);
-			}
-		},
-		input.signal,
-	);
-	void next.catch(() => {});
-	return next;
 }
 
 function storeProjectMemoryRows(
@@ -2273,34 +2053,16 @@ function reconcileProjectMemoryFilesLocked(cwd: string, sessionId?: string, forc
 	if (!checked.readable) return;
 	const projectContent = checked.content;
 	const entries = parseMarkdownMemoryEntries(projectContent);
-	// The file is canonical for the curated layer; a routine reconcile only syncs
-	// when the file actually changed since the last recorded revision.
+	// The file is the single canonical store: the database is a pure projection
+	// of it. Sync only when the file actually changed since the last revision.
 	if (!force && !projectMemoryFileNeedsReconcile(cwd)) return;
 	const session = sessionId ? readSessionMemory(sessionId) : undefined;
 	const checkpoint = session ? parseCheckpointMarkdown(session.checkpoint) : undefined;
 	const turnKey = `file:${createHash("sha256").update(projectContent).digest("hex").slice(0, 24)}`;
 	const db = getDb();
 	withImmediateTransaction(db, () => {
-		const fingerprints = entries.map((entry) => fingerprintFor(entry.content, entry.type));
-		// Drop file-derived rows whose bullet is no longer in the file.
-		if (fingerprints.length === 0) {
-			db.prepare("DELETE FROM project_memory WHERE project_id = ? AND source_turn_key LIKE 'file:%'").run(projectId);
-		} else {
-			db.prepare(
-				`DELETE FROM project_memory WHERE project_id = ? AND source_turn_key LIKE 'file:%' AND fingerprint NOT IN (${fingerprints.map(() => "?").join(",")})`,
-			).run(projectId, ...fingerprints);
-		}
-		// Upsert the file's entries as file-derived rows. The fingerprint conflict
-		// merges any matching extraction row and re-tags it file-derived.
+		db.prepare("DELETE FROM project_memory WHERE project_id = ?").run(projectId);
 		if (entries.length > 0) storeProjectMemoryRows(db, cwd, sessionId ?? "memory-file-reconcile", turnKey, entries);
-		// Extraction rows keep their metadata until their content is curated into
-		// the file; once it is, drop the provisional copy so search never returns
-		// the same fact twice.
-		db.prepare(`
-			DELETE FROM project_memory
-			WHERE project_id = ? AND source_turn_key NOT LIKE 'file:%'
-			  AND content IN (SELECT content FROM project_memory WHERE project_id = ? AND source_turn_key LIKE 'file:%')
-		`).run(projectId, projectId);
 		if (checkpoint && sessionId) storeProjectMemoryCheckpointRow(db, cwd, sessionId, turnKey, checkpoint);
 		if (sessionId) {
 			appendMemorySessionEvent(db, sessionId, "memory_files_reconciled", {
@@ -2578,6 +2340,5 @@ export function createProjectMemoryService(): MemoryService {
 	return {
 		search: searchProjectMemory,
 		buildPrompt: buildMemoryPrompt,
-		extractAndStoreProjectMemory,
 	};
 }
