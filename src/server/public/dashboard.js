@@ -216,6 +216,20 @@ export function Dashboard({ onClose }) {
 		loadChart()
 			.then((Chart) => {
 				if (cancelled) return;
+				const canvasId =
+					tab === "reliability"
+						? "dash-chart-errors"
+						: tab === "system"
+							? "dash-chart-tools"
+							: tab === "llm"
+								? "dash-chart-requests"
+								: "dash-chart-endpoints";
+				// If the active tab's canvas isn't mounted yet, skip entirely —
+				// a stale async creation would destroy the current tab's charts
+				// and then fail to create on a detached canvas ("can't acquire
+				// context"), leaving the dashboard empty. The fresh effect run
+				// for the actual active tab will create its own charts.
+				if (!document.getElementById(canvasId)) return;
 				destroyCharts();
 				const colors = themeColors();
 				if (tab === "reliability") {
