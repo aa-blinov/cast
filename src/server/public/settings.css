@@ -489,6 +489,29 @@
 	font-family: var(--font);
 	font-size: .8rem;
 }
+/* Memory panel's numeric value rows: a themed input followed by check/reset
+   icon buttons, kept together as one grid cell (display:contents would drop
+   the button onto its own grid row). The input styling mirrors the Add host
+   form rows so the controls look identical to the rest of the settings. */
+.settings-inline-form {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	width: 210px;
+	max-width: 100%;
+}
+.settings-inline-form input {
+	flex: 1;
+	min-width: 0;
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	padding: 6px 8px;
+	color: var(--text);
+	font-family: var(--font);
+	font-size: .8rem;
+}
+.settings-inline-form input:focus { border-color: var(--cyan); }
 @media (max-width: 768px) {
 	.modal.settings-modal { width: 100%; max-width: 100%; height: 100%; max-height: 100%; border-radius: 0; }
 	.settings-body { flex-direction: column; min-height: 0; }
@@ -511,6 +534,8 @@
 	.settings-compact-row { grid-template-columns: 1fr; gap: 8px; }
 	.settings-compact-row > :last-child { justify-self: start; }
 	.settings-compact-row select { max-width: none; width: 100%; box-sizing: border-box; }
+	.settings-inline-form { width: 100%; }
+	.settings-inline-form input { flex: 1; width: auto; }
 	/* Stack SSH multi-field rows vertically on narrow screens */
 	.settings-ssh-form .settings-form-row { flex-direction: column; align-items: stretch; }
 	.settings-ssh-form .settings-form-row input { min-width: 0; width: 100%; box-sizing: border-box; }

@@ -68,6 +68,17 @@ function SettingsBash({ data, busy, act }) {
 	`;
 }
 
+// Defaults mirrored from src/core/settings.ts / src/core/loop.ts — used to
+// decide when a numeric memory setting is "custom" and should show a reset icon.
+const DEFAULTS = {
+	reserved: 13_000,
+	dreamInterval: 7,
+	distillInterval: 30,
+	budget: 4_096,
+	floor: 0.15,
+	caps: { checkpoint: 11_000, memory: 10_000, notes: 6_000, global: 6_000, tasks: 2_000 },
+};
+
 function SettingsMemory({ data, busy, act }) {
 	const [budgetDraft, setBudgetDraft] = useState("");
 	const [floorDraft, setFloorDraft] = useState("");
@@ -80,15 +91,15 @@ function SettingsMemory({ data, busy, act }) {
 	const enabled = data.memoryEnabled !== false;
 	const writeEnabled = data.memoryWriteEnabled !== false;
 	const checkpointFork = data.checkpointFork === true;
-	const budget = data.memoryPromptBudget ?? 4096;
-	const floor = data.memorySearchScoreFloor ?? 0.15;
+	const budget = data.memoryPromptBudget ?? DEFAULTS.budget;
+	const floor = data.memorySearchScoreFloor ?? DEFAULTS.floor;
 	const reconcile = data.memoryReconcileOnSearch !== false;
 	const dreamAuto = data.memoryDreamAuto === true;
-	const dreamInterval = data.memoryDreamIntervalDays ?? 7;
+	const dreamInterval = data.memoryDreamIntervalDays ?? DEFAULTS.dreamInterval;
 	const distillAuto = data.memoryDistillAuto === true;
-	const distillInterval = data.memoryDistillIntervalDays ?? 30;
+	const distillInterval = data.memoryDistillIntervalDays ?? DEFAULTS.distillInterval;
 	const thresholds = data.checkpointThresholds ?? [];
-	const reserved = data.checkpointReserved ?? 13000;
+	const reserved = data.checkpointReserved ?? DEFAULTS.reserved;
 	const pushCaps = data.checkpointPushCaps ?? {};
 	const setCapDraft = (key) => (event) => setCapsDrafts({ ...capsDrafts, [key]: event.target.value });
 	const actCaps = (key) => {
@@ -103,58 +114,58 @@ function SettingsMemory({ data, busy, act }) {
 			<p class="settings-hint">Project memory is shared with the TUI and saved in <code>~/.cast/settings.json</code>. Reading and background writing can be controlled independently.</p>
 			<div class="settings-compact-list">
 				<div class="settings-compact-row">
-					<div class="settings-compact-copy"><span class="settings-compact-title">Memory</span><span>${enabled ? "Retrieval and the Memory sidebar are active." : "Memory retrieval and the Memory sidebar are disabled."}</span></div>
+					<div class="settings-compact-copy"><span class="settings-compact-title">Memory</span><span>${enabled ? "Retrieval and the Memory sidebar are active" : "Memory retrieval and the Memory sidebar are disabled"}</span></div>
 					<button class="settings-toggle" role="switch" aria-checked=${enabled ? "true" : "false"} disabled=${busy} onClick=${() => act(`/memory ${enabled ? "off" : "on"}`)}><span class="settings-toggle-thumb" />${enabled ? "Enabled" : "Disabled"}</button>
 				</div>
 				<div class="settings-compact-row">
-					<div class="settings-compact-copy"><span class="settings-compact-title">Background writing</span><span>${writeEnabled ? "The writer and checkpoint agent may update memory." : "Existing memory remains readable; no new memory is written."}</span></div>
+					<div class="settings-compact-copy"><span class="settings-compact-title">Background writing</span><span>${writeEnabled ? "The writer and checkpoint agent may update memory" : "Existing memory remains readable; no new memory is written"}</span></div>
 					<button class="settings-toggle" role="switch" aria-checked=${writeEnabled ? "true" : "false"} disabled=${busy || !enabled} onClick=${() => act(`/memory write ${writeEnabled ? "off" : "on"}`)}><span class="settings-toggle-thumb" />${writeEnabled ? "Enabled" : "Disabled"}</button>
 				</div>
 				<div class="settings-compact-row">
-					<div class="settings-compact-copy"><span class="settings-compact-title">Checkpoint prefix fork</span><span>${checkpointFork ? "Checkpoint writers retain the parent prefix for prompt-cache reuse." : "Checkpoint writers receive only the post-checkpoint delta."}</span></div>
+					<div class="settings-compact-copy"><span class="settings-compact-title">Checkpoint prefix fork</span><span>${checkpointFork ? "Checkpoint writers retain the parent prefix for prompt-cache reuse" : "Checkpoint writers receive only the post-checkpoint delta"}</span></div>
 					<button class="settings-toggle" role="switch" aria-checked=${checkpointFork ? "true" : "false"} disabled=${busy || !enabled || !writeEnabled} onClick=${() => act(`/memory checkpoint fork ${checkpointFork ? "off" : "on"}`)}><span class="settings-toggle-thumb" />${checkpointFork ? "Enabled" : "Disabled"}</button>
 				</div>
 				<div class="settings-compact-row">
-					<div class="settings-compact-copy"><span class="settings-compact-title">Checkpoint thresholds</span><span>${thresholds.length > 0 ? `Writer fires at ${thresholds.join("%,")}% of the window.` : "Writer fires at the window-based defaults."}</span></div>
-					<form style="display:contents" onSubmit=${(event) => { event.preventDefault(); const value = thresholdsDraft.trim(); if (value === "default" || value.split(",").every((part) => { const n = Number(part.trim()); return Number.isFinite(n) && n > 0 && n <= 100; })) act(`/memory checkpoint thresholds ${value}`); }}><input aria-label="Checkpoint thresholds" placeholder="${thresholds.length > 0 ? thresholds.join(",") : "default"}" value=${thresholdsDraft} disabled=${busy || !enabled || !writeEnabled} onInput=${(event) => setThresholdsDraft(event.target.value)} /><button class="modal-btn" disabled=${busy || !thresholdsDraft} onClick=${() => act(`/memory checkpoint thresholds ${thresholdsDraft.trim()}`)}>Save</button></form>
+					<div class="settings-compact-copy"><span class="settings-compact-title">Checkpoint thresholds</span><span>${thresholds.length > 0 ? `Writer fires at ${thresholds.join("%,")}% of the window` : "Writer fires at the window-based defaults"}</span></div>
+					<form class="settings-inline-form" onSubmit=${(event) => { event.preventDefault(); const value = thresholdsDraft.trim(); if (value === "default" || value.split(",").every((part) => { const n = Number(part.trim()); return Number.isFinite(n) && n > 0 && n <= 100; })) act(`/memory checkpoint thresholds ${value}`); }}><input aria-label="Checkpoint thresholds" placeholder=${thresholds.length > 0 ? thresholds.join(",") : "default"} value=${thresholdsDraft} disabled=${busy || !enabled || !writeEnabled} onInput=${(event) => setThresholdsDraft(event.target.value)} /><button class="modal-btn icon-btn" title="Reset to window defaults" disabled=${busy || !enabled || !writeEnabled || thresholds.length === 0} onClick=${() => act("/memory checkpoint thresholds default")}><${icons.arrowUturnLeft} /></button><button class="modal-btn icon-btn" title="Save" disabled=${busy || !thresholdsDraft} onClick=${() => act(`/memory checkpoint thresholds ${thresholdsDraft.trim()}`)}><${icons.check} /></button></form>
 				</div>
 				<div class="settings-compact-row">
-					<div class="settings-compact-copy"><span class="settings-compact-title">Checkpoint reserved</span><span>Token safety buffer at the window end; thresholds clamp to window − reserved (current ${reserved}).</span></div>
-					<form style="display:contents" onSubmit=${(event) => { event.preventDefault(); const value = Number(reservedDraft); if (Number.isInteger(value) && value >= 0) act(`/memory checkpoint reserved ${value}`); }}><input aria-label="Checkpoint reserved tokens" type="number" min="0" step="1000" value=${reservedDraft || reserved} disabled=${busy || !enabled || !writeEnabled} onInput=${(event) => setReservedDraft(event.target.value)} /><button class="modal-btn" disabled=${busy || !reservedDraft || Number(reservedDraft) === reserved} onClick=${() => act(`/memory checkpoint reserved ${Number(reservedDraft)}`)}>Save</button></form>
+					<div class="settings-compact-copy"><span class="settings-compact-title">Checkpoint reserved</span><span>Token safety buffer at the window end; thresholds clamp to window − reserved (current ${reserved})</span></div>
+					<form class="settings-inline-form" onSubmit=${(event) => { event.preventDefault(); const value = Number(reservedDraft); if (Number.isInteger(value) && value >= 0) act(`/memory checkpoint reserved ${value}`); }}><input aria-label="Checkpoint reserved tokens" type="number" min="0" step="1000" value=${reservedDraft || reserved} disabled=${busy || !enabled || !writeEnabled} onInput=${(event) => setReservedDraft(event.target.value)} /><button class="modal-btn icon-btn" title="Reset to ${DEFAULTS.reserved}" disabled=${busy || !enabled || !writeEnabled || reserved === DEFAULTS.reserved} onClick=${() => act(`/memory checkpoint reserved ${DEFAULTS.reserved}`)}><${icons.arrowUturnLeft} /></button><button class="modal-btn icon-btn" title="Save" disabled=${busy || !reservedDraft || Number(reservedDraft) === reserved} onClick=${() => act(`/memory checkpoint reserved ${Number(reservedDraft)}`)}><${icons.check} /></button></form>
 				</div>
 				${["checkpoint", "memory", "notes", "global", "tasks"].map((key) => {
-					const current = pushCaps[key] ?? { checkpoint: 11000, memory: 10000, notes: 6000, global: 6000, tasks: 2000 }[key];
+					const current = pushCaps[key] ?? DEFAULTS.caps[key];
 					return html`<div class="settings-compact-row" key=${`caps-${key}`}>
-						<div class="settings-compact-copy"><span class="settings-compact-title">Caps: ${key}</span><span>Rebuild token cap for the ${key} section (current ${current}).</span></div>
-						<form style="display:contents" onSubmit=${(event) => { event.preventDefault(); actCaps(key); }}><input aria-label=${`Checkpoint ${key} token cap`} type="number" min="1" step="500" placeholder=${current} value=${capsDrafts[key] ?? ""} disabled=${busy || !enabled || !writeEnabled} onInput=${setCapDraft(key)} /><button class="modal-btn" disabled=${busy || !capsDrafts[key]} onClick=${() => actCaps(key)}>Save</button></form>
+						<div class="settings-compact-copy"><span class="settings-compact-title">Caps: ${key}</span><span>Rebuild token cap for the ${key} section (current ${current})</span></div>
+						<form class="settings-inline-form" onSubmit=${(event) => { event.preventDefault(); actCaps(key); }}><input aria-label=${`Checkpoint ${key} token cap`} type="number" min="1" step="500" placeholder=${current} value=${capsDrafts[key] ?? ""} disabled=${busy || !enabled || !writeEnabled} onInput=${setCapDraft(key)} /><button class="modal-btn icon-btn" title="Reset to ${DEFAULTS.caps[key]}" disabled=${busy || !enabled || !writeEnabled || (pushCaps[key] === undefined || pushCaps[key] === DEFAULTS.caps[key])} onClick=${() => act(`/memory checkpoint caps ${key}=${DEFAULTS.caps[key]}`)}><${icons.arrowUturnLeft} /></button><button class="modal-btn icon-btn" title="Save" disabled=${busy || !capsDrafts[key]} onClick=${() => actCaps(key)}><${icons.check} /></button></form>
 					</div>`;
 				})}
 				<div class="settings-compact-row">
-					<div class="settings-compact-copy"><span class="settings-compact-title">Automatic dream</span><span>${dreamAuto ? `Consolidates project memory on a new session, at most every ${dreamInterval} day${dreamInterval === 1 ? "" : "s"}.` : "Manual only. Enable to consolidate durable project memory on new sessions."}</span></div>
+					<div class="settings-compact-copy"><span class="settings-compact-title">Automatic dream</span><span>${dreamAuto ? `Consolidates project memory on a new session, at most every ${dreamInterval} day${dreamInterval === 1 ? "" : "s"}` : "Manual only. Enable to consolidate durable project memory on new sessions"}</span></div>
 					<button class="settings-toggle" role="switch" aria-checked=${dreamAuto ? "true" : "false"} disabled=${busy || !enabled || !writeEnabled} onClick=${() => act(`/memory dream ${dreamAuto ? "off" : "on"}`)}><span class="settings-toggle-thumb" />${dreamAuto ? "Enabled" : "Disabled"}</button>
 				</div>
 				<div class="settings-compact-row">
-					<div class="settings-compact-copy"><span class="settings-compact-title">Dream interval</span><span>Minimum days between automatic consolidation runs; 0 runs on every new session.</span></div>
-					<form style="display:contents" onSubmit=${(event) => { event.preventDefault(); const value = Number(dreamIntervalDraft || dreamInterval); if (Number.isInteger(value) && value >= 0 && value <= 3650) act(`/memory dream interval ${value}`); }}><input aria-label="Automatic dream interval days" type="number" min="0" max="3650" step="1" value=${dreamIntervalDraft || dreamInterval} disabled=${busy || !enabled || !writeEnabled} onInput=${(event) => setDreamIntervalDraft(event.target.value)} /><button class="modal-btn" disabled=${busy || !dreamIntervalDraft || Number(dreamIntervalDraft) === dreamInterval} onClick=${() => act(`/memory dream interval ${Number(dreamIntervalDraft)}`)}>Save</button></form>
+					<div class="settings-compact-copy"><span class="settings-compact-title">Dream interval</span><span>Minimum days between automatic consolidation runs; 0 runs on every new session</span></div>
+					<form class="settings-inline-form" onSubmit=${(event) => { event.preventDefault(); const value = Number(dreamIntervalDraft || dreamInterval); if (Number.isInteger(value) && value >= 0 && value <= 3650) act(`/memory dream interval ${value}`); }}><input aria-label="Automatic dream interval days" type="number" min="0" max="3650" step="1" value=${dreamIntervalDraft || dreamInterval} disabled=${busy || !enabled || !writeEnabled} onInput=${(event) => setDreamIntervalDraft(event.target.value)} /><button class="modal-btn icon-btn" title="Reset to ${DEFAULTS.dreamInterval}" disabled=${busy || !enabled || !writeEnabled || dreamInterval === DEFAULTS.dreamInterval} onClick=${() => act(`/memory dream interval ${DEFAULTS.dreamInterval}`)}><${icons.arrowUturnLeft} /></button><button class="modal-btn icon-btn" title="Save" disabled=${busy || !dreamIntervalDraft || Number(dreamIntervalDraft) === dreamInterval} onClick=${() => act(`/memory dream interval ${Number(dreamIntervalDraft)}`)}><${icons.check} /></button></form>
 				</div>
 				<div class="settings-compact-row">
-					<div class="settings-compact-copy"><span class="settings-compact-title">Automatic distill</span><span>${distillAuto ? `Packages repeated workflows on a new session, at most every ${distillInterval} day${distillInterval === 1 ? "" : "s"}.` : "Manual only. Enable to package repeated workflows into reusable assets."}</span></div>
+					<div class="settings-compact-copy"><span class="settings-compact-title">Automatic distill</span><span>${distillAuto ? `Packages repeated workflows on a new session, at most every ${distillInterval} day${distillInterval === 1 ? "" : "s"}` : "Manual only. Enable to package repeated workflows into reusable assets"}</span></div>
 					<button class="settings-toggle" role="switch" aria-checked=${distillAuto ? "true" : "false"} disabled=${busy || !enabled || !writeEnabled} onClick=${() => act(`/memory distill ${distillAuto ? "off" : "on"}`)}><span class="settings-toggle-thumb" />${distillAuto ? "Enabled" : "Disabled"}</button>
 				</div>
 				<div class="settings-compact-row">
-					<div class="settings-compact-copy"><span class="settings-compact-title">Distill interval</span><span>Minimum days between automatic workflow packaging runs.</span></div>
-					<form style="display:contents" onSubmit=${(event) => { event.preventDefault(); const value = Number(distillIntervalDraft || distillInterval); if (Number.isInteger(value) && value >= 0 && value <= 3650) act(`/memory distill interval ${value}`); }}><input aria-label="Automatic distill interval days" type="number" min="0" max="3650" step="1" value=${distillIntervalDraft || distillInterval} disabled=${busy || !enabled || !writeEnabled} onInput=${(event) => setDistillIntervalDraft(event.target.value)} /><button class="modal-btn" disabled=${busy || !distillIntervalDraft || Number(distillIntervalDraft) === distillInterval} onClick=${() => act(`/memory distill interval ${Number(distillIntervalDraft)}`)}>Save</button></form>
+					<div class="settings-compact-copy"><span class="settings-compact-title">Distill interval</span><span>Minimum days between automatic workflow packaging runs</span></div>
+					<form class="settings-inline-form" onSubmit=${(event) => { event.preventDefault(); const value = Number(distillIntervalDraft || distillInterval); if (Number.isInteger(value) && value >= 0 && value <= 3650) act(`/memory distill interval ${value}`); }}><input aria-label="Automatic distill interval days" type="number" min="0" max="3650" step="1" value=${distillIntervalDraft || distillInterval} disabled=${busy || !enabled || !writeEnabled} onInput=${(event) => setDistillIntervalDraft(event.target.value)} /><button class="modal-btn icon-btn" title="Reset to ${DEFAULTS.distillInterval}" disabled=${busy || !enabled || !writeEnabled || distillInterval === DEFAULTS.distillInterval} onClick=${() => act(`/memory distill interval ${DEFAULTS.distillInterval}`)}><${icons.arrowUturnLeft} /></button><button class="modal-btn icon-btn" title="Save" disabled=${busy || !distillIntervalDraft || Number(distillIntervalDraft) === distillInterval} onClick=${() => act(`/memory distill interval ${Number(distillIntervalDraft)}`)}><${icons.check} /></button></form>
 				</div>
 				<div class="settings-compact-row">
-					<div class="settings-compact-copy"><span class="settings-compact-title">Prompt budget</span><span>Maximum estimated memory tokens added to a model context.</span></div>
-					<form style="display:contents" onSubmit=${(event) => { event.preventDefault(); const value = Number(budgetDraft || budget); if (Number.isInteger(value) && value >= 256) act(`/memory budget ${value}`); }}><input aria-label="Memory prompt token budget" type="number" min="256" max="16384" step="256" value=${budgetDraft || budget} disabled=${busy} onInput=${(event) => setBudgetDraft(event.target.value)} /><button class="modal-btn" disabled=${busy || !budgetDraft || Number(budgetDraft) === budget} onClick=${() => act(`/memory budget ${Number(budgetDraft)}`)}>Save</button></form>
+					<div class="settings-compact-copy"><span class="settings-compact-title">Prompt budget</span><span>Maximum estimated memory tokens added to a model context</span></div>
+					<form class="settings-inline-form" onSubmit=${(event) => { event.preventDefault(); const value = Number(budgetDraft || budget); if (Number.isInteger(value) && value >= 256) act(`/memory budget ${value}`); }}><input aria-label="Memory prompt token budget" type="number" min="256" max="16384" step="256" value=${budgetDraft || budget} disabled=${busy} onInput=${(event) => setBudgetDraft(event.target.value)} /><button class="modal-btn icon-btn" title="Reset to ${DEFAULTS.budget}" disabled=${busy || budget === DEFAULTS.budget} onClick=${() => act(`/memory budget ${DEFAULTS.budget}`)}><${icons.arrowUturnLeft} /></button><button class="modal-btn icon-btn" title="Save" disabled=${busy || !budgetDraft || Number(budgetDraft) === budget} onClick=${() => act(`/memory budget ${Number(budgetDraft)}`)}><${icons.check} /></button></form>
 				</div>
 				<div class="settings-compact-row">
-					<div class="settings-compact-copy"><span class="settings-compact-title">Search score floor</span><span>Drop weak common-word matches below this fraction of the best result.</span></div>
-					<form style="display:contents" onSubmit=${(event) => { event.preventDefault(); const value = Number(floorDraft || floor); if (value >= 0 && value <= 1) act(`/memory floor ${value}`); }}><input aria-label="Memory search score floor" type="number" min="0" max="1" step="0.05" value=${floorDraft || floor} disabled=${busy} onInput=${(event) => setFloorDraft(event.target.value)} /><button class="modal-btn" disabled=${busy || !floorDraft || Number(floorDraft) === floor} onClick=${() => act(`/memory floor ${Number(floorDraft)}`)}>Save</button></form>
+					<div class="settings-compact-copy"><span class="settings-compact-title">Search score floor</span><span>Drop weak common-word matches below this fraction of the best result</span></div>
+					<form class="settings-inline-form" onSubmit=${(event) => { event.preventDefault(); const value = Number(floorDraft || floor); if (value >= 0 && value <= 1) act(`/memory floor ${value}`); }}><input aria-label="Memory search score floor" type="number" min="0" max="1" step="0.05" value=${floorDraft || floor} disabled=${busy} onInput=${(event) => setFloorDraft(event.target.value)} /><button class="modal-btn icon-btn" title="Reset to ${DEFAULTS.floor}" disabled=${busy || floor === DEFAULTS.floor} onClick=${() => act(`/memory floor ${DEFAULTS.floor}`)}><${icons.arrowUturnLeft} /></button><button class="modal-btn icon-btn" title="Save" disabled=${busy || !floorDraft || Number(floorDraft) === floor} onClick=${() => act(`/memory floor ${Number(floorDraft)}`)}><${icons.check} /></button></form>
 				</div>
 				<div class="settings-compact-row">
-					<div class="settings-compact-copy"><span class="settings-compact-title">Reconcile before search</span><span>${reconcile ? "File changes are checked before memory search." : "Search uses the existing SQLite index until the next writer sync."}</span></div>
+					<div class="settings-compact-copy"><span class="settings-compact-title">Reconcile before search</span><span>${reconcile ? "File changes are checked before memory search" : "Search uses the existing SQLite index until the next writer sync"}</span></div>
 					<button class="settings-toggle" role="switch" aria-checked=${reconcile ? "true" : "false"} disabled=${busy} onClick=${() => act(`/memory reconcile ${reconcile ? "off" : "on"}`)}><span class="settings-toggle-thumb" />${reconcile ? "Enabled" : "Disabled"}</button>
 				</div>
 			</div>
