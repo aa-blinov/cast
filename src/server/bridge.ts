@@ -1504,7 +1504,13 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 						const t = event as { id: string; name: string; result: { isError?: boolean } };
 						const started = toolStartTimes.get(t.id);
 						toolStartTimes.delete(t.id);
-						recordToolCall(ws.id, t.name, t.result?.isError === true, started !== undefined ? Date.now() - started : undefined, ws.currentClientMessageId);
+						recordToolCall(
+							ws.id,
+							t.name,
+							t.result?.isError === true,
+							started !== undefined ? Date.now() - started : undefined,
+							ws.currentClientMessageId,
+						);
 						appendSessionEvent(sessionId, event.type, event);
 						break;
 					}

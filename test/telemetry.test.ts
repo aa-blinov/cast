@@ -189,8 +189,20 @@ describe("llm telemetry", () => {
 	});
 
 	it("counts doom-loop and empty-response error types in reliability", () => {
-		recordLlmRequest({ provider: "p", model: "m", kind: "error", error: "doom loop: bash x3", errorType: "doom-loop" });
-		recordLlmRequest({ provider: "p", model: "m", kind: "error", error: "empty response", errorType: "empty-response" });
+		recordLlmRequest({
+			provider: "p",
+			model: "m",
+			kind: "error",
+			error: "doom loop: bash x3",
+			errorType: "doom-loop",
+		});
+		recordLlmRequest({
+			provider: "p",
+			model: "m",
+			kind: "error",
+			error: "empty response",
+			errorType: "empty-response",
+		});
 
 		const reliability = queryReliabilityOverview(0);
 		expect(reliability.errorTypes.some((t) => t.errorType === "doom-loop" && t.count === 1)).toBe(true);
@@ -198,8 +210,21 @@ describe("llm telemetry", () => {
 	});
 
 	it("records memory maintenance runs and aggregates stored entries and tokens", () => {
-		recordMemoryMaintenance({ sessionId: "s1", kind: "dream", status: "completed", entriesStored: 5, entriesRemoved: 2, usageTokens: 1200 });
-		recordMemoryMaintenance({ sessionId: "s1", kind: "distill", status: "completed", entriesStored: 3, usageTokens: 800 });
+		recordMemoryMaintenance({
+			sessionId: "s1",
+			kind: "dream",
+			status: "completed",
+			entriesStored: 5,
+			entriesRemoved: 2,
+			usageTokens: 1200,
+		});
+		recordMemoryMaintenance({
+			sessionId: "s1",
+			kind: "distill",
+			status: "completed",
+			entriesStored: 3,
+			usageTokens: 800,
+		});
 		recordMemoryMaintenance({ sessionId: "s1", kind: "dream", status: "failed" });
 		recordToolCall("s1", "memory", false, 7);
 
@@ -220,16 +245,50 @@ describe("llm telemetry", () => {
 		// completions (spans 2ms), no tools. Untagged rows (memory maintenance,
 		// etc.) must not count as turns.
 		const now = Date.now();
-		recordLlmRequest({ provider: "p", model: "m", kind: "main", turnId: "turn-a", promptTokens: 100, completionTokens: 50 });
+		recordLlmRequest({
+			provider: "p",
+			model: "m",
+			kind: "main",
+			turnId: "turn-a",
+			promptTokens: 100,
+			completionTokens: 50,
+		});
 		recordToolCall("s1", "bash", false, 10, "turn-a");
-		recordLlmRequest({ provider: "p", model: "m", kind: "main", turnId: "turn-a", promptTokens: 200, completionTokens: 100 });
+		recordLlmRequest({
+			provider: "p",
+			model: "m",
+			kind: "main",
+			turnId: "turn-a",
+			promptTokens: 200,
+			completionTokens: 100,
+		});
 		recordToolCall("s1", "write", false, 5, "turn-a");
-		recordLlmRequest({ provider: "p", model: "m", kind: "main", turnId: "turn-b", promptTokens: 50, completionTokens: 20 });
-		recordLlmRequest({ provider: "p", model: "m", kind: "main", turnId: "turn-b", promptTokens: 60, completionTokens: 20 });
+		recordLlmRequest({
+			provider: "p",
+			model: "m",
+			kind: "main",
+			turnId: "turn-b",
+			promptTokens: 50,
+			completionTokens: 20,
+		});
+		recordLlmRequest({
+			provider: "p",
+			model: "m",
+			kind: "main",
+			turnId: "turn-b",
+			promptTokens: 60,
+			completionTokens: 20,
+		});
 		recordLlmRequest({ provider: "p", model: "m", kind: "main", promptTokens: 10 });
-		getDb().prepare("UPDATE llm_requests SET ts = ? WHERE turn_id='turn-a' AND prompt_tokens = 100").run(now - 10);
-		getDb().prepare("UPDATE llm_requests SET ts = ? WHERE turn_id='turn-a' AND prompt_tokens = 200").run(now - 6);
-		getDb().prepare("UPDATE llm_requests SET ts = ? WHERE turn_id='turn-b' AND prompt_tokens = 50").run(now - 2);
+		getDb()
+			.prepare("UPDATE llm_requests SET ts = ? WHERE turn_id='turn-a' AND prompt_tokens = 100")
+			.run(now - 10);
+		getDb()
+			.prepare("UPDATE llm_requests SET ts = ? WHERE turn_id='turn-a' AND prompt_tokens = 200")
+			.run(now - 6);
+		getDb()
+			.prepare("UPDATE llm_requests SET ts = ? WHERE turn_id='turn-b' AND prompt_tokens = 50")
+			.run(now - 2);
 		getDb().prepare("UPDATE llm_requests SET ts = ? WHERE turn_id='turn-b' AND prompt_tokens = 60").run(now);
 		getDb().prepare("UPDATE llm_requests SET ts = ? WHERE turn_id IS NULL").run(now);
 
