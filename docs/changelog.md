@@ -2,6 +2,29 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.17.0
+
+### Added
+
+- **LLM error handling hardened.** Moderation blocks are now surfaced as a clear "model refused the request" message instead of an empty `(no response)` (OpenAI `content_filter` / `refusal` field). Empty or reasoning-only replies are retried once with a doubled budget and a nudge telling the model to actually answer. OpenRouter `stream_interrupted`/`PROVIDER_TIMEOUT` and `server_error` codes are retried instead of failing the turn. MiMo/MiniMax gateway moderation (421) and risk-control (441) blocks are relabeled with the real reason from `error.param`.
+- **Context overflow on a 5xx is no longer retried blindly** — it's routed straight to auto-compaction.
+- **Prompt-cache rate is visible everywhere** — the TUI status bar and `/current` show the `% cached` next to tokens, plus a new Cost segment; the web status popover already showed it.
+- **A memory reference was added to the builtin `cast` skill**, so asking the agent about memory in chat produces concrete answers (storage, `/memory` commands, how to enable/disable writing).
+- **Memory settings UI reworked** to match the rest of the modal: themed inline inputs with a check-to-save and reset-to-default buttons, and no trailing punctuation in item descriptions.
+
+### Fixed
+
+- **Vision fallback retry was discarded** — a model rejecting images got images stripped and retried, but the successful retry was thrown away and the turn still failed with the original 400. The retry now completes normally (verified against a real non-vision model).
+- **Concurrent checkpoint writers on the same project** now serialize per project instead of racing on the same `MEMORY.md` (the second writer queued on the project memory lease could time out).
+- **Multi-message runs (steering/follow-up) duplicated earlier turn content** in the persisted partial on an abort; the accumulator now resets per stream attempt.
+- **Thin-client TUI message send** no longer keeps a stale `[user · sending…]` label on committed rows (Ink `<Static>` never re-renders them), and the resend-on-reconnect race is closed by claiming the message id synchronously on the daemon.
+- **Marketplace seeding no longer blocks the event loop**: `/plugin marketplace list|catalog` (which the settings modal preloads in parallel with `/memory`) no longer triggers synchronous git clones on a fresh machine, which hung the Memory tab with "Loading…".
+
+### Internal
+
+- Removed redundant per-message `sending` guards in both TUI and web thin clients now that the daemon dedupes by `clientMessageId` synchronously.
+- Retry classification widened (408, `stream_interrupted`, `PROVIDER_*`, `server_error`, upstream wording); `describeTurnError` maps `model_not_found`, `NO_PERMISSION`, content-policy, and `invalid_api_key` to actionable messages.
+
 ## 0.16.0
 
 ### Added
