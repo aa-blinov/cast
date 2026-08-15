@@ -1498,6 +1498,63 @@ describe("runAgentLoop — caps total embedded image bytes across reads, not jus
 });
 
 // ============================================================================
+// runAgentLoop — vision fallback on a model/endpoint that rejects images
+// ============================================================================
+
+describe("runAgentLoop — vision fallback", () => {
+	it("strips rejected image_url parts, keeps the text, warns, and completes via the retry", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "cast-loop-vision-"));
+		try {
+			const events: string[] = [];
+			const warnings: string[] = [];
+			// Reproduces the real provider failure (400 + "image" in the body) —
+			// the loop must recover, not surface the raw error.
+			const imageError = Object.assign(new Error("image input is not supported by this endpoint"), {
+				status: 400,
+			});
+			vi.mocked(streamAndCollect)
+				.mockRejectedValueOnce(imageError)
+				.mockImplementationOnce(async () => ({
+					content: "I can't see the image",
+					thinking: "",
+					finishReason: "stop",
+				}));
+
+			const messages = await runAgentLoop(
+				[
+					{
+						role: "user",
+						content: [
+							{ type: "text", text: "What color is this?" },
+							{ type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } },
+						],
+					},
+				],
+				{
+					config: testConfig,
+					model: "test-model",
+					cwd,
+					systemPrompt: "SYS",
+					onEvent: (e) => events.push(e.type),
+					onWarning: (m) => warnings.push(m),
+				},
+			);
+
+			expect(warnings).toEqual(["Model doesn't support images — sending file path only"]);
+			// The successful retry must not be discarded by a re-thrown original error.
+			expect(events).not.toContain("error");
+			const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant") as Message;
+			expect(lastAssistant?.content).toBe("I can't see the image");
+			// The retry kept the user's text but dropped the image part.
+			const userMsg = messages.find((m) => m.role === "user" && Array.isArray(m.content)) as Message;
+			expect(userMsg.content).toEqual([{ type: "text", text: "What color is this?" }]);
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+});
+
+// ============================================================================
 // runAgentLoop — nested AGENTS.md injection end-to-end
 // ============================================================================
 

@@ -1455,6 +1455,10 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				updateLastCheckpoint(ws.session.id, chk);
 			},
 			onCompaction: (full, compacted) => recordCompaction(ws.session, full, compacted),
+			// Non-fatal warnings from the loop (e.g. "Model doesn't support
+			// images — sending file path only") must reach the browser like any
+			// other notice, or the vision fallback looks like a silent failure.
+			onWarning: (message) => broadcast(ws, { type: "notice", message }),
 			onMessagesChanged: (messages) => {
 				ws.session.messages = messages;
 				try {
