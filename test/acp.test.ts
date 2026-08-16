@@ -289,7 +289,7 @@ describe("ACP adapter", () => {
 		await adapter.closeSession(session.state.id, sessions);
 		expect(sessions.has(session.state.id)).toBe(false);
 		expect(runner.abort).toHaveBeenCalledWith("acp close");
-		expect(deleteSession).toHaveBeenCalledWith(session.state.id);
+		expect(deleteSession).toHaveBeenCalledWith(session.state.id, session.state.cwd);
 	});
 
 	it("closeSession awaits runner.waitForIdle before returning", async () => {
