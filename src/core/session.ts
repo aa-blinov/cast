@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -1419,8 +1419,16 @@ export function markImageMessagesOutOfContext(sessionId: string): void {
 
 /** Delete a saved session entirely — cascades to its message rows. Returns
  *  false if it wasn't found. */
-export function deleteSession(id: string): boolean {
+export function deleteSession(id: string, cwd?: string): boolean {
 	const result = getDb().prepare("DELETE FROM sessions WHERE id = ?").run(id);
+	// A sandbox session owns its throwaway working copy
+	// (~/.cast/sandbox/cast-<id>); remove it with the session so these dirs
+	// don't pile up as orphans. Matched exactly (never by prefix), so a
+	// project that merely lives under ~/.cast/sandbox is never touched.
+	// The caller passes the cwd it captured before the row was deleted.
+	if (cwd && cwd === join(homedir(), ".cast", "sandbox", `cast-${id}`)) {
+		rmSync(cwd, { recursive: true, force: true });
+	}
 	return result.changes > 0;
 }
 
