@@ -607,6 +607,10 @@ export interface ServerBridge {
 	getSharedSession(
 		token: string,
 	): { title?: string; persona: string; model: string; messages: DisplayMessage[] } | null;
+	/** Resolve the live, in-memory session owning `token`, so the public share
+	 * route can relay its events read-only. Null when the session isn't
+	 * running in this process (closed, or driven by another process). */
+	getSharedLiveSession(token: string): WebAgentSession | null;
 	submit(sessionId: string, text: string, images?: string[], clientMessageId?: string): Promise<void>;
 	/** Inject a message into the running turn (submits; the loop's
 	 *  steeringQueue drains it if a turn is in flight, matching /steer). */
@@ -2211,13 +2215,19 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		};
 	}
 
+	function getSharedLiveSession(token: string): WebAgentSession | null {
+		for (const ws of sessions.values()) {
+			if (ws.session.shareToken === token) return ws;
+		}
+		return null;
+	}
+
 	async function executeCommand(
 		sessionId: string,
 		command: string,
 	): Promise<{ ok: boolean; result?: unknown; error?: string }> {
 		const ws = sessions.get(sessionId);
 		if (!ws) return { ok: false, error: "Session not found" };
-
 		const cmd = command.trim();
 		if (!cmd.startsWith("/")) return { ok: false, error: "Not a command" };
 
@@ -4003,6 +4013,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		shareSession,
 		unshareSession,
 		getSharedSession,
+		getSharedLiveSession,
 		submit,
 		steer,
 		followUp,

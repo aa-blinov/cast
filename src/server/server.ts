@@ -87,6 +87,23 @@ const staticResponseCache = new Map<
 	{ status: number; headers: Record<string, string | number>; body: Buffer }
 >();
 
+// Events relayed to the public live-share view (/api/shared/:token/events).
+// Only what an anonymous visitor should see while watching the agent work:
+// streaming tokens/thinking, tool calls, committed messages, the per-turn
+// footer, status, and errors. Never usage, steering, plan/decision state, or
+// session internals — the share link is read-only by construction.
+const SHARED_LIVE_EVENT_TYPES = new Set<string>([
+	"status",
+	"thinking",
+	"token",
+	"tool_start",
+	"tool_end",
+	"assistant_message",
+	"turn_meta",
+	"retry",
+	"error",
+]);
+
 // app.js / settings-modal.js. assetVersion mixes these into the app.js hash so
 // any change to one of them invalidates the cached app.js too.
 const IMPORT_REWRITE_TARGETS = [
@@ -155,6 +172,22 @@ export interface WebServerOptions {
 export function startServer(options: WebServerOptions): ReturnType<typeof createServer> {
 	const { port, host, bridge, webUser, serverPassword } = options;
 	const publicDir = join(import.meta.dirname ?? ".", "public");
+
+	// Every static file in public/ is public (no secrets — the real data is
+	// behind gated /api/* routes), and the public shared page needs app.js's
+	// entire module graph, not just a hand-maintained allowlist. Build the
+	// full set once; assets only change on rebuild, which restarts the process.
+	const PUBLIC_ASSET_FILES = new Set<string>();
+	{
+		const walk = (rel: string): void => {
+			for (const entry of readdirSync(join(publicDir, rel), { withFileTypes: true })) {
+				const relPath = rel ? `${rel}/${entry.name}` : entry.name;
+				if (entry.isDirectory()) walk(relPath);
+				else PUBLIC_ASSET_FILES.add(`/${relPath}`);
+			}
+		};
+		walk("");
+	}
 
 	console.log(`[cast server] auth enabled (user: ${webUser})`);
 
@@ -1948,6 +1981,43 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		json(res, shared);
 	});
 
+	// Live read-only relay for a shared thread: streams the session's events
+	// (tokens, thinking, tool calls, status) to an anonymous visitor while the
+	// agent works. Purely server→client SSE — the visitor can only watch. Only
+	// display events are relayed (never usage, steering, plan state, or the
+	// session's internal summaries); the session must be live in THIS process.
+	route("GET", "/api/shared/:token/events", (req, res, params) => {
+		const shared = bridge.getSharedSession(params.token);
+		if (!shared) return json(res, { error: "Not found" }, 404);
+		const ws = bridge.getSharedLiveSession(params.token);
+		res.writeHead(200, {
+			"Content-Type": "text/event-stream",
+			"Cache-Control": "no-store",
+			Connection: "keep-alive",
+		});
+		if (!ws) {
+			// Not live in this process (closed, or driven by another process):
+			// the static transcript already covers it. Close immediately.
+			res.write(": live-unavailable\n\n");
+			res.end();
+			return;
+		}
+		const listener = (event: { type: string }) => {
+			if (!SHARED_LIVE_EVENT_TYPES.has(event.type)) return;
+			writer.write(`data: ${JSON.stringify(event)}\n\n`);
+		};
+		const writer = createSseWriter(res, () => bridge.unsubscribe(ws.id, listener));
+		// Late joiner: send the current status immediately so the view shows
+		// the in-flight turn without waiting for the next event.
+		writer.write(`data: ${JSON.stringify({ type: "status", status: ws.status, startedAt: ws.turnStartedAt })}\n\n`);
+		bridge.subscribe(ws.id, listener);
+		const heartbeat = setInterval(() => writer.write(": keepalive\n\n"), 15_000);
+		req.on("close", () => {
+			clearInterval(heartbeat);
+			writer.close();
+		});
+	});
+
 	// Main request handler
 	const server = createServer(async (req, res) => {
 		setSecurityHeaders(req, res);
@@ -1975,6 +2045,14 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		// they carry no secrets (the actual password check happens server-side
 		// against every real /api/* route, which stays gated) so this doesn't
 		// widen what an unauthenticated visitor can actually do.
+		//
+		// app.js imports the whole SPA module graph at load time, so a public
+		// page can't hardcode a short allowlist of assets — the browser needs
+		// every one of app.js's imports (api.js, composer.js, …) reachable
+		// without a session. Serve every non-API GET asset publicly; all data
+		// still lives behind /api/, which is gated. A logged-out visitor to the
+		// main page gets the app shell, then the app's own 401 handling bounces
+		// them to /login — same as before, just one request later.
 		const PUBLIC_STATIC_ASSETS = new Set([
 			"/app.js",
 			"/new-session-modal.js",
@@ -2009,7 +2087,13 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			urlPath.startsWith("/api/shared/") ||
 			urlPath === OPENAPI_V1_PATH ||
 			PUBLIC_STATIC_ASSETS.has(urlPath) ||
-			urlPath.startsWith("/fonts/");
+			urlPath.startsWith("/fonts/") ||
+			// Any real static file (the SPA's module graph) is public — the
+			// shared page loads app.js's imports (api.js, composer.js, …)
+			// without a session, and static files carry no secrets. Page
+			// routes that aren't files (/, /settings, /dashboard) stay gated,
+			// so a logged-out visitor still gets bounced to /login.
+			PUBLIC_ASSET_FILES.has(urlPath);
 		if (!isPublicShareRoute && !isAuthenticated(req)) {
 			requireAuth(res, urlPath.startsWith("/api/"));
 			return;
