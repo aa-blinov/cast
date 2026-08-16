@@ -122,6 +122,13 @@ const DEFAULT_MEMORY_SERVICE = createProjectMemoryService();
 // we treat it as a doom loop and block execution — the model gets an error
 // result and must try something different.
 const DOOM_LOOP_THRESHOLD = 3;
+// Safety cap for turns without an explicit /goal budget: a model that keeps
+// calling DIFFERENT tools (so the doom-loop detector can't catch it) must not
+// loop forever. 200 model calls is far beyond any legitimate single turn, so
+// this only ever trips a genuine runaway — and the work done so far is already
+// persisted per tool batch, so nothing is lost.
+const DEFAULT_OUTER_ITERATION_CAP = 200;
+export { DEFAULT_OUTER_ITERATION_CAP };
 const MEMORY_RECALL_HINT = [
 	"<system-reminder>",
 	"Durable project memory may contain prior decisions and facts.",
@@ -2155,27 +2162,31 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 			let reasoningRetryDone = false;
 
 			while (hasMoreToolCalls || pendingMessages.length > 0) {
-				// Goal-mode bound: count each model call (one per inner-loop pass,
-				// which may carry several tool calls). Cap it so an autonomous run
-				// can't spin on different-but-unproductive tool calls forever.
-				// Nudge the model just before the cap so it can wrap up; warn if
-				// it burns through anyway.
-				if (loopConfig.maxOuterIterations !== undefined) {
-					outerIteration += 1;
-					if (outerIteration > loopConfig.maxOuterIterations) {
-						loopConfig.onWarning?.(
-							`Autonomous goal hit its iteration budget (${loopConfig.maxOuterIterations}) — stopping.`,
-						);
-						hasMoreToolCalls = false;
-						pendingMessages = [];
-						break;
-					}
-					if (loopConfig.maxOuterIterations >= 6 && outerIteration >= loopConfig.maxOuterIterations - 3) {
-						messages.push({
-							role: "system",
-							content: `<system-reminder>You are near the end of your autonomous goal budget (~${loopConfig.maxOuterIterations - outerIteration} iterations left). Finish the current work and summarize; do not start new sub-tasks.</system-reminder>`,
-						});
-					}
+				// Iteration bound: count each model call (one per inner-loop pass,
+				// which may carry several tool calls). The explicit /goal budget
+				// caps an autonomous run; a default safety cap applies to every
+				// other turn so a model spinning on different-but-unproductive
+				// tool calls can't loop forever. Either way the model is nudged
+				// to wrap up near the cap and warned if it burns through — the
+				// work done so far is already persisted per tool batch.
+				const goalCap = loopConfig.maxOuterIterations;
+				const activeCap = goalCap ?? DEFAULT_OUTER_ITERATION_CAP;
+				outerIteration += 1;
+				if (outerIteration > activeCap) {
+					loopConfig.onWarning?.(
+						goalCap !== undefined
+							? `Autonomous goal hit its iteration budget (${goalCap}) — stopping.`
+							: `Turn hit the iteration safety cap (${activeCap}) — stopping. This may be a runaway loop; check the recent tool calls.`,
+					);
+					hasMoreToolCalls = false;
+					pendingMessages = [];
+					break;
+				}
+				if (activeCap >= 4 && outerIteration >= activeCap - 3) {
+					messages.push({
+						role: "system",
+						content: `<system-reminder>You are near the end of this turn's iteration budget (~${activeCap - outerIteration} iterations left). Finish the current work and summarize; do not start new sub-tasks.</system-reminder>`,
+					});
 				}
 				// Inject pending steering messages
 				if (pendingMessages.length > 0) {
