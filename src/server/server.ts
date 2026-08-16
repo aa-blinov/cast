@@ -81,7 +81,11 @@ const VERSIONED_LOCAL_IMPORT_RE = /from\s+"\.\/(?!\.)([\w-]+)\.js(?!\?v=)"/g;
 // Local modules whose `./<name>.js` imports are rewritten with `?v=` inside
 // Rendered static responses (body + headers), keyed by path|encoding|version —
 // see serveStatic. Bounded; cleared wholesale when it passes 1024 entries.
-const staticResponseCache = new Map<string, { status: number; headers: Record<string, string>; body: Buffer }>();
+// Headers hold numbers too (Content-Length), hence string | number.
+const staticResponseCache = new Map<
+	string,
+	{ status: number; headers: Record<string, string | number>; body: Buffer }
+>();
 
 // app.js / settings-modal.js. assetVersion mixes these into the app.js hash so
 // any change to one of them invalidates the cached app.js too.
