@@ -2,6 +2,52 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.19.0
+
+### Added
+
+- **Live read-only share** — a shared thread link (`/shared/<token>`) now
+  streams the agent working in **real time**: tokens, thinking, tool calls,
+  and status, with a `· live` badge. The visitor only ever receives display
+  events (usage, steering, and plan state are filtered out) and there is no
+  input surface, so the link is read-only by construction. On turn end the
+  committed transcript refreshes.
+- **`session_history` tool gains `scope=global`** — the agent's "second
+  brain". Previously it searched only the current project's sessions; now
+  `scope=global` searches across **every project**, so you can ask "when did
+  we fix/decide X" and get the actual verbatim conversation, with the session
+  title and date. Tool results now include that context.
+- **Models are told to quote history verbatim and never fabricate.** The
+  `session_history` and `memory` tool prompts now require quoting exactly what
+  the search returned (numbers, paths, commit hashes) and admitting when a
+  specific detail isn't in the results instead of inventing it.
+- **Sandbox cleanup** — deleting a sandbox session also removes its throwaway
+  folder (`~/.cast/sandbox/cast-<id>`) on every delete path (web, TUI, ACP).
+  Real project directories are never touched (exact-match only), and the web
+  delete confirmation warns when the sandbox folder will go too.
+
+### Fixed
+
+- **Shared links never worked for anonymous visitors**: the public page loads
+  app.js's full module graph, but only a hardcoded allowlist of static assets
+  was public — everyone else got `text/html` for the modules. Every real
+  static file is now public (data stays behind the gated `/api/*` routes);
+  page routes like `/` still bounce to `/login`.
+- **Slow git operations no longer freeze the daemon**: `git worktree add`,
+  `worktree remove`, marketplace clone/pull/update, and plugin install now run
+  asynchronously, so a multi-second git op doesn't stall every other session's
+  streaming. Fast probes (rev-parse, worktree list) stay sync deliberately.
+
+### Performance
+
+- **Static asset responses are cached in memory** — one app.js hit went from
+  ~182ms (re-hash + re-brotli per request) to ~4.5ms.
+- **Chat POSTs are acknowledged immediately** instead of awaiting the turn's
+  async setup (provider reconcile, hooks) — measured 402ms → 0ms.
+- **SQLite WAL is truncated periodically while idle** so it can't grow
+  unbounded (observed at 155MB) and every later checkpoint stays cheap.
+- **Larger V8 young generation** for the streaming daemon (fewer minor GCs).
+
 ## 0.18.0
 
 ### Added
