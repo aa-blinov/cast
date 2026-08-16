@@ -3141,7 +3141,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		const raw = input === "/goal" ? "" : input.slice("/goal ".length);
 		const { goal: goalText, maxIterations } = parseGoalInput(raw);
 		if (!goalText) {
-			showNotice("[Usage: /goal [--steps N] <what to achieve> — works autonomously until done]");
+			showNotice("[Usage: /goal [N] <what to achieve> — works autonomously until done (or /goal --steps N <desc>)]");
 			return;
 		}
 		if (deps.running) {
