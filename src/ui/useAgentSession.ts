@@ -252,7 +252,7 @@ export interface UseAgentSession {
 	 */
 	pendingSteers: string[];
 	pendingQueue: string[];
-	submit: (text: string, images?: PendingImage[], goal?: boolean) => Promise<void>;
+	submit: (text: string, images?: PendingImage[], goal?: boolean | number) => Promise<void>;
 	steer: (text: string) => void;
 	followUp: (text: string) => void;
 	abort: () => void;
@@ -828,7 +828,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	};
 
 	const submit = useCallback(
-		async (text: string, images?: PendingImage[], goal?: boolean) => {
+		async (text: string, images?: PendingImage[], goal?: boolean | number) => {
 			if (isClient && effectiveDaemonUrl) {
 				// Thin-client submit: the daemon owns the loop. Enqueue locally if a
 				// turn is already running (the daemon serializes concurrent submits),

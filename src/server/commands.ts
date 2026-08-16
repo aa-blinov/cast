@@ -184,7 +184,19 @@ export const REVIEW_PROMPT = `Review the work done in this session as a careful 
 // MiMo-Code-style: work through iterations without yielding for permission,
 // ask at most one clarifying question, verify as you go, and report honestly.
 export const GOAL_MAX_OUTER_ITERATIONS = 25;
-export function buildGoalPrompt(goal: string): string {
+
+/** Parse `/goal [--steps N] <description>`. Returns the goal text and the
+ * iteration budget (the prompt and the loop cap both use it). */
+export function parseGoalInput(input: string): { goal: string; maxIterations: number } {
+	const match = input.match(/^(?:--steps|-s)\s+(\d+)\s*(.*)$/s);
+	if (match) {
+		const n = Math.max(1, Math.min(Number(match[1]), 200));
+		return { goal: match[2]!.trim(), maxIterations: n };
+	}
+	return { goal: input.trim(), maxIterations: GOAL_MAX_OUTER_ITERATIONS };
+}
+
+export function buildGoalPrompt(goal: string, maxIterations = GOAL_MAX_OUTER_ITERATIONS): string {
 	return `You are working toward a goal autonomously. Keep going until it is fully done — do NOT stop after the first attempt, and do NOT yield back to the user for permission mid-task.
 
 Goal: ${goal}
@@ -193,7 +205,7 @@ Work as a careful senior engineer:
 1. Inspect the repository or context, then implement the smallest steps that move toward the goal.
 2. Verify as you go: run the relevant tests/checks for what you changed.
 3. Fix issues you find. Iterate until the goal is met or you hit your iteration budget.
-4. You have a bounded budget (~${GOAL_MAX_OUTER_ITERATIONS} tool iterations). When you believe the goal is met, run a final check and summarize what was done and what was verified.
+4. You have a bounded budget (~${maxIterations} tool iterations). When you believe the goal is met, run a final check and summarize what was done and what was verified.
 5. Do not ask "do you want me to also...?" — push forward when the goal is clear. Ask at most ONE question (via the question tool) only if the goal is genuinely ambiguous and the answer would change what you do.
 6. Be honest: name exactly which checks you ran and their results. Do not claim a check passed unless you actually ran it.`;
 }
