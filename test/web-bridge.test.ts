@@ -230,6 +230,29 @@ describe("web bridge", () => {
 		});
 	});
 
+	it("/turn-cap works through the settings command path (Settings > Bash saves it)", async () => {
+		const bridge = createServerBridge(makeResult());
+
+		const set = await bridge.executeSettingsCommand("/turn-cap 30");
+		expect(set.ok).toBe(true);
+		expect((await bridge.executeSettingsCommand("/turn-cap")).result).toMatch(/30/);
+
+		// The invalid case must fail rather than silently accept.
+		expect((await bridge.executeSettingsCommand("/turn-cap 99999999")).ok).toBe(false);
+
+		await bridge.executeSettingsCommand("/turn-cap reset");
+		expect((await bridge.executeSettingsCommand("/turn-cap")).result).toMatch(/500|default|reset/i);
+	});
+
+	it("/skill-save is a session command, not a settings command", async () => {
+		const bridge = createServerBridge(makeResult());
+
+		expect(await bridge.executeSettingsCommand("/skill-save")).toEqual({
+			ok: false,
+			error: "Command requires an active session",
+		});
+	});
+
 	it("seeds default marketplaces only from /plugin subcommands that consume them", async () => {
 		const bridge = createServerBridge(makeResult());
 

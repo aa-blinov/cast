@@ -16,7 +16,7 @@ import type { AgentActorNotification } from "../core/actors.ts";
 import { backupFileForCheckpoint, createCheckpoint, restoreCheckpoint } from "../core/checkpoint.ts";
 import { fetchModels, type ModelInfo, probeProvider, resolveProvider } from "../core/config.ts";
 import { hasHooks, runHooksForEvent } from "../core/hooks.ts";
-import type { Message } from "../core/llm.ts";
+import { createClient, type Message, streamAndCollect } from "../core/llm.ts";
 import { type AgentEvent, compactSessionMessages, runAgentLoop, runMemoryMaintenanceAgent } from "../core/loop.ts";
 import { closeMcpConnections, formatMcpForPrompt, type McpSetupResult } from "../core/mcp.ts";
 import {
@@ -131,6 +131,34 @@ const WORKTREE_REMOVE_PREFIX_RE = /^(?:remove|rm)\s*(.*)$/;
 const MEMORY_WRITE_COMMAND_RE = /^write(?:\s+(on|off))?$/;
 const MEMORY_BUDGET_COMMAND_RE = /^budget\s+(\d+)$/;
 const MEMORY_FLOOR_COMMAND_RE = /^floor\s+(0(?:\.\d+)?|1(?:\.0)?)$/;
+// Post-turn "reusable procedure?" check for auto skill suggestions. Only
+// fires on substantial multi-step turns, and the eval prompt is explicitly
+// conservative, so it can't nag on every trivial action.
+const MIN_TOOL_CALLS_FOR_SKILL_SUGGESTION = 4;
+const SKILL_SUGGEST_SYSTEM_PROMPT =
+	"You decide whether a coding-agent turn performed a clearly reusable, multi-step procedure worth saving as a project skill. Be conservative. Always reply with valid JSON and nothing else.";
+const SKILL_SUGGEST_PROMPT = `Below is a transcript of one turn (assistant messages and tool results, newest last). Determine whether the turn performed a clearly reusable, multi-step procedure — a repeatable workflow like "run the dev server and verify it with curl", "add a component with tests", "cut a release" — as opposed to a one-off task or a trivial single action.
+
+Reply with exactly one of these two JSON objects, nothing else, no markdown:
+
+If reusable:
+{"name": "short-kebab-case-name", "description": "one sentence: when to use this procedure"}
+
+If not:
+{"name": null}
+
+Be conservative: only propose when a future session would genuinely benefit from following the same steps.
+
+<transcript>
+{{TRANSCRIPT}}
+</transcript>`;
+const SKILL_SUGGEST_GENERATE_PROMPT = `Write a concise Agent-Skills-style SKILL.md for the reusable procedure below. YAML frontmatter: name (kebab-case), description (one sentence, "Use when …"), then a short ordered list of steps. Keep it under 30 lines — every line is a recurring token cost once loaded. Base it on the actual steps performed:
+
+<procedure>
+{{PROCEDURE}}
+</procedure>
+
+Output only the SKILL.md file contents.`;
 const MEMORY_RECONCILE_COMMAND_RE = /^reconcile\s+(on|off)$/;
 const MEMORY_CHECKPOINT_FORK_COMMAND_RE = /^checkpoint\s+fork\s+(on|off)$/;
 const MEMORY_CHECKPOINT_THRESHOLDS_COMMAND_RE = /^checkpoint\s+thresholds\s+(.+)$/;
@@ -190,6 +218,7 @@ export type WebAgentStatus = "idle" | "running" | "error";
 export type WebEvent =
 	| AgentEvent
 	| { type: "status"; status: WebAgentStatus; startedAt?: number }
+	| { type: "skill_suggestion"; name: string; description: string }
 	| {
 			type: "user_message";
 			message: {
@@ -227,6 +256,9 @@ export interface WebAgentSession {
 	/** Current in-flight assistant blocks. Ephemeral: returned on reload, but
 	 * never persisted as transcript history and cleared when the turn settles. */
 	activeStream?: DisplayStreamBlock[];
+	/** A pending "save this as a skill?" suggestion from the post-turn check,
+	 * with the transcript captured so a confirmed save writes the exact turn. */
+	pendingSkillSuggestion?: { name: string; description: string; transcript: string };
 	listeners: Set<(event: WebEvent) => void>;
 	/** IDs accepted while this live session has queued work. Persisted user
 	 * messages are checked as well, so a lost HTTP response can be retried
@@ -1253,6 +1285,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		const lease = ws.runner.startRun(ac);
 		const automaticMemoryMaintenance = ws.session.messages.length === 0;
 		const automaticMemoryMessages = ws.session.messages.slice();
+		// Tool calls this turn — gating the post-turn "reusable procedure?"
+		// skill suggestion so it only fires on substantial multi-step turns.
+		let toolCallsInTurn = 0;
 		ws.currentClientMessageId = clientMessageId;
 		ws.status = "running";
 		ws.error = null;
@@ -1525,6 +1560,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 						const t = event as { id: string; name: string; result: { isError?: boolean } };
 						const started = toolStartTimes.get(t.id);
 						toolStartTimes.delete(t.id);
+						toolCallsInTurn += 1;
 						recordToolCall(
 							ws.id,
 							t.name,
@@ -1768,6 +1804,13 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				});
 				broadcastSessionUpdate(ws);
 				startQueuedFollowUps(sessionId, ws);
+				// Post-turn "reusable procedure?" check — only on substantial
+				// multi-step turns, and the eval is conservative + user-confirmed.
+				if (toolCallsInTurn >= MIN_TOOL_CALLS_FOR_SKILL_SUGGESTION) {
+					void suggestReusableSkill(ws, finalMessages).catch((err: unknown) => {
+						console.error("[skill-suggest] eval failed:", err);
+					});
+				}
 			})
 			.catch((err: unknown) => {
 				ws.status = "error";
@@ -1780,6 +1823,118 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				broadcast(ws, { type: "status", status: "error" });
 				broadcastSessionUpdate(ws);
 			});
+	}
+
+	function compactTurnTranscript(messages: Message[]): string {
+		// Last ~24 assistant/tool messages, newest last — enough to recognize a
+		// procedure without shipping the whole turn.
+		const tail = messages.filter((m) => m.role === "assistant" || m.role === "tool").slice(-24);
+		return tail
+			.map((m) => {
+				const text = typeof m.content === "string" ? m.content : "";
+				const calls =
+					"tool_calls" in m && Array.isArray((m as { tool_calls?: unknown }).tool_calls) ? " [tool call]" : "";
+				return `${m.role === "tool" ? "TOOL" : "AGENT"}:${text.slice(0, 600)}${calls}`;
+			})
+			.join("\n");
+	}
+
+	async function runCompactLlm(system: string, user: string, maxTokens: number): Promise<{ content: string } | null> {
+		try {
+			const ac = new AbortController();
+			const timer = setTimeout(() => ac.abort(), 20_000);
+			timer.unref();
+			const resp = await streamAndCollect(
+				createClient(config, undefined),
+				defaultModel,
+				[
+					{ role: "system", content: system },
+					{ role: "user", content: user },
+				],
+				[],
+				maxTokens,
+				ac.signal,
+			);
+			clearTimeout(timer);
+			return resp;
+		} catch {
+			return null;
+		}
+	}
+
+	function parseSuggestionJson(content: string): { name: string; description: string } | null {
+		const cleaned = content
+			.replace(/^```(?:json)?\s*/i, "")
+			.replace(/```\s*$/, "")
+			.trim();
+		try {
+			const parsed = JSON.parse(cleaned) as { name?: unknown; description?: unknown };
+			if (typeof parsed.name === "string" && parsed.name.trim() && typeof parsed.description === "string") {
+				return { name: parsed.name.trim(), description: parsed.description.trim() };
+			}
+		} catch {
+			// Not JSON — no suggestion.
+		}
+		return null;
+	}
+
+	/** Post-turn check: if the turn clearly did a reusable multi-step procedure,
+	 * suggest saving it as a project skill. Fire-and-forget; the eval prompt is
+	 * conservative and the gate (tool-call count, name-exists, once-per-session)
+	 * keeps it from nagging. */
+	async function suggestReusableSkill(ws: WebAgentSession, messages: Message[]): Promise<void> {
+		if (ws.status === "error") return;
+		const transcript = compactTurnTranscript(messages);
+		if (transcript.trim().length === 0) return;
+		const resp = await runCompactLlm(
+			SKILL_SUGGEST_SYSTEM_PROMPT,
+			SKILL_SUGGEST_PROMPT.replace("{{TRANSCRIPT}}", transcript),
+			512,
+		);
+		if (!resp) return;
+		const suggestion = parseSuggestionJson(resp.content);
+		if (!suggestion) return;
+		// Guard against re-proposing / overwriting an existing skill.
+		const name = suggestion.name
+			.toLowerCase()
+			.replace(/[^a-z0-9-_]+/g, "-")
+			.replace(/^-+|-+$/g, "");
+		if (!name || skillExists(ws.session.cwd ?? cwd, name)) return;
+		if (ws.pendingSkillSuggestion?.name === name) return;
+		ws.pendingSkillSuggestion = { name, description: suggestion.description, transcript };
+		broadcast(ws, { type: "skill_suggestion", name, description: suggestion.description });
+	}
+
+	function skillExists(sessionCwd: string, name: string): boolean {
+		const candidates = [
+			join(homedir(), ".cast", "skills", name, "SKILL.md"),
+			join(sessionCwd, ".cast", "skills", name, "SKILL.md"),
+		];
+		return candidates.some((p) => existsSync(p));
+	}
+
+	/** Generate and write `.cast/skills/<name>/SKILL.md` from a captured turn. */
+	async function writeSkillFromPending(ws: WebAgentSession): Promise<string | null> {
+		const pending = ws.pendingSkillSuggestion;
+		if (!pending) return null;
+		const transcript = pending.transcript;
+		const resp = await runCompactLlm(
+			"Write a concise reusable-procedure skill for a coding agent.",
+			SKILL_SUGGEST_GENERATE_PROMPT.replace("{{PROCEDURE}}", transcript),
+			800,
+		);
+		if (!resp) return null;
+		const body = resp.content
+			.replace(/^```[^\n]*\n/, "")
+			.replace(/```\s*$/, "")
+			.trim();
+		if (!body) return null;
+		const sessionCwd = ws.session.cwd ?? cwd;
+		const dir = join(sessionCwd, ".cast", "skills", pending.name);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "SKILL.md"), `${body}\n`, "utf-8");
+		ws.pendingSkillSuggestion = undefined;
+		return pending.name;
 	}
 
 	function abort(sessionId: string): void {
@@ -2387,8 +2542,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		}
 		if (name === "/review") {
 			// /review is blocking (isCommandBlocking), so this only runs idle.
-			// Start the review turn without awaiting it — the SSE stream carries
-			// the agent's work; the command just acknowledges the kick-off.
+			// Start the review turn without awaiting it — the SSE stream carries			// the agent's work; the command just acknowledges the kick-off.
 			void submit(ws.id, REVIEW_PROMPT).catch((error) => {
 				console.error(`[cast server] /review submit failed:`, error);
 			});
@@ -2411,6 +2565,17 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			}
 			updateSettings({ maxTurnIterations: n });
 			return { ok: true, result: `Turn iteration safety cap set to ${n} (applies on the next turn).` };
+		}
+		if (name === "/skill-save") {
+			const pending = ws.pendingSkillSuggestion;
+			if (!pending) return { ok: false, error: "No pending skill suggestion — run a multi-step task first." };
+			if (arg === "dismiss" || arg === "no") {
+				ws.pendingSkillSuggestion = undefined;
+				return { ok: true, result: "Dismissed the skill suggestion." };
+			}
+			const saved = await writeSkillFromPending(ws);
+			if (!saved) return { ok: false, error: "Could not generate the skill." };
+			return { ok: true, result: `Saved reusable procedure as skill /${saved}.` };
 		}
 		if (name === "/rules") {
 			return {
@@ -3735,6 +3900,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			"/plugin",
 			"/provider",
 			"/ssh",
+			"/turn-cap",
 		]);
 		if (!allowed.has(name ?? "")) return { ok: false, error: "Command requires an active session" };
 

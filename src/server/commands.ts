@@ -126,6 +126,12 @@ export const SLASH_COMMANDS: Array<{
 	{ name: "/rules", description: "List loaded rules", blocking: false },
 	{ name: "/s", description: "Alias for /steer", takesArgs: true, blocking: false },
 	{ name: "/sessions", description: "List sessions", blocking: false, hidden: true },
+	{
+		name: "/skill-save",
+		description: "Save the pending reusable procedure as a skill (or 'dismiss')",
+		takesArgs: true,
+		blocking: false,
+	},
 	{ name: "/skills", description: "Manage skills", takesArgs: true, blocking: false, hidden: true },
 	{ name: "/ssh", description: "Manage SSH hosts", takesArgs: true, blocking: false, hidden: true },
 	{ name: "/steer", description: "Inject a message while running", takesArgs: true, blocking: false },

@@ -253,6 +253,14 @@ export function handleSseEvent(event, context) {
 				prev ? { ...prev, messages: [...prev.messages, { role: "warning", content: event.message }] } : prev,
 			);
 			break;
+		case "skill_suggestion":
+			// A post-turn check found a reusable procedure. Store it so the App
+			// can offer a Save/Dismiss card; the user decides, so it's cheap and
+			// never auto-writes.
+			setSession((prev) =>
+				prev ? { ...prev, skillSuggestion: { name: event.name, description: event.description } } : prev,
+			);
+			break;
 		case "agent_actor": {
 			const actor = event.actor;
 			const status = actor.status === "success" ? "completed" : actor.status;
