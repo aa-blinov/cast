@@ -2369,7 +2369,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		}
 		if (name === "/goal") {
 			const { goal, maxIterations } = parseGoalInput(arg);
-			if (!goal) return { ok: false, error: "Usage: /goal [--steps N] <what to achieve>" };
+			if (!goal) return { ok: false, error: "Usage: /goal [N] <what to achieve>  (or /goal --steps N <desc>)" };
 			// /goal is blocking (isCommandBlocking), so this only runs idle.
 			// Kick off the autonomous run with the chosen iteration budget and
 			// let the SSE stream carry the work.

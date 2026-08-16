@@ -185,15 +185,26 @@ export const REVIEW_PROMPT = `Review the work done in this session as a careful 
 // ask at most one clarifying question, verify as you go, and report honestly.
 export const GOAL_MAX_OUTER_ITERATIONS = 25;
 
-/** Parse `/goal [--steps N] <description>`. Returns the goal text and the
- * iteration budget (the prompt and the loop cap both use it). */
+/** Parse `/goal [--steps N] <description>` — and the ergonomic leading-number
+ * form `/goal N <description>` (mirrors `timeout 10 cmd`). A pure integer
+ * 1–200 as the first token is the budget; otherwise it's part of the goal
+ * text. Returns the goal text and the iteration budget (both the prompt and
+ * the loop cap use it). */
 export function parseGoalInput(input: string): { goal: string; maxIterations: number } {
-	const match = input.match(/^(?:--steps|-s)\s+(\d+)\s*(.*)$/s);
-	if (match) {
-		const n = Math.max(1, Math.min(Number(match[1]), 200));
-		return { goal: match[2]!.trim(), maxIterations: n };
+	const flagged = input.match(/^(?:--steps|-s)\s+(\d+)\s*(.*)$/s);
+	if (flagged) {
+		return { goal: flagged[2]!.trim(), maxIterations: clampSteps(Number(flagged[1])) };
+	}
+	const numbered = input.match(/^(\d+)\s+(.*)$/s);
+	if (numbered) {
+		const n = Number(numbered[1]);
+		if (n >= 1 && n <= 200) return { goal: numbered[2]!.trim(), maxIterations: n };
 	}
 	return { goal: input.trim(), maxIterations: GOAL_MAX_OUTER_ITERATIONS };
+}
+
+function clampSteps(n: number): number {
+	return Math.max(1, Math.min(Math.floor(n), 200));
 }
 
 export function buildGoalPrompt(goal: string, maxIterations = GOAL_MAX_OUTER_ITERATIONS): string {
