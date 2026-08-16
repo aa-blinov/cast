@@ -848,6 +848,11 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					clientMessageId,
 				});
 				setMessages((msgs) => [...msgs, { role: "user", content: text, clientMessageId }]);
+				// Show the activity spinner immediately — the daemon's
+				// status:running SSE event (which would otherwise be the first
+				// signal) only lands after the POST round-trip. Guarded so an
+				// already-streaming turn (steering) keeps its live blocks.
+				if (!streamingRef.current) updateStreaming(() => ({ blocks: [] }), true);
 				const attempt = async (client: ServerClient): Promise<boolean> => {
 					try {
 						await submitServerChat(
@@ -910,6 +915,9 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					void submit(queued.map((message) => messageContentToText(message.content)).join("\n\n"));
 			};
 			setError(null);
+			// Local-loop submit: show the spinner before the first LLM event
+			// (which can take the full TTFT), not after it.
+			if (!streamingRef.current) updateStreaming(() => ({ blocks: [] }), true);
 			if (refreshPersonasForTurn) {
 				let refreshed: Awaited<ReturnType<NonNullable<typeof refreshPersonasForTurn>>>;
 				try {
