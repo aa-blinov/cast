@@ -104,6 +104,10 @@ export interface QuestionItem {
 	question: string;
 	options: QuestionOption[];
 	recommended?: string;
+	/** UI-only: skip the free-form "your own answer" path. The model's options
+	 * are exhaustive (e.g. our post-turn skill-save confirmation) and a custom
+	 * answer would be misinterpreted by the answer consumer. */
+	noFreeForm?: boolean;
 }
 
 export interface PlanQuestion {

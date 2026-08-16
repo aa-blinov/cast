@@ -38,6 +38,9 @@ export async function submitMessage(text, images, pendingDocs, context) {
 		!images?.length &&
 		!pendingDocs?.length &&
 		session?.question?.questions?.length &&
+		// noFreeForm questions (skill-save confirmation) have exhaustive
+		// options — typing must be a new message, not a custom answer.
+		!session.question.questions.some((item) => item.noFreeForm) &&
 		text?.trim() &&
 		!text.trim().startsWith("/")
 	) {

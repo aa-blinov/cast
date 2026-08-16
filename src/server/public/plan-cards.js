@@ -57,13 +57,17 @@ export function QuestionCard({ question, onChoose }) {
 								${option.description && html`<span class="plan-decision-option-description">${option.description}</span>`}
 							</button>`,
 						)}
-						<textarea
-							class="plan-decision-option plan-decision-textarea"
-							value=${answers[index]}
-							placeholder="Or your own answer…"
-							rows="2"
-							onInput=${(e) => setAnswers((prev) => prev.map((value, i) => (i === index ? e.currentTarget.value : value)))}
-						></textarea>
+						${
+							item.noFreeForm
+								? ""
+								: html`<textarea
+									class="plan-decision-option plan-decision-textarea"
+									value=${answers[index]}
+									placeholder="Or your own answer…"
+									rows="2"
+									onInput=${(e) => setAnswers((prev) => prev.map((value, i) => (i === index ? e.currentTarget.value : value)))}
+								></textarea>`
+						}
 					</div>
 				`,
 			)}

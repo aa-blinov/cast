@@ -116,4 +116,35 @@ describe("resolvePlanQuestionWithPicker", () => {
 		expect(result?.answers).not.toContain("__other__");
 		expect(result?.sources).toEqual(["free-form"]);
 	});
+
+	it("skips the free-form sentinel entirely for noFreeForm questions", async () => {
+		// noFreeForm (the skill-save confirmation) has exhaustive options — the
+		// sentinel must not be offered, so a custom answer can't be invented.
+		const confirm: PlanQuestion = {
+			questions: [
+				{
+					question: "Save reusable procedure as a skill?",
+					options: [
+						{ value: "save", label: "Save as /release" },
+						{ value: "dismiss", label: "Dismiss" },
+					],
+					noFreeForm: true,
+				},
+			],
+		};
+		let offered: { value: string }[] | null = null;
+		const picker = {
+			pickOption: async (opts: unknown[]) => {
+				offered = opts as { value: string }[];
+				return "save";
+			},
+			promptText: async () => {
+				throw new Error("promptText must not be reachable for noFreeForm");
+			},
+			log: () => {},
+		} as unknown as Pickers;
+		const result = await resolvePlanQuestionWithPicker(confirm, picker);
+		expect(result).toEqual({ answers: ["save"], sources: ["option"] });
+		expect(offered?.map((o) => o.value)).toEqual(["save", "dismiss"]);
+	});
 });
