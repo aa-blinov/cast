@@ -41,6 +41,26 @@ describe("session history search", () => {
 		expect(formatSessionHistoryToolResult("reconnect watermark", results)).toContain("SSE");
 	});
 
+	it("scope=global searches across every project, not just the current cwd", () => {
+		const project = join(root, "project");
+		const otherProject = join(root, "other");
+		const current = createSession("test-model", project);
+		current.messages = [{ role: "user", content: "the second brain question about zebras" }];
+		saveSession(current);
+		const other = createSession("test-model", otherProject);
+		other.messages = [{ role: "assistant", content: "the answer about zebras lives in another project" }];
+		saveSession(other);
+
+		const scoped = searchSessionHistory(project, "zebras");
+		expect(scoped.every((result) => result.sessionId === current.id)).toBe(true);
+
+		const global = searchSessionHistory(project, "zebras", 8, "global");
+		const globalIds = new Set(global.map((result) => result.sessionId));
+		expect(globalIds.has(current.id)).toBe(true);
+		expect(globalIds.has(other.id)).toBe(true);
+		expect(formatSessionHistoryToolResult("zebras", global)).toContain("another project");
+	});
+
 	it("returns no results for an empty or unknown query", () => {
 		const project = join(root, "project");
 		expect(searchSessionHistory(project, "")).toEqual([]);

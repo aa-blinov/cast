@@ -142,6 +142,12 @@ export function getToolDefinitions(
 					properties: {
 						query: { type: "string", description: "One to three distinctive search terms" },
 						limit: { type: "number", description: "Maximum results, default 10" },
+						scope: {
+							type: "string",
+							enum: ["project", "global"],
+							description:
+								'"project" (default) searches only sessions in the current working directory; "global" searches across every project — use it for "when did we fix/decide X" across all your history.',
+						},
 					},
 					required: ["query"],
 				},
