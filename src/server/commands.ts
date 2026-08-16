@@ -120,6 +120,7 @@ export const SLASH_COMMANDS: Array<{
 	{ name: "/reasoning", description: "Show or change reasoning level", takesArgs: true, blocking: true, hidden: true },
 	{ name: "/reload", description: "Reload skills, rules, MCP, and personas", blocking: true, hidden: true },
 	{ name: "/repo", description: "Show cwd and git branch", blocking: false, hidden: true },
+	{ name: "/review", description: "Ask the agent to review and verify its own work", blocking: true },
 	{ name: "/rule:", description: "Invoke a rule by name", takesArgs: true, blocking: false },
 	{ name: "/rules", description: "List loaded rules", blocking: false },
 	{ name: "/s", description: "Alias for /steer", takesArgs: true, blocking: false },
@@ -167,6 +168,16 @@ export const SLASH_COMMANDS: Array<{
 		hidden: true,
 	},
 ];
+
+// The prompt /review submits. Generic enough for any project; the honesty
+// clause matters — a review that claims checks it never ran is worse than no
+// review. Kept here (the server command registry) so both the bridge handler
+// and the TUI's handleInput can share it.
+export const REVIEW_PROMPT = `Review the work done in this session as a careful senior engineer.
+
+1. Identify what changed: run git status and git diff if this is a git repo, otherwise list the files touched in this session.
+2. Verify it actually holds together: find and run the project's test and lint commands (inspect package.json, pyproject.toml, Cargo.toml, deno.json, go.mod, Makefile, etc.). Fix quick, obvious breakage only if it's safe.
+3. Report concisely and honestly: what was implemented, what was verified (name the exact commands you ran and their result), and what remains open, risky, or unverified. Do not claim a check passed unless you actually ran it — if you didn't run something, say so.`;
 
 /** Check if a command requires the agent to be idle. */
 export function isCommandBlocking(input: string): boolean {
