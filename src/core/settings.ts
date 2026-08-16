@@ -159,6 +159,8 @@ export interface Settings {
 	memoryPromptBudget?: number;
 	/** Relative BM25 score floor for dropping weak common-word matches. */
 	memorySearchScoreFloor?: number;
+	/** Safety cap on model calls per turn (loop runaway backstop). Default 500. */
+	maxTurnIterations?: number;
 	/** Reconcile project memory files before search operations. */
 	memoryReconcileOnSearch?: boolean;
 	/** Index Claude Code memory files (~/.claude/projects/<slug>/memory) into search. */
@@ -313,6 +315,14 @@ export function memoryPromptBudget(settings: Settings = loadSettings()): number 
 	return typeof value === "number" && Number.isFinite(value)
 		? Math.max(256, Math.min(Math.round(value), 16_384))
 		: 4_096;
+}
+
+// Safety cap on model calls per turn (the loop's runaway backstop). Far above
+// any legitimate single turn; read fresh on every submit so an edit applies on
+// the next agent call.
+export function turnIterationCap(settings: Settings = loadSettings()): number {
+	const value = settings.maxTurnIterations;
+	return typeof value === "number" && Number.isFinite(value) ? Math.max(10, Math.min(Math.round(value), 10_000)) : 500;
 }
 
 export function memorySearchScoreFloor(settings: Settings = loadSettings()): number {

@@ -124,10 +124,10 @@ const DEFAULT_MEMORY_SERVICE = createProjectMemoryService();
 const DOOM_LOOP_THRESHOLD = 3;
 // Safety cap for turns without an explicit /goal budget: a model that keeps
 // calling DIFFERENT tools (so the doom-loop detector can't catch it) must not
-// loop forever. 200 model calls is far beyond any legitimate single turn, so
-// this only ever trips a genuine runaway — and the work done so far is already
-// persisted per tool batch, so nothing is lost.
-const DEFAULT_OUTER_ITERATION_CAP = 200;
+// loop forever. Matches the settings default; the bridge overrides it with the
+// configured maxTurnIterations each submit. The work done so far is persisted
+// per tool batch, so hitting it loses nothing.
+const DEFAULT_OUTER_ITERATION_CAP = 500;
 export { DEFAULT_OUTER_ITERATION_CAP };
 const MEMORY_RECALL_HINT = [
 	"<system-reminder>",
@@ -710,6 +710,9 @@ export interface LoopConfig {
 	 * forever on different-but-unproductive tool calls; the model is nudged
 	 * before the cap and a notice is emitted when it's hit. */
 	maxOuterIterations?: number;
+	/** Runaway backstop for ordinary turns (no /goal budget): the configurable
+	 * `maxTurnIterations` setting, read fresh on each submit. */
+	defaultOuterIterations?: number;
 	/** Optional permission gate for destructive file tools (write/edit/patch and
 	 * MCP tools prefixed `mcp_`). When unset, no extra confirmation fires —
 	 * matches TUI behavior, where only bash needs confirmation. */
@@ -2170,7 +2173,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				// to wrap up near the cap and warned if it burns through — the
 				// work done so far is already persisted per tool batch.
 				const goalCap = loopConfig.maxOuterIterations;
-				const activeCap = goalCap ?? DEFAULT_OUTER_ITERATION_CAP;
+				const activeCap = goalCap ?? loopConfig.defaultOuterIterations ?? DEFAULT_OUTER_ITERATION_CAP;
 				outerIteration += 1;
 				if (outerIteration > activeCap) {
 					loopConfig.onWarning?.(

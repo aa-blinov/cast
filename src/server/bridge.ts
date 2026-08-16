@@ -95,6 +95,7 @@ import {
 	memoryDistillIntervalDays,
 	memoryDreamAuto,
 	memoryDreamIntervalDays,
+	turnIterationCap,
 	updateSettings,
 } from "../core/settings.ts";
 import {
@@ -1476,6 +1477,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			sessionId: ws.session.id,
 			permissionMode,
 			...(opts?.maxOuterIterations ? { maxOuterIterations: opts.maxOuterIterations } : {}),
+			// Read fresh each submit so an edited maxTurnIterations applies on
+			// the next agent call.
+			defaultOuterIterations: turnIterationCap(),
 			skills,
 			personas: turnPersonas,
 			currentPersona: persona.name,
@@ -2297,6 +2301,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					subagentModelProvider: subagentModelProvider ?? null,
 					planModel: planModel ?? null,
 					planModelProvider: planModelProvider ?? null,
+					maxTurnIterations: turnIterationCap(loadSettings()),
 				},
 			};
 		}
@@ -2388,6 +2393,24 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				console.error(`[cast server] /review submit failed:`, error);
 			});
 			return { ok: true, result: "Reviewing the session's work…" };
+		}
+		if (name === "/turn-cap") {
+			const settings = loadSettings();
+			if (!arg)
+				return {
+					ok: true,
+					result: `Turn iteration safety cap: ${turnIterationCap(settings)} (applies on the next turn)`,
+				};
+			if (arg === "reset" || arg === "off") {
+				updateSettings({ maxTurnIterations: undefined });
+				return { ok: true, result: "Turn iteration safety cap reset to default (500)." };
+			}
+			const n = Number(arg);
+			if (!Number.isInteger(n) || n < 10 || n > 10_000) {
+				return { ok: false, error: "Usage: /turn-cap <10-10000> | reset" };
+			}
+			updateSettings({ maxTurnIterations: n });
+			return { ok: true, result: `Turn iteration safety cap set to ${n} (applies on the next turn).` };
 		}
 		if (name === "/rules") {
 			return {
