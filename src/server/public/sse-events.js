@@ -248,17 +248,16 @@ export function handleSseEvent(event, context) {
 				prev ? { ...prev, messages: [...prev.messages, { role: "warning", content: event.content }] } : prev,
 			);
 			break;
+		case "decision_state":
+			// The daemon owns planState: any pending question (a model `question`
+			// call or the post-turn skill-save confirmation) arrives here as well
+			// as through the tool_end path — keep session.question in lockstep so
+			// the QuestionCard renders for both. A clear (undefined) closes it.
+			setSession((prev) => (prev ? { ...prev, question: event.question ?? undefined } : prev));
+			break;
 		case "notice":
 			setSession((prev) =>
 				prev ? { ...prev, messages: [...prev.messages, { role: "warning", content: event.message }] } : prev,
-			);
-			break;
-		case "skill_suggestion":
-			// A post-turn check found a reusable procedure. Store it so the App
-			// can offer a Save/Dismiss card; the user decides, so it's cheap and
-			// never auto-writes.
-			setSession((prev) =>
-				prev ? { ...prev, skillSuggestion: { name: event.name, description: event.description } } : prev,
 			);
 			break;
 		case "agent_actor": {

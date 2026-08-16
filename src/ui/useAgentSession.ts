@@ -1518,6 +1518,12 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					break;
 				case "decision_state":
 					setPendingQuestion(event.question);
+					// The daemon owns planState in client mode: a question arriving
+					// via decision_state (a model `question` call OR our post-turn
+					// skill-save confirmation) must signal the App to open the
+					// picker once the run settles — exactly what the tool_end path
+					// below does for `question`.
+					if (event.question) onPlanSignal?.("question");
 					setPendingPlanTransition(event.planTransition);
 					break;
 				case "thinking":
@@ -1642,14 +1648,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					errorRef.current = event.message;
 					setError(event.message);
 					break;
-				case "skill_suggestion":
-					setMessages((msgs) => [
-						...msgs,
-						{
-							role: "warning",
-							content: `[Reusable procedure detected — save it as a skill?] ${event.name}: ${event.description} — run /skill-save to save, /skill-save dismiss to skip.`,
-						},
-					]);
+				case "notice":
+					setMessages((msgs) => [...msgs, { role: "warning", content: `[${event.message}]` }]);
 					break;
 				case "compaction":
 					refresh();

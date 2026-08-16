@@ -252,11 +252,6 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/rules", description: "List loaded rules" },
 	{ name: "/s", description: "Alias for /steer", takesArgs: true },
 	{ name: "/sessions", description: "List / switch / delete sessions" },
-	{
-		name: "/skill-save",
-		description: "Save the pending reusable procedure as a skill — or 'dismiss'",
-		takesArgs: true,
-	},
 	{ name: "/skills", description: "Toggle skills on/off" },
 	{ name: "/skills disable", description: "Disable one skill — name", takesArgs: true },
 	{ name: "/skills enable", description: "Enable one skill — name", takesArgs: true },
