@@ -120,6 +120,7 @@ export const SLASH_COMMANDS: Array<{
 	{ name: "/reasoning", description: "Show or change reasoning level", takesArgs: true, blocking: true, hidden: true },
 	{ name: "/reload", description: "Reload skills, rules, MCP, and personas", blocking: true, hidden: true },
 	{ name: "/repo", description: "Show cwd and git branch", blocking: false, hidden: true },
+	{ name: "/goal", description: "Work toward a goal autonomously until done", takesArgs: true, blocking: true },
 	{ name: "/review", description: "Ask the agent to review and verify its own work", blocking: true },
 	{ name: "/rule:", description: "Invoke a rule by name", takesArgs: true, blocking: false },
 	{ name: "/rules", description: "List loaded rules", blocking: false },
@@ -178,6 +179,24 @@ export const REVIEW_PROMPT = `Review the work done in this session as a careful 
 1. Identify what changed: run git status and git diff if this is a git repo, otherwise list the files touched in this session.
 2. Verify it actually holds together: find and run the project's test and lint commands (inspect package.json, pyproject.toml, Cargo.toml, deno.json, go.mod, Makefile, etc.). Fix quick, obvious breakage only if it's safe.
 3. Report concisely and honestly: what was implemented, what was verified (name the exact commands you ran and their result), and what remains open, risky, or unverified. Do not claim a check passed unless you actually ran it — if you didn't run something, say so.`;
+
+// The prompt /goal submits — an autonomous "keep going until done" directive,
+// MiMo-Code-style: work through iterations without yielding for permission,
+// ask at most one clarifying question, verify as you go, and report honestly.
+export const GOAL_MAX_OUTER_ITERATIONS = 25;
+export function buildGoalPrompt(goal: string): string {
+	return `You are working toward a goal autonomously. Keep going until it is fully done — do NOT stop after the first attempt, and do NOT yield back to the user for permission mid-task.
+
+Goal: ${goal}
+
+Work as a careful senior engineer:
+1. Inspect the repository or context, then implement the smallest steps that move toward the goal.
+2. Verify as you go: run the relevant tests/checks for what you changed.
+3. Fix issues you find. Iterate until the goal is met or you hit your iteration budget.
+4. You have a bounded budget (~${GOAL_MAX_OUTER_ITERATIONS} tool iterations). When you believe the goal is met, run a final check and summarize what was done and what was verified.
+5. Do not ask "do you want me to also...?" — push forward when the goal is clear. Ask at most ONE question (via the question tool) only if the goal is genuinely ambiguous and the answer would change what you do.
+6. Be honest: name exactly which checks you ran and their results. Do not claim a check passed unless you actually ran it.`;
+}
 
 /** Check if a command requires the agent to be idle. */
 export function isCommandBlocking(input: string): boolean {

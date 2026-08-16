@@ -242,10 +242,11 @@ export async function submitServerChat(
 	text: string,
 	images?: string[],
 	clientMessageId?: string,
+	goal?: boolean,
 ): Promise<void> {
 	const { status, data } = await serverFetch(client, `${API_V1_PREFIX}/sessions/${sessionId}/chat`, {
 		method: "POST",
-		body: { text, images, clientMessageId },
+		body: { text, images, clientMessageId, goal },
 	});
 	if (status !== 202) {
 		const msg =

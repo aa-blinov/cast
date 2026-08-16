@@ -698,6 +698,11 @@ export interface LoopConfig {
 	steeringQueue?: MessageQueue;
 	followUpQueue?: MessageQueue;
 	confirmBash?: ConfirmBash;
+	/** Hard cap on outer-loop iterations (each iteration is one LLM call plus
+	 * its tool batch). Goal mode sets this so an autonomous run can't loop
+	 * forever on different-but-unproductive tool calls; the model is nudged
+	 * before the cap and a notice is emitted when it's hit. */
+	maxOuterIterations?: number;
 	/** Optional permission gate for destructive file tools (write/edit/patch and
 	 * MCP tools prefixed `mcp_`). When unset, no extra confirmation fires —
 	 * matches TUI behavior, where only bash needs confirmation. */
@@ -2112,6 +2117,8 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		// from `overflowCompacted` so we still try LLM-based compaction if the
 		// in-place shrink wasn't enough.
 		let toolResultTrimmed = false;
+		// Goal-mode iteration budget (maxOuterIterations), enforced in the loop.
+		let outerIteration = 0;
 		// The main agent turn loop is inherently sequential: each iteration
 		// depends on the previous model response and tool results. Promise.all
 		// would break causality (the model hasn't produced the next step yet).
@@ -2148,6 +2155,28 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 			let reasoningRetryDone = false;
 
 			while (hasMoreToolCalls || pendingMessages.length > 0) {
+				// Goal-mode bound: count each model call (one per inner-loop pass,
+				// which may carry several tool calls). Cap it so an autonomous run
+				// can't spin on different-but-unproductive tool calls forever.
+				// Nudge the model just before the cap so it can wrap up; warn if
+				// it burns through anyway.
+				if (loopConfig.maxOuterIterations !== undefined) {
+					outerIteration += 1;
+					if (outerIteration > loopConfig.maxOuterIterations) {
+						loopConfig.onWarning?.(
+							`Autonomous goal hit its iteration budget (${loopConfig.maxOuterIterations}) — stopping.`,
+						);
+						hasMoreToolCalls = false;
+						pendingMessages = [];
+						break;
+					}
+					if (loopConfig.maxOuterIterations >= 6 && outerIteration >= loopConfig.maxOuterIterations - 3) {
+						messages.push({
+							role: "system",
+							content: `<system-reminder>You are near the end of your autonomous goal budget (~${loopConfig.maxOuterIterations - outerIteration} iterations left). Finish the current work and summarize; do not start new sub-tasks.</system-reminder>`,
+						});
+					}
+				}
 				// Inject pending steering messages
 				if (pendingMessages.length > 0) {
 					for (const msg of pendingMessages) {

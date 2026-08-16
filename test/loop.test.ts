@@ -1176,7 +1176,39 @@ describe("runAgentLoop — retries a length-truncated response with no tool call
 		});
 
 		expect(vi.mocked(streamAndCollect)).toHaveBeenCalledTimes(2);
-		expect(messages.some((m) => m.role === "assistant" && m.content === "stub two")).toBe(true);
+		expect(events.find((e) => e.type === "end")).toEqual({ type: "end", reason: "stop" });
+	});
+
+	it("caps autonomous goal runs at maxOuterIterations and warns", async () => {
+		// The model keeps returning a tool call, so the loop would otherwise
+		// continue forever; the goal-mode iteration budget must stop it and
+		// warn before the turn becomes an unbounded autonomous spin. Each
+		// mockImplementationOnce is consumed by exactly one loop pass (budget
+		// 3 → 3 model calls), then the shared throwing default takes over for
+		// later tests — mockImplementation would leak this stub into them.
+		const warnings: string[] = [];
+		const toolCall = () => ({
+			content: "",
+			finishReason: "tool_calls" as const,
+			toolCalls: [{ id: "goal-1", name: "bash", arguments: '{"command":"echo goal-step"}' }],
+		});
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(toolCall)
+			.mockImplementationOnce(toolCall)
+			.mockImplementationOnce(toolCall);
+
+		await runAgentLoop([{ role: "user", content: "autonomous goal" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			maxOuterIterations: 3,
+			onEvent: () => {},
+			onWarning: (message) => warnings.push(message),
+		});
+
+		expect(vi.mocked(streamAndCollect)).toHaveBeenCalledTimes(3);
+		expect(warnings.some((w) => w.includes("iteration budget"))).toBe(true);
 	});
 
 	it("warns when the retried turn is still empty, so '(no response)' is never unexplained", async () => {
