@@ -97,6 +97,17 @@ See [Rules](rules.md) for rule types and creation.
 
 See [Plan Mode](plan-mode.md) for the full workflow.
 
+## Autonomous and Self-Verification
+
+| Command | Description |
+|---------|-------------|
+| `/goal <description>` | Work autonomously toward a goal until it's done — bounded, never-ask |
+| `/review` | Ask the agent to review and verify its own work |
+
+**`/goal <description>`** runs one autonomous turn that keeps iterating (tools → verify → fix → repeat) until the goal is met, without yielding back to ask for permission. At most one clarifying question (via the `question` tool) if the goal is genuinely ambiguous. The run is bounded to **25 model calls** so it can't loop forever on unproductive tool calls — the model is nudged near the cap and a warning fires if it's hit. Use it for start-to-finish tasks: "fix the tests", "set up the project and make the first commit", "implement X and verify it runs". Works in the TUI and the web composer.
+
+**`/review`** asks the agent to verify its own most recent work: identify what changed (git diff / touched files), find and run the project's test and lint commands, and report honestly what was verified and what remains open — it never claims a check it didn't actually run.
+
 ## Steering
 
 These commands work while the agent is running:
