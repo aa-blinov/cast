@@ -1203,6 +1203,21 @@ function App() {
 		],
 	);
 
+	const saveSkillSuggestion = useCallback(async () => {
+		const suggestion = session?.skillSuggestion;
+		if (!activeId || !suggestion) return;
+		const r = await api("POST", `/api/sessions/${activeId}/command`, { command: "/skill-save" }).catch(() => null);
+		if (r?.ok) showToast(`Saved reusable procedure as skill /${suggestion.name}`, "success");
+		else showToast("Could not save the skill", "error");
+		setSession((prev) => (prev ? { ...prev, skillSuggestion: undefined } : prev));
+	}, [activeId, session?.skillSuggestion, setSession, showToast]);
+	const dismissSkillSuggestion = useCallback(() => {
+		const suggestion = session?.skillSuggestion;
+		if (!activeId || !suggestion) return;
+		api("POST", `/api/sessions/${activeId}/command`, { command: "/skill-save dismiss" }).catch(() => {});
+		setSession((prev) => (prev ? { ...prev, skillSuggestion: undefined } : prev));
+	}, [activeId, session?.skillSuggestion, setSession]);
+
 	const handlePlanTransition = useCallback(
 		async (choice) => {
 			const transition = planTransition ?? session?.planTransition;
@@ -2036,6 +2051,21 @@ function App() {
 							</div>
 						`,
 						)}
+					</div>
+				`
+				}
+				${
+					session?.skillSuggestion &&
+					html`
+					<div class="skill-suggestion">
+						<div class="skill-suggestion-body">
+							<div class="skill-suggestion-title">Save reusable procedure as skill?</div>
+							<div class="skill-suggestion-desc">/<span class="skill-suggestion-name">${session.skillSuggestion.name}</span> — ${session.skillSuggestion.description}</div>
+						</div>
+						<div class="skill-suggestion-actions">
+							<button class="modal-btn icon-btn" title="Dismiss" aria-label="Dismiss skill suggestion" onClick=${() => dismissSkillSuggestion()}><${icons.xMark} /></button>
+							<button class="modal-btn icon-btn" title="Save as skill" aria-label="Save as skill" onClick=${() => saveSkillSuggestion()}><${icons.check} /></button>
+						</div>
 					</div>
 				`
 				}

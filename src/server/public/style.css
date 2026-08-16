@@ -619,6 +619,27 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	border-radius: var(--radius-sm);
 	background: rgba(255,200,0,.06);
 }
+.skill-suggestion {
+	max-width: 860px;
+	width: 100%;
+	margin: 0 auto;
+	padding: 0 max(16px, env(safe-area-inset-left)) 4px;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	font-size: .76rem;
+	line-height: 1.4;
+	border: 1px solid var(--border-active);
+	border-radius: var(--radius-sm);
+	background: rgba(0,200,255,.05);
+	padding: 6px 10px;
+}
+.skill-suggestion-body { min-width: 0; }
+.skill-suggestion-title { font-weight: 600; color: var(--text); }
+.skill-suggestion-desc { color: var(--text-muted); opacity: .9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skill-suggestion-name { color: var(--cyan); }
+.skill-suggestion-actions { display: flex; gap: 4px; flex-shrink: 0; }
 .pending-item.pending-steer { color: var(--cyan); background: rgba(0,200,255,.06); }
 .pending-item.pending-queue { color: var(--amber); }
 .pending-label { font-weight: 600; }

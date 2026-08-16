@@ -1642,6 +1642,15 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					errorRef.current = event.message;
 					setError(event.message);
 					break;
+				case "skill_suggestion":
+					setMessages((msgs) => [
+						...msgs,
+						{
+							role: "warning",
+							content: `[Reusable procedure detected — save it as a skill?] ${event.name}: ${event.description} — run /skill-save to save, /skill-save dismiss to skip.`,
+						},
+					]);
+					break;
 				case "compaction":
 					refresh();
 					break;
