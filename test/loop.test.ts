@@ -45,6 +45,7 @@ const {
 	compactSessionMessages,
 	waitForToolBatch,
 	TOOL_ABORT_GRACE_MS,
+	DEFAULT_OUTER_ITERATION_CAP,
 	createAgentContextFork,
 	createAgentForkContext,
 	createAgentForkRuntimeSnapshot,
@@ -1209,6 +1210,40 @@ describe("runAgentLoop — retries a length-truncated response with no tool call
 
 		expect(vi.mocked(streamAndCollect)).toHaveBeenCalledTimes(3);
 		expect(warnings.some((w) => w.includes("iteration budget"))).toBe(true);
+	});
+
+	it("applies a default iteration cap to a runaway turn without a goal budget", async () => {
+		// A model calling DIFFERENT tools forever (so the doom-loop detector
+		// can't catch it) must not loop indefinitely in a plain turn either —
+		// the default safety cap stops it with a warning, and the per-batch
+		// persistence means no work is lost.
+		const warnings: string[] = [];
+		const original = vi.mocked(streamAndCollect).getMockImplementation();
+		let n = 0;
+		vi.mocked(streamAndCollect).mockImplementation(async () => {
+			n += 1;
+			return {
+				content: "",
+				finishReason: "tool_calls" as const,
+				toolCalls: [{ id: `run-${n}`, name: "bash", arguments: '{"command":"echo x"}' }],
+			};
+		});
+		try {
+			await runAgentLoop([{ role: "user", content: "go" }], {
+				config: testConfig,
+				model: "test-model",
+				cwd: process.cwd(),
+				systemPrompt: "test",
+				skipCompaction: true,
+				onEvent: () => {},
+				onWarning: (message) => warnings.push(message),
+			});
+		} finally {
+			vi.mocked(streamAndCollect).mockImplementation(original);
+		}
+
+		expect(vi.mocked(streamAndCollect)).toHaveBeenCalledTimes(DEFAULT_OUTER_ITERATION_CAP);
+		expect(warnings.some((w) => w.includes("safety cap"))).toBe(true);
 	});
 
 	it("warns when the retried turn is still empty, so '(no response)' is never unexplained", async () => {
