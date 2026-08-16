@@ -2109,15 +2109,75 @@ document.addEventListener("click", async (e) => {
 function SharedThreadView({ token }) {
 	const [data, setData] = useState(null);
 	const [error, setError] = useState(null);
+	const [liveStatus, setLiveStatus] = useState(null);
+	const streamingControllerRef = useRef(null);
+	const loadStatic = useCallback(
+		() =>
+			api("GET", `/api/shared/${encodeURIComponent(token)}`)
+				.then((d) => {
+					if (d) setData(d);
+				})
+				.catch((err) => setError(err.message)),
+		[token],
+	);
 
 	useEffect(() => {
-		api("GET", `/api/shared/${encodeURIComponent(token)}`)
-			.then((d) => {
-				if (!d) return;
-				setData(d);
-			})
-			.catch((err) => setError(err.message));
-	}, [token]);
+		loadStatic();
+		// Live read-only relay: watch the agent work in real time. The relay
+		// only ever sends display events, so this stays read-only — there is
+		// no input path on the shared view at all.
+		const es = new EventSource(`/api/shared/${encodeURIComponent(token)}/events`);
+		es.onmessage = (m) => {
+			if (m.data === "live-unavailable") {
+				es.close();
+				return;
+			}
+			let event;
+			try {
+				event = JSON.parse(m.data);
+			} catch {
+				return;
+			}
+			switch (event.type) {
+				case "status":
+					setLiveStatus(event.status);
+					if (event.status === "idle" || event.status === "error") {
+						// Turn finished — refresh the committed transcript and
+						// drop the live tail.
+						streamingControllerRef.current?.reset();
+						loadStatic();
+					}
+					break;
+				case "token":
+					streamingControllerRef.current?.reduce({ type: "content", text: event.text });
+					break;
+				case "thinking":
+					streamingControllerRef.current?.reduce({ type: "thinking", text: event.text });
+					break;
+				case "tool_start":
+					streamingControllerRef.current?.reduce({
+						type: "tool_start",
+						call: { id: event.id, name: event.name, args: event.args, status: event.status },
+					});
+					break;
+				case "tool_end":
+					streamingControllerRef.current?.reduce({
+						type: "tool_end",
+						id: event.id,
+						status: event.status,
+						result: event.result,
+					});
+					break;
+				case "assistant_message":
+					streamingControllerRef.current?.reset();
+					loadStatic();
+					break;
+				default:
+					break;
+			}
+		};
+		return () => es.close();
+	}, [token, loadStatic]);
 
 	if (error) {
 		return html`
@@ -2144,11 +2204,12 @@ function SharedThreadView({ token }) {
 				<${CastLogo} class="shared-view-logo" />
 				<div class="shared-view-meta">
 					<div class="shared-view-title">${data.title || "Shared thread"}</div>
-					<div class="shared-view-sub">${data.persona} · ${data.model} · read-only</div>
+					<div class="shared-view-sub">${data.persona} · ${data.model} · read-only${liveStatus === "running" ? " · live" : ""}</div>
 				</div>
 			</div>
 			<div class="shared-view-messages">
 				${data.messages.map((msg, i) => html`<${MessageModule} key=${i} msg=${msg} renderMarkdown=${renderMarkdown} escapeHtml=${escapeHtml} />`)}
+				<${LiveStreamingBlocksModule} controllerRef=${streamingControllerRef} onFrame=${() => {}} renderMarkdown=${renderMarkdown} showReasoning=${true} />
 			</div>
 		</div>
 	`;
