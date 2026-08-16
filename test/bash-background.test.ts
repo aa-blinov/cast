@@ -137,7 +137,13 @@ describe("BackgroundTaskRegistry", () => {
 		const smallConfig: AppConfig = { ...mockConfig, maxToolOutputLines: 5 };
 		const task = registry.start("for i in $(seq 1 20); do echo line-$i; done", process.cwd(), smallConfig, 10, deps);
 
-		await new Promise((r) => setTimeout(r, 300));
+		// Poll for exit instead of a fixed sleep: on a loaded CI runner 300ms
+		// can land mid-loop (each echo is a spawn), leaving the raw output
+		// short of the 20 lines and making the assertion flaky.
+		const deadline = Date.now() + 5000;
+		while (task.status !== "exited" && Date.now() < deadline) {
+			await new Promise((r) => setTimeout(r, 25));
+		}
 		expect(task.status).toBe("exited");
 		// The completion reminder is what actually goes through formatBashResult's
 		// truncation — assert the raw output itself was captured (truncation is
