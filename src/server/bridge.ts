@@ -3216,7 +3216,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					marketplaceSubsub !== undefined &&
 					marketplaceSubsub !== "list" &&
 					marketplaceSubsub !== "catalog");
-			if (shouldSeedDefaults) ensureDefaultMarketplaces();
+			if (shouldSeedDefaults) void ensureDefaultMarketplaces();
 			try {
 				if (!sub || sub === "list") {
 					return { ok: true, result: listInstalledPlugins(settings) };
@@ -3231,7 +3231,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				}
 				if (sub === "install") {
 					if (!rest) return { ok: false, error: "Usage: /plugin install <name@marketplace>" };
-					const r = installPlugin(rest, settings);
+					const r = await installPlugin(rest, settings);
 					updateSettings({ enabledPlugins: r.enabledPlugins });
 					const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
 					skills = skillsResult.skills;
@@ -3277,7 +3277,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					}
 					if (subsub === "add") {
 						if (!rest2) return { ok: false, error: "Usage: /plugin marketplace add <owner/repo|url|path>" };
-						const mp = addMarketplace(rest2);
+						const mp = await addMarketplace(rest2);
 						return { ok: true, result: `Added marketplace "${mp.name}"` };
 					}
 					if (subsub === "remove") {
@@ -3295,7 +3295,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					}
 					if (subsub === "update") {
 						if (!rest2) return { ok: false, error: "Usage: /plugin marketplace update <name>" };
-						const mp = updateMarketplace(rest2);
+						const mp = await updateMarketplace(rest2);
 						return { ok: true, result: `Updated marketplace "${mp.name}"` };
 					}
 					return { ok: false, error: `Unknown /plugin marketplace subcommand: ${subsub}` };
@@ -3582,7 +3582,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				const targetName = rmMatch[1]!.trim();
 				if (!targetName) return { ok: false, error: "Usage: /worktree remove <name>" };
 				const target = listWorktrees(sessionCwd).find((worktree) => worktree.name === targetName);
-				const res = removeWorktreeBySlug(targetName, sessionCwd);
+				const res = await removeWorktreeBySlug(targetName, sessionCwd);
 				if (res.ok) {
 					void runHooksForEvent(resolveHooksForCwd(sessionCwd, projectTrusted), {
 						event: "WorktreeRemove",

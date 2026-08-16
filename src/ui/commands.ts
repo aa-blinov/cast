@@ -979,7 +979,7 @@ async function handlePluginCommand(input: string, deps: CommandDeps): Promise<vo
 				return;
 			}
 			showNotice(`[Installing ${restJoined}…]`);
-			const result = installPlugin(restJoined, loadSettings());
+			const result = await installPlugin(restJoined, loadSettings());
 			updateSettings({ enabledPlugins: result.enabledPlugins });
 			await reloadSkillsAfterPluginChange(deps);
 			deps.agent.addDisplayMessage({
@@ -1057,7 +1057,7 @@ async function handlePluginCommand(input: string, deps: CommandDeps): Promise<vo
 					return;
 				}
 				showNotice(`[Adding marketplace ${subArgs}…]`);
-				const mp = addMarketplace(subArgs);
+				const mp = await addMarketplace(subArgs);
 				deps.agent.addDisplayMessage({
 					role: "warning",
 					content: `[Marketplace added: ${mp.name}] → /plugin install <name>@${mp.name}`,
@@ -1070,7 +1070,7 @@ async function handlePluginCommand(input: string, deps: CommandDeps): Promise<vo
 					return;
 				}
 				showNotice(`[Updating marketplace ${subArgs}…]`);
-				const mp = updateMarketplace(subArgs);
+				const mp = await updateMarketplace(subArgs);
 				deps.agent.addDisplayMessage({ role: "warning", content: `[Marketplace updated: ${mp.name}]` });
 				return;
 			}
@@ -2002,7 +2002,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 				showNotice("[Usage: /worktree remove <name>]");
 				return;
 			}
-			const res = removeWorktreeBySlug(targetName, deps.cwd);
+			const res = await removeWorktreeBySlug(targetName, deps.cwd);
 			showNotice(`[${res.message}]`);
 			return;
 		}

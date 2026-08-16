@@ -24,9 +24,10 @@
  *  - PR reference (`-w "#1234"`) parsing.
  */
 
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, realpathSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
+import { promisify } from "node:util";
 
 const VALID_SEGMENT = /^[a-zA-Z0-9._-]+$/;
 const MAX_SLUG_LENGTH = 64;
@@ -236,7 +237,7 @@ export async function ensureSessionWorktree(name: string, startCwd: string): Pro
 		};
 	}
 
-	const result = runGitWithStatus(repoRoot, ["worktree", "add", "-B", branch, worktreePath, "HEAD"]);
+	const result = await runGitAsyncWithStatus(repoRoot, ["worktree", "add", "-B", branch, worktreePath, "HEAD"]);
 	if (!result.ok) {
 		throw new Error(`Failed to create worktree at ${worktreePath}: ${result.stderr}`);
 	}
@@ -311,8 +312,9 @@ function findExistingWorktree(repoRoot: string, expectedPath: string): { path: s
 export async function disposeSessionWorktree(wt: SessionWorktree): Promise<void> {
 	// `git worktree remove --force` deletes the directory and un-registers the
 	// worktree from .git/worktrees/. Must run from the main repo, not the
-	// worktree itself (which we're about to delete).
-	runGit(wt.repoRoot, ["worktree", "remove", "--force", wt.path]);
+	// worktree itself (which we're about to delete). Async: this deletes a
+	// whole checkout on disk and must not freeze the loop while git works.
+	await runGitAsync(wt.repoRoot, ["worktree", "remove", "--force", wt.path]);
 	// `git branch -D` (capital, force) drops the branch even if it has
 	// unmerged commits. We don't try to preserve them — the user kept them in
 	// the working tree until they explicitly chose `-w` again, but this v1
@@ -369,6 +371,49 @@ function runGitWithStatus(cwd: string, args: string[]): GitResult {
 	}
 }
 
+const execFileP = promisify(execFile);
+// promisify(execFile)'s generated types don't accept `stdio` in options, so
+// type the wrapper explicitly; the runtime options are what execFileSync used.
+const execFileT = execFileP as (
+	file: string,
+	args: readonly string[],
+	options: { cwd?: string; env?: NodeJS.ProcessEnv; encoding?: BufferEncoding; stdio?: Array<"ignore" | "pipe"> },
+) => Promise<{ stdout: string | Buffer; stderr: string | Buffer }>;
+
+/** Async `git <args>` — for the slow operations (worktree add/remove) that
+ * must not freeze the daemon's event loop while git works. Same semantics as
+ * runGit (null on failure); callers that already await are unchanged. */
+async function runGitAsync(cwd: string, args: string[]): Promise<string | null> {
+	try {
+		const out = await execFileT("git", args, {
+			cwd,
+			env: { ...process.env, ...GIT_NO_PROMPT_ENV },
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		return out.stdout.toString().trim();
+	} catch {
+		return null;
+	}
+}
+
+/** Async counterpart of runGitWithStatus for side-effecting git commands. */
+async function runGitAsyncWithStatus(cwd: string, args: string[]): Promise<GitResult> {
+	try {
+		const out = await execFileT("git", args, {
+			cwd,
+			env: { ...process.env, ...GIT_NO_PROMPT_ENV },
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		return { ok: true, stdout: out.stdout.toString(), stderr: "" };
+	} catch (err) {
+		const e = err as { stderr?: Buffer | string; status?: number };
+		const stderr = e.stderr ? e.stderr.toString() : "";
+		return { ok: false, stdout: "", stderr: stderr.trim() || `git exited with status ${e.status ?? "non-zero"}` };
+	}
+}
+
 // ---- shared types re-exports (intentionally not present; this module owns
 // the only SessionWorktree type, and the integration site imports directly). ----
 
@@ -402,7 +447,7 @@ function copyIgnoredConfigFiles(repoRoot: string, worktreePath: string): void {
 /**
  * Remove a worktree and its branch given a slug/name or path.
  */
-export function removeWorktreeBySlug(name: string, startCwd: string): { ok: boolean; message: string } {
+export async function removeWorktreeBySlug(name: string, startCwd: string): Promise<{ ok: boolean; message: string }> {
 	validateWorktreeSlug(name);
 	const repoRoot = findCanonicalGitRoot(startCwd);
 	if (!repoRoot) {
@@ -416,7 +461,7 @@ export function removeWorktreeBySlug(name: string, startCwd: string): { ok: bool
 		return { ok: false, message: `Worktree "${name}" does not exist` };
 	}
 
-	const removeRes = runGitWithStatus(repoRoot, ["worktree", "remove", "--force", wtPath]);
+	const removeRes = await runGitAsyncWithStatus(repoRoot, ["worktree", "remove", "--force", wtPath]);
 	runGitWithStatus(repoRoot, ["branch", "-D", branch]);
 
 	if (!removeRes.ok && existsSync(wtPath)) {

@@ -443,8 +443,8 @@ describe("handleInput", () => {
 			join(mpDir, "plugins", "hello", "skills", "greet", "SKILL.md"),
 			"---\nname: greet\ndescription: Hi.\n---\n\nHello.\n",
 		);
-		addMarketplace(mpDir);
-		const installed = installPlugin("hello@ponytail", {});
+		await addMarketplace(mpDir);
+		const installed = await installPlugin("hello@ponytail", {});
 		expect(listInstalledPlugins({ enabledPlugins: installed.enabledPlugins })).toHaveLength(1);
 
 		const { updateSettings } = await import("../src/core/settings.ts");
