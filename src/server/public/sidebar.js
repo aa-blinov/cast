@@ -150,10 +150,11 @@ export function Sidebar({
 	}, [editingId]);
 
 	const doDelete = async (s) => {
+		const sandboxNote = s.isSandbox ? " Its throwaway sandbox folder will also be deleted." : "";
 		const message =
 			s.status === "running"
-				? "Stop the running agent and permanently delete this thread? This can't be undone."
-				: "Permanently delete this thread? This can't be undone.";
+				? `Stop the running agent and permanently delete this thread? This can't be undone.${sandboxNote}`
+				: `Permanently delete this thread? This can't be undone.${sandboxNote}`;
 		if (await confirm(message)) onDeleteSession(s.id);
 	};
 
