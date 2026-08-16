@@ -2069,6 +2069,25 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		options.onListening?.(boundPort);
 	});
 
+	// WAL hygiene: TRUNCATE checkpoint periodically while nothing is running.
+	// A WAL that's never truncated grows without bound (observed at 155MB) and
+	// makes every later checkpoint heavier. TRUNCATE is synchronous, so only
+	// fire it when no session is mid-turn — a running turn must never pay the
+	// checkpoint's cost on the single event loop.
+	const walHygieneTimer = setInterval(
+		() => {
+			if (bridge.listSessions().some((s) => s.status === "running")) return;
+			try {
+				getDb().exec("PRAGMA wal_checkpoint(TRUNCATE)");
+			} catch {
+				// A busy writer elsewhere (rare) makes TRUNCATE return busy — skip
+				// and let the next interval try again.
+			}
+		},
+		10 * 60 * 1000,
+	);
+	walHygieneTimer.unref();
+
 	return server;
 }
 
