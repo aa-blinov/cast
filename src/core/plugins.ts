@@ -10,10 +10,11 @@
  * plugins; MCP servers/agents bundled inside a plugin are not read yet.
  */
 
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, resolve } from "node:path";
+import { promisify } from "node:util";
 import type { Settings } from "./settings.ts";
 
 const DOTGIT_RE = /\.git$/i;
@@ -150,10 +151,10 @@ export interface EnsureDefaultsResult {
  * a one-shot flag, so a source that failed on a previous offline run gets
  * retried automatically instead of needing a manual re-add.
  */
-export function ensureDefaultMarketplaces(
+export async function ensureDefaultMarketplaces(
 	paths: PluginsPaths = defaultPluginsPaths(),
 	sources: ReadonlyArray<{ source: string; label: string }> = DEFAULT_MARKETPLACE_SOURCES,
-): EnsureDefaultsResult {
+): Promise<EnsureDefaultsResult> {
 	const known = readKnownMarketplaces(paths);
 	const added: string[] = [];
 	const errors: string[] = [];
@@ -163,7 +164,7 @@ export function ensureDefaultMarketplaces(
 		);
 		if (alreadyKnown) continue;
 		try {
-			const mp = addMarketplace(source, paths, { isDefault: true });
+			const mp = await addMarketplace(source, paths, { isDefault: true });
 			added.push(`${mp.name} (${label})`);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
@@ -343,24 +344,57 @@ function runGit(args: string[], cwd?: string): string {
 	}
 }
 
-function cloneOrUpdate(url: string, dest: string, sha?: string): void {
+const execFileP = promisify(execFile);
+// promisify(execFile)'s generated types don't accept `stdio` in options, so
+// type the wrapper explicitly; the runtime options are what execFileSync used.
+const execFileT = execFileP as (
+	file: string,
+	args: readonly string[],
+	options: { cwd?: string; env?: NodeJS.ProcessEnv; encoding?: BufferEncoding; stdio?: Array<"ignore" | "pipe"> },
+) => Promise<{ stdout: string | Buffer; stderr: string | Buffer }>;
+
+/** Async `git <args>` — marketplace clones/pulls can take seconds and must
+ * not freeze the daemon's event loop while git works. Same error mapping as
+ * the sync runGit. */
+async function runGitAsync(args: string[], cwd?: string): Promise<string> {
+	try {
+		const out = await execFileT("git", args, {
+			cwd,
+			encoding: "utf-8",
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		return out.stdout.toString().trim();
+	} catch (error) {
+		const err = error as { stderr?: Buffer | string; message?: string; code?: string };
+		if (err.code === "ENOENT") {
+			throw new Error(
+				"git is not installed or not in PATH — plugin marketplaces are cloned with git. " +
+					"Install git (on Windows: Git for Windows) and retry.",
+			);
+		}
+		const stderr = err.stderr ? String(err.stderr).trim() : "";
+		throw new Error(stderr || err.message || `git ${args.join(" ")} failed`);
+	}
+}
+
+async function cloneOrUpdate(url: string, dest: string, sha?: string): Promise<void> {
 	mkdirSync(join(dest, ".."), { recursive: true });
 	if (existsSync(join(dest, ".git"))) {
-		runGit(["fetch", "--depth", "1", "origin", sha ?? "HEAD"], dest);
+		await runGitAsync(["fetch", "--depth", "1", "origin", sha ?? "HEAD"], dest);
 		if (sha) {
-			runGit(["checkout", "--force", sha], dest);
+			await runGitAsync(["checkout", "--force", sha], dest);
 		} else {
-			runGit(["pull", "--ff-only"], dest);
+			await runGitAsync(["pull", "--ff-only"], dest);
 		}
 		return;
 	}
 	if (existsSync(dest)) rmSync(dest, { recursive: true, force: true });
 	if (sha) {
-		runGit(["clone", "--filter=blob:none", url, dest]);
-		runGit(["fetch", "--depth", "1", "origin", sha], dest);
-		runGit(["checkout", "--force", sha], dest);
+		await runGitAsync(["clone", "--filter=blob:none", url, dest]);
+		await runGitAsync(["fetch", "--depth", "1", "origin", sha], dest);
+		await runGitAsync(["checkout", "--force", sha], dest);
 	} else {
-		runGit(["clone", "--depth", "1", url, dest]);
+		await runGitAsync(["clone", "--depth", "1", url, dest]);
 	}
 }
 
@@ -375,11 +409,11 @@ function copyLocalPlugin(src: string, dest: string): void {
 // Marketplace add / remove / update
 // ---------------------------------------------------------------------------
 
-export function addMarketplace(
+export async function addMarketplace(
 	source: string,
 	paths: PluginsPaths = defaultPluginsPaths(),
 	opts: { isDefault?: boolean } = {},
-): KnownMarketplace {
+): Promise<KnownMarketplace> {
 	mkdirSync(marketplacesDir(paths), { recursive: true });
 
 	const abs = isAbsolute(source) || source.startsWith(".") ? resolve(source) : null;
@@ -406,7 +440,7 @@ export function addMarketplace(
 	const staging = join(marketplacesDir(paths), `.staging-${stagingNameFor(source)}-${process.pid}`);
 	try {
 		if (existsSync(staging)) rmSync(staging, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
-		runGit(["clone", "--depth", "1", url, staging]);
+		await runGitAsync(["clone", "--depth", "1", url, staging]);
 		const catalog = loadMarketplaceCatalog(staging);
 		const dest = join(marketplacesDir(paths), catalog.name);
 		// Retries: on Windows an antivirus/indexer briefly holding a handle on
@@ -461,17 +495,20 @@ export function removeMarketplace(name: string, paths: PluginsPaths = defaultPlu
 	return removedIds;
 }
 
-export function updateMarketplace(name: string, paths: PluginsPaths = defaultPluginsPaths()): KnownMarketplace {
+export async function updateMarketplace(
+	name: string,
+	paths: PluginsPaths = defaultPluginsPaths(),
+): Promise<KnownMarketplace> {
 	const all = readKnownMarketplaces(paths);
 	const entry = all[name];
 	if (!entry) throw new Error(`Unknown marketplace "${name}"`);
 	if (existsSync(join(entry.path, ".git"))) {
-		runGit(["pull", "--ff-only"], entry.path);
+		await runGitAsync(["pull", "--ff-only"], entry.path);
 	} else if (entry.source.startsWith("/") || entry.source.startsWith(".")) {
 		const abs = resolve(entry.source);
 		if (existsSync(abs)) copyLocalPlugin(abs, entry.path);
 	} else {
-		cloneOrUpdate(resolveGitUrl(entry.source), entry.path);
+		await cloneOrUpdate(resolveGitUrl(entry.source), entry.path);
 	}
 	const catalog = loadMarketplaceCatalog(entry.path);
 	const updated = { ...entry, name: catalog.name, installedAt: new Date().toISOString() };
@@ -498,12 +535,12 @@ function installRootFor(paths: PluginsPaths, marketplace: string, plugin: string
 	return join(installsDir(paths), marketplace, plugin);
 }
 
-function materializePlugin(
+async function materializePlugin(
 	marketplaceDir: string,
 	marketplaceName: string,
 	pluginName: string,
 	paths: PluginsPaths,
-): string {
+): Promise<string> {
 	const { source } = rawPluginSource(marketplaceDir, pluginName);
 	const dest = installRootFor(paths, marketplaceName, pluginName);
 
@@ -514,7 +551,7 @@ function materializePlugin(
 			return dest;
 		}
 		const url = resolveGitUrl(source);
-		cloneOrUpdate(url, dest);
+		await cloneOrUpdate(url, dest);
 		return dest;
 	}
 
@@ -535,7 +572,7 @@ function materializePlugin(
 		throw new Error(`Unsupported plugin source for "${pluginName}"`);
 	}
 
-	cloneOrUpdate(url, dest, source.sha);
+	await cloneOrUpdate(url, dest, source.sha);
 	if (source.path) {
 		const nested = join(dest, source.path);
 		if (!existsSync(nested)) throw new Error(`Plugin subpath missing after clone: ${source.path}`);
@@ -570,11 +607,11 @@ function writeInstallMeta(paths: PluginsPaths, data: Record<PluginId, { root: st
 	writeFileSync(join(paths.root, "installed.json"), JSON.stringify(data, null, 2), "utf-8");
 }
 
-export function installPlugin(
+export async function installPlugin(
 	ref: string,
 	settings: Settings,
 	paths: PluginsPaths = defaultPluginsPaths(),
-): { id: PluginId; root: string; description?: string; enabledPlugins: Record<string, boolean> } {
+): Promise<{ id: PluginId; root: string; description?: string; enabledPlugins: Record<string, boolean> }> {
 	const parsed = parsePluginRef(ref);
 	if (!parsed) throw new Error(`Invalid plugin ref "${ref}". Use name@marketplace`);
 	const { plugin, marketplace } = parsed;
@@ -587,7 +624,7 @@ export function installPlugin(
 		throw new Error(`Plugin "${plugin}" not found in "${marketplace}". Try /plugin marketplace list`);
 	}
 
-	const root = materializePlugin(mp.path, marketplace, plugin, paths);
+	const root = await materializePlugin(mp.path, marketplace, plugin, paths);
 	const id = pluginId(plugin, marketplace);
 	const meta = readInstallMeta(paths);
 	meta[id] = { root, description: entry.description };

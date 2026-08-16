@@ -88,16 +88,16 @@ describe("parsePluginRef", () => {
 });
 
 describe("marketplace + install (local)", () => {
-	it("adds a local marketplace and installs ponytail@ponytail", () => {
+	it("adds a local marketplace and installs ponytail@ponytail", async () => {
 		const mpDir = join(TEST_DIR, "mp");
 		writeMarketplace(mpDir);
 		const p = paths();
 
-		const known = addMarketplace(mpDir, p);
+		const known = await addMarketplace(mpDir, p);
 		expect(known.name).toBe("ponytail");
 		expect(listKnownMarketplaces(p).map((m) => m.name)).toEqual(["ponytail"]);
 
-		const installed = installPlugin("ponytail@ponytail", {}, p);
+		const installed = await installPlugin("ponytail@ponytail", {}, p);
 		expect(installed.id).toBe("ponytail@ponytail");
 		expect(installed.enabledPlugins["ponytail@ponytail"]).toBe(true);
 
@@ -112,24 +112,24 @@ describe("marketplace + install (local)", () => {
 		expect(skills[0]!.source).toBe("plugin");
 	});
 
-	it("uninstall removes the plugin and skill dirs", () => {
+	it("uninstall removes the plugin and skill dirs", async () => {
 		const mpDir = join(TEST_DIR, "mp");
 		writeMarketplace(mpDir);
 		const p = paths();
-		addMarketplace(mpDir, p);
-		const installed = installPlugin("hello@ponytail", {}, p);
+		await addMarketplace(mpDir, p);
+		const installed = await installPlugin("hello@ponytail", {}, p);
 		const after = uninstallPlugin("hello@ponytail", { enabledPlugins: installed.enabledPlugins }, p);
 		expect(after.enabledPlugins["hello@ponytail"]).toBeUndefined();
 		expect(listInstalledPlugins({ enabledPlugins: after.enabledPlugins }, p)).toHaveLength(0);
 		expect(pluginSkillDirs({ enabledPlugins: after.enabledPlugins }, p)).toHaveLength(0);
 	});
 
-	it("disabled plugin stays in contributions but not in enabled skill dirs", () => {
+	it("disabled plugin stays in contributions but not in enabled skill dirs", async () => {
 		const mpDir = join(TEST_DIR, "mp");
 		writeMarketplace(mpDir);
 		const p = paths();
-		addMarketplace(mpDir, p);
-		const installed = installPlugin("ponytail@ponytail", {}, p);
+		await addMarketplace(mpDir, p);
+		const installed = await installPlugin("ponytail@ponytail", {}, p);
 		expect(pluginSkillDirs({ enabledPlugins: installed.enabledPlugins }, p)).toHaveLength(1);
 
 		const disabled = setPluginEnabled("ponytail@ponytail", false, {
@@ -157,12 +157,12 @@ describe("marketplace + install (local)", () => {
 		expect(loaded.skills.map((s) => s.name)).toEqual(["pony"]);
 	});
 
-	it("removeMarketplace drops installs and returns removed plugin ids", () => {
+	it("removeMarketplace drops installs and returns removed plugin ids", async () => {
 		const mpDir = join(TEST_DIR, "mp");
 		writeMarketplace(mpDir);
 		const p = paths();
-		addMarketplace(mpDir, p);
-		installPlugin("hello@ponytail", {}, p);
+		await addMarketplace(mpDir, p);
+		await installPlugin("hello@ponytail", {}, p);
 		expect(listInstalledPlugins({}, p)).toHaveLength(1);
 		const removed = removeMarketplace("ponytail", p);
 		expect(removed).toEqual(["hello@ponytail"]);
@@ -170,11 +170,11 @@ describe("marketplace + install (local)", () => {
 		expect(listKnownMarketplaces(p)).toEqual([]);
 	});
 
-	it("removeMarketplace refuses a default marketplace", () => {
+	it("removeMarketplace refuses a default marketplace", async () => {
 		const mpDir = join(TEST_DIR, "default-mp");
 		writeMarketplace(mpDir);
 		const p = paths();
-		addMarketplace(mpDir, p, { isDefault: true });
+		await addMarketplace(mpDir, p, { isDefault: true });
 		expect(() => removeMarketplace("ponytail", p)).toThrow(/can't be removed/);
 		expect(listKnownMarketplaces(p)).toHaveLength(1);
 	});
@@ -187,14 +187,14 @@ describe("ensureDefaultMarketplaces", () => {
 		writeMarketplace(mpDir);
 		const p = paths();
 
-		const first = ensureDefaultMarketplaces(p, [{ source: mpDir, label: "test" }]);
+		const first = await ensureDefaultMarketplaces(p, [{ source: mpDir, label: "test" }]);
 		expect(first.added.some((a) => a.includes("ponytail"))).toBe(true);
 		expect(first.errors).toEqual([]);
 		const known = listKnownMarketplaces(p);
 		expect(known).toHaveLength(1);
 		expect(known[0]).toMatchObject({ name: "ponytail", isDefault: true });
 
-		const second = ensureDefaultMarketplaces(p, [{ source: mpDir, label: "test" }]);
+		const second = await ensureDefaultMarketplaces(p, [{ source: mpDir, label: "test" }]);
 		expect(second.added).toEqual([]);
 		expect(second.errors).toEqual([]);
 		expect(listKnownMarketplaces(p)).toHaveLength(1);
