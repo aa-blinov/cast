@@ -32,7 +32,9 @@ vi.mock("../src/core/config.ts", async (importOriginal) => {
 	};
 });
 
-const { createServerBridge, SANDBOX_CWD, toDisplayMessages } = await import("../src/server/bridge.ts");
+const { createServerBridge, SANDBOX_CWD, parseSuggestionJson, toDisplayMessages } = await import(
+	"../src/server/bridge.ts"
+);
 
 // /plugin must seed the default Codex/Claude/Grok marketplaces only on
 // subcommands that consume them — the read-only list/catalog paths (which the
@@ -216,6 +218,29 @@ describe("web bridge", () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession("senior");
 		expect(ws.systemPrompt).toContain("You are the senior persona.");
+	});
+
+	it("parses the skill-suggest eval verdict, incl. MiniMax inline thinking", () => {
+		// Clean JSON, as emitted when reasoning lands in its own field.
+		expect(parseSuggestionJson('{"name": "cut-a-release", "description": "Bump and commit."}')).toEqual({
+			name: "cut-a-release",
+			description: "Bump and commit.",
+		});
+		// "Not reusable" verdicts and empty responses both mean "no suggestion".
+		expect(parseSuggestionJson('{"name": null}')).toBeNull();
+		expect(parseSuggestionJson("")).toBeNull();
+		// MiniMax sometimes inlines chain-of-thought before the JSON.
+		const inline =
+			' thinkingThe transcript shows a clear multi-step release procedure.\n\n{"name": "bump-version-and-release", "description": "Bump package.json, add a changelog entry, and commit the release."}';
+		expect(parseSuggestionJson(inline)).toEqual({
+			name: "bump-version-and-release",
+			description: "Bump package.json, add a changelog entry, and commit the release.",
+		});
+		// Code-fenced JSON still parses.
+		expect(parseSuggestionJson('```json\n{"name": "x", "description": "y"}\n```')).toEqual({
+			name: "x",
+			description: "y",
+		});
 	});
 
 	it("runs settings commands without creating a visible session", async () => {

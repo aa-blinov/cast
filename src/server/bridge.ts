@@ -258,6 +258,11 @@ export interface WebAgentSession {
 	/** A pending "save this as a skill?" suggestion from the post-turn check,
 	 * with the transcript captured so a confirmed save writes the exact turn. */
 	pendingSkillSuggestion?: { name: string; description: string; transcript: string };
+	/** The user declined a skill suggestion this session. Stop offering ANY
+	 * skill-save suggestions for the rest of the session: the eval's proposed
+	 * name is not stable (cut-a-release vs cut-release), so per-name tracking
+	 * can't stop the nagging the user explicitly asked to avoid. */
+	declinedSkillSuggestion: boolean;
 	listeners: Set<(event: WebEvent) => void>;
 	/** IDs accepted while this live session has queued work. Persisted user
 	 * messages are checked as well, so a lost HTTP response can be retried
@@ -431,6 +436,31 @@ function extractSystemReminders(text: string): { cleaned: string; reminders: str
 		})
 		.trim();
 	return { cleaned, reminders };
+}
+
+/** Parse the skill-suggest eval verdict. Robust to MiniMax inlining its
+ * chain-of-thought into `content` before the JSON instead of putting it in a
+ * reasoning field — the JSON substring is extracted and parsed. */
+export function parseSuggestionJson(content: string): { name: string; description: string } | null {
+	const cleaned = content
+		.replace(/^```(?:json)?\s*/i, "")
+		.replace(/```\s*$/, "")
+		.trim();
+	const candidates = [cleaned];
+	const firstBrace = cleaned.indexOf("{");
+	const lastBrace = cleaned.lastIndexOf("}");
+	if (firstBrace >= 0 && lastBrace > firstBrace) candidates.push(cleaned.slice(firstBrace, lastBrace + 1));
+	for (const candidate of candidates) {
+		try {
+			const parsed = JSON.parse(candidate) as { name?: unknown; description?: unknown };
+			if (typeof parsed.name === "string" && parsed.name.trim() && typeof parsed.description === "string") {
+				return { name: parsed.name.trim(), description: parsed.description.trim() };
+			}
+		} catch {
+			// Not JSON in this form — try the next candidate.
+		}
+	}
+	return null;
 }
 
 export function toDisplayMessages(
@@ -974,6 +1004,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			error: null,
 			listeners: new Set(),
 			acceptedClientMessageIds: new Set(),
+			declinedSkillSuggestion: false,
 			systemPrompt: computeSystemPrompt(persona, model, sessionCwd),
 		};
 
@@ -1008,6 +1039,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			error: null,
 			listeners: new Set(),
 			acceptedClientMessageIds: new Set(),
+			declinedSkillSuggestion: false,
 			systemPrompt: computeSystemPrompt(persona, session.model, session.cwd ?? cwd, session.mode),
 		};
 		sessions.set(session.id, ws);
@@ -1869,22 +1901,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		}
 	}
 
-	function parseSuggestionJson(content: string): { name: string; description: string } | null {
-		const cleaned = content
-			.replace(/^```(?:json)?\s*/i, "")
-			.replace(/```\s*$/, "")
-			.trim();
-		try {
-			const parsed = JSON.parse(cleaned) as { name?: unknown; description?: unknown };
-			if (typeof parsed.name === "string" && parsed.name.trim() && typeof parsed.description === "string") {
-				return { name: parsed.name.trim(), description: parsed.description.trim() };
-			}
-		} catch {
-			// Not JSON — no suggestion.
-		}
-		return null;
-	}
-
 	/** Post-turn check: if the turn clearly did a reusable multi-step procedure,
 	 * suggest saving it as a project skill. Fire-and-forget; the eval prompt is
 	 * conservative and the gate (tool-call count, name-exists, once-per-session)
@@ -1893,6 +1909,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	 * the web UI — no new confirmation surface to build or maintain. */
 	async function suggestReusableSkill(ws: WebAgentSession, messages: Message[]): Promise<void> {
 		if (ws.status === "error") return;
+		// The user already declined a suggestion this session — stop offering
+		// and don't even burn the eval call.
+		if (ws.declinedSkillSuggestion) return;
 		// A real question from the model is pending (turn ended on the question
 		// tool) — never clobber it with our own.
 		if (ws.session.planQuestion) return;
@@ -1922,7 +1941,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 						{ value: "save", label: `Save as /${name}`, description: suggestion.description },
 						{ value: "dismiss", label: "Dismiss" },
 					],
-					recommended: "save",
+					// No `recommended`: "Save as /name" is already first (default
+					// cursor/selection) and the " (recommended)" suffix is noise
+					// for a yes/no the user must consciously choose.
 					noFreeForm: true,
 				},
 			],
@@ -2072,6 +2093,11 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				}
 				broadcast(ws, { type: "notice", message: `Saved reusable procedure as skill /${saved}.` });
 			} else {
+				// The user chose not to save — stop offering suggestions for the
+				// rest of the session. The eval's name is unstable between runs
+				// (cut-a-release vs cut-release), so only a session-wide stop
+				// guarantees it can't re-pop ("не на каждый чих").
+				ws.declinedSkillSuggestion = true;
 				ws.pendingSkillSuggestion = undefined;
 				broadcast(ws, { type: "notice", message: "Skill suggestion dismissed." });
 			}
@@ -2242,6 +2268,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			error: null,
 			listeners: new Set(),
 			acceptedClientMessageIds: new Set(),
+			declinedSkillSuggestion: false,
 			systemPrompt: computeSystemPrompt(persona, session.model, session.cwd ?? cwd, session.mode),
 		};
 		sessions.set(session.id, ws);
