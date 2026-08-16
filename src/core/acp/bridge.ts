@@ -291,7 +291,7 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 				}
 			}
 			try {
-				deleteSession(sessionId);
+				deleteSession(sessionId, s?.state.cwd);
 			} catch {
 				// Best-effort — DB delete failure shouldn't abort the rest of
 				// teardown. The session row may persist as an orphan on disk
