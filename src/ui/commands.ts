@@ -94,7 +94,7 @@ import {
 	selectSkills,
 } from "../pickers/domain.ts";
 import type { Pickers, PickOption } from "../pickers/types.ts";
-import { REVIEW_PROMPT } from "../server/commands.ts";
+import { buildGoalPrompt, REVIEW_PROMPT } from "../server/commands.ts";
 import { TUI_KEYBINDINGS } from "./input/keybindings.ts";
 import { getStatusBarSegments, SEGMENT_MAX_WIDTH, type SegmentContext, type StatusBarSegment } from "./statusbar.tsx";
 import { ALL_THEMES, getActiveTheme, setActiveTheme } from "./themes/index.ts";
@@ -175,6 +175,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/dream", description: "Consolidate durable project memory" },
 	{ name: "/exit", description: "Save and exit (alias for /quit)" },
 	{ name: "/fork", description: "Fork the current conversation into a new session" },
+	{ name: "/goal", description: "Work toward a goal autonomously until done — goal text", takesArgs: true },
 	{ name: "/help", description: "Show this command list" },
 	{ name: "/hooks", description: "List configured hooks" },
 	{ name: "/hooks disable", description: "Disable a hook — id", takesArgs: true },
@@ -3133,6 +3134,23 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		}
 		deps.agent.addDisplayMessage({ role: "user", content: input });
 		await agent.submit(REVIEW_PROMPT, images);
+		return;
+	}
+
+	if (input === "/goal" || input.startsWith("/goal ")) {
+		const goalText = input === "/goal" ? "" : input.slice("/goal ".length).trim();
+		if (!goalText) {
+			showNotice("[Usage: /goal <what to achieve> — works autonomously until done]");
+			return;
+		}
+		if (deps.running) {
+			showNotice("[Agent is running — wait for it to finish, or use /steer, before /goal]");
+			return;
+		}
+		deps.agent.addDisplayMessage({ role: "user", content: input });
+		// goal=true tells the daemon to cap the turn's iterations so the
+		// autonomous run can't loop forever.
+		await agent.submit(buildGoalPrompt(goalText), images, true);
 		return;
 	}
 

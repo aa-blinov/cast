@@ -63,6 +63,7 @@ import {
 	OPENAPI_V1_PATH,
 } from "./api-v1.ts";
 import { reconcileActiveStream, SANDBOX_CWD, type ServerBridge, toDisplayMessages, type WebEvent } from "./bridge.ts";
+import { GOAL_MAX_OUTER_ITERATIONS } from "./commands.ts";
 import { readLiveServerState } from "./daemon-state.ts";
 import { isBlockedAttachmentName, sessionInputsDir } from "./inputs.ts";
 
@@ -1105,11 +1106,18 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		let text: string;
 		let images: string[] | undefined;
 		let clientMessageId: string | undefined;
+		let goal = false;
 		try {
-			const parsed = JSON.parse(body) as { text?: string; images?: string[]; clientMessageId?: unknown };
+			const parsed = JSON.parse(body) as {
+				text?: string;
+				images?: string[];
+				clientMessageId?: unknown;
+				goal?: unknown;
+			};
 			text = parsed.text ?? "";
 			images = Array.isArray(parsed.images) && parsed.images.length > 0 ? parsed.images : undefined;
 			clientMessageId = typeof parsed.clientMessageId === "string" ? parsed.clientMessageId.trim() : undefined;
+			goal = parsed.goal === true;
 		} catch {
 			return json(res, { error: "Invalid JSON" }, 400);
 		}
@@ -1128,9 +1136,13 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			// only delays this 202 ack and makes every send feel like it lags.
 			// Setup failures are surfaced through the SSE stream (failSetup
 			// broadcasts status:error + a transcript error), not this response.
-			void bridge.submit(params.id, text, images, clientMessageId).catch((error) => {
-				console.error(`[cast server] chat submit failed:`, error);
-			});
+			void bridge
+				.submit(params.id, text, images, clientMessageId, undefined, {
+					...(goal ? { maxOuterIterations: GOAL_MAX_OUTER_ITERATIONS } : {}),
+				})
+				.catch((error) => {
+					console.error(`[cast server] chat submit failed:`, error);
+				});
 		} catch (error) {
 			return json(res, { error: error instanceof Error ? error.message : "Could not accept message" }, 500);
 		}

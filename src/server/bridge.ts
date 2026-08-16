@@ -120,7 +120,13 @@ import {
 import { ensureSessionWorktree, listWorktrees, removeWorktreeBySlug, type SessionWorktree } from "../core/worktree.ts";
 import { ALL_THEMES } from "../ui/themes/index.ts";
 import type { ThemeColors } from "../ui/themes/types.ts";
-import { isCommandBlocking, REVIEW_PROMPT, SLASH_COMMANDS } from "./commands.ts";
+import {
+	buildGoalPrompt,
+	GOAL_MAX_OUTER_ITERATIONS,
+	isCommandBlocking,
+	REVIEW_PROMPT,
+	SLASH_COMMANDS,
+} from "./commands.ts";
 import { sessionInputsDir } from "./inputs.ts";
 
 const SYSTEM_REMINDER_RE = /<system-reminder>([\s\S]*?)<\/system-reminder>/g;
@@ -611,7 +617,14 @@ export interface ServerBridge {
 	 * route can relay its events read-only. Null when the session isn't
 	 * running in this process (closed, or driven by another process). */
 	getSharedLiveSession(token: string): WebAgentSession | null;
-	submit(sessionId: string, text: string, images?: string[], clientMessageId?: string): Promise<void>;
+	submit(
+		sessionId: string,
+		text: string,
+		images?: string[],
+		clientMessageId?: string,
+		queuedMessages?: Message[],
+		opts?: { maxOuterIterations?: number },
+	): Promise<void>;
 	/** Inject a message into the running turn (submits; the loop's
 	 *  steeringQueue drains it if a turn is in flight, matching /steer). */
 	steer(sessionId: string, message: string): void;
@@ -1198,6 +1211,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		images?: string[],
 		clientMessageId?: string,
 		queuedMessages?: Message[],
+		opts?: { maxOuterIterations?: number },
 	): Promise<void> {
 		const ws = sessions.get(sessionId);
 		if (!ws) throw new Error("Session not found");
@@ -1467,6 +1481,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			hooks: submitHooks,
 			sessionId: ws.session.id,
 			permissionMode,
+			...(opts?.maxOuterIterations ? { maxOuterIterations: opts.maxOuterIterations } : {}),
 			skills,
 			personas: turnPersonas,
 			currentPersona: persona.name,
@@ -2357,6 +2372,19 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				ok: true,
 				result: { cwd: sessionCwd, isGit: true, branch, dirty, worktree },
 			};
+		}
+		if (name === "/goal") {
+			const goal = arg;
+			if (!goal) return { ok: false, error: "Usage: /goal <what to achieve>" };
+			// /goal is blocking (isCommandBlocking), so this only runs idle.
+			// Kick off the autonomous run with a hard iteration budget and let
+			// the SSE stream carry the work.
+			void submit(ws.id, buildGoalPrompt(goal), undefined, undefined, undefined, {
+				maxOuterIterations: GOAL_MAX_OUTER_ITERATIONS,
+			}).catch((error) => {
+				console.error(`[cast server] /goal submit failed:`, error);
+			});
+			return { ok: true, result: "Working toward the goal autonomously…" };
 		}
 		if (name === "/review") {
 			// /review is blocking (isCommandBlocking), so this only runs idle.
