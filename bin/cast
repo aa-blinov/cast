@@ -21,4 +21,6 @@ SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
 # DEP0040 comes from OpenAI's unused bundled node-fetch fallback. node:sqlite
 # is intentionally used by cast but remains experimental in Node 22. Keep
 # other warnings visible instead of suppressing the process-wide warning stream.
-exec env CAST_CWD="$ORIGINAL_CWD" node --disable-warning=DEP0040 --disable-warning=ExperimentalWarning "$SCRIPT_DIR/../dist/index.js" "$@"
+# --max-semi-space-size=64: the daemon streams many small objects (SSE events,
+# provider chunks); a bigger young generation means fewer, amortized minor GCs.
+exec env CAST_CWD="$ORIGINAL_CWD" node --disable-warning=DEP0040 --disable-warning=ExperimentalWarning --max-semi-space-size=64 "$SCRIPT_DIR/../dist/index.js" "$@"
