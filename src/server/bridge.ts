@@ -257,6 +257,10 @@ export interface SessionSummary {
 	title?: string;
 	pinned?: boolean;
 	status: WebAgentStatus;
+	/** True when the session runs in its own throwaway sandbox folder
+	 * (~/.cast/sandbox/cast-<id>) — the UI warns that deleting the session
+	 * also deletes that folder. */
+	isSandbox?: boolean;
 	messageCount: number;
 	createdAt: string;
 	updatedAt: string;
@@ -1924,6 +1928,11 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 
 	function deleteSessionPermanently(sessionId: string): boolean {
 		const ws = sessions.get(sessionId);
+		// Capture the cwd before the row is deleted — a session's throwaway
+		// sandbox folder is cleaned up on delete, a user-chosen directory is
+		// never touched. For a session already unloaded from memory (closed in
+		// an earlier process run), load it from disk first.
+		const sessionCwd = ws?.session.cwd ?? loadSession(sessionId)?.cwd;
 		if (ws) {
 			if (ws.status === "running") ws.runner.abort();
 			ws.backgroundBash.registry.killAll();
@@ -1947,6 +1956,14 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// them. force:true since a session that never had any attachments is
 		// the common case, not an error.
 		rmSync(sessionInputsDir(sessionId), { recursive: true, force: true });
+		// The sandbox folder is the session's own throwaway working copy
+		// (~/.cast/sandbox/cast-<id>) — remove it with the session so these
+		// dirs don't accumulate as orphans. Matched exactly (not by prefix),
+		// so a project that merely lives under ~/.cast/sandbox is never touched.
+		const sandboxCwd = join(homedir(), ".cast", "sandbox", `cast-${sessionId}`);
+		if (sessionCwd === sandboxCwd) {
+			rmSync(sandboxCwd, { recursive: true, force: true });
+		}
 		return Boolean(ws) || removedFromDisk;
 	}
 
@@ -2031,6 +2048,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			title: session.title,
 			pinned: session.pinned,
 			status,
+			isSandbox: (session.cwd ?? cwd) === join(homedir(), ".cast", "sandbox", `cast-${session.id}`),
 			messageCount: countTurnMessages(session.messages),
 			createdAt: session.createdAt,
 			updatedAt: session.updatedAt,
@@ -2051,6 +2069,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			// turn-runner-state.ts, so a crashed runner self-heals even without
 			// the unlink ever running.
 			status: effectiveStatusFromFile(cold.id),
+			isSandbox: (cold.cwd ?? cwd) === join(homedir(), ".cast", "sandbox", `cast-${cold.id}`),
 			messageCount: cold.msgCount,
 			createdAt: cold.createdAt ?? cold.updatedAt,
 			updatedAt: cold.updatedAt,
