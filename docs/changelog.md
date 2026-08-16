@@ -2,6 +2,17 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.20.0
+
+### Added
+
+- **`/review`** — one word tells the agent to verify its own work: identify
+  what changed (git diff / touched files), find and run the project's test and
+  lint commands, and report honestly what was verified and what remains open.
+  Works in the TUI and the web composer. The shared prompt carries the same
+  honesty rule as the memory tools — the agent never claims a check it didn't
+  actually run.
+
 ## 0.19.0
 
 ### Added
