@@ -79,6 +79,10 @@ const STREAM_BLOCKS_IMPORT_RE = /from\s+"\.\/stream-blocks\.js"/;
 // even though the file content on disk is different.
 const VERSIONED_LOCAL_IMPORT_RE = /from\s+"\.\/(?!\.)([\w-]+)\.js(?!\?v=)"/g;
 // Local modules whose `./<name>.js` imports are rewritten with `?v=` inside
+// Rendered static responses (body + headers), keyed by path|encoding|version —
+// see serveStatic. Bounded; cleared wholesale when it passes 1024 entries.
+const staticResponseCache = new Map<string, { status: number; headers: Record<string, string>; body: Buffer }>();
+
 // app.js / settings-modal.js. assetVersion mixes these into the app.js hash so
 // any change to one of them invalidates the cached app.js too.
 const IMPORT_REWRITE_TARGETS = [
@@ -417,6 +421,21 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			return true;
 		}
 
+		// Static assets are immutable in practice (content-hash URLs) and the
+		// HTML only changes on rebuild, which restarts the process — so the
+		// fully-rendered response can be cached in memory keyed by path +
+		// encoding. Without this every request re-reads the file, re-hashes it
+		// (app.js hashes all its imports too), and re-runs brotli/gzip, which
+		// dominates CPU for the browser's asset burst on each new visitor.
+		const requestedVersion = new URL(req.url ?? "/", `http://localhost:${port}`).searchParams.get("v");
+		const cacheKey = `${urlPath}|${req.headers?.["accept-encoding"] ?? ""}|${requestedVersion ?? ""}`;
+		const cached = staticResponseCache.get(cacheKey);
+		if (cached) {
+			res.writeHead(cached.status, cached.headers);
+			res.end(cached.body);
+			return true;
+		}
+
 		try {
 			const stat = statSync(filePath);
 			if (!stat.isFile()) return false;
@@ -467,9 +486,8 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			const encoding =
 				textAsset && accepts.includes("br") ? "br" : textAsset && accepts.includes("gzip") ? "gzip" : undefined;
 			const body = encoding === "br" ? brotliCompressSync(raw) : encoding === "gzip" ? gzipSync(raw) : raw;
-			const requestedVersion = new URL(req.url ?? "/", `http://localhost:${port}`).searchParams.get("v");
 			const immutable = ext !== ".html" && requestedVersion === assetVersion(urlPath);
-			res.writeHead(200, {
+			const headers = {
 				"Content-Type": mime,
 				"Content-Length": body.length,
 				"Cache-Control":
@@ -479,7 +497,10 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 							? "public, max-age=31536000, immutable"
 							: "public, max-age=3600",
 				...(encoding ? { "Content-Encoding": encoding, Vary: "Accept-Encoding" } : {}),
-			});
+			};
+			if (staticResponseCache.size >= 1024) staticResponseCache.clear();
+			staticResponseCache.set(cacheKey, { status: 200, headers, body });
+			res.writeHead(200, headers);
 			res.end(body);
 			return true;
 		} catch (_) {
