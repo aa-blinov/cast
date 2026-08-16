@@ -1064,7 +1064,15 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			if (tooBig) return json(res, { error: "One of the images is too large" }, 400);
 		}
 		try {
-			await bridge.submit(params.id, text, images, clientMessageId);
+			// Don't await the full submit: the daemon broadcasts status:running
+			// synchronously at turn start, so awaiting the async setup that
+			// follows (provider reconcile, persona/hook resolution, MCP connect)
+			// only delays this 202 ack and makes every send feel like it lags.
+			// Setup failures are surfaced through the SSE stream (failSetup
+			// broadcasts status:error + a transcript error), not this response.
+			void bridge.submit(params.id, text, images, clientMessageId).catch((error) => {
+				console.error(`[cast server] chat submit failed:`, error);
+			});
 		} catch (error) {
 			return json(res, { error: error instanceof Error ? error.message : "Could not accept message" }, 500);
 		}
