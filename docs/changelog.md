@@ -2,6 +2,33 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.1
+
+### Added
+
+- **Skill suggestions after reusable procedures.** After a turn that used many
+  tools (4+) clearly following a repeatable workflow (cut a release, add a
+  component with tests, run the dev server and verify it), cast proposes
+  saving it as a project skill. The confirmation reuses the standard question
+  picker in both the TUI and the web UI — pick "Save as /name" to write
+  `.cast/skills/<name>/SKILL.md`, or "Dismiss". Conservative eval: trivial
+  or one-off turns never suggest, an existing skill name is never overwritten,
+  and declining once silences suggestions for the rest of the session.
+
+### Fixed
+
+- **Settings > Bash "turn safety cap" save.** The save failed with a 400
+  because `/turn-cap` wasn't allowed in the settings command path that the
+  settings modal uses — now it works from the UI as well as from chat.
+- **A daemon crash after multi-step turns.** The post-turn skill eval ran
+  fire-and-forget; an unhandled rejection inside it (cloning the message
+  array) silently killed the daemon on Node 22. The eval is now guarded and
+  stores a compact transcript instead of the full message list.
+- **Skill suggestion reliability.** The eval verdict is parsed robustly even
+  when the model inlines its reasoning before the JSON (which used to read as
+  "not reusable"), and the "(recommended)" marker was dropped from the
+  save/dismiss confirmation.
+
 ## 0.22.0
 
 ### Added
