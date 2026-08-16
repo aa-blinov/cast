@@ -1168,7 +1168,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		} catch {
 			return json(res, { error: "Invalid JSON" }, 400);
 		}
-		const result = bridge.answerQuestion(params.id, values);
+		const result = await bridge.answerQuestion(params.id, values);
 		if (!result.ok) return json(res, { error: result.error }, result.error === "Agent running" ? 409 : 400);
 		json(res, { ok: true }, 202);
 	});

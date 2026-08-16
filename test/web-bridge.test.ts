@@ -244,15 +244,6 @@ describe("web bridge", () => {
 		expect((await bridge.executeSettingsCommand("/turn-cap")).result).toMatch(/500|default|reset/i);
 	});
 
-	it("/skill-save is a session command, not a settings command", async () => {
-		const bridge = createServerBridge(makeResult());
-
-		expect(await bridge.executeSettingsCommand("/skill-save")).toEqual({
-			ok: false,
-			error: "Command requires an active session",
-		});
-	});
-
 	it("seeds default marketplaces only from /plugin subcommands that consume them", async () => {
 		const bridge = createServerBridge(makeResult());
 
@@ -908,7 +899,7 @@ describe("web bridge", () => {
 		expect(bridge.getQuestion(ws.id)?.questions).toHaveLength(2);
 
 		runAgentLoop.mockImplementationOnce(async (messages) => messages);
-		expect(bridge.answerQuestion(ws.id, ["redis", "disk"])).toEqual({ ok: true });
+		expect(await bridge.answerQuestion(ws.id, ["redis", "disk"])).toEqual({ ok: true });
 		expect(ws.session.planQuestion).toBeUndefined();
 		expect(ws.session.messages.at(-1)?.content).toContain("Question: Choose cache backend Answer: Redis");
 	});
@@ -945,7 +936,7 @@ describe("web bridge", () => {
 		// model-supplied values. The bridge must accept it (instead of 400-ing
 		// with "Unknown question option") and pass the raw text to the model.
 		runAgentLoop.mockImplementationOnce(async (messages) => messages);
-		expect(bridge.answerQuestion(ws.id, ["orange"])).toEqual({ ok: true });
+		expect(await bridge.answerQuestion(ws.id, ["orange"])).toEqual({ ok: true });
 		expect(ws.session.planQuestion).toBeUndefined();
 		expect(ws.session.messages.at(-1)?.content).toContain("Question: Which color do you like best? Answer: orange");
 	});
@@ -962,7 +953,7 @@ describe("web bridge", () => {
 		bridge.subscribe(ws.id, (event) => secondClientEvents.push(event));
 
 		runAgentLoop.mockImplementationOnce(async (messages) => messages);
-		expect(bridge.answerQuestion(ws.id, ["memory"])).toEqual({ ok: true });
+		expect(await bridge.answerQuestion(ws.id, ["memory"])).toEqual({ ok: true });
 		const expected = { type: "decision_state", question: undefined, planTransition: undefined };
 		expect(firstClientEvents).toContainEqual(expected);
 		expect(secondClientEvents).toContainEqual(expected);

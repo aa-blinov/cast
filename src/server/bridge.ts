@@ -218,7 +218,6 @@ export type WebAgentStatus = "idle" | "running" | "error";
 export type WebEvent =
 	| AgentEvent
 	| { type: "status"; status: WebAgentStatus; startedAt?: number }
-	| { type: "skill_suggestion"; name: string; description: string }
 	| {
 			type: "user_message";
 			message: {
@@ -660,7 +659,7 @@ export interface ServerBridge {
 	/** Outstanding user questions, if the agent is waiting for choices. */
 	getQuestion(sessionId: string): PlanQuestion | undefined;
 	/** Records choices and resumes the same conversation in either mode. */
-	answerQuestion(sessionId: string, values: string[]): { ok: true } | { ok: false; error: string };
+	answerQuestion(sessionId: string, values: string[]): Promise<{ ok: true } | { ok: false; error: string }>;
 	getPlanTransition(sessionId: string): { kind: "done" } | undefined;
 	resolvePlanTransition(sessionId: string, kind: "done"): { ok: true } | { ok: false; error: string };
 	/** Flip a session between plan/build mode. The TUI in daemon mode owns its
@@ -1881,9 +1880,14 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	/** Post-turn check: if the turn clearly did a reusable multi-step procedure,
 	 * suggest saving it as a project skill. Fire-and-forget; the eval prompt is
 	 * conservative and the gate (tool-call count, name-exists, once-per-session)
-	 * keeps it from nagging. */
+	 * keeps it from nagging. The confirmation reuses the existing question
+	 * picker (the `question` tool's PlanQuestion pipeline) in both the TUI and
+	 * the web UI — no new confirmation surface to build or maintain. */
 	async function suggestReusableSkill(ws: WebAgentSession, messages: Message[]): Promise<void> {
 		if (ws.status === "error") return;
+		// A real question from the model is pending (turn ended on the question
+		// tool) — never clobber it with our own.
+		if (ws.session.planQuestion) return;
 		const transcript = compactTurnTranscript(messages);
 		if (transcript.trim().length === 0) return;
 		const resp = await runCompactLlm(
@@ -1902,7 +1906,19 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		if (!name || skillExists(ws.session.cwd ?? cwd, name)) return;
 		if (ws.pendingSkillSuggestion?.name === name) return;
 		ws.pendingSkillSuggestion = { name, description: suggestion.description, transcript };
-		broadcast(ws, { type: "skill_suggestion", name, description: suggestion.description });
+		const confirm: PlanQuestion = {
+			questions: [
+				{
+					question: "Save reusable procedure as a skill?",
+					options: [
+						{ value: "save", label: `Save as /${name}`, description: suggestion.description },
+						{ value: "dismiss", label: "Dismiss" },
+					],
+					recommended: "save",
+				},
+			],
+		};
+		persistDecisionState(ws, confirm, ws.session.planTransition);
 	}
 
 	function skillExists(sessionCwd: string, name: string): boolean {
@@ -2006,7 +2022,10 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		return { ok: true };
 	}
 
-	function answerQuestion(sessionId: string, values: string[]): { ok: true } | { ok: false; error: string } {
+	async function answerQuestion(
+		sessionId: string,
+		values: string[],
+	): Promise<{ ok: true } | { ok: false; error: string }> {
 		const ws = sessions.get(sessionId);
 		if (!ws) return { ok: false, error: "Session not found" };
 		if (ws.status === "running") return { ok: false, error: "Agent running" };
@@ -2022,6 +2041,34 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		if (!question) return { ok: false, error: "No question is awaiting an answer" };
 		if (values.length !== question.questions.length)
 			return { ok: false, error: "An answer is required for every question" };
+
+		// Skill-confirm intercept: this is our own post-turn "save reusable
+		// procedure?" question, offered through the same picker the `question`
+		// tool uses — not a question the model asked. Answer it in place (write
+		// the skill or discard it) instead of feeding a synthetic
+		// "Question:/Answer:" turn back to the model.
+		const pendingSkill = ws.pendingSkillSuggestion;
+		const isSkillConfirm =
+			pendingSkill !== undefined &&
+			question.questions.length === 1 &&
+			question.questions[0].options.some((option) => option.value === "save") &&
+			question.questions[0].options.some((option) => option.value === "dismiss");
+		if (isSkillConfirm) {
+			resolvePlanQuestion(planState);
+			if (values[0] === "save") {
+				const saved = await writeSkillFromPending(ws);
+				if (!saved) {
+					broadcast(ws, { type: "notice", message: "Could not generate the skill." });
+					return { ok: false, error: "Could not generate the skill." };
+				}
+				broadcast(ws, { type: "notice", message: `Saved reusable procedure as skill /${saved}.` });
+			} else {
+				ws.pendingSkillSuggestion = undefined;
+				broadcast(ws, { type: "notice", message: "Skill suggestion dismissed." });
+			}
+			return { ok: true };
+		}
+
 		// Each value is either the `value` of one of the model's options (picked
 		// from the picker) or an arbitrary string the user typed into the composer.
 		// The latter is a legitimate "free-form" answer — the user explicitly chose
@@ -2565,17 +2612,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			}
 			updateSettings({ maxTurnIterations: n });
 			return { ok: true, result: `Turn iteration safety cap set to ${n} (applies on the next turn).` };
-		}
-		if (name === "/skill-save") {
-			const pending = ws.pendingSkillSuggestion;
-			if (!pending) return { ok: false, error: "No pending skill suggestion — run a multi-step task first." };
-			if (arg === "dismiss" || arg === "no") {
-				ws.pendingSkillSuggestion = undefined;
-				return { ok: true, result: "Dismissed the skill suggestion." };
-			}
-			const saved = await writeSkillFromPending(ws);
-			if (!saved) return { ok: false, error: "Could not generate the skill." };
-			return { ok: true, result: `Saved reusable procedure as skill /${saved}.` };
 		}
 		if (name === "/rules") {
 			return {
