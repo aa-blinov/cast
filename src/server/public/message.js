@@ -19,7 +19,7 @@ export function Message({ msg, renderMarkdown, escapeHtml, showReasoning = true 
 	if (role === "tool") return null;
 
 	const labelMap = {
-		user: "you",
+		user: "user",
 		agent: "agent",
 		assistant: "agent",
 		system: "system",
@@ -118,7 +118,7 @@ export function Message({ msg, renderMarkdown, escapeHtml, showReasoning = true 
 		const isRealSend = msg.content !== null;
 		return html`
 		<div class="message ${isRealSend ? "message-user" : "message-image-result"}">
-		<div class="message-label">${isRealSend ? "you" : "image (read)"}</div>
+		<div class="message-label">${isRealSend ? "user" : "image (read)"}</div>
 			${content && html`<div class="message-content" dangerouslySetInnerHTML=${{ __html: escapeHtml(content) }} />`}
 			<div class="message-content message-images">
 				${msg.images.map(
