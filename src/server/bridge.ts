@@ -120,7 +120,7 @@ import {
 import { ensureSessionWorktree, listWorktrees, removeWorktreeBySlug, type SessionWorktree } from "../core/worktree.ts";
 import { ALL_THEMES } from "../ui/themes/index.ts";
 import type { ThemeColors } from "../ui/themes/types.ts";
-import { isCommandBlocking, SLASH_COMMANDS } from "./commands.ts";
+import { isCommandBlocking, REVIEW_PROMPT, SLASH_COMMANDS } from "./commands.ts";
 import { sessionInputsDir } from "./inputs.ts";
 
 const SYSTEM_REMINDER_RE = /<system-reminder>([\s\S]*?)<\/system-reminder>/g;
@@ -2357,6 +2357,15 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				ok: true,
 				result: { cwd: sessionCwd, isGit: true, branch, dirty, worktree },
 			};
+		}
+		if (name === "/review") {
+			// /review is blocking (isCommandBlocking), so this only runs idle.
+			// Start the review turn without awaiting it — the SSE stream carries
+			// the agent's work; the command just acknowledges the kick-off.
+			void submit(ws.id, REVIEW_PROMPT).catch((error) => {
+				console.error(`[cast server] /review submit failed:`, error);
+			});
+			return { ok: true, result: "Reviewing the session's work…" };
 		}
 		if (name === "/rules") {
 			return {

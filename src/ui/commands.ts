@@ -94,6 +94,7 @@ import {
 	selectSkills,
 } from "../pickers/domain.ts";
 import type { Pickers, PickOption } from "../pickers/types.ts";
+import { REVIEW_PROMPT } from "../server/commands.ts";
 import { TUI_KEYBINDINGS } from "./input/keybindings.ts";
 import { getStatusBarSegments, SEGMENT_MAX_WIDTH, type SegmentContext, type StatusBarSegment } from "./statusbar.tsx";
 import { ALL_THEMES, getActiveTheme, setActiveTheme } from "./themes/index.ts";
@@ -245,6 +246,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/reasoning-format", description: "Set provider reasoning protocol" },
 	{ name: "/reload", description: "Reload skills, rules, MCP, and personas for cwd" },
 	{ name: "/repo", description: "Show cwd and git branch" },
+	{ name: "/review", description: "Ask the agent to review and verify its own work" },
 	{ name: "/rule:", description: "Invoke a rule by name", takesArgs: true },
 	{ name: "/rules", description: "List loaded rules" },
 	{ name: "/s", description: "Alias for /steer", takesArgs: true },
@@ -3121,6 +3123,16 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			role: "warning",
 			content: `cwd: ${deps.cwd}\ngit: ${isGit}\ngit branch: ${branch}\ndirty: ${dirty}\nremote: ${remote}\nhead: ${head}`,
 		});
+		return;
+	}
+
+	if (input === "/review") {
+		if (deps.running) {
+			showNotice("[Agent is running — wait for it to finish, or use /steer, before /review]");
+			return;
+		}
+		deps.agent.addDisplayMessage({ role: "user", content: input });
+		await agent.submit(REVIEW_PROMPT, images);
 		return;
 	}
 
