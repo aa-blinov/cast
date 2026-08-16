@@ -1,6 +1,6 @@
 Use `session_history` when the exact wording, decision, or details from an earlier conversation are needed — "when did we fix X", "what did we decide about Y", "what exactly was said".
 
-This searches the raw conversation transcripts (full-text, BM25), deliberately separate from `memory`: session history is verbatim conversation evidence, while `memory` holds distilled durable project facts.
+This searches the raw conversation transcripts (full-text, BM25), deliberately separate from `memory`: session history is raw conversation evidence, while `memory` holds distilled durable project facts.
 
 - `scope=project` (default) searches only sessions in the current working directory.
 - `scope=global` searches across every project — use it for questions about anything you ever worked on, not just the current repo.
