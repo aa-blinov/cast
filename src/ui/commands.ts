@@ -268,6 +268,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/subagent-model", description: "Show or change subagent model" },
 	{ name: "/subagent-model-provider", description: "Set provider for subagent model", takesArgs: true },
 	{ name: "/theme", description: "Change color theme" },
+	{ name: "/turn-cap", description: "Show/set the per-turn iteration safety cap — N or reset", takesArgs: true },
 	{ name: "/undo", description: "Undo last turn (restore files and context)" },
 	{ name: "/web", description: "Toggle web search & fetch tools" },
 	{ name: "/web-fetch-provider", description: "Switch web_fetch backend (Jina Reader / local)" },

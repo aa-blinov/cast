@@ -145,6 +145,12 @@ export const SLASH_COMMANDS: Array<{
 		hidden: true,
 	},
 	{ name: "/theme", description: "Show or change color theme", takesArgs: true, blocking: false, hidden: true },
+	{
+		name: "/turn-cap",
+		description: "Show/set the per-turn iteration safety cap (default 500)",
+		takesArgs: true,
+		blocking: false,
+	},
 	{ name: "/usage", description: "Show token and cost usage", blocking: false, hidden: true },
 	{ name: "/undo", description: "Undo the last turn and restore its files", blocking: true },
 	{

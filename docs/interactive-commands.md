@@ -152,6 +152,7 @@ Use `/statusbar` to toggle individual segments on/off and reorder them — usefu
 | `/statusbar` | Toggle and reorder status bar segments (multi-select picker) |
 | `/theme` | Open theme picker |
 | `/theme <id>` | Switch to a specific theme |
+| `/turn-cap [N\|reset]` | Show/set the per-turn iteration safety cap (default 500, 10–10000); applies on the next agent call. Also configurable via `maxTurnIterations` in `settings.json` and Settings → Bash |
 
 ## Utility
 

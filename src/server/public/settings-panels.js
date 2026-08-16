@@ -56,6 +56,8 @@ function SettingsServer({ data }) {
 function SettingsBash({ data, busy, act }) {
 	if (!data) return null;
 	const perm = data.permissions || {};
+	const [capDraft, setCapDraft] = useState("");
+	const cap = data.maxTurnIterations ?? 500;
 	return html`
 		<div class="settings-rows">
 			<div class="settings-section-title">Bash confirmation mode</div>
@@ -63,6 +65,13 @@ function SettingsBash({ data, busy, act }) {
 			<div class="settings-form-row">
 				<button class="modal-btn${perm.permissionMode === "default" ? " modal-btn-primary" : ""}" title="Confirm dangerous commands" disabled=${busy} onClick=${() => act("/permissions default")}>Default</button>
 				<button class="modal-btn${perm.permissionMode === "bypass" ? " modal-btn-primary" : ""}" title="Skip confirmation prompts" disabled=${busy} onClick=${() => act("/permissions bypass")}>Bypass</button>
+			</div>
+			<div class="settings-section-title">Turn safety cap</div>
+			<p class="settings-hint">Max model calls per turn before the loop stops as a runaway (default 500). Applies on the next agent call.</p>
+			<div class="settings-inline-form">
+				<input aria-label="Turn iteration safety cap" type="number" min="10" max="10000" step="10" value=${capDraft || cap} disabled=${busy} onInput=${(event) => setCapDraft(event.target.value)} />
+				<button class="modal-btn icon-btn" title="Reset to 500" disabled=${busy || cap === 500} onClick=${() => act("/turn-cap reset")}><${icons.arrowUturnLeft} /></button>
+				<button class="modal-btn icon-btn" title="Save" disabled=${busy || !capDraft || Number(capDraft) === cap} onClick=${() => act(`/turn-cap ${Number(capDraft)}`)}><${icons.check} /></button>
 			</div>
 		</div>
 	`;
