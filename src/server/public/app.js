@@ -623,6 +623,14 @@ function App() {
 		pendingPlanSignalRef,
 		planRefineArmedRef,
 	} = useSessionState();
+	// Earliest send time among in-flight (pending) user messages — lets the
+	// composer timer start the moment the user hits send, before the daemon's
+	// status:running round-trip (no "sending…" label in the transcript).
+	const pendingSince = (session?.messages ?? []).reduce(
+		(acc, m) => (m.role === "user" && m.pending && typeof m.pendingAt === "number" ? Math.min(acc, m.pendingAt) : acc),
+		Infinity,
+	);
+	const pendingSinceMs = Number.isFinite(pendingSince) ? pendingSince : undefined;
 	// Re-fetched per active session (not just once at boot) because the list
 	// now includes one live slash-command entry per loaded, enabled skill —
 	// those vary by session cwd and change after /reload, so a stale one-shot
@@ -2006,7 +2014,7 @@ function App() {
 							${activePersonaLabel}
 							${session?.mode && session.mode !== "build" && html`<span class="composer-role-mode">${session.mode}</span>`}
 						</div>
-						<${ElapsedTimer} key=${activeId} running=${running} connected=${connected} turnStartedAt=${session?.turnStartedAt} />
+						<${ElapsedTimer} key=${activeId} running=${running} connected=${connected} turnStartedAt=${session?.turnStartedAt} pendingSince=${pendingSinceMs} />
 					</div>
 				`
 				}

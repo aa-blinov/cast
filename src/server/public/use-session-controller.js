@@ -27,6 +27,7 @@ function mergePendingOutgoing(data, sessionId, pendingOutgoingRef) {
 				...(item.images?.length ? { images: item.images } : {}),
 				clientMessageId: item.clientMessageId,
 				pending: true,
+				pendingAt: Date.now(),
 			},
 		];
 	}

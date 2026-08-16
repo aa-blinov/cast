@@ -118,7 +118,7 @@ export function Message({ msg, renderMarkdown, escapeHtml, showReasoning = true 
 		const isRealSend = msg.content !== null;
 		return html`
 		<div class="message ${isRealSend ? "message-user" : "message-image-result"}">
-		<div class="message-label">${isRealSend ? (msg.pending ? "you · sending…" : "you") : "image (read)"}</div>
+		<div class="message-label">${isRealSend ? "you" : "image (read)"}</div>
 			${content && html`<div class="message-content" dangerouslySetInnerHTML=${{ __html: escapeHtml(content) }} />`}
 			<div class="message-content message-images">
 				${msg.images.map(
@@ -140,7 +140,7 @@ export function Message({ msg, renderMarkdown, escapeHtml, showReasoning = true 
 
 	return html`
 	<div class="message message-${role}">
-		<div class="message-label">${role === "user" && msg.pending ? "you · sending…" : labelMap[role] ?? role}</div>
+		<div class="message-label">${labelMap[role] ?? role}</div>
 		<div class="message-content" dangerouslySetInnerHTML=${{ __html: role === "user" ? escapeHtml(content) : renderMarkdown(content) }} />
 		${
 			msg.attachments?.length > 0 &&

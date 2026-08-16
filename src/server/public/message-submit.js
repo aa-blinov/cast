@@ -306,6 +306,7 @@ export async function submitMessage(text, images, pendingDocs, context) {
 							...(images?.length ? { images } : {}),
 							clientMessageId,
 							pending: true,
+							pendingAt: Date.now(),
 						},
 					],
 				}
