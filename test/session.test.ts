@@ -949,6 +949,46 @@ describe("session persistence", () => {
 		expect(remaining).not.toContain(toDelete.id);
 	});
 
+	it("deleteSession removes the session's own sandbox folder on an exact cwd match", () => {
+		const session = createSession("gpt-4o", projectA);
+		saveSession(session);
+		const sandbox = join(fakeHome, ".cast", "sandbox", `cast-${session.id}`);
+		mkdirSync(sandbox, { recursive: true });
+		writeFileSync(join(sandbox, "scratch.txt"), "hi");
+
+		expect(deleteSession(session.id, sandbox)).toBe(true);
+		expect(existsSync(sandbox)).toBe(false);
+	});
+
+	it("deleteSession never touches a user-chosen cwd, even under ~/.cast/sandbox", () => {
+		const session = createSession("gpt-4o", projectA);
+		saveSession(session);
+		// A real project that merely lives under the sandbox root — the folder
+		// name doesn't match cast-<session id>, so exact-match must keep it.
+		const otherSandbox = join(fakeHome, ".cast", "sandbox", "my-own-project");
+		mkdirSync(otherSandbox, { recursive: true });
+		writeFileSync(join(otherSandbox, "keep.txt"), "keep");
+
+		deleteSession(session.id, otherSandbox);
+		expect(existsSync(join(otherSandbox, "keep.txt"))).toBe(true);
+
+		// A real folder outside the sandbox root is obviously kept.
+		writeFileSync(join(projectA, "keep.txt"), "keep");
+		deleteSession(session.id, projectA);
+		expect(existsSync(join(projectA, "keep.txt"))).toBe(true);
+	});
+
+	it("deleteSession without a cwd never removes any folder", () => {
+		const session = createSession("gpt-4o", projectA);
+		saveSession(session);
+		const sandbox = join(fakeHome, ".cast", "sandbox", `cast-${session.id}`);
+		mkdirSync(sandbox, { recursive: true });
+
+		// No cwd passed — nothing to match against, so nothing is removed.
+		deleteSession(session.id);
+		expect(existsSync(sandbox)).toBe(true);
+	});
+
 	it("getMostRecentSession is cwd-scoped when given a path", async () => {
 		// Two projects, each with its own latest session. The default
 		// (no-cwd) lookup used to fall through to a global "most recent
