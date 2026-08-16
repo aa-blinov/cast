@@ -2,6 +2,18 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.0
+
+### Added
+
+- **Configurable per-turn iteration safety cap.** The loop's runaway backstop
+  (a model that keeps calling tools forever could otherwise hang a turn) is
+  now a setting: `maxTurnIterations` in `settings.json`, default **500**
+  (range 10–10000), applied on the next agent call. Control it with
+  `/turn-cap [N|reset]` (TUI + web palette) or Settings → Bash. `/goal`'s own
+  iteration budget still overrides it. Hitting the cap stops the turn with a
+  warning; work done so far is never lost (persisted per tool batch).
+
 ## 0.21.0
 
 ### Added
