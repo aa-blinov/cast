@@ -2,6 +2,20 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.21.0
+
+### Added
+
+- **`/goal` — bounded autonomous "work until done" mode.** `/goal <description>`
+  runs one turn that keeps iterating (tools → verify → fix) until the goal is
+  met, without yielding for permission — at most one clarifying question if the
+  goal is genuinely ambiguous. A leading number (`/goal 10 fix the tests`) or
+  `--steps N` sets the iteration budget (default 25 model calls; each call can
+  batch several tools). Near the cap the model is nudged to wrap up, and if it
+  burns through the run stops with a warning — it never loops forever. Verified
+  live: the agent fixed a bug, hit and fixed a real Node-22 `node --test test/`
+  gotcha, ran the corrected tests, and reported honestly.
+
 ## 0.20.0
 
 ### Added
