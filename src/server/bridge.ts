@@ -1294,6 +1294,14 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		syncFsWatcher(ws);
 		broadcast(ws, { type: "status", status: "running", startedAt: ws.turnStartedAt });
 		broadcastSessionUpdate(ws);
+		// A new user turn makes any pending skill-save confirmation stale — the
+		// user moved on instead of answering it. Close the picker and forget the
+		// suggestion, or the leftover question would intercept a later, unrelated
+		// answer as if it were the confirmation.
+		if (ws.pendingSkillSuggestion) {
+			ws.pendingSkillSuggestion = undefined;
+			if (ws.session.planQuestion) persistDecisionState(ws, undefined, ws.session.planTransition);
+		}
 		let chk: ReturnType<typeof createCheckpoint>;
 		const failSetup = (error: unknown): void => {
 			ws.status = "error";
@@ -1915,6 +1923,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 						{ value: "dismiss", label: "Dismiss" },
 					],
 					recommended: "save",
+					noFreeForm: true,
 				},
 			],
 		};

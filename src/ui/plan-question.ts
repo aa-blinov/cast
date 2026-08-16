@@ -46,7 +46,9 @@ export async function resolvePlanQuestionWithPicker(
 					label: `${option.label}${option.value === item.recommended ? " (recommended)" : ""}`,
 					...(option.description ? { description: option.description } : {}),
 				})),
-				{ value: FREE_FORM, label: "Other… (custom answer)" },
+				// noFreeForm questions (the skill-save confirmation) have
+				// exhaustive options — a custom answer has no valid meaning.
+				...(item.noFreeForm ? [] : [{ value: FREE_FORM, label: "Other… (custom answer)" }]),
 			],
 			{ title: item.question },
 		);
