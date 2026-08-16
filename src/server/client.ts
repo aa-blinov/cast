@@ -242,7 +242,7 @@ export async function submitServerChat(
 	text: string,
 	images?: string[],
 	clientMessageId?: string,
-	goal?: boolean,
+	goal?: boolean | number,
 ): Promise<void> {
 	const { status, data } = await serverFetch(client, `${API_V1_PREFIX}/sessions/${sessionId}/chat`, {
 		method: "POST",

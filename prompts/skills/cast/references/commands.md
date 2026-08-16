@@ -25,7 +25,7 @@
 | `/sessions` | List/switch sessions |
 | `/plan` | User-initiated task initialization: establish scope and an execution plan before implementation |
 | `/build` | Exit plan mode, approve the plan, and restore the implementation toolset |
-| `/goal <description>` | Work autonomously toward a goal until done — bounded (25 model calls), never-ask, at most one clarifying question |
+| `/goal [--steps N] <description>` | Work autonomously toward a goal until done — bounded (default 25 model calls, `--steps N` overrides), never-ask, at most one clarifying question |
 | `/review` | Ask the agent to verify its own work: git diff, run tests/lint, report honestly what was and wasn't verified |
 | `/clear` | Clear context |
 | `/compact` | Compact context now |

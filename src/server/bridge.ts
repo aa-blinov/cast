@@ -120,13 +120,7 @@ import {
 import { ensureSessionWorktree, listWorktrees, removeWorktreeBySlug, type SessionWorktree } from "../core/worktree.ts";
 import { ALL_THEMES } from "../ui/themes/index.ts";
 import type { ThemeColors } from "../ui/themes/types.ts";
-import {
-	buildGoalPrompt,
-	GOAL_MAX_OUTER_ITERATIONS,
-	isCommandBlocking,
-	REVIEW_PROMPT,
-	SLASH_COMMANDS,
-} from "./commands.ts";
+import { buildGoalPrompt, isCommandBlocking, parseGoalInput, REVIEW_PROMPT, SLASH_COMMANDS } from "./commands.ts";
 import { sessionInputsDir } from "./inputs.ts";
 
 const SYSTEM_REMINDER_RE = /<system-reminder>([\s\S]*?)<\/system-reminder>/g;
@@ -2374,17 +2368,17 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			};
 		}
 		if (name === "/goal") {
-			const goal = arg;
-			if (!goal) return { ok: false, error: "Usage: /goal <what to achieve>" };
+			const { goal, maxIterations } = parseGoalInput(arg);
+			if (!goal) return { ok: false, error: "Usage: /goal [--steps N] <what to achieve>" };
 			// /goal is blocking (isCommandBlocking), so this only runs idle.
-			// Kick off the autonomous run with a hard iteration budget and let
-			// the SSE stream carry the work.
-			void submit(ws.id, buildGoalPrompt(goal), undefined, undefined, undefined, {
-				maxOuterIterations: GOAL_MAX_OUTER_ITERATIONS,
+			// Kick off the autonomous run with the chosen iteration budget and
+			// let the SSE stream carry the work.
+			void submit(ws.id, buildGoalPrompt(goal, maxIterations), undefined, undefined, undefined, {
+				maxOuterIterations: maxIterations,
 			}).catch((error) => {
 				console.error(`[cast server] /goal submit failed:`, error);
 			});
-			return { ok: true, result: "Working toward the goal autonomously…" };
+			return { ok: true, result: `Working toward the goal autonomously (budget: ${maxIterations})…` };
 		}
 		if (name === "/review") {
 			// /review is blocking (isCommandBlocking), so this only runs idle.

@@ -94,7 +94,7 @@ import {
 	selectSkills,
 } from "../pickers/domain.ts";
 import type { Pickers, PickOption } from "../pickers/types.ts";
-import { buildGoalPrompt, REVIEW_PROMPT } from "../server/commands.ts";
+import { buildGoalPrompt, parseGoalInput, REVIEW_PROMPT } from "../server/commands.ts";
 import { TUI_KEYBINDINGS } from "./input/keybindings.ts";
 import { getStatusBarSegments, SEGMENT_MAX_WIDTH, type SegmentContext, type StatusBarSegment } from "./statusbar.tsx";
 import { ALL_THEMES, getActiveTheme, setActiveTheme } from "./themes/index.ts";
@@ -3138,9 +3138,10 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 	}
 
 	if (input === "/goal" || input.startsWith("/goal ")) {
-		const goalText = input === "/goal" ? "" : input.slice("/goal ".length).trim();
+		const raw = input === "/goal" ? "" : input.slice("/goal ".length);
+		const { goal: goalText, maxIterations } = parseGoalInput(raw);
 		if (!goalText) {
-			showNotice("[Usage: /goal <what to achieve> — works autonomously until done]");
+			showNotice("[Usage: /goal [--steps N] <what to achieve> — works autonomously until done]");
 			return;
 		}
 		if (deps.running) {
@@ -3148,9 +3149,9 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			return;
 		}
 		deps.agent.addDisplayMessage({ role: "user", content: input });
-		// goal=true tells the daemon to cap the turn's iterations so the
-		// autonomous run can't loop forever.
-		await agent.submit(buildGoalPrompt(goalText), images, true);
+		// goal=<number> tells the daemon to cap the turn's iterations so the
+		// autonomous run can't loop forever, and uses the requested budget.
+		await agent.submit(buildGoalPrompt(goalText, maxIterations), images, maxIterations);
 		return;
 	}
 

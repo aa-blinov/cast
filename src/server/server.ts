@@ -1106,7 +1106,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		let text: string;
 		let images: string[] | undefined;
 		let clientMessageId: string | undefined;
-		let goal = false;
+		let goal: boolean | number = false;
 		try {
 			const parsed = JSON.parse(body) as {
 				text?: string;
@@ -1117,7 +1117,12 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			text = parsed.text ?? "";
 			images = Array.isArray(parsed.images) && parsed.images.length > 0 ? parsed.images : undefined;
 			clientMessageId = typeof parsed.clientMessageId === "string" ? parsed.clientMessageId.trim() : undefined;
-			goal = parsed.goal === true;
+			goal =
+				parsed.goal === true
+					? true
+					: typeof parsed.goal === "number" && Number.isFinite(parsed.goal)
+						? Math.max(1, Math.min(parsed.goal, 200))
+						: false;
 		} catch {
 			return json(res, { error: "Invalid JSON" }, 400);
 		}
@@ -1138,7 +1143,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			// broadcasts status:error + a transcript error), not this response.
 			void bridge
 				.submit(params.id, text, images, clientMessageId, undefined, {
-					...(goal ? { maxOuterIterations: GOAL_MAX_OUTER_ITERATIONS } : {}),
+					...(goal ? { maxOuterIterations: typeof goal === "number" ? goal : GOAL_MAX_OUTER_ITERATIONS } : {}),
 				})
 				.catch((error) => {
 					console.error(`[cast server] chat submit failed:`, error);
