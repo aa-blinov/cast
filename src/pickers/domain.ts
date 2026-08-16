@@ -249,7 +249,8 @@ export async function selectSession(pickers: Pickers): Promise<SessionState | nu
 		});
 		const toDelete = await pickers.pickOption(delOptions, { title: "Delete which session?" });
 		if (toDelete) {
-			deleteSession(toDelete);
+			const del = sessions.find((s) => s.id === toDelete);
+			deleteSession(toDelete, del?.cwd);
 			pickers.log(`Deleted session ${toDelete}.`);
 		}
 	}

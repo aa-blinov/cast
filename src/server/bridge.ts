@@ -1949,21 +1949,15 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// closed earlier in this process (or one from a previous run) only
 		// exists on disk, and deleteSession() is what actually makes "Delete"
 		// mean delete instead of just closeSession's "unload from memory".
-		const removedFromDisk = deleteSession(sessionId);
+		// deleteSession also removes the session's own throwaway sandbox folder
+		// when cwd is exactly that folder (see core/session.ts).
+		const removedFromDisk = deleteSession(sessionId, sessionCwd);
 		// Attached documents live outside the session's own cwd (see
 		// inputs.ts) specifically so they're never a project file the user has
 		// to manage — that only holds if deleting the session also deletes
 		// them. force:true since a session that never had any attachments is
 		// the common case, not an error.
 		rmSync(sessionInputsDir(sessionId), { recursive: true, force: true });
-		// The sandbox folder is the session's own throwaway working copy
-		// (~/.cast/sandbox/cast-<id>) — remove it with the session so these
-		// dirs don't accumulate as orphans. Matched exactly (not by prefix),
-		// so a project that merely lives under ~/.cast/sandbox is never touched.
-		const sandboxCwd = join(homedir(), ".cast", "sandbox", `cast-${sessionId}`);
-		if (sessionCwd === sandboxCwd) {
-			rmSync(sandboxCwd, { recursive: true, force: true });
-		}
 		return Boolean(ws) || removedFromDisk;
 	}
 
