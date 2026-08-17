@@ -2,6 +2,39 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.3
+
+### Added
+
+- **`/evolve` — create reusable skills on demand.** Replace the old proactive
+  auto-suggestion (which proposed saving a skill after every multi-tool turn
+  and felt aggressive) with an explicit command. Run `/evolve` at any point in
+  a session: it analyzes the conversation plus the project's typical tasks and
+  proposes reusable skills, which you pick in a multi-select picker (TUI /
+  web). Chosen skills are written to the project's `.cast/skills/`. Nothing
+  is created without your selection.
+
+### Changed
+
+- **Stable daemon token.** The loopback credential the TUI uses is now the
+  same `serverToken` (persisted in settings.json) instead of a fresh random
+  token minted on every daemon start. Previously a restart (`cast upgrade`,
+  redeploy) silently invalidated an already-running TUI, so the next
+  authenticated call — e.g. the skill-save confirmation — failed with 401
+  until it reconnected.
+
+### Fixed
+
+- **Settings numeric fields (web UI).** The turn safety cap on the Bash tab
+  always showed 500 even after saving; numeric fields in Settings (Bash cap +
+  Memory numbers) felt laggy and couldn't be fully erased — a cleared field
+  snapped back to the current value. They now show real values, edit in one
+  pass, and number steppers are visible again.
+- **Memory settings labels** show the default (e.g. "(default 13000)") instead
+  of duplicating the current value that the field already shows.
+- **TUI elapsed timer** anchors to the daemon's start time (resumes across
+  reconnect instead of resetting to zero) and ticks at 100ms.
+
 ## 0.22.2
 
 ### Fixed
