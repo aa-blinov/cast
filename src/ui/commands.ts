@@ -3129,6 +3129,23 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		return;
 	}
 
+	if (input === "/evolve") {
+		if (deps.running) {
+			showNotice("[Agent is running — wait for it to finish before /evolve]");
+			return;
+		}
+		deps.agent.addDisplayMessage({ role: "user", content: input });
+		try {
+			const result = await deps.agent.runCommand("/evolve");
+			if (typeof result === "string" && result) showNotice(`[${result}]`);
+			// Otherwise the daemon set a multi-select question; the decision_state
+			// event opens the picker automatically.
+		} catch (err) {
+			showNotice(`[${err instanceof Error ? err.message : String(err)}]`);
+		}
+		return;
+	}
+
 	if (input === "/review") {
 		if (deps.running) {
 			showNotice("[Agent is running — wait for it to finish, or use /steer, before /review]");
