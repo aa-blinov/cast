@@ -146,13 +146,14 @@ export async function runServerMain(args: string[], options: { foreground: boole
 		);
 	}
 
-	// Local-only token for TUI clients — lets `cast` (the TUI)
-	// talk to the daemon over HTTP+SSE without the browser's interactive
-	// login. The browser still logs in with cast_web_session; this is a
-	// separate, file-only credential. It is always recorded so a local TUI
-	// can attach even when the daemon listens publicly; server.ts accepts it
-	// only from a loopback socket, so it never authorizes a remote request.
-	const localToken = randomBytes(24).toString("base64url");
+	// One credential for the whole daemon: serverPassword (= serverToken).
+	// The TUI and the browser both authenticate with it — the TUI over loopback
+	// (Bearer / ?token= from server.json), the browser through the login form.
+	// Reusing a single token (instead of a fresh randomBytes local token per
+	// restart) keeps an already-running TUI valid across `cast upgrade` /
+	// daemon restarts; a per-restart token silently invalidated the TUI's
+	// in-memory client, so the next authed call (e.g. the skill-save POST
+	// /question) failed with 401 until it reconnected.
 	const instanceId = randomBytes(18).toString("base64url");
 
 	// Set before the server is even created so the background MCP connect
@@ -180,7 +181,7 @@ export async function runServerMain(args: string[], options: { foreground: boole
 				host,
 				startedAt: new Date().toISOString(),
 				foreground,
-				token: localToken,
+				token: serverPassword,
 				instanceId,
 			});
 			console.log(`[cast server] stop: cast server stop`);
