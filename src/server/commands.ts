@@ -83,6 +83,7 @@ export const SLASH_COMMANDS: Array<{
 	{ name: "/diff", description: "Toggle the diff panel", blocking: false, hidden: true },
 	{ name: "/distill", description: "Package a repeated workflow as a reusable project artifact", blocking: true },
 	{ name: "/dream", description: "Consolidate durable project memory", blocking: true },
+	{ name: "/evolve", description: "Propose reusable skills for this project from the session", blocking: true },
 	{ name: "/help", description: "Show this command list", blocking: false },
 	{ name: "/hooks", description: "List/enable/disable hooks", takesArgs: true, blocking: false, hidden: true },
 	{ name: "/mcp", description: "Manage MCP servers", takesArgs: true, blocking: false, hidden: true },

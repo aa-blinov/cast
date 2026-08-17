@@ -173,6 +173,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/current", description: "Show all status bar data" },
 	{ name: "/distill", description: "Package a repeated workflow as a reusable project artifact" },
 	{ name: "/dream", description: "Consolidate durable project memory" },
+	{ name: "/evolve", description: "Propose reusable skills for this project from the session" },
 	{ name: "/exit", description: "Save and exit (alias for /quit)" },
 	{ name: "/fork", description: "Fork the current conversation into a new session" },
 	{ name: "/goal", description: "Work toward a goal autonomously until done — goal text", takesArgs: true },

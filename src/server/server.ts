@@ -1158,13 +1158,12 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		const ws = bridge.getSession(params.id);
 		if (!ws) return json(res, { error: "Not found" }, 404);
 		const body = await readBody(req);
-		let values: string[];
+		let values: Array<string | string[]>;
 		try {
 			const parsed = JSON.parse(body) as { values?: unknown };
-			values =
-				Array.isArray(parsed.values) && parsed.values.every((value) => typeof value === "string")
-					? parsed.values
-					: [];
+			const isValue = (v: unknown): v is string | string[] =>
+				typeof v === "string" || (Array.isArray(v) && v.every((x) => typeof x === "string"));
+			values = Array.isArray(parsed.values) && parsed.values.every(isValue) ? parsed.values : [];
 		} catch {
 			return json(res, { error: "Invalid JSON" }, 400);
 		}

@@ -32,7 +32,7 @@ vi.mock("../src/core/config.ts", async (importOriginal) => {
 	};
 });
 
-const { createServerBridge, SANDBOX_CWD, parseSuggestionJson, toDisplayMessages } = await import(
+const { createServerBridge, SANDBOX_CWD, parseEvolveJson, parseSuggestionJson, toDisplayMessages } = await import(
 	"../src/server/bridge.ts"
 );
 
@@ -241,6 +241,28 @@ describe("web bridge", () => {
 			name: "x",
 			description: "y",
 		});
+	});
+
+	it("parses the /evolve suggestion list, tolerating inline thinking and empty", () => {
+		expect(
+			parseEvolveJson(
+				'[{"name": "cut-a-release", "description": "Bump version and commit"}, {"name": "add-component", "description": "Scaffold a component with tests"}]',
+			),
+		).toEqual([
+			{ name: "cut-a-release", description: "Bump version and commit" },
+			{ name: "add-component", description: "Scaffold a component with tests" },
+		]);
+		// Empty array → nothing reusable.
+		expect(parseEvolveJson("[]")).toEqual([]);
+		expect(parseEvolveJson("")).toEqual([]);
+		// Inline chain-of-thought before the JSON array.
+		const inline =
+			' thinkingThe session cut a release.\n\n[{"name": "cut-a-release", "description": "Bump and commit"}]';
+		expect(parseEvolveJson(inline)).toEqual([{ name: "cut-a-release", description: "Bump and commit" }]);
+		// Items missing a name/description are dropped.
+		expect(parseEvolveJson('[{"name": "", "description": "x"}, {"name": "ok", "description": "y"}]')).toEqual([
+			{ name: "ok", description: "y" },
+		]);
 	});
 
 	it("runs settings commands without creating a visible session", async () => {

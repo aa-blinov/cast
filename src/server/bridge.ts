@@ -131,34 +131,6 @@ const WORKTREE_REMOVE_PREFIX_RE = /^(?:remove|rm)\s*(.*)$/;
 const MEMORY_WRITE_COMMAND_RE = /^write(?:\s+(on|off))?$/;
 const MEMORY_BUDGET_COMMAND_RE = /^budget\s+(\d+)$/;
 const MEMORY_FLOOR_COMMAND_RE = /^floor\s+(0(?:\.\d+)?|1(?:\.0)?)$/;
-// Post-turn "reusable procedure?" check for auto skill suggestions. Only
-// fires on substantial multi-step turns, and the eval prompt is explicitly
-// conservative, so it can't nag on every trivial action.
-const MIN_TOOL_CALLS_FOR_SKILL_SUGGESTION = 4;
-const SKILL_SUGGEST_SYSTEM_PROMPT =
-	"You decide whether a coding-agent turn performed a clearly reusable, multi-step procedure worth saving as a project skill. Be conservative. Always reply with valid JSON and nothing else.";
-const SKILL_SUGGEST_PROMPT = `Below is a transcript of one turn (assistant messages and tool results, newest last). Determine whether the turn performed a clearly reusable, multi-step procedure — a repeatable workflow like "run the dev server and verify it with curl", "add a component with tests", "cut a release" — as opposed to a one-off task or a trivial single action.
-
-Reply with exactly one of these two JSON objects, nothing else, no markdown:
-
-If reusable:
-{"name": "short-kebab-case-name", "description": "one sentence: when to use this procedure"}
-
-If not:
-{"name": null}
-
-Be conservative: only propose when a future session would genuinely benefit from following the same steps.
-
-<transcript>
-{{TRANSCRIPT}}
-</transcript>`;
-const SKILL_SUGGEST_GENERATE_PROMPT = `Write a concise Agent-Skills-style SKILL.md for the reusable procedure below. YAML frontmatter: name (kebab-case), description (one sentence, "Use when …"), then a short ordered list of steps. Keep it under 30 lines — every line is a recurring token cost once loaded. Base it on the actual steps performed:
-
-<procedure>
-{{PROCEDURE}}
-</procedure>
-
-Output only the SKILL.md file contents.`;
 const MEMORY_RECONCILE_COMMAND_RE = /^reconcile\s+(on|off)$/;
 const MEMORY_CHECKPOINT_FORK_COMMAND_RE = /^checkpoint\s+fork\s+(on|off)$/;
 const MEMORY_CHECKPOINT_THRESHOLDS_COMMAND_RE = /^checkpoint\s+thresholds\s+(.+)$/;
@@ -167,6 +139,23 @@ const MEMORY_CHECKPOINT_CAPS_COMMAND_RE = /^checkpoint\s+caps\s+(.+)$/;
 const MEMORY_AUTO_TOGGLE_COMMAND_RE = /^(dream|distill)\s+(on|off)$/;
 const MEMORY_AUTO_INTERVAL_COMMAND_RE = /^(dream|distill)\s+interval\s+(\d+)$/;
 const MEMORY_CANCEL_RUN_COMMAND_RE = /^cancel\s+([a-f0-9-]+)$/;
+const EVOLVE_SYSTEM_PROMPT =
+	"You analyze a coding-agent session and propose reusable project skills (SKILL.md) worth creating, grouped by the typical tasks this project keeps doing. Reply with valid JSON only.";
+const EVOLVE_PROMPT = `Below is a transcript of the current session (assistant messages and tool results, newest last), plus the project's typical tasks.
+
+Identify the recurring, reusable procedures this session performed that a future session in THIS project would genuinely benefit from following again — e.g. "run the dev server and verify with curl", "add a component with tests", "cut a release", "run a specific migration". Group each proposal around a typical task for this project.
+
+For each, reply with one object in a JSON array (nothing else, no markdown):
+[{"name": "short-kebab-case-name", "description": "one sentence: when to use this procedure in this project"}]
+
+Only include procedures that are clearly reusable and project-specific. If the session was one-off or nothing is reusable, reply with an empty array [].
+
+Project typical tasks:
+{{PROJECT}}
+
+<transcript>
+{{TRANSCRIPT}}
+</transcript>`;
 const CLIENT_PARITY_COMMANDS = new Set([
 	"/quit",
 	"/exit",
@@ -255,14 +244,6 @@ export interface WebAgentSession {
 	/** Current in-flight assistant blocks. Ephemeral: returned on reload, but
 	 * never persisted as transcript history and cleared when the turn settles. */
 	activeStream?: DisplayStreamBlock[];
-	/** A pending "save this as a skill?" suggestion from the post-turn check,
-	 * with the transcript captured so a confirmed save writes the exact turn. */
-	pendingSkillSuggestion?: { name: string; description: string; transcript: string };
-	/** The user declined a skill suggestion this session. Stop offering ANY
-	 * skill-save suggestions for the rest of the session: the eval's proposed
-	 * name is not stable (cut-a-release vs cut-release), so per-name tracking
-	 * can't stop the nagging the user explicitly asked to avoid. */
-	declinedSkillSuggestion: boolean;
 	listeners: Set<(event: WebEvent) => void>;
 	/** IDs accepted while this live session has queued work. Persisted user
 	 * messages are checked as well, so a lost HTTP response can be retried
@@ -461,6 +442,47 @@ export function parseSuggestionJson(content: string): { name: string; descriptio
 		}
 	}
 	return null;
+}
+
+/** /evolve suggestion: a reusable skill worth capturing for this project,
+ *  scoped to a typical task the session was doing. */
+export interface EvolveSkillSuggestion {
+	name: string;
+	description: string;
+}
+
+/** Parse the /evolve verdict. The model returns a JSON array of skill
+ *  suggestions (or an empty array); inline chain-of-thought before the JSON
+ *  is tolerated, matching parseSuggestionJson's robustness. */
+export function parseEvolveJson(content: string): EvolveSkillSuggestion[] {
+	const cleaned = content
+		.replace(/^```(?:json)?\s*/i, "")
+		.replace(/```\s*$/, "")
+		.trim();
+	const candidates = [cleaned];
+	const firstBrace = cleaned.indexOf("[");
+	const lastBrace = cleaned.lastIndexOf("]");
+	if (firstBrace >= 0 && lastBrace > firstBrace) candidates.push(cleaned.slice(firstBrace, lastBrace + 1));
+	for (const candidate of candidates) {
+		try {
+			const parsed = JSON.parse(candidate) as unknown;
+			if (Array.isArray(parsed)) {
+				return parsed
+					.filter(
+						(item): item is { name?: unknown; description?: unknown } =>
+							typeof item === "object" && item !== null,
+					)
+					.map((item) => ({
+						name: typeof item.name === "string" ? item.name.trim() : "",
+						description: typeof item.description === "string" ? item.description.trim() : "",
+					}))
+					.filter((item) => item.name && item.description);
+			}
+		} catch {
+			// Not JSON in this form — try the next candidate.
+		}
+	}
+	return [];
 }
 
 export function toDisplayMessages(
@@ -689,7 +711,10 @@ export interface ServerBridge {
 	/** Outstanding user questions, if the agent is waiting for choices. */
 	getQuestion(sessionId: string): PlanQuestion | undefined;
 	/** Records choices and resumes the same conversation in either mode. */
-	answerQuestion(sessionId: string, values: string[]): Promise<{ ok: true } | { ok: false; error: string }>;
+	answerQuestion(
+		sessionId: string,
+		values: Array<string | string[]>,
+	): Promise<{ ok: true } | { ok: false; error: string }>;
 	getPlanTransition(sessionId: string): { kind: "done" } | undefined;
 	resolvePlanTransition(sessionId: string, kind: "done"): { ok: true } | { ok: false; error: string };
 	/** Flip a session between plan/build mode. The TUI in daemon mode owns its
@@ -1004,7 +1029,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			error: null,
 			listeners: new Set(),
 			acceptedClientMessageIds: new Set(),
-			declinedSkillSuggestion: false,
 			systemPrompt: computeSystemPrompt(persona, model, sessionCwd),
 		};
 
@@ -1039,7 +1063,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			error: null,
 			listeners: new Set(),
 			acceptedClientMessageIds: new Set(),
-			declinedSkillSuggestion: false,
 			systemPrompt: computeSystemPrompt(persona, session.model, session.cwd ?? cwd, session.mode),
 		};
 		sessions.set(session.id, ws);
@@ -1316,9 +1339,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		const lease = ws.runner.startRun(ac);
 		const automaticMemoryMaintenance = ws.session.messages.length === 0;
 		const automaticMemoryMessages = ws.session.messages.slice();
-		// Tool calls this turn — gating the post-turn "reusable procedure?"
-		// skill suggestion so it only fires on substantial multi-step turns.
-		let toolCallsInTurn = 0;
 		ws.currentClientMessageId = clientMessageId;
 		ws.status = "running";
 		ws.error = null;
@@ -1326,14 +1346,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		syncFsWatcher(ws);
 		broadcast(ws, { type: "status", status: "running", startedAt: ws.turnStartedAt });
 		broadcastSessionUpdate(ws);
-		// A new user turn makes any pending skill-save confirmation stale — the
-		// user moved on instead of answering it. Close the picker and forget the
-		// suggestion, or the leftover question would intercept a later, unrelated
-		// answer as if it were the confirmation.
-		if (ws.pendingSkillSuggestion) {
-			ws.pendingSkillSuggestion = undefined;
-			if (ws.session.planQuestion) persistDecisionState(ws, undefined, ws.session.planTransition);
-		}
 		let chk: ReturnType<typeof createCheckpoint>;
 		const failSetup = (error: unknown): void => {
 			ws.status = "error";
@@ -1599,7 +1611,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 						const t = event as { id: string; name: string; result: { isError?: boolean } };
 						const started = toolStartTimes.get(t.id);
 						toolStartTimes.delete(t.id);
-						toolCallsInTurn += 1;
 						recordToolCall(
 							ws.id,
 							t.name,
@@ -1843,13 +1854,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				});
 				broadcastSessionUpdate(ws);
 				startQueuedFollowUps(sessionId, ws);
-				// Post-turn "reusable procedure?" check — only on substantial
-				// multi-step turns, and the eval is conservative + user-confirmed.
-				if (toolCallsInTurn >= MIN_TOOL_CALLS_FOR_SKILL_SUGGESTION) {
-					void suggestReusableSkill(ws, finalMessages).catch((err: unknown) => {
-						console.error("[skill-suggest] eval failed:", err);
-					});
-				}
 			})
 			.catch((err: unknown) => {
 				ws.status = "error";
@@ -1901,86 +1905,109 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		}
 	}
 
-	/** Post-turn check: if the turn clearly did a reusable multi-step procedure,
-	 * suggest saving it as a project skill. Fire-and-forget; the eval prompt is
-	 * conservative and the gate (tool-call count, name-exists, once-per-session)
-	 * keeps it from nagging. The confirmation reuses the existing question
-	 * picker (the `question` tool's PlanQuestion pipeline) in both the TUI and
-	 * the web UI — no new confirmation surface to build or maintain. */
-	async function suggestReusableSkill(ws: WebAgentSession, messages: Message[]): Promise<void> {
-		if (ws.status === "error") return;
-		// The user already declined a suggestion this session — stop offering
-		// and don't even burn the eval call.
-		if (ws.declinedSkillSuggestion) return;
-		// A real question from the model is pending (turn ended on the question
-		// tool) — never clobber it with our own.
-		if (ws.session.planQuestion) return;
-		const transcript = compactTurnTranscript(messages);
-		if (transcript.trim().length === 0) return;
-		const resp = await runCompactLlm(
-			SKILL_SUGGEST_SYSTEM_PROMPT,
-			SKILL_SUGGEST_PROMPT.replace("{{TRANSCRIPT}}", transcript),
-			512,
-		);
-		if (!resp) return;
-		const suggestion = parseSuggestionJson(resp.content);
-		if (!suggestion) return;
-		// Guard against re-proposing / overwriting an existing skill.
-		const name = suggestion.name
+	function normalizeSkillName(name: string): string {
+		return name
 			.toLowerCase()
 			.replace(/[^a-z0-9-_]+/g, "-")
 			.replace(/^-+|-+$/g, "");
-		if (!name || skillExists(ws.session.cwd ?? cwd, name)) return;
-		if (ws.pendingSkillSuggestion?.name === name) return;
-		ws.pendingSkillSuggestion = { name, description: suggestion.description, transcript };
-		const confirm: PlanQuestion = {
-			questions: [
-				{
-					question: "Save reusable procedure as a skill?",
-					options: [
-						{ value: "save", label: `Save as /${name}`, description: suggestion.description },
-						{ value: "dismiss", label: "Dismiss" },
-					],
-					// No `recommended`: "Save as /name" is already first (default
-					// cursor/selection) and the " (recommended)" suffix is noise
-					// for a yes/no the user must consciously choose.
-					noFreeForm: true,
-				},
-			],
-		};
-		persistDecisionState(ws, confirm, ws.session.planTransition);
 	}
 
-	function skillExists(sessionCwd: string, name: string): boolean {
-		const candidates = [
-			join(homedir(), ".cast", "skills", name, "SKILL.md"),
-			join(sessionCwd, ".cast", "skills", name, "SKILL.md"),
-		];
-		return candidates.some((p) => existsSync(p));
+	/** Safe-name the skill and write its SKILL.md to the project's
+	 *  `.cast/skills/<name>/`. Mirrors the project-level skill location the
+	 *  `/skills` command and skill loader already use. */
+	function writeSkillFile(sessionCwd: string, name: string, body: string): void {
+		const dir = join(sessionCwd, ".cast", "skills", name);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "SKILL.md"), `${body}\n`, "utf-8");
 	}
 
-	/** Generate and write `.cast/skills/<name>/SKILL.md` from a captured turn. */
-	async function writeSkillFromPending(ws: WebAgentSession): Promise<string | null> {
-		const pending = ws.pendingSkillSuggestion;
-		if (!pending) return null;
-		const transcript = pending.transcript;
+	/** Ask the model to flesh out a full SKILL.md for a named procedure based
+	 *  on the session transcript. Returns the body (with YAML frontmatter). */
+	async function generateSkillBody(name: string, description: string, messages: Message[]): Promise<string | null> {
+		const transcript = compactTurnTranscript(messages);
 		const resp = await runCompactLlm(
-			"Write a concise reusable-procedure skill for a coding agent.",
-			SKILL_SUGGEST_GENERATE_PROMPT.replace("{{PROCEDURE}}", transcript),
+			'Write a concise Agent-Skills-style SKILL.md for a reusable project procedure. YAML frontmatter: name (kebab-case), description (one sentence, "Use when …"). Then a short ordered list of steps. Keep it under 30 lines — every line is a recurring token cost once loaded. Output only the SKILL.md file contents.',
+			`Skill name: ${name}\nSkill description: ${description}\n\nProcedure performed in the session:\n\n${transcript}`,
 			800,
 		);
 		if (!resp) return null;
-		const body = resp.content
+		let body = resp.content
 			.replace(/^```[^\n]*\n/, "")
 			.replace(/```\s*$/, "")
 			.trim();
 		if (!body) return null;
-		const sessionCwd = ws.session.cwd ?? cwd;
-		const dir = join(sessionCwd, ".cast", "skills", pending.name);
-		mkdirSync(dir, { recursive: true });
-		writeFileSync(join(dir, "SKILL.md"), `${body}\n`, "utf-8");
-		ws.pendingSkillSuggestion = undefined;
-		return pending.name;
+		// If the model already emitted YAML frontmatter, leave it as-is.
+		if (!body.startsWith("---")) {
+			body = `---\nname: ${name}\ndescription: ${description}\n---\n\n${body}`;
+		}
+		return body;
+	}
+
+	/** /evolve: analyze the session + typical project tasks, propose reusable
+	 *  skills, and (via the answer path) write the chosen ones. Returns a
+	 *  multi-select question for the picker, or a notice if nothing reusable
+	 *  was found. */
+	async function evolveSkills(ws: WebAgentSession): Promise<{ ok: boolean; result?: string; error?: string }> {
+		if (ws.status === "running") return { ok: false, error: "Agent running" };
+		const transcript = compactTurnTranscript(ws.session.messages);
+		if (transcript.trim().length === 0) return { ok: false, error: "Session is empty — nothing to evolve from." };
+		const project = projectTypicalTasks(ws.session.cwd ?? cwd);
+		const resp = await runCompactLlm(
+			EVOLVE_SYSTEM_PROMPT,
+			EVOLVE_PROMPT.replace("{{PROJECT}}", project).replace("{{TRANSCRIPT}}", transcript),
+			800,
+		);
+		if (!resp) return { ok: false, error: "Could not analyze the session." };
+		const suggestions = parseEvolveJson(resp.content)
+			.map((s) => ({ ...s, name: normalizeSkillName(s.name) }))
+			.filter((s) => s.name && !skillExistsAnywhere(ws.session.cwd ?? cwd, s.name));
+		if (suggestions.length === 0) {
+			return { ok: true, result: "No reusable project skills to create from this session." };
+		}
+		const confirm: PlanQuestion = {
+			questions: [
+				{
+					question: "Which skills should I create for this project?",
+					options: suggestions.map((s) => ({
+						value: s.name,
+						label: `/${s.name}`,
+						description: s.description,
+					})),
+					multi: true,
+				},
+			],
+		};
+		persistDecisionState(ws, confirm, ws.session.planTransition);
+		return { ok: true };
+	}
+
+	/** A short digest of this project's typical tasks, derived from existing
+	 *  skills and rules, to ground /evolve's suggestions. Falls back to the
+	 *  cwd name. */
+	function projectTypicalTasks(sessionCwd: string): string {
+		const roots = [
+			join(homedir(), ".cast", "skills"),
+			join(sessionCwd, ".cast", "skills"),
+			join(sessionCwd, ".agents", "skills"),
+		];
+		const names: string[] = [];
+		for (const root of roots) {
+			if (!existsSync(root)) continue;
+			for (const entry of readdirSync(root, { withFileTypes: true })) {
+				if (entry.isDirectory() && existsSync(join(root, entry.name, "SKILL.md"))) names.push(entry.name);
+			}
+		}
+		return names.length > 0 ? names.join(", ") : basename(sessionCwd) || sessionCwd;
+	}
+
+	/** True if a skill with this name exists at any project/global location. */
+	function skillExistsAnywhere(sessionCwd: string, name: string): boolean {
+		const candidates = [
+			join(homedir(), ".cast", "skills", name, "SKILL.md"),
+			join(sessionCwd, ".cast", "skills", name, "SKILL.md"),
+			join(sessionCwd, ".agents", "skills", name, "SKILL.md"),
+		];
+		return candidates.some((p) => existsSync(p));
 	}
 
 	function abort(sessionId: string): void {
@@ -2054,7 +2081,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 
 	async function answerQuestion(
 		sessionId: string,
-		values: string[],
+		values: Array<string | string[]>,
 	): Promise<{ ok: true } | { ok: false; error: string }> {
 		const ws = sessions.get(sessionId);
 		if (!ws) return { ok: false, error: "Session not found" };
@@ -2072,34 +2099,33 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		if (values.length !== question.questions.length)
 			return { ok: false, error: "An answer is required for every question" };
 
-		// Skill-confirm intercept: this is our own post-turn "save reusable
-		// procedure?" question, offered through the same picker the `question`
-		// tool uses — not a question the model asked. Answer it in place (write
-		// the skill or discard it) instead of feeding a synthetic
+		// /evolve intercept: a multi-select "which skills to create?" question
+		// that we offered. Each value is an array of chosen option values; write
+		// the matching skill files in place instead of feeding a synthetic
 		// "Question:/Answer:" turn back to the model.
-		const pendingSkill = ws.pendingSkillSuggestion;
-		const isSkillConfirm =
-			pendingSkill !== undefined &&
-			question.questions.length === 1 &&
-			question.questions[0].options.some((option) => option.value === "save") &&
-			question.questions[0].options.some((option) => option.value === "dismiss");
-		if (isSkillConfirm) {
+		const isEvolveQuestion = question.questions.length === 1 && question.questions[0].multi === true;
+		if (isEvolveQuestion) {
+			const item = question.questions[0];
+			const chosen = Array.isArray(values[0]) ? (values[0] as string[]) : [];
 			resolvePlanQuestion(planState);
-			if (values[0] === "save") {
-				const saved = await writeSkillFromPending(ws);
-				if (!saved) {
-					broadcast(ws, { type: "notice", message: "Could not generate the skill." });
-					return { ok: false, error: "Could not generate the skill." };
-				}
-				broadcast(ws, { type: "notice", message: `Saved reusable procedure as skill /${saved}.` });
+			const created: string[] = [];
+			for (const value of chosen) {
+				const option = item.options.find((o) => o.value === value);
+				if (!option) continue;
+				const name = normalizeSkillName(option.value);
+				if (!name) continue;
+				const body = await generateSkillBody(name, option.description ?? "", ws.session.messages);
+				if (!body) continue;
+				writeSkillFile(ws.session.cwd ?? cwd, name, body);
+				created.push(name);
+			}
+			if (created.length > 0) {
+				broadcast(ws, {
+					type: "notice",
+					message: `Created ${created.length} skill${created.length > 1 ? "s" : ""}: ${created.map((n) => `/${n}`).join(", ")}.`,
+				});
 			} else {
-				// The user chose not to save — stop offering suggestions for the
-				// rest of the session. The eval's name is unstable between runs
-				// (cut-a-release vs cut-release), so only a session-wide stop
-				// guarantees it can't re-pop ("не на каждый чих").
-				ws.declinedSkillSuggestion = true;
-				ws.pendingSkillSuggestion = undefined;
-				broadcast(ws, { type: "notice", message: "Skill suggestion dismissed." });
+				broadcast(ws, { type: "notice", message: "No skills created." });
 			}
 			return { ok: true };
 		}
@@ -2111,8 +2137,15 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// way and use the option's `label` for display when it matches, falling
 		// back to the raw value when it doesn't.
 		const rendered = question.questions.map((item, index) => {
-			const match = item.options.find((option) => option.value === values[index]);
-			const display = match?.label ?? values[index];
+			const v = values[index];
+			if (Array.isArray(v)) {
+				const labels = v
+					.map((value) => item.options.find((option) => option.value === value)?.label ?? value)
+					.join(", ");
+				return `Question: ${item.question} Answer: ${labels}`;
+			}
+			const match = item.options.find((option) => option.value === v);
+			const display = match?.label ?? v;
 			return `Question: ${item.question} Answer: ${display}`;
 		});
 
@@ -2268,7 +2301,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			error: null,
 			listeners: new Set(),
 			acceptedClientMessageIds: new Set(),
-			declinedSkillSuggestion: false,
 			systemPrompt: computeSystemPrompt(persona, session.model, session.cwd ?? cwd, session.mode),
 		};
 		sessions.set(session.id, ws);
@@ -2648,6 +2680,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			}
 			updateSettings({ maxTurnIterations: n });
 			return { ok: true, result: `Turn iteration safety cap set to ${n} (applies on the next turn).` };
+		}
+		if (name === "/evolve") {
+			return await evolveSkills(ws);
 		}
 		if (name === "/rules") {
 			return {

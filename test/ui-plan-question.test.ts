@@ -5,11 +5,21 @@ import { resolvePlanQuestionWithPicker } from "../src/ui/plan-question.ts";
 
 /** A fake Pickers that hands back a queued answer to each call. The first
  *  call to pickOption pulls from `options`, the first promptText pull from
- *  `texts`, then null thereafter (simulating user cancel). */
-function fakePickers({ options, texts }: { options: (string | null)[]; texts?: (string | null)[] }) {
+ *  `texts`, the first pickMulti pull from `multi`, then null thereafter
+ *  (simulating user cancel). */
+function fakePickers({
+	options,
+	texts,
+	multi,
+}: {
+	options: (string | null)[];
+	texts?: (string | null)[];
+	multi?: (string[] | null)[];
+}) {
 	const oQueue = [...options];
 	const tQueue = [...(texts ?? [])];
-	const calls = { pickOption: 0, promptText: 0 };
+	const mQueue = [...(multi ?? [])];
+	const calls = { pickOption: 0, promptText: 0, pickMulti: 0 };
 	return {
 		picker: {
 			pickOption: async (_opts: unknown[], _meta: unknown) => {
@@ -19,6 +29,10 @@ function fakePickers({ options, texts }: { options: (string | null)[]; texts?: (
 			promptText: async (_label: string, _defaultValue?: string, _placeholder?: string) => {
 				calls.promptText += 1;
 				return tQueue.shift() ?? null;
+			},
+			pickMulti: async (_opts: unknown[], _meta: unknown) => {
+				calls.pickMulti += 1;
+				return mQueue.shift() ?? null;
 			},
 			log: () => {},
 		} as unknown as Pickers,
@@ -146,5 +160,36 @@ describe("resolvePlanQuestionWithPicker", () => {
 		const result = await resolvePlanQuestionWithPicker(confirm, picker);
 		expect(result).toEqual({ answers: ["save"], sources: ["option"] });
 		expect(offered?.map((o) => o.value)).toEqual(["save", "dismiss"]);
+	});
+
+	it("collects several options for a multi-select question via pickMulti", async () => {
+		const multi: PlanQuestion = {
+			questions: [
+				{
+					question: "Which skills to create?",
+					options: [
+						{ value: "release", label: "Release" },
+						{ value: "component", label: "Component" },
+						{ value: "verify", label: "Verify" },
+					],
+					multi: true,
+				},
+			],
+		};
+		const { picker, calls } = fakePickers({ options: [], multi: [["release", "verify"]] });
+		const result = await resolvePlanQuestionWithPicker(multi, picker);
+		expect(result).toEqual({ answers: [["release", "verify"]], sources: ["multi"] });
+		expect(calls.pickMulti).toBe(1);
+		expect(calls.pickOption).toBe(0);
+	});
+
+	it("cancels a multi-select question (null) returns null without creating anything", async () => {
+		const multi: PlanQuestion = {
+			questions: [{ question: "Which?", options: [{ value: "a", label: "A" }], multi: true }],
+		};
+		const { picker, calls } = fakePickers({ options: [], multi: [null] });
+		const result = await resolvePlanQuestionWithPicker(multi, picker);
+		expect(result).toBeNull();
+		expect(calls.pickMulti).toBe(1);
 	});
 });

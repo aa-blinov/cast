@@ -108,6 +108,10 @@ export interface QuestionItem {
 	 * are exhaustive (e.g. our post-turn skill-save confirmation) and a custom
 	 * answer would be misinterpreted by the answer consumer. */
 	noFreeForm?: boolean;
+	/** UI-only: allow selecting several options at once (e.g. /evolve "which
+	 * skills to create"). TUI uses pickMulti, web renders toggle rows, and the
+	 * answer carries an array of selected values. */
+	multi?: boolean;
 }
 
 export interface PlanQuestion {

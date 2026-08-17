@@ -284,7 +284,11 @@ export async function setServerMode(client: ServerClient, sessionId: string, mod
 }
 
 /** Answer a pending question on a daemon session. */
-export async function answerServerQuestion(client: ServerClient, sessionId: string, values: string[]): Promise<void> {
+export async function answerServerQuestion(
+	client: ServerClient,
+	sessionId: string,
+	values: Array<string | string[]>,
+): Promise<void> {
 	const { status } = await serverFetch(client, `${API_V1_PREFIX}/sessions/${sessionId}/question`, {
 		method: "POST",
 		body: { values },
