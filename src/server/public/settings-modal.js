@@ -114,8 +114,14 @@ export function SettingsModal({
 					},
 				}));
 			} else if (t === "bash") {
-				const permissions = await run("/permissions");
-				commit((d) => ({ ...d, bash: { permissions: permissions?.result } }));
+				// /current carries maxTurnIterations (turnIterationCap); the cap
+				// input must reflect the real value or a save looks like it never
+				// happened (the field keeps showing 500).
+				const [permissions, current] = await Promise.all([run("/permissions"), run("/current")]);
+				commit((d) => ({
+					...d,
+					bash: { permissions: permissions?.result, maxTurnIterations: current?.result?.maxTurnIterations },
+				}));
 			} else if (t === "web") {
 				const [webTools, searchProvider, fetchProvider] = await Promise.all([
 					run("/web"),
@@ -232,9 +238,20 @@ export function SettingsModal({
 			try {
 				const res = await run(command);
 				if (!res.ok) setErrors((e) => ({ ...e, [tab]: res.error ?? "Failed" }));
-				// Always refresh the Model tab too: a /provider Switch changes the
-				// active provider, which the Model picker's model list depends on.
-				await Promise.all([load(actionTab), actionTab === "model" ? Promise.resolve() : load("model")]);
+				// Refresh the current tab, and the Model tab too when the command
+				// actually affects it (a /provider Switch changes the active
+				// provider, which the Model picker's model list depends on).
+				// Non-model saves (Bash cap, memory numbers) skip the extra round
+				// trip so the input doesn't stay disabled waiting on unrelated
+				// fetches — that latency read as "медлаей" on every numeric field.
+				const affectsModel =
+					actionTab === "model" ||
+					actionTab === "provider" ||
+					/^\/(provider|model|model-selection|reasoning)\b/.test(command);
+				await Promise.all([
+					load(actionTab),
+					affectsModel && actionTab !== "model" ? load("model") : Promise.resolve(),
+				]);
 				// /reload and any /skills mutation can change which skills are
 				// loaded/enabled — those show up as native /<skill-id> slash commands,
 				// so the composer's palette needs to catch up too.
