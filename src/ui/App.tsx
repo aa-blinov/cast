@@ -905,7 +905,9 @@ function StatusBar(
 	const [, forceTick] = useState(0);
 	useEffect(() => {
 		if (turnStartedAt === null) return;
-		const id = setInterval(() => forceTick((n) => n + 1), 200);
+		// 100ms — a 0.1s-quantum counter reads as continuous instead of a
+		// 200ms jump between tenths.
+		const id = setInterval(() => forceTick((n) => n + 1), 100);
 		return () => clearInterval(id);
 	}, [turnStartedAt]);
 

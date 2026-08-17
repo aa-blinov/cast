@@ -71,6 +71,18 @@ describe("parseDaemonPendingState", () => {
 		});
 	});
 
+	it("surfaces the backend turnStartedAt so the elapsed timer resumes across reconnect", () => {
+		expect(
+			parseDaemonPendingState({
+				status: "running",
+				turnStartedAt: 1789000000123,
+			}),
+		).toEqual({
+			status: "running",
+			startedAt: 1789000000123,
+		});
+	});
+
 	it("fetches persisted decisions from the daemon when no SSE event was observed", async () => {
 		const fetchMock = vi.fn(
 			async () =>
