@@ -176,6 +176,7 @@ export function parseDaemonPendingState(state: Record<string, unknown>): {
 	question: PlanQuestion | undefined;
 	planTransition: PlanTransition | undefined;
 	status: AgentStatus | undefined;
+	startedAt: number | undefined;
 } {
 	const question = state.question;
 	const planTransition = state.planTransition;
@@ -190,6 +191,7 @@ export function parseDaemonPendingState(state: Record<string, unknown>): {
 				? { kind: "done" }
 				: undefined,
 		status: status === "idle" || status === "running" || status === "error" ? status : undefined,
+		startedAt: typeof state.turnStartedAt === "number" ? state.turnStartedAt : undefined,
 	};
 }
 
@@ -594,6 +596,12 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	// this hook re-rendering App every 200ms (see ElapsedSegment in App.tsx).
 	const [turnStartedAt, setTurnStartedAt] = useState<number | null>(null);
 	const turnStartRef = useRef(0);
+	// Backend-authoritative turn start (daemon mode). The status event / hydrate
+	// carry the daemon's `startedAt`; the timer must anchor to it so a reconnect
+	// or page reload resumes the original request instead of resetting to 0
+	// (the web timer already does this via elapsed-timer.js — the TUI had been
+	// restarting from the client's local clock instead).
+	const backendStartRef = useRef<number | null>(null);
 	// Frozen elapsed time of the last completed turn, for synchronous reads
 	// (e.g. /current) once the turn has ended.
 	const frozenElapsedRef = useRef(0);
@@ -670,7 +678,10 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	// App (and the composer under it) to re-render every 200ms.
 	useEffect(() => {
 		if (status === "running") {
-			turnStartRef.current = Date.now();
+			// The daemon's timestamp wins when it supplied one (fresh anchor for
+			// this turn); local mode has none, so fall back to the local clock.
+			turnStartRef.current = backendStartRef.current ?? Date.now();
+			backendStartRef.current = null;
 			setTurnStartedAt(turnStartRef.current);
 		} else if (turnStartRef.current) {
 			frozenElapsedRef.current = Date.now() - turnStartRef.current;
@@ -1392,7 +1403,10 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				if (disposed) return;
 				setPendingQuestion(pending.question);
 				setPendingPlanTransition(pending.planTransition);
-				if (pending.status) setStatus(pending.status);
+				if (pending.status) {
+					backendStartRef.current = pending.startedAt ?? null;
+					setStatus(pending.status);
+				}
 			})
 			.catch(() => {});
 		return () => {
@@ -1444,7 +1458,10 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 						if (disposed) return;
 						setPendingQuestion(pending.question);
 						setPendingPlanTransition(pending.planTransition);
-						if (pending.status) setStatus(pending.status);
+						if (pending.status) {
+							backendStartRef.current = pending.startedAt ?? null;
+							setStatus(pending.status);
+						}
 					})
 					.catch(() => {});
 			}
@@ -1507,6 +1524,10 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					});
 					break;
 				case "status":
+					// The daemon's startedAt is authoritative for the elapsed
+					// counter — take it over the local clock (fresh reconnect
+					// resume, not a reset to zero).
+					if (typeof event.startedAt === "number") backendStartRef.current = event.startedAt;
 					setStatus(event.status);
 					if (event.status === "running") {
 						setStreamingActive(true);
