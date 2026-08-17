@@ -189,9 +189,9 @@ export function discoverSkillsForCwd(deps: ProjectResolverDeps, cwd: string, tru
 	const skillsResult = loadSkills(
 		skillLoadOptionsForCwd(cwd, trusted, { noSkills: deps.noSkills, cliSkillPaths: deps.cliSkillPaths }),
 	);
-	for (const diagnostic of skillsResult.diagnostics) {
-		console.log(`[skill warning] ${diagnostic.path}: ${diagnostic.message}`);
-	}
+	// Diagnostics are intentionally not printed here: this runs in the TUI
+	// process too, where a raw console.log writes into Ink's managed frame and
+	// tears the layout. Callers surface warnings through the UI instead.
 	return skillsResult.skills;
 }
 
@@ -308,7 +308,9 @@ export async function resolveMcpForCwd(
 	const result = await connectMcpServers(filtered);
 	result.allServerNames = allNames.sort((a, b) => a.localeCompare(b));
 	result.serverSources = serverSources;
-	for (const diagnostic of result.diagnostics) console.log(`[mcp warning] ${diagnostic}`);
+	// Diagnostics are intentionally not printed here: this runs in the TUI
+	// process too, where a raw console.log writes into Ink's managed frame and
+	// tears the layout. Callers surface warnings through the UI instead.
 	return result;
 }
 
