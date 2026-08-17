@@ -1528,10 +1528,9 @@ export function migrateLegacySessionsToDb(): number {
 				insertRow.run(session.id, seq, randomUUID(), m.role, JSON.stringify(m), isToolCallOnly(m) ? 1 : 0);
 			});
 		} catch (err) {
-			// Log and continue — one malformed file shouldn't poison the rest.
-			console.warn(
-				`[cast] skipping legacy session ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
-			);
+			// Skip one malformed file without poisoning the rest. Not logged via
+			// console (it would tear the TUI frame) — silent here.
+			void err;
 			continue;
 		}
 		existing.add(session.id);
