@@ -2,6 +2,25 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.2
+
+### Fixed
+
+- **Settings numeric fields (web UI).** The turn safety cap on the Bash tab
+  always showed 500 even after saving — it never read the real value, so a
+  save looked like it never happened. Now it shows the actual cap. Numeric
+  fields in Settings (Bash cap + all Memory numbers: dream/distill interval,
+  prompt budget, search floor, checkpoint reserved) also felt laggy and
+  couldn't be fully erased — a cleared field snapped back to the current
+  value. Editing now works in one pass, and number steppers are visible
+  again. The Settings modal also stops force-refreshing the Model tab on
+  every save (which was part of the lag).
+- **TUI elapsed timer.** In daemon mode the status-bar counter restarted from
+  the client's local clock on every reconnect or reload mid-turn, resetting
+  to zero instead of resuming. It now anchors to the daemon's authoritative
+  start time (matching the web timer), and ticks at 100ms so the counter
+  reads continuously rather than jumping between tenths.
+
 ## 0.22.1
 
 ### Added
