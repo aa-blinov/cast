@@ -287,8 +287,9 @@ export interface UseAgentSession {
 	pendingQuestion: PlanQuestion | undefined;
 	/** Pending plan approval restored from the daemon on reconnect. */
 	pendingPlanTransition: PlanTransition | undefined;
-	/** Submit answers to the daemon's pending question (thin-client mode). */
-	answerQuestion: (values: string[]) => void;
+	/** Submit answers to the daemon's pending question (thin-client mode). A
+	 *  multi-select question carries an array of chosen values. */
+	answerQuestion: (values: Array<string | string[]>) => void;
 	/** Resolve the daemon's pending plan approval (thin-client mode). */
 	approvePlan: () => void;
 	/** Sync the session's plan/build mode to the daemon (thin-client mode). */
@@ -1765,7 +1766,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	// does. No-ops in local mode — the App branches on daemonUrl and keeps the
 	// planState path there.
 	const answerQuestion = useCallback(
-		(values: string[]) => {
+		(values: Array<string | string[]>) => {
 			if (isClient && effectiveDaemonUrl) {
 				if (!serverClient) return;
 				void answerServerQuestion(serverClient, session.id, values)

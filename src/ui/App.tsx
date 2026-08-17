@@ -553,11 +553,18 @@ export function App(props: AppProps): JSX.Element {
 						setPendingAutoSubmit({
 							text: question.questions
 								.map((item, index) => {
+									const ans = answers[index];
 									if (sources[index] === "free-form") {
-										return `Question: ${item.question} Answer: ${answers[index]}`;
+										return `Question: ${item.question} Answer: ${ans}`;
 									}
-									const selected = item.options.find((option) => option.value === answers[index]);
-									return `Question: ${item.question} Answer: ${selected?.label ?? answers[index]}`;
+									if (Array.isArray(ans)) {
+										const labels = ans
+											.map((v) => item.options.find((option) => option.value === v)?.label ?? v)
+											.join(", ");
+										return `Question: ${item.question} Answer: ${labels}`;
+									}
+									const selected = item.options.find((option) => option.value === ans);
+									return `Question: ${item.question} Answer: ${selected?.label ?? ans}`;
 								})
 								.join("\n"),
 							wantPlanMode: planMode,

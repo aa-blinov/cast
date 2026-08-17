@@ -20,25 +20,42 @@ import type { Pickers } from "../pickers/types.ts";
 const FREE_FORM = "__other__";
 
 export interface ResolveResult {
-	answers: string[];
-	/** Map of question index → "option" (model-picked) or "free-form"
-	 *  (custom text). Useful for the prompt-template substitution that the
-	 *  bridge performs when composing the auto-submit message. */
-	sources: Array<"option" | "free-form">;
+	/** One value per question; a multi-select question yields an array of the
+	 *  selected option values. */
+	answers: Array<string | string[]>;
+	/** Map of question index → "option" (model-picked), "multi" (several
+	 *  picked), or "free-form" (custom text). Useful for the prompt-template
+	 *  substitution that the bridge performs when composing the auto-submit
+	 *  message. */
+	sources: Array<"option" | "multi" | "free-form">;
 }
 
 /** Walk every question, get a value via pickOption (with the free-form
- *  sentinel), optionally falling through to promptText. Returns null on user
- *  cancel (Esc) at any point — the caller decides whether that's an abort
- *  or a retry. */
+ *  sentinel) or pickMulti for multi-select questions, optionally falling
+ *  through to promptText. Returns null on user cancel (Esc) at any point —
+ *  the caller decides whether that's an abort or a retry. */
 export async function resolvePlanQuestionWithPicker(
 	question: PlanQuestion,
 	pickers: Pickers,
 ): Promise<ResolveResult | null> {
-	const answers: string[] = [];
-	const sources: Array<"option" | "free-form"> = [];
+	const answers: Array<string | string[]> = [];
+	const sources: Array<"option" | "multi" | "free-form"> = [];
 	for (const item of question.questions) {
-		// biome-ignore lint/performance/noAwaitInLoops: sequential user interaction
+		if (item.multi) {
+			// biome-ignore lint/performance/noAwaitInLoops: sequential user interaction
+			const picked = await pickers.pickMulti(
+				item.options.map((option) => ({
+					value: option.value,
+					label: `${option.label}${option.value === item.recommended ? " (recommended)" : ""}`,
+					...(option.description ? { description: option.description } : {}),
+				})),
+				{ title: item.question },
+			);
+			if (picked === null) return null;
+			answers.push(picked);
+			sources.push("multi");
+			continue;
+		}
 		const choice = await pickers.pickOption(
 			[
 				...item.options.map((option) => ({
