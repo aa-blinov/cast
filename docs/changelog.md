@@ -2,6 +2,32 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.4
+
+### Fixed
+
+- **TUI input died after `/reload` and MCP reconnect commands.** Re-resolving
+  skills/MCP/personas could leave Ink's stdin unref'd and its readable
+  listener dropped, so keystrokes echoed below the composer instead of
+  entering it — only a terminal resize recovered. `/reload`, `/mcp
+  enable|disable|uninstall`, and session switches now run a no-op suspension
+  so Ink's `resumeInput` reinstates stdin (the same path a resize takes).
+- **No more `^[[6;1R` / screen-jump on `/mcp`.** The suspension cancels the
+  in-flight cursor-position query (whose reply echoed as visible garbage once
+  raw mode dropped) and no longer clears the screen, which made it visibly
+  jump.
+
+### Changed
+
+- **Composer lost its box border.** The round frame was cosmetic and could
+  paint from a stale cursor position after resyncs, showing as a torn
+  `╭──╭──` line. It's replaced by a thin border-free ruled divider above the
+  composer and above the status bar, and the prompt arrow sits at column 0.
+- **Raw `console.log` from core code no longer tears the TUI layout.** Skill/
+  MCP warnings and a legacy-session warning were printed straight to stdout
+  from code that also runs in the TUI process, breaking Ink's frame; they're
+  now returned through the UI instead.
+
 ## 0.22.3
 
 ### Added
