@@ -2204,17 +2204,16 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			return;
 		}
 
-		const reasoningFormat = await selectReasoningFormat(deps.pickers);
-		if (!reasoningFormat) {
-			showNotice("[Cancelled]");
-			return;
-		}
-		const newProvider: Provider = { name, url, apiKey: key, reasoningFormat };
+		// Reasoning protocol is auto-detected from the URL (resolveReasoningFormat)
+		// and enriched per-model from models.dev — no manual pick on add. Custom
+		// formats for unusual/proxy endpoints can be set afterwards via
+		// `/provider <name> reasoning <format>`.
+		const newProvider: Provider = { name, url, apiKey: key };
 		const candidate = {
 			...config,
 			baseURL: url,
 			apiKey: key,
-			reasoningFormat: resolveReasoningFormat(url, reasoningFormat),
+			reasoningFormat: resolveReasoningFormat(url),
 		};
 		showNotice(`[Provider "${name}" verified. Select a model and reasoning mode.]`);
 		const selection = await selectModelWithReasoning(candidate, deps.pickers);

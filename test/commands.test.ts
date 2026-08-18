@@ -1230,8 +1230,9 @@ describe("/provider", () => {
 			},
 			pickOption: async (options) => {
 				pickStep++;
-				if (pickStep === 1) return "auto";
-				if (pickStep === 2) return options[0]!.value;
+				// First pick is the model list (the reasoning-protocol step was
+				// removed — format is auto-detected now); then the reasoning level.
+				if (pickStep === 1) return options[0]!.value;
 				return "off";
 			},
 			pickMulti: async () => null,
