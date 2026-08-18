@@ -2,6 +2,23 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.5
+
+### Changed
+
+- **Provider reasoning protocol is auto-detected, not hand-picked.** Adding a
+  provider no longer asks you to pick a "Reasoning protocol" in the TUI — it's
+  detected from the URL (`openrouter`, `deepseek`, `qwen`, `minimax`, …) and
+  enriched per-model from models.dev, matching the web form. For proxy or
+  aggregator endpoints the detector can't recognize, set it explicitly with
+  `/provider <name> reasoning <format>` (or `auto` to reset to detection).
+- **`/provider add` just saves the provider.** It no longer forces the new
+  provider active and runs the model/reasoning picker (which made adding a
+  second provider a surprising one-shot). It now matches the web form: verify
+  and save; activate and pick a model later via the Model tab or
+  `/provider <name>`. The only exception is the very first provider with no
+  active endpoint, which becomes the default so there's something to talk to.
+
 ## 0.22.4
 
 ### Fixed
