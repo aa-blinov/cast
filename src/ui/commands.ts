@@ -72,6 +72,7 @@ import {
 	uninstallUserSkill,
 } from "../core/skills.ts";
 import { resolveSshHosts, type SshHost, saveSshConfig, scanSshKeys, validateKeyPermissions } from "../core/ssh.ts";
+import { suspendAndRun } from "../core/stdin-manager.ts";
 import {
 	buildReasoningParams,
 	getDefaultReasoningLevel,
@@ -1979,6 +1980,11 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		deps.setMcpResult(
 			await resolveMcpForCwd(deps.projectDeps, deps.cwd, trusted, loadSettings().disabledMcpServers ?? []),
 		);
+		// Re-resolving skills/MCP/personas can leave Ink's input control in a
+		// bad state (stdin unref'd / readable listener dropped), so keystrokes
+		// echo below the composer until a resize re-runs resumeInput. Run a
+		// no-op suspension so Ink's endSuspend → resumeInput reinstates stdin.
+		await suspendAndRun(async () => {});
 		showNotice(
 			`[Reloaded: ${newSkills.length} skill(s), ${resolvedRules.directoryRules.length} rule(s), ${deps.mcpResult.connections.length} mcp server(s), personas]`,
 		);
