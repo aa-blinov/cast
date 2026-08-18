@@ -72,7 +72,7 @@ import {
 	uninstallUserSkill,
 } from "../core/skills.ts";
 import { resolveSshHosts, type SshHost, saveSshConfig, scanSshKeys, validateKeyPermissions } from "../core/ssh.ts";
-import { suspendAndRun } from "../core/stdin-manager.ts";
+import { setRawModeActive, suspendAndRun } from "../core/stdin-manager.ts";
 import {
 	buildReasoningParams,
 	getDefaultReasoningLevel,
@@ -772,8 +772,12 @@ async function reloadMcpAfterChange(deps: CommandDeps, disabledServers: string[]
 	const newResult = await resolveMcpForCwd(deps.projectDeps, deps.cwd, deps.projectTrusted, disabledServers);
 	deps.setMcpResult(newResult);
 	rebuildSystemPrompt(deps, deps.cwd);
-	// Re-connecting MCP can leave Ink's stdin control unref'd (same failure as
-	// /reload) — reinstate it so typed input keeps reaching the composer.
+	// Re-connecting MCP can leave Ink's stdin control unref'd (pauseInput), so
+	// the stream stalls and keystrokes echo below the composer. Run a no-op
+	// suspension to re-run Ink's resumeInput — but clear + home first, exactly
+	// like the resize resync, so the forced full redraw starts from the top
+	// instead of painting the frame from a stale cursor position.
+	process.stdout.write("\x1b[2J\x1b[H");
 	await suspendAndRun(async () => {});
 }
 
@@ -1359,8 +1363,6 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			deps.setMcpResult(
 				await resolveMcpForCwd(deps.projectDeps, chosen.cwd, trusted, loadSettings().disabledMcpServers ?? []),
 			);
-			// Session switch re-connects MCP like /reload — reinstate stdin.
-			await suspendAndRun(async () => {});
 		}
 		let restoredPersona: Persona | undefined;
 		if (chosen.persona && chosen.persona !== deps.currentPersona.name) {
@@ -3025,8 +3027,6 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			deps.setMcpResult(
 				await resolveMcpForCwd(deps.projectDeps, chosen.cwd, trusted, loadSettings().disabledMcpServers ?? []),
 			);
-			// Session switch re-connects MCP like /reload — reinstate stdin.
-			await suspendAndRun(async () => {});
 		}
 		// Persona travels with the session, same as mode: reopening a thread
 		// under whatever persona is currently active silently swaps the system

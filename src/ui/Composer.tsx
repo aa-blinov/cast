@@ -651,12 +651,7 @@ export function Composer({
 					<Text color={theme().warning}>[Press Esc again to stop the turn]</Text>
 				</Box>
 			)}
-			<Box
-				flexDirection="column"
-				borderStyle="round"
-				borderColor={locked ? theme().muted : running ? theme().warning : theme().success}
-				paddingX={1}
-			>
+			<Box flexDirection="column" paddingX={1}>
 				{line.length === 0 ? (
 					<Text>
 						<Text color={theme().accent} bold>
