@@ -1206,10 +1206,9 @@ describe("/provider", () => {
 		expect(deps.config.apiKey).toBe("");
 	});
 
-	it("/provider add → save + select model", async () => {
-		// drive the add wizard through the three prompts, then a model selection,
-		// then a reasoning level. The helper extracted in 0.6.6+ should reuse
-		// the same selectModel + selectReasoningLevel flow /activate uses.
+	it("/provider add saves a provider without activating it when one is active", async () => {
+		// add wizard = name → url → key, then just save (no model/reasoning pick —
+		// that's the Model tab / /provider <name> job, matching the web form).
 		writeSettings({});
 		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			new Response(JSON.stringify({ data: [{ id: "gpt-test" }] }), {
@@ -1218,36 +1217,70 @@ describe("/provider", () => {
 			}),
 		);
 		let textStep = 0;
-		let pickStep = 0;
 		const pickers: import("../src/pickers/types.ts").Pickers = {
 			promptText: async () => {
 				textStep++;
-				// name → url → key
 				if (textStep === 1) return "openrouter";
 				if (textStep === 2) return "https://openrouter.example/v1";
 				if (textStep === 3) return "sk-or-test";
 				return null;
 			},
-			pickOption: async (options) => {
-				pickStep++;
-				// First pick is the model list (the reasoning-protocol step was
-				// removed — format is auto-detected now); then the reasoning level.
-				if (pickStep === 1) return options[0]!.value;
-				return "off";
+			pickOption: async () => {
+				throw new Error("add wizard must not open a picker anymore");
 			},
 			pickMulti: async () => null,
 			log: () => {},
 		};
 		const { deps, calls } = createFakeDeps({ pickers } as never);
 		try {
+			// createFakeDeps config already has an active endpoint — the new
+			// provider must be saved but NOT switched to.
+			await handleInput("/provider add", undefined, deps);
+			const { loadSettings } = await import("../src/core/settings.ts");
+			const providers = loadSettings().providers ?? [];
+			expect(providers.some((p) => p.name === "openrouter")).toBe(true);
+			expect(loadSettings().modelProvider).not.toBe("openrouter");
+			const notice = String(calls.showNotice?.at(-1)?.[0] ?? "");
+			expect(notice).toMatch(/added/i);
+		} finally {
+			fetchSpy.mockRestore();
+		}
+	});
+
+	it("/provider add becomes the default when no provider is active", async () => {
+		writeSettings({});
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			new Response(JSON.stringify({ data: [{ id: "gpt-test" }] }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			}),
+		);
+		let textStep = 0;
+		const pickers: import("../src/pickers/types.ts").Pickers = {
+			promptText: async () => {
+				textStep++;
+				if (textStep === 1) return "openrouter";
+				if (textStep === 2) return "https://openrouter.example/v1";
+				if (textStep === 3) return "sk-or-test";
+				return null;
+			},
+			pickOption: async () => {
+				throw new Error("add wizard must not open a picker anymore");
+			},
+			pickMulti: async () => null,
+			log: () => {},
+		};
+		const { deps, calls } = createFakeDeps({ pickers } as never);
+		try {
+			// No active endpoint yet → the first provider becomes the default.
+			deps.config.baseURL = "";
+			deps.config.apiKey = "";
 			await handleInput("/provider add", undefined, deps);
 			const { loadSettings } = await import("../src/core/settings.ts");
 			expect(loadSettings().modelProvider).toBe("openrouter");
-			// Wizard produces an "added and selected" notice (distinct from /activate's
-			// "Provider: ... . Select a model." wording). If the helper extract is
-			// wrong, this check goes red because the notice shape changes.
+			expect(deps.config.baseURL).toBe("https://openrouter.example/v1");
 			const notice = String(calls.showNotice?.at(-1)?.[0] ?? "");
-			expect(notice).toMatch(/added|Model:/);
+			expect(notice).toMatch(/active \(default\)/);
 		} finally {
 			fetchSpy.mockRestore();
 		}
