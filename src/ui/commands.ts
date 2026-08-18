@@ -772,6 +772,9 @@ async function reloadMcpAfterChange(deps: CommandDeps, disabledServers: string[]
 	const newResult = await resolveMcpForCwd(deps.projectDeps, deps.cwd, deps.projectTrusted, disabledServers);
 	deps.setMcpResult(newResult);
 	rebuildSystemPrompt(deps, deps.cwd);
+	// Re-connecting MCP can leave Ink's stdin control unref'd (same failure as
+	// /reload) — reinstate it so typed input keeps reaching the composer.
+	await suspendAndRun(async () => {});
 }
 
 async function applyMcpUninstall(deps: CommandDeps, name: string): Promise<void> {
@@ -1356,6 +1359,8 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			deps.setMcpResult(
 				await resolveMcpForCwd(deps.projectDeps, chosen.cwd, trusted, loadSettings().disabledMcpServers ?? []),
 			);
+			// Session switch re-connects MCP like /reload — reinstate stdin.
+			await suspendAndRun(async () => {});
 		}
 		let restoredPersona: Persona | undefined;
 		if (chosen.persona && chosen.persona !== deps.currentPersona.name) {
@@ -3020,6 +3025,8 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			deps.setMcpResult(
 				await resolveMcpForCwd(deps.projectDeps, chosen.cwd, trusted, loadSettings().disabledMcpServers ?? []),
 			);
+			// Session switch re-connects MCP like /reload — reinstate stdin.
+			await suspendAndRun(async () => {});
 		}
 		// Persona travels with the session, same as mode: reopening a thread
 		// under whatever persona is currently active silently swaps the system
