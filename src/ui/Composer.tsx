@@ -651,7 +651,7 @@ export function Composer({
 					<Text color={theme().warning}>[Press Esc again to stop the turn]</Text>
 				</Box>
 			)}
-			<Box flexDirection="column" paddingX={1}>
+			<Box flexDirection="column">
 				{line.length === 0 ? (
 					<Text>
 						<Text color={theme().accent} bold>
