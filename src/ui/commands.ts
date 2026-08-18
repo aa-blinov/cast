@@ -72,7 +72,7 @@ import {
 	uninstallUserSkill,
 } from "../core/skills.ts";
 import { resolveSshHosts, type SshHost, saveSshConfig, scanSshKeys, validateKeyPermissions } from "../core/ssh.ts";
-import { setRawModeActive, suspendAndRun } from "../core/stdin-manager.ts";
+import { cancelActiveDecxprQuery, setRawModeActive, suspendAndRun } from "../core/stdin-manager.ts";
 import {
 	buildReasoningParams,
 	getDefaultReasoningLevel,
@@ -776,7 +776,11 @@ async function reloadMcpAfterChange(deps: CommandDeps, disabledServers: string[]
 	// the stream stalls and keystrokes echo below the composer. Run a no-op
 	// suspension to re-run Ink's resumeInput — but clear + home first, exactly
 	// like the resize resync, so the forced full redraw starts from the top
-	// instead of painting the frame from a stale cursor position.
+	// instead of painting the frame from a stale cursor position. Cancel any
+	// in-flight \x1b[6n and give it a beat to land first: its reply echoes as
+	// visible ^[[6;1R garbage once the suspension drops raw mode.
+	cancelActiveDecxprQuery();
+	await new Promise((resolve) => setTimeout(resolve, 30));
 	process.stdout.write("\x1b[2J\x1b[H");
 	await suspendAndRun(async () => {});
 }
@@ -1991,6 +1995,10 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		// bad state (stdin unref'd / readable listener dropped), so keystrokes
 		// echo below the composer until a resize re-runs resumeInput. Run a
 		// no-op suspension so Ink's endSuspend → resumeInput reinstates stdin.
+		// Cancel an in-flight \x1b[6n first so its reply can't echo as garbage
+		// once the suspension drops raw mode.
+		cancelActiveDecxprQuery();
+		await new Promise((resolve) => setTimeout(resolve, 30));
 		await suspendAndRun(async () => {});
 		showNotice(
 			`[Reloaded: ${newSkills.length} skill(s), ${resolvedRules.directoryRules.length} rule(s), ${deps.mcpResult.connections.length} mcp server(s), personas]`,
