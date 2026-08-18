@@ -2204,45 +2204,26 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			return;
 		}
 
-		// Reasoning protocol is auto-detected from the URL (resolveReasoningFormat)
-		// and enriched per-model from models.dev — no manual pick on add. Custom
-		// formats for unusual/proxy endpoints can be set afterwards via
-		// `/provider <name> reasoning <format>`.
-		const newProvider: Provider = { name, url, apiKey: key };
-		const candidate = {
-			...config,
-			baseURL: url,
-			apiKey: key,
-			reasoningFormat: resolveReasoningFormat(url),
-		};
-		showNotice(`[Provider "${name}" verified. Select a model and reasoning mode.]`);
-		const selection = await selectModelWithReasoning(candidate, deps.pickers);
-		if (!selection) {
-			showNotice(`[Cancelled — provider "${name}" was not saved]`);
+		// Just save the provider (reasoning protocol is auto-detected from the
+		// URL and enriched per-model from models.dev). No forced activation or
+		// model pick here — that's the Model tab / `/model` / `/provider <name>`
+		// job, matching the web form. The only exception: no active endpoint at
+		// all (first provider), which becomes the default so there's something
+		// to talk to.
+		const next = [...existing, { name, url, apiKey: key }];
+		if (!config.baseURL) {
+			config.baseURL = url;
+			config.apiKey = key;
+			config.reasoningFormat = resolveReasoningFormat(url);
+			session.providerUrl = url;
+			updateSettings({ providers: next, providerUrl: url, apiKey: key, modelProvider: name });
+			updateSessionIdentity(session);
+			agent.refreshMeta();
+			showNotice(`[Provider "${name}" added and set active (default). Pick a model: /model or the Model tab.]`);
 			return;
 		}
-		// Persist the provider and active model together only after the complete
-		// provider/model/reasoning flow has succeeded.
-		updateSettings({
-			providers: [...existing, newProvider],
-			providerUrl: url,
-			apiKey: key,
-			modelProvider: name,
-			model: selection.model,
-			reasoningLevel: selection.reasoningLevel,
-		});
-		config.baseURL = url;
-		config.apiKey = key;
-		config.reasoningFormat = candidate.reasoningFormat;
-		session.providerUrl = url;
-		session.model = selection.model;
-		deps.setReasoningMeta(selection.reasoningMeta);
-		if (selection.contextWindow && selection.contextWindow > 0) config.contextWindow = selection.contextWindow;
-		config.reasoningLevel = selection.reasoningLevel;
-		config.reasoningParams = selection.reasoningParams;
-		updateSessionIdentity(session);
-		agent.refreshMeta();
-		showNotice(`[Provider "${name}" added. Model: ${session.model}. Reasoning: ${config.reasoningLevel}]`);
+		updateSettings({ providers: next });
+		showNotice(`[Provider "${name}" added — pick it in the Model tab or /provider ${name} to use it]`);
 	}
 
 	// --- /provider helper: delete picker ---
