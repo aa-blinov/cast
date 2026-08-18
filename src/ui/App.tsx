@@ -871,6 +871,7 @@ export function App(props: AppProps): JSX.Element {
 				locked={modalRequest !== null}
 				skills={skills}
 			/>
+			<ComposerDivider />
 			<StatusBar
 				statusBar={statusBar}
 				persona={currentPersona.label}
