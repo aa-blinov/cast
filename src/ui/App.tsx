@@ -859,6 +859,7 @@ export function App(props: AppProps): JSX.Element {
 					[Queued{agent.pendingQueue.length > 1 ? ` (${i + 1}/${agent.pendingQueue.length})` : ""}: {text}]
 				</Text>
 			))}
+			<ComposerDivider />
 			<Composer
 				onSubmit={(text) => handleSubmit(text)}
 				canSubmit={canSubmit}
@@ -978,6 +979,18 @@ function StatusBar(
 function ChatLogWithSize(props: Omit<Parameters<typeof ChatLog>[0], "columns">): JSX.Element {
 	const { columns } = useWindowSize();
 	return <ChatLog {...props} columns={columns} />;
+}
+
+/** Thin divider between the transcript and the composer — a plain ruled line
+ *  that spans the terminal width. Kept border-free so it can never tear like
+ *  the old composer box. */
+function ComposerDivider(): JSX.Element {
+	const { columns } = useWindowSize();
+	return (
+		<Box>
+			<Text color={theme().muted}>{"─".repeat(Math.max(columns - 1, 20))}</Text>
+		</Box>
+	);
 }
 
 /**
