@@ -116,6 +116,7 @@ import {
 	getDefaultReasoningLevel,
 	getReasoningOptionsForFormat,
 	REASONING_FORMAT_OPTIONS,
+	type ReasoningFormat,
 	resolveReasoningFormat,
 } from "../core/vendors.ts";
 import { ensureSessionWorktree, listWorktrees, removeWorktreeBySlug, type SessionWorktree } from "../core/worktree.ts";
@@ -3738,9 +3739,35 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				updateSettings({ providers: next });
 				return { ok: true, result: `Added provider "${pname}" — pick it in the Model tab to use it` };
 			}
-			// Bare name — switch to it.
+			// Bare name — switch to it (or override its reasoning protocol).
 			const target = providers.find((p) => p.name === sub);
 			if (!target) return { ok: false, error: `Unknown provider: ${sub}. See /provider for the list.` };
+			if (rest.startsWith("reasoning")) {
+				// /provider <name> reasoning <format> — override the auto-detected
+				// reasoning protocol for a provider whose endpoint isn't recognized
+				// by URL (proxies, aggregators). Auto-detection via
+				// resolveReasoningFormat is the default; this is the escape hatch.
+				const fmt = rest.slice("reasoning".length).trim();
+				if (!fmt) return { ok: false, error: "Usage: /provider <name> reasoning <format>" };
+				const accepted = [...new Set(["auto", "generic", ...REASONING_FORMAT_OPTIONS.map((o) => o.value)])];
+				if (!accepted.includes(fmt)) {
+					return {
+						ok: false,
+						error: `Unknown reasoning format "${fmt}". Use: ${accepted.join(", ")}`,
+					};
+				}
+				const next = providers.map((p) => (p.name === sub ? { ...p, reasoningFormat: fmt as ReasoningFormat } : p));
+				updateSettings({ providers: next });
+				if (settings.modelProvider === sub) {
+					config.reasoningFormat = resolveReasoningFormat(target.url, fmt as ReasoningFormat);
+					config.reasoningParams = buildReasoningParams(
+						config.reasoningLevel,
+						config.reasoningFormat,
+						ws.session.model,
+					);
+				}
+				return { ok: true, result: `Provider "${sub}" reasoning protocol: ${fmt}` };
+			}
 			const probe = await probeProvider({ ...config, baseURL: target.url, apiKey: target.apiKey });
 			if (probe !== "ok" && probe !== "unknown") {
 				return { ok: false, error: `Provider "${sub}" isn't reachable (${probe}) — not switched` };
