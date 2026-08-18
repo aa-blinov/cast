@@ -572,16 +572,23 @@ export function Composer({
 		// actually gone — cheap (idempotent) and recovers any such terminal
 		// within a couple of seconds. Uses process.stdin directly (not Ink's
 		// counted setRawMode) so repeated re-asserts can't leak the count.
+		//
+		// The same watchdog also recovers a *stalled* input stream: a /reload
+		// (skills/MCP/persona re-resolve) can leave process.stdin unreadable;
+		// the /reload command itself runs a no-op suspension afterwards to
+		// reinstate Ink's input control, so the watchdog only needs the raw
+		// re-assert here.
 		const rawWatchdog = setInterval(() => {
-			if (process.stdin.isTTY && process.stdin.isRaw !== true) {
+			const s = process.stdin;
+			if (s.isTTY && s.isRaw !== true) {
 				try {
-					process.stdin.setRawMode(true);
+					s.setRawMode(true);
 					setRawModeActive(true);
 				} catch {
 					// not a TTY / can't set — nothing more to do
 				}
 			}
-		}, 2000);
+		}, 1000);
 
 		return () => {
 			clearInterval(rawWatchdog);
