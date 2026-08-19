@@ -13,6 +13,7 @@ describe("web message submission", () => {
 	it("waits for the active session SSE stream before posting a normal message", async () => {
 		vi.mocked(api).mockResolvedValue({ ok: true });
 		const waitForSessionStream = vi.fn().mockResolvedValue(true);
+		const setRunning = vi.fn();
 		const context = {
 			planRefineArmedRef: { current: false },
 			session: { id: "session-1", messages: [] },
@@ -21,6 +22,7 @@ describe("web message submission", () => {
 			setSession: vi.fn(),
 			pendingOutgoingRef: { current: new Map() },
 			waitForSessionStream,
+			setRunning,
 			showToast: vi.fn(),
 		};
 
@@ -32,6 +34,9 @@ describe("web message submission", () => {
 			"/api/sessions/session-1/chat",
 			expect.objectContaining({ text: "hello" }),
 		);
+		// Optimistic Abort — flips before SSE catches up so the composer
+		// doesn't leave a disabled Send button hanging for a round trip.
+		expect(setRunning).toHaveBeenCalledWith(true);
 	});
 
 	it("keeps the message pending instead of posting when the SSE connection is unavailable", async () => {
@@ -39,6 +44,7 @@ describe("web message submission", () => {
 		vi.mocked(api).mockResolvedValue({ ok: true });
 		const selectSession = vi.fn().mockResolvedValue(undefined);
 		const pendingOutgoingRef = { current: new Map() };
+		const setRunning = vi.fn();
 		const context = {
 			planRefineArmedRef: { current: false },
 			session: { id: "session-1", messages: [] },
@@ -48,6 +54,7 @@ describe("web message submission", () => {
 			pendingOutgoingRef,
 			waitForSessionStream: vi.fn().mockResolvedValue(false),
 			selectSession,
+			setRunning,
 			showToast: vi.fn(),
 		};
 
@@ -57,6 +64,9 @@ describe("web message submission", () => {
 		expect(api).not.toHaveBeenCalled();
 		expect(pendingOutgoingRef.current.size).toBe(1);
 		expect([...pendingOutgoingRef.current.values()][0]).toMatchObject({ text: "hello" });
+		// Rolled back when the stream isn't ready — no message was actually sent.
+		expect(setRunning).toHaveBeenNthCalledWith(1, true);
+		expect(setRunning).toHaveBeenLastCalledWith(false);
 	});
 
 	it("does not answer a pending question while the backend is disconnected", async () => {
@@ -93,6 +103,7 @@ describe("web message submission", () => {
 			setSession: vi.fn(),
 			pendingOutgoingRef: { current: new Map() },
 			setInputsRefreshNonce: vi.fn(),
+			setRunning: vi.fn(),
 			showToast,
 		};
 

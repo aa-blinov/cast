@@ -1,6 +1,6 @@
 import htm from "htm";
 import { h } from "preact";
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 
 const html = htm.bind(h);
 
@@ -10,11 +10,31 @@ const html = htm.bind(h);
 // status:running round-trip), fall back to the client-side pendingSince — the
 // moment the user hit send — so the counter starts with no dead air and there
 // is no need for a "sending…" label in the transcript.
+//
+// The two anchors live on different clocks (client vs server). The naive
+// `running ? turnStartedAt : pendingSince` switch made the visible counter
+// jump the moment the daemon claimed the turn. Capture the offset once on
+// the first server sighting and translate `turnStartedAt` into client time
+// thereafter so the counter never skips.
 export function ElapsedTimer({ running, connected, turnStartedAt, pendingSince }) {
 	const [elapsedMs, setElapsedMs] = useState(0);
-	// Once the daemon claims the turn, its timestamp wins (backend-authoritative);
-	// otherwise keep ticking from the local send time.
-	const startMs = running ? turnStartedAt : pendingSince;
+	const serverToClientRef = useRef(null);
+	// Reset between turns so a stale offset can't be carried into the next run.
+	if (turnStartedAt == null) serverToClientRef.current = null;
+	let startMs;
+	if (typeof turnStartedAt === "number") {
+		if (serverToClientRef.current === null) {
+			// Anchor against the still-pending client message when we have one —
+			// this is the normal "send → status:running" handoff. After a mid-
+			// turn reload there's no pending row, so fall back to Date.now() and
+			// let the server timestamp seed the counter at 0.
+			const anchor = typeof pendingSince === "number" ? pendingSince : Date.now();
+			serverToClientRef.current = anchor - turnStartedAt;
+		}
+		startMs = turnStartedAt + serverToClientRef.current;
+	} else {
+		startMs = pendingSince;
+	}
 	useEffect(() => {
 		if (connected && typeof startMs === "number") {
 			setElapsedMs(Math.max(0, Date.now() - startMs));

@@ -26,6 +26,7 @@ export async function submitMessage(text, images, pendingDocs, context) {
 		setInputsRefreshNonce,
 		waitForSessionStream,
 		pendingOutgoingRef,
+		setRunning,
 		canSend,
 	} = context;
 	const connectionReady = canSend?.() ?? true;
@@ -315,12 +316,19 @@ export async function submitMessage(text, images, pendingDocs, context) {
 				}
 			: prev,
 	);
+	// Flip the composer to Abort the moment the message is in flight — the
+	// daemon's `status:running` SSE event is the only thing that ever set
+	// this before, which left the disabled Send button hanging visibly for
+	// a round trip. SSE still owns the source of truth and will reconcile
+	// `running` again on `end`/`error`/reconnect.
+	setRunning(true);
 	// The session-selection effect can render the composer before EventSource has
 	// reached OPEN. Keep the prompt visible while waiting, then send only after
 	// the live stream is ready so user_message/status/token events cannot race
 	// past an unsubscribed browser tab.
 	const streamReady = (await waitForSessionStream?.(id)) !== false;
 	if (!streamReady) {
+		setRunning(false);
 		if (isCurrentDraft()) showToast?.("Connection lost — message kept locally until the daemon reconnects", "error");
 		return;
 	}
@@ -350,6 +358,7 @@ export async function submitMessage(text, images, pendingDocs, context) {
 		// the user posted a message, saw nothing in the sidebar change,
 		// then everything moved after the round trip landed.
 	} catch (err) {
+		setRunning(false);
 		if (isCurrentDraft()) showToast(`Message kept locally; retrying when the daemon reconnects: ${err.message}`, "error");
 	}
 }
