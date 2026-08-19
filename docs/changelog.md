@@ -2,6 +2,29 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.6
+
+### Fixed
+
+- **Web UI: Send→Abort switches immediately, no disabled-button dead air.** The
+  composer used to wait for the daemon's `status:running` SSE round trip before
+  swapping the icon — for a beat the disabled Send button stayed on screen
+  with the input already cleared, so it looked like the click did nothing.
+  `running` is now flipped optimistically the moment the optimistic pending
+  message lands, and rolled back on the two early-return paths (SSE not
+  open, POST failure), so the Abort button is visible while the request is
+  actually in flight. The TUI was already correct.
+- **Web UI: turn-timer no longer jumps when the daemon claims the turn.** The
+  composer clock used to switch from a client-side `pendingSince` (set at
+  send time) to the server's `startedAt` the instant the first
+  `status:running` SSE event landed — those live on different clocks, so the
+  visible counter skipped forward or backward by tens-to-hundreds of ms each
+  turn. The timer now captures the offset once on first server sighting and
+  expresses `startedAt` in client time thereafter, so `Date.now() − startMs`
+  stays continuous through the handoff. The offset is cleared between turns
+  and on reload-mid-turn falls back to `Date.now()`, so reconnects still
+  seed the counter correctly from the server timestamp.
+
 ## 0.22.5
 
 ### Changed
