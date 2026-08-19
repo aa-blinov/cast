@@ -1179,6 +1179,7 @@ function App() {
 				setInputsRefreshNonce,
 				waitForSessionStream,
 				pendingOutgoingRef,
+				setRunning,
 				canSend: () => Boolean(session && connected && backendUp),
 		}),
 		[
@@ -1198,6 +1199,7 @@ function App() {
 			setInputsRefreshNonce,
 			waitForSessionStream,
 			pendingOutgoingRef,
+			setRunning,
 			connected,
 			backendUp,
 		],
