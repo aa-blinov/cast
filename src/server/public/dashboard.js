@@ -379,6 +379,8 @@ export function Dashboard({ onClose }) {
 		};
 	}, [loading, tab, llm, perf, reliability, system, range, themeVersion, destroyCharts]);
 
+	useEffect(() => () => destroyCharts(), [destroyCharts]);
+
 	const llmTotals = llm.overview.reduce(
 		(acc, r) => {
 			acc.requests += r.requests;

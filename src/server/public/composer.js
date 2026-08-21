@@ -21,6 +21,7 @@ export function canSubmitAttachments(docs) {
 
 export function Composer({
 	running,
+	aborting = false,
 	ready,
 	sendReady = true,
 	activeId,
@@ -164,8 +165,9 @@ export function Composer({
 		}
 	}, []);
 
+	const [sending, setSending] = useState(false);
 	const handleSubmit = useCallback(() => {
-		if (!ready || !sendReady) return;
+		if (!ready || !sendReady || sending) return;
 		if (!canSubmitAttachments(docs)) return;
 		const trimmed = value.trim();
 		const readyDocs = docs.filter((d) => (d.path || d.pending) && !d.uploading && !d.error);
@@ -182,26 +184,54 @@ export function Composer({
 			readyDocs.length > 0
 				? `${trimmed}\n\n<system-reminder>\nThe user attached the following file(s) to this message:\n${readyDocs.map((d) => `- ${d.name}: ${d.path ?? `(pending — will be uploaded on send)`}`).join("\n")}\n</system-reminder>`
 				: trimmed;
-		onSubmit(text, images, pendingDocs.length > 0 ? pendingDocs : undefined);
+		// Snapshot to restore only if submit explicitly reports failure (e.g. connection lost before SSE ready)
+		const snapshot = { value, images: [...images], docs: [...docs] };
+		// Optimistic clear — feels instant, no "Sending…" hang
 		setValue("");
 		setImages([]);
 		setDocs([]);
 		setCmdVisible(false);
 		if (textareaRef.current) textareaRef.current.style.height = "auto";
-	}, [value, images, docs, onSubmit, ready, sendReady]);
+		setSending(true);
+		// Brief debounce to prevent double-Enter spam, not tied to network
+		setTimeout(() => setSending(false), 400);
+		Promise.resolve(onSubmit(text, images, pendingDocs.length > 0 ? pendingDocs : undefined))
+			.then((result) => {
+				if (result === false) {
+					// Restore only if user hasn't already typed something new
+					setValue((prev) => (prev ? prev : snapshot.value));
+					setImages((prev) => (prev.length ? prev : snapshot.images));
+					setDocs((prev) => (prev.length ? prev : snapshot.docs));
+					requestAnimationFrame(() => {
+						if (textareaRef.current) {
+							textareaRef.current.focus();
+							textareaRef.current.style.height = "auto";
+							textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 150)}px`;
+						}
+					});
+				} else {
+					requestAnimationFrame(() => textareaRef.current?.focus());
+				}
+			})
+			.catch(() => {
+				setValue((prev) => (prev ? prev : snapshot.value));
+				setImages((prev) => (prev.length ? prev : snapshot.images));
+				setDocs((prev) => (prev.length ? prev : snapshot.docs));
+			});
+	}, [value, images, docs, onSubmit, ready, sendReady, sending]);
 
 	const handleCmdSelect = useCallback(
-		(name) => {
+		async (name) => {
 			if (!ready || !sendReady) return;
 			// Argument-less commands (help, current, usage, ...) should just run —
 			// filling the box with "/current " and waiting for a second Enter is
 			// exactly the "picker doesn't work" feeling this is meant to fix.
 			const cmd = commands.find((c) => c.name === name);
 			if (cmd && !cmd.takesArgs) {
-				onSubmit(name);
 				setValue("");
 				setCmdVisible(false);
 				if (textareaRef.current) textareaRef.current.style.height = "auto";
+				await onSubmit(name);
 				return;
 			}
 			setValue(`${name} `);
@@ -213,11 +243,11 @@ export function Composer({
 	);
 
 	const handlePersonaSelect = useCallback(
-		(name) => {
+		async (name) => {
 			if (!ready || !sendReady) return;
-			onSubmit(`/persona ${name}`);
 			setValue("");
 			if (textareaRef.current) textareaRef.current.style.height = "auto";
+			await onSubmit(`/persona ${name}`);
 		},
 		[onSubmit, ready, sendReady],
 	);
@@ -251,7 +281,7 @@ export function Composer({
 	const clampedIndex = pickerItems.length > 0 ? Math.min(selectedIndex, pickerItems.length - 1) : 0;
 	const attachmentsBlocked = !canSubmitAttachments(docs);
 	const hasReadyDocs = docs.some((d) => (d.path || d.pending) && !d.uploading && !d.error);
-	const sendBlocked = !ready || !sendReady;
+	const sendBlocked = !ready || !sendReady || sending;
 
 	// Arrow-key nav must scroll the picker, not just select past the visible
 	// edge — mouse/scroll-wheel already worked, but the highlighted row could
@@ -371,6 +401,7 @@ export function Composer({
 					multiple
 					style="display:none"
 					onChange=${handleFilePick}
+					accept="image/*,.txt,.md,.json,.yaml,.yml,.toml,.ini,.sh,.py,.js,.ts,.tsx,.css,.html,.xml,.csv,.pdf"
 				/>
 				<button
 					type="button"
@@ -393,8 +424,8 @@ export function Composer({
 				/>
 				${
 						running
-						? html`<button class="composer-abort" onClick=${onAbort} aria-label="Abort"><${icons.stop} /></button>`
-						: html`<button class="composer-send" onClick=${handleSubmit} disabled=${sendBlocked || attachmentsBlocked || (!value.trim() && images.length === 0 && !hasReadyDocs)} aria-label="Send" title=${attachmentsBlocked ? "Wait for attachments to finish uploading" : !sendReady ? "Waiting for the daemon connection" : "Send"}><${icons.send} /></button>`
+						? html`<button class="composer-abort" onClick=${onAbort} disabled=${aborting} aria-label=${aborting ? "Aborting…" : "Abort"} title=${aborting ? "Aborting…" : sendReady ? "Abort (Esc)" : "Abort — waiting for connection"} aria-busy=${aborting ? "true" : "false"}><${aborting ? icons.spinner : icons.stop} /></button>`
+						: html`<button class="composer-send" onClick=${handleSubmit} disabled=${sendBlocked || attachmentsBlocked || (!value.trim() && images.length === 0 && !hasReadyDocs)} aria-label="Send" title=${attachmentsBlocked ? "Wait for attachments to finish uploading" : !sendReady ? "Waiting for the daemon connection" : sending ? "Sending…" : "Send (Enter)"}><${icons.send} /></button>`
 				}
 			</div>
 		</div>

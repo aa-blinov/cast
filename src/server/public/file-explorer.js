@@ -110,11 +110,13 @@ export function FileExplorer({ activeId, confirm, refreshNonce }) {
 	const runSearch = useCallback(
 		async (q) => {
 			setSearching(true);
+			setError(null);
 			try {
 				const data = await api("GET", `/api/sessions/${activeId}/fs/search?q=${encodeURIComponent(q)}`);
 				setSearchResults(data?.results ?? []);
 			} catch (err) {
-				setError(err.message);
+				if (err?.message?.includes("timed out")) setError(err.message);
+				else setError(err.message);
 			} finally {
 				setSearching(false);
 			}

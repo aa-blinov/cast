@@ -18,12 +18,16 @@ describe("web api client", () => {
 		vi.stubGlobal("fetch", fetchMock);
 
 		await expect(api("POST", "/api/example", { value: 42 })).resolves.toEqual({ ok: true });
-		expect(fetchMock).toHaveBeenCalledWith("http://cast.test/api/example", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ value: 42 }),
-			cache: "no-store",
-		});
+		expect(fetchMock).toHaveBeenCalledWith(
+			"http://cast.test/api/example",
+			expect.objectContaining({
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ value: 42 }),
+				cache: "no-store",
+			}),
+		);
+		expect(fetchMock.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
 	});
 
 	it("redirects expired sessions to the login page", async () => {

@@ -43,36 +43,36 @@ export function Sidebar({
 	// the same way the in-session file search above it is (300ms).
 	const [searchResults, setSearchResults] = useState(null);
 	const searchTimerRef = useRef(null);
+	const searchAbortRef = useRef(null);
 	useEffect(() => {
 		clearTimeout(searchTimerRef.current);
+		searchAbortRef.current?.abort();
 		const q = search.trim();
 		if (!q) {
 			setSearchResults(null);
 			return;
 		}
-		// clearTimeout above only cancels a timer that hasn't fired yet — once
-		// a fetch is in flight (typing continued past the 300ms debounce while
-		// a slower request from an earlier keystroke was still pending),
-		// there's nothing to abort it. A slow response for a stale query could
-		// otherwise land after a faster response for the current one and
-		// silently overwrite it with results for text that's no longer in the
-		// box. `cancelled` (closed over per effect run, flipped by cleanup the
-		// moment `search` changes again) makes a stale response a no-op.
 		let cancelled = false;
+		const controller = new AbortController();
+		searchAbortRef.current = controller;
 		searchTimerRef.current = setTimeout(() => {
-			api("GET", `/api/sessions?q=${encodeURIComponent(q)}`)
+			api("GET", `/api/sessions?q=${encodeURIComponent(q)}`, undefined, { signal: controller.signal })
 				.then((data) => {
 					if (!cancelled) setSearchResults(Array.isArray(data) ? data : []);
 				})
-				.catch(() => {
-					if (!cancelled) setSearchResults([]);
+				.catch((err) => {
+					if (cancelled || controller.signal.aborted) return;
+					if (err?.name === "AbortError") return;
+					setSearchResults([]);
 				});
 		}, 300);
 		return () => {
 			cancelled = true;
 			clearTimeout(searchTimerRef.current);
+			controller.abort();
 		};
 	}, [search]);
+	useEffect(() => () => searchAbortRef.current?.abort(), []);
 	const [editingId, setEditingId] = useState(null);
 	const [editValue, setEditValue] = useState("");
 	const editInputRef = useRef(null);

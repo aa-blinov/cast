@@ -33,6 +33,7 @@ body {
 button:focus-visible { outline: none; }
 input:focus-visible, textarea:focus-visible, select:focus-visible { outline: none; border-color: var(--cyan); }
 button, input, textarea { font: inherit; }
+button, [role="button"] { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
 
 /* ── Layout ───────────────────────────────────────────────────────── */
 .app {
@@ -684,6 +685,10 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	transition: background .15s;
 }
 .composer-abort:hover { background: rgba(239,68,68,.1); }
+.composer-abort:disabled { opacity: .6; cursor: wait; }
+.composer-abort[aria-busy="true"] svg { animation: spin .7s linear infinite; }
+.composer-send:disabled { opacity: .4; cursor: default; }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 .composer-drag-over { border-color: var(--cyan); background: color-mix(in srgb, var(--cyan) 8%, var(--bg-surface)); }
 .composer-attach {
 	background: transparent;

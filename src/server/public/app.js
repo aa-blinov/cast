@@ -352,8 +352,11 @@ const CODE_COPY_ICON_SVG =
 const CODE_COPY_ICON_CHECK_SVG =
 	'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m4.5 12.75 6 6 9-13.5"/></svg>';
 
+const markdownCache = new Map();
+const MARKDOWN_CACHE_LIMIT = 300;
 function renderMarkdown(text) {
 	if (!text) return "";
+	if (markdownCache.has(text)) return markdownCache.get(text);
 
 	// Pull fenced code blocks out first so inline rules below can't mangle
 	// their contents; they go back in verbatim (already escaped) at the end.
@@ -466,6 +469,11 @@ function renderMarkdown(text) {
 
 	out = out.replace(/ FENCE(\d+) /g, (_m, i) => fences[Number(i)]);
 	out = out.replace(/ ?LINK(\d+) ?/g, (_m, i) => links[Number(i)]);
+	if (markdownCache.size >= MARKDOWN_CACHE_LIMIT) {
+		const firstKey = markdownCache.keys().next().value;
+		markdownCache.delete(firstKey);
+	}
+	markdownCache.set(text, out);
 	return out;
 }
 
@@ -957,7 +965,7 @@ function App() {
 		const timer = setTimeout(() => {
 			sessionStreamWaitersRef.current.delete(id);
 			resolveWaiter(false);
-		}, 1500);
+		}, 400);
 		sessionStreamWaitersRef.current.set(id, { promise, resolve: resolveWaiter, timer });
 		return promise;
 	}, [activeSessionIdRef, connected, backendUp]);
@@ -1269,16 +1277,25 @@ function App() {
 		[activeId, session?.question, showToast, setSession],
 	);
 
-	// Abort
+	// Abort — immediate visual feedback, debounce double-clicks, keep
+	// transcript in sync even if SSE is slow.
+	const [aborting, setAborting] = useState(false);
 	const abortRun = useCallback(async () => {
-		if (!activeId) return;
+		if (!activeId || aborting) return;
+		setAborting(true);
 		try {
 			await api("POST", `/api/sessions/${activeId}/abort`);
-		} catch {}
-		setSession((prev) =>
-			prev ? { ...prev, messages: [...prev.messages, { role: "warning", content: "Run aborted" }] } : prev,
-		);
-	}, [activeId, setSession]);
+			setSession((prev) =>
+				prev ? { ...prev, messages: [...prev.messages, { role: "warning", content: "Run aborted" }] } : prev,
+			);
+		} catch (err) {
+			showToast(err.message, "error");
+		} finally {
+			// Keep spinner visible for at least 400ms so the click is perceived,
+			// even if the server responded instantly.
+			setTimeout(() => setAborting(false), 400);
+		}
+	}, [activeId, aborting, setSession, showToast]);
 
 	// Load diff — always the full multi-file diff. Selecting a file in the
 	// list (setDiffFile below) just changes which of the already-fetched
@@ -1520,18 +1537,22 @@ function App() {
 		pendingScrollRestoreRef.current = null;
 	}, [session?.messages]);
 
-	// Scroll detection
+	// Scroll detection — coalesced via rAF so a fast fling doesn't queue
+	// dozens of setAtBottom/loadOlderMessages calls per frame.
+	const scrollRafRef = useRef(null);
 	const handleScroll = useCallback(() => {
-		const el = messagesRef.current;
-		if (!el) return;
-		const bottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 80;
-		autoScrollRef.current = bottom;
-		setAtBottom(bottom);
-		// Near the top — fetch the next older batch. 400px gives it a head
-		// start before the user actually hits the edge, so it doesn't feel
-		// like a hard stop-and-wait while scrolling fast.
-		if (el.scrollTop < 400) loadOlderMessages();
+		if (scrollRafRef.current != null) return;
+		scrollRafRef.current = requestAnimationFrame(() => {
+			scrollRafRef.current = null;
+			const el = messagesRef.current;
+			if (!el) return;
+			const bottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 80;
+			autoScrollRef.current = bottom;
+			setAtBottom(bottom);
+			if (el.scrollTop < 400) loadOlderMessages();
+		});
 	}, [loadOlderMessages, setAtBottom]);
+	useEffect(() => () => { if (scrollRafRef.current != null) cancelAnimationFrame(scrollRafRef.current); }, []);
 
 	// Toggle diff — reset the selected file so switching sessions (or
 	// reopening) doesn't leave a stale selection that no longer matches any
@@ -2016,7 +2037,7 @@ function App() {
 							${activePersonaLabel}
 							${session?.mode && session.mode !== "build" && html`<span class="composer-role-mode">${session.mode}</span>`}
 						</div>
-						<${ElapsedTimer} key=${activeId} running=${running} connected=${connected} turnStartedAt=${session?.turnStartedAt} pendingSince=${pendingSinceMs} />
+						<${ElapsedTimer} key=${activeId} running=${running} connected=${connected} turnStartedAt=${session?.turnStartedAt} />
 					</div>
 				`
 				}
@@ -2050,7 +2071,7 @@ function App() {
 						</button>
 					`
 					}
-					<${ComposerModule} running=${running} ready=${!!session} sendReady=${Boolean(session && connected && backendUp)} activeId=${activeId} commands=${commands} personas=${personas} onSubmit=${submitMessage} onAbort=${abortRun} onDocUploaded=${() => setInputsRefreshNonce((n) => n + 1)} />
+					<${ComposerModule} running=${running} aborting=${aborting} ready=${!!session} sendReady=${Boolean(session && connected && backendUp)} activeId=${activeId} commands=${commands} personas=${personas} onSubmit=${submitMessage} onAbort=${abortRun} onDocUploaded=${() => setInputsRefreshNonce((n) => n + 1)} />
 				</div>
 			</main>
 

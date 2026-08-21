@@ -38,8 +38,19 @@ export function resizeImageToDataUrl(file) {
 	return new Promise((resolve, reject) => {
 		const img = new Image();
 		const objectUrl = URL.createObjectURL(file);
+		let settled = false;
+		const cleanup = () => {
+			if (!settled) {
+				settled = true;
+				URL.revokeObjectURL(objectUrl);
+			}
+		};
 		img.onload = () => {
-			URL.revokeObjectURL(objectUrl);
+			cleanup();
+			if (!img.width || !img.height) {
+				reject(new Error("Invalid image dimensions"));
+				return;
+			}
 			const scale = Math.min(1, IMAGE_MAX_DIMENSION / Math.max(img.width, img.height));
 			const width = Math.max(1, Math.round(img.width * scale));
 			const height = Math.max(1, Math.round(img.height * scale));
@@ -47,13 +58,28 @@ export function resizeImageToDataUrl(file) {
 			canvas.width = width;
 			canvas.height = height;
 			const context = canvas.getContext("2d");
+			if (!context) {
+				reject(new Error("Canvas not available"));
+				return;
+			}
 			context.drawImage(img, 0, 0, width, height);
-			resolve(canvas.toDataURL("image/jpeg", IMAGE_JPEG_QUALITY));
+			try {
+				resolve(canvas.toDataURL("image/jpeg", IMAGE_JPEG_QUALITY));
+			} catch (err) {
+				reject(err instanceof Error ? err : new Error(String(err)));
+			}
 		};
 		img.onerror = () => {
-			URL.revokeObjectURL(objectUrl);
+			cleanup();
 			reject(new Error("Could not load image"));
 		};
+		// Guard against hanging decode for corrupted files — release object URL after 10s.
+		setTimeout(() => {
+			if (!settled) {
+				cleanup();
+				reject(new Error("Image load timed out"));
+			}
+		}, 10000);
 		img.src = objectUrl;
 	});
 }
@@ -67,8 +93,8 @@ export function isBlockedAttachmentName(name) {
 export function partitionFiles(fileList) {
 	const files = Array.from(fileList ?? []);
 	return {
-		images: files.filter((file) => file.type.startsWith("image/")),
-		docs: files.filter((file) => !file.type.startsWith("image/")),
+		images: files.filter((file) => file.type.startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|ico)$/i.test(file.name)),
+		docs: files.filter((file) => !(file.type.startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|ico)$/i.test(file.name))),
 	};
 }
 

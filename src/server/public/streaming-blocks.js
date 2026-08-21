@@ -21,6 +21,25 @@ function StreamingText({ text, className }) {
 	return html`<div ref=${setRef} class=${className ?? "message-content"}></div>`;
 }
 
+function StreamingMarkdown({ text, renderMarkdown }) {
+	const elRef = useRef(null);
+	const setRef = (el) => {
+		if (el && !elRef.current) elRef.current = el;
+		if (el && text) {
+			const fenceCount = (text.match(/```/g) || []).length;
+			const patched = fenceCount % 2 === 1 ? `${text}\n\`\`\`` : text;
+			el.innerHTML = renderMarkdown(patched);
+		}
+	};
+	useLayoutEffect(() => {
+		if (!elRef.current) return;
+		const fenceCount = (text.match(/```/g) || []).length;
+		const patched = fenceCount % 2 === 1 ? `${text}\n\`\`\`` : text;
+		elRef.current.innerHTML = renderMarkdown(patched);
+	}, [text, renderMarkdown]);
+	return html`<div ref=${setRef} class="message-content"></div>`;
+}
+
 export function BlockView({ block, streaming = false, renderMarkdown, showReasoning = true }) {
 	if (block.kind === "tool") {
 		// Key on the tool-call id (not position): when a second tool call
@@ -40,13 +59,17 @@ export function BlockView({ block, streaming = false, renderMarkdown, showReason
 	// opts in to the toggle.
 	if (block.kind === "thinking" && !showReasoning) return null;
 	const kind = block.kind === "thinking" ? "reasoning" : "assistant";
-	const className = `message message-${kind}${streaming ? " message-entering" : ""}`;
+	const isReasoning = block.kind === "thinking";
+	const className = `message message-${kind}`;
+	const streamingClass = streaming ? " message-entering" : "";
 	return html`
-		<div class=${className}>
+		<div class=${className + streamingClass}>
 			<div class="message-label">${block.kind === "thinking" ? "reasoning" : "agent"}</div>
 			${
 				streaming
-					? html`<${StreamingText} text=${block.text} />`
+					? isReasoning
+						? html`<${StreamingText} text=${block.text} />`
+						: html`<${StreamingMarkdown} text=${block.text} renderMarkdown=${renderMarkdown} />`
 					: block.kind === "thinking"
 						? html`<div class="message-content">${block.text}</div>`
 						: html`<div class="message-content" dangerouslySetInnerHTML=${{ __html: renderMarkdown(block.text) }} />`
