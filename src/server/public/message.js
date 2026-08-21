@@ -122,7 +122,7 @@ export function Message({ msg, renderMarkdown, escapeHtml, showReasoning = true 
 			${content && html`<div class="message-content" dangerouslySetInnerHTML=${{ __html: escapeHtml(content) }} />`}
 			<div class="message-content message-images">
 				${msg.images.map(
-					(src, i) => html`<img key=${i} src=${src} class="message-image" onClick=${() => setPreviewSrc(src)} />`,
+					(src, i) => html`<img key=${i} src=${src} class="message-image" loading="lazy" alt="Attached image ${i + 1}" onClick=${() => setPreviewSrc(src)} />`,
 				)}
 			</div>
 			${

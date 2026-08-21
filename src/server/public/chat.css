@@ -8,6 +8,7 @@
 	flex: 1;
 	min-height: 0;
 	overflow-y: auto;
+	overscroll-behavior: contain;
 	scrollbar-gutter: stable;
 	padding: 20px;
 	padding-left: max(20px, env(safe-area-inset-left));
@@ -26,6 +27,9 @@
  * Streaming updates on the same DOM subtree don't re-add it, so the
  * growing reply stays still while tokens arrive. */
 .message-entering { animation: rise .15s ease; }
+@media (prefers-reduced-motion: reduce) {
+	.message-entering { animation: none; }
+}
 .messages > * + * { padding-top: 6px; }
 .history-boundary {
 	display: flex;
@@ -61,8 +65,8 @@
 }
 .history-boundary-retry:hover { color: var(--text); text-decoration: underline; }
 @keyframes rise {
-	from { opacity: 0; transform: translateY(3px); }
-	to { opacity: 1; transform: translateY(0); }
+	from { opacity: 0; }
+	to { opacity: 1; }
 }
 /* Plain transcript, not a stack of cards — a role label plus content, like a
  * terminal/IDE chat log rather than a messaging-app bubble list. Only roles

@@ -313,7 +313,7 @@ export function SettingsModal({
 					<div class="settings-tabs">
 						${SETTINGS_TABS.map(
 							(t) => html`
-							<button key=${t.id} class="settings-tab${tab === t.id ? " active" : ""}" disabled=${busy} onClick=${() => setTab(t.id)}>${t.label}</button>
+							<button key=${t.id} class="settings-tab${tab === t.id ? " active" : ""}" onClick=${() => setTab(t.id)}>${t.label}</button>
 						`,
 						)}
 					</div>

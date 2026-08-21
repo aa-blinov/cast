@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "preact/hooks";
+import { useCallback, useEffect, useRef } from "preact/hooks";
 
 export function usePanelResize({ diffOpen, diffWidth, setDiffWidth, sidebarWidth, setSidebarWidth }) {
 	const diffDragRef = useRef(null);
@@ -21,6 +21,9 @@ export function usePanelResize({ diffOpen, diffWidth, setDiffWidth, sidebarWidth
 		diffDragRef.current = null;
 		document.body.classList.remove("resizing-diff");
 		window.removeEventListener("pointermove", onDiffResizeMove);
+		window.removeEventListener("pointercancel", onDiffResizeMove);
+		window.removeEventListener("pointerup", onDiffResizeEnd);
+		window.removeEventListener("pointercancel", onDiffResizeEnd);
 	}, [onDiffResizeMove]);
 	const startDiffResize = useCallback(
 		(event) => {
@@ -32,7 +35,14 @@ export function usePanelResize({ diffOpen, diffWidth, setDiffWidth, sidebarWidth
 			};
 			document.body.classList.add("resizing-diff");
 			window.addEventListener("pointermove", onDiffResizeMove);
+			window.addEventListener("pointercancel", onDiffResizeMove);
 			window.addEventListener("pointerup", onDiffResizeEnd, { once: true });
+			window.addEventListener("pointercancel", onDiffResizeEnd, { once: true });
+			if (event.target?.setPointerCapture) {
+				try {
+					event.target.setPointerCapture(event.pointerId);
+				} catch {}
+			}
 		},
 		[diffWidth, onDiffResizeMove, onDiffResizeEnd],
 	);
@@ -58,6 +68,9 @@ export function usePanelResize({ diffOpen, diffWidth, setDiffWidth, sidebarWidth
 		sidebarDragRef.current = null;
 		document.body.classList.remove("resizing-sidebar");
 		window.removeEventListener("pointermove", onSidebarResizeMove);
+		window.removeEventListener("pointercancel", onSidebarResizeMove);
+		window.removeEventListener("pointerup", onSidebarResizeEnd);
+		window.removeEventListener("pointercancel", onSidebarResizeEnd);
 	}, [onSidebarResizeMove]);
 	const startSidebarResize = useCallback(
 		(event) => {
@@ -70,9 +83,28 @@ export function usePanelResize({ diffOpen, diffWidth, setDiffWidth, sidebarWidth
 			};
 			document.body.classList.add("resizing-sidebar");
 			window.addEventListener("pointermove", onSidebarResizeMove);
+			window.addEventListener("pointercancel", onSidebarResizeMove);
 			window.addEventListener("pointerup", onSidebarResizeEnd, { once: true });
+			window.addEventListener("pointercancel", onSidebarResizeEnd, { once: true });
+			if (event.target?.setPointerCapture) {
+				try {
+					event.target.setPointerCapture(event.pointerId);
+				} catch {}
+			}
 		},
 		[sidebarWidth, onSidebarResizeMove, onSidebarResizeEnd],
+	);
+
+	// Ensure no dangling listeners survive unmount mid-drag.
+	useEffect(
+		() => () => {
+			window.removeEventListener("pointermove", onDiffResizeMove);
+			window.removeEventListener("pointercancel", onDiffResizeMove);
+			window.removeEventListener("pointermove", onSidebarResizeMove);
+			window.removeEventListener("pointercancel", onSidebarResizeMove);
+			document.body.classList.remove("resizing-diff", "resizing-sidebar");
+		},
+		[onDiffResizeMove, onSidebarResizeMove],
 	);
 
 	return { startDiffResize, startSidebarResize };

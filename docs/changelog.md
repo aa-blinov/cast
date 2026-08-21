@@ -2,6 +2,19 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.7
+
+### Fixed
+
+- **Web UI: sending no longer hangs on "Sending…".** The composer awaited the full `waitForSessionStream` (1.5s) + `POST /chat` before clearing `sending`, disabling the textarea and showing `Sending…` for the whole round trip. It now clears optimistically, debounces the Send button for 400ms only, and restores the draft only if `submitMessage` explicitly returns `false` (connection lost / upload failed). `waitForSessionStream` timeout is 400ms (was 1500ms) and `textarea` is never disabled by `sending`.
+- **Web UI: streaming renders markdown progressively.** `BlockView` streamed plain `textNode` and only `Message` rendered markdown at `assistant_message` — lists, code fences and bold popped at the end with a height jump. Streaming `content` blocks now use `StreamingMarkdown` (`innerHTML = renderMarkdown(patched)`) on every RAF, with virtually-closed fences (`odd fences → +\n\`\`\``) so code blocks appear early and grow smoothly. Final height matches settled height.
+- **Web UI: jump at streaming start removed.** `chat.css` `rise` no longer `translateY(3px)` — opacity only — and respects `prefers-reduced-motion`.
+- **Web UI: turn timer starts only on SSE `status:running`.** Previously it started on client `pendingSince` and jumped when `turnStartedAt` arrived (or disappeared after `POST` cleared `pending`). Now `elapsed-timer.js` ignores `pendingSince` and starts from server `turnStartedAt` (anchored `Date.now()-turnStartedAt`), `App` no longer passes `pendingSince`.
+- **Web UI: API client no longer hangs forever.** `api.js` now uses `AbortController` with 15s timeout (30s for session/history) and propagates `AbortError` as `Request timed out`.
+- **Web UI: panel resize no longer leaks listeners.** `use-panel-resize.js` now handles `pointercancel`, `setPointerCapture`, and cleans up on unmount; both diff and sidebar handles are robust.
+- **Web UI: sidebar search no longer races.** Aborts previous `fetch` via `AbortController` instead of only a `cancelled` flag.
+- **Web UI: composer UX.** Restores draft only when `submitMessage` returns `false`, keeps `textarea` enabled while `sending` (placeholder no longer `Sending…`), file input has `accept` filter, images get `loading="lazy"`/`alt`, `tool` cards are keyboard-accessible, and `partitionFiles` also matches by extension.
+
 ## 0.22.6
 
 ### Fixed

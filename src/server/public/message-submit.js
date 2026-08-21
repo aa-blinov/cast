@@ -47,16 +47,16 @@ export async function submitMessage(text, images, pendingDocs, context) {
 	) {
 		if (!connectionReady) {
 			showToast?.("Connection lost — answer kept in the composer until the daemon reconnects", "error");
-			return;
+			return false;
 		}
 		try {
 			const values = session.question.questions.map(() => text.trim());
 			await api("POST", `/api/sessions/${activeId}/question`, { values });
 			setSession((prev) => (prev ? { ...prev, question: undefined } : prev));
-			return;
+			return true;
 		} catch (err) {
 			showToast?.(err.message, "error");
-			return;
+			return false;
 		}
 	}
 
@@ -72,7 +72,7 @@ export async function submitMessage(text, images, pendingDocs, context) {
 	// real backend session with nothing actually said yet.
 	if (text === "/diff") {
 		toggleDiff();
-		return;
+		return true;
 	}
 	if (text === "/copy") {
 		const lastAssistant = [...(session?.messages ?? [])].reverse().find((m) => m.role === "assistant");
@@ -107,11 +107,11 @@ export async function submitMessage(text, images, pendingDocs, context) {
 		} catch {
 			addNotice("Copy failed", "error");
 		}
-		return;
+		return true;
 	}
 	if (!connectionReady) {
 		showToast?.("Connection lost — message kept in the composer until the daemon reconnects", "error");
-		return;
+		return false;
 	}
 
 	// Deferred documents from a draft session — upload them now that we
@@ -131,11 +131,11 @@ export async function submitMessage(text, images, pendingDocs, context) {
 					});
 				} catch (err) {
 					showToast(err.message, "error");
-					return;
+					return false;
 				}
 			} else {
 				showToast("Still connecting — try again in a moment", "error");
-				return;
+				return false;
 			}
 		}
 		const paths = [];
@@ -152,7 +152,7 @@ export async function submitMessage(text, images, pendingDocs, context) {
 				// Sending without the attachment would make the transcript claim
 				// success while the agent can never access the user's file.
 				setInputsRefreshNonce?.((n) => n + 1);
-				return;
+				return false;
 			}
 		}
 		// Rebuild the system-reminder with real server-side paths —
@@ -184,14 +184,14 @@ export async function submitMessage(text, images, pendingDocs, context) {
 				});
 			} catch (err) {
 				showToast(err.message, "error");
-				return;
+				return false;
 			}
 		} else {
 			// Composer is disabled while !ready, so this only fires on a very
 			// fast Enter right as the page loads — surface it instead of eating
 			// the message silently.
 			showToast("Still connecting — try again in a moment", "error");
-			return;
+			return false;
 		}
 	}
 	// The EventSource effect may still be connecting after commitSession or
@@ -201,7 +201,7 @@ export async function submitMessage(text, images, pendingDocs, context) {
 	if (finalText.startsWith("/")) {
 		if ((await waitForSessionStream?.(id)) === false) {
 			showToast?.("Connection lost — command kept in the composer until the daemon reconnects", "error");
-			return;
+			return false;
 		}
 		try {
 			const result = await api("POST", `/api/sessions/${id}/command`, { command: text });
@@ -283,7 +283,7 @@ export async function submitMessage(text, images, pendingDocs, context) {
 		} catch (err) {
 			addNotice(err.message, "error");
 		}
-		return;
+		return true;
 	}
 	// Show the message immediately — waiting for the POST to resolve before
 	// appending it made every send feel like it had a beat of lag, even
@@ -330,7 +330,7 @@ export async function submitMessage(text, images, pendingDocs, context) {
 	if (!streamReady) {
 		setRunning(false);
 		if (isCurrentDraft()) showToast?.("Connection lost — message kept locally until the daemon reconnects", "error");
-		return;
+		return true;
 	}
 	try {
 		await api("POST", `/api/sessions/${id}/chat`, {
@@ -360,5 +360,7 @@ export async function submitMessage(text, images, pendingDocs, context) {
 	} catch (err) {
 		setRunning(false);
 		if (isCurrentDraft()) showToast(`Message kept locally; retrying when the daemon reconnects: ${err.message}`, "error");
+		return false;
 	}
+	return true;
 }

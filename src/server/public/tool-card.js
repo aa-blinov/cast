@@ -105,7 +105,10 @@ export function ToolCard({ call, renderMarkdown }) {
 			<div
 				class="tool-card-header${hasResult ? " clickable" : ""}"
 				data-tool=${call.name}
+				role=${hasResult ? "button" : undefined}
+				tabIndex=${hasResult ? 0 : undefined}
 				onClick=${hasResult ? () => setOpen((openState) => !openState) : undefined}
+				onKeyDown=${hasResult ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((s) => !s); } } : undefined}
 			>
 				${mcp && html`<span class="tool-card-mcp-badge">MCP</span>`}
 				<span class="tool-card-name">${mcp ? mcpToolLabel(call.name) : call.name}</span>
@@ -118,7 +121,7 @@ export function ToolCard({ call, renderMarkdown }) {
 				call.images?.length &&
 				html`
 				<div class="message-content message-images tool-card-images">
-					${call.images.map((src, index) => html`<img key=${index} src=${src} class="message-image" onClick=${() => setPreviewSrc(src)} />`)}
+					${call.images.map((src, index) => html`<img key=${index} src=${src} class="message-image" loading="lazy" alt="Tool image ${index + 1}" onClick=${() => setPreviewSrc(src)} />`)}
 				</div>
 			`
 			}
