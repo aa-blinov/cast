@@ -233,6 +233,8 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	display: flex;
 	align-items: flex-start;
 	padding: 0 12px;
+	content-visibility: auto;
+	contain-intrinsic-size: auto 20px;
 }
 .diff-line-num {
 	flex-shrink: 0;
@@ -402,6 +404,24 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	padding: 6px 8px;
 	font-size: .75rem;
 	color: var(--text-muted);
+}
+.fs-skeleton {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 8px;
+}
+.fs-skeleton-row {
+	height: 22px;
+	background: var(--bg-raised);
+	border-radius: 4px;
+	animation: fs-shimmer 1.2s ease-in-out infinite;
+}
+.fs-skeleton-row:nth-child(2) { width: 85%; }
+.fs-skeleton-row:nth-child(3) { width: 70%; }
+@keyframes fs-shimmer {
+	0%, 100% { opacity: .6; }
+	50% { opacity: 1; }
 }
 .fs-rename-input {
 	flex: 1;

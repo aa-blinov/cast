@@ -138,12 +138,17 @@ export function FileExplorer({ activeId, confirm, refreshNonce }) {
 	// the user having to manually collapse and reopen a folder — re-fetch
 	// every directory that's currently loaded (not just expanded ones still
 	// visible) and re-run an active search, so new/changed/deleted files
-	// surface on their own.
+	// surface on their own. Debounced to avoid a burst of parallel fetches
+	// when several tool_end events fire in quick succession.
+	const refreshTimerRef = useRef(null);
 	const refreshLoaded = useCallback(() => {
 		if (!activeId) return;
-		for (const relPath of Object.keys(treeRef.current)) void loadDir(relPath);
-		const currentQuery = queryRef.current.trim();
-		if (currentQuery) void runSearch(currentQuery);
+		if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+		refreshTimerRef.current = setTimeout(() => {
+			for (const relPath of Object.keys(treeRef.current)) void loadDir(relPath);
+			const currentQuery = queryRef.current.trim();
+			if (currentQuery) void runSearch(currentQuery);
+		}, 200);
 	}, [activeId, loadDir, runSearch]);
 
 	useEffect(() => {
@@ -151,6 +156,7 @@ export function FileExplorer({ activeId, confirm, refreshNonce }) {
 		lastRefreshNonceRef.current = refreshNonce;
 		refreshLoaded();
 	}, [refreshLoaded, refreshNonce]);
+	useEffect(() => () => { if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current); }, []);
 
 	const doDelete = async (relPath, type) => {
 		const message =
@@ -279,7 +285,7 @@ export function FileExplorer({ activeId, confirm, refreshNonce }) {
 				${
 					isDir && isOpen
 						? isLoading
-							? html`<div class="fs-loading" style=${{ paddingLeft: `${(depth + 1) * 16}px` }}>Loading…</div>`
+							? html`<div class="fs-skeleton" style=${{ paddingLeft: `${(depth + 1) * 16}px` }}><div class="fs-skeleton-row"></div><div class="fs-skeleton-row"></div><div class="fs-skeleton-row"></div></div>`
 							: (tree[fullPath] || []).map((child) => renderEntry(fullPath, child, depth + 1))
 						: null
 				}
@@ -298,7 +304,7 @@ export function FileExplorer({ activeId, confirm, refreshNonce }) {
 				${
 					searchResults
 						? searching
-							? html`<div class="fs-loading">Searching…</div>`
+							? html`<div class="fs-skeleton"><div class="fs-skeleton-row"></div><div class="fs-skeleton-row"></div><div class="fs-skeleton-row"></div></div>`
 							: searchResults.length === 0
 								? html`<div class="diff-empty">No matches</div>`
 								: searchResults.map((r) => {
@@ -322,7 +328,7 @@ export function FileExplorer({ activeId, confirm, refreshNonce }) {
 								? tree[""].map((entry) => renderEntry("", entry, 0))
 								: html`<div class="diff-empty">No files yet</div>`
 							: loadingDirs.has("")
-								? html`<div class="diff-empty">Loading…</div>`
+								? html`<div class="fs-skeleton"><div class="fs-skeleton-row"></div><div class="fs-skeleton-row"></div><div class="fs-skeleton-row"></div><div class="fs-skeleton-row"></div></div>`
 								: null
 				}
 			</div>

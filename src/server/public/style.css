@@ -68,6 +68,11 @@ body.resizing-sidebar * { user-select: none; }
 	gap: 10px;
 	z-index: 10;
 }
+@media (max-width: 360px) {
+	.header { padding: 0 8px; gap: 6px; }
+	.header-right { gap: 4px; }
+	.header .menu-toggle { padding: 4px; }
+}
 .header-logo {
 	display: inline-flex; align-items: center;
 	font-family: var(--font-mono);
@@ -355,6 +360,14 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	margin-top: 8px;
 	padding-top: 8px;
 	border-top: 1px solid var(--border);
+}
+.sidebar-item {
+	content-visibility: auto;
+	contain-intrinsic-size: auto 36px;
+}
+.sidebar-session-group {
+	content-visibility: auto;
+	contain-intrinsic-size: auto 120px;
 }
 /* Unlike .sidebar-divider (used between top-level chrome blocks, outside any
  * padded section), this one lives inside .sidebar-section's own 12px

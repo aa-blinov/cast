@@ -78,6 +78,13 @@
 	word-wrap: break-word;
 	font-size: .9rem;
 	line-height: 1.5;
+	content-visibility: auto;
+	contain-intrinsic-size: auto 120px;
+}
+/* Streaming block is actively mutating — keep it rendered even offscreen
+   so height measurements for auto-scroll stay accurate */
+.message-group .message:last-child {
+	content-visibility: visible;
 }
 
 /* ── Empty state ──────────────────────────────────────────────────── */

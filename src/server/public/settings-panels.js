@@ -1,6 +1,6 @@
 import htm from "htm";
 import { h } from "preact";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { api } from "./api.js";
 import { icons } from "./icons.js";
 import { useModalFocusTrap } from "./modal-focus.js";
@@ -495,15 +495,25 @@ function SettingsHooks({ data, busy, act }) {
 function SettingsSkillssh({ data, busy, act, confirm }) {
 	const [installArgs, setInstallArgs] = useState("");
 	const [installing, setInstalling] = useState(false);
+	const [installFeedback, setInstallFeedback] = useState(null);
 	const allSkills = data || [];
 	// Filter to skills installed via npx skills add (flagged by the bridge)
 	const shSkills = allSkills.filter((s) => s.skillssh);
 	const install = async () => {
 		if (!installArgs || busy || installing) return;
 		setInstalling(true);
+		setInstallFeedback(null);
 		try {
 			const res = await act(`/skills-sh install ${installArgs}`);
-			if (res.ok) setInstallArgs("");
+			if (res.ok) {
+				setInstallArgs("");
+				// Surface stdout even on success — it contains "Failed to install 1" etc.
+				if (res.result) setInstallFeedback({ ok: true, text: String(res.result).slice(0, 3000) });
+			} else {
+				setInstallFeedback({ ok: false, text: String(res.error || "Install failed").slice(0, 3000) });
+			}
+		} catch (err) {
+			setInstallFeedback({ ok: false, text: err instanceof Error ? err.message : String(err) });
 		} finally {
 			setInstalling(false);
 		}
@@ -514,7 +524,7 @@ function SettingsSkillssh({ data, busy, act, confirm }) {
 
 			<div class="settings-section-title">Install a skill</div>
 			<div class="settings-form-row">
-				<input type="text" placeholder="owner/repo --skill name (or paste skills.sh's npx command)" value=${installArgs} disabled=${installing} onInput=${(e) => setInstallArgs(e.target.value)} onKeyDown=${(
+				<input type="text" placeholder="owner/repo --skill name (or paste skills.sh's npx command)" value=${installArgs} disabled=${installing} onInput=${(e) => { setInstallArgs(e.target.value); if (installFeedback) setInstallFeedback(null); }} onKeyDown=${(
 					e,
 				) => {
 					if (e.key === "Enter") {
@@ -525,6 +535,7 @@ function SettingsSkillssh({ data, busy, act, confirm }) {
 				<button class="modal-btn icon-btn" title=${installing ? "Installing skill" : "Run npx skills add -g"} aria-busy=${installing} disabled=${busy || installing || !installArgs} onClick=${install}>${installing ? html`<span class="settings-inline-loader" aria-label="Installing" />` : html`<${icons.arrowDownTray} />`}</button>
 			</div>
 			${installing && html`<div class="settings-install-status" role="status">Installing skill… this can take a minute.</div>`}
+			${installFeedback && html`<div class=${installFeedback.ok ? "settings-ok" : "settings-error"} style="white-space:pre-wrap;word-break:break-word;max-height:240px;overflow:auto">${installFeedback.text}</div>`}
 
 			<div class="settings-section-title">Installed via skills.sh (${shSkills.length})</div>
 			${shSkills.length === 0 && html`<div class="settings-hint">No skills installed via skills.sh yet. Install one above.</div>`}
@@ -1083,6 +1094,77 @@ function InfoPopover({ text, readUrl, contentLabel = "Skill content" }) {
 	];
 }
 
+function SettingsUpdates() {
+	const [info, setInfo] = useState(null);
+	const [checking, setChecking] = useState(true);
+	const [upgrading, setUpgrading] = useState(false);
+	const [error, setError] = useState(null);
+
+	const check = useCallback(async () => {
+		setChecking(true);
+		setError(null);
+		try {
+			// quick check — 3s timeout on server, plus client abort
+			const controller = new AbortController();
+			const timer = setTimeout(() => controller.abort(), 4000);
+			const res = await fetch("/api/system/version", { cache: "no-store", signal: controller.signal });
+			clearTimeout(timer);
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			const data = await res.json();
+			setInfo(data);
+		} catch (err) {
+			setError(err instanceof Error ? err.message : String(err));
+		} finally {
+			setChecking(false);
+		}
+	}, []);
+
+	useEffect(() => { check(); }, [check]);
+
+	const doUpgrade = async () => {
+		setUpgrading(true);
+		setError(null);
+		try {
+			const res = await api("POST", "/api/system/upgrade", {});
+			if (res?.queued) {
+				setError(null);
+				// poll for new version after upgrade queued
+				setTimeout(check, 5000);
+			}
+		} catch (err) {
+			setError(err instanceof Error ? err.message : String(err));
+		} finally {
+			setUpgrading(false);
+		}
+	};
+
+	if (checking && !info) {
+		return html`<div class="settings-rows"><div class="settings-loading"><span class="settings-inline-loader" /> Checking for updates…</div></div>`;
+	}
+
+	return html`<div class="settings-rows">
+		<p class="settings-intro"><span>Keep Cast up to date. Checks GitHub releases quickly on open (3s timeout) — no hang.</span></p>
+		<div class="settings-compact-list">
+			<div class="settings-compact-row">
+				<div class="settings-compact-copy"><span class="settings-compact-title">Current</span><span><code>v${info?.current ?? "—"}</code> ${info?.isRelease ? "" : "(dev — git pull)"}</span></div>
+			</div>
+			<div class="settings-compact-row">
+				<div class="settings-compact-copy"><span class="settings-compact-title">Latest</span><span>${info?.latest ? html`<code>v${info.latest}</code>` : "—"} ${info?.isRelease && info?.updateAvailable ? html`<span class="settings-item-tag">update available</span>` : ""}</span></div>
+				<button class="modal-btn" disabled=${checking} onClick=${check} title="Check again">${checking ? html`<span class="settings-inline-loader" />` : "Check"}</button>
+			</div>
+		</div>
+		${error ? html`<div class="settings-error" style="white-space:pre-wrap">${error}</div>` : null}
+		${info?.isRelease && info?.updateAvailable
+			? html`<div class="settings-section-title">Update</div>
+				<p class="settings-hint">A newer version v${info.latest} is available. Upgrade runs <code>install.sh</code> and restarts the daemon on the same <code>host:port</code> — web UI will show <em>reconnecting</em> for ~3s.</p>
+				<button class="modal-btn modal-btn-primary" disabled=${upgrading} onClick=${doUpgrade}>${upgrading ? html`<span class="settings-inline-loader" /> Updating…` : `Update to v${info.latest}`}</button>`
+			: info && !checking
+				? html`<div class="settings-ok" style="margin-top:8px">Up to date${info.isRelease ? "" : " (dev — git pull to update)"}.</div>`
+				: null}
+		${!info?.isRelease ? html`<p class="settings-hint" style="margin-top:8px">Running from source — upgrade via <code>git pull</code>, not this button.</p>` : null}
+	</div>`;
+}
+
 export {
 	InfoPopover,
 	SettingsBash,
@@ -1096,6 +1178,7 @@ export {
 	SettingsQuickMode,
 	SettingsServer,
 	SettingsSkills,
+	SettingsUpdates,
 	SettingsSkillssh,
 	SettingsSsh,
 	SettingsWeb,

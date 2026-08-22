@@ -101,15 +101,25 @@ export function LiveStreamingBlocks({ controllerRef, onFrame, renderMarkdown, sh
 	const [stream, setStream] = useState({ blocks: [] });
 	const streamRef = useRef({ blocks: [] });
 	const rafRef = useRef(null);
+	const lastFlushRef = useRef(0);
 	const flush = useCallback(() => {
 		rafRef.current = null;
-		setStream(streamRef.current);
+		lastFlushRef.current = performance.now();
+		setStream({ blocks: [...streamRef.current.blocks] });
 		onFrame();
 	}, [onFrame]);
 	const reduce = useCallback(
 		(event) => {
 			streamRef.current = reduceStreamEvent(streamRef.current, event);
-			if (rafRef.current == null) rafRef.current = requestAnimationFrame(flush);
+			if (rafRef.current != null) return;
+			const since = performance.now() - lastFlushRef.current;
+			// Throttle streaming renders to ~12fps (80ms) — full markdown re-parse
+			// on every token is O(n²). Coalescing via RAF already helps, but for
+			// 4-5 tokens per frame we still re-parse the whole growing text.
+			// 80ms keeps typing feel smooth while cutting renders 4× on fast streams.
+			const delay = since < 80 ? 80 - since : 0;
+			if (delay === 0) rafRef.current = requestAnimationFrame(flush);
+			else rafRef.current = setTimeout(() => requestAnimationFrame(flush), delay);
 		},
 		[flush],
 	);

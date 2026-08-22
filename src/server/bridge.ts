@@ -195,12 +195,24 @@ async function runSkillsSh(args: string[], timeout: number): Promise<string> {
 	// `homedir()` for us). Any caller already passing `-y` (rare) is
 	// left alone.
 	const fullArgs = args.includes("-y") || args.includes("--yes") ? args : [...args, "-y"];
-	const { stdout } = await execFileAsync("npx", ["--yes", "skills", ...fullArgs], {
-		cwd: homedir(),
-		encoding: "utf-8",
-		timeout,
-	});
-	return stripAnsi(stdout).trim();
+	try {
+		const { stdout, stderr } = await execFileAsync("npx", ["--yes", "skills", ...fullArgs], {
+			cwd: homedir(),
+			encoding: "utf-8",
+			timeout,
+		});
+		const out = stripAnsi(stdout).trim();
+		const err = stripAnsi(stderr || "").trim();
+		// Surface stderr warnings (e.g. "Failed to install 1") even on success
+		if (err && !out.includes(err)) return err ? `${out}\n${err}`.trim() : out;
+		return out;
+	} catch (error) {
+		const execError = error as { stdout?: string; stderr?: string; message?: string };
+		const out = stripAnsi(execError.stdout || "").trim();
+		const err = stripAnsi(execError.stderr || execError.message || String(error)).trim();
+		const combined = [out, err].filter(Boolean).join("\n").trim();
+		throw new Error(combined || "skills.sh failed");
+	}
 }
 
 export type WebAgentStatus = "idle" | "running" | "error";

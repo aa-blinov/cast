@@ -2,6 +2,22 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.8
+
+### Added
+
+- **Pluggable UI factory — reactive, no-build, agent-editable.** `src/server/ui-factory/template/` (`Preact + htm` via `/vendor/*`) with `LAYOUT = {sidebar, THEME}` and `style.css` tokens. `POST /api/uis {"name":"my-ui"}` or `cp -r template ~/.cast/ui/<name>` creates `http://host:1337/ui/<name>/` and `http://host:1337/<name>/` (also `GET /ui` lists). `src/server/ui-registry.ts` discovers `~/.cast/ui/*` every request, `chokidar` watches `~/.cast/ui` → `GET /api/uis/events` SSE `ui_change` → template auto-`reload`. Built-in skill `prompts/skills/ui-factory` (and `references/*`) teaches the agent to `read`/`write` `~/.cast/ui/*` (`files.ts:265` blocks `src/server/public`/`dist/public`).
+- **Settings → Updates with quick check.** `GET /api/system/version` (`current` from `package.json`, `fetchLatestVersion()` with `3s` race, `isReleaseInstall()`) and `POST /api/system/upgrade` (`202` + `setImmediate runUpgrade`). `SettingsUpdates` (`settings-panels.js`) fetches on open with `4s` client abort, shows `Current v…` / `Latest v…` + `Check` / `Update to v…` (only when `isRelease && updateAvailable`), `dev — git pull` hint otherwise. Lazy-loaded (`settings-modal.js` only visible tab).
+
+### Changed
+
+- **Base UI is now stable at `/app` (and `/cast`, `/default`, `/base`, `/based`, `/core`, `/main`).** `server.ts:2264` serves `dist/public` for all aliases + `…/settings` sub-paths, `app.js:498` `viewFromPath()` strips prefix, `navigate()` preserves it. `GET /` stays `default` for compat, `GET /ui` lists factory UIs. Factory UIs also at `/<name>/` for convenience (`http://host:1337/claude-ui/`).
+- **Install script opens firewall.** `install.sh:109` and `install.ps1:92` now `ufw allow 1337/tcp` (and `firewall-cmd`/`iptables`/`New-NetFirewallRule` fallbacks) best-effort, so `cast server --public` is reachable without manual `ufw`.
+
+### Fixed
+
+- **Factory UIs are isolated and live-reload while open.** Previously `default` at `/` could be overwritten by a factory `write`; now `src/core/tools/files.ts:265` blocks `src/server/public`/`dist/public` and `src/server/ui-factory/template`, `shared.ts:153` expands `~/`, and `server.ts` serves extra UIs only from `~/.cast/ui/*` with `no-cache` HTML.
+
 ## 0.22.7
 
 ### Fixed
