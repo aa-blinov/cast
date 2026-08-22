@@ -262,6 +262,17 @@ export async function execWrite(args: Record<string, unknown>, cwd: string): Pro
 	}
 	const content = args.content;
 	const absolutePath = resolvePath(filePath, cwd);
+	// Guard built-in UI — agent must use ~/.cast/ui/*, not overwrite default at / (src/server/public, dist/public)
+	if (
+		absolutePath.includes("/src/server/public/") ||
+		absolutePath.includes("/dist/public/") ||
+		absolutePath.includes("/src/server/ui-factory/template/")
+	) {
+		return {
+			content: `Blocked: built-in UI at ${absolutePath} is read-only. Use ~/.cast/ui/<name>/ (served at /ui/<name>/) or POST /api/uis — see ui-factory skill.`,
+			isError: true,
+		};
+	}
 
 	let oldContent: string | null = null;
 	try {
@@ -390,6 +401,16 @@ export async function execEdit(args: Record<string, unknown>, cwd: string, confi
 	const replaceAll = args.replaceAll === true;
 
 	const absolutePath = resolvePath(filePath, cwd);
+	if (
+		absolutePath.includes("/src/server/public/") ||
+		absolutePath.includes("/dist/public/") ||
+		absolutePath.includes("/src/server/ui-factory/template/")
+	) {
+		return {
+			content: `Blocked: built-in UI at ${absolutePath} is read-only. Use ~/.cast/ui/<name>/ (served at /ui/<name>/) — see ui-factory skill.`,
+			isError: true,
+		};
+	}
 
 	// oldString: "" means "create a new file with newString" — the documented
 	// way to create a file via `edit` instead of `write`.

@@ -23,6 +23,7 @@ const SETTINGS_TABS = [
 	{ id: "server", label: "Server" },
 	{ id: "skills", label: "Skills" },
 	{ id: "ssh", label: "SSH" },
+	{ id: "updates", label: "Updates" },
 	{ id: "web", label: "Web" },
 ];
 
@@ -211,13 +212,14 @@ export function SettingsModal({
 		[run, activeId],
 	);
 
-	// Preload every tab in parallel as soon as the modal mounts (or the active
-	// session changes) — clicking a tab then just shows what's already there
-	// instead of a fresh fetch-and-flash "Loading…" every single time.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: activeId isn't read in the body directly, but load() closes over it (see `run`'s deps above) — re-running this on session switch is the intended behavior.
+	// Lazy load — only the visible tab is fetched. Preloading all 15 tabs
+	// in parallel on open spiked 7+ concurrent `POST /command` + `GET` calls
+	// and left the modal in "Loading…" on slow networks.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: tab is the trigger, activeId via load()'s closure
 	useEffect(() => {
-		for (const t of SETTINGS_TABS) load(t.id);
-	}, [activeId, load]);
+		if (tab === "appearance" || tab === "personas" || tab === "updates") return;
+		load(tab);
+	}, [tab, activeId, load]);
 	const modalRef = useModalFocusTrap(true);
 	useEffect(() => {
 		const onKey = (e) => {
@@ -297,7 +299,7 @@ export function SettingsModal({
 	// theme and font both come from props/local state (fetched once at app
 	// boot, or never fetched at all for font — see applyFont) rather than the
 	// per-tab preload above.
-	const hasData = tab === "appearance" || tab === "personas" || data[tab] !== undefined;
+	const hasData = tab === "appearance" || tab === "personas" || tab === "updates" || data[tab] !== undefined;
 
 	return html`
 		<div class="modal-backdrop" onClick=${onClose}>
@@ -360,7 +362,9 @@ export function SettingsModal({
 																					? html`<${panels.SettingsProvider} data=${data.provider} busy=${busy} act=${act} confirm=${confirm} />`
 																					: tab === "ssh"
 																						? html`<${panels.SettingsSsh} data=${data.ssh} busy=${busy} act=${act} confirm=${confirm} />`
-																						: null
+																						: tab === "updates"
+																							? html`<${panels.SettingsUpdates} />`
+																							: null
 						}
 					</div>
 				</div>

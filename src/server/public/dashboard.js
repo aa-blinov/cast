@@ -163,10 +163,37 @@ export function Dashboard({ onClose }) {
 		}
 	}, []);
 
+	const telemetryCache = useRef(new Map());
 	const load = useCallback(async () => {
 		const req = ++loadRequestIdRef.current;
 		const hours = range === "30d" ? 720 : range === "7d" ? 168 : 24;
 		const resolution = hours === 24 ? 60 : hours === 168 ? 360 : 1440;
+		const cacheKey = `${hours}:${resolution}`;
+		const cached = telemetryCache.current.get(cacheKey);
+		if (cached && Date.now() - cached.ts < 30000) {
+			const { ov, se, eo, es, rel, sys, mem } = cached.data;
+			if (req === loadRequestIdRef.current) {
+				setLlm({
+					overview: ov?.rows ?? [],
+					series: se?.buckets ?? [],
+					avgLatencyMs: ov?.avgLatencyMs ?? null,
+					latencyPercentiles: ov?.latencyPercentiles ?? null,
+					tokensPerSec: ov?.tokensPerSec ?? null,
+				});
+				setPerf({
+					overview: eo?.rows ?? [],
+					series: es?.buckets ?? [],
+					avgLatencyMs: eo?.avgLatencyMs ?? null,
+					latencyPercentiles: eo?.latencyPercentiles ?? null,
+				});
+				setReliability(rel ?? null);
+				setSystem(sys ?? null);
+				setMemory(mem ?? null);
+				setEndpointPage((p) => ({ ...p, page: 0 }));
+				setLoading(false);
+				return;
+			}
+		}
 		setLoading(true);
 		setError(null);
 		try {
@@ -197,6 +224,11 @@ export function Dashboard({ onClose }) {
 			setSystem(sys ?? null);
 			setMemory(mem ?? null);
 			setEndpointPage((p) => ({ ...p, page: 0 }));
+			telemetryCache.current.set(cacheKey, { ts: Date.now(), data: { ov, se, eo, es, rel, sys, mem } });
+			if (telemetryCache.current.size > 6) {
+				const first = telemetryCache.current.keys().next().value;
+				telemetryCache.current.delete(first);
+			}
 		} catch (err) {
 			if (req === loadRequestIdRef.current) setError(err.message);
 		} finally {

@@ -89,3 +89,16 @@ if ($userPath -notlike "*$binDir*") {
 
 $installedVersion = (Get-Content (Join-Path $InstallDir "package.json") -Raw | ConvertFrom-Json).version
 Write-Host "cast $installedVersion installed. Restart your terminal, then run 'cast' to get started." -ForegroundColor Cyan
+
+# Open firewall for web UI (1337 — factory UIs at /ui/* and /<name>/ on same port)
+foreach ($port in @(1337)) {
+	try {
+		$ruleName = "cast-$port"
+		if (-not (Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue)) {
+			Write-Host "Opening firewall port $port/tcp..." -ForegroundColor Cyan
+			New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Protocol TCP -LocalPort $port -Action Allow -ErrorAction Stop | Out-Null
+		}
+	} catch {
+		Write-Host "Could not open firewall port $port/tcp automatically (try: New-NetFirewallRule -DisplayName cast-$port -Direction Inbound -Protocol TCP -LocalPort $port -Action Allow)" -ForegroundColor Yellow
+	}
+}

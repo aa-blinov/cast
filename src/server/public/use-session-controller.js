@@ -246,11 +246,27 @@ export function useSessionController({
 				localStorage.setItem("cast:lastSessionId", data.id);
 			} catch {}
 			setUrlSessionId(data.id, { push });
-			void loadSessions();
+			// Optimistic sidebar update — no full refetch needed for an empty new session
+			setSessions((prev) => {
+				if (prev.some((s) => s.id === data.id)) return prev;
+				const summary = {
+					id: data.id,
+					title: data.session.title ?? null,
+					persona: data.session.persona,
+					model: data.session.model,
+					cwd: data.session.cwd,
+					pinned: false,
+					status: "idle",
+					updatedAt: data.session.updatedAt,
+					createdAt: data.session.createdAt,
+					messageCount: 0,
+				};
+				return [summary, ...prev];
+			});
 			return data.id;
 		},
 		[
-			loadSessions,
+			setSessions,
 			resetStreamingNow,
 			setSidebarOpen,
 			setActiveId,

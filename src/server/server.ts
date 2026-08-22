@@ -22,6 +22,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { brotliCompressSync, gzipSync } from "node:zlib";
+import chokidar from "chokidar";
 import { getDb } from "../core/db.ts";
 import {
 	listProjectMemory,
@@ -54,6 +55,7 @@ import {
 	queryTurnMetrics,
 	recordApiRequest,
 } from "../core/telemetry.ts";
+import { fetchLatestVersion, isNewerVersion, isReleaseInstall } from "../core/upgrade.ts";
 import { ensureSessionWorktree } from "../core/worktree.ts";
 import {
 	API_V1_PREFIX,
@@ -66,6 +68,8 @@ import { reconcileActiveStream, SANDBOX_CWD, type ServerBridge, toDisplayMessage
 import { GOAL_MAX_OUTER_ITERATIONS } from "./commands.ts";
 import { readLiveServerState } from "./daemon-state.ts";
 import { isBlockedAttachmentName, sessionInputsDir } from "./inputs.ts";
+import { createUi } from "./ui-factory/factory.ts";
+import { discoverUis } from "./ui-registry.ts";
 
 const PORT_RE = /:\d+$/;
 const ROUTE_PARAM_RE = /:(\w+)/g;
@@ -168,6 +172,10 @@ export interface WebServerOptions {
 	onListening?: (port: number) => void;
 	/** Fires on a listen failure (e.g. EADDRINUSE) instead of the process crashing on an unhandled error event. */
 	onError?: (err: NodeJS.ErrnoException) => void;
+	/** When true, this server is the factory UI server on the neighbour port — it serves extra UIs at / and /ui/*, while the main server keeps only / */
+	isUiServer?: boolean;
+	/** Neighbour port for factory UIs — used by main server to redirect /ui/* */
+	uiPort?: number;
 }
 
 export function startServer(options: WebServerOptions): ReturnType<typeof createServer> {
@@ -191,6 +199,56 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 	}
 
 	console.log(`[cast server] auth enabled (user: ${webUser})`);
+	// Pluggable UIs — factory: any static dir with index.html becomes /ui/<name>/
+	// Re-discovered per request so `POST /api/uis` is live without restart.
+	function getAllUis() {
+		const cwd = (() => {
+			try {
+				return bridge.getConfig().cwd ?? homedir();
+			} catch {
+				return homedir();
+			}
+		})();
+		const trusted = (() => {
+			try {
+				const s = loadSettings();
+				return s.projectTrust?.[cwd] === true;
+			} catch {
+				return false;
+			}
+		})();
+		return discoverUis(cwd, trusted);
+	}
+	function getUiMap() {
+		const all = getAllUis();
+		return new Map(all.filter((u) => !u.builtin).map((u) => [u.name, u]));
+	}
+	try {
+		const atStart = getAllUis().filter((u) => !u.builtin);
+		if (atStart.length > 0)
+			console.log(`[cast server] extra UIs: ${atStart.map((u) => `${u.name} → ${u.dir}`).join(", ")}`);
+	} catch {}
+	// Live reload for factory UIs — agent edits ~/.cast/ui/* and browser auto-reloads
+	const uiEventListeners = new Set<(ev: { type: string }) => void>();
+	try {
+		const watchTargets = [join(homedir(), ".cast", "ui"), join(homedir(), ".config", "cast", "ui")].filter((p) =>
+			existsSync(p),
+		);
+		if (watchTargets.length > 0) {
+			const w = chokidar.watch(watchTargets, { ignoreInitial: true, depth: 4, ignorePermissionErrors: true });
+			const notify = () => {
+				for (const l of [...uiEventListeners])
+					try {
+						l({ type: "ui_change" });
+					} catch {}
+			};
+			w.on("add", notify);
+			w.on("change", notify);
+			w.on("unlink", notify);
+			w.on("addDir", notify);
+			w.on("unlinkDir", notify);
+		}
+	} catch {}
 
 	const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 	const failedLogins = new Map<string, { attempts: number; expiresAt: number }>();
@@ -643,6 +701,92 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 
 	route("GET", "/api/personas", (_req, res) => {
 		json(res, bridge.getPersonas());
+	});
+
+	route("GET", "/api/uis", (_req, res) => {
+		json(
+			res,
+			getAllUis().map((u) => ({ name: u.name, builtin: u.builtin })),
+		);
+	});
+
+	route("POST", "/api/uis", async (req, res) => {
+		let name = "";
+		try {
+			const body = JSON.parse(await readBody(req)) as { name?: string };
+			name = (body.name ?? "").trim().toLowerCase();
+		} catch {
+			return json(res, { error: "Invalid JSON" }, 400);
+		}
+		if (!name) return json(res, { error: "name required, a-z0-9- only" }, 400);
+		try {
+			const dir = createUi(name);
+			json(res, { ok: true, name, dir, url: `/ui/${name}/` }, 201);
+		} catch (err) {
+			json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
+		}
+	});
+
+	route("GET", "/api/uis/events", (req, res) => {
+		res.writeHead(200, {
+			"Content-Type": "text/event-stream",
+			"Cache-Control": "no-cache",
+			Connection: "keep-alive",
+			"X-Accel-Buffering": "no",
+		});
+		res.write(": connected\n\n");
+		const listener = (ev: { type: string }) => {
+			try {
+				res.write(`data: ${JSON.stringify(ev)}\n\n`);
+			} catch {}
+		};
+		uiEventListeners.add(listener);
+		const hb = setInterval(() => {
+			try {
+				res.write(": keepalive\n\n");
+			} catch {}
+		}, 15000);
+		req.on("close", () => {
+			clearInterval(hb);
+			uiEventListeners.delete(listener);
+		});
+	});
+
+	route("GET", "/api/system/version", async (_req, res) => {
+		const current = options.version;
+		const isRelease = isReleaseInstall();
+		let latest: string | null = null;
+		let updateAvailable = false;
+		try {
+			// Quick check with timeout — don't block UI for slow GitHub
+			const controller = new AbortController();
+			const timer = setTimeout(() => controller.abort(), 3000);
+			// fetchLatestVersion uses global fetch without signal, so race with timeout
+			const latestPromise = fetchLatestVersion();
+			const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000));
+			latest = (await Promise.race([latestPromise, timeoutPromise])) as string | null;
+			clearTimeout(timer);
+			if (latest && isNewerVersion(current, latest)) updateAvailable = true;
+		} catch {}
+		json(res, { current, latest, isRelease, updateAvailable });
+	});
+
+	route("POST", "/api/system/upgrade", async (req, res) => {
+		let version: string | undefined;
+		try {
+			const body = JSON.parse(await readBody(req)) as { version?: string };
+			version = body.version?.trim() || undefined;
+		} catch {
+			// no body is fine — upgrade to latest
+		}
+		// Don't block response — upgrade runs install.sh which may take a minute
+		setImmediate(async () => {
+			try {
+				const { runUpgrade } = await import("../core/upgrade.ts");
+				await runUpgrade(options.version, version);
+			} catch {}
+		});
+		json(res, { ok: true, queued: true }, 202);
 	});
 
 	// Cast web daemon state — the same file the CLI's `cast server status`
@@ -2094,6 +2238,10 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			"/vendor/preact-hooks.mjs",
 			"/vendor/htm.mjs",
 		]);
+		const isFactoryTop = (() => {
+			const top = urlPath.split("/").filter(Boolean)[0];
+			return top ? getUiMap().has(top) : false;
+		})();
 		const isPublicShareRoute =
 			urlPath === "/login" ||
 			urlPath === "/login.html" ||
@@ -2102,6 +2250,9 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			urlPath.startsWith("/shared/") ||
 			urlPath.startsWith("/api/shared/") ||
 			urlPath === OPENAPI_V1_PATH ||
+			urlPath.startsWith("/ui/") ||
+			urlPath === "/ui" ||
+			isFactoryTop ||
 			PUBLIC_STATIC_ASSETS.has(urlPath) ||
 			urlPath.startsWith("/fonts/") ||
 			// Any real static file (the SPA's module graph) is public — the
@@ -2143,6 +2294,136 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		// tearing down the session view. Same index.html fallback as /shared.
 		if (method === "GET" && (urlPath === "/settings" || urlPath === "/dashboard")) {
 			if (serveStatic({ url: "/" } as IncomingMessage, res)) return;
+		}
+
+		// Stable aliases for the built-in UI — / never moves, but /app is the
+		// canonical stable path (also /cast, /default, /base, /based for typo).
+		// Keeps factory UIs at /ui/* isolated without breaking old bookmarks.
+		// Any sub-path under /app (e.g. /app/settings) also serves the base UI's SPA.
+		if (
+			method === "GET" &&
+			["/app", "/cast", "/default", "/base", "/based", "/core", "/main"].some(
+				(p) => urlPath === p || urlPath.startsWith(`${p}/`),
+			)
+		) {
+			if (serveStatic({ url: "/" } as IncomingMessage, res)) return;
+		}
+
+		// Factory UIs also at /<name>/ for convenience (e.g., /claude-ui → same as /ui/claude-ui)
+		// Keeps / never moves, but new UIs are discoverable as /<slug> as user expects (http://host:1337/<new-slug> and http://host:1338/<new-slug>)
+		if (method === "GET") {
+			const segs = urlPath.split("?")[0].split("/").filter(Boolean);
+			const top = segs[0];
+			const reserved = new Set([
+				"app",
+				"cast",
+				"default",
+				"base",
+				"based",
+				"core",
+				"main",
+				"api",
+				"login",
+				"shared",
+				"settings",
+				"dashboard",
+				"fonts",
+				"vendor",
+				"ui",
+			]);
+			if (top && !reserved.has(top)) {
+				const ui = getUiMap().get(top);
+				if (ui) {
+					let rel = `/${segs.slice(1).join("/")}`;
+					if (rel === "/" || rel === "") rel = "/index.html";
+					const filePath = join(ui.dir, rel);
+					if (filePath.startsWith(ui.dir)) {
+						try {
+							const stat = statSync(filePath);
+							if (stat.isFile()) {
+								const ext = extname(filePath);
+								const mime = MIME_TYPES[ext] ?? "application/octet-stream";
+								const data = readFileSync(filePath);
+								res.writeHead(200, {
+									"Content-Type": mime,
+									"Content-Length": data.length,
+									"Cache-Control": ext === ".html" ? "no-cache" : "public, max-age=3600",
+								});
+								res.end(data);
+								return;
+							}
+						} catch {}
+						try {
+							const idx = readFileSync(join(ui.dir, "index.html"));
+							res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" });
+							res.end(idx);
+							return;
+						} catch {}
+					}
+				}
+			}
+		}
+
+		// Factory listing at /ui — plain index of extra UIs, keeps / as base
+		if (method === "GET" && (urlPath === "/ui" || urlPath === "/ui/")) {
+			const uis = getAllUis().filter((u) => !u.builtin);
+			const items =
+				uis
+					.map(
+						(u) =>
+							`<li><a href="/ui/${u.name}/">${u.name}</a> <small>→ ${u.dir}</small> <small>also <a href="/${u.name}/">/${u.name}/</a></small></li>`,
+					)
+					.join("") ||
+				'<li>no extra UIs yet — POST /api/uis {"name":"my-ui"} or cp -r src/server/ui-factory/template ~/.cast/ui/&lt;name&gt;</li>';
+			const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Factory UIs · Cast</title><style>body{font-family:sans-serif;background:#111;color:#eee;padding:32px;line-height:1.6} a{color:#8b5cf6} ul{margin:16px 0} small{color:#888}</style></head><body><h1>Factory UIs</h1><ul>${items}</ul><p><a href="/app">← default UI (/app)</a> · <a href="/api/uis">/api/uis</a></p></body></html>`;
+			res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" });
+			res.end(html);
+			return;
+		}
+
+		// Pluggable UIs — /ui/<name>/* serves from the discovered extra UI dirs.
+		// Keeps the built-in UI at / while allowing e.g. /ui/retro/ to be a
+		// completely different frontend reusing the same /api/*.
+		if (method === "GET" && urlPath.startsWith("/ui/")) {
+			const segs = urlPath.split("?")[0].split("/").filter(Boolean);
+			const uiName = segs[1];
+			const ui = uiName ? getUiMap().get(uiName) : undefined;
+			if (ui) {
+				let rel = `/${segs.slice(2).join("/")}`;
+				if (rel === "/" || rel === "") rel = "/index.html";
+				const filePath = join(ui.dir, rel);
+				if (!filePath.startsWith(ui.dir)) {
+					res.writeHead(403);
+					res.end("Forbidden");
+					return;
+				}
+				try {
+					const stat = statSync(filePath);
+					if (stat.isFile()) {
+						const ext = extname(filePath);
+						const mime = MIME_TYPES[ext] ?? "application/octet-stream";
+						const data = readFileSync(filePath);
+						res.writeHead(200, {
+							"Content-Type": mime,
+							"Content-Length": data.length,
+							"Cache-Control": ext === ".html" ? "no-cache" : "public, max-age=3600",
+						});
+						res.end(data);
+						return;
+					}
+				} catch {}
+				// SPA fallback inside that UI — deep links like /ui/retro/settings
+				try {
+					const idx = readFileSync(join(ui.dir, "index.html"));
+					res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" });
+					res.end(idx);
+					return;
+				} catch {
+					res.writeHead(404);
+					res.end("UI not found");
+					return;
+				}
+			}
 		}
 
 		const versionedLegacyPath = legacyPathForApiV1(urlPath);

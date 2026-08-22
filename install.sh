@@ -106,6 +106,36 @@ ln -sf "$INSTALL_DIR/bin/cast" "$BIN_DIR/cast"
 INSTALLED_VERSION="$(node -e "console.log(require('$INSTALL_DIR/package.json').version)" 2>/dev/null || echo "unknown")"
 info "cast ${INSTALLED_VERSION} installed."
 
+# Open firewall for web UI (cast server --public uses 1337, factory UIs at /ui/* and /<name>/ on same port)
+open_port() {
+	local port="$1"
+	if command -v ufw >/dev/null 2>&1; then
+		if sudo -n ufw status >/dev/null 2>&1; then
+			if ! sudo -n ufw status 2>&1 | grep -q "${port}/tcp.*ALLOW"; then
+				info "Opening firewall port ${port}/tcp (ufw)..."
+				sudo -n ufw allow "${port}/tcp" >/dev/null 2>&1 || warn "Could not open ${port}/tcp via ufw (try: sudo ufw allow ${port}/tcp)"
+			fi
+		elif [ "$(id -u)" -eq 0 ] && ufw status >/dev/null 2>&1; then
+			if ! ufw status 2>&1 | grep -q "${port}/tcp.*ALLOW"; then
+				info "Opening firewall port ${port}/tcp (ufw)..."
+				ufw allow "${port}/tcp" >/dev/null 2>&1 || warn "Could not open ${port}/tcp via ufw"
+			fi
+		fi
+	elif command -v firewall-cmd >/dev/null 2>&1; then
+		if sudo -n firewall-cmd --state >/dev/null 2>&1; then
+			info "Opening firewall port ${port}/tcp (firewalld)..."
+			sudo -n firewall-cmd --add-port="${port}/tcp" --permanent >/dev/null 2>&1 || true
+			sudo -n firewall-cmd --reload >/dev/null 2>&1 || true
+		fi
+	elif command -v iptables >/dev/null 2>&1 && [ "$(id -u)" -eq 0 ]; then
+		if ! iptables -C INPUT -p tcp --dport "$port" -j ACCEPT >/dev/null 2>&1; then
+			info "Opening firewall port ${port}/tcp (iptables)..."
+			iptables -I INPUT -p tcp --dport "$port" -j ACCEPT 2>&1 | head -n 5 || true
+		fi
+	fi
+}
+for p in 1337; do open_port "$p"; done
+
 case ":$PATH:" in
 *":$BIN_DIR:"*) ;;
 *)

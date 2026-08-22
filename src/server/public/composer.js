@@ -54,11 +54,19 @@ export function Composer({
 		setImages([]);
 	}, [activeId]);
 
+	const MAX_IMAGES = 6;
+	const [resizingImages, setResizingImages] = useState(0);
 	const addImageFiles = useCallback(async (files) => {
 		if (files.length === 0) return;
-		const resized = await Promise.all(files.map((f) => resizeImageToDataUrl(f).catch(() => null)));
-		setImages((prev) => [...prev, ...resized.filter(Boolean)]);
-	}, []);
+		// Enforce server limit client-side with immediate feedback
+		const allowed = Math.max(0, MAX_IMAGES - images.length - resizingImages);
+		if (allowed === 0) return;
+		const sliced = files.slice(0, allowed);
+		setResizingImages((n) => n + sliced.length);
+		const resized = await Promise.all(sliced.map((f) => resizeImageToDataUrl(f).catch(() => null)));
+		setImages((prev) => [...prev, ...resized.filter(Boolean).slice(0, MAX_IMAGES - prev.length)]);
+		setResizingImages((n) => Math.max(0, n - sliced.length));
+	}, [images.length, resizingImages]);
 
 	const addDocFiles = useCallback(
 		async (files) => {
@@ -157,13 +165,18 @@ export function Composer({
 	// typing "/" only ever surfaces conversation-flow commands.
 	const personaMatch = PERSONA_CMD_RE.exec(value);
 
+	const resizeRafRef = useRef(null);
 	const resize = useCallback(() => {
-		const el = textareaRef.current;
-		if (el) {
-			el.style.height = "auto";
-			el.style.height = `${Math.min(el.scrollHeight, 150)}px`;
-		}
+		if (resizeRafRef.current) cancelAnimationFrame(resizeRafRef.current);
+		resizeRafRef.current = requestAnimationFrame(() => {
+			const el = textareaRef.current;
+			if (el) {
+				el.style.height = "auto";
+				el.style.height = `${Math.min(el.scrollHeight, 150)}px`;
+			}
+		});
 	}, []);
+	useEffect(() => () => { if (resizeRafRef.current) cancelAnimationFrame(resizeRafRef.current); }, []);
 
 	const [sending, setSending] = useState(false);
 	const handleSubmit = useCallback(() => {
@@ -279,9 +292,9 @@ export function Composer({
 		pickerSelect = handleCmdSelect;
 	}
 	const clampedIndex = pickerItems.length > 0 ? Math.min(selectedIndex, pickerItems.length - 1) : 0;
-	const attachmentsBlocked = !canSubmitAttachments(docs);
+	const attachmentsBlocked = !canSubmitAttachments(docs) || resizingImages > 0;
 	const hasReadyDocs = docs.some((d) => (d.path || d.pending) && !d.uploading && !d.error);
-	const sendBlocked = !ready || !sendReady || sending;
+	const sendBlocked = !ready || !sendReady || sending || resizingImages > 0;
 
 	// Arrow-key nav must scroll the picker, not just select past the visible
 	// edge — mouse/scroll-wheel already worked, but the highlighted row could
@@ -347,13 +360,17 @@ export function Composer({
 				}
 			</div>
 			${
+				resizingImages > 0 &&
+				html`<div class="composer-images"><div class="fs-loading">Resizing ${resizingImages} image${resizingImages > 1 ? "s" : ""}…</div></div>`
+			}
+			${
 				images.length > 0 &&
 				html`
 				<div class="composer-images">
 					${images.map(
 						(src, i) => html`
 						<div key=${i} class="composer-image-thumb">
-							<img src=${src} />
+							<img src=${src} loading="lazy" alt="Attached image ${i + 1}" />
 							<button
 								type="button"
 								class="composer-image-remove"

@@ -78,6 +78,7 @@ import { build, transform } from "esbuild";
 import { cpSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 cpSync("src/server/public", "dist/public", { recursive: true });
+cpSync("src/server/ui-factory/template", "dist/ui-factory/template", { recursive: true });
 
 // Keep the source web assets readable for the dev server, but ship compact
 // browser assets in release builds. Each module is transformed independently

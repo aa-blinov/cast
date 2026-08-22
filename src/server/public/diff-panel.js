@@ -97,7 +97,13 @@ export function DiffPanel({
 		<aside class="diff-panel${openClass}">
 			<div class="diff-resize-handle" onPointerDown=${onResizeStart} />
 			${header}
-			<div class="diff-empty">Loading...</div>
+			<div class="fs-skeleton" style="padding:12px">
+				<div class="fs-skeleton-row"></div>
+				<div class="fs-skeleton-row"></div>
+				<div class="fs-skeleton-row"></div>
+				<div class="fs-skeleton-row"></div>
+				<div class="fs-skeleton-row"></div>
+			</div>
 		</aside>
 	`;
 

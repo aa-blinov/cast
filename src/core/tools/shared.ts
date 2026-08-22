@@ -5,7 +5,8 @@
  * reach a common path/size helper or the ToolResult shape.
  */
 
-import { isAbsolute, resolve } from "node:path";
+import { homedir } from "node:os";
+import { isAbsolute, join, resolve } from "node:path";
 import type { Usage } from "../llm.ts";
 
 export interface ToolResult {
@@ -151,6 +152,8 @@ export type ConfirmWrite = (tool: string, path: string, reason: string) => Promi
 
 /** Resolve a possibly-relative tool path argument against the agent's cwd. */
 export function resolvePath(path: string, cwd: string): string {
+	if (path.startsWith("~/")) return join(homedir(), path.slice(2));
+	if (path === "~") return homedir();
 	if (isAbsolute(path)) return path;
 	return resolve(cwd, path);
 }

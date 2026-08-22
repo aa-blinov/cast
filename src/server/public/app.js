@@ -40,6 +40,7 @@ import {
 	SettingsSkills,
 	SettingsSkillssh,
 	SettingsSsh,
+	SettingsUpdates,
 	SettingsWeb,
 } from "./settings-panels.js";
 import { ShareModal } from "./share-modal.js";
@@ -497,6 +498,19 @@ function sessionIdFromUrl() {
 // every route so a dashboard/settings link keeps its session context.
 function viewFromPath() {
 	const p = window.location.pathname;
+	// Stable base aliases: /app, /cast, /default, /base, /based, /core, /main all serve the same base UI at /
+	// Strip the alias prefix so /app/settings and /settings both route to settings
+	const baseAliases = ["/app", "/cast", "/default", "/base", "/based", "/core", "/main"];
+	for (const a of baseAliases) {
+		if (p === a) return "chat";
+		if (p.startsWith(`${a}/`)) {
+			const sub = p.slice(a.length);
+			if (sub === "/settings") return "settings";
+			if (sub === "/dashboard") return "dashboard";
+			if (sub.startsWith("/shared/")) return "chat";
+			return "chat";
+		}
+	}
 	if (p === "/settings") return "settings";
 	if (p === "/dashboard") return "dashboard";
 	return "chat";
@@ -805,8 +819,15 @@ function App() {
 	);
 	const navigate = useCallback(
 		(path) => {
-			if (window.location.pathname + window.location.search === path) return;
-			window.history.pushState(null, "", path);
+			const baseAliases = ["/app", "/cast", "/default", "/base", "/based", "/core", "/main"];
+			const cur = window.location.pathname;
+			let prefix = "";
+			for (const a of baseAliases) {
+				if (cur === a || cur.startsWith(`${a}/`)) { prefix = a; break; }
+			}
+			const full = prefix ? `${prefix}${path}` : path;
+			if (window.location.pathname + window.location.search === full) return;
+			window.history.pushState(null, "", full);
 			applyView(viewFromPath());
 		},
 		[applyView],
@@ -1483,7 +1504,7 @@ function App() {
 	const scrollToBottom = useCallback(() => {
 		autoScrollRef.current = true;
 		setAtBottom(true);
-		if (messagesRef.current) messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
+		if (messagesRef.current) messagesRef.current.scrollTo({ top: messagesRef.current.scrollHeight, behavior: "smooth" });
 	}, [setAtBottom]);
 
 	// Fetches the next older batch (GET /api/sessions/:id/history) and
@@ -1538,7 +1559,8 @@ function App() {
 	}, [session?.messages]);
 
 	// Scroll detection — coalesced via rAF so a fast fling doesn't queue
-	// dozens of setAtBottom/loadOlderMessages calls per frame.
+	// dozens of setAtBottom/loadOlderMessages calls per frame. Prefetch
+	// threshold increased to 600px for smoother infinite scroll.
 	const scrollRafRef = useRef(null);
 	const handleScroll = useCallback(() => {
 		if (scrollRafRef.current != null) return;
@@ -1549,7 +1571,7 @@ function App() {
 			const bottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 80;
 			autoScrollRef.current = bottom;
 			setAtBottom(bottom);
-			if (el.scrollTop < 400) loadOlderMessages();
+			if (el.scrollTop < 600) loadOlderMessages();
 		});
 	}, [loadOlderMessages, setAtBottom]);
 	useEffect(() => () => { if (scrollRafRef.current != null) cancelAnimationFrame(scrollRafRef.current); }, []);
@@ -1912,7 +1934,7 @@ function App() {
 				settingsOpen &&
 				html`
 				<${SettingsModalModule}
-					panels=${{ SettingsAppearance, SettingsModel, SettingsBash, SettingsWeb, SettingsMemory, SettingsPersonas, SettingsQuickMode, SettingsServer, SettingsHooks, SettingsMcp, SettingsSkills, SettingsPlugins, SettingsMarketplace, SettingsSkillssh, SettingsProvider, SettingsSsh }}
+					panels=${{ SettingsAppearance, SettingsModel, SettingsBash, SettingsWeb, SettingsMemory, SettingsPersonas, SettingsQuickMode, SettingsServer, SettingsHooks, SettingsMcp, SettingsSkills, SettingsPlugins, SettingsMarketplace, SettingsSkillssh, SettingsProvider, SettingsSsh, SettingsUpdates }}
 					fontOptions=${FONT_OPTIONS}
 					fontScales=${FONT_SCALE_OPTIONS}
 					activeId=${activeId}
