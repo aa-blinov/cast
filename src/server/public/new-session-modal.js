@@ -122,19 +122,6 @@ export function NewSessionModal({
 			});
 	}, [open]);
 
-	// load models for selected provider — so "any change provider→model" has fresh list and ✓ can verify pair
-	useEffect(() => {
-		if (!open || !provider) return;
-		let cancelled = false;
-		api("GET", `/api/models?provider=${encodeURIComponent(provider)}`)
-			.then((d) => {
-				if (cancelled) return;
-				if (d?.models && Array.isArray(d.models)) setModels(d.models);
-			})
-			.catch(() => {});
-		return () => { cancelled = true; };
-	}, [open, provider]);
-
 	// when persona changes, auto-fill its pinned provider/model (if any) — user can still override
 	useEffect(() => {
 		if (!open) return;
