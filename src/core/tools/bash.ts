@@ -381,13 +381,24 @@ export async function execBash(
 			outputTruncated ||= appended.truncated;
 		});
 
+		let heartbeat: NodeJS.Timeout | null = null;
+		if (signal) {
+			heartbeat = setInterval(() => {
+				// heartbeat for long-running bash — lets the loop emit progress
+				// without waiting for the full timeout
+			}, 5000);
+			heartbeat.unref();
+		}
 		const timer = setTimeout(() => {
 			timedOut = true;
 			try {
-				process.kill(-proc.pid!, "SIGKILL");
-			} catch {
-				// already dead
-			}
+				process.kill(-proc.pid!, "SIGTERM");
+			} catch {}
+			setTimeout(() => {
+				try {
+					process.kill(-proc.pid!, "SIGKILL");
+				} catch {}
+			}, 5000);
 		}, timeout * 1000);
 
 		const onAbort = () => {
@@ -414,6 +425,7 @@ export async function execBash(
 		// unhandled 'error' event instead of the model seeing what went wrong.
 		proc.on("error", (err) => {
 			clearTimeout(timer);
+			if (heartbeat) clearInterval(heartbeat);
 			signal?.removeEventListener("abort", onAbort);
 			if (finalResult) return;
 			const result: ToolResult = {
@@ -427,6 +439,7 @@ export async function execBash(
 		proc.on("close", (exitCode) => {
 			if (finalResult) return;
 			clearTimeout(timer);
+			if (heartbeat) clearInterval(heartbeat);
 			signal?.removeEventListener("abort", onAbort);
 
 			const result = formatBashResult(rawOutput, config, {

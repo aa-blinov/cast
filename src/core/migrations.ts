@@ -666,6 +666,15 @@ CREATE INDEX IF NOT EXISTS idx_agents_name ON agents(name);
 `);
 		},
 	},
+	{
+		version: 27,
+		name: "sessions-version",
+		up: (db) => {
+			if (!columnExists(db, "sessions", "version")) {
+				db.exec("ALTER TABLE sessions ADD COLUMN version INTEGER NOT NULL DEFAULT 0");
+			}
+		},
+	},
 ];
 
 const MIGRATION_TABLE_SCHEMA = `
