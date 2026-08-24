@@ -124,11 +124,15 @@ export async function submitMessage(text, images, pendingDocs, context) {
 		if (!id) {
 			if (session?.isDraft) {
 				try {
-					id = await commitSession(session.persona, session.cwd, {
-						push: true,
-						draftVersion,
-						worktree: session.worktree,
-					});
+					if (session.agentId) {
+						id = await commitSession({ persona: session.persona, cwd: session.cwd, agentId: session.agentId, push: true, draftVersion, worktree: session.worktree });
+					} else {
+						id = await commitSession(session.persona, session.cwd, {
+							push: true,
+							draftVersion,
+							worktree: session.worktree,
+						});
+					}
 				} catch (err) {
 					showToast(err.message, "error");
 					return false;
@@ -177,11 +181,15 @@ export async function submitMessage(text, images, pendingDocs, context) {
 	if (!id) {
 		if (session?.isDraft) {
 			try {
-				id = await commitSession(session.persona, session.cwd, {
-					push: true,
-					draftVersion,
-					worktree: session.worktree,
-				});
+				if (session.agentId) {
+					id = await commitSession({ persona: session.persona, cwd: session.cwd, agentId: session.agentId, push: true, draftVersion, worktree: session.worktree });
+				} else {
+					id = await commitSession(session.persona, session.cwd, {
+						push: true,
+						draftVersion,
+						worktree: session.worktree,
+					});
+				}
 			} catch (err) {
 				showToast(err.message, "error");
 				return false;

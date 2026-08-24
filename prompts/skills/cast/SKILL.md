@@ -1,6 +1,6 @@
 ---
 name: cast
-description: Configure cast itself — create and manage personas, skills, marketplace plugins, MCP servers, rules, or durable project memory. Use when the user wants to customize cast, ask about memory (what cast remembers, how memory works, enabling/disabling it), create a persona through chat, or install plugins from Codex/Claude/Grok catalogs.
+description: Configures cast itself — creates and manages personas, skills, marketplace plugins, MCP servers, rules, and durable project memory. Use when user wants to customize cast, create a persona through chat, ask about memory, or install plugins from Codex/Claude/Grok catalogs.
 ---
 
 # cast configuration

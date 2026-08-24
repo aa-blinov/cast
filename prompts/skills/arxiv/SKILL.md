@@ -1,6 +1,6 @@
 ---
 name: arxiv
-description: "Use this skill whenever the user wants to find, read, cite, track, download, or analyze academic papers on arXiv. That includes: searching papers by topic, author, category, or arXiv ID; fetching abstracts or full metadata; generating BibTeX citations; downloading PDFs; listing the latest submissions in a field (e.g. cs.AI daily digest); checking a paper's citation impact; finding who cites a paper, what it references, or related-paper recommendations. Trigger on mentions of 'arXiv', an arXiv ID (e.g. 2601.02780 or hep-th/0601001), an arxiv.org URL, 'paper search', 'literature review', 'find papers about X', 'cite this paper', or 'what's new in cs.LG'."
+description: Searches arXiv and Semantic Scholar for academic papers, retrieves metadata and abstracts, generates BibTeX citations, downloads PDFs, and analyzes citation impact. Use when user wants to find, read, cite, track, download, or analyze academic papers on arXiv, mentions arXiv IDs, arxiv.org URLs, or asks for paper search, literature review, or what's new in a field.
 version: 2.0.0
 license: MIT
 platforms: [linux, macos, windows]

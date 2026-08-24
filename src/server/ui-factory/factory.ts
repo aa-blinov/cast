@@ -10,14 +10,10 @@ function renderTemplate(src: string, vars: Record<string, string>): string {
 	return out;
 }
 
+const UI_NAME_RE = /^[a-z0-9-]+$/;
+
 const RESERVED_UI_NAMES = new Set([
-	"app",
-	"cast",
 	"default",
-	"base",
-	"based",
-	"core",
-	"main",
 	"api",
 	"login",
 	"shared",
@@ -28,7 +24,7 @@ const RESERVED_UI_NAMES = new Set([
 	"ui",
 ]);
 export function createUi(name: string, opts?: { dest?: string; templateVars?: Record<string, string> }): string {
-	if (!/^[a-z0-9-]+$/.test(name)) throw new Error("UI name must be lowercase a-z, 0-9, hyphens only");
+	if (!UI_NAME_RE.test(name)) throw new Error("UI name must be lowercase a-z, 0-9, hyphens only");
 	if (RESERVED_UI_NAMES.has(name)) throw new Error(`UI name "${name}" is reserved — use another slug`);
 	const dest = opts?.dest ?? join(homedir(), ".cast", "ui", name);
 	if (existsSync(dest)) throw new Error(`UI already exists: ${dest}`);
@@ -50,6 +46,32 @@ export function createUi(name: string, opts?: { dest?: string; templateVars?: Re
 			const rendered = renderTemplate(raw, vars);
 			writeFileSync(dstPath, rendered, "utf-8");
 		}
+	}
+	// Ensure required skeleton is present — new UIs must not lose threads/composer/settings
+	// Skeleton contract (BACKBONE): Sidebar (threads) + Composer + SettingsModal (real tabs, not stub) + sessions/settingsOpen state.
+	const appContent = readFileSync(join(dest, "app.js"), "utf-8");
+	const required = [
+		"Sidebar",
+		"Composer",
+		"SettingsModal",
+		"sessions",
+		"settingsOpen",
+		'api("GET","/api/system/version")',
+	];
+	const missing = required.filter((k) => !appContent.includes(k));
+	if (missing.length > 0)
+		throw new Error(
+			`Template missing required skeleton sections: ${missing.join(", ")} — new UI would lose threads/composer/settings. ` +
+				`Skeleton is the backbone; generate only LAYOUT/THEME + style.css on top.`,
+		);
+	// Guard against халтура stub: SettingsModal must handle real tabs, not just link to /default/settings
+	if (
+		appContent.includes("// threads and settings are required sections — full settings live at /default/settings") &&
+		!appContent.includes('tab==="appearance"')
+	) {
+		throw new Error(
+			`Settings is a stub — replace with real skeleton SettingsModal (General + Appearance tabs, Default UI, Updates, Server).`,
+		);
 	}
 	return dest;
 }

@@ -259,7 +259,7 @@ export function FilePreviewModal({ path, onClose, downloadHref, previewHref }) {
 	const name = fileName(path);
 	let body;
 	if (isImage) body = html`<img class="fs-preview-image" src=${previewHref} alt=${name} />`;
-	else if (isPdf) body = html`<iframe class="fs-preview-pdf" src=${previewHref} title=${name}></iframe>`;
+	else if (isPdf) body = html`<iframe class="fs-preview-pdf" src=${previewHref} title=${name} loading="lazy"></iframe>`;
 	else if (error) body = html`<div class="diff-empty diff-empty-error">${error}</div>`;
 	else if (!isText && !isTable) body = html`<div class="diff-empty">No preview for this file type.</div>`;
 	else if (tooLarge) body = html`<div class="diff-empty">Too large to preview — use Download instead.</div>`;
@@ -314,7 +314,7 @@ export function FilePreviewModal({ path, onClose, downloadHref, previewHref }) {
 
 	return html`<div class="modal-backdrop" onClick=${onClose}><div class="modal modal-preview" role="dialog" aria-modal="true" aria-label="File preview" tabIndex="-1" ref=${modalRef} onClick=${(e) => e.stopPropagation()}>
 		<div class="modal-header"><span title=${path}>${name}</span><div style=${{ display: "flex", gap: "6px", alignItems: "center" }}>
-			<button class="modal-btn icon-btn" onClick=${handleCopy} disabled=${copyDisabled} title=${copied ? "Copied" : "Copy"} aria-label="Copy file contents"><${copied ? icons.check : icons.clipboard} /></button><a class="modal-btn icon-btn" href=${downloadHref} download title="Download"><${icons.arrowDownTray} /></a><button class="modal-close" onClick=${onClose} aria-label="Close"><${icons.xMark} /></button>
+			<button class="modal-btn icon-btn" onClick=${handleCopy} disabled=${copyDisabled} title=${copied ? "Copied" : "Copy"} aria-label="Copy file contents"><${copied ? icons.check : icons.clipboard} /></button>${isPdf ? html`<a class="modal-btn icon-btn" href=${previewHref} target="_blank" rel="noopener" title="Open in new tab"><${icons.link} /></a>` : null}<a class="modal-btn icon-btn" href=${downloadHref} download title="Download"><${icons.arrowDownTray} /></a><button class="modal-close" onClick=${onClose} aria-label="Close"><${icons.xMark} /></button>
 		</div></div><div class="fs-preview-body">${body}</div>
 	</div></div>`;
 }

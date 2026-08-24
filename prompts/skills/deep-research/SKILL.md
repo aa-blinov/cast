@@ -1,6 +1,6 @@
 ---
 name: deep-research
-description: Deep research on any topic using parallel subagents and Cast tools only (`web_search`, `web_fetch`, `task`). Use for a thorough multi-source investigation with a cited report. NOT for simple lookups (one `web_search` usually suffices) and NOT for academic literature surveys (use the super-research skill instead).
+description: Performs deep research on any topic using parallel subagents and Cast tools only (web_search, web_fetch, task). Use when user wants a thorough multi-source investigation with a cited report. Triggers on deep research requests, not simple lookups or academic surveys.
 ---
 
 # Deep Research

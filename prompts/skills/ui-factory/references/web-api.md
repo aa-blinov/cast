@@ -12,6 +12,6 @@ All UIs reuse same daemon. **Auth first** — `POST /api/auth/login {username:"c
 - `GET /api/settings/*` / `POST /api/settings/*` — appearance, model, bash, memory, web, etc. (see `src/server/server.ts` route table)
 - `GET /api/personas`, `/api/themes`, `/api/config`
 
-Static: `GET /ui/<name>/*` and `GET /<name>/*` where `<name>` is a factory UI (e.g. `/claude-ui/`, `/ui/claude-ui/`) — public, `GET /vendor/*`, `/fonts/*`, `/login.html` — public. `GET /ui` lists factory UIs, `GET /` on `1337` → default (also stable `GET /app`, `/cast`, `/default`, `/base`, `/based`, `/core`, `/main` and `GET /app/settings` etc. all same base SPA, `viewFromPath` strips prefix). `GET /settings`/`/dashboard` — gated `index.html` fallback for base SPA.
+Static: `GET /ui/<name>/*` and `GET /<name>/*` where `<name>` is a factory UI (e.g. `/claude-ui/`, `/ui/claude-ui/`) — public, `GET /vendor/*`, `/fonts/*`, `/login.html` — public. `GET /ui` lists factory UIs, `GET /` and `GET /default` (also `/default/settings`) → default, stable base layer. `GET /settings`/`/dashboard` — gated `index.html` fallback for base SPA.
 
 See `src/server/api-v1.ts` for versioned contract and `prompts/skills/cast/references/web.md`.

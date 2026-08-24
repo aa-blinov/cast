@@ -1,9 +1,9 @@
 /* ── Settings modal ───────────────────────────────────────────────── */
 .modal.settings-modal {
-	max-width: 820px;
-	width: 92vw;
-	height: min(700px, 88vh);
-	max-height: none;
+	width: min(1100px, 94vw);
+	max-width: 1100px;
+	height: min(760px, 88vh);
+	max-height: 88vh;
 	overflow: hidden;
 }
 .settings-body {

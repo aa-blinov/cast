@@ -1,6 +1,6 @@
 ---
 name: frontend-design
-description: Guidance for distinctive, intentional visual design when building new UI or reshaping an existing one. Use whenever the task produces or modifies anything a user will see rendered — websites, landing pages, web apps, dashboards, React/HTML/Vue components, artifacts with visual output, style overhauls, or "make this look better" requests — even if the user never says the word "design". Covers aesthetic direction, typography, environment constraints (fonts, Tailwind, assets), and when to converge on convention instead of chasing distinctiveness.
+description: Provides guidance for distinctive, intentional visual design when building new UI or reshaping an existing one. Use when task produces or modifies anything a user will see rendered — websites, landing pages, web apps, dashboards, components, or style overhauls.
 license: Complete terms in LICENSE.txt
 ---
 

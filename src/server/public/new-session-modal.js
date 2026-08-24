@@ -54,6 +54,12 @@ export function NewSessionModal({
 	onClose,
 }) {
 	const [persona, setPersona] = useState(defaultPersona ?? personas[0]?.name ?? "");
+	const [provider, setProvider] = useState("");
+	const [providers, setProviders] = useState(null);
+	const [model, setModel] = useState("");
+	const [models, setModels] = useState(null);
+	const [checkingModel, setCheckingModel] = useState(false);
+	const [modelCheck, setModelCheck] = useState(null);
 	const [sandbox, setSandbox] = useState(false);
 	const [worktreeEnabled, setWorktreeEnabled] = useState(false);
 	const [worktreeName, setWorktreeName] = useState(() => defaultWorktreeName());
@@ -67,14 +73,77 @@ export function NewSessionModal({
 	// defaultCwd are honoured fresh.
 	useEffect(() => {
 		if (!open) return;
+		// persona's pinned model/provider is the default for this persona — see personas.ts `model`/`provider` frontmatter
+		const pinnedPersona = personas.find((p) => p.name === (defaultPersona ?? personas[0]?.name ?? ""));
+		const pinned = pinnedPersona?.model;
+		const pinnedProvider = pinnedPersona?.provider;
 		setPersona(defaultPersona ?? personas[0]?.name ?? "");
-		setSandbox(false);
+		// provider must not stay on placeholder while model already shows default — infer from active/providers or model prefix
+		const activeName = (providers || []).find((p) => p.active)?.name;
+		const inferredProvider = pinnedProvider || activeName || (defaultModel?.startsWith("MiniMax") ? "minimax" : "") || (pinned && pinned.startsWith("MiniMax") ? "minimax" : "");
+		setProvider(inferredProvider);
+		setModel(pinned ?? defaultModel ?? "");
+		setModelCheck(null);
+		// by default sandbox — safer isolated session; user explicitly picks Select dir if needs repo
+		setSandbox(true);
 		setWorktreeEnabled(false);
 		// Fresh tree-XXXX each open so parallel worktrees never collide.
 		setWorktreeName(defaultWorktreeName());
 		setError(null);
 		setBusy(false);
-	}, [open, defaultPersona, personas]);
+	}, [open, defaultPersona, personas, defaultModel]);
+
+	useEffect(() => {
+		if (!open) return;
+		// providers: explicit list, no "auto" — comes from settings.providers via /provider list
+		api("POST", "/api/settings/command", { command: "/provider list" })
+			.then((d) => {
+				const list = d?.result;
+				const arr = Array.isArray(list) ? list : Array.isArray(d?.providers) ? d.providers : null;
+				if (Array.isArray(arr)) {
+					setProviders(arr);
+					// default provider = active (standard) if nothing selected and no persona pin — use functional update to avoid stale closure
+					const active = arr.find((p) => p.active)?.name;
+					if (active) setProvider((prev) => prev || active);
+				}
+			})
+			.catch(() => {});
+		api("GET", "/api/models/cached")
+			.then((d) => {
+				if (d?.models && Array.isArray(d.models)) setModels(d.models);
+				else if (Array.isArray(d)) setModels(d);
+			})
+			.catch(() => {
+				api("GET", "/api/models")
+					.then((d) => {
+						if (d?.models && Array.isArray(d.models)) setModels(d.models);
+					})
+					.catch(() => {});
+			});
+	}, [open]);
+
+	// load models for selected provider — so "any change provider→model" has fresh list and ✓ can verify pair
+	useEffect(() => {
+		if (!open || !provider) return;
+		let cancelled = false;
+		api("GET", `/api/models?provider=${encodeURIComponent(provider)}`)
+			.then((d) => {
+				if (cancelled) return;
+				if (d?.models && Array.isArray(d.models)) setModels(d.models);
+			})
+			.catch(() => {});
+		return () => { cancelled = true; };
+	}, [open, provider]);
+
+	// when persona changes, auto-fill its pinned provider/model (if any) — user can still override
+	useEffect(() => {
+		if (!open) return;
+		const p = personas.find((x) => x.name === persona);
+		if (p?.provider) setProvider(p.provider);
+		// don't auto-clear model if persona has no pin — keep user's manual choice
+		if (p?.model) setModel(p.model);
+		setModelCheck(null);
+	}, [persona]);
 
 	// cwd is the controlled value from App (sidebar lives off the same
 	// state); when the user clicks "Select dir" the parent opens the
@@ -165,6 +234,8 @@ export function NewSessionModal({
 		try {
 			await onCreate({
 				persona,
+				provider: provider || undefined,
+				model: model || undefined,
 				cwd: sandbox ? SANDBOX_CWD : cwd,
 				worktree: worktreeEnabled && worktreeName.trim() ? worktreeName.trim() : undefined,
 			});
@@ -218,13 +289,51 @@ export function NewSessionModal({
 						)}
 					</div>
 
+					<div class="new-session-section-title">Provider & Model</div>
+					<div class="new-session-model">
+						<select
+							value=${provider}
+							disabled=${busy}
+							onChange=${(e) => { setProvider(e.target.value); setModelCheck(null); }}
+						>
+							<option value="">— Select provider —</option>
+							${(providers || []).map((p) => html`<option value=${p.name}>${p.name}</option>`)}
+						</select>
+						<div class="new-session-model-row">
+							<select
+								value=${model}
+								disabled=${busy}
+								onChange=${(e) => { setModel(e.target.value); setModelCheck(null); }}
+							>
+								<option value="">— Select model —</option>
+								${(models || []).filter((m) => !provider || (m.provider && m.provider === provider) || !m.provider).slice(0, 50).map((m) => html`<option value=${m.id}>${m.id}${m.provider ? ` · ${m.provider}` : ""}</option>`)}
+							</select>
+							<button class="modal-btn icon-btn verify-btn" title="Проверить доступность модели" disabled=${busy || checkingModel || !provider || !model} onClick=${async () => {
+							setCheckingModel(true); setModelCheck(null);
+							try{
+								// verify the exact provider+model pair — any change keeps button enabled (save is Create session)
+								const res = await api("POST", "/api/provider/verify", { provider });
+								if (res?.ok) {
+									const list = await api("GET", `/api/models?provider=${encodeURIComponent(provider)}`).catch(()=>null);
+									const hasModel = list?.models?.some((x) => x.id === model);
+									setModelCheck({ ok: !!hasModel, msg: hasModel ? `✓ ${model} отвечает via ${provider}` : `✕ ${model} не найден для ${provider}` });
+								} else {
+									setModelCheck({ ok: false, msg: res?.error || "Provider unreachable" });
+								}
+							} catch (e) { setModelCheck({ ok: false, msg: e.message }); }
+							finally { setCheckingModel(false); }
+						}} class="verify-btn">${checkingModel ? html`<span class="settings-inline-loader" aria-label="Checking" />` : html`<${icons.arrowPath} />`}</button>
+						</div>
+					</div>
+					${modelCheck ? html`<div class=${modelCheck.ok ? "modal-hint" : "new-session-error"} style="margin-bottom:8px; font-size:.72rem; line-height:1.4">${modelCheck.msg}</div>` : null}
+
 					<div class="new-session-section-title">Working directory</div>
 					<div class="new-session-cwd">
 						<button
 							type="button"
 							class=${`modal-btn new-session-cwd-toggle${!sandbox ? " active" : ""}`}
 							title=${cwd ? `Selected: ${cwd}` : "Pick a directory…"}
-							onClick=${() => onOpenDirPicker?.()}
+							onClick=${() => { setSandbox(false); setWorktreeEnabled(false); onOpenDirPicker?.(); }}
 						>Select dir</button>
 						<button
 							type="button"

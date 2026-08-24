@@ -1,6 +1,6 @@
 ---
 name: cast-ops
-description: Self-update Cast and control its web server — upgrade to latest, start/stop/status, public vs local. Use when the user says "обнови cast", "update", "подними вебсервер", "сделай публичным", "локальный сервер", "перезапусти daemon", "cast server". Triggers on "обнов", "upgrade", "server", "daemon", "публичный", "локальный", "перезапусти".
+description: Updates Cast and controls its web server — upgrades to latest, starts, stops, and checks status for public vs local deployments. Use when user says "обнови cast", "update", "подними вебсервер", "сделай публичным", or asks about server status, daemon, or public vs local.
 ---
 
 # Cast self-ops — update and web server

@@ -1,6 +1,6 @@
 ---
 name: super-research
-description: "Autonomous long-running research (minutes to overnight) producing honest, comparable, auditable evidence instead of one-shot answers. Eight modes: experiment loop, topic survey, quantitative analysis, benchmark comparison, root-cause investigation, ablation study, paper reproduction, paper writing + citation audit. Zero-dependency toolbox — built-in tools plus free scholarly APIs (arXiv, Semantic Scholar, OpenAlex, Crossref), no API keys. Trigger for any research work with volume and discipline, even without the words 'research' or 'experiment'."
+description: Performs autonomous long-running research (minutes to overnight) producing honest, comparable, auditable evidence instead of one-shot answers. Use when user wants experiment loops, topic surveys, quantitative analysis, or any research with volume and discipline, even without explicit research keywords.
 ---
 
 # Autonomous Research

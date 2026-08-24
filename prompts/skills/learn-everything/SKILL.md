@@ -1,6 +1,6 @@
 ---
 name: learn-everything
-description: Turn an uploaded PDF, paper, book chapter, document, URL, or topic into a structured, interactive learning course — chapter by chapter, with exercises, quizzes, grading, hints, and spaced review. Use for "teach me this", "learn this PDF", a request to study/master/review a subject, or to continue a previously saved course.
+description: Turns uploaded PDFs, papers, book chapters, documents, URLs, or topics into structured, interactive learning courses with exercises, quizzes, and spaced review. Use when user asks to teach, learn, study, or continue a course.
 ---
 
 # Learn Everything
