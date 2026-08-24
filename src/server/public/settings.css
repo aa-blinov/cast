@@ -456,7 +456,7 @@
 	min-width: 88px;
 	padding: 5px 8px;
 	border: 1px solid var(--border);
-	border-radius: 999px;
+	border-radius: var(--radius-sm);
 	background: var(--bg);
 	color: var(--text-dim);
 	font-family: var(--font);
@@ -464,7 +464,7 @@
 	cursor: pointer;
 }
 .settings-toggle[aria-checked="true"] { border-color: var(--cyan); color: var(--text); background: var(--accent-subtle); }
-.settings-toggle-thumb { width: 9px; height: 9px; border-radius: 50%; background: var(--text-muted); }
+.settings-toggle-thumb { width: 9px; height: 9px; border-radius: 2px; background: var(--text-muted); }
 .settings-toggle[aria-checked="true"] .settings-toggle-thumb { background: var(--cyan); }
 .settings-toggle:disabled { opacity: .5; cursor: default; }
 .settings-rows .settings-compact-list .settings-compact-row { padding: 8px 0; }
