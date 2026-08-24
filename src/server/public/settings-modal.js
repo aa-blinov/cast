@@ -77,7 +77,26 @@ export function SettingsModal({
 			localStorage.setItem("cast:customCss", css);
 		} catch {}
 	}, []);
-	const [tab, setTab] = useState(SETTINGS_TABS[0].id);
+	const getInitialTab = () => {
+		try {
+			const url = new URL(window.location.href);
+			const tabParam = url.searchParams.get("tab") || url.pathname.split("/settings/")[1]?.split("/")[0];
+			if (tabParam && SETTINGS_TABS.some((t) => t.id === tabParam)) return tabParam;
+			const stored = localStorage.getItem("cast:settingsTab");
+			if (stored && SETTINGS_TABS.some((t) => t.id === stored)) return stored;
+		} catch {}
+		return SETTINGS_TABS[0].id;
+	};
+	const [tab, setTabState] = useState(getInitialTab);
+	const setTab = useCallback((id) => {
+		setTabState(id);
+		try {
+			localStorage.setItem("cast:settingsTab", id);
+			const url = new URL(window.location.href);
+			url.searchParams.set("tab", id);
+			window.history.replaceState({}, "", url.toString());
+		} catch {}
+	}, []);
 	const [data, setData] = useState({});
 	const [errors, setErrors] = useState({});
 	const [busy, setBusy] = useState(false);
