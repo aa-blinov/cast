@@ -68,7 +68,7 @@ function SettingsBash({ data, busy, act }) {
 	return html`
 		<div class="settings-rows">
 			<div class="settings-section-title">Bash confirmation mode</div>
-			<p class="settings-hint">Default asks before running potentially dangerous shell commands. Bypass skips all confirmation prompts.</p>
+			<p class="settings-intro"><span>Default asks before running potentially dangerous shell commands. Bypass skips all confirmation prompts.</span></p>
 			<div class="settings-form-row">
 				<button class="modal-btn${perm.permissionMode === "default" ? " modal-btn-primary" : ""}" title="Confirm dangerous commands" disabled=${busy} onClick=${() => act("/permissions default")}>Default</button>
 				<button class="modal-btn${perm.permissionMode === "bypass" ? " modal-btn-primary" : ""}" title="Skip confirmation prompts" disabled=${busy} onClick=${() => act("/permissions bypass")}>Bypass</button>
