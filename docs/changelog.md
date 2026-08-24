@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.10
+
+### Fixed
+
+- **Settings `gt`/`lt` display:** `Custom CSS` hint and `Default UI` hint now show `<style id="cast-custom-css">` and `/ui/<name>/` correctly via JS expression (was `&lt;` double-escaped to `&amp;lt;`).
+
 ## 0.22.9
 
 ### Fixed

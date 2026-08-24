@@ -175,20 +175,18 @@ export function useSessionController({
 				mergePendingOutgoing(data, id, pendingOutgoingRef);
 				// Splice in older pages already loaded via scroll-up earlier this
 				// tab session — only if nothing changed underneath: the cache's
-				// anchorSeq is the oldestSeq the *latest* page had when caching
-				// started, so a mismatch means new turns landed since (e.g. a
-				// background task woke this session while looking at another
-				// one) and the cache is stale for the gap. Simplest safe answer:
-				// drop it and let scroll-up refetch — correctness over a saved
-				// round trip in that rare case.
+				// anchorVersion is the session version when caching started — more
+				// reliable than oldestSeq (which may not change on some edits).
+				// A mismatch means the session mutated underneath (e.g. background
+				// task), so drop the cache and refetch.
 				const cached = olderPagesCacheRef.current.get(id);
-				if (cached && cached.anchorSeq === data.oldestSeq) {
+				if (cached && cached.anchorVersion === data.version) {
 					data.messages = [...cached.messages, ...data.messages];
 					data.oldestSeq = cached.oldestSeq;
 					data.hasMoreHistory = cached.hasMore;
 				} else {
 					olderPagesCacheRef.current.set(id, {
-						anchorSeq: data.oldestSeq,
+						anchorVersion: data.version,
 						messages: [],
 						oldestSeq: data.oldestSeq,
 						hasMore: data.hasMoreHistory,

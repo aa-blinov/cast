@@ -58,6 +58,8 @@ export interface SessionState {
 	model: string;
 	createdAt: string;
 	updatedAt: string;
+	/** Monotonic version for optimistic concurrency — increments on every save. */
+	version?: number;
 	checkpoints?: TurnCheckpoint[];
 	/** Cumulative token/cost usage across every turn in this session. */
 	usage: SessionUsage;
@@ -587,16 +589,18 @@ function sessionMetaRow(session: SessionState) {
 		share_token: session.shareToken ?? null,
 		plan_question_json: session.planQuestion ? JSON.stringify(session.planQuestion) : null,
 		plan_transition_json: session.planTransition ? JSON.stringify(session.planTransition) : null,
+		version: session.version ?? 0,
 	};
 }
 
 export function saveSession(session: SessionState): void {
+	session.version = (session.version ?? 0) + 1;
 	session.updatedAt = new Date().toISOString();
 	const db = getDb();
 	const meta = sessionMetaRow(session);
 	db.prepare(
-		`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, session_kind, parent_session_id, background_kind, usage_json, todos_json, share_token, plan_question_json, plan_transition_json, checkpoint_watermark_seq)
-			 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :session_kind, :parent_session_id, :background_kind, :usage_json, :todos_json, :share_token, :plan_question_json, :plan_transition_json, :checkpoint_watermark_seq)
+		`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, session_kind, parent_session_id, background_kind, usage_json, todos_json, share_token, plan_question_json, plan_transition_json, checkpoint_watermark_seq, version)
+			 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :session_kind, :parent_session_id, :background_kind, :usage_json, :todos_json, :share_token, :plan_question_json, :plan_transition_json, :checkpoint_watermark_seq, :version)
 		 ON CONFLICT(id) DO UPDATE SET
 		   cwd = excluded.cwd, model = excluded.model, persona = excluded.persona, mode = excluded.mode,
 		   title = excluded.title, pinned = excluded.pinned, updated_at = excluded.updated_at,
@@ -606,6 +610,7 @@ export function saveSession(session: SessionState): void {
 		   usage_json = excluded.usage_json, todos_json = excluded.todos_json,
 		   share_token = excluded.share_token, plan_question_json = excluded.plan_question_json,
 		   plan_transition_json = excluded.plan_transition_json,
+		   version = excluded.version,
 		   checkpoint_watermark_seq = CASE
 		     WHEN sessions.checkpoint_watermark_seq IS NULL THEN excluded.checkpoint_watermark_seq
 		     WHEN excluded.checkpoint_watermark_seq IS NULL THEN sessions.checkpoint_watermark_seq
@@ -1160,6 +1165,7 @@ interface SessionRow {
 	share_token: string | null;
 	plan_question_json: string | null;
 	plan_transition_json: string | null;
+	version: number | null;
 }
 
 function rowToMeta(row: SessionRow): Omit<SessionState, "messages"> {
@@ -1188,6 +1194,7 @@ function rowToMeta(row: SessionRow): Omit<SessionState, "messages"> {
 			row.plan_transition_json && (JSON.parse(row.plan_transition_json) as { kind?: unknown }).kind === "done"
 				? { kind: "done" }
 				: undefined,
+		version: row.version ?? undefined,
 	};
 }
 
@@ -1518,8 +1525,8 @@ export function migrateLegacySessionsToDb(): number {
 		try {
 			if (!session.title) session.title = deriveSessionTitle(getFirstUserMessage(session));
 			db.prepare(
-				`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, session_kind, parent_session_id, background_kind, usage_json, todos_json, share_token, plan_question_json, plan_transition_json, checkpoint_watermark_seq)
-					 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :session_kind, :parent_session_id, :background_kind, :usage_json, :todos_json, :share_token, :plan_question_json, :plan_transition_json, :checkpoint_watermark_seq)`,
+				`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, session_kind, parent_session_id, background_kind, usage_json, todos_json, share_token, plan_question_json, plan_transition_json, checkpoint_watermark_seq, version)
+					 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :session_kind, :parent_session_id, :background_kind, :usage_json, :todos_json, :share_token, :plan_question_json, :plan_transition_json, :checkpoint_watermark_seq, :version)`,
 			).run(sessionMetaRow(session));
 			const insertRow = db.prepare(
 				"INSERT INTO messages (session_id, seq, message_id, role, content_json, in_context, has_tool_calls) VALUES (?, ?, ?, ?, ?, 1, ?)",
