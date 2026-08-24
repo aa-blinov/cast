@@ -2004,7 +2004,7 @@ function App() {
 						!session &&
 						html`
 						<div class="empty-state">
-							<p class="settings-loading">Loading…</p>
+							<p class="settings-loading">Loading</p>
 						</div>
 					`
 					}
@@ -2014,7 +2014,7 @@ function App() {
 						// active* thread doesn't trigger this (the fetch is
 						// there to refresh data, not to switch — the messages
 						// are still accurate, so showing a loader would just
-						// be visual noise). The user gets a static "Loading…"
+						// be visual noise). The user gets a static "Loading"
 						// centered in the same .empty-state slot the initial
 						// bootstrap uses for its spinner, same visual language
 						// as .settings-loading — "we got it, working on it".
@@ -2031,7 +2031,7 @@ function App() {
 						selectingId !== activeId &&
 						html`
 						<div class="empty-state">
-							<p class="settings-loading">Loading…</p>
+							<p class="settings-loading">Loading</p>
 						</div>
 					`
 					}
@@ -2262,7 +2262,7 @@ function SharedThreadView({ token }) {
 		return html`
 			<div class="shared-view">
 				<div class="shared-view-loading">
-					<p class="settings-loading">Loading…</p>
+					<p class="settings-loading">Loading</p>
 				</div>
 			</div>
 		`;

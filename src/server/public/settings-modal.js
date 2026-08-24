@@ -228,7 +228,7 @@ export function SettingsModal({
 
 	// Lazy load — only the visible tab is fetched. Preloading all 15 tabs
 	// in parallel on open spiked 7+ concurrent `POST /command` + `GET` calls
-	// and left the modal in "Loading…" on slow networks.
+	// and left the modal in "Loading" on slow networks.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: tab is the trigger, activeId via load()'s closure
 	useEffect(() => {
 		if (tab === "appearance" || tab === "personas" || tab === "updates" || tab === "default-ui") return;
