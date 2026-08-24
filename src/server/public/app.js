@@ -69,6 +69,31 @@ const html = htm.bind(h);
 // Only accent colors are themed (16 palettes, shared with the TUI via
 // settings.json's `theme` field) — background/border/text neutrals stay
 // fixed so the "terminal control room" look holds regardless of palette.
+function applyCustomCss(css) {
+	let el = document.getElementById("cast-custom-css");
+	if (!css) {
+		if (el) el.remove();
+		try { localStorage.removeItem("cast:customCss"); } catch {}
+		return;
+	}
+	if (!el) {
+		el = document.createElement("style");
+		el.id = "cast-custom-css";
+		document.head.appendChild(el);
+	}
+	el.textContent = css;
+	try { localStorage.setItem("cast:customCss", css); } catch {}
+}
+try {
+	const savedCss = localStorage.getItem("cast:customCss");
+	if (savedCss) applyCustomCss(savedCss);
+} catch {}
+window.addEventListener("storage", (e) => {
+	if (e.key === "cast:customCss") applyCustomCss(e.newValue || "");
+	if (e.key === "cast:themeColors" && e.newValue) {
+		try { applyTheme(JSON.parse(e.newValue)); } catch {}
+	}
+});
 function applyTheme(colors) {
 	if (!colors) return;
 	const root = document.documentElement.style;
@@ -690,13 +715,13 @@ function App() {
 	// lot of auxiliary thinking that just clutters the chat. Persisted to
 	// localStorage so the choice survives reloads; the web UI opens a single
 	// chat at a time, so this toggle spans whichever session is active. The
-	// default is off — explicit opt-in via the toggle (or the Appearance
-	// panel's Reasoning section).
+	// default is on — parity with TUI streaming (was off). Explicit opt-out via toggle.
 	const [showReasoning, setShowReasoning] = useState(() => {
 		try {
-			return localStorage.getItem("cast:showReasoning") === "1";
+			const v = localStorage.getItem("cast:showReasoning");
+			return v === null ? true : v === "1";
 		} catch {
-			return false;
+			return true;
 		}
 	});
 	// Sync the initial value from settings.json (written by /rd in TUI). The
@@ -986,6 +1011,7 @@ function App() {
 	}, [activeSessionIdRef, connected, backendUp]);
 	const {
 		loadSessions,
+		loadMoreSessions,
 		selectSession,
 		selectingId,
 		commitSession,
@@ -994,6 +1020,8 @@ function App() {
 		initClientState,
 		startReconnectLoop,
 		retryPendingOutgoing,
+		sessionsTotalRef,
+		sessionsOffsetRef,
 	} =
 		useSessionController({
 			setSessions,
@@ -1735,6 +1763,7 @@ function App() {
 	// closed one should stay out of view in this browser until re-opened by
 	// URL/history — see dismiss()/undismiss() above.
 	const visibleSessions = sessions.filter((s) => !dismissedIds.has(s.id));
+	const hasMoreSessions = visibleSessions.length < (sessionsTotalRef.current || visibleSessions.length);
 	// Default persona for a fresh draft — "senior" if installed, else whatever
 	// the server sent first. Same picker the delete-last-session path uses
 	// below (see deleteSessionPermanently); one shared source of truth so the
@@ -1877,6 +1906,8 @@ function App() {
 				defaultModelLoaded=${staticResourcesLoadedRef.current}
 				onResizeStart=${startSidebarResize}
 				confirm=${requestConfirm}
+				hasMore=${hasMoreSessions}
+				onLoadMore=${loadMoreSessions}
 			/>
 
 			<${ShareModal} session=${shareModalSession} onClose=${() => setShareModalSession(null)} />

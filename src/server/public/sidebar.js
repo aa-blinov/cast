@@ -33,6 +33,8 @@ export function Sidebar({
 	defaultModel,
 	defaultModelLoaded,
 	onResizeStart,
+	hasMore,
+	onLoadMore,
 }) {
 	const [personaOpen, setPersonaOpen] = useState(false);
 	const [search, setSearch] = useState("");
@@ -76,6 +78,7 @@ export function Sidebar({
 	const [editingId, setEditingId] = useState(null);
 	const [editValue, setEditValue] = useState("");
 	const editInputRef = useRef(null);
+	const loadMoreRef = useRef(null);
 	// One shared menu (Rename/Delete) rather than per-row state — opened by
 	// the ⋮ button or a right-click anywhere on the row, closed by an outside
 	// click/Escape/picking an action. Frees up the row for one icon instead
@@ -129,6 +132,17 @@ export function Sidebar({
 	const filtered = isSearching ? (searchResults ?? []) : sessions;
 	const sessionGroups = isSearching ? [] : groupSessionsByDate(filtered);
 	const isSandbox = cwd === SANDBOX_CWD;
+
+	useEffect(() => {
+		if (!hasMore || !onLoadMore || isSearching) return;
+		const el = loadMoreRef.current;
+		if (!el) return;
+		const obs = new IntersectionObserver((entries) => {
+			if (entries[0]?.isIntersecting) onLoadMore();
+		}, { root: el.closest(".sidebar-scroll"), threshold: 0.1 });
+		obs.observe(el);
+		return () => obs.disconnect();
+	}, [hasMore, onLoadMore, isSearching, sessions.length]);
 
 	const startEdit = useCallback((s) => {
 		setEditingId(s.id);
@@ -261,6 +275,7 @@ export function Sidebar({
 					${!sessionsLoaded && html`<div class="sidebar-empty">Loading...</div>`}
 					${sessionsLoaded && searching && html`<div class="sidebar-empty">Searching…</div>`}
 					${sessionsLoaded && !searching && (isSearching ? filtered.length === 0 : sessionGroups.length === 0) && html`<div class="sidebar-empty">No sessions match "${search}"</div>`}
+					${!isSearching && hasMore && sessionsLoaded && html`<button ref=${loadMoreRef} class="sidebar-load-more" onClick=${onLoadMore}>Load more</button>`}
 				</div>
 			</div>
 			<div class="sidebar-footer" title=${defaultModel || (defaultModelLoaded ? "No model selected" : "Loading…")}>

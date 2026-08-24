@@ -64,6 +64,19 @@ export function SettingsModal({
 	onToggleShowReasoning,
 	onMemoryChange,
 }) {
+	const [customCss, setCustomCss] = useState(() => {
+		try { return localStorage.getItem("cast:customCss") || ""; } catch { return ""; }
+	});
+	const saveCustomCss = useCallback((css) => {
+		setCustomCss(css);
+		try {
+			let el = document.getElementById("cast-custom-css");
+			if (!css) { if (el) el.remove(); localStorage.removeItem("cast:customCss"); return; }
+			if (!el) { el = document.createElement("style"); el.id = "cast-custom-css"; document.head.appendChild(el); }
+			el.textContent = css;
+			localStorage.setItem("cast:customCss", css);
+		} catch {}
+	}, []);
 	const [tab, setTab] = useState(SETTINGS_TABS[0].id);
 	const [data, setData] = useState({});
 	const [errors, setErrors] = useState({});
@@ -332,7 +345,7 @@ export function SettingsModal({
 											const res = await act(`/theme ${id}`);
 											if (res.ok && res.result?.colors) onApplyTheme(res.result.colors);
 											if (res.ok && res.result?.theme) onThemeChange(res.result.theme);
-																	}} currentFontId=${currentFontId} currentFontScale=${currentFontScale} onPickFont=${onPickFont} onPickScale=${onPickScale} showReasoning=${showReasoning} onToggleShowReasoning=${onToggleShowReasoning} />`
+																	}} currentFontId=${currentFontId} currentFontScale=${currentFontScale} onPickFont=${onPickFont} onPickScale=${onPickScale} showReasoning=${showReasoning} onToggleShowReasoning=${onToggleShowReasoning} customCss=${customCss} onSaveCustomCss=${saveCustomCss} />`
 									: tab === "model"
 										? html`<${panels.SettingsModel} data=${data.model} busy=${busy} act=${act} />`
 										: tab === "personas"

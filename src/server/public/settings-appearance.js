@@ -33,6 +33,13 @@ function SettingsFont({ options, scales, currentFontId, currentFontScale, onPick
 	return html`<div class="settings-font-settings"><div class="settings-row-label">Scale</div><div class="settings-scale-row">${scales.map((scale) => html`<button key=${scale} class="settings-scale-btn${scale === currentFontScale ? " active" : ""}" onClick=${() => onPickScale(scale)}>${Math.round(scale * 100)}%</button>`)}</div><div class="settings-row-label">Monospace</div><div class="settings-font-grid">${renderFonts(true)}</div><div class="settings-row-label">Sans-serif</div><div class="settings-font-grid">${renderFonts(false)}</div></div>`;
 }
 
+function SettingsCustomCss({ customCss, onSave }) {
+	return html`<div class="settings-rows"><div class="settings-section-title">Custom CSS</div>
+		<p class="settings-hint">Injected as <code>&lt;style id="cast-custom-css"&gt;</code> — survives reload, syncs across tabs via storage event.</p>
+		<textarea class="settings-textarea" rows="4" placeholder="/* e.g. .message { border-left: 2px solid var(--cyan) } */" value=${customCss} onInput=${(e) => onSave(e.target.value)} style="font-family:var(--font-mono);font-size:.75rem"></textarea>
+	</div>`;
+}
+
 export function SettingsAppearance({
 	themes,
 	currentThemeId,
@@ -45,6 +52,8 @@ export function SettingsAppearance({
 	onPickScale,
 	showReasoning,
 	onToggleShowReasoning,
+	customCss,
+	onSaveCustomCss,
 }) {
-	return html`<div class="settings-rows"><div class="settings-section-title">Theme</div><${SettingsTheme} themes=${themes} currentThemeId=${currentThemeId} onPick=${onPickTheme} /><div class="settings-section-title">Font</div><${SettingsFont} options=${fontOptions} scales=${fontScales} currentFontId=${currentFontId} currentFontScale=${currentFontScale} onPickFont=${onPickFont} onPickScale=${onPickScale} /><div class="settings-section-title">Reasoning</div><${SettingsReasoning} showReasoning=${showReasoning} onToggle=${onToggleShowReasoning} /></div>`;
+	return html`<div class="settings-rows"><div class="settings-section-title">Theme</div><${SettingsTheme} themes=${themes} currentThemeId=${currentThemeId} onPick=${onPickTheme} /><div class="settings-section-title">Font</div><${SettingsFont} options=${fontOptions} scales=${fontScales} currentFontId=${currentFontId} currentFontScale=${currentFontScale} onPickFont=${onPickFont} onPickScale=${onPickScale} /><div class="settings-section-title">Reasoning</div><${SettingsReasoning} showReasoning=${showReasoning} onToggle=${onToggleShowReasoning} /><${SettingsCustomCss} customCss=${customCss} onSave=${onSaveCustomCss} /></div>`;
 }

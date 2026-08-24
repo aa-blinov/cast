@@ -70,7 +70,7 @@ function createFakeDeps(overrides?: Partial<CommandDeps> & { running?: boolean }
 		// render a notice without waiting for the next React render. This
 		// mock mirrors the new contract: flipping the bit is in-band with
 		// the call, and the returned value is what the caller sees.
-		showReasoning: false,
+		showReasoning: true,
 		toggleReasoning: () => {
 			agent.showReasoning = !agent.showReasoning;
 			track("agent.toggleReasoning")();
@@ -664,22 +664,22 @@ describe("handleInput", () => {
 	// surface it when they want to debug the model's reasoning.
 	it("/reasoning-display toggles the showReasoning flag", async () => {
 		const { deps, calls } = createFakeDeps({ running: false });
-		expect(deps.agent.showReasoning).toBe(false);
-		await handleInput("/reasoning-display", undefined, deps);
 		expect(deps.agent.showReasoning).toBe(true);
+		await handleInput("/reasoning-display", undefined, deps);
+		expect(deps.agent.showReasoning).toBe(false);
 		expect(calls["agent.toggleReasoning"]).toHaveLength(1);
 		const notices = (calls.showNotice as unknown[][] | undefined)?.map((n) => String(n[0] ?? "")) ?? [];
-		expect(notices[0]).toContain("on");
+		expect(notices[0]).toContain("off");
 		await handleInput("/reasoning-display", undefined, deps);
-		expect(deps.agent.showReasoning).toBe(false);
+		expect(deps.agent.showReasoning).toBe(true);
 		const notices2 = (calls.showNotice as unknown[][] | undefined)?.map((n) => String(n[0] ?? "")) ?? [];
-		expect(notices2[1]).toContain("off");
+		expect(notices2[1]).toContain("on");
 	});
 
 	it("/rd is an alias for /reasoning-display", async () => {
 		const { deps, calls } = createFakeDeps({ running: false });
 		await handleInput("/rd", undefined, deps);
-		expect(deps.agent.showReasoning).toBe(true);
+		expect(deps.agent.showReasoning).toBe(false);
 		expect(calls["agent.toggleReasoning"]).toHaveLength(1);
 	});
 

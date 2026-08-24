@@ -620,8 +620,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	// this instead of the local planState, which the daemon owns in client mode.
 	const [pendingQuestion, setPendingQuestion] = useState<PlanQuestion | undefined>(undefined);
 	const [pendingPlanTransition, setPendingPlanTransition] = useState<PlanTransition | undefined>(undefined);
-	const [showReasoning, setShowReasoning] = useState(() => loadSettings().showReasoning ?? false);
-	const showReasoningRef = useRef(loadSettings().showReasoning ?? false);
+	const [showReasoning, setShowReasoning] = useState(() => loadSettings().showReasoning ?? true);
+	const showReasoningRef = useRef(loadSettings().showReasoning ?? true);
 	const toggleReasoning = useCallback((): boolean => {
 		setShowReasoning((prev) => {
 			const next = !prev;

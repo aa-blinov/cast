@@ -1027,7 +1027,18 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 	route("GET", "/api/sessions", (req, res) => {
 		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
 		const q = url.searchParams.get("q");
-		json(res, q ? bridge.searchSessions(q) : bridge.listSessions());
+		const limitParam = url.searchParams.get("limit");
+		const offsetParam = url.searchParams.get("offset");
+		const all = q ? bridge.searchSessions(q) : bridge.listSessions();
+		if (limitParam !== null || offsetParam !== null) {
+			const limit = Math.min(200, Math.max(1, parseInt(limitParam ?? "50", 10) || 50));
+			const offset = Math.max(0, parseInt(offsetParam ?? "0", 10) || 0);
+			const total = all.length;
+			const sessions = all.slice(offset, offset + limit);
+			json(res, { sessions, total, limit, offset });
+			return;
+		}
+		json(res, all);
 	});
 
 	route("POST", "/api/sessions", async (req, res) => {
@@ -2098,7 +2109,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 
 	route("GET", "/api/settings/appearance", (_req, res) => {
 		const { showReasoning } = loadSettings();
-		json(res, { showReasoning: showReasoning ?? false });
+		json(res, { showReasoning: showReasoning ?? true });
 	});
 	route("POST", "/api/settings/appearance", async (req, res) => {
 		let parsed: { showReasoning?: unknown };

@@ -3933,7 +3933,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			return { ok: true, result: loadSettings().statusBar ?? { visible: [], order: [], sides: {} } };
 		}
 		if (name === "/reasoning-display" || name === "/rd") {
-			const next = !(loadSettings().showReasoning ?? false);
+			const next = !(loadSettings().showReasoning ?? true);
 			updateSettings({ showReasoning: next });
 			return { ok: true, result: { showReasoning: next } };
 		}
