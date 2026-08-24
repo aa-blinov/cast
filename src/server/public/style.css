@@ -1247,12 +1247,11 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 }
 .new-session-personas {
 	display: grid;
-	/* Always exactly two columns: consistent layout on mobile, tablet,
-	   and desktop. Cards are tall enough for two lines of text (label +
-	   source), so 2-up reads cleanly without leaving the right column
-	   empty. */
 	grid-template-columns: 1fr 1fr;
 	gap: 6px;
+	max-width: 520px;
+	margin: 0 auto;
+	width: 100%;
 }
 .new-session-persona {
 	display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
