@@ -110,15 +110,14 @@ function SettingsMemory({ data, busy, act }) {
 	const [dreamIntervalDraft, setDreamIntervalDraft] = useState(() => String(dreamInterval));
 	const [distillIntervalDraft, setDistillIntervalDraft] = useState(() => String(distillInterval));
 	const [thresholdsDraft, setThresholdsDraft] = useState("");
-	const [reservedDraft, setReservedDraft] = useState(() => String(reserved));
+	const [reservedDraft, setReservedDraft] = useState("");
 	const [capsDrafts, setCapsDrafts] = useState({});
 	useEffect(() => {
 		setBudgetDraft(String(budget));
 		setFloorDraft(String(floor));
 		setDreamIntervalDraft(String(dreamInterval));
 		setDistillIntervalDraft(String(distillInterval));
-		setReservedDraft(String(reserved));
-	}, [budget, floor, dreamInterval, distillInterval, reserved]);
+	}, [budget, floor, dreamInterval, distillInterval]);
 	if (!data) return null;
 	const enabled = data.memoryEnabled !== false;
 	const writeEnabled = data.memoryWriteEnabled !== false;
@@ -158,7 +157,7 @@ function SettingsMemory({ data, busy, act }) {
 				</div>
 				<div class="settings-compact-row">
 					<div class="settings-compact-copy"><span class="settings-compact-title">Checkpoint reserved</span><span>Token safety buffer at the window end; thresholds clamp to window − reserved (default ${DEFAULTS.reserved})</span></div>
-					<form class="settings-inline-form" onSubmit=${(event) => { event.preventDefault(); const value = Number(reservedDraft); if (Number.isInteger(value) && value >= 0) act(`/memory checkpoint reserved ${value}`); }}><input aria-label="Checkpoint reserved tokens" type="text" inputmode="numeric" pattern="[0-9]*" value=${reservedDraft} disabled=${busy || !enabled || !writeEnabled} onInput=${(event) => setReservedDraft(event.target.value.replace(/[^0-9]/g, ""))} /><button class="modal-btn icon-btn" title="Reset to ${DEFAULTS.reserved}" disabled=${busy || !enabled || !writeEnabled || reserved === DEFAULTS.reserved} onClick=${() => act(`/memory checkpoint reserved ${DEFAULTS.reserved}`)}><${icons.arrowUturnLeft} /></button><button class="modal-btn icon-btn" title="Save" disabled=${busy || !reservedDraft || Number(reservedDraft) === reserved} onClick=${() => act(`/memory checkpoint reserved ${Number(reservedDraft)}`)}><${icons.check} /></button></form>
+					<form class="settings-inline-form" onSubmit=${(event) => { event.preventDefault(); const value = Number(reservedDraft); if (Number.isInteger(value) && value >= 0) act(`/memory checkpoint reserved ${value}`); }}><input aria-label="Checkpoint reserved tokens" type="text" inputmode="numeric" pattern="[0-9]*" placeholder=${reserved} value=${reservedDraft} disabled=${busy || !enabled || !writeEnabled} onInput=${(event) => setReservedDraft(event.target.value.replace(/[^0-9]/g, ""))} /><button class="modal-btn icon-btn" title="Reset to ${DEFAULTS.reserved}" disabled=${busy || !enabled || !writeEnabled || reserved === DEFAULTS.reserved} onClick=${() => act(`/memory checkpoint reserved ${DEFAULTS.reserved}`)}><${icons.arrowUturnLeft} /></button><button class="modal-btn icon-btn" title="Save" disabled=${busy || !reservedDraft || Number(reservedDraft) === reserved} onClick=${() => { act(`/memory checkpoint reserved ${Number(reservedDraft)}`); setReservedDraft(""); }}><${icons.check} /></button></form>
 				</div>
 				${["checkpoint", "memory", "notes", "global", "tasks"].map((key) => {
 					const current = pushCaps[key] ?? DEFAULTS.caps[key];
