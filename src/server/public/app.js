@@ -28,6 +28,7 @@ import { SettingsModal as SettingsModalModule } from "./settings-modal.js";
 import { SettingsModel } from "./settings-model.js";
 import {
 	SettingsBash,
+	SettingsDefaultUi,
 	SettingsHooks,
 	SettingsMarketplace,
 	SettingsMemory,
@@ -498,18 +499,14 @@ function sessionIdFromUrl() {
 // every route so a dashboard/settings link keeps its session context.
 function viewFromPath() {
 	const p = window.location.pathname;
-	// Stable base aliases: /app, /cast, /default, /base, /based, /core, /main all serve the same base UI at /
-	// Strip the alias prefix so /app/settings and /settings both route to settings
-	const baseAliases = ["/app", "/cast", "/default", "/base", "/based", "/core", "/main"];
-	for (const a of baseAliases) {
-		if (p === a) return "chat";
-		if (p.startsWith(`${a}/`)) {
-			const sub = p.slice(a.length);
-			if (sub === "/settings") return "settings";
-			if (sub === "/dashboard") return "dashboard";
-			if (sub.startsWith("/shared/")) return "chat";
-			return "chat";
-		}
+	// Stable base alias: /default (and /) serve the same base UI
+	if (p === "/default") return "chat";
+	if (p.startsWith("/default/")) {
+		const sub = p.slice("/default".length);
+		if (sub === "/settings") return "settings";
+		if (sub === "/dashboard") return "dashboard";
+		if (sub.startsWith("/shared/")) return "chat";
+		return "chat";
 	}
 	if (p === "/settings") return "settings";
 	if (p === "/dashboard") return "dashboard";
@@ -819,12 +816,9 @@ function App() {
 	);
 	const navigate = useCallback(
 		(path) => {
-			const baseAliases = ["/app", "/cast", "/default", "/base", "/based", "/core", "/main"];
 			const cur = window.location.pathname;
 			let prefix = "";
-			for (const a of baseAliases) {
-				if (cur === a || cur.startsWith(`${a}/`)) { prefix = a; break; }
-			}
+			if (cur === "/default" || cur.startsWith("/default/")) prefix = "/default";
 			const full = prefix ? `${prefix}${path}` : path;
 			if (window.location.pathname + window.location.search === full) return;
 			window.history.pushState(null, "", full);
@@ -1136,9 +1130,9 @@ function App() {
 		// worktree creation happens server-side at POST /api/sessions, so a
 		// failure here is invisible to startDraft and must surface in the
 		// modal's error slot.
-		startDraft(payload.persona, payload.cwd, { worktree: payload.worktree });
+		startDraft(payload.persona, payload.cwd, { worktree: payload.worktree, model: payload.model });
 		try {
-			await commitSession(payload.persona, payload.cwd, { push: false, worktree: payload.worktree });
+			await commitSession(payload.persona, payload.cwd, { push: false, worktree: payload.worktree, model: payload.model });
 			setNewSessionError(null);
 			setNewSessionOpen(false);
 		} catch (err) {
@@ -1934,7 +1928,7 @@ function App() {
 				settingsOpen &&
 				html`
 				<${SettingsModalModule}
-					panels=${{ SettingsAppearance, SettingsModel, SettingsBash, SettingsWeb, SettingsMemory, SettingsPersonas, SettingsQuickMode, SettingsServer, SettingsHooks, SettingsMcp, SettingsSkills, SettingsPlugins, SettingsMarketplace, SettingsSkillssh, SettingsProvider, SettingsSsh, SettingsUpdates }}
+					panels=${{ SettingsAppearance, SettingsModel, SettingsBash, SettingsWeb, SettingsMemory, SettingsPersonas, SettingsQuickMode, SettingsServer, SettingsHooks, SettingsMcp, SettingsSkills, SettingsPlugins, SettingsMarketplace, SettingsSkillssh, SettingsProvider, SettingsSsh, SettingsDefaultUi, SettingsUpdates }}
 					fontOptions=${FONT_OPTIONS}
 					fontScales=${FONT_SCALE_OPTIONS}
 					activeId=${activeId}

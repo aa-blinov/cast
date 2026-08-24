@@ -1,6 +1,6 @@
 ---
 name: skill-creator
-description: Reference for writing and editing skills well — the vocabulary and principles that make a skill predictable.
+description: Provides reference for writing and editing skills well — defines vocabulary and principles that make a skill predictable. Use when creating or editing SKILL.md, fixing trigger issues, or designing skill structure.
 disable-model-invocation: true
 ---
 

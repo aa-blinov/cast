@@ -1094,6 +1094,42 @@ function InfoPopover({ text, readUrl, contentLabel = "Skill content" }) {
 	];
 }
 
+function SettingsDefaultUi() {
+	const [uis, setUis] = useState([]);
+	const [selected, setSelected] = useState("default");
+	const [saving, setSaving] = useState(false);
+	const [status, setStatus] = useState(null);
+	useEffect(() => {
+		api("GET", "/api/uis").then((d) => Array.isArray(d) && setUis(d)).catch(()=>{});
+		api("GET", "/api/settings/default-ui").then((d) => d?.defaultUi && setSelected(d.defaultUi)).catch(()=>{});
+	}, []);
+	const save = async () => {
+		setSaving(true);
+		setStatus(null);
+		try {
+			const res = await api("POST", "/api/settings/default-ui", { name: selected });
+			if (res?.ok) setStatus({ ok: true, text: `Default UI set to ${selected} — open / to see` });
+			else setStatus({ ok: false, text: res?.error || "Failed" });
+		} catch (e) {
+			setStatus({ ok: false, text: e instanceof Error ? e.message : String(e) });
+		} finally {
+			setSaving(false);
+		}
+	};
+	const current = uis.find((u) => u.name === selected)?.name ?? selected;
+	return html`<div class="settings-rows">
+		<p class="settings-intro"><span>Choose which UI opens at <code>/</code> — like default assistant. Factory UIs at <code>/ui/&lt;name&gt;/</code> and <code>/&lt;name&gt;/</code> stay always reachable.</span></p>
+		<div class="settings-form-row">
+			<select value=${selected} onChange=${(e) => setSelected(e.target.value)} disabled=${saving}>
+				<option value="default">default — built-in Cast</option>
+				${uis.filter((u) => !u.builtin).map((u) => html`<option value=${u.name}>${u.name}</option>`)}
+			</select>
+			<button class="modal-btn icon-btn" title="Save" disabled=${saving} onClick=${save}>${saving ? html`<span class="settings-inline-loader" />` : html`<${icons.check} />`}</button>
+		</div>
+		${status ? html`<div class=${status.ok ? "settings-ok" : "settings-error"}>${status.text}</div>` : null}
+	</div>`;
+}
+
 function SettingsUpdates() {
 	const [info, setInfo] = useState(null);
 	const [checking, setChecking] = useState(true);
@@ -1168,6 +1204,7 @@ function SettingsUpdates() {
 export {
 	InfoPopover,
 	SettingsBash,
+	SettingsDefaultUi,
 	SettingsHooks,
 	SettingsMemory,
 	SettingsMcp,

@@ -1,79 +1,51 @@
 ---
 name: ui-factory
-description: Build and modify Cast web UIs — create new reactive frontends, edit layouts, themes, and components. Use when the user wants a custom UI, to change the look of the web app, to add a new page/panel, or when you (the agent) want to adapt the UI to the task (e.g. a data dashboard, a kanban, a focused chat). Triggers on "make a UI", "change the UI", "new frontend", "custom theme", "reactive UI", "factory".
+description: Builds and modifies Cast web UIs — creates new reactive frontends, edits layouts, themes, and components via lib/ puzzle library. Use when user asks to make a UI, change the UI, create new frontend, custom theme, reactive UI, or factory, or when adapting UI to a task (dashboard, kanban, focused chat).
 ---
 
-# UI Factory — reactive, no-build frontends for Cast
+# UI Factory — библиотека пазлов
 
-Cast's daemon is headless — any frontend that speaks `/api/*` can drive it. The built-in UI is at `src/server/public` (`dist/public` after build, served at `/` on `1337` **and stable aliases** `/app`, `/cast`, `/default`, `/base`, `/based` (typo alias), `/core`, `/main` — all same `default`, never moves). Factory UIs are just static dirs with `index.html` served at `http://host:1337/ui/<name>/` and `http://host:1337/<name>/` (e.g. `http://host:1337/claude-ui/`) via `src/server/ui-registry.ts` — same daemon, same `/api/*`, no neighbour port needed.
+Сборка из готовых кубиков, не фристайл. Любой `index.html` в `~/.cast/ui/<name>/` → `http://host:1337/<name>/` (канонично, без `/ui`; `/ui/<name>/` →302→ `/<name>/`). Встроенный `default` — `src/server/public` (`/`, `/default`).
 
-## Where UIs live (discovered every request, no restart)
-
-- `~/.cast/ui/<name>/` — global, always trusted
-- `~/.config/cast/ui/<name>/` — XDG global
-- `<cwd>/.cast/ui/<name>/` and `<cwd>/.agents/ui/<name>/` — project-local, trust-gated (same as skills/mcp)
-
-Each needs `index.html` (others optional). Listed at `GET /api/uis` → `[{name, builtin}]`. `GET http://host:1337/ui` lists factory UIs, `GET http://host:1337/` and `GET http://host:1337/app` (also `/cast`, `/default`, `/base`, `/based`) is still `default`. Factory UIs at `http://host:1337/ui/<name>/` and `http://host:1337/<name>/` (e.g. `http://host:1337/claude-ui/`).
-
-## Factory template
-
-`src/server/ui-factory/template/` is a minimal reactive UI (Preact + htm via `/vendor/*`, no build). It reuses the same API as the default UI:
-
-- `GET /api/sessions`, `POST /api/sessions`, `GET /api/sessions/:id`, `POST /api/sessions/:id/chat`, `GET /api/sessions/:id/events` (SSE)
-- `GET /api/uis`
-
-Copy it:
+## Быстрый старт
 
 ```
-POST /api/uis {"name":"my-ui"}  → 201 {url:"/ui/my-ui/", dir:"~/.cast/ui/my-ui"} (http://host:1337/ui/my-ui/ and http://host:1337/my-ui/ — both same)
-# or
-cp -r src/server/ui-factory/template ~/.cast/ui/my-ui
-# then edit
-# GET http://host:1337/ui lists factory UIs, GET http://host:1337/ and GET http://host:1337/app (also /cast, /default, /base) is still default — /app/settings and /settings both serve default's SPA (viewFromPath handles /app prefix)
+POST /api/uis {"name":"my-ui"} → 201 {url:"/my-ui/"}   # или cp -r src/server/ui-factory/template ~/.cast/ui/my-ui
+# правь только LAYOUT/THEME + lib/tokens.css — кубики не трогай
 ```
 
-Template files:
+## Библиотека `lib/` (все пазлы — не изобретай)
 
-- `index.html` — shell + importmap (`preact`, `htm` → `/vendor/*`)
-- `app.js` — `LAYOUT = {sidebar:"left|right|no", diff:"", showReasoning}` and `THEME`, components `Sidebar`, `Chat`, `Composer`, `Message`. Edit `LAYOUT` to rearrange, add panels, swap components.
-- `style.css` — tokens at `:root` (`--bg`, `--accent`, `--border`).
-- `README.md` — usage.
+- `lib/tokens.css` — 10 токенов `:root` (`--bg --panel --border --text --muted --accent --accent-hover --success --warning --error`) + `--radius/--sidebar-w/--header-h`
+- `lib/components.js` — база `Header, Sidebar, Bubble, Composer` (`@` mention пазл `api` → `GET /api/agents` + chips `→ ответят N агента`), `SettingsModal` — **правильный**: `General` (глобально) + `Appearance` — **пазл темы** `GET /api/themes` → `localStorage cast:ui:<name>:theme` (изолировано).
+- `lib/puzzles.js` — пазлы `FileTree` (`/fs`), `DiffView` (`/diff`), `TelemetryKpis` (`/telemetry/overview`), `Kanban` (колонки `GET /api/sessions`), `AgentsPanel` (`GET/POST /api/agents` — библиотека агентов), `BuzzThreads` (тред где на 1 сообщение отвечают N агентов `POST /api/sessions {agentId}` фан-аут) — каждый <100 строк.
 
-No rebuild: extra UIs are static, served directly; refresh after edit.
+Скелет (валидация `factory.ts:50` — не удалять): `Sidebar + Composer + SettingsModal + sessions/settingsOpen` + `api("GET","/api/system/version")` + `tab==="appearance"`.
 
-## Auth & Settings — must handle
+Сборка `app.js` — только:
+- `LAYOUT = {sidebar:"left"|"right"|"off", density:"compact"|"comfortable"|"spacious", header:"minimal"|"full", composer:"bar"|"floating"}`
+- `THEME = {bg,panel,border,text,muted,accent,accentHover,success,warning,error}` → `applyThemeVars` → `lib/tokens.css`
+- `App: <Header/> + {sidebar!="off" && <Sidebar/>} + <Bubble/>* + <Composer/> + <SettingsModal api={api}/>` — добавь пазлы импортом `import { FileTree } from "./lib/puzzles.js"`.
 
-- **Login**: daemon auth is `HttpOnly` cookie `cast_web_session` set by `POST /api/auth/login {username:"cast", password: serverToken from ~/.cast/settings.json serverToken}`. Every `GET /api/*` (except `/api/auth/*`, `/api/shared/*`, `/vendor/*`, `/fonts/*`, `/ui/*` assets) is gated — client must `if (res.status===401) location.assign("/login")` (see template `api()` helper). `GET /login` → `login.html`, `POST /api/auth/logout` clears.
-- **Settings**: `~/.cast/settings.json` via `GET /api/settings/appearance|model|bash|memory…` and `POST` same. To build a settings UI, fetch current, render controls, `POST` back. See `src/server/server.ts` route table and `prompts/skills/cast/references/web.md` (settings/dashboard tabs).
-- **No secrets in UI**: static assets are public, all data via `/api/*` is gated — don't embed tokens in JS.
+## Дизайн — `frontend-design` коротко
 
-## Safety — never break the built-in UI
+Один тезис-герой, пара шрифтов (`display+mono ≠ Inter`), структура = информация, один motion (`prefers-reduced-motion`), Chanel — сними один аксессуар. Перед правкой план 4 строки: `Subject/Audience/Job + Palette 4-6 hex + Type + Signature` → выведи `LAYOUT/THEME`.
 
-- **Never** `write`/`edit` `src/server/public/*` or `dist/public/*` — that's the built-in `default` UI at `/` (`cast` web). It is rebuilt from sources and served `no-cache` for HTML but `immutable` for `?v=` assets; overwriting it requires a rebuild and breaks `1337` for everyone. The daemon will reject such writes with `PERMISSION_DENIED`.
-- Only `~/.cast/ui/<name>/`, `~/.config/cast/ui/<name>/`, or (if trusted) `.cast/ui/<name>/` — those are served at `http://host:1337/ui/<name>/` and `http://host:1337/<name>/`. `default` at `http://host:1337/` and `http://host:1337/app` stays untouched.
+**Анти-паттерны (не делай, если бриф не просит):** `Inter` везде, `big number + small label + gradient`, `warm cream #F4F1EA + terracotta`, `near-black + acid-green`, `broadsheet hairlines`.
 
-## For the agent (you)
+## Для агента
 
-You can change the UI yourself — no user edit needed:
+1. **Create:** `read lib/components.js` → план 4 строки → `POST /api/uis` → правь `LAYOUT/THEME`.
+2. **Modify:** `edit lib/tokens.css` / `LAYOUT` — не трогай кубики.
+3. **Verify:** см. `references/verify.md` — `playwright` `GET /<name>/` (без `/ui`, `/ui/<name>/` →302) скрин `1280×800`+`390×844` + `node --import tsx` валидация `factory.ts`. Без скрина `done` нельзя.
 
-1. **Create**: `write` to `~/.cast/ui/<name>/index.html` (or `POST /api/uis`) — copy template then edit.
-2. **Modify**: `read` then `edit`/`write` any file in `~/.cast/ui/<name>/` — e.g. change `LAYOUT.sidebar = "no-sidebar"` for a focused chat, or `THEME.accent = "#ff3366"`, or replace `Message` to render a custom card.
-3. **Live**: server watches `~/.cast/ui/*` via `chokidar` and broadcasts `ui_change` on `GET /api/uis/events` (SSE). The factory template listens and `location.reload()`s — your change appears without manual refresh. If the UI doesn't listen, the next `GET /ui/<name>/` already serves the new file (HTML `no-cache`).
-
-Example — make a minimal kanban UI:
-
-```
-write ~/.cast/ui/kanban/index.html  — copy template index.html, change title
-write ~/.cast/ui/kanban/app.js      — replace Chat with Kanban component that fetches /api/sessions and renders cards
-write ~/.cast/ui/kanban/style.css   — tweak --accent
-```
-
-Then tell the user: `http://host:1337/kanban/` and `http://host:1337/ui/kanban/` are live.
+Где живут: `~/.cast/ui/*` (global), `~/.config/cast/ui/*`, `.cast/ui` (trust-gated). Список `GET /api/uis` + `GET /ui` листинг. Auth `POST /api/auth/login` → `HttpOnly cast_web_session`.
 
 ## References
 
 | Topic | Read |
 |-------|------|
-| UI registry and serving | `references/ui-registry.md` |
-| Factory template walkthrough | `references/factory.md` |
-| Web API for UIs | `references/web-api.md` |
+| Верификация | `references/verify.md` |
+| Библиотека | `lib/components.js`, `lib/tokens.css`, `lib/puzzles.js` |
+| Дизайн | `references/frontend-design.md` |
+| Реестр + API | `references/ui-registry.md`, `references/web-api.md` |

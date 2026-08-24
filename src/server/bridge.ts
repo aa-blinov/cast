@@ -999,6 +999,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		cwdOverride?: string,
 		runSessionStartHook = true,
 		worktree?: SessionWorktree,
+		providerOverride?: string,
 	): WebAgentSession {
 		// New sessions must start on whatever provider/model settings.json
 		// currently declares — not whatever was active when the daemon booted
@@ -1006,7 +1007,8 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// sessions on the stale startup provider even after an external switch.
 		syncActiveProviderFromSettings();
 		const persona = personaName ? (resolvePersona(personaName) ?? currentPersona) : currentPersona;
-		const model = modelOverride ?? defaultModel;
+		const model = modelOverride ?? persona.model ?? defaultModel;
+		const providerName = providerOverride ?? persona.provider;
 
 		let sessionCwd = cwdOverride && cwdOverride !== SANDBOX_CWD ? cwdOverride : cwd;
 		// Worktree and sandbox are mutually exclusive — worktree wins if both

@@ -648,6 +648,24 @@ CREATE INDEX IF NOT EXISTS idx_memory_maintenance_ts ON memory_maintenance(ts);
 `);
 		},
 	},
+	{
+		version: 26,
+		name: "agents-entity",
+		up: (db) => {
+			db.exec(`
+CREATE TABLE IF NOT EXISTS agents (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  persona TEXT NOT NULL,
+  model TEXT,
+  provider TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agents_name ON agents(name);
+`);
+		},
+	},
 ];
 
 const MIGRATION_TABLE_SCHEMA = `

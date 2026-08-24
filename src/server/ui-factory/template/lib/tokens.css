@@ -1,0 +1,15 @@
+/* lib/tokens.css — design tokens (single source). Меняй только значения, не имена. */
+:root{
+  /* palette — 8 токенов, wired via app.js THEME → :root */
+  --bg:#08080a; --panel:#14141b; --border:#2a2a33;
+  --text:#f0f0f5; --muted:#8a8a95;
+  --accent:#8b5cf6; --accent-hover:#7c3aed;
+  --success:#22c55e; --warning:#f59e0b; --error:#ef4444;
+  /* bubble — производные, не трогай */
+  --bubble-user:var(--accent); --bubble-assistant:var(--panel);
+  /* layout */
+  --radius:12px; --sidebar-w:260px; --header-h:48px;
+  /* type */
+  --font: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
+  --font-mono: 'SF Mono', Consolas, monospace;
+}

@@ -1,6 +1,6 @@
 import htm from "htm";
 import { h } from "preact";
-import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { api } from "./api.js";
 import { FilePreviewModal } from "./file-preview.js";
 import { humanSize } from "./file-size.js";
@@ -37,16 +37,20 @@ export function FileExplorer({ activeId, confirm, refreshNonce }) {
 	const treeRef = useRef(tree);
 	const queryRef = useRef(query);
 	const lastRefreshNonceRef = useRef(refreshNonce);
+	const loadingDirsRef = useRef(loadingDirs);
+	const expandedRef = useRef(expanded);
 	activeIdRef.current = activeId;
 	treeRef.current = tree;
 	queryRef.current = query;
+	loadingDirsRef.current = loadingDirs;
+	expandedRef.current = expanded;
 
 	const loadDir = useCallback(
-		async (relPath) => {
+		async (relPath, { silent = false } = {}) => {
 			const requestActiveId = activeId;
 			const requestKey = `${requestActiveId}\u0000${relPath}`;
 			const requestVersion = nextDirectoryRequestVersion(directoryRequestVersionsRef.current, requestKey);
-			setLoadingDirs((prev) => new Set(prev).add(relPath));
+			if (!silent) setLoadingDirs((prev) => new Set(prev).add(relPath));
 			try {
 				const data = await api("GET", `/api/sessions/${requestActiveId}/fs?path=${encodeURIComponent(relPath || ".")}`);
 				const isCurrent =
@@ -99,7 +103,7 @@ export function FileExplorer({ activeId, confirm, refreshNonce }) {
 				next.delete(relPath);
 			} else {
 				next.add(relPath);
-				if (!tree[relPath]) loadDir(relPath);
+				if (!treeRef.current[relPath] && !loadingDirsRef.current.has(relPath)) loadDir(relPath);
 			}
 			return next;
 		});
@@ -145,7 +149,7 @@ export function FileExplorer({ activeId, confirm, refreshNonce }) {
 		if (!activeId) return;
 		if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
 		refreshTimerRef.current = setTimeout(() => {
-			for (const relPath of Object.keys(treeRef.current)) void loadDir(relPath);
+			for (const relPath of Object.keys(treeRef.current)) void loadDir(relPath, { silent: true });
 			const currentQuery = queryRef.current.trim();
 			if (currentQuery) void runSearch(currentQuery);
 		}, 200);
@@ -261,11 +265,11 @@ export function FileExplorer({ activeId, confirm, refreshNonce }) {
 		</div>
 	`;
 
-	const renderEntry = (parentPath, entry, depth) => {
+	const renderEntry = useCallback((parentPath, entry, depth) => {
 		const fullPath = parentPath ? `${parentPath}/${entry.name}` : entry.name;
 		const isDir = entry.type === "dir";
-		const isOpen = expanded.has(fullPath);
-		const isLoading = loadingDirs.has(fullPath);
+		const isOpen = expandedRef.current.has(fullPath);
+		const isLoading = loadingDirsRef.current.has(fullPath);
 		const isBusy = busyPath === fullPath;
 		return html`
 			<div key=${fullPath}>
@@ -286,12 +290,12 @@ export function FileExplorer({ activeId, confirm, refreshNonce }) {
 					isDir && isOpen
 						? isLoading
 							? html`<div class="fs-skeleton" style=${{ paddingLeft: `${(depth + 1) * 16}px` }}><div class="fs-skeleton-row"></div><div class="fs-skeleton-row"></div><div class="fs-skeleton-row"></div></div>`
-							: (tree[fullPath] || []).map((child) => renderEntry(fullPath, child, depth + 1))
+							: (treeRef.current[fullPath] || []).map((child) => renderEntry(fullPath, child, depth + 1))
 						: null
 				}
 			</div>
 		`;
-	};
+	}, [busyPath, renderName, renderActions, toggleDir]);
 
 	return html`
 		<div class="fs-explorer">

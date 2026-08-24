@@ -72,6 +72,10 @@ export interface Persona {
 	 * Defaults to true; set `agentsMd: false` in frontmatter to disable.
 	 */
 	agentsMd: boolean;
+	/** Pinned model for this persona — when set, new sessions with this persona use this model unless overridden. */
+	model?: string;
+	/** Pinned provider for this persona — name from `providers` in settings.json, or a URL. */
+	provider?: string;
 }
 
 export const DEFAULT_PERSONA = "senior";
@@ -142,6 +146,8 @@ function loadPersonaFromFile(filePath: string, source: PersonaSource): Persona |
 		mcp: parseNameAllowlist(frontmatter, "mcp"),
 		subagentTypes: parseNameAllowlist(frontmatter, "subagentTypes"),
 		agentsMd: parseAgentsMd(frontmatter),
+		model: typeof frontmatter.model === "string" && frontmatter.model ? frontmatter.model : undefined,
+		provider: typeof frontmatter.provider === "string" && frontmatter.provider ? frontmatter.provider : undefined,
 	};
 }
 

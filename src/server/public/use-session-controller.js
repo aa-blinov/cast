@@ -213,8 +213,24 @@ export function useSessionController({
 	// (nothing left after this change — kept as the one place that actually
 	// talks to POST /api/sessions).
 	const commitSession = useCallback(
-		async (persona, cwd, { push = true, draftVersion, worktree } = {}) => {
-			const create = async () => api("POST", "/api/sessions", { persona, cwd, worktree });
+		async (personaOrOpts, cwd, { push = true, draftVersion, worktree, agentId, model } = {}) => {
+			// Support both old signature commitSession(persona, cwd, opts) and new
+			// commitSession({persona, cwd, agentId, model}, ...) via overload detection
+			let persona = personaOrOpts;
+			let actualCwd = cwd;
+			let actualAgentId = agentId;
+			let actualModel = model;
+			if (personaOrOpts && typeof personaOrOpts === "object" && !Array.isArray(personaOrOpts)) {
+				const opts = personaOrOpts;
+				persona = opts.persona;
+				actualCwd = opts.cwd;
+				actualAgentId = opts.agentId;
+				actualModel = opts.model ?? actualModel;
+				worktree = opts.worktree ?? worktree;
+				push = opts.push ?? push;
+				draftVersion = opts.draftVersion ?? draftVersion;
+			}
+			const create = async () => api("POST", "/api/sessions", { persona, cwd: actualCwd, worktree, agentId: actualAgentId, model: actualModel });
 			const pending = draftVersion == null ? create() : (draftCommitsRef.current.get(draftVersion) ?? create());
 			if (draftVersion != null) draftCommitsRef.current.set(draftVersion, pending);
 			let data;
@@ -287,7 +303,19 @@ export function useSessionController({
 	// this draft actually gets a message (see there). Same idea as ChatGPT's
 	// "New chat": the conversation doesn't exist until you say something.
 	const startDraft = useCallback(
-		(persona, draftCwd, opts = {}) => {
+		(personaOrOpts, draftCwd, opts = {}) => {
+			let persona = personaOrOpts;
+			let actualCwd = draftCwd;
+			let agentId;
+			let model;
+			if (personaOrOpts && typeof personaOrOpts === "object" && !Array.isArray(personaOrOpts)) {
+				const o = personaOrOpts;
+				persona = o.persona;
+				actualCwd = o.cwd;
+				agentId = o.agentId;
+				model = o.model;
+				opts = { ...opts, ...o };
+			}
 			++sessionViewVersionRef.current;
 			const draftVersion = ++draftVersionRef.current;
 			if (esRef.current) {
@@ -298,8 +326,9 @@ export function useSessionController({
 			setSession({
 				id: null,
 				persona,
-				model: "",
-				cwd: draftCwd,
+				agentId,
+				model: model ?? "",
+				cwd: actualCwd,
 				status: "idle",
 				messages: [],
 				usage: null,
@@ -312,6 +341,8 @@ export function useSessionController({
 				// real session. Optional — only set when the new-session modal
 				// asked for worktree isolation.
 				worktree: opts.worktree,
+				agentId,
+				model,
 			});
 			resetStreamingNow();
 			setRunning(false);

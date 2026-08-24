@@ -161,6 +161,8 @@ export interface Settings {
 	memorySearchScoreFloor?: number;
 	/** Active pluggable UI name (shown at / and /ui/<name>). Defaults to "default". */
 	activeUi?: string;
+	/** Default UI shown at / — "default" or a factory UI name like "claude-ui". */
+	defaultUi?: string;
 	/** Safety cap on model calls per turn (loop runaway backstop). Default 500. */
 	maxTurnIterations?: number;
 	/** Reconcile project memory files before search operations. */

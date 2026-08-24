@@ -10,6 +10,7 @@ const html = htm.bind(h);
 const SETTINGS_TABS = [
 	{ id: "appearance", label: "Appearance" },
 	{ id: "bash", label: "Bash" },
+	{ id: "default-ui", label: "Default UI" },
 	{ id: "hooks", label: "Hooks" },
 	{ id: "marketplace", label: "Marketplace" },
 	{ id: "memory", label: "Memory" },
@@ -217,7 +218,7 @@ export function SettingsModal({
 	// and left the modal in "Loading…" on slow networks.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: tab is the trigger, activeId via load()'s closure
 	useEffect(() => {
-		if (tab === "appearance" || tab === "personas" || tab === "updates") return;
+		if (tab === "appearance" || tab === "personas" || tab === "updates" || tab === "default-ui") return;
 		load(tab);
 	}, [tab, activeId, load]);
 	const modalRef = useModalFocusTrap(true);
@@ -299,7 +300,7 @@ export function SettingsModal({
 	// theme and font both come from props/local state (fetched once at app
 	// boot, or never fetched at all for font — see applyFont) rather than the
 	// per-tab preload above.
-	const hasData = tab === "appearance" || tab === "personas" || tab === "updates" || data[tab] !== undefined;
+	const hasData = tab === "appearance" || tab === "personas" || tab === "updates" || tab === "default-ui" || data[tab] !== undefined;
 
 	return html`
 		<div class="modal-backdrop" onClick=${onClose}>
@@ -362,9 +363,11 @@ export function SettingsModal({
 																					? html`<${panels.SettingsProvider} data=${data.provider} busy=${busy} act=${act} confirm=${confirm} />`
 																					: tab === "ssh"
 																						? html`<${panels.SettingsSsh} data=${data.ssh} busy=${busy} act=${act} confirm=${confirm} />`
-																						: tab === "updates"
-																							? html`<${panels.SettingsUpdates} />`
-																							: null
+																						: tab === "default-ui"
+																							? html`<${panels.SettingsDefaultUi} />`
+																							: tab === "updates"
+																								? html`<${panels.SettingsUpdates} />`
+																								: null
 						}
 					</div>
 				</div>

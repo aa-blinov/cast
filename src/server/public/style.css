@@ -927,6 +927,13 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	transition: background .1s, color .1s;
 }
 .modal-close:hover { color: var(--cyan); background: var(--accent-subtle); }
+@media (max-width: 768px) and (orientation: portrait) {
+	.modal-backdrop { padding: 0; align-items: stretch; }
+	.modal { max-width: 100%; width: 100%; height: 100%; max-height: 100%; height: 100dvh; border-radius: 0; border-left: none; border-right: none; }
+	.modal:not(.modal-confirm):not(.modal-share):not(.modal-status) { max-width: 100%; }
+	/* Keep small confirms usable — not full bleed */
+	.modal-confirm, .modal-share, .modal-status { margin: 16px; width: calc(100% - 32px); height: auto; max-height: min(560px, 90dvh); border-radius: var(--radius); border: 1px solid var(--border-active); }
+}
 /* Per-modal size overrides — must come after the base .modal rule above:
    equal specificity means whichever is declared later in the file wins, and
    these were previously declared earlier (near their own feature's other
@@ -1211,8 +1218,17 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); border: 0; }
 
 /* ── New session modal ───────────────────────────────────────────── */
-.modal-new-session { max-width: 520px; }
-.new-session-body { padding: 14px; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
+.modal-new-session { width: min(1100px, 94vw); max-width: 1100px; height: min(760px, 88vh); max-height: 88vh; display: flex; flex-direction: column; }
+.new-session-body { padding: 14px; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; flex: 1; min-height: 0; }
+.modal-new-session .modal-footer { flex-shrink: 0; position: sticky; bottom: 0; background: var(--bg-surface); }
+.new-session-model { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.new-session-model > select { width: 100%; min-width: 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-surface); color: var(--text); font-size: .85rem; line-height: 1.2; }
+.new-session-model-row { display: flex; gap: 8px; align-items: center; width: 100%; }
+.new-session-model-row select { flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-surface); color: var(--text); font-size: .85rem; line-height: 1.2; }
+.verify-btn { flex: 0 0 32px; width: 32px; height: 32px; min-width: 32px; min-height: 32px; display: inline-flex; align-items: center; justify-content:center; flex-shrink:0; border: 1px solid var(--border); border-radius: 8px; padding: 0; background: var(--bg-surface); color: var(--text-dim); }
+@media (max-width: 768px) {
+	.modal-new-session { width: 100%; max-width: 100%; height: 100%; max-height: 100%; height: 100dvh; border-radius: 0; border-left: none; border-right: none; }
+}
 .new-session-personas {
 	display: grid;
 	/* Always exactly two columns: consistent layout on mobile, tablet,
