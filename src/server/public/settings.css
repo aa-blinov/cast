@@ -56,8 +56,11 @@
 	display: flex;
 	align-items: center;
 	justify-content: center;
+	flex: 1;
+	min-height: 120px;
 	color: var(--text-muted);
 	font-size: .82rem;
+	text-align: center;
 }
 .settings-intro {
 	display: flex;
