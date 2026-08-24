@@ -33,8 +33,8 @@ function SettingsServer({ data }) {
 	};
 	return html`
 		<div class="settings-rows">
+			<p class="settings-intro"><span>The cast server process serving this UI. Same info as <code>cast server status</code> on the command line.</span></p>
 			<div class="settings-section-title">Server status</div>
-			<p class="settings-hint">The cast server process serving this UI. Same info as <code>cast server status</code> on the command line.</p>
 			<div class="settings-compact-list">
 				<div class="settings-compact-row">
 					<div class="settings-compact-copy"><span class="settings-compact-title">Status</span><span>Running</span></div>
@@ -828,6 +828,7 @@ function SettingsProvider({ data, busy, act, confirm }) {
 	};
 	return html`
 		<div class="settings-rows">
+			<p class="settings-intro"><span>Providers here are just a saved list. In the Model tab, pick which provider each model slot uses (main / subagent / plan) — they can be on different providers.</span></p>
 			${[...(data || [])]
 				.sort((a, b) => a.name.localeCompare(b.name))
 				.map(
@@ -848,7 +849,6 @@ function SettingsProvider({ data, busy, act, confirm }) {
 			`,
 				)}
 			${!data || data.length === 0 ? html`<div class="settings-hint">No saved providers.</div>` : null}
-			${data && data.length > 0 ? html`<div class="settings-hint">Providers here are just a saved list. In the Model tab, pick which provider each model slot uses (main / subagent / plan) — they can be on different providers.</div>` : null}
 			<div class="settings-section-title">${editing ? `Edit provider: ${editing}` : "Add provider"}</div>
 			<div class="settings-form-row">
 				<form style="display:contents" onSubmit=${(e) => e.preventDefault()}>
@@ -1185,14 +1185,14 @@ function SettingsUpdates() {
 			</div>
 			<div class="settings-compact-row">
 				<div class="settings-compact-copy"><span class="settings-compact-title">Latest</span><span>${info?.latest ? html`<code>v${info.latest}</code>` : "—"} ${info?.isRelease && info?.updateAvailable ? html`<span class="settings-item-tag">update available</span>` : ""}</span></div>
-				<button class="modal-btn" disabled=${checking} onClick=${check} title="Check again">${checking ? "loading" : "Check"}</button>
+				<div style="display:flex; gap:6px">
+					<button class="modal-btn" disabled=${checking} onClick=${check} title="Check again">${checking ? "loading" : "Check"}</button>
+					${info?.isRelease && info?.updateAvailable ? html`<button class="modal-btn" title="Update to v${info.latest}" disabled=${upgrading} onClick=${doUpgrade}>${upgrading ? "loading" : "Update"}</button>` : null}
+				</div>
 			</div>
 		</div>
 		${error ? html`<div class="settings-error" style="white-space:pre-wrap">${error}</div>` : null}
-		${info?.isRelease && info?.updateAvailable
-			? html`<div class="settings-section-title">Update</div>
-				<p class="settings-hint">A newer version v${info.latest} is available. Upgrade runs <code>install.sh</code> and restarts the daemon on the same <code>host:port</code> — web UI will show <em>reconnecting</em> for ~3s.</p>
-				<button class="modal-btn modal-btn-primary" disabled=${upgrading} onClick=${doUpgrade}>${upgrading ? "loading" : `Update to v${info.latest}`}</button>`
+		${info?.isRelease && info?.updateAvailable ? null
 			: info && !checking
 				? html`<div class="settings-ok" style="margin-top:8px">Up to date${info.isRelease ? "" : " (dev — git pull to update)"}.</div>`
 				: null}
