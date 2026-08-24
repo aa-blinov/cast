@@ -15,7 +15,7 @@
 
 import htm from "htm";
 import { h } from "preact";
-import { useEffect, useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { api } from "./api.js";
 import { icons } from "./icons.js";
 import { useModalFocusTrap } from "./modal-focus.js";
@@ -131,6 +131,29 @@ export function NewSessionModal({
 		if (p?.model) setModel(p.model);
 		setModelCheck(null);
 	}, [persona]);
+
+	// keep model list fresh when provider changes — skip the first fetch after open (cached already has minimax, would block 700ms)
+	const skipProviderFetchRef = useRef(true);
+	useEffect(() => {
+		if (open) skipProviderFetchRef.current = true;
+	}, [open]);
+	useEffect(() => {
+		if (!open || !provider) return;
+		if (skipProviderFetchRef.current) {
+			skipProviderFetchRef.current = false;
+			return;
+		}
+		let cancelled = false;
+		api("GET", `/api/models?provider=${encodeURIComponent(provider)}`)
+			.then((d) => {
+				if (cancelled) return;
+				if (d?.models && Array.isArray(d.models)) setModels(d.models);
+			})
+			.catch(() => {});
+		return () => {
+			cancelled = true;
+		};
+	}, [open, provider]);
 
 	// cwd is the controlled value from App (sidebar lives off the same
 	// state); when the user clicks "Select dir" the parent opens the
