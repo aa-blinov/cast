@@ -1184,11 +1184,10 @@ function SettingsUpdates() {
 				<div class="settings-compact-copy"><span class="settings-compact-title">Current</span><span><code>v${info?.current ?? "—"}</code> ${info?.isRelease ? "" : "(dev — git pull)"}</span></div>
 			</div>
 			<div class="settings-compact-row">
-				<div class="settings-compact-copy"><span class="settings-compact-title">Latest</span><span>${info?.latest ? html`<code>v${info.latest}</code>` : "—"} ${info?.isRelease && info?.updateAvailable ? html`<span class="settings-item-tag">update available</span>` : ""}</span></div>
-				<div style="display:flex; gap:6px">
-					<button class="modal-btn" disabled=${checking} onClick=${check} title="Check again">${checking ? "loading" : "Check"}</button>
-					${info?.isRelease && info?.updateAvailable ? html`<button class="modal-btn" title="Update to v${info.latest}" disabled=${upgrading} onClick=${doUpgrade}>${upgrading ? "loading" : "Update"}</button>` : null}
-				</div>
+				<div class="settings-compact-copy"><span class="settings-compact-title">Latest</span><span>${info?.latest ? html`<code>v${info.latest}</code>` : "—"}</span></div>
+				${info?.isRelease && info?.updateAvailable
+					? html`<button class="modal-btn" title="Update to v${info.latest}" disabled=${upgrading || checking} onClick=${doUpgrade}>${upgrading || checking ? "loading" : "Update"}</button>`
+					: html`<button class="modal-btn" disabled=${checking} onClick=${check} title="Check again">${checking ? "loading" : "Check"}</button>`}
 			</div>
 		</div>
 		${error ? html`<div class="settings-error" style="white-space:pre-wrap">${error}</div>` : null}
