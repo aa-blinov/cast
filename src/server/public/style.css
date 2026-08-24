@@ -295,6 +295,22 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	outline: none;
 }
 .sidebar-search:focus { border-color: var(--cyan); }
+.sidebar-load-more {
+	display: block;
+	width: 100%;
+	margin: 8px 0 0;
+	padding: 8px 10px;
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	color: var(--text-dim);
+	font-family: var(--font);
+	font-size: .8rem;
+	cursor: pointer;
+	text-align: center;
+	transition: background .15s, color .15s, border-color .15s;
+}
+.sidebar-load-more:hover { background: var(--bg-hover); color: var(--text); border-color: var(--border-active); }
 .sidebar-empty {
 	display: flex; align-items: center; justify-content: center;
 	flex: 1;

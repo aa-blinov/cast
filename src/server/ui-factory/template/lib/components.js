@@ -135,19 +135,33 @@ export function SettingsModal({ onClose, api }){
     api("GET","/api/server/status").then(d=>d&&setServer(d)).catch(()=>{});
     api("GET","/api/themes").then(d=>Array.isArray(d)&&setThemes(d)).catch(()=>{});
     // изолированная тема: применить сохранённую для этого UI (не глобальную)
-    try{
-      const saved = localStorage.getItem(perUiKey);
-      const savedColors = localStorage.getItem(perUiColorsKey);
-      if(saved && savedColors){
-        const colors=JSON.parse(savedColors);
-        const r=document.documentElement.style;
-        if(colors.accent) r.setProperty("--accent",colors.accent);
-        if(colors.bg) r.setProperty("--bg",colors.bg);
-        if(colors.bgSurface) r.setProperty("--panel",colors.bgSurface);
-        if(colors.border) r.setProperty("--border",colors.border);
-        if(colors.muted) r.setProperty("--muted",colors.muted);
+    const applyPerUi = ()=>{
+      try{
+        const saved = localStorage.getItem(perUiKey);
+        const savedColors = localStorage.getItem(perUiColorsKey);
+        if(saved && savedColors){
+          const colors=JSON.parse(savedColors);
+          const r=document.documentElement.style;
+          if(colors.accent) r.setProperty("--accent",colors.accent);
+          if(colors.bg) r.setProperty("--bg",colors.bg);
+          if(colors.bgSurface) r.setProperty("--panel",colors.bgSurface);
+          if(colors.border) r.setProperty("--border",colors.border);
+          if(colors.muted) r.setProperty("--muted",colors.muted);
+        }
+      }catch{}
+    };
+    applyPerUi();
+    const onStorage=(e)=>{
+      if(e.key===perUiKey || e.key===perUiColorsKey) applyPerUi();
+      if(e.key==="cast:customCss"){
+        let el=document.getElementById("cast-custom-css");
+        if(!e.newValue){ if(el) el.remove(); return; }
+        if(!el){ el=document.createElement("style"); el.id="cast-custom-css"; document.head.appendChild(el); }
+        el.textContent=e.newValue;
       }
-    }catch{}
+    };
+    window.addEventListener("storage", onStorage);
+    return ()=> window.removeEventListener("storage", onStorage);
   },[]);
   const saveDefaultUi = async(name)=>{
     setSavingDefault(true);

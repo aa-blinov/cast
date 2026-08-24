@@ -1,4 +1,4 @@
-import { useCallback, useState } from "preact/hooks";
+import { useCallback, useRef, useState } from "preact/hooks";
 import { api } from "./api.js";
 
 function setUrlSessionId(id, { push } = {}) {
@@ -99,15 +99,45 @@ export function useSessionController({
 		},
 		[markOutgoingDelivered, pendingOutgoingRef],
 	);
-	// Load sessions
+	// Load sessions — paginated to keep payload small for >200 sessions (172KB → ~40KB per page)
+	const sessionsTotalRef = useRef(0);
+	const sessionsOffsetRef = useRef(0);
 	const loadSessions = useCallback(async () => {
 		const version = ++sessionsLoadVersionRef.current;
 		try {
-			const data = await api("GET", "/api/sessions");
-			if (version === sessionsLoadVersionRef.current) setSessions(data);
-		} catch {}
+			const data = await api("GET", "/api/sessions?limit=50&offset=0");
+			const sessions = Array.isArray(data) ? data : data.sessions ?? [];
+			const total = Array.isArray(data) ? data.length : data.total ?? sessions.length;
+			if (version === sessionsLoadVersionRef.current) {
+				setSessions(sessions);
+				sessionsTotalRef.current = total;
+				sessionsOffsetRef.current = sessions.length;
+			}
+		} catch {
+			try {
+				const fallback = await api("GET", "/api/sessions");
+				if (version === sessionsLoadVersionRef.current) setSessions(Array.isArray(fallback) ? fallback : fallback.sessions ?? []);
+			} catch {}
+		}
 		if (version === sessionsLoadVersionRef.current) setSessionsLoaded(true);
 	}, [setSessions, setSessionsLoaded, sessionsLoadVersionRef]);
+
+	const loadingMoreRef = useRef(false);
+	const loadMoreSessions = useCallback(async () => {
+		if (loadingMoreRef.current) return;
+		const offset = sessionsOffsetRef.current;
+		const total = sessionsTotalRef.current;
+		if (offset >= total) return;
+		loadingMoreRef.current = true;
+		try {
+			const data = await api("GET", `/api/sessions?limit=50&offset=${offset}`);
+			const sessions = Array.isArray(data) ? data : data.sessions ?? [];
+			if (sessions.length === 0) return;
+			setSessions((prev) => [...prev, ...sessions]);
+			sessionsOffsetRef.current += sessions.length;
+		} catch {}
+		finally { loadingMoreRef.current = false; }
+	}, [setSessions]);
 
 	// Select session — `push` controls whether this lands as a new browser
 	// history entry (a real click) or just replaces the current URL
@@ -439,9 +469,13 @@ export function useSessionController({
 					.catch(() => {});
 			}
 
-			const s = await api("GET", "/api/sessions");
+			const raw = await api("GET", "/api/sessions?limit=50&offset=0");
+			const s = Array.isArray(raw) ? raw : raw.sessions ?? [];
+			const total = Array.isArray(raw) ? raw.length : raw.total ?? s.length;
 			if (!s) return false;
 			setSessions(s);
+			sessionsTotalRef.current = total;
+			sessionsOffsetRef.current = s.length;
 			setSessionsLoaded(true);
 			if (urlId && s.find((x) => x.id === urlId)) {
 				// A session is restored only when the URL explicitly names it. The
@@ -524,6 +558,7 @@ export function useSessionController({
 
 	return {
 		loadSessions,
+		loadMoreSessions,
 		selectSession,
 		selectingId,
 		commitSession,
@@ -532,5 +567,7 @@ export function useSessionController({
 		initClientState,
 		startReconnectLoop,
 		retryPendingOutgoing,
+		sessionsTotalRef,
+		sessionsOffsetRef,
 	};
 }

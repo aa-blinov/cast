@@ -145,9 +145,9 @@ export interface Settings {
 	 */
 	quickSessionPersona?: string;
 	/**
-	 * Whether to show reasoning blocks in the transcript. Defaults to false
-	 * (reasoning models stream a lot of auxiliary thinking that clutters the
-	 * view). Toggled via /reasoning-display (/rd) and persisted so the
+	 * Whether to show reasoning blocks in the transcript. Defaults to true
+	 * (parity with TUI streaming — reasoning models stream thinking live).
+	 * Toggled via /reasoning-display (/rd) and persisted so the
 	 * preference survives restarts.
 	 */
 	showReasoning?: boolean;

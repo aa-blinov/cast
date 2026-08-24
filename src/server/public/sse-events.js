@@ -201,7 +201,8 @@ export function handleSseEvent(event, context) {
 			});
 			break;
 		}
-		case "end":
+		case "end": {
+			const wasRunning = wasRunningRef.current;
 			resetStreamingNow();
 			setRunning(false);
 			setSession((prev) => (prev ? { ...prev, status: "idle" } : prev));
@@ -211,7 +212,30 @@ export function handleSseEvent(event, context) {
 				setPlanTransition(pendingPlanSignalRef.current);
 				pendingPlanSignalRef.current = null;
 			}
+			if (wasRunning) {
+				try {
+					if (document.hidden && typeof Notification !== "undefined") {
+						if (Notification.permission === "granted") new Notification("Cast — turn done", { body: "Agent finished", icon: "/favicon.svg" });
+						else if (Notification.permission !== "denied") Notification.requestPermission().catch(()=>{});
+					}
+				} catch {}
+				try {
+					const AC = window.AudioContext || window.webkitAudioContext;
+					if (AC) {
+						const ctx = new AC();
+						const o = ctx.createOscillator();
+						const g = ctx.createGain();
+						o.type = "sine"; o.frequency.value = 880;
+						g.gain.value = 0.12;
+						o.connect(g).connect(ctx.destination);
+						o.start();
+						g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.25);
+						setTimeout(() => { try { o.stop(); ctx.close(); } catch {} }, 320);
+					}
+				} catch {}
+			}
 			break;
+		}
 		case "turn_meta":
 			setSession((prev) => {
 				if (!prev || prev.messages.length === 0) return prev;
