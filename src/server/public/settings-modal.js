@@ -337,7 +337,7 @@ export function SettingsModal({
 						${errors[tab] && html`<div class="settings-error">${errors[tab]}</div>`}
 						${
 							!hasData
-								? html`<div class="settings-loading">Loading…</div>`
+								? html`<div class="settings-loading"><span class="settings-inline-loader" /> loading</div>`
 								: tab === "appearance"
 									? html`<${panels.SettingsAppearance} themes=${themes} currentThemeId=${currentThemeId} fontOptions=${fontOptions} fontScales=${fontScales} onPickTheme=${async (
 											id,

@@ -696,7 +696,7 @@ function SettingsMarketplace({ data, installed, busy, act, confirm }) {
 			</div>
 			${
 				catalog.length === 0
-					? html`<div class="settings-hint">Loading catalog…</div>`
+					? html`<div class="settings-loading"><span class="settings-inline-loader" /> loading</div>`
 					: html`
 					<div class="plugin-catalog-list">
 						${
@@ -1083,7 +1083,7 @@ function InfoPopover({ text, readUrl, contentLabel = "Skill content" }) {
 				<div class="fs-preview-body">
 					${
 						fullContent == null || (renderedHtml == null && !renderFailed)
-							? html`<div class="diff-empty">Loading…</div>`
+							? html`<div class="settings-loading"><span class="settings-inline-loader" /> loading</div>`
 							: renderFailed
 								? html`<pre class="fs-preview-text">${fullContent}</pre>`
 								: html`<div class="fs-preview-markdown message-content" dangerouslySetInnerHTML=${{ __html: renderedHtml }} />`
@@ -1175,7 +1175,7 @@ function SettingsUpdates() {
 	};
 
 	if (checking && !info) {
-		return html`<div class="settings-rows"><div class="settings-loading"><span class="settings-inline-loader" /> Checking for updates…</div></div>`;
+		return html`<div class="settings-rows"><div class="settings-loading"><span class="settings-inline-loader" /> loading</div></div>`;
 	}
 
 	return html`<div class="settings-rows">
