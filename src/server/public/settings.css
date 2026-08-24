@@ -47,7 +47,7 @@
 .settings-hint {
 	color: var(--text-muted);
 	font-size: .82rem;
-	padding: 8px 0;
+	padding: 6px 0;
 }
 /* Centered in the pane (not just top-left with padding) — noticeable on a
  * tall Settings tab or the Status popover body where the text would
@@ -62,8 +62,8 @@
 .settings-intro {
 	display: flex;
 	align-items: flex-start;
-	gap: 7px;
-	margin: 0 0 12px;
+	gap: 8px;
+	margin: 0 0 8px;
 	padding: 8px 10px;
 	background: var(--bg-surface);
 	border: 1px solid var(--border-subtle);
@@ -109,20 +109,18 @@
 	color: var(--status-error-fg);
 	font-size: .8rem;
 	padding: 8px 10px;
-	margin-bottom: 10px;
+	margin-bottom: 8px;
 }
 .settings-ok {
 	color: var(--status-success-fg);
 	font-size: .8rem;
 	padding: 6px 0;
 }
-.settings-rows { display: flex; flex-direction: column; gap: 4px; }
-.settings-group { margin-top: 4px; }
-.settings-group:first-child { margin-top: 0; }
-.settings-group .settings-section-title { margin-top: 0; }
+.settings-rows { display: flex; flex-direction: column; gap: 8px; }
+.settings-group { margin-top: 0; }
 .settings-row {
 	display: flex; justify-content: space-between; gap: 12px;
-	padding: 5px 0;
+	padding: 8px 0;
 	font-size: .82rem;
 	border-bottom: 1px solid var(--border);
 }
@@ -133,15 +131,15 @@
 	text-transform: uppercase;
 	letter-spacing: .05em;
 	color: var(--text-muted);
-	margin: 14px 0 6px;
-	padding-top: 10px;
+	margin: 16px 0 8px;
+	padding-top: 8px;
 	border-top: 1px solid var(--border);
 }
 .settings-section-title:first-child { margin-top: 0; border-top: none; padding-top: 0; }
 .settings-form-row {
-	display: flex; flex-wrap: wrap; gap: 6px;
+	display: flex; flex-wrap: wrap; gap: 8px;
 	align-items: center;
-	margin-bottom: 10px;
+	margin-bottom: 8px;
 }
 .settings-form-row select,
 .settings-form-row input {
@@ -220,7 +218,7 @@
 }
 .settings-rows > .settings-item-row + .settings-item-row,
 .settings-group .settings-item-row + .settings-item-row {
-	margin-top: 6px;
+	margin-top: 0;
 }
 .settings-section-title-plugin {
 	display: flex; justify-content: space-between; align-items: baseline;
@@ -413,13 +411,14 @@
 .settings-compact-list {
 	display: flex;
 	flex-direction: column;
+	gap: 8px;
 }
 .settings-compact-row {
 	display: grid;
 	grid-template-columns: minmax(0, 1fr) auto;
-	gap: 14px;
+	gap: 8px;
 	align-items: center;
-	padding: 12px 0;
+	padding: 8px 0;
 	border-bottom: 1px solid var(--border);
 }
 .settings-compact-copy {
@@ -465,11 +464,7 @@
 .settings-toggle-thumb { width: 9px; height: 9px; border-radius: 50%; background: var(--text-muted); }
 .settings-toggle[aria-checked="true"] .settings-toggle-thumb { background: var(--cyan); }
 .settings-toggle:disabled { opacity: .5; cursor: default; }
-/* Reasoning row sits inside the Appearance panel next to the Font/Theme rows,
-   which use `.settings-row` (padding 5px). The compact row's 12px padding
-   would push the toggle 7px lower than the Font/Theme controls, breaking the
-   vertical rhythm. Match the .settings-row padding here. */
-.settings-rows .settings-compact-list .settings-compact-row { padding: 5px 0; }
+.settings-rows .settings-compact-list .settings-compact-row { padding: 8px 0; }
 .settings-segmented { display: flex; gap: 4px; }
 .settings-segmented .modal-btn { min-width: 54px; }
 .settings-compact-detail {
