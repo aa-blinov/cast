@@ -36,7 +36,7 @@ export function DiffPanel({
 
 	// A draft session (nothing sent yet) has no cwd on the server to diff or
 	// browse — show that plainly instead of either tab's normal content
-	// (which would otherwise sit on a permanent "Loading…"/blank state).
+	// (which would otherwise sit on a permanent "Loading"/blank state).
 	// During bootstrap, though, activeId is only briefly null while the last
 	// session is still being resolved — a real session is about to load, so
 	// this must say "Loading", not "No session yet" (which read as wrong the
@@ -48,7 +48,7 @@ export function DiffPanel({
 				${header}
 				${
 					bootstrapping
-						? html`<div class="diff-empty">Loading…</div>`
+						? html`<div class="diff-empty">Loading</div>`
 						: html`
 						<div class="diff-empty diff-empty-hint">
 							<div>

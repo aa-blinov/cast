@@ -264,7 +264,7 @@ export function FilePreviewModal({ path, onClose, downloadHref, previewHref }) {
 	else if (!isText && !isTable) body = html`<div class="diff-empty">No preview for this file type.</div>`;
 	else if (tooLarge) body = html`<div class="diff-empty">Too large to preview — use Download instead.</div>`;
 	else if (content == null || ((isMarkdown || hljsLang) && !enhanced))
-		body = html`<div class="diff-empty">Loading…</div>`;
+		body = html`<div class="diff-empty">Loading</div>`;
 	else if (isTable) {
 		const rows = parseDelimited(content, detectDelimiter(content, ext));
 		const shown = rows.slice(0, FS_TABLE_MAX_ROWS);

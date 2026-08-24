@@ -332,7 +332,7 @@ export function NewSessionModal({
 								}
 							} catch (e) { setModelCheck({ ok: false, msg: e.message }); }
 							finally { setCheckingModel(false); }
-						}} class="verify-btn">${checkingModel ? html`<span class="settings-inline-loader" aria-label="Checking" />` : html`<${icons.arrowPath} />`}</button>
+						}} class="verify-btn">${checkingModel ? "loading" : html`<${icons.arrowPath} />`}</button>
 						</div>
 					</div>
 					${modelCheck ? html`<div class=${modelCheck.ok ? "modal-hint" : "new-session-error"} style="margin-bottom:8px; font-size:.72rem; line-height:1.4">${modelCheck.msg}</div>` : null}

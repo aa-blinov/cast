@@ -474,7 +474,7 @@ export function Dashboard({ onClose }) {
 				<div class="dash-body">
 					${error ? html`<div class="dash-error">${error}</div>` : null}
 					${loading
-						? html`<div class="dash-loading"><span class="dash-spinner" /> Loading…</div>`
+						? html`<div class="dash-loading">Loading</div>`
 						: html`${tab === "llm"
 				? html`
 					<div class="dash-kpis">
