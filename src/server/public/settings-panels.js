@@ -1118,7 +1118,7 @@ function SettingsDefaultUi() {
 	};
 	const current = uis.find((u) => u.name === selected)?.name ?? selected;
 	return html`<div class="settings-rows">
-		<p class="settings-intro"><span>Choose which UI opens at <code>/</code> — like default assistant. Factory UIs at <code>/ui/&lt;name&gt;/</code> and <code>/&lt;name&gt;/</code> stay always reachable.</span></p>
+		<p class="settings-intro"><span>Choose which UI opens at <code>/</code> — like default assistant. Factory UIs at <code>${"/ui/<name>/"}</code> and <code>${"/<name>/"}</code> stay always reachable.</span></p>
 		<div class="settings-form-row">
 			<select value=${selected} onChange=${(e) => setSelected(e.target.value)} disabled=${saving}>
 				<option value="default">default — built-in Cast</option>
