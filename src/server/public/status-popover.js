@@ -72,7 +72,7 @@ export function StatusPopover({ activeId, running }) {
 			open &&
 			html`<div class="modal-backdrop" onClick=${() => setOpen(false)}><div class="modal modal-status" role="dialog" aria-modal="true" aria-label="Status" tabIndex="-1" ref=${modalRef} onClick=${(event) => event.stopPropagation()}>
 			<div class="modal-header"><span>Status</span><button class="modal-close" onClick=${() => setOpen(false)} aria-label="Close"><${icons.xMark} /></button></div>
-			<div class="modal-status-body">${error && html`<div class="settings-error">${error}</div>`}${!data && !error ? html`<div class="settings-loading">Loading…</div>` : html`<${SettingsStatus} data=${data} />`}</div>
+			<div class="modal-status-body">${error && html`<div class="settings-error">${error}</div>`}${!data && !error ? html`<div class="settings-loading">Loading</div>` : html`<${SettingsStatus} data=${data} />`}</div>
 		</div></div>`
 		}`;
 }

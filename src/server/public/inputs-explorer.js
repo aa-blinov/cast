@@ -51,7 +51,7 @@ export function InputsExplorer({ activeId, confirm, refreshNonce }) {
 		}
 	};
 
-	if (loading) return html`<div class="fs-explorer"><div class="diff-empty">Loading…</div></div>`;
+	if (loading) return html`<div class="fs-explorer"><div class="diff-empty">Loading</div></div>`;
 	return html`
 		<div class="fs-explorer">
 			${error && html`<div class="diff-empty diff-empty-error">${error}</div>`}

@@ -532,7 +532,7 @@ function SettingsSkillssh({ data, busy, act, confirm }) {
 						void install();
 					}
 				}} />
-				<button class="modal-btn icon-btn" title=${installing ? "Installing skill" : "Run npx skills add -g"} aria-busy=${installing} disabled=${busy || installing || !installArgs} onClick=${install}>${installing ? html`<span class="settings-inline-loader" aria-label="Installing" />` : html`<${icons.arrowDownTray} />`}</button>
+				<button class="modal-btn icon-btn" title=${installing ? "Installing skill" : "Run npx skills add -g"} aria-busy=${installing} disabled=${busy || installing || !installArgs} onClick=${install}>${installing ? "loading" : html`<${icons.arrowDownTray} />`}</button>
 			</div>
 			${installing && html`<div class="settings-install-status" role="status">Installing skill… this can take a minute.</div>`}
 			${installFeedback && html`<div class=${installFeedback.ok ? "settings-ok" : "settings-error"} style="white-space:pre-wrap;word-break:break-word;max-height:240px;overflow:auto">${installFeedback.text}</div>`}
@@ -647,7 +647,7 @@ function SettingsMarketplace({ data, installed, busy, act, confirm }) {
 					<span class="settings-item-meta">${mp.name}</span>
 					${
 						isPending
-							? html`<span class="settings-inline-loader" role="status" aria-label="Installing ${name}"></span>`
+							? html`loading`
 							: showInstalled
 								? html`<span class="plugin-installed-label">${justInstalled === id ? "installed ✓" : "installed"}</span>`
 								: html`<button class="modal-btn icon-btn" title="Install ${name}" onClick=${async () => {
@@ -1000,7 +1000,7 @@ function InfoPopover({ text, readUrl, contentLabel = "Skill content" }) {
 	const [bookOpen, setBookOpen] = useState(false);
 	const [fullContent, setFullContent] = useState(null);
 	// Same anti-flicker discipline as FilePreviewModal: stays null (renders
-	// "Loading…") through marked's async load+parse instead of flashing the
+	// "Loading") through marked's async load+parse instead of flashing the
 	// raw markdown source first — see that component's comment for why.
 	const [renderedHtml, setRenderedHtml] = useState(null);
 	const [renderFailed, setRenderFailed] = useState(false);
@@ -1124,7 +1124,7 @@ function SettingsDefaultUi() {
 				<option value="default">default — built-in Cast</option>
 				${uis.filter((u) => !u.builtin).map((u) => html`<option value=${u.name}>${u.name}</option>`)}
 			</select>
-			<button class="modal-btn icon-btn" title="Save" disabled=${saving} onClick=${save}>${saving ? html`<span class="settings-inline-loader" />` : html`<${icons.check} />`}</button>
+			<button class="modal-btn icon-btn" title="Save" disabled=${saving} onClick=${save}>${saving ? "loading" : html`<${icons.check} />`}</button>
 		</div>
 		${status ? html`<div class=${status.ok ? "settings-ok" : "settings-error"}>${status.text}</div>` : null}
 	</div>`;
@@ -1186,14 +1186,14 @@ function SettingsUpdates() {
 			</div>
 			<div class="settings-compact-row">
 				<div class="settings-compact-copy"><span class="settings-compact-title">Latest</span><span>${info?.latest ? html`<code>v${info.latest}</code>` : "—"} ${info?.isRelease && info?.updateAvailable ? html`<span class="settings-item-tag">update available</span>` : ""}</span></div>
-				<button class="modal-btn" disabled=${checking} onClick=${check} title="Check again">${checking ? html`<span class="settings-inline-loader" />` : "Check"}</button>
+				<button class="modal-btn" disabled=${checking} onClick=${check} title="Check again">${checking ? "loading" : "Check"}</button>
 			</div>
 		</div>
 		${error ? html`<div class="settings-error" style="white-space:pre-wrap">${error}</div>` : null}
 		${info?.isRelease && info?.updateAvailable
 			? html`<div class="settings-section-title">Update</div>
 				<p class="settings-hint">A newer version v${info.latest} is available. Upgrade runs <code>install.sh</code> and restarts the daemon on the same <code>host:port</code> — web UI will show <em>reconnecting</em> for ~3s.</p>
-				<button class="modal-btn modal-btn-primary" disabled=${upgrading} onClick=${doUpgrade}>${upgrading ? html`<span class="settings-inline-loader" /> Updating…` : `Update to v${info.latest}`}</button>`
+				<button class="modal-btn modal-btn-primary" disabled=${upgrading} onClick=${doUpgrade}>${upgrading ? "loading" : `Update to v${info.latest}`}</button>`
 			: info && !checking
 				? html`<div class="settings-ok" style="margin-top:8px">Up to date${info.isRelease ? "" : " (dev — git pull to update)"}.</div>`
 				: null}

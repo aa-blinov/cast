@@ -272,14 +272,14 @@ export function Sidebar({
 					`
 					}
 					${isSearching ? filtered.map(renderItem) : sessionGroups.map(renderGroup)}
-					${!sessionsLoaded && html`<div class="sidebar-empty">Loading...</div>`}
+					${!sessionsLoaded && html`<div class="sidebar-empty">Loading</div>`}
 					${sessionsLoaded && searching && html`<div class="sidebar-empty">Searching…</div>`}
 					${sessionsLoaded && !searching && (isSearching ? filtered.length === 0 : sessionGroups.length === 0) && html`<div class="sidebar-empty">No sessions match "${search}"</div>`}
 					${!isSearching && hasMore && sessionsLoaded && html`<button ref=${loadMoreRef} class="sidebar-load-more" onClick=${onLoadMore}>Load more</button>`}
 				</div>
 			</div>
-			<div class="sidebar-footer" title=${defaultModel || (defaultModelLoaded ? "No model selected" : "Loading…")}>
-				<span class="sidebar-footer-model">${defaultModel || (defaultModelLoaded ? "No model selected" : "Loading…")}</span>
+			<div class="sidebar-footer" title=${defaultModel || (defaultModelLoaded ? "No model selected" : "Loading")}>
+				<span class="sidebar-footer-model">${defaultModel || (defaultModelLoaded ? "No model selected" : "Loading")}</span>
 				<button class="sidebar-logout" onClick=${onLogout} aria-label="Log out" title="Log out">
 					<${icons.arrowLeftOnRectangle} />
 				</button>
