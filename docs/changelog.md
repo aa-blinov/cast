@@ -2,6 +2,17 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.9
+
+### Fixed
+
+- **New session:** provider list without `auto` (explicit `minimax` etc.), verify `↻` (`POST /api/provider/verify {provider}`) on any pair, stacked provider/model, sandbox default, `1100×704` modals (like dashboard) with sticky footer, `· active` removed, `Loading` compact.
+- **Performance:** `GET /api/models?provider=` no longer blocks modal open (`708ms → 330ms`, lazy on switch), `GET /api/sessions` paginated `50/page` (`585 total 172KB → 3.5KB`) with `Load more` + guard.
+- **Reasoning:** `showReasoning` default `true` (parity TUI/web), `LiveStreamingBlocks` streaming via `collapseMidWordBoundaries`.
+- **PWA/offline:** `manifest.json` + `sw.js` (shell cache, network-first for `/api/`), `index.html` `manifest` + `register`, `turn_end` (`sse-events.js:204`) `Notification` + `880Hz` beep when `document.hidden`.
+- **Theme:** `Appearance` `Custom CSS` (`cast:customCss` `<style id>` + `storage` sync) and cross-tab `cast:themeColors` / `cast:ui:<name>:theme` sync (factory `lib/components.js`).
+- **Settings:** paddings unified `8px`, loaders unified `Loading` (capital, no spinner, centered `flex:1 min-height:120px`), `Updates` loading centered.
+
 ## 0.22.8
 
 ### Added
