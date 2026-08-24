@@ -1175,7 +1175,7 @@ function SettingsUpdates() {
 	};
 
 	if (checking && !info) {
-		return html`<div class="settings-rows"><div class="settings-loading">Loading</div></div>`;
+		return html`<div class="settings-loading">Loading</div>`;
 	}
 
 	return html`<div class="settings-rows">
