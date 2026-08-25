@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.12
+
+### Changed
+
+- **Skills:** replace duplicated `super-research` (8 heavyweight modes) with proven `obra/superpowers` trio — `tdd` (red-green-refactor, seams), `systematic-debugging` (4-phase root cause), `verification-before-completion` (evidence-before-claims gate) — all `builtin` `prompts/skills/` with `0` diagnostics; `deep-research` remains single research skill, `learn-everything` kept.
+
 ## 0.22.11
 
 ### Fixed
