@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.14
+
+### Fixed
+
+- **TUI:** `/new` and `/clear` now repaint `CAST` ascii banner (`onRepaintHistory` full clear + `Static` replay) like a fresh launch; `ChatLog` `hard-cut` no longer leaks `]<]minimax[>`/`/think>` — strips `<think>` and advances cut to next `>` boundary (verified `800` positions `0` dirty, `10` clamp tests).
+
 ## 0.22.13
 
 ### Added
