@@ -441,6 +441,11 @@ export function useSessionController({
 				api("GET", "/api/commands")
 					.then((c) => c && setCommands(c))
 					.catch(() => {});
+				// themes: use cached first for instant paint (no flicker), then refresh in background
+				try {
+					const cached = JSON.parse(localStorage.getItem("cast:themes") || "null");
+					if (Array.isArray(cached) && cached.length) setThemes(cached);
+				} catch {}
 				Promise.all([api("GET", "/api/themes"), api("GET", "/api/config")])
 					.then(([t, cfg]) => {
 						// The model belongs to app config, not the theme request. Keep
@@ -452,6 +457,7 @@ export function useSessionController({
 							if (typeof cfg.memoryEnabled === "boolean") setMemoryEnabled(cfg.memoryEnabled);
 						}
 						if (!t) return;
+						try { localStorage.setItem("cast:themes", JSON.stringify(t)); } catch {}
 						setThemes(t);
 						const current = t.find((x) => x.id === cfg?.theme) ?? t.find((x) => x.id === "cast");
 						if (current) {
