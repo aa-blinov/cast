@@ -1530,6 +1530,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 
 	if (input === "/clear") {
 		agent.clearContext();
+		await deps.onRepaintHistory?.();
 		showNotice("[Context cleared]");
 		return;
 	}
@@ -1568,7 +1569,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 	// `personaName` override exists because the persona-switch flow calls this
 	// right after setCurrentPersona — deps.currentPersona still reads the OLD
 	// persona for the rest of this call (see the render-snapshot note above).
-	const startNewSession = (personaName?: string): void => {
+	const startNewSession = async (personaName?: string): Promise<void> => {
 		if (session.messages.length > 0) saveSession(session);
 		const fresh = createSession(session.model, deps.cwd);
 		Object.assign(session, fresh, {
@@ -1588,6 +1589,10 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		// A fresh session starts in build mode — plan mode is a per-task state,
 		// not a sticky preference.
 		deps.setPlanMode(false);
+		// Fresh session should look like a fresh launch: banner at the top and
+		// an empty transcript. The banner lives outside Ink's tree, so a plain
+		// clearContext without a repaint leaves the old scrollback with no banner.
+		await deps.onRepaintHistory?.();
 		showNotice(`[New session: ${session.id}]`);
 	};
 
@@ -1620,7 +1625,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			{ title: `Start a new session for ${persona.label}?` },
 		);
 		if (choice === "new") {
-			startNewSession(persona.name);
+			await startNewSession(persona.name);
 		} else {
 			session.persona = persona.name;
 			saveSession(session);
@@ -1628,7 +1633,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 	};
 
 	if (input === "/new") {
-		startNewSession();
+		await startNewSession();
 		return;
 	}
 
