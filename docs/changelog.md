@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.11
+
+### Fixed
+
+- **Appearance flicker:** `GET /api/themes` now hydrates from `localStorage cast:themes` instantly; fresh list overwrites in background — `Appearance` tab paints with `18` swatches on first frame, no `Loading` flash.
+
 ## 0.22.10
 
 ### Fixed
