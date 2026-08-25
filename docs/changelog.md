@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.13
+
+### Added
+
+- **Skills:** `presentation-builder` promoted from global to `builtin` (`5` presets `minimal/corporate/bold/technical/editorial` with PNG verify gate, `166+416+138` lines) and `forge-review` generalized from `glab-mr` to all forges (GitLab `glab` / GitHub `gh` / Gitea `tea` with threaded reply gate, `94` lines) — `13` builtins total.
+
 ## 0.22.12
 
 ### Changed
