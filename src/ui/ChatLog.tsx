@@ -297,8 +297,28 @@ export function clampStreamingBlocks(
 		// maxChars is measured in cells, so with wide chars this cuts slightly
 		// more than strictly necessary — erring short is the safe direction.
 		let text = kept.join("\n");
+		// Strip any leaked <think> tags — vendors should have split them, but a
+		// hard-cut mid-tag must never leak "]<]minimax[>" style fragments.
+		if (text.includes("<think") || text.includes("</think")) {
+			text = text.replace(/<\/?think[^>]*>/g, "");
+		}
 		const maxChars = remaining * cols;
-		if (kept.length === 1 && text.length > maxChars) text = text.slice(-maxChars);
+		if (kept.length === 1 && text.length > maxChars) {
+			let cut = text.length - maxChars;
+			const tail = text.slice(cut);
+			// Don't cut mid-word/tag — advance to next boundary. If the tail
+			// starts inside a tag fragment like "payload</think>...", skip the
+			// whole tag up to the next ">" to avoid "/think>" leaks.
+			const gt = tail.indexOf(">");
+			const nextBoundary = tail.search(/[\s<>\[\]]/);
+			if (gt !== -1 && gt < 30 && gt < (nextBoundary === -1 ? 30 : nextBoundary)) {
+				text = tail.slice(gt + 1).replace(/^\s+/, "");
+			} else if (nextBoundary !== -1 && nextBoundary < 20) {
+				text = tail.slice(nextBoundary + 1);
+			} else {
+				text = tail;
+			}
+		}
 		out.unshift({ block: { ...block, text }, truncated: true, index: i });
 		used = budget;
 		break;
