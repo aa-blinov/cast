@@ -7,6 +7,10 @@ import { formatTaskToolSummary } from "./task-tool-summary.ts";
 import { theme } from "./themes/index.ts";
 import type { ChatMessage, RetryInfo, StreamBlock, StreamingState, ToolCallEntry } from "./useAgentSession.ts";
 
+const THINK_TAG_RE = /<\/?think[^>]*>/g;
+const BOUNDARY_RE = /[\s<>\[\]]/;
+const LEADING_WS_RE = /^\s+/;
+
 interface ChatLogProps {
 	messages: ChatMessage[];
 	streaming: StreamingState | null;
@@ -300,19 +304,19 @@ export function clampStreamingBlocks(
 		// Strip any leaked <think> tags — vendors should have split them, but a
 		// hard-cut mid-tag must never leak "]<]minimax[>" style fragments.
 		if (text.includes("<think") || text.includes("</think")) {
-			text = text.replace(/<\/?think[^>]*>/g, "");
+			text = text.replace(THINK_TAG_RE, "");
 		}
 		const maxChars = remaining * cols;
 		if (kept.length === 1 && text.length > maxChars) {
-			let cut = text.length - maxChars;
+			const cut = text.length - maxChars;
 			const tail = text.slice(cut);
 			// Don't cut mid-word/tag — advance to next boundary. If the tail
 			// starts inside a tag fragment like "payload</think>...", skip the
 			// whole tag up to the next ">" to avoid "/think>" leaks.
 			const gt = tail.indexOf(">");
-			const nextBoundary = tail.search(/[\s<>\[\]]/);
+			const nextBoundary = tail.search(BOUNDARY_RE);
 			if (gt !== -1 && gt < 30 && gt < (nextBoundary === -1 ? 30 : nextBoundary)) {
-				text = tail.slice(gt + 1).replace(/^\s+/, "");
+				text = tail.slice(gt + 1).replace(LEADING_WS_RE, "");
 			} else if (nextBoundary !== -1 && nextBoundary < 20) {
 				text = tail.slice(nextBoundary + 1);
 			} else {
