@@ -1,5 +1,10 @@
 // Cast PWA — offline shell for static assets, network-first for APIs.
-const CACHE = "cast-v1";
+// __CAST_VERSION__ is patched to the release version at build time (see
+// scripts/build.mjs) — a fixed cache name never rotates out old entries: the
+// fetch handler below is cache-first, so once *anything* (sidebar.js,
+// message.js, ...) gets cached this way, it's served forever regardless of
+// deploys, since `activate` only evicts keys that don't match CACHE.
+const CACHE = "cast-__CAST_VERSION__";
 const SHELL = [
   "/",
   "/index.html",
