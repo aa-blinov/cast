@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.18
+
+### Fixed
+
+- **Server:** a second server process (e.g. a dev-mode instance started outside the `cast server` CLI, which already refuses this) no longer silently overwrites `~/.cast/server.json` registration for an already-running daemon, and no longer erases it on its own shutdown — `cast server status`/`stop` could otherwise start reporting "not running" or pointing at the wrong process while the real daemon kept running untracked.
+
 ## 0.22.17
 
 ### Fixed
