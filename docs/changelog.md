@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.16
+
+### Fixed
+
+- **Web UI:** sidebar session item menu now closes on scroll/resize instead of drifting from its anchor row — its position was a one-shot snapshot taken on open that never tracked the row afterwards.
+
 ## 0.22.15
 
 ### Fixed
