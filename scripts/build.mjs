@@ -159,6 +159,12 @@ for (const file of webStylesheets) {
 	writeFileSync(`dist/public/${file}`, result.code);
 }
 
+// Stamp the PWA service worker's cache name with the release version so it
+// actually rotates on every deploy — `activate` evicts any cache key that
+// doesn't match CACHE, but that's a no-op if CACHE never changes (see sw.js).
+const { version: castVersion } = JSON.parse(readFileSync("package.json", "utf8"));
+writeFileSync("dist/public/sw.js", readFileSync("dist/public/sw.js", "utf8").replaceAll("__CAST_VERSION__", castVersion));
+
 // Same idea for the vendored image-codec WASM binaries (image-resize.ts) —
 // esbuild only bundles the @jsquash/* JS glue, not these; they're read from
 // disk at runtime via a path resolved relative to dist/index.js.

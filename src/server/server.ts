@@ -75,7 +75,14 @@ import { discoverUis } from "./ui-registry.ts";
 const PORT_RE = /:\d+$/;
 const ROUTE_PARAM_RE = /:(\w+)/g;
 const FILENAME_QUOTE_RE = /"/g;
-const STREAM_BLOCKS_IMPORT_RE = /from\s+"\.\/stream-blocks\.js"/;
+// `\s*`, not `\s+` — esbuild's minifier strips the space after `from`
+// (`from"./x.js"`), so a `+` here silently never matched the built/installed
+// bytes these regexes actually run against in production, only the spaced-out
+// dev-mode source. That left every local import but new-session-modal.js
+// (which has its own hash mechanism) unversioned in production: browsers kept
+// serving the pre-deploy module body for up to `max-age=3600` after every
+// release, indistinguishable from "the deploy didn't take".
+const STREAM_BLOCKS_IMPORT_RE = /from\s*"\.\/stream-blocks\.js"/;
 // Matches bare `./<name>.js` imports inside the top-level modules whose content
 // changes during dev (app.js, settings-modal.js) — the negative lookahead
 // skips any already-versioned `?v=…` so we don't double-stamp after the first
@@ -83,7 +90,7 @@ const STREAM_BLOCKS_IMPORT_RE = /from\s+"\.\/stream-blocks\.js"/;
 // pinned to the stale module: dynamic imports inside app.js resolve by URL,
 // and `max-age=3600` on the asset means `location.reload()` won't re-fetch
 // even though the file content on disk is different.
-const VERSIONED_LOCAL_IMPORT_RE = /from\s+"\.\/(?!\.)([\w-]+)\.js(?!\?v=)"/g;
+const VERSIONED_LOCAL_IMPORT_RE = /from\s*"\.\/(?!\.)([\w-]+)\.js(?!\?v=)"/g;
 // Local modules whose `./<name>.js` imports are rewritten with `?v=` inside
 // Rendered static responses (body + headers), keyed by path|encoding|version —
 // see serveStatic. Bounded; cleared wholesale when it passes 1024 entries.
