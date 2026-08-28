@@ -89,6 +89,35 @@ describe("daemon-state", () => {
 		expect(() => clearServerState()).not.toThrow();
 	});
 
+	it("clearServerStateIfOwner removes state recorded by this pid", async () => {
+		const { writeServerState, clearServerStateIfOwner, readServerState } = await import(
+			"../src/server/daemon-state.ts"
+		);
+		writeServerState({ pid: process.pid, port: 1337, host: "127.0.0.1", startedAt: "now", foreground: false });
+		clearServerStateIfOwner(process.pid);
+		expect(readServerState()).toBeUndefined();
+	});
+
+	it("clearServerStateIfOwner leaves another process's state alone", async () => {
+		const { writeServerState, clearServerStateIfOwner, readServerState } = await import(
+			"../src/server/daemon-state.ts"
+		);
+		// Simulates the exact failure this exists to prevent: process A registers,
+		// then process B (a different daemon, still alive and serving) exits and
+		// must not wipe out A's registration just because it's the one shutting
+		// down — otherwise `cast server status`/`stop` go blind to a live daemon.
+		const other = { pid: process.pid + 1, port: 1337, host: "127.0.0.1", startedAt: "now", foreground: false };
+		writeServerState(other);
+		clearServerStateIfOwner(process.pid);
+		expect(readServerState()).toEqual(other);
+	});
+
+	it("clearServerStateIfOwner is a no-op when no state file exists", async () => {
+		const { clearServerStateIfOwner, readServerState } = await import("../src/server/daemon-state.ts");
+		expect(() => clearServerStateIfOwner(process.pid)).not.toThrow();
+		expect(readServerState()).toBeUndefined();
+	});
+
 	it("readLiveServerState returns the state for a real, currently-alive process", async () => {
 		const { writeServerState, readLiveServerState } = await import("../src/server/daemon-state.ts");
 		writeServerState({ pid: process.pid, port: 1337, host: "127.0.0.1", startedAt: "now", foreground: false });

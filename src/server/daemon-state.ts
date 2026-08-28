@@ -159,6 +159,23 @@ export function clearServerState(): void {
 }
 
 /**
+ * Same as clearServerState, but only if the file still records *this*
+ * process as the daemon. A dying server unconditionally clearing the file on
+ * shutdown is wrong the moment two server processes have existed on this
+ * machine at once (a manual `--port` run started alongside an already-running
+ * daemon, two dev-mode servers, ...): whichever one exits later wipes out
+ * tracking for whichever one is still alive and actually serving traffic,
+ * and every `cast server status`/`stop` after that reports "not running"
+ * even though a real daemon is still up. Scoping the clear to "only if it's
+ * still mine" makes an exiting process that never should have registered (or
+ * that's since been superseded) a no-op instead of a foot-gun.
+ */
+export function clearServerStateIfOwner(pid: number): void {
+	const state = readServerState();
+	if (state?.pid === pid) clearServerState();
+}
+
+/**
  * Reads the state file and tells the caller whether it describes a genuinely
  * live process, cleaning up automatically when it doesn't — the one check
  * every start/stop/status path should go through instead of reading the
