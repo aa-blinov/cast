@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.15
+
+### Fixed
+
+- **Web UI:** sidebar session item menu (⋮ / right-click) is rendered once at the `<nav class="sidebar">` level instead of nested inside each row/session-group. Those containers use `content-visibility: auto` for list virtualization, which made the menu's `position: fixed` mis-place and clip against a later group, or — after an earlier attempted fix — forced a relayout that jumped the whole list's scroll position when opened near the bottom.
+
 ## 0.22.14
 
 ### Fixed
