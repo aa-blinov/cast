@@ -123,11 +123,21 @@ export function Sidebar({
 			window.addEventListener("contextmenu", close);
 		}, 0);
 		window.addEventListener("keydown", onKey);
+		// menuPos is a one-shot snapshot of the anchor row's rect, taken when
+		// the menu opens — it doesn't track the row afterwards. Scrolling the
+		// session list or resizing the window would leave the menu visually
+		// detached from its row, so close instead of trying to keep it glued
+		// on (a live reposition on scroll would need a rAF loop for no real
+		// benefit — nobody scrolls while reading a context menu).
+		window.addEventListener("scroll", close, { capture: true, passive: true });
+		window.addEventListener("resize", close);
 		return () => {
 			clearTimeout(id);
 			window.removeEventListener("click", close);
 			window.removeEventListener("contextmenu", close);
 			window.removeEventListener("keydown", onKey);
+			window.removeEventListener("scroll", close, { capture: true });
+			window.removeEventListener("resize", close);
 		};
 	}, [menuFor]);
 
