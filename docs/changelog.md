@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.17
+
+### Fixed
+
+- **Web:** production static assets are now actually cache-busted after a deploy. The `?v=…` stamping regex required a space after `from` that esbuild's minifier strips, so every local JS import except `new-session-modal.js` silently kept serving its pre-deploy body for up to an hour; the PWA service worker's cache name was also hardcoded and never rotated, so a cached module could be served forever regardless of HTTP caching. Both now update on every release.
+
 ## 0.22.16
 
 ### Fixed
