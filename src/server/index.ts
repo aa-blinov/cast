@@ -15,7 +15,12 @@ import type { ParsedArgs } from "../core/startup.ts";
 import { runStartup } from "../core/startup.ts";
 import type { Pickers, PickOption } from "../pickers/types.ts";
 import { createServerBridge } from "./bridge.ts";
-import { clearServerState, DAEMON_PROTOCOL_VERSION, writeServerState } from "./daemon-state.ts";
+import {
+	clearServerStateIfOwner,
+	DAEMON_PROTOCOL_VERSION,
+	readLiveServerState,
+	writeServerState,
+} from "./daemon-state.ts";
 import { startServer } from "./server.ts";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
@@ -171,20 +176,36 @@ export async function runServerMain(args: string[], options: { foreground: boole
 		instanceId,
 		version: ver,
 		onListening: (boundPort: number) => {
-			// Write the state file now that we have the real bound port (may differ
-			// from `port` when 0 was passed for OS assignment). The TUI reads this
-			// for both the port and the loopback token.
-			writeServerState({
-				protocolVersion: DAEMON_PROTOCOL_VERSION,
-				pid: process.pid,
-				port: boundPort,
-				host,
-				startedAt: new Date().toISOString(),
-				foreground,
-				token: serverPassword,
-				instanceId,
-			});
-			console.log(`[cast server] stop: cast server stop`);
+			// handleServerCommand (the `cast server` CLI path) already refuses to
+			// spawn a second daemon when one's live — but that check is bypassed
+			// entirely by anything that calls runServerMain directly (dev-mode
+			// `npm run dev:web`, tests). Without this, a second process here would
+			// silently overwrite the registration of a daemon that's still up and
+			// serving traffic: the TUI/`cast server status`/`cast server stop`
+			// would all start pointing at this one instead, and the original
+			// becomes a live-but-untracked orphan. Bind already succeeded, so
+			// still serve on this port — just don't claim to be *the* daemon.
+			const other = readLiveServerState();
+			if (other && other.pid !== process.pid) {
+				console.log(
+					`[cast server] another cast daemon is already registered (pid ${other.pid}, http://${other.host}:${other.port}) — this instance will keep serving on port ${boundPort} but won't replace it in 'cast server status'/'stop'.`,
+				);
+			} else {
+				// Write the state file now that we have the real bound port (may differ
+				// from `port` when 0 was passed for OS assignment). The TUI reads this
+				// for both the port and the loopback token.
+				writeServerState({
+					protocolVersion: DAEMON_PROTOCOL_VERSION,
+					pid: process.pid,
+					port: boundPort,
+					host,
+					startedAt: new Date().toISOString(),
+					foreground,
+					token: serverPassword,
+					instanceId,
+				});
+				console.log(`[cast server] stop: cast server stop`);
+			}
 			// The deferred half of ParsedArgs.deferMcp above: now that the HTTP
 			// server is actually accepting connections, do the real connect
 			// (npx resolution, browser launches, remote handshakes — whatever
@@ -246,7 +267,7 @@ export async function runServerMain(args: string[], options: { foreground: boole
 		bridge.dispose?.();
 		await drainProjectCheckpointWriters(2_500);
 		await drainAutomaticMemoryMaintenance(2_500);
-		clearServerState();
+		clearServerStateIfOwner(process.pid);
 		server.close(() => process.exit(0));
 		// server.close() waits for existing connections (including open SSE
 		// streams) to end on their own — force exit if that takes too long
@@ -266,7 +287,7 @@ async function main(): Promise<void> {
 if (!process.env.CAST_SERVER_SKIP_AUTORUN) {
 	main().catch((err) => {
 		console.error("[cast server] fatal:", err);
-		clearServerState();
+		clearServerStateIfOwner(process.pid);
 		process.exit(1);
 	});
 }

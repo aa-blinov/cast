@@ -51,7 +51,10 @@ vi.mock("../src/server/bridge.ts", () => ({
 vi.mock("../src/server/daemon-state.ts", () => ({
 	DAEMON_PROTOCOL_VERSION: 1,
 	writeServerState: writeServerStateSpy,
-	clearServerState: vi.fn(),
+	clearServerStateIfOwner: vi.fn(),
+	// No other daemon registered — onListening's collision check should fall
+	// through to writeServerStateSpy, same as before this mock existed.
+	readLiveServerState: vi.fn(() => undefined),
 }));
 
 let capturedOnListening: (() => void) | undefined;
