@@ -444,15 +444,23 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	transition: opacity .1s, background .1s, color .1s;
 }
 .sidebar-item:hover .sidebar-item-more, .sidebar-item:hover .sidebar-item-pin,
-.sidebar-item.active .sidebar-item-more, .sidebar-item.active .sidebar-item-pin { opacity: 1; }
+.sidebar-item.active .sidebar-item-more, .sidebar-item.active .sidebar-item-pin,
+.sidebar-item.menu-open .sidebar-item-more, .sidebar-item.menu-open .sidebar-item-pin { opacity: 1; }
 .sidebar-item-more:hover { background: var(--bg-hover); color: var(--cyan); }
 .sidebar-item-pin:hover { background: var(--bg-hover); color: var(--cyan); }
 /* Pinned is a persistent marker, not just a hover affordance — stays visible
  * and tinted even when the row isn't hovered/active. */
 .sidebar-item-pin.pinned { opacity: 1; color: var(--cyan); }
 .sidebar-item-menu-anchor { position: relative; flex-shrink: 0; display: flex; }
+/* Rendered once at the <nav> level (see Sidebar's shared menu), positioned
+ * via inline top/left/width computed from the triggering row's rect —
+ * position:fixed so it always sizes/paints relative to the viewport, not
+ * whichever row/group happens to contain it (those use content-visibility
+ * for list virtualization, which turns them into containing blocks and
+ * stacking contexts and would otherwise mis-place and clip a nested menu,
+ * and relayout-on-open would jump the whole scroll position). */
 .sidebar-item-menu {
-	position: absolute; top: calc(100% + 4px); right: 0; z-index: 20;
+	position: fixed; z-index: 999;
 	min-width: 140px;
 	background: var(--bg-raised);
 	border: 1px solid var(--border);
@@ -461,9 +469,6 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	padding: 4px;
 	display: flex; flex-direction: column; gap: 2px;
 }
-/* Applied when the row is near the bottom of the sidebar — opening downward
-   (the default above) would push the menu past the viewport edge. */
-.sidebar-item-menu.upward { top: auto; bottom: calc(100% + 4px); }
 .sidebar-item-menu-item {
 	display: flex; align-items: center; gap: 8px;
 	padding: 6px 8px;

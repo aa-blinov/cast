@@ -19,16 +19,9 @@ export function SidebarSessionItem({
 	cancelEdit,
 	startEdit,
 	menuFor,
-	menuUpward,
 	openMenu,
-	setMenuFor,
-	onShare,
-	onFork,
-	onDelete,
 }) {
 	const s = session;
-	const doDelete = () => onDelete(s);
-	const doFork = () => onFork(s.id);
 	// `selecting` is true while the click's /api/sessions/:id fetch is still
 	// in flight (activeId only flips when the response lands). The row gets
 	// the same "active" highlight up front so the click reads as registered
@@ -45,10 +38,11 @@ export function SidebarSessionItem({
 	// selecting boolean) so we can tell "is this row the picker target?"
 	// from "is some other row the picker target?".
 	const isActive = selecting || (s.id === activeId && !selectingId);
+	const menuOpen = menuFor === s.id;
 	return html`
 		<div
 			key=${s.id}
-			class="sidebar-item${isActive ? " active" : ""}"
+			class="sidebar-item${isActive ? " active" : ""}${menuOpen ? " menu-open" : ""}"
 			title=${s.cwd}
 			onClick=${() => onSelect(s.id)}
 			onContextMenu=${(e) => {
@@ -90,28 +84,6 @@ export function SidebarSessionItem({
 					e.stopPropagation();
 					openMenu(menuFor === s.id ? null : s.id, e.currentTarget.closest(".sidebar-item"));
 				}}><${icons.ellipsisVertical} /></button>
-				${
-					menuFor === s.id &&
-					html`
-					<div class="sidebar-item-menu${menuUpward ? " upward" : ""}" onClick=${(e) => e.stopPropagation()}>
-						<button class="sidebar-item-menu-item" onClick=${() => {
-							setMenuFor(null);
-							startEdit(s);
-						}}><${icons.pencil} /> Rename</button>
-						<button class="sidebar-item-menu-item" onClick=${() => {
-							setMenuFor(null);
-							onShare(s);
-						}}><${icons.link} /> Share</button>
-						<button class="sidebar-item-menu-item" disabled=${s.status === "running"} title=${s.status === "running" ? "Wait for the agent to finish" : "Create a new session from this context"} onClick=${() => {
-							setMenuFor(null);
-							doFork();
-						}}><${icons.fork} /> Fork</button>
-						<button class="sidebar-item-menu-item danger" onClick=${() => {
-							setMenuFor(null);
-							doDelete();
-						}}><${icons.trash} /> Delete</button>
-					</div>`
-				}
 			</div>
 		</div>
 	`;

@@ -84,22 +84,34 @@ export function Sidebar({
 	// click/Escape/picking an action. Frees up the row for one icon instead
 	// of two permanently-visible ones.
 	const [menuFor, setMenuFor] = useState(null);
-	// Whether the last-opened menu should render above its anchor instead of
-	// below — a row near the bottom of the (often short, scrolled) sidebar
-	// otherwise had the menu's fixed "always opens downward" positioning push
-	// it straight past the viewport edge, unreachable and unclickable.
-	const [menuUpward, setMenuUpward] = useState(false);
+	const [menuPos, setMenuPos] = useState(null);
 	const openMenu = useCallback((id, rowEl) => {
 		if (rowEl) {
 			const rect = rowEl.getBoundingClientRect();
 			const ESTIMATED_MENU_HEIGHT = 190; // 4 items + padding, roomy on purpose
-			setMenuUpward(rect.bottom + ESTIMATED_MENU_HEIGHT > window.innerHeight);
+			// A row near the bottom of the (often short, scrolled) sidebar would
+			// otherwise push the menu's default "opens downward" position past
+			// the viewport edge, unreachable and unclickable — open upward instead.
+			const upward = rect.bottom + ESTIMATED_MENU_HEIGHT > window.innerHeight;
+			// position:fixed, computed from the row's viewport rect — rendered
+			// once at the <nav> level (see menuSession below), not nested inside
+			// the row, so it isn't a content-visibility descendant.
+			const MENU_WIDTH = 160;
+			setMenuPos({ top: upward ? rect.top - ESTIMATED_MENU_HEIGHT + 4 : rect.bottom + 4, left: rect.right - MENU_WIDTH, width: MENU_WIDTH });
+		} else {
+			setMenuPos(null);
 		}
 		setMenuFor(id);
 	}, []);
 	useEffect(() => {
-		if (!menuFor) return;
-		const close = () => setMenuFor(null);
+		if (!menuFor) {
+			setMenuPos(null);
+			return;
+		}
+		const close = () => {
+			setMenuFor(null);
+			setMenuPos(null);
+		};
 		const onKey = (e) => {
 			if (e.key === "Escape") close();
 		};
@@ -179,9 +191,6 @@ export function Sidebar({
 		selecting=${selectingId === s.id}
 		onSelect=${onSelectSession}
 		onPin=${onPinSession}
-		onDelete=${doDelete}
-		onShare=${onShareSession}
-		onFork=${onForkSession}
 		editingId=${editingId}
 		editInputRef=${editInputRef}
 		editValue=${editValue}
@@ -190,10 +199,17 @@ export function Sidebar({
 		cancelEdit=${() => setEditingId(null)}
 		startEdit=${startEdit}
 		menuFor=${menuFor}
-		menuUpward=${menuUpward}
 		openMenu=${openMenu}
-		setMenuFor=${setMenuFor}
 	/>`;
+	// The open row's menu — rendered once here, at the <nav> level, rather
+	// than inline inside the row. Rows live inside content-visibility:auto
+	// containers (list virtualization for long session lists); a
+	// position:fixed menu nested in there gets mispositioned (the container
+	// becomes fixed's containing block) and clipped/covered by later groups
+	// (containment forces a stacking context), and toggling containment off
+	// to work around that forces a relayout of the whole group, which jumps
+	// the scroll position. Rendering at the top level sidesteps all of it.
+	const menuSession = menuFor ? filtered.find((s) => s.id === menuFor) : null;
 	const renderGroup = ([key, group]) => {
 		const groupSessions = [...group.sessions].sort((a, b) => {
 			if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
@@ -285,6 +301,29 @@ export function Sidebar({
 				</button>
 			</div>
 			<div class="sidebar-resize-handle" onPointerDown=${onResizeStart} aria-hidden="true" />
+			${
+				menuSession &&
+				menuPos &&
+				html`
+				<div class="sidebar-item-menu" style=${`top:${menuPos.top}px;left:${menuPos.left}px;width:${menuPos.width}px;`} onClick=${(e) => e.stopPropagation()}>
+					<button class="sidebar-item-menu-item" onClick=${() => {
+						setMenuFor(null);
+						startEdit(menuSession);
+					}}><${icons.pencil} /> Rename</button>
+					<button class="sidebar-item-menu-item" onClick=${() => {
+						setMenuFor(null);
+						onShareSession(menuSession);
+					}}><${icons.link} /> Share</button>
+					<button class="sidebar-item-menu-item" disabled=${menuSession.status === "running"} title=${menuSession.status === "running" ? "Wait for the agent to finish" : "Create a new session from this context"} onClick=${() => {
+						setMenuFor(null);
+						onForkSession(menuSession.id);
+					}}><${icons.fork} /> Fork</button>
+					<button class="sidebar-item-menu-item danger" onClick=${() => {
+						setMenuFor(null);
+						doDelete(menuSession);
+					}}><${icons.trash} /> Delete</button>
+				</div>`
+			}
 		</nav>
 	`;
 }
