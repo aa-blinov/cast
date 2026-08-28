@@ -122,6 +122,7 @@ const SHARED_LIVE_EVENT_TYPES = new Set<string>([
 const IMPORT_REWRITE_TARGETS = [
 	"api",
 	"cast-logo",
+	"chat-scroll",
 	"composer",
 	"diff-panel",
 	"directory-browser",

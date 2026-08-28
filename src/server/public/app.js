@@ -8,6 +8,7 @@ import { h, render } from "preact";
 import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { api } from "./api.js";
 import { CastLogo } from "./cast-logo.js";
+import { isNearBottom, isNearTop, scrollTopAfterPrepend } from "./chat-scroll.js";
 import { Composer as ComposerModule } from "./composer.js";
 import { Dashboard as DashboardModule } from "./dashboard.js";
 import { DiffPanel as DiffPanelModule } from "./diff-panel.js";
@@ -1576,7 +1577,7 @@ function App() {
 		const delta = pendingScrollRestoreRef.current;
 		if (delta == null || !messagesRef.current) return;
 		const el = messagesRef.current;
-		el.scrollTop += el.scrollHeight - delta;
+		el.scrollTop = scrollTopAfterPrepend(el.scrollTop, el.scrollHeight, delta);
 		pendingScrollRestoreRef.current = null;
 	}, [session?.messages]);
 
@@ -1590,10 +1591,10 @@ function App() {
 			scrollRafRef.current = null;
 			const el = messagesRef.current;
 			if (!el) return;
-			const bottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 80;
+			const bottom = isNearBottom(el.scrollTop, el.clientHeight, el.scrollHeight);
 			autoScrollRef.current = bottom;
 			setAtBottom(bottom);
-			if (el.scrollTop < 600) loadOlderMessages();
+			if (isNearTop(el.scrollTop)) loadOlderMessages();
 		});
 	}, [loadOlderMessages, setAtBottom]);
 	useEffect(() => () => { if (scrollRafRef.current != null) cancelAnimationFrame(scrollRafRef.current); }, []);

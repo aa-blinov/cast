@@ -87,6 +87,7 @@ const webJavaScript = [
 	"app.js",
 	"api.js",
 	"cast-logo.js",
+	"chat-scroll.js",
 	"composer-pickers.js",
 	"composer-attachments.js",
 	"composer.js",
