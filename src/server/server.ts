@@ -1624,9 +1624,22 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 				} else if (xy === "A " || xy === "A" + " ") {
 					groups.added.push(path);
 					diffTargets.push({ path, args: ["diff", "--no-color", "--unified=3", "--staged", "--", path] });
-				} else if (xy === "R ") {
+				} else if (xy[0] === "R") {
+					// A single-pathspec diff can't detect a rename — git has nothing
+					// to compare the new name against — so it falls back to showing
+					// the whole file as freshly added. Passing both the old and new
+					// path lets git's own rename detection populate the diff header
+					// (and DiffFile.oldPath, parsed from it) correctly.
+					const oldPath = line.slice(3).split(" -> ")[0]!;
 					groups.renamed.push(path);
-					diffTargets.push({ path, args: ["diff", "--no-color", "--unified=3", "--staged", "--", path] });
+					diffTargets.push({
+						path: `${path}:staged`,
+						args: ["diff", "--no-color", "--unified=3", "--staged", "--", oldPath, path],
+					});
+					// "RM" — renamed and staged, with further unstaged edits on top.
+					if (xy[1] === "M") {
+						diffTargets.push({ path, args: ["diff", "--no-color", "--unified=3", "--", path] });
+					}
 				} else if (xy === "D " || xy === " D") {
 					groups.deleted.push(path);
 					if (xy[0] === " ") diffTargets.push({ path, args: ["diff", "--no-color", "--unified=3", "--", path] });
@@ -2680,6 +2693,14 @@ function parseDiff(raw: string): { files: DiffFile[] } {
 		}
 
 		if (!currentFile) continue;
+
+		// A same-content rename (100% similarity) has no hunks and thus no
+		// "--- a/" line to read oldPath from below — "rename from X" is the
+		// only place it appears.
+		if (line.startsWith("rename from ")) {
+			currentFile.oldPath = line.slice("rename from ".length);
+			continue;
+		}
 
 		if (line.startsWith("--- a/")) {
 			currentFile.oldPath = line.slice(6);
