@@ -4,9 +4,13 @@ All notable user-facing changes to cast, newest first.
 
 ## 0.22.20
 
+### Added
+
+- **Memory:** both project and global memory are now always loaded in full into every session's system prompt when they have content — not just pointed at by path, and no longer left to the model to proactively decide to search for. A saved fact like "this project uses SQLite, not Postgres" or a cross-project preference like "always write commit messages in English" is now simply present from the start of every relevant session, like ChatGPT's saved memories. Bounded by the same `checkpointPushCaps` settings (Settings → Memory → Caps) already used for checkpoint-rebuild context, so an oversized memory file doesn't silently tax every turn. Session checkpoint/notes/task-progress are unaffected — still pull-based, fully loaded only at an actual checkpoint rebuild.
+
 ### Fixed
 
-- **Memory:** a preference saved to global memory (cross-project, e.g. "always write commit messages in English") got no proactive recall nudge on a fresh session in a different project — only project-scoped memory triggered the "search memory before asking" reminder. Global memory now triggers it too.
+- **Memory:** a preference saved to global memory got no proactive recall nudge on a fresh session in a different project — only project-scoped memory triggered the "search memory before asking" reminder. Global memory now triggers it too (on top of the always-loaded content above).
 
 ## 0.22.19
 

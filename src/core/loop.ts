@@ -41,11 +41,14 @@ import {
 	type CheckpointWriterHandle,
 	type CheckpointWriterToolRuntime,
 	createProjectMemoryService,
+	DEFAULT_REBUILD_GLOBAL_CAP,
+	DEFAULT_REBUILD_MEMORY_CAP,
 	type MemoryCheckpointWriterInput,
 	type MemoryMaintenanceAgentInput,
 	type MemoryMaintenanceAgentResult,
 	type MemoryService,
 	projectIdForCwd,
+	readMemorySectionsWithinBudget,
 	reconcileProjectMemoryFiles,
 	runAutomaticMemoryMaintenanceRun,
 	scheduleAutomaticMemoryMaintenance,
@@ -91,6 +94,7 @@ import {
 } from "./session.ts";
 import {
 	checkpointFork as checkpointForkSetting,
+	checkpointPushCapsSetting,
 	checkpointReservedSetting,
 	checkpointThresholdsSetting,
 	isMemoryEnabled,
@@ -151,32 +155,72 @@ function memoryPromptBudgetTokens(config: AppConfig): number {
 	return Math.min(configuredBudget, Math.max(256, inputBudget));
 }
 
+/** True once a memory file has at least one line of real content — not just headings, italic scaffolding comments, or blank lines. */
+function isMeaningfulMemoryText(text: string): boolean {
+	return text.split("\n").some((line) => {
+		const value = line.trim();
+		return value.length > 0 && !value.startsWith("#") && !value.startsWith("_") && !MEMORY_EMPTY_LINE_RE.test(value);
+	});
+}
+
 function hasMemoryOrTasks(cwd: string, sessionId: string): boolean {
 	const projectText = readProjectMemory(projectIdForCwd(cwd));
 	const globalText = readMemoryFile(globalMemoryPath());
 	const sessionMemory = readSessionMemory(sessionId);
-	const meaningful = (text: string): boolean =>
-		text.split("\n").some((line) => {
-			const value = line.trim();
-			return (
-				value.length > 0 && !value.startsWith("#") && !value.startsWith("_") && !MEMORY_EMPTY_LINE_RE.test(value)
-			);
-		});
 	return (
-		meaningful(projectText) ||
-		meaningful(globalText) ||
-		meaningful(sessionMemory.checkpoint) ||
-		meaningful(sessionMemory.notes) ||
+		isMeaningfulMemoryText(projectText) ||
+		isMeaningfulMemoryText(globalText) ||
+		isMeaningfulMemoryText(sessionMemory.checkpoint) ||
+		isMeaningfulMemoryText(sessionMemory.notes) ||
 		Boolean(sessionMemory.taskProgress.trim())
 	);
 }
 
+// Global memory is meant to hold a short list of cross-project user
+// preferences (see prompts/memory-system.md) — small enough that, unlike
+// project memory, it's worth always loading in full rather than relying on
+// the model to think to search for it (see hasMemoryOrTasks/
+// MEMORY_RECALL_HINT for that pull-based path, kept for project memory).
+// Reuses the same checkpointPushCaps setting/defaults as the checkpoint
+// rebuild context (memory.ts) — same content, same reasonable size budget,
+// already user-configurable via Settings → Memory → Caps, rather than a
+// second, smaller set of magic numbers for what's otherwise the same data.
+
+/** Appends a bounded "already loaded" block for `text` under `heading`, or returns `prompt` unchanged when `text` has no real content. */
+function withInlinedMemorySection(prompt: string, heading: string, text: string, tokenCap: number): string {
+	if (!isMeaningfulMemoryText(text)) return prompt;
+	const { text: bounded } = readMemorySectionsWithinBudget(text, tokenCap);
+	return `${prompt}\n\n## ${heading} (already loaded)\nThe following is already in your context — do not Read the file itself.\n\n${bounded}`;
+}
+
 function memorySystemPrompt(cwd: string, sessionId: string): string {
 	const projectId = projectIdForCwd(cwd);
-	return MEMORY_SYSTEM_PROMPT.replace("{{MEMORY_PATH}}", projectMemoryPath(projectId))
+	let prompt = MEMORY_SYSTEM_PROMPT.replace("{{MEMORY_PATH}}", projectMemoryPath(projectId))
 		.replace("{{GLOBAL_MEMORY_PATH}}", globalMemoryPath())
 		.replace("{{CHECKPOINT_PATH}}", checkpointPath(sessionId))
 		.replace("{{NOTES_PATH}}", notesPath(sessionId));
+	const caps = checkpointPushCapsSetting() ?? {};
+	// Pushed unconditionally when present (nothing when absent) rather than
+	// left purely pull-based — relying on the model to proactively decide to
+	// search project/global memory before it's relevant proved unreliable in
+	// practice (confirmed live: a saved preference with no direct question
+	// attached to it didn't reliably get looked up). Session checkpoint/
+	// notes/task-progress stay pull-only (via MEMORY_RECALL_HINT below) and
+	// fully pushed only at an actual checkpoint rebuild — they're
+	// session-in-progress state, not "read this once at the start" material.
+	prompt = withInlinedMemorySection(
+		prompt,
+		"Project memory",
+		readProjectMemory(projectId),
+		caps.memory ?? DEFAULT_REBUILD_MEMORY_CAP,
+	);
+	prompt = withInlinedMemorySection(
+		prompt,
+		"Global memory",
+		readMemoryFile(globalMemoryPath()),
+		caps.global ?? DEFAULT_REBUILD_GLOBAL_CAP,
+	);
+	return prompt;
 }
 
 // Running cap on embedded image_url data across the whole live context (see
