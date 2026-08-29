@@ -103,6 +103,12 @@ function loadMarked() {
 	return markedModulePromise;
 }
 
+let dompurifyModulePromise = null;
+function loadDompurify() {
+	if (!dompurifyModulePromise) dompurifyModulePromise = import("/vendor/dompurify.min.mjs");
+	return dompurifyModulePromise;
+}
+
 let hljsModulePromise = null;
 function loadHljs() {
 	if (!hljsModulePromise) hljsModulePromise = import("/vendor/highlight.min.mjs");
@@ -227,9 +233,13 @@ export function FilePreviewModal({ path, onClose, downloadHref, previewHref }) {
 		if (content == null) return;
 		let cancelled = false;
 		if (isMarkdown) {
-			loadMarked()
-				.then(({ marked }) => {
-					if (!cancelled) setEnhanced({ kind: "markdown", html: marked.parse(content) });
+			// The file being previewed is arbitrary user/repo content (an
+			// attachment or a workspace file), not model output — it can carry a
+			// raw <script> or an onerror handler, so marked's HTML must be
+			// sanitized before it reaches dangerouslySetInnerHTML below.
+			Promise.all([loadMarked(), loadDompurify()])
+				.then(([{ marked }, { default: DOMPurify }]) => {
+					if (!cancelled) setEnhanced({ kind: "markdown", html: DOMPurify.sanitize(marked.parse(content)) });
 				})
 				.catch(() => {
 					if (!cancelled) setEnhanced({ kind: "error" });

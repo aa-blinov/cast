@@ -2,6 +2,13 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.22
+
+### Fixed
+
+- **Security:** clicking an uploaded attachment in the composer's attachment panel opened it in a new top-level browser tab. For an `.svg` attachment, that meant the browser rendered it as a full document rather than an embedded image — so an SVG containing a `<script>` executed with the app's own session cookie. Attachments now open through the same in-app preview modal already used for the Files panel, which renders images via an `<img>` tag (SVG scripts never execute there) instead of navigating to the raw file.
+- **Security:** the file preview modal (Files panel and, as of this release, attachments) rendered a Markdown file's content through `marked` straight into the page with no sanitization, so a `.md` file containing raw HTML (a `<script>` tag, an `<img onerror>`) executed when previewed. Output is now run through DOMPurify before rendering.
+
 ## 0.22.21
 
 ### Fixed
