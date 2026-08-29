@@ -529,9 +529,18 @@ export async function runStartup(
 		}
 	}
 
+	// providerName must move in lockstep with providerUrl, not just get
+	// spread in from resumedSession's stale value — this path always resets
+	// providerUrl to whatever's currently active (no per-session provider
+	// pinning here, unlike the web daemon's bridge.ts), so a resumed
+	// session's old providerName would otherwise keep pointing at whatever
+	// it was pinned to before, while providerUrl says something else. If
+	// this session is later reopened through the web UI, bridge.ts resolves
+	// the run's provider by that name first — a stale one would silently
+	// route it back to the old pin instead of the provider actually in use.
 	const session = resumedSession
-		? { ...resumedSession, model, providerUrl: config.baseURL, persona: persona.name }
-		: { ...createSession(model, cwd), providerUrl: config.baseURL, persona: persona.name };
+		? { ...resumedSession, model, providerUrl: config.baseURL, providerName: undefined, persona: persona.name }
+		: { ...createSession(model, cwd), providerUrl: config.baseURL, providerName: undefined, persona: persona.name };
 	// Persist the new session immediately so cross-process readers (the web UI
 	// sidebar) can see it before the rest of startup finishes — runStartup does
 	// a model onboarding check and connects MCP servers (several seconds of
