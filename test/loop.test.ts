@@ -408,6 +408,54 @@ describe("runAgentLoop — abort vs. error", () => {
 		}
 	});
 
+	it("nudges the model to search memory when only global memory (no project memory) has content", async () => {
+		// hasMemoryOrTasks previously only looked at project/session memory —
+		// global-only content (e.g. a cross-project user preference) got no
+		// recall hint at all, so the model had no signal to ever search for it
+		// on a fresh session unless it happened to think of it unprompted.
+		const realHome = process.env.HOME;
+		const realMemoryDir = process.env.CAST_MEMORY_DIR;
+		const fakeHome = mkdtempSync(join(tmpdir(), "cast-global-memory-hint-home-"));
+		const projectCwd = mkdtempSync(join(tmpdir(), "cast-global-memory-hint-project-"));
+		process.env.HOME = fakeHome;
+		process.env.CAST_MEMORY_DIR = join(fakeHome, "memory");
+		try {
+			const { globalMemoryPath } = await import("../src/core/memory-files.ts");
+			const globalPath = globalMemoryPath();
+			mkdirSync(join(globalPath, ".."), { recursive: true });
+			writeFileSync(globalPath, "# Global preferences\n\n- Always write commit messages in English.\n");
+
+			let capturedMessages: Message[] = [];
+			vi.mocked(streamAndCollect).mockImplementationOnce(async (_client, _model, messages) => {
+				capturedMessages = messages.slice();
+				return { content: "ok", thinking: "", finishReason: "stop" };
+			});
+
+			await runAgentLoop([{ role: "user", content: "hi" }], {
+				config: testConfig,
+				model: "test-model",
+				cwd: projectCwd,
+				systemPrompt: "test",
+				memory: { sessionId: "global-memory-hint-session" },
+				sessionId: "global-memory-hint-session",
+				onEvent: () => {},
+				onWarning: () => {},
+			});
+
+			const systemPrompt = capturedMessages.find((m) => m.role === "system")?.content;
+			expect(systemPrompt).toContain(
+				"Durable project or global memory may contain prior decisions, facts, or user preferences.",
+			);
+		} finally {
+			if (realHome === undefined) delete process.env.HOME;
+			else process.env.HOME = realHome;
+			if (realMemoryDir === undefined) delete process.env.CAST_MEMORY_DIR;
+			else process.env.CAST_MEMORY_DIR = realMemoryDir;
+			rmSync(fakeHome, { recursive: true, force: true });
+			rmSync(projectCwd, { recursive: true, force: true });
+		}
+	});
+
 	it("executes every advertised parent tool from a checkpoint fork", async () => {
 		const realHome = process.env.HOME;
 		const realMemoryDir = process.env.CAST_MEMORY_DIR;

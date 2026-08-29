@@ -131,7 +131,7 @@ const DEFAULT_OUTER_ITERATION_CAP = 500;
 export { DEFAULT_OUTER_ITERATION_CAP };
 const MEMORY_RECALL_HINT = [
 	"<system-reminder>",
-	"Durable project memory may contain prior decisions and facts.",
+	"Durable project or global memory may contain prior decisions, facts, or user preferences.",
 	"When relevant, search it with the memory tool using 1–3 distinctive terms before asking the user.",
 	"</system-reminder>",
 ].join("\n");
@@ -153,6 +153,7 @@ function memoryPromptBudgetTokens(config: AppConfig): number {
 
 function hasMemoryOrTasks(cwd: string, sessionId: string): boolean {
 	const projectText = readProjectMemory(projectIdForCwd(cwd));
+	const globalText = readMemoryFile(globalMemoryPath());
 	const sessionMemory = readSessionMemory(sessionId);
 	const meaningful = (text: string): boolean =>
 		text.split("\n").some((line) => {
@@ -163,6 +164,7 @@ function hasMemoryOrTasks(cwd: string, sessionId: string): boolean {
 		});
 	return (
 		meaningful(projectText) ||
+		meaningful(globalText) ||
 		meaningful(sessionMemory.checkpoint) ||
 		meaningful(sessionMemory.notes) ||
 		Boolean(sessionMemory.taskProgress.trim())
