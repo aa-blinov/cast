@@ -8,6 +8,42 @@ import { shortPath } from "./sidebar-utils.js";
 
 const html = htm.bind(h);
 
+// Per-row/per-action pending tracking, shared by every settings list that
+// runs a mutating `act()` per row (MCP/Skills/Hooks/Plugins/Marketplace).
+// The modal's global `busy` flag flashes for ~100ms around the request then
+// clears, which reads as "did that even do anything?" on a slower action —
+// tracking pending by its own id (row id, or `${id}:${verb}` when a row has
+// more than one button) shows a spinner on the specific button clicked for
+// as long as its own act() call actually takes, independent of busy's timing.
+function usePendingIds() {
+	const [pending, setPending] = useState(() => new Set());
+	const addPending = (id) =>
+		setPending((s) => {
+			if (s.has(id)) return s;
+			const n = new Set(s);
+			n.add(id);
+			return n;
+		});
+	const removePending = (id) =>
+		setPending((s) => {
+			if (!s.has(id)) return s;
+			const n = new Set(s);
+			n.delete(id);
+			return n;
+		});
+	return [pending, addPending, removePending];
+}
+
+/** Runs `act(command)` with `id` marked pending for the duration of the call. */
+async function actPending(act, addPending, removePending, id, command) {
+	addPending(id);
+	try {
+		return await act(command);
+	} finally {
+		removePending(id);
+	}
+}
+
 function SettingsServer({ data }) {
 	if (!data || !data.running) {
 		return html`
@@ -128,11 +164,15 @@ function SettingsMemory({ data, busy, act }) {
 	const thresholds = data.checkpointThresholds ?? [];
 	const pushCaps = data.checkpointPushCaps ?? {};
 	const setCapDraft = (key) => (event) => setCapsDrafts({ ...capsDrafts, [key]: event.target.value });
-	const actCaps = (key) => {
+	// Clears the draft only once the save actually confirms — clearing on click
+	// (as this once did) collapsed the field back to its old-value placeholder
+	// immediately, so a failed save silently discarded whatever the user typed
+	// instead of leaving it there to retry.
+	const actCaps = async (key) => {
 		const value = Number(capsDrafts[key]);
 		if (!Number.isFinite(value) || value <= 0) return;
-		act(`/memory checkpoint caps ${key}=${Math.floor(value)}`);
-		setCapsDrafts({ ...capsDrafts, [key]: "" });
+		const res = await act(`/memory checkpoint caps ${key}=${Math.floor(value)}`);
+		if (res?.ok) setCapsDrafts({ ...capsDrafts, [key]: "" });
 	};
 	return html`
 		<div class="settings-rows">
@@ -153,11 +193,11 @@ function SettingsMemory({ data, busy, act }) {
 				</div>
 				<div class="settings-compact-row">
 					<div class="settings-compact-copy"><span class="settings-compact-title">Checkpoint thresholds</span><span>${thresholds.length > 0 ? `Writer fires at ${thresholds.join("%,")}% of the window` : "Writer fires at the window-based defaults"}</span></div>
-					<form class="settings-inline-form" onSubmit=${(event) => { event.preventDefault(); const value = thresholdsDraft.trim(); if (value === "default" || value.split(",").every((part) => { const n = Number(part.trim()); return Number.isFinite(n) && n > 0 && n <= 100; })) act(`/memory checkpoint thresholds ${value}`); }}><input aria-label="Checkpoint thresholds" placeholder=${thresholds.length > 0 ? thresholds.join(",") : "default"} value=${thresholdsDraft} disabled=${busy || !enabled || !writeEnabled} onInput=${(event) => setThresholdsDraft(event.target.value)} /><button class="modal-btn icon-btn" title="Reset to window defaults" disabled=${busy || !enabled || !writeEnabled || thresholds.length === 0} onClick=${() => act("/memory checkpoint thresholds default")}><${icons.arrowUturnLeft} /></button><button class="modal-btn icon-btn" title="Save" disabled=${busy || !thresholdsDraft} onClick=${() => act(`/memory checkpoint thresholds ${thresholdsDraft.trim()}`)}><${icons.check} /></button></form>
+					<form class="settings-inline-form" onSubmit=${async (event) => { event.preventDefault(); const value = thresholdsDraft.trim(); if (value === "default" || value.split(",").every((part) => { const n = Number(part.trim()); return Number.isFinite(n) && n > 0 && n <= 100; })) { const res = await act(`/memory checkpoint thresholds ${value}`); if (res?.ok) setThresholdsDraft(""); } }}><input aria-label="Checkpoint thresholds" placeholder=${thresholds.length > 0 ? thresholds.join(",") : "default"} value=${thresholdsDraft} disabled=${busy || !enabled || !writeEnabled} onInput=${(event) => setThresholdsDraft(event.target.value)} /><button class="modal-btn icon-btn" title="Reset to window defaults" disabled=${busy || !enabled || !writeEnabled || thresholds.length === 0} onClick=${() => act("/memory checkpoint thresholds default")}><${icons.arrowUturnLeft} /></button><button class="modal-btn icon-btn" title="Save" disabled=${busy || !thresholdsDraft} onClick=${async () => { const res = await act(`/memory checkpoint thresholds ${thresholdsDraft.trim()}`); if (res?.ok) setThresholdsDraft(""); }}><${icons.check} /></button></form>
 				</div>
 				<div class="settings-compact-row">
 					<div class="settings-compact-copy"><span class="settings-compact-title">Checkpoint reserved</span><span>Token safety buffer at the window end; thresholds clamp to window − reserved (default ${DEFAULTS.reserved})</span></div>
-					<form class="settings-inline-form" onSubmit=${(event) => { event.preventDefault(); const value = Number(reservedDraft); if (Number.isInteger(value) && value >= 0) act(`/memory checkpoint reserved ${value}`); }}><input aria-label="Checkpoint reserved tokens" type="text" inputmode="numeric" pattern="[0-9]*" placeholder=${reserved} value=${reservedDraft} disabled=${busy || !enabled || !writeEnabled} onInput=${(event) => setReservedDraft(event.target.value.replace(/[^0-9]/g, ""))} /><button class="modal-btn icon-btn" title="Reset to ${DEFAULTS.reserved}" disabled=${busy || !enabled || !writeEnabled || reserved === DEFAULTS.reserved} onClick=${() => act(`/memory checkpoint reserved ${DEFAULTS.reserved}`)}><${icons.arrowUturnLeft} /></button><button class="modal-btn icon-btn" title="Save" disabled=${busy || !reservedDraft || Number(reservedDraft) === reserved} onClick=${() => { act(`/memory checkpoint reserved ${Number(reservedDraft)}`); setReservedDraft(""); }}><${icons.check} /></button></form>
+					<form class="settings-inline-form" onSubmit=${async (event) => { event.preventDefault(); const value = Number(reservedDraft); if (Number.isInteger(value) && value >= 0) { const res = await act(`/memory checkpoint reserved ${value}`); if (res?.ok) setReservedDraft(""); } }}><input aria-label="Checkpoint reserved tokens" type="text" inputmode="numeric" pattern="[0-9]*" placeholder=${reserved} value=${reservedDraft} disabled=${busy || !enabled || !writeEnabled} onInput=${(event) => setReservedDraft(event.target.value.replace(/[^0-9]/g, ""))} /><button class="modal-btn icon-btn" title="Reset to ${DEFAULTS.reserved}" disabled=${busy || !enabled || !writeEnabled || reserved === DEFAULTS.reserved} onClick=${() => act(`/memory checkpoint reserved ${DEFAULTS.reserved}`)}><${icons.arrowUturnLeft} /></button><button class="modal-btn icon-btn" title="Save" disabled=${busy || !reservedDraft || Number(reservedDraft) === reserved} onClick=${async () => { const res = await act(`/memory checkpoint reserved ${Number(reservedDraft)}`); if (res?.ok) setReservedDraft(""); }}><${icons.check} /></button></form>
 				</div>
 				${["checkpoint", "memory", "notes", "global", "tasks"].map((key) => {
 					const current = pushCaps[key] ?? DEFAULTS.caps[key];
@@ -326,11 +366,16 @@ function SettingsPersonas({ personas = [] }) {
 
 function SettingsMcp({ data, busy, act, confirm }) {
 	const servers = data || [];
+	const [pending, addPending, removePending] = usePendingIds();
 	const groups = [
 		{ key: "global", label: "Global", items: servers.filter((s) => s.source === "global") },
 		{ key: "project", label: "Project", items: servers.filter((s) => s.source === "project") },
 	];
-	const renderServer = (s) => html`
+	const renderServer = (s) => {
+		const reconnectKey = `${s.name}:reconnect`;
+		const toggleKey = `${s.name}:toggle`;
+		const uninstallKey = `${s.name}:uninstall`;
+		return html`
 		<div key=${s.name} class="settings-item-row">
 			<div class="settings-item-info">
 				<span class="settings-item-status ${s.connected ? "ok" : "off"}" />
@@ -338,14 +383,15 @@ function SettingsMcp({ data, busy, act, confirm }) {
 				<span class="settings-item-meta">${s.disabled ? "disabled" : s.connected ? "connected" : "not connected"}</span>
 			</div>
 			<div class="settings-item-actions">
-				${!s.disabled && html`<button class="modal-btn icon-btn" title="Reconnect" disabled=${busy} onClick=${() => act(`/mcp reconnect ${s.name}`)}><${icons.arrowPath} /></button>`}
-				<button class="modal-btn icon-btn" title=${s.disabled ? "Enable" : "Disable"} disabled=${busy} onClick=${() => act(`/mcp ${s.disabled ? "enable" : "disable"} ${s.name}`)}>${s.disabled ? html`<${icons.play} />` : html`<${icons.pause} />`}</button>
-				<button class="modal-btn icon-btn modal-btn-danger" title="Uninstall" disabled=${busy} onClick=${async () => {
-					if (await confirm(`Uninstall MCP server "${s.name}"?`)) act(`/mcp uninstall ${s.name}`);
-				}}><${icons.trash} /></button>
+				${!s.disabled && html`<button class="modal-btn icon-btn" title="Reconnect" disabled=${busy || pending.has(reconnectKey)} onClick=${() => actPending(act, addPending, removePending, reconnectKey, `/mcp reconnect ${s.name}`)}>${pending.has(reconnectKey) ? "loading" : html`<${icons.arrowPath} />`}</button>`}
+				<button class="modal-btn icon-btn" title=${s.disabled ? "Enable" : "Disable"} disabled=${busy || pending.has(toggleKey)} onClick=${() => actPending(act, addPending, removePending, toggleKey, `/mcp ${s.disabled ? "enable" : "disable"} ${s.name}`)}>${pending.has(toggleKey) ? "loading" : s.disabled ? html`<${icons.play} />` : html`<${icons.pause} />`}</button>
+				<button class="modal-btn icon-btn modal-btn-danger" title="Uninstall" disabled=${busy || pending.has(uninstallKey)} onClick=${async () => {
+					if (await confirm(`Uninstall MCP server "${s.name}"?`)) actPending(act, addPending, removePending, uninstallKey, `/mcp uninstall ${s.name}`);
+				}}>${pending.has(uninstallKey) ? "loading" : html`<${icons.trash} />`}</button>
 			</div>
 		</div>
 	`;
+	};
 	return html`
 		<div class="settings-rows">
 			<p class="settings-intro"><span>Background processes that give the agent extra tools. Configured in <code>.cast/mcp.json</code> (project) or <code>~/.cast/mcp.json</code> (global).</span></p>
@@ -365,6 +411,7 @@ function SettingsMcp({ data, busy, act, confirm }) {
 }
 function SettingsSkills({ data, busy, act, confirm }) {
 	const skills = data || [];
+	const [pending, addPending, removePending] = usePendingIds();
 	const groups = [
 		{ key: "builtin", label: "Built-in", items: skills.filter((s) => s.source === "builtin") },
 		{ key: "global", label: "Global", items: skills.filter((s) => s.source === "global") },
@@ -375,7 +422,10 @@ function SettingsSkills({ data, busy, act, confirm }) {
 		},
 		{ key: "plugin", label: "Plugins", items: skills.filter((s) => s.source === "plugin") },
 	];
-	const renderSkill = (s) => html`
+	const renderSkill = (s) => {
+		const toggleKey = `${s.name}:toggle`;
+		const uninstallKey = `${s.name}:uninstall`;
+		return html`
 		<div key=${s.name} class="settings-item-row">
 			<div class="settings-item-info">
 				<span class="settings-item-status ${s.enabled ? "ok" : "off"}" />
@@ -384,16 +434,17 @@ function SettingsSkills({ data, busy, act, confirm }) {
 				<${InfoPopover} text=${s.description} readUrl=${`/api/skill-content?name=${encodeURIComponent(s.name)}`} />
 			</div>
 			<div class="settings-item-actions">
-				<button class="modal-btn icon-btn" title=${s.enabled ? "Disable" : "Enable"} disabled=${busy} onClick=${() => act(`/skills ${s.enabled ? "disable" : "enable"} ${s.name}`)}>${s.enabled ? html`<${icons.pause} />` : html`<${icons.play} />`}</button>
+				<button class="modal-btn icon-btn" title=${s.enabled ? "Disable" : "Enable"} disabled=${busy || pending.has(toggleKey)} onClick=${() => actPending(act, addPending, removePending, toggleKey, `/skills ${s.enabled ? "disable" : "enable"} ${s.name}`)}>${pending.has(toggleKey) ? "loading" : s.enabled ? html`<${icons.pause} />` : html`<${icons.play} />`}</button>
 				${
 					s.uninstallable &&
-					html`<button class="modal-btn icon-btn modal-btn-danger" title="Uninstall" disabled=${busy} onClick=${async () => {
-						if (await confirm(`Uninstall skill "${s.name}"?`)) act(`/skills uninstall ${s.name}`);
-					}}><${icons.trash} /></button>`
+					html`<button class="modal-btn icon-btn modal-btn-danger" title="Uninstall" disabled=${busy || pending.has(uninstallKey)} onClick=${async () => {
+						if (await confirm(`Uninstall skill "${s.name}"?`)) actPending(act, addPending, removePending, uninstallKey, `/skills uninstall ${s.name}`);
+					}}>${pending.has(uninstallKey) ? "loading" : html`<${icons.trash} />`}</button>`
 				}
 			</div>
 		</div>
 	`;
+	};
 	return html`
 		<div class="settings-rows">
 			<p class="settings-intro"><span>On-demand instruction sets — "expertise plugins" the agent picks up when a task matches, or you invoke with <code>/skill-name</code>. Click ℹ to preview one.</span></p>
@@ -414,6 +465,7 @@ function SettingsSkills({ data, busy, act, confirm }) {
 function SettingsHooks({ data, busy, act }) {
 	const hooks = data?.entries || [];
 	const diagnostics = data?.diagnostics || [];
+	const [pending, addPending, removePending] = usePendingIds();
 	// Group plugins by pluginId — each plugin gets its own collapsible subsection.
 	// Global/project stay flat since they have no pluginId.
 	const globalHooks = hooks.filter((h) => h.source === "global");
@@ -431,7 +483,7 @@ function SettingsHooks({ data, busy, act }) {
 				<span class="settings-item-name">${h.event}${h.matcher ? html` <span style=${{ opacity: 0.6 }}>(${h.matcher})</span>` : ""}</span>
 				${showPlugin && h.pluginId ? html`<span class="settings-item-meta">${h.pluginId}</span>` : ""}
 				<div class="settings-item-actions">
-					<button class="modal-btn icon-btn" title=${h.enabled ? "Disable" : "Enable"} disabled=${busy} onClick=${() => act(`/hooks ${h.enabled ? "disable" : "enable"} ${h.id}`)}>${h.enabled ? html`<${icons.pause} />` : html`<${icons.play} />`}</button>
+					<button class="modal-btn icon-btn" title=${h.enabled ? "Disable" : "Enable"} disabled=${busy || pending.has(h.id)} onClick=${() => actPending(act, addPending, removePending, h.id, `/hooks ${h.enabled ? "disable" : "enable"} ${h.id}`)}>${pending.has(h.id) ? "loading" : h.enabled ? html`<${icons.pause} />` : html`<${icons.play} />`}</button>
 				</div>
 			</div>
 			${
@@ -562,14 +614,17 @@ function SettingsSkillssh({ data, busy, act, confirm }) {
 }
 
 function SettingsPlugins({ data, busy, act, confirm }) {
+	const [pending, addPending, removePending] = usePendingIds();
 	if (!data) return null;
 	return html`
 		<div class="settings-rows">
 			<p class="settings-intro"><span>Plugins installed on this machine. Each plugin can ship skills, hooks, and MCP servers. To browse and install more, see the <strong>Marketplace</strong> tab.</span></p>
 			${[...data.plugins]
 				.sort((a, b) => a.id.localeCompare(b.id))
-				.map(
-					(p) => html`
+				.map((p) => {
+					const toggleKey = `${p.id}:toggle`;
+					const uninstallKey = `${p.id}:uninstall`;
+					return html`
 				<div key=${p.id} class="settings-item-row">
 					<div class="settings-item-info">
 						<span class="settings-item-status ${p.enabled ? "ok" : "off"}" />
@@ -578,14 +633,14 @@ function SettingsPlugins({ data, busy, act, confirm }) {
 						<${InfoPopover} text=${p.description} />
 					</div>
 					<div class="settings-item-actions">
-						<button class="modal-btn icon-btn" title=${p.enabled ? "Disable" : "Enable"} disabled=${busy} onClick=${() => act(`/plugin ${p.enabled ? "disable" : "enable"} ${p.id}`)}>${p.enabled ? html`<${icons.pause} />` : html`<${icons.play} />`}</button>
-						<button class="modal-btn icon-btn modal-btn-danger" title="Uninstall" disabled=${busy} onClick=${async () => {
-							if (await confirm(`Uninstall plugin "${p.id}"?`)) act(`/plugin uninstall ${p.id}`);
-						}}><${icons.trash} /></button>
+						<button class="modal-btn icon-btn" title=${p.enabled ? "Disable" : "Enable"} disabled=${busy || pending.has(toggleKey)} onClick=${() => actPending(act, addPending, removePending, toggleKey, `/plugin ${p.enabled ? "disable" : "enable"} ${p.id}`)}>${pending.has(toggleKey) ? "loading" : p.enabled ? html`<${icons.pause} />` : html`<${icons.play} />`}</button>
+						<button class="modal-btn icon-btn modal-btn-danger" title="Uninstall" disabled=${busy || pending.has(uninstallKey)} onClick=${async () => {
+							if (await confirm(`Uninstall plugin "${p.id}"?`)) actPending(act, addPending, removePending, uninstallKey, `/plugin uninstall ${p.id}`);
+						}}>${pending.has(uninstallKey) ? "loading" : html`<${icons.trash} />`}</button>
 					</div>
 				</div>
-			`,
-				)}
+			`;
+				})}
 			${data.plugins.length === 0 && html`<div class="settings-hint">No plugins installed. Browse the Marketplace tab to add some.</div>`}
 		</div>
 	`;
@@ -595,29 +650,16 @@ function SettingsMarketplace({ data, installed, busy, act, confirm }) {
 	const [mpSource, setMpSource] = useState("");
 	const [mpQuery, setMpQuery] = useState("");
 	const [addStatus, setAddStatus] = useState("");
-	// Per-row pending state. The modal's global `busy` flashes for ~100ms then
+	// Per-row pending state (shared with MCP/Skills/Hooks/Plugins — see
+	// usePendingIds above). The modal's global `busy` flashes for ~100ms then
 	// re-enables, leaving no visible feedback that the install actually fired —
 	// worse, /plugin install is server-side sync but the reload of `data.plugins`
 	// (which gates the "installed" label) used to be skipped, so the button
 	// reappeared in its pre-click state and the install looked like a no-op.
-	// Tracking pending per id lets us swap the icon for a spinner mid-flight and
-	// show a brief "installed ✓" so the action reads as done, not dropped.
-	const [pending, setPending] = useState(() => new Set());
+	// justInstalled additionally shows a brief "installed ✓" so the action
+	// reads as done, not dropped.
+	const [pending, addPending, removePending] = usePendingIds();
 	const [justInstalled, setJustInstalled] = useState(null);
-	const addPending = (id) =>
-		setPending((s) => {
-			if (s.has(id)) return s;
-			const n = new Set(s);
-			n.add(id);
-			return n;
-		});
-	const removePending = (id) =>
-		setPending((s) => {
-			if (!s.has(id)) return s;
-			const n = new Set(s);
-			n.delete(id);
-			return n;
-		});
 	useEffect(() => {
 		if (!justInstalled) return;
 		const t = setTimeout(() => setJustInstalled(null), 2500);
