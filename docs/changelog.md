@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.21
+
+### Fixed
+
+- **Session:** resuming a session outside the web daemon (the TUI without a live daemon, or the ACP integration) reset the provider it runs against but left the newly-added per-session provider name stale, pointing at whatever it had been pinned to before. Reopening the same session through the web UI afterward could silently route it back to that old pin instead of the provider actually in use.
+
 ## 0.22.20
 
 ### Added
