@@ -2,6 +2,7 @@ import htm from "htm";
 import { h } from "preact";
 import { useCallback, useEffect, useState } from "preact/hooks";
 import { api } from "./api.js";
+import { FilePreviewModal } from "./file-preview.js";
 import { humanSize } from "./file-size.js";
 import { icons } from "./icons.js";
 
@@ -14,6 +15,7 @@ export function InputsExplorer({ activeId, confirm, refreshNonce }) {
 	const [error, setError] = useState(null);
 	const [busyName, setBusyName] = useState(null);
 	const [loading, setLoading] = useState(true);
+	const [previewName, setPreviewName] = useState(null);
 
 	const load = useCallback(async () => {
 		if (!activeId) return;
@@ -61,7 +63,7 @@ export function InputsExplorer({ activeId, confirm, refreshNonce }) {
 					: html`<div class="fs-tree">${entries.map(
 							(entry) => html`
 					<div key=${entry.name} class="fs-row">
-						<div class="fs-row-main" onClick=${() => window.open(previewHref(entry.name), "_blank", "noopener")}>
+						<div class="fs-row-main" onClick=${() => setPreviewName(entry.name)}>
 							<span class="fs-icon"><${icons.docFile} /></span><span class="fs-name">${entry.name}</span>
 							${entry.size != null ? html`<span class="fs-size">${humanSize(entry.size)}</span>` : null}
 						</div>
@@ -76,6 +78,12 @@ export function InputsExplorer({ activeId, confirm, refreshNonce }) {
 				`,
 						)}</div>`
 			}
+			<${FilePreviewModal}
+				path=${previewName}
+				onClose=${() => setPreviewName(null)}
+				downloadHref=${previewName ? downloadHref(previewName) : null}
+				previewHref=${previewName ? previewHref(previewName) : null}
+			/>
 		</div>
 	`;
 }
