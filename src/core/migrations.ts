@@ -675,6 +675,20 @@ CREATE INDEX IF NOT EXISTS idx_agents_name ON agents(name);
 			}
 		},
 	},
+	{
+		version: 28,
+		name: "sessions-provider-name",
+		up: (db) => {
+			// provider_url alone can't disambiguate two saved providers that
+			// legitimately share a base URL (two keys against the same
+			// OpenAI-compatible host) — a session pinned to one could
+			// silently run against the other's credentials. provider_name
+			// records which saved provider entry was actually chosen.
+			if (!columnExists(db, "sessions", "provider_name")) {
+				db.exec("ALTER TABLE sessions ADD COLUMN provider_name TEXT");
+			}
+		},
+	},
 ];
 
 const MIGRATION_TABLE_SCHEMA = `

@@ -140,6 +140,13 @@ const MEMORY_CHECKPOINT_CAPS_COMMAND_RE = /^checkpoint\s+caps\s+(.+)$/;
 const MEMORY_AUTO_TOGGLE_COMMAND_RE = /^(dream|distill)\s+(on|off)$/;
 const MEMORY_AUTO_INTERVAL_COMMAND_RE = /^(dream|distill)\s+interval\s+(\d+)$/;
 const MEMORY_CANCEL_RUN_COMMAND_RE = /^cancel\s+([a-f0-9-]+)$/;
+// Shared markdown code-fence stripping — parseSuggestionJson/parseEvolveJson
+// tolerate a model wrapping its JSON in a ```json fence; generateSkillBody
+// tolerates any language tag (or none) around a SKILL.md body. All three
+// close on a bare trailing ``` fence.
+const JSON_FENCE_OPEN_RE = /^```(?:json)?\s*/i;
+const CODE_FENCE_OPEN_RE = /^```[^\n]*\n/;
+const CODE_FENCE_CLOSE_RE = /```\s*$/;
 const EVOLVE_SYSTEM_PROMPT =
 	"You analyze a coding-agent session and propose reusable project skills (SKILL.md) worth creating, grouped by the typical tasks this project keeps doing. Reply with valid JSON only.";
 const EVOLVE_PROMPT = `Below is a transcript of the current session (assistant messages and tool results, newest last), plus the project's typical tasks.
@@ -436,10 +443,7 @@ function extractSystemReminders(text: string): { cleaned: string; reminders: str
  * chain-of-thought into `content` before the JSON instead of putting it in a
  * reasoning field — the JSON substring is extracted and parsed. */
 export function parseSuggestionJson(content: string): { name: string; description: string } | null {
-	const cleaned = content
-		.replace(/^```(?:json)?\s*/i, "")
-		.replace(/```\s*$/, "")
-		.trim();
+	const cleaned = content.replace(JSON_FENCE_OPEN_RE, "").replace(CODE_FENCE_CLOSE_RE, "").trim();
 	const candidates = [cleaned];
 	const firstBrace = cleaned.indexOf("{");
 	const lastBrace = cleaned.lastIndexOf("}");
@@ -468,10 +472,7 @@ export interface EvolveSkillSuggestion {
  *  suggestions (or an empty array); inline chain-of-thought before the JSON
  *  is tolerated, matching parseSuggestionJson's robustness. */
 export function parseEvolveJson(content: string): EvolveSkillSuggestion[] {
-	const cleaned = content
-		.replace(/^```(?:json)?\s*/i, "")
-		.replace(/```\s*$/, "")
-		.trim();
+	const cleaned = content.replace(JSON_FENCE_OPEN_RE, "").replace(CODE_FENCE_CLOSE_RE, "").trim();
 	const candidates = [cleaned];
 	const firstBrace = cleaned.indexOf("[");
 	const lastBrace = cleaned.lastIndexOf("]");
@@ -660,6 +661,8 @@ export interface ServerBridge {
 		cwdOverride?: string,
 		runSessionStartHook?: boolean,
 		worktree?: SessionWorktree,
+		/** Provider name (from settings.providers) to pin this session to, instead of inheriting whatever's globally active right now. */
+		providerOverride?: string,
 	): WebAgentSession;
 	/** Creates an idle copy of the current safe context and registers it as a new session. */
 	forkSession(sessionId: string): WebAgentSession | undefined;
@@ -903,6 +906,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 
 		ws.session.model = stored.model;
 		ws.session.providerUrl = stored.providerUrl;
+		ws.session.providerName = stored.providerName;
 		ws.systemPrompt = computeSystemPrompt(
 			resolvePersona(ws.session.persona ?? "") ?? currentPersona,
 			ws.session.model,
@@ -1009,6 +1013,12 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		const persona = personaName ? (resolvePersona(personaName) ?? currentPersona) : currentPersona;
 		const model = modelOverride ?? persona.model ?? defaultModel;
 		const providerName = providerOverride ?? persona.provider;
+		// Resolved eagerly (unlike the plan/subagent slots, which re-resolve
+		// fresh per turn from mutable settings) — a session's pinned provider
+		// is meant to survive later /provider switch calls, not track them.
+		const pinnedProvider = providerName
+			? (loadSettings().providers ?? []).find((p) => p.name === providerName)
+			: undefined;
 
 		let sessionCwd = cwdOverride && cwdOverride !== SANDBOX_CWD ? cwdOverride : cwd;
 		// Worktree and sandbox are mutually exclusive — worktree wins if both
@@ -1021,7 +1031,8 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		if (worktree) sessionCwd = worktree.path;
 		const session = createSession(model, sessionCwd);
 		session.persona = persona.name;
-		session.providerUrl = config.baseURL;
+		session.providerUrl = pinnedProvider?.url ?? config.baseURL;
+		session.providerName = pinnedProvider?.name;
 
 		// Scratch dirs must exist before SessionStart hooks run: hooks receive this
 		// cwd and are allowed to prepare the workspace. Web drafts don't reach this
@@ -1518,7 +1529,32 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// Resolve per-slot provider credentials.
 		const currentSettings = loadSettings();
 		const providers = currentSettings.providers ?? [];
-		const activeCreds = { baseURL: config.baseURL, apiKey: config.apiKey };
+		const globalActiveCreds = { baseURL: config.baseURL, apiKey: config.apiKey };
+		// The main model's endpoint is THIS session's own recorded provider, not
+		// necessarily whatever's globally active right now — `config` is one
+		// object shared by the whole daemon, so resolving straight from it here
+		// meant a /model-selection or /provider switch run inside any session
+		// silently redirected every other already-open session's very next turn
+		// to the same endpoint too. Sessions already record their own
+		// providerUrl/providerName (set at creation, and on every
+		// session-scoped model/provider change) — this just starts reading it
+		// back for the run instead of only for display/resume-matching.
+		// Matched by name first — providerUrl alone can't disambiguate two
+		// saved providers that legitimately share a base URL with different
+		// keys (confirmed live: routed a session to the wrong of two
+		// same-host providers before this was name-first). URL-only is kept
+		// as a fallback for sessions saved before providerName existed.
+		// Falls back to whatever's globally active when unset (new-enough
+		// default) or when the recorded name/URL no longer matches any saved
+		// provider (renamed/deleted since).
+		const sessionProvider = ws.session.providerName
+			? providers.find((p) => p.name === ws.session.providerName)
+			: ws.session.providerUrl
+				? providers.find((p) => p.url === ws.session.providerUrl)
+				: undefined;
+		const activeCreds = sessionProvider
+			? { baseURL: sessionProvider.url, apiKey: sessionProvider.apiKey }
+			: globalActiveCreds;
 		const resolvedModelProvider =
 			planMode && planModel && planModelProvider
 				? resolveProvider(providers, planModelProvider, activeCreds)
@@ -1529,20 +1565,27 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// from it. Matched by URL since that's the only thing a resolved
 		// provider and a saved provider entry share.
 		const turnStart = ws.turnStartedAt ?? Date.now();
-		const effectiveBaseURL = resolvedModelProvider?.baseURL ?? config.baseURL;
+		const effectiveBaseURL = resolvedModelProvider?.baseURL ?? activeCreds.baseURL;
+		const effectiveApiKey = resolvedModelProvider?.apiKey ?? activeCreds.apiKey;
 		// Match by url+key, not just url — two saved providers can legitimately
 		// share a base URL (e.g. two keys against the same OpenAI-compatible
 		// host), and URL-only matching would silently pick the first one.
-		const effectiveProvider = providers.find((p) => p.url === effectiveBaseURL && p.apiKey === config.apiKey);
+		const effectiveProvider = providers.find((p) => p.url === effectiveBaseURL && p.apiKey === effectiveApiKey);
 		const runReasoningFormat = resolveReasoningFormat(effectiveBaseURL, effectiveProvider?.reasoningFormat);
 		const runReasoningLevel = reasoningLevelForModel(runModel, runReasoningFormat);
 		const runConfig = {
 			...config,
+			baseURL: effectiveBaseURL,
+			apiKey: effectiveApiKey,
 			reasoningFormat: runReasoningFormat,
 			reasoningLevel: runReasoningLevel,
 			reasoningParams: buildReasoningParams(runReasoningLevel, runReasoningFormat, runModel),
 		};
-		if (runModel === ws.session.model && runReasoningLevel !== config.reasoningLevel) {
+		// Only sync the shared config/settings when this run is actually using
+		// the globally active provider — a session pinned to a different one
+		// must not push its reasoning level onto every other session sharing
+		// the global default.
+		if (runModel === ws.session.model && !sessionProvider && runReasoningLevel !== config.reasoningLevel) {
 			config.reasoningLevel = runReasoningLevel;
 			config.reasoningFormat = runReasoningFormat;
 			config.reasoningParams = runConfig.reasoningParams;
@@ -1553,7 +1596,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// providers share a base URL — would always pick the first one and
 		// mislabel the chat footer.
 		const runProviderName =
-			providers.find((p) => p.url === effectiveBaseURL && p.apiKey === config.apiKey)?.name ?? "default";
+			providers.find((p) => p.url === effectiveBaseURL && p.apiKey === effectiveApiKey)?.name ?? "default";
 
 		runAgentLoop(ws.session.messages, {
 			config: runConfig,
@@ -1946,10 +1989,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			800,
 		);
 		if (!resp) return null;
-		let body = resp.content
-			.replace(/^```[^\n]*\n/, "")
-			.replace(/```\s*$/, "")
-			.trim();
+		let body = resp.content.replace(CODE_FENCE_OPEN_RE, "").replace(CODE_FENCE_CLOSE_RE, "").trim();
 		if (!body) return null;
 		// If the model already emitted YAML frontmatter, leave it as-is.
 		if (!body.startsWith("---")) {
@@ -2123,17 +2163,23 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			const item = question.questions[0];
 			const chosen = Array.isArray(values[0]) ? (values[0] as string[]) : [];
 			resolvePlanQuestion(planState);
-			const created: string[] = [];
-			for (const value of chosen) {
-				const option = item.options.find((o) => o.value === value);
-				if (!option) continue;
-				const name = normalizeSkillName(option.value);
-				if (!name) continue;
-				const body = await generateSkillBody(name, option.description ?? "", ws.session.messages);
-				if (!body) continue;
-				writeSkillFile(ws.session.cwd ?? cwd, name, body);
-				created.push(name);
-			}
+			// Each chosen skill gets its own generateSkillBody call (independent
+			// LLM request) and its own file (writeSkillFile keys the path by
+			// name) — no shared state between iterations, so these run
+			// concurrently instead of waiting on each other one at a time.
+			const createdResults = await Promise.all(
+				chosen.map(async (value): Promise<string | null> => {
+					const option = item.options.find((o) => o.value === value);
+					if (!option) return null;
+					const name = normalizeSkillName(option.value);
+					if (!name) return null;
+					const body = await generateSkillBody(name, option.description ?? "", ws.session.messages);
+					if (!body) return null;
+					writeSkillFile(ws.session.cwd ?? cwd, name, body);
+					return name;
+				}),
+			);
+			const created = createdResults.filter((name): name is string => name !== null);
 			if (created.length > 0) {
 				broadcast(ws, {
 					type: "notice",
@@ -2568,10 +2614,15 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					persona: ws.session.persona,
 					model: ws.session.model,
 					providerUrl: ws.session.providerUrl ?? config.baseURL,
+					// Session's own pin by name first (disambiguates two saved
+					// providers sharing a URL) — falls back to matching the
+					// globally active provider for a session that isn't pinned.
 					providerName:
+						ws.session.providerName ??
 						(loadSettings().providers ?? []).find(
 							(provider) => provider.url === config.baseURL && provider.apiKey === config.apiKey,
-						)?.name ?? null,
+						)?.name ??
+						null,
 					// Reasoning level is stored on the global `config` object, not the
 					// session — the Settings → Model tab header reads this so the
 					// user can see what level is currently in effect.
@@ -3118,6 +3169,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat, model);
 			ws.session.model = model;
 			ws.session.providerUrl = provider.url;
+			ws.session.providerName = provider.name;
 			ws.systemPrompt = computeSystemPrompt(
 				resolvePersona(ws.session.persona ?? "") ?? currentPersona,
 				model,
@@ -3144,6 +3196,10 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			if (!arg) return { ok: true, result: { model: ws.session.model } };
 			ws.session.model = arg;
 			ws.session.providerUrl = config.baseURL;
+			// Not resolved against a specific saved provider — this switches the
+			// model on whatever's currently active, so any provider pin this
+			// session had is no longer meaningful and must not be trusted stale.
+			ws.session.providerName = undefined;
 			reasoningMeta = modelInfoFor(arg)?.reasoning;
 			config.reasoningLevel = reasoningLevelForModel(arg, config.reasoningFormat);
 			config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat, arg);
@@ -3700,6 +3756,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					config.baseURL = fallback.url;
 					config.apiKey = fallback.apiKey;
 					ws.session.providerUrl = fallback.url;
+					ws.session.providerName = fallback.name;
 					config.reasoningFormat = resolveReasoningFormat(fallback.url, fallback.reasoningFormat);
 					config.reasoningParams = buildReasoningParams(
 						config.reasoningLevel,
@@ -3726,6 +3783,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					config.baseURL = "";
 					config.apiKey = "";
 					ws.session.providerUrl = undefined;
+					ws.session.providerName = undefined;
 					ws.session.model = "";
 					saveSession(ws.session);
 				}
@@ -3747,6 +3805,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					config.baseURL = url;
 					config.apiKey = apiKey;
 					ws.session.providerUrl = url;
+					ws.session.providerName = pname;
 					updateSettings({ providers: next, providerUrl: url, apiKey, modelProvider: pname });
 					return { ok: true, result: `Added provider "${pname}" and set it active (default)` };
 				}
@@ -3789,6 +3848,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			config.baseURL = target.url;
 			config.apiKey = target.apiKey;
 			ws.session.providerUrl = target.url;
+			ws.session.providerName = target.name;
 			config.reasoningFormat = resolveReasoningFormat(target.url, target.reasoningFormat);
 			config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat, ws.session.model);
 			// Switching the active provider invalidates every model id that was

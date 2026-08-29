@@ -241,24 +241,26 @@ export function useSessionController({
 	// (nothing left after this change — kept as the one place that actually
 	// talks to POST /api/sessions).
 	const commitSession = useCallback(
-		async (personaOrOpts, cwd, { push = true, draftVersion, worktree, agentId, model } = {}) => {
+		async (personaOrOpts, cwd, { push = true, draftVersion, worktree, agentId, model, provider } = {}) => {
 			// Support both old signature commitSession(persona, cwd, opts) and new
 			// commitSession({persona, cwd, agentId, model}, ...) via overload detection
 			let persona = personaOrOpts;
 			let actualCwd = cwd;
 			let actualAgentId = agentId;
 			let actualModel = model;
+			let actualProvider = provider;
 			if (personaOrOpts && typeof personaOrOpts === "object" && !Array.isArray(personaOrOpts)) {
 				const opts = personaOrOpts;
 				persona = opts.persona;
 				actualCwd = opts.cwd;
 				actualAgentId = opts.agentId;
 				actualModel = opts.model ?? actualModel;
+				actualProvider = opts.provider ?? actualProvider;
 				worktree = opts.worktree ?? worktree;
 				push = opts.push ?? push;
 				draftVersion = opts.draftVersion ?? draftVersion;
 			}
-			const create = async () => api("POST", "/api/sessions", { persona, cwd: actualCwd, worktree, agentId: actualAgentId, model: actualModel });
+			const create = async () => api("POST", "/api/sessions", { persona, cwd: actualCwd, worktree, agentId: actualAgentId, model: actualModel, provider: actualProvider });
 			const pending = draftVersion == null ? create() : (draftCommitsRef.current.get(draftVersion) ?? create());
 			if (draftVersion != null) draftCommitsRef.current.set(draftVersion, pending);
 			let data;

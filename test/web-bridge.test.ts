@@ -606,6 +606,116 @@ describe("web bridge", () => {
 		});
 	});
 
+	it("createSession with a providerOverride pins the session to that provider, not whatever's globally active", async () => {
+		const { updateSettings } = await import("../src/core/settings.ts");
+		updateSettings({
+			providers: [
+				{ name: "local", url: testConfig.baseURL, apiKey: testConfig.apiKey },
+				{ name: "remote", url: "https://remote.example/v1", apiKey: "remote-key" },
+			],
+		});
+		const bridge = createServerBridge(makeResult({ config: { ...testConfig } }));
+		const ws = bridge.createSession(undefined, undefined, undefined, true, undefined, "remote");
+		expect(ws.session.providerUrl).toBe("https://remote.example/v1");
+	});
+
+	it("an unknown providerOverride name falls back to the globally active provider instead of erroring", async () => {
+		const bridge = createServerBridge(makeResult({ config: { ...testConfig } }));
+		const ws = bridge.createSession(undefined, undefined, undefined, true, undefined, "no-such-provider");
+		expect(ws.session.providerUrl).toBe(testConfig.baseURL);
+	});
+
+	it("a session pinned to a different provider runs against its own endpoint, not the shared global one", async () => {
+		const { updateSettings } = await import("../src/core/settings.ts");
+		updateSettings({
+			providers: [
+				{ name: "local", url: testConfig.baseURL, apiKey: testConfig.apiKey },
+				{ name: "remote", url: "https://remote.example/v1", apiKey: "remote-key" },
+			],
+		});
+		const bridge = createServerBridge(makeResult({ config: { ...testConfig } }));
+		const ws = bridge.createSession(undefined, undefined, undefined, true, undefined, "remote");
+
+		await bridge.submit(ws.id, "hello");
+
+		const runConfig = runAgentLoop.mock.calls[0]![1] as { config: AppConfig };
+		expect(runConfig.config.baseURL).toBe("https://remote.example/v1");
+		expect(runConfig.config.apiKey).toBe("remote-key");
+	});
+
+	it("disambiguates two saved providers that share a base URL by name, not just URL", async () => {
+		// Reproduces a bug found live: providers.find(p => p.url === ...) alone
+		// picks whichever entry happens to come first in the array when two
+		// providers share a host with different keys — silently running the
+		// pinned session against the wrong one's credentials.
+		const { updateSettings } = await import("../src/core/settings.ts");
+		updateSettings({
+			providers: [
+				{ name: "first-shared", url: "https://shared.example/v1", apiKey: "first-key" },
+				{ name: "second-shared", url: "https://shared.example/v1", apiKey: "second-key" },
+			],
+		});
+		const bridge = createServerBridge(makeResult({ config: { ...testConfig } }));
+		const ws = bridge.createSession(undefined, undefined, undefined, true, undefined, "second-shared");
+		expect(ws.session.providerName).toBe("second-shared");
+
+		await bridge.submit(ws.id, "hello");
+
+		const runConfig = runAgentLoop.mock.calls[0]![1] as { config: AppConfig };
+		expect(runConfig.config.apiKey).toBe("second-key");
+	});
+
+	it("switching provider in one session does not leak into another already-open session's next run", async () => {
+		const { updateSettings } = await import("../src/core/settings.ts");
+		updateSettings({
+			providers: [
+				{ name: "local", url: testConfig.baseURL, apiKey: testConfig.apiKey },
+				{ name: "remote", url: "https://remote.example/v1", apiKey: "remote-key" },
+			],
+			providerUrl: testConfig.baseURL,
+			apiKey: testConfig.apiKey,
+			modelProvider: "local",
+		});
+		const bridge = createServerBridge(makeResult({ config: { ...testConfig } }));
+		const untouched = bridge.createSession();
+		const pinned = bridge.createSession(undefined, undefined, undefined, true, undefined, "remote");
+
+		await bridge.submit(pinned.id, "hello from the pinned session");
+		await bridge.submit(untouched.id, "hello from the untouched session");
+
+		const pinnedRun = runAgentLoop.mock.calls[0]![1] as { config: AppConfig };
+		const untouchedRun = runAgentLoop.mock.calls[1]![1] as { config: AppConfig };
+		expect(pinnedRun.config.baseURL).toBe("https://remote.example/v1");
+		expect(untouchedRun.config.baseURL).toBe(testConfig.baseURL);
+	});
+
+	it("does not push a pinned session's reasoning level onto the shared config/settings", async () => {
+		const { loadSettings, updateSettings } = await import("../src/core/settings.ts");
+		updateSettings({
+			providers: [
+				{ name: "local", url: testConfig.baseURL, apiKey: testConfig.apiKey, reasoningFormat: "generic" },
+				{
+					name: "remote",
+					url: "https://remote.example/v1",
+					apiKey: "remote-key",
+					reasoningFormat: "openai-compatible",
+				},
+			],
+			providerUrl: testConfig.baseURL,
+			apiKey: testConfig.apiKey,
+			modelProvider: "local",
+			reasoningLevel: "off",
+		});
+		const config = { ...testConfig, reasoningFormat: "generic" } as AppConfig;
+		const bridge = createServerBridge(makeResult({ config }));
+		const pinned = bridge.createSession(undefined, undefined, undefined, true, undefined, "remote");
+
+		await bridge.submit(pinned.id, "hello");
+
+		expect(config.reasoningFormat).toBe("generic");
+		expect(loadSettings().reasoningLevel).toBe("off");
+	});
+
 	it("chooses a valid model default when the current reasoning level is unsupported", async () => {
 		const { loadSettings, updateSettings } = await import("../src/core/settings.ts");
 		updateSettings({

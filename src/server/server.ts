@@ -1114,7 +1114,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 				return json(res, { error: message }, 400);
 			}
 		}
-		const ws = bridge.createSession(persona, model, wtPath ?? cwd, true);
+		const ws = bridge.createSession(persona, model, wtPath ?? cwd, true, undefined, provider);
 		json(res, { id: ws.id, session: ws.session }, 201);
 	});
 
