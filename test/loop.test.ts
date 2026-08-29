@@ -1167,7 +1167,7 @@ describe("runAgentLoop — retries a length-truncated response with no tool call
 			.mockImplementationOnce(async () => ({ content: "stub one", thinking: "", finishReason: "length" }))
 			.mockImplementationOnce(async () => ({ content: "stub two", thinking: "", finishReason: "length" }));
 
-		const messages = await runAgentLoop([{ role: "user", content: "hi" }], {
+		const _messages = await runAgentLoop([{ role: "user", content: "hi" }], {
 			config: testConfig,
 			model: "test-model",
 			cwd: process.cwd(),

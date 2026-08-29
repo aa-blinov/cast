@@ -72,7 +72,7 @@ import {
 	uninstallUserSkill,
 } from "../core/skills.ts";
 import { resolveSshHosts, type SshHost, saveSshConfig, scanSshKeys, validateKeyPermissions } from "../core/ssh.ts";
-import { cancelActiveDecxprQuery, setRawModeActive, suspendAndRun } from "../core/stdin-manager.ts";
+import { cancelActiveDecxprQuery, suspendAndRun } from "../core/stdin-manager.ts";
 import {
 	buildReasoningParams,
 	getDefaultReasoningLevel,

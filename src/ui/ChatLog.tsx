@@ -8,7 +8,7 @@ import { theme } from "./themes/index.ts";
 import type { ChatMessage, RetryInfo, StreamBlock, StreamingState, ToolCallEntry } from "./useAgentSession.ts";
 
 const THINK_TAG_RE = /<\/?think[^>]*>/g;
-const BOUNDARY_RE = /[\s<>\[\]]/;
+const BOUNDARY_RE = /[\s<>[\]]/;
 const LEADING_WS_RE = /^\s+/;
 
 interface ChatLogProps {
