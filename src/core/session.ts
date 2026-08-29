@@ -105,6 +105,17 @@ export interface SessionState {
 	 * sessions saved before this field existed (treated as "unknown provider").
 	 */
 	providerUrl?: string;
+	/**
+	 * Name of the saved provider entry (settings.providers) this session is
+	 * actually pinned to — providerUrl alone can't disambiguate two saved
+	 * providers that legitimately share a base URL with different API keys;
+	 * matching by URL only would silently pick whichever one happens to come
+	 * first in the list. Optional for sessions saved before this field
+	 * existed, or when the session tracks the globally active provider
+	 * rather than a specific pin (URL-only matching is the accepted fallback
+	 * there, same as before this field existed).
+	 */
+	providerName?: string;
 	/** Conversation sessions are user-facing; background sessions are maintenance runs. */
 	sessionKind?: "conversation" | "background";
 	/** Parent conversation for a background session. */
@@ -581,6 +592,7 @@ function sessionMetaRow(session: SessionState) {
 		checkpoint_watermark_seq: session.checkpointWatermarkSeq ?? null,
 		last_announced_local_date: session.lastAnnouncedLocalDate ?? null,
 		provider_url: session.providerUrl ?? null,
+		provider_name: session.providerName ?? null,
 		session_kind: session.sessionKind ?? "conversation",
 		parent_session_id: session.parentSessionId ?? null,
 		background_kind: session.backgroundKind ?? null,
@@ -599,13 +611,13 @@ export function saveSession(session: SessionState): void {
 	const db = getDb();
 	const meta = sessionMetaRow(session);
 	db.prepare(
-		`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, session_kind, parent_session_id, background_kind, usage_json, todos_json, share_token, plan_question_json, plan_transition_json, checkpoint_watermark_seq, version)
-			 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :session_kind, :parent_session_id, :background_kind, :usage_json, :todos_json, :share_token, :plan_question_json, :plan_transition_json, :checkpoint_watermark_seq, :version)
+		`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, provider_name, session_kind, parent_session_id, background_kind, usage_json, todos_json, share_token, plan_question_json, plan_transition_json, checkpoint_watermark_seq, version)
+			 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :provider_name, :session_kind, :parent_session_id, :background_kind, :usage_json, :todos_json, :share_token, :plan_question_json, :plan_transition_json, :checkpoint_watermark_seq, :version)
 		 ON CONFLICT(id) DO UPDATE SET
 		   cwd = excluded.cwd, model = excluded.model, persona = excluded.persona, mode = excluded.mode,
 		   title = excluded.title, pinned = excluded.pinned, updated_at = excluded.updated_at,
 		   last_prompt_tokens = excluded.last_prompt_tokens, last_announced_local_date = excluded.last_announced_local_date,
-		   provider_url = excluded.provider_url, session_kind = excluded.session_kind,
+		   provider_url = excluded.provider_url, provider_name = excluded.provider_name, session_kind = excluded.session_kind,
 		   parent_session_id = excluded.parent_session_id, background_kind = excluded.background_kind,
 		   usage_json = excluded.usage_json, todos_json = excluded.todos_json,
 		   share_token = excluded.share_token, plan_question_json = excluded.plan_question_json,
@@ -807,11 +819,19 @@ export function getMessagesAfterCheckpoint(sessionId: string): Message[] {
 /** Persist only the session routing identity. TUI model/provider switches can
  * happen while the daemon owns a newer message history; upserting the whole
  * local SessionState there would overwrite that history with a stale mirror. */
-export function updateSessionIdentity(session: Pick<SessionState, "id" | "model" | "providerUrl">): void {
+export function updateSessionIdentity(
+	session: Pick<SessionState, "id" | "model" | "providerUrl" | "providerName">,
+): void {
 	const updatedAt = new Date().toISOString();
+	// provider_name is always overwritten with whatever's on the in-memory
+	// session (including clearing it to NULL when absent) rather than left
+	// untouched — a caller that updates providerUrl without also supplying
+	// the matching providerName (e.g. the TUI's /model, which only tracks
+	// the currently-active provider by URL) must not leave a now-stale name
+	// behind for a run to trust over the URL it just changed.
 	const result = getDb()
-		.prepare("UPDATE sessions SET model = ?, provider_url = ?, updated_at = ? WHERE id = ?")
-		.run(session.model, session.providerUrl ?? null, updatedAt, session.id);
+		.prepare("UPDATE sessions SET model = ?, provider_url = ?, provider_name = ?, updated_at = ? WHERE id = ?")
+		.run(session.model, session.providerUrl ?? null, session.providerName ?? null, updatedAt, session.id);
 	if (result.changes === 0) saveSession(session as SessionState);
 }
 
@@ -1157,6 +1177,7 @@ interface SessionRow {
 	checkpoint_watermark_seq: number | null;
 	last_announced_local_date: string | null;
 	provider_url: string | null;
+	provider_name: string | null;
 	session_kind: "conversation" | "background" | null;
 	parent_session_id: string | null;
 	background_kind: "memory-dream" | "memory-distill" | null;
@@ -1183,6 +1204,7 @@ function rowToMeta(row: SessionRow): Omit<SessionState, "messages"> {
 		checkpointWatermarkSeq: row.checkpoint_watermark_seq ?? undefined,
 		lastAnnouncedLocalDate: row.last_announced_local_date ?? undefined,
 		providerUrl: row.provider_url ?? undefined,
+		providerName: row.provider_name ?? undefined,
 		sessionKind: row.session_kind ?? "conversation",
 		parentSessionId: row.parent_session_id ?? undefined,
 		backgroundKind: row.background_kind ?? undefined,
@@ -1209,16 +1231,19 @@ export function loadSession(id: string): SessionState | null {
 /** Read the mutable session identity without loading its messages. The daemon
  * uses this at turn boundaries to notice model/provider changes made by TUI
  * or another web surface while it was idle. */
-export function loadSessionMeta(id: string): Pick<SessionState, "id" | "model" | "providerUrl" | "updatedAt"> | null {
-	const row = getDb().prepare("SELECT id, model, updated_at, provider_url FROM sessions WHERE id = ?").get(id) as
-		| Pick<SessionRow, "id" | "model" | "updated_at" | "provider_url">
-		| undefined;
+export function loadSessionMeta(
+	id: string,
+): Pick<SessionState, "id" | "model" | "providerUrl" | "providerName" | "updatedAt"> | null {
+	const row = getDb()
+		.prepare("SELECT id, model, updated_at, provider_url, provider_name FROM sessions WHERE id = ?")
+		.get(id) as Pick<SessionRow, "id" | "model" | "updated_at" | "provider_url" | "provider_name"> | undefined;
 	if (!row) return null;
 	return {
 		id: row.id,
 		model: row.model ?? "",
 		updatedAt: row.updated_at,
 		providerUrl: row.provider_url ?? undefined,
+		providerName: row.provider_name ?? undefined,
 	};
 }
 
@@ -1525,8 +1550,8 @@ export function migrateLegacySessionsToDb(): number {
 		try {
 			if (!session.title) session.title = deriveSessionTitle(getFirstUserMessage(session));
 			db.prepare(
-				`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, session_kind, parent_session_id, background_kind, usage_json, todos_json, share_token, plan_question_json, plan_transition_json, checkpoint_watermark_seq, version)
-					 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :session_kind, :parent_session_id, :background_kind, :usage_json, :todos_json, :share_token, :plan_question_json, :plan_transition_json, :checkpoint_watermark_seq, :version)`,
+				`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, provider_name, session_kind, parent_session_id, background_kind, usage_json, todos_json, share_token, plan_question_json, plan_transition_json, checkpoint_watermark_seq, version)
+					 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :provider_name, :session_kind, :parent_session_id, :background_kind, :usage_json, :todos_json, :share_token, :plan_question_json, :plan_transition_json, :checkpoint_watermark_seq, :version)`,
 			).run(sessionMetaRow(session));
 			const insertRow = db.prepare(
 				"INSERT INTO messages (session_id, seq, message_id, role, content_json, in_context, has_tool_calls) VALUES (?, ?, ?, ?, ?, 1, ?)",
@@ -1918,6 +1943,7 @@ export function forkSession(source: SessionState): SessionState {
 	fork.persona = source.persona;
 	fork.mode = source.mode;
 	fork.providerUrl = source.providerUrl;
+	fork.providerName = source.providerName;
 	fork.lastAnnouncedLocalDate = source.lastAnnouncedLocalDate;
 	fork.reasoning = source.reasoning
 		? (JSON.parse(JSON.stringify(source.reasoning)) as Record<number, string>)

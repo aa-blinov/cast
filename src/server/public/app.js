@@ -1161,7 +1161,12 @@ function App() {
 		// modal's error slot.
 		startDraft(payload.persona, payload.cwd, { worktree: payload.worktree, model: payload.model });
 		try {
-			await commitSession(payload.persona, payload.cwd, { push: false, worktree: payload.worktree, model: payload.model });
+			await commitSession(payload.persona, payload.cwd, {
+				push: false,
+				worktree: payload.worktree,
+				model: payload.model,
+				provider: payload.provider,
+			});
 			setNewSessionError(null);
 			setNewSessionOpen(false);
 		} catch (err) {
