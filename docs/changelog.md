@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.23
+
+### Fixed
+
+- **Files/Changes panel:** a renamed file (`git mv`, or a rename picked up by an editor) showed up as the entire file being freshly added, with no indication it was a rename and no old path — a single-pathspec `git diff` has nothing to compare the new name against, so it can't detect the rename. If the rename also had further unstaged edits on top, the staged half (the rename itself plus any staged content change) was dropped from the diff entirely, silently hiding real uncommitted changes. Renamed files are now diffed against both their old and new path so git's own rename detection populates the header correctly, and the staged and further-unstaged halves are now both shown as separate entries, matching how a plain modified file's staged/unstaged diffs are already handled.
+
 ## 0.22.22
 
 ### Fixed
