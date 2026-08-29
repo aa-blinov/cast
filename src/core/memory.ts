@@ -2333,9 +2333,12 @@ function memoryPriorityComparator(a: MemorySearchResult, b: MemorySearchResult):
 // Each block is bounded independently so a huge notes file cannot starve the
 // checkpoint or project memory.
 const DEFAULT_REBUILD_CHECKPOINT_CAP = 11_000;
-const DEFAULT_REBUILD_MEMORY_CAP = 10_000;
+// Exported: also used by loop.ts's per-turn "inline project/global memory at
+// session start" injection — same setting (checkpointPushCaps), same
+// defaults, rather than a second, smaller set of magic numbers.
+export const DEFAULT_REBUILD_MEMORY_CAP = 10_000;
 const DEFAULT_REBUILD_NOTES_CAP = 6_000;
-const DEFAULT_REBUILD_GLOBAL_CAP = 6_000;
+export const DEFAULT_REBUILD_GLOBAL_CAP = 6_000;
 const DEFAULT_REBUILD_TASKS_CAP = 2_000;
 const REBUILD_RECENT_USER_MAX = 6;
 

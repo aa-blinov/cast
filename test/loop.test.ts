@@ -446,6 +446,110 @@ describe("runAgentLoop — abort vs. error", () => {
 			expect(systemPrompt).toContain(
 				"Durable project or global memory may contain prior decisions, facts, or user preferences.",
 			);
+			// Global memory is small enough (unlike project memory, which stays
+			// pull-based) to always load in full — checking the hint fires isn't
+			// enough on its own to prove the model actually sees the preference.
+			expect(systemPrompt).toContain("Global memory (already loaded)");
+			expect(systemPrompt).toContain("Always write commit messages in English.");
+		} finally {
+			if (realHome === undefined) delete process.env.HOME;
+			else process.env.HOME = realHome;
+			if (realMemoryDir === undefined) delete process.env.CAST_MEMORY_DIR;
+			else process.env.CAST_MEMORY_DIR = realMemoryDir;
+			rmSync(fakeHome, { recursive: true, force: true });
+			rmSync(projectCwd, { recursive: true, force: true });
+		}
+	});
+
+	it("inlines project memory content when present, and adds nothing when absent", async () => {
+		const realHome = process.env.HOME;
+		const realMemoryDir = process.env.CAST_MEMORY_DIR;
+		const fakeHome = mkdtempSync(join(tmpdir(), "cast-project-memory-inline-home-"));
+		const projectCwd = mkdtempSync(join(tmpdir(), "cast-project-memory-inline-project-"));
+		process.env.HOME = fakeHome;
+		process.env.CAST_MEMORY_DIR = join(fakeHome, "memory");
+		try {
+			const projectPath = projectMemoryPath(projectIdForCwd(projectCwd));
+			mkdirSync(join(projectPath, ".."), { recursive: true });
+			writeFileSync(
+				projectPath,
+				"# Project memory\n\n## Architecture decisions\n- This project uses SQLite, not Postgres.\n",
+			);
+
+			let capturedMessages: Message[] = [];
+			vi.mocked(streamAndCollect).mockImplementationOnce(async (_client, _model, messages) => {
+				capturedMessages = messages.slice();
+				return { content: "ok", thinking: "", finishReason: "stop" };
+			});
+
+			await runAgentLoop([{ role: "user", content: "hi" }], {
+				config: testConfig,
+				model: "test-model",
+				cwd: projectCwd,
+				systemPrompt: "test",
+				memory: { sessionId: "project-memory-inline-session" },
+				sessionId: "project-memory-inline-session",
+				onEvent: () => {},
+				onWarning: () => {},
+			});
+
+			const systemPrompt = capturedMessages.find((m) => m.role === "system")?.content;
+			expect(systemPrompt).toContain("Project memory (already loaded)");
+			expect(systemPrompt).toContain("This project uses SQLite, not Postgres.");
+			// No global memory file was written — that section must not appear.
+			expect(systemPrompt).not.toContain("Global memory (already loaded)");
+		} finally {
+			if (realHome === undefined) delete process.env.HOME;
+			else process.env.HOME = realHome;
+			if (realMemoryDir === undefined) delete process.env.CAST_MEMORY_DIR;
+			else process.env.CAST_MEMORY_DIR = realMemoryDir;
+			rmSync(fakeHome, { recursive: true, force: true });
+			rmSync(projectCwd, { recursive: true, force: true });
+		}
+	});
+
+	it("caps inlined global memory instead of letting an oversized file tax every turn", async () => {
+		const realHome = process.env.HOME;
+		const realMemoryDir = process.env.CAST_MEMORY_DIR;
+		const fakeHome = mkdtempSync(join(tmpdir(), "cast-global-memory-cap-home-"));
+		const projectCwd = mkdtempSync(join(tmpdir(), "cast-global-memory-cap-project-"));
+		process.env.HOME = fakeHome;
+		process.env.CAST_MEMORY_DIR = join(fakeHome, "memory");
+		try {
+			const { globalMemoryPath } = await import("../src/core/memory-files.ts");
+			const globalPath = globalMemoryPath();
+			mkdirSync(join(globalPath, ".."), { recursive: true });
+			// One long block (no headings) well past the 1,500-token inline cap —
+			// readMemorySectionsWithinBudget trims proportionally within a block,
+			// so this should come back non-empty but strictly shorter.
+			const line = "A fairly wordy preference line to burn through the token budget quickly.\n";
+			const oversized = line.repeat(2_000);
+			writeFileSync(globalPath, oversized);
+
+			let capturedMessages: Message[] = [];
+			vi.mocked(streamAndCollect).mockImplementationOnce(async (_client, _model, messages) => {
+				capturedMessages = messages.slice();
+				return { content: "ok", thinking: "", finishReason: "stop" };
+			});
+
+			await runAgentLoop([{ role: "user", content: "hi" }], {
+				config: testConfig,
+				model: "test-model",
+				cwd: projectCwd,
+				systemPrompt: "test",
+				memory: { sessionId: "global-memory-cap-session" },
+				sessionId: "global-memory-cap-session",
+				onEvent: () => {},
+				onWarning: () => {},
+			});
+
+			const systemPrompt = capturedMessages.find((m) => m.role === "system")?.content as string;
+			expect(systemPrompt).toContain("Global memory (already loaded)");
+			expect(systemPrompt).toContain("A fairly wordy preference line");
+			// Truncated, not dropped to nothing or blown past the cap: the
+			// 2,000-line file (well over the 1,500-token cap) must come back
+			// noticeably shorter than it went in.
+			expect(systemPrompt.length).toBeLessThan(oversized.length);
 		} finally {
 			if (realHome === undefined) delete process.env.HOME;
 			else process.env.HOME = realHome;
