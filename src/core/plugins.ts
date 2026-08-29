@@ -164,6 +164,12 @@ export async function ensureDefaultMarketplaces(
 		);
 		if (alreadyKnown) continue;
 		try {
+			// Sequential on purpose, not just habit: addMarketplace does an
+			// unlocked read-modify-write of the shared known-marketplaces JSON
+			// file (readKnownMarketplaces → mutate → writeKnownMarketplaces) —
+			// running these concurrently via Promise.all would race two writes
+			// against the same file and silently drop whichever finished first.
+			// biome-ignore lint/performance/noAwaitInLoops: shared-file read-modify-write below requires serialization, see comment above
 			const mp = await addMarketplace(source, paths, { isDefault: true });
 			added.push(`${mp.name} (${label})`);
 		} catch (error) {
@@ -322,7 +328,7 @@ export function stagingNameFor(source: string): string {
 	return cleaned || "marketplace";
 }
 
-function runGit(args: string[], cwd?: string): string {
+function _runGit(args: string[], cwd?: string): string {
 	try {
 		return execFileSync("git", args, {
 			cwd,
