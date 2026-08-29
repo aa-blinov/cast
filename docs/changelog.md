@@ -2,6 +2,17 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.19
+
+### Added
+
+- **Web:** the New Session modal's provider picker actually works now — a session can be pinned to a specific saved provider, at creation or later via `/model-selection`, independent of whichever provider is globally active. Previously the choice was silently dropped before it ever reached the server, and the main model's endpoint was resolved from one config shared by every session, so switching provider in any session immediately redirected every other open session's next turn too.
+
+### Fixed
+
+- **Web:** two saved providers sharing a base URL (different keys) could have a pinned session silently routed to the wrong one's credentials — sessions now record which provider by name, not just by URL.
+- **Web:** Settings panel list actions (MCP/Skills/Hooks/Plugins enable-disable-uninstall) now show per-row pending feedback instead of relying on the modal's global busy flag, which flashed too briefly to tell whether a slower action actually did anything. Memory's numeric fields (checkpoint reserved/thresholds/caps) no longer clear a typed value before the save is confirmed, so a failed save leaves it there to retry instead of silently discarding it.
+
 ## 0.22.18
 
 ### Fixed
