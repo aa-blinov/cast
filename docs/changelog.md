@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.20
+
+### Fixed
+
+- **Memory:** a preference saved to global memory (cross-project, e.g. "always write commit messages in English") got no proactive recall nudge on a fresh session in a different project — only project-scoped memory triggered the "search memory before asking" reminder. Global memory now triggers it too.
+
 ## 0.22.19
 
 ### Added
