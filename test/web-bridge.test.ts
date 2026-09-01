@@ -1326,6 +1326,48 @@ describe("web bridge", () => {
 		expect(promptInsideScope).toContain("Use Tailwind for this app, not raw CSS.");
 	});
 
+	it("seeds lastPromptTokens from the persisted session so auto-compaction isn't blind on a fresh runAgentLoop call", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		ws.session.lastPromptTokens = 123_456;
+
+		await bridge.submit(ws.id, "hello");
+
+		const call = runAgentLoop.mock.calls[0]![1] as { lastPromptTokens?: number };
+		expect(call.lastPromptTokens).toBe(123_456);
+	});
+
+	it("wires announcedLocalDate so a write lands on the persisted session field", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		ws.session.lastAnnouncedLocalDate = "2020-01-01";
+
+		await bridge.submit(ws.id, "hello");
+
+		const call = runAgentLoop.mock.calls[0]![1] as { announcedLocalDate?: { value: string } };
+		expect(call.announcedLocalDate?.value).toBe("2020-01-01");
+		call.announcedLocalDate!.value = "2020-01-02";
+		expect(ws.session.lastAnnouncedLocalDate).toBe("2020-01-02");
+	});
+
+	it("passes the same contextFiles array across separate submits so a match stays sticky once the session goes idle", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		runAgentLoop.mockImplementation(async (messages: unknown) => messages);
+
+		bridge.submit(ws.id, "first turn");
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		const firstCall = runAgentLoop.mock.calls[0]![1] as { contextFiles?: string[] };
+		firstCall.contextFiles!.push("apps/web/index.tsx");
+
+		bridge.submit(ws.id, "second turn");
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		const secondCall = runAgentLoop.mock.calls[1]![1] as { contextFiles?: string[] };
+
+		expect(secondCall.contextFiles).toBe(firstCall.contextFiles);
+		expect(secondCall.contextFiles).toContain("apps/web/index.tsx");
+	});
+
 	it("/fork creates and returns a new session id, and refuses a running session", async () => {
 		const bridge = createServerBridge(makeResult());
 		const source = bridge.createSession();
