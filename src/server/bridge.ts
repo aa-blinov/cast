@@ -60,7 +60,14 @@ import {
 	resolveSkillsForCwd,
 } from "../core/project.ts";
 import { getModelsCache, setModelsCache } from "../core/readline.ts";
-import { formatRuleInvocation } from "../core/rules.ts";
+import {
+	formatRuleInvocation,
+	formatRulesForTurn,
+	matchAutoRules,
+	type Rule,
+	selectMentionedRules,
+	unionStickyRules,
+} from "../core/rules.ts";
 import { type AgentRunner, createAgentRunner } from "../core/runner.ts";
 import {
 	addUsage,
@@ -274,6 +281,13 @@ export interface WebAgentSession {
 	currentClientMessageId?: string;
 	/** Rebuilt whenever persona or model changes — see `computeSystemPrompt`. */
 	systemPrompt: string;
+	/** Directory rules with `applyMode: "auto"` that have latched on because a
+	 * file matching their globs entered context this session (Cursor-style
+	 * sticky rules — see rules.ts's matchAutoRules/unionStickyRules). Ephemeral
+	 * like activeStream: re-latches from scratch on the next turn if the
+	 * session is evicted and rehydrated, same as the standalone TUI's copy
+	 * (App.tsx) resets on process restart. */
+	activeAutoRules?: Rule[];
 	/** Ephemeral, like the TUI's `lastTurnUsage` (useAgentSession.ts) — not
 	 * persisted to disk, cleared implicitly by just being overwritten each
 	 * turn. Surfaced via /current. */
@@ -1650,6 +1664,30 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			subagentModelProvider: resolvedSubagentProvider,
 			cwd: ws.session.cwd ?? cwd,
 			systemPrompt: ws.systemPrompt,
+			// Web UI/daemon-backed equivalent of the standalone TUI's
+			// rebuildSystemPrompt (App.tsx) — same directoryRules catalog, same
+			// rules.ts functions, just reading/writing the per-session sticky set
+			// off `ws` instead of React state. Without this, `applyMode: "auto"`
+			// rules (glob-matched, sticky once latched) and @-mentioned rules
+			// never reach the model on this path — only always-apply rules
+			// (baked into ws.systemPrompt at session creation) did.
+			rebuildSystemPrompt: ({ userText, contextFiles: ctxFiles }) => {
+				const newAuto = matchAutoRules(directoryRules, ctxFiles);
+				const sticky = unionStickyRules(ws.activeAutoRules ?? [], newAuto);
+				ws.activeAutoRules = sticky;
+				const mentioned = selectMentionedRules(directoryRules, userText);
+				const rulesBlock = formatRulesForTurn(sticky, mentioned);
+				return buildSystemPrompt(
+					persona,
+					contextFilesSuffix,
+					rulesBlock,
+					rulesLazySuffix,
+					formatSkillsForPrompt(skills, persona.skills),
+					formatMcpForPrompt(mcpResult, persona.mcp),
+					ws.session.cwd ?? cwd,
+					{ model: runModel, reasoningLevel: config.reasoningLevel, reasoningMeta, mode: ws.session.mode },
+				);
+			},
 			memory: { sessionId: ws.session.id },
 			automaticMemoryMaintenance,
 			automaticMemoryMessages,

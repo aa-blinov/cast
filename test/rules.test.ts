@@ -638,41 +638,63 @@ describe("rules", () => {
 		}
 
 		it("returns empty string when nothing applies", () => {
-			expect(formatRulesForTurn([], [], [])).toBe("");
+			expect(formatRulesForTurn([], [])).toBe("");
 		});
 
 		it("always-apply rules stay in the prompt once an auto rule latches (regression)", () => {
 			const rules = catalog();
+			// A real caller always computes sticky via matchAutoRules first — that's
+			// what scope-gates the always rule in; formatRulesForTurn just renders
+			// whatever sticky set it's handed.
+			const sticky = matchAutoRules(rules, []);
 			const auto = rules.filter((r) => r.applyMode === "auto");
-			// Sticky now holds the auto rule — the always rule must NOT drop out.
-			const formatted = formatRulesForTurn(rules, auto, []);
+			const stickyWithAuto = unionStickyRules(sticky, matchAutoRules(rules, ["any/file.ts"]));
+			const formatted = formatRulesForTurn(stickyWithAuto, []);
 			expect(formatted).toContain("ALWAYS body.");
 			expect(formatted).toContain("AUTO body.");
+			expect(auto).toHaveLength(1);
 			// Single combined block, not two separate <rules> wrappers.
 			expect(formatted.match(/<rules>/g)).toHaveLength(1);
 		});
 
-		it("includes always-apply rules even with no sticky or mentioned rules", () => {
+		it("includes an unscoped always-apply rule from turn one, before any file enters context", () => {
 			const rules = catalog();
-			expect(formatRulesForTurn(rules, [], [])).toContain("ALWAYS body.");
+			const sticky = matchAutoRules(rules, []);
+			expect(formatRulesForTurn(sticky, [])).toContain("ALWAYS body.");
 		});
 
 		it("injects a manually @-mentioned rule alongside always rules", () => {
 			const rules = catalog();
+			const sticky = matchAutoRules(rules, []);
 			const manual = rules.filter((r) => r.applyMode === "manual");
-			const formatted = formatRulesForTurn(rules, [], manual);
+			const formatted = formatRulesForTurn(sticky, manual);
 			expect(formatted).toContain("ALWAYS body.");
 			expect(formatted).toContain("MANUAL body.");
 		});
 
-		it("orders always first, then sticky, then mentioned, deduped", () => {
+		it("orders sticky first, then mentioned, deduped", () => {
 			const rules = catalog();
-			const auto = rules.filter((r) => r.applyMode === "auto");
+			const sticky = unionStickyRules(matchAutoRules(rules, []), matchAutoRules(rules, ["any/file.ts"]));
 			const manual = rules.filter((r) => r.applyMode === "manual");
-			const formatted = formatRulesForTurn(rules, [...auto, ...manual], manual);
+			const formatted = formatRulesForTurn(sticky, manual);
 			expect(formatted.indexOf("ALWAYS body.")).toBeLessThan(formatted.indexOf("AUTO body."));
 			expect(formatted.indexOf("AUTO body.")).toBeLessThan(formatted.indexOf("MANUAL body."));
 			expect(formatted.split("MANUAL body.")).toHaveLength(2); // once despite being in both lists
+		});
+
+		it("does not include a nested always-apply rule until a file from its own subtree enters context (Finding B regression)", () => {
+			const projectRoot = join(fakeHome, "nested-cast");
+			const nestedRulesDir = join(projectRoot, "apps", "web", ".cast", "rules");
+			mkdirSync(nestedRulesDir, { recursive: true });
+			writeFileSync(join(nestedRulesDir, "web-style.md"), "---\nalwaysApply: true\n---\nWeb-only body.");
+			const nested = loadDirectoryRules({ projectCwd: projectRoot });
+			expect(nested.find((r) => r.name === "web-style")?.scope).toBe("apps/web");
+
+			const outsideScope = formatRulesForTurn(matchAutoRules(nested, ["apps/api/main.ts"]), []);
+			expect(outsideScope).not.toContain("Web-only body.");
+
+			const insideScope = formatRulesForTurn(matchAutoRules(nested, ["apps/web/index.tsx"]), []);
+			expect(insideScope).toContain("Web-only body.");
 		});
 	});
 

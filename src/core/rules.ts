@@ -484,14 +484,16 @@ function renderRuleBodies(rules: Rule[]): string[] {
 }
 
 /**
- * Build the complete `<rules>` section for a single turn: every always-apply
- * rule (Cursor: "always included") followed by the sticky auto-attached rules
- * and any @-mentioned rules, deduplicated by id into one block. This is the
- * authoritative per-turn formatter — unlike concatenating the always-apply and
- * active blocks separately, it guarantees always-apply rules never drop out
- * once an auto/mentioned rule activates. Returns "" when nothing applies.
+ * Build the complete `<rules>` section for a single turn: the sticky set
+ * (auto-attached rules, plus always-apply rules once their scope is active —
+ * see matchAutoRules, which scope-gates both the same way and is what feeds
+ * `sticky`) followed by any @-mentioned rules, deduplicated by id. A
+ * root-scope (unscoped) always-apply rule is active from the very first
+ * turn regardless of contextFiles, since `ruleScopeActive("", ...)` is
+ * unconditionally true — so it reaches `sticky` on turn one and never drops
+ * out. Returns "" when nothing applies.
  */
-export function formatRulesForTurn(catalog: Rule[], sticky: Rule[], mentioned: Rule[]): string {
+export function formatRulesForTurn(sticky: Rule[], mentioned: Rule[]): string {
 	const seen = new Set<string>();
 	const ordered: Rule[] = [];
 	const add = (r: Rule) => {
@@ -499,10 +501,8 @@ export function formatRulesForTurn(catalog: Rule[], sticky: Rule[], mentioned: R
 		seen.add(r.id);
 		ordered.push(r);
 	};
-	// Always rules first, in catalog order, then sticky auto, then mentioned.
-	for (const r of catalog) if (r.applyMode === "always") add(r);
-	for (const r of sticky) if (r.applyMode !== "always") add(r);
-	for (const r of mentioned) if (r.applyMode !== "always") add(r);
+	for (const r of sticky) add(r);
+	for (const r of mentioned) add(r);
 
 	const parts = renderRuleBodies(ordered);
 	if (parts.length === 0) return "";

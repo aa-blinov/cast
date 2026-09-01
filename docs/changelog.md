@@ -2,6 +2,13 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.29
+
+### Fixed
+
+- **Rules:** `applyMode: "auto"` directory rules (glob-matched, latching once a matching file enters context — Cursor-style sticky rules) and `@name`-mentioned rules were fully implemented and tested but never wired into the web UI / daemon-backed session path — only the standalone TUI (no-daemon mode) actually used them. A rule authored with `globs` never reached the model through the web UI or a daemon-backed TUI session, silently.
+- **Rules:** a nested `alwaysApply: true` rule (e.g. `apps/web/.cast/rules/style.md`) was supposed to only apply once a session touches a file under its own subtree, but the per-turn rules formatter injected every always-apply rule from the whole project into every session regardless of scope — contradicting its own documented behavior. Fixed at the root: the formatter now renders whatever the (already scope-gated) sticky rule set contains, instead of independently re-scanning the full catalog.
+
 ## 0.22.28
 
 ### Fixed
