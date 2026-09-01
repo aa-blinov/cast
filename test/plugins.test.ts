@@ -1,4 +1,6 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -198,6 +200,101 @@ describe("ensureDefaultMarketplaces", () => {
 		expect(second.added).toEqual([]);
 		expect(second.errors).toEqual([]);
 		expect(listKnownMarketplaces(p)).toHaveLength(1);
+	});
+});
+
+// A git-sourced plugin (not a local "./" path) so materializePlugin routes
+// through cloneOrUpdate — that's the function under test in both cases
+// below, not the local-directory copy path the other describe blocks use.
+function writeGitPlugin(remoteDir: string): void {
+	mkdirSync(remoteDir, { recursive: true });
+	writeFileSync(join(remoteDir, "marker.txt"), "v1", "utf-8");
+	execFileSync("git", ["init", "-q", "-b", "main"], { cwd: remoteDir });
+	execFileSync("git", ["config", "user.email", "t@t.com"], { cwd: remoteDir });
+	execFileSync("git", ["config", "user.name", "t"], { cwd: remoteDir });
+	execFileSync("git", ["add", "marker.txt"], { cwd: remoteDir });
+	execFileSync("git", ["commit", "-q", "-m", "init"], { cwd: remoteDir });
+}
+
+function writeGitMarketplace(mpDir: string, remoteDir: string): void {
+	mkdirSync(join(mpDir, ".cast-plugin"), { recursive: true });
+	writeFileSync(
+		join(mpDir, ".cast-plugin", "marketplace.json"),
+		JSON.stringify(
+			{
+				name: "gitmp",
+				description: "Git-sourced test marketplace",
+				plugins: [{ name: "gitplugin", description: "Git plugin", source: remoteDir }],
+			},
+			null,
+			2,
+		),
+		"utf-8",
+	);
+}
+
+describe("cloneOrUpdate (via a git-sourced plugin install)", () => {
+	// Deliberately outside the cast repo (unlike TEST_DIR above, which lives
+	// under test/): corrupting a nested repo's .git/HEAD makes git fall back
+	// to discovering the *enclosing* repo instead of failing — inside the
+	// cast checkout that's the real cast repo, and `git fetch` there quietly
+	// succeeds against its real origin instead of erroring the way a
+	// genuinely broken standalone clone would, defeating the whole point of
+	// the self-heal test below.
+	let gitTestDir: string;
+
+	beforeEach(() => {
+		gitTestDir = mkdtempSync(join(tmpdir(), "cast-plugins-git-test-"));
+	});
+
+	afterEach(() => {
+		rmSync(gitTestDir, { recursive: true, force: true });
+	});
+
+	it("self-heals from a broken clone (.git present but unusable) instead of failing forever", async () => {
+		const remoteDir = join(gitTestDir, "git-remote-broken");
+		writeGitPlugin(remoteDir);
+		const mpDir = join(gitTestDir, "git-mp-broken");
+		writeGitMarketplace(mpDir, remoteDir);
+		const p: PluginsPaths = { root: join(gitTestDir, "plugins-home") };
+		await addMarketplace(mpDir, p);
+
+		const first = await installPlugin("gitplugin@gitmp", {}, p);
+		expect(existsSync(join(first.root, "marker.txt"))).toBe(true);
+
+		// Simulate a clone that was interrupted after git created .git/ but
+		// before it finished populating it — objects are unreadable, so any
+		// fetch/pull against this checkout fails, but .git/ itself exists.
+		rmSync(join(first.root, ".git", "objects"), { recursive: true, force: true });
+		rmSync(join(first.root, ".git", "refs"), { recursive: true, force: true });
+		writeFileSync(join(first.root, ".git", "HEAD"), "garbage, not a real ref\n", "utf-8");
+		rmSync(join(first.root, "marker.txt"), { force: true });
+
+		// A second install must recover, not fail forever against the broken repo.
+		const second = await installPlugin("gitplugin@gitmp", {}, p);
+		expect(existsSync(join(second.root, "marker.txt"))).toBe(true);
+		expect(readFileSync(join(second.root, "marker.txt"), "utf-8")).toBe("v1");
+	});
+
+	it("serializes two concurrent installs into the same destination instead of racing two git clones", async () => {
+		const remoteDir = join(gitTestDir, "git-remote-concurrent");
+		writeGitPlugin(remoteDir);
+		const mpDir = join(gitTestDir, "git-mp-concurrent");
+		writeGitMarketplace(mpDir, remoteDir);
+		const p: PluginsPaths = { root: join(gitTestDir, "plugins-home") };
+		await addMarketplace(mpDir, p);
+
+		const [a, b] = await Promise.all([
+			installPlugin("gitplugin@gitmp", {}, p),
+			installPlugin("gitplugin@gitmp", {}, p),
+		]);
+
+		expect(a.root).toBe(b.root);
+		expect(existsSync(join(a.root, "marker.txt"))).toBe(true);
+		expect(readFileSync(join(a.root, "marker.txt"), "utf-8")).toBe("v1");
+		// A genuinely valid, uncorrupted clone — not a directory left half-full
+		// by two `git clone`s writing into it at once.
+		expect(() => execFileSync("git", ["rev-parse", "HEAD"], { cwd: a.root })).not.toThrow();
 	});
 });
 

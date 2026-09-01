@@ -383,17 +383,7 @@ async function runGitAsync(args: string[], cwd?: string): Promise<string> {
 	}
 }
 
-async function cloneOrUpdate(url: string, dest: string, sha?: string): Promise<void> {
-	mkdirSync(join(dest, ".."), { recursive: true });
-	if (existsSync(join(dest, ".git"))) {
-		await runGitAsync(["fetch", "--depth", "1", "origin", sha ?? "HEAD"], dest);
-		if (sha) {
-			await runGitAsync(["checkout", "--force", sha], dest);
-		} else {
-			await runGitAsync(["pull", "--ff-only"], dest);
-		}
-		return;
-	}
+async function freshClone(url: string, dest: string, sha?: string): Promise<void> {
 	if (existsSync(dest)) rmSync(dest, { recursive: true, force: true });
 	if (sha) {
 		await runGitAsync(["clone", "--filter=blob:none", url, dest]);
@@ -402,6 +392,56 @@ async function cloneOrUpdate(url: string, dest: string, sha?: string): Promise<v
 	} else {
 		await runGitAsync(["clone", "--depth", "1", url, dest]);
 	}
+}
+
+// Two calls targeting the same `dest` (two tabs both installing the same
+// not-yet-known marketplace, a reload racing an install) would otherwise run
+// two concurrent `git clone`s into the same directory — a write-write
+// collision that leaves a corrupt repo neither call intended. Serializing per
+// destination lets the second call see the first's finished (or
+// self-healed) result instead of racing it.
+const cloneQueues = new Map<string, Promise<unknown>>();
+
+async function cloneOrUpdate(url: string, dest: string, sha?: string): Promise<void> {
+	const key = resolve(dest);
+	const prior = cloneQueues.get(key) ?? Promise.resolve();
+	const run = prior.then(
+		() => cloneOrUpdateUnlocked(url, dest, sha),
+		() => cloneOrUpdateUnlocked(url, dest, sha),
+	);
+	cloneQueues.set(
+		key,
+		run.then(
+			() => undefined,
+			() => undefined,
+		),
+	);
+	return run;
+}
+
+async function cloneOrUpdateUnlocked(url: string, dest: string, sha?: string): Promise<void> {
+	mkdirSync(join(dest, ".."), { recursive: true });
+	if (existsSync(join(dest, ".git"))) {
+		try {
+			await runGitAsync(["fetch", "--depth", "1", "origin", sha ?? "HEAD"], dest);
+			if (sha) {
+				await runGitAsync(["checkout", "--force", sha], dest);
+			} else {
+				await runGitAsync(["pull", "--ff-only"], dest);
+			}
+			return;
+		} catch {
+			// A .git directory that exists but can't fetch/checkout/pull is
+			// most often a clone that was interrupted (process killed,
+			// network drop) partway through — git creates .git/ early and
+			// fills it in progressively, so its mere presence doesn't mean
+			// the repo is usable. There's nothing to salvage from a broken
+			// clone; fall through to the same fresh-clone path a first
+			// install takes, rather than leaving the marketplace permanently
+			// stuck failing every subsequent update.
+		}
+	}
+	await freshClone(url, dest, sha);
 }
 
 function copyLocalPlugin(src: string, dest: string): void {
