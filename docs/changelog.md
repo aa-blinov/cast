@@ -2,6 +2,14 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.31
+
+### Fixed
+
+- **Compaction:** the web UI / daemon-backed path never seeded `lastPromptTokens` into a fresh agent run, so the automatic-compaction check was blind for every turn after a session went idle and a new one started — a large session could silently skip auto-compaction turn after turn instead of proactively summarizing, risking a raw "context exceeded" error from the provider instead. Now seeded from the session's own persisted token count on every run.
+- **Rules:** the nested-AGENTS.md/CLAUDE.md fix in 0.22.30 tracked touched files per `runAgentLoop` call instead of per session — a match found in one submit could drop back out of the prompt on the very next submit once the session went idle in between. Now persisted on the session like the sticky auto-rules already were.
+- Overnight/long-running web sessions never got the day-rollover reminder (`<system-reminder>` noting the calendar date advanced) that the standalone TUI already had — wired the same way now.
+
 ## 0.22.30
 
 ### Fixed

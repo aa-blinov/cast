@@ -16,6 +16,7 @@ import type { AgentActorNotification } from "../core/actors.ts";
 import { backupFileForCheckpoint, createCheckpoint, restoreCheckpoint } from "../core/checkpoint.ts";
 import { fetchModels, type ModelInfo, probeProvider, resolveProvider } from "../core/config.ts";
 import { formatContextFilesForPrompt, resolveNestedContextFiles } from "../core/context-files.ts";
+import { initialAnnouncedLocalDate } from "../core/date-rollover-reminder.ts";
 import { hasHooks, runHooksForEvent } from "../core/hooks.ts";
 import { createClient, type Message, streamAndCollect } from "../core/llm.ts";
 import { type AgentEvent, compactSessionMessages, runAgentLoop, runMemoryMaintenanceAgent } from "../core/loop.ts";
@@ -289,6 +290,13 @@ export interface WebAgentSession {
 	 * session is evicted and rehydrated, same as the standalone TUI's copy
 	 * (App.tsx) resets on process restart. */
 	activeAutoRules?: Rule[];
+	/** Files touched (read/write/edit) this session, relative to cwd — grown
+	 * in place by loop.ts across turns AND across separate runAgentLoop
+	 * invocations (passed by reference, same array every call) so a nested
+	 * AGENTS.md/CLAUDE.md rule stays matched once its subtree has been
+	 * touched, the same way the standalone TUI's `contextFilesRef` does.
+	 * Ephemeral like activeAutoRules. */
+	contextFiles?: string[];
 	/** Ephemeral, like the TUI's `lastTurnUsage` (useAgentSession.ts) — not
 	 * persisted to disk, cleared implicitly by just being overwritten each
 	 * turn. Surfaced via /current. */
@@ -1658,6 +1666,10 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		const runProviderName =
 			providers.find((p) => p.url === effectiveBaseURL && p.apiKey === effectiveApiKey)?.name ?? "default";
 
+		if (!ws.session.lastAnnouncedLocalDate) {
+			ws.session.lastAnnouncedLocalDate = initialAnnouncedLocalDate(ws.session);
+		}
+		ws.contextFiles ??= [];
 		runAgentLoop(ws.session.messages, {
 			config: runConfig,
 			model: runModel,
@@ -1665,6 +1677,30 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			subagentModelProvider: resolvedSubagentProvider,
 			cwd: ws.session.cwd ?? cwd,
 			systemPrompt: ws.systemPrompt,
+			// Seeded from the persisted column so the auto-compaction check
+			// (shouldCompact) isn't blind on the first turn of every fresh
+			// runAgentLoop call — bridge.ts calls it fresh per idle→active
+			// transition, not once for the session's whole lifetime, so without
+			// this a large session could go turn after turn with no compaction
+			// trigger until the provider hard-errors with "context exceeded".
+			lastPromptTokens: ws.session.lastPromptTokens,
+			// Same session-backed getter/setter shape as the TUI's
+			// (useAgentSession.ts) — writes land straight on ws.session, which
+			// gets persisted the same way any other session field does.
+			announcedLocalDate: {
+				get value() {
+					return ws.session.lastAnnouncedLocalDate!;
+				},
+				set value(next: string) {
+					ws.session.lastAnnouncedLocalDate = next;
+				},
+			},
+			// The array passed by reference, not a fresh literal — loop.ts grows
+			// it in place (extractContextFile), so it must be the SAME array
+			// across separate runAgentLoop calls for a nested AGENTS.md/CLAUDE.md
+			// match or a sticky auto-rule glob match to survive the session going
+			// idle and a later submit starting a fresh call.
+			contextFiles: ws.contextFiles,
 			// Web UI/daemon-backed equivalent of the standalone TUI's
 			// rebuildSystemPrompt (App.tsx) — same directoryRules catalog, same
 			// rules.ts/context-files.ts functions, just reading/writing the
