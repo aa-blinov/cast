@@ -2,6 +2,13 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.26
+
+### Fixed
+
+- **Worktree:** `/worktree remove <name>` had nothing stopping it from removing a worktree another live session (a second tab, or another session entirely) still had as its cwd — including mid-turn, while a tool was actively reading/writing inside it. `git worktree remove --force` bypasses git's own uncommitted-changes guard, so this could force-delete real uncommitted work out from under a running turn. Now refuses with a clear error when any live session still points at that worktree.
+- **Usage/cost tracking:** aborting a turn mid-stream could silently drop real, provider-billed token/cost data — a provider can send a terminal usage chunk just before the connection actually tears down on abort, and that already-arrived usage was thrown away instead of recorded, under-reporting cost for any turn aborted after usage info arrived but before the stream's natural end.
+
 ## 0.22.25
 
 ### Fixed

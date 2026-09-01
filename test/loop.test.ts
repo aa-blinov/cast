@@ -1098,6 +1098,43 @@ describe("runAgentLoop — abort vs. error", () => {
 		expect(events.some((e) => e.type === "interrupt_reminder")).toBe(true);
 	});
 
+	it("still records usage/cost from a mid-stream abort when the provider had already sent a usage chunk", async () => {
+		const controller = new AbortController();
+		const events: AgentEvent[] = [];
+
+		// llm.ts assigns `usage` from any chunk that carries it, not only one
+		// tagged with a finish reason — a provider can send it just before the
+		// connection actually tears down on abort, so `completion.usage` can be
+		// populated even though `interrupted` is also true. That's real,
+		// provider-billed cost; dropping it under-reports every aborted turn
+		// where the provider happened to send usage first.
+		vi.mocked(streamAndCollect).mockImplementationOnce(async () => {
+			controller.abort();
+			return {
+				content: "partial answer",
+				thinking: "",
+				finishReason: "stop",
+				interrupted: true,
+				usage: { promptTokens: 100, completionTokens: 20, totalTokens: 120, cost: 0.01 },
+			};
+		});
+
+		await runAgentLoop([{ role: "user", content: "hi" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			signal: controller.signal,
+			onEvent: (event) => events.push(event),
+		});
+
+		const usageEvent = events.find((e) => e.type === "usage");
+		expect(usageEvent).toMatchObject({
+			usage: { promptTokens: 100, completionTokens: 20, totalTokens: 120, cost: 0.01 },
+		});
+		expect(events.find((e) => e.type === "end")).toEqual({ type: "end", reason: "aborted" });
+	});
+
 	it("appends an interrupt system-reminder into messages on mid-stream abort", async () => {
 		const controller = new AbortController();
 		vi.mocked(streamAndCollect).mockImplementationOnce(async () => {

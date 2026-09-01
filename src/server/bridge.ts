@@ -4093,6 +4093,20 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				const targetName = rmMatch[1]!.trim();
 				if (!targetName) return { ok: false, error: "Usage: /worktree remove <name>" };
 				const target = listWorktrees(sessionCwd).find((worktree) => worktree.name === targetName);
+				// removeWorktreeBySlug runs `git worktree remove --force`, which
+				// bypasses git's own uncommitted-changes guard — nothing else
+				// stops it from deleting the directory a live session (this one or
+				// another tab/session) still has as its cwd, including mid-turn
+				// while a tool is actively reading/writing inside it.
+				const inUseBy = target
+					? [...sessions.values()].find((other) => other.session.cwd === target.path)
+					: undefined;
+				if (inUseBy) {
+					return {
+						ok: false,
+						error: `Worktree "${targetName}" is still in use by another session${inUseBy.status === "running" ? " (currently running)" : ""} — close or switch that session away from it first`,
+					};
+				}
 				const res = await removeWorktreeBySlug(targetName, sessionCwd);
 				if (res.ok) {
 					void runHooksForEvent(resolveHooksForCwd(sessionCwd, projectTrusted), {
