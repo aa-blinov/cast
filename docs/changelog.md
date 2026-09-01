@@ -2,6 +2,13 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.25
+
+### Fixed
+
+- **MCP:** two `/mcp reconnect|enable|disable|uninstall` (or `/reload`) calls in flight at once — two browser tabs, or a fast double-click — each closed and reopened the whole MCP connection set independently; whichever finished last simply overwrote the other's result, leaking the other's freshly spawned MCP server subprocesses with nothing left referencing them to close them. These now serialize, so a second call only starts once the first has fully closed/reopened.
+- **Settings:** `/mcp`, `/hooks`, and `/skills` enable/disable now read the current settings from inside the same lock they write under, instead of reading beforehand — hardening against the same class of lost-update race for any future code path that adds an `await` between the read and the write.
+
 ## 0.22.24
 
 ### Fixed

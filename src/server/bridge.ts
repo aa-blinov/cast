@@ -813,6 +813,25 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	// change out to every live session's system prompt (see
 	// recomputeAllSystemPrompts below), not just the one that issued the command.
 	let mcpResult = result.mcpResult;
+	// /reload, /mcp reconnect|enable|disable|uninstall each close the current
+	// MCP connections and reassign `mcpResult` from a fresh
+	// resolveMcpForCwd() call — two of them running concurrently (e.g. two
+	// browser tabs, or a double-click) would both start their own fresh
+	// connection set from the same starting `mcpResult`, and whichever
+	// finishes last simply overwrites the other's — leaking its freshly
+	// spawned MCP server subprocesses with nothing left referencing them to
+	// close. Serializing through this queue means the second call only
+	// starts once the first has fully closed/reopened and updated
+	// `mcpResult`, so there's never two live connection sets to leak between.
+	let mcpMutationQueue: Promise<unknown> = Promise.resolve();
+	function withMcpLock<T>(fn: () => Promise<T>): Promise<T> {
+		const run = mcpMutationQueue.then(fn, fn);
+		mcpMutationQueue = run.then(
+			() => undefined,
+			() => undefined,
+		);
+		return run;
+	}
 	let personas = result.personas;
 	let subagentModel = result.subagentModel;
 	let subagentModelProvider = result.subagentModelProvider;
@@ -3097,11 +3116,12 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				const id = rest.join(" ").trim();
 				if (!id) return { ok: false, error: `Usage: /hooks ${verb} <id>` };
 				if (!entries.some((e) => e.id === id)) return { ok: false, error: `No hook with id "${id}"` };
-				const settings = loadSettings();
-				const disabled = new Set(settings.disabledHooks ?? []);
-				if (verb === "disable") disabled.add(id);
-				else disabled.delete(id);
-				updateSettings({ disabledHooks: [...disabled] });
+				updateSettings((current) => {
+					const disabled = new Set(current.disabledHooks ?? []);
+					if (verb === "disable") disabled.add(id);
+					else disabled.delete(id);
+					return { disabledHooks: [...disabled] };
+				});
 				return { ok: true, result: `Hook ${id} ${verb}d` };
 			}
 			return { ok: false, error: `Unknown /hooks ${verb}` };
@@ -3414,8 +3434,10 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				);
 				const newNames = freshMcp.allServerNames.slice().sort().join(",");
 				if (prevNames !== newNames) {
-					await closeMcpConnections(mcpResult.connections);
-					mcpResult = await resolveMcpForCwd(projectDeps, sessionCwd, projectTrusted, disabledMcp);
+					await withMcpLock(async () => {
+						await closeMcpConnections(mcpResult.connections);
+						mcpResult = await resolveMcpForCwd(projectDeps, sessionCwd, projectTrusted, disabledMcp);
+					});
 				}
 				recomputeAllSystemPrompts();
 				return { ok: true, result: "Reloaded skills, rules, MCP, and personas" };
@@ -3448,15 +3470,17 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				if (!rest) return { ok: false, error: "Usage: /mcp reconnect <name>" };
 				if (!mcpResult.allServerNames.includes(rest)) return { ok: false, error: `Unknown MCP server: ${rest}` };
 				try {
-					await closeMcpConnections(mcpResult.connections);
-					mcpResult = await resolveMcpForCwd(
-						projectDeps,
-						sessionCwd,
-						projectTrusted,
-						loadSettings().disabledMcpServers ?? [],
-					);
-					recomputeAllSystemPrompts();
-					const connected = mcpResult.connections.some((c) => c.serverName === rest);
+					const connected = await withMcpLock(async () => {
+						await closeMcpConnections(mcpResult.connections);
+						mcpResult = await resolveMcpForCwd(
+							projectDeps,
+							sessionCwd,
+							projectTrusted,
+							loadSettings().disabledMcpServers ?? [],
+						);
+						recomputeAllSystemPrompts();
+						return mcpResult.connections.some((c) => c.serverName === rest);
+					});
 					return { ok: true, result: `MCP server "${rest}" ${connected ? "reconnected" : "reconnect failed"}` };
 				} catch (err) {
 					return { ok: false, error: `Reconnect failed: ${err instanceof Error ? err.message : String(err)}` };
@@ -3464,15 +3488,23 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			}
 			if (sub === "enable" || sub === "disable") {
 				if (!rest) return { ok: false, error: `Usage: /mcp ${sub} <name>` };
-				const settings = loadSettings();
-				const disabled = new Set(settings.disabledMcpServers ?? []);
-				if (sub === "disable") disabled.add(rest);
-				else disabled.delete(rest);
-				updateSettings({ disabledMcpServers: [...disabled] });
+				updateSettings((current) => {
+					const disabled = new Set(current.disabledMcpServers ?? []);
+					if (sub === "disable") disabled.add(rest);
+					else disabled.delete(rest);
+					return { disabledMcpServers: [...disabled] };
+				});
 				try {
-					await closeMcpConnections(mcpResult.connections);
-					mcpResult = await resolveMcpForCwd(projectDeps, sessionCwd, projectTrusted, [...disabled]);
-					recomputeAllSystemPrompts();
+					await withMcpLock(async () => {
+						await closeMcpConnections(mcpResult.connections);
+						mcpResult = await resolveMcpForCwd(
+							projectDeps,
+							sessionCwd,
+							projectTrusted,
+							loadSettings().disabledMcpServers ?? [],
+						);
+						recomputeAllSystemPrompts();
+					});
 					return { ok: true, result: `MCP server "${rest}" ${sub}d` };
 				} catch (err) {
 					return { ok: false, error: `Reconnect failed: ${err instanceof Error ? err.message : String(err)}` };
@@ -3483,14 +3515,16 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				const removed = removeMcpServerFromDisk(rest, sessionCwd, projectTrusted);
 				if (!removed) return { ok: false, error: `Unknown or already-removed MCP server: ${rest}` };
 				try {
-					await closeMcpConnections(mcpResult.connections);
-					mcpResult = await resolveMcpForCwd(
-						projectDeps,
-						sessionCwd,
-						projectTrusted,
-						loadSettings().disabledMcpServers ?? [],
-					);
-					recomputeAllSystemPrompts();
+					await withMcpLock(async () => {
+						await closeMcpConnections(mcpResult.connections);
+						mcpResult = await resolveMcpForCwd(
+							projectDeps,
+							sessionCwd,
+							projectTrusted,
+							loadSettings().disabledMcpServers ?? [],
+						);
+						recomputeAllSystemPrompts();
+					});
 					return { ok: true, result: `Uninstalled MCP server "${rest}" (${removed.origin})` };
 				} catch (err) {
 					return { ok: false, error: `Reconnect failed: ${err instanceof Error ? err.message : String(err)}` };
@@ -3536,11 +3570,12 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			}
 			if (sub === "enable" || sub === "disable") {
 				if (!rest) return { ok: false, error: `Usage: /skills ${sub} <name>` };
-				const settings = loadSettings();
-				const disabled = new Set(settings.disabledSkills ?? []);
-				if (sub === "disable") disabled.add(rest);
-				else disabled.delete(rest);
-				updateSettings({ disabledSkills: [...disabled] });
+				updateSettings((current) => {
+					const disabled = new Set(current.disabledSkills ?? []);
+					if (sub === "disable") disabled.add(rest);
+					else disabled.delete(rest);
+					return { disabledSkills: [...disabled] };
+				});
 				const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
 				skills = skillsResult.skills;
 				recomputeAllSystemPrompts();
