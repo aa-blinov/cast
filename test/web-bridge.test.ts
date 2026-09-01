@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
 import type { McpSetupResult } from "../src/core/mcp.ts";
 import type { Persona } from "../src/core/personas.ts";
+import type { Rule } from "../src/core/rules.ts";
 import { createAgentRunner } from "../src/core/runner.ts";
 import { createSession, getFullHistory, loadSession, saveSession } from "../src/core/session.ts";
 import type { StartupResult } from "../src/core/startup.ts";
@@ -1206,6 +1207,102 @@ describe("web bridge", () => {
 		releaseFirst();
 		await Promise.all([first, second]);
 		expect(calls).toBe(2);
+	});
+
+	it("latches an auto-mode directory rule once a matching file enters context, and keeps it sticky next turn", async () => {
+		const rulePath = join(fakeHome, "python-style.md");
+		writeFileSync(
+			rulePath,
+			[
+				"---",
+				"name: python-style",
+				"description: Python conventions",
+				"globs: ['**/*.py']",
+				"---",
+				"",
+				"Use type hints on every function.",
+			].join("\n"),
+			"utf-8",
+		);
+		const autoRule: Rule = {
+			name: "python-style",
+			id: "python-style",
+			description: "Python conventions",
+			filePath: rulePath,
+			baseDir: fakeHome,
+			source: "project",
+			scope: "",
+			alwaysApply: false,
+			globs: ["**/*.py"],
+			applyMode: "auto",
+		};
+
+		const bridge = createServerBridge(makeResult({ directoryRules: [autoRule] }));
+		const ws = bridge.createSession();
+		runAgentLoop.mockImplementation(async (messages: unknown) => messages);
+
+		bridge.submit(ws.id, "look at main.py");
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		const firstCall = runAgentLoop.mock.calls[0]![1] as {
+			rebuildSystemPrompt?: (ctx: { userText: string; contextFiles: string[] }) => string;
+		};
+		const promptWithoutMatch = firstCall.rebuildSystemPrompt!({ userText: "hi", contextFiles: [] });
+		expect(promptWithoutMatch).not.toContain("Use type hints on every function.");
+
+		const promptAfterMatch = firstCall.rebuildSystemPrompt!({ userText: "hi", contextFiles: ["src/main.py"] });
+		expect(promptAfterMatch).toContain("Use type hints on every function.");
+
+		// Sticky: a later turn with no .py file in its own contextFiles still
+		// carries the rule, because it latched onto the session earlier.
+		bridge.submit(ws.id, "now do something unrelated");
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		const secondCall = runAgentLoop.mock.calls[1]![1] as {
+			rebuildSystemPrompt?: (ctx: { userText: string; contextFiles: string[] }) => string;
+		};
+		const promptNextTurn = secondCall.rebuildSystemPrompt!({ userText: "unrelated", contextFiles: [] });
+		expect(promptNextTurn).toContain("Use type hints on every function.");
+	});
+
+	it("a nested always-apply rule only applies once a file from its subtree enters context", async () => {
+		const rulePath = join(fakeHome, "web-style.md");
+		writeFileSync(
+			rulePath,
+			["---", "name: web-style", "description: Web app conventions", "---", "", "Use Tailwind, not raw CSS."].join(
+				"\n",
+			),
+			"utf-8",
+		);
+		const nestedAlwaysRule: Rule = {
+			name: "web-style",
+			id: "apps/web/web-style",
+			description: "Web app conventions",
+			filePath: rulePath,
+			baseDir: fakeHome,
+			source: "project",
+			scope: "apps/web",
+			alwaysApply: true,
+			globs: [],
+			applyMode: "always",
+		};
+
+		const bridge = createServerBridge(makeResult({ directoryRules: [nestedAlwaysRule] }));
+		const ws = bridge.createSession();
+		runAgentLoop.mockImplementation(async (messages: unknown) => messages);
+
+		bridge.submit(ws.id, "touch something outside apps/web");
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		const call = runAgentLoop.mock.calls[0]![1] as {
+			rebuildSystemPrompt?: (ctx: { userText: string; contextFiles: string[] }) => string;
+		};
+
+		// A session that never touches apps/web must not get this rule at all —
+		// nested always-apply rules are scoped to their own subtree, not
+		// injected into every session in the repo.
+		const promptOutsideScope = call.rebuildSystemPrompt!({ userText: "x", contextFiles: ["apps/api/main.ts"] });
+		expect(promptOutsideScope).not.toContain("Use Tailwind, not raw CSS.");
+
+		const promptInsideScope = call.rebuildSystemPrompt!({ userText: "x", contextFiles: ["apps/web/index.tsx"] });
+		expect(promptInsideScope).toContain("Use Tailwind, not raw CSS.");
 	});
 
 	it("/fork creates and returns a new session id, and refuses a running session", async () => {

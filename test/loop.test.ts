@@ -1726,7 +1726,7 @@ describe("runAgentLoop — context files drive rule auto-attach", () => {
 			const prompts: string[] = [];
 			const rebuildSystemPrompt = ({ contextFiles }: { userText: string; contextFiles: string[] }) => {
 				sticky = unionStickyRules(sticky, matchAutoRules(catalog, contextFiles));
-				const p = `SYS${formatRulesForTurn(catalog, sticky, [])}`;
+				const p = `SYS${formatRulesForTurn(sticky, [])}`;
 				prompts.push(p);
 				return p;
 			};
@@ -1786,7 +1786,7 @@ describe("runAgentLoop — context files drive rule auto-attach", () => {
 			let sticky: ReturnType<typeof matchAutoRules> = [];
 			const rebuildSystemPrompt = ({ contextFiles }: { userText: string; contextFiles: string[] }) => {
 				sticky = unionStickyRules(sticky, matchAutoRules(catalog, contextFiles));
-				return `SYS${formatRulesForTurn(catalog, sticky, [])}`;
+				return `SYS${formatRulesForTurn(sticky, [])}`;
 			};
 
 			// Capture the system prompt (messages[0]) actually sent on each request.

@@ -312,7 +312,7 @@ export function App(props: AppProps): JSX.Element {
 			// 3. One block: always-apply + sticky auto + mentioned (deduped).
 			//    Must include always-apply rules unconditionally — see
 			//    formatRulesForTurn.
-			const rulesBlock = formatRulesForTurn(directoryRules, sticky, mentioned);
+			const rulesBlock = formatRulesForTurn(sticky, mentioned);
 
 			// 4. Nested AGENTS.md/CLAUDE.md for files touched this session — a
 			//    subdirectory instruction file attaches once a file from its
