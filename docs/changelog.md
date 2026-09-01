@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.24
+
+### Fixed
+
+- **Fork:** forking a session with an attachment left the fork referencing the *original* session's attachment file, not its own copy — an attached file's path is embedded as text in the message that referenced it, not looked up by session id at read time. Deleting the source session afterward (Delete → permanently) removed that file out from under the fork, silently breaking a reference that still looked valid in its transcript. The fork now gets its own copy of every attachment, with its history rewritten to point at that copy — a fork is now a fully independent snapshot, matching how its message history already behaved.
+
 ## 0.22.23
 
 ### Fixed
