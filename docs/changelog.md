@@ -2,6 +2,13 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.27
+
+### Fixed
+
+- **Plugins:** a plugin's git clone getting interrupted (process killed, network drop) left a `.git` directory that existed but couldn't be fetched or pulled from — every later install attempt hit the same broken repo and failed forever, with no way to recover short of manually deleting the directory. Install now falls back to a fresh clone when updating an existing checkout fails.
+- **Plugins:** two installs targeting the same not-yet-cloned plugin at once (two tabs, a marketplace reload racing an install) could run two concurrent `git clone`s into the same destination, corrupting it. These now serialize per destination.
+
 ## 0.22.26
 
 ### Fixed
