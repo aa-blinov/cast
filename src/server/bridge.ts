@@ -15,6 +15,7 @@ import { subscribeAgentActorNotifications } from "../core/actor-events.ts";
 import type { AgentActorNotification } from "../core/actors.ts";
 import { backupFileForCheckpoint, createCheckpoint, restoreCheckpoint } from "../core/checkpoint.ts";
 import { fetchModels, type ModelInfo, probeProvider, resolveProvider } from "../core/config.ts";
+import { formatContextFilesForPrompt, resolveNestedContextFiles } from "../core/context-files.ts";
 import { hasHooks, runHooksForEvent } from "../core/hooks.ts";
 import { createClient, type Message, streamAndCollect } from "../core/llm.ts";
 import { type AgentEvent, compactSessionMessages, runAgentLoop, runMemoryMaintenanceAgent } from "../core/loop.ts";
@@ -1666,25 +1667,31 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			systemPrompt: ws.systemPrompt,
 			// Web UI/daemon-backed equivalent of the standalone TUI's
 			// rebuildSystemPrompt (App.tsx) — same directoryRules catalog, same
-			// rules.ts functions, just reading/writing the per-session sticky set
-			// off `ws` instead of React state. Without this, `applyMode: "auto"`
-			// rules (glob-matched, sticky once latched) and @-mentioned rules
-			// never reach the model on this path — only always-apply rules
-			// (baked into ws.systemPrompt at session creation) did.
+			// rules.ts/context-files.ts functions, just reading/writing the
+			// per-session sticky set off `ws` instead of React state. Without
+			// this, `applyMode: "auto"` rules (glob-matched, sticky once
+			// latched), @-mentioned rules, and nested AGENTS.md/CLAUDE.md files
+			// never reach the model on this path — only always-apply rules and
+			// the cwd-root context file (baked into ws.systemPrompt at session
+			// creation) did.
 			rebuildSystemPrompt: ({ userText, contextFiles: ctxFiles }) => {
 				const newAuto = matchAutoRules(directoryRules, ctxFiles);
 				const sticky = unionStickyRules(ws.activeAutoRules ?? [], newAuto);
 				ws.activeAutoRules = sticky;
 				const mentioned = selectMentionedRules(directoryRules, userText);
 				const rulesBlock = formatRulesForTurn(sticky, mentioned);
+				const sessionCwd = ws.session.cwd ?? cwd;
+				const nestedContext = projectTrusted
+					? formatContextFilesForPrompt(resolveNestedContextFiles(sessionCwd, ctxFiles))
+					: "";
 				return buildSystemPrompt(
 					persona,
-					contextFilesSuffix,
+					contextFilesSuffix + nestedContext,
 					rulesBlock,
 					rulesLazySuffix,
 					formatSkillsForPrompt(skills, persona.skills),
 					formatMcpForPrompt(mcpResult, persona.mcp),
-					ws.session.cwd ?? cwd,
+					sessionCwd,
 					{ model: runModel, reasoningLevel: config.reasoningLevel, reasoningMeta, mode: ws.session.mode },
 				);
 			},

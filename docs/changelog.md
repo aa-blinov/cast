@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.30
+
+### Fixed
+
+- **Rules:** nested `AGENTS.md`/`CLAUDE.md` files (in a subdirectory the agent touches, not the project root) had the same gap as the directory-rules fix in 0.22.29 — implemented and wired into the standalone TUI, but never reaching the web UI or a daemon-backed TUI session. Now injected there too, per-turn, once a file from that subdirectory enters context.
+
 ## 0.22.29
 
 ### Fixed

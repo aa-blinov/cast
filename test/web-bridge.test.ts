@@ -1305,6 +1305,27 @@ describe("web bridge", () => {
 		expect(promptInsideScope).toContain("Use Tailwind, not raw CSS.");
 	});
 
+	it("injects a nested AGENTS.md only once a file from its subtree enters context", async () => {
+		mkdirSync(join(cwd, "apps", "web"), { recursive: true });
+		writeFileSync(join(cwd, "apps", "web", "AGENTS.md"), "Use Tailwind for this app, not raw CSS.");
+
+		const bridge = createServerBridge(makeResult({ persona: makePersona({ agentsMd: true }) }));
+		const ws = bridge.createSession();
+		runAgentLoop.mockImplementation(async (messages: unknown) => messages);
+
+		bridge.submit(ws.id, "touch something outside apps/web");
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		const call = runAgentLoop.mock.calls[0]![1] as {
+			rebuildSystemPrompt?: (ctx: { userText: string; contextFiles: string[] }) => string;
+		};
+
+		const promptOutsideScope = call.rebuildSystemPrompt!({ userText: "x", contextFiles: ["apps/api/main.ts"] });
+		expect(promptOutsideScope).not.toContain("Use Tailwind for this app, not raw CSS.");
+
+		const promptInsideScope = call.rebuildSystemPrompt!({ userText: "x", contextFiles: ["apps/web/index.tsx"] });
+		expect(promptInsideScope).toContain("Use Tailwind for this app, not raw CSS.");
+	});
+
 	it("/fork creates and returns a new session id, and refuses a running session", async () => {
 		const bridge = createServerBridge(makeResult());
 		const source = bridge.createSession();
