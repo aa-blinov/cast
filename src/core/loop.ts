@@ -2421,6 +2421,20 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				// signal.aborted) so a turn that *finished* right before a late Esc is
 				// committed normally instead of being mislabeled aborted.
 				if (completion.interrupted) {
+					// A provider can stream a terminal usage chunk before the abort
+					// actually tears down the connection (llm.ts assigns `usage` from
+					// any chunk that carries it, not only a finish-reason'd one) — if
+					// it did, that's real, provider-billed cost that must still be
+					// recorded, the same as the finishReason==="aborted" path below.
+					if (completion.usage) {
+						loopConfig.lastPromptTokens = completion.usage.promptTokens;
+						onEvent({
+							type: "usage",
+							usage: completion.usage,
+							generationMs: completion.generationMs,
+							ttftMs: completion.ttftMs,
+						});
+					}
 					persistPartialAssistant(completion.content, completion.thinking);
 					endAborted();
 					return;

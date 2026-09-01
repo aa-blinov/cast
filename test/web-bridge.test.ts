@@ -1405,6 +1405,32 @@ describe("web bridge", () => {
 		expect(existsSync(join(cwd, ".cast", "worktrees", "blocked"))).toBe(false);
 	});
 
+	it("refuses to remove a worktree another live session still has as its cwd", async () => {
+		execFileSync("git", ["init", "-b", "main"], { cwd, stdio: "ignore" });
+		execFileSync("git", ["config", "user.email", "test@example.com"], { cwd });
+		execFileSync("git", ["config", "user.name", "Cast Test"], { cwd });
+		writeFileSync(join(cwd, "README.md"), "test\n");
+		execFileSync("git", ["add", "README.md"], { cwd });
+		execFileSync("git", ["commit", "-m", "initial"], { cwd, stdio: "ignore" });
+		const bridge = createServerBridge(makeResult());
+		const owner = bridge.createSession();
+
+		const created = await bridge.executeCommand(owner.id, "/worktree in-use");
+		expect(created.ok).toBe(true);
+		const worktreePath = owner.session.cwd;
+		expect(worktreePath).not.toBe(cwd);
+		expect(existsSync(worktreePath!)).toBe(true);
+
+		// A second, unrelated session tries to remove the worktree the first
+		// session is still sitting in.
+		const remover = bridge.createSession();
+		const result = await bridge.executeCommand(remover.id, "/worktree remove in-use");
+
+		expect(result).toMatchObject({ ok: false });
+		expect(existsSync(worktreePath!)).toBe(true);
+		expect(owner.session.cwd).toBe(worktreePath);
+	});
+
 	it("blocks manual compaction before starting a model request", async () => {
 		mkdirSync(join(cwd, ".cast"));
 		writeFileSync(
