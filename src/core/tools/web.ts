@@ -19,6 +19,8 @@
  * output via htmlparser2/turndown instead of a third party's conversion.
  */
 
+import { lookup as dnsLookup } from "node:dns/promises";
+import { isIPv4 } from "node:net";
 import { Parser } from "htmlparser2";
 import TurndownService from "turndown";
 import { loadSettings } from "../settings.ts";
@@ -29,6 +31,9 @@ const DDG_RESULT_RE = /<div[^>]+class="result\s/;
 const DDG_LINK_RE = /<a[^>]+class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/;
 const DDG_SNIPPET_RE = /<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/;
 const JINA_TITLE_RE = /^Title: (.+)$/m;
+const IPV6_LINK_LOCAL_RE = /^fe[89ab][0-9a-f]:/;
+const IPV6_UNIQUE_LOCAL_RE = /^f[cd][0-9a-f]{2}:/;
+const IPV4_MAPPED_IPV6_RE = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/;
 
 // ============================================================================
 // Constants
@@ -598,6 +603,77 @@ function convertHTMLToMarkdown(html: string): string {
  * (images, other binaries) is rejected rather than silently mangled into
  * "text".
  */
+
+// Unlike the "jina" backend (which fetches from Jina's infrastructure, never
+// from this process), "local" makes this process itself issue the request —
+// the model can otherwise turn web_fetch into an SSRF primitive against the
+// cloud metadata endpoint, the loopback interface, or any other host on this
+// machine's private network. Checked before the initial request and again on
+// every redirect hop (redirect:"follow" would otherwise let a public URL
+// silently 302 into an internal address after the first check already
+// passed), and against every DNS-resolved address for a hostname, not just
+// the hostname string itself, so a public domain rebound to an internal IP
+// doesn't slip through.
+function isPrivateOrReservedIPv4(ip: string): boolean {
+	const parts = ip.split(".").map(Number);
+	if (parts.length !== 4 || parts.some((p) => !Number.isInteger(p) || p < 0 || p > 255)) return true;
+	const [a, b, c] = parts as [number, number, number, number];
+	if (a === 0 || a === 127 || a >= 224) return true; // "this network", loopback, multicast+reserved
+	if (a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)) return true; // RFC1918
+	if (a === 100 && b >= 64 && b <= 127) return true; // carrier-grade NAT
+	if (a === 169 && b === 254) return true; // link-local, incl. 169.254.169.254 cloud metadata
+	if (a === 192 && b === 0 && c === 0) return true; // IETF protocol assignments
+	if (a === 198 && (b === 18 || b === 19)) return true; // benchmarking
+	return false;
+}
+
+function isPrivateOrReservedIPv6(ip: string): boolean {
+	const lower = ip.toLowerCase();
+	if (lower === "::1" || lower === "::") return true; // loopback, unspecified
+	if (IPV6_LINK_LOCAL_RE.test(lower)) return true; // fe80::/10 link-local
+	if (IPV6_UNIQUE_LOCAL_RE.test(lower)) return true; // fc00::/7 unique-local
+	const mapped = IPV4_MAPPED_IPV6_RE.exec(lower);
+	if (mapped) return isPrivateOrReservedIPv4(mapped[1]!);
+	return false;
+}
+
+async function assertPublicFetchTarget(urlStr: string): Promise<void> {
+	let parsed: URL;
+	try {
+		parsed = new URL(urlStr);
+	} catch {
+		throw new Error(`Invalid URL: ${urlStr}`);
+	}
+	if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+		throw new Error(`Unsupported URL scheme "${parsed.protocol}" — only http/https are allowed`);
+	}
+	const hostname = parsed.hostname.replace(/^\[|\]$/g, "");
+	if (isIPv4(hostname)) {
+		if (isPrivateOrReservedIPv4(hostname))
+			throw new Error(`Refusing to fetch a private/internal address: ${hostname}`);
+		return;
+	}
+	if (hostname.includes(":")) {
+		if (isPrivateOrReservedIPv6(hostname))
+			throw new Error(`Refusing to fetch a private/internal address: ${hostname}`);
+		return;
+	}
+	let addresses: { address: string; family: number }[];
+	try {
+		addresses = await dnsLookup(hostname, { all: true });
+	} catch {
+		throw new Error(`Could not resolve host "${hostname}"`);
+	}
+	for (const { address, family } of addresses) {
+		const isPrivate = family === 4 ? isPrivateOrReservedIPv4(address) : isPrivateOrReservedIPv6(address);
+		if (isPrivate) {
+			throw new Error(`Refusing to fetch — "${hostname}" resolves to a private/internal address (${address})`);
+		}
+	}
+}
+
+const LOCAL_MAX_REDIRECTS = 5;
+
 export async function fetchUrlLocal(
 	url: string,
 	options?: { format?: FetchFormat; maxChars?: number; signal?: AbortSignal },
@@ -613,20 +689,34 @@ export async function fetchUrlLocal(
 	else signal?.addEventListener("abort", onAbort, { once: true });
 
 	try {
-		const doFetch = (userAgent: string) =>
-			fetch(url, {
-				headers: {
-					"User-Agent": userAgent,
-					Accept: acceptHeaderForFormat(format),
-					"Accept-Language": "en-US,en;q=0.9",
-				},
-				redirect: "follow",
-				signal: controller.signal,
-			});
+		let currentUrl = url;
+		let resp: Response | undefined;
+		// redirect:"manual" so each hop's target is validated before it's
+		// followed — "follow" would let a public URL that passed the first
+		// check 302 into an internal address afterward.
+		for (let hop = 0; ; hop++) {
+			// biome-ignore lint/performance/noAwaitInLoops: each redirect hop must be validated and fetched before the next one is even known
+			await assertPublicFetchTarget(currentUrl);
+			const doFetch = (userAgent: string) =>
+				fetch(currentUrl, {
+					headers: {
+						"User-Agent": userAgent,
+						Accept: acceptHeaderForFormat(format),
+						"Accept-Language": "en-US,en;q=0.9",
+					},
+					redirect: "manual",
+					signal: controller.signal,
+				});
 
-		let resp = await doFetch(LOCAL_BROWSER_UA);
-		if (resp.status === 403 && resp.headers.get("cf-mitigated") === "challenge") {
-			resp = await doFetch("cast");
+			resp = await doFetch(LOCAL_BROWSER_UA);
+			if (resp.status === 403 && resp.headers.get("cf-mitigated") === "challenge") {
+				resp = await doFetch("cast");
+			}
+
+			const location = resp.status >= 300 && resp.status < 400 ? resp.headers.get("location") : null;
+			if (!location) break;
+			if (hop >= LOCAL_MAX_REDIRECTS) throw new Error(`Too many redirects (>${LOCAL_MAX_REDIRECTS})`);
+			currentUrl = new URL(location, currentUrl).toString();
 		}
 		if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
 

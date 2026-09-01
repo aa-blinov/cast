@@ -4,6 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { updateSettings } from "../src/core/settings.ts";
+
+// fetchUrlLocal resolves every hostname it's given (SSRF guard) — mocked so
+// these tests don't depend on real DNS/network, with a public IP by default
+// and a per-test override for the DNS-rebinding scenario below.
+const mockDnsLookup = vi.fn().mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+vi.mock("node:dns/promises", () => ({ lookup: (...args: unknown[]) => mockDnsLookup(...args) }));
+
 import {
 	execWebFetch,
 	execWebSearch,
@@ -45,6 +52,8 @@ beforeEach(() => {
 	realHome = process.env.HOME;
 	fakeHome = mkdtempSync(join(tmpdir(), "cast-web-test-"));
 	process.env.HOME = fakeHome;
+	mockDnsLookup.mockReset();
+	mockDnsLookup.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
 });
 
 afterEach(() => {
@@ -731,6 +740,90 @@ describe("fetchUrlLocal", () => {
 
 		const result = await fetchUrlLocal("https://example.com/");
 		expect(result.title).toBe("");
+	});
+
+	describe("SSRF guard", () => {
+		it("refuses a literal loopback address before ever calling fetch", async () => {
+			const fetchMock = vi.fn();
+			vi.stubGlobal("fetch", fetchMock);
+
+			await expect(fetchUrlLocal("http://127.0.0.1:1337/api/sessions")).rejects.toThrow(/private\/internal/i);
+			expect(fetchMock).not.toHaveBeenCalled();
+		});
+
+		it("refuses the cloud metadata link-local address", async () => {
+			const fetchMock = vi.fn();
+			vi.stubGlobal("fetch", fetchMock);
+
+			await expect(fetchUrlLocal("http://169.254.169.254/latest/meta-data/")).rejects.toThrow(/private\/internal/i);
+			expect(fetchMock).not.toHaveBeenCalled();
+		});
+
+		it("refuses RFC1918 private ranges and IPv6 loopback/unique-local", async () => {
+			const fetchMock = vi.fn();
+			vi.stubGlobal("fetch", fetchMock);
+
+			for (const url of [
+				"http://10.0.0.5/",
+				"http://172.16.0.1/",
+				"http://192.168.1.1/",
+				"http://[::1]/",
+				"http://[fc00::1]/",
+			]) {
+				await expect(fetchUrlLocal(url)).rejects.toThrow(/private\/internal/i);
+			}
+			expect(fetchMock).not.toHaveBeenCalled();
+		});
+
+		it("allows a literal public IP straight through", async () => {
+			const fetchMock = vi
+				.fn()
+				.mockResolvedValue(mockLocalResponse({ headers: { "content-type": "text/plain" }, body: "ok" }));
+			vi.stubGlobal("fetch", fetchMock);
+
+			const result = await fetchUrlLocal("http://93.184.216.34/");
+			expect(result.content).toBe("ok");
+		});
+
+		it("refuses a hostname that resolves (DNS rebinding) to a private address", async () => {
+			mockDnsLookup.mockResolvedValue([{ address: "10.1.2.3", family: 4 }]);
+			const fetchMock = vi.fn();
+			vi.stubGlobal("fetch", fetchMock);
+
+			await expect(fetchUrlLocal("https://rebind.example.com/")).rejects.toThrow(/private\/internal/i);
+			expect(fetchMock).not.toHaveBeenCalled();
+		});
+
+		it("re-validates a redirect target instead of blindly following it into a private address", async () => {
+			const fetchMock = vi.fn().mockResolvedValueOnce(
+				mockLocalResponse({
+					ok: false,
+					status: 302,
+					headers: { location: "http://169.254.169.254/latest/meta-data/" },
+					body: "",
+				}),
+			);
+			vi.stubGlobal("fetch", fetchMock);
+
+			await expect(fetchUrlLocal("https://example.com/redirects-away")).rejects.toThrow(/private\/internal/i);
+			// The redirect response itself is fine to receive — only the second
+			// hop (the actual internal address) must never be requested.
+			expect(fetchMock).toHaveBeenCalledTimes(1);
+		});
+
+		it("gives up after too many redirect hops instead of looping forever", async () => {
+			const fetchMock = vi.fn().mockResolvedValue(
+				mockLocalResponse({
+					ok: false,
+					status: 302,
+					headers: { location: "https://example.com/next" },
+					body: "",
+				}),
+			);
+			vi.stubGlobal("fetch", fetchMock);
+
+			await expect(fetchUrlLocal("https://example.com/loop")).rejects.toThrow(/too many redirects/i);
+		});
 	});
 });
 

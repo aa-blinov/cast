@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.28
+
+### Fixed
+
+- **Security:** the `web_fetch` tool's "local" backend (an opt-in alternative to the default Jina Reader proxy, `/web-fetch-provider local`) fetched the model-supplied URL directly from the daemon's own process with no restriction on the target — a model could be steered into fetching `169.254.169.254` (cloud instance metadata), `127.0.0.1` (the daemon's own API — though still blocked by its normal auth), or any other address on the host's private network, and get the response back as tool output. Now refuses any URL (including a redirect target, checked on every hop, and a hostname's DNS-resolved address, to catch rebinding) that resolves to a loopback, link-local, or RFC1918 private range, before ever issuing the request.
+
 ## 0.22.27
 
 ### Fixed
