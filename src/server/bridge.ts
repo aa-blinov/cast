@@ -6,7 +6,7 @@
 
 import { execFile, execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
@@ -1074,10 +1074,36 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		return ws;
 	}
 
+	// An attachment's absolute path (`~/.cast/inputs/<session-id>/...`) is
+	// embedded as literal text in the message that referenced it (see
+	// composer.js's <system-reminder>), not looked up by session id at read
+	// time — forkSession's deep-copied history still points at the source
+	// session's inputs dir. Left alone, deleting the source session later
+	// (which rmSyncs that dir) leaves the fork's transcript referencing files
+	// that no longer exist. Copy the dir under the fork's own id and rewrite
+	// every occurrence of the old path so the fork is a real independent
+	// snapshot, the same way its message history already is.
+	function rehomeForkedAttachments(sourceSessionId: string, forked: SessionState): void {
+		const sourceDir = sessionInputsDir(sourceSessionId);
+		if (!existsSync(sourceDir)) return;
+		const forkDir = sessionInputsDir(forked.id);
+		cpSync(sourceDir, forkDir, { recursive: true });
+		const rewrite = (value: unknown): unknown => {
+			if (typeof value === "string") return value.includes(sourceDir) ? value.split(sourceDir).join(forkDir) : value;
+			if (Array.isArray(value)) return value.map(rewrite);
+			if (value && typeof value === "object")
+				return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, rewrite(v)]));
+			return value;
+		};
+		forked.messages = rewrite(forked.messages) as SessionState["messages"];
+		saveSession(forked);
+	}
+
 	function forkSessionInstance(sessionId: string): WebAgentSession | undefined {
 		const source = getSession(sessionId);
 		if (!source || source.status === "running") return undefined;
 		const session = forkSession(source.session);
+		rehomeForkedAttachments(source.session.id, session);
 		const persona = resolvePersona(session.persona ?? "") ?? currentPersona;
 		const runner = createAgentRunner();
 		const ws: WebAgentSession = {

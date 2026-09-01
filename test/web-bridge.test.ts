@@ -9,6 +9,7 @@ import type { Persona } from "../src/core/personas.ts";
 import { createAgentRunner } from "../src/core/runner.ts";
 import { createSession, getFullHistory, loadSession, saveSession } from "../src/core/session.ts";
 import type { StartupResult } from "../src/core/startup.ts";
+import { sessionInputsDir } from "../src/server/inputs.ts";
 
 // submit() fires runAgentLoop in the background (fire-and-forget) — stub it
 // so bridge tests don't need a live provider, but keep everything else
@@ -1133,6 +1134,35 @@ describe("web bridge", () => {
 		expect(bridge.getSession(fork!.id)).toBe(fork);
 		fork!.session.messages[0] = { role: "user", content: "Fork-only request" };
 		expect(source.session.messages[0]).toEqual({ role: "user", content: "Original request" });
+	});
+
+	it("forking a session with an attachment gives the fork its own independent copy, immune to the source being deleted later", () => {
+		const bridge = createServerBridge(makeResult());
+		const source = bridge.createSession();
+		const sourceInputsDir = sessionInputsDir(source.id);
+		mkdirSync(sourceInputsDir, { recursive: true });
+		writeFileSync(join(sourceInputsDir, "report.pdf"), "pdf bytes");
+		source.session.messages = [
+			{
+				role: "user",
+				content: `Look at this\n\n<system-reminder>\nThe user attached the following file(s) to this message:\n- report.pdf: ${join(sourceInputsDir, "report.pdf")}\n</system-reminder>`,
+			},
+		];
+
+		const fork = bridge.forkSession(source.id);
+		const forkInputsDir = sessionInputsDir(fork!.id);
+
+		// The fork got its own copy of the attachment...
+		expect(existsSync(join(forkInputsDir, "report.pdf"))).toBe(true);
+		// ...and its history now points at that copy, not the source's.
+		const forkContent = fork!.session.messages[0]!.content as string;
+		expect(forkContent).toContain(join(forkInputsDir, "report.pdf"));
+		expect(forkContent).not.toContain(sourceInputsDir);
+
+		// Deleting the source (which rmSyncs its inputs dir) must not take the
+		// fork's copy down with it.
+		expect(bridge.deleteSessionPermanently(source.id)).toBe(true);
+		expect(existsSync(join(forkInputsDir, "report.pdf"))).toBe(true);
 	});
 
 	it("/fork creates and returns a new session id, and refuses a running session", async () => {
