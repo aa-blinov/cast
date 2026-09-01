@@ -33,6 +33,15 @@ vi.mock("../src/core/config.ts", async (importOriginal) => {
 	};
 });
 
+// /mcp reconnect|enable|disable|uninstall (and /reload) each close and
+// re-resolve MCP connections — controllable so a test can force two of these
+// to overlap and assert they serialize instead of racing.
+const mockResolveMcpForCwd = vi.fn();
+vi.mock("../src/core/project.ts", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../src/core/project.ts")>();
+	return { ...actual, resolveMcpForCwd: (...args: unknown[]) => mockResolveMcpForCwd(...args) };
+});
+
 const { createServerBridge, SANDBOX_CWD, parseEvolveJson, parseSuggestionJson, toDisplayMessages } = await import(
 	"../src/server/bridge.ts"
 );
@@ -92,6 +101,8 @@ describe("web bridge", () => {
 		mockFetchModels.mockReset();
 		mockProbeProvider.mockClear();
 		mockEnsureDefaultMarketplaces.mockReset();
+		mockResolveMcpForCwd.mockReset();
+		mockResolveMcpForCwd.mockResolvedValue({ ...emptyMcp, allServerNames: ["srv"] });
 		mockFetchModels.mockResolvedValue({
 			ok: true,
 			models: [{ id: "gpt-4o" }, { id: "hy3" }],
@@ -1163,6 +1174,38 @@ describe("web bridge", () => {
 		// fork's copy down with it.
 		expect(bridge.deleteSessionPermanently(source.id)).toBe(true);
 		expect(existsSync(join(forkInputsDir, "report.pdf"))).toBe(true);
+	});
+
+	it("concurrent /mcp enable and disable calls serialize their reconnect instead of racing", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+
+		let releaseFirst: () => void = () => {};
+		const firstGate = new Promise<void>((resolve) => {
+			releaseFirst = resolve;
+		});
+		let calls = 0;
+		mockResolveMcpForCwd.mockImplementation(async () => {
+			calls++;
+			// Only the first call blocks — if the second one starts before this
+			// resolves, it proves the two overlapped instead of serializing.
+			if (calls === 1) await firstGate;
+			return { ...emptyMcp, allServerNames: ["srv"] };
+		});
+
+		const first = bridge.executeCommand(ws.id, "/mcp disable srv");
+		await new Promise((r) => setTimeout(r, 0));
+		expect(calls).toBe(1);
+
+		const second = bridge.executeCommand(ws.id, "/mcp enable srv");
+		await new Promise((r) => setTimeout(r, 0));
+		// The second call is queued behind the lock, not racing the first —
+		// its resolveMcpForCwd hasn't been reached yet.
+		expect(calls).toBe(1);
+
+		releaseFirst();
+		await Promise.all([first, second]);
+		expect(calls).toBe(2);
 	});
 
 	it("/fork creates and returns a new session id, and refuses a running session", async () => {

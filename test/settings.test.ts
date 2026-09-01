@@ -184,4 +184,54 @@ describe("settings", () => {
 			).toEqual({ checkpoint: 11_000, notes: 6_000 });
 		});
 	});
+
+	describe("updateSettings concurrency", () => {
+		// A caller that reads settings, derives a new array/Set from it, and
+		// only later (after an await — e.g. bridge.ts's /provider switch
+		// probes the endpoint before writing) calls updateSettings() with a
+		// plain object is reading a value that can go stale: another update
+		// can land in between, and this caller's write silently overwrites it
+		// with a version that never saw the other change. The functional form
+		// reads `current` from *inside* updateSettings' own lock, so nothing
+		// else can land between the read and the write no matter what the
+		// caller awaited beforehand.
+		it("a plain-object update racing another one across an await gap loses whichever wrote first", async () => {
+			updateSettings({ disabledHooks: [] });
+			const disableTheOldWay = (id: string) =>
+				new Promise<void>((resolve) => {
+					setTimeout(async () => {
+						const current = loadSettings();
+						// The await gap a real caller has for a different reason
+						// (network probe, subprocess spawn, ...) — this is what
+						// lets another update's write land before this one, with
+						// nothing to notice `current` is now stale.
+						await new Promise((r) => setTimeout(r, 0));
+						updateSettings({ disabledHooks: [...(current.disabledHooks ?? []), id] });
+						resolve();
+					}, 0);
+				});
+
+			await Promise.all([disableTheOldWay("hookA"), disableTheOldWay("hookB")]);
+
+			// Only one of the two survives — the plain-object form has no
+			// defense against this regardless of how it's called.
+			expect(loadSettings().disabledHooks?.length).toBe(1);
+		});
+
+		it("the functional form survives the same race — reading current settings from inside the lock instead", async () => {
+			updateSettings({ disabledHooks: [] });
+			const disable = (id: string) =>
+				new Promise<void>((resolve) => {
+					setTimeout(async () => {
+						await new Promise((r) => setTimeout(r, 0));
+						updateSettings((current) => ({ disabledHooks: [...(current.disabledHooks ?? []), id] }));
+						resolve();
+					}, 0);
+				});
+
+			await Promise.all([disable("hookA"), disable("hookB")]);
+
+			expect(loadSettings().disabledHooks?.slice().sort()).toEqual(["hookA", "hookB"]);
+		});
+	});
 });
