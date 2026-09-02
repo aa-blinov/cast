@@ -699,6 +699,55 @@ describe("streamChat — message sanitization", () => {
 		expect(parsed.error).toContain("truncated");
 	});
 
+	it("answers a tool call the history never answered, so an interrupted session isn't bricked", async () => {
+		// loop.ts persists the assistant message with its tool_calls before
+		// running the tools, so a SIGKILL/OOM mid-call leaves an unanswered
+		// call on disk — and every provider 400s a history like that, making
+		// every later turn in the session fail permanently.
+		const { client, sent } = capturingClient();
+		const messages = [
+			{ role: "user", content: "read it" },
+			{
+				role: "assistant",
+				content: null,
+				tool_calls: [
+					{ id: "call_a", type: "function", function: { name: "bash", arguments: "{}" } },
+					{ id: "call_b", type: "function", function: { name: "read", arguments: "{}" } },
+				],
+			},
+			// Only one of the two parallel calls made it to disk.
+			{ role: "tool", tool_call_id: "call_b", content: "file contents" },
+			{ role: "user", content: "continue" },
+		];
+		for await (const _ of streamChat(client, "m", messages as never, [], 100)) {
+			// drain
+		}
+
+		const out = sent() as Array<{ role: string; tool_call_id?: string; content?: unknown }>;
+		const results = out.filter((m) => m.role === "tool");
+		expect(results.map((m) => m.tool_call_id)).toEqual(["call_a", "call_b"]);
+		expect(String(results[0]!.content)).toContain("interrupted");
+		// The synthetic result goes before the following user message, where a
+		// tool result has to sit.
+		expect(out.map((m) => m.role)).toEqual(["user", "assistant", "tool", "tool", "user"]);
+	});
+
+	it("leaves a fully answered tool sequence untouched", async () => {
+		const { client, sent } = capturingClient();
+		const messages = [
+			{
+				role: "assistant",
+				content: null,
+				tool_calls: [{ id: "call_1", type: "function", function: { name: "read", arguments: "{}" } }],
+			},
+			{ role: "tool", tool_call_id: "call_1", content: "ok" },
+		];
+		for await (const _ of streamChat(client, "m", messages as never, [], 100)) {
+			// drain
+		}
+		expect(sent()).toHaveLength(2);
+	});
+
 	it("wraps non-object tool call arguments so mapping-only chat templates don't 400", async () => {
 		// Some providers' templates iterate arguments as a mapping; a bare
 		// array in history (a legacy tool called with ["step 1"]) then fails
