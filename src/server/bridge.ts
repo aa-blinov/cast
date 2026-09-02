@@ -1793,8 +1793,11 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				ws.session.messages = messages;
 				try {
 					saveSession(ws.session);
-				} catch {
+				} catch (err) {
 					// Best-effort: disk full / permissions shouldn't kill the run.
+					// Logged, though — swallowing it silently meant a turn whose
+					// messages never persisted looked completely normal.
+					console.error("[cast server] failed to persist session messages:", err);
 				}
 			},
 			onEvent: (event: AgentEvent) => {
@@ -1802,83 +1805,92 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				// "what the engine did", not "what the user sees". token/thinking
 				// are too fine-grained (thousands per turn) and their final form
 				// already lands in messages; these are the coarse, useful ones.
-				switch (event.type) {
-					case "tool_start": {
-						const ts = event as { id: string };
-						toolStartTimes.set(ts.id, Date.now());
-						appendSessionEvent(sessionId, event.type, event);
-						break;
-					}
-					case "tool_end": {
-						// One row per completed tool call (not per start+end) — the
-						// end event carries the error flag, so recording only here
-						// avoids double-counting usage.
-						const t = event as { id: string; name: string; result: { isError?: boolean } };
-						const started = toolStartTimes.get(t.id);
-						toolStartTimes.delete(t.id);
-						recordToolCall(
-							ws.id,
-							t.name,
-							t.result?.isError === true,
-							started !== undefined ? Date.now() - started : undefined,
-							ws.currentClientMessageId,
-						);
-						appendSessionEvent(sessionId, event.type, event);
-						break;
-					}
-					case "doom_loop": {
-						const d = event as { tool: string; attempts: number };
-						recordLlmRequest({
-							sessionId: ws.id,
-							provider: runProviderName,
-							model: runModel,
-							kind: "error",
-							error: `doom loop: ${d.tool} x${d.attempts}`,
-							errorType: "doom-loop",
-							turnId: ws.currentClientMessageId,
-						});
-						appendSessionEvent(sessionId, event.type, event);
-						break;
-					}
-					case "compaction": {
-						const c = event as { messagesCompacted: number; tokensBefore: number };
-						recordLlmCompaction(ws.id, c.messagesCompacted, c.tokensBefore);
-						appendSessionEvent(sessionId, event.type, event);
-						break;
-					}
-					case "turn_end":
-					case "open_work_gate":
-					case "open_work_gate_exhausted":
-					case "retry":
-					case "compaction_failed":
-					case "interrupt_reminder":
-					case "date_rollover":
-					case "end":
-					case "error":
-						appendSessionEvent(sessionId, event.type, event);
-						if (event.type === "retry") {
-							recordLlmRequest({
-								sessionId: ws.id,
-								provider: runProviderName,
-								model: runModel,
-								kind: "retry",
-								retries: event.attempt,
-								error: event.reason,
-								errorType: classifyLlmError(event.reason),
-							});
-						} else if (event.type === "error") {
+				// Recording is best-effort: a DB fault here used to throw out of
+				// onEvent, which loop.ts calls unguarded from ~60 places — including
+				// from the handler that reports a failed turn, so the exception
+				// escaped runAgentLoop entirely. Telemetry is never worth losing a
+				// turn over.
+				try {
+					switch (event.type) {
+						case "tool_start": {
+							const ts = event as { id: string };
+							toolStartTimes.set(ts.id, Date.now());
+							appendSessionEvent(sessionId, event.type, event);
+							break;
+						}
+						case "tool_end": {
+							// One row per completed tool call (not per start+end) — the
+							// end event carries the error flag, so recording only here
+							// avoids double-counting usage.
+							const t = event as { id: string; name: string; result: { isError?: boolean } };
+							const started = toolStartTimes.get(t.id);
+							toolStartTimes.delete(t.id);
+							recordToolCall(
+								ws.id,
+								t.name,
+								t.result?.isError === true,
+								started !== undefined ? Date.now() - started : undefined,
+								ws.currentClientMessageId,
+							);
+							appendSessionEvent(sessionId, event.type, event);
+							break;
+						}
+						case "doom_loop": {
+							const d = event as { tool: string; attempts: number };
 							recordLlmRequest({
 								sessionId: ws.id,
 								provider: runProviderName,
 								model: runModel,
 								kind: "error",
-								error: event.message,
-								errorType: classifyLlmError(event.message),
+								error: `doom loop: ${d.tool} x${d.attempts}`,
+								errorType: "doom-loop",
+								turnId: ws.currentClientMessageId,
 							});
+							appendSessionEvent(sessionId, event.type, event);
+							break;
 						}
-						break;
-					default:
-						break;
+						case "compaction": {
+							const c = event as { messagesCompacted: number; tokensBefore: number };
+							recordLlmCompaction(ws.id, c.messagesCompacted, c.tokensBefore);
+							appendSessionEvent(sessionId, event.type, event);
+							break;
+						}
+						case "turn_end":
+						case "open_work_gate":
+						case "open_work_gate_exhausted":
+						case "retry":
+						case "compaction_failed":
+						case "interrupt_reminder":
+						case "date_rollover":
+						case "end":
+						case "error":
+							appendSessionEvent(sessionId, event.type, event);
+							if (event.type === "retry") {
+								recordLlmRequest({
+									sessionId: ws.id,
+									provider: runProviderName,
+									model: runModel,
+									kind: "retry",
+									retries: event.attempt,
+									error: event.reason,
+									errorType: classifyLlmError(event.reason),
+								});
+							} else if (event.type === "error") {
+								recordLlmRequest({
+									sessionId: ws.id,
+									provider: runProviderName,
+									model: runModel,
+									kind: "error",
+									error: event.message,
+									errorType: classifyLlmError(event.message),
+								});
+							}
+							break;
+						default:
+							break;
+					}
+				} catch (err) {
+					console.error("[cast server] failed to record session event:", err);
 				}
 				if (event.type === "token" || event.type === "thinking") {
 					if (activeStreamCompletion) {

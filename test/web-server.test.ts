@@ -1,5 +1,5 @@
 import { once } from "node:events";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,7 +11,7 @@ import { appendMessage, createSession, saveSession } from "../src/core/session.t
 import { queryEndpointOverview } from "../src/core/telemetry.ts";
 import type { ServerBridge } from "../src/server/bridge.ts";
 import { createServerBridge } from "../src/server/bridge.ts";
-import { startServer } from "../src/server/server.ts";
+import { isInsideRoot, startServer } from "../src/server/server.ts";
 
 let server: ReturnType<typeof startServer>;
 let origin: string;
@@ -558,5 +558,45 @@ describe("api telemetry paths", () => {
 		expect(paths.join("\n")).not.toContain(token);
 		expect(paths).toContain("/api/shared/:token");
 		expect(paths).toContain("/api/sessions/:id/rename");
+	});
+});
+
+describe("isInsideRoot", () => {
+	let root: string;
+	let outside: string;
+
+	beforeEach(() => {
+		root = mkdtempSync(join(tmpdir(), "cast-inside-root-"));
+		outside = mkdtempSync(join(tmpdir(), "cast-outside-root-"));
+	});
+	afterEach(() => {
+		rmSync(root, { recursive: true, force: true });
+		rmSync(outside, { recursive: true, force: true });
+	});
+
+	it("accepts the root itself and paths under it", () => {
+		mkdirSync(join(root, "src"), { recursive: true });
+		writeFileSync(join(root, "src", "app.ts"), "x");
+		expect(isInsideRoot(root, root)).toBe(true);
+		expect(isInsideRoot(root, join(root, "src"))).toBe(true);
+		expect(isInsideRoot(root, join(root, "src", "app.ts"))).toBe(true);
+		// A destination that doesn't exist yet is judged by its parent.
+		expect(isInsideRoot(root, join(root, "src", "new-name.ts"))).toBe(true);
+	});
+
+	it("rejects a traversing path", () => {
+		expect(isInsideRoot(root, join(root, "..", "etc"))).toBe(false);
+		expect(isInsideRoot(root, outside)).toBe(false);
+	});
+
+	it("rejects a path reached through a symlink out of the root", () => {
+		// The /fs routes' consumers all follow symlinks (statSync,
+		// createReadStream, rmSync, renameSync), so a purely lexical check let
+		// a link inside the cwd list, download and delete outside the project.
+		writeFileSync(join(outside, "secret.txt"), "secret");
+		symlinkSync(outside, join(root, "link"));
+
+		expect(isInsideRoot(root, join(root, "link"))).toBe(false);
+		expect(isInsideRoot(root, join(root, "link", "secret.txt"))).toBe(false);
 	});
 });
