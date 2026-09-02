@@ -1020,6 +1020,32 @@ describe("web bridge", () => {
 		expect(ws.runner.steeringQueue.hasItems()).toBe(true);
 	});
 
+	it("says so when an iteration budget is requested against an already-running turn", async () => {
+		// The budget can't apply to a turn that's already going, and it used to
+		// be dropped in silence on this path.
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const notices: string[] = [];
+		bridge.subscribe(ws.id, (event) => {
+			if (event.type === "notice") notices.push(event.message);
+		});
+
+		let finishTurn!: () => void;
+		runAgentLoop.mockImplementationOnce(
+			(messages: unknown) =>
+				new Promise((resolve) => {
+					finishTurn = () => resolve(messages);
+				}),
+		);
+		bridge.submit(ws.id, "first message");
+		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalled());
+		bridge.submit(ws.id, "run this as a goal", undefined, undefined, undefined, { maxOuterIterations: 40 });
+
+		expect(notices.join("\n")).toContain("iteration budget (40)");
+		finishTurn();
+		await vi.waitFor(() => expect(ws.runner.steeringQueue.hasItems()).toBe(false));
+	});
+
 	it("delivers a steer that arrived after the loop's last drain instead of stranding it", async () => {
 		// The loop drains the steering queue at fixed points and then the turn
 		// ends; a message enqueued between that last drain and idle used to sit

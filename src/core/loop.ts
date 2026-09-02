@@ -2167,6 +2167,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 
 	try {
 		// Outer loop: continues when follow-up messages arrive after agent would stop
+		let nearCapReminderSent = false;
 		let overflowCompacted = false;
 		// Tracks whether we've already yanked the largest tool result out of
 		// history on this turn as an in-place context-overflow fallback. Distinct
@@ -2246,7 +2247,12 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 					}
 					break;
 				}
-				if (activeCap >= 4 && outerIteration >= activeCap - 3) {
+				// Once, on entering the last stretch — not on every remaining
+				// iteration. Repeating it pushed a near-identical system message
+				// per pass, spending context on the reminder itself at exactly
+				// the point the turn is short of room.
+				if (!nearCapReminderSent && activeCap >= 4 && outerIteration >= activeCap - 3) {
+					nearCapReminderSent = true;
 					messages.push({
 						role: "system",
 						content: `<system-reminder>You are near the end of this turn's iteration budget (~${activeCap - outerIteration} iterations left). Finish the current work and summarize; do not start new sub-tasks.</system-reminder>`,
