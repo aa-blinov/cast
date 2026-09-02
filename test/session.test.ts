@@ -907,6 +907,22 @@ describe("session persistence", () => {
 		expect(all).toContain(b.id);
 	});
 
+	it("skips one unreadable session row instead of hiding the whole list", () => {
+		// loadSession parses usage_json/todos_json/plan_*_json unguarded, so a
+		// row corrupted by a partial write used to throw out of listSessions and
+		// leave the sidebar and picker completely empty — every session hidden
+		// by one bad one.
+		const good = createSession("gpt-4o", projectA);
+		saveSession(good);
+		const broken = createSession("gpt-4o", projectA);
+		saveSession(broken);
+		getDb().prepare("UPDATE sessions SET usage_json = ? WHERE id = ?").run("{not json", broken.id);
+
+		const ids = listSessions().map((s) => s.id);
+		expect(ids).toContain(good.id);
+		expect(ids).not.toContain(broken.id);
+	});
+
 	it("still finds a legacy flat-file session (no cwd, saved directly under sessions/)", () => {
 		const legacy = createSession("gpt-4o", projectA);
 		delete (legacy as { cwd?: string }).cwd;
