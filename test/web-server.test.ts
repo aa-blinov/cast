@@ -1,5 +1,5 @@
 import { once } from "node:events";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -509,5 +509,33 @@ describe("request body limits", () => {
 		// How much of the body the client got to send before the refusal is
 		// deliberately not asserted: the server drains the remainder rather than
 		// resetting the socket, so that count is load-dependent, not a contract.
+	});
+});
+
+describe("factory UI slugs", () => {
+	it("a UI directory named after a daemon route can't make that route public", async () => {
+		// A UI directory can appear on disk without going through createUi's
+		// reserved-name check — a user (or an agent, which server.ts documents as
+		// an expected editor of ~/.cast/ui/*) simply making the directory. When a
+		// discovered UI's slug matched a real route's first path segment, the auth
+		// gate treated every such request as a public static route, so `api` here
+		// meant the whole API answered unauthenticated.
+		const fakeHome = mkdtempSync(join(tmpdir(), "cast-ui-slug-test-"));
+		const previousHome = process.env.HOME;
+		process.env.HOME = fakeHome;
+		try {
+			const unauthenticated = await fetch(`${origin}/api/sessions`);
+			expect(unauthenticated.status).toBe(401);
+
+			mkdirSync(join(fakeHome, ".cast", "ui", "api"), { recursive: true });
+			writeFileSync(join(fakeHome, ".cast", "ui", "api", "index.html"), "<h1>hi</h1>");
+
+			const stillGated = await fetch(`${origin}/api/sessions`);
+			expect(stillGated.status).toBe(401);
+		} finally {
+			if (previousHome === undefined) delete process.env.HOME;
+			else process.env.HOME = previousHome;
+			rmSync(fakeHome, { recursive: true, force: true });
+		}
 	});
 });

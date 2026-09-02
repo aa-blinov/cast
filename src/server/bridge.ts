@@ -132,7 +132,7 @@ import { ensureSessionWorktree, listWorktrees, removeWorktreeBySlug, type Sessio
 import { ALL_THEMES } from "../ui/themes/index.ts";
 import type { ThemeColors } from "../ui/themes/types.ts";
 import { buildGoalPrompt, isCommandBlocking, parseGoalInput, REVIEW_PROMPT, SLASH_COMMANDS } from "./commands.ts";
-import { sessionInputsDir } from "./inputs.ts";
+import { isSafePathSegment, isSafeSessionId, sessionInputsDir } from "./inputs.ts";
 
 const SYSTEM_REMINDER_RE = /<system-reminder>([\s\S]*?)<\/system-reminder>/g;
 const GITHUB_URL_RE = /^https?:\/\/(?:www\.)?github\.com\//i;
@@ -2433,6 +2433,10 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	}
 
 	function deleteSessionPermanently(sessionId: string): boolean {
+		// Checked before anything runs, not just before the rmSync below, so the
+		// route answers its normal 404 for a nonsense id instead of throwing out
+		// of sessionInputsDir's own guard as a 500.
+		if (!isSafeSessionId(sessionId)) return false;
 		const ws = sessions.get(sessionId);
 		// Capture the cwd before the row is deleted — a session's throwaway
 		// sandbox folder is cleaned up on delete, a user-chosen directory is
@@ -4482,6 +4486,13 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			if (parts.length < 2) return { ok: false, error: `Invalid plugin id: ${pluginId}` };
 			const pluginName = parts[0];
 			const marketplace = parts.slice(1).join("@");
+			// Both halves are path segments, so neither may traverse: `..@..`
+			// otherwise resolved `root` to ~/.cast and turned this into an
+			// arbitrary-directory read (plus a path-disclosure oracle, since the
+			// not-found error below echoes the resolved absolute path).
+			if (!isSafePathSegment(pluginName) || !isSafePathSegment(marketplace)) {
+				return { ok: false, error: `Invalid plugin id: ${pluginId}` };
+			}
 			const root = join(pluginDir, marketplace, pluginName);
 			// Collect existing SKILL.md files: root first, then skills/*/SKILL.md
 			const candidates: string[] = [];
