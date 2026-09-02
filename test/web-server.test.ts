@@ -612,3 +612,105 @@ describe("bridgeErrorStatus", () => {
 		expect(bridgeErrorStatus('Mode must be "plan" or "build"')).toBe(400);
 	});
 });
+
+describe("agent validation", () => {
+	let agentServer: ReturnType<typeof startServer>;
+	let agentOrigin: string;
+	let cookie: string;
+	let agentHome: string;
+	let previousHome: string | undefined;
+
+	beforeEach(async () => {
+		agentHome = mkdtempSync(join(tmpdir(), "cast-agent-home-"));
+		previousHome = process.env.HOME;
+		process.env.HOME = agentHome;
+		const { updateSettings } = await import("../src/core/settings.ts");
+		updateSettings({ providers: [{ name: "known-provider", url: "http://p.test/v1", apiKey: "k" }] });
+		// Only the surface the agent routes touch — enough to exercise the
+		// validation without standing up a whole bridge.
+		agentServer = startServer({
+			port: 0,
+			host: "127.0.0.1",
+			bridge: {
+				getPersonas: () => [{ name: "senior", label: "Senior", description: "", source: "builtin" }],
+			} as unknown as ServerBridge,
+			webUser: "cast",
+			serverPassword: "test-password",
+			version: "test",
+		});
+		await once(agentServer, "listening");
+		agentOrigin = `http://127.0.0.1:${(agentServer.address() as AddressInfo).port}`;
+		const auth = await fetch(`${agentOrigin}/api/auth/login`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ username: "cast", password: "test-password" }),
+		});
+		cookie = auth.headers.get("set-cookie")!;
+	});
+
+	afterEach(async () => {
+		agentServer.close();
+		await once(agentServer, "close");
+		if (previousHome === undefined) delete process.env.HOME;
+		else process.env.HOME = previousHome;
+		rmSync(agentHome, { recursive: true, force: true });
+	});
+
+	const post = (path: string, body: unknown) =>
+		fetch(`${agentOrigin}${path}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Cookie: cookie },
+			body: JSON.stringify(body),
+		});
+
+	it("refuses an agent naming a persona or provider that doesn't exist", async () => {
+		// These used to be stored verbatim, and the spawn path then dropped the
+		// pin silently — so a user could pin an agent to a provider, see it
+		// accepted, and have every session from it run somewhere else.
+		const badPersona = await post("/api/agents", { name: "a1", persona: "does-not-exist" });
+		expect(badPersona.status).toBe(400);
+		expect(((await badPersona.json()) as { error: string }).error).toContain("Unknown persona");
+
+		const badProvider = await post("/api/agents", { name: "a2", persona: "senior", provider: "deleted-provider" });
+		expect(badProvider.status).toBe(400);
+		expect(((await badProvider.json()) as { error: string }).error).toContain("Unknown provider");
+
+		// A valid one still goes through, and an unknown *model* is allowed on
+		// purpose — the provider's model list is remote and may be stale.
+		const ok = await post("/api/agents", {
+			name: "a3",
+			persona: "senior",
+			provider: "known-provider",
+			model: "some-model",
+		});
+		expect(ok.status).toBe(201);
+	});
+
+	it("refuses to patch an agent into an invalid persona, including an empty one", async () => {
+		const created = await post("/api/agents", { name: "a4", persona: "senior" });
+		const { id } = (await created.json()) as { id: string };
+
+		for (const patch of [{ persona: "" }, { persona: "ghost" }, { provider: "ghost-provider" }]) {
+			const res = await fetch(`${agentOrigin}/api/agents/${id}`, {
+				method: "PATCH",
+				headers: { "Content-Type": "application/json", Cookie: cookie },
+				body: JSON.stringify(patch),
+			});
+			expect(res.status, JSON.stringify(patch)).toBe(400);
+		}
+	});
+
+	it("refuses to spawn a session from an agent whose pin has gone stale", async () => {
+		const { updateSettings } = await import("../src/core/settings.ts");
+		const created = await post("/api/agents", { name: "a5", persona: "senior", provider: "known-provider" });
+		expect(created.status).toBe(201);
+		const { id } = (await created.json()) as { id: string };
+
+		// The user renames or deletes that provider afterwards.
+		updateSettings({ providers: [{ name: "renamed-provider", url: "http://p.test/v1", apiKey: "k" }] });
+
+		const spawn = await post("/api/sessions", { agentId: id });
+		expect(spawn.status).toBe(409);
+		expect(((await spawn.json()) as { error: string }).error).toContain("Unknown provider");
+	});
+});

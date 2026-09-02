@@ -892,6 +892,8 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			return json(res, { error: "Invalid JSON" }, 400);
 		}
 		if (!name) return json(res, { error: "name required, a-z0-9- only" }, 400);
+		const invalid = invalidAgentField(persona, provider);
+		if (invalid) return json(res, { error: invalid }, 400);
 		try {
 			const agent = createAgent({ name, persona, model, provider });
 			json(res, agent, 201);
@@ -899,6 +901,41 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
 		}
 	});
+	/** Validates an agent's persona/provider against what actually exists.
+	 *
+	 * The agent routes used to store these verbatim: a persona that was never
+	 * defined, a provider since renamed or deleted, even `persona: ""` via
+	 * PATCH. Nothing complained at save time, and the spawn path then fell back
+	 * to the global provider silently — so a user could pin an agent to a
+	 * provider, see it accepted, and have every session from it quietly run
+	 * somewhere else. The same fields typed as `/persona` or
+	 * `/quick-session-persona` are rejected with the list of valid values, so
+	 * this only brings the API in line with the commands. Model is deliberately
+	 * not checked: the provider's model list is remote, may be stale or
+	 * unavailable, and a model name unknown to us is a legitimate thing to pin.
+	 */
+	function invalidAgentField(persona?: string, provider?: string): string | undefined {
+		if (persona !== undefined) {
+			if (!persona.trim()) return "persona cannot be empty";
+			const known = bridge.getPersonas().map((entry) => entry.name);
+			// Only judge against a list we actually have: a daemon that failed
+			// to load its personas would otherwise refuse every agent, which is
+			// worse than accepting a name it can't currently verify.
+			if (known.length > 0 && !known.includes(persona)) {
+				return `Unknown persona: ${persona}. Available: ${known.join(", ")}`;
+			}
+		}
+		if (provider?.trim()) {
+			const known = (loadSettings().providers ?? []).map((entry) => entry.name);
+			if (!known.includes(provider)) {
+				return known.length > 0
+					? `Unknown provider: ${provider}. Available: ${known.join(", ")}`
+					: `Unknown provider: ${provider}. No providers are configured.`;
+			}
+		}
+		return undefined;
+	}
+
 	route("GET", "/api/agents/:id", (_req, res, params) => {
 		const agent = getAgent(params.id);
 		if (!agent) return json(res, { error: "Not found" }, 404);
@@ -916,6 +953,8 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		} catch {
 			return json(res, { error: "Invalid JSON" }, 400);
 		}
+		const invalidPatch = invalidAgentField(patch.persona, patch.provider);
+		if (invalidPatch) return json(res, { error: invalidPatch }, 400);
 		const updated = updateAgent(params.id, patch);
 		if (!updated) return json(res, { error: "Not found" }, 404);
 		json(res, updated);
@@ -1186,6 +1225,16 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		if (agentId) {
 			const agent = getAgent(agentId);
 			if (!agent) return json(res, { error: `Agent ${agentId} not found` }, 404);
+			// An agent saved before these fields were validated (or one whose
+			// persona/provider was deleted since) must fail loudly here. The
+			// spawn path resolves an unknown persona to the global default and
+			// an unknown provider to the global endpoint, dropping the pin
+			// without a word — so a session would run somewhere the user never
+			// chose, and only a confusing provider error later would hint at it.
+			const stale = invalidAgentField(agent.persona, agent.provider);
+			if (stale) {
+				return json(res, { error: `Agent "${agent.name}" can't be used: ${stale}` }, 409);
+			}
 			persona = agent.persona;
 			if (agent.model) model = agent.model;
 			if (agent.provider) provider = agent.provider;
