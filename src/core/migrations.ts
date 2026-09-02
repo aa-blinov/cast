@@ -741,6 +741,63 @@ WHERE role IN ('user', 'assistant');
 `);
 		},
 	},
+	{
+		// 30-32 are taken by another line of this codebase (users/multi-tenant),
+		// whose rows are already in real databases — see the name-mismatch
+		// warning in runMigrations below.
+		version: 33,
+		name: "compact-actor-fork-json",
+		up: (db) => {
+			// `fork_json` used to serialize the same transcript three times over
+			// — `messages`, `inheritedMessages` and `prefix`+`tail` are all views
+			// of it, sharing objects in memory but expanded into full copies by
+			// JSON. On one real store that was 140MB of a 547MB database, with
+			// the largest single row 21MB holding 7.8MB of distinct data. Writes
+			// now store the transcript and the boundary only, and rebuild the
+			// views on read; drop the redundant copies from rows already on
+			// disk, which the same reader handles either way.
+			if (!tableExists(db, "agent_actors")) return;
+			db.exec(
+				"UPDATE agent_actors SET fork_json = json_remove(fork_json, '$.inheritedMessages', '$.prefix', '$.tail') WHERE fork_json IS NOT NULL",
+			);
+		},
+	},
+	{
+		version: 34,
+		name: "messages-fts-seq-sync-repair",
+		up: (db) => {
+			// Version 29 in this line of the codebase is "messages-fts-seq-sync";
+			// in another line it is "users-and-multi-tenant-columns". A database
+			// that saw the latter has 29 recorded, so this line's 29 was skipped
+			// as already-applied and its messages_fts_au trigger was never
+			// created — leaving exactly the stale-seq search bug that migration
+			// was written to fix. Verified on a real store: session_history_fts_au
+			// present, messages_fts_au missing.
+			//
+			// Idempotent: does nothing when the trigger is already there, so a
+			// database that did run 29 properly is untouched.
+			if (!tableExists(db, "messages_fts")) return;
+			const hasTrigger =
+				db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name = 'messages_fts_au'").get() !==
+				undefined;
+			if (hasTrigger) return;
+			db.exec(`
+CREATE TRIGGER messages_fts_au AFTER UPDATE OF seq ON messages
+BEGIN
+  UPDATE messages_fts SET seq = NEW.seq WHERE session_id = NEW.session_id AND seq = OLD.seq;
+END;
+`);
+			// Same reasoning as migration 29: a stale entry can't be told from a
+			// correct one once its old slot is reoccupied, so rebuild.
+			db.exec("DELETE FROM messages_fts;");
+			db.exec(`
+INSERT INTO messages_fts(session_id, seq, body)
+SELECT session_id, seq, cast_message_text(content_json)
+FROM messages
+WHERE role IN ('user', 'assistant');
+`);
+		},
+	},
 ];
 
 const MIGRATION_TABLE_SCHEMA = `
@@ -771,7 +828,25 @@ export function runMigrations(db: DatabaseSync): void {
 	// missing increments — e.g. session_events added later — get applied, and
 	// already-present schema is a no-op. Record each as it runs; no separate
 	// baseline step needed.
+	// A version recorded under a different name means this database was
+	// migrated by a different line of this codebase whose numbering collides
+	// with ours: our migration of that number is then skipped as
+	// already-applied, silently, and whatever it does never happens. That is
+	// exactly how a store ended up missing the messages_fts_au trigger while
+	// reporting version 29 as applied. Warn — repairs go in as new versions
+	// (see 34), since the recorded number can't be reclaimed.
+	const appliedNames = new Map(
+		(db.prepare("SELECT version, name FROM schema_migrations").all() as Array<{ version: number; name: string }>).map(
+			(row) => [row.version, row.name],
+		),
+	);
 	for (const migration of MIGRATIONS) {
+		const recordedName = appliedNames.get(migration.version);
+		if (recordedName !== undefined && recordedName !== migration.name) {
+			console.error(
+				`[cast] migration ${migration.version} is recorded as "${recordedName}" but this build expects "${migration.name}" — it was skipped, and whatever it does has not been applied.`,
+			);
+		}
 		if (applied.has(migration.version)) continue;
 		// IMMEDIATE, and the applied-check repeated inside the transaction:
 		// `applied` above was read before any transaction, and several

@@ -9,7 +9,7 @@ import { homedir } from "node:os";
 import { closeMcpConnections } from "../core/mcp.ts";
 import { drainAutomaticMemoryMaintenance, drainProjectCheckpointWriters } from "../core/memory.ts";
 import { resolveMcpForCwd } from "../core/project.ts";
-import { deleteSession, pruneBackgroundSessions } from "../core/session.ts";
+import { deleteSession, pruneBackgroundSessions, pruneSessionEvents } from "../core/session.ts";
 import { loadSettings, updateSettings } from "../core/settings.ts";
 import type { ParsedArgs } from "../core/startup.ts";
 import { runStartup } from "../core/startup.ts";
@@ -225,8 +225,12 @@ export async function runServerMain(args: string[], options: { foreground: boole
 			try {
 				const pruned = pruneBackgroundSessions();
 				if (pruned > 0) console.log(`[cast server] pruned ${pruned} expired background session(s)`);
+				// Same sweep point, same reasoning: execution telemetry that
+				// nothing reads back after the fact, and had no delete path.
+				const events = pruneSessionEvents();
+				if (events > 0) console.log(`[cast server] pruned ${events} expired session event(s)`);
 			} catch (err) {
-				console.error("[cast server] failed to prune background sessions:", err);
+				console.error("[cast server] failed to prune expired rows:", err);
 			}
 
 			const mcpConnectStart = Date.now();

@@ -242,6 +242,44 @@ function snapshotOf(record: AgentActorRecord): AgentActorSnapshot {
 	});
 }
 
+/**
+ * What actually gets written to `fork_json`.
+ *
+ * `inheritedMessages`, `prefix` and `tail` are all views of the same
+ * transcript — in memory they share the message objects, but JSON expands
+ * them into three full copies. On one real store that meant 21MB rows holding
+ * 7.8MB of distinct data, and 140MB of a 547MB database. Only the transcript
+ * and the boundary are stored; the views are rebuilt on read.
+ */
+function serializableForkContext(fork: AgentForkContext): Record<string, unknown> {
+	const { inheritedMessages: _inherited, prefix: _prefix, tail: _tail, ...rest } = fork;
+	return rest;
+}
+
+/**
+ * Rebuilds the derived views a fork context exposes. Accepts both shapes: the
+ * compact one written now, and rows written before that change, which carry
+ * all three copies (their `messages` is identical to `inheritedMessages`, and
+ * `prefix + tail` reconstructs it exactly — verified against a real store).
+ */
+function rehydrateForkContext(parsed: Partial<AgentForkContext>): AgentForkContext | undefined {
+	const messages = Array.isArray(parsed.messages)
+		? parsed.messages
+		: Array.isArray(parsed.inheritedMessages)
+			? parsed.inheritedMessages
+			: undefined;
+	if (!messages || typeof parsed.boundaryIndex !== "number") return undefined;
+	const boundary = Math.max(-1, Math.min(parsed.boundaryIndex, messages.length - 1));
+	return {
+		...parsed,
+		messages,
+		inheritedMessages: messages,
+		prefix: messages.slice(0, boundary + 1),
+		tail: messages.slice(boundary + 1),
+		boundaryIndex: boundary,
+	} as AgentForkContext;
+}
+
 function snapshotFromRow(row: SqliteActorRow): AgentActorSnapshot | undefined {
 	if (!isMode(row.mode) || !isLifecycle(row.lifecycle) || !isStatus(row.status)) return undefined;
 	let forkContext: AgentForkContext | undefined;
@@ -249,9 +287,8 @@ function snapshotFromRow(row: SqliteActorRow): AgentActorSnapshot | undefined {
 	if (row.fork_json) {
 		try {
 			const parsed = JSON.parse(row.fork_json) as Partial<AgentForkContext>;
-			if (Array.isArray(parsed.inheritedMessages) && Array.isArray(parsed.prefix) && Array.isArray(parsed.tail)) {
-				forkContext = parsed as AgentForkContext;
-			}
+			const rehydrated = rehydrateForkContext(parsed);
+			if (rehydrated) forkContext = rehydrated;
 		} catch {
 			// A corrupt optional fork snapshot must not hide the actor lifecycle row.
 		}
@@ -367,7 +404,9 @@ export class SqliteAgentActorStore implements AgentActorStore {
 				// Ephemeral task actors keep their fork in memory for the active run;
 				// duplicating a whole transcript into SQLite on every heartbeat would
 				// make actor telemetry compete with the session history itself.
-				snapshot.lifecycle === "persistent" && snapshot.forkContext ? JSON.stringify(snapshot.forkContext) : null,
+				snapshot.lifecycle === "persistent" && snapshot.forkContext
+					? JSON.stringify(serializableForkContext(snapshot.forkContext))
+					: null,
 				snapshot.recovery ? JSON.stringify(snapshot.recovery) : null,
 				ownership.token,
 				ownership.pid,
