@@ -1,7 +1,7 @@
 import { Box, Static, Text } from "ink";
 import { type JSX, useMemo, useRef } from "react";
 import { getLastFrameOverflow } from "../core/stdin-manager.ts";
-import { displayWidth } from "./display-width.ts";
+import { displayWidthAtMost } from "./display-width.ts";
 import { Spinner } from "./Spinner.tsx";
 import { formatTaskToolSummary } from "./task-tool-summary.ts";
 import { theme } from "./themes/index.ts";
@@ -238,6 +238,19 @@ function BlockView({
  * getLastFrameOverflow) to keep the live region within the viewport even
  * when the estimate falls short. See the ChatLog component below.
  */
+/** Yields `text`'s lines from the last to the first, without materialising a
+ *  split of the whole string. `isFirst` marks the line that carries a block's
+ *  label prefix. */
+function* linesFromEnd(text: string): Generator<{ line: string; isFirst: boolean }> {
+	let end = text.length;
+	for (;;) {
+		const newline = text.lastIndexOf("\n", end - 1);
+		yield { line: text.slice(newline + 1, end), isFirst: newline === -1 };
+		if (newline === -1) return;
+		end = newline;
+	}
+}
+
 export function clampStreamingBlocks(
 	blocks: StreamBlock[],
 	rows: number,
@@ -249,12 +262,29 @@ export function clampStreamingBlocks(
 	const budget = Math.max(4, rows - 8 - extraReserve);
 	const cols = Math.max(20, columns);
 
-	const wrappedRows = (text: string, prefixLen: number): number => {
+	/**
+	 * Rows `text` wraps to, counted from the end and abandoned as soon as the
+	 * tail alone exceeds `limit` — returns undefined in that case.
+	 *
+	 * The clamp only ever needs to know whether a block fits and which tail
+	 * lines to keep, never the true height of one that overflows. Measuring
+	 * the whole text (and splitting it) on every frame made a long streaming
+	 * reasoning run quadratic over the turn: 2.3s of clamp work across 1500
+	 * frames of a 374KB block, with the worst frames past the 16ms budget, so
+	 * the live region visibly stuttered. A reasoning block never drains into
+	 * <Static> mid-turn (see splitCompleteLines), so it is the whole turn's
+	 * text that was being re-measured.
+	 */
+	const wrappedRowsWithin = (text: string, prefixLen: number, limit: number): number | undefined => {
 		let total = 0;
-		const lines = text.split("\n");
-		for (let i = 0; i < lines.length; i++) {
-			const len = displayWidth(lines[i]!) + (i === 0 ? prefixLen : 0);
-			total += Math.max(1, Math.ceil(len / cols));
+		for (const { line, isFirst } of linesFromEnd(text)) {
+			// Measured only as far as the remaining budget can accommodate: a
+			// line wider than that already decides the answer.
+			const prefix = isFirst ? prefixLen : 0;
+			const affordableCells = Math.max(0, (limit - total) * cols - prefix);
+			const width = displayWidthAtMost(line, affordableCells) + prefix;
+			total += Math.max(1, Math.ceil(width / cols));
+			if (total > limit) return undefined;
 		}
 		return total;
 	};
@@ -282,20 +312,22 @@ export function clampStreamingBlocks(
 			continue;
 		}
 		const prefixLen = block.continued ? 0 : block.kind === "thinking" ? "[reasoning] ".length : "[agent] ".length;
-		const need = wrappedRows(block.text, prefixLen);
-		if (used + need <= budget) {
+		const need = wrappedRowsWithin(block.text, prefixLen, budget - used);
+		if (need !== undefined) {
 			out.unshift({ block, truncated: false, index: i });
 			used += need;
 			continue;
 		}
 		// Keep only the tail lines of this block that fit the remaining budget.
 		const remaining = budget - used;
-		const lines = block.text.split("\n");
+		// Same reason as above: walk back from the end rather than splitting the
+		// whole (possibly hundreds of KB) block to keep a handful of lines.
 		const kept: string[] = [];
 		let tailRows = 0;
-		for (let j = lines.length - 1; j >= 0 && tailRows < remaining; j--) {
-			kept.unshift(lines[j]!);
-			tailRows += Math.max(1, Math.ceil(displayWidth(lines[j]!) / cols));
+		for (const { line } of linesFromEnd(block.text)) {
+			if (tailRows >= remaining) break;
+			kept.unshift(line);
+			tailRows += Math.max(1, Math.ceil(displayWidthAtMost(line, (remaining - tailRows) * cols) / cols));
 		}
 		// A single wrapped line longer than the budget: hard-cut by characters.
 		// maxChars is measured in cells, so with wide chars this cuts slightly
