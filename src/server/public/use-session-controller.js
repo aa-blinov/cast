@@ -33,6 +33,34 @@ function mergePendingOutgoing(data, sessionId, pendingOutgoingRef) {
 	}
 }
 
+/** How many sessions' scroll-up pages are kept at once. Each entry can hold
+ *  thousands of messages, so this is a memory bound, not a hit-rate tuning
+ *  knob: switching between a couple of threads still never refetches. */
+const OLDER_PAGES_CACHE_LIMIT = 3;
+
+/** Reads an entry and marks it most-recently-used (Map iterates in insertion
+ *  order, so re-inserting moves it to the end). */
+export function readOlderPages(cacheRef, sessionId) {
+	const cache = cacheRef.current;
+	const entry = cache.get(sessionId);
+	if (!entry) return undefined;
+	cache.delete(sessionId);
+	cache.set(sessionId, entry);
+	return entry;
+}
+
+/** Stores an entry, evicting the least recently used session past the limit. */
+export function rememberOlderPages(cacheRef, sessionId, entry) {
+	const cache = cacheRef.current;
+	cache.delete(sessionId);
+	cache.set(sessionId, entry);
+	for (const oldest of cache.keys()) {
+		if (cache.size <= OLDER_PAGES_CACHE_LIMIT) break;
+		cache.delete(oldest);
+	}
+	return entry;
+}
+
 export function useSessionController({
 	setSessions,
 	setSessionsLoaded,
@@ -179,13 +207,13 @@ export function useSessionController({
 				// reliable than oldestSeq (which may not change on some edits).
 				// A mismatch means the session mutated underneath (e.g. background
 				// task), so drop the cache and refetch.
-				const cached = olderPagesCacheRef.current.get(id);
+				const cached = readOlderPages(olderPagesCacheRef, id);
 				if (cached && cached.anchorVersion === data.version) {
 					data.messages = [...cached.messages, ...data.messages];
 					data.oldestSeq = cached.oldestSeq;
 					data.hasMoreHistory = cached.hasMore;
 				} else {
-					olderPagesCacheRef.current.set(id, {
+					rememberOlderPages(olderPagesCacheRef, id, {
 						anchorVersion: data.version,
 						messages: [],
 						oldestSeq: data.oldestSeq,
@@ -224,8 +252,10 @@ export function useSessionController({
 			setRunning,
 			setSession,
 			draftVersionRef,
-			olderPagesCacheRef.current.get,
-			olderPagesCacheRef.current.set,
+			// The ref itself, not Map.prototype.get/set — those were listed
+			// here, which is a stable value either way and says nothing about
+			// the cache's contents.
+			olderPagesCacheRef,
 			sessionViewVersionRef,
 			wasRunningRef,
 			pendingOutgoingRef,

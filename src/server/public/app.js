@@ -52,7 +52,7 @@ import { handleSseEvent } from "./sse-events.js";
 import { StatusPopover } from "./status-popover.js";
 import { LiveStreamingBlocks as LiveStreamingBlocksModule } from "./streaming-blocks.js";
 import { usePanelResize } from "./use-panel-resize.js";
-import { useSessionController } from "./use-session-controller.js";
+import { readOlderPages, useSessionController } from "./use-session-controller.js";
 import { useSessionState } from "./use-session-state.js";
 import { useWorkspaceState } from "./use-workspace-state.js";
 
@@ -945,9 +945,14 @@ function App() {
 
 	// Scroll-up pagination for long threads: older pages already fetched this
 	// tab session, keyed by session id, so switching away and back doesn't
-	// refetch. Cleared only on a full reload — messages never change once
-	// fetched (compaction can't retroactively edit history, see recordCompaction),
-	// so there's no staleness to invalidate against.
+	// refetch. Messages never change once fetched (compaction can't
+	// retroactively edit history, see recordCompaction), so there's no
+	// staleness to invalidate against — but the pages themselves are large,
+	// and this used to be an unbounded Map cleared only by /clear. In a tab
+	// left open for days, every session ever visited kept its scroll-up
+	// history in memory; walking to the top of a 4000-message thread pinned
+	// all of it for the life of the tab. Bounded to the few most recently
+	// used sessions instead (see rememberOlderPages / readOlderPages).
 	const olderPagesCacheRef = useRef(new Map());
 	// Outgoing chat is kept here until the daemon acknowledges the request. A
 	// ref avoids making reconnect bookkeeping itself re-render the whole app.
@@ -1072,6 +1077,8 @@ function App() {
 				return;
 			}
 			setSessions((prev) => prev.filter((s) => s.id !== id));
+			// Nothing will ever read this session's pages again.
+			olderPagesCacheRef.current.delete(id);
 			try {
 				if (localStorage.getItem("cast:lastSessionId") === id) localStorage.removeItem("cast:lastSessionId");
 			} catch {}
@@ -1548,7 +1555,7 @@ function App() {
 		setOlderHistoryStatus({ sessionId: forId, status: "loading" });
 		try {
 			const res = await api("GET", `/api/sessions/${forId}/history?before=${session.oldestSeq}`);
-			const cached = olderPagesCacheRef.current.get(forId);
+			const cached = readOlderPages(olderPagesCacheRef, forId);
 			if (cached) {
 				cached.messages = [...res.messages, ...cached.messages];
 				cached.oldestSeq = res.oldestSeq;
