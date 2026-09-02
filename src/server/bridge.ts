@@ -3793,8 +3793,15 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				}
 				if (sub === "install") {
 					if (!rest) return { ok: false, error: "Usage: /plugin install <name@marketplace>" };
+					// installPlugin's git clone can take seconds — a concurrent
+					// settings change (another /plugin command, another tab)
+					// landing in that window would otherwise be silently
+					// overwritten by this call's write, since r.enabledPlugins is
+					// derived from the `settings` snapshot read before the await.
+					// Only the id being installed matters here; re-derive the rest
+					// from current settings at write time instead of trusting it.
 					const r = await installPlugin(rest, settings);
-					updateSettings({ enabledPlugins: r.enabledPlugins });
+					updateSettings((current) => ({ enabledPlugins: { ...(current.enabledPlugins ?? {}), [r.id]: true } }));
 					const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
 					skills = skillsResult.skills;
 					recomputeAllSystemPrompts();

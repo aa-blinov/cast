@@ -53,9 +53,14 @@ const { createServerBridge, SANDBOX_CWD, parseEvolveJson, parseSuggestionJson, t
 // three synchronous git clones that block the event loop. Stub the seeder to
 // assert it's never reached from those paths.
 const mockEnsureDefaultMarketplaces = vi.fn();
+const mockInstallPlugin = vi.fn();
 vi.mock("../src/core/plugins.ts", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../src/core/plugins.ts")>();
-	return { ...actual, ensureDefaultMarketplaces: (...args: unknown[]) => mockEnsureDefaultMarketplaces(...args) };
+	return {
+		...actual,
+		ensureDefaultMarketplaces: (...args: unknown[]) => mockEnsureDefaultMarketplaces(...args),
+		installPlugin: (...args: unknown[]) => mockInstallPlugin(...args),
+	};
 });
 
 const testConfig: AppConfig = {
@@ -102,6 +107,7 @@ describe("web bridge", () => {
 		mockFetchModels.mockReset();
 		mockProbeProvider.mockClear();
 		mockEnsureDefaultMarketplaces.mockReset();
+		mockInstallPlugin.mockReset();
 		mockResolveMcpForCwd.mockReset();
 		mockResolveMcpForCwd.mockResolvedValue({ ...emptyMcp, allServerNames: ["srv"] });
 		mockFetchModels.mockResolvedValue({
@@ -1207,6 +1213,41 @@ describe("web bridge", () => {
 		releaseFirst();
 		await Promise.all([first, second]);
 		expect(calls).toBe(2);
+	});
+
+	it("a slow /plugin install doesn't clobber a concurrent settings change with its stale enabledPlugins snapshot", async () => {
+		const { loadSettings, updateSettings } = await import("../src/core/settings.ts");
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+
+		let releaseInstall: () => void = () => {};
+		const installGate = new Promise<void>((resolve) => {
+			releaseInstall = resolve;
+		});
+		mockInstallPlugin.mockImplementation(
+			async (_ref: string, settings: { enabledPlugins?: Record<string, boolean> }) => {
+				await installGate;
+				// Mirrors the real installPlugin: derives its return value from the
+				// settings snapshot it was handed at call time — stale by the time
+				// this resolves if something else wrote settings in the meantime.
+				return {
+					id: "pluginA@mp",
+					root: "/fake/root",
+					enabledPlugins: { ...(settings.enabledPlugins ?? {}), "pluginA@mp": true },
+				};
+			},
+		);
+
+		const install = bridge.executeCommand(ws.id, "/plugin install pluginA@mp");
+		await new Promise((r) => setTimeout(r, 0));
+
+		// A concurrent settings change lands while the clone is still "running".
+		updateSettings({ enabledPlugins: { "pluginB@mp": true } });
+
+		releaseInstall();
+		await install;
+
+		expect(loadSettings().enabledPlugins).toEqual({ "pluginA@mp": true, "pluginB@mp": true });
 	});
 
 	it("latches an auto-mode directory rule once a matching file enters context, and keeps it sticky next turn", async () => {

@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.34
+
+### Fixed
+
+- **Plugins:** `/plugin install`'s git clone can take seconds — a settings change from a concurrent command or another tab landing in that window was silently overwritten once the install finished, since its `enabledPlugins` write was derived from the settings snapshot read before the clone started. Now re-derives just the installed plugin's own enabled flag against current settings at write time.
+
 ## 0.22.33
 
 ### Fixed
