@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.33
+
+### Fixed
+
+- **ACP:** the ACP (editor/IDE) integration leaked a client connection reference on every session, for the life of the daemon process — `closeSession` cleaned up the runner, MCP connections, and open-document buffers, but never released the module-level map tracking each session's client, populated on every prompt. Any long-running ACP-connected editor (e.g. Zed) opening and closing many chat sessions over a work session accumulated these indefinitely.
+
 ## 0.22.32
 
 ### Fixed

@@ -64,6 +64,12 @@ export interface AcpAdapterSession {
 // ---------------------------------------------------------------------------
 const sessionClients = new Map<string, { notify(method: string, params: unknown): Promise<void> }>();
 
+/** Test-only: verifies closeSession actually releases the client reference
+ * instead of leaking it for the life of the daemon process. */
+export function sessionClientsSizeForTests(): number {
+	return sessionClients.size;
+}
+
 // ---------------------------------------------------------------------------
 // Adapter API
 // ---------------------------------------------------------------------------
@@ -288,6 +294,13 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 					// reuses `session` objects).
 					s.openDocuments.clear();
 					sessions.delete(sessionId);
+					// sessionClients is a module-level map, separate from the
+					// per-adapter `sessions` map above — populated on every
+					// submitPrompt() call and otherwise never cleared, so every
+					// ACP session ever prompted leaked its client reference (a
+					// closure over the JSON-RPC connection) for the life of the
+					// daemon process.
+					sessionClients.delete(sessionId);
 				}
 			}
 			try {
