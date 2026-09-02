@@ -100,10 +100,24 @@ export function StreamingBlocks({ blocks, renderMarkdown, showReasoning = true }
 export function LiveStreamingBlocks({ controllerRef, onFrame, renderMarkdown, showReasoning = true }) {
 	const [stream, setStream] = useState({ blocks: [] });
 	const streamRef = useRef({ blocks: [] });
-	const rafRef = useRef(null);
+	// { kind: "raf" | "timeout", id } — the throttled path below schedules a
+	// timeout, the immediate one a frame, and the two id spaces are unrelated:
+	// storing both in one ref and always calling cancelAnimationFrame meant a
+	// pending throttle timer survived reset/take/hydrate/unmount and fired a
+	// stale flush afterwards, while the number it did pass to
+	// cancelAnimationFrame could cancel an unrelated frame that happened to
+	// share the id.
+	const pendingRef = useRef(null);
+	const cancelPending = useCallback(() => {
+		const pending = pendingRef.current;
+		if (!pending) return;
+		if (pending.kind === "raf") cancelAnimationFrame(pending.id);
+		else clearTimeout(pending.id);
+		pendingRef.current = null;
+	}, []);
 	const lastFlushRef = useRef(0);
 	const flush = useCallback(() => {
-		rafRef.current = null;
+		pendingRef.current = null;
 		lastFlushRef.current = performance.now();
 		setStream({ blocks: [...streamRef.current.blocks] });
 		onFrame();
@@ -111,46 +125,53 @@ export function LiveStreamingBlocks({ controllerRef, onFrame, renderMarkdown, sh
 	const reduce = useCallback(
 		(event) => {
 			streamRef.current = reduceStreamEvent(streamRef.current, event);
-			if (rafRef.current != null) return;
+			if (pendingRef.current != null) return;
 			const since = performance.now() - lastFlushRef.current;
 			// Throttle streaming renders to ~12fps (80ms) — full markdown re-parse
 			// on every token is O(n²). Coalescing via RAF already helps, but for
 			// 4-5 tokens per frame we still re-parse the whole growing text.
 			// 80ms keeps typing feel smooth while cutting renders 4× on fast streams.
 			const delay = since < 80 ? 80 - since : 0;
-			if (delay === 0) rafRef.current = requestAnimationFrame(flush);
-			else rafRef.current = setTimeout(() => requestAnimationFrame(flush), delay);
+			if (delay === 0) {
+				pendingRef.current = { kind: "raf", id: requestAnimationFrame(flush) };
+			} else {
+				pendingRef.current = {
+					kind: "timeout",
+					id: setTimeout(() => {
+						// Re-registered as a frame, so a cancel landing between the
+						// timeout firing and the frame running still catches it.
+						pendingRef.current = { kind: "raf", id: requestAnimationFrame(flush) };
+					}, delay),
+				};
+			}
 		},
 		[flush],
 	);
 	const reset = useCallback(() => {
-		if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
-		rafRef.current = null;
+		cancelPending();
 		streamRef.current = { blocks: [] };
 		setStream({ blocks: [] });
-	}, []);
+	}, [cancelPending]);
 	const take = useCallback(() => {
-		if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
-		rafRef.current = null;
+		cancelPending();
 		const snapshot = streamRef.current.blocks;
 		streamRef.current = { blocks: [] };
 		setStream({ blocks: [] });
 		return snapshot;
-	}, []);
+	}, [cancelPending]);
 	const hydrate = useCallback((blocks) => {
-		if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
-		rafRef.current = null;
+		cancelPending();
 		const snapshot = Array.isArray(blocks) ? [...blocks].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)) : [];
 		streamRef.current = { blocks: snapshot };
 		setStream({ blocks: snapshot });
-	}, []);
+	}, [cancelPending]);
 	controllerRef.current = { reduce, reset, take, hydrate };
 	useEffect(
 		() => () => {
-			if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+			cancelPending();
 			if (controllerRef.current?.reset === reset) controllerRef.current = null;
 		},
-		[controllerRef, reset],
+		[cancelPending, controllerRef, reset],
 	);
 	return html`<${StreamingBlocks} blocks=${stream.blocks} renderMarkdown=${renderMarkdown} showReasoning=${showReasoning} />`;
 }

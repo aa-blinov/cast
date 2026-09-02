@@ -28,17 +28,18 @@ function upsertRetryRow(messages, text) {
 /** Drops any lingering "[Retrying..." warning row once real content streams —
  *  the retry belongs to the waiting phase, not the reply. Returns the same
  *  array reference when there's nothing to strip. */
+function isRetryRow(m) {
+	return Boolean(m) && m.role === "warning" && typeof m.content === "string" && m.content.startsWith("[Retrying");
+}
+
 function stripRetryRow(messages) {
-	let changed = false;
-	const next = [];
-	for (const m of messages) {
-		if (m && m.role === "warning" && typeof m.content === "string" && m.content.startsWith("[Retrying")) {
-			changed = true;
-			continue;
-		}
-		next.push(m);
-	}
-	return changed ? next : messages;
+	// Checked before building anything: this runs on every token and thinking
+	// event, and a retry row is present for a fraction of a second at most —
+	// so the common case is a scan that finds nothing, and allocating a copy
+	// of the whole loaded transcript per token just to discard it was pure GC
+	// churn at 50+ tokens/s on a session with thousands of messages.
+	if (!messages.some(isRetryRow)) return messages;
+	return messages.filter((m) => !isRetryRow(m));
 }
 
 export function handleSseEvent(event, context) {
