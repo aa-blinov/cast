@@ -754,12 +754,18 @@ export interface SessionAnalytics {
 }
 
 export function querySessionAnalytics(sinceMs: number): SessionAnalytics {
-	const sessionsRow = getDb()
-		.prepare("SELECT COUNT(*) AS n FROM sessions WHERE created_at >= ?")
-		.get(new Date(sinceMs).toISOString());
+	const since = new Date(sinceMs).toISOString();
+	const sessionsRow = getDb().prepare("SELECT COUNT(*) AS n FROM sessions WHERE created_at >= ?").get(since);
+	// Scoped to the same window as `sessions` above — averaging over every
+	// session in the database's entire history regardless of the requested
+	// range made the two numbers on the same dashboard card incomparable
+	// (e.g. "Sessions: 2" for the last hour next to an all-time "~85
+	// msgs/session").
 	const msgsRow = getDb()
-		.prepare("SELECT AVG(c) AS avg_msgs FROM (SELECT COUNT(*) AS c FROM messages GROUP BY session_id)")
-		.get();
+		.prepare(
+			"SELECT AVG(c) AS avg_msgs FROM (SELECT COUNT(*) AS c FROM messages m JOIN sessions s ON s.id = m.session_id WHERE s.created_at >= ? GROUP BY m.session_id)",
+		)
+		.get(since);
 	return {
 		sessions: Number((sessionsRow as { n: number }).n),
 		avgMessagesPerSession: Number((msgsRow as { avg_msgs: number | null }).avg_msgs) || null,

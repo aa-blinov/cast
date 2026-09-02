@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb, resetDbConnectionForTests } from "../src/core/db.ts";
+import { appendMessage, createSession, saveSession } from "../src/core/session.ts";
 import {
 	countRecentLlmRequests,
 	queryEndpointOverview,
@@ -13,6 +14,7 @@ import {
 	queryMemoryToolUsage,
 	queryRecentLlmRequests,
 	queryReliabilityOverview,
+	querySessionAnalytics,
 	queryTelemetryOverview,
 	queryTelemetrySeries,
 	queryTokensPerSecond,
@@ -300,5 +302,51 @@ describe("llm telemetry", () => {
 		expect(t.avgTokensPerTurn).toBe(300);
 		// turn-a spans 4ms, turn-b 2ms → avg 3ms.
 		expect(t.avgDurationMs).toBe(3);
+	});
+});
+
+describe("querySessionAnalytics", () => {
+	let root = "";
+
+	beforeEach(() => {
+		root = mkdtempSync(join(tmpdir(), "cast-telemetry-test-"));
+		process.env.CAST_SESSIONS_DB = join(root, "sessions.db");
+		resetDbConnectionForTests();
+	});
+
+	afterEach(() => {
+		resetDbConnectionForTests();
+		delete process.env.CAST_SESSIONS_DB;
+		rmSync(root, { recursive: true, force: true });
+	});
+
+	it("scopes avgMessagesPerSession to the same window as the session count, not the whole database", () => {
+		const now = Date.now();
+
+		// An old session, well outside any window we'll query, with a large
+		// message count that must not pollute a windowed average.
+		const old = createSession("gpt-4o", "/tmp/old");
+		old.createdAt = new Date(now - 10 * 24 * 60 * 60 * 1000).toISOString();
+		for (let i = 0; i < 20; i++) appendMessage(old, { role: "user", content: `old-${i}` });
+		saveSession(old);
+
+		// A recent session with a small message count — this is the one a
+		// "last hour" window should actually be averaging over.
+		const recent = createSession("gpt-4o", "/tmp/recent");
+		recent.createdAt = new Date(now - 60 * 1000).toISOString();
+		appendMessage(recent, { role: "user", content: "hi" });
+		appendMessage(recent, { role: "assistant", content: "hello" });
+		saveSession(recent);
+
+		const windowed = querySessionAnalytics(now - 60 * 60 * 1000);
+		expect(windowed.sessions).toBe(1);
+		// If this used the whole database's history (the bug), the average
+		// would be pulled toward the old session's 20 messages instead of the
+		// windowed session's 2.
+		expect(windowed.avgMessagesPerSession).toBe(2);
+
+		const allTime = querySessionAnalytics(now - 30 * 24 * 60 * 60 * 1000);
+		expect(allTime.sessions).toBe(2);
+		expect(allTime.avgMessagesPerSession).toBe(11);
 	});
 });
