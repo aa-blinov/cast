@@ -1478,6 +1478,39 @@ describe("web bridge", () => {
 		expect(ws.systemPrompt).toContain("Mode: build");
 	});
 
+	it("setSessionMode clears a stale pending plan question/transition and broadcasts the clear", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		ws.session.mode = "plan";
+		ws.session.planQuestion = {
+			questions: [{ question: "Choose approach", options: [{ value: "a", label: "A" }] }],
+		};
+		ws.session.planTransition = { kind: "done" };
+		const events: Array<{ type: string; question?: unknown; planTransition?: unknown }> = [];
+		bridge.subscribe(ws.id, (event) => events.push(event));
+
+		// Switching mode by any path other than answering the pending
+		// question/transition must not leave it dangling — its premise
+		// ("still in plan mode") no longer holds once the mode has moved.
+		expect(bridge.setSessionMode(ws.id, "build")).toEqual({ ok: true });
+
+		expect(ws.session.planQuestion).toBeUndefined();
+		expect(ws.session.planTransition).toBeUndefined();
+		expect(events).toContainEqual({ type: "decision_state", question: undefined, planTransition: undefined });
+	});
+
+	it("/plan and /build commands also clear a stale pending plan question/transition", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		ws.session.mode = "plan";
+		ws.session.planTransition = { kind: "done" };
+
+		await expect(bridge.executeCommand(ws.id, "/build")).resolves.toMatchObject({ ok: true });
+
+		expect(ws.session.mode).toBe("build");
+		expect(ws.session.planTransition).toBeUndefined();
+	});
+
 	it("setSessionMode is a no-op when the mode is already active", () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();

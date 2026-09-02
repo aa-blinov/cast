@@ -2363,7 +2363,18 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			ws.session.cwd ?? cwd,
 			mode,
 		);
-		saveSession(ws.session);
+		// A pending plan question/transition's premise is "still in plan mode"
+		// — switching mode out from under it any other way than answering it
+		// (the approve/reject buttons already clear it themselves) leaves a
+		// stale card the client would still render, and answering it would
+		// still run resolvePlanTransition/createPlanTodos against a session
+		// already in build mode. persistDecisionState both clears it and
+		// broadcasts, so an open approval card actually closes.
+		if (ws.session.planQuestion || ws.session.planTransition) {
+			persistDecisionState(ws, undefined, undefined);
+		} else {
+			saveSession(ws.session);
+		}
 		broadcastSessionUpdate(ws);
 		return { ok: true };
 	}
@@ -3484,7 +3495,14 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				ws.session.cwd ?? cwd,
 				mode,
 			);
-			saveSession(ws.session);
+			// Same reasoning as setSessionMode: a stale plan question/transition
+			// left over from before this mode switch must not survive it — see
+			// that function's comment for the full failure mode.
+			if (ws.session.planQuestion || ws.session.planTransition) {
+				persistDecisionState(ws, undefined, undefined);
+			} else {
+				saveSession(ws.session);
+			}
 			return {
 				ok: true,
 				result:
