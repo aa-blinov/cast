@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -36,6 +36,41 @@ describe("settings", () => {
 	afterEach(() => {
 		process.env.HOME = realHome;
 		rmSync(fakeHome, { recursive: true, force: true });
+	});
+
+	describe("a corrupt settings.json", () => {
+		it("is preserved instead of being silently overwritten by the next update", () => {
+			// loadSettings() degrades to {} on a parse error, and updateSettings
+			// merges over that — which used to write the empty state out as the
+			// whole file, destroying every provider entry and API key. The
+			// daemon itself calls updateSettings during an ordinary turn, so a
+			// single hand-edit typo was enough to lose them with no warning.
+			const settingsDir = join(fakeHome, ".cast");
+			mkdirSync(settingsDir, { recursive: true });
+			const path = join(settingsDir, "settings.json");
+			const original =
+				'{\n  "model": "some-model",\n  "providers": [{ "name": "p", "url": "u", "apiKey": "sk-real-secret" }],\n}';
+			writeFileSync(path, original);
+
+			expect(loadSettings()).toEqual({});
+			updateSettings({ reasoningLevel: "high" });
+
+			// The update went through, so the daemon keeps working...
+			expect(loadSettings().reasoningLevel).toBe("high");
+			// ...and the unreadable original is still on disk, verbatim.
+			const quarantined = readdirSync(settingsDir).filter((f) => f.startsWith("settings.json.corrupt-"));
+			expect(quarantined).toHaveLength(1);
+			expect(readFileSync(join(settingsDir, quarantined[0]!), "utf-8")).toBe(original);
+		});
+
+		it("leaves a readable settings.json alone", () => {
+			updateSettings({ model: "m1", providers: [{ name: "p", url: "u", apiKey: "k" }] });
+			updateSettings({ reasoningLevel: "low" });
+
+			expect(loadSettings()).toMatchObject({ model: "m1", reasoningLevel: "low" });
+			expect(loadSettings().providers).toHaveLength(1);
+			expect(readdirSync(join(fakeHome, ".cast")).filter((f) => f.includes(".corrupt-"))).toHaveLength(0);
+		});
 	});
 
 	describe("project trust", () => {

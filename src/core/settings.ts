@@ -240,16 +240,22 @@ function withSettingsLock<T>(work: () => T): T {
 	}
 }
 
-export function loadSettings(): Settings {
+/** Distinguishes "no settings yet" from "settings exist but don't parse" —
+ * the two must not be treated alike on the write path, see updateSettings. */
+function readSettingsFile(): { settings: Settings; corrupt: boolean } {
 	const path = getSettingsPath();
-	if (!existsSync(path)) return {};
+	if (!existsSync(path)) return { settings: {}, corrupt: false };
 
 	try {
 		const s = JSON.parse(readFileSync(path, "utf-8")) as Settings;
-		return migrateSettings(s);
+		return { settings: migrateSettings(s), corrupt: false };
 	} catch {
-		return {};
+		return { settings: {}, corrupt: true };
 	}
+}
+
+export function loadSettings(): Settings {
+	return readSettingsFile().settings;
 }
 
 /**
@@ -299,10 +305,30 @@ function saveSettings(settings: Settings): void {
 
 export function updateSettings(partial: Partial<Settings> | ((current: Settings) => Partial<Settings>)): void {
 	withSettingsLock(() => {
-		const current = loadSettings();
+		const { settings: current, corrupt } = readSettingsFile();
+		// A settings.json that doesn't parse (a hand-edit typo — the atomic
+		// tmp+rename in saveSettings already rules out a truncated write) reads
+		// back as `{}`, and merging an update over that used to write the empty
+		// state out as the whole file: every provider entry and API key gone,
+		// no warning, no way back. It needed no user action either, since the
+		// daemon itself calls updateSettings during an ordinary turn. Move the
+		// unreadable file aside first so its contents stay recoverable.
+		if (corrupt) quarantineCorruptSettings();
 		const update = typeof partial === "function" ? partial(current) : partial;
 		saveSettings({ ...current, ...update });
 	});
+}
+
+function quarantineCorruptSettings(): void {
+	const path = getSettingsPath();
+	const backup = `${path}.corrupt-${Date.now()}`;
+	try {
+		renameSync(path, backup);
+		console.error(`[cast] ${path} could not be parsed — kept a copy at ${backup} and continuing from defaults.`);
+	} catch {
+		// Best effort: if it can't be moved aside, the write below still has to
+		// go through — refusing would leave the daemon unable to save anything.
+	}
 }
 
 /** Existing settings remain enabled; only an explicit false disables memory. */
