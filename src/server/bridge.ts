@@ -1471,7 +1471,15 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				if (refreshed.ok && refreshed.models) setModelsCache(refreshed.models);
 			}
 			if (sessionModelChanged) reasoningMeta = modelInfoFor(ws.session.model)?.reasoning;
-			if (endpointChanged) await reconcileSessionModel(ws);
+			// A session pinned to its own saved provider (providerName set) is
+			// unaffected by the *global* active endpoint moving — reconciling it
+			// here anyway would fetch the new global provider's model list and,
+			// if the session's model isn't on it, silently reset the pinned
+			// session onto the global default model, defeating the whole point
+			// of the pin (confirmed reachable: another session's /provider
+			// switch, the TUI, or a manual settings.json edit all flip the
+			// global endpoint without touching this session's pin at all).
+			if (endpointChanged && !ws.session.providerName) await reconcileSessionModel(ws);
 		} catch (error) {
 			failSetup(error);
 			return;

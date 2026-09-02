@@ -2134,6 +2134,32 @@ describe("web bridge", () => {
 			expect(events.some((e) => e.type === "notice" && e.message?.includes('switched to "hy3"'))).toBe(true);
 		});
 
+		it("does not reconcile a session pinned to its own provider when only the global endpoint moves", async () => {
+			const { updateSettings } = await import("../src/core/settings.ts");
+			updateSettings({
+				providers: [
+					{ name: "local", url: testConfig.baseURL, apiKey: testConfig.apiKey },
+					{ name: "pinned-provider", url: "https://pinned.example/v1", apiKey: "pinned-key" },
+				],
+			});
+			// New global endpoint only serves "hy3" — if the pinned session got
+			// reconciled against it (the bug), its gpt-4o model would get reset.
+			mockFetchModels.mockResolvedValue({ ok: true, models: [{ id: "hy3" }] });
+			const bridge = freshBridge();
+			const ws = bridge.createSession(undefined, undefined, undefined, true, undefined, "pinned-provider");
+			expect(ws.session.model).toBe("gpt-4o");
+
+			// Someone/something else flips the *global* active provider — the
+			// pinned session's own provider is untouched by this.
+			await setActive("https://new.provider/v1", "newkey");
+
+			await bridge.submit(ws.id, "hi");
+
+			expect(ws.session.model).toBe("gpt-4o");
+			expect(ws.session.providerName).toBe("pinned-provider");
+			expect(mockFetchModels).not.toHaveBeenCalled();
+		});
+
 		it("keeps a session model that exists on both endpoints", async () => {
 			const bridge = freshBridge();
 			const ws = bridge.createSession();
