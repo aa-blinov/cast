@@ -1736,7 +1736,20 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					formatSkillsForPrompt(skills, persona.skills),
 					formatMcpForPrompt(mcpResult, persona.mcp),
 					sessionCwd,
-					{ model: runModel, reasoningLevel: config.reasoningLevel, reasoningMeta, mode: ws.session.mode },
+					{
+						// The run's own resolved level/meta, not the global ones —
+						// runConfig above sends `runReasoningLevel` to the provider, so
+						// telling the model "Reasoning: high" out of the global config
+						// while the request actually carries "enabled" (a session
+						// pinned to a provider whose vocabulary differs) describes a
+						// state that doesn't exist. Same for the supported-efforts
+						// line: the global `reasoningMeta` describes whichever model
+						// the globally active provider resolved, not this run's.
+						model: runModel,
+						reasoningLevel: runReasoningLevel,
+						reasoningMeta: modelInfoFor(runModel)?.reasoning ?? reasoningMeta,
+						mode: ws.session.mode,
+					},
 				);
 			},
 			memory: { sessionId: ws.session.id },
@@ -4400,9 +4413,17 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 
 	function saveSshKey(name: string, keyContent: string): { ok: boolean; path?: string; error?: string } {
 		try {
+			// basename() so a name carrying path separators can't escape the flat
+			// keys directory — same rule the attachment routes apply. Without it
+			// a name like "../../.ssh/authorized_keys" resolved outside ~/.cast
+			// and this became a write-anywhere-the-daemon-can-write primitive.
+			const safeName = basename(name.trim());
+			if (!safeName || safeName === "." || safeName === "..") {
+				return { ok: false, error: "Invalid key name" };
+			}
 			const keysDir = join(homedir(), ".cast", "keys");
 			if (!existsSync(keysDir)) mkdirSync(keysDir, { recursive: true });
-			const keyPath = join(keysDir, name);
+			const keyPath = join(keysDir, safeName);
 			writeFileSync(keyPath, keyContent.endsWith("\n") ? keyContent : `${keyContent}\n`, "utf-8");
 			chmodSync(keyPath, 0o600);
 			return { ok: true, path: keyPath };

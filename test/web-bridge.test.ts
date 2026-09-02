@@ -760,6 +760,36 @@ describe("web bridge", () => {
 		expect(config.reasoningLevel).toBe("high");
 	});
 
+	it("tells the model the reasoning level the turn actually runs with, not the global one", async () => {
+		const { updateSettings } = await import("../src/core/settings.ts");
+		updateSettings({
+			providers: [
+				{ name: "local", url: testConfig.baseURL, apiKey: testConfig.apiKey },
+				{ name: "minimax-pinned", url: "https://api.minimax.io/v1", apiKey: "mm-key", reasoningFormat: "minimax" },
+			],
+			providerUrl: testConfig.baseURL,
+			apiKey: testConfig.apiKey,
+			modelProvider: "local",
+			reasoningLevel: "high",
+		});
+		const config = { ...testConfig, reasoningFormat: "generic", reasoningLevel: "high" } as AppConfig;
+		const bridge = createServerBridge(makeResult({ config }));
+		const pinned = bridge.createSession(undefined, undefined, undefined, true, undefined, "minimax-pinned");
+
+		await bridge.submit(pinned.id, "hello");
+
+		const run = runAgentLoop.mock.calls[0]![1] as {
+			config: AppConfig;
+			rebuildSystemPrompt: (ctx: { userText: string; contextFiles: string[] }) => string;
+		};
+		// loop.ts calls rebuildSystemPrompt for every turn, so this — not the
+		// prompt cached at session creation — is what the model actually reads.
+		const prompt = run.rebuildSystemPrompt({ userText: "hello", contextFiles: [] });
+		expect(prompt).toContain(`- Reasoning: ${run.config.reasoningLevel}`);
+		expect(prompt).toContain("- Reasoning: enabled");
+		expect(prompt).not.toContain("- Reasoning: high");
+	});
+
 	it("chooses a valid model default when the current reasoning level is unsupported", async () => {
 		const { loadSettings, updateSettings } = await import("../src/core/settings.ts");
 		updateSettings({
@@ -1874,6 +1904,35 @@ describe("web bridge", () => {
 
 		const sshSuggestions = bridge.suggestCommand(ws.id, "/ssh");
 		expect(sshSuggestions.map((s) => s.value)).toEqual(["list", "add", "remove"]);
+	});
+
+	it("saveSshKey can't be tricked into writing outside the keys directory", async () => {
+		const fakeHome = mkdtempSync(join(tmpdir(), "cast-ssh-key-test-"));
+		const previousHome = process.env.HOME;
+		process.env.HOME = fakeHome;
+		try {
+			mkdirSync(join(fakeHome, ".ssh"), { recursive: true });
+			const bridge = createServerBridge(makeResult());
+
+			const escaped = bridge.saveSshKey("../../.ssh/authorized_keys", "ssh-rsa AAAA attacker");
+
+			// Written as a literal file name inside the keys dir, if at all —
+			// never at the traversed destination.
+			expect(existsSync(join(fakeHome, ".ssh", "authorized_keys"))).toBe(false);
+			if (escaped.ok) expect(escaped.path).toBe(join(fakeHome, ".cast", "keys", "authorized_keys"));
+
+			expect(bridge.saveSshKey("..", "x").ok).toBe(false);
+			expect(bridge.saveSshKey("   ", "x").ok).toBe(false);
+
+			// A normal name still works.
+			const normal = bridge.saveSshKey("id_test", "ssh-rsa AAAA legit");
+			expect(normal).toMatchObject({ ok: true, path: join(fakeHome, ".cast", "keys", "id_test") });
+			expect(readFileSync(normal.path!, "utf-8")).toBe("ssh-rsa AAAA legit\n");
+		} finally {
+			if (previousHome === undefined) delete process.env.HOME;
+			else process.env.HOME = previousHome;
+			rmSync(fakeHome, { recursive: true, force: true });
+		}
 	});
 
 	it("suggestCommand returns empty for unknown commands", async () => {
