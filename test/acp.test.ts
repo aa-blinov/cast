@@ -47,7 +47,7 @@ vi.mock("../src/core/mcp.ts", () => ({
 
 // ---- Imports after mocks ------------------------------------------------
 
-const { createAcpAdapter } = await import("../src/core/acp/bridge.ts");
+const { createAcpAdapter, sessionClientsSizeForTests } = await import("../src/core/acp/bridge.ts");
 const { createAgentRunner, createPlanState } = await import("../src/core/runner.ts");
 const { listSessions, deleteSession, loadSession } = await import("../src/core/session.ts");
 
@@ -302,6 +302,23 @@ describe("ACP adapter", () => {
 		const sessions = new Map([[session.state.id, session]]);
 		await adapter.closeSession(session.state.id, sessions);
 		expect(order).toEqual(["abort", "waitForIdle"]);
+	});
+
+	it("closeSession releases the session's client reference instead of leaking it", async () => {
+		const { session } = makeSession();
+		// submitPrompt is what populates sessionClients (a module-level map,
+		// separate from the per-adapter `sessions` map closeSession clears) —
+		// without this call there'd be nothing to leak in the first place.
+		await adapter.submitPrompt("sid", [{ type: "text", text: "/abort" }], session, mockClient as any, {
+			version: "test",
+			permissionMode: "default",
+		});
+		expect(sessionClientsSizeForTests()).toBeGreaterThan(0);
+
+		const sessions = new Map([[session.state.id, session]]);
+		await adapter.closeSession(session.state.id, sessions);
+
+		expect(sessionClientsSizeForTests()).toBe(0);
 	});
 
 	it("setSessionMode toggles plan state", () => {
