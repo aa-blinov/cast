@@ -466,3 +466,48 @@ describe("JSON response compression", () => {
 		await res.arrayBuffer().catch(() => undefined);
 	});
 });
+
+describe("request body limits", () => {
+	it("rejects an oversized request body with 413 instead of buffering it all in memory", async () => {
+		const auth = await fetch(`${origin}/api/auth/login`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ username: "cast", password: "test-password" }),
+		});
+		const cookie = auth.headers.get("set-cookie")!;
+
+		// Streamed, not one big string: the point is that the *server* must
+		// not accumulate the whole thing, so the client must not either.
+		// 56MB total, past the 48MB readBody ceiling.
+		const chunk = new Uint8Array(1024 * 1024).fill(0x20);
+		const totalChunks = 56;
+		let sent = 0;
+		const body = new ReadableStream<Uint8Array>({
+			pull(controller) {
+				if (sent >= totalChunks) {
+					controller.close();
+					return;
+				}
+				sent++;
+				controller.enqueue(chunk);
+			},
+		});
+
+		const res = await fetch(`${origin}/api/sessions`, {
+			method: "POST",
+			headers: { Cookie: cookie, "Content-Type": "application/json" },
+			body,
+			// Node's fetch requires this for a streaming request body.
+			duplex: "half",
+		} as RequestInit & { duplex: "half" });
+
+		expect(res.status).toBe(413);
+		expect(((await res.json()) as { error?: string }).error).toContain("too large");
+		// Without the cap this same request is buffered in full and answered by
+		// the route handler (400/500 from the JSON parse), never 413 — so the
+		// status alone distinguishes "refused while streaming" from "swallowed".
+		// How much of the body the client got to send before the refusal is
+		// deliberately not asserted: the server drains the remainder rather than
+		// resetting the socket, so that count is load-dependent, not a contract.
+	});
+});

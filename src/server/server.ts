@@ -74,6 +74,16 @@ import { discoverUis } from "./ui-registry.ts";
 
 const PORT_RE = /:\d+$/;
 const ROUTE_PARAM_RE = /:(\w+)/g;
+
+/** Thrown by readBody() when a request body exceeds MAX_REQUEST_BODY_BYTES, so
+ * the top-level route wrapper can answer 413 instead of a generic 500. */
+class RequestBodyTooLargeError extends Error {
+	constructor() {
+		super("Request body too large");
+		this.name = "RequestBodyTooLargeError";
+	}
+}
+
 const FILENAME_QUOTE_RE = /"/g;
 // `\s*`, not `\s+` — esbuild's minifier strips the space after `from`
 // (`from"./x.js"`), so a `+` here silently never matched the built/installed
@@ -429,12 +439,46 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		res.end(out);
 	}
 
+	// Ceiling on what a single request may buffer in memory. The largest
+	// legitimate body is a 25MB attachment upload, which arrives base64-encoded
+	// inside JSON (~34MB), so 48MB leaves headroom. Without this, a mistaken (or
+	// malicious) multi-gigabyte POST is buffered in full before any route's own
+	// size check gets a chance to reject it — the upload route's
+	// MAX_INPUT_FILE_BYTES check only runs after readBody() has already resolved.
+	const MAX_REQUEST_BODY_BYTES = 48 * 1024 * 1024;
+
 	function readBody(req: IncomingMessage): Promise<string> {
 		return new Promise((resolve, reject) => {
 			const chunks: Buffer[] = [];
-			req.on("data", (chunk: Buffer) => chunks.push(chunk));
-			req.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
-			req.on("error", reject);
+			let total = 0;
+			let settled = false;
+			req.on("data", (chunk: Buffer) => {
+				if (settled) return;
+				total += chunk.length;
+				if (total > MAX_REQUEST_BODY_BYTES) {
+					settled = true;
+					// Release the oversized prefix immediately, then keep the
+					// stream flowing and discard the rest: draining rather than
+					// destroying lets the 413 actually reach the client, and
+					// nothing further is retained, so memory stays bounded no
+					// matter how much more the client sends.
+					chunks.length = 0;
+					reject(new RequestBodyTooLargeError());
+					req.resume();
+					return;
+				}
+				chunks.push(chunk);
+			});
+			req.on("end", () => {
+				if (settled) return;
+				settled = true;
+				resolve(Buffer.concat(chunks).toString("utf-8"));
+			});
+			req.on("error", (err) => {
+				if (settled) return;
+				settled = true;
+				reject(err);
+			});
 		});
 	}
 
@@ -1947,8 +1991,9 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 	});
 
 	// 25MB — generous for a PDF/docx/small archive, small enough that a
-	// mistaken multi-gigabyte drop doesn't fill the disk or hang the request
-	// buffering the whole base64 body in memory (see readBody).
+	// mistaken multi-gigabyte drop doesn't fill the disk. A body large enough to
+	// threaten the heap is cut off earlier, while it streams in, by
+	// MAX_REQUEST_BODY_BYTES in readBody(); this check is the decoded-size rule.
 	const MAX_INPUT_FILE_BYTES = 25 * 1024 * 1024;
 
 	route("POST", "/api/sessions/:id/inputs/upload", async (req, res, params) => {
@@ -1956,7 +2001,10 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		let parsed: { name?: string; dataUrl?: string };
 		try {
 			parsed = JSON.parse(await readBody(req));
-		} catch {
+		} catch (err) {
+			// An oversized drop is the one failure worth naming precisely here —
+			// "Invalid JSON" would be a confusing answer to a 3GB file.
+			if (err instanceof RequestBodyTooLargeError) throw err;
 			return json(res, { error: "Invalid JSON" }, 400);
 		}
 		// basename() so a full path (or a client sending one by mistake/malice)
@@ -2587,6 +2635,11 @@ window.addEventListener("storage", (e)=>{
 			try {
 				await matched.handler(req, res, matched.params);
 			} catch (err) {
+				if (err instanceof RequestBodyTooLargeError) {
+					// Not a server fault — the client sent more than we'll buffer.
+					if (!res.headersSent) json(res, { error: err.message }, 413);
+					return;
+				}
 				console.error(`[cast server] ${method} ${urlPath}:`, err);
 				if (!res.headersSent) {
 					json(res, { error: "Internal server error" }, 500);
