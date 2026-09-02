@@ -66,9 +66,36 @@ function dbPath(): string {
 export function getDb(): DatabaseSync {
 	const path = dbPath();
 	if (instance && instancePath === path) return instance;
-	if (instance) instance.close();
-	instance = new DatabaseSync(path);
+	if (instance) {
+		instance.close();
+		// Cleared before the reopen, not after: if `new DatabaseSync` below
+		// throws, leaving the closed handle in place made every later call
+		// throw on close() instead of retrying the open.
+		instance = null;
+		instancePath = null;
+	}
+	// Published to the module singleton only once fully initialised. Assigning
+	// first meant a failed migration (two processes racing an upgrade, say)
+	// left every later getDb() early-returning a partially-migrated handle
+	// from the check above, with no retry — the real cause then surfaced much
+	// later as a confusing "no such column".
+	const db = new DatabaseSync(path);
+	try {
+		initConnection(db);
+	} catch (err) {
+		try {
+			db.close();
+		} catch {
+			// Already unusable; the original error is the one worth reporting.
+		}
+		throw err;
+	}
+	instance = db;
 	instancePath = path;
+	return instance;
+}
+
+function initConnection(instance: DatabaseSync): void {
 	instance.exec("PRAGMA journal_mode = WAL");
 	instance.exec("PRAGMA busy_timeout = 5000");
 	instance.exec("PRAGMA foreign_keys = ON");
@@ -95,7 +122,6 @@ export function getDb(): DatabaseSync {
 			`);
 		}
 	}
-	return instance;
 }
 
 /** Test-only: force the next getDb() to reopen (a fresh temp path per test

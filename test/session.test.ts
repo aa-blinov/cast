@@ -907,6 +907,37 @@ describe("session persistence", () => {
 		expect(all).toContain(b.id);
 	});
 
+	it("rolls the whole save back when one message can't be written", () => {
+		// saveSession bumps the session row's version and then inserts each
+		// message as its own statement. Without one transaction around the lot,
+		// a failure partway left the row claiming a version whose messages were
+		// only half persisted.
+		const session = createSession("gpt-4o", projectA);
+		session.messages = [{ role: "user", content: "first" }];
+		saveSession(session);
+		const versionBefore = (
+			getDb().prepare("SELECT version FROM sessions WHERE id = ?").get(session.id) as { version: number }
+		).version;
+		const countBefore = (
+			getDb().prepare("SELECT COUNT(*) AS n FROM messages WHERE session_id = ?").get(session.id) as { n: number }
+		).n;
+
+		// A cyclic object throws inside JSON.stringify at insert time — after
+		// the sessions UPSERT and the first new message have already run.
+		const cyclic: { role: string; content: string; self?: unknown } = { role: "user", content: "second" };
+		cyclic.self = cyclic;
+		session.messages = [...session.messages, { role: "user", content: "ok" }, cyclic as never];
+
+		expect(() => saveSession(session)).toThrow();
+
+		const after = getDb().prepare("SELECT version FROM sessions WHERE id = ?").get(session.id) as { version: number };
+		const countAfter = (
+			getDb().prepare("SELECT COUNT(*) AS n FROM messages WHERE session_id = ?").get(session.id) as { n: number }
+		).n;
+		expect(after.version).toBe(versionBefore);
+		expect(countAfter).toBe(countBefore);
+	});
+
 	it("skips one unreadable session row instead of hiding the whole list", () => {
 		// loadSession parses usage_json/todos_json/plan_*_json unguarded, so a
 		// row corrupted by a partial write used to throw out of listSessions and

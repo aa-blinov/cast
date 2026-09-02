@@ -773,8 +773,25 @@ export function runMigrations(db: DatabaseSync): void {
 	// baseline step needed.
 	for (const migration of MIGRATIONS) {
 		if (applied.has(migration.version)) continue;
-		db.exec("BEGIN");
+		// IMMEDIATE, and the applied-check repeated inside the transaction:
+		// `applied` above was read before any transaction, and several
+		// processes migrate independently (the daemon, a TUI picker, `cast
+		// run`, an ACP connection each open their own connection). Two of them
+		// starting during the same upgrade both saw this version as pending —
+		// the second one's idempotent DDL then succeeded and its bookkeeping
+		// INSERT failed on the UNIQUE version, rolling back and throwing out
+		// of getDb(). A deferred BEGIN also doesn't honour busy_timeout on its
+		// first write, so it failed instantly instead of waiting for the other
+		// process to finish.
+		db.exec("BEGIN IMMEDIATE");
 		try {
+			const alreadyApplied =
+				db.prepare("SELECT 1 FROM schema_migrations WHERE version = ?").get(migration.version) !== undefined;
+			if (alreadyApplied) {
+				db.exec("COMMIT");
+				applied.add(migration.version);
+				continue;
+			}
 			migration.up(db);
 			db.prepare("INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)").run(
 				migration.version,
