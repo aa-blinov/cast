@@ -828,6 +828,16 @@ const MAX_ENTRIES_PER_RESPONSE = 8;
 /** Ceiling on entries read out of a canonical memory file. */
 const MAX_FILE_MEMORY_ENTRIES = 500;
 
+/** A 0-100 score from a model's JSON, which routinely arrives as a string —
+ *  `importance: "95"`. Rejecting those silently replaced the model's own
+ *  importance and confidence with defaults, which is how a rule asked for at
+ *  95/90 landed as 90/50. */
+function clampScore(value: unknown): number | undefined {
+	const numeric = typeof value === "number" ? value : typeof value === "string" ? Number(value.trim()) : Number.NaN;
+	if (!Number.isFinite(numeric)) return undefined;
+	return Math.max(0, Math.min(100, Math.round(numeric)));
+}
+
 function parseMemoryEntries(value: unknown, limit = MAX_ENTRIES_PER_RESPONSE): MemoryEntry[] {
 	if (!Array.isArray(value)) return [];
 	const seen = new Set<string>();
@@ -841,8 +851,7 @@ function parseMemoryEntries(value: unknown, limit = MAX_ENTRIES_PER_RESPONSE): M
 		const key = `${type}\n${content}`.toLowerCase();
 		if (!content || seen.has(key)) continue;
 		seen.add(key);
-		const confidence =
-			typeof item.confidence === "number" ? Math.max(0, Math.min(100, Math.round(item.confidence))) : undefined;
+		const confidence = clampScore(item.confidence);
 		const expiresAt =
 			typeof item.expiresAt === "string" && !Number.isNaN(Date.parse(item.expiresAt)) ? item.expiresAt : undefined;
 		const supersedes = Array.isArray(item.supersedes)
@@ -851,7 +860,7 @@ function parseMemoryEntries(value: unknown, limit = MAX_ENTRIES_PER_RESPONSE): M
 		entries.push({
 			content,
 			type,
-			importance: typeof item.importance === "number" ? Math.max(0, Math.min(100, Math.round(item.importance))) : 50,
+			importance: clampScore(item.importance) ?? 50,
 			...(confidence === undefined ? {} : { confidence }),
 			...(expiresAt === undefined ? {} : { expiresAt }),
 			...(supersedes === undefined ? {} : { supersedes }),
@@ -2722,6 +2731,18 @@ function memoryFileSearchResult(match: MemoryFileMatch): MemorySearchResult {
 }
 
 export function execMemorySearch(args: Record<string, unknown>, cwd: string): ToolResult {
+	// Say so when the model asks for an operation this tool doesn't have.
+	// `operation` is declared as enum ["search"], but models do try
+	// `operation: "store"` — and answering that with a plain empty search
+	// result ("No matches for …") reads as "your write didn't take", which sent
+	// a real run off editing MEMORY.md by hand instead.
+	const operation = typeof args.operation === "string" ? args.operation.trim().toLowerCase() : "";
+	if (operation && operation !== "search") {
+		return {
+			content: `The memory tool only searches — there is no "${operation}" operation. Durable memory is written for you automatically at the end of a turn (and by /memory dream), so nothing needs storing by hand. Re-run with operation "search" to look something up.`,
+			isError: true,
+		};
+	}
 	const query = typeof args.query === "string" ? args.query : "";
 	if (!query.trim()) return { content: "Memory search requires a non-empty query.", isError: true };
 	const scope =

@@ -13,6 +13,7 @@ import {
 	distillProjectMemory,
 	drainProjectCheckpointWriters,
 	dreamProjectMemory,
+	execMemorySearch,
 	formatMemoryToolResult,
 	formatMemoryTranscript,
 	getProjectCheckpointWriterSnapshot,
@@ -546,6 +547,47 @@ describe("project memory", () => {
 			expect.objectContaining({ type: "rule", content: "Keep the daemon single-writer." }),
 		]);
 		expect(checkpointPath(session.id)).toContain(join("memory", "sessions", session.id));
+	});
+
+	it("tells the model when it asks memory for an operation it doesn't have", () => {
+		// A real run asked for operation "store" and got a plain empty search
+		// result back, read it as "the write didn't take", and went off editing
+		// MEMORY.md by hand.
+		const result = execMemorySearch({ operation: "store", query: "anything" }, join(root, "op-project"));
+		expect(result.isError).toBe(true);
+		expect(result.content).toContain("only searches");
+		expect(result.content).toContain("automatically");
+		// A plain search still works.
+		expect(
+			execMemorySearch({ operation: "search", query: "anything" }, join(root, "op-project")).isError,
+		).toBeFalsy();
+	});
+
+	it("accepts the numeric strings models actually send for importance and confidence", async () => {
+		// Models routinely emit `importance: "95"` in their JSON. Rejecting the
+		// string silently replaced the model's own scores with defaults — a real
+		// run asked for 95/90 and the entry landed at 90/50.
+		const projectCwd = join(root, "numeric-strings-project");
+		const session = createSession("test-model", projectCwd);
+		saveSession(session);
+		vi.mocked(streamAndCollect).mockResolvedValueOnce({
+			content: JSON.stringify({
+				removeIds: [],
+				entries: [{ type: "rule", content: "Scores arrive as strings.", importance: "95", confidence: "90" }],
+			}),
+		});
+
+		await dreamProjectMemory({
+			cwd: projectCwd,
+			sessionId: session.id,
+			model: session.model,
+			config: testConfig,
+			messages: [{ role: "user", content: "Consolidate the project memory" }],
+		});
+
+		const stored = listProjectMemory(projectCwd).find((row) => row.content === "Scores arrive as strings.");
+		expect(stored?.importance).toBe(95);
+		expect(stored?.confidence).toBe(90);
 	});
 
 	it("keeps a tool-written memory across a file reconcile, with its metadata", () => {
