@@ -83,8 +83,8 @@ import {
 	deleteSession,
 	dropLastCheckpoint,
 	forkSession,
-	getFullHistory,
 	getHistoryPage,
+	hasRecentClientMessageId,
 	listSessionSummaries,
 	loadSession,
 	loadSessionByShareToken,
@@ -1392,10 +1392,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		if (!ws) throw new Error("Session not found");
 		if (clientMessageId) {
 			if (ws.acceptedClientMessageIds.has(clientMessageId)) return;
-			const alreadyPersisted = getFullHistory(ws.id).some(
-				(message) =>
-					(message as Message & { castClientMessageId?: string }).castClientMessageId === clientMessageId,
-			);
+			const alreadyPersisted = hasRecentClientMessageId(ws.id, clientMessageId);
 			if (alreadyPersisted) {
 				ws.acceptedClientMessageIds.add(clientMessageId);
 				return;

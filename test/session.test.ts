@@ -24,6 +24,7 @@ import {
 	getFullHistory,
 	getFullHistoryWithReasoning,
 	getHistoryPage,
+	hasRecentClientMessageId,
 	getMessageImage,
 	getMessagesAfterCheckpoint,
 	getMostRecentSession,
@@ -985,6 +986,33 @@ describe("session persistence", () => {
 		expect(
 			(db.prepare("SELECT COUNT(*) AS n FROM messages_fts WHERE session_id = ?").get(next.id) as { n: number }).n,
 		).toBe(0);
+	});
+
+	it("finds a recent client message id without loading the transcript, and only within the window", () => {
+		// The dedup check used to run getFullHistory() and JSON.parse every row
+		// of the session to test one field — 117-162ms on a 4465-message
+		// session, on every message the web UI sends.
+		const session = createSession("gpt-4o", projectA);
+		session.messages = [
+			{ role: "user", content: "first", castClientMessageId: "client-1" } as never,
+			{ role: "assistant", content: "reply" },
+		];
+		saveSession(session);
+
+		expect(hasRecentClientMessageId(session.id, "client-1")).toBe(true);
+		expect(hasRecentClientMessageId(session.id, "client-unknown")).toBe(false);
+		// An id that isn't a plain string must not match by accident.
+		expect(hasRecentClientMessageId(session.id, "")).toBe(false);
+
+		// Push the tagged message out of the window: a resend only ever races
+		// the last few messages, so anything older is deliberately not checked.
+		session.messages = [
+			...session.messages,
+			...Array.from({ length: 5 }, (_, i) => ({ role: "user" as const, content: `later ${i}` })),
+		];
+		saveSession(session);
+		expect(hasRecentClientMessageId(session.id, "client-1", 3)).toBe(false);
+		expect(hasRecentClientMessageId(session.id, "client-1", 50)).toBe(true);
 	});
 
 	it("prunes only background sessions past the retention window", () => {

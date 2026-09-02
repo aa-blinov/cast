@@ -2092,6 +2092,38 @@ export function pruneBackgroundSessions(now: number = Date.now(), limit = BACKGR
 	}
 }
 
+/** How far back the client-message-id dedup check looks. A resent submit only
+ * ever races the last few messages — a client reconnecting and replaying the
+ * one submit it wasn't sure had landed — so the tail is the whole of what
+ * needs checking. */
+const CLIENT_MESSAGE_ID_WINDOW = 50;
+
+/**
+ * Whether a recent message in this session already carries `clientMessageId`
+ * — the daemon's idempotency check for a resent submit.
+ *
+ * Answered by SQL over the tail of the session rather than by loading the
+ * transcript: this used to run `getFullHistory()` and JSON.parse every row of
+ * the session to test one field, which measured 117-162ms on a 4465-message
+ * session, grows linearly with history, and ran on every single message the
+ * web UI sends (it always sends an id).
+ */
+export function hasRecentClientMessageId(
+	sessionId: string,
+	clientMessageId: string,
+	window: number = CLIENT_MESSAGE_ID_WINDOW,
+): boolean {
+	const db = getDb();
+	const row = db
+		.prepare(
+			`SELECT 1 AS hit FROM (
+				SELECT content_json FROM messages WHERE session_id = ? ORDER BY seq DESC LIMIT ?
+			) WHERE json_extract(content_json, '$.castClientMessageId') = ? LIMIT 1`,
+		)
+		.get(sessionId, window, clientMessageId);
+	return row !== undefined;
+}
+
 export function listBackgroundSessions(parentSessionId?: string): SessionState[] {
 	const db = getDb();
 	const rows = parentSessionId
