@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import type { DatabaseSync } from "node:sqlite";
 import { getDb } from "./db.ts";
 
 export interface Agent {
@@ -27,6 +28,27 @@ export function listAgents(): Agent[] {
 	return rows;
 }
 
+/**
+ * Extra columns to fill in when the live schema has them.
+ *
+ * A database migrated by the multi-tenant line of this codebase has
+ * `agents.user_id INTEGER NOT NULL REFERENCES users(id)`, a column this line
+ * knows nothing about — so every insert here failed outright with "NOT NULL
+ * constraint failed: agents.user_id", i.e. agents could not be created at all
+ * on such a store. Verified against a real one. Attribute the row to an
+ * existing user (there is exactly one in a single-user install) rather than
+ * inventing an id, since the column carries a foreign key.
+ */
+function tenantColumns(db: DatabaseSync): { columns: string[]; values: Array<string | number> } {
+	const hasUserId = (db.prepare("PRAGMA table_info(agents)").all() as Array<{ name: string }>).some(
+		(column) => column.name === "user_id",
+	);
+	if (!hasUserId) return { columns: [], values: [] };
+	const owner = db.prepare("SELECT id FROM users ORDER BY id LIMIT 1").get() as { id: number } | undefined;
+	if (!owner) throw new Error("This database requires an owning user for agents, and no users exist yet.");
+	return { columns: ["user_id"], values: [owner.id] };
+}
+
 export function getAgent(id: string): Agent | null {
 	const db = getDb();
 	const row = db
@@ -53,9 +75,9 @@ export function createAgent(opts: { name: string; persona?: string; model?: stri
 		createdAt: now,
 		updatedAt: now,
 	};
-	db.prepare(
-		"INSERT INTO agents (id, name, persona, model, provider, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-	).run(
+	const tenant = tenantColumns(db);
+	const columns = ["id", "name", "persona", "model", "provider", "created_at", "updated_at", ...tenant.columns];
+	db.prepare(`INSERT INTO agents (${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`).run(
 		agent.id,
 		agent.name,
 		agent.persona,
@@ -63,6 +85,7 @@ export function createAgent(opts: { name: string; persona?: string; model?: stri
 		agent.provider ?? null,
 		agent.createdAt,
 		agent.updatedAt,
+		...tenant.values,
 	);
 	return agent;
 }

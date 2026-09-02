@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { resetDbConnectionForTests } from "../src/core/db.ts";
+import { getDb, resetDbConnectionForTests } from "../src/core/db.ts";
 import { createAgentRunner } from "../src/core/runner.ts";
 import { createSession } from "../src/core/session.ts";
 import { createServerBridge } from "../src/server/bridge.ts";
@@ -135,5 +135,38 @@ describe("agents API", () => {
 			body: JSON.stringify({ persona: "senior", model: "gpt-4o", provider: "openai" }),
 		});
 		expect(res.status).toBe(201);
+	});
+
+	it("creates an agent on a database that has the multi-tenant user_id column", async () => {
+		// A store migrated by the multi-tenant line of this codebase has
+		// `agents.user_id INTEGER NOT NULL REFERENCES users(id)`. This line
+		// knows nothing about that column, so every insert failed with "NOT
+		// NULL constraint failed: agents.user_id" — agents could not be created
+		// at all. Found against the developer's real database.
+		const db = getDb();
+		db.exec("DROP TABLE IF EXISTS agents");
+		db.exec("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, username TEXT NOT NULL)");
+		db.exec("INSERT OR IGNORE INTO users (id, username) VALUES (1, 'cast')");
+		db.exec(`CREATE TABLE agents (
+			id TEXT PRIMARY KEY,
+			user_id INTEGER NOT NULL REFERENCES users(id),
+			name TEXT NOT NULL,
+			persona TEXT NOT NULL,
+			model TEXT,
+			provider TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			UNIQUE (user_id, name)
+		)`);
+
+		const cookie = await login();
+		const created = await fetch(`${origin}/api/agents`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Cookie: cookie },
+			body: JSON.stringify({ name: "tenant-agent", persona: "senior" }),
+		});
+		expect(created.status).toBe(201);
+		const row = db.prepare("SELECT user_id FROM agents WHERE name = ?").get("tenant-agent") as { user_id: number };
+		expect(row.user_id).toBe(1);
 	});
 });
