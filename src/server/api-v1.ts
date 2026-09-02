@@ -242,7 +242,11 @@ const additionalApiV1Paths: OpenApiObject = {
 			summary: "Rename a session",
 			parameters: [idParameter],
 			requestBody: requestBody({ type: "object", required: ["title"], properties: { title: { type: "string" } } }),
-			responses: { "200": jsonResponse("Renamed", { type: "object" }), "400": errorResponse },
+			responses: {
+				"200": jsonResponse("Renamed", { type: "object" }),
+				"400": errorResponse,
+				"404": errorResponse,
+			},
 		},
 	},
 	"/api/v1/sessions/{id}/pin": {
@@ -254,19 +258,32 @@ const additionalApiV1Paths: OpenApiObject = {
 				required: ["pinned"],
 				properties: { pinned: { type: "boolean" } },
 			}),
-			responses: { "200": jsonResponse("Pinned state", { type: "object" }), "400": errorResponse },
+			responses: {
+				"200": jsonResponse("Pinned state", { type: "object" }),
+				"400": errorResponse,
+				"404": errorResponse,
+			},
 		},
 	},
 	"/api/v1/sessions/{id}/share": {
 		post: {
 			summary: "Create a share link",
 			parameters: [idParameter],
-			responses: { "200": jsonResponse("Share link", { type: "object" }) },
+			responses: { "200": jsonResponse("Share link", { type: "object" }), "404": errorResponse },
 		},
 		delete: {
 			summary: "Revoke a share link",
 			parameters: [idParameter],
-			responses: { "200": jsonResponse("Revoked", { $ref: "#/components/schemas/Ok" }) },
+			responses: {
+				// `ok: false` at 200 when the session wasn't shared in the first
+				// place — not an Ok, which is `ok: const true`.
+				"200": jsonResponse("Revoked, or already not shared", {
+					type: "object",
+					required: ["ok"],
+					properties: { ok: { type: "boolean" } },
+				}),
+				"404": errorResponse,
+			},
 		},
 	},
 	"/api/v1/sessions/{id}/diff": {
@@ -397,11 +414,38 @@ export const apiV1OpenApiDocument: OpenApiObject = {
 		"/api/v1/sessions": {
 			get: {
 				summary: "List sessions",
-				parameters: [{ name: "q", in: "query", schema: { type: "string" }, description: "Optional text search." }],
+				description:
+					"Returns a plain array by default. Passing `limit` or `offset` switches the body to a paged object — clients that add paging must handle both shapes.",
+				parameters: [
+					{ name: "q", in: "query", schema: { type: "string" }, description: "Optional text search." },
+					{
+						name: "limit",
+						in: "query",
+						schema: { type: "integer", minimum: 1, maximum: 200, default: 50 },
+						description: "Page size. Presence of this or `offset` changes the response shape (see above).",
+					},
+					{
+						name: "offset",
+						in: "query",
+						schema: { type: "integer", minimum: 0, default: 0 },
+						description: "Page offset. Presence of this or `limit` changes the response shape (see above).",
+					},
+				],
 				responses: {
-					"200": jsonResponse("Session summaries", {
-						type: "array",
-						items: { $ref: "#/components/schemas/SessionSummary" },
+					"200": jsonResponse("Session summaries — an array, or a paged object when limit/offset is given", {
+						oneOf: [
+							{ type: "array", items: { $ref: "#/components/schemas/SessionSummary" } },
+							{
+								type: "object",
+								required: ["sessions", "total", "limit", "offset"],
+								properties: {
+									sessions: { type: "array", items: { $ref: "#/components/schemas/SessionSummary" } },
+									total: { type: "integer" },
+									limit: { type: "integer" },
+									offset: { type: "integer" },
+								},
+							},
+						],
 					}),
 					"401": errorResponse,
 				},
@@ -413,6 +457,7 @@ export const apiV1OpenApiDocument: OpenApiObject = {
 					"201": jsonResponse("Created session", { $ref: "#/components/schemas/CreateSessionResponse" }),
 					"400": errorResponse,
 					"401": errorResponse,
+					"404": errorResponse,
 				},
 			},
 		},
@@ -458,6 +503,7 @@ export const apiV1OpenApiDocument: OpenApiObject = {
 					"400": errorResponse,
 					"401": errorResponse,
 					"404": errorResponse,
+					"500": errorResponse,
 				},
 			},
 		},
@@ -537,7 +583,14 @@ export const apiV1OpenApiDocument: OpenApiObject = {
 				requestBody: requestBody({
 					type: "object",
 					required: ["values"],
-					properties: { values: { type: "array", items: { type: "string" } } },
+					properties: {
+						values: {
+							type: "array",
+							description:
+								"One entry per question. A multi-select answer is itself an array of the chosen values.",
+							items: { oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }] },
+						},
+					},
 				}),
 				responses: {
 					"202": jsonResponse("Answer accepted", { $ref: "#/components/schemas/Ok" }),
@@ -670,8 +723,13 @@ export const apiV1OpenApiDocument: OpenApiObject = {
 				properties: {
 					persona: { type: "string" },
 					model: { type: "string" },
-					cwd: { type: "string" },
-					worktree: { type: "string" },
+					provider: { type: "string", description: "Pin the session to a saved provider by name." },
+					cwd: { type: "string", description: '"sandbox" for a throwaway directory, or an absolute path.' },
+					worktree: { type: "string", description: "Mutually exclusive with a sandbox cwd." },
+					agentId: {
+						type: "string",
+						description: "Spawn from a saved agent; its persona/model/provider override the fields above.",
+					},
 				},
 			},
 			CreateSessionResponse: {
@@ -685,6 +743,11 @@ export const apiV1OpenApiDocument: OpenApiObject = {
 					text: { type: "string" },
 					images: { type: "array", maxItems: 6, items: { type: "string", contentEncoding: "base64" } },
 					clientMessageId: { type: "string", maxLength: 200 },
+					goal: {
+						description:
+							"Run the turn as a goal: `true` for the default iteration budget, or a number (1-200) to set it.",
+						oneOf: [{ type: "boolean" }, { type: "integer", minimum: 1, maximum: 200 }],
+					},
 				},
 				anyOf: [{ required: ["text"] }, { required: ["images"] }],
 			},

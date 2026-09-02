@@ -77,6 +77,18 @@ import { discoverUis, RESERVED_UI_NAMES } from "./ui-registry.ts";
  * one check every /fs/* route relies on to keep a session's file browser from
  * reading/downloading/deleting anything outside its own cwd, no matter what
  * `..`-laden path (or symlink) a request goes through. Exported for tests. */
+/** HTTP status for a bridge result's error string.
+ *
+ * "Session not found" has to be a 404: it's what the v1 contract documents,
+ * and `status === 404` is the only way an integration can tell a deleted
+ * session from a bad request. It used to share 400 with genuine
+ * bad-request errors, so that check never fired. */
+export function bridgeErrorStatus(error: string): number {
+	if (error === "Agent running") return 409;
+	if (error === "Session not found") return 404;
+	return 400;
+}
+
 export function isInsideRoot(root: string, target: string): boolean {
 	const rel = relative(root, target);
 	if (rel !== "" && (rel.startsWith("..") || isAbsolute(rel))) return false;
@@ -1513,7 +1525,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			return json(res, { error: "Invalid JSON" }, 400);
 		}
 		const result = await bridge.answerQuestion(params.id, values);
-		if (!result.ok) return json(res, { error: result.error }, result.error === "Agent running" ? 409 : 400);
+		if (!result.ok) return json(res, { error: result.error }, bridgeErrorStatus(result.error));
 		json(res, { ok: true }, 202);
 	});
 
@@ -1528,7 +1540,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			return json(res, { error: "Invalid JSON" }, 400);
 		}
 		const result = bridge.resolvePlanTransition(params.id, kind);
-		if (!result.ok) return json(res, { error: result.error }, result.error === "Agent running" ? 409 : 400);
+		if (!result.ok) return json(res, { error: result.error }, bridgeErrorStatus(result.error));
 		json(res, { ok: true }, 202);
 	});
 
@@ -1545,13 +1557,13 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			return json(res, { error: "Invalid JSON" }, 400);
 		}
 		const result = bridge.setSessionMode(params.id, mode);
-		if (!result.ok) return json(res, { error: result.error }, result.error === "Agent running" ? 409 : 400);
+		if (!result.ok) return json(res, { error: result.error }, bridgeErrorStatus(result.error));
 		json(res, { ok: true });
 	});
 
 	route("POST", "/api/sessions/:id/clean-context", (_req, res, params) => {
 		const result = bridge.resetContext(params.id);
-		if (!result.ok) return json(res, { error: result.error }, result.error === "Agent running" ? 409 : 400);
+		if (!result.ok) return json(res, { error: result.error }, bridgeErrorStatus(result.error));
 		json(res, result);
 	});
 
