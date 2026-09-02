@@ -819,7 +819,16 @@ function parseJsonObject(raw: string): Record<string, unknown> | undefined {
 	}
 }
 
-function parseMemoryEntries(value: unknown): MemoryEntry[] {
+/** Cap on entries taken from one model response. The markdown file is not one
+ *  response — it is the whole project's canonical memory — so parsing it passes
+ *  its own limit. Applying this cap there silently indexed only the first 8
+ *  bullets of a file: everything below them existed on disk but could never be
+ *  searched or injected. */
+const MAX_ENTRIES_PER_RESPONSE = 8;
+/** Ceiling on entries read out of a canonical memory file. */
+const MAX_FILE_MEMORY_ENTRIES = 500;
+
+function parseMemoryEntries(value: unknown, limit = MAX_ENTRIES_PER_RESPONSE): MemoryEntry[] {
 	if (!Array.isArray(value)) return [];
 	const seen = new Set<string>();
 	const entries: MemoryEntry[] = [];
@@ -847,7 +856,7 @@ function parseMemoryEntries(value: unknown): MemoryEntry[] {
 			...(expiresAt === undefined ? {} : { expiresAt }),
 			...(supersedes === undefined ? {} : { supersedes }),
 		});
-		if (entries.length === 8) break;
+		if (entries.length >= limit) break;
 	}
 	return entries;
 }
@@ -954,6 +963,69 @@ function fileMemoryContext(
 		: parts;
 }
 
+/**
+ * Per-bullet metadata, carried in an HTML comment so the canonical markdown
+ * stays readable and any renderer hides it:
+ *
+ *   - Cast's daemon is single-writer. <!-- cast: type=architecture conf=80 exp=2026-10-01 -->
+ *
+ * The file is the single source of truth (see reconcileProjectMemoryFilesLocked),
+ * but a bullet alone cannot express the exact type, the confidence or an
+ * expiry — so rebuilding rows from the markdown used to normalise the type to
+ * one of the four section defaults and drop the rest. A bullet with no
+ * suffix keeps behaving exactly as before, which is what every file written
+ * before this existed looks like.
+ */
+const MEMORY_META_RE = /\s*<!--\s*cast:\s*([^>]*?)\s*-->\s*$/;
+const MEMORY_META_SEP_RE = /\s+/;
+
+function formatMemoryMeta(entry: MemoryEntry, section: string): string {
+	const parts: string[] = [];
+	// Only what the section itself can't already say.
+	const type = entry.type.trim();
+	if (type && projectMemorySectionForType(type) === section && type !== defaultTypeForSection(section)) {
+		parts.push(`type=${type}`);
+	}
+	const confidence = entry.confidence;
+	if (typeof confidence === "number" && Math.round(confidence) !== 50) parts.push(`conf=${Math.round(confidence)}`);
+	const importance = entry.importance;
+	if (typeof importance === "number" && Math.round(importance) !== defaultImportanceForType(entry.type)) {
+		parts.push(`imp=${Math.round(importance)}`);
+	}
+	if (entry.expiresAt) parts.push(`exp=${entry.expiresAt}`);
+	return parts.length > 0 ? ` <!-- cast: ${parts.join(" ")} -->` : "";
+}
+
+/** Splits a bullet into its visible text and whatever metadata it carries. */
+function parseMemoryMeta(bullet: string): { content: string; meta: Partial<MemoryEntry> } {
+	const match = bullet.match(MEMORY_META_RE);
+	if (!match) return { content: bullet.trim(), meta: {} };
+	const meta: Partial<MemoryEntry> = {};
+	for (const pair of (match[1] ?? "").split(MEMORY_META_SEP_RE)) {
+		const eq = pair.indexOf("=");
+		if (eq <= 0) continue;
+		const key = pair.slice(0, eq);
+		const value = pair.slice(eq + 1);
+		if (!value) continue;
+		if (key === "type") meta.type = value;
+		else if (key === "conf") meta.confidence = Number(value);
+		else if (key === "imp") meta.importance = Number(value);
+		else if (key === "exp") meta.expiresAt = value;
+	}
+	return { content: bullet.slice(0, match.index).trim(), meta };
+}
+
+function defaultTypeForSection(section: string): string {
+	if (section === "Project context") return "context";
+	if (section === "Rules") return "rule";
+	if (section === "Architecture decisions") return "decision";
+	return "knowledge";
+}
+
+function defaultImportanceForType(type: string): number {
+	return type === "rule" || type === "decision" || type === "directive" || type === "architecture" ? 90 : 70;
+}
+
 function projectMemorySectionForType(type: string): string {
 	if (type === "context") return "Project context";
 	if (type === "rule" || type === "directive") return "Rules";
@@ -961,7 +1033,7 @@ function projectMemorySectionForType(type: string): string {
 	return "Discovered durable knowledge";
 }
 
-function appendBulletToSection(content: string, section: string, bulletContent: string): string {
+function appendBulletToSection(content: string, section: string, bulletContent: string, meta = ""): string {
 	const lines = content.split("\n");
 	const heading = `## ${section}`;
 	let sectionIndex = -1;
@@ -972,7 +1044,7 @@ function appendBulletToSection(content: string, section: string, bulletContent: 
 		}
 	}
 	const normalized = bulletContent.toLowerCase();
-	const bullet = `- ${bulletContent}`;
+	const bullet = `- ${bulletContent}${meta}`;
 	if (sectionIndex < 0) return `${content.trimEnd()}\n\n${heading}\n${bullet}\n`;
 	let end = lines.length;
 	for (let i = sectionIndex + 1; i < lines.length; i++) {
@@ -982,7 +1054,14 @@ function appendBulletToSection(content: string, section: string, bulletContent: 
 		}
 	}
 	const body = lines.slice(sectionIndex + 1, end);
-	const existing = body.map((line) => line.match(MARKDOWN_BULLET_RE)?.[1]?.trim().toLowerCase()).filter(Boolean);
+	const existing = body
+		.map((line) => {
+			const raw = line.match(MARKDOWN_BULLET_RE)?.[1];
+			// Compare the visible text: the same entry stored twice must not
+			// produce a second bullet just because its metadata differs.
+			return raw === undefined ? undefined : parseMemoryMeta(raw).content.toLowerCase();
+		})
+		.filter(Boolean);
 	if (existing.includes(normalized)) return content;
 	const placeholder = body.findIndex((line) => MARKDOWN_EMPTY_RE.test(line.trim()));
 	if (placeholder >= 0) {
@@ -1005,7 +1084,8 @@ function removeBullets(content: string, contents: ReadonlySet<string>): string {
 	const out: string[] = [];
 	let skipping = false;
 	for (const line of lines) {
-		const bullet = line.match(MARKDOWN_BULLET_RE)?.[1]?.trim();
+		const raw = line.match(MARKDOWN_BULLET_RE)?.[1];
+		const bullet = raw === undefined ? undefined : parseMemoryMeta(raw).content;
 		if (bullet !== undefined && lower.has(bullet.toLowerCase())) {
 			skipping = true;
 			continue;
@@ -1060,7 +1140,8 @@ function mergeEntriesIntoProjectMemoryFile(cwd: string, entries: MemoryEntry[]):
 	}
 	let added = 0;
 	for (const entry of entries) {
-		const next = appendBulletToSection(content, projectMemorySectionForType(entry.type), entry.content.trim());
+		const section = projectMemorySectionForType(entry.type);
+		const next = appendBulletToSection(content, section, entry.content.trim(), formatMemoryMeta(entry, section));
 		if (next !== content) {
 			content = next;
 			added++;
@@ -1264,6 +1345,38 @@ export function storeProjectMemory(
 	sourceTurnKey: string,
 	entries: MemoryEntry[],
 ): void {
+	// Write-through to the canonical file first, then update the projection.
+	//
+	// The markdown file is the single source of truth (see
+	// reconcileProjectMemoryFilesLocked), so a row that existed only in the
+	// database was deleted by the next reconcile — which silently discarded
+	// everything the memory tool had ever stored, the moment anyone searched
+	// memory or edited the file. Writing the file first also means the failure
+	// mode is recoverable in the right direction: if the row write below
+	// fails, reconcile restores it from the file.
+	//
+	// Best effort on the lease: the file write itself is atomic (temp+rename),
+	// so the worst case without one is losing a bullet another writer added in
+	// the same instant, which is far better than dropping this entry for sure.
+	const fileLease = tryAcquireProjectMemoryLease(cwd, `memory-store:${sourceSessionId}`, MEMORY_OPERATION_LEASE_MS);
+	try {
+		if (mergeEntriesIntoProjectMemoryFile(cwd, entries) > 0) {
+			// Keep the revision hash in step with what was just written, so the
+			// next reconcile doesn't treat our own write as an external edit.
+			const projectPath = projectMemoryPath(projectIdForCwd(cwd));
+			const written = readMemoryFileChecked(projectPath);
+			if (written.readable) {
+				recordMemoryFileRevision(
+					cwd,
+					sourceSessionId,
+					written.content,
+					readSessionMemory(sourceSessionId).checkpoint,
+				);
+			}
+		}
+	} finally {
+		if (fileLease) releaseProjectMemoryLease(cwd, fileLease);
+	}
 	const db = getDb();
 	withImmediateTransaction(db, () => {
 		const stored = storeProjectMemoryRows(db, cwd, sourceSessionId, sourceTurnKey, entries);
@@ -2045,11 +2158,21 @@ function parseMarkdownMemoryEntries(content: string): MemoryEntry[] {
 			type = sectionTypes[line.slice(3).trim()] ?? "knowledge";
 			continue;
 		}
-		const value = line.match(MARKDOWN_BULLET_RE)?.[1]?.trim();
+		const raw = line.match(MARKDOWN_BULLET_RE)?.[1];
+		if (raw === undefined) continue;
+		const { content: value, meta } = parseMemoryMeta(raw);
 		if (!value || value === "(none yet)" || value === "(none)") continue;
-		entries.push({ type, content: value, importance: type === "rule" || type === "decision" ? 90 : 70 });
+		entries.push({
+			type: meta.type ?? type,
+			content: value,
+			importance: meta.importance ?? (type === "rule" || type === "decision" ? 90 : 70),
+			...(meta.confidence !== undefined ? { confidence: meta.confidence } : {}),
+			...(meta.expiresAt !== undefined ? { expiresAt: meta.expiresAt } : {}),
+		});
 	}
-	return parseMemoryEntries(entries);
+	// The file's own ceiling: high enough that a real project's memory is never
+	// silently cut, low enough to stay a bound.
+	return parseMemoryEntries(entries, MAX_FILE_MEMORY_ENTRIES);
 }
 
 function parseCheckpointMarkdown(content: string): MemoryCheckpoint | undefined {
@@ -2096,10 +2219,32 @@ function projectMemoryFileNeedsReconcile(cwd: string): boolean {
 
 function reconcileProjectMemoryFilesLocked(cwd: string, sessionId?: string, force = false): void {
 	const projectId = projectIdForCwd(cwd);
+	const db0 = getDb();
 	if (sessionId) ensureMemoryFiles(sessionId, projectId);
 	const checked = readMemoryFileChecked(projectMemoryPath(projectId));
 	if (!checked.readable) return;
-	const projectContent = checked.content;
+	let projectContent = checked.content;
+	// One-time rescue for a store written before storeProjectMemory wrote
+	// through to the file: those rows exist only in the database, and the merge
+	// below — where the file decides what exists — would delete them. No
+	// revision row means this project's file has never been reconciled, which
+	// is exactly that case. Lift the rows into the file first, so they become
+	// canonical instead of disappearing.
+	const hasRevision =
+		db0.prepare("SELECT 1 AS hit FROM project_memory_revisions WHERE project_id = ?").get(projectId) !== undefined;
+	if (!hasRevision) {
+		const orphans = listProjectMemory(cwd, 100).map((row) => ({
+			type: row.type,
+			content: row.content,
+			importance: row.importance,
+			confidence: row.confidence,
+			...(row.expiresAt ? { expiresAt: row.expiresAt } : {}),
+		}));
+		if (orphans.length > 0 && mergeEntriesIntoProjectMemoryFile(cwd, orphans) > 0) {
+			const reread = readMemoryFileChecked(projectMemoryPath(projectId));
+			if (reread.readable) projectContent = reread.content;
+		}
+	}
 	const entries = parseMarkdownMemoryEntries(projectContent);
 	// The file is the single canonical store: the database is a pure projection
 	// of it. Sync only when the file actually changed since the last revision.
@@ -2109,7 +2254,24 @@ function reconcileProjectMemoryFilesLocked(cwd: string, sessionId?: string, forc
 	const turnKey = `file:${createHash("sha256").update(projectContent).digest("hex").slice(0, 24)}`;
 	const db = getDb();
 	withImmediateTransaction(db, () => {
-		db.prepare("DELETE FROM project_memory WHERE project_id = ?").run(projectId);
+		// Merge, not rebuild. The file decides which entries *exist* — anything
+		// no longer in it goes — but a bullet whose text is unchanged keeps the
+		// row it already had, so its id, created_at and the metadata it was
+		// stored with survive an unrelated edit elsewhere in the file. The old
+		// DELETE-then-INSERT gave every entry a new id on every reconcile and
+		// re-tokenised the whole FTS index for a one-line change.
+		const surviving = new Set(entries.map((entry) => fingerprintFor(entry.content.trim(), entry.type)));
+		const existing = db
+			.prepare("SELECT id, fingerprint FROM project_memory WHERE project_id = ?")
+			.all(projectId) as Array<{ id: number; fingerprint: string }>;
+		const stale = existing.filter((row) => !surviving.has(row.fingerprint)).map((row) => row.id);
+		if (stale.length > 0) {
+			const placeholders = stale.map(() => "?").join(",");
+			db.prepare(`DELETE FROM project_memory WHERE project_id = ? AND id IN (${placeholders})`).run(
+				projectId,
+				...stale,
+			);
+		}
 		if (entries.length > 0) storeProjectMemoryRows(db, cwd, sessionId ?? "memory-file-reconcile", turnKey, entries);
 		if (checkpoint && sessionId) storeProjectMemoryCheckpointRow(db, cwd, sessionId, turnKey, checkpoint);
 		if (sessionId) {
@@ -2298,13 +2460,19 @@ function renderMemoryPrompt(
 	if (checkpoint && (checkpoint.activeIntent || checkpoint.nextAction)) {
 		appendIfFits(`<project-checkpoint>\n${checkpointPromptText(checkpoint)}\n</project-checkpoint>`);
 	}
-	if (fileContext) {
-		appendIfFits(`<project-memory-files>\n${fileContext}\n</project-memory-files>`);
-	}
+	// Retrieved entries come before the raw file. The file's bullets and these
+	// entries are the same information — the entries are the projection of it
+	// — so with the file first, a small budget spent itself on unranked file
+	// text (headings and all) and the actually-relevant entries were dropped.
+	// Ranked entries first, file into whatever budget is left.
+	const fileSection = fileContext ? `<project-memory-files>\n${fileContext}\n</project-memory-files>` : undefined;
+	// Reserve room for the file only while entries still fit, so a long file
+	// can't crowd them out and an entry can't crowd out the whole file either.
 	for (const match of matches.slice().sort(memoryPriorityComparator)) {
 		const line = `- [${match.type}; importance ${match.importance}; confidence ${match.confidence}] ${match.content}`;
 		if (!appendIfFits(line)) break;
 	}
+	if (fileSection) appendIfFits(fileSection);
 	return `${prompt}\n${closing}`;
 }
 
