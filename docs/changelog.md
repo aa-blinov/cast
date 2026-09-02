@@ -2,23 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
-## 0.22.34
-
-### Fixed
-
-- **Plugins:** `/plugin install`'s git clone can take seconds — a settings change from a concurrent command or another tab landing in that window was silently overwritten once the install finished, since its `enabledPlugins` write was derived from the settings snapshot read before the clone started. Now re-derives just the installed plugin's own enabled flag against current settings at write time.
-
-## 0.22.33
-
-### Fixed
-
-- **ACP:** the ACP (editor/IDE) integration leaked a client connection reference on every session, for the life of the daemon process — `closeSession` cleaned up the runner, MCP connections, and open-document buffers, but never released the module-level map tracking each session's client, populated on every prompt. Any long-running ACP-connected editor (e.g. Zed) opening and closing many chat sessions over a work session accumulated these indefinitely.
-
 ## 0.22.32
 
 ### Fixed
 
-- **Tests:** the background-bash-output truncation test gated its assertion on `task.status === "exited"`, but a PTY's exit event fires from the child process's `wait()` status, which isn't synchronized with its data events draining the kernel tty buffer — status can flip to "exited" before all output has actually arrived. Caused a spurious CI failure. Now polls the actual output instead of a proxy signal for it.
+- **Plugins:** `/plugin install`'s git clone can take seconds — a settings change from a concurrent command or another tab landing in that window was silently overwritten once the install finished, since its `enabledPlugins` write was derived from the settings snapshot read before the clone started. Now re-derives just the installed plugin's own enabled flag against current settings at write time.
+- **ACP:** the ACP (editor/IDE) integration leaked a client connection reference on every session, for the life of the daemon process — `closeSession` cleaned up the runner, MCP connections, and open-document buffers, but never released the module-level map tracking each session's client, populated on every prompt. Any long-running ACP-connected editor (e.g. Zed) opening and closing many chat sessions over a work session accumulated these indefinitely.
 
 ## 0.22.31
 
