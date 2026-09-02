@@ -386,7 +386,7 @@ export const EMPTY_ASSISTANT_PLACEHOLDER = "(no response)";
  *    with a minimal valid JSON error so the request stays well-formed.
  */
 function sanitizeMessages(messages: Message[]): Message[] {
-	return messages.map((m) => {
+	const sanitized: Message[] = messages.map((m) => {
 		// Drop cast-only UI metadata before it reaches the provider.
 		if (m.role === "tool" && m && typeof m === "object" && "castIsError" in m) {
 			const tool = m as { role: "tool"; tool_call_id: string; content: string; castIsError?: boolean };
@@ -433,6 +433,51 @@ function sanitizeMessages(messages: Message[]): Message[] {
 		if (hasToolCalls || hasContent) return m;
 		return { ...m, content: EMPTY_ASSISTANT_PLACEHOLDER };
 	});
+	return answerOrphanedToolCalls(sanitized);
+}
+
+/** What an interrupted tool call reports back to the model. */
+const ORPHANED_TOOL_RESULT = "Tool call was interrupted before it finished — cast was stopped mid-call.";
+
+/**
+ * Appends a synthetic result for any tool call the history never answers.
+ *
+ * Every provider rejects a request whose history contains an assistant tool
+ * call with no matching result, and loop.ts deliberately persists the
+ * assistant message (with its tool_calls) before running the tools — so it is
+ * on disk for the whole duration of the call. A SIGKILL or an OOM in that
+ * window (SIGTERM/SIGINT are handled and do write aborted results) left the
+ * session permanently unable to continue: every later submit resent the
+ * unanswered call and got a 400 back, with no way to recover from inside cast.
+ *
+ * Done on the request path rather than on load so it also repairs sessions
+ * already sitting on disk in that state.
+ */
+function answerOrphanedToolCalls(messages: Message[]): Message[] {
+	const out: Message[] = [];
+	for (let i = 0; i < messages.length; i++) {
+		const m = messages[i]!;
+		out.push(m);
+		if (m.role !== "assistant") continue;
+		const toolCalls = "tool_calls" in m && Array.isArray(m.tool_calls) ? m.tool_calls : [];
+		if (toolCalls.length === 0) continue;
+		// Results always follow their call as one uninterrupted run of `tool`
+		// messages (loop.ts pushes them with no await in between), so the scan
+		// stops at the first message that isn't one.
+		const answered = new Set<string>();
+		for (let j = i + 1; j < messages.length; j++) {
+			const next = messages[j];
+			if (!next || next.role !== "tool") break;
+			const id = (next as { tool_call_id?: string }).tool_call_id;
+			if (id) answered.add(id);
+		}
+		for (const tc of toolCalls) {
+			if (tc.id && !answered.has(tc.id)) {
+				out.push({ role: "tool" as const, tool_call_id: tc.id, content: ORPHANED_TOOL_RESULT });
+			}
+		}
+	}
+	return out;
 }
 
 /**
