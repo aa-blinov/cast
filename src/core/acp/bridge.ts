@@ -20,7 +20,7 @@ import { createPlanState, type PlanState, resolvePlanQuestion, resolvePlanTransi
 import type { AgentRunner } from "../runner.ts";
 import { createAgentRunner } from "../runner.ts";
 import type { SessionState } from "../session.ts";
-import { deleteSession, listSessions, loadSession, recordCompaction } from "../session.ts";
+import { deleteSession, listSessionSummaries, loadSession, recordCompaction } from "../session.ts";
 import type { StartupResult } from "../startup.ts";
 
 // ---------------------------------------------------------------------------
@@ -319,7 +319,13 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 		},
 
 		listSessions: (params?: { cursor?: string | null; cwd?: string | null; limit?: number }) => {
-			const all = listSessions();
+			// Summaries, not full sessions: this only needs each row's id and
+			// cwd, while listSessions() loads every message of every session
+			// off disk to build them — 1.3s on a 600-session store, on every
+			// editor listing. listSessionSummaries() answers the same rows
+			// from aggregate queries in ~60ms, already ordered newest-first,
+			// which the cursor paging below relies on staying stable.
+			const all = listSessionSummaries();
 			// Exact match on cwd — `startsWith` would over-include (e.g. a
 			// filter for /proj would match /projects/a). Editors asking for
 			// "sessions for this exact project" want the sessionId back, not

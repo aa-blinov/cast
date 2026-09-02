@@ -15,7 +15,7 @@ vi.mock("../src/core/loop.ts", () => ({
 }));
 
 vi.mock("../src/core/session.ts", () => ({
-	listSessions: vi.fn(() => []),
+	listSessionSummaries: vi.fn(() => []),
 	deleteSession: vi.fn(() => true),
 	loadSession: vi.fn(() => null),
 	recordCompaction: vi.fn(),

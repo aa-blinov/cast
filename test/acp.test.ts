@@ -16,7 +16,13 @@ vi.mock("../src/core/loop.ts", () => ({
 }));
 
 vi.mock("../src/core/session.ts", () => ({
-	listSessions: vi.fn(() => []),
+	// The adapter lists sessions from summaries, not full sessions: it only
+	// needs each row's id and cwd, and loading every message of every session
+	// to get them took 1.3s on a 600-session store.
+	listSessionSummaries: vi.fn(() => []),
+	listSessions: vi.fn(() => {
+		throw new Error("listSessions must not be used for an ACP listing — it loads every message off disk");
+	}),
 	deleteSession: vi.fn(() => true),
 	loadSession: vi.fn(() => null),
 	recordCompaction: vi.fn(),
@@ -49,7 +55,7 @@ vi.mock("../src/core/mcp.ts", () => ({
 
 const { createAcpAdapter, sessionClientsSizeForTests } = await import("../src/core/acp/bridge.ts");
 const { createAgentRunner, createPlanState } = await import("../src/core/runner.ts");
-const { listSessions, deleteSession, loadSession } = await import("../src/core/session.ts");
+const { listSessionSummaries, deleteSession, loadSession } = await import("../src/core/session.ts");
 
 // ---- Helpers -------------------------------------------------------------
 
@@ -273,7 +279,7 @@ describe("ACP adapter", () => {
 	});
 
 	it("listSessions returns session summaries", () => {
-		(listSessions as any).mockReturnValue([
+		(listSessionSummaries as any).mockReturnValue([
 			{ id: "s1", cwd: "/a", updatedAt: "2024-01-01T00:00:00Z" },
 			{ id: "s2", cwd: "/b" },
 		]);
@@ -1091,7 +1097,7 @@ describe("UX polish", () => {
 
 	it("listSessions returns nextCursor when more pages remain", () => {
 		const localAdapter = createAcpAdapter({ version: "test", permissionMode: "default" });
-		(listSessions as any).mockReturnValue([
+		(listSessionSummaries as any).mockReturnValue([
 			{ id: "s1", cwd: "/a" },
 			{ id: "s2", cwd: "/a" },
 			{ id: "s3", cwd: "/a" },
@@ -1108,7 +1114,7 @@ describe("UX polish", () => {
 
 	it("listSessions filters by cwd exact match", () => {
 		const localAdapter = createAcpAdapter({ version: "test", permissionMode: "default" });
-		(listSessions as any).mockReturnValue([
+		(listSessionSummaries as any).mockReturnValue([
 			{ id: "s1", cwd: "/projects/a" },
 			{ id: "s2", cwd: "/projects/b" },
 			{ id: "s3", cwd: "/projects/a" },
@@ -1120,7 +1126,7 @@ describe("UX polish", () => {
 
 	it("listSessions cwd filter rejects prefix matches", () => {
 		const localAdapter = createAcpAdapter({ version: "test", permissionMode: "default" });
-		(listSessions as any).mockReturnValue([
+		(listSessionSummaries as any).mockReturnValue([
 			{ id: "s1", cwd: "/projects/a" },
 			{ id: "s2", cwd: "/proj" },
 		]);
