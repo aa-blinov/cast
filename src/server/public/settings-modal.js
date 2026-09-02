@@ -172,10 +172,18 @@ export function SettingsModal({
 				}));
 			} else if (t === "memory") {
 				const res = await run("/memory");
-				commit((d) => ({ ...d, memory: res?.result }));
+				if (!res.ok) {
+					setLoadError(res.error);
+					return;
+				}
+				commit((d) => ({ ...d, memory: res.result }));
 			} else if (t === "quick-mode") {
-				const quickSessionPersona = await run("/quick-session-persona");
-				commit((d) => ({ ...d, "quick-mode": { quickSessionPersona: quickSessionPersona?.result } }));
+				const res = await run("/quick-session-persona");
+				if (!res.ok) {
+					setLoadError(res.error);
+					return;
+				}
+				commit((d) => ({ ...d, "quick-mode": { quickSessionPersona: res.result } }));
 			} else if (t === "server") {
 				const res = await api("GET", "/api/server/status").catch(() => null);
 				commit((d) => ({ ...d, server: res ?? { running: false } }));
@@ -205,13 +213,21 @@ export function SettingsModal({
 				// already loaded from ~/.config/agents/skills/ as part of the
 				// agentsGlobalDirs list.
 				const res = await run("/skills list");
-				commit((d) => ({ ...d, skills: res?.result ?? [], skillssh: true }));
+				if (!res.ok) {
+					setLoadError(res.error);
+					return;
+				}
+				commit((d) => ({ ...d, skills: res.result, skillssh: true }));
 			} else if (t === "plugins") {
 				const res = await run("/plugin list");
+				if (!res.ok) {
+					setLoadError(res.error);
+					return;
+				}
 				commit((d) => ({
 					...d,
 					plugins: {
-						plugins: res?.result ?? [],
+						plugins: res.result,
 					},
 				}));
 			} else if (t === "marketplace") {
@@ -219,11 +235,18 @@ export function SettingsModal({
 					run("/plugin marketplace list"),
 					run("/plugin marketplace catalog"),
 				]);
+				// A silently-empty list here reads as "no marketplaces configured"
+				// — indistinguishable from an actual fetch failure (e.g. one
+				// marketplace's git remote is now unreachable) without this check.
+				if (!marketplaces.ok || !catalog.ok) {
+					setLoadError(marketplaces.error || catalog.error);
+					return;
+				}
 				commit((d) => ({
 					...d,
 					marketplace: {
-						marketplaces: marketplaces?.result ?? [],
-						catalog: catalog?.result ?? [],
+						marketplaces: marketplaces.result,
+						catalog: catalog.result,
 					},
 				}));
 			} else if (t === "provider") {
