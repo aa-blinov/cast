@@ -8,6 +8,7 @@ All notable user-facing changes to cast, newest first.
 
 - **Plugins:** `/plugin install`'s git clone can take seconds — a settings change from a concurrent command or another tab landing in that window was silently overwritten once the install finished, since its `enabledPlugins` write was derived from the settings snapshot read before the clone started. Now re-derives just the installed plugin's own enabled flag against current settings at write time.
 - **ACP:** the ACP (editor/IDE) integration leaked a client connection reference on every session, for the life of the daemon process — `closeSession` cleaned up the runner, MCP connections, and open-document buffers, but never released the module-level map tracking each session's client, populated on every prompt. Any long-running ACP-connected editor (e.g. Zed) opening and closing many chat sessions over a work session accumulated these indefinitely.
+- **Search:** compaction's marker-insertion could shift a kept message's row to a new position without updating its search-index entry (the index only synced on insert/delete, not on this seq shift) — a search hit on that message's content could resolve to the wrong row, and the stale entry was never cleaned up, silently accumulating dead rows in the index every time a session compacted. Existing databases get a one-time rebuild on upgrade.
 
 ## 0.22.31
 

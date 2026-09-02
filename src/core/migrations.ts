@@ -118,6 +118,15 @@ function columnExists(db: DatabaseSync, table: string, column: string): boolean 
 	return cols.some((c) => c.name === column);
 }
 
+/** A legacy store can have its early migrations recorded as already-applied
+ * (a baseline INSERT into schema_migrations) without their DDL having
+ * actually run — most visibly, one that predates messages_fts entirely. */
+function tableExists(db: DatabaseSync, table: string): boolean {
+	return (
+		(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) as unknown) !== undefined
+	);
+}
+
 export const MIGRATIONS: Migration[] = [
 	{
 		version: 1,
@@ -687,6 +696,49 @@ CREATE INDEX IF NOT EXISTS idx_agents_name ON agents(name);
 			if (!columnExists(db, "sessions", "provider_name")) {
 				db.exec("ALTER TABLE sessions ADD COLUMN provider_name TEXT");
 			}
+		},
+	},
+	{
+		version: 29,
+		name: "messages-fts-seq-sync",
+		up: (db) => {
+			// messages_fts only had AFTER INSERT / AFTER DELETE triggers —
+			// compaction's marker-insertion path shifts kept messages up by one
+			// seq via a plain UPDATE (session.ts, "shiftOne") to make room, which
+			// fired neither trigger. Each shifted message's fts row kept its old
+			// seq, now silently pointing at whatever the compaction marker (or a
+			// later message) ended up occupying — a search hit on that content
+			// would resolve to the wrong message. The old row was never cleaned
+			// up either, since AFTER DELETE only matches a row's *current* seq,
+			// not the stale one the orphan is filed under — dead rows piled up
+			// in the index every time a session compacted.
+			//
+			// A legacy store can have its early migrations (including the one
+			// that creates messages_fts) recorded as already-applied via a
+			// baseline INSERT into schema_migrations, without that DDL having
+			// actually run — skip cleanly rather than fail on a table that
+			// genuinely doesn't exist here (db.ts's own getDb() bootstrap
+			// handles creating/backfilling it separately in that case).
+			if (!tableExists(db, "messages_fts")) return;
+			db.exec(`
+CREATE TRIGGER IF NOT EXISTS messages_fts_au AFTER UPDATE OF seq ON messages
+BEGIN
+  UPDATE messages_fts SET seq = NEW.seq WHERE session_id = NEW.session_id AND seq = OLD.seq;
+END;
+`);
+			// Existing databases: a shifted row's stale fts entry can't be
+			// told apart from a correct one by seq alone once its old slot is
+			// reoccupied by different content (exactly what compaction's
+			// marker insertion does) — the only fully correct repair is to
+			// rebuild the index from the messages table's current state
+			// rather than try to patch individual rows.
+			db.exec("DELETE FROM messages_fts;");
+			db.exec(`
+INSERT INTO messages_fts(session_id, seq, body)
+SELECT session_id, seq, cast_message_text(content_json)
+FROM messages
+WHERE role IN ('user', 'assistant');
+`);
 		},
 	},
 ];

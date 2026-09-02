@@ -1151,6 +1151,44 @@ describe("session persistence", () => {
 		expect(getMessagesAfterCheckpoint(s.id)).toEqual([]);
 	});
 
+	it("keeps messages_fts in sync when compaction's marker insertion shifts a kept message's seq", () => {
+		const s = createSession("gpt-4o", projectA);
+		const m1: Message = { role: "user", content: "first" };
+		const m2: Message = { role: "assistant", content: "second" };
+		const m3: Message = { role: "user", content: "uniquethirdmarkerword" };
+		s.messages.push(m1, m2, m3);
+		saveSession(s);
+
+		// m3 starts at seq 2; the marker must sort before it, so recordCompaction
+		// shifts m3 to seq 3 via a plain UPDATE — the exact path that used to
+		// leave messages_fts pointing at m3's old seq (2) instead of its new one.
+		recordCompaction(s, s.messages, [
+			{ role: "system", content: "[Compacted context — 2 messages summarized]\nsummary" },
+			m3,
+		]);
+
+		const db = getDb();
+		const m3Seq = (
+			db
+				.prepare("SELECT seq FROM messages WHERE session_id = ? AND content_json LIKE ?")
+				.get(s.id, "%uniquethirdmarkerword%") as {
+				seq: number;
+			}
+		).seq;
+		expect(m3Seq).toBe(3);
+
+		// The fts row for m3's content must have followed it to the new seq —
+		// not be stranded at the old one, and not exist twice.
+		const ftsRows = db
+			.prepare("SELECT seq FROM messages_fts WHERE body MATCH 'uniquethirdmarkerword'")
+			.all() as Array<{ seq: number }>;
+		expect(ftsRows).toEqual([{ seq: 3 }]);
+
+		// No dangling row left behind at the vacated seq 2 either.
+		const staleAtOldSeq = db.prepare("SELECT seq FROM messages_fts WHERE session_id = ? AND seq = 2").all(s.id);
+		expect(staleAtOldSeq).toEqual([]);
+	});
+
 	it("clearSessionMessages deletes all message rows but keeps the session row", () => {
 		const s = createSession("gpt-4o", projectA);
 		s.messages.push({ role: "user", content: "hello" });
