@@ -735,6 +735,31 @@ describe("web bridge", () => {
 		expect(loadSettings().reasoningLevel).toBe("off");
 	});
 
+	it("/current shows a pinned session's own resolved reasoning level, not the global one if it's invalid for that model", async () => {
+		const { updateSettings } = await import("../src/core/settings.ts");
+		updateSettings({
+			providers: [
+				{ name: "local", url: testConfig.baseURL, apiKey: testConfig.apiKey },
+				// minimax's reasoning vocabulary is enabled/adaptive/disabled —
+				// "high" (a generic-format level) isn't one of its options.
+				{ name: "minimax-pinned", url: "https://api.minimax.io/v1", apiKey: "mm-key", reasoningFormat: "minimax" },
+			],
+			providerUrl: testConfig.baseURL,
+			apiKey: testConfig.apiKey,
+			modelProvider: "local",
+			reasoningLevel: "high",
+		});
+		const config = { ...testConfig, reasoningFormat: "generic", reasoningLevel: "high" } as AppConfig;
+		const bridge = createServerBridge(makeResult({ config }));
+		const pinned = bridge.createSession(undefined, undefined, undefined, true, undefined, "minimax-pinned");
+
+		const result = await bridge.executeCommand(pinned.id, "/current");
+
+		expect(result).toMatchObject({ ok: true, result: { reasoningLevel: "enabled" } });
+		// The global level itself must be untouched by just reading /current.
+		expect(config.reasoningLevel).toBe("high");
+	});
+
 	it("chooses a valid model default when the current reasoning level is unsupported", async () => {
 		const { loadSettings, updateSettings } = await import("../src/core/settings.ts");
 		updateSettings({
