@@ -666,6 +666,10 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 
 	interface Route {
 		method: string;
+		/** The declared path with its `:param` placeholders intact — what
+		 * telemetry records, so a share token or session id never lands in the
+		 * store (and so rows aggregate per endpoint instead of per id). */
+		template: string;
 		pattern: RegExp;
 		paramNames: string[];
 		handler: RouteHandler;
@@ -679,13 +683,13 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			paramNames.push(name);
 			return "([^/]+)";
 		});
-		routes.push({ method, pattern: new RegExp(`^${pattern}$`), paramNames, handler });
+		routes.push({ method, template: path, pattern: new RegExp(`^${pattern}$`), paramNames, handler });
 	}
 
 	function matchRoute(
 		method: string,
 		urlPath: string,
-	): { handler: RouteHandler; params: Record<string, string> } | null {
+	): { handler: RouteHandler; params: Record<string, string>; template: string } | null {
 		for (const r of routes) {
 			if (r.method !== method) continue;
 			const match = r.pattern.exec(urlPath);
@@ -694,9 +698,20 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			r.paramNames.forEach((name, i) => {
 				params[name] = match[i + 1]!;
 			});
-			return { handler: r.handler, params };
+			return { handler: r.handler, params, template: r.template };
 		}
 		return null;
+	}
+
+	/** Telemetry path for a request no route matched (a 404, or a valid path
+	 * with the wrong method). `/api/shared/<token>` is the one such path that
+	 * carries a credential — the share link's token is the *only* thing
+	 * guarding an otherwise-unauthenticated read of a thread, so it must not
+	 * be persisted to the telemetry store or rendered in the dashboard's
+	 * endpoint table. */
+	function unmatchedTelemetryPath(urlPath: string): string {
+		if (urlPath === "/api/shared" || urlPath.startsWith("/api/shared/")) return "/api/shared/:token";
+		return urlPath;
 	}
 
 	// API routes
@@ -2398,10 +2413,16 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		// `finish` fires only when the client disconnects — its duration is the
 		// session lifetime, not a request/response latency. One cheap prepared
 		// INSERT on res.finish.
+		// Recorded as the matched route's template, so the concrete ids and
+		// tokens in the URL never reach the store. Resolved here rather than
+		// only at dispatch below because a request rejected by the auth gate
+		// returns before dispatch, and its path is recorded all the same;
+		// re-assigned below for the versioned-route rewrite.
+		let telemetryPath = matchRoute(method, urlPath)?.template ?? unmatchedTelemetryPath(urlPath);
 		if (urlPath.startsWith("/api/") && !urlPath.startsWith("/api/telemetry/") && !urlPath.endsWith("/events")) {
 			const reqStart = Date.now();
 			res.on("finish", () => {
-				recordApiRequest({ method, path: urlPath, status: res.statusCode, latencyMs: Date.now() - reqStart });
+				recordApiRequest({ method, path: telemetryPath, status: res.statusCode, latencyMs: Date.now() - reqStart });
 			});
 		}
 
@@ -2625,6 +2646,7 @@ window.addEventListener("storage", (e)=>{
 		// independently stable.
 		const matched = matchRoute(method, versionedLegacyPath ?? urlPath);
 		if (matched) {
+			telemetryPath = matched.template;
 			try {
 				await matched.handler(req, res, matched.params);
 			} catch (err) {
