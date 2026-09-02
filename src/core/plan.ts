@@ -204,7 +204,16 @@ const FORBIDDEN_FLAGS: Record<string, RegExp> = {
 	fd: /^(-x|-X|--exec|--exec-batch)$/,
 	sort: /^(-o|--output|--compress-program)$/,
 	tree: /^-o$/,
-	yq: /^(-i|--inplace)$/,
+	// -s/--split-exp writes one output file per result — a writer independent
+	// of the in-place flag.
+	yq: /^(-i|--inplace|-s|--split-exp)$/,
+	// `file -C -m src` compiles the magic source and writes `src.mgc`.
+	file: /^-C$/,
+	// GNU grep has no exec or write flag, but `grep` is commonly a drop-in for
+	// ugrep, whose --filter is ripgrep's --pre by another name (and which can
+	// write its config). Listed regardless of which grep is installed — the
+	// gate can't know, and no read-only invocation needs these.
+	grep: /^(--filter|--view|--pager|--save-config)$/,
 	date: /^(-s|--set)$/,
 };
 

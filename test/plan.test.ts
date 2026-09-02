@@ -203,6 +203,17 @@ describe("plan", () => {
 			// ...while an ordinary ripgrep search still passes.
 			await expectCommand("rg -n 'handler' src/", true);
 			await expectCommand("rg --pre-glob '*.md' needle .", true);
+			// `file -C -m src` compiles the magic source into src.mgc.
+			await expectCommand("file -C -m plan.md", false);
+			await expectCommand("file plan.md", true);
+			// yq's --split-exp writes one file per result, independently of -i.
+			await expectCommand("yq -s '\"out_\" + $index' data.yaml", false);
+			await expectCommand("yq --split-exp '.' data.yaml", false);
+			await expectCommand("yq '.version' package.yaml", true);
+			// ugrep is a common drop-in `grep`; its --filter is rg's --pre.
+			await expectCommand("grep --filter='md:sh' needle plan.md", false);
+			await expectCommand("grep --pager=sh needle .", false);
+			await expectCommand("grep -n handler src/app.ts", true);
 		});
 	});
 

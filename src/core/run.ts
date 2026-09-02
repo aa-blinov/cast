@@ -322,10 +322,28 @@ export async function runNonInteractive(args: ParsedArgs, options: RunOptions): 
 				case "todos_updated":
 					emit("todos_updated", { todos: event.todos });
 					break;
+				case "notice":
+					// Dropped entirely before — which silently swallowed the
+					// runaway-loop iteration cap, /goal budget exhaustion and a
+					// model refusal, all of which end the turn with reason
+					// "stop". The interactive/JSONL path already forwards these.
+					if (!emit("notice", { text: event.message })) {
+						process.stderr.write(`  ${event.message}${EOL}`);
+					}
+					break;
 				case "end":
-					if (event.reason === "error") failed = true;
+					// Any reason but a clean stop (or a user abort) means what
+					// reached stdout is incomplete. "disconnected" in particular
+					// is loop.ts's signal that the provider cut the stream
+					// mid-response — it exists so a truncated answer isn't taken
+					// for a clean one, and `out=$(cast run …)` can only see that
+					// through the exit code.
+					if (event.reason !== "stop" && event.reason !== "aborted") failed = true;
 					if (!emit("end", { reason: event.reason })) {
-						if (event.reason === "error") process.exitCode = 1;
+						if (event.reason !== "stop" && event.reason !== "aborted") {
+							process.stderr.write(`Turn ended early: ${event.reason}${EOL}`);
+							process.exitCode = 1;
+						}
 					}
 					break;
 				case "error":
