@@ -8,6 +8,7 @@ import { resetDbConnectionForTests } from "../src/core/db.ts";
 import { storeProjectMemory } from "../src/core/memory.ts";
 import { createAgentRunner } from "../src/core/runner.ts";
 import { appendMessage, createSession, saveSession } from "../src/core/session.ts";
+import { queryEndpointOverview } from "../src/core/telemetry.ts";
 import type { ServerBridge } from "../src/server/bridge.ts";
 import { createServerBridge } from "../src/server/bridge.ts";
 import { startServer } from "../src/server/server.ts";
@@ -537,5 +538,25 @@ describe("factory UI slugs", () => {
 			else process.env.HOME = previousHome;
 			rmSync(fakeHome, { recursive: true, force: true });
 		}
+	});
+});
+
+describe("api telemetry paths", () => {
+	it("records the route template, never the share token or session id in the URL", async () => {
+		// A share link's token is the only thing guarding an otherwise
+		// unauthenticated read of a thread — persisting it into the telemetry
+		// store (7-day retention) and rendering it in the dashboard's endpoint
+		// table would hand it to anyone with dashboard access. Recording the
+		// template also stops every session id becoming its own row in the
+		// endpoint overview's GROUP BY.
+		const token = "sharetokenthatmustnotbestored";
+		await fetch(`${origin}/api/shared/${token}`);
+		await fetch(`${origin}/api/shared/${token}`, { method: "POST" }); // 404, no route
+		await fetch(`${origin}/api/sessions/abc123/rename`, { method: "POST" });
+
+		const paths = queryEndpointOverview().map((row) => row.path);
+		expect(paths.join("\n")).not.toContain(token);
+		expect(paths).toContain("/api/shared/:token");
+		expect(paths).toContain("/api/sessions/:id/rename");
 	});
 });

@@ -193,6 +193,16 @@ describe("plan", () => {
 			await expectCommand("git log --oneline", true);
 			await expectCommand("yq -i '.version = 2' package.yaml", false);
 			await expectCommand("date -s 'next week'", false);
+			// ripgrep's --pre runs a command per searched file, --hostname-bin
+			// runs one outright — a full shell inside "read-only" plan mode,
+			// especially since the model may write any .md into the plans dir
+			// and then feed it to --pre.
+			await expectCommand("rg --pre=sh needle plan.md", false);
+			await expectCommand("rg --pre sh needle plan.md", false);
+			await expectCommand("rg --hostname-bin=sh needle .", false);
+			// ...while an ordinary ripgrep search still passes.
+			await expectCommand("rg -n 'handler' src/", true);
+			await expectCommand("rg --pre-glob '*.md' needle .", true);
 		});
 	});
 

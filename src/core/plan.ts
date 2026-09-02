@@ -195,6 +195,12 @@ const READONLY_BINARIES = new Set([
  * output flags); these are the per-binary extras. */
 const FORBIDDEN_FLAGS: Record<string, RegExp> = {
 	find: /^-(delete|exec|execdir|ok|okdir|fprint0?|fprintf|fls)$/,
+	// ripgrep runs `--pre` once per searched file and `--hostname-bin` once for
+	// the hostname, both as arbitrary commands — `rg --pre=sh q notes.md`
+	// executes the contents of notes.md, which plan mode itself lets the model
+	// write (the plans directory accepts any .md content). Without these two,
+	// "read-only" plan mode had a full shell in it.
+	rg: /^(--pre|--hostname-bin)$/,
 	fd: /^(-x|-X|--exec|--exec-batch)$/,
 	sort: /^(-o|--output|--compress-program)$/,
 	tree: /^-o$/,
