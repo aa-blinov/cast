@@ -1132,7 +1132,23 @@ export function getHistoryPage(
  *  off) — `/clear`'s contract is "forget this thread's history entirely",
  *  distinct from compaction's "keep it, just stop sending it to the model". */
 export function clearSessionMessages(session: SessionState): void {
-	getDb().prepare("DELETE FROM messages WHERE session_id = ?").run(session.id);
+	const db = getDb();
+	const clear = () =>
+		withMessageFtsClearedFor(db, [session.id], () =>
+			db.prepare("DELETE FROM messages WHERE session_id = ?").run(session.id),
+		);
+	if (db.isTransaction) {
+		clear();
+	} else {
+		db.exec("BEGIN IMMEDIATE");
+		try {
+			clear();
+			db.exec("COMMIT");
+		} catch (error) {
+			db.exec("ROLLBACK");
+			throw error;
+		}
+	}
 	session.messages = [];
 }
 
@@ -1486,8 +1502,64 @@ export function markImageMessagesOutOfContext(sessionId: string): void {
 
 /** Delete a saved session entirely — cascades to its message rows. Returns
  *  false if it wasn't found. */
+/**
+ * Runs `work` with the per-message FTS delete triggers off, having cleared the
+ * session's rows from each index with a single session-scoped delete first.
+ *
+ * messages_fts and session_history_fts keep session_id/seq as UNINDEXED
+ * columns, which FTS5 cannot index — so `DELETE FROM ... WHERE session_id = ?
+ * AND seq = ?` scans the whole index, and the AFTER DELETE triggers run that
+ * scan once per message. Measured on a real 185MB store, deleting one
+ * 2786-message conversation took 241 seconds, holding the write lock the
+ * entire time (long enough for every concurrent writer to blow past the 5s
+ * busy_timeout). Doing it this way is two scans instead of two per message.
+ *
+ * Safe only because callers hold a `BEGIN IMMEDIATE` write transaction: no
+ * other connection can insert a message while the triggers are missing. The
+ * trigger definitions are read back from sqlite_master and replayed verbatim,
+ * so this never has to keep its own copy of them in sync with migrations.
+ */
+function withMessageFtsClearedFor<T>(db: DatabaseSync, sessionIds: readonly string[], work: () => T): T {
+	const triggers = db
+		.prepare(
+			"SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND name IN ('messages_fts_ad', 'session_history_fts_ad')",
+		)
+		.all() as Array<{ name: string; sql: string }>;
+	for (const trigger of triggers) db.exec(`DROP TRIGGER ${trigger.name}`);
+	try {
+		for (const table of ["messages_fts", "session_history_fts"]) {
+			try {
+				const clear = db.prepare(`DELETE FROM ${table} WHERE session_id = ?`);
+				for (const sessionId of sessionIds) clear.run(sessionId);
+			} catch {
+				// A legacy store can be missing one of the indexes entirely
+				// (its creating migration recorded as baselined without the
+				// DDL having run); nothing to clear then.
+			}
+		}
+		return work();
+	} finally {
+		for (const trigger of triggers) db.exec(trigger.sql);
+	}
+}
+
 export function deleteSession(id: string, cwd?: string): boolean {
-	const result = getDb().prepare("DELETE FROM sessions WHERE id = ?").run(id);
+	const db = getDb();
+	const remove = () =>
+		withMessageFtsClearedFor(db, [id], () => db.prepare("DELETE FROM sessions WHERE id = ?").run(id));
+	let result: { changes: number | bigint };
+	if (db.isTransaction) {
+		result = remove();
+	} else {
+		db.exec("BEGIN IMMEDIATE");
+		try {
+			result = remove();
+			db.exec("COMMIT");
+		} catch (error) {
+			db.exec("ROLLBACK");
+			throw error;
+		}
+	}
 	// A sandbox session owns its throwaway working copy
 	// (~/.cast/sandbox/cast-<id>); remove it with the session so these dirs
 	// don't pile up as orphans. Matched exactly (never by prefix), so a
@@ -1960,6 +2032,64 @@ export function createSession(model: string, cwd: string, options: SessionCreati
 		parentSessionId: options.parentSessionId,
 		backgroundKind: options.backgroundKind,
 	};
+}
+
+/** How long a background session's rows are kept.
+ *
+ * Background sessions are cast's own working snapshots — checkpoint writers,
+ * memory dream/distill runs — not user history. They never appear in the
+ * sidebar or the picker (listSessions filters them out) and nothing reads
+ * them back once the run that created them is done. Nothing deleted them
+ * either, so they grew forever: on one real installation 376 of 999 session
+ * rows, and 23% of the database's content, were invisible background rows.
+ * Same window as telemetry retention. */
+const BACKGROUND_SESSION_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** How many expired background sessions one sweep removes. Capped so the write
+ * transaction stays well inside the 5s busy_timeout other connections wait on
+ * — a first sweep on a long-neglected store would otherwise hold the lock for
+ * a dozen seconds. The backlog clears over the next few daemon starts. */
+const BACKGROUND_PRUNE_BATCH = 25;
+
+/**
+ * Deletes background sessions untouched for longer than the retention window,
+ * returning how many rows went. Messages and events go with them through the
+ * schema's ON DELETE CASCADE, same as an ordinary deleteSession.
+ *
+ * Only ever touches `session_kind = 'background'` — a user's own
+ * conversations, however old, are never pruned.
+ */
+export function pruneBackgroundSessions(now: number = Date.now(), limit = BACKGROUND_PRUNE_BATCH): number {
+	const db = getDb();
+	const cutoff = new Date(now - BACKGROUND_SESSION_RETENTION_MS).toISOString();
+	const prune = () => {
+		// Must go through the same FTS-clearing path as deleteSession: a plain
+		// DELETE here falls back to the per-message AFTER DELETE triggers and
+		// takes minutes on a large store, holding the write lock — which, at
+		// daemon startup, meant the daemon never finished starting.
+		const ids = (
+			db
+				.prepare("SELECT id FROM sessions WHERE session_kind = 'background' AND updated_at < ? LIMIT ?")
+				.all(cutoff, limit) as Array<{ id: string }>
+		).map((row) => row.id);
+		if (ids.length === 0) return 0;
+		const placeholders = ids.map(() => "?").join(", ");
+		return withMessageFtsClearedFor(
+			db,
+			ids,
+			() => db.prepare(`DELETE FROM sessions WHERE id IN (${placeholders})`).run(...ids).changes,
+		);
+	};
+	if (db.isTransaction) return Number(prune());
+	db.exec("BEGIN IMMEDIATE");
+	try {
+		const removed = Number(prune());
+		db.exec("COMMIT");
+		return removed;
+	} catch (error) {
+		db.exec("ROLLBACK");
+		throw error;
+	}
 }
 
 export function listBackgroundSessions(parentSessionId?: string): SessionState[] {
