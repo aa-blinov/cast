@@ -1471,8 +1471,18 @@ export function listSessions(): SessionState[] {
 		.all() as Array<{ id: string }>;
 	const sessions: SessionState[] = [];
 	for (const { id } of rows) {
-		const s = loadSession(id);
-		if (s) sessions.push(s);
+		// loadSession parses several JSON columns unguarded, so one row with a
+		// malformed usage_json/todos_json throws — and an unguarded loop here
+		// meant that single bad row hid EVERY session from the sidebar and the
+		// picker. Skip the row it can't read instead: the rest of the list is
+		// still correct and usable, and the broken session is one entry missing
+		// rather than a blank app.
+		try {
+			const s = loadSession(id);
+			if (s) sessions.push(s);
+		} catch (err) {
+			console.error(`[cast] skipping unreadable session ${id}:`, err instanceof Error ? err.message : err);
+		}
 	}
 	return sessions;
 }
