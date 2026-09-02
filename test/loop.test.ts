@@ -1417,6 +1417,38 @@ describe("runAgentLoop — retries a length-truncated response with no tool call
 		expect(warnings.some((w) => w.includes("iteration budget"))).toBe(true);
 	});
 
+	it("reminds the model about the iteration budget once, not on every remaining pass", async () => {
+		// The reminder used to be pushed on each of the last four iterations, so
+		// a long turn spent context on near-identical system messages at exactly
+		// the point it was short of room.
+		const toolCall = () => ({
+			content: "",
+			finishReason: "tool_calls" as const,
+			toolCalls: [{ id: "near-cap", name: "bash", arguments: '{"command":"echo step"}' }],
+		});
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(toolCall)
+			.mockImplementationOnce(toolCall)
+			.mockImplementationOnce(toolCall)
+			.mockImplementationOnce(toolCall)
+			.mockImplementationOnce(toolCall);
+
+		const messages = await runAgentLoop([{ role: "user", content: "long turn" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			maxOuterIterations: 5,
+			onEvent: () => {},
+			onWarning: () => {},
+		});
+
+		const reminders = messages.filter(
+			(m) => m.role === "system" && String(m.content).includes("near the end of this turn's iteration budget"),
+		);
+		expect(reminders).toHaveLength(1);
+	});
+
 	it("keeps a steer that arrives as the iteration budget runs out", async () => {
 		// A steer already drained out of the queue was thrown away when the cap
 		// fired: nothing persisted, no steering_injected event — the user's

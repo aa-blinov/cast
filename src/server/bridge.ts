@@ -1448,6 +1448,16 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// instead. The loop drains steeringQueue and broadcasts
 		// "steering_injected" itself, so every connected tab sees it land.
 		if (ws.status === "running" || ws.runner.isRunning) {
+			// A per-run iteration budget can't be applied to a turn that is
+			// already running — it was silently dropped here, so a `/goal`
+			// racing a turn would have steered in with the default cap and no
+			// hint that its budget was ignored. Say so instead.
+			if (opts?.maxOuterIterations !== undefined) {
+				broadcast(ws, {
+					type: "notice",
+					message: `A turn is already running — your message was steered into it, and the requested iteration budget (${opts.maxOuterIterations}) applies to a new turn, not this one.`,
+				});
+			}
 			ws.runner.steeringQueue.enqueue({
 				role: "user",
 				content: buildUserContent(text, images),
