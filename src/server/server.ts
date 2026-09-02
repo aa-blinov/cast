@@ -70,7 +70,7 @@ import { GOAL_MAX_OUTER_ITERATIONS } from "./commands.ts";
 import { readLiveServerState } from "./daemon-state.ts";
 import { isBlockedAttachmentName, sessionInputsDir } from "./inputs.ts";
 import { createUi } from "./ui-factory/factory.ts";
-import { discoverUis } from "./ui-registry.ts";
+import { discoverUis, RESERVED_UI_NAMES } from "./ui-registry.ts";
 
 const PORT_RE = /:\d+$/;
 const ROUTE_PARAM_RE = /:(\w+)/g;
@@ -2516,18 +2516,11 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		if (method === "GET" || method === "HEAD") {
 			const segs = urlPath.split("?")[0].split("/").filter(Boolean);
 			const top = segs[0];
-			const reserved = new Set([
-				"default",
-				"api",
-				"login",
-				"shared",
-				"settings",
-				"dashboard",
-				"fonts",
-				"vendor",
-				"ui",
-			]);
-			if (top && !reserved.has(top)) {
+			// Second line of defence — discoverUis already refuses these slugs,
+			// so getUiMap() can't hold one; kept because serving a daemon route's
+			// path out of a UI directory would be wrong regardless of how the
+			// entry got there.
+			if (top && !RESERVED_UI_NAMES.has(top)) {
 				const ui = getUiMap().get(top);
 				if (ui) {
 					let rel = `/${segs.slice(1).join("/")}`;

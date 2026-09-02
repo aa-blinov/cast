@@ -19,6 +19,27 @@ export interface UiEntry {
 	builtin: boolean;
 }
 
+/**
+ * Slugs a discovered UI may never claim, because the daemon's own routes own
+ * them. Enforced here, at discovery, rather than only at creation: a UI
+ * directory can appear on disk without going through `createUi` (a user or an
+ * agent making the directory by hand), and a discovered UI named e.g. "api"
+ * used to make every `/api/*` route public — server.ts treats a request whose
+ * first path segment matches a known UI as a public static route, so the
+ * auth gate was skipped for the whole API while the real handlers still ran.
+ */
+export const RESERVED_UI_NAMES = new Set([
+	"default",
+	"api",
+	"login",
+	"shared",
+	"settings",
+	"dashboard",
+	"fonts",
+	"vendor",
+	"ui",
+]);
+
 function isUiDir(dir: string): boolean {
 	try {
 		return existsSync(join(dir, "index.html")) && statSync(dir).isDirectory();
@@ -37,6 +58,7 @@ function scanUisIn(root: string): UiEntry[] {
 	}
 	for (const name of children) {
 		if (name.startsWith(".")) continue;
+		if (RESERVED_UI_NAMES.has(name)) continue;
 		const dir = join(root, name);
 		if (isUiDir(dir)) entries.push({ name, dir, builtin: false });
 	}

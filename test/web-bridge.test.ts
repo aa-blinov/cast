@@ -1906,6 +1906,39 @@ describe("web bridge", () => {
 		expect(sshSuggestions.map((s) => s.value)).toEqual(["list", "add", "remove"]);
 	});
 
+	it("a traversing session id can't turn permanent-delete into an rmSync of ~/.cast", async () => {
+		// The router's `([^/]+)` matches "..", and Node never normalizes it out
+		// of req.url — so `DELETE /api/sessions/../permanent` used to reach
+		// rmSync(join(~/.cast/inputs, ".."), {recursive, force}), i.e. the whole
+		// cast home directory, and still answer a misleading 404.
+		const fakeHome = mkdtempSync(join(tmpdir(), "cast-id-safety-test-"));
+		const previousHome = process.env.HOME;
+		process.env.HOME = fakeHome;
+		try {
+			mkdirSync(join(fakeHome, ".cast", "inputs"), { recursive: true });
+			writeFileSync(join(fakeHome, ".cast", "settings.json"), '{"providers":[]}');
+			const bridge = createServerBridge(makeResult());
+
+			expect(bridge.deleteSessionPermanently("..")).toBe(false);
+			expect(existsSync(join(fakeHome, ".cast", "settings.json"))).toBe(true);
+			expect(existsSync(join(fakeHome, ".cast", "inputs"))).toBe(true);
+
+			expect(bridge.deleteSessionPermanently(".")).toBe(false);
+			expect(existsSync(join(fakeHome, ".cast", "inputs"))).toBe(true);
+		} finally {
+			if (previousHome === undefined) delete process.env.HOME;
+			else process.env.HOME = previousHome;
+			rmSync(fakeHome, { recursive: true, force: true });
+		}
+	});
+
+	it("readPluginContent rejects a plugin id whose halves traverse out of the installs directory", async () => {
+		const bridge = createServerBridge(makeResult());
+		expect(bridge.readPluginContent("..@..")).toMatchObject({ ok: false });
+		expect(bridge.readPluginContent("..@..").error).toContain("Invalid plugin id");
+		expect(bridge.readPluginContent("x@../..").error).toContain("Invalid plugin id");
+	});
+
 	it("saveSshKey can't be tricked into writing outside the keys directory", async () => {
 		const fakeHome = mkdtempSync(join(tmpdir(), "cast-ssh-key-test-"));
 		const previousHome = process.env.HOME;

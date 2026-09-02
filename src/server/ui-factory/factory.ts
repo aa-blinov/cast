@@ -2,6 +2,8 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { RESERVED_UI_NAMES } from "../ui-registry.ts";
+
 const TEMPLATE_DIR = join(import.meta.dirname ?? ".", "template");
 
 function renderTemplate(src: string, vars: Record<string, string>): string {
@@ -12,17 +14,6 @@ function renderTemplate(src: string, vars: Record<string, string>): string {
 
 const UI_NAME_RE = /^[a-z0-9-]+$/;
 
-const RESERVED_UI_NAMES = new Set([
-	"default",
-	"api",
-	"login",
-	"shared",
-	"settings",
-	"dashboard",
-	"fonts",
-	"vendor",
-	"ui",
-]);
 export function createUi(name: string, opts?: { dest?: string; templateVars?: Record<string, string> }): string {
 	if (!UI_NAME_RE.test(name)) throw new Error("UI name must be lowercase a-z, 0-9, hyphens only");
 	if (RESERVED_UI_NAMES.has(name)) throw new Error(`UI name "${name}" is reserved — use another slug`);

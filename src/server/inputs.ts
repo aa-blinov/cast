@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 /**
  * Where a session's attached (non-image) documents live: `~/.cast/inputs/
@@ -12,7 +12,41 @@ import { join } from "node:path";
  * nested paths, only filenames.
  */
 export function sessionInputsDir(sessionId: string): string {
+	if (!isSafeSessionId(sessionId)) throw new Error(`Invalid session id: ${JSON.stringify(sessionId)}`);
 	return join(homedir(), ".cast", "inputs", sessionId);
+}
+
+/**
+ * Whether a session id is safe to use as a single path segment.
+ *
+ * Session ids are generated as `[a-z0-9]+` (see core/session.ts), but they
+ * arrive here straight out of a URL path parameter, and the router's `([^/]+)`
+ * happily matches `..` — which Node never normalizes out of `req.url`. Without
+ * this check `join(~/.cast/inputs, "..")` resolves to `~/.cast` itself, so
+ * `DELETE /api/sessions/../permanent` handed the whole cast home directory
+ * (settings with provider keys, sessions.db, keys/, skills/, plugins/) to a
+ * recursive `rmSync` and still answered a misleading 404.
+ *
+ * Deliberately a bit looser than the generator's own alphabet — an id can also
+ * come from an outside caller (ACP, an import) — while still admitting nothing
+ * that means anything to the filesystem.
+ */
+export function isSafeSessionId(sessionId: string): boolean {
+	return SAFE_SESSION_ID_RE.test(sessionId);
+}
+
+const SAFE_SESSION_ID_RE = /^[A-Za-z0-9_-]+$/;
+
+/**
+ * Whether a string may be used as one path segment: non-empty, no separator,
+ * and not a relative-directory reference. Looser than isSafeSessionId because
+ * the names it guards (plugin and marketplace slugs) legitimately contain dots
+ * and other punctuation — it only rules out anything that would let a name
+ * escape the directory it's being joined into.
+ */
+export function isSafePathSegment(segment: string): boolean {
+	if (!segment || segment === "." || segment === "..") return false;
+	return !segment.includes("/") && !segment.includes("\\") && basename(segment) === segment;
 }
 
 /**
