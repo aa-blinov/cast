@@ -2634,6 +2634,26 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		return getDefaultReasoningLevel(info?.reasoning ?? null, format, model, info?.reasoningSupported);
 	}
 
+	/** What /current shows for reasoningLevel — must mirror the same
+	 * session-pin-aware resolution submit() actually runs with (the
+	 * `sessionProvider`/`runReasoningFormat`/`runReasoningLevel` block there),
+	 * not the raw global config.reasoningLevel. A session pinned to a
+	 * provider whose model doesn't support the globally active level (e.g.
+	 * global "high" on a MiniMax-pinned session, whose vocabulary is
+	 * enabled/adaptive/disabled) would otherwise display a level that isn't
+	 * what the next turn actually sends. */
+	function sessionReasoningLevel(ws: WebAgentSession): string {
+		const providers = loadSettings().providers ?? [];
+		const sessionProvider = ws.session.providerName
+			? providers.find((p) => p.name === ws.session.providerName)
+			: ws.session.providerUrl
+				? providers.find((p) => p.url === ws.session.providerUrl)
+				: undefined;
+		if (!sessionProvider) return config.reasoningLevel;
+		const format = resolveReasoningFormat(sessionProvider.url, sessionProvider.reasoningFormat);
+		return reasoningLevelForModel(ws.session.model, format);
+	}
+
 	function renameSession(sessionId: string, title: string): boolean {
 		const ws = sessions.get(sessionId);
 		if (!ws) return false;
@@ -2770,8 +2790,11 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 						null,
 					// Reasoning level is stored on the global `config` object, not the
 					// session — the Settings → Model tab header reads this so the
-					// user can see what level is currently in effect.
-					reasoningLevel: config.reasoningLevel,
+					// user can see what level is currently in effect. Resolved
+					// through the session's own pin (see sessionReasoningLevel) so a
+					// pinned session shows what its next turn will actually use, not
+					// the global level if that isn't even valid for its model.
+					reasoningLevel: sessionReasoningLevel(ws),
 					mode: ws.session.mode ?? "build",
 					status: ws.status,
 					messageCount: countTurnMessages(ws.session.messages),
