@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { runMigrations } from "./migrations.ts";
@@ -55,18 +55,20 @@ function dbPath(): string {
 		if (configuredPath !== ":memory:") mkdirSync(dirname(configuredPath), { recursive: true });
 		return configuredPath;
 	}
-	// Under vitest, refuse the real database outright rather than writing to
-	// it. Tests set CAST_SESSIONS_DB per test, but fire-and-forget work (a
+	const dir = join(homedir(), ".cast", "sessions");
+	// Under vitest, refuse a database outside the temp dir rather than writing
+	// to it. Tests set CAST_SESSIONS_DB per test, but fire-and-forget work (a
 	// checkpoint writer, say) can outlive the test that started it and reach
 	// getDb() after afterEach has already restored the variable — which
 	// silently accumulated hundreds of rows in the developer's own
 	// ~/.cast/sessions/sessions.db. Failing loudly points at the leak instead.
-	if (process.env.VITEST) {
+	// Scoped to paths outside tmpdir, so the tests that spawn a real daemon
+	// under an isolated HOME (which inherits VITEST) still work.
+	if (process.env.VITEST && !dir.startsWith(tmpdir())) {
 		throw new Error(
 			"Refusing to open the real sessions.db from a test — set CAST_SESSIONS_DB, and make sure no background work outlives the test that started it.",
 		);
 	}
-	const dir = join(homedir(), ".cast", "sessions");
 	if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 	return join(dir, "sessions.db");
 }

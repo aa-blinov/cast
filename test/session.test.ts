@@ -36,6 +36,7 @@ import {
 	loadSubagentRuns,
 	markImageMessagesOutOfContext,
 	migrateLegacySessionsToDb,
+	pruneBackgroundSessions,
 	recordCompaction,
 	resetSessionContext,
 	saveSession,
@@ -936,6 +937,120 @@ describe("session persistence", () => {
 		).n;
 		expect(after.version).toBe(versionBefore);
 		expect(countAfter).toBe(countBefore);
+	});
+
+	it("clears a deleted session's search-index rows and puts the FTS triggers back", () => {
+		// Deleting a session used to lean on the per-message AFTER DELETE
+		// triggers, whose `WHERE session_id = ? AND seq = ?` scans the whole
+		// FTS index once per message — 241 seconds for one real 2786-message
+		// conversation, with the write lock held throughout. The triggers are
+		// now dropped for the delete and replayed afterwards, so both the
+		// index rows and the triggers themselves have to be checked.
+		const session = createSession("gpt-4o", projectA);
+		session.messages = [
+			{ role: "user", content: "uniquedeletionprobe alpha" },
+			{ role: "assistant", content: "uniquedeletionprobe beta" },
+		];
+		saveSession(session);
+		const db = getDb();
+		const ftsBefore = db.prepare("SELECT COUNT(*) AS n FROM messages_fts WHERE session_id = ?").get(session.id) as {
+			n: number;
+		};
+		expect(ftsBefore.n).toBe(2);
+
+		expect(deleteSession(session.id)).toBe(true);
+
+		for (const table of ["messages_fts", "session_history_fts"]) {
+			const left = db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE session_id = ?`).get(session.id) as {
+				n: number;
+			};
+			expect(left.n, table).toBe(0);
+		}
+		const triggers = db
+			.prepare(
+				"SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'trigger' AND name IN ('messages_fts_ad', 'session_history_fts_ad')",
+			)
+			.get() as { n: number };
+		expect(triggers.n).toBe(2);
+
+		// The restored triggers still work: a later session's rows come and go
+		// from the index as before.
+		const next = createSession("gpt-4o", projectA);
+		next.messages = [{ role: "user", content: "uniquedeletionprobe gamma" }];
+		saveSession(next);
+		expect(
+			(db.prepare("SELECT COUNT(*) AS n FROM messages_fts WHERE session_id = ?").get(next.id) as { n: number }).n,
+		).toBe(1);
+		deleteSession(next.id);
+		expect(
+			(db.prepare("SELECT COUNT(*) AS n FROM messages_fts WHERE session_id = ?").get(next.id) as { n: number }).n,
+		).toBe(0);
+	});
+
+	it("prunes only background sessions past the retention window", () => {
+		// Background sessions are cast's own working snapshots — invisible in the
+		// sidebar, never read back — and nothing deleted them, so they grew
+		// forever. A user's own conversation must never be pruned, however old.
+		const old = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+		const recentBackground = createSession("gpt-4o", projectA, {
+			sessionKind: "background",
+			backgroundKind: "checkpoint-writer",
+		});
+		recentBackground.messages = [{ role: "user", content: "recent snapshot" }];
+		saveSession(recentBackground);
+
+		const oldBackground = createSession("gpt-4o", projectA, {
+			sessionKind: "background",
+			backgroundKind: "checkpoint-writer",
+		});
+		oldBackground.messages = [{ role: "user", content: "old snapshot" }];
+		saveSession(oldBackground);
+
+		const oldConversation = createSession("gpt-4o", projectA);
+		oldConversation.messages = [{ role: "user", content: "the user's own old thread" }];
+		saveSession(oldConversation);
+
+		getDb()
+			.prepare("UPDATE sessions SET updated_at = ? WHERE id IN (?, ?)")
+			.run(old, oldBackground.id, oldConversation.id);
+
+		expect(pruneBackgroundSessions()).toBe(1);
+		expect(loadSession(oldBackground.id)).toBeNull();
+		expect(loadSession(recentBackground.id)).not.toBeNull();
+		expect(loadSession(oldConversation.id)).not.toBeNull();
+		// Messages go with it, through the schema's ON DELETE CASCADE.
+		const orphans = getDb()
+			.prepare("SELECT COUNT(*) AS n FROM messages WHERE session_id = ?")
+			.get(oldBackground.id) as { n: number };
+		expect(orphans.n).toBe(0);
+	});
+
+	it("prunes background sessions in bounded batches", () => {
+		// One sweep must stay well inside the busy_timeout other connections
+		// wait on, so a long-neglected store clears over several sweeps rather
+		// than holding the write lock for one very long transaction.
+		const old = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+		const ids: string[] = [];
+		for (let i = 0; i < 5; i++) {
+			const session = createSession("gpt-4o", projectA, {
+				sessionKind: "background",
+				backgroundKind: "checkpoint-writer",
+			});
+			session.messages = [{ role: "user", content: `snapshot ${i}` }];
+			saveSession(session);
+			ids.push(session.id);
+		}
+		const placeholders = ids.map(() => "?").join(", ");
+		getDb()
+			.prepare(`UPDATE sessions SET updated_at = ? WHERE id IN (${placeholders})`)
+			.run(old, ...ids);
+
+		expect(pruneBackgroundSessions(Date.now(), 2)).toBe(2);
+		expect(pruneBackgroundSessions(Date.now(), 2)).toBe(2);
+		expect(pruneBackgroundSessions(Date.now(), 2)).toBe(1);
+		expect(pruneBackgroundSessions(Date.now(), 2)).toBe(0);
+		expect(ids.filter((id) => loadSession(id) !== null)).toEqual([]);
 	});
 
 	it("skips one unreadable session row instead of hiding the whole list", () => {

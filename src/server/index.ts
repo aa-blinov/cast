@@ -9,7 +9,7 @@ import { homedir } from "node:os";
 import { closeMcpConnections } from "../core/mcp.ts";
 import { drainAutomaticMemoryMaintenance, drainProjectCheckpointWriters } from "../core/memory.ts";
 import { resolveMcpForCwd } from "../core/project.ts";
-import { deleteSession } from "../core/session.ts";
+import { deleteSession, pruneBackgroundSessions } from "../core/session.ts";
 import { loadSettings, updateSettings } from "../core/settings.ts";
 import type { ParsedArgs } from "../core/startup.ts";
 import { runStartup } from "../core/startup.ts";
@@ -214,6 +214,21 @@ export async function runServerMain(args: string[], options: { foreground: boole
 			// mechanism /mcp enable/disable already relies on), so the very
 			// next message in any open session picks up the newly connected
 			// tools automatically — no restart needed.
+			// Background sessions (checkpoint writers, memory dream/distill) are
+			// cast's own working snapshots — invisible in the sidebar, never read
+			// back after the run that made them — and nothing used to delete
+			// them, so they piled up indefinitely. Swept here rather than before
+			// listen(): the sweep takes a write transaction, and a client
+			// waiting for the daemon to come up shouldn't wait on it too.
+			// Batched (see BACKGROUND_PRUNE_BATCH), so a long backlog clears
+			// over several starts instead of holding the lock in one go.
+			try {
+				const pruned = pruneBackgroundSessions();
+				if (pruned > 0) console.log(`[cast server] pruned ${pruned} expired background session(s)`);
+			} catch (err) {
+				console.error("[cast server] failed to prune background sessions:", err);
+			}
+
 			const mcpConnectStart = Date.now();
 			resolveMcpForCwd(
 				result.projectDeps,
