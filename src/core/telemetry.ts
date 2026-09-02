@@ -68,6 +68,13 @@ export function classifyLlmError(message: string | undefined): LlmErrorType {
 const TELEMETRY_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 let lastPruneAt = 0;
 
+/** Test-only: lets a test force the next record*() call to actually prune,
+ * instead of silently no-oping behind the real 60s throttle for the rest of
+ * the process's test run. */
+export function resetPruneThrottleForTests(): void {
+	lastPruneAt = 0;
+}
+
 // Prepared lazily and re-prepared when the DB connection changes (tests close
 // and reopen it via resetDbConnectionForTests). The hot path — one insert per
 // LLM request, fired from the bridge's event handler — pays only for run(),
@@ -89,15 +96,25 @@ function getInsertStmt(): StatementSync {
 	return insertStmt;
 }
 
+// Every telemetry table this module writes to, all on the same retention —
+// tool_calls, api_requests, compactions, and memory_maintenance previously
+// had no pruning at all (only llm_requests did), so they grew unbounded for
+// the life of sessions.db. api_requests in particular logs one row per HTTP
+// request the daemon serves (page loads, polls, SSE reconnects), the
+// highest-volume of the five.
+const TELEMETRY_TABLES = ["llm_requests", "tool_calls", "compactions", "api_requests", "memory_maintenance"];
+
 function prune(): void {
 	const now = Date.now();
 	// Prune at most once a minute — cheap guard against running a DELETE on
 	// every single request.
 	if (now - lastPruneAt < 60_000) return;
 	lastPruneAt = now;
-	getDb()
-		.prepare("DELETE FROM llm_requests WHERE ts < ?")
-		.run(now - TELEMETRY_RETENTION_MS);
+	const db = getDb();
+	const cutoff = now - TELEMETRY_RETENTION_MS;
+	for (const table of TELEMETRY_TABLES) {
+		db.prepare(`DELETE FROM ${table} WHERE ts < ?`).run(cutoff);
+	}
 }
 
 export function recordLlmRequest(record: LlmRequestRecord): void {
@@ -312,6 +329,12 @@ function getApiInsertStmt(): StatementSync {
 
 export function recordApiRequest(record: ApiRequestRecord): void {
 	getApiInsertStmt().run(Date.now(), record.method, record.path, record.status, record.latencyMs);
+	// The highest-volume of the telemetry tables (one row per HTTP request —
+	// page loads, polls, SSE reconnects) and the only activity a daemon
+	// serving an idle web UI with no LLM turns running would generate, so it
+	// needs its own prune() trigger rather than relying solely on
+	// recordLlmRequest's.
+	prune();
 }
 
 /** Global mean latency over usage rows since `sinceMs` — for KPIs; a mean of

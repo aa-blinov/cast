@@ -21,9 +21,11 @@ import {
 	queryToolUsage,
 	queryTurnMetrics,
 	recordApiRequest,
+	recordLlmCompaction,
 	recordLlmRequest,
 	recordMemoryMaintenance,
 	recordToolCall,
+	resetPruneThrottleForTests,
 } from "../src/core/telemetry.ts";
 
 describe("llm telemetry", () => {
@@ -348,5 +350,50 @@ describe("querySessionAnalytics", () => {
 		const allTime = querySessionAnalytics(now - 30 * 24 * 60 * 60 * 1000);
 		expect(allTime.sessions).toBe(2);
 		expect(allTime.avgMessagesPerSession).toBe(11);
+	});
+});
+
+describe("telemetry retention", () => {
+	let root = "";
+
+	beforeEach(() => {
+		root = mkdtempSync(join(tmpdir(), "cast-telemetry-test-"));
+		process.env.CAST_SESSIONS_DB = join(root, "sessions.db");
+		resetDbConnectionForTests();
+		resetPruneThrottleForTests();
+	});
+
+	afterEach(() => {
+		resetDbConnectionForTests();
+		delete process.env.CAST_SESSIONS_DB;
+		rmSync(root, { recursive: true, force: true });
+	});
+
+	it("prunes tool_calls, api_requests, compactions, and memory_maintenance, not just llm_requests", () => {
+		const old = Date.now() - 8 * 24 * 60 * 60 * 1000; // 8 days — past the 7-day retention
+		recordToolCall("s1", "bash", false, 10);
+		recordLlmCompaction("s1", 3, 1000);
+		recordMemoryMaintenance({ sessionId: "s1", kind: "dream", status: "completed" });
+		recordApiRequest({ method: "GET", path: "/api/old", status: 200, latencyMs: 1 });
+
+		const db = getDb();
+		for (const table of ["tool_calls", "compactions", "memory_maintenance", "api_requests"]) {
+			db.prepare(`UPDATE ${table} SET ts = ?`).run(old);
+		}
+
+		// The very first recordApiRequest call above already consumed this
+		// test's throttle window; reset it so this one actually prunes instead
+		// of silently no-oping (prune() is shared and rate-limited across all
+		// five tables, not per-call).
+		resetPruneThrottleForTests();
+		recordApiRequest({ method: "GET", path: "/api/new", status: 200, latencyMs: 1 });
+
+		expect((db.prepare("SELECT COUNT(*) AS c FROM tool_calls").get() as { c: number }).c).toBe(0);
+		expect((db.prepare("SELECT COUNT(*) AS c FROM compactions").get() as { c: number }).c).toBe(0);
+		expect((db.prepare("SELECT COUNT(*) AS c FROM memory_maintenance").get() as { c: number }).c).toBe(0);
+		// The old api_requests row and the fresh one both exist pre-prune;
+		// only the old one should be gone afterward.
+		expect((db.prepare("SELECT COUNT(*) AS c FROM api_requests").get() as { c: number }).c).toBe(1);
+		expect((db.prepare("SELECT path FROM api_requests").get() as { path: string }).path).toBe("/api/new");
 	});
 });
