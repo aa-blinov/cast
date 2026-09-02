@@ -1533,6 +1533,28 @@ describe("web bridge", () => {
 		expect(ws.systemPrompt).toContain("Mode: build");
 	});
 
+	it("approving a plan switches the session to build in the same call", async () => {
+		// The client used to resolve the transition and then separately POST
+		// /build, so an interruption between the two left the approval consumed
+		// and the mode still "plan": card gone, model still read-only, nothing
+		// left to approve. Reproduced against a live daemon before this change.
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		bridge.setSessionMode(ws.id, "plan");
+		ws.session.planTransition = { kind: "done" };
+		expect(ws.session.mode).toBe("plan");
+
+		expect(bridge.resolvePlanTransition(ws.id, "done")).toEqual({ ok: true });
+
+		expect(ws.session.mode).toBe("build");
+		expect(ws.session.planTransition).toBeUndefined();
+		// The prompt has to follow the mode, or the next turn still advertises
+		// the plan-mode surface.
+		expect(ws.systemPrompt).toContain("Mode: build");
+		// A client that does still send /build afterwards is a no-op, not an error.
+		expect(bridge.setSessionMode(ws.id, "build")).toEqual({ ok: true });
+	});
+
 	it("setSessionMode clears a stale pending plan question/transition and broadcasts the clear", async () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();

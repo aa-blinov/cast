@@ -2286,7 +2286,24 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			return { ok: false, error: "No matching plan transition is awaiting a choice" };
 		ws.session.todos = createPlanTodos(planState);
 		resolvePlanTransition(planState);
+		// Approving a plan *is* the switch to build — do it here rather than
+		// leaving it to a follow-up call from the client. The client used to
+		// resolve the transition and then separately POST /build (and then
+		// clean-context, and then the chat), so anything interrupting it
+		// between the two — a closed tab, a dropped connection, a daemon
+		// restart — left the session with the approval consumed and the mode
+		// still "plan": the approval card gone, the model still read-only, and
+		// nothing left to approve again. Verified against a live daemon before
+		// this change.
+		ws.session.mode = "build";
+		ws.systemPrompt = computeSystemPrompt(
+			resolvePersona(ws.session.persona ?? "") ?? currentPersona,
+			ws.session.model,
+			ws.session.cwd ?? cwd,
+			"build",
+		);
 		saveSession(ws.session);
+		broadcastSessionUpdate(ws);
 		return { ok: true };
 	}
 
