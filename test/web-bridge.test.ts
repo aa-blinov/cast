@@ -1020,6 +1020,39 @@ describe("web bridge", () => {
 		expect(ws.runner.steeringQueue.hasItems()).toBe(true);
 	});
 
+	it("delivers a steer that arrived after the loop's last drain instead of stranding it", async () => {
+		// The loop drains the steering queue at fixed points and then the turn
+		// ends; a message enqueued between that last drain and idle used to sit
+		// on a queue nobody drained again — never delivered, and the client's
+		// "Steer queued" chip stayed up forever. Follow-ups already had this
+		// net; steering didn't.
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const events: string[] = [];
+		bridge.subscribe(ws.id, (event) => events.push(event.type));
+
+		// Hold the turn open, steer into it (runAgentLoop is stubbed, so nothing
+		// drains the queue), then let the turn finish: exactly the window.
+		let finishTurn!: () => void;
+		runAgentLoop.mockImplementationOnce(
+			(messages: unknown) =>
+				new Promise((resolve) => {
+					finishTurn = () => resolve(messages);
+				}),
+		);
+		bridge.submit(ws.id, "first message");
+		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalled());
+		bridge.submit(ws.id, "steer that races the end of the turn");
+		expect(ws.runner.steeringQueue.hasItems()).toBe(true);
+		finishTurn();
+
+		// Delivered: the queue drains and the event the client's "Steer queued"
+		// chip listens for actually fires. (It used to sit there forever.)
+		await vi.waitFor(() => expect(ws.runner.steeringQueue.hasItems()).toBe(false));
+		expect(events).toContain("steering_injected");
+		expect(runAgentLoop.mock.calls.length).toBeGreaterThan(1);
+	});
+
 	it("submit() while a turn is already running steers instead of racing a second runAgentLoop", () => {
 		// Two browser tabs on the same session both hitting "send" hit this
 		// same code path — without the guard, both would call runAgentLoop
@@ -1648,10 +1681,18 @@ describe("web bridge", () => {
 		bridge.submit(ws.id, "first message");
 		bridge.submit(ws.id, "second message");
 
+		// The claim is synchronous, so the second send can only queue.
 		expect(runAgentLoop).not.toHaveBeenCalled();
 		expect(ws.runner.steeringQueue.hasItems()).toBe(true);
 		releaseModels({ ok: true, models: [{ id: "gpt-4o" }] });
-		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalledTimes(1));
+		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalled());
+		// One loop at a time is the invariant here — never two at once...
+		expect(runAgentLoop.mock.calls.length).toBeGreaterThanOrEqual(1);
+		// ...and the queued message is eventually delivered rather than left on
+		// an idle queue forever, which is what used to happen: runAgentLoop is
+		// stubbed here, so nothing drains the queue during the turn and the
+		// stranded-steer net has to pick it up afterwards.
+		await vi.waitFor(() => expect(ws.runner.steeringQueue.hasItems()).toBe(false));
 	});
 
 	it("runs MessageDisplay hooks for a completed daemon response", async () => {

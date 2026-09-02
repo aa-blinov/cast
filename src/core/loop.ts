@@ -2228,7 +2228,22 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 							: `Turn hit the iteration safety cap (${activeCap}) — stopping. This may be a runaway loop; check the recent tool calls.`,
 					);
 					hasMoreToolCalls = false;
-					pendingMessages = [];
+					// A steer already drained out of the queue must not vanish
+					// with the turn: it was typed by the user, and dropping it
+					// here persisted nothing and emitted no event, so it was
+					// gone without trace. Keep it in the transcript — the model
+					// answers it on the next turn rather than this one — and say
+					// why it wasn't acted on now.
+					if (pendingMessages.length > 0) {
+						for (const message of pendingMessages) messages.push(message);
+						onEvent({ type: "steering_injected", messages: [...pendingMessages] });
+						loopConfig.onWarning?.(
+							pendingMessages.length === 1
+								? "Your message arrived as this turn ran out of its iteration budget — it's kept in the conversation and will be answered on the next turn."
+								: `${pendingMessages.length} of your messages arrived as this turn ran out of its iteration budget — they're kept in the conversation and will be answered on the next turn.`,
+						);
+						pendingMessages = [];
+					}
 					break;
 				}
 				if (activeCap >= 4 && outerIteration >= activeCap - 3) {

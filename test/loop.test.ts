@@ -1417,6 +1417,46 @@ describe("runAgentLoop — retries a length-truncated response with no tool call
 		expect(warnings.some((w) => w.includes("iteration budget"))).toBe(true);
 	});
 
+	it("keeps a steer that arrives as the iteration budget runs out", async () => {
+		// A steer already drained out of the queue was thrown away when the cap
+		// fired: nothing persisted, no steering_injected event — the user's
+		// message vanished without trace.
+		const warnings: string[] = [];
+		const events: string[] = [];
+		const toolCall = () => ({
+			content: "",
+			finishReason: "tool_calls" as const,
+			toolCalls: [{ id: "steer-cap-1", name: "bash", arguments: '{"command":"echo step"}' }],
+		});
+		const steeringQueue = new MessageQueue();
+		// Enqueued *during* the last permitted pass, so the loop's end-of-pass
+		// drain takes it into its local pending list and the next pass's cap
+		// check is what throws it away — the exact window.
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(toolCall)
+			.mockImplementationOnce(() => {
+				steeringQueue.enqueue({ role: "user", content: "wait, do it differently" });
+				return toolCall();
+			});
+
+		const messages = await runAgentLoop([{ role: "user", content: "autonomous goal" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			maxOuterIterations: 2,
+			steeringQueue,
+			onEvent: (event) => events.push(event.type),
+			onWarning: (message) => warnings.push(message),
+		});
+
+		expect(warnings.some((w) => w.includes("iteration budget"))).toBe(true);
+		// The message is in the conversation and the client was told it landed.
+		expect(messages.some((m) => m.role === "user" && m.content === "wait, do it differently")).toBe(true);
+		expect(events).toContain("steering_injected");
+		expect(warnings.some((w) => w.includes("answered on the next turn"))).toBe(true);
+	});
+
 	it("applies a configurable default iteration cap to a runaway turn", async () => {
 		// A model calling DIFFERENT tools forever (so the doom-loop detector
 		// can't catch it) must not loop indefinitely in a plain turn either —
