@@ -20,7 +20,17 @@
  * gives it the same tool (and the same nudge) it already uses correctly.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	realpathSync,
+	renameSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { createRequire } from "node:module";
 import { basename, dirname, extname, join } from "node:path";
 import * as TreeSitter from "web-tree-sitter";
@@ -641,11 +651,43 @@ function parseSections(content: string): Section[] {
 // the file-level doc comment for why this replaced a dedicated tool pair.
 
 /** True for a real .md file directly inside `plansDir` — no subdirectories,
- * no `..` traversal. The only paths write/edit may touch while plan mode is
- * active. dirname()/extname() on the resolved absolute path reject both
- * cheaply without needing a realpath syscall. */
+ * no `..` traversal, and nothing reached through a symlink. The only paths
+ * write/edit may touch while plan mode is active.
+ *
+ * The lexical dirname()/extname() checks are not enough on their own: write
+ * follows symlinks, so a link at the plans directory or at the plan file
+ * itself would let a write in "read-only" plan mode land wherever it points.
+ * Plan mode can't create such a link (no ln/cp/mv/tee on the read-only
+ * allowlist), but an earlier build-mode turn — or a prompt injection during
+ * one — can plant it and have the write happen after the user switches to
+ * plan mode trusting it to touch nothing. Resolving costs one syscall per
+ * write/edit call, which is nothing next to the write itself. */
 export function isPlanFilePath(absolutePath: string, plansDir: string): boolean {
-	return dirname(absolutePath) === plansDir && extname(absolutePath).toLowerCase() === ".md";
+	if (extname(absolutePath).toLowerCase() !== ".md") return false;
+	if (dirname(absolutePath) !== plansDir) return false;
+	// Compare resolved directories, so a symlinked plans dir (or any
+	// symlinked ancestor of it) can't redirect the write.
+	if (resolveRealPath(dirname(absolutePath)) !== resolveRealPath(plansDir)) return false;
+	// An entry that already exists must be a regular file, not a link
+	// pointing out of the directory. Not existing yet is the common case — a
+	// new plan file — and is fine.
+	try {
+		if (lstatSync(absolutePath).isSymbolicLink()) return false;
+	} catch {
+		// ENOENT: nothing there to redirect a write.
+	}
+	return true;
+}
+
+/** realpath, falling back to the path itself when it doesn't exist yet — the
+ * plans directory is created lazily, so a not-yet-created one must still
+ * compare equal to itself. */
+function resolveRealPath(path: string): string {
+	try {
+		return realpathSync(path);
+	} catch {
+		return path;
+	}
 }
 
 /**

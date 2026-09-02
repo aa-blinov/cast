@@ -12,6 +12,7 @@ import {
 	mkdirSync,
 	readdirSync,
 	readFileSync,
+	realpathSync,
 	renameSync,
 	rmdirSync,
 	rmSync,
@@ -71,6 +72,41 @@ import { readLiveServerState } from "./daemon-state.ts";
 import { isBlockedAttachmentName, sessionInputsDir } from "./inputs.ts";
 import { createUi } from "./ui-factory/factory.ts";
 import { discoverUis, RESERVED_UI_NAMES } from "./ui-registry.ts";
+
+/** True whenever `target` is `root` itself or somewhere underneath it — the
+ * one check every /fs/* route relies on to keep a session's file browser from
+ * reading/downloading/deleting anything outside its own cwd, no matter what
+ * `..`-laden path (or symlink) a request goes through. Exported for tests. */
+export function isInsideRoot(root: string, target: string): boolean {
+	const rel = relative(root, target);
+	if (rel !== "" && (rel.startsWith("..") || isAbsolute(rel))) return false;
+	// The lexical check above can't see through a symlink, and every
+	// consumer below follows one (statSync, createReadStream, rmSync,
+	// renameSync) — so a link inside the cwd pointing at, say, /etc let the
+	// file browser list, download and delete outside the project, which is
+	// the one thing this check exists to prevent. Compare resolved paths
+	// too; a link the user put inside their own project to another of their
+	// own directories now reads as outside, which is the intended reading
+	// of "outside its own cwd".
+	const realRel = relative(realPathOrNearest(root), realPathOrNearest(target));
+	return realRel === "" || (!realRel.startsWith("..") && !isAbsolute(realRel));
+}
+
+/** realpath of `path`, or of its closest existing ancestor when it doesn't
+ * exist yet — a rename destination or a not-yet-created directory still has
+ * to be judged by where its parent actually lives. */
+function realPathOrNearest(path: string): string {
+	let current = path;
+	for (;;) {
+		try {
+			return realpathSync(current);
+		} catch {
+			const parent = dirname(current);
+			if (parent === current) return path;
+			current = parent;
+		}
+	}
+}
 
 const PORT_RE = /:\d+$/;
 const ROUTE_PARAM_RE = /:(\w+)/g;
@@ -1768,15 +1804,6 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			json(res, { files: [], groups: emptyGroups(), error: err instanceof Error ? err.message : String(err) });
 		}
 	});
-
-	// True whenever `target` is `root` itself or somewhere underneath it — the
-	// one check every /fs/* route below relies on to keep a session's file
-	// browser from reading/downloading/deleting anything outside its own cwd,
-	// no matter what `..`-laden path a request sends.
-	function isInsideRoot(root: string, target: string): boolean {
-		const rel = relative(root, target);
-		return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
-	}
 
 	function sessionCwd(sessionId: string): string | null {
 		const ws = bridge.getSession(sessionId);
