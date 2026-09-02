@@ -35,6 +35,7 @@ import {
 	ensureMemoryFiles,
 	globalMemoryPath,
 	projectMemoryPath,
+	readMemoryFile,
 	readProjectMemory,
 	readSessionMemory,
 	writeMemoryFile,
@@ -545,6 +546,120 @@ describe("project memory", () => {
 			expect.objectContaining({ type: "rule", content: "Keep the daemon single-writer." }),
 		]);
 		expect(checkpointPath(session.id)).toContain(join("memory", "sessions", session.id));
+	});
+
+	it("keeps a tool-written memory across a file reconcile, with its metadata", () => {
+		// The markdown file is canonical, so a row that lived only in the
+		// database was deleted by the next reconcile — silently discarding
+		// everything the memory tool had stored. Storing now writes the bullet
+		// (with its metadata in a trailing comment) into the file too.
+		const projectCwd = join(root, "canonical-store-project");
+		const session = createSession("test-model", projectCwd);
+		saveSession(session);
+		storeProjectMemory(projectCwd, session.id, "turn-1", [
+			{
+				type: "architecture",
+				content: "Tool-written rule that must survive.",
+				importance: 77,
+				confidence: 88,
+				expiresAt: "2099-01-01T00:00:00.000Z",
+			},
+		]);
+
+		const path = projectMemoryPath(projectIdForCwd(projectCwd));
+		const file = readMemoryFile(path);
+		expect(file).toContain("- Tool-written rule that must survive. <!-- cast:");
+		expect(file).toContain("type=architecture");
+		expect(file).toContain("exp=2099-01-01T00:00:00.000Z");
+
+		// An unrelated hand edit, then a search forces the reconcile.
+		writeMemoryFile(path, file.replace("## Rules\n(none yet)", "## Rules\n- A hand-written rule."));
+		searchProjectMemory(projectCwd, "rule");
+
+		const rows = listProjectMemory(projectCwd);
+		const survivor = rows.find((row) => row.content === "Tool-written rule that must survive.");
+		expect(survivor).toBeDefined();
+		// Metadata the markdown alone couldn't express came back from the suffix.
+		expect(survivor?.type).toBe("architecture");
+		expect(survivor?.importance).toBe(77);
+		expect(survivor?.confidence).toBe(88);
+		expect(survivor?.expiresAt).toBe("2099-01-01T00:00:00.000Z");
+		expect(rows.map((row) => row.content)).toContain("A hand-written rule.");
+	});
+
+	it("keeps a bullet's row identity across an unrelated edit elsewhere in the file", () => {
+		// Reconcile used to DELETE every row and re-INSERT from the file, so a
+		// one-line edit renumbered every entry and re-tokenised the whole index.
+		const projectCwd = join(root, "merge-identity-project");
+		const path = projectMemoryPath(projectIdForCwd(projectCwd));
+		writeMemoryFile(path, "# Project memory\n\n## Rules\n- The first rule.\n");
+		reconcileProjectMemoryFiles(projectCwd);
+		const before = listProjectMemory(projectCwd).find((row) => row.content === "The first rule.");
+		expect(before).toBeDefined();
+
+		writeMemoryFile(path, "# Project memory\n\n## Rules\n- The first rule.\n- A second rule.\n");
+		reconcileProjectMemoryFiles(projectCwd);
+		const after = listProjectMemory(projectCwd);
+		expect(after.find((row) => row.content === "The first rule.")?.id).toBe(before?.id);
+		expect(after.map((row) => row.content)).toContain("A second rule.");
+
+		// And an entry removed from the file really goes.
+		writeMemoryFile(path, "# Project memory\n\n## Rules\n- A second rule.\n");
+		reconcileProjectMemoryFiles(projectCwd);
+		expect(listProjectMemory(projectCwd).map((row) => row.content)).toEqual(["A second rule."]);
+	});
+
+	it("indexes every bullet in a memory file, not just the first eight", () => {
+		// The eight-entry cap belongs to one model response; applying it to the
+		// canonical file meant everything past the eighth bullet existed on disk
+		// but could never be searched or injected.
+		const projectCwd = join(root, "many-bullets-project");
+		const bullets = Array.from({ length: 12 }, (_, i) => `- Durable fact number ${i + 1}.`).join("\n");
+		writeMemoryFile(
+			projectMemoryPath(projectIdForCwd(projectCwd)),
+			`# Project memory\n\n## Discovered durable knowledge\n${bullets}\n`,
+		);
+
+		reconcileProjectMemoryFiles(projectCwd, undefined, true);
+
+		const stored = listProjectMemory(projectCwd).map((row) => row.content);
+		expect(stored).toHaveLength(12);
+		expect(stored).toContain("Durable fact number 12.");
+	});
+
+	it("lifts pre-write-through rows into the file instead of deleting them", () => {
+		// A store written before storeProjectMemory wrote through has rows that
+		// exist only in the database; the file-decides-what-exists merge would
+		// delete them. No revision row marks exactly that state, which is what
+		// this reproduces: store, then strip the file and the revision.
+		const projectCwd = join(root, "legacy-rows-project");
+		const session = createSession("test-model", projectCwd);
+		saveSession(session);
+		const content = "A legacy row that only exists in the database.";
+		storeProjectMemory(projectCwd, session.id, "turn-1", [{ type: "rule", content, importance: 90 }]);
+		const projectId = projectIdForCwd(projectCwd);
+		writeMemoryFile(projectMemoryPath(projectId), "# Project memory\n\n## Rules\n(none yet)\n");
+		getDb().prepare("DELETE FROM project_memory_revisions WHERE project_id = ?").run(projectId);
+		expect(listProjectMemory(projectCwd).map((row) => row.content)).toContain(content);
+
+		reconcileProjectMemoryFiles(projectCwd, undefined, true);
+
+		expect(readMemoryFile(projectMemoryPath(projectId))).toContain(content);
+		expect(listProjectMemory(projectCwd).map((row) => row.content)).toContain(content);
+	});
+
+	it("shows a stored entry in the prompt even on a tiny budget", () => {
+		// The file's bullets and the retrieved entries are the same information,
+		// and with the file first a small budget spent itself on raw file text.
+		const projectCwd = join(root, "tiny-budget-project");
+		const session = createSession("test-model", projectCwd);
+		saveSession(session);
+		storeProjectMemory(projectCwd, session.id, "turn-1", [
+			{ type: "architecture", content: "The bridge owns one writer per session.", importance: 90 },
+		]);
+		expect(buildMemoryPrompt(projectCwd, "", undefined, { tokenBudget: 120 })).toContain(
+			"The bridge owns one writer per session.",
+		);
 	});
 
 	it("reconciles an externally edited project memory file before search", () => {
