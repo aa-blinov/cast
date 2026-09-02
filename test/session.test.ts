@@ -24,11 +24,11 @@ import {
 	getFullHistory,
 	getFullHistoryWithReasoning,
 	getHistoryPage,
-	hasRecentClientMessageId,
 	getMessageImage,
 	getMessagesAfterCheckpoint,
 	getMostRecentSession,
 	getSessionEvents,
+	hasRecentClientMessageId,
 	listSessionSummaries,
 	listSessions,
 	loadCheckpoints,
@@ -38,6 +38,7 @@ import {
 	markImageMessagesOutOfContext,
 	migrateLegacySessionsToDb,
 	pruneBackgroundSessions,
+	pruneSessionEvents,
 	recordCompaction,
 	resetSessionContext,
 	saveSession,
@@ -1013,6 +1014,28 @@ describe("session persistence", () => {
 		saveSession(session);
 		expect(hasRecentClientMessageId(session.id, "client-1", 3)).toBe(false);
 		expect(hasRecentClientMessageId(session.id, "client-1", 50)).toBe(true);
+	});
+
+	it("prunes session events past the retention window, keeping recent ones", () => {
+		// session_events is execution telemetry with no delete path beyond the
+		// cascade on session delete — it grew ~2 rows per tool call forever
+		// (8377 rows / 60MB of payloads on one real store).
+		const session = createSession("gpt-4o", projectA);
+		saveSession(session);
+		appendSessionEvent(session.id, "tool_start", { name: "read" });
+		appendSessionEvent(session.id, "tool_end", { name: "read" });
+		const db = getDb();
+		// Age the first event past the window, leave the second recent.
+		db.prepare("UPDATE session_events SET ts = ? WHERE session_id = ? AND seq = 0").run(
+			new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+			session.id,
+		);
+
+		expect(pruneSessionEvents()).toBe(1);
+		const left = getSessionEvents(session.id);
+		expect(left).toHaveLength(1);
+		expect(left[0]!.type).toBe("tool_end");
+		expect(pruneSessionEvents()).toBe(0);
 	});
 
 	it("prunes only background sessions past the retention window", () => {

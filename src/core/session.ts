@@ -2051,6 +2051,9 @@ const BACKGROUND_SESSION_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
  * a dozen seconds. The backlog clears over the next few daemon starts. */
 const BACKGROUND_PRUNE_BATCH = 25;
 
+/** Retention for recorded session events — the same window telemetry uses. */
+const SESSION_EVENT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
 /**
  * Deletes background sessions untouched for longer than the retention window,
  * returning how many rows went. Messages and events go with them through the
@@ -2122,6 +2125,33 @@ export function hasRecentClientMessageId(
 		)
 		.get(sessionId, window, clientMessageId);
 	return row !== undefined;
+}
+
+/**
+ * Deletes recorded session events older than the retention window, returning
+ * how many rows went.
+ *
+ * `session_events` is execution telemetry — tool_start/tool_end/turn_end and
+ * friends, reachable only through the events/history endpoint and never part
+ * of the conversation. It had no delete path at all beyond the cascade when a
+ * session is removed, so it grew about two rows per tool call forever: 8377
+ * rows and 60MB of payloads on one real store. Same 7-day window the rest of
+ * the telemetry uses.
+ */
+export function pruneSessionEvents(now: number = Date.now(), retentionMs: number = SESSION_EVENT_RETENTION_MS): number {
+	const db = getDb();
+	const cutoff = new Date(now - retentionMs).toISOString();
+	const prune = () => Number(db.prepare("DELETE FROM session_events WHERE ts < ?").run(cutoff).changes);
+	if (db.isTransaction) return prune();
+	db.exec("BEGIN IMMEDIATE");
+	try {
+		const removed = prune();
+		db.exec("COMMIT");
+		return removed;
+	} catch (error) {
+		db.exec("ROLLBACK");
+		throw error;
+	}
 }
 
 export function listBackgroundSessions(parentSessionId?: string): SessionState[] {

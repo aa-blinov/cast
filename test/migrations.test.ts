@@ -146,4 +146,54 @@ describe("schema migrations", () => {
 		expect(cols).toContain("todos_json");
 		db.close();
 	});
+	it("repairs a store where another line's migration claimed version 29", () => {
+		// Version 29 here is "messages-fts-seq-sync"; in another line of this
+		// codebase it is "users-and-multi-tenant-columns". A store that saw the
+		// latter has 29 recorded, so this line's 29 is skipped as
+		// already-applied and its trigger never gets created — which is exactly
+		// what a real store looked like: session_history_fts_au present,
+		// messages_fts_au missing.
+		const db = openDb("collided.db");
+		runMigrations(db);
+		// Simulate that store: drop the trigger 29 creates and relabel 29.
+		db.exec("DROP TRIGGER IF EXISTS messages_fts_au");
+		db.prepare("UPDATE schema_migrations SET name = ? WHERE version = 29").run("users-and-multi-tenant-columns");
+		db.prepare("DELETE FROM schema_migrations WHERE version = 34").run();
+
+		const warnings: string[] = [];
+		const realError = console.error;
+		console.error = (...args: unknown[]) => warnings.push(args.map(String).join(" "));
+		try {
+			runMigrations(db);
+		} finally {
+			console.error = realError;
+		}
+
+		// The repair migration put the trigger back...
+		const trigger = db
+			.prepare("SELECT 1 AS hit FROM sqlite_master WHERE type = 'trigger' AND name = 'messages_fts_au'")
+			.get();
+		expect(trigger).toBeDefined();
+		// ...and the collision itself was reported rather than passing silently.
+		expect(warnings.join("\n")).toContain('recorded as "users-and-multi-tenant-columns"');
+		db.close();
+	});
+
+	it("leaves a correctly migrated store alone on a second run", () => {
+		const db = openDb("clean.db");
+		runMigrations(db);
+		const before = db.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get() as { n: number };
+		const warnings: string[] = [];
+		const realError = console.error;
+		console.error = (...args: unknown[]) => warnings.push(args.map(String).join(" "));
+		try {
+			runMigrations(db);
+		} finally {
+			console.error = realError;
+		}
+		const after = db.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get() as { n: number };
+		expect(after.n).toBe(before.n);
+		expect(warnings).toEqual([]);
+		db.close();
+	});
 });

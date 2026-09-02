@@ -9,7 +9,7 @@ import {
 	SqliteAgentActorStore,
 } from "../src/core/actors.ts";
 import { loadConfig } from "../src/core/config.ts";
-import { resetDbConnectionForTests } from "../src/core/db.ts";
+import { getDb, resetDbConnectionForTests } from "../src/core/db.ts";
 
 const spec: AgentActorSpec = {
 	parentSessionId: "parent-session",
@@ -97,6 +97,80 @@ describe("AgentActorRegistry", () => {
 		expect(actor.snapshot().status).toBe("cancelled");
 		expect(await actor.wait()).toBe("cancelled");
 		expect(actor.snapshot().status).toBe("cancelled");
+	});
+
+	it("stores the fork transcript once and rebuilds the derived views on read", async () => {
+		// inheritedMessages/prefix/tail are views of the same transcript; JSON
+		// used to expand them into three full copies, which on a real store
+		// meant 21MB rows holding 7.8MB of distinct data and 140MB of a 547MB
+		// database.
+		const store = new SqliteAgentActorStore();
+		const registry = new AgentActorRegistry({ store, watchdogIntervalMs: 0 });
+		const longFork = {
+			...spec.forkContext!,
+			messages: [
+				{ role: "user" as const, content: "one" },
+				{ role: "assistant" as const, content: "two" },
+				{ role: "user" as const, content: "three" },
+			],
+			inheritedMessages: [
+				{ role: "user" as const, content: "one" },
+				{ role: "assistant" as const, content: "two" },
+				{ role: "user" as const, content: "three" },
+			],
+			prefix: [
+				{ role: "user" as const, content: "one" },
+				{ role: "assistant" as const, content: "two" },
+			],
+			tail: [{ role: "user" as const, content: "three" }],
+			boundaryIndex: 1,
+		};
+		const actor = registry.spawn({ ...spec, lifecycle: "persistent", forkContext: longFork });
+		await actor.run(async () => "done");
+
+		const stored = getDb().prepare("SELECT fork_json FROM agent_actors WHERE id = ?").get(actor.id) as {
+			fork_json: string;
+		};
+		const raw = JSON.parse(stored.fork_json) as Record<string, unknown>;
+		expect(Object.keys(raw)).not.toContain("inheritedMessages");
+		expect(Object.keys(raw)).not.toContain("prefix");
+		expect(Object.keys(raw)).not.toContain("tail");
+		// One copy of the transcript in the row, not three.
+		expect(stored.fork_json.match(/"two"/g)).toHaveLength(1);
+
+		// ...and a reader still sees every view, split at the same boundary.
+		const restored = new AgentActorRegistry({ store, watchdogIntervalMs: 0 });
+		const fork = restored.list().find((item) => item.id === actor.id)?.forkContext;
+		expect(fork?.messages).toEqual(longFork.messages);
+		expect(fork?.inheritedMessages).toEqual(longFork.messages);
+		expect(fork?.prefix).toEqual(longFork.prefix);
+		expect(fork?.tail).toEqual(longFork.tail);
+	});
+
+	it("still reads a fork row written in the old three-copy format", async () => {
+		// Rows already on disk carry all three arrays; they must keep working.
+		const store = new SqliteAgentActorStore();
+		const registry = new AgentActorRegistry({ store, watchdogIntervalMs: 0 });
+		const actor = registry.spawn({ ...spec, lifecycle: "persistent" });
+		await actor.run(async () => "done");
+		getDb()
+			.prepare("UPDATE agent_actors SET fork_json = ? WHERE id = ?")
+			.run(
+				JSON.stringify({
+					messages: [{ role: "user", content: "legacy" }],
+					inheritedMessages: [{ role: "user", content: "legacy" }],
+					prefix: [{ role: "user", content: "legacy" }],
+					tail: [],
+					boundaryIndex: 0,
+				}),
+				actor.id,
+			);
+
+		const restored = new AgentActorRegistry({ store, watchdogIntervalMs: 0 });
+		const fork = restored.list().find((item) => item.id === actor.id)?.forkContext;
+		expect(fork?.messages).toEqual([{ role: "user", content: "legacy" }]);
+		expect(fork?.prefix).toEqual([{ role: "user", content: "legacy" }]);
+		expect(fork?.tail).toEqual([]);
 	});
 
 	it("persists fork context and restores unfinished actors as stalled", async () => {
