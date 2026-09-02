@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.22.32
+
+### Fixed
+
+- **Tests:** the background-bash-output truncation test gated its assertion on `task.status === "exited"`, but a PTY's exit event fires from the child process's `wait()` status, which isn't synchronized with its data events draining the kernel tty buffer — status can flip to "exited" before all output has actually arrived. Caused a spurious CI failure. Now polls the actual output instead of a proxy signal for it.
+
 ## 0.22.31
 
 ### Fixed

@@ -137,18 +137,24 @@ describe("BackgroundTaskRegistry", () => {
 		const smallConfig: AppConfig = { ...mockConfig, maxToolOutputLines: 5 };
 		const task = registry.start("for i in $(seq 1 20); do echo line-$i; done", process.cwd(), smallConfig, 10, deps);
 
-		// Poll for exit instead of a fixed sleep: on a loaded CI runner 300ms
-		// can land mid-loop (each echo is a spawn), leaving the raw output
-		// short of the 20 lines and making the assertion flaky.
+		// Poll on the actual output line count, not `task.status` — a PTY's
+		// "exit" event fires from the child process's wait() status, which is
+		// not synchronized with its "data" events draining the kernel tty
+		// buffer. `status` can flip to "exited" while output is still
+		// arriving, so gating on it (as this test previously did) is racy by
+		// construction, not just slow-CI flakiness: no fixed deadline makes
+		// that ordering guaranteed. Poll the actual condition instead.
 		const deadline = Date.now() + 5000;
-		while (task.status !== "exited" && Date.now() < deadline) {
+		let lineCount = task.rawOutput.split("\n").filter(Boolean).length;
+		while (lineCount < 20 && Date.now() < deadline) {
 			await new Promise((r) => setTimeout(r, 25));
+			lineCount = task.rawOutput.split("\n").filter(Boolean).length;
 		}
-		expect(task.status).toBe("exited");
 		// The completion reminder is what actually goes through formatBashResult's
 		// truncation — assert the raw output itself was captured (truncation is
 		// exercised at read-time, verified via bash_output in tools.test.ts).
-		expect(task.rawOutput.split("\n").filter(Boolean).length).toBe(20);
+		expect(lineCount).toBe(20);
+		expect(task.status).toBe("exited");
 	});
 
 	it("does not apply the foreground default timeout when background timeout is omitted", async () => {
