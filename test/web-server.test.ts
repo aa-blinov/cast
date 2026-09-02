@@ -11,7 +11,7 @@ import { appendMessage, createSession, saveSession } from "../src/core/session.t
 import { queryEndpointOverview } from "../src/core/telemetry.ts";
 import type { ServerBridge } from "../src/server/bridge.ts";
 import { createServerBridge } from "../src/server/bridge.ts";
-import { isInsideRoot, startServer } from "../src/server/server.ts";
+import { bridgeErrorStatus, isInsideRoot, startServer } from "../src/server/server.ts";
 
 let server: ReturnType<typeof startServer>;
 let origin: string;
@@ -598,5 +598,17 @@ describe("isInsideRoot", () => {
 
 		expect(isInsideRoot(root, join(root, "link"))).toBe(false);
 		expect(isInsideRoot(root, join(root, "link", "secret.txt"))).toBe(false);
+	});
+});
+
+describe("bridgeErrorStatus", () => {
+	it("maps a missing session to 404, a busy one to 409, everything else to 400", () => {
+		// A deleted session used to answer 400 alongside genuine bad-request
+		// errors on /mode, /plan-transition, /question and /clean-context, so
+		// `status === 404` — the documented contract and the only way an
+		// integration can tell "gone" from "bad request" — never fired.
+		expect(bridgeErrorStatus("Session not found")).toBe(404);
+		expect(bridgeErrorStatus("Agent running")).toBe(409);
+		expect(bridgeErrorStatus('Mode must be "plan" or "build"')).toBe(400);
 	});
 });

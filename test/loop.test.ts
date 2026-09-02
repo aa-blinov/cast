@@ -8,7 +8,7 @@ import { formatContextFilesForPrompt, resolveNestedContextFiles } from "../src/c
 import { formatLocalDate } from "../src/core/date-rollover-reminder.ts";
 import { resetDbConnectionForTests } from "../src/core/db.ts";
 import type { Message } from "../src/core/llm.ts";
-import { projectIdForCwd } from "../src/core/memory.ts";
+import { type CheckpointWriterHandle, projectIdForCwd } from "../src/core/memory.ts";
 import { CHECKPOINT_TEMPLATE, checkpointPath, notesPath, projectMemoryPath } from "../src/core/memory-files.ts";
 import { formatRulesForTurn, loadDirectoryRules, matchAutoRules, unionStickyRules } from "../src/core/rules.ts";
 import { commitCheckpointWatermark, createSession, listBackgroundSessions, saveSession } from "../src/core/session.ts";
@@ -814,6 +814,9 @@ describe("runAgentLoop — abort vs. error", () => {
 	it("fires the checkpoint writer once per newly crossed threshold", async () => {
 		const sessionId = "threshold-session";
 		const writers: number[] = [];
+		// See the sibling test below: the handles have to be awaited or the
+		// fire-and-forget writer outlives the test and writes to the real DB.
+		const handles: CheckpointWriterHandle[] = [];
 		const usages = [400, 800, 900];
 		let mainCall = 0;
 		const originalImpl = vi.mocked(streamAndCollect).getMockImplementation();
@@ -839,7 +842,10 @@ describe("runAgentLoop — abort vs. error", () => {
 			memory: { sessionId },
 			sessionId,
 			onEvent: () => {},
-			onCheckpointWriter: () => writers.push(mainCall),
+			onCheckpointWriter: (handle: CheckpointWriterHandle) => {
+				writers.push(mainCall);
+				handles.push(handle);
+			},
 		};
 		try {
 			// 400/1000 = 40% → crosses 30%. 800/1000 = 80% → crosses 70%.
@@ -849,6 +855,7 @@ describe("runAgentLoop — abort vs. error", () => {
 			await runAgentLoop([{ role: "user", content: "third" }], base);
 
 			expect(writers).toHaveLength(2);
+			await Promise.all(handles.map((handle) => handle.wait()));
 		} finally {
 			vi.mocked(streamAndCollect).mockImplementation(originalImpl as never);
 		}
@@ -864,6 +871,12 @@ describe("runAgentLoop — abort vs. error", () => {
 	it("clamps checkpoint thresholds to the reserved window tail", async () => {
 		const sessionId = "reserved-session";
 		const writers: number[] = [];
+		// The handles matter, not just the count: a checkpoint writer is
+		// fire-and-forget, so without awaiting it here it outlives the test and
+		// reaches getDb() after afterEach restored CAST_SESSIONS_DB — which is
+		// how hundreds of "checkpoint-writer: reserved-session" rows ended up in
+		// the developer's real ~/.cast/sessions/sessions.db.
+		const handles: CheckpointWriterHandle[] = [];
 		const usages = [85_000, 88_000]; // 100K window reserves 13K → maxAllowed 87K
 		let mainCall = 0;
 		const originalImpl = vi.mocked(streamAndCollect).getMockImplementation();
@@ -888,7 +901,10 @@ describe("runAgentLoop — abort vs. error", () => {
 			memory: { sessionId },
 			sessionId,
 			onEvent: () => {},
-			onCheckpointWriter: () => writers.push(mainCall),
+			onCheckpointWriter: (handle: CheckpointWriterHandle) => {
+				writers.push(mainCall);
+				handles.push(handle);
+			},
 		};
 		try {
 			// 90% of 100K = 90K, clamped to 100K - 13K = 87K. 85K stays under,
@@ -896,6 +912,7 @@ describe("runAgentLoop — abort vs. error", () => {
 			await runAgentLoop([{ role: "user", content: "first" }], base);
 			await runAgentLoop([{ role: "user", content: "second" }], base);
 			expect(writers).toHaveLength(1);
+			await Promise.all(handles.map((handle) => handle.wait()));
 		} finally {
 			vi.mocked(streamAndCollect).mockImplementation(originalImpl as never);
 		}
