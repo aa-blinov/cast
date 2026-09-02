@@ -609,6 +609,41 @@ export function saveSession(session: SessionState): void {
 	session.version = (session.version ?? 0) + 1;
 	session.updatedAt = new Date().toISOString();
 	const db = getDb();
+	// Every row this save writes goes in as one transaction. The sessions
+	// UPSERT bumps version/updated_at and each message is a separate INSERT,
+	// so a throw (or a crash) partway through used to leave the session row
+	// claiming a version whose messages were only half persisted. BEGIN
+	// IMMEDIATE like the other write transactions in this file, so a
+	// concurrent writer waits out busy_timeout instead of failing on its
+	// first write, and the isTransaction check keeps a caller that already
+	// opened a transaction reentrant.
+	const pending = db.isTransaction
+		? writeSessionRows(db, session)
+		: (() => {
+				db.exec("BEGIN IMMEDIATE");
+				try {
+					const rows = writeSessionRows(db, session);
+					db.exec("COMMIT");
+					return rows;
+				} catch (error) {
+					db.exec("ROLLBACK");
+					throw error;
+				}
+			})();
+	// Applied only once the rows are committed: mapping a message to a seq
+	// that got rolled back would make every later save treat it as already
+	// persisted and skip it forever.
+	for (const [message, seq, messageId] of pending) {
+		messageSeq.set(message, seq);
+		if (messageId !== undefined) messageMessageId.set(message, messageId);
+	}
+}
+
+/** The row writes behind saveSession, split out so the transaction wrapper
+ *  above stays readable. Returns the message→seq/id mappings to record once
+ *  the transaction commits, rather than setting them as it goes. */
+function writeSessionRows(db: DatabaseSync, session: SessionState): Array<[Message, number, string | undefined]> {
+	const pending: Array<[Message, number, string | undefined]> = [];
 	const meta = sessionMetaRow(session);
 	db.prepare(
 		`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, provider_name, session_kind, parent_session_id, background_kind, usage_json, todos_json, share_token, plan_question_json, plan_transition_json, checkpoint_watermark_seq, version)
@@ -677,7 +712,7 @@ export function saveSession(session: SessionState): void {
 			if (current && current.content_json === serialized) {
 				// Identical to the already-active row — alias this turn's fresh
 				// object to that row instead of writing a redundant duplicate.
-				messageSeq.set(m, current.seq);
+				pending.push([m, current.seq, undefined]);
 				return;
 			}
 			deactivateOldSystemRows.run(session.id, `%${COMPACTION_MARKER_PREFIX}%`);
@@ -693,10 +728,10 @@ export function saveSession(session: SessionState): void {
 			reasoning,
 			turnMetaJson,
 		);
-		messageSeq.set(m, seq);
-		messageMessageId.set(m, messageId);
+		pending.push([m, seq, messageId]);
 		seq++;
 	});
+	return pending;
 }
 
 /** Return the message id covered by the last successful checkpoint. */
