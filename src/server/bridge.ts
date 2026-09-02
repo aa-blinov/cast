@@ -1369,9 +1369,42 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		});
 	}
 
+	/** Steering messages the loop never got to see.
+	 *
+	 * The loop drains the steering queue at fixed points and then the turn
+	 * ends; anything enqueued between its last drain and `status = "idle"` was
+	 * stranded, because nothing drained that queue again — the message was
+	 * silently never delivered and the client's "Steer queued" chip stayed up
+	 * forever (it clears on `steering_injected`). Follow-ups already had this
+	 * net; steering didn't. Runs after the follow-up net so that ordering
+	 * between the two is unchanged from a turn that wasn't racing.
+	 */
+	function startStrandedSteers(sessionId: string, ws: WebAgentSession): void {
+		if (!ws.runner.steeringQueue.hasItems()) return;
+		// Waiting on the runner, not just on ws.status: submit() re-queues
+		// anything that arrives while the runner still reports itself running,
+		// so draining too early would put the message straight back and leave
+		// it stranded exactly as before. Same handoff the follow-up net uses.
+		void ws.runner.waitForIdle().then(() => {
+			if (ws.status === "running" || ws.runner.isRunning) return;
+			const stranded = ws.runner.steeringQueue.drain();
+			if (stranded.length === 0) return;
+			const text = stranded
+				.map((message) => (typeof message.content === "string" ? message.content : ""))
+				.filter(Boolean)
+				.join("\n\n");
+			if (!text.trim()) return;
+			broadcast(ws, { type: "steering_injected", messages: stranded });
+			void submit(sessionId, text, undefined, undefined, stranded);
+		});
+	}
+
 	function startQueuedFollowUps(sessionId: string, ws: WebAgentSession): void {
 		const queued = ws.runner.followUpQueue.drain();
-		if (queued.length === 0) return;
+		if (queued.length === 0) {
+			startStrandedSteers(sessionId, ws);
+			return;
+		}
 		const text = queued
 			.map((message) => (typeof message.content === "string" ? message.content : ""))
 			.filter(Boolean)
@@ -2079,6 +2112,11 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				broadcast(ws, { type: "error", message: ws.error });
 				broadcast(ws, { type: "status", status: "error" });
 				broadcastSessionUpdate(ws);
+				// A turn that failed still has to hand back whatever the user
+				// queued while it ran. Only the success path did this, so a
+				// provider error swallowed the steer or follow-up typed during
+				// the turn — the message was never delivered and never shown.
+				startQueuedFollowUps(sessionId, ws);
 			});
 	}
 
