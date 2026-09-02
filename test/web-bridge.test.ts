@@ -1666,10 +1666,21 @@ describe("web bridge", () => {
 			const bridge = createServerBridge(makeResult());
 			const ws = bridge.createSession();
 			bridge.subscribe(ws.id, () => {});
-			await new Promise((resolve) => setTimeout(resolve, 100));
-			writeFileSync(join(cwd, "watched.txt"), "changed");
 
-			await vi.waitFor(() => expect(readFileSync(marker, "utf8")).toBe("changed"), { timeout: 3_000 });
+			// Re-touch the file on every poll rather than sleeping a fixed amount
+			// and writing once: chokidar is registered asynchronously after
+			// subscribe(), and a write landing before that is simply never seen,
+			// so no fixed delay is right — it's either longer than the test needs
+			// or, under load, still too short. The poll interval has to clear the
+			// bridge's 500ms fs debounce, which every new event restarts, or the
+			// re-touching would itself keep the hook from ever firing.
+			await vi.waitFor(
+				() => {
+					writeFileSync(join(cwd, "watched.txt"), `changed ${Date.now()}`);
+					expect(readFileSync(marker, "utf8")).toBe("changed");
+				},
+				{ timeout: 15_000, interval: 900 },
+			);
 		} finally {
 			rmSync(marker, { force: true });
 		}
