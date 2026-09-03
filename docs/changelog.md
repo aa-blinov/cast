@@ -2,10 +2,11 @@
 
 All notable user-facing changes to cast, newest first.
 
-## 0.22.32
+## 0.23.0
 
 ### Fixed
 
+- **Web:** a queued message the daemon delivers after a turn ends (a stranded steer, a follow-up) was submitted as a detached promise with no rejection handler. `submit` throws for a session no longer loaded — closed, deleted, or evicted in the window between the delivery being armed and firing — and Node's default for an unhandled rejection is to terminate the process, so one undeliverable message in one session would take the daemon and every other live session down with it. The failure is now caught, logged, and reported to the session as a notice.
 - **Database:** migrations are identified by name, not by version number. Two lines of this codebase evolved the same schema and assigned the same numbers to different migrations, so a store carrying the other line's 29-32 treated this line's 29 as already-applied and its work silently never happened — the warning added earlier could report that, but not fix it. A migration now runs when its *name* has never been recorded, and is recorded under whatever version number is free; on the affected store this immediately applied the migration that had been stuck since August. Every `up()` is idempotent, so a re-run against a schema that already has the change is a no-op.
 - **Database:** removed `messages_fts`, a second full-text index over text `session_history_fts` already covered. The two held the same message bodies — `messages_fts` was exactly the user/assistant subset, and the surviving index carries `role`, so the same searches are answered from one place (verified identical result sets on a real store). Every message write had been updating both indexes, and the redundant copy was ~11MB of a 547MB database. Its triggers and the seq-sync repair that maintained it go with it.
 - **Memory:** a memory's fingerprint was taken from the raw `type` while the row stored the trimmed one, so `" fact"` and `"fact"` produced different keys for rows that are identical once stored — slipping past `UNIQUE(project_id, fingerprint)` and duplicating an entry.

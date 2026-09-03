@@ -144,5 +144,30 @@
     "file": "runs/2026-08-09T19-04-46-467Z_compare-x3_openai-gpt-5.6-luna.json",
     "repeat": 3,
     "inconsistentCases": 0
+  },
+  {
+    "timestamp": "2026-09-03T08:19:58.946Z",
+    "kind": "run",
+    "models": [
+      "MiniMax-M3"
+    ],
+    "total": 38,
+    "passed": 35,
+    "failed": 3,
+    "commit": "0a42006",
+    "file": "runs/2026-09-03T08-19-58-946Z_run_MiniMax-M3.json"
+  },
+  {
+    "timestamp": "2026-09-03T08:23:52.503Z",
+    "kind": "run",
+    "models": [
+      "MiniMax-M3"
+    ],
+    "caseFilter": "plan-open-question-blocks-done,build-mode-flags-plan-divergence,approved-plan-todo-progress",
+    "total": 3,
+    "passed": 1,
+    "failed": 2,
+    "commit": "0a42006",
+    "file": "runs/2026-09-03T08-23-52-503Z_run_MiniMax-M3.json"
   }
 ]

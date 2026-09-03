@@ -1415,7 +1415,29 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				.join("\n\n");
 			if (!text.trim()) return;
 			broadcast(ws, { type: "steering_injected", messages: stranded });
-			void submit(sessionId, text, undefined, undefined, stranded);
+			startDeferredSubmit(sessionId, ws, text, stranded);
+		});
+	}
+
+	/** Starts a submit nobody is awaiting, without risking the whole daemon.
+	 *
+	 * Both nets below run detached — one from a `.then` on the runner, one
+	 * straight after a turn ends — so a rejection had no handler. `submit`
+	 * throws "Session not found" for a session closed or deleted in the window
+	 * between the net arming and firing, and Node's default for an unhandled
+	 * rejection is to terminate: one stranded steer in a session the user just
+	 * closed would take down every other session with it. The message is lost
+	 * either way at that point; the process shouldn't be.
+	 */
+	function startDeferredSubmit(sessionId: string, ws: WebAgentSession, text: string, queued: Message[]): void {
+		void submit(sessionId, text, undefined, undefined, queued).catch((err) => {
+			console.error("[cast server] deferred submit failed:", err);
+			if (sessions.get(sessionId) === ws) {
+				broadcast(ws, {
+					type: "notice",
+					message: `A queued message could not be delivered: ${err instanceof Error ? err.message : String(err)}`,
+				});
+			}
 		});
 	}
 
@@ -1430,7 +1452,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			.filter(Boolean)
 			.join("\n\n");
 		broadcast(ws, { type: "followup_injected", messages: queued });
-		void submit(sessionId, text, undefined, undefined, queued);
+		startDeferredSubmit(sessionId, ws, text, queued);
 	}
 
 	async function submit(

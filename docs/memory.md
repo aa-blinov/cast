@@ -65,9 +65,13 @@ Example layout:
 
 ## How memory gets written
 
-Three things write memory:
+Four things write memory:
 
-1. **The checkpoint writer.** While a conversation grows, Cast keeps a copy of
+1. **The agent itself**, through the `memory` tool. An entry the agent stores
+   is written straight into the project's `MEMORY.md` as well as the index, so
+   a fact learned mid-conversation survives in the file a person reads — and
+   survives the next dream, which reconciles the file rather than replacing it.
+2. **The checkpoint writer.** While a conversation grows, Cast keeps a copy of
    the transcript in its context window. When the used context crosses a
    **threshold** — a percentage of the model's window — Cast quietly launches a
    background agent that updates `checkpoint.md` and `MEMORY.md`. Default
@@ -77,11 +81,11 @@ Three things write memory:
    default 13K tokens) so the writer always has room to finish. This is why a
    checkpoint is almost always fresh when a long conversation needs to be
    compacted.
-2. **Dream** (`/dream`, or automatically with `memoryDreamAuto`). Periodically
+3. **Dream** (`/dream`, or automatically with `memoryDreamAuto`). Periodically
    reviews the recent conversation history, keeps only durable facts, merges
    duplicates, and removes stale entries from `MEMORY.md`. Default: every 7
    days.
-3. **Distill** (`/distill`, or `memoryDistillAuto`). Looks for workflows you did
+4. **Distill** (`/distill`, or `memoryDistillAuto`). Looks for workflows you did
    repeatedly and packages them as reusable skills/personas/commands. Default:
    every 30 days.
 
@@ -174,7 +178,10 @@ Cast's own notes about them.
 **Can I read/edit the memory myself?** Yes. The files are plain markdown under
 `~/.cast/memory/`. Edit them by hand — the search index picks up the changes on
 the next search (or run `/memory reconcile`). The Web UI also shows memory in
-the Memory sidebar.
+the Memory sidebar. Some entries carry a trailing HTML comment
+(`<!-- cast: type=rule conf=0.9 … -->`) holding the metadata markdown cannot
+express; it is invisible when rendered, and deleting it only costs the entry
+its type and scores, never the text.
 
 **Is my memory shared between projects?** No. Project memory is scoped to one
 project (identified by its path). Only `global/MEMORY.md` is cross-project.
