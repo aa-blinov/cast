@@ -9,6 +9,7 @@ import { runInteractive, runNonInteractive } from "./core/run.ts";
 import { loadSettings } from "./core/settings.ts";
 import type { ParsedArgs } from "./core/startup.ts";
 import { runUpgrade } from "./core/upgrade.ts";
+import { WorktreeBlockedError } from "./core/worktree.ts";
 import {
 	acquireStartLock,
 	clearServerState,
@@ -674,6 +675,12 @@ function getHost(args: string[]): string {
 main().catch((err) => {
 	if (err instanceof DaemonProtocolMismatchError) {
 		console.error(err.message);
+		process.exit(1);
+	}
+	// A hook refusing an action is a decision the user's own configuration
+	// made, not a crash — print what it said, not a stack trace.
+	if (err instanceof WorktreeBlockedError) {
+		console.error(`Worktree creation blocked by a WorktreeCreate hook: ${err.message}`);
 		process.exit(1);
 	}
 	console.error(err);

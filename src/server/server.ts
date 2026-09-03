@@ -58,7 +58,7 @@ import {
 	recordApiRequest,
 } from "../core/telemetry.ts";
 import { fetchLatestVersion, isNewerVersion, isReleaseInstall } from "../core/upgrade.ts";
-import { ensureSessionWorktree } from "../core/worktree.ts";
+import { createSessionWorktree } from "../core/worktree.ts";
 import {
 	API_V1_PREFIX,
 	apiV1OpenApiDocument,
@@ -1260,7 +1260,10 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		if (worktree) {
 			const sourceCwd = cwd && cwd !== SANDBOX_CWD ? cwd : bridge.getConfig().cwd;
 			try {
-				const wt = await ensureSessionWorktree(worktree, sourceCwd);
+				const wt = await createSessionWorktree(worktree, sourceCwd, {
+					// Same trust rule the rest of the daemon uses for a cwd.
+					projectTrusted: loadSettings().projectTrust?.[sourceCwd] === true,
+				});
 				wtPath = wt.path;
 			} catch (err) {
 				// ensureSessionWorktree throws a user-readable message on every

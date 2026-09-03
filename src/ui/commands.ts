@@ -81,7 +81,7 @@ import {
 	type ReasoningParams,
 	resolveReasoningFormat,
 } from "../core/vendors.ts";
-import { ensureSessionWorktree, listWorktrees, removeWorktreeBySlug } from "../core/worktree.ts";
+import { createSessionWorktree, listWorktrees, removeSessionWorktree } from "../core/worktree.ts";
 import {
 	formatSkillPickLabel,
 	selectMcpServers,
@@ -2031,7 +2031,10 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 				showNotice("[Usage: /worktree remove <name>]");
 				return;
 			}
-			const res = await removeWorktreeBySlug(targetName, deps.cwd);
+			const res = await removeSessionWorktree(targetName, deps.cwd, {
+				sessionId: session.id,
+				projectTrusted: deps.projectTrusted,
+			});
 			showNotice(`[${res.message}]`);
 			return;
 		}
@@ -2042,7 +2045,10 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		}
 		showNotice(`[Creating worktree "${name}"…]`);
 		try {
-			const wt = await ensureSessionWorktree(name, deps.cwd);
+			const wt = await createSessionWorktree(name, deps.cwd, {
+				sessionId: session.id,
+				projectTrusted: deps.projectTrusted,
+			});
 			// Persist the new cwd before anything that might re-read state.
 			// run.ts uses session.cwd (not result.cwd) for subsequent tool
 			// calls so the worktree path actually takes effect.

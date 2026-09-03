@@ -46,7 +46,7 @@ import {
 	type SessionState,
 	saveSession,
 } from "./session.ts";
-import { loadSettings, type PermissionMode, type Settings, updateSettings } from "./settings.ts";
+import { getProjectTrust, loadSettings, type PermissionMode, type Settings, updateSettings } from "./settings.ts";
 import { formatSkillsForPrompt, type Skill } from "./skills.ts";
 import type { SshHost } from "./ssh.ts";
 import { resolveSshHosts } from "./ssh.ts";
@@ -54,7 +54,7 @@ import { loadSubagentPrompts, type SubagentPrompt } from "./subagents.ts";
 import { getBashResolution } from "./tools/bash.ts";
 import { BackgroundTaskRegistry } from "./tools/bash-background.ts";
 import { buildReasoningParams, type ModelReasoningMeta, resolveReasoningFormat } from "./vendors.ts";
-import { ensureSessionWorktree } from "./worktree.ts";
+import { createSessionWorktree } from "./worktree.ts";
 
 export interface ParsedArgs {
 	cwd: string;
@@ -240,7 +240,14 @@ export async function runStartup(
 	// saved session.cwd is the worktree path and matching it is the whole
 	// point of this flag (see found.cwd handling below).
 	if (args.worktree) {
-		const wt = await ensureSessionWorktree(args.worktree, cwd);
+		// Trust isn't resolved yet here (the worktree has to exist before any
+		// project work reads from it), but a decision the user already made is
+		// on record — use that rather than prompting mid-flag or ignoring the
+		// project's hooks outright. A project never trusted stays untrusted, so
+		// only its global hooks gate this path, which is the safe default.
+		const wt = await createSessionWorktree(args.worktree, cwd, {
+			projectTrusted: getProjectTrust(settings, cwd) === true,
+		});
 		cwd = wt.path;
 	}
 

@@ -128,7 +128,7 @@ import {
 	type ReasoningFormat,
 	resolveReasoningFormat,
 } from "../core/vendors.ts";
-import { ensureSessionWorktree, listWorktrees, removeWorktreeBySlug, type SessionWorktree } from "../core/worktree.ts";
+import { createSessionWorktree, listWorktrees, removeSessionWorktree, type SessionWorktree } from "../core/worktree.ts";
 import { ALL_THEMES } from "../ui/themes/index.ts";
 import type { ThemeColors } from "../ui/themes/types.ts";
 import { buildGoalPrompt, isCommandBlocking, parseGoalInput, REVIEW_PROMPT, SLASH_COMMANDS } from "./commands.ts";
@@ -4335,29 +4335,20 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 						error: `Worktree "${targetName}" is still in use by another session${inUseBy.status === "running" ? " (currently running)" : ""} — close or switch that session away from it first`,
 					};
 				}
-				const res = await removeWorktreeBySlug(targetName, sessionCwd);
-				if (res.ok) {
-					void runHooksForEvent(resolveHooksForCwd(sessionCwd, projectTrusted), {
-						event: "WorktreeRemove",
-						cwd: sessionCwd,
-						sessionId: ws.id,
-						payload: { worktree_name: targetName, worktree_path: target?.path },
-					});
-				}
+				const res = await removeSessionWorktree(targetName, sessionCwd, {
+					sessionId: ws.id,
+					projectTrusted,
+					worktreePath: target?.path,
+				});
 				return { ok: true, result: res.message };
 			}
 			if (running)
 				return { ok: false, error: "Agent running — finish the run or /abort before switching worktrees" };
 			try {
-				const beforeCreate = await runHooksForEvent(resolveHooksForCwd(sessionCwd, projectTrusted), {
-					event: "WorktreeCreate",
-					cwd: sessionCwd,
-					sessionId: ws.id,
-					payload: { worktree_name: arg },
-				});
-				if (beforeCreate.blocked)
-					return { ok: false, error: beforeCreate.reason ?? "Worktree creation blocked by hook" };
-				const wt = await ensureSessionWorktree(arg, sessionCwd);
+				// The WorktreeCreate hook now lives inside createSessionWorktree, so
+				// every path that makes a worktree honours it — this one used to be
+				// the only one that did.
+				const wt = await createSessionWorktree(arg, sessionCwd, { sessionId: ws.id, projectTrusted });
 				const previousCwd = ws.session.cwd;
 				ws.session.cwd = wt.path;
 				saveSession(ws.session);
