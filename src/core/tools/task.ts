@@ -387,23 +387,40 @@ export async function execTask(
 		// Persist the subagent's full transcript — it used to be in-memory only
 		// and was lost when the process died. Saved even for aborted/error runs
 		// so nothing the model did is unrecoverable.
+		//
+		// Best-effort, in its own try: this ran inside the outer try, so a
+		// failing write discarded the work the subagent had already done and
+		// billed for. `subagent_runs.session_id` has a foreign key to
+		// `sessions`, so a session whose row isn't on disk yet made every
+		// subagent in it report "Subagent failed with an error: FOREIGN KEY
+		// constraint failed" instead of its answer (verified). A full disk or a
+		// locked database did the same. Losing the archive copy is not a reason
+		// to lose the result.
 		if (deps.sessionId) {
-			saveSubagentRun({
-				sessionId: deps.sessionId,
-				toolCallId: toolCallId ?? "",
-				persona: subagent?.name ?? "worker",
-				model: deps.model,
-				startedAt,
-				endReason,
-				messages: finalMessages,
-			});
+			try {
+				saveSubagentRun({
+					sessionId: deps.sessionId,
+					toolCallId: toolCallId ?? "",
+					persona: subagent?.name ?? "worker",
+					model: deps.model,
+					startedAt,
+					endReason,
+					messages: finalMessages,
+				});
+			} catch (err) {
+				console.error("[cast] failed to persist subagent transcript:", err);
+			}
 			if (isMemoryEnabled()) {
-				const taskId = (toolCallId || `task-${Date.now()}`).replace(/[^a-zA-Z0-9._-]+/g, "-");
-				writeTaskProgress(
-					deps.sessionId,
-					taskId,
-					`# Task progress\n\n- Assignment: ${assignment}\n- Persona: ${subagent?.name ?? "worker"}\n- End reason: ${endReason}\n\n## Result\n${extractTaskResult(finalMessages) || "(no output)"}`,
-				);
+				try {
+					const taskId = (toolCallId || `task-${Date.now()}`).replace(/[^a-zA-Z0-9._-]+/g, "-");
+					writeTaskProgress(
+						deps.sessionId,
+						taskId,
+						`# Task progress\n\n- Assignment: ${assignment}\n- Persona: ${subagent?.name ?? "worker"}\n- End reason: ${endReason}\n\n## Result\n${extractTaskResult(finalMessages) || "(no output)"}`,
+					);
+				} catch (err) {
+					console.error("[cast] failed to write subagent task progress:", err);
+				}
 			}
 		}
 	} catch (error) {

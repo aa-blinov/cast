@@ -289,3 +289,72 @@ describe("execTask — final extract", () => {
 		expect(actorRegistry.list().every((actor) => actor.status === "cancelled")).toBe(true);
 	});
 });
+
+describe("execTask persistence failures", () => {
+	it("returns the subagent's answer even when its transcript cannot be saved", async () => {
+		// The archive write ran inside the same try as the run itself, so a
+		// failing write discarded work the subagent had already done and billed
+		// for. subagent_runs.session_id has a foreign key to sessions, so a
+		// session whose row isn't on disk yet made every subagent in it report
+		// "Subagent failed with an error: FOREIGN KEY constraint failed".
+		const errors: string[] = [];
+		const consoleError = console.error;
+		console.error = (...args: unknown[]) => {
+			errors.push(args.map(String).join(" "));
+		};
+		try {
+			const result = await execTask(
+				{ assignment: "do the thing" },
+				process.cwd(),
+				testConfig,
+				{
+					model: "test-model",
+					sessionId: "session-with-no-row-on-disk",
+					subagentPrompts: [{ name: "worker", label: "Worker", systemPrompt: "you are a worker" } as never],
+					actorRegistry: new AgentActorRegistry({ watchdogIntervalMs: 0 }),
+					runAgentLoop: async () =>
+						[
+							{ role: "user", content: "do the thing" },
+							{ role: "assistant", content: "THE SUBAGENT'S REAL ANSWER" },
+						] as Message[],
+				},
+				undefined,
+				"call-1",
+			);
+
+			expect(result.isError).toBeFalsy();
+			expect(result.content).toBe("THE SUBAGENT'S REAL ANSWER");
+			// The failure is still reported somewhere a maintainer can see it.
+			expect(errors.some((line) => line.includes("failed to persist subagent transcript"))).toBe(true);
+		} finally {
+			console.error = consoleError;
+		}
+	});
+
+	it("still persists the transcript when the session row exists", async () => {
+		const session = createSession(process.cwd(), "test-model");
+		saveSession(session);
+		const result = await execTask(
+			{ assignment: "do the thing" },
+			process.cwd(),
+			testConfig,
+			{
+				model: "test-model",
+				sessionId: session.id,
+				subagentPrompts: [{ name: "worker", label: "Worker", systemPrompt: "you are a worker" } as never],
+				actorRegistry: new AgentActorRegistry({ watchdogIntervalMs: 0 }),
+				runAgentLoop: async () =>
+					[
+						{ role: "user", content: "do the thing" },
+						{ role: "assistant", content: "PERSISTED ANSWER" },
+					] as Message[],
+			},
+			undefined,
+			"call-2",
+		);
+
+		expect(result.content).toBe("PERSISTED ANSWER");
+		const { loadSubagentRuns } = await import("../src/core/session.ts");
+		expect(loadSubagentRuns(session.id).map((run) => run.endReason)).toEqual(["stop"]);
+	});
+});
