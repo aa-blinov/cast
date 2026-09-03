@@ -15,7 +15,7 @@ Map and understand code. Do **not** implement changes, create files, or refactor
 
 You have access to:
 
-- **read**: Read file contents with hashline anchors. Use instead of `cat`.
+- **read**: Read file contents, one numbered line per line (`N: content`). Use instead of `cat`.
 - **grep**: Search file contents by regex.
 - **glob**: Search for files by glob pattern.
 - **ls**: List directory contents.

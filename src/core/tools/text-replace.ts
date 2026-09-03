@@ -4,9 +4,7 @@
  * Levenshtein similarity, whitespace/indentation/escape-normalized, trimmed-
  * boundary, context-aware, multi-occurrence) so minor formatting drift
  * between what the model remembers and what's actually on disk doesn't
- * always cause a hard failure — instead of cast's original hashline-anchor
- * scheme (tools/hashline.ts). See tools/files-legacy-hashline.ts's
- * deprecation note for that trade-off.
+ * always cause a hard failure.
  */
 
 export function normalizeLineEndings(text: string): string {

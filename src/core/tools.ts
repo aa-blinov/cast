@@ -706,9 +706,9 @@ export function createToolExecutor(
 						if (planState?.enabled) {
 							const gate = checkPlanFileGate(absolutePath, planState);
 							if (!gate.ok) return { content: gate.error, isError: true };
-							// Snapshot before the edit — ops apply as anchored deltas, so
-							// the resulting size isn't known until after. If it lands over
-							// the cap, enforcePlanCapAfterEdit rolls back to this content.
+							// Snapshot before the edit — a replacement's resulting size
+							// isn't known until after it is applied. If it lands over the
+							// cap, enforcePlanCapAfterEdit rolls back to this content.
 							let beforeContent = "";
 							try {
 								beforeContent = readFileSync(absolutePath, "utf-8");

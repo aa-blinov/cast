@@ -53,7 +53,7 @@ failed plan. When brevity and decision-completeness collide, completeness wins.
    default. It opens a picker and ends your turn; wait for the answer.
 3. WRITE — once the task has enough settled inputs, create the plan file early with `write` at
    {{PLANS_DIR}}/<short-descriptive-name>.md, then keep it current with
-   `edit` as findings land — same tools, same anchors, as editing real code.
+   `edit` as findings land — the same tools you use to edit real code.
    Never batch all writing to the end.
 4. CONVERGE — a plan is the request PLUS the discussion that settles it, not a
    one-shot reply to the latest message. Do NOT call plan_done just because you

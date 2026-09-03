@@ -86,7 +86,7 @@ export function globalPersonasDir(): string {
 
 const PROMPTS_DIR = promptsDir;
 
-// Shared error-handling + file-tool / hashline guidance is appended via
+// Shared error-handling + file-tool guidance is appended via
 // `withSharedToolPrompt` so personas and subagents stay on the same contract.
 
 /**

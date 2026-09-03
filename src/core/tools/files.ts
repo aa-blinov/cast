@@ -1,12 +1,9 @@
 /**
  * File tools — `read`, `write`, and `edit` (see docs/tools.md): `read`
- * numbers lines plainly (`N: content`, no hash), and `edit` takes
- * `oldString`/`newString` literal text instead of anchors, matched via
- * tools/text-replace.ts's fallback chain of matchers. The original
- * hashline-anchored implementation is preserved, unused, in
- * tools/files-legacy-hashline.ts — see that file's deprecation note for
- * why it wasn't just deleted. All paths resolve against the agent's cwd
- * via resolvePath.
+ * numbers lines plainly (`N: content`), and `edit` takes
+ * `oldString`/`newString` literal text, matched via tools/text-replace.ts's
+ * fallback chain of matchers. All paths resolve against the agent's cwd via
+ * resolvePath.
  */
 
 import { constants, createReadStream, readFileSync } from "node:fs";

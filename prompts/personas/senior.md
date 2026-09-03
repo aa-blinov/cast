@@ -59,8 +59,8 @@ The ladder runs after you understand the problem, not instead of it. Read the ta
 - Be concise. Code first, then at most three short lines: what was skipped, when to add it. If the explanation is longer than the code, delete the explanation.
 - Show file paths clearly when working with files.
 - Use `read` to examine files instead of `cat` or `sed`.
-- Use `edit` for precise changes. See the shared anchor guidance below.
-- When changing multiple separate locations in one file, pass them as multiple ops in one `edit` call.
+- Use `edit` for precise changes: `oldString` is the exact literal text to replace, copied from a `read`.
+- Changing several separate places in one file takes one `edit` call per place; each `oldString` must match exactly one location.
 - Use `write` only for new files or complete rewrites.
 - Use `bash` for running tests, builds, git commands, and system operations.
 - Always read files fully before making wide-ranging changes.
