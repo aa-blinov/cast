@@ -13,7 +13,7 @@
 import { execFile, execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, isAbsolute, join, resolve } from "node:path";
+import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import type { Settings } from "./settings.ts";
 
@@ -55,6 +55,50 @@ export function defaultPluginsPaths(): PluginsPaths {
 
 function marketplacesDir(paths: PluginsPaths): string {
 	return join(paths.root, "marketplaces");
+}
+
+const UNSAFE_SEGMENT_RE = /[/\\]|\0/;
+
+/**
+ * A marketplace or plugin name is used as one directory component under
+ * ~/.cast/plugins, and it comes from a `marketplace.json` in a third-party
+ * repository the user added by URL — untrusted input on a path that is then
+ * `rmSync(…, { recursive: true, force: true })`'d before being written. A
+ * manifest declaring `"name": "../../../something"` therefore deleted and
+ * overwrote an arbitrary directory outside the plugins tree (verified: a file
+ * in a sibling directory was destroyed by a plain `/plugin marketplace add`).
+ * Names must be a single, ordinary path segment.
+ */
+function assertSafeName(value: string, kind: "marketplace" | "plugin"): string {
+	const name = value.trim();
+	if (!name || name === "." || name === ".." || UNSAFE_SEGMENT_RE.test(name) || isAbsolute(name)) {
+		throw new Error(
+			`Unsafe ${kind} name ${JSON.stringify(value)} — a ${kind} name must be a single path segment, ` +
+				"with no separators or parent-directory references.",
+		);
+	}
+	return name;
+}
+
+function isSafeName(value: string): boolean {
+	try {
+		assertSafeName(value, "plugin");
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/** Guards a path read back from our own JSON state, which an earlier
+ * (pre-fix) install could have poisoned with a traversing name — nothing is
+ * deleted outside the tree it belongs to. */
+function assertInside(parent: string, target: string, what: string): string {
+	const base = resolve(parent);
+	const full = resolve(target);
+	if (full !== base && !full.startsWith(base + sep)) {
+		throw new Error(`Refusing to touch ${what} outside ${base}: ${full}`);
+	}
+	return full;
 }
 
 function installsDir(paths: PluginsPaths): string {
@@ -246,10 +290,16 @@ export function loadMarketplaceCatalog(dir: string): MarketplaceCatalog {
 		throw new Error(`No marketplace.json under ${dir} (looked for ${MARKETPLACE_MANIFESTS.join(", ")})`);
 	}
 	const raw = JSON.parse(readFileSync(manifestPath, "utf-8")) as RawMarketplace;
-	const name = typeof raw.name === "string" && raw.name ? raw.name : basename(dir);
+	// Both names land in a filesystem path below; the manifest is untrusted.
+	const name = assertSafeName(typeof raw.name === "string" && raw.name ? raw.name : basename(dir), "marketplace");
 	const plugins: MarketplacePluginEntry[] = [];
 	for (const entry of raw.plugins ?? []) {
 		if (!entry || typeof entry.name !== "string" || !entry.name) continue;
+		// A plugin whose name isn't a plain path segment is dropped from the
+		// catalog rather than failing the whole marketplace — the rest of a
+		// large third-party catalog stays usable, and the unusable entry simply
+		// never becomes installable.
+		if (!isSafeName(entry.name)) continue;
 		if (entry.source === undefined || entry.source === null) continue;
 		const root = resolvePluginRootFromSource(dir, entry.source);
 		plugins.push({
@@ -524,8 +574,9 @@ export function removeMarketplace(name: string, paths: PluginsPaths = defaultPlu
 	if (entry.isDefault) throw new Error(`"${name}" is a default marketplace and can't be removed`);
 	delete all[name];
 	writeKnownMarketplaces(paths, all);
-	if (existsSync(entry.path)) rmSync(entry.path, { recursive: true, force: true });
-	const installs = join(installsDir(paths), name);
+	const checkout = assertInside(marketplacesDir(paths), entry.path, "a marketplace checkout");
+	if (existsSync(checkout)) rmSync(checkout, { recursive: true, force: true });
+	const installs = join(installsDir(paths), assertSafeName(name, "marketplace"));
 	if (existsSync(installs)) rmSync(installs, { recursive: true, force: true });
 
 	const meta = readInstallMeta(paths);
@@ -552,7 +603,8 @@ export async function updateMarketplace(
 		await runGitAsync(["pull", "--ff-only"], entry.path);
 	} else if (entry.source.startsWith("/") || entry.source.startsWith(".")) {
 		const abs = resolve(entry.source);
-		if (existsSync(abs)) copyLocalPlugin(abs, entry.path);
+		if (existsSync(abs))
+			copyLocalPlugin(abs, assertInside(marketplacesDir(paths), entry.path, "a marketplace checkout"));
 	} else {
 		await cloneOrUpdate(resolveGitUrl(entry.source), entry.path);
 	}
@@ -578,7 +630,7 @@ export function getMarketplaceCatalog(name: string, paths: PluginsPaths = defaul
 // ---------------------------------------------------------------------------
 
 function installRootFor(paths: PluginsPaths, marketplace: string, plugin: string): string {
-	return join(installsDir(paths), marketplace, plugin);
+	return join(installsDir(paths), assertSafeName(marketplace, "marketplace"), assertSafeName(plugin, "plugin"));
 }
 
 async function materializePlugin(

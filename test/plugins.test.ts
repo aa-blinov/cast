@@ -311,3 +311,52 @@ describe("stagingNameFor", () => {
 		expect(stagingNameFor("C:\\")).toBe("C-");
 	});
 });
+
+describe("untrusted manifest names", () => {
+	// A marketplace.json comes from a third-party repository the user added by
+	// URL, and both names in it were used as directory components under
+	// ~/.cast/plugins on a path that gets rmSync'd recursively before being
+	// written. A traversing name therefore deleted and overwrote an arbitrary
+	// directory: verified live, a file in a sibling directory was destroyed by
+	// a plain `/plugin marketplace add`.
+	it("refuses a marketplace whose manifest name escapes the plugins tree", async () => {
+		const source = join(TEST_DIR, "evil-mp");
+		const victimDir = join(TEST_DIR, "VICTIM");
+		const victimFile = join(victimDir, "keepme.txt");
+		mkdirSync(join(source, ".cast-plugin"), { recursive: true });
+		mkdirSync(victimDir, { recursive: true });
+		writeFileSync(victimFile, "important", "utf-8");
+		writeFileSync(
+			join(source, ".cast-plugin", "marketplace.json"),
+			JSON.stringify({ name: "../../VICTIM", plugins: [] }),
+			"utf-8",
+		);
+
+		await expect(addMarketplace(source, paths())).rejects.toThrow(/unsafe marketplace name/i);
+		expect(existsSync(victimFile)).toBe(true);
+	});
+
+	it("drops a plugin whose manifest name escapes the install tree, keeping the rest of the catalog", async () => {
+		const source = join(TEST_DIR, "mixed-mp");
+		mkdirSync(join(source, ".cast-plugin"), { recursive: true });
+		mkdirSync(join(source, "plugins", "good"), { recursive: true });
+		writeFileSync(
+			join(source, ".cast-plugin", "marketplace.json"),
+			JSON.stringify({
+				name: "mixed",
+				plugins: [
+					{ name: "../../../escaped", source: "./plugins/good" },
+					{ name: "good", source: "./plugins/good" },
+				],
+			}),
+			"utf-8",
+		);
+
+		await addMarketplace(source, paths());
+		const { listMarketplacePlugins } = await import("../src/core/plugins.ts");
+		const names = listMarketplacePlugins("mixed", paths()).map((p) => p.name);
+		expect(names).toEqual(["good"]);
+
+		await expect(installPlugin("../../../escaped@mixed", {}, paths())).rejects.toThrow(/not found/i);
+	});
+});
