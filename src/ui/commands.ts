@@ -1536,6 +1536,21 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 	}
 
 	if (input === "/compact") {
+		// The same hooks the web /compact and the automatic threshold fire.
+		// This path fired neither, so a PreCompact guard written to protect a
+		// long transcript was honoured everywhere except here, and a
+		// PostCompact bookkeeping hook never saw a manual TUI compaction.
+		const compactHooks = resolveHooksForCwd(deps.cwd, deps.projectTrusted);
+		const preCompact = await runHooksForEvent(compactHooks, {
+			event: "PreCompact",
+			cwd: deps.cwd,
+			sessionId: session.id,
+			payload: { trigger: "manual" },
+		});
+		if (preCompact.blocked) {
+			showNotice(`[Compaction blocked by hook: ${preCompact.reason ?? "no reason given"}]`);
+			return;
+		}
 		showNotice("[Compacting...]");
 		try {
 			const planState = createPlanState(deps.cwd, session.id);
@@ -1555,6 +1570,12 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 				session.messages = result.messages;
 				agent.refresh();
 				showNotice(`[Compacted: ${result.messagesCompacted} msgs (~${result.tokensBefore} tokens)]`);
+				void runHooksForEvent(compactHooks, {
+					event: "PostCompact",
+					cwd: deps.cwd,
+					sessionId: session.id,
+					payload: { trigger: "manual", messagesCompacted: result.messagesCompacted },
+				});
 			} else if (result.error) {
 				showNotice(`[Compaction failed: ${result.error}]`);
 			} else {

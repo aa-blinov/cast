@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
+import { streamAndCollect } from "../src/core/llm.ts";
 import type { McpSetupResult } from "../src/core/mcp.ts";
 import type { Persona } from "../src/core/personas.ts";
 import { createSession, loadSession, type SessionState, saveSession } from "../src/core/session.ts";
@@ -12,6 +13,13 @@ import type { Pickers } from "../src/pickers/types.ts";
 import type { CommandDeps } from "../src/ui/commands.ts";
 import { defaultStatusBarConfig } from "../src/ui/statusbar.tsx";
 import type { UseAgentSession } from "../src/ui/useAgentSession.ts";
+
+// /compact runs a real summarization call; stub it so the hook wiring can be
+// tested without a provider.
+vi.mock("../src/core/llm.ts", async (importOriginal) => {
+	const mod = await importOriginal<typeof import("../src/core/llm.ts")>();
+	return { ...mod, streamAndCollect: vi.fn() };
+});
 
 vi.mock("../src/core/config.ts", async (importOriginal) => {
 	const mod = await importOriginal<typeof import("../src/core/config.ts")>();
@@ -1331,5 +1339,74 @@ describe("/worktree honours a blocking WorktreeCreate hook", () => {
 		expect(existsSync(join(repo, ".cast", "worktrees", "blocked-from-tui"))).toBe(false);
 		// The session must stay on its original cwd.
 		expect(calls.setCwd ?? []).toEqual([]);
+	});
+});
+
+describe("/compact fires the compaction hooks", () => {
+	// The web /compact and the automatic threshold both fire PreCompact and
+	// PostCompact; the TUI's /compact fired neither, so a guard written to
+	// protect a long transcript was honoured everywhere except here.
+	let dir: string;
+	let previousHome: string | undefined;
+
+	beforeEach(() => {
+		dir = join(tmpdir(), `cast-tui-compact-${process.pid}-${Date.now()}`);
+		mkdirSync(join(dir, "fake-home", ".cast"), { recursive: true });
+		previousHome = process.env.HOME;
+		process.env.HOME = join(dir, "fake-home");
+	});
+
+	afterEach(() => {
+		if (previousHome === undefined) delete process.env.HOME;
+		else process.env.HOME = previousHome;
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	const writeHooks = (hooks: unknown) =>
+		writeFileSync(join(dir, "fake-home", ".cast", "hooks.json"), JSON.stringify(hooks));
+
+	it("a blocking PreCompact hook stops it, and says so", async () => {
+		writeHooks({ PreCompact: [{ hooks: [{ command: "exit 2" }] }] });
+		const { deps, calls } = createFakeDeps();
+		deps.cwd = dir;
+		deps.session.messages = [
+			{ role: "user", content: "one" },
+			{ role: "assistant", content: "two" },
+		];
+
+		await handleInput("/compact", undefined, deps);
+
+		const notices = (calls.showNotice as unknown[][] | undefined)?.map((n) => String(n[0] ?? "")) ?? [];
+		expect(notices.join("\n")).toMatch(/blocked by hook/i);
+		// Never even started compacting.
+		expect(notices.join("\n")).not.toContain("Compacting...");
+	});
+
+	it("runs PostCompact after a real compaction", async () => {
+		const marker = join(dir, "post-compact.txt");
+		writeHooks({ PostCompact: [{ hooks: [{ command: `printf done > ${JSON.stringify(marker)}` }] }] });
+		const { deps, calls } = createFakeDeps();
+		deps.cwd = dir;
+		// Enough alternating turns that compaction finds a safe cut point.
+		deps.session.messages = Array.from({ length: 12 }, (_, i) => [
+			{ role: "user" as const, content: `question ${i}` },
+			{ role: "assistant" as const, content: `answer ${i} `.repeat(30) },
+		]).flat();
+		deps.config.contextWindow = 1;
+		deps.config.maxResponseTokens = 0;
+		deps.config.compactionThreshold = 0;
+		vi.mocked(streamAndCollect).mockResolvedValueOnce({
+			content: "a summary",
+			thinking: "",
+			finishReason: "stop",
+		} as never);
+		// recordCompaction writes message rows, which have an FK to the session.
+		saveSession(deps.session);
+
+		await handleInput("/compact", undefined, deps);
+		const notices = (calls.showNotice as unknown[][] | undefined)?.map((n) => String(n[0] ?? "")) ?? [];
+		// Fail loudly with what actually happened if the compaction didn't run.
+		expect(notices.join(" | ")).toMatch(/Compacted:/);
+		await vi.waitFor(() => expect(existsSync(marker)).toBe(true));
 	});
 });
