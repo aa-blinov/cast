@@ -819,65 +819,66 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
  * `schema_migrations` row — converges by running the missing increments (e.g.
  * a table added in a later migration) without touching already-present schema.
  */
+/** The migration's own version when that number is free, otherwise the next
+ *  number past everything recorded. `version` is a PRIMARY KEY and another
+ *  line of this codebase may hold this one for a different migration; the
+ *  number only orders the log, the name is the identity. */
+function freeVersionFor(db: DatabaseSync, preferred: number): number {
+	const taken = db.prepare("SELECT 1 FROM schema_migrations WHERE version = ?").get(preferred) !== undefined;
+	if (!taken) return preferred;
+	const row = db.prepare("SELECT MAX(version) AS max FROM schema_migrations").get() as { max: number | null };
+	return (row.max ?? preferred) + 1;
+}
+
 export function runMigrations(db: DatabaseSync): void {
 	db.exec(MIGRATION_TABLE_SCHEMA);
-	const applied = new Set(
-		(db.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as Array<{ version: number }>).map(
-			(r) => r.version,
-		),
+
+	// Identified by NAME, not by version number.
+	//
+	// Two lines of this codebase evolved the same schema and assigned the same
+	// version numbers to different migrations — a real store has 29-32 taken by
+	// the multi-tenant line's migrations, which meant this line's 29 was
+	// treated as already-applied and its work silently never happened. A number
+	// is a poor identity for that reason; a name isn't, and it's already
+	// recorded. So: apply a migration when its *name* has never been recorded,
+	// and record it under a version number that is actually free.
+	//
+	// Every up() is idempotent (CREATE IF NOT EXISTS / columnExists guards), so
+	// a migration re-run against a database that already has its schema — a
+	// pre-migrations store, or one where the other line did the equivalent work
+	// — is a no-op rather than an error.
+	const appliedNames = new Set(
+		(db.prepare("SELECT name FROM schema_migrations").all() as Array<{ name: string }>).map((row) => row.name),
 	);
 
-	// Pre-migrations database (tables exist, no versions recorded): every up()
-	// is idempotent (CREATE IF NOT EXISTS / columnExists guards), so the
-	// missing increments — e.g. session_events added later — get applied, and
-	// already-present schema is a no-op. Record each as it runs; no separate
-	// baseline step needed.
-	// A version recorded under a different name means this database was
-	// migrated by a different line of this codebase whose numbering collides
-	// with ours: our migration of that number is then skipped as
-	// already-applied, silently, and whatever it does never happens. That is
-	// exactly how a store ended up missing the messages_fts_au trigger while
-	// reporting version 29 as applied. Warn — repairs go in as new versions
-	// (see 34), since the recorded number can't be reclaimed.
-	const appliedNames = new Map(
-		(db.prepare("SELECT version, name FROM schema_migrations").all() as Array<{ version: number; name: string }>).map(
-			(row) => [row.version, row.name],
-		),
-	);
 	for (const migration of MIGRATIONS) {
-		const recordedName = appliedNames.get(migration.version);
-		if (recordedName !== undefined && recordedName !== migration.name) {
-			console.error(
-				`[cast] migration ${migration.version} is recorded as "${recordedName}" but this build expects "${migration.name}" — it was skipped, and whatever it does has not been applied.`,
-			);
-		}
-		if (applied.has(migration.version)) continue;
+		if (appliedNames.has(migration.name)) continue;
 		// IMMEDIATE, and the applied-check repeated inside the transaction:
-		// `applied` above was read before any transaction, and several
+		// `appliedNames` above was read before any transaction, and several
 		// processes migrate independently (the daemon, a TUI picker, `cast
 		// run`, an ACP connection each open their own connection). Two of them
-		// starting during the same upgrade both saw this version as pending —
+		// starting during the same upgrade both saw this migration as pending —
 		// the second one's idempotent DDL then succeeded and its bookkeeping
-		// INSERT failed on the UNIQUE version, rolling back and throwing out
-		// of getDb(). A deferred BEGIN also doesn't honour busy_timeout on its
-		// first write, so it failed instantly instead of waiting for the other
-		// process to finish.
+		// INSERT failed, rolling back and throwing out of getDb(). A deferred
+		// BEGIN also doesn't honour busy_timeout on its first write, so it
+		// failed instantly instead of waiting for the other process to finish.
 		db.exec("BEGIN IMMEDIATE");
 		try {
 			const alreadyApplied =
-				db.prepare("SELECT 1 FROM schema_migrations WHERE version = ?").get(migration.version) !== undefined;
+				db.prepare("SELECT 1 FROM schema_migrations WHERE name = ?").get(migration.name) !== undefined;
 			if (alreadyApplied) {
 				db.exec("COMMIT");
-				applied.add(migration.version);
+				appliedNames.add(migration.name);
 				continue;
 			}
 			migration.up(db);
 			db.prepare("INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)").run(
-				migration.version,
+				freeVersionFor(db, migration.version),
 				migration.name,
 				new Date().toISOString(),
 			);
 			db.exec("COMMIT");
+			appliedNames.add(migration.name);
 		} catch (err) {
 			db.exec("ROLLBACK");
 			throw err;

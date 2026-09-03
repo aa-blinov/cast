@@ -145,27 +145,44 @@ describe("schema migrations", () => {
 		expect(cols).toContain("todos_json");
 		db.close();
 	});
-	it("reports a version recorded under another line's migration name", () => {
-		// Version 29 here is "messages-fts-seq-sync"; in another line of this
-		// codebase it is "users-and-multi-tenant-columns". A store that saw the
-		// latter has 29 recorded, so this line's 29 is skipped as
-		// already-applied — silently, until this warning existed. (The repair
-		// that used to be needed alongside it is moot now: migration 35 removed
-		// the index that migration's trigger maintained.)
+	it("applies a migration whose version number another line already used", () => {
+		// Two lines of this codebase assigned the same numbers to different
+		// migrations: a real store had 29-32 taken by the multi-tenant line, so
+		// this line's 29 was treated as already-applied and its work silently
+		// never happened. Migrations are identified by name now, and recorded
+		// under whatever version number is free.
 		const db = openDb("collided.db");
 		runMigrations(db);
-		db.prepare("UPDATE schema_migrations SET name = ? WHERE version = 29").run("users-and-multi-tenant-columns");
 
-		const warnings: string[] = [];
-		const realError = console.error;
-		console.error = (...args: unknown[]) => warnings.push(args.map(String).join(" "));
-		try {
-			runMigrations(db);
-		} finally {
-			console.error = realError;
+		// Reproduce that store: this line's records replaced by the other
+		// line's, holding the same numbers under different names.
+		const ours = db.prepare("SELECT version, name FROM schema_migrations ORDER BY version").all() as Array<{
+			version: number;
+			name: string;
+		}>;
+		const stolen = ours.slice(-3);
+		db.exec("DELETE FROM schema_migrations");
+		for (const [i, row] of stolen.entries()) {
+			db.prepare("INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)").run(
+				row.version,
+				`other-line-migration-${i}`,
+				new Date().toISOString(),
+			);
 		}
 
-		expect(warnings.join("\n")).toContain('recorded as "users-and-multi-tenant-columns"');
+		expect(() => runMigrations(db)).not.toThrow();
+
+		// Every one of our migrations is now recorded under its own name...
+		const names = new Set(
+			(db.prepare("SELECT name FROM schema_migrations").all() as Array<{ name: string }>).map((r) => r.name),
+		);
+		for (const migration of MIGRATIONS) expect(names.has(migration.name), migration.name).toBe(true);
+		// ...alongside the other line's rows, which keep their numbers.
+		expect(names.has("other-line-migration-0")).toBe(true);
+		// A third run changes nothing.
+		const before = db.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get() as { n: number };
+		runMigrations(db);
+		expect((db.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get() as { n: number }).n).toBe(before.n);
 		db.close();
 	});
 
