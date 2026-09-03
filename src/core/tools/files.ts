@@ -9,9 +9,10 @@
  * via resolvePath.
  */
 
-import { constants } from "node:fs";
-import { access, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, extname } from "node:path";
+import { constants, createReadStream, readFileSync } from "node:fs";
+import { access, mkdir, open, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, extname, join, resolve, sep } from "node:path";
+import { createInterface } from "node:readline";
 import type { AppConfig } from "../config.ts";
 import { resizeImageForEmbedding } from "../image-resize.ts";
 import { findFilesByBasename } from "./search.ts";
@@ -106,6 +107,135 @@ function isBinaryFile(filePath: string, sample: Buffer): boolean {
 
 const SAMPLE_BYTES = 4096;
 
+/** Above this, `read` streams instead of loading the file into memory. Well
+ * clear of any source file, and small enough that the whole-file path's ~3x
+ * memory cost stays negligible. */
+const MAX_WHOLE_FILE_BYTES = 8 * 1024 * 1024;
+
+function startLineFrom(offset: number | undefined): number {
+	return offset ? Math.max(0, offset - 1) : 0;
+}
+
+/** First `bytes` bytes of a file, without reading the rest of it. */
+async function readSample(absolutePath: string, bytes: number): Promise<Buffer> {
+	const handle = await open(absolutePath, "r");
+	try {
+		const buffer = Buffer.alloc(bytes);
+		const { bytesRead } = await handle.read(buffer, 0, bytes, 0);
+		return buffer.subarray(0, bytesRead);
+	} finally {
+		await handle.close();
+	}
+}
+
+/**
+ * Streams a large file, keeping only the requested line window in memory.
+ *
+ * The total line count is deliberately not reported: knowing it means reading
+ * to the end, which for the files this path exists for is exactly the work
+ * being avoided. The continuation hint carries the offset to resume from
+ * instead, which is what a caller actually needs.
+ */
+async function readLargeFile(
+	absolutePath: string,
+	sizeBytes: number,
+	startLine: number,
+	limit: number | undefined,
+	config: AppConfig,
+): Promise<ToolResult> {
+	const maxLines = Math.min(limit ?? config.maxToolOutputLines, config.maxToolOutputLines);
+	const maxBytes = config.maxToolOutputBytes;
+	const kept: string[] = [];
+	let lineNumber = 0;
+	let usedBytes = 0;
+	let stoppedOnBytes = false;
+	const stream = createReadStream(absolutePath, { encoding: "utf-8" });
+	const lines = createInterface({ input: stream, crlfDelay: Number.POSITIVE_INFINITY });
+	try {
+		for await (const line of lines) {
+			lineNumber++;
+			if (lineNumber <= startLine) continue;
+			const rendered = `${lineNumber}: ${line}`;
+			usedBytes += Buffer.byteLength(rendered, "utf-8") + 1;
+			if (usedBytes > maxBytes && kept.length > 0) {
+				stoppedOnBytes = true;
+				break;
+			}
+			kept.push(usedBytes > maxBytes ? `${rendered.slice(0, maxBytes)}… [line truncated, too large]` : rendered);
+			if (kept.length >= maxLines) break;
+		}
+	} finally {
+		lines.close();
+		stream.destroy();
+	}
+	if (kept.length === 0) {
+		return {
+			content: `Offset ${startLine + 1} is beyond end of file (${lineNumber} lines, ${formatSize(sizeBytes)})`,
+			isError: true,
+		};
+	}
+	const nextOffset = startLine + kept.length + 1;
+	const why = stoppedOnBytes ? `stopped at ${formatSize(maxBytes)}` : `${kept.length} line(s) shown`;
+	const hint =
+		`\n\n[Large file (${formatSize(sizeBytes)}) — read streams it, so the total line count is not counted. ` +
+		`Showing lines ${startLine + 1}-${startLine + kept.length} (${why}). Use offset=${nextOffset} to continue, ` +
+		`or grep/bash for a targeted search.]`;
+	return { content: kept.join("\n") + hint };
+}
+
+/**
+ * cast's own installation root, or null when this build isn't running from
+ * one. Found by walking up from this module looking for cast's package.json —
+ * works both from the repo (src/core/tools/) and from a built install
+ * (<root>/dist/index.js).
+ */
+let castRootCache: string | null | undefined;
+function castRoot(): string | null {
+	if (castRootCache !== undefined) return castRootCache;
+	castRootCache = null;
+	let dir = import.meta.dirname;
+	for (let up = 0; dir && up < 6; up++) {
+		try {
+			const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf-8")) as { name?: string };
+			if (pkg.name === "cast") {
+				castRootCache = dir;
+				break;
+			}
+		} catch {
+			// No package.json here (or unreadable/not JSON) — keep walking up.
+		}
+		const parent = dirname(dir);
+		if (parent === dir) break;
+		dir = parent;
+	}
+	return castRootCache;
+}
+
+/**
+ * The built-in web UI is read-only: the agent is meant to add UIs under
+ * ~/.cast/ui/, not overwrite cast's own.
+ *
+ * The check used to be a substring test for "/src/server/public/" and
+ * "/dist/public/" against the path alone, which matched those directory
+ * names *in any project* — a user working on their own Node app that happens
+ * to have src/server/public could not have the agent write there at all
+ * (verified: a plain write into an unrelated project's own
+ * src/server/public/app.js was refused). It is anchored to cast's own
+ * installation root now, so it protects what it was meant to protect and
+ * nothing else.
+ */
+function builtInUiBlockReason(absolutePath: string): string | null {
+	const root = castRoot();
+	if (!root) return null;
+	const protectedDirs = [
+		join(root, "src", "server", "public"),
+		join(root, "dist", "public"),
+		join(root, "src", "server", "ui-factory", "template"),
+	];
+	const full = resolve(absolutePath);
+	return protectedDirs.some((dir) => full === dir || full.startsWith(dir + sep)) ? root : null;
+}
+
 export async function execRead(args: Record<string, unknown>, cwd: string, config: AppConfig): Promise<ToolResult> {
 	const filePath = typeof args.path === "string" ? args.path : "";
 	if (!filePath.trim()) return { content: 'Error: "path" is required and must be a non-empty string.', isError: true };
@@ -172,17 +302,27 @@ export async function execRead(args: Record<string, unknown>, cwd: string, confi
 		};
 	}
 
-	// Sample the first few KB to classify binary-vs-text before committing to
-	// a full read, without a separate streaming-read path (this file's
-	// below-64KB-typical sizes don't need it; large files are already bounded
-	// by the byte budget below).
-	const fullBuffer = await readFile(absolutePath);
-	if (isBinaryFile(absolutePath, fullBuffer.subarray(0, SAMPLE_BYTES))) {
+	// Sample the first few KB to classify binary-vs-text *before* reading the
+	// whole file — the old order read everything first, so a binary blob was
+	// pulled fully into memory only to be rejected.
+	const sample = await readSample(absolutePath, SAMPLE_BYTES);
+	if (isBinaryFile(absolutePath, sample)) {
 		return { content: `Cannot read binary file: ${filePath}`, isError: true };
 	}
+
+	// A file above the scan ceiling is read line by line and only the
+	// requested window is kept. Reading it whole cost roughly three times its
+	// size in memory (buffer + UTF-16 string + split array): measured 592MB of
+	// RSS to return five lines of a 200MB log, so a multi-GB file — a log, a
+	// dump, a .jsonl dataset — took the process down before printing anything.
+	if (stats.size > MAX_WHOLE_FILE_BYTES) {
+		return readLargeFile(absolutePath, stats.size, startLineFrom(offset), limit, config);
+	}
+
+	const fullBuffer = await readFile(absolutePath);
 	const allLines = fullBuffer.toString("utf-8").split("\n");
 
-	const startLine = offset ? Math.max(0, offset - 1) : 0;
+	const startLine = startLineFrom(offset);
 	if (startLine >= allLines.length) {
 		return { content: `Offset ${offset} is beyond end of file (${allLines.length} lines total)`, isError: true };
 	}
@@ -262,12 +402,8 @@ export async function execWrite(args: Record<string, unknown>, cwd: string): Pro
 	}
 	const content = args.content;
 	const absolutePath = resolvePath(filePath, cwd);
-	// Guard built-in UI — agent must use ~/.cast/ui/*, not overwrite default at / (src/server/public, dist/public)
-	if (
-		absolutePath.includes("/src/server/public/") ||
-		absolutePath.includes("/dist/public/") ||
-		absolutePath.includes("/src/server/ui-factory/template/")
-	) {
+	// Guard cast's own built-in UI — the agent must add UIs under ~/.cast/ui/.
+	if (builtInUiBlockReason(absolutePath)) {
 		return {
 			content: `Blocked: built-in UI at ${absolutePath} is read-only. Use ~/.cast/ui/<name>/ (served at /ui/<name>/) or POST /api/uis — see ui-factory skill.`,
 			isError: true,
@@ -401,11 +537,7 @@ export async function execEdit(args: Record<string, unknown>, cwd: string, confi
 	const replaceAll = args.replaceAll === true;
 
 	const absolutePath = resolvePath(filePath, cwd);
-	if (
-		absolutePath.includes("/src/server/public/") ||
-		absolutePath.includes("/dist/public/") ||
-		absolutePath.includes("/src/server/ui-factory/template/")
-	) {
+	if (builtInUiBlockReason(absolutePath)) {
 		return {
 			content: `Blocked: built-in UI at ${absolutePath} is read-only. Use ~/.cast/ui/<name>/ (served at /ui/<name>/) — see ui-factory skill.`,
 			isError: true,
