@@ -77,3 +77,40 @@ describe("remainingTodoCount", () => {
 		expect(count).toBe(2);
 	});
 });
+
+describe("validateTodos — bounds", () => {
+	// The list is re-rendered into the system prompt on every build-mode turn
+	// and persisted with the session, so one oversized write taxes every later
+	// request and survives a restart. Neither dimension was capped: a 500-item
+	// list and a single 100,000-character item were both accepted.
+	it("refuses a list far larger than any real task list", () => {
+		const many = Array.from({ length: 101 }, (_, i) => ({
+			content: `task ${i}`,
+			status: "pending" as const,
+			priority: "low" as const,
+		}));
+		const result = validateTodos(many);
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.error).toMatch(/too many todos/);
+		// The limit itself still passes.
+		expect(validateTodos(many.slice(0, 100)).ok).toBe(true);
+	});
+
+	it("refuses an item whose content is a document rather than a task", () => {
+		const result = validateTodos([{ content: "x".repeat(501), status: "pending", priority: "low" }]);
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.error).toMatch(/at most 500/);
+	});
+
+	it("refuses two todos with the same content", () => {
+		// `content` is a todo's only identity — plan-step links and the
+		// TaskCreated/TaskCompleted hook diffs are keyed by it — so a duplicate
+		// silently inherited the other's plan step.
+		const result = validateTodos([
+			{ content: "same task", status: "pending", priority: "high" },
+			{ content: "same task", status: "completed", priority: "low" },
+		]);
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.error).toMatch(/duplicates an earlier todo/);
+	});
+});

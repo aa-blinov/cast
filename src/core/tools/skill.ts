@@ -44,6 +44,19 @@ export function execSkill(args: Record<string, unknown>, deps: SkillToolDeps): T
 		};
 	}
 
-	const content = formatSkillInvocation(skill, userArgs, deps.sessionId);
-	return { content };
+	// The body is usually cached at discovery time, but not always — and the
+	// file can be gone by now (the skill was uninstalled, the worktree
+	// switched, the repo moved). Reading it then threw ENOENT out of the tool,
+	// which the dispatcher reports as "skill failed unexpectedly: ENOENT: no
+	// such file or directory…" — true, but it tells the model nothing about
+	// what to do. Say what happened instead.
+	try {
+		return { content: formatSkillInvocation(skill, userArgs, deps.sessionId) };
+	} catch (error) {
+		const reason = error instanceof Error ? error.message : String(error);
+		return {
+			content: `Error: skill "${name}" could not be loaded — its file at ${skill.filePath} is unreadable (${reason}). It may have been uninstalled or moved; continue without it, or ask the user to reinstall it.`,
+			isError: true,
+		};
+	}
 }
