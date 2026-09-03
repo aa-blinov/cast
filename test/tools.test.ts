@@ -2021,3 +2021,44 @@ describe("plan tool definitions", () => {
 		expect([...defined].sort()).toEqual([...PLAN_TOOL_NAMES].sort());
 	});
 });
+
+describe("search path relativization", () => {
+	// Regression: a bare `path.startsWith(cwd)` is also true for a sibling
+	// directory whose name merely begins with cwd's, and slicing cwd.length+1
+	// off that chopped the sibling's name mid-word. `glob`/`grep` handed back
+	// `extra/a.ts` for `/w/proj-extra/a.ts` — a path that resolves to nothing,
+	// so the model's follow-up `read` could only fail.
+	it("keeps a sibling directory's path intact instead of mangling its name", async () => {
+		const cwd = join(TEST_DIR, "proj");
+		const sibling = join(TEST_DIR, "proj-extra");
+		mkdirSync(cwd, { recursive: true });
+		mkdirSync(sibling, { recursive: true });
+		writeFileSync(join(sibling, "a.ts"), "const a = 1;\n", "utf-8");
+		writeFileSync(join(sibling, "b.txt"), "hit here\n", "utf-8");
+
+		const { execGlob, execGrep } = await import("../src/core/tools/search.ts");
+
+		const globbed = await execGlob({ pattern: "*.ts", path: "../proj-extra" }, cwd, mockConfig);
+		const globLines = globbed.content.split("\n").filter((line) => !line.startsWith("[note:"));
+		expect(globLines).toContain(join(sibling, "a.ts"));
+		// The mangled form was a relative path with the sibling's name cut
+		// mid-word — nothing in the output may be relative to cwd here.
+		expect(globLines.every((line) => line.startsWith("/"))).toBe(true);
+
+		const grepped = await execGrep({ pattern: "hit", path: "../proj-extra" }, cwd, mockConfig);
+		const grepLines = grepped.content.split("\n").filter((line) => !line.startsWith("[note:"));
+		expect(grepLines[0]).toBe(`${join(sibling, "b.txt")}:1:hit here`);
+	});
+
+	it("still shortens a path that really is inside cwd", async () => {
+		const cwd = join(TEST_DIR, "proj");
+		mkdirSync(join(cwd, "src"), { recursive: true });
+		writeFileSync(join(cwd, "src", "inside.ts"), "const inside = 1;\n", "utf-8");
+
+		const { execGlob } = await import("../src/core/tools/search.ts");
+
+		const globbed = await execGlob({ pattern: "inside.ts" }, cwd, mockConfig);
+		expect(globbed.content).toContain("src/inside.ts");
+		expect(globbed.content).not.toContain(cwd);
+	});
+});

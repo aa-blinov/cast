@@ -781,14 +781,12 @@ describe("fetchUrlLocal", () => {
 	it("falls back to UTF-8 for a charset label the runtime does not know", async () => {
 		vi.stubGlobal(
 			"fetch",
-			vi
-				.fn()
-				.mockResolvedValue(
-					mockLocalResponse({
-						headers: { "content-type": "text/plain; charset=x-nonsense" },
-						body: "plain ascii",
-					}),
-				),
+			vi.fn().mockResolvedValue(
+				mockLocalResponse({
+					headers: { "content-type": "text/plain; charset=x-nonsense" },
+					body: "plain ascii",
+				}),
+			),
 		);
 
 		const result = await fetchUrlLocal("https://example.com/odd.txt");

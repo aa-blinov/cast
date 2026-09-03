@@ -107,7 +107,12 @@ import type { SubagentPrompt } from "./subagents.ts";
 import { recordLlmRequest } from "./telemetry.ts";
 import { formatTodoList, remainingTodoCount, type TodoItem, validateTodos } from "./todo.ts";
 import { BackgroundTaskRegistry } from "./tools/bash-background.ts";
-import { type CompletedToolCallStatus, completedToolCallStatus, normalizeToolResultError } from "./tools/shared.ts";
+import {
+	type CompletedToolCallStatus,
+	completedToolCallStatus,
+	normalizeToolResultError,
+	relativeToCwd,
+} from "./tools/shared.ts";
 import {
 	type BashBackgroundDeps,
 	type ConfirmBash,
@@ -3185,7 +3190,7 @@ function extractContextFile(
 	// Normalize to relative path from cwd for consistent glob matching
 	let relPath: string;
 	if (rawPath.startsWith("/")) {
-		relPath = rawPath.startsWith(cwd) ? rawPath.slice(cwd.length + 1) : rawPath;
+		relPath = relativeToCwd(rawPath, cwd);
 	} else {
 		relPath = rawPath;
 	}
