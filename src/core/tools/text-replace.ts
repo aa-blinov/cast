@@ -31,22 +31,37 @@ const LEADING_SPACE_RE = /^(\s*)/;
 const REGEX_SPECIAL_RE2 = /[.*+?^${}()|[\]\\]/g;
 const ESCAPE_SEQUENCE_RE = /\\(n|t|r|'|"|`|\\|\n|\$)/g;
 
-/** Levenshtein distance algorithm implementation */
-function levenshtein(a: string, b: string): number {
-	if (a === "" || b === "") {
-		return Math.max(a.length, b.length);
-	}
-	const matrix: number[][] = Array.from({ length: a.length + 1 }, (_, i) =>
-		Array.from({ length: b.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)),
-	);
+/** How much of a line the similarity check looks at. The full quadratic
+ * distance over two long lines is what makes this dangerous: a minified
+ * bundle or a generated data file can hold a single 200KB line, and the
+ * allocated matrix — one number per character pair — would be tens of
+ * billions of cells. Comparing the first 512 characters answers the same
+ * "are these roughly the same line?" question at a bounded cost. */
+const LEVENSHTEIN_MAX_CHARS = 512;
+
+/** Levenshtein distance, computed over two rolling rows rather than a full
+ * matrix (the matrix cost O(a·b) memory for a value that only ever needs the
+ * previous row) and capped in input length. */
+function levenshtein(aFull: string, bFull: string): number {
+	const a = aFull.length > LEVENSHTEIN_MAX_CHARS ? aFull.slice(0, LEVENSHTEIN_MAX_CHARS) : aFull;
+	const b = bFull.length > LEVENSHTEIN_MAX_CHARS ? bFull.slice(0, LEVENSHTEIN_MAX_CHARS) : bFull;
+	if (a === "" || b === "") return Math.max(a.length, b.length);
+
+	let previous = new Uint32Array(b.length + 1);
+	let current = new Uint32Array(b.length + 1);
+	for (let j = 0; j <= b.length; j++) previous[j] = j;
 
 	for (let i = 1; i <= a.length; i++) {
+		current[0] = i;
 		for (let j = 1; j <= b.length; j++) {
 			const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-			matrix[i]![j] = Math.min(matrix[i - 1]![j]! + 1, matrix[i]![j - 1]! + 1, matrix[i - 1]![j - 1]! + cost);
+			current[j] = Math.min(previous[j]! + 1, current[j - 1]! + 1, previous[j - 1]! + cost);
 		}
+		const swap = previous;
+		previous = current;
+		current = swap;
 	}
-	return matrix[a.length]![b.length]!;
+	return previous[b.length]!;
 }
 
 export const SimpleReplacer: Replacer = function* (_content, find) {
@@ -487,6 +502,51 @@ export function trimDiff(diff: string): string {
 	return trimmedLines.join("\n");
 }
 
+const INDENT_RE = /^[ \t]*/;
+
+/** The indentation every non-blank line of `text` starts with — the longest
+ * common leading run of spaces/tabs, kept as literal characters so a tab-
+ * indented file isn't re-indented with spaces. */
+function commonIndent(text: string): string {
+	const lines = text.split("\n").filter((line) => line.trim().length > 0);
+	if (lines.length === 0) return "";
+	let prefix = INDENT_RE.exec(lines[0]!)![0];
+	for (const line of lines.slice(1)) {
+		const indent = INDENT_RE.exec(line)![0];
+		let i = 0;
+		while (i < prefix.length && i < indent.length && prefix[i] === indent[i]) i++;
+		prefix = prefix.slice(0, i);
+		if (prefix === "") break;
+	}
+	return prefix;
+}
+
+/**
+ * Rewrites `newString`'s indentation from the level `oldString` was written
+ * at to the level the text actually matched at.
+ *
+ * Several matchers in the chain deliberately ignore indentation when
+ * searching — that is the whole point of the line-trimmed and
+ * indentation-flexible ones — but the replacement used to be inserted
+ * verbatim, so a block the model remembered without the file's indentation
+ * was written back without it. Verified: replacing a method body inside a
+ * Python class dedented `def go(self):` out of the class, changing what the
+ * program means. Matching loosely is only safe if the replacement is put
+ * back at the indentation of what it replaced.
+ */
+function realignIndentation(search: string, oldString: string, newString: string): string {
+	const target = commonIndent(search);
+	const source = commonIndent(oldString);
+	if (target === source) return newString;
+	return newString
+		.split("\n")
+		.map((line) => {
+			if (line.trim().length === 0) return line;
+			return line.startsWith(source) ? target + line.slice(source.length) : target + line;
+		})
+		.join("\n");
+}
+
 function isDisproportionateMatch(search: string, oldString: string): boolean {
 	const oldLines = oldString.split("\n").length;
 	const searchLines = search.split("\n").length;
@@ -534,12 +594,13 @@ export function replace(content: string, oldString: string, newString: string, r
 					"Refusing replacement because the matched span is much larger than oldString. Re-read the file and provide the full exact oldString for the intended replacement.",
 				);
 			}
+			const replacement = realignIndentation(search, oldString, newString);
 			if (replaceAll) {
-				return content.replaceAll(search, newString);
+				return content.replaceAll(search, replacement);
 			}
 			const lastIndex = content.lastIndexOf(search);
 			if (index !== lastIndex) continue;
-			return content.substring(0, index) + newString + content.substring(index + search.length);
+			return content.substring(0, index) + replacement + content.substring(index + search.length);
 		}
 	}
 
