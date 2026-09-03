@@ -794,6 +794,11 @@ export function stripHermesToolCalls(content: string): string {
 /** True when a tool_calls[].arguments string is a usable JSON object. Empty,
  * truncated (`{"x":`), or non-object payloads are not. */
 function isValidJsonObject(s: string): boolean {
+	// A tool called without parameters legitimately arrives with empty
+	// arguments (some providers send "" rather than "{}"), which is not
+	// malformed — treating it as such sent the Hermes-XML recovery path
+	// looking for a tool call that was never mis-serialized.
+	if (s.trim() === "") return true;
 	try {
 		const v = JSON.parse(s);
 		return typeof v === "object" && v !== null;

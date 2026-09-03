@@ -1578,6 +1578,41 @@ describe("runAgentLoop — retries a length-truncated response with no tool call
 		expect(events.some((e) => e.type === "end" && (e as { reason: string }).reason === "stop")).toBe(true);
 	});
 
+	it("treats empty tool-call arguments as no arguments, not as malformed JSON", async () => {
+		// Several OpenAI-compatible providers send `arguments: ""` (or omit the
+		// field entirely) for a tool invoked without parameters — `ls` and
+		// `plan_done` both accept that. JSON.parse rejected it, so the model got
+		// "arguments were truncated or malformed. Retry the tool call" and could
+		// only answer by retrying the same call forever.
+		const events: AgentEvent[] = [];
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "tool_calls",
+				toolCalls: [{ id: "1", name: "ls", arguments: "" }],
+			}))
+			.mockImplementationOnce(async () => ({
+				content: "listed",
+				thinking: "",
+				finishReason: "stop",
+			}));
+
+		await runAgentLoop([{ role: "user", content: "what's here" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			onEvent: (event) => events.push(event),
+		});
+
+		const toolEnd = events.find((event) => event.type === "tool_end");
+		expect(toolEnd).toBeDefined();
+		const result = (toolEnd as Extract<AgentEvent, { type: "tool_end" }>).result;
+		expect(result.isError).toBeFalsy();
+		expect(result.content).not.toMatch(/truncated or malformed/);
+	});
+
 	it("does not retry when a tool call was reached despite finishReason 'length'", async () => {
 		const events: AgentEvent[] = [];
 

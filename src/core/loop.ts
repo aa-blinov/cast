@@ -2993,6 +2993,16 @@ async function executeToolCalls(
 	const prepared: Array<{ id: string; name: string; args: Record<string, unknown> | null }> = [];
 	for (const tc of toolCalls) {
 		let args: Record<string, unknown>;
+		// No arguments at all is a legitimate call, not a malformed one. Several
+		// OpenAI-compatible providers send `arguments: ""` (or omit the field, which
+		// accumulates to "") for a tool invoked without parameters, and JSON.parse
+		// rejected that — so a plain `ls` or `plan_done` with no arguments came back
+		// as "arguments were truncated or malformed. Retry the tool call", which the
+		// model could only answer by retrying the same call forever.
+		if (tc.arguments.trim() === "") {
+			prepared.push({ id: tc.id, name: tc.name, args: {} });
+			continue;
+		}
 		try {
 			args = JSON.parse(tc.arguments);
 		} catch {
