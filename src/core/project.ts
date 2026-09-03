@@ -301,7 +301,12 @@ export async function resolveMcpForCwd(
 	for (const name of Object.keys(extraServers)) serverSources[name] = "project";
 	if (allNames.length === 0) return { ...emptyResult, allServerNames: [], serverSources };
 	if (skipConnect)
-		return { ...emptyResult, allServerNames: allNames.sort((a, b) => a.localeCompare(b)), serverSources };
+		return {
+			...emptyResult,
+			allServerNames: allNames.sort((a, b) => a.localeCompare(b)),
+			serverSources,
+			connectPending: true,
+		};
 	// Filter out disabled servers before connecting
 	const disabledSet = new Set(disabledServers);
 	const filtered = Object.fromEntries(Object.entries(merged).filter(([name]) => !disabledSet.has(name)));

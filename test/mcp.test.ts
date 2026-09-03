@@ -5,6 +5,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import {
 	closeMcpConnections,
 	connectMcpServers,
+	formatMcpForPrompt,
 	listMcpTools,
 	loadMcpConfig,
 	mcpHttpFetch,
@@ -108,13 +109,48 @@ describe("connectMcpServers (real spawned MCP server, not mocked)", () => {
 		const result = await connectMcpServers({ echo: { command: "node", args: [FIXTURE_SERVER] } });
 		try {
 			expect(result.diagnostics).toEqual([]);
-			expect(result.connections).toEqual([{ serverName: "echo", toolCount: 4, client: expect.anything() }]);
+			expect(result.connections).toEqual([
+				{ serverName: "echo", toolCount: 4, client: expect.anything(), alive: true },
+			]);
 			expect([...result.toolIndex.keys()].sort()).toEqual([
 				"mcp_echo_add",
 				"mcp_echo_echo",
 				"mcp_echo_fails",
 				"mcp_echo_get-last-auth-header",
 			]);
+		} finally {
+			await closeMcpConnections(result.connections);
+		}
+	});
+
+	it("notices a server that goes away and stops advertising or calling it", async () => {
+		// Nothing used to notice: the SDK's onerror/onclose are no-ops unless
+		// assigned, so a crashed stdio server stayed in the system prompt for
+		// the daemon's lifetime and the model kept calling tools that could
+		// only fail.
+		const result = await connectMcpServers({ echo: { command: "node", args: [FIXTURE_SERVER] } });
+		try {
+			expect(formatMcpForPrompt(result)).toContain("mcp_echo_echo");
+
+			const errors: string[] = [];
+			const realError = console.error;
+			console.error = (...args: unknown[]) => errors.push(args.map(String).join(" "));
+			try {
+				// Kill the transport the way a crashed server would.
+				await result.connections[0]!.client.close();
+			} finally {
+				console.error = realError;
+			}
+
+			expect(result.connections[0]!.alive).toBe(false);
+			expect(errors.join("\n")).toContain("disconnected");
+			// Gone from the prompt, so the next turn isn't told about tools that
+			// can't work...
+			expect(formatMcpForPrompt(result)).not.toContain("mcp_echo_echo");
+			// ...and a call explains itself instead of surfacing a transport error.
+			const called = await result.toolIndex.get("mcp_echo_echo")!.call({ text: "hi" });
+			expect(called.isError).toBe(true);
+			expect(String(called.content)).toContain("/mcp reconnect");
 		} finally {
 			await closeMcpConnections(result.connections);
 		}

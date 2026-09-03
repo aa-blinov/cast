@@ -105,6 +105,14 @@ export interface McpConnection {
 	serverName: string;
 	toolCount: number;
 	client: Client;
+	/** Cleared when the transport closes or errors — a stdio server that
+	 *  crashed, an HTTP one that started refusing. Nothing used to notice:
+	 *  the SDK's onerror/onclose were never subscribed, so a dead server's
+	 *  tools stayed in the system prompt for the daemon's lifetime and the
+	 *  model kept calling them. */
+	alive: boolean;
+	/** Why it went away, for the error the model sees on the next call. */
+	deadReason?: string;
 }
 
 export interface McpSetupResult {
@@ -115,6 +123,11 @@ export interface McpSetupResult {
 	/** Every server name from the original config, regardless of connection
 	 * success or disabled state — so the /mcp picker can show the full list. */
 	allServerNames: string[];
+	/** True while the real connect is still pending (deferMcp / skipConnect):
+	 *  the servers are known but none of their tools exist yet. A turn started
+	 *  in that window runs with no MCP tools at all, which is worth telling the
+	 *  user rather than silently answering without them. */
+	connectPending?: boolean;
 	/** Per-server source: "global" or "project". */
 	serverSources: Record<string, "global" | "project">;
 }
@@ -330,6 +343,9 @@ export async function connectMcpServers(
 				}
 				const tools = await listMcpTools(client, connectTimeoutMs);
 
+				// Filled in just below, once the connection object exists — the tool
+				// handles close over it so a call can see the server has since died.
+				const connectionRef: { value?: McpConnection } = {};
 				for (const t of tools) {
 					const name = mcpToolName(serverName, t.name);
 					const definition: Tool = {
@@ -362,6 +378,14 @@ export async function connectMcpServers(
 					toolIndex.set(name, {
 						definition,
 						call: async (args, signal): Promise<ToolResult> => {
+							if (!connectionRef.value?.alive) {
+								return {
+									content: `The MCP server "${serverName}" is no longer connected${
+										connectionRef.value?.deadReason ? ` (${connectionRef.value.deadReason})` : ""
+									}. Its tools are unavailable until the user runs /mcp reconnect — do not keep retrying them.`,
+									isError: true,
+								};
+							}
 							try {
 								const result = await client.callTool({ name: t.name, arguments: args }, undefined, { signal });
 								const parts = (result.content ?? []) as McpContentPart[];
@@ -412,7 +436,22 @@ export async function connectMcpServers(
 					});
 				}
 
-				connections.push({ serverName, toolCount: tools.length, client });
+				const connection: McpConnection = { serverName, toolCount: tools.length, client, alive: true };
+				// Notice when the server goes away. The SDK's own handlers are
+				// no-ops unless assigned, so a crashed stdio server or an HTTP
+				// endpoint that started refusing left cast advertising tools that
+				// could never work again.
+				const markDead = (reason: string) => {
+					if (!connection.alive) return;
+					connection.alive = false;
+					connection.deadReason = reason;
+					console.error(`[cast] mcp server "${serverName}" disconnected: ${reason}. Use /mcp reconnect to retry.`);
+				};
+				client.onclose = () => markDead("the connection closed");
+				client.onerror = (error: unknown) =>
+					markDead(error instanceof Error ? error.message : String(error) || "transport error");
+				connectionRef.value = connection;
+				connections.push(connection);
 			} catch (error) {
 				diagnostics.push(`mcp server "${serverName}": ${error instanceof Error ? error.message : String(error)}`);
 				await closeClient(client);
@@ -450,6 +489,7 @@ export function mcpServerToolBlurbs(result: McpSetupResult): Record<string, stri
 			const fn = t.function.name;
 			names.push(fn.startsWith(marker) ? fn.slice(marker.length) : fn);
 		}
+		if (c.alive === false) continue;
 		if (names.length > 0) out[c.serverName] = names.join(", ");
 	}
 	return out;
@@ -465,10 +505,15 @@ export function mcpServerToolBlurbs(result: McpSetupResult): Record<string, stri
  * loop.ts actually filters out of the callable tool list.
  */
 export function formatMcpForPrompt(result: McpSetupResult, personaMcpAllowlist?: string[]): string {
+	// A server that has since disconnected is dropped: keeping it here told the
+	// model about tools that can only fail, and it would dutifully keep calling
+	// them for the rest of the daemon's life. The prompt is rebuilt every turn
+	// (see rebuildSystemPrompt), so this takes effect on the next one.
+	const live = result.connections.filter((c) => c.alive !== false);
 	const servers =
 		personaMcpAllowlist !== undefined
-			? result.connections.filter((c) => matchesToolsAllowlist(c.serverName, personaMcpAllowlist))
-			: result.connections;
+			? live.filter((c) => matchesToolsAllowlist(c.serverName, personaMcpAllowlist))
+			: live;
 	if (servers.length === 0) return "";
 	const lines = ["\n<available_mcp>", "  <!-- Only enabled MCP servers are listed. -->"];
 	for (const c of servers) {

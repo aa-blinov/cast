@@ -1020,6 +1020,34 @@ describe("web bridge", () => {
 		expect(ws.runner.steeringQueue.hasItems()).toBe(true);
 	});
 
+	it("says the turn is running without MCP tools while the servers are still connecting", async () => {
+		// The daemon connects MCP in the background after it starts listening; a
+		// turn sent in that window ran with none of their tools and said nothing,
+		// leaving the user to wonder why a configured server went unused.
+		const bridge = createServerBridge(
+			makeResult({
+				mcpResult: {
+					toolIndex: new Map(),
+					toolDefinitions: [],
+					connections: [],
+					diagnostics: [],
+					allServerNames: ["context7", "playwright"],
+					connectPending: true,
+				},
+			}),
+		);
+		const ws = bridge.createSession();
+		const notices: string[] = [];
+		bridge.subscribe(ws.id, (event) => {
+			if (event.type === "notice") notices.push(event.message);
+		});
+
+		await bridge.submit(ws.id, "hello");
+
+		expect(notices.join("\n")).toContain("still connecting");
+		expect(notices.join("\n")).toContain("context7");
+	});
+
 	it("says so when an iteration budget is requested against an already-running turn", async () => {
 		// The budget can't apply to a turn that's already going, and it used to
 		// be dropped in silence on this path.
