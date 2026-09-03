@@ -4425,6 +4425,38 @@ describe("runAgentLoop — compaction", () => {
 		expect(result.length).toBeLessThan(seedHistory(6).length + 4);
 	});
 
+	it("lets a PreCompact hook cancel automatic compaction, as the docs promise", async () => {
+		// The manual /compact path honoured a blocking PreCompact hook, but the
+		// automatic one awaited the hook and threw the result away — so a guard
+		// written to protect a long transcript worked everywhere except the
+		// path that fires on its own.
+		const events: AgentEvent[] = [];
+		const warnings: string[] = [];
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({ content: "turn 1 done", thinking: "", finishReason: "stop" }))
+			.mockImplementationOnce(async () => ({ content: "turn 2 done", thinking: "", finishReason: "stop" }));
+
+		const followUpQueue = new MessageQueue();
+		followUpQueue.enqueue({ role: "user", content: "keep going" });
+
+		await runAgentLoop([...seedHistory(6), { role: "user", content: "start" }], {
+			config: tinyBudgetConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "test",
+			followUpQueue,
+			lastPromptTokens: 5000,
+			hooks: { PreCompact: [{ hooks: [{ command: "exit 2" }] }] },
+			onEvent: (e) => events.push(e),
+			onWarning: (message) => warnings.push(message),
+		});
+
+		expect(events.some((e) => e.type === "compaction")).toBe(false);
+		expect(warnings.some((w) => w.includes("PreCompact"))).toBe(true);
+		// Only the two real model calls — no summarization call was made.
+		expect(vi.mocked(streamAndCollect)).toHaveBeenCalledTimes(2);
+	});
+
 	it("skips compaction for short-lived system agents when skipCompaction is set", async () => {
 		const events: AgentEvent[] = [];
 		vi.mocked(streamAndCollect)

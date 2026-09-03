@@ -610,13 +610,26 @@ async function performCompaction(
 		}
 	}
 	if (loopConfig.hooks) {
-		await runHooksForEvent(loopConfig.hooks, {
+		// PreCompact is documented as able to cancel compaction, and the manual
+		// /compact path honours it — but here the result was awaited and thrown
+		// away, so a guard the user wrote to protect a long transcript worked
+		// everywhere except the automatic threshold, which is the one that
+		// actually fires on its own.
+		const preCompact = await runHooksForEvent(loopConfig.hooks, {
 			event: "PreCompact",
 			cwd: loopConfig.cwd,
 			sessionId: loopConfig.sessionId,
 			payload: { trigger: "auto" },
 			signal,
 		});
+		if (preCompact.blocked) {
+			loopConfig.onWarning?.(
+				preCompact.reason
+					? `Compaction blocked by a PreCompact hook: ${preCompact.reason}`
+					: "Compaction blocked by a PreCompact hook.",
+			);
+			return { messages, compacted: false, messagesCompacted: 0, tokensBefore: 0 };
+		}
 	}
 	const result = await compactSessionMessages(
 		messages,
