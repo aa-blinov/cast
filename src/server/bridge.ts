@@ -1175,6 +1175,22 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		}
 	}
 
+	/** Fires the `Notification` hook — the "the agent wants your attention"
+	 *  event. It was declared and matcher-aware but dispatched from nowhere, so
+	 *  a hook written to ring a bell, post to Slack or flash a window never ran.
+	 *  Deliberately only the two moments that actually warrant interrupting
+	 *  someone: a turn finished, or the agent is blocked on the user. */
+	function fireNotificationHook(ws: WebAgentSession, type: "turn_complete" | "input_needed", message: string): void {
+		const hooks = resolveHooksForCwd(ws.session.cwd ?? cwd, projectTrusted);
+		if (!hooks.Notification?.length) return;
+		void runHooksForEvent(hooks, {
+			event: "Notification",
+			cwd: ws.session.cwd ?? cwd,
+			sessionId: ws.id,
+			payload: { notification_type: type, message, title: ws.session.title ?? "" },
+		});
+	}
+
 	function persistDecisionState(
 		ws: WebAgentSession,
 		question: PlanQuestion | undefined,
@@ -1184,6 +1200,10 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		ws.session.planTransition = planTransition;
 		saveSession(ws.session);
 		broadcast(ws, { type: "decision_state", question, planTransition });
+		// Only when something new is being asked — clearing a resolved
+		// question calls this too, and that is not a notification.
+		if (question) fireNotificationHook(ws, "input_needed", question.questions[0]?.question ?? "Input needed");
+		else if (planTransition) fireNotificationHook(ws, "input_needed", "A plan is waiting for approval");
 	}
 
 	/** Pushes a sidebar-friendly snapshot so every connected client (including
@@ -2122,6 +2142,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					messageCount: ws.session.messages.filter((m) => m.role === "user" || m.role === "assistant").length,
 				});
 				broadcastSessionUpdate(ws);
+				fireNotificationHook(ws, "turn_complete", "The agent finished its turn");
 				startQueuedFollowUps(sessionId, ws);
 			})
 			.catch((err: unknown) => {
@@ -2134,6 +2155,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				broadcast(ws, { type: "error", message: ws.error });
 				broadcast(ws, { type: "status", status: "error" });
 				broadcastSessionUpdate(ws);
+				// A failed turn also ends the wait — someone watching for the
+				// bell wants it either way.
+				fireNotificationHook(ws, "turn_complete", `The turn ended with an error: ${ws.error}`);
 				// A turn that failed still has to hand back whatever the user
 				// queued while it ran. Only the success path did this, so a
 				// provider error swallowed the steer or follow-up typed during

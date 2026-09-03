@@ -7,13 +7,20 @@
  *
  * ## Scope — what's implemented
  *
- * Events (see `HookEvent`): full Claude Code set — PreToolUse, PostToolUse,
- * PostToolUseFailure, Notification, UserPromptSubmit, SessionStart,
- * SessionEnd, Stop, StopFailure, SubagentStart, SubagentStop, PreCompact,
- * PostCompact, PermissionRequest, PermissionDenied, Setup, TeammateIdle,
- * TaskCreated, TaskCompleted, Elicitation, ElicitationResult, ConfigChange,
+ * Events (see `HookEvent`): the full Claude Code set is *accepted* in a
+ * hooks.json, so a config written for Claude Code loads unmodified. Events
+ * cast actually fires: PreToolUse, PostToolUse, PostToolUseFailure,
+ * Notification, UserPromptSubmit, SessionStart, SessionEnd, Stop,
+ * StopFailure, SubagentStart, SubagentStop, PreCompact, PostCompact,
+ * PermissionRequest, PermissionDenied, TaskCreated, TaskCompleted,
  * WorktreeCreate, WorktreeRemove, InstructionsLoaded, CwdChanged,
- * FileChanged. Plus cast-specific: UserPromptExpansion, PostToolBatch.
+ * FileChanged, DirectoryAdded. Plus cast-specific: UserPromptExpansion,
+ * PostToolBatch.
+ *
+ * Accepted but never fired, because the underlying subsystem doesn't exist
+ * here (see docs/hooks.md's scope section): Setup, TeammateIdle, Elicitation,
+ * ElicitationResult, ConfigChange. A hook on one of those loads and lists
+ * fine, and simply never runs — keep this list and the docs in step.
  *
  * Hook types (`HookCommand.type`): `command` (shell), `http` (POST),
  * `mcp_tool` (call an already-connected MCP server's tool), `prompt`
