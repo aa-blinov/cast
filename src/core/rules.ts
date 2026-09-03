@@ -210,28 +210,46 @@ const DISCOVERY_IGNORE_DIRS = new Set([
  * subtree it scopes (relative to `cwd`, `""` for the root). Bounded by depth
  * and an ignore-list so a large monorepo doesn't pay a full-tree scan.
  */
+/**
+ * Ceiling on how many directories one discovery pass may look at.
+ *
+ * The walk is depth-bounded but was otherwise unbounded in width, and it runs
+ * on startup *and* on every subagent spawn. A normal project costs nothing
+ * (cast's own tree is 68 directories, 13ms), but running cast straight from a
+ * home directory — which people do — walked 9,392 of them: 333ms warm, 2s on
+ * a cold filesystem cache, repeated per subagent.
+ */
+const MAX_SCANNED_DIRS = 4000;
+
 export function discoverProjectRuleDirs(cwd: string, maxDepth = 8): Array<{ dir: string; scope: string }> {
 	const found: Array<{ dir: string; scope: string }> = [];
+	// Breadth-first so the budget spends itself on the levels nearest the root
+	// — where rules actually live — instead of exhausting itself down one deep
+	// branch. (A single level wider than the budget is still cut mid-level;
+	// nothing can be found beyond a ceiling, only spent more usefully.)
+	const queue: Array<{ absDir: string; scope: string; depth: number }> = [{ absDir: cwd, scope: "", depth: 0 }];
+	let scanned = 0;
 
-	function walk(absDir: string, scope: string, depth: number): void {
+	while (queue.length > 0) {
+		const { absDir, scope, depth } = queue.shift()!;
 		const rulesDir = join(absDir, ".cast", "rules");
 		if (existsSync(rulesDir)) found.push({ dir: rulesDir, scope });
-		if (depth >= maxDepth) return;
+		if (depth >= maxDepth || scanned >= MAX_SCANNED_DIRS) continue;
 
 		let entries: Dirent[];
 		try {
 			entries = readdirSync(absDir, { withFileTypes: true });
 		} catch {
-			return;
+			continue;
 		}
 		for (const e of entries) {
 			if (!e.isDirectory()) continue;
 			if (e.name.startsWith(".") || DISCOVERY_IGNORE_DIRS.has(e.name)) continue;
-			walk(join(absDir, e.name), scope ? `${scope}/${e.name}` : e.name, depth + 1);
+			if (++scanned > MAX_SCANNED_DIRS) break;
+			queue.push({ absDir: join(absDir, e.name), scope: scope ? `${scope}/${e.name}` : e.name, depth: depth + 1 });
 		}
 	}
 
-	walk(cwd, "", 0);
 	return found;
 }
 

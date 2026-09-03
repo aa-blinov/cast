@@ -37,7 +37,10 @@ const DANGEROUS_PATTERNS: DangerPattern[] = [
 	{ regex: />\s*\/dev\/(sd|nvme|disk|hd)/, reason: "writing directly to a block device" },
 	{ regex: /:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/, reason: "fork bomb" },
 	{ regex: commandStart("(shutdown|reboot|poweroff|halt)"), reason: "shutting down or rebooting the machine" },
-	{ regex: /\bnpm\s+publish\b/, reason: "publishing a package publicly" },
+	// `--dry-run` publishes nothing — it is the command a release checklist
+	// tells you to run *before* the real one, so asking to confirm it trains
+	// the habit of confirming without reading.
+	{ regex: /\bnpm\s+publish\b(?![^|;&\n]*--dry-run\b)/, reason: "publishing a package publicly" },
 	{ regex: commandStart("killall"), reason: "killing every process on the machine" },
 	{ regex: /\bkill\s+-9\s+-?1\b/, reason: "killing every process on the machine" },
 	{ regex: /\bgit\s+(checkout|restore)\s+\.(?!\w)/, reason: "discarding all uncommitted changes" },
