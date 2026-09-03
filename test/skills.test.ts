@@ -1,5 +1,15 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parseFrontmatter } from "../src/core/frontmatter.ts";
@@ -527,5 +537,43 @@ describe("skill tool — a file that vanished after discovery", () => {
 		expect(result.isError).toBe(true);
 		expect(result.content).toMatch(/could not be loaded/);
 		expect(result.content).toMatch(/uninstalled or moved/);
+	});
+});
+
+describe("skill argument substitution", () => {
+	it("leaves no unresolved placeholder when the skill is invoked without arguments", async () => {
+		// `args` is optional on the skill tool, and the substitution returned
+		// early when it was absent — so a skill body written with $ARGUMENTS
+		// handed the model the literal text "$ARGUMENTS", which reads as an
+		// instruction to substitute something that already happened.
+		const dir = mkdtempSync(join(tmpdir(), "cast-skill-args-"));
+		try {
+			mkdirSync(join(dir, "args"), { recursive: true });
+			const filePath = join(dir, "args", "SKILL.md");
+			writeFileSync(
+				filePath,
+				"---\nname: args\ndescription: d\n---\nGot: $ARGUMENTS | first=$0 | sess=${CAST_SESSION_ID}\n",
+				"utf-8",
+			);
+			const skill = {
+				name: "args",
+				description: "d",
+				filePath,
+				baseDir: join(dir, "args"),
+				source: "project",
+				disableModelInvocation: false,
+			} as never;
+
+			const withArgs = formatSkillInvocation(skill, 'one "two three"', "sess-9");
+			expect(withArgs).toContain('Got: one "two three" | first=one | sess=sess-9');
+
+			const withoutArgs = formatSkillInvocation(skill, undefined, undefined);
+			expect(withoutArgs).toContain("Got:  | first= | sess=");
+			expect(withoutArgs).not.toContain("$ARGUMENTS");
+			expect(withoutArgs).not.toContain("$0");
+			expect(withoutArgs).not.toContain("CAST_SESSION_ID");
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });

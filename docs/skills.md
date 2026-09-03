@@ -144,7 +144,7 @@ Skill bodies can reference invocation arguments and their own directory:
 | `$ARGUMENTS[0]`, `$ARGUMENTS[1]`, ... / `$0`, `$1`, ... | An individual argument (shell-quote-style parsing — quoted strings stay intact) |
 | `${CLAUDE_SKILL_DIR}` | Absolute path to the skill's own directory, for resolving relative paths |
 
-If arguments are supplied but the skill body contains no `$ARGUMENTS` placeholder, they're appended as a trailing `User: <args>` line instead of being silently dropped.
+If arguments are supplied but the skill body contains no `$ARGUMENTS` placeholder, they're appended as a trailing `User: <args>` line instead of being silently dropped. If the skill is invoked *without* arguments, every placeholder is replaced with an empty string — an unsubstituted `$ARGUMENTS` reaching the model reads as an instruction rather than as "there were none".
 
 ### The `skill` Tool
 
