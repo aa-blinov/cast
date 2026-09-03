@@ -381,23 +381,40 @@ export async function execBash(
 			outputTruncated ||= appended.truncated;
 		});
 
-		let heartbeat: NodeJS.Timeout | null = null;
-		if (signal) {
-			heartbeat = setInterval(() => {
-				// heartbeat for long-running bash — lets the loop emit progress
-				// without waiting for the full timeout
-			}, 5000);
-			heartbeat.unref();
-		}
+		// Timers that must not outlive the call: an unreffed stray keeps the
+		// event loop busy after the result is already resolved.
+		const pending: NodeJS.Timeout[] = [];
+		const later = (fn: () => void, ms: number): void => {
+			const t = setTimeout(fn, ms);
+			t.unref();
+			pending.push(t);
+		};
 		const timer = setTimeout(() => {
 			timedOut = true;
 			try {
 				process.kill(-proc.pid!, "SIGTERM");
 			} catch {}
-			setTimeout(() => {
+			later(() => {
 				try {
 					process.kill(-proc.pid!, "SIGKILL");
 				} catch {}
+				// A process that survives SIGKILL — stuck in uninterruptible I/O,
+				// or already reaped with its 'close' lost — used to leave this
+				// promise pending forever, hanging the agent's turn on a command
+				// that had already timed out. The abort path had this net; the
+				// timeout path did not.
+				later(() => {
+					if (finalResult) return;
+					const result = formatBashResult(rawOutput, config, {
+						exitCode: null,
+						timedOut: true,
+						outputTruncated,
+						timeoutSeconds: timeout,
+						warnPrefix,
+					});
+					finalResult = result;
+					resolve(result);
+				}, 5000);
 			}, 5000);
 		}, timeout * 1000);
 
@@ -408,12 +425,14 @@ export async function execBash(
 			} catch {
 				// already dead
 			}
-			setTimeout(() => {
-				if (!finalResult)
-					resolve({
-						content: "[ABORTED] Command was interrupted by user (forced — process did not exit).",
-						isError: true,
-					});
+			later(() => {
+				if (finalResult) return;
+				const result: ToolResult = {
+					content: "[ABORTED] Command was interrupted by user (forced — process did not exit).",
+					isError: true,
+				};
+				finalResult = result;
+				resolve(result);
 			}, 5000);
 		};
 		signal?.addEventListener("abort", onAbort, { once: true });
@@ -425,7 +444,7 @@ export async function execBash(
 		// unhandled 'error' event instead of the model seeing what went wrong.
 		proc.on("error", (err) => {
 			clearTimeout(timer);
-			if (heartbeat) clearInterval(heartbeat);
+			for (const t of pending) clearTimeout(t);
 			signal?.removeEventListener("abort", onAbort);
 			if (finalResult) return;
 			const result: ToolResult = {
@@ -439,7 +458,7 @@ export async function execBash(
 		proc.on("close", (exitCode) => {
 			if (finalResult) return;
 			clearTimeout(timer);
-			if (heartbeat) clearInterval(heartbeat);
+			for (const t of pending) clearTimeout(t);
 			signal?.removeEventListener("abort", onAbort);
 
 			const result = formatBashResult(rawOutput, config, {

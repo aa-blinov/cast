@@ -187,3 +187,46 @@ describe("BackgroundTaskRegistry", () => {
 		expect(task.status).toBe("exited");
 	});
 });
+
+describe("BackgroundTaskRegistry retention", () => {
+	it("stops holding every finished task's captured output forever", async () => {
+		// Nothing ever removed a task, and on an interactive surface every
+		// foreground bash call goes through this registry — so a session
+		// accumulated captured output for its whole life: 200 finished commands
+		// held 3.77MB, and a long session ran into hundreds of megabytes.
+		const registry = new BackgroundTaskRegistry();
+		const { deps } = makeDeps(false);
+		deps.registry = registry;
+
+		for (let i = 0; i < 130; i++) {
+			await registry.start(`echo line-${i}`, process.cwd(), mockConfig, 10, deps, {
+				notifyOnCompletion: false,
+			}).exitPromise;
+		}
+
+		const held = (registry as unknown as { tasks: Map<string, unknown> }).tasks;
+		expect(held.size).toBeLessThanOrEqual(100);
+		// The most recent tasks are the ones a caller can still ask about.
+		expect(registry.get("bg-130")).toBeDefined();
+		expect(registry.get("bg-1")).toBeUndefined();
+	});
+
+	it("never drops a running task to make room", async () => {
+		const registry = new BackgroundTaskRegistry();
+		const { deps } = makeDeps(false);
+		deps.registry = registry;
+
+		const longRunning = registry.start("sleep 30", process.cwd(), mockConfig, undefined, deps, {
+			notifyOnCompletion: false,
+		});
+		for (let i = 0; i < 120; i++) {
+			await registry.start(`echo f-${i}`, process.cwd(), mockConfig, 10, deps, {
+				notifyOnCompletion: false,
+			}).exitPromise;
+		}
+
+		expect(registry.get(longRunning.id)).toBeDefined();
+		expect(registry.hasRunning()).toBe(true);
+		registry.killAll();
+	});
+});

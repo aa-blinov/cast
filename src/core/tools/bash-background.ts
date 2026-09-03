@@ -113,6 +113,18 @@ function buildCompletionReminder(task: BackgroundTask, config: AppConfig): strin
 	);
 }
 
+/** How many finished tasks stay queryable via `bash_output`.
+ *
+ * Nothing ever removed a task, and on an interactive surface *every*
+ * foreground bash call goes through this registry — so a session's captured
+ * output accumulated for its whole life: 200 finished commands held 3.77MB
+ * (each task may retain up to config.maxToolOutputBytes of output), and a
+ * long session running thousands of commands held hundreds of megabytes per
+ * live session. Recent tasks are what a caller can plausibly still ask about;
+ * older ones are dropped oldest-first. Running tasks are never dropped.
+ */
+const MAX_RETAINED_FINISHED_TASKS = 100;
+
 export class BackgroundTaskRegistry {
 	private tasks = new Map<string, BackgroundTask>();
 	private counter = 0;
@@ -260,7 +272,20 @@ export class BackgroundTaskRegistry {
 		}
 	}
 
+	/** Drops the oldest finished tasks once more than the retention limit have
+	 * piled up. Map iteration is insertion order, which is task order. */
+	private pruneFinished(): void {
+		const finished: string[] = [];
+		for (const [id, task] of this.tasks) {
+			if (task.status !== "running") finished.push(id);
+		}
+		for (const id of finished.slice(0, Math.max(0, finished.length - MAX_RETAINED_FINISHED_TASKS))) {
+			this.tasks.delete(id);
+		}
+	}
+
 	private settle(task: BackgroundTask, config: AppConfig, deps: BashBackgroundDeps): void {
+		this.pruneFinished();
 		if (!task.notifyOnCompletion) return;
 		const reminderText = buildCompletionReminder(task, config);
 		const message: Message = { role: "user", content: reminderText };
