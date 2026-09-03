@@ -87,3 +87,13 @@ describe("checkDangerousBash", () => {
 		expect(checkDangerousBash("false || sudo reboot")).toBeDefined();
 	});
 });
+
+describe("checkDangerousBash — confirmations that shouldn't be asked for", () => {
+	it("lets `npm publish --dry-run` through", () => {
+		// It publishes nothing — it is the command a release checklist tells you
+		// to run before the real one, so asking to confirm it trains the habit
+		// of confirming without reading.
+		expect(checkDangerousBash("npm publish --dry-run")).toBeUndefined();
+		expect(checkDangerousBash("npm publish")).toBeDefined();
+	});
+});
