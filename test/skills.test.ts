@@ -499,3 +499,33 @@ describe("uninstallUserSkill", () => {
 		expect(isUninstallableSkill(agents)).toBe(true);
 	});
 });
+
+describe("skill tool — a file that vanished after discovery", () => {
+	it("explains that the skill file is unreadable instead of leaking ENOENT", async () => {
+		// The body is cached at discovery time, but not always — and the file can
+		// be gone by the time the model calls it (uninstalled, worktree switched,
+		// repo moved). Reading it then threw out of the tool and the dispatcher
+		// reported "skill failed unexpectedly: ENOENT: no such file or
+		// directory…", which says nothing about what to do next.
+		const { execSkill } = await import("../src/core/tools/skill.ts");
+		const result = execSkill(
+			{ name: "ghost-skill" },
+			{
+				skills: [
+					{
+						name: "ghost-skill",
+						description: "a skill whose file is gone",
+						filePath: "/nonexistent/path/SKILL.md",
+						baseDir: "/nonexistent/path",
+						source: "project",
+						disableModelInvocation: false,
+					} as never,
+				],
+			},
+		);
+
+		expect(result.isError).toBe(true);
+		expect(result.content).toMatch(/could not be loaded/);
+		expect(result.content).toMatch(/uninstalled or moved/);
+	});
+});
