@@ -92,25 +92,11 @@ CREATE TABLE IF NOT EXISTS subagent_runs (
 ) WITHOUT ROWID;
 `;
 
-const FTS_SCHEMA = `
-CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
-  session_id UNINDEXED,
-  seq UNINDEXED,
-  body,
-  tokenize = 'unicode61'
-);
-
-CREATE TRIGGER IF NOT EXISTS messages_fts_ai AFTER INSERT ON messages
-WHEN NEW.role IN ('user', 'assistant')
-BEGIN
-  INSERT INTO messages_fts(session_id, seq, body) VALUES (NEW.session_id, NEW.seq, cast_message_text(NEW.content_json));
-END;
-
-CREATE TRIGGER IF NOT EXISTS messages_fts_ad AFTER DELETE ON messages
-BEGIN
-  DELETE FROM messages_fts WHERE session_id = OLD.session_id AND seq = OLD.seq;
-END;
-`;
+/** Message search lives in a single index, session_history_fts (migration 8),
+ *  which covers user/assistant/tool and carries `role` so a user/assistant-only
+ *  search can filter. A second index over the same text used to exist here
+ *  (messages_fts); migration 35 removed it. */
+const FTS_SCHEMA = "";
 
 /** Append-only SQLite helper: column exists? (SQLite has no ADD COLUMN IF NOT EXISTS.) */
 function columnExists(db: DatabaseSync, table: string, column: string): boolean {
@@ -795,6 +781,24 @@ INSERT INTO messages_fts(session_id, seq, body)
 SELECT session_id, seq, cast_message_text(content_json)
 FROM messages
 WHERE role IN ('user', 'assistant');
+`);
+		},
+	},
+	{
+		version: 35,
+		name: "drop-redundant-messages-fts",
+		up: (db) => {
+			// messages_fts indexed exactly the user/assistant subset of
+			// session_history_fts, which also carries `role` — so the same
+			// searches can be answered from one index (verified identical result
+			// sets against a real store). Keeping both meant every message write
+			// updated two FTS indexes and the store carried two copies of the
+			// same text: messages_fts was ~11MB of a 547MB database.
+			db.exec(`
+DROP TRIGGER IF EXISTS messages_fts_ai;
+DROP TRIGGER IF EXISTS messages_fts_ad;
+DROP TRIGGER IF EXISTS messages_fts_au;
+DROP TABLE IF EXISTS messages_fts;
 `);
 		},
 	},

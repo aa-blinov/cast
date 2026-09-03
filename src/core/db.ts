@@ -118,20 +118,20 @@ function initConnection(instance: DatabaseSync): void {
 	// has to be re-registered on this connection every time regardless.
 	instance.function("cast_message_text", { deterministic: true }, extractMessageText);
 	runMigrations(instance);
-	// One-time backfill: an existing sessions.db from before messages_fts
+	// One-time backfill: an existing sessions.db from before the search index
 	// existed has years of messages the triggers above never saw. Only the
-	// first getDb() after upgrading hits this — an empty fts table with a
-	// non-empty messages table is exactly (and only) that situation, since
-	// clearing every session's messages also clears every fts row for it.
-	const ftsIsEmpty = (instance.prepare("SELECT 1 FROM messages_fts LIMIT 1").get() as unknown) === undefined;
+	// first getDb() after upgrading hits this — an empty index with a non-empty
+	// messages table is exactly (and only) that situation, since clearing every
+	// session's messages also clears every index row for it.
+	const ftsIsEmpty = (instance.prepare("SELECT 1 FROM session_history_fts LIMIT 1").get() as unknown) === undefined;
 	if (ftsIsEmpty) {
 		const hasMessages = (instance.prepare("SELECT 1 FROM messages LIMIT 1").get() as unknown) !== undefined;
 		if (hasMessages) {
 			instance.exec(`
-				INSERT INTO messages_fts(session_id, seq, body)
-				SELECT session_id, seq, cast_message_text(content_json)
+				INSERT INTO session_history_fts(session_id, seq, role, body)
+				SELECT session_id, seq, role, cast_message_text(content_json)
 				FROM messages
-				WHERE role IN ('user', 'assistant')
+				WHERE role IN ('user', 'assistant', 'tool')
 			`);
 		}
 	}

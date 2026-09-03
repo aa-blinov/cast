@@ -978,25 +978,25 @@ describe("session persistence", () => {
 		];
 		saveSession(session);
 		const db = getDb();
-		const ftsBefore = db.prepare("SELECT COUNT(*) AS n FROM messages_fts WHERE session_id = ?").get(session.id) as {
+		const ftsBefore = db
+			.prepare("SELECT COUNT(*) AS n FROM session_history_fts WHERE session_id = ?")
+			.get(session.id) as {
 			n: number;
 		};
 		expect(ftsBefore.n).toBe(2);
 
 		expect(deleteSession(session.id)).toBe(true);
 
-		for (const table of ["messages_fts", "session_history_fts"]) {
+		for (const table of ["session_history_fts"]) {
 			const left = db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE session_id = ?`).get(session.id) as {
 				n: number;
 			};
 			expect(left.n, table).toBe(0);
 		}
 		const triggers = db
-			.prepare(
-				"SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'trigger' AND name IN ('messages_fts_ad', 'session_history_fts_ad')",
-			)
+			.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'trigger' AND name = 'session_history_fts_ad'")
 			.get() as { n: number };
-		expect(triggers.n).toBe(2);
+		expect(triggers.n).toBe(1);
 
 		// The restored triggers still work: a later session's rows come and go
 		// from the index as before.
@@ -1004,11 +1004,19 @@ describe("session persistence", () => {
 		next.messages = [{ role: "user", content: "uniquedeletionprobe gamma" }];
 		saveSession(next);
 		expect(
-			(db.prepare("SELECT COUNT(*) AS n FROM messages_fts WHERE session_id = ?").get(next.id) as { n: number }).n,
+			(
+				db.prepare("SELECT COUNT(*) AS n FROM session_history_fts WHERE session_id = ?").get(next.id) as {
+					n: number;
+				}
+			).n,
 		).toBe(1);
 		deleteSession(next.id);
 		expect(
-			(db.prepare("SELECT COUNT(*) AS n FROM messages_fts WHERE session_id = ?").get(next.id) as { n: number }).n,
+			(
+				db.prepare("SELECT COUNT(*) AS n FROM session_history_fts WHERE session_id = ?").get(next.id) as {
+					n: number;
+				}
+			).n,
 		).toBe(0);
 	});
 
@@ -1387,7 +1395,7 @@ describe("session persistence", () => {
 		expect(getMessagesAfterCheckpoint(s.id)).toEqual([]);
 	});
 
-	it("keeps messages_fts in sync when compaction's marker insertion shifts a kept message's seq", () => {
+	it("keeps the search index in sync when compaction's marker insertion shifts a kept message's seq", () => {
 		const s = createSession("gpt-4o", projectA);
 		const m1: Message = { role: "user", content: "first" };
 		const m2: Message = { role: "assistant", content: "second" };
@@ -1397,7 +1405,7 @@ describe("session persistence", () => {
 
 		// m3 starts at seq 2; the marker must sort before it, so recordCompaction
 		// shifts m3 to seq 3 via a plain UPDATE — the exact path that used to
-		// leave messages_fts pointing at m3's old seq (2) instead of its new one.
+		// leave the index pointing at m3's old seq (2) instead of its new one.
 		recordCompaction(s, s.messages, [
 			{ role: "system", content: "[Compacted context — 2 messages summarized]\nsummary" },
 			m3,
@@ -1416,12 +1424,14 @@ describe("session persistence", () => {
 		// The fts row for m3's content must have followed it to the new seq —
 		// not be stranded at the old one, and not exist twice.
 		const ftsRows = db
-			.prepare("SELECT seq FROM messages_fts WHERE body MATCH 'uniquethirdmarkerword'")
+			.prepare("SELECT seq FROM session_history_fts WHERE session_history_fts MATCH 'uniquethirdmarkerword'")
 			.all() as Array<{ seq: number }>;
 		expect(ftsRows).toEqual([{ seq: 3 }]);
 
 		// No dangling row left behind at the vacated seq 2 either.
-		const staleAtOldSeq = db.prepare("SELECT seq FROM messages_fts WHERE session_id = ? AND seq = 2").all(s.id);
+		const staleAtOldSeq = db
+			.prepare("SELECT seq FROM session_history_fts WHERE session_id = ? AND seq = 2")
+			.all(s.id);
 		expect(staleAtOldSeq).toEqual([]);
 	});
 
