@@ -19,6 +19,7 @@ Shell commands, HTTP callbacks, MCP tool calls, or one-shot model prompts that f
 | `SubagentStop` | A subagent's turn ends | No (see Scope below) |
 | `TaskCreated` | A new item is added via the `todo_write` tool | No |
 | `TaskCompleted` | A todo item's status becomes `completed` | No |
+| `Notification` | The agent wants your attention: a turn finished, or it's blocked on you (`notification_type` is `turn_complete` or `input_needed`) | No |
 | `PreCompact` | Automatic or manual (`/compact`) context compaction is about to run | **Yes** — can cancel compaction |
 | `PostCompact` | Automatic or manual context compaction completes | No |
 | `InstructionsLoaded` | AGENTS.md/CLAUDE.md and always-apply rules load for a session | No |
@@ -137,7 +138,7 @@ An installed plugin can ship its own `<plugin root>/hooks/hooks.json` (same shap
 
 This is a **compatible subset** of Claude Code's protocol, not a byte-for-byte clone — built from the official public documentation, deliberately never from any leaked/decompiled source. Everything in the tables above works as described. What's out of scope, and why:
 
-**Events cast has no infrastructure to fire at all** (not missing wiring — the underlying subsystem doesn't exist):
+**Events cast has no infrastructure to fire at all** (not missing wiring — the underlying subsystem doesn't exist). A hook on one of these loads and lists normally, and never runs:
 - `Setup` — no CLI init/maintenance-mode concept.
 - `TeammateIdle` — no persistent "teammate" background agents.
 - `Elicitation`/`ElicitationResult` — cast's MCP client doesn't implement the MCP elicitation capability.

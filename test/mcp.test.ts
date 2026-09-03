@@ -181,10 +181,10 @@ describe("connectMcpServers (real spawned MCP server, not mocked)", () => {
 				await result.connections.find((c) => c.serverName === "flaky")!.client.close();
 				expect(result.connections.find((c) => c.serverName === "flaky")!.alive).toBe(false);
 
-				await vi.waitFor(
-					() => expect(result.connections.find((c) => c.serverName === "flaky")?.alive).toBe(true),
-					{ timeout: 15_000, interval: 250 },
-				);
+				await vi.waitFor(() => expect(result.connections.find((c) => c.serverName === "flaky")?.alive).toBe(true), {
+					timeout: 15_000,
+					interval: 250,
+				});
 			} finally {
 				console.error = realError;
 			}

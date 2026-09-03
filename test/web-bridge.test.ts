@@ -1020,6 +1020,34 @@ describe("web bridge", () => {
 		expect(ws.runner.steeringQueue.hasItems()).toBe(true);
 	});
 
+	it("fires the Notification hook when a turn ends, including when it fails", async () => {
+		// The event was declared, matcher-aware and dispatched from nowhere — a
+		// hook written to ring a bell or post to Slack simply never ran. (The
+		// input_needed case fires from the plan question/approval path, which
+		// only the agent loop drives; it's covered by a live run, not here.)
+		mkdirSync(join(cwd, ".cast"), { recursive: true });
+		const marker = join(cwd, "notified.txt");
+		writeFileSync(
+			join(cwd, ".cast", "hooks.json"),
+			JSON.stringify({ Notification: [{ hooks: [{ command: `printf notified >> ${JSON.stringify(marker)}` }] }] }),
+		);
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		runAgentLoop.mockImplementationOnce(async (messages: unknown) => messages);
+
+		await bridge.submit(ws.id, "hello");
+		await vi.waitFor(() => expect(existsSync(marker)).toBe(true));
+
+		// A failed turn ends the wait too — someone watching for the bell wants
+		// it either way.
+		rmSync(marker, { force: true });
+		runAgentLoop.mockImplementationOnce(async () => {
+			throw new Error("provider exploded");
+		});
+		await bridge.submit(ws.id, "again");
+		await vi.waitFor(() => expect(existsSync(marker)).toBe(true));
+	});
+
 	it("says the turn is running without MCP tools while the servers are still connecting", async () => {
 		// The daemon connects MCP in the background after it starts listening; a
 		// turn sent in that window ran with none of their tools and said nothing,
