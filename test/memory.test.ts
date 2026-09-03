@@ -563,6 +563,32 @@ describe("project memory", () => {
 		).toBeFalsy();
 	});
 
+	it("rejects a bad limit instead of silently returning one result", () => {
+		// `Number(args.limit) || MAX` accepted anything: a negative limit was
+		// clamped to a single result and reported as "Found 1 match" —
+		// indistinguishable from there genuinely being one — and `limit: 0`
+		// silently meant the default rather than nothing.
+		const cwd = join(root, "limit-project");
+		for (const limit of [-3, 0, 1.5]) {
+			const result = execMemorySearch({ query: "anything", limit }, cwd);
+			expect(result.isError).toBe(true);
+			expect(result.content).toMatch(/positive integer/);
+		}
+		expect(execMemorySearch({ query: "anything", limit: 3 }, cwd).isError).toBeFalsy();
+	});
+
+	it("rejects an unknown scope instead of answering from the default one", () => {
+		// An unrecognized scope fell through to the default (this project plus
+		// its sessions), so a model that mistyped `sessions` as `session` was
+		// answered from a scope it never chose, with no way to tell.
+		const cwd = join(root, "scope-project");
+		const result = execMemorySearch({ query: "anything", scope: "session" }, cwd);
+		expect(result.isError).toBe(true);
+		expect(result.content).toMatch(/unknown scope/i);
+		expect(result.content).toMatch(/projects/);
+		expect(execMemorySearch({ query: "anything", scope: "sessions" }, cwd).isError).toBeFalsy();
+	});
+
 	it("accepts the numeric strings models actually send for importance and confidence", async () => {
 		// Models routinely emit `importance: "95"` in their JSON. Rejecting the
 		// string silently replaced the model's own scores with defaults — a real

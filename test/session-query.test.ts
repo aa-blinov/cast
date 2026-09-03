@@ -4,7 +4,11 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resetDbConnectionForTests } from "../src/core/db.ts";
 import { appendMessage, compactMessages, createSession, recordCompaction, saveSession } from "../src/core/session.ts";
-import { formatSessionHistoryToolResult, searchSessionHistory } from "../src/core/session-query.ts";
+import {
+	execSessionHistorySearch,
+	formatSessionHistoryToolResult,
+	searchSessionHistory,
+} from "../src/core/session-query.ts";
 
 describe("session history search", () => {
 	let root = "";
@@ -99,5 +103,47 @@ describe("session history search", () => {
 		expect(results).toHaveLength(1);
 		expect(results[0]!.snippet).toContain("zebra answer");
 		expect(results[0]!.role).toBe("assistant");
+	});
+});
+
+describe("execSessionHistorySearch — argument validation", () => {
+	let root = "";
+
+	beforeEach(() => {
+		root = mkdtempSync(join(tmpdir(), "cast-session-query-args-"));
+		process.env.CAST_SESSIONS_DB = join(root, "sessions.db");
+		resetDbConnectionForTests();
+	});
+
+	afterEach(() => {
+		resetDbConnectionForTests();
+		delete process.env.CAST_SESSIONS_DB;
+		rmSync(root, { recursive: true, force: true });
+	});
+
+	it("rejects a limit that is not a positive integer", () => {
+		// `Number(args.limit) || MAX_RESULTS` let anything through: a negative
+		// limit reached SQL as `LIMIT -3` and returned a single row, reported as
+		// "Found 1 session history result" — indistinguishable from there being
+		// exactly one. `limit: 0` silently meant the default, and a fractional
+		// one surfaced SQLite's "datatype mismatch" as an unexplained failure.
+		for (const limit of [-3, 0, 1.5, "5"]) {
+			const result = execSessionHistorySearch({ query: "anything", limit }, root);
+			expect(result.isError).toBe(true);
+			expect(result.content).toMatch(/positive integer/);
+		}
+	});
+
+	it("rejects an unknown scope rather than answering from the project scope", () => {
+		const result = execSessionHistorySearch({ query: "anything", scope: "everything" }, root);
+		expect(result.isError).toBe(true);
+		expect(result.content).toMatch(/unknown scope/i);
+	});
+
+	it("accepts the documented arguments", () => {
+		expect(execSessionHistorySearch({ query: "anything" }, root).isError).toBeFalsy();
+		expect(execSessionHistorySearch({ query: "anything", limit: 3 }, root).isError).toBeFalsy();
+		expect(execSessionHistorySearch({ query: "anything", scope: "global" }, root).isError).toBeFalsy();
+		expect(execSessionHistorySearch({ query: "anything", scope: "project" }, root).isError).toBeFalsy();
 	});
 });

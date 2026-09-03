@@ -84,15 +84,35 @@ export function formatSessionHistoryToolResult(query: string, matches: SessionHi
 export function execSessionHistorySearch(args: Record<string, unknown>, cwd: string): ToolResult {
 	const query = typeof args.query === "string" ? args.query : "";
 	if (!query.trim()) return { content: "Session history search requires a non-empty query.", isError: true };
+	// `Number(args.limit) || MAX_RESULTS` accepted anything: a negative limit
+	// reached SQL as `LIMIT -3` and came back with a single result — reported to
+	// the model as "Found 1 session history result", indistinguishable from
+	// there genuinely being one — `limit: 0` silently meant "the default, 8",
+	// and a fractional limit surfaced SQLite's own "datatype mismatch" as an
+	// unexplained tool failure. A bad argument must say so, like every other
+	// tool's limit does.
+	if (
+		args.limit !== undefined &&
+		(typeof args.limit !== "number" || !Number.isInteger(args.limit) || args.limit < 1)
+	) {
+		return {
+			content: 'Error: "limit" must be a positive integer. Retry with limit: 1 or greater.',
+			isError: true,
+		};
+	}
+	// An unrecognized scope used to fall through to "project", so a model that
+	// asked for something else was answered from a scope it did not choose.
+	if (args.scope !== undefined && args.scope !== "global" && args.scope !== "project") {
+		return {
+			content: `Error: unknown scope ${JSON.stringify(args.scope)}. Use "project" (default) or "global".`,
+			isError: true,
+		};
+	}
+	const limit = typeof args.limit === "number" ? Math.min(args.limit, MAX_RESULTS) : MAX_RESULTS;
 	return {
 		content: formatSessionHistoryToolResult(
 			query,
-			searchSessionHistory(
-				cwd,
-				query,
-				Number(args.limit) || MAX_RESULTS,
-				args.scope === "global" ? "global" : "project",
-			),
+			searchSessionHistory(cwd, query, limit, args.scope === "global" ? "global" : "project"),
 		),
 	};
 }
