@@ -114,6 +114,16 @@ export interface Settings {
 	/** MCP server names the user has disabled via /mcp toggle. Persisted so
 	 * they stay disabled across sessions and /reload. */
 	disabledMcpServers?: string[];
+	/**
+	 * Seconds an MCP tool call may take before it fails. Clamped to 5-3600.
+	 *
+	 * Unset means the MCP SDK's own 60s default, which is fine for most tools
+	 * and far too short for a few real ones (a browser automation step, a slow
+	 * database query) — that limit was previously neither reachable nor
+	 * documented, so a long tool just failed with a timeout the user couldn't
+	 * do anything about.
+	 */
+	mcpToolTimeoutSeconds?: number;
 	/** Skill names disabled via /skills toggle. Still discovered for the picker;
 	 * omitted from the agent catalog and /skill: invocation until re-enabled. */
 	disabledSkills?: string[];
@@ -332,6 +342,14 @@ function quarantineCorruptSettings(): void {
 }
 
 /** Existing settings remain enabled; only an explicit false disables memory. */
+/** Per-call MCP tool timeout in milliseconds, or undefined to leave the SDK's
+ *  own default in place. */
+export function mcpToolTimeoutMs(settings: Settings = loadSettings()): number | undefined {
+	const value = settings.mcpToolTimeoutSeconds;
+	if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+	return Math.max(5, Math.min(Math.round(value), 3600)) * 1000;
+}
+
 export function isMemoryEnabled(settings: Settings = loadSettings()): boolean {
 	return settings.memoryEnabled !== false;
 }

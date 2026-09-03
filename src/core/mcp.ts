@@ -27,6 +27,7 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { Agent } from "undici";
 import { matchesToolsAllowlist } from "./frontmatter.ts";
 import type { Tool } from "./llm.ts";
+import { mcpToolTimeoutMs } from "./settings.ts";
 import type { ToolResult } from "./tools.ts";
 
 const MCP_SANITIZE_NAME_RE = /[^a-zA-Z0-9_-]/g;
@@ -407,7 +408,15 @@ export async function connectMcpServers(
 								};
 							}
 							try {
-								const result = await client.callTool({ name: t.name, arguments: args }, undefined, { signal });
+								// The SDK caps a call at 60s by default; a slow-but-legitimate
+								// tool (a browser step, a heavy query) needs a way past that,
+								// and it's read per call so a settings change applies without
+								// a reconnect.
+								const timeout = mcpToolTimeoutMs();
+								const result = await client.callTool({ name: t.name, arguments: args }, undefined, {
+									signal,
+									...(timeout === undefined ? {} : { timeout }),
+								});
 								const parts = (result.content ?? []) as McpContentPart[];
 								const fragments: string[] = [];
 								let image: McpContentPart | undefined;
