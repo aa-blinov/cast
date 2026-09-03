@@ -35,7 +35,7 @@ cast acp [--cwd <path>] [--session <id>] [--continue] [--bypass-permissions]
 | `session/new`         | Create a session in the given cwd.                              |
 | `session/load`        | Re-open an existing session by id.                             |
 | `session/list`        | List all sessions in the local database.                       |
-| `session/close`       | Close a session and abort its runner.                          |
+| `session/close`       | Unload a session and abort its runner; history stays on disk.  |
 | `session/resume`      | Resume an existing session (same as load).                     |
 | `session/set_mode`    | Toggle plan/build mode.                                         |
 | `session/prompt`      | Submit a turn; mid-turn prompts enqueue on `steeringQueue`.    |
@@ -49,13 +49,19 @@ Advertised in `initialize`:
 {
   "loadSession": true,
   "promptCapabilities": { "audio": false, "embeddedContext": true, "image": true },
-  "mcpCapabilities": { "http": false, "sse": false },
-  "sessionCapabilities": { "close": {}, "fork": {}, "list": {}, "resume": {} }
+  "mcpCapabilities": { "http": true, "sse": true },
+  "sessionCapabilities": { "close": {}, "list": {} }
 }
 ```
 
-- `forkSession` is advertised but returns an empty result (no fork support yet).
-- `mcpCapabilities.{http,sse}` are `false` — cast consumes MCP, doesn't expose it.
+- `fork` and `resume` are deliberately absent: cast has no fork semantics, and
+  `session/resume` is a synonym of `session/load`, so advertising it separately
+  would make an editor show a distinct affordance for the same thing.
+- `mcpCapabilities.{http,sse}` are `true` — an editor may pass HTTP/SSE MCP
+  servers in `session/new`, and their tools are merged with cast's own for the
+  life of that session. `stdio` and the experimental `acp` transport are
+  refused: spawning local processes on behalf of a remote editor is not
+  something cast enables by default.
 - `promptCapabilities.image` is `true` because cast supports image attachments.
 
 ## Notifications the agent sends

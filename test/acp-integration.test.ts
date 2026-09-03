@@ -53,6 +53,7 @@ vi.mock("../src/core/mcp.ts", () => ({
 
 const acp = await import("@agentclientprotocol/sdk");
 const { buildAcpAgentApp } = await import("../src/core/acp/agent.ts");
+const { deleteSession, loadSession } = await import("../src/core/session.ts");
 
 /**
  * Build the agent + client pair and run the given callback inside the
@@ -93,6 +94,40 @@ afterEach(() => {
 });
 
 describe("ACP integration", () => {
+	it("session/close unloads the session without deleting it, so session/load finds it again", async () => {
+		// Closing a thread in the editor used to erase the conversation from
+		// disk, which contradicts what `close` means in ACP and made the
+		// `list`/`load` capabilities useless for anything already closed.
+		(deleteSession as unknown as ReturnType<typeof vi.fn>).mockClear();
+		(loadSession as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+			id: "reopened",
+			cwd: "/tmp/test",
+			messages: [{ role: "user", content: "earlier turn" }],
+			mode: "build",
+			model: "test",
+		});
+
+		await withClient(async (client) => {
+			await client.request<unknown, unknown>("initialize", { protocolVersion: 1, clientCapabilities: {} });
+			const created = await client.request<{ sessionId: string }, { cwd: string; mcpServers: unknown[] }>(
+				"session/new",
+				{ cwd: "/tmp/test", mcpServers: [] },
+			);
+
+			await client.request<unknown, { sessionId: string }>("session/close", { sessionId: created.sessionId });
+			expect(deleteSession).not.toHaveBeenCalled();
+
+			// The editor can re-open it: nothing was destroyed on close.
+			await expect(
+				client.request<unknown, { sessionId: string; cwd: string; mcpServers: unknown[] }>("session/load", {
+					sessionId: created.sessionId,
+					cwd: "/tmp/test",
+					mcpServers: [],
+				}),
+			).resolves.toBeDefined();
+		});
+	});
+
 	it("handles initialize + session/new + session/prompt end-to-end", async () => {
 		const sessionId = await withClient(async (client) => {
 			const initResult = await client.request<

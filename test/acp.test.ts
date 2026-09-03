@@ -291,13 +291,25 @@ describe("ACP adapter", () => {
 		expect(result.sessions[1].cwd).toBe("/b");
 	});
 
-	it("closeSession deletes and aborts", async () => {
+	it("closeSession unloads and aborts, and keeps the conversation on disk", async () => {
+		// session/close releases this session's resources; it must not destroy
+		// the conversation. It used to call deleteSession, so closing a thread
+		// in the editor erased its history from disk (and, when cwd was the
+		// session's own throwaway sandbox, that directory with it) — which also
+		// made the `list`/`load` capabilities this adapter advertises useless
+		// for anything the user had closed.
 		const { session, runner } = makeSession();
 		const sessions = new Map([[session.state.id, session]]);
+		(saveSession as unknown as ReturnType<typeof vi.fn>).mockClear();
+
 		await adapter.closeSession(session.state.id, sessions);
+
 		expect(sessions.has(session.state.id)).toBe(false);
 		expect(runner.abort).toHaveBeenCalledWith("acp close");
-		expect(deleteSession).toHaveBeenCalledWith(session.state.id, session.state.cwd);
+		expect(deleteSession).not.toHaveBeenCalled();
+		// Unsaved state (mode, todos, an aborted turn's messages) is persisted
+		// on the way out so the next session/load sees it.
+		expect(saveSession).toHaveBeenCalledWith(session.state);
 	});
 
 	it("closeSession leaves the process-wide startup MCP pool alone", async () => {
