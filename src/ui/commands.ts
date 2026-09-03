@@ -142,6 +142,8 @@ async function selectModelWithReasoning(
 
 const WHITESPACE_SPLIT_RE = /\s+/;
 const WORKTREE_REMOVE_PREFIX_RE = /^(?:remove|rm)\s*/;
+const WORKTREE_FORCE_FLAG_RE = /(^|\s)(--force|-f)(\s|$)/;
+const WORKTREE_FORCE_STRIP_RE = /(^|\s)(--force|-f)(?=\s|$)/g;
 const MEMORY_BUDGET_COMMAND_RE = /^\/memory budget (\d+)$/;
 const MEMORY_FLOOR_COMMAND_RE = /^\/memory floor (0(?:\.\d+)?|1(?:\.0)?)$/;
 const MEMORY_RECONCILE_COMMAND_RE = /^\/memory reconcile (on|off)$/;
@@ -277,7 +279,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/web-search-provider", description: "Switch web_search backend (DuckDuckGo / Tavily / Brave)" },
 	{ name: "/worktree", description: "Switch into a git worktree — name", takesArgs: true },
 	{ name: "/worktree list", description: "List all active worktrees" },
-	{ name: "/worktree remove", description: "Remove a worktree — name", takesArgs: true },
+	{ name: "/worktree remove", description: "Remove a worktree — name [--force to discard uncommitted work]", takesArgs: true },
 ];
 
 export interface CommandDeps {
@@ -2047,14 +2049,19 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			return;
 		}
 		if (rawArg.startsWith("remove ") || rawArg.startsWith("rm ") || rawArg === "remove" || rawArg === "rm") {
-			const targetName = rawArg.replace(WORKTREE_REMOVE_PREFIX_RE, "").trim();
+			const removeArg = rawArg.replace(WORKTREE_REMOVE_PREFIX_RE, "").trim();
+			// `--force` discards uncommitted work and unmerged commits, so it has
+			// to be asked for by name; a plain remove lets git's own guards stand.
+			const force = WORKTREE_FORCE_FLAG_RE.test(removeArg);
+			const targetName = removeArg.replace(WORKTREE_FORCE_STRIP_RE, "").trim();
 			if (!targetName) {
-				showNotice("[Usage: /worktree remove <name>]");
+				showNotice("[Usage: /worktree remove <name> [--force]]");
 				return;
 			}
 			const res = await removeSessionWorktree(targetName, deps.cwd, {
 				sessionId: session.id,
 				projectTrusted: deps.projectTrusted,
+				force,
 			});
 			showNotice(`[${res.message}]`);
 			return;

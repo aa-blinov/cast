@@ -24,6 +24,7 @@ import {
 	findCanonicalGitRoot,
 	flattenSlug,
 	isWorktreeInsideRepo,
+	removeWorktreeBySlug,
 	samePath,
 	validateWorktreeSlug,
 	WorktreeBlockedError,
@@ -296,6 +297,57 @@ describe("ensureSessionWorktree — failure modes", () => {
 		await expect(ensureSessionWorktree("../escape", tmpRoot)).rejects.toThrow(/Invalid worktree name/);
 		// Sanity: nothing was created.
 		expect(existsSync(join(tmpRoot, ".cast", "worktrees", "..escape"))).toBe(false);
+	});
+});
+
+describe("removeWorktreeBySlug — git's own guards", () => {
+	let repo: string;
+
+	beforeEach(() => {
+		repo = tmpRoot;
+		initRepo(repo);
+	});
+
+	it("refuses to delete a worktree holding uncommitted work, and says how to proceed", async () => {
+		// Removal used to pass `--force` unconditionally, so `/worktree remove`
+		// silently destroyed whatever was not committed.
+		const wt = await ensureSessionWorktree("feature-auth", repo);
+		writeFileSync(join(wt.path, "precious.txt"), "hours of unsaved work\n", "utf-8");
+
+		const result = await removeWorktreeBySlug("feature-auth", repo);
+
+		expect(result.ok).toBe(false);
+		expect(result.message).toMatch(/--force/);
+		expect(existsSync(join(wt.path, "precious.txt"))).toBe(true);
+	});
+
+	it("discards it when force is asked for explicitly", async () => {
+		const wt = await ensureSessionWorktree("feature-auth", repo);
+		writeFileSync(join(wt.path, "scratch.txt"), "throwaway\n", "utf-8");
+
+		const result = await removeWorktreeBySlug("feature-auth", repo, { force: true });
+
+		expect(result.ok).toBe(true);
+		expect(existsSync(wt.path)).toBe(false);
+	});
+
+	it("keeps a branch whose commits are merged nowhere else, and reports it", async () => {
+		// `git branch -D` used to run unconditionally too, so commits that
+		// existed only on the worktree's branch went with it.
+		const wt = await ensureSessionWorktree("feature-auth", repo);
+		writeFileSync(join(wt.path, "done.txt"), "real work\n", "utf-8");
+		execFileSync("git", ["add", "-A"], { cwd: wt.path });
+		execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "real work"], {
+			cwd: wt.path,
+		});
+
+		const result = await removeWorktreeBySlug("feature-auth", repo);
+
+		expect(result.ok).toBe(true);
+		expect(existsSync(wt.path)).toBe(false);
+		expect(result.message).toMatch(/kept/i);
+		// The commits are still reachable from the branch.
+		expect(runGitOrFail(repo, ["rev-parse", "--verify", "--quiet", "refs/heads/cast-feature-auth"])).toBe(true);
 	});
 });
 

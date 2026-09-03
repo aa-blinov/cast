@@ -38,9 +38,23 @@ When creating a new session from the Web UI control room, check **Run in an isol
 
 ## Cleanup
 
-Worktrees and their branches are left on disk on exit so your work is never lost. To remove a completed worktree:
+Worktrees and their branches are left on disk on exit so your work is never lost. To remove a completed worktree, from inside cast:
+
+```
+/worktree remove <name>
+```
+
+That refuses to delete a worktree holding uncommitted or untracked files, and
+keeps the branch when its commits are merged nowhere else — telling you which
+happened either way. Add `--force` to discard uncommitted work as well:
+
+```
+/worktree remove <name> --force
+```
+
+The equivalent by hand:
 
 ```bash
 git worktree remove .cast/worktrees/<name>
-git branch -D cast-<name>
+git branch -d cast-<name>
 ```
