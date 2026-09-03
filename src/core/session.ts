@@ -1515,7 +1515,7 @@ export function markImageMessagesOutOfContext(sessionId: string): void {
  * Runs `work` with the per-message FTS delete triggers off, having cleared the
  * session's rows from each index with a single session-scoped delete first.
  *
- * messages_fts and session_history_fts keep session_id/seq as UNINDEXED
+ * session_history_fts keeps session_id/seq as UNINDEXED
  * columns, which FTS5 cannot index — so `DELETE FROM ... WHERE session_id = ?
  * AND seq = ?` scans the whole index, and the AFTER DELETE triggers run that
  * scan once per message. Measured on a real 185MB store, deleting one
@@ -1530,13 +1530,11 @@ export function markImageMessagesOutOfContext(sessionId: string): void {
  */
 function withMessageFtsClearedFor<T>(db: DatabaseSync, sessionIds: readonly string[], work: () => T): T {
 	const triggers = db
-		.prepare(
-			"SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND name IN ('messages_fts_ad', 'session_history_fts_ad')",
-		)
+		.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND name = 'session_history_fts_ad'")
 		.all() as Array<{ name: string; sql: string }>;
 	for (const trigger of triggers) db.exec(`DROP TRIGGER ${trigger.name}`);
 	try {
-		for (const table of ["messages_fts", "session_history_fts"]) {
+		for (const table of ["session_history_fts"]) {
 			try {
 				const clear = db.prepare(`DELETE FROM ${table} WHERE session_id = ?`);
 				for (const sessionId of sessionIds) clear.run(sessionId);
@@ -1901,7 +1899,7 @@ function toFtsTerm(token: string): string {
  * Sessions matching `query`, ranked by relevance — replaces the old approach
  * of shipping every session's full message text to the caller (TUI picker or
  * web sidebar) to score in JS. Two match sources, merged:
- *  - message content, via the messages_fts index (bm25-ranked; lower is
+ *  - message content, via the session_history_fts index (bm25-ranked; lower is
  *    better in SQLite's convention, so ranks compare with plain `<`);
  *  - session metadata (cwd/id/title/persona/model), via LIKE — cheap (one
  *    short row per session, no message text involved) and always outranks a
@@ -1915,7 +1913,7 @@ export function searchSessionSummaries(query: string): SessionSummary[] {
 	const db = getDb();
 
 	const tokens = q.split(WHITESPACE_RE).filter(Boolean);
-	// messages_fts has one row per message, not one per session — a combined
+	// The index has one row per message, not one per session — a combined
 	// multi-word MATCH (`"a"* "b"*`) requires every word in the SAME message
 	// row, so "привет" and "настроение" typed in different turns of one
 	// conversation would never match together even though the session
@@ -1923,8 +1921,14 @@ export function searchSessionSummaries(query: string): SessionSummary[] {
 	// the matching session_id sets in JS finds a session where the words are
 	// scattered across different messages, same as the old single-haystack
 	// JS scorer did before this index existed.
+	// session_history_fts, filtered by role, rather than a second index of the
+	// same text: messages_fts held exactly the user/assistant subset of this
+	// one — verified identical result sets on a real store — and every message
+	// write paid for both. Its content copy alone was ~11MB of a 547MB store.
 	const contentStmt = db.prepare(
-		"SELECT session_id, bm25(messages_fts) AS rank FROM messages_fts WHERE messages_fts MATCH ?",
+		`SELECT session_id, bm25(session_history_fts) AS rank
+		 FROM session_history_fts
+		 WHERE session_history_fts MATCH ? AND role IN ('user', 'assistant')`,
 	);
 	let matchedSessionIds: Set<string> | null = null;
 	const bestRankById = new Map<string, number>();

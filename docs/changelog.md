@@ -6,6 +6,7 @@ All notable user-facing changes to cast, newest first.
 
 ### Fixed
 
+- **Database:** removed `messages_fts`, a second full-text index over text `session_history_fts` already covered. The two held the same message bodies — `messages_fts` was exactly the user/assistant subset, and the surviving index carries `role`, so the same searches are answered from one place (verified identical result sets on a real store). Every message write had been updating both indexes, and the redundant copy was ~11MB of a 547MB database. Its triggers and the seq-sync repair that maintained it go with it.
 - **Memory:** a memory's fingerprint was taken from the raw `type` while the row stored the trimmed one, so `" fact"` and `"fact"` produced different keys for rows that are identical once stored — slipping past `UNIQUE(project_id, fingerprint)` and duplicating an entry.
 - **Auth:** the daemon token was compared with `===` while the web password next to it used a constant-time comparison. Both now go through the same constant-time check; loopback-only either way, but the inconsistency is gone.
 - **Plan mode:** a command reading its arguments from a file (`strings @opts`, the binutils convention) bypassed the per-binary flag scan entirely. Harmless for `strings` itself, which has no dangerous flag, but it would have silently defeated the whole check for any binutils tool added to the read-only allowlist later.
