@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	AgentActorCancelledError,
 	AgentActorRegistry,
@@ -139,6 +139,10 @@ describe("AgentActorRegistry", () => {
 		expect(stored.fork_json.match(/"two"/g)).toHaveLength(1);
 
 		// ...and a reader still sees every view, split at the same boundary.
+		// Read back from a non-terminal row: a finished actor's fork context is
+		// deliberately never loaded (nothing can resume it, and it is the
+		// largest thing in the row).
+		getDb().prepare("UPDATE agent_actors SET status = 'stalled' WHERE id = ?").run(actor.id);
 		const restored = new AgentActorRegistry({ store, watchdogIntervalMs: 0 });
 		const fork = restored.list().find((item) => item.id === actor.id)?.forkContext;
 		expect(fork?.messages).toEqual(longFork.messages);
@@ -154,7 +158,7 @@ describe("AgentActorRegistry", () => {
 		const actor = registry.spawn({ ...spec, lifecycle: "persistent" });
 		await actor.run(async () => "done");
 		getDb()
-			.prepare("UPDATE agent_actors SET fork_json = ? WHERE id = ?")
+			.prepare("UPDATE agent_actors SET fork_json = ?, status = 'stalled' WHERE id = ?")
 			.run(
 				JSON.stringify({
 					messages: [{ role: "user", content: "legacy" }],
@@ -185,15 +189,71 @@ describe("AgentActorRegistry", () => {
 				id: actor.id,
 				lifecycle: "persistent",
 				status: "success",
-				forkContext: spec.forkContext,
 			}),
 		]);
+		// A finished actor's fork context is not read back — nothing can resume
+		// it, and it is the bulk of the row.
+		expect(restored.list()[0]?.forkContext).toBeUndefined();
 
 		const running = first.spawn({ ...spec, lifecycle: "persistent" });
 		// The actor has been registered but never started, which models a process
 		// dying between registration and the detached work fiber.
 		const restarted = new AgentActorRegistry({ store, watchdogIntervalMs: 0 });
-		expect(restarted.list().find((item) => item.id === running.id)?.status).toBe("stalled");
+		const recovered = restarted.list().find((item) => item.id === running.id);
+		expect(recovered?.status).toBe("stalled");
+		// The unfinished actor's fork context *is* read back — recovery needs it.
+		expect(recovered?.forkContext).toEqual(spec.forkContext);
+	});
+
+	it("renews the lease while the actor keeps working", async () => {
+		// The lease was set once at spawn and never renewed, so after leaseMs a
+		// healthy long-running actor (a checkpoint writer, a dream or distill
+		// run — all routinely minutes long) looked abandoned: another daemon
+		// process claimed it, marked it stalled and redid the work, while the
+		// original's final save was rejected by the owner-token check.
+		const store = new SqliteAgentActorStore();
+		const registry = new AgentActorRegistry({
+			store,
+			watchdogIntervalMs: 0,
+			heartbeatIntervalMs: 5,
+			leaseMs: 20_000,
+		});
+		const actor = registry.spawn({ ...spec, lifecycle: "persistent" });
+		const leaseBefore = (
+			getDb().prepare("SELECT lease_until FROM agent_actors WHERE id = ?").get(actor.id) as {
+				lease_until: string;
+			}
+		).lease_until;
+
+		await actor.run(async () => {
+			// Long enough for at least one heartbeat to fire.
+			await new Promise((resolve) => setTimeout(resolve, 30));
+			return "done";
+		});
+
+		const leaseAfter = (
+			getDb().prepare("SELECT lease_until FROM agent_actors WHERE id = ?").get(actor.id) as {
+				lease_until: string;
+			}
+		).lease_until;
+		expect(Date.parse(leaseAfter)).toBeGreaterThan(Date.parse(leaseBefore));
+	});
+
+	it("the watchdog pass does not re-read finished actor rows", async () => {
+		// scanStalled re-read the whole table every few seconds just to find
+		// actors a crashed process left behind — 697ms per pass on a real
+		// store, all of it discarded because the rows were already in memory.
+		const store = new SqliteAgentActorStore();
+		const registry = new AgentActorRegistry({ store, watchdogIntervalMs: 0 });
+		const actor = registry.spawn({ ...spec, lifecycle: "persistent" });
+		await actor.run(async () => "done");
+
+		const loadAll = vi.spyOn(store, "load");
+		const loadRecoverable = vi.spyOn(store, "loadRecoverable");
+		registry.scanStalled();
+
+		expect(loadAll).not.toHaveBeenCalled();
+		expect(loadRecoverable).toHaveBeenCalledTimes(1);
 	});
 
 	it("marks an unresponsive actor stalled and aborts its work", async () => {
