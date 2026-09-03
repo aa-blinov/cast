@@ -21,6 +21,36 @@ function isEnoent(err: unknown): boolean {
 }
 
 /**
+ * Turn the errno the filesystem raised into something a model can act on.
+ *
+ * These used to escape to the dispatcher's catch-all, which reports "write
+ * failed unexpectedly: EISDIR: illegal operation on a directory, read" — the
+ * mention of *read* comes from loading the previous content for the diff, so
+ * the message actively misleads about what went wrong. Each case here names
+ * the actual obstacle instead.
+ */
+function describeFileWriteError(err: unknown, path: string): string | null {
+	const code = (err as { code?: string })?.code;
+	switch (code) {
+		case "EISDIR":
+			return `${path} is a directory, not a file. Pass a file path (use ls to see what is inside it).`;
+		case "EACCES":
+		case "EPERM":
+			return `No permission to write ${path}. Check the file's mode and ownership, or ask the user to change it.`;
+		case "EROFS":
+			return `${path} is on a read-only filesystem.`;
+		case "ENOSPC":
+			return `No space left on the device holding ${path}.`;
+		case "ENOTDIR":
+			return `A path component of ${path} is a file, not a directory.`;
+		case "ELOOP":
+			return `Too many symbolic links resolving ${path} — the link chain is circular.`;
+		default:
+			return null;
+	}
+}
+
+/**
  * When the requested path is missing, run `glob` by basename under the hood
  * and attach real hits so the model can retry `read`/`edit` without starting
  * its own search loop. No guessed prefixes — only what the search returns.
@@ -411,11 +441,21 @@ export async function execWrite(args: Record<string, unknown>, cwd: string): Pro
 	try {
 		oldContent = await readFile(absolutePath, "utf-8");
 	} catch (err) {
-		if (!isEnoent(err)) throw err;
+		if (!isEnoent(err)) {
+			const described = describeFileWriteError(err, filePath);
+			if (described) return { content: `Error: ${described}`, isError: true };
+			throw err;
+		}
 	}
 
-	await mkdir(dirname(absolutePath), { recursive: true });
-	await writeFile(absolutePath, content, "utf-8");
+	try {
+		await mkdir(dirname(absolutePath), { recursive: true });
+		await writeFile(absolutePath, content, "utf-8");
+	} catch (err) {
+		const described = describeFileWriteError(err, filePath);
+		if (described) return { content: `Error: ${described}`, isError: true };
+		throw err;
+	}
 
 	const newLines = content.split("\n");
 	const dupWarning = duplicateRunWarning(newLines);
@@ -558,8 +598,14 @@ export async function execEdit(args: Record<string, unknown>, cwd: string, confi
 				isError: true,
 			};
 		}
-		await mkdir(dirname(absolutePath), { recursive: true });
-		await writeFile(absolutePath, newString, "utf-8");
+		try {
+			await mkdir(dirname(absolutePath), { recursive: true });
+			await writeFile(absolutePath, newString, "utf-8");
+		} catch (err) {
+			const described = describeFileWriteError(err, filePath);
+			if (described) return { content: `Error: ${described}`, isError: true };
+			throw err;
+		}
 		const dupWarning = duplicateRunWarning(newString.split("\n"));
 		return { content: `Created ${filePath}.${dupWarning ? `\nWarning: ${dupWarning}` : ""}` };
 	}
@@ -568,6 +614,11 @@ export async function execEdit(args: Record<string, unknown>, cwd: string, confi
 		await access(absolutePath, constants.R_OK | constants.W_OK);
 	} catch (err) {
 		if (isEnoent(err)) return fileNotFoundResult(filePath, cwd, config);
+		// A file the agent may read but not write reached here as an
+		// unhandled EACCES from the access() probe itself, so `edit` on a
+		// read-only file threw out of the tool instead of reporting why.
+		const described = describeFileWriteError(err, filePath);
+		if (described) return { content: `Error: ${described}`, isError: true };
 		throw err;
 	}
 
@@ -590,7 +641,13 @@ export async function execEdit(args: Record<string, unknown>, cwd: string, confi
 		return { content: err instanceof Error ? err.message : String(err), isError: true };
 	}
 
-	await writeFile(absolutePath, convertToLineEnding(contentNew, ending), "utf-8");
+	try {
+		await writeFile(absolutePath, convertToLineEnding(contentNew, ending), "utf-8");
+	} catch (err) {
+		const described = describeFileWriteError(err, filePath);
+		if (described) return { content: `Error: ${described}`, isError: true };
+		throw err;
+	}
 
 	const diff = formatWriteDiff(contentOld.split("\n"), contentNew.split("\n"));
 	const dupWarning = duplicateRunWarning(contentNew.split("\n"));

@@ -2122,3 +2122,51 @@ describe("file tools on large files and lookalike UI paths", () => {
 		expect(result.content).toMatch(/read-only/);
 	});
 });
+
+describe("write / edit filesystem error reporting", () => {
+	// These used to escape to the dispatcher's catch-all, which reports
+	// "write failed unexpectedly: EISDIR: illegal operation on a directory,
+	// read" — the mention of *read* comes from loading the previous content for
+	// the diff, so the message misleads about what actually went wrong.
+	it("says the path is a directory instead of leaking EISDIR from the diff read", async () => {
+		const { execWrite } = await import("../src/core/tools/files.ts");
+		mkdirSync(join(TEST_DIR, "somedir"), { recursive: true });
+
+		const result = await execWrite({ path: "somedir", content: "x" }, TEST_DIR);
+
+		expect(result.isError).toBe(true);
+		expect(result.content).toMatch(/is a directory, not a file/);
+		expect(result.content).not.toMatch(/unexpectedly/);
+	});
+
+	it("says permission was denied, naming the file", async () => {
+		const { execWrite } = await import("../src/core/tools/files.ts");
+		const target = join(TEST_DIR, "readonly.txt");
+		writeFileSync(target, "keep\n", "utf-8");
+		chmodSync(target, 0o444);
+
+		const result = await execWrite({ path: "readonly.txt", content: "changed\n" }, TEST_DIR);
+
+		expect(result.isError).toBe(true);
+		expect(result.content).toMatch(/No permission to write readonly\.txt/);
+		expect(readFileSync(target, "utf-8")).toBe("keep\n");
+		chmodSync(target, 0o644);
+	});
+
+	it("reports the same way from edit", async () => {
+		const { execEdit } = await import("../src/core/tools/files.ts");
+		const target = join(TEST_DIR, "locked.txt");
+		writeFileSync(target, "before\n", "utf-8");
+		chmodSync(target, 0o444);
+
+		const result = await execEdit(
+			{ filePath: "locked.txt", oldString: "before", newString: "after" },
+			TEST_DIR,
+			mockConfig,
+		);
+
+		expect(result.isError).toBe(true);
+		expect(result.content).toMatch(/No permission to write locked\.txt|is a directory/);
+		chmodSync(target, 0o644);
+	});
+});
