@@ -526,7 +526,19 @@ export async function compactMessages(
 	);
 	const oldText = old.map(formatMessageForSummary).join("\n");
 
-	const summary = (await summarizeFn(oldText, previousSummary)) + formatFileOps(readFiles, modifiedFiles);
+	const summarized = await summarizeFn(oldText, previousSummary);
+	// A summarization call that *succeeds* with nothing usable is a failure,
+	// not a compaction. Without this check an empty response still flipped
+	// every old row out of context and replaced it with a content-free marker
+	// — the caller reported `compacted: true` and the model was handed a
+	// summary of nothing, irreversibly for the running conversation (the rows
+	// survive on disk, but the working context doesn't get them back).
+	// Providers produce this in ordinary ways: a reasoning-only stream, a
+	// refusal emitted as an empty assistant turn, a stream truncated without
+	// throwing. Throwing here puts it on the same path as a network failure,
+	// which leaves the history untouched and retries on the next turn.
+	if (!summarized.trim()) throw new Error("Compaction summary came back empty — keeping the full history.");
+	const summary = summarized + formatFileOps(readFiles, modifiedFiles);
 
 	const compacted: Message[] = [
 		...system,

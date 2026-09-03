@@ -199,6 +199,29 @@ describe("compactMessages", () => {
 		expect(result.summary.tokensBefore).toBeGreaterThan(0);
 	});
 
+	it("refuses to compact when the summarizer returns nothing usable", async () => {
+		// A summarization call that *succeeds* with empty content used to flip
+		// every old message out of context anyway, replacing them with a
+		// content-free marker while reporting success — the model then had a
+		// summary of nothing, and the working context couldn't get it back.
+		// Providers produce this in ordinary ways (a reasoning-only stream, a
+		// refusal as an empty assistant turn, a stream truncated without
+		// throwing).
+		const messages: Message[] = [];
+		for (let i = 0; i < 12; i++) {
+			messages.push({ role: "user", content: `question ${i}` });
+			messages.push({ role: "assistant", content: `answer ${i}` });
+		}
+		const config = { contextWindow: 1, maxResponseTokens: 0, compactionThreshold: 0 } as never;
+
+		await expect(compactMessages(messages, async () => "", config)).rejects.toThrow(/empty/i);
+		await expect(compactMessages(messages, async () => "   \n  ", config)).rejects.toThrow(/empty/i);
+
+		// A real summary still compacts.
+		const ok = await compactMessages(messages, async () => "a real summary", config);
+		expect(ok.summary.messagesCompacted).toBeGreaterThan(0);
+	});
+
 	it("surfaces tool_calls in the text sent to the summarizer instead of dropping them", async () => {
 		// Real messages from this codebase carry tool_calls as a sibling field
 		// (OpenAI shape), with content: null when the turn is purely a tool
