@@ -2062,3 +2062,72 @@ describe("search path relativization", () => {
 		expect(globbed.content).not.toContain(cwd);
 	});
 });
+
+describe("file tools on large files and lookalike UI paths", () => {
+	it("reads a window of a large file without loading it into memory", async () => {
+		// The whole file used to be read and split regardless of offset/limit,
+		// costing roughly three times its size in memory: measured 592MB of RSS
+		// to return five lines of a 200MB log, so a multi-GB log or dump took
+		// the process down before printing anything.
+		const bigPath = join(TEST_DIR, "big.log");
+		const line = `${"padding text ".repeat(6)}\n`;
+		const chunk = line.repeat(1000);
+		const { appendFileSync } = await import("node:fs");
+		writeFileSync(bigPath, "");
+		// ~9MB — over the streaming threshold, small enough for a fast test.
+		for (let i = 0; i < 120; i++) appendFileSync(bigPath, chunk);
+		expect(statSync(bigPath).size).toBeGreaterThan(8 * 1024 * 1024);
+
+		const { execRead } = await import("../src/core/tools/files.ts");
+		const before = process.memoryUsage().arrayBuffers;
+		const result = await execRead({ path: bigPath, offset: 1, limit: 3 }, TEST_DIR, mockConfig);
+		const grew = process.memoryUsage().arrayBuffers - before;
+
+		expect(result.isError).toBeUndefined();
+		expect(result.content.split("\n").filter((l) => /^\d+: /.test(l))).toHaveLength(3);
+		expect(result.content).toContain("Large file");
+		// Nowhere near the file's own size.
+		expect(grew).toBeLessThan(2 * 1024 * 1024);
+	});
+
+	it("reports an offset past the end of a large file instead of returning nothing", async () => {
+		const bigPath = join(TEST_DIR, "big2.log");
+		const { appendFileSync } = await import("node:fs");
+		writeFileSync(bigPath, "");
+		for (let i = 0; i < 120; i++) appendFileSync(bigPath, `${"x".repeat(78)}\n`.repeat(1000));
+
+		const { execRead } = await import("../src/core/tools/files.ts");
+		const result = await execRead({ path: bigPath, offset: 9_999_999 }, TEST_DIR, mockConfig);
+		expect(result.isError).toBe(true);
+		expect(result.content).toMatch(/beyond end of file/);
+	});
+
+	it("does not treat another project's src/server/public as cast's built-in UI", async () => {
+		// The guard was a substring test on the path, so it fired for those
+		// directory names in *any* project: a user working on their own Node app
+		// with src/server/public could not have the agent write there at all.
+		const project = join(TEST_DIR, "myapp");
+		mkdirSync(join(project, "src", "server", "public"), { recursive: true });
+
+		const { execWrite, execEdit } = await import("../src/core/tools/files.ts");
+		const written = await execWrite({ path: "src/server/public/app.js", content: "console.log(1)\n" }, project);
+		expect(written.isError).toBeUndefined();
+		expect(written.content).not.toMatch(/Blocked/);
+
+		const edited = await execEdit(
+			{ filePath: "src/server/public/app.js", oldString: "1", newString: "2" },
+			project,
+			mockConfig,
+		);
+		expect(edited.isError).toBeUndefined();
+		expect(readFileSync(join(project, "src", "server", "public", "app.js"), "utf-8")).toBe("console.log(2)\n");
+	});
+
+	it("still blocks writes to cast's own built-in UI", async () => {
+		const { execWrite } = await import("../src/core/tools/files.ts");
+		const castOwnUi = join(import.meta.dirname, "..", "src", "server", "public", "app.js");
+		const result = await execWrite({ path: castOwnUi, content: "tampered" }, TEST_DIR);
+		expect(result.isError).toBe(true);
+		expect(result.content).toMatch(/read-only/);
+	});
+});
