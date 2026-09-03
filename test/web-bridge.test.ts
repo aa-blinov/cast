@@ -15,7 +15,10 @@ import { sessionInputsDir } from "../src/server/inputs.ts";
 // submit() fires runAgentLoop in the background (fire-and-forget) — stub it
 // so bridge tests don't need a live provider, but keep everything else
 // (MessageQueue, event types) from the real module.
-const runAgentLoop = vi.fn().mockResolvedValue(undefined);
+// Resolves with a message array, like the real loop's Promise<Message[]> —
+// resolving with undefined left ws.session.messages undefined, which the real
+// loop can never do, and made unrelated tests throw out of a detached submit.
+const runAgentLoop = vi.fn().mockImplementation(async (messages: unknown) => messages);
 vi.mock("../src/core/loop.ts", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../src/core/loop.ts")>();
 	return { ...actual, runAgentLoop: (...args: unknown[]) => runAgentLoop(...args) };
