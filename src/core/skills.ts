@@ -441,16 +441,18 @@ function substituteArguments(content: string, args: string | undefined, baseDir:
 	content = content.replaceAll("${CAST_SKILL_DIR}", baseDir);
 	// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for skill template variable, not JS template
 	content = content.replaceAll("${CLAUDE_SKILL_DIR}", baseDir);
-	if (sessionId) {
-		// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for skill template variable, not JS template
-		content = content.replaceAll("${CAST_SESSION_ID}", sessionId);
-		// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for skill template variable, not JS template
-		content = content.replaceAll("${CLAUDE_SESSION_ID}", sessionId);
-	}
+	// An unresolved placeholder must never reach the model: it reads as an
+	// instruction ("substitute the arguments") for something that already
+	// happened, or as literal text the skill author never meant to show. Every
+	// placeholder is replaced, with an empty string when there is nothing to
+	// put there — both for a skill invoked without `args` (the tool's `args`
+	// is optional) and outside a session.
+	// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for skill template variable, not JS template
+	content = content.replaceAll("${CAST_SESSION_ID}", sessionId ?? "");
+	// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for skill template variable, not JS template
+	content = content.replaceAll("${CLAUDE_SESSION_ID}", sessionId ?? "");
 
-	if (!args?.trim()) return content;
-
-	const parsed = parseArguments(args);
+	const parsed = parseArguments(args ?? "");
 
 	// $ARGUMENTS[0], $ARGUMENTS[1], etc.
 	content = content.replace(/\$ARGUMENTS\[(\d+)\]/g, (_, idx) => parsed[parseInt(idx, 10)] ?? "");
@@ -459,7 +461,7 @@ function substituteArguments(content: string, args: string | undefined, baseDir:
 	content = content.replace(/\$(\d+)(?!\w)/g, (_, idx) => parsed[parseInt(idx, 10)] ?? "");
 
 	// $ARGUMENTS — full string
-	content = content.replaceAll("$ARGUMENTS", args);
+	content = content.replaceAll("$ARGUMENTS", args ?? "");
 
 	return content;
 }
