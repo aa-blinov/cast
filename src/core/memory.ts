@@ -2750,13 +2750,42 @@ export function execMemorySearch(args: Record<string, unknown>, cwd: string): To
 	}
 	const query = typeof args.query === "string" ? args.query : "";
 	if (!query.trim()) return { content: "Memory search requires a non-empty query.", isError: true };
+	// An unrecognized scope used to fall through to the default (the current
+	// project plus its sessions), so a model that mistyped `sessions` as
+	// `session` was answered from a scope it never asked for and had no way to
+	// notice — the results look like a normal hit.
+	if (
+		args.scope !== undefined &&
+		args.scope !== "global" &&
+		args.scope !== "projects" &&
+		args.scope !== "sessions" &&
+		args.scope !== "cc"
+	) {
+		return {
+			content: `Error: unknown scope ${JSON.stringify(args.scope)}. Use one of: projects (default), sessions, cc, global.`,
+			isError: true,
+		};
+	}
+	// `Number(args.limit) || MAX_SEARCH_RESULTS` accepted anything: a negative
+	// limit was clamped to a single result and reported as "Found 1 match",
+	// indistinguishable from there genuinely being one, and `limit: 0` silently
+	// meant the default instead of nothing.
+	if (
+		args.limit !== undefined &&
+		(typeof args.limit !== "number" || !Number.isInteger(args.limit) || args.limit < 1)
+	) {
+		return {
+			content: 'Error: "limit" must be a positive integer. Retry with limit: 1 or greater.',
+			isError: true,
+		};
+	}
 	const scope =
 		args.scope === "global" || args.scope === "projects" || args.scope === "sessions" || args.scope === "cc"
 			? args.scope
 			: undefined;
 	const scopeId = typeof args.scope_id === "string" && args.scope_id.trim() ? args.scope_id.trim() : undefined;
 	const type = typeof args.type === "string" && args.type.trim() ? args.type.trim() : undefined;
-	const limit = Number(args.limit) || MAX_SEARCH_RESULTS;
+	const limit = typeof args.limit === "number" ? Math.min(args.limit, MAX_SEARCH_RESULTS) : MAX_SEARCH_RESULTS;
 	// Structured project-memory entries (importance/confidence-ranked).
 	const structured = searchProjectMemory(cwd, query, limit, { scope, scopeId, type });
 	// File-backed matches: checkpoint/notes/task-progress, spillover MEMORY-<topic>.md,
