@@ -110,7 +110,13 @@ describe("connectMcpServers (real spawned MCP server, not mocked)", () => {
 		try {
 			expect(result.diagnostics).toEqual([]);
 			expect(result.connections).toEqual([
-				{ serverName: "echo", toolCount: 4, client: expect.anything(), alive: true },
+				{
+					serverName: "echo",
+					toolCount: 4,
+					client: expect.anything(),
+					alive: true,
+					config: { command: "node", args: [FIXTURE_SERVER] },
+				},
 			]);
 			expect([...result.toolIndex.keys()].sort()).toEqual([
 				"mcp_echo_add",
@@ -154,6 +160,56 @@ describe("connectMcpServers (real spawned MCP server, not mocked)", () => {
 		} finally {
 			await closeMcpConnections(result.connections);
 		}
+	});
+
+	it("reconnects a dropped server on its own, without disturbing the others", async () => {
+		// The only recovery used to be a manual /mcp reconnect, which also
+		// closes and re-resolves *every* server — far too blunt to run
+		// automatically, since one flaky server would take the rest down with
+		// it on every attempt.
+		const result = await connectMcpServers({
+			flaky: { command: "node", args: [FIXTURE_SERVER] },
+			steady: { command: "node", args: [FIXTURE_SERVER] },
+		});
+		try {
+			const steadyClient = result.connections.find((c) => c.serverName === "steady")!.client;
+			const errors: string[] = [];
+			const realError = console.error;
+			console.error = (...args: unknown[]) => errors.push(args.map(String).join(" "));
+			try {
+				// Drop one the way a crashing server would.
+				await result.connections.find((c) => c.serverName === "flaky")!.client.close();
+				expect(result.connections.find((c) => c.serverName === "flaky")!.alive).toBe(false);
+
+				await vi.waitFor(
+					() => expect(result.connections.find((c) => c.serverName === "flaky")?.alive).toBe(true),
+					{ timeout: 15_000, interval: 250 },
+				);
+			} finally {
+				console.error = realError;
+			}
+
+			expect(errors.join("\n")).toContain("retrying");
+			// Its tools work again through the same result object...
+			const called = await result.toolIndex.get("mcp_flaky_echo")!.call({ text: "back up" });
+			expect(called).toMatchObject({ content: "back up", isError: false });
+			// ...and the untouched server kept the very same client.
+			expect(result.connections.find((c) => c.serverName === "steady")!.client).toBe(steadyClient);
+		} finally {
+			await closeMcpConnections(result.connections);
+		}
+	}, 30_000);
+
+	it("does not retry a server cast closed on purpose", async () => {
+		// A shutdown, /mcp disable or a manual reconnect all close deliberately;
+		// retrying those would fight the user.
+		const result = await connectMcpServers({ echo: { command: "node", args: [FIXTURE_SERVER] } });
+		await closeMcpConnections(result.connections);
+
+		const connection = result.connections[0]!;
+		expect(connection.retry?.timer).toBeUndefined();
+		await new Promise((resolve) => setTimeout(resolve, 1500));
+		expect(connection.alive).toBe(false);
 	});
 
 	it("reports a tool-name collision instead of silently routing to one server", async () => {
