@@ -895,4 +895,66 @@ describe("runHooksForEvent", () => {
 		expect(Date.now() - start).toBeLessThan(1_000);
 		expect(result.blocked).toBe(false);
 	});
+
+	it("reports a hook that failed to run instead of treating it as approval", async () => {
+		// exitCode was recorded and read by nobody, so a typo'd path was
+		// indistinguishable from a hook that ran and approved.
+		const errors: string[] = [];
+		const realError = console.error;
+		console.error = (...args: unknown[]) => errors.push(args.map(String).join(" "));
+		try {
+			const hooks: HooksFile = { Stop: [{ hooks: [{ command: "exit 127" }] }] };
+			const result = await runHooksForEvent(hooks, { event: "Stop", cwd: process.cwd() });
+			// Still not blocking — a broken hook must not wedge the turn...
+			expect(result.blocked).toBe(false);
+			// ...but it is no longer silent.
+			expect(errors.join("\n")).toContain("exited 127");
+		} finally {
+			console.error = realError;
+		}
+	});
+
+	it("stays quiet for the exit codes that mean success and block", async () => {
+		const errors: string[] = [];
+		const realError = console.error;
+		console.error = (...args: unknown[]) => errors.push(args.map(String).join(" "));
+		try {
+			await runHooksForEvent({ Stop: [{ hooks: [{ command: "exit 0" }] }] }, { event: "Stop", cwd: process.cwd() });
+			const blocked = await runHooksForEvent(
+				{ Stop: [{ hooks: [{ command: "exit 2" }] }] },
+				{ event: "Stop", cwd: process.cwd() },
+			);
+			expect(blocked.blocked).toBe(true);
+			expect(errors).toEqual([]);
+		} finally {
+			console.error = realError;
+		}
+	});
+
+	it("bounds a prompt hook that never settles", async () => {
+		// `timeout` reached only the command and http runners; an mcp_tool or
+		// prompt hook waiting on a wedged server or provider blocked forever —
+		// and with it any tool call the hook was gating.
+		mockStreamAndCollect.mockImplementationOnce(() => new Promise(() => {}));
+		const errors: string[] = [];
+		const realError = console.error;
+		console.error = (...args: unknown[]) => errors.push(args.map(String).join(" "));
+		try {
+			const started = Date.now();
+			const result = await runHooksForEvent(
+				{ Stop: [{ hooks: [{ type: "prompt", prompt: "is it ok?", timeout: 1 }] }] },
+				{
+					event: "Stop",
+					cwd: process.cwd(),
+					config: { baseURL: "http://localhost", apiKey: "k" } as AppConfig,
+					model: "test-model",
+				},
+			);
+			expect(result.blocked).toBe(false);
+			expect(Date.now() - started).toBeLessThan(5000);
+			expect(errors.join("\n")).toContain("timed out");
+		} finally {
+			console.error = realError;
+		}
+	});
 });

@@ -592,6 +592,11 @@ function runCommandHook(
 			stdio: background ? ["pipe", "ignore", "ignore"] : ["pipe", "pipe", "pipe"],
 			detached: process.platform !== "win32",
 		});
+		proc.on("error", (err) => {
+			// ENOENT/EACCES: the command never started. Silently resolving as
+			// "not blocked" made a broken hook look like an approving one.
+			console.error(`[cast] hook command failed to start: ${err instanceof Error ? err.message : String(err)}`);
+		});
 		const stdin = proc.stdin;
 		if (!stdin) {
 			resolve({ blocked: false, stdout: "", exitCode: null });
@@ -770,6 +775,35 @@ function interpolateDeep(value: unknown, payload: Record<string, unknown>): unkn
 		return out;
 	}
 	return value;
+}
+
+/** Applies a hook's timeout to a promise that has no timer of its own.
+ *
+ * `timeout` is documented as applying to hooks generally (default 30s), but
+ * only the command and http runners ever honoured it — an mcp_tool hook
+ * waiting on a wedged server, or a prompt hook waiting on a stalled provider,
+ * blocked forever, and for a PreToolUse hook that stalls the tool call with
+ * it. Aborting the shared signal is not an option (it belongs to the turn),
+ * so the wait is bounded here and the hook reports as not-blocking.
+ */
+async function withHookTimeout(
+	work: Promise<HookRunResult>,
+	timeoutSeconds: number,
+	label: string,
+): Promise<HookRunResult> {
+	let timer: NodeJS.Timeout | undefined;
+	const timeout = new Promise<HookRunResult>((resolve) => {
+		timer = setTimeout(() => {
+			console.error(`[cast] ${label} hook timed out after ${timeoutSeconds}s — treated as not blocking.`);
+			resolve({ blocked: false, stdout: "", exitCode: null });
+		}, timeoutSeconds * 1000);
+		timer.unref?.();
+	});
+	try {
+		return await Promise.race([work, timeout]);
+	} finally {
+		if (timer) clearTimeout(timer);
+	}
 }
 
 async function runMcpToolHook(
@@ -951,10 +985,18 @@ export async function runHooksForEvent(hooks: HooksFile, opts: RunHooksOptions):
 				return runHttpHook(cmd.url, timeoutSeconds, payload, opts.signal, cmd.headers, cmd.allowedEnvVars);
 			}
 			if (cmd.type === "mcp_tool") {
-				return runMcpToolHook(cmd, payload, opts.mcpToolIndex, opts.signal);
+				return withHookTimeout(
+					runMcpToolHook(cmd, payload, opts.mcpToolIndex, opts.signal),
+					timeoutSeconds,
+					`${opts.event} mcp_tool`,
+				);
 			}
 			if (cmd.type === "prompt") {
-				return runPromptHook(cmd, payload, opts.config, opts.model, opts.signal);
+				return withHookTimeout(
+					runPromptHook(cmd, payload, opts.config, opts.model, opts.signal),
+					timeoutSeconds,
+					`${opts.event} prompt`,
+				);
 			}
 			return runCommandHook(
 				substitutePluginVars(cmd.command ?? "", group._pluginRoot),
@@ -971,6 +1013,20 @@ export async function runHooksForEvent(hooks: HooksFile, opts: RunHooksOptions):
 	if (promises.length === 0) return { blocked: false, stdout: "", exitCode: null };
 
 	const results = await Promise.all(promises);
+
+	// A hook that never ran at all — a typo'd path, a missing interpreter, no
+	// execute bit — used to be indistinguishable from one that ran and
+	// approved: exitCode was recorded on the result and then read by nobody.
+	// Exit 2 is the documented "block" signal and 0 is success; anything else
+	// from a command hook means the user's guard silently isn't guarding.
+	for (const result of results) {
+		if (result.exitCode === null || result.exitCode === 0 || result.exitCode === 2) continue;
+		console.error(
+			`[cast] ${opts.event} hook exited ${result.exitCode}${
+				result.stdout.trim() ? `: ${result.stdout.trim().slice(0, 200)}` : " with no output"
+			} — it did not block, and its result was ignored.`,
+		);
+	}
 
 	let firstBlock: HookRunResult | undefined;
 	let firstForceStop: HookRunResult | undefined;
