@@ -1322,6 +1322,7 @@ function storeProjectMemoryRows(
 	for (const entry of entries) {
 		const content = entry.content.trim();
 		if (!content) continue;
+		const normalizedType = entry.type.trim() || "general";
 		if (entry.supersedes && entry.supersedes.length > 0) {
 			const placeholders = entry.supersedes.map(() => "?").join(",");
 			db.prepare(`DELETE FROM project_memory WHERE project_id = ? AND id IN (${placeholders})`).run(
@@ -1332,9 +1333,13 @@ function storeProjectMemoryRows(
 		insert.run(
 			projectId,
 			normalizeCwd(cwd),
-			entry.type.trim() || "general",
+			normalizedType,
 			content,
-			fingerprintFor(content, entry.type),
+			// From the same normalized type that goes into the row: fingerprinting
+			// the raw one meant " fact" and "fact" produced different keys for
+			// rows stored with identical type+content, slipping past
+			// UNIQUE(project_id, fingerprint).
+			fingerprintFor(content, normalizedType),
 			sourceSessionId,
 			sourceTurnKey,
 			Math.max(0, Math.min(100, Math.round(entry.importance ?? 50))),

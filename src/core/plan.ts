@@ -320,6 +320,13 @@ export async function checkReadOnlyCommand(command: string): Promise<{ ok: boole
 			if (args.some((t) => t === "--output" || t.startsWith("--output="))) {
 				return { ok: false, reason: "--output writes a file" };
 			}
+			// binutils tools read their arguments from a file given as `@file`,
+			// which the per-binary flag checks below never see. Harmless for
+			// `strings` (it has no dangerous flag), but it would silently defeat
+			// the whole scan for any binutils tool added to the allowlist later.
+			if (args.some((t) => t.startsWith("@"))) {
+				return { ok: false, reason: "@file passes arguments this check can't see" };
+			}
 			if (binary === "git") {
 				const sub = args.find((t) => !t.startsWith("-"));
 				if (!sub || !READONLY_GIT_SUBCOMMANDS.has(sub)) {

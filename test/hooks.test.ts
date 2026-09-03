@@ -1051,4 +1051,14 @@ describe("runHooksForEvent", () => {
 		);
 		expect(noMatch.stdout).not.toContain("listed");
 	});
+
+	it("refuses a plan-mode command that reads its arguments from a file", async () => {
+		// binutils tools take `@file` as "read arguments from here", which the
+		// per-binary flag checks never see. Harmless for `strings` today, but it
+		// would silently defeat the whole scan for any binutils tool added to
+		// the read-only allowlist later.
+		const { checkReadOnlyCommand } = await import("../src/core/plan.ts");
+		expect((await checkReadOnlyCommand("strings @opts")).ok).toBe(false);
+		expect((await checkReadOnlyCommand("strings binary.bin")).ok).toBe(true);
+	});
 });

@@ -120,6 +120,15 @@ function realPathOrNearest(path: string): string {
 	}
 }
 
+/** Constant-time comparison for a credential. Used for both the web password
+ *  and the daemon token — the length check leaks only the length, which both
+ *  sides already fix. */
+function secretsMatch(value: string, expected: string): boolean {
+	const a = Buffer.from(value);
+	const b = Buffer.from(expected);
+	return a.length === b.length && timingSafeEqual(a, b);
+}
+
 const PORT_RE = /:\d+$/;
 const ROUTE_PARAM_RE = /:(\w+)/g;
 
@@ -360,7 +369,11 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			if (auth?.startsWith("Bearer ")) {
 				const candidate = auth.slice("Bearer ".length);
 				const state = readLiveServerState();
-				if (state?.token && candidate === state.token) return true;
+				// Constant-time, like passwordsMatch: the token *is* the daemon
+				// credential, and comparing it with === while the password next
+				// to it is compared safely is an inconsistency worth removing
+				// even though this path is loopback-only.
+				if (state?.token && secretsMatch(candidate, state.token)) return true;
 			}
 			// EventSource (browser + Node) can't set custom headers, so the loopback
 			// TUI client passes its token as a `?token=` query param instead.
@@ -368,16 +381,14 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			const candidate = url.searchParams.get("token");
 			if (candidate) {
 				const state = readLiveServerState();
-				if (state?.token && candidate === state.token) return true;
+				if (state?.token && secretsMatch(candidate, state.token)) return true;
 			}
 		}
 		return false;
 	}
 
 	function passwordsMatch(value: string): boolean {
-		const expected = Buffer.from(serverPassword);
-		const candidate = Buffer.from(value);
-		return candidate.length === expected.length && timingSafeEqual(candidate, expected);
+		return secretsMatch(value, serverPassword);
 	}
 
 	function sessionCookie(req: IncomingMessage, token: string, maxAge: number): string {

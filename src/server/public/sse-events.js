@@ -42,6 +42,33 @@ function stripRetryRow(messages) {
 	return messages.filter((m) => !isRetryRow(m));
 }
 
+/** Short chime for "the turn finished", on a lazily-created shared context. */
+let chimeContext;
+function playTurnDoneChime() {
+	const AC = window.AudioContext || window.webkitAudioContext;
+	if (!AC) return;
+	if (!chimeContext) chimeContext = new AC();
+	const ctx = chimeContext;
+	// A context created before any user gesture starts suspended; resuming is a
+	// no-op when it's already running.
+	if (ctx.state === "suspended") ctx.resume().catch(() => {});
+	const o = ctx.createOscillator();
+	const g = ctx.createGain();
+	o.type = "sine";
+	o.frequency.value = 880;
+	g.gain.value = 0.12;
+	o.connect(g).connect(ctx.destination);
+	o.start();
+	g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.25);
+	setTimeout(() => {
+		try {
+			o.stop();
+			o.disconnect();
+			g.disconnect();
+		} catch {}
+	}, 320);
+}
+
 export function handleSseEvent(event, context) {
 	const {
 		streamSessionId,
@@ -221,18 +248,13 @@ export function handleSseEvent(event, context) {
 					}
 				} catch {}
 				try {
-					const AC = window.AudioContext || window.webkitAudioContext;
-					if (AC) {
-						const ctx = new AC();
-						const o = ctx.createOscillator();
-						const g = ctx.createGain();
-						o.type = "sine"; o.frequency.value = 880;
-						g.gain.value = 0.12;
-						o.connect(g).connect(ctx.destination);
-						o.start();
-						g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.25);
-						setTimeout(() => { try { o.stop(); ctx.close(); } catch {} }, 320);
-					}
+					// Only when the tab isn't in front, same as the notification
+					// above — the beep exists to say "look over here", and it fired
+					// even while the user was watching the turn happen.
+					// One shared AudioContext: a fresh one per turn accumulates
+					// against the browser's per-page limit, after which later
+					// beeps silently fail.
+					if (document.hidden) playTurnDoneChime();
 				} catch {}
 			}
 			break;
