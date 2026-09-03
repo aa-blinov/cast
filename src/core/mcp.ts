@@ -113,6 +113,15 @@ export interface McpConnection {
 	alive: boolean;
 	/** Why it went away, for the error the model sees on the next call. */
 	deadReason?: string;
+	/** The config this server was connected from, so a dropped connection can
+	 *  be rebuilt without re-resolving every other server. */
+	config: McpServerConfig;
+	/** Set while cast is closing the connection deliberately (shutdown, /mcp
+	 *  disable, a reconnect) — the drop is then expected and must not trigger
+	 *  the automatic retry below. */
+	closing?: boolean;
+	/** Automatic reconnect bookkeeping; see scheduleMcpReconnect. */
+	retry?: { attempts: number; timer?: NodeJS.Timeout };
 }
 
 export interface McpSetupResult {
@@ -273,6 +282,17 @@ export async function connectMcpServers(
 	const toolDefinitions: Tool[] = [];
 	const connections: McpConnection[] = [];
 	const diagnostics: string[] = [];
+	// Built before the connects so a server's disconnect handler can hand the
+	// live result to the reconnect scheduler — it swaps that server's tools in
+	// place, which every holder of this object then picks up.
+	const setupResult: McpSetupResult = {
+		toolIndex,
+		toolDefinitions,
+		connections,
+		diagnostics,
+		allServerNames: Object.keys(servers),
+		serverSources: {},
+	};
 
 	await Promise.all(
 		Object.entries(servers).map(async ([serverName, cfg]) => {
@@ -436,7 +456,13 @@ export async function connectMcpServers(
 					});
 				}
 
-				const connection: McpConnection = { serverName, toolCount: tools.length, client, alive: true };
+				const connection: McpConnection = {
+					serverName,
+					toolCount: tools.length,
+					client,
+					alive: true,
+					config: cfg,
+				};
 				// Notice when the server goes away. The SDK's own handlers are
 				// no-ops unless assigned, so a crashed stdio server or an HTTP
 				// endpoint that started refusing left cast advertising tools that
@@ -445,7 +471,9 @@ export async function connectMcpServers(
 					if (!connection.alive) return;
 					connection.alive = false;
 					connection.deadReason = reason;
-					console.error(`[cast] mcp server "${serverName}" disconnected: ${reason}. Use /mcp reconnect to retry.`);
+					if (connection.closing) return;
+					console.error(`[cast] mcp server "${serverName}" disconnected: ${reason} — retrying.`);
+					scheduleMcpReconnect(setupResult, connection);
 				};
 				client.onclose = () => markDead("the connection closed");
 				client.onerror = (error: unknown) =>
@@ -459,14 +487,7 @@ export async function connectMcpServers(
 		}),
 	);
 
-	return {
-		toolIndex,
-		toolDefinitions,
-		connections,
-		diagnostics,
-		allServerNames: Object.keys(servers),
-		serverSources: {},
-	};
+	return setupResult;
 }
 
 function escapeXml(s: string): string {
@@ -529,6 +550,104 @@ export function formatMcpForPrompt(result: McpSetupResult, personaMcpAllowlist?:
 	return lines.join("\n");
 }
 
+/** How many times a dropped server is re-tried before cast gives up and waits
+ *  for the user. Five attempts with the backoff below spans about half a
+ *  minute — long enough to ride out a server restarting itself, short enough
+ *  that a genuinely broken one stops making noise. */
+const MCP_RECONNECT_ATTEMPTS = 5;
+/** 1s, 2s, 4s, 8s, 16s. Backing off matters because a server that crashes on
+ *  startup would otherwise be respawned in a tight loop. */
+const MCP_RECONNECT_BASE_MS = 1000;
+
+/**
+ * Rebuilds one dropped server's connection in place, leaving every other
+ * server alone.
+ *
+ * The existing `/mcp reconnect` closes and re-resolves *all* servers, which is
+ * fine as a user-initiated action but far too blunt for an automatic retry:
+ * one flaky server would take the rest down with it on every attempt.
+ *
+ * Returns true when the server is connected again. The result object is
+ * mutated in place — its tool index, definitions and connection entry are all
+ * swapped over — so every holder of it (the system prompt builder, the tool
+ * dispatcher) sees the new tools without being re-plumbed.
+ */
+export async function reconnectMcpServer(result: McpSetupResult, serverName: string): Promise<boolean> {
+	const index = result.connections.findIndex((c) => c.serverName === serverName);
+	const previous = result.connections[index];
+	if (!previous) return false;
+	previous.closing = true;
+	if (previous.retry?.timer) clearTimeout(previous.retry.timer);
+	await closeClient(previous.client);
+
+	const fresh = await connectMcpServers({ [serverName]: previous.config });
+	const connection = fresh.connections[0];
+	if (!connection) {
+		// Keep the dead entry so the failure stays visible in /mcp rather than
+		// the server quietly vanishing from the list.
+		previous.closing = false;
+		result.diagnostics.push(...fresh.diagnostics);
+		return false;
+	}
+
+	// Swap this server's tools; leave the others untouched.
+	const prefix = `[${serverName}]`;
+	for (const [name, handle] of [...result.toolIndex]) {
+		if (handle.definition.function.description?.startsWith(prefix)) result.toolIndex.delete(name);
+	}
+	result.toolDefinitions = result.toolDefinitions.filter((t) => !t.function.description?.startsWith(prefix));
+	for (const [name, handle] of fresh.toolIndex) result.toolIndex.set(name, handle);
+	result.toolDefinitions.push(...fresh.toolDefinitions);
+	result.connections[index] = connection;
+	return true;
+}
+
+/**
+ * Schedules the automatic retries for a server that dropped on its own.
+ *
+ * Only unexpected drops get here — a shutdown, `/mcp disable` or a manual
+ * reconnect marks the connection `closing` first. Attempts are bounded and
+ * backed off; after the last one cast stops and leaves the server visibly
+ * disconnected, which is when `/mcp reconnect` is the right answer.
+ */
+function scheduleMcpReconnect(result: McpSetupResult, connection: McpConnection): void {
+	connection.retry ??= { attempts: 0 };
+	const retry = connection.retry;
+	if (retry.attempts >= MCP_RECONNECT_ATTEMPTS) {
+		console.error(
+			`[cast] mcp server "${connection.serverName}" did not come back after ${MCP_RECONNECT_ATTEMPTS} attempts — run /mcp reconnect ${connection.serverName} when it's ready.`,
+		);
+		return;
+	}
+	const delay = MCP_RECONNECT_BASE_MS * 2 ** retry.attempts;
+	retry.attempts++;
+	retry.timer = setTimeout(() => {
+		void reconnectMcpServer(result, connection.serverName)
+			.then((ok) => {
+				if (ok) {
+					console.error(`[cast] mcp server "${connection.serverName}" reconnected.`);
+					return;
+				}
+				const current = result.connections.find((c) => c.serverName === connection.serverName);
+				if (current) {
+					current.retry = retry;
+					scheduleMcpReconnect(result, current);
+				}
+			})
+			.catch(() => {
+				scheduleMcpReconnect(result, connection);
+			});
+	}, delay);
+	// Never hold the process open just to retry a background connection.
+	retry.timer.unref?.();
+}
+
 export async function closeMcpConnections(connections: McpConnection[]): Promise<void> {
+	for (const connection of connections) {
+		// Mark before closing: the transport's close handler runs during
+		// closeClient below, and an expected drop must not schedule a retry.
+		connection.closing = true;
+		if (connection.retry?.timer) clearTimeout(connection.retry.timer);
+	}
 	await Promise.all(connections.map((c) => closeClient(c.client)));
 }
