@@ -1804,65 +1804,56 @@ describe("task", () => {
 		expect(result.content).toContain("no output");
 	});
 
-	it("caps concurrent subagents at 10", async () => {
+	it("runs sibling task calls one at a time, without an artificial slot limit", async () => {
+		// `task` is deliberately absent from the loop's PARALLEL_SAFE_TOOL_NAMES,
+		// so sibling task calls are executed in order rather than with
+		// Promise.all — that sequencing, not a semaphore, is what bounds
+		// subagent concurrency. A 10-slot semaphore used to sit here as well; it
+		// could only ever make one session's subagent wait on ten *other*
+		// sessions', so it was removed. This pins both halves: concurrency is
+		// not capped at some magic number, and each call still runs to
+		// completion on its own.
+		const { PARALLEL_SAFE_TOOL_NAMES } = await import("../src/core/loop.ts");
+		expect(PARALLEL_SAFE_TOOL_NAMES.has("task")).toBe(false);
+
 		let active = 0;
 		let peak = 0;
-		let release!: () => void;
-		const gate = new Promise<void>((r) => {
-			release = r;
-		});
 		const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, {
 			model: "test",
 			subagentPrompts: [{ name: "worker", label: "Worker", description: "test", systemPrompt: "worker prompt" }],
 			runAgentLoop: async () => {
 				active++;
 				peak = Math.max(peak, active);
-				await gate;
+				await new Promise((r) => setTimeout(r, 5));
 				active--;
 				return [{ role: "assistant", content: "done" }];
 			},
 		});
-		const runs = Array.from({ length: 25 }, () => exec("task", { assignment: "work" }));
-		// Let the semaphore admit its first wave before releasing the gate.
-		await new Promise((r) => setTimeout(r, 20));
-		expect(peak).toBe(10);
-		release();
-		await Promise.all(runs);
-		expect(peak).toBe(10);
+
+		// Driven concurrently on purpose: nothing queues them behind a limit any
+		// more, and all 12 must still complete.
+		const results = await Promise.all(Array.from({ length: 12 }, () => exec("task", { assignment: "work" })));
+		expect(results.every((r) => r.content === "done")).toBe(true);
+		expect(peak).toBeGreaterThan(10);
 	});
 
-	it("cancels queued subagents immediately when the signal aborts (no slot wait)", async () => {
+	it("does not start a subagent whose turn was already cancelled", async () => {
 		const ac = new AbortController();
+		ac.abort();
 		let started = 0;
-		let release!: () => void;
-		const gate = new Promise<void>((r) => {
-			release = r;
-		});
 		const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, {
 			model: "test",
 			subagentPrompts: [{ name: "worker", label: "Worker", description: "x", systemPrompt: "worker prompt" }],
 			runAgentLoop: async () => {
 				started++;
-				await gate; // the 10 admitted runs park here, holding every slot
 				return [{ role: "assistant", content: "done" }];
 			},
 		});
-		// 10 fill the cap and block; 3 more queue behind the semaphore.
-		const runs = Array.from({ length: 13 }, () => exec("task", { assignment: "work" }, ac.signal));
-		await new Promise((r) => setTimeout(r, 20));
-		expect(started).toBe(10); // only the cap started; 3 are queued
 
-		ac.abort();
-		const results = await Promise.all(runs.slice(10)); // the 3 queued ones
-		// They resolve right away as aborted errors, without waiting for a slot.
-		for (const r of results) {
-			expect(r.isError).toBe(true);
-			expect(r.content).toContain("aborted");
-		}
-		expect(started).toBe(10); // none of the queued runs ever entered the loop
-
-		release();
-		await Promise.all(runs.slice(0, 10));
+		const result = await exec("task", { assignment: "work" }, ac.signal);
+		expect(result.isError).toBe(true);
+		expect(result.content).toContain("aborted");
+		expect(started).toBe(0);
 	});
 
 	it("serializes confirmBash across concurrent subagents", async () => {

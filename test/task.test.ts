@@ -249,14 +249,11 @@ describe("execTask — final extract", () => {
 		expect(following.content).toBe("ran fine");
 	});
 
-	it("cancels while queued on the semaphore without starting the loop", async () => {
+	it("does not enter the loop when the turn was cancelled before the run started", async () => {
 		const ac = new AbortController();
-		const actorRegistry = new AgentActorRegistry();
+		ac.abort();
+		const actorRegistry = new AgentActorRegistry({ watchdogIntervalMs: 0 });
 		let started = 0;
-		let release!: () => void;
-		const gate = new Promise<void>((r) => {
-			release = r;
-		});
 		const deps = {
 			model: "test-model",
 			subagentPrompts: [
@@ -265,32 +262,16 @@ describe("execTask — final extract", () => {
 			actorRegistry,
 			runAgentLoop: async (messages: Message[]) => {
 				started++;
-				await gate;
 				return [...messages, { role: "assistant", content: "done" }];
 			},
 		};
-		const runs = Array.from({ length: 13 }, () =>
-			execTask({ assignment: "work" }, "/tmp", testConfig, deps, ac.signal),
-		);
-		await new Promise((r) => setTimeout(r, 20));
-		expect(started).toBe(10);
 
-		ac.abort();
-		const queued = await Promise.all(runs.slice(10));
-		for (const r of queued) {
-			expect(r.isError).toBe(true);
-			expect(r.content).toContain("cancelled before start");
-		}
-		expect(started).toBe(10);
+		const result = await execTask({ assignment: "work" }, "/tmp", testConfig, deps, ac.signal);
 
-		release();
-		await Promise.all(runs.slice(0, 10));
-		expect(actorRegistry.list()).toHaveLength(13);
-		expect(actorRegistry.list().every((actor) => actor.status === "cancelled")).toBe(true);
+		expect(result.isError).toBe(true);
+		expect(result.content).toContain("cancelled before start");
+		expect(started).toBe(0);
 	});
-});
-
-describe("execTask persistence failures", () => {
 	it("returns the subagent's answer even when its transcript cannot be saved", async () => {
 		// The archive write ran inside the same try as the run itself, so a
 		// failing write discarded work the subagent had already done and billed
