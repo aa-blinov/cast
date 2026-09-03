@@ -20,7 +20,7 @@ import { createPlanState, type PlanState, resolvePlanQuestion, resolvePlanTransi
 import type { AgentRunner } from "../runner.ts";
 import { createAgentRunner } from "../runner.ts";
 import type { SessionState } from "../session.ts";
-import { deleteSession, listSessionSummaries, loadSession, recordCompaction } from "../session.ts";
+import { listSessionSummaries, loadSession, recordCompaction, saveSession as saveSessionState } from "../session.ts";
 import type { StartupResult } from "../startup.ts";
 
 // ---------------------------------------------------------------------------
@@ -278,9 +278,18 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 			const s = sessions.get(sessionId);
 			if (s) {
 				s.runner.abort("acp close");
-				// MCP cleanup runs in try/finally so even if deleteSession below
-				// throws (DB error mid-shutdown), the connections are torn down
-				// — otherwise we'd leak file descriptors / subprocess handles.
+				// Persist before unloading — `session/close` releases resources,
+				// it does not discard the conversation, and state the turn loop
+				// hasn't saved yet (mode, todos, an aborted turn's messages)
+				// would otherwise be lost to the next session/load.
+				try {
+					saveSessionState(s.state);
+				} catch {
+					// Best-effort: a failing save must not block teardown.
+				}
+				// MCP cleanup runs in try/finally so even if anything below
+				// throws, the connections are torn down — otherwise we'd leak
+				// file descriptors / subprocess handles.
 				try {
 					// Only this session's own (editor-provided) servers. The
 					// startup pool is a single StartupResult shared by every ACP
@@ -308,13 +317,14 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 					sessionClients.delete(sessionId);
 				}
 			}
-			try {
-				deleteSession(sessionId, s?.state.cwd);
-			} catch {
-				// Best-effort — DB delete failure shouldn't abort the rest of
-				// teardown. The session row may persist as an orphan on disk
-				// but the MCP connections are already closed.
-			}
+			// No deleteSession here. `session/close` means "release this
+			// session's resources", not "destroy the conversation" — closing a
+			// thread in the editor used to erase its history from disk (and,
+			// when cwd was the session's own throwaway sandbox, that directory
+			// with it), which also made the `list` and `load` capabilities this
+			// adapter advertises useless for anything that had been closed.
+			// Removing a session for good is `/sessions` in cast itself.
+			//
 			// Wait for the runner to settle before returning so the editor can
 			// assume the session is fully torn down on close — no straggling
 			// `session/update` events arriving after the response. `waitForIdle`
