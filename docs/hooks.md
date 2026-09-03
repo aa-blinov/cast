@@ -58,6 +58,16 @@ Each entry in a matcher group's `hooks` array is one of:
 
 Three sources, merged (a group from each applies — they don't override each other):
 
+### Matchers
+
+A group's `matcher` picks which occurrences the hook runs for — the tool name for `PreToolUse`/`PostToolUse`, the trigger for `PreCompact`, the file name for `FileChanged`, and so on.
+
+- A single plain name (letters, digits, `_`, `:`, `/`, `-`) is compared **literally**, case-insensitively: `bash`.
+- A `|`- or `,`-separated list is a list of **literal names**, so file matchers work as written: `write|edit`, `package.json, README.md`.
+- Anything else — including a single name containing a `.` — is a **regular expression**, case-insensitive and **unanchored**. So `Edit` and `Edit.*` both match `MultiEdit` (anchor it as `^edit$` when you mean exactly one), and `mcp.foo` matches `mcp__foo` because a dot is a regex "any character".
+- No matcher (or `*`) runs for every occurrence.
+- Some events have nothing to match against (`Stop`, `WorktreeCreate`, `MessageDisplay`, `TaskCreated`, `PostToolBatch`). A matcher there is ignored and the hook runs every time; cast reports this once so it isn't mistaken for a filter.
+
 - `~/.cast/hooks.json` — global, always applies
 - `.cast/hooks.json` — project-local, **trust-gated** the same as `.cast/mcp.json`: only read for a trusted project, since a hook is an arbitrary shell command
 - `<installed plugin root>/hooks/hooks.json` — Claude Code's real convention for plugin-contributed hooks (falls back to a bare `<root>/hooks.json` too). Always applies — installing a plugin is already an explicit trust decision.

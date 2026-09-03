@@ -77,7 +77,11 @@ import type { McpToolHandle } from "./mcp.ts";
 import { mcpToolName } from "./mcp.ts";
 import { getBashResolution } from "./tools/bash.ts";
 
+/** A matcher made only of these characters is compared literally, rather than
+ *  as a regular expression. */
 const SIMPLE_MATCHER_RE = /^[a-zA-Z0-9_.:/-]+(?:\s*(?:\||,)\s*[a-zA-Z0-9_.:/-]+)*$/;
+const MATCHER_HAS_LIST_RE = /[|,]/;
+const MATCHER_HAS_DOT_RE = /\./;
 const MATCHER_SEPARATOR_RE = /[|,]/;
 const IF_CONDITION_RE = /^(\w+)(?:\((.*)\))?$/;
 
@@ -491,12 +495,23 @@ function matchesMatcher(matchTarget: string | undefined, matcher: string): boole
 	if (matchTarget === undefined) return true;
 	if (SIMPLE_MATCHER_RE.test(matcher)) {
 		const lower = matchTarget.toLowerCase();
-		if (matcher.includes("|") || matcher.includes(",")) {
+		// A `|`/`,` list is always a list of literal names — that is how file
+		// matchers like "package.json, README.md" are written, and reading
+		// those as one regex would match neither.
+		if (MATCHER_HAS_LIST_RE.test(matcher)) {
 			return matcher.split(MATCHER_SEPARATOR_RE).some((p) => p.trim().toLowerCase() === lower);
 		}
-		return matcher.toLowerCase() === lower;
+		// A single name containing a dot goes to the regex branch below: `.`
+		// otherwise meant "any character" in `Edit.*` and a literal dot in
+		// `mcp.foo`, so two matchers that look the same behaved in opposite
+		// ways (`mcp.foo` did not match `mcp__foo`). A dotted literal still
+		// matches itself as a regex.
+		if (!MATCHER_HAS_DOT_RE.test(matcher)) return matcher.toLowerCase() === lower;
 	}
 	try {
+		// Unanchored on purpose, matching Claude Code: `Edit` matches
+		// `MultiEdit`. Anchor it yourself (`^Edit$`) when you mean only that
+		// one — see docs/hooks.md.
 		return new RegExp(matcher, "i").test(matchTarget);
 	} catch {
 		return matcher.toLowerCase() === matchTarget.toLowerCase();
