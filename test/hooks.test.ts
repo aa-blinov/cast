@@ -1020,4 +1020,35 @@ describe("runHooksForEvent", () => {
 			console.error = realError;
 		}
 	});
+
+	it("treats a dot the same way everywhere in a matcher", async () => {
+		// A single dotted name used to be compared literally, while `Edit.*` —
+		// one character longer — was a regex: two matchers that look alike
+		// behaving in opposite ways. A dot now means "any character" in both.
+		const matched = await runHooksForEvent(
+			{ PreToolUse: [{ matcher: "mcp.foo", hooks: [{ command: "echo dotted" }] }] },
+			{ event: "PreToolUse", cwd: "/tmp", payload: { tool_name: "mcp_foo" } },
+		);
+		expect(matched.stdout).toContain("dotted");
+
+		// A dotted name still matches itself.
+		const itself = await runHooksForEvent(
+			{ FileChanged: [{ matcher: "package.json", hooks: [{ command: "echo selfmatch" }] }] },
+			{ event: "FileChanged", cwd: "/tmp", payload: { file_name: "package.json" } },
+		);
+		expect(itself.stdout).toContain("selfmatch");
+
+		// ...and a comma list of dotted names stays a list of literals, which
+		// is how file matchers are written.
+		const list = await runHooksForEvent(
+			{ FileChanged: [{ matcher: "package.json, README.md", hooks: [{ command: "echo listed" }] }] },
+			{ event: "FileChanged", cwd: "/tmp", payload: { file_name: "README.md" } },
+		);
+		expect(list.stdout).toContain("listed");
+		const noMatch = await runHooksForEvent(
+			{ FileChanged: [{ matcher: "package.json, README.md", hooks: [{ command: "echo listed" }] }] },
+			{ event: "FileChanged", cwd: "/tmp", payload: { file_name: "other.txt" } },
+		);
+		expect(noMatch.stdout).not.toContain("listed");
+	});
 });
