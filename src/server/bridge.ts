@@ -1563,6 +1563,17 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			if (hookContext) text = `${text}\n\n<hook-context>${hookContext}</hook-context>`;
 		}
 
+		// The daemon connects MCP servers in the background after it starts
+		// listening, so a turn sent in that window runs with none of their tools
+		// — and used to do so in silence, leaving the user to wonder why the
+		// model didn't use a server they had configured.
+		if (mcpResult.connectPending && mcpResult.allServerNames.length > 0) {
+			broadcast(ws, {
+				type: "notice",
+				message: `MCP servers are still connecting (${mcpResult.allServerNames.join(", ")}) — this turn runs without their tools.`,
+			});
+		}
+
 		if (ws.session.cwd && !existsSync(ws.session.cwd)) {
 			mkdirSync(ws.session.cwd, { recursive: true });
 		}
@@ -3676,7 +3687,10 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					result: mcpResult.allServerNames.map((n) => ({
 						name: n,
 						source: mcpResult.serverSources[n] ?? "global",
-						connected: mcpResult.connections.some((c) => c.serverName === n),
+						// alive, not merely present: a server whose transport died is
+						// still in `connections` (nothing prunes it), and reporting it
+						// as connected sent the user looking for a problem elsewhere.
+						connected: mcpResult.connections.some((c) => c.serverName === n && c.alive !== false),
 						disabled: (loadSettings().disabledMcpServers ?? []).includes(n),
 					})),
 				};
