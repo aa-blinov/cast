@@ -6,6 +6,7 @@ All notable user-facing changes to cast, newest first.
 
 ### Fixed
 
+- **Compaction:** a summarization call that *succeeded* with empty content still compacted — every superseded message left the working context and was replaced by a content-free marker, while the caller reported success. Providers produce this in ordinary ways (a reasoning-only stream, a refusal emitted as an empty assistant turn, a stream truncated without throwing). It is now treated like any other summarization failure: the history is kept and compaction retries on the next turn.
 - **Turns:** the near-the-budget reminder was pushed on *each* of the last four iterations rather than once on entering that stretch, spending context on near-identical system messages exactly when the turn is short of room.
 - **Turns:** requesting a per-run iteration budget against a session whose turn is already running dropped the budget in silence. The message still steers into the running turn, but a notice now says the budget applies to a new turn rather than this one.
 - **Agents:** creating an agent failed outright on a database carrying the multi-tenant `agents.user_id` column — `NOT NULL constraint failed: agents.user_id` — so the feature was simply unusable on such a store (found on a real one). The row is now attributed to an existing user when that column is present.
