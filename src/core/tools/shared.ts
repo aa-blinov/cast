@@ -6,7 +6,7 @@
  */
 
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, resolve, sep } from "node:path";
 import type { Usage } from "../llm.ts";
 
 export interface ToolResult {
@@ -156,6 +156,22 @@ export function resolvePath(path: string, cwd: string): string {
 	if (path === "~") return homedir();
 	if (isAbsolute(path)) return path;
 	return resolve(cwd, path);
+}
+
+/** Shorten an absolute path to a cwd-relative one — but only when it really
+ * is inside cwd.
+ *
+ * A bare `path.startsWith(cwd)` is true for a *sibling* whose name merely
+ * begins with cwd's ("/w/proj" vs "/w/proj-extra"), and slicing
+ * `cwd.length + 1` off that produced a mangled path with the directory's name
+ * chopped mid-word — `/w/proj-extra/a.ts` came back as `extra/a.ts`, which
+ * resolves to nothing, so the model was handed a file path it could not read.
+ * Paths outside cwd are left absolute, which is what a caller can actually use.
+ */
+export function relativeToCwd(path: string, cwd: string): string {
+	if (path === cwd) return ".";
+	const prefix = cwd.endsWith(sep) ? cwd : cwd + sep;
+	return path.startsWith(prefix) ? path.slice(prefix.length) : path;
 }
 
 export function formatSize(bytes: number): string {

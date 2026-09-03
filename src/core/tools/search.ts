@@ -12,7 +12,7 @@ import { access, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { basename, join, relative } from "node:path";
 import { promisify } from "node:util";
 import type { AppConfig } from "../config.ts";
-import { formatSize, resolvePath, type ToolResult, toolError } from "./shared.ts";
+import { formatSize, relativeToCwd, resolvePath, type ToolResult, toolError } from "./shared.ts";
 
 const REGEX_ESCAPE_RE = /[.*+?^${}()|[\]\\]/g;
 const SEARCH_PATH_PREFIX_RE = /^\.\//gm;
@@ -363,7 +363,7 @@ export async function execGlob(
 
 	if (absolutePaths.length === 0) return { content: "No files found" };
 
-	const relativePaths = absolutePaths.map((p) => (p.startsWith(cwd) ? p.slice(cwd.length + 1) : p));
+	const relativePaths = absolutePaths.map((p) => relativeToCwd(p, cwd));
 	let content = relativePaths.join("\n");
 	// Few hits → steer the model straight to read instead of another glob/ls.
 	if (relativePaths.length <= 3) {
@@ -600,7 +600,7 @@ export async function execGrep(
 			}
 
 			const fileLines = fileText.split("\n");
-			const relPath = absPath.startsWith(cwd) ? absPath.slice(cwd.length + 1) : absPath;
+			const relPath = relativeToCwd(absPath, cwd);
 
 			let fileMatches = 0;
 			for (let i = 0; i < fileLines.length; i++) {
