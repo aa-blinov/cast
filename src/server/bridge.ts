@@ -4766,7 +4766,15 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		unsubscribe,
 		subscribeAll,
 		unsubscribeAll,
-		dispose: unsubscribeActorNotifications,
+		dispose: () => {
+			unsubscribeActorNotifications();
+			// Stdio MCP servers are child processes; the daemon's shutdown never
+			// closed them, relying on stdin EOF once cast exits — which a server
+			// that ignores EOF survives, leaving an orphan behind every restart.
+			// Every other path (/mcp enable|disable|reconnect|uninstall, the TUI,
+			// a failed connect) already closes them explicitly.
+			void closeMcpConnections(mcpResult.connections);
+		},
 		executeCommand,
 		executeSettingsCommand,
 		getConfig,

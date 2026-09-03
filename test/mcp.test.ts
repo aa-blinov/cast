@@ -120,6 +120,30 @@ describe("connectMcpServers (real spawned MCP server, not mocked)", () => {
 		}
 	});
 
+	it("reports a tool-name collision instead of silently routing to one server", async () => {
+		// `[^a-zA-Z0-9_-]` all becomes `_`, so distinct (server, tool) pairs can
+		// converge — "echo.one"/"add" and "echo"/"one_add" both map to
+		// mcp_echo_one_add. The index was last-wins while the definitions kept
+		// both, so the provider saw duplicate function names and calls routed to
+		// whichever server connected last: different between runs, no warning.
+		const result = await connectMcpServers({
+			"echo one": { command: "node", args: [FIXTURE_SERVER] },
+			echo_one: { command: "node", args: [FIXTURE_SERVER] },
+		});
+		try {
+			const names = result.toolDefinitions.map((t) => t.function.name);
+			// No duplicate function names reach the provider...
+			expect(new Set(names).size).toBe(names.length);
+			// ...and the dropped one is reported rather than lost.
+			expect(result.diagnostics.join("\n")).toContain("collision");
+			// The surviving handle still works.
+			const handle = result.toolIndex.get("mcp_echo_one_echo");
+			expect(await handle?.call({ text: "still routed" })).toMatchObject({ content: "still routed" });
+		} finally {
+			await closeMcpConnections(result.connections);
+		}
+	});
+
 	it("builds OpenAI-shape tool definitions from the server's inputSchema", async () => {
 		const result = await connectMcpServers({ echo: { command: "node", args: [FIXTURE_SERVER] } });
 		try {
