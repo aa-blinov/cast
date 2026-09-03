@@ -43,6 +43,7 @@ User settings are persisted to `~/.cast/settings.json`. This file is loaded on s
 | `braveApiKey` | string | API key for the Brave Search backend, from https://api-dashboard.search.brave.com |
 | `webFetchProvider` | `"jina"` \| `"local"` | `web_fetch` backend (default: `"jina"`) — use `/web-fetch-provider` to change |
 | `disabledMcpServers` | string[] | MCP server names disabled via `/mcp` toggle |
+| `mcpToolTimeoutSeconds` | integer | How long an MCP tool call may take before it fails, clamped to 5–3600. Unset uses the MCP SDK's own 60s default — raise it for a slow-but-legitimate tool (a browser step, a heavy query). Read per call, so a change applies without reconnecting |
 | `disabledSkills` | string[] | Skill names disabled via `/skills` toggle |
 | `disabledHooks` | string[] | Content-derived hook group ids disabled via `/hooks` |
 | `enabledPlugins` | Record<string, boolean> | Marketplace plugins keyed by `name@marketplace` |

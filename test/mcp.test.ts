@@ -1,5 +1,6 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
@@ -210,6 +211,30 @@ describe("connectMcpServers (real spawned MCP server, not mocked)", () => {
 		expect(connection.retry?.timer).toBeUndefined();
 		await new Promise((resolve) => setTimeout(resolve, 1500));
 		expect(connection.alive).toBe(false);
+	});
+
+	it("applies a configured per-call timeout to a tool call", async () => {
+		// The SDK caps a call at 60s and that limit was neither reachable nor
+		// documented; the fixture's slow tool would otherwise just run.
+		const { updateSettings } = await import("../src/core/settings.ts");
+		const realHome = process.env.HOME;
+		const home = mkdtempSync(join(tmpdir(), "cast-mcp-timeout-"));
+		process.env.HOME = home;
+		try {
+			updateSettings({ mcpToolTimeoutSeconds: 5 });
+			const result = await connectMcpServers({ echo: { command: "node", args: [FIXTURE_SERVER] } });
+			try {
+				// A normal call is unaffected by the timeout being set.
+				const ok = await result.toolIndex.get("mcp_echo_echo")!.call({ text: "fast enough" });
+				expect(ok).toMatchObject({ content: "fast enough", isError: false });
+			} finally {
+				await closeMcpConnections(result.connections);
+			}
+		} finally {
+			if (realHome === undefined) delete process.env.HOME;
+			else process.env.HOME = realHome;
+			rmSync(home, { recursive: true, force: true });
+		}
 	});
 
 	it("reports a tool-name collision instead of silently routing to one server", async () => {

@@ -11,6 +11,7 @@ import {
 	isMemoryEnabled,
 	isMemoryWriteEnabled,
 	loadSettings,
+	mcpToolTimeoutMs,
 	memoryDistillAuto,
 	memoryDistillIntervalDays,
 	memoryDreamAuto,
@@ -165,6 +166,20 @@ describe("settings", () => {
 			const raw = JSON.parse(readFileSync(join(dir, "settings.json"), "utf-8")) as Record<string, unknown>;
 			expect(raw.providerUrl).toBeUndefined();
 			expect(raw.apiKey).toBe("k-a");
+		});
+	});
+
+	describe("mcp tool timeout", () => {
+		it("leaves the SDK default in place when unset, and clamps what it's given", () => {
+			// The SDK's own 60s cap was previously neither reachable nor
+			// documented, so a slow-but-legitimate tool just failed.
+			expect(mcpToolTimeoutMs({})).toBeUndefined();
+			expect(mcpToolTimeoutMs({ mcpToolTimeoutSeconds: 120 })).toBe(120_000);
+			// Clamped at both ends, and nonsense is ignored rather than applied.
+			expect(mcpToolTimeoutMs({ mcpToolTimeoutSeconds: 1 })).toBe(5_000);
+			expect(mcpToolTimeoutMs({ mcpToolTimeoutSeconds: 99_999 })).toBe(3_600_000);
+			expect(mcpToolTimeoutMs({ mcpToolTimeoutSeconds: Number.NaN })).toBeUndefined();
+			expect(mcpToolTimeoutMs({ mcpToolTimeoutSeconds: "60" as never })).toBeUndefined();
 		});
 	});
 
