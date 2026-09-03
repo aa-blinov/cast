@@ -674,6 +674,81 @@ async function assertPublicFetchTarget(urlStr: string): Promise<void> {
 
 const LOCAL_MAX_REDIRECTS = 5;
 
+/** Reads the body, giving up as soon as it passes the cap.
+ *
+ * `arrayBuffer()` buffers the entire response before anything can measure it,
+ * so the size check that ran after it only ever reported a limit already
+ * exceeded — a server that declares no Content-Length (or understates it) and
+ * streams gigabytes would take the process to an OOM kill before the check it
+ * was supposed to be caught by ever ran. Reading chunk by chunk and cancelling
+ * mid-stream keeps at most the cap plus one chunk in memory.
+ */
+async function readCappedBody(resp: Response): Promise<Uint8Array> {
+	const tooLarge = (): Error => new Error(`Response too large (exceeds ${LOCAL_MAX_RESPONSE_BYTES} byte limit)`);
+	// A 204/304 (and a HEAD response) has no body at all; nothing to stream.
+	if (!resp.body) {
+		const buf = new Uint8Array(await resp.arrayBuffer());
+		if (buf.byteLength > LOCAL_MAX_RESPONSE_BYTES) throw tooLarge();
+		return buf;
+	}
+	const reader = resp.body.getReader();
+	const chunks: Uint8Array[] = [];
+	let total = 0;
+	try {
+		for (;;) {
+			// biome-ignore lint/performance/noAwaitInLoops: reading a stream is inherently sequential
+			const { done, value } = await reader.read();
+			if (done) break;
+			if (!value) continue;
+			total += value.byteLength;
+			if (total > LOCAL_MAX_RESPONSE_BYTES) throw tooLarge();
+			chunks.push(value);
+		}
+	} finally {
+		// Releases the connection instead of leaving it held open by an
+		// abandoned reader — including on the over-limit throw above.
+		await reader.cancel().catch(() => {});
+	}
+	const out = new Uint8Array(total);
+	let offset = 0;
+	for (const chunk of chunks) {
+		out.set(chunk, offset);
+		offset += chunk.byteLength;
+	}
+	return out;
+}
+
+const CHARSET_RE = /charset\s*=\s*"?([\w-]+)"?/i;
+const META_CHARSET_RE = /<meta[^>]+charset\s*=\s*["']?([\w-]+)/i;
+
+/** Decodes the body using the charset the response actually declares.
+ *
+ * The decoder was hardcoded to UTF-8, so a page served as windows-1251,
+ * iso-8859-1 or shift_jis — still common outside the anglophone web — came
+ * back as replacement characters, and the model got mojibake it had no way to
+ * recognize as an encoding problem. The header wins; for HTML without one,
+ * the `<meta charset>` in the document is honored (its ASCII-compatible
+ * prefix decodes the same under every label this cares about); an unknown or
+ * unsupported label falls back to UTF-8 rather than failing the fetch.
+ */
+function decodeBody(buf: Uint8Array, contentType: string): string {
+	const declared = CHARSET_RE.exec(contentType)?.[1];
+	const label =
+		declared ??
+		(mimeFrom(contentType).includes("html") || !contentType
+			? META_CHARSET_RE.exec(new TextDecoder("utf-8").decode(buf.subarray(0, 2048)))?.[1]
+			: undefined);
+	if (label && label.toLowerCase() !== "utf-8" && label.toLowerCase() !== "utf8") {
+		try {
+			return new TextDecoder(label).decode(buf);
+		} catch {
+			// RangeError for a label Node doesn't know — UTF-8 is the better
+			// guess than refusing to return the page at all.
+		}
+	}
+	return new TextDecoder().decode(buf);
+}
+
 export async function fetchUrlLocal(
 	url: string,
 	options?: { format?: FetchFormat; maxChars?: number; signal?: AbortSignal },
@@ -730,12 +805,9 @@ export async function fetchUrlLocal(
 		if (isImageMime(mime)) throw new Error(`Unsupported fetched image content type: ${mime}`);
 		if (!isTextualMime(mime)) throw new Error(`Unsupported fetched file content type: ${mime}`);
 
-		const buf = await resp.arrayBuffer();
-		if (buf.byteLength > LOCAL_MAX_RESPONSE_BYTES) {
-			throw new Error(`Response too large (exceeds ${LOCAL_MAX_RESPONSE_BYTES} byte limit)`);
-		}
+		const buf = await readCappedBody(resp);
 
-		const raw = new TextDecoder().decode(buf);
+		const raw = decodeBody(buf, contentType);
 		let content = raw;
 		if (contentType.includes("text/html")) {
 			if (format === "markdown") content = convertHTMLToMarkdown(raw);

@@ -563,16 +563,40 @@ function mockLocalResponse(opts: {
 	status?: number;
 	statusText?: string;
 	headers?: Record<string, string>;
-	body: string;
+	body?: string;
+	bytes?: Uint8Array;
 }) {
 	const headerMap = new Map(Object.entries(opts.headers ?? {}).map(([k, v]) => [k.toLowerCase(), v]));
-	const bytes = new TextEncoder().encode(opts.body);
+	const bytes = opts.bytes ?? new TextEncoder().encode(opts.body ?? "");
+	// A real body is a stream, and fetchUrlLocal reads it as one so it can stop
+	// at the size cap instead of buffering everything first. Chunked here (and
+	// counted) so a test can assert how much was actually pulled off the wire.
+	const CHUNK = 64 * 1024;
+	let delivered = 0;
+	const body = {
+		getReader() {
+			let offset = 0;
+			return {
+				async read() {
+					if (offset >= bytes.byteLength) return { done: true, value: undefined };
+					const end = Math.min(offset + CHUNK, bytes.byteLength);
+					const value = bytes.subarray(offset, end);
+					offset = end;
+					delivered += value.byteLength;
+					return { done: false, value };
+				},
+				async cancel() {},
+			};
+		},
+	};
 	return {
 		ok: opts.ok ?? true,
 		status: opts.status ?? 200,
 		statusText: opts.statusText ?? "",
 		headers: { get: (name: string) => headerMap.get(name.toLowerCase()) ?? null },
+		body,
 		arrayBuffer: async () => bytes.buffer,
+		bytesDelivered: () => delivered,
 	};
 }
 
@@ -700,6 +724,75 @@ describe("fetchUrlLocal", () => {
 		vi.stubGlobal("fetch", fetchMock);
 
 		await expect(fetchUrlLocal("https://example.com/huge")).rejects.toThrow(/too large/i);
+	});
+
+	it("stops reading a body that passes the cap instead of buffering all of it first", async () => {
+		// The size check used to run after arrayBuffer(), which had already
+		// pulled the entire response into memory — so a server streaming
+		// gigabytes with no Content-Length would OOM the process before the
+		// limit it was supposed to be caught by was ever evaluated.
+		const overLimit = new Uint8Array(6 * 1024 * 1024);
+		const response = mockLocalResponse({ headers: { "content-type": "text/plain" }, bytes: overLimit });
+		vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+
+		await expect(fetchUrlLocal("https://example.com/huge")).rejects.toThrow(/too large/i);
+		// The body was streamed (not handed over whole) and reading stopped at
+		// the cap plus at most the chunk that crossed it — nowhere near 6MB.
+		expect(response.bytesDelivered()).toBeGreaterThan(0);
+		expect(response.bytesDelivered()).toBeLessThan(5 * 1024 * 1024 + 128 * 1024);
+		expect(response.bytesDelivered()).toBeLessThan(overLimit.byteLength);
+	});
+
+	it("decodes a body using the charset the response declares, not always UTF-8", async () => {
+		// "Привет" in windows-1251. Decoded as UTF-8 (the old hardcoded
+		// decoder) every byte is invalid and the model gets replacement
+		// characters with no hint that it was an encoding problem.
+		const cp1251 = new Uint8Array([0xcf, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2]);
+		vi.stubGlobal(
+			"fetch",
+			vi
+				.fn()
+				.mockResolvedValue(
+					mockLocalResponse({ headers: { "content-type": "text/plain; charset=windows-1251" }, bytes: cp1251 }),
+				),
+		);
+
+		const result = await fetchUrlLocal("https://example.com/ru.txt");
+		expect(result.content).toBe("Привет");
+	});
+
+	it("honors a <meta charset> when the HTML response declares none in its header", async () => {
+		const head = new TextEncoder().encode('<html><head><meta charset="windows-1251"></head><body><p>');
+		const word = new Uint8Array([0xcf, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2]);
+		const tail = new TextEncoder().encode("</p></body></html>");
+		const bytes = new Uint8Array(head.length + word.length + tail.length);
+		bytes.set(head, 0);
+		bytes.set(word, head.length);
+		bytes.set(tail, head.length + word.length);
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockResolvedValue(mockLocalResponse({ headers: { "content-type": "text/html" }, bytes })),
+		);
+
+		const result = await fetchUrlLocal("https://example.com/ru.html", { format: "text" });
+		expect(result.content).toBe("Привет");
+	});
+
+	it("falls back to UTF-8 for a charset label the runtime does not know", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi
+				.fn()
+				.mockResolvedValue(
+					mockLocalResponse({
+						headers: { "content-type": "text/plain; charset=x-nonsense" },
+						body: "plain ascii",
+					}),
+				),
+		);
+
+		const result = await fetchUrlLocal("https://example.com/odd.txt");
+		expect(result.content).toBe("plain ascii");
 	});
 
 	it("retries once with a plain User-Agent on a Cloudflare bot challenge (403 + cf-mitigated)", async () => {
