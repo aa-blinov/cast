@@ -73,6 +73,9 @@ export function saveMcpConfig(path: string, servers: Record<string, McpServerCon
 }
 
 /** OpenAI function-calling tool names are restricted to [a-zA-Z0-9_-]; server/tool names aren't guaranteed to be. */
+/** Pulls the server name back out of a tool definition's "[server] …" description. */
+const MCP_DESCRIPTION_SERVER_RE = /^\[([^\]]+)]/;
+
 export function sanitizeToolNamePart(name: string): string {
 	return name.replace(MCP_SANITIZE_NAME_RE, "_");
 }
@@ -337,6 +340,24 @@ export async function connectMcpServers(
 							parameters: t.inputSchema as Record<string, unknown>,
 						},
 					};
+					// Two different (server, tool) pairs can sanitize to the same
+					// name — `[^a-zA-Z0-9_-]` all becomes `_`, so a server called
+					// "github.api" with tool "x" collides with "github" + "api_x".
+					// The index was last-wins while the definitions kept both, so
+					// the provider received duplicate function names and calls
+					// silently routed to whichever server happened to connect
+					// last: non-deterministic between runs, with no diagnostic.
+					// Keep the first and say what was dropped.
+					const clash = toolIndex.get(name);
+					if (clash) {
+						const owner = MCP_DESCRIPTION_SERVER_RE.exec(clash.definition.function.description ?? "")?.[1];
+						diagnostics.push(
+							`mcp tool name collision: "${serverName}"/"${t.name}" maps to "${name}", already provided by ${
+								owner ? `"${owner}"` : "another server"
+							} — keeping the first; the second is unavailable.`,
+						);
+						continue;
+					}
 					toolDefinitions.push(definition);
 					toolIndex.set(name, {
 						definition,
