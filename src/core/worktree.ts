@@ -487,9 +487,9 @@ export async function createSessionWorktree(
 export async function removeSessionWorktree(
 	name: string,
 	startCwd: string,
-	context: { sessionId?: string; projectTrusted: boolean; worktreePath?: string },
+	context: { sessionId?: string; projectTrusted: boolean; worktreePath?: string; force?: boolean },
 ): Promise<{ ok: boolean; message: string }> {
-	const result = await removeWorktreeBySlug(name, startCwd);
+	const result = await removeWorktreeBySlug(name, startCwd, { force: context.force });
 	if (result.ok) {
 		void runHooksForEvent(resolveHooksForCwd(startCwd, context.projectTrusted), {
 			event: "WorktreeRemove",
@@ -501,7 +501,22 @@ export async function removeSessionWorktree(
 	return result;
 }
 
-export async function removeWorktreeBySlug(name: string, startCwd: string): Promise<{ ok: boolean; message: string }> {
+/**
+ * Remove a worktree and its branch.
+ *
+ * Without `force` this asks git nicely: `git worktree remove` refuses a tree
+ * holding modified or untracked files, and `git branch -d` refuses a branch
+ * whose commits aren't merged anywhere. Removal used to pass `--force` and
+ * `-D` unconditionally, so `/worktree remove foo` silently destroyed
+ * uncommitted work *and* unmerged commits — git's own two guards against
+ * exactly that, both bypassed, with nothing asked and nothing said. `force`
+ * is for a caller who has actually confirmed that intent.
+ */
+export async function removeWorktreeBySlug(
+	name: string,
+	startCwd: string,
+	opts: { force?: boolean } = {},
+): Promise<{ ok: boolean; message: string }> {
 	validateWorktreeSlug(name);
 	const repoRoot = findCanonicalGitRoot(startCwd);
 	if (!repoRoot) {
@@ -515,11 +530,30 @@ export async function removeWorktreeBySlug(name: string, startCwd: string): Prom
 		return { ok: false, message: `Worktree "${name}" does not exist` };
 	}
 
-	const removeRes = await runGitAsyncWithStatus(repoRoot, ["worktree", "remove", "--force", wtPath]);
-	runGitWithStatus(repoRoot, ["branch", "-D", branch]);
-
+	const removeArgs = opts.force ? ["worktree", "remove", "--force", wtPath] : ["worktree", "remove", wtPath];
+	const removeRes = await runGitAsyncWithStatus(repoRoot, removeArgs);
 	if (!removeRes.ok && existsSync(wtPath)) {
+		if (!opts.force) {
+			return {
+				ok: false,
+				message:
+					`Worktree "${name}" was not removed — git refused: ${removeRes.stderr || "it is not clean"}. ` +
+					`Commit or stash the work in ${wtPath}, or run \`/worktree remove ${name} --force\` to discard it.`,
+			};
+		}
 		return { ok: false, message: `Failed to remove worktree: ${removeRes.stderr}` };
+	}
+
+	// The tree is gone; the branch is a separate decision. `-d` keeps commits
+	// that exist nowhere else, and saying so is more useful than deleting them.
+	const branchRes = runGitWithStatus(repoRoot, ["branch", opts.force ? "-D" : "-d", branch]);
+	if (!branchRes.ok) {
+		return {
+			ok: true,
+			message:
+				`Worktree "${name}" removed. Branch "${branch}" was kept — git refused to delete it ` +
+				`(its commits are not merged anywhere else). Delete it with \`git branch -D ${branch}\` once you are sure.`,
+		};
 	}
 	return { ok: true, message: `Worktree "${name}" and branch "${branch}" removed` };
 }

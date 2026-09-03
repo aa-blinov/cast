@@ -138,6 +138,8 @@ const SYSTEM_REMINDER_RE = /<system-reminder>([\s\S]*?)<\/system-reminder>/g;
 const GITHUB_URL_RE = /^https?:\/\/(?:www\.)?github\.com\//i;
 const FRONTMATTER_STRIP_RE = /^---\n[\s\S]*?\n---\n?/;
 const WORKTREE_REMOVE_PREFIX_RE = /^(?:remove|rm)\s*(.*)$/;
+const WORKTREE_FORCE_FLAG_RE = /(^|\s)(--force|-f)(\s|$)/;
+const WORKTREE_FORCE_STRIP_RE = /(^|\s)(--force|-f)(?=\s|$)/g;
 const MEMORY_WRITE_COMMAND_RE = /^write(?:\s+(on|off))?$/;
 const MEMORY_BUDGET_COMMAND_RE = /^budget\s+(\d+)$/;
 const MEMORY_FLOOR_COMMAND_RE = /^floor\s+(0(?:\.\d+)?|1(?:\.0)?)$/;
@@ -4379,8 +4381,12 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			}
 			const rmMatch = WORKTREE_REMOVE_PREFIX_RE.exec(arg);
 			if (rmMatch) {
-				const targetName = rmMatch[1]!.trim();
-				if (!targetName) return { ok: false, error: "Usage: /worktree remove <name>" };
+				const removeArg = rmMatch[1]!.trim();
+				// See the TUI's /worktree remove: --force is opt-in because it
+				// discards uncommitted work and unmerged commits.
+				const force = WORKTREE_FORCE_FLAG_RE.test(removeArg);
+				const targetName = removeArg.replace(WORKTREE_FORCE_STRIP_RE, "").trim();
+				if (!targetName) return { ok: false, error: "Usage: /worktree remove <name> [--force]" };
 				const target = listWorktrees(sessionCwd).find((worktree) => worktree.name === targetName);
 				// removeWorktreeBySlug runs `git worktree remove --force`, which
 				// bypasses git's own uncommitted-changes guard — nothing else
@@ -4400,6 +4406,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					sessionId: ws.id,
 					projectTrusted,
 					worktreePath: target?.path,
+					force,
 				});
 				return { ok: true, result: res.message };
 			}
