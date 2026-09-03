@@ -17,7 +17,7 @@ import { backupFileForCheckpoint, createCheckpoint, restoreCheckpoint } from "..
 import { fetchModels, type ModelInfo, probeProvider, resolveProvider } from "../core/config.ts";
 import { formatContextFilesForPrompt, resolveNestedContextFiles } from "../core/context-files.ts";
 import { initialAnnouncedLocalDate } from "../core/date-rollover-reminder.ts";
-import { hasHooks, runHooksForEvent } from "../core/hooks.ts";
+import { hasHooks, hookPromptContext, runHooksForEvent } from "../core/hooks.ts";
 import { createClient, type Message, streamAndCollect } from "../core/llm.ts";
 import { type AgentEvent, compactSessionMessages, runAgentLoop, runMemoryMaintenanceAgent } from "../core/loop.ts";
 import { closeMcpConnections, formatMcpForPrompt, type McpSetupResult } from "../core/mcp.ts";
@@ -1559,7 +1559,8 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				});
 				return;
 			}
-			if (submitResult.reason) text = `${text}\n\n<hook-context>${submitResult.reason}</hook-context>`;
+			const hookContext = hookPromptContext(submitResult);
+			if (hookContext) text = `${text}\n\n<hook-context>${hookContext}</hook-context>`;
 		}
 
 		if (ws.session.cwd && !existsSync(ws.session.cwd)) {

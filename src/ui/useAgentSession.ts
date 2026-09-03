@@ -10,7 +10,7 @@ import { backupFileForCheckpoint, createCheckpoint } from "../core/checkpoint.ts
 import type { AppConfig } from "../core/config.ts";
 import { resolveProvider } from "../core/config.ts";
 import { initialAnnouncedLocalDate } from "../core/date-rollover-reminder.ts";
-import { hasHooks, runHooksForEvent } from "../core/hooks.ts";
+import { hasHooks, hookPromptContext, runHooksForEvent } from "../core/hooks.ts";
 import { describeTurnError, isRetryableStreamError, type Message, stripHermesToolCalls } from "../core/llm.ts";
 import { type AgentEvent, runAgentLoop } from "../core/loop.ts";
 import { formatMcpForPrompt, type McpSetupResult } from "../core/mcp.ts";
@@ -970,7 +970,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					runner.endRun(lease);
 					return;
 				}
-				if (submitResult.reason) text = `${text}\n\n<hook-context>${submitResult.reason}</hook-context>`;
+				const hookContext = hookPromptContext(submitResult);
+				if (hookContext) text = `${text}\n\n<hook-context>${hookContext}</hook-context>`;
 			}
 
 			// Ensure the session row exists before appending its checkpoint

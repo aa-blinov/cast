@@ -951,6 +951,34 @@ export interface RunHooksOptions {
  * `updatedInput`/`updatedToolOutput` which carry over from whichever hook
  * set them last.
  */
+/** Largest hook output that may be pasted into the model's prompt. Hook stdout
+ *  is arbitrary program output — a runaway script could otherwise push the
+ *  turn straight past the context window. */
+const MAX_HOOK_CONTEXT_CHARS = 8000;
+
+/**
+ * The text a UserPromptSubmit hook contributes to the prompt, or undefined.
+ *
+ * Prefers `hookSpecificOutput.additionalContext`, which is what the docs
+ * document for this and what a hook author would reach for — it was parsed,
+ * merged and unit-tested, but no caller ever read it, so the documented field
+ * did nothing. `reason` (populated only on block-shaped output) is what the
+ * call sites actually injected, so it stays as the fallback.
+ *
+ * The closing tag is neutralised: the wrapper is `<hook-context>…`, and hook
+ * output containing that tag could otherwise close the block early and have
+ * the rest read as if cast had written it.
+ */
+export function hookPromptContext(result: HookRunResult): string | undefined {
+	const raw = result.additionalContext ?? result.reason;
+	if (!raw?.trim()) return undefined;
+	const clipped = raw.length > MAX_HOOK_CONTEXT_CHARS ? `${raw.slice(0, MAX_HOOK_CONTEXT_CHARS)}\n[truncated]` : raw;
+	return clipped.replaceAll("</hook-context>", "<\\/hook-context>");
+}
+
+/** One warning per event+matcher pair, not per firing. */
+const warnedUnusedMatchers = new Set<string>();
+
 export async function runHooksForEvent(hooks: HooksFile, opts: RunHooksOptions): Promise<HookRunResult> {
 	const groups = hooks[opts.event];
 	if (!groups?.length) return { blocked: false, stdout: "", exitCode: null };
@@ -964,10 +992,27 @@ export async function runHooksForEvent(hooks: HooksFile, opts: RunHooksOptions):
 		}))
 		.filter((g) => g.hooks.length > 0);
 
-	const matchedGroups =
-		matchTarget !== undefined
-			? filteredGroups.filter((g) => matchesMatcher(matchTarget, g.matcher ?? ""))
-			: filteredGroups;
+	let matchedGroups: typeof filteredGroups;
+	if (matchTarget !== undefined) {
+		matchedGroups = filteredGroups.filter((g) => matchesMatcher(matchTarget, g.matcher ?? ""));
+	} else {
+		// This event carries nothing to match against, so every group runs
+		// regardless of its matcher. That is the long-standing behaviour and
+		// changing it would silently stop existing hooks from firing — but a
+		// matcher that looks like a filter and filters nothing is worth saying
+		// out loud once, since the user wrote it expecting the opposite.
+		for (const group of filteredGroups) {
+			const matcher = group.matcher?.trim();
+			if (!matcher || matcher === "*") continue;
+			const key = `${opts.event}\u0000${matcher}`;
+			if (warnedUnusedMatchers.has(key)) continue;
+			warnedUnusedMatchers.add(key);
+			console.error(
+				`[cast] the ${opts.event} hook event has nothing to match against, so its matcher ${JSON.stringify(matcher)} is ignored and the hook runs every time.`,
+			);
+		}
+		matchedGroups = filteredGroups;
+	}
 
 	const deduped = deduplicateHooks(matchedGroups);
 
