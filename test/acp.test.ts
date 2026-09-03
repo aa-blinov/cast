@@ -291,6 +291,38 @@ describe("ACP adapter", () => {
 		expect(result.sessions[1].cwd).toBe("/b");
 	});
 
+	it("does not replay cast's own system reminders as if the user had typed them", async () => {
+		// `<system-reminder>` blocks are cast talking to the model — interrupt
+		// notices, the post-compaction state block, background-task completions.
+		// They ride on `role: "user"` because the wire format has no better role,
+		// and this replay sent them verbatim, so the editor showed raw XML
+		// attributed to the person using it. 158 such messages exist in one real
+		// store. The web UI and TUI both strip them.
+		const client = { notify: vi.fn(async () => {}) };
+		(loadSession as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+			id: "replayed",
+			cwd: "/tmp/test",
+			model: "test",
+			messages: [
+				{ role: "user", content: "the real question" },
+				{ role: "assistant", content: "the answer" },
+				{ role: "user", content: "<system-reminder>\n[Request interrupted by user]\n</system-reminder>" },
+				{ role: "user", content: "<system-reminder>\nnotes\n</system-reminder>\n\nand a real follow-up" },
+			],
+		});
+
+		adapter.loadSession("replayed", {} as never, { version: "t", permissionMode: "default" }, client as never);
+		await new Promise<void>((resolve) => setTimeout(resolve, 20));
+
+		const userTexts = client.notify.mock.calls
+			.map((call: unknown[]) => call[1] as { update?: { sessionUpdate?: string; content?: { text?: string } } })
+			.filter((params) => params.update?.sessionUpdate === "user_message_chunk")
+			.map((params) => params.update?.content?.text ?? "");
+
+		expect(userTexts).toEqual(["the real question", "and a real follow-up"]);
+		expect(userTexts.join("\n")).not.toContain("system-reminder");
+	});
+
 	it("closeSession unloads and aborts, and keeps the conversation on disk", async () => {
 		// session/close releases this session's resources; it must not destroy
 		// the conversation. It used to call deleteSession, so closing a thread

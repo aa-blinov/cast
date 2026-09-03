@@ -35,6 +35,7 @@ import {
 } from "../core/session.ts";
 import { loadSettings, type PermissionMode, updateSettings } from "../core/settings.ts";
 import { setLastTurnAborted, setStreamingActive } from "../core/stdin-manager.ts";
+import { extractSystemReminders } from "../core/system-reminder.ts";
 import type { BackgroundTaskRegistry, BashBackgroundDeps } from "../core/tools/bash-background.ts";
 import { completedToolCallStatus, type ToolCallStatus } from "../core/tools/shared.ts";
 import {
@@ -436,13 +437,7 @@ export function buildDisplayMessages(sessionMessages: SessionState["messages"]):
 			// messages instead of raw XML. These are internal protocol
 			// (compaction, date-rollover, interrupt reminders) injected as
 			// role:"user" because the wire format has no dedicated role.
-			const reminders: string[] = [];
-			const cleaned = text
-				.replace(/<system-reminder>([\s\S]*?)<\/system-reminder>/g, (_, body: string) => {
-					reminders.push(body.trim());
-					return "";
-				})
-				.trim();
+			const { cleaned, reminders } = extractSystemReminders(text);
 			// Show each reminder as a styled warning message
 			for (const body of reminders) {
 				if (body) out.push({ role: "warning", content: `[system] ${body}` });

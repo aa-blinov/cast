@@ -115,6 +115,7 @@ import {
 } from "../core/skills.ts";
 import { saveSshConfig } from "../core/ssh.ts";
 import type { StartupResult } from "../core/startup.ts";
+import { extractSystemReminders } from "../core/system-reminder.ts";
 import { classifyLlmError, recordLlmCompaction, recordLlmRequest, recordToolCall } from "../core/telemetry.ts";
 import { stripAnsi } from "../core/tools/bash.ts";
 import { BackgroundTaskRegistry, type BashBackgroundDeps } from "../core/tools/bash-background.ts";
@@ -134,7 +135,6 @@ import type { ThemeColors } from "../ui/themes/types.ts";
 import { buildGoalPrompt, isCommandBlocking, parseGoalInput, REVIEW_PROMPT, SLASH_COMMANDS } from "./commands.ts";
 import { isSafePathSegment, isSafeSessionId, sessionInputsDir } from "./inputs.ts";
 
-const SYSTEM_REMINDER_RE = /<system-reminder>([\s\S]*?)<\/system-reminder>/g;
 const GITHUB_URL_RE = /^https?:\/\/(?:www\.)?github\.com\//i;
 const FRONTMATTER_STRIP_RE = /^---\n[\s\S]*?\n---\n?/;
 const WORKTREE_REMOVE_PREFIX_RE = /^(?:remove|rm)\s*(.*)$/;
@@ -453,17 +453,6 @@ export function reconcileActiveStream(
  *  shared by both branches below (plain-string user messages, and the
  *  array-content branch for a message that also carries images) so a
  *  reminder is never left as raw XML in what the user sees. */
-function extractSystemReminders(text: string): { cleaned: string; reminders: string[] } {
-	const reminders: string[] = [];
-	const cleaned = text
-		.replace(SYSTEM_REMINDER_RE, (_, body: string) => {
-			reminders.push(body.trim());
-			return "";
-		})
-		.trim();
-	return { cleaned, reminders };
-}
-
 /** Parse the skill-suggest eval verdict. Robust to MiniMax inlining its
  * chain-of-thought into `content` before the JSON instead of putting it in a
  * reasoning field — the JSON substring is extracted and parsed. */

@@ -2933,6 +2933,51 @@ describe("runAgentLoop — open-work gate", () => {
 		}
 	});
 
+	it("gives the gate its budget back when the user steers mid-turn", async () => {
+		// The gate is documented as capped "per user prompt". The follow-up path
+		// reset the counter; steering did not — so a steer sent after the gate
+		// had already fired its two nudges left the model free to stop with
+		// approved-plan work still open, exactly when the user had asked for
+		// more.
+		const dir = mkdtempSync(join(tmpdir(), "cast-owg-steer-"));
+		writeFileSync(join(dir, "feature.md"), openPlan, "utf-8");
+		const steeringQueue = new MessageQueue();
+		try {
+			let calls = 0;
+			vi.mocked(streamAndCollect).mockImplementation(async () => {
+				calls++;
+				// After the gate has spent its two fires, the user steers.
+				if (calls === 3) steeringQueue.enqueue({ role: "user", content: "keep going" });
+				// Stop cleanly once the gate has demonstrably fired again.
+				return { content: `text-only ${calls}`, thinking: "", finishReason: "stop" };
+			});
+
+			const events: AgentEvent[] = [];
+			await runAgentLoop([{ role: "user", content: "implement" }], {
+				config: testConfig,
+				model: "test-model",
+				cwd: dir,
+				systemPrompt: "BASE",
+				planState: { enabled: false, plansDir: dir },
+				steeringQueue,
+				maxOuterIterations: 12,
+				initialTodos: [{ content: "do the work", status: "pending", priority: "medium", planStep: "do the work" }],
+				onEvent: (e) => events.push(e),
+			});
+
+			const fires = events.filter((e) => e.type === "open_work_gate");
+			// Two before the steer, and more after it — without the reset the
+			// counter stays exhausted and the gate never fires again.
+			expect(fires.length).toBeGreaterThan(2);
+			// The counter restarted rather than continuing to climb.
+			expect(fires.map((e) => (e as { fires: number }).fires)).toContain(1);
+			expect(fires.map((e) => (e as { fires: number }).fires).lastIndexOf(1)).toBeGreaterThan(1);
+		} finally {
+			vi.mocked(streamAndCollect).mockReset();
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	it("caps at max fires then emits open_work_gate_exhausted and stops", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "cast-owg-cap-"));
 		writeFileSync(join(dir, "feature.md"), openPlan, "utf-8");

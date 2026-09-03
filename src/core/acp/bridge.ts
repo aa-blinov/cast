@@ -22,6 +22,7 @@ import { createAgentRunner } from "../runner.ts";
 import type { SessionState } from "../session.ts";
 import { listSessionSummaries, loadSession, recordCompaction, saveSession as saveSessionState } from "../session.ts";
 import type { StartupResult } from "../startup.ts";
+import { extractSystemReminders } from "../system-reminder.ts";
 
 // ---------------------------------------------------------------------------
 // Adapter session
@@ -1203,7 +1204,14 @@ async function replaySessionHistory(
 		if (m && typeof m === "object" && m[OPEN_DOC_REMINDER_MARKER] === true) continue;
 		try {
 			if (message.role === "user") {
-				const content = normalizeMessageContent(message.content);
+				// `<system-reminder>` blocks are cast talking to the model —
+				// interrupt notices, the post-compaction state block, background
+				// task completions. They ride on a `role: "user"` message because
+				// the wire format has no better role, and replaying them verbatim
+				// showed the editor raw XML attributed to the person using it. The
+				// web UI and the TUI both strip them; this replay did not.
+				const { cleaned } = extractSystemReminders(normalizeMessageContent(message.content));
+				const content = cleaned;
 				if (!content) continue;
 				// Sequential notify is intentional — replay must restore
 				// messages in chronological order; parallel emits would

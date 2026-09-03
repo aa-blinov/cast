@@ -2287,6 +2287,12 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 					// again" after three identical calls is an explicit go-ahead, not
 					// the model stuck in a loop.
 					recentToolCalls.length = 0;
+					// …and the open-work gate's budget, which is documented as "per
+					// user prompt". The follow-up path already reset it; steering did
+					// not, so a steer sent after the gate had fired twice left the
+					// model free to stop with approved-plan work still open, exactly
+					// when the user had just asked for more.
+					openWorkGateFires = 0;
 				}
 
 				// Re-sync the system prompt against contextFiles that tool calls
