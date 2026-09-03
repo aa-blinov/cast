@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1284,5 +1285,51 @@ describe("/provider", () => {
 		} finally {
 			fetchSpy.mockRestore();
 		}
+	});
+});
+
+describe("/worktree honours a blocking WorktreeCreate hook", () => {
+	// The hook is documented as able to cancel a creation, but it used to fire
+	// only from the web bridge — the TUI's /worktree called the worktree
+	// helper directly and never asked. It's now gated inside the shared
+	// creation path, so this exercises the TUI surface end to end.
+	let repo: string;
+	let previousHome: string | undefined;
+
+	beforeEach(() => {
+		repo = join(tmpdir(), `cast-tui-wt-${process.pid}-${Date.now()}`);
+		mkdirSync(join(repo, "fake-home", ".cast"), { recursive: true });
+		execFileSync("git", ["init", "-b", "main"], { cwd: repo, stdio: "ignore" });
+		execFileSync("git", ["config", "user.email", "t@example.com"], { cwd: repo });
+		execFileSync("git", ["config", "user.name", "T"], { cwd: repo });
+		writeFileSync(join(repo, "README.md"), "hi\n");
+		execFileSync("git", ["add", "README.md"], { cwd: repo });
+		execFileSync("git", ["commit", "-m", "init"], { cwd: repo, stdio: "ignore" });
+		previousHome = process.env.HOME;
+		process.env.HOME = join(repo, "fake-home");
+		writeFileSync(
+			join(repo, "fake-home", ".cast", "hooks.json"),
+			JSON.stringify({ WorktreeCreate: [{ hooks: [{ command: "exit 2" }] }] }),
+		);
+	});
+
+	afterEach(() => {
+		if (previousHome === undefined) delete process.env.HOME;
+		else process.env.HOME = previousHome;
+		rmSync(repo, { recursive: true, force: true });
+	});
+
+	it("reports the block and creates nothing", async () => {
+		const { deps, calls } = createFakeDeps();
+		deps.cwd = repo;
+		deps.session.cwd = repo;
+
+		await handleInput("/worktree blocked-from-tui", undefined, deps);
+
+		const notices = (calls.showNotice as unknown[][] | undefined)?.map((n) => String(n[0] ?? "")) ?? [];
+		expect(notices.join("\n")).toMatch(/block/i);
+		expect(existsSync(join(repo, ".cast", "worktrees", "blocked-from-tui"))).toBe(false);
+		// The session must stay on its original cwd.
+		expect(calls.setCwd ?? []).toEqual([]);
 	});
 });

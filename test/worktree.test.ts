@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+	createSessionWorktree,
 	disposeSessionWorktree,
 	ensureSessionWorktree,
 	findCanonicalGitRoot,
@@ -25,6 +26,7 @@ import {
 	isWorktreeInsideRepo,
 	samePath,
 	validateWorktreeSlug,
+	WorktreeBlockedError,
 	worktreeBranchName,
 } from "../src/core/worktree.ts";
 
@@ -384,5 +386,52 @@ describe("integration: parent cwd does not see worktree edits", () => {
 		const mainHead = git(tmpRoot, ["rev-parse", "HEAD"]);
 		const wtHead = git(wt.path, ["rev-parse", "HEAD"]);
 		expect(mainHead).not.toBe(wtHead);
+	});
+});
+
+describe("createSessionWorktree — the WorktreeCreate hook gate", () => {
+	let repo: string;
+	let previousHome: string | undefined;
+
+	beforeEach(() => {
+		repo = tmpRoot;
+		initRepo(repo);
+		// Global hooks, so the gate is exercised without needing project trust.
+		previousHome = process.env.HOME;
+		process.env.HOME = join(repo, "fake-home");
+		mkdirSync(join(repo, "fake-home", ".cast"), { recursive: true });
+	});
+
+	afterEach(() => {
+		if (previousHome === undefined) delete process.env.HOME;
+		else process.env.HOME = previousHome;
+	});
+
+	const writeHook = (command: string) =>
+		writeFileSync(
+			join(repo, "fake-home", ".cast", "hooks.json"),
+			JSON.stringify({ WorktreeCreate: [{ hooks: [{ command }] }] }),
+		);
+
+	it("refuses to create the worktree when the hook blocks", async () => {
+		// The hook is documented as able to cancel a creation, but it used to
+		// fire from exactly one of the four places that create one. It now
+		// lives inside createSessionWorktree, so every caller — the TUI, the
+		// --worktree flag, POST /api/sessions and the web /worktree command —
+		// is gated by construction.
+		writeHook("exit 2");
+
+		await expect(createSessionWorktree("blocked-tree", repo, { projectTrusted: false })).rejects.toThrow(
+			WorktreeBlockedError,
+		);
+		expect(existsSync(join(gitPath(repo), ".cast", "worktrees", "blocked-tree"))).toBe(false);
+	});
+
+	it("creates it when the hook allows", async () => {
+		writeHook("exit 0");
+
+		const wt = await createSessionWorktree("allowed-tree", repo, { projectTrusted: false });
+		expect(existsSync(wt.path)).toBe(true);
+		expect(git(wt.path, ["rev-parse", "--abbrev-ref", "HEAD"])).toBe("cast-allowed-tree");
 	});
 });

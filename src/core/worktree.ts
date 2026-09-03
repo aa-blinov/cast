@@ -28,6 +28,8 @@ import { execFile, execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, realpathSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
+import { runHooksForEvent } from "./hooks.ts";
+import { resolveHooksForCwd } from "./project.ts";
 
 const VALID_SEGMENT = /^[a-zA-Z0-9._-]+$/;
 const MAX_SLUG_LENGTH = 64;
@@ -447,6 +449,58 @@ function copyIgnoredConfigFiles(repoRoot: string, worktreePath: string): void {
 /**
  * Remove a worktree and its branch given a slug/name or path.
  */
+/** Thrown when a WorktreeCreate hook refuses the creation. */
+export class WorktreeBlockedError extends Error {
+	constructor(reason: string) {
+		super(reason);
+		this.name = "WorktreeBlockedError";
+	}
+}
+
+/**
+ * ensureSessionWorktree plus the documented WorktreeCreate hook.
+ *
+ * The hook is documented as able to cancel a worktree creation, but it used to
+ * be fired from exactly one of the four places that create one (the web
+ * bridge's /worktree) — the TUI's /worktree, the `--worktree` CLI flag and
+ * `POST /api/sessions {worktree}` all called ensureSessionWorktree directly
+ * and never asked. Putting the hook here means every caller honours it by
+ * construction, and a new call site can't quietly skip it.
+ */
+export async function createSessionWorktree(
+	name: string,
+	startCwd: string,
+	context: { sessionId?: string; projectTrusted: boolean },
+): Promise<SessionWorktree> {
+	const before = await runHooksForEvent(resolveHooksForCwd(startCwd, context.projectTrusted), {
+		event: "WorktreeCreate",
+		cwd: startCwd,
+		sessionId: context.sessionId,
+		payload: { worktree_name: name },
+	});
+	if (before.blocked) throw new WorktreeBlockedError(before.reason ?? "Worktree creation blocked by hook");
+	return ensureSessionWorktree(name, startCwd);
+}
+
+/** removeWorktreeBySlug plus the WorktreeRemove hook, for the same reason as
+ *  createSessionWorktree above — the TUI's /worktree remove never fired it. */
+export async function removeSessionWorktree(
+	name: string,
+	startCwd: string,
+	context: { sessionId?: string; projectTrusted: boolean; worktreePath?: string },
+): Promise<{ ok: boolean; message: string }> {
+	const result = await removeWorktreeBySlug(name, startCwd);
+	if (result.ok) {
+		void runHooksForEvent(resolveHooksForCwd(startCwd, context.projectTrusted), {
+			event: "WorktreeRemove",
+			cwd: startCwd,
+			sessionId: context.sessionId,
+			payload: { worktree_name: name, worktree_path: context.worktreePath },
+		});
+	}
+	return result;
+}
+
 export async function removeWorktreeBySlug(name: string, startCwd: string): Promise<{ ok: boolean; message: string }> {
 	validateWorktreeSlug(name);
 	const repoRoot = findCanonicalGitRoot(startCwd);

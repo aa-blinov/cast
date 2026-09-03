@@ -1,5 +1,6 @@
+import { execFileSync } from "node:child_process";
 import { once } from "node:events";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -712,5 +713,55 @@ describe("agent validation", () => {
 		const spawn = await post("/api/sessions", { agentId: id });
 		expect(spawn.status).toBe(409);
 		expect(((await spawn.json()) as { error: string }).error).toContain("Unknown provider");
+	});
+});
+
+describe("worktree creation over HTTP honours the WorktreeCreate hook", () => {
+	// POST /api/sessions {worktree} called the worktree helper directly and
+	// never asked the hook — one of the three surfaces that bypassed a gate
+	// documented as able to cancel a creation.
+	let repo: string;
+	let previousHome: string | undefined;
+
+	beforeEach(() => {
+		repo = mkdtempSync(join(tmpdir(), "cast-http-wt-"));
+		execFileSync("git", ["init", "-b", "main"], { cwd: repo, stdio: "ignore" });
+		execFileSync("git", ["config", "user.email", "t@example.com"], { cwd: repo });
+		execFileSync("git", ["config", "user.name", "T"], { cwd: repo });
+		writeFileSync(join(repo, "README.md"), "hi\n");
+		execFileSync("git", ["add", "README.md"], { cwd: repo });
+		execFileSync("git", ["commit", "-m", "init"], { cwd: repo, stdio: "ignore" });
+		previousHome = process.env.HOME;
+		process.env.HOME = join(repo, "fake-home");
+		mkdirSync(join(repo, "fake-home", ".cast"), { recursive: true });
+		writeFileSync(
+			join(repo, "fake-home", ".cast", "hooks.json"),
+			JSON.stringify({ WorktreeCreate: [{ hooks: [{ command: "exit 2" }] }] }),
+		);
+	});
+
+	afterEach(() => {
+		if (previousHome === undefined) delete process.env.HOME;
+		else process.env.HOME = previousHome;
+		rmSync(repo, { recursive: true, force: true });
+	});
+
+	it("refuses the session and creates no worktree", async () => {
+		const auth = await fetch(`${origin}/api/auth/login`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ username: "cast", password: "test-password" }),
+		});
+		const cookie = auth.headers.get("set-cookie")!;
+
+		const res = await fetch(`${origin}/api/sessions`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Cookie: cookie },
+			body: JSON.stringify({ cwd: repo, worktree: "blocked-over-http" }),
+		});
+
+		expect(res.status).toBe(400);
+		expect(((await res.json()) as { error: string }).error).toMatch(/block/i);
+		expect(existsSync(join(repo, ".cast", "worktrees", "blocked-over-http"))).toBe(false);
 	});
 });
