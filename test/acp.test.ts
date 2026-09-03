@@ -56,6 +56,8 @@ vi.mock("../src/core/mcp.ts", () => ({
 const { createAcpAdapter, sessionClientsSizeForTests } = await import("../src/core/acp/bridge.ts");
 const { createAgentRunner, createPlanState } = await import("../src/core/runner.ts");
 const { listSessionSummaries, deleteSession, loadSession } = await import("../src/core/session.ts");
+const { closeMcpConnections } = await import("../src/core/mcp.ts");
+const { saveSession } = await import("../src/core/session.ts");
 
 // ---- Helpers -------------------------------------------------------------
 
@@ -296,6 +298,46 @@ describe("ACP adapter", () => {
 		expect(sessions.has(session.state.id)).toBe(false);
 		expect(runner.abort).toHaveBeenCalledWith("acp close");
 		expect(deleteSession).toHaveBeenCalledWith(session.state.id, session.state.cwd);
+	});
+
+	it("closeSession leaves the process-wide startup MCP pool alone", async () => {
+		// One StartupResult is shared by every ACP session in the process, so
+		// closing its connections here tore down the MCP servers every other
+		// open session was still using — closing one thread in the editor left
+		// the rest calling dead tools. Only the session's own editor-provided
+		// servers may be closed.
+		const { session } = makeSession();
+		const startupConnection = { name: "shared", alive: true } as never;
+		session.startup.mcpResult.connections = [startupConnection];
+		const clientConnection = { name: "editor-provided", alive: true } as never;
+		session.clientMcpResult = { connections: [clientConnection], toolDefinitions: [], toolIndex: new Map() };
+		(closeMcpConnections as unknown as ReturnType<typeof vi.fn>).mockClear();
+
+		const sessions = new Map([[session.state.id, session]]);
+		await adapter.closeSession(session.state.id, sessions);
+
+		const closed = (closeMcpConnections as unknown as ReturnType<typeof vi.fn>).mock.calls.flatMap(
+			(call: unknown[]) => call[0] as unknown[],
+		);
+		expect(closed).toContain(clientConnection);
+		expect(closed).not.toContain(startupConnection);
+	});
+
+	it("listSessions ends the listing on a cursor whose session is gone", async () => {
+		// A cursor naming a row deleted between two pages produced an empty
+		// page *with* a nextCursor computed from index -1: the editor got
+		// nothing to show plus a cursor pointing elsewhere, so a paged walk
+		// skipped rows or looped.
+		(listSessionSummaries as unknown as ReturnType<typeof vi.fn>).mockReturnValue([
+			{ id: "s1", cwd: "/a" },
+			{ id: "s2", cwd: "/b" },
+			{ id: "s3", cwd: "/c" },
+		]);
+
+		const result = adapter.listSessions({ cursor: "deleted-since", limit: 2 });
+
+		expect(result.sessions).toEqual([]);
+		expect(result.nextCursor).toBeUndefined();
 	});
 
 	it("closeSession awaits runner.waitForIdle before returning", async () => {
@@ -1195,6 +1237,68 @@ describe("Open documents (embedded context)", () => {
 		expect(text).toContain("y = 2");
 		expect(text).toContain("typescript");
 		expect(text).toContain("python");
+	});
+
+	it("caps how much open-buffer content one prompt injects", async () => {
+		// Every open document was injected in full on every prompt with no
+		// ceiling — a few large buffers (a lockfile, a bundle, a log) could
+		// blow the model's context on their own and fail the turn with an
+		// error the user couldn't connect to the files they had open.
+		const localAdapter = createAcpAdapter({ version: "test", permissionMode: "bypass" });
+		const mockClient = { notify: vi.fn(async () => {}), request: vi.fn(async () => ({})) };
+		const { session } = makeSession();
+		localAdapter.openDocument(session, "file:///huge-a.ts", "a".repeat(400_000), "typescript");
+		localAdapter.openDocument(session, "file:///huge-b.ts", "b".repeat(400_000), "typescript");
+
+		let receivedMessages: unknown;
+		runAgentLoopSpy.mockImplementationOnce(async (msgs: unknown) => {
+			receivedMessages = msgs;
+			return msgs;
+		});
+		await localAdapter.submitPrompt("sid", [{ type: "text", text: "do stuff" }], session, mockClient as any, {
+			version: "test",
+			permissionMode: "bypass",
+		});
+
+		const arr = receivedMessages as Array<{ role: string; content: unknown }>;
+		const text = arr[arr.length - 1]?.content as string;
+		expect(text.length).toBeLessThan(200_000);
+		// The first buffer is still represented, just cut short.
+		expect(text).toContain("file:///huge-a.ts");
+		expect(text).toContain("truncated");
+	});
+
+	it("persists the partial turn when the loop throws mid-turn", async () => {
+		// The loop appends assistant/tool messages into state.messages as it
+		// runs, but only the success path saved them — a provider error threw
+		// the whole turn away, and the next session/load replayed a
+		// conversation that stopped at the user's prompt.
+		const localAdapter = createAcpAdapter({ version: "test", permissionMode: "bypass" });
+		const mockClient = { notify: vi.fn(async () => {}), request: vi.fn(async () => ({})) };
+		const { session } = makeSession();
+		runAgentLoopSpy.mockImplementationOnce(async (msgs: unknown) => {
+			(msgs as Array<unknown>).push({ role: "assistant", content: "partial answer" });
+			throw new Error("provider exploded");
+		});
+		// Snapshot at call time: saveSession receives the live state object, so
+		// inspecting it afterwards would see mutations made after the call and
+		// pass even when nothing was saved post-error.
+		const snapshots: string[][] = [];
+		(saveSession as unknown as ReturnType<typeof vi.fn>).mockImplementation((state: unknown) => {
+			snapshots.push(
+				((state as { messages: Array<{ content: unknown }> }).messages ?? []).map((m) => String(m.content)),
+			);
+		});
+
+		await expect(
+			localAdapter.submitPrompt("sid", [{ type: "text", text: "do stuff" }], session, mockClient as any, {
+				version: "test",
+				permissionMode: "bypass",
+			}),
+		).rejects.toThrow(/provider exploded/);
+
+		expect(snapshots.at(-1)).toContain("partial answer");
+		(saveSession as unknown as ReturnType<typeof vi.fn>).mockReset();
 	});
 
 	it("submitPrompt without open documents does not push a reminder", async () => {

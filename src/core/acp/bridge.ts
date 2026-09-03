@@ -282,7 +282,12 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 				// throws (DB error mid-shutdown), the connections are torn down
 				// — otherwise we'd leak file descriptors / subprocess handles.
 				try {
-					closeMcpConnections(s.startup.mcpResult.connections);
+					// Only this session's own (editor-provided) servers. The
+					// startup pool is a single StartupResult shared by every ACP
+					// session in this process — closing it here tore down the MCP
+					// servers every *other* open session was still using, so
+					// closing one thread in the editor left the rest calling dead
+					// tools. It belongs to the process and is closed with it.
 					if (s.clientMcpResult) {
 						closeMcpConnections(s.clientMcpResult.connections);
 					}
@@ -338,8 +343,16 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 			// nextCursor. Stable across re-sorts (we don't re-sort here) and
 			// across listSessions() calls because sessionId is unique.
 			const limit = params?.limit ?? 100;
-			const startIndex = params?.cursor ? filtered.findIndex((s) => s.id === params.cursor) : 0;
-			const page = startIndex >= 0 ? filtered.slice(startIndex, startIndex + limit) : [];
+			const found = params?.cursor ? filtered.findIndex((s) => s.id === params.cursor) : 0;
+			// A cursor naming a session that no longer exists (deleted, or its
+			// cwd filter changed, between two pages of the same walk) used to
+			// produce an empty page *with* a nextCursor computed from index -1
+			// — the editor was handed nothing to show plus a cursor pointing
+			// somewhere else entirely, so a paged listing silently skipped rows
+			// or looped. An unknown cursor now ends the listing cleanly.
+			if (found < 0) return { sessions: [] };
+			const startIndex = found;
+			const page = filtered.slice(startIndex, startIndex + limit);
 			const next = filtered.length > startIndex + limit ? filtered[startIndex + limit]?.id : undefined;
 			return {
 				sessions: page.map((s) => ({
@@ -552,6 +565,18 @@ async function runPromptInner(
 		// the full conversation, then persist.
 		state.messages = finalMessages;
 		saveSession(state);
+	} catch (err) {
+		// The loop pushes assistant/tool messages into `state.messages` as it
+		// goes, but only the success path above persisted them — so a provider
+		// error mid-turn threw away everything the turn had produced, and the
+		// next session/load replayed a conversation that stopped at the user's
+		// prompt. Save what the turn did produce before the error propagates.
+		try {
+			saveSession(state);
+		} catch {
+			// A failing save must not mask the error that actually ended the turn.
+		}
+		throw err;
 	} finally {
 		runner.endRun(lease);
 	}
@@ -579,6 +604,27 @@ function makePermissionRequestId(): string {
 	return `perm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+const PERMISSION_TIMEOUT_MS = 60_000;
+
+/** Races a permission request against its timeout and always clears the
+ * timer. The `setTimeout` inside a bare `Promise.race` was never cleared, so
+ * every approval left a live 60s timer behind: the process could not exit
+ * until the last one elapsed, and a session with many approvals kept one
+ * timer per decision alive for a minute each. */
+async function requestWithTimeout(promise: Promise<unknown>): Promise<unknown | "timeout"> {
+	let timer: NodeJS.Timeout | undefined;
+	try {
+		return await Promise.race([
+			promise,
+			new Promise<"timeout">((resolve) => {
+				timer = setTimeout(() => resolve("timeout"), PERMISSION_TIMEOUT_MS);
+			}),
+		]);
+	} finally {
+		if (timer) clearTimeout(timer);
+	}
+}
+
 export async function requestPermissionViaBridge(
 	client: {
 		request(method: string, params: unknown): Promise<unknown>;
@@ -595,9 +641,8 @@ export async function requestPermissionViaBridge(
 		if (verdict !== undefined) return verdict;
 	}
 	const requestId = makePermissionRequestId();
-	const TIMEOUT_MS = 60_000;
 	try {
-		const outcome: unknown = await Promise.race([
+		const outcome: unknown = await requestWithTimeout(
 			client.request("session/request_permission", {
 				toolCall: {
 					toolCallId: requestId,
@@ -613,8 +658,7 @@ export async function requestPermissionViaBridge(
 					{ kind: "reject_always", name: "Reject for this session", optionId: "reject_always" },
 				],
 			}),
-			new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), TIMEOUT_MS)),
-		]);
+		);
 		if (outcome === "timeout") return false;
 		if (!isPermissionResponse(outcome)) return false;
 		if (outcome.outcome.outcome !== "selected") return false;
@@ -655,9 +699,8 @@ export async function requestWritePermissionViaBridge(
 		if (verdict !== undefined) return verdict;
 	}
 	const requestId = makePermissionRequestId();
-	const TIMEOUT_MS = 60_000;
 	try {
-		const outcome: unknown = await Promise.race([
+		const outcome: unknown = await requestWithTimeout(
 			client.request("session/request_permission", {
 				toolCall: {
 					toolCallId: requestId,
@@ -673,8 +716,7 @@ export async function requestWritePermissionViaBridge(
 					{ kind: "reject_always", name: "Reject for this session", optionId: "reject_always" },
 				],
 			}),
-			new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), TIMEOUT_MS)),
-		]);
+		);
 		if (outcome === "timeout") return false;
 		if (!isPermissionResponse(outcome)) return false;
 		if (outcome.outcome.outcome !== "selected") return false;
@@ -922,17 +964,47 @@ function emitAvailableCommands(
  * reminder so the message array doesn't grow unboundedly with each
  * prompt. The latest snapshot always wins. */
 const OPEN_DOC_REMINDER_MARKER = "_castOpenDocsReminder";
+/** How much of the editor's open buffers may be injected, in characters.
+ *
+ * Every open document was injected in full on every prompt, with no ceiling
+ * — an editor with a handful of large files open (a lockfile, a generated
+ * bundle, a long log) could exceed the model's context on its own, and the
+ * turn then failed outright with an error the user could not connect to
+ * "files I happen to have open". Roughly 30K tokens' worth, which leaves
+ * room for the actual conversation on every context size cast supports.
+ */
+const MAX_OPEN_DOC_CHARS = 120_000;
 function injectOpenDocumentsAsContext(session: AcpAdapterSession): void {
 	if (session.openDocuments.size === 0) return;
 	const docs = [...session.openDocuments.entries()];
+	const blocks: string[] = [];
+	let budget = MAX_OPEN_DOC_CHARS;
+	let omitted = 0;
+	for (const [uri, doc] of docs) {
+		const lang = doc.language ? ` (${doc.language})` : "";
+		const header = `### ${uri}${lang}`;
+		if (budget <= header.length) {
+			omitted++;
+			continue;
+		}
+		const room = budget - header.length;
+		const truncated = doc.content.length > room;
+		const body = truncated
+			? `${doc.content.slice(0, room)}\n[… truncated: buffer is larger than the context budget]`
+			: doc.content;
+		blocks.push(`${header}\n\`\`\`\n${body}\n\`\`\``);
+		budget -= header.length + Math.min(doc.content.length, room);
+	}
 	const reminder = [
 		"<system-reminder>",
 		"The following files are currently open in the editor. Treat their contents as part of the conversation context.",
+		...(omitted > 0
+			? [
+					`(${omitted} further open file(s) omitted — the open-buffer context budget was reached. Use the read tool if you need them.)`,
+				]
+			: []),
 		"",
-		...docs.map(([uri, doc]) => {
-			const lang = doc.language ? ` (${doc.language})` : "";
-			return `### ${uri}${lang}\n\`\`\`\n${doc.content}\n\`\`\``;
-		}),
+		...blocks,
 		"</system-reminder>",
 	].join("\n");
 	// Drop any previous open-doc reminder we injected — only the latest
