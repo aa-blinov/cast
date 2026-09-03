@@ -590,6 +590,22 @@ describe("project memory", () => {
 		expect(stored?.confidence).toBe(90);
 	});
 
+	it("keys a memory by its normalized type so a padded type can't duplicate a row", async () => {
+		// The stored type was trimmed while the fingerprint was taken from the
+		// raw one, so " fact" and "fact" produced different keys for rows that
+		// are identical once stored — slipping past UNIQUE(project_id,
+		// fingerprint).
+		const projectCwd = join(root, "fingerprint-project");
+		const session = createSession("test-model", projectCwd);
+		saveSession(session);
+		storeProjectMemory(projectCwd, session.id, "turn-a", [{ type: "fact", content: "Ports are pinned." }]);
+		storeProjectMemory(projectCwd, session.id, "turn-b", [{ type: " fact ", content: "Ports are pinned." }]);
+
+		const stored = listProjectMemory(projectCwd).filter((row) => row.content === "Ports are pinned.");
+		expect(stored).toHaveLength(1);
+		expect(stored[0]?.type).toBe("fact");
+	});
+
 	it("keeps a tool-written memory across a file reconcile, with its metadata", () => {
 		// The markdown file is canonical, so a row that lived only in the
 		// database was deleted by the next reconcile — silently discarding

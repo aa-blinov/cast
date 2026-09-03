@@ -68,7 +68,6 @@ export interface SessionState {
 	 * when a session is loaded from disk with no prior API data. */
 	lastPromptTokens?: number;
 	/** Highest persisted message sequence fully covered by a successful checkpoint. */
-	checkpointWatermarkSeq?: number;
 	/**
 	 * Absolute path cast was launched from when this session was created —
 	 * lets --resume/--continue/`/sessions` switch back into the right project
@@ -601,7 +600,6 @@ function sessionMetaRow(session: SessionState) {
 		created_at: session.createdAt,
 		updated_at: session.updatedAt,
 		last_prompt_tokens: session.lastPromptTokens ?? null,
-		checkpoint_watermark_seq: session.checkpointWatermarkSeq ?? null,
 		last_announced_local_date: session.lastAnnouncedLocalDate ?? null,
 		provider_url: session.providerUrl ?? null,
 		provider_name: session.providerName ?? null,
@@ -658,8 +656,8 @@ function writeSessionRows(db: DatabaseSync, session: SessionState): Array<[Messa
 	const pending: Array<[Message, number, string | undefined]> = [];
 	const meta = sessionMetaRow(session);
 	db.prepare(
-		`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, provider_name, session_kind, parent_session_id, background_kind, usage_json, todos_json, share_token, plan_question_json, plan_transition_json, checkpoint_watermark_seq, version)
-			 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :provider_name, :session_kind, :parent_session_id, :background_kind, :usage_json, :todos_json, :share_token, :plan_question_json, :plan_transition_json, :checkpoint_watermark_seq, :version)
+		`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, provider_name, session_kind, parent_session_id, background_kind, usage_json, todos_json, share_token, plan_question_json, plan_transition_json, version)
+			 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :provider_name, :session_kind, :parent_session_id, :background_kind, :usage_json, :todos_json, :share_token, :plan_question_json, :plan_transition_json, :version)
 		 ON CONFLICT(id) DO UPDATE SET
 		   cwd = excluded.cwd, model = excluded.model, persona = excluded.persona, mode = excluded.mode,
 		   title = excluded.title, pinned = excluded.pinned, updated_at = excluded.updated_at,
@@ -669,12 +667,7 @@ function writeSessionRows(db: DatabaseSync, session: SessionState): Array<[Messa
 		   usage_json = excluded.usage_json, todos_json = excluded.todos_json,
 		   share_token = excluded.share_token, plan_question_json = excluded.plan_question_json,
 		   plan_transition_json = excluded.plan_transition_json,
-		   version = excluded.version,
-		   checkpoint_watermark_seq = CASE
-		     WHEN sessions.checkpoint_watermark_seq IS NULL THEN excluded.checkpoint_watermark_seq
-		     WHEN excluded.checkpoint_watermark_seq IS NULL THEN sessions.checkpoint_watermark_seq
-		     ELSE MAX(sessions.checkpoint_watermark_seq, excluded.checkpoint_watermark_seq)
-		   END`,
+		   version = excluded.version`,
 	).run(meta);
 
 	const insertRow = db.prepare(
@@ -1237,6 +1230,11 @@ interface SessionRow {
 	created_at: string;
 	updated_at: string;
 	last_prompt_tokens: number | null;
+	/** Vestigial: the durable watermark moved to an immutable message_id in
+	 *  migration 19 (watermarkMessageSeq resolves it against the live table),
+	 *  and nothing has written or read this since. The column stays in the
+	 *  schema — dropping it would rewrite the sessions table for no gain — but
+	 *  nothing in the code touches it any more. */
 	checkpoint_watermark_seq: number | null;
 	last_announced_local_date: string | null;
 	provider_url: string | null;
@@ -1264,7 +1262,6 @@ function rowToMeta(row: SessionRow): Omit<SessionState, "messages"> {
 		createdAt: row.created_at,
 		updatedAt: row.updated_at,
 		lastPromptTokens: row.last_prompt_tokens ?? undefined,
-		checkpointWatermarkSeq: row.checkpoint_watermark_seq ?? undefined,
 		lastAnnouncedLocalDate: row.last_announced_local_date ?? undefined,
 		providerUrl: row.provider_url ?? undefined,
 		providerName: row.provider_name ?? undefined,
@@ -1679,8 +1676,8 @@ export function migrateLegacySessionsToDb(): number {
 		try {
 			if (!session.title) session.title = deriveSessionTitle(getFirstUserMessage(session));
 			db.prepare(
-				`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, provider_name, session_kind, parent_session_id, background_kind, usage_json, todos_json, share_token, plan_question_json, plan_transition_json, checkpoint_watermark_seq, version)
-					 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :provider_name, :session_kind, :parent_session_id, :background_kind, :usage_json, :todos_json, :share_token, :plan_question_json, :plan_transition_json, :checkpoint_watermark_seq, :version)`,
+				`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, provider_name, session_kind, parent_session_id, background_kind, usage_json, todos_json, share_token, plan_question_json, plan_transition_json, version)
+					 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :provider_name, :session_kind, :parent_session_id, :background_kind, :usage_json, :todos_json, :share_token, :plan_question_json, :plan_transition_json, :version)`,
 			).run(sessionMetaRow(session));
 			const insertRow = db.prepare(
 				"INSERT INTO messages (session_id, seq, message_id, role, content_json, in_context, has_tool_calls) VALUES (?, ?, ?, ?, ?, 1, ?)",
