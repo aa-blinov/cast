@@ -35,7 +35,6 @@ import { createRequire } from "node:module";
 import { basename, dirname, extname, join } from "node:path";
 import * as TreeSitter from "web-tree-sitter";
 import type { TodoItem } from "./todo.ts";
-import { invalidateCachedFile } from "./tools/hashline-cache.ts";
 import type { ToolResult } from "./tools.ts";
 
 const SLUG_SANITIZE_RE = /[^a-z0-9]+/g;
@@ -732,7 +731,6 @@ export function finalizePlanFileWrite(absolutePath: string, planState: PlanState
 	const normalized = normalizeStepChecklist(raw);
 	if (normalized !== raw) {
 		writeFileAtomic(absolutePath, normalized);
-		invalidateCachedFile(absolutePath);
 	}
 	planState.activePlanPath = absolutePath;
 }
@@ -757,7 +755,6 @@ export function enforcePlanCapAfterEdit(
 	const after = readFileSync(absolutePath, "utf-8");
 	if (after.length <= MAX_PLAN_CHARS) return { ok: true };
 	writeFileAtomic(absolutePath, beforeContent);
-	invalidateCachedFile(absolutePath);
 	return {
 		ok: false,
 		error: `Error: this edit would grow the plan to ${after.length} chars — the limit is ${MAX_PLAN_CHARS}. Reverted — tighten the section instead of expanding it.`,
