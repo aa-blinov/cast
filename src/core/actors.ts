@@ -133,6 +133,11 @@ export type AgentActorRecoveryHandler = (snapshot: AgentActorSnapshot) => Promis
 
 export interface AgentActorStore {
 	load(): AgentActorPersistedState[];
+	/** Only the rows a restart could still act on (non-terminal persistent
+	 * actors). The watchdog re-reads the store every few seconds and needs
+	 * nothing else; optional so a custom store can omit it and fall back to
+	 * `load()`. */
+	loadRecoverable?(): AgentActorPersistedState[];
 	save(snapshot: AgentActorSnapshot, ownership: AgentActorOwnership): boolean;
 	claimRecovery(actorId: string, previousToken: string | undefined, ownership: AgentActorOwnership): boolean;
 	prune(limit: number): void;
@@ -350,9 +355,20 @@ function ownershipFromRow(row: SqliteActorRow): AgentActorOwnership {
 
 /** Durable actor metadata with a lease so two daemon processes cannot mutate one actor row. */
 export class SqliteAgentActorStore implements AgentActorStore {
-	load(): AgentActorPersistedState[] {
+	// A terminal actor's fork context can never be used again — nothing can
+	// resume an actor that already succeeded, failed or was cancelled — but it
+	// is by far the largest thing in the row. Leaving it out of the SELECT
+	// keeps the registry from parsing (and then holding in memory for the life
+	// of the daemon) transcripts it will never look at: on a real store, 377
+	// rows carried 56MB of fork_json, and reading them cost 697ms.
+	private static readonly SELECT_COLUMNS = `id, parent_session_id, parent_actor_id, session_id, agent, mode,
+        background, lifecycle, status, created_at, updated_at, completed_at,
+        CASE WHEN status IN ('pending', 'running', 'stalled') THEN fork_json ELSE NULL END AS fork_json,
+        recovery_json, owner_token, owner_pid, lease_until`;
+
+	private query(where: string): AgentActorPersistedState[] {
 		const rows = getDb()
-			.prepare("SELECT * FROM agent_actors ORDER BY updated_at DESC")
+			.prepare(`SELECT ${SqliteAgentActorStore.SELECT_COLUMNS} FROM agent_actors ${where} ORDER BY updated_at DESC`)
 			.all() as unknown as SqliteActorRow[];
 		return rows
 			.map((row) => {
@@ -360,6 +376,14 @@ export class SqliteAgentActorStore implements AgentActorStore {
 				return snapshot ? { snapshot, ownership: ownershipFromRow(row) } : undefined;
 			})
 			.filter((state): state is AgentActorPersistedState => state !== undefined);
+	}
+
+	load(): AgentActorPersistedState[] {
+		return this.query("");
+	}
+
+	loadRecoverable(): AgentActorPersistedState[] {
+		return this.query("WHERE lifecycle = 'persistent' AND status IN ('pending', 'running', 'stalled')");
 	}
 
 	save(snapshot: AgentActorSnapshot, ownership: AgentActorOwnership): boolean {
@@ -496,7 +520,9 @@ export class AgentActorRegistry {
 		if (!previous || previous.status !== "stalled") return undefined;
 		const record = this.newRecord(spec ?? previous, id);
 		record.createdAt = previous.createdAt;
-		record.ownership = previous.ownership;
+		// Same durable identity (owner token), fresh expiry — the inherited
+		// lease is by definition already stale on a stalled actor.
+		record.ownership = { ...previous.ownership, leaseUntil: this.leaseExpiry() };
 		this.records.set(id, record);
 		this.persist(record);
 		return this.createHandle(record, parentSignal);
@@ -611,7 +637,7 @@ export class AgentActorRegistry {
 
 	scanStalled(at = Date.now()): AgentActorSnapshot[] {
 		this.ensureRestored();
-		this.restorePersistentActors();
+		this.restorePersistentActors("recoverable");
 		const stalled: AgentActorSnapshot[] = [];
 		for (const record of this.records.values()) {
 			if (record.status !== "running") continue;
@@ -638,8 +664,16 @@ export class AgentActorRegistry {
 		this.records.clear();
 	}
 
-	private restorePersistentActors(): void {
-		for (const state of this.store?.load() ?? []) {
+	private restorePersistentActors(scope: "all" | "recoverable" = "all"): void {
+		// The watchdog runs this every few seconds purely to catch actors a
+		// crashed process left behind; re-reading every historical row each
+		// time was pure waste (measured 697ms per pass on a real store, all of
+		// it discarded because the rows were already in memory).
+		const states =
+			scope === "recoverable" && this.store?.loadRecoverable
+				? this.store.loadRecoverable()
+				: (this.store?.load() ?? []);
+		for (const state of states) {
 			const { snapshot, ownership } = state;
 			if (snapshot.lifecycle !== "persistent") continue;
 			if (this.records.has(snapshot.id)) continue;
@@ -694,6 +728,15 @@ export class AgentActorRegistry {
 		const heartbeat = setInterval(() => {
 			if (record.status !== "running") return;
 			record.updatedAt = now();
+			// Extend the lease too. It was set once when the actor was created
+			// and never renewed, so after leaseMs (45s by default) a perfectly
+			// healthy long-running actor — a checkpoint writer, a dream or
+			// distill run, all of which routinely take minutes — looked
+			// abandoned: another daemon process would claim it via
+			// claimRecovery, mark it stalled and start the same work again,
+			// while the original's own final save was rejected by the
+			// owner-token check and silently lost.
+			record.ownership = { ...record.ownership, leaseUntil: this.leaseExpiry() };
 			this.persist(record);
 		}, this.heartbeatIntervalMs);
 		heartbeat.unref();
@@ -745,8 +788,12 @@ export class AgentActorRegistry {
 		return {
 			token: randomUUID(),
 			pid: process.pid,
-			leaseUntil: new Date(Date.now() + this.leaseMs).toISOString(),
+			leaseUntil: this.leaseExpiry(),
 		};
+	}
+
+	private leaseExpiry(): string {
+		return new Date(Date.now() + this.leaseMs).toISOString();
 	}
 }
 
