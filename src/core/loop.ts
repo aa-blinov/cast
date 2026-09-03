@@ -390,7 +390,7 @@ const DESTRUCTIVE_WRITE_TOOLS = new Set(["write", "edit", "patch", "apply_patch"
 // group. Unknown/MCP tools, shells, subagents, and stateful plan tools stay
 // ordered so a sibling mutation cannot race another tool in the same model
 // response. Read-only calls remain parallel when they are adjacent.
-const PARALLEL_SAFE_TOOL_NAMES = new Set([
+export const PARALLEL_SAFE_TOOL_NAMES = new Set([
 	"glob",
 	"grep",
 	"ls",

@@ -62,7 +62,7 @@ cast speaks the OpenAI chat completions format. Supported providers include Open
 
 ### Parallel Tool Execution
 
-Tool calls within one assistant message run concurrently via `Promise.all`. If the model requests `bash`, `read`, and `grep` in a single response, all three execute simultaneously.
+Read-only tool calls within one assistant message run concurrently via `Promise.all` — `read`, `grep`, `glob`, `ls`, `memory`, `session_history`, `web_search`, `web_fetch` and `bash_output`. Everything else (shells, writes, `task`, plan tools, MCP tools) runs in call order, so a sibling mutation can't race another tool in the same response.
 
 ### Hashline LRU Cache
 
@@ -103,7 +103,7 @@ A turn runs as a bounded outer iteration:
 
 1. **Prompt assembly.** The user message (or a steered/follow-up message injected mid-turn) is appended to `session.messages`. The system prompt is rebuilt per turn via `rebuildSystemPrompt` (sticky rules + `@`-mention context files).
 2. **LLM streaming.** The provider is called in streaming mode. Deltas arrive as `token` (content) and `thinking` (reasoning) events and are folded into the live transcript as they land.
-3. **Tool dispatch.** When the model returns `tool_calls`, each call is dispatched. **Tool calls within one assistant message run concurrently** via `Promise.all` — `bash`, `read`, and `grep` requested together execute simultaneously, not in sequence. Each tool emits `tool_start` / `tool_end`; unsuccessful results carry stable `error.code`, `error.retryable`, and `error.suggestedFix` fields as well as their readable diagnostic. Sub-agents (`task` tool) recurse into their own `runAgentLoop` invocation.
+3. **Tool dispatch.** When the model returns `tool_calls`, each call is dispatched. **Adjacent read-only calls within one assistant message run concurrently** via `Promise.all` — `read` and `grep` requested together execute simultaneously; a `bash`, a write, a `task` or an MCP call runs in order instead, since only tools with an explicit read-only contract are safe to overlap. Each tool emits `tool_start` / `tool_end`; unsuccessful results carry stable `error.code`, `error.retryable`, and `error.suggestedFix` fields as well as their readable diagnostic. Sub-agents (`task` tool) recurse into their own `runAgentLoop` invocation.
 4. **Tool results → next iteration.** Results are appended and the loop streams another model call. The iteration continues until the model returns no tool calls (a final answer), hits a stop reason, or is aborted.
 5. **Turn close.** `turn_end` promotes the live streaming blocks into permanent history; `end` carries the stop reason (`stop` / `aborted` / `error` / `disconnected`). The session is persisted to SQLite incrementally as messages and tool results accumulate — not just at turn end.
 

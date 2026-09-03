@@ -1,8 +1,8 @@
 /**
  * The `task` tool — delegates an assignment to a worker subagent running its
- * own agent loop. Concurrency is bounded by a semaphore, and bash confirmations
- * from parallel subagents are serialized so they don't race the shared
- * terminal. runAgentLoop is injected to avoid a circular import with loop.ts.
+ * own agent loop. Bash confirmations are serialized so two subagents (in
+ * different sessions of the same daemon) don't race the shared terminal.
+ * runAgentLoop is injected to avoid a circular import with loop.ts.
  */
 
 import { type AgentActorRegistry, type AgentForkContext, agentActorRegistry } from "../actors.ts";
@@ -39,69 +39,18 @@ export function extractTaskResult(messages: Message[]): string {
 }
 
 /**
- * Max subagents allowed to run at once. The model can emit many `task` calls
- * in a single batch (executed via Promise.all in the loop); without a cap each
- * one spawns a full agent loop with its own LLM traffic and child processes,
- * which blows rate limits and memory. Excess spawns queue on this semaphore.
+ * Subagents are not run in parallel, so nothing here bounds their number.
+ *
+ * There used to be a 10-slot semaphore, added when a batch of `task` calls in
+ * one model response was executed with Promise.all. That is no longer how the
+ * loop works: `task` is deliberately absent from PARALLEL_SAFE_TOOL_NAMES
+ * (see loop.ts), so sibling task calls run one after another, and a subagent
+ * cannot delegate further — the `task` tool is only advertised when
+ * `subagentPrompts` is non-empty, and a child is given none. At most one
+ * subagent per session is therefore in flight at a time. The only thing the
+ * shared limit could still do was make one session's subagent wait on ten
+ * *other* sessions' — throttling independent work for no benefit.
  */
-const MAX_CONCURRENT_SUBAGENTS = 10;
-
-/** Thrown by Semaphore.acquire when the wait is cancelled via its signal. */
-class AbortError extends Error {
-	constructor() {
-		super("Aborted while queued");
-		this.name = "AbortError";
-	}
-}
-
-/**
- * Minimal FIFO counting semaphore for bounding subagent concurrency.
- * `acquire` is abort-aware: a caller queued behind the limit that gets its
- * signal aborted is removed from the queue and rejected immediately, instead
- * of holding on until a slot frees. This lets Esc cancel queued subagents at
- * once rather than draining them one released slot at a time.
- */
-class Semaphore {
-	private active = 0;
-	private readonly waiters: Array<() => void> = [];
-	constructor(private readonly max: number) {}
-	acquire(signal?: AbortSignal): Promise<void> {
-		if (signal?.aborted) return Promise.reject(new AbortError());
-		if (this.active < this.max) {
-			this.active++;
-			return Promise.resolve();
-		}
-		return new Promise<void>((resolve, reject) => {
-			const waiter = (): void => {
-				cleanup();
-				resolve();
-			};
-			const onAbort = (): void => {
-				const i = this.waiters.indexOf(waiter);
-				// Only reject if we're still queued — if release() already handed us
-				// the slot, `waiter` ran first and removed the listener, so this is a
-				// no-op. A queued waiter never incremented `active`, so nothing to free.
-				if (i >= 0) this.waiters.splice(i, 1);
-				cleanup();
-				reject(new AbortError());
-			};
-			const cleanup = (): void => signal?.removeEventListener("abort", onAbort);
-			this.waiters.push(waiter);
-			signal?.addEventListener("abort", onAbort, { once: true });
-		});
-	}
-	release(): void {
-		const next = this.waiters.shift();
-		if (next) {
-			// Hand the slot straight to the next waiter — active stays constant.
-			next();
-		} else {
-			this.active--;
-		}
-	}
-}
-
-const subagentSemaphore = new Semaphore(MAX_CONCURRENT_SUBAGENTS);
 
 /**
  * Serializes bash-confirmation prompts across concurrently running subagents.
@@ -278,11 +227,10 @@ export async function execTask(
 		signal,
 	);
 
-	// Bound concurrency: excess subagents queue here until a slot frees up.
-	// Abort-aware — if cancelled while queued, bail out before holding a slot.
-	try {
-		await subagentSemaphore.acquire(actor.signal);
-	} catch {
+	// A turn cancelled between the spawn above and the run below must not start
+	// work. actor.run() would refuse it too, but as a thrown
+	// AgentActorCancelledError reported as a generic failure; say what happened.
+	if (actor.signal.aborted) {
 		actor.cancel();
 		return {
 			content: "Subagent did not complete successfully (aborted):\n\n(cancelled before start)",
@@ -302,7 +250,6 @@ export async function execTask(
 			});
 		} catch (error) {
 			actor.cancel();
-			subagentSemaphore.release();
 			return {
 				content: `Subagent failed to start: ${error instanceof Error ? error.message : String(error)}`,
 				isError: true,
@@ -434,7 +381,6 @@ export async function execTask(
 		const message = error instanceof Error ? error.message : String(error);
 		return { content: `Subagent failed with an error: ${message}`, isError: true, subagentUsage };
 	} finally {
-		subagentSemaphore.release();
 		// Observation-only (the child's own recursive runLoop already handles
 		// blocking/continuation via its own `Stop` hook — this is a distinct
 		// "a subagent finished" signal for logging/notification, not a second
