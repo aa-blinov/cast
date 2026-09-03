@@ -224,7 +224,32 @@ const FORBIDDEN_FLAGS: Record<string, RegExp> = {
 	// gate can't know, and no read-only invocation needs these.
 	grep: /^(--filter|--view|--pager|--save-config)$/,
 	date: /^(-s|--set)$/,
+	// git options that hand a command to git rather than describing what to
+	// show. `--ext-diff` and `--textconv` run the driver named by
+	// `diff.<name>.command` / `.textconv` — which a repository's own .git/config
+	// or .gitattributes can define, so a clone alone is enough to get code
+	// execution; `-O`/`--open-files-in-pager` runs its argument directly;
+	// `--exec-path` redirects where git looks for its own subcommand binaries;
+	// `-c`/`--config-env` set the same config keys inline. The `--no-` forms
+	// (`--no-ext-diff`, `--no-textconv`) are the safe direction and stay allowed.
+	// `-O` is matched as a prefix on purpose: git accepts its value glued on
+	// (`git grep -O'sh -c "rm x"'`), which an anchored match would miss. The
+	// only other `-O` git has is diff's order file, which nothing needs here.
+	git: /^(--ext-diff|--textconv|--exec-path|--open-files-in-pager|-c|--config-env|--upload-pack|--receive-pack)$|^-O/,
 };
+
+/**
+ * Environment assignments a read-only command may carry.
+ *
+ * Everything else is refused: the parser reports `VAR=value cmd` as a
+ * variable_assignment node, and those were dropped from the argument list
+ * before any check ran — so `LD_PRELOAD=/tmp/evil.so cat file`,
+ * `GIT_EXTERNAL_DIFF=/tmp/evil git diff` and `PAGER='sh -c …' git log` all
+ * passed the gate as read-only and then executed arbitrary code (verified).
+ * Locale and timezone are the only ones a genuinely read-only command needs
+ * (`LC_ALL=C sort`, `TZ=UTC date`).
+ */
+const ALLOWED_ENV_ASSIGNMENTS = /^(LC_[A-Z_]+|LANG|LANGUAGE|TZ)=/;
 
 /** Git subcommands that cannot mutate the repository. `branch`/`tag`/`remote`
  * are excluded on purpose — without arguments they list, with arguments they
@@ -309,11 +334,23 @@ export async function checkReadOnlyCommand(command: string): Promise<{ ok: boole
 			const name = stage.childForFieldName("name");
 			const binary = name?.text.replace(PATH_BEFORE_SLASH_RE, "");
 			if (!binary) return { ok: false, reason: "empty command stage" };
-			const args = Array.from({ length: stage.childCount }, (_, index) => stage.child(index))
-				.filter(
-					(node): node is TreeSitter.Node =>
-						node !== null && node.type !== "command_name" && node.type !== "variable_assignment",
-				)
+			const children = Array.from({ length: stage.childCount }, (_, index) => stage.child(index)).filter(
+				(node): node is TreeSitter.Node => node !== null,
+			);
+			// Environment assignments were dropped here without ever being
+			// looked at, so a single prefix (LD_PRELOAD, GIT_EXTERNAL_DIFF,
+			// PAGER, …) turned any allowlisted command into arbitrary code.
+			const envAssignment = children.find(
+				(node) => node.type === "variable_assignment" && !ALLOWED_ENV_ASSIGNMENTS.test(node.text),
+			);
+			if (envAssignment) {
+				return {
+					ok: false,
+					reason: `setting ${envAssignment.text.split("=", 1)[0]} can change what the command actually runs`,
+				};
+			}
+			const args = children
+				.filter((node) => node.type !== "command_name" && node.type !== "variable_assignment")
 				.map((node) => unquoteShellToken(node.text));
 			// Output flags write files without any `>` — git log --output, sort -o, …
 			if (args.some((t) => t === "--output" || t.startsWith("--output="))) {
@@ -330,6 +367,12 @@ export async function checkReadOnlyCommand(command: string): Promise<{ ok: boole
 				const sub = args.find((t) => !t.startsWith("-"));
 				if (!sub || !READONLY_GIT_SUBCOMMANDS.has(sub)) {
 					return { ok: false, reason: `git ${sub ?? "(none)"} is not a read-only subcommand` };
+				}
+				// A read-only subcommand is not enough on its own: several git
+				// options run a command of their own (see FORBIDDEN_FLAGS.git).
+				const forbiddenGit = args.find((t) => FORBIDDEN_FLAGS.git!.test(t.split("=", 1)[0]));
+				if (forbiddenGit) {
+					return { ok: false, reason: `git ${forbiddenGit} can run an arbitrary command` };
 				}
 				continue;
 			}
