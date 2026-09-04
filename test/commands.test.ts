@@ -1402,3 +1402,96 @@ describe("/compact fires the compaction hooks", () => {
 		await vi.waitFor(() => expect(existsSync(marker)).toBe(true));
 	});
 });
+
+// Every routed command, run through the real handleInput once. The registry
+// refactor moved 62 bodies mechanically, and only 37 of these command words
+// were exercised anywhere in this file — this covers the rest at least to the
+// depth of "it dispatches, and nothing throws". Cancelling pickers (the fake
+// returns null) is the path most of them take.
+describe("every routed command dispatches", () => {
+	const COMMANDS = [
+		"/abort",
+		"/stop",
+		"/build",
+		"/clear",
+		"/compact",
+		"/continue",
+		"/copy",
+		"/current",
+		"/distill",
+		"/dream",
+		"/evolve",
+		"/fork",
+		"/goal do a thing",
+		"/help",
+		"/hooks",
+		"/keys",
+		"/mcp",
+		"/memory",
+		"/memory budget 2048",
+		"/memory cancel 0",
+		"/memory dream",
+		"/memory dream on",
+		"/memory dream interval 30",
+		"/memory checkpoint caps 1,2",
+		"/memory checkpoint fork on",
+		"/memory checkpoint reserved 4",
+		"/memory checkpoint thresholds default",
+		"/memory floor 0.5",
+		"/memory reconcile on",
+		"/memory runs",
+		"/model",
+		"/model some-model",
+		"/new",
+		"/older",
+		"/permissions",
+		"/permissions default",
+		"/persona",
+		"/persona senior",
+		"/plan",
+		"/plan-model",
+		"/plan-model some-model",
+		"/plan-model-provider",
+		"/provider",
+		"/queue",
+		"/queue-reset",
+		"/reasoning",
+		"/reasoning-display",
+		"/reasoning-format",
+		"/reload",
+		"/repo",
+		"/review",
+		"/rules",
+		"/rule:nonexistent",
+		"/skill:nonexistent",
+		"/sessions",
+		"/skills",
+		"/skills-sh",
+		"/ssh",
+		"/statusbar",
+		"/steer",
+		"/subagent-model",
+		"/subagent-model some-model",
+		"/subagent-model-provider",
+		"/theme",
+		"/undo",
+		"/web",
+		"/web-fetch-provider",
+		"/web-search-provider",
+		"/worktree",
+	];
+
+	for (const command of COMMANDS) {
+		it(`${command} is routed, not submitted as text`, async () => {
+			const { deps, calls } = createFakeDeps();
+			await handleInput(command, undefined, deps);
+			// An unrouted slash line falls through to `agent.submit` carrying the
+			// raw input, so that is what a lost or shadowed route looks like from
+			// outside. Commands that legitimately submit (/review, /goal) send a
+			// prompt of their own, not the command text. Reaching this line at all
+			// also means the body returned normally rather than throwing.
+			const submitted = calls["agent.submit"]?.[0]?.[0];
+			expect(submitted, `${command} fell through to submit`).not.toBe(command);
+		});
+	}
+});
