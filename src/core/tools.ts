@@ -97,6 +97,8 @@ export function getToolDefinitions(
 				name: "bash",
 				description:
 					"Execute a bash command in the current working directory. Returns stdout and stderr. " +
+					"Each call runs in a fresh shell rooted at that same directory: a `cd` does not carry over to the next " +
+					"call, so repeat it (or use absolute paths) whenever a command must run elsewhere. " +
 					"Output is truncated to last 2000 lines or 128KB (whichever is hit first). " +
 					"Short commands return normally. Long-running commands are automatically promoted to a managed background task " +
 					"instead of blocking indefinitely; use run_in_background:true to start one immediately. " +

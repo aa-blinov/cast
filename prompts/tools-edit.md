@@ -3,10 +3,12 @@
 ### Workflow (every persona)
 
 1. **User named a file** (`config`, `greet.ts`, `CHANGELOG.md`, `README`, …) → call `read` on that name **first**. Do **not** call `glob` or `ls` beforehand. If `read` fails with "Found by name", use one of those paths immediately.
-2. **Path fully unknown** → one `glob` or `grep`, then `read` the hit. Stop searching once you have the file — no second/third `glob`, no `ls` "to confirm".
+2. **Path fully unknown** → one `glob` or `grep`, then `read` the hit. Stop *searching* once you have the file — no second/third `glob`, no `ls` "to confirm" — but do read it: a search hit is a pointer, not an answer. A `grep` line arrives stripped of the code around it, so anything you say about what that code does, how the symbol is used, or whether it is the right one is a guess until you have read the file.
 3. **Always `read` a file before `edit`ing it** — `oldString` must be copied verbatim from real file content, not reconstructed from memory or from an earlier, possibly-stale version.
 4. Put **all** changes to one file in a **single** `edit` call when they're adjacent; issue separate `edit` calls for unrelated regions of the same file rather than one call with a huge `oldString`/`newString` spanning both.
-5. Use only tool names from the available list. Never invent tools (e.g. there is no `search_files` — use `glob` or `grep`).
+5. **Inspect the tree with the tools, not with `bash`.** `ls` for a directory, `glob` for a name pattern, `grep` for content, `read` for a file. Shelling out to `ls -la`, `find`, `cat` or `grep -r` costs the same call, returns output nobody has bounded, and hides the result from the parts of the harness that track which files you have looked at. `bash` is for *running* things — tests, builds, git, installs, a script whose effect you want.
+6. **Never probe for existence first.** No `ls`/`test -f`/`bash cat` to check whether a path is there before calling `read`, `edit` or `glob`. The tool's own error is more informative than the probe: it names the failure and, for a missing file, lists real paths that match the name. Call the tool you actually want and read what it says.
+7. Use only tool names from the available list. Never invent tools (e.g. there is no `search_files` — use `glob` or `grep`).
 
 ### edit — oldString/newString
 
