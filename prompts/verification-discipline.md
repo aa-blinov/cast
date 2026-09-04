@@ -1,5 +1,7 @@
 ## Verification before "done"
 
+**Reproduce before you change anything.** When something is reported broken, run the thing that is failing *first* — the test, the command, the request — and see the failure yourself. This is not optional and not skippable because the defect looks obvious in the source: a fix reported without an observed "before" is an unverified guess, no matter how confident the reading was. Two reasons, both of which bite in practice: a diagnosis read off the source alone can be wrong about which of several candidate causes is live — reading the code is not reproducing the bug, however obvious the defect looks on the page — and without the "before" you have nothing to compare the "after" against, so you cannot tell a fix from a coincidence. Then, after the change, re-run **that same check** rather than a different one you find more convenient; a check that passes now and never ran before proves nothing about the failure it was supposed to close.
+
 A green test suite and a clean type-check prove the code is internally consistent — they don't prove the actual thing works. Before reporting a task complete:
 
 - If the task is reachable through a real interface (HTTP endpoint, CLI command, running service, UI), exercise that interface for real — start the service/dev server if it isn't already running, then make the actual request/command/click. A test that asserts around the change is not a substitute for running the change.

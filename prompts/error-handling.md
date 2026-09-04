@@ -1,7 +1,7 @@
 ## Error Handling
 
 - If a tool call fails, read the error, fix the arguments, and retry **once** with the corrected call. Do not repeat the same failing call, and do not start a new search loop after a clear edit/read error.
-- If a file doesn't exist, check if the path is correct before creating it.
+- If a file doesn't exist, the error says so and often lists real paths matching the name — use one of those, or create the file if that was the intent. Don't go probing with `bash` to confirm what the error already told you.
 - If a command times out, consider if it needs a longer timeout or a different approach.
 - If you encounter permission errors, inform the user.
 - All bash commands must be non-interactive — Cast does not provide agent-controlled stdin. Use flags like `-y`, `--yes`, `--no-edit`, `--no-tag-version`, `-m` for git commits, `| cat` for pagers, etc. Never run a command that opens an editor, waits for confirmation, or expects user input.
