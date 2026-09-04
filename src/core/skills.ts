@@ -17,6 +17,8 @@ import { promptsDir, readRequiredPrompt } from "./prompts.ts";
 
 const SLUG_RE = /^[a-z0-9-]+$/;
 
+const LIST_SPLIT_RE = /[\s,]+/;
+const ARGUMENT_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const PARAGRAPH_SPLIT_RE = /\n\s*\n/;
 const MAX_NAME_LENGTH = 64;
 const MAX_DESCRIPTION_LENGTH = 1024;
@@ -53,6 +55,15 @@ export interface Skill {
 	baseDir: string;
 	source: SkillSource;
 	disableModelInvocation: boolean;
+	/** False when only the model may invoke this skill — it stays out of the
+	 * slash-command menu and `/name` does not run it. Spec field
+	 * `user-invocable`; default true. */
+	userInvocable: boolean;
+	/** Autocomplete hint for the arguments this skill expects (`argument-hint`). */
+	argumentHint?: string;
+	/** Named positional arguments (`arguments`), mapped to `$name` placeholders
+	 * in body order. */
+	argumentNames?: string[];
 	/** Marketplace plugin id (`name@marketplace`) when `source === "plugin"`. */
 	pluginId?: string;
 	/** False when the contributing plugin pack is disabled via `/plugin`. */
@@ -169,11 +180,37 @@ function validateToolList(
  * skill marked `disable-model-invocation: yes` — the author saying "only the
  * user may run this" — stayed model-invocable.
  */
-function parseSpecBoolean(value: unknown): boolean {
+function parseSpecBoolean(value: unknown, fallback = false): boolean {
+	if (value === undefined || value === null) return fallback;
 	if (typeof value === "boolean") return value;
 	if (typeof value === "number") return value === 1;
-	if (typeof value !== "string") return false;
-	return ["true", "yes", "on", "1"].includes(value.trim().toLowerCase());
+	if (typeof value !== "string") return fallback;
+	const text = value.trim().toLowerCase();
+	if (["true", "yes", "on", "1"].includes(text)) return true;
+	if (["false", "no", "off", "0"].includes(text)) return false;
+	return fallback;
+}
+
+/** `arguments` per spec: "a space-separated string or a YAML list". Names map
+ * to argument positions in order, so `arguments: [issue, branch]` makes
+ * `$issue` the first argument and `$branch` the second. */
+function validateNameList(
+	frontmatter: Record<string, unknown>,
+	field: string,
+): { value: string[] | undefined; errors: string[] } {
+	const raw = frontmatter[field];
+	if (raw === undefined) return { value: undefined, errors: [] };
+	const entries = Array.isArray(raw)
+		? raw
+		: typeof raw === "string"
+			? raw.split(LIST_SPLIT_RE).filter(Boolean)
+			: undefined;
+	if (!entries) return { value: undefined, errors: [`${field} must be a space-separated string or a YAML list`] };
+	const names = entries.filter((entry): entry is string => typeof entry === "string" && ARGUMENT_NAME_RE.test(entry));
+	if (names.length !== entries.length) {
+		return { value: undefined, errors: [`${field} entries must be names matching [A-Za-z_][A-Za-z0-9_]*`] };
+	}
+	return { value: names.length > 0 ? names : undefined, errors: [] };
 }
 
 /** First non-empty paragraph of a skill body — the spec's fallback description. */
@@ -239,11 +276,13 @@ function loadSkillFromFile(
 
 	for (const error of validateSkillDescription(description)) diagnostics.push({ message: error, path: filePath });
 	for (const error of validateSkillName(name)) diagnostics.push({ message: error, path: filePath });
+	const argumentHint = validateOptionalString(frontmatter, "argument-hint");
+	const argumentNames = validateNameList(frontmatter, "arguments");
 	const license = validateOptionalString(frontmatter, "license");
 	const compatibility = validateOptionalString(frontmatter, "compatibility", MAX_COMPATIBILITY_LENGTH);
 	const allowedTools = validateToolList(frontmatter, "allowed-tools");
 	const metadata = validateMetadata(frontmatter.metadata);
-	for (const result of [license, compatibility, allowedTools, metadata]) {
+	for (const result of [license, compatibility, allowedTools, argumentHint, metadata]) {
 		for (const message of result.errors) diagnostics.push({ message, path: filePath });
 	}
 	const hasValidationErrors = diagnostics.length > 0;
@@ -270,6 +309,9 @@ function loadSkillFromFile(
 			baseDir: dirname(filePath),
 			source,
 			disableModelInvocation: parseSpecBoolean(frontmatter["disable-model-invocation"]),
+			userInvocable: parseSpecBoolean(frontmatter["user-invocable"], true),
+			argumentHint: argumentHint.value,
+			argumentNames: argumentNames.value,
 			body,
 		},
 		diagnostics,
@@ -446,7 +488,9 @@ export function formatSkillsForPrompt(skills: Skill[], personaSkillsAllowlist?: 
 	for (const skill of visible) {
 		const combined = skill.whenToUse ? `${skill.description} — ${skill.whenToUse}` : skill.description;
 		const desc =
-			combined.length > MAX_LISTING_DESCRIPTION_LENGTH ? combined.slice(0, MAX_LISTING_DESCRIPTION_LENGTH) : combined;
+			combined.length > MAX_LISTING_DESCRIPTION_LENGTH
+				? combined.slice(0, MAX_LISTING_DESCRIPTION_LENGTH)
+				: combined;
 		lines.push("  <skill>");
 		lines.push(`    <name>${escapeXml(skill.name)}</name>`);
 		lines.push(`    <description>${escapeXml(desc)}</description>`);
@@ -495,7 +539,22 @@ function parseArguments(args: string): string[] {
  * ${CAST_SESSION_ID} (the active session's id, when provided).
  * Returns the substituted content. Caller decides what to do if no placeholders matched.
  */
-function substituteArguments(content: string, args: string | undefined, baseDir: string, sessionId?: string): string {
+export interface SubstitutionContext {
+	/** Project root — the spec's `${CLAUDE_PROJECT_DIR}`. */
+	projectDir?: string;
+	/** Installed plugin root for a plugin skill — `${CLAUDE_PLUGIN_ROOT}`. */
+	pluginRoot?: string;
+	/** Named positional arguments declared in `arguments` frontmatter. */
+	argumentNames?: string[];
+}
+
+function substituteArguments(
+	content: string,
+	args: string | undefined,
+	baseDir: string,
+	sessionId?: string,
+	context: SubstitutionContext = {},
+): string {
 	// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for skill template variable, not JS template
 	content = content.replaceAll("${CAST_SKILL_DIR}", baseDir);
 	// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for skill template variable, not JS template
@@ -511,7 +570,26 @@ function substituteArguments(content: string, args: string | undefined, baseDir:
 	// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for skill template variable, not JS template
 	content = content.replaceAll("${CLAUDE_SESSION_ID}", sessionId ?? "");
 
+	if (context.projectDir) {
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for skill template variable, not JS template
+		content = content.replaceAll("${CLAUDE_PROJECT_DIR}", context.projectDir);
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for skill template variable, not JS template
+		content = content.replaceAll("${CAST_PROJECT_DIR}", context.projectDir);
+	}
+	if (context.pluginRoot) {
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for skill template variable, not JS template
+		content = content.replaceAll("${CLAUDE_PLUGIN_ROOT}", context.pluginRoot);
+	}
+
 	const parsed = parseArguments(args ?? "");
+
+	// Named arguments (`arguments: [issue, branch]` → `$issue`, `$branch`),
+	// substituted before the positional forms so a name is never mistaken for
+	// bare text. Declared-but-missing names resolve to an empty string, like
+	// every other placeholder.
+	for (const [index, argName] of (context.argumentNames ?? []).entries()) {
+		content = content.replaceAll(`$${argName}`, parsed[index] ?? "");
+	}
 
 	// $ARGUMENTS[0], $ARGUMENTS[1], etc.
 	content = content.replace(/\$ARGUMENTS\[(\d+)\]/g, (_, idx) => parsed[parseInt(idx, 10)] ?? "");
@@ -526,9 +604,17 @@ function substituteArguments(content: string, args: string | undefined, baseDir:
 }
 
 /** Format a skill's full content for `/skill:name` invocation, optionally with trailing user args. */
-export function formatSkillInvocation(skill: Skill, additionalArgs?: string, sessionId?: string): string {
+export function formatSkillInvocation(
+	skill: Skill,
+	additionalArgs?: string,
+	sessionId?: string,
+	context: Omit<SubstitutionContext, "argumentNames"> = {},
+): string {
 	const content = readSkillBody(skill);
-	const substituted = substituteArguments(content, additionalArgs, skill.baseDir, sessionId);
+	const substituted = substituteArguments(content, additionalArgs, skill.baseDir, sessionId, {
+		...context,
+		argumentNames: skill.argumentNames,
+	});
 	// Check if any $ARGUMENTS placeholders were actually substituted
 	const hadPlaceholders =
 		content.includes("$ARGUMENTS") ||
