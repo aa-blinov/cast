@@ -50,7 +50,6 @@ const { createServerBridge, SANDBOX_CWD, parseEvolveJson, parseSuggestionJson, t
 	"../src/server/bridge.ts"
 );
 
-
 const testConfig: AppConfig = {
 	baseURL: "http://localhost",
 	apiKey: "test",
@@ -94,7 +93,7 @@ describe("web bridge", () => {
 		runAgentLoop.mockClear();
 		mockFetchModels.mockReset();
 		mockProbeProvider.mockClear();
-			mockResolveMcpForCwd.mockReset();
+		mockResolveMcpForCwd.mockReset();
 		mockResolveMcpForCwd.mockResolvedValue({ ...emptyMcp, allServerNames: ["srv"] });
 		mockFetchModels.mockResolvedValue({
 			ok: true,
@@ -1980,7 +1979,6 @@ describe("web bridge", () => {
 
 		const skillsSuggestions = bridge.suggestCommand(ws.id, "/skills");
 		expect(skillsSuggestions.map((s) => s.value)).toEqual(["list", "enable", "disable", "uninstall", "help"]);
-
 
 		const permissionsSuggestions = bridge.suggestCommand(ws.id, "/permissions");
 		expect(permissionsSuggestions.map((s) => s.value)).toEqual(["default", "bypass"]);

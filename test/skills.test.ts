@@ -23,7 +23,6 @@ import {
 	renderSkillInvocation,
 	uninstallUserSkill,
 } from "../src/core/skills.ts";
-import { formatSkillPickLabel } from "../src/pickers/domain.ts";
 
 const TEST_DIR = join(import.meta.dirname, "__test_tmp_skills__");
 const GLOBAL_DIR = join(TEST_DIR, "global");

@@ -58,6 +58,7 @@ import {
 	type Skill,
 	uninstallUserSkill,
 } from "../core/skills.ts";
+import { skillsShInstall, skillsShListAvailable, skillsShSearch, skillsShUninstall } from "../core/skills-sh.ts";
 import { resolveSshHosts, type SshHost, saveSshConfig, scanSshKeys, validateKeyPermissions } from "../core/ssh.ts";
 import { cancelActiveDecxprQuery, suspendAndRun } from "../core/stdin-manager.ts";
 import {
@@ -227,6 +228,15 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 		description: "Uninstall — picker, or skill name (cast/agents dirs)",
 		takesArgs: true,
 	},
+	{ name: "/skills-sh", description: "skills.sh — install / search / uninstall universal skills" },
+	{
+		name: "/skills-sh install",
+		description: "Install — owner/repo --skill name (a pasted npx line works too)",
+		takesArgs: true,
+	},
+	{ name: "/skills-sh list-available", description: "List a repo's skills — owner/repo", takesArgs: true },
+	{ name: "/skills-sh search", description: "Search skills.sh — query", takesArgs: true },
+	{ name: "/skills-sh uninstall", description: "Uninstall a skills.sh skill — name", takesArgs: true },
 	{ name: "/ssh", description: "Manage SSH hosts (list, add, remove)" },
 	{ name: "/statusbar", description: "Toggle and reorder status bar segments" },
 	{ name: "/steer", description: "Inject a message while running", takesArgs: true },
@@ -726,6 +736,59 @@ function formatMcpList(deps: CommandDeps): string {
 			return `${disabled.has(name) ? "off" : "on "} ${name} (${origin}, ${status})`;
 		});
 	return `MCP\n${lines.join("\n")}`;
+}
+
+const SKILLS_SH_HELP = `skills.sh — install skills from the universal Agent Skills index:
+
+  /skills-sh search QUERY            Find skills by keyword
+  /skills-sh list-available OWNER/REPO
+  /skills-sh install OWNER/REPO --skill NAME
+  /skills-sh install npx skills add OWNER/REPO --skill NAME   (a pasted line works)
+  /skills-sh uninstall NAME
+
+Installs go to the universal scope (~/.agents/skills), which cast discovers
+without a reload and every other agent on this machine shares.`;
+
+async function handleSkillsShCommand(input: string, deps: CommandDeps): Promise<void> {
+	const { showNotice } = deps;
+	deps.agent.addDisplayMessage({ role: "user", content: input });
+	const args = input === "/skills-sh" ? "" : input.slice("/skills-sh ".length).trim();
+	const [sub, ...restParts] = args ? args.split(WHITESPACE_SPLIT_RE) : [""];
+	const rest = restParts.join(" ");
+	if (!sub || sub === "help") {
+		deps.agent.addDisplayMessage({ role: "warning", content: SKILLS_SH_HELP });
+		return;
+	}
+	try {
+		if (sub === "install") {
+			showNotice("[skills.sh: installing…]");
+			const out = await skillsShInstall(rest);
+			await reloadSkillsAfterChange(deps);
+			deps.agent.addDisplayMessage({ role: "warning", content: out || "Installed." });
+			return;
+		}
+		if (sub === "uninstall") {
+			showNotice("[skills.sh: removing…]");
+			const out = await skillsShUninstall(rest);
+			await reloadSkillsAfterChange(deps);
+			deps.agent.addDisplayMessage({ role: "warning", content: out || "Uninstalled." });
+			return;
+		}
+		if (sub === "list-available") {
+			showNotice("[skills.sh: listing…]");
+			deps.agent.addDisplayMessage({ role: "warning", content: await skillsShListAvailable(rest) });
+			return;
+		}
+		if (sub === "search") {
+			showNotice("[skills.sh: searching…]");
+			deps.agent.addDisplayMessage({ role: "warning", content: await skillsShSearch(rest) });
+			return;
+		}
+		showNotice(`[Unknown /skills-sh ${sub}. See /skills-sh help]`);
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		deps.agent.addDisplayMessage({ role: "warning", content: `[skills.sh] ${message}` });
+	}
 }
 
 async function handleMcpCommand(input: string, deps: CommandDeps): Promise<void> {
@@ -1654,6 +1717,10 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		return;
 	}
 
+	if (input === "/skills-sh" || input.startsWith("/skills-sh ")) {
+		await handleSkillsShCommand(input, deps);
+		return;
+	}
 	if (input === "/skills" || input.startsWith("/skills ")) {
 		await handleSkillsCommand(input, deps);
 		return;

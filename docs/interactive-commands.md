@@ -57,6 +57,7 @@ See [Personas](personas.md) for the full list.
 | Command | Description |
 |---------|-------------|
 | `/skills` | Toggle skills on/off (multi-select). Also: `list`, `enable`/`disable`, `uninstall`, `help` |
+| `/skills-sh` | skills.sh — search / list-available / install / uninstall universal skills |
 | `/skill:<name> [args]` | Force-load and run a skill by name |
 | `/mcp` | Toggle MCP servers on/off. Also: `list`, `enable`/`disable`, `uninstall`, `help` |
 | `/hooks` | List lifecycle hooks; also `enable`/`disable <id>` and `help` |

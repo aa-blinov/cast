@@ -4,12 +4,11 @@
  * background. SSE listeners receive AgentEvent broadcasts in real time.
  */
 
-import { execFile, execFileSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import { promisify } from "node:util";
 import chokidar from "chokidar";
 import { subscribeAgentActorNotifications } from "../core/actor-events.ts";
 import type { AgentActorNotification } from "../core/actors.ts";
@@ -101,11 +100,11 @@ import {
 	renderSkillInvocation,
 	uninstallUserSkill,
 } from "../core/skills.ts";
+import { skillsShInstall, skillsShListAvailable, skillsShSearch, skillsShUninstall } from "../core/skills-sh.ts";
 import { saveSshConfig } from "../core/ssh.ts";
 import type { StartupResult } from "../core/startup.ts";
 import { extractSystemReminders } from "../core/system-reminder.ts";
 import { classifyLlmError, recordLlmCompaction, recordLlmRequest, recordToolCall } from "../core/telemetry.ts";
-import { stripAnsi } from "../core/tools/bash.ts";
 import { BackgroundTaskRegistry, type BashBackgroundDeps } from "../core/tools/bash-background.ts";
 import { type CompletedToolCallStatus, completedToolCallStatus } from "../core/tools/shared.ts";
 import { effectiveStatusFromFile } from "../core/turn-runner-state.ts";
@@ -123,7 +122,6 @@ import type { ThemeColors } from "../ui/themes/types.ts";
 import { buildGoalPrompt, isCommandBlocking, parseGoalInput, REVIEW_PROMPT, SLASH_COMMANDS } from "./commands.ts";
 import { isSafeSessionId, sessionInputsDir } from "./inputs.ts";
 
-const GITHUB_URL_RE = /^https?:\/\/(?:www\.)?github\.com\//i;
 const FRONTMATTER_STRIP_RE = /^---\n[\s\S]*?\n---\n?/;
 const WORKTREE_REMOVE_PREFIX_RE = /^(?:remove|rm)\s*(.*)$/;
 const WORKTREE_FORCE_FLAG_RE = /(^|\s)(--force|-f)(\s|$)/;
@@ -179,8 +177,6 @@ const CLIENT_PARITY_COMMANDS = new Set([
 	"/worktree",
 ]);
 
-const execFileAsync = promisify(execFile);
-
 // Slash-command argument parsing pulls the same one-or-more-whitespace
 // regex into every branch (every command dispatches via `arg.split(WHITESPACE_SPLIT)`).
 // Hoisting to module scope avoids re-parsing the pattern on every
@@ -190,36 +186,6 @@ const WHITESPACE_SPLIT = /\s+/;
 // string to `npx` verbatim and `npx` expects `owner/repo`. Strip a leading
 // `https?://(www.)?github.com/` so a paste from the skills.sh site
 // "just works" no matter how the user copied the URL. Used twice in the
-const GITHUB_GIT_SUFFIX = /\.git$/;
-
-async function runSkillsSh(args: string[], timeout: number): Promise<string> {
-	// `npx skills add` is a TTY-bound CLI — it walks the user through a
-	// scope prompt before installing. Cast already passes a specific skill
-	// name (and optionally a repo), so the only remaining prompt is the
-	// project-vs-global question. `-y` short-circuits it (auto-detect:
-	// `global` when the CLI is invoked from a non-project cwd, which is
-	// `homedir()` for us). Any caller already passing `-y` (rare) is
-	// left alone.
-	const fullArgs = args.includes("-y") || args.includes("--yes") ? args : [...args, "-y"];
-	try {
-		const { stdout, stderr } = await execFileAsync("npx", ["--yes", "skills", ...fullArgs], {
-			cwd: homedir(),
-			encoding: "utf-8",
-			timeout,
-		});
-		const out = stripAnsi(stdout).trim();
-		const err = stripAnsi(stderr || "").trim();
-		// Surface stderr warnings (e.g. "Failed to install 1") even on success
-		if (err && !out.includes(err)) return err ? `${out}\n${err}`.trim() : out;
-		return out;
-	} catch (error) {
-		const execError = error as { stdout?: string; stderr?: string; message?: string };
-		const out = stripAnsi(execError.stdout || "").trim();
-		const err = stripAnsi(execError.stderr || execError.message || String(error)).trim();
-		const combined = [out, err].filter(Boolean).join("\n").trim();
-		throw new Error(combined || "skills.sh failed");
-	}
-}
 
 export type WebAgentStatus = "idle" | "running" | "error";
 
@@ -3859,72 +3825,22 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			const sessionCwd = ws.session.cwd ?? cwd;
 			const [sub, ...restParts] = arg ? arg.split(WHITESPACE_SPLIT) : [""];
 			const rest = restParts.join(" ");
+			const refreshSkills = async (): Promise<void> => {
+				const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
+				skills = skillsResult.skills;
+				recomputeAllSystemPrompts();
+			};
 			try {
 				if (sub === "install") {
-					if (!rest) return { ok: false, error: "Usage: /skills-sh install <owner/repo> --skill <name>" };
-					// skills.sh's own "copy install command" button gives the full
-					// `npx skills add <pkg> --skill <name>` line, not just the tail —
-					// tolerate that being pasted in whole by dropping a leading
-					// `npx [--yes|-y] skills [add|a]` prefix before parsing.
-					const rawArgs = rest.split(WHITESPACE_SPLIT);
-					// `npx skills add` accepts `https://github.com/<owner>/<repo>`
-					// as the package argument, but our UI / `runSkillsSh` wrapper
-					// hands the string off to the underlying CLI verbatim, which
-					// expects `owner/repo` (or `owner/repo.git`). Strip a leading
-					// github.com/ so the same paste "works" no matter where the
-					// user copied the URL from — the original skills.sh site
-					// copy-button uses the long form, which currently surfaces
-					// as a confusing usage error.
-					if (rawArgs[0] && GITHUB_URL_RE.test(rawArgs[0])) {
-						rawArgs[0] = rawArgs[0].replace(GITHUB_URL_RE, "");
-						rawArgs[0] = rawArgs[0].replace(GITHUB_GIT_SUFFIX, "");
-					}
-					if (rawArgs[0] === "npx") rawArgs.shift();
-					if (rawArgs[0] === "--yes" || rawArgs[0] === "-y") rawArgs.shift();
-					if (rawArgs[0] === "skills") rawArgs.shift();
-					if (rawArgs[0] === "add" || rawArgs[0] === "a") rawArgs.shift();
-					if (rawArgs.length === 0)
-						return { ok: false, error: "Usage: /skills-sh install <owner/repo> --skill <name>" };
-					// Drop any `-a`/`--agent` the caller passed and force `-g`/`--global`:
-					// `skills add` with `-a <agent>` installs (only) into that agent's own
-					// dir (e.g. `.claude/skills/`), never the universal `~/.agents/skills/`
-					// tree Cast actually scans (see agentsGlobalSkillsDirs in project.ts) —
-					// an `-a claude-code` install would silently never show up in Cast.
-					// Omitting `-a` makes `add` install the universal copy and symlink it
-					// into every agent dir it detects, so nothing is lost either way.
-					const installArgs: string[] = [];
-					for (let i = 0; i < rawArgs.length; i++) {
-						const a = rawArgs[i];
-						if (a === "-a" || a === "--agent") {
-							i++; // skip its value too
-							continue;
-						}
-						if (a !== "-g" && a !== "--global") installArgs.push(a);
-					}
-					installArgs.push("-g");
-					const out = await runSkillsSh(["add", ...installArgs], 120_000);
-					const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
-					skills = skillsResult.skills;
-					recomputeAllSystemPrompts();
+					const out = await skillsShInstall(rest);
+					await refreshSkills();
 					return { ok: true, result: out || "Installed." };
 				}
-				if (sub === "list-available") {
-					if (!rest) return { ok: false, error: "Usage: /skills-sh list-available <owner/repo>" };
-					return { ok: true, result: await runSkillsSh(["add", rest, "--list"], 60_000) };
-				}
-				if (sub === "search") {
-					if (!rest) return { ok: false, error: "Usage: /skills-sh search <query>" };
-					return { ok: true, result: await runSkillsSh(["find", ...rest.split(WHITESPACE_SPLIT)], 60_000) };
-				}
+				if (sub === "list-available") return { ok: true, result: await skillsShListAvailable(rest) };
+				if (sub === "search") return { ok: true, result: await skillsShSearch(rest) };
 				if (sub === "uninstall") {
-					if (!rest) return { ok: false, error: "Usage: /skills-sh uninstall <name>" };
-					// Cast installs Skills.sh entries into the universal scope. Without
-					// --global, the CLI only searches the current project and reports a
-					// successful no-op for skills such as ~/.config/agents/skills/pr-review.
-					const out = await runSkillsSh(["remove", "--global", "--yes", ...rest.split(WHITESPACE_SPLIT)], 30_000);
-					const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
-					skills = skillsResult.skills;
-					recomputeAllSystemPrompts();
+					const out = await skillsShUninstall(rest);
+					await refreshSkills();
 					return { ok: true, result: out || "Uninstalled." };
 				}
 				return {
