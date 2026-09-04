@@ -142,18 +142,29 @@ describe("loadSkills discovery", () => {
 		expect(skills).toHaveLength(0);
 	});
 
-	it("drops a skill without the required name, with a diagnostic", () => {
+	it("takes the name from the directory when the frontmatter omits it", () => {
+		// Per the Agent Skills spec `name` is optional and defaults to the
+		// directory name. Requiring it dropped skills written to the published
+		// spec — anything from anthropics/skills or a skills.sh package.
 		writeSkill(GLOBAL_DIR, "fallback-name/SKILL.md", { description: "No name field." });
 		const { skills, diagnostics } = loadSkills({ globalDir: GLOBAL_DIR, extraPaths: [] });
-		expect(skills).toHaveLength(0);
-		expect(diagnostics.some((d) => d.message === "name is required")).toBe(true);
+		expect(skills.map((s) => s.name)).toEqual(["fallback-name"]);
+		expect(diagnostics).toEqual([]);
 	});
 
-	it("drops a skill with a missing description, with a diagnostic", () => {
-		writeSkill(GLOBAL_DIR, "no-desc/SKILL.md", { name: "no-desc" });
+	it("falls back to the first paragraph when the description is omitted", () => {
+		// The spec calls `description` recommended, not required: "If omitted,
+		// uses the first paragraph of markdown content."
+		const skillDir = join(GLOBAL_DIR, "no-desc");
+		mkdirSync(skillDir, { recursive: true });
+		writeFileSync(
+			join(skillDir, "SKILL.md"),
+			"---\nname: no-desc\n---\n\nSummarizes a changelog for release notes.\n\nMore detail here.\n",
+			"utf-8",
+		);
 		const { skills, diagnostics } = loadSkills({ globalDir: GLOBAL_DIR, extraPaths: [] });
-		expect(skills).toHaveLength(0);
-		expect(diagnostics.some((d) => d.message.includes("description"))).toBe(true);
+		expect(skills[0]?.description).toBe("Summarizes a changelog for release notes.");
+		expect(diagnostics).toEqual([]);
 	});
 
 	it("drops a skill with an invalid name", () => {
@@ -163,11 +174,42 @@ describe("loadSkills discovery", () => {
 		expect(diagnostics.some((d) => d.message.includes("lowercase"))).toBe(true);
 	});
 
-	it("drops a directory skill whose name does not match its directory", () => {
-		writeSkill(GLOBAL_DIR, "other-name/SKILL.md", { name: "my-skill", description: "Wrong directory." });
+	it("keeps a skill whose name differs from its directory", () => {
+		// The spec treats `name` as the display name and the directory as the
+		// command; they need not match. Rejecting the mismatch dropped valid
+		// third-party skills outright.
+		writeSkill(GLOBAL_DIR, "other-name/SKILL.md", { name: "my-skill", description: "Different display name." });
 		const { skills, diagnostics } = loadSkills({ globalDir: GLOBAL_DIR, extraPaths: [] });
-		expect(skills).toHaveLength(0);
-		expect(diagnostics.some((d) => d.message.includes("must match parent directory"))).toBe(true);
+		expect(skills.map((s) => s.name)).toEqual(["my-skill"]);
+		expect(diagnostics).toEqual([]);
+	});
+
+	it("accepts allowed-tools as a YAML list as well as a string", () => {
+		// Spec: "Accepts a space- or comma-separated string, or a YAML list."
+		const skillDir = join(GLOBAL_DIR, "list-tools");
+		mkdirSync(skillDir, { recursive: true });
+		writeFileSync(
+			join(skillDir, "SKILL.md"),
+			"---\nname: list-tools\ndescription: d\nallowed-tools:\n  - Read\n  - Grep\n---\nbody\n",
+			"utf-8",
+		);
+		const { skills, diagnostics } = loadSkills({ globalDir: GLOBAL_DIR, extraPaths: [] });
+		expect(skills[0]?.allowedTools).toBe("Read Grep");
+		expect(diagnostics).toEqual([]);
+	});
+
+	it("honours the spec's boolean spellings for disable-model-invocation", () => {
+		// Only a literal `true` counted, so a skill marked `yes` — its author
+		// saying "only the user may run this" — stayed model-invocable.
+		const skillDir = join(GLOBAL_DIR, "user-only");
+		mkdirSync(skillDir, { recursive: true });
+		writeFileSync(
+			join(skillDir, "SKILL.md"),
+			"---\nname: user-only\ndescription: d\ndisable-model-invocation: yes\n---\nbody\n",
+			"utf-8",
+		);
+		const { skills } = loadSkills({ globalDir: GLOBAL_DIR, extraPaths: [] });
+		expect(skills[0]?.disableModelInvocation).toBe(true);
 	});
 
 	it("parses and retains standard optional fields from full YAML", () => {

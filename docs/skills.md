@@ -69,13 +69,13 @@ Always check `templates/` for reference material.
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `name` | **Yes** | Identifier; for `SKILL.md`, it must match the containing directory |
-| `description` | **Yes** | What the skill does — invalid skills are not loaded |
+| `name` | No | Display name. Defaults to the containing directory's name, and need not match it |
+| `description` | Recommended | What the skill does and when to use it. When omitted, the body's first paragraph is used |
 | `license` | No | License name or a reference to a bundled license file |
 | `compatibility` | No | Environment requirements; 1–500 characters |
 | `metadata` | No | Mapping of string keys to string values for client-specific data |
-| `allowed-tools` | No | Experimental space-separated list of pre-approved tools; retained and exposed with the skill, with execution semantics depending on the client |
-| `disable-model-invocation` | No | `true` to hide from the agent (manual `/skill:<name>` only) |
+| `allowed-tools` | No | Pre-approved tools, as a space- or comma-separated string **or** a YAML list; retained and exposed with the skill, with execution semantics depending on the client |
+| `disable-model-invocation` | No | Hide from the agent (manual `/skill:<name>` only). Accepts `true`/`yes`/`on`/`1` in any case, as the spec allows |
 | `when_to_use` | No | Extra matching guidance shown to the model as `description — whenToUse` in the skill listing |
 
 ### Name Rules
@@ -87,7 +87,7 @@ Per the Agent Skills spec:
 - Must not contain consecutive hyphens (`--`)
 - Maximum 64 characters
 
-Malformed required fields, invalid YAML, and a directory/name mismatch prevent the skill from loading. Cast warns when the body exceeds the spec's recommended 500 lines but still loads it.
+A malformed `name`, an over-long `description` or `compatibility`, and invalid YAML prevent the skill from loading. A name that differs from its directory does not — the spec treats `name` as a display name. Cast warns when the body exceeds the spec's recommended 500 lines but still loads it. In the skill listing, `description` and `when_to_use` are combined and truncated at 1,536 characters, as the spec specifies.
 
 ### Relative Paths
 

@@ -1,9 +1,10 @@
 ---
 name: arxiv
 description: Searches arXiv and Semantic Scholar for academic papers, retrieves metadata and abstracts, generates BibTeX citations, downloads PDFs, and analyzes citation impact. Use when user wants to find, read, cite, track, download, or analyze academic papers on arXiv, mentions arXiv IDs, arxiv.org URLs, or asks for paper search, literature review, or what's new in a field.
-version: 2.0.0
 license: MIT
-platforms: [linux, macos, windows]
+compatibility: Runs on Linux, macOS and Windows; needs python3 (standard library only) and network access to arxiv.org and api.semanticscholar.org.
+metadata:
+  version: "2.0.0"
 ---
 
 # arXiv Research
