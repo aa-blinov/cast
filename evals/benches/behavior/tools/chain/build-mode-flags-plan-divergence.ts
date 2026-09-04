@@ -25,7 +25,12 @@ export const buildModeFlagsPlanDivergence: EvalCase = {
 	setup: () => void writeFixture("behavior-plan-divergence", { "settings/flags.json": '{"betaFeature": false}\n' }),
 	prompt: "Continue executing the approved plan: complete its first step.",
 	expect: {
-		toolsNotCalled: ["write"],
+		// Not `toolsNotCalled: ["write"]`: build-mode.md tells the agent to "say
+		// so and adapt", and adapting here means editing the real
+		// settings/flags.json — which that forbade, failing a run that found the
+		// divergence, fixed the right file, and reported the deviation. What must
+		// not happen is fabricating the plan's wrong path, and `verify` below is
+		// what checks that.
 		containsAny: ["legacy-flags", "does not exist", "could not find", "no such file", "not found"],
 		noErrors: true,
 		verify: ({ toolCalls }) => {
