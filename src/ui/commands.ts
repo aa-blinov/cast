@@ -65,9 +65,9 @@ import {
 	updateSettings,
 } from "../core/settings.ts";
 import {
-	formatSkillInvocation,
 	formatSkillsForPrompt,
 	isUninstallableSkill,
+	renderSkillInvocation,
 	type Skill,
 	uninstallUserSkill,
 } from "../core/skills.ts";
@@ -2175,7 +2175,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			return;
 		}
 		fireUserPromptExpansion(deps, skill.name);
-		await agent.submit(formatSkillInvocation(skill, skillArgs, session.id, { projectDir: deps.cwd }));
+		await agent.submit(await renderSkillInvocation(skill, skillArgs, session.id, { projectDir: deps.cwd }));
 		return;
 	}
 
@@ -3372,7 +3372,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			const skill = deps.skills.find((s) => s.name === skillId && s.userInvocable);
 			if (skill) {
 				fireUserPromptExpansion(deps, skill.name);
-				await agent.submit(formatSkillInvocation(skill, skillArgs, session.id, { projectDir: deps.cwd }));
+				await agent.submit(await renderSkillInvocation(skill, skillArgs, session.id, { projectDir: deps.cwd }));
 				return;
 			}
 		}

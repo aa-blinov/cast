@@ -9,7 +9,7 @@ import { dirname } from "node:path";
 const TOOL_LIST_SPLIT_RE = /[\s,]+/;
 
 import type { Skill } from "../skills.ts";
-import { formatSkillInvocation } from "../skills.ts";
+import { renderSkillInvocation } from "../skills.ts";
 import type { ToolResult } from "./shared.ts";
 
 export interface SkillToolDeps {
@@ -35,7 +35,7 @@ export function getSkillToolDescription(skills: Skill[]): string {
 	return `Load a specialized skill by name. Skills contain detailed workflows and instructions for specific tasks. Available skills: ${names}. Call this tool when the user's request matches a skill's description, or when the user invokes /skill:name.`;
 }
 
-export function execSkill(args: Record<string, unknown>, deps: SkillToolDeps): ToolResult {
+export async function execSkill(args: Record<string, unknown>, deps: SkillToolDeps): Promise<ToolResult> {
 	const name = typeof args.name === "string" ? args.name.trim() : "";
 	const userArgs = typeof args.args === "string" ? args.args : undefined;
 
@@ -68,7 +68,7 @@ export function execSkill(args: Record<string, unknown>, deps: SkillToolDeps): T
 	try {
 		const disallowed = skill.disallowedTools?.split(TOOL_LIST_SPLIT_RE).filter(Boolean);
 		return {
-			content: formatSkillInvocation(skill, userArgs, deps.sessionId, {
+			content: await renderSkillInvocation(skill, userArgs, deps.sessionId, {
 				projectDir: deps.cwd,
 				pluginRoot: pluginRootFor(skill),
 			}),

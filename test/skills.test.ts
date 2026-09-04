@@ -13,12 +13,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parseFrontmatter } from "../src/core/frontmatter.ts";
+import type { Skill } from "../src/core/skills.ts";
 import {
 	builtinSkillsDir,
 	formatSkillInvocation,
 	formatSkillsForPrompt,
 	isUninstallableSkill,
 	loadSkills,
+	renderSkillInvocation,
 	uninstallUserSkill,
 } from "../src/core/skills.ts";
 import { formatSkillPickLabel } from "../src/pickers/domain.ts";
@@ -560,7 +562,7 @@ describe("skill tool — a file that vanished after discovery", () => {
 		// reported "skill failed unexpectedly: ENOENT: no such file or
 		// directory…", which says nothing about what to do next.
 		const { execSkill } = await import("../src/core/tools/skill.ts");
-		const result = execSkill(
+		const result = await execSkill(
 			{ name: "ghost-skill" },
 			{
 				skills: [
@@ -674,5 +676,50 @@ describe("Claude Code skill extensions", () => {
 		expect(byName.get("hidden")?.userInvocable).toBe(false);
 		expect(byName.get("shown")?.userInvocable).toBe(true);
 		expect(formatSkillsForPrompt(skills)).toContain("<name>hidden</name>");
+	});
+});
+
+describe("inline `!`command`` blocks in a skill body", () => {
+	let dir = "";
+	beforeEach(() => {
+		dir = mkdtempSync(join(tmpdir(), "cast-skill-inline-"));
+	});
+	afterEach(() => {
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	function writeProbe(body: string): Skill {
+		mkdirSync(join(dir, "probe"), { recursive: true });
+		writeFileSync(join(dir, "probe", "SKILL.md"), `---\nname: probe\ndescription: d\n---\n${body}\n`, "utf-8");
+		return loadSkills({ globalDir: dir, extraPaths: [] }).skills[0]!;
+	}
+
+	it("runs them for a skill the user installed themselves", async () => {
+		// Left unexecuted the model reads the literal text as a fact — a body
+		// saying "Node: !`node --version`" looks like the version was checked.
+		const skill = writeProbe("Version: !`echo v99.0.0`");
+		expect(await renderSkillInvocation(skill)).toContain("Version: v99.0.0");
+	});
+
+	it("reports a failing command instead of leaving the literal in place", async () => {
+		const skill = writeProbe("Probe: !`definitely-not-a-real-binary`");
+		const out = await renderSkillInvocation(skill);
+		expect(out).toMatch(/Probe: \[command failed:/);
+		expect(out).not.toContain("!`");
+	});
+
+	it("refuses to run them for a marketplace plugin skill, and says so", async () => {
+		// Installing a plugin is not consent to run arbitrary commands from it;
+		// every installed skill using this syntax comes from a marketplace.
+		const skill = { ...writeProbe("Version: !`echo v99.0.0`"), source: "plugin" as const };
+		const out = await renderSkillInvocation(skill);
+		expect(out).toContain("command not run");
+		// The notice quotes the command, so check the *output* never appeared.
+		expect(out).not.toContain("Version: v99.0.0");
+	});
+
+	it("leaves the blocks alone in the synchronous formatter", async () => {
+		const skill = writeProbe("Version: !`echo v99.0.0`");
+		expect(formatSkillInvocation(skill)).toContain("!`echo v99.0.0`");
 	});
 });

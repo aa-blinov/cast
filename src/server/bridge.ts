@@ -108,9 +108,9 @@ import {
 	updateSettings,
 } from "../core/settings.ts";
 import {
-	formatSkillInvocation,
 	formatSkillsForPrompt,
 	isUninstallableSkill,
+	renderSkillInvocation,
 	uninstallUserSkill,
 } from "../core/skills.ts";
 import { saveSshConfig } from "../core/ssh.ts";
@@ -4296,7 +4296,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			if (skill) {
 				if (running) return { ok: false, error: "Agent running — use /queue, /steer, or /abort" };
 				fireUserPromptExpansion(sessionCwd, skill.name);
-				submit(sessionId, formatSkillInvocation(skill, arg, undefined, { projectDir: sessionCwd }));
+				submit(sessionId, await renderSkillInvocation(skill, arg, undefined, { projectDir: sessionCwd }));
 				return { ok: true, result: `Invoked skill: ${skill.name}` };
 			}
 		}
