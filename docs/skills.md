@@ -25,11 +25,41 @@ Use `--no-skills` to skip auto-discovery (including `.agents/skills`). Extra pat
 
 ### skills.sh / `npx skills add`
 
-```bash
-npx -y skills add mattpocock/skills --skill grill-me -a universal
+Install from inside cast — same command in the TUI and the web UI (**Settings
+→ Skills.sh**):
+
+```
+/skills-sh search grill                       Find skills by keyword
+/skills-sh list-available mattpocock/skills   What a repo offers
+/skills-sh install mattpocock/skills --skill grill-me
+/skills-sh uninstall grill-me
 ```
 
-Installs into `.agents/skills/` (project) or `~/.agents/skills/` (global). Cast also recognizes the compatible `~/.config/agents/skills/` location. It loads these automatically after `/reload` (or on next start). Invoke with `/skill:grill-me` (not `/grill-me`).
+`install` also accepts a whole `npx skills add …` line pasted from the
+skills.sh copy button, and a `https://github.com/owner/repo` URL. Cast always
+installs into the **universal** scope, and drops an `-a <agent>` flag if you
+pass one: that form installs only into that one agent's directory (e.g.
+`.claude/skills`), which cast never scans, so the skill would silently never
+appear. The catalog refreshes in the same session — no `/reload`.
+
+Or run the CLI yourself:
+
+```bash
+npx -y skills add mattpocock/skills --skill grill-me
+```
+
+Either way the skill lands in `.agents/skills/` (project, trust-gated) or
+`~/.agents/skills/` (global); cast also recognizes the compatible
+`~/.config/agents/skills/` location. Installing by hand needs `/reload` (or a
+restart) for cast to pick it up. Invoke with `/skill:grill-me` (not
+`/grill-me`).
+
+Settings → Skills.sh lists the skills whose provenance `npx skills`' own
+lockfile (`~/.agents/.skill-lock.json`) records, with their source repo. A
+skill you dropped into `.agents/skills/` yourself has no lockfile entry, so it
+appears under Skills rather than Skills.sh — those directories are shared with
+other tools, and the lockfile is the only thing that establishes where a skill
+came from.
 
 ## Creating a Skill
 

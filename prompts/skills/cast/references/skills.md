@@ -61,3 +61,13 @@ description: Branch naming, commit messages, and PR conventions for this repo.
 - Always squash-merge PRs
 EOF
 ```
+
+## skills.sh
+
+`/skills-sh search <query>`, `/skills-sh list-available <owner/repo>`,
+`/skills-sh install <owner/repo> --skill <name>`, `/skills-sh uninstall <name>` —
+same in the TUI and the web UI (Settings → Skills.sh). Installs go to the
+universal scope (`~/.agents/skills`) and the catalog refreshes in the same
+session. A pasted `npx skills add …` line or a github.com URL is accepted; an
+`-a <agent>` flag is dropped because that form installs only into one agent's
+directory, which cast does not scan.

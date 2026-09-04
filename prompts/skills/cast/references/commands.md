@@ -3,6 +3,7 @@
 | Command | Description |
 |---------|-------------|
 | `/skills` | Toggle / list / enable\|disable / uninstall skills |
+| `/skills-sh` | skills.sh — search / list-available / install / uninstall |
 | `/mcp` | Toggle / list / enable\|disable / uninstall MCP servers |
 | `/rule:<name>` | Invoke a rule by name |
 | `/rules` | List loaded rules |
