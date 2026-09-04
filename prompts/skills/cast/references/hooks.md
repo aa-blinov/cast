@@ -1,10 +1,9 @@
-Hooks are shell commands, HTTP callbacks, MCP tool calls, or model prompts that fire at agent lifecycle events. Config shape matches Claude Code's protocol — real `hooks.json` files from Claude Code plugins load unmodified.
+Hooks are shell commands, HTTP callbacks, MCP tool calls, or model prompts that fire at agent lifecycle events. Config shape matches Claude Code's protocol — a real `hooks.json` loads unmodified.
 
 **Locations** (merged, all apply):
 
 1. `~/.cast/hooks.json` — global, always applies
 2. `.cast/hooks.json` — project (trust-gated, same as mcp.json)
-3. `<plugin root>/hooks/hooks.json` — plugin-contributed (auto-merged on install)
 
 **File format:**
 
@@ -45,7 +44,7 @@ A bare `{ "PreToolUse": [...] }` (no wrapping `"hooks"` key) works too. Unrecogn
 
 **Matcher:** regex tested against tool name (for tool events), subagent name (for SubagentStart/Stop), or ignored for events with no natural target. Case-insensitive. Supports pipe-separated exact matches (`Write|Edit`).
 
-**Env vars** (command hooks): `CAST_HOOK_EVENT`, `CAST_SESSION_ID`, `CAST_WORKSPACE_ROOT`, `CAST_PLUGIN_ROOT`/`CAST_PLUGIN_DATA` (plugin hooks only). Reserved keys in hook's own `env` field are stripped.
+**Env vars** (command hooks): `CAST_HOOK_EVENT`, `CAST_SESSION_ID`, `CAST_WORKSPACE_ROOT`. Reserved keys in a hook's own `env` field are stripped.
 
 **Commands:**
 

@@ -1,13 +1,13 @@
 ---
 name: cast
-description: Configures cast itself — creates and manages personas, skills, marketplace plugins, MCP servers, rules, and durable project memory. Use when user wants to customize cast, create a persona through chat, ask about memory, or install plugins from Codex/Claude/Grok catalogs.
+description: Configures cast itself — creates and manages personas, skills, MCP servers, rules, hooks, and durable project memory. Use when user wants to customize cast, create a persona through chat, install a skill, or ask about memory.
 ---
 
 # cast configuration
 
 cast stores user config under `~/.cast/` (global) and `<cwd>/.cast/` (project-local).
 
-- Slash toggles/install/uninstall for `/skills`, `/mcp`, `/plugin`: hot-reload in the same session — no `/reload`, no restart.
+- Slash toggles/install/uninstall for `/skills` and `/mcp`: hot-reload in the same session — no `/reload`, no restart.
 - File drops/edits (skills, personas, rules, mcp.json, `npx skills add`): `/reload` in the same session (does not reset chat).
 
 ## Plan mode
@@ -24,7 +24,6 @@ This skill ships as an **index + reference files**. Read only what the task need
 |-------|------|
 | Personas — locations, frontmatter, isolation knobs, example | `references/personas.md` |
 | Skills — locations, format, discovery order, example | `references/skills.md` |
-| Marketplace plugins — catalogs, `/plugin` flow, state | `references/marketplace.md` |
 | MCP servers — `mcp.json` shape, transports, commands | `references/mcp.md` |
 | Rules — apply modes, globs, `@rule-name` vs `/rule:` | `references/rules.md` |
 | Hooks — `hooks.json` shape, events, matchers, env vars | `references/hooks.md` |
@@ -35,4 +34,4 @@ This skill ships as an **index + reference files**. Read only what the task need
 | Memory — durable project memory, `/memory` commands, files, how to answer user questions | `references/memory.md` |
 | Project configuration — `.cast/` layout, trust, git policy, reload | `references/project-config.md` |
 
-When the user asks for a specific concern ("how do I add an MCP server?", "where do personas live?"), open the matching reference file. For multi-topic requests ("install a plugin from a non-default marketplace that exposes a custom hook"), follow the references in order.
+When the user asks for a specific concern ("how do I add an MCP server?", "where do personas live?"), open the matching reference file. For multi-topic requests ("add an MCP server and a hook that gates its tools"), follow the references in order.

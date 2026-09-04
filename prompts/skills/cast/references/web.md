@@ -8,7 +8,7 @@ ssh -L 1337:127.0.0.1:1337 user@server
 
 Then open `http://localhost:1337` locally. Do not claim that a password makes public HTTP safe against a network observer. Use HTTPS through a trusted reverse proxy or tunnel before exposing Cast to an untrusted network.
 
-Web settings configure the same global providers, models, skills, MCP servers, plugins, hooks, SSH hosts, theme, and fonts as the TUI. Editing files under `.cast/` or `~/.cast/` still requires `/reload` in an active session; toggles and installs made in Settings apply immediately.
+Web settings configure the same global providers, models, skills, MCP servers, hooks, SSH hosts, theme, and fonts as the TUI. Editing files under `.cast/` or `~/.cast/` still requires `/reload` in an active session; toggles and installs made in Settings apply immediately.
 
 ## Web UI
 
@@ -79,8 +79,8 @@ when cwd is not a git repo).
 
 ### Settings tabs
 
-Appearance, Bash, Hooks, Marketplace, Memory, MCP, Model, Personas, Plugins,
-Provider, Skills.sh, Quick Mode, Server, Skills, SSH, Web. A "Reload resources"
+Appearance, Bash, Hooks, Memory, MCP, Model, Personas, Provider,
+Skills.sh, Quick Mode, Server, Skills, SSH, Web. A "Reload resources"
 button re-scans `.cast/` directories. Key panels: **Appearance** (theme swatch
 grid, font scale, reasoning toggle), **Memory** (memory on/off, background
 writing, checkpoint knobs, per-section token caps, automatic dream/distill +
