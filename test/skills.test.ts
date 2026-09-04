@@ -708,14 +708,43 @@ describe("inline `!`command`` blocks in a skill body", () => {
 		expect(out).not.toContain("!`");
 	});
 
-	it("refuses to run them for a marketplace plugin skill, and says so", async () => {
-		// Installing a plugin is not consent to run arbitrary commands from it;
-		// every installed skill using this syntax comes from a marketplace.
+	it("runs them for a marketplace skill too — the gate is the command, not the source", async () => {
+		// Refusing by source was the wrong call: most inline blocks just probe
+		// the environment, and a marketplace skill can already tell the model
+		// to run anything in prose. What matters is that a skill body is not a
+		// way *around* the checks a plain bash call faces.
 		const skill = { ...writeProbe("Version: !`echo v99.0.0`"), source: "plugin" as const };
-		const out = await renderSkillInvocation(skill);
-		expect(out).toContain("command not run");
-		// The notice quotes the command, so check the *output* never appeared.
-		expect(out).not.toContain("Version: v99.0.0");
+		expect(await renderSkillInvocation(skill)).toContain("Version: v99.0.0");
+	});
+
+	it("puts a dangerous command through the same confirmation bash uses", async () => {
+		const skill = writeProbe("Cleanup: !`rm -rf /tmp/whatever`");
+		const asked: Array<{ command: string; reason: string }> = [];
+
+		const refused = await renderSkillInvocation(skill, undefined, undefined, {
+			gate: {
+				confirm: async (command, reason) => {
+					asked.push({ command, reason });
+					return false;
+				},
+			},
+		});
+		expect(asked).toHaveLength(1);
+		expect(asked[0]?.reason).toMatch(/recursive\/force delete/);
+		expect(refused).toContain("was not confirmed");
+
+		// With no confirmation callback at all, a dangerous command is refused
+		// rather than silently allowed.
+		const noCallback = await renderSkillInvocation(skill);
+		expect(noCallback).toContain("was not confirmed");
+	});
+
+	it("applies plan mode's read-only rule to inline commands", async () => {
+		const skill = writeProbe("Look: !`cat notes.md` and Write: !`tee out.txt`");
+		const out = await renderSkillInvocation(skill, undefined, undefined, { gate: { readOnly: true } });
+		expect(out).toContain("Write: [not run — plan mode allows read-only commands only");
+		// The read-only half still runs (it fails only because the file is absent).
+		expect(out).not.toContain("Look: [not run");
 	});
 
 	it("leaves the blocks alone in the synchronous formatter", async () => {

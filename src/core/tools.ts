@@ -757,7 +757,15 @@ export function createToolExecutor(
 						return execQuestion(args, planState);
 					case "skill":
 						if (!skillDeps) return { content: "Skill tool not available.", isError: true };
-						return execSkill(args, skillDeps);
+						// A skill body's inline commands run under the same gate as the
+						// bash tool: dangerous patterns need the same confirmation, and
+						// plan mode's read-only rule applies (the loop layers that on
+						// via its own wrapper, same as it does for bash).
+						return execSkill(args, {
+							...skillDeps,
+							cwd: skillDeps.cwd ?? cwd,
+							inlineGate: { ...skillDeps.inlineGate, confirm: skillDeps.inlineGate?.confirm ?? confirmBash },
+						});
 					default:
 						return { content: `Unknown tool: ${name}`, isError: true };
 				}

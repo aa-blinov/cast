@@ -344,7 +344,6 @@ export function App(props: AppProps): JSX.Element {
 			mcpResult,
 			contextFilesSuffix,
 			rulesLazySuffix,
-			skillsPromptSuffix,
 			cwd,
 			projectTrusted,
 			activeModel,

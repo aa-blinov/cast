@@ -9,13 +9,16 @@ import { dirname } from "node:path";
 const TOOL_LIST_SPLIT_RE = /[\s,]+/;
 
 import type { Skill } from "../skills.ts";
-import { renderSkillInvocation } from "../skills.ts";
+import { type InlineCommandGate, renderSkillInvocation } from "../skills.ts";
 import type { ToolResult } from "./shared.ts";
 
 export interface SkillToolDeps {
 	skills: Skill[];
 	/** Project root, for the skill body's `${CLAUDE_PROJECT_DIR}`. */
 	cwd?: string;
+	/** Gate for the body's inline `` !`command` `` blocks — the same read-only
+	 * and dangerous-pattern checks the bash tool applies. */
+	inlineGate?: InlineCommandGate;
 	/** Current session id — substituted into ${CAST_SESSION_ID} / ${CLAUDE_SESSION_ID} in the skill body. */
 	sessionId?: string;
 }
@@ -71,6 +74,7 @@ export async function execSkill(args: Record<string, unknown>, deps: SkillToolDe
 			content: await renderSkillInvocation(skill, userArgs, deps.sessionId, {
 				projectDir: deps.cwd,
 				pluginRoot: pluginRootFor(skill),
+				gate: deps.inlineGate,
 			}),
 			...(disallowed?.length ? { skillDisallowedTools: disallowed } : {}),
 		};
