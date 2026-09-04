@@ -29,8 +29,16 @@ function isEnoent(err: unknown): boolean {
  * the message actively misleads about what went wrong. Each case here names
  * the actual obstacle instead.
  */
-function describeFileWriteError(err: unknown, path: string): string | null {
+export function describeFileWriteError(err: unknown, path: string): string | null {
 	const code = (err as { code?: string })?.code;
+	// libuv has no name for EDQUOT, so a quota-exhausted write surfaces as
+	// code "UNKNOWN" with errno -122 and the message "Unknown system error
+	// -122, write" — which says nothing a caller can act on. Observed for real
+	// on a filled tmpfs, where it also broke writes the agent had every reason
+	// to expect to work.
+	if (code === "EDQUOT" || (err as { errno?: number })?.errno === -122) {
+		return `Disk quota exceeded writing ${path} — the filesystem holding it is over quota (Node reports this as "Unknown system error -122"). Free space there or write somewhere else.`;
+	}
 	switch (code) {
 		case "EISDIR":
 			return `${path} is a directory, not a file. Pass a file path (use ls to see what is inside it).`;

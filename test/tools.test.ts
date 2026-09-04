@@ -2140,6 +2140,22 @@ describe("write / edit filesystem error reporting", () => {
 	// "write failed unexpectedly: EISDIR: illegal operation on a directory,
 	// read" — the mention of *read* comes from loading the previous content for
 	// the diff, so the message misleads about what actually went wrong.
+	it("names a quota-exhausted write, which libuv reports only as errno -122", async () => {
+		// Hit for real on a filled tmpfs: the agent's write failed with
+		// "Unknown system error -122: Unknown system error -122, write" — a
+		// message that names neither the cause nor anything to do about it.
+		const { describeFileWriteError } = await import("../src/core/tools/files.ts");
+		const quotaError = Object.assign(new Error("Unknown system error -122: Unknown system error -122, write"), {
+			code: "UNKNOWN",
+			errno: -122,
+		});
+
+		expect(describeFileWriteError(quotaError, "/tmp/out.json")).toMatch(/quota exceeded/i);
+		expect(describeFileWriteError(Object.assign(new Error("q"), { code: "EDQUOT" }), "/tmp/out.json")).toMatch(
+			/quota exceeded/i,
+		);
+	});
+
 	it("says the path is a directory instead of leaking EISDIR from the diff read", async () => {
 		const { execWrite } = await import("../src/core/tools/files.ts");
 		mkdirSync(join(TEST_DIR, "somedir"), { recursive: true });

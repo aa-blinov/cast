@@ -18,7 +18,10 @@ export const approvedPlanTodoProgress: EvalCase = {
 	initialTodos: [{ content: STEP, status: "pending", priority: "medium", planStep: STEP }],
 	prompt: "Continue the approved plan. Complete its only step and verify it before reporting completion.",
 	expect: {
-		toolsCalled: ["todo_write", "write", "read"],
+		// Not "write": replacing PENDING with READY through `edit` is the same
+		// outcome by the better tool, and mimo-v2.5 does exactly that — the
+		// file's final content is what matters, and `verify` below checks it.
+		toolsCalled: ["todo_write", "read"],
 		noErrors: true,
 		verify: ({ toolCalls }) => {
 			const completion = toolCalls
