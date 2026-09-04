@@ -20,6 +20,13 @@ export interface ToolResult {
 	 * follows it up with a separate `role: "user"` image message instead.
 	 */
 	imageDataUrl?: string;
+	/**
+	 * Tools the invoked skill removes from the model's pool for the rest of
+	 * the turn (`disallowed-tools`). Set by the `skill` tool only; the loop
+	 * applies it and clears it on the next user message, per the spec's
+	 * "the restriction clears when you send your next message".
+	 */
+	skillDisallowedTools?: string[];
 	/** Usage from subagent execution (task tool only). */
 	subagentUsage?: Usage;
 }
