@@ -2,6 +2,20 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.25.0
+
+### Changed
+
+- **Debugging discipline in the shared prompts.** Three general rules, each measured on the behavior bench rather than guessed at. (1) When a task starts from something failing, running it to see the failure is the default first action rather than opening the source to reason about it — with one exception, added after both MiniMax-M3 and mimo-v2.5 declined the rule on a single-line operator inversion and were right to: skip the reproduction when what you read leaves exactly one nameable cause. Anything vaguer ("probably the cache", "looks like a race") still gets run, and verifying after the change is unconditional. (2) Inspect the tree with the tools (`ls`, `glob`, `grep`, `read`) instead of shelling out to `ls -la`/`find`/`cat`, and never probe for a path's existence before calling the tool that wants it — the tool's own error is more informative than the probe. A `grep` hit is still a pointer, not an answer: the file has to be read before saying what the code does. (3) In plan mode, ask only when the answer changes the plan — if rival answers produce the same Steps and differ in a detail (who does it, what it is called, when), write the step and park the detail in Assumptions with a pre-decided fallback. A question that stops the turn without changing what gets written spends the user's turn for nothing. Verified by A/B with alternating runs on identical code: 30/27/35 before the prompt changes against 35/33/36 after, a win in all three pairs, and the same average on a second model (mimo-v2.5, 35.3) as on MiniMax-M3.
+
+### Fixed
+
+- **bash:** the tool never said that each call is a fresh shell. Every invocation starts in the session's directory, so a `cd` does not carry into the next call — undocumented, and a trace caught the model losing its directory exactly that way: `cd <dir> && node check.js` worked, the follow-up `node check.js` failed with `Cannot find module .../check.js`. The description now states it.
+- **bash:** a background task whose command exited non-zero was reported as the *shell* having failed to start — `Failed to start bash ("bash"): ls: cannot access '…': No such file or directory`. The spawn-failure test matched "no such file or directory" anywhere in the output, which is what any command says about a path it cannot find, so a healthy shell running a failing `ls` was described as never having started and its real output was buried behind the wrong explanation. Detection now requires node-pty's `execvp(3) failed` marker or the shell naming itself at the head of a line.
+- **todo_write:** the link between a todo and its plan step was lost whenever the model retyped the item. `planStep` is carried forward by matching the previous item's `content` exactly, but flipping one status means resending the whole list, and models routinely shorten an absolute path in it (`…/note.txt` becomes `note.txt`). The link — the open-work gate's only handle on that step — silently went with it, so approved-plan work read as unlinked. A second matching pass compares with directories stripped off path-like tokens.
+- **write:** a file ending in a newline was reported with one line too many. `"READY\n"` came back as `Overwrote … (2 lines)` because the trailing empty split counted as a line, telling the model it had written a blank line it never wrote — an invitation to "clean up" a correct file.
+- **write / edit:** an exhausted disk quota surfaced as `Unknown system error -122: Unknown system error -122, write`. libuv has no name for EDQUOT, so it arrives as code `UNKNOWN` with errno -122 and slipped past every case in the error description. Hit for real on a filled tmpfs, where it also broke writes the agent had every reason to expect to work. It is now named as a quota exhaustion, with what to do about it.
+
 ## 0.24.0
 
 ### Removed
