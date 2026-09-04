@@ -79,6 +79,7 @@ Always check `templates/` for reference material.
 | `when_to_use` | No | Extra matching guidance shown to the model as `description — whenToUse` in the skill listing |
 | `user-invocable` | No | `false` keeps the skill out of the slash menu — the model may load it, a person may not. Accepts the same boolean spellings |
 | `argument-hint` | No | Autocomplete hint for the arguments the skill expects, e.g. `[issue-number]` |
+| `paths` | No | Globs limiting when the skill is offered — it is listed only while a file matching one of them is in context. Comma-separated string or a YAML list |
 | `disallowed-tools` | No | Tools removed from the model's pool for the rest of the turn the skill is invoked in; cleared by your next message. Space- or comma-separated string, or a YAML list |
 | `arguments` | No | Named positional arguments, as a space-separated string or a YAML list. `arguments: [issue, branch]` makes `$issue` the first argument and `$branch` the second |
 
