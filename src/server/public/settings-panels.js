@@ -9,7 +9,7 @@ import { shortPath } from "./sidebar-utils.js";
 const html = htm.bind(h);
 
 // Per-row/per-action pending tracking, shared by every settings list that
-// runs a mutating `act()` per row (MCP/Skills/Hooks/Plugins/Marketplace).
+// runs a mutating `act()` per row (MCP/Skills/Hooks).
 // The modal's global `busy` flag flashes for ~100ms around the request then
 // clears, which reads as "did that even do anything?" on a slower action —
 // tracking pending by its own id (row id, or `${id}:${verb}` when a row has
@@ -420,7 +420,6 @@ function SettingsSkills({ data, busy, act, confirm }) {
 			label: "Project",
 			items: skills.filter((s) => s.source === "project" || s.source === "agents" || s.source === "path"),
 		},
-		{ key: "plugin", label: "Plugins", items: skills.filter((s) => s.source === "plugin") },
 	];
 	const renderSkill = (s) => {
 		const toggleKey = `${s.name}:toggle`;
@@ -430,7 +429,7 @@ function SettingsSkills({ data, busy, act, confirm }) {
 			<div class="settings-item-info">
 				<span class="settings-item-status ${s.enabled ? "ok" : "off"}" />
 				<span class="settings-item-name">${s.name}</span>
-				<span class="settings-item-meta">${s.source === "plugin" && s.pluginId ? s.pluginId : s.source}</span>
+				<span class="settings-item-meta">${s.source}</span>
 				<${InfoPopover} text=${s.description} readUrl=${`/api/skill-content?name=${encodeURIComponent(s.name)}`} />
 			</div>
 			<div class="settings-item-actions">
@@ -447,7 +446,7 @@ function SettingsSkills({ data, busy, act, confirm }) {
 	};
 	return html`
 		<div class="settings-rows">
-			<p class="settings-intro"><span>On-demand instruction sets — "expertise plugins" the agent picks up when a task matches, or you invoke with <code>/skill-name</code>. Click ℹ to preview one.</span></p>
+			<p class="settings-intro"><span>On-demand instruction sets — expertise packs the agent picks up when a task matches, or you invoke with <code>/skill-name</code>. Click ℹ to preview one.</span></p>
 			${groups
 				.filter((g) => g.items.length > 0)
 				.map(
@@ -466,22 +465,13 @@ function SettingsHooks({ data, busy, act }) {
 	const hooks = data?.entries || [];
 	const diagnostics = data?.diagnostics || [];
 	const [pending, addPending, removePending] = usePendingIds();
-	// Group plugins by pluginId — each plugin gets its own collapsible subsection.
-	// Global/project stay flat since they have no pluginId.
 	const globalHooks = hooks.filter((h) => h.source === "global");
 	const projectHooks = hooks.filter((h) => h.source === "project");
-	const pluginGroups = new Map();
-	for (const h of hooks.filter((h) => h.source === "plugin")) {
-		const key = h.pluginId ?? "(unknown plugin)";
-		if (!pluginGroups.has(key)) pluginGroups.set(key, []);
-		pluginGroups.get(key).push(h);
-	}
-	const renderHook = (h, showPlugin = false) => html`
+	const renderHook = (h) => html`
 		<div key=${h.id} class="settings-item-row settings-item-row-stack">
 			<div class="settings-item-header">
 				<span class="settings-item-status ${h.enabled ? "ok" : "off"}" />
 				<span class="settings-item-name">${h.event}${h.matcher ? html` <span style=${{ opacity: 0.6 }}>(${h.matcher})</span>` : ""}</span>
-				${showPlugin && h.pluginId ? html`<span class="settings-item-meta">${h.pluginId}</span>` : ""}
 				<div class="settings-item-actions">
 					<button class="modal-btn icon-btn" title=${h.enabled ? "Disable" : "Enable"} disabled=${busy || pending.has(h.id)} onClick=${() => actPending(act, addPending, removePending, h.id, `/hooks ${h.enabled ? "disable" : "enable"} ${h.id}`)}>${pending.has(h.id) ? "loading" : h.enabled ? html`<${icons.pause} />` : html`<${icons.play} />`}</button>
 				</div>
@@ -510,13 +500,13 @@ function SettingsHooks({ data, busy, act }) {
 		return html`
 			<div key=${opts.key ?? label} class="settings-group">
 				<div class="settings-section-title">${label}</div>
-				${[...items].sort((a, b) => a.event.localeCompare(b.event)).map((h) => renderHook(h, opts.showPlugin ?? false))}
+				${[...items].sort((a, b) => a.event.localeCompare(b.event)).map((h) => renderHook(h))}
 			</div>
 		`;
 	};
 	return html`
 		<div class="settings-rows">
-			<p class="settings-intro"><span>Shell (or HTTP) commands that fire on lifecycle events — validate/block a tool call, log activity, or force the agent to keep working before it stops. Configure in <code>.cast/hooks.json</code> (project) or <code>~/.cast/hooks.json</code> (global). Plugin-contributed hooks are grouped under their plugin; uninstall the plugin to remove all its hooks.</span></p>
+			<p class="settings-intro"><span>Shell (or HTTP) commands that fire on lifecycle events — validate/block a tool call, log activity, or force the agent to keep working before it stops. Configure in <code>.cast/hooks.json</code> (project) or <code>~/.cast/hooks.json</code> (global).</span></p>
 			${
 				diagnostics.length > 0 &&
 				html`<div class="settings-error">
@@ -525,19 +515,6 @@ function SettingsHooks({ data, busy, act }) {
 			}
 			${renderGroup("Global", globalHooks, { key: "global" })}
 			${renderGroup("Project", projectHooks, { key: "project" })}
-			${[...pluginGroups.entries()]
-				.sort(([a], [b]) => a.localeCompare(b))
-				.map(
-					([pluginId, items]) => html`
-					<div key=${pluginId} class="settings-group">
-						<div class="settings-section-title settings-section-title-plugin">
-							<span class="settings-section-title-name">${pluginId}</span>
-							<span class="settings-section-title-count">${items.length} hook${items.length === 1 ? "" : "s"}</span>
-						</div>
-						${[...items].sort((a, b) => a.event.localeCompare(b.event)).map((h) => renderHook(h, false))}
-					</div>
-				`,
-				)}
 			${hooks.length === 0 && html`<div class="settings-hint">No hooks configured.</div>`}
 		</div>
 	`;
@@ -609,195 +586,6 @@ function SettingsSkillssh({ data, busy, act, confirm }) {
 				</div>
 			`,
 				)}
-		</div>
-	`;
-}
-
-function SettingsPlugins({ data, busy, act, confirm }) {
-	const [pending, addPending, removePending] = usePendingIds();
-	if (!data) return null;
-	return html`
-		<div class="settings-rows">
-			<p class="settings-intro"><span>Plugins installed on this machine. Each plugin can ship skills, hooks, and MCP servers. To browse and install more, see the <strong>Marketplace</strong> tab.</span></p>
-			${[...data.plugins]
-				.sort((a, b) => a.id.localeCompare(b.id))
-				.map((p) => {
-					const toggleKey = `${p.id}:toggle`;
-					const uninstallKey = `${p.id}:uninstall`;
-					return html`
-				<div key=${p.id} class="settings-item-row">
-					<div class="settings-item-info">
-						<span class="settings-item-status ${p.enabled ? "ok" : "off"}" />
-						<span class="settings-item-name">${p.plugin || p.id}</span>
-						<span class="settings-item-meta">${p.marketplace || ""}</span>
-						<${InfoPopover} text=${p.description} />
-					</div>
-					<div class="settings-item-actions">
-						<button class="modal-btn icon-btn" title=${p.enabled ? "Disable" : "Enable"} disabled=${busy || pending.has(toggleKey)} onClick=${() => actPending(act, addPending, removePending, toggleKey, `/plugin ${p.enabled ? "disable" : "enable"} ${p.id}`)}>${pending.has(toggleKey) ? "loading" : p.enabled ? html`<${icons.pause} />` : html`<${icons.play} />`}</button>
-						<button class="modal-btn icon-btn modal-btn-danger" title="Uninstall" disabled=${busy || pending.has(uninstallKey)} onClick=${async () => {
-							if (await confirm(`Uninstall plugin "${p.id}"?`)) actPending(act, addPending, removePending, uninstallKey, `/plugin uninstall ${p.id}`);
-						}}>${pending.has(uninstallKey) ? "loading" : html`<${icons.trash} />`}</button>
-					</div>
-				</div>
-			`;
-				})}
-			${data.plugins.length === 0 && html`<div class="settings-hint">No plugins installed. Browse the Marketplace tab to add some.</div>`}
-		</div>
-	`;
-}
-
-function SettingsMarketplace({ data, installed, busy, act, confirm }) {
-	const [mpSource, setMpSource] = useState("");
-	const [mpQuery, setMpQuery] = useState("");
-	const [addStatus, setAddStatus] = useState("");
-	// Per-row pending state (shared with MCP/Skills/Hooks/Plugins — see
-	// usePendingIds above). The modal's global `busy` flashes for ~100ms then
-	// re-enables, leaving no visible feedback that the install actually fired —
-	// worse, /plugin install is server-side sync but the reload of `data.plugins`
-	// (which gates the "installed" label) used to be skipped, so the button
-	// reappeared in its pre-click state and the install looked like a no-op.
-	// justInstalled additionally shows a brief "installed ✓" so the action
-	// reads as done, not dropped.
-	const [pending, addPending, removePending] = usePendingIds();
-	const [justInstalled, setJustInstalled] = useState(null);
-	useEffect(() => {
-		if (!justInstalled) return;
-		const t = setTimeout(() => setJustInstalled(null), 2500);
-		return () => clearTimeout(t);
-	}, [justInstalled]);
-	if (!data) return null;
-	const catalog = data.catalog || [];
-	const sortedCatalog = [...catalog].sort((a, b) => a.name.localeCompare(b.name));
-	// `installed` is passed in from the modal's `data.plugins` (separate slice —
-	// the Marketplace tab's own `data` only carries catalog + marketplaces). The
-	// modal refreshes it after every /plugin command, so a freshly-installed
-	// plugin lands in these sets and the row flips from "Install" to "installed".
-	const installedNames = new Set((installed || []).map((p) => p.plugin || p.id));
-	const installedIds = new Set((installed || []).map((p) => p.id));
-	const renderInstallable = (mp, p) => {
-		const pkg = p.package || p.name;
-		const name = p.name || pkg;
-		const id = `${name}@${mp.name}`;
-		const installed = installedNames.has(name) || installedIds.has(id);
-		const isPending = pending.has(id);
-		const showInstalled = installed || justInstalled === id;
-		return html`
-			<div key=${`${mp.name}:${name}`} class="plugin-catalog-item">
-				<div class="plugin-catalog-header">
-					<span class="settings-item-name">${name}</span>
-					<span class="settings-item-meta">${mp.name}</span>
-					${
-						isPending
-							? html`loading`
-							: showInstalled
-								? html`<span class="plugin-installed-label">${justInstalled === id ? "installed ✓" : "installed"}</span>`
-								: html`<button class="modal-btn icon-btn" title="Install ${name}" onClick=${async () => {
-										addPending(id);
-										try {
-											const res = await act(`/plugin install ${id}`);
-											if (res?.ok) setJustInstalled(id);
-										} finally {
-											removePending(id);
-										}
-									}}><${icons.arrowDownTray} /></button>`
-					}
-				</div>
-				${p.description && html`<div class="plugin-catalog-desc">${p.description}</div>`}
-			</div>
-		`;
-	};
-	// Every marketplace's plugins merged into one flat list (already loaded
-	// in memory — no network round trip) instead of a per-marketplace tab,
-	// filtered live by the search box.
-	const query = mpQuery.trim().toLowerCase();
-	const allPlugins = sortedCatalog
-		.filter((mp) => !mp.error)
-		.flatMap((mp) =>
-			(mp.plugins || [])
-				.filter((p) => {
-					if (!query) return true;
-					const name = (p.name || p.package || "").toLowerCase();
-					const desc = (p.description || "").toLowerCase();
-					return name.includes(query) || desc.includes(query);
-				})
-				.map((p) => ({ mp, p })),
-		);
-	const erroredMarketplaces = sortedCatalog.filter((mp) => mp.error);
-	return html`
-		<div class="settings-rows">
-			<p class="settings-intro"><span>Browse plugin catalogs from configured marketplaces, and manage which marketplaces cast knows about. Plugins you install from here will appear in the <strong>Plugins</strong> tab.</span></p>
-
-			<div class="settings-section-title">Browse marketplaces (${allPlugins.length})</div>
-			<div class="settings-form-row">
-				<input type="text" placeholder="search all marketplaces (e.g. testing)" value=${mpQuery} onInput=${(e) => setMpQuery(e.target.value)} />
-				${
-					mpQuery &&
-					html`<button class="modal-btn icon-btn" title="Clear search" onClick=${() => setMpQuery("")}><${icons.xMark} /></button>`
-				}
-			</div>
-			${
-				catalog.length === 0
-					? html`<div class="settings-loading">Loading</div>`
-					: html`
-					<div class="plugin-catalog-list">
-						${
-							allPlugins.length === 0
-								? html`<div class="settings-hint">${query ? `No plugins match "${mpQuery}".` : "No plugins found."}</div>`
-								: allPlugins
-										.sort((a, b) =>
-											(a.p.name || a.p.package || "").localeCompare(b.p.name || b.p.package || ""),
-										)
-										.map(({ mp, p }) => renderInstallable(mp, p))
-						}
-					</div>
-				`
-			}
-			${
-				erroredMarketplaces.length > 0 &&
-				html`<div class="settings-hint">Failed to load catalog for: ${erroredMarketplaces.map((mp) => mp.name).join(", ")}.</div>`
-			}
-
-			<div class="settings-section-title">Marketplaces</div>
-				<div class="settings-rows">
-					${[...data.marketplaces]
-						.sort((a, b) => a.name.localeCompare(b.name))
-						.map(
-							(mp) => html`
-						<div key=${mp.name} class="settings-item-row">
-							<div class="settings-item-info">
-								<span class="settings-item-name">${mp.name}</span>
-								<span class="settings-item-meta" title=${mp.source}>${mp.isDefault ? "built-in" : shortPath(mp.source)}</span>
-							</div>
-							<div class="settings-item-actions">
-								<button class="modal-btn icon-btn" title="Update" disabled=${busy} onClick=${() => act(`/plugin marketplace update ${mp.name}`)}><${icons.arrowPath} /></button>
-								${
-									!mp.isDefault &&
-									html`<button class="modal-btn icon-btn modal-btn-danger" title="Remove" disabled=${busy} onClick=${async () => {
-										if (await confirm(`Remove marketplace "${mp.name}"?`))
-											act(`/plugin marketplace remove ${mp.name}`);
-									}}><${icons.trash} /></button>`
-								}
-							</div>
-						</div>
-					`,
-						)}
-					${data.marketplaces.length === 0 && html`<div class="settings-hint">No marketplaces added.</div>`}
-					<div class="settings-hint" style="margin-bottom:6px">Any git repo with a <code>marketplace.json</code> catalog works. Add by <code>owner/repo</code>, URL, or path.</div>
-					<div class="settings-form-row">
-						<input type="text" placeholder="owner/repo, URL, or path" value=${mpSource} onInput=${(e) => {
-							setMpSource(e.target.value);
-							setAddStatus("");
-						}} />
-						<button class="modal-btn icon-btn" title="Add marketplace" disabled=${busy || !mpSource} onClick=${async () => {
-							const res = await act(`/plugin marketplace add ${mpSource}`);
-							if (res.ok) {
-								setAddStatus(typeof res.result === "string" ? res.result : "Marketplace added");
-								setMpSource("");
-							}
-						}}><${icons.plus} /></button>
-					</div>
-					${addStatus && html`<div class="settings-ok" role="status">${addStatus}</div>`}
-				</div>
 		</div>
 	`;
 }
@@ -1248,8 +1036,6 @@ export {
 	SettingsHooks,
 	SettingsMemory,
 	SettingsMcp,
-	SettingsMarketplace,
-	SettingsPlugins,
 	SettingsProvider,
 	SettingsPersonas,
 	SettingsQuickMode,

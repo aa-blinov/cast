@@ -183,57 +183,9 @@
 	font-size: .8rem;
 	margin: -4px 0 6px;
 }
-.plugin-catalog-list {
-	max-height: 320px; overflow-y: auto; overflow-x: hidden;
-	margin-bottom: 10px;
-	display: flex;
-	flex-direction: column;
-	gap: 6px;
-	padding: 2px;
-}
-.plugin-installed-label {
-	font-size: .68rem;
-	color: var(--cyan);
-	background: var(--accent-muted);
-	border-radius: 999px;
-	padding: 3px 9px;
-	white-space: nowrap;
-}
-.plugin-catalog-item {
-	padding: 8px 10px;
-	border: 1px solid var(--border-subtle);
-	border-radius: var(--radius-sm);
-	background: var(--bg);
-	transition: border-color .15s, background .15s;
-}
-.plugin-catalog-item:hover { border-color: var(--border-active); background: var(--bg-hover); }
-.plugin-catalog-header {
-	display: flex; align-items: center; gap: 8px;
-}
-.plugin-catalog-header .settings-item-name { flex: none; font-weight: 500; }
-.plugin-catalog-header .settings-item-meta { flex: none; font-family: var(--font); }
-.plugin-catalog-header > *:last-child { margin-left: auto; }
-.plugin-catalog-desc {
-	font-size: .74rem;
-	color: var(--text-muted);
-	margin: 4px 0 0;
-	line-height: 1.45;
-}
 .settings-rows > .settings-item-row + .settings-item-row,
 .settings-group .settings-item-row + .settings-item-row {
 	margin-top: 0;
-}
-.settings-section-title-plugin {
-	display: flex; justify-content: space-between; align-items: baseline;
-	padding-bottom: 4px;
-	border-bottom: 1px solid var(--border);
-	margin-bottom: 6px;
-}
-.settings-section-title-plugin .settings-section-title-name {
-	font-weight: 600; color: var(--purple);
-}
-.settings-section-title-plugin .settings-section-title-count {
-	font-size: .72rem; color: var(--text-muted); font-weight: 400;
 }
 .settings-item-row {
 	display: flex; flex-wrap: wrap; gap: 6px 8px;
@@ -548,11 +500,6 @@
 	.settings-ssh-form { gap: 10px; }
 	/* Other form rows: keep default flex-wrap, let icon buttons stay inline */
 	.settings-form-row .icon-btn { width: auto; flex-shrink: 0; }
-	/* Marketplace plugin items need wrapping header */
-	.plugin-catalog-header { flex-wrap: wrap; gap: 4px; }
-	.plugin-catalog-header .settings-item-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.plugin-catalog-header .settings-item-meta { max-width: 100%; }
-	.plugin-catalog-desc { overflow-wrap: break-word; }
 	/* Compact-detail (API key + Save button) stacks on mobile */
 	.settings-compact-detail { flex-wrap: wrap; }
 	.settings-compact-detail input { width: 100%; box-sizing: border-box; }

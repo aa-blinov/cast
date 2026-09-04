@@ -46,7 +46,6 @@ User settings are persisted to `~/.cast/settings.json`. This file is loaded on s
 | `mcpToolTimeoutSeconds` | integer | How long an MCP tool call may take before it fails, clamped to 5–3600. Unset uses the MCP SDK's own 60s default — raise it for a slow-but-legitimate tool (a browser step, a heavy query). Read per call, so a change applies without reconnecting |
 | `disabledSkills` | string[] | Skill names disabled via `/skills` toggle |
 | `disabledHooks` | string[] | Content-derived hook group ids disabled via `/hooks` |
-| `enabledPlugins` | Record<string, boolean> | Marketplace plugins keyed by `name@marketplace` |
 | `statusBar` | object | Status bar segment config (`visible`, `order`, `sides`) — use `/statusbar` to configure |
 | `serverToken` | string | Password generated for the server daemon on first start |
 | `webPassword` | string | Deprecated predecessor of `serverToken`; read and migrated for compatibility |
@@ -89,7 +88,6 @@ Provider URL and API key are configured **only** via `~/.cast/settings.json` (fi
   mcp.json              # Global MCP server config
   sessions/sessions.db  # SQLite session database (legacy JSON files are imported once)
   skills/               # Global skills
-  plugins/              # Marketplace catalogs + installed plugins (see plugins.md)
   rules/                # Global rules
   personas/             # Global personas
 

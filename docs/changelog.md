@@ -2,7 +2,9 @@
 
 All notable user-facing changes to cast, newest first.
 
-## 0.23.0
+### Removed
+
+- **Plugin marketplaces.** The whole subsystem is gone: `/plugin` and its subcommands (install, uninstall, enable, disable, marketplace add/list/remove/update), the Plugins and Marketplace tabs in the web Settings modal, the `enabledPlugins` setting, the `/api/plugin-content` endpoint, plugin-contributed skills and hooks, and the `${CLAUDE_PLUGIN_ROOT}`/`CAST_PLUGIN_*` substitutions that existed only for them — about 2,700 lines. Installing a plugin required a registered marketplace, and registering one cloned an entire catalog repository to disk (316MB across the three defaults on one real installation) to browse packages that were never installed. Skills, which is what the catalogs were used for in practice, are better served by installing them individually: `~/.cast/skills`, a project's `.cast/skills`, or the universal `.agents/skills` path that `npx skills add` writes to and that cast already discovers. Hooks and MCP servers stay configurable through `hooks.json` and `mcp.json` as before. An existing `~/.cast/plugins/` directory is now inert and can be deleted.
 
 ### Fixed
 

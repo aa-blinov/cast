@@ -160,7 +160,7 @@ export function Composer({
 	);
 
 	// Only /persona still lives in the composer — model, theme, reasoning,
-	// web-tools, MCP/skills/plugins/provider/SSH, and the rest of the former
+	// web-tools, MCP/skills/provider/SSH, and the rest of the former
 	// sub-arg pickers moved to the Settings modal (see SettingsModal) so
 	// typing "/" only ever surfaces conversation-flow commands.
 	const personaMatch = PERSONA_CMD_RE.exec(value);

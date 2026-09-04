@@ -131,12 +131,6 @@ export interface Settings {
 	 * A group's id is content-derived, so it survives edits to unrelated hooks
 	 * in the same file. */
 	disabledHooks?: string[];
-	/**
-	 * Installed marketplace plugins keyed by `name@marketplace`.
-	 * `true`/absent-after-install = enabled; `false` = installed but disabled.
-	 * Package lives under ~/.cast/plugins/; see plugins.ts.
-	 */
-	enabledPlugins?: Record<string, boolean>;
 	/** Status bar segment configuration: which are visible, order, and sides. */
 	statusBar?: StatusBarConfig;
 	/** @deprecated Agent mode moved to SessionState.mode — the mode is per-task

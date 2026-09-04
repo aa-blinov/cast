@@ -37,18 +37,6 @@ import {
 	resolvePlanTransition,
 } from "../core/plan.ts";
 import {
-	addMarketplace,
-	ensureDefaultMarketplaces,
-	getMarketplaceCatalog,
-	installPlugin,
-	listInstalledPlugins,
-	listKnownMarketplaces,
-	removeMarketplace,
-	setPluginEnabled,
-	uninstallPlugin,
-	updateMarketplace,
-} from "../core/plugins.ts";
-import {
 	buildSystemPrompt,
 	discoverSkillsForCwd,
 	listHooksForCwdSettings,
@@ -133,7 +121,7 @@ import { createSessionWorktree, listWorktrees, removeSessionWorktree, type Sessi
 import { ALL_THEMES } from "../ui/themes/index.ts";
 import type { ThemeColors } from "../ui/themes/types.ts";
 import { buildGoalPrompt, isCommandBlocking, parseGoalInput, REVIEW_PROMPT, SLASH_COMMANDS } from "./commands.ts";
-import { isSafePathSegment, isSafeSessionId, sessionInputsDir } from "./inputs.ts";
+import { isSafeSessionId, sessionInputsDir } from "./inputs.ts";
 
 const GITHUB_URL_RE = /^https?:\/\/(?:www\.)?github\.com\//i;
 const FRONTMATTER_STRIP_RE = /^---\n[\s\S]*?\n---\n?/;
@@ -791,7 +779,6 @@ export interface ServerBridge {
 	): { ok: boolean; error?: string };
 	readSkillContent(name: string): { ok: boolean; content?: string; error?: string };
 	readPersonaContent(name: string): { ok: boolean; content?: string; error?: string };
-	readPluginContent(pluginId: string): { ok: boolean; content?: string; error?: string };
 	getReasoningOptionsForSession(sessionId: string): { options: Array<{ value: string; label: string }> };
 	suggestCommand(sessionId: string, input: string): Array<{ value: string; label: string }>;
 	getSlashCommands(sessionId?: string): typeof SLASH_COMMANDS;
@@ -821,7 +808,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 
 	// Everything below is captured once at startup by the TUI's own
 	// per-process App component, but the web bridge outlives many
-	// sessions/requests — so /reload, /mcp, /skills, and /plugin (anything
+	// sessions/requests — so /reload, /mcp, and /skills (anything
 	// that changes project-local resources) need these as *mutable* bridge
 	// state, not `const`s from the initial destructure, plus a way to push a
 	// change out to every live session's system prompt (see
@@ -2740,8 +2727,8 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	}
 
 	/** Splits "sub rest of args" into its first word and everything after —
-	 * used by every command with sub-verbs (/mcp enable <name>, /plugin
-	 * marketplace add <src>, ...) since the outer name/arg split in
+	 * used by every command with sub-verbs (/mcp enable <name>,
+	 * <name> ...) since the outer name/arg split in
 	 * executeCommand only peels off the top-level command name. */
 	function splitArg(s: string): [string, string] {
 		const i = s.indexOf(" ");
@@ -3823,9 +3810,8 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 							name: s.name,
 							source: s.source,
 							filePath: s.filePath,
-							pluginId: s.pluginId,
 							description: s.description,
-							enabled: !disabled.has(s.name) && s.pluginEnabled !== false,
+							enabled: !disabled.has(s.name),
 							uninstallable: isUninstallableSkill(s),
 							// Agent directories are shared with other tools (Amp, Codex,
 							// etc.). Only Skills.sh's lockfile establishes its provenance.
@@ -3860,7 +3846,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				const skill = discovered.find((s) => s.name === rest);
 				if (!skill) return { ok: false, error: `Unknown skill: ${rest}` };
 				if (!isUninstallableSkill(skill))
-					return { ok: false, error: `"${rest}" isn't a removable skill (builtin/plugin)` };
+					return { ok: false, error: `"${rest}" isn't a removable skill (builtin or --skill path)` };
 				uninstallUserSkill(skill);
 				const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
 				skills = skillsResult.skills;
@@ -3948,122 +3934,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				return { ok: false, error: message };
-			}
-		}
-		if (name === "/plugin") {
-			const [sub, rest] = splitArg(arg);
-			const sessionCwd = ws.session.cwd ?? cwd;
-			const settings = loadSettings();
-			// Default Codex/Claude/Grok catalogs are seeded lazily — only for
-			// subcommands that consume a marketplace (install resolves
-			// `name@codex|claude|grok`, marketplace add registers one). The
-			// read-only list/catalog paths must NOT seed: the very first seed
-			// clones three repos through *synchronous* git (runGit uses
-			// execFileSync) and would block the event loop for the whole
-			// clone, stalling every concurrent request — including the Settings
-			// modal's parallel /memory preload, which calls `/plugin marketplace
-			// list` + `/plugin marketplace catalog` on open.
-			const [marketplaceSubsub] = sub === "marketplace" ? splitArg(rest) : [undefined];
-			const shouldSeedDefaults =
-				sub === "install" ||
-				(sub === "marketplace" &&
-					marketplaceSubsub !== undefined &&
-					marketplaceSubsub !== "list" &&
-					marketplaceSubsub !== "catalog");
-			if (shouldSeedDefaults) void ensureDefaultMarketplaces();
-			try {
-				if (!sub || sub === "list") {
-					return { ok: true, result: listInstalledPlugins(settings) };
-				}
-				if (sub === "help") {
-					return {
-						ok: true,
-						result:
-							"/plugin list · /plugin install <name@marketplace> · /plugin uninstall <name@marketplace> · " +
-							"/plugin enable/disable <name@marketplace> · /plugin marketplace add/list/remove/update",
-					};
-				}
-				if (sub === "install") {
-					if (!rest) return { ok: false, error: "Usage: /plugin install <name@marketplace>" };
-					// installPlugin's git clone can take seconds — a concurrent
-					// settings change (another /plugin command, another tab)
-					// landing in that window would otherwise be silently
-					// overwritten by this call's write, since r.enabledPlugins is
-					// derived from the `settings` snapshot read before the await.
-					// Only the id being installed matters here; re-derive the rest
-					// from current settings at write time instead of trusting it.
-					const r = await installPlugin(rest, settings);
-					updateSettings((current) => ({ enabledPlugins: { ...(current.enabledPlugins ?? {}), [r.id]: true } }));
-					const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
-					skills = skillsResult.skills;
-					recomputeAllSystemPrompts();
-					return { ok: true, result: `Installed plugin "${r.id}"` };
-				}
-				if (sub === "uninstall") {
-					if (!rest) return { ok: false, error: "Usage: /plugin uninstall <name@marketplace>" };
-					const r = uninstallPlugin(rest, settings);
-					updateSettings({ enabledPlugins: r.enabledPlugins });
-					const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
-					skills = skillsResult.skills;
-					recomputeAllSystemPrompts();
-					return { ok: true, result: `Uninstalled plugin "${r.id}"` };
-				}
-				if (sub === "enable" || sub === "disable") {
-					if (!rest) return { ok: false, error: `Usage: /plugin ${sub} <name@marketplace>` };
-					const r = setPluginEnabled(rest, sub === "enable", settings);
-					updateSettings({ enabledPlugins: r.enabledPlugins });
-					const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
-					skills = skillsResult.skills;
-					recomputeAllSystemPrompts();
-					return { ok: true, result: `Plugin "${r.id}" ${sub}d` };
-				}
-				if (sub === "marketplace") {
-					const [subsub, rest2] = splitArg(rest);
-					if (!subsub || subsub === "list") {
-						if (rest2) return { ok: true, result: getMarketplaceCatalog(rest2).plugins };
-						return { ok: true, result: listKnownMarketplaces() };
-					}
-					if (subsub === "catalog") {
-						const mps = listKnownMarketplaces();
-						const results = [];
-						for (const mp of mps) {
-							try {
-								const cat = getMarketplaceCatalog(mp.name);
-								results.push({ name: mp.name, source: mp.source, plugins: cat.plugins });
-							} catch {
-								results.push({ name: mp.name, source: mp.source, plugins: [], error: true });
-							}
-						}
-						return { ok: true, result: results };
-					}
-					if (subsub === "add") {
-						if (!rest2) return { ok: false, error: "Usage: /plugin marketplace add <owner/repo|url|path>" };
-						const mp = await addMarketplace(rest2);
-						return { ok: true, result: `Added marketplace "${mp.name}"` };
-					}
-					if (subsub === "remove") {
-						if (!rest2) return { ok: false, error: "Usage: /plugin marketplace remove <name>" };
-						const removedIds = removeMarketplace(rest2);
-						if (removedIds.length > 0) {
-							const enabled = { ...(settings.enabledPlugins ?? {}) };
-							for (const id of removedIds) delete enabled[id];
-							updateSettings({ enabledPlugins: enabled });
-							const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
-							skills = skillsResult.skills;
-							recomputeAllSystemPrompts();
-						}
-						return { ok: true, result: `Removed marketplace "${rest2}"` };
-					}
-					if (subsub === "update") {
-						if (!rest2) return { ok: false, error: "Usage: /plugin marketplace update <name>" };
-						const mp = await updateMarketplace(rest2);
-						return { ok: true, result: `Updated marketplace "${mp.name}"` };
-					}
-					return { ok: false, error: `Unknown /plugin marketplace subcommand: ${subsub}` };
-				}
-				return { ok: false, error: `Unknown /plugin subcommand: ${sub}` };
-			} catch (err) {
-				return { ok: false, error: err instanceof Error ? err.message : String(err) };
 			}
 		}
 		if (name === "/provider") {
@@ -4290,9 +4160,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			const sessionCwd = ws.session.cwd ?? cwd;
 			const discovered = discoverSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
 			const disabled = new Set(loadSettings().disabledSkills ?? []);
-			const skill = discovered.find(
-				(s) => s.name === skillId && s.userInvocable && !disabled.has(s.name) && s.pluginEnabled !== false,
-			);
+			const skill = discovered.find((s) => s.name === skillId && s.userInvocable && !disabled.has(s.name));
 			if (skill) {
 				if (running) return { ok: false, error: "Agent running — use /queue, /steer, or /abort" };
 				fireUserPromptExpansion(sessionCwd, skill.name);
@@ -4458,7 +4326,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			"/mcp",
 			"/skills",
 			"/skills-sh",
-			"/plugin",
 			"/provider",
 			"/ssh",
 			"/turn-cap",
@@ -4602,53 +4469,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		}
 	}
 
-	function readPluginContent(pluginId: string): { ok: boolean; content?: string; error?: string } {
-		try {
-			const pluginDir = join(homedir(), ".cast", "plugins", "installs");
-			// pluginId format: name@marketplace
-			const parts = pluginId.split("@");
-			if (parts.length < 2) return { ok: false, error: `Invalid plugin id: ${pluginId}` };
-			const pluginName = parts[0];
-			const marketplace = parts.slice(1).join("@");
-			// Both halves are path segments, so neither may traverse: `..@..`
-			// otherwise resolved `root` to ~/.cast and turned this into an
-			// arbitrary-directory read (plus a path-disclosure oracle, since the
-			// not-found error below echoes the resolved absolute path).
-			if (!isSafePathSegment(pluginName) || !isSafePathSegment(marketplace)) {
-				return { ok: false, error: `Invalid plugin id: ${pluginId}` };
-			}
-			const root = join(pluginDir, marketplace, pluginName);
-			// Collect existing SKILL.md files: root first, then skills/*/SKILL.md
-			const candidates: string[] = [];
-			const rootSkill = join(root, "SKILL.md");
-			if (existsSync(rootSkill)) candidates.push(rootSkill);
-			try {
-				const skillsDir = join(root, "skills");
-				if (existsSync(skillsDir)) {
-					for (const d of readdirSync(skillsDir, { withFileTypes: true })) {
-						if (d.isDirectory()) {
-							const p = join(skillsDir, d.name, "SKILL.md");
-							if (existsSync(p)) candidates.push(p);
-						}
-					}
-				}
-			} catch {
-				/* ignore */
-			}
-			if (candidates.length === 0) return { ok: false, error: `No SKILL.md found in ${root}` };
-			// Concatenate all skill files
-			const content = candidates
-				.map((p) => {
-					const raw = readFileSync(p, "utf-8");
-					return raw.replace(FRONTMATTER_STRIP_RE, "");
-				})
-				.join("\n\n---\n\n");
-			return { ok: true, content };
-		} catch (err) {
-			return { ok: false, error: err instanceof Error ? err.message : String(err) };
-		}
-	}
-
 	function getReasoningOptionsForSession(sessionId: string): { options: Array<{ value: string; label: string }> } {
 		const ws = sessions.get(sessionId) ?? hydrateSession(sessionId);
 		const model = ws?.session.model ?? defaultModel;
@@ -4695,34 +4515,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			}
 			if (sub === "uninstall")
 				return discovered.filter(isUninstallableSkill).map((s) => ({ value: s.name, label: s.description }));
-			return [];
-		}
-
-		if (cmd === "/plugin") {
-			if (!arg)
-				return ["list", "install", "uninstall", "enable", "disable", "marketplace", "help"].map((v) => ({
-					value: v,
-					label: v,
-				}));
-			const [sub] = arg.split(WHITESPACE_SPLIT);
-			if (sub === "marketplace" && !arg.slice(sub.length).trim())
-				return ["list", "add", "remove", "update"].map((v) => ({ value: v, label: v }));
-			if (sub === "enable" || sub === "disable" || sub === "uninstall") {
-				return listInstalledPlugins(settings).map((p) => ({ value: p.id, label: p.description ?? p.id }));
-			}
-			if (sub === "install") {
-				const catalogs = listKnownMarketplaces();
-				const items: Array<{ value: string; label: string }> = [];
-				for (const mp of catalogs) {
-					try {
-						const cat = getMarketplaceCatalog(mp.name);
-						for (const p of cat.plugins) items.push({ value: p.name, label: p.description ?? p.name });
-					} catch {
-						/* skip broken catalogs */
-					}
-				}
-				return items;
-			}
 			return [];
 		}
 
@@ -4787,10 +4579,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		const skillCommands = discovered
 			// `user-invocable: false` means the model may load the skill but a
 			// person may not: it stays out of the slash menu (spec field).
-			.filter(
-				(s) =>
-					!disabled.has(s.name) && s.userInvocable && s.pluginEnabled !== false && !builtinNames.has(`/${s.name}`),
-			)
+			.filter((s) => !disabled.has(s.name) && s.userInvocable && true && !builtinNames.has(`/${s.name}`))
 			.map((s) => ({
 				name: `/${s.name}`,
 				description: s.description,
@@ -4850,7 +4639,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		addSshHost,
 		readSkillContent,
 		readPersonaContent,
-		readPluginContent,
 		getReasoningOptionsForSession,
 		suggestCommand,
 		getSlashCommands,
@@ -4860,7 +4648,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 function getHelpText(): string {
 	// No column-padding here — this renders through the same proportional-font
 	// markdown pipe as chat prose, where fixed-width alignment doesn't hold.
-	// Hidden commands (MCP/skills/plugins/provider/SSH/theme/...) live in the
+	// Hidden commands (MCP/skills/provider/SSH/theme/...) live in the
 	// Settings modal now, not this list — repeating them here would be the
 	// exact chat clutter that modal exists to avoid.
 	const visible = SLASH_COMMANDS.filter((c) => !c.hidden);
@@ -4873,6 +4661,6 @@ function getHelpText(): string {
 		"",
 		`*Blocking (require idle): ${blocking.join(", ")}. Everything else works while the agent runs.*`,
 		"",
-		"*MCP, skills, plugins, provider, SSH, theme, model/reasoning details, and usage live in Settings (gear icon).*",
+		"*MCP, skills, provider, SSH, theme, model/reasoning details, and usage live in Settings (gear icon).*",
 	].join("\n");
 }

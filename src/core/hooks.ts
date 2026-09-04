@@ -3,7 +3,7 @@
  * prompts that fire at agent lifecycle events. Config shape matches Claude
  * Code's official protocol (code.claude.com/docs/en/hooks) closely enough
  * that a real-world `hooks.json` — including ones shipped inside installed
- * Claude Code plugins — loads and runs unmodified.
+ * Claude Code hooks.json — loads and runs unmodified.
  *
  * ## Scope — what's implemented
  *
@@ -175,20 +175,12 @@ export interface HookCommand {
 export interface HookMatcherGroup {
 	matcher?: string;
 	hooks: HookCommand[];
-	_source?: "global" | "project" | "plugin";
-	_pluginRoot?: string;
-	/** Plugin marketplace id (`name@marketplace`) when `_source === "plugin"`. */
-	_pluginId?: string;
+	_source?: "global" | "project";
 }
 
 export type HooksFile = Partial<Record<HookEvent, HookMatcherGroup[]>>;
 
-function readHooksFile(
-	path: string,
-	source: HookMatcherGroup["_source"],
-	pluginRoot?: string,
-	pluginId?: string,
-): HooksFile {
+function readHooksFile(path: string, source: HookMatcherGroup["_source"]): HooksFile {
 	if (!existsSync(path)) return {};
 	try {
 		const parsed = JSON.parse(readFileSync(path, "utf-8")) as { hooks?: HooksFile } & HooksFile;
@@ -196,7 +188,7 @@ function readHooksFile(
 		const tagged: HooksFile = {};
 		for (const [event, groups] of Object.entries(file) as [HookEvent, HookMatcherGroup[] | undefined][]) {
 			if (!HOOK_EVENTS.includes(event) || !groups?.length) continue;
-			tagged[event] = groups.map((g) => ({ ...g, _source: source, _pluginRoot: pluginRoot, _pluginId: pluginId }));
+			tagged[event] = groups.map((g) => ({ ...g, _source: source }));
 		}
 		return tagged;
 	} catch {
@@ -268,11 +260,7 @@ function checkHooksFileSyntax(path: string): HookDiagnostic | undefined {
  * called from the Settings-triggered `/hooks` listing, a user-initiated,
  * infrequent action.
  */
-export function hooksFileDiagnostics(
-	cwd: string,
-	trusted: boolean,
-	pluginHookFilePaths: Array<{ path: string; pluginRoot: string; pluginId: string }> = [],
-): HookDiagnostic[] {
+export function hooksFileDiagnostics(cwd: string, trusted: boolean): HookDiagnostic[] {
 	const out: HookDiagnostic[] = [];
 	const global = checkHooksFileSyntax(globalHooksPath());
 	if (global) out.push(global);
@@ -281,23 +269,19 @@ export function hooksFileDiagnostics(
 		const project = checkHooksFileSyntax(projectPath);
 		if (project) out.push(project);
 	}
-	for (const p of pluginHookFilePaths) {
-		const diag = checkHooksFileSyntax(p.path);
-		if (diag) out.push(diag);
-	}
 	return out;
 }
 
 /**
  * Content-addressed so re-resolving unchanged config yields the same id
  * across reloads (see the "stable across repeated resolves" test) — but
- * includes the source (global/project/which plugin) precisely so two
+ * includes the source (global/project) precisely so two
  * byte-identical hook groups from *different* sources don't collide onto
  * the same id, which would make disabling one from Settings silently
  * disable the other too.
  */
 export function hookGroupId(event: HookEvent, group: HookMatcherGroup): string {
-	const sourceKey = `${group._source ?? "global"}|${group._pluginId ?? group._pluginRoot ?? ""}`;
+	const sourceKey = group._source ?? "global";
 	const key = `${event}|${sourceKey}|${group.matcher ?? ""}|${JSON.stringify(group.hooks)}`;
 	let hash = 0;
 	for (let i = 0; i < key.length; i++) {
@@ -311,19 +295,16 @@ export interface ResolvedHookEntry {
 	event: HookEvent;
 	matcher?: string;
 	commands: HookCommand[];
-	source: "global" | "project" | "plugin";
-	/** Plugin marketplace id (`name@marketplace`) when `source === "plugin"`. */
-	pluginId?: string;
+	source: "global" | "project";
 	enabled: boolean;
 }
 
 export function listHooksForCwd(
 	cwd: string,
 	trusted: boolean,
-	pluginHookFilePaths: Array<{ path: string; pluginRoot: string; pluginId: string }> = [],
 	disabledIds: ReadonlySet<string> = new Set(),
 ): ResolvedHookEntry[] {
-	const merged = mergeHooksFiles(cwd, trusted, pluginHookFilePaths);
+	const merged = mergeHooksFiles(cwd, trusted);
 	const out: ResolvedHookEntry[] = [];
 	for (const [event, groups] of Object.entries(merged) as [HookEvent, HookMatcherGroup[] | undefined][]) {
 		for (const group of groups ?? []) {
@@ -334,7 +315,6 @@ export function listHooksForCwd(
 				matcher: group.matcher,
 				commands: group.hooks,
 				source: group._source ?? "global",
-				pluginId: group._pluginId,
 				enabled: !disabledIds.has(id),
 			});
 		}
@@ -342,25 +322,19 @@ export function listHooksForCwd(
 	return out;
 }
 
-function mergeHooksFiles(
-	cwd: string,
-	trusted: boolean,
-	pluginHookFilePaths: Array<{ path: string; pluginRoot: string; pluginId: string }>,
-): HooksFile {
+function mergeHooksFiles(cwd: string, trusted: boolean): HooksFile {
 	const global = readHooksFile(globalHooksPath(), "global");
 	const projectPath = projectHooksPath(cwd);
 	const project = trusted && projectPath !== globalHooksPath() ? readHooksFile(projectPath, "project") : {};
-	const plugins = pluginHookFilePaths.map((p) => readHooksFile(p.path, "plugin", p.pluginRoot, p.pluginId));
-	return mergeHooks(global, ...plugins, project);
+	return mergeHooks(global, project);
 }
 
 export function loadHooksForCwd(
 	cwd: string,
 	trusted: boolean,
-	pluginHookFilePaths: Array<{ path: string; pluginRoot: string; pluginId: string }> = [],
 	disabledIds: ReadonlySet<string> = new Set(),
 ): HooksFile {
-	const merged = mergeHooksFiles(cwd, trusted, pluginHookFilePaths);
+	const merged = mergeHooksFiles(cwd, trusted);
 	if (disabledIds.size === 0) return merged;
 	const out: HooksFile = {};
 	for (const [event, groups] of Object.entries(merged) as [HookEvent, HookMatcherGroup[] | undefined][]) {
@@ -433,21 +407,12 @@ function tryParseJson(text: string): ParsedHookOutput | undefined {
 	}
 }
 
-const RESERVED_ENV_KEYS = new Set([
-	"CAST_HOOK_EVENT",
-	"CAST_SESSION_ID",
-	"CAST_WORKSPACE_ROOT",
-	"CAST_PLUGIN_ROOT",
-	"CAST_PLUGIN_DATA",
-	"CLAUDE_PLUGIN_ROOT",
-	"CLAUDE_PLUGIN_DATA",
-]);
+const RESERVED_ENV_KEYS = new Set(["CAST_HOOK_EVENT", "CAST_SESSION_ID", "CAST_WORKSPACE_ROOT"]);
 
 function buildHookEnv(
 	event: HookEvent,
 	cwd: string,
 	sessionId: string | undefined,
-	pluginRoot: string | undefined,
 	userEnv: Record<string, string> | undefined,
 ): Record<string, string> {
 	const env: Record<string, string> = { ...process.env } as Record<string, string>;
@@ -459,13 +424,6 @@ function buildHookEnv(
 	env.CAST_HOOK_EVENT = event;
 	if (sessionId) env.CAST_SESSION_ID = sessionId;
 	env.CAST_WORKSPACE_ROOT = cwd;
-	if (pluginRoot) {
-		env.CAST_PLUGIN_ROOT = pluginRoot;
-		const dataDir = join(homedir(), ".cast", "plugins", "data", pluginRoot.replace(/[^a-zA-Z0-9]/g, "_"));
-		env.CAST_PLUGIN_DATA = dataDir;
-		env.CLAUDE_PLUGIN_ROOT = pluginRoot;
-		env.CLAUDE_PLUGIN_DATA = dataDir;
-	}
 	return env;
 }
 
@@ -591,7 +549,7 @@ function deduplicateHooks(groups: HookMatcherGroup[]): HookMatcherGroup[] {
 			const seen = new Set<string>();
 			const unique: HookCommand[] = [];
 			for (const cmd of group.hooks) {
-				const key = hookDedupKey(cmd, group._pluginRoot ?? "");
+				const key = hookDedupKey(cmd, "");
 				if (!seen.has(key)) {
 					seen.add(key);
 					unique.push(cmd);
@@ -603,16 +561,6 @@ function deduplicateHooks(groups: HookMatcherGroup[]): HookMatcherGroup[] {
 }
 
 // ─── exec helpers ───
-
-function substitutePluginVars(command: string, pluginRoot: string | undefined): string {
-	if (!pluginRoot) return command;
-	const dataDir = join(homedir(), ".cast", "plugins", "data", pluginRoot.replace(/[^a-zA-Z0-9]/g, "_"));
-	return command
-		.replace(/\$\{CAST_PLUGIN_ROOT\}/g, pluginRoot)
-		.replace(/\$\{CAST_PLUGIN_DATA\}/g, dataDir)
-		.replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, pluginRoot)
-		.replace(/\$\{CLAUDE_PLUGIN_DATA\}/g, dataDir);
-}
 
 function runCommandHook(
 	command: string,
@@ -986,7 +934,7 @@ export interface RunHooksOptions {
 
 /**
  * Run every hook registered for `event` whose matcher accepts the match
- * target — across every source (global, every plugin, project), in
+ * target — across every source (global, project), in
  * parallel (matching Claude Code's behavior). A `forceStop` result
  * short-circuits immediately; all other hooks still run even after one
  * blocks — only the *first* blocking result is returned, except
@@ -1086,11 +1034,11 @@ export async function runHooksForEvent(hooks: HooksFile, opts: RunHooksOptions):
 				);
 			}
 			return runCommandHook(
-				substitutePluginVars(cmd.command ?? "", group._pluginRoot),
+				cmd.command ?? "",
 				cmd.async === true,
 				timeoutSeconds,
 				opts.cwd,
-				buildHookEnv(opts.event, opts.cwd, opts.sessionId, group._pluginRoot, cmd.env),
+				buildHookEnv(opts.event, opts.cwd, opts.sessionId, cmd.env),
 				payload,
 				opts.signal,
 			);

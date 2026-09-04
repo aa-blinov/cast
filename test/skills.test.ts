@@ -268,50 +268,16 @@ describe("loadSkills discovery", () => {
 		expect(diagnostics.some((d) => d.message.includes("collision"))).toBe(true);
 	});
 
-	it("keeps global over plugin, and plugin over builtin, on name collision", () => {
-		const pluginDir = join(TEST_DIR, "plugin");
+	it("keeps global over builtin on name collision", () => {
 		const builtinDir = join(TEST_DIR, "builtin");
-		mkdirSync(pluginDir, { recursive: true });
 		mkdirSync(builtinDir, { recursive: true });
 		writeSkill(GLOBAL_DIR, "shared/SKILL.md", { name: "shared", description: "Global version." });
-		writeSkill(pluginDir, "shared/SKILL.md", { name: "shared", description: "Plugin version." });
 		writeSkill(builtinDir, "shared/SKILL.md", { name: "shared", description: "Builtin version." });
 
-		const globalWins = loadSkills({
-			globalDir: GLOBAL_DIR,
-			pluginDirs: [pluginDir],
-			builtinDir,
-			extraPaths: [],
-		});
-		expect(globalWins.skills).toHaveLength(1);
-		expect(globalWins.skills[0]?.description).toBe("Global version.");
-		expect(globalWins.skills[0]?.source).toBe("global");
-
-		const pluginWins = loadSkills({
-			pluginDirs: [pluginDir],
-			builtinDir,
-			extraPaths: [],
-		});
-		expect(pluginWins.skills).toHaveLength(1);
-		expect(pluginWins.skills[0]?.description).toBe("Plugin version.");
-		expect(pluginWins.skills[0]?.source).toBe("plugin");
-	});
-
-	it("stamps pluginId and pluginEnabled from pluginContributions", () => {
-		const pluginDir = join(TEST_DIR, "plugin-pack");
-		mkdirSync(pluginDir, { recursive: true });
-		writeSkill(pluginDir, "alpha/SKILL.md", { name: "alpha", description: "A." });
-		writeSkill(pluginDir, "beta/SKILL.md", { name: "beta", description: "B." });
-		const { skills } = loadSkills({
-			pluginContributions: [{ dir: pluginDir, pluginId: "pack@mp", enabled: false }],
-			extraPaths: [],
-		});
-		expect(skills).toHaveLength(2);
-		for (const s of skills) {
-			expect(s.pluginId).toBe("pack@mp");
-			expect(s.pluginEnabled).toBe(false);
-			expect(s.source).toBe("plugin");
-		}
+		const result = loadSkills({ globalDir: GLOBAL_DIR, builtinDir, extraPaths: [] });
+		expect(result.skills).toHaveLength(1);
+		expect(result.skills[0]?.description).toBe("Global version.");
+		expect(result.diagnostics.some((d) => d.message.includes("collision"))).toBe(true);
 	});
 
 	it("returns skills sorted alphabetically by name", () => {
@@ -496,41 +462,6 @@ describe("formatSkillInvocation", () => {
 });
 
 describe("formatSkillPickLabel", () => {
-	it("shows plugin provenance and locks pack-off skills", () => {
-		const locked = formatSkillPickLabel(
-			{
-				name: "pony",
-				description: "A pony skill.",
-				source: "plugin",
-				pluginId: "ponytail@ponytail",
-				pluginEnabled: false,
-				disableModelInvocation: false,
-			},
-			false,
-		);
-		expect(locked.label).toBe("pony (plugin · ponytail@ponytail, pack off)");
-		expect(locked.locked).toBe(true);
-		expect(locked.muted).toBe(true);
-		expect(locked.description).toBe("Enable this pack with /plugin first. A pony skill.");
-
-		const on = formatSkillPickLabel(
-			{
-				name: "pony",
-				description: "A pony skill.",
-				source: "plugin",
-				pluginId: "ponytail@ponytail",
-				pluginEnabled: true,
-				disableModelInvocation: false,
-			},
-			true,
-		);
-		expect(on.label).toBe("pony (plugin · ponytail@ponytail, disabled)");
-		expect(on.description).toBe("A pony skill.");
-		expect(on.locked).toBe(false);
-	});
-});
-
-describe("uninstallUserSkill", () => {
 	it("removes a directory skill and refuses builtin", () => {
 		writeSkill(GLOBAL_DIR, "gone/SKILL.md", { name: "gone", description: "Delete me." });
 		const { skills } = loadSkills({ globalDir: GLOBAL_DIR, extraPaths: [] });
@@ -654,16 +585,12 @@ describe("Claude Code skill extensions", () => {
 		expect(skills[0]?.argumentHint).toBe("[issue-number]");
 	});
 
-	it("substitutes the project and plugin directories", () => {
+	it("substitutes the project directory", () => {
 		const projectPlaceholder = ["$", "{CLAUDE_PROJECT_DIR}"].join("");
-		const pluginPlaceholder = ["$", "{CLAUDE_PLUGIN_ROOT}"].join("");
-		write("dirs", "name: dirs\ndescription: d", `project=${projectPlaceholder} plugin=${pluginPlaceholder}`);
+		write("dirs", "name: dirs\ndescription: d", `project=${projectPlaceholder}`);
 		const { skills } = loadSkills({ globalDir: dir, extraPaths: [] });
-		const out = formatSkillInvocation(skills[0]!, undefined, undefined, {
-			projectDir: "/proj",
-			pluginRoot: "/plug",
-		});
-		expect(out).toContain("project=/proj plugin=/plug");
+		const out = formatSkillInvocation(skills[0]!, undefined, undefined, { projectDir: "/proj" });
+		expect(out).toContain("project=/proj");
 	});
 
 	it("marks a user-invocable: false skill as model-only but still lists it", () => {
@@ -708,12 +635,12 @@ describe("inline `!`command`` blocks in a skill body", () => {
 		expect(out).not.toContain("!`");
 	});
 
-	it("runs them for a marketplace skill too — the gate is the command, not the source", async () => {
+	it("runs them for a third-party skill too — the gate is the command, not the source", async () => {
 		// Refusing by source was the wrong call: most inline blocks just probe
-		// the environment, and a marketplace skill can already tell the model
-		// to run anything in prose. What matters is that a skill body is not a
-		// way *around* the checks a plain bash call faces.
-		const skill = { ...writeProbe("Version: !`echo v99.0.0`"), source: "plugin" as const };
+		// the environment, and a third-party skill can already tell the model to
+		// run anything in prose. What matters is that a skill body is not a way
+		// *around* the checks a plain bash call faces.
+		const skill = { ...writeProbe("Version: !`echo v99.0.0`"), source: "agents" as const };
 		expect(await renderSkillInvocation(skill)).toContain("Version: v99.0.0");
 	});
 

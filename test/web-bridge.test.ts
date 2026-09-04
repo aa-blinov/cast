@@ -50,21 +50,6 @@ const { createServerBridge, SANDBOX_CWD, parseEvolveJson, parseSuggestionJson, t
 	"../src/server/bridge.ts"
 );
 
-// /plugin must seed the default Codex/Claude/Grok marketplaces only on
-// subcommands that consume them — the read-only list/catalog paths (which the
-// Settings modal preloads in parallel with /memory) would otherwise trigger
-// three synchronous git clones that block the event loop. Stub the seeder to
-// assert it's never reached from those paths.
-const mockEnsureDefaultMarketplaces = vi.fn();
-const mockInstallPlugin = vi.fn();
-vi.mock("../src/core/plugins.ts", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("../src/core/plugins.ts")>();
-	return {
-		...actual,
-		ensureDefaultMarketplaces: (...args: unknown[]) => mockEnsureDefaultMarketplaces(...args),
-		installPlugin: (...args: unknown[]) => mockInstallPlugin(...args),
-	};
-});
 
 const testConfig: AppConfig = {
 	baseURL: "http://localhost",
@@ -109,9 +94,7 @@ describe("web bridge", () => {
 		runAgentLoop.mockClear();
 		mockFetchModels.mockReset();
 		mockProbeProvider.mockClear();
-		mockEnsureDefaultMarketplaces.mockReset();
-		mockInstallPlugin.mockReset();
-		mockResolveMcpForCwd.mockReset();
+			mockResolveMcpForCwd.mockReset();
 		mockResolveMcpForCwd.mockResolvedValue({ ...emptyMcp, allServerNames: ["srv"] });
 		mockFetchModels.mockResolvedValue({
 			ok: true,
@@ -311,20 +294,6 @@ describe("web bridge", () => {
 
 		await bridge.executeSettingsCommand("/turn-cap reset");
 		expect((await bridge.executeSettingsCommand("/turn-cap")).result).toMatch(/500|default|reset/i);
-	});
-
-	it("seeds default marketplaces only from /plugin subcommands that consume them", async () => {
-		const bridge = createServerBridge(makeResult());
-
-		// The Settings modal preloads these two in parallel with /memory on
-		// open — they must never trigger the synchronous git clone of the
-		// default catalogs (which would block the event loop).
-		await bridge.executeSettingsCommand("/plugin marketplace list");
-		await bridge.executeSettingsCommand("/plugin marketplace catalog");
-		expect(mockEnsureDefaultMarketplaces).not.toHaveBeenCalled();
-
-		await bridge.executeSettingsCommand("/plugin install foo@bar");
-		expect(mockEnsureDefaultMarketplaces).toHaveBeenCalledTimes(1);
 	});
 
 	it("resets each secondary model slot atomically", async () => {
@@ -1388,41 +1357,6 @@ describe("web bridge", () => {
 		expect(calls).toBe(2);
 	});
 
-	it("a slow /plugin install doesn't clobber a concurrent settings change with its stale enabledPlugins snapshot", async () => {
-		const { loadSettings, updateSettings } = await import("../src/core/settings.ts");
-		const bridge = createServerBridge(makeResult());
-		const ws = bridge.createSession();
-
-		let releaseInstall: () => void = () => {};
-		const installGate = new Promise<void>((resolve) => {
-			releaseInstall = resolve;
-		});
-		mockInstallPlugin.mockImplementation(
-			async (_ref: string, settings: { enabledPlugins?: Record<string, boolean> }) => {
-				await installGate;
-				// Mirrors the real installPlugin: derives its return value from the
-				// settings snapshot it was handed at call time — stale by the time
-				// this resolves if something else wrote settings in the meantime.
-				return {
-					id: "pluginA@mp",
-					root: "/fake/root",
-					enabledPlugins: { ...(settings.enabledPlugins ?? {}), "pluginA@mp": true },
-				};
-			},
-		);
-
-		const install = bridge.executeCommand(ws.id, "/plugin install pluginA@mp");
-		await new Promise((r) => setTimeout(r, 0));
-
-		// A concurrent settings change lands while the clone is still "running".
-		updateSettings({ enabledPlugins: { "pluginB@mp": true } });
-
-		releaseInstall();
-		await install;
-
-		expect(loadSettings().enabledPlugins).toEqual({ "pluginA@mp": true, "pluginB@mp": true });
-	});
-
 	it("latches an auto-mode directory rule once a matching file enters context, and keeps it sticky next turn", async () => {
 		const rulePath = join(fakeHome, "python-style.md");
 		writeFileSync(
@@ -2047,16 +1981,6 @@ describe("web bridge", () => {
 		const skillsSuggestions = bridge.suggestCommand(ws.id, "/skills");
 		expect(skillsSuggestions.map((s) => s.value)).toEqual(["list", "enable", "disable", "uninstall", "help"]);
 
-		const pluginSuggestions = bridge.suggestCommand(ws.id, "/plugin");
-		expect(pluginSuggestions.map((s) => s.value)).toEqual([
-			"list",
-			"install",
-			"uninstall",
-			"enable",
-			"disable",
-			"marketplace",
-			"help",
-		]);
 
 		const permissionsSuggestions = bridge.suggestCommand(ws.id, "/permissions");
 		expect(permissionsSuggestions.map((s) => s.value)).toEqual(["default", "bypass"]);
@@ -2089,13 +2013,6 @@ describe("web bridge", () => {
 			else process.env.HOME = previousHome;
 			rmSync(fakeHome, { recursive: true, force: true });
 		}
-	});
-
-	it("readPluginContent rejects a plugin id whose halves traverse out of the installs directory", async () => {
-		const bridge = createServerBridge(makeResult());
-		expect(bridge.readPluginContent("..@..")).toMatchObject({ ok: false });
-		expect(bridge.readPluginContent("..@..").error).toContain("Invalid plugin id");
-		expect(bridge.readPluginContent("x@../..").error).toContain("Invalid plugin id");
 	});
 
 	it("saveSshKey can't be tricked into writing outside the keys directory", async () => {

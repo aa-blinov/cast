@@ -24,7 +24,7 @@ export function sessionInputsDir(sessionId: string): string {
  * happily matches `..` — which Node never normalizes out of `req.url`. Without
  * this check `join(~/.cast/inputs, "..")` resolves to `~/.cast` itself, so
  * `DELETE /api/sessions/../permanent` handed the whole cast home directory
- * (settings with provider keys, sessions.db, keys/, skills/, plugins/) to a
+ * (settings with provider keys, sessions.db, keys/, skills/) to a
  * recursive `rmSync` and still answered a misleading 404.
  *
  * Deliberately a bit looser than the generator's own alphabet — an id can also
@@ -40,7 +40,7 @@ const SAFE_SESSION_ID_RE = /^[A-Za-z0-9_-]+$/;
 /**
  * Whether a string may be used as one path segment: non-empty, no separator,
  * and not a relative-directory reference. Looser than isSafeSessionId because
- * the names it guards (plugin and marketplace slugs) legitimately contain dots
+ * the names it guards legitimately contain dots
  * and other punctuation — it only rules out anything that would let a name
  * escape the directory it's being joined into.
  */

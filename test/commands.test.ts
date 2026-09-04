@@ -436,54 +436,6 @@ describe("handleInput", () => {
 		expect(displayMessageText(calls)).toContain("No skills");
 	});
 
-	it("/plugin uninstall with no args picks, confirms, and removes", async () => {
-		const { addMarketplace, installPlugin, listInstalledPlugins } = await import("../src/core/plugins.ts");
-		const mpDir = join(process.env.HOME!, "mp");
-		mkdirSync(join(mpDir, ".cast-plugin"), { recursive: true });
-		mkdirSync(join(mpDir, "plugins", "hello", "skills", "greet"), { recursive: true });
-		writeFileSync(
-			join(mpDir, ".cast-plugin", "marketplace.json"),
-			JSON.stringify({
-				name: "ponytail",
-				plugins: [{ name: "hello", description: "Hello", source: "./plugins/hello" }],
-			}),
-		);
-		writeFileSync(
-			join(mpDir, "plugins", "hello", "skills", "greet", "SKILL.md"),
-			"---\nname: greet\ndescription: Hi.\n---\n\nHello.\n",
-		);
-		await addMarketplace(mpDir);
-		const installed = await installPlugin("hello@ponytail", {});
-		expect(listInstalledPlugins({ enabledPlugins: installed.enabledPlugins })).toHaveLength(1);
-
-		const { updateSettings } = await import("../src/core/settings.ts");
-		updateSettings({ enabledPlugins: installed.enabledPlugins });
-
-		let pickStep = 0;
-		const { deps, calls } = createFakeDeps();
-		deps.pickers = {
-			pickOption: async () => {
-				// 1) pick plugin id, 2) confirm true
-				const responses = ["hello@ponytail", true] as const;
-				return responses[pickStep++] ?? null;
-			},
-			promptText: async () => null,
-			pickMulti: async () => null,
-			log: () => {},
-		};
-		deps.projectDeps = { ...deps.projectDeps, pickers: deps.pickers };
-
-		await handleInput("/plugin uninstall", undefined, deps);
-		expect(displayMessageText(calls)).toContain("[Uninstalled hello@ponytail]");
-		expect(listInstalledPlugins({ enabledPlugins: {} })).toHaveLength(0);
-	});
-
-	it("/plugin uninstall with no plugins → notice", async () => {
-		const { deps, calls } = createFakeDeps();
-		await handleInput("/plugin uninstall", undefined, deps);
-		expect(displayMessageText(calls)).toContain("No plugins installed");
-	});
-
 	it("/skills uninstall with no removable skills → notice", async () => {
 		const { deps, calls } = createFakeDeps({
 			projectDeps: {

@@ -4,8 +4,6 @@
  * Handles $ARGUMENTS, ${CLAUDE_SKILL_DIR} substitution automatically.
  */
 
-import { dirname } from "node:path";
-
 const TOOL_LIST_SPLIT_RE = /[\s,]+/;
 
 import type { Skill } from "../skills.ts";
@@ -21,15 +19,6 @@ export interface SkillToolDeps {
 	inlineGate?: InlineCommandGate;
 	/** Current session id — substituted into ${CAST_SESSION_ID} / ${CLAUDE_SESSION_ID} in the skill body. */
 	sessionId?: string;
-}
-
-/** A plugin skill's install root: skills live at `<root>/skills/<name>/`, so
- * the root is two levels up from the skill directory. `${CLAUDE_PLUGIN_ROOT}`
- * is how a plugin skill reaches scripts shared across the plugin. */
-function pluginRootFor(skill: Skill): string | undefined {
-	if (skill.source !== "plugin") return undefined;
-	const skillsDir = dirname(skill.baseDir);
-	return dirname(skillsDir).endsWith("skills") ? dirname(skillsDir) : dirname(skillsDir);
 }
 
 export function getSkillToolDescription(skills: Skill[]): string {
@@ -75,7 +64,6 @@ export async function execSkill(args: Record<string, unknown>, deps: SkillToolDe
 		return {
 			content: await renderSkillInvocation(skill, userArgs, deps.sessionId, {
 				projectDir: deps.cwd,
-				pluginRoot: pluginRootFor(skill),
 				gate: deps.inlineGate,
 			}),
 			...(disallowed?.length ? { skillDisallowedTools: disallowed } : {}),

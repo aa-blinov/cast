@@ -1,6 +1,6 @@
 # Hooks
 
-Shell commands, HTTP callbacks, MCP tool calls, or one-shot model prompts that fire at agent lifecycle events. Config shape and response contract match Claude Code's official protocol (`code.claude.com/docs/en/hooks`) closely enough that a real-world `hooks.json` — including ones shipped inside installed Claude Code plugins — loads and runs unmodified for everything listed below.
+Shell commands, HTTP callbacks, MCP tool calls, or one-shot model prompts that fire at agent lifecycle events. Config shape and response contract match Claude Code's official protocol (`code.claude.com/docs/en/hooks`) closely enough that a real-world `hooks.json` loads and runs unmodified for everything listed below.
 
 ## Events
 
@@ -70,7 +70,6 @@ A group's `matcher` picks which occurrences the hook runs for — the tool name 
 
 - `~/.cast/hooks.json` — global, always applies
 - `.cast/hooks.json` — project-local, **trust-gated** the same as `.cast/mcp.json`: only read for a trusted project, since a hook is an arbitrary shell command
-- `<installed plugin root>/hooks/hooks.json` — Claude Code's real convention for plugin-contributed hooks (falls back to a bare `<root>/hooks.json` too). Always applies — installing a plugin is already an explicit trust decision.
 
 ```json
 {
@@ -131,18 +130,12 @@ A `Stop` block can't loop forever: after 8 continuations in one turn (matching t
 | `CAST_HOOK_EVENT` | The event name, e.g. `PreToolUse` |
 | `CAST_SESSION_ID` | The current session id |
 | `CAST_WORKSPACE_ROOT` | The cwd the hook is running for |
-| `CAST_PLUGIN_ROOT` / `CAST_PLUGIN_DATA` | Plugin install dir / writable per-plugin data dir (plugin-contributed hooks only) |
-| `CLAUDE_PLUGIN_ROOT` / `CLAUDE_PLUGIN_DATA` | Aliases for the two above — real plugin scripts (e.g. `anthropics/claude-plugins-official`'s "hookify") reference `${CLAUDE_PLUGIN_ROOT}` directly |
 
-Reserved `CAST_*`/`CLAUDE_PLUGIN_*` keys in a hook's own `env` field are silently stripped — the runner always injects the real values.
+Reserved `CAST_*` keys in a hook's own `env` field are silently stripped — the runner always injects the real values.
 
 ## Managing hooks
 
-`/hooks` lists every merged hook (global/project/plugin) with a stable id, its event, matcher, and enabled/disabled state. `/hooks enable <id>` / `/hooks disable <id>` toggles one, `/hooks help` shows a cheat sheet. State is per-user (`~/.cast/settings.json`'s `disabledHooks`), takes effect on the very next message (no restart), and survives edits to unrelated hooks in the same file since the id is derived from the hook's own content. The web UI has the same thing under **Settings → Hooks**.
-
-## Plugins
-
-An installed plugin can ship its own `<plugin root>/hooks/hooks.json` (same shape as above, no wrapping `"hooks"` key needed) — this is the same location Claude Code plugins already use, verified against real plugins like `anthropics/claude-plugins-official`'s "hookify" and "ralph-loop". Enabled plugins' hook files are merged in automatically — no separate registration step, matching how plugin skills already work.
+`/hooks` lists every merged hook (global/project) with a stable id, its event, matcher, and enabled/disabled state. `/hooks enable <id>` / `/hooks disable <id>` toggles one, `/hooks help` shows a cheat sheet. State is per-user (`~/.cast/settings.json`'s `disabledHooks`), takes effect on the very next message (no restart), and survives edits to unrelated hooks in the same file since the id is derived from the hook's own content. The web UI has the same thing under **Settings → Hooks**.
 
 ## Scope — what's implemented vs. not
 

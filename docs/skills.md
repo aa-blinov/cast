@@ -18,7 +18,6 @@ Skills are discovered from multiple locations. On a name collision, the first-lo
 2. **Project (agents)** — `.agents/skills/` (trust-gated; skills.sh / `npx skills add` universal path)
 3. **Global (cast)** — `~/.cast/skills/` (always loaded)
 4. **Global (agents)** — `~/.agents/skills/` then the compatible `~/.config/agents/skills/` (skills.sh universal global)
-5. **Plugin** — skills from enabled `/plugin install name@marketplace` packages
 6. **Builtin** — `prompts/skills/` (ships with cast)
 7. **Extra paths** — `--skill <directory>` flags (loaded even with `--no-skills`)
 
@@ -74,7 +73,7 @@ Always check `templates/` for reference material.
 | `license` | No | License name or a reference to a bundled license file |
 | `compatibility` | No | Environment requirements; 1–500 characters |
 | `metadata` | No | Mapping of string keys to string values for client-specific data |
-| `allowed-tools` | No | Pre-approved tools, as a space- or comma-separated string **or** a YAML list. Cast retains and exposes the field with the skill but does not act on it: a skill installed from a marketplace should not be able to waive cast's own bash/write confirmations. `disallowed-tools`, which only ever *removes* tools, is enforced |
+| `allowed-tools` | No | Pre-approved tools, as a space- or comma-separated string **or** a YAML list. Cast retains and exposes the field with the skill but does not act on it: a third-party skill should not be able to waive cast's own bash/write confirmations. `disallowed-tools`, which only ever *removes* tools, is enforced |
 | `disable-model-invocation` | No | Hide from the agent (manual `/skill:<name>` only). Accepts `true`/`yes`/`on`/`1` in any case, as the spec allows |
 | `when_to_use` | No | Extra matching guidance shown to the model as `description — whenToUse` in the skill listing |
 | `user-invocable` | No | `false` keeps the skill out of the slash menu — the model may load it, a person may not. Accepts the same boolean spellings |
@@ -160,15 +159,11 @@ When a skill file references relative paths (scripts, references, assets, templa
 
 Disabled names are stored in `~/.cast/settings.json` as `disabledSkills`. `/skill:<name>` only works for enabled skills.
 
-Plugin skills show their pack id in the picker/list (`plugin · name@marketplace`). If the pack is disabled via `/plugin`, the skill stays visible but locked (muted, Space ignored) until you re-enable the pack — it is not added to `disabledSkills`.
-
-`/skills uninstall` deletes a **global**, **project**, or **agents** (`.agents/skills`) skill from disk. Plugin skills appear in the picker muted/locked (Enter ignored) — remove the pack with `/plugin uninstall`. Builtin and `--skill` paths are omitted.
-
-Whole marketplace packs can be toggled with bare `/plugin` (see [Plugins](plugins.md)).
+`/skills uninstall` deletes a **global**, **project**, or **agents** (`.agents/skills`) skill from disk. Builtin and `--skill` paths are omitted.
 
 ### Hot-reload
 
-`/skills` toggle / `enable` / `disable` / `uninstall` and `/plugin install` / enable / uninstall update the skill catalog **in the current session** — no `/reload`, no restart.
+`/skills` toggle / `enable` / `disable` / `uninstall` update the skill catalog **in the current session** — no `/reload`, no restart.
 
 Use `/reload` only after dropping or editing skill files on disk yourself (e.g. `npx skills add`, copy into `.cast/skills/`). See [Interactive commands](interactive-commands.md#hot-reload-vs-reload).
 
@@ -200,7 +195,6 @@ Skill bodies can reference invocation arguments and their own directory:
 | `$ARGUMENTS[0]`, `$ARGUMENTS[1]`, ... / `$0`, `$1`, ... | An individual argument (shell-quote-style parsing — quoted strings stay intact) |
 | `${CLAUDE_SKILL_DIR}` | Absolute path to the skill's own directory, for resolving relative paths |
 | `${CLAUDE_PROJECT_DIR}` (`${CAST_PROJECT_DIR}`) | The project root |
-| `${CLAUDE_PLUGIN_ROOT}` | A plugin skill's installation root, for files shared across the plugin |
 | `${CLAUDE_SESSION_ID}` (`${CAST_SESSION_ID}`) | The current session id |
 
 If arguments are supplied but the skill body contains no `$ARGUMENTS` placeholder, they're appended as a trailing `User: <args>` line instead of being silently dropped. If the skill is invoked *without* arguments, every placeholder is replaced with an empty string — an unsubstituted `$ARGUMENTS` reaching the model reads as an instruction rather than as "there were none".
@@ -214,7 +208,7 @@ The agent invokes skills through a dedicated `skill` tool (`name`, optional `arg
 | Flag | Description |
 |------|-------------|
 | `--skill <directory>` | Load an extra skill package directory (repeatable) |
-| `--no-skills` | Skip project/agents/global/plugin/builtin skill discovery |
+| `--no-skills` | Skip project/agents/global/builtin skill discovery |
 
 ```bash
 cast --skill ./my-project-skill

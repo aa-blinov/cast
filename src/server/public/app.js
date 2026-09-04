@@ -31,10 +31,8 @@ import {
 	SettingsBash,
 	SettingsDefaultUi,
 	SettingsHooks,
-	SettingsMarketplace,
 	SettingsMemory,
 	SettingsMcp,
-	SettingsPlugins,
 	SettingsPersonas,
 	SettingsProvider,
 	SettingsQuickMode,
@@ -1972,7 +1970,7 @@ function App() {
 				settingsOpen &&
 				html`
 				<${SettingsModalModule}
-					panels=${{ SettingsAppearance, SettingsModel, SettingsBash, SettingsWeb, SettingsMemory, SettingsPersonas, SettingsQuickMode, SettingsServer, SettingsHooks, SettingsMcp, SettingsSkills, SettingsPlugins, SettingsMarketplace, SettingsSkillssh, SettingsProvider, SettingsSsh, SettingsDefaultUi, SettingsUpdates }}
+					panels=${{ SettingsAppearance, SettingsModel, SettingsBash, SettingsWeb, SettingsMemory, SettingsPersonas, SettingsQuickMode, SettingsServer, SettingsHooks, SettingsMcp, SettingsSkills, SettingsSkillssh, SettingsProvider, SettingsSsh, SettingsDefaultUi, SettingsUpdates }}
 					fontOptions=${FONT_OPTIONS}
 					fontScales=${FONT_SCALE_OPTIONS}
 					activeId=${activeId}

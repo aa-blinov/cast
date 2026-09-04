@@ -12,12 +12,10 @@ const SETTINGS_TABS = [
 	{ id: "bash", label: "Bash" },
 	{ id: "default-ui", label: "Default UI" },
 	{ id: "hooks", label: "Hooks" },
-	{ id: "marketplace", label: "Marketplace" },
 	{ id: "memory", label: "Memory" },
 	{ id: "mcp", label: "MCP" },
 	{ id: "model", label: "Model" },
 	{ id: "personas", label: "Personas" },
-	{ id: "plugins", label: "Plugins" },
 	{ id: "provider", label: "Provider" },
 	{ id: "skillssh", label: "Skills.sh" },
 	{ id: "quick-mode", label: "Quick Mode" },
@@ -37,7 +35,7 @@ const SETTINGS_TABS = [
 // Reloads on every open since usage/message-count/git-dirty drift constantly.
 // Everything that used to be a slash command typed into the composer but
 // isn't part of the actual back-and-forth with the agent (MCP/skills/
-// plugins/provider/SSH management, theme, model/reasoning details, usage) —
+// provider/SSH management, theme, model/reasoning details, usage) —
 // consolidated here so the chat transcript stays just the conversation.
 // Every action still runs through the exact same POST /command endpoint the
 // composer used, just without ever appending a chat notice for it.
@@ -218,37 +216,6 @@ export function SettingsModal({
 					return;
 				}
 				commit((d) => ({ ...d, skills: res.result, skillssh: true }));
-			} else if (t === "plugins") {
-				const res = await run("/plugin list");
-				if (!res.ok) {
-					setLoadError(res.error);
-					return;
-				}
-				commit((d) => ({
-					...d,
-					plugins: {
-						plugins: res.result,
-					},
-				}));
-			} else if (t === "marketplace") {
-				const [marketplaces, catalog] = await Promise.all([
-					run("/plugin marketplace list"),
-					run("/plugin marketplace catalog"),
-				]);
-				// A silently-empty list here reads as "no marketplaces configured"
-				// — indistinguishable from an actual fetch failure (e.g. one
-				// marketplace's git remote is now unreachable) without this check.
-				if (!marketplaces.ok || !catalog.ok) {
-					setLoadError(marketplaces.error || catalog.error);
-					return;
-				}
-				commit((d) => ({
-					...d,
-					marketplace: {
-						marketplaces: marketplaces.result,
-						catalog: catalog.result,
-					},
-				}));
 			} else if (t === "provider") {
 				const res = await run("/provider list");
 				if (!res.ok) {
@@ -313,11 +280,6 @@ export function SettingsModal({
 				// /reload and any /skills mutation can change which skills are
 				// loaded/enabled — those show up as native /<skill-id> slash commands,
 				// so the composer's palette needs to catch up too.
-				// Same for /plugin install/uninstall/enable/disable — they change
-				// which hooks appear in the Hooks tab AND which plugins the
-				// Marketplace tab lists as installed (the Marketplace tab derives
-				// its "installed" label from data.plugins, so without a reload the
-				// just-installed plugin would still show the Install button).
 				if (res.ok) {
 					if ((command.startsWith("/model ") || command.startsWith("/model-selection ")) && typeof res.result?.model === "string") {
 						onModelChange?.(res.result.model);
@@ -328,11 +290,10 @@ export function SettingsModal({
 					if (command === "/reload" || command.startsWith("/skills ")) onReload?.();
 					if (
 						command === "/reload" ||
-						command.startsWith("/plugin ") ||
 						command.startsWith("/mcp ") ||
 						command.startsWith("/skills-sh ")
 					) {
-						await Promise.all([load("hooks"), load("mcp"), load("skills"), load("plugins")]);
+						await Promise.all([load("hooks"), load("mcp"), load("skills")]);
 					}
 				}
 				return res;
@@ -408,10 +369,6 @@ export function SettingsModal({
 																? html`<${panels.SettingsMcp} data=${data.mcp} busy=${busy} act=${act} confirm=${confirm} />`
 																: tab === "skills"
 																	? html`<${panels.SettingsSkills} data=${data.skills} busy=${busy} act=${act} confirm=${confirm} />`
-																	: tab === "plugins"
-																		? html`<${panels.SettingsPlugins} data=${data.plugins} busy=${busy} act=${act} confirm=${confirm} />`
-																		: tab === "marketplace"
-																			? html`<${panels.SettingsMarketplace} data=${data.marketplace} installed=${data.plugins?.plugins ?? []} busy=${busy} act=${act} confirm=${confirm} />`
 																			: tab === "skillssh"
 																				? html`<${panels.SettingsSkillssh} data=${data.skills} busy=${busy} act=${act} confirm=${confirm} />`
 																				: tab === "provider"

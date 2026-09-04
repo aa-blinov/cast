@@ -16,7 +16,6 @@ import {
 } from "./hooks.ts";
 import { connectMcpServers, loadMcpConfig, type McpServerConfig, type McpSetupResult, saveMcpConfig } from "./mcp.ts";
 import { globalPersonasDir, type LoadPersonasOptions, loadPersonas, type Persona } from "./personas.ts";
-import { pluginHookFiles, pluginSkillContributions } from "./plugins.ts";
 import {
 	formatAlwaysApplyRules,
 	formatLazyRulesForPrompt,
@@ -178,8 +177,6 @@ function skillLoadOptionsForCwd(cwd: string, trusted: boolean, opts: { noSkills:
 		projectDir: !opts.noSkills && trusted && skillsDir && existsSync(skillsDir) ? skillsDir : undefined,
 		agentsProjectDir: !opts.noSkills && trusted && agentsDir && existsSync(agentsDir) ? agentsDir : undefined,
 		agentsGlobalDirs: opts.noSkills ? undefined : agentsGlobalSkillsDirs().filter((d) => existsSync(d)),
-		// Fresh settings so /plugin install takes effect without restarting.
-		pluginContributions: opts.noSkills ? undefined : pluginSkillContributions(loadSettings()),
 		extraPaths: opts.cliSkillPaths,
 	};
 }
@@ -202,8 +199,7 @@ export async function resolveSkillsForCwd(
 ): Promise<{ skills: Skill[]; skillsPromptSuffix: string }> {
 	const discovered = discoverSkillsForCwd(deps, cwd, trusted);
 	const disabled = new Set(loadSettings().disabledSkills ?? []);
-	// Pack-off plugin skills stay visible in `/skills` but not in the agent catalog.
-	const skills = discovered.filter((s) => !disabled.has(s.name) && s.pluginEnabled !== false);
+	const skills = discovered.filter((s) => !disabled.has(s.name));
 	return {
 		skills,
 		skillsPromptSuffix: formatSkillsForPrompt(skills),
@@ -250,10 +246,10 @@ export function removeMcpServerFromDisk(name: string, cwd: string, trusted: bool
 	return entry;
 }
 
-/** Merged, disabled-filtered hook config for a cwd — global + trust-gated project + enabled plugins. */
+/** Merged, disabled-filtered hook config for a cwd — global + trust-gated project. */
 export function resolveHooksForCwd(cwd: string, trusted: boolean): HooksFile {
 	const settings = loadSettings();
-	return loadHooksForCwd(cwd, trusted, pluginHookFiles(settings), new Set(settings.disabledHooks ?? []));
+	return loadHooksForCwd(cwd, trusted, new Set(settings.disabledHooks ?? []));
 }
 
 /** Every hook group for a cwd (enabled and disabled) with stable ids — for `/hooks` listing/toggling. */
@@ -262,10 +258,9 @@ export function listHooksForCwdSettings(
 	trusted: boolean,
 ): { entries: ResolvedHookEntry[]; diagnostics: HookDiagnostic[] } {
 	const settings = loadSettings();
-	const files = pluginHookFiles(settings);
 	return {
-		entries: listHooksForCwd(cwd, trusted, files, new Set(settings.disabledHooks ?? [])),
-		diagnostics: hooksFileDiagnostics(cwd, trusted, files),
+		entries: listHooksForCwd(cwd, trusted, new Set(settings.disabledHooks ?? [])),
+		diagnostics: hooksFileDiagnostics(cwd, trusted),
 	};
 }
 

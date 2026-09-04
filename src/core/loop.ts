@@ -768,7 +768,7 @@ export interface LoopConfig {
 	cwd: string;
 	systemPrompt: string;
 	/** Enables durable project memory after a completed turn. A service override
-	 * keeps the loop independent from the SQLite implementation in tests/plugins. */
+	 * keeps the loop independent from the SQLite implementation in tests. */
 	memory?: { sessionId: string; service?: MemoryService };
 	onEvent: (event: AgentEvent) => void;
 	/** Non-fatal warning shown to the user (e.g. vision fallback). */

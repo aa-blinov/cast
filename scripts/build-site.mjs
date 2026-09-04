@@ -19,7 +19,6 @@ const NAV_ORDER = [
 	{ file: "persona-research.md", label: "Persona Research" },
 	{ file: "subagents.md", label: "Sub-agents & Delegation" },
 	{ file: "skills.md", label: "Skills" },
-	{ file: "plugins.md", label: "Plugins" },
 	{ file: "rules.md", label: "Rules" },
 	{ file: "mcp-servers.md", label: "MCP Servers" },
 	{ file: "context-files.md", label: "Context Files" },
