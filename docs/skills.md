@@ -74,11 +74,12 @@ Always check `templates/` for reference material.
 | `license` | No | License name or a reference to a bundled license file |
 | `compatibility` | No | Environment requirements; 1–500 characters |
 | `metadata` | No | Mapping of string keys to string values for client-specific data |
-| `allowed-tools` | No | Pre-approved tools, as a space- or comma-separated string **or** a YAML list; retained and exposed with the skill, with execution semantics depending on the client |
+| `allowed-tools` | No | Pre-approved tools, as a space- or comma-separated string **or** a YAML list. Cast retains and exposes the field with the skill but does not act on it: a skill installed from a marketplace should not be able to waive cast's own bash/write confirmations. `disallowed-tools`, which only ever *removes* tools, is enforced |
 | `disable-model-invocation` | No | Hide from the agent (manual `/skill:<name>` only). Accepts `true`/`yes`/`on`/`1` in any case, as the spec allows |
 | `when_to_use` | No | Extra matching guidance shown to the model as `description — whenToUse` in the skill listing |
 | `user-invocable` | No | `false` keeps the skill out of the slash menu — the model may load it, a person may not. Accepts the same boolean spellings |
 | `argument-hint` | No | Autocomplete hint for the arguments the skill expects, e.g. `[issue-number]` |
+| `disallowed-tools` | No | Tools removed from the model's pool for the rest of the turn the skill is invoked in; cleared by your next message. Space- or comma-separated string, or a YAML list |
 | `arguments` | No | Named positional arguments, as a space-separated string or a YAML list. `arguments: [issue, branch]` makes `$issue` the first argument and `$branch` the second |
 
 ### Name Rules

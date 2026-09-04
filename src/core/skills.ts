@@ -59,6 +59,9 @@ export interface Skill {
 	 * slash-command menu and `/name` does not run it. Spec field
 	 * `user-invocable`; default true. */
 	userInvocable: boolean;
+	/** Tools removed from the model's pool while this skill is active
+	 * (`disallowed-tools`), space-separated. */
+	disallowedTools?: string;
 	/** Autocomplete hint for the arguments this skill expects (`argument-hint`). */
 	argumentHint?: string;
 	/** Named positional arguments (`arguments`), mapped to `$name` placeholders
@@ -281,8 +284,9 @@ function loadSkillFromFile(
 	const license = validateOptionalString(frontmatter, "license");
 	const compatibility = validateOptionalString(frontmatter, "compatibility", MAX_COMPATIBILITY_LENGTH);
 	const allowedTools = validateToolList(frontmatter, "allowed-tools");
+	const disallowedTools = validateToolList(frontmatter, "disallowed-tools");
 	const metadata = validateMetadata(frontmatter.metadata);
-	for (const result of [license, compatibility, allowedTools, argumentHint, metadata]) {
+	for (const result of [license, compatibility, allowedTools, disallowedTools, argumentHint, metadata]) {
 		for (const message of result.errors) diagnostics.push({ message, path: filePath });
 	}
 	const hasValidationErrors = diagnostics.length > 0;
@@ -305,6 +309,7 @@ function loadSkillFromFile(
 			compatibility: compatibility.value,
 			metadata: metadata.value,
 			allowedTools: allowedTools.value,
+			disallowedTools: disallowedTools.value,
 			filePath,
 			baseDir: dirname(filePath),
 			source,

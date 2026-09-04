@@ -1804,15 +1804,26 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 			return server !== undefined && matchesToolsAllowlist(server, mcpAllowlist);
 		});
 	}
-	const tools = loopConfig.toolDefinitionsOverride
+	const baseTools = loopConfig.toolDefinitionsOverride
 		? structuredClone(loopConfig.toolDefinitionsOverride)
 		: [...builtins, ...mcps];
+	// Tools an invoked skill removed for the rest of this turn via its
+	// `disallowed-tools` frontmatter. Per the spec the restriction "clears when
+	// you send your next message", so a steer or follow-up empties it.
+	const skillDisallowedTools = new Set<string>();
+	let tools = baseTools;
+	const applySkillToolRestrictions = (): void => {
+		tools = skillDisallowedTools.size
+			? baseTools.filter((t) => !skillDisallowedTools.has(t.function.name))
+			: baseTools;
+		advertisedNames = new Set(tools.map((t) => t.function.name));
+	};
 	// Names registered before allowlist/denylist filters — so a call to a
 	// real-but-filtered builtin gets "not available", not an unknown-tool hint.
 	const knownToolNames = new Set(allTools.map((t) => t.function.name));
 	// Names the model is actually allowed to call this turn — used to catch
 	// fabricated tool names in executeTool below.
-	const advertisedNames = new Set(tools.map((t) => t.function.name));
+	let advertisedNames = new Set(tools.map((t) => t.function.name));
 
 	// Doom-loop detector: tracks the last DOOM_LOOP_THRESHOLD tool calls
 	// (name + serialized args). When the same call appears that many times in
@@ -2293,6 +2304,11 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 					// model free to stop with approved-plan work still open, exactly
 					// when the user had just asked for more.
 					openWorkGateFires = 0;
+					// A skill's tool restriction lasts until the next user message.
+					if (skillDisallowedTools.size) {
+						skillDisallowedTools.clear();
+						applySkillToolRestrictions();
+					}
 				}
 
 				// Re-sync the system prompt against contextFiles that tool calls
@@ -2667,6 +2683,14 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 						} as Message;
 						messages.push(toolMsg);
 
+						// A skill with `disallowed-tools` narrows the pool for the rest
+						// of the turn — the author's way of saying "this procedure must
+						// not touch these", which was previously parsed and ignored.
+						if (r.result.skillDisallowedTools?.length) {
+							for (const name of r.result.skillDisallowedTools) skillDisallowedTools.add(name);
+							applySkillToolRestrictions();
+						}
+
 						// Propagate subagent usage to the main session, tagged so the UI
 						// can attribute it separately from the main agent's own tokens.
 						if (r.result.subagentUsage) {
@@ -2808,6 +2832,10 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				// Same as steering: a new user message resets the doom-loop window.
 				recentToolCalls.length = 0;
 				openWorkGateFires = 0;
+				if (skillDisallowedTools.size) {
+					skillDisallowedTools.clear();
+					applySkillToolRestrictions();
+				}
 				continue;
 			}
 

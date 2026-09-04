@@ -1578,6 +1578,62 @@ describe("runAgentLoop — retries a length-truncated response with no tool call
 		expect(events.some((e) => e.type === "end" && (e as { reason: string }).reason === "stop")).toBe(true);
 	});
 
+	it("honours a skill's disallowed-tools for the rest of the turn, then clears it", async () => {
+		// `disallowed-tools` is the skill author saying "this procedure must not
+		// touch these". It was parsed and ignored, so the restriction never
+		// reached the model's tool list.
+		const dir = mkdtempSync(join(tmpdir(), "cast-skill-disallow-"));
+		try {
+			mkdirSync(join(dir, "locked"), { recursive: true });
+			writeFileSync(
+				join(dir, "locked", "SKILL.md"),
+				"---\nname: locked\ndescription: d\ndisallowed-tools: bash write\n---\nDo it read-only.\n",
+				"utf-8",
+			);
+			const { loadSkills } = await import("../src/core/skills.ts");
+			const { skills } = loadSkills({ globalDir: dir, extraPaths: [] });
+
+			const toolNamesPerCall: string[][] = [];
+			const steeringQueue = new MessageQueue();
+			vi.mocked(streamAndCollect).mockImplementation(async (_client, _model, _messages, tools) => {
+				toolNamesPerCall.push((tools as Array<{ function: { name: string } }>).map((t) => t.function.name));
+				if (toolNamesPerCall.length === 1) {
+					return {
+						content: "",
+						thinking: "",
+						finishReason: "tool_calls",
+						toolCalls: [{ id: "1", name: "skill", arguments: JSON.stringify({ name: "locked" }) }],
+					};
+				}
+				// After the skill's restriction is in force, the user steers — which
+				// per spec clears it — and the next request sees the full pool again.
+				if (toolNamesPerCall.length === 2) steeringQueue.enqueue({ role: "user", content: "carry on" });
+				return { content: "done", thinking: "", finishReason: "stop" };
+			});
+
+			await runAgentLoop([{ role: "user", content: "use the locked skill" }], {
+				config: testConfig,
+				model: "test-model",
+				cwd: dir,
+				systemPrompt: "test",
+				skills,
+				steeringQueue,
+				onEvent: () => {},
+			});
+
+			expect(toolNamesPerCall[0]).toContain("bash");
+			// Second request: the skill has landed, bash and write are gone.
+			expect(toolNamesPerCall[1]).not.toContain("bash");
+			expect(toolNamesPerCall[1]).not.toContain("write");
+			expect(toolNamesPerCall[1]).toContain("read");
+			// Third request follows the steer, which clears the restriction.
+			expect(toolNamesPerCall[2]).toContain("bash");
+		} finally {
+			vi.mocked(streamAndCollect).mockReset();
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	it("treats empty tool-call arguments as no arguments, not as malformed JSON", async () => {
 		// Several OpenAI-compatible providers send `arguments: ""` (or omit the
 		// field entirely) for a tool invoked without parameters — `ls` and

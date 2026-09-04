@@ -5,6 +5,9 @@
  */
 
 import { dirname } from "node:path";
+
+const TOOL_LIST_SPLIT_RE = /[\s,]+/;
+
 import type { Skill } from "../skills.ts";
 import { formatSkillInvocation } from "../skills.ts";
 import type { ToolResult } from "./shared.ts";
@@ -63,11 +66,13 @@ export function execSkill(args: Record<string, unknown>, deps: SkillToolDeps): T
 	// such file or directory…" — true, but it tells the model nothing about
 	// what to do. Say what happened instead.
 	try {
+		const disallowed = skill.disallowedTools?.split(TOOL_LIST_SPLIT_RE).filter(Boolean);
 		return {
 			content: formatSkillInvocation(skill, userArgs, deps.sessionId, {
 				projectDir: deps.cwd,
 				pluginRoot: pluginRootFor(skill),
 			}),
+			...(disallowed?.length ? { skillDisallowedTools: disallowed } : {}),
 		};
 	} catch (error) {
 		const reason = error instanceof Error ? error.message : String(error);
