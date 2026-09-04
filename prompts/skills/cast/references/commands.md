@@ -4,7 +4,6 @@
 |---------|-------------|
 | `/skills` | Toggle / list / enable\|disable / uninstall skills |
 | `/mcp` | Toggle / list / enable\|disable / uninstall MCP servers |
-| `/plugin` | Plugins palette (install / marketplace / toggle) |
 | `/rule:<name>` | Invoke a rule by name |
 | `/rules` | List loaded rules |
 | `/skill:<name>` | Invoke a skill |
@@ -38,6 +37,5 @@ Never quit cast for these — the chat continues either way.
 
 | Change | How to apply |
 |--------|----------------|
-| `/skills` / `/mcp` / `/plugin` toggle, enable/disable, uninstall | automatic (hot-reload) |
-| `/plugin install` / marketplace remove | automatic (skills reload) |
+| `/skills` / `/mcp` toggle, enable/disable, uninstall | automatic (hot-reload) |
 | New/edited files under `.cast/` / `~/.cast/` / `.agents/` (skills, personas, rules, mcp.json) | `/reload` (same session) |

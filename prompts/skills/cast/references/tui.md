@@ -72,7 +72,7 @@ Model/provider: `/model`, `/plan-model`, `/plan-model-provider`,
 Run-time injection (allowed while a turn runs): `/queue` (+`/q`), `/queue-reset`
 (+`/qr`), `/steer` (+`/s`).
 
-Tools/skills/plugins/MCP: `/mcp`, `/skills`, `/plugin`, `/hooks`, `/web`,
+Tools/skills/MCP: `/mcp`, `/skills`, `/hooks`, `/web`,
 `/web-search-provider`, `/web-fetch-provider`, `/ssh`, `/statusbar`,
 `/memory` (on/off, `write`, `budget`, `floor`, `reconcile`, `dream`/`distill`
 + interval, `runs`, `cancel`, `checkpoint`), `/dream`, `/distill`.

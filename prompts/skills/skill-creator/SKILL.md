@@ -24,7 +24,7 @@ mkdir -p ~/.cast/skills/my-skill
 mkdir -p .cast/skills/my-skill
 ```
 
-After creating or editing files on disk, run `/reload` in cast to pick up changes. Skills installed via `/skills` or `/plugin` hot-reload automatically.
+After creating or editing files on disk, run `/reload` in cast to pick up changes. Toggles made with `/skills` apply in the same session.
 
 Frontmatter fields:
 

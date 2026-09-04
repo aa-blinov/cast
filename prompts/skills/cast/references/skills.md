@@ -6,11 +6,10 @@ Skills are reusable instruction files the model can read on demand.
 2. `.agents/skills/` — skills.sh universal project path (trust-gated)
 3. `~/.cast/skills/` — global
 4. `~/.config/agents/skills/` / `~/.agents/skills/` — skills.sh universal global
-5. Enabled marketplace plugins (`/plugin install`) — `source: plugin`
-6. Shipped with cast — builtin
-7. `--skill <directory>` — explicit skill package directory (still loads with `--no-skills`)
+5. Shipped with cast — builtin
+6. `--skill <directory>` — explicit skill package directory (still loads with `--no-skills`)
 
-`--no-skills` skips project, agents, global, plugin, and builtin discovery.
+`--no-skills` skips project, agents, global, and builtin discovery.
 
 `npx skills add owner/repo --skill name -a universal` → `.agents/skills/`; invoke with `/skill:name`.
 
@@ -42,9 +41,8 @@ Instructions the model reads when this skill is invoked...
 - Optional standard fields: `license`, `compatibility` (up to 500 characters), `metadata` (string-to-string map), `allowed-tools` (experimental)
 - `disable-model-invocation: true` — skill is hidden from model, only usable via `/skill:name`
 - `/skills` — multi-select toggle; also `list`, `enable`/`disable <name>`, `uninstall`, `help`
-- `/skills uninstall` — delete cast/agents skill from disk (picker or name + confirm); plugin skills show locked → `/plugin uninstall`
-- Plugin skills are labeled `plugin · name@marketplace`; if the pack is off, they stay visible but locked until `/plugin` re-enables the pack
-- On name collision: `.cast` project > `.agents` project > `.cast` global > `.agents` global > plugin > builtin
+- `/skills uninstall` — delete a cast/agents skill from disk (picker or name + confirm); builtin and `--skill` paths are not removable
+- On name collision: `.cast` project > `.agents` project > `.cast` global > `.agents` global > builtin
 
 **Example — create a skill:**
 
