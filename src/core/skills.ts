@@ -15,6 +15,8 @@ import { type Dirent, existsSync, readdirSync, readFileSync, rmSync, statSync } 
 import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { matchesToolsAllowlist, parseFrontmatter } from "./frontmatter.ts";
+import { checkDangerousBash } from "./permissions.ts";
+import { checkReadOnlyCommand } from "./plan.ts";
 import { promptsDir, readRequiredPrompt } from "./prompts.ts";
 import { fileMatchesGlob } from "./rules.ts";
 
@@ -659,18 +661,14 @@ const MAX_INJECTED_COMMANDS = 10;
 const INJECTION_TIMEOUT_MS = 10_000;
 const MAX_INJECTION_OUTPUT_CHARS = 2000;
 
-/**
- * Whether a skill's inline `` !`command` `` blocks may actually run.
- *
- * They may for skills the user put there themselves — cast's own builtins,
- * `~/.cast/skills`, the project's `.cast/skills` and `.agents/skills` (both
- * already trust-gated before they are even discovered), and an explicit
- * `--skill` path. They may not for marketplace plugin skills: installing a
- * plugin is not consent to run arbitrary commands from it, and every one of
- * the 194 installed skills that uses this syntax comes from a marketplace.
- */
-function mayRunInlineCommands(skill: Skill): boolean {
-	return skill.source !== "plugin";
+/** How an inline command is cleared to run. Supplied by the caller so a skill
+ * body goes through exactly the gates the `bash` tool does, rather than
+ * bypassing them by virtue of living in a skill. */
+export interface InlineCommandGate {
+	/** Plan mode / a read-only subagent: only inspection commands may run. */
+	readOnly?: boolean;
+	/** Same confirmation callback the bash tool uses for dangerous patterns. */
+	confirm?: (command: string, reason: string) => Promise<boolean>;
 }
 
 /**
@@ -680,16 +678,9 @@ function mayRunInlineCommands(skill: Skill): boolean {
  * saying `` Node: !`node --version` `` reads as though the version had been
  * checked.
  */
-async function runInlineCommands(content: string, skill: Skill, cwd: string | undefined): Promise<string> {
+async function runInlineCommands(content: string, cwd: string | undefined, gate: InlineCommandGate): Promise<string> {
 	const matches = [...content.matchAll(BASH_INJECTION_RE)];
 	if (matches.length === 0) return content;
-	if (!mayRunInlineCommands(skill)) {
-		return content.replace(
-			BASH_INJECTION_RE,
-			(_, command: string) =>
-				`[command not run — this skill came from a plugin marketplace, so cast does not execute its inline commands: ${command}]`,
-		);
-	}
 	const outputs = new Map<string, string>();
 	let executed = 0;
 	for (const match of matches) {
@@ -700,12 +691,32 @@ async function runInlineCommands(content: string, skill: Skill, cwd: string | un
 			continue;
 		}
 		executed++;
+		// The same two gates the bash tool applies. A skill body is untrusted
+		// input like any other — most of them only probe the environment
+		// (`node --version`), which is exactly why refusing them wholesale was
+		// the wrong call, but a skill must not be a way *around* the checks a
+		// plain bash call would face.
+		if (gate.readOnly) {
+			// biome-ignore lint/performance/noAwaitInLoops: each command is checked before the next runs
+			const verdict = await checkReadOnlyCommand(command);
+			if (!verdict.ok) {
+				outputs.set(command, `[not run — plan mode allows read-only commands only: ${verdict.reason}]`);
+				continue;
+			}
+		}
+		const danger = checkDangerousBash(command);
+		if (danger) {
+			const approved = gate.confirm ? await gate.confirm(command, danger) : false;
+			if (!approved) {
+				outputs.set(command, `[not run — matches a dangerous pattern (${danger}) and was not confirmed]`);
+				continue;
+			}
+		}
 		try {
 			// Sequential on purpose: a skill's blocks routinely probe the same
 			// environment in order ("is X installed" then "which version"), and
 			// running a body's commands in parallel would reorder side effects
 			// the author wrote as a sequence.
-			// biome-ignore lint/performance/noAwaitInLoops: see above
 			const { stdout, stderr } = await execFileAsync("bash", ["-c", command], {
 				cwd,
 				timeout: INJECTION_TIMEOUT_MS,
@@ -735,10 +746,10 @@ export async function renderSkillInvocation(
 	skill: Skill,
 	additionalArgs?: string,
 	sessionId?: string,
-	context: Omit<SubstitutionContext, "argumentNames"> = {},
+	context: Omit<SubstitutionContext, "argumentNames"> & { gate?: InlineCommandGate } = {},
 ): Promise<string> {
 	const rendered = formatSkillInvocation(skill, additionalArgs, sessionId, context);
-	return runInlineCommands(rendered, skill, context.projectDir);
+	return runInlineCommands(rendered, context.projectDir, context.gate ?? {});
 }
 
 export function formatSkillInvocation(

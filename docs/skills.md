@@ -104,15 +104,20 @@ is about to work in:
 Node: !`node --version 2>/dev/null || echo "not installed"`
 ```
 
-Cast runs these only for skills you installed yourself — built-ins,
-`~/.cast/skills`, the project's `.cast/skills` and `.agents/skills`, and
-`--skill` paths. **Marketplace plugin skills never have their inline commands
-run**: installing a plugin is not consent to execute arbitrary commands from
-it. Their blocks are replaced with a visible notice naming the command that
-was skipped, so the model doesn't read the literal text as a result.
+These run for every skill, whatever its source — most of them only probe the
+environment, and a skill can already tell the model to run anything in prose.
+What a skill body must not be is a way *around* the checks a plain `bash` call
+faces, so each command goes through the same two gates:
+
+- In **plan mode** (and in a subagent of a plan-mode parent) only read-only
+  commands run; anything that could write is reported in place, unrun.
+- A command matching a **dangerous pattern** (`rm -rf`, `sudo`, force-push, …)
+  needs the same confirmation the `bash` tool asks for. Without a confirmation
+  callback it is refused rather than silently allowed.
 
 Bounds: at most 10 commands per skill, 10s each, 2,000 characters of output
-each. A failing command is reported in place rather than left as literal text.
+each. A failing or refused command is reported in place rather than left as
+literal text.
 
 ### Relative Paths
 

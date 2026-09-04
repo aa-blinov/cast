@@ -1934,7 +1934,16 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		loopConfig.planState,
 		loopConfig.sshHosts,
 		loopConfig.backgroundBash,
-		allowedSkills ? { skills: allowedSkills, sessionId: loopConfig.sessionId } : undefined,
+		allowedSkills
+			? {
+					skills: allowedSkills,
+					sessionId: loopConfig.sessionId,
+					cwd,
+					// Plan mode (and a plan-mode parent's subagent) restricts a skill's
+					// inline commands exactly as it restricts the bash tool.
+					inlineGate: { readOnly: loopConfig.planState?.enabled === true || loopConfig.readOnlyBash === true },
+				}
+			: undefined,
 		loopConfig.beforeFileWrite,
 	);
 	const executeTool = async (
