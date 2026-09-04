@@ -9,7 +9,7 @@ export interface PickOption<T> {
 	/** Optional haystack for fuzzy search; concatenated into the match query
 	 *  alongside label + description. Not rendered. */
 	searchText?: string;
-	/** Dimmed label (e.g. skill whose plugin pack is disabled). */
+	/** Dimmed label for a row that is shown but not selectable. */
 	muted?: boolean;
 	/** Space cannot toggle this row (still navigable). */
 	locked?: boolean;

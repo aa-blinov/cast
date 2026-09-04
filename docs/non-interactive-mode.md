@@ -79,7 +79,7 @@ fields instead of parsing that text.
 | `--interactive` | | Persistent JSONL session protocol (no positional message) |
 | `--bypass-permissions` | | Skip bash confirmation |
 | `--skill <path>` | | Load extra skill |
-| `--no-skills` | | Skip project/agents/global/plugin/builtin skill discovery |
+| `--no-skills` | | Skip project/agents/global/builtin skill discovery |
 | `--mcp <path>` | | Load extra MCP config |
 | `--no-mcp` | | Skip MCP discovery |
 

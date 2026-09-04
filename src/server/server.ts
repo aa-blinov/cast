@@ -2332,12 +2332,6 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		if (!name) return json(res, { ok: false, error: "name required" }, 400);
 		json(res, bridge.readPersonaContent(name));
 	});
-	route("GET", "/api/plugin-content", (req, res) => {
-		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
-		const id = url.searchParams.get("id");
-		if (!id) return json(res, { ok: false, error: "id required" }, 400);
-		json(res, bridge.readPluginContent(id));
-	});
 	route("POST", "/api/ssh/key", async (req, res) => {
 		let name: unknown;
 		let key: unknown;

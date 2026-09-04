@@ -56,7 +56,7 @@ Options:
                              to persist it
   --skill <directory>        Load an extra skill package directory
                              (repeatable, works even with --no-skills)
-  --no-skills                Skip project/agents/global/plugin/builtin skill discovery
+  --no-skills                Skip project/agents/global/builtin skill discovery
   --mcp <path>               Load an extra MCP server config file
                              (repeatable, works even with --no-mcp)
   --no-mcp                   Skip global/project MCP server discovery
@@ -103,7 +103,6 @@ Interactive commands:
   /web                   Toggle web tools (web_search, web_fetch)
   /ssh                   Manage SSH hosts (list, add, remove)
   /skills …              Toggle / list / enable|disable / uninstall (see /skills help)
-  /plugin …              Type /plugin — palette lists install, marketplace, toggle
   /mcp …                 Toggle / list / enable|disable / uninstall (see /mcp help)
   /reload                Re-scan skills, personas, and reconnect MCP servers
                          for the current directory (no restart needed after

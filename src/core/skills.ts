@@ -44,7 +44,7 @@ const SKILLS_INSTRUCTIONS = readRequiredPrompt(promptsDir, "skills-instructions.
 
 export const builtinSkillsDir = join(promptsDir, "skills");
 
-export type SkillSource = "builtin" | "global" | "project" | "agents" | "plugin" | "path";
+export type SkillSource = "builtin" | "global" | "project" | "agents" | "path";
 
 export interface Skill {
 	name: string;
@@ -79,10 +79,6 @@ export interface Skill {
 	/** Named positional arguments (`arguments`), mapped to `$name` placeholders
 	 * in body order. */
 	argumentNames?: string[];
-	/** Marketplace plugin id (`name@marketplace`) when `source === "plugin"`. */
-	pluginId?: string;
-	/** False when the contributing plugin pack is disabled via `/plugin`. */
-	pluginEnabled?: boolean;
 	/**
 	 * Cached skill body (frontmatter stripped) — read once at discovery time so
 	 * `/skill:name` and the skill tool don't I/O on every invocation. Stale
@@ -90,13 +86,6 @@ export interface Skill {
 	 * re-discovers and naturally invalidates.
 	 */
 	body?: string;
-}
-
-/** One plugin pack's skill root for `loadSkills`. */
-export interface PluginSkillContribution {
-	dir: string;
-	pluginId: string;
-	enabled: boolean;
 }
 
 export interface SkillDiagnostic {
@@ -113,7 +102,7 @@ function readSkillBody(skill: Skill): string {
 	return skill.body ?? parseFrontmatter(readFileSync(skill.filePath, "utf-8")).body;
 }
 
-/** User-managed skills that `/skills uninstall` may delete (not builtin/plugin/--skill). */
+/** User-managed skills that `/skills uninstall` may delete (not builtin or --skill). */
 export function isUninstallableSkill(skill: Skill): boolean {
 	return skill.source === "global" || skill.source === "project" || skill.source === "agents";
 }
@@ -314,7 +303,7 @@ function loadSkillFromFile(
 	const argumentHint = validateOptionalString(frontmatter, "argument-hint");
 	const argumentNames = validateNameList(frontmatter, "arguments");
 	const paths = validateGlobList(frontmatter, "paths");
-	const skillHooks = coerceHooksObject(frontmatter.hooks, source === "plugin" ? "plugin" : "project");
+	const skillHooks = coerceHooksObject(frontmatter.hooks, "project");
 	const license = validateOptionalString(frontmatter, "license");
 	const compatibility = validateOptionalString(frontmatter, "compatibility", MAX_COMPATIBILITY_LENGTH);
 	const allowedTools = validateToolList(frontmatter, "allowed-tools");
@@ -418,13 +407,6 @@ export interface LoadSkillsOptions {
 	 * First listed wins on collision within this tier.
 	 */
 	agentsGlobalDirs?: string[];
-	/**
-	 * Marketplace plugin skill roots (enabled and disabled). Disabled packs
-	 * still load for the `/skills` picker with `pluginEnabled: false`.
-	 */
-	pluginContributions?: PluginSkillContribution[];
-	/** @deprecated Prefer `pluginContributions` — string dirs load as enabled plugin skills. */
-	pluginDirs?: string[];
 	/** Explicit `--skill <directory>` packages — load even with `--no-skills`. */
 	extraPaths: string[];
 }
@@ -433,7 +415,7 @@ export interface LoadSkillsOptions {
  * Load skills from every configured location. On a name collision the
  * first-loaded skill wins:
  * `.cast` project > `.agents` project > `.cast` global > `.agents` global >
- * plugin > builtin > `--skill` paths.
+ * builtin > `--skill` paths.
  */
 export function loadSkills(options: LoadSkillsOptions): { skills: Skill[]; diagnostics: SkillDiagnostic[] } {
 	const skillMap = new Map<string, Skill>();
@@ -459,18 +441,6 @@ export function loadSkills(options: LoadSkillsOptions): { skills: Skill[]; diagn
 	if (options.globalDir) addAll(loadSkillsFromDirInternal(options.globalDir, "global"));
 	for (const dir of options.agentsGlobalDirs ?? []) {
 		addAll(loadSkillsFromDirInternal(dir, "agents"));
-	}
-	const pluginContributions: PluginSkillContribution[] = [
-		...(options.pluginContributions ?? []),
-		...(options.pluginDirs ?? []).map((dir) => ({ dir, pluginId: "", enabled: true })),
-	];
-	for (const contrib of pluginContributions) {
-		const loaded = loadSkillsFromDirInternal(contrib.dir, "plugin");
-		for (const skill of loaded.skills) {
-			if (contrib.pluginId) skill.pluginId = contrib.pluginId;
-			skill.pluginEnabled = contrib.enabled;
-		}
-		addAll(loaded);
 	}
 	if (options.builtinDir) addAll(loadSkillsFromDirInternal(options.builtinDir, "builtin"));
 
@@ -598,8 +568,6 @@ function parseArguments(args: string): string[] {
 export interface SubstitutionContext {
 	/** Project root — the spec's `${CLAUDE_PROJECT_DIR}`. */
 	projectDir?: string;
-	/** Installed plugin root for a plugin skill — `${CLAUDE_PLUGIN_ROOT}`. */
-	pluginRoot?: string;
 	/** Named positional arguments declared in `arguments` frontmatter. */
 	argumentNames?: string[];
 }
@@ -631,10 +599,6 @@ function substituteArguments(
 		content = content.replaceAll("${CLAUDE_PROJECT_DIR}", context.projectDir);
 		// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for skill template variable, not JS template
 		content = content.replaceAll("${CAST_PROJECT_DIR}", context.projectDir);
-	}
-	if (context.pluginRoot) {
-		// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for skill template variable, not JS template
-		content = content.replaceAll("${CLAUDE_PLUGIN_ROOT}", context.pluginRoot);
 	}
 
 	const parsed = parseArguments(args ?? "");

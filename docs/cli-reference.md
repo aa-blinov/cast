@@ -81,10 +81,10 @@ Features:
 - Tool call cards showing arguments and status
 - Git diff viewer (file tree + unified diff) as a resizable side panel, auto-refreshing after each tool call
 - File reader popup with wrapped text/code and source-line numbers; Markdown, CSV/TSV, images, and PDFs use their dedicated previews
-- Settings modal (gear icon) — model & reasoning, color theme, web tools toggle, bash confirmation mode, Quick session persona, and management for MCP servers, skills, plugins, hooks, providers, and SSH hosts; shared with the TUI's `~/.cast/settings.json`
+- Settings modal (gear icon) — model & reasoning, color theme, web tools toggle, bash confirmation mode, Quick session persona, and management for MCP servers, skills, hooks, providers, and SSH hosts; shared with the TUI's `~/.cast/settings.json`
 - Status popover (info icon) — persona, model, mode, token usage, and git branch for the active session
 - Keyboard shortcuts — `Ctrl+B` (`⌘B` on Mac) toggles the sidebar, `Ctrl+Shift+D` / `N` / `L` toggle the diff panel / start a new session / clear context, `Ctrl+/` shows the full reference
-- Chat slash commands are available in the composer; provider, MCP, skills, plugins, hooks, and SSH are managed through Settings. Non-blocking commands work while an agent runs.
+- Chat slash commands are available in the composer; provider, MCP, skills, hooks, and SSH are managed through Settings. Non-blocking commands work while an agent runs.
 - Mobile/tablet/desktop responsive — sidebar and diff panel become touch-friendly slide-over drawers on narrow screens
 - Themed sign-in screen with an HttpOnly, SameSite session cookie; repeated failed sign-ins are rate-limited
 
@@ -136,7 +136,7 @@ See [Tools](tools.md#dangerous-command-gating) for the list of patterns that tri
 | Flag | Description |
 |------|-------------|
 | `--skill <directory>` | Load an extra skill package directory (repeatable) |
-| `--no-skills` | Skip project/agents/global/plugin/builtin skill discovery |
+| `--no-skills` | Skip project/agents/global/builtin skill discovery |
 | `--mcp <path>` | Load an extra MCP server config file (repeatable) |
 | `--no-mcp` | Skip global/project MCP server discovery |
 
@@ -171,7 +171,7 @@ The `run` subcommand accepts a subset of the main flags:
 | `--interactive` | | Persistent JSONL session protocol; no positional message |
 | `--bypass-permissions` | | Skip bash confirmation prompts |
 | `--skill <directory>` | | Load an extra skill package directory (repeatable) |
-| `--no-skills` | | Skip project/agents/global/plugin/builtin skill discovery |
+| `--no-skills` | | Skip project/agents/global/builtin skill discovery |
 | `--mcp <path>` | | Load extra MCP config (repeatable) |
 | `--no-mcp` | | Skip MCP discovery |
 

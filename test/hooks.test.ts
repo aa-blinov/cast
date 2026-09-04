@@ -52,45 +52,44 @@ describe("loadHooksForCwd", () => {
 	});
 
 	it("reads a bare event-keyed file", () => {
+		mkdirSync(join(dir, ".cast"), { recursive: true });
 		writeFileSync(
-			join(dir, "hooks.json"),
+			join(dir, ".cast", "hooks.json"),
 			JSON.stringify({ PreToolUse: [{ matcher: "Bash", hooks: [{ command: "echo hi" }] }] }),
 		);
-		const hooks = loadHooksForCwd(dir, true, [{ path: join(dir, "hooks.json"), pluginRoot: dir }]);
+		const hooks = loadHooksForCwd(dir, true);
 		expect(hooks.PreToolUse).toHaveLength(1);
 		expect(hooks.PreToolUse?.[0]?.matcher).toBe("Bash");
 	});
 
 	it("accepts the Claude-Code/Grok Build settings shape with a top-level hooks key", () => {
-		writeFileSync(join(dir, "hooks.json"), JSON.stringify({ hooks: { Stop: [{ hooks: [{ command: "true" }] }] } }));
-		const hooks = loadHooksForCwd(dir, true, [{ path: join(dir, "hooks.json"), pluginRoot: dir }]);
+		mkdirSync(join(dir, ".cast"), { recursive: true });
+		writeFileSync(
+			join(dir, ".cast", "hooks.json"),
+			JSON.stringify({ hooks: { Stop: [{ hooks: [{ command: "true" }] }] } }),
+		);
+		const hooks = loadHooksForCwd(dir, true);
 		expect(hooks.Stop).toHaveLength(1);
 	});
 
 	it("ignores an unrecognized event name instead of erroring (shared Claude/Cursor files)", () => {
+		mkdirSync(join(dir, ".cast"), { recursive: true });
 		writeFileSync(
-			join(dir, "hooks.json"),
+			join(dir, ".cast", "hooks.json"),
 			JSON.stringify({
 				NotARealEvent: [{ hooks: [{ command: "true" }] }],
 				Stop: [{ hooks: [{ command: "true" }] }],
 			}),
 		);
-		const hooks = loadHooksForCwd(dir, true, [{ path: join(dir, "hooks.json"), pluginRoot: dir }]);
+		const hooks = loadHooksForCwd(dir, true);
 		expect(Object.keys(hooks)).toEqual(["Stop"]);
 	});
 
 	it("malformed JSON is treated as no hooks, not an error", () => {
-		writeFileSync(join(dir, "hooks.json"), "{not json");
-		const path = join(dir, "hooks.json");
-		expect(() => loadHooksForCwd(dir, true, [{ path, pluginRoot: dir }])).not.toThrow();
-		expect(loadHooksForCwd(dir, true, [{ path, pluginRoot: dir }])).toEqual({});
-	});
-
-	it("merges plugin-contributed hook files alongside global/project ones", () => {
-		const pluginFile = join(dir, "plugin-hooks.json");
-		writeFileSync(pluginFile, JSON.stringify({ PreToolUse: [{ hooks: [{ command: "echo plugin" }] }] }));
-		const hooks = loadHooksForCwd(dir, true, [{ path: pluginFile, pluginRoot: dir }]);
-		expect(hooks.PreToolUse).toHaveLength(1);
+		mkdirSync(join(dir, ".cast"), { recursive: true });
+		writeFileSync(join(dir, ".cast", "hooks.json"), "{not json");
+		expect(() => loadHooksForCwd(dir, true)).not.toThrow();
+		expect(loadHooksForCwd(dir, true)).toEqual({});
 	});
 
 	it("reads .cast/hooks.json under the cwd only when trusted", () => {
@@ -101,11 +100,14 @@ describe("loadHooksForCwd", () => {
 	});
 
 	it("filters out disabled hook groups by id", () => {
-		const pluginFile = join(dir, "plugin-hooks.json");
-		writeFileSync(pluginFile, JSON.stringify({ PreToolUse: [{ hooks: [{ command: "echo plugin" }] }] }));
-		const all = loadHooksForCwd(dir, true, [{ path: pluginFile, pluginRoot: dir }]);
+		mkdirSync(join(dir, ".cast"), { recursive: true });
+		writeFileSync(
+			join(dir, ".cast", "hooks.json"),
+			JSON.stringify({ PreToolUse: [{ hooks: [{ command: "echo project" }] }] }),
+		);
+		const all = loadHooksForCwd(dir, true);
 		const id = hookGroupId("PreToolUse", all.PreToolUse![0]!);
-		const filtered = loadHooksForCwd(dir, true, [{ path: pluginFile, pluginRoot: dir }], new Set([id]));
+		const filtered = loadHooksForCwd(dir, true, new Set([id]));
 		expect(filtered.PreToolUse).toBeUndefined();
 	});
 });
@@ -122,14 +124,17 @@ describe("listHooksForCwd", () => {
 	});
 
 	it("lists both enabled and disabled hooks with stable ids", () => {
-		const pluginFile = join(dir, "plugin-hooks.json");
-		writeFileSync(pluginFile, JSON.stringify({ PreToolUse: [{ matcher: "bash", hooks: [{ command: "echo hi" }] }] }));
-		const entries = listHooksForCwd(dir, true, [{ path: pluginFile, pluginRoot: dir }]);
+		mkdirSync(join(dir, ".cast"), { recursive: true });
+		writeFileSync(
+			join(dir, ".cast", "hooks.json"),
+			JSON.stringify({ PreToolUse: [{ matcher: "bash", hooks: [{ command: "echo hi" }] }] }),
+		);
+		const entries = listHooksForCwd(dir, true);
 		expect(entries).toHaveLength(1);
-		expect(entries[0]?.source).toBe("plugin");
+		expect(entries[0]?.source).toBe("project");
 		expect(entries[0]?.enabled).toBe(true);
 
-		const disabled = listHooksForCwd(dir, true, [{ path: pluginFile, pluginRoot: dir }], new Set([entries[0]!.id]));
+		const disabled = listHooksForCwd(dir, true, new Set([entries[0]!.id]));
 		expect(disabled[0]?.enabled).toBe(false);
 	});
 
@@ -141,29 +146,10 @@ describe("listHooksForCwd", () => {
 		expect(a[0]?.id).toBe(b[0]?.id);
 	});
 
-	it("REGRESSION: byte-identical hook content from different sources gets different ids (no cross-source collision)", () => {
-		// Before the fix, hookGroupId hashed only event|matcher|hooks — two
-		// groups with identical content from a project file and a plugin file
-		// collided onto the same id, so disabling one via Settings silently
-		// disabled the other too.
-		const identical = JSON.stringify({ Stop: [{ hooks: [{ command: "true" }] }] });
-		mkdirSync(join(dir, ".cast"), { recursive: true });
-		writeFileSync(join(dir, ".cast", "hooks.json"), identical);
-		const pluginFile = join(dir, "plugin-hooks.json");
-		writeFileSync(pluginFile, identical);
-
-		const entries = listHooksForCwd(dir, true, [{ path: pluginFile, pluginRoot: dir, pluginId: "some-plugin" }]);
-		const projectEntry = entries.find((e) => e.source === "project");
-		const pluginEntry = entries.find((e) => e.source === "plugin");
-		expect(projectEntry).toBeTruthy();
-		expect(pluginEntry).toBeTruthy();
-		expect(projectEntry!.id).not.toBe(pluginEntry!.id);
-	});
-
 	it("REGRESSION: hooksFileDiagnostics surfaces a malformed hooks.json instead of the silent empty-config fallback", () => {
 		mkdirSync(join(dir, ".cast"), { recursive: true });
 		writeFileSync(join(dir, ".cast", "hooks.json"), "{not valid json");
-		const diagnostics = hooksFileDiagnostics(dir, true, []);
+		const diagnostics = hooksFileDiagnostics(dir, true);
 		expect(diagnostics).toHaveLength(1);
 		expect(diagnostics[0]!.path).toBe(join(dir, ".cast", "hooks.json"));
 		expect(diagnostics[0]!.message).toBeTruthy();
@@ -172,17 +158,7 @@ describe("listHooksForCwd", () => {
 	it("hooksFileDiagnostics reports nothing for valid hooks.json files", () => {
 		mkdirSync(join(dir, ".cast"), { recursive: true });
 		writeFileSync(join(dir, ".cast", "hooks.json"), JSON.stringify({ Stop: [{ hooks: [{ command: "true" }] }] }));
-		expect(hooksFileDiagnostics(dir, true, [])).toEqual([]);
-	});
-
-	it("hooksFileDiagnostics also checks plugin-contributed hook files", () => {
-		const pluginFile = join(dir, "plugin-hooks.json");
-		writeFileSync(pluginFile, "not json at all");
-		const diagnostics = hooksFileDiagnostics(dir, true, [
-			{ path: pluginFile, pluginRoot: dir, pluginId: "broken-plugin" },
-		]);
-		expect(diagnostics).toHaveLength(1);
-		expect(diagnostics[0]!.path).toBe(pluginFile);
+		expect(hooksFileDiagnostics(dir, true)).toEqual([]);
 	});
 });
 
