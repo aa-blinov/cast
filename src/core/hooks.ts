@@ -204,7 +204,27 @@ function readHooksFile(
 	}
 }
 
-function mergeHooks(...files: HooksFile[]): HooksFile {
+/**
+ * Validate an already-parsed hooks object (a skill's frontmatter `hooks:`
+ * block) into a HooksFile, dropping unknown events and malformed groups. The
+ * shape is the same one hooks.json uses, so a skill author writes what they
+ * already know.
+ */
+export function coerceHooksObject(raw: unknown, source: HookMatcherGroup["_source"]): HooksFile {
+	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+	const out: HooksFile = {};
+	for (const [event, groups] of Object.entries(raw as Record<string, unknown>)) {
+		if (!HOOK_EVENTS.includes(event as HookEvent) || !Array.isArray(groups)) continue;
+		const valid = groups.filter(
+			(group): group is HookMatcherGroup =>
+				Boolean(group) && typeof group === "object" && Array.isArray((group as HookMatcherGroup).hooks),
+		);
+		if (valid.length > 0) out[event as HookEvent] = valid.map((group) => ({ ...group, _source: source }));
+	}
+	return out;
+}
+
+export function mergeHooks(...files: HooksFile[]): HooksFile {
 	const out: HooksFile = {};
 	for (const file of files) {
 		for (const [event, groups] of Object.entries(file) as [HookEvent, HookMatcherGroup[] | undefined][]) {

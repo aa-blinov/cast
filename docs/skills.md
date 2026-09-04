@@ -79,6 +79,7 @@ Always check `templates/` for reference material.
 | `when_to_use` | No | Extra matching guidance shown to the model as `description — whenToUse` in the skill listing |
 | `user-invocable` | No | `false` keeps the skill out of the slash menu — the model may load it, a person may not. Accepts the same boolean spellings |
 | `argument-hint` | No | Autocomplete hint for the arguments the skill expects, e.g. `[issue-number]` |
+| `hooks` | No | Hooks registered when the skill is invoked, in `hooks.json`'s shape expressed as YAML. They stay active for the rest of the run; a hook with `once: true` is dropped after it fires without blocking |
 | `paths` | No | Globs limiting when the skill is offered — it is listed only while a file matching one of them is in context. Comma-separated string or a YAML list |
 | `disallowed-tools` | No | Tools removed from the model's pool for the rest of the turn the skill is invoked in; cleared by your next message. Space- or comma-separated string, or a YAML list |
 | `arguments` | No | Named positional arguments, as a space-separated string or a YAML list. `arguments: [issue, branch]` makes `$issue` the first argument and `$branch` the second |
@@ -93,6 +94,30 @@ Per the Agent Skills spec:
 - Maximum 64 characters
 
 A malformed `name`, an over-long `description` or `compatibility`, and invalid YAML prevent the skill from loading. A name that differs from its directory does not — the spec treats `name` as a display name. Cast warns when the body exceeds the spec's recommended 500 lines but still loads it. In the skill listing, `description` and `when_to_use` are combined and truncated at 1,536 characters, as the spec specifies.
+
+### Hooks in a Skill
+
+A skill can register hooks when it is invoked, using the same shape as
+`hooks.json`:
+
+```yaml
+---
+name: formatter
+description: Keeps the tree formatted
+hooks:
+  PostToolUse:
+    - matcher: "write|edit"
+      hooks:
+        - type: command
+          command: npm run format
+          once: true
+---
+```
+
+They join the session's own hooks for the rest of the run and cover every
+event cast supports. `once: true` removes the hook after it fires without
+blocking — a blocked or failed run leaves it in place, so a gate keeps
+gating.
 
 ### Inline Commands
 

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -1576,6 +1576,74 @@ describe("runAgentLoop — retries a length-truncated response with no tool call
 		expect(nudge).toBeDefined();
 		expect(result.at(-1)?.content).toBe("here is the real answer");
 		expect(events.some((e) => e.type === "end" && (e as { reason: string }).reason === "stop")).toBe(true);
+	});
+
+	it("registers a skill's hooks and honours `once`", async () => {
+		// A skill whose whole point is "run X after every edit" is inert without
+		// its hooks; cast parsed nothing and registered nothing.
+		const dir = mkdtempSync(join(tmpdir(), "cast-skill-hooks-"));
+		const marker = join(dir, "fired.txt");
+		try {
+			mkdirSync(join(dir, "watcher"), { recursive: true });
+			writeFileSync(
+				join(dir, "watcher", "SKILL.md"),
+				[
+					"---",
+					"name: watcher",
+					"description: d",
+					"hooks:",
+					"  PostToolUse:",
+					"    - hooks:",
+					`        - type: command`,
+					`          command: printf x >> ${JSON.stringify(marker)}`,
+					"---",
+					"body",
+					"",
+				].join("\n"),
+				"utf-8",
+			);
+			const { loadSkills } = await import("../src/core/skills.ts");
+			const { skills } = loadSkills({ globalDir: dir, extraPaths: [] });
+			expect(skills[0]?.hooks?.PostToolUse).toBeDefined();
+
+			let call = 0;
+			vi.mocked(streamAndCollect).mockImplementation(async () => {
+				call++;
+				if (call === 1) {
+					return {
+						content: "",
+						thinking: "",
+						finishReason: "tool_calls",
+						toolCalls: [{ id: "s", name: "skill", arguments: JSON.stringify({ name: "watcher" }) }],
+					};
+				}
+				if (call === 2) {
+					return {
+						content: "",
+						thinking: "",
+						finishReason: "tool_calls",
+						toolCalls: [{ id: "t", name: "bash", arguments: JSON.stringify({ command: "echo hi" }) }],
+					};
+				}
+				return { content: "done", thinking: "", finishReason: "stop" };
+			});
+
+			await runAgentLoop([{ role: "user", content: "watch" }], {
+				config: testConfig,
+				model: "test-model",
+				cwd: dir,
+				systemPrompt: "test",
+				skills,
+				hooks: {},
+				onEvent: () => {},
+			});
+
+			// The hook the skill registered ran on the tool call that followed it.
+			expect(existsSync(marker)).toBe(true);
+		} finally {
+			vi.mocked(streamAndCollect).mockReset();
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
 	it("honours a skill's disallowed-tools for the rest of the turn, then clears it", async () => {
