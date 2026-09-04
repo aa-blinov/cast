@@ -10,13 +10,16 @@
  * Frontmatter is parsed by the shared YAML parser in frontmatter.ts.
  */
 
+import { execFile } from "node:child_process";
 import { type Dirent, existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { promisify } from "node:util";
 import { matchesToolsAllowlist, parseFrontmatter } from "./frontmatter.ts";
 import { promptsDir, readRequiredPrompt } from "./prompts.ts";
 
 const SLUG_RE = /^[a-z0-9-]+$/;
 
+const execFileAsync = promisify(execFile);
 const LIST_SPLIT_RE = /[\s,]+/;
 const ARGUMENT_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const PARAGRAPH_SPLIT_RE = /\n\s*\n/;
@@ -608,7 +611,95 @@ function substituteArguments(
 	return content;
 }
 
+const BASH_INJECTION_RE = /!`([^`\n]+)`/g;
+/** Ceilings on inline command execution: a skill body is a prompt fragment,
+ * not a build script. */
+const MAX_INJECTED_COMMANDS = 10;
+const INJECTION_TIMEOUT_MS = 10_000;
+const MAX_INJECTION_OUTPUT_CHARS = 2000;
+
+/**
+ * Whether a skill's inline `` !`command` `` blocks may actually run.
+ *
+ * They may for skills the user put there themselves — cast's own builtins,
+ * `~/.cast/skills`, the project's `.cast/skills` and `.agents/skills` (both
+ * already trust-gated before they are even discovered), and an explicit
+ * `--skill` path. They may not for marketplace plugin skills: installing a
+ * plugin is not consent to run arbitrary commands from it, and every one of
+ * the 194 installed skills that uses this syntax comes from a marketplace.
+ */
+function mayRunInlineCommands(skill: Skill): boolean {
+	return skill.source !== "plugin";
+}
+
+/**
+ * Run the `` !`command` `` blocks a skill body declares and splice their
+ * output in, the way the skill expects to be read. Left unexecuted, the model
+ * sees the literal text and treats it as a fact or an instruction — a body
+ * saying `` Node: !`node --version` `` reads as though the version had been
+ * checked.
+ */
+async function runInlineCommands(content: string, skill: Skill, cwd: string | undefined): Promise<string> {
+	const matches = [...content.matchAll(BASH_INJECTION_RE)];
+	if (matches.length === 0) return content;
+	if (!mayRunInlineCommands(skill)) {
+		return content.replace(
+			BASH_INJECTION_RE,
+			(_, command: string) =>
+				`[command not run — this skill came from a plugin marketplace, so cast does not execute its inline commands: ${command}]`,
+		);
+	}
+	const outputs = new Map<string, string>();
+	let executed = 0;
+	for (const match of matches) {
+		const command = match[1]!;
+		if (outputs.has(command)) continue;
+		if (executed >= MAX_INJECTED_COMMANDS) {
+			outputs.set(command, `[not run — a skill may run at most ${MAX_INJECTED_COMMANDS} inline commands]`);
+			continue;
+		}
+		executed++;
+		try {
+			// Sequential on purpose: a skill's blocks routinely probe the same
+			// environment in order ("is X installed" then "which version"), and
+			// running a body's commands in parallel would reorder side effects
+			// the author wrote as a sequence.
+			// biome-ignore lint/performance/noAwaitInLoops: see above
+			const { stdout, stderr } = await execFileAsync("bash", ["-c", command], {
+				cwd,
+				timeout: INJECTION_TIMEOUT_MS,
+				encoding: "utf-8",
+				maxBuffer: MAX_INJECTION_OUTPUT_CHARS * 4,
+			});
+			const text = (stdout || stderr || "").trim();
+			outputs.set(
+				command,
+				text.length > MAX_INJECTION_OUTPUT_CHARS ? `${text.slice(0, MAX_INJECTION_OUTPUT_CHARS)}…` : text,
+			);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			outputs.set(command, `[command failed: ${message.split("\n")[0]}]`);
+		}
+	}
+	return content.replace(BASH_INJECTION_RE, (_, command: string) => outputs.get(command) ?? "");
+}
+
 /** Format a skill's full content for `/skill:name` invocation, optionally with trailing user args. */
+/**
+ * `formatSkillInvocation` plus the inline `` !`command` `` blocks executed.
+ * Async because running them is; callers that cannot await keep using the
+ * synchronous form, which leaves the blocks untouched.
+ */
+export async function renderSkillInvocation(
+	skill: Skill,
+	additionalArgs?: string,
+	sessionId?: string,
+	context: Omit<SubstitutionContext, "argumentNames"> = {},
+): Promise<string> {
+	const rendered = formatSkillInvocation(skill, additionalArgs, sessionId, context);
+	return runInlineCommands(rendered, skill, context.projectDir);
+}
+
 export function formatSkillInvocation(
 	skill: Skill,
 	additionalArgs?: string,

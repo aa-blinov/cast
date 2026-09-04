@@ -4346,11 +4346,11 @@ describe("runAgentLoop — persona skills: filtering", () => {
 		// ever sees it. Same shape loop.ts builds `allowedSkills` from.
 		const restricted = skills.filter((s) => s.name !== "dangerous");
 
-		const ok = execSkill({ name: "research" }, { skills: restricted });
+		const ok = await execSkill({ name: "research" }, { skills: restricted });
 		expect(ok.isError).not.toBe(true);
 		expect(ok.content).toContain("Research body");
 
-		const denied = execSkill({ name: "dangerous" }, { skills: restricted });
+		const denied = await execSkill({ name: "dangerous" }, { skills: restricted });
 		expect(denied.isError).toBe(true);
 		expect(denied.content).toContain("not found");
 		// "Available skills" only lists the persona-restricted set — a filtered

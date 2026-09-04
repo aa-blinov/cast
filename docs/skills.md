@@ -93,6 +93,26 @@ Per the Agent Skills spec:
 
 A malformed `name`, an over-long `description` or `compatibility`, and invalid YAML prevent the skill from loading. A name that differs from its directory does not — the spec treats `name` as a display name. Cast warns when the body exceeds the spec's recommended 500 lines but still loads it. In the skill listing, `description` and `when_to_use` are combined and truncated at 1,536 characters, as the spec specifies.
 
+### Inline Commands
+
+A skill body may embed a shell command with `` !`command` ``; its output is
+spliced in when the skill is invoked, so a body can report the environment it
+is about to work in:
+
+```markdown
+Node: !`node --version 2>/dev/null || echo "not installed"`
+```
+
+Cast runs these only for skills you installed yourself — built-ins,
+`~/.cast/skills`, the project's `.cast/skills` and `.agents/skills`, and
+`--skill` paths. **Marketplace plugin skills never have their inline commands
+run**: installing a plugin is not consent to execute arbitrary commands from
+it. Their blocks are replaced with a visible notice naming the command that
+was skipped, so the model doesn't read the literal text as a result.
+
+Bounds: at most 10 commands per skill, 10s each, 2,000 characters of output
+each. A failing command is reported in place rather than left as literal text.
+
 ### Relative Paths
 
 When a skill file references relative paths (scripts, references, assets, templates, configs), resolve them against the skill's directory. The system prompt tells the agent: *"When a skill file references a relative path, resolve it against the skill directory."* Resources are never automatically read or executed: the agent loads or runs the referenced file only when the activated instructions require it.
