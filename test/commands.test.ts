@@ -30,7 +30,7 @@ vi.mock("../src/core/config.ts", async (importOriginal) => {
 	};
 });
 
-const { handleInput } = await import("../src/ui/commands.ts");
+const { handleInput, canSubmitDuringRun } = await import("../src/ui/commands.ts");
 
 // Every handler that persists (saveSession in /clear and /new, updateSettings
 // in /plan-model, readActivePlan in /build) resolves through homedir(), which
@@ -269,6 +269,46 @@ describe("handleInput", () => {
 		const { deps, calls } = createFakeDeps({ running: true });
 		await handleInput("/q next step", undefined, deps);
 		expect(calls["agent.followUp"]).toEqual([["next step"]]);
+	});
+
+	// The composer's mid-turn allowlist used to be a second hand-maintained
+	// Set next to the chain; it is now derived from the routes themselves, so
+	// this pins the set it has to keep producing.
+	it("lets the composer send exactly the mid-turn commands, with or without arguments", () => {
+		for (const cmd of [
+			"/queue",
+			"/q",
+			"/queue-reset",
+			"/qr",
+			"/steer",
+			"/s",
+			"/abort",
+			"/stop",
+			"/reasoning-display",
+			"/rd",
+		]) {
+			expect(canSubmitDuringRun(cmd), cmd).toBe(true);
+			expect(canSubmitDuringRun(`${cmd} some argument`), cmd).toBe(true);
+		}
+		for (const cmd of ["/clear", "/model", "/quit", "/memory runs", "hello", "/tmp/screenshot.png"]) {
+			expect(canSubmitDuringRun(cmd), cmd).toBe(false);
+		}
+	});
+
+	// Leaving must not require aborting the turn first.
+	it("/quit still quits while running", async () => {
+		const { deps, calls } = createFakeDeps({ running: true });
+		await handleInput("/quit", undefined, deps);
+		expect(calls.onQuit).toHaveLength(1);
+	});
+
+	// An unrouted slash line is a prompt (or a native skill), so it waits like
+	// any other work rather than slipping past the guard.
+	it("refuses an unknown slash command while running instead of submitting it", async () => {
+		const { deps, calls } = createFakeDeps({ running: true });
+		await handleInput("/tmp/cast-clipboard-1.png", undefined, deps);
+		expect(calls["agent.submit"]).toBeUndefined();
+		expect(noticeText(calls)).toContain("running");
 	});
 
 	it("blocks most commands while running", async () => {
