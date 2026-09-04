@@ -23,7 +23,32 @@ import type { MessageQueue } from "../loop.ts";
 import { formatBashResult, getBashResolution, stripAnsi } from "./bash.ts";
 import { appendBoundedOutput, formatSize, type ToolResult } from "./shared.ts";
 
-const PTY_SPAWN_FAILURE_RE = /execvp\(3\) failed|no such file or directory/i;
+const PTY_EXECVP_FAILURE_RE = /execvp\(3\) failed/i;
+const NO_SUCH_FILE_RE = /no such file or directory/i;
+
+/**
+ * Did the shell itself fail to start, or did it start and run something that
+ * failed?
+ *
+ * "no such file or directory" alone cannot tell those apart — it is what any
+ * command says about a path it cannot find, so `ls /nope` on a non-zero exit
+ * was being reported to the model as `Failed to start bash ("bash"): ls:
+ * cannot access '/nope': No such file or directory`, which is false about the
+ * shell and buries the real output behind a wrong explanation. A genuine spawn
+ * failure either carries node-pty's execvp marker or names the shell binary
+ * itself.
+ */
+export function isPtySpawnFailure(rawOutput: string, bashPath: string): boolean {
+	if (PTY_EXECVP_FAILURE_RE.test(rawOutput)) return true;
+	if (!NO_SUCH_FILE_RE.test(rawOutput)) return false;
+	// A shell that cannot start says so in its own name at the head of a line
+	// ("bash: /nope: No such file or directory"); a command's own complaint is
+	// prefixed with that command's name instead.
+	const shellName = bashPath.split("/").pop() || bashPath;
+	return rawOutput
+		.split("\n")
+		.some((line) => line.trimStart().startsWith(`${bashPath}:`) || line.trimStart().startsWith(`${shellName}:`));
+}
 
 export interface BackgroundTask {
 	id: string;
@@ -213,7 +238,7 @@ export class BackgroundTaskRegistry {
 				task.endedAt = Date.now();
 				if (task.status === "killed") {
 					// kill() already set "killed" — a later PTY exit mustn't downgrade it.
-				} else if (exitCode !== 0 && PTY_SPAWN_FAILURE_RE.test(task.rawOutput)) {
+				} else if (exitCode !== 0 && isPtySpawnFailure(task.rawOutput, bash.path)) {
 					task.status = "error";
 					task.errorMessage = `Failed to start bash ("${bash.path}"): ${task.rawOutput.trim()}`;
 				} else {

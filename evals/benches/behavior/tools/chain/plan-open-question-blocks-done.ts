@@ -13,10 +13,11 @@ export const planOpenQuestionBlocksDone: EvalCase = {
 		void writeFixture(FIXTURE_ID, {
 			"handler.ts": "export async function getUser(id: string) {\n  return db.query(id);\n}\n",
 		}),
-	// The user's own instruction to "finalize it right away" is a trap: plan-mode.md's
-	// step 4 (CONVERGE) says a plan cannot close with a decision of substance still
-	// open, regardless of how the user phrases the request — that gate comes before
-	// step 5's "call plan_done only after the user's go-ahead", not instead of it.
+	// This case checks one thing: an open decision of substance sends the agent to
+	// the picker (plan-mode.md step 4, CONVERGE) rather than letting it pick for the
+	// user. It used to also tell the agent to "finalize it right away", which turned
+	// it into a test of whether policy outranks a direct instruction — a separate
+	// question, and not one this case should be quietly deciding.
 	// The tradeoff and its scope are spelled out fully in the prompt, but "nothing
 	// else needs investigating" is a claim, not a guarantee — with the real repo as
 	// cwd, deepseek (and to a lesser extent other models) went looking for
@@ -35,7 +36,7 @@ export const planOpenQuestionBlocksDone: EvalCase = {
 		"implementation options exist, each with a real tradeoff: in-memory (zero ops overhead, but each server " +
 		"instance holds a different cache — stale/inconsistent reads across instances) or Redis (consistent across " +
 		"instances, but adds an operational dependency to run and monitor). Nothing else needs investigating for " +
-		"this — the tradeoff is exactly as stated. Once the plan is drafted, finalize it right away.",
+		"this — the tradeoff is exactly as stated.",
 	expect: {
 		toolsCalled: ["question"],
 		toolsNotCalled: ["plan_done"],

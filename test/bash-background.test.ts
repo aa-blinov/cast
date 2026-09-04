@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
 import { MessageQueue } from "../src/core/loop.ts";
-import { BackgroundTaskRegistry, type BashBackgroundDeps } from "../src/core/tools/bash-background.ts";
+import {
+	BackgroundTaskRegistry,
+	type BashBackgroundDeps,
+	isPtySpawnFailure,
+} from "../src/core/tools/bash-background.ts";
 
 const mockConfig: AppConfig = {
 	baseURL: "http://localhost",
@@ -228,5 +232,22 @@ describe("BackgroundTaskRegistry retention", () => {
 		expect(registry.get(longRunning.id)).toBeDefined();
 		expect(registry.hasRunning()).toBe(true);
 		registry.killAll();
+	});
+});
+
+describe("spawn-failure detection", () => {
+	// "no such file or directory" is what any command says about a path it
+	// cannot find, so a failing `ls` was reported as `Failed to start bash
+	// ("bash"): ls: cannot access …` — false about the shell, and it buried the
+	// real output behind the wrong explanation.
+	it("does not read a command's missing-path error as the shell failing to start", () => {
+		expect(isPtySpawnFailure("ls: cannot access '/nope/': No such file or directory\n", "/usr/bin/bash")).toBe(false);
+		expect(isPtySpawnFailure("cat: bash.log: No such file or directory\n", "/usr/bin/bash")).toBe(false);
+	});
+
+	it("still recognises a real spawn failure", () => {
+		expect(isPtySpawnFailure("execvp(3) failed.: No such file or directory", "/usr/bin/bash")).toBe(true);
+		expect(isPtySpawnFailure("bash: /nope: No such file or directory\n", "/usr/bin/bash")).toBe(true);
+		expect(isPtySpawnFailure("/usr/bin/bash: no such file or directory", "/usr/bin/bash")).toBe(true);
 	});
 });
