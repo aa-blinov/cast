@@ -279,7 +279,11 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/web-search-provider", description: "Switch web_search backend (DuckDuckGo / Tavily / Brave)" },
 	{ name: "/worktree", description: "Switch into a git worktree — name", takesArgs: true },
 	{ name: "/worktree list", description: "List all active worktrees" },
-	{ name: "/worktree remove", description: "Remove a worktree — name [--force to discard uncommitted work]", takesArgs: true },
+	{
+		name: "/worktree remove",
+		description: "Remove a worktree — name [--force to discard uncommitted work]",
+		takesArgs: true,
+	},
 ];
 
 export interface CommandDeps {
@@ -2160,7 +2164,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		const spaceIdx = rest.indexOf(" ");
 		const skillName = spaceIdx === -1 ? rest : rest.slice(0, spaceIdx);
 		const skillArgs = spaceIdx === -1 ? undefined : rest.slice(spaceIdx + 1).trim();
-		const skill = deps.skills.find((s) => s.name === skillName);
+		const skill = deps.skills.find((s) => s.name === skillName && s.userInvocable);
 		if (!skill) {
 			const discovered = discoverSkillsForCwd(deps.projectDeps, deps.cwd, deps.projectTrusted);
 			if (discovered.some((s) => s.name === skillName)) {
@@ -2171,7 +2175,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			return;
 		}
 		fireUserPromptExpansion(deps, skill.name);
-		await agent.submit(formatSkillInvocation(skill, skillArgs));
+		await agent.submit(formatSkillInvocation(skill, skillArgs, session.id, { projectDir: deps.cwd }));
 		return;
 	}
 
@@ -3365,10 +3369,10 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		const skillId = name.slice(1);
 		const skillArgs = spaceIdx === -1 ? undefined : input.slice(spaceIdx + 1).trim();
 		if (skillId) {
-			const skill = deps.skills.find((s) => s.name === skillId);
+			const skill = deps.skills.find((s) => s.name === skillId && s.userInvocable);
 			if (skill) {
 				fireUserPromptExpansion(deps, skill.name);
-				await agent.submit(formatSkillInvocation(skill, skillArgs));
+				await agent.submit(formatSkillInvocation(skill, skillArgs, session.id, { projectDir: deps.cwd }));
 				return;
 			}
 		}

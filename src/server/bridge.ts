@@ -4290,11 +4290,13 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			const sessionCwd = ws.session.cwd ?? cwd;
 			const discovered = discoverSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
 			const disabled = new Set(loadSettings().disabledSkills ?? []);
-			const skill = discovered.find((s) => s.name === skillId && !disabled.has(s.name) && s.pluginEnabled !== false);
+			const skill = discovered.find(
+				(s) => s.name === skillId && s.userInvocable && !disabled.has(s.name) && s.pluginEnabled !== false,
+			);
 			if (skill) {
 				if (running) return { ok: false, error: "Agent running — use /queue, /steer, or /abort" };
 				fireUserPromptExpansion(sessionCwd, skill.name);
-				submit(sessionId, formatSkillInvocation(skill, arg));
+				submit(sessionId, formatSkillInvocation(skill, arg, undefined, { projectDir: sessionCwd }));
 				return { ok: true, result: `Invoked skill: ${skill.name}` };
 			}
 		}
@@ -4783,7 +4785,12 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		const builtinNames = new Set(SLASH_COMMANDS.map((c) => c.name));
 		const discovered = discoverSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
 		const skillCommands = discovered
-			.filter((s) => !disabled.has(s.name) && s.pluginEnabled !== false && !builtinNames.has(`/${s.name}`))
+			// `user-invocable: false` means the model may load the skill but a
+			// person may not: it stays out of the slash menu (spec field).
+			.filter(
+				(s) =>
+					!disabled.has(s.name) && s.userInvocable && s.pluginEnabled !== false && !builtinNames.has(`/${s.name}`),
+			)
 			.map((s) => ({
 				name: `/${s.name}`,
 				description: s.description,

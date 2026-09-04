@@ -592,11 +592,9 @@ describe("skill argument substitution", () => {
 		try {
 			mkdirSync(join(dir, "args"), { recursive: true });
 			const filePath = join(dir, "args", "SKILL.md");
-			writeFileSync(
-				filePath,
-				"---\nname: args\ndescription: d\n---\nGot: $ARGUMENTS | first=$0 | sess=${CAST_SESSION_ID}\n",
-				"utf-8",
-			);
+			const sessionPlaceholder = ["$", "{CAST_SESSION_ID}"].join("");
+			const bodyWithPlaceholders = `---\nname: args\ndescription: d\n---\nGot: $ARGUMENTS | first=$0 | sess=${sessionPlaceholder}\n`;
+			writeFileSync(filePath, bodyWithPlaceholders, "utf-8");
 			const skill = {
 				name: "args",
 				description: "d",
@@ -617,5 +615,64 @@ describe("skill argument substitution", () => {
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
+	});
+});
+
+describe("Claude Code skill extensions", () => {
+	let dir = "";
+	beforeEach(() => {
+		dir = mkdtempSync(join(tmpdir(), "cast-skill-ext-"));
+	});
+	afterEach(() => {
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	function write(name: string, frontmatter: string, body: string): void {
+		mkdirSync(join(dir, name), { recursive: true });
+		writeFileSync(join(dir, name, "SKILL.md"), `---\n${frontmatter}\n---\n${body}\n`, "utf-8");
+	}
+
+	it("maps named `arguments` onto $name placeholders in order", () => {
+		write("named", "name: named\ndescription: d\narguments: [issue, branch]", "Fix $issue on $branch.");
+		const { skills, diagnostics } = loadSkills({ globalDir: dir, extraPaths: [] });
+		expect(diagnostics).toEqual([]);
+		expect(skills[0]?.argumentNames).toEqual(["issue", "branch"]);
+		expect(formatSkillInvocation(skills[0]!, "42 main")).toContain("Fix 42 on main.");
+	});
+
+	it("resolves a declared-but-missing named argument to an empty string", () => {
+		write("named", "name: named\ndescription: d\narguments: [issue, branch]", "Fix $issue on $branch.");
+		const { skills } = loadSkills({ globalDir: dir, extraPaths: [] });
+		expect(formatSkillInvocation(skills[0]!, "42")).toContain("Fix 42 on .");
+	});
+
+	it("keeps argument-hint for autocomplete", () => {
+		write("hinted", 'name: hinted\ndescription: d\nargument-hint: "[issue-number]"', "body");
+		const { skills } = loadSkills({ globalDir: dir, extraPaths: [] });
+		expect(skills[0]?.argumentHint).toBe("[issue-number]");
+	});
+
+	it("substitutes the project and plugin directories", () => {
+		const projectPlaceholder = ["$", "{CLAUDE_PROJECT_DIR}"].join("");
+		const pluginPlaceholder = ["$", "{CLAUDE_PLUGIN_ROOT}"].join("");
+		write("dirs", "name: dirs\ndescription: d", `project=${projectPlaceholder} plugin=${pluginPlaceholder}`);
+		const { skills } = loadSkills({ globalDir: dir, extraPaths: [] });
+		const out = formatSkillInvocation(skills[0]!, undefined, undefined, {
+			projectDir: "/proj",
+			pluginRoot: "/plug",
+		});
+		expect(out).toContain("project=/proj plugin=/plug");
+	});
+
+	it("marks a user-invocable: false skill as model-only but still lists it", () => {
+		// The spec's inverse of disable-model-invocation: the model may load it,
+		// a person may not — it stays out of the slash menu.
+		write("hidden", "name: hidden\ndescription: d\nuser-invocable: false", "body");
+		write("shown", "name: shown\ndescription: d", "body");
+		const { skills } = loadSkills({ globalDir: dir, extraPaths: [] });
+		const byName = new Map(skills.map((s) => [s.name, s]));
+		expect(byName.get("hidden")?.userInvocable).toBe(false);
+		expect(byName.get("shown")?.userInvocable).toBe(true);
+		expect(formatSkillsForPrompt(skills)).toContain("<name>hidden</name>");
 	});
 });

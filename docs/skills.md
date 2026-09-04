@@ -77,6 +77,9 @@ Always check `templates/` for reference material.
 | `allowed-tools` | No | Pre-approved tools, as a space- or comma-separated string **or** a YAML list; retained and exposed with the skill, with execution semantics depending on the client |
 | `disable-model-invocation` | No | Hide from the agent (manual `/skill:<name>` only). Accepts `true`/`yes`/`on`/`1` in any case, as the spec allows |
 | `when_to_use` | No | Extra matching guidance shown to the model as `description — whenToUse` in the skill listing |
+| `user-invocable` | No | `false` keeps the skill out of the slash menu — the model may load it, a person may not. Accepts the same boolean spellings |
+| `argument-hint` | No | Autocomplete hint for the arguments the skill expects, e.g. `[issue-number]` |
+| `arguments` | No | Named positional arguments, as a space-separated string or a YAML list. `arguments: [issue, branch]` makes `$issue` the first argument and `$branch` the second |
 
 ### Name Rules
 
@@ -141,8 +144,12 @@ Skill bodies can reference invocation arguments and their own directory:
 | Placeholder | Substituted with |
 |-------------|-------------------|
 | `$ARGUMENTS` | The full argument string |
+| `$<name>` | A named argument declared in `arguments` frontmatter |
 | `$ARGUMENTS[0]`, `$ARGUMENTS[1]`, ... / `$0`, `$1`, ... | An individual argument (shell-quote-style parsing — quoted strings stay intact) |
 | `${CLAUDE_SKILL_DIR}` | Absolute path to the skill's own directory, for resolving relative paths |
+| `${CLAUDE_PROJECT_DIR}` (`${CAST_PROJECT_DIR}`) | The project root |
+| `${CLAUDE_PLUGIN_ROOT}` | A plugin skill's installation root, for files shared across the plugin |
+| `${CLAUDE_SESSION_ID}` (`${CAST_SESSION_ID}`) | The current session id |
 
 If arguments are supplied but the skill body contains no `$ARGUMENTS` placeholder, they're appended as a trailing `User: <args>` line instead of being silently dropped. If the skill is invoked *without* arguments, every placeholder is replaced with an empty string — an unsubstituted `$ARGUMENTS` reaching the model reads as an instruction rather than as "there were none".
 
