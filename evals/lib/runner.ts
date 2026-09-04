@@ -141,7 +141,7 @@ export interface EvalCase {
 		 */
 		verify?: (ctx: VerifyContext) => string | undefined | Promise<string | undefined>;
 	};
-	/** Timeout in ms (default: 60000) */
+	/** Timeout in ms (default: 150000) */
 	timeout?: number;
 }
 
@@ -313,7 +313,12 @@ const MAX_INFRA_RETRIES = 2;
 async function runAttempt(evalCase: EvalCase, options: RunnerOptions, config: AppConfig, model: string): Promise<AttemptResult> {
 	const temporaryCwd = evalCase.cwd ? undefined : mkdtempSync(join(tmpdir(), `cast-eval-${evalCase.id}-`));
 	const cwd = evalCase.cwd ?? temporaryCwd!;
-	const timeout = evalCase.timeout ?? 60_000;
+	// 60s was cutting real attempts off mid-turn: across the saved runs, 31
+	// failures landed within a few hundred ms of this limit — plan-done-signal
+	// six times, build-mode-flags-plan-divergence five — and slower models
+	// (mimo-v2.5) hit it on cases faster models finish comfortably. A limit
+	// exists to stop a hung attempt, not to score speed, so it is generous.
+	const timeout = evalCase.timeout ?? 150_000;
 	const events: AgentEvent[] = [];
 	const toolsCalled: string[] = [];
 	const toolCalls: ObservedToolCall[] = [];
