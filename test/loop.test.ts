@@ -5054,6 +5054,50 @@ describe("runAgentLoop — todo list (build mode only)", () => {
 		expect(systemPrompts[1]).toContain("[~] (high) Step one");
 	});
 
+	it("keeps the plan link when a rewritten todo shortened the paths in its text", async () => {
+		// Flipping one status means resending the whole list, and models retype
+		// the item with the absolute path collapsed to a basename. Matching the
+		// previous item by exact content alone dropped `planStep`, which is the
+		// open-work gate's only handle on that step — the step then read as
+		// unlinked and the gate stopped tracking it.
+		const step = "Replace the content of /tmp/deep/dir/note.txt with READY and verify the exact result.";
+		const events: AgentEvent[] = [];
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [
+					{
+						id: "t1",
+						name: "todo_write",
+						arguments: JSON.stringify({
+							todos: [
+								{
+									content: "Replace the content of note.txt with READY and verify the exact result.",
+									status: "completed",
+									priority: "medium",
+								},
+							],
+						}),
+					},
+				],
+			}))
+			.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
+
+		await runAgentLoop([{ role: "user", content: "continue the plan" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "BASE_PROMPT",
+			initialTodos: [{ content: step, status: "pending", priority: "medium", planStep: step }],
+			onEvent: (e) => events.push(e),
+		});
+
+		const updated = events.filter((e) => e.type === "todos_updated").at(-1);
+		expect(updated?.type === "todos_updated" && updated.todos[0]?.planStep).toBe(step);
+	});
+
 	it("rejects more than one in_progress item without updating state", async () => {
 		const events: AgentEvent[] = [];
 		vi.mocked(streamAndCollect)

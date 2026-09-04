@@ -458,6 +458,12 @@ export async function execWrite(args: Record<string, unknown>, cwd: string): Pro
 	}
 
 	const newLines = content.split("\n");
+	// A file ending in a newline splits to a trailing "" that is not a line:
+	// "READY\n" is one line, not two. Reporting the raw split count told the
+	// model it had written a blank line it did not write, inviting a "cleanup"
+	// rewrite of a correct file.
+	const lineCount =
+		newLines[newLines.length - 1] === "" && newLines.length > 1 ? newLines.length - 1 : newLines.length;
 	const dupWarning = duplicateRunWarning(newLines);
 	const warn = dupWarning ? `\nWarning: ${dupWarning}` : "";
 
@@ -468,7 +474,7 @@ export async function execWrite(args: Record<string, unknown>, cwd: string): Pro
 		// 13-character Cyrillic+emoji string reported "13 bytes" for a file
 		// that was actually 24 bytes). Buffer.byteLength gives the real count.
 		const byteLength = Buffer.byteLength(content, "utf-8");
-		return { content: `Created ${filePath} (${newLines.length} lines, ${byteLength} bytes).${warn}` };
+		return { content: `Created ${filePath} (${lineCount} lines, ${byteLength} bytes).${warn}` };
 	}
 	if (oldContent === content) {
 		return { content: `Wrote ${filePath} — content is identical to what was already on disk.${warn}` };
@@ -495,7 +501,7 @@ export async function execWrite(args: Record<string, unknown>, cwd: string): Pro
 	}
 	const diff = formatWriteDiff(oldDiffLines, newDiffLines);
 	return {
-		content: `Overwrote ${filePath} (${newLines.length} lines). Diff vs previous content:\n\n${diff}${nlNote}${warn}`,
+		content: `Overwrote ${filePath} (${lineCount} lines). Diff vs previous content:\n\n${diff}${nlNote}${warn}`,
 	};
 }
 
