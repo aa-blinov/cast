@@ -27,6 +27,12 @@ export interface ToolResult {
 	 * "the restriction clears when you send your next message".
 	 */
 	skillDisallowedTools?: string[];
+	/**
+	 * Hooks the invoked skill registers (`hooks:` frontmatter). Set by the
+	 * `skill` tool only; the loop merges them into the active set for the rest
+	 * of the run, and drops a `once: true` hook after its first success.
+	 */
+	skillHooks?: unknown;
 	/** Usage from subagent execution (task tool only). */
 	subagentUsage?: Usage;
 }

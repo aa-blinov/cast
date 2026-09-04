@@ -23,7 +23,15 @@ import {
 import type { AppConfig, ProviderCredentials } from "./config.ts";
 import { type AnnouncedLocalDate, appendDateRolloverReminder } from "./date-rollover-reminder.ts";
 import { matchesToolsAllowlist } from "./frontmatter.ts";
-import { type HooksFile, runHooksForEvent } from "./hooks.ts";
+import {
+	coerceHooksObject,
+	type HookEvent,
+	type HookMatcherGroup,
+	type HookRunResult,
+	type HooksFile,
+	mergeHooks,
+	runHooksForEvent,
+} from "./hooks.ts";
 import { appendInterruptReminder } from "./interrupt-reminder.ts";
 import type { Message, Tool, Usage } from "./llm.ts";
 import {
@@ -1830,6 +1838,41 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 	// a row we refuse to execute it and tell the model to try something else.
 	const recentToolCalls: Array<{ name: string; argsKey: string }> = [];
 
+	// Hooks in force for this run. Seeded from the caller's set and extended
+	// when a skill with a `hooks:` block is invoked — a skill whose whole point
+	// is "run the formatter after every edit" is inert without them. Kept local
+	// rather than mutating loopConfig, which the caller owns and reuses.
+	let activeHooks: HooksFile | undefined = loopConfig.hooks;
+	/** Groups registered by a skill with `once: true`, dropped after they fire. */
+	const onceHookEvents = new Set<HookEvent>();
+	const registerSkillHooks = (raw: unknown): void => {
+		const incoming = coerceHooksObject(raw, "project");
+		if (Object.keys(incoming).length === 0) return;
+		for (const [event, groups] of Object.entries(incoming) as [HookEvent, HookMatcherGroup[]][]) {
+			if (groups.some((group) => group.hooks.some((hook) => (hook as { once?: boolean }).once))) {
+				onceHookEvents.add(event);
+			}
+		}
+		activeHooks = mergeHooks(activeHooks ?? {}, incoming);
+	};
+	/** Runs an event against the active set and retires any `once` group that
+	 * fired successfully. Every in-run hook dispatch goes through this. */
+	const runHook = async (opts: Parameters<typeof runHooksForEvent>[1]): Promise<HookRunResult> => {
+		const result = await runHooksForEvent(activeHooks ?? {}, opts);
+		retireOnceHooks(opts.event, result.blocked);
+		return result;
+	};
+
+	/** After an event fires, drop the skill groups that asked to run once. */
+	const retireOnceHooks = (event: HookEvent, blocked: boolean): void => {
+		if (!onceHookEvents.has(event) || blocked || !activeHooks?.[event]) return;
+		const kept = activeHooks[event]!.filter(
+			(group) => !group.hooks.some((hook) => (hook as { once?: boolean }).once),
+		);
+		activeHooks = { ...activeHooks, [event]: kept };
+		onceHookEvents.delete(event);
+	};
+
 	const openWorkGateConfig: OpenWorkGateConfig = {
 		...defaultOpenWorkGateConfig(),
 		...loopConfig.openWorkGate,
@@ -1849,43 +1892,46 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 	// permission" dispatcher; only bash has one). Placed here (not per call
 	// site) so it applies to subagents too — they recurse through this same
 	// function with `hooks` inherited from the parent.
-	const confirmBashWithHooks: ConfirmBash | undefined =
-		loopConfig.confirmBash && loopConfig.hooks
-			? async (command, reason) => {
-					const hooksForConfirm = loopConfig.hooks!;
-					const pr = await runHooksForEvent(hooksForConfirm, {
-						event: "PermissionRequest",
+	// Read `activeHooks` at call time, not at construction: a skill invoked
+	// mid-run can add PermissionRequest/PermissionDenied hooks, and a run that
+	// started with none would otherwise never see them.
+	const confirmBashWithHooks: ConfirmBash | undefined = loopConfig.confirmBash
+		? async (command, reason) => {
+				const hooksForConfirm = activeHooks;
+				if (!hooksForConfirm) return loopConfig.confirmBash!(command, reason);
+				const pr = await runHooksForEvent(hooksForConfirm, {
+					event: "PermissionRequest",
+					matchTarget: "bash",
+					cwd,
+					sessionId: loopConfig.sessionId,
+					payload: { tool_name: "bash", tool_input: { command, description: reason } },
+					signal,
+				});
+				if (pr.blocked) {
+					void runHooksForEvent(hooksForConfirm, {
+						event: "PermissionDenied",
 						matchTarget: "bash",
 						cwd,
 						sessionId: loopConfig.sessionId,
-						payload: { tool_name: "bash", tool_input: { command, description: reason } },
+						payload: { tool_name: "bash", tool_input: { command } },
 						signal,
 					});
-					if (pr.blocked) {
-						void runHooksForEvent(hooksForConfirm, {
-							event: "PermissionDenied",
-							matchTarget: "bash",
-							cwd,
-							sessionId: loopConfig.sessionId,
-							payload: { tool_name: "bash", tool_input: { command } },
-							signal,
-						});
-						return false;
-					}
-					const allowed = await loopConfig.confirmBash!(command, reason);
-					if (!allowed) {
-						void runHooksForEvent(hooksForConfirm, {
-							event: "PermissionDenied",
-							matchTarget: "bash",
-							cwd,
-							sessionId: loopConfig.sessionId,
-							payload: { tool_name: "bash", tool_input: { command } },
-							signal,
-						});
-					}
-					return allowed;
+					return false;
 				}
-			: loopConfig.confirmBash;
+				const allowed = await loopConfig.confirmBash!(command, reason);
+				if (!allowed) {
+					void runHooksForEvent(hooksForConfirm, {
+						event: "PermissionDenied",
+						matchTarget: "bash",
+						cwd,
+						sessionId: loopConfig.sessionId,
+						payload: { tool_name: "bash", tool_input: { command } },
+						signal,
+					});
+				}
+				return allowed;
+			}
+		: loopConfig.confirmBash;
 
 	const builtinExecuteTool = createToolExecutor(
 		cwd,
@@ -1914,7 +1960,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 					cliSkillPaths: loopConfig.cliSkillPaths,
 					mcpPromptSuffix: loopConfig.mcpPromptSuffix,
 					sshHosts: loopConfig.sshHosts,
-					hooks: loopConfig.hooks,
+					hooks: activeHooks,
 					sessionId: loopConfig.sessionId,
 					forkContext: () =>
 						createAgentForkContext(messages, checkpointBoundary, {
@@ -2007,12 +2053,12 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				// Observation-only, fire-and-forget — content is the only stable
 				// identity todos have (no id field), so this is a best-effort diff,
 				// not a guaranteed one (renaming a todo reads as create+drop).
-				if (loopConfig.hooks) {
+				if (activeHooks) {
 					const previousByContent = new Map(previousTodos.map((t) => [t.content, t]));
 					for (const t of todos) {
 						const prev = previousByContent.get(t.content);
 						if (!prev) {
-							void runHooksForEvent(loopConfig.hooks, {
+							void runHook({
 								event: "TaskCreated",
 								cwd,
 								sessionId: loopConfig.sessionId,
@@ -2020,7 +2066,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 								signal,
 							});
 						} else if (prev.status !== "completed" && t.status === "completed") {
-							void runHooksForEvent(loopConfig.hooks, {
+							void runHook({
 								event: "TaskCompleted",
 								cwd,
 								sessionId: loopConfig.sessionId,
@@ -2038,7 +2084,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 			if (mcpTool) return mcpTool.call(finalArgs, toolSignal);
 			return builtinExecuteTool(name, finalArgs, toolSignal, toolCallId);
 		};
-		const hooks = loopConfig.hooks;
+		const hooks = activeHooks;
 		if (hooks) {
 			return runToolWithHooks(
 				{
@@ -2661,8 +2707,8 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 					// Observation-only, matching the official spec (no blocking
 					// semantics documented) — fire-and-forget so a slow hook here
 					// doesn't add latency to every multi-tool turn.
-					if (loopConfig.hooks && executedToolBatch.length > 1) {
-						void runHooksForEvent(loopConfig.hooks, {
+					if (activeHooks && executedToolBatch.length > 1) {
+						void runHook({
 							event: "PostToolBatch",
 							cwd,
 							sessionId: loopConfig.sessionId,
@@ -2695,6 +2741,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 						// A skill with `disallowed-tools` narrows the pool for the rest
 						// of the turn — the author's way of saying "this procedure must
 						// not touch these", which was previously parsed and ignored.
+						if (r.result.skillHooks) registerSkillHooks(r.result.skillHooks);
 						if (r.result.skillDisallowedTools?.length) {
 							for (const name of r.result.skillDisallowedTools) skillDisallowedTools.add(name);
 							applySkillToolRestrictions();
@@ -2849,8 +2896,8 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 			}
 
 			// No more messages — done, unless a Stop hook says otherwise.
-			if (loopConfig.hooks && stopHookBlocks < MAX_STOP_HOOK_BLOCKS) {
-				const stopResult = await runHooksForEvent(loopConfig.hooks, {
+			if (activeHooks && stopHookBlocks < MAX_STOP_HOOK_BLOCKS) {
+				const stopResult = await runHook({
 					event: "Stop",
 					cwd,
 					sessionId: loopConfig.sessionId,
@@ -2888,8 +2935,8 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		// StopFailure is observation-only (matching Grok Build) — its output is
 		// never awaited-on for a decision, so it can't affect what already
 		// happened; fire it and move on regardless of the result.
-		if (loopConfig.hooks) {
-			void runHooksForEvent(loopConfig.hooks, {
+		if (activeHooks) {
+			void runHook({
 				event: "StopFailure",
 				cwd,
 				sessionId: loopConfig.sessionId,

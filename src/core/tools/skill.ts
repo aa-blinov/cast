@@ -70,6 +70,8 @@ export async function execSkill(args: Record<string, unknown>, deps: SkillToolDe
 	// what to do. Say what happened instead.
 	try {
 		const disallowed = skill.disallowedTools?.split(TOOL_LIST_SPLIT_RE).filter(Boolean);
+		// Registered by the loop for the rest of the run — a skill whose whole
+		// point is "check X after every edit" is inert without them.
 		return {
 			content: await renderSkillInvocation(skill, userArgs, deps.sessionId, {
 				projectDir: deps.cwd,
@@ -77,6 +79,7 @@ export async function execSkill(args: Record<string, unknown>, deps: SkillToolDe
 				gate: deps.inlineGate,
 			}),
 			...(disallowed?.length ? { skillDisallowedTools: disallowed } : {}),
+			...(skill.hooks ? { skillHooks: skill.hooks } : {}),
 		};
 	} catch (error) {
 		const reason = error instanceof Error ? error.message : String(error);

@@ -15,6 +15,7 @@ import { type Dirent, existsSync, readdirSync, readFileSync, rmSync, statSync } 
 import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { matchesToolsAllowlist, parseFrontmatter } from "./frontmatter.ts";
+import { coerceHooksObject, type HooksFile } from "./hooks.ts";
 import { checkDangerousBash } from "./permissions.ts";
 import { checkReadOnlyCommand } from "./plan.ts";
 import { promptsDir, readRequiredPrompt } from "./prompts.ts";
@@ -65,6 +66,8 @@ export interface Skill {
 	 * slash-command menu and `/name` does not run it. Spec field
 	 * `user-invocable`; default true. */
 	userInvocable: boolean;
+	/** Hooks the skill registers when invoked, in hooks.json's shape. */
+	hooks?: HooksFile;
 	/** Glob patterns limiting when the skill is offered: it is listed only
 	 * while a file matching one of them is in context (`paths`). */
 	paths?: string[];
@@ -311,6 +314,7 @@ function loadSkillFromFile(
 	const argumentHint = validateOptionalString(frontmatter, "argument-hint");
 	const argumentNames = validateNameList(frontmatter, "arguments");
 	const paths = validateGlobList(frontmatter, "paths");
+	const skillHooks = coerceHooksObject(frontmatter.hooks, source === "plugin" ? "plugin" : "project");
 	const license = validateOptionalString(frontmatter, "license");
 	const compatibility = validateOptionalString(frontmatter, "compatibility", MAX_COMPATIBILITY_LENGTH);
 	const allowedTools = validateToolList(frontmatter, "allowed-tools");
@@ -348,6 +352,7 @@ function loadSkillFromFile(
 			argumentHint: argumentHint.value,
 			argumentNames: argumentNames.value,
 			paths: paths.value,
+			...(Object.keys(skillHooks).length > 0 ? { hooks: skillHooks } : {}),
 			body,
 		},
 		diagnostics,
