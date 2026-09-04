@@ -723,3 +723,45 @@ describe("inline `!`command`` blocks in a skill body", () => {
 		expect(formatSkillInvocation(skill)).toContain("!`echo v99.0.0`");
 	});
 });
+
+describe("paths-scoped skills", () => {
+	let dir = "";
+	beforeEach(() => {
+		dir = mkdtempSync(join(tmpdir(), "cast-skill-paths-"));
+	});
+	afterEach(() => {
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	function write(name: string, frontmatter: string): void {
+		mkdirSync(join(dir, name), { recursive: true });
+		writeFileSync(join(dir, name, "SKILL.md"), `---\n${frontmatter}\n---\nbody\n`, "utf-8");
+	}
+
+	it("offers a paths-scoped skill only while a matching file is in context", () => {
+		// Spec: "When set, Claude loads the skill automatically only when
+		// working with files matching the patterns." Without this, a
+		// language-specific skill sat in every prompt of every project.
+		write("react", 'name: react\ndescription: d\npaths: ["**/*.tsx"]');
+		write("always", "name: always\ndescription: d");
+		const { skills, diagnostics } = loadSkills({ globalDir: dir, extraPaths: [] });
+		expect(diagnostics).toEqual([]);
+
+		const withoutContext = formatSkillsForPrompt(skills, undefined, []);
+		expect(withoutContext).toContain("<name>always</name>");
+		expect(withoutContext).not.toContain("<name>react</name>");
+
+		const withTsx = formatSkillsForPrompt(skills, undefined, ["src/components/App.tsx"]);
+		expect(withTsx).toContain("<name>react</name>");
+
+		const withOther = formatSkillsForPrompt(skills, undefined, ["README.md"]);
+		expect(withOther).not.toContain("<name>react</name>");
+	});
+
+	it("accepts paths as a comma-separated string too", () => {
+		write("scoped", 'name: scoped\ndescription: d\npaths: "**/*.py, **/*.pyi"');
+		const { skills } = loadSkills({ globalDir: dir, extraPaths: [] });
+		expect(skills[0]?.paths).toEqual(["**/*.py", "**/*.pyi"]);
+		expect(formatSkillsForPrompt(skills, undefined, ["app/main.py"])).toContain("<name>scoped</name>");
+	});
+});

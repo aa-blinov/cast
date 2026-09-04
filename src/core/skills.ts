@@ -16,6 +16,7 @@ import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { matchesToolsAllowlist, parseFrontmatter } from "./frontmatter.ts";
 import { promptsDir, readRequiredPrompt } from "./prompts.ts";
+import { fileMatchesGlob } from "./rules.ts";
 
 const SLUG_RE = /^[a-z0-9-]+$/;
 
@@ -62,6 +63,9 @@ export interface Skill {
 	 * slash-command menu and `/name` does not run it. Spec field
 	 * `user-invocable`; default true. */
 	userInvocable: boolean;
+	/** Glob patterns limiting when the skill is offered: it is listed only
+	 * while a file matching one of them is in context (`paths`). */
+	paths?: string[];
 	/** Tools removed from the model's pool while this skill is active
 	 * (`disallowed-tools`), space-separated. */
 	disallowedTools?: string;
@@ -197,6 +201,26 @@ function parseSpecBoolean(value: unknown, fallback = false): boolean {
 	return fallback;
 }
 
+/** `paths` per spec: "a comma-separated string or a YAML list" of globs. */
+function validateGlobList(
+	frontmatter: Record<string, unknown>,
+	field: string,
+): { value: string[] | undefined; errors: string[] } {
+	const raw = frontmatter[field];
+	if (raw === undefined) return { value: undefined, errors: [] };
+	const entries = Array.isArray(raw)
+		? raw
+		: typeof raw === "string"
+			? raw.split(LIST_SPLIT_RE).filter(Boolean)
+			: undefined;
+	if (!entries) return { value: undefined, errors: [`${field} must be a comma-separated string or a YAML list`] };
+	const globs = entries.filter((entry): entry is string => typeof entry === "string" && entry.trim() !== "");
+	if (globs.length !== entries.length) {
+		return { value: undefined, errors: [`${field} entries must be non-empty glob strings`] };
+	}
+	return { value: globs.length > 0 ? globs : undefined, errors: [] };
+}
+
 /** `arguments` per spec: "a space-separated string or a YAML list". Names map
  * to argument positions in order, so `arguments: [issue, branch]` makes
  * `$issue` the first argument and `$branch` the second. */
@@ -284,12 +308,13 @@ function loadSkillFromFile(
 	for (const error of validateSkillName(name)) diagnostics.push({ message: error, path: filePath });
 	const argumentHint = validateOptionalString(frontmatter, "argument-hint");
 	const argumentNames = validateNameList(frontmatter, "arguments");
+	const paths = validateGlobList(frontmatter, "paths");
 	const license = validateOptionalString(frontmatter, "license");
 	const compatibility = validateOptionalString(frontmatter, "compatibility", MAX_COMPATIBILITY_LENGTH);
 	const allowedTools = validateToolList(frontmatter, "allowed-tools");
 	const disallowedTools = validateToolList(frontmatter, "disallowed-tools");
 	const metadata = validateMetadata(frontmatter.metadata);
-	for (const result of [license, compatibility, allowedTools, disallowedTools, argumentHint, metadata]) {
+	for (const result of [license, compatibility, allowedTools, disallowedTools, argumentHint, paths, metadata]) {
 		for (const message of result.errors) diagnostics.push({ message, path: filePath });
 	}
 	const hasValidationErrors = diagnostics.length > 0;
@@ -320,6 +345,7 @@ function loadSkillFromFile(
 			userInvocable: parseSpecBoolean(frontmatter["user-invocable"], true),
 			argumentHint: argumentHint.value,
 			argumentNames: argumentNames.value,
+			paths: paths.value,
 			body,
 		},
 		diagnostics,
@@ -485,8 +511,23 @@ function escapeXml(str: string): string {
  * keeps what's described here in sync with what loop.ts actually enforces,
  * so the model isn't pointed at a skill it'll then get rejected for calling.
  */
-export function formatSkillsForPrompt(skills: Skill[], personaSkillsAllowlist?: string[]): string {
-	let visible = skills.filter((s) => !s.disableModelInvocation);
+/**
+ * A `paths`-scoped skill is only offered while a file it claims is in
+ * context — the spec's "Claude loads the skill automatically only when
+ * working with files matching the patterns". A skill without `paths` is
+ * always offered, as before.
+ */
+export function skillMatchesContext(skill: Skill, contextFiles: string[]): boolean {
+	if (!skill.paths?.length) return true;
+	return contextFiles.some((file) => skill.paths!.some((pattern) => fileMatchesGlob(pattern, file)));
+}
+
+export function formatSkillsForPrompt(
+	skills: Skill[],
+	personaSkillsAllowlist?: string[],
+	contextFiles: string[] = [],
+): string {
+	let visible = skills.filter((s) => !s.disableModelInvocation && skillMatchesContext(s, contextFiles));
 	if (personaSkillsAllowlist !== undefined) {
 		visible = visible.filter((s) => matchesToolsAllowlist(s.name, personaSkillsAllowlist));
 	}

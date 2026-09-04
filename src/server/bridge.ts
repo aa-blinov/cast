@@ -1818,7 +1818,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					contextFilesSuffix + nestedContext,
 					rulesBlock,
 					rulesLazySuffix,
-					formatSkillsForPrompt(skills, persona.skills),
+					formatSkillsForPrompt(skills, persona.skills, ctxFiles),
 					formatMcpForPrompt(mcpResult, persona.mcp),
 					sessionCwd,
 					{

@@ -329,9 +329,9 @@ export function App(props: AppProps): JSX.Element {
 				contextFilesSuffix + nestedContext,
 				rulesBlock,
 				rulesLazySuffix,
-				activePersona.skills !== undefined
-					? formatSkillsForPrompt(skills, activePersona.skills)
-					: skillsPromptSuffix,
+				// Rebuilt with the turn's context files so a `paths`-scoped skill is
+				// offered only while a file it claims is in context.
+				formatSkillsForPrompt(skills, activePersona.skills, ctxFiles),
 				formatMcpForPrompt(mcpResult, activePersona.mcp),
 				cwd,
 				{ model: activeModel, reasoningLevel: config.reasoningLevel, mode: planMode ? "plan" : "build" },
