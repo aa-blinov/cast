@@ -17,8 +17,14 @@ import { promptsDir, readRequiredPrompt } from "./prompts.ts";
 
 const SLUG_RE = /^[a-z0-9-]+$/;
 
+const PARAGRAPH_SPLIT_RE = /\n\s*\n/;
 const MAX_NAME_LENGTH = 64;
 const MAX_DESCRIPTION_LENGTH = 1024;
+/** Spec: the combined `description` + `when_to_use` text is truncated at this
+ * length in the skill listing, to bound what every turn pays for skills it
+ * may never use. Only `description` was capped, so a long `when_to_use` rode
+ * into the system prompt uncapped. */
+const MAX_LISTING_DESCRIPTION_LENGTH = 1536;
 const MAX_COMPATIBILITY_LENGTH = 500;
 const RECOMMENDED_MAX_BODY_LINES = 500;
 
@@ -135,6 +141,50 @@ function validateOptionalString(
 	return { value: raw, errors: [] };
 }
 
+/**
+ * `allowed-tools` per spec: "a space- or comma-separated string, or a YAML
+ * list". Only the string form was accepted, so the list form — which is what
+ * a multi-tool grant is usually written as — was reported as invalid and took
+ * the whole skill down with it.
+ */
+function validateToolList(
+	frontmatter: Record<string, unknown>,
+	field: string,
+): { value: string | undefined; errors: string[] } {
+	const raw = frontmatter[field];
+	if (raw === undefined) return { value: undefined, errors: [] };
+	if (Array.isArray(raw)) {
+		const entries = raw.filter((entry): entry is string => typeof entry === "string" && entry.trim() !== "");
+		if (entries.length !== raw.length) {
+			return { value: undefined, errors: [`${field} list entries must be non-empty strings`] };
+		}
+		return { value: entries.join(" "), errors: [] };
+	}
+	return validateOptionalString(frontmatter, field);
+}
+
+/**
+ * Booleans in skill frontmatter accept `yes`/`no`/`on`/`off`/`1`/`0` in any
+ * case as well as `true`/`false`. Only a literal `true` counted before, so a
+ * skill marked `disable-model-invocation: yes` — the author saying "only the
+ * user may run this" — stayed model-invocable.
+ */
+function parseSpecBoolean(value: unknown): boolean {
+	if (typeof value === "boolean") return value;
+	if (typeof value === "number") return value === 1;
+	if (typeof value !== "string") return false;
+	return ["true", "yes", "on", "1"].includes(value.trim().toLowerCase());
+}
+
+/** First non-empty paragraph of a skill body — the spec's fallback description. */
+function firstParagraph(body: string): string | undefined {
+	for (const block of body.split(PARAGRAPH_SPLIT_RE)) {
+		const text = block.trim();
+		if (text) return text.length > MAX_DESCRIPTION_LENGTH ? text.slice(0, MAX_DESCRIPTION_LENGTH) : text;
+	}
+	return undefined;
+}
+
 function validateMetadata(value: unknown): { value: Record<string, string> | undefined; errors: string[] } {
 	if (value === undefined) return { value: undefined, errors: [] };
 	if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -173,18 +223,25 @@ function loadSkillFromFile(
 		diagnostics.push({ message: `invalid YAML frontmatter: ${message}`, path: filePath });
 	if (yamlErrors.length > 0) return { skill: null, diagnostics };
 	const parentDirName = basename(dirname(filePath));
-	const name = typeof frontmatter.name === "string" ? frontmatter.name : undefined;
-	const description = typeof frontmatter.description === "string" ? frontmatter.description : undefined;
+	// Per the Agent Skills spec, `name` is optional and defaults to the
+	// directory name, and `description` is only *recommended* — when it is
+	// absent the first paragraph of the body stands in. cast required both and
+	// additionally demanded that `name` equal the directory, so skills written
+	// to the published spec (anthropics/skills, skills.sh packages) were
+	// dropped at load with a diagnostic nobody reads.
+	const declaredName = typeof frontmatter.name === "string" ? frontmatter.name.trim() : undefined;
+	const name = declaredName || parentDirName;
+	const declaredDescription =
+		typeof frontmatter.description === "string" && frontmatter.description.trim() !== ""
+			? frontmatter.description
+			: undefined;
+	const description = declaredDescription ?? firstParagraph(body);
 
 	for (const error of validateSkillDescription(description)) diagnostics.push({ message: error, path: filePath });
-	if (!name) diagnostics.push({ message: "name is required", path: filePath });
-	else for (const error of validateSkillName(name)) diagnostics.push({ message: error, path: filePath });
-	if (basename(filePath) === "SKILL.md" && name && name !== parentDirName) {
-		diagnostics.push({ message: `name must match parent directory "${parentDirName}"`, path: filePath });
-	}
+	for (const error of validateSkillName(name)) diagnostics.push({ message: error, path: filePath });
 	const license = validateOptionalString(frontmatter, "license");
 	const compatibility = validateOptionalString(frontmatter, "compatibility", MAX_COMPATIBILITY_LENGTH);
-	const allowedTools = validateOptionalString(frontmatter, "allowed-tools");
+	const allowedTools = validateToolList(frontmatter, "allowed-tools");
 	const metadata = validateMetadata(frontmatter.metadata);
 	for (const result of [license, compatibility, allowedTools, metadata]) {
 		for (const message of result.errors) diagnostics.push({ message, path: filePath });
@@ -202,7 +259,7 @@ function loadSkillFromFile(
 
 	return {
 		skill: {
-			name: name!,
+			name,
 			description: description!,
 			whenToUse: typeof frontmatter.when_to_use === "string" ? frontmatter.when_to_use : undefined,
 			license: license.value,
@@ -212,7 +269,7 @@ function loadSkillFromFile(
 			filePath,
 			baseDir: dirname(filePath),
 			source,
-			disableModelInvocation: frontmatter["disable-model-invocation"] === true,
+			disableModelInvocation: parseSpecBoolean(frontmatter["disable-model-invocation"]),
 			body,
 		},
 		diagnostics,
@@ -387,7 +444,9 @@ export function formatSkillsForPrompt(skills: Skill[], personaSkillsAllowlist?: 
 
 	const lines = ["", "", SKILLS_INSTRUCTIONS, "", "<available_skills>"];
 	for (const skill of visible) {
-		const desc = skill.whenToUse ? `${skill.description} — ${skill.whenToUse}` : skill.description;
+		const combined = skill.whenToUse ? `${skill.description} — ${skill.whenToUse}` : skill.description;
+		const desc =
+			combined.length > MAX_LISTING_DESCRIPTION_LENGTH ? combined.slice(0, MAX_LISTING_DESCRIPTION_LENGTH) : combined;
 		lines.push("  <skill>");
 		lines.push(`    <name>${escapeXml(skill.name)}</name>`);
 		lines.push(`    <description>${escapeXml(desc)}</description>`);
