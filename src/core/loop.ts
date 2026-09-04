@@ -158,6 +158,15 @@ const CHECKPOINT_WRITER_TIMEOUT_MS = 5 * 60_000;
 const CHECKPOINT_REBUILD_WAIT_MS = 30_000;
 const CHECKPOINT_FIRST_REBUILD_WAIT_MS = 5 * 60_000;
 
+/**
+ * Reduce every path-like token in a todo's text to its basename, so a rewritten
+ * item still matches the one it replaces when the model shortened the paths in
+ * it. Used only to carry `planStep` across a `todo_write`; never stored.
+ */
+export function shortenPathsForTodoMatch(content: string): string {
+	return content.replace(/\S*\/(\S+)/g, "$1").trim();
+}
+
 function memoryPromptBudgetTokens(config: AppConfig): number {
 	const inputBudget = Math.max(0, config.contextWindow - config.maxResponseTokens);
 	const settings = loadSettings();
@@ -2045,8 +2054,20 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				const planStepsByContent = new Map(
 					previousTodos.flatMap((todo) => (todo.planStep ? [[todo.content, todo.planStep] as const] : [])),
 				);
+				// Rewriting the list to flip one status, models routinely retype the
+				// item and shorten any absolute path in it ("…/note.txt" becomes
+				// "note.txt"). Exact content matching then loses the plan link, and
+				// with it the open-work gate's only handle on that step, so a second
+				// pass compares with directories stripped off path-like tokens.
+				const planStepsByShortenedContent = new Map(
+					previousTodos.flatMap((todo) =>
+						todo.planStep ? [[shortenPathsForTodoMatch(todo.content), todo.planStep] as const] : [],
+					),
+				);
 				todos = result.todos.map((todo) => {
-					const planStep = planStepsByContent.get(todo.content);
+					const planStep =
+						planStepsByContent.get(todo.content) ??
+						planStepsByShortenedContent.get(shortenPathsForTodoMatch(todo.content));
 					return planStep ? { ...todo, planStep } : todo;
 				});
 				onEvent({ type: "todos_updated", todos });

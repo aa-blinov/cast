@@ -687,6 +687,18 @@ describe("write", () => {
 		expect(readResult.content).toContain("hello world");
 	});
 
+	it("does not count the empty trailing split as a line", async () => {
+		// "READY\n" is one line. Reporting two told the model it had written a
+		// blank line it never wrote.
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const created = await exec("write", { path: "one-line.txt", content: "READY\n" });
+		expect(created.content).toContain("(1 lines");
+
+		writeFileSync(join(TEST_DIR, "note.txt"), "PENDING\n");
+		const overwritten = await exec("write", { path: "note.txt", content: "READY\n" });
+		expect(overwritten.content).toContain("(1 lines)");
+	});
+
 	it("creates parent directories", async () => {
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
 		await exec("write", { path: "deep/nested/file.txt", content: "ok" });

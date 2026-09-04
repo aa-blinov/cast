@@ -27,7 +27,10 @@ export const approvedPlanTodoProgress: EvalCase = {
 			if (!completion?.includes('"status":"completed"') || !completion.includes('"planStep"')) {
 				return "the verified plan step was not retained as a completed linked todo";
 			}
-			return readFileSync(NOTE_PATH, "utf-8") === "READY"
+			// The fixture ends in a newline, so writing "READY\n" back is the
+			// faithful result; requiring the byte-exact "READY" failed a correct
+			// run over a trailing newline nobody asked about either way.
+			return readFileSync(NOTE_PATH, "utf-8").trimEnd() === "READY"
 				? undefined
 				: "the approved plan did not write the requested final state";
 		},
