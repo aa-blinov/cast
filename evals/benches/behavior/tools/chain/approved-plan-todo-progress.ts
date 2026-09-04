@@ -11,7 +11,7 @@ export const approvedPlanTodoProgress: EvalCase = {
 	description: "An approved plan keeps its specification while the matching linked todo records verified execution progress.",
 	signals: ["plan-lifecycle", "state-persistence", "tool-chain", "filesystem-safety"],
 	mode: "build",
-	timeout: 90_000,
+	timeout: 180_000,
 	setup: () => void writeFixture(FIXTURE_ID, { "note.txt": "PENDING\n" }),
 	cwd: fixtureDir(FIXTURE_ID),
 	planFixture: { name: "ready-note", content: `# Ready note\n\n## Steps\n- [ ] ${STEP}\n\n## Verification\n- Read ${NOTE_PATH} and confirm it is READY.\n` },

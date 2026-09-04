@@ -29,7 +29,7 @@ export const planReentryReusesExistingPlan: EvalCase = {
 	// RE-ENTRY's ls+read adds a turn or two before the actual edit; the
 	// default 60s cut at least one otherwise-clean attempt off right after
 	// the read, mid-generation of the edit itself.
-	timeout: 90_000,
+	timeout: 180_000,
 	// Deliberately doesn't name the file or tell the agent to reuse it — plan
 	// mode's own system prompt (step 0, RE-ENTRY) is what's supposed to make
 	// it ls/glob {{PLANS_DIR}}, find the existing plan for this task, and

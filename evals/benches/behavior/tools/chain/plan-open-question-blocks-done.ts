@@ -29,7 +29,7 @@ export const planOpenQuestionBlocksDone: EvalCase = {
 	// verification section, assumptions — see plan-mode.md's "Plan structure")
 	// is a lot of generation on top of the RE-ENTRY ls/read turns; the default
 	// 60s cut some models off mid-draft before they ever reached `write`.
-	timeout: 120_000,
+	timeout: 180_000,
 	prompt:
 		`Write a plan to add caching in front of ${fixturePath("behavior-plan-open-question", "handler.ts")}. Two ` +
 		"implementation options exist, each with a real tradeoff: in-memory (zero ops overhead, but each server " +
