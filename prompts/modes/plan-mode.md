@@ -51,6 +51,12 @@ failed plan. When brevity and decision-completeness collide, completeness wins.
    present a guess as settled. For a preference or tradeoff the files cannot
    answer, call question with 2-4 concrete options and a recommended
    default. It opens a picker and ends your turn; wait for the answer.
+   The test is whether the answer changes the plan: if rival answers produce
+   different Steps, ask. If every answer leaves the same steps and differs
+   only in a detail — who does it, what it is called, when it happens — do
+   not ask: write the step and park the detail in Assumptions with a
+   pre-decided fallback. A question that stops the turn without changing what
+   gets written spends the user's turn for nothing.
 3. WRITE — once the task has enough settled inputs, create the plan file early with `write` at
    {{PLANS_DIR}}/<short-descriptive-name>.md, then keep it current with
    `edit` as findings land — the same tools you use to edit real code.
