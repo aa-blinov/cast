@@ -107,7 +107,7 @@ import {
 	uninstallUserSkill,
 } from "../core/skills.ts";
 import { skillsShInstall, skillsShListAvailable, skillsShSearch, skillsShUninstall } from "../core/skills-sh.ts";
-import { saveSshConfig } from "../core/ssh.ts";
+import { resolveSshHosts, type SshHost, saveSshConfig } from "../core/ssh.ts";
 import type { StartupResult } from "../core/startup.ts";
 import { extractSystemReminders } from "../core/system-reminder.ts";
 import { classifyLlmError, recordLlmCompaction, recordLlmRequest, recordToolCall } from "../core/telemetry.ts";
@@ -843,6 +843,28 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	function trustForSessionCwd(sessionCwd: string): boolean {
 		if (sessionCwd === cwd) return projectTrusted;
 		return getProjectTrust(loadSettings(), sessionCwd) ?? false;
+	}
+
+	/**
+	 * SSH hosts visible to one session.
+	 *
+	 * `.cast/ssh.json` is project-local and trust-gated, and the daemon merged
+	 * it once for its own directory: a session elsewhere got that project's
+	 * hosts — targets for remote command execution — and not its own.
+	 */
+	const sshHostsByCwd = new Map<string, SshHost[]>();
+	function sshHostsForSessionCwd(sessionCwd: string): SshHost[] {
+		if (sessionCwd === cwd) return sshHosts;
+		const cached = sshHostsByCwd.get(sessionCwd);
+		if (cached) return cached;
+		let resolved: SshHost[];
+		try {
+			resolved = resolveSshHosts(sessionCwd, trustForSessionCwd(sessionCwd));
+		} catch {
+			resolved = sshHosts;
+		}
+		sshHostsByCwd.set(sessionCwd, resolved);
+		return resolved;
 	}
 
 	/**
@@ -1921,7 +1943,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			subagentPrompts: subPrompts,
 			subagentModel,
 			projectTrusted,
-			sshHosts,
+			sshHosts: sshHostsForSessionCwd(sessionCwd),
 			backgroundBash: ws.backgroundBash,
 			mcpPromptSuffix: formatMcpForPrompt(mcpResult, persona.mcp),
 			beforeFileWrite: (path) => {
@@ -3759,6 +3781,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				rulesByCwd.clear();
 				skillsByCwd.clear();
 				contextFilesByCwd.clear();
+				sshHostsByCwd.clear();
 				const rules = resolveRulesForCwd(sessionCwd, projectTrusted);
 				rulesSuffix = rules.alwaysApplySuffix;
 				rulesLazySuffix = rules.lazySuffix;
