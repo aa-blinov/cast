@@ -924,13 +924,26 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		};
 	}
 
-	/** Drop a directory's servers once its last live session is gone. */
+	/**
+	 * Drop everything cached for a directory once its last live session is gone:
+	 * its MCP connections (real processes) and the per-directory prompt caches.
+	 *
+	 * The caches are small individually but unbounded in number — one entry per
+	 * directory ever visited, holding rule bodies among other things — and stale
+	 * by construction once nothing is open there, since a rules or skills edit
+	 * made in the meantime would otherwise be served from a cache nobody can
+	 * invalidate short of /reload.
+	 */
 	function releaseProjectMcpForCwd(sessionCwd: string): void {
-		const entry = projectMcpByCwd.get(sessionCwd);
-		if (!entry) return;
 		for (const other of sessions.values()) {
 			if ((other.session.cwd ?? cwd) === sessionCwd) return;
 		}
+		rulesByCwd.delete(sessionCwd);
+		skillsByCwd.delete(sessionCwd);
+		contextFilesByCwd.delete(sessionCwd);
+		sshHostsByCwd.delete(sessionCwd);
+		const entry = projectMcpByCwd.get(sessionCwd);
+		if (!entry) return;
 		projectMcpByCwd.delete(sessionCwd);
 		void entry.pending?.then(() => {
 			if (entry.result) void closeMcpConnections(entry.result.connections);
