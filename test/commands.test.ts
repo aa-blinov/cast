@@ -1408,6 +1408,40 @@ describe("/compact fires the compaction hooks", () => {
 // were exercised anywhere in this file — this covers the rest at least to the
 // depth of "it dispatches, and nothing throws". Cancelling pickers (the fake
 // returns null) is the path most of them take.
+describe("/rules", () => {
+	// The agent loop tracks which auto rules have latched, and for a thin
+	// client that loop is the daemon's. /rules printed the local view
+	// regardless, so every auto rule read as "not matched yet" for the whole
+	// session while the daemon was injecting it on every turn.
+	it("asks the daemon which rules have latched before listing them", async () => {
+		const rule = {
+			name: "react",
+			id: "react",
+			description: "",
+			filePath: "/p/.cursor/rules/react.mdc",
+			baseDir: "/p/.cursor/rules",
+			source: "project" as const,
+			scope: "",
+			alwaysApply: false,
+			globs: ["**/*.tsx"],
+			applyMode: "auto" as const,
+		};
+		const { deps, calls } = createFakeDeps({ directoryRules: [rule], activeAutoRules: [] });
+		(deps.agent as { daemonMode: boolean }).daemonMode = true;
+		(deps.agent as { runCommand: (c: string) => Promise<unknown> }).runCommand = async () => [
+			{ id: "react", sticky: true },
+		];
+
+		await handleInput("/rules", undefined, deps);
+
+		const listing = (calls["agent.addDisplayMessage"] ?? [])
+			.map((args) => (args[0] as { content?: string }).content ?? "")
+			.join("\n");
+		expect(listing).toContain("[auto:sticky]");
+		expect(listing).not.toContain("[auto:globs]");
+	});
+});
+
 describe("every routed command dispatches", () => {
 	const COMMANDS = [
 		"/abort",

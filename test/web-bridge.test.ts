@@ -1356,6 +1356,43 @@ describe("web bridge", () => {
 		expect(calls).toBe(2);
 	});
 
+	// The daemon resolved rules once, for the directory it was started in, and
+	// every session reused that catalog — so a session opened in another project
+	// ran with none of that project's rules, silently. Personas and hooks were
+	// already re-resolved per session directory; rules were not.
+	it("resolves rules for the session's own directory, not the daemon's", async () => {
+		const projectDir = mkdtempSync(join(tmpdir(), "cast-bridge-rules-"));
+		mkdirSync(join(projectDir, ".cursor", "rules"), { recursive: true });
+		writeFileSync(
+			join(projectDir, ".cursor", "rules", "project-only.mdc"),
+			"---\nalwaysApply: true\n---\nPROJECT_ONLY_RULE\n",
+			"utf-8",
+		);
+		try {
+			// The daemon's own directory has no rules at all.
+			const bridge = createServerBridge(makeResult({ directoryRules: [] }));
+			const ws = bridge.createSession(undefined, undefined, projectDir);
+			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
+
+			bridge.submit(ws.id, "hello");
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			const opts = runAgentLoop.mock.calls.at(-1)![1] as {
+				rebuildSystemPrompt?: (ctx: { userText: string; contextFiles: string[] }) => string;
+			};
+			const prompt = opts.rebuildSystemPrompt?.({ userText: "hello", contextFiles: [] }) ?? "";
+			expect(prompt).toContain("PROJECT_ONLY_RULE");
+
+			const listed = (await bridge.executeCommand(ws.id, "/rules")) as {
+				ok: boolean;
+				result?: Array<{ name: string }>;
+			};
+			expect(listed.ok).toBe(true);
+			expect((listed.result ?? []).map((r) => r.name)).toContain("project-only");
+		} finally {
+			rmSync(projectDir, { recursive: true, force: true });
+		}
+	});
+
 	it("latches an auto-mode directory rule once a matching file enters context, and keeps it sticky next turn", async () => {
 		const rulePath = join(fakeHome, "python-style.md");
 		writeFileSync(
