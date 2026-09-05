@@ -1,6 +1,17 @@
 # Rules
 
-Rules are project-specific instructions the agent follows. They use the same format as Cursor rules — `.cast/rules/*.md` files with frontmatter — so existing Cursor rules work in cast without modification.
+Rules are project-specific instructions the agent follows. They use Cursor's rule format, so a project that already has Cursor rules needs no second copy of them.
+
+cast reads, in this order:
+
+- `~/.cast/rules/` — your global rules
+- `<project>/.cast/rules/` — project rules (trust-gated)
+- `<project>/.cursor/rules/` — a Cursor project's own rules, read as-is
+- the same directories nested in subdirectories, scoped to that subtree
+
+Both `.md` and Cursor's `.mdc` are read, and subfolders inside a rules
+directory are for organisation — a rule keeps the scope of the rules directory
+it lives under, however it is filed.
 
 ## Rule Types
 
@@ -23,7 +34,7 @@ Injected into the system prompt every turn. The `globs` field is ignored.
 ```markdown
 ---
 always-apply: false
-globs: ["*.ts", "*.tsx"]
+globs: ["**/*.ts", "**/*.tsx"]
 ---
 
 Use strict TypeScript with no `any` types.
@@ -62,6 +73,7 @@ Only activated by `@rule-name` mention in a message or `/rule:<name>` command.
 |----------|-------|-------|
 | `~/.cast/rules/` | Global (all projects) | Always loaded |
 | `.cast/rules/` | Project root | Trust-gated |
+| `.cursor/rules/` | Project root (a Cursor project's own rules) | Trust-gated |
 | `apps/web/.cast/rules/` | Nested subtree | Trust-gated |
 
 ### Nested Rules
@@ -91,10 +103,31 @@ description: API endpoint conventions
 
 | Field | Description |
 |-------|-------------|
-| `name` | Human label (defaults to filename without `.md`) |
+| `name` | Human label (defaults to the filename without its extension) |
 | `always-apply` | `true` for always mode; `false` + globs/description for other modes |
-| `globs` | Array of glob patterns for auto attach mode |
+| `globs` | Glob patterns for auto attach mode — a YAML array, or one comma-separated string (`globs: *.ts, *.tsx`) |
 | `description` | Description for agent-requested (lazy) mode |
+
+### Glob syntax
+
+Patterns are matched against the file's path relative to the project root, the
+same way Cursor and minimatch read them:
+
+| Pattern | Matches | Does not match |
+|---------|---------|----------------|
+| `*.ts` | `main.ts` | `src/main.ts` |
+| `**/*.ts` | `main.ts`, `src/deep/main.ts` | `main.js` |
+| `src/*.ts` | `src/main.ts` | `src/deep/main.ts` |
+| `src/**/*.ts` | `src/main.ts`, `src/deep/main.ts` | `lib/main.ts` |
+| `docs/**` | everything under `docs/` | `other/x.md` |
+| `*.{ts,tsx}` | `main.ts`, `main.tsx` | `main.js` |
+
+`*` and `?` never cross a `/`; only `**` does. To match a file type anywhere in
+the project, write `**/*.ts` rather than `*.ts`.
+
+A rule in a nested `.cast/rules` directory writes its globs relative to its own
+subtree: `apps/web/.cast/rules/style.md` with `globs: src/**/*.ts` matches
+`apps/web/src/a.ts`.
 
 The apply mode is determined automatically from the frontmatter:
 - `always-apply: true` → **always**
@@ -131,25 +164,11 @@ Rules
 
 Auto rules show `[auto:sticky]` once they've been activated for the session, or `[auto:globs]` if they haven't matched yet.
 
-## Glob Patterns
-
-Glob patterns in the `globs` field use standard conventions:
-
-- `*` matches anything except path separators
-- `**` matches across path separators
-- `?` matches a single non-separator character
-
-Examples:
-- `*.ts` — all TypeScript files
-- `src/api/**/*.ts` — TypeScript files under `src/api/`
-- `**/*.test.ts` — all test files
-- `["*.ts", "*.tsx"]` — multiple patterns
-
 ## Priority
 
 On a name collision (same `id`), the first-loaded rule wins:
 
-1. **Project** (`.cast/rules/`) — highest priority
+1. **Project** (`.cast/rules/`, then `.cursor/rules/`) — highest priority
 2. **Global** (`~/.cast/rules/`)
 
 Within one scope, project beats global and the first-loaded file wins.
