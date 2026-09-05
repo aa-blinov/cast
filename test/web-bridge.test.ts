@@ -1516,6 +1516,44 @@ describe("web bridge", () => {
 		}
 	});
 
+	// The per-directory caches are unbounded in number and stale by
+	// construction. AGENTS.md is the clearest case: unlike rule bodies (re-read
+	// from disk on every render), its text is cached as a finished string, so an
+	// edit made while nothing is open there was invisible until /reload.
+	it("forgets a directory's cached AGENTS.md once its last session is gone", async () => {
+		const projectDir = mkdtempSync(join(tmpdir(), "cast-bridge-cache-"));
+		const agentsPath = join(projectDir, "AGENTS.md");
+		writeFileSync(agentsPath, "FIRST_AGENTS_TEXT\n", "utf-8");
+		try {
+			setProjectTrust(projectDir, true);
+			const persona = makePersona({ agentsMd: true });
+			const bridge = createServerBridge(makeResult({ persona, personas: [persona] }));
+			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
+			const promptFor = (sessionId: string, text: string): string => {
+				bridge.submit(sessionId, text);
+				const opts = runAgentLoop.mock.calls.at(-1)![1] as {
+					rebuildSystemPrompt?: (ctx: { userText: string; contextFiles: string[] }) => string;
+				};
+				return opts.rebuildSystemPrompt?.({ userText: text, contextFiles: [] }) ?? "";
+			};
+
+			const first = bridge.createSession(undefined, undefined, projectDir);
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			expect(promptFor(first.id, "hello")).toContain("FIRST_AGENTS_TEXT");
+
+			expect(bridge.closeSession(first.id)).toBe(true);
+			writeFileSync(agentsPath, "SECOND_AGENTS_TEXT\n", "utf-8");
+
+			const second = bridge.createSession(undefined, undefined, projectDir);
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			const prompt = promptFor(second.id, "hello again");
+			expect(prompt).toContain("SECOND_AGENTS_TEXT");
+			expect(prompt).not.toContain("FIRST_AGENTS_TEXT");
+		} finally {
+			rmSync(projectDir, { recursive: true, force: true });
+		}
+	});
+
 	// Project servers are real processes, so every path that drops a session has
 	// to release them — not just closeSession. Idle eviction and permanent
 	// deletion each remove a session on their own, and both used to leave the
