@@ -6,7 +6,11 @@
  * session lifecycle through the SDK factory. Tests run without an LLM:
  * `runStartup` / `runAgentLoop` / `session.ts` / `runner.ts` are mocked.
  */
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { setProjectTrust } from "../src/core/settings.ts";
 
 // ---- Mocks --------------------------------------------------------------
 
@@ -166,6 +170,44 @@ describe("ACP adapter", () => {
 		const session = await adapter.newSession(mockStartup as any, {} as any);
 		expect(session.state.id).toBe("new-sess");
 		expect(session.runner).toBeDefined();
+	});
+
+	// `session/new.cwd` is required by the protocol and names the directory the
+	// editor means. It was ignored, so every ACP session ran in whatever
+	// directory the agent process was launched in — with that directory's
+	// AGENTS.md, rules and skills.
+	it("newSession runs in the cwd the editor asked for, with that project's rules", async () => {
+		const projectDir = mkdtempSync(join(tmpdir(), "cast-acp-cwd-"));
+		mkdirSync(join(projectDir, ".cursor", "rules"), { recursive: true });
+		writeFileSync(
+			join(projectDir, ".cursor", "rules", "editor-project.mdc"),
+			"---\nalwaysApply: true\n---\nEDITOR_PROJECT_RULE\n",
+			"utf-8",
+		);
+		try {
+			setProjectTrust(projectDir, true);
+			const mockStartup = {
+				session: { id: "cwd-sess", cwd: "/tmp", messages: [], mode: undefined, model: "m" },
+				cwd: "/tmp",
+				config: { reasoningLevel: "medium" },
+				systemPrompt: "STARTUP_PROMPT",
+				mcpResult: { connections: [], toolDefinitions: [], toolIndex: new Map() },
+				hooks: {},
+				skills: [],
+				personas: [],
+				persona: { name: "s", systemPrompt: "ROLE", agentsMd: true },
+				subagentPrompts: [],
+				subagentModel: "m",
+				permissionMode: "default" as const,
+			};
+
+			const session = await adapter.newSession(mockStartup as any, {} as any, undefined, projectDir);
+
+			expect(session.state.cwd).toBe(projectDir);
+			expect(mockStartup.systemPrompt).toContain("EDITOR_PROJECT_RULE");
+		} finally {
+			rmSync(projectDir, { recursive: true, force: true });
+		}
 	});
 
 	it("newSession connects client-provided http MCP servers and stores the result", async () => {

@@ -2011,7 +2011,12 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			currentPersona: persona.name,
 			subagentPrompts: subPrompts,
 			subagentModel,
-			projectTrusted,
+			// Subagents build their own prompt from this cwd (task.ts's
+			// buildTaskSystemPrompt loads AGENTS.md, rules and skills through it),
+			// so the trust decision has to be the one recorded for this session's
+			// directory — not the daemon's, which would let an unvetted checkout's
+			// files into a child's prompt.
+			projectTrusted: trustForSessionCwd(sessionCwd),
 			sshHosts: sshHostsForSessionCwd(sessionCwd),
 			backgroundBash: ws.backgroundBash,
 			mcpPromptSuffix: formatMcpForPrompt(mcpResult, persona.mcp),
