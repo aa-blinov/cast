@@ -1,6 +1,6 @@
 import { execFileSync, execSync } from "node:child_process";
 import { homedir } from "node:os";
-import { restoreCheckpoint } from "../core/checkpoint.ts";
+import { filesLostByRestore, restoreCheckpoint } from "../core/checkpoint.ts";
 import { reminderStateFromPlan } from "../core/compaction-reminder.ts";
 import { type AppConfig, probeProvider, resolveProvider, runOnboardingCheck } from "../core/config.ts";
 import { formatContextFilesForPrompt, loadProjectContextFiles } from "../core/context-files.ts";
@@ -2143,8 +2143,8 @@ const COMMAND_ROUTES: CommandRoute[] = [
 		},
 	},
 	{
-		match: (input) => input === "/undo",
-		run: ({ deps, session, showNotice }) => {
+		match: (input) => isCommand(input, "/undo"),
+		run: async ({ input, deps, session, showNotice }) => {
 			if (deps.running) {
 				showNotice("[Agent running — finish the run or /abort before /undo]");
 				return;
@@ -2154,7 +2154,29 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				showNotice("[No checkpoint available to undo]");
 				return;
 			}
-			const lastCheckpoint = checkpoints.pop()!;
+			const lastCheckpoint = checkpoints[checkpoints.length - 1]!;
+			// Restoring runs `git clean -fd`, which also removes untracked files
+			// created after the checkpoint — including whatever the user wrote
+			// themselves while the agent worked. Those cannot be brought back, so
+			// name them and ask, unless --force says not to.
+			const lost = filesLostByRestore(lastCheckpoint);
+			const forced = input.includes("--force") || input.includes("-f");
+			if (lost.length > 0 && !forced) {
+				const shown = lost.slice(0, 10);
+				const more = lost.length > shown.length ? `\n  …and ${lost.length - shown.length} more` : "";
+				const confirmed = await deps.pickers.pickOption(
+					[
+						{ value: false, label: "Cancel — keep these files" },
+						{ value: true, label: `Undo anyway, deleting ${lost.length} file(s)` },
+					],
+					{ title: `Undo will delete files created since the checkpoint:\n  ${shown.join("\n  ")}${more}` },
+				);
+				if (confirmed !== true) {
+					showNotice("[Undo cancelled — nothing was restored]");
+					return;
+				}
+			}
+			checkpoints.pop();
 			const res = restoreCheckpoint(lastCheckpoint);
 			if (!res.ok) {
 				showNotice(`[Undo failed: ${res.message}]`);

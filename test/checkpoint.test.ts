@@ -2,7 +2,12 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { backupFileForCheckpoint, createCheckpoint, restoreCheckpoint } from "../src/core/checkpoint.ts";
+import {
+	backupFileForCheckpoint,
+	createCheckpoint,
+	filesLostByRestore,
+	restoreCheckpoint,
+} from "../src/core/checkpoint.ts";
 import type { AppConfig } from "../src/core/config.ts";
 import { createToolExecutor } from "../src/core/tools.ts";
 
@@ -94,5 +99,38 @@ describe("checkpoint module", () => {
 		expect(execFileSync("git", ["diff", "--cached", "--name-only"], { cwd: TEST_DIR, encoding: "utf8" })).toBe(
 			indexBefore,
 		);
+	});
+	describe("filesLostByRestore", () => {
+		// Restoring runs `git clean -fd`, so untracked files created after the
+		// checkpoint are deleted and cannot be recovered — that includes anything
+		// the user wrote themselves while the agent worked. Files untracked *at*
+		// checkpoint time are in its tree and come back, so they are not losses.
+		it("names only the untracked files the restore cannot bring back", () => {
+			execFileSync("git", ["init", "-q", "-b", "main"], { cwd: TEST_DIR, stdio: "ignore" });
+			execFileSync("git", ["config", "user.email", "t@e.com"], { cwd: TEST_DIR, stdio: "ignore" });
+			execFileSync("git", ["config", "user.name", "t"], { cwd: TEST_DIR, stdio: "ignore" });
+			writeFileSync(join(TEST_DIR, "tracked.ts"), "v1", "utf8");
+			execFileSync("git", ["add", "-A"], { cwd: TEST_DIR, stdio: "ignore" });
+			execFileSync("git", ["commit", "-m", "init"], { cwd: TEST_DIR, stdio: "ignore" });
+			writeFileSync(join(TEST_DIR, "untracked-before.txt"), "written before the checkpoint", "utf8");
+
+			const chk = createCheckpoint(TEST_DIR);
+			expect(chk.gitCommitSha).toBeDefined();
+
+			writeFileSync(join(TEST_DIR, "tracked.ts"), "v2", "utf8");
+			writeFileSync(join(TEST_DIR, "written-during-the-turn.txt"), "the user's own note", "utf8");
+
+			expect(filesLostByRestore(chk)).toEqual(["written-during-the-turn.txt"]);
+
+			// And the claim holds: restoring keeps the first, loses the second.
+			restoreCheckpoint(chk);
+			expect(existsSync(join(TEST_DIR, "untracked-before.txt"))).toBe(true);
+			expect(existsSync(join(TEST_DIR, "written-during-the-turn.txt"))).toBe(false);
+		});
+
+		it("reports nothing for a shadow checkpoint, which never cleans", () => {
+			const chk = createCheckpoint(TEST_DIR, true);
+			expect(filesLostByRestore(chk)).toEqual([]);
+		});
 	});
 });

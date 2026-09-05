@@ -23,6 +23,9 @@ const GIT_NO_PROMPT_ENV = {
 	GIT_ASKPASS: "",
 } as const;
 
+const WOULD_REMOVE_PREFIX_RE = /^Would remove /;
+const TRAILING_SLASH_RE = /\/$/;
+
 function runGit(cwd: string, args: string[], env?: NodeJS.ProcessEnv): string | null {
 	try {
 		const out = execFileSync("git", args, {
@@ -105,6 +108,37 @@ export function backupFileForCheckpoint(checkpoint: TurnCheckpoint, filePath: st
 /**
  * Restore a workspace to the state captured by checkpoint.
  */
+/**
+ * Files a restore would delete without being able to bring them back.
+ *
+ * Restoring a git checkpoint runs `git clean -fd` first, which removes every
+ * untracked file — including ones that appeared *after* the checkpoint was
+ * taken. Files that were untracked at checkpoint time are recreated by the
+ * restore (they are in its tree), so those are not losses; anything else is
+ * gone for good, and that includes whatever the user wrote themselves while
+ * the agent worked. Callers ask first.
+ */
+export function filesLostByRestore(checkpoint: TurnCheckpoint): string[] {
+	if (!checkpoint.gitCommitSha || !findCanonicalGitRoot(checkpoint.cwd)) return [];
+	const wouldRemove = runGit(checkpoint.cwd, ["clean", "-nd"]);
+	if (!wouldRemove) return [];
+	const inCheckpoint = new Set(
+		(runGit(checkpoint.cwd, ["ls-tree", "-r", "--name-only", checkpoint.gitCommitSha]) ?? "")
+			.split("\n")
+			.filter(Boolean),
+	);
+	const removed: string[] = [];
+	for (const line of wouldRemove.split("\n")) {
+		const path = line.replace(WOULD_REMOVE_PREFIX_RE, "").trim().replace(TRAILING_SLASH_RE, "");
+		if (!path || inCheckpoint.has(path)) continue;
+		// A directory line covers everything under it; keep it only when the
+		// checkpoint holds nothing from that subtree.
+		if (line.trim().endsWith("/") && [...inCheckpoint].some((f) => f.startsWith(`${path}/`))) continue;
+		removed.push(path);
+	}
+	return removed;
+}
+
 export function restoreCheckpoint(checkpoint: TurnCheckpoint): { ok: boolean; message: string } {
 	const repoRoot = findCanonicalGitRoot(checkpoint.cwd);
 

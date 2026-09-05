@@ -1,8 +1,9 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createCheckpoint } from "../src/core/checkpoint.ts";
 import type { AppConfig } from "../src/core/config.ts";
 import { streamAndCollect } from "../src/core/llm.ts";
 import type { McpSetupResult } from "../src/core/mcp.ts";
@@ -1408,6 +1409,62 @@ describe("/compact fires the compaction hooks", () => {
 // were exercised anywhere in this file — this covers the rest at least to the
 // depth of "it dispatches, and nothing throws". Cancelling pickers (the fake
 // returns null) is the path most of them take.
+describe("/undo", () => {
+	// Restoring runs `git clean -fd`, which deletes untracked files created
+	// after the checkpoint — including whatever the user wrote themselves while
+	// the agent worked. Those cannot be recovered, so the command asks first.
+	function repoWithCheckpoint(): { cwd: string; checkpoint: unknown } {
+		const cwd = mkdtempSync(join(tmpdir(), "cast-undo-cmd-"));
+		execFileSync("git", ["init", "-q", "-b", "main"], { cwd, stdio: "ignore" });
+		execFileSync("git", ["config", "user.email", "t@e.com"], { cwd, stdio: "ignore" });
+		execFileSync("git", ["config", "user.name", "t"], { cwd, stdio: "ignore" });
+		writeFileSync(join(cwd, "tracked.txt"), "v1", "utf-8");
+		execFileSync("git", ["add", "-A"], { cwd, stdio: "ignore" });
+		execFileSync("git", ["commit", "-qm", "init"], { cwd, stdio: "ignore" });
+		const checkpoint = createCheckpoint(cwd);
+		writeFileSync(join(cwd, "user-file.txt"), "the user's own note", "utf-8");
+		return { cwd, checkpoint };
+	}
+
+	it("asks before deleting files created since the checkpoint, and cancelling keeps them", async () => {
+		const { cwd, checkpoint } = repoWithCheckpoint();
+		try {
+			const { deps, calls } = createFakeDeps({ cwd });
+			deps.session.checkpoints = [checkpoint as never];
+			deps.pickers.pickOption = async () => false;
+
+			await handleInput("/undo", undefined, deps);
+
+			expect(existsSync(join(cwd, "user-file.txt")), "cancelling must not delete it").toBe(true);
+			expect(noticeText(calls)).toContain("cancelled");
+			// The checkpoint is still there to undo later.
+			expect(deps.session.checkpoints).toHaveLength(1);
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	it("--force skips the question and restores", async () => {
+		const { cwd, checkpoint } = repoWithCheckpoint();
+		try {
+			const { deps } = createFakeDeps({ cwd });
+			deps.session.checkpoints = [checkpoint as never];
+			let asked = false;
+			deps.pickers.pickOption = async () => {
+				asked = true;
+				return false;
+			};
+
+			await handleInput("/undo --force", undefined, deps);
+
+			expect(asked, "--force must not prompt").toBe(false);
+			expect(existsSync(join(cwd, "user-file.txt"))).toBe(false);
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+});
+
 describe("/rules", () => {
 	// The agent loop tracks which auto rules have latched, and for a thin
 	// client that loop is the daemon's. /rules printed the local view
