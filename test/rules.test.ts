@@ -857,12 +857,50 @@ describe("rules", () => {
 			expect(star.globs).toEqual(["*.tsx"]);
 			expect(star.applyMode).toBe("auto");
 			expect(star.description).toBe("web");
-			expect(matchesRuleGlobs(star, ["src/App.tsx"])).toBe(true);
+			// Strict path semantics: `*.tsx` is a root-level file, not any .tsx
+			// anywhere. `**/*.tsx` is how you say "anywhere".
+			expect(matchesRuleGlobs(star, ["App.tsx"])).toBe(true);
+			expect(matchesRuleGlobs(star, ["src/App.tsx"])).toBe(false);
 
 			expect(rules.find((r) => r.name === "commas")!.globs).toEqual(["*.ts", "*.md"]);
 			expect(rules.find((r) => r.name === "listed")!.globs).toEqual(["app/**/*.tsx"]);
 			// Booleans still survive the fallback reader.
 			expect(rules.find((r) => r.name === "always")!.applyMode).toBe("always");
+		});
+
+		// A glob is read against the whole project-relative path, the way Cursor
+		// and minimatch read it. cast used to also try the bare filename, so
+		// every `*.ts` silently behaved like `**/*.ts` — a rule written for the
+		// root attached itself six directories down with nothing saying it would.
+		it("matches globs against the whole path, with braces and a leading ./ handled", () => {
+			const cases: Array<[string, string, boolean]> = [
+				["*.ts", "a.ts", true],
+				["*.ts", "src/a.ts", false],
+				["**/*.ts", "src/deep/a.ts", true],
+				["src/*.ts", "src/a.ts", true],
+				["src/*.ts", "src/deep/a.ts", false],
+				["docs/**", "docs/a/b.md", true],
+				["docs/**", "other/b.md", false],
+				["*.{ts,tsx}", "a.tsx", true],
+				["*.{ts,tsx}", "a.js", false],
+				["./src/*.ts", "src/a.ts", true],
+				["?.ts", "ab.ts", false],
+			];
+			for (const [pattern, file, expected] of cases) {
+				expect(fileMatchesGlob(pattern, file), `${pattern} vs ${file}`).toBe(expected);
+			}
+		});
+
+		it("splits a comma-separated glob list without breaking brace groups", () => {
+			const rulesDir = join(projectDir, ".cast", "rules");
+			mkdirSync(rulesDir, { recursive: true });
+			writeFileSync(join(rulesDir, "braces.md"), "---\nglobs: **/*.{ts,tsx}, docs/**\n---\nBRACES");
+
+			const rule = loadDirectoryRules({ projectCwd: projectDir }).find((r) => r.name === "braces")!;
+			expect(rule.globs).toEqual(["**/*.{ts,tsx}", "docs/**"]);
+			expect(matchesRuleGlobs(rule, ["src/a.tsx"])).toBe(true);
+			expect(matchesRuleGlobs(rule, ["docs/guide/x.md"])).toBe(true);
+			expect(matchesRuleGlobs(rule, ["src/a.py"])).toBe(false);
 		});
 
 		it("keeps loading the other rules when one file's frontmatter is unparseable", () => {
@@ -874,6 +912,30 @@ describe("rules", () => {
 			const rules = loadDirectoryRules({ projectCwd: projectDir });
 			expect(rules.map((r) => r.name).sort()).toEqual(["broken", "good"]);
 			expect(formatAlwaysApplyRules(rules)).toContain("GOOD");
+		});
+
+		// Cursor writes `.mdc`, organises rules in subdirectories of the rules
+		// folder, and keeps them in `.cursor/rules`. cast read only top-level
+		// `.md` under `.cast/rules`, so a Cursor project's rules were invisible.
+		it("loads .mdc files, rules-directory subfolders, and .cursor/rules", () => {
+			mkdirSync(join(projectDir, ".cast", "rules", "backend"), { recursive: true });
+			mkdirSync(join(projectDir, ".cursor", "rules"), { recursive: true });
+			writeFileSync(join(projectDir, ".cast", "rules", "root.md"), "---\nalwaysApply: true\n---\nROOT");
+			writeFileSync(
+				join(projectDir, ".cast", "rules", "backend", "api.mdc"),
+				"---\nglobs: src/api/**/*.ts\n---\nAPI",
+			);
+			writeFileSync(join(projectDir, ".cursor", "rules", "cursor-side.mdc"), "---\nalwaysApply: true\n---\nCURSOR");
+
+			const rules = loadDirectoryRules({ projectCwd: projectDir });
+			expect(rules.map((r) => r.name).sort()).toEqual(["api", "cursor-side", "root"]);
+			// A subfolder is organisation, not scope: the rule keeps the directory's.
+			expect(rules.find((r) => r.name === "api")!.scope).toBe("");
+			expect(matchesRuleGlobs(rules.find((r) => r.name === "api")!, ["src/api/users.ts"])).toBe(true);
+
+			const injected = formatAlwaysApplyRules(rules);
+			expect(injected).toContain("ROOT");
+			expect(injected).toContain("CURSOR");
 		});
 
 		// The catalog is built once per turn, so /rule:name can land on a file

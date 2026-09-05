@@ -19,10 +19,12 @@
 
 import { type Dirent, existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
 import { parseFrontmatter } from "./frontmatter.ts";
 import { promptsDir, readRequiredPrompt } from "./prompts.ts";
 
+const LEADING_DOT_SLASH_RE = /^\.\//;
+const LEADING_SLASH_RE = /^\//;
 const REGEX_SPECIAL_CHARS_RE = /[.*+?^${}()|[\]\\]/g;
 const AMP_RE = /&/g;
 const LT_RE = /</g;
@@ -101,7 +103,7 @@ export function hasProjectRulesDir(cwd: string): boolean {
 	const dir = projectRulesDir(cwd);
 	if (!dir || !existsSync(dir)) return false;
 	try {
-		return readdirSync(dir).some((f) => f.endsWith(".md"));
+		return readdirSync(dir).some((f) => isRuleFile(f));
 	} catch {
 		return false;
 	}
@@ -123,12 +125,28 @@ function classifyApplyMode(r: Rule): ApplyMode {
 	return "manual";
 }
 
-/** `*.ts, *.tsx` → ["*.ts", "*.tsx"]. A glob never legitimately contains a comma. */
+/**
+ * `*.ts, *.tsx` → ["*.ts", "*.tsx"] — Cursor's comma-separated form.
+ *
+ * Commas inside braces belong to the glob itself (`*.{ts,tsx}` is one pattern),
+ * so only top-level commas split.
+ */
 function splitGlobList(value: string): string[] {
-	return value
-		.split(",")
-		.map((part) => part.trim())
-		.filter(Boolean);
+	const parts: string[] = [];
+	let depth = 0;
+	let current = "";
+	for (const ch of value) {
+		if (ch === "{") depth++;
+		else if (ch === "}") depth = Math.max(0, depth - 1);
+		if (ch === "," && depth === 0) {
+			parts.push(current);
+			current = "";
+			continue;
+		}
+		current += ch;
+	}
+	parts.push(current);
+	return parts.map((part) => part.trim()).filter(Boolean);
 }
 
 const FRONTMATTER_BLOCK_RE = /^---\r?\n([\s\S]*?)\r?\n---/;
@@ -173,7 +191,10 @@ function loadRuleFromFile(filePath: string, source: RuleSource, scope: string): 
 	// field with it. Fall back to reading the fields off the raw lines, which is
 	// all a Cursor rule's frontmatter ever is: flat `key: value` pairs.
 	const frontmatter = parsed.errors.length > 0 ? parseCursorishFrontmatter(raw) : parsed.frontmatter;
-	const name = frontmatter.name && typeof frontmatter.name === "string" ? frontmatter.name : basename(filePath, ".md");
+	const name =
+		frontmatter.name && typeof frontmatter.name === "string"
+			? frontmatter.name
+			: basename(filePath, extname(filePath));
 	const description = typeof frontmatter.description === "string" ? frontmatter.description : "";
 	const alwaysApply = frontmatter["always-apply"] === true || frontmatter.alwaysApply === true;
 
@@ -204,7 +225,22 @@ function loadRuleFromFile(filePath: string, source: RuleSource, scope: string): 
 	return rule;
 }
 
-function loadRulesFromDir(dir: string, source: RuleSource, scope: string): Rule[] {
+/**
+ * Rule file extensions. `.mdc` is what Cursor writes; `.md` is cast's own and
+ * stays first so a project holding both keeps its existing behaviour.
+ */
+const RULE_FILE_EXTENSIONS = [".md", ".mdc"];
+
+function isRuleFile(name: string): boolean {
+	return RULE_FILE_EXTENSIONS.some((ext) => name.endsWith(ext));
+}
+
+/** How deep to descend *inside* a rules directory. Folders there are for
+ * organisation, not for scoping — a rule keeps the scope of the `.cast/rules`
+ * (or `.cursor/rules`) directory it lives under, however it is filed. */
+const MAX_RULE_DIR_DEPTH = 4;
+
+function loadRulesFromDir(dir: string, source: RuleSource, scope: string, depth = 0): Rule[] {
 	if (!existsSync(dir)) return [];
 
 	let entries: Dirent[];
@@ -216,7 +252,14 @@ function loadRulesFromDir(dir: string, source: RuleSource, scope: string): Rule[
 
 	const rules: Rule[] = [];
 	for (const entry of [...entries].sort((a, b) => a.name.localeCompare(b.name))) {
-		if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+		if (entry.isDirectory()) {
+			// Cursor lets rules be organised in subdirectories of the rules
+			// directory; reading only the top level silently ignored them.
+			if (depth < MAX_RULE_DIR_DEPTH)
+				rules.push(...loadRulesFromDir(join(dir, entry.name), source, scope, depth + 1));
+			continue;
+		}
+		if (!entry.isFile() || !isRuleFile(entry.name)) continue;
 		const rule = loadRuleFromFile(join(dir, entry.name), source, scope);
 		if (rule) rules.push(rule);
 	}
@@ -260,6 +303,15 @@ const DISCOVERY_IGNORE_DIRS = new Set([
  */
 const MAX_SCANNED_DIRS = 4000;
 
+/**
+ * The rules directories a single directory can hold: cast's own, plus Cursor's
+ * — a project that already keeps rules in `.cursor/rules` needs no second copy.
+ * cast's own is listed first so it wins a same-named rule.
+ */
+function ruleDirsAt(absDir: string): string[] {
+	return [join(absDir, ".cast", "rules"), join(absDir, ".cursor", "rules")].filter((dir) => existsSync(dir));
+}
+
 export function discoverProjectRuleDirs(cwd: string, maxDepth = 8): Array<{ dir: string; scope: string }> {
 	const found: Array<{ dir: string; scope: string }> = [];
 	// Breadth-first so the budget spends itself on the levels nearest the root
@@ -271,8 +323,7 @@ export function discoverProjectRuleDirs(cwd: string, maxDepth = 8): Array<{ dir:
 
 	while (queue.length > 0) {
 		const { absDir, scope, depth } = queue.shift()!;
-		const rulesDir = join(absDir, ".cast", "rules");
-		if (existsSync(rulesDir)) found.push({ dir: rulesDir, scope });
+		for (const rulesDir of ruleDirsAt(absDir)) found.push({ dir: rulesDir, scope });
 		if (depth >= maxDepth || scanned >= MAX_SCANNED_DIRS) continue;
 
 		let entries: Dirent[];
@@ -337,12 +388,14 @@ export function loadDirectoryRules(options: LoadRulesOptions): Rule[] {
 // ============================================================================
 
 /**
- * Convert a glob pattern to a regex source. A lone `*` does not cross
- * path separators; a double star matches across them.
+ * Convert a glob to a regex source, reading it the way Cursor (and minimatch,
+ * and every editor's `files.exclude`) does:
  *
- * The double-star-slash pattern (e.g. `src/components/[star][star]/[star].tsx`)
- * matches zero or more intermediate segments, so it finds both
- * `src/components/App.tsx` and `src/components/foo/Bar.tsx`.
+ *   `*`         one path segment, never crossing a slash
+ *   `?`         one character, never a slash
+ *   `**` + `/`  zero or more whole segments
+ *   `/` + `**`  everything below that directory
+ *   `{a,b}`     alternatives
  */
 function globToRegExpSource(glob: string): string {
 	let out = "";
@@ -351,13 +404,11 @@ function globToRegExpSource(glob: string): string {
 		if (ch === "*") {
 			if (glob[i + 1] === "*") {
 				i++;
-				// Double-star-slash matches zero or more path segments.
-				// Double-star at end matches everything remaining.
 				if (glob[i + 1] === "/") {
 					i++;
-					out += "(.*\\/)?";
-				} else if (i === glob.length - 1) {
-					out += ".*";
+					out += "(?:[^/]+/)*";
+				} else if (out.endsWith("/")) {
+					out = `${out.slice(0, -1)}(?:/.*)?`;
 				} else {
 					out += ".*";
 				}
@@ -366,6 +417,18 @@ function globToRegExpSource(glob: string): string {
 			}
 		} else if (ch === "?") {
 			out += "[^/]";
+		} else if (ch === "{") {
+			const close = glob.indexOf("}", i);
+			if (close === -1) {
+				out += "\\{";
+			} else {
+				const alternatives = glob
+					.slice(i + 1, close)
+					.split(",")
+					.map((part) => globToRegExpSource(part.trim()));
+				out += `(?:${alternatives.join("|")})`;
+				i = close;
+			}
 		} else {
 			out += ch.replace(REGEX_SPECIAL_CHARS_RE, "\\$&");
 		}
@@ -373,18 +436,25 @@ function globToRegExpSource(glob: string): string {
 	return out;
 }
 
-/** Check if a file path matches a glob pattern. */
+/** Drop a leading `./` or `/` so pattern and path are compared on equal terms. */
+function normalizeGlobPath(value: string): string {
+	return value.replace(LEADING_DOT_SLASH_RE, "").replace(LEADING_SLASH_RE, "");
+}
+
+/**
+ * Check if a file path matches a glob pattern.
+ *
+ * The pattern is matched against the whole project-relative path: `*.ts` is a
+ * `.ts` file at the root, `src/*.ts` one directly in `src/`, and only a leading
+ * double-star reaches deeper. cast used to also try every pattern against the
+ * bare filename, which silently promoted every `*.ts` to a recursive one —
+ * handy until a rule written for the root attached itself to a file six
+ * directories down, with nothing in the rule saying it should.
+ */
 export function fileMatchesGlob(pattern: string, filePath: string): boolean {
-	// Try full path match
-	const re = new RegExp(`^${globToRegExpSource(pattern)}$`);
-	if (re.test(filePath)) return true;
-	// Try basename match for `**/*.ext` patterns
-	const simplePattern = pattern.startsWith("**/") ? pattern.slice(3) : pattern;
-	const simpleRe = new RegExp(`^${globToRegExpSource(simplePattern)}$`);
-	const base = filePath.split("/").pop() ?? filePath;
-	if (simpleRe.test(base)) return true;
-	// Try the simplified pattern against the full path
-	return simpleRe.test(filePath);
+	const normalized = normalizeGlobPath(pattern);
+	if (!normalized) return false;
+	return new RegExp(`^${globToRegExpSource(normalized)}$`).test(normalizeGlobPath(filePath));
 }
 
 /**

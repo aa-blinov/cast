@@ -25,7 +25,7 @@ This skill ships as an **index + reference files**. Read only what the task need
 | Personas — locations, frontmatter, isolation knobs, example | `references/personas.md` |
 | Skills — locations, format, discovery order, example | `references/skills.md` |
 | MCP servers — `mcp.json` shape, transports, commands | `references/mcp.md` |
-| Rules — apply modes, globs, `@rule-name` vs `/rule:` | `references/rules.md` |
+| Rules — apply modes, glob syntax, nested rules, choosing a mode, `@rule-name` vs `/rule:` | `references/rules.md` |
 | Hooks — `hooks.json` shape, events, matchers, env vars | `references/hooks.md` |
 | Slash commands — full table, hot-reload vs `/reload` | `references/commands.md` |
 | Providers and model slots — OpenAI-compatible endpoint, reasoning, validation | `references/providers.md` |
