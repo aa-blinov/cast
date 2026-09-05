@@ -23,7 +23,13 @@ import { initialAnnouncedLocalDate } from "../core/date-rollover-reminder.ts";
 import { hasHooks, hookPromptContext, runHooksForEvent } from "../core/hooks.ts";
 import { createClient, type Message, streamAndCollect } from "../core/llm.ts";
 import { type AgentEvent, compactSessionMessages, runAgentLoop, runMemoryMaintenanceAgent } from "../core/loop.ts";
-import { closeMcpConnections, formatMcpForPrompt, type McpSetupResult } from "../core/mcp.ts";
+import {
+	closeMcpConnections,
+	connectMcpServers,
+	formatMcpForPrompt,
+	loadMcpConfig,
+	type McpSetupResult,
+} from "../core/mcp.ts";
 import {
 	cancelAutomaticMemoryRun,
 	distillProjectMemory,
@@ -43,6 +49,7 @@ import {
 	buildSystemPrompt,
 	discoverSkillsForCwd,
 	listHooksForCwdSettings,
+	projectMcpPath,
 	readSkillsShSources,
 	removeMcpServerFromDisk,
 	resolveHooksForCwd,
@@ -859,6 +866,78 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	}
 
 	/**
+	 * MCP servers declared by a session's own project.
+	 *
+	 * Global servers (`~/.cast/mcp.json`) stay shared: they are one set of live
+	 * processes for the whole daemon, and duplicating them per directory would
+	 * multiply real processes for no gain. A project's `.cast/mcp.json`, though,
+	 * only ever reached a session when the daemon happened to be started in that
+	 * project — so a session opened anywhere else silently ran without the
+	 * servers its own repository declares.
+	 *
+	 * Connecting is slow (seconds) and asynchronous, so it starts in the
+	 * background when the session is created and the tools join from the turn
+	 * after they land — the same shape as the daemon's own deferred connect.
+	 * Connections are closed once no live session is left in that directory.
+	 */
+	const projectMcpByCwd = new Map<string, { result?: McpSetupResult; pending?: Promise<void> }>();
+
+	function ensureProjectMcpForCwd(sessionCwd: string): void {
+		if (sessionCwd === cwd || projectMcpByCwd.has(sessionCwd)) return;
+		const mcpPath = projectMcpPath(sessionCwd);
+		if (!mcpPath || !existsSync(mcpPath) || !trustForSessionCwd(sessionCwd)) return;
+		const disabled = new Set(loadSettings().disabledMcpServers ?? []);
+		const servers = Object.fromEntries(
+			Object.entries(loadMcpConfig(mcpPath)).filter(([name]) => !disabled.has(name)),
+		);
+		if (Object.keys(servers).length === 0) return;
+		const entry: { result?: McpSetupResult; pending?: Promise<void> } = {};
+		const names = Object.keys(servers).sort((a, b) => a.localeCompare(b));
+		entry.pending = connectMcpServers(servers)
+			.then((result: McpSetupResult) => {
+				// connectMcpServers reports tools and connections; the names and
+				// their origin are the caller's to fill in (resolveMcpForCwd does
+				// the same), and without them /mcp listed these as "global".
+				result.allServerNames = names;
+				result.serverSources = Object.fromEntries(names.map((n) => [n, "project" as const]));
+				entry.result = result;
+			})
+			.catch(() => {
+				// A project's servers failing to connect must not take the session
+				// with them; the turn runs with the global set.
+			});
+		projectMcpByCwd.set(sessionCwd, entry);
+	}
+
+	/** Global set plus this session's project servers, project winning a name clash. */
+	function mcpForSessionCwd(sessionCwd: string): McpSetupResult {
+		const project = projectMcpByCwd.get(sessionCwd)?.result;
+		if (!project) return mcpResult;
+		return {
+			...mcpResult,
+			toolIndex: new Map([...mcpResult.toolIndex, ...project.toolIndex]),
+			toolDefinitions: [...mcpResult.toolDefinitions, ...project.toolDefinitions],
+			connections: [...mcpResult.connections, ...project.connections],
+			diagnostics: [...mcpResult.diagnostics, ...project.diagnostics],
+			allServerNames: [...new Set([...mcpResult.allServerNames, ...project.allServerNames])],
+			serverSources: { ...mcpResult.serverSources, ...project.serverSources },
+		};
+	}
+
+	/** Drop a directory's servers once its last live session is gone. */
+	function releaseProjectMcpForCwd(sessionCwd: string): void {
+		const entry = projectMcpByCwd.get(sessionCwd);
+		if (!entry) return;
+		for (const other of sessions.values()) {
+			if ((other.session.cwd ?? cwd) === sessionCwd) return;
+		}
+		projectMcpByCwd.delete(sessionCwd);
+		void entry.pending?.then(() => {
+			if (entry.result) void closeMcpConnections(entry.result.connections);
+		});
+	}
+
+	/**
 	 * SSH hosts visible to one session.
 	 *
 	 * `.cast/ssh.json` is project-local and trust-gated, and the daemon merged
@@ -1182,6 +1261,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		};
 
 		sessions.set(session.id, ws);
+		ensureProjectMcpForCwd(session.cwd ?? cwd);
 		if (runSessionStartHook) {
 			// Fire-and-forget (SessionStart is non-blocking, matching Grok Build) —
 			// this function is sync and callers don't need to wait on a hook script.
@@ -1241,6 +1321,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			systemPrompt: computeSystemPrompt(persona, session.model, session.cwd ?? cwd, session.mode),
 		};
 		sessions.set(session.id, ws);
+		ensureProjectMcpForCwd(session.cwd ?? cwd);
 		syncFsWatcher(ws);
 		broadcastSessionUpdate(ws);
 		return ws;
@@ -1712,6 +1793,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// Same reasoning as the personas above, and the same per-directory gap
 		// rules had: a session in another project must see that project's skills.
 		ws.sessionSkills = skillsForSessionCwd(sessionCwd);
+		// Project MCP servers connect in the background; whatever has landed by
+		// now joins this turn, the rest join the next one.
+		const sessionMcp = mcpForSessionCwd(sessionCwd);
 		const submitHooks = resolveHooksForCwd(sessionCwd, trustForSessionCwd(sessionCwd));
 		if (hasHooks(submitHooks)) {
 			let submitResult: Awaited<ReturnType<typeof runHooksForEvent>>;
@@ -1968,7 +2052,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					rulesBlock,
 					sessionRules.lazySuffix,
 					formatSkillsForPrompt(ws.sessionSkills ?? skills, persona.skills, ctxFiles),
-					formatMcpForPrompt(mcpResult, persona.mcp),
+					formatMcpForPrompt(sessionMcp, persona.mcp),
 					sessionCwd,
 					{
 						// The run's own resolved level/meta, not the global ones —
@@ -1997,8 +2081,8 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			disabledTools,
 			planState,
 			initialTodos: ws.session.todos,
-			mcpTools: mcpResult.toolDefinitions,
-			mcpToolIndex: mcpResult.toolIndex,
+			mcpTools: sessionMcp.toolDefinitions,
+			mcpToolIndex: sessionMcp.toolIndex,
 			hooks: submitHooks,
 			sessionId: ws.session.id,
 			permissionMode,
@@ -2019,7 +2103,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			projectTrusted: trustForSessionCwd(sessionCwd),
 			sshHosts: sshHostsForSessionCwd(sessionCwd),
 			backgroundBash: ws.backgroundBash,
-			mcpPromptSuffix: formatMcpForPrompt(mcpResult, persona.mcp),
+			mcpPromptSuffix: formatMcpForPrompt(sessionMcp, persona.mcp),
 			beforeFileWrite: (path) => {
 				backupFileForCheckpoint(chk, path);
 				updateLastCheckpoint(ws.session.id, chk);
@@ -2710,6 +2794,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		if (eviction) clearTimeout(eviction);
 		idleSessionEvictions.delete(sessionId);
 		sessions.delete(sessionId);
+		releaseProjectMcpForCwd(ws.session.cwd ?? cwd);
 		return true;
 	}
 
@@ -2808,6 +2893,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			systemPrompt: computeSystemPrompt(persona, session.model, session.cwd ?? cwd, session.mode),
 		};
 		sessions.set(session.id, ws);
+		ensureProjectMcpForCwd(session.cwd ?? cwd);
 		void runHooksForEvent(resolveHooksForCwd(session.cwd ?? cwd, trustForSessionCwd(session.cwd ?? cwd)), {
 			event: "SessionStart",
 			cwd: session.cwd ?? cwd,
@@ -3888,15 +3974,19 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			const [sub, rest] = splitArg(arg);
 			const sessionCwd = ws.session.cwd ?? cwd;
 			if (!sub || sub === "list") {
+				// The session's set, not the daemon's: a project's own servers are
+				// connected for its directory, and a listing that omitted them
+				// disagreed with the tools the model actually has.
+				const sessionMcp = mcpForSessionCwd(sessionCwd);
 				return {
 					ok: true,
-					result: mcpResult.allServerNames.map((n) => ({
+					result: sessionMcp.allServerNames.map((n) => ({
 						name: n,
-						source: mcpResult.serverSources[n] ?? "global",
+						source: sessionMcp.serverSources[n] ?? "global",
 						// alive, not merely present: a server whose transport died is
 						// still in `connections` (nothing prunes it), and reporting it
 						// as connected sent the user looking for a problem elsewhere.
-						connected: mcpResult.connections.some((c) => c.serverName === n && c.alive !== false),
+						connected: sessionMcp.connections.some((c) => c.serverName === n && c.alive !== false),
 						disabled: (loadSettings().disabledMcpServers ?? []).includes(n),
 					})),
 				};

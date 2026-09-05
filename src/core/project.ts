@@ -99,7 +99,7 @@ function projectAgentsSkillsDir(targetCwd: string): string | undefined {
 	return globals.has(dir) ? undefined : dir;
 }
 
-function projectMcpPath(targetCwd: string): string | undefined {
+export function projectMcpPath(targetCwd: string): string | undefined {
 	const path = join(targetCwd, ".cast", "mcp.json");
 	return path !== globalMcpPath() ? path : undefined;
 }
