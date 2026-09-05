@@ -14,7 +14,11 @@ import { subscribeAgentActorNotifications } from "../core/actor-events.ts";
 import type { AgentActorNotification } from "../core/actors.ts";
 import { backupFileForCheckpoint, createCheckpoint, restoreCheckpoint } from "../core/checkpoint.ts";
 import { fetchModels, type ModelInfo, probeProvider, resolveProvider } from "../core/config.ts";
-import { formatContextFilesForPrompt, resolveNestedContextFiles } from "../core/context-files.ts";
+import {
+	formatContextFilesForPrompt,
+	loadProjectContextFiles,
+	resolveNestedContextFiles,
+} from "../core/context-files.ts";
 import { initialAnnouncedLocalDate } from "../core/date-rollover-reminder.ts";
 import { hasHooks, hookPromptContext, runHooksForEvent } from "../core/hooks.ts";
 import { createClient, type Message, streamAndCollect } from "../core/llm.ts";
@@ -842,14 +846,27 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	}
 
 	/**
-	 * Skills for one session's own directory, cached per directory.
+	 * The root AGENTS.md/CLAUDE.md text for one session's own directory.
 	 *
-	 * Same defect the rules had: the daemon discovered skills once, for its own
-	 * directory, so a session opened elsewhere never saw that project's
-	 * `.cast/skills` (or `.agents/skills`). Resolution is async, so it runs
-	 * before the turn starts and the result is parked on the session for the
-	 * synchronous prompt rebuild to read.
+	 * Loaded once for the daemon's directory before this, so a session in
+	 * another project was handed a different project's instructions — and never
+	 * saw its own.
 	 */
+	const contextFilesByCwd = new Map<string, string>();
+	function contextFilesSuffixForCwd(sessionCwd: string): string {
+		if (sessionCwd === cwd) return contextFilesSuffix;
+		const cached = contextFilesByCwd.get(sessionCwd);
+		if (cached !== undefined) return cached;
+		let suffix: string;
+		try {
+			suffix = formatContextFilesForPrompt(loadProjectContextFiles(sessionCwd, trustForSessionCwd(sessionCwd)));
+		} catch {
+			suffix = "";
+		}
+		contextFilesByCwd.set(sessionCwd, suffix);
+		return suffix;
+	}
+
 	/**
 	 * Skills for one session's own directory, cached per directory.
 	 *
@@ -1030,11 +1047,12 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// the active persona is reflected in what the model is told is
 		// available — kept in sync with what loop.ts actually lets it call.
 		const suffix = formatSkillsForPrompt(skills, persona.skills);
+		const sessionRules = rulesForSessionCwd(sessionCwd);
 		return buildSystemPrompt(
 			persona,
-			contextFilesSuffix,
-			rulesSuffix,
-			rulesLazySuffix,
+			contextFilesSuffixForCwd(sessionCwd),
+			sessionRules.alwaysApplySuffix,
+			sessionRules.lazySuffix,
 			suffix,
 			formatMcpForPrompt(mcpResult, persona.mcp),
 			sessionCwd,
@@ -1132,7 +1150,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		if (runSessionStartHook) {
 			// Fire-and-forget (SessionStart is non-blocking, matching Grok Build) —
 			// this function is sync and callers don't need to wait on a hook script.
-			void runHooksForEvent(resolveHooksForCwd(sessionCwd, projectTrusted), {
+			void runHooksForEvent(resolveHooksForCwd(sessionCwd, trustForSessionCwd(sessionCwd)), {
 				event: "SessionStart",
 				cwd: sessionCwd,
 				sessionId: session.id,
@@ -1209,7 +1227,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	 *  Deliberately only the two moments that actually warrant interrupting
 	 *  someone: a turn finished, or the agent is blocked on the user. */
 	function fireNotificationHook(ws: WebAgentSession, type: "turn_complete" | "input_needed", message: string): void {
-		const hooks = resolveHooksForCwd(ws.session.cwd ?? cwd, projectTrusted);
+		const hooks = resolveHooksForCwd(ws.session.cwd ?? cwd, trustForSessionCwd(ws.session.cwd ?? cwd));
 		if (!hooks.Notification?.length) return;
 		void runHooksForEvent(hooks, {
 			event: "Notification",
@@ -1278,7 +1296,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					if (!ws || ws.status !== "idle") return;
 					broadcast(ws, { type: "fs_change" });
 					const hookEvent = eventName === "addDir" ? "DirectoryAdded" : "FileChanged";
-					const hooks = resolveHooksForCwd(ws.session.cwd ?? cwd, projectTrusted);
+					const hooks = resolveHooksForCwd(ws.session.cwd ?? cwd, trustForSessionCwd(ws.session.cwd ?? cwd));
 					void runHooksForEvent(hooks, {
 						event: hookEvent,
 						cwd: ws.session.cwd ?? cwd,
@@ -1386,7 +1404,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	}
 	/** Toggles the idle watcher as the session enters/leaves a turn. */
 	function syncFsWatcher(ws: WebAgentSession): void {
-		const hooks = resolveHooksForCwd(ws.session.cwd ?? cwd, projectTrusted);
+		const hooks = resolveHooksForCwd(ws.session.cwd ?? cwd, trustForSessionCwd(ws.session.cwd ?? cwd));
 		const needsFileHooks = Boolean(hooks.FileChanged?.length || hooks.DirectoryAdded?.length);
 		if (ws.status === "idle" && (ws.listeners.size > 0 || needsFileHooks)) startFsWatcher(ws);
 		else stopFsWatcher(ws.id);
@@ -1407,7 +1425,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 
 	/** Observation-only, fire-and-forget — a skill/rule name expanding into its actual prompt content. */
 	function fireUserPromptExpansion(sessionCwd: string, name: string): void {
-		const hooks = resolveHooksForCwd(sessionCwd, projectTrusted);
+		const hooks = resolveHooksForCwd(sessionCwd, trustForSessionCwd(sessionCwd));
 		if (!hasHooks(hooks)) return;
 		void runHooksForEvent(hooks, {
 			event: "UserPromptExpansion",
@@ -1600,11 +1618,11 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// session's persona sources before every new turn so an override written in
 		// the previous turn is effective without reconnecting MCP or restarting the
 		// daemon. The active turn keeps the old tool set; only this next turn changes.
-		const turnPersonas = resolvePersonasForCwd(sessionCwd, projectTrusted).personas;
+		const turnPersonas = resolvePersonasForCwd(sessionCwd, trustForSessionCwd(sessionCwd)).personas;
 		// Same reasoning as the personas above, and the same per-directory gap
 		// rules had: a session in another project must see that project's skills.
 		ws.sessionSkills = skillsForSessionCwd(sessionCwd);
-		const submitHooks = resolveHooksForCwd(sessionCwd, projectTrusted);
+		const submitHooks = resolveHooksForCwd(sessionCwd, trustForSessionCwd(sessionCwd));
 		if (hasHooks(submitHooks)) {
 			let submitResult: Awaited<ReturnType<typeof runHooksForEvent>>;
 			try {
@@ -1851,12 +1869,12 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				ws.activeAutoRules = sticky;
 				const mentioned = selectMentionedRules(sessionRules.directoryRules, userText);
 				const rulesBlock = formatRulesForTurn(sticky, mentioned);
-				const nestedContext = projectTrusted
+				const nestedContext = trustForSessionCwd(sessionCwd)
 					? formatContextFilesForPrompt(resolveNestedContextFiles(sessionCwd, ctxFiles))
 					: "";
 				return buildSystemPrompt(
 					persona,
-					contextFilesSuffix + nestedContext,
+					contextFilesSuffixForCwd(sessionCwd) + nestedContext,
 					rulesBlock,
 					sessionRules.lazySuffix,
 					formatSkillsForPrompt(ws.sessionSkills ?? skills, persona.skills, ctxFiles),
@@ -2057,12 +2075,15 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					);
 				}
 				if (event.type === "assistant_message") {
-					void runHooksForEvent(resolveHooksForCwd(ws.session.cwd ?? cwd, projectTrusted), {
-						event: "MessageDisplay",
-						cwd: ws.session.cwd ?? cwd,
-						sessionId: ws.id,
-						payload: { message: event.content, tool_calls: event.toolCalls },
-					});
+					void runHooksForEvent(
+						resolveHooksForCwd(ws.session.cwd ?? cwd, trustForSessionCwd(ws.session.cwd ?? cwd)),
+						{
+							event: "MessageDisplay",
+							cwd: ws.session.cwd ?? cwd,
+							sessionId: ws.id,
+							payload: { message: event.content, tool_calls: event.toolCalls },
+						},
+					);
 					// The loop commits this placeholder when a retried turn is
 					// still empty — a real quality signal for the Reliability tab.
 					if (event.content === "(no response)") {
@@ -2579,7 +2600,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		if (countTurnMessages(ws.session.messages) > 0) {
 			saveSession(ws.session);
 		}
-		void runHooksForEvent(resolveHooksForCwd(ws.session.cwd ?? cwd, projectTrusted), {
+		void runHooksForEvent(resolveHooksForCwd(ws.session.cwd ?? cwd, trustForSessionCwd(ws.session.cwd ?? cwd)), {
 			event: "SessionEnd",
 			cwd: ws.session.cwd ?? cwd,
 			sessionId: ws.session.id,
@@ -2691,7 +2712,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			systemPrompt: computeSystemPrompt(persona, session.model, session.cwd ?? cwd, session.mode),
 		};
 		sessions.set(session.id, ws);
-		void runHooksForEvent(resolveHooksForCwd(session.cwd ?? cwd, projectTrusted), {
+		void runHooksForEvent(resolveHooksForCwd(session.cwd ?? cwd, trustForSessionCwd(session.cwd ?? cwd)), {
 			event: "SessionStart",
 			cwd: session.cwd ?? cwd,
 			sessionId: session.id,
@@ -3419,7 +3440,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					result: "/hooks · /hooks enable <id> · /hooks disable <id> — see docs/hooks.md",
 				};
 			}
-			const { entries, diagnostics } = listHooksForCwdSettings(sessionCwd, projectTrusted);
+			const { entries, diagnostics } = listHooksForCwdSettings(sessionCwd, trustForSessionCwd(sessionCwd));
 			if (!verb) {
 				return { ok: true, result: { entries, diagnostics } };
 			}
@@ -3446,7 +3467,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		}
 		if (name === "/compact") {
 			if (ws.session.messages.length === 0) return { ok: true, result: "Nothing to compact yet" };
-			const compactHooks = resolveHooksForCwd(ws.session.cwd ?? cwd, projectTrusted);
+			const compactHooks = resolveHooksForCwd(ws.session.cwd ?? cwd, trustForSessionCwd(ws.session.cwd ?? cwd));
 			const preCompact = await runHooksForEvent(compactHooks, {
 				event: "PreCompact",
 				cwd: ws.session.cwd ?? cwd,
@@ -3737,11 +3758,12 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				skills = skillsResult.skills;
 				rulesByCwd.clear();
 				skillsByCwd.clear();
+				contextFilesByCwd.clear();
 				const rules = resolveRulesForCwd(sessionCwd, projectTrusted);
 				rulesSuffix = rules.alwaysApplySuffix;
 				rulesLazySuffix = rules.lazySuffix;
 				directoryRules = rules.directoryRules;
-				personas = resolvePersonasForCwd(sessionCwd, projectTrusted).personas;
+				personas = resolvePersonasForCwd(sessionCwd, trustForSessionCwd(sessionCwd)).personas;
 				// Only reconnect MCP if the config actually changed on disk.
 				const prevNames = mcpResult.allServerNames.slice().sort().join(",");
 				const disabledMcp = loadSettings().disabledMcpServers ?? [];
