@@ -2021,6 +2021,70 @@ describe("runAgentLoop — context files drive rule auto-attach", () => {
 		}
 	});
 
+	// `edit` names its path argument `filePath`; every other file tool uses
+	// `path`. Only `path` was read, so the file the agent is actively editing
+	// never entered contextFiles — the clearest "this file is the work" signal
+	// there is — and a glob rule scoped to it never attached.
+	it("attaches a glob rule for a file the agent edited rather than read", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "cast-loop-rules-edit-"));
+		try {
+			mkdirSync(join(cwd, "src"), { recursive: true });
+			writeFileSync(join(cwd, "src", "App.tsx"), "export const App = () => null;");
+			const rulesDir = join(cwd, ".cast", "rules");
+			mkdirSync(rulesDir, { recursive: true });
+			writeFileSync(join(rulesDir, "web.md"), '---\nglobs: ["**/*.tsx"]\n---\nWEB_RULE_BODY');
+			const catalog = loadDirectoryRules({ projectCwd: cwd });
+
+			let sticky: ReturnType<typeof matchAutoRules> = [];
+			const prompts: string[] = [];
+			const rebuildSystemPrompt = ({ contextFiles }: { userText: string; contextFiles: string[] }) => {
+				sticky = unionStickyRules(sticky, matchAutoRules(catalog, contextFiles));
+				const p = `SYS${formatRulesForTurn(sticky, [])}`;
+				prompts.push(p);
+				return p;
+			};
+
+			const followUpQueue = new MessageQueue();
+			vi.mocked(streamAndCollect)
+				.mockImplementationOnce(async () => ({
+					content: "",
+					thinking: "",
+					finishReason: "stop",
+					toolCalls: [
+						{
+							id: "t1",
+							name: "edit",
+							arguments: JSON.stringify({
+								filePath: "src/App.tsx",
+								oldString: "null",
+								newString: "<div />",
+							}),
+						},
+					],
+				}))
+				.mockImplementationOnce(async () => {
+					followUpQueue.enqueue({ role: "user", content: "continue" });
+					return { content: "edited", thinking: "", finishReason: "stop" };
+				})
+				.mockImplementationOnce(async () => ({ content: "second turn", thinking: "", finishReason: "stop" }));
+
+			await runAgentLoop([{ role: "user", content: "tweak the component" }], {
+				config: testConfig,
+				model: "test-model",
+				cwd,
+				systemPrompt: "SYS",
+				followUpQueue,
+				rebuildSystemPrompt,
+				onEvent: () => {},
+			});
+
+			expect(prompts[0]).not.toContain("WEB_RULE_BODY");
+			expect(prompts.at(-1)).toContain("WEB_RULE_BODY");
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
 	it("attaches a glob rule within the SAME submit — the request after the read already carries it", async () => {
 		const cwd = mkdtempSync(join(tmpdir(), "cast-loop-rules2-"));
 		try {
