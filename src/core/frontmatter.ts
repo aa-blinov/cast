@@ -103,7 +103,18 @@ export function parseFrontmatter(content: string): ParsedFrontmatter {
 	const errors = document.errors.map((error) => error.message);
 	if (errors.length > 0) return { frontmatter: {}, body, errors };
 
-	const value = document.toJS();
+	// `parseDocument` reports syntax problems in `document.errors`, but some
+	// failures only surface when the tree is materialised — an unresolved alias
+	// being the one that matters here, because `globs: *.tsx` (ordinary Cursor
+	// notation) reads as a YAML alias. That threw out of every caller: one such
+	// rule took down the whole rules catalog, and the same would hold for a
+	// skill or a context file.
+	let value: unknown;
+	try {
+		value = document.toJS();
+	} catch (error) {
+		return { frontmatter: {}, body, errors: [error instanceof Error ? error.message : String(error)] };
+	}
 	if (value === null || value === undefined) return { frontmatter: {}, body, errors: [] };
 	if (typeof value !== "object" || Array.isArray(value)) {
 		return { frontmatter: {}, body, errors: ["frontmatter must be a YAML mapping"] };

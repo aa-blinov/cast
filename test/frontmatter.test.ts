@@ -68,6 +68,17 @@ describe("parseFrontmatter", () => {
 	});
 });
 
+// `globs: *.tsx` is ordinary Cursor rule notation, and YAML reads a leading
+// `*` as an alias. parseDocument accepts it, then toJS() throws — out of every
+// caller, so one such file took down the whole rules catalog (and would do the
+// same to a skill or context file).
+it("returns an error instead of throwing on an unresolved YAML alias", () => {
+	const result = parseFrontmatter("---\nglobs: *.tsx\n---\nbody text");
+	expect(result.errors.length).toBeGreaterThan(0);
+	expect(result.frontmatter).toEqual({});
+	expect(result.body).toBe("body text");
+});
+
 describe("parseToolsAllowlist", () => {
 	it("returns undefined when tools is omitted", () => {
 		expect(parseToolsAllowlist({})).toBeUndefined();
