@@ -1397,6 +1397,74 @@ describe("web bridge", () => {
 		}
 	});
 
+	// The daemon used to answer its own dangerous-command gate with an
+	// unconditional "yes", so rm -rf, sudo, git push --force and the rest ran
+	// without asking anyone — including for a TUI attached as a thin client,
+	// whose picker never got a say.
+	describe("dangerous-command confirmation", () => {
+		function confirmFromLoop(): (command: string, reason: string) => Promise<boolean> {
+			const opts = runAgentLoop.mock.calls.at(-1)![1] as {
+				confirmBash?: (command: string, reason: string) => Promise<boolean>;
+			};
+			expect(opts.confirmBash, "daemon must pass a confirm callback outside bypass mode").toBeTypeOf("function");
+			return opts.confirmBash!;
+		}
+
+		it("asks the connected clients and blocks until one answers", async () => {
+			const bridge = createServerBridge(makeResult());
+			const ws = bridge.createSession();
+			const events: Array<{ type: string; id?: string; command?: string; reason?: string }> = [];
+			bridge.subscribe(ws.id, (event) => events.push(event as { type: string }));
+			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
+
+			bridge.submit(ws.id, "clean up");
+			await new Promise<void>((resolve) => setImmediate(resolve));
+
+			const pending = confirmFromLoop()("rm -rf build", "recursive/force delete (rm -rf)");
+			await new Promise<void>((resolve) => setImmediate(resolve));
+
+			const asked = events.find((e) => e.type === "bash_confirm");
+			expect(asked?.command).toBe("rm -rf build");
+			expect(asked?.reason).toContain("rm -rf");
+			expect(bridge.getBashConfirm(ws.id)?.id).toBe(asked!.id);
+
+			expect(bridge.answerBashConfirm(ws.id, asked!.id!, true)).toBe(true);
+			await expect(pending).resolves.toBe(true);
+			// Settled: the same id cannot be answered twice.
+			expect(bridge.answerBashConfirm(ws.id, asked!.id!, true)).toBe(false);
+			expect(bridge.getBashConfirm(ws.id)).toBeUndefined();
+		});
+
+		it("denies when the answer says no, and ignores an id that is not pending", async () => {
+			const bridge = createServerBridge(makeResult());
+			const ws = bridge.createSession();
+			const events: Array<{ type: string; id?: string }> = [];
+			bridge.subscribe(ws.id, (event) => events.push(event as { type: string }));
+			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
+			bridge.submit(ws.id, "push it");
+			await new Promise<void>((resolve) => setImmediate(resolve));
+
+			const pending = confirmFromLoop()("git push --force", "force push (rewrites remote history)");
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			const id = events.find((e) => e.type === "bash_confirm")!.id!;
+
+			expect(bridge.answerBashConfirm(ws.id, "not-the-pending-id", true)).toBe(false);
+			expect(bridge.answerBashConfirm(ws.id, id, false)).toBe(true);
+			await expect(pending).resolves.toBe(false);
+		});
+
+		// Nobody attached means nobody to ask, and "nobody said no" is not a yes.
+		it("denies when no client is listening", async () => {
+			const bridge = createServerBridge(makeResult());
+			const ws = bridge.createSession();
+			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
+			bridge.submit(ws.id, "delete things");
+			await new Promise<void>((resolve) => setImmediate(resolve));
+
+			await expect(confirmFromLoop()("sudo rm -rf /", "elevated privileges (sudo)")).resolves.toBe(false);
+		});
+	});
+
 	// `.cast/ssh.json` is project-local and trust-gated, and the daemon merged it
 	// once for its own directory — so a session elsewhere was handed that
 	// project's remote-execution targets and not its own.

@@ -23,7 +23,7 @@ import { Message as MessageModule } from "./message.js";
 import { submitMessage as submitMessageRequest } from "./message-submit.js";
 import { useModalFocusTrap } from "./modal-focus.js";
 import { NewSessionModal } from "./new-session-modal.js?v=__NSM_HASH__";
-import { PlanDecisionCard, QuestionCard } from "./plan-cards.js";
+import { BashConfirmCard, PlanDecisionCard, QuestionCard } from "./plan-cards.js";
 import { SettingsAppearance } from "./settings-appearance.js";
 import { SettingsModal as SettingsModalModule } from "./settings-modal.js";
 import { SettingsModel } from "./settings-model.js";
@@ -1331,6 +1331,22 @@ function App() {
 		[activeId, session?.question, showToast, setSession],
 	);
 
+	const answerBashConfirm = useCallback(
+		async (id, allow) => {
+			if (!activeId) return;
+			// Clear locally first: the turn resumes the moment the daemon has the
+			// answer, and a card left on screen would invite a second click that
+			// the daemon would reject as stale.
+			setSession((prev) => (prev ? { ...prev, bashConfirm: undefined } : prev));
+			try {
+				await api("POST", `/api/sessions/${activeId}/bash-confirm`, { id, allow });
+			} catch (err) {
+				showToast(err.message, "error");
+			}
+		},
+		[activeId, showToast, setSession],
+	);
+
 	// Abort — immediate visual feedback, debounce double-clicks, keep
 	// transcript in sync even if SSE is slow.
 	const [aborting, setAborting] = useState(false);
@@ -2082,6 +2098,7 @@ function App() {
 								html`
 									<${PlanDecisionCard} transition=${session?.planTransition ?? planTransition} onChoose=${handlePlanTransition} />
 									${session?.question && html`<${QuestionCard} question=${session.question} onChoose=${answerQuestion} />`}
+									${session?.bashConfirm && html`<${BashConfirmCard} request=${session.bashConfirm} onAnswer=${answerBashConfirm} />`}
 								`
 							}
 						`

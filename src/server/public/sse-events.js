@@ -310,6 +310,11 @@ export function handleSseEvent(event, context) {
 				prev ? { ...prev, messages: [...prev.messages, { role: "warning", content: event.message }] } : prev,
 			);
 			break;
+		case "bash_confirm":
+			// The daemon is blocked on this until a client answers; render it the
+			// same way a pending question is rendered.
+			setSession((prev) => (prev ? { ...prev, bashConfirm: { id: event.id, command: event.command, reason: event.reason } } : prev));
+			break;
 		case "agent_actor": {
 			const actor = event.actor;
 			const status = actor.status === "success" ? "completed" : actor.status;

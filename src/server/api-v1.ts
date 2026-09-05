@@ -35,7 +35,7 @@ const STABLE_API_V1_ROUTES: StableRoute[] = [
 	{
 		method: "POST",
 		legacyPath:
-			/^\/api\/sessions\/[^/]+\/(fork|chat|abort|steer|followup|command|mode|question|plan-transition|clean-context|rename|pin|share|fs\/rename|inputs\/upload)$/,
+			/^\/api\/sessions\/[^/]+\/(fork|chat|abort|steer|followup|command|mode|question|bash-confirm|plan-transition|clean-context|rename|pin|share|fs\/rename|inputs\/upload)$/,
 	},
 	{ method: "GET", legacyPath: /^\/api\/browse$/ },
 	{ method: "POST", legacyPath: /^\/api\/browse\/mkdir$/ },
@@ -584,6 +584,29 @@ export const apiV1OpenApiDocument: OpenApiObject = {
 								"One entry per question. A multi-select answer is itself an array of the chosen values.",
 							items: { oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }] },
 						},
+					},
+				}),
+				responses: {
+					"202": jsonResponse("Answer accepted", { $ref: "#/components/schemas/Ok" }),
+					"400": errorResponse,
+					"401": errorResponse,
+					"404": errorResponse,
+					"409": errorResponse,
+				},
+			},
+		},
+		"/api/v1/sessions/{id}/bash-confirm": {
+			post: {
+				summary: "Answer a pending dangerous-command confirmation",
+				description:
+					"The daemon runs the agent loop, so its dangerous-command gate asks the connected clients. The turn stays blocked until this is answered or the request times out (denied).",
+				parameters: [idParameter],
+				requestBody: requestBody({
+					type: "object",
+					required: ["id", "allow"],
+					properties: {
+						id: { type: "string", description: "The id carried by the bash_confirm event." },
+						allow: { type: "boolean", description: "True runs the command once; false blocks it." },
 					},
 				}),
 				responses: {
