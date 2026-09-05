@@ -1397,6 +1397,36 @@ describe("web bridge", () => {
 		}
 	});
 
+	// `.cast/ssh.json` is project-local and trust-gated, and the daemon merged it
+	// once for its own directory — so a session elsewhere was handed that
+	// project's remote-execution targets and not its own.
+	it("uses the session directory's own ssh hosts", async () => {
+		const projectDir = mkdtempSync(join(tmpdir(), "cast-bridge-ssh-"));
+		mkdirSync(join(projectDir, ".cast"), { recursive: true });
+		writeFileSync(
+			join(projectDir, ".cast", "ssh.json"),
+			JSON.stringify({ hosts: { "project-box": { host: "10.0.0.9", username: "deploy" } } }),
+			"utf-8",
+		);
+		try {
+			setProjectTrust(projectDir, true);
+			const bridge = createServerBridge(
+				makeResult({ sshHosts: [{ name: "daemon-box", host: "10.0.0.1", username: "root" }] }),
+			);
+			const ws = bridge.createSession(undefined, undefined, projectDir);
+			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
+
+			bridge.submit(ws.id, "hello");
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			const opts = runAgentLoop.mock.calls.at(-1)![1] as { sshHosts?: Array<{ name: string }> };
+			const names = (opts.sshHosts ?? []).map((h) => h.name);
+			expect(names).toContain("project-box");
+			expect(names).not.toContain("daemon-box");
+		} finally {
+			rmSync(projectDir, { recursive: true, force: true });
+		}
+	});
+
 	// AGENTS.md/CLAUDE.md at the project root was loaded once, for the daemon's
 	// own directory, and every session got that text — so a session in another
 	// project was handed a different project's instructions and never saw its
