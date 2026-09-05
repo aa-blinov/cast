@@ -141,14 +141,16 @@ describe("BackgroundTaskRegistry", () => {
 		const smallConfig: AppConfig = { ...mockConfig, maxToolOutputLines: 5 };
 		const task = registry.start("for i in $(seq 1 20); do echo line-$i; done", process.cwd(), smallConfig, 10, deps);
 
-		// Poll on the actual output line count, not `task.status` — a PTY's
-		// "exit" event fires from the child process's wait() status, which is
-		// not synchronized with its "data" events draining the kernel tty
-		// buffer. `status` can flip to "exited" while output is still
-		// arriving, so gating on it (as this test previously did) is racy by
-		// construction, not just slow-CI flakiness: no fixed deadline makes
-		// that ordering guaranteed. Poll the actual condition instead.
-		const deadline = Date.now() + 5000;
+		// Two separate races, and both have to be waited out rather than timed.
+		// A PTY's "exit" fires from the child's wait() status, which is not
+		// synchronized with its "data" events draining the kernel tty buffer:
+		// `status` can flip to "exited" while output is still arriving, and the
+		// last lines can equally arrive before the exit is observed. So wait on
+		// the exit signal the task itself provides, then poll for the output —
+		// a fixed 5s window was enough on an idle machine and not enough under
+		// load, which is what made this test flake.
+		await task.exitPromise;
+		const deadline = Date.now() + 30_000;
 		let lineCount = task.rawOutput.split("\n").filter(Boolean).length;
 		while (lineCount < 20 && Date.now() < deadline) {
 			await new Promise((r) => setTimeout(r, 25));
