@@ -31,7 +31,7 @@ export function buildAcpAgentApp(
 	})
 		.onRequest(acp.AGENT_METHODS.authenticate, (): acp.AuthenticateResponse => ({}))
 		.onRequest(acp.AGENT_METHODS.session_new, async (ctx): Promise<acp.NewSessionResponse> => {
-			const session = await adapter.newSession(startup, opts, ctx.params.mcpServers);
+			const session = await adapter.newSession(startup, opts, ctx.params.mcpServers, ctx.params.cwd);
 			sessions.set(session.state.id, session);
 			return { sessionId: session.state.id };
 		})

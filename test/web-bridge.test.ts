@@ -1575,6 +1575,26 @@ describe("web bridge", () => {
 		}
 	});
 
+	// Subagents build their own prompt from the session cwd (task.ts loads
+	// AGENTS.md, rules and skills through it), so the trust flag handed to the
+	// loop decides what a child may read. The daemon's own decision would let an
+	// unvetted checkout's files into a child's prompt.
+	it("hands the loop the session directory's trust decision, not the daemon's", async () => {
+		const untrusted = mkdtempSync(join(tmpdir(), "cast-bridge-childtrust-"));
+		try {
+			const bridge = createServerBridge(makeResult({ projectTrusted: true }));
+			const ws = bridge.createSession(undefined, undefined, untrusted);
+			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
+
+			bridge.submit(ws.id, "hello");
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			const opts = runAgentLoop.mock.calls.at(-1)![1] as { projectTrusted?: boolean };
+			expect(opts.projectTrusted).toBe(false);
+		} finally {
+			rmSync(untrusted, { recursive: true, force: true });
+		}
+	});
+
 	// The flip side of resolving per session directory: `projectTrusted` is one
 	// decision the user made about the daemon's own directory, and handing it to
 	// a session opened in an unvetted checkout would load that checkout's rules,

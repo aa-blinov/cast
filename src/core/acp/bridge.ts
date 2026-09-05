@@ -7,6 +7,7 @@
 
 import type * as acpSdk from "@agentclientprotocol/sdk";
 import { SLASH_COMMANDS } from "../../ui/commands.ts";
+import { formatContextFilesForPrompt, loadProjectContextFiles } from "../context-files.ts";
 import type { AgentEvent } from "../loop.ts";
 import { runAgentLoop } from "../loop.ts";
 import {
@@ -17,10 +18,12 @@ import {
 	type McpSetupResult,
 } from "../mcp.ts";
 import { createPlanState, type PlanState, resolvePlanQuestion, resolvePlanTransition } from "../plan.ts";
+import { buildSystemPrompt, resolvePromptContextForCwd } from "../project.ts";
 import type { AgentRunner } from "../runner.ts";
 import { createAgentRunner } from "../runner.ts";
 import type { SessionState } from "../session.ts";
 import { listSessionSummaries, loadSession, recordCompaction, saveSession as saveSessionState } from "../session.ts";
+import { getProjectTrust, loadSettings } from "../settings.ts";
 import type { StartupResult } from "../startup.ts";
 import { extractSystemReminders } from "../system-reminder.ts";
 
@@ -95,6 +98,10 @@ export interface AcpAdapter {
 			url?: string;
 			headers?: Array<{ name: string; value: string }>;
 		}>,
+		/** `session/new.cwd` — required by the protocol, and the directory the
+		 * editor means. Ignored before this, so every ACP session ran in the
+		 * directory the agent process happened to start in. */
+		cwd?: string,
 	): Promise<AcpAdapterSession>;
 	loadSession(
 		sessionId: string,
@@ -169,8 +176,15 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 			agentInfo: { name: "cast", version },
 		}),
 
-		newSession: async (startup, _opts, mcpServers): Promise<AcpAdapterSession> => {
+		newSession: async (startup, _opts, mcpServers, requestedCwd): Promise<AcpAdapterSession> => {
 			const session = startup.session;
+			// The editor names the directory; the agent process's own is only a
+			// fallback. Rules, skills and AGENTS.md all hang off it, so the prompt
+			// is rebuilt when they differ.
+			if (requestedCwd && requestedCwd !== startup.cwd) {
+				session.cwd = requestedCwd;
+				startup.systemPrompt = rebuildStartupPromptForCwd(startup, requestedCwd);
+			}
 			const runner: AgentRunner = createAgentRunner();
 			// Connect client-provided MCP servers in parallel with session
 			// setup. Anything that fails to connect (network error, bad URL)
@@ -508,6 +522,24 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 }
 
 // ---------------------------------------------------------------------------
+/**
+ * Rebuild the system prompt for a directory the editor named in `session/new`.
+ *
+ * Everything project-shaped hangs off cwd — AGENTS.md, rules, skills — and
+ * startup resolved all of it for whatever directory the agent process was
+ * launched in. Trust is read from what the user already decided for that
+ * directory, never asked here: an ACP agent has no prompt to ask at.
+ */
+function rebuildStartupPromptForCwd(startup: StartupResult, cwd: string): string {
+	const trusted = getProjectTrust(loadSettings(), cwd) ?? false;
+	const context = startup.persona.agentsMd ? formatContextFilesForPrompt(loadProjectContextFiles(cwd, trusted)) : "";
+	const { rulesSuffix, rulesLazySuffix, skillsPromptSuffix } = resolvePromptContextForCwd(cwd, trusted);
+	return buildSystemPrompt(startup.persona, context, rulesSuffix, rulesLazySuffix, skillsPromptSuffix, "", cwd, {
+		model: startup.session.model,
+		reasoningLevel: startup.config.reasoningLevel,
+	});
+}
+
 // runAgentLoop wrapper
 // ---------------------------------------------------------------------------
 
