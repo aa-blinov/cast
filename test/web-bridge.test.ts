@@ -1516,6 +1516,51 @@ describe("web bridge", () => {
 		}
 	});
 
+	// Project servers are real processes, so every path that drops a session has
+	// to release them — not just closeSession. Idle eviction and permanent
+	// deletion each remove a session on their own, and both used to leave the
+	// connections behind for the life of the daemon.
+	it("closes a project's MCP servers when its last session is deleted", async () => {
+		const projectDir = mkdtempSync(join(tmpdir(), "cast-bridge-mcp-release-"));
+		mkdirSync(join(projectDir, ".cast"), { recursive: true });
+		writeFileSync(
+			join(projectDir, ".cast", "mcp.json"),
+			JSON.stringify({ mcpServers: { "project-srv": { command: "true", args: [] } } }),
+			"utf-8",
+		);
+		try {
+			setProjectTrust(projectDir, true);
+			// closeMcpConnections closes the client, not the connection wrapper.
+			const close = vi.fn(async () => {});
+			const connection = { serverName: "project-srv", client: { close } };
+			mockConnectMcpServers.mockResolvedValue({
+				toolIndex: new Map(),
+				toolDefinitions: [],
+				connections: [connection],
+				diagnostics: [],
+				allServerNames: ["project-srv"],
+				serverSources: {},
+			});
+
+			const bridge = createServerBridge(makeResult());
+			const first = bridge.createSession(undefined, undefined, projectDir);
+			const second = bridge.createSession(undefined, undefined, projectDir);
+			await new Promise<void>((resolve) => setImmediate(resolve));
+
+			// Still another session in that directory — keep the servers up.
+			expect(bridge.deleteSessionPermanently(first.id)).toBe(true);
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			expect(close).not.toHaveBeenCalled();
+
+			expect(bridge.deleteSessionPermanently(second.id)).toBe(true);
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			expect(close).toHaveBeenCalled();
+		} finally {
+			rmSync(projectDir, { recursive: true, force: true });
+		}
+	});
+
 	// `.cast/ssh.json` is project-local and trust-gated, and the daemon merged it
 	// once for its own directory — so a session elsewhere was handed that
 	// project's remote-execution targets and not its own.

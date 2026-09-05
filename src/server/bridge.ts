@@ -1569,6 +1569,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			if (countTurnMessages(live.session.messages) > 0) saveSession(live.session);
 			stopFsWatcher(live.id);
 			sessions.delete(live.id);
+			releaseProjectMcpForCwd(live.session.cwd ?? cwd);
 		}, IDLE_SESSION_EVICTION_MS);
 		timer.unref();
 		idleSessionEvictions.set(ws.id, timer);
@@ -2817,6 +2818,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			broadcast(ws, { type: "session_closed" });
 			ws.listeners.clear();
 			sessions.delete(sessionId);
+			releaseProjectMcpForCwd(ws.session.cwd ?? cwd);
 		}
 		const eviction = idleSessionEvictions.get(sessionId);
 		if (eviction) clearTimeout(eviction);
@@ -4563,6 +4565,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		} finally {
 			ws.backgroundBash.registry.killAll();
 			sessions.delete(ws.id);
+			releaseProjectMcpForCwd(ws.session.cwd ?? cwd);
 			deleteSession(ws.id);
 		}
 	}
