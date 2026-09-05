@@ -42,6 +42,12 @@ vi.mock("../src/core/config.ts", async (importOriginal) => {
 // re-resolve MCP connections — controllable so a test can force two of these
 // to overlap and assert they serialize instead of racing.
 const mockResolveMcpForCwd = vi.fn();
+const mockConnectMcpServers = vi.fn();
+vi.mock("../src/core/mcp.ts", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../src/core/mcp.ts")>();
+	return { ...actual, connectMcpServers: (...args: unknown[]) => mockConnectMcpServers(...args) };
+});
+
 vi.mock("../src/core/project.ts", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../src/core/project.ts")>();
 	return { ...actual, resolveMcpForCwd: (...args: unknown[]) => mockResolveMcpForCwd(...args) };
@@ -1463,6 +1469,51 @@ describe("web bridge", () => {
 
 			await expect(confirmFromLoop()("sudo rm -rf /", "elevated privileges (sudo)")).resolves.toBe(false);
 		});
+	});
+
+	// Global MCP servers stay one shared set for the daemon; a project's own
+	// `.cast/mcp.json` only ever reached a session when the daemon happened to
+	// start in that project, so a session opened anywhere else ran without the
+	// servers its repository declares.
+	it("connects the session project's own MCP servers and adds their tools to the turn", async () => {
+		const projectDir = mkdtempSync(join(tmpdir(), "cast-bridge-mcp-"));
+		mkdirSync(join(projectDir, ".cast"), { recursive: true });
+		writeFileSync(
+			join(projectDir, ".cast", "mcp.json"),
+			JSON.stringify({ mcpServers: { "project-srv": { command: "true", args: [] } } }),
+			"utf-8",
+		);
+		try {
+			setProjectTrust(projectDir, true);
+			mockConnectMcpServers.mockResolvedValue({
+				toolIndex: new Map([["project_tool", {} as never]]),
+				toolDefinitions: [
+					{ type: "function", function: { name: "project_tool", description: "", parameters: {} } },
+				],
+				connections: [],
+				diagnostics: [],
+				allServerNames: ["project-srv"],
+				serverSources: { "project-srv": "project" as const },
+			});
+
+			const bridge = createServerBridge(makeResult());
+			const ws = bridge.createSession(undefined, undefined, projectDir);
+			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
+
+			expect(mockConnectMcpServers).toHaveBeenCalledWith({ "project-srv": { command: "true", args: [] } });
+			// The connect resolves on a microtask; the turn after it lands carries
+			// the tools.
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			bridge.submit(ws.id, "hello");
+			await new Promise<void>((resolve) => setImmediate(resolve));
+
+			const opts = runAgentLoop.mock.calls.at(-1)![1] as {
+				mcpTools?: Array<{ function?: { name?: string } }>;
+			};
+			expect((opts.mcpTools ?? []).map((t) => t.function?.name)).toContain("project_tool");
+		} finally {
+			rmSync(projectDir, { recursive: true, force: true });
+		}
 	});
 
 	// `.cast/ssh.json` is project-local and trust-gated, and the daemon merged it
