@@ -810,6 +810,28 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	let rulesLazySuffix = result.rulesLazySuffix;
 	let directoryRules = result.directoryRules;
 	let skills = result.skills;
+
+	/**
+	 * Rules for one session's own directory.
+	 *
+	 * The daemon resolved rules once, for the directory *it* was started in, and
+	 * every session reused that catalog — so a session opened in another project
+	 * ran with none of that project's rules and no sign anything was missing.
+	 * (Personas and hooks were already re-resolved per session directory a few
+	 * lines below; rules were not.) Cached per directory: the walk is cheap but
+	 * runs on every turn.
+	 */
+	const rulesByCwd = new Map<string, ReturnType<typeof resolveRulesForCwd>>();
+	function rulesForSessionCwd(sessionCwd: string): ReturnType<typeof resolveRulesForCwd> {
+		if (sessionCwd === cwd) {
+			return { alwaysApplySuffix: rulesSuffix, lazySuffix: rulesLazySuffix, directoryRules };
+		}
+		const cached = rulesByCwd.get(sessionCwd);
+		if (cached) return cached;
+		const resolved = resolveRulesForCwd(sessionCwd, projectTrusted);
+		rulesByCwd.set(sessionCwd, resolved);
+		return resolved;
+	}
 	// SSH hosts and permission mode are simple settings-backed values with no
 	// prompt-rebuild fan-out, but still need to be mutable so /ssh and
 	// /permissions actually take effect without a server restart.
@@ -1757,12 +1779,13 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			// the cwd-root context file (baked into ws.systemPrompt at session
 			// creation) did.
 			rebuildSystemPrompt: ({ userText, contextFiles: ctxFiles }) => {
-				const newAuto = matchAutoRules(directoryRules, ctxFiles);
+				const sessionCwd = ws.session.cwd ?? cwd;
+				const sessionRules = rulesForSessionCwd(sessionCwd);
+				const newAuto = matchAutoRules(sessionRules.directoryRules, ctxFiles);
 				const sticky = unionStickyRules(ws.activeAutoRules ?? [], newAuto);
 				ws.activeAutoRules = sticky;
-				const mentioned = selectMentionedRules(directoryRules, userText);
+				const mentioned = selectMentionedRules(sessionRules.directoryRules, userText);
 				const rulesBlock = formatRulesForTurn(sticky, mentioned);
-				const sessionCwd = ws.session.cwd ?? cwd;
 				const nestedContext = projectTrusted
 					? formatContextFilesForPrompt(resolveNestedContextFiles(sessionCwd, ctxFiles))
 					: "";
@@ -1770,7 +1793,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					persona,
 					contextFilesSuffix + nestedContext,
 					rulesBlock,
-					rulesLazySuffix,
+					sessionRules.lazySuffix,
 					formatSkillsForPrompt(skills, persona.skills, ctxFiles),
 					formatMcpForPrompt(mcpResult, persona.mcp),
 					sessionCwd,
@@ -3012,13 +3035,19 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			return await evolveSkills(ws);
 		}
 		if (name === "/rules") {
+			// `sticky` is what the *daemon* has latched this session. The agent
+			// loop runs here, so a TUI attached as a thin client has no idea which
+			// auto rules already attached — it was reporting every one of them as
+			// still waiting for a match, for the whole session.
+			const stickyIds = new Set((ws.activeAutoRules ?? []).map((r) => r.id));
 			return {
 				ok: true,
-				result: directoryRules.map((r) => ({
+				result: rulesForSessionCwd(ws.session.cwd ?? cwd).directoryRules.map((r) => ({
 					id: r.id,
 					name: r.name,
 					description: r.description,
 					applyMode: r.applyMode,
+					sticky: stickyIds.has(r.id),
 				})),
 			};
 		}
@@ -3030,7 +3059,8 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			// prompt injection), so it needs the same idle gate a plain message
 			// submit would get if the composer weren't already disabled while running.
 			if (running) return { ok: false, error: "Agent running — use /queue, /steer, or /abort" };
-			const rule = directoryRules.find((r) => r.id === ruleId) ?? directoryRules.find((r) => r.name === ruleId);
+			const sessionRules = rulesForSessionCwd(ws.session.cwd ?? cwd).directoryRules;
+			const rule = sessionRules.find((r) => r.id === ruleId) ?? sessionRules.find((r) => r.name === ruleId);
 			if (!rule) return { ok: false, error: `Unknown rule: ${ruleId}. See /rules for the list.` };
 			fireUserPromptExpansion(ws.session.cwd ?? cwd, rule.name);
 			submit(sessionId, formatRuleInvocation(rule));
@@ -3640,6 +3670,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				projectTrusted = await resolveProjectTrustForCwd(projectDeps, sessionCwd);
 				const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
 				skills = skillsResult.skills;
+				rulesByCwd.clear();
 				const rules = resolveRulesForCwd(sessionCwd, projectTrusted);
 				rulesSuffix = rules.alwaysApplySuffix;
 				rulesLazySuffix = rules.lazySuffix;

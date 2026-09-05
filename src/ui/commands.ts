@@ -2998,7 +2998,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 	},
 	{
 		match: (input) => input === "/rules" || input === "/rules list",
-		run: ({ input, deps }) => {
+		run: async ({ input, deps }) => {
 			deps.agent.addDisplayMessage({ role: "user", content: input });
 			if (deps.directoryRules.length === 0) {
 				deps.agent.addDisplayMessage({
@@ -3006,7 +3006,21 @@ const COMMAND_ROUTES: CommandRoute[] = [
 					content: "No rules loaded. Create .cast/rules/*.md files to add rules.",
 				});
 			} else {
-				const stickyIds = new Set(deps.activeAutoRules.map((r) => r.id));
+				// Which auto rules have latched is tracked wherever the agent loop
+				// runs. As a thin client that is the daemon, not here, so ask it —
+				// otherwise every auto rule reads as "not matched yet" for the whole
+				// session even while the daemon is injecting it on every turn.
+				let stickyIds = new Set(deps.activeAutoRules.map((r) => r.id));
+				if (deps.agent.daemonMode) {
+					try {
+						const remote = (await deps.agent.runCommand("/rules")) as Array<{ id?: string; sticky?: boolean }>;
+						if (Array.isArray(remote)) {
+							stickyIds = new Set(remote.filter((r) => r.sticky && r.id).map((r) => r.id!));
+						}
+					} catch {
+						// Fall back to the local view rather than failing the listing.
+					}
+				}
 				const lines = deps.directoryRules.map((r) => {
 					let tag: string;
 					if (r.applyMode === "always") {
