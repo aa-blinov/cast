@@ -1397,6 +1397,41 @@ describe("web bridge", () => {
 		}
 	});
 
+	// AGENTS.md/CLAUDE.md at the project root was loaded once, for the daemon's
+	// own directory, and every session got that text — so a session in another
+	// project was handed a different project's instructions and never saw its
+	// own.
+	it("uses the session directory's own AGENTS.md, not the daemon's", async () => {
+		const projectDir = mkdtempSync(join(tmpdir(), "cast-bridge-agents-"));
+		writeFileSync(join(projectDir, "AGENTS.md"), "PROJECT_B_INSTRUCTIONS\n", "utf-8");
+		try {
+			setProjectTrust(projectDir, true);
+			// Real personas default to agentsMd: true — that is what makes the
+			// root context file reach the prompt at all.
+			const persona = makePersona({ agentsMd: true });
+			const bridge = createServerBridge(
+				makeResult({
+					contextFilesSuffix: "\n\nPROJECT_A_INSTRUCTIONS",
+					persona,
+					personas: [persona],
+				}),
+			);
+			const ws = bridge.createSession(undefined, undefined, projectDir);
+			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
+
+			bridge.submit(ws.id, "hello");
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			const opts = runAgentLoop.mock.calls.at(-1)![1] as {
+				rebuildSystemPrompt?: (ctx: { userText: string; contextFiles: string[] }) => string;
+			};
+			const prompt = opts.rebuildSystemPrompt?.({ userText: "hello", contextFiles: [] }) ?? "";
+			expect(prompt).toContain("PROJECT_B_INSTRUCTIONS");
+			expect(prompt).not.toContain("PROJECT_A_INSTRUCTIONS");
+		} finally {
+			rmSync(projectDir, { recursive: true, force: true });
+		}
+	});
+
 	// Same defect as the rules, one layer over: the daemon discovered skills for
 	// its own directory only, so a session opened in another project was never
 	// told that project's skills existed and could not call them.
