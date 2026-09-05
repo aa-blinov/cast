@@ -86,6 +86,7 @@ import {
 } from "../core/session.ts";
 import {
 	checkpointFork,
+	getProjectTrust,
 	loadSettings,
 	memoryDistillAuto,
 	memoryDistillIntervalDays,
@@ -98,6 +99,7 @@ import {
 	formatSkillsForPrompt,
 	isUninstallableSkill,
 	renderSkillInvocation,
+	type Skill,
 	uninstallUserSkill,
 } from "../core/skills.ts";
 import { skillsShInstall, skillsShListAvailable, skillsShSearch, skillsShUninstall } from "../core/skills-sh.ts";
@@ -246,6 +248,9 @@ export interface WebAgentSession {
 	 * session is evicted and rehydrated, same as the standalone TUI's copy
 	 * (App.tsx) resets on process restart. */
 	activeAutoRules?: Rule[];
+	/** Skills discovered for this session's own directory, refreshed before each
+	 * turn (see skillsForSessionCwd). Ephemeral like activeAutoRules. */
+	sessionSkills?: Skill[];
 	/** Files touched (read/write/edit) this session, relative to cwd — grown
 	 * in place by loop.ts across turns AND across separate runAgentLoop
 	 * invocations (passed by reference, same array every call) so a nested
@@ -821,14 +826,71 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	 * lines below; rules were not.) Cached per directory: the walk is cheap but
 	 * runs on every turn.
 	 */
+	/**
+	 * Is this session's own directory trusted?
+	 *
+	 * `projectTrusted` is one value for the whole daemon, decided for the
+	 * directory it started in. Handing that to a session opened somewhere else
+	 * means an unvetted checkout's rules, skills and personas load under a
+	 * decision the user made about a different project. The daemon cannot ask —
+	 * there is nobody at a prompt — so it reads the decision already recorded
+	 * for that directory and treats "never asked" as untrusted.
+	 */
+	function trustForSessionCwd(sessionCwd: string): boolean {
+		if (sessionCwd === cwd) return projectTrusted;
+		return getProjectTrust(loadSettings(), sessionCwd) ?? false;
+	}
+
+	/**
+	 * Skills for one session's own directory, cached per directory.
+	 *
+	 * Same defect the rules had: the daemon discovered skills once, for its own
+	 * directory, so a session opened elsewhere never saw that project's
+	 * `.cast/skills` (or `.agents/skills`). Resolution is async, so it runs
+	 * before the turn starts and the result is parked on the session for the
+	 * synchronous prompt rebuild to read.
+	 */
+	/**
+	 * Skills for one session's own directory, cached per directory.
+	 *
+	 * Same defect the rules had: the daemon discovered skills once, for its own
+	 * directory, so a session opened elsewhere never saw that project's
+	 * `.cast/skills` (or `.agents/skills`) — the model was never told they
+	 * existed and could not call them.
+	 */
+	const skillsByCwd = new Map<string, Skill[]>();
+	function skillsForSessionCwd(sessionCwd: string): Skill[] {
+		if (sessionCwd === cwd) return skills;
+		const cached = skillsByCwd.get(sessionCwd);
+		if (cached) return cached;
+		let resolved: Skill[];
+		try {
+			// The synchronous half of resolveSkillsForCwd — discovery plus the
+			// disabled filter. Kept synchronous deliberately: `submit` must reach
+			// runAgentLoop in the same tick it is called, and an extra await here
+			// reordered every event a caller expects on the next microtask.
+			const disabled = new Set(loadSettings().disabledSkills ?? []);
+			resolved = discoverSkillsForCwd(projectDeps, sessionCwd, trustForSessionCwd(sessionCwd)).filter(
+				(skill) => !disabled.has(skill.name),
+			);
+		} catch {
+			// Discovery reads the filesystem and can fail on a directory that went
+			// away mid-session; the daemon's own set is the safe fallback.
+			resolved = skills;
+		}
+		skillsByCwd.set(sessionCwd, resolved);
+		return resolved;
+	}
+
 	const rulesByCwd = new Map<string, ReturnType<typeof resolveRulesForCwd>>();
+
 	function rulesForSessionCwd(sessionCwd: string): ReturnType<typeof resolveRulesForCwd> {
 		if (sessionCwd === cwd) {
 			return { alwaysApplySuffix: rulesSuffix, lazySuffix: rulesLazySuffix, directoryRules };
 		}
 		const cached = rulesByCwd.get(sessionCwd);
 		if (cached) return cached;
-		const resolved = resolveRulesForCwd(sessionCwd, projectTrusted);
+		const resolved = resolveRulesForCwd(sessionCwd, trustForSessionCwd(sessionCwd));
 		rulesByCwd.set(sessionCwd, resolved);
 		return resolved;
 	}
@@ -1539,6 +1601,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// the previous turn is effective without reconnecting MCP or restarting the
 		// daemon. The active turn keeps the old tool set; only this next turn changes.
 		const turnPersonas = resolvePersonasForCwd(sessionCwd, projectTrusted).personas;
+		// Same reasoning as the personas above, and the same per-directory gap
+		// rules had: a session in another project must see that project's skills.
+		ws.sessionSkills = skillsForSessionCwd(sessionCwd);
 		const submitHooks = resolveHooksForCwd(sessionCwd, projectTrusted);
 		if (hasHooks(submitHooks)) {
 			let submitResult: Awaited<ReturnType<typeof runHooksForEvent>>;
@@ -1794,7 +1859,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					contextFilesSuffix + nestedContext,
 					rulesBlock,
 					sessionRules.lazySuffix,
-					formatSkillsForPrompt(skills, persona.skills, ctxFiles),
+					formatSkillsForPrompt(ws.sessionSkills ?? skills, persona.skills, ctxFiles),
 					formatMcpForPrompt(mcpResult, persona.mcp),
 					sessionCwd,
 					{
@@ -1832,7 +1897,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			// Read fresh each submit so an edited maxTurnIterations applies on
 			// the next agent call.
 			defaultOuterIterations: turnIterationCap(),
-			skills,
+			skills: ws.sessionSkills ?? skills,
 			personas: turnPersonas,
 			currentPersona: persona.name,
 			subagentPrompts: subPrompts,
@@ -3671,6 +3736,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
 				skills = skillsResult.skills;
 				rulesByCwd.clear();
+				skillsByCwd.clear();
 				const rules = resolveRulesForCwd(sessionCwd, projectTrusted);
 				rulesSuffix = rules.alwaysApplySuffix;
 				rulesLazySuffix = rules.lazySuffix;
