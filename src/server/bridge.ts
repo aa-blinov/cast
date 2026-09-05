@@ -12,7 +12,12 @@ import { basename, join } from "node:path";
 import chokidar from "chokidar";
 import { subscribeAgentActorNotifications } from "../core/actor-events.ts";
 import type { AgentActorNotification } from "../core/actors.ts";
-import { backupFileForCheckpoint, createCheckpoint, restoreCheckpoint } from "../core/checkpoint.ts";
+import {
+	backupFileForCheckpoint,
+	createCheckpoint,
+	filesLostByRestore,
+	restoreCheckpoint,
+} from "../core/checkpoint.ts";
 import { fetchModels, type ModelInfo, probeProvider, resolveProvider } from "../core/config.ts";
 import {
 	formatContextFilesForPrompt,
@@ -4364,7 +4369,21 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			if (running) return { ok: false, error: "Agent running — finish the run or /abort before /undo" };
 			const checkpoints = ws.session.checkpoints || [];
 			if (checkpoints.length === 0) return { ok: false, error: "No checkpoint available to undo" };
-			const lastCheckpoint = checkpoints.pop()!;
+			const lastCheckpoint = checkpoints[checkpoints.length - 1]!;
+			// `git clean -fd` runs as part of the restore and takes untracked
+			// files created after the checkpoint with it — including anything the
+			// user wrote while the agent worked. There is no picker on this path,
+			// so name them and refuse; `/undo --force` proceeds.
+			const lost = filesLostByRestore(lastCheckpoint);
+			if (lost.length > 0 && !arg.includes("--force") && !arg.includes("-f")) {
+				const shown = lost.slice(0, 10).join(", ");
+				const more = lost.length > 10 ? `, and ${lost.length - 10} more` : "";
+				return {
+					ok: false,
+					error: `Undo would delete ${lost.length} file(s) created since the checkpoint (${shown}${more}). Re-run as "/undo --force" to proceed.`,
+				};
+			}
+			checkpoints.pop();
 			const res = restoreCheckpoint(lastCheckpoint);
 			if (!res.ok) return { ok: false, error: `Undo failed: ${res.message}` };
 			// Drop the matching row so the persisted list stays in sync.
