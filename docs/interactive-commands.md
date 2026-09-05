@@ -22,6 +22,8 @@ All commands are typed at the TUI prompt, prefixed with `/`. Unknown slash comma
 
 `/undo` requires a checkpoint from the previous turn. In a Git workspace, every file is restored to its pre-turn tree without changing the user's Git index; files created during the turn are removed, while files that were untracked before the turn are restored. Outside Git, Cast restores files changed through its `write` and `edit` tools from shadow backups. Arbitrary changes made through `bash` or an MCP tool in a non-Git workspace cannot be reversed. `/undo` is refused while the agent is running (use `/abort` first) and is a no-op if there is nothing to undo.
 
+Removing files created during the turn also removes any *you* created in that window — the restore cannot tell them apart, and they cannot be brought back. When there are such files, `/undo` names them and asks before proceeding; over the web API it refuses and asks you to re-run as `/undo --force`. `--force` skips the question.
+
 `/fork` leaves the original session unchanged and starts an independent new session with the context currently sent to the model. It deliberately does not restore compacted-out history, copy checkpoints or pending pickers, or create a Git worktree: both sessions use the same working directory unless you switch one with `/worktree`.
 
 ## Model and Provider
