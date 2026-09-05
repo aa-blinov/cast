@@ -91,3 +91,29 @@ export function QuestionCard({ question, onChoose }) {
 		</section>
 	`;
 }
+
+/**
+ * The daemon runs the agent loop, so its dangerous-command gate has no picker
+ * of its own — it asks whoever is watching. The turn is blocked until this is
+ * answered (or the daemon times the request out and denies it).
+ */
+export function BashConfirmCard({ request, onAnswer }) {
+	if (!request) return null;
+	return html`
+		<section class="plan-decision-card question-card" aria-label="Confirm a dangerous command">
+			<div class="plan-decision-header">
+				<span class="plan-decision-name">command</span>
+				<span class="plan-decision-kind">${request.reason}</span>
+			</div>
+			<div class="plan-decision-body"><code>${request.command}</code></div>
+			<div class="plan-decision-options">
+				<button class="plan-decision-option" onClick=${() => onAnswer(request.id, true)}>
+					<span class="plan-decision-option-label">Allow once</span>
+				</button>
+				<button class="plan-decision-option" onClick=${() => onAnswer(request.id, false)}>
+					<span class="plan-decision-option-label">Block</span>
+				</button>
+			</div>
+		</section>
+	`;
+}

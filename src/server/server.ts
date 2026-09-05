@@ -1592,6 +1592,32 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		json(res, { ok: true }, 202);
 	});
 
+	// Answer the dangerous-command gate. The turn is blocked on this, so the
+	// reply is a plain allow/deny keyed by the request id the event carried —
+	// an id from an older request is refused rather than silently applied to
+	// whatever is pending now.
+	route("POST", "/api/sessions/:id/bash-confirm", async (req, res, params) => {
+		const ws = bridge.getSession(params.id);
+		if (!ws) return json(res, { error: "Not found" }, 404);
+		const body = await readBody(req);
+		let id: string;
+		let allow: boolean;
+		try {
+			const parsed = JSON.parse(body) as { id?: unknown; allow?: unknown };
+			if (typeof parsed.id !== "string" || typeof parsed.allow !== "boolean") {
+				return json(res, { error: "Expected { id: string, allow: boolean }" }, 400);
+			}
+			id = parsed.id;
+			allow = parsed.allow;
+		} catch {
+			return json(res, { error: "Invalid JSON" }, 400);
+		}
+		if (!bridge.answerBashConfirm(params.id, id, allow)) {
+			return json(res, { error: "No matching confirmation is pending" }, 409);
+		}
+		json(res, { ok: true }, 202);
+	});
+
 	route("POST", "/api/sessions/:id/plan-transition", async (req, res, params) => {
 		const body = await readBody(req);
 		let kind: "done";

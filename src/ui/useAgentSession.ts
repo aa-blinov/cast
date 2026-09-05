@@ -40,6 +40,7 @@ import type { BackgroundTaskRegistry, BashBackgroundDeps } from "../core/tools/b
 import { completedToolCallStatus, type ToolCallStatus } from "../core/tools/shared.ts";
 import {
 	abortServerSession,
+	answerServerBashConfirm,
 	answerServerQuestion,
 	ensureServerClient,
 	followUpServerSession,
@@ -1417,6 +1418,12 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	// the WebEvent handling in src/server/public/sse-events.js (the browser path)
 	// and the local onEvent below — all three must stay in lockstep on event
 	// semantics. An SSE disconnect (daemon stopped via `cast server stop`, or a
+	// Read through a ref: the SSE subscription below must not tear down and
+	// reconnect just because the confirm callback was rebuilt (it is rebuilt
+	// whenever permissionMode changes).
+	const confirmBashRef = useRef(confirmBash);
+	confirmBashRef.current = confirmBash;
+
 	// crash) is surfaced immediately and triggers daemon re-selection; the stream
 	// hydrates persisted session state after it reconnects.
 	useEffect(() => {
@@ -1598,6 +1605,28 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 							}
 						}
 					}
+					break;
+				}
+				case "bash_confirm": {
+					// The daemon runs the loop, so its dangerous-command gate has no
+					// picker of its own — it asks the attached clients instead. Answer
+					// with the same prompt a local run would show.
+					void (async () => {
+						let allow = false;
+						try {
+							allow = await confirmBashRef.current(event.command, event.reason);
+						} catch {
+							allow = false;
+						}
+						if (serverClient) {
+							try {
+								await answerServerBashConfirm(serverClient, session.id, event.id, allow);
+							} catch {
+								// The daemon times the request out on its own if this
+								// never lands; nothing useful to do from here.
+							}
+						}
+					})();
 					break;
 				}
 				case "agent_actor": {

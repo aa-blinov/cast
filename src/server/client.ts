@@ -258,6 +258,19 @@ export async function submitServerChat(
 }
 
 /** Run a slash command on a daemon session (the same surface the web UI's /command uses). */
+/** Answer a dangerous-command confirmation the daemon is blocked on. */
+export async function answerServerBashConfirm(
+	client: ServerClient,
+	sessionId: string,
+	id: string,
+	allow: boolean,
+): Promise<void> {
+	await serverFetch(client, `${API_V1_PREFIX}/sessions/${sessionId}/bash-confirm`, {
+		method: "POST",
+		body: { id, allow },
+	});
+}
+
 export async function runServerCommand(client: ServerClient, sessionId: string, command: string): Promise<unknown> {
 	const { status, data } = await serverFetch(client, `${API_V1_PREFIX}/sessions/${sessionId}/command`, {
 		method: "POST",

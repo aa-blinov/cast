@@ -220,7 +220,11 @@ export type WebEvent =
 	 * when nothing else is broadcasting — tool_end already covers active turns.
 	 * Client should re-fetch the diff (and re-read the file tree). */
 	| { type: "fs_change" }
-	| { type: "agent_actor"; actor: AgentActorNotification };
+	| { type: "agent_actor"; actor: AgentActorNotification }
+	/** The turn hit a command the dangerous-command gate wants confirmed. The
+	 * agent is blocked until a client answers via `answerBashConfirm`, or the
+	 * request times out (denied). */
+	| { type: "bash_confirm"; id: string; command: string; reason: string };
 
 export interface WebAgentSession {
 	id: string;
@@ -255,6 +259,9 @@ export interface WebAgentSession {
 	/** Skills discovered for this session's own directory, refreshed before each
 	 * turn (see skillsForSessionCwd). Ephemeral like activeAutoRules. */
 	sessionSkills?: Skill[];
+	/** A dangerous-command confirmation the turn is blocked on, waiting for a
+	 * client to answer. At most one: the loop runs one bash call at a time. */
+	pendingBashConfirm?: { id: string; command: string; reason: string; settle: (allow: boolean) => void };
 	/** Files touched (read/write/edit) this session, relative to cwd — grown
 	 * in place by loop.ts across turns AND across separate runAgentLoop
 	 * invocations (passed by reference, same array every call) so a nested
@@ -708,6 +715,12 @@ export interface ServerBridge {
 		sessionId: string,
 		values: Array<string | string[]>,
 	): Promise<{ ok: true } | { ok: false; error: string }>;
+	/** Answer a pending dangerous-command confirmation. False when the id names
+	 * no live request (already answered, timed out, or the turn moved on). */
+	answerBashConfirm(sessionId: string, id: string, allow: boolean): boolean;
+	/** The confirmation this session is blocked on, if any — so a client that
+	 * connects mid-turn can render it instead of waiting for a replayed event. */
+	getBashConfirm(sessionId: string): { id: string; command: string; reason: string } | undefined;
 	getPlanTransition(sessionId: string): { kind: "done" } | undefined;
 	resolvePlanTransition(sessionId: string, kind: "done"): { ok: true } | { ok: false; error: string };
 	/** Flip a session between plan/build mode. The TUI in daemon mode owns its
@@ -1231,6 +1244,61 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		syncFsWatcher(ws);
 		broadcastSessionUpdate(ws);
 		return ws;
+	}
+
+	/**
+	 * How long a dangerous-command confirmation waits for an answer.
+	 *
+	 * Long enough that a request landing while nobody is looking at the tab
+	 * survives the walk back to the desk, short enough that an abandoned session
+	 * does not hold a turn open forever. Timing out denies: the command is the
+	 * thing that needs a yes, and silence is not one.
+	 */
+	const BASH_CONFIRM_TIMEOUT_MS = 5 * 60_000;
+
+	/**
+	 * Ask the connected clients to confirm a dangerous command, and block the
+	 * turn until one answers.
+	 *
+	 * The daemon used to answer `true` here unconditionally, so every pattern the
+	 * gate exists to catch — `rm -rf`, `sudo`, `git push --force`, `curl | sh` —
+	 * ran without asking anyone, including for a TUI attached as a thin client,
+	 * whose own picker never got a say. With no listener attached there is nobody
+	 * to ask, so the request is denied rather than silently allowed.
+	 */
+	function requestBashConfirm(ws: WebAgentSession, command: string, reason: string): Promise<boolean> {
+		if (ws.listeners.size === 0) return Promise.resolve(false);
+		ws.pendingBashConfirm?.settle(false);
+		const id = randomBytes(8).toString("hex");
+		return new Promise<boolean>((resolve) => {
+			const timer = setTimeout(() => settle(false), BASH_CONFIRM_TIMEOUT_MS);
+			// Node keeps the process alive for a pending timer; this one must not
+			// hold a daemon open on its own.
+			timer.unref?.();
+			const settle = (allow: boolean) => {
+				if (ws.pendingBashConfirm?.id !== id) return;
+				clearTimeout(timer);
+				ws.pendingBashConfirm = undefined;
+				resolve(allow);
+			};
+			ws.pendingBashConfirm = { id, command, reason, settle };
+			broadcast(ws, { type: "bash_confirm", id, command, reason });
+		});
+	}
+
+	function getBashConfirm(sessionId: string): { id: string; command: string; reason: string } | undefined {
+		const pending = sessions.get(sessionId)?.pendingBashConfirm;
+		return pending ? { id: pending.id, command: pending.command, reason: pending.reason } : undefined;
+	}
+
+	/** Answer a pending confirmation. Returns false when there is none, or when
+	 * the id names an older request that has already been settled. */
+	function answerBashConfirm(sessionId: string, id: string, allow: boolean): boolean {
+		const ws = sessions.get(sessionId);
+		const pending = ws?.pendingBashConfirm;
+		if (!pending || pending.id !== id) return false;
+		pending.settle(allow);
+		return true;
 	}
 
 	function broadcast(ws: WebAgentSession, event: WebEvent): void {
@@ -1924,7 +1992,8 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			signal: ac.signal,
 			steeringQueue: ws.runner.steeringQueue,
 			followUpQueue: ws.runner.followUpQueue,
-			confirmBash: permissionMode === "bypass" ? undefined : async () => true,
+			confirmBash:
+				permissionMode === "bypass" ? undefined : (command, reason) => requestBashConfirm(ws, command, reason),
 			disabledTools,
 			planState,
 			initialTodos: ws.session.todos,
@@ -4667,6 +4736,8 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		followUp,
 		getQuestion,
 		answerQuestion,
+		answerBashConfirm,
+		getBashConfirm,
 		getPlanTransition,
 		resolvePlanTransition: resolvePersistedPlanTransition,
 		setSessionMode,
