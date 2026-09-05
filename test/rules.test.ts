@@ -838,6 +838,44 @@ describe("rules", () => {
 			expect(injected).toContain("Rule truncated at");
 		});
 
+		// Cursor's own rule files write `globs: *.tsx` and `globs: *.ts,*.tsx`.
+		// The first is a YAML alias, which threw out of the parser and took the
+		// entire catalog with it; the second parsed as one string that could
+		// never match anything.
+		it("reads Cursor's glob notation, including the forms that are not valid YAML", () => {
+			const rulesDir = join(projectDir, ".cast", "rules");
+			mkdirSync(rulesDir, { recursive: true });
+			writeFileSync(join(rulesDir, "star.md"), "---\nglobs: *.tsx\ndescription: web\n---\nSTAR");
+			writeFileSync(join(rulesDir, "commas.md"), "---\nglobs: *.ts, *.md\n---\nCOMMAS");
+			writeFileSync(join(rulesDir, "listed.md"), '---\nglobs: ["app/**/*.tsx"]\n---\nLISTED');
+			writeFileSync(join(rulesDir, "always.md"), "---\nalwaysApply: true\nglobs: *.go\n---\nALWAYS");
+
+			const rules = loadDirectoryRules({ projectCwd: projectDir });
+			expect(rules.map((r) => r.name).sort()).toEqual(["always", "commas", "listed", "star"]);
+
+			const star = rules.find((r) => r.name === "star")!;
+			expect(star.globs).toEqual(["*.tsx"]);
+			expect(star.applyMode).toBe("auto");
+			expect(star.description).toBe("web");
+			expect(matchesRuleGlobs(star, ["src/App.tsx"])).toBe(true);
+
+			expect(rules.find((r) => r.name === "commas")!.globs).toEqual(["*.ts", "*.md"]);
+			expect(rules.find((r) => r.name === "listed")!.globs).toEqual(["app/**/*.tsx"]);
+			// Booleans still survive the fallback reader.
+			expect(rules.find((r) => r.name === "always")!.applyMode).toBe("always");
+		});
+
+		it("keeps loading the other rules when one file's frontmatter is unparseable", () => {
+			const rulesDir = join(projectDir, ".cast", "rules");
+			mkdirSync(rulesDir, { recursive: true });
+			writeFileSync(join(rulesDir, "good.md"), "---\nalwaysApply: true\n---\nGOOD");
+			writeFileSync(join(rulesDir, "broken.md"), "---\nglobs: *.tsx\n---\nBROKEN");
+
+			const rules = loadDirectoryRules({ projectCwd: projectDir });
+			expect(rules.map((r) => r.name).sort()).toEqual(["broken", "good"]);
+			expect(formatAlwaysApplyRules(rules)).toContain("GOOD");
+		});
+
 		// The catalog is built once per turn, so /rule:name can land on a file
 		// that has since been moved or deleted. That threw ENOENT out of the
 		// command handler — unhandled in the TUI.

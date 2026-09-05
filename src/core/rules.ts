@@ -19,11 +19,10 @@
 
 import { type Dirent, existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { parseFrontmatter } from "./frontmatter.ts";
 import { promptsDir, readRequiredPrompt } from "./prompts.ts";
 
-const MD_EXT_RE = /\.md$/;
 const REGEX_SPECIAL_CHARS_RE = /[.*+?^${}()|[\]\\]/g;
 const AMP_RE = /&/g;
 const LT_RE = /</g;
@@ -124,6 +123,42 @@ function classifyApplyMode(r: Rule): ApplyMode {
 	return "manual";
 }
 
+/** `*.ts, *.tsx` → ["*.ts", "*.tsx"]. A glob never legitimately contains a comma. */
+function splitGlobList(value: string): string[] {
+	return value
+		.split(",")
+		.map((part) => part.trim())
+		.filter(Boolean);
+}
+
+const FRONTMATTER_BLOCK_RE = /^---\r?\n([\s\S]*?)\r?\n---/;
+const BOM_RE = /^\uFEFF/;
+const SURROUNDING_QUOTES_RE = /^["']|["']$/g;
+const FRONTMATTER_LINE_RE = /^([A-Za-z_][\w-]*)\s*:\s*(.*)$/;
+
+/**
+ * Last-resort reader for frontmatter YAML rejected as invalid.
+ *
+ * Cursor rule files are flat `key: value` pairs, and the values people write
+ * there (`globs: *.tsx`, `globs: src/**\/*.ts,*.md`) are not valid YAML. Losing
+ * every field over that is worse than reading the lines directly: quotes are
+ * stripped, `true`/`false` become booleans, everything else stays a string.
+ */
+function parseCursorishFrontmatter(raw: string): Record<string, unknown> {
+	const block = FRONTMATTER_BLOCK_RE.exec(raw.replace(BOM_RE, ""));
+	if (!block?.[1]) return {};
+	const out: Record<string, unknown> = {};
+	for (const line of block[1].split("\n")) {
+		const match = FRONTMATTER_LINE_RE.exec(line.trim());
+		if (!match) continue;
+		const key = match[1]!;
+		const rawValue = match[2]!.trim().replace(SURROUNDING_QUOTES_RE, "");
+		if (rawValue === "true" || rawValue === "false") out[key] = rawValue === "true";
+		else if (rawValue) out[key] = rawValue;
+	}
+	return out;
+}
+
 function loadRuleFromFile(filePath: string, source: RuleSource, scope: string): Rule | null {
 	let raw: string;
 	try {
@@ -132,21 +167,25 @@ function loadRuleFromFile(filePath: string, source: RuleSource, scope: string): 
 		return null;
 	}
 
-	const { frontmatter } = parseFrontmatter(raw);
-	const name =
-		frontmatter.name && typeof frontmatter.name === "string"
-			? frontmatter.name
-			: filePath.replace(MD_EXT_RE, "").split("/").pop()!;
+	const parsed = parseFrontmatter(raw);
+	// `globs: *.tsx` is what Cursor's own rule files write, and YAML reads a
+	// leading `*` as an alias — so the whole block fails to parse and every
+	// field with it. Fall back to reading the fields off the raw lines, which is
+	// all a Cursor rule's frontmatter ever is: flat `key: value` pairs.
+	const frontmatter = parsed.errors.length > 0 ? parseCursorishFrontmatter(raw) : parsed.frontmatter;
+	const name = frontmatter.name && typeof frontmatter.name === "string" ? frontmatter.name : basename(filePath, ".md");
 	const description = typeof frontmatter.description === "string" ? frontmatter.description : "";
 	const alwaysApply = frontmatter["always-apply"] === true || frontmatter.alwaysApply === true;
 
-	// Parse globs — can be an inline YAML array ["a", "b"] or a single string
+	// Globs arrive as an inline YAML array ["a", "b"], a single string, or —
+	// Cursor's usual shape — one comma-separated string (`*.ts,*.tsx`), which
+	// used to be kept whole and could then never match anything.
 	let globs: string[] = [];
 	const globsVal = frontmatter.globs ?? frontmatter.paths;
 	if (Array.isArray(globsVal)) {
-		globs = globsVal.filter((glob): glob is string => typeof glob === "string");
+		globs = globsVal.flatMap((glob) => (typeof glob === "string" ? splitGlobList(glob) : []));
 	} else if (typeof globsVal === "string" && globsVal) {
-		globs = [globsVal];
+		globs = splitGlobList(globsVal);
 	}
 
 	const rule: Rule = {
