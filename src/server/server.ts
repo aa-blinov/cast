@@ -184,6 +184,34 @@ const SHARED_LIVE_EVENT_TYPES = new Set<string>([
 	"error",
 ]);
 
+/**
+ * Strip a live event down to what the saved transcript would have shown.
+ *
+ * The stored share view drops tool messages entirely, so a link opened after
+ * the fact never reveals what a command printed or a file contained. The live
+ * relay was sending `tool_start`/`tool_end` whole — arguments and result text
+ * included — so watching the same thread *while it ran* leaked exactly what
+ * the static view was careful not to: file contents, command output, and the
+ * paths behind them. Keep the tool's name and status (that is what makes the
+ * live view worth watching) and drop the payload.
+ */
+export function sanitizeSharedLiveEvent(event: { type: string } & Record<string, unknown>): Record<string, unknown> {
+	if (event.type === "tool_start") {
+		const call = (event.call ?? {}) as Record<string, unknown>;
+		return { type: "tool_start", call: { id: call.id, name: call.name, status: call.status, arguments: "" } };
+	}
+	if (event.type === "tool_end") {
+		return {
+			type: "tool_end",
+			id: event.id,
+			name: event.name,
+			status: event.status,
+			result: { content: "[hidden in the shared view]", isError: (event.result as { isError?: boolean })?.isError },
+		};
+	}
+	return event;
+}
+
 // app.js / settings-modal.js. assetVersion mixes these into the app.js hash so
 // any change to one of them invalidates the cached app.js too.
 const IMPORT_REWRITE_TARGETS = [
@@ -2487,7 +2515,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		}
 		const listener = (event: { type: string }) => {
 			if (!SHARED_LIVE_EVENT_TYPES.has(event.type)) return;
-			writer.write(`data: ${JSON.stringify(event)}\n\n`);
+			writer.write(`data: ${JSON.stringify(sanitizeSharedLiveEvent(event as { type: string }))}\n\n`);
 		};
 		const writer = createSseWriter(res, () => bridge.unsubscribe(ws.id, listener));
 		// Late joiner: send the current status immediately so the view shows

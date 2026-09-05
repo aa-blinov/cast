@@ -176,6 +176,40 @@ describe("web session authentication", () => {
 	});
 });
 
+describe("shared live relay", () => {
+	// The saved share view drops tool messages, so a link opened afterwards
+	// never shows what a command printed or a file held. The live relay was
+	// sending tool events whole, so watching the same thread while it ran
+	// leaked exactly that.
+	it("strips tool arguments and output from relayed events", async () => {
+		const { sanitizeSharedLiveEvent } = await import("../src/server/server.ts");
+
+		const started = sanitizeSharedLiveEvent({
+			type: "tool_start",
+			call: { id: "t1", name: "read", status: "running", arguments: JSON.stringify({ path: "/home/u/.env" }) },
+		});
+		expect(JSON.stringify(started)).not.toContain(".env");
+		expect((started.call as { name?: string }).name).toBe("read");
+
+		const ended = sanitizeSharedLiveEvent({
+			type: "tool_end",
+			id: "t1",
+			name: "read",
+			status: "completed",
+			result: { content: "API_KEY=sk-super-secret", isError: false },
+		});
+		expect(JSON.stringify(ended)).not.toContain("sk-super-secret");
+		expect(ended.name).toBe("read");
+		expect((ended.result as { isError?: boolean }).isError).toBe(false);
+	});
+
+	it("passes non-tool events through untouched", async () => {
+		const { sanitizeSharedLiveEvent } = await import("../src/server/server.ts");
+		const event = { type: "token", text: "hello" };
+		expect(sanitizeSharedLiveEvent(event)).toEqual(event);
+	});
+});
+
 describe("/api/server/status", () => {
 	beforeEach(async () => {
 		// The status endpoint reads the real ~/.cast/server.json. Tests run in
