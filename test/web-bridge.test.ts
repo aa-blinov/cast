@@ -9,6 +9,7 @@ import type { Persona } from "../src/core/personas.ts";
 import type { Rule } from "../src/core/rules.ts";
 import { createAgentRunner } from "../src/core/runner.ts";
 import { createSession, getFullHistory, loadSession, saveSession } from "../src/core/session.ts";
+import { setProjectTrust } from "../src/core/settings.ts";
 import type { StartupResult } from "../src/core/startup.ts";
 import { sessionInputsDir } from "../src/server/inputs.ts";
 
@@ -1369,6 +1370,9 @@ describe("web bridge", () => {
 			"utf-8",
 		);
 		try {
+			// The daemon cannot ask about a directory it was not started in, so it
+			// reads the decision already recorded for it.
+			setProjectTrust(projectDir, true);
 			// The daemon's own directory has no rules at all.
 			const bridge = createServerBridge(makeResult({ directoryRules: [] }));
 			const ws = bridge.createSession(undefined, undefined, projectDir);
@@ -1388,6 +1392,80 @@ describe("web bridge", () => {
 			};
 			expect(listed.ok).toBe(true);
 			expect((listed.result ?? []).map((r) => r.name)).toContain("project-only");
+		} finally {
+			rmSync(projectDir, { recursive: true, force: true });
+		}
+	});
+
+	// Same defect as the rules, one layer over: the daemon discovered skills for
+	// its own directory only, so a session opened in another project was never
+	// told that project's skills existed and could not call them.
+	it("offers the session directory's own skills to the model", async () => {
+		const projectDir = mkdtempSync(join(tmpdir(), "cast-bridge-skills-"));
+		mkdirSync(join(projectDir, ".cast", "skills", "project-only"), { recursive: true });
+		writeFileSync(
+			join(projectDir, ".cast", "skills", "project-only", "SKILL.md"),
+			"---\nname: project-only\ndescription: Only in this project, for the per-session skill check.\n---\n\nbody\n",
+			"utf-8",
+		);
+		try {
+			setProjectTrust(projectDir, true);
+			// A realistic resolver: the daemon's is fully populated, and skill
+			// discovery reads these fields.
+			const bridge = createServerBridge(
+				makeResult({
+					skills: [],
+					projectDeps: {
+						noSkills: false,
+						noMcp: false,
+						cliSkillPaths: [],
+						cliMcpPaths: [],
+						settings: {},
+						pickers: {} as never,
+					} as StartupResult["projectDeps"],
+				}),
+			);
+			const ws = bridge.createSession(undefined, undefined, projectDir);
+			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
+
+			bridge.submit(ws.id, "hello");
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			const opts = runAgentLoop.mock.calls.at(-1)![1] as {
+				skills?: Array<{ name: string }>;
+				rebuildSystemPrompt?: (ctx: { userText: string; contextFiles: string[] }) => string;
+			};
+			expect((opts.skills ?? []).map((s) => s.name)).toContain("project-only");
+			const prompt = opts.rebuildSystemPrompt?.({ userText: "hello", contextFiles: [] }) ?? "";
+			expect(prompt).toContain("project-only");
+		} finally {
+			rmSync(projectDir, { recursive: true, force: true });
+		}
+	});
+
+	// The flip side of resolving per session directory: `projectTrusted` is one
+	// decision the user made about the daemon's own directory, and handing it to
+	// a session opened in an unvetted checkout would load that checkout's rules,
+	// skills and personas under it. With no recorded decision, don't.
+	it("does not load rules from a session directory that was never trusted", async () => {
+		const projectDir = mkdtempSync(join(tmpdir(), "cast-bridge-untrusted-"));
+		mkdirSync(join(projectDir, ".cursor", "rules"), { recursive: true });
+		writeFileSync(
+			join(projectDir, ".cursor", "rules", "untrusted.mdc"),
+			"---\nalwaysApply: true\n---\nUNTRUSTED_RULE\n",
+			"utf-8",
+		);
+		try {
+			const bridge = createServerBridge(makeResult({ directoryRules: [] }));
+			const ws = bridge.createSession(undefined, undefined, projectDir);
+			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
+
+			bridge.submit(ws.id, "hello");
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			const opts = runAgentLoop.mock.calls.at(-1)![1] as {
+				rebuildSystemPrompt?: (ctx: { userText: string; contextFiles: string[] }) => string;
+			};
+			const prompt = opts.rebuildSystemPrompt?.({ userText: "hello", contextFiles: [] }) ?? "";
+			expect(prompt).not.toContain("UNTRUSTED_RULE");
 		} finally {
 			rmSync(projectDir, { recursive: true, force: true });
 		}
