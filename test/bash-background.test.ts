@@ -4,6 +4,7 @@ import { MessageQueue } from "../src/core/loop.ts";
 import {
 	BackgroundTaskRegistry,
 	type BashBackgroundDeps,
+	isPtyAvailable,
 	isPtySpawnFailure,
 } from "../src/core/tools/bash-background.ts";
 
@@ -234,6 +235,19 @@ describe("BackgroundTaskRegistry retention", () => {
 		expect(registry.get(longRunning.id)).toBeDefined();
 		expect(registry.hasRunning()).toBe(true);
 		registry.killAll();
+	});
+});
+
+describe("pty availability", () => {
+	// node-pty is a native module, and a build of it only loads under the Node
+	// it was compiled against — a release built on a distro Node (linked
+	// against libnode.so) will not load under an official Node tarball. That
+	// used to be a startup crash for the whole harness; a container with a
+	// different Node could not run cast at all.
+	it("reports whether the native module loaded, without throwing", () => {
+		expect(typeof isPtyAvailable()).toBe("boolean");
+		// Cached: a second call must not re-throw or re-import.
+		expect(isPtyAvailable()).toBe(isPtyAvailable());
 	});
 });
 

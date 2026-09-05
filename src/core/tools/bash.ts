@@ -12,7 +12,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { AppConfig } from "../config.ts";
 import { checkDangerousBash } from "../permissions.ts";
-import type { BackgroundTask, BashBackgroundDeps } from "./bash-background.ts";
+import { type BackgroundTask, type BashBackgroundDeps, isPtyAvailable } from "./bash-background.ts";
 import { looksLongRunningCommand } from "./long-running.ts";
 import { appendBoundedOutput, type ConfirmBash, formatSize, type ToolResult } from "./shared.ts";
 
@@ -317,18 +317,24 @@ export async function execBash(
 	// support — see tools.ts's conditional getToolDefinitions. If the model
 	// sets this flag somewhere it's not wired (cast run, a subagent), fall
 	// through to the normal synchronous path below instead of erroring.
-	if (args.run_in_background === true && background) {
+	// Every managed path needs the PTY backend. Where the native module cannot
+	// load, fall through to plain foreground execution rather than failing the
+	// tool outright — losing background tasks is a smaller loss than losing
+	// `bash`.
+	const managed = background && isPtyAvailable() ? background : undefined;
+
+	if (args.run_in_background === true && managed) {
 		// Background tasks are open-ended by default (dev servers, long builds)
 		// — only apply a kill timer when the model explicitly asked for one.
-		const task = background.registry.start(command, cwd, config, explicitTimeout, background);
+		const task = managed.registry.start(command, cwd, config, explicitTimeout, managed);
 		return formatBackgroundStart(task, warnPrefix, false);
 	}
 
-	if (background) {
+	if (managed) {
 		// Start every interactive-surface command in the managed PTY so a still-
 		// running process can be promoted without trying to hand an OS process
 		// from pipe-based foreground execution to a new terminal later.
-		const task = background.registry.start(command, cwd, config, undefined, background, {
+		const task = managed.registry.start(command, cwd, config, undefined, managed, {
 			notifyOnCompletion: false,
 		});
 		if (task.status !== "running") return formatManagedTaskResult(task, config, warnPrefix, timeout);
@@ -337,20 +343,20 @@ export async function execBash(
 		// discover that they are open-ended. Other commands get OMP-style grace
 		// time to finish normally before being promoted.
 		if (looksLongRunningCommand(command)) {
-			background.registry.promote(task.id);
+			managed.registry.promote(task.id);
 			return formatBackgroundStart(task, warnPrefix, true);
 		}
 
 		const waitMs = Math.min(AUTO_BACKGROUND_THRESHOLD_MS, Math.max(1000, timeout * 1000 - 1000));
 		const outcome = await waitForManagedTask(task, waitMs, signal);
 		if (outcome === "aborted") {
-			background.registry.kill(task.id);
+			managed.registry.kill(task.id);
 			return { content: "[ABORTED] Command was interrupted by user.", isError: true };
 		}
 		if (outcome === "exited" || task.status !== "running") {
 			return formatManagedTaskResult(task, config, warnPrefix, timeout);
 		}
-		background.registry.promote(task.id);
+		managed.registry.promote(task.id);
 		return formatBackgroundStart(task, warnPrefix, true);
 	}
 

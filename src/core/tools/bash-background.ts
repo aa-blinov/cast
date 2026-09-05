@@ -16,7 +16,35 @@
  * must not kill a task the user explicitly asked to survive past it.
  */
 
-import { type IPty, spawn as spawnPty } from "node-pty";
+import { createRequire } from "node:module";
+import type { IPty } from "node-pty";
+
+/**
+ * node-pty is a native module, and a build of it is tied to the exact Node it
+ * was compiled against — a release built on a distro Node (which links against
+ * libnode.so) will not load under an official Node tarball, and vice versa.
+ * Importing it at module load made that a startup crash for the whole harness,
+ * even though background bash is one optional feature. Loading it on first use
+ * turns the same mismatch into "this one feature is unavailable".
+ */
+/** Whether the PTY backend is usable here — callers fall back to plain
+ * foreground execution when it is not. */
+export function isPtyAvailable(): boolean {
+	return loadPty() !== null;
+}
+
+let ptyModule: typeof import("node-pty") | null | undefined;
+function loadPty(): typeof import("node-pty") | null {
+	if (ptyModule !== undefined) return ptyModule;
+	try {
+		// createRequire, not a bare `require`: the bundle is ESM.
+		ptyModule = createRequire(import.meta.url)("node-pty") as typeof import("node-pty");
+	} catch {
+		ptyModule = null;
+	}
+	return ptyModule;
+}
+
 import type { AppConfig } from "../config.ts";
 import type { Message } from "../llm.ts";
 import type { MessageQueue } from "../loop.ts";
@@ -208,8 +236,20 @@ export class BackgroundTaskRegistry {
 		this.tasks.set(id, task);
 
 		const maxBytes = config.maxToolOutputBytes;
+		const pty_ = loadPty();
+		if (!pty_) {
+			// Native module unavailable (an ABI mismatch, or a build without it).
+			// The rest of the harness works; only this feature cannot.
+			task.status = "error";
+			task.endedAt = Date.now();
+			task.errorMessage =
+				"Background bash is unavailable: the node-pty native module could not be loaded in this environment. Run the command in the foreground instead.";
+			resolveExit();
+			this.settle(task, config, deps);
+			return task;
+		}
 		try {
-			const pty = spawnPty(bash.path, ["-c", command], {
+			const pty = pty_.spawn(bash.path, ["-c", command], {
 				name: "xterm-256color",
 				cols: 120,
 				rows: 40,
