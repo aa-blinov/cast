@@ -11,6 +11,7 @@ import {
 	formatRulesForTurn,
 	hasProjectRulesDir,
 	loadDirectoryRules,
+	MAX_RULE_BODY_CHARS,
 	matchAutoRules,
 	matchesRuleGlobs,
 	parseAtMentions,
@@ -798,6 +799,63 @@ describe("rules", () => {
 			writeFileSync(join(deep, ".cast", "rules", "x.md"), "---\n---\nbody");
 			expect(discoverProjectRuleDirs(root, 2).map((f) => f.scope)).not.toContain("a/b/c");
 			expect(discoverProjectRuleDirs(root, 5).map((f) => f.scope)).toContain("a/b/c");
+		});
+	});
+
+	describe("audit regressions", () => {
+		// A nested rule's globs are written relative to its own subtree — the
+		// file at apps/web/.cast/rules/style.md says `src/**/*.ts` meaning
+		// apps/web/src/**/*.ts. Matching only root-relative made every
+		// path-shaped glob in a nested rule dead: it cannot match
+		// apps/web/src/a.ts, and files outside the subtree are already excluded
+		// by the scope gate, so the rule could never attach at all.
+		it("matches a nested rule's path-shaped globs against its own subtree", () => {
+			const rulesDir = join(projectDir, "apps", "web", ".cast", "rules");
+			mkdirSync(rulesDir, { recursive: true });
+			writeFileSync(join(rulesDir, "style.md"), "---\nglobs: src/**/*.ts\n---\nweb style");
+
+			const rules = loadDirectoryRules({ projectCwd: projectDir });
+			const rule = rules.find((r) => r.id === "apps/web/style");
+			expect(rule?.applyMode).toBe("auto");
+
+			expect(matchesRuleGlobs(rule!, ["apps/web/src/a.ts"])).toBe(true);
+			expect(matchAutoRules(rules, ["apps/web/src/a.ts"]).map((r) => r.id)).toContain("apps/web/style");
+			// Still scoped: the same path outside the subtree must not attach it.
+			expect(matchAutoRules(rules, ["src/a.ts"]).map((r) => r.id)).not.toContain("apps/web/style");
+		});
+
+		// An always-apply rule is pasted into the system prompt on every request,
+		// so an unbounded one is a per-turn tax: a 3MB file went in whole, about
+		// 750k tokens.
+		it("clamps an oversized rule body instead of injecting all of it", () => {
+			const rulesDir = join(projectDir, ".cast", "rules");
+			mkdirSync(rulesDir, { recursive: true });
+			const huge = "x".repeat(MAX_RULE_BODY_CHARS * 3);
+			writeFileSync(join(rulesDir, "huge.md"), `---\nalwaysApply: true\n---\n${huge}`);
+
+			const injected = formatAlwaysApplyRules(loadDirectoryRules({ projectCwd: projectDir }));
+			expect(injected.length).toBeLessThan(MAX_RULE_BODY_CHARS * 1.1);
+			expect(injected).toContain("Rule truncated at");
+		});
+
+		// The catalog is built once per turn, so /rule:name can land on a file
+		// that has since been moved or deleted. That threw ENOENT out of the
+		// command handler — unhandled in the TUI.
+		it("reports a vanished rule file instead of throwing", () => {
+			const rule: Rule = {
+				name: "gone",
+				id: "gone",
+				description: "",
+				filePath: join(projectDir, "never-existed.md"),
+				baseDir: projectDir,
+				source: "project",
+				scope: "",
+				alwaysApply: false,
+				globs: [],
+				applyMode: "manual",
+			};
+			expect(() => formatRuleInvocation(rule)).not.toThrow();
+			expect(formatRuleInvocation(rule)).toContain("could not be read");
 		});
 	});
 });

@@ -3305,7 +3305,13 @@ function extractContextFile(
 	contextFiles: string[],
 	cwd: string,
 ): void {
-	const rawPath = typeof args.path === "string" ? args.path : undefined;
+	// `edit` names its argument `filePath`, every other file tool uses `path`.
+	// Reading only `path` meant the file the agent is actively editing never
+	// entered contextFiles, so a glob rule scoped to it never auto-attached and
+	// a nested rule's subtree never activated — on the one signal that most
+	// clearly says "this file is the work".
+	const rawPath =
+		typeof args.path === "string" ? args.path : typeof args.filePath === "string" ? args.filePath : undefined;
 	if (!rawPath) return;
 
 	// Normalize to relative path from cwd for consistent glob matching

@@ -348,12 +348,25 @@ export function fileMatchesGlob(pattern: string, filePath: string): boolean {
 	return simpleRe.test(filePath);
 }
 
-/** Check if any context file matches any of the rule's globs. */
+/**
+ * Check if any context file matches any of the rule's globs.
+ *
+ * Context files are relative to the project root, but a nested rule's globs are
+ * written relative to the rule's own subtree — `apps/web/.cast/rules/style.md`
+ * saying `globs: src/**\/*.ts` means `apps/web/src/**\/*.ts`. Matching only
+ * against the root-relative path made every path-shaped glob in a nested rule
+ * dead: it could not match `apps/web/src/a.ts` (the prefix is missing from the
+ * pattern) and files outside the subtree are already excluded by the scope
+ * gate. Each file is therefore tried root-relative *and* scope-relative; a
+ * basename-shaped glob (`*.ts`) matched either way and is unaffected.
+ */
 export function matchesRuleGlobs(r: Rule, contextFiles: string[]): boolean {
 	if (r.globs.length === 0) return false;
+	const prefix = r.scope ? `${r.scope}/` : "";
 	for (const pattern of r.globs) {
 		for (const file of contextFiles) {
 			if (fileMatchesGlob(pattern, file)) return true;
+			if (prefix && file.startsWith(prefix) && fileMatchesGlob(pattern, file.slice(prefix.length))) return true;
 		}
 	}
 	return false;
@@ -487,13 +500,30 @@ export function formatAlwaysApplyRules(rules: Rule[]): string {
 	return `\n\n<rules>\n${parts.join("\n\n")}\n</rules>`;
 }
 
+/**
+ * Ceiling on one rule's injected body.
+ *
+ * An always-apply rule is pasted into the system prompt on *every* request, so
+ * its size is a per-turn tax paid for the life of the session. Nothing bounded
+ * it: a 3MB file went in whole — about 750k tokens, past most context windows
+ * and expensive in the ones it fits. 64KB is roughly 16k tokens, far more than
+ * any instruction needs, and the truncation says so in-band so neither the
+ * model nor the user is left thinking they read the whole rule.
+ */
+export const MAX_RULE_BODY_CHARS = 64 * 1024;
+
+function clampRuleBody(body: string, filePath: string): string {
+	if (body.length <= MAX_RULE_BODY_CHARS) return body;
+	return `${body.slice(0, MAX_RULE_BODY_CHARS)}\n\n[Rule truncated at ${MAX_RULE_BODY_CHARS} characters — ${filePath} is ${body.length} characters. Split it into focused rules, or have the model read the file when it needs the rest.]`;
+}
+
 /** Read each rule's body (frontmatter stripped), dropping empty/unreadable ones. */
 function renderRuleBodies(rules: Rule[]): string[] {
 	const parts: string[] = [];
 	for (const rule of rules) {
 		try {
 			const { body } = parseFrontmatter(readFileSync(rule.filePath, "utf-8"));
-			if (body.trim()) parts.push(body.trim());
+			if (body.trim()) parts.push(clampRuleBody(body.trim(), rule.filePath));
 		} catch {
 			// Unreadable — skip.
 		}
@@ -555,8 +585,19 @@ export function readRuleBody(rule: Rule): string {
 
 /**
  * Format a rule's full content for /rule:name invocation.
+ *
+ * The catalog is built once per turn, so by the time someone types
+ * `/rule:name` the file may be gone — uninstalled, a worktree switch, a branch
+ * that never had it. That used to throw ENOENT out of the command handler
+ * (unhandled in the TUI, a failed command over the bridge); it is reported as
+ * a rule problem instead.
  */
 export function formatRuleInvocation(rule: Rule): string {
-	const content = readRuleBody(rule);
+	let content: string;
+	try {
+		content = clampRuleBody(readRuleBody(rule), rule.filePath);
+	} catch {
+		return `<rule name="${escapeXml(rule.name)}" location="${escapeXml(rule.filePath)}">\nThis rule's file could not be read (it may have been moved or deleted). Continue without it, and mention that it was unavailable.\n</rule>`;
+	}
 	return `<rule name="${escapeXml(rule.name)}" location="${escapeXml(rule.filePath)}">\nReferences are relative to ${rule.baseDir}.\n\n${content}\n</rule>`;
 }
