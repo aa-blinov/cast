@@ -264,6 +264,52 @@ describe("compactMessages", () => {
 		expect(estimateTokens(tail)).toBeLessThan(8_000);
 	});
 
+	it("never stacks duplicate file tags when the model copies the previous summary back", async () => {
+		// The update prompt says "PRESERVE all existing information", and the
+		// previous summary was handed to the model with our <read-files> block
+		// still attached — so it copied the block into its answer and we
+		// appended ours underneath. Every round added another copy, and the
+		// first block (the one parseFileTagsFromSummary reads) became the
+		// model's transcription instead of our extraction from tool_calls.
+		const bulk = "x".repeat(32 * 1024);
+		const history = (n: number): Message[] => [
+			{ role: "system", content: "persona" },
+			{ role: "user", content: "read them" },
+			{
+				role: "assistant",
+				content: null,
+				tool_calls: [{ id: `t${n}`, type: "function", function: { name: "read", arguments: `{"path":"f${n}"}` } }],
+			} as never,
+			{ role: "tool", tool_call_id: `t${n}`, content: bulk } as never,
+			{ role: "assistant", content: `read f${n}` },
+		];
+		const config = { contextWindow: 8_000, maxResponseTokens: 1_000, compactionThreshold: 0.05 } as any;
+
+		const first = await compactMessages(history(1), async () => "## Goal\n- read files", config);
+		const marker = first.messages.find(
+			(m) => typeof m.content === "string" && m.content.includes("Compacted context"),
+		);
+		expect(marker).toBeDefined();
+
+		// Second round: the model echoes the previous summary verbatim, tags
+		// and all — exactly what a "preserve everything" instruction produces.
+		let seenByModel: string | undefined;
+		const second = await compactMessages(
+			[marker as Message, ...history(2).slice(1)],
+			async (_text, previousSummary) => {
+				seenByModel = previousSummary;
+				return `## Goal\n- read files\n\n${previousSummary ?? ""}`;
+			},
+			config,
+		);
+
+		expect(seenByModel).not.toContain("<read-files>");
+		const summary = second.summary.summary;
+		expect(summary.match(/<read-files>/g)?.length ?? 0).toBe(1);
+		expect(summary).toContain("f1");
+		expect(summary).toContain("f2");
+	});
+
 	it("refuses to compact when the summarizer returns nothing usable", async () => {
 		// A summarization call that *succeeds* with empty content used to flip
 		// every old message out of context anyway, replacing them with a
