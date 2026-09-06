@@ -1,5 +1,8 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import OpenAI from "openai";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	createClient,
 	describeTurnError,
@@ -313,10 +316,10 @@ describe("retryDelayMs", () => {
 		expect(retryDelayMs(1, err)).toBe(60_000);
 	});
 
-	it("still caps an absurd retry-after, so a bad header can't park the turn for hours", () => {
+	it("caps an absurd retry-after at the configured ceiling (default one hour)", () => {
 		const err = rateLimitError({ message: "rate limited" });
 		(err as { headers: Headers }).headers = new Headers({ "retry-after": "999999" });
-		expect(retryDelayMs(1, err)).toBe(10 * 60_000);
+		expect(retryDelayMs(1, err)).toBe(3_600_000);
 	});
 
 	it("falls back to capped exponential backoff with no headers", () => {
@@ -658,6 +661,110 @@ describe("streamChat — uncapped retry count for genuinely transient errors", (
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+
+	describe("waiting out an exhausted quota", () => {
+		let realHome: string | undefined;
+		let fakeHome: string;
+
+		beforeEach(() => {
+			realHome = process.env.HOME;
+			fakeHome = mkdtempSync(join(tmpdir(), "cast-quota-test-"));
+			process.env.HOME = fakeHome;
+		});
+
+		afterEach(() => {
+			process.env.HOME = realHome;
+			rmSync(fakeHome, { recursive: true, force: true });
+		});
+
+		function setSettings(value: Record<string, unknown>): void {
+			mkdirSync(join(fakeHome, ".cast"), { recursive: true });
+			writeFileSync(join(fakeHome, ".cast", "settings.json"), JSON.stringify(value));
+		}
+
+		function quotaThenSucceed(refusals: number, retryAfter?: string) {
+			let calls = 0;
+			const client = {
+				chat: {
+					completions: {
+						create: async () => {
+							calls++;
+							if (calls <= refusals) {
+								const err = rateLimitError({ message: "You exceeded your current quota" });
+								(err as { code?: string }).code = "insufficient_quota";
+								if (retryAfter)
+									(err as { headers: Headers }).headers = new Headers({ "retry-after": retryAfter });
+								throw err;
+							}
+							return {
+								async *[Symbol.asyncIterator]() {
+									yield { choices: [{ delta: { content: "back" } }] };
+									yield { choices: [{ delta: {}, finish_reason: "stop" }] };
+								},
+							};
+						},
+					},
+				},
+			} as unknown as OpenAI;
+			return { client, calls: () => calls };
+		}
+
+		it("still fails immediately when the wait is not configured (default)", async () => {
+			setSettings({});
+			const { client, calls } = quotaThenSucceed(1);
+			await expect(streamAndCollect(client, "m", [], [], 100)).rejects.toThrow(/quota/i);
+			// One attempt, no retry: credit does not come back on its own, and
+			// this is the behaviour every existing setup keeps.
+			expect(calls()).toBe(1);
+		});
+
+		it("sits out the window and finishes the turn when retryQuotaWaitSeconds is set", async () => {
+			// The point of the setting: an unattended run must not die at 3am on
+			// a daily limit that reopens at 4.
+			setSettings({ retryQuotaWaitSeconds: 7200 });
+			vi.useFakeTimers();
+			try {
+				const { client, calls } = quotaThenSucceed(2);
+				const promise = streamAndCollect(client, "m", [], [], 100);
+				// Poll backoff: 30s then 60s, both well inside the 2h budget.
+				await vi.advanceTimersByTimeAsync(30_000 + 60_000 + 1_000);
+				const result = await promise;
+				expect(result.content).toBe("back");
+				expect(calls()).toBe(3);
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("waits exactly as long as the provider asked, when it says", async () => {
+			setSettings({ retryQuotaWaitSeconds: 7200 });
+			vi.useFakeTimers();
+			try {
+				const { client, calls } = quotaThenSucceed(1, "1800");
+				const promise = streamAndCollect(client, "m", [], [], 100);
+				await vi.advanceTimersByTimeAsync(1_800_000 + 1_000);
+				const result = await promise;
+				expect(result.content).toBe("back");
+				expect(calls()).toBe(2);
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("gives up once the configured budget is spent", async () => {
+			setSettings({ retryQuotaWaitSeconds: 60 });
+			vi.useFakeTimers();
+			try {
+				const { client } = quotaThenSucceed(Number.POSITIVE_INFINITY);
+				const promise = streamAndCollect(client, "m", [], [], 100);
+				const assertion = expect(promise).rejects.toThrow();
+				await vi.advanceTimersByTimeAsync(10 * 60_000);
+				await assertion;
+			} finally {
+				vi.useRealTimers();
+			}
+		});
 	});
 
 	it("still gives up immediately on a non-retryable error, no matter the attempt count", async () => {

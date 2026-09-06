@@ -135,6 +135,12 @@ export async function runInteractive(args: ParsedArgs): Promise<void> {
 			case "notice":
 				emit("notice", { text: event.message });
 				break;
+			case "retry":
+				// A retry can now be a *long* wait — a quota window measured in
+				// hours, when retryQuotaWaitSeconds is set. Dropping the event
+				// left `cast run` looking hung with nothing on either stream.
+				emit("retry", { attempt: event.attempt, reason: event.reason });
+				break;
 			case "status":
 				if (event.status === "idle") emit("end", { reason: "stop" });
 				break;
@@ -329,6 +335,14 @@ export async function runNonInteractive(args: ParsedArgs, options: RunOptions): 
 					// "stop". The interactive/JSONL path already forwards these.
 					if (!emit("notice", { text: event.message })) {
 						process.stderr.write(`  ${event.message}${EOL}`);
+					}
+					break;
+				case "retry":
+					// Same reason as the JSONL path: with a quota wait
+					// configured this is a pause of minutes to hours, and a
+					// silent one reads as a hang.
+					if (!emit("retry", { attempt: event.attempt, reason: event.reason })) {
+						process.stderr.write(`  Retry ${event.attempt}: ${event.reason}${EOL}`);
 					}
 					break;
 				case "end":

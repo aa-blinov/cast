@@ -146,6 +146,18 @@ export interface Settings {
 	 * lines / 128KB. Lines clamp to 100–100k, bytes to 4KB–8MB. */
 	maxToolOutputLines?: number;
 	maxToolOutputBytes?: number;
+	/** Longest single wait a provider's own `Retry-After` may buy, in seconds.
+	 * Unset means 3600 (an hour); clamps to 30–86400. A provider that answers
+	 * a 429 with "come back in 20 minutes" is telling the truth about its
+	 * window, and refusing to wait that long just wastes the turn. */
+	retryMaxWaitSeconds?: number;
+	/** How long to keep waiting for an exhausted quota to reset, in seconds.
+	 * Unset (or 0) keeps the old behaviour: a quota/billing error fails the
+	 * turn immediately, since credit does not come back on its own. Set it
+	 * when the key's limit is a *window* (daily tokens, hourly requests) that
+	 * reopens with time and an unattended run should sit through it. Clamps to
+	 * 0–604800 (a week). */
+	retryQuotaWaitSeconds?: number;
 	/** Skill names disabled via /skills toggle. Still discovered for the picker;
 	 * omitted from the agent catalog and /skill: invocation until re-enabled. */
 	disabledSkills?: string[];
@@ -391,6 +403,16 @@ export function maxToolOutputLinesSetting(settings: Settings = loadSettings()): 
 
 export function maxToolOutputBytesSetting(settings: Settings = loadSettings()): number {
 	return Math.round(clampedNumber(settings.maxToolOutputBytes, 4 * 1024, 8 * 1024 * 1024, 128 * 1024));
+}
+
+export function retryMaxWaitSeconds(settings: Settings = loadSettings()): number {
+	return Math.round(clampedNumber(settings.retryMaxWaitSeconds, 30, 86_400, 3_600));
+}
+
+export function retryQuotaWaitSeconds(settings: Settings = loadSettings()): number {
+	const value = settings.retryQuotaWaitSeconds;
+	if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return 0;
+	return Math.round(Math.min(value, 604_800));
 }
 
 export function isMemoryEnabled(settings: Settings = loadSettings()): boolean {
