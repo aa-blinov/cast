@@ -136,6 +136,19 @@ const RETRY_BASE_DELAY_MS = 500;
 // *count* is uncapped. Without this ceiling, 2^(attempt-1)*500ms blows past
 // any reasonable wait within a dozen attempts.
 const RETRY_MAX_DELAY_MS = 30_000;
+// A `Retry-After` is not a guess — it is the provider telling you when its
+// window reopens, and it was being clamped to the same 30s as the blind
+// backoff. A 429 saying "retry in 60s" then got a retry at 30s (another 429),
+// another at 30s, and the deadline below killed the turn — at the exact moment
+// the provider had said what to do. opencode splits these two ceilings for
+// this reason (RETRY_MAX_DELAY_NO_HEADERS vs RETRY_MAX_DELAY); this is the
+// same split, with a practical ceiling instead of their setTimeout limit,
+// since a CLI that silently sleeps for hours is its own kind of broken.
+const RETRY_HEADER_MAX_DELAY_MS = 10 * 60_000;
+// Backoff jitter, as a share of the computed delay. Without it, parallel
+// subagents that hit one provider limit together retry in lockstep and arrive
+// as a single wave — the thundering herd the limit was rate-limiting for.
+const RETRY_JITTER_FACTOR = 0.25;
 // A transient provider failure may be retried, but it must not leave a turn
 // pending forever. This deadline covers the retry/backoff phase only; a stream
 // that is already producing tokens is allowed to finish normally.
@@ -257,24 +270,36 @@ export function isRetryableStreamError(error: unknown): boolean {
  * exactly when its window resets is more accurate than guessing). Otherwise
  * capped exponential backoff.
  */
-export function retryDelayMs(attempt: number, error: unknown): number {
+export function retryDelayMs(attempt: number, error: unknown, random: number = Math.random()): number {
+	const fromHeader = retryAfterMs(error);
+	if (fromHeader !== undefined) return Math.min(fromHeader, RETRY_HEADER_MAX_DELAY_MS);
+	const base = Math.min(RETRY_BASE_DELAY_MS * 2 ** (attempt - 1), RETRY_MAX_DELAY_MS);
+	return Math.ceil(base + base * RETRY_JITTER_FACTOR * random);
+}
+
+/**
+ * The provider's own `Retry-After` / `retry-after-ms`, in milliseconds, or
+ * undefined when it didn't say. Split out from the delay so the retry loop can
+ * tell "the provider asked for this wait" from "we guessed" — only the former
+ * is allowed to push past the deadline.
+ */
+export function retryAfterMs(error: unknown): number | undefined {
 	const headers = (error as { headers?: Headers } | undefined)?.headers;
-	if (headers && typeof headers.get === "function") {
-		const ms = headers.get("retry-after-ms");
-		if (ms) {
-			const parsed = Number.parseFloat(ms);
-			if (!Number.isNaN(parsed)) return Math.min(parsed, RETRY_MAX_DELAY_MS);
-		}
-		const seconds = headers.get("retry-after");
-		if (seconds) {
-			const parsedSeconds = Number.parseFloat(seconds);
-			if (!Number.isNaN(parsedSeconds)) return Math.min(Math.ceil(parsedSeconds * 1000), RETRY_MAX_DELAY_MS);
-			// HTTP-date form, e.g. "Wed, 21 Oct 2026 07:28:00 GMT".
-			const parsedDate = Date.parse(seconds) - Date.now();
-			if (!Number.isNaN(parsedDate) && parsedDate > 0) return Math.min(parsedDate, RETRY_MAX_DELAY_MS);
-		}
+	if (!headers || typeof headers.get !== "function") return undefined;
+	const ms = headers.get("retry-after-ms");
+	if (ms) {
+		const parsed = Number.parseFloat(ms);
+		if (!Number.isNaN(parsed) && parsed >= 0) return parsed;
 	}
-	return Math.min(RETRY_BASE_DELAY_MS * 2 ** (attempt - 1), RETRY_MAX_DELAY_MS);
+	const seconds = headers.get("retry-after");
+	if (seconds) {
+		const parsedSeconds = Number.parseFloat(seconds);
+		if (!Number.isNaN(parsedSeconds) && parsedSeconds >= 0) return Math.ceil(parsedSeconds * 1000);
+		// HTTP-date form, e.g. "Wed, 21 Oct 2026 07:28:00 GMT".
+		const parsedDate = Date.parse(seconds) - Date.now();
+		if (!Number.isNaN(parsedDate) && parsedDate > 0) return Math.ceil(parsedDate);
+	}
+	return undefined;
 }
 
 /**
@@ -516,6 +541,7 @@ export async function* streamChat(
 	let attempt = 0;
 	let yieldedAny = false;
 	let retryStartedAt: number | undefined;
+	let retryDeadlineAt: number | undefined;
 
 	// Stream reads are inherently sequential — the next chunk depends on server push.
 	while (true) {
@@ -684,16 +710,25 @@ export async function* streamChat(
 				throw error;
 			}
 			retryStartedAt ??= Date.now();
+			retryDeadlineAt ??= retryStartedAt + RETRY_DEADLINE_MS;
 			attempt++;
-			if (Date.now() - retryStartedAt >= RETRY_DEADLINE_MS) {
-				throw new Error(`Provider retry deadline exceeded (${RETRY_DEADLINE_MS / 1000}s)`);
+			const wait = retryDelayMs(attempt, error);
+			const asked = retryAfterMs(error);
+			// The deadline bounds *our* guessing, not the provider's
+			// instruction. When a 429 says "come back in 60s" the wait is
+			// honoured and the deadline moves out to cover it — clamping it to
+			// the remaining budget is what turned a provider that told us
+			// exactly what to do into a failed turn.
+			if (asked !== undefined) retryDeadlineAt = Math.max(retryDeadlineAt, Date.now() + wait + RETRY_DEADLINE_MS);
+			if (Date.now() >= retryDeadlineAt) {
+				throw new Error(`Provider retry deadline exceeded (${Math.round((Date.now() - retryStartedAt) / 1000)}s)`);
 			}
 			const reason = error instanceof Error ? error.message : String(error);
 			yield { retrying: { attempt, reason } };
-			const remaining = RETRY_DEADLINE_MS - (Date.now() - retryStartedAt);
+			const remaining = retryDeadlineAt - Date.now();
 			// Abortable: Esc during a backoff must cancel the retry immediately,
-			// not wait out the timer (up to 30s) and fail on the next request.
-			await abortableSleep(Math.min(retryDelayMs(attempt, error), Math.max(0, remaining)), signal);
+			// not wait out the timer and fail on the next request.
+			await abortableSleep(Math.min(wait, Math.max(0, remaining)), signal);
 		}
 	}
 }
