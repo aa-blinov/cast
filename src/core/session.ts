@@ -450,6 +450,32 @@ const TOOL_RESULT_MAX_CHARS = 500;
 const TAIL_MIN_TOKENS = 10_000;
 const TAIL_MAX_TOKENS = 20_000;
 const TAIL_MIN_TEXT_BLOCK_MESSAGES = 5;
+/** Share of the input budget the kept tail may reach on a large window. */
+const TAIL_MAX_SHARE = 0.2;
+/** Hard ceiling on the tail however large the window gets. */
+const TAIL_ABSOLUTE_MAX_TOKENS = 100_000;
+
+/**
+ * Ceiling on the tail compaction keeps, in tokens.
+ *
+ * The flat 20k ceiling was written for a 128k window, where it is a sixth of
+ * the budget. On a 1M model the same constant made compaction a near-total
+ * reset: it fired at 726k tokens and left about 28k (an 8k summary plus a 20k
+ * tail), throwing away 96% of the context in one step. The ceiling therefore
+ * scales with the budget, but never below the 20k it used to be and never
+ * above 100k.
+ *
+ * Deliberately a `max` over the old constant: on every window up to 128k the
+ * 20% share lands under 20k, so the result is byte-for-byte the old behaviour
+ * (96k budget × 0.2 = 19.2k → 20k). Only genuinely large windows see a change.
+ * It stays well under the compaction threshold either way — the tail is capped
+ * at 40% of the budget further down, against a threshold of 75% — so a
+ * compaction can't leave the context still over the line.
+ */
+function tailCeilingTokens(config: AppConfig): number {
+	const budget = inputTokenBudget(config);
+	return Math.min(TAIL_ABSOLUTE_MAX_TOKENS, Math.max(TAIL_MAX_TOKENS, Math.floor(budget * TAIL_MAX_SHARE)));
+}
 
 /** One tool call as `name(arg=val, ...)`, truncating long argument values. */
 function formatToolCall(name: string, argsJson: string): string {
@@ -544,7 +570,7 @@ export async function compactMessages(
 	const envelopeTailTokens =
 		nonSystemTokens < TAIL_MIN_TOKENS * 1.5
 			? Math.max(1, Math.floor(nonSystemTokens * 0.4))
-			: Math.min(TAIL_MAX_TOKENS, Math.max(TAIL_MIN_TOKENS, Math.floor(nonSystemTokens * 0.4)));
+			: Math.min(tailCeilingTokens(config), Math.max(TAIL_MIN_TOKENS, Math.floor(nonSystemTokens * 0.4)));
 	// The 10k–20k envelope is meaningless once the model's own window is that
 	// small: with contextWindow 8k the tail budget alone exceeded the window,
 	// so the tail kept every message and compaction had nothing left to
