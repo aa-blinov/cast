@@ -302,20 +302,45 @@ describe("retryDelayMs", () => {
 		expect(retryDelayMs(1, err)).toBe(5000);
 	});
 
-	it("caps an absurdly large retry-after at the same ceiling as backoff", () => {
+	it("waits out a retry-after longer than the blind-backoff ceiling (regression)", () => {
+		// The header used to be clamped to the same 30s as the guessed
+		// backoff, so a 429 saying "retry in 60s" was retried at 30s — another
+		// 429 — and the turn died on the retry deadline at the exact moment the
+		// provider had said what to do. opencode keeps these two ceilings
+		// separate for this reason.
+		const err = rateLimitError({ message: "rate limited" });
+		(err as { headers: Headers }).headers = new Headers({ "retry-after": "60" });
+		expect(retryDelayMs(1, err)).toBe(60_000);
+	});
+
+	it("still caps an absurd retry-after, so a bad header can't park the turn for hours", () => {
 		const err = rateLimitError({ message: "rate limited" });
 		(err as { headers: Headers }).headers = new Headers({ "retry-after": "999999" });
-		expect(retryDelayMs(1, err)).toBe(30_000);
+		expect(retryDelayMs(1, err)).toBe(10 * 60_000);
 	});
 
 	it("falls back to capped exponential backoff with no headers", () => {
 		const err = new Error("socket hang up");
-		expect(retryDelayMs(1, err)).toBe(500);
-		expect(retryDelayMs(2, err)).toBe(1000);
-		expect(retryDelayMs(3, err)).toBe(2000);
+		// random = 0 removes the jitter, leaving the base schedule to assert.
+		expect(retryDelayMs(1, err, 0)).toBe(500);
+		expect(retryDelayMs(2, err, 0)).toBe(1000);
+		expect(retryDelayMs(3, err, 0)).toBe(2000);
 		// Uncapped attempt count (see llm.ts's streamChat) — must still not
 		// blow past the 30s ceiling however high the attempt count climbs.
-		expect(retryDelayMs(10, err)).toBe(30_000);
+		expect(retryDelayMs(10, err, 0)).toBe(30_000);
+	});
+
+	it("adds jitter so parallel agents don't retry in lockstep", () => {
+		const err = new Error("socket hang up");
+		// Jitter is a share of the delay, added on top: [base, base * 1.25].
+		expect(retryDelayMs(3, err, 0)).toBe(2000);
+		expect(retryDelayMs(3, err, 1)).toBe(2500);
+		const spread = new Set(Array.from({ length: 50 }, () => retryDelayMs(3, err)));
+		expect(spread.size).toBeGreaterThan(10);
+		for (const value of spread) {
+			expect(value).toBeGreaterThanOrEqual(2000);
+			expect(value).toBeLessThanOrEqual(2500);
+		}
 	});
 
 	describe("createClient", () => {
@@ -580,10 +605,56 @@ describe("streamChat — uncapped retry count for genuinely transient errors", (
 				{ choices: [{ delta: {}, finish_reason: "stop" }] },
 			]);
 			const resultPromise = streamAndCollect(client, "m", [], [], 100);
-			// Backoff for attempts 1-4: 500 + 1000 + 2000 + 4000ms.
-			await vi.advanceTimersByTimeAsync(500 + 1000 + 2000 + 4000 + 100);
+			// Backoff for attempts 1-4: 500 + 1000 + 2000 + 4000ms, each with up
+			// to 25% jitter on top.
+			await vi.advanceTimersByTimeAsync((500 + 1000 + 2000 + 4000) * 1.25 + 100);
 			const result = await resultPromise;
 			expect(result.content).toBe("ok");
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("honours a retry-after that outlasts the retry deadline (regression)", async () => {
+		// A provider whose window is 5 minutes wide. The header used to be
+		// clamped to the same 30s as the guessed backoff, so cast retried eight
+		// times inside the 120s deadline, was refused every time because the
+		// window had not reopened, and killed the turn — having never once
+		// waited as long as it was told to. The deadline bounds our own
+		// guessing; an explicit instruction moves it out.
+		vi.useFakeTimers();
+		try {
+			const started = Date.now();
+			const windowMs = 300_000;
+			let calls = 0;
+			const client = {
+				chat: {
+					completions: {
+						create: async () => {
+							calls++;
+							if (Date.now() - started < windowMs) {
+								const err = rateLimitError({ message: "rate limited" });
+								(err as { headers: Headers }).headers = new Headers({ "retry-after": "300" });
+								throw err;
+							}
+							return {
+								async *[Symbol.asyncIterator]() {
+									yield { choices: [{ delta: { content: "ok" } }] };
+									yield { choices: [{ delta: {}, finish_reason: "stop" }] };
+								},
+							};
+						},
+					},
+				},
+			} as unknown as OpenAI;
+
+			const resultPromise = streamAndCollect(client, "m", [], [], 100);
+			await vi.advanceTimersByTimeAsync(windowMs + 1000);
+			const result = await resultPromise;
+			expect(result.content).toBe("ok");
+			// One refusal, one wait of the length it asked for, one success —
+			// not a burst of doomed 30s retries.
+			expect(calls).toBe(2);
 		} finally {
 			vi.useRealTimers();
 		}
