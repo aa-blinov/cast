@@ -7,6 +7,7 @@ import OpenAI, {
 } from "openai";
 import type { ChatCompletionFunctionTool, ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import { type AppConfig, providerFetch } from "./config.ts";
+import { retryMaxWaitSeconds, retryQuotaWaitSeconds } from "./settings.ts";
 import { ThinkBlockParser } from "./vendors.ts";
 
 export type Message = ChatCompletionMessageParam;
@@ -145,6 +146,12 @@ const RETRY_MAX_DELAY_MS = 30_000;
 // same split, with a practical ceiling instead of their setTimeout limit,
 // since a CLI that silently sleeps for hours is its own kind of broken.
 const RETRY_HEADER_MAX_DELAY_MS = 10 * 60_000;
+// Poll interval while sitting out an exhausted quota with no header to go on.
+// Long, because a quota window is measured in hours and a request per five
+// minutes is enough to notice it reopening without hammering a provider that
+// has already said no.
+const QUOTA_POLL_MIN_MS = 30_000;
+const QUOTA_POLL_MAX_MS = 5 * 60_000;
 // Backoff jitter, as a share of the computed delay. Without it, parallel
 // subagents that hit one provider limit together retry in lockstep and arrive
 // as a single wave — the thundering herd the limit was rate-limiting for.
@@ -272,9 +279,51 @@ export function isRetryableStreamError(error: unknown): boolean {
  */
 export function retryDelayMs(attempt: number, error: unknown, random: number = Math.random()): number {
 	const fromHeader = retryAfterMs(error);
-	if (fromHeader !== undefined) return Math.min(fromHeader, RETRY_HEADER_MAX_DELAY_MS);
+	if (fromHeader !== undefined) return Math.min(fromHeader, headerWaitCeilingMs());
 	const base = Math.min(RETRY_BASE_DELAY_MS * 2 ** (attempt - 1), RETRY_MAX_DELAY_MS);
 	return Math.ceil(base + base * RETRY_JITTER_FACTOR * random);
+}
+
+/**
+ * Ceiling on a header-supplied wait. Settings-driven so an unattended run can
+ * sit out a long window; RETRY_HEADER_MAX_DELAY_MS remains the floor of what
+ * is always allowed, so a broken settings file can't make cast *less* patient
+ * than it was.
+ */
+function headerWaitCeilingMs(): number {
+	try {
+		return Math.max(RETRY_HEADER_MAX_DELAY_MS, retryMaxWaitSeconds() * 1000);
+	} catch {
+		return RETRY_HEADER_MAX_DELAY_MS;
+	}
+}
+
+/** Total time an exhausted quota may be waited out; 0 disables the wait. */
+function quotaWaitBudgetMs(): number {
+	try {
+		return retryQuotaWaitSeconds() * 1000;
+	} catch {
+		return 0;
+	}
+}
+
+/**
+ * How long to sleep before re-testing an exhausted quota. The provider's own
+ * `Retry-After` wins when present; otherwise back off from 30s to 5 minutes,
+ * since a quota window is measured in hours and polling it faster only annoys
+ * a provider that has already said no.
+ */
+function quotaWaitMs(attempt: number, error: unknown): number {
+	const asked = retryAfterMs(error);
+	if (asked !== undefined) return Math.min(asked, headerWaitCeilingMs());
+	return Math.min(QUOTA_POLL_MIN_MS * 2 ** Math.max(0, attempt - 1), QUOTA_POLL_MAX_MS);
+}
+
+/** True for the "you are out of credit / over your quota" family of errors. */
+export function isQuotaError(error: unknown): boolean {
+	const code = (error as { code?: string } | undefined)?.code;
+	const message = error instanceof Error ? error.message : String(error);
+	return code === "insufficient_quota" || NON_RETRYABLE_QUOTA_PATTERN.test(message);
 }
 
 /**
@@ -542,6 +591,7 @@ export async function* streamChat(
 	let yieldedAny = false;
 	let retryStartedAt: number | undefined;
 	let retryDeadlineAt: number | undefined;
+	let quotaStartedAt: number | undefined;
 
 	// Stream reads are inherently sequential — the next chunk depends on server push.
 	while (true) {
@@ -706,13 +756,31 @@ export async function* streamChat(
 			// by then the loop can no longer recognize it as overflow and won't
 			// auto-compact, turning a recoverable situation into a hard failure.
 			// Throw it through so the loop's compaction path sees the original.
-			if (yieldedAny || signal?.aborted || isContextOverflow(error) || !isRetryableStreamError(error)) {
+			// A quota error is normally terminal: credit does not come back on
+			// its own, and retrying it just burns the turn. But when the key's
+			// limit is a *window* (daily tokens, hourly requests) it does
+			// reopen, and an unattended run should be able to sit through that
+			// rather than dying at 3am on a limit that clears at 4. Opt-in via
+			// retryQuotaWaitSeconds, which is also the whole budget for it.
+			const quota = isQuotaError(error);
+			const quotaBudgetMs = quota ? quotaWaitBudgetMs() : 0;
+			const waitingOutQuota = quota && quotaBudgetMs > 0;
+			if (
+				yieldedAny ||
+				signal?.aborted ||
+				isContextOverflow(error) ||
+				(!isRetryableStreamError(error) && !waitingOutQuota)
+			) {
 				throw error;
 			}
 			retryStartedAt ??= Date.now();
 			retryDeadlineAt ??= retryStartedAt + RETRY_DEADLINE_MS;
 			attempt++;
-			const wait = retryDelayMs(attempt, error);
+			if (waitingOutQuota) {
+				quotaStartedAt ??= Date.now();
+				retryDeadlineAt = Math.max(retryDeadlineAt, quotaStartedAt + quotaBudgetMs);
+			}
+			const wait = waitingOutQuota ? quotaWaitMs(attempt, error) : retryDelayMs(attempt, error);
 			const asked = retryAfterMs(error);
 			// The deadline bounds *our* guessing, not the provider's
 			// instruction. When a 429 says "come back in 60s" the wait is
@@ -723,7 +791,10 @@ export async function* streamChat(
 			if (Date.now() >= retryDeadlineAt) {
 				throw new Error(`Provider retry deadline exceeded (${Math.round((Date.now() - retryStartedAt) / 1000)}s)`);
 			}
-			const reason = error instanceof Error ? error.message : String(error);
+			const baseReason = error instanceof Error ? error.message : String(error);
+			const reason = waitingOutQuota
+				? `${baseReason} — quota exhausted; waiting ${Math.round(Math.min(wait, Math.max(0, retryDeadlineAt - Date.now())) / 1000)}s for the window to reset`
+				: baseReason;
 			yield { retrying: { attempt, reason } };
 			const remaining = retryDeadlineAt - Date.now();
 			// Abortable: Esc during a backoff must cancel the retry immediately,

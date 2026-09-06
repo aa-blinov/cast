@@ -43,6 +43,8 @@ User settings are persisted to `~/.cast/settings.json`. This file is loaded on s
 | `compactionThreshold` | number | Fraction of the usable input budget that triggers automatic compaction (0.05–0.95, default: `0.75`). The budget is `contextWindow` minus the reply reserve, and the reserve is capped at half the window — so a 32k model reserves 16k rather than the full default 32k |
 | `maxToolOutputLines` | integer | Line cap on a single tool result before it is truncated (100–100000, default: `2000`) |
 | `maxToolOutputBytes` | integer | Byte cap on a single tool result before it is truncated (4096–8388608, default: `131072`) |
+| `retryMaxWaitSeconds` | integer | Longest single wait a provider's own `Retry-After` may buy (30–86400, default: `3600`). A 429 that says "come back in 20 minutes" is telling the truth about its window; the guessed exponential backoff stays capped at 30s regardless |
+| `retryQuotaWaitSeconds` | integer | How long to keep waiting for an exhausted quota to reset (0–604800, default: `0` = off). Off, a quota/billing error fails the turn at once, since credit does not return on its own. Set it when the key's limit is a *window* (daily tokens, hourly requests) and an unattended run should sit through it — cast then re-tests the quota on a 30s→5min backoff (or exactly when `Retry-After` says) until the budget is spent. Esc cancels the wait |
 | `searchProvider` | `"ddg"` \| `"tavily"` \| `"brave"` | `web_search` backend (default: `"ddg"`) — use `/web-search-provider` to change |
 | `tavilyApiKey` | string | API key for the Tavily backend, from https://app.tavily.com |
 | `braveApiKey` | string | API key for the Brave Search backend, from https://api-dashboard.search.brave.com |
