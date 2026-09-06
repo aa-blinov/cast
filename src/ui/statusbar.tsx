@@ -1,5 +1,6 @@
 import { Text } from "ink";
 import type { JSX } from "react";
+import { inputTokenBudget } from "../core/config.ts";
 import type { SessionUsage } from "../core/session.ts";
 import { estimateTokens } from "../core/session.ts";
 import type { StatusBarConfig } from "../core/settings.ts";
@@ -153,8 +154,8 @@ registerStatusBarSegment({
 	render: (ctx) => {
 		if (ctx.messages.length === 0) return null;
 		const used = estimateTokens(ctx.messages);
-		const budget = ctx.contextWindow - ctx.maxResponseTokens;
-		if (budget <= 0) return <Text color={theme().muted}>ctx ?</Text>;
+		if (!(ctx.contextWindow > 0)) return <Text color={theme().muted}>ctx ?</Text>;
+		const budget = inputTokenBudget(ctx);
 		const pct = Math.round((used / budget) * 100);
 		return (
 			<Text color={theme().muted}>
@@ -165,8 +166,8 @@ registerStatusBarSegment({
 	formatValue: (ctx) => {
 		if (ctx.messages.length === 0) return null;
 		const used = estimateTokens(ctx.messages);
-		const budget = ctx.contextWindow - ctx.maxResponseTokens;
-		if (budget <= 0) return "ctx ?";
+		if (!(ctx.contextWindow > 0)) return "ctx ?";
+		const budget = inputTokenBudget(ctx);
 		const pct = Math.round((used / budget) * 100);
 		return `ctx ${abbreviateTokens(used)}/${abbreviateTokens(ctx.contextWindow)} (${pct}%)`;
 	},

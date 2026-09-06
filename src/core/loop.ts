@@ -20,7 +20,7 @@ import {
 	type PostCompactReminderState,
 	reminderStateFromPlan,
 } from "./compaction-reminder.ts";
-import type { AppConfig, ProviderCredentials } from "./config.ts";
+import { type AppConfig, inputTokenBudget, type ProviderCredentials, reservedResponseTokens } from "./config.ts";
 import { type AnnouncedLocalDate, appendDateRolloverReminder } from "./date-rollover-reminder.ts";
 import { matchesToolsAllowlist } from "./frontmatter.ts";
 import {
@@ -168,7 +168,7 @@ export function shortenPathsForTodoMatch(content: string): string {
 }
 
 function memoryPromptBudgetTokens(config: AppConfig): number {
-	const inputBudget = Math.max(0, config.contextWindow - config.maxResponseTokens);
+	const inputBudget = inputTokenBudget(config);
 	const settings = loadSettings();
 	const configuredBudget =
 		typeof settings.memoryPromptBudget === "number"
@@ -2322,7 +2322,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 
 			// Inner loop: process tool calls and steering messages
 			let hasMoreToolCalls = true;
-			let effectiveMaxTokens = config.maxResponseTokens;
+			let effectiveMaxTokens = reservedResponseTokens(config);
 			let reasoningRetryDone = false;
 
 			while (hasMoreToolCalls || pendingMessages.length > 0) {

@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { TurnCheckpoint } from "./checkpoint.ts";
-import type { AppConfig } from "./config.ts";
+import { type AppConfig, inputTokenBudget } from "./config.ts";
 import { formatLocalDate } from "./date-rollover-reminder.ts";
 import { getDb } from "./db.ts";
 import type { Message, Usage } from "./llm.ts";
@@ -255,7 +255,7 @@ interface CompactionSummary {
  */
 export function shouldCompact(_messages: Message[], config: AppConfig, lastPromptTokens?: number): boolean {
 	if (lastPromptTokens === undefined) return false;
-	const budget = config.contextWindow - config.maxResponseTokens;
+	const budget = inputTokenBudget(config);
 	return lastPromptTokens > budget * config.compactionThreshold;
 }
 
@@ -553,12 +553,8 @@ export async function compactMessages(
 	// produce a NaN budget, every `tailTokens >= target` comparison would be
 	// false, and the tail would silently swallow the whole history again —
 	// the same no-op this cap exists to prevent, but harder to see.
-	const usableWindow =
-		Number.isFinite(config.contextWindow) && Number.isFinite(config.maxResponseTokens)
-			? config.contextWindow - config.maxResponseTokens
-			: undefined;
-	const windowTailTokens = usableWindow === undefined ? undefined : Math.max(1, Math.floor(usableWindow * 0.4));
-	const targetTailTokens = Math.max(1, Math.min(envelopeTailTokens, windowTailTokens ?? envelopeTailTokens));
+	const windowTailTokens = Math.max(1, Math.floor(inputTokenBudget(config) * 0.4));
+	const targetTailTokens = Math.max(1, Math.min(envelopeTailTokens, windowTailTokens));
 	let tailStart = nonSystem.length;
 	let tailTokens = 0;
 	let textBlocks = 0;
