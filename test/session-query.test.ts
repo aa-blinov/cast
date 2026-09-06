@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resetDbConnectionForTests } from "../src/core/db.ts";
+import type { Message } from "../src/core/llm.ts";
 import { appendMessage, compactMessages, createSession, recordCompaction, saveSession } from "../src/core/session.ts";
 import {
 	execSessionHistorySearch,
@@ -145,5 +146,48 @@ describe("execSessionHistorySearch — argument validation", () => {
 		expect(execSessionHistorySearch({ query: "anything", limit: 3 }, root).isError).toBeFalsy();
 		expect(execSessionHistorySearch({ query: "anything", scope: "global" }, root).isError).toBeFalsy();
 		expect(execSessionHistorySearch({ query: "anything", scope: "project" }, root).isError).toBeFalsy();
+	});
+});
+
+describe("compaction summary size", () => {
+	// The mirror of the empty-summary case: a model that answers a
+	// summarization request with a wall of text made compaction *grow* the
+	// context, so the next turn sat closer to the ceiling, tripped the
+	// threshold again, and paid for another summarization that could do the
+	// same thing.
+	it("clamps a summary that would make the context bigger", async () => {
+		const filler = "x".repeat(4000);
+		const messages: Message[] = [{ role: "system", content: "persona" }];
+		for (let i = 0; i < 30; i++) {
+			messages.push({ role: "user", content: `q${i} ${filler}` });
+			messages.push({ role: "assistant", content: `a${i} ${filler}` });
+		}
+		const before = JSON.stringify(messages).length;
+
+		const compacted = await compactMessages(messages, async () => "S".repeat(400_000), {
+			baseURL: "https://example.invalid",
+			contextWindow: 128_000,
+			apiKey: "test",
+		} as never);
+
+		const after = JSON.stringify(compacted.messages).length;
+		expect(after, "compaction must shrink the context, not grow it").toBeLessThan(before);
+		expect(compacted.summary.summary).toContain("Summary truncated at");
+	});
+
+	it("keeps a normal-sized summary verbatim", async () => {
+		const filler = "y".repeat(4000);
+		const messages: Message[] = [{ role: "system", content: "persona" }];
+		for (let i = 0; i < 30; i++) {
+			messages.push({ role: "user", content: `q${i} ${filler}` });
+			messages.push({ role: "assistant", content: `a${i} ${filler}` });
+		}
+		const compacted = await compactMessages(messages, async () => "a concise summary", {
+			baseURL: "https://example.invalid",
+			contextWindow: 128_000,
+			apiKey: "test",
+		} as never);
+		expect(compacted.summary.summary).toContain("a concise summary");
+		expect(compacted.summary.summary).not.toContain("truncated");
 	});
 });

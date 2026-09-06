@@ -468,6 +468,17 @@ function formatMessageForSummary(m: Message): string {
  * so the running summary keeps improving instead of each round only
  * knowing about its own slice of history.
  */
+/** Ceiling on a compaction summary, in tokens. Generous next to the 10k–20k
+ * tail it sits beside, and far below anything that could undo the compaction. */
+const MAX_SUMMARY_TOKENS = 8_000;
+const SUMMARY_CHARS_PER_TOKEN = 3.8;
+
+function clampSummary(summary: string): string {
+	const maxChars = Math.floor(MAX_SUMMARY_TOKENS * SUMMARY_CHARS_PER_TOKEN);
+	if (summary.length <= maxChars) return summary;
+	return `${summary.slice(0, maxChars)}\n\n[Summary truncated at ${maxChars} characters — the model returned ${summary.length}.]`;
+}
+
 export async function compactMessages(
 	messages: Message[],
 	summarizeFn: (text: string, previousSummary?: string) => Promise<string>,
@@ -537,7 +548,15 @@ export async function compactMessages(
 	// throwing. Throwing here puts it on the same path as a network failure,
 	// which leaves the history untouched and retries on the next turn.
 	if (!summarized.trim()) throw new Error("Compaction summary came back empty — keeping the full history.");
-	const summary = summarized + formatFileOps(readFiles, modifiedFiles);
+	// The mirror of the empty-summary case: a summary far larger than what it
+	// replaces. Nothing bounded it, so a model that answered with a wall of
+	// text made compaction *grow* the context (measured: 242k chars in, 472k
+	// out) — the next turn is then closer to the ceiling, trips the threshold
+	// again, and pays for another summarization that can do the same thing.
+	// Clamped rather than rejected: a systematically verbose model would
+	// otherwise never compact at all, and a truncated summary still shrinks
+	// the context, which is the whole point.
+	const summary = clampSummary(summarized) + formatFileOps(readFiles, modifiedFiles);
 
 	const compacted: Message[] = [
 		...system,
