@@ -313,6 +313,20 @@ function safeCutIndex(messages: Message[], idx: number): number {
 	for (let i = target; i > 0; i--) {
 		if (isRealTurnStart(messages[i])) return i;
 	}
+	// No user-turn boundary anywhere — one long open turn, which is the normal
+	// shape of an agent run (a single request followed by dozens of tool
+	// calls). Restricting cuts to user turns meant such a session could never
+	// be compacted at all: the mid-turn guard ran compaction, got "no safe cut
+	// point", and the context grew until the provider rejected the request.
+	// An assistant row is just as safe a boundary — `tool` results always
+	// follow the assistant message that declared their calls, so cutting
+	// immediately before an assistant row never orphans a tool result.
+	for (let i = target; i < messages.length; i++) {
+		if (messages[i]?.role === "assistant") return i;
+	}
+	for (let i = target; i > 0; i--) {
+		if (messages[i]?.role === "assistant") return i;
+	}
 	return 0;
 }
 
@@ -482,7 +496,7 @@ function clampSummary(summary: string): string {
 export async function compactMessages(
 	messages: Message[],
 	summarizeFn: (text: string, previousSummary?: string) => Promise<string>,
-	_config: AppConfig,
+	config: AppConfig,
 ): Promise<{ messages: Message[]; summary: CompactionSummary }> {
 	const tokensBefore = estimateTokens(messages);
 
@@ -495,20 +509,40 @@ export async function compactMessages(
 	);
 	const nonSystem = messages.filter((m) => m.role !== "system");
 	const nonSystemTokens = estimateTokens(nonSystem);
-	const targetTailTokens =
+	const envelopeTailTokens =
 		nonSystemTokens < TAIL_MIN_TOKENS * 1.5
 			? Math.max(1, Math.floor(nonSystemTokens * 0.4))
 			: Math.min(TAIL_MAX_TOKENS, Math.max(TAIL_MIN_TOKENS, Math.floor(nonSystemTokens * 0.4)));
+	// The 10k–20k envelope is meaningless once the model's own window is that
+	// small: with contextWindow 8k the tail budget alone exceeded the window,
+	// so the tail kept every message and compaction had nothing left to
+	// summarize — it silently no-opped on exactly the sessions that needed it.
+	// Both fields are guarded: a config missing either one would otherwise
+	// produce a NaN budget, every `tailTokens >= target` comparison would be
+	// false, and the tail would silently swallow the whole history again —
+	// the same no-op this cap exists to prevent, but harder to see.
+	const usableWindow =
+		Number.isFinite(config.contextWindow) && Number.isFinite(config.maxResponseTokens)
+			? config.contextWindow - config.maxResponseTokens
+			: undefined;
+	const windowTailTokens = usableWindow === undefined ? undefined : Math.max(1, Math.floor(usableWindow * 0.4));
+	const targetTailTokens = Math.max(1, Math.min(envelopeTailTokens, windowTailTokens ?? envelopeTailTokens));
 	let tailStart = nonSystem.length;
 	let tailTokens = 0;
 	let textBlocks = 0;
 	const requiredTextBlocks = nonSystemTokens < TAIL_MIN_TOKENS * 1.5 ? 0 : TAIL_MIN_TEXT_BLOCK_MESSAGES;
+	// A history of few but enormous messages (two 32KB tool results is enough)
+	// can't satisfy the text-block minimum, and without a ceiling the tail grew
+	// backwards until it swallowed the whole transcript — the same silent
+	// no-op. The block minimum is a preference for prose in the tail, not a
+	// reason to give up on compacting, so it stops mattering past 2x budget.
+	const hardTailTokens = targetTailTokens * 2;
 	for (let i = nonSystem.length - 1; i >= 0; i--) {
 		const message = nonSystem[i]!;
 		tailTokens += estimateTokens([message]);
 		if (typeof message.content === "string" && message.content.trim()) textBlocks += 1;
 		tailStart = i;
-		if (tailTokens >= targetTailTokens && textBlocks >= requiredTextBlocks) break;
+		if (tailTokens >= targetTailTokens && (textBlocks >= requiredTextBlocks || tailTokens >= hardTailTokens)) break;
 	}
 	const splitIdx = safeCutIndex(nonSystem, tailStart);
 	const old = nonSystem.slice(0, splitIdx);

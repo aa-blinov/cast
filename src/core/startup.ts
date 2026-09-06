@@ -46,7 +46,14 @@ import {
 	type SessionState,
 	saveSession,
 } from "./session.ts";
-import { getProjectTrust, loadSettings, type PermissionMode, type Settings, updateSettings } from "./settings.ts";
+import {
+	contextWindowSetting,
+	getProjectTrust,
+	loadSettings,
+	type PermissionMode,
+	type Settings,
+	updateSettings,
+} from "./settings.ts";
 import { formatSkillsForPrompt, type Skill } from "./skills.ts";
 import type { SshHost } from "./ssh.ts";
 import { resolveSshHosts } from "./ssh.ts";
@@ -155,7 +162,12 @@ function warmModelMetadataInBackground(
 			if (!r.ok || !r.models) return undefined;
 			setModelsCache(r.models);
 			const found = r.models.find((m) => m.id === forModel);
-			if (found?.contextWindow && found.contextWindow > 0) config.contextWindow = found.contextWindow;
+			// An explicit contextWindow in settings.json wins: the catalog is a
+			// default for people who have not chosen, not an override of someone
+			// who has (a smaller window is a legitimate way to cap cost).
+			if (found?.contextWindow && found.contextWindow > 0 && contextWindowSetting() === undefined) {
+				config.contextWindow = found.contextWindow;
+			}
 			return found;
 		})
 		.catch(() => undefined);
@@ -416,7 +428,9 @@ export async function runStartup(
 		contextWindow = sel.contextWindow;
 	}
 
-	if (contextWindow && contextWindow > 0) config.contextWindow = contextWindow;
+	if (contextWindow && contextWindow > 0 && contextWindowSetting() === undefined) {
+		config.contextWindow = contextWindow;
+	}
 	// Fallback chain when /v1/models doesn't expose context_length (many
 	// providers don't — confirmed on api.minimax.io, which returns bare
 	// {id, owned_by} with nothing about context size):
@@ -431,7 +445,7 @@ export async function runStartup(
 	//    models-dev.ts's doc comment on how it resolves reseller conflicts).
 	// Runs regardless of network reachability (fetchModelsDevCatalog never
 	// throws) so a flaky models.dev doesn't block startup.
-	if (!unconfigured && (!contextWindow || contextWindow <= 0)) {
+	if (!unconfigured && (!contextWindow || contextWindow <= 0) && contextWindowSetting() === undefined) {
 		const known = lookupContextWindow(model);
 		if (known) {
 			config.contextWindow = known;

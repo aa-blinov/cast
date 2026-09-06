@@ -683,6 +683,15 @@ async function performCompaction(
 				signal,
 			});
 		}
+	} else if (!result.error) {
+		// compacted:false with no error means compactMessages found no safe cut
+		// point and left the history alone. That used to be completely silent:
+		// the context stayed over the threshold, nothing was logged, no event
+		// was emitted, and the run just kept growing until the provider
+		// rejected it. Say it out loud instead.
+		loopConfig.onWarning?.(
+			"Context is over the compaction threshold, but no safe cut point was found — history kept intact.",
+		);
 	}
 	return result;
 }

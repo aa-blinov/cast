@@ -124,6 +124,28 @@ export interface Settings {
 	 * do anything about.
 	 */
 	mcpToolTimeoutSeconds?: number;
+	/**
+	 * Fraction of the usable context budget at which the conversation is
+	 * compacted. Clamped to 0.05–0.95; unset means 0.75.
+	 *
+	 * These four were fields of AppConfig that nothing could set: the values
+	 * were hard-coded in loadConfig, so `/current` displayed a budget the user
+	 * had no way to change, and a smaller window or an earlier compaction was
+	 * simply unreachable.
+	 */
+	compactionThreshold?: number;
+	/** Context window in tokens. Unset means the model catalog's figure, or
+	 * 128k when the catalog has none. Setting it wins over both — the catalog
+	 * can be wrong, and a smaller window is a legitimate way to keep requests
+	 * cheap. Clamped to 8k–2M. */
+	contextWindow?: number;
+	/** Tokens reserved for the model's reply, subtracted from the window to
+	 * get the usable budget. Clamped to 1k–200k; unset means 32k. */
+	maxResponseTokens?: number;
+	/** Ceiling on one tool result, in lines and in bytes. Unset means 2000
+	 * lines / 128KB. Lines clamp to 100–100k, bytes to 4KB–8MB. */
+	maxToolOutputLines?: number;
+	maxToolOutputBytes?: number;
 	/** Skill names disabled via /skills toggle. Still discovered for the picker;
 	 * omitted from the agent catalog and /skill: invocation until re-enabled. */
 	disabledSkills?: string[];
@@ -342,6 +364,33 @@ export function mcpToolTimeoutMs(settings: Settings = loadSettings()): number | 
 	const value = settings.mcpToolTimeoutSeconds;
 	if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
 	return Math.max(5, Math.min(Math.round(value), 3600)) * 1000;
+}
+
+/** Read a numeric setting, clamped, falling back when unset or malformed. */
+function clampedNumber(value: unknown, min: number, max: number, fallback: number): number {
+	if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+	return Math.max(min, Math.min(value, max));
+}
+
+export function compactionThresholdSetting(settings: Settings = loadSettings()): number {
+	return clampedNumber(settings.compactionThreshold, 0.05, 0.95, 0.75);
+}
+
+export function contextWindowSetting(settings: Settings = loadSettings()): number | undefined {
+	if (typeof settings.contextWindow !== "number" || !Number.isFinite(settings.contextWindow)) return undefined;
+	return Math.round(clampedNumber(settings.contextWindow, 8_000, 2_000_000, 128_000));
+}
+
+export function maxResponseTokensSetting(settings: Settings = loadSettings()): number {
+	return Math.round(clampedNumber(settings.maxResponseTokens, 1_000, 200_000, 32_000));
+}
+
+export function maxToolOutputLinesSetting(settings: Settings = loadSettings()): number {
+	return Math.round(clampedNumber(settings.maxToolOutputLines, 100, 100_000, 2000));
+}
+
+export function maxToolOutputBytesSetting(settings: Settings = loadSettings()): number {
+	return Math.round(clampedNumber(settings.maxToolOutputBytes, 4 * 1024, 8 * 1024 * 1024, 128 * 1024));
 }
 
 export function isMemoryEnabled(settings: Settings = loadSettings()): boolean {
