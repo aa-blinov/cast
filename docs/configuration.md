@@ -38,6 +38,11 @@ User settings are persisted to `~/.cast/settings.json`. This file is loaded on s
 | `checkpointThresholds` | number[] | Checkpoint writer trigger points as percentages of the context window (default depends on the window: 4 × 20% up to 200K, 9 × 10% up to 500K, 18 × 5% above; a writer fires once per crossed threshold) |
 | `checkpointReserved` | integer | Token safety buffer kept at the end of the window; thresholds are clamped to `window - reserved` (default: `13000`) |
 | `checkpointPushCaps` | object | Per-section token caps for the rebuild context: `{ checkpoint?, memory?, notes?, global?, tasks? }` (defaults: 11000/10000/6000/6000/2000) |
+| `contextWindow` | integer | Override the model's context window in tokens (8000–2000000). Unset (default) uses the model catalog's value for the active model — set it only when the catalog is wrong for your endpoint |
+| `maxResponseTokens` | integer | Tokens reserved for the model's own reply, subtracted from the window when deciding when to compact (1000–200000, default: `32000`) |
+| `compactionThreshold` | number | Fraction of the usable window (`contextWindow - maxResponseTokens`) that triggers automatic compaction (0.05–0.95, default: `0.75`) |
+| `maxToolOutputLines` | integer | Line cap on a single tool result before it is truncated (100–100000, default: `2000`) |
+| `maxToolOutputBytes` | integer | Byte cap on a single tool result before it is truncated (4096–8388608, default: `131072`) |
 | `searchProvider` | `"ddg"` \| `"tavily"` \| `"brave"` | `web_search` backend (default: `"ddg"`) — use `/web-search-provider` to change |
 | `tavilyApiKey` | string | API key for the Tavily backend, from https://app.tavily.com |
 | `braveApiKey` | string | API key for the Brave Search backend, from https://api-dashboard.search.brave.com |

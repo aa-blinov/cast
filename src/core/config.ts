@@ -5,7 +5,15 @@ import {
 	type ModelsDevCatalog,
 	type ModelsDevReasoningOption,
 } from "./models-dev.ts";
-import type { Provider } from "./settings.ts";
+import {
+	compactionThresholdSetting,
+	contextWindowSetting,
+	loadSettings,
+	maxResponseTokensSetting,
+	maxToolOutputBytesSetting,
+	maxToolOutputLinesSetting,
+	type Provider,
+} from "./settings.ts";
 import type { ModelReasoningMeta, ReasoningFormat, ReasoningParams } from "./vendors.ts";
 import { extractReasoningMeta, resolveReasoningFormat } from "./vendors.ts";
 
@@ -85,14 +93,19 @@ function createProviderProbeClient(config: AppConfig): OpenAI {
 export function loadConfig(connection: { baseURL: string; apiKey: string }): AppConfig {
 	const { baseURL, apiKey } = connection;
 
+	// Read from settings rather than hard-coded: these were AppConfig fields
+	// nothing could set, so `/current` showed a budget the user had no way to
+	// change. Each helper clamps and falls back to what used to be the constant
+	// here, so an absent or malformed setting behaves exactly as before.
+	const settings = loadSettings();
 	return {
 		baseURL,
 		apiKey,
-		contextWindow: 128_000,
-		maxResponseTokens: 32_000,
-		compactionThreshold: 0.75,
-		maxToolOutputLines: 2000,
-		maxToolOutputBytes: 128 * 1024,
+		contextWindow: contextWindowSetting(settings) ?? 128_000,
+		maxResponseTokens: maxResponseTokensSetting(settings),
+		compactionThreshold: compactionThresholdSetting(settings),
+		maxToolOutputLines: maxToolOutputLinesSetting(settings),
+		maxToolOutputBytes: maxToolOutputBytesSetting(settings),
 		defaultBashTimeout: 180,
 		reasoningLevel: "off",
 		reasoningParams: { body: {}, enabled: false },

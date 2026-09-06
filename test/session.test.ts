@@ -199,6 +199,71 @@ describe("compactMessages", () => {
 		expect(result.summary.tokensBefore).toBeGreaterThan(0);
 	});
 
+	it("compacts a single open turn made of a few huge tool results (regression)", async () => {
+		// The real shape of an agent run that blows the window: one user
+		// request, one assistant tool_calls row, and two 32KB tool results.
+		// Three defects stacked up here and made compaction a silent no-op on
+		// exactly this history — the text-block minimum (5 prose messages)
+		// could never be met, so the tail grew backwards until it swallowed
+		// everything; the 10k–20k tail envelope ignored the model's own
+		// window; and safeCutIndex only ever cut at a *user* turn, of which a
+		// single-turn run has exactly one, at index 0. Result: shouldCompact
+		// stayed true, compaction ran every round, compacted nothing, emitted
+		// no event, and the context grew until the provider rejected it.
+		const bulk = "x".repeat(32 * 1024);
+		const messages: Message[] = [
+			{ role: "system", content: "persona" },
+			{ role: "user", content: "read both files" },
+			{
+				role: "assistant",
+				content: null,
+				tool_calls: [
+					{ id: "a", type: "function", function: { name: "read", arguments: '{"path":"f1"}' } },
+					{ id: "b", type: "function", function: { name: "read", arguments: '{"path":"f2"}' } },
+				],
+			} as never,
+			{ role: "tool", tool_call_id: "a", content: bulk } as never,
+			{ role: "tool", tool_call_id: "b", content: bulk } as never,
+			{ role: "assistant", content: "done" },
+		];
+
+		const result = await compactMessages(messages, async () => "summary", {
+			contextWindow: 8_000,
+			maxResponseTokens: 1_000,
+			compactionThreshold: 0.05,
+		} as any);
+
+		expect(result.summary.messagesCompacted).toBeGreaterThan(0);
+		// And the cut must not orphan a tool result from its declaring call.
+		const declared = new Set<string>();
+		for (const m of result.messages as Array<{
+			role: string;
+			tool_calls?: Array<{ id: string }>;
+			tool_call_id?: string;
+		}>) {
+			if (m.role === "assistant" && m.tool_calls) for (const tc of m.tool_calls) declared.add(tc.id);
+			if (m.role === "tool" && m.tool_call_id) expect(declared.has(m.tool_call_id)).toBe(true);
+		}
+	});
+
+	it("keeps the tail inside the model's own window, not the fixed 10k-20k envelope", async () => {
+		// With a small contextWindow the tail budget alone exceeded the whole
+		// window, so "keep a 10k-20k tail" kept more than the model could ever
+		// be sent.
+		const messages: Message[] = [{ role: "system", content: "persona" }];
+		for (let i = 0; i < 40; i++) {
+			messages.push({ role: "user", content: `q${i} ${"y".repeat(2000)}` });
+			messages.push({ role: "assistant", content: `a${i} ${"z".repeat(2000)}` });
+		}
+		const result = await compactMessages(messages, async () => "summary", {
+			contextWindow: 8_000,
+			maxResponseTokens: 1_000,
+			compactionThreshold: 0.05,
+		} as any);
+		const tail = result.messages.filter((m) => m.role !== "system");
+		expect(estimateTokens(tail)).toBeLessThan(8_000);
+	});
+
 	it("refuses to compact when the summarizer returns nothing usable", async () => {
 		// A summarization call that *succeeds* with empty content used to flip
 		// every old message out of context anyway, replacing them with a
