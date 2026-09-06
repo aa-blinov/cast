@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Box, Text, useApp, useWindowSize } from "ink";
 import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { AppConfig } from "../core/config.ts";
+import { type AppConfig, inputTokenBudget } from "../core/config.ts";
 import { formatContextFilesForPrompt, resolveNestedContextFiles } from "../core/context-files.ts";
 import { formatMcpForPrompt } from "../core/mcp.ts";
 import { findPersona, listPersonas, type Persona } from "../core/personas.ts";
@@ -1009,8 +1009,8 @@ export function abbreviateTokens(n: number): string {
 
 export function formatContextPct(messages: import("../core/llm.ts").Message[], config: AppConfig): string {
 	const used = estimateTokens(messages);
-	const budget = config.contextWindow - config.maxResponseTokens;
-	if (budget <= 0) return "ctx ?";
+	if (!(config.contextWindow > 0)) return "ctx ?";
+	const budget = inputTokenBudget(config);
 	const pct = Math.round((used / budget) * 100);
 	return `ctx ${abbreviateTokens(used)}/${abbreviateTokens(config.contextWindow)} (${pct}%)`;
 }

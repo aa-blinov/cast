@@ -90,6 +90,37 @@ function createProviderProbeClient(config: AppConfig): OpenAI {
  * settings or an interactive prompt and always passes it explicitly; see
  * `resolveConnection` in select.ts.
  */
+/** Smallest reply we will ever reserve room for, however small the window. */
+const MIN_RESPONSE_TOKENS = 1_024;
+/** No more than half the window may be reserved for the reply. */
+const MAX_RESPONSE_SHARE = 0.5;
+
+/**
+ * Tokens actually reserved for the model's reply.
+ *
+ * `maxResponseTokens` defaults to 32k, which is fine for a 128k model and
+ * nonsense for a 32k one: the input budget (`contextWindow - reserved`) came
+ * out at 768 tokens, so compaction fired on the very first tool call — a live
+ * run reading a 16-byte file compacted at 8080 tokens — and then again every
+ * round after. Below 32k the budget went *negative*, which made `shouldCompact`
+ * true unconditionally and collapsed the compaction tail to one message. 676
+ * models in the catalog have a window of 32k or less, so this is the ordinary
+ * case for them, not an exotic one. The reserve is therefore capped at half the
+ * window: the request's own `max_tokens` shrinks with it too, which is what a
+ * small model would accept anyway.
+ */
+export function reservedResponseTokens(config: Pick<AppConfig, "contextWindow" | "maxResponseTokens">): number {
+	const window = Number.isFinite(config.contextWindow) ? config.contextWindow : 0;
+	const requested = Number.isFinite(config.maxResponseTokens) ? config.maxResponseTokens : MIN_RESPONSE_TOKENS;
+	const ceiling = Math.max(MIN_RESPONSE_TOKENS, Math.floor(window * MAX_RESPONSE_SHARE));
+	return Math.max(1, Math.min(requested, ceiling));
+}
+
+/** Tokens available for everything that is not the reply. Never negative. */
+export function inputTokenBudget(config: Pick<AppConfig, "contextWindow" | "maxResponseTokens">): number {
+	return Math.max(1, config.contextWindow - reservedResponseTokens(config));
+}
+
 export function loadConfig(connection: { baseURL: string; apiKey: string }): AppConfig {
 	const { baseURL, apiKey } = connection;
 

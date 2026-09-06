@@ -27,9 +27,17 @@ describe("formatContextPct", () => {
 	const cfg = (contextWindow: number, maxResponseTokens: number) =>
 		({ contextWindow, maxResponseTokens }) as unknown as AppConfig;
 
-	it("returns 'ctx ?' when the usable budget is non-positive", () => {
-		expect(formatContextPct([], cfg(100, 100))).toBe("ctx ?");
-		expect(formatContextPct([], cfg(100, 200))).toBe("ctx ?");
+	it("returns 'ctx ?' only when the window itself is unusable", () => {
+		expect(formatContextPct([], cfg(0, 100))).toBe("ctx ?");
+		expect(formatContextPct([], cfg(Number.NaN, 100))).toBe("ctx ?");
+	});
+
+	it("still reports a percentage when the reply reserve exceeds the window", () => {
+		// It used to print "ctx ?" here, because the reserve was subtracted raw
+		// and the budget went non-positive — the ordinary case for a 32k model
+		// with the default 32k reserve. The reserve is now capped at half the
+		// window, so there is always a real budget to show.
+		expect(formatContextPct([], cfg(32_768, 32_000))).toMatch(/^ctx .+\/32\.8k \(\d+%\)$/);
 	});
 
 	it("formats used/window with a percentage when there is a budget", () => {

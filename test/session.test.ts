@@ -167,6 +167,30 @@ describe("shouldCompact", () => {
 		// shouldCompact now uses API-reported promptTokens, not message estimation.
 		expect(shouldCompact(messages, config as any, 800)).toBe(true);
 	});
+
+	it("does not fire on the first tool call of a small-window model (regression)", () => {
+		// maxResponseTokens defaults to 32k, which is right for a 128k model and
+		// nonsense for a 32k one: the input budget came out at 768 tokens, so a
+		// live run that read a 16-byte file compacted at 8080 tokens — and would
+		// again every round after. Below 32k the budget went negative and
+		// shouldCompact was true unconditionally. 676 catalog models have a
+		// window of 32k or less.
+		const messages: Message[] = [{ role: "user", content: "Hello" }];
+		for (const contextWindow of [22_016, 32_768, 40_000]) {
+			const small = { contextWindow, maxResponseTokens: 32_000, compactionThreshold: 0.75 } as any;
+			expect(shouldCompact(messages, small, 8_080)).toBe(false);
+			// Still compacts once the context genuinely approaches the window.
+			expect(shouldCompact(messages, small, contextWindow)).toBe(true);
+		}
+	});
+
+	it("leaves a large window's budget exactly as it was", () => {
+		// The reserve is only capped, never raised: a 128k model must keep
+		// reserving its full 32k and compacting at 72k, as before.
+		const big = { contextWindow: 128_000, maxResponseTokens: 32_000, compactionThreshold: 0.75 } as any;
+		expect(shouldCompact([], big, 72_000)).toBe(false);
+		expect(shouldCompact([], big, 72_001)).toBe(true);
+	});
 });
 
 // ============================================================================
