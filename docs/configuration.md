@@ -39,8 +39,8 @@ User settings are persisted to `~/.cast/settings.json`. This file is loaded on s
 | `checkpointReserved` | integer | Token safety buffer kept at the end of the window; thresholds are clamped to `window - reserved` (default: `13000`) |
 | `checkpointPushCaps` | object | Per-section token caps for the rebuild context: `{ checkpoint?, memory?, notes?, global?, tasks? }` (defaults: 11000/10000/6000/6000/2000) |
 | `contextWindow` | integer | Override the model's context window in tokens (8000–2000000). Unset (default) uses the model catalog's value for the active model — set it only when the catalog is wrong for your endpoint |
-| `maxResponseTokens` | integer | Tokens reserved for the model's own reply, subtracted from the window when deciding when to compact (1000–200000, default: `32000`) |
-| `compactionThreshold` | number | Fraction of the usable window (`contextWindow - maxResponseTokens`) that triggers automatic compaction (0.05–0.95, default: `0.75`) |
+| `maxResponseTokens` | integer | Tokens reserved for the model's own reply, subtracted from the window when deciding when to compact (1000–200000, default: `32000`). Capped at half `contextWindow` so a small-window model still gets a usable input budget |
+| `compactionThreshold` | number | Fraction of the usable input budget that triggers automatic compaction (0.05–0.95, default: `0.75`). The budget is `contextWindow` minus the reply reserve, and the reserve is capped at half the window — so a 32k model reserves 16k rather than the full default 32k |
 | `maxToolOutputLines` | integer | Line cap on a single tool result before it is truncated (100–100000, default: `2000`) |
 | `maxToolOutputBytes` | integer | Byte cap on a single tool result before it is truncated (4096–8388608, default: `131072`) |
 | `searchProvider` | `"ddg"` \| `"tavily"` \| `"brave"` | `web_search` backend (default: `"ddg"`) — use `/web-search-provider` to change |

@@ -334,6 +334,38 @@ describe("compactMessages", () => {
 		expect(summary).toContain("f2");
 	});
 
+	it("scales the kept tail with a large window, and leaves 128k and below untouched", async () => {
+		// The 20k tail ceiling was written for a 128k window. On a 1M model the
+		// same constant turned compaction into a near-total reset: it fires at
+		// 726k tokens and used to leave ~28k, discarding 96% of the context in
+		// one step. The ceiling now scales with the budget — but only upward,
+		// so every window up to 128k keeps exactly the tail it had.
+		const build = (rounds: number): Message[] => {
+			const messages: Message[] = [{ role: "system", content: "persona" }];
+			for (let i = 0; i < rounds; i++) {
+				messages.push({ role: "user", content: `q${i} ${"y".repeat(20_000)}` });
+				messages.push({ role: "assistant", content: `a${i} ${"z".repeat(20_000)}` });
+			}
+			return messages;
+		};
+		const cfg = (contextWindow: number) =>
+			({ contextWindow, maxResponseTokens: 32_000, compactionThreshold: 0.75 }) as any;
+		const tailOf = async (contextWindow: number, rounds: number) => {
+			const messages = build(rounds);
+			const result = await compactMessages(messages, async () => "summary", cfg(contextWindow));
+			return estimateTokens(result.messages.filter((m) => m.role !== "system"));
+		};
+
+		// Same history, three windows. 128k must match the old 20k envelope.
+		const small = await tailOf(128_000, 60);
+		expect(small).toBeLessThanOrEqual(24_000);
+
+		const large = await tailOf(1_000_000, 60);
+		expect(large).toBeGreaterThan(small * 2);
+		// And still far under the threshold that triggered the compaction.
+		expect(large).toBeLessThan(726_000);
+	});
+
 	it("refuses to compact when the summarizer returns nothing usable", async () => {
 		// A summarization call that *succeeds* with empty content used to flip
 		// every old message out of context anyway, replacing them with a
