@@ -36,3 +36,5 @@ Use this EXACT format:
 - [Preserve important context, add new if needed]
 
 Keep each section concise. Preserve exact file paths, function names, and error messages.
+
+Tool results in the conversation above may have their middle cut, marked inline. Never conclude that something is absent from a truncated result, and never invent how a fact was established — record only what the conversation actually shows, and say "not verified" where it is unclear.

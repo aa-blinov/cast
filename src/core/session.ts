@@ -14,6 +14,7 @@ import type { TodoItem } from "./todo.ts";
 
 const READ_FILES_RE = /<read-files>\n([\s\S]*?)\n<\/read-files>/;
 const MODIFIED_FILES_RE = /<modified-files>\n([\s\S]*?)\n<\/modified-files>/;
+const FILE_TAGS_RE_G = /\n*<(read|modified)-files>\n[\s\S]*?\n<\/\1-files>/g;
 const JSON_EXT_RE = /\.json$/;
 const NEWLINE_RE_G = /\n/g;
 const DOUBLE_QUOTE_RE = /"/g;
@@ -394,6 +395,23 @@ function parseFileTagsFromSummary(text: string): { readFiles: string[]; modified
 	};
 }
 
+/**
+ * Drop every `<read-files>`/`<modified-files>` block from a summary.
+ *
+ * The tags are ours, appended deterministically after the summarization call
+ * — but the update prompt tells the model to "PRESERVE all existing
+ * information" from the previous summary, and the previous summary was handed
+ * to it with the tags still on. So it dutifully copied them into its answer,
+ * we appended our own beneath, and each round added another copy (observed:
+ * two identical blocks by the third compaction, growing with the file list).
+ * Worse, `parseFileTagsFromSummary` reads the *first* block, which by then was
+ * the model's transcription rather than our extraction — the exact thing
+ * extracting them from tool_calls was meant to stop depending on.
+ */
+function stripFileTags(text: string): string {
+	return text.replace(FILE_TAGS_RE_G, "").trimEnd();
+}
+
 /** Public alias for post-compact reminder assembly. */
 export function fileTagsFromCompactionSummary(text: string): { readFiles: string[]; modifiedFiles: string[] } {
 	return parseFileTagsFromSummary(text);
@@ -467,7 +485,21 @@ function formatMessageForSummary(m: Message): string {
 		}
 		return `assistant: ${parts.join(" ") || "(no content)"}`;
 	}
-	if (m.role === "tool") return `tool (${m.tool_call_id}): ${String(m.content).slice(0, TOOL_RESULT_MAX_CHARS)}`;
+	if (m.role === "tool") {
+		// Head *and* tail, and say the middle was cut. A head-only slice made
+		// the summarizer read the first 500 characters of a 32KB dump as the
+		// whole result: it wrote "no MARKER found" for a file whose marker sat
+		// on the last line, a false fact that then outlived the messages it
+		// came from — and once it went on to explain that with a `Grep` call
+		// that never happened. The end of a tool result is where the payload
+		// usually is (a compiler's error list, a test summary, the tail of a
+		// file), so dropping it was the worst half to lose.
+		const text = String(m.content);
+		if (text.length <= TOOL_RESULT_MAX_CHARS) return `tool (${m.tool_call_id}): ${text}`;
+		const half = Math.floor(TOOL_RESULT_MAX_CHARS / 2);
+		const cut = text.length - half * 2;
+		return `tool (${m.tool_call_id}): ${text.slice(0, half)}\n[…${cut} characters cut from the middle of this result for the summary — do not read the gap as absence…]\n${text.slice(-half)}`;
+	}
 	if (typeof m.content === "string") return `${m.role}: ${m.content.slice(0, 500)}`;
 	return `${m.role}: [structured content]`;
 }
@@ -570,7 +602,9 @@ export async function compactMessages(
 	);
 	const oldText = old.map(formatMessageForSummary).join("\n");
 
-	const summarized = await summarizeFn(oldText, previousSummary);
+	// The tags go to us, not to the model: it only ever copied them back
+	// verbatim, which duplicated them and displaced our own extraction.
+	const summarized = await summarizeFn(oldText, previousSummary ? stripFileTags(previousSummary) : undefined);
 	// A summarization call that *succeeds* with nothing usable is a failure,
 	// not a compaction. Without this check an empty response still flipped
 	// every old row out of context and replaced it with a content-free marker
@@ -590,7 +624,7 @@ export async function compactMessages(
 	// Clamped rather than rejected: a systematically verbose model would
 	// otherwise never compact at all, and a truncated summary still shrinks
 	// the context, which is the whole point.
-	const summary = clampSummary(summarized) + formatFileOps(readFiles, modifiedFiles);
+	const summary = clampSummary(stripFileTags(summarized)) + formatFileOps(readFiles, modifiedFiles);
 
 	const compacted: Message[] = [
 		...system,
