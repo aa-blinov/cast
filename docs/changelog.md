@@ -2,6 +2,13 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Fixed
+
+- **A share link handed over every command's output.** The public `/api/shared/:token` view dropped the persona's system prompt and the web UI hides tool cards in that view, but the JSON behind it is unauthenticated and carried each tool call's full arguments and full result — so a "read-only conversation link" sent to a colleague was also a transcript of every file the agent read and everything every command printed, `curl` away. The live relay had already been fixed to hide exactly this; the saved view it was fixed to match never actually hid it. Both now redact the same way: the visitor sees that `bash` ran and whether it succeeded, never the payload. The `<system-reminder>` notices a turn carries (project memory, attached documents) are dropped from the shared view too.
+- **The web UI escaped `&`, `<` and `>` but not quotes.** Rendered markdown is inserted as HTML and link targets are interpolated into `href="…"`, so a URL containing a double quote closed the attribute and added an event handler that then ran in the daemon's own origin — session cookie and full API included. Markdown reaches the renderer from model output, tool results and file contents, none of which is under the user's control. Quotes are now escaped, and the renderer moved into its own module so this is testable.
+
 ## 0.26.1
 
 ### Fixed

@@ -949,6 +949,42 @@ describe("web bridge", () => {
 		expect(view?.messages.some((m) => m.role === "system")).toBe(false);
 	});
 
+	it("the shared view hides what tool calls carried, and the reminders injected into a turn", () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		ws.session.messages.push(
+			{ role: "user", content: "read the env\n<system-reminder>project memory: staging password rotates weekly</system-reminder>" },
+			{
+				role: "assistant",
+				content: "done",
+				tool_calls: [
+					{ id: "c1", type: "function", function: { name: "bash", arguments: '{"command":"cat /home/me/.env"}' } },
+				],
+			} as never,
+			{ role: "tool", tool_call_id: "c1", content: "OPENAI_API_KEY=sk-SUPERSECRET" } as never,
+		);
+
+		const shared = bridge.shareSession(ws.id);
+		const view = bridge.getSharedSession(shared.token);
+		const json = JSON.stringify(view);
+
+		// The link is a *conversation* link: that `bash` ran and succeeded is
+		// fine, what it printed is not — and the JSON is served with no auth,
+		// so the client hiding tool cards would not be a control at all.
+		const call = view?.messages.find((m) => m.toolCalls?.length)?.toolCalls?.[0];
+		expect(call?.name).toBe("bash");
+		expect(call?.status).toBe("ok");
+		expect(json).not.toContain("SUPERSECRET");
+		expect(json).not.toContain("/home/me/.env");
+		// Same for the <system-reminder> bodies toDisplayMessages surfaces as
+		// `warning` rows — project memory and attached documents, not the
+		// visitor's business.
+		expect(json).not.toContain("staging password");
+		expect(view?.messages.some((m) => m.role === "warning")).toBe(false);
+		// Still readable as a conversation.
+		expect(view?.messages.some((m) => m.content === "done")).toBe(true);
+	});
+
 	it("shareSession is idempotent — calling it twice returns the same token", () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();

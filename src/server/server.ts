@@ -66,7 +66,14 @@ import {
 	legacyPathForApiV1,
 	OPENAPI_V1_PATH,
 } from "./api-v1.ts";
-import { reconcileActiveStream, SANDBOX_CWD, type ServerBridge, toDisplayMessages, type WebEvent } from "./bridge.ts";
+import {
+	reconcileActiveStream,
+	SANDBOX_CWD,
+	type ServerBridge,
+	SHARED_TOOL_PAYLOAD_PLACEHOLDER,
+	toDisplayMessages,
+	type WebEvent,
+} from "./bridge.ts";
 import { GOAL_MAX_OUTER_ITERATIONS } from "./commands.ts";
 import { readLiveServerState } from "./daemon-state.ts";
 import { isBlockedAttachmentName, sessionInputsDir } from "./inputs.ts";
@@ -206,7 +213,10 @@ export function sanitizeSharedLiveEvent(event: { type: string } & Record<string,
 			id: event.id,
 			name: event.name,
 			status: event.status,
-			result: { content: "[hidden in the shared view]", isError: (event.result as { isError?: boolean })?.isError },
+			result: {
+				content: SHARED_TOOL_PAYLOAD_PLACEHOLDER,
+				isError: (event.result as { isError?: boolean })?.isError,
+			},
 		};
 	}
 	return event;
