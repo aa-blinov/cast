@@ -226,6 +226,7 @@ const IMPORT_REWRITE_TARGETS = [
 	"hotkeys",
 	"icons",
 	"inputs-explorer",
+	"markdown",
 	"memory-explorer",
 	"message",
 	"message-submit",
