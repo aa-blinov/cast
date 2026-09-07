@@ -1681,10 +1681,27 @@ export function deleteSession(id: string, cwd?: string): boolean {
 	// don't pile up as orphans. Matched exactly (never by prefix), so a
 	// project that merely lives under ~/.cast/sandbox is never touched.
 	// The caller passes the cwd it captured before the row was deleted.
-	if (cwd && cwd === join(homedir(), ".cast", "sandbox", `cast-${id}`)) {
-		rmSync(cwd, { recursive: true, force: true });
-	}
+	removeSandboxDirFor(id, cwd);
 	return result.changes > 0;
+}
+
+/**
+ * Remove a session's own throwaway working copy, if that is what its cwd was.
+ *
+ * Matched exactly (never by prefix), so a project that merely lives under
+ * ~/.cast/sandbox is never touched. Shared with the background-session prune,
+ * which used to delete the rows and leave the directory: a real installation
+ * had 118 sandbox directories of which 34 belonged to sessions that no longer
+ * existed.
+ */
+function removeSandboxDirFor(id: string, cwd: string | undefined): void {
+	if (!cwd || cwd !== join(homedir(), ".cast", "sandbox", `cast-${id}`)) return;
+	try {
+		rmSync(cwd, { recursive: true, force: true });
+	} catch {
+		// Best-effort: a directory we cannot remove must not fail the delete or
+		// stall the prune. It stays as an orphan, which is what it already was.
+	}
 }
 
 export function listSessions(): SessionState[] {
@@ -2192,18 +2209,22 @@ export function pruneBackgroundSessions(now: number = Date.now(), limit = BACKGR
 		// DELETE here falls back to the per-message AFTER DELETE triggers and
 		// takes minutes on a large store, holding the write lock — which, at
 		// daemon startup, meant the daemon never finished starting.
-		const ids = (
-			db
-				.prepare("SELECT id FROM sessions WHERE session_kind = 'background' AND updated_at < ? LIMIT ?")
-				.all(cutoff, limit) as Array<{ id: string }>
-		).map((row) => row.id);
+		// cwd comes along because the row is about to go: a background session
+		// that ran in its own sandbox owns that directory, and pruning the row
+		// while leaving the files behind is how orphans accumulated.
+		const rows = db
+			.prepare("SELECT id, cwd FROM sessions WHERE session_kind = 'background' AND updated_at < ? LIMIT ?")
+			.all(cutoff, limit) as Array<{ id: string; cwd: string | null }>;
+		const ids = rows.map((row) => row.id);
 		if (ids.length === 0) return 0;
 		const placeholders = ids.map(() => "?").join(", ");
-		return withMessageFtsClearedFor(
+		const changes = withMessageFtsClearedFor(
 			db,
 			ids,
 			() => db.prepare(`DELETE FROM sessions WHERE id IN (${placeholders})`).run(...ids).changes,
 		);
+		for (const row of rows) removeSandboxDirFor(row.id, row.cwd ?? undefined);
+		return changes;
 	};
 	if (db.isTransaction) return Number(prune());
 	db.exec("BEGIN IMMEDIATE");

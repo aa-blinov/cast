@@ -1236,6 +1236,49 @@ describe("session persistence", () => {
 		expect(pruneSessionEvents()).toBe(0);
 	});
 
+	it("takes the sandbox directory with a pruned background session (regression)", () => {
+		// The prune deleted the rows and left the files: a real installation had
+		// 118 sandbox directories, 34 of them belonging to sessions that no
+		// longer existed. deleteSession has always removed its own; the
+		// retention path did not.
+		const old = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+		const session = createSession("gpt-4o", projectA, {
+			sessionKind: "background",
+			backgroundKind: "checkpoint-writer",
+		});
+		// A sandbox session's cwd is exactly ~/.cast/sandbox/cast-<id>.
+		const sandbox = join(process.env.HOME ?? "", ".cast", "sandbox", `cast-${session.id}`);
+		mkdirSync(sandbox, { recursive: true });
+		writeFileSync(join(sandbox, "scratch.txt"), "work in progress\n");
+		session.cwd = sandbox;
+		session.messages = [{ role: "user", content: "snapshot" }];
+		saveSession(session);
+		getDb().prepare("UPDATE sessions SET updated_at = ? WHERE id = ?").run(old, session.id);
+
+		expect(existsSync(sandbox)).toBe(true);
+		expect(pruneBackgroundSessions()).toBe(1);
+		expect(existsSync(sandbox)).toBe(false);
+	});
+
+	it("never removes a directory that merely lives under the sandbox root", () => {
+		// Matched exactly, never by prefix — a real project checked out inside
+		// ~/.cast/sandbox is not cast's to delete.
+		const old = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+		const session = createSession("gpt-4o", projectA, {
+			sessionKind: "background",
+			backgroundKind: "checkpoint-writer",
+		});
+		const notOurs = join(process.env.HOME ?? "", ".cast", "sandbox", "someones-real-project");
+		mkdirSync(notOurs, { recursive: true });
+		session.cwd = notOurs;
+		session.messages = [{ role: "user", content: "snapshot" }];
+		saveSession(session);
+		getDb().prepare("UPDATE sessions SET updated_at = ? WHERE id = ?").run(old, session.id);
+
+		expect(pruneBackgroundSessions()).toBe(1);
+		expect(existsSync(notOurs)).toBe(true);
+	});
+
 	it("prunes only background sessions past the retention window", () => {
 		// Background sessions are cast's own working snapshots — invisible in the
 		// sidebar, never read back — and nothing deleted them, so they grew
