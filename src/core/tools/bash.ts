@@ -323,6 +323,16 @@ export async function execBash(
 	// `bash`.
 	const managed = background && isPtyAvailable() ? background : undefined;
 
+	// Falling back is right, but doing it silently is not: a model that asked
+	// for a background task and got a foreground run reads the eventual
+	// "[TIMED OUT] after 180 seconds" as the dev server having crashed, and
+	// retries the same call. Say which of the two reasons applies.
+	if (args.run_in_background === true && !managed) {
+		warnPrefix += background
+			? "[warning] run_in_background is unavailable here — the PTY backend (node-pty) could not be loaded, so this ran in the foreground with the normal timeout. Long-running commands will time out; run them yourself or redirect their output to a file.\n\n"
+			: "[warning] run_in_background is unavailable in this session — this ran in the foreground with the normal timeout.\n\n";
+	}
+
 	if (args.run_in_background === true && managed) {
 		// Background tasks are open-ended by default (dev servers, long builds)
 		// — only apply a kill timer when the model explicitly asked for one.
