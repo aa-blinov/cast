@@ -52,6 +52,29 @@ describe("context-files", () => {
 			expect(loadProjectContextFiles(level2, true)).toEqual([]);
 		});
 
+		it("caps a huge context file, since it is sent with every request (regression)", async () => {
+			// Nothing bounded this: a 3.9MB AGENTS.md produced a 3832KB prompt
+			// block — about a million tokens, on every single request — with no
+			// note and no warning, so the bill was the only symptom. The rules
+			// subsystem has had a 64KB cap for the same reason.
+			const { MAX_CONTEXT_FILE_CHARS } = await import("../src/core/context-files.ts");
+			const huge = "x".repeat(MAX_CONTEXT_FILE_CHARS * 3);
+			writeFileSync(join(level2, "AGENTS.md"), huge, "utf-8");
+
+			const loaded = loadProjectContextFiles(level2, true);
+			const file = loaded.find((f) => f.path.endsWith(join("level2", "AGENTS.md")));
+			expect(file).toBeDefined();
+			expect(file!.content.length).toBeLessThan(MAX_CONTEXT_FILE_CHARS + 500);
+			expect(file!.content).toContain("Context file truncated");
+			expect(file!.content.startsWith("xxxx")).toBe(true);
+		});
+
+		it("leaves an ordinary context file byte-for-byte alone", () => {
+			writeFileSync(join(level2, "AGENTS.md"), "Use tabs.\nRun the tests.\n", "utf-8");
+			const loaded = loadProjectContextFiles(level2, true);
+			expect(loaded.some((f) => f.content === "Use tabs.\nRun the tests.\n")).toBe(true);
+		});
+
 		it("includes an ancestor's context file regardless of project trust", () => {
 			writeFileSync(join(level1, "AGENTS.md"), "Ancestor rule.", "utf-8");
 			const untrusted = loadProjectContextFiles(level2, false);
