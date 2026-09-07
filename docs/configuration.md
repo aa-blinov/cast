@@ -87,6 +87,15 @@ otherwise make everything under it one project sharing one memory.
 
 `/reload` re-reads the root, so `git init` mid-session takes effect.
 
+## Context files (AGENTS.md / CLAUDE.md)
+
+`AGENTS.md` (or `CLAUDE.md`) is read from the working directory and every
+ancestor, and its content goes into the system prompt of **every** request.
+Each file is capped at 64KB — the same ceiling rules use — with a note in
+place of the rest, so a generated or dumped-into file cannot quietly cost a
+million tokens per request. Keep these files short and let the agent read the
+details on demand.
+
 ## Project Memory
 
 > See [Memory](memory.md) for a complete guide to what memory is, where the

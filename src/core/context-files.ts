@@ -26,13 +26,30 @@ export interface ContextFile {
 
 const CANDIDATES = ["AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"];
 
+/**
+ * Ceiling on one context file, matching the rules subsystem's own
+ * (MAX_RULE_BODY_CHARS).
+ *
+ * A context file goes into the system prompt of *every* request, so its size
+ * is paid over and over. Nothing capped it: a 3.9MB AGENTS.md produced a
+ * 3832KB prompt block — about a million tokens per request — with no note and
+ * no warning, so the bill was the only symptom. Generated or dumped-into
+ * AGENTS.md files reach that scale without anyone intending it.
+ */
+export const MAX_CONTEXT_FILE_CHARS = 64 * 1024;
+
+function clampContextFile(content: string, filePath: string): string {
+	if (content.length <= MAX_CONTEXT_FILE_CHARS) return content;
+	return `${content.slice(0, MAX_CONTEXT_FILE_CHARS)}\n\n[Context file truncated at ${MAX_CONTEXT_FILE_CHARS} characters — ${filePath} is ${content.length} characters, and this file is sent with every request. Keep it short and let the model read the details on demand.]`;
+}
+
 function loadContextFileFromDir(dir: string): ContextFile | null {
 	for (const filename of CANDIDATES) {
 		const filePath = join(dir, filename);
 		if (existsSync(filePath)) {
 			try {
 				const content = readFileSync(filePath, "utf-8");
-				if (content.trim()) return { path: filePath, content };
+				if (content.trim()) return { path: filePath, content: clampContextFile(content, filePath) };
 			} catch {
 				// Unreadable file is silently skipped — same as pi.
 			}
