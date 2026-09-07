@@ -47,6 +47,17 @@ afterEach(() => {
 // bash
 // ============================================================================
 
+/** Fails the test rather than hanging, if a tool ever blocks again. */
+function withTimeout<T>(promise: Promise<T>, ms = 5000): Promise<T> {
+	return Promise.race([
+		promise,
+		new Promise<T>((_, reject) => {
+			const t = setTimeout(() => reject(new Error(`tool call did not settle within ${ms}ms`)), ms);
+			t.unref();
+		}),
+	]);
+}
+
 describe("bash", () => {
 	it("rejects a missing command instead of reporting a no-op as success", async () => {
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
@@ -2091,6 +2102,40 @@ describe("file tools on large files and lookalike UI paths", () => {
 		expect(result.content).toContain("Large file");
 		// Nowhere near the file's own size.
 		expect(grew).toBeLessThan(2 * 1024 * 1024);
+	});
+
+	it("refuses a named pipe instead of blocking on it forever (regression)", async () => {
+		// Opening a FIFO blocks until something opens the other end, and these
+		// tools have no timeout and no cancel path — `read` on one simply never
+		// returned, and the turn sat holding an unanswered tool call. A probe
+		// against the old code had to be killed after ten minutes.
+		const { execEdit, execRead, execWrite } = await import("../src/core/tools/files.ts");
+		const { mkfifoSync } = await import("./helpers/mkfifo.ts");
+		const fifoPath = join(TEST_DIR, "pipe");
+		mkfifoSync(fifoPath);
+
+		const read = await withTimeout(execRead({ path: fifoPath }, TEST_DIR, mockConfig));
+		expect(read.isError).toBe(true);
+		expect(read.content).toContain("named pipe");
+
+		const write = await withTimeout(execWrite({ path: fifoPath, content: "x" }, TEST_DIR));
+		expect(write.isError).toBe(true);
+		expect(write.content).toContain("named pipe");
+
+		const edit = await withTimeout(
+			execEdit({ filePath: fifoPath, oldString: "a", newString: "b" }, TEST_DIR, mockConfig),
+		);
+		expect(edit.isError).toBe(true);
+		expect(edit.content).toContain("named pipe");
+	});
+
+	it("still reads and writes an ordinary file", async () => {
+		const { execRead, execWrite } = await import("../src/core/tools/files.ts");
+		const path = join(TEST_DIR, "regular-after-guard.txt");
+		expect((await execWrite({ path, content: "hello\n" }, TEST_DIR)).isError).toBeFalsy();
+		const read = await execRead({ path }, TEST_DIR, mockConfig);
+		expect(read.isError).toBeFalsy();
+		expect(read.content).toContain("hello");
 	});
 
 	it("reports an offset past the end of a large file instead of returning nothing", async () => {
