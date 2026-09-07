@@ -170,10 +170,17 @@ The `run` subcommand accepts a subset of the main flags:
 | `--format <default\|json>` | | Output format |
 | `--interactive` | | Persistent JSONL session protocol; no positional message |
 | `--bypass-permissions` | | Skip bash confirmation prompts |
-| `--skill <directory>` | | Load an extra skill package directory (repeatable) |
+| `--keep-background` | | Leave background tasks this run started running after it exits |
+| `--skill <directory>` | | Load an extra skill package directory (repeatable) — **not applied under the daemon**, see below |
 | `--no-skills` | | Skip project/agents/global/builtin skill discovery |
-| `--mcp <path>` | | Load extra MCP config (repeatable) |
+| `--mcp <path>` | | Load extra MCP config (repeatable) — **not applied under the daemon**, see below |
 | `--no-mcp` | | Skip MCP discovery |
+
+`cast run` executes inside the daemon, and `--skill`/`--mcp` load from a path
+*there*: the daemon does not receive them, so the run says so on stderr and
+continues without them. Install into `~/.cast/skills` / `~/.cast/mcp.json`, or
+run with `CAST_NO_DAEMON=1`. Every other flag above is applied to that run's
+own session only, so a second client on the same daemon is unaffected.
 
 ```bash
 cast run --format json "list all test files"

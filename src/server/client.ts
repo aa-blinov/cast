@@ -179,6 +179,7 @@ export async function createServerSession(
 		permissionMode?: "bypass";
 		noSkills?: boolean;
 		noMcp?: boolean;
+		reasoningLevel?: string;
 	} = {},
 ): Promise<string> {
 	const { status, data } = await serverFetch(client, `${API_V1_PREFIX}/sessions`, {
@@ -232,6 +233,8 @@ export async function ensureServerSession(
 		 *  before the daemon previously, so a run got them anyway. */
 		noSkills?: boolean;
 		noMcp?: boolean;
+		/** `--reasoning <level>` for this session only. */
+		reasoningLevel?: string;
 	},
 ): Promise<{ id: string; resumed: boolean }> {
 	// Explicit id: GET hydrates it on the daemon (bridge.getSession → hydrateSession).
@@ -261,6 +264,7 @@ export async function ensureServerSession(
 		permissionMode: options.permissionMode,
 		noSkills: options.noSkills,
 		noMcp: options.noMcp,
+		reasoningLevel: options.reasoningLevel,
 	});
 	return { id, resumed: false };
 }

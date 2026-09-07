@@ -21,6 +21,28 @@ import type { ParsedArgs } from "./startup.ts";
 // Non-interactive runner — `cast run "message"`
 // ============================================================================
 
+/**
+ * Flags the daemon path cannot honour.
+ *
+ * `--skill <path>` and `--mcp <path>` load from a path, and the loading happens
+ * in the daemon — which was never told about them, so both were silently
+ * ignored (the same way --worktree, --bypass-permissions, --no-skills and
+ * --no-mcp were, before those were threaded through). Saying so beats
+ * pretending: an ignored `--mcp` means the run had none of the tools the user
+ * pointed at.
+ */
+function warnUnsupportedDaemonFlags(args: ParsedArgs): void {
+	const ignored = [
+		...((args.cliSkillPaths?.length ?? 0) > 0 ? ["--skill"] : []),
+		...((args.cliMcpPaths?.length ?? 0) > 0 ? ["--mcp"] : []),
+	];
+	if (ignored.length === 0) return;
+	process.stderr.write(
+		`${ignored.join(" and ")} ${ignored.length === 1 ? "is" : "are"} not applied when running through the daemon — the paths are loaded there, and it does not receive them.${EOL}` +
+			`Install into ~/.cast/skills or ~/.cast/mcp.json, or run with CAST_NO_DAEMON=1.${EOL}`,
+	);
+}
+
 export interface RunOptions {
 	message: string;
 	format: "default" | "json";
@@ -95,6 +117,7 @@ export async function runInteractive(args: ParsedArgs): Promise<void> {
 	}
 	const settings = loadSettings();
 	const cwd = process.env.CAST_CWD ? resolve(process.env.CAST_CWD) : resolve(".");
+	warnUnsupportedDaemonFlags(args);
 	let { id: sessionId } = await ensureServerSession(client, {
 		persona: args.cliPersona ?? settings.persona,
 		model: args.cliModel ?? settings.model,
@@ -105,6 +128,7 @@ export async function runInteractive(args: ParsedArgs): Promise<void> {
 		permissionMode: args.cliBypassPermissions ? "bypass" : undefined,
 		noSkills: args.noSkills,
 		noMcp: args.noMcp,
+		reasoningLevel: args.cliReasoning,
 	});
 
 	const emit = (type: string, data: Record<string, unknown> = {}) => {
@@ -277,6 +301,7 @@ export async function runNonInteractive(args: ParsedArgs, options: RunOptions): 
 	// the daemon create/resume the session (it applies its own provider settings).
 	const settings = loadSettings();
 	const cwd = process.env.CAST_CWD ? resolve(process.env.CAST_CWD) : resolve(".");
+	warnUnsupportedDaemonFlags(args);
 	const { id: sessionId, resumed } = await ensureServerSession(client, {
 		persona: args.cliPersona ?? settings.persona,
 		model: args.cliModel ?? settings.model,
@@ -287,6 +312,7 @@ export async function runNonInteractive(args: ParsedArgs, options: RunOptions): 
 		permissionMode: args.cliBypassPermissions ? "bypass" : undefined,
 		noSkills: args.noSkills,
 		noMcp: args.noMcp,
+		reasoningLevel: args.cliReasoning,
 	});
 
 	let failed = false;
