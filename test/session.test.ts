@@ -1236,6 +1236,40 @@ describe("session persistence", () => {
 		expect(pruneSessionEvents()).toBe(0);
 	});
 
+	it("takes the session's uploaded documents with it on delete (regression)", () => {
+		// Attached documents live in ~/.cast/inputs/<session-id>. Nothing
+		// removed them when the session went: a real installation had 15 input
+		// directories, 7 of them belonging to sessions that no longer existed,
+		// and the only path that ever deleted an upload was a manual DELETE
+		// while the session still existed.
+		const session = createSession("gpt-4o", projectA);
+		session.messages = [{ role: "user", content: "here is a file" }];
+		saveSession(session);
+		const inputs = join(process.env.HOME ?? "", ".cast", "inputs", session.id);
+		mkdirSync(inputs, { recursive: true });
+		writeFileSync(join(inputs, "spec.pdf"), "not really a pdf\n");
+
+		expect(deleteSession(session.id)).toBe(true);
+		expect(existsSync(inputs)).toBe(false);
+	});
+
+	it("takes uploaded documents with a pruned background session too", () => {
+		const old = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+		const session = createSession("gpt-4o", projectA, {
+			sessionKind: "background",
+			backgroundKind: "checkpoint-writer",
+		});
+		session.messages = [{ role: "user", content: "snapshot" }];
+		saveSession(session);
+		const inputs = join(process.env.HOME ?? "", ".cast", "inputs", session.id);
+		mkdirSync(inputs, { recursive: true });
+		writeFileSync(join(inputs, "attachment.txt"), "payload\n");
+		getDb().prepare("UPDATE sessions SET updated_at = ? WHERE id = ?").run(old, session.id);
+
+		expect(pruneBackgroundSessions()).toBe(1);
+		expect(existsSync(inputs)).toBe(false);
+	});
+
 	it("takes the sandbox directory with a pruned background session (regression)", () => {
 		// The prune deleted the rows and left the files: a real installation had
 		// 118 sandbox directories, 34 of them belonging to sessions that no

@@ -1,5 +1,5 @@
-import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { basename } from "node:path";
+import { sessionInputsPath } from "../core/session.ts";
 
 /**
  * Where a session's attached (non-image) documents live: `~/.cast/inputs/
@@ -13,7 +13,9 @@ import { basename, join } from "node:path";
  */
 export function sessionInputsDir(sessionId: string): string {
 	if (!isSafeSessionId(sessionId)) throw new Error(`Invalid session id: ${JSON.stringify(sessionId)}`);
-	return join(homedir(), ".cast", "inputs", sessionId);
+	// Shared with core/session.ts, which removes this directory when the
+	// session goes: one definition so the two cannot drift apart.
+	return sessionInputsPath(sessionId);
 }
 
 /**
