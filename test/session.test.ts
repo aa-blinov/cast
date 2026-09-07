@@ -1236,6 +1236,27 @@ describe("session persistence", () => {
 		expect(pruneSessionEvents()).toBe(0);
 	});
 
+	it("takes the session's own memory files with it, but never the project's (regression)", () => {
+		// Third subsystem of the same shape: nothing referenced
+		// sessionMemoryDir() except the code that writes to it, so
+		// checkpoint.md / notes.md / tasks outlived their session for good — a
+		// real installation had 5 such directories. Project memory is shared
+		// durable knowledge and must survive.
+		const session = createSession("gpt-4o", projectA);
+		session.messages = [{ role: "user", content: "remember this" }];
+		saveSession(session);
+		const sessionMemory = join(process.env.HOME ?? "", ".cast", "memory", "sessions", session.id);
+		mkdirSync(join(sessionMemory, "tasks"), { recursive: true });
+		writeFileSync(join(sessionMemory, "notes.md"), "session notes\n");
+		const projectMemory = join(process.env.HOME ?? "", ".cast", "memory", "projects");
+		mkdirSync(projectMemory, { recursive: true });
+		writeFileSync(join(projectMemory, "MEMORY.md"), "# durable\n");
+
+		expect(deleteSession(session.id)).toBe(true);
+		expect(existsSync(sessionMemory)).toBe(false);
+		expect(existsSync(join(projectMemory, "MEMORY.md"))).toBe(true);
+	});
+
 	it("takes the session's uploaded documents with it on delete (regression)", () => {
 		// Attached documents live in ~/.cast/inputs/<session-id>. Nothing
 		// removed them when the session went: a real installation had 15 input
