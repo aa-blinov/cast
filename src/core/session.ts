@@ -8,6 +8,7 @@ import { type AppConfig, inputTokenBudget } from "./config.ts";
 import { formatLocalDate } from "./date-rollover-reminder.ts";
 import { getDb } from "./db.ts";
 import type { Message, Usage } from "./llm.ts";
+import { sessionMemoryDir } from "./memory-files.ts";
 import type { PlanQuestion, PlanTransition } from "./plan.ts";
 import { deriveSessionTitle } from "./session-title.ts";
 import type { TodoItem } from "./todo.ts";
@@ -1683,6 +1684,7 @@ export function deleteSession(id: string, cwd?: string): boolean {
 	// The caller passes the cwd it captured before the row was deleted.
 	removeSandboxDirFor(id, cwd);
 	removeInputsDirFor(id);
+	removeSessionMemoryDirFor(id);
 	return result.changes > 0;
 }
 
@@ -1706,6 +1708,24 @@ export function deleteSession(id: string, cwd?: string): boolean {
  */
 export function sessionInputsPath(id: string): string {
 	return join(homedir(), ".cast", "inputs", id);
+}
+
+/**
+ * Remove a session's own memory files — checkpoint.md, notes.md, tasks/ under
+ * ~/.cast/memory/sessions/<id>.
+ *
+ * Third subsystem of the same shape: nothing referenced sessionMemoryDir()
+ * except the code that writes to it, so these outlived their session for
+ * good. A real installation had 5 such directories whose sessions were gone.
+ * The *project* memory (~/.cast/memory/projects) is deliberately untouched —
+ * that is shared, durable knowledge and outliving one session is its purpose.
+ */
+function removeSessionMemoryDirFor(id: string): void {
+	try {
+		rmSync(sessionMemoryDir(id), { recursive: true, force: true });
+	} catch {
+		// Best-effort, like the sandbox and inputs directories.
+	}
 }
 
 function removeInputsDirFor(id: string): void {
@@ -2252,6 +2272,7 @@ export function pruneBackgroundSessions(now: number = Date.now(), limit = BACKGR
 		for (const row of rows) {
 			removeSandboxDirFor(row.id, row.cwd ?? undefined);
 			removeInputsDirFor(row.id);
+			removeSessionMemoryDirFor(row.id);
 		}
 		return changes;
 	};
