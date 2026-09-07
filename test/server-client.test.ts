@@ -99,6 +99,19 @@ describe("server client", () => {
 		expect(received[0]).toMatchObject({ method: "POST", path: "/api/v1/sessions", auth: "Bearer tok-123" });
 	});
 
+	it("passes --bypass-permissions through to the daemon (regression)", async () => {
+		// The flag never reached the daemon, so a non-interactive run hit the
+		// dangerous-command confirmation, had nothing that could answer it, and
+		// hung until the five-minute timeout refused the command. Verified
+		// live: the same run exited 124 on a `rm -f` before this, and prints
+		// the command's output after.
+		const client = { baseUrl, token: undefined };
+		await ensureServerSession(client, { cwd: "/tmp", permissionMode: "bypass" });
+		await new Promise((r) => setTimeout(r, 20));
+		const post = received.find((r) => r.method === "POST" && r.path === "/api/v1/sessions");
+		expect(post?.body).toMatchObject({ permissionMode: "bypass" });
+	});
+
 	it("passes --worktree through to the daemon (regression)", async () => {
 		// `cast run -w <name>` was dropped on the floor: the flag was parsed,
 		// documented in --help, and never reached createServerSession, so the
