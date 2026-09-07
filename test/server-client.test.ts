@@ -22,11 +22,29 @@ import {
 describe("server client", () => {
 	let server: Server;
 	let baseUrl: string;
-	const received: Array<{ method: string; path: string; auth?: string }> = [];
+	const received: Array<{ method: string; path: string; auth?: string; body?: unknown }> = [];
 
 	beforeEach(async () => {
 		server = createServer((req, res) => {
-			received.push({ method: req.method ?? "", path: req.url ?? "", auth: req.headers.authorization });
+			const entry: { method: string; path: string; auth?: string; body?: unknown } = {
+				method: req.method ?? "",
+				path: req.url ?? "",
+				auth: req.headers.authorization,
+			};
+			received.push(entry);
+			if (req.method === "POST") {
+				let raw = "";
+				req.on("data", (chunk) => {
+					raw += String(chunk);
+				});
+				req.on("end", () => {
+					try {
+						entry.body = JSON.parse(raw);
+					} catch {
+						entry.body = raw;
+					}
+				});
+			}
 			if (req.method === "POST" && req.url === "/api/v1/sessions") {
 				res.writeHead(201, { "content-type": "application/json" });
 				res.end(JSON.stringify({ id: "sess-1", session: { id: "sess-1" } }));
@@ -79,6 +97,19 @@ describe("server client", () => {
 		const id = await createServerSession(client, { persona: "senior", model: "hy3", cwd: "/tmp" });
 		expect(id).toBe("sess-1");
 		expect(received[0]).toMatchObject({ method: "POST", path: "/api/v1/sessions", auth: "Bearer tok-123" });
+	});
+
+	it("passes --worktree through to the daemon (regression)", async () => {
+		// `cast run -w <name>` was dropped on the floor: the flag was parsed,
+		// documented in --help, and never reached createServerSession, so the
+		// session ran in the project root with nothing saying otherwise.
+		// Verified live before the fix — `pwd` printed the project root.
+		const client = { baseUrl, token: undefined };
+		await ensureServerSession(client, { persona: "senior", model: "hy3", cwd: "/tmp", worktree: "feature-one" });
+		// Give the body handler a tick to finish reading.
+		await new Promise((r) => setTimeout(r, 20));
+		const post = received.find((r) => r.method === "POST" && r.path === "/api/v1/sessions");
+		expect(post?.body).toMatchObject({ worktree: "feature-one" });
 	});
 
 	it("submitServerChat posts the text", async () => {

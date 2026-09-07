@@ -101,6 +101,7 @@ export async function runInteractive(args: ParsedArgs): Promise<void> {
 		cwd,
 		resumeId: args.resumeId,
 		resumeRequested: args.resumeRequested,
+		worktree: args.worktree,
 	});
 
 	const emit = (type: string, data: Record<string, unknown> = {}) => {
@@ -279,6 +280,7 @@ export async function runNonInteractive(args: ParsedArgs, options: RunOptions): 
 		cwd,
 		resumeId: args.resumeId,
 		resumeRequested: args.resumeRequested,
+		worktree: args.worktree,
 	});
 
 	let failed = false;
