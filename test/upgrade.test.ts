@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchLatestVersion, isAlreadyUpToDate, isNewerVersion, restartDaemon } from "../src/core/upgrade.ts";
 import {
@@ -10,7 +10,11 @@ import {
 
 vi.mock("node:child_process", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("node:child_process")>();
-	return { ...actual, spawnSync: vi.fn(() => ({ status: 0 })) };
+	return {
+		...actual,
+		spawnSync: vi.fn(() => ({ status: 0 })),
+		spawn: vi.fn(() => ({ unref: vi.fn() })),
+	};
 });
 vi.mock("../src/server/daemon-state.ts", () => ({
 	readServerState: vi.fn(),
@@ -145,6 +149,34 @@ describe("restartDaemon", () => {
 		expect(spawnSync).toHaveBeenCalledWith("cast", ["server", "start", "--port", "1337", "--host", "127.0.0.1"], {
 			stdio: "inherit",
 		});
+	});
+
+	it("hands its own restart to a detached waiter instead of SIGTERMing itself", async () => {
+		// The web UI's Upgrade button calls runUpgrade inside the daemon, so the
+		// recorded pid is this process. SIGTERM here is suicide: the shutdown
+		// handler exits within seconds and the spawnSync that starts the
+		// replacement never runs, leaving a new install and no daemon.
+		vi.mocked(readServerState).mockReturnValue({
+			pid: process.pid,
+			host: "127.0.0.1",
+			port: 1337,
+			startedAt: "t",
+			foreground: false,
+		});
+		vi.mocked(isProcessAlive).mockReturnValue(true);
+		vi.mocked(isCurrentDaemonInstance).mockResolvedValue(true);
+		const kill = vi.spyOn(process, "kill").mockImplementation(() => {});
+
+		expect(await restartDaemon()).toBe(true);
+
+		expect(spawnSync).not.toHaveBeenCalled();
+		const [command, args, options] = vi.mocked(spawn).mock.calls[0];
+		expect(command).toBe("sh");
+		expect(String(args?.[1])).toContain(`kill -0 ${process.pid}`);
+		expect(String(args?.[1])).toContain("cast server start --port 1337 --host 127.0.0.1");
+		expect(options).toMatchObject({ detached: true });
+		// Still shuts down, so sessions drain — just after the waiter exists.
+		expect(kill).toHaveBeenCalledWith(process.pid, "SIGTERM");
 	});
 
 	it("does not signal a PID that cannot be verified as the daemon", async () => {

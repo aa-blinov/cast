@@ -10,7 +10,7 @@
  * on it.
  */
 
-import { openSync } from "node:fs";
+import { mkdirSync, openSync } from "node:fs";
 import { dirname } from "node:path";
 
 export interface DaemonLogFailure {
@@ -34,6 +34,12 @@ export function daemonLogFailureLines(path: string, err: unknown): string[] {
  */
 export function openDaemonLog(path: string): { ok: true; fd: number } | { ok: false; failure: DaemonLogFailure } {
 	try {
+		// `cast server start` can be the very first cast command on a machine
+		// (a fresh install, a container image), and nothing has created ~/.cast
+		// yet — settings only make it when they are written. Without this the
+		// daemon refused to start with an ENOENT on its own log file and told
+		// the user to check a directory that simply did not exist yet.
+		mkdirSync(dirname(path), { recursive: true });
 		return { ok: true, fd: openSync(path, "a") };
 	} catch (err) {
 		return { ok: false, failure: { lines: daemonLogFailureLines(path, err) } };

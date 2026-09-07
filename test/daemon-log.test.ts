@@ -49,11 +49,28 @@ describe("openDaemonLog", () => {
 		chmodSync(nested, 0o700);
 	});
 
-	it("explains a missing directory the same way", () => {
+	it("creates a missing directory instead of refusing to start", () => {
+		// `cast server start` can be the first cast command on a machine, with
+		// nothing having created ~/.cast yet — that used to be an ENOENT and a
+		// message telling the user to check a directory that never existed.
 		const path = join(dir, "does", "not", "exist", "server.log");
+
 		const result = openDaemonLog(path);
+
+		expect(result.ok).toBe(true);
+		expect(existsSync(path)).toBe(true);
+	});
+
+	it("still explains a directory it cannot create", () => {
+		const nested = join(dir, "cast");
+		mkdirSync(nested);
+		chmodSync(nested, 0o500);
+
+		const result = openDaemonLog(join(nested, "sub", "server.log"));
+
 		expect(result.ok).toBe(false);
 		if (result.ok) return;
 		expect(result.failure.lines.join("\n")).toContain("exists and is writable");
+		chmodSync(nested, 0o700);
 	});
 });
