@@ -171,7 +171,7 @@ export async function serverFetch(
 /** Create a session on the daemon. Returns the session id. */
 export async function createServerSession(
 	client: ServerClient,
-	options: { persona?: string; model?: string; cwd?: string } = {},
+	options: { persona?: string; model?: string; cwd?: string; worktree?: string } = {},
 ): Promise<string> {
 	const { status, data } = await serverFetch(client, `${API_V1_PREFIX}/sessions`, {
 		method: "POST",
@@ -206,7 +206,17 @@ export async function forkServerSession(client: ServerClient, sessionId: string)
  */
 export async function ensureServerSession(
 	client: ServerClient,
-	options: { persona?: string; model?: string; cwd?: string; resumeId?: string; resumeRequested?: boolean },
+	options: {
+		persona?: string;
+		model?: string;
+		cwd?: string;
+		resumeId?: string;
+		resumeRequested?: boolean;
+		/** `--worktree <name>`: the daemon creates (or reuses) the worktree and
+		 *  runs the session there. Dropped on the floor before — `cast run -w`
+		 *  silently ran in the project root instead. */
+		worktree?: string;
+	},
 ): Promise<{ id: string; resumed: boolean }> {
 	// Explicit id: GET hydrates it on the daemon (bridge.getSession → hydrateSession).
 	if (options.resumeId) {
@@ -231,6 +241,7 @@ export async function ensureServerSession(
 		persona: options.persona,
 		model: options.model,
 		cwd: options.cwd,
+		worktree: options.worktree,
 	});
 	return { id, resumed: false };
 }

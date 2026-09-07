@@ -7,7 +7,7 @@ import { EventSource } from "undici";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSession, saveSession } from "../src/core/session.ts";
 import type { StartupResult } from "../src/core/startup.ts";
-import { apiV1OpenApiDocument, apiV1OpenApiDocument } from "../src/server/api-v1.ts";
+import { apiV1OpenApiDocument } from "../src/server/api-v1.ts";
 import { createServerBridge } from "../src/server/bridge.ts";
 import { writeServerState } from "../src/server/daemon-state.ts";
 import { startServer } from "../src/server/server.ts";
@@ -200,9 +200,9 @@ describe("daemon single-writer SSE contract", () => {
 		expect(Array.isArray(rows) && rows.length > 0).toBe(true);
 		const summaryDeclared = new Set(Object.keys(doc.components.schemas.SessionSummary?.properties ?? {}));
 		// Union across rows: hot and cold sessions carry different field sets.
-		const summaryUndeclared = [
-			...new Set(rows.flatMap((row) => Object.keys(row))),
-		].filter((key) => !summaryDeclared.has(key));
+		const summaryUndeclared = [...new Set(rows.flatMap((row) => Object.keys(row)))].filter(
+			(key) => !summaryDeclared.has(key),
+		);
 		expect(summaryUndeclared, `undeclared in SessionSummary: ${summaryUndeclared.join(", ")}`).toEqual([]);
 	});
 
