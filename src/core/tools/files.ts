@@ -271,6 +271,40 @@ function builtInUiBlockReason(absolutePath: string): string | null {
 	return protectedDirs.some((dir) => full === dir || full.startsWith(dir + sep)) ? root : null;
 }
 
+/**
+ * Refuse a path that is not a regular file (or directory).
+ *
+ * Opening a FIFO blocks until something opens the other end, and these tools
+ * have no timeout and no signal to cancel on — `read` on a named pipe simply
+ * never returned, and the turn sat there holding an unanswered tool call.
+ * Character devices are mostly caught by the binary sniffer, but `/dev/stdin`
+ * and `/dev/tty` block the same way, and writing into a reader-less pipe
+ * blocks too. Naming the thing is more useful than hanging on it.
+ */
+function nonRegularFileReason(
+	stats: {
+		isFile(): boolean;
+		isDirectory(): boolean;
+		isFIFO(): boolean;
+		isSocket(): boolean;
+		isCharacterDevice(): boolean;
+		isBlockDevice(): boolean;
+	},
+	filePath: string,
+): string | undefined {
+	if (stats.isFile() || stats.isDirectory()) return undefined;
+	const kind = stats.isFIFO()
+		? "a named pipe (FIFO)"
+		: stats.isSocket()
+			? "a socket"
+			: stats.isCharacterDevice()
+				? "a character device"
+				: stats.isBlockDevice()
+					? "a block device"
+					: "not a regular file";
+	return `${filePath} is ${kind}, not a regular file — reading or writing it can block indefinitely with no way to cancel. Use bash with an explicit timeout if that is really what you want.`;
+}
+
 export async function execRead(args: Record<string, unknown>, cwd: string, config: AppConfig): Promise<ToolResult> {
 	const filePath = typeof args.path === "string" ? args.path : "";
 	if (!filePath.trim()) return { content: 'Error: "path" is required and must be a non-empty string.', isError: true };
@@ -301,6 +335,9 @@ export async function execRead(args: Record<string, unknown>, cwd: string, confi
 		if (isEnoent(err)) return fileNotFoundResult(filePath, cwd, config);
 		throw err;
 	}
+
+	const irregular = nonRegularFileReason(stats, filePath);
+	if (irregular) return { content: `Error: ${irregular}`, isError: true };
 
 	// Directory: list entries one per line (files and subdirectories, the
 	// latter with a trailing "/") — not a replacement for `ls` (no
@@ -443,6 +480,19 @@ export async function execWrite(args: Record<string, unknown>, cwd: string): Pro
 			content: `Blocked: built-in UI at ${absolutePath} is read-only. Use ~/.cast/ui/<name>/ (served at /ui/<name>/) or POST /api/uis — see ui-factory skill.`,
 			isError: true,
 		};
+	}
+
+	try {
+		const existing = await stat(absolutePath);
+		const irregular = nonRegularFileReason(existing, filePath);
+		if (irregular) return { content: `Error: ${irregular}`, isError: true };
+	} catch (err) {
+		// ENOENT is the ordinary case: a new file.
+		if (!isEnoent(err)) {
+			const described = describeFileWriteError(err, filePath);
+			if (described) return { content: `Error: ${described}`, isError: true };
+			throw err;
+		}
 	}
 
 	let oldContent: string | null = null;
@@ -633,6 +683,15 @@ export async function execEdit(args: Record<string, unknown>, cwd: string, confi
 		// read-only file threw out of the tool instead of reporting why.
 		const described = describeFileWriteError(err, filePath);
 		if (described) return { content: `Error: ${described}`, isError: true };
+		throw err;
+	}
+
+	try {
+		const existing = await stat(absolutePath);
+		const irregular = nonRegularFileReason(existing, filePath);
+		if (irregular) return { content: `Error: ${irregular}`, isError: true };
+	} catch (err) {
+		if (isEnoent(err)) return fileNotFoundResult(filePath, cwd, config);
 		throw err;
 	}
 
