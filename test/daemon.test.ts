@@ -7,7 +7,7 @@ import { EventSource } from "undici";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSession, saveSession } from "../src/core/session.ts";
 import type { StartupResult } from "../src/core/startup.ts";
-import { apiV1OpenApiDocument } from "../src/server/api-v1.ts";
+import { apiV1OpenApiDocument, apiV1OpenApiDocument } from "../src/server/api-v1.ts";
 import { createServerBridge } from "../src/server/bridge.ts";
 import { writeServerState } from "../src/server/daemon-state.ts";
 import { startServer } from "../src/server/server.ts";
@@ -156,6 +156,29 @@ describe("daemon single-writer SSE contract", () => {
 				expect(response.status, `${method.toUpperCase()} ${path}`).toBe(401);
 			}
 		}
+	});
+
+	it("declares every field a session response actually returns (regression)", async () => {
+		// The v1 contract is the integration-facing one, and its Session schema
+		// described 9 fields while the endpoint returned 16: title, usage,
+		// createdAt, updatedAt, shareToken, turnStartedAt and backgroundTasks
+		// were all absent, so a client generated from the document could not
+		// see most of what a session is.
+		const session = createSession("coding", "gpt", process.cwd());
+		saveSession(session);
+
+		const res = await fetch(`${origin}/api/v1/sessions/${session.id}`, {
+			headers: { Authorization: `Bearer ${LOOPBACK_TOKEN}` },
+		});
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as Record<string, unknown>;
+
+		const doc = apiV1OpenApiDocument as unknown as {
+			components: { schemas: Record<string, { properties?: Record<string, unknown> }> };
+		};
+		const declared = new Set(Object.keys(doc.components.schemas.Session?.properties ?? {}));
+		const undeclared = Object.keys(body).filter((key) => !declared.has(key));
+		expect(undeclared, `undeclared in the Session schema: ${undeclared.join(", ")}`).toEqual([]);
 	});
 
 	it("serves a public OpenAPI document and a versioned compatibility route", async () => {
