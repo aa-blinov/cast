@@ -106,9 +106,11 @@ details on demand.
 Sessions, events and background runs are pruned on a retention policy, but
 SQLite never shrinks the file on its own — the freed space stays claimed. At
 open, cast reclaims it when it is worth the write lock: at least 64MB of free
-pages *and* a fifth of the file. Measured on a real store, that was 219MB of
-547MB, returned in 2 seconds, and the log says so when it happens. Below
-either threshold nothing runs.
+pages *and* a fifth of the file. The rebuilt database is then checkpointed out
+of the write-ahead log, without which the space is only moved — a VACUUM in
+WAL mode writes the whole database into the log. Measured on a real store:
+547MB became 324MB in about 2.5 seconds, and the log says so when it happens.
+Below either threshold nothing runs.
 
 ## Project Memory
 
