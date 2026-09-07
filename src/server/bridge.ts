@@ -109,6 +109,7 @@ import {
 	memoryDistillIntervalDays,
 	memoryDreamAuto,
 	memoryDreamIntervalDays,
+	type PermissionMode,
 	turnIterationCap,
 	updateSettings,
 } from "../core/settings.ts";
@@ -242,6 +243,12 @@ export type WebEvent =
 export interface WebAgentSession {
 	id: string;
 	session: SessionState;
+	/** Per-session override of the bridge-wide permission mode. Set by a
+	 * client that created the session with one (`cast run
+	 * --bypass-permissions`), which otherwise had nowhere to go: the flag never
+	 * reached the daemon, so the run hit a confirmation prompt no one could
+	 * answer and hung until the five-minute timeout refused it. */
+	permissionModeOverride?: PermissionMode;
 	runner: AgentRunner;
 	backgroundBash: BashBackgroundDeps;
 	status: WebAgentStatus;
@@ -660,6 +667,8 @@ export interface ServerBridge {
 		worktree?: SessionWorktree,
 		/** Provider name (from settings.providers) to pin this session to, instead of inheriting whatever's globally active right now. */
 		providerOverride?: string,
+		/** Permission mode for this session only (`cast run --bypass-permissions`). */
+		permissionModeOverride?: PermissionMode,
 	): WebAgentSession;
 	/** Creates an idle copy of the current safe context and registers it as a new session. */
 	forkSession(sessionId: string): WebAgentSession | undefined;
@@ -1231,6 +1240,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		runSessionStartHook = true,
 		worktree?: SessionWorktree,
 		providerOverride?: string,
+		permissionModeOverride?: PermissionMode,
 	): WebAgentSession {
 		// New sessions must start on whatever provider/model settings.json
 		// currently declares — not whatever was active when the daemon booted
@@ -1283,6 +1293,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			listeners: new Set(),
 			acceptedClientMessageIds: new Set(),
 			systemPrompt: computeSystemPrompt(persona, model, sessionCwd),
+			permissionModeOverride,
 		};
 
 		sessions.set(session.id, ws);
@@ -1823,6 +1834,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// now joins this turn, the rest join the next one.
 		const sessionMcp = mcpForSessionCwd(sessionCwd);
 		const submitHooks = resolveHooksForCwd(sessionCwd, trustForSessionCwd(sessionCwd));
+		// A session created with an explicit mode keeps it; everything else
+		// follows the bridge-wide setting, which /permissions still changes.
+		const effectiveMode = ws.permissionModeOverride ?? permissionMode;
 		if (hasHooks(submitHooks)) {
 			let submitResult: Awaited<ReturnType<typeof runHooksForEvent>>;
 			try {
@@ -2103,7 +2117,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			steeringQueue: ws.runner.steeringQueue,
 			followUpQueue: ws.runner.followUpQueue,
 			confirmBash:
-				permissionMode === "bypass" ? undefined : (command, reason) => requestBashConfirm(ws, command, reason),
+				effectiveMode === "bypass" ? undefined : (command, reason) => requestBashConfirm(ws, command, reason),
 			disabledTools,
 			planState,
 			initialTodos: ws.session.todos,
@@ -2111,7 +2125,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			mcpToolIndex: sessionMcp.toolIndex,
 			hooks: submitHooks,
 			sessionId: ws.session.id,
-			permissionMode,
+			permissionMode: effectiveMode,
 			...(opts?.maxOuterIterations ? { maxOuterIterations: opts.maxOuterIterations } : {}),
 			// Read fresh each submit so an edited maxTurnIterations applies on
 			// the next agent call.

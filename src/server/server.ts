@@ -1242,6 +1242,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		let cwd: string | undefined;
 		let worktree: string | undefined;
 		let agentId: string | undefined;
+		let permissionMode: "bypass" | undefined;
 		try {
 			const parsed = JSON.parse(body) as {
 				persona?: string;
@@ -1250,6 +1251,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 				cwd?: string;
 				worktree?: string;
 				agentId?: string;
+				permissionMode?: string;
 			};
 			persona = parsed.persona;
 			model = parsed.model;
@@ -1257,6 +1259,10 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			cwd = parsed.cwd;
 			worktree = parsed.worktree;
 			agentId = parsed.agentId;
+			// `cast run --bypass-permissions` had nowhere to put this: the flag
+			// never reached the daemon, so the run hit a confirmation prompt
+			// nothing could answer and hung until it timed out.
+			permissionMode = parsed.permissionMode === "bypass" ? "bypass" : undefined;
 		} catch {
 			// empty body is fine
 		}
@@ -1312,7 +1318,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 				return json(res, { error: message }, 400);
 			}
 		}
-		const ws = bridge.createSession(persona, model, wtPath ?? cwd, true, undefined, provider);
+		const ws = bridge.createSession(persona, model, wtPath ?? cwd, true, undefined, provider, permissionMode);
 		json(res, { id: ws.id, session: ws.session }, 201);
 	});
 

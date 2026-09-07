@@ -171,7 +171,7 @@ export async function serverFetch(
 /** Create a session on the daemon. Returns the session id. */
 export async function createServerSession(
 	client: ServerClient,
-	options: { persona?: string; model?: string; cwd?: string; worktree?: string } = {},
+	options: { persona?: string; model?: string; cwd?: string; worktree?: string; permissionMode?: "bypass" } = {},
 ): Promise<string> {
 	const { status, data } = await serverFetch(client, `${API_V1_PREFIX}/sessions`, {
 		method: "POST",
@@ -216,6 +216,10 @@ export async function ensureServerSession(
 		 *  runs the session there. Dropped on the floor before — `cast run -w`
 		 *  silently ran in the project root instead. */
 		worktree?: string;
+		/** `--bypass-permissions`: skip the dangerous-command confirmation for
+		 *  this session. Without it a non-interactive run hung on a prompt
+		 *  nothing could answer. */
+		permissionMode?: "bypass";
 	},
 ): Promise<{ id: string; resumed: boolean }> {
 	// Explicit id: GET hydrates it on the daemon (bridge.getSession → hydrateSession).
@@ -242,6 +246,7 @@ export async function ensureServerSession(
 		model: options.model,
 		cwd: options.cwd,
 		worktree: options.worktree,
+		permissionMode: options.permissionMode,
 	});
 	return { id, resumed: false };
 }

@@ -102,6 +102,7 @@ export async function runInteractive(args: ParsedArgs): Promise<void> {
 		resumeId: args.resumeId,
 		resumeRequested: args.resumeRequested,
 		worktree: args.worktree,
+		permissionMode: args.cliBypassPermissions ? "bypass" : undefined,
 	});
 
 	const emit = (type: string, data: Record<string, unknown> = {}) => {
@@ -281,6 +282,7 @@ export async function runNonInteractive(args: ParsedArgs, options: RunOptions): 
 		resumeId: args.resumeId,
 		resumeRequested: args.resumeRequested,
 		worktree: args.worktree,
+		permissionMode: args.cliBypassPermissions ? "bypass" : undefined,
 	});
 
 	let failed = false;
