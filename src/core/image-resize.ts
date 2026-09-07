@@ -102,3 +102,48 @@ export async function resizeImageForEmbedding(buffer: Buffer, mimeType: string):
 		return undefined;
 	}
 }
+
+/**
+ * Ceiling on an image's *pixel* count, checked before any decode.
+ *
+ * The byte cap on a file says nothing about what it expands to: a 652KB PNG
+ * of 15000×15000 decodes to 858MB of RGBA, and reading one took a process
+ * from 110MB to 3.3GB of RSS in 6.6s — inside the daemon, where every session
+ * shares that memory. A decompression bomb needs no exotic input, just a
+ * large canvas that compresses well.
+ *
+ * 40MP is far above any image worth sending to a vision model (the resize
+ * target is 1568px on the long side) and still decodes in about 160MB.
+ */
+export const MAX_IMAGE_PIXELS = 40_000_000;
+
+/**
+ * Width and height straight from the container header, without decoding
+ * pixels. Returns undefined when the header isn't recognisable — the caller
+ * then falls back to the byte cap, which is what it had before.
+ */
+export function imageDimensionsFromHeader(buffer: Buffer): { width: number; height: number } | undefined {
+	// PNG: 8-byte signature, then IHDR with width/height as big-endian u32.
+	if (buffer.length >= 24 && buffer.readUInt32BE(0) === 0x89504e47) {
+		return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
+	}
+	// JPEG: walk the marker segments to the first SOFn, which carries the size.
+	if (buffer.length >= 4 && buffer[0] === 0xff && buffer[1] === 0xd8) {
+		let offset = 2;
+		while (offset + 9 < buffer.length) {
+			if (buffer[offset] !== 0xff) {
+				offset++;
+				continue;
+			}
+			const marker = buffer[offset + 1]!;
+			// SOF0/1/2/3/5/6/7/9/10/11/13/14/15 — every frame header shape.
+			if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+				return { height: buffer.readUInt16BE(offset + 5), width: buffer.readUInt16BE(offset + 7) };
+			}
+			const length = buffer.readUInt16BE(offset + 2);
+			if (length < 2) return undefined;
+			offset += 2 + length;
+		}
+	}
+	return undefined;
+}
