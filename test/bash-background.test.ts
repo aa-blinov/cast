@@ -267,3 +267,27 @@ describe("spawn-failure detection", () => {
 		expect(isPtySpawnFailure("/usr/bin/bash: no such file or directory", "/usr/bin/bash")).toBe(true);
 	});
 });
+
+describe("BackgroundTaskRegistry.running", () => {
+	it("lists what is still running, so an exiting client can say what it leaves behind", async () => {
+		// `cast run` exits while the daemon keeps its background tasks alive.
+		// Nothing killed them and nothing said so: a live run printed "DONE",
+		// exited 0, and left `sleep 432` running with no trace. There was no
+		// way to even ask — this is what the API now reports.
+		const registry = new BackgroundTaskRegistry();
+		const { deps } = makeDeps();
+		deps.registry = registry;
+		expect(registry.running()).toEqual([]);
+
+		const task = registry.start("sleep 5", process.cwd(), mockConfig, undefined, deps);
+		const listed = registry.running();
+		expect(listed).toHaveLength(1);
+		expect(listed[0]?.id).toBe(task.id);
+		expect(listed[0]?.command).toBe("sleep 5");
+		expect(typeof listed[0]?.startedAt).toBe("number");
+
+		registry.killAll();
+		await task.exitPromise;
+		expect(registry.running()).toEqual([]);
+	});
+});

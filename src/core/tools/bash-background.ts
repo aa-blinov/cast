@@ -200,6 +200,14 @@ export class BackgroundTaskRegistry {
 		return [...this.tasks.values()].some((task) => task.status === "running");
 	}
 
+	/** Still-running tasks, for a surface that has to say what it is leaving
+	 *  behind — `cast run` exits while the daemon keeps them alive. */
+	running(): Array<{ id: string; command: string; startedAt: number }> {
+		return [...this.tasks.values()]
+			.filter((task) => task.status === "running")
+			.map((task) => ({ id: task.id, command: task.command, startedAt: task.startedAt }));
+	}
+
 	start(
 		command: string,
 		cwd: string,
