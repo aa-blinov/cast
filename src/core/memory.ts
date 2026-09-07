@@ -24,6 +24,7 @@ import {
 	projectMemoryPath,
 	readMemoryFile,
 	readMemoryFileChecked,
+	readMemoryFileForPrompt,
 	readProjectMemory,
 	readSessionMemory,
 	renderCheckpoint,
@@ -951,8 +952,8 @@ function fileMemoryContext(
 	const sections = [
 		[project ? `Project MEMORY.md:\n${project}` : "", 0.28],
 		[
-			options.rebuildContext && readMemoryFile(globalMemoryPath())
-				? `Global MEMORY.md:\n${readMemoryFile(globalMemoryPath())}`
+			options.rebuildContext && readMemoryFileForPrompt(globalMemoryPath())
+				? `Global MEMORY.md:\n${readMemoryFileForPrompt(globalMemoryPath())}`
 				: "",
 			0.12,
 		],
@@ -1946,7 +1947,7 @@ function parseProjectArtifactFile(file: { kind: MemoryArtifactKind; name: string
 			content: string;
 	  }
 	| undefined {
-	const raw = readMemoryFile(file.path);
+	const raw = readMemoryFileForPrompt(file.path);
 	if (!raw.trim()) return undefined;
 	const frontmatter = raw.match(ARTIFACT_FRONTMATTER_RE);
 	const description = frontmatter?.[1]?.match(ARTIFACT_DESCRIPTION_RE)?.[1]?.trim() ?? "Generated project workflow";
@@ -2603,7 +2604,7 @@ function tailAwareReminder(message: Message | undefined): string {
 function buildMemoryRebuildContext(cwd: string, sessionId: string, options: MemoryPromptOptions = {}): string {
 	const projectId = projectIdForCwd(cwd);
 	const project = readProjectMemory(projectId);
-	const global = readMemoryFile(globalMemoryPath());
+	const global = readMemoryFileForPrompt(globalMemoryPath());
 	const session = readSessionMemory(sessionId);
 	const recentUser = recentUserTextForRebuild(options.recentMessages, sessionId);
 	const actors = activeBackgroundActors(sessionId);

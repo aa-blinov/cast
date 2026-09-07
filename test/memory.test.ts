@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -77,6 +77,32 @@ describe("project memory", () => {
 		delete process.env.CAST_SESSIONS_DB;
 		delete process.env.CAST_MEMORY_DIR;
 		rmSync(root, { recursive: true, force: true });
+	});
+
+	it("does not amputate a MEMORY.md larger than the prompt cap when merging into it", () => {
+		// The file is the canonical store, read-modify-written on every dream
+		// merge and reconciled against the database afterwards. Reading it
+		// through the prompt-side cap meant the first merge past 40,000
+		// characters rewrote the file as its own first 40,000 characters,
+		// deleting every bullet beyond them for good.
+		const projectCwd = join(root, "big-project");
+		const path = projectMemoryPath(projectIdForCwd(projectCwd));
+		mkdirSync(join(root, "memory", "projects", projectIdForCwd(projectCwd)), { recursive: true });
+		const filler = Array.from({ length: 400 }, (_, i) => `- Durable fact number ${i}: ${"x".repeat(100)}`).join("\n");
+		writeMemoryFile(
+			path,
+			`# Project memory\n\n## Discovered durable knowledge\n${filler}\n- LAST-BULLET marker fact at the very end\n`,
+		);
+		expect(readFileSync(path, "utf8").length).toBeGreaterThan(40_000);
+
+		storeProjectMemory(projectCwd, "session-a", "turn-a", [
+			{ content: "A brand new fact merged in by dream.", type: "architecture", importance: 90 },
+		]);
+
+		const after = readFileSync(path, "utf8");
+		expect(after).toContain("A brand new fact merged in by dream.");
+		expect(after).toContain("LAST-BULLET marker fact at the very end");
+		expect(after.length).toBeGreaterThan(40_000);
 	});
 
 	it("keeps project memory isolated by cwd and searchable across sessions", () => {

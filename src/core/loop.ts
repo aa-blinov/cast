@@ -70,6 +70,7 @@ import {
 	notesPath,
 	projectMemoryPath,
 	readMemoryFile,
+	readMemoryFileForPrompt,
 	readProjectMemory,
 	readSessionMemory,
 	tasksDir,
@@ -188,7 +189,7 @@ function isMeaningfulMemoryText(text: string): boolean {
 
 function hasMemoryOrTasks(cwd: string, sessionId: string): boolean {
 	const projectText = readProjectMemory(projectIdForCwd(cwd));
-	const globalText = readMemoryFile(globalMemoryPath());
+	const globalText = readMemoryFileForPrompt(globalMemoryPath());
 	const sessionMemory = readSessionMemory(sessionId);
 	return (
 		isMeaningfulMemoryText(projectText) ||
@@ -240,7 +241,7 @@ function memorySystemPrompt(cwd: string, sessionId: string): string {
 	prompt = withInlinedMemorySection(
 		prompt,
 		"Global memory",
-		readMemoryFile(globalMemoryPath()),
+		readMemoryFileForPrompt(globalMemoryPath()),
 		caps.global ?? DEFAULT_REBUILD_GLOBAL_CAP,
 	);
 	return prompt;
