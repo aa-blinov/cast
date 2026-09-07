@@ -181,6 +181,55 @@ describe("runHooksForEvent", () => {
 		expect(result.blocked).toBe(false);
 	});
 
+	it("keeps multibyte output intact across pipe chunk boundaries (regression)", async () => {
+		// Each chunk was decoded on its own with `chunk.toString("utf-8")`, so
+		// a character straddling a 64KB pipe boundary came out as U+FFFD:
+		// proven with an emoji placed astride each boundary, 2 of 5 destroyed.
+		// The output reaches the model, and a hook's JSON decision spanning a
+		// boundary would fail to parse — silently discarding a `block`.
+		const emoji = Buffer.from("\u{1F3AF}", "utf8"); // 4 bytes
+		const parts: Buffer[] = [];
+		let written = 0;
+		for (let k = 1; k <= 5; k++) {
+			const pad = 65536 * k - written - 2;
+			parts.push(Buffer.alloc(pad, 0x61), emoji);
+			written += pad + emoji.length;
+		}
+		const payloadFile = join(mkdtempSync(join(tmpdir(), "cast-hook-mb-")), "multibyte.txt");
+		writeFileSync(payloadFile, Buffer.concat(parts));
+
+		const hooks: HooksFile = {
+			PreToolUse: [{ matcher: "bash", hooks: [{ command: `cat ${payloadFile}`, timeout: 20 }] }],
+		};
+		const result = await runHooksForEvent(hooks, {
+			event: "PreToolUse",
+			matchTarget: "bash",
+			cwd: "/tmp",
+			payload: {},
+		});
+		expect(result.stdout.match(/\u{1F3AF}/gu)?.length ?? 0).toBe(5);
+		expect(result.stdout).not.toContain("\uFFFD");
+	});
+
+	it("caps a hook that floods stdout instead of buffering it all (regression)", async () => {
+		// Only the timeout bounded this: a flooding hook reached 24MB of stdout
+		// and RSS 140MB→409MB in five seconds, and a Stop hook gets 600 of
+		// them. The prompt only ever sees 8KB of hook output anyway.
+		const hooks: HooksFile = {
+			PreToolUse: [{ matcher: "bash", hooks: [{ command: "tr '\\0' 'a' < /dev/zero", timeout: 3 }] }],
+		};
+		const result = await runHooksForEvent(hooks, {
+			event: "PreToolUse",
+			matchTarget: "bash",
+			cwd: "/tmp",
+			payload: {},
+		});
+		// 1MB cap plus the truncation note, nowhere near what 3s of /dev/zero
+		// would otherwise produce.
+		expect(result.stdout.length).toBeLessThan(1024 * 1024 + 200);
+		expect(result.stdout).toContain("truncated at");
+	});
+
 	it("blocks when a matching hook exits 2, surfacing stderr as the reason", async () => {
 		const hooks: HooksFile = {
 			PreToolUse: [{ matcher: "bash", hooks: [{ command: "echo nope 1>&2; exit 2" }] }],

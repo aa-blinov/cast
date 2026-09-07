@@ -49,7 +49,7 @@ import type { AppConfig } from "../config.ts";
 import type { Message } from "../llm.ts";
 import type { MessageQueue } from "../loop.ts";
 import { formatBashResult, getBashResolution, stripAnsi } from "./bash.ts";
-import { appendBoundedOutput, formatSize, type ToolResult } from "./shared.ts";
+import { BoundedOutput, formatSize, type ToolResult } from "./shared.ts";
 
 const PTY_EXECVP_FAILURE_RE = /execvp\(3\) failed/i;
 const NO_SUCH_FILE_RE = /no such file or directory/i;
@@ -258,10 +258,13 @@ export class BackgroundTaskRegistry {
 			});
 			task.pty = pty;
 
+			const output = new BoundedOutput(maxBytes);
 			pty.onData((data) => {
-				const appended = appendBoundedOutput(task.rawOutput, Buffer.from(data), maxBytes);
-				task.rawOutput = appended.output;
-				task.outputTruncated ||= appended.truncated;
+				output.append(data);
+				// Snapshot, not final(): this fires per chunk and the task's
+				// output is read live while it runs.
+				task.rawOutput = output.snapshot();
+				task.outputTruncated = output.truncated;
 			});
 
 			const timer =
