@@ -8,6 +8,7 @@ import {
 	getServerSession,
 	resolveServerPlanTransition,
 	runServerCommand,
+	type ServerClient,
 	setServerMode,
 	submitServerChat,
 	subscribeServerEvents,
@@ -379,5 +380,47 @@ export async function runNonInteractive(args: ParsedArgs, options: RunOptions): 
 
 	await submitServerChat(client, sessionId, options.message);
 	await done;
+	await warnAboutBackgroundTasks(client, sessionId, emit);
 	if (failed) process.exitCode = 1;
+}
+
+/**
+ * Say what is being left running.
+ *
+ * Background tasks live in the daemon, not in this process: `cast run` exits
+ * and they keep going. The TUI kills its own on exit (tui.tsx's process exit
+ * handler), the daemon kills a session's when it is closed or deleted — but a
+ * `cast run` that started one just returned 0 and said nothing, so a scripted
+ * run could leave a dev server (or a `sleep`) behind with no trace. Verified
+ * live: `cast run` printed "DONE" and exited while `sleep 432` kept running.
+ * The task is deliberately not killed — the session can be resumed and a
+ * long-running server is often the point — but silence about it is not
+ * defensible.
+ */
+async function warnAboutBackgroundTasks(
+	client: ServerClient,
+	sessionId: string,
+	emit: (type: string, data: Record<string, unknown>) => boolean,
+): Promise<void> {
+	let tasks: Array<{ id?: unknown; command?: unknown }> = [];
+	try {
+		const session = await getServerSession(client, sessionId);
+		const raw = session.backgroundTasks;
+		if (Array.isArray(raw)) tasks = raw as Array<{ id?: unknown; command?: unknown }>;
+	} catch {
+		// Best-effort: a daemon that just went away must not turn a finished
+		// run into a failure.
+		return;
+	}
+	if (tasks.length === 0) return;
+	const described = tasks.map((task) => ({
+		id: typeof task.id === "string" ? task.id : "?",
+		command: typeof task.command === "string" ? task.command : "?",
+	}));
+	if (emit("background_tasks_running", { sessionId, tasks: described })) return;
+	const lines = described.map((task) => `  ${task.id}: ${task.command}`);
+	process.stderr.write(
+		`${described.length} background task${described.length === 1 ? "" : "s"} still running in session ${sessionId}:${EOL}${lines.join(EOL)}${EOL}` +
+			`They keep running in the daemon. Stop them with \`cast\` (bash_kill) or shut it down with \`cast server stop\`.${EOL}`,
+	);
 }

@@ -1400,6 +1400,11 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			oldestSeq: page.oldestSeq ?? null,
 			hasMoreHistory: page.hasMore,
 			usage: ws.session.usage,
+			// Background tasks the daemon is still running for this session. A
+			// client that is about to exit (`cast run`) has no other way to
+			// know it is leaving processes behind: nothing killed them and
+			// nothing said so.
+			backgroundTasks: ws.backgroundBash.registry.running(),
 			createdAt: ws.session.createdAt,
 			updatedAt: ws.session.updatedAt,
 		});
