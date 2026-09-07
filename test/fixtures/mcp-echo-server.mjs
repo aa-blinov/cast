@@ -85,6 +85,13 @@ function buildServer() {
 		}));
 	}
 
+	if (process.argv.includes("--fat")) {
+		// Returns a payload far larger than any context window, to pin the cap.
+		server.registerTool("fat", { description: "Returns a huge blob." }, async () => ({
+			content: [{ type: "text", text: "A".repeat(3 * 1024 * 1024) }],
+		}));
+	}
+
 	if (process.argv.includes("--hang-list-tools")) {
 		server.server.setRequestHandler(ListToolsRequestSchema, async () => new Promise(() => {}));
 	}

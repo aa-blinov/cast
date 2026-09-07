@@ -130,6 +130,26 @@ describe("connectMcpServers (real spawned MCP server, not mocked)", () => {
 		}
 	});
 
+	it("caps a tool result the way bash output is capped (regression)", async () => {
+		// Nothing bounded an MCP result: a server answering with its whole
+		// result set put all of it into the context. A stub returning 5MB —
+		// roughly 1.3M tokens from a single tool call — came back whole, while
+		// the same bytes out of bash would have been cut at maxToolOutputBytes.
+		const result = await connectMcpServers({ fat: { command: "node", args: [FIXTURE_SERVER, "--fat"] } });
+		try {
+			const called = await result.toolIndex.get("mcp_fat_fat")!.call({});
+			const content = String(called.content);
+			expect(called.isError).toBeFalsy();
+			// Default cap is 128KB; the payload is 3MB.
+			expect(content.length).toBeLessThan(200 * 1024);
+			expect(content).toContain("MCP output truncated");
+			// The kept prefix is the real payload, not a placeholder.
+			expect(content.startsWith("AAAA")).toBe(true);
+		} finally {
+			await closeMcpConnections(result.connections);
+		}
+	});
+
 	it("notices a server that goes away and stops advertising or calling it", async () => {
 		// Nothing used to notice: the SDK's onerror/onclose are no-ops unless
 		// assigned, so a crashed stdio server stayed in the system prompt for

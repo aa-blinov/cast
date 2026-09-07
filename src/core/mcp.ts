@@ -27,8 +27,47 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { Agent } from "undici";
 import { matchesToolsAllowlist } from "./frontmatter.ts";
 import type { Tool } from "./llm.ts";
-import { mcpToolTimeoutMs } from "./settings.ts";
+import { maxToolOutputBytesSetting, maxToolOutputLinesSetting, mcpToolTimeoutMs } from "./settings.ts";
 import type { ToolResult } from "./tools.ts";
+
+/**
+ * Bound an MCP tool's text the way bash and ssh output is bounded.
+ *
+ * Nothing capped it: a server that answers with its whole result set put all
+ * of it straight into the context. Measured with a stub server returning 5MB —
+ * about 1.3M tokens, from one tool call — where the same bytes out of bash
+ * would have been cut at maxToolOutputBytes (128KB by default). The caps are
+ * the user's existing tool-output settings, so raising them raises this too.
+ */
+const TRAILING_REPLACEMENT_CHAR_RE = /\uFFFD$/;
+
+function capMcpText(text: string): string {
+	const maxBytes = maxToolOutputBytesSetting();
+	const maxLines = maxToolOutputLinesSetting();
+	let out = text;
+	let byteTruncated = false;
+	if (Buffer.byteLength(out, "utf-8") > maxBytes) {
+		// Cut on a character boundary: slicing the buffer mid-sequence would
+		// leave a U+FFFD at the end of the text the model reads.
+		out = Buffer.from(out, "utf-8").subarray(0, maxBytes).toString("utf-8").replace(TRAILING_REPLACEMENT_CHAR_RE, "");
+		byteTruncated = true;
+	}
+	const lines = out.split("\n");
+	let lineTruncated = false;
+	if (lines.length > maxLines) {
+		out = lines.slice(0, maxLines).join("\n");
+		lineTruncated = true;
+	}
+	if (!byteTruncated && !lineTruncated) return out;
+	const what = byteTruncated ? formatBytes(maxBytes) : `${maxLines} lines`;
+	return `${out}\n\n[MCP output truncated at ${what}. Ask the tool for less — a narrower query, a filter, or pagination.]`;
+}
+
+function formatBytes(bytes: number): string {
+	if (bytes < 1024) return `${bytes}B`;
+	if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)}KB`;
+	return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
 
 const MCP_SANITIZE_NAME_RE = /[^a-zA-Z0-9_-]/g;
 const MCP_BRACKET_NAME_RE = /^\[([^\]]+)\]/;
@@ -447,10 +486,11 @@ export async function connectMcpServers(
 								}
 								if (extraImages > 0) fragments.push(`[${extraImages} additional image(s) omitted]`);
 
+								const text = capMcpText(fragments.join("\n"));
 								return {
 									content: result.isError
-										? `MCP server "${serverName}", tool "${t.name}" reported an error:\n${fragments.join("\n") || "(no details provided)"}`
-										: fragments.join("\n") || "(no output)",
+										? `MCP server "${serverName}", tool "${t.name}" reported an error:\n${text || "(no details provided)"}`
+										: text || "(no output)",
 									isError: Boolean(result.isError),
 									imageDataUrl: image ? `data:${image.mimeType};base64,${image.data}` : undefined,
 								};
