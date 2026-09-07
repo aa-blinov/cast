@@ -76,6 +76,36 @@ function dbPath(): string {
 /** The shared connection, opened (and schema-migrated) on first use. Reopens
  *  if CAST_SESSIONS_DB changes between calls — only ever happens in tests,
  *  which each point at their own temp file. */
+const DAMAGED_STORE_RE = /not a database|file is encrypted|database disk image is malformed/i;
+const UNOPENABLE_STORE_RE = /unable to open database file/i;
+
+/**
+ * Turn SQLite's own wording into something actionable.
+ *
+ * A truncated or overwritten store made cast exit with `Error: file is not a
+ * database` and a stack through the minified bundle — nothing naming the file
+ * and nothing saying what to do about it. The file is never touched
+ * automatically: it may be the only copy of the user's history, and a wrong
+ * guess here would delete it.
+ */
+function describeStoreFailure(err: unknown, path: string): Error {
+	const code = (err as { errcode?: number } | undefined)?.errcode;
+	const message = err instanceof Error ? err.message : String(err);
+	// 26 = SQLITE_NOTADB, 11 = SQLITE_CORRUPT.
+	const damaged = code === 26 || code === 11 || DAMAGED_STORE_RE.test(message);
+	if (damaged) {
+		return new Error(
+			`Session store at ${path} is not a readable SQLite database (${message}). Nothing was changed. Move it aside (e.g. \`mv ${path} ${path}.broken\`) and cast will create a fresh store — the sessions in the old file stay in it, recoverable with sqlite tooling.`,
+		);
+	}
+	if (code === 14 || UNOPENABLE_STORE_RE.test(message)) {
+		return new Error(
+			`Cannot open the session store at ${path} (${message}). Check that the directory exists and is writable by this user, and that the filesystem is not full or read-only.`,
+		);
+	}
+	return err instanceof Error ? err : new Error(message);
+}
+
 export function getDb(): DatabaseSync {
 	const path = dbPath();
 	if (instance && instancePath === path) return instance;
@@ -92,7 +122,12 @@ export function getDb(): DatabaseSync {
 	// left every later getDb() early-returning a partially-migrated handle
 	// from the check above, with no retry — the real cause then surfaced much
 	// later as a confusing "no such column".
-	const db = new DatabaseSync(path);
+	let db: DatabaseSync;
+	try {
+		db = new DatabaseSync(path);
+	} catch (err) {
+		throw describeStoreFailure(err, path);
+	}
 	try {
 		initConnection(db);
 	} catch (err) {
@@ -101,7 +136,7 @@ export function getDb(): DatabaseSync {
 		} catch {
 			// Already unusable; the original error is the one worth reporting.
 		}
-		throw err;
+		throw describeStoreFailure(err, path);
 	}
 	instance = db;
 	instancePath = path;

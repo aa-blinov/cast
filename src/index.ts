@@ -522,7 +522,19 @@ async function handleServerCommand(args: string[]): Promise<void> {
 	if (foreground || process.env.CAST_SERVER_FOREGROUND === "0") {
 		process.env.CAST_SERVER_SKIP_AUTORUN = "1";
 		const { runServerMain } = await import("./server/index.ts");
-		runServerMain(args, { foreground, version: VERSION });
+		// Awaited and handled: called bare, a failed startup surfaced as an
+		// unhandled rejection — Node's own dump of the minified bundle with the
+		// real message buried in it — and skipped the state-file cleanup that
+		// the module's own autorun path does. A corrupt session store printed
+		// pages of that instead of the one line saying which file to move.
+		try {
+			await runServerMain(args, { foreground, version: VERSION });
+		} catch (err) {
+			console.error(`[cast server] fatal: ${err instanceof Error ? err.message : String(err)}`);
+			const { clearServerStateIfOwner } = await import("./server/daemon-state.ts");
+			clearServerStateIfOwner(process.pid);
+			process.exit(1);
+		}
 		return;
 	}
 
