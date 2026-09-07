@@ -1536,6 +1536,18 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		json(res, { ok: true, token: shared.token, url: `/shared/${shared.token}` });
 	});
 
+	// Kill this session's background tasks. `cast run` calls it on exit for a
+	// session it created itself: those tasks used to outlive the run with
+	// nothing killing them and nothing saying so, while the TUI has always
+	// killed its own on exit.
+	route("POST", "/api/sessions/:id/background/kill", (_req, res, params) => {
+		const ws = bridge.getSession(params.id);
+		if (!ws) return json(res, { error: "Not found" }, 404);
+		const killed = ws.backgroundBash.registry.running();
+		ws.backgroundBash.registry.killAll();
+		json(res, { ok: true, killed });
+	});
+
 	route("DELETE", "/api/sessions/:id/share", (_req, res, params) => {
 		const revoked = bridge.unshareSession(params.id);
 		json(res, { ok: revoked });

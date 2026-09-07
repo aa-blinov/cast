@@ -61,6 +61,17 @@ User settings are persisted to `~/.cast/settings.json`. This file is loaded on s
 
 Settings are written atomically (temp file + rename) to prevent corruption from crashes mid-write.
 
+## `cast run` and background tasks
+
+Background tasks live in the daemon, not in the client. A `cast run` that
+created its own session now stops the tasks it started when it exits, and says
+which ones — the TUI has always done the same on exit. A run that attached to
+an existing session (`--continue` / `--session`) leaves them alone: those tasks
+belong to whoever started them. `--keep-background` opts out for the
+deliberate "start the dev server and leave it running" case, and then the run
+names what it is leaving behind instead. Under `--format json` this is a
+`background_tasks_killed` or `background_tasks_running` event.
+
 ## The Project Root
 
 Rules, project memory, and project-scoped history search are all keyed on the

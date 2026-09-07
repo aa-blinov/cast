@@ -6,6 +6,7 @@ import {
 	ensureServerClient,
 	ensureServerSession,
 	getServerSession,
+	killServerBackgroundTasks,
 	resolveServerPlanTransition,
 	runServerCommand,
 	type ServerClient,
@@ -23,6 +24,8 @@ import type { ParsedArgs } from "./startup.ts";
 export interface RunOptions {
 	message: string;
 	format: "default" | "json";
+	/** Leave background tasks this run started running after it exits. */
+	keepBackground?: boolean;
 }
 
 type InteractiveAction =
@@ -270,7 +273,7 @@ export async function runNonInteractive(args: ParsedArgs, options: RunOptions): 
 	// the daemon create/resume the session (it applies its own provider settings).
 	const settings = loadSettings();
 	const cwd = process.env.CAST_CWD ? resolve(process.env.CAST_CWD) : resolve(".");
-	const { id: sessionId } = await ensureServerSession(client, {
+	const { id: sessionId, resumed } = await ensureServerSession(client, {
 		persona: args.cliPersona ?? settings.persona,
 		model: args.cliModel ?? settings.model,
 		cwd,
@@ -380,47 +383,89 @@ export async function runNonInteractive(args: ParsedArgs, options: RunOptions): 
 
 	await submitServerChat(client, sessionId, options.message);
 	await done;
-	await warnAboutBackgroundTasks(client, sessionId, emit);
+	await settleBackgroundTasks(client, sessionId, emit, {
+		ownsSession: !resumed,
+		keepBackground: options.keepBackground === true,
+	});
 	if (failed) process.exitCode = 1;
 }
 
 /**
- * Say what is being left running.
+ * Deal with background tasks the turn leaves behind.
  *
- * Background tasks live in the daemon, not in this process: `cast run` exits
- * and they keep going. The TUI kills its own on exit (tui.tsx's process exit
- * handler), the daemon kills a session's when it is closed or deleted — but a
- * `cast run` that started one just returned 0 and said nothing, so a scripted
- * run could leave a dev server (or a `sleep`) behind with no trace. Verified
- * live: `cast run` printed "DONE" and exited while `sleep 432` kept running.
- * The task is deliberately not killed — the session can be resumed and a
- * long-running server is often the point — but silence about it is not
- * defensible.
+ * They live in the daemon, not in this process, so `cast run` used to exit
+ * while they kept going — nothing killed them, nothing said so, and a session
+ * with a running task is never idle-evicted either. Verified live: the run
+ * printed "DONE", exited 0, and `sleep 432` was still running afterwards.
+ * The TUI has always killed its own on exit (tui.tsx), and the daemon kills a
+ * session's when it is closed or deleted; a one-shot run was the only surface
+ * that leaked.
+ *
+ * So a run that created its own session cleans up after itself. A run that
+ * attached to an existing one (`--resume` / `--continue`) must not: those
+ * tasks belong to whoever started them. `--keep-background` opts out for the
+ * deliberate "start the dev server and leave it" case, and then the tasks are
+ * at least named on the way out.
  */
-async function warnAboutBackgroundTasks(
+async function settleBackgroundTasks(
 	client: ServerClient,
 	sessionId: string,
 	emit: (type: string, data: Record<string, unknown>) => boolean,
+	opts: { ownsSession: boolean; keepBackground: boolean },
 ): Promise<void> {
-	let tasks: Array<{ id?: unknown; command?: unknown }> = [];
+	let tasks: Array<{ id: string; command: string }> = [];
 	try {
 		const session = await getServerSession(client, sessionId);
 		const raw = session.backgroundTasks;
-		if (Array.isArray(raw)) tasks = raw as Array<{ id?: unknown; command?: unknown }>;
+		if (Array.isArray(raw)) {
+			tasks = (raw as Array<{ id?: unknown; command?: unknown }>).map((task) => ({
+				id: typeof task.id === "string" ? task.id : "?",
+				command: typeof task.command === "string" ? task.command : "?",
+			}));
+		}
 	} catch {
 		// Best-effort: a daemon that just went away must not turn a finished
 		// run into a failure.
 		return;
 	}
 	if (tasks.length === 0) return;
-	const described = tasks.map((task) => ({
-		id: typeof task.id === "string" ? task.id : "?",
-		command: typeof task.command === "string" ? task.command : "?",
-	}));
-	if (emit("background_tasks_running", { sessionId, tasks: described })) return;
-	const lines = described.map((task) => `  ${task.id}: ${task.command}`);
+
+	if (opts.ownsSession && !opts.keepBackground) {
+		let killed: Array<{ id: string; command: string }> = [];
+		try {
+			killed = await killServerBackgroundTasks(client, sessionId);
+		} catch {
+			killed = [];
+		}
+		// Only the daemon's own answer counts as proof. An earlier version fell
+		// back to the list it had already fetched, and printed "Stopped 1
+		// background task" for a call that had 404'd — the task was still
+		// running, which a live check caught. Unconfirmed means say so.
+		if (killed.length === 0) {
+			reportStillRunning(sessionId, tasks, emit);
+			return;
+		}
+		if (emit("background_tasks_killed", { sessionId, tasks: killed })) return;
+		const lines = killed.map((task) => `  ${task.id}: ${task.command}`);
+		process.stderr.write(
+			`Stopped ${killed.length} background task${killed.length === 1 ? "" : "s"} started by this run:${EOL}${lines.join(EOL)}${EOL}` +
+				`Pass --keep-background to leave them running.${EOL}`,
+		);
+		return;
+	}
+
+	reportStillRunning(sessionId, tasks, emit);
+}
+
+function reportStillRunning(
+	sessionId: string,
+	tasks: Array<{ id: string; command: string }>,
+	emit: (type: string, data: Record<string, unknown>) => boolean,
+): void {
+	if (emit("background_tasks_running", { sessionId, tasks })) return;
+	const lines = tasks.map((task) => `  ${task.id}: ${task.command}`);
 	process.stderr.write(
-		`${described.length} background task${described.length === 1 ? "" : "s"} still running in session ${sessionId}:${EOL}${lines.join(EOL)}${EOL}` +
+		`${tasks.length} background task${tasks.length === 1 ? "" : "s"} still running in session ${sessionId}:${EOL}${lines.join(EOL)}${EOL}` +
 			`They keep running in the daemon. Stop them with \`cast\` (bash_kill) or shut it down with \`cast server stop\`.${EOL}`,
 	);
 }
