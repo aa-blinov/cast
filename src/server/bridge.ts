@@ -510,6 +510,10 @@ export function parseEvolveJson(content: string): EvolveSkillSuggestion[] {
 	return [];
 }
 
+/** Stands in for a tool call's arguments and result in the unauthenticated
+ * share view — see hideSharedToolPayload and sanitizeSharedLiveEvent. */
+export const SHARED_TOOL_PAYLOAD_PLACEHOLDER = "[hidden in the shared view]";
+
 export function toDisplayMessages(
 	messages: Message[],
 	reasoning?: Record<number, string>,
@@ -3152,10 +3156,35 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		return true;
 	}
 
+	/**
+	 * Blank out what a tool call carried, keeping the fact that it happened.
+	 *
+	 * The share link is a *conversation* link: the visitor should see that the
+	 * agent ran `bash` and that it succeeded, never what the command printed or
+	 * what a file contained. toDisplayMessages hangs the full arguments and the
+	 * full result off the assistant message (that is right for the session's
+	 * owner), and the client hiding tool cards would be cosmetic — the JSON at
+	 * `/api/shared/:token` is unauthenticated and readable with curl. Same
+	 * redaction the live relay applies in sanitizeSharedLiveEvent, so the two
+	 * views of one thread cannot disagree about what a link reveals.
+	 */
+	function hideSharedToolPayload(message: DisplayMessage): DisplayMessage {
+		if (!message.toolCalls || message.toolCalls.length === 0) return message;
+		return {
+			...message,
+			toolCalls: message.toolCalls.map(({ id, name, status }) => ({
+				id,
+				name,
+				status,
+				args: "",
+				result: SHARED_TOOL_PAYLOAD_PLACEHOLDER,
+			})),
+		};
+	}
+
 	/** The read-only projection served (with no auth at all) at
 	 * `/shared/:token`. Deliberately narrow — no cwd, no persona system
-	 * prompt, no tool internals beyond what toDisplayMessages already shows
-	 * for the authenticated view; just enough to read the conversation. */
+	 * prompt, no tool payloads; just enough to read the conversation. */
 	function getSharedSession(
 		token: string,
 	): { title?: string; persona: string; model: string; messages: DisplayMessage[] } | null {
@@ -3175,9 +3204,16 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			// unauthenticated — inline data: URLs here instead (this is a public
 			// link's read view, not the main session load the multi-MB-payload
 			// problem is about).
-			messages: toDisplayMessages(session.messages, session.reasoning, session.turnMeta).filter(
-				(m) => m.role !== "system",
-			),
+			messages: toDisplayMessages(session.messages, session.reasoning, session.turnMeta)
+				// Drop system messages (the persona's full system prompt,
+				// compaction markers) and the injected <system-reminder>
+				// notices toDisplayMessages surfaces as `warning` rows (attached
+				// documents, project memory): the authenticated view shows these
+				// to the session's own owner, but a public link's anonymous
+				// visitor has no business reading the persona's internal
+				// instructions, tool descriptions, or project paths baked in.
+				.filter((m) => m.role !== "system" && m.role !== "warning")
+				.map(hideSharedToolPayload),
 		};
 	}
 
