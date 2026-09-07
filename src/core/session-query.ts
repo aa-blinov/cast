@@ -1,4 +1,5 @@
 import { getDb } from "./db.ts";
+import { findProjectRoot } from "./project-root.ts";
 import type { ToolResult } from "./tools/shared.ts";
 
 const MAX_RESULTS = 8;
@@ -17,6 +18,13 @@ export interface SessionHistorySearchResult {
 	score: number;
 }
 
+/** Escapes LIKE's own wildcards so a path containing `_` or `%` still matches
+ *  only itself (`_` is LIKE's single-character wildcard — an unescaped
+ *  `/home/a_b/%` would also match `/home/axb/...`). */
+function likePrefix(path: string): string {
+	return path.replace(/[\\%_]/g, "\\$&");
+}
+
 function buildSearchQuery(raw: string): string {
 	const tokens = raw.match(/[\p{L}\p{N}_]+/gu) ?? [];
 	return [...new Set(tokens)].map((token) => `"${token.replaceAll('"', '""')}"`).join(" OR ");
@@ -30,6 +38,7 @@ export function searchSessionHistory(
 ): SessionHistorySearchResult[] {
 	const ftsQuery = buildSearchQuery(query);
 	if (!ftsQuery) return [];
+	const projectRoot = findProjectRoot(cwd);
 	const rows = getDb()
 		.prepare(
 			`SELECT m.session_id, m.seq, m.role, s.cwd, s.title, s.updated_at,
@@ -38,12 +47,16 @@ export function searchSessionHistory(
 			FROM session_history_fts
 			JOIN messages AS m ON m.session_id = session_history_fts.session_id AND m.seq = session_history_fts.seq
 			JOIN sessions AS s ON s.id = m.session_id
-			WHERE session_history_fts MATCH ? ${scope === "project" ? "AND s.cwd = ?" : ""}
+			WHERE session_history_fts MATCH ? ${scope === "project" ? "AND (s.cwd = ? OR s.cwd LIKE ? ESCAPE '\\')" : ""}
 			ORDER BY score DESC, s.updated_at DESC, m.seq DESC
 			LIMIT ?`,
 		)
 		.all(
-			...(scope === "project" ? [ftsQuery, cwd] : [ftsQuery]),
+			// "project" means the whole checkout, not this one directory: an
+			// exact `s.cwd = ?` could not see the sessions run from the
+			// repository root, or from a sibling subdirectory, which is most of
+			// a project's history once any work happens in subdirectories.
+			...(scope === "project" ? [ftsQuery, projectRoot, `${likePrefix(projectRoot)}/%`] : [ftsQuery]),
 			Math.max(1, Math.min(limit, MAX_RESULTS)),
 		) as Array<{
 		session_id: string;

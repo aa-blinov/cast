@@ -61,6 +61,21 @@ User settings are persisted to `~/.cast/settings.json`. This file is loaded on s
 
 Settings are written atomically (temp file + rename) to prevent corruption from crashes mid-write.
 
+## The Project Root
+
+Rules, project memory, and project-scoped history search are all keyed on the
+project root: the nearest ancestor directory containing `.git`, or — when there
+is no checkout — the topmost one containing `.cast/`. A nested checkout (a
+submodule, a vendored copy) is its own project, since its own `.git` says so,
+while a subdirectory's `.cast/rules` stays what it is documented to be: rules
+scoped to that subtree, not a project of its own.
+
+The home directory is never a project root, whatever it contains: `~/.cast` is
+the global configuration directory, and a dotfiles repository in `$HOME` would
+otherwise make everything under it one project sharing one memory.
+
+`/reload` re-reads the root, so `git init` mid-session takes effect.
+
 ## Project Memory
 
 > See [Memory](memory.md) for a complete guide to what memory is, where the

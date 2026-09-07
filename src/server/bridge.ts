@@ -64,6 +64,7 @@ import {
 	resolveRulesForCwd,
 	resolveSkillsForCwd,
 } from "../core/project.ts";
+import { clearProjectRootCache } from "../core/project-root.ts";
 import { getModelsCache, setModelsCache } from "../core/readline.ts";
 import {
 	formatRuleInvocation,
@@ -3962,6 +3963,10 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				skillsByCwd.clear();
 				contextFilesByCwd.clear();
 				sshHostsByCwd.clear();
+				// The project root is read off the filesystem, so `git init` (or
+				// a new `.cast/`) during a session changes which directory every
+				// other resolver above answers from.
+				clearProjectRootCache();
 				const rules = resolveRulesForCwd(sessionCwd, projectTrusted);
 				rulesSuffix = rules.alwaysApplySuffix;
 				rulesLazySuffix = rules.lazySuffix;

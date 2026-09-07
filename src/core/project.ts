@@ -16,6 +16,7 @@ import {
 } from "./hooks.ts";
 import { connectMcpServers, loadMcpConfig, type McpServerConfig, type McpSetupResult, saveMcpConfig } from "./mcp.ts";
 import { globalPersonasDir, type LoadPersonasOptions, loadPersonas, type Persona } from "./personas.ts";
+import { findProjectRoot } from "./project-root.ts";
 import {
 	formatAlwaysApplyRules,
 	formatLazyRulesForPrompt,
@@ -345,11 +346,15 @@ export interface ResolvedRules {
 }
 
 export function resolveRulesForCwd(cwd: string, trusted: boolean): ResolvedRules {
-	// When trusted, discover the root `.cast/rules` plus any nested ones in
-	// subdirectories (each scoped to its subtree). Global rules always load.
+	// When trusted, discover the project root's `.cast/rules` plus any nested
+	// ones in subdirectories (each scoped to its subtree). Global rules always
+	// load. Discovery starts at the *project root*, not at cwd: a session
+	// started in `apps/web` used to see no rules at all, while AGENTS.md was
+	// inherited from the same repository root — the rules were simply above the
+	// only directory being searched.
 	const directoryRules = loadDirectoryRules({
 		globalDir: globalRulesDir(),
-		projectCwd: trusted ? cwd : undefined,
+		projectCwd: trusted ? findProjectRoot(cwd) : undefined,
 	});
 
 	return {
