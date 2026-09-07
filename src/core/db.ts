@@ -177,6 +177,17 @@ export function reclaimFreePages(
 		if (freeBytes < minFreeBytes || freeCount / pageCount < minFreeShare) return false;
 		const startedAt = Date.now();
 		instance.exec("VACUUM");
+		// Without this the space is not returned, only moved: in WAL mode a
+		// VACUUM writes the whole rebuilt database into the write-ahead log,
+		// and nothing truncates it on its own. Measured on the real store —
+		// 547MB became a 324MB database plus a 326MB WAL, i.e. no saving at
+		// all until the checkpoint ran.
+		try {
+			instance.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+		} catch {
+			// A reader holding the WAL open makes this a no-op for now; the
+			// next checkpoint (or the next open) picks it up.
+		}
 		if (!opts.quiet) {
 			console.error(
 				`[cast] compacted sessions.db — reclaimed ${(freeBytes / 1048576).toFixed(0)}MB of free pages in ${Date.now() - startedAt}ms.`,

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -42,22 +42,35 @@ describe("reclaimFreePages", () => {
 		db.exec("COMMIT");
 	}
 
+	function walSize(): number {
+		return existsSync(`${path}-wal`) ? statSync(`${path}-wal`).size : 0;
+	}
+
+	function onDiskSize(): number {
+		return statSync(path).size + walSize();
+	}
+
 	function freelist(): number {
 		const row = db.prepare("PRAGMA freelist_count").get() as Record<string, unknown>;
 		return Number(Object.values(row)[0]);
 	}
 
 	it("returns the free pages to the filesystem once both thresholds are met", () => {
+		db.exec("PRAGMA journal_mode = WAL");
 		fill(600);
 		db.exec("DELETE FROM blobs");
-		const sizeBefore = statSync(path).size;
+		const sizeBefore = onDiskSize();
 		expect(freelist()).toBeGreaterThan(0);
 
 		const ran = reclaimFreePages(db, { minFreeBytes: 1024 * 1024, minFreeShare: 0.2, quiet: true });
 
 		expect(ran).toBe(true);
 		expect(freelist()).toBe(0);
-		expect(statSync(path).size).toBeLessThan(sizeBefore / 2);
+		// Measured across db + WAL on purpose: in WAL mode a VACUUM writes the
+		// whole rebuilt database into the log, so checking the .db file alone
+		// would call a 547MB→(324MB db + 326MB WAL) move a saving. It was not.
+		expect(onDiskSize()).toBeLessThan(sizeBefore / 2);
+		expect(walSize()).toBeLessThan(1024 * 1024);
 	});
 
 	it("does nothing when the free space is below the byte threshold", () => {
