@@ -953,7 +953,10 @@ describe("web bridge", () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		ws.session.messages.push(
-			{ role: "user", content: "read the env\n<system-reminder>project memory: staging password rotates weekly</system-reminder>" },
+			{
+				role: "user",
+				content: "read the env\n<system-reminder>project memory: staging password rotates weekly</system-reminder>",
+			},
 			{
 				role: "assistant",
 				content: "done",

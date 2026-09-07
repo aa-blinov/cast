@@ -258,6 +258,7 @@ const IMPORT_REWRITE_TARGETS = [
 	"use-session-state",
 	"use-workspace-state",
 ] as const;
+const PINNED_VERSION_RE = /^v?\d+\.\d+\.\d+$/;
 const DIFF_FILE_RE = /b\/(.+)$/;
 const HUNK_HEADER_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 
@@ -1036,6 +1037,13 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			version = body.version?.trim() || undefined;
 		} catch {
 			// no body is fine — upgrade to latest
+		}
+		// A pinned version becomes CAST_VERSION for the public installer, which
+		// builds a download URL out of it. Only x.y.z (optionally "v"-prefixed)
+		// is a version; anything else is someone pointing the installer at an
+		// artifact of their choosing.
+		if (version && !PINNED_VERSION_RE.test(version)) {
+			return json(res, { error: "Invalid version — expected x.y.z" }, 400);
 		}
 		// Don't block response — upgrade runs install.sh which may take a minute
 		setImmediate(async () => {

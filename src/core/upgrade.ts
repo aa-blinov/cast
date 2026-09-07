@@ -5,7 +5,7 @@
  * logic here. One source of truth for "how to install cast."
  */
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -163,6 +163,28 @@ export async function restartDaemon(): Promise<boolean> {
 		console.log("[cast server] could not verify the running daemon after upgrade; leaving its PID untouched.");
 		clearServerState();
 		return false;
+	}
+	// The daemon can also be the process running this: `POST /api/system/upgrade`
+	// calls runUpgrade *inside* the daemon (that is how the web UI's Upgrade
+	// button works). SIGTERM below would then be suicide — the shutdown handler
+	// closes every session and exits within a few seconds, so the spawnSync that
+	// was supposed to start the replacement never ran, and the button left the
+	// user with a freshly installed cast and no daemon at all (verified: the log
+	// ends at "received SIGTERM", server.json is gone, nothing is listening).
+	// Hand the restart to a detached waiter that starts the new daemon once this
+	// pid is gone, then shut down normally so sessions still drain.
+	if (state.pid === process.pid) {
+		console.log(`\n[cast server] restarting this daemon (pid ${state.pid}) on the new build...`);
+		spawn(
+			"sh",
+			[
+				"-c",
+				`while kill -0 ${state.pid} 2>/dev/null; do sleep 0.2; done; exec cast server start --port ${state.port} --host ${state.host}`,
+			],
+			{ detached: true, stdio: "ignore" },
+		).unref();
+		process.kill(state.pid, "SIGTERM");
+		return true;
 	}
 	if (state.foreground) {
 		console.log(
