@@ -171,7 +171,15 @@ export async function serverFetch(
 /** Create a session on the daemon. Returns the session id. */
 export async function createServerSession(
 	client: ServerClient,
-	options: { persona?: string; model?: string; cwd?: string; worktree?: string; permissionMode?: "bypass" } = {},
+	options: {
+		persona?: string;
+		model?: string;
+		cwd?: string;
+		worktree?: string;
+		permissionMode?: "bypass";
+		noSkills?: boolean;
+		noMcp?: boolean;
+	} = {},
 ): Promise<string> {
 	const { status, data } = await serverFetch(client, `${API_V1_PREFIX}/sessions`, {
 		method: "POST",
@@ -220,6 +228,10 @@ export async function ensureServerSession(
 		 *  this session. Without it a non-interactive run hung on a prompt
 		 *  nothing could answer. */
 		permissionMode?: "bypass";
+		/** `--no-skills` / `--no-mcp`: run without those tool sources. Dropped
+		 *  before the daemon previously, so a run got them anyway. */
+		noSkills?: boolean;
+		noMcp?: boolean;
 	},
 ): Promise<{ id: string; resumed: boolean }> {
 	// Explicit id: GET hydrates it on the daemon (bridge.getSession → hydrateSession).
@@ -247,6 +259,8 @@ export async function ensureServerSession(
 		cwd: options.cwd,
 		worktree: options.worktree,
 		permissionMode: options.permissionMode,
+		noSkills: options.noSkills,
+		noMcp: options.noMcp,
 	});
 	return { id, resumed: false };
 }

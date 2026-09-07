@@ -1243,6 +1243,8 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		let worktree: string | undefined;
 		let agentId: string | undefined;
 		let permissionMode: "bypass" | undefined;
+		let noSkills = false;
+		let noMcp = false;
 		try {
 			const parsed = JSON.parse(body) as {
 				persona?: string;
@@ -1252,6 +1254,8 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 				worktree?: string;
 				agentId?: string;
 				permissionMode?: string;
+				noSkills?: boolean;
+				noMcp?: boolean;
 			};
 			persona = parsed.persona;
 			model = parsed.model;
@@ -1263,6 +1267,8 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			// never reached the daemon, so the run hit a confirmation prompt
 			// nothing could answer and hung until it timed out.
 			permissionMode = parsed.permissionMode === "bypass" ? "bypass" : undefined;
+			noSkills = parsed.noSkills === true;
+			noMcp = parsed.noMcp === true;
 		} catch {
 			// empty body is fine
 		}
@@ -1318,7 +1324,10 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 				return json(res, { error: message }, 400);
 			}
 		}
-		const ws = bridge.createSession(persona, model, wtPath ?? cwd, true, undefined, provider, permissionMode);
+		const ws = bridge.createSession(persona, model, wtPath ?? cwd, true, undefined, provider, permissionMode, {
+			noSkills,
+			noMcp,
+		});
 		json(res, { id: ws.id, session: ws.session }, 201);
 	});
 
