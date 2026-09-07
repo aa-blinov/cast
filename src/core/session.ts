@@ -1682,6 +1682,7 @@ export function deleteSession(id: string, cwd?: string): boolean {
 	// project that merely lives under ~/.cast/sandbox is never touched.
 	// The caller passes the cwd it captured before the row was deleted.
 	removeSandboxDirFor(id, cwd);
+	removeInputsDirFor(id);
 	return result.changes > 0;
 }
 
@@ -1694,6 +1695,31 @@ export function deleteSession(id: string, cwd?: string): boolean {
  * had 118 sandbox directories of which 34 belonged to sessions that no longer
  * existed.
  */
+/**
+ * Where a session's attached documents live (see server/inputs.ts).
+ *
+ * Defined here, not only in the server layer, because deleting a session has
+ * to remove them: a real installation had 15 input directories of which 7
+ * belonged to sessions that no longer existed. The uploads outlive the
+ * session they were attached to otherwise, with no path that would ever clean
+ * them up — only a manual DELETE .../inputs while the session still exists.
+ */
+export function sessionInputsPath(id: string): string {
+	return join(homedir(), ".cast", "inputs", id);
+}
+
+function removeInputsDirFor(id: string): void {
+	// Ids are `[a-z0-9]+` by construction (createSession) and these come
+	// straight out of the database, so there is no traversal to guard here —
+	// the server layer validates the ones that arrive from a URL.
+	try {
+		rmSync(sessionInputsPath(id), { recursive: true, force: true });
+	} catch {
+		// Best-effort, same as the sandbox directory: an upload we cannot
+		// delete must not fail the session delete or stall the prune.
+	}
+}
+
 function removeSandboxDirFor(id: string, cwd: string | undefined): void {
 	if (!cwd || cwd !== join(homedir(), ".cast", "sandbox", `cast-${id}`)) return;
 	try {
@@ -2223,7 +2249,10 @@ export function pruneBackgroundSessions(now: number = Date.now(), limit = BACKGR
 			ids,
 			() => db.prepare(`DELETE FROM sessions WHERE id IN (${placeholders})`).run(...ids).changes,
 		);
-		for (const row of rows) removeSandboxDirFor(row.id, row.cwd ?? undefined);
+		for (const row of rows) {
+			removeSandboxDirFor(row.id, row.cwd ?? undefined);
+			removeInputsDirFor(row.id);
+		}
 		return changes;
 	};
 	if (db.isTransaction) return Number(prune());
