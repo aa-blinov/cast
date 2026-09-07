@@ -733,6 +733,32 @@ export const apiV1OpenApiDocument: OpenApiObject = {
 					streaming: { type: "array", items: { type: "object" } },
 					hasMoreHistory: { type: "boolean" },
 					oldestSeq: { type: ["integer", "null"] },
+					// Everything below was returned but undeclared: a client
+					// generated from this contract could not see the title, the
+					// usage totals or the timestamps — most of what a session
+					// listing is for.
+					title: { type: "string" },
+					pinned: { type: "boolean" },
+					shareToken: { type: ["string", "null"], description: "Public share token, when the session is shared." },
+					turnStartedAt: { type: ["integer", "null"], description: "Epoch ms the in-flight turn began." },
+					question: { type: ["object", "null"], description: "Pending question awaiting an answer." },
+					planTransition: { type: ["object", "null"] },
+					usage: { type: "object", description: "Token and cost totals for the session." },
+					backgroundTasks: {
+						type: "array",
+						description: "Background bash tasks still running for this session.",
+						items: {
+							type: "object",
+							required: ["id", "command"],
+							properties: {
+								id: { type: "string" },
+								command: { type: "string" },
+								startedAt: { type: "integer", description: "Epoch ms." },
+							},
+						},
+					},
+					createdAt: { type: "string" },
+					updatedAt: { type: "string" },
 				},
 			},
 			CreateSessionRequest: {
