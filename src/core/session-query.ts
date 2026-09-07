@@ -25,9 +25,29 @@ function likePrefix(path: string): string {
 	return path.replace(/[\\%_]/g, "\\$&");
 }
 
+/**
+ * Ceiling on the number of terms one search may carry.
+ *
+ * The terms are OR-ed into an FTS5 MATCH, and node:sqlite runs synchronously:
+ * a 100,000-word query measured 50 seconds, with the daemon's event loop
+ * blocked for all of it — every session, the web UI and every SSE stream
+ * stalled. The input is whatever the model passes, and a model pasting a code
+ * fragment into the query needs no bad intent to do this. bm25 ranks on the
+ * strongest terms anyway, so more than a few dozen adds latency, not recall.
+ */
+const MAX_QUERY_TERMS = 32;
+
 function buildSearchQuery(raw: string): string {
 	const tokens = raw.match(/[\p{L}\p{N}_]+/gu) ?? [];
-	return [...new Set(tokens)].map((token) => `"${token.replaceAll('"', '""')}"`).join(" OR ");
+	return [...new Set(tokens)]
+		.slice(0, MAX_QUERY_TERMS)
+		.map((token) => `"${token.replaceAll('"', '""')}"`)
+		.join(" OR ");
+}
+
+/** How many distinct terms a query holds, for the truncation note. */
+function queryTermCount(raw: string): number {
+	return new Set(raw.match(/[\p{L}\p{N}_]+/gu) ?? []).size;
 }
 
 export function searchSessionHistory(
@@ -82,11 +102,15 @@ export function searchSessionHistory(
 }
 
 export function formatSessionHistoryToolResult(query: string, matches: SessionHistorySearchResult[]): string {
+	// Say when the query itself was cut, so a model that pasted a wall of text
+	// knows why the results look unrelated to most of it.
+	const terms = queryTermCount(query);
+	const clipped = terms > MAX_QUERY_TERMS ? ` (searched the first ${MAX_QUERY_TERMS} of ${terms} terms)` : "";
 	if (matches.length === 0) {
-		return `No session history matched "${query}". Try fewer, more distinctive terms or use memory for durable project facts.`;
+		return `No session history matched "${query.slice(0, 200)}"${clipped}. Try fewer, more distinctive terms or use memory for durable project facts.`;
 	}
 	return [
-		`Found ${matches.length} session histor${matches.length === 1 ? "y result" : "y results"}, ranked by relevance:`,
+		`Found ${matches.length} session histor${matches.length === 1 ? "y result" : "y results"}, ranked by relevance${clipped}:`,
 		...matches.map(
 			(match) =>
 				`### ${match.title ?? match.sessionId} · ${match.role} · ${new Date(match.updatedAt).toISOString().slice(0, 10)}\n${match.snippet}\nSource: session_history (cwd: ${match.cwd})`,
