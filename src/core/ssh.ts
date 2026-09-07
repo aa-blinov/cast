@@ -2,11 +2,11 @@ import { execSync } from "node:child_process";
 import {
 	chmodSync,
 	existsSync,
+	lstatSync,
 	mkdirSync,
 	readdirSync,
 	readFileSync,
 	renameSync,
-	rmSync,
 	statSync,
 	writeFileSync,
 } from "node:fs";
@@ -77,28 +77,68 @@ export function resolveSshHosts(cwd: string, trusted: boolean): SshHost[] {
 // ============================================================================
 
 // Use /tmp directly — tmpdir() on macOS can produce paths that exceed the
-// 104-byte Unix socket path limit when SSH expands %C.
-const CONTROL_DIR = join("/tmp", "cast-ssh-ctl");
-const CONTROL_PATH = join(CONTROL_DIR, "%C.sock");
+// 104-byte Unix socket path limit when SSH expands %C. The uid is in the name
+// because /tmp is shared: without it, the first user on a multi-user machine to
+// create `/tmp/cast-ssh-ctl` owns the directory every other user's cast then
+// puts its ControlMaster sockets in.
+// CAST_SSH_CONTROL_DIR exists so tests can point this somewhere disposable —
+// the real path is shared with whatever cast processes the user has running.
+function controlDir(): string {
+	return (
+		process.env.CAST_SSH_CONTROL_DIR ||
+		join("/tmp", `cast-ssh-ctl-${typeof process.getuid === "function" ? process.getuid() : "win"}`)
+	);
+}
 
-let controlDirReady = false;
+let verifiedControlDir: string | undefined;
 
-/** Ensure the SSH control socket directory exists with mode 0o700. Returns the control path template. */
+/**
+ * Ensure the SSH control socket directory exists, is ours, and is private.
+ * Returns the control path template.
+ *
+ * The verification is the point. A multiplexed master socket persists for an
+ * hour (ControlPersist=3600) and anyone who can reach it runs commands on the
+ * remote host as you, with no key and no password. `mkdirSync(…, {recursive:
+ * true})` silently accepts a path that already exists — including a symlink
+ * planted by another local user — and the chmod that followed was a swallowed
+ * best-effort, so cast would happily put its sockets in someone else's
+ * directory (verified: with `/tmp/cast-ssh-ctl` symlinked elsewhere, the
+ * socket landed at the link's target). Anything that isn't a real directory we
+ * own with mode 0700 is now an error rather than a place to keep credentials.
+ */
 export function ensureControlDir(): string {
-	if (!controlDirReady) {
-		mkdirSync(CONTROL_DIR, { recursive: true, mode: 0o700 });
+	const dir = controlDir();
+	if (verifiedControlDir !== dir) {
+		mkdirSync(dir, { recursive: true, mode: 0o700 });
 		try {
-			chmodSync(CONTROL_DIR, 0o700);
+			chmodSync(dir, 0o700);
 		} catch {
-			// best-effort
+			// Not ours to chmod — assertControlDirIsPrivate says so precisely.
 		}
-		controlDirReady = true;
+		assertControlDirIsPrivate(dir);
+		verifiedControlDir = dir;
 	}
-	return CONTROL_PATH;
+	return getControlPath();
+}
+
+function assertControlDirIsPrivate(dir: string): void {
+	const stats = lstatSync(dir);
+	if (!stats.isDirectory()) {
+		throw new Error(`SSH control path ${dir} is not a directory (a symlink or file is in the way) — remove it.`);
+	}
+	// Windows reports neither a meaningful uid nor POSIX modes.
+	if (process.platform === "win32") return;
+	const uid = process.getuid?.();
+	if (uid !== undefined && stats.uid !== uid) {
+		throw new Error(`SSH control directory ${dir} is owned by uid ${stats.uid}, not by you — remove it.`);
+	}
+	if ((stats.mode & 0o077) !== 0) {
+		throw new Error(`SSH control directory ${dir} is accessible to other users — set it to mode 700.`);
+	}
 }
 
 export function getControlPath(): string {
-	return CONTROL_PATH;
+	return join(controlDir(), "%C.sock");
 }
 
 /** Validate SSH key exists and has correct permissions (600 or stricter, skipped on win32). */
@@ -160,16 +200,11 @@ export function scanSshKeys(): string[] {
 	}
 }
 
-/** Remove the control dir on process exit. Registered once. */
-let cleanupRegistered = false;
-export function registerControlDirCleanup(): void {
-	if (cleanupRegistered) return;
-	cleanupRegistered = true;
-	process.on("exit", () => {
-		try {
-			rmSync(CONTROL_DIR, { recursive: true, force: true });
-		} catch {
-			// best-effort
-		}
-	});
-}
+/**
+ * Kept as a no-op: removing the control directory on exit deleted the sockets
+ * of every *other* live cast process on the machine (and of this process's own
+ * masters, which outlive it by design — ControlPersist=3600). An orphaned
+ * master unlinks its own socket when it times out, so there is nothing here to
+ * clean up.
+ */
+export function registerControlDirCleanup(): void {}

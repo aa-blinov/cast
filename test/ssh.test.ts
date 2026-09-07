@@ -1,9 +1,9 @@
-import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
-import { loadSshConfig, resolveSshHosts, validateKeyPermissions } from "../src/core/ssh.ts";
+import { ensureControlDir, loadSshConfig, resolveSshHosts, validateKeyPermissions } from "../src/core/ssh.ts";
 import { createToolExecutor, getToolDefinitions } from "../src/core/tools.ts";
 
 const TEST_DIR = join(import.meta.dirname, "__test_tmp__", "ssh");
@@ -295,5 +295,53 @@ describe("SSH tool executor", () => {
 		} finally {
 			process.env.PATH = originalPath;
 		}
+	});
+});
+
+// ============================================================================
+// ensureControlDir
+// ============================================================================
+
+/**
+ * A multiplexed master socket lives here for an hour (ControlPersist=3600) and
+ * anyone who can reach it runs commands on the remote host as the user, with no
+ * key and no password — so the directory holding it has to be ours and private.
+ * `mkdirSync(…, { recursive: true })` accepts a path that already exists,
+ * including one another local user planted in the shared /tmp.
+ */
+describe("ensureControlDir", () => {
+	afterEach(() => {
+		delete process.env.CAST_SSH_CONTROL_DIR;
+	});
+
+	it("refuses a control path that is a symlink instead of a real directory", () => {
+		const target = join(TEST_DIR, "elsewhere");
+		const link = join(TEST_DIR, "ctl-link");
+		mkdirSync(target, { recursive: true });
+		symlinkSync(target, link);
+		process.env.CAST_SSH_CONTROL_DIR = link;
+
+		expect(() => ensureControlDir()).toThrow(/not a directory/);
+		expect(existsSync(join(target, "%C.sock"))).toBe(false);
+	});
+
+	it("tightens a pre-existing directory of its own that other users can reach", () => {
+		// A directory we own is repaired rather than refused — the refusal is for
+		// one we cannot chmod, which means it belongs to someone else.
+		const dir = join(TEST_DIR, "ctl-open");
+		mkdirSync(dir, { recursive: true });
+		chmodSync(dir, 0o777);
+		process.env.CAST_SSH_CONTROL_DIR = dir;
+
+		expect(ensureControlDir()).toBe(join(dir, "%C.sock"));
+		expect(statSync(dir).mode & 0o777).toBe(0o700);
+	});
+
+	it("creates its own directory private and returns the socket template inside it", () => {
+		const dir = join(TEST_DIR, "ctl-fresh");
+		process.env.CAST_SSH_CONTROL_DIR = dir;
+
+		expect(ensureControlDir()).toBe(join(dir, "%C.sock"));
+		expect(statSync(dir).mode & 0o777).toBe(0o700);
 	});
 });
