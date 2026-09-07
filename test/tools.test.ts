@@ -270,11 +270,14 @@ describe("bash — run_in_background", () => {
 		expect(result.content).toMatch(/Started in background as bg-\d+/);
 	});
 
-	it("falls back to running synchronously when no background deps are configured", async () => {
+	it("falls back to running synchronously when no background deps are configured, and says so", async () => {
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
 		const result = await exec("bash", { command: "echo hi", run_in_background: true });
-		expect(result.content.trim()).toBe("hi");
+		expect(result.content).toContain("hi");
 		expect(result.content).not.toContain("Started in background");
+		// The fallback is right; doing it silently was not — the model asked
+		// for a background task and has to know it did not get one.
+		expect(result.content).toContain("run_in_background is unavailable");
 	});
 
 	it("delivers completion onto followUpQueue while the runner is still marked running", async () => {
