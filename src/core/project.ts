@@ -343,6 +343,8 @@ export interface ResolvedRules {
 	lazySuffix: string;
 	/** All discovered directory rules (for /rule:name lookup). */
 	directoryRules: Rule[];
+	/** Per-file load failures, so `/rules` can say why a rule is missing. */
+	diagnostics: string[];
 }
 
 export function resolveRulesForCwd(cwd: string, trusted: boolean): ResolvedRules {
@@ -352,15 +354,18 @@ export function resolveRulesForCwd(cwd: string, trusted: boolean): ResolvedRules
 	// started in `apps/web` used to see no rules at all, while AGENTS.md was
 	// inherited from the same repository root — the rules were simply above the
 	// only directory being searched.
+	const diagnostics: string[] = [];
 	const directoryRules = loadDirectoryRules({
 		globalDir: globalRulesDir(),
 		projectCwd: trusted ? findProjectRoot(cwd) : undefined,
+		diagnostics,
 	});
 
 	return {
 		alwaysApplySuffix: formatAlwaysApplyRules(directoryRules),
 		lazySuffix: formatLazyRulesForPrompt(directoryRules),
 		directoryRules,
+		diagnostics,
 	};
 }
 

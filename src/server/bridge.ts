@@ -844,6 +844,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	let rulesSuffix = result.rulesSuffix;
 	let rulesLazySuffix = result.rulesLazySuffix;
 	let directoryRules = result.directoryRules;
+	let ruleDiagnostics = result.ruleDiagnostics ?? [];
 	let skills = result.skills;
 
 	/**
@@ -1036,7 +1037,12 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 
 	function rulesForSessionCwd(sessionCwd: string): ReturnType<typeof resolveRulesForCwd> {
 		if (sessionCwd === cwd) {
-			return { alwaysApplySuffix: rulesSuffix, lazySuffix: rulesLazySuffix, directoryRules };
+			return {
+				alwaysApplySuffix: rulesSuffix,
+				lazySuffix: rulesLazySuffix,
+				directoryRules,
+				diagnostics: ruleDiagnostics,
+			};
 		}
 		const cached = rulesByCwd.get(sessionCwd);
 		if (cached) return cached;
@@ -3971,6 +3977,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				rulesSuffix = rules.alwaysApplySuffix;
 				rulesLazySuffix = rules.lazySuffix;
 				directoryRules = rules.directoryRules;
+				ruleDiagnostics = rules.diagnostics;
 				personas = resolvePersonasForCwd(sessionCwd, trustForSessionCwd(sessionCwd)).personas;
 				// Only reconnect MCP if the config actually changed on disk.
 				const prevNames = mcpResult.allServerNames.slice().sort().join(",");
