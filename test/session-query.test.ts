@@ -122,6 +122,23 @@ describe("execSessionHistorySearch — argument validation", () => {
 		rmSync(root, { recursive: true, force: true });
 	});
 
+	it("caps the number of search terms instead of stalling the daemon (regression)", () => {
+		// The terms are OR-ed into an FTS5 MATCH and node:sqlite is
+		// synchronous: a 100,000-word query measured 50 seconds with the event
+		// loop blocked for all of it — every session, the web UI and every SSE
+		// stream stalled. The input is whatever the model passes.
+		const words = Array.from({ length: 100_000 }, (_, i) => `w${i}`).join(" ");
+		const started = Date.now();
+		const result = execSessionHistorySearch({ query: words }, root);
+		const elapsed = Date.now() - started;
+
+		expect(result.isError).toBeFalsy();
+		// Two orders of magnitude of headroom against the 50s it took before.
+		expect(elapsed).toBeLessThan(5000);
+		// And it says the query was cut, so unrelated-looking results make sense.
+		expect(result.content).toMatch(/searched the first 32 of 100000 terms/);
+	});
+
 	it("rejects a limit that is not a positive integer", () => {
 		// `Number(args.limit) || MAX_RESULTS` let anything through: a negative
 		// limit reached SQL as `LIMIT -3` and returned a single row, reported as
