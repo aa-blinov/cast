@@ -9,7 +9,7 @@ import {
 	validateKeyPermissions,
 } from "../ssh.ts";
 import { stripAnsi } from "./bash.ts";
-import { appendBoundedOutput, type ConfirmBash, formatSize, type ToolResult } from "./shared.ts";
+import { BoundedOutput, type ConfirmBash, formatSize, type ToolResult } from "./shared.ts";
 
 export async function execSsh(
 	args: Record<string, unknown>,
@@ -107,22 +107,13 @@ export async function execSsh(
 			detached: true,
 		});
 
-		let rawOutput = "";
-		let outputTruncated = false;
+		const maxBytes = config.maxToolOutputBytes;
+		const output = new BoundedOutput(maxBytes);
 		let timedOut = false;
 		let aborted = false;
-		const maxBytes = config.maxToolOutputBytes;
 
-		proc.stdout.on("data", (d: Buffer) => {
-			const appended = appendBoundedOutput(rawOutput, d, maxBytes);
-			rawOutput = appended.output;
-			outputTruncated ||= appended.truncated;
-		});
-		proc.stderr.on("data", (d: Buffer) => {
-			const appended = appendBoundedOutput(rawOutput, d, maxBytes);
-			rawOutput = appended.output;
-			outputTruncated ||= appended.truncated;
-		});
+		proc.stdout.on("data", (d: Buffer) => output.append(d));
+		proc.stderr.on("data", (d: Buffer) => output.append(d));
 
 		const timer = setTimeout(() => {
 			timedOut = true;
@@ -173,25 +164,25 @@ export async function execSsh(
 			clearTimeout(timer);
 			signal?.removeEventListener("abort", onAbort);
 
-			let output = stripAnsi(rawOutput).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+			let text = stripAnsi(output.final()).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 			const prefix = aborted
 				? "[ABORTED] Command was interrupted by user.\n\n"
 				: timedOut
 					? `[TIMED OUT] after ${timeout} seconds. If this command needs more time, retry with a larger timeout.\n\n`
 					: "";
 			if (exitCode !== 0 && !aborted && !timedOut) {
-				output += `\n\nProcess exited with code ${exitCode}`;
+				text += `\n\nProcess exited with code ${exitCode}`;
 			}
-			const lines = output.split("\n");
+			const lines = text.split("\n");
 			if (lines.length > config.maxToolOutputLines) {
 				const kept = lines.slice(-config.maxToolOutputLines);
-				output = `[Showing last ${config.maxToolOutputLines} of ${lines.length} lines]\n${kept.join("\n")}`;
+				text = `[Showing last ${config.maxToolOutputLines} of ${lines.length} lines]\n${kept.join("\n")}`;
 			}
-			if (outputTruncated) {
-				output += `\n\n[Output truncated at ${formatSize(config.maxToolOutputBytes)}. Narrow the command or redirect output to a file and read it in chunks.]`;
+			if (output.truncated) {
+				text += `\n\n[Output truncated at ${formatSize(config.maxToolOutputBytes)}. Narrow the command or redirect output to a file and read it in chunks.]`;
 			}
 			const result: ToolResult = {
-				content: prefix + (output || "(no output)"),
+				content: prefix + (text || "(no output)"),
 				isError: aborted || timedOut || exitCode !== 0,
 			};
 			finalResult = result;

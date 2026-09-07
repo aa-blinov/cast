@@ -14,7 +14,7 @@ import type { AppConfig } from "../config.ts";
 import { checkDangerousBash } from "../permissions.ts";
 import { type BackgroundTask, type BashBackgroundDeps, isPtyAvailable } from "./bash-background.ts";
 import { looksLongRunningCommand } from "./long-running.ts";
-import { appendBoundedOutput, type ConfirmBash, formatSize, type ToolResult } from "./shared.ts";
+import { BoundedOutput, type ConfirmBash, formatSize, type ToolResult } from "./shared.ts";
 
 const INSTALL_PATH_RE = /InstallPath\s+REG_SZ\s+(.+)/;
 const CRLF_RE = /\r\n/g;
@@ -370,22 +370,13 @@ export async function execBash(
 			detached: true,
 		});
 
-		let rawOutput = "";
-		let outputTruncated = false;
+		const maxBytes = config.maxToolOutputBytes;
+		const output = new BoundedOutput(maxBytes);
 		let timedOut = false;
 		let aborted = false;
-		const maxBytes = config.maxToolOutputBytes;
 
-		proc.stdout.on("data", (d: Buffer) => {
-			const appended = appendBoundedOutput(rawOutput, d, maxBytes);
-			rawOutput = appended.output;
-			outputTruncated ||= appended.truncated;
-		});
-		proc.stderr.on("data", (d: Buffer) => {
-			const appended = appendBoundedOutput(rawOutput, d, maxBytes);
-			rawOutput = appended.output;
-			outputTruncated ||= appended.truncated;
-		});
+		proc.stdout.on("data", (d: Buffer) => output.append(d));
+		proc.stderr.on("data", (d: Buffer) => output.append(d));
 
 		// Timers that must not outlive the call: an unreffed stray keeps the
 		// event loop busy after the result is already resolved.
@@ -411,10 +402,10 @@ export async function execBash(
 				// timeout path did not.
 				later(() => {
 					if (finalResult) return;
-					const result = formatBashResult(rawOutput, config, {
+					const result = formatBashResult(output.final(), config, {
 						exitCode: null,
 						timedOut: true,
-						outputTruncated,
+						outputTruncated: output.truncated,
 						timeoutSeconds: timeout,
 						warnPrefix,
 					});
@@ -467,11 +458,11 @@ export async function execBash(
 			for (const t of pending) clearTimeout(t);
 			signal?.removeEventListener("abort", onAbort);
 
-			const result = formatBashResult(rawOutput, config, {
+			const result = formatBashResult(output.final(), config, {
 				exitCode,
 				aborted,
 				timedOut,
-				outputTruncated,
+				outputTruncated: output.truncated,
 				timeoutSeconds: timeout,
 				warnPrefix,
 			});

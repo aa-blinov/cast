@@ -7,6 +7,7 @@
 
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import type { Usage } from "../llm.ts";
 
 export interface ToolResult {
@@ -195,13 +196,66 @@ export function formatSize(bytes: number): string {
 }
 
 /** Append child-process output without exceeding the tool-result byte budget. */
-export function appendBoundedOutput(
-	current: string,
-	chunk: Buffer,
-	maxBytes: number,
-): { output: string; truncated: boolean } {
-	const remaining = maxBytes - Buffer.byteLength(current, "utf-8");
-	if (remaining <= 0) return { output: current, truncated: true };
-	if (chunk.byteLength <= remaining) return { output: current + chunk.toString("utf-8"), truncated: false };
-	return { output: current + chunk.subarray(0, remaining).toString("utf-8"), truncated: true };
+/**
+ * Accumulates a subprocess's output as text, bounded by a byte budget.
+ *
+ * Stateful because decoding has to be: a pipe chunk can end mid-character, and
+ * decoding each chunk on its own (`chunk.toString("utf-8")`, which this
+ * replaces) turned every multibyte character straddling a 64KB boundary into
+ * U+FFFD. Measured on `cat` of a file with an emoji astride each boundary:
+ * all five destroyed, 15 replacement characters in the output the model then
+ * reads. Any non-ASCII text in a large command output — Cyrillic, CJK, emoji,
+ * a compiler's box-drawing — was corrupted this way.
+ */
+export class BoundedOutput {
+	private readonly decoder = new StringDecoder("utf-8");
+	private text = "";
+	private bytes = 0;
+	private flushed = false;
+	truncated = false;
+
+	constructor(private readonly maxBytes: number) {}
+
+	append(chunk: Buffer | string): void {
+		const buffer = typeof chunk === "string" ? Buffer.from(chunk, "utf-8") : chunk;
+		const remaining = this.maxBytes - this.bytes;
+		if (remaining <= 0) {
+			this.truncated = true;
+			return;
+		}
+		if (buffer.byteLength <= remaining) {
+			this.bytes += buffer.byteLength;
+			this.text += this.decoder.write(buffer);
+			return;
+		}
+		// Cut on the budget, then let the decoder hold whatever partial
+		// character the cut left: `end()` renders it once, instead of a stray
+		// U+FFFD landing in the middle of the text.
+		this.bytes += remaining;
+		this.text += this.decoder.write(buffer.subarray(0, remaining));
+		this.truncated = true;
+	}
+
+	/**
+	 * The text decoded so far. Non-destructive: a partial character the decoder
+	 * is still holding stays held, so this is safe to read between chunks — the
+	 * live view of a background task calls it on every chunk, and flushing
+	 * there would drop a U+FFFD into the middle of the text.
+	 */
+	snapshot(): string {
+		return this.text;
+	}
+
+	/**
+	 * The final text, flushing whatever partial character is left. Call once,
+	 * when the process has finished: a stream that ends on an incomplete
+	 * sequence would otherwise drop those bytes entirely.
+	 */
+	final(): string {
+		if (!this.flushed) {
+			this.flushed = true;
+			this.text += this.decoder.end();
+		}
+		return this.text;
+	}
 }

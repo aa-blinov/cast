@@ -71,6 +71,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import type { AppConfig } from "./config.ts";
 import { createClient, streamAndCollect } from "./llm.ts";
 import type { McpToolHandle } from "./mcp.ts";
@@ -366,6 +367,17 @@ export interface HookRunResult {
 	exitCode: number | null;
 }
 
+/**
+ * Ceiling on what one hook's stdout (and stderr) may hold in memory.
+ *
+ * Nothing bounded these before: the only limit was the timeout, so a hook that
+ * floods stdout accumulated until it fired — measured at 24MB of stdout and
+ * RSS 140MB→409MB in five seconds, and a Stop hook gets 600 of them. The
+ * prompt only ever sees 8KB of it (MAX_HOOK_CONTEXT_CHARS), and a hook's JSON
+ * decision is one line, so anything past this is memory spent on nothing.
+ */
+const MAX_HOOK_OUTPUT_BYTES = 1024 * 1024;
+
 const DEFAULT_HOOK_TIMEOUT = 30;
 const STOP_HOOK_TIMEOUT = 600;
 
@@ -610,8 +622,20 @@ function runCommandHook(
 			resolve({ blocked: false, stdout: "", exitCode: null });
 			return;
 		}
+		// A decoder per stream, not `chunk.toString()`: a pipe chunk can end
+		// mid-character, and decoding each chunk on its own turned every
+		// multibyte character straddling a 64KB boundary into U+FFFD — proven
+		// with an emoji placed astride each boundary, 2 of 5 destroyed. That
+		// output reaches the model, and a hook's JSON decision would fail to
+		// parse, silently discarding a `block`.
+		const stdoutDecoder = new StringDecoder("utf8");
+		const stderrDecoder = new StringDecoder("utf8");
 		let stdout = "";
 		let stderr = "";
+		let stdoutBytes = 0;
+		let stderrBytes = 0;
+		let stdoutClipped = false;
+		let stderrClipped = false;
 		let settled = false;
 		let initialResponseChecked = false;
 		let asyncResolve: ((r: HookRunResult) => void) | null = null;
@@ -631,11 +655,26 @@ function runCommandHook(
 			settled = true;
 			clearTimeout(timer);
 			signal?.removeEventListener("abort", onAbort);
+			// Flush whatever the decoders are holding: a stream that ends on an
+			// incomplete sequence otherwise drops those bytes entirely.
+			if (!stdoutClipped) stdout += stdoutDecoder.end();
+			if (!stderrClipped) stderr += stderrDecoder.end();
 			resolve(interpretHookOutput(stdout, stderr, exitCode));
 		};
 
 		stdoutStream.on("data", (d: Buffer) => {
-			stdout += d.toString("utf-8");
+			stdoutBytes += d.length;
+			// Keep draining the pipe past the cap — a hook blocked on write()
+			// would sit there until the timeout killed it, turning "too chatty"
+			// into "hung". Just stop keeping it.
+			if (stdoutBytes > MAX_HOOK_OUTPUT_BYTES) {
+				if (!stdoutClipped) {
+					stdoutClipped = true;
+					stdout += `\n[hook output truncated at ${MAX_HOOK_OUTPUT_BYTES} bytes]`;
+				}
+				return;
+			}
+			stdout += stdoutDecoder.write(d);
 			if (!initialResponseChecked) {
 				const firstLine = stdout.split("\n")[0]?.trim() ?? "";
 				if (firstLine.includes("}")) {
@@ -667,7 +706,15 @@ function runCommandHook(
 			}
 		});
 		stderrStream.on("data", (d: Buffer) => {
-			stderr += d.toString("utf-8");
+			stderrBytes += d.length;
+			if (stderrBytes > MAX_HOOK_OUTPUT_BYTES) {
+				if (!stderrClipped) {
+					stderrClipped = true;
+					stderr += `\n[hook stderr truncated at ${MAX_HOOK_OUTPUT_BYTES} bytes]`;
+				}
+				return;
+			}
+			stderr += stderrDecoder.write(d);
 		});
 		proc.on("error", () => finish(null));
 		proc.on("close", async (code) => {
