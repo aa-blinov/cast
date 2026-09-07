@@ -100,6 +100,16 @@ place of the rest, so a generated or dumped-into file cannot quietly cost a
 million tokens per request. Keep these files short and let the agent read the
 details on demand.
 
+## Session store maintenance
+
+`~/.cast/sessions/sessions.db` holds every session's messages and events.
+Sessions, events and background runs are pruned on a retention policy, but
+SQLite never shrinks the file on its own — the freed space stays claimed. At
+open, cast reclaims it when it is worth the write lock: at least 64MB of free
+pages *and* a fifth of the file. Measured on a real store, that was 219MB of
+547MB, returned in 2 seconds, and the log says so when it happens. Below
+either threshold nothing runs.
+
 ## Project Memory
 
 > See [Memory](memory.md) for a complete guide to what memory is, where the

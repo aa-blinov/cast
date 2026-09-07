@@ -135,6 +135,61 @@ function initConnection(instance: DatabaseSync): void {
 			`);
 		}
 	}
+	reclaimFreePages(instance);
+}
+
+/**
+ * Reclaim the free pages that deletes leave behind.
+ *
+ * SQLite never shrinks a file on its own, and `auto_vacuum` is off (its
+ * incremental mode cannot be switched on for an existing database without a
+ * full VACUUM anyway). Sessions, events and background runs are all pruned on
+ * a retention policy, so the space is genuinely freed — it just stays claimed
+ * by the file. Measured on a real store: 547MB on disk of which 219MB (40%)
+ * were free pages, and a VACUUM took 2.0s to bring it to 324MB.
+ *
+ * Thresholds keep it rare: a fifth of the file *and* at least 64MB, so the
+ * common case never pays, and a store that has just been pruned hard does.
+ * VACUUM holds a write lock for its duration, which is why this runs once per
+ * process at open — before anything is serving — rather than mid-session.
+ */
+const VACUUM_MIN_FREE_BYTES = 64 * 1024 * 1024;
+const VACUUM_MIN_FREE_SHARE = 0.2;
+
+/** @internal exported so a test can drive it with small thresholds */
+export function reclaimFreePages(
+	instance: DatabaseSync,
+	opts: { minFreeBytes?: number; minFreeShare?: number; quiet?: boolean } = {},
+): boolean {
+	const minFreeBytes = opts.minFreeBytes ?? VACUUM_MIN_FREE_BYTES;
+	const minFreeShare = opts.minFreeShare ?? VACUUM_MIN_FREE_SHARE;
+	try {
+		const value = (sql: string): number => {
+			const row = instance.prepare(sql).get() as Record<string, unknown> | undefined;
+			const first = row ? Object.values(row)[0] : undefined;
+			return typeof first === "number" ? first : 0;
+		};
+		const pageSize = value("PRAGMA page_size");
+		const pageCount = value("PRAGMA page_count");
+		const freeCount = value("PRAGMA freelist_count");
+		if (pageSize <= 0 || pageCount <= 0) return false;
+		const freeBytes = pageSize * freeCount;
+		if (freeBytes < minFreeBytes || freeCount / pageCount < minFreeShare) return false;
+		const startedAt = Date.now();
+		instance.exec("VACUUM");
+		if (!opts.quiet) {
+			console.error(
+				`[cast] compacted sessions.db — reclaimed ${(freeBytes / 1048576).toFixed(0)}MB of free pages in ${Date.now() - startedAt}ms.`,
+			);
+		}
+		return true;
+	} catch {
+		// A VACUUM that cannot run (no temp space, a concurrent writer holding
+		// the lock) must never stop the process from opening its database — the
+		// free pages are reusable either way, this only returns them to the
+		// filesystem.
+		return false;
+	}
 }
 
 /** Test-only: force the next getDb() to reopen (a fresh temp path per test
