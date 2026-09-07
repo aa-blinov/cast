@@ -3026,10 +3026,22 @@ const COMMAND_ROUTES: CommandRoute[] = [
 		match: (input) => input === "/rules" || input === "/rules list",
 		run: async ({ input, deps }) => {
 			deps.agent.addDisplayMessage({ role: "user", content: input });
+			// Recomputed here rather than threaded through every setter: a rule
+			// file cast could not read used to vanish from this listing with no
+			// explanation, which reads as "cast never saw my file". Cheap — rule
+			// files are small and this is not a hot path.
+			const rulesTrusted = await resolveProjectTrustForCwd(deps.projectDeps, deps.cwd);
+			const loadIssues = resolveRulesForCwd(deps.cwd, rulesTrusted).diagnostics;
+			const issuesBlock =
+				loadIssues.length > 0
+					? `\n\nCould not load ${loadIssues.length} rule file${loadIssues.length === 1 ? "" : "s"}:\n${loadIssues
+							.map((issue) => `  ${issue}`)
+							.join("\n")}`
+					: "";
 			if (deps.directoryRules.length === 0) {
 				deps.agent.addDisplayMessage({
 					role: "warning",
-					content: "No rules loaded. Create .cast/rules/*.md files to add rules.",
+					content: `No rules loaded. Create .cast/rules/*.md files to add rules.${issuesBlock}`,
 				});
 			} else {
 				// Which auto rules have latched is tracked wherever the agent loop
@@ -3062,7 +3074,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 					const scope = r.scope ? ` scope=${r.scope}` : "";
 					return `  ${r.id}${tag}${globs}${scope} (${r.source}) — ${r.description || "no description"}`;
 				});
-				deps.agent.addDisplayMessage({ role: "warning", content: `Rules\n${lines.join("\n")}` });
+				deps.agent.addDisplayMessage({ role: "warning", content: `Rules\n${lines.join("\n")}${issuesBlock}` });
 			}
 			return;
 		},

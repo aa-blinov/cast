@@ -177,11 +177,17 @@ function parseCursorishFrontmatter(raw: string): Record<string, unknown> {
 	return out;
 }
 
-function loadRuleFromFile(filePath: string, source: RuleSource, scope: string): Rule | null {
+function loadRuleFromFile(filePath: string, source: RuleSource, scope: string, diagnostics?: string[]): Rule | null {
 	let raw: string;
 	try {
 		raw = readFileSync(filePath, "utf-8");
-	} catch {
+	} catch (err) {
+		// Skipping is right — one bad file must not take the others down — but
+		// skipping *silently* left `/rules` showing a list with the rule simply
+		// absent, which reads as "cast never saw my file". Skills, MCP and
+		// hooks all report their load failures; rules were the last subsystem
+		// that did not.
+		diagnostics?.push(`${filePath}: unreadable (${err instanceof Error ? err.message : String(err)})`);
 		return null;
 	}
 
@@ -240,7 +246,7 @@ function isRuleFile(name: string): boolean {
  * (or `.cursor/rules`) directory it lives under, however it is filed. */
 const MAX_RULE_DIR_DEPTH = 4;
 
-function loadRulesFromDir(dir: string, source: RuleSource, scope: string, depth = 0): Rule[] {
+function loadRulesFromDir(dir: string, source: RuleSource, scope: string, depth = 0, diagnostics?: string[]): Rule[] {
 	if (!existsSync(dir)) return [];
 
 	let entries: Dirent[];
@@ -256,11 +262,11 @@ function loadRulesFromDir(dir: string, source: RuleSource, scope: string, depth 
 			// Cursor lets rules be organised in subdirectories of the rules
 			// directory; reading only the top level silently ignored them.
 			if (depth < MAX_RULE_DIR_DEPTH)
-				rules.push(...loadRulesFromDir(join(dir, entry.name), source, scope, depth + 1));
+				rules.push(...loadRulesFromDir(join(dir, entry.name), source, scope, depth + 1, diagnostics));
 			continue;
 		}
 		if (!entry.isFile() || !isRuleFile(entry.name)) continue;
-		const rule = loadRuleFromFile(join(dir, entry.name), source, scope);
+		const rule = loadRuleFromFile(join(dir, entry.name), source, scope, diagnostics);
 		if (rule) rules.push(rule);
 	}
 	return rules;
@@ -351,6 +357,10 @@ export interface LoadRulesOptions {
 	/** Project root: when set, discovers the root plus all nested `.cast/rules`
 	 * (each scoped to its subtree). Takes precedence over `projectDir`. */
 	projectCwd?: string;
+	/** Collects per-file load failures (unreadable file, unparsable
+	 * frontmatter) so a surface can show why a rule the user wrote is not in
+	 * the list. Silently dropping them read as cast never having seen the file. */
+	diagnostics?: string[];
 }
 
 /**
@@ -373,12 +383,12 @@ export function loadDirectoryRules(options: LoadRulesOptions): Rule[] {
 	// discovered when projectCwd is given; otherwise fall back to the flat dir.
 	if (options.projectCwd) {
 		for (const { dir, scope } of discoverProjectRuleDirs(options.projectCwd)) {
-			addAll(loadRulesFromDir(dir, "project", scope));
+			addAll(loadRulesFromDir(dir, "project", scope, 0, options.diagnostics));
 		}
 	} else if (options.projectDir) {
-		addAll(loadRulesFromDir(options.projectDir, "project", ""));
+		addAll(loadRulesFromDir(options.projectDir, "project", "", 0, options.diagnostics));
 	}
-	if (options.globalDir) addAll(loadRulesFromDir(options.globalDir, "global", ""));
+	if (options.globalDir) addAll(loadRulesFromDir(options.globalDir, "global", "", 0, options.diagnostics));
 
 	return Array.from(ruleMap.values());
 }

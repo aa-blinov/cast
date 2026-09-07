@@ -85,6 +85,10 @@ Choosing the mode:
 
 ## Checking your work
 
+`/rules` also lists any rule file cast could not load (unreadable, wrong
+permissions) with the reason — a rule that is missing from the list *and* not
+named there was never inside a discovered rules directory.
+
 `/rules` lists every loaded rule with its mode, globs, scope, and source —
 `[auto:globs]` means it has not matched yet this session, `[auto:sticky]` that
 it has latched. A rule that shows up as `manual` when you meant `auto` means

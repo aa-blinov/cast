@@ -139,6 +139,8 @@ export interface StartupResult {
 	rulesSuffix: string;
 	rulesLazySuffix: string;
 	directoryRules: Rule[];
+	/** Per-file rule load failures, surfaced by `/rules`. */
+	ruleDiagnostics: string[];
 	activeAutoRules: Rule[];
 	skillsPromptSuffix: string;
 	/** Configured SSH hosts for the ssh tool. */
@@ -657,6 +659,7 @@ export async function runStartup(
 		rulesSuffix,
 		rulesLazySuffix,
 		directoryRules: resolvedRules.directoryRules,
+		ruleDiagnostics: resolvedRules.diagnostics,
 		activeAutoRules: [],
 		skillsPromptSuffix,
 		sshHosts,

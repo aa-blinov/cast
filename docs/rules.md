@@ -170,6 +170,10 @@ Rules
 
 Auto rules show `[auto:sticky]` once they've been activated for the session, or `[auto:globs]` if they haven't matched yet.
 
+A rule file cast could not read (wrong permissions, a broken symlink) is
+listed separately with the reason. One bad file never stops the others from
+loading, but it is no longer dropped in silence either.
+
 ## Priority
 
 On a name collision (same `id`), the first-loaded rule wins:
