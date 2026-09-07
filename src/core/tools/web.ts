@@ -23,6 +23,7 @@ import { lookup as dnsLookup } from "node:dns/promises";
 import { isIPv4 } from "node:net";
 import { Parser } from "htmlparser2";
 import TurndownService from "turndown";
+import { Agent } from "undici";
 import { loadSettings } from "../settings.ts";
 import type { ToolResult } from "./shared.ts";
 
@@ -637,7 +638,17 @@ function isPrivateOrReservedIPv6(ip: string): boolean {
 	return false;
 }
 
-async function assertPublicFetchTarget(urlStr: string): Promise<void> {
+/**
+ * Validates a fetch target and returns the addresses it is allowed to use.
+ *
+ * Returning them is the point: checking the hostname's addresses and then
+ * letting `fetch` resolve it again leaves a window between the two lookups —
+ * classic DNS rebinding. A name under an attacker's control with a zero TTL
+ * can answer with a public address for the check and 127.0.0.1 (or a
+ * metadata endpoint) for the request that follows, and every guard here would
+ * have passed. The connection is now pinned to what was actually vetted.
+ */
+async function assertPublicFetchTarget(urlStr: string): Promise<string[]> {
 	let parsed: URL;
 	try {
 		parsed = new URL(urlStr);
@@ -651,12 +662,12 @@ async function assertPublicFetchTarget(urlStr: string): Promise<void> {
 	if (isIPv4(hostname)) {
 		if (isPrivateOrReservedIPv4(hostname))
 			throw new Error(`Refusing to fetch a private/internal address: ${hostname}`);
-		return;
+		return [hostname];
 	}
 	if (hostname.includes(":")) {
 		if (isPrivateOrReservedIPv6(hostname))
 			throw new Error(`Refusing to fetch a private/internal address: ${hostname}`);
-		return;
+		return [hostname];
 	}
 	let addresses: { address: string; family: number }[];
 	try {
@@ -670,6 +681,43 @@ async function assertPublicFetchTarget(urlStr: string): Promise<void> {
 			throw new Error(`Refusing to fetch — "${hostname}" resolves to a private/internal address (${address})`);
 		}
 	}
+	return addresses.map((a) => a.address);
+}
+
+/**
+ * A dispatcher that only ever connects to `allowed` — the addresses this
+ * hostname was just vetted at. undici's own lookup is bypassed, so the
+ * request cannot land anywhere a second DNS answer might point.
+ */
+function pinnedDispatcher(allowed: string[]): Agent {
+	return new Agent({ connect: { lookup: pinnedLookup(allowed) } });
+}
+
+/** The lookup a pinned dispatcher connects through. @internal exported for tests */
+export function pinnedLookup(
+	allowed: string[],
+): (
+	hostname: string,
+	options: unknown,
+	callback: (err: Error | null, addresses: Array<{ address: string; family: number }>) => void,
+) => void {
+	const pinned = new Set(allowed);
+	return (hostname, _options, callback) => {
+		if (isIPv4(hostname) || hostname.includes(":")) {
+			// An address undici asks for that was never vetted (a rebind
+			// answered between the check and the connection) must not be dialed.
+			if (!pinned.has(hostname)) {
+				callback(new Error(`Refusing to connect to an unvetted address: ${hostname}`), []);
+				return;
+			}
+			callback(null, [{ address: hostname, family: isIPv4(hostname) ? 4 : 6 }]);
+			return;
+		}
+		callback(
+			null,
+			allowed.map((address) => ({ address, family: isIPv4(address) ? 4 : 6 })),
+		);
+	};
 }
 
 const LOCAL_MAX_REDIRECTS = 5;
@@ -763,6 +811,7 @@ export async function fetchUrlLocal(
 	if (signal?.aborted) controller.abort(signal.reason);
 	else signal?.addEventListener("abort", onAbort, { once: true });
 
+	const dispatchers: Agent[] = [];
 	try {
 		let currentUrl = url;
 		let resp: Response | undefined;
@@ -771,7 +820,9 @@ export async function fetchUrlLocal(
 		// check 302 into an internal address afterward.
 		for (let hop = 0; ; hop++) {
 			// biome-ignore lint/performance/noAwaitInLoops: each redirect hop must be validated and fetched before the next one is even known
-			await assertPublicFetchTarget(currentUrl);
+			const vetted = await assertPublicFetchTarget(currentUrl);
+			const dispatcher = pinnedDispatcher(vetted);
+			dispatchers.push(dispatcher);
 			const doFetch = (userAgent: string) =>
 				fetch(currentUrl, {
 					headers: {
@@ -781,7 +832,8 @@ export async function fetchUrlLocal(
 					},
 					redirect: "manual",
 					signal: controller.signal,
-				});
+					dispatcher,
+				} as RequestInit & { dispatcher: Agent });
 
 			resp = await doFetch(LOCAL_BROWSER_UA);
 			if (resp.status === 403 && resp.headers.get("cf-mitigated") === "challenge") {
@@ -828,6 +880,10 @@ export async function fetchUrlLocal(
 	} finally {
 		clearTimeout(timeout);
 		signal?.removeEventListener("abort", onAbort);
+		// One dispatcher per hop, each holding its own connection pool: without
+		// closing them the sockets (and their keep-alive timers) outlive the
+		// call, which in a long session means a pool per fetched URL.
+		await Promise.all(dispatchers.map((d) => d.close().catch(() => undefined)));
 	}
 }
 
