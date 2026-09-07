@@ -2,6 +2,14 @@
 
 cast automatically discovers and loads `AGENTS.md` or `CLAUDE.md` files from your project tree and injects them into the system prompt. This gives the agent project-specific instructions without needing to create a skill or rule.
 
+## Size
+
+Each context file is capped at 64KB, with a note in place of the rest. A
+context file is injected into the system prompt of **every** request, so its
+size is paid over and over — an uncapped one measured at 3.9MB cost roughly a
+million tokens per request. Keep these files short and let the agent read the
+details on demand (a rule with `globs`, or just a file it can open).
+
 ## How It Works
 
 cast searches for these filenames (case-insensitive):
