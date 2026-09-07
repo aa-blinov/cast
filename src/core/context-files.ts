@@ -43,15 +43,20 @@ function clampContextFile(content: string, filePath: string): string {
 	return `${content.slice(0, MAX_CONTEXT_FILE_CHARS)}\n\n[Context file truncated at ${MAX_CONTEXT_FILE_CHARS} characters — ${filePath} is ${content.length} characters, and this file is sent with every request. Keep it short and let the model read the details on demand.]`;
 }
 
-function loadContextFileFromDir(dir: string): ContextFile | null {
+function loadContextFileFromDir(dir: string, diagnostics?: string[]): ContextFile | null {
 	for (const filename of CANDIDATES) {
 		const filePath = join(dir, filename);
 		if (existsSync(filePath)) {
 			try {
 				const content = readFileSync(filePath, "utf-8");
 				if (content.trim()) return { path: filePath, content: clampContextFile(content, filePath) };
-			} catch {
-				// Unreadable file is silently skipped — same as pi.
+			} catch (err) {
+				// Skipping is right — one unreadable file must not stop the walk
+				// — but in silence the instructions the user wrote simply never
+				// reached the model, with nothing anywhere saying why. Collected
+				// for `/context` to show, the same way rules, skills, MCP and
+				// hooks report their own load failures.
+				diagnostics?.push(`${filePath}: unreadable (${err instanceof Error ? err.message : String(err)})`);
 			}
 		}
 	}
@@ -68,13 +73,13 @@ export function hasContextFileInDir(dir: string): boolean {
  * `/`. The file in cwd itself is only included when `projectTrusted` is true.
  * Returned root-first so higher-level guidelines precede project-specific ones.
  */
-export function loadProjectContextFiles(cwd: string, projectTrusted: boolean): ContextFile[] {
+export function loadProjectContextFiles(cwd: string, projectTrusted: boolean, diagnostics?: string[]): ContextFile[] {
 	const resolvedCwd = resolve(cwd);
 	const result: ContextFile[] = [];
 	const seen = new Set<string>();
 
 	const globalDir = join(homedir(), ".cast");
-	const globalFile = loadContextFileFromDir(globalDir);
+	const globalFile = loadContextFileFromDir(globalDir, diagnostics);
 	if (globalFile) {
 		result.push(globalFile);
 		seen.add(globalFile.path);
@@ -87,7 +92,7 @@ export function loadProjectContextFiles(cwd: string, projectTrusted: boolean): C
 	const root = resolve("/");
 
 	while (true) {
-		const file = loadContextFileFromDir(current);
+		const file = loadContextFileFromDir(current, diagnostics);
 		if (file && !seen.has(file.path)) {
 			if (current !== resolvedCwd || projectTrusted) {
 				ancestorFiles.unshift(file);

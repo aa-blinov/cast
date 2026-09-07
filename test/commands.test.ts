@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1465,6 +1465,37 @@ describe("/undo", () => {
 	});
 });
 
+describe("/context", () => {
+	it("lists the loaded context files and names any it could not read", async () => {
+		// There was no way to see which AGENTS.md files are in play — the
+		// question behind "why is the agent doing that?" — and an unreadable one
+		// was skipped in silence, so instructions the user wrote never reached
+		// the model with nothing anywhere saying why.
+		const dir = mkdtempSync(join(tmpdir(), "cast-context-cmd-"));
+		try {
+			writeFileSync(join(dir, "AGENTS.md"), "Use tabs.\n");
+			const nested = join(dir, "sub");
+			mkdirSync(nested, { recursive: true });
+			const broken = join(nested, "AGENTS.md");
+			writeFileSync(broken, "Unreadable.\n");
+			chmodSync(broken, 0o000);
+
+			const { deps, calls } = createFakeDeps({ cwd: nested });
+			await handleInput("/context", undefined, deps);
+
+			const listing = (calls["agent.addDisplayMessage"] ?? [])
+				.map((args) => (args[0] as { content?: string }).content ?? "")
+				.join("\n");
+			expect(listing).toContain("AGENTS.md");
+			expect(listing).toContain("Could not load 1 context file");
+			expect(listing).toMatch(/unreadable|EACCES/i);
+			chmodSync(broken, 0o644);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});
+
 describe("/rules", () => {
 	// The agent loop tracks which auto rules have latched, and for a thin
 	// client that loop is the daemon's. /rules printed the local view
@@ -1546,6 +1577,7 @@ describe("every routed command dispatches", () => {
 		"/provider",
 		"/queue",
 		"/queue-reset",
+		"/context",
 		"/reasoning",
 		"/reasoning-display",
 		"/reasoning-format",

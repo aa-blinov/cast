@@ -2,6 +2,14 @@
 
 cast automatically discovers and loads `AGENTS.md` or `CLAUDE.md` files from your project tree and injects them into the system prompt. This gives the agent project-specific instructions without needing to create a skill or rule.
 
+## Seeing what is loaded
+
+`/context` lists the context files in play for the current directory, with
+their size, and names any file cast could not read (wrong permissions, a
+broken symlink) with the reason. One unreadable file never stops the walk, but
+it is not dropped in silence either — otherwise instructions you wrote simply
+never reach the model, with nothing saying why.
+
 ## Size
 
 Each context file is capped at 64KB, with a note in place of the rest. A
