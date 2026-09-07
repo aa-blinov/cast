@@ -239,6 +239,7 @@ async function handleRunCommand(args: string[], version: string): Promise<void> 
 	let cliBypassPermissions = false;
 	let format: "default" | "json" = "default";
 	let interactive = false;
+	let keepBackground = false;
 	let noSkills = false;
 	const cliSkillPaths: string[] = [];
 	let noMcp = false;
@@ -268,6 +269,8 @@ async function handleRunCommand(args: string[], version: string): Promise<void> 
 			i++;
 		} else if (args[i] === "--interactive") {
 			interactive = true;
+		} else if (args[i] === "--keep-background") {
+			keepBackground = true;
 		} else if (args[i] === "--bypass-permissions") {
 			cliBypassPermissions = true;
 		} else if (args[i] === "--skill") {
@@ -306,6 +309,7 @@ Options:
   -w, --worktree <name>  Run in an isolated git worktree (cast/.cast/worktrees/<name>)
   --format <default|json>  Output format
   --interactive          Persistent JSONL session protocol on stdin/stdout
+  --keep-background      Leave background tasks this run started running after it exits
   --bypass-permissions   Skip destructive-action confirmations (bash + write)`);
 			return;
 		} else {
@@ -346,7 +350,7 @@ Options:
 		await runInteractive(parsedArgs);
 		return;
 	}
-	await runNonInteractive(parsedArgs, { message, format });
+	await runNonInteractive(parsedArgs, { message, format, keepBackground });
 }
 
 async function handleAcpCommand(args: string[], version: string): Promise<void> {

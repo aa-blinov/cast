@@ -35,7 +35,7 @@ const STABLE_API_V1_ROUTES: StableRoute[] = [
 	{
 		method: "POST",
 		legacyPath:
-			/^\/api\/sessions\/[^/]+\/(fork|chat|abort|steer|followup|command|mode|question|bash-confirm|plan-transition|clean-context|rename|pin|share|fs\/rename|inputs\/upload)$/,
+			/^\/api\/sessions\/[^/]+\/(fork|chat|abort|steer|followup|command|mode|question|bash-confirm|plan-transition|clean-context|rename|pin|share|background\/kill|fs\/rename|inputs\/upload)$/,
 	},
 	{ method: "GET", legacyPath: /^\/api\/browse$/ },
 	{ method: "POST", legacyPath: /^\/api\/browse\/mkdir$/ },

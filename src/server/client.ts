@@ -357,6 +357,28 @@ export async function resolveServerPlanTransition(client: ServerClient, sessionI
 }
 
 /** Fetch the daemon's view of a session (mode, question, plan transition, status). */
+/**
+ * Kill a session's background tasks and report what was killed. Used by
+ * `cast run` on exit for a session it created — the daemon would otherwise
+ * keep them running with no client left to watch them.
+ */
+export async function killServerBackgroundTasks(
+	client: ServerClient,
+	sessionId: string,
+): Promise<Array<{ id: string; command: string }>> {
+	const { status, data } = await serverFetch(client, `${API_V1_PREFIX}/sessions/${sessionId}/background/kill`, {
+		method: "POST",
+	});
+	if (status !== 200) return [];
+	const killed = (data as { killed?: unknown }).killed;
+	if (!Array.isArray(killed)) return [];
+	return killed.map((task) => ({
+		id: typeof (task as { id?: unknown }).id === "string" ? (task as { id: string }).id : "?",
+		command:
+			typeof (task as { command?: unknown }).command === "string" ? (task as { command: string }).command : "?",
+	}));
+}
+
 export async function getServerSession(client: ServerClient, sessionId: string): Promise<Record<string, unknown>> {
 	const { status, data } = await serverFetch(client, `${API_V1_PREFIX}/sessions/${sessionId}`);
 	if (status !== 200) throw new Error(`session fetch failed (HTTP ${status})`);

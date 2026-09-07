@@ -24,6 +24,26 @@ describe("API v1 contract", () => {
 		}
 	});
 
+	it("accepts the routes the CLI itself calls over /api/v1 (regression)", () => {
+		// A route registered only under /api/* is invisible to a client that
+		// speaks /api/v1: the versioned router answers exactly the paths on
+		// this list. `cast run` called POST .../background/kill through the v1
+		// prefix, got a 404, and the client — which trusted its own earlier
+		// listing instead of the daemon's answer — printed "Stopped 1
+		// background task" while the task kept running. Caught by checking the
+		// process afterwards, not by any test.
+		const called: Array<[string, string]> = [
+			["POST", "/api/sessions/session-test/background/kill"],
+			["GET", "/api/sessions/session-test"],
+			["POST", "/api/sessions/session-test/chat"],
+			["POST", "/api/sessions"],
+			["GET", "/api/sessions"],
+		];
+		for (const [method, legacyPath] of called) {
+			expect(isStableApiV1Route(method, legacyPath), `${method} ${legacyPath}`).toBe(true);
+		}
+	});
+
 	it("publishes only routes accepted by the versioned daemon router", () => {
 		const paths = apiV1OpenApiDocument.paths as Record<string, Record<string, unknown>>;
 		for (const [path, operations] of Object.entries(paths)) {
