@@ -145,12 +145,34 @@ export function ensureMemoryFiles(sessionId: string, projectId: string): void {
 	mkdirSync(tasksDir(sessionId), { recursive: true });
 }
 
+/**
+ * The whole file. Anything that reads a memory file in order to *write* one
+ * back — merging dream bullets in, rolling a rejected checkpoint back,
+ * appending a note, reconciling the database against the file — has to see all
+ * of it: this used to cut at MAX_FILE_CHARS like the prompt reader below, so
+ * the first merge after MEMORY.md passed 40,000 characters rewrote the file as
+ * its own first 40,000 and reconcile then deleted the database rows for every
+ * bullet that had just been cut off. Silent amputation of the file whose
+ * comment two lines up promises hand edits survive.
+ */
 export function readMemoryFile(path: string, fallback = ""): string {
 	try {
-		return readFileSync(path, "utf8").slice(0, MAX_FILE_CHARS);
+		return readFileSync(path, "utf8");
 	} catch {
 		return fallback;
 	}
+}
+
+/**
+ * Capped read for prompt assembly, where an unbounded file would be pasted
+ * into the context. The cut is marked: an unmarked one reads to the model as
+ * "this fact is not in memory", which is how a summarizer came to record a
+ * fact as absent because it was on the far side of a silent truncation.
+ */
+export function readMemoryFileForPrompt(path: string, fallback = ""): string {
+	const content = readMemoryFile(path, fallback);
+	if (content.length <= MAX_FILE_CHARS) return content;
+	return `${content.slice(0, MAX_FILE_CHARS)}\n\n[… truncated at ${MAX_FILE_CHARS} characters for this prompt — the file itself is longer; Grep it for anything you expect and cannot see …]`;
 }
 
 export interface CheckedMemoryFile {
@@ -161,7 +183,7 @@ export interface CheckedMemoryFile {
 /** Distinguishes an intentionally empty file from an I/O failure. */
 export function readMemoryFileChecked(path: string): CheckedMemoryFile {
 	try {
-		return { readable: true, content: readFileSync(path, "utf8").slice(0, MAX_FILE_CHARS) };
+		return { readable: true, content: readFileSync(path, "utf8") };
 	} catch {
 		return { readable: false, content: "" };
 	}
@@ -172,21 +194,22 @@ export function readSessionMemory(sessionId: string): { checkpoint: string; note
 	try {
 		for (const entry of readdirSync(tasksDir(sessionId), { withFileTypes: true })) {
 			if (!entry.isDirectory()) continue;
-			const content = readMemoryFile(taskProgressPath(sessionId, entry.name));
+			const content = readMemoryFileForPrompt(taskProgressPath(sessionId, entry.name));
 			if (content) progress.push(`### ${entry.name}\n${content}`);
 		}
 	} catch {
 		// The session may not have delegated any tasks yet.
 	}
 	return {
-		checkpoint: readMemoryFile(checkpointPath(sessionId)),
-		notes: readMemoryFile(notesPath(sessionId)),
+		checkpoint: readMemoryFileForPrompt(checkpointPath(sessionId)),
+		notes: readMemoryFileForPrompt(notesPath(sessionId)),
 		taskProgress: progress.join("\n\n").slice(0, MAX_FILE_CHARS),
 	};
 }
 
+/** Prompt-side read: every caller pastes this into the model's context. */
 export function readProjectMemory(projectId: string): string {
-	return readMemoryFile(projectMemoryPath(projectId));
+	return readMemoryFileForPrompt(projectMemoryPath(projectId));
 }
 
 export function writeMemoryFile(path: string, content: string): void {
