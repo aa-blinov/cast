@@ -159,6 +159,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/build", description: "Exit plan mode, restore full toolset" },
 	{ name: "/clear", description: "Clear context (and save)" },
 	{ name: "/compact", description: "Compact context now" },
+	{ name: "/context", description: "List loaded AGENTS.md / CLAUDE.md context files" },
 	{ name: "/continue", description: "Resume the most recent session" },
 	{ name: "/copy", description: "Copy last assistant response" },
 	{ name: "/current", description: "Show all status bar data" },
@@ -3019,6 +3020,35 @@ const COMMAND_ROUTES: CommandRoute[] = [
 			agent.refresh();
 			const personaNote = restoredPersona ? ` · persona: ${restoredPersona.label}` : "";
 			showNotice(`[Switched to session: ${session.id} (${session.messages.length} messages)${personaNote}]`);
+			return;
+		},
+	},
+	{
+		match: (input) => input === "/context" || input === "/context list",
+		run: async ({ input, deps }) => {
+			deps.agent.addDisplayMessage({ role: "user", content: input });
+			// There was no way to see which context files are in play — the
+			// question behind "why is the agent doing that?" — and an unreadable
+			// one was skipped in silence, so instructions the user had written
+			// never reached the model with nothing saying why.
+			const trusted = await resolveProjectTrustForCwd(deps.projectDeps, deps.cwd);
+			const issues: string[] = [];
+			const files = loadProjectContextFiles(deps.cwd, trusted, issues);
+			const lines = files.map((f) => {
+				const truncated = f.content.includes("[Context file truncated at") ? ", truncated" : "";
+				return `  ${f.path} (${(f.content.length / 1024).toFixed(1)}KB${truncated})`;
+			});
+			const issuesBlock =
+				issues.length > 0
+					? `\n\nCould not load ${issues.length} context file${issues.length === 1 ? "" : "s"}:\n${issues
+							.map((issue) => `  ${issue}`)
+							.join("\n")}`
+					: "";
+			const body =
+				files.length > 0
+					? `Context files (sent with every request)\n${lines.join("\n")}${issuesBlock}`
+					: `No context files loaded. Create AGENTS.md in the project root to add project instructions.${issuesBlock}`;
+			deps.agent.addDisplayMessage({ role: "warning", content: body });
 			return;
 		},
 	},

@@ -139,6 +139,7 @@ Use `/statusbar` to toggle individual segments on/off and reorder them — usefu
 | Command | Description |
 |---------|-------------|
 | `/current` | All status bar data: model, context, tokens in/out with cache %, cost, sub-agent tokens, repo, session |
+| `/context` | The AGENTS.md / CLAUDE.md files loaded for this directory, with their size, plus any file that could not be read |
 
 ## Configuration
 
