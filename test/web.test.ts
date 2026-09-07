@@ -16,6 +16,7 @@ import {
 	execWebSearch,
 	fetchUrl,
 	fetchUrlLocal,
+	pinnedLookup,
 	searchBrave,
 	searchDuckDuckGo,
 	searchTavily,
@@ -900,6 +901,43 @@ describe("fetchUrlLocal", () => {
 			// The redirect response itself is fine to receive — only the second
 			// hop (the actual internal address) must never be requested.
 			expect(fetchMock).toHaveBeenCalledTimes(1);
+		});
+
+		it("pins the connection to the address it vetted, so a rebind cannot follow (regression)", async () => {
+			// The guard resolved the hostname and then let fetch resolve it
+			// again: a name with a zero TTL could answer public for the check
+			// and 127.0.0.1 for the request. Proven end-to-end against a real
+			// local server before this — "lookups answered: 2, local server
+			// hits: 1, INTERNAL SECRET REACHED".
+			mockDnsLookup.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+			const fetchMock = vi
+				.fn()
+				.mockResolvedValue(mockLocalResponse({ headers: { "content-type": "text/plain" }, body: "ok" }));
+			vi.stubGlobal("fetch", fetchMock);
+
+			await fetchUrlLocal("https://rebind.example/");
+
+			expect(fetchMock).toHaveBeenCalledTimes(1);
+			const init = fetchMock.mock.calls[0]?.[1] as { dispatcher?: unknown } | undefined;
+			expect(init?.dispatcher, "the request must carry a dispatcher pinned to the vetted address").toBeDefined();
+		});
+
+		it("the pinned lookup answers only with vetted addresses", () => {
+			const lookup = pinnedLookup(["93.184.216.34"]);
+			const seen: Array<{ err: Error | null; addresses: Array<{ address: string; family: number }> }> = [];
+			const record = (err: Error | null, addresses: Array<{ address: string; family: number }>) =>
+				seen.push({ err, addresses });
+
+			// The hostname itself resolves to exactly what was vetted.
+			lookup("rebind.example", {}, record);
+			expect(seen[0]?.err).toBeNull();
+			expect(seen[0]?.addresses).toEqual([{ address: "93.184.216.34", family: 4 }]);
+
+			// A rebind that hands undici a loopback address is refused outright.
+			lookup("127.0.0.1", {}, record);
+			expect(seen[1]?.err?.message).toMatch(/unvetted address/i);
+			lookup("169.254.169.254", {}, record);
+			expect(seen[2]?.err?.message).toMatch(/unvetted address/i);
 		});
 
 		it("gives up after too many redirect hops instead of looping forever", async () => {
