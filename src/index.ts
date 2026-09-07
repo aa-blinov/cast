@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { openSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -543,7 +543,15 @@ async function handleServerCommand(args: string[]): Promise<void> {
 	// see web/index.ts) or failure (it exits early — bad port, crash, a
 	// runStartup error) instead of declaring victory the instant spawn()
 	// returns, which is true whether or not the child goes on to bind at all.
-	const logFd = openSync(LOG_FILE, "a");
+	// The daemon's stdout/stderr go straight into this file, so it has to be
+	// openable before anything is spawned (see server/daemon-log.ts).
+	const { openDaemonLog } = await import("./server/daemon-log.ts");
+	const opened = openDaemonLog(LOG_FILE);
+	if (!opened.ok) {
+		for (const line of opened.failure.lines) console.error(line);
+		process.exit(1);
+	}
+	const logFd = opened.fd;
 	const child = spawn(process.execPath, spawnArgs, {
 		cwd: spawnCwd,
 		detached: true,
