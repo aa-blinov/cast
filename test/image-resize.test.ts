@@ -4,7 +4,7 @@ import decodeJpeg, { init as initJpegDecode } from "@jsquash/jpeg/decode.js";
 import encodeJpeg, { init as initJpegEncode } from "@jsquash/jpeg/encode.js";
 import encodePng, { init as initPngEncode } from "@jsquash/png/encode.js";
 import { describe, expect, it } from "vitest";
-import { resizeImageForEmbedding } from "../src/core/image-resize.ts";
+import { imageDimensionsFromHeader, MAX_IMAGE_PIXELS, resizeImageForEmbedding } from "../src/core/image-resize.ts";
 
 // Real codecs, real WASM init, real images — this is the same pipeline
 // execRead uses (tools/files.ts), not a mock. Builds its own oversized test
@@ -77,4 +77,50 @@ describe("resizeImageForEmbedding", () => {
 		const garbage = Buffer.alloc(400 * 1024, 0xff);
 		await expect(resizeImageForEmbedding(garbage, "image/jpeg")).resolves.toBeUndefined();
 	}, 45_000);
+});
+
+describe("imageDimensionsFromHeader / MAX_IMAGE_PIXELS", () => {
+	// A byte cap says nothing about what a file expands to: a 652KB
+	// 15000×15000 PNG decodes to 858MB of RGBA, and reading one took the
+	// process from 110MB to 3.3GB of RSS in 6.6s — inside the daemon, where
+	// every session shares that memory.
+	function png(width: number, height: number): Buffer {
+		const header = Buffer.alloc(24);
+		header.writeUInt32BE(0x89504e47, 0);
+		header.writeUInt32BE(width, 16);
+		header.writeUInt32BE(height, 20);
+		return header;
+	}
+
+	function jpeg(width: number, height: number): Buffer {
+		// SOI, then a minimal SOF0 segment carrying the size.
+		const buf = Buffer.alloc(20, 0);
+		buf[0] = 0xff;
+		buf[1] = 0xd8;
+		buf[2] = 0xff;
+		buf[3] = 0xc0;
+		buf.writeUInt16BE(11, 4); // segment length
+		buf.writeUInt16BE(height, 7);
+		buf.writeUInt16BE(width, 9);
+		return buf;
+	}
+
+	it("reads PNG dimensions without decoding pixels", () => {
+		expect(imageDimensionsFromHeader(png(15000, 15000))).toEqual({ width: 15000, height: 15000 });
+	});
+
+	it("reads JPEG dimensions from the frame header", () => {
+		expect(imageDimensionsFromHeader(jpeg(4000, 3000))).toEqual({ width: 4000, height: 3000 });
+	});
+
+	it("returns undefined for anything it does not recognise", () => {
+		expect(imageDimensionsFromHeader(Buffer.from("not an image at all"))).toBeUndefined();
+	});
+
+	it("puts a bomb over the pixel ceiling and an ordinary photo under it", () => {
+		const bomb = 15000 * 15000;
+		const photo = 4000 * 3000;
+		expect(bomb).toBeGreaterThan(MAX_IMAGE_PIXELS);
+		expect(photo).toBeLessThan(MAX_IMAGE_PIXELS);
+	});
 });

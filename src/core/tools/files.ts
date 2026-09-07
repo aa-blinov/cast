@@ -11,7 +11,7 @@ import { access, mkdir, open, readdir, readFile, stat, writeFile } from "node:fs
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
 import type { AppConfig } from "../config.ts";
-import { resizeImageForEmbedding } from "../image-resize.ts";
+import { imageDimensionsFromHeader, MAX_IMAGE_PIXELS, resizeImageForEmbedding } from "../image-resize.ts";
 import { findFilesByBasename } from "./search.ts";
 import { formatSize, resolvePath, type ToolResult } from "./shared.ts";
 import { convertToLineEnding, detectLineEnding, normalizeLineEndings, replace } from "./text-replace.ts";
@@ -365,6 +365,19 @@ export async function execRead(args: Record<string, unknown>, cwd: string, confi
 			};
 		}
 		const original = await readFile(absolutePath);
+		// A byte cap says nothing about what the file expands to: a 652KB
+		// 15000×15000 PNG decodes to 858MB of RGBA, and reading one took the
+		// process from 110MB to 3.3GB of RSS — in the daemon, where every
+		// session shares that memory. Checked from the header, before any
+		// decode touches it.
+		const dimensions = imageDimensionsFromHeader(original);
+		if (dimensions && dimensions.width * dimensions.height > MAX_IMAGE_PIXELS) {
+			const megapixels = (dimensions.width * dimensions.height) / 1_000_000;
+			return {
+				content: `Image too large to read (${dimensions.width}×${dimensions.height}, ${megapixels.toFixed(0)}MP; max ${MAX_IMAGE_PIXELS / 1_000_000}MP): ${filePath}. Decoding it would need about ${formatSize(dimensions.width * dimensions.height * 4)} of memory. Resize or crop it first.`,
+				isError: true,
+			};
+		}
 		const resized = await resizeImageForEmbedding(original, mimeType);
 		const embedded = resized?.buffer ?? original;
 		const note = resized ? ` — downscaled from ${formatSize(stats.size)} to ${formatSize(embedded.length)}` : "";

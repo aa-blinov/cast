@@ -2107,6 +2107,48 @@ describe("file tools on large files and lookalike UI paths", () => {
 		expect(grew).toBeLessThan(2 * 1024 * 1024);
 	});
 
+	it("refuses an image whose pixel count would blow up memory (regression)", async () => {
+		// The 5MB byte cap says nothing about what a file expands to. A 652KB
+		// 15000×15000 PNG decodes to 858MB of RGBA: reading one took the
+		// process from 110MB to 3.3GB of RSS in 6.6s, inside the daemon where
+		// every session shares that memory. Checked from the header now, so
+		// this test needs no real bomb — just its dimensions.
+		const { execRead } = await import("../src/core/tools/files.ts");
+		const { deflateSync } = await import("node:zlib");
+		const width = 15000;
+		const height = 15000;
+
+		const chunk = (type: string, data: Buffer): Buffer => {
+			const len = Buffer.alloc(4);
+			len.writeUInt32BE(data.length, 0);
+			const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+			const crc = Buffer.alloc(4);
+			// Any CRC: nothing validates it before the dimension check.
+			crc.writeUInt32BE(0, 0);
+			return Buffer.concat([len, body, crc]);
+		};
+		const ihdr = Buffer.alloc(13);
+		ihdr.writeUInt32BE(width, 0);
+		ihdr.writeUInt32BE(height, 4);
+		ihdr[8] = 8;
+		ihdr[9] = 2;
+		const file = Buffer.concat([
+			Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+			chunk("IHDR", ihdr),
+			chunk("IDAT", deflateSync(Buffer.alloc(1024))),
+			chunk("IEND", Buffer.alloc(0)),
+		]);
+		const path = join(TEST_DIR, "bomb.png");
+		writeFileSync(path, file);
+
+		const result = await execRead({ path }, TEST_DIR, mockConfig);
+
+		expect(result.isError).toBe(true);
+		expect(result.content).toContain("15000×15000");
+		expect(result.content).toMatch(/max 40MP/);
+		expect(result.imageDataUrl).toBeUndefined();
+	});
+
 	it("refuses a named pipe instead of blocking on it forever (regression)", async () => {
 		// Opening a FIFO blocks until something opens the other end, and these
 		// tools have no timeout and no cancel path — `read` on one simply never
