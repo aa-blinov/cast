@@ -1,9 +1,10 @@
-import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { reclaimFreePages } from "../src/core/db.ts";
+import { getDb, reclaimFreePages, resetDbConnectionForTests } from "../src/core/db.ts";
 
 /**
  * SQLite never shrinks a file on its own, and `auto_vacuum` is off. cast
@@ -95,5 +96,51 @@ describe("reclaimFreePages", () => {
 
 		expect(ran).toBe(false);
 		expect(statSync(path).size).toBe(sizeBefore);
+	});
+});
+
+describe("opening a damaged store", () => {
+	let realHome: string | undefined;
+	let home: string;
+
+	beforeEach(() => {
+		realHome = process.env.HOME;
+		home = mkdtempSync(join(tmpdir(), "cast-badstore-"));
+		process.env.HOME = home;
+		delete process.env.CAST_SESSIONS_DB;
+		resetDbConnectionForTests();
+	});
+
+	afterEach(() => {
+		resetDbConnectionForTests();
+		process.env.HOME = realHome;
+		rmSync(home, { recursive: true, force: true });
+	});
+
+	it("explains what to do instead of surfacing SQLite's own wording", () => {
+		// A truncated or overwritten store made cast exit with "Error: file is
+		// not a database" and a stack through the minified bundle — nothing
+		// naming the file, nothing saying what to do. Verified live: the daemon
+		// log held pages of that.
+		const dir = join(home, ".cast", "sessions");
+		mkdirSync(dir, { recursive: true });
+		const path = join(dir, "sessions.db");
+		writeFileSync(path, randomBytes(40 * 1024));
+
+		let error: Error | undefined;
+		try {
+			getDb();
+		} catch (err) {
+			error = err as Error;
+		}
+
+		expect(error).toBeDefined();
+		expect(error?.message).toContain(path);
+		expect(error?.message).toMatch(/not a readable SQLite database/i);
+		expect(error?.message).toContain("Nothing was changed");
+		expect(error?.message).toContain(".broken");
+		// And the file really is untouched: it may be the only copy of the
+		// user's history, so a wrong guess here would destroy it.
+		expect(statSync(path).size).toBe(40 * 1024);
 	});
 });
