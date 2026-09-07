@@ -81,6 +81,13 @@ Servers connect in parallel during startup. Each gets a 30-second timeout — en
 
 Failed connections produce a diagnostic message but don't block other servers or prevent cast from starting.
 
+A server that drops after connecting is retried automatically — five attempts
+over roughly half a minute, backing off 1s/2s/4s/8s/16s — which rides out a
+server restarting itself. A refusal is not retried: when the endpoint answers
+`401`/`403` or "invalid authorization", no amount of retrying changes the
+answer, so cast says once what to fix and waits for
+`/mcp reconnect <server>`.
+
 ## CLI Flags
 
 | Flag | Description |
