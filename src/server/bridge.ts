@@ -249,6 +249,11 @@ export interface WebAgentSession {
 	 * reached the daemon, so the run hit a confirmation prompt no one could
 	 * answer and hung until the five-minute timeout refused it. */
 	permissionModeOverride?: PermissionMode;
+	/** `--no-skills` / `--no-mcp` for this session. Same story as the
+	 * permission mode: parsed, documented, and dropped before the daemon —
+	 * a run asking for no MCP tools got them anyway. */
+	noSkills?: boolean;
+	noMcp?: boolean;
 	runner: AgentRunner;
 	backgroundBash: BashBackgroundDeps;
 	status: WebAgentStatus;
@@ -669,6 +674,8 @@ export interface ServerBridge {
 		providerOverride?: string,
 		/** Permission mode for this session only (`cast run --bypass-permissions`). */
 		permissionModeOverride?: PermissionMode,
+		/** `--no-skills` / `--no-mcp` for this session only. */
+		toolSources?: { noSkills?: boolean; noMcp?: boolean },
 	): WebAgentSession;
 	/** Creates an idle copy of the current safe context and registers it as a new session. */
 	forkSession(sessionId: string): WebAgentSession | undefined;
@@ -926,6 +933,11 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	}
 
 	/** Global set plus this session's project servers, project winning a name clash. */
+	/** The same result with no tools — for a session created with --no-mcp. */
+	function emptyMcpResult(base: McpSetupResult): McpSetupResult {
+		return { ...base, toolIndex: new Map(), toolDefinitions: [], connections: [] };
+	}
+
 	function mcpForSessionCwd(sessionCwd: string): McpSetupResult {
 		const project = projectMcpByCwd.get(sessionCwd)?.result;
 		if (!project) return mcpResult;
@@ -1241,6 +1253,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		worktree?: SessionWorktree,
 		providerOverride?: string,
 		permissionModeOverride?: PermissionMode,
+		toolSources?: { noSkills?: boolean; noMcp?: boolean },
 	): WebAgentSession {
 		// New sessions must start on whatever provider/model settings.json
 		// currently declares — not whatever was active when the daemon booted
@@ -1294,6 +1307,8 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			acceptedClientMessageIds: new Set(),
 			systemPrompt: computeSystemPrompt(persona, model, sessionCwd),
 			permissionModeOverride,
+			noSkills: toolSources?.noSkills,
+			noMcp: toolSources?.noMcp,
 		};
 
 		sessions.set(session.id, ws);
@@ -1832,7 +1847,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		ws.sessionSkills = skillsForSessionCwd(sessionCwd);
 		// Project MCP servers connect in the background; whatever has landed by
 		// now joins this turn, the rest join the next one.
-		const sessionMcp = mcpForSessionCwd(sessionCwd);
+		// A session created with --no-mcp gets an empty tool set, not the
+		// daemon's: it asked to run without them.
+		const sessionMcp = ws.noMcp ? emptyMcpResult(mcpForSessionCwd(sessionCwd)) : mcpForSessionCwd(sessionCwd);
 		const submitHooks = resolveHooksForCwd(sessionCwd, trustForSessionCwd(sessionCwd));
 		// A session created with an explicit mode keeps it; everything else
 		// follows the bridge-wide setting, which /permissions still changes.
@@ -2091,7 +2108,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					contextFilesSuffixForCwd(sessionCwd) + nestedContext,
 					rulesBlock,
 					sessionRules.lazySuffix,
-					formatSkillsForPrompt(ws.sessionSkills ?? skills, persona.skills, ctxFiles),
+					formatSkillsForPrompt(ws.noSkills ? [] : (ws.sessionSkills ?? skills), persona.skills, ctxFiles),
 					formatMcpForPrompt(sessionMcp, persona.mcp),
 					sessionCwd,
 					{
@@ -2130,7 +2147,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			// Read fresh each submit so an edited maxTurnIterations applies on
 			// the next agent call.
 			defaultOuterIterations: turnIterationCap(),
-			skills: ws.sessionSkills ?? skills,
+			skills: ws.noSkills ? [] : (ws.sessionSkills ?? skills),
 			personas: turnPersonas,
 			currentPersona: persona.name,
 			subagentPrompts: subPrompts,

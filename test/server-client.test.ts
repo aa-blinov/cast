@@ -112,6 +112,17 @@ describe("server client", () => {
 		expect(post?.body).toMatchObject({ permissionMode: "bypass" });
 	});
 
+	it("passes --no-skills / --no-mcp through to the daemon (regression)", async () => {
+		// Both were parsed, documented, and dropped before the daemon: a run
+		// with --no-mcp called an MCP tool anyway, and --no-skills still had
+		// the skill tool. Verified live against a fixture MCP server.
+		const client = { baseUrl, token: undefined };
+		await ensureServerSession(client, { cwd: "/tmp", noSkills: true, noMcp: true });
+		await new Promise((r) => setTimeout(r, 20));
+		const post = received.find((r) => r.method === "POST" && r.path === "/api/v1/sessions");
+		expect(post?.body).toMatchObject({ noSkills: true, noMcp: true });
+	});
+
 	it("passes --worktree through to the daemon (regression)", async () => {
 		// `cast run -w <name>` was dropped on the floor: the flag was parsed,
 		// documented in --help, and never reached createServerSession, so the
