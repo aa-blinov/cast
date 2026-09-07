@@ -179,6 +179,31 @@ describe("daemon single-writer SSE contract", () => {
 		const declared = new Set(Object.keys(doc.components.schemas.Session?.properties ?? {}));
 		const undeclared = Object.keys(body).filter((key) => !declared.has(key));
 		expect(undeclared, `undeclared in the Session schema: ${undeclared.join(", ")}`).toEqual([]);
+
+		// The listing has the same problem shape: SessionSummary described 7
+		// fields while the endpoint returned 10 (isSandbox, messageCount and
+		// createdAt were missing). Created through the API on purpose — a row
+		// read straight from the database takes the "cold summary" path, which
+		// carries fewer fields and would let the gap through unnoticed.
+		const live = await fetch(`${origin}/api/v1/sessions`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Authorization: `Bearer ${LOOPBACK_TOKEN}` },
+			body: JSON.stringify({ persona: "coding", model: "gpt" }),
+		});
+		expect(live.status).toBe(201);
+
+		const list = await fetch(`${origin}/api/v1/sessions`, {
+			headers: { Authorization: `Bearer ${LOOPBACK_TOKEN}` },
+		});
+		expect(list.status).toBe(200);
+		const rows = (await list.json()) as Array<Record<string, unknown>>;
+		expect(Array.isArray(rows) && rows.length > 0).toBe(true);
+		const summaryDeclared = new Set(Object.keys(doc.components.schemas.SessionSummary?.properties ?? {}));
+		// Union across rows: hot and cold sessions carry different field sets.
+		const summaryUndeclared = [
+			...new Set(rows.flatMap((row) => Object.keys(row))),
+		].filter((key) => !summaryDeclared.has(key));
+		expect(summaryUndeclared, `undeclared in SessionSummary: ${summaryUndeclared.join(", ")}`).toEqual([]);
 	});
 
 	it("serves a public OpenAPI document and a versioned compatibility route", async () => {
