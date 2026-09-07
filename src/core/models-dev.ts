@@ -143,3 +143,60 @@ export function lookupModelMetadataFromCatalog(
 	if (reasoning === undefined && reasoningOptions === undefined && contextWindow === undefined) return undefined;
 	return { reasoning, reasoningOptions, contextWindow };
 }
+
+/**
+ * Per-million-token prices for a model, from the catalog.
+ *
+ * The provider's own `usage.cost` is the authority when it sends one (only
+ * some gateways do — OpenRouter, mainly). Everything else showed $0.00: on a
+ * real store, 524 of 542 sessions with token counts had zero cost recorded,
+ * including 453 on a model whose prices are right here in the catalog.
+ *
+ * ponytail: base tier only — the catalog also carries context-tier pricing
+ * (over 200k tokens costs double on some models); add tier selection if the
+ * number needs to be exact rather than close.
+ */
+export function lookupCostFromCatalog(
+	modelId: string,
+	catalog: ModelsDevCatalog,
+): { input: number; output: number; cacheRead: number } | undefined {
+	// Exact id match only. The substring matching the context-window lookup
+	// uses is fine for a limit — it takes the minimum, so a wrong match is
+	// merely conservative — but this is money: "gpt-5" matched a cheaper
+	// gpt-5-* entry and priced 1M tokens at $0.09 instead of $2.47. An
+	// unpriced model reports nothing, which is honest; a wrong price is not.
+	// The same id appears under several resellers at different prices — one of
+	// them free — so take the dearest of the exact matches. An estimate that
+	// understates what a turn cost is worse than one that overstates it, and
+	// the provider's own `usage.cost` overrides this whenever it sends one.
+	const needle = modelId.toLowerCase();
+	let dearest: { input: number; output: number; cacheRead: number } | undefined;
+	for (const provider of Object.values(catalog)) {
+		for (const [key, model] of Object.entries(provider.models ?? {})) {
+			if (key.toLowerCase() !== needle) continue;
+			const cost = (model as { cost?: { input?: number; output?: number; cache_read?: number } }).cost;
+			if (!cost || typeof cost.input !== "number" || typeof cost.output !== "number") continue;
+			const candidate = { input: cost.input, output: cost.output, cacheRead: cost.cache_read ?? cost.input };
+			if (!dearest || candidate.input + candidate.output > dearest.input + dearest.output) dearest = candidate;
+		}
+	}
+	return dearest;
+}
+
+/** USD for one request, from cached catalog prices. Undefined when unpriced. */
+export function estimateRequestCost(
+	modelId: string,
+	usage: { promptTokens: number; completionTokens: number; cacheReadTokens?: number },
+): number | undefined {
+	const catalog = readCache(cachePath());
+	if (!catalog) return undefined;
+	const price = lookupCostFromCatalog(modelId, catalog);
+	if (!price) return undefined;
+	const cacheRead = Math.min(usage.cacheReadTokens ?? 0, usage.promptTokens);
+	const uncached = Math.max(0, usage.promptTokens - cacheRead);
+	return (
+		(uncached * price.input) / 1_000_000 +
+		(cacheRead * price.cacheRead) / 1_000_000 +
+		(usage.completionTokens * price.output) / 1_000_000
+	);
+}

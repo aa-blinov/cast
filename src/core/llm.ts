@@ -7,6 +7,7 @@ import OpenAI, {
 } from "openai";
 import type { ChatCompletionFunctionTool, ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import { type AppConfig, providerFetch } from "./config.ts";
+import { estimateRequestCost } from "./models-dev.ts";
 import { retryMaxWaitSeconds, retryQuotaWaitSeconds } from "./settings.ts";
 import { ThinkBlockParser } from "./vendors.ts";
 
@@ -644,7 +645,17 @@ export async function* streamChat(
 						// actually match prompt+completion; recomputing avoids surfacing
 						// a "Total" that visibly disagrees with the two numbers next to it.
 						totalTokens: chunk.usage.prompt_tokens + chunk.usage.completion_tokens,
-						cost: typeof usageAny.cost === "number" ? usageAny.cost : undefined,
+						// The provider's own number wins; the catalog fills the gap
+						// for the many gateways that send none, which was showing
+						// every one of those sessions as $0.00.
+						cost:
+							typeof usageAny.cost === "number"
+								? usageAny.cost
+								: estimateRequestCost(model, {
+										promptTokens: chunk.usage.prompt_tokens,
+										completionTokens: chunk.usage.completion_tokens,
+										cacheReadTokens: cacheReadTokens ?? undefined,
+									}),
 						cacheReadTokens: cacheReadTokens ?? undefined,
 						cacheWriteTokens: cacheWriteTokens ?? undefined,
 						uncachedTokens: Math.max(
