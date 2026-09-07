@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.26.1
+
+### Fixed
+
+- **One definition of "the project" for rules, memory and history search.** Each subsystem answered the question differently, and a session started in a subdirectory paid for it: `AGENTS.md` was inherited from every ancestor, but `.cast/rules` was only read from `<cwd>` downwards, project memory was keyed on a hash of the exact `cwd`, and a project-scoped history search matched `s.cwd` exactly. In a monorepo `cd apps/web && cast` therefore lost the repository's rules — `/rules` looked empty, as though none had been written — started from an empty `MEMORY.md`, the file whose own template says it is "shared by all sessions", and could not find any session run from the root. The project root is now the nearest ancestor with a `.git`, else the topmost with a `.cast/`, else the directory itself, and rules, memory, history scope and glob-matched context paths all use it. A nested checkout stays its own project (its own `.git` says so), a subdirectory's `.cast/rules` stays what it is documented to be — rules scoped to that subtree — and the home directory is never a root, so `~/.cast` remains global configuration and a dotfiles repository in `$HOME` cannot make everything under it one project. `/reload` re-reads the root.
+
 ## 0.26.0
 
 ### Added
