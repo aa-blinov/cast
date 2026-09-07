@@ -1806,6 +1806,16 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 	const disabledTools = new Set(loopConfig.disabledTools);
 	if (loopConfig.planState?.enabled) disabledTools.delete("plan_done");
 	else if (loopConfig.planState) disabledTools.add("plan_done");
+	// The plan-mode prompt states "SSH is unavailable in plan mode because it
+	// can execute arbitrary remote commands" — but nothing enforced it: the
+	// tool stayed advertised and the read-only gate only matched `bash`, so
+	// `ssh {host, command: "rm -rf /srv/app"}` reached the remote host. Make
+	// the promise true. Not merely gated like bash: the allowlist reasons about
+	// *local* binaries, and the same name on another machine can be a different
+	// program (or a shell alias), so the guarantee would be weaker than it
+	// looks. The gate below stays as a second line for a caller that
+	// re-advertises the tool.
+	if (loopConfig.planState?.enabled || loopConfig.readOnlyBash) disabledTools.add("ssh");
 	// Persona/subagent frontmatter `tools:` allowlists builtins only.
 	// LoopConfig wins when set (subagent spawn); otherwise the active persona.
 	const allowedTools = loopConfig.allowedTools ?? currentPersonaObj?.tools;
@@ -2043,11 +2053,17 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		// anything that can write (redirects, substitution, unlisted binaries)
 		// is refused with the reason. Subagents of a plan-mode parent inherit
 		// the same gate via readOnlyBash.
-		if (name === "bash" && (loopConfig.planState?.enabled || loopConfig.readOnlyBash)) {
+		// `ssh` is the same primitive pointed at another machine: it takes a
+		// command string and runs it. Gating only `bash` left plan mode
+		// promising "no write/edit; bash is inspection-only" while
+		// `ssh {host, command: "rm -rf /srv/app"}` went straight through — on a
+		// host that is often production. Same gate, same wording.
+		if ((name === "bash" || name === "ssh") && (loopConfig.planState?.enabled || loopConfig.readOnlyBash)) {
 			const verdict = await checkReadOnlyCommand(typeof args.command === "string" ? args.command : "");
 			if (!verdict.ok) {
+				const where = name === "ssh" ? "on a remote host " : "";
 				return Promise.resolve({
-					content: `Plan mode allows read-only commands only — rejected: ${verdict.reason}. Inspect with ls/cat/grep/find/git log|show|diff|status|blame.`,
+					content: `Plan mode allows read-only commands only — rejected ${where}: ${verdict.reason}. Inspect with ls/cat/grep/find/git log|show|diff|status|blame.`,
 					isError: true,
 				});
 			}

@@ -146,7 +146,7 @@ A single trust decision per project gates local skills, MCP, context files, pers
 
 ### Plan Mode
 
-Plan mode is a restricted agent state: read-only bash (a curated allowlist of inspection binaries), unrestricted read, and `write`/`edit` narrowed to the session plans directory. Plan files persist as markdown with checkbox tracking.
+Plan mode is a restricted agent state: read-only bash (a curated allowlist of inspection binaries) — the same gate applies to `ssh`, which is the same primitive aimed at another machine — unrestricted read, and `write`/`edit` narrowed to the session plans directory. Plan files persist as markdown with checkbox tracking.
 
 ### System Reminders & Open Work Gate
 

@@ -2639,6 +2639,104 @@ const contentToText = (content: unknown): string => {
 };
 
 describe("runAgentLoop — plan mode", () => {
+	it("refuses a writing ssh command, not just bash (regression)", async () => {
+		// The gate matched `name === "bash"` only, while plan mode promises
+		// "no write/edit; bash is inspection-only". `ssh` is the same
+		// primitive aimed at another machine — it takes a command string and
+		// runs it — so `ssh {host, command: "rm -rf /srv/app"}` went straight
+		// through, on a host that is often production.
+		const sshCalls: unknown[] = [];
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "tool_calls",
+				toolCalls: [
+					{ id: "c1", name: "ssh", arguments: JSON.stringify({ host: "prod", command: "rm -rf /srv/app" }) },
+				],
+			}))
+			.mockImplementationOnce(async () => ({ content: "understood", thinking: "", finishReason: "stop" }));
+
+		const results: string[] = [];
+		await runAgentLoop([{ role: "user", content: "plan the deploy" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "BASE_PROMPT",
+			planState: { enabled: true, plansDir: "/tmp/never-existing-plans-dir" },
+			sshHosts: [{ name: "prod", host: "example.invalid", username: "root" }],
+			executeTool: async (name, args) => {
+				sshCalls.push({ name, args });
+				return { content: "REMOTE COMMAND RAN" };
+			},
+			onEvent: (event) => {
+				if (event.type === "tool_end") results.push(String(event.result.content));
+			},
+		});
+
+		// The command never ran: `ssh` is not advertised in plan mode at all,
+		// which is what the plan-mode prompt has always claimed.
+		expect(sshCalls).toEqual([]);
+		expect(results.join("\n")).toMatch(/not available/i);
+	});
+
+	it("does not advertise ssh in plan mode, even for a read-only command", async () => {
+		// The prompt's claim is unconditional: ssh can execute arbitrary remote
+		// commands, and the read-only allowlist reasons about *local* binaries —
+		// the same name on another machine can be a different program. Reading
+		// remote state is what build mode (or a plain question) is for.
+		const seen: string[] = [];
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "tool_calls",
+				toolCalls: [{ id: "c1", name: "ssh", arguments: JSON.stringify({ host: "prod", command: "git status" }) }],
+			}))
+			.mockImplementationOnce(async () => ({ content: "ok", thinking: "", finishReason: "stop" }));
+
+		await runAgentLoop([{ role: "user", content: "inspect prod" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "BASE_PROMPT",
+			planState: { enabled: true, plansDir: "/tmp/never-existing-plans-dir" },
+			sshHosts: [{ name: "prod", host: "example.invalid", username: "root" }],
+			onEvent: (event) => {
+				if (event.type === "tool_end") seen.push(String(event.result.content));
+			},
+		});
+
+		expect(seen.join("\n")).toMatch(/not available/i);
+	});
+
+	it("still advertises ssh outside plan mode", async () => {
+		const seen: string[] = [];
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "tool_calls",
+				toolCalls: [{ id: "c1", name: "ssh", arguments: JSON.stringify({ host: "prod", command: "git status" }) }],
+			}))
+			.mockImplementationOnce(async () => ({ content: "ok", thinking: "", finishReason: "stop" }));
+
+		await runAgentLoop([{ role: "user", content: "check prod" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "BASE_PROMPT",
+			sshHosts: [{ name: "prod", host: "example.invalid", username: "root" }],
+			onEvent: (event) => {
+				if (event.type === "tool_end") seen.push(String(event.result.content));
+			},
+		});
+
+		// It ran (and failed to resolve the fake host) rather than being refused.
+		expect(seen.join("\n")).not.toMatch(/not available/i);
+		expect(seen.join("\n")).toMatch(/ssh|resolve|connect/i);
+	});
+
 	it("prepends the plan block even when rebuildSystemPrompt replaces the prompt", async () => {
 		// rebuildSystemPrompt is always set in the TUI and rebuilds the prompt
 		// wholesale — the plan block must be applied after it, not overwritten.
