@@ -112,6 +112,18 @@ describe("server client", () => {
 		expect(post?.body).toMatchObject({ permissionMode: "bypass" });
 	});
 
+	it("passes --reasoning through to the daemon (regression)", async () => {
+		// Parsed, documented, and dropped like the rest: the level lived in
+		// runStartup, which the daemon never runs, so `cast run -r disabled`
+		// used whatever the daemon's global level was. Verified live: two
+		// sessions on one daemon now report "disabled" and "enabled".
+		const client = { baseUrl, token: undefined };
+		await ensureServerSession(client, { cwd: "/tmp", reasoningLevel: "disabled" });
+		await new Promise((r) => setTimeout(r, 20));
+		const post = received.find((r) => r.method === "POST" && r.path === "/api/v1/sessions");
+		expect(post?.body).toMatchObject({ reasoningLevel: "disabled" });
+	});
+
 	it("passes --no-skills / --no-mcp through to the daemon (regression)", async () => {
 		// Both were parsed, documented, and dropped before the daemon: a run
 		// with --no-mcp called an MCP tool anyway, and --no-skills still had

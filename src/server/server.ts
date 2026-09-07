@@ -1245,6 +1245,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		let permissionMode: "bypass" | undefined;
 		let noSkills = false;
 		let noMcp = false;
+		let reasoningLevel: string | undefined;
 		try {
 			const parsed = JSON.parse(body) as {
 				persona?: string;
@@ -1256,6 +1257,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 				permissionMode?: string;
 				noSkills?: boolean;
 				noMcp?: boolean;
+				reasoningLevel?: string;
 			};
 			persona = parsed.persona;
 			model = parsed.model;
@@ -1269,6 +1271,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			permissionMode = parsed.permissionMode === "bypass" ? "bypass" : undefined;
 			noSkills = parsed.noSkills === true;
 			noMcp = parsed.noMcp === true;
+			reasoningLevel = typeof parsed.reasoningLevel === "string" ? parsed.reasoningLevel : undefined;
 		} catch {
 			// empty body is fine
 		}
@@ -1327,6 +1330,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		const ws = bridge.createSession(persona, model, wtPath ?? cwd, true, undefined, provider, permissionMode, {
 			noSkills,
 			noMcp,
+			reasoningLevel,
 		});
 		json(res, { id: ws.id, session: ws.session }, 201);
 	});

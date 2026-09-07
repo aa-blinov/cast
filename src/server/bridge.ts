@@ -254,6 +254,8 @@ export interface WebAgentSession {
 	 * a run asking for no MCP tools got them anyway. */
 	noSkills?: boolean;
 	noMcp?: boolean;
+	/** `--reasoning <level>` for this session only. */
+	reasoningLevelOverride?: string;
 	runner: AgentRunner;
 	backgroundBash: BashBackgroundDeps;
 	status: WebAgentStatus;
@@ -674,8 +676,8 @@ export interface ServerBridge {
 		providerOverride?: string,
 		/** Permission mode for this session only (`cast run --bypass-permissions`). */
 		permissionModeOverride?: PermissionMode,
-		/** `--no-skills` / `--no-mcp` for this session only. */
-		toolSources?: { noSkills?: boolean; noMcp?: boolean },
+		/** `--no-skills` / `--no-mcp` / `--reasoning` for this session only. */
+		toolSources?: { noSkills?: boolean; noMcp?: boolean; reasoningLevel?: string },
 	): WebAgentSession;
 	/** Creates an idle copy of the current safe context and registers it as a new session. */
 	forkSession(sessionId: string): WebAgentSession | undefined;
@@ -1253,7 +1255,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		worktree?: SessionWorktree,
 		providerOverride?: string,
 		permissionModeOverride?: PermissionMode,
-		toolSources?: { noSkills?: boolean; noMcp?: boolean },
+		toolSources?: { noSkills?: boolean; noMcp?: boolean; reasoningLevel?: string },
 	): WebAgentSession {
 		// New sessions must start on whatever provider/model settings.json
 		// currently declares — not whatever was active when the daemon booted
@@ -1309,6 +1311,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			permissionModeOverride,
 			noSkills: toolSources?.noSkills,
 			noMcp: toolSources?.noMcp,
+			reasoningLevelOverride: toolSources?.reasoningLevel,
 		};
 
 		sessions.set(session.id, ws);
@@ -2022,7 +2025,11 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// host), and URL-only matching would silently pick the first one.
 		const effectiveProvider = providers.find((p) => p.url === effectiveBaseURL && p.apiKey === effectiveApiKey);
 		const runReasoningFormat = resolveReasoningFormat(effectiveBaseURL, effectiveProvider?.reasoningFormat);
-		const runReasoningLevel = reasoningLevelForModel(runModel, runReasoningFormat);
+		const runReasoningLevel = reasoningLevelForModel(
+			runModel,
+			runReasoningFormat,
+			ws.reasoningLevelOverride ?? config.reasoningLevel,
+		);
 		const runConfig = {
 			...config,
 			baseURL: effectiveBaseURL,
@@ -3067,11 +3074,15 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		return undefined;
 	}
 
-	function reasoningLevelForModel(model: string, format = config.reasoningFormat): string {
+	function reasoningLevelForModel(
+		model: string,
+		format = config.reasoningFormat,
+		requested = config.reasoningLevel,
+	): string {
 		const info = modelInfoFor(model);
 		const options = getReasoningOptionsForFormat(info?.reasoning ?? null, format, model, info?.reasoningSupported);
-		if (options.length === 0 || options.some((option) => option.value === config.reasoningLevel)) {
-			return config.reasoningLevel;
+		if (options.length === 0 || options.some((option) => option.value === requested)) {
+			return requested;
 		}
 		return getDefaultReasoningLevel(info?.reasoning ?? null, format, model, info?.reasoningSupported);
 	}
@@ -3091,9 +3102,13 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			: ws.session.providerUrl
 				? providers.find((p) => p.url === ws.session.providerUrl)
 				: undefined;
-		if (!sessionProvider) return config.reasoningLevel;
+		// A session created with `--reasoning <level>` runs at that level, so
+		// this has to show it — otherwise /current reports the global one and
+		// the flag looks ignored even when it is not.
+		const requested = ws.reasoningLevelOverride ?? config.reasoningLevel;
+		if (!sessionProvider) return requested;
 		const format = resolveReasoningFormat(sessionProvider.url, sessionProvider.reasoningFormat);
-		return reasoningLevelForModel(ws.session.model, format);
+		return reasoningLevelForModel(ws.session.model, format, requested);
 	}
 
 	function renameSession(sessionId: string, title: string): boolean {
