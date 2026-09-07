@@ -521,7 +521,14 @@ export async function connectMcpServers(
 					connection.alive = false;
 					connection.deadReason = reason;
 					if (connection.closing) return;
-					console.error(`[cast] mcp server "${serverName}" disconnected: ${reason} — retrying.`);
+					// The wording has to match what actually happens next —
+					// saying "retrying" and then not retrying is worse than
+					// either one alone.
+					console.error(
+						isNonRetryableMcpFailure(reason)
+							? `[cast] mcp server "${serverName}" disconnected: ${reason}.`
+							: `[cast] mcp server "${serverName}" disconnected: ${reason} — retrying.`,
+					);
 					scheduleMcpReconnect(setupResult, connection);
 				};
 				client.onclose = () => markDead("the connection closed");
@@ -604,6 +611,19 @@ export function formatMcpForPrompt(result: McpSetupResult, personaMcpAllowlist?:
  *  minute — long enough to ride out a server restarting itself, short enough
  *  that a genuinely broken one stops making noise. */
 const MCP_RECONNECT_ATTEMPTS = 5;
+/**
+ * Failures no amount of retrying fixes: the endpoint answered, and its answer
+ * was "no". Retrying an `Invalid authorization` five times over half a minute
+ * changes nothing except the log — one real installation had 115 such lines
+ * from a stale token — and hammers a service that has already refused. Same
+ * reasoning as the provider retry loop, which excludes quota/billing errors.
+ */
+const MCP_NON_RETRYABLE_PATTERN =
+	/\b(?:401|403)\b|invalid authorization|unauthorized|forbidden|invalid[ _-]?api[ _-]?key/i;
+
+function isNonRetryableMcpFailure(reason: string): boolean {
+	return MCP_NON_RETRYABLE_PATTERN.test(reason);
+}
 /** 1s, 2s, 4s, 8s, 16s. Backing off matters because a server that crashes on
  *  startup would otherwise be respawned in a tight loop. */
 const MCP_RECONNECT_BASE_MS = 1000;
@@ -660,6 +680,12 @@ export async function reconnectMcpServer(result: McpSetupResult, serverName: str
  * disconnected, which is when `/mcp reconnect` is the right answer.
  */
 function scheduleMcpReconnect(result: McpSetupResult, connection: McpConnection): void {
+	if (connection.deadReason && isNonRetryableMcpFailure(connection.deadReason)) {
+		console.error(
+			`[cast] mcp server "${connection.serverName}" refused the connection: ${connection.deadReason}. Not retrying — fix the credentials in mcp.json, then run /mcp reconnect ${connection.serverName}.`,
+		);
+		return;
+	}
 	connection.retry ??= { attempts: 0 };
 	const retry = connection.retry;
 	if (retry.attempts >= MCP_RECONNECT_ATTEMPTS) {

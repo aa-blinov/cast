@@ -130,6 +130,53 @@ describe("connectMcpServers (real spawned MCP server, not mocked)", () => {
 		}
 	});
 
+	it("does not retry a server that refused the credentials (regression)", async () => {
+		// Retrying an "Invalid authorization" five times over half a minute
+		// changes nothing except the log: one real installation had 115 such
+		// lines from a stale token, and each attempt hammers a service that has
+		// already said no. The provider retry loop excludes quota/billing
+		// errors for the same reason.
+		const result = await connectMcpServers({ echo: { command: "node", args: [FIXTURE_SERVER] } });
+		try {
+			const errors: string[] = [];
+			const realError = console.error;
+			console.error = (...args: unknown[]) => errors.push(args.map(String).join(" "));
+			try {
+				// The transport reporting a 401 the way a refusing HTTP endpoint does.
+				result.connections[0]!.client.onerror?.(new Error("Streamable HTTP error: Non-200 status code (401)"));
+			} finally {
+				console.error = realError;
+			}
+
+			expect(result.connections[0]!.alive).toBe(false);
+			// No retry scheduled, and the message says so instead of promising one.
+			expect(result.connections[0]!.retry).toBeUndefined();
+			expect(errors.join("\n")).toContain("Not retrying");
+			expect(errors.join("\n")).not.toContain("— retrying.");
+		} finally {
+			await closeMcpConnections(result.connections);
+		}
+	});
+
+	it("still retries a server that merely dropped", async () => {
+		const result = await connectMcpServers({ echo: { command: "node", args: [FIXTURE_SERVER] } });
+		try {
+			const errors: string[] = [];
+			const realError = console.error;
+			console.error = (...args: unknown[]) => errors.push(args.map(String).join(" "));
+			try {
+				result.connections[0]!.client.onerror?.(new Error("socket hang up"));
+			} finally {
+				console.error = realError;
+			}
+			expect(errors.join("\n")).toContain("retrying");
+			expect(result.connections[0]!.retry?.attempts).toBeGreaterThan(0);
+			if (result.connections[0]!.retry?.timer) clearTimeout(result.connections[0]!.retry.timer);
+		} finally {
+			await closeMcpConnections(result.connections);
+		}
+	});
+
 	it("caps a tool result the way bash output is capped (regression)", async () => {
 		// Nothing bounded an MCP result: a server answering with its whole
 		// result set put all of it into the context. A stub returning 5MB —
