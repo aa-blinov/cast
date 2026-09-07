@@ -1,5 +1,5 @@
 import { setMaxListeners } from "node:events";
-import { basename, join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import {
 	type AgentForkContext as ActorForkContext,
 	type AgentActorRecoverySpec,
@@ -85,6 +85,7 @@ import {
 import type { Persona } from "./personas.ts";
 import { checkReadOnlyCommand, listPlanNames, readActivePlan, TERMINAL_TOOL_NAMES } from "./plan.ts";
 import { type ProjectResolverDeps, resolveMcpForCwd } from "./project.ts";
+import { findProjectRoot } from "./project-root.ts";
 import { promptsDir, readRequiredPrompt } from "./prompts.ts";
 import {
 	commitCheckpointWatermark,
@@ -3323,13 +3324,15 @@ function extractContextFile(
 		typeof args.path === "string" ? args.path : typeof args.filePath === "string" ? args.filePath : undefined;
 	if (!rawPath) return;
 
-	// Normalize to relative path from cwd for consistent glob matching
-	let relPath: string;
-	if (rawPath.startsWith("/")) {
-		relPath = relativeToCwd(rawPath, cwd);
-	} else {
-		relPath = rawPath;
-	}
+	// Normalize against the *project root*, which is what a rule's globs and a
+	// nested rule's scope are written relative to. Normalizing against cwd
+	// meant a session started in `apps/web` reported `src/a.ts` while the
+	// repository's rule said `apps/web/src/**`, so no glob could ever match
+	// and no nested scope could activate — the paths were measured from two
+	// different places.
+	const root = findProjectRoot(cwd);
+	const absolute = rawPath.startsWith("/") ? rawPath : resolve(cwd, rawPath);
+	const relPath = relativeToCwd(absolute, root);
 
 	if (!contextFiles.includes(relPath)) {
 		contextFiles.push(relPath);

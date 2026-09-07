@@ -2,6 +2,12 @@
 
 Rules are project-specific instructions the agent follows. They use Cursor's rule format, so a project that already has Cursor rules needs no second copy of them.
 
+Rules are resolved from the **project root** — the nearest ancestor with a
+`.git` (or, failing that, the topmost one with a `.cast/`). A session started
+in a subdirectory therefore sees the same rules as one started at the root:
+`cd apps/web && cast` gets the repository's rules, not none. The home
+directory is never a root, so `~/.cast` stays global configuration.
+
 cast reads, in this order:
 
 - `~/.cast/rules/` — your global rules

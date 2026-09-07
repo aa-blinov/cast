@@ -38,6 +38,7 @@ import {
 } from "./memory-files-index.ts";
 import type { Persona } from "./personas.ts";
 import type { PlanState } from "./plan.ts";
+import { findProjectRoot } from "./project-root.ts";
 import { promptsDir, readRequiredPrompt } from "./prompts.ts";
 import {
 	appendMessage,
@@ -680,7 +681,14 @@ function normalizeCwd(cwd: string): string {
 }
 
 export function projectIdForCwd(cwd: string): string {
-	return createHash("sha256").update(normalizeCwd(cwd)).digest("hex").slice(0, 16);
+	// Keyed on the project *root*, not the exact directory. Hashing cwd meant
+	// `cd apps/web && cast` in a monorepo got its own empty MEMORY.md — the
+	// file whose template says it is "shared by all sessions" — while the same
+	// session still inherited the repository's AGENTS.md.
+	return createHash("sha256")
+		.update(normalizeCwd(findProjectRoot(cwd)))
+		.digest("hex")
+		.slice(0, 16);
 }
 
 export { buildMemorySearchQuery };

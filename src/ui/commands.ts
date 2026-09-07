@@ -29,6 +29,7 @@ import {
 	resolveRulesForCwd,
 	resolveSkillsForCwd,
 } from "../core/project.ts";
+import { clearProjectRootCache } from "../core/project-root.ts";
 import { getModelsCache } from "../core/readline.ts";
 import { formatRuleInvocation, type Rule } from "../core/rules.ts";
 import {
@@ -2012,6 +2013,9 @@ const COMMAND_ROUTES: CommandRoute[] = [
 			deps.setSkillsPromptSuffix(skillsPromptSuffix);
 			const contextFilesSuffix = formatContextFilesForPrompt(loadProjectContextFiles(deps.cwd, trusted));
 			deps.setContextFilesSuffix(contextFilesSuffix);
+			// The project root comes off the filesystem: `git init` mid-session
+			// moves it, and rules/memory/history scope all follow it.
+			clearProjectRootCache();
 			const resolvedRules = resolveRulesForCwd(deps.cwd, trusted);
 			const rulesSuffix = resolvedRules.alwaysApplySuffix;
 			deps.setRulesSuffix(rulesSuffix);

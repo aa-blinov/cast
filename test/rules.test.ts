@@ -2,6 +2,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { projectIdForCwd } from "../src/core/memory.ts";
+import { resolveRulesForCwd } from "../src/core/project.ts";
+import { clearProjectRootCache } from "../src/core/project-root.ts";
 import {
 	discoverProjectRuleDirs,
 	fileMatchesGlob,
@@ -38,6 +41,48 @@ describe("rules", () => {
 	afterEach(() => {
 		process.env.HOME = realHome;
 		rmSync(fakeHome, { recursive: true, force: true });
+	});
+
+	describe("a session started in a subdirectory", () => {
+		it("gets the project's rules and its memory, not an empty set (regression)", () => {
+			// `cd apps/web && cast` used to read rules only from
+			// `apps/web/.cast/rules` and key memory on the exact directory, so
+			// the repository's rules and MEMORY.md were both invisible — while
+			// AGENTS.md was still inherited from that same root. Three
+			// subsystems, three different answers to "what is the project".
+			mkdirSync(join(projectDir, ".git"), { recursive: true });
+			const rulesDir = join(projectDir, ".cast", "rules");
+			mkdirSync(rulesDir, { recursive: true });
+			writeFileSync(join(rulesDir, "house.md"), "---\nalways-apply: true\n---\nHOUSE RULE.\n");
+			const nested = join(projectDir, "apps", "web");
+			mkdirSync(join(nested, "src"), { recursive: true });
+			clearProjectRootCache();
+
+			for (const cwd of [projectDir, nested, join(nested, "src")]) {
+				const resolved = resolveRulesForCwd(cwd, true);
+				expect(resolved.directoryRules.map((r) => r.name)).toContain("house");
+				expect(resolved.alwaysApplySuffix).toContain("HOUSE RULE.");
+				expect(projectIdForCwd(cwd)).toBe(projectIdForCwd(projectDir));
+			}
+		});
+
+		it("keeps a nested rules directory scoped to its own subtree", () => {
+			// The other half: promoting the root must not flatten nested rules
+			// into project-wide ones.
+			mkdirSync(join(projectDir, ".git"), { recursive: true });
+			const nestedRules = join(projectDir, "apps", "web", ".cast", "rules");
+			mkdirSync(nestedRules, { recursive: true });
+			writeFileSync(join(nestedRules, "web.md"), "---\nalways-apply: false\nglobs: src/**/*.ts\n---\nWEB RULE.\n");
+			clearProjectRootCache();
+
+			const rules = resolveRulesForCwd(join(projectDir, "apps", "web"), true).directoryRules;
+			const web = rules.find((r) => r.name === "web");
+			expect(web?.scope).toBe("apps/web");
+			// Dormant until a file from its subtree is in context; context files
+			// are relative to the project root, which is what makes this work.
+			expect(matchAutoRules(rules, ["docs/x.md"]).map((r) => r.name)).not.toContain("web");
+			expect(matchAutoRules(rules, ["apps/web/src/a.ts"]).map((r) => r.name)).toContain("web");
+		});
 	});
 
 	describe("hasProjectRulesDir", () => {
