@@ -717,6 +717,13 @@ export const apiV1OpenApiDocument: OpenApiObject = {
 					persona: { type: "string" },
 					status: { enum: ["idle", "running", "error"] },
 					updatedAt: { type: "string" },
+					createdAt: { type: "string" },
+					pinned: { type: "boolean" },
+					messageCount: { type: "integer", description: "Turns in the session, as the sidebar counts them." },
+					isSandbox: {
+						type: "boolean",
+						description: "True when the session runs in a throwaway sandbox directory.",
+					},
 				},
 			},
 			Session: {
