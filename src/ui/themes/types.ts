@@ -35,6 +35,17 @@ export interface ThemeColors {
 	border: string;
 	/** Active/focused borders. */
 	borderActive: string;
+	/**
+	 * The transcript's gutter rail — the `▌`/`│` column down the left edge.
+	 *
+	 * Optional: it falls back to `muted`, which is right for most themes. It
+	 * exists because a rail has to stay *visible* while the text beside it is
+	 * dimmed, and two palettes put `muted` too close to the background for
+	 * that (measured against `bg`: nord 1.69:1, solarized 2.79:1, where every
+	 * other theme is 3.3–9.5:1). `border` is not an alternative — it is
+	 * 1.3–2.5:1 everywhere, a ghost at one cell wide.
+	 */
+	rail?: string;
 }
 
 export interface Theme {

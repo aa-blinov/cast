@@ -107,7 +107,9 @@ describe("ChatLog tool rows", () => {
 			{ columns: 120 },
 		);
 
-		expect(output).toMatch(/┃\s+bash/);
+		// A running call is the same bar, just not dimmed — a weight difference
+		// of one pixel was invisible in half the fonts.
+		expect(output).toMatch(/│\s+bash/);
 		expect(output).not.toContain("⠋");
 	});
 });

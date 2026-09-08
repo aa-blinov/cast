@@ -22,5 +22,7 @@ export const solarized: Theme = {
 		bgHover: "#135f6c",
 		border: "#1d616b",
 		borderActive: "#268bd2",
+		// solarized's muted sits at 2.79:1 against its background, so the gutter rail gets its own, brighter value.
+		rail: "#4a6572",
 	},
 };

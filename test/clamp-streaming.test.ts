@@ -15,12 +15,10 @@ describe("clampStreamingBlocks", () => {
 	 * it is about to render rather than estimating cells — the estimate is
 	 * where a CJK answer used to take twice the rows it was allowed.
 	 */
+	// A tool call is one row; a text block is exactly its rendered lines — the
+	// speaker label rides the first of them rather than taking a row.
 	const rows = (out: ReturnType<typeof clampStreamingBlocks>): number =>
-		out.reduce(
-			(total, entry) =>
-				total + (entry.block.kind === "tool" ? 1 : (entry.lines?.length ?? 0) + (entry.block.continued ? 0 : 1)),
-			0,
-		);
+		out.reduce((total, entry) => total + (entry.block.kind === "tool" ? 1 : (entry.lines?.length ?? 0)), 0);
 	const renderedText = (entry: ReturnType<typeof clampStreamingBlocks>[number]): string =>
 		(entry.lines ?? []).map((line) => line.spans.map((span) => span.text).join("")).join("\n");
 	const widestLine = (entry: ReturnType<typeof clampStreamingBlocks>[number]): number =>

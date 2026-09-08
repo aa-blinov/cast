@@ -21,5 +21,7 @@ export const nord: Theme = {
 		bgHover: "#4c566a",
 		border: "#4c566a",
 		borderActive: "#5e81ac",
+		// nord's muted sits at 1.69:1 against its background, so the gutter rail gets its own, brighter value.
+		rail: "#6b7a94",
 	},
 };
