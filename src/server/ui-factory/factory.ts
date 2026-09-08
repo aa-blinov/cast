@@ -8,7 +8,8 @@ const TEMPLATE_DIR = join(import.meta.dirname ?? ".", "template");
 
 function renderTemplate(src: string, vars: Record<string, string>): string {
 	let out = src;
-	for (const [k, v] of Object.entries(vars)) out = out.replaceAll(`{{${k}}}`, v);
+	// split/join: replaceAll would read `$&` in a value as a pattern.
+	for (const [k, v] of Object.entries(vars)) out = out.split(`{{${k}}}`).join(v);
 	return out;
 }
 
