@@ -988,6 +988,32 @@ describe("web bridge", () => {
 		expect(view?.messages.some((m) => m.content === "done")).toBe(true);
 	});
 
+	it("isFullyIdle is false while anything is happening or anyone is watching", async () => {
+		// What ends an unregistered daemon must never be "the clients went
+		// away" — that is what the daemon is for: the user closes the terminal
+		// and the agent keeps working. So this asks whether anything is in
+		// flight, not whether anyone is connected.
+		const bridge = createServerBridge(makeResult());
+		expect(bridge.isFullyIdle()).toBe(true);
+
+		const ws = bridge.createSession();
+		expect(bridge.isFullyIdle(), "a fresh idle session is not work").toBe(true);
+
+		const listener = () => {};
+		bridge.subscribe(ws.id, listener);
+		expect(bridge.isFullyIdle(), "a subscribed client is someone watching").toBe(false);
+		bridge.unsubscribe(ws.id, listener);
+		expect(bridge.isFullyIdle()).toBe(true);
+
+		ws.status = "running";
+		expect(bridge.isFullyIdle(), "a turn in flight").toBe(false);
+		ws.status = "idle";
+
+		ws.backgroundBash.registry.start("sleep 30", process.cwd(), {} as never, 30, ws.backgroundBash);
+		expect(bridge.isFullyIdle(), "a background task outlives the turn that started it").toBe(false);
+		ws.backgroundBash.registry.killAll();
+	});
+
 	it("shareSession is idempotent — calling it twice returns the same token", () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();

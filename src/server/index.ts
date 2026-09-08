@@ -219,10 +219,14 @@ export async function runServerMain(args: string[], options: { foreground: boole
 			//
 			// Two guards, so retiring can never take work with it: a grace
 			// period after startup (the record is written *after* the bind, and
-			// another process may be mid-write), and nothing in flight — a
-			// client that is still streaming from this instance found it before
-			// it lost the record, and its turn finishes first. A `--foreground`
-			// daemon is never retired: the user is looking at it.
+			// another process may be mid-write), and nothing in flight at all —
+			// not just no running turn, but no background bash task, no
+			// subagent, no checkpoint writer, and nobody subscribed. A
+			// `--foreground` daemon is never retired: the user is looking at it.
+			//
+			// What this must never do is end a daemon because its clients went
+			// away: that is the daemon's whole purpose. An unregistered daemon
+			// with a turn in flight keeps going until the work is done.
 			if (!foreground) {
 				const checkEvery = Number(process.env.CAST_ORPHAN_CHECK_MS) || 30_000;
 				const grace = Number(process.env.CAST_ORPHAN_GRACE_MS) || 60_000;
@@ -230,7 +234,13 @@ export async function runServerMain(args: string[], options: { foreground: boole
 				const retirement = setInterval(() => {
 					if (shuttingDown || Date.now() - bornAt < grace) return;
 					if (isRecordedDaemon(process.pid, instanceId)) return;
-					if (bridge.listSessions().some((session) => session.status === "running")) return;
+					// The daemon exists so work outlives its clients — someone
+					// closes the terminal and goes to bed while the agent keeps
+					// going. So the question is never "is anyone connected" but
+					// "is anything happening": a turn, a background bash task, a
+					// subagent, a checkpoint writer, a subscribed client. See
+					// bridge.isFullyIdle.
+					if (!bridge.isFullyIdle()) return;
 					console.log(
 						"[cast server] another daemon holds the registration — retiring this instance so they cannot pile up.",
 					);
