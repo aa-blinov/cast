@@ -287,6 +287,7 @@ function MarkdownBody({
 	bar = "▌",
 	continuationBar,
 	label,
+	truncated,
 	dimText,
 }: {
 	lines: RenderedLine[];
@@ -298,9 +299,17 @@ function MarkdownBody({
 	continuationBar?: string;
 	/** Speaker label for the first line — `you`, `agent`, `reasoning`. */
 	label?: string;
+	/** Head of the block was dropped: shown as `…` *inside* the label's field,
+	 *  never appended to it. Appending made the row two cells wider than the
+	 *  width its lines were rendered for, so Ink wrapped every one of them and
+	 *  the live region doubled in height (63 full-screen clears in one
+	 *  streaming answer — the exact failure the clamp exists to prevent). */
+	truncated?: boolean;
 	/** Dim the text (not the rail) — reasoning and finished scaffolding. */
 	dimText?: boolean;
 }): JSX.Element {
+	// The label's field is exactly `label + LABEL_GAP` cells wide, whatever it
+	// renders inside it — that is the width the lines were wrapped for.
 	const indent = label ? " ".repeat(displayWidth(label) + LABEL_GAP) : "";
 	return (
 		<Box flexDirection="column">
@@ -311,7 +320,7 @@ function MarkdownBody({
 					{label && i === 0 ? (
 						<Text color={gutter} dimColor={dimText}>
 							{label}
-							{" ".repeat(LABEL_GAP)}
+							{truncated ? `…${" ".repeat(LABEL_GAP - 1)}` : " ".repeat(LABEL_GAP)}
 						</Text>
 					) : (
 						indent
@@ -374,7 +383,8 @@ function BlockView({
 				lines={lines ?? renderMarkdownLines(block.text, { width: bodyWidth(width, "thinking") })}
 				gutter={railMuted()}
 				bar={style.bar}
-				label={block.continued ? undefined : `${style.label}${truncated ? " …" : ""}`}
+				label={block.continued ? undefined : style.label}
+				truncated={truncated}
 				dimText
 			/>
 		);
@@ -386,7 +396,8 @@ function BlockView({
 				lines={lines ?? renderMarkdownLines(block.text, { width: bodyWidth(width, "content") })}
 				gutter={theme().agent}
 				bar={style.bar}
-				label={block.continued ? undefined : `${style.label}${truncated ? " …" : ""}`}
+				label={block.continued ? undefined : style.label}
+				truncated={truncated}
 			/>
 		);
 	}
