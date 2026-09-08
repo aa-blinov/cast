@@ -1014,6 +1014,26 @@ describe("web bridge", () => {
 		ws.backgroundBash.registry.killAll();
 	});
 
+	it("lastActivityAt moves on any event, so brief work between polls still counts", async () => {
+		// The retirement watchdog samples every 30s; a turn that starts and
+		// finishes between two samples is invisible to sampling (measured with a
+		// 1s tick: a short turn in the middle of the quiet window went unnoticed
+		// and the window was never reset). A watermark cannot miss it.
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const before = bridge.lastActivityAt();
+		await new Promise((resolve) => setTimeout(resolve, 5));
+
+		const listener = () => {};
+		bridge.subscribe(ws.id, listener);
+		const afterSubscribe = bridge.lastActivityAt();
+		expect(afterSubscribe).toBeGreaterThan(before);
+
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		bridge.unsubscribe(ws.id, listener);
+		expect(bridge.lastActivityAt()).toBeGreaterThan(afterSubscribe);
+	});
+
 	it("shareSession is idempotent — calling it twice returns the same token", () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();

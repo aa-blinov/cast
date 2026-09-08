@@ -697,6 +697,8 @@ export interface ServerBridge {
 	 * daemon has to ask this, not "are any clients connected".
 	 */
 	isFullyIdle(): boolean;
+	/** Epoch millis of the last thing that happened here — see noteActivity. */
+	lastActivityAt(): number;
 	/** Same shape as listSessions, filtered and ranked by relevance against
 	 *  `query` (message content via SQLite FTS, plus cwd/id/title/persona/
 	 *  model). Empty/whitespace-only query is equivalent to listSessions(). */
@@ -1450,7 +1452,22 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		return true;
 	}
 
+	/**
+	 * When something last happened in this daemon — any agent event, a client
+	 * subscribing or leaving, a session opening or closing.
+	 *
+	 * Event-driven on purpose. A watchdog that only *samples* `isFullyIdle`
+	 * cannot see a turn that starts and finishes between two ticks: measured
+	 * with a 1s tick, a short turn in the middle of the quiet window went
+	 * unnoticed and the window was never reset. A watermark cannot miss it.
+	 */
+	let lastActivityAt = Date.now();
+	function noteActivity(): void {
+		lastActivityAt = Date.now();
+	}
+
 	function broadcast(ws: WebAgentSession, event: WebEvent): void {
+		noteActivity();
 		for (const listener of ws.listeners) {
 			try {
 				listener(event);
@@ -2917,6 +2934,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	}
 
 	function subscribe(sessionId: string, callback: (event: WebEvent) => void): void {
+		noteActivity();
 		const ws = sessions.get(sessionId);
 		if (!ws) return;
 		ws.listeners.add(callback);
@@ -2924,6 +2942,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	}
 
 	function unsubscribe(sessionId: string, callback: (event: WebEvent) => void): void {
+		noteActivity();
 		const ws = sessions.get(sessionId);
 		if (!ws) return;
 		ws.listeners.delete(callback);
@@ -4975,6 +4994,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		forkSession: forkSessionInstance,
 		getSession,
 		isFullyIdle,
+		lastActivityAt: () => lastActivityAt,
 		listSessions,
 		searchSessions,
 		applyMcpResult,
