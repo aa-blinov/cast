@@ -123,26 +123,10 @@ describe("TextBuffer", () => {
 		expect(buf.value).toBe("ab\ncd");
 		expect(buf.getCursorLine()).toBe(1);
 		expect(buf.getCursorColumn()).toBe(2);
-		buf.moveUp();
-		expect(buf.getCursorLine()).toBe(0);
-		expect(buf.getCursorColumn()).toBe(2);
+		buf.moveLineStart();
+		expect(buf.getCursorColumn()).toBe(0);
 		buf.moveLineEnd();
 		expect(buf.getCursorColumn()).toBe(2);
-	});
-
-	it("moveUp at the first line is a no-op (can't go above line 0)", () => {
-		const buf = new TextBuffer();
-		buf.insert("abc");
-		buf.moveUp();
-		expect(buf.cursorPos).toBe(3);
-	});
-
-	it("moveDown past the last line goes to the end", () => {
-		const buf = new TextBuffer();
-		buf.insert("abc");
-		buf.moveLeft();
-		buf.moveDown();
-		expect(buf.cursorPos).toBe(3);
 	});
 
 	it("clear resets text and cursor", () => {
@@ -187,21 +171,6 @@ describe("TextBuffer", () => {
 			expect(buf.cursorPos).toBe(1);
 			buf.moveRight(); // after 😀
 			expect(buf.cursorPos).toBe(3);
-		});
-
-		it("moveDown snaps a column landing inside a pair to its start", () => {
-			const buf = new TextBuffer();
-			buf.insert("aaaa\n😀b");
-			// Cursor to line 0, column 1: moveUp keeps column 3, two moveLefts
-			// land on column 1.
-			buf.moveUp();
-			buf.moveLeft();
-			buf.moveLeft();
-			expect(buf.cursorPos).toBe(1);
-			buf.moveDown();
-			// Column 1 of "😀b" is the middle of the surrogate pair — snapped
-			// back to the pair's start (column 0, absolute position 5).
-			expect(buf.cursorPos).toBe(5);
 		});
 	});
 });

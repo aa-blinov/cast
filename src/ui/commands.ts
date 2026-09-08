@@ -3297,8 +3297,8 @@ const COMMAND_ROUTES: CommandRoute[] = [
 		run: ({ input, deps }) => {
 			deps.agent.addDisplayMessage({ role: "user", content: input });
 			const ACTION_LABELS: Record<string, string> = {
-				"editor.cursorUp": "Cursor up",
-				"editor.cursorDown": "Cursor down",
+				"editor.cursorUp": "Previous prompt (palette: up)",
+				"editor.cursorDown": "Next prompt (palette: down)",
 				"editor.cursorLeft": "Cursor left",
 				"editor.cursorRight": "Cursor right",
 				"editor.cursorWordLeft": "Word left",

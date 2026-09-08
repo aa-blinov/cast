@@ -10,6 +10,7 @@ import {
 } from "../core/stdin-manager.ts";
 import { SLASH_COMMANDS } from "./commands.ts";
 import { type InputEvent, InputParser } from "./input/input-parser.ts";
+import { PromptHistory } from "./input/prompt-history.ts";
 import { StdinBuffer } from "./input/stdin-buffer.ts";
 import { graphemeAt, TextBuffer } from "./input/textarea.ts";
 import { chipCharFor, expandPastes, isChipChar, type PendingPaste, pasteLabel } from "./paste.ts";
@@ -28,6 +29,10 @@ interface ComposerProps {
 	onPasteImage?: () => Promise<ClipboardPasteResult>;
 	/** Load older session history (PageUp). */
 	onLoadOlder?: () => void;
+	/** Prompts already submitted in this session, oldest first — what ↑ recalls. */
+	promptHistory?: readonly string[];
+	/** Recall resets when the session changes (/new, /resume). */
+	sessionId?: string;
 	running: boolean;
 	locked: boolean;
 	/** Loaded, enabled skills — merged into the palette as native `/<skill-id>`
@@ -107,6 +112,8 @@ export function Composer({
 	onExit,
 	onPasteImage,
 	onLoadOlder,
+	promptHistory,
+	sessionId,
 	running,
 	locked,
 	skills,
@@ -128,6 +135,14 @@ export function Composer({
 	// alongside pendingPastes on submit / clear so pastes in the next turn
 	// start from U+E000 again.
 	const chipCounterRef = useRef(0);
+	// Seeded once from the loaded session, then appended on every submit;
+	// rebuilt when the session itself changes (/new, /resume).
+	const historyRef = useRef(new PromptHistory(promptHistory ?? []));
+	const historySessionRef = useRef(sessionId);
+	if (historySessionRef.current !== sessionId) {
+		historySessionRef.current = sessionId;
+		historyRef.current = new PromptHistory(promptHistory ?? []);
+	}
 	const runningRef = useRef(running);
 	runningRef.current = running;
 	const onSubmitRef = useRef(onSubmit);
@@ -237,9 +252,39 @@ export function Composer({
 		// so the user can edit and retry without retyping.
 		if (canSubmitRef.current && !canSubmitRef.current(value)) return;
 		onSubmitRef.current(value);
+		historyRef.current.push(value);
 		b.clear();
 		setPendingPastes([]);
 		chipCounterRef.current = 0;
+	};
+
+	/**
+	 * Put a recalled prompt into the composer.
+	 *
+	 * A multi-line prompt goes back in as a paste chip rather than as literal
+	 * newlines: the buffer is one line by construction (see paste.ts), and the
+	 * chip expands to the exact original text on submit, so recalling and
+	 * re-sending a pasted block reproduces it byte for byte.
+	 */
+	const showRecalled = (text: string): void => {
+		const b = bufRef.current;
+		b.clear();
+		setPendingPastes([]);
+		chipCounterRef.current = 0;
+		if (!text) {
+			setVersion((v) => v + 1);
+			return;
+		}
+		const lineCount = text.split("\n").length;
+		if (lineCount > 1) {
+			const char = chipCharFor(0);
+			chipCounterRef.current = 1;
+			setPendingPastes([{ char, label: pasteLabel(lineCount, text.length), text }]);
+			b.insert(char);
+		} else {
+			b.insert(text);
+		}
+		setVersion((v) => v + 1);
 	};
 
 	// Ctrl+C is exit-with-confirmation in every state, including mid-generation:
@@ -395,12 +440,20 @@ export function Composer({
 				case "history.older":
 					onLoadOlderRef.current?.();
 					break;
-				case "editor.cursorUp":
-					b.moveUp();
+				case "editor.cursorUp": {
+					// The buffer is one line, so these were a no-op (↑) and a
+					// jump-to-end-of-line (↓). Recall submitted prompts instead,
+					// like every other terminal input. (With the palette open the
+					// same keys move the selection — handled above.)
+					const previous = historyRef.current.older(expandPastes(b.value, pendingPastesRef.current));
+					if (previous !== null) showRecalled(previous);
 					break;
-				case "editor.cursorDown":
-					b.moveDown();
+				}
+				case "editor.cursorDown": {
+					const next = historyRef.current.newer();
+					if (next !== null) showRecalled(next);
 					break;
+				}
 				case "editor.cursorLeft":
 					b.moveLeft();
 					break;
