@@ -18,6 +18,7 @@ import { createServerBridge } from "./bridge.ts";
 import {
 	clearServerStateIfOwner,
 	DAEMON_PROTOCOL_VERSION,
+	isRecordedDaemon,
 	readLiveServerState,
 	writeServerState,
 } from "./daemon-state.ts";
@@ -206,6 +207,39 @@ export async function runServerMain(args: string[], options: { foreground: boole
 				});
 				console.log(`[cast server] stop: cast server stop`);
 			}
+			// A daemon that is no longer the one recorded in server.json cannot be
+			// reached by anything — every client finds the daemon through that
+			// file — so it is dead weight that only shows up as memory. They do
+			// accumulate: measured on one machine, four daemons at 160–250MB
+			// each, three of them unreachable. Causes vary (a lost start race, a
+			// `cast server stop` followed by a client auto-starting a fresh one,
+			// an upgrade restart, a launcher that died before recording); the
+			// remedy does not have to know which — an unrecorded daemon retires
+			// itself.
+			//
+			// Two guards, so retiring can never take work with it: a grace
+			// period after startup (the record is written *after* the bind, and
+			// another process may be mid-write), and nothing in flight — a
+			// client that is still streaming from this instance found it before
+			// it lost the record, and its turn finishes first. A `--foreground`
+			// daemon is never retired: the user is looking at it.
+			if (!foreground) {
+				const checkEvery = Number(process.env.CAST_ORPHAN_CHECK_MS) || 30_000;
+				const grace = Number(process.env.CAST_ORPHAN_GRACE_MS) || 60_000;
+				const bornAt = Date.now();
+				const retirement = setInterval(() => {
+					if (shuttingDown || Date.now() - bornAt < grace) return;
+					if (isRecordedDaemon(process.pid, instanceId)) return;
+					if (bridge.listSessions().some((session) => session.status === "running")) return;
+					console.log(
+						"[cast server] another daemon holds the registration — retiring this instance so they cannot pile up.",
+					);
+					clearInterval(retirement);
+					void shutdown("unregistered");
+				}, checkEvery);
+				retirement.unref();
+			}
+
 			// The deferred half of ParsedArgs.deferMcp above: now that the HTTP
 			// server is actually accepting connections, do the real connect
 			// (npx resolution, browser launches, remote handshakes — whatever
