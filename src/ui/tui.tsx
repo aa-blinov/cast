@@ -3,7 +3,7 @@ import type { JSX } from "react";
 import { runHooksForEvent } from "../core/hooks.ts";
 import { closeMcpConnections } from "../core/mcp.ts";
 import { drainProjectCheckpointWriters } from "../core/memory.ts";
-import { saveSession } from "../core/session.ts";
+import { saveSession, sessionHasMessages } from "../core/session.ts";
 import { type ParsedArgs, runStartup } from "../core/startup.ts";
 import { cancelActiveDecxprQuery, suspendAndRun } from "../core/stdin-manager.ts";
 import { inkPickers } from "../pickers/ink.tsx";
@@ -120,6 +120,15 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 		});
 	}
 
+	// Leaving the session behind is only useful if you can get back into it,
+	// and the id is nowhere on screen — the exit clears it along with the rest
+	// of the frame. Print the exact command instead of the bare id. Skipped
+	// for a session with no turns: there is nothing to resume.
+	const printResumeHint = () => {
+		if (!sessionHasMessages(result.session.id)) return;
+		process.stdout.write(`\x1b[2mResume this session:\x1b[22m cast --resume=${result.session.id}\n`);
+	};
+
 	const onQuit = () => {
 		saveSession(result.session);
 		if (result.hooks) {
@@ -141,6 +150,7 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 			.finally(() => closeMcpConnections(result.mcpResult.connections))
 			.then(async () => {
 				process.stdout.write("\x1b[2J\x1b[H");
+				printResumeHint();
 				await new Promise((resolve) => setTimeout(resolve, 60));
 				process.exit(0);
 			});
@@ -208,6 +218,7 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 
 	await waitUntilExit();
 	saveSession(result.session);
+	printResumeHint();
 	if (result.hooks) {
 		await runHooksForEvent(result.hooks, {
 			event: "SessionEnd",
