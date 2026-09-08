@@ -16,6 +16,8 @@
  * repeat, so they aren't cached at all; the rest evict oldest-first.
  */
 
+import { eastAsianWidth } from "get-east-asian-width";
+
 /** Above this, a line is measured every time instead of being retained. The
  *  lines this cache exists for — repeated prefixes and ordinary wrapped text —
  *  are far shorter than a terminal is wide. */
@@ -25,17 +27,91 @@ const MAX_CACHE_ENTRIES = 4096;
 
 const cache = new Map<string, number>();
 
-function isWide(cp: number): boolean {
+/**
+ * Zero-width code points: combining marks, the zero-width space/joiner family,
+ * variation selectors' non-emoji half, and emoji skin-tone modifiers (which
+ * attach to the preceding emoji rather than occupying their own cell).
+ *
+ * They used to count as one cell each, which is where the old measurement went
+ * wrong on ordinary text: `école` with a combining acute measured 6 instead of
+ * 5, and every emoji built from a ZWJ sequence measured far too wide.
+ */
+function isZeroWidth(cp: number): boolean {
 	return (
-		(cp >= 0x1100 && cp <= 0x115f) || // Hangul Jamo
-		(cp >= 0x2e80 && cp <= 0xa4cf) || // CJK radicals … Yi
-		(cp >= 0xac00 && cp <= 0xd7a3) || // Hangul syllables
-		(cp >= 0xf900 && cp <= 0xfaff) || // CJK compatibility ideographs
-		(cp >= 0xfe30 && cp <= 0xfe4f) || // CJK compatibility forms
-		(cp >= 0xff00 && cp <= 0xff60) || // fullwidth forms
-		(cp >= 0xffe0 && cp <= 0xffe6) ||
-		cp >= 0x1f300 // emoji & symbols (approximation)
+		cp === 0x200b || // zero-width space
+		cp === 0x200c || // zero-width non-joiner
+		cp === 0xfeff || // BOM / zero-width no-break space
+		(cp >= 0x0300 && cp <= 0x036f) || // combining diacritical marks
+		(cp >= 0x1ab0 && cp <= 0x1aff) ||
+		(cp >= 0x1dc0 && cp <= 0x1dff) ||
+		(cp >= 0x20d0 && cp <= 0x20ff) || // combining marks for symbols
+		(cp >= 0xfe20 && cp <= 0xfe2f) || // combining half marks
+		(cp >= 0x1f3fb && cp <= 0x1f3ff) || // emoji skin-tone modifiers
+		(cp >= 0xe0100 && cp <= 0xe01ef) // variation selectors supplement
 	);
+}
+
+/**
+ * Terminal cells one line occupies, summed per code point with the pieces that
+ * combine into one glyph folded into their base.
+ *
+ * The width table used to be hand-rolled ranges plus "everything at or above
+ * U+1F300 is two cells", which was wrong in both directions and both
+ * directions hurt: overcounting made the live region drop text that would have
+ * fitted, undercounting let it overrun the viewport — the very failure this
+ * module exists to prevent. Measured against `string-width` (the package Ink
+ * itself measures with) on 33 strings, the old code disagreed on 8 of them:
+ * `👨‍👩‍👧‍👦` was 11 cells instead of 2, `👨‍💻` 5 instead of 2, `👍🏽` 4 instead of 2,
+ * while `🀄`, `🈁` and `⌚` were 1 instead of 2. This agrees with all 33 —
+ * see test/display-width.test.ts, which cross-checks against string-width
+ * directly — and stays a per-code-point loop, because string-width costs 46×
+ * more (647ms against 14ms on one 240KB line, well past a 16ms frame).
+ *
+ * ANSI escapes are counted as printable, as they were before: the callers
+ * measure model prose, not styled output.
+ */
+function accumulate(line: string, maxCells: number): number {
+	let w = 0;
+	// A ZWJ sequence renders as one glyph: the joiner and everything it joins
+	// fold into the width of the first emoji.
+	let afterZwj = false;
+	// U+FE0F (emoji presentation) makes an otherwise narrow base two cells
+	// wide — `❤` is one cell, `❤️` is two.
+	let lastNarrow = false;
+	for (const ch of line) {
+		const cp = ch.codePointAt(0) ?? 0;
+		if (afterZwj) {
+			afterZwj = cp === 0x200d;
+			lastNarrow = false;
+			continue;
+		}
+		if (cp === 0x200d) {
+			afterZwj = true;
+			continue;
+		}
+		if (cp === 0xfe0f) {
+			if (lastNarrow) {
+				w += 1;
+				lastNarrow = false;
+			}
+		} else if (cp === 0xfe0e) {
+			lastNarrow = false;
+		} else if (!isZeroWidth(cp)) {
+			if (cp < 0x0300) {
+				// Fast path for ASCII and Latin-1, which is most of every line.
+				if (cp >= 0x20) {
+					w += 1;
+					lastNarrow = true;
+				}
+			} else {
+				const wide = eastAsianWidth(cp, { ambiguousAsWide: false }) === 2;
+				w += wide ? 2 : 1;
+				lastNarrow = !wide;
+			}
+		}
+		if (w > maxCells) return w;
+	}
+	return w;
 }
 
 /**
@@ -51,22 +127,15 @@ function isWide(cp: number): boolean {
 export function displayWidthAtMost(line: string, maxCells: number): number {
 	const cached = cache.get(line);
 	if (cached !== undefined) return cached;
-	let w = 0;
-	for (const ch of line) {
-		w += isWide(ch.codePointAt(0) ?? 0) ? 2 : 1;
-		if (w > maxCells) return w;
-	}
-	rememberWidth(line, w);
+	const w = accumulate(line, maxCells);
+	if (w <= maxCells) rememberWidth(line, w);
 	return w;
 }
 
 export function displayWidth(line: string): number {
 	const cached = cache.get(line);
 	if (cached !== undefined) return cached;
-	let w = 0;
-	for (const ch of line) {
-		w += isWide(ch.codePointAt(0) ?? 0) ? 2 : 1;
-	}
+	const w = accumulate(line, Number.POSITIVE_INFINITY);
 	rememberWidth(line, w);
 	return w;
 }
