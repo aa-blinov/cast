@@ -1,7 +1,7 @@
 import { renderToString } from "ink";
 import { createElement } from "react";
 import { describe, expect, it } from "vitest";
-import { ChatLog, parseToolSummary } from "../src/ui/ChatLog.tsx";
+import { ChatLog, oneLineSummary, parseToolSummary } from "../src/ui/ChatLog.tsx";
 
 describe("ChatLog tool rows", () => {
 	it("renders real bash and MCP events as summaries without either result payload", () => {
@@ -146,5 +146,36 @@ describe("parseToolSummary — todo_write", () => {
 
 	it("falls back to the generic JSON dump when args don't parse as a todo list", () => {
 		expect(parseToolSummary("todo_write", "not json")).toEqual({ kind: "generic", text: "not json" });
+	});
+});
+
+describe("oneLineSummary — the live region charges tool rows as one line", () => {
+	/**
+	 * Ink's wrap="truncate" truncates the string but keeps its newlines: a
+	 * value that already fits the width comes back unchanged, so the row
+	 * rendered as many physical lines as it contained while
+	 * clampStreamingBlocks had charged exactly one. A live region taller than
+	 * the viewport is what makes Ink stack duplicate frames into scrollback.
+	 */
+	it("collapses a multi-line task assignment to one line", () => {
+		const model = parseToolSummary("task", JSON.stringify({ assignment: "Do X\nThen Y\nReport back" }));
+
+		expect(model).toEqual({ kind: "task", text: "Do X\nThen Y\nReport back" });
+		const line = oneLineSummary((model as { text: string }).text);
+		expect(line).toBe("Do X Then Y Report back");
+		expect(line.split("\n")).toHaveLength(1);
+	});
+
+	it("collapses pretty-printed streaming args, which every tool can produce", () => {
+		// Partial args are raw text, not parsed JSON — a model that emits
+		// pretty-printed JSON puts real newlines in the generic summary.
+		const partial = '{\n  "command": "ls -la",\n  "timeout": 5';
+		const model = parseToolSummary("bash", partial);
+
+		expect(oneLineSummary((model as { text: string }).text).split("\n")).toHaveLength(1);
+	});
+
+	it("leaves an ordinary one-line summary alone", () => {
+		expect(oneLineSummary("path=x.ts, lines=3")).toBe("path=x.ts, lines=3");
 	});
 });

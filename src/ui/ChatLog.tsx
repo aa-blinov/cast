@@ -102,6 +102,24 @@ export function parseToolSummary(name: string, args: string): ToolSummaryModel {
 }
 
 /**
+ * Collapse a summary to one physical line for the live region.
+ *
+ * Ink's `wrap="truncate"` truncates the string, but it does not remove
+ * newlines: a value that already fits the terminal width comes back
+ * unchanged, so a multi-line `task` assignment ("Do X\nThen Y\nReport
+ * back") rendered three rows while clampStreamingBlocks had charged the tool
+ * block exactly one — and a live region taller than the viewport is what
+ * makes Ink stack duplicate frames into scrollback. Streaming args arrive as
+ * raw text too, so a model that emits pretty-printed JSON hits this on every
+ * tool call, not just `task`.
+ */
+const NEWLINE_RUN_RE = /\s*\n\s*/g;
+/** @internal exported for unit tests */
+export function oneLineSummary(text: string): string {
+	return text.replace(NEWLINE_RUN_RE, " ");
+}
+
+/**
  * One-line summary for a tool call. Only the parse is memoized — the JSX is
  * rebuilt every render so theme() colors stay live: memoizing the whole
  * element on [name, args] kept the previous theme's colors on still-visible
@@ -138,13 +156,13 @@ function ToolSummary({ name, args, compact }: { name: string; args: string; comp
 		// History: wrap the full assignment once the turn is committed.
 		return (
 			<Text color={theme().muted} wrap={compact ? "truncate" : "wrap"}>
-				{model.text}
+				{compact ? oneLineSummary(model.text) : model.text}
 			</Text>
 		);
 	}
 	return (
 		<Text color={theme().muted} wrap="truncate">
-			{model.text}
+			{compact ? oneLineSummary(model.text) : model.text}
 		</Text>
 	);
 }
