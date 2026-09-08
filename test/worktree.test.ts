@@ -19,7 +19,6 @@ import { join, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	createSessionWorktree,
-	disposeSessionWorktree,
 	ensureSessionWorktree,
 	findCanonicalGitRoot,
 	flattenSlug,
@@ -351,66 +350,12 @@ describe("removeWorktreeBySlug — git's own guards", () => {
 	});
 });
 
-describe("disposeSessionWorktree", () => {
-	let repo: string;
-
-	beforeEach(() => {
-		repo = tmpRoot;
-		initRepo(repo);
-	});
-
-	it("removes the worktree directory and the branch", async () => {
-		const wt = await ensureSessionWorktree("feature-auth", repo);
-		expect(existsSync(wt.path)).toBe(true);
-		await disposeSessionWorktree(wt);
-		expect(existsSync(wt.path)).toBe(false);
-		// The branch should be gone. `git rev-parse --verify refs/heads/<name>`
-		// is the precise "does this ref exist" probe — `git branch --list`
-		// would mark the active branch with a `+` and noise the equality check.
-		const verify = runGitOrFail(repo, ["rev-parse", "--verify", "--quiet", "refs/heads/cast-feature-auth"]);
-		expect(verify).toBe(false);
-		// git worktree list should no longer mention the path.
-		const list = git(repo, ["worktree", "list"]);
-		expect(list).not.toContain(wt.path);
-	});
-
-	it("is idempotent — calling on an already-disposed worktree does not throw", async () => {
-		const wt = await ensureSessionWorktree("feature-auth", repo);
-		await disposeSessionWorktree(wt);
-		// Second call: the directory is gone, the branch is gone. Both
-		// subcommands should report "no such" errors which we swallow.
-		await expect(disposeSessionWorktree(wt)).resolves.toBeUndefined();
-	});
-
-	it("ensures a fresh worktree after dispose (the old branch is fully gone)", async () => {
-		const first = await ensureSessionWorktree("feature-auth", repo);
-		await disposeSessionWorktree(first);
-		const second = await ensureSessionWorktree("feature-auth", repo);
-		expect(second.path).toBe(first.path);
-		expect(existsSync(second.path)).toBe(true);
-		// The branch exists again — `git rev-parse --verify --quiet` returns
-		// exit 0 only when the ref is present.
-		const verify = runGitOrFail(repo, ["rev-parse", "--verify", "--quiet", "refs/heads/cast-feature-auth"]);
-		expect(verify).toBe(true);
-	});
-
-	it("removes a worktree that has uncommitted changes when called explicitly", async () => {
-		// Documents v1 behavior: dispose is "user has decided, nuke it" — we
-		// always run --force. v2's ExitWorktree tool will offer a safer
-		// keep/remove with discard_changes confirmation instead.
-		const wt = await ensureSessionWorktree("feature-auth", repo);
-		writeFileSync(join(wt.path, "dirty.txt"), "uncommitted");
-		await disposeSessionWorktree(wt);
-		expect(existsSync(wt.path)).toBe(false);
-	});
-});
-
-describe("ensure → dispose → ensure — round trip", () => {
+describe("ensure → remove → ensure — round trip", () => {
 	it("rebuilds the same worktree cleanly", async () => {
 		initRepo(tmpRoot);
 		const wt1 = await ensureSessionWorktree("round-trip", tmpRoot);
 		const firstHead = wt1.headCommit;
-		await disposeSessionWorktree(wt1);
+		expect((await removeWorktreeBySlug("round-trip", tmpRoot, { force: true })).ok).toBe(true);
 		const wt2 = await ensureSessionWorktree("round-trip", tmpRoot);
 		expect(wt2.path).toBe(wt1.path);
 		expect(wt2.headCommit).toBe(firstHead);

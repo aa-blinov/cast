@@ -303,28 +303,6 @@ function findExistingWorktree(repoRoot: string, expectedPath: string): { path: s
 	return check();
 }
 
-/**
- * Remove the worktree directory and its branch from the main repo. Best-effort:
- * errors are swallowed because the caller (cleanup on exit) cannot meaningfully
- * react to a partial failure — the user will see leftover files on disk and can
- * clean them up with `git worktree remove` / `git branch -D` themselves. Both
- * commands are no-ops if the worktree/branch is already gone, so this is safe
- * to call speculatively (e.g. from a signal handler).
- */
-export async function disposeSessionWorktree(wt: SessionWorktree): Promise<void> {
-	// `git worktree remove --force` deletes the directory and un-registers the
-	// worktree from .git/worktrees/. Must run from the main repo, not the
-	// worktree itself (which we're about to delete). Async: this deletes a
-	// whole checkout on disk and must not freeze the loop while git works.
-	await runGitAsync(wt.repoRoot, ["worktree", "remove", "--force", wt.path]);
-	// `git branch -D` (capital, force) drops the branch even if it has
-	// unmerged commits. We don't try to preserve them — the user kept them in
-	// the working tree until they explicitly chose `-w` again, but this v1
-	// always auto-keeps on exit (no `discard_changes` flow), so by the time
-	// we get here, the user wants the branch gone.
-	runGit(wt.repoRoot, ["branch", "-D", wt.branch]);
-}
-
 // ---- git plumbing ----
 
 /**
@@ -382,24 +360,6 @@ const execFileT = execFileP as (
 	options: { cwd?: string; env?: NodeJS.ProcessEnv; encoding?: BufferEncoding; stdio?: Array<"ignore" | "pipe"> },
 ) => Promise<{ stdout: string | Buffer; stderr: string | Buffer }>;
 
-/** Async `git <args>` — for the slow operations (worktree add/remove) that
- * must not freeze the daemon's event loop while git works. Same semantics as
- * runGit (null on failure); callers that already await are unchanged. */
-async function runGitAsync(cwd: string, args: string[]): Promise<string | null> {
-	try {
-		const out = await execFileT("git", args, {
-			cwd,
-			env: { ...process.env, ...GIT_NO_PROMPT_ENV },
-			encoding: "utf8",
-			stdio: ["ignore", "pipe", "pipe"],
-		});
-		return out.stdout.toString().trim();
-	} catch {
-		return null;
-	}
-}
-
-/** Async counterpart of runGitWithStatus for side-effecting git commands. */
 async function runGitAsyncWithStatus(cwd: string, args: string[]): Promise<GitResult> {
 	try {
 		const out = await execFileT("git", args, {
