@@ -5,6 +5,21 @@
  */
 import { findWordBackward, findWordForward } from "./word-nav.ts";
 
+const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+/**
+ * The whole grapheme cluster starting at `pos` — what the cursor cell has to
+ * render as one inverse block. Taking a single code point split a family
+ * emoji or an accented letter across the cursor and both halves rendered
+ * wrong.
+ */
+export function graphemeAt(text: string, pos: number): string {
+	if (pos < 0 || pos >= text.length) return "";
+	const window = text.slice(pos, Math.min(text.length, pos + 128));
+	for (const { segment } of GRAPHEMES.segment(window)) return segment;
+	return "";
+}
+
 export class TextBuffer {
 	private text = "";
 	private cursor = 0;
@@ -31,41 +46,69 @@ export class TextBuffer {
 	}
 
 	// The buffer indexes UTF-16 code units, but the cursor must only ever rest
-	// on code-point boundaries: stepping or deleting a single unit inside an
-	// astral character (emoji, some CJK extensions) leaves a lone surrogate —
-	// mojibake in the render and in the submitted text.
+	// on a grapheme-cluster boundary. Stepping or deleting a single unit inside
+	// an astral character leaves a lone surrogate — mojibake in the render and
+	// in the submitted text — and stepping by *code point* is not enough
+	// either: one backspace on a family emoji removed a single member and left
+	// a dangling joiner, so the glyph fell apart into separate emoji and it
+	// took seven presses to delete what looks like one character. Same for an
+	// accent written as a combining mark (`e` + U+0301), and for an emoji with
+	// a skin-tone modifier.
+	//
+	// Boundaries come from Intl.Segmenter, over a window around the cursor
+	// rather than the whole buffer: segmenting a long pasted draft costs 49ms
+	// at 100KB — on every keystroke — against 0.13ms for the window. A cluster
+	// is a handful of units, so a window this wide always contains the one
+	// being crossed.
+	private static readonly BOUNDARY_WINDOW = 128;
 
-	/** Position one code point left of `pos` (skips over a surrogate pair). */
-	private prevBoundary(pos: number): number {
-		if (pos <= 0) return 0;
-		const low = this.text.charCodeAt(pos - 1);
-		if (low >= 0xdc00 && low <= 0xdfff && pos >= 2) {
-			const high = this.text.charCodeAt(pos - 2);
-			if (high >= 0xd800 && high <= 0xdbff) return pos - 2;
+	/** Cluster start offsets (absolute) inside a window of the buffer. */
+	private clusterStarts(from: number, to: number): number[] {
+		const start = this.snapUnitBoundary(Math.max(0, from));
+		const end = this.snapUnitBoundary(Math.min(this.text.length, to));
+		const starts: number[] = [];
+		for (const { index } of GRAPHEMES.segment(this.text.slice(start, end))) {
+			starts.push(start + index);
 		}
-		return pos - 1;
+		return starts;
 	}
 
-	/** Position one code point right of `pos` (skips over a surrogate pair). */
-	private nextBoundary(pos: number): number {
-		if (pos >= this.text.length) return this.text.length;
-		const high = this.text.charCodeAt(pos);
-		if (high >= 0xd800 && high <= 0xdbff && pos + 1 < this.text.length) {
-			const low = this.text.charCodeAt(pos + 1);
-			if (low >= 0xdc00 && low <= 0xdfff) return pos + 2;
-		}
-		return pos + 1;
-	}
-
-	/** If `pos` sits between the halves of a surrogate pair, snap to its start. */
-	private snapBoundary(pos: number): number {
+	/** Nudge off the low half of a surrogate pair, so a window never starts or
+	 *  ends inside one (Segmenter would see a lone surrogate). */
+	private snapUnitBoundary(pos: number): number {
 		if (pos <= 0 || pos >= this.text.length) return pos;
 		const code = this.text.charCodeAt(pos);
-		if (code >= 0xdc00 && code <= 0xdfff) {
-			const high = this.text.charCodeAt(pos - 1);
-			if (high >= 0xd800 && high <= 0xdbff) return pos - 1;
+		return code >= 0xdc00 && code <= 0xdfff ? pos - 1 : pos;
+	}
+
+	/** Start of the grapheme cluster before `pos`. */
+	private prevBoundary(pos: number): number {
+		if (pos <= 0) return 0;
+		const starts = this.clusterStarts(pos - TextBuffer.BOUNDARY_WINDOW, pos);
+		for (let i = starts.length - 1; i >= 0; i--) {
+			if (starts[i]! < pos) return starts[i]!;
 		}
-		return pos;
+		return this.snapUnitBoundary(pos - 1);
+	}
+
+	/** Start of the grapheme cluster after `pos`. */
+	private nextBoundary(pos: number): number {
+		if (pos >= this.text.length) return this.text.length;
+		const starts = this.clusterStarts(pos, pos + TextBuffer.BOUNDARY_WINDOW);
+		for (const start of starts) {
+			if (start > pos) return start;
+		}
+		return this.text.length;
+	}
+
+	/** If `pos` sits inside a cluster, snap to its start. */
+	private snapBoundary(pos: number): number {
+		if (pos <= 0 || pos >= this.text.length) return pos;
+		const starts = this.clusterStarts(pos - TextBuffer.BOUNDARY_WINDOW, pos + 1);
+		for (let i = starts.length - 1; i >= 0; i--) {
+			if (starts[i]! <= pos) return starts[i]!;
+		}
+		return this.snapUnitBoundary(pos);
 	}
 
 	backspace(): void {

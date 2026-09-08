@@ -11,7 +11,7 @@ import {
 import { SLASH_COMMANDS } from "./commands.ts";
 import { type InputEvent, InputParser } from "./input/input-parser.ts";
 import { StdinBuffer } from "./input/stdin-buffer.ts";
-import { TextBuffer } from "./input/textarea.ts";
+import { graphemeAt, TextBuffer } from "./input/textarea.ts";
 import { chipCharFor, expandPastes, isChipChar, type PendingPaste, pasteLabel } from "./paste.ts";
 import type { ClipboardPasteResult } from "./readClipboardImage.ts";
 import { theme } from "./themes/index.ts";
@@ -672,14 +672,12 @@ export function Composer({
 				) : (
 					(() => {
 						const beforeCol = line.slice(0, cursorCol);
-						// Take the full code point under the cursor — slicing a single
-						// UTF-16 unit would split an emoji's surrogate pair and render
-						// mojibake on both sides of the cursor.
-						let atCol = "";
-						if (cursorCol < line.length) {
-							const cp = line.codePointAt(cursorCol) ?? 0;
-							atCol = line.slice(cursorCol, cursorCol + (cp > 0xffff ? 2 : 1));
-						}
+						// The whole grapheme cluster under the cursor. A single UTF-16
+						// unit would split an emoji's surrogate pair into mojibake; a
+						// single code point kept the pair intact but still cut a family
+						// emoji or a combining accent in half, so the cursor block
+						// showed one member and the rest spilled out to its right.
+						const atCol = graphemeAt(line, cursorCol);
 						const afterCol = line.slice(cursorCol + atCol.length);
 						// If the cursor cell is a chip character, show the whole chip
 						// label in inverse (the chip is one buffer column, so the cursor

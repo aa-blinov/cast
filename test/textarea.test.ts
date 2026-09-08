@@ -1,7 +1,78 @@
 import { describe, expect, it } from "vitest";
-import { TextBuffer } from "../src/ui/input/textarea.ts";
+import { graphemeAt, TextBuffer } from "../src/ui/input/textarea.ts";
 
 describe("TextBuffer", () => {
+	/**
+	 * One keypress has to delete one *glyph*. Stepping by code point left a
+	 * dangling joiner behind, so a family emoji fell apart into its members
+	 * and took seven backspaces to remove; an accent written as a combining
+	 * mark came off its letter.
+	 */
+	describe("grapheme clusters", () => {
+		const CLUSTERS: Array<[string, string]> = [
+			["family emoji", "\u{1f468}\u200d\u{1f469}\u200d\u{1f467}\u200d\u{1f466}"],
+			["skin tone", "\u{1f44d}\u{1f3fd}"],
+			["combining accent", "e\u0301"],
+			["regional flag", "\u{1f1fa}\u{1f1f8}"],
+			["astral emoji", "\u{1f600}"],
+			["wide CJK", "日"],
+		];
+
+		it.each(CLUSTERS)("backspace removes a whole %s", (_name, cluster) => {
+			const buf = new TextBuffer();
+			buf.insert(`ab${cluster}`);
+
+			buf.backspace();
+
+			expect(buf.value).toBe("ab");
+			expect(buf.cursorPos).toBe(2);
+		});
+
+		it.each(CLUSTERS)("delete-forward removes a whole %s", (_name, cluster) => {
+			const buf = new TextBuffer();
+			buf.insert(`${cluster}ab`);
+			buf.moveLineStart();
+
+			buf.deleteForward();
+
+			expect(buf.value).toBe("ab");
+		});
+
+		it.each(CLUSTERS)("arrows step over a whole %s", (_name, cluster) => {
+			const buf = new TextBuffer();
+			buf.insert(`a${cluster}b`);
+			buf.moveLineStart();
+
+			buf.moveRight();
+			expect(buf.cursorPos).toBe(1);
+			buf.moveRight();
+			expect(buf.cursorPos).toBe(1 + cluster.length);
+			buf.moveLeft();
+			expect(buf.cursorPos).toBe(1);
+		});
+
+		it("keeps a long draft responsive", () => {
+			// The boundary lookup is windowed because segmenting the whole buffer
+			// costs 49ms at 100KB — on every keystroke.
+			const buf = new TextBuffer();
+			buf.insert("hello \u{1f468}\u200d\u{1f469}\u200d\u{1f467}\u200d\u{1f466} e\u0301 日本語 ".repeat(4200));
+			const startedAt = performance.now();
+			for (let i = 0; i < 200; i++) buf.backspace();
+			expect(performance.now() - startedAt).toBeLessThan(2000);
+		});
+	});
+
+	describe("graphemeAt", () => {
+		it("returns the whole cluster the cursor cell must render", () => {
+			const family = "\u{1f468}\u200d\u{1f469}\u200d\u{1f467}\u200d\u{1f466}";
+			expect(graphemeAt(`ab${family}c`, 2)).toBe(family);
+			expect(graphemeAt("e\u0301x", 0)).toBe("e\u0301");
+			expect(graphemeAt("abc", 1)).toBe("b");
+			expect(graphemeAt("abc", 3)).toBe("");
+			expect(graphemeAt("", 0)).toBe("");
+		});
+	});
+
 	it("inserts text at the cursor", () => {
 		const buf = new TextBuffer();
 		buf.insert("hello");
