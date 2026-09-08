@@ -128,16 +128,15 @@ export function App(props: AppProps): JSX.Element {
 	// changes do a full clear (\x1b[2J\x1b[3J) because the banner gradient
 	// changed and the old copy in scrollback must disappear.
 	const [repaintKey, setRepaintKey] = useState(0);
+	// Read by the resync callback below, which is defined before `agent` exists.
+	const messagesRef = useRef<ChatMessage[]>([]);
 	useTerminalResync(
 		useCallback(
 			async (preserveScrollback: boolean) => {
-				// Always reprint the banner — it lives outside Ink's tree (plain
-				// stdout), so a light clear that skips the scrollback wipe would
-				// leave it erased. Full resync wipes scrollback and prints the
-				// banner from a clean top; light resync keeps scrollback and just
-				// reprints the banner so a settleResync/resize doesn't blank the
-				// top of the screen.
-				await onRepaintBanner?.(preserveScrollback);
+				// See shouldReprintBanner for why a light resync usually must not.
+				if (shouldReprintBanner(preserveScrollback, messagesRef.current.length)) {
+					await onRepaintBanner?.(preserveScrollback);
+				}
 				setRepaintKey((k) => k + 1);
 				// The synchronized-output block useTerminalResync wraps this call
 				// in must stay open until the replayed <Static> content actually
@@ -427,6 +426,7 @@ export function App(props: AppProps): JSX.Element {
 	const running = agent.status === "running";
 	// Recomputed when the transcript changes so a prompt is recallable on the
 	// turn right after it was sent.
+	messagesRef.current = agent.messages;
 	const promptHistory = useMemo(() => submittedPrompts(agent.messages), [agent.messages]);
 	const canSubmit = useCallback(
 		(text: string) => {
@@ -1040,6 +1040,23 @@ function submittedPrompts(messages: readonly ChatMessage[]): string[] {
 		if (typeof message.content === "string" && message.content.trim()) prompts.push(message.content);
 	}
 	return prompts;
+}
+
+/**
+ * Whether a terminal resync should reprint the banner.
+ *
+ * The banner is written to stdout, outside Ink's tree, so any clear erases it
+ * and only a reprint brings it back. A *full* resync wipes the scrollback,
+ * so its reprint replaces the old copy. A light one deliberately keeps the
+ * scrollback — and reprinting there left the previous banner above and added
+ * another below, once per resync: dragging a window's edge stacked a wall of
+ * banners (reproduced in a pseudo-terminal: three resizes, three extra
+ * copies). While the transcript is empty the banner is still the thing on
+ * screen and the reprint is what keeps it there; once there is history it has
+ * scrolled up, where a second copy is pure noise.
+ */
+export function shouldReprintBanner(preserveScrollback: boolean, messageCount: number): boolean {
+	return !preserveScrollback || messageCount === 0;
 }
 
 export function formatContextPct(messages: import("../core/llm.ts").Message[], config: AppConfig): string {

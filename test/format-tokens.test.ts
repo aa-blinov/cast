@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
-import { abbreviateTokens, formatContextPct } from "../src/ui/App.tsx";
+import { abbreviateTokens, formatContextPct, shouldReprintBanner } from "../src/ui/App.tsx";
 
 describe("abbreviateTokens", () => {
 	it("leaves values under 1000 untouched", () => {
@@ -57,5 +57,24 @@ describe("formatContextPct", () => {
 		const [, used, budget, pct] = match!;
 		const impliedPct = Math.round((Number(used) / Number(budget)) * 100);
 		expect(Math.abs(impliedPct - Number(pct))).toBeLessThanOrEqual(1);
+	});
+});
+
+describe("shouldReprintBanner", () => {
+	/**
+	 * The banner is written outside Ink's tree, so a clear erases it. A light
+	 * resync keeps the scrollback, so reprinting there left the old copy above
+	 * and added another below — once per resync. Three resizes, three extra
+	 * banners (reproduced in a pseudo-terminal).
+	 */
+	it("reprints on a full resync, which wipes the old copy with the scrollback", () => {
+		expect(shouldReprintBanner(false, 0)).toBe(true);
+		expect(shouldReprintBanner(false, 12)).toBe(true);
+	});
+
+	it("reprints on a light resync only while the banner is what is on screen", () => {
+		expect(shouldReprintBanner(true, 0)).toBe(true);
+		expect(shouldReprintBanner(true, 1)).toBe(false);
+		expect(shouldReprintBanner(true, 200)).toBe(false);
 	});
 });
