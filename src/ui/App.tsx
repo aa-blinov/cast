@@ -34,6 +34,7 @@ import { ModalPicker, MultiSelectPicker, TextInputModal } from "../pickers/ink.t
 import { ChatLog } from "./ChatLog.tsx";
 import { Composer } from "./Composer.tsx";
 import { canSubmitDuringRun, handleInput } from "./commands.ts";
+import { displayWidth } from "./display-width.ts";
 import { imageFilePathsInText } from "./paste.ts";
 import { useModalBridge } from "./pickerBridge.ts";
 import { resolvePlanQuestionWithPicker } from "./plan-question.ts";
@@ -116,7 +117,21 @@ export function App(props: AppProps): JSX.Element {
 
 	const [notice, setNotice] = useState<string | null>(null);
 	const noticeDurationRef = useRef(6000);
+	// Set once the agent session exists — showNotice is created before it
+	// (useModalBridge below needs it) but only ever called after mount.
+	const addDisplayMessageRef = useRef<((message: ChatMessage) => void) | null>(null);
 	const showNotice = useCallback((text: string, duration?: number) => {
+		// A listing is not a toast. Anything taller than a few rows goes to the
+		// transcript instead of the live notice line: the live region has to
+		// stay shorter than the terminal or Ink clears the screen *and* the
+		// scrollback on every frame (a 30-hook `/hooks` listing wiped it —
+		// measured), and a listing is worth scrolling back to anyway. Most
+		// commands already push their listings with addDisplayMessage; this
+		// catches the ones that don't.
+		if (noticeRows(text) > MAX_NOTICE_ROWS && addDisplayMessageRef.current) {
+			addDisplayMessageRef.current({ role: "warning", content: text });
+			return;
+		}
 		setNotice(text);
 		noticeDurationRef.current = duration ?? 6000;
 	}, []);
@@ -415,6 +430,7 @@ export function App(props: AppProps): JSX.Element {
 		daemonUrl,
 		daemonToken,
 	});
+	addDisplayMessageRef.current = agent.addDisplayMessage;
 	// Mode flips in daemon mode go over HTTP (setSessionMode on the daemon) —
 	// populate the ref setPlanMode reads after the agent hook exists.
 	daemonModeSyncRef.current = agent.setMode;
@@ -880,6 +896,16 @@ export function App(props: AppProps): JSX.Element {
 		</Box>
 	);
 }
+
+/** Rows a notice would occupy on the current terminal — the live notice line
+ *  wraps, so a single long line counts for as many rows as it takes. */
+function noticeRows(text: string): number {
+	const cols = Math.max(20, process.stdout.columns || 80);
+	return text.split("\n").reduce((rows, line) => rows + Math.max(1, Math.ceil(displayWidth(line) / cols)), 0);
+}
+
+/** Above this a notice is transcript content, not a toast. */
+const MAX_NOTICE_ROWS = 3;
 
 /**
  * One row per pending /steer or /queue message, truncated — never wrapped,

@@ -127,6 +127,22 @@ writeFileSync(
 	)}\n`,
 );
 
+// A long listing must not arrive as a notice: the notice line lives in the
+// live region, so 30 hooks' worth of it used to wipe the scrollback once.
+writeFileSync(
+	join(home, ".cast", "hooks.json"),
+	JSON.stringify(
+		{
+			PreToolUse: Array.from({ length: 30 }, (_, i) => ({
+				matcher: `tool-${i}`,
+				hooks: [{ type: "command", command: `echo hook number ${i}` }],
+			})),
+		},
+		null,
+		2,
+	),
+);
+
 const term = pty.spawn(process.execPath, [join(import.meta.dirname, "..", "dist", "index.js")], {
 	name: "xterm-256color",
 	cols: COLS,
@@ -177,6 +193,13 @@ for (const draft of ["queued text that is long ", "second queued message just as
 await wait(2500);
 const composerClears = [...seen.matchAll(/\x1b\[2J/g)].length;
 
+seen = "";
+await typeSlowly("/hooks");
+term.write("\r");
+await wait(2500);
+const noticeClears = [...seen.matchAll(/\x1b\[2J/g)].length;
+const listedHooks = stripAnsi(seen).split("\n").filter((line) => line.includes("tool-")).length;
+
 term.write("\x03");
 await wait(200);
 term.write("\x03");
@@ -189,6 +212,11 @@ console.log(`full screen clears while streaming: ${clears} (scrollback wipes: ${
 console.log(`full screen clears while typing a long draft and queueing mid-turn: ${composerClears}`);
 if (composerClears > 0) {
 	console.error("FAIL: a long composer draft or a queued-message row grew the live region past the viewport.");
+	process.exit(1);
+}
+console.log(`full screen clears for a 30-hook /hooks listing: ${noticeClears} (rows listed: ${listedHooks})`);
+if (noticeClears > 0 || listedHooks === 0) {
+	console.error("FAIL: a long listing either wiped the screen or never reached the transcript.");
 	process.exit(1);
 }
 if (clears > 0) {
