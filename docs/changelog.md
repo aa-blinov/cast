@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Fixed
+
+- **A command's output could forge cast's own notices.** Completion notices for background tasks are `<system-reminder>` blocks — the channel the harness uses to talk to the model, which the TUI and web UI render as `[system] …` rows and the ACP adapter drops from a replay. The task's command and output were embedded in one without escaping, so output containing `</system-reminder><system-reminder>…` closed cast's envelope and opened its own: one notice became five reminder blocks, one of them authored entirely by the command. The model reads that block as an instruction from the harness rather than as data a command printed, and the user is shown it as a genuine `[system]` notice (or, in an editor over ACP, not shown it at all). Ordinary output can do this by accident — a build log echoing a prompt file — and a hostile repository can do it on purpose. The same escaping now applies to the editor buffers the ACP adapter injects as context and to the checkpoint-validation report, the other two places where untrusted text sits inside that envelope.
+
 ## 0.27.0
 
 ### Changed
