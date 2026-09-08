@@ -1,6 +1,5 @@
 import { Box, render, Text } from "ink";
 import type { JSX } from "react";
-import { CAST_BANNER } from "../core/help.ts";
 import { runHooksForEvent } from "../core/hooks.ts";
 import { closeMcpConnections } from "../core/mcp.ts";
 import { drainProjectCheckpointWriters } from "../core/memory.ts";
@@ -11,7 +10,7 @@ import { inkPickers } from "../pickers/ink.tsx";
 import type { Pickers } from "../pickers/types.ts";
 import { daemonBaseUrl, readLiveServerState } from "../server/daemon-state.ts";
 import { App } from "./App.tsx";
-import { gradientBanner } from "./gradient.ts";
+import { gradientAnsi } from "./gradient.ts";
 import { type ClipboardPasteResult, saveClipboardImageToTempFile } from "./readClipboardImage.ts";
 import { Spinner } from "./Spinner.tsx";
 import { loadTheme } from "./themes/index.ts";
@@ -96,7 +95,11 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 	const result = await runStartup(args, pickersWithLoaderHandoff, showLoader);
 	hideLoader();
 
-	console.log(gradientBanner(CAST_BANNER, args.version));
+	// One line instead of the seven-row ASCII wordmark: on a 24-row terminal
+	// the art cost a third of the screen before the first message, it had to be
+	// reprinted (and de-duplicated) on every resync, and the web UI keeps the
+	// logo where a logo makes sense.
+	console.log(`${gradientAnsi(`cast v${args.version}`)}\n`);
 
 	// Background bash tasks are spawned detached (their own process group, see
 	// tools/bash-background.ts) specifically so a running command's own
@@ -144,24 +147,17 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 	};
 	const onPasteImage = (): Promise<ClipboardPasteResult> => saveClipboardImageToTempFile();
 
-	// Repaint the banner with the current theme's gradient. Uses suspendAndRun
-	// to temporarily pause Ink so raw stdout writes don't fight its managed
-	// frame. Clears the whole screen (+ scrollback) first: the banner scrolled
-	// into scrollback as soon as the conversation grew, so a relative
-	// cursor-up from the frame bottom would land mid-transcript and clobber
-	// whatever was there instead of the banner. App.onThemeChange replays the
-	// full history below the fresh banner afterwards (see its Static key
-	// bump), so nothing on screen is actually lost.
+	// Clear the screen for a terminal resync. Ink's frame is torn down first
+	// (suspendAndRun) so these raw writes don't fight it, and App replays the
+	// full <Static> history afterwards.
 	//
 	// `preserveScrollback` (light resync — resize, settleResync after a resume,
-	// focus regain): the clear (\x1b[2J) must NOT wipe scrollback so the user's
-	// scroll position survives. But the banner is printed to stdout (outside
-	// Ink's tree), so a bare light clear would leave it erased — reprint it
-	// without the scrollback wipe.
-	const onRepaintBanner = async (preserveScrollback?: boolean) => {
+	// focus regain): erase the visible screen but not the scrollback, so the
+	// user's scroll position survives. A theme change asks for the full clear,
+	// because the old colours must go with it.
+	const onClearScreen = async (preserveScrollback?: boolean) => {
 		await suspendAndRun(async () => {
-			if (!preserveScrollback) process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
-			process.stdout.write(`${gradientBanner(CAST_BANNER, args.version)}\n`);
+			process.stdout.write(preserveScrollback ? "\x1b[2J\x1b[H" : "\x1b[2J\x1b[3J\x1b[H");
 		});
 	};
 
@@ -172,7 +168,7 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 			initialPrompt={args.initialPrompt}
 			onPasteImage={onPasteImage}
 			onQuit={onQuit}
-			onRepaintBanner={onRepaintBanner}
+			onClearScreen={onClearScreen}
 			daemonUrl={daemonUrl}
 			daemonToken={daemonToken}
 		/>,

@@ -6,9 +6,6 @@
 // the GitHub Pages/README SVG generator (scripts/build-banner-svg.mjs) and
 // cast server's own inline SVG logo (src/server/public/app.js) — all three used to
 // carry their own copy of this grid and could silently drift out of sync.
-import castBannerGrid from "../server/public/cast-banner-grid.json" with { type: "json" };
-
-export const CAST_BANNER = (castBannerGrid as string[]).join("\n");
 
 export function printHelp(): void {
 	console.log(`
