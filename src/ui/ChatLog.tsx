@@ -137,28 +137,39 @@ export function oneLineSummary(text: string): string {
  * element on [name, args] kept the previous theme's colors on still-visible
  * rows after a /theme switch.
  */
-function ToolSummary({ name, args, compact }: { name: string; args: string; compact?: boolean }): JSX.Element {
+function ToolSummary({
+	name,
+	args,
+	compact,
+	muted,
+}: {
+	name: string;
+	args: string;
+	compact?: boolean;
+	/** Inside a muted tool row the summary inherits its colour instead of
+	 *  adding a second one — churn counts stay coloured, they are the point. */
+	muted?: boolean;
+}): JSX.Element {
 	const model = useMemo(() => parseToolSummary(name, args), [name, args]);
+	const tone = muted ? {} : { color: theme().muted };
 	if (model.kind === "edit") {
 		return (
-			<Text wrap="truncate">
-				<Text color={theme().muted}>{model.path} · </Text>
-				<Text color={theme().success}>+{model.added}</Text>
-				<Text color={theme().muted}> </Text>
-				<Text color={theme().error}>-{model.removed}</Text>
+			<Text wrap="truncate" {...tone}>
+				{model.path} <Text color={theme().success}>+{model.added}</Text>{" "}
+				<Text color={theme().error}>−{model.removed}</Text>
 			</Text>
 		);
 	}
 	if (model.kind === "read") {
 		return (
-			<Text color={theme().muted} wrap="truncate">
+			<Text wrap="truncate" {...tone}>
 				{model.path} · lines {model.range}
 			</Text>
 		);
 	}
 	if (model.kind === "write") {
 		return (
-			<Text color={theme().muted} wrap="truncate">
+			<Text wrap="truncate" {...tone}>
 				{model.path} · {model.lines} {model.lines === 1 ? "line" : "lines"}
 			</Text>
 		);
@@ -167,13 +178,13 @@ function ToolSummary({ name, args, compact }: { name: string; args: string; comp
 		// Live region: one line so parallel tasks stay visible under the clamp.
 		// History: wrap the full assignment once the turn is committed.
 		return (
-			<Text color={theme().muted} wrap={compact ? "truncate" : "wrap"}>
+			<Text wrap={compact ? "truncate" : "wrap"} {...tone}>
 				{compact ? oneLineSummary(model.text) : model.text}
 			</Text>
 		);
 	}
 	return (
-		<Text color={theme().muted} wrap="truncate">
+		<Text wrap="truncate" {...tone}>
 			{compact ? oneLineSummary(model.text) : model.text}
 		</Text>
 	);
@@ -181,18 +192,21 @@ function ToolSummary({ name, args, compact }: { name: string; args: string; comp
 
 function ToolCallView({ call, compact }: { call: ToolCallEntry; compact?: boolean }): JSX.Element {
 	const colors = theme();
-	// A bullet carries the status instead of a second bracketed word: three
-	// `[bash] [ok] command="…"` columns of chrome left little room for the part
-	// that says what actually happened.
-	const statusColor =
-		call.status === "running" ? colors.warning : call.status === "error" ? colors.error : colors.success;
-	const mcp = isMcpTool(call.name);
-	const name = mcp ? mcpToolLabel(call.name) : call.name;
+	// Tool rows are scaffolding, not the answer: what the agent *said* should
+	// be the loud thing on screen. Bracketed `[bash] [ok]` columns were noisy,
+	// and a bright bullet plus a coloured tool name was no quieter — the rows
+	// jumped out between the turns they belong to. So the whole row is muted
+	// and dim, indented into the same column as a turn's body text, and colour
+	// is spent only where it earns its contrast: a failure.
+	const failed = call.status === "error";
+	const glyph = call.status === "running" ? "◌" : failed ? "✗" : "·";
+	const rowColor = failed ? colors.error : colors.muted;
 	return (
 		<Box flexDirection="column">
-			<Text>
-				<Text color={statusColor}>{call.status === "running" ? "◍" : call.status === "error" ? "✗" : "●"}</Text>{" "}
-				<Text color={colors.tool}>{name}</Text> <ToolSummary name={call.name} args={call.args} compact={compact} />
+			<Text color={rowColor} dimColor={!failed}>
+				{TOOL_INDENT}
+				{glyph} {isMcpTool(call.name) ? mcpToolLabel(call.name) : call.name}{" "}
+				<ToolSummary name={call.name} args={call.args} compact={compact} muted={!failed} />
 			</Text>
 		</Box>
 	);
@@ -202,6 +216,9 @@ function ToolCallView({ call, compact }: { call: ToolCallEntry; compact?: boolea
 // first line only: a wrapped paragraph used to start at column 0, so it did
 // not read as part of the reply it belonged to.
 const GUTTER = "▌ ";
+// Tool rows sit in the same column as a turn's text, so the transcript keeps
+// one left edge instead of three.
+const TOOL_INDENT = "  ";
 const GUTTER_WIDTH = 2;
 
 /** Ink props for one rendered span, with tones resolved against the theme. */
