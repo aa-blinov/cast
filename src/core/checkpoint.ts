@@ -7,7 +7,11 @@ import { findCanonicalGitRoot } from "./worktree.ts";
 export interface CheckpointFileBackup {
 	relPath: string;
 	existedBefore: boolean;
+	/** Base64 when `encoding` says so, otherwise the file's text (older checkpoints). */
 	content?: string;
+	encoding?: "base64";
+	/** Set when the file was too large to snapshot — restore has to say so. */
+	omitted?: true;
 }
 
 export interface TurnCheckpoint {
@@ -24,6 +28,11 @@ const GIT_NO_PROMPT_ENV = {
 } as const;
 
 const WOULD_REMOVE_PREFIX_RE = /^Would remove /;
+const LEADING_DOT_SLASH_RE = /^\.\//;
+/** Above this, a file is recorded as un-restorable rather than copied into the
+ * session store — a shadow checkpoint is persisted with the session, and a
+ * multi-megabyte snapshot per edited file is not what /undo is worth. */
+const MAX_SHADOW_BACKUP_BYTES = 10 * 1024 * 1024;
 const TRAILING_SLASH_RE = /\/$/;
 
 function runGit(cwd: string, args: string[], env?: NodeJS.ProcessEnv): string | null {
@@ -95,8 +104,21 @@ export function backupFileForCheckpoint(checkpoint: TurnCheckpoint, filePath: st
 
 	if (existsSync(absPath)) {
 		try {
-			const content = readFileSync(absPath, "utf8");
-			checkpoint.backups.push({ relPath, existedBefore: true, content });
+			// Base64 of the raw bytes, not utf8 text. Reading and writing back as
+			// "utf8" replaced every byte that is not valid UTF-8 with U+FFFD, so
+			// /undo on a non-git project "restored" a PNG as 22 bytes of
+			// replacement characters and reported success (verified).
+			const bytes = readFileSync(absPath);
+			if (bytes.byteLength > MAX_SHADOW_BACKUP_BYTES) {
+				checkpoint.backups.push({ relPath, existedBefore: true, omitted: true });
+			} else {
+				checkpoint.backups.push({
+					relPath,
+					existedBefore: true,
+					content: bytes.toString("base64"),
+					encoding: "base64",
+				});
+			}
 		} catch {
 			// Best effort
 		}
@@ -123,17 +145,45 @@ export function filesLostByRestore(checkpoint: TurnCheckpoint): string[] {
 	const wouldRemove = runGit(checkpoint.cwd, ["clean", "-nd"]);
 	if (!wouldRemove) return [];
 	const inCheckpoint = new Set(
-		(runGit(checkpoint.cwd, ["ls-tree", "-r", "--name-only", checkpoint.gitCommitSha]) ?? "")
+		// --full-tree --full-name: without them ls-tree is scoped to the cwd and
+		// prints paths relative to it, so in a subdirectory the comparison below
+		// was between two different namespaces (and, before that, between
+		// "notes.txt" and git clean's "./notes.txt").
+		(
+			runGit(checkpoint.cwd, [
+				"ls-tree",
+				"-r",
+				"--full-tree",
+				"--full-name",
+				"--name-only",
+				checkpoint.gitCommitSha,
+			]) ?? ""
+		)
 			.split("\n")
 			.filter(Boolean),
 	);
+	// `git clean -nd` prints paths relative to the cwd (and prefixed with `./`
+	// in a subdirectory), while `ls-tree` prints them relative to the
+	// repository root. Comparing the two directly meant that in a subdirectory
+	// nothing ever matched, so /undo warned that it would delete files its own
+	// restore puts straight back — including files the *user* had written.
+	const prefix = runGit(checkpoint.cwd, ["rev-parse", "--show-prefix"]) ?? "";
 	const removed: string[] = [];
-	for (const line of wouldRemove.split("\n")) {
-		const path = line.replace(WOULD_REMOVE_PREFIX_RE, "").trim().replace(TRAILING_SLASH_RE, "");
-		if (!path || inCheckpoint.has(path)) continue;
+	for (const rawLine of wouldRemove.split("\n")) {
+		const line = rawLine.trim();
+		// Only "Would remove …" lines are paths; git also emits notices such as
+		// "Would refuse to remove current working directory", which used to be
+		// listed to the user as a file about to be deleted.
+		if (!WOULD_REMOVE_PREFIX_RE.test(line)) continue;
+		const relToCwd = line.replace(WOULD_REMOVE_PREFIX_RE, "").replace(LEADING_DOT_SLASH_RE, "");
+		const isDir = relToCwd.endsWith("/");
+		const path = relToCwd.replace(TRAILING_SLASH_RE, "");
+		if (!path) continue;
+		const repoPath = `${prefix}${path}`;
+		if (inCheckpoint.has(repoPath)) continue;
 		// A directory line covers everything under it; keep it only when the
 		// checkpoint holds nothing from that subtree.
-		if (line.trim().endsWith("/") && [...inCheckpoint].some((f) => f.startsWith(`${path}/`))) continue;
+		if (isDir && [...inCheckpoint].some((f) => f.startsWith(`${repoPath}/`))) continue;
 		removed.push(path);
 	}
 	return removed;
@@ -164,20 +214,37 @@ export function restoreCheckpoint(checkpoint: TurnCheckpoint): { ok: boolean; me
 	}
 
 	if (checkpoint.backups) {
+		let restored = 0;
+		const skipped: string[] = [];
 		for (const backup of checkpoint.backups) {
 			const absPath = join(checkpoint.cwd, backup.relPath);
+			if (backup.omitted) {
+				skipped.push(backup.relPath);
+				continue;
+			}
 			if (backup.existedBefore && backup.content !== undefined) {
 				mkdirSync(dirname(absPath), { recursive: true });
-				writeFileSync(absPath, backup.content, "utf8");
-			} else if (!backup.existedBefore && existsSync(absPath)) {
-				try {
-					rmSync(absPath, { recursive: true, force: true });
-				} catch {
-					// Best effort
+				// Older checkpoints stored text; anything written since is base64.
+				writeFileSync(
+					absPath,
+					backup.encoding === "base64"
+						? Buffer.from(backup.content, "base64")
+						: Buffer.from(backup.content, "utf8"),
+				);
+				restored++;
+			} else if (!backup.existedBefore) {
+				if (existsSync(absPath)) {
+					try {
+						rmSync(absPath, { recursive: true, force: true });
+					} catch {
+						// Best effort
+					}
 				}
+				restored++;
 			}
 		}
-		return { ok: true, message: `Restored ${checkpoint.backups.length} file(s) from shadow checkpoint` };
+		const note = skipped.length > 0 ? ` — left untouched (too large to snapshot): ${skipped.join(", ")}` : "";
+		return { ok: true, message: `Restored ${restored} file(s) from shadow checkpoint${note}` };
 	}
 
 	return { ok: false, message: "No valid checkpoint data found" };
