@@ -1206,10 +1206,14 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 								// itself — otherwise a steering/follow-up message
 								// typed mid-run never appears in the transcript.
 								promoteStreamingToHistory();
-								const injected: ChatMessage[] = event.messages.map((m) => ({
-									role: "user",
-									content: messageContentToText(m.content),
-								}));
+								// Through userMessageRows: an injected message is not
+								// always something a person typed. A background task
+								// that finishes *during* a turn is queued as a
+								// follow-up and arrives here, and appended verbatim it
+								// showed up as the user saying `<system-reminder>…`.
+								const injected = event.messages.flatMap((m) =>
+									userMessageRows(messageContentToText(m.content)),
+								);
 								setMessages((msgs) => [...msgs, ...injected]);
 								setError(null);
 								// MessageQueue.drain() hands back one message at a time, so
@@ -1661,11 +1665,16 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 								pendingServerMessagesRef.current.delete(clientMessageId);
 								return !msgs.some((existing) => existing.clientMessageId === clientMessageId);
 							})
-							.map((message) => ({
-								role: "user" as const,
-								content: messageContentToText(message.content),
-								clientMessageId: (message as Message & { castClientMessageId?: string }).castClientMessageId,
-							}));
+							// Same split as everywhere else — see userMessageRows. A
+							// background task finishing mid-turn is injected as a
+							// follow-up, and appended verbatim it read as the user
+							// saying `<system-reminder>…`.
+							.flatMap((message) =>
+								userMessageRows(
+									messageContentToText(message.content),
+									(message as Message & { castClientMessageId?: string }).castClientMessageId,
+								),
+							);
 						return [...msgs, ...injected];
 					});
 					setError(null);
