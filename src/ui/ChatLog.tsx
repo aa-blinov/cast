@@ -1,7 +1,7 @@
 import { Box, Static, Text } from "ink";
 import { type JSX, useMemo, useRef } from "react";
 import { getLastFrameOverflow } from "../core/stdin-manager.ts";
-import { displayWidthAtMost } from "./display-width.ts";
+import { displayWidthAtMost, sliceTailToWidth } from "./display-width.ts";
 import { Spinner } from "./Spinner.tsx";
 import { formatTaskToolSummary } from "./task-tool-summary.ts";
 import { theme } from "./themes/index.ts";
@@ -329,19 +329,19 @@ export function clampStreamingBlocks(
 			kept.unshift(line);
 			tailRows += Math.max(1, Math.ceil(displayWidthAtMost(line, (remaining - tailRows) * cols) / cols));
 		}
-		// A single wrapped line longer than the budget: hard-cut by characters.
-		// maxChars is measured in cells, so with wide chars this cuts slightly
-		// more than strictly necessary — erring short is the safe direction.
+		// A single wrapped line longer than the budget: hard-cut to the cells
+		// the remaining rows can hold (see sliceTailToWidth — this used to cut
+		// by characters against a cell budget, so a line of CJK kept twice the
+		// rows it was allowed and the live region overran the viewport).
 		let text = kept.join("\n");
 		// Strip any leaked <think> tags — vendors should have split them, but a
 		// hard-cut mid-tag must never leak "]<]minimax[>" style fragments.
 		if (text.includes("<think") || text.includes("</think")) {
 			text = text.replace(THINK_TAG_RE, "");
 		}
-		const maxChars = remaining * cols;
-		if (kept.length === 1 && text.length > maxChars) {
-			const cut = text.length - maxChars;
-			const tail = text.slice(cut);
+		const maxCells = remaining * cols;
+		if (kept.length === 1 && displayWidthAtMost(text, maxCells) > maxCells) {
+			const tail = sliceTailToWidth(text, maxCells);
 			// Don't cut mid-word/tag — advance to next boundary. If the tail
 			// starts inside a tag fragment like "payload</think>...", skip the
 			// whole tag up to the next ">" to avoid "/think>" leaks.
