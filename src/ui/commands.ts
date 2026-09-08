@@ -38,6 +38,7 @@ import {
 	createSession,
 	dropLastCheckpoint,
 	listSessionSummaries,
+	loadCheckpoints,
 	loadSession,
 	recordCompaction,
 	type SessionState,
@@ -2154,7 +2155,15 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				showNotice("[Agent running — finish the run or /abort before /undo]");
 				return;
 			}
-			const checkpoints = session.checkpoints || [];
+			// Read the persisted list, not the in-memory one. When a daemon is
+			// running, it owns the turn and appends the checkpoint itself
+			// (bridge.ts's submit), while this process's `session.checkpoints`
+			// is only ever filled when the session is loaded — so /undo right
+			// after a change said "[No checkpoint available to undo]" and only
+			// started working after a restart, which is the one moment nobody
+			// needs it. The store is the same table both paths write to.
+			const persisted = loadCheckpoints(session.id);
+			const checkpoints = persisted.length > 0 ? persisted : (session.checkpoints ?? []);
 			if (checkpoints.length === 0) {
 				showNotice("[No checkpoint available to undo]");
 				return;
