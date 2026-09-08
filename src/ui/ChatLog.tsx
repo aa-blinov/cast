@@ -195,14 +195,15 @@ function ToolCallView({ call, compact }: { call: ToolCallEntry; compact?: boolea
 	// Tool rows are scaffolding, not the answer: what the agent *said* should
 	// be the loud thing on screen. Bracketed `[bash] [ok]` columns were noisy,
 	// and a bright bullet plus a coloured tool name was no quieter — the rows
-	// jumped out between the turns they belong to. So the whole row is muted
-	// and dim, indented into the same column as a turn's body text, and colour
-	// is spent only where it earns its contrast: a failure.
+	// jumped out between the turns they belong to.
+	//
+	// So the row is grey and dim, and its marker is a *bar in the gutter
+	// column*, level with a turn's `▌`: the transcript keeps one left edge, and
+	// the difference between a reply and its scaffolding is carried by weight
+	// and grey rather than by indentation or colour. A call still running gets
+	// the thicker `┃`; only a failure spends colour, where the contrast is
+	// worth something.
 	const failed = call.status === "error";
-	// A bar, not a bullet: the row then continues the transcript's gutter
-	// rhythm (`▌` for a turn, `│` for its scaffolding) instead of reading as a
-	// list item. A thicker bar marks the call still running — a difference in
-	// weight rather than in colour, which keeps the row quiet.
 	const glyph = call.status === "running" ? "┃" : failed ? "✗" : "│";
 	const rowColor = failed ? colors.error : colors.muted;
 	return (
@@ -220,9 +221,10 @@ function ToolCallView({ call, compact }: { call: ToolCallEntry; compact?: boolea
 // first line only: a wrapped paragraph used to start at column 0, so it did
 // not read as part of the reply it belonged to.
 const GUTTER = "▌ ";
-// Tool rows sit in the same column as a turn's text, so the transcript keeps
-// one left edge instead of three.
-const TOOL_INDENT = "  ";
+// The tool row's bar sits in the gutter column itself, level with a turn's
+// `▌`: one left edge for the whole transcript, with the weight and the grey
+// saying which rows are scaffolding.
+const TOOL_INDENT = "";
 const GUTTER_WIDTH = 2;
 
 /** Ink props for one rendered span, with tones resolved against the theme. */
