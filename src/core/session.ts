@@ -2170,6 +2170,13 @@ export function getMostRecentSession(cwd?: string): SessionState | null {
 	return row ? loadSession(row.id) : null;
 }
 
+/** Cheapest "is there anything here to come back to?" check, for the exit
+ *  hint. It has to hit the db: a thin-client TUI's own SessionState stays
+ *  empty because the daemon is the one writing the turns. */
+export function sessionHasMessages(id: string): boolean {
+	return getDb().prepare("SELECT 1 FROM messages WHERE session_id = ? LIMIT 1").get(id) !== undefined;
+}
+
 function generateSessionId(): string {
 	return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }

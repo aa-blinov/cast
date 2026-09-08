@@ -969,9 +969,9 @@ async function startNewSession(ctx: CommandContext, personaName?: string): Promi
 	// A fresh session starts in build mode — plan mode is a per-task state,
 	// not a sticky preference.
 	deps.setPlanMode(false);
-	// Fresh session should look like a fresh launch: banner at the top and
-	// an empty transcript. The banner lives outside Ink's tree, so a plain
-	// clearContext without a repaint leaves the old scrollback with no banner.
+	// Fresh session should look like a fresh launch: an empty transcript.
+	// clearContext alone only drops the model-facing history — the old turns
+	// stay drawn in the scrollback until the screen is repainted.
 	await deps.onRepaintHistory?.();
 	showNotice(`[New session: ${session.id}]`);
 }

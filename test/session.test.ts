@@ -43,6 +43,7 @@ import {
 	resetSessionContext,
 	saveSession,
 	saveSubagentRun,
+	sessionHasMessages,
 	searchSessionSummaries,
 	shouldCompact,
 	updateLastCheckpoint,
@@ -988,6 +989,24 @@ describe("session persistence", () => {
 		appendMessage(session, { role: "user", content: "  First\nmessage becomes the session title  " });
 		appendMessage(session, { role: "user", content: "A later message does not replace it" });
 		expect(session.title).toBe("First message becomes the session title");
+	});
+
+	it("sessionHasMessages sees rows written by anyone, in context or not", () => {
+		const session = createSession("gpt-4o", projectA);
+		expect(sessionHasMessages(session.id)).toBe(false);
+
+		// The exit hint runs in the TUI, whose own SessionState is empty in
+		// thin-client mode — the daemon writes the rows. Read a *fresh* handle
+		// on the same session to stand in for that.
+		appendMessage(session, { role: "user", content: "hi" });
+		saveSession(session);
+		expect(sessionHasMessages(loadSession(session.id)!.id)).toBe(true);
+
+		// Compaction drops rows out of context but the transcript is still
+		// there, so the session is still worth resuming.
+		markImageMessagesOutOfContext(session.id);
+		getDb().prepare("UPDATE messages SET in_context = 0 WHERE session_id = ?").run(session.id);
+		expect(sessionHasMessages(session.id)).toBe(true);
 	});
 
 	it("backfills legacy untitled sessions without restoring an explicitly cleared title", () => {
