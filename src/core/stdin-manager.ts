@@ -4,13 +4,20 @@
  * a password).
  *
  * Problem: Ink sets stdin to raw mode and installs a data handler for
- * keystroke-by-keystroke processing. A child process spawned with
- * stdio: ["pipe", …] would never see user input because Ink intercepts it.
+ * keystroke-by-keystroke processing, so anything else that writes to the
+ * terminal fights its managed frame and any keystrokes meant for something
+ * else are swallowed by the Composer.
  *
- * Solution: Before spawning a command that might need stdin, call
- * suspendAndRun() which (a) suspends Ink's renderer (clears screen,
- * disables raw mode), (b) pipes process.stdin to the child, and
- * (c) resumes Ink when the child exits.
+ * Solution: suspendAndRun() suspends Ink's renderer (clears its frame,
+ * disables raw mode) around a callback and resumes it afterwards, pausing the
+ * Composer's stdin handler for the duration.
+ *
+ * It does *not* hand stdin to a child process — the header used to say it
+ * piped `process.stdin` to one, which it never did and nothing asks it to:
+ * `bash` runs with stdin at EOF on purpose (see tools/bash.ts), so a command
+ * that waits for input exits instead of hanging the session. The callers are
+ * the ones that need the terminal to themselves for a moment: repainting the
+ * banner, printing outside the frame.
  */
 
 export interface StdinOwner {
@@ -76,20 +83,28 @@ export async function suspendAndRun<T>(callback: () => Promise<T>): Promise<T> {
 	// Snapshot before we touch the flag — if another concurrent suspendAndRun
 	// already holds the terminal, we must not clear it when ours fails.
 	const wasSuspended = terminalSuspended;
-	// Pause the Composer's stdin handler before Ink suspends, so that
-	// keystrokes during the child process don't leak into the Composer.
-	// Only the outermost concurrent caller actually pauses.
+	// Pause the Composer's stdin handler before Ink suspends, so keystrokes
+	// meant for whatever runs inside don't leak into the Composer. Only the
+	// outermost concurrent caller actually pauses.
 	if (pauseDepth++ === 0) currentOwner?.onPause();
 	terminalSuspended = true;
+	// Whether the callback got as far as starting. The fallback below exists
+	// for a hook that *refuses* to suspend; without this flag a callback that
+	// threw was indistinguishable from that and got run a second time — with
+	// its own error swallowed, and the retry printing over Ink's frame because
+	// the terminal was no longer suspended.
+	let callbackStarted = false;
 	try {
 		await suspendHook(async () => {
+			callbackStarted = true;
 			result = await callback();
 		});
-	} catch {
-		// suspendTerminal throws if already suspended (parallel bash calls).
-		// Fall back to running without terminal suspension — but only clear
-		// the flag if we were the one who set it (not a concurrent caller).
+	} catch (error) {
 		if (!wasSuspended) terminalSuspended = false;
+		if (callbackStarted) throw error;
+		// suspendTerminal throws if already suspended (parallel calls). Fall
+		// back to running without terminal suspension — but only clear the flag
+		// if we were the one who set it (not a concurrent caller).
 		result = await callback();
 	} finally {
 		if (!wasSuspended) terminalSuspended = false;
