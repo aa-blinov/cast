@@ -37,11 +37,25 @@ describe("formatContextPct", () => {
 		// and the budget went non-positive — the ordinary case for a 32k model
 		// with the default 32k reserve. The reserve is now capped at half the
 		// window, so there is always a real budget to show.
-		expect(formatContextPct([], cfg(32_768, 32_000))).toMatch(/^ctx .+\/32\.8k \(\d+%\)$/);
+		// Denominator is the budget: half of 32,768 once the reserve is capped.
+		expect(formatContextPct([], cfg(32_768, 32_000))).toMatch(/^ctx .+\/16\.4k \(\d+%\)$/);
 	});
 
-	it("formats used/window with a percentage when there is a budget", () => {
+	it("formats used/budget with a percentage when there is a budget", () => {
 		const out = formatContextPct([], cfg(200_000, 8000));
-		expect(out).toMatch(/^ctx \d[\d.]*[kM]?\/200k \(\d+%\)$/);
+		expect(out).toMatch(/^ctx \d[\d.]*[kM]?\/192k \(\d+%\)$/);
+	});
+
+	it("shows a fraction that agrees with its own percentage", () => {
+		// Both halves used to come from different denominators: a 128k model with
+		// the default reserve printed "ctx 94.7k/128k (99%)" — 94.7/128 is 74%.
+		const messages = [{ role: "user" as const, content: "x".repeat(360_000) }];
+		const out = formatContextPct(messages, cfg(128_000, 32_000));
+
+		const match = /^ctx ([\d.]+)k\/([\d.]+)k \((\d+)%\)$/.exec(out);
+		expect(match, out).not.toBeNull();
+		const [, used, budget, pct] = match!;
+		const impliedPct = Math.round((Number(used) / Number(budget)) * 100);
+		expect(Math.abs(impliedPct - Number(pct))).toBeLessThanOrEqual(1);
 	});
 });

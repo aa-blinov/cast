@@ -159,7 +159,8 @@ registerStatusBarSegment({
 		const pct = Math.round((used / budget) * 100);
 		return (
 			<Text color={theme().muted}>
-				ctx {abbreviateTokens(used)}/{abbreviateTokens(ctx.contextWindow)} ({pct}%)
+				{/* Budget, not the raw window — see formatContextPct in App.tsx. */}
+				ctx {abbreviateTokens(used)}/{abbreviateTokens(budget)} ({pct}%)
 			</Text>
 		);
 	},
@@ -169,7 +170,7 @@ registerStatusBarSegment({
 		if (!(ctx.contextWindow > 0)) return "ctx ?";
 		const budget = inputTokenBudget(ctx);
 		const pct = Math.round((used / budget) * 100);
-		return `ctx ${abbreviateTokens(used)}/${abbreviateTokens(ctx.contextWindow)} (${pct}%)`;
+		return `ctx ${abbreviateTokens(used)}/${abbreviateTokens(budget)} (${pct}%)`;
 	},
 });
 

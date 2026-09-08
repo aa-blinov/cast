@@ -1008,10 +1008,21 @@ export function abbreviateTokens(n: number): string {
 	return `${(n / 1_000_000).toFixed(1).replace(TRAILING_ZERO_RE, "")}M`;
 }
 
+/**
+ * `ctx <used>/<budget> (<pct>%)`.
+ *
+ * The denominator is the *input budget* — the window minus the reply reserve —
+ * because that is what the percentage is computed against and what compaction
+ * measures against. It used to print the raw context window next to a
+ * percentage derived from the budget, so the two halves of the same string
+ * disagreed: a 128k model with the default 32k reserve rendered
+ * `ctx 94.7k/128k (99%)`, where 94.7/128 is 74%, and a 32k model rendered
+ * `ctx 94.7k/32.8k (578%)`.
+ */
 export function formatContextPct(messages: import("../core/llm.ts").Message[], config: AppConfig): string {
 	const used = estimateTokens(messages);
 	if (!(config.contextWindow > 0)) return "ctx ?";
 	const budget = inputTokenBudget(config);
 	const pct = Math.round((used / budget) * 100);
-	return `ctx ${abbreviateTokens(used)}/${abbreviateTokens(config.contextWindow)} (${pct}%)`;
+	return `ctx ${abbreviateTokens(used)}/${abbreviateTokens(budget)} (${pct}%)`;
 }
