@@ -12,7 +12,7 @@ import type { Pickers } from "../pickers/types.ts";
 import { daemonBaseUrl, readLiveServerState } from "../server/daemon-state.ts";
 import { App } from "./App.tsx";
 import { gradientBanner } from "./gradient.ts";
-import { saveClipboardImageToTempFile } from "./readClipboardImage.ts";
+import { type ClipboardPasteResult, saveClipboardImageToTempFile } from "./readClipboardImage.ts";
 import { Spinner } from "./Spinner.tsx";
 import { loadTheme } from "./themes/index.ts";
 
@@ -142,10 +142,7 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 				process.exit(0);
 			});
 	};
-	const onPasteImage = async (): Promise<string | null> => {
-		const filePath = await saveClipboardImageToTempFile();
-		return filePath;
-	};
+	const onPasteImage = (): Promise<ClipboardPasteResult> => saveClipboardImageToTempFile();
 
 	// Repaint the banner with the current theme's gradient. Uses suspendAndRun
 	// to temporarily pause Ink so raw stdout writes don't fight its managed
