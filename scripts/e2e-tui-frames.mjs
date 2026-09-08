@@ -155,6 +155,28 @@ const clears = [...seen.matchAll(/\x1b\[2J/g)].length;
 const scrollbackWipes = [...seen.matchAll(/\x1b\[3J/g)].length;
 const bytes = seen.length;
 
+// Phase two: the live region is not only the streaming answer. A long draft
+// in the composer, and the receipt rows for messages queued mid-turn, used to
+// wrap to as many rows as they liked — 210 full clears (and 1.8MB) for two
+// long /queue messages during a stream, the scrollback gone with them.
+const typeSlowly = async (text) => {
+	for (let i = 0; i < text.length; i += 8) {
+		term.write(text.slice(i, i + 8));
+		await wait(12);
+	}
+};
+seen = "";
+term.write("LONGCJK stream again\r");
+await wait(1500);
+for (const draft of ["queued text that is long ", "second queued message just as long "]) {
+	await typeSlowly(`/queue ${draft.repeat(24)}`);
+	await wait(300);
+	term.write("\r");
+	await wait(1200);
+}
+await wait(2500);
+const composerClears = [...seen.matchAll(/\x1b\[2J/g)].length;
+
 term.write("\x03");
 await wait(200);
 term.write("\x03");
@@ -164,6 +186,11 @@ provider.close();
 rmSync(home, { recursive: true, force: true });
 
 console.log(`full screen clears while streaming: ${clears} (scrollback wipes: ${scrollbackWipes}), ${bytes} bytes`);
+console.log(`full screen clears while typing a long draft and queueing mid-turn: ${composerClears}`);
+if (composerClears > 0) {
+	console.error("FAIL: a long composer draft or a queued-message row grew the live region past the viewport.");
+	process.exit(1);
+}
 if (clears > 0) {
 	console.error("FAIL: the live region grew taller than the viewport — Ink cleared and replayed the screen.");
 	process.exit(1);
