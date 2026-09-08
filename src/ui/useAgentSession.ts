@@ -425,6 +425,29 @@ export function messageContentToText(content: unknown): string {
  * (assistant message, then separate tool messages) leaks provider protocol
  * details into the transcript that the user shouldn't have to read.
  */
+/**
+ * The transcript rows one `role: "user"` message becomes.
+ *
+ * A user message is not always something a person typed: `<system-reminder>`
+ * blocks are cast talking to the model (a finished background task, the
+ * post-compaction state block, an attached-file list), and they are shown as
+ * `[system]` notices instead. Shared by the rebuild-from-session path and the
+ * daemon's `user_message` SSE event — the latter appended the text verbatim,
+ * so a background-task completion arrived in the transcript as the *user*
+ * saying the reminder's body followed by a bare `</system-reminder>`.
+ */
+export function userMessageRows(text: string, clientMessageId?: string): ChatMessage[] {
+	const { cleaned, reminders } = extractSystemReminders(text);
+	const rows: ChatMessage[] = [];
+	for (const body of reminders) {
+		if (body) rows.push({ role: "warning", content: `[system] ${body}` });
+	}
+	const idPart = clientMessageId ? { clientMessageId } : {};
+	if (cleaned) rows.push({ role: "user", content: cleaned, ...idPart });
+	else if (rows.length === 0) rows.push({ role: "user", content: text, ...idPart });
+	return rows;
+}
+
 export function buildDisplayMessages(sessionMessages: SessionState["messages"]): ChatMessage[] {
 	const out: ChatMessage[] = [];
 	for (let i = 0; i < sessionMessages.length; i++) {
@@ -433,20 +456,8 @@ export function buildDisplayMessages(sessionMessages: SessionState["messages"]):
 		if (m.role === "tool") continue;
 
 		if (m.role === "user") {
-			const text = messageContentToText(m.content);
-			// Extract <system-reminder> blocks and render them as warning
-			// messages instead of raw XML. These are internal protocol
-			// (compaction, date-rollover, interrupt reminders) injected as
-			// role:"user" because the wire format has no dedicated role.
-			const { cleaned, reminders } = extractSystemReminders(text);
-			// Show each reminder as a styled warning message
-			for (const body of reminders) {
-				if (body) out.push({ role: "warning", content: `[system] ${body}` });
-			}
 			const clientMessageId = (m as Message & { castClientMessageId?: string }).castClientMessageId;
-			if (cleaned) out.push({ role: "user", content: cleaned, ...(clientMessageId ? { clientMessageId } : {}) });
-			if (!cleaned && reminders.length === 0)
-				out.push({ role: "user", content: text, ...(clientMessageId ? { clientMessageId } : {}) });
+			out.push(...userMessageRows(messageContentToText(m.content), clientMessageId));
 			continue;
 		}
 
@@ -1517,14 +1528,12 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 							const existing = msgs.findIndex((message) => message.clientMessageId === clientMessageId);
 							if (existing >= 0) return msgs;
 						}
-						return [
-							...msgs,
-							{
-								role: "user",
-								content: messageContentToText(event.message.content),
-								...(clientMessageId ? { clientMessageId } : {}),
-							},
-						];
+						// A message the daemon injects can be cast talking to the
+						// model rather than something a person typed — see
+						// userMessageRows. Appended verbatim, a finished background
+						// task landed in the transcript as the *user* saying the
+						// reminder's body followed by a bare `</system-reminder>`.
+						return [...msgs, ...userMessageRows(messageContentToText(event.message.content), clientMessageId)];
 					});
 					break;
 				case "status":
