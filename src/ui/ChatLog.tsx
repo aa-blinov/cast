@@ -1,6 +1,7 @@
 import { Box, Static, Text } from "ink";
 import { type JSX, useMemo, useRef } from "react";
 import { getLastFrameOverflow } from "../core/stdin-manager.ts";
+import { displayWidth } from "./display-width.ts";
 import { type RenderedLine, renderMarkdownLines, renderMarkdownTail, type Span } from "./markdown-terminal.ts";
 import { Spinner } from "./Spinner.tsx";
 import { formatTaskToolSummary } from "./task-tool-summary.ts";
@@ -193,39 +194,42 @@ function ToolSummary({
 function ToolCallView({ call, compact }: { call: ToolCallEntry; compact?: boolean }): JSX.Element {
 	const colors = theme();
 	// Tool rows are scaffolding, not the answer: what the agent *said* should
-	// be the loud thing on screen. Bracketed `[bash] [ok]` columns were noisy,
-	// and a bright bullet plus a coloured tool name was no quieter — the rows
-	// jumped out between the turns they belong to.
+	// be the loud thing on screen. `[bash] [ok] command="…"` spent three
+	// bracketed columns on chrome, and a bright bullet was no quieter.
 	//
-	// So the row is grey and dim, and its marker is a *bar in the gutter
-	// column*, level with a turn's `▌`: the transcript keeps one left edge, and
-	// the difference between a reply and its scaffolding is carried by weight
-	// and grey rather than by indentation or colour. A call still running gets
-	// the thicker `┃`; only a failure spends colour, where the contrast is
-	// worth something.
+	// So: the bar sits in the rail column, level with a turn's `▌`; the tool's
+	// name is dimmer than its argument, because `bash` and `read` are rarely
+	// the interesting half; and colour is spent only on a failure. The rail
+	// itself is never dimmed — see MarkdownBody.
 	const failed = call.status === "error";
-	const glyph = call.status === "running" ? "┃" : failed ? "✗" : "│";
-	const rowColor = failed ? colors.error : colors.muted;
+	const running = call.status === "running";
 	return (
 		<Box flexDirection="column">
-			<Text color={rowColor} dimColor={!failed && call.status !== "running"}>
-				{TOOL_INDENT}
-				{glyph} {isMcpTool(call.name) ? mcpToolLabel(call.name) : call.name}{" "}
-				<ToolSummary name={call.name} args={call.args} compact={compact} muted={!failed} />
+			<Text>
+				<Text color={failed ? colors.error : railMuted()}>{failed ? "✗" : "│"} </Text>
+				<Text color={colors.muted} dimColor>
+					{isMcpTool(call.name) ? mcpToolLabel(call.name) : call.name}{" "}
+				</Text>
+				<Text color={failed ? colors.error : colors.muted} dimColor={!failed && !running}>
+					<ToolSummary name={call.name} args={call.args} compact={compact} muted />
+				</Text>
 			</Text>
 		</Box>
 	);
 }
 
-// A turn is framed by a coloured bar in the gutter rather than a label on the
-// first line only: a wrapped paragraph used to start at column 0, so it did
-// not read as part of the reply it belonged to.
-const GUTTER = "▌ ";
-// The tool row's bar sits in the gutter column itself, level with a turn's
-// `▌`: one left edge for the whole transcript, with the weight and the grey
-// saying which rows are scaffolding.
-const TOOL_INDENT = "";
 const GUTTER_WIDTH = 2;
+/** Spaces between the speaker label and the text that follows it. */
+const LABEL_GAP = 2;
+const USER_LABEL = "you";
+/** Written by every surface that renders a `<system-reminder>` as a notice. */
+const SYSTEM_PREFIX = "[system] ";
+/** Label and rail per block kind — shared by the clamp, which has to know the
+ *  width the text will be rendered at, and the view, which draws them. */
+const BLOCK_STYLE = {
+	content: { label: "agent", bar: "▌" },
+	thinking: { label: "reasoning", bar: "┆" },
+} as const;
 
 /** Ink props for one rendered span, with tones resolved against the theme. */
 function spanProps(span: Span): {
@@ -255,44 +259,72 @@ function spanProps(span: Span): {
 	};
 }
 
-/** Rendered markdown lines, each prefixed with the turn's gutter bar. */
+/**
+ * The rail's own colour for a scaffolding row: `muted` is right in most
+ * themes, but nord and solarized put it within 1.7–2.8:1 of the background,
+ * where a one-cell bar disappears — those give the rail its own value.
+ */
+function railMuted(): string {
+	const colors = theme();
+	return colors.rail ?? colors.muted;
+}
+
+/**
+ * Rendered markdown lines behind one rail.
+ *
+ * The speaker's label rides the first line rather than taking a row of its
+ * own — two rows of chrome per turn is a lot on a 24-row terminal, and the
+ * rail's colour already says who is speaking. Continuations are indented to
+ * the same column, so the block still reads as one paragraph.
+ *
+ * The rail itself is never dimmed: it has to stay visible while the text
+ * beside it is dim, and in two themes `muted` is already close enough to the
+ * background that dimming it erases the rail (see ThemeColors.rail).
+ */
 function MarkdownBody({
 	lines,
 	gutter,
 	bar = "▌",
+	continuationBar,
+	label,
+	dimText,
 }: {
 	lines: RenderedLine[];
 	gutter: string;
-	/** `▌` for a turn, `│` for anything that is scaffolding around it. */
+	/** `▌` for a turn, `│` for scaffolding, `┆` for reasoning. */
 	bar?: string;
+	/** Rail for lines after the first — a notice's `ⓘ` marks the notice, not
+	 *  every line of it. Defaults to `bar`, which is what a turn wants. */
+	continuationBar?: string;
+	/** Speaker label for the first line — `you`, `agent`, `reasoning`. */
+	label?: string;
+	/** Dim the text (not the rail) — reasoning and finished scaffolding. */
+	dimText?: boolean;
 }): JSX.Element {
+	const indent = label ? " ".repeat(displayWidth(label) + LABEL_GAP) : "";
 	return (
 		<Box flexDirection="column">
 			{lines.map((line, i) => (
 				// biome-ignore lint/suspicious/noArrayIndexKey: lines are positional by construction
 				<Text key={i}>
-					<Text color={gutter} dimColor={line.code}>
-						{bar}{" "}
-					</Text>
+					<Text color={gutter}>{`${i === 0 ? bar : (continuationBar ?? bar)} `}</Text>
+					{label && i === 0 ? (
+						<Text color={gutter} dimColor={dimText}>
+							{label}
+							{" ".repeat(LABEL_GAP)}
+						</Text>
+					) : (
+						indent
+					)}
 					{line.spans.map((span, j) => (
 						// biome-ignore lint/suspicious/noArrayIndexKey: spans are positional within a line
-						<Text key={j} {...spanProps(span)}>
+						<Text key={j} {...spanProps(span)} dimColor={dimText || span.dim}>
 							{span.text}
 						</Text>
 					))}
 				</Text>
 			))}
 		</Box>
-	);
-}
-
-/** `▌ agent` / `▌ you` / `▌ reasoning` — who is speaking, once per block. */
-function TurnHeader({ label, color, dim }: { label: string; color: string; dim?: boolean }): JSX.Element {
-	return (
-		<Text color={color} dimColor={dim}>
-			{GUTTER}
-			<Text bold={!dim}>{label}</Text>
-		</Text>
 	);
 }
 
@@ -336,35 +368,40 @@ function BlockView({
 }): JSX.Element | null {
 	if (block.kind === "thinking") {
 		if (showReasoning === false) return null;
-		const colors = theme();
+		const style = BLOCK_STYLE.thinking;
 		return (
-			<Box flexDirection="column">
-				{!block.continued && <TurnHeader label={`reasoning${truncated ? " …" : ""}`} color={colors.muted} dim />}
-				<MarkdownBody
-					lines={lines ?? renderMarkdownLines(block.text, { width: bodyWidth(width) })}
-					gutter={colors.muted}
-				/>
-			</Box>
+			<MarkdownBody
+				lines={lines ?? renderMarkdownLines(block.text, { width: bodyWidth(width, "thinking") })}
+				gutter={railMuted()}
+				bar={style.bar}
+				label={block.continued ? undefined : `${style.label}${truncated ? " …" : ""}`}
+				dimText
+			/>
 		);
 	}
 	if (block.kind === "content") {
-		const colors = theme();
+		const style = BLOCK_STYLE.content;
 		return (
-			<Box flexDirection="column">
-				{!block.continued && <TurnHeader label={`agent${truncated ? " …" : ""}`} color={colors.agent} />}
-				<MarkdownBody
-					lines={lines ?? renderMarkdownLines(block.text, { width: bodyWidth(width) })}
-					gutter={colors.agent}
-				/>
-			</Box>
+			<MarkdownBody
+				lines={lines ?? renderMarkdownLines(block.text, { width: bodyWidth(width, "content") })}
+				gutter={theme().agent}
+				bar={style.bar}
+				label={block.continued ? undefined : `${style.label}${truncated ? " …" : ""}`}
+			/>
 		);
 	}
 	return <ToolCallView call={block.call} compact={compact} />;
 }
 
-/** Cells left for the text once the gutter has taken its share. */
-function bodyWidth(width: number | undefined): number {
-	return Math.max(20, (width ?? process.stdout.columns ?? 80) - GUTTER_WIDTH);
+/**
+ * Cells left for the text once the rail and the speaker label have taken
+ * theirs. The label only appears on a block's first line, but every line is
+ * indented to the same column, so one width covers the whole block — which is
+ * what lets the clamp count rows without re-rendering.
+ */
+function bodyWidth(width: number | undefined, kind?: keyof typeof BLOCK_STYLE | "plain"): number {
+	const label = kind && kind !== "plain" ? displayWidth(BLOCK_STYLE[kind].label) + LABEL_GAP : 0;
+	return Math.max(20, (width ?? process.stdout.columns ?? 80) - GUTTER_WIDTH - label);
 }
 
 /**
@@ -413,7 +450,6 @@ export function clampStreamingBlocks(
 	// Rows reserved for everything below the streaming area: composer frame
 	// (3), status bar (1), notices/steer/queue lines and a safety margin.
 	const budget = Math.max(4, rows - 8 - extraReserve);
-	const width = Math.max(20, columns) - GUTTER_WIDTH;
 
 	const out: LaidOutBlock[] = [];
 	let used = 0;
@@ -433,23 +469,18 @@ export function clampStreamingBlocks(
 			used += 1;
 			continue;
 		}
-		// One header row per block that starts a run, plus its body lines.
-		const headerRows = block.continued ? 0 : 1;
-		const room = budget - used - headerRows;
-		if (room <= 0) {
-			if (out.length === 0) {
-				out.unshift({ block, truncated: true, index: i, lines: [] });
-				used = budget;
-			}
-			break;
-		}
+		// The speaker label rides the first body line, so a block costs exactly
+		// its rendered lines — no separate header row to charge for.
+		const room = budget - used;
+		if (room <= 0) break;
+		const width = bodyWidth(columns, block.kind === "thinking" ? "thinking" : "content");
 		const text =
 			block.text.includes("<think") || block.text.includes("</think")
 				? block.text.replace(THINK_TAG_RE, "")
 				: block.text;
 		const { lines, truncated } = renderMarkdownTail(text, { width, maxLines: room });
 		out.unshift({ block, truncated, index: i, lines });
-		used += headerRows + lines.length;
+		used += lines.length;
 		if (truncated) break;
 	}
 	return out;
@@ -470,14 +501,13 @@ function MessageView({
 }): JSX.Element {
 	const colors = theme();
 	if (message.role === "user") {
+		const usable = Math.max(20, width - GUTTER_WIDTH - displayWidth(USER_LABEL) - LABEL_GAP);
 		return (
-			<Box flexDirection="column">
-				<TurnHeader label="you" color={colors.user} />
-				<MarkdownBody
-					lines={renderMarkdownLines(message.content, { width: bodyWidth(width) })}
-					gutter={colors.user}
-				/>
-			</Box>
+			<MarkdownBody
+				lines={renderMarkdownLines(message.content, { width: usable })}
+				gutter={colors.user}
+				label={USER_LABEL}
+			/>
 		);
 	}
 	if (message.role === "assistant") {
@@ -492,12 +522,19 @@ function MessageView({
 	if (message.role === "warning") {
 		// Notices ride the same rail as everything else: a row with no marker in
 		// the gutter column broke the transcript's single left edge, which is
-		// the thing that makes a wrapped reply read as one block.
+		// the thing that makes a wrapped reply read as one block. `ⓘ` replaces
+		// the `[system]` prefix the text carries — the marker column already
+		// says this is not the agent, so the word was chrome.
+		const text = message.content.startsWith(SYSTEM_PREFIX)
+			? message.content.slice(SYSTEM_PREFIX.length)
+			: message.content;
 		return (
 			<MarkdownBody
-				lines={renderMarkdownLines(message.content, { width: bodyWidth(width) })}
+				lines={renderMarkdownLines(text, { width: bodyWidth(width, "plain") })}
 				gutter={colors.warning}
-				bar="│"
+				bar="ⓘ"
+				continuationBar="│"
+				dimText
 			/>
 		);
 	}
