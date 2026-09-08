@@ -123,3 +123,25 @@ describe("line endings", () => {
 		expect(convertToLineEnding("a\nb\n", "\n")).toBe("a\nb\n");
 	});
 });
+
+describe("replace — literal replacement", () => {
+	it("does not expand $& in newString when replacing every occurrence", () => {
+		// String.replaceAll reads `$&`, `$'` and `$1` in the replacement as
+		// patterns. The single-occurrence path concatenates and never did, so one
+		// tool wrote two different things depending on replaceAll — and what it
+		// wrote for a sed/regex/jQuery line was not what the model asked for.
+		const content = "sed -e s/a/b/\nsed -e s/a/b/\n";
+
+		const out = replace(content, "s/a/b/", "s/x/$&y/", true);
+
+		expect(out).toBe("sed -e s/x/$&y/\nsed -e s/x/$&y/\n");
+	});
+
+	it("keeps $1, $` and $$ literal too", () => {
+		const content = "A\nA\n";
+
+		const out = replace(content, "A", "$1 $` $$ $'", true);
+
+		expect(out).toBe("$1 $` $$ $'\n$1 $` $$ $'\n");
+	});
+});

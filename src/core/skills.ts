@@ -572,6 +572,16 @@ export interface SubstitutionContext {
 	argumentNames?: string[];
 }
 
+/**
+ * Literal substitution. `String.replaceAll` treats `$&`, `$'` and `$1` in the
+ * replacement as patterns, and every replacement here is data — a path, the
+ * session id, whatever the user typed after the command — so a `$&` in one of
+ * them expanded into the placeholder it had just replaced.
+ */
+function substitute(text: string, placeholder: string, value: string): string {
+	return text.split(placeholder).join(value);
+}
+
 function substituteArguments(
 	content: string,
 	args: string | undefined,
@@ -580,9 +590,9 @@ function substituteArguments(
 	context: SubstitutionContext = {},
 ): string {
 	// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for skill template variable, not JS template
-	content = content.replaceAll("${CAST_SKILL_DIR}", baseDir);
+	content = substitute(content, "${CAST_SKILL_DIR}", baseDir);
 	// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for skill template variable, not JS template
-	content = content.replaceAll("${CLAUDE_SKILL_DIR}", baseDir);
+	content = substitute(content, "${CLAUDE_SKILL_DIR}", baseDir);
 	// An unresolved placeholder must never reach the model: it reads as an
 	// instruction ("substitute the arguments") for something that already
 	// happened, or as literal text the skill author never meant to show. Every
@@ -590,15 +600,15 @@ function substituteArguments(
 	// put there — both for a skill invoked without `args` (the tool's `args`
 	// is optional) and outside a session.
 	// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for skill template variable, not JS template
-	content = content.replaceAll("${CAST_SESSION_ID}", sessionId ?? "");
+	content = substitute(content, "${CAST_SESSION_ID}", sessionId ?? "");
 	// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for skill template variable, not JS template
-	content = content.replaceAll("${CLAUDE_SESSION_ID}", sessionId ?? "");
+	content = substitute(content, "${CLAUDE_SESSION_ID}", sessionId ?? "");
 
 	if (context.projectDir) {
 		// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for skill template variable, not JS template
-		content = content.replaceAll("${CLAUDE_PROJECT_DIR}", context.projectDir);
+		content = substitute(content, "${CLAUDE_PROJECT_DIR}", context.projectDir);
 		// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for skill template variable, not JS template
-		content = content.replaceAll("${CAST_PROJECT_DIR}", context.projectDir);
+		content = substitute(content, "${CAST_PROJECT_DIR}", context.projectDir);
 	}
 
 	const parsed = parseArguments(args ?? "");
@@ -608,7 +618,7 @@ function substituteArguments(
 	// bare text. Declared-but-missing names resolve to an empty string, like
 	// every other placeholder.
 	for (const [index, argName] of (context.argumentNames ?? []).entries()) {
-		content = content.replaceAll(`$${argName}`, parsed[index] ?? "");
+		content = substitute(content, `$${argName}`, parsed[index] ?? "");
 	}
 
 	// $ARGUMENTS[0], $ARGUMENTS[1], etc.
@@ -618,7 +628,7 @@ function substituteArguments(
 	content = content.replace(/\$(\d+)(?!\w)/g, (_, idx) => parsed[parseInt(idx, 10)] ?? "");
 
 	// $ARGUMENTS — full string
-	content = content.replaceAll("$ARGUMENTS", args ?? "");
+	content = substitute(content, "$ARGUMENTS", args ?? "");
 
 	return content;
 }

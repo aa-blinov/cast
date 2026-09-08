@@ -596,7 +596,12 @@ export function replace(content: string, oldString: string, newString: string, r
 			}
 			const replacement = realignIndentation(search, oldString, newString);
 			if (replaceAll) {
-				return content.replaceAll(search, replacement);
+				// split/join, not replaceAll: String.replaceAll interprets `$&`,
+				// `$'` and `$1` in the *replacement*, so a newString containing
+				// them (sed, regex, jQuery, shell) was written back expanded into
+				// the matched text — silent corruption the single-occurrence path
+				// below, which concatenates, never had.
+				return content.split(search).join(replacement);
 			}
 			const lastIndex = content.lastIndexOf(search);
 			if (index !== lastIndex) continue;
