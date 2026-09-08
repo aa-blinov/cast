@@ -230,9 +230,19 @@ export async function runServerMain(args: string[], options: { foreground: boole
 			if (!foreground) {
 				const checkEvery = Number(process.env.CAST_ORPHAN_CHECK_MS) || 30_000;
 				const grace = Number(process.env.CAST_ORPHAN_GRACE_MS) || 60_000;
+				// How long an unregistered instance must be *continuously* idle
+				// before it retires. The registration check alone would be enough
+				// to make it unreachable, but a wide quiet window is what keeps
+				// the promise this daemon exists for — work outliving its clients
+				// — safe from any mistake in reading "idle": anything at all
+				// happening resets the clock, so retirement can only ever land on
+				// an instance that has done nothing for ten minutes straight.
+				const quietFor = Number(process.env.CAST_ORPHAN_QUIET_MS) || 10 * 60_000;
 				const bornAt = Date.now();
 				const retirement = setInterval(() => {
 					if (shuttingDown || Date.now() - bornAt < grace) return;
+					// Still the registered daemon: nothing to do, ever. Clients come
+					// and go; that is the whole point of the daemon.
 					if (isRecordedDaemon(process.pid, instanceId)) return;
 					// The daemon exists so work outlives its clients — someone
 					// closes the terminal and goes to bed while the agent keeps
@@ -241,8 +251,13 @@ export async function runServerMain(args: string[], options: { foreground: boole
 					// subagent, a checkpoint writer, a subscribed client. See
 					// bridge.isFullyIdle.
 					if (!bridge.isFullyIdle()) return;
+					// The watermark, not a sampled flag: a turn that starts and
+					// finishes between two ticks is invisible to sampling (measured),
+					// and it must still count as activity.
+					const quiet = Date.now() - Math.max(bridge.lastActivityAt(), bornAt);
+					if (quiet < quietFor) return;
 					console.log(
-						"[cast server] another daemon holds the registration — retiring this instance so they cannot pile up.",
+						`[cast server] another daemon holds the registration and nothing has happened here for ${Math.round(quiet / 1000)}s — retiring so instances cannot pile up.`,
 					);
 					clearInterval(retirement);
 					void shutdown("unregistered");
