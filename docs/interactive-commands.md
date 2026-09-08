@@ -169,7 +169,8 @@ Use `/statusbar` to toggle individual segments on/off and reorder them — usefu
 
 | Action | Keys |
 |--------|------|
-| Cursor up/down/left/right | ↑ / ↓ / ← / → |
+| Previous / next prompt | ↑ / ↓ (moves the selection while the command palette is open) |
+| Cursor left/right | ← / → (or Ctrl+B / Ctrl+F) |
 | Word left/right | Alt+← / Alt+→ (or Ctrl+← / Ctrl+→) |
 | Line start/end | Home / End (or Ctrl+A / Ctrl+E) |
 | Delete char | Backspace / Delete |

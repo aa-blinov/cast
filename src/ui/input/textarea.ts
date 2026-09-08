@@ -101,16 +101,6 @@ export class TextBuffer {
 		return this.text.length;
 	}
 
-	/** If `pos` sits inside a cluster, snap to its start. */
-	private snapBoundary(pos: number): number {
-		if (pos <= 0 || pos >= this.text.length) return pos;
-		const starts = this.clusterStarts(pos - TextBuffer.BOUNDARY_WINDOW, pos + 1);
-		for (let i = starts.length - 1; i >= 0; i--) {
-			if (starts[i]! <= pos) return starts[i]!;
-		}
-		return this.snapUnitBoundary(pos);
-	}
-
 	backspace(): void {
 		if (this.cursor === 0) return;
 		const target = this.prevBoundary(this.cursor);
@@ -129,30 +119,6 @@ export class TextBuffer {
 
 	moveRight(): void {
 		this.cursor = this.nextBoundary(this.cursor);
-	}
-
-	moveUp(): void {
-		const currentLineStart = this.text.lastIndexOf("\n", this.cursor - 1) + 1;
-		const col = this.cursor - currentLineStart;
-		const prevNewline = this.text.lastIndexOf("\n", currentLineStart - 2);
-		const prevLineStart = prevNewline === -1 ? 0 : prevNewline + 1;
-		const prevLineEnd = this.text.indexOf("\n", prevLineStart);
-		const prevLineLength = (prevLineEnd === -1 ? this.text.length : prevLineEnd) - prevLineStart;
-		this.cursor = this.snapBoundary(prevLineStart + Math.min(col, prevLineLength));
-	}
-
-	moveDown(): void {
-		const currentLineStart = this.text.lastIndexOf("\n", this.cursor - 1) + 1;
-		const col = this.cursor - currentLineStart;
-		const nextNewline = this.text.indexOf("\n", this.cursor);
-		if (nextNewline === -1) {
-			this.cursor = this.text.length;
-			return;
-		}
-		const nextLineStart = nextNewline + 1;
-		const nextLineEnd = this.text.indexOf("\n", nextLineStart);
-		const nextLineLength = (nextLineEnd === -1 ? this.text.length : nextLineEnd) - nextLineStart;
-		this.cursor = this.snapBoundary(nextLineStart + Math.min(col, nextLineLength));
 	}
 
 	moveLineStart(): void {

@@ -47,7 +47,7 @@ import {
 } from "./statusbar.tsx";
 import { StatusBarPicker } from "./statusbar-picker.tsx";
 import { theme } from "./themes/index.ts";
-import { type PendingImage, useAgentSession } from "./useAgentSession.ts";
+import { type ChatMessage, type PendingImage, useAgentSession } from "./useAgentSession.ts";
 import { useTerminalResync } from "./useTerminalResync.ts";
 
 const TRAILING_ZERO_RE = /\.0$/;
@@ -425,6 +425,9 @@ export function App(props: AppProps): JSX.Element {
 	// populate the ref setPlanMode reads after the agent hook exists.
 	daemonModeSyncRef.current = agent.setMode;
 	const running = agent.status === "running";
+	// Recomputed when the transcript changes so a prompt is recallable on the
+	// turn right after it was sent.
+	const promptHistory = useMemo(() => submittedPrompts(agent.messages), [agent.messages]);
 	const canSubmit = useCallback(
 		(text: string) => {
 			if (!agent.daemonConnected) {
@@ -867,6 +870,8 @@ export function App(props: AppProps): JSX.Element {
 				onExit={onQuit}
 				onPasteImage={onPasteImage}
 				onLoadOlder={() => void onLoadOlder()}
+				promptHistory={promptHistory}
+				sessionId={session.id}
 				running={running}
 				locked={modalRequest !== null}
 				skills={skills}
@@ -1019,6 +1024,24 @@ export function abbreviateTokens(n: number): string {
  * `ctx 94.7k/128k (99%)`, where 94.7/128 is 74%, and a 32k model rendered
  * `ctx 94.7k/32.8k (578%)`.
  */
+/**
+ * The prompts the user actually typed in this session, oldest first — what ↑
+ * recalls in the composer.
+ *
+ * Read off the rendered transcript rather than the wire messages: the display
+ * list already has cast's own `<system-reminder>` traffic split out into
+ * `warning` rows (background-task notices, the post-compaction state block,
+ * attached-file lists), so a user row here is exactly what someone typed.
+ */
+function submittedPrompts(messages: readonly ChatMessage[]): string[] {
+	const prompts: string[] = [];
+	for (const message of messages) {
+		if (message.role !== "user") continue;
+		if (typeof message.content === "string" && message.content.trim()) prompts.push(message.content);
+	}
+	return prompts;
+}
+
 export function formatContextPct(messages: import("../core/llm.ts").Message[], config: AppConfig): string {
 	const used = estimateTokens(messages);
 	if (!(config.contextWindow > 0)) return "ctx ?";

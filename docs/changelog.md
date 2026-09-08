@@ -4,6 +4,10 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+### Added
+
+- **↑/↓ recall previous prompts,** as in any other terminal input. They were wired to the text buffer's cursor-up/cursor-down, and the composer's buffer is one line by construction — so ↑ did nothing at all and ↓ jumped the cursor to the end of the line. Now ↑ walks back through the prompts submitted in this session (seeded from a resumed session's transcript), ↓ walks forward, and stepping past the newest entry restores the draft that was being typed. A recalled multi-line prompt comes back as a paste chip, so re-sending it reproduces the original text exactly. While the command palette is open the same keys still move its selection.
+
 ### Fixed
 
 - **The context indicator's two halves disagreed.** `ctx <used>/<total> (<pct>%)` computed the percentage against the input budget — the window minus the reply reserve, which is what compaction measures against — while printing the raw context window as the denominator. A 128k model with the default 32k reserve therefore rendered `ctx 94.7k/128k (99%)`, where 94.7 of 128 is 74%, and a 32k model rendered `ctx 94.7k/32.8k (578%)`. The denominator is the budget now, so the fraction and the percentage say the same thing and the percentage still means "how close am I to a compaction".
