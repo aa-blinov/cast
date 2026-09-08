@@ -157,3 +157,44 @@ function rememberWidth(line: string, w: number): void {
 export function displayWidthCacheFlush(): void {
 	cache.clear();
 }
+
+/**
+ * The longest suffix of `line` that fits in `maxCells` terminal cells.
+ *
+ * The hard cut for a single over-long streaming line used to slice
+ * `maxCells` *characters* off the end while calling the number a cell budget,
+ * and the comment beside it claimed that erred short with wide characters. It
+ * erred long, by exactly the character's width: 20,000 CJK characters clamped
+ * to a 16-row budget on an 80-column terminal kept 1,280 characters — 2,560
+ * cells, 32 rows. A live region taller than the viewport is the one thing the
+ * clamp exists to prevent, because Ink cannot erase above the top of the
+ * screen and every redraw then stacks another copy of the frame into
+ * scrollback.
+ *
+ * Walked from the end, so the pieces of a ZWJ sequence are counted separately
+ * — that overcounts a cluster split by the cut and therefore keeps slightly
+ * less than the budget allows, which is the safe direction here.
+ */
+export function sliceTailToWidth(line: string, maxCells: number): string {
+	if (maxCells <= 0) return "";
+	// A suffix of at most `maxCells` code points is an upper bound: no code
+	// point is narrower than one cell.
+	const points = Array.from(line.length > maxCells * 2 ? line.slice(-maxCells * 2) : line);
+	const tail = points.length > maxCells ? points.slice(-maxCells) : points;
+	let cells = 0;
+	let taken = 0;
+	for (let i = tail.length - 1; i >= 0; i--) {
+		const cp = tail[i]!.codePointAt(0) ?? 0;
+		const w = cp === 0x200d || cp === 0xfe0f || cp === 0xfe0e || isZeroWidth(cp) ? 0 : widthOfCodePoint(cp);
+		if (cells + w > maxCells) break;
+		cells += w;
+		taken++;
+	}
+	return tail.slice(tail.length - taken).join("");
+}
+
+/** Cells one code point occupies on its own, ignoring what it combines with. */
+function widthOfCodePoint(cp: number): number {
+	if (cp < 0x0300) return cp >= 0x20 ? 1 : 0;
+	return eastAsianWidth(cp, { ambiguousAsWide: false }) === 2 ? 2 : 1;
+}

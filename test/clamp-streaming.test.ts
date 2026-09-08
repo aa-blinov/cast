@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { clampStreamingBlocks } from "../src/ui/ChatLog.tsx";
+import { displayWidth } from "../src/ui/display-width.ts";
 import type { StreamBlock } from "../src/ui/useAgentSession.ts";
 
 const text = (kind: "thinking" | "content", t: string): StreamBlock => ({ kind, text: t }) as StreamBlock;
@@ -7,6 +8,45 @@ const tool = (id: string): StreamBlock =>
 	({ kind: "tool", call: { id, name: "bash", args: "{}", status: "running" } }) as StreamBlock;
 
 describe("clampStreamingBlocks", () => {
+	/**
+	 * Ink redraws the live region by moving the cursor up N rows; it cannot go
+	 * above the top of the screen, so a region taller than the viewport can
+	 * never be fully erased and each redraw stacks another copy of the frame
+	 * into scrollback. The clamp is what prevents that, and the hard cut for a
+	 * single over-long line used to slice *characters* against a budget
+	 * measured in *cells*: 20,000 CJK characters on an 80-column, 24-row
+	 * terminal kept 1,280 characters — 2,560 cells, 32 rows for a 16-row
+	 * budget.
+	 */
+	const renderedRows = (block: { text: string }, columns: number): number =>
+		block.text.split("\n").reduce((rows, line) => rows + Math.max(1, Math.ceil(displayWidth(line) / columns)), 0);
+
+	it.each([
+		["ascii", "x"],
+		["CJK", "日"],
+		["emoji", "\u{1f600}"],
+		["combining", "é"],
+	])("keeps one long %s line inside the row budget", (_name, char) => {
+		const blocks = [text("content", char.repeat(20_000))];
+
+		const out = clampStreamingBlocks(blocks, 24, 80);
+
+		expect(out).toHaveLength(1);
+		expect(out[0]!.truncated).toBe(true);
+		// budget = 24 - 8 = 16 rows
+		expect(renderedRows(out[0]!.block as { text: string }, 80)).toBeLessThanOrEqual(16);
+	});
+
+	it("keeps the tail of a wide-character line, not its head", () => {
+		const line = `${"日".repeat(5_000)}THE-END`;
+
+		const out = clampStreamingBlocks([text("content", line)], 24, 80);
+
+		const kept = (out[0]!.block as { text: string }).text;
+		expect(kept.endsWith("THE-END")).toBe(true);
+		expect(renderedRows(out[0]!.block as { text: string }, 80)).toBeLessThanOrEqual(16);
+	});
+
 	it("passes through blocks that fit the viewport", () => {
 		const blocks = [text("thinking", "short"), tool("t1"), text("content", "also short")];
 		const out = clampStreamingBlocks(blocks, 24, 80);
