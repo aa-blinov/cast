@@ -43,8 +43,8 @@ import {
 	resetSessionContext,
 	saveSession,
 	saveSubagentRun,
-	sessionHasMessages,
 	searchSessionSummaries,
+	sessionHasMessages,
 	shouldCompact,
 	updateLastCheckpoint,
 } from "../src/core/session.ts";

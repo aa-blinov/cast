@@ -840,22 +840,9 @@ export function App(props: AppProps): JSX.Element {
 			)}
 			{/* Stays up for as long as the message is actually queued — not a
 			    timed toast, since a tool-heavy turn can take much longer than a
-			    fixed timeout to reach the point where the queue gets drained.
-			    Lists every pending entry (not just the latest) so queuing
-			    several /steer or /queue messages before the turn catches up to
-			    them doesn't silently hide all but the last one. */}
-			{agent.pendingSteers.map((text, i) => (
-				// biome-ignore lint/suspicious/noArrayIndexKey: FIFO queue, no stable identity
-				<Text key={`steer-${i}`} color={theme().warning}>
-					[Steer queued{agent.pendingSteers.length > 1 ? ` (${i + 1}/${agent.pendingSteers.length})` : ""}: {text}]
-				</Text>
-			))}
-			{agent.pendingQueue.map((text, i) => (
-				// biome-ignore lint/suspicious/noArrayIndexKey: FIFO queue, no stable identity
-				<Text key={`queue-${i}`} color={theme().warning}>
-					[Queued{agent.pendingQueue.length > 1 ? ` (${i + 1}/${agent.pendingQueue.length})` : ""}: {text}]
-				</Text>
-			))}
+			    fixed timeout to reach the point where the queue gets drained. */}
+			<PendingRows label="Steer queued" items={agent.pendingSteers} />
+			<PendingRows label="Queued" items={agent.pendingQueue} />
 			<ComposerDivider />
 			<Composer
 				onSubmit={(text) => handleSubmit(text)}
@@ -891,6 +878,37 @@ export function App(props: AppProps): JSX.Element {
 				repaintKey={repaintKey}
 			/>
 		</Box>
+	);
+}
+
+/**
+ * One row per pending /steer or /queue message, truncated — never wrapped,
+ * and never more rows than this.
+ *
+ * A queued prompt is as long as the user made it. Rendered in full it pushed
+ * the live region past the terminal height, and Ink answers that by clearing
+ * the screen *and the scrollback* on every frame: two long /queue messages
+ * during a streaming answer measured 210 full clears and 1.8MB of output,
+ * with the scroll position gone. The full text is still in the queue (and
+ * lands in the transcript when it's sent) — this row is only a receipt.
+ */
+const MAX_PENDING_ROWS = 3;
+
+function PendingRows({ label, items }: { label: string; items: string[] }): JSX.Element | null {
+	if (items.length === 0) return null;
+	return (
+		<>
+			{items.slice(0, MAX_PENDING_ROWS).map((text, i) => (
+				// biome-ignore lint/suspicious/noArrayIndexKey: FIFO queue, no stable identity
+				<Text key={`${label}-${i}`} color={theme().warning} wrap="truncate">
+					[{label}
+					{items.length > 1 ? ` (${i + 1}/${items.length})` : ""}: {text}]
+				</Text>
+			))}
+			{items.length > MAX_PENDING_ROWS && (
+				<Text color={theme().warning}>[+{items.length - MAX_PENDING_ROWS} more queued]</Text>
+			)}
+		</>
 	);
 }
 

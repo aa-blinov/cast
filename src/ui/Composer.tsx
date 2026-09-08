@@ -9,7 +9,9 @@ import {
 	unregisterStdinOwner,
 } from "../core/stdin-manager.ts";
 import { SLASH_COMMANDS } from "./commands.ts";
+import { displayWidth } from "./display-width.ts";
 import { type InputEvent, InputParser } from "./input/input-parser.ts";
+import { lineWindow } from "./input/line-window.ts";
 import { PromptHistory } from "./input/prompt-history.ts";
 import { StdinBuffer } from "./input/stdin-buffer.ts";
 import { graphemeAt, TextBuffer } from "./input/textarea.ts";
@@ -724,23 +726,33 @@ export function Composer({
 					</Text>
 				) : (
 					(() => {
-						const beforeCol = line.slice(0, cursorCol);
+						// One row, always: the draft is windowed horizontally instead
+						// of wrapped (see input/line-window.ts — a wrapped long draft
+						// grew the live region past the terminal and cost the whole
+						// scrollback). Two cells go to the `> ` prompt, one to each
+						// edge marker, reserved whether or not they show so the text
+						// doesn't shift as the window starts clipping.
+						const cols = Math.max(20, process.stdout.columns || 80);
+						const cellWidth = (cluster: string) => displayWidth(chipLabels.get(cluster) ?? cluster);
+						const win = lineWindow(line, cursorCol, cols - 4, cellWidth);
+						const beforeCol = line.slice(win.start, cursorCol);
 						// The whole grapheme cluster under the cursor. A single UTF-16
 						// unit would split an emoji's surrogate pair into mojibake; a
 						// single code point kept the pair intact but still cut a family
 						// emoji or a combining accent in half, so the cursor block
 						// showed one member and the rest spilled out to its right.
 						const atCol = graphemeAt(line, cursorCol);
-						const afterCol = line.slice(cursorCol + atCol.length);
+						const afterCol = line.slice(cursorCol + atCol.length, Math.max(win.end, cursorCol + atCol.length));
 						// If the cursor cell is a chip character, show the whole chip
 						// label in inverse (the chip is one buffer column, so the cursor
 						// can rest on it; backspace/delete then act on the whole chip).
 						const atColChip = chipLabels.get(atCol) ?? null;
 						return (
-							<Text>
+							<Text wrap="truncate">
 								<Text color={theme().accent} bold>
 									{"> "}
 								</Text>
+								<Text color={theme().muted}>{win.clippedLeft ? "\u2039" : " "}</Text>
 								{renderWithChips(beforeCol, chipLabels, "before")}
 								{atColChip !== null ? (
 									<Text color="black" backgroundColor="yellow" inverse>
@@ -752,6 +764,7 @@ export function Composer({
 									</Text>
 								)}
 								{renderWithChips(afterCol, chipLabels, "after")}
+								<Text color={theme().muted}>{win.clippedRight ? "\u203a" : ""}</Text>
 							</Text>
 						);
 					})()
