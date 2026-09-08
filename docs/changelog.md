@@ -2,7 +2,11 @@
 
 All notable user-facing changes to cast, newest first.
 
-## Unreleased
+## 0.27.0
+
+### Changed
+
+- **`disposeSessionWorktree` is gone.** Nothing called it, and it removed a worktree with `git worktree remove --force` plus `git branch -D` — the two guards `/worktree remove` was fixed to stop bypassing. Dead code that discards uncommitted work and unmerged commits is one call site away from doing it again.
 
 ### Fixed
 
