@@ -199,11 +199,15 @@ function ToolCallView({ call, compact }: { call: ToolCallEntry; compact?: boolea
 	// and dim, indented into the same column as a turn's body text, and colour
 	// is spent only where it earns its contrast: a failure.
 	const failed = call.status === "error";
-	const glyph = call.status === "running" ? "◌" : failed ? "✗" : "·";
+	// A bar, not a bullet: the row then continues the transcript's gutter
+	// rhythm (`▌` for a turn, `│` for its scaffolding) instead of reading as a
+	// list item. A thicker bar marks the call still running — a difference in
+	// weight rather than in colour, which keeps the row quiet.
+	const glyph = call.status === "running" ? "┃" : failed ? "✗" : "│";
 	const rowColor = failed ? colors.error : colors.muted;
 	return (
 		<Box flexDirection="column">
-			<Text color={rowColor} dimColor={!failed}>
+			<Text color={rowColor} dimColor={!failed && call.status !== "running"}>
 				{TOOL_INDENT}
 				{glyph} {isMcpTool(call.name) ? mcpToolLabel(call.name) : call.name}{" "}
 				<ToolSummary name={call.name} args={call.args} compact={compact} muted={!failed} />

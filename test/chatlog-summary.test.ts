@@ -43,10 +43,10 @@ describe("ChatLog tool rows", () => {
 			{ columns: 120 },
 		);
 
-		// Tool rows are scaffolding: a quiet glyph, the tool name, the argument.
+		// Tool rows are scaffolding: a quiet bar, the tool name, the argument.
 		// Bracketed `[bash] [ok]` columns were noise, and a bright bullet was no
 		// quieter — the rows jumped out between the turns they belong to.
-		expect(output).toMatch(/·\s+bash/);
+		expect(output).toMatch(/│\s+bash/);
 		// The command itself, not `command="…"`: the key and the quotes spent a
 		// third of the row on nothing the reader needed.
 		expect(output).toContain("git status --short");
@@ -107,7 +107,7 @@ describe("ChatLog tool rows", () => {
 			{ columns: 120 },
 		);
 
-		expect(output).toMatch(/◌\s+bash/);
+		expect(output).toMatch(/┃\s+bash/);
 		expect(output).not.toContain("⠋");
 	});
 });
