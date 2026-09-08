@@ -13,6 +13,7 @@ import { type InputEvent, InputParser } from "./input/input-parser.ts";
 import { StdinBuffer } from "./input/stdin-buffer.ts";
 import { TextBuffer } from "./input/textarea.ts";
 import { chipCharFor, expandPastes, isChipChar, type PendingPaste, pasteLabel } from "./paste.ts";
+import type { ClipboardPasteResult } from "./readClipboardImage.ts";
 import { theme } from "./themes/index.ts";
 
 // Theme colors read at render time — these are reactive because the Composer
@@ -24,7 +25,7 @@ interface ComposerProps {
 	canSubmit?: (text: string) => boolean;
 	onAbort: () => void;
 	onExit: () => void;
-	onPasteImage?: () => Promise<string | null>;
+	onPasteImage?: () => Promise<ClipboardPasteResult>;
 	/** Load older session history (PageUp). */
 	onLoadOlder?: () => void;
 	running: boolean;
@@ -278,10 +279,15 @@ export function Composer({
 			return;
 		}
 		showImageNotice("[Reading clipboard...]", 0);
-		void reader().then((filePath) => {
-			if (filePath) {
-				bufRef.current.insert(filePath);
-				showImageNotice(`[Image saved: ${filePath}]`, 0);
+		void reader().then((result) => {
+			if (result.ok) {
+				bufRef.current.insert(result.path);
+				showImageNotice(`[Image saved: ${result.path}]`, 0);
+			} else if (result.error) {
+				// A real, actionable problem — a missing helper binary, an
+				// unsupported platform. Saying "no image in clipboard" here is a
+				// wrong diagnosis the user cannot get past.
+				showImageNotice(`[${result.error}]`, 6000);
 			} else {
 				showImageNotice("[No image in clipboard — copy a screenshot or image file first]", 4000);
 			}

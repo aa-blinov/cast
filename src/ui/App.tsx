@@ -37,6 +37,7 @@ import { canSubmitDuringRun, handleInput } from "./commands.ts";
 import { imageFilePathsInText } from "./paste.ts";
 import { useModalBridge } from "./pickerBridge.ts";
 import { resolvePlanQuestionWithPicker } from "./plan-question.ts";
+import type { ClipboardPasteResult } from "./readClipboardImage.ts";
 import { Spinner } from "./Spinner.tsx";
 import {
 	defaultStatusBarConfig,
@@ -86,7 +87,7 @@ interface AppProps {
 	result: StartupResult;
 	version: string;
 	initialPrompt?: string;
-	onPasteImage?: () => Promise<string | null>;
+	onPasteImage?: () => Promise<ClipboardPasteResult>;
 	onQuit: () => void;
 	onRepaintBanner?: (preserveScrollback?: boolean) => Promise<void>;
 	/** When set, the TUI runs as a thin client of the `cast server` daemon
