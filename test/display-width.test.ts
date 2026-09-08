@@ -8,7 +8,7 @@
  */
 import stringWidth from "string-width";
 import { describe, expect, it } from "vitest";
-import { displayWidth, displayWidthAtMost, displayWidthCacheFlush } from "../src/ui/display-width.ts";
+import { displayWidth, displayWidthCacheFlush } from "../src/ui/display-width.ts";
 
 const SAMPLES = [
 	"hello world",
@@ -55,22 +55,5 @@ describe("displayWidth", () => {
 		const first = displayWidth(line);
 		expect(displayWidth(line)).toBe(first);
 		expect(first).toBe(stringWidth(line));
-	});
-});
-
-describe("displayWidthAtMost", () => {
-	it("returns the true width when it fits and gives up past the budget", () => {
-		displayWidthCacheFlush();
-		expect(displayWidthAtMost("hello", 10)).toBe(5);
-		// Only "greater than the budget" is promised once abandoned.
-		expect(displayWidthAtMost("x".repeat(100), 10)).toBeGreaterThan(10);
-	});
-
-	it("does not cache a width it abandoned early", () => {
-		displayWidthCacheFlush();
-		const line = "y".repeat(50);
-		expect(displayWidthAtMost(line, 5)).toBeGreaterThan(5);
-		// The full measurement must still be correct afterwards.
-		expect(displayWidth(line)).toBe(50);
 	});
 });

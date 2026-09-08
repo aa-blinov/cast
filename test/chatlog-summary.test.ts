@@ -43,10 +43,15 @@ describe("ChatLog tool rows", () => {
 			{ columns: 120 },
 		);
 
-		expect(output).toContain("[bash] [ok]");
-		expect(output).toContain('command="git status --short"');
-		expect(output).toContain("[workspace · search] [error]");
-		expect(output).toContain('query="authentication"');
+		// The row is a status bullet plus the tool name now — three bracketed
+		// columns of chrome left little room for what actually happened.
+		expect(output).toMatch(/●\s+bash/);
+		// The command itself, not `command="…"`: the key and the quotes spent a
+		// third of the row on nothing the reader needed.
+		expect(output).toContain("git status --short");
+		expect(output).not.toContain('command="');
+		expect(output).toMatch(/✗\s+workspace · search/);
+		expect(output).toContain("authentication");
 		expect(output).not.toContain("MUTATED_RESULT_MUST_NOT_RENDER");
 		expect(output).not.toContain("MCP_ERROR_PAYLOAD_MUST_NOT_RENDER");
 	});
@@ -100,7 +105,7 @@ describe("ChatLog tool rows", () => {
 			{ columns: 120 },
 		);
 
-		expect(output).toContain("[bash] [running]");
+		expect(output).toMatch(/◍\s+bash/);
 		expect(output).not.toContain("⠋");
 	});
 });

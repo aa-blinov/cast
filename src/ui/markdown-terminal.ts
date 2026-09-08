@@ -1,0 +1,406 @@
+/**
+ * Markdown → terminal lines.
+ *
+ * The model answers in markdown and the TUI printed it verbatim, so a reply
+ * arrived looking like source: `## heading`, `**bold**`, backticks, ``` fences,
+ * `|---|` table rules. The web UI has had a renderer since the beginning; this
+ * is the same job for a terminal.
+ *
+ * The output is *lines*, not a blob, and each line is already wrapped to the
+ * width it was rendered for. That is deliberate: the live-region clamp needs
+ * to know exactly how many rows a block will occupy (see ChatLog), and a
+ * renderer that returns pre-wrapped lines answers that question by
+ * construction instead of by estimating cells afterwards.
+ *
+ * Wrapping measures cells with displayWidth, so CJK, emoji and combining marks
+ * count the way the terminal draws them.
+ */
+
+import { displayWidth } from "./display-width.ts";
+
+export interface Span {
+	text: string;
+	bold?: boolean;
+	italic?: boolean;
+	dim?: boolean;
+	underline?: boolean;
+	/** Semantic colour name resolved by the view against the active theme. */
+	tone?: "heading" | "code" | "quote" | "link" | "marker" | "rule";
+}
+
+export interface RenderedLine {
+	spans: Span[];
+	/** True for a line inside a fenced code block — the view draws its gutter. */
+	code?: boolean;
+}
+
+const HEADING_RE = /^(#{1,6})\s+(.*)$/;
+const FENCE_RE = /^\s*(```+|~~~+)\s*(\S*)/;
+const BULLET_RE = /^(\s*)([-*+])\s+(.*)$/;
+const ORDERED_RE = /^(\s*)(\d{1,3})[.)]\s+(.*)$/;
+const QUOTE_RE = /^\s*>\s?(.*)$/;
+const HR_RE = /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/;
+const TABLE_RULE_RE = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
+const TABLE_ROW_RE = /^\s*\|(.+)\|\s*$/;
+const LIST_MARKER_WIDTH = 2;
+
+// Inline patterns, hoisted: inlineSpans runs per line of every rendered block.
+const INLINE_CODE_RE = /`([^`]+)`/;
+const INLINE_LINK_RE = /\[([^\]]+)\]\(([^)\s]+)\)/;
+const INLINE_BOLD_RE = /\*\*([^*]+)\*\*/;
+const INLINE_BOLD_ALT_RE = /__([^_]+)__/;
+const INLINE_ITALIC_RE = /(?<![A-Za-z0-9])\*([^*\n]+)\*(?![A-Za-z0-9])/;
+const INLINE_ITALIC_ALT_RE = /(?<![A-Za-z0-9])_([^_\n]+)_(?![A-Za-z0-9])/;
+const INLINE_STRIKE_RE = /~~([^~]+)~~/;
+const WORD_SPLIT_RE = /(\s+)/;
+const ONLY_SPACE_RE = /^\s+$/;
+const FENCE_SCAN_RE = /^\s*(?:```+|~~~+)/gm;
+
+interface InlinePattern {
+	re: RegExp;
+	make: (m: RegExpExecArray, base: Omit<Span, "text">) => Span[];
+}
+
+// Precedence: code first (its content is never emphasised), then links, then
+// the emphasis markers longest-first so `**` beats `*`.
+const INLINE_PATTERNS: InlinePattern[] = [
+	{ re: INLINE_CODE_RE, make: (m, base) => [{ ...base, text: m[1]!, tone: "code" }] },
+	{
+		re: INLINE_LINK_RE,
+		make: (m, base) => [
+			{ ...base, text: m[1]!, tone: "link", underline: true },
+			{ ...base, text: ` (${m[2]})`, dim: true },
+		],
+	},
+	{ re: INLINE_BOLD_RE, make: (m, base) => [{ ...base, text: m[1]!, bold: true }] },
+	{ re: INLINE_BOLD_ALT_RE, make: (m, base) => [{ ...base, text: m[1]!, bold: true }] },
+	{ re: INLINE_ITALIC_RE, make: (m, base) => [{ ...base, text: m[1]!, italic: true }] },
+	{ re: INLINE_ITALIC_ALT_RE, make: (m, base) => [{ ...base, text: m[1]!, italic: true }] },
+	{ re: INLINE_STRIKE_RE, make: (m, base) => [{ ...base, text: m[1]!, dim: true }] },
+];
+
+/** Inline emphasis, code and links, in one pass so nested markers don't nest. */
+function inlineSpans(text: string, base: Omit<Span, "text"> = {}): Span[] {
+	const spans: Span[] = [];
+	let rest = text;
+	for (let guard = 0; guard < 500; guard++) {
+		let best: { index: number; length: number; spans: Span[] } | undefined;
+		for (const { re, make } of INLINE_PATTERNS) {
+			const m = re.exec(rest);
+			if (!m) continue;
+			if (best === undefined || m.index < best.index) {
+				best = { index: m.index, length: m[0].length, spans: make(m, base) };
+			}
+		}
+		if (!best) break;
+		if (best.index > 0) spans.push({ ...base, text: rest.slice(0, best.index) });
+		spans.push(...best.spans);
+		rest = rest.slice(best.index + best.length);
+		if (!rest) break;
+	}
+	if (rest) spans.push({ ...base, text: rest });
+	return spans.filter((span) => span.text !== "");
+}
+
+/**
+ * Collapse neighbouring spans that share a style.
+ *
+ * Wrapping works word by word, so a styled run arrives as one span per word
+ * and every one of them would carry its own escape sequence into the frame —
+ * a heading of four words wrote four bold-on/bold-off pairs. Ink diffs frames
+ * as strings, so this is fewer bytes on the wire and less for it to compare.
+ */
+function mergeSpans(spans: Span[]): Span[] {
+	const out: Span[] = [];
+	for (const span of spans) {
+		const last = out[out.length - 1];
+		if (
+			last &&
+			last.bold === span.bold &&
+			last.italic === span.italic &&
+			last.dim === span.dim &&
+			last.underline === span.underline &&
+			last.tone === span.tone
+		) {
+			last.text += span.text;
+			continue;
+		}
+		out.push({ ...span });
+	}
+	return out;
+}
+
+/** Break spans into lines no wider than `width` cells, indenting continuations. */
+function wrapSpans(spans: Span[], width: number, indent: string, hangingIndent: string): RenderedLine[] {
+	const usable = Math.max(8, width - displayWidth(indent));
+	const lines: RenderedLine[] = [];
+	let current: Span[] = [];
+	let used = 0;
+	let prefix = indent;
+
+	const flush = (): void => {
+		lines.push({ spans: mergeSpans([{ text: prefix, dim: true, tone: "marker" }, ...current]) });
+		current = [];
+		used = 0;
+		prefix = hangingIndent;
+	};
+
+	for (const span of spans) {
+		// Words, keeping the spaces so a wrapped line does not lose them.
+		const words = span.text.split(WORD_SPLIT_RE).filter((w) => w !== "");
+		for (const word of words) {
+			const w = displayWidth(word);
+			const room = Math.max(8, width - displayWidth(prefix));
+			if (used > 0 && used + w > room) {
+				if (ONLY_SPACE_RE.test(word)) continue; // never start a line with the space that broke it
+				flush();
+			}
+			if (w > usable && !ONLY_SPACE_RE.test(word)) {
+				// A single word wider than the line (a URL, a long identifier):
+				// hard-split it rather than overflowing the viewport.
+				let remainder = word;
+				while (displayWidth(remainder) > Math.max(8, width - displayWidth(prefix))) {
+					const room2 = Math.max(8, width - displayWidth(prefix));
+					let cut = 0;
+					let cells = 0;
+					for (const ch of remainder) {
+						const cw = displayWidth(ch);
+						if (cells + cw > room2) break;
+						cells += cw;
+						cut += ch.length;
+					}
+					current.push({ ...span, text: remainder.slice(0, cut) });
+					used = cells;
+					flush();
+					remainder = remainder.slice(cut);
+				}
+				if (remainder) {
+					current.push({ ...span, text: remainder });
+					used += displayWidth(remainder);
+				}
+				continue;
+			}
+			current.push({ ...span, text: word });
+			used += w;
+		}
+	}
+	if (current.length > 0 || lines.length === 0) flush();
+	return lines;
+}
+
+/** Cells wide, for table layout. */
+function spansWidth(spans: Span[]): number {
+	let total = 0;
+	for (const span of spans) total += displayWidth(span.text);
+	return total;
+}
+
+function splitRow(row: string): string[] {
+	const inner = TABLE_ROW_RE.exec(row)?.[1] ?? row;
+	return inner.split("|").map((cell) => cell.trim());
+}
+
+/**
+ * A markdown table as aligned columns. Column widths come from the content,
+ * then shrink proportionally when the table is wider than the terminal —
+ * a raw `|---|---|` table just wrapped into noise before.
+ */
+function renderTable(rows: string[][], width: number, indent: string): RenderedLine[] {
+	const columns = Math.max(...rows.map((r) => r.length));
+	const cells = rows.map((row) => {
+		const padded = [...row];
+		while (padded.length < columns) padded.push("");
+		return padded.map((cell) => inlineSpans(cell));
+	});
+	const widths = Array.from({ length: columns }, (_, c) => Math.max(1, ...cells.map((row) => spansWidth(row[c]!))));
+	const gap = 2;
+	const available = Math.max(8, width - displayWidth(indent) - gap * (columns - 1));
+	let total = widths.reduce((a, b) => a + b, 0);
+	if (total > available) {
+		// Shrink the widest columns first so short ones stay readable.
+		const scale = available / total;
+		for (let c = 0; c < columns; c++) widths[c] = Math.max(3, Math.floor(widths[c]! * scale));
+		total = widths.reduce((a, b) => a + b, 0);
+	}
+	const lines: RenderedLine[] = [];
+	cells.forEach((row, rowIndex) => {
+		const spans: Span[] = [{ text: indent, dim: true, tone: "marker" }];
+		row.forEach((cell, c) => {
+			const budget = widths[c]!;
+			let usedCells = 0;
+			for (const span of cell) {
+				const remaining = budget - usedCells;
+				if (remaining <= 0) break;
+				let piece = span.text;
+				if (displayWidth(piece) > remaining) {
+					let cut = 0;
+					let cells2 = 0;
+					for (const ch of piece) {
+						const cw = displayWidth(ch);
+						if (cells2 + cw > remaining) break;
+						cells2 += cw;
+						cut += ch.length;
+					}
+					piece = piece.slice(0, cut);
+				}
+				if (!piece) break;
+				spans.push({ ...span, text: piece, bold: span.bold || rowIndex === 0 });
+				usedCells += displayWidth(piece);
+			}
+			const pad = budget - usedCells + (c === columns - 1 ? 0 : gap);
+			if (pad > 0) spans.push({ text: " ".repeat(pad) });
+		});
+		lines.push({ spans: mergeSpans(spans) });
+	});
+	return lines;
+}
+
+export interface MarkdownRenderOptions {
+	/** Terminal cells available for the text itself (gutter excluded). */
+	width: number;
+	/** Indent applied to every line — two spaces for the chat's body text. */
+	indent?: string;
+}
+
+/**
+ * Render `text` as terminal lines. Deterministic and side-effect free: the
+ * same input and width always produce the same lines, which is what lets the
+ * clamp count rows without rendering twice.
+ */
+export function renderMarkdownLines(text: string, options: MarkdownRenderOptions): RenderedLine[] {
+	const width = Math.max(20, options.width);
+	const indent = options.indent ?? "";
+	const out: RenderedLine[] = [];
+	const rawLines = text.split("\n");
+	let inFence = false;
+	let fenceMarker = "";
+	let table: string[][] | null = null;
+
+	const flushTable = (): void => {
+		if (!table) return;
+		out.push(...renderTable(table, width, indent));
+		table = null;
+	};
+
+	for (const raw of rawLines) {
+		const fence = FENCE_RE.exec(raw);
+		if (fence) {
+			flushTable();
+			if (!inFence) {
+				// The language tag is dropped rather than printed: it would cost a
+				// row in the live region, and the block is already marked as code
+				// for the view to colour.
+				inFence = true;
+				fenceMarker = fence[1]!.slice(0, 3);
+			} else if (fence[1]!.startsWith(fenceMarker)) {
+				inFence = false;
+			}
+			continue;
+		}
+		if (inFence) {
+			// Code keeps its own spacing; only hard-wrap what does not fit.
+			out.push(
+				...wrapSpans([{ text: raw === "" ? " " : raw, tone: "code" }], width, indent, `${indent}  `).map(
+					(line) => ({
+						...line,
+						code: true,
+					}),
+				),
+			);
+			continue;
+		}
+
+		if (TABLE_RULE_RE.test(raw) && table) continue;
+		if (TABLE_ROW_RE.test(raw)) {
+			table = table ?? [];
+			table.push(splitRow(raw));
+			continue;
+		}
+		flushTable();
+
+		if (raw.trim() === "") {
+			out.push({ spans: [{ text: "" }] });
+			continue;
+		}
+		if (HR_RE.test(raw)) {
+			const rule = "─".repeat(Math.max(4, width - displayWidth(indent)));
+			out.push({ spans: [{ text: indent }, { text: rule, dim: true, tone: "rule" }] });
+			continue;
+		}
+		const heading = HEADING_RE.exec(raw);
+		if (heading) {
+			const level = heading[1]!.length;
+			out.push(
+				...wrapSpans(inlineSpans(heading[2]!, { bold: true, tone: "heading" }), width, indent, `${indent}  `).map(
+					(line) => (level > 2 ? line : line),
+				),
+			);
+			continue;
+		}
+		const quote = QUOTE_RE.exec(raw);
+		if (quote) {
+			out.push(
+				...wrapSpans(inlineSpans(quote[1]!, { dim: true, tone: "quote" }), width, `${indent}│ `, `${indent}│ `),
+			);
+			continue;
+		}
+		const bullet = BULLET_RE.exec(raw);
+		if (bullet) {
+			const depth = Math.floor(displayWidth(bullet[1]!) / 2);
+			const marker = depth === 0 ? "•" : depth === 1 ? "–" : "·";
+			const lead = `${indent}${" ".repeat(depth * LIST_MARKER_WIDTH)}${marker} `;
+			out.push(
+				...wrapSpans(inlineSpans(bullet[3]!), width, lead, `${indent}${" ".repeat(depth * LIST_MARKER_WIDTH + 2)}`),
+			);
+			continue;
+		}
+		const ordered = ORDERED_RE.exec(raw);
+		if (ordered) {
+			const depth = Math.floor(displayWidth(ordered[1]!) / 2);
+			const lead = `${indent}${" ".repeat(depth * LIST_MARKER_WIDTH)}${ordered[2]}. `;
+			out.push(
+				...wrapSpans(
+					inlineSpans(ordered[3]!),
+					width,
+					lead,
+					`${indent}${" ".repeat(depth * LIST_MARKER_WIDTH + displayWidth(`${ordered[2]}. `))}`,
+				),
+			);
+			continue;
+		}
+		out.push(...wrapSpans(inlineSpans(raw), width, indent, indent));
+	}
+	flushTable();
+	return out;
+}
+
+/**
+ * The last `maxLines` rendered lines of `text`, for the live region.
+ *
+ * Rendering a whole streaming block every frame is what the old cell
+ * arithmetic was avoiding, and a reasoning stream reaches hundreds of KB. Only
+ * the tail can be on screen, so only the tail is rendered — with enough raw
+ * lines taken to fill the budget, plus the fence state carried in from the
+ * text before them so a code block does not lose its styling mid-stream.
+ */
+export function renderMarkdownTail(
+	text: string,
+	options: MarkdownRenderOptions & { maxLines: number },
+): {
+	lines: RenderedLine[];
+	truncated: boolean;
+} {
+	const { maxLines } = options;
+	if (maxLines <= 0) return { lines: [], truncated: text.length > 0 };
+	const rawLines = text.split("\n");
+	// A rendered line is at least one raw line, so this many raw lines can
+	// always cover the budget; a couple extra absorb wrapping.
+	const take = Math.min(rawLines.length, maxLines + 4);
+	const head = rawLines.slice(0, rawLines.length - take).join("\n");
+	const tailText = rawLines.slice(rawLines.length - take).join("\n");
+	const fencesBefore = (head.match(FENCE_SCAN_RE) ?? []).length;
+	const insideFence = fencesBefore % 2 === 1;
+	const rendered = renderMarkdownLines(insideFence ? `\`\`\`\n${tailText}` : tailText, options);
+	const truncated = rendered.length > maxLines || take < rawLines.length;
+	return { lines: truncated ? rendered.slice(rendered.length - maxLines) : rendered, truncated };
+}

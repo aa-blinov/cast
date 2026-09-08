@@ -9,17 +9,22 @@ const tool = (id: string): StreamBlock =>
 
 describe("clampStreamingBlocks", () => {
 	/**
-	 * Ink redraws the live region by moving the cursor up N rows; it cannot go
-	 * above the top of the screen, so a region taller than the viewport can
-	 * never be fully erased and each redraw stacks another copy of the frame
-	 * into scrollback. The clamp is what prevents that, and the hard cut for a
-	 * single over-long line used to slice *characters* against a budget
-	 * measured in *cells*: 20,000 CJK characters on an 80-column, 24-row
-	 * terminal kept 1,280 characters — 2,560 cells, 32 rows for a 16-row
-	 * budget.
+	 * A live region taller than the viewport is what Ink cannot erase: it falls
+	 * back to clearing the terminal and replaying all of its static output, on
+	 * every frame. The clamp is what prevents that, and it now counts the rows
+	 * it is about to render rather than estimating cells — the estimate is
+	 * where a CJK answer used to take twice the rows it was allowed.
 	 */
-	const renderedRows = (block: { text: string }, columns: number): number =>
-		block.text.split("\n").reduce((rows, line) => rows + Math.max(1, Math.ceil(displayWidth(line) / columns)), 0);
+	const rows = (out: ReturnType<typeof clampStreamingBlocks>): number =>
+		out.reduce(
+			(total, entry) =>
+				total + (entry.block.kind === "tool" ? 1 : (entry.lines?.length ?? 0) + (entry.block.continued ? 0 : 1)),
+			0,
+		);
+	const renderedText = (entry: ReturnType<typeof clampStreamingBlocks>[number]): string =>
+		(entry.lines ?? []).map((line) => line.spans.map((span) => span.text).join("")).join("\n");
+	const widestLine = (entry: ReturnType<typeof clampStreamingBlocks>[number]): number =>
+		Math.max(0, ...(entry.lines ?? []).map((line) => displayWidth(line.spans.map((span) => span.text).join(""))));
 
 	it.each([
 		["ascii", "x"],
@@ -33,8 +38,9 @@ describe("clampStreamingBlocks", () => {
 
 		expect(out).toHaveLength(1);
 		expect(out[0]!.truncated).toBe(true);
-		// budget = 24 - 8 = 16 rows
-		expect(renderedRows(out[0]!.block as { text: string }, 80)).toBeLessThanOrEqual(16);
+		// budget = 24 - 8 = 16 rows, and every line fits the width in cells
+		expect(rows(out)).toBeLessThanOrEqual(16);
+		expect(widestLine(out[0]!)).toBeLessThanOrEqual(80);
 	});
 
 	it("keeps the tail of a wide-character line, not its head", () => {
@@ -42,9 +48,8 @@ describe("clampStreamingBlocks", () => {
 
 		const out = clampStreamingBlocks([text("content", line)], 24, 80);
 
-		const kept = (out[0]!.block as { text: string }).text;
-		expect(kept.endsWith("THE-END")).toBe(true);
-		expect(renderedRows(out[0]!.block as { text: string }, 80)).toBeLessThanOrEqual(16);
+		expect(renderedText(out[0]!).trimEnd().endsWith("THE-END")).toBe(true);
+		expect(rows(out)).toBeLessThanOrEqual(16);
 	});
 
 	it("passes through blocks that fit the viewport", () => {
@@ -61,9 +66,11 @@ describe("clampStreamingBlocks", () => {
 		const out = clampStreamingBlocks(blocks, 24, 80);
 		expect(out).toHaveLength(1);
 		expect(out[0]!.truncated).toBe(true);
-		const kept = (out[0]!.block as { text: string }).text.split("\n");
-		// budget = 24 - 8 = 16 rows
-		expect(kept.length).toBeLessThanOrEqual(16);
+		const kept = renderedText(out[0]!)
+			.split("\n")
+			.map((l) => l.trim());
+		// budget = 24 - 8 = 16 rows, one of them the block's header
+		expect(rows(out)).toBeLessThanOrEqual(16);
 		// tail is kept, not the head
 		expect(kept.at(-1)).toBe("line 99");
 		expect(kept[0]).not.toBe("line 0");
@@ -80,9 +87,9 @@ describe("clampStreamingBlocks", () => {
 	it("hard-cuts a single wrapped line longer than the whole budget", () => {
 		const blocks = [text("content", "y".repeat(10_000))];
 		const out = clampStreamingBlocks(blocks, 14, 50); // budget 6 → 300 chars
-		const t = (out[0]!.block as { text: string }).text;
 		expect(out[0]!.truncated).toBe(true);
-		expect(t.length).toBeLessThanOrEqual(6 * 50);
+		expect(rows(out)).toBeLessThanOrEqual(6);
+		expect(widestLine(out[0]!)).toBeLessThanOrEqual(50);
 	});
 
 	it("drops older blocks entirely once the budget is spent", () => {

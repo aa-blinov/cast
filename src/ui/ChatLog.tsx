@@ -1,15 +1,15 @@
 import { Box, Static, Text } from "ink";
 import { type JSX, useMemo, useRef } from "react";
 import { getLastFrameOverflow } from "../core/stdin-manager.ts";
-import { displayWidthAtMost, sliceTailToWidth } from "./display-width.ts";
+import { type RenderedLine, renderMarkdownLines, renderMarkdownTail, type Span } from "./markdown-terminal.ts";
 import { Spinner } from "./Spinner.tsx";
 import { formatTaskToolSummary } from "./task-tool-summary.ts";
 import { theme } from "./themes/index.ts";
 import type { ChatMessage, RetryInfo, StreamBlock, StreamingState, ToolCallEntry } from "./useAgentSession.ts";
 
+// Vendors are supposed to split reasoning out of the content stream; when one
+// leaks the tags, a cut mid-tag must never show "]<]minimax[>" fragments.
 const THINK_TAG_RE = /<\/?think[^>]*>/g;
-const BOUNDARY_RE = /[\s<>[\]]/;
-const LEADING_WS_RE = /^\s+/;
 
 interface ChatLogProps {
 	messages: ChatMessage[];
@@ -93,11 +93,23 @@ export function parseToolSummary(name: string, args: string): ToolSummaryModel {
 		return { kind: "generic", text: `${done}/${todos.length} done${suffix}` };
 	}
 
-	const generic = parsed
-		? Object.entries(parsed)
-				.map(([k, v]) => `${k}=${JSON.stringify(v)}`)
-				.join(", ")
-		: args.slice(0, 200);
+	// `command="ls -la /tmp"` spent a third of the row on the key and the
+	// quotes. A command, a pattern or a path is self-describing: print the
+	// value. Several arguments still get the `k=v` list, which is the only
+	// case where the keys carry information.
+	const entries = parsed ? Object.entries(parsed) : [];
+	const primary =
+		name === "bash" && typeof parsed?.command === "string"
+			? parsed.command
+			: entries.length === 1 && typeof entries[0]![1] === "string"
+				? (entries[0]![1] as string)
+				: undefined;
+	const generic =
+		primary !== undefined
+			? primary
+			: parsed
+				? entries.map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(", ")
+				: args.slice(0, 200);
 	return { kind: "generic", text: generic };
 }
 
@@ -168,17 +180,87 @@ function ToolSummary({ name, args, compact }: { name: string; args: string; comp
 }
 
 function ToolCallView({ call, compact }: { call: ToolCallEntry; compact?: boolean }): JSX.Element {
+	const colors = theme();
+	// A bullet carries the status instead of a second bracketed word: three
+	// `[bash] [ok] command="…"` columns of chrome left little room for the part
+	// that says what actually happened.
 	const statusColor =
-		call.status === "running" ? theme().warning : call.status === "error" ? theme().error : theme().success;
+		call.status === "running" ? colors.warning : call.status === "error" ? colors.error : colors.success;
 	const mcp = isMcpTool(call.name);
+	const name = mcp ? mcpToolLabel(call.name) : call.name;
 	return (
 		<Box flexDirection="column">
 			<Text>
-				<Text color={theme().tool}>[{mcp ? mcpToolLabel(call.name) : call.name}]</Text>{" "}
-				<Text color={statusColor}>[{call.status}]</Text>{" "}
-				<ToolSummary name={call.name} args={call.args} compact={compact} />
+				<Text color={statusColor}>{call.status === "running" ? "◍" : call.status === "error" ? "✗" : "●"}</Text>{" "}
+				<Text color={colors.tool}>{name}</Text> <ToolSummary name={call.name} args={call.args} compact={compact} />
 			</Text>
 		</Box>
+	);
+}
+
+// A turn is framed by a coloured bar in the gutter rather than a label on the
+// first line only: a wrapped paragraph used to start at column 0, so it did
+// not read as part of the reply it belonged to.
+const GUTTER = "▌ ";
+const GUTTER_WIDTH = 2;
+
+/** Ink props for one rendered span, with tones resolved against the theme. */
+function spanProps(span: Span): {
+	color?: string;
+	bold?: boolean;
+	italic?: boolean;
+	dimColor?: boolean;
+	underline?: boolean;
+} {
+	const colors = theme();
+	const color =
+		span.tone === "code"
+			? colors.accent
+			: span.tone === "heading"
+				? colors.agent
+				: span.tone === "link"
+					? colors.accent
+					: span.tone === "quote" || span.tone === "marker" || span.tone === "rule"
+						? colors.muted
+						: undefined;
+	return {
+		...(color ? { color } : {}),
+		...(span.bold ? { bold: true } : {}),
+		...(span.italic ? { italic: true } : {}),
+		...(span.dim ? { dimColor: true } : {}),
+		...(span.underline ? { underline: true } : {}),
+	};
+}
+
+/** Rendered markdown lines, each prefixed with the turn's gutter bar. */
+function MarkdownBody({ lines, gutter }: { lines: RenderedLine[]; gutter: string }): JSX.Element {
+	return (
+		<Box flexDirection="column">
+			{lines.map((line, i) => (
+				// biome-ignore lint/suspicious/noArrayIndexKey: lines are positional by construction
+				<Text key={i}>
+					<Text color={gutter} dimColor={line.code}>
+						{GUTTER}
+					</Text>
+					{line.spans.map((span, j) => (
+						// biome-ignore lint/suspicious/noArrayIndexKey: spans are positional within a line
+						<Text key={j} {...spanProps(span)}>
+							{span.text}
+						</Text>
+					))}
+				</Text>
+			))}
+		</Box>
+	);
+}
+
+/** `▌ agent` / `▌ you` / `▌ reasoning` — who is speaking, once per block. */
+function TurnHeader({ label, color, dim }: { label: string; color: string; dim?: boolean }): JSX.Element {
+	return (
+		<Text color={color} dimColor={dim}>
+			{GUTTER}
+			<Text bold={!dim}>{label}</Text>
+		</Text>
 	);
 }
 
@@ -204,6 +286,8 @@ function BlockView({
 	truncated,
 	compact,
 	showReasoning,
+	width,
+	lines,
 }: {
 	block: StreamBlock;
 	truncated?: boolean;
@@ -212,61 +296,80 @@ function BlockView({
 	/** When false, drop `thinking` blocks entirely. Defaults to true so the
 	 *  pure-BlockView test surface and any external callers stay unchanged. */
 	showReasoning?: boolean;
+	/** Terminal columns; the body is rendered to fit them. */
+	width?: number;
+	/** Pre-rendered lines from the clamp — rendering twice per frame would
+	 *  double the cost of the one thing that runs on every token. */
+	lines?: RenderedLine[];
 }): JSX.Element | null {
 	if (block.kind === "thinking") {
 		if (showReasoning === false) return null;
+		const colors = theme();
 		return (
-			<Text color={theme().muted} dimColor>
-				{!block.continued && `[reasoning] ${truncated ? "… " : ""}`}
-				{block.text}
-			</Text>
+			<Box flexDirection="column">
+				{!block.continued && <TurnHeader label={`reasoning${truncated ? " …" : ""}`} color={colors.muted} dim />}
+				<MarkdownBody
+					lines={lines ?? renderMarkdownLines(block.text, { width: bodyWidth(width) })}
+					gutter={colors.muted}
+				/>
+			</Box>
 		);
 	}
 	if (block.kind === "content") {
+		const colors = theme();
 		return (
-			<Text color={theme().agent}>
-				{!block.continued && <Text bold>[agent] {truncated ? "… " : ""}</Text>}
-				{block.text}
-			</Text>
+			<Box flexDirection="column">
+				{!block.continued && <TurnHeader label={`agent${truncated ? " …" : ""}`} color={colors.agent} />}
+				<MarkdownBody
+					lines={lines ?? renderMarkdownLines(block.text, { width: bodyWidth(width) })}
+					gutter={colors.agent}
+				/>
+			</Box>
 		);
 	}
 	return <ToolCallView call={block.call} compact={compact} />;
 }
 
+/** Cells left for the text once the gutter has taken its share. */
+function bodyWidth(width: number | undefined): number {
+	return Math.max(20, (width ?? process.stdout.columns ?? 80) - GUTTER_WIDTH);
+}
+
 /**
- * Clamp the live streaming blocks to fit the terminal viewport, keeping the
- * tail. Ink's log-update redraws the live region by moving the cursor up N
- * rows and erasing — but the cursor can't move above the top of the screen,
- * so a live region taller than the viewport can't be fully erased and every
- * redraw stacks a duplicate frame into scrollback (repeated [reasoning] /
- * [agent] lines). Settled blocks already drain into <Static> (see
- * useAgentSession), but a single still-streaming block can grow past the
- * viewport on its own; here we render only its last lines that fit. The full
- * text still lands in history when the block settles — only the live preview
- * is clipped.
+ * Lay the live streaming blocks out to fit the terminal viewport, keeping the
+ * tail.
  *
- * Each entry carries the block's index in the *input* array so React keys
- * stay aligned with the unclamped list — keying by position in the clamped
- * output shifted identities whenever older blocks dropped out of the window.
+ * A live region taller than the viewport is the one thing this must prevent:
+ * Ink cannot erase above the top of the screen, so it falls back to clearing
+ * the terminal and replaying every static row it has printed — on every frame
+ * (measured: 51 full clears in nine seconds of one streaming answer).
+ *
+ * Rows are counted by *rendering* each block to lines at the current width and
+ * counting them, rather than by estimating cells and dividing. The renderer
+ * wraps to the width it is given, so the count is exact, and the lines it
+ * returns are handed to the view — one render per frame, not two. The old
+ * arithmetic was where a cell/character mix-up let a CJK answer take twice the
+ * rows it was allowed.
+ *
+ * Each entry carries the block's index in the *input* array so React keys stay
+ * aligned with the unclamped list — keying by position in the clamped output
+ * shifted identities whenever older blocks dropped out of the window.
  *
  * `extraReserve` shrinks the budget further, on top of the flat guess below.
  * It exists because the flat guess is only ever an estimate — the composer
  * grows with multi-line input, steer/queue notices stack, etc. — so ChatLog
  * feeds back the *actual* overflow of the last real Ink frame (see
- * getLastFrameOverflow) to keep the live region within the viewport even
- * when the estimate falls short. See the ChatLog component below.
+ * getLastFrameOverflow) to keep the live region within the viewport even when
+ * the estimate falls short.
  */
-/** Yields `text`'s lines from the last to the first, without materialising a
- *  split of the whole string. `isFirst` marks the line that carries a block's
- *  label prefix. */
-function* linesFromEnd(text: string): Generator<{ line: string; isFirst: boolean }> {
-	let end = text.length;
-	for (;;) {
-		const newline = text.lastIndexOf("\n", end - 1);
-		yield { line: text.slice(newline + 1, end), isFirst: newline === -1 };
-		if (newline === -1) return;
-		end = newline;
-	}
+export interface LaidOutBlock {
+	block: StreamBlock;
+	/** Index in the input array, for stable React keys. */
+	index: number;
+	/** True when the block's head was dropped to make it fit. */
+	truncated: boolean;
+	/** Rendered body lines; absent for tool blocks, which are one row. */
+	lines?: RenderedLine[];
 }
 
 export function clampStreamingBlocks(
@@ -274,129 +377,74 @@ export function clampStreamingBlocks(
 	rows: number,
 	columns: number,
 	extraReserve = 0,
-): Array<{ block: StreamBlock; truncated: boolean; index: number }> {
+): LaidOutBlock[] {
 	// Rows reserved for everything below the streaming area: composer frame
 	// (3), status bar (1), notices/steer/queue lines and a safety margin.
 	const budget = Math.max(4, rows - 8 - extraReserve);
-	const cols = Math.max(20, columns);
+	const width = Math.max(20, columns) - GUTTER_WIDTH;
 
-	/**
-	 * Rows `text` wraps to, counted from the end and abandoned as soon as the
-	 * tail alone exceeds `limit` — returns undefined in that case.
-	 *
-	 * The clamp only ever needs to know whether a block fits and which tail
-	 * lines to keep, never the true height of one that overflows. Measuring
-	 * the whole text (and splitting it) on every frame made a long streaming
-	 * reasoning run quadratic over the turn: 2.3s of clamp work across 1500
-	 * frames of a 374KB block, with the worst frames past the 16ms budget, so
-	 * the live region visibly stuttered. A reasoning block never drains into
-	 * <Static> mid-turn (see splitCompleteLines), so it is the whole turn's
-	 * text that was being re-measured.
-	 */
-	const wrappedRowsWithin = (text: string, prefixLen: number, limit: number): number | undefined => {
-		let total = 0;
-		for (const { line, isFirst } of linesFromEnd(text)) {
-			// Measured only as far as the remaining budget can accommodate: a
-			// line wider than that already decides the answer.
-			const prefix = isFirst ? prefixLen : 0;
-			const affordableCells = Math.max(0, (limit - total) * cols - prefix);
-			const width = displayWidthAtMost(line, affordableCells) + prefix;
-			total += Math.max(1, Math.ceil(width / cols));
-			if (total > limit) return undefined;
-		}
-		return total;
-	};
-
-	const out: Array<{ block: StreamBlock; truncated: boolean; index: number }> = [];
+	const out: LaidOutBlock[] = [];
 	let used = 0;
 	for (let i = blocks.length - 1; i >= 0; i--) {
 		const block = blocks[i]!;
 		if (used >= budget) break;
 		if (block.kind === "tool") {
-			// Live ToolCallView uses compact truncate for task — charge 1 status
-			// row (+ optional result). Full wrap is only in committed history.
-			// Charging full wrap height hid sibling parallel tasks (only the
-			// newest long assignment fit the budget).
-			const resultRows = block.call.result && block.call.status === "error" ? 1 : 0;
-			const need = 1 + resultRows;
-			if (used + need > budget) {
+			// Live ToolCallView is one status row. Charging a full wrap hid
+			// sibling parallel tasks (only the newest long assignment fit).
+			if (used + 1 > budget) {
 				if (out.length > 0) break;
 				out.unshift({ block, truncated: true, index: i });
 				used = budget;
 				break;
 			}
 			out.unshift({ block, truncated: false, index: i });
-			used += need;
+			used += 1;
 			continue;
 		}
-		const prefixLen = block.continued ? 0 : block.kind === "thinking" ? "[reasoning] ".length : "[agent] ".length;
-		const need = wrappedRowsWithin(block.text, prefixLen, budget - used);
-		if (need !== undefined) {
-			out.unshift({ block, truncated: false, index: i });
-			used += need;
-			continue;
-		}
-		// Keep only the tail lines of this block that fit the remaining budget.
-		const remaining = budget - used;
-		// Same reason as above: walk back from the end rather than splitting the
-		// whole (possibly hundreds of KB) block to keep a handful of lines.
-		const kept: string[] = [];
-		let tailRows = 0;
-		for (const { line } of linesFromEnd(block.text)) {
-			if (tailRows >= remaining) break;
-			kept.unshift(line);
-			tailRows += Math.max(1, Math.ceil(displayWidthAtMost(line, (remaining - tailRows) * cols) / cols));
-		}
-		// A single wrapped line longer than the budget: hard-cut to the cells
-		// the remaining rows can hold (see sliceTailToWidth — this used to cut
-		// by characters against a cell budget, so a line of CJK kept twice the
-		// rows it was allowed and the live region overran the viewport).
-		let text = kept.join("\n");
-		// Strip any leaked <think> tags — vendors should have split them, but a
-		// hard-cut mid-tag must never leak "]<]minimax[>" style fragments.
-		if (text.includes("<think") || text.includes("</think")) {
-			text = text.replace(THINK_TAG_RE, "");
-		}
-		const maxCells = remaining * cols;
-		if (kept.length === 1 && displayWidthAtMost(text, maxCells) > maxCells) {
-			const tail = sliceTailToWidth(text, maxCells);
-			// Don't cut mid-word/tag — advance to next boundary. If the tail
-			// starts inside a tag fragment like "payload</think>...", skip the
-			// whole tag up to the next ">" to avoid "/think>" leaks.
-			const gt = tail.indexOf(">");
-			const nextBoundary = tail.search(BOUNDARY_RE);
-			if (gt !== -1 && gt < 30 && gt < (nextBoundary === -1 ? 30 : nextBoundary)) {
-				text = tail.slice(gt + 1).replace(LEADING_WS_RE, "");
-			} else if (nextBoundary !== -1 && nextBoundary < 20) {
-				text = tail.slice(nextBoundary + 1);
-			} else {
-				text = tail;
+		// One header row per block that starts a run, plus its body lines.
+		const headerRows = block.continued ? 0 : 1;
+		const room = budget - used - headerRows;
+		if (room <= 0) {
+			if (out.length === 0) {
+				out.unshift({ block, truncated: true, index: i, lines: [] });
+				used = budget;
 			}
+			break;
 		}
-		out.unshift({ block: { ...block, text }, truncated: true, index: i });
-		used = budget;
-		break;
+		const text =
+			block.text.includes("<think") || block.text.includes("</think")
+				? block.text.replace(THINK_TAG_RE, "")
+				: block.text;
+		const { lines, truncated } = renderMarkdownTail(text, { width, maxLines: room });
+		out.unshift({ block, truncated, index: i, lines });
+		used += headerRows + lines.length;
+		if (truncated) break;
 	}
 	return out;
 }
 
-/**
- * Stable-ish key for a block at a given index. Tool blocks have a real id;
- * text/reasoning runs are positionally stable (blocks only append or update
- * in place, never reorder or change kind at an index), so index suffices.
- */
 function blockKey(block: StreamBlock, index: number): string {
 	return block.kind === "tool" ? `tool-${block.call.id}` : `${block.kind}-${index}`;
 }
 
-function MessageView({ message, showReasoning }: { message: ChatMessage; showReasoning: boolean }): JSX.Element {
+function MessageView({
+	message,
+	showReasoning,
+	width,
+}: {
+	message: ChatMessage;
+	showReasoning: boolean;
+	width: number;
+}): JSX.Element {
+	const colors = theme();
 	if (message.role === "user") {
 		return (
 			<Box flexDirection="column">
-				<Text color={theme().user}>
-					<Text bold>[user] </Text>
-					{message.content}
-				</Text>
+				<TurnHeader label="you" color={colors.user} />
+				<MarkdownBody
+					lines={renderMarkdownLines(message.content, { width: bodyWidth(width) })}
+					gutter={colors.user}
+				/>
 			</Box>
 		);
 	}
@@ -404,7 +452,7 @@ function MessageView({ message, showReasoning }: { message: ChatMessage; showRea
 		return (
 			<Box flexDirection="column">
 				{message.blocks?.map((b, i) => (
-					<BlockView key={blockKey(b, i)} block={b} showReasoning={showReasoning} />
+					<BlockView key={blockKey(b, i)} block={b} showReasoning={showReasoning} width={width} />
 				))}
 			</Box>
 		);
@@ -412,7 +460,7 @@ function MessageView({ message, showReasoning }: { message: ChatMessage; showRea
 	if (message.role === "warning") {
 		return (
 			<Box>
-				<Text color={theme().warning}>{message.content}</Text>
+				<Text color={colors.warning}>{message.content}</Text>
 			</Box>
 		);
 	}
@@ -477,7 +525,7 @@ export function ChatLog({
 		const streamingParts: JSX.Element[] = [];
 		const clamped = clampStreamingBlocks(streaming.blocks, availableRows, cols, stickyOverflowRef.current);
 		const visibleBlocks = showReasoning ? clamped : clamped.filter(({ block }) => block.kind !== "thinking");
-		for (const { block, truncated, index } of visibleBlocks) {
+		for (const { block, truncated, index, lines } of visibleBlocks) {
 			streamingParts.push(
 				<BlockView
 					key={blockKey(block, index)}
@@ -485,6 +533,8 @@ export function ChatLog({
 					truncated={truncated}
 					compact
 					showReasoning={showReasoning}
+					width={cols}
+					lines={lines}
 				/>,
 			);
 		}
@@ -506,7 +556,12 @@ export function ChatLog({
 		<>
 			<Static key={repaintKey} items={messages}>
 				{(m, i) => (
-					<MessageView key={`m-${i}-${showReasoning ? "on" : "off"}`} message={m} showReasoning={showReasoning} />
+					<MessageView
+						key={`m-${i}-${showReasoning ? "on" : "off"}-${cols}`}
+						message={m}
+						showReasoning={showReasoning}
+						width={cols}
+					/>
 				)}
 			</Static>
 			<Box flexDirection="column">{liveParts}</Box>
