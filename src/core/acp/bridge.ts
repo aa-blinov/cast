@@ -25,7 +25,7 @@ import type { SessionState } from "../session.ts";
 import { listSessionSummaries, loadSession, recordCompaction, saveSession as saveSessionState } from "../session.ts";
 import { getProjectTrust, loadSettings } from "../settings.ts";
 import type { StartupResult } from "../startup.ts";
-import { extractSystemReminders } from "../system-reminder.ts";
+import { escapeSystemReminderTags, extractSystemReminders } from "../system-reminder.ts";
 
 // ---------------------------------------------------------------------------
 // Adapter session
@@ -1024,17 +1024,23 @@ function injectOpenDocumentsAsContext(session: AcpAdapterSession): void {
 	let budget = MAX_OPEN_DOC_CHARS;
 	let omitted = 0;
 	for (const [uri, doc] of docs) {
-		const lang = doc.language ? ` (${doc.language})` : "";
-		const header = `### ${uri}${lang}`;
+		// The buffer, its language tag and its URI are all data — see
+		// escapeSystemReminderTags: a file open in the editor that contains the
+		// closing tag would otherwise end this envelope and speak to the model
+		// in cast's own voice, invisibly to the user.
+		const lang = doc.language ? ` (${escapeSystemReminderTags(doc.language)})` : "";
+		const header = `### ${escapeSystemReminderTags(uri)}${lang}`;
 		if (budget <= header.length) {
 			omitted++;
 			continue;
 		}
 		const room = budget - header.length;
 		const truncated = doc.content.length > room;
-		const body = truncated
-			? `${doc.content.slice(0, room)}\n[… truncated: buffer is larger than the context budget]`
-			: doc.content;
+		const body = escapeSystemReminderTags(
+			truncated
+				? `${doc.content.slice(0, room)}\n[… truncated: buffer is larger than the context budget]`
+				: doc.content,
+		);
 		blocks.push(`${header}\n\`\`\`\n${body}\n\`\`\``);
 		budget -= header.length + Math.min(doc.content.length, room);
 	}

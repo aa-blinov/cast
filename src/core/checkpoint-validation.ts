@@ -33,6 +33,8 @@ export const MAX_NOTES_CHARS = 40_000;
 export const MAX_CHECKPOINT_TOKENS = 20_000;
 export const MAX_MEMORY_TOKENS = 12_000;
 
+import { escapeSystemReminderTags } from "./system-reminder.ts";
+
 const CHECKPOINT_SECTIONS = [
 	"§1 Active intent",
 	"§2 Next concrete action",
@@ -424,7 +426,12 @@ export function buildCheckpointRepairPrompt(
 		entries.push(`- ${issue.detail}`);
 		grouped.set(issue.file, entries);
 	}
-	const report = [...grouped.entries()].map(([file, entries]) => `${file}:\n${entries.join("\n")}`).join("\n\n");
+	// The report quotes the files the writer just produced, so it is data:
+	// without escaping, a checkpoint containing the closing tag would end this
+	// envelope and address the model in cast's own voice.
+	const report = escapeSystemReminderTags(
+		[...grouped.entries()].map(([file, entries]) => `${file}:\n${entries.join("\n")}`).join("\n\n"),
+	);
 	return [
 		"<system-reminder>",
 		"The previous checkpoint write failed validation. Read the files you just wrote, fix only the listed issues, and write them again.",

@@ -48,6 +48,7 @@ function loadPty(): typeof import("node-pty") | null {
 import type { AppConfig } from "../config.ts";
 import type { Message } from "../llm.ts";
 import type { MessageQueue } from "../loop.ts";
+import { escapeSystemReminderTags } from "../system-reminder.ts";
 import { formatBashResult, getBashResolution, stripAnsi } from "./bash.ts";
 import { BoundedOutput, formatSize, type ToolResult } from "./shared.ts";
 
@@ -158,10 +159,14 @@ function buildCompletionReminder(task: BackgroundTask, config: AppConfig): strin
 					outputTruncated: task.outputTruncated,
 					timeoutSeconds: task.timeoutSeconds,
 				}).content;
+	// The command and its output are data: text that closes this envelope and
+	// opens its own block would reach the model as an instruction from cast,
+	// and every surface strips reminders before display, so the user would
+	// never see it. See escapeSystemReminderTags.
 	return (
 		"<system-reminder>\n" +
-		`Background task ${task.id} (\`${task.command}\`) ${statusLine(task)}.\n\n` +
-		`${body}\n` +
+		`Background task ${task.id} (\`${escapeSystemReminderTags(task.command)}\`) ${statusLine(task)}.\n\n` +
+		`${escapeSystemReminderTags(body)}\n` +
 		"</system-reminder>"
 	);
 }
