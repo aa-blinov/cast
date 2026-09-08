@@ -2867,6 +2867,12 @@ const COMMAND_ROUTES: CommandRoute[] = [
 	},
 	{
 		match: (input) => input === "/theme" || input.startsWith("/theme "),
+		// Local and read-only: prints or repaints, never touches the running
+		// turn. Refusing these mid-run answered a theme switch with
+		// "[Agent running — use /queue, /steer, or /abort]", which is advice
+		// for a prompt and nonsense for /help — and left the text sitting in
+		// the composer as though Enter had been swallowed.
+		whileRunning: "submit",
 		run: async ({ input, deps, showNotice }) => {
 			const arg = input.slice("/theme".length).trim();
 			if (arg) {
@@ -2903,6 +2909,12 @@ const COMMAND_ROUTES: CommandRoute[] = [
 	},
 	{
 		match: (input) => input === "/current",
+		// Local and read-only: prints or repaints, never touches the running
+		// turn. Refusing these mid-run answered a theme switch with
+		// "[Agent running — use /queue, /steer, or /abort]", which is advice
+		// for a prompt and nonsense for /help — and left the text sitting in
+		// the composer as though Enter had been swallowed.
+		whileRunning: "submit",
 		run: ({ deps, agent, session, config }) => {
 			const allSegs = getStatusBarSegments();
 			const cfg = deps.statusBar;
@@ -3025,6 +3037,12 @@ const COMMAND_ROUTES: CommandRoute[] = [
 	},
 	{
 		match: (input) => input === "/context" || input === "/context list",
+		// Local and read-only: prints or repaints, never touches the running
+		// turn. Refusing these mid-run answered a theme switch with
+		// "[Agent running — use /queue, /steer, or /abort]", which is advice
+		// for a prompt and nonsense for /help — and left the text sitting in
+		// the composer as though Enter had been swallowed.
+		whileRunning: "submit",
 		run: async ({ input, deps }) => {
 			deps.agent.addDisplayMessage({ role: "user", content: input });
 			// There was no way to see which context files are in play — the
@@ -3054,6 +3072,12 @@ const COMMAND_ROUTES: CommandRoute[] = [
 	},
 	{
 		match: (input) => input === "/rules" || input === "/rules list",
+		// Local and read-only: prints or repaints, never touches the running
+		// turn. Refusing these mid-run answered a theme switch with
+		// "[Agent running — use /queue, /steer, or /abort]", which is advice
+		// for a prompt and nonsense for /help — and left the text sitting in
+		// the composer as though Enter had been swallowed.
+		whileRunning: "submit",
 		run: async ({ input, deps }) => {
 			deps.agent.addDisplayMessage({ role: "user", content: input });
 			// Recomputed here rather than threaded through every setter: a rule
@@ -3221,6 +3245,12 @@ const COMMAND_ROUTES: CommandRoute[] = [
 	},
 	{
 		match: (input) => input === "/help",
+		// Local and read-only: prints or repaints, never touches the running
+		// turn. Refusing these mid-run answered a theme switch with
+		// "[Agent running — use /queue, /steer, or /abort]", which is advice
+		// for a prompt and nonsense for /help — and left the text sitting in
+		// the composer as though Enter had been swallowed.
+		whileRunning: "submit",
 		run: ({ input, deps }) => {
 			deps.agent.addDisplayMessage({ role: "user", content: input });
 			deps.agent.addDisplayMessage({
@@ -3294,6 +3324,12 @@ const COMMAND_ROUTES: CommandRoute[] = [
 	},
 	{
 		match: (input) => input === "/keys",
+		// Local and read-only: prints or repaints, never touches the running
+		// turn. Refusing these mid-run answered a theme switch with
+		// "[Agent running — use /queue, /steer, or /abort]", which is advice
+		// for a prompt and nonsense for /help — and left the text sitting in
+		// the composer as though Enter had been swallowed.
+		whileRunning: "submit",
 		run: ({ input, deps }) => {
 			deps.agent.addDisplayMessage({ role: "user", content: input });
 			const ACTION_LABELS: Record<string, string> = {

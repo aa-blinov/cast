@@ -287,11 +287,31 @@ describe("handleInput", () => {
 			"/stop",
 			"/reasoning-display",
 			"/rd",
+			// Local and repaint-only, and it takes an argument.
+			"/theme",
 		]) {
 			expect(canSubmitDuringRun(cmd), cmd).toBe(true);
 			expect(canSubmitDuringRun(`${cmd} some argument`), cmd).toBe(true);
 		}
-		for (const cmd of ["/clear", "/model", "/quit", "/memory runs", "hello", "/tmp/screenshot.png"]) {
+		// Local and read-only, matched exactly — printing, never touching the
+		// running turn. These used to be refused with "[Agent running — use
+		// /queue, /steer, or /abort]", advice that means nothing for /help, and
+		// the line stayed in the composer as though Enter had been swallowed.
+		for (const cmd of ["/help", "/keys", "/current", "/context", "/context list", "/rules", "/rules list"]) {
+			expect(canSubmitDuringRun(cmd), cmd).toBe(true);
+		}
+		// Anything that changes what the running turn does, or needs it finished,
+		// stays blocked.
+		for (const cmd of [
+			"/clear",
+			"/model",
+			"/quit",
+			"/memory runs",
+			"/compact",
+			"/undo",
+			"hello",
+			"/tmp/screenshot.png",
+		]) {
 			expect(canSubmitDuringRun(cmd), cmd).toBe(false);
 		}
 	});
