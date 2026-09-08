@@ -35,6 +35,7 @@ const frameRows = (blocks: StreamBlock[]): { rows: number; widest: number } => {
 		{ columns: COLUMNS },
 	);
 	const lines = output
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping the SGR codes Ink emits
 		.replace(/\x1b\[[0-9;]*m/g, "")
 		.split("\n")
 		.map((line) => line.replace(/\s+$/, ""));

@@ -167,4 +167,61 @@ describe("daemon-state", () => {
 		expect(acquireStartLock()).toBe(true);
 		releaseStartLock();
 	});
+
+	/**
+	 * A daemon that isn't recorded in server.json cannot be reached by
+	 * anything — every client finds the daemon through that file — so it is
+	 * dead weight that shows up only as memory. Measured on one machine before
+	 * this existed: four daemons, 160–250MB each, three unreachable.
+	 */
+	describe("isRecordedDaemon", () => {
+		const state = (overrides: Record<string, unknown> = {}) => ({
+			protocolVersion: 2,
+			pid: 4242,
+			port: 1337,
+			host: "127.0.0.1",
+			startedAt: "t",
+			foreground: false,
+			instanceId: "mine",
+			...overrides,
+		});
+
+		it("is true for the process the file records", async () => {
+			const { isRecordedDaemon, writeServerState } = await import("../src/server/daemon-state.ts");
+			writeServerState(state() as never);
+
+			expect(isRecordedDaemon(4242, "mine")).toBe(true);
+		});
+
+		it("is false once another daemon has taken the record", async () => {
+			const { isRecordedDaemon, writeServerState } = await import("../src/server/daemon-state.ts");
+			writeServerState(state({ pid: 9999, instanceId: "theirs" }) as never);
+
+			expect(isRecordedDaemon(4242, "mine")).toBe(false);
+		});
+
+		it("is false for a restarted process that reused the pid", async () => {
+			// Same pid, different instance: the record belongs to the other run.
+			const { isRecordedDaemon, writeServerState } = await import("../src/server/daemon-state.ts");
+			writeServerState(state({ instanceId: "theirs" }) as never);
+
+			expect(isRecordedDaemon(4242, "mine")).toBe(false);
+		});
+
+		it("falls back to the pid for a record written before instance ids", async () => {
+			const { isRecordedDaemon, writeServerState } = await import("../src/server/daemon-state.ts");
+			const { instanceId, ...withoutInstance } = state();
+			void instanceId;
+			writeServerState(withoutInstance as never);
+
+			expect(isRecordedDaemon(4242, "mine")).toBe(true);
+			expect(isRecordedDaemon(1, "mine")).toBe(false);
+		});
+
+		it("is false when there is no record at all", async () => {
+			const { isRecordedDaemon } = await import("../src/server/daemon-state.ts");
+
+			expect(isRecordedDaemon(4242, "mine")).toBe(false);
+		});
+	});
 });

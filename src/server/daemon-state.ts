@@ -190,6 +190,25 @@ export function readLiveServerState(): ServerDaemonState | undefined {
 	return undefined;
 }
 
+/**
+ * Whether the state file still records *this* process as the daemon.
+ *
+ * A daemon that isn't recorded cannot be found by anything: every client
+ * (TUI, `cast run`, ACP, `cast server status`/`stop`) locates the daemon
+ * through this file. Such an instance is created deliberately — a second
+ * process that binds a port while another daemon holds the record keeps
+ * serving rather than dying mid-request — and nothing used to end it, so
+ * they accumulated: four daemons on one machine, 160–250MB each, three of
+ * them unreachable.
+ */
+export function isRecordedDaemon(pid: number, instanceId?: string): boolean {
+	const state = readServerState();
+	if (!state || state.pid !== pid) return false;
+	// A state file written before instanceId existed can only be matched by pid.
+	if (!state.instanceId || !instanceId) return true;
+	return state.instanceId === instanceId;
+}
+
 function startLockPath(): string {
 	return join(homedir(), ".cast", "server-start.lock");
 }
