@@ -256,14 +256,23 @@ function spanProps(span: Span): {
 }
 
 /** Rendered markdown lines, each prefixed with the turn's gutter bar. */
-function MarkdownBody({ lines, gutter }: { lines: RenderedLine[]; gutter: string }): JSX.Element {
+function MarkdownBody({
+	lines,
+	gutter,
+	bar = "▌",
+}: {
+	lines: RenderedLine[];
+	gutter: string;
+	/** `▌` for a turn, `│` for anything that is scaffolding around it. */
+	bar?: string;
+}): JSX.Element {
 	return (
 		<Box flexDirection="column">
 			{lines.map((line, i) => (
 				// biome-ignore lint/suspicious/noArrayIndexKey: lines are positional by construction
 				<Text key={i}>
 					<Text color={gutter} dimColor={line.code}>
-						{GUTTER}
+						{bar}{" "}
 					</Text>
 					{line.spans.map((span, j) => (
 						// biome-ignore lint/suspicious/noArrayIndexKey: spans are positional within a line
@@ -481,16 +490,23 @@ function MessageView({
 		);
 	}
 	if (message.role === "warning") {
+		// Notices ride the same rail as everything else: a row with no marker in
+		// the gutter column broke the transcript's single left edge, which is
+		// the thing that makes a wrapped reply read as one block.
 		return (
-			<Box>
-				<Text color={colors.warning}>{message.content}</Text>
-			</Box>
+			<MarkdownBody
+				lines={renderMarkdownLines(message.content, { width: bodyWidth(width) })}
+				gutter={colors.warning}
+				bar="│"
+			/>
 		);
 	}
 	return (
-		<Text>
-			[{message.role}] {message.content}
-		</Text>
+		<MarkdownBody
+			lines={renderMarkdownLines(`[${message.role}] ${message.content}`, { width: bodyWidth(width) })}
+			gutter={colors.muted}
+			bar="│"
+		/>
 	);
 }
 
@@ -531,7 +547,7 @@ export function ChatLog({
 	if (error) {
 		liveParts.push(
 			<Text key="error" color={theme().error}>
-				[{error}]
+				│ {error}
 			</Text>,
 		);
 	}
@@ -539,7 +555,7 @@ export function ChatLog({
 	if (retry) {
 		liveParts.push(
 			<Text key="retry" color={theme().warning}>
-				[Retrying (attempt {retry.attempt}): {retry.reason}]
+				│ Retrying (attempt {retry.attempt}): {retry.reason}
 			</Text>,
 		);
 	}
@@ -567,7 +583,18 @@ export function ChatLog({
 		const hasVisibleRunningTool = visibleBlocks.some(
 			({ block }) => block.kind === "tool" && block.call.status === "running",
 		);
-		if (!hasVisibleRunningTool) streamingParts.push(<Spinner key="wait" />);
+		if (!hasVisibleRunningTool) {
+			// Even the activity frame keeps the rail — a bare spinner at column 0
+			// was the one row that stepped out of line.
+			streamingParts.push(
+				<Text key="wait">
+					<Text color={theme().muted} dimColor>
+						{"│ "}
+					</Text>
+					<Spinner />
+				</Text>,
+			);
+		}
 		liveParts.push(
 			<Box key="streaming" flexDirection="column">
 				{streamingParts}
