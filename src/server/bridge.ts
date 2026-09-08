@@ -11,7 +11,7 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import chokidar from "chokidar";
 import { subscribeAgentActorNotifications } from "../core/actor-events.ts";
-import type { AgentActorNotification } from "../core/actors.ts";
+import { type AgentActorNotification, agentActorRegistry } from "../core/actors.ts";
 import {
 	backupFileForCheckpoint,
 	createCheckpoint,
@@ -687,6 +687,16 @@ export interface ServerBridge {
 	forkSession(sessionId: string): WebAgentSession | undefined;
 	getSession(id: string): WebAgentSession | undefined;
 	listSessions(): SessionSummary[];
+	/**
+	 * Nothing is happening here and nobody is watching: no turn running, no
+	 * client subscribed, no background bash task alive, no agent actor (a
+	 * subagent, a checkpoint writer, a memory run) in flight.
+	 *
+	 * The daemon exists precisely so work survives its clients — the user
+	 * closes the terminal and the agent keeps going — so anything that ends a
+	 * daemon has to ask this, not "are any clients connected".
+	 */
+	isFullyIdle(): boolean;
 	/** Same shape as listSessions, filtered and ranked by relevance against
 	 *  `query` (message content via SQLite FTS, plus cwd/id/title/persona/
 	 *  model). Empty/whitespace-only query is equivalent to listSessions(). */
@@ -3016,6 +3026,26 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		};
 	}
 
+	/**
+	 * True when this daemon is doing nothing for anyone. See the interface for
+	 * why the question is not "are any clients connected": a client closing its
+	 * terminal is the normal case the daemon exists for.
+	 *
+	 * Mirrors the predicate idle-session eviction already uses (status, no
+	 * listeners, no background bash) and adds the actor registry, which is
+	 * where a subagent, a checkpoint writer and a memory run are visible.
+	 */
+	function isFullyIdle(): boolean {
+		for (const ws of sessions.values()) {
+			if (ws.status !== "idle") return false;
+			if (ws.listeners.size > 0) return false;
+			if (ws.backgroundBash.registry.hasRunning()) return false;
+			if (ws.runner.isRunning) return false;
+		}
+		if (sessionListListeners.size > 0) return false;
+		return !agentActorRegistry.list().some((actor) => actor.status === "running" || actor.status === "pending");
+	}
+
 	function listSessions(): SessionSummary[] {
 		const out: SessionSummary[] = [];
 		const seen = new Set<string>();
@@ -4944,6 +4974,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		createSession: createSessionInstance,
 		forkSession: forkSessionInstance,
 		getSession,
+		isFullyIdle,
 		listSessions,
 		searchSessions,
 		applyMcpResult,
