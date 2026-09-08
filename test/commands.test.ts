@@ -8,7 +8,7 @@ import type { AppConfig } from "../src/core/config.ts";
 import { streamAndCollect } from "../src/core/llm.ts";
 import type { McpSetupResult } from "../src/core/mcp.ts";
 import type { Persona } from "../src/core/personas.ts";
-import { createSession, loadSession, type SessionState, saveSession } from "../src/core/session.ts";
+import { appendCheckpoint, createSession, loadSession, type SessionState, saveSession } from "../src/core/session.ts";
 import { type PermissionMode, updateSettings } from "../src/core/settings.ts";
 import type { Pickers } from "../src/pickers/types.ts";
 import type { CommandDeps } from "../src/ui/commands.ts";
@@ -1459,6 +1459,30 @@ describe("/undo", () => {
 			expect(noticeText(calls)).toContain("cancelled");
 			// The checkpoint is still there to undo later.
 			expect(deps.session.checkpoints).toHaveLength(1);
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	it("finds a checkpoint the daemon persisted, not just this process's list", async () => {
+		// With a daemon running it owns the turn and appends the checkpoint
+		// itself; `session.checkpoints` in this process is only filled when the
+		// session is loaded. So /undo right after a change reported
+		// "[No checkpoint available to undo]" and only began working after a
+		// restart — the one moment nobody needs it.
+		const { cwd, checkpoint } = repoWithCheckpoint();
+		try {
+			const { deps, calls } = createFakeDeps({ cwd });
+			saveSession(deps.session);
+			appendCheckpoint(deps.session.id, checkpoint as never);
+			deps.session.checkpoints = [];
+			deps.pickers.pickOption = async () => true;
+
+			await handleInput("/undo", undefined, deps);
+
+			expect(noticeText(calls)).not.toContain("No checkpoint");
+			expect(noticeText(calls)).toContain("Undone");
+			expect(existsSync(join(cwd, "user-file.txt")), "the restore must have run").toBe(false);
 		} finally {
 			rmSync(cwd, { recursive: true, force: true });
 		}
