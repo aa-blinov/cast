@@ -46,35 +46,3 @@ export function gradientAnsi(text: string): string {
 		.join("");
 	return `\x1b[1m${painted}\x1b[0m`;
 }
-
-/**
- * Multi-line banner with continuous per-character gradient across all lines
- * (gradient flows top-left → bottom-right, not restarting per line).
- * Returns pre-formatted ANSI string ready for console.log.
- */
-export function gradientBanner(banner: string, version: string): string {
-	const lines = banner.split("\n");
-	// Flatten all characters across lines to compute a single gradient pass
-	const allChars: string[] = [];
-	for (const line of lines) allChars.push(...[...line], "\n");
-	// Drop the trailing newline from the split
-	if (allChars[allChars.length - 1] === "\n") allChars.pop();
-	const total = Math.max(1, allChars.length - 1);
-	let charIdx = 0;
-	const result: string[] = [];
-	for (const line of lines) {
-		const chars = [...line];
-		const painted = chars
-			.map((ch) => {
-				const [r, g, b] = lerpColor(charIdx / total);
-				charIdx++;
-				return `\x1b[38;2;${r};${g};${b}m${ch}`;
-			})
-			.join("");
-		result.push(`\x1b[1m${painted}\x1b[0m`);
-	}
-	// Version line: dim, left-aligned under the banner
-	result.push("");
-	result.push(`\x1b[2mv${version}\x1b[0m`);
-	return result.join("\n");
-}

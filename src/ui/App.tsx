@@ -89,7 +89,7 @@ interface AppProps {
 	initialPrompt?: string;
 	onPasteImage?: () => Promise<ClipboardPasteResult>;
 	onQuit: () => void;
-	onRepaintBanner?: (preserveScrollback?: boolean) => Promise<void>;
+	onClearScreen?: (preserveScrollback?: boolean) => Promise<void>;
 	/** When set, the TUI runs as a thin client of the `cast server` daemon
 	 *  (single-writer model) instead of owning runAgentLoop locally. */
 	daemonUrl?: string;
@@ -97,7 +97,7 @@ interface AppProps {
 }
 
 export function App(props: AppProps): JSX.Element {
-	const { result, version, initialPrompt, onQuit, onPasteImage, onRepaintBanner, daemonUrl, daemonToken } = props;
+	const { result, version, initialPrompt, onQuit, onPasteImage, onClearScreen, daemonUrl, daemonToken } = props;
 	const { config, runner, backgroundTasks } = result;
 
 	// Wire Ink's suspendTerminal so execBash can hand the terminal to child
@@ -128,15 +128,10 @@ export function App(props: AppProps): JSX.Element {
 	// changes do a full clear (\x1b[2J\x1b[3J) because the banner gradient
 	// changed and the old copy in scrollback must disappear.
 	const [repaintKey, setRepaintKey] = useState(0);
-	// Read by the resync callback below, which is defined before `agent` exists.
-	const messagesRef = useRef<ChatMessage[]>([]);
 	useTerminalResync(
 		useCallback(
 			async (preserveScrollback: boolean) => {
-				// See shouldReprintBanner for why a light resync usually must not.
-				if (shouldReprintBanner(preserveScrollback, messagesRef.current.length)) {
-					await onRepaintBanner?.(preserveScrollback);
-				}
+				await onClearScreen?.(preserveScrollback);
 				setRepaintKey((k) => k + 1);
 				// The synchronized-output block useTerminalResync wraps this call
 				// in must stay open until the replayed <Static> content actually
@@ -149,7 +144,7 @@ export function App(props: AppProps): JSX.Element {
 				// that used to gate the release.
 				await waitUntilRenderFlush();
 			},
-			[onRepaintBanner, waitUntilRenderFlush],
+			[onClearScreen, waitUntilRenderFlush],
 		),
 	);
 
@@ -275,24 +270,24 @@ export function App(props: AppProps): JSX.Element {
 	// detect on its own.
 	const [_themeVer, setThemeVer] = useState(0);
 	const onThemeChange = useCallback(() => {
-		// Order matters: onRepaintBanner clears the screen (+ scrollback) and
-		// reprints the banner; only then bump the version so the <Static> key
-		// change replays the recolored history below the fresh banner. Bumping
-		// first would append a second copy of the transcript under the old one.
+		// Order matters: clear the screen and the scrollback first, and only
+		// then bump the version so the <Static> key change replays the
+		// recoloured history from a clean top. Bumping first would append a
+		// second copy of the transcript under the old one.
 		void (async () => {
-			await onRepaintBanner?.();
+			await onClearScreen?.();
 			setThemeVer((v) => v + 1);
 		})();
-	}, [onRepaintBanner]);
+	}, [onClearScreen]);
 	// History was prepended by /older (loadOlder shifts every <Static> index,
 	// which that component never revisits) — replay the whole transcript from a
 	// clean top, same clear + key-bump contract as a theme change.
 	const onRepaintHistory = useCallback(() => {
 		void (async () => {
-			await onRepaintBanner?.();
+			await onClearScreen?.();
 			setRepaintKey((k) => k + 1);
 		})();
-	}, [onRepaintBanner]);
+	}, [onClearScreen]);
 	const confirmBash = useMemo(() => makeConfirmBash(pickers, permissionMode), [pickers, permissionMode]);
 
 	// Per-turn system prompt rebuild for sticky rules + @-mention.
@@ -426,7 +421,6 @@ export function App(props: AppProps): JSX.Element {
 	const running = agent.status === "running";
 	// Recomputed when the transcript changes so a prompt is recallable on the
 	// turn right after it was sent.
-	messagesRef.current = agent.messages;
 	const promptHistory = useMemo(() => submittedPrompts(agent.messages), [agent.messages]);
 	const canSubmit = useCallback(
 		(text: string) => {
@@ -1040,23 +1034,6 @@ function submittedPrompts(messages: readonly ChatMessage[]): string[] {
 		if (typeof message.content === "string" && message.content.trim()) prompts.push(message.content);
 	}
 	return prompts;
-}
-
-/**
- * Whether a terminal resync should reprint the banner.
- *
- * The banner is written to stdout, outside Ink's tree, so any clear erases it
- * and only a reprint brings it back. A *full* resync wipes the scrollback,
- * so its reprint replaces the old copy. A light one deliberately keeps the
- * scrollback — and reprinting there left the previous banner above and added
- * another below, once per resync: dragging a window's edge stacked a wall of
- * banners (reproduced in a pseudo-terminal: three resizes, three extra
- * copies). While the transcript is empty the banner is still the thing on
- * screen and the reprint is what keeps it there; once there is history it has
- * scrolled up, where a second copy is pure noise.
- */
-export function shouldReprintBanner(preserveScrollback: boolean, messageCount: number): boolean {
-	return !preserveScrollback || messageCount === 0;
 }
 
 export function formatContextPct(messages: import("../core/llm.ts").Message[], config: AppConfig): string {
