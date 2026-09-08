@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDisplayMessages, messageContentToText } from "../src/ui/useAgentSession.ts";
+import { buildDisplayMessages, messageContentToText, userMessageRows } from "../src/ui/useAgentSession.ts";
 
 type Msgs = Parameters<typeof buildDisplayMessages>[0];
 const build = (msgs: unknown[]) => buildDisplayMessages(msgs as Msgs);
@@ -172,5 +172,45 @@ describe("buildDisplayMessages", () => {
 	it("leaves blocks undefined for an empty assistant message (no content, no tools)", () => {
 		const out = build([{ role: "assistant", content: null }]);
 		expect(out).toEqual([{ role: "assistant", content: "", blocks: undefined }]);
+	});
+});
+
+/**
+ * The daemon's `user_message` SSE event goes through the same split. It used
+ * to append the text verbatim, so with a daemon running — the default — a
+ * finished background task appeared in the transcript as the *user* saying the
+ * reminder's body, followed by a bare `</system-reminder>` (verified against a
+ * real daemon in a pseudo-terminal: zero `[system]` rows on screen, the raw
+ * closing tag visible).
+ */
+describe("userMessageRows", () => {
+	const reminder =
+		"<system-reminder>\nBackground task bg-1 (`sleep 2; echo done`) exited with code 0 after 2s.\n\ndone\n</system-reminder>";
+
+	it("turns a reminder-only message into a [system] notice", () => {
+		const rows = userMessageRows(reminder);
+
+		expect(rows).toHaveLength(1);
+		expect(rows[0]!.role).toBe("warning");
+		expect(rows[0]!.content).toContain("[system] Background task bg-1");
+		expect(rows.some((row) => row.content.includes("</system-reminder>"))).toBe(false);
+	});
+
+	it("keeps what the person typed and lifts the reminder out of it", () => {
+		const rows = userMessageRows(`please look at this\n\n${reminder}`, "cmid-1");
+
+		expect(rows.map((row) => row.role)).toEqual(["warning", "user"]);
+		expect(rows[1]!.content).toBe("please look at this");
+		expect(rows[1]!.clientMessageId).toBe("cmid-1");
+	});
+
+	it("passes an ordinary message through with its id", () => {
+		const rows = userMessageRows("just a question", "cmid-2");
+
+		expect(rows).toEqual([{ role: "user", content: "just a question", clientMessageId: "cmid-2" }]);
+	});
+
+	it("keeps an empty message visible rather than dropping the row", () => {
+		expect(userMessageRows("")).toEqual([{ role: "user", content: "" }]);
 	});
 });
