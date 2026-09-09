@@ -84,34 +84,38 @@ describe("InputParser — sequence classification", () => {
 	});
 });
 
-describe("InputParser — submit-only Enter (no newline binding)", () => {
+describe("InputParser — Enter and line breaks", () => {
 	it("maps Enter (\\r) to input.submit", () => {
 		const { events, feed } = makeParser();
 		feed("\r");
 		expect(events).toEqual([{ type: "binding", binding: "input.submit", raw: "\r" }]);
 	});
 
-	it("ignores Kitty Shift+Enter (CSI 13;2u) — no binding claims it", () => {
+	// Line-break entry: a terminal that reports modified Enter says so in one
+	// of these three shapes, and each must reach editor.insertNewline rather
+	// than being ignored (as it was when the composer was one line) or being
+	// swallowed by input.submit.
+	it("maps Kitty Shift+Enter (CSI 13;2u) to editor.insertNewline", () => {
 		const { events, feed } = makeParser();
 		feed("\x1b[13;2u");
-		expect(events).toEqual([]);
+		expect(events).toEqual([{ type: "binding", binding: "editor.insertNewline", raw: "\x1b[13;2u" }]);
 	});
 
-	it("ignores modifyOtherKeys Shift+Enter", () => {
+	it("maps modifyOtherKeys Shift+Enter to editor.insertNewline", () => {
 		const { events, feed } = makeParser();
 		feed("\x1b[27;2;13~");
-		expect(events).toEqual([]);
+		expect(events).toEqual([{ type: "binding", binding: "editor.insertNewline", raw: "\x1b[27;2;13~" }]);
 	});
 
-	it("ignores legacy Alt+Enter (\\x1b\\r)", () => {
+	it("maps legacy Alt+Enter (\\x1b\\r) to editor.insertNewline", () => {
 		const { events, feed } = makeParser();
 		feed("\x1b\r");
-		expect(events).toEqual([]);
+		expect(events).toEqual([{ type: "binding", binding: "editor.insertNewline", raw: "\x1b\r" }]);
 	});
 
+	// Ctrl+J is \n, which is also what a non-Kitty terminal sends for Enter —
+	// so it submits, and is deliberately not bound to a line break.
 	it("maps legacy Ctrl+J (\\n) to input.submit, same as Enter", () => {
-		// With no newline binding to shadow it, the "enter" matcher's \n arm
-		// (for terminals without the Kitty protocol) wins — Ctrl+J submits.
 		const { events, feed } = makeParser();
 		feed("\n");
 		expect(events).toEqual([{ type: "binding", binding: "input.submit", raw: "\n" }]);

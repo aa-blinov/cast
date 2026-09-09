@@ -131,6 +131,43 @@ export class TextBuffer {
 		this.cursor = nl === -1 ? this.text.length : nl;
 	}
 
+	/**
+	 * Cursor to the same column one line up / down, snapped to a grapheme
+	 * boundary. False when there is no such line — the caller (Composer) then
+	 * falls back to recalling a prompt from history, which is what ↑/↓ mean on
+	 * a single-line draft.
+	 */
+	moveUp(): boolean {
+		return this.moveByLine(-1);
+	}
+
+	moveDown(): boolean {
+		return this.moveByLine(1);
+	}
+
+	private moveByLine(delta: number): boolean {
+		const { lines, cursorLine, cursorCol } = this.getLayout();
+		const target = cursorLine + delta;
+		if (target < 0 || target >= lines.length) return false;
+		let offset = 0;
+		for (let i = 0; i < target; i++) offset += lines[i]!.length + 1;
+		const column = Math.min(cursorCol, lines[target]!.length);
+		this.cursor = this.snapUnitBoundary(offset + column);
+		return true;
+	}
+
+	/**
+	 * Replace `[from, to)` and leave the cursor after what was inserted — what
+	 * Tab-completing a path needs, since it rewrites the token behind the
+	 * cursor rather than typing at it.
+	 */
+	replaceRange(from: number, to: number, insert: string): void {
+		const start = Math.max(0, Math.min(from, this.text.length));
+		const end = Math.max(start, Math.min(to, this.text.length));
+		this.text = this.text.slice(0, start) + insert + this.text.slice(end);
+		this.cursor = start + insert.length;
+	}
+
 	moveWordLeft(): void {
 		this.cursor = findWordBackward(this.text, this.cursor);
 	}

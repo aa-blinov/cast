@@ -12,6 +12,7 @@ import { SLASH_COMMANDS } from "./commands.ts";
 import { displayWidth } from "./display-width.ts";
 import { type InputEvent, InputParser } from "./input/input-parser.ts";
 import { lineWindow } from "./input/line-window.ts";
+import { completePath } from "./input/path-complete.ts";
 import { PromptHistory } from "./input/prompt-history.ts";
 import { StdinBuffer } from "./input/stdin-buffer.ts";
 import { graphemeAt, TextBuffer } from "./input/textarea.ts";
@@ -37,6 +38,8 @@ interface ComposerProps {
 	sessionId?: string;
 	running: boolean;
 	locked: boolean;
+	/** Where a Tab-completed relative path is resolved from. */
+	cwd: string;
 	/** Loaded, enabled skills — merged into the palette as native `/<skill-id>`
 	 * rows (see filteredCmds below) so a skill is just as fast to invoke as any
 	 * built-in command, no `/skill:` prefix needed. */
@@ -45,17 +48,28 @@ interface ComposerProps {
 
 // Multi-line pastes are collapsed to a single PUA character ("chip") in the
 // TextBuffer instead of the literal `[Pasted N lines]` string. A chip is one
-// buffer character, so the composer stays one row tall, the cursor math never
-// has to reason about the chip's visible width, and every TextBuffer operation
-// (backspace, move, delete) treats the whole chip atomically — no way to
-// corrupt the placeholder by typing inside it. See paste.ts for the full
-// rationale. The renderer maps each chip character back to its yellow label,
+// buffer character, so a pasted block costs one row however long it is, the
+// cursor math never has to reason about the chip's visible width, and every
+// TextBuffer operation (backspace, move, delete) treats the whole chip
+// atomically — no way to corrupt the placeholder by typing inside it. Typed
+// line breaks (Shift+Enter, or `\` before Enter) are literal newlines, and the
+// composer shows a window of at most MAX_COMPOSER_ROWS of them. See paste.ts
+// for the full rationale. The renderer maps each chip character back to its yellow label,
 // and doSubmit swaps chips back to the real text on submit.
 
 /** Renders `text`, highlighting any chip characters with their yellow label. */
 /** What the empty composer says. Short on purpose: it is a hint, not
  *  documentation, and on a narrow terminal a sentence wraps the composer to
  *  two rows. The commands it used to list are in the `/` palette. */
+/**
+ * Rows the composer may occupy. Three keeps the flat reserve the live-region
+ * clamp works with honest (composer + two dividers + status bar ≤ 8 rows) —
+ * a taller composer is how the region ends up bigger than the terminal, and
+ * Ink answers that by clearing the screen and the scrollback on every frame.
+ * The window follows the cursor, so a longer draft is still fully editable.
+ */
+const MAX_COMPOSER_ROWS = 3;
+
 const IDLE_PLACEHOLDER = "ask cast to do anything";
 const RUNNING_PLACEHOLDER = "type to steer the running turn — esc esc to stop";
 
@@ -124,6 +138,7 @@ export function Composer({
 	sessionId,
 	running,
 	locked,
+	cwd,
 	skills,
 }: ComposerProps): JSX.Element {
 	const { stdin, setRawMode, isRawModeSupported } = useStdin();
@@ -133,6 +148,8 @@ export function Composer({
 	const [, setVersion] = useState(0);
 	const [pendingPastes, setPendingPastes] = useState<PendingPaste[]>([]);
 	const [paletteIdx, setPaletteIdx] = useState(0);
+	/** Remaining choices after an ambiguous Tab — cleared on the next keystroke. */
+	const [completions, setCompletions] = useState<string[]>([]);
 	const [exitHint, setExitHint] = useState(false);
 	const [imageNotice, setImageNotice] = useState<string | null>(null);
 
@@ -252,6 +269,16 @@ export function Composer({
 	const doSubmit = () => {
 		const b = bufRef.current;
 		if (b.length === 0) return;
+		// A trailing backslash means "not done yet". Shift+Enter only reaches us
+		// from terminals that report modified Enter (Kitty protocol or
+		// modifyOtherKeys); everywhere else Enter and Shift+Enter are the same
+		// byte, and this is the escape hatch that works regardless.
+		if (b.value.endsWith("\\")) {
+			b.replaceRange(b.value.length - 1, b.value.length, "");
+			b.insertNewline();
+			setVersion((v) => v + 1);
+			return;
+		}
 		// Swap each chip character back to its real pasted text. Each chip is a
 		// unique PUA character, so per-entry first-occurrence replace is exact.
 		const value = expandPastes(b.value, pendingPastesRef.current);
@@ -367,6 +394,8 @@ export function Composer({
 	const handleEventRef = useRef<(event: InputEvent) => void>(() => {});
 	handleEventRef.current = (event: InputEvent) => {
 		const b = bufRef.current;
+		// The Tab hint answers one keypress; anything else moves on from it.
+		if (!(event.type === "binding" && event.binding === "input.tab")) setCompletions([]);
 
 		// Esc stops a running turn — the headline behavior, checked before
 		// anything else so it wins regardless of what's in the composer (an open
@@ -443,21 +472,33 @@ export function Composer({
 				case "input.attachImage":
 					handleAttachImage();
 					break;
-				case "input.tab":
+				case "input.tab": {
+					// Path completion. Only for a path-shaped token (see
+					// path-complete.ts) — Tab in prose does nothing rather than
+					// splicing in a filename nobody asked for.
+					const completion = completePath(b.value, b.cursorPos, cwd);
+					if (!completion) break;
+					b.replaceRange(completion.from, completion.to, completion.insert);
+					// Ambiguous still: show what is left to choose between, the
+					// way a shell does, instead of silently doing half the job.
+					setCompletions(completion.candidates.length > 1 ? completion.candidates : []);
 					break;
+				}
 				case "history.older":
 					onLoadOlderRef.current?.();
 					break;
 				case "editor.cursorUp": {
-					// The buffer is one line, so these were a no-op (↑) and a
-					// jump-to-end-of-line (↓). Recall submitted prompts instead,
-					// like every other terminal input. (With the palette open the
-					// same keys move the selection — handled above.)
+					// Inside a multi-line draft these move between its lines;
+					// at the top (or on a one-line draft) they recall submitted
+					// prompts, like every other terminal input. (With the palette
+					// open the same keys move the selection — handled above.)
+					if (b.moveUp()) break;
 					const previous = historyRef.current.older(expandPastes(b.value, pendingPastesRef.current));
 					if (previous !== null) showRecalled(previous);
 					break;
 				}
 				case "editor.cursorDown": {
+					if (b.moveDown()) break;
 					const next = historyRef.current.newer();
 					if (next !== null) showRecalled(next);
 					break;
@@ -479,6 +520,9 @@ export function Composer({
 					break;
 				case "editor.cursorLineEnd":
 					b.moveLineEnd();
+					break;
+				case "editor.insertNewline":
+					b.insertNewline();
 					break;
 				case "editor.deleteCharBackward":
 					b.backspace();
@@ -671,15 +715,18 @@ export function Composer({
 		};
 	}, [setRawMode, stdin, isRawModeSupported]);
 
-	// No keybinding ever inserts "\n" into the buffer (newline entry was
-	// removed — see keybindings.ts), and multi-line/long pastes collapse to a
-	// single chip character rather than literal newlines (see paste.ts), so
-	// the buffer is always exactly one line. That made the old scrolling
-	// window, sticky-max-height, and shrink-padding logic here dead weight —
-	// they existed only to handle a frame whose height could change, which
-	// can no longer happen.
-	const { lines, cursorCol } = buf.getLayout();
-	const line = lines[0] ?? "";
+	// The draft can be several lines (Shift+Enter, or `\` before Enter), and a
+	// long paste is still one chip character. Both dimensions are bounded: at
+	// most MAX_COMPOSER_ROWS rows, each windowed horizontally, so the composer's
+	// height can never follow the draft — a live region taller than the terminal
+	// costs the screen and the scrollback on every frame.
+	const { lines, cursorLine, cursorCol } = buf.getLayout();
+	const rowsShown = Math.min(lines.length, MAX_COMPOSER_ROWS);
+	// Keep the cursor's line visible: follow the tail while typing, scroll back
+	// up when the cursor walks above the window.
+	const firstRow = Math.max(0, Math.min(cursorLine - rowsShown + 1, cursorLine, lines.length - rowsShown));
+	const cols = Math.max(20, process.stdout.columns || 80);
+	const cellWidth = (cluster: string) => displayWidth(chipLabels.get(cluster) ?? cluster);
 
 	return (
 		<Box flexDirection="column">
@@ -718,8 +765,13 @@ export function Composer({
 					<Text color={theme().warning}>[Press Esc again to stop the turn]</Text>
 				</Box>
 			)}
+			{completions.length > 0 && (
+				<Text color={theme().muted} wrap="truncate">
+					{completions.join("  ")}
+				</Text>
+			)}
 			<Box flexDirection="column">
-				{line.length === 0 ? (
+				{buf.length === 0 ? (
 					// Truncated for the same reason the draft is windowed: a
 					// placeholder that wraps makes the composer two or three rows
 					// tall on a narrow terminal, and the live region's height is
@@ -731,49 +783,62 @@ export function Composer({
 						<Text color={theme().muted}>{running ? RUNNING_PLACEHOLDER : IDLE_PLACEHOLDER}</Text>
 					</Text>
 				) : (
-					(() => {
-						// One row, always: the draft is windowed horizontally instead
-						// of wrapped (see input/line-window.ts — a wrapped long draft
-						// grew the live region past the terminal and cost the whole
-						// scrollback). Two cells go to the `> ` prompt, one to each
-						// edge marker, reserved whether or not they show so the text
-						// doesn't shift as the window starts clipping.
-						const cols = Math.max(20, process.stdout.columns || 80);
-						const cellWidth = (cluster: string) => displayWidth(chipLabels.get(cluster) ?? cluster);
-						const win = lineWindow(line, cursorCol, cols - 4, cellWidth);
-						const beforeCol = line.slice(win.start, cursorCol);
+					Array.from({ length: rowsShown }, (_, i) => {
+						const row = firstRow + i;
+						const line = lines[row] ?? "";
+						const onCursorRow = row === cursorLine;
+						// Each row is windowed horizontally instead of wrapped (see
+						// input/line-window.ts): two cells for the prompt column, one
+						// for each edge marker, reserved whether or not they show so
+						// the text doesn't shift as the window starts clipping.
+						const win = lineWindow(line, onCursorRow ? cursorCol : 0, cols - 4, cellWidth);
+						// The prompt column doubles as the vertical scroll indicator:
+						// `↑`/`↓` where the draft continues out of the window.
+						const marker =
+							i === 0 && firstRow > 0
+								? "\u2191 "
+								: i === rowsShown - 1 && firstRow + rowsShown < lines.length
+									? "\u2193 "
+									: row === 0
+										? "> "
+										: "  ";
+						const before = line.slice(win.start, onCursorRow ? cursorCol : win.end);
 						// The whole grapheme cluster under the cursor. A single UTF-16
 						// unit would split an emoji's surrogate pair into mojibake; a
 						// single code point kept the pair intact but still cut a family
 						// emoji or a combining accent in half, so the cursor block
 						// showed one member and the rest spilled out to its right.
-						const atCol = graphemeAt(line, cursorCol);
-						const afterCol = line.slice(cursorCol + atCol.length, Math.max(win.end, cursorCol + atCol.length));
+						const atCol = onCursorRow ? graphemeAt(line, cursorCol) : "";
+						const after = onCursorRow
+							? line.slice(cursorCol + atCol.length, Math.max(win.end, cursorCol + atCol.length))
+							: "";
 						// If the cursor cell is a chip character, show the whole chip
 						// label in inverse (the chip is one buffer column, so the cursor
 						// can rest on it; backspace/delete then act on the whole chip).
 						const atColChip = chipLabels.get(atCol) ?? null;
 						return (
-							<Text wrap="truncate">
+							// biome-ignore lint/suspicious/noArrayIndexKey: rows are positional within the window
+							<Text key={i} wrap="truncate">
 								<Text color={theme().accent} bold>
-									{"> "}
+									{marker}
 								</Text>
 								<Text color={theme().muted}>{win.clippedLeft ? "\u2039" : " "}</Text>
-								{renderWithChips(beforeCol, chipLabels, "before")}
-								{atColChip !== null ? (
-									<Text color="black" backgroundColor="yellow" inverse>
-										{atColChip}
-									</Text>
-								) : (
-									<Text color="white" inverse>
-										{atCol || " "}
-									</Text>
-								)}
-								{renderWithChips(afterCol, chipLabels, "after")}
+								{renderWithChips(before, chipLabels, `before-${i}`)}
+								{onCursorRow &&
+									(atColChip !== null ? (
+										<Text color="black" backgroundColor="yellow" inverse>
+											{atColChip}
+										</Text>
+									) : (
+										<Text color="white" inverse>
+											{atCol || " "}
+										</Text>
+									))}
+								{renderWithChips(after, chipLabels, `after-${i}`)}
 								<Text color={theme().muted}>{win.clippedRight ? "\u203a" : ""}</Text>
 							</Text>
 						);
-					})()
+					})
 				)}
 			</Box>
 		</Box>

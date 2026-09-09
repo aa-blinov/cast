@@ -22,6 +22,10 @@ const CURSOR_POS_REMNANT_RE = /^\d+(?:;\d+)+R$/;
 export type InputEvent = { type: "binding"; binding: Keybinding; raw: string } | { type: "char"; text: string };
 
 const BINDING_ORDER: Keybinding[] = [
+	// Before input.submit: with the Kitty protocol active, Shift+Enter arrives
+	// as bytes plain Enter also accepts ("\n"), so whichever is tested first
+	// wins — and a line break must not be swallowed as a send.
+	"editor.insertNewline",
 	"input.submit",
 	"input.abort",
 	"input.escape",

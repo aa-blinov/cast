@@ -174,3 +174,43 @@ describe("TextBuffer", () => {
 		});
 	});
 });
+
+describe("multi-line drafts", () => {
+	// ↑/↓ move inside a draft that has line breaks in it (Shift+Enter, or a
+	// trailing backslash before Enter); the false return is what tells the
+	// Composer to recall a prompt from history instead.
+	it("moves between lines and reports when there is none", () => {
+		const b = new TextBuffer();
+		b.insert("first");
+		b.insertNewline();
+		b.insert("second line");
+		expect(b.moveDown()).toBe(false);
+		expect(b.moveUp()).toBe(true);
+		// Column is kept where it fits: 11 on line two, clamped to 5 on line one.
+		expect(b.cursorPos).toBe("first".length);
+		expect(b.moveUp()).toBe(false);
+		expect(b.moveDown()).toBe(true);
+		expect(b.cursorPos).toBe("first\n".length + 5);
+	});
+
+	it("never lands inside a surrogate pair when moving by line", () => {
+		const b = new TextBuffer();
+		b.insert("👨‍👩‍👧‍👦x");
+		b.insertNewline();
+		b.insert("abcdefghij");
+		expect(b.moveUp()).toBe(true);
+		// The line above is shorter in cells but longer in UTF-16 units; the
+		// cursor must still sit on a cluster boundary.
+		expect(b.cursorPos).toBeLessThanOrEqual("👨‍👩‍👧‍👦x".length);
+		expect(b.value.charCodeAt(b.cursorPos) & 0xfc00).not.toBe(0xdc00);
+	});
+
+	it("replaceRange rewrites a slice and leaves the cursor after it", () => {
+		const b = new TextBuffer();
+		b.setText("посмотри src/ui/Comp");
+		b.moveLineEnd();
+		b.replaceRange(16, 20, "Composer.tsx");
+		expect(b.value).toBe("посмотри src/ui/Composer.tsx");
+		expect(b.cursorPos).toBe(b.value.length);
+	});
+});

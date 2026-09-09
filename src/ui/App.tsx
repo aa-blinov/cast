@@ -871,6 +871,7 @@ export function App(props: AppProps): JSX.Element {
 				sessionId={session.id}
 				running={running}
 				locked={modalRequest !== null}
+				cwd={cwd}
 				skills={skills}
 			/>
 			<ComposerDivider />

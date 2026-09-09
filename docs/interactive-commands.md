@@ -171,7 +171,7 @@ Use `/statusbar` to toggle individual segments on/off and reorder them — usefu
 
 | Action | Keys |
 |--------|------|
-| Previous / next prompt | ↑ / ↓ (moves the selection while the command palette is open) |
+| Previous / next prompt | ↑ / ↓ (moves within a multi-line draft first; moves the selection while the command palette is open) |
 | Cursor left/right | ← / → (or Ctrl+B / Ctrl+F) |
 | Word left/right | Alt+← / Alt+→ (or Ctrl+← / Ctrl+→) |
 | Line start/end | Home / End (or Ctrl+A / Ctrl+E) |
@@ -180,18 +180,24 @@ Use `/statusbar` to toggle individual segments on/off and reorder them — usefu
 | Delete to line start | Ctrl+U |
 | Delete to line end | Ctrl+K |
 | Submit | Enter |
-| Stop turn / clear input | Esc |
+| Line break | Shift+Enter or Alt+Enter — or end the line with `\` and press Enter, which works on any terminal |
+| Stop turn (2×) | Esc |
+| Clear the input | Ctrl+L |
 | Exit (2× to confirm) | Ctrl+C |
 | Attach image | Ctrl+G |
-| Autocomplete | Tab |
+| Complete a command, or a file path | Tab |
 
-**Esc** stops the current turn while generating; clears the input otherwise.
+**Esc** stops the current turn while generating (twice within 2s); `Ctrl+L` clears the input in any state.
+
+**Tab** completes a slash command in the palette, and a path-shaped token anywhere else (one containing `/`, or starting with `~`) — ambiguous ones list what is left to choose from. Tab in ordinary prose does nothing.
+
+**Line breaks:** Shift+Enter and Alt+Enter need a terminal that reports modified Enter (the Kitty keyboard protocol or `modifyOtherKeys`); everywhere else, end the line with a backslash and press Enter. The composer shows at most three rows of the draft and scrolls to follow the cursor (`↑`/`↓` in the prompt column mark the rest).
 
 **Ctrl+C** — press twice within 2s to exit. Does not stop a turn — use Esc for that.
 
 ## During a Running Agent
 
-While the agent is executing, only these commands are accepted:
+Typing a plain message steers the running turn — no command needed. Besides that, these commands are accepted while the agent is executing:
 
 - `/steer` / `/s` — inject context
 - `/queue` / `/q` — queue follow-up
