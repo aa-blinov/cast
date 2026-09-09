@@ -10,8 +10,8 @@ import {
 } from "../core/stdin-manager.ts";
 import { SLASH_COMMANDS } from "./commands.ts";
 import { displayWidth } from "./display-width.ts";
+import { cellColumn, layoutDraft, offsetAtColumn } from "./input/draft-layout.ts";
 import { type InputEvent, InputParser } from "./input/input-parser.ts";
-import { lineWindow } from "./input/line-window.ts";
 import { completePath } from "./input/path-complete.ts";
 import { PromptHistory } from "./input/prompt-history.ts";
 import { StdinBuffer } from "./input/stdin-buffer.ts";
@@ -394,6 +394,23 @@ export function Composer({
 	};
 
 	const handleEventRef = useRef<(event: InputEvent) => void>(() => {});
+	/**
+	 * Cursor one visual row up (-1) or down (+1), keeping its column. False
+	 * when there is no such row — the caller then recalls a prompt instead.
+	 *
+	 * The rows come from the last render's layout (this handler is reassigned
+	 * every render), so what ↑ moves through is exactly what is on screen.
+	 */
+	const moveByRow = (delta: number): boolean => {
+		const b = bufRef.current;
+		const target = cursorRow + delta;
+		if (target < 0 || target >= draftRows.length) return false;
+		const row = draftRows[cursorRow]!;
+		const column = cellColumn(b.value, row.from, Math.min(b.cursorPos, row.to), cellWidth);
+		b.moveTo(offsetAtColumn(b.value, draftRows[target]!, column, cellWidth));
+		return true;
+	};
+
 	handleEventRef.current = (event: InputEvent) => {
 		const b = bufRef.current;
 		// The Tab hint answers one keypress; anything else moves on from it.
@@ -490,17 +507,18 @@ export function Composer({
 					onLoadOlderRef.current?.();
 					break;
 				case "editor.cursorUp": {
-					// Inside a multi-line draft these move between its lines;
-					// at the top (or on a one-line draft) they recall submitted
-					// prompts, like every other terminal input. (With the palette
-					// open the same keys move the selection — handled above.)
-					if (b.moveUp()) break;
+					// Inside the draft these move between its *visual* rows —
+					// wrapped ones included, which is what the eye sees. Only at
+					// the very top (or bottom) do they recall submitted prompts,
+					// like every other terminal input. (With the palette open the
+					// same keys move the selection — handled above.)
+					if (moveByRow(-1)) break;
 					const previous = historyRef.current.older(expandPastes(b.value, pendingPastesRef.current));
 					if (previous !== null) showRecalled(previous);
 					break;
 				}
 				case "editor.cursorDown": {
-					if (b.moveDown()) break;
+					if (moveByRow(1)) break;
 					const next = historyRef.current.newer();
 					if (next !== null) showRecalled(next);
 					break;
@@ -717,18 +735,22 @@ export function Composer({
 		};
 	}, [setRawMode, stdin, isRawModeSupported]);
 
-	// The draft can be several lines (Shift+Enter, or `\` before Enter), and a
-	// long paste is still one chip character. Both dimensions are bounded: at
-	// most MAX_COMPOSER_ROWS rows, each windowed horizontally, so the composer's
-	// height can never follow the draft — a live region taller than the terminal
-	// costs the screen and the scrollback on every frame.
-	const { lines, cursorLine, cursorCol } = buf.getLayout();
-	const rowsShown = Math.min(lines.length, MAX_COMPOSER_ROWS);
-	// Keep the cursor's line visible: follow the tail while typing, scroll back
-	// up when the cursor walks above the window.
-	const firstRow = Math.max(0, Math.min(cursorLine - rowsShown + 1, cursorLine, lines.length - rowsShown));
+	// The draft wraps like text anywhere else, and can hold typed line breaks
+	// (Shift+Enter, or `\` before Enter); a long paste is still one chip
+	// character. What it cannot do is grow without limit: only
+	// MAX_COMPOSER_ROWS rows are drawn, windowed around the cursor, because a
+	// live region taller than the terminal costs the screen and the scrollback
+	// on every frame.
 	const cols = Math.max(20, process.stdout.columns || 80);
 	const cellWidth = (cluster: string) => displayWidth(chipLabels.get(cluster) ?? cluster);
+	// Two cells for the prompt column, one kept clear of the last column (a row
+	// that reaches it makes the terminal wrap and the composer grows a row).
+	const draftWidth = cols - 3;
+	const { rows: draftRows, cursorRow } = layoutDraft(buf.value, buf.cursorPos, draftWidth, cellWidth);
+	const rowsShown = Math.min(draftRows.length, MAX_COMPOSER_ROWS);
+	// Follow the cursor: the tail while typing, scrolling back up when the
+	// cursor walks above the window.
+	const firstRow = Math.max(0, Math.min(cursorRow - rowsShown + 1, cursorRow, draftRows.length - rowsShown));
 
 	return (
 		<Box flexDirection="column">
@@ -786,34 +808,30 @@ export function Composer({
 					</Text>
 				) : (
 					Array.from({ length: rowsShown }, (_, i) => {
-						const row = firstRow + i;
-						const line = lines[row] ?? "";
-						const onCursorRow = row === cursorLine;
-						// Each row is windowed horizontally instead of wrapped (see
-						// input/line-window.ts): two cells for the prompt column, one
-						// for each edge marker, reserved whether or not they show so
-						// the text doesn't shift as the window starts clipping.
-						const win = lineWindow(line, onCursorRow ? cursorCol : 0, cols - 4, cellWidth);
-						// The prompt column doubles as the vertical scroll indicator:
-						// `↑`/`↓` where the draft continues out of the window.
+						const rowIndex = firstRow + i;
+						const row = draftRows[rowIndex]!;
+						const text = buf.value.slice(row.from, row.to);
+						const onCursorRow = rowIndex === cursorRow;
+						// The prompt column doubles as the vertical scroll
+						// indicator: `↑`/`↓` where the draft continues out of the
+						// window, `>` on its very first row, blank on a wrap.
 						const marker =
 							i === 0 && firstRow > 0
 								? "\u2191 "
-								: i === rowsShown - 1 && firstRow + rowsShown < lines.length
+								: i === rowsShown - 1 && firstRow + rowsShown < draftRows.length
 									? "\u2193 "
-									: row === 0
+									: rowIndex === 0
 										? "> "
 										: "  ";
-						const before = line.slice(win.start, onCursorRow ? cursorCol : win.end);
+						const cursorAt = Math.min(Math.max(buf.cursorPos, row.from), row.to);
+						const before = onCursorRow ? buf.value.slice(row.from, cursorAt) : text;
 						// The whole grapheme cluster under the cursor. A single UTF-16
 						// unit would split an emoji's surrogate pair into mojibake; a
 						// single code point kept the pair intact but still cut a family
 						// emoji or a combining accent in half, so the cursor block
 						// showed one member and the rest spilled out to its right.
-						const atCol = onCursorRow ? graphemeAt(line, cursorCol) : "";
-						const after = onCursorRow
-							? line.slice(cursorCol + atCol.length, Math.max(win.end, cursorCol + atCol.length))
-							: "";
+						const atCol = onCursorRow ? graphemeAt(buf.value, cursorAt) : "";
+						const after = onCursorRow ? buf.value.slice(Math.min(cursorAt + atCol.length, row.to), row.to) : "";
 						// If the cursor cell is a chip character, show the whole chip
 						// label in inverse (the chip is one buffer column, so the cursor
 						// can rest on it; backspace/delete then act on the whole chip).
@@ -824,7 +842,6 @@ export function Composer({
 								<Text color={theme().accent} bold>
 									{marker}
 								</Text>
-								<Text color={theme().muted}>{win.clippedLeft ? "\u2039" : " "}</Text>
 								{renderWithChips(before, chipLabels, `before-${i}`)}
 								{onCursorRow &&
 									(atColChip !== null ? (
@@ -837,7 +854,6 @@ export function Composer({
 										</Text>
 									))}
 								{renderWithChips(after, chipLabels, `after-${i}`)}
-								<Text color={theme().muted}>{win.clippedRight ? "\u203a" : ""}</Text>
 							</Text>
 						);
 					})
