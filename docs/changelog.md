@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Changed
+
+- **Every row under the transcript is one row again, on any terminal width.** The composer's placeholder, and the status bar, still wrapped: at 24 columns the bar took two rows and the placeholder three, growing the live region the rest of this work exists to keep fixed; at 40 the elapsed counter painted over the tail of the model name, so `test-model` read `test-mode0.4s`. Both truncate now, with the status bar's right-hand group keeping its width. The composer's hint is also shorter and less shouty — `ask cast to do anything`, and `esc esc to stop · /queue · /steer` while a turn runs; the commands it used to spell out are in the `/` palette. The divider above the composer spans the full width instead of stopping one cell short.
+
 ## 0.29.0
 
 ### Changed

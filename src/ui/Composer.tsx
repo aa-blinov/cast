@@ -53,6 +53,12 @@ interface ComposerProps {
 // and doSubmit swaps chips back to the real text on submit.
 
 /** Renders `text`, highlighting any chip characters with their yellow label. */
+/** What the empty composer says. Short on purpose: it is a hint, not
+ *  documentation, and on a narrow terminal a sentence wraps the composer to
+ *  two rows. The commands it used to list are in the `/` palette. */
+const IDLE_PLACEHOLDER = "ask cast to do anything";
+const RUNNING_PLACEHOLDER = "esc esc to stop · /queue · /steer";
+
 function renderWithChips(text: string, chipLabels: Map<string, string>, keyPrefix: string): JSX.Element[] {
 	if (!text) return [];
 	const nodes: JSX.Element[] = [];
@@ -714,15 +720,15 @@ export function Composer({
 			)}
 			<Box flexDirection="column">
 				{line.length === 0 ? (
-					<Text>
+					// Truncated for the same reason the draft is windowed: a
+					// placeholder that wraps makes the composer two or three rows
+					// tall on a narrow terminal, and the live region's height is
+					// what has to stay fixed.
+					<Text wrap="truncate">
 						<Text color={theme().accent} bold>
 							{"> "}
 						</Text>
-						<Text color={theme().muted}>
-							{running
-								? "Esc twice to stop · /queue to queue, /steer to inject..."
-								: "type / for commands, Ctrl+G to attach image"}
-						</Text>
+						<Text color={theme().muted}>{running ? RUNNING_PLACEHOLDER : IDLE_PLACEHOLDER}</Text>
 					</Text>
 				) : (
 					(() => {

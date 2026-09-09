@@ -989,16 +989,22 @@ function StatusBar(
 	const sep = <Text color={theme().muted}> │ </Text>;
 	const renderGroup = (elems: JSX.Element[]) => elems.flatMap((el, i) => (i > 0 ? [sep, el] : [el]));
 
+	// Both groups truncate, and the right one keeps its width: without that the
+	// bar wrapped to two rows on a 24-column terminal (growing the live region,
+	// which has to stay a fixed height) and the elapsed counter painted over
+	// the tail of the model name at 40 — `test-model` read `test-mode0.4s`.
 	return (
 		<Box justifyContent="space-between">
-			<Text color={theme().muted} dimColor>
+			<Text color={theme().muted} dimColor wrap="truncate">
 				{...renderGroup(leftElems)}
 				{repaintKey % 2 === 1 ? "\u200b" : null}
 			</Text>
 			{rightElems.length > 0 && (
-				<Text color={theme().muted} dimColor>
-					{...renderGroup(rightElems)}
-				</Text>
+				<Box flexShrink={0}>
+					<Text color={theme().muted} dimColor wrap="truncate">
+						{...renderGroup(rightElems)}
+					</Text>
+				</Box>
 			)}
 		</Box>
 	);
@@ -1030,9 +1036,13 @@ function ChatLogWithSize(props: Omit<Parameters<typeof ChatLog>[0], "columns">):
  *  the old composer box. */
 function ComposerDivider(): JSX.Element {
 	const { columns } = useWindowSize();
+	// Full width: the old `columns - 1` left a gap at the right edge that read
+	// as a rendering bug on a narrow terminal. Ink measures the row itself and
+	// emits its own newline, so a row exactly as wide as the terminal does not
+	// wrap — verified at 24, 40 and 120 columns.
 	return (
 		<Box>
-			<Text color={theme().muted}>{"─".repeat(Math.max(columns - 1, 20))}</Text>
+			<Text color={theme().muted}>{"─".repeat(Math.max(columns, 20))}</Text>
 		</Box>
 	);
 }
