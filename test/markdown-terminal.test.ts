@@ -184,6 +184,49 @@ describe("code blocks and tables", () => {
 	});
 });
 
+describe("lists", () => {
+	it("draws a task list as boxes, not as typed-out brackets", () => {
+		const lines = renderMarkdownLines("- [ ] сделать\n- [x] сделано\n- обычный пункт", { width: 40, indent: "" });
+		expect(lines.map((line) => line.spans.map((span) => span.text).join(""))).toEqual([
+			"☐ сделать",
+			"☑ сделано",
+			"• обычный пункт",
+		]);
+	});
+
+	it("keeps a nested item under its parent's text, ordered lists included", () => {
+		const lines = renderMarkdownLines("1. первый\n   1. вложенный\n- пункт\n  - вложенный", {
+			width: 40,
+			indent: "",
+		});
+		const text = lines.map((line) => line.spans.map((span) => span.text).join(""));
+		// `1. ` is three cells wide, `• ` two — the indent follows the source.
+		expect(text).toEqual(["1. первый", "   1. вложенный", "• пункт", "  ◦ вложенный"]);
+	});
+
+	it("gives each level its own bullet shape", () => {
+		const lines = renderMarkdownLines("- a\n  - b\n    - c\n      - d", { width: 40, indent: "" });
+		const markers = lines.map(
+			(line) =>
+				line.spans
+					.map((span) => span.text)
+					.join("")
+					.trim()[0],
+		);
+		expect(markers).toEqual(["•", "◦", "▪", "▪"]);
+	});
+
+	it("wraps a long item under its own text, not under the marker", () => {
+		const lines = renderMarkdownLines("10. очень длинный пункт списка который перенесётся", {
+			width: 30,
+			indent: "",
+		});
+		const text = lines.map((line) => line.spans.map((span) => span.text).join(""));
+		expect(text[0]).toMatch(/^10\. /);
+		expect(text[1]).toMatch(/^ {4}\S/);
+	});
+});
+
 describe("a horizontal rule is not a table rule", () => {
 	// Both match the same pattern; the pipe is what makes it a table's
 	// alignment row. Treating a bare `---` as one swallowed the rule line and

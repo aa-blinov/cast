@@ -4,6 +4,10 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+### Changed
+
+- **Lists read as lists.** A task list printed its source — `• [ ] сделать` — and now draws the box itself, `☐` and `☑`, in place of the bullet rather than after it. A nested item keeps the indentation it was written with instead of a fixed two cells per level, so an item under `1. ` (three cells) lines up with its parent's text rather than sitting a cell short of it. And each level gets its own bullet shape, `•` `◦` `▪` — the old `•` `–` `·` made the third level look like a smaller second.
+
 ### Fixed
 
 - **A `---` line vanished, and the next table lost its header divider.** A horizontal rule matches the same pattern as a table's `|---|---|` alignment row, and 0.30.1 started dropping those wherever they appeared — so a thematic break disappeared from the answer and the table after it was rendered as if its header belonged to an earlier chunk. The pipe is what makes it a table rule now.
