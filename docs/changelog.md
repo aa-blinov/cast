@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Fixed
+
+- **A `---` line vanished, and the next table lost its header divider.** A horizontal rule matches the same pattern as a table's `|---|---|` alignment row, and 0.30.1 started dropping those wherever they appeared — so a thematic break disappeared from the answer and the table after it was rendered as if its header belonged to an earlier chunk. The pipe is what makes it a table rule now.
+
 ## 0.30.1
 
 ### Added

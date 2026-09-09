@@ -184,6 +184,21 @@ describe("code blocks and tables", () => {
 	});
 });
 
+describe("a horizontal rule is not a table rule", () => {
+	// Both match the same pattern; the pipe is what makes it a table's
+	// alignment row. Treating a bare `---` as one swallowed the rule line and
+	// left the *next* table without its header divider.
+	it("draws `---` as a rule and still divides the table after it", () => {
+		const lines = renderMarkdownLines("текст\n\n---\n\n| a | b |\n|---|---|\n| 1 | 2 |", {
+			width: 30,
+			indent: "",
+		});
+		const text = lines.map((line) => line.spans.map((span) => span.text).join(""));
+		expect(text).toContain("─".repeat(30));
+		expect(text.filter((row) => row.startsWith("├"))).toHaveLength(1);
+	});
+});
+
 describe("a table cut across chunks", () => {
 	it("drops an alignment rule with no header above it, and keeps the rows as data", () => {
 		const lines = renderMarkdownLines("|---|---:|\n| Температура | +14 °C |\n| Ветер | штиль |", {

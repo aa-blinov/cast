@@ -404,7 +404,11 @@ export function renderMarkdownLines(text: string, options: MarkdownRenderOptions
 		// when a chunk *starts* with the rule (the header settled in the chunk
 		// before it), keeping it made the alignment row itself the table's
 		// header — `---  ---:  ---:` as a row of data.
-		if (TABLE_RULE_RE.test(raw)) {
+		//
+		// The pipe is what makes it a table rule. A bare `---` matches the same
+		// pattern and is a horizontal rule: swallowing it lost the `───` line
+		// *and* left the next table headerless.
+		if (TABLE_RULE_RE.test(raw) && (table || raw.includes("|"))) {
 			if (!table) headerless = true;
 			continue;
 		}
