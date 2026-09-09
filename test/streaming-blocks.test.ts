@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
 	appendTextBlock,
 	blocksFromAssistantCompletion,
+	flushInterval,
+	MAX_FLUSH_MS,
+	MIN_FLUSH_MS,
 	reduceStreamEvent,
 } from "../src/server/public/stream-blocks.js";
 import { type StreamBlock, settledPrefixLength, splitCompleteLines } from "../src/ui/useAgentSession.ts";
@@ -172,5 +175,35 @@ describe("blocksFromAssistantCompletion", () => {
 				call: { id: "call-1", name: "bash", args: "uname -a", status: "ok" },
 			},
 		]);
+	});
+});
+
+describe("flushInterval", () => {
+	// Each repaint of a streaming answer replaces its HTML, so the browser
+	// re-parses and re-lays-out all of it: the cost grows with the answer while
+	// a fixed render rate does not. Traced on a CPU throttled 6×, an
+	// eight-second answer spent 1.1s in layout alone.
+	const content = (chars: number) => [{ kind: "content" as const, text: "x".repeat(chars) }];
+
+	it("keeps the full rate for a short answer", () => {
+		expect(flushInterval([])).toBe(MIN_FLUSH_MS);
+		expect(flushInterval(content(200))).toBeLessThan(MIN_FLUSH_MS + 5);
+	});
+
+	it("slows down as the answer grows, and stops slowing at the cap", () => {
+		const mid = flushInterval(content(6000));
+		expect(mid).toBeGreaterThan(MIN_FLUSH_MS);
+		expect(mid).toBeLessThan(MAX_FLUSH_MS);
+		expect(flushInterval(content(12000))).toBe(MAX_FLUSH_MS);
+		expect(flushInterval(content(200000))).toBe(MAX_FLUSH_MS);
+	});
+
+	it("counts every text block, and no tool block", () => {
+		const blocks = [
+			{ kind: "thinking" as const, text: "y".repeat(6000) },
+			{ kind: "tool" as const, call: { id: "t1", name: "bash", args: "{}", status: "running" as const } },
+			{ kind: "content" as const, text: "z".repeat(6000) },
+		];
+		expect(flushInterval(blocks)).toBe(MAX_FLUSH_MS);
 	});
 });

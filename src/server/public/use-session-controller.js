@@ -81,6 +81,7 @@ export function useSessionController({
 	showToast,
 	esRef,
 	staticResourcesLoadedRef,
+	freshlyFetchedSessionRef,
 	personasRef,
 	reconnectTimerRef,
 	setPersonas,
@@ -199,6 +200,9 @@ export function useSessionController({
 				// for every other caller (sidebar clicks, popstate, ...).
 				const data = prefetch ? await prefetch : await api("GET", `/api/sessions/${id}`);
 				if (!data) throw new Error("Not found");
+				// The stream's onopen must not refetch what this just fetched —
+				// see freshlyFetchedSessionRef in app.js.
+				if (freshlyFetchedSessionRef) freshlyFetchedSessionRef.current = id;
 				if (version !== sessionViewVersionRef.current) return;
 				mergePendingOutgoing(data, id, pendingOutgoingRef);
 				// Splice in older pages already loaded via scroll-up earlier this

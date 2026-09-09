@@ -709,7 +709,16 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 					// URL whenever any of those import targets change (otherwise the
 					// browser's `immutable` cache keeps the pre-rewrite body).
 					for (const child of IMPORT_REWRITE_TARGETS) {
-						hash.update(`${child}=${assetVersion(`/${child}.js`)};`);
+						// A name in that hand-maintained list that no longer exists
+						// used to throw here — inside serveStatic's try, so the
+						// *whole* page 404'd, index.html included, with nothing said
+						// about why (CAST_DEBUG_STATIC=1 prints it now). A stale entry
+						// is a versioning problem, not a reason to serve nothing.
+						let childVersion = "missing";
+						try {
+							childVersion = assetVersion(`/${child}.js`);
+						} catch {}
+						hash.update(`${child}=${childVersion};`);
 					}
 				}
 				return hash.digest("hex").slice(0, 12);
@@ -781,7 +790,8 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			res.writeHead(200, headers);
 			res.end(body);
 			return true;
-		} catch (_) {
+		} catch (error) {
+			if (process.env.CAST_DEBUG_STATIC) console.error("[static]", urlPath, error);
 			return false;
 		}
 	}
