@@ -159,8 +159,9 @@ describe("clampStreamingBlocks fence threading", () => {
 		const blocks = [text("content", "```ts\nconst a = 1;"), text("content", "const b = 2;")];
 		const laidOut = clampStreamingBlocks(blocks, 30, 60);
 		const second = laidOut.find((entry) => entry.block === blocks[1]);
-		expect(second?.lines?.[0]!.code).toBe(true);
-		expect(second?.lines?.[0]!.spans.map((span) => span.scope)).toContain("keyword");
+		const first = second?.lines?.[0];
+		expect(first?.code).toBe(true);
+		expect(first?.spans.map((span) => span.scope)).toContain("keyword");
 	});
 
 	it("reads a chunk's leading ``` as the close it is", () => {

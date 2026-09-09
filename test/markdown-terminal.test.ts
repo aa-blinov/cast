@@ -161,10 +161,7 @@ describe("code blocks and tables", () => {
 	// until it does would freeze the answer as it is being written.
 	it("renders an unclosed fence", () => {
 		const lines = renderMarkdownLines("```python\ndef f():\n    return 1", { width: 60 });
-		expect(lines.map((line) => line.spans.map((span) => span.text).join(""))).toEqual([
-			"def f():",
-			"    return 1",
-		]);
+		expect(lines.map((line) => line.spans.map((span) => span.text).join(""))).toEqual(["def f():", "    return 1"]);
 	});
 
 	it("frames a table and rules its header off, but rules nothing with no data", () => {
