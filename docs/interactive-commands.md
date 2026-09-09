@@ -191,7 +191,9 @@ Use `/statusbar` to toggle individual segments on/off and reorder them — usefu
 
 **Tab** completes a slash command in the palette, and a path-shaped token anywhere else (one containing `/`, or starting with `~`) — ambiguous ones list what is left to choose from. Tab in ordinary prose does nothing.
 
-**Line breaks:** Shift+Enter and Alt+Enter need a terminal that reports modified Enter (the Kitty keyboard protocol or `modifyOtherKeys`); everywhere else, end the line with a backslash and press Enter. The composer shows at most three rows of the draft and scrolls to follow the cursor (`↑`/`↓` in the prompt column mark the rest).
+**Line breaks:** Shift+Enter and Alt+Enter need a terminal that reports modified Enter (the Kitty keyboard protocol or `modifyOtherKeys`); everywhere else, end the line with a backslash and press Enter.
+
+**A long draft wraps** at the terminal's edge, on word boundaries. The composer draws at most three rows and follows the cursor, with `↑`/`↓` in the prompt column where the draft continues past them — ↑/↓ move between rows, wrapped ones included.
 
 **Ctrl+C** — press twice within 2s to exit. Does not stop a turn — use Esc for that.
 

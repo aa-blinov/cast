@@ -175,34 +175,25 @@ describe("TextBuffer", () => {
 	});
 });
 
-describe("multi-line drafts", () => {
-	// ↑/↓ move inside a draft that has line breaks in it (Shift+Enter, or a
-	// trailing backslash before Enter); the false return is what tells the
-	// Composer to recall a prompt from history instead.
-	it("moves between lines and reports when there is none", () => {
-		const b = new TextBuffer();
-		b.insert("first");
-		b.insertNewline();
-		b.insert("second line");
-		expect(b.moveDown()).toBe(false);
-		expect(b.moveUp()).toBe(true);
-		// Column is kept where it fits: 11 on line two, clamped to 5 on line one.
-		expect(b.cursorPos).toBe("first".length);
-		expect(b.moveUp()).toBe(false);
-		expect(b.moveDown()).toBe(true);
-		expect(b.cursorPos).toBe("first\n".length + 5);
-	});
-
-	it("never lands inside a surrogate pair when moving by line", () => {
+describe("cursor placement for a wrapped draft", () => {
+	// Moving by *visual* row lives in the Composer (rows are a view concept);
+	// the buffer only has to put the cursor on a cluster boundary wherever the
+	// view asks, and let a slice be rewritten under it.
+	it("moveTo snaps onto a grapheme boundary, never inside one", () => {
 		const b = new TextBuffer();
 		b.insert("👨‍👩‍👧‍👦x");
-		b.insertNewline();
-		b.insert("abcdefghij");
-		expect(b.moveUp()).toBe(true);
-		// The line above is shorter in cells but longer in UTF-16 units; the
-		// cursor must still sit on a cluster boundary.
-		expect(b.cursorPos).toBeLessThanOrEqual("👨‍👩‍👧‍👦x".length);
-		expect(b.value.charCodeAt(b.cursorPos) & 0xfc00).not.toBe(0xdc00);
+		b.moveTo(3);
+		// Anywhere inside the family emoji resolves to its start.
+		expect(b.cursorPos).toBe(0);
+		const family = b.value.slice(0, b.length - 1);
+		b.moveTo(family.length);
+		expect(b.cursorPos).toBe(family.length);
+		// The end of the buffer is a position too, even though it is not a
+		// cluster start — snapping used to pull the cursor back off it.
+		b.moveTo(999);
+		expect(b.cursorPos).toBe(b.length);
+		b.moveTo(-4);
+		expect(b.cursorPos).toBe(0);
 	});
 
 	it("replaceRange rewrites a slice and leaves the cursor after it", () => {

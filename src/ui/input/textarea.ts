@@ -131,29 +131,22 @@ export class TextBuffer {
 		this.cursor = nl === -1 ? this.text.length : nl;
 	}
 
-	/**
-	 * Cursor to the same column one line up / down, snapped to a grapheme
-	 * boundary. False when there is no such line — the caller (Composer) then
-	 * falls back to recalling a prompt from history, which is what ↑/↓ mean on
-	 * a single-line draft.
-	 */
-	moveUp(): boolean {
-		return this.moveByLine(-1);
-	}
-
-	moveDown(): boolean {
-		return this.moveByLine(1);
-	}
-
-	private moveByLine(delta: number): boolean {
-		const { lines, cursorLine, cursorCol } = this.getLayout();
-		const target = cursorLine + delta;
-		if (target < 0 || target >= lines.length) return false;
-		let offset = 0;
-		for (let i = 0; i < target; i++) offset += lines[i]!.length + 1;
-		const column = Math.min(cursorCol, lines[target]!.length);
-		this.cursor = this.snapUnitBoundary(offset + column);
-		return true;
+	/** Put the cursor at `pos`, snapped to a grapheme-cluster boundary — what
+	 *  moving by *visual* row needs, since the row layout lives in the view. */
+	moveTo(pos: number): void {
+		const clamped = Math.max(0, Math.min(pos, this.text.length));
+		// The end of the buffer is a valid cursor position and not a cluster
+		// start, so it can't go through the snapping below.
+		if (clamped >= this.text.length) {
+			this.cursor = this.text.length;
+			return;
+		}
+		const starts = this.clusterStarts(clamped - TextBuffer.BOUNDARY_WINDOW, clamped + 1);
+		let snapped = 0;
+		for (const start of starts) {
+			if (start <= clamped) snapped = start;
+		}
+		this.cursor = starts.length > 0 ? snapped : clamped;
 	}
 
 	/**
