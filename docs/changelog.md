@@ -2,6 +2,16 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Changed
+
+- **The web UI loads about three times faster on a first visit.** Measured cold (fresh browser profile, no cache) against a session with 240 messages, up to the moment the composer is usable: 59 requests and 108KB became **12 requests and 50KB**, and the composer was ready in 73ms instead of 197ms on localhost, 278ms instead of 423ms with 40ms of latency on every request — which is the case that matters, since the daemon is usually reached over a network rather than from localhost. Three things did it:
+  - **The app is bundled for production.** The browser used to fetch it as 45 separate ES modules in a graph six levels deep, and every level of that graph is a round trip. The built copy is now one hash-named bundle plus a chunk per click-gated feature. Served from `src/` in development the modules stay exactly as they were — unbundled and debuggable without a build step.
+  - **Code behind a click is loaded behind a click.** The settings modal and its sixteen panels, the dashboard, the new-session and share modals, and the workspace panel with its three explorers — about 150KB — used to load before the first paint whether or not anyone opened them. They now load on demand, and are prefetched once the page goes idle, so the first click still opens instantly.
+  - **Fonts are woff2 instead of TTF**, and immutable. The default face went from 112KB to 37KB, and its URL now carries a content hash, so it is fetched once ever instead of once an hour; all six faces together dropped from 1MB to 348KB.
+- **The service worker precached the wrong files.** Its shell list named `/app.js` and the vendored preact/htm modules — none of which the bundled page loads — and missed the bundle itself; the build now writes the list from what it actually emitted. A single missing entry also used to fail the whole install (one rejected `addAll`) and leave the page with no service worker at all, silently; entries are added individually now.
+
 ## 0.30.2
 
 ### Changed

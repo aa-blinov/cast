@@ -5,7 +5,12 @@
 // message.js, ...) gets cached this way, it's served forever regardless of
 // deploys, since `activate` only evicts keys that don't match CACHE.
 const CACHE = "cast-__CAST_VERSION__";
-const SHELL = [
+// The built app is one hash-named bundle (see scripts/build.mjs), so the shell
+// list cannot be written here — the build replaces this placeholder with the
+// exact assets the built HTML loads. Unreplaced (running from src/ during
+// development) it stays a string, and the dev list below is used instead.
+const BUILT_SHELL = "__CAST_SHELL__";
+const DEV_SHELL = [
   "/",
   "/index.html",
   "/manifest.json",
@@ -23,8 +28,15 @@ const SHELL = [
   "/vendor/htm.mjs",
   "/favicon.svg"
 ];
+const SHELL = Array.isArray(BUILT_SHELL) ? BUILT_SHELL : DEV_SHELL;
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // Per-entry, not addAll: one 404 in the list rejects addAll, which fails the
+  // whole install — and then there is no service worker at all, silently.
+  e.waitUntil(
+    caches.open(CACHE)
+      .then((c) => Promise.all(SHELL.map((url) => c.add(url).catch(() => {}))))
+      .then(() => self.skipWaiting()),
+  );
 });
 self.addEventListener("activate", (e) => {
   e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()));

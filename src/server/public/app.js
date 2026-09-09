@@ -11,40 +11,15 @@ import { escapeHtml, renderMarkdown } from "./markdown.js";
 import { CastLogo } from "./cast-logo.js";
 import { isNearBottom, isNearTop, scrollTopAfterPrepend } from "./chat-scroll.js";
 import { Composer as ComposerModule } from "./composer.js";
-import { Dashboard as DashboardModule } from "./dashboard.js";
-import { DiffPanel as DiffPanelModule } from "./diff-panel.js";
 import { DirectoryBrowser } from "./directory-browser.js";
 import { ElapsedTimer } from "./elapsed-timer.js";
-import { FileExplorer as FileExplorerModule } from "./file-explorer.js";
 import { hotkeysHtml, modKey } from "./hotkeys.js";
 import { icons } from "./icons.js";
-import { InputsExplorer as InputsExplorerModule } from "./inputs-explorer.js";
-import { MemoryExplorer as MemoryExplorerModule } from "./memory-explorer.js";
+import { lazy, prefetchWhenIdle } from "./lazy.js";
 import { Message as MessageModule } from "./message.js";
 import { submitMessage as submitMessageRequest } from "./message-submit.js";
 import { useModalFocusTrap } from "./modal-focus.js";
-import { NewSessionModal } from "./new-session-modal.js?v=__NSM_HASH__";
 import { BashConfirmCard, PlanDecisionCard, QuestionCard } from "./plan-cards.js";
-import { SettingsAppearance } from "./settings-appearance.js";
-import { SettingsModal as SettingsModalModule } from "./settings-modal.js";
-import { SettingsModel } from "./settings-model.js";
-import {
-	SettingsBash,
-	SettingsDefaultUi,
-	SettingsHooks,
-	SettingsMemory,
-	SettingsMcp,
-	SettingsPersonas,
-	SettingsProvider,
-	SettingsQuickMode,
-	SettingsServer,
-	SettingsSkills,
-	SettingsSkillssh,
-	SettingsSsh,
-	SettingsUpdates,
-	SettingsWeb,
-} from "./settings-panels.js";
-import { ShareModal } from "./share-modal.js";
 import { Sidebar as SidebarModule } from "./sidebar.js";
 import { closeSseConnection, openSseConnection } from "./sse-connection.js";
 import { handleSseEvent } from "./sse-events.js";
@@ -58,6 +33,17 @@ import { useWorkspaceState } from "./use-workspace-state.js";
 const FRONTMATTER_LINE_RE = /^- (.+?): (.+)$/;
 
 const html = htm.bind(h);
+// Behind a click, so behind a dynamic import: ~150KB of settings panels,
+// dashboard, modals and workspace explorers used to load before the first
+// paint. prefetchWhenIdle (below, after mount) warms them once the page is
+// quiet, so the first click still opens instantly.
+const DashboardModule = lazy(() => import("./dashboard.js"), (m) => m.Dashboard);
+const SettingsModalModule = lazy(() => import("./settings-entry.js"), (m) => m.Settings);
+const NewSessionModal = lazy(() => import("./new-session-modal.js"), (m) => m.NewSessionModal);
+const ShareModal = lazy(() => import("./share-modal.js"), (m) => m.ShareModal);
+const WorkspacePanelModule = lazy(() => import("./workspace-panel-entry.js"), (m) => m.WorkspacePanel);
+const SPLIT_MODULES = [DashboardModule, SettingsModalModule, NewSessionModal, ShareModal, WorkspacePanelModule];
+
 
 // ── Theme ────────────────────────────────────────────────────────────
 // Only accent colors are themed (16 palettes, shared with the TUI via
@@ -554,6 +540,11 @@ function App() {
 	useEffect(() => {
 		if (activeId) refreshCommands(activeId);
 	}, [activeId, refreshCommands]);
+	// Warm the click-gated modules once the page is idle: the first paint no
+	// longer pays for them, and a click still opens them without a fetch.
+	useEffect(() => {
+		prefetchWhenIdle(SPLIT_MODULES);
+	}, []);
 	const [themes, setThemes] = useState([]);
 	const [currentThemeId, setCurrentThemeId] = useState(null);
 	// Font/scale, unlike theme, are purely client-side (localStorage — see
@@ -1851,7 +1842,6 @@ function App() {
 				settingsOpen &&
 				html`
 				<${SettingsModalModule}
-					panels=${{ SettingsAppearance, SettingsModel, SettingsBash, SettingsWeb, SettingsMemory, SettingsPersonas, SettingsQuickMode, SettingsServer, SettingsHooks, SettingsMcp, SettingsSkills, SettingsSkillssh, SettingsProvider, SettingsSsh, SettingsDefaultUi, SettingsUpdates }}
 					fontOptions=${FONT_OPTIONS}
 					fontScales=${FONT_SCALE_OPTIONS}
 					activeId=${activeId}
@@ -2024,7 +2014,7 @@ function App() {
 			     leave this unmounted entirely while still reserving its grid
 			     column on open, which read as content shifting into an empty
 			     void with no panel there to show for it. -->
-			<${DiffPanelModule} data=${diffData} activeFile=${diffFile} onSelectFile=${setDiffFile} onResizeStart=${startDiffResize} open=${diffOpen} activeId=${activeId} tab=${diffTab} onTabChange=${setDiffTab} memoryEnabled=${memoryEnabled} confirm=${requestConfirm} fsRefreshNonce=${fsRefreshNonce} inputsRefreshNonce=${inputsRefreshNonce} bootstrapping=${bootstrapping} InputsExplorer=${InputsExplorerModule} FileExplorer=${FileExplorerModule} MemoryExplorer=${MemoryExplorerModule} />
+			<${WorkspacePanelModule} data=${diffData} activeFile=${diffFile} onSelectFile=${setDiffFile} onResizeStart=${startDiffResize} open=${diffOpen} activeId=${activeId} tab=${diffTab} onTabChange=${setDiffTab} memoryEnabled=${memoryEnabled} confirm=${requestConfirm} fsRefreshNonce=${fsRefreshNonce} inputsRefreshNonce=${inputsRefreshNonce} bootstrapping=${bootstrapping} />
 		</div>
 	`;
 }
