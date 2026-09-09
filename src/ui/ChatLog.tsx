@@ -1,7 +1,6 @@
 import { Box, Static, Text } from "ink";
 import { type JSX, useMemo, useRef } from "react";
 import { getLastFrameOverflow } from "../core/stdin-manager.ts";
-import { displayWidth } from "./display-width.ts";
 import { type RenderedLine, renderMarkdownLines, renderMarkdownTail, type Span } from "./markdown-terminal.ts";
 import { Spinner } from "./Spinner.tsx";
 import { formatTaskToolSummary } from "./task-tool-summary.ts";
@@ -219,8 +218,6 @@ function ToolCallView({ call, compact }: { call: ToolCallEntry; compact?: boolea
 }
 
 const GUTTER_WIDTH = 2;
-/** Spaces between the speaker label and the text that follows it. */
-const LABEL_GAP = 2;
 const USER_LABEL = "you";
 /** Written by every surface that renders a `<system-reminder>` as a notice. */
 const SYSTEM_PREFIX = "[system] ";
@@ -230,22 +227,6 @@ const BLOCK_STYLE = {
 	content: { label: "agent", bar: "▌" },
 	thinking: { label: "reasoning", bar: "┆" },
 } as const;
-
-/**
- * Every turn's label is drawn in a field this wide, so `you` and `agent` push
- * their text to the same column and consecutive turns read as one column of
- * prose instead of two ragged ones.
- *
- * `reasoning` is wider and keeps its own field: padding every turn out to nine
- * cells to match it would spend a ninth of an 80-column terminal on chrome,
- * and reasoning is dim secondary text that reads as its own thing anyway.
- */
-const LABEL_FIELD = Math.max(displayWidth(USER_LABEL), displayWidth(BLOCK_STYLE.content.label));
-
-/** Cells the label occupies, gap excluded. */
-function labelField(label: string): number {
-	return Math.max(displayWidth(label), LABEL_FIELD);
-}
 
 /** Ink props for one rendered span, with tones resolved against the theme. */
 function spanProps(span: Span): {
@@ -288,10 +269,11 @@ function railMuted(): string {
 /**
  * Rendered markdown lines behind one rail.
  *
- * The speaker's label rides the first line rather than taking a row of its
- * own — two rows of chrome per turn is a lot on a 24-row terminal, and the
- * rail's colour already says who is speaking. Continuations are indented to
- * the same column, so the block still reads as one paragraph.
+ * The speaker's label takes a row of its own, and the text under it starts in
+ * the same column as every other row's — so there is no indent to keep in step
+ * and no width spent on chrome. Riding the first line cost both: a `reasoning`
+ * block gave up 11 cells of an 80-column terminal, and `you` had to be padded
+ * out to `agent`'s width for two consecutive turns to line up at all.
  *
  * The rail itself is never dimmed: it has to stay visible while the text
  * beside it is dim, and in two themes `muted` is already close enough to the
@@ -313,37 +295,32 @@ function MarkdownBody({
 	/** Rail for lines after the first — a notice's `ⓘ` marks the notice, not
 	 *  every line of it. Defaults to `bar`, which is what a turn wants. */
 	continuationBar?: string;
-	/** Speaker label for the first line — `you`, `agent`, `reasoning`. */
+	/** Speaker label, drawn on a row of its own — `you`, `agent`, `reasoning`. */
 	label?: string;
-	/** Head of the block was dropped: shown as `…` *inside* the label's field,
-	 *  never appended to it. Appending made the row two cells wider than the
-	 *  width its lines were rendered for, so Ink wrapped every one of them and
-	 *  the live region doubled in height (63 full-screen clears in one
-	 *  streaming answer — the exact failure the clamp exists to prevent). */
+	/** Head of the block was dropped: `…` after the label. Safe there because
+	 *  the label row carries no body text — appended to a *text* row it made
+	 *  that row wider than the width it was wrapped for, Ink wrapped every one
+	 *  of them, and the live region doubled in height (63 full-screen clears in
+	 *  one streaming answer). */
 	truncated?: boolean;
 	/** Dim the text (not the rail) — reasoning and finished scaffolding. */
 	dimText?: boolean;
 }): JSX.Element {
-	// The label's field is exactly `labelField(label) + LABEL_GAP` cells wide,
-	// whatever it renders inside it — that is the width the lines were wrapped
-	// for, and it is why continuations line up with the first line.
-	const field = label ? labelField(label) + LABEL_GAP : 0;
-	const indent = " ".repeat(field);
 	return (
 		<Box flexDirection="column">
+			{label && (
+				<Text>
+					<Text color={gutter}>{`${bar} `}</Text>
+					<Text color={gutter} dimColor={dimText}>
+						{label}
+						{truncated ? " …" : ""}
+					</Text>
+				</Text>
+			)}
 			{lines.map((line, i) => (
 				// biome-ignore lint/suspicious/noArrayIndexKey: lines are positional by construction
 				<Text key={i}>
-					<Text color={gutter}>{`${i === 0 ? bar : (continuationBar ?? bar)} `}</Text>
-					{label && i === 0 ? (
-						<Text color={gutter} dimColor={dimText}>
-							{label}
-							{truncated ? "…" : ""}
-							{" ".repeat(field - displayWidth(label) - (truncated ? 1 : 0))}
-						</Text>
-					) : (
-						indent
-					)}
+					<Text color={gutter}>{`${label || i > 0 ? (continuationBar ?? bar) : bar} `}</Text>
 					{line.spans.map((span, j) => (
 						// biome-ignore lint/suspicious/noArrayIndexKey: spans are positional within a line
 						<Text key={j} {...spanProps(span)} dimColor={dimText || span.dim}>
@@ -399,7 +376,7 @@ function BlockView({
 		const style = BLOCK_STYLE.thinking;
 		return (
 			<MarkdownBody
-				lines={lines ?? renderMarkdownLines(block.text, { width: bodyWidth(width, "thinking") })}
+				lines={lines ?? renderMarkdownLines(block.text, { width: bodyWidth(width) })}
 				gutter={railMuted()}
 				bar={style.bar}
 				label={block.continued ? undefined : style.label}
@@ -412,7 +389,7 @@ function BlockView({
 		const style = BLOCK_STYLE.content;
 		return (
 			<MarkdownBody
-				lines={lines ?? renderMarkdownLines(block.text, { width: bodyWidth(width, "content") })}
+				lines={lines ?? renderMarkdownLines(block.text, { width: bodyWidth(width) })}
 				gutter={theme().agent}
 				bar={style.bar}
 				label={block.continued ? undefined : style.label}
@@ -424,14 +401,12 @@ function BlockView({
 }
 
 /**
- * Cells left for the text once the rail and the speaker label have taken
- * theirs. The label only appears on a block's first line, but every line is
- * indented to the same column, so one width covers the whole block — which is
- * what lets the clamp count rows without re-rendering.
+ * Cells left for the text once the rail has taken its two. The label sits on
+ * its own row and costs no width, so one number covers every row of every
+ * kind — which is what lets the clamp count rows without re-rendering.
  */
-function bodyWidth(width: number | undefined, kind?: keyof typeof BLOCK_STYLE | "plain"): number {
-	const label = kind && kind !== "plain" ? labelField(BLOCK_STYLE[kind].label) + LABEL_GAP : 0;
-	return Math.max(20, (width ?? process.stdout.columns ?? 80) - GUTTER_WIDTH - label);
+function bodyWidth(width: number | undefined): number {
+	return Math.max(20, (width ?? process.stdout.columns ?? 80) - GUTTER_WIDTH);
 }
 
 /**
@@ -499,18 +474,21 @@ export function clampStreamingBlocks(
 			used += 1;
 			continue;
 		}
-		// The speaker label rides the first body line, so a block costs exactly
-		// its rendered lines — no separate header row to charge for.
-		const room = budget - used;
+		// The label takes a row of its own, so a block costs its rendered lines
+		// plus one. Charging only the lines is exactly how the live region ends
+		// up taller than the clamp believes it is. A continued block (its head
+		// already committed to <Static>) draws no label and charges nothing.
+		const labelRows = block.continued ? 0 : 1;
+		const room = budget - used - labelRows;
 		if (room <= 0) break;
-		const width = bodyWidth(columns, block.kind === "thinking" ? "thinking" : "content");
+		const width = bodyWidth(columns);
 		const text =
 			block.text.includes("<think") || block.text.includes("</think")
 				? block.text.replace(THINK_TAG_RE, "")
 				: block.text;
 		const { lines, truncated } = renderMarkdownTail(text, { width, maxLines: room });
 		out.unshift({ block, truncated, index: i, lines });
-		used += lines.length;
+		used += lines.length + labelRows;
 		if (truncated) break;
 	}
 	return out;
@@ -531,7 +509,7 @@ function MessageView({
 }): JSX.Element {
 	const colors = theme();
 	if (message.role === "user") {
-		const usable = Math.max(20, width - GUTTER_WIDTH - labelField(USER_LABEL) - LABEL_GAP);
+		const usable = bodyWidth(width);
 		return (
 			<MarkdownBody
 				lines={renderMarkdownLines(message.content, { width: usable })}
@@ -560,7 +538,7 @@ function MessageView({
 			: message.content;
 		return (
 			<MarkdownBody
-				lines={renderMarkdownLines(text, { width: bodyWidth(width, "plain") })}
+				lines={renderMarkdownLines(text, { width: bodyWidth(width) })}
 				gutter={colors.warning}
 				bar="ⓘ"
 				continuationBar="│"
