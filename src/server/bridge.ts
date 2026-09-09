@@ -442,7 +442,7 @@ export function reconcileActiveStream(
  * merged-in) `tool` messages entirely. `reasoning` (SessionState's sidecar
  * map, index -> thinking text — see core/session.ts) reattaches each
  * assistant message's reasoning so a reload looks the same as a live turn.
- * `turnMeta` is the same kind of sidecar map for the "provider · model · Ns"
+ * `turnMeta` is the same kind of sidecar map for the "provider – model – Ns"
  * footer under whichever assistant message actually ended a turn.
  */
 /** Strips every `<system-reminder>...</system-reminder>` block out of `text`,
@@ -2453,7 +2453,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				if (ws.lastTurn) ws.lastTurn.totalMs = Date.now() - turnStart;
 				// Persisted per-turn (unlike ws.lastTurn above, which is the same
 				// data but ephemeral/in-memory-only) so every past reply in this
-				// thread shows its own "provider · model · Ns" footer on reload,
+				// thread shows its own "provider – model – Ns" footer on reload,
 				// not just whichever turn happened to be most recent. Attached to
 				// the turn-ending assistant message specifically — the loop only
 				// ever ends on one (tool-call rounds always continue), so this is
@@ -3777,7 +3777,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			if (verb === "help") {
 				return {
 					ok: true,
-					result: "/hooks · /hooks enable <id> · /hooks disable <id> — see docs/hooks.md",
+					result: "/hooks – /hooks enable <id> – /hooks disable <id> — see docs/hooks.md",
 				};
 			}
 			const { entries, diagnostics } = listHooksForCwdSettings(sessionCwd, trustForSessionCwd(sessionCwd));
@@ -4158,7 +4158,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				return {
 					ok: true,
 					result:
-						"/mcp list · /mcp enable <name> · /mcp disable <name> · /mcp reconnect <name> · /mcp uninstall <name>",
+						"/mcp list – /mcp enable <name> – /mcp disable <name> – /mcp reconnect <name> – /mcp uninstall <name>",
 				};
 			}
 			if (sub === "reconnect") {
@@ -4259,7 +4259,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			if (sub === "help") {
 				return {
 					ok: true,
-					result: "/skills list · /skills enable <name> · /skills disable <name> · /skills uninstall <name>",
+					result: "/skills list – /skills enable <name> – /skills disable <name> – /skills uninstall <name>",
 				};
 			}
 			if (sub === "enable" || sub === "disable") {

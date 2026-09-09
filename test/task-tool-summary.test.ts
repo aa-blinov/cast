@@ -17,7 +17,7 @@ describe("formatTaskToolSummary", () => {
 
 	it("prefixes a non-default subagent name", () => {
 		expect(formatTaskToolSummary(JSON.stringify({ assignment: "explore tree", subagent: "explore" }))).toBe(
-			"explore · explore tree",
+			"explore – explore tree",
 		);
 	});
 

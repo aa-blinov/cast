@@ -17,6 +17,7 @@
  */
 
 import { displayWidth } from "./display-width.ts";
+import { highlightCode } from "./syntax.ts";
 
 export interface Span {
 	text: string;
@@ -26,6 +27,10 @@ export interface Span {
 	underline?: boolean;
 	/** Semantic colour name resolved by the view against the active theme. */
 	tone?: "heading" | "code" | "quote" | "link" | "marker" | "rule";
+	/** highlight.js scope inside a fenced block ("keyword", "string", …), or
+	 *  "text" for a piece the grammar left plain. Set only when the block was
+	 *  highlighted, so the view can tell a highlighted token from flat code. */
+	scope?: string;
 }
 
 export interface RenderedLine {
@@ -54,7 +59,6 @@ const INLINE_ITALIC_ALT_RE = /(?<![A-Za-z0-9])_([^_\n]+)_(?![A-Za-z0-9])/;
 const INLINE_STRIKE_RE = /~~([^~]+)~~/;
 const WORD_SPLIT_RE = /(\s+)/;
 const ONLY_SPACE_RE = /^\s+$/;
-const FENCE_SCAN_RE = /^\s*(?:```+|~~~+)/gm;
 
 interface InlinePattern {
 	re: RegExp;
@@ -120,7 +124,8 @@ function mergeSpans(spans: Span[]): Span[] {
 			last.italic === span.italic &&
 			last.dim === span.dim &&
 			last.underline === span.underline &&
-			last.tone === span.tone
+			last.tone === span.tone &&
+			last.scope === span.scope
 		) {
 			last.text += span.text;
 			continue;
@@ -251,8 +256,28 @@ function renderTable(rows: string[][], width: number, indent: string): RenderedL
 			if (pad > 0) spans.push({ text: " ".repeat(pad) });
 		});
 		lines.push({ spans: mergeSpans(spans) });
+		// A rule under the header row. Bold alone marked it before, which is
+		// nothing at all in a theme with a low-contrast palette or on a terminal
+		// that renders bold as a colour shift — and a table whose header reads as
+		// data is a table you have to count columns in.
+		if (rowIndex === 0 && cells.length > 1) {
+			const rule = widths
+				.map((columnWidth, c) => "─".repeat(columnWidth) + (c === columns - 1 ? "" : " ".repeat(gap)))
+				.join("");
+			lines.push({
+				spans: [
+					{ text: indent, dim: true, tone: "marker" },
+					{ text: rule, dim: true, tone: "rule" },
+				],
+			});
+		}
 	});
 	return lines;
+}
+
+/** A fenced block left open, and the language it was opened with. */
+export interface OpenFence {
+	language?: string;
 }
 
 export interface MarkdownRenderOptions {
@@ -260,6 +285,8 @@ export interface MarkdownRenderOptions {
 	width: number;
 	/** Indent applied to every line — two spaces for the chat's body text. */
 	indent?: string;
+	/** The text starts inside this already-open fence (see trailingOpenFence). */
+	openFence?: OpenFence | null;
 }
 
 /**
@@ -272,8 +299,11 @@ export function renderMarkdownLines(text: string, options: MarkdownRenderOptions
 	const indent = options.indent ?? "";
 	const out: RenderedLine[] = [];
 	const rawLines = text.split("\n");
-	let inFence = false;
-	let fenceMarker = "";
+	// The text may begin inside a fence opened in an earlier chunk of the same
+	// answer — the caller says so with `openFence`, and its language is what
+	// keeps the highlighting going across the cut.
+	let inFence = options.openFence != null;
+	let fenceMarker = "```";
 	let table: string[][] | null = null;
 
 	const flushTable = (): void => {
@@ -282,31 +312,47 @@ export function renderMarkdownLines(text: string, options: MarkdownRenderOptions
 		table = null;
 	};
 
+	// A fenced block is highlighted as a whole, not line by line: a block
+	// comment or a template literal spans lines, and a per-line tokenizer would
+	// lose its scope at every break. So the lines are buffered until the closing
+	// fence — or until the input ends, which is the normal case mid-stream.
+	let fenceLang: string | undefined = options.openFence?.language;
+	let fenceLines: string[] = [];
+	const flushFence = () => {
+		if (fenceLines.length === 0) return;
+		const highlighted = highlightCode(fenceLines.join("\n"), fenceLang);
+		fenceLines.forEach((raw, index) => {
+			const tokens = highlighted?.[index];
+			const spans: Span[] =
+				tokens && tokens.length > 0
+					? tokens.map((token) => ({ text: token.text, tone: "code" as const, scope: token.scope ?? "text" }))
+					: // A blank line still needs a cell, or the wrapper drops the row.
+						[{ text: raw === "" ? " " : raw, tone: "code" as const, ...(highlighted ? { scope: "text" } : {}) }];
+			// Code keeps its own spacing; only hard-wrap what does not fit.
+			out.push(...wrapSpans(spans, width, indent, `${indent}  `).map((line) => ({ ...line, code: true })));
+		});
+		fenceLines = [];
+	};
+
 	for (const raw of rawLines) {
 		const fence = FENCE_RE.exec(raw);
 		if (fence) {
 			flushTable();
 			if (!inFence) {
-				// The language tag is dropped rather than printed: it would cost a
-				// row in the live region, and the block is already marked as code
-				// for the view to colour.
+				// The language tag is not printed — it would cost a row in the live
+				// region — but it does decide the grammar the block is coloured with.
 				inFence = true;
 				fenceMarker = fence[1]!.slice(0, 3);
+				fenceLang = fence[2] || undefined;
 			} else if (fence[1]!.startsWith(fenceMarker)) {
 				inFence = false;
+				flushFence();
+				fenceLang = undefined;
 			}
 			continue;
 		}
 		if (inFence) {
-			// Code keeps its own spacing; only hard-wrap what does not fit.
-			out.push(
-				...wrapSpans([{ text: raw === "" ? " " : raw, tone: "code" }], width, indent, `${indent}  `).map(
-					(line) => ({
-						...line,
-						code: true,
-					}),
-				),
-			);
+			fenceLines.push(raw);
 			continue;
 		}
 
@@ -370,6 +416,9 @@ export function renderMarkdownLines(text: string, options: MarkdownRenderOptions
 		}
 		out.push(...wrapSpans(inlineSpans(raw), width, indent, indent));
 	}
+	// An unclosed fence is the normal case while an answer streams: render what
+	// arrived rather than holding the whole block back until the closing fence.
+	flushFence();
 	flushTable();
 	return out;
 }
@@ -383,6 +432,33 @@ export function renderMarkdownLines(text: string, options: MarkdownRenderOptions
  * lines taken to fill the budget, plus the fence state carried in from the
  * text before them so a code block does not lose its styling mid-stream.
  */
+/**
+ * The fence still open at the end of `text`, with the language tag it was
+ * opened with — or null when everything is closed. `incoming` is the fence the
+ * text *starts* inside, for a chunk cut out of a longer answer.
+ *
+ * The streaming transcript is cut into chunks at line boundaries (see
+ * splitCompleteLines), so a chunk routinely begins inside a fenced block with
+ * its ```` ```ts ```` opener in an earlier chunk. Without threading this, the
+ * first rows of a code block were highlighted and every row after the cut
+ * arrived flat.
+ */
+export function trailingOpenFence(text: string, incoming?: OpenFence | null): OpenFence | null {
+	let open: OpenFence | null = incoming ?? null;
+	let marker = "```";
+	for (const raw of text.split("\n")) {
+		const fence = FENCE_RE.exec(raw);
+		if (!fence) continue;
+		if (!open) {
+			open = fence[2] ? { language: fence[2] } : {};
+			marker = fence[1]!.slice(0, 3);
+		} else if (fence[1]!.startsWith(marker)) {
+			open = null;
+		}
+	}
+	return open;
+}
+
 export function renderMarkdownTail(
 	text: string,
 	options: MarkdownRenderOptions & { maxLines: number },
@@ -398,9 +474,13 @@ export function renderMarkdownTail(
 	const take = Math.min(rawLines.length, maxLines + 4);
 	const head = rawLines.slice(0, rawLines.length - take).join("\n");
 	const tailText = rawLines.slice(rawLines.length - take).join("\n");
-	const fencesBefore = (head.match(FENCE_SCAN_RE) ?? []).length;
-	const insideFence = fencesBefore % 2 === 1;
-	const rendered = renderMarkdownLines(insideFence ? `\`\`\`\n${tailText}` : tailText, options);
+	// Reopen the fence the window starts inside — *with its language tag*.
+	// A bare ``` was enough to keep the block styled as code, but it threw the
+	// tag away, so a long block lost its highlighting the moment the opening
+	// fence scrolled out of the window: the first rows of an answer were
+	// coloured and the rest arrived flat.
+	const open = trailingOpenFence(head, options.openFence);
+	const rendered = renderMarkdownLines(tailText, { ...options, openFence: open });
 	const truncated = rendered.length > maxLines || take < rawLines.length;
 	return { lines: truncated ? rendered.slice(rendered.length - maxLines) : rendered, truncated };
 }

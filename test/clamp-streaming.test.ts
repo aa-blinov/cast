@@ -149,3 +149,24 @@ describe("clampStreamingBlocks", () => {
 		expect(out.map((e) => (e.block.kind === "tool" ? e.block.call.id : ""))).toEqual(["a", "b", "c"]);
 	});
 });
+
+describe("clampStreamingBlocks fence threading", () => {
+	// The clamp renders the blocks it keeps, so it has to know which of them
+	// start inside a fenced block — the stream cuts an answer into chunks at
+	// line boundaries, and the opener with its language tag stays behind in an
+	// earlier chunk.
+	it("carries a fence's language into the chunk after the cut", () => {
+		const blocks = [text("content", "```ts\nconst a = 1;"), text("content", "const b = 2;")];
+		const laidOut = clampStreamingBlocks(blocks, 30, 60);
+		const second = laidOut.find((entry) => entry.block === blocks[1]);
+		expect(second?.lines?.[0]!.code).toBe(true);
+		expect(second?.lines?.[0]!.spans.map((span) => span.scope)).toContain("keyword");
+	});
+
+	it("reads a chunk's leading ``` as the close it is", () => {
+		const blocks = [text("content", "```ts\nconst a = 1;"), text("content", "```\nобычный текст")];
+		const laidOut = clampStreamingBlocks(blocks, 30, 60);
+		const second = laidOut.find((entry) => entry.block === blocks[1]);
+		expect(second?.lines?.every((line) => line.code !== true)).toBe(true);
+	});
+});

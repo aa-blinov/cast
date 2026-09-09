@@ -1431,7 +1431,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			turnStartedAt: ws.turnStartedAt ?? null,
 			streaming: reconciled.streaming,
 			// turnMeta is per-message now (see toDisplayMessages) — each
-			// assistant reply carries its own "provider · model · Ns" footer,
+			// assistant reply carries its own "provider – model – Ns" footer,
 			// persisted to disk, instead of a single session-level "last turn"
 			// value that only ever covered the most recent one.
 			messages: reconciled.messages,

@@ -316,7 +316,7 @@ export function NewSessionModal({
 								onChange=${(e) => { setModel(e.target.value); setModelCheck(null); }}
 							>
 								<option value="">— Select model —</option>
-								${(models || []).filter((m) => !provider || (m.provider && m.provider === provider) || !m.provider).slice(0, 50).map((m) => html`<option value=${m.id}>${m.id}${m.provider ? ` · ${m.provider}` : ""}</option>`)}
+								${(models || []).filter((m) => !provider || (m.provider && m.provider === provider) || !m.provider).slice(0, 50).map((m) => html`<option value=${m.id}>${m.id}${m.provider ? ` – ${m.provider}` : ""}</option>`)}
 							</select>
 							<button class="modal-btn icon-btn verify-btn" title="Проверить доступность модели" disabled=${busy || checkingModel || !provider || !model} onClick=${async () => {
 							setCheckingModel(true); setModelCheck(null);

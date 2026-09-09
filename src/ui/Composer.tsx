@@ -71,7 +71,7 @@ interface ComposerProps {
 const MAX_COMPOSER_ROWS = 3;
 
 const IDLE_PLACEHOLDER = "ask cast to do anything";
-const RUNNING_PLACEHOLDER = "type to steer the running turn — esc esc to stop";
+const RUNNING_PLACEHOLDER = "type to steer the running turn – esc esc to stop";
 
 function renderWithChips(text: string, chipLabels: Map<string, string>, keyPrefix: string): JSX.Element[] {
 	if (!text) return [];
@@ -774,8 +774,8 @@ export function Composer({
 						);
 					})}
 					<Text color={theme().muted}>
-						↑↓ — Tab/Enter — Esc
-						{filteredCmds.length > paletteRows ? ` — ${safeIdx + 1}/${filteredCmds.length}` : ""}
+						↑↓ – Tab/Enter – Esc
+						{filteredCmds.length > paletteRows ? ` – ${safeIdx + 1}/${filteredCmds.length}` : ""}
 					</Text>
 				</Box>
 			)}

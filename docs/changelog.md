@@ -2,6 +2,21 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Added
+
+- **Code blocks are syntax-highlighted.** A snippet in a reply was one flat colour, which is where a terminal gives up on the thing it is best at — strings, comments and names carry the shape of the code, and the eye finds them before it reads the words. highlight.js does the tokenizing (through its emitter, not its HTML), across 25 curated grammars: an unknown or missing language tag leaves the block plain rather than guessing, because a wrong guess colours a snippet *misleadingly*. A ```` ```diff ```` block gets its additions and deletions coloured, so a patch in an answer reads like a patch.
+
+### Fixed
+
+- **A code block stopped being highlighted halfway down, and a table after it came out as raw `|` rows.** The stream cuts an answer into chunks at line boundaries and promotes each separately, so a chunk routinely begins inside a fenced block — with its ```` ```ts ```` opener, language tag and all, left behind in an earlier chunk. Worse, a chunk that *began* with the closing ```` ``` ```` read it as a new opening fence and swallowed everything after it as flat code. The open fence (and its language) is now threaded through the chunks, in the live region and in the committed transcript alike.
+- **A table's header row is marked by a rule, not just bold.** Bold alone is nothing at all on a terminal that renders it as a faint colour shift, and a table whose header reads as data is a table you have to count columns in.
+
+### Changed
+
+- **One separator everywhere: `–`.** Hints used `—`, content labels used `·`, and both appeared in the same frame. The picker and palette footers, the composer placeholder, tool rows (`read src/ui/ChatLog.tsx – lines all`), the MCP `server – tool` label, the subagent summary, the turn footer (`provider – model – Ns`) and the web UI's equivalents all use the en dash now.
+
 ## 0.30.0
 
 ### Changed

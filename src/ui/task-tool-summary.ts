@@ -25,7 +25,7 @@ export function formatTaskToolSummary(argsJson: string): string | null {
 	const subagent = typeof obj.subagent === "string" ? obj.subagent.trim() : "";
 	const capped = assignment.length > ASSIGNMENT_CAP ? `${assignment.slice(0, ASSIGNMENT_CAP)}…` : assignment;
 	if (subagent && subagent !== "worker") {
-		return `${subagent} · ${capped}`;
+		return `${subagent} – ${capped}`;
 	}
 	return capped;
 }

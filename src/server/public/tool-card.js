@@ -46,7 +46,7 @@ function isMcpTool(name) {
 }
 
 function mcpToolLabel(name) {
-	return name.slice(4).replace(/_/g, " · ");
+	return name.slice(4).replace(/_/g, " – ");
 }
 
 function formatToolResult(name, result) {
