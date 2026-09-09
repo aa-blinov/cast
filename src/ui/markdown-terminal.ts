@@ -210,7 +210,7 @@ function splitRow(row: string): string[] {
  * then shrink proportionally when the table is wider than the terminal —
  * a raw `|---|---|` table just wrapped into noise before.
  */
-function renderTable(rows: string[][], width: number, indent: string): RenderedLine[] {
+function renderTable(rows: string[][], width: number, indent: string, headerless = false): RenderedLine[] {
 	const columns = Math.max(...rows.map((r) => r.length));
 	const cells = rows.map((row) => {
 		const padded = [...row];
@@ -249,7 +249,7 @@ function renderTable(rows: string[][], width: number, indent: string): RenderedL
 					piece = piece.slice(0, cut);
 				}
 				if (!piece) break;
-				spans.push({ ...span, text: piece, bold: span.bold || rowIndex === 0 });
+				spans.push({ ...span, text: piece, bold: span.bold || (rowIndex === 0 && !headerless) });
 				usedCells += displayWidth(piece);
 			}
 			const pad = budget - usedCells + (c === columns - 1 ? 0 : gap);
@@ -260,7 +260,7 @@ function renderTable(rows: string[][], width: number, indent: string): RenderedL
 		// nothing at all in a theme with a low-contrast palette or on a terminal
 		// that renders bold as a colour shift — and a table whose header reads as
 		// data is a table you have to count columns in.
-		if (rowIndex === 0 && cells.length > 1) {
+		if (rowIndex === 0 && cells.length > 1 && !headerless) {
 			const rule = widths
 				.map((columnWidth, c) => "─".repeat(columnWidth) + (c === columns - 1 ? "" : " ".repeat(gap)))
 				.join("");
@@ -278,6 +278,17 @@ function renderTable(rows: string[][], width: number, indent: string): RenderedL
 /** A fenced block left open, and the language it was opened with. */
 export interface OpenFence {
 	language?: string;
+}
+
+/**
+ * True for a line the table renderer would swallow — a row or an alignment
+ * rule. The stream's chunk splitter uses it to keep a table whole: column
+ * widths are computed per chunk, so a table cut across two of them comes out
+ * with two different column layouts, and the chunk that starts with the
+ * alignment rule loses its header.
+ */
+export function isTableLine(raw: string): boolean {
+	return TABLE_ROW_RE.test(raw) || TABLE_RULE_RE.test(raw);
 }
 
 export interface MarkdownRenderOptions {
@@ -305,11 +316,15 @@ export function renderMarkdownLines(text: string, options: MarkdownRenderOptions
 	let inFence = options.openFence != null;
 	let fenceMarker = "```";
 	let table: string[][] | null = null;
+	// The header row is in an earlier chunk: this chunk's first table row is
+	// data, and must not be drawn as a header.
+	let headerless = false;
 
 	const flushTable = (): void => {
 		if (!table) return;
-		out.push(...renderTable(table, width, indent));
+		out.push(...renderTable(table, width, indent, headerless));
 		table = null;
+		headerless = false;
 	};
 
 	// A fenced block is highlighted as a whole, not line by line: a block
@@ -356,7 +371,14 @@ export function renderMarkdownLines(text: string, options: MarkdownRenderOptions
 			continue;
 		}
 
-		if (TABLE_RULE_RE.test(raw) && table) continue;
+		// A `|---|---|` row is never content, with or without a header above it:
+		// when a chunk *starts* with the rule (the header settled in the chunk
+		// before it), keeping it made the alignment row itself the table's
+		// header — `---  ---:  ---:` as a row of data.
+		if (TABLE_RULE_RE.test(raw)) {
+			if (!table) headerless = true;
+			continue;
+		}
 		if (TABLE_ROW_RE.test(raw)) {
 			table = table ?? [];
 			table.push(splitRow(raw));
