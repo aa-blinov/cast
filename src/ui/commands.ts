@@ -3360,9 +3360,11 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				"editor.deleteToLineEnd": "Delete to line end",
 				"input.submit": "Submit",
 				"input.abort": "Exit (2× to confirm)",
-				"input.escape": "Stop turn / clear input",
+				"input.escape": "Stop turn (2×)",
 				"input.attachImage": "Attach image",
-				"input.tab": "Autocomplete",
+				"input.tab": "Complete a command or path",
+				"editor.insertNewline": "Line break",
+				"editor.clearBuffer": "Clear the input",
 			};
 			const KEY_LABELS: Record<string, string> = {
 				up: "↑",
@@ -3393,6 +3395,9 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				"alt+right": "Alt+→",
 				"alt+backspace": "Alt+Backspace",
 				"alt+delete": "Alt+Del",
+				"ctrl+l": "Ctrl+L",
+				"shift+enter": "Shift+Enter",
+				"alt+enter": "Alt+Enter",
 				"ctrl+left": "Ctrl+←",
 				"ctrl+right": "Ctrl+→",
 			};
@@ -3406,8 +3411,11 @@ const COMMAND_ROUTES: CommandRoute[] = [
 			// Esc and Ctrl+C are context-dependent (a single label can't capture it):
 			// spell out what each does while a turn is running vs idle.
 			const notes =
-				"\n\n  Esc      stops the current turn while generating; clears the input otherwise" +
-				"\n  Ctrl+C   press twice within 2s to exit (does not stop a turn — use Esc for that)";
+				"\n\n  Esc      stops the current turn while generating (press twice); Ctrl+L clears the input" +
+				"\n  Ctrl+C   press twice within 2s to exit (does not stop a turn — use Esc for that)" +
+				"\n  Enter    sends; for a line break use Shift+Enter or Alt+Enter, or end the line with \\" +
+				"\n           (Shift+Enter needs a terminal that reports it — kitty, WezTerm, Ghostty, iTerm2)" +
+				"\n  Tab      completes a slash command, or a path containing / or starting with ~";
 			deps.agent.addDisplayMessage({
 				role: "warning",
 				content: `${header}\n${lines.join("\n")}${notes}`,

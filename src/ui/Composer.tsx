@@ -296,10 +296,12 @@ export function Composer({
 	/**
 	 * Put a recalled prompt into the composer.
 	 *
-	 * A multi-line prompt goes back in as a paste chip rather than as literal
-	 * newlines: the buffer is one line by construction (see paste.ts), and the
-	 * chip expands to the exact original text on submit, so recalling and
-	 * re-sending a pasted block reproduces it byte for byte.
+	 * Short multi-line prompts come back as real lines, now that the composer
+	 * can hold them — recalling one to fix a typo used to hand back an opaque
+	 * `[Pasted 3 lines]` chip that could only be deleted whole. A big block
+	 * still becomes a chip: the composer shows three rows, so pouring a
+	 * hundred lines into it helps nobody, and the chip re-expands byte for byte
+	 * on submit.
 	 */
 	const showRecalled = (text: string): void => {
 		const b = bufRef.current;
@@ -311,7 +313,7 @@ export function Composer({
 			return;
 		}
 		const lineCount = text.split("\n").length;
-		if (lineCount > 1) {
+		if (lineCount > MAX_COMPOSER_ROWS) {
 			const char = chipCharFor(0);
 			chipCounterRef.current = 1;
 			setPendingPastes([{ char, label: pasteLabel(lineCount, text.length), text }]);
