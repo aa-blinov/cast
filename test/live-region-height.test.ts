@@ -43,16 +43,18 @@ const frameRows = (blocks: StreamBlock[]): { rows: number; widest: number } => {
 };
 
 describe("live region height", () => {
-	// `you` is shorter than `agent`, so without a shared label field the text
-	// of consecutive turns started in two different columns.
-	it("starts the text of every turn in the same column", () => {
+	// Labels sit on their own row now, so every kind of row — a turn, its
+	// reasoning, a notice — starts its text in the same column, and none of
+	// them spends width on the label.
+	it("starts every row's text in the column right after the rail", () => {
 		const output = renderToString(
 			createElement(ChatLog, {
 				messages: [
 					{ role: "user" as const, content: "вопрос" },
 					{ role: "assistant" as const, content: "", blocks: [{ kind: "content" as const, text: "ответ" }] },
+					{ role: "warning" as const, content: "[system] уведомление" },
 				],
-				streaming: null,
+				streaming: { blocks: [{ kind: "thinking" as const, text: "мысль" }] },
 				error: null,
 				retry: null,
 				columns: COLUMNS,
@@ -64,11 +66,16 @@ describe("live region height", () => {
 		const rows = output
 			// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping the SGR codes Ink emits
 			.replace(/\x1b\[[0-9;]*m/g, "")
-			.split("\n")
-			.filter((line) => line.includes("вопрос") || line.includes("ответ"));
-		expect(rows).toHaveLength(2);
-		const columnOf = (row: string, word: string) => displayWidth(row.slice(0, row.indexOf(word)));
-		expect(columnOf(rows[0]!, "вопрос")).toBe(columnOf(rows[1]!, "ответ"));
+			.split("\n");
+		for (const word of ["вопрос", "ответ", "уведомление", "мысль"]) {
+			const row = rows.find((line) => line.includes(word));
+			expect(row, word).toBeDefined();
+			// Two cells for the rail and its space, then the text.
+			expect(displayWidth(row!.slice(0, row!.indexOf(word))), word).toBe(2);
+		}
+		// The label is a row of its own, carrying no body text.
+		expect(rows.some((line) => line.trim() === "▌ you")).toBe(true);
+		expect(rows.some((line) => line.trim() === "▌ agent")).toBe(true);
 	});
 
 	it.each([

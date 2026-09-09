@@ -322,15 +322,7 @@ describe("handleInput", () => {
 		}
 		// Anything that changes what the running turn does, or needs it finished,
 		// stays blocked.
-		for (const cmd of [
-			"/clear",
-			"/model",
-			"/quit",
-			"/memory runs",
-			"/compact",
-			"/undo",
-			"/tmp/screenshot.png",
-		]) {
+		for (const cmd of ["/clear", "/model", "/quit", "/memory runs", "/compact", "/undo", "/tmp/screenshot.png"]) {
 			expect(canSubmitDuringRun(cmd), cmd).toBe(false);
 		}
 		// Plain text is always sendable: mid-run it steers the turn, so the
