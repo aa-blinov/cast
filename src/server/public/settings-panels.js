@@ -781,7 +781,7 @@ function SettingsSsh({ data, busy, act, confirm }) {
 				<div key=${h.name} class="settings-item-row">
 					<div class="settings-item-info">
 						<span class="settings-item-name">${h.name}</span>
-						<span class="settings-item-meta">${h.username ? `${h.username}@` : ""}${h.host}${h.port ? `:${h.port}` : ""} · ${h.keyPath ? "private key" : h.password ? "password" : "SSH agent"}</span>
+						<span class="settings-item-meta">${h.username ? `${h.username}@` : ""}${h.host}${h.port ? `:${h.port}` : ""} – ${h.keyPath ? "private key" : h.password ? "password" : "SSH agent"}</span>
 					</div>
 					<div class="settings-item-actions">
 						<button class="modal-btn icon-btn modal-btn-danger" title="Remove" disabled=${busy} onClick=${async () => {

@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { displayWidth } from "../src/ui/display-width.ts";
-import { renderMarkdownLines, renderMarkdownTail } from "../src/ui/markdown-terminal.ts";
+import { renderMarkdownLines, renderMarkdownTail, trailingOpenFence } from "../src/ui/markdown-terminal.ts";
 
 const plain = (line: { spans: Array<{ text: string }> }) => line.spans.map((s) => s.text).join("");
 const render = (text: string, width = 60, indent = "") => renderMarkdownLines(text, { width, indent });
@@ -126,5 +126,83 @@ describe("renderMarkdownTail", () => {
 
 		expect(truncated).toBe(false);
 		expect(lines.map(plain).join("\n")).toContain("one");
+	});
+});
+
+describe("code blocks and tables", () => {
+	// The fence's language tag is not printed, but it decides the grammar the
+	// block is coloured with — and the block is highlighted as a whole, so a
+	// comment or template literal spanning lines keeps its scope on each.
+	it("carries syntax scopes into the spans of a fenced block", () => {
+		const lines = renderMarkdownLines('```ts\nconst x = "s";\n```', { width: 60 });
+		const spans = lines[0]!.spans.filter((span) => span.scope !== undefined);
+		expect(spans.map((span) => [span.scope, span.text])).toEqual([
+			["keyword", "const"],
+			["text", " x = "],
+			["string", '"s"'],
+			["text", ";"],
+		]);
+	});
+
+	it("leaves a block with no language, or an unknown one, flat", () => {
+		for (const fence of ["```", "```cobol"]) {
+			const lines = renderMarkdownLines(`${fence}\nconst x = 1;\n\`\`\``, { width: 60 });
+			expect(lines[0]!.spans.every((span) => span.scope === undefined)).toBe(true);
+			expect(lines[0]!.code).toBe(true);
+		}
+	});
+
+	// Mid-stream the closing fence has not arrived yet; holding the block back
+	// until it does would freeze the answer as it is being written.
+	it("renders an unclosed fence", () => {
+		const lines = renderMarkdownLines("```python\ndef f():\n    return 1", { width: 60 });
+		expect(lines.map((line) => line.spans.map((span) => span.text).join(""))).toEqual([
+			"def f():",
+			"    return 1",
+		]);
+	});
+
+	it("draws a rule under a table header, but not under a header with no data", () => {
+		const table = renderMarkdownLines("| файл | строк |\n|---|---|\n| a.ts | 12 |", { width: 40, indent: "" });
+		const text = table.map((line) => line.spans.map((span) => span.text).join(""));
+		expect(text[1]).toMatch(/^─+ {2}─+$/);
+		expect(text).toHaveLength(3);
+		const headerOnly = renderMarkdownLines("| файл | строк |", { width: 40, indent: "" });
+		expect(headerOnly).toHaveLength(1);
+	});
+});
+
+describe("fenced blocks across chunk boundaries", () => {
+	// The stream cuts an answer into chunks at line boundaries and promotes
+	// them separately, so a chunk routinely starts inside a fenced block — or
+	// with the *closing* fence, which read as an opening one and swallowed the
+	// rest of the answer as flat code (a table after a code block came out as
+	// raw `| a | b |` rows).
+	it("reports the fence a chunk leaves open, with its language", () => {
+		expect(trailingOpenFence("text\n```ts\nconst x = 1;")).toEqual({ language: "ts" });
+		expect(trailingOpenFence("```ts\nconst x = 1;\n```")).toBeNull();
+		expect(trailingOpenFence("```\nplain")).toEqual({});
+		expect(trailingOpenFence("still code")).toBeNull();
+		// Threaded: the chunk starts inside a fence and closes it.
+		expect(trailingOpenFence("```\nprose", { language: "ts" })).toBeNull();
+		expect(trailingOpenFence("more code", { language: "ts" })).toEqual({ language: "ts" });
+	});
+
+	it("keeps highlighting a block whose opener is in an earlier chunk", () => {
+		const lines = renderMarkdownLines('const x = "s";', { width: 60, openFence: { language: "ts" } });
+		expect(lines[0]!.code).toBe(true);
+		expect(lines[0]!.spans.map((span) => span.scope)).toContain("keyword");
+	});
+
+	it("treats a chunk's leading ``` as the close it is, not a new block", () => {
+		const lines = renderMarkdownLines("```\n\n| файл | строк |\n|---|---|\n| a.ts | 12 |", {
+			width: 40,
+			indent: "",
+			openFence: { language: "ts" },
+		});
+		// A table, not five rows of flat code.
+		const text = lines.map((line) => line.spans.map((span) => span.text).join(""));
+		expect(text.some((row) => /^─+ {2}─+$/.test(row))).toBe(true);
+		expect(lines.every((line) => line.code !== true)).toBe(true);
 	});
 });

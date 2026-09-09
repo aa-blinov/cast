@@ -1,7 +1,14 @@
 import { Box, Static, Text } from "ink";
 import { type JSX, useMemo, useRef } from "react";
 import { getLastFrameOverflow } from "../core/stdin-manager.ts";
-import { type RenderedLine, renderMarkdownLines, renderMarkdownTail, type Span } from "./markdown-terminal.ts";
+import {
+	type OpenFence,
+	type RenderedLine,
+	renderMarkdownLines,
+	renderMarkdownTail,
+	type Span,
+	trailingOpenFence,
+} from "./markdown-terminal.ts";
 import { Spinner } from "./Spinner.tsx";
 import { formatTaskToolSummary } from "./task-tool-summary.ts";
 import { theme } from "./themes/index.ts";
@@ -163,14 +170,14 @@ function ToolSummary({
 	if (model.kind === "read") {
 		return (
 			<Text wrap="truncate" {...tone}>
-				{model.path} · lines {model.range}
+				{model.path} – lines {model.range}
 			</Text>
 		);
 	}
 	if (model.kind === "write") {
 		return (
 			<Text wrap="truncate" {...tone}>
-				{model.path} · {model.lines} {model.lines === 1 ? "line" : "lines"}
+				{model.path} – {model.lines} {model.lines === 1 ? "line" : "lines"}
 			</Text>
 		);
 	}
@@ -229,6 +236,54 @@ const BLOCK_STYLE = {
 } as const;
 
 /** Ink props for one rendered span, with tones resolved against the theme. */
+/**
+ * highlight.js scope → theme colour, in five buckets rather than a full
+ * editor palette: a terminal theme has one hue per role, and a snippet in a
+ * reply needs the shape (what is a string, what is a comment, where a name is)
+ * rather than a colour per token class. `text` is a piece the grammar left
+ * plain and keeps the default foreground — flat `accent` on everything is what
+ * the highlighting replaces.
+ *
+ * Scopes arrive dotted ("title.function", "meta.string"), so the lookup walks
+ * from the most specific prefix down.
+ */
+function syntaxColor(scope: string): string | undefined {
+	const colors = theme();
+	const buckets: Record<string, string | undefined> = {
+		text: undefined,
+		comment: colors.muted,
+		quote: colors.muted,
+		meta: colors.muted,
+		string: colors.success,
+		char: colors.success,
+		regexp: colors.success,
+		addition: colors.success,
+		number: colors.warning,
+		literal: colors.warning,
+		symbol: colors.warning,
+		deletion: colors.error,
+		keyword: colors.accent,
+		built_in: colors.accent,
+		operator: colors.accent,
+		// Not `agent`: that is the colour of the rail this code sits behind, and
+		// a function name in the rail's own hue reads as chrome.
+		title: colors.user,
+		section: colors.user,
+		name: colors.user,
+		tag: colors.user,
+		type: colors.user,
+		class: colors.user,
+		"selector-tag": colors.user,
+	};
+	let key = scope;
+	for (;;) {
+		if (key in buckets) return buckets[key];
+		const dot = key.lastIndexOf(".");
+		if (dot === -1) return undefined;
+		key = key.slice(0, dot);
+	}
+}
+
 function spanProps(span: Span): {
 	color?: string;
 	bold?: boolean;
@@ -238,15 +293,17 @@ function spanProps(span: Span): {
 } {
 	const colors = theme();
 	const color =
-		span.tone === "code"
-			? colors.accent
-			: span.tone === "heading"
-				? colors.agent
-				: span.tone === "link"
-					? colors.accent
-					: span.tone === "quote" || span.tone === "marker" || span.tone === "rule"
-						? colors.muted
-						: undefined;
+		span.scope !== undefined
+			? syntaxColor(span.scope)
+			: span.tone === "code"
+				? colors.accent
+				: span.tone === "heading"
+					? colors.agent
+					: span.tone === "link"
+						? colors.accent
+						: span.tone === "quote" || span.tone === "marker" || span.tone === "rule"
+							? colors.muted
+							: undefined;
 	return {
 		...(color ? { color } : {}),
 		...(span.bold ? { bold: true } : {}),
@@ -337,12 +394,12 @@ function MarkdownBody({
 // core/mcp.ts's mcpToolName) — same prefix-strip-and-loosen treatment the
 // web UI already applies (app.js's isMcpTool/mcpToolLabel), so the TUI
 // doesn't show the raw underscored wire name where the web UI shows a
-// readable "server · tool" label.
+// readable "server – tool" label.
 function isMcpTool(name: string): boolean {
 	return name.startsWith("mcp_");
 }
 function mcpToolLabel(name: string): string {
-	return name.slice(4).replace(/_/g, " · ");
+	return name.slice(4).replace(/_/g, " – ");
 }
 
 /**
@@ -357,6 +414,7 @@ function BlockView({
 	showReasoning,
 	width,
 	lines,
+	openFence,
 }: {
 	block: StreamBlock;
 	truncated?: boolean;
@@ -370,13 +428,15 @@ function BlockView({
 	/** Pre-rendered lines from the clamp — rendering twice per frame would
 	 *  double the cost of the one thing that runs on every token. */
 	lines?: RenderedLine[];
+	/** The block's text begins inside this fence — see trailingOpenFence. */
+	openFence?: OpenFence | null;
 }): JSX.Element | null {
 	if (block.kind === "thinking") {
 		if (showReasoning === false) return null;
 		const style = BLOCK_STYLE.thinking;
 		return (
 			<MarkdownBody
-				lines={lines ?? renderMarkdownLines(block.text, { width: bodyWidth(width) })}
+				lines={lines ?? renderMarkdownLines(block.text, { width: bodyWidth(width), openFence })}
 				gutter={railMuted()}
 				bar={style.bar}
 				label={block.continued ? undefined : style.label}
@@ -389,7 +449,7 @@ function BlockView({
 		const style = BLOCK_STYLE.content;
 		return (
 			<MarkdownBody
-				lines={lines ?? renderMarkdownLines(block.text, { width: bodyWidth(width) })}
+				lines={lines ?? renderMarkdownLines(block.text, { width: bodyWidth(width), openFence })}
 				gutter={theme().agent}
 				bar={style.bar}
 				label={block.continued ? undefined : style.label}
@@ -456,6 +516,16 @@ export function clampStreamingBlocks(
 	// (3), status bar (1), notices/steer/queue lines and a safety margin.
 	const budget = Math.max(4, rows - 8 - extraReserve);
 
+	// Fence context per block, forward: a block cut out of a longer answer can
+	// start inside a fenced block whose opener (and language) is in an earlier
+	// one, and the highlighting has to survive the cut.
+	const fences: Array<OpenFence | null> = [];
+	let fence: OpenFence | null = null;
+	for (const block of blocks) {
+		fences.push(fence);
+		if (block.kind !== "tool") fence = trailingOpenFence(block.text, fence);
+	}
+
 	const out: LaidOutBlock[] = [];
 	let used = 0;
 	for (let i = blocks.length - 1; i >= 0; i--) {
@@ -486,7 +556,7 @@ export function clampStreamingBlocks(
 			block.text.includes("<think") || block.text.includes("</think")
 				? block.text.replace(THINK_TAG_RE, "")
 				: block.text;
-		const { lines, truncated } = renderMarkdownTail(text, { width, maxLines: room });
+		const { lines, truncated } = renderMarkdownTail(text, { width, maxLines: room, openFence: fences[i] });
 		out.unshift({ block, truncated, index: i, lines });
 		used += lines.length + labelRows;
 		if (truncated) break;
@@ -502,10 +572,13 @@ function MessageView({
 	message,
 	showReasoning,
 	width,
+	openFence: incomingFence,
 }: {
 	message: ChatMessage;
 	showReasoning: boolean;
 	width: number;
+	/** Fence still open when this message starts — see trailingOpenFence. */
+	openFence?: OpenFence | null;
 }): JSX.Element {
 	const colors = theme();
 	if (message.role === "user") {
@@ -519,11 +592,25 @@ function MessageView({
 		);
 	}
 	if (message.role === "assistant") {
+		// Same threading as the clamp's: a promoted chunk can begin inside a
+		// fence opened in an earlier chunk — of this message, or of the one
+		// before it (each settle promotes its own assistant message).
+		let fence: OpenFence | null = incomingFence ?? null;
 		return (
 			<Box flexDirection="column">
-				{message.blocks?.map((b, i) => (
-					<BlockView key={blockKey(b, i)} block={b} showReasoning={showReasoning} width={width} />
-				))}
+				{message.blocks?.map((b, i) => {
+					const openFence = fence;
+					if (b.kind !== "tool") fence = trailingOpenFence(b.text, fence);
+					return (
+						<BlockView
+							key={blockKey(b, i)}
+							block={b}
+							showReasoning={showReasoning}
+							width={width}
+							openFence={openFence}
+						/>
+					);
+				})}
 			</Box>
 		);
 	}
@@ -567,6 +654,24 @@ export function ChatLog({
 	const liveParts: JSX.Element[] = [];
 
 	const cols = Math.max(20, columns);
+	// Where each message starts, fence-wise. Recomputed only when the message
+	// list changes (an append, a replay) — not per streamed token, which is
+	// what ChatLog's other work is paced by. Threading this is what keeps a
+	// code block highlighted across the chunk boundaries the stream cuts it
+	// into: a chunk that begins with the *closing* ``` used to read as an
+	// opening one and swallowed the rest of the answer as flat code.
+	const messageFences = useMemo(() => {
+		const out: Array<OpenFence | null> = [];
+		let fence: OpenFence | null = null;
+		for (const message of messages) {
+			out.push(fence);
+			if (message.role !== "assistant") continue;
+			for (const block of message.blocks ?? []) {
+				if (block.kind !== "tool") fence = trailingOpenFence(block.text, fence);
+			}
+		}
+		return out;
+	}, [messages]);
 	// Sticky overflow compensation: the flat "-8" budget guess in
 	// clampStreamingBlocks doesn't know the composer's actual height, open
 	// palette, steer/queue lines, etc., so it can still under-reserve and let
@@ -656,6 +761,7 @@ export function ChatLog({
 						message={m}
 						showReasoning={showReasoning}
 						width={cols}
+						openFence={messageFences[i]}
 					/>
 				)}
 			</Static>

@@ -136,7 +136,7 @@ export interface SessionState {
 	 */
 	reasoning?: Record<number, string>;
 	/**
-	 * Per-turn "provider · model · Ns" summary, keyed by the index of the
+	 * Per-turn "provider – model – Ns" summary, keyed by the index of the
 	 * assistant message that concluded that turn — same sidecar-map shape and
 	 * rationale as `reasoning` above (no field on the wire-format `Message`
 	 * itself to hold it). Unlike `reasoning`, this used to be purely ephemeral

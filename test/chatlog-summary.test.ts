@@ -52,7 +52,7 @@ describe("ChatLog tool rows", () => {
 		expect(output).toContain("git status --short");
 		expect(output).not.toContain('command="');
 		// Colour is spent only where it earns the contrast: a failure.
-		expect(output).toMatch(/✗\s+workspace · search/);
+		expect(output).toMatch(/✗\s+workspace – search/);
 		expect(output).toContain("authentication");
 		expect(output).not.toContain("MUTATED_RESULT_MUST_NOT_RENDER");
 		expect(output).not.toContain("MCP_ERROR_PAYLOAD_MUST_NOT_RENDER");

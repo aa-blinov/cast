@@ -1411,7 +1411,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				...(restoredPersona ? { persona: restoredPersona } : {}),
 			});
 			agent.refresh();
-			const personaNote = restoredPersona ? ` · persona: ${restoredPersona.label}` : "";
+			const personaNote = restoredPersona ? ` – persona: ${restoredPersona.label}` : "";
 			showNotice(`[Continued session: ${session.id} (${session.messages.length} messages)${personaNote}]`);
 			return;
 		},
@@ -1486,7 +1486,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 			const mcpCount = deps.mcpResult.toolDefinitions.length;
 			showNotice(
 				mcpCount > 0
-					? `[Plan mode: ON — exploring and planning only · ${mcpCount} MCP tool${mcpCount === 1 ? "" : "s"} stay fully enabled (not gated by plan mode)]`
+					? `[Plan mode: ON — exploring and planning only – ${mcpCount} MCP tool${mcpCount === 1 ? "" : "s"} stay fully enabled (not gated by plan mode)]`
 					: "[Plan mode: ON — exploring and planning only]",
 			);
 			return;
@@ -3041,7 +3041,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				...(restoredPersona ? { persona: restoredPersona } : {}),
 			});
 			agent.refresh();
-			const personaNote = restoredPersona ? ` · persona: ${restoredPersona.label}` : "";
+			const personaNote = restoredPersona ? ` – persona: ${restoredPersona.label}` : "";
 			showNotice(`[Switched to session: ${session.id} (${session.messages.length} messages)${personaNote}]`);
 			return;
 		},

@@ -196,8 +196,8 @@ export function ModalPicker<T>(props: {
 			)}
 			<Box marginTop={1}>
 				<Text color={theme().muted}>
-					{searchable ? "type to filter" : "up/down select"} — Enter confirm — Esc cancel
-					{visibleLen > rows ? ` — ${idx + 1}/${visibleLen}` : ""}
+					{searchable ? "type to filter" : "up/down select"} – Enter confirm – Esc cancel
+					{visibleLen > rows ? ` – ${idx + 1}/${visibleLen}` : ""}
 				</Text>
 			</Box>
 		</Box>
@@ -265,7 +265,7 @@ export function TextInputModal(props: {
 				</Box>
 			)}
 			<Box marginTop={1}>
-				<Text color={theme().muted}>Enter confirm — Esc cancel</Text>
+				<Text color={theme().muted}>Enter confirm – Esc cancel</Text>
 			</Box>
 		</Box>
 	);
@@ -353,8 +353,8 @@ export function MultiSelectPicker<T>(props: {
 			})}
 			<Box marginTop={1}>
 				<Text color={theme().muted}>
-					up/down navigate — Space toggle — Enter confirm — Esc cancel
-					{props.options.length > rows ? ` — ${idx + 1}/${props.options.length}` : ""}
+					up/down navigate – Space toggle – Enter confirm – Esc cancel
+					{props.options.length > rows ? ` – ${idx + 1}/${props.options.length}` : ""}
 				</Text>
 			</Box>
 		</Box>
