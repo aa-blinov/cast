@@ -25,6 +25,13 @@ export const TUI_KEYBINDINGS = {
 	"editor.deleteToLineEnd": { defaultKeys: "ctrl+k" },
 	"editor.clearBuffer": { defaultKeys: "ctrl+l", description: "Clear the composer in any state" },
 	"input.submit": { defaultKeys: "enter" },
+	// Terminals that speak the Kitty protocol or modifyOtherKeys report these;
+	// a plain one sends the same bytes for Enter and Shift+Enter, so the
+	// composer also accepts a trailing backslash before Enter (see doSubmit).
+	"editor.insertNewline": {
+		defaultKeys: ["shift+enter", "alt+enter"],
+		description: "Insert a line break (or end the line with \\ and press Enter)",
+	},
 	"input.abort": { defaultKeys: "ctrl+c" },
 	"input.escape": { defaultKeys: "escape" },
 	"input.attachImage": { defaultKeys: "ctrl+g" },

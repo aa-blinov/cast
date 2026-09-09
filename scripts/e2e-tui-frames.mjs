@@ -191,6 +191,17 @@ for (const draft of ["queued text that is long ", "second queued message just as
 	await wait(1200);
 }
 await wait(2500);
+// A multi-line draft is bounded too: MAX_COMPOSER_ROWS rows, window following
+// the cursor. Typed here with the backslash continuation, which needs no
+// terminal support for modified Enter.
+for (const line of ["первая строка", "вторая строка", "третья строка", "четвёртая"]) {
+	await typeSlowly(`${line}\\`);
+	term.write("\r");
+	await wait(200);
+}
+await wait(800);
+term.write("\x0c"); // Ctrl+L — drop the draft
+await wait(400);
 const composerClears = [...seen.matchAll(/\x1b\[2J/g)].length;
 
 seen = "";
@@ -209,9 +220,9 @@ provider.close();
 rmSync(home, { recursive: true, force: true });
 
 console.log(`full screen clears while streaming: ${clears} (scrollback wipes: ${scrollbackWipes}), ${bytes} bytes`);
-console.log(`full screen clears while typing a long draft and queueing mid-turn: ${composerClears}`);
+console.log(`full screen clears while typing a long draft, a multi-line draft and queueing mid-turn: ${composerClears}`);
 if (composerClears > 0) {
-	console.error("FAIL: a long composer draft or a queued-message row grew the live region past the viewport.");
+	console.error("FAIL: a composer draft or a queued-message row grew the live region past the viewport.");
 	process.exit(1);
 }
 console.log(`full screen clears for a 30-hook /hooks listing: ${noticeClears} (rows listed: ${listedHooks})`);
