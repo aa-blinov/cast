@@ -165,6 +165,10 @@ const STREAM_BLOCKS_IMPORT_RE = /from\s*"\.\/stream-blocks\.js"/;
 // and `max-age=3600` on the asset means `location.reload()` won't re-fetch
 // even though the file content on disk is different.
 const VERSIONED_LOCAL_IMPORT_RE = /from\s*"\.\/(?!\.)([\w-]+)\.js(?!\?v=)"/g;
+/** The same, for a dynamic `import("./x.js")` — the click-gated modules are
+ *  loaded that way (see public/lazy.js), and without a version in the URL they
+ *  fall into the one-hour cache bucket and a deploy leaves them stale. */
+const VERSIONED_DYNAMIC_IMPORT_RE = /import\(\s*"\.\/(?!\.)([\w-]+)\.js(?!\?v=)"\s*\)/g;
 // Local modules whose `./<name>.js` imports are rewritten with `?v=` inside
 // Rendered static responses (body + headers), keyed by path|encoding|version —
 // see serveStatic. Bounded; cleared wholesale when it passes 1024 entries.
@@ -236,6 +240,7 @@ const IMPORT_REWRITE_TARGETS = [
 	"hotkeys",
 	"icons",
 	"inputs-explorer",
+	"lazy",
 	"markdown",
 	"memory-explorer",
 	"message",
@@ -246,6 +251,7 @@ const IMPORT_REWRITE_TARGETS = [
 	"settings-appearance",
 	"settings-modal",
 	"settings-model",
+	"settings-entry",
 	"settings-panels",
 	"share-modal",
 	"sidebar",
@@ -257,8 +263,12 @@ const IMPORT_REWRITE_TARGETS = [
 	"use-session-controller",
 	"use-session-state",
 	"use-workspace-state",
+	"workspace-panel-entry",
 ] as const;
 const PINNED_VERSION_RE = /^v?\d+\.\d+\.\d+$/;
+/** A font URL inside a stylesheet. Quoting varies: the source uses single
+ *  quotes, and the build's CSS minifier drops them (see scripts/build.mjs). */
+const FONT_URL_RE = /url\(\s*['"]?\/fonts\/([a-z0-9-]+)\.woff2['"]?\s*\)/g;
 const DIFF_FILE_RE = /b\/(.+)$/;
 const HUNK_HEADER_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 
@@ -271,7 +281,7 @@ const MIME_TYPES: Record<string, string> = {
 	".png": "image/png",
 	".svg": "image/svg+xml",
 	".ico": "image/x-icon",
-	".ttf": "font/ttf",
+	".woff2": "font/woff2",
 };
 
 export interface WebServerOptions {
@@ -717,7 +727,20 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 					.replace('href="/settings.css"', `href="/settings.css?v=${assetVersion("/settings.css")}"`)
 					.replace('src="/app.js"', `src="/app.js?v=${assetVersion("/app.js")}"`)
 					.replace('src="/login.js"', `src="/login.js?v=${assetVersion("/login.js")}"`);
-			} else if (ext === ".js") {
+			} else if (ext === ".css") {
+				// Stamp the font URLs with a content hash, the same way the JS
+				// imports below are stamped: a font file never changes, but
+				// without a version in the URL it falls into the one-hour
+				// `max-age` bucket and every visitor refetches it — 37KB of
+				// woff2 for the default face, and the browser cannot know it is
+				// the same bytes it already has.
+				content = content
+					.toString("utf-8")
+					.replace(
+						FONT_URL_RE,
+						(_, name) => `url("/fonts/${name}.woff2?v=${assetVersion(`/fonts/${name}.woff2`)}")`,
+					);
+			} else if (ext === ".js" && !urlPath.startsWith("/bundle/")) {
 				// Stamp every bare `./<local>.js` import with a content-hash — for app.js/settings-modal the hash is mixed into the HTML's ?v= above, for other modules (file-explorer.js → file-preview.js) the browser's cache is busted via the import URL itself
 				// version query so the browser refetches them when the file
 				// changes (see VERSIONED_LOCAL_IMPORT_RE comment). The
@@ -726,6 +749,10 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 				content = content
 					.toString("utf-8")
 					.replace(VERSIONED_LOCAL_IMPORT_RE, (_, name) => `from"./${name}.js?v=${assetVersion(`/${name}.js`)}"`)
+					.replace(
+						VERSIONED_DYNAMIC_IMPORT_RE,
+						(_, name) => `import("./${name}.js?v=${assetVersion(`/${name}.js`)}")`,
+					)
 					.replace(STREAM_BLOCKS_IMPORT_RE, `from"./stream-blocks.js?v=${assetVersion("/stream-blocks.js")}"`);
 			}
 			const accepts = req.headers?.["accept-encoding"] ?? "";
@@ -734,7 +761,10 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			const encoding =
 				textAsset && accepts.includes("br") ? "br" : textAsset && accepts.includes("gzip") ? "gzip" : undefined;
 			const body = encoding === "br" ? brotliCompressSync(raw) : encoding === "gzip" ? gzipSync(raw) : raw;
-			const immutable = ext !== ".html" && requestedVersion === assetVersion(urlPath);
+			// A bundled chunk carries a content hash in its own filename (see
+			// scripts/build.mjs), so it needs no `?v=` to be cacheable forever.
+			const immutable =
+				urlPath.startsWith("/bundle/") || (ext !== ".html" && requestedVersion === assetVersion(urlPath));
 			const headers = {
 				"Content-Type": mime,
 				"Content-Length": body.length,

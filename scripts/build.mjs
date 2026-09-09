@@ -122,6 +122,9 @@ const webJavaScript = [
 	"sidebar-session-item.js",
 	"sidebar.js",
 	"share-modal.js",
+	"settings-entry.js",
+	"workspace-panel-entry.js",
+	"lazy.js",
 	"settings-model.js",
 	"settings-appearance.js",
 	"settings-panels.js",
@@ -154,6 +157,54 @@ for (const file of webJavaScript) {
 	writeFileSync(`dist/public/${file}`, result.code);
 }
 
+// Bundle the web app for production.
+//
+// The browser was fetching the app as 45 separate ES modules before it could
+// show a composer, in a graph six levels deep — every level a round trip, and
+// this daemon is routinely reached over a network rather than from localhost.
+// One bundled entry plus a chunk per click-gated feature (the dynamic imports
+// in public/lazy.js become those chunks) turns that into two round trips.
+//
+// Only the built copy is bundled: served from src/ during development the raw
+// modules stay exactly as they are, which is what makes them debuggable
+// without a build step. Output names carry a content hash, so the server can
+// treat everything under /bundle/ as immutable without any URL rewriting.
+const bundle = await build({
+	entryPoints: ["dist/public/app.js"],
+	bundle: true,
+	splitting: true,
+	format: "esm",
+	outdir: "dist/public/bundle",
+	entryNames: "[name]-[hash]",
+	chunkNames: "[name]-[hash]",
+	minify: true,
+	legalComments: "none",
+	target: "es2022",
+	metafile: true,
+	// The big vendored libraries stay out of the bundle on purpose: marked,
+	// DOMPurify and highlight.js (1MB of it) are dynamically imported by the
+	// file preview and must keep loading only when a file is previewed.
+	external: ["/vendor/*"],
+	// preact/htm are vendored (see public/vendor) and resolved through an
+	// import map in the browser; the bundler needs the same mapping.
+	alias: {
+		preact: "./src/server/public/vendor/preact.mjs",
+		"preact/hooks": "./src/server/public/vendor/preact-hooks.mjs",
+		htm: "./src/server/public/vendor/htm.mjs",
+	},
+});
+const bundleEntry = Object.keys(bundle.metafile.outputs).find(
+	(file) => bundle.metafile.outputs[file].entryPoint === "dist/public/app.js",
+);
+if (!bundleEntry) throw new Error("web bundle: entry point missing from the metafile");
+const bundleUrl = `/${bundleEntry.replace(/^dist\/public\//, "")}`;
+// Point the served HTML at the bundle. The import map stays: it is what the
+// unbundled dev copy resolves preact through, and an unused map costs nothing.
+writeFileSync(
+	"dist/public/index.html",
+	readFileSync("dist/public/index.html", "utf8").replace('src="/app.js"', `src="${bundleUrl}"`),
+);
+
 const webStylesheets = ["tokens.css", "chat.css", "tools.css", "workspace.css", "settings.css", "style.css", "login.css"];
 for (const file of webStylesheets) {
 	const source = readFileSync(`dist/public/${file}`, "utf8");
@@ -165,7 +216,30 @@ for (const file of webStylesheets) {
 // actually rotates on every deploy — `activate` evicts any cache key that
 // doesn't match CACHE, but that's a no-op if CACHE never changes (see sw.js).
 const { version: castVersion } = JSON.parse(readFileSync("package.json", "utf8"));
-writeFileSync("dist/public/sw.js", readFileSync("dist/public/sw.js", "utf8").replaceAll("__CAST_VERSION__", castVersion));
+// The precache list, written from what the build actually emitted: the shell
+// used to name `/app.js` and the vendored preact/htm modules, none of which the
+// bundled HTML loads any more — so the worker was precaching bytes nobody
+// fetches while missing the bundle itself.
+const shell = [
+	"/",
+	"/index.html",
+	"/manifest.json",
+	"/tokens.css",
+	"/chat.css",
+	"/tools.css",
+	"/workspace.css",
+	"/settings.css",
+	"/style.css",
+	"/login.css",
+	"/favicon.svg",
+	bundleUrl,
+];
+writeFileSync(
+	"dist/public/sw.js",
+	readFileSync("dist/public/sw.js", "utf8")
+		.replaceAll("__CAST_VERSION__", castVersion)
+		.replace('"__CAST_SHELL__"', JSON.stringify(shell)),
+);
 
 // Same idea for the vendored image-codec WASM binaries (image-resize.ts) —
 // esbuild only bundles the @jsquash/* JS glue, not these; they're read from
