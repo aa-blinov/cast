@@ -6,6 +6,8 @@ All notable user-facing changes to cast, newest first.
 
 ### Changed
 
+- **Typing while the agent works steers it.** A plain message sent mid-turn is injected into the running turn — no `/steer`, no `/s`. That is what the message means when it is written mid-run, and it is what the web UI already did (the daemon steers anything sent into a running turn), so the two surfaces finally agree; the TUI used to refuse the line and tell you to go read about `/queue` and `/steer`. `/steer` stays for being explicit and for scripts. An image can't be injected mid-turn — that says so instead of dropping the picture silently. The composer's hint follows: `type to steer the running turn — esc esc to stop`.
+- **`·` is gone from the hint lines.** Composer placeholder, the `/` palette footer and every picker footer separate their hints with `—` now.
 - **Every row under the transcript is one row again, on any terminal width.** The composer's placeholder, and the status bar, still wrapped: at 24 columns the bar took two rows and the placeholder three, growing the live region the rest of this work exists to keep fixed; at 40 the elapsed counter painted over the tail of the model name, so `test-model` read `test-mode0.4s`. Both truncate now, with the status bar's right-hand group keeping its width. The composer's hint is also shorter and less shouty — `ask cast to do anything`, and `esc esc to stop · /queue · /steer` while a turn runs; the commands it used to spell out are in the `/` palette. The divider above the composer spans the full width instead of stopping one cell short.
 
 ## 0.29.0

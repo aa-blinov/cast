@@ -191,7 +191,7 @@ export function StatusBarPicker(props: StatusBarPickerProps): JSX.Element {
 			})}
 			<Box marginTop={1}>
 				<Text color={theme().muted}>
-					↑/↓ navigate · Space toggle · ←/→ side · j/k reorder · Enter confirm · Esc cancel
+					↑/↓ navigate — Space toggle — ←/→ side — j/k reorder — Enter confirm — Esc cancel
 				</Text>
 			</Box>
 		</Box>

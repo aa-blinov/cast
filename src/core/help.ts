@@ -106,7 +106,7 @@ Interactive commands:
                          adding a skill, persona, or mcp.json entry)
   /skill:name [args]     Force-load and run a skill
   /usage                 Show cumulative token/cost usage for this session
-  /steer <message>       Inject message while agent is running
+  /steer <message>       Inject message while agent is running (or just type it)
   /queue <message>       Queue message for after agent stops
   /queue-reset (/qr)     Clear the message queue
   /abort, /stop          Abort current agent run
