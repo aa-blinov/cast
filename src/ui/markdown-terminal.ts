@@ -42,12 +42,30 @@ export interface RenderedLine {
 const HEADING_RE = /^(#{1,6})\s+(.*)$/;
 const FENCE_RE = /^\s*(```+|~~~+)\s*(\S*)/;
 const BULLET_RE = /^(\s*)([-*+])\s+(.*)$/;
+/** GitHub task list: `- [ ] todo`, `- [x] done`. */
+const TASK_RE = /^\[([ xX])\]\s+(.*)$/;
+/** Bullet per nesting level — three shapes, so the third level is not a
+ *  slightly smaller version of the second. */
+const BULLETS = ["•", "◦", "▪"] as const;
 const ORDERED_RE = /^(\s*)(\d{1,3})[.)]\s+(.*)$/;
 const QUOTE_RE = /^\s*>\s?(.*)$/;
 const HR_RE = /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/;
 const TABLE_RULE_RE = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
 const TABLE_ROW_RE = /^\s*\|(.+)\|\s*$/;
 const LIST_MARKER_WIDTH = 2;
+/** Cells a nested list item is indented by, above which nesting is capped so a
+ *  deeply (or oddly) indented item cannot push its text off the terminal. */
+const MAX_LIST_PAD = 12;
+
+/**
+ * A nested item keeps the indentation it was written with, rounded to whole
+ * levels — `1. ` is three cells wide and `• ` two, so a fixed two-per-level
+ * indent left an item nested under an ordered one a cell short of its parent's
+ * text.
+ */
+function listPad(leading: string): number {
+	return Math.min(displayWidth(leading), MAX_LIST_PAD);
+}
 
 // Inline patterns, hoisted: inlineSpans runs per line of every rendered block.
 const INLINE_CODE_RE = /`([^`]+)`/;
@@ -447,24 +465,27 @@ export function renderMarkdownLines(text: string, options: MarkdownRenderOptions
 		}
 		const bullet = BULLET_RE.exec(raw);
 		if (bullet) {
-			const depth = Math.floor(displayWidth(bullet[1]!) / 2);
-			const marker = depth === 0 ? "•" : depth === 1 ? "–" : "·";
-			const lead = `${indent}${" ".repeat(depth * LIST_MARKER_WIDTH)}${marker} `;
-			out.push(
-				...wrapSpans(inlineSpans(bullet[3]!), width, lead, `${indent}${" ".repeat(depth * LIST_MARKER_WIDTH + 2)}`),
-			);
+			const pad = listPad(bullet[1]!);
+			const task = TASK_RE.exec(bullet[3]!);
+			// A task list is a list of boxes, not of `[ ]` typed out. The box
+			// replaces the bullet rather than sitting after it: two markers in a
+			// row (`• [ ]`) is one marker too many, and both are one cell wide.
+			const marker = task ? (task[1] === " " ? "☐" : "☑") : (BULLETS[Math.min(pad / 2, BULLETS.length - 1)] ?? "•");
+			const text = task ? task[2]! : bullet[3]!;
+			const lead = `${indent}${" ".repeat(pad)}${marker} `;
+			out.push(...wrapSpans(inlineSpans(text), width, lead, `${indent}${" ".repeat(pad + LIST_MARKER_WIDTH)}`));
 			continue;
 		}
 		const ordered = ORDERED_RE.exec(raw);
 		if (ordered) {
-			const depth = Math.floor(displayWidth(ordered[1]!) / 2);
-			const lead = `${indent}${" ".repeat(depth * LIST_MARKER_WIDTH)}${ordered[2]}. `;
+			const pad = listPad(ordered[1]!);
+			const lead = `${indent}${" ".repeat(pad)}${ordered[2]}. `;
 			out.push(
 				...wrapSpans(
 					inlineSpans(ordered[3]!),
 					width,
 					lead,
-					`${indent}${" ".repeat(depth * LIST_MARKER_WIDTH + displayWidth(`${ordered[2]}. `))}`,
+					`${indent}${" ".repeat(pad + displayWidth(`${ordered[2]}. `))}`,
 				),
 			);
 			continue;
