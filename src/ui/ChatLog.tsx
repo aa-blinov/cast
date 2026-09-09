@@ -231,6 +231,22 @@ const BLOCK_STYLE = {
 	thinking: { label: "reasoning", bar: "┆" },
 } as const;
 
+/**
+ * Every turn's label is drawn in a field this wide, so `you` and `agent` push
+ * their text to the same column and consecutive turns read as one column of
+ * prose instead of two ragged ones.
+ *
+ * `reasoning` is wider and keeps its own field: padding every turn out to nine
+ * cells to match it would spend a ninth of an 80-column terminal on chrome,
+ * and reasoning is dim secondary text that reads as its own thing anyway.
+ */
+const LABEL_FIELD = Math.max(displayWidth(USER_LABEL), displayWidth(BLOCK_STYLE.content.label));
+
+/** Cells the label occupies, gap excluded. */
+function labelField(label: string): number {
+	return Math.max(displayWidth(label), LABEL_FIELD);
+}
+
 /** Ink props for one rendered span, with tones resolved against the theme. */
 function spanProps(span: Span): {
 	color?: string;
@@ -308,9 +324,11 @@ function MarkdownBody({
 	/** Dim the text (not the rail) — reasoning and finished scaffolding. */
 	dimText?: boolean;
 }): JSX.Element {
-	// The label's field is exactly `label + LABEL_GAP` cells wide, whatever it
-	// renders inside it — that is the width the lines were wrapped for.
-	const indent = label ? " ".repeat(displayWidth(label) + LABEL_GAP) : "";
+	// The label's field is exactly `labelField(label) + LABEL_GAP` cells wide,
+	// whatever it renders inside it — that is the width the lines were wrapped
+	// for, and it is why continuations line up with the first line.
+	const field = label ? labelField(label) + LABEL_GAP : 0;
+	const indent = " ".repeat(field);
 	return (
 		<Box flexDirection="column">
 			{lines.map((line, i) => (
@@ -320,7 +338,8 @@ function MarkdownBody({
 					{label && i === 0 ? (
 						<Text color={gutter} dimColor={dimText}>
 							{label}
-							{truncated ? `…${" ".repeat(LABEL_GAP - 1)}` : " ".repeat(LABEL_GAP)}
+							{truncated ? "…" : ""}
+							{" ".repeat(field - displayWidth(label) - (truncated ? 1 : 0))}
 						</Text>
 					) : (
 						indent
@@ -411,7 +430,7 @@ function BlockView({
  * what lets the clamp count rows without re-rendering.
  */
 function bodyWidth(width: number | undefined, kind?: keyof typeof BLOCK_STYLE | "plain"): number {
-	const label = kind && kind !== "plain" ? displayWidth(BLOCK_STYLE[kind].label) + LABEL_GAP : 0;
+	const label = kind && kind !== "plain" ? labelField(BLOCK_STYLE[kind].label) + LABEL_GAP : 0;
 	return Math.max(20, (width ?? process.stdout.columns ?? 80) - GUTTER_WIDTH - label);
 }
 
@@ -512,7 +531,7 @@ function MessageView({
 }): JSX.Element {
 	const colors = theme();
 	if (message.role === "user") {
-		const usable = Math.max(20, width - GUTTER_WIDTH - displayWidth(USER_LABEL) - LABEL_GAP);
+		const usable = Math.max(20, width - GUTTER_WIDTH - labelField(USER_LABEL) - LABEL_GAP);
 		return (
 			<MarkdownBody
 				lines={renderMarkdownLines(message.content, { width: usable })}
