@@ -7,7 +7,12 @@
  */
 import { describe, expect, it } from "vitest";
 import { displayWidth } from "../src/ui/display-width.ts";
-import { renderMarkdownLines, renderMarkdownTail, trailingOpenFence } from "../src/ui/markdown-terminal.ts";
+import {
+	isTableLine,
+	renderMarkdownLines,
+	renderMarkdownTail,
+	trailingOpenFence,
+} from "../src/ui/markdown-terminal.ts";
 
 const plain = (line: { spans: Array<{ text: string }> }) => line.spans.map((s) => s.text).join("");
 const render = (text: string, width = 60, indent = "") => renderMarkdownLines(text, { width, indent });
@@ -169,6 +174,27 @@ describe("code blocks and tables", () => {
 		expect(text).toHaveLength(3);
 		const headerOnly = renderMarkdownLines("| файл | строк |", { width: 40, indent: "" });
 		expect(headerOnly).toHaveLength(1);
+	});
+});
+
+describe("a table cut across chunks", () => {
+	it("drops an alignment rule with no header above it, and keeps the rows as data", () => {
+		const lines = renderMarkdownLines("|---|---:|\n| Температура | +14 °C |\n| Ветер | штиль |", {
+			width: 50,
+			indent: "",
+		});
+		const text = lines.map((line) => line.spans.map((span) => span.text).join("").trimEnd());
+		// No `---  ---:` row, and no header rule under the first data row.
+		expect(text).toEqual(["Температура  +14 °C", "Ветер        штиль"]);
+		expect(lines.every((line) => line.spans.every((span) => !span.bold))).toBe(true);
+	});
+
+	it("knows which lines a table owns", () => {
+		expect(isTableLine("| a | b |")).toBe(true);
+		expect(isTableLine("|---|---:|")).toBe(true);
+		expect(isTableLine("| 1 |")).toBe(true);
+		expect(isTableLine("обычный текст")).toBe(false);
+		expect(isTableLine("")).toBe(false);
 	});
 });
 

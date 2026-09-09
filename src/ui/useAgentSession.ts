@@ -61,6 +61,7 @@ import {
 	type StreamingState,
 } from "../server/public/stream-blocks.js";
 import { displayWidthCacheFlush } from "./display-width.ts";
+import { isTableLine } from "./markdown-terminal.ts";
 
 export type AgentStatus = "idle" | "running" | "error";
 
@@ -124,9 +125,20 @@ export function splitCompleteLines(block: StreamBlock): { settled: StreamBlock[]
 	if (block.kind !== "content") return { settled: [], tail: block };
 	const idx = block.text.lastIndexOf("\n");
 	if (idx === -1) return { settled: [], tail: block };
+	// A table under construction stays in the tail until it ends. Column widths
+	// are computed per chunk, so a table cut across two of them is laid out
+	// twice with different widths — and the chunk that begins with the
+	// `|---|---|` rule loses the header that settled before it and draws the
+	// rule itself as a row of data. A code block, by contrast, splits fine: its
+	// open fence and language are threaded (see trailingOpenFence).
+	const lines = block.text.slice(0, idx).split("\n");
+	let keep = lines.length;
+	while (keep > 0 && isTableLine(lines[keep - 1]!)) keep--;
+	if (keep === 0) return { settled: [], tail: block };
+	const cut = lines.slice(0, keep).join("\n").length;
 	return {
-		settled: [{ kind: block.kind, text: block.text.slice(0, idx), continued: block.continued }],
-		tail: { kind: block.kind, text: block.text.slice(idx + 1), continued: true },
+		settled: [{ kind: block.kind, text: block.text.slice(0, cut), continued: block.continued }],
+		tail: { kind: block.kind, text: block.text.slice(cut + 1), continued: true },
 	};
 }
 

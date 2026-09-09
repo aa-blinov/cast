@@ -63,6 +63,32 @@ describe("splitCompleteLines", () => {
 		expect(tail).toEqual({ kind: "content", text: "partial", continued: true });
 	});
 
+	// Column widths are computed per chunk, so a table cut across two of them
+	// is laid out twice at different widths — and the chunk that begins with the
+	// `|---|---|` rule has no header above it and drew the rule as a row of
+	// data. So a table under construction stays in the tail until it ends.
+	it("keeps a table whole instead of settling half of it", () => {
+		const growing = "текст\n\n| a | b |\n|---|---|\n| 1 | 2 |\n";
+		const { settled, tail } = splitCompleteLines(content(growing));
+		expect(settled).toEqual([{ kind: "content", text: "текст\n", continued: undefined }]);
+		expect(tail.kind === "content" && tail.text).toBe("| a | b |\n|---|---|\n| 1 | 2 |\n");
+	});
+
+	it("settles the table once a line after it arrives", () => {
+		const done = "| a | b |\n|---|---|\n| 1 | 2 |\n\nи дальше проза\nпартиал";
+		const { settled, tail } = splitCompleteLines(content(done));
+		expect(settled[0]!.kind === "content" && settled[0]!.text).toBe(
+			"| a | b |\n|---|---|\n| 1 | 2 |\n\nи дальше проза",
+		);
+		expect(tail.kind === "content" && tail.text).toBe("партиал");
+	});
+
+	it("holds back a block that is nothing but a table so far", () => {
+		const { settled, tail } = splitCompleteLines(content("| a | b |\n|---|---|\n| 1 |"));
+		expect(settled).toEqual([]);
+		expect(tail.kind === "content" && tail.text).toBe("| a | b |\n|---|---|\n| 1 |");
+	});
+
 	it("marks the settled piece as continued once the run already showed its label", () => {
 		const running = content("partial");
 		(running as { continued?: boolean }).continued = true;
