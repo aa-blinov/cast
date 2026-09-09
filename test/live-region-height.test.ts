@@ -43,6 +43,34 @@ const frameRows = (blocks: StreamBlock[]): { rows: number; widest: number } => {
 };
 
 describe("live region height", () => {
+	// `you` is shorter than `agent`, so without a shared label field the text
+	// of consecutive turns started in two different columns.
+	it("starts the text of every turn in the same column", () => {
+		const output = renderToString(
+			createElement(ChatLog, {
+				messages: [
+					{ role: "user" as const, content: "вопрос" },
+					{ role: "assistant" as const, content: "", blocks: [{ kind: "content" as const, text: "ответ" }] },
+				],
+				streaming: null,
+				error: null,
+				retry: null,
+				columns: COLUMNS,
+				repaintKey: 0,
+				showReasoning: true,
+			}),
+			{ columns: COLUMNS },
+		);
+		const rows = output
+			// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping the SGR codes Ink emits
+			.replace(/\x1b\[[0-9;]*m/g, "")
+			.split("\n")
+			.filter((line) => line.includes("вопрос") || line.includes("ответ"));
+		expect(rows).toHaveLength(2);
+		const columnOf = (row: string, word: string) => displayWidth(row.slice(0, row.indexOf(word)));
+		expect(columnOf(rows[0]!, "вопрос")).toBe(columnOf(rows[1]!, "ответ"));
+	});
+
 	it.each([
 		["CJK", "日本語のテキストです".repeat(400)],
 		["ascii", "the quick brown fox jumps over the lazy dog ".repeat(400)],
