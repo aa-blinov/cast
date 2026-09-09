@@ -914,7 +914,9 @@ interface CommandRoute {
 	whileRunning?: "submit" | "handle";
 }
 
-const BUSY_NOTICE = "[Agent running — use /queue, /steer, or /abort]";
+/** For a command that can't run mid-turn. Plain text no longer lands here —
+ *  it steers (see handleInput). */
+const BUSY_NOTICE = "[Agent running — Esc stops the turn, /queue runs this after it]";
 
 /** Exact match on the command word, ignoring any arguments after it. */
 function isCommand(input: string, ...names: string[]): boolean {
@@ -3279,7 +3281,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 					"  /abort              Abort running agent (alias: /stop)\n" +
 					"  /queue (/q)         Queue message for next turn\n" +
 					"  /queue-reset (/qr)  Clear queue\n" +
-					"  /steer (/s)         Inject message into running turn\n" +
+					"  /steer (/s)         Inject message into running turn (plain text does this too)\n" +
 					"  /model [name]       Show/change model\n" +
 					"  /subagent-model [name]  Show/change subagent model\n" +
 					"  /reasoning [level]  Show/change reasoning level\n" +
@@ -3419,10 +3421,12 @@ const COMMAND_ROUTES: CommandRoute[] = [
  * Can the composer send this mid-turn? Derived from the routes themselves, so
  * a command that survives a running turn cannot drift out of the composer's
  * allowed list (they were two hand-maintained lists before).
+ *
+ * Plain text always can: mid-run it steers the turn (see handleInput).
  */
 export function canSubmitDuringRun(text: string): boolean {
 	const input = text.trim();
-	if (!input.startsWith("/")) return false;
+	if (!input.startsWith("/")) return true;
 	return COMMAND_ROUTES.some((route) => route.whileRunning === "submit" && route.match(input));
 }
 
@@ -3437,6 +3441,22 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 	if (!input) return;
 
 	if (!input.startsWith("/")) {
+		// Typing during a turn steers it — no /steer needed. That is what the
+		// message means when it is written mid-run, and it is what the daemon
+		// already does with anything the web UI sends into a running turn
+		// (bridge.submit's steering branch), so the two surfaces now agree.
+		// Routed through agent.steer rather than agent.submit so the pending
+		// receipt above the composer shows up in local-loop mode too.
+		if (running) {
+			if (images?.length) {
+				// steer carries text only, down every path — saying so beats
+				// injecting the words and silently dropping the picture.
+				showNotice("[An image can't be injected mid-turn — send it once the turn ends]");
+				return;
+			}
+			agent.steer(input);
+			return;
+		}
 		await agent.submit(text, images);
 		return;
 	}

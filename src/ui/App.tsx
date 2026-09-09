@@ -446,7 +446,7 @@ export function App(props: AppProps): JSX.Element {
 			}
 			if (agent.status !== "running") return true;
 			if (canSubmitDuringRun(text)) return true;
-			showNotice("[Agent running — use /queue, /steer, or /abort]");
+			showNotice("[Agent running — Esc stops the turn, /queue runs this after it]");
 			return false;
 		},
 		[agent.daemonConnected, agent.status, showNotice],

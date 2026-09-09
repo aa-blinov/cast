@@ -57,7 +57,7 @@ interface ComposerProps {
  *  documentation, and on a narrow terminal a sentence wraps the composer to
  *  two rows. The commands it used to list are in the `/` palette. */
 const IDLE_PLACEHOLDER = "ask cast to do anything";
-const RUNNING_PLACEHOLDER = "esc esc to stop · /queue · /steer";
+const RUNNING_PLACEHOLDER = "type to steer the running turn — esc esc to stop";
 
 function renderWithChips(text: string, chipLabels: Map<string, string>, keyPrefix: string): JSX.Element[] {
 	if (!text) return [];
@@ -703,8 +703,8 @@ export function Composer({
 						);
 					})}
 					<Text color={theme().muted}>
-						↑↓ · Tab/Enter · Esc
-						{filteredCmds.length > paletteRows ? ` · ${safeIdx + 1}/${filteredCmds.length}` : ""}
+						↑↓ — Tab/Enter — Esc
+						{filteredCmds.length > paletteRows ? ` — ${safeIdx + 1}/${filteredCmds.length}` : ""}
 					</Text>
 				</Box>
 			)}

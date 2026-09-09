@@ -111,6 +111,8 @@ See [Plan Mode](plan-mode.md) for the full workflow.
 
 ## Steering
 
+**Just type.** A plain message sent while the agent is running is steered into the running turn — no command needed, in the TUI and the web UI alike. `/steer` stays for when you want to be explicit (and for scripts).
+
 These commands work while the agent is running:
 
 | Command | Short | Description |

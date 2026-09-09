@@ -230,6 +230,26 @@ describe("handleInput", () => {
 		expect(calls["agent.submit"]).toEqual([["hello world", undefined]]);
 	});
 
+	// Typing mid-run is the steer, no command needed — the web UI has always
+	// behaved this way (the daemon steers anything sent into a running turn),
+	// and the TUI used to refuse the line outright.
+	it("steers plain text typed while a turn is running", async () => {
+		const { deps, calls } = createFakeDeps({ running: true });
+		await handleInput("  actually use the other file  ", undefined, deps);
+		expect(calls["agent.steer"]).toEqual([["actually use the other file"]]);
+		expect(calls["agent.submit"]).toBeUndefined();
+	});
+
+	// steer carries text only on every path, so an attached image would be
+	// dropped without a word.
+	it("refuses to steer a message with an image instead of dropping the image", async () => {
+		const { deps, calls } = createFakeDeps({ running: true });
+		await handleInput("look at this", [{ dataUrl: "data:image/png;base64,AAA" }], deps);
+		expect(calls["agent.steer"]).toBeUndefined();
+		expect(calls["agent.submit"]).toBeUndefined();
+		expect(noticeText(calls)).toContain("image");
+	});
+
 	it("/quit calls onQuit", async () => {
 		const { deps, calls } = createFakeDeps();
 		await handleInput("/quit", undefined, deps);
@@ -309,10 +329,14 @@ describe("handleInput", () => {
 			"/memory runs",
 			"/compact",
 			"/undo",
-			"hello",
 			"/tmp/screenshot.png",
 		]) {
 			expect(canSubmitDuringRun(cmd), cmd).toBe(false);
+		}
+		// Plain text is always sendable: mid-run it steers the turn, so the
+		// composer must not hold it back.
+		for (const prompt of ["hello", "  fix the failing test  ", "не то, дальше налево"]) {
+			expect(canSubmitDuringRun(prompt), prompt).toBe(true);
 		}
 	});
 
