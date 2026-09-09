@@ -241,7 +241,7 @@ function renderTable(rows: string[][], width: number, indent: string, headerless
 	// Per column: a `│`, a space either side of the text; plus the closing `│`.
 	const frame = 3 * columns + 1;
 	const available = Math.max(columns * 3, width - displayWidth(indent) - frame);
-	let total = widths.reduce((a, b) => a + b, 0);
+	const total = widths.reduce((a, b) => a + b, 0);
 	if (total > available) {
 		// Shrink the widest columns first so short ones stay readable.
 		const scale = available / total;
