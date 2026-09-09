@@ -75,8 +75,13 @@ import { build, transform } from "esbuild";
 // Copy static web assets into dist/ so the bundled server can serve them.
 // In the bundle, import.meta.dirname resolves to dist/ — the server looks
 // for public/ as a sibling of dist/index.js.
-import { cpSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
+// Wiped first, not merged into: the bundle's filenames carry content hashes,
+// so every build would otherwise leave its predecessor behind and the release
+// would ship every historical copy (and any file deleted from src/, like the
+// TTF fonts woff2 replaced, would live on in dist forever).
+rmSync("dist/public", { recursive: true, force: true });
 cpSync("src/server/public", "dist/public", { recursive: true });
 cpSync("src/server/ui-factory/template", "dist/ui-factory/template", { recursive: true });
 
