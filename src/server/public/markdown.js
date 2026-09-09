@@ -34,9 +34,16 @@ function escapeHtml(s) {
 		.replace(/'/g, "&#39;");
 }
 
-function renderMarkdown(text) {
+/**
+ * `useCache = false` for the text of a turn that is still streaming: its text
+ * is a different string every flush, so every one of those intermediate
+ * versions was landing in the cache and evicting the finished messages it
+ * exists to hold (300 entries, ~100 new versions per streamed answer). The
+ * result is identical either way — this only decides whether it is remembered.
+ */
+function renderMarkdown(text, useCache = true) {
 	if (!text) return "";
-	if (markdownCache.has(text)) return markdownCache.get(text);
+	if (useCache && markdownCache.has(text)) return markdownCache.get(text);
 
 	// Pull fenced code blocks out first so inline rules below can't mangle
 	// their contents; they go back in verbatim (already escaped) at the end.
@@ -149,11 +156,13 @@ function renderMarkdown(text) {
 
 	out = out.replace(/ FENCE(\d+) /g, (_m, i) => fences[Number(i)]);
 	out = out.replace(/ ?LINK(\d+) ?/g, (_m, i) => links[Number(i)]);
-	if (markdownCache.size >= MARKDOWN_CACHE_LIMIT) {
-		const firstKey = markdownCache.keys().next().value;
-		markdownCache.delete(firstKey);
+	if (useCache) {
+		if (markdownCache.size >= MARKDOWN_CACHE_LIMIT) {
+			const firstKey = markdownCache.keys().next().value;
+			markdownCache.delete(firstKey);
+		}
+		markdownCache.set(text, out);
 	}
-	markdownCache.set(text, out);
 	return out;
 }
 

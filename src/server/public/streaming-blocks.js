@@ -2,7 +2,7 @@ import htm from "htm";
 import { h } from "preact";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { collapseMidWordBoundaries } from "./reasoning-split.js";
-import { reduceStreamEvent } from "./stream-blocks.js";
+import { flushInterval, reduceStreamEvent } from "./stream-blocks.js";
 import { ToolCard } from "./tool-card.js";
 
 const html = htm.bind(h);
@@ -23,19 +23,20 @@ function StreamingText({ text, className }) {
 
 function StreamingMarkdown({ text, renderMarkdown }) {
 	const elRef = useRef(null);
-	const setRef = (el) => {
-		if (el && !elRef.current) elRef.current = el;
-		if (el && text) {
-			const fenceCount = (text.match(/```/g) || []).length;
-			const patched = fenceCount % 2 === 1 ? `${text}\n\`\`\`` : text;
-			el.innerHTML = renderMarkdown(patched);
-		}
-	};
-	useLayoutEffect(() => {
-		if (!elRef.current) return;
+	const paint = (el) => {
 		const fenceCount = (text.match(/```/g) || []).length;
 		const patched = fenceCount % 2 === 1 ? `${text}\n\`\`\`` : text;
-		elRef.current.innerHTML = renderMarkdown(patched);
+		// `false`: every frame's text is a new string, so caching these
+		// intermediate versions only evicts the finished messages the cache
+		// exists for (see markdown.js).
+		el.innerHTML = renderMarkdown(patched, false);
+	};
+	const setRef = (el) => {
+		if (el && !elRef.current) elRef.current = el;
+		if (el && text) paint(el);
+	};
+	useLayoutEffect(() => {
+		if (elRef.current) paint(elRef.current);
 	}, [text, renderMarkdown]);
 	return html`<div ref=${setRef} class="message-content"></div>`;
 }
@@ -127,11 +128,7 @@ export function LiveStreamingBlocks({ controllerRef, onFrame, renderMarkdown, sh
 			streamRef.current = reduceStreamEvent(streamRef.current, event);
 			if (pendingRef.current != null) return;
 			const since = performance.now() - lastFlushRef.current;
-			// Throttle streaming renders to ~12fps (80ms) — full markdown re-parse
-			// on every token is O(n²). Coalescing via RAF already helps, but for
-			// 4-5 tokens per frame we still re-parse the whole growing text.
-			// 80ms keeps typing feel smooth while cutting renders 4× on fast streams.
-			const delay = since < 80 ? 80 - since : 0;
+			const delay = Math.max(0, flushInterval(streamRef.current.blocks) - since);
 			if (delay === 0) {
 				pendingRef.current = { kind: "raf", id: requestAnimationFrame(flush) };
 			} else {

@@ -777,6 +777,13 @@ function App() {
 	const selfClosingRef = useRef(null);
 	const reconnectTimerRef = useRef(null);
 	const staticResourcesLoadedRef = useRef(false);
+	// Session id whose state selectSession has just fetched. The SSE stream's
+	// onopen refetches the session to catch anything missed while
+	// disconnected — but it fires on the *first* connect too, right after that
+	// fetch, so opening a session downloaded and parsed its whole page twice
+	// (439KB of JSON for a 240-message session, measured) and rendered it
+	// twice. Set by the controller, cleared by the first onopen.
+	const freshlyFetchedSessionRef = useRef(null);
 	const wasRunningRef = useRef(false);
 	const sessionViewVersionRef = useRef(0);
 	const draftVersionRef = useRef(0);
@@ -903,6 +910,7 @@ function App() {
 			showToast,
 			esRef,
 			staticResourcesLoadedRef,
+			freshlyFetchedSessionRef,
 			personasRef,
 			reconnectTimerRef,
 			setPersonas,
@@ -1265,6 +1273,22 @@ function App() {
 		es.onopen = () => {
 			if (!isCurrent()) return;
 			setConnected(true);
+			// First connect right after selectSession fetched this very session:
+			// its state is already applied, streaming blocks hydrated and all, so
+			// neither the reset nor the refetch below is wanted. That refetch was
+			// the largest response the page makes — 439KB of JSON for a
+			// 240-message session, parsed and rendered a second time on every
+			// session open — and it exists for a genuine *re*connect, where the
+			// daemon may have moved on while the tab was away.
+			const justFetched = freshlyFetchedSessionRef.current === streamSessionId;
+			freshlyFetchedSessionRef.current = null;
+			if (justFetched) {
+				autoScrollRef.current = true;
+				setAtBottom(true);
+				void retryPendingOutgoing(streamSessionId);
+				settleSessionStreamWaiter(streamSessionId, true);
+				return;
+			}
 			resetStreamingNow();
 			const hydrationVersion = streamingEventVersionRef.current;
 			// Refetch session state on reconnect — the server may have

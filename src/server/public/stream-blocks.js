@@ -69,3 +69,29 @@ export function reduceStreamEvent(state, event) {
 		),
 	};
 }
+
+/**
+ * How often the streaming answer may be repainted, by how long it already is.
+ *
+ * Each repaint replaces the block's HTML, and the browser then re-parses and
+ * re-lays-out all of it — the cost grows with the answer while the render rate
+ * does not, which is where a long turn's jank comes from. Traced on a CPU
+ * throttled 6× (a mid-range laptop), an eight-second answer spent ~1.2s in
+ * layout alone, and the transcript above it made no difference: it is the
+ * growing block itself.
+ *
+ * So a short answer keeps the full ~12fps, where the difference is visible,
+ * and a long one slows to ~4fps, where it is not — nobody reads the tail of a
+ * 30KB answer as it lands, and the text still arrives continuously.
+ */
+export const MIN_FLUSH_MS = 80;
+export const MAX_FLUSH_MS = 250;
+/** Text length at which the interval reaches MAX_FLUSH_MS. */
+const FLUSH_RAMP_CHARS = 12000;
+
+export function flushInterval(blocks) {
+	let length = 0;
+	for (const block of blocks) if (block.kind !== "tool") length += block.text.length;
+	const ramp = Math.min(1, length / FLUSH_RAMP_CHARS);
+	return MIN_FLUSH_MS + (MAX_FLUSH_MS - MIN_FLUSH_MS) * ramp;
+}
