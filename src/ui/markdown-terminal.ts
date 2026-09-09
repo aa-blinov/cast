@@ -206,10 +206,30 @@ function splitRow(row: string): string[] {
 }
 
 /**
- * A markdown table as aligned columns. Column widths come from the content,
- * then shrink proportionally when the table is wider than the terminal —
- * a raw `|---|---|` table just wrapped into noise before.
+ * A markdown table as a box-drawn grid. Column widths come from the content,
+ * then shrink proportionally when the table is wider than the terminal — a raw
+ * `|---|---|` table just wrapped into noise before.
+ *
+ * The frame costs three cells per column plus one, and two rows: it is the
+ * difference between a table you read and a table you count columns in, which
+ * on a terminal (no alternating row colours, no cell padding to speak of) is
+ * worth the space. Borders are dim, so the content stays the loudest thing in
+ * the block.
  */
+const BOX = {
+	h: "─",
+	v: "│",
+	topLeft: "┌",
+	topMid: "┬",
+	topRight: "┐",
+	midLeft: "├",
+	midMid: "┼",
+	midRight: "┤",
+	bottomLeft: "└",
+	bottomMid: "┴",
+	bottomRight: "┘",
+} as const;
+
 function renderTable(rows: string[][], width: number, indent: string, headerless = false): RenderedLine[] {
 	const columns = Math.max(...rows.map((r) => r.length));
 	const cells = rows.map((row) => {
@@ -218,20 +238,35 @@ function renderTable(rows: string[][], width: number, indent: string, headerless
 		return padded.map((cell) => inlineSpans(cell));
 	});
 	const widths = Array.from({ length: columns }, (_, c) => Math.max(1, ...cells.map((row) => spansWidth(row[c]!))));
-	const gap = 2;
-	const available = Math.max(8, width - displayWidth(indent) - gap * (columns - 1));
+	// Per column: a `│`, a space either side of the text; plus the closing `│`.
+	const frame = 3 * columns + 1;
+	const available = Math.max(columns * 3, width - displayWidth(indent) - frame);
 	let total = widths.reduce((a, b) => a + b, 0);
 	if (total > available) {
 		// Shrink the widest columns first so short ones stay readable.
 		const scale = available / total;
 		for (let c = 0; c < columns; c++) widths[c] = Math.max(3, Math.floor(widths[c]! * scale));
-		total = widths.reduce((a, b) => a + b, 0);
 	}
+
 	const lines: RenderedLine[] = [];
+	const border = (left: string, mid: string, right: string): RenderedLine => ({
+		spans: [
+			{ text: indent, dim: true, tone: "marker" },
+			{
+				text: left + widths.map((w) => BOX.h.repeat(w + 2)).join(mid) + right,
+				dim: true,
+				tone: "rule",
+			},
+		],
+	});
+	const edge = (): Span => ({ text: BOX.v, dim: true, tone: "rule" });
+
+	lines.push(border(BOX.topLeft, BOX.topMid, BOX.topRight));
 	cells.forEach((row, rowIndex) => {
 		const spans: Span[] = [{ text: indent, dim: true, tone: "marker" }];
 		row.forEach((cell, c) => {
 			const budget = widths[c]!;
+			spans.push(edge(), { text: " " });
 			let usedCells = 0;
 			for (const span of cell) {
 				const remaining = budget - usedCells;
@@ -252,26 +287,20 @@ function renderTable(rows: string[][], width: number, indent: string, headerless
 				spans.push({ ...span, text: piece, bold: span.bold || (rowIndex === 0 && !headerless) });
 				usedCells += displayWidth(piece);
 			}
-			const pad = budget - usedCells + (c === columns - 1 ? 0 : gap);
-			if (pad > 0) spans.push({ text: " ".repeat(pad) });
+			spans.push({ text: " ".repeat(budget - usedCells + 1) });
 		});
+		spans.push(edge());
 		lines.push({ spans: mergeSpans(spans) });
-		// A rule under the header row. Bold alone marked it before, which is
-		// nothing at all in a theme with a low-contrast palette or on a terminal
-		// that renders bold as a colour shift — and a table whose header reads as
-		// data is a table you have to count columns in.
+		// The header's own rule. Bold alone marked it before, which is nothing at
+		// all on a terminal that renders bold as a faint colour shift — and a
+		// table whose header reads as data is a table you count columns in.
+		// `headerless` means the header settled in an earlier chunk of the
+		// answer, so this chunk's first row is data.
 		if (rowIndex === 0 && cells.length > 1 && !headerless) {
-			const rule = widths
-				.map((columnWidth, c) => "─".repeat(columnWidth) + (c === columns - 1 ? "" : " ".repeat(gap)))
-				.join("");
-			lines.push({
-				spans: [
-					{ text: indent, dim: true, tone: "marker" },
-					{ text: rule, dim: true, tone: "rule" },
-				],
-			});
+			lines.push(border(BOX.midLeft, BOX.midMid, BOX.midRight));
 		}
 	});
+	lines.push(border(BOX.bottomLeft, BOX.bottomMid, BOX.bottomRight));
 	return lines;
 }
 

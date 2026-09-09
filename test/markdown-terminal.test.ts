@@ -167,13 +167,23 @@ describe("code blocks and tables", () => {
 		]);
 	});
 
-	it("draws a rule under a table header, but not under a header with no data", () => {
+	it("frames a table and rules its header off, but rules nothing with no data", () => {
 		const table = renderMarkdownLines("| файл | строк |\n|---|---|\n| a.ts | 12 |", { width: 40, indent: "" });
 		const text = table.map((line) => line.spans.map((span) => span.text).join(""));
-		expect(text[1]).toMatch(/^─+ {2}─+$/);
-		expect(text).toHaveLength(3);
+		expect(text).toEqual([
+			"┌──────┬───────┐",
+			"│ файл │ строк │",
+			"├──────┼───────┤",
+			"│ a.ts │ 12    │",
+			"└──────┴───────┘",
+		]);
+		// Nothing to rule off: a lone row is framed, not divided.
 		const headerOnly = renderMarkdownLines("| файл | строк |", { width: 40, indent: "" });
-		expect(headerOnly).toHaveLength(1);
+		expect(headerOnly.map((line) => line.spans.map((span) => span.text).join(""))).toEqual([
+			"┌──────┬───────┐",
+			"│ файл │ строк │",
+			"└──────┴───────┘",
+		]);
 	});
 });
 
@@ -183,9 +193,15 @@ describe("a table cut across chunks", () => {
 			width: 50,
 			indent: "",
 		});
-		const text = lines.map((line) => line.spans.map((span) => span.text).join("").trimEnd());
-		// No `---  ---:` row, and no header rule under the first data row.
-		expect(text).toEqual(["Температура  +14 °C", "Ветер        штиль"]);
+		const text = lines.map((line) => line.spans.map((span) => span.text).join(""));
+		// No `---  ---:` row, and no rule dividing the first data row off as a
+		// header — the header settled in the chunk before this one.
+		expect(text).toEqual([
+			"┌─────────────┬────────┐",
+			"│ Температура │ +14 °C │",
+			"│ Ветер       │ штиль  │",
+			"└─────────────┴────────┘",
+		]);
 		expect(lines.every((line) => line.spans.every((span) => !span.bold))).toBe(true);
 	});
 
@@ -228,7 +244,8 @@ describe("fenced blocks across chunk boundaries", () => {
 		});
 		// A table, not five rows of flat code.
 		const text = lines.map((line) => line.spans.map((span) => span.text).join(""));
-		expect(text.some((row) => /^─+ {2}─+$/.test(row))).toBe(true);
+		expect(text.some((row) => row.startsWith("┌"))).toBe(true);
+		expect(text.some((row) => row.startsWith("├"))).toBe(true);
 		expect(lines.every((line) => line.code !== true)).toBe(true);
 	});
 });
