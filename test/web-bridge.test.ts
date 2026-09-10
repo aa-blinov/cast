@@ -603,6 +603,54 @@ describe("web bridge", () => {
 		});
 	});
 
+	it("/provider edit updates the active provider in place, keeping the model and the slots", async () => {
+		// The web form used to delete + re-add, and deleting the active provider
+		// switched to a fallback, cleared the model and dropped the slots.
+		const { loadSettings, updateSettings } = await import("../src/core/settings.ts");
+		updateSettings({
+			providers: [
+				{ name: "local", url: testConfig.baseURL, apiKey: testConfig.apiKey },
+				{ name: "remote", url: "https://remote.example/v1", apiKey: "remote-key" },
+			],
+			providerUrl: testConfig.baseURL,
+			apiKey: testConfig.apiKey,
+			modelProvider: "local",
+			model: "hy3",
+			subagentModelProvider: "local",
+			subagentModel: "hy-small",
+		});
+		const bridge = createServerBridge(makeResult({ config: { ...testConfig, model: "hy3" } }));
+
+		const edited = await bridge.executeSettingsCommand("/provider edit local http://127.0.0.1:1/v1 new-key");
+		expect(edited.ok).toBe(true);
+
+		const settings = loadSettings();
+		expect(settings.providers?.find((p) => p.name === "local")).toMatchObject({
+			url: "http://127.0.0.1:1/v1",
+			apiKey: "new-key",
+		});
+		expect(settings).toMatchObject({
+			providerUrl: "http://127.0.0.1:1/v1",
+			apiKey: "new-key",
+			modelProvider: "local",
+			model: "hy3",
+			subagentModelProvider: "local",
+			subagentModel: "hy-small",
+		});
+		expect(bridge.getConfig().baseURL).toBe("http://127.0.0.1:1/v1");
+		expect((await bridge.executeSettingsCommand("/provider edit nope http://x/v1 k")).ok).toBe(false);
+	});
+
+	it("/web-search-provider reports whether a key is saved, never the key", async () => {
+		const bridge = createServerBridge(makeResult());
+		await bridge.executeSettingsCommand("/web-search-provider tavily tvly-secret");
+		const shown = await bridge.executeSettingsCommand("/web-search-provider");
+		expect(shown.result).toEqual({ searchProvider: "tavily", hasTavilyApiKey: true, hasBraveApiKey: false });
+		expect(JSON.stringify(shown)).not.toContain("tvly-secret");
+		// Re-selecting without a key keeps the saved one.
+		expect((await bridge.executeSettingsCommand("/web-search-provider tavily")).ok).toBe(true);
+	});
+
 	it("createSession with a providerOverride pins the session to that provider, not whatever's globally active", async () => {
 		const { updateSettings } = await import("../src/core/settings.ts");
 		updateSettings({

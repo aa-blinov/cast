@@ -14,6 +14,9 @@ All notable user-facing changes to cast, newest first.
 
 ### Fixed
 
+- **Web settings: editing the active provider lost the model.** The form did `/provider delete` + `/provider add`, and deleting the active provider switches to a fallback, clears the chosen model and drops the subagent/plan slots pointing at it. There is a `/provider edit <name> <url> <apiKey>` now that updates in place.
+- **Web settings: search API keys no longer travel to the browser.** `/web-search-provider` reports only whether a Tavily/Brave key is saved; the field starts empty and a saved key is kept when it stays empty.
+- **Web settings: a tab whose data failed to load rendered blank.** Model, Bash and Web are built from several commands; when one failed the tab drew empty values with no error. The first failure is shown now. The model pickers also follow the saved values after every reload instead of staying on the last pick.
 - **Web settings: a rejected command showed no error.** The tab reloads its data after every action, and the reload cleared the error slot the action had just filled, so a refused save (`/turn-cap 5`, an invalid threshold list) left the tab looking as if it had succeeded. The error is set after the reload now.
 
 - **The workspace panel no longer stalls the daemon, and keeps its place when you switch threads.** Three things, all measured against two projects with 50 and 5 changed files:

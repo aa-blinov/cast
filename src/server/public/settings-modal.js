@@ -124,6 +124,13 @@ export function SettingsModal({
 			const setLoadError = (error) => {
 				if (isCurrent()) setErrors((e) => ({ ...e, [t]: error }));
 			};
+			// A tab built from several commands used to render with blanks when
+			// one of them failed, no error shown; the first failure is the error.
+			const failed = (...results) => {
+				const bad = results.find((r) => !r?.ok);
+				if (bad) setLoadError(bad?.error ?? "Failed to load");
+				return !!bad;
+			};
 			setErrors((e) => ({ ...e, [t]: null }));
 			if (t === "model") {
 				const [models, reasoning, current, providers] = await Promise.all([
@@ -135,6 +142,7 @@ export function SettingsModal({
 					run("/current"),
 					run("/provider list"),
 				]);
+				if (failed(current, providers)) return;
 				commit((d) => ({
 					...d,
 					model: {
@@ -149,6 +157,7 @@ export function SettingsModal({
 				// input must reflect the real value or a save looks like it never
 				// happened (the field keeps showing 500).
 				const [permissions, current] = await Promise.all([run("/permissions"), run("/current")]);
+				if (failed(permissions, current)) return;
 				commit((d) => ({
 					...d,
 					bash: { permissions: permissions?.result, maxTurnIterations: current?.result?.maxTurnIterations },
@@ -159,6 +168,7 @@ export function SettingsModal({
 					run("/web-search-provider"),
 					run("/web-fetch-provider"),
 				]);
+				if (failed(webTools, searchProvider, fetchProvider)) return;
 				commit((d) => ({
 					...d,
 					web: {

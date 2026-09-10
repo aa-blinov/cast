@@ -250,8 +250,11 @@ function SettingsWeb({ data, busy, act }) {
 	const webOn = webTools.webTools;
 	const provider = search.searchProvider || "ddg";
 	const selectedSearchProvider = pendingSearchProvider || provider;
-	const tKey = tavilyKey || search.tavilyApiKey || "";
-	const bKey = braveKey || search.braveApiKey || "";
+	// The server only says whether a key is saved; the field starts empty and a
+	// saved key is kept when it stays empty.
+	const keyDraft = selectedSearchProvider === "tavily" ? tavilyKey : braveKey;
+	const hasSavedKey = selectedSearchProvider === "tavily" ? !!search.hasTavilyApiKey : !!search.hasBraveApiKey;
+	const canSave = !!keyDraft.trim() || hasSavedKey;
 	const fetchBackend = fetchProvider.webFetchProvider || "jina";
 	const selectSearchProvider = async (nextProvider) => {
 		setPendingSearchProvider(nextProvider);
@@ -260,10 +263,14 @@ function SettingsWeb({ data, busy, act }) {
 		if (result.ok) setPendingSearchProvider("");
 	};
 	const saveSearchProvider = async () => {
-		const key = selectedSearchProvider === "tavily" ? tKey : bKey;
-		if (!key) return;
-		const result = await act(`/web-search-provider ${selectedSearchProvider} ${key}`);
-		if (result.ok) setPendingSearchProvider("");
+		if (!canSave) return;
+		const key = keyDraft.trim();
+		const result = await act(`/web-search-provider ${selectedSearchProvider}${key ? ` ${key}` : ""}`);
+		if (result.ok) {
+			setPendingSearchProvider("");
+			if (selectedSearchProvider === "tavily") setTavilyKey("");
+			else setBraveKey("");
+		}
 	};
 	return html`
 		<div class="settings-compact-list">
@@ -281,7 +288,7 @@ function SettingsWeb({ data, busy, act }) {
 			</div>
 			${
 				selectedSearchProvider !== "ddg"
-					? html`<div class="settings-compact-detail"><form style="display:contents" onSubmit=${(e) => e.preventDefault()}><input type="password" autocomplete="off" placeholder=${selectedSearchProvider === "tavily" ? "Tavily API key (tvly-...)" : "Brave Search API key (BSA...)"} value=${selectedSearchProvider === "tavily" ? tKey : bKey} onInput=${(e) => (selectedSearchProvider === "tavily" ? setTavilyKey(e.target.value) : setBraveKey(e.target.value))} /><button class="modal-btn" disabled=${busy || !(selectedSearchProvider === "tavily" ? tKey : bKey)} onClick=${saveSearchProvider}>Save</button></form></div>`
+					? html`<div class="settings-compact-detail"><form style="display:contents" onSubmit=${(e) => e.preventDefault()}><input type="password" autocomplete="off" placeholder=${hasSavedKey ? "Key saved – paste a new one to replace it" : selectedSearchProvider === "tavily" ? "Tavily API key (tvly-...)" : "Brave Search API key (BSA...)"} value=${keyDraft} onInput=${(e) => (selectedSearchProvider === "tavily" ? setTavilyKey(e.target.value) : setBraveKey(e.target.value))} /><button class="modal-btn" disabled=${busy || !canSave} onClick=${saveSearchProvider}>Save</button></form></div>`
 					: null
 			}
 			<div class="settings-compact-row">
@@ -603,8 +610,9 @@ function SettingsProvider({ data, busy, act, confirm }) {
 		setEditing(p.name);
 		setName(p.name);
 		setUrl(p.url);
-		setApiKey(p.apiKey);
-		setVerifyState(p.url && p.apiKey ? { ok: true, msg: "Saved — re-verify to confirm changes" } : null);
+		// /provider list never carries the key — it has to be entered again.
+		setApiKey("");
+		setVerifyState(null);
 	};
 	const cancelEdit = () => {
 		setEditing(null);
@@ -639,19 +647,16 @@ function SettingsProvider({ data, busy, act, confirm }) {
 		if (!name || !url || !apiKey) return;
 		setSaving(true);
 		try {
-			const res = await api("POST", "/api/provider/verify", { url, apiKey });
+			const res = await api("POST", "/api/provider/verify", { url, apiKey }).catch((err) => ({
+				ok: false,
+				error: err instanceof Error ? err.message : String(err),
+			}));
 			if (!res?.ok) {
 				setVerifyState({ ok: false, msg: res?.error || "Verification failed — provider not saved" });
 				return;
 			}
-			if (editing) {
-				await act(`/provider delete ${editing}`);
-				await act(`/provider add ${name} ${url} ${apiKey}`);
-				if (data.find((p) => p.active && p.name === editing)) await act(`/provider ${name}`);
-			} else {
-				await act(`/provider add ${name} ${url} ${apiKey}`);
-			}
-			cancelEdit();
+			const saved = await act(`/provider ${editing ? "edit" : "add"} ${name} ${url} ${apiKey}`);
+			if (saved?.ok) cancelEdit();
 		} finally {
 			setSaving(false);
 		}

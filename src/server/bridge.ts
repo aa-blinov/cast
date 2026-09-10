@@ -3685,10 +3685,11 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				const s = loadSettings();
 				return {
 					ok: true,
+					// Only whether a key is saved — the key itself never goes to the browser.
 					result: {
 						searchProvider: s.searchProvider ?? "ddg",
-						tavilyApiKey: s.tavilyApiKey,
-						braveApiKey: s.braveApiKey,
+						hasTavilyApiKey: !!s.tavilyApiKey,
+						hasBraveApiKey: !!s.braveApiKey,
 					},
 				};
 			}
@@ -3701,13 +3702,13 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				const key = rest.join(" ").trim() || loadSettings().tavilyApiKey;
 				if (!key) return { ok: false, error: "Usage: /web-search-provider tavily <api-key>" };
 				updateSettings({ searchProvider: "tavily", tavilyApiKey: key });
-				return { ok: true, result: { searchProvider: "tavily", tavilyApiKey: key } };
+				return { ok: true, result: { searchProvider: "tavily", hasTavilyApiKey: true } };
 			}
 			if (provider === "brave") {
 				const key = rest.join(" ").trim() || loadSettings().braveApiKey;
 				if (!key) return { ok: false, error: "Usage: /web-search-provider brave <api-key>" };
 				updateSettings({ searchProvider: "brave", braveApiKey: key });
-				return { ok: true, result: { searchProvider: "brave", braveApiKey: key } };
+				return { ok: true, result: { searchProvider: "brave", hasBraveApiKey: true } };
 			}
 			return { ok: false, error: "Usage: /web-search-provider ddg | tavily <api-key> | brave <api-key>" };
 		}
@@ -4408,6 +4409,34 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				updateSettings({ providers: next });
 				return { ok: true, result: `Added provider "${pname}" — pick it in the Model tab to use it` };
 			}
+			if (sub === "edit") {
+				// In-place update for the web form. The delete+add the form used
+				// to do dropped the model and every slot pointing at the provider
+				// whenever the edited one was active.
+				const [pname, url, apiKey] = rest.split(WHITESPACE_SPLIT);
+				if (!pname || !url || !apiKey) return { ok: false, error: "Usage: /provider edit <name> <url> <apiKey>" };
+				const current = providers.find((p) => p.name === pname);
+				if (!current) return { ok: false, error: `Unknown provider: ${pname}` };
+				const next = providers.map((p) => (p === current ? { ...p, url, apiKey } : p));
+				const isActive =
+					settings.modelProvider === pname || (current.url === config.baseURL && current.apiKey === config.apiKey);
+				if (!isActive) {
+					updateSettings({ providers: next });
+					return { ok: true, result: `Updated provider "${pname}"` };
+				}
+				config.baseURL = url;
+				config.apiKey = apiKey;
+				ws.session.providerUrl = url;
+				config.reasoningFormat = resolveReasoningFormat(url, current.reasoningFormat);
+				config.reasoningParams = buildReasoningParams(
+					config.reasoningLevel,
+					config.reasoningFormat,
+					ws.session.model,
+				);
+				updateSettings({ providers: next, providerUrl: url, apiKey });
+				saveSession(ws.session);
+				return { ok: true, result: `Updated provider "${pname}"` };
+			}
 			// Bare name — switch to it (or override its reasoning protocol).
 			const target = providers.find((p) => p.name === sub);
 			if (!target) return { ok: false, error: `Unknown provider: ${sub}. See /provider for the list.` };
@@ -4921,9 +4950,12 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		if (cmd === "/provider") {
 			const providers = settings.providers ?? [];
 			if (!arg)
-				return ["list", "add", "delete", ...providers.map((p) => p.name)].map((v) => ({ value: v, label: v }));
+				return ["list", "add", "edit", "delete", ...providers.map((p) => p.name)].map((v) => ({
+					value: v,
+					label: v,
+				}));
 			const [sub] = arg.split(WHITESPACE_SPLIT);
-			if (sub === "delete") return providers.map((p) => ({ value: p.name, label: p.name }));
+			if (sub === "delete" || sub === "edit") return providers.map((p) => ({ value: p.name, label: p.name }));
 			return [];
 		}
 
