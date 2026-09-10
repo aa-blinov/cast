@@ -4,6 +4,10 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+### Removed
+
+- **Pluggable ("factory") UIs are gone.** The web UI is served at `/` again instead of redirecting to `/default/`; `/default/*` answers with a 301 to the same path without the prefix, so old bookmarks keep working. Removed with it: `~/.cast/ui/*` discovery, `/ui`, `/ui/<name>/`, `/<name>/`, `GET|POST /api/uis`, `/api/uis/events`, `/api/settings/default-ui`, the Default UI settings tab, the `activeUi`/`defaultUi` settings, the `ui-factory` skill, the UI template shipped in the package, and the write guard that refused agent edits to cast's own `src/server/public`.
+
 ### Added
 
 - **The session's directory is shown above the composer**, next to the persona: `SENIOR DEVELOPER – /home/ubuntu/pet/cast`. It was visible nowhere in the web UI, so two threads in different projects looked identical. The full path is shown. The line also appears for a session with no persona set, which used to hide it entirely.

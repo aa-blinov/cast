@@ -24,7 +24,6 @@ import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { brotliCompressSync, gzipSync } from "node:zlib";
-import chokidar from "chokidar";
 import { createAgent, deleteAgent, getAgent, listAgents, updateAgent } from "../core/agents.ts";
 import { getDb } from "../core/db.ts";
 import {
@@ -78,8 +77,6 @@ import {
 import { GOAL_MAX_OUTER_ITERATIONS } from "./commands.ts";
 import { readLiveServerState } from "./daemon-state.ts";
 import { isBlockedAttachmentName, sessionInputsDir } from "./inputs.ts";
-import { createUi } from "./ui-factory/factory.ts";
-import { discoverUis, RESERVED_UI_NAMES } from "./ui-registry.ts";
 
 /** True whenever `target` is `root` itself or somewhere underneath it — the
  * one check every /fs/* route relies on to keep a session's file browser from
@@ -300,10 +297,6 @@ export interface WebServerOptions {
 	onListening?: (port: number) => void;
 	/** Fires on a listen failure (e.g. EADDRINUSE) instead of the process crashing on an unhandled error event. */
 	onError?: (err: NodeJS.ErrnoException) => void;
-	/** When true, this server is the factory UI server on the neighbour port — it serves extra UIs at / and /ui/*, while the main server keeps only / */
-	isUiServer?: boolean;
-	/** Neighbour port for factory UIs — used by main server to redirect /ui/* */
-	uiPort?: number;
 }
 
 export function startServer(options: WebServerOptions): ReturnType<typeof createServer> {
@@ -327,57 +320,6 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 	}
 
 	console.log(`[cast server] auth enabled (user: ${webUser})`);
-	// Pluggable UIs — factory: any static dir with index.html becomes /ui/<name>/
-	// Re-discovered per request so `POST /api/uis` is live without restart.
-	function getAllUis() {
-		const cwd = (() => {
-			try {
-				return bridge.getConfig().cwd ?? homedir();
-			} catch {
-				return homedir();
-			}
-		})();
-		const trusted = (() => {
-			try {
-				const s = loadSettings();
-				return s.projectTrust?.[cwd] === true;
-			} catch {
-				return false;
-			}
-		})();
-		return discoverUis(cwd, trusted);
-	}
-	function getUiMap() {
-		const all = getAllUis();
-		return new Map(all.filter((u) => !u.builtin).map((u) => [u.name, u]));
-	}
-	try {
-		const atStart = getAllUis().filter((u) => !u.builtin);
-		if (atStart.length > 0)
-			console.log(`[cast server] extra UIs: ${atStart.map((u) => `${u.name} → ${u.dir}`).join(", ")}`);
-	} catch {}
-	// Live reload for factory UIs — agent edits ~/.cast/ui/* and browser auto-reloads
-	const uiEventListeners = new Set<(ev: { type: string }) => void>();
-	try {
-		const watchTargets = [join(homedir(), ".cast", "ui"), join(homedir(), ".config", "cast", "ui")].filter((p) =>
-			existsSync(p),
-		);
-		if (watchTargets.length > 0) {
-			const w = chokidar.watch(watchTargets, { ignoreInitial: true, depth: 4, ignorePermissionErrors: true });
-			const notify = () => {
-				for (const l of [...uiEventListeners])
-					try {
-						l({ type: "ui_change" });
-					} catch {}
-			};
-			w.on("add", notify);
-			w.on("change", notify);
-			w.on("unlink", notify);
-			w.on("addDir", notify);
-			w.on("unlinkDir", notify);
-		}
-	} catch {}
-
 	const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 	const failedLogins = new Map<string, { attempts: number; expiresAt: number }>();
 	const LOGIN_WINDOW_MS = 15 * 60 * 1000;
@@ -912,55 +854,6 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		json(res, bridge.getPersonas());
 	});
 
-	route("GET", "/api/uis", (_req, res) => {
-		json(
-			res,
-			getAllUis().map((u) => ({ name: u.name, builtin: u.builtin })),
-		);
-	});
-
-	route("POST", "/api/uis", async (req, res) => {
-		let name = "";
-		try {
-			const body = JSON.parse(await readBody(req)) as { name?: string };
-			name = (body.name ?? "").trim().toLowerCase();
-		} catch {
-			return json(res, { error: "Invalid JSON" }, 400);
-		}
-		if (!name) return json(res, { error: "name required, a-z0-9- only" }, 400);
-		try {
-			const dir = createUi(name);
-			json(res, { ok: true, name, dir, url: `/ui/${name}/` }, 201);
-		} catch (err) {
-			json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
-		}
-	});
-
-	route("GET", "/api/uis/events", (req, res) => {
-		res.writeHead(200, {
-			"Content-Type": "text/event-stream",
-			"Cache-Control": "no-cache",
-			Connection: "keep-alive",
-			"X-Accel-Buffering": "no",
-		});
-		res.write(": connected\n\n");
-		const listener = (ev: { type: string }) => {
-			try {
-				res.write(`data: ${JSON.stringify(ev)}\n\n`);
-			} catch {}
-		};
-		uiEventListeners.add(listener);
-		const hb = setInterval(() => {
-			try {
-				res.write(": keepalive\n\n");
-			} catch {}
-		}, 15000);
-		req.on("close", () => {
-			clearInterval(hb);
-			uiEventListeners.delete(listener);
-		});
-	});
-
 	// ── Agents — spawnable entities (persona+model) — separate from sessions (thread) ──
 	route("GET", "/api/agents", (_req, res) => {
 		json(res, listAgents());
@@ -1095,25 +988,6 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			} catch {}
 		});
 		json(res, { ok: true, queued: true }, 202);
-	});
-
-	route("GET", "/api/settings/default-ui", (_req, res) => {
-		const s = loadSettings();
-		json(res, { defaultUi: s.defaultUi ?? "default" });
-	});
-
-	route("POST", "/api/settings/default-ui", async (req, res) => {
-		let name = "";
-		try {
-			const body = JSON.parse(await readBody(req)) as { name?: string };
-			name = (body.name ?? "").trim();
-		} catch {
-			return json(res, { error: "Invalid JSON" }, 400);
-		}
-		if (!name) name = "default";
-		if (name !== "default" && !getUiMap().has(name)) return json(res, { error: `UI "${name}" not found` }, 400);
-		updateSettings({ defaultUi: name === "default" ? undefined : name });
-		json(res, { ok: true, defaultUi: name });
 	});
 
 	// Cast web daemon state — the same file the CLI's `cast server status`
@@ -2654,24 +2528,14 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		const urlPath = req.url?.split("?")[0] ?? "/";
 		const method = req.method ?? "GET";
 
-		// Root never serves UI directly — always 302 to the chosen default (default → /default/)
-		// Must respect auth: unauthenticated visitors get the normal login redirect,
-		// not a blind jump to /default/ that bypasses the auth gate below.
-		if ((method === "GET" || method === "HEAD") && urlPath === "/") {
-			if (!isAuthenticated(req)) {
-				requireAuth(res, false);
-				return;
-			}
-			const defUi = (() => {
-				try {
-					return loadSettings().defaultUi;
-				} catch {
-					return undefined;
-				}
-			})();
-			const target = defUi && defUi !== "default" && getUiMap().has(defUi) ? `/${defUi}/` : "/default/";
+		// The built-in UI used to live at /default/ (pluggable UIs, since
+		// removed). Old bookmarks and open tabs still point there.
+		if (urlPath === "/default" || urlPath.startsWith("/default/")) {
 			const qs = req.url?.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
-			res.writeHead(302, { Location: `${target}${qs}`, "Cache-Control": "no-store" });
+			res.writeHead(301, {
+				Location: `${urlPath.slice("/default".length) || "/"}${qs}`,
+				"Cache-Control": "no-store",
+			});
 			res.end();
 			return;
 		}
@@ -2736,10 +2600,6 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			"/vendor/preact-hooks.mjs",
 			"/vendor/htm.mjs",
 		]);
-		const isFactoryTop = (() => {
-			const top = urlPath.split("/").filter(Boolean)[0];
-			return top ? getUiMap().has(top) : false;
-		})();
 		const isPublicShareRoute =
 			urlPath === "/login" ||
 			urlPath === "/login.html" ||
@@ -2748,9 +2608,6 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			urlPath.startsWith("/shared/") ||
 			urlPath.startsWith("/api/shared/") ||
 			urlPath === OPENAPI_V1_PATH ||
-			urlPath.startsWith("/ui/") ||
-			urlPath === "/ui" ||
-			isFactoryTop ||
 			PUBLIC_STATIC_ASSETS.has(urlPath) ||
 			urlPath.startsWith("/fonts/") ||
 			// Any real static file (the SPA's module graph) is public — the
@@ -2792,115 +2649,6 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		// tearing down the session view. Same index.html fallback as /shared.
 		if (method === "GET" && (urlPath === "/settings" || urlPath === "/dashboard")) {
 			if (serveStatic({ url: "/" } as IncomingMessage, res)) return;
-		}
-
-		// Stable alias for the built-in UI — / never moves, but /default is the canonical stable path.
-		// Keeps factory UIs at /ui/* and /<custom> isolated without breaking old bookmarks.
-		// Any sub-path under /default (e.g. /default/settings) also serves the base UI's SPA.
-		if ((method === "GET" || method === "HEAD") && (urlPath === "/default" || urlPath.startsWith("/default/"))) {
-			if (serveStatic({ url: "/" } as IncomingMessage, res)) return;
-		}
-
-		// Factory UIs also at /<name>/ for convenience (e.g., /claude-ui → same as /ui/claude-ui)
-		// Keeps / never moves, but new UIs are discoverable as /<slug> as user expects (http://host:1337/<new-slug> and http://host:1338/<new-slug>)
-		if (method === "GET" || method === "HEAD") {
-			const segs = urlPath.split("?")[0].split("/").filter(Boolean);
-			const top = segs[0];
-			// Second line of defence — discoverUis already refuses these slugs,
-			// so getUiMap() can't hold one; kept because serving a daemon route's
-			// path out of a UI directory would be wrong regardless of how the
-			// entry got there.
-			if (top && !RESERVED_UI_NAMES.has(top)) {
-				const ui = getUiMap().get(top);
-				if (ui) {
-					let rel = `/${segs.slice(1).join("/")}`;
-					if (rel === "/" || rel === "") rel = "/index.html";
-					const filePath = join(ui.dir, rel);
-					if (filePath.startsWith(ui.dir)) {
-						try {
-							const stat = statSync(filePath);
-							if (stat.isFile()) {
-								const ext = extname(filePath);
-								const mime = MIME_TYPES[ext] ?? "application/octet-stream";
-								const data = readFileSync(filePath);
-								res.writeHead(200, {
-									"Content-Type": mime,
-									"Content-Length": data.length,
-									// Factory UIs are edited live — no-cache so style.css busts instantly (otherwise 3600s stale = "style похожий на cast")
-									"Cache-Control": "no-cache",
-								});
-								res.end(data);
-								return;
-							}
-						} catch {}
-						try {
-							const idx = readFileSync(join(ui.dir, "index.html"));
-							res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" });
-							res.end(idx);
-							return;
-						} catch {}
-					}
-				}
-			}
-		}
-
-		// Factory listing at /ui — themed like default UI (same tokens, same bootstrap, live on theme change)
-		if ((method === "GET" || method === "HEAD") && (urlPath === "/ui" || urlPath === "/ui/")) {
-			const uis = getAllUis().filter((u) => !u.builtin);
-			const items =
-				uis
-					.map(
-						(u) =>
-							`<li><a href="/ui/${u.name}/">${u.name}</a> <small>→ ${u.dir}</small> <small>also <a href="/${u.name}/">/${u.name}/</a></small></li>`,
-					)
-					.join("") ||
-				'<li>no extra UIs yet — POST /api/uis {"name":"my-ui"} or cp -r src/server/ui-factory/template ~/.cast/ui/&lt;name&gt;</li>';
-			const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Factory UIs · Cast</title>
-<script>
-try{
- const c=JSON.parse(localStorage.getItem("cast:themeColors"));
- if(c){
-  const r=document.documentElement.style;
-  r.setProperty("--cyan",c.accent); r.setProperty("--violet",c.gradient.to);
-  r.setProperty("--gradient",\`linear-gradient(135deg, \${c.gradient.from}, \${c.gradient.to})\`);
-  r.setProperty("--gradient-from",c.gradient.from); r.setProperty("--gradient-to",c.gradient.to);
-  r.setProperty("--teal",c.user); r.setProperty("--purple",c.agent); r.setProperty("--blue",c.tool);
-  r.setProperty("--green",c.success); r.setProperty("--amber",c.warning); r.setProperty("--rose",c.error);
-  r.setProperty("--persona",c.persona); r.setProperty("--text-muted",c.muted);
-  if(c.bg) r.setProperty("--bg",c.bg); if(c.bgSurface) r.setProperty("--bg-surface",c.bgSurface);
-  if(c.bgRaised) r.setProperty("--bg-raised",c.bgRaised); if(c.bgHover) r.setProperty("--bg-hover",c.bgHover);
-  if(c.border) r.setProperty("--border",c.border); if(c.borderActive) r.setProperty("--border-active",c.borderActive);
- }
- const fid=localStorage.getItem("cast:fontId");
- if(fid){
-  const families={"fira-code":["'Fira Code', 'JetBrains Mono', monospace",true],"ibm-plex-mono":["'IBM Plex Mono', monospace",true],"jetbrains-mono":["'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace",true],"ibm-plex-sans":["'IBM Plex Sans', sans-serif",false],"inter":["'Inter', sans-serif",false],"work-sans":["'Work Sans', sans-serif",false]};
-  const p=families[fid]; if(p){ document.documentElement.style.setProperty("--font",p[0]); if(p[1]) document.documentElement.style.setProperty("--font-mono",p[0]); }
- }
- const fs=localStorage.getItem("cast:fontScale"); if(fs) document.documentElement.style.setProperty("--font-scale",fs);
-}catch{}
-window.addEventListener("storage", (e)=>{
- if(e.key==="cast:themeColors" || e.key==="cast:fontId" || e.key==="cast:fontScale") location.reload();
-});
-</script>
-<link rel="stylesheet" href="/tokens.css"><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/chat.css"><style>body{background:var(--bg);color:var(--text);font-family:var(--font)} .factory-wrap{max-width:860px;margin:0 auto;padding:32px 20px} .factory-card{background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px}</style></head><body><div class="factory-wrap"><div class="factory-card"><h1 style="font-size:1.1rem;font-weight:700;margin-bottom:12px">Factory UIs</h1><ul style="margin:12px 0;padding-left:18px">${items}</ul><p style="margin-top:16px"><a href="/default" style="color:var(--cyan)">← default UI (/default)</a> · <a href="/api/uis">/api/uis</a></p></div></div></body></html>`;
-			res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" });
-			res.end(html);
-			return;
-		}
-
-		// Pluggable UIs — canonical is /<name>/* (without /ui), /ui/<name>/* →302→ /<name>/* for короткого пути без префикса
-		if ((method === "GET" || method === "HEAD") && urlPath.startsWith("/ui/")) {
-			const segs = urlPath.split("?")[0].split("/").filter(Boolean);
-			const uiName = segs[1];
-			const ui = uiName ? getUiMap().get(uiName) : undefined;
-			if (ui) {
-				const rest = segs.slice(2).join("/");
-				const qs = req.url?.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
-				const target = rest ? `/${uiName}/${rest}${qs}` : `/${uiName}/${qs}`;
-				res.writeHead(302, { Location: target, "Cache-Control": "no-store" });
-				res.end();
-				return;
-			}
 		}
 
 		const versionedLegacyPath = legacyPathForApiV1(urlPath);

@@ -31,7 +31,6 @@ cast server status                          # is it running? pid/host/port
 cast server start --port 1337               # local only (127.0.0.1:1337, default)
 cast server start --public --port 1337      # public (0.0.0.0:1337, needs firewall)
 cast server start --host 0.0.0.0 --port 1337 # same as --public
-cast server start --port 1337 --ui-port 1338 # also factory UIs on :1338 (rare)
 cast server stop
 ```
 

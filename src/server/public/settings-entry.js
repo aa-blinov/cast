@@ -4,7 +4,6 @@ import { SettingsModal } from "./settings-modal.js";
 import { SettingsModel } from "./settings-model.js";
 import {
 	SettingsBash,
-	SettingsDefaultUi,
 	SettingsHooks,
 	SettingsMcp,
 	SettingsMemory,
@@ -43,7 +42,6 @@ const PANELS = {
 	SettingsSkillssh,
 	SettingsProvider,
 	SettingsSsh,
-	SettingsDefaultUi,
 	SettingsUpdates,
 };
 

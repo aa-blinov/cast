@@ -83,7 +83,6 @@ import { createHash } from "node:crypto";
 // TTF fonts woff2 replaced, would live on in dist forever).
 rmSync("dist/public", { recursive: true, force: true });
 cpSync("src/server/public", "dist/public", { recursive: true });
-cpSync("src/server/ui-factory/template", "dist/ui-factory/template", { recursive: true });
 
 // Keep the source web assets readable for the dev server, but ship compact
 // browser assets in release builds. Each module is transformed independently
