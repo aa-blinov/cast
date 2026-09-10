@@ -18,7 +18,7 @@ export function isCurrentDirectoryRequest(requests, relPath, version) {
 	return requests.get(relPath) === version;
 }
 
-export function FileExplorer({ activeId, confirm, refreshNonce }) {
+export function FileExplorer({ activeId, cwd, confirm, refreshNonce }) {
 	const [tree, setTree] = useState({});
 	const [expanded, setExpanded] = useState(new Set());
 	const [loadingDirs, setLoadingDirs] = useState(new Set());
@@ -85,7 +85,17 @@ export function FileExplorer({ activeId, confirm, refreshNonce }) {
 		[activeId],
 	);
 
+	// The tree is keyed by the *project*, not the session: two threads in the
+	// same directory show the same files, and resetting on every session
+	// switch threw away every expanded folder (and refetched the root) for
+	// nothing. Reset only when the cwd actually changes — or is unknown (a
+	// draft has none yet).
+	const lastCwdRef = useRef(undefined);
 	useEffect(() => {
+		if (!activeId) return;
+		const sameProject = cwd != null && cwd === lastCwdRef.current && Object.keys(treeRef.current).length > 0;
+		lastCwdRef.current = cwd;
+		if (sameProject) return;
 		directoryRequestVersionsRef.current.clear();
 		lastRefreshNonceRef.current = refreshNonce;
 		setTree({});
@@ -93,8 +103,8 @@ export function FileExplorer({ activeId, confirm, refreshNonce }) {
 		setSearchResults(null);
 		setQuery("");
 		setError(null);
-		if (activeId) void loadDir("");
-	}, [activeId, loadDir]);
+		void loadDir("");
+	}, [activeId, cwd, loadDir]);
 
 	const toggleDir = (relPath) => {
 		setExpanded((prev) => {

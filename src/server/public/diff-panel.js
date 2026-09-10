@@ -13,6 +13,7 @@ export function DiffPanel({
 	onResizeStart,
 	open,
 	activeId,
+	cwd,
 	tab,
 	onTabChange,
 	memoryEnabled = true,
@@ -77,7 +78,7 @@ export function DiffPanel({
 			<aside class="diff-panel${openClass}">
 				<div class="diff-resize-handle" onPointerDown=${onResizeStart} />
 				${header}
-				<${FileExplorerModule} activeId=${activeId} confirm=${confirm} refreshNonce=${fsRefreshNonce} />
+				<${FileExplorerModule} activeId=${activeId} cwd=${cwd} confirm=${confirm} refreshNonce=${fsRefreshNonce} />
 			</aside>
 		`;
 	}
