@@ -27,6 +27,12 @@ export function SlotModelPicker({
 	const [models, setModels] = useState(initialModels || []);
 	const [loading, setLoading] = useState(false);
 	const modelRequestVersion = useRef(0);
+	// The tab reloads its data after every action; the selects follow the
+	// saved values instead of staying on whatever was picked before.
+	useEffect(() => {
+		setProviderValue(initialProvider);
+		setModelValue(effectiveModel);
+	}, [initialProvider, effectiveModel]);
 	const defaultLabel = isMainSlot ? "Select…" : `${activeProviderName || "Default"} (default)`;
 	const visibleProviders = isMainSlot ? providers : providers.filter((p) => p.name !== activeProviderName);
 
