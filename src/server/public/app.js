@@ -9,7 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks"
 import { api } from "./api.js";
 import { escapeHtml, renderMarkdown } from "./markdown.js";
 import { CastLogo } from "./cast-logo.js";
-import { isNearBottom, isNearTop, scrollTopAfterPrepend } from "./chat-scroll.js";
+import { isNearTop, scrollTopAfterPrepend, shouldFollow } from "./chat-scroll.js";
 import { Composer as ComposerModule } from "./composer.js";
 import { DirectoryBrowser } from "./directory-browser.js";
 import { ElapsedTimer } from "./elapsed-timer.js";
@@ -754,6 +754,24 @@ function App() {
 	// is temporarily unavailable.
 	const sessionStreamWaitersRef = useRef(new Map());
 	const messagesRef = useRef(null);
+	const messagesInnerRef = useRef(null);
+	// Follow the content, whatever grows it. The rAF scrolls below run right
+	// after a commit, but heights keep changing afterwards: a message with
+	// content-visibility:auto is laid out as its 120px placeholder while it
+	// sits below the viewport and only gets its real height once scrolled to,
+	// a code block re-renders when highlight.js arrives, an image loads. Each
+	// of those left the list pinned thousands of px above the bottom with the
+	// scroll handler none the wiser (content growth fires no scroll event).
+	useEffect(() => {
+		const inner = messagesInnerRef.current;
+		if (!inner || typeof ResizeObserver === "undefined") return;
+		const ro = new ResizeObserver(() => {
+			if (autoScrollRef.current && messagesRef.current)
+				messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
+		});
+		ro.observe(inner);
+		return () => ro.disconnect();
+	}, []);
 	const _scrollStreamingFrame = useCallback(() => {
 		requestAnimationFrame(() => {
 			if (autoScrollRef.current && messagesRef.current)
@@ -1498,16 +1516,31 @@ function App() {
 	// dozens of setAtBottom/loadOlderMessages calls per frame. Prefetch
 	// threshold increased to 600px for smoother infinite scroll.
 	const scrollRafRef = useRef(null);
+	const lastScrollTopRef = useRef(0);
+	const lastScrollHeightRef = useRef(0);
 	const handleScroll = useCallback(() => {
+		const el = messagesRef.current;
+		if (!el) return;
+		// Decided synchronously, in the scroll event itself: the ResizeObserver
+		// above runs later in the same frame and, while still following, pins
+		// the list back to the bottom — a decision deferred to the next frame
+		// would then read "at the bottom" and never notice the user scrolled up.
+		const follow = shouldFollow(
+			autoScrollRef.current,
+			el.scrollTop,
+			lastScrollTopRef.current,
+			el.clientHeight,
+			el.scrollHeight,
+			lastScrollHeightRef.current,
+		);
+		lastScrollTopRef.current = el.scrollTop;
+		lastScrollHeightRef.current = el.scrollHeight;
+		autoScrollRef.current = follow;
 		if (scrollRafRef.current != null) return;
 		scrollRafRef.current = requestAnimationFrame(() => {
 			scrollRafRef.current = null;
-			const el = messagesRef.current;
-			if (!el) return;
-			const bottom = isNearBottom(el.scrollTop, el.clientHeight, el.scrollHeight);
-			autoScrollRef.current = bottom;
-			setAtBottom(bottom);
-			if (isNearTop(el.scrollTop)) loadOlderMessages();
+			setAtBottom(autoScrollRef.current);
+			if (messagesRef.current && isNearTop(messagesRef.current.scrollTop)) loadOlderMessages();
 		});
 	}, [loadOlderMessages, setAtBottom]);
 	useEffect(() => () => { if (scrollRafRef.current != null) cancelAnimationFrame(scrollRafRef.current); }, []);
@@ -1912,6 +1945,7 @@ function App() {
 			<!-- Chat area -->
 			<main class="chat-area">
 				<div class="messages" ref=${messagesRef} onScroll=${handleScroll}>
+				<div class="messages-inner" ref=${messagesInnerRef}>
 					${
 						bootstrapping &&
 						!session &&
@@ -1989,6 +2023,7 @@ function App() {
 							}
 						`
 					}
+				</div>
 				</div>
 				${
 					(activePersonaLabel || session?.cwd) &&
