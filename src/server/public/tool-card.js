@@ -138,7 +138,7 @@ export function ToolCard({ call, renderMarkdown }) {
 				open &&
 				call.result &&
 				(mcp
-					? html`<div class="tool-card-result" dangerouslySetInnerHTML=${{ __html: renderMarkdown(formatToolResult(call.name, call.result)) }}></div>`
+					? html`<div class="tool-card-result md-body" dangerouslySetInnerHTML=${{ __html: renderMarkdown(formatToolResult(call.name, call.result)) }}></div>`
 					: html`<div class="tool-card-result">${formatToolResult(call.name, call.result)}</div>`)
 			}
 		</div>

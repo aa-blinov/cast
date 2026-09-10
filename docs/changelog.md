@@ -2,6 +2,14 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Fixed
+
+- **The web transcript renders markdown properly.** It was a hand-rolled set of regexes, which got the common cases right and then fell over: `2 * 3 * 4 = 24` came out with the 3 in italics, `` `a **b** c` `` put a `<strong>` inside the `<code>`, every heading level collapsed to a single `<strong>`, and blockquotes, `---`, nested lists, task lists, `~~strike~~`, `__bold__`, `~~~` fences, `1)` numbering and a fenced block inside a list item were not implemented at all (an unterminated fence also stayed raw text once the turn settled, so the view changed under you when it did). marked parses it now — it was already vendored for the file preview, so no new dependency — and every one of those renders correctly.
+  Safety did not regress, it got a second layer: the renderer emits no raw HTML of its own (an HTML token in the source comes back escaped, and a link is only a link if its scheme is http/https/mailto — `javascript:` and `data:` render as plain text), and DOMPurify sanitizes the result on top of that. The cost is 19KB more on the first load, cached forever; time to an interactive composer did not move (307ms vs 310ms with 40ms of latency per request).
+  The file preview no longer fetches marked and DOMPurify a second time either — the transcript needs them on first paint, so they are in the main bundle. highlight.js stays lazy, being 1MB of it.
+
 ## 0.30.3
 
 ### Changed

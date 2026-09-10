@@ -38,7 +38,7 @@ function StreamingMarkdown({ text, renderMarkdown }) {
 	useLayoutEffect(() => {
 		if (elRef.current) paint(elRef.current);
 	}, [text, renderMarkdown]);
-	return html`<div ref=${setRef} class="message-content"></div>`;
+	return html`<div ref=${setRef} class="message-content md-body"></div>`;
 }
 
 export function BlockView({ block, streaming = false, renderMarkdown, showReasoning = true }) {
@@ -73,7 +73,7 @@ export function BlockView({ block, streaming = false, renderMarkdown, showReason
 						: html`<${StreamingMarkdown} text=${block.text} renderMarkdown=${renderMarkdown} />`
 					: block.kind === "thinking"
 						? html`<div class="message-content">${block.text}</div>`
-						: html`<div class="message-content" dangerouslySetInnerHTML=${{ __html: renderMarkdown(block.text) }} />`
+						: html`<div class="message-content md-body" dangerouslySetInnerHTML=${{ __html: renderMarkdown(block.text) }} />`
 			}
 		</div>
 	`;
