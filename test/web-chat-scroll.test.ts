@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isNearBottom, isNearTop, scrollTopAfterPrepend } from "../src/server/public/chat-scroll.js";
+import { isNearBottom, isNearTop, scrollTopAfterPrepend, shouldFollow } from "../src/server/public/chat-scroll.js";
 
 describe("isNearBottom", () => {
 	it("is true when scrolled exactly to the bottom", () => {
@@ -46,5 +46,33 @@ describe("scrollTopAfterPrepend", () => {
 
 	it("is a no-op when nothing was actually prepended", () => {
 		expect(scrollTopAfterPrepend(200, 1000, 1000)).toBe(200);
+	});
+});
+
+describe("shouldFollow", () => {
+	it("keeps following when a streaming frame grew the list past the threshold before the catch-up scroll", () => {
+		// scrollTop unchanged at 500, the list grew from 1000 to 1400: 320px
+		// from the bottom, no scroll up happened.
+		expect(shouldFollow(true, 500, 500, 80, 1400)).toBe(true);
+	});
+
+	it("stops following on a scroll up", () => {
+		expect(shouldFollow(true, 400, 500, 80, 1400)).toBe(false);
+	});
+
+	it("stays off while scrolling down without reaching the bottom", () => {
+		expect(shouldFollow(false, 450, 400, 80, 1400)).toBe(false);
+	});
+
+	it("turns back on once near the bottom", () => {
+		expect(shouldFollow(false, 1300, 400, 80, 1400)).toBe(true);
+	});
+
+	it("ignores the clamp that follows a shrinking list — a reader who scrolled up stays there", () => {
+		// Streaming block swapped for a settled message that is laid out as its
+		// placeholder for a frame: 4000px → 461px, scrollTop snapped 148 → 0.
+		expect(shouldFollow(false, 0, 148, 600, 461, 4000)).toBe(false);
+		// And a reader who was following keeps following through it.
+		expect(shouldFollow(true, 0, 3400, 600, 461, 4000)).toBe(true);
 	});
 });

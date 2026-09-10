@@ -24,3 +24,28 @@ export function isNearTop(scrollTop, threshold = 600) {
 export function scrollTopAfterPrepend(currentScrollTop, newScrollHeight, previousScrollHeight) {
 	return currentScrollTop + (newScrollHeight - previousScrollHeight);
 }
+
+/**
+ * Whether the list should keep following new content after a scroll event.
+ * Near the bottom it always follows. Away from it, only a scroll *up*
+ * (scrollTop below the previous reading) turns following off: content
+ * growing under a pinned view fires no scroll event, and the follow-up
+ * programmatic scroll only ever moves down. Measuring "near bottom" alone was
+ * wrong once a streaming frame grew the list by more than the threshold: the
+ * scroll handler read the position after the render but before the catch-up
+ * scroll, saw it far from the bottom and stopped following for good.
+ *
+ * A scroll event that comes with a *shorter* list is the browser clamping
+ * scrollTop to the new height, not the user: when the streaming block is
+ * swapped for the settled message, that message is laid out as its
+ * content-visibility placeholder for one frame, the list collapses to a few
+ * hundred px, scrollTop snaps to 0 — which reads as "at the bottom" and
+ * dragged a reader who had scrolled up back down once the message got its
+ * real height. The state is left alone for those.
+ */
+export function shouldFollow(wasFollowing, scrollTop, previousScrollTop, clientHeight, scrollHeight, previousScrollHeight = 0) {
+	if (scrollHeight < previousScrollHeight) return wasFollowing;
+	if (isNearBottom(scrollTop, clientHeight, scrollHeight)) return true;
+	if (scrollTop < previousScrollTop) return false;
+	return wasFollowing;
+}
