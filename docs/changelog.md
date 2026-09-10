@@ -6,7 +6,7 @@ All notable user-facing changes to cast, newest first.
 
 ### Added
 
-- **The session's directory is shown above the composer**, next to the persona: `SENIOR DEVELOPER – …/pet/cast`. It was visible nowhere in the web UI, so two threads in different projects looked identical. The full path is shown. The line also appears for a session with no persona set, which used to hide it entirely.
+- **The session's directory is shown above the composer**, next to the persona: `SENIOR DEVELOPER – /home/ubuntu/pet/cast`. It was visible nowhere in the web UI, so two threads in different projects looked identical. The full path is shown. The line also appears for a session with no persona set, which used to hide it entirely.
 
 ### Fixed
 
