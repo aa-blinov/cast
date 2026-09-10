@@ -261,7 +261,6 @@ export function SettingsModal({
 			setErrors((e) => ({ ...e, [actionTab]: null }));
 			try {
 				const res = await run(command);
-				if (!res.ok) setErrors((e) => ({ ...e, [tab]: res.error ?? "Failed" }));
 				// Refresh the current tab, and the Model tab too when the command
 				// actually affects it (a /provider Switch changes the active
 				// provider, which the Model picker's model list depends on).
@@ -276,6 +275,10 @@ export function SettingsModal({
 					load(actionTab),
 					affectsModel && actionTab !== "model" ? load("model") : Promise.resolve(),
 				]);
+				// Set after the reload: load() clears the tab's error slot when it
+				// starts, so an error set before it was wiped before anyone saw it
+				// (a rejected `/turn-cap 5` left the Bash tab looking like it saved).
+				if (!res.ok) setErrors((e) => ({ ...e, [actionTab]: res.error ?? "Failed" }));
 				// /reload and any /skills mutation can change which skills are
 				// loaded/enabled — those show up as native /<skill-id> slash commands,
 				// so the composer's palette needs to catch up too.
