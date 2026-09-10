@@ -617,6 +617,21 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	background: var(--purple);
 	flex-shrink: 0;
 }
+/* The session's cwd, next to the persona: it was visible nowhere in the UI,
+   and two sessions in different projects looked identical above the composer. */
+.composer-role-sep { color: var(--text-muted); }
+.composer-role-cwd {
+	font-family: var(--font-mono);
+	/* The role line is set in small caps; a path is case-sensitive. */
+	text-transform: none;
+	letter-spacing: 0;
+	font-size: .68rem;
+	color: var(--text-muted);
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
 .composer-role-mode {
 	font-size: .65rem;
 	font-weight: 600;
