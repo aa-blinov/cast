@@ -313,6 +313,7 @@ describe("/api/server/status", () => {
 // refactor can't silently regress them.
 describe("JSON response compression", () => {
 	let memorySessionId = "";
+	let bridge: ReturnType<typeof createServerBridge>;
 	// The shared startServer above uses `{} as ServerBridge`, so this
 	// describe swaps it out for a populated one — 80 sessions are enough
 	// to push the /api/sessions responses past the 8 KB compression
@@ -325,7 +326,7 @@ describe("JSON response compression", () => {
 	});
 	beforeEach(async () => {
 		await stopTestServer();
-		const bridge = createServerBridge({
+		bridge = createServerBridge({
 			config: {
 				baseURL: "http://localhost",
 				apiKey: "test",
@@ -409,6 +410,54 @@ describe("JSON response compression", () => {
 		await once(server, "listening");
 		const address = server.address() as AddressInfo;
 		origin = `http://127.0.0.1:${address.port}`;
+	});
+
+	// /diff used to run one synchronous git process per changed file on the
+	// event loop, and spliced paths into a shell string. Async now; this pins
+	// the output shape and the path-with-a-space case that the shell broke.
+	it("diffs a session's cwd, including a path with a space in it", async () => {
+		const repo = join(testDbDir, "repo with space");
+		mkdirSync(repo, { recursive: true });
+		const git = (args: string[]) =>
+			execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd: repo, stdio: "pipe" });
+		writeFileSync(join(repo, "plain.ts"), "export const a = 1;\n");
+		writeFileSync(join(repo, "has space.ts"), "export const b = 1;\n");
+		writeFileSync(join(repo, "файл.ts"), "export const d = 1;\n");
+		writeFileSync(join(repo, "old name.ts"), "export const e = 1;\n");
+		git(["init", "-q"]);
+		git(["add", "-A"]);
+		git(["commit", "-qm", "init"]);
+		writeFileSync(join(repo, "plain.ts"), "export const a = 2;\n");
+		writeFileSync(join(repo, "has space.ts"), "export const b = 2;\n");
+		writeFileSync(join(repo, "файл.ts"), "export const d = 2;\n");
+		writeFileSync(join(repo, "brand new.ts"), "export const c = 3;\n");
+		git(["mv", "old name.ts", "new name.ts"]);
+		const { id } = bridge.createSession("senior", "gpt-4o", repo, false);
+
+		const auth = await fetch(`${origin}/api/auth/login`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ username: "cast", password: "test-password" }),
+		});
+		const cookie = auth.headers.get("set-cookie")!;
+		const res = await fetch(`${origin}/api/sessions/${id}/diff`, { headers: { cookie } });
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as {
+			groups: Record<string, string[]>;
+			files: Array<{ path: string; hunks: unknown[]; additions: number; deletions: number }>;
+			noRepo?: boolean;
+		};
+		expect(body.noRepo).toBeUndefined();
+		expect(body.groups.modified.sort()).toEqual(["has space.ts", "plain.ts", "файл.ts"]);
+		expect(body.groups.untracked).toEqual(["brand new.ts"]);
+		expect(body.groups.renamed).toEqual(["new name.ts"]);
+		const byPath = Object.fromEntries(body.files.map((f) => [f.path, f]));
+		for (const path of ["plain.ts", "has space.ts", "файл.ts", "brand new.ts"]) {
+			expect(byPath[path], path).toBeDefined();
+			expect(byPath[path]!.hunks.length, path).toBeGreaterThan(0);
+		}
+		expect(byPath["plain.ts"]!.additions).toBe(1);
+		expect(byPath["plain.ts"]!.deletions).toBe(1);
 	});
 
 	it("gzip-encodes JSON responses that exceed the 8 KB threshold", async () => {

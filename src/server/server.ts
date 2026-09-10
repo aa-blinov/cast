@@ -4,7 +4,7 @@
  * cookie so the browser never replaces Cast's UI with its own prompt.
  */
 
-import { execFileSync, execSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import {
 	createReadStream,
@@ -22,6 +22,7 @@ import {
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
+import { promisify } from "node:util";
 import { brotliCompressSync, gzipSync } from "node:zlib";
 import chokidar from "chokidar";
 import { createAgent, deleteAgent, getAgent, listAgents, updateAgent } from "../core/agents.ts";
@@ -265,6 +266,7 @@ const IMPORT_REWRITE_TARGETS = [
 	"use-workspace-state",
 	"workspace-panel-entry",
 ] as const;
+const execFileAsync = promisify(execFile);
 const PINNED_VERSION_RE = /^v?\d+\.\d+\.\d+$/;
 /** A font URL inside a stylesheet. Quoting varies: the source uses single
  *  quotes, and the build's CSS minifier drops them (see scripts/build.mjs). */
@@ -1885,53 +1887,73 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		});
 	});
 
-	route("GET", "/api/sessions/:id/diff", (_req, res, params) => {
+	// Async, and genuinely parallel. This used to be execSync per file: on a
+	// repo with 50 changed files one request held the daemon's event loop for
+	// 1–4 seconds, during which *every* other request — another client's
+	// tokens, a session switch, the file tree — sat and waited (measured:
+	// /api/config went from 3ms to 850ms while a diff was running). The Web UI
+	// fires this on every session switch with the panel open and on every
+	// file-modifying tool call, so it was the daemon's single worst stall.
+	// execFile also passes paths as arguments rather than splicing them into a
+	// shell string, which the old code did — a path with a space broke it.
+	route("GET", "/api/sessions/:id/diff", async (_req, res, params) => {
 		const ws = bridge.getSession(params.id);
 		if (!ws) return json(res, { error: "Not found" }, 404);
 
 		const targetCwd = ws.session.cwd ?? process.cwd();
 
-		try {
-			execSync("git rev-parse --is-inside-work-tree", {
-				cwd: targetCwd,
-				encoding: "utf-8",
-				timeout: 5_000,
-				stdio: ["ignore", "pipe", "ignore"],
-			});
-		} catch {
-			return json(res, { files: [], groups: emptyGroups(), noRepo: true });
-		}
-
-		const git = (args: string[]) =>
-			execSync(`git ${args.join(" ")}`, {
+		// core.quotePath=false: git otherwise writes a non-ASCII path as octal
+		// escapes in *both* `status` and the `diff --git` header — the status
+		// group said `файл.ts` while parseDiff read `"\321\204..."` from the
+		// header, and the two never matched up, so the file had no diff.
+		const git = async (args: string[]): Promise<string> => {
+			const { stdout } = await execFileAsync("git", ["-c", "core.quotePath=false", ...args], {
 				cwd: targetCwd,
 				encoding: "utf-8",
 				timeout: 10_000,
 				maxBuffer: 5 * 1024 * 1024,
 			});
+			return stdout;
+		};
+
+		try {
+			await git(["rev-parse", "--is-inside-work-tree"]);
+		} catch {
+			return json(res, { files: [], groups: emptyGroups(), noRepo: true });
+		}
 
 		// git diff returns exit code 1 when files differ — that's expected,
-		// not an error. execSync throws on any non-zero exit, so we catch
+		// not an error. execFile rejects on any non-zero exit, so we catch
 		// code-1 and return stdout normally.
-		const gitDiff = (args: string[]): string => {
+		const gitDiff = async (args: string[]): Promise<string> => {
 			try {
-				return git(args);
+				return await git(args);
 			} catch (err: unknown) {
-				const e = err as { status?: number; stdout?: string };
-				if (e.status === 1 && typeof e.stdout === "string") return e.stdout;
+				const e = err as { code?: number; stdout?: string };
+				if (e.code === 1 && typeof e.stdout === "string") return e.stdout;
 				throw err;
 			}
 		};
 
 		try {
-			const status = git(["status", "--porcelain", "-u"]);
+			// -z: NUL-separated records, and no quoting. Without it git wraps a
+			// path with a space in double quotes and writes anything non-ASCII as
+			// octal escapes (`"\320\276..."` for a Cyrillic name), and the parser
+			// took that string literally — the Changes tab then listed
+			// `"has space.ts"` with an empty diff, because no such file exists.
+			// A rename in -z form is two records: `R  new\0old\0`.
+			const status = await git(["status", "--porcelain", "-z", "-u"]);
 			const groups: FileGroups = { untracked: [], added: [], modified: [], deleted: [], renamed: [] };
 			const diffTargets: Array<{ path: string; args: string[] }> = [];
 
-			for (const line of status.split("\n")) {
+			const records = status.split("\0");
+			for (let r = 0; r < records.length; r++) {
+				const line = records[r]!;
 				if (line.length < 4) continue;
 				const xy = line.slice(0, 2);
-				const path = line.slice(3).split(" -> ").pop()!;
+				const path = line.slice(3);
+				// The old name of a rename/copy travels as the next record.
+				const oldPath = xy[0] === "R" || xy[0] === "C" ? records[++r] : undefined;
 				if (path.startsWith(".cast/") || path.includes("/.cast/")) continue;
 
 				if (xy === "??") {
@@ -1949,11 +1971,10 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 					// the whole file as freshly added. Passing both the old and new
 					// path lets git's own rename detection populate the diff header
 					// (and DiffFile.oldPath, parsed from it) correctly.
-					const oldPath = line.slice(3).split(" -> ")[0]!;
 					groups.renamed.push(path);
 					diffTargets.push({
 						path: `${path}:staged`,
-						args: ["diff", "--no-color", "--unified=3", "--staged", "--", oldPath, path],
+						args: ["diff", "--no-color", "--unified=3", "--staged", "--", ...(oldPath ? [oldPath] : []), path],
 					});
 					// "RM" — renamed and staged, with further unstaged edits on top.
 					if (xy[1] === "M") {
@@ -1998,19 +2019,22 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 				groups.untracked = groups.untracked.slice(0, maxUntracked);
 			}
 
-			// Run per-file diffs in parallel batches
+			// Per-file diffs, ten git processes at a time. (The old loop said
+			// "parallel batches" over a synchronous map — nothing about it was.)
 			const allFiles: DiffFile[] = [];
 			const batchSize = 10;
 			for (let i = 0; i < diffTargets.length; i += batchSize) {
 				const batch = diffTargets.slice(i, i + batchSize);
-				const results = batch.map((t) => {
-					try {
-						const raw = gitDiff(t.args);
-						return parseDiff(raw).files;
-					} catch {
-						return [] as DiffFile[];
-					}
-				});
+				// biome-ignore lint/performance/noAwaitInLoops: the await *is* the concurrency cap — one Promise.all over every target would spawn a git process per changed file at once.
+				const results = await Promise.all(
+					batch.map(async (t) => {
+						try {
+							return parseDiff(await gitDiff(t.args)).files;
+						} catch {
+							return [] as DiffFile[];
+						}
+					}),
+				);
 				for (let j = 0; j < results.length; j++) {
 					for (const f of results[j]) {
 						// Unstrip the :staged suffix we added for collision avoidance

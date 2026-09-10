@@ -1237,20 +1237,40 @@ function App() {
 	// response would replace the whole list with just that one entry (and
 	// for a file git treats as binary, with none at all — "picking a file
 	// makes everything disappear").
+	// Aborted, not just ignored, when superseded: switching threads quickly
+	// used to leave every earlier diff request running to completion on the
+	// server (1–4s of git each, see the /diff route) with its answer thrown
+	// away here by the version check.
+	const diffAbortRef = useRef(null);
 	const loadDiff = useCallback(async () => {
 		if (!activeId) return;
 		const sessionId = activeId;
 		const version = ++diffRequestVersionRef.current;
+		diffAbortRef.current?.abort();
+		const controller = new AbortController();
+		diffAbortRef.current = controller;
 		try {
-			const data = await api("GET", `/api/sessions/${sessionId}/diff`);
+			const data = await api("GET", `/api/sessions/${sessionId}/diff`, undefined, { signal: controller.signal });
 			if (version === diffRequestVersionRef.current && activeSessionIdRef.current === sessionId) setDiffData(data);
 		} catch (error) {
+			if (controller.signal.aborted) return;
 			if (version === diffRequestVersionRef.current && activeSessionIdRef.current === sessionId)
 				setDiffData({ files: [], error: error instanceof Error ? error.message : "Unable to load diff" });
 		}
 	}, [activeId, diffRequestVersionRef, setDiffData, activeSessionIdRef.current]);
+	// The diff is only wanted while the Changes tab is showing. It was fetched
+	// whenever the panel was open at all — every session switch with Files or
+	// Memory in front still ran the full git diff for nothing.
+	const diffTabRef = useRef(diffTab);
+	diffTabRef.current = diffTab;
 	const queueDiffRefresh = useCallback(() => {
 		if (!diffOpenRef.current || diffRefreshRafRef.current != null) return;
+		if (diffTabRef.current !== "changes") {
+			// Files may still need to know; the diff itself reloads when the
+			// Changes tab is next shown (see the diffTab effect).
+			setFsRefreshNonce((n) => n + 1);
+			return;
+		}
 		diffRefreshRafRef.current = requestAnimationFrame(() => {
 			diffRefreshRafRef.current = null;
 			loadDiff();
@@ -1509,11 +1529,11 @@ function App() {
 	// reopening) doesn't leave a stale selection that no longer matches any
 	// file in the freshly loaded list.
 	useEffect(() => {
-		if (diffOpen && activeId) {
+		if (diffOpen && diffTab === "changes" && activeId) {
 			setDiffFile(null);
 			loadDiff();
 		}
-	}, [diffOpen, activeId, loadDiff, setDiffFile]);
+	}, [diffOpen, diffTab, activeId, loadDiff, setDiffFile]);
 
 	// Init
 	// biome-ignore lint/correctness/useExhaustiveDependencies: deliberately mount-only — initClientState's own identity can change across renders, and re-running the full bootstrap on that would fight startReconnectLoop's manual retries.
@@ -2038,7 +2058,7 @@ function App() {
 			     leave this unmounted entirely while still reserving its grid
 			     column on open, which read as content shifting into an empty
 			     void with no panel there to show for it. -->
-			<${WorkspacePanelModule} data=${diffData} activeFile=${diffFile} onSelectFile=${setDiffFile} onResizeStart=${startDiffResize} open=${diffOpen} activeId=${activeId} tab=${diffTab} onTabChange=${setDiffTab} memoryEnabled=${memoryEnabled} confirm=${requestConfirm} fsRefreshNonce=${fsRefreshNonce} inputsRefreshNonce=${inputsRefreshNonce} bootstrapping=${bootstrapping} />
+			<${WorkspacePanelModule} data=${diffData} activeFile=${diffFile} onSelectFile=${setDiffFile} onResizeStart=${startDiffResize} open=${diffOpen} activeId=${activeId} cwd=${session?.cwd} tab=${diffTab} onTabChange=${setDiffTab} memoryEnabled=${memoryEnabled} confirm=${requestConfirm} fsRefreshNonce=${fsRefreshNonce} inputsRefreshNonce=${inputsRefreshNonce} bootstrapping=${bootstrapping} />
 		</div>
 	`;
 }
