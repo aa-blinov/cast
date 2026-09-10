@@ -374,15 +374,6 @@ function sessionIdFromUrl() {
 // every route so a dashboard/settings link keeps its session context.
 function viewFromPath() {
 	const p = window.location.pathname;
-	// Stable base alias: /default (and /) serve the same base UI
-	if (p === "/default") return "chat";
-	if (p.startsWith("/default/")) {
-		const sub = p.slice("/default".length);
-		if (sub === "/settings") return "settings";
-		if (sub === "/dashboard") return "dashboard";
-		if (sub.startsWith("/shared/")) return "chat";
-		return "chat";
-	}
 	if (p === "/settings") return "settings";
 	if (p === "/dashboard") return "dashboard";
 	return "chat";
@@ -696,12 +687,8 @@ function App() {
 	);
 	const navigate = useCallback(
 		(path) => {
-			const cur = window.location.pathname;
-			let prefix = "";
-			if (cur === "/default" || cur.startsWith("/default/")) prefix = "/default";
-			const full = prefix ? `${prefix}${path}` : path;
-			if (window.location.pathname + window.location.search === full) return;
-			window.history.pushState(null, "", full);
+			if (window.location.pathname + window.location.search === path) return;
+			window.history.pushState(null, "", path);
 			applyView(viewFromPath());
 		},
 		[applyView],

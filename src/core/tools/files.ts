@@ -6,9 +6,9 @@
  * resolvePath.
  */
 
-import { constants, createReadStream, readFileSync } from "node:fs";
+import { constants, createReadStream } from "node:fs";
 import { access, mkdir, open, readdir, readFile, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, extname, join, resolve, sep } from "node:path";
+import { basename, dirname, extname } from "node:path";
 import { createInterface } from "node:readline";
 import type { AppConfig } from "../config.ts";
 import { imageDimensionsFromHeader, MAX_IMAGE_PIXELS, resizeImageForEmbedding } from "../image-resize.ts";
@@ -216,59 +216,6 @@ async function readLargeFile(
 		`Showing lines ${startLine + 1}-${startLine + kept.length} (${why}). Use offset=${nextOffset} to continue, ` +
 		`or grep/bash for a targeted search.]`;
 	return { content: kept.join("\n") + hint };
-}
-
-/**
- * cast's own installation root, or null when this build isn't running from
- * one. Found by walking up from this module looking for cast's package.json —
- * works both from the repo (src/core/tools/) and from a built install
- * (<root>/dist/index.js).
- */
-let castRootCache: string | null | undefined;
-function castRoot(): string | null {
-	if (castRootCache !== undefined) return castRootCache;
-	castRootCache = null;
-	let dir = import.meta.dirname;
-	for (let up = 0; dir && up < 6; up++) {
-		try {
-			const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf-8")) as { name?: string };
-			if (pkg.name === "cast") {
-				castRootCache = dir;
-				break;
-			}
-		} catch {
-			// No package.json here (or unreadable/not JSON) — keep walking up.
-		}
-		const parent = dirname(dir);
-		if (parent === dir) break;
-		dir = parent;
-	}
-	return castRootCache;
-}
-
-/**
- * The built-in web UI is read-only: the agent is meant to add UIs under
- * ~/.cast/ui/, not overwrite cast's own.
- *
- * The check used to be a substring test for "/src/server/public/" and
- * "/dist/public/" against the path alone, which matched those directory
- * names *in any project* — a user working on their own Node app that happens
- * to have src/server/public could not have the agent write there at all
- * (verified: a plain write into an unrelated project's own
- * src/server/public/app.js was refused). It is anchored to cast's own
- * installation root now, so it protects what it was meant to protect and
- * nothing else.
- */
-function builtInUiBlockReason(absolutePath: string): string | null {
-	const root = castRoot();
-	if (!root) return null;
-	const protectedDirs = [
-		join(root, "src", "server", "public"),
-		join(root, "dist", "public"),
-		join(root, "src", "server", "ui-factory", "template"),
-	];
-	const full = resolve(absolutePath);
-	return protectedDirs.some((dir) => full === dir || full.startsWith(dir + sep)) ? root : null;
 }
 
 /**
@@ -487,13 +434,6 @@ export async function execWrite(args: Record<string, unknown>, cwd: string): Pro
 	}
 	const content = args.content;
 	const absolutePath = resolvePath(filePath, cwd);
-	// Guard cast's own built-in UI — the agent must add UIs under ~/.cast/ui/.
-	if (builtInUiBlockReason(absolutePath)) {
-		return {
-			content: `Blocked: built-in UI at ${absolutePath} is read-only. Use ~/.cast/ui/<name>/ (served at /ui/<name>/) or POST /api/uis — see ui-factory skill.`,
-			isError: true,
-		};
-	}
 
 	try {
 		const existing = await stat(absolutePath);
@@ -651,12 +591,6 @@ export async function execEdit(args: Record<string, unknown>, cwd: string, confi
 	const replaceAll = args.replaceAll === true;
 
 	const absolutePath = resolvePath(filePath, cwd);
-	if (builtInUiBlockReason(absolutePath)) {
-		return {
-			content: `Blocked: built-in UI at ${absolutePath} is read-only. Use ~/.cast/ui/<name>/ (served at /ui/<name>/) — see ui-factory skill.`,
-			isError: true,
-		};
-	}
 
 	// oldString: "" means "create a new file with newString" — the documented
 	// way to create a file via `edit` instead of `write`.

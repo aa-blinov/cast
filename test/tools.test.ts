@@ -2080,7 +2080,7 @@ describe("search path relativization", () => {
 	});
 });
 
-describe("file tools on large files and lookalike UI paths", () => {
+describe("file tools on large files", () => {
 	it("reads a window of a large file without loading it into memory", async () => {
 		// The whole file used to be read and split regardless of offset/limit,
 		// costing roughly three times its size in memory: measured 592MB of RSS
@@ -2193,35 +2193,6 @@ describe("file tools on large files and lookalike UI paths", () => {
 		const result = await execRead({ path: bigPath, offset: 9_999_999 }, TEST_DIR, mockConfig);
 		expect(result.isError).toBe(true);
 		expect(result.content).toMatch(/beyond end of file/);
-	});
-
-	it("does not treat another project's src/server/public as cast's built-in UI", async () => {
-		// The guard was a substring test on the path, so it fired for those
-		// directory names in *any* project: a user working on their own Node app
-		// with src/server/public could not have the agent write there at all.
-		const project = join(TEST_DIR, "myapp");
-		mkdirSync(join(project, "src", "server", "public"), { recursive: true });
-
-		const { execWrite, execEdit } = await import("../src/core/tools/files.ts");
-		const written = await execWrite({ path: "src/server/public/app.js", content: "console.log(1)\n" }, project);
-		expect(written.isError).toBeUndefined();
-		expect(written.content).not.toMatch(/Blocked/);
-
-		const edited = await execEdit(
-			{ filePath: "src/server/public/app.js", oldString: "1", newString: "2" },
-			project,
-			mockConfig,
-		);
-		expect(edited.isError).toBeUndefined();
-		expect(readFileSync(join(project, "src", "server", "public", "app.js"), "utf-8")).toBe("console.log(2)\n");
-	});
-
-	it("still blocks writes to cast's own built-in UI", async () => {
-		const { execWrite } = await import("../src/core/tools/files.ts");
-		const castOwnUi = join(import.meta.dirname, "..", "src", "server", "public", "app.js");
-		const result = await execWrite({ path: castOwnUi, content: "tampered" }, TEST_DIR);
-		expect(result.isError).toBe(true);
-		expect(result.content).toMatch(/read-only/);
 	});
 });
 
