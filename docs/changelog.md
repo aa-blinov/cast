@@ -2,7 +2,7 @@
 
 All notable user-facing changes to cast, newest first.
 
-## Unreleased
+## 0.31.0
 
 ### Removed
 
@@ -19,7 +19,6 @@ All notable user-facing changes to cast, newest first.
 - **Web settings: search API keys no longer travel to the browser.** `/web-search-provider` reports only whether a Tavily/Brave key is saved; the field starts empty and a saved key is kept when it stays empty.
 - **Web settings: a tab whose data failed to load rendered blank.** Model, Bash and Web are built from several commands; when one failed the tab drew empty values with no error. The first failure is shown now. The model pickers also follow the saved values after every reload instead of staying on the last pick.
 - **Web settings: a rejected command showed no error.** The tab reloads its data after every action, and the reload cleared the error slot the action had just filled, so a refused save (`/turn-cap 5`, an invalid threshold list) left the tab looking as if it had succeeded. The error is set after the reload now.
-
 - **The workspace panel no longer stalls the daemon, and keeps its place when you switch threads.** Three things, all measured against two projects with 50 and 5 changed files:
   - `GET /api/sessions/:id/diff` ran `git` synchronously, one process per changed file, on the daemon's event loop. One request on the 50-file project held it for 1–4 seconds, and *everything* else waited behind it: a session switch took 1.5s instead of 30ms, the file tree 2.5s instead of 10ms, `/api/config` 850ms instead of 3ms — for every client, not just the one asking. The diffs run asynchronously now, ten at a time: 1.06s → 0.27s for the request itself, and the request next to it stays at ~20ms. Paths are passed as arguments instead of spliced into a shell string, so a file with a space in its name diffs too.
   - The diff was fetched whenever the panel was open, whatever tab was showing — every session switch with Files or Memory in front still ran the full `git diff` for nothing, and a quick run through several threads left every earlier request running to completion on the server with its answer discarded. It is fetched only while Changes is showing, and a superseded request is aborted.
