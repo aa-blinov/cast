@@ -3,6 +3,8 @@ import { h } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { icons } from "./icons.js";
 import { useModalFocusTrap } from "./modal-focus.js";
+import DOMPurify from "./vendor/dompurify.min.mjs";
+import { marked } from "./vendor/marked.min.mjs";
 
 const html = htm.bind(h);
 
@@ -96,18 +98,6 @@ const EXT_TO_HLJS = {
 const FS_TABLE_EXTENSIONS = new Set(["csv", "tsv"]);
 const FS_PREVIEW_MAX_BYTES = 512 * 1024;
 const FS_TABLE_MAX_ROWS = 1000;
-
-let markedModulePromise = null;
-function loadMarked() {
-	if (!markedModulePromise) markedModulePromise = import("/vendor/marked.min.mjs");
-	return markedModulePromise;
-}
-
-let dompurifyModulePromise = null;
-function loadDompurify() {
-	if (!dompurifyModulePromise) dompurifyModulePromise = import("/vendor/dompurify.min.mjs");
-	return dompurifyModulePromise;
-}
 
 let hljsModulePromise = null;
 function loadHljs() {
@@ -237,13 +227,15 @@ export function FilePreviewModal({ path, onClose, downloadHref, previewHref }) {
 			// attachment or a workspace file), not model output — it can carry a
 			// raw <script> or an onerror handler, so marked's HTML must be
 			// sanitized before it reaches dangerouslySetInnerHTML below.
-			Promise.all([loadMarked(), loadDompurify()])
-				.then(([{ marked }, { default: DOMPurify }]) => {
-					if (!cancelled) setEnhanced({ kind: "markdown", html: DOMPurify.sanitize(marked.parse(content)) });
-				})
-				.catch(() => {
-					if (!cancelled) setEnhanced({ kind: "error" });
-				});
+			// marked/DOMPurify are statically imported (above): the transcript's
+			// renderer needs them on first paint anyway, so they are in the main
+			// bundle and fetching them again here would be two requests for
+			// bytes the page already has. highlight.js stays lazy — it is 1MB.
+			try {
+				setEnhanced({ kind: "markdown", html: DOMPurify.sanitize(marked.parse(content)) });
+			} catch {
+				setEnhanced({ kind: "error" });
+			}
 		} else if (hljsLang) {
 			loadHljs()
 				.then(({ default: hljs }) => {

@@ -95,7 +95,7 @@ export function Message({ msg, renderMarkdown, escapeHtml, showReasoning = true 
 					html`
 					<div class="message message-assistant">
 						<div class="message-label">agent</div>
-						<div class="message-content" dangerouslySetInnerHTML=${{ __html: renderMarkdown(content) }} />
+						<div class="message-content md-body" dangerouslySetInnerHTML=${{ __html: renderMarkdown(content) }} />
 					</div>
 				`
 				}
@@ -141,7 +141,7 @@ export function Message({ msg, renderMarkdown, escapeHtml, showReasoning = true 
 	return html`
 	<div class="message message-${role}">
 		<div class="message-label">${labelMap[role] ?? role}</div>
-		<div class="message-content" dangerouslySetInnerHTML=${{ __html: role === "user" ? escapeHtml(content) : renderMarkdown(content) }} />
+		<div class="message-content ${role === "user" ? "" : "md-body"}" dangerouslySetInnerHTML=${{ __html: role === "user" ? escapeHtml(content) : renderMarkdown(content) }} />
 		${
 			msg.attachments?.length > 0 &&
 			html`
