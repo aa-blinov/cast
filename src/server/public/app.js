@@ -33,18 +33,6 @@ import { useWorkspaceState } from "./use-workspace-state.js";
 const FRONTMATTER_LINE_RE = /^- (.+?): (.+)$/;
 
 const html = htm.bind(h);
-
-/**
- * The session's directory, short enough for the role line: the last two path
- * segments with an ellipsis in front (`…/pet/cast`), the full path in the
- * title. The browser has no idea where `~` is, so `~/pet/cast` is not on offer
- * — and two segments are what a person recognises a project by anyway.
- */
-function shortCwd(cwd) {
-	const parts = cwd.split("/").filter(Boolean);
-	if (parts.length <= 2) return cwd;
-	return `…/${parts.slice(-2).join("/")}`;
-}
 // Behind a click, so behind a dynamic import: ~150KB of settings panels,
 // dashboard, modals and workspace explorers used to load before the first
 // paint. prefetchWhenIdle (below, after mount) warms them once the page is
@@ -2024,7 +2012,7 @@ function App() {
 							${session?.mode && session.mode !== "build" && html`<span class="composer-role-mode">${session.mode}</span>`}
 							${
 								session?.cwd &&
-								html`${activePersonaLabel && html`<span class="composer-role-sep">–</span>`}<span class="composer-role-cwd" title=${session.cwd}>${shortCwd(session.cwd)}</span>`
+								html`${activePersonaLabel && html`<span class="composer-role-sep">–</span>`}<span class="composer-role-cwd" title=${session.cwd}>${session.cwd}</span>`
 							}
 							${session?.worktree && html`<span class="composer-role-mode composer-role-worktree">worktree</span>`}
 						</div>
